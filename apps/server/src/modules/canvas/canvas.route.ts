@@ -12,6 +12,7 @@ import {
   exportCanvasQuerySchema,
   getCanvasEventsQuerySchema,
   postCanvasEventsBodySchema,
+  postCanvasExecuteBodySchema,
   preprocessNodeBodySchema,
   putCanvasBodySchema,
   putNodeContentBodySchema,
@@ -33,10 +34,12 @@ import {
 } from '../storage/index.js';
 import { canvasRoot } from '../storage/paths.js';
 import { getWorkspacePath } from '../workspace.js';
+import { CanvasNotFoundError, executeOnServer } from './canvas-executor.js';
 
 import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
 import type {
   ApiResult,
+  CanvasCommand,
   CanvasConflictResponse,
   CreateCanvasRequest,
   CreateCanvasResponse,
@@ -51,6 +54,8 @@ import type {
   ListCanvasesResponse,
   PostCanvasEventsRequest,
   PostCanvasEventsResponse,
+  PostCanvasExecuteRequest,
+  PostCanvasExecuteResponse,
   PreprocessNodeBody,
   PreprocessNodeRequest,
   PreprocessNodeResponse,
@@ -857,6 +862,64 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       canvasId,
       version: nextVersion,
     });
+  });
+
+  // --- POST /:canvasId/execute (headless executor, M2) -----------------
+  //
+  // Runs a batch of `CanvasCommand`s server-side: hydrates content from
+  // .md sidecars, drives the shared engine, persists canvas.json + .md,
+  // appends one row to the delta log, and returns the structural delta
+  // the client can apply locally without re-issuing a full snapshot.
+  //
+  // Atomic per-canvas (the executor owns a mutex keyed by canvasId).
+  // Idempotent no-op batches do not bump the version.
+
+  fastify.post<{
+    Params: { canvasId: string };
+    Body: PostCanvasExecuteRequest;
+    Reply: ApiResult<PostCanvasExecuteResponse>;
+  }>('/:canvasId/execute', async function (request, reply) {
+    const { canvasId } = request.params;
+    const parsed = postCanvasExecuteBodySchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        message: parsed.error.issues[0]?.message ?? 'Invalid request body',
+      });
+    }
+    const { commands, originator, runId } = parsed.data;
+
+    try {
+      const out = await executeOnServer({
+        canvasId,
+        commands: commands as CanvasCommand[],
+        originator,
+        ...(runId ? { runId } : {}),
+      });
+      const response: PostCanvasExecuteResponse = {
+        canvasId: out.canvasId,
+        fromVersion: out.fromVersion,
+        toVersion: out.toVersion,
+        deltas: out.deltas,
+        results: out.results,
+        commands: out.commands,
+        pendingEffects: {
+          mutatedNodes: out.pendingEffects.mutatedNodes,
+          deletedNodeIds: out.pendingEffects.deletedNodeIds,
+          contentEditedNodeIds: out.pendingEffects.contentEditedNodeIds,
+          deferredFitFrameIds: out.pendingEffects.deferredFitFrameIds,
+        },
+        ...(runId ? { runId } : {}),
+      };
+      return reply.send(response);
+    } catch (err) {
+      if (err instanceof CanvasNotFoundError) {
+        return reply.code(404).send({ message: 'Canvas not found' });
+      }
+      request.log.error({ canvasId, err }, 'Failed to execute canvas commands');
+      return reply.code(500).send({
+        message: 'Failed to execute canvas commands',
+      });
+    }
   });
 
   // --- Canvas events: append-only behavioural log -----------------------

@@ -212,6 +212,20 @@
 
 - 正常情况下 daemon 通常在百毫秒内就上线，所以多数用户不会感知到这个变化。只有首次冷启动或机器很慢的场景下，原来"先弹错、点重试又能用"的体验会被消除。
 - 真正卡住的极端场景（例如 daemon 一直起不来）现在最长会让 ChatPanel loading 状态保持 20 s 才显示失败，但前提是 supervisor 仍在尝试重启；一旦它放弃，错误会立刻浮出来，用户可以走 Settings → External Agents 的 **Restart worker** 重置。
+## 2026-06-05 · AI 画布操作迁移到服务端 Headless Executor
+
+**What Changed**
+
+- **AI 的 `canvas_commands` 工具现在在服务端执行，而不是把命令吐给前端再让前端跑引擎**。新增了 `POST /api/canvas/:canvasId/execute` 接口、一个 per-canvas 异步互斥锁、以及共享 `executeCanvasCommands` 引擎在服务端的封装。命令在服务端跑完后，服务端会同步落盘：更新 `canvas.json`（含 `version` 自增）、写入每个 Markdown 化节点的 sidecar 文件、并在 `<canvasDir>/.history/delta-log.jsonl` 追加一条 batch 记录（包含 fromVersion → toVersion、原始 commands、最小化的 deltas、来源标记）。
+- **前端不再二次执行 AI 命令**。`useAgentStream` 现在消费工具响应里携带的 `deltas + toVersion + pendingEffects`，通过新的 `applyDeltasFromAgent` action 把节点/边的最小变更原子地合到本地 store，并把 `mutatedNodes` 交给已有的 web 端 post-effects（预处理调度、Frame fit 等）继续走原来的路径。版本号严格跟随服务端，autosave 不会因此被触发，避免双写。
+- **撤销 / 还原 / "AI 改过的节点" 高亮、Frame 自动 fit、内容预处理调度** 这些既有行为全部保留：snapshot 在调用 `applyDeltasFromAgent` 之前抓取，命令上还是带着服务端预分配好的稳定 id，所以 `useCanvasChanges` 系列逻辑无需改动。
+
+**Notes**
+
+- **Sketch 识别流程在本版本仍走前端执行**（`origin.type === 'sketch-recognized'` 会从 handler 直接返回旧版 envelope，跳过服务端执行），以避免与 `sketch.service` 里已经做的客户端 `executeCommands` 重复施加。Sketch 会在 M3 接入跨标签广播时统一收回到 headless 路径。
+- **既有画布在第一次跑 AI batch 时会自动生成 `.history/delta-log.jsonl` 文件**；老画布不需要任何迁移，没有 AI batch 就不会出现这个文件。
+- **OCC 冲突语义不变**：服务端写盘仍然走原来的 `version` 校验路径；agent 这条链路因为有 per-canvas 互斥锁，多个 AI batch 不会互相打架。
+- 服务端尚未广播 deltas 给其它打开同一画布的客户端 —— 跨标签同步是 M3 的事；本版本只解决"AI 改画布"这一条入口，前端 UI 操作仍然走老的 PUT `/canvas/:id` 路径，不受影响。
 
 ---
 
