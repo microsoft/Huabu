@@ -34,6 +34,22 @@ import { getAgentletServer } from './server-mount.js';
 
 import type { AcpBindingRecipe } from './session-store.js';
 
+/**
+ * Cold-start grace window for the embedded agentlet daemon's WS
+ * handshake. Generous on purpose: in packaged Electron builds the
+ * very first launch has to pay for ASAR unpack, on-access AV scans
+ * of the freshly-extracted Node child binary, and the fork itself —
+ * all of which can blow well past a few hundred ms on Windows /
+ * macOS Gatekeeper systems. Subsequent launches are usually subsecond
+ * because the OS has the files cached.
+ *
+ * We still short-circuit the wait as soon as the supervisor reports
+ * `hasGivenUp()` (daemon entry missing, repeated crashes, …) so a
+ * truly broken install does not make every UI affordance hang for
+ * the full window.
+ */
+const DAEMON_READY_TIMEOUT_MS = 20_000;
+
 interface CachedAgent {
   agentletAgentId: string;
   pid: number;
@@ -82,29 +98,36 @@ function readActiveDaemon(): {
 
 /**
  * Poll {@link readActiveDaemon} until a daemon is online or `timeoutMs`
- * elapses. Returns the resolved daemon descriptor or `null` on timeout.
+ * elapses. Returns the resolved daemon descriptor or `null` on timeout
+ * (or as soon as the supervisor has stopped trying — see below).
  *
  * Rationale: at server cold-start the embedded agentlet daemon is
  * forked by the supervisor and only registers itself once its WS
- * handshake completes — typically tens to a few hundred ms. The
- * ChatPanel's `useAcpSessionMeta` / `useAcpSlashCommands` effects fire
- * `POST /threads/:id/session` on first mount, which previously raced
- * the handshake and got an immediate "External agent worker is not
- * ready" 503 even though the daemon came online moments later. This
- * short wait closes the race so the badge never falsely shows "Failed"
+ * handshake completes. In dev that takes tens to a few hundred ms; in
+ * packaged Electron builds the first launch can be much slower (ASAR
+ * unpack, AV scanning of the just-extracted Node child binary, etc.).
+ * The ChatPanel's `useAcpSessionMeta` / `useAcpSlashCommands` effects
+ * fire `POST /threads/:id/session` on first mount, which previously
+ * raced the handshake and got an immediate "External agent worker is
+ * not ready" 503 even though the daemon came online moments later.
+ * This wait closes the race so the badge never falsely shows "Failed"
  * just because the user opened the page faster than the daemon could
  * boot.
  *
- * 100 ms poll interval is well below human-perceptible latency; a 5 s
- * cap is long enough to ride out a typical cold-start but short enough
- * that a truly broken daemon still surfaces a clear error.
+ * 100 ms poll interval is well below human-perceptible latency. We
+ * also bail out early when `DaemonSupervisor.hasGivenUp()` flips true
+ * — that means the daemon entry is missing or the failure budget is
+ * spent and no retry is scheduled, so further waiting would only
+ * delay the user-facing error.
  */
 async function waitForActiveDaemon(
   timeoutMs: number,
 ): Promise<{ daemonId: string } | null> {
   const deadline = Date.now() + timeoutMs;
+  const supervisor = getDaemonSupervisor();
   let daemon = readActiveDaemon();
   while (!daemon && Date.now() < deadline) {
+    if (supervisor.hasGivenUp()) return null;
     await new Promise((r) => setTimeout(r, 100));
     daemon = readActiveDaemon();
   }
@@ -142,10 +165,11 @@ async function waitForAgentConnection(
  * because the upstream CLI's state (session pool, current model,
  * mode) is per-process and would bleed across threads otherwise.
  *
- * Cold-start tolerance: we briefly wait (up to 5 s) for the daemon to
- * come online and (up to 3 s) for the freshly-spawned agent to finish
- * its handshake — see {@link waitForActiveDaemon} / {@link waitForAgentConnection}
- * for rationale. Only after both windows expire do we surface a
+ * Cold-start tolerance: we wait up to {@link DAEMON_READY_TIMEOUT_MS}
+ * for the daemon to come online and up to 3 s for the freshly-spawned
+ * agent to finish its handshake — see {@link waitForActiveDaemon} /
+ * {@link waitForAgentConnection} for rationale. Only after both windows
+ * expire (or the supervisor reports it has given up) do we surface a
  * user-facing error.
  *
  * Throws when:
@@ -160,7 +184,7 @@ export async function ensureAgentForThread(
   threadKey: string,
   recipe: AcpBindingRecipe,
 ): Promise<{ agentletAgentId: string; pid: number }> {
-  const daemon = await waitForActiveDaemon(5000);
+  const daemon = await waitForActiveDaemon(DAEMON_READY_TIMEOUT_MS);
   if (!daemon) {
     const supervisorStatus = getDaemonSupervisor().getStatus();
     const hint = supervisorStatus.lastError

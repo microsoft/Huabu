@@ -4,6 +4,20 @@
 
 ---
 
+## 2026-06-05 · 打包后首次连接 External Agent 不再误报 503
+
+**What Changed**
+
+- **拉长了 ChatPanel 等待 agentlet daemon 上线的窗口**：原来固定 5 s，现在改成 20 s。打包后的桌面端首次启动需要付出 ASAR 解包、杀毒软件按需扫描新解出的 Node 子进程二进制等额外开销，daemon 握手在某些 Windows / macOS 机器上很容易突破 5 s，导致 ChatPanel 一进去就拿到 **503 `acp_session_failed`**（前端表现为 `Failed to load resource: the server responded with a status of 503`）。
+- **遇到永久性故障会立刻退出等待**：supervisor 已经判定放弃重启（找不到 daemon 入口、失败预算用尽等）时，等待函数会立即返回 `null`，不会继续轮询到 20 s 才报错。
+
+**Notes**
+
+- 正常情况下 daemon 通常在百毫秒内就上线，所以多数用户不会感知到这个变化。只有首次冷启动或机器很慢的场景下，原来"先弹错、点重试又能用"的体验会被消除。
+- 真正卡住的极端场景（例如 daemon 一直起不来）现在最长会让 ChatPanel loading 状态保持 20 s 才显示失败，但前提是 supervisor 仍在尝试重启；一旦它放弃，错误会立刻浮出来，用户可以走 Settings → External Agents 的 **Restart worker** 重置。
+
+---
+
 ## 2026-06-05 · External Agent 编辑器：分区布局 + 折叠高级选项
 
 **What Changed**

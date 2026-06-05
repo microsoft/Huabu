@@ -238,6 +238,17 @@ class DaemonSupervisor {
   }
 
   /**
+   * Whether the supervisor has stopped attempting restarts (failure
+   * budget exhausted, daemon entry not found, …). When `true`, callers
+   * polling for the daemon to come online should short-circuit instead
+   * of waiting out their full timeout — the daemon will not appear
+   * without user intervention ("Restart worker" in Settings).
+   */
+  hasGivenUp(): boolean {
+    return this.state.givenUp;
+  }
+
+  /**
    * Synchronous best-effort shutdown. Kills the child, clears every
    * timer, and prevents future restart attempts.
    */
