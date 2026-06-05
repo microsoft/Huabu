@@ -150,8 +150,8 @@ export default function Settings() {
             <>
               The profile list refreshes automatically after save; if a stale
               menu is open, close and re-open it. Profiles created in Settings
-              and in the inline <strong>Create agent</strong> entry both feed
-              the same store.
+              and in the inline <strong>Add agent</strong> entry both feed the
+              same store.
             </>,
           ],
         ]}

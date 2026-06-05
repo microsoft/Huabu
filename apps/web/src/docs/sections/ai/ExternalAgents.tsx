@@ -84,9 +84,9 @@ export default function ExternalAgents() {
         <li>
           The <strong>new-chat menu</strong> in the chat panel — pick a profile
           to start a thread bound to that external agent instead of Huabu&apos;s
-          built-in agent. The menu also has an inline{' '}
-          <strong>Create agent</strong> entry that opens the same Profile editor
-          without leaving the chat surface.
+          built-in agent. The menu also has an inline <strong>Add agent</strong>{' '}
+          entry that opens the same Profile editor without leaving the chat
+          surface.
         </li>
         <li>
           The <strong>@mention menu</strong> inside a{' '}

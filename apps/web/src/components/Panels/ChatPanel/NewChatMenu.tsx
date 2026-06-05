@@ -10,7 +10,7 @@
  *   └─────┴─────┘
  *      │     │
  *      │     └─ Opens a menu: pick the (mode, agent) for a brand-new
- *      │        thread. A **Create agent** entry lives in the menu
+ *      │        thread. An **Add agent** entry lives in the menu
  *      │        footer; clicking it opens the same Profile editor used
  *      │        by Settings → External Agents, so adding a new external
  *      │        agent never requires leaving the chat surface.
@@ -58,7 +58,7 @@ interface NewChatMenuProps {
   /** Configured external-agent profiles available for binding. */
   profiles: AcpAgentProfile[];
   /**
-   * Re-fetch the profile list. Invoked after the inline "Create agent"
+   * Re-fetch the profile list. Invoked after the inline "Add agent"
    * modal saves so the newly-created profile shows up in the menu
    * without requiring the user to open Settings.
    */
@@ -263,7 +263,7 @@ export const NewChatMenu = ({
                   className="w-full justify-start gap-1.5 rounded px-2 py-1.5 text-left"
                 >
                   <Plus size={14} />
-                  <span className="text-xs">Create agent</span>
+                  <span className="text-xs">Add agent</span>
                 </Button>
               </div>
             </>

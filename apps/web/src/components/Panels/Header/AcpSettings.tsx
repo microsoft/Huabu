@@ -716,7 +716,7 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
  */
 /**
  * Fetch the host-detected CLIs on mount. Shared between the Settings
- * section and the inline "Create agent" entry in `NewChatMenu` so both
+ * section and the inline "Add agent" entry in `NewChatMenu` so both
  * surfaces can present the same Profile editor without duplicating the
  * one-shot detection effect.
  *
