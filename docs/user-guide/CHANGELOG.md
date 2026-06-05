@@ -4,6 +4,25 @@
 
 ---
 
+## 2026-06-05 · 桌面端启动遇到端口冲突会自动换端口
+
+**What Changed**
+
+- **打包后的桌面端启动时遇到 `EADDRINUSE`（端口被占用）不再静默失败**：之前主进程会拿 `get-port` 探测一次 3001，如果在 `app.listen()` 真正发生前那一瞬间端口被别的进程抢走（最常见的是上一次 `pnpm dev:desktop` 留下的孤儿 `node.exe`），server 子进程会立刻崩溃，但主进程不知情，仍然把 BrowserWindow 指向 `127.0.0.1:3001` —— 结果加载到的其实是占用端口的"另一个" server，于是首页返回 `Route GET:/ not found` 的 JSON 404。
+- **新增的逻辑**：主进程现在最多尝试 3 次，每次拿一个**全新的**空闲端口（避开已经失败过的端口），并把 `waitForPort` 与 server 子进程的 `exit` 事件做了竞速 —— 子进程先死就立刻报错重试，绝不会把 BrowserWindow 接到不属于自己的端口上。
+- **`dev:desktop` 的 orchestrator 端口探测修复 Windows 弱绑定误判**：Windows 下,绑在 `0.0.0.0:N`(wildcard)的进程**不会**和 `127.0.0.1:N`(specific loopback)的 `listen()` 冲突,所以原来只探测 loopback 的逻辑在有僵尸 Vite 占着 5173 时会误以为端口空闲,把 5173 传给新 Vite。新 Vite 用 `host:true` 绑 wildcard 真冲突了,静默滑到 5174,但 orchestrator 不知道,继续告诉 Electron `WEB_DEV_SERVER_URL=http://127.0.0.1:5173` —— 结果 BrowserWindow 加载了那个上周遗留的 Vite,页面空白、Console/Network 都没东西。现在 probe 同时尝试两种地址,只有两个都成功才算端口可用。
+- **`apps/web/vite.config.ts` 加 `strictPort: true`**:Vite 默认遇到端口冲突会静默滑到下一个,这在 orchestrated dev 下很危险。改成 strict 后端口冲突会硬报错,让 orchestrator 立刻看到失败而不是悄悄走偏。
+- **Predev 也覆盖到 `dev:desktop`**：补了一个 `predev:desktop` 钩子，每次 `pnpm dev:desktop` 之前都会跑一次 `pnpm build:agentlet`，避免 agentlet `dist/` 没跟上源码导致 daemon 启动报 `required option '--agent <command>' not specified`。
+
+**Notes**
+
+- 正常机器上你看不到任何变化 —— 端口 3001 没被占,第一次尝试就成功了。
+- 如果三次尝试都失败（极端情况：本机所有 ephemeral port 都被耗光，或防火墙阻止 loopback），会回退到"Huabu failed to start"对话框，而不是 BrowserWindow 加载到无效页面。
+- 退出应用时的端口释放逻辑没变 —— `before-quit` 仍然 `kill()` server 子进程并等最多 3 s。问题只出现在**不正常退出**的场景：dev orchestrator 在 Windows 上靠 `taskkill /T`，如果在 Ctrl+C 的瞬间 tsx-watch 的孙进程还没起完，就有可能漏杀。下次启动遇到孤儿端口现在会自动避开。
+- 如果你以前手动跑 `pnpm dev:web` 习惯端口被占时它自己滑动,现在它会改成报错退出 —— 这是刻意的,可以让你显式处理冲突而不是迷糊地连到一个意外端口。需要的话可以临时在命令前加 `VITE_PORT=5174` 之类的指定一个空闲端口。
+
+---
+
 ## 2026-06-05 · 打包后首次连接 External Agent 不再误报 503
 
 **What Changed**

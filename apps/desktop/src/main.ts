@@ -185,6 +185,29 @@ let serverPort = 0;
 let serverLogStream: WriteStream | null = null;
 
 /**
+ * Number of times we'll re-fork the server on a fresh port after an
+ * early bind failure (EADDRINUSE) or immediate exit. Three attempts
+ * covers the realistic case where a stale Huabu / dev orchestrator is
+ * holding the previous port and another local service grabs the next
+ * one before we can bind. After that we surface the original error so
+ * the user can investigate instead of spinning forever.
+ */
+const MAX_SERVER_START_ATTEMPTS = 3;
+
+/**
+ * Resolved when the forked server child exits. We track it on a module
+ * scope so {@link waitForPort} can race against it: if the child dies
+ * before its port becomes reachable we must abort the readiness wait
+ * (otherwise a *foreign* process holding the same port — e.g. a leftover
+ * dev server — would make the wait spuriously succeed and we'd load
+ * a phantom backend into the BrowserWindow).
+ */
+let serverExitPromise: Promise<{
+  code: number | null;
+  signal: string | null;
+}> | null = null;
+
+/**
  * Open (and rotate) a per-launch server log file under `app.getPath('logs')`.
  *
  * The trailing folder name is derived by Electron from `productName` in
@@ -423,15 +446,21 @@ async function startServer(port: number): Promise<void> {
     }
   }
 
-  serverProcess.on('exit', (code) => {
-    if (code !== 0) {
-      console.error(`[desktop] server exited with code ${code}`);
-    }
-    serverProcess = null;
-    // Close the log stream so the file handle is released and the
-    // final buffered bytes hit disk before quit.
-    serverLogStream?.end();
-    serverLogStream = null;
+  serverExitPromise = new Promise((resolve) => {
+    serverProcess!.on('exit', (code) => {
+      if (code !== 0) {
+        console.error(`[desktop] server exited with code ${code}`);
+      }
+      serverProcess = null;
+      // Close the log stream so the file handle is released and the
+      // final buffered bytes hit disk before quit.
+      serverLogStream?.end();
+      serverLogStream = null;
+      // `utilityProcess.fork` only forwards an exit code, never a signal
+      // — keep the shape symmetric with the POSIX-style tuple anyway
+      // so future swaps to child_process don't require call-site edits.
+      resolve({ code: code ?? null, signal: null });
+    });
   });
 }
 
@@ -440,19 +469,57 @@ async function startServer(port: number): Promise<void> {
 /**
  * Poll until the server port accepts a TCP connection or we time out.
  * Uses raw TCP (not HTTP) so it works before Fastify has registered routes.
+ *
+ * When `exitSignal` is provided we race the poll against the child's
+ * exit — if the server we just forked dies first, we reject with the
+ * exit code instead of waiting out the full timeout (and instead of
+ * accidentally "succeeding" because some OTHER process happens to own
+ * the same loopback port).
  */
-function waitForPort(port: number, timeoutMs = 20_000): Promise<void> {
+function waitForPort(
+  port: number,
+  timeoutMs = 20_000,
+  exitSignal?: Promise<{ code: number | null; signal: string | null }>,
+): Promise<void> {
   const start = Date.now();
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const finishOk = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    const finishErr = (err: Error) => {
+      if (settled) return;
+      settled = true;
+      reject(err);
+    };
+
+    if (exitSignal) {
+      void exitSignal.then(({ code, signal }) => {
+        finishErr(
+          new Error(
+            `Server process exited before becoming ready (code=${
+              code ?? 'null'
+            }, signal=${signal ?? 'null'})`,
+          ),
+        );
+      });
+    }
+
     function attempt() {
+      if (settled) return;
       const socket = net.connect(port, '127.0.0.1', () => {
         socket.destroy();
-        resolve();
+        finishOk();
       });
       socket.on('error', () => {
         socket.destroy();
+        if (settled) return;
         if (Date.now() - start > timeoutMs) {
-          reject(new Error(`Server did not start within ${timeoutMs / 1000}s`));
+          finishErr(
+            new Error(`Server did not start within ${timeoutMs / 1000}s`),
+          );
           return;
         }
         setTimeout(attempt, 200);
@@ -759,9 +826,50 @@ app.whenReady().then(async () => {
       );
       await waitForPort(serverPort);
     } else {
-      serverPort = await getPort({ port: PREFERRED_PORT });
-      await startServer(serverPort);
-      await waitForPort(serverPort);
+      // Race-resistant port allocation: `get-port` only tells us the
+      // port was free *at the moment we asked*. Between then and the
+      // server's `app.listen()` another process can grab it (a stale
+      // Huabu install, a leftover dev orchestrator, an unrelated
+      // service that just bound 3001). When that happens the child
+      // crashes with EADDRINUSE — retry with a fresh port instead of
+      // surfacing the error to the user.
+      const tried = new Set<number>();
+      let lastErr: Error | null = null;
+      for (let attempt = 1; attempt <= MAX_SERVER_START_ATTEMPTS; attempt++) {
+        // Bias the first attempt toward 3001 for stable origins
+        // (localStorage, OAuth callback URLs, etc.); subsequent
+        // attempts ask for any free port and exclude what we already
+        // tried so we never re-pick the loser.
+        const candidate = await getPort({
+          port: attempt === 1 ? PREFERRED_PORT : undefined,
+          exclude: [...tried],
+        });
+        tried.add(candidate);
+        try {
+          await startServer(candidate);
+          await waitForPort(candidate, 20_000, serverExitPromise ?? undefined);
+          serverPort = candidate;
+          lastErr = null;
+          break;
+        } catch (err) {
+          lastErr = err instanceof Error ? err : new Error(String(err));
+          console.warn(
+            `[desktop] server start attempt ${attempt}/${MAX_SERVER_START_ATTEMPTS} on port ${candidate} failed: ${lastErr.message}`,
+          );
+          // Best-effort cleanup: if the child is somehow still alive
+          // (waitForPort timeout rather than early exit), kill it so
+          // the next attempt doesn't leak a zombie.
+          if (serverProcess) {
+            try {
+              serverProcess.kill();
+            } catch {
+              /* already dead */
+            }
+            serverProcess = null;
+          }
+        }
+      }
+      if (lastErr) throw lastErr;
     }
     createWindow(serverPort);
   } catch (err) {

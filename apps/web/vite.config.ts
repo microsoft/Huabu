@@ -80,6 +80,17 @@ export default defineConfig(({ mode }) => {
     server: {
       host: true,
       port: devPort,
+      // `strictPort: true` makes Vite ABORT instead of silently sliding
+      // to the next free port when its requested one is taken. Silent
+      // sliding is dangerous in orchestrated dev (scripts/dev-desktop.mjs):
+      // the orchestrator commits a specific port to Electron's
+      // WEB_DEV_SERVER_URL *before* Vite finishes binding, and if Vite
+      // slides we lose URL-port sync and Electron loads a phantom
+      // backend on the original port (e.g. a stale Vite from a previous
+      // session). Aborting surfaces the conflict immediately. For plain
+      // `pnpm dev:web` this just turns the rare \"hidden\" port-slide
+      // into a loud error, which is the better default UX anyway.
+      strictPort: true,
       proxy: {
         '/api': {
           target: apiTarget,

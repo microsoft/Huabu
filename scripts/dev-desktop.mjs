@@ -82,15 +82,11 @@ const POLL_INTERVAL_MS = 250;
 /* ─── helpers ─────────────────────────────────────────────────────── */
 
 /**
- * Probe whether `host:port` can accept a fresh `listen()`. This is the
- * same check Fastify / Vite will do at startup, so a `true` here means
- * the next spawned child should be able to bind without EADDRINUSE.
- *
- * TOCTOU caveat: between this check and the child's actual `listen()`
- * another process could grab the port. In a dev orchestrator that's
- * vanishingly rare and not worth a retry loop downstream.
+ * Probe whether a single `host:port` binding is free. Used as a
+ * building block by {@link isPortFree} \u2014 see that function for why we
+ * have to probe BOTH `127.0.0.1` and `0.0.0.0` instead of just one.
  */
-function isPortFree(host, port) {
+function probeBind(host, port) {
   return new Promise((resolve) => {
     const srv = net.createServer();
     srv.unref();
@@ -103,17 +99,45 @@ function isPortFree(host, port) {
 }
 
 /**
+ * Whether the port is truly free for ANY binding mode.
+ *
+ * Windows has \"weak\" socket binding semantics by default: a server bound
+ * to `0.0.0.0:N` (wildcard) does NOT conflict with a probe that does
+ * `listen(N, '127.0.0.1')` (specific loopback). The probe returns true
+ * (port appears free), the orchestrator picks N, then the downstream
+ * child \u2014 Vite is the usual culprit, since `host: true` makes it bind
+ * wildcard \u2014 tries `listen(N, '0.0.0.0')` and *that* hits EADDRINUSE
+ * against the original holder. Vite then silently slides to N+1, but
+ * the orchestrator already committed N to the URL it passes Electron \u2014
+ * result: BrowserWindow loads a phantom / stale backend on the original
+ * port (e.g. an orphan Vite from last week serving 5/28's `index.html`).
+ *
+ * Probing both addresses catches any holder regardless of which one
+ * they're bound to, so the orchestrator's port choice always matches
+ * what every downstream child can actually bind.
+ *
+ * TOCTOU caveat: between this check and the child's actual `listen()`
+ * another process could grab the port. In a dev orchestrator that's
+ * vanishingly rare and not worth a retry loop downstream.
+ */
+async function isPortFree(port) {
+  if (!(await probeBind('127.0.0.1', port))) return false;
+  if (!(await probeBind('0.0.0.0', port))) return false;
+  return true;
+}
+
+/**
  * Find a free port starting at `startPort`, scanning at most
  * `PORT_SCAN_RANGE` consecutive ports. Used so a stale Electron / tsx
- * holding 3001 (or 5173) doesn't crash the whole orchestrator — we
+ * holding 3001 (or 5173) doesn't crash the whole orchestrator \u2014 we
  * just slide to 3002 / 5174 and propagate that everywhere.
  */
-async function findAvailablePort(host, startPort) {
+async function findAvailablePort(startPort) {
   for (let p = startPort; p < startPort + PORT_SCAN_RANGE; p += 1) {
-    if (await isPortFree(host, p)) return p;
+    if (await isPortFree(p)) return p;
   }
   throw new Error(
-    `No free port found in ${startPort}..${startPort + PORT_SCAN_RANGE - 1} on ${host}`,
+    `No free port found in ${startPort}..${startPort + PORT_SCAN_RANGE - 1}`,
   );
 }
 
@@ -256,13 +280,13 @@ async function main() {
   //     and propagate that port to every consumer below so the Vite
   //     proxy and Electron's EXTERNAL_SERVER_URL stay in sync with
   //     wherever the server actually bound.
-  const serverPort = await findAvailablePort(HOST, SERVER_PORT);
+  const serverPort = await findAvailablePort(SERVER_PORT);
   if (serverPort !== SERVER_PORT) {
     console.warn(
       `[dev-desktop] Server port ${SERVER_PORT} is in use; using ${serverPort} instead.`,
     );
   }
-  const vitePort = await findAvailablePort(HOST, VITE_PORT);
+  const vitePort = await findAvailablePort(VITE_PORT);
   if (vitePort !== VITE_PORT) {
     console.warn(
       `[dev-desktop] Vite port ${VITE_PORT} is in use; using ${vitePort} instead.`,
