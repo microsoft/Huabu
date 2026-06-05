@@ -502,10 +502,8 @@ export const NodeWrapper = memo(
 
         <NodeSideAffordance
           nodeId={id}
-          hovered={hovered}
           selected={!!selected}
           editing={editing}
-          isNotMouse={isNotMouse}
           onCreate={handleCreateConnected}
         />
       </>

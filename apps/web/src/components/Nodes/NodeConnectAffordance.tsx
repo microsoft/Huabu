@@ -58,37 +58,6 @@ const NEW_NODE_DEFAULTS: Record<'note' | 'question', { w: number; h: number }> =
 /** Flow-space gap between the source node and the newly-created node. */
 const NEW_NODE_GAP = 80;
 
-/** How long the handles / arrows stay visible after the pointer leaves. */
-const HOVER_LINGER_MS = 400;
-
-function useHoverLinger(hovered: boolean, delayMs = HOVER_LINGER_MS): boolean {
-  const [lingering, setLingering] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    if (hovered) {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-        timerRef.current = null;
-      }
-      setLingering(true);
-      return;
-    }
-    timerRef.current = setTimeout(() => {
-      setLingering(false);
-      timerRef.current = null;
-    }, delayMs);
-    return () => {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-        timerRef.current = null;
-      }
-    };
-  }, [hovered, delayMs]);
-
-  return lingering;
-}
-
 export function useCreateConnectedNode(id: string) {
   const addNode = useCanvasStore((state) => state.addNode);
   const dispatchUiIntent = useCanvasStore((state) => state.dispatchUiIntent);
@@ -188,8 +157,6 @@ export const NodeConnectionHandles = memo(
       return { width: size, height: size };
     });
 
-    const lingering = useHoverLinger(hovered);
-
     return (
       <>
         {HANDLE_DEFS.map((h) => (
@@ -210,9 +177,7 @@ export const NodeConnectionHandles = memo(
                 ? selected
                   ? 'opacity-40 active:opacity-100'
                   : 'pointer-events-none opacity-0'
-                : // Mouse mode: shared linger window with the side
-                  // affordance so both fade out together.
-                  lingering
+                : hovered
                   ? 'opacity-100'
                   : 'pointer-events-none opacity-0',
             )}
@@ -226,22 +191,13 @@ NodeConnectionHandles.displayName = 'NodeConnectionHandles';
 
 interface NodeSideAffordanceProps {
   nodeId: string;
-  hovered: boolean;
   selected: boolean;
   editing: boolean;
-  isNotMouse: boolean;
   onCreate: (side: Side, kind: 'note' | 'question') => void;
 }
 
 export const NodeSideAffordance = memo(
-  ({
-    nodeId,
-    hovered,
-    selected,
-    editing,
-    isNotMouse,
-    onCreate,
-  }: NodeSideAffordanceProps) => {
+  ({ nodeId, selected, editing, onCreate }: NodeSideAffordanceProps) => {
     const domNode = useStore((state) => state.domNode);
     const rendererEl = useMemo(
       () => domNode?.querySelector('.react-flow__renderer') ?? null,
@@ -253,7 +209,6 @@ export const NodeSideAffordance = memo(
     const [openSide, setOpenSide] = useState<Side | null>(null);
 
     const [affordanceHovered, setAffordanceHovered] = useState(false);
-    const lingering = useHoverLinger(hovered);
     const rootRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -273,6 +228,17 @@ export const NodeSideAffordance = memo(
       if (editing) setOpenSide(null);
     }, [editing]);
 
+    // When the node loses selection (e.g. after creating a connected
+    // child node that steals focus), clear any sticky hover state — the
+    // popover may have unmounted under a stationary pointer, in which
+    // case the browser never fires onPointerLeave on the affordance.
+    useEffect(() => {
+      if (!selected) {
+        setAffordanceHovered(false);
+        setOpenSide(null);
+      }
+    }, [selected]);
+
     if (!rendererEl || !internalNode?.internals.positionAbsolute) return null;
 
     const absX = internalNode.internals.positionAbsolute.x;
@@ -291,11 +257,7 @@ export const NodeSideAffordance = memo(
     const heightPx = nodeH * zoom;
 
     const showArrows =
-      !editing &&
-      (lingering ||
-        affordanceHovered ||
-        (isNotMouse && selected) ||
-        openSide !== null);
+      !editing && (selected || affordanceHovered || openSide !== null);
 
     return createPortal(
       <div
@@ -394,6 +356,7 @@ export const NodeSideAffordance = memo(
                     onClick={() => {
                       onCreate(side, 'note');
                       setOpenSide(null);
+                      setAffordanceHovered(false);
                     }}
                   >
                     <NODE_ICON.note />
@@ -406,6 +369,7 @@ export const NodeSideAffordance = memo(
                     onClick={() => {
                       onCreate(side, 'question');
                       setOpenSide(null);
+                      setAffordanceHovered(false);
                     }}
                   >
                     <NODE_ICON.question />
