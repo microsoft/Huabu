@@ -158,6 +158,7 @@ export const NewChatMenu = ({
           onClick={handleShortcut}
           disabled={disabled || busy}
           title={shortcutTitle}
+          tooltipPlacement="bottom"
           className="rounded-r-none"
         >
           <Plus />
@@ -171,6 +172,7 @@ export const NewChatMenu = ({
           disabled={disabled}
           aria-expanded={isOpen}
           title="Start chat with…"
+          tooltipPlacement="bottom"
           className={cn(
             'rounded-l-none px-0.5 [&_svg]:h-3 [&_svg]:w-3',
             isOpen && 'bg-bg-default',

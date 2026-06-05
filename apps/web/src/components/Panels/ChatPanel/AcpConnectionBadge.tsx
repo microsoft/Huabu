@@ -52,7 +52,7 @@ export const AcpConnectionBadge: FC<AcpConnectionBadgeProps> = ({
 }) => {
   if (status === 'connecting') {
     return (
-      <Tooltip content={`Connecting…`}>
+      <Tooltip content={`Connecting…`} placement="bottom">
         <span
           className="inline-flex shrink-0 items-center gap-1 px-0.5 py-0.5"
           aria-label={`Connecting`}
@@ -68,7 +68,7 @@ export const AcpConnectionBadge: FC<AcpConnectionBadgeProps> = ({
 
   if (status === 'connected') {
     return (
-      <Tooltip content={`Connected`}>
+      <Tooltip content={`Connected`} placement="bottom">
         <span
           className="inline-flex shrink-0 items-center gap-1 px-0.5 py-0.5"
           aria-label={`Connected`}
@@ -88,7 +88,7 @@ export const AcpConnectionBadge: FC<AcpConnectionBadgeProps> = ({
       ? errorMessage
       : `Could not connect to ${alias}. Check Settings → External Agents.`;
   return (
-    <Tooltip content={tooltipText}>
+    <Tooltip content={tooltipText} placement="bottom">
       <span
         className="text-danger inline-flex shrink-0 items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase"
         aria-label={tooltipText}

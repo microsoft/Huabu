@@ -530,6 +530,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
             iconOnly
             onClick={closeSketchCluster}
             title="Back to chat"
+            tooltipPlacement="bottom"
           >
             <ArrowLeft />
           </Button>
@@ -539,6 +540,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
             iconOnly
             onClick={closeQuestionThread}
             title="Back to chat"
+            tooltipPlacement="bottom"
           >
             <ArrowLeft />
           </Button>

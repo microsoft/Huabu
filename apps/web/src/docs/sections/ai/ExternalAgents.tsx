@@ -40,8 +40,8 @@ export default function ExternalAgents() {
         <SettingsIcon
           aria-label="Settings"
           className="inline-block size-[1em] align-[-0.15em]"
-        />{' '}
-        in the top-right corner) → <strong>External Agents</strong> and click{' '}
+        />
+        ) → <strong>External Agents</strong> and click{' '}
         <strong>Add agent</strong>. The editor opens with two tabs:
       </P>
       <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
