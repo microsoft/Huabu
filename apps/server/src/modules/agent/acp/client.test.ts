@@ -39,7 +39,7 @@ function createFakeConnection(): FakeConnection {
     agentId: 'fake:agent',
     token: 'fake-token',
     metadata: {},
-    agentInfo: { command: 'fake', pid: 0 },
+    agentInfo: { command: 'fake', pid: 0, cwd: '/tmp/fake' },
     bridge: { name: 'fake', version: '0.0.0' },
     capabilities: { autoRestart: false, bufferLimit: 0 },
     status: 'connected',

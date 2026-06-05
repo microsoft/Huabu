@@ -16,9 +16,10 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "^0.22.1",
     "@agentlet/protocol": "workspace:*",
-    "ws": "^8.18.0",
-    "commander": "^13.0.0"
+    "commander": "^13.0.0",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/ws": "^8.5.0",

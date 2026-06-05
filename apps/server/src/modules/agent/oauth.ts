@@ -103,11 +103,15 @@ export async function startDeviceCodeFlow(): Promise<{
     promise: null!,
   };
 
-  // Promise that resolves once onDeviceCode fires with the device code
-  const userCodeReady = new Promise<void>((resolveCode) => {
+  // Promise that resolves once onDeviceCode fires with the device code,
+  // or rejects if loginGitHubCopilot fails before that callback ever runs
+  // (e.g. github.com is unreachable — pi-ai will throw a fetch error).
+  let codeReceived = false;
+  const userCodeReady = new Promise<void>((resolveCode, rejectCode) => {
     // loginGitHubCopilot is async and will call onDeviceCode when the device code is ready
     const loginPromise = loginGitHubCopilot({
       onDeviceCode: (info) => {
+        codeReceived = true;
         session.userCode = info.userCode;
         session.verificationUri = info.verificationUri;
         if (typeof info.intervalSeconds === 'number') {
@@ -126,6 +130,20 @@ export async function startDeviceCodeFlow(): Promise<{
     });
 
     session.promise = loginPromise;
+
+    // CRUCIAL: attach a rejection handler to the login promise.
+    // Without this, a fetch failure (github.com unreachable, DNS error,
+    // signal abort) before `onDeviceCode` fires becomes an unhandled
+    // promise rejection that crashes the server's utilityProcess — the
+    // frontend then sees `ERR_EMPTY_RESPONSE` instead of a 5xx. After
+    // `onDeviceCode` has fired we've already returned 200 to the
+    // client, and pollDeviceCode() awaits the same `session.promise`
+    // and will surface the same error to its caller, so this handler
+    // intentionally only forwards the error during the pre-code phase.
+    loginPromise.catch((err) => {
+      const e = err instanceof Error ? err : new Error(String(err));
+      if (!codeReceived) rejectCode(e);
+    });
   });
 
   pendingLogin = session;

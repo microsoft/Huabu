@@ -8,13 +8,29 @@ import {
   type WorkspaceInfo,
   type WorkspaceMode,
 } from '../api/workspace';
+import { getElectronBridge } from '../hooks/useElectron';
 
 const FREE_PATH_KEY = 'sediment:workspace-path';
 const RECENT_PATHS_KEY = 'sediment:recent-workspaces';
 const MAX_RECENT = 5;
 
-/** Read recent free-mode workspace paths from localStorage. */
-function loadRecentWorkspaces(): string[] {
+/**
+ * Storage backend abstraction. In Electron we delegate to the main
+ * process (file under `userData/workspace.json`) so the saved
+ * workspace survives the renderer's per-origin localStorage being
+ * wiped whenever the shell picks a different server port. In the
+ * browser / Vite dev server we fall back to `localStorage`.
+ *
+ * Implementations mirror each other shape-wise so the caller doesn't
+ * have to branch on the environment.
+ */
+interface WorkspacePersistence {
+  load: () => Promise<{ path: string | null; recent: string[] }>;
+  save: (path: string) => Promise<string[]>;
+  remove: (path: string) => Promise<string[]>;
+}
+
+function loadLocalStorageRecents(): string[] {
   try {
     const raw = localStorage.getItem(RECENT_PATHS_KEY);
     if (!raw) return [];
@@ -27,14 +43,86 @@ function loadRecentWorkspaces(): string[] {
   return [];
 }
 
-/** Persist a path to the free-mode recent list (most recent first, deduped). */
-function pushRecentWorkspace(path: string): string[] {
-  const list = loadRecentWorkspaces().filter((p) => p !== path);
+function pushLocalStorageRecent(path: string): string[] {
+  const list = loadLocalStorageRecents().filter((p) => p !== path);
   list.unshift(path);
   const trimmed = list.slice(0, MAX_RECENT);
   localStorage.setItem(RECENT_PATHS_KEY, JSON.stringify(trimmed));
   return trimmed;
 }
+
+const localStoragePersistence: WorkspacePersistence = {
+  load: async () => ({
+    path: localStorage.getItem(FREE_PATH_KEY),
+    recent: loadLocalStorageRecents(),
+  }),
+  save: async (path: string) => {
+    localStorage.setItem(FREE_PATH_KEY, path);
+    return pushLocalStorageRecent(path);
+  },
+  remove: async (path: string) => {
+    const list = loadLocalStorageRecents().filter((p) => p !== path);
+    localStorage.setItem(RECENT_PATHS_KEY, JSON.stringify(list));
+    if (localStorage.getItem(FREE_PATH_KEY) === path) {
+      localStorage.removeItem(FREE_PATH_KEY);
+    }
+    return list;
+  },
+};
+
+/**
+ * Build the Electron-backed persistence, migrating any pre-existing
+ * `localStorage` values into the main-process store on first read so
+ * users upgrading from a previous build don't lose their selection.
+ */
+interface ElectronWorkspaceLike {
+  get: () => Promise<{ path: string | null; recent: string[] }>;
+  set: (path: string) => Promise<{ path: string | null; recent: string[] }>;
+  removeRecent: (
+    path: string,
+  ) => Promise<{ path: string | null; recent: string[] }>;
+}
+
+function makeElectronPersistence(
+  api: ElectronWorkspaceLike,
+): WorkspacePersistence {
+  return {
+    load: async () => {
+      const snap = await api.get();
+      // One-shot migration: if the main-process file is empty but the
+      // renderer still has a localStorage value (from an older build
+      // that only used localStorage), promote it so the user keeps
+      // their workspace across this upgrade. We only migrate the
+      // active path — stale recents from a different port partition
+      // aren't worth preserving.
+      if (!snap.path) {
+        const legacyPath = localStorage.getItem(FREE_PATH_KEY);
+        if (legacyPath) {
+          return await api.set(legacyPath);
+        }
+      }
+      return snap;
+    },
+    save: async (path: string) => {
+      const snap = await api.set(path);
+      return snap.recent;
+    },
+    remove: async (path: string) => {
+      const snap = await api.removeRecent(path);
+      return snap.recent;
+    },
+  };
+}
+
+function getPersistence(): WorkspacePersistence {
+  const bridge = getElectronBridge();
+  if (bridge?.workspace) {
+    return makeElectronPersistence(bridge.workspace);
+  }
+  return localStoragePersistence;
+}
+
+const persistence = getPersistence();
 
 interface WorkspaceState {
   /** Server operating mode. `null` until the first `init()` call. */
@@ -99,12 +187,34 @@ function fromInfo(info: WorkspaceInfo): Partial<WorkspaceState> {
   };
 }
 
+/**
+ * Notify the rest of the app that a workspace is now active. Dispatched
+ * on every transition from "no workspace" / "different workspace" to
+ * "ready", including auto-activation from a saved path on boot. Stores
+ * gated by the server-side workspace guard (e.g. `acpProfilesStore`,
+ * `useDetectedClis`) listen for this to silently re-fetch and drop the
+ * cached "Workspace has not been configured" 503 they may have hit
+ * before the user picked a folder.
+ */
+function emitWorkspaceChanged(): void {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new Event('workspace-changed'));
+}
+
 export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   mode: null,
   capabilities: null,
-  workspacePath: localStorage.getItem(FREE_PATH_KEY),
+  // Synchronous bootstrap value so first paint doesn't flicker the
+  // setup page when localStorage already holds something. The async
+  // `init()` call refreshes both fields from the authoritative
+  // persistence (Electron file or localStorage) immediately after.
+  workspacePath:
+    typeof localStorage !== 'undefined'
+      ? localStorage.getItem(FREE_PATH_KEY)
+      : null,
   workspaceName: null,
-  recentWorkspaces: loadRecentWorkspaces(),
+  recentWorkspaces:
+    typeof localStorage !== 'undefined' ? loadLocalStorageRecents() : [],
   isReady: false,
   isSyncing: false,
   error: null,
@@ -112,6 +222,21 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
 
   init: async () => {
     set({ isSyncing: true, error: null });
+
+    // Pull the persisted snapshot up-front so we have an authoritative
+    // value regardless of whether we're using the Electron-backed
+    // store or plain localStorage. Doing this BEFORE the server call
+    // also lets us refresh the synchronous bootstrap value if the
+    // Electron file disagrees with localStorage.
+    const persisted = await persistence.load().catch(() => ({
+      path: null as string | null,
+      recent: [] as string[],
+    }));
+    set({
+      workspacePath: persisted.path,
+      recentWorkspaces: persisted.recent,
+    });
+
     let info: WorkspaceInfo;
     try {
       info = await getWorkspaceInfo();
@@ -128,37 +253,49 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     // ── Managed mode: server has already activated; nothing to do. ──
     if (info.mode === 'managed') {
       // Free-mode leftovers are meaningless here.
+      try {
+        await persistence.remove(persisted.path ?? '');
+      } catch {
+        // best-effort cleanup
+      }
       localStorage.removeItem(FREE_PATH_KEY);
       set({ isSyncing: false });
+      if (info.configured) emitWorkspaceChanged();
       return info.configured;
     }
 
     // ── Free mode ──
     // Server already activated (e.g. another tab beat us to it).
     if (info.configured && info.path) {
-      localStorage.setItem(FREE_PATH_KEY, info.path);
-      const recent = pushRecentWorkspace(info.path);
+      const recent = await persistence.save(info.path);
       set({ recentWorkspaces: recent, isSyncing: false });
+      emitWorkspaceChanged();
       return true;
     }
 
-    // Try to auto-activate using a remembered absolute path.
-    const savedPath = localStorage.getItem(FREE_PATH_KEY);
+    // Try to auto-activate using the remembered absolute path.
+    const savedPath = persisted.path;
     if (savedPath) {
       try {
         const next = await putWorkspacePath(savedPath);
-        const recent = pushRecentWorkspace(savedPath);
+        const recent = await persistence.save(savedPath);
         set({
           ...fromInfo(next),
           recentWorkspaces: recent,
           isSyncing: false,
         });
+        emitWorkspaceChanged();
         return true;
       } catch (err) {
         // Stored path is invalid (e.g. cross-platform leftover). Drop it
         // and fall through to setup so the user picks a fresh one.
-        localStorage.removeItem(FREE_PATH_KEY);
+        try {
+          await persistence.remove(savedPath);
+        } catch {
+          // best-effort cleanup
+        }
         set({
+          workspacePath: null,
           error:
             err instanceof Error
               ? `Saved workspace is no longer valid: ${err.message}`
@@ -178,9 +315,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     set({ isSyncing: true, error: null, canvasCount: null });
     try {
       const info = await putWorkspacePath(path);
-      localStorage.setItem(FREE_PATH_KEY, path);
-      const recent = pushRecentWorkspace(path);
+      const recent = await persistence.save(path);
       set({ ...fromInfo(info), recentWorkspaces: recent, isSyncing: false });
+      emitWorkspaceChanged();
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Failed to update workspace';
@@ -190,9 +327,12 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
 
   removeRecentWorkspace: (path: string) => {
-    const list = loadRecentWorkspaces().filter((p) => p !== path);
-    localStorage.setItem(RECENT_PATHS_KEY, JSON.stringify(list));
-    set({ recentWorkspaces: list });
+    void persistence
+      .remove(path)
+      .then((list) => set({ recentWorkspaces: list }))
+      .catch(() => {
+        // Surface nothing — the recents list is best-effort UX.
+      });
   },
 
   setCanvasCount: (count: number | null) => {
@@ -217,4 +357,18 @@ export function useWorkspaceLabel(): string | null {
     if (path) return path.split(/[\\/]/).filter(Boolean).pop() ?? null;
     return null;
   }, [name, path]);
+}
+
+/**
+ * Whether the server can open a native folder-picker dialog. This is a
+ * server-level capability (GUI present) rather than a workspace
+ * property — surfaced via a dedicated hook so callers that only need
+ * the flag don't have to reach into `useWorkspaceStore` and accidentally
+ * imply they're mutating workspace state.
+ *
+ * Returns `false` while the first capability snapshot is still loading,
+ * matching the conservative behaviour of the workspace setup flow.
+ */
+export function useFolderPickerSupported(): boolean {
+  return useWorkspaceStore((s) => s.capabilities?.nativePicker ?? false);
 }

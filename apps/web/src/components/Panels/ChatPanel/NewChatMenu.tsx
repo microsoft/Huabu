@@ -10,7 +10,10 @@
  *   └─────┴─────┘
  *      │     │
  *      │     └─ Opens a menu: pick the (mode, agent) for a brand-new
- *      │        thread. Refresh-agents lives in the menu footer.
+ *      │        thread. An **Add agent** entry lives in the menu
+ *      │        footer; clicking it opens the same Profile editor used
+ *      │        by Settings → External Agents, so adding a new external
+ *      │        agent never requires leaving the chat surface.
  *      │
  *      └─ Shortcut: starts a new thread bound to the *current* config
  *         (so "+" while chatting with claude → another claude thread).
@@ -28,22 +31,16 @@
  * thread, so menu rows are actions, not radio options.
  */
 
-import {
-  ChevronDown,
-  MessageSquare,
-  Plus,
-  RefreshCw,
-  Route,
-  Sprout,
-} from 'lucide-react';
+import { ChevronDown, MessageSquare, Plus, Route, Sprout } from 'lucide-react';
 import { useCallback, useRef, useState, type ReactNode } from 'react';
 
 import { Button } from '../../Common/Button';
 import { cn } from '../../Common/cn';
 import { Popover } from '../../Common/Popover';
+import { ProfileEditorModal, useDetectedClis } from '../Header/AcpSettings';
 
 import type {
-  AcpAgentSummary,
+  AcpAgentProfile,
   AgentBinding,
   AgentMode,
 } from '@sediment/shared';
@@ -58,12 +55,14 @@ interface NewChatMenuProps {
   currentMode: AgentMode;
   /** Binding of the *current* thread. Used to mark the matching menu row. */
   currentBinding: AgentBinding;
-  /** External agents currently connected through the ACP bridge. */
-  connectedAgents: AcpAgentSummary[];
-  /** Re-fetch the connected-agents list. Wired to the menu footer button. */
-  onRefreshAgents?: () => void | Promise<void>;
-  /** True while an agent-list fetch is in flight — spins the refresh icon. */
-  refreshing?: boolean;
+  /** Configured external-agent profiles available for binding. */
+  profiles: AcpAgentProfile[];
+  /**
+   * Re-fetch the profile list. Invoked after the inline "Add agent"
+   * modal saves so the newly-created profile shows up in the menu
+   * without requiring the user to open Settings.
+   */
+  onRefreshProfiles?: () => void | Promise<void>;
   /** Atomic "reset thread + apply (mode, binding)". */
   onSelect: (choice: NewChatChoice) => void;
   /** Disable the control completely (e.g. history not yet loaded). */
@@ -81,7 +80,7 @@ const INTERNAL: AgentBinding = { kind: 'internal' };
 function bindingsEqual(a: AgentBinding, b: AgentBinding): boolean {
   if (a.kind === 'internal' && b.kind === 'internal') return true;
   if (a.kind === 'external' && b.kind === 'external') {
-    return a.agentletAgentId === b.agentletAgentId;
+    return a.profileId === b.profileId;
   }
   return false;
 }
@@ -89,16 +88,21 @@ function bindingsEqual(a: AgentBinding, b: AgentBinding): boolean {
 export const NewChatMenu = ({
   currentMode,
   currentBinding,
-  connectedAgents,
-  onRefreshAgents,
-  refreshing = false,
+  profiles,
+  onRefreshProfiles,
   onSelect,
   disabled = false,
   busy = false,
 }: NewChatMenuProps) => {
   const [isOpen, setIsOpen] = useState(false);
+  const [editorOpen, setEditorOpen] = useState(false);
   const triggerRef = useRef<HTMLDivElement>(null);
   const justDismissedRef = useRef(false);
+  // CLI detection is cheap (single fetch, cached for the menu's
+  // lifetime). We do it eagerly so opening the editor modal feels
+  // instant even on a cold mount — same reason the Settings section
+  // fetches at mount instead of on dialog-open.
+  const detectedClis = useDetectedClis();
 
   const handleDismiss = useCallback(() => {
     justDismissedRef.current = true;
@@ -154,6 +158,7 @@ export const NewChatMenu = ({
           onClick={handleShortcut}
           disabled={disabled || busy}
           title={shortcutTitle}
+          tooltipPlacement="bottom"
           className="rounded-r-none"
         >
           <Plus />
@@ -167,6 +172,7 @@ export const NewChatMenu = ({
           disabled={disabled}
           aria-expanded={isOpen}
           title="Start chat with…"
+          tooltipPlacement="bottom"
           className={cn(
             'rounded-l-none px-0.5 [&_svg]:h-3 [&_svg]:w-3',
             isOpen && 'bg-bg-default',
@@ -208,36 +214,35 @@ export const NewChatMenu = ({
               />
             );
           })}
-          {connectedAgents.length > 0 && (
+          {profiles.length > 0 && (
             <div
               role="presentation"
               className="text-fg-muted mt-1 flex items-center gap-2 px-3 pt-1 pb-0.5 text-[10px] tracking-wider uppercase select-none"
             >
               <span className="bg-edge-default h-px flex-1" />
-              <span>Connected Agents</span>
+              <span>External Agents</span>
               <span className="bg-edge-default h-px flex-1" />
             </div>
           )}
-          {connectedAgents.map((agent) => {
+          {profiles.map((profile) => {
             const binding: AgentBinding = {
               kind: 'external',
-              alias: agent.alias,
-              agentletAgentId: agent.agentId,
+              alias: profile.displayName,
+              profileId: profile.id,
             };
             const isCurrent = bindingsEqual(currentBinding, binding);
             return (
               <MenuRow
-                key={`agent:${agent.agentId}`}
+                key={`profile:${profile.id}`}
                 icon={<Route size={14} />}
-                label={agent.alias}
-                hint={`pid ${agent.pid}`}
+                label={profile.displayName}
                 current={isCurrent}
                 disabled={busy}
                 onClick={() => handleSelect({ mode: currentMode, binding })}
               />
             );
           })}
-          {onRefreshAgents && (
+          {onRefreshProfiles && (
             <>
               <div
                 role="presentation"
@@ -249,23 +254,36 @@ export const NewChatMenu = ({
                   tone="neutral"
                   size="sm"
                   onClick={() => {
-                    void onRefreshAgents();
+                    // Close the popover before opening the modal so the
+                    // two surfaces don't visually stack. The modal then
+                    // owns focus management for the rest of the flow.
+                    setIsOpen(false);
+                    setEditorOpen(true);
                   }}
-                  disabled={refreshing}
                   className="w-full justify-start gap-1.5 rounded px-2 py-1.5 text-left"
                 >
-                  <RefreshCw
-                    size={14}
-                    className={refreshing ? 'animate-spin' : undefined}
-                  />
-                  <span className="text-xs">
-                    {refreshing ? 'Refreshing…' : 'Refresh Agents'}
-                  </span>
+                  <Plus size={14} />
+                  <span className="text-xs">Add agent</span>
                 </Button>
               </div>
             </>
           )}
         </Popover>
+      )}
+      {onRefreshProfiles && (
+        <ProfileEditorModal
+          isOpen={editorOpen}
+          editing={null}
+          detectedClis={detectedClis}
+          onClose={() => setEditorOpen(false)}
+          onSaved={async () => {
+            // Refresh the profile list so the newly-created agent
+            // appears in this menu (and everywhere else that subscribes
+            // to the profiles store) without forcing the user to open
+            // Settings or reload the page.
+            await onRefreshProfiles();
+          }}
+        />
       )}
     </>
   );

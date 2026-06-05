@@ -1119,7 +1119,7 @@ const agentRoutes: FastifyPluginAsync = async (
           threadId: threadId ?? null,
           canvasId: canvasId ?? null,
           alias: agentBinding.alias,
-          agentletAgentId: agentBinding.agentletAgentId,
+          profileId: agentBinding.profileId,
         },
         'agent.route: external agentBinding → ACP dispatch',
       );
@@ -1444,7 +1444,7 @@ const agentRoutes: FastifyPluginAsync = async (
           ? runAcpAgent({
               binding: {
                 alias: agentBinding.alias,
-                agentletAgentId: agentBinding.agentletAgentId,
+                profileId: agentBinding.profileId,
               },
               message: userContent,
               threadId: resolvedThreadId,

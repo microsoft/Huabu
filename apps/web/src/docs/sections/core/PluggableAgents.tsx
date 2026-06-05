@@ -1,23 +1,15 @@
-import { Plug, Shield, Terminal, Zap } from 'lucide-react';
-
 import {
   Callout,
-  CardGrid,
   Code,
-  CodeBlock,
   DocLink,
   H2,
-  NavCard,
   P,
   PageLayout,
-  Table,
   type TocEntry,
 } from '../../components';
 
 const toc: TocEntry[] = [
   { id: 'the-idea', label: 'The idea' },
-  { id: 'why-it-matters', label: 'Why pluggable matters' },
-  { id: 'capabilities', label: 'What paired agents can do' },
   { id: 'how-it-works', label: 'How the bridge works' },
   { id: 'lifecycle', label: 'Per-message lifecycle' },
   { id: 'security', label: 'Security & sandboxing' },
@@ -28,117 +20,58 @@ export default function PluggableAgents() {
   return (
     <PageLayout
       title="Pluggable Agents"
-      description="Huabu can drive any external coding agent that speaks the open Agent Client Protocol (ACP) — Claude, Copilot, Gemini and friends. You keep their login, quota and tool catalogue; the canvas just becomes the place they think on."
+      description="Huabu is where you think; the agents you trust are where things get done. Pluggable Agents lets any external agent — coding CLIs like Claude, Copilot and Gemini, or any other compatible agent — plug into a chat thread, so the canvas can both hand finished thinking off to them and pull more minds into the thinking itself."
       toc={toc}
     >
       <H2>The idea</H2>
       <P>
-        Huabu ships with a built-in agent for everyday canvas work. But the
-        coding agents you already use are good at things Huabu shouldn&apos;t
-        try to copy — terminal access, repo-aware tool calls, your own quota.
-        Instead of re-implementing each one, Huabu speaks the open{' '}
-        <strong>Agent Client Protocol</strong> (ACP) so any compliant agent can
-        plug into a chat thread.
-      </P>
-      <P>
-        ACP is a small JSON-RPC contract between an <strong>agent</strong> (a
-        process that can think and run tools) and a <strong>client</strong> (an
-        editor or canvas that hosts the conversation). The wire shape is
-        intentionally narrow:
+        Huabu is a place to <em>think</em> — sketch, link, question,
+        restructure. Thinking is only valuable when it lands as something real,
+        and a single built-in agent can only carry an idea so far. Pluggable
+        Agents exists to close both halves of that loop.
       </P>
       <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
         <li>
-          <Code>initialize</Code> / <Code>session/new</Code> /{' '}
-          <Code>session/prompt</Code> — open a session and send a turn.
+          <strong>Get finished thinking off the canvas, fast.</strong> Hand a
+          plan, a spec or a question to an external agent and let it turn the
+          idea into edits, commits, tool calls or whatever else its toolbelt
+          supports — using its login, its quota and its tool catalogue, not a
+          re-implementation inside Huabu.
         </li>
         <li>
-          <Code>session/update</Code> — streamed events as the agent thinks,
-          calls tools and replies.
-        </li>
-        <li>
-          <strong>Client capabilities</strong> — file reads, permission prompts,
-          terminal requests, all gated by the host.
+          <strong>Bring more agents into the thinking itself.</strong> Different
+          agents have different strengths and different blind spots. Routing a
+          Question node (or a whole chat thread) to a specific agent lets you
+          stress-test an idea from several angles before you commit to one.
         </li>
       </ul>
       <P>
-        Huabu acts as the ACP <strong>client</strong>. Any agent that speaks ACP
-        — including the official <Code>claude --acp</Code>,{' '}
-        <Code>copilot --acp</Code> and <Code>gemini --acp</Code> — can be paired
-        with a Huabu chat thread.
+        Any external agent that speaks a standard agent protocol can plug in.
+        The coding CLIs Huabu detects out of the box — <Code>claude</Code>,{' '}
+        <Code>copilot</Code> and <Code>gemini</Code> — are just the obvious
+        starting points; any other compatible agent works through the same
+        bridge.
       </P>
-
-      <H2>Why pluggable matters</H2>
-      <Table
-        headers={['Without a shared protocol', 'With Pluggable Agents']}
-        rows={[
-          [
-            'Each AI vendor needs a bespoke integration.',
-            'Any ACP-compatible agent works through one shared bridge.',
-          ],
-          [
-            'You re-authenticate inside Huabu separately from your CLI.',
-            'Your existing CLI login, quota and tool catalogue are reused as-is.',
-          ],
-          [
-            'Tool calls and permission prompts are vendor-specific.',
-            'A single permission UI covers every agent.',
-          ],
-          [
-            'Switching agents means switching products.',
-            'Switching agents is a dropdown in the chat panel.',
-          ],
-        ]}
-      />
-
-      <H2>What paired agents can do</H2>
-      <CardGrid>
-        <NavCard
-          to="/docs/ai/external-agents"
-          icon={Plug}
-          eyebrow="Setup"
-          title="External Agents"
-          description="One-click pairing for detected CLIs, plus the manual pairing flow."
-        />
-        <NavCard
-          to="/docs/ai/agent-mode"
-          icon={Zap}
-          eyebrow="Workflow"
-          title="Agent Mode"
-          description="External agents emit the same change-list batches the built-in agent uses."
-        />
-        <NavCard
-          to="/docs/ai/memory"
-          icon={Terminal}
-          eyebrow="Under the hood"
-          title="Prompt payload"
-          description="Each turn becomes a structured task + selected file refs the agent reads on demand."
-        />
-        <NavCard
-          to="/docs/reference/settings"
-          icon={Shield}
-          eyebrow="Reference"
-          title="Settings & LLM"
-          description="Where pairing tokens live and how to revoke them."
-        />
-      </CardGrid>
 
       <H2>How the bridge works</H2>
       <P>
-        Huabu embeds{' '}
-        <DocLink href="https://github.com/hai-team/agentlet">agentlet</DocLink>,
-        a small WebSocket bridge, into its server. You install the{' '}
-        <Code>agentlet</Code> CLI on whichever machine the agent should run on
-        (often your own laptop), then point it at Huabu with a one-time pairing
-        token:
+        Under the hood Huabu talks to your agent through an open agent protocol,
+        so there&apos;s no per-vendor glue code: install a supported agent,
+        point a profile at it in Settings → External Agents, and the canvas can
+        drive it. You never launch or pair anything by hand — Huabu starts the
+        agent for you when a chat first needs it and shuts it down when
+        it&apos;s no longer in use.
       </P>
-      <CodeBlock language="bash">{`agentlet \\
-  --agent "claude --acp" \\
-  --server ws://localhost:3001/api/acp/agent \\
-  --token <pairing-token>`}</CodeBlock>
       <P>
-        Detected CLIs (Copilot, Claude, Gemini) get a one-click <em>Connect</em>{' '}
-        in Settings that builds and copies that command for you — see{' '}
-        <DocLink href="/docs/ai/external-agents">External Agents</DocLink>.
+        When a chat thread that uses a profile sends its first message, Huabu
+        starts the configured agent in the right working directory and streams
+        its responses into the chat — the experience matches the built-in agent.
+        See <DocLink href="/docs/ai/external-agents">External Agents</DocLink>{' '}
+        for the editor walk-through, and the{' '}
+        <DocLink href="https://github.com/hai-team/agentlet#readme">
+          agentlet README
+        </DocLink>{' '}
+        for the underlying protocol and the full list of supported agents.
       </P>
 
       <H2>Per-message lifecycle</H2>
@@ -147,25 +80,24 @@ export default function PluggableAgents() {
           You type a message in the chat panel and pick an external agent.
         </li>
         <li>
-          Huabu&apos;s preprocessor rewrites it into a structured prompt
-          (&quot;task + file refs&quot;) the agent can act on.
+          Huabu rewrites it into a structured prompt (the task plus the canvas
+          nodes / files it should look at) so the agent has the context it
+          needs.
+        </li>
+        <li>The prompt is handed to the agent.</li>
+        <li>
+          The agent streams thoughts, text and tool calls back as it works.
         </li>
         <li>
-          The prompt is sent over ACP <Code>session/prompt</Code> to the agent.
-        </li>
-        <li>
-          The agent streams thoughts, text and tool calls back via{' '}
-          <Code>session/update</Code>.
-        </li>
-        <li>
-          Huabu translates those events into the same SSE stream the built-in
-          agent uses, so the UI looks identical.
+          Huabu renders the stream in the chat panel exactly the way it renders
+          the built-in agent, so the UI looks identical regardless of which CLI
+          is on the other end.
         </li>
       </ol>
       <Callout tone="info">
-        One chat thread is bound to exactly one external agent at a time.
-        Switching agents inside a thread starts an implicit new conversation, so
-        contexts don&apos;t leak.
+        One chat thread uses exactly one external agent at a time. Switching
+        agents inside a thread starts an implicit new conversation, so contexts
+        don&apos;t leak.
       </Callout>
 
       <H2>Security &amp; sandboxing</H2>
@@ -177,23 +109,24 @@ export default function PluggableAgents() {
           disk.
         </li>
         <li>
-          <strong>Permission prompts</strong> for anything beyond the sandbox.
+          <strong>Permission prompts</strong> for anything beyond that sandbox.
           Each request shows the exact resource and tool involved.
         </li>
         <li>
-          <strong>Pairing tokens</strong> are scoped, revocable and printed
-          fresh per session.
+          <strong>Credentials stay server-side.</strong> The browser never sees
+          the tokens Huabu uses to talk to your agent CLI — they live only in
+          the local server process.
         </li>
       </ul>
 
       <H2>Going further</H2>
       <P>
-        For step-by-step pairing, troubleshooting and the manual flow when an
-        agent isn&apos;t auto-detected, jump to{' '}
+        For the Profile editor walk-through, troubleshooting and how the offline
+        banner behaves, jump to{' '}
         <DocLink href="/docs/ai/external-agents">External Agents</DocLink>. For
-        the wire format and reference implementation, see the{' '}
-        <DocLink href="https://github.com/hai-team/agentlet">
-          agentlet repo
+        the protocol and the full list of supported agents, see the{' '}
+        <DocLink href="https://github.com/hai-team/agentlet#readme">
+          agentlet README
         </DocLink>
         .
       </P>

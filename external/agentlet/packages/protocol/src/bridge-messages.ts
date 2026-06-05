@@ -17,6 +17,13 @@ export interface BridgeHelloParams {
    */
   agentId: string
 
+  /**
+   * Connection mode. Defaults to 'bridge' for backward compatibility.
+   * - 'bridge': standard mode — agent already spawned, relay ACP messages
+   * - 'daemon': daemon mode — no agent yet, waits for spawn commands
+   */
+  mode?: 'bridge' | 'daemon'
+
   /** Bridge (agent-side adapter) identity */
   bridge: {
     /** Bridge name, always "agentlet" */
@@ -25,12 +32,28 @@ export interface BridgeHelloParams {
     version: string
   }
 
-  /** Spawned agent process info */
-  agent: {
+  /** Spawned agent process info (required for mode='bridge', absent for mode='daemon') */
+  agent?: {
     /** Shell command used to spawn the agent */
     command: string
     /** OS process ID of the agent */
     pid: number
+    /** Working directory of the agent process */
+    cwd: string
+  }
+
+  /**
+   * Active ACP session info (present when agentlet has completed session bootstrap).
+   * In bridge mode, this is always present after startup.
+   * In daemon mode, each spawned agent reports its own session via a separate bridge/hello.
+   */
+  session?: {
+    /** The active ACP sessionId */
+    sessionId: string
+    /** Whether the agent supports session/load (from initializeResult.agentCapabilities.loadSession) */
+    supportsLoad: boolean
+    /** The full ACP initialize response (agent capabilities, info, protocol version) */
+    initializeResult: unknown
   }
 
   /** Machine info (informational, for display/debugging) */
@@ -47,6 +70,8 @@ export interface BridgeHelloParams {
     autoRestart: boolean
     /** Max messages buffered during disconnect */
     bufferLimit: number
+    /** Max concurrent agents (daemon mode only) */
+    maxAgents?: number
   }
 }
 
@@ -111,6 +136,69 @@ export interface BridgePongParams {}
 export interface BridgeShutdownParams {
   /** Reason for shutdown request */
   reason: 'token_revoked' | 'server_shutting_down' | 'idle_timeout' | (string & {})
+}
+
+// ─── Daemon Control Messages (Server → Daemon) ───────────────────────────────
+
+/** Server requests daemon to spawn an agent */
+export interface DaemonSpawnParams {
+  /** Shell command to spawn the agent (must support ACP stdio) */
+  command: string
+  /** Working directory for the agent subprocess */
+  cwd?: string
+  /** Extra environment variables for the agent */
+  env?: Record<string, string>
+  /** Whether to auto-restart the agent on crash */
+  autoRestart?: boolean
+}
+
+/** Successful spawn result returned by daemon */
+export interface DaemonSpawnResult {
+  /** The agentId of the newly spawned agent */
+  agentId: string
+  /** The OS process ID of the agent */
+  pid: number
+}
+
+/** Server requests daemon to stop a running agent */
+export interface DaemonStopParams {
+  /** The agentId of the agent to stop */
+  agentId: string
+}
+
+/** Successful stop result returned by daemon */
+export interface DaemonStopResult {
+  /** Whether the agent was successfully stopped */
+  stopped: boolean
+}
+
+/** Server requests daemon to list its running agents */
+export interface DaemonListParams {}
+
+/** Daemon's response to bridge/list with running agents */
+export interface DaemonListResult {
+  agents: Array<{
+    agentId: string
+    command: string
+    pid: number
+    cwd: string
+    status: 'running' | 'starting'
+  }>
+}
+
+// ─── Daemon Connection Info (surfaced to host app) ────────────────────────────
+
+/** Represents a connected daemon in the server registry */
+export interface DaemonConnection {
+  readonly daemonId: string
+  readonly token: string
+  readonly metadata: Record<string, unknown>
+  readonly machine?: { hostname: string; platform: string }
+  readonly bridge: { name: string; version: string }
+  readonly capabilities: { autoRestart: boolean; bufferLimit: number; maxAgents?: number }
+  readonly status: 'connected' | 'disconnected'
+  readonly connectedAt: Date
+  readonly agents: string[]
 }
 
 // ─── Lifecycle Events (surfaced to host app) ──────────────────────────────────

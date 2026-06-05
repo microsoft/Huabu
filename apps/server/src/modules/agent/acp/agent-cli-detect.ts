@@ -146,8 +146,3 @@ export async function detectAgentClis(): Promise<AcpAgentCliInfo[]> {
     }),
   );
 }
-
-/** Probe for the `agentlet` wrapper itself. */
-export async function detectAgentletOnPath(): Promise<boolean> {
-  return (await whichBinary('agentlet')) !== null;
-}

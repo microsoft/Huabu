@@ -47,6 +47,7 @@ export const SidebarPanel = ({
           iconOnly
           onClick={onToggle}
           title={`Expand ${title}`}
+          tooltipPlacement="bottom"
         >
           {iconCollapsed}
         </Button>
@@ -80,6 +81,7 @@ export const SidebarPanel = ({
               iconOnly
               onClick={onToggle}
               title={`Collapse ${title}`}
+              tooltipPlacement="bottom"
             >
               {iconExpanded}
             </Button>

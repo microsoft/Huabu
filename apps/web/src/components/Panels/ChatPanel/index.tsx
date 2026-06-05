@@ -9,7 +9,7 @@ import {
 import { logIntentEpisode } from '@/api/intent';
 import { Button } from '@/components/Common/Button';
 import { toast } from '@/components/Common/Toast';
-import { useAcpAgents } from '@/hooks/useAcpAgents';
+import { useAcpProfiles } from '@/hooks/useAcpProfiles';
 import { useAcpSessionMeta } from '@/hooks/useAcpSessionMeta';
 import { useAcpSlashCommands } from '@/hooks/useAcpSlashCommands';
 import { useInternalSlashCommands } from '@/hooks/useInternalSlashCommands';
@@ -23,6 +23,10 @@ import { useIntentStore } from '@/store/intentStore';
 import { useLLMStore } from '@/store/llmStore';
 import { usePanelStore } from '@/store/panelStore';
 
+import {
+  AcpConnectionBadge,
+  type AcpConnectionStatus,
+} from './AcpConnectionBadge';
 import { AcpSessionSelectors } from './AcpSessionSelectors';
 import { ChatInput } from './ChatInput';
 import { NewChatMenu, type NewChatChoice } from './NewChatMenu';
@@ -76,64 +80,49 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const agentBinding = useChatStore((state) => state.agentBinding);
   const setAgentBinding = useChatStore((state) => state.setAgentBinding);
   const {
-    agents: connectedAgents,
-    refresh: refreshAcpAgents,
-    loading: acpAgentsLoading,
-    loaded: acpAgentsLoaded,
-  } = useAcpAgents();
+    profiles: acpProfiles,
+    refresh: refreshAcpProfiles,
+    loaded: acpProfilesLoaded,
+  } = useAcpProfiles();
 
   // Auto-reset a stale external binding on an *empty* thread: the
-  // persisted binding refers to an agent that is no longer connected
-  // (bridge restart, agent exited, page reload before the agent came
-  // back). Without this, the "+" shortcut in `NewChatMenu` would try
-  // to start a new thread bound to a disconnected agent and reliably
-  // 503. Threads with messages keep the stale binding so the title
-  // still reads "Chat with <alias>" — the user can hit Refresh in the
-  // dropdown to bring the agent back.
+  // persisted binding refers to a profile that no longer exists
+  // (user deleted it from Settings, or imported a workspace whose
+  // profiles were never created locally). Without this, the "+"
+  // shortcut in `NewChatMenu` would try to start a new thread bound
+  // to a missing profile and reliably 404. Threads with messages
+  // keep the stale binding so the title still reads "Chat with
+  // <alias>" — the user can recreate the profile in Settings to
+  // bring the binding back to life.
   useEffect(() => {
     if (!isHistoryLoaded) return;
     if (messages.length > 0) return;
-    if (!acpAgentsLoaded) return;
+    if (!acpProfilesLoaded) return;
     if (agentBinding.kind !== 'external') return;
-    const stillConnected = connectedAgents.some(
-      (a) => a.agentId === agentBinding.agentletAgentId,
+    const profileExists = acpProfiles.some(
+      (p) => p.id === agentBinding.profileId,
     );
-    if (stillConnected) return;
+    if (profileExists) return;
     setAgentBinding({ kind: 'internal' }, canvasId || undefined);
   }, [
     isHistoryLoaded,
     messages.length,
-    acpAgentsLoaded,
+    acpProfilesLoaded,
     agentBinding,
-    connectedAgents,
+    acpProfiles,
     canvasId,
     setAgentBinding,
   ]);
 
-  // Gate the ACP per-thread hooks on the bound agent actually being
-  // present in the connected-agents list. Without this gate a thread
-  // whose persisted binding refers to a now-disconnected agent (bridge
-  // restart, agent process exited, etc.) would still POST
-  // /api/acp/threads/<id>/session at mount and reliably get a 503,
-  // which clutters the console and confuses debugging. The auto-reset
-  // effect above clears the stale binding on empty threads, but the
-  // meta/slash-commands hooks still fire one render earlier than the
-  // reset — `acpExternalReachable` is what keeps that initial fetch
-  // from happening.
-  const acpExternalReachable =
-    agentBinding.kind === 'external' &&
-    connectedAgents.some((a) => a.agentId === agentBinding.agentletAgentId);
-
-  // Surface a header badge when the thread's bound external agent has
-  // dropped off the connected list. Gated on `acpAgentsLoaded` so the
-  // badge never flashes during the initial fetch (before that we just
-  // don't know yet — assuming "disconnected" would be a lie). Threads
-  // bound to an internal agent never trigger this — there's nothing to
-  // disconnect from.
-  const isExternalDisconnected =
-    agentBinding.kind === 'external' &&
-    acpAgentsLoaded &&
-    !connectedAgents.some((a) => a.agentId === agentBinding.agentletAgentId);
+  // Gate the ACP per-thread hooks on the binding being external. We
+  // intentionally do NOT also gate on the profile still existing in
+  // the profile list: post-snapshot-refactor each thread carries its
+  // own binding recipe (see server's session-store `bindingRecipe`),
+  // so a deleted-profile thread still has a usable transport. If the
+  // server can't resolve a recipe (orphan v2 record with no profile)
+  // the ensure-session call surfaces a clear error and the badge flips
+  // to `failed` — that's the right channel for it.
+  const acpExternalReachable = agentBinding.kind === 'external';
 
   // Slash commands have two independent sources depending on the
   // thread binding:
@@ -195,6 +184,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const {
     meta: acpSessionMeta,
     loading: acpSessionMetaLoading,
+    error: acpSessionMetaError,
     applyEvent: applyAcpSessionMetaEvent,
     applyOptimistic: applyAcpSessionMetaOptimistic,
   } = useAcpSessionMeta({
@@ -211,6 +201,35 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   useEffect(() => {
     acpSessionMetaRef.current = acpSessionMeta;
   }, [acpSessionMeta]);
+
+  // Three-state connection summary for the header badge, derived from
+  // `useAcpSessionMeta` after it has had a chance to fire its first
+  // ensure-session call. We deliberately do NOT regress to `connecting`
+  // on subsequent transient `loading` (set-mode / set-model / refresh)
+  // — once we have a meta snapshot the agent is, by definition,
+  // connected and the user shouldn't see the dot flicker on every
+  // dropdown change.
+  //
+  //   connecting: first ensure in flight, no snapshot yet
+  //   connected:  snapshot received and no recent error
+  //   failed:     ensure rejected and no snapshot has ever arrived
+  //
+  // Internal bindings get `null` — the parent only renders the badge
+  // for `agentBinding.kind === 'external'`.
+  //
+  // Profile deletion is intentionally NOT an input here: after the
+  // thread-binding-snapshot refactor each thread carries its own
+  // recipe, so removing the profile in Settings has no effect on a
+  // running thread's transport health. The only signal that matters
+  // for "is this thread usable right now" is the live meta pipeline.
+  const acpConnectionStatus: AcpConnectionStatus | null =
+    agentBinding.kind !== 'external'
+      ? null
+      : acpSessionMeta.updatedAt > 0 && !acpSessionMetaError
+        ? 'connected'
+        : !acpSessionMetaLoading && acpSessionMetaError
+          ? 'failed'
+          : 'connecting';
 
   // Optimistic onChange handlers for the ACP selectors: merge the
   // chosen value into the local snapshot immediately, then fire the
@@ -490,21 +509,12 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           <span className="min-w-0 truncate" title={panelTitle}>
             {panelTitle}
           </span>
-          {isExternalDisconnected && (
-            <span
-              className="border-warning-light text-warning inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase"
-              title={
-                agentBinding.kind === 'external'
-                  ? `${agentBinding.alias} is no longer connected. Relaunch the agentlet bridge or start a new chat with a connected agent.`
-                  : 'External agent is no longer connected.'
-              }
-            >
-              <span
-                aria-hidden
-                className="bg-warning h-1.5 w-1.5 shrink-0 rounded-full"
-              />
-              Disconnected
-            </span>
+          {acpConnectionStatus && agentBinding.kind === 'external' && (
+            <AcpConnectionBadge
+              status={acpConnectionStatus}
+              alias={agentBinding.alias}
+              errorMessage={acpSessionMetaError?.message ?? null}
+            />
           )}
         </span>
       }
@@ -520,6 +530,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
             iconOnly
             onClick={closeSketchCluster}
             title="Back to chat"
+            tooltipPlacement="bottom"
           >
             <ArrowLeft />
           </Button>
@@ -529,6 +540,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
             iconOnly
             onClick={closeQuestionThread}
             title="Back to chat"
+            tooltipPlacement="bottom"
           >
             <ArrowLeft />
           </Button>
@@ -536,9 +548,8 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           <NewChatMenu
             currentMode={mode}
             currentBinding={agentBinding}
-            connectedAgents={connectedAgents}
-            onRefreshAgents={refreshAcpAgents}
-            refreshing={acpAgentsLoading}
+            profiles={acpProfiles}
+            onRefreshProfiles={refreshAcpProfiles}
             onSelect={handleStartNewChat}
             disabled={!isHistoryLoaded}
             busy={isLoading}
@@ -599,22 +610,12 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
                   ? acpSessionMeta.usage
                   : undefined
               }
-              // Block the input outright when the bound external agent
-              // has dropped off the connected list. Without this gate
-              // the user can still type + Send, the request reaches
-              // `runAcpAgent` → `ensureAcpSession` → throws "External
-              // agent '<alias>' is not connected", and the failure ends
-              // up in thread history as a `[SYSTEM Error]` row. Pairing
-              // the gate with the header `Disconnected` pill makes the
-              // "you can't send right now" message clear *before* the
-              // user types anything. The pill stays visible so the user
-              // still sees who the thread was bound to.
-              disabled={isLoading || !isHistoryLoaded || isExternalDisconnected}
-              placeholder={
-                isExternalDisconnected && agentBinding.kind === 'external'
-                  ? `${agentBinding.alias} is disconnected — relaunch the agentlet bridge to resume, or use + to start a new chat.`
-                  : undefined
-              }
+              // Profile deletion no longer blocks Send: the thread carries
+              // its own binding recipe and continues running off the
+              // snapshot. Transport-health gating is now expressed via the
+              // connection badge above; we keep the input enabled so the
+              // user can retry / trigger a re-ensure on the next send.
+              disabled={isLoading || !isHistoryLoaded}
             />
           </div>
         )}

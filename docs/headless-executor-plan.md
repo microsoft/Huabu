@@ -41,6 +41,41 @@ Both sides call the shared pure subset first, then run their own host-specific p
 4. **Yjs is opt-in and orthogonal.** Content sync (M4) does not block, and is not blocked by, structure sync (M1–M3).
 5. **Engine maps commands to deltas; deltas are the log unit.** Client and server both run the shared engine. The server's deltas are the source of truth; client predicts the same deltas locally for instant feedback. For deterministic commands the prediction equals the authoritative output and the optimistic apply is silently confirmed; for non-deterministic commands (auto-layout, geometric defaults) the server's deltas win and the client reconciles by replacing its prediction. Only deltas are ever logged or broadcast — replay needs no engine.
 
+## Shipping Phases
+
+The M1→M2→M3→M4 milestones below describe the **target architecture**. This section records how we actually ship them and where we diverged from the original plan for pragmatic reasons.
+
+### M1 status: shipped, with task 1.7 deferred
+
+Engine extraction (1.1–1.6, 1.8–1.10) landed. **Task 1.7 (move per-command change extractors to `deltaExpanders.ts`) was deferred** — the extractors in `apps/web/src/hooks/useCanvasChanges.ts` remain client-side. Phase A absorbs this by computing deltas via a coarse `diffCanvasState(prev, next)` (see below) instead of per-command expanders. Per-command, per-property expanders only become useful when fine-grained `SET_DATA(key, prev, next)` deltas are needed (M5 / CRDT) — defer until then.
+
+### Phase A = M2 + M3.1–3.4 (one release, four PRs)
+
+Ship M2 and M3's **passive-sync subset** together. Phase A solves the headless-agent and per-tab agent-write visibility problems; multi-tab UI co-editing still falls back to today's 409 path.
+
+Subdivide into four independent PRs so each one is reviewable and reversible:
+
+| PR  | Scope                                                                                                                                                | Unlocks                                                                           |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| 1   | Shared `delta.ts` + `diff.ts` (`Delta` union, `invertDelta`, `applyDeltas`, `diffCanvasState`)                                                       | Zero runtime impact; type-only foundation                                         |
+| 2   | Server `canvas-executor` + `delta_log` table + `POST /:id/execute`; rewrite `handleCanvasCommands` to call executor; web `applyDeltasFromToolResult` | **Headless agent works**; LLM gets real per-command results (errors included)     |
+| 3   | Server `canvas-broadcast` + SSE `GET /:id/events` + pull `GET /:id/log?since=v`; web `useCanvasSync` hook                                            | Agent writes auto-sync to other tabs                                              |
+| 4   | `PUT /:id` internally goes through executor; `saveCanvas` 409 auto-recover via `/log?since=`                                                         | UI drags auto-sync to other tabs; OCC 409 becomes recoverable (toast as fallback) |
+
+**Phase A pragmatic choice: coarse deltas.** Rather than refactoring every command handler to emit per-property deltas (D5 ideal), Phase A runs the existing shared engine and then diffs `prestate → poststate` to produce coarse deltas: `INSERT_NODE / DELETE_NODE / REPLACE_NODE / INSERT_EDGE / DELETE_EDGE / REPLACE_EDGE` plus scalar `SET_EXPANDED_NODE`. Trade-off accepted:
+
+- ✅ Self-inverting (carries pre + post node/edge data).
+- ✅ Replay needs no engine — downstream clients just `applyDeltas`.
+- ❌ A single-field data change shows up as a full `REPLACE_NODE`, not `SET_DATA(key, prev, next)`. CRDT-friendliness deferred.
+
+**Phase A version dedup (no `optimisticTag` yet).** The tab that originated an agent run receives the same delta batch through two channels: SSE `tool_result` (with deltas + `toVersion`) and SSE `/events` (broadcast). Both apply paths gate on `if (localVersion >= toVersion) skip` — no per-tab tag machinery needed in Phase A.
+
+**Phase A retains the old write paths intentionally.** `PUT /api/canvas/:id` and the 409 toast both survive Phase A. The PUT handler internally calls the executor so it still produces `delta_log` rows + broadcasts, but the wire shape is unchanged for the web client. Phase B removes both.
+
+### Phase B = M3.5–3.9 (later release)
+
+Defer until real usage data from Phase A informs the optimistic-reconcile design. Phase B's hard part is 3.6 (predicted vs authoritative reconcile), which only matters when two tabs concurrently mutate the same canvas — a workload Sediment has no real telemetry for yet. Phase A's `delta_log` will produce that telemetry.
+
 ## Open Design Decisions
 
 ### D1. Engine location
@@ -178,15 +213,17 @@ Mutations originated elsewhere — agent runs on the server, or commands posted 
 
 **Goal**: agent commands execute on the server; every accepted command's expansion is persisted as a delta-row to an authoritative log; preprocessing migrates server-side.
 
-| #   | Task                                                                                                                                                                                                                                                                                                                                                                                 |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 2.1 | New SQLite table `delta_log` (schema in D6). Index on `(canvas_id, run_id)` for "revert this agent run" queries.                                                                                                                                                                                                                                                                     |
-| 2.2 | `apps/server/src/modules/canvas/canvas-executor.ts`: imports the shared engine + command-to-delta expanders directly (no hooks). Per-canvas async mutex serializes concurrent writers. Allocates next `version` atomically; persists `(command_json, delta_json)` pair per accepted command.                                                                                         |
-| 2.3 | New endpoint `POST /api/canvas/:id/execute`: body `{ commands, originator, optimisticTag? }`; response `{ fromVersion, toVersion, results: Array<{ command, deltas, error? }> }`. Writes log rows inside the mutex; updates `canvas.json` as the materialized view; runs server-only post-effects. Web computes inverses locally from `deltas` (D7) — no `revertCommand` round-trip. |
-| 2.4 | Replace body of `handleCanvasCommands` (agent tool handler): invoke `canvas-executor` directly. Return real per-command results (deltas applied or structured error) to the LLM.                                                                                                                                                                                                     |
-| 2.5 | Refactor `applyCanvasCommandsFromToolResult` (web): no longer executes commands locally — agent-produced deltas arrive via broadcast (M3). Tool result only carries metadata (`run_id`, applied count) so the chat UI can render "AI made N changes" affordances.                                                                                                                    |
-| 2.6 | Move the preprocessing pipeline server-side: server-only post-effects enqueue ingestion / embeddings / knowledge graph work directly. Remove `triggerPreprocessing` callback path from `postEffects.web.ts`.                                                                                                                                                                         |
-| 2.7 | Debug / audit: SQL view `delta_log_view` expanding `delta_json` via `json_each` for human-readable history. Joins **nothing** against current node/edge tables — historical rows must show labels/data as of the time of the delta, not the current ones.                                                                                                                            |
+> **Phase A note**: tasks 2.1–2.7 describe the **target** wire shape per D5. In practice we ship them with the coarse-delta shortcut described in "Shipping Phases" above — `delta_json` carries `INSERT/DELETE/REPLACE_NODE` rather than per-property `SET_DATA`. The schema and endpoint surfaces are unchanged; only the delta producer is simpler.
+
+| #   | Task                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 2.1 | New SQLite table `delta_log` (schema in D6). Index on `(canvas_id, run_id)` for "revert this agent run" queries.                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| 2.2 | `apps/server/src/modules/canvas/canvas-executor.ts`: imports the shared engine + command-to-delta expanders directly (no hooks). Per-canvas async mutex serializes concurrent writers. Allocates next `version` atomically; persists `(command_json, delta_json)` pair per accepted command.                                                                                                                                                                                                                                               |
+| 2.3 | New endpoint `POST /api/canvas/:id/execute`: body `{ commands, originator, optimisticTag? }`; response `{ fromVersion, toVersion, results: Array<{ command, deltas, error? }> }`. Writes log rows inside the mutex; updates `canvas.json` as the materialized view; runs server-only post-effects. Web computes inverses locally from `deltas` (D7) — no `revertCommand` round-trip.                                                                                                                                                       |
+| 2.4 | Replace body of `handleCanvasCommands` (agent tool handler): invoke `canvas-executor` directly. Return real per-command results (deltas applied or structured error) to the LLM.                                                                                                                                                                                                                                                                                                                                                           |
+| 2.5 | Refactor `applyCanvasCommandsFromToolResult` (web) into `applyDeltasFromToolResult`: no longer executes commands locally — it consumes the authoritative deltas the server returns inside the tool result and `applyDeltas`-es them into the local state (gated by `localVersion >= toVersion`). The chat-card UI continues to read `perCommand[].command` for "AI made N changes" affordances. (M3 broadcast is an _additional_ delivery channel for tabs that did not originate the run, not a replacement for the tool-result payload.) |
+| 2.6 | Move the preprocessing pipeline server-side: server-only post-effects enqueue ingestion / embeddings / knowledge graph work directly. Remove `triggerPreprocessing` callback path from `postEffects.web.ts`.                                                                                                                                                                                                                                                                                                                               |
+| 2.7 | Debug / audit: SQL view `delta_log_view` expanding `delta_json` via `json_each` for human-readable history. Joins **nothing** against current node/edge tables — historical rows must show labels/data as of the time of the delta, not the current ones.                                                                                                                                                                                                                                                                                  |
 
 **Done when**:
 
@@ -198,6 +235,8 @@ Mutations originated elsewhere — agent runs on the server, or commands posted 
 ### M3. Delta broadcast + multi-tab sync
 
 **Goal**: any structure change reaches all clients within ~50 ms via delta broadcast; chat-panel revert works across tabs without latency regression.
+
+> **Phase A note**: only 3.1–3.4 ship in Phase A, and 3.4 is simplified — no `optimisticTag` matching, no rollback. The Phase A hook just gates on `localVersion >= toVersion` to skip already-applied batches (covers the case where the tab that originated an agent run receives the same batch twice: once via tool-result, once via broadcast). 3.5–3.9 are Phase B.
 
 | #   | Task                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

@@ -197,14 +197,15 @@ export const sketchClusterContextSchema = z.object({
 /**
  * Wire shape of {@link AgentBinding}.
  * Discriminated union: `kind: 'internal'` (default) routes to the built-in
- * agent; `kind: 'external'` routes to the ACP service. See acp.ts.
+ * agent; `kind: 'external'` routes to the ACP service via a configured
+ * profile id. See acp.ts.
  */
 export const agentBindingSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('internal') }),
   z.object({
     kind: z.literal('external'),
     alias: z.string().min(1),
-    agentletAgentId: z.string().min(1),
+    profileId: z.string().min(1),
   }),
 ]) satisfies z.ZodType<AgentBinding>;
 
@@ -237,8 +238,9 @@ export const agentRequestSchema = z.object({
   /**
    * Thread-level agent binding. When omitted or `{ kind: 'internal' }`
    * the request is dispatched to Huabu's built-in agent loop
-   * (`runAgent`). When `{ kind: 'external', alias, agentletAgentId }`
-   * the request is dispatched to the ACP service.
+   * (`runAgent`). When `{ kind: 'external', alias, profileId }`
+   * the request is dispatched to the ACP service, which resolves the
+   * profile to a live agent (spawning one via the daemon if needed).
    * Carried per-request so the server is stateless about thread bindings;
    * the persistent ChatStore on the client is the source of truth.
    */

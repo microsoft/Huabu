@@ -7,13 +7,16 @@ import {
   type BridgeHelloResult,
   type JsonRpcMessage,
 } from '@agentlet/protocol'
+import type { SessionProfile } from './session-bootstrap.js'
 
 export interface WsClientOptions {
   serverUrl: string
   token: string
   agentCommand: string
   agentPid: number
+  agentCwd: string
   agentId: string
+  session?: SessionProfile
   capabilities: { autoRestart: boolean; bufferLimit: number }
   heartbeatInterval?: number
   allowInsecure?: boolean
@@ -119,8 +122,13 @@ export class WsClient extends EventEmitter<WsClientEvents> {
       agent: {
         command: this.options.agentCommand,
         pid: this.options.agentPid,
+        cwd: this.options.agentCwd,
       },
       capabilities: this.options.capabilities,
+    }
+
+    if (this.options.session) {
+      params.session = this.options.session
     }
 
     if (this.options.machine) {

@@ -1,49 +1,39 @@
 /**
- * ACP (external agent bridge) pairing section in the Settings popover.
+ * External-agent settings section in the Settings popover.
  *
- * The section presents a single mental model:
+ * The section presents two stacked surfaces:
  *
- *   "Pick an agent → get a launch command."
+ *  1. **Daemon health** — an inline status pill that's invisible on
+ *     the happy path (`online: true`, no lastError). When the
+ *     supervisor flips to `online: false` with a non-empty
+ *     `lastError`, an amber banner appears with the error text + a
+ *     **Restart worker** button. The supervisor auto-restarts with
+ *     exponential backoff on its own; the manual button is the
+ *     escape hatch when backoff has stretched too long or the user
+ *     just fixed the underlying problem (e.g. installed agentlet on
+ *     PATH).
  *
- * Two sources feed that flow inside one card:
+ *  2. **Profile editor** — list + CRUD for user-configured external
+ *     agents. Each profile is a stable spawn recipe `{cli, command,
+ *     cwd, autoRestart}` that the daemon launches on demand.
+ *     Profiles persist across restarts; sessions follow the
+ *     profileId, not the (volatile) agentlet agentId.
  *
- *  1. **Detected agents** — the server probes the host for installed
- *     ACP-capable CLIs (Copilot / Claude / Gemini). Each is rendered
- *     as a row with name, an optional `--allow-all` toggle
- *     (only shown when the CLI exposes one), and a **Connect** button
- *     that mints a fresh pairing code AND builds the exact
- *     `agentlet --token … --agent "…"` command, copying it to the
- *     clipboard. Right under the detected-agent list, the active-code
- *     slot then renders a **persistent "paste this into a terminal"
- *     panel** showing the same command in a code block with a copy
- *     button + countdown — so the next-step instruction survives toast
- *     timeouts and stays visible until the agent actually pairs.
- *
- *  2. **Connect manually** — a compact fallback row with a **Generate
- *     code** button for users who want to launch agentlet themselves
- *     (custom args, custom binary, remote shell, etc.). This flow has
- *     no associated command, so the active-code slot falls back to
- *     showing just the bare pairing code.
- *
- * At any moment there is at most ONE active pairing code — the store's
- * `createTicket` revokes any prior pending ticket before minting a
- * new one, and the UI only renders one ticket as a single "active
- * code" slot. The list of connected agents lives in the chat panel's
- * agent picker (see `useAcpAgents`), so this view does not double as
- * a connection manager — the post-Connect "Connected · alias" success
- * row is scoped to the current popover session by tracking the
- * just-minted ticket id in component-local state (`sessionTicketId`):
- * it disappears the moment the popover closes, and reopening Settings
- * with a still-online claimed ticket from another flow does NOT
- * re-echo a row, since that ticket was never registered as
- * session-owned. We resolve the ticket by id rather than reading
- * `tickets[0]` because the server lists tickets in insertion order
- * (oldest first), so any pre-existing claimed ticket from another
- * agent would otherwise push our just-minted pending ticket out of
- * the head slot the moment the next poll lands.
+ * **No more pairing terminal paste**: in daemon mode the server owns
+ * the daemon lifecycle and the token never crosses the HTTP
+ * boundary. The user only sees profiles + the optional troubleshoot
+ * banner.
  */
 
-import { Check, ClipboardCopy, Plus, Terminal } from 'lucide-react';
+import {
+  AlertTriangle,
+  Folder,
+  Info,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Trash2,
+} from 'lucide-react';
 import React, {
   useCallback,
   useEffect,
@@ -52,761 +42,909 @@ import React, {
   useState,
 } from 'react';
 
-import { listAcpAgentClis } from '@/api/acp';
+import {
+  createAcpProfile,
+  deleteAcpProfile,
+  listAcpAgentClis,
+  restartAcpDaemon,
+  updateAcpProfile,
+} from '@/api/acp';
+import { pickFolder } from '@/api/workspace';
 import { Button } from '@/components/Common/Button';
+import { Input } from '@/components/Common/Input';
+import { Modal } from '@/components/Common/Modal';
+import { Select } from '@/components/Common/Select';
 import { SettingRow } from '@/components/Common/SettingRow';
 import { SettingSection } from '@/components/Common/SettingSection';
+import { TabGroup } from '@/components/Common/TabGroup';
 import { toast } from '@/components/Common/Toast';
-import { useAcpAgentsStore } from '@/store/acpAgentsStore';
-import { useAcpPairingStore } from '@/store/acpPairingStore';
-import { copyToClipboard } from '@/utils/io/clipboard';
+import { Tooltip } from '@/components/Common/Tooltip';
+import { useAcpProfilesStore } from '@/store/acpProfilesStore';
+import { useFolderPickerSupported } from '@/store/workspaceStore';
 
-import type { AcpAgentCliInfo, AcpPairingTicket } from '@sediment/shared';
+import type {
+  AcpAgentCliInfo,
+  AcpAgentProfile,
+  AcpDaemonStatus,
+  AcpProfileCreateRequest,
+  AcpProfileUpdateRequest,
+} from '@sediment/shared';
 
-/**
- * Custom hook: returns a millisecond-precision "now" that advances
- * roughly every `intervalMs` while `active` is true. Re-uses a single
- * `setInterval` so the countdown stays smooth without re-rendering the
- * whole tree on every tick, and falls back to a static timestamp once
- * `active` flips false so an idle popover doesn't keep React busy.
- */
-function useNow(active: boolean, intervalMs = 250): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!active) return;
-    // Tick immediately on activation so a freshly-minted pending ticket
-    // doesn't wait up to `intervalMs` for its first refresh.
-    setNow(Date.now());
-    const id = setInterval(() => setNow(Date.now()), intervalMs);
-    return () => clearInterval(id);
-  }, [active, intervalMs]);
-  return now;
+// ── Daemon health banner ──────────────────────────────────────────────
+
+interface DaemonHealthBannerProps {
+  daemon: AcpDaemonStatus | null;
+  onRestart: () => Promise<void>;
+  restarting: boolean;
 }
 
 /**
- * Powers the "show ✓ for ~1.5s after a successful copy" affordance
- * used by every copy button in this section. Encapsulates the timer +
- * unmount cleanup so each call site doesn't have to manage its own
- * `useRef` + `useEffect` pair (a pattern that was previously
- * duplicated across three components in this file).
- */
-function useCopyState(timeoutMs = 1500): {
-  copied: boolean;
-  trigger: () => void;
-} {
-  const [copied, setCopied] = useState(false);
-  const timerRef = useRef<number | null>(null);
-  useEffect(() => {
-    return () => {
-      if (timerRef.current !== null) clearTimeout(timerRef.current);
-    };
-  }, []);
-  const trigger = useCallback(() => {
-    setCopied(true);
-    if (timerRef.current !== null) clearTimeout(timerRef.current);
-    timerRef.current = window.setTimeout(() => {
-      setCopied(false);
-      timerRef.current = null;
-    }, timeoutMs);
-  }, [timeoutMs]);
-  return { copied, trigger };
-}
-
-/**
- * One-shot fetch of host-side agent CLI detection. Re-runs on demand
- * via the returned `refresh` callback (e.g. after the user installs a
- * CLI in a separate terminal and wants to see it appear without a
- * full page reload).
+ * Inline amber banner shown only when the daemon supervisor is in a
+ * known-failed state. The happy path (`online: true`, no error) renders
+ * nothing so the section stays compact.
  *
- * Errors are surfaced as `error` state and also funnelled through the
- * shared toast bus so the user notices even if the section isn't
- * scrolled into view.
+ * Why amber, not red? The supervisor auto-restarts in the background;
+ * a momentary offline period during a daemon respawn is expected
+ * behaviour. Red would imply "you need to fix this NOW", which
+ * overstates the urgency unless the user just tried Restart and it
+ * still failed.
  */
-function useAgentCliDetection(): {
-  agents: AcpAgentCliInfo[];
-  agentletOnPath: boolean;
-  agentletWrapperPath: string | null;
-  loading: boolean;
-  error: string | null;
-  refresh: () => void;
-} {
-  const [agents, setAgents] = useState<AcpAgentCliInfo[]>([]);
-  const [agentletOnPath, setAgentletOnPath] = useState(false);
-  const [agentletWrapperPath, setAgentletWrapperPath] = useState<string | null>(
-    null,
-  );
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [tick, setTick] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    listAcpAgentClis()
-      .then((res) => {
-        if (cancelled) return;
-        setAgents(res.agents);
-        setAgentletOnPath(res.agentletOnPath);
-        setAgentletWrapperPath(res.agentletWrapperPath);
-        setLoading(false);
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        const msg =
-          err instanceof Error
-            ? err.message
-            : 'Failed to detect installed agent CLIs';
-        setError(msg);
-        setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [tick]);
-
-  const refresh = useCallback(() => setTick((n) => n + 1), []);
-
-  return {
-    agents,
-    agentletOnPath,
-    agentletWrapperPath,
-    loading,
-    error,
-    refresh,
-  };
-}
-
-/**
- * Build the exact shell command we want the user to paste in a
- * terminal: agentlet wrapper + the just-minted token + the agent's
- * launch command (binary + acpArgs + optional allow-all flag).
- *
- * The agent command itself is wrapped in double quotes because it
- * contains a space, e.g. `--agent "copilot --acp --allow-all"`.
- * When `agentletOnPath` is true we emit the short form `agentlet …`;
- * otherwise we fall back to the absolute path to the in-repo wrapper
- * so the command works from any CWD.
- *
- * We always prefix `ACP_URL=ws://<host>/api/acp/agent`, derived from
- * the page origin. The agentlet wrapper defaults to
- * `ws://localhost:${SERVER_PORT:-3001}`, which is wrong whenever the
- * server is bound to a non-default port — e.g. inside Electron when
- * port 3001 is already taken and `get-port` falls back to a random
- * one, or in any multi-instance / custom-port deployment. Anchoring
- * to `window.location.host` guarantees the agentlet talks to the
- * same backend the UI is talking to.
- */
-function buildLaunchCommand(opts: {
-  agent: AcpAgentCliInfo;
-  allowAll: boolean;
-  token: string;
-  agentletOnPath: boolean;
-  agentletWrapperPath: string | null;
-}): string {
-  const { agent, allowAll, token, agentletOnPath, agentletWrapperPath } = opts;
-  const parts = [agent.binary, ...agent.acpArgs];
-  if (allowAll && agent.allowAllFlag) parts.push(agent.allowAllFlag);
-  const agentCmd = parts.join(' ');
-  const wrapper = agentletOnPath
-    ? 'agentlet'
-    : (agentletWrapperPath ?? 'bin/agentlet');
-  const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  const acpUrl = `${wsProtocol}://${window.location.host}/api/acp/agent`;
-  return `ACP_URL=${acpUrl} ${wrapper} --token ${token} --agent "${agentCmd}"`;
-}
-
-interface DetectedAgentRowProps {
-  agent: AcpAgentCliInfo;
-  agentletOnPath: boolean;
-  agentletWrapperPath: string | null;
-  /**
-   * Called once a Connect click has (a) minted a fresh pairing ticket
-   * and (b) built + copied the corresponding launch command. The parent
-   * uses this to surface a persistent "paste this in your terminal"
-   * panel below the row — the post-Connect signal that survives toast
-   * timeouts so users don't miss what to do next.
-   */
-  onLaunchReady: (info: {
-    ticketId: string;
-    command: string;
-    agentDisplayName: string;
-  }) => void;
-}
-
-const DetectedAgentRow: React.FC<DetectedAgentRowProps> = ({
-  agent,
-  agentletOnPath,
-  agentletWrapperPath,
-  onLaunchReady,
+const DaemonHealthBanner: React.FC<DaemonHealthBannerProps> = ({
+  daemon,
+  onRestart,
+  restarting,
 }) => {
-  const createTicket = useAcpPairingStore((s) => s.createTicket);
-  // Default ON for agents that support it — the whole point of the
-  // "Connect" one-click flow is reducing friction; users who care can
-  // toggle off before clicking.
-  const [allowAll, setAllowAll] = useState<boolean>(
-    agent.allowAllFlag !== null,
-  );
-  const [busy, setBusy] = useState(false);
-  const { copied, trigger: markCopied } = useCopyState();
+  // Hide on the happy path AND while we're loading the first snapshot —
+  // a blank initial state shouldn't flash an error banner.
+  if (!daemon) return null;
+  if (daemon.online && !daemon.lastError) return null;
 
-  const handleConnect = useCallback(async () => {
-    setBusy(true);
-    try {
-      const ticket = await createTicket();
-      if (!ticket) return; // store already surfaced an error toast
-      const cmd = buildLaunchCommand({
-        agent,
-        allowAll: allowAll && agent.allowAllFlag !== null,
-        token: ticket.code,
-        agentletOnPath,
-        agentletWrapperPath,
-      });
-      // Best-effort clipboard write — even if it fails (e.g. browser
-      // permissions revoked), the persistent panel surfaced below still
-      // lets the user copy the command manually, so we don't bail out.
-      await copyToClipboard(cmd).catch(() => undefined);
-      markCopied();
-      // Hand the freshly-built command to the parent so it can render
-      // the persistent "paste in your terminal" panel. This is the
-      // primary post-click signal — the prior toast disappeared too
-      // fast for users to act on.
-      onLaunchReady({
-        ticketId: ticket.id,
-        command: cmd,
-        agentDisplayName: agent.displayName,
-      });
-    } finally {
-      setBusy(false);
-    }
-  }, [
-    agent,
-    allowAll,
-    agentletOnPath,
-    agentletWrapperPath,
-    createTicket,
-    markCopied,
-    onLaunchReady,
-  ]);
+  const nextRestartInSec = daemon.nextRestartAt
+    ? Math.max(0, Math.ceil((daemon.nextRestartAt - Date.now()) / 1000))
+    : null;
 
   return (
-    <div className="flex items-center justify-between gap-3 px-3 py-2.5">
+    <div className="border-warning-light/60 bg-warning-light/15 mb-3 flex items-start gap-2 rounded-md border px-3 py-2">
+      <AlertTriangle className="text-warning mt-0.5 h-3.5 w-3.5 shrink-0" />
       <div className="min-w-0 flex-1">
         <p className="text-fg-default text-xs font-medium">
-          {agent.displayName}
+          External-agent worker is offline
         </p>
-        {agent.allowAllFlag !== null && (
-          <label className="text-fg-muted mt-1 inline-flex cursor-pointer items-center gap-1.5 text-[11px] select-none">
-            <input
-              type="checkbox"
-              className="accent-info h-3 w-3"
-              checked={allowAll}
-              onChange={(e) => setAllowAll(e.target.checked)}
-              disabled={busy}
-            />
-            <span>
-              Auto-approve tool calls (
-              <code className="font-mono">{agent.allowAllFlag}</code>)
-            </span>
-          </label>
+        {daemon.lastError && (
+          <p className="text-fg-muted mt-0.5 text-[11px] leading-snug wrap-break-word">
+            {daemon.lastError}
+          </p>
         )}
-      </div>
-      <div className="flex shrink-0 items-center gap-1">
-        <Button
-          variant="outline"
-          tone="info"
-          size="sm"
-          onClick={() => {
-            void handleConnect();
-          }}
-          disabled={busy}
-          title={`Mint a connection code + copy the launch command for ${agent.displayName}`}
-        >
-          {copied ? <Check /> : <Terminal />}
-          <span>{busy ? 'Generating…' : copied ? 'Copied!' : 'Connect'}</span>
-        </Button>
-      </div>
-    </div>
-  );
-};
-
-/**
- * Snapshot of what the user just minted in a Connect-flow click:
- * which ticket it bound to + the exact shell command they need to
- * paste in a terminal + the agent display name to put in the panel
- * header. Carried through the parent so the persistent terminal-paste
- * UI survives polling refreshes and toast timeouts.
- */
-interface LaunchInfo {
-  ticketId: string;
-  command: string;
-  agentDisplayName: string;
-}
-
-interface LaunchCommandPanelProps {
-  ticket: AcpPairingTicket;
-  command: string;
-  agentDisplayName: string;
-  now: number;
-}
-
-/**
- * Post-Connect "paste this into a terminal" panel. Replaces the prior
- * toast-based instruction with a persistent UI block that survives
- * until the agent actually pairs or the pending ticket expires
- * (~60s). The parent gates rendering so this is only used while the
- * remembered launch command is still bound to the current pending
- * ticket; once the ticket flips to claimed / revoked / replaced, the
- * parent falls back to {@link PairingCodePanel}.
- */
-const LaunchCommandPanel: React.FC<LaunchCommandPanelProps> = ({
-  ticket,
-  command,
-  agentDisplayName,
-  now,
-}) => {
-  const { copied, trigger: markCopied } = useCopyState();
-  const remainingSec = Math.max(0, Math.ceil((ticket.expiresAt - now) / 1000));
-
-  const handleCopy = useCallback(() => {
-    void copyToClipboard(command).then(markCopied);
-  }, [command, markCopied]);
-
-  return (
-    <div className="px-3 py-3">
-      {/* Header: icon + label on one line. Code block and footer hint
-          below intentionally start at the panel's left edge (not
-          indented under the icon) so wide commands get the full
-          available width. */}
-      <div className="flex items-center gap-2">
-        <Terminal className="text-info h-3.5 w-3.5 shrink-0" />
-        <p className="text-fg-default text-xs font-medium">
-          Paste this into a terminal to launch {agentDisplayName}
-        </p>
-      </div>
-      <div className="mt-2 flex items-stretch gap-1.5">
-        <div className="bg-bg-default text-fg-default border-edge-default min-w-0 flex-1 overflow-x-auto rounded border px-2 py-1.5 font-mono text-[11px] leading-snug whitespace-nowrap">
-          {command}
-        </div>
-        <Button
-          variant="outline"
-          tone="info"
-          size="sm"
-          iconOnly
-          title={copied ? 'Copied!' : 'Copy command'}
-          onClick={handleCopy}
-        >
-          {copied ? <Check /> : <ClipboardCopy />}
-        </Button>
-      </div>
-      <p className="text-fg-subtle mt-1.5 text-[11px] leading-snug">
-        Code <span className="text-fg-muted font-mono">{ticket.code}</span> ·
-        expires in {remainingSec}s · the agent will appear in the chat picker
-        once connected.
-      </p>
-    </div>
-  );
-};
-
-interface PairingCodePanelProps {
-  ticket: AcpPairingTicket;
-  now: number;
-}
-
-/**
- * Bare-code display used by the Manual ("Generate code") flow and as
- * the fallback when a Connect-flow ticket flips out of the pending
- * state. Renders one of three states:
- *
- *   • pending (window open)    → big code + countdown + copy
- *   • claimed (just witnessed) → "Connected · alias" (success bg)
- *   • pending (window passed)  → "Waiting for agent…" (defensive: the
- *                                server should have dropped this by now)
- *
- * No cancel / disconnect button: pending tickets auto-expire after
- * their 60s window, and disconnecting a claimed agent already lives
- * in the chat panel's agent picker per the module-level "not a
- * connection manager" rule.
- */
-const PairingCodePanel: React.FC<PairingCodePanelProps> = ({ ticket, now }) => {
-  const { copied, trigger: markCopied } = useCopyState();
-  const remainingMs = Math.max(0, ticket.expiresAt - now);
-  const remainingSec = Math.ceil(remainingMs / 1000);
-  const pendingWindowOpen = ticket.status === 'pending' && remainingMs > 0;
-
-  const handleCopy = useCallback(() => {
-    void copyToClipboard(ticket.code).then(markCopied);
-  }, [ticket.code, markCopied]);
-
-  let titleNode: React.ReactNode;
-  if (pendingWindowOpen) {
-    titleNode = (
-      <code className="bg-bg-default text-fg-default border-edge-default rounded border px-2 py-0.5 font-mono text-sm font-semibold tracking-widest">
-        {ticket.code}
-      </code>
-    );
-  } else if (ticket.status === 'claimed') {
-    titleNode = (
-      <span className="text-fg-default inline-flex items-center gap-1.5 text-xs font-medium">
-        <Check className="text-success h-3.5 w-3.5 shrink-0" />
-        Connected · {ticket.claimedAlias ?? 'agent'}
-      </span>
-    );
-  } else {
-    titleNode = (
-      <span className="text-fg-subtle text-xs">Waiting for agent…</span>
-    );
-  }
-
-  return (
-    <div
-      className={`flex items-center justify-between gap-3 px-3 py-2.5 ${
-        // Light green success bg only on the claimed confirmation row,
-        // so the brief pending→claimed transition lands with an obvious
-        // visual cue. Pending and "waiting" states stay neutral so the
-        // big code badge / countdown stays the focal point.
-        ticket.status === 'claimed' ? 'bg-success-bg' : ''
-      }`}
-    >
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">{titleNode}</div>
-        {pendingWindowOpen && (
-          <p className="text-fg-subtle mt-0.5 truncate text-[11px] leading-snug">
-            Expires in {remainingSec}s
+        {nextRestartInSec !== null && nextRestartInSec > 0 && (
+          <p className="text-fg-subtle mt-0.5 text-[11px] leading-snug">
+            Next auto-retry in {nextRestartInSec}s.
           </p>
         )}
       </div>
-      {pendingWindowOpen && (
-        <div className="flex shrink-0 items-center gap-1">
-          <Button
-            variant="outline"
-            tone="info"
-            size="sm"
-            iconOnly
-            title={copied ? 'Copied!' : 'Copy code'}
-            onClick={handleCopy}
-          >
-            {copied ? <Check /> : <ClipboardCopy />}
-          </Button>
-        </div>
-      )}
+      <Button
+        variant="outline"
+        tone="info"
+        size="sm"
+        onClick={() => void onRestart()}
+        disabled={restarting}
+        title="Force the worker to restart now"
+        className="shrink-0"
+      >
+        <RefreshCw
+          size={12}
+          className={restarting ? 'animate-spin' : undefined}
+        />
+        <span>{restarting ? 'Restarting…' : 'Restart worker'}</span>
+      </Button>
     </div>
   );
 };
 
+// ── Profile editor modal ──────────────────────────────────────────────
+
+interface ProfileEditorModalProps {
+  isOpen: boolean;
+  /** When non-null we're editing; when null we're creating. */
+  editing: AcpAgentProfile | null;
+  /** Host-detected CLIs used to pre-fill `command` for new profiles. */
+  detectedClis: AcpAgentCliInfo[];
+  onClose: () => void;
+  /** Parent re-fetches profiles after the mutation succeeds. */
+  onSaved: () => Promise<void>;
+}
+
+interface ProfileFormState {
+  displayName: string;
+  /**
+   * Either the id of a detected CLI (`copilot` / `claude` / …) or
+   * the literal `'custom'`. Drives whether structured controls
+   * (auto-approve toggle, command preview) or the raw `customCommand`
+   * field is rendered.
+   */
+  cliId: string;
+  /**
+   * Structured mode: append the CLI's `allowAllFlag` (e.g. `--allow-all`)
+   * to the assembled command. Ignored when the selected CLI has no
+   * such flag or when `cliId === 'custom'`.
+   */
+  allowAll: boolean;
+  /**
+   * Custom mode (`cliId === 'custom'` or the picked CLI is no longer
+   * detected on host): the full command line the worker should spawn.
+   */
+  customCommand: string;
+  cwd: string;
+  autoRestart: boolean;
+}
+
+const EMPTY_FORM: ProfileFormState = {
+  displayName: '',
+  cliId: 'custom',
+  allowAll: false,
+  customCommand: '',
+  cwd: '',
+  autoRestart: true,
+};
+
 /**
- * Derives the single active-ticket view from the store, prioritising
- * the ticket the user just initiated in this popover session
- * (`sessionTicketId`). Falls back to any stray pending ticket so a
- * page refresh doesn't strand the user.
- *
- * We resolve the ticket by id rather than reading `tickets[0]`
- * because the server's `getTokenStore().list()` returns Map insertion
- * order (oldest first), so any pre-existing claimed ticket from
- * another agent would otherwise push our just-minted pending ticket
- * out of the head slot the moment the next 1s poll lands — causing
- * the active-code panel to flicker open then immediately disappear.
- *
- * Returns:
- *  • `activeTicket` — the ticket to render (or null).
- *  • `launchForActive` — the cached launch command IFF it's still
- *    bound to the current pending ticket; degrades to null once the
- *    ticket is claimed, replaced or revoked.
- *  • `activeTicketFromConnect` — true when the active ticket came
- *    from a Connect-flow click. Consumed by the parent to decide
- *    which slot the row renders in. We deliberately keep this true
- *    even after the ticket flips to claimed so a freshly claimed
- *    Connect ticket doesn't visually jump down past the manual row.
+ * Strip directory + `.exe` from a path so e.g.
+ * `C:\Users\me\AppData\npm\copilot.exe` → `copilot`. Used to match
+ * a stored command's first token against a detected CLI's `binary`
+ * name without being defeated by Windows absolute paths.
  */
-function useActivePairingTicket(
-  sessionTicketId: string | null,
-  lastLaunch: LaunchInfo | null,
-): {
-  activeTicket: AcpPairingTicket | null;
-  launchForActive: LaunchInfo | null;
-  activeTicketFromConnect: boolean;
-} {
-  const tickets = useAcpPairingStore((s) => s.tickets);
-
-  const activeTicket = useMemo<AcpPairingTicket | null>(() => {
-    if (sessionTicketId) {
-      const t = tickets.find((entry) => entry.id === sessionTicketId);
-      if (t) return t;
-    }
-    // Recovery fallback: surface any stray pending ticket (e.g.
-    // leftover from a page refresh) so the user can still copy or
-    // wait it out instead of losing the code entirely. Claimed
-    // tickets are intentionally NOT surfaced here — that long-lived
-    // state belongs in the chat panel's agent picker.
-    const pending = tickets.find((entry) => entry.status === 'pending');
-    return pending ?? null;
-  }, [tickets, sessionTicketId]);
-
-  const launchForActive =
-    lastLaunch !== null &&
-    activeTicket !== null &&
-    lastLaunch.ticketId === activeTicket.id &&
-    activeTicket.status === 'pending'
-      ? lastLaunch
-      : null;
-
-  const activeTicketFromConnect =
-    activeTicket !== null &&
-    lastLaunch !== null &&
-    lastLaunch.ticketId === activeTicket.id;
-
-  return { activeTicket, launchForActive, activeTicketFromConnect };
+function binaryBasename(token: string): string {
+  const flat = token.replace(/\\/g, '/');
+  const last = flat.slice(flat.lastIndexOf('/') + 1);
+  return last.replace(/\.exe$/i, '');
 }
 
 /**
- * Refresh the shared connected-agents list once the user's pairing
- * ticket flips from pending → claimed. This is the **only** side
- * effect of a successful pairing today: the freshly connected agent
- * shows up in the NewChatMenu's "Connected Agents" picker on the
- * next render, and the user decides if/when to start a chat with it.
- *
- * We intentionally do **not** touch the current thread's
- * `agentBinding` here. Pairing is an inventory operation ("register
- * this agent as available"), not a conversation operation. Mutating
- * the active thread's binding behind the user's back would either:
- *   - silently route subsequent prompts in a thread whose history
- *     belongs to agent A to the freshly paired agent B (mixing two
- *     agents' memories in a single conversation — the bug that
- *     surfaced when killing + re-pairing copilot mid-chat), or
- *   - clobber the user's in-progress thread with an empty fork they
- *     didn't ask for.
- *
- * Both fail the "1 thread = 1 binding" invariant from a UX angle:
- * the only sanctioned way to start talking to a new agent is via
- * NewChatMenu (which forks a fresh thread atomically).
- *
- * The `autoBoundRef` guard still de-dupes per-ticket so the refresh
- * fires at most once per claim even under strict-mode dev or
- * polling-induced re-runs of the effect.
+ * Assemble the final command line from a structured form + the
+ * selected detected CLI. Returns the trimmed string the worker will
+ * spawn. Returns `customCommand` (trimmed) in custom mode or when the
+ * referenced CLI isn't currently detected. Use Custom mode for
+ * anything more advanced than `binary + acpArgs (+ allow-all flag)`.
  */
-function useRefreshAgentsOnClaim(
-  activeTicket: AcpPairingTicket | null,
-  sessionTicketId: string | null,
-): void {
-  const refreshedRef = useRef<string | null>(null);
+function buildCommand(
+  state: ProfileFormState,
+  detectedClis: AcpAgentCliInfo[],
+): string {
+  if (state.cliId === 'custom') return state.customCommand.trim();
+  const cli = detectedClis.find((c) => c.id === state.cliId);
+  if (!cli) return state.customCommand.trim();
+  const parts: string[] = [cli.binary, ...cli.acpArgs];
+  if (state.allowAll && cli.allowAllFlag) parts.push(cli.allowAllFlag);
+  return parts.join(' ');
+}
+
+/**
+ * Take the last path segment of a file-system path, normalised across
+ * `/` and `\\` separators. Used to derive a friendly default display
+ * name (`Copilot (project-x)` from `/Users/me/project-x`). Returns an
+ * empty string for empty / whitespace input — callers fall back to
+ * just the agent name in that case.
+ */
+function basenameFromPath(p: string): string {
+  if (!p) return '';
+  const flat = p.replace(/\\/g, '/').replace(/\/+$/, '');
+  if (!flat) return '';
+  const idx = flat.lastIndexOf('/');
+  return idx >= 0 ? flat.slice(idx + 1) : flat;
+}
+
+/**
+ * Compose the editor's default display name from the selected CLI's
+ * label + the working-directory basename. Example:
+ * `Copilot CLI (project-x)`. Used both as the placeholder in the
+ * Display name input AND as the fallback sent to the server when the
+ * user leaves the field blank — so the persisted profile always has a
+ * reasonable label without forcing the user to type one.
+ */
+function buildDefaultDisplayName(
+  cliDisplayName: string | null,
+  cwd: string,
+): string {
+  const folder = basenameFromPath(cwd.trim());
+  const agent = cliDisplayName?.trim() || 'Custom agent';
+  return folder ? `${agent} (${folder})` : agent;
+}
+
+/**
+ * Best-effort reverse of {@link buildCommand}: given a stored
+ * `command` plus its `cliId`, recover the structured form fields so
+ * the editor opens with the same checkboxes the user originally
+ * chose. When the command no longer matches the detected CLI's
+ * exact shape (binary + acpArgs (+ allow-all flag)) — e.g. extra
+ * flags were appended, the user hand-edited it, or the CLI was
+ * uninstalled — falls back to Custom mode so the raw command is
+ * fully visible and editable rather than partially hidden behind
+ * structured controls.
+ */
+function parseCommandIntoForm(
+  command: string,
+  cliId: string,
+  detectedClis: AcpAgentCliInfo[],
+): {
+  cliId: string;
+  allowAll: boolean;
+  customCommand: string;
+} {
+  const fallback = {
+    cliId: 'custom',
+    allowAll: false,
+    customCommand: command,
+  };
+  if (cliId === 'custom') return fallback;
+  const cli = detectedClis.find((c) => c.id === cliId);
+  if (!cli) return fallback;
+  const tokens = command.trim().split(/\s+/);
+  if (tokens.length === 0 || binaryBasename(tokens[0]) !== cli.binary) {
+    return fallback;
+  }
+  let i = 1;
+  for (const arg of cli.acpArgs) {
+    if (tokens[i] !== arg) return fallback;
+    i++;
+  }
+  const rest = tokens.slice(i);
+  // The only structured "extra" we recognise is the allow-all flag.
+  // Anything else means the command was customised — drop into
+  // Custom mode so nothing is hidden from the user.
+  if (rest.length === 0) {
+    return { cliId: cli.id, allowAll: false, customCommand: '' };
+  }
+  if (cli.allowAllFlag && rest.length === 1 && rest[0] === cli.allowAllFlag) {
+    return { cliId: cli.id, allowAll: true, customCommand: '' };
+  }
+  return fallback;
+}
+
+/**
+ * Field label with an optional trailing info icon that surfaces the
+ * long-form description in a hover tooltip. Used inside
+ * `ProfileEditorModal` to keep each row visually compact while
+ * preserving the explanatory copy.
+ */
+const FieldLabel: React.FC<{
+  children: React.ReactNode;
+  hint?: React.ReactNode;
+}> = ({ children, hint }) => (
+  <span className="text-fg-muted flex items-center gap-1">
+    <span>{children}</span>
+    {hint ? (
+      <Tooltip
+        content={hint}
+        contentClassName="max-w-80 leading-snug whitespace-normal"
+      >
+        <span
+          role="img"
+          aria-label="More info"
+          tabIndex={0}
+          className="text-fg-subtle hover:text-fg-default focus-visible:text-fg-default inline-flex cursor-help outline-none"
+        >
+          <Info size={12} />
+        </span>
+      </Tooltip>
+    ) : null}
+  </span>
+);
+
+export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
+  isOpen,
+  editing,
+  detectedClis,
+  onClose,
+  onSaved,
+}) => {
+  const [form, setForm] = useState<ProfileFormState>(EMPTY_FORM);
+  const [saving, setSaving] = useState(false);
+
+  // Reset the form whenever the dialog opens for a different profile
+  // (or transitions create ↔ edit). Done as an effect so the form
+  // state is reset before the first render of the open dialog.
   useEffect(() => {
-    if (
-      activeTicket === null ||
-      activeTicket.id !== sessionTicketId ||
-      activeTicket.status !== 'claimed' ||
-      !activeTicket.claimedAgentId ||
-      refreshedRef.current === activeTicket.id
-    ) {
+    if (!isOpen) return;
+    if (editing) {
+      // Try to recover the structured fields (allow-all toggle +
+      // extra args) by re-parsing the persisted `command` against the
+      // detected CLI. If the command no longer fits the structured
+      // shape (custom binary path, hand-edited, CLI uninstalled),
+      // `parseCommandIntoForm` falls back to custom mode with the raw
+      // command preserved verbatim — no silent reformat.
+      const parsed = parseCommandIntoForm(
+        editing.command,
+        editing.cliId,
+        detectedClis,
+      );
+      setForm({
+        displayName: editing.displayName,
+        cliId: parsed.cliId,
+        allowAll: parsed.allowAll,
+        customCommand: parsed.customCommand,
+        cwd: editing.cwd,
+        autoRestart: editing.autoRestart,
+      });
+    } else {
+      // For new profiles, default to the first detected CLI so the
+      // structured controls appear immediately. Falls back to
+      // `'custom'` when nothing is on PATH. `displayName` stays empty
+      // so the input's placeholder shows the derived default — the
+      // submit handler falls back to `defaultDisplayName` when the
+      // field is left blank.
+      const firstDetected = detectedClis[0];
+      setForm({
+        ...EMPTY_FORM,
+        cliId: firstDetected ? firstDetected.id : 'custom',
+      });
+    }
+  }, [isOpen, editing, detectedClis]);
+
+  /**
+   * Switching CLIs resets the per-CLI allow-all flag since the
+   * vocabulary doesn't carry across CLIs. `displayName` is left
+   * untouched — the input's placeholder already reflects the new
+   * default via `buildDefaultDisplayName`, and the submit path
+   * substitutes the derived default when the field is empty.
+   */
+  const handleCliChange = useCallback((cliId: string) => {
+    setForm((prev) => ({
+      ...prev,
+      cliId,
+      allowAll: false,
+    }));
+  }, []);
+
+  const selectedCli = useMemo(
+    () =>
+      form.cliId === 'custom'
+        ? null
+        : (detectedClis.find((c) => c.id === form.cliId) ?? null),
+    [form.cliId, detectedClis],
+  );
+  const isStructured = selectedCli !== null;
+
+  /**
+   * Friendly fallback used both as the Display name placeholder AND
+   * as the value persisted when the user leaves the field blank. Recomputed
+   * whenever the CLI selection or working directory changes so it always
+   * reflects what the saved profile will be called.
+   */
+  const defaultDisplayName = useMemo(
+    () => buildDefaultDisplayName(selectedCli?.displayName ?? null, form.cwd),
+    [selectedCli, form.cwd],
+  );
+
+  const handleSubmit = useCallback(async () => {
+    const command = buildCommand(form, detectedClis);
+    const cwd = form.cwd.trim();
+    if (!command) {
+      toast('Command is required', { variant: 'error' });
       return;
     }
-    refreshedRef.current = activeTicket.id;
-    void useAcpAgentsStore.getState().refresh();
-  }, [activeTicket, sessionTicketId]);
+    if (!cwd) {
+      toast('Working directory is required', { variant: 'error' });
+      return;
+    }
+    // Empty input → fall back to the computed default so the user
+    // doesn't have to type a name to save. The default is also what
+    // the placeholder shows, so the saved label matches expectations.
+    const displayName = form.displayName.trim() || defaultDisplayName;
+    setSaving(true);
+    try {
+      if (editing) {
+        const patch: AcpProfileUpdateRequest = {
+          displayName,
+          command,
+          cwd,
+          autoRestart: form.autoRestart,
+        };
+        await updateAcpProfile(editing.id, patch);
+        toast('Profile updated', { variant: 'success' });
+      } else {
+        const payload: AcpProfileCreateRequest = {
+          displayName,
+          cliId: form.cliId,
+          command,
+          cwd,
+          autoRestart: form.autoRestart,
+        };
+        await createAcpProfile(payload);
+        toast('Profile created', { variant: 'success' });
+      }
+      await onSaved();
+      onClose();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Failed to save profile', {
+        variant: 'error',
+      });
+    } finally {
+      setSaving(false);
+    }
+  }, [form, defaultDisplayName, detectedClis, editing, onSaved, onClose]);
+
+  const cliOptions = useMemo(
+    () =>
+      detectedClis.map((c) => ({
+        value: c.id,
+        label: c.displayName,
+      })),
+    [detectedClis],
+  );
+
+  /**
+   * The agent picker is a two-tab switch:
+   *   - "detected" → choose from the auto-detected CLIs on PATH.
+   *   - "custom"   → type a full launch command yourself.
+   * `form.cliId === 'custom'` is the single source of truth; the tab
+   * state is derived from it so loading an existing profile lands on
+   * the correct tab automatically.
+   */
+  const agentMode: 'detected' | 'custom' =
+    form.cliId === 'custom' ? 'custom' : 'detected';
+
+  const handleAgentModeChange = useCallback(
+    (mode: 'detected' | 'custom') => {
+      if (mode === 'custom') {
+        // Seed the Custom textarea with whatever Detected would have
+        // launched so the user can tweak instead of typing from
+        // scratch. Skip when the user already has a custom command
+        // (e.g. they toggled away and back) so we don't blow away
+        // their edits.
+        setForm((prev) => {
+          if (prev.cliId === 'custom') return prev;
+          const seeded =
+            prev.customCommand.trim() || buildCommand(prev, detectedClis);
+          return {
+            ...prev,
+            cliId: 'custom',
+            allowAll: false,
+            customCommand: seeded,
+          };
+        });
+      } else {
+        handleCliChange(detectedClis[0]?.id ?? 'custom');
+      }
+    },
+    [detectedClis, handleCliChange],
+  );
+
+  /**
+   * Show the native folder-picker button only when the server reports
+   * a GUI is available — same capability flag used by the workspace
+   * setup flow. On headless / remote servers we silently degrade to
+   * just the text input, which still works for typing a remote path.
+   */
+  const folderPickerSupported = useFolderPickerSupported();
+  const [picking, setPicking] = useState(false);
+
+  const handlePickCwd = useCallback(async () => {
+    setPicking(true);
+    try {
+      const result = await pickFolder();
+      if (result.ok) {
+        setForm((p) => ({ ...p, cwd: result.path }));
+      } else if (result.reason === 'no-picker') {
+        toast('No folder picker available on this server', {
+          variant: 'error',
+        });
+      }
+      // 'cancelled' is silent.
+    } catch (err) {
+      toast(
+        err instanceof Error ? err.message : 'Failed to open folder picker',
+        {
+          variant: 'error',
+        },
+      );
+    } finally {
+      setPicking(false);
+    }
+  }, []);
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={editing ? 'Edit external agent' : 'New external agent'}
+      className="w-104"
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button
+            variant="outline"
+            tone="neutral"
+            size="sm"
+            onClick={onClose}
+            disabled={saving}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="solid"
+            tone="info"
+            size="sm"
+            onClick={() => void handleSubmit()}
+            disabled={saving}
+          >
+            {saving ? 'Saving…' : editing ? 'Save changes' : 'Create profile'}
+          </Button>
+        </div>
+      }
+    >
+      <div className="flex flex-col gap-5 px-1 py-1">
+        {/* ─── Agent ─────────────────────────────────────────────── */}
+        <div className="flex flex-col gap-3">
+          {/*
+           * Hide the picker on edit because `cliId` is immutable in the
+           * update schema (changing it would silently break the persisted
+           * binding). Show the chosen agent as a static label so the user
+           * still sees what's wired up.
+           */}
+          {editing ? (
+            <label className="flex flex-col gap-1 text-xs">
+              <FieldLabel>Agent</FieldLabel>
+              <div className="border-edge-default bg-surface text-fg-default rounded border px-2 py-1 text-xs">
+                {detectedClis.find((c) => c.id === form.cliId)?.displayName ??
+                  (form.cliId === 'custom' ? 'Custom command' : form.cliId)}
+              </div>
+            </label>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <TabGroup
+                value={agentMode}
+                onChange={handleAgentModeChange}
+                options={[
+                  { value: 'detected', label: 'Built-in' },
+                  { value: 'custom', label: 'Custom' },
+                ]}
+                size="sm"
+                className="self-start"
+              />
+              {agentMode === 'detected' ? (
+                <label className="flex flex-col gap-1 text-xs">
+                  <FieldLabel>Agent</FieldLabel>
+                  {cliOptions.length > 0 ? (
+                    <Select
+                      value={form.cliId}
+                      onChange={handleCliChange}
+                      options={cliOptions}
+                    />
+                  ) : (
+                    <div className="border-edge-default bg-surface text-fg-muted rounded border px-2 py-1 text-xs leading-snug">
+                      No ACP-capable CLIs found on your PATH. Switch to{' '}
+                      <strong>Custom</strong> to type a launch command yourself.
+                    </div>
+                  )}
+                </label>
+              ) : (
+                <label className="flex flex-col gap-1 text-xs">
+                  <FieldLabel hint="Full command line the worker should spawn (binary + all flags). Use this for binaries that aren't on PATH or for flags not exposed by an auto-detected agent.">
+                    Launch command
+                  </FieldLabel>
+                  <Input
+                    value={form.customCommand}
+                    onChange={(e) =>
+                      setForm((p) => ({
+                        ...p,
+                        customCommand: e.target.value,
+                      }))
+                    }
+                    placeholder="/usr/local/bin/copilot --acp --allow-all"
+                    className="border-edge-default bg-surface rounded border px-2 py-1 font-mono text-xs"
+                  />
+                </label>
+              )}
+            </div>
+          )}
+
+          {isStructured && selectedCli?.allowAllFlag && (
+            <label className="text-fg-default flex cursor-pointer items-start gap-2 text-xs select-none">
+              <input
+                type="checkbox"
+                className="accent-info mt-0.5 h-3.5 w-3.5"
+                checked={form.allowAll}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, allowAll: e.target.checked }))
+                }
+              />
+              <FieldLabel hint="Skip the per-tool confirmation prompt. Convenient for sandboxed runs, risky for anything that can touch your filesystem or network.">
+                Auto-approve all tool calls (
+                <code className="font-mono">{selectedCli.allowAllFlag}</code>)
+              </FieldLabel>
+            </label>
+          )}
+        </div>
+
+        {/* ─── Workspace ─────────────────────────────────────────── */}
+        <div className="flex flex-col gap-3">
+          <label className="flex flex-col gap-1 text-xs">
+            <FieldLabel hint="The agent is spawned with this as its working directory and treats it as the project root for file edits and tool calls.">
+              Working directory
+            </FieldLabel>
+            <div className="flex items-stretch gap-1.5">
+              <Input
+                value={form.cwd}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, cwd: e.target.value }))
+                }
+                placeholder="/Users/me/project-x"
+                wrapperClassName="flex-1"
+                className="border-edge-default bg-surface w-full rounded border px-2 py-1 font-mono text-xs"
+              />
+              {folderPickerSupported && (
+                <Button
+                  variant="outline"
+                  tone="neutral"
+                  size="sm"
+                  iconOnly
+                  title="Pick a folder"
+                  onClick={() => void handlePickCwd()}
+                  disabled={picking}
+                >
+                  <Folder size={14} />
+                </Button>
+              )}
+            </div>
+          </label>
+        </div>
+
+        {/* ─── Display name (placed last per UX request) ─────────── */}
+        <label className="flex flex-col gap-1 text-xs">
+          <FieldLabel>
+            Display name <span className="text-fg-subtle">(optional)</span>
+          </FieldLabel>
+          <Input
+            value={form.displayName}
+            onChange={(e) =>
+              setForm((p) => ({ ...p, displayName: e.target.value }))
+            }
+            placeholder={defaultDisplayName}
+            className="border-edge-default bg-surface rounded border px-2 py-1 text-xs"
+          />
+        </label>
+      </div>
+    </Modal>
+  );
+};
+
+// ── Top-level section ────────────────────────────────────────────────
+
+/**
+ * `AcpSettings` — section rendered inside the Settings popover that
+ * exposes the user's external-agent profiles + the daemon health
+ * banner. The store loads its initial snapshot lazily; SettingsPopover
+ * fires `init()` when the popover opens.
+ */
+/**
+ * Fetch the host-detected CLIs on mount. Shared between the Settings
+ * section and the inline "Add agent" entry in `NewChatMenu` so both
+ * surfaces can present the same Profile editor without duplicating the
+ * one-shot detection effect.
+ *
+ * Detection failures degrade silently — callers receive `[]` and the
+ * editor's Auto-detected dropdown just falls back to "Custom command".
+ */
+export function useDetectedClis(): AcpAgentCliInfo[] {
+  const [detectedClis, setDetectedClis] = useState<AcpAgentCliInfo[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    /**
+     * Fire-and-forget. We refetch on every workspace-ready transition
+     * because `/api/acp/agent-cli` sits behind the server's workspace
+     * guard — if Settings was opened on the WorkspaceSetupPage the
+     * initial fetch 503s and we'd otherwise be stuck with an empty
+     * Built-in list until the user reloads.
+     */
+    const load = () => {
+      listAcpAgentClis()
+        .then((res) => {
+          if (!cancelled) setDetectedClis(res.agents);
+        })
+        .catch(() => {
+          // Detection failure is non-fatal — the Custom option still
+          // works. Don't pop a toast; the dropdown just shows "Custom"
+          // as the only entry.
+        });
+    };
+    load();
+    const handler = () => load();
+    window.addEventListener('workspace-changed', handler);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('workspace-changed', handler);
+    };
+  }, []);
+  return detectedClis;
 }
 
 export const AcpSettings: React.FC = () => {
-  const error = useAcpPairingStore((s) => s.error);
-  const createTicket = useAcpPairingStore((s) => s.createTicket);
-  // Local in-flight flag for the Manual "Generate code" button. We
-  // deliberately do NOT reuse the store's global `creating` flag
-  // because that flag is also set during Connect-flow mints — using it
-  // here would make Generate code spuriously show "Generating…"
-  // whenever the user clicks Connect on a detected agent. Each entry
-  // point owns its own busy state; the store remains the single source
-  // of truth for the resulting ticket list.
-  const [creatingManual, setCreatingManual] = useState(false);
+  const profiles = useAcpProfilesStore((s) => s.profiles);
+  const daemon = useAcpProfilesStore((s) => s.daemon);
+  const loaded = useAcpProfilesStore((s) => s.loaded);
+  const error = useAcpProfilesStore((s) => s.error);
+  const refresh = useAcpProfilesStore((s) => s.refresh);
 
-  const {
-    agents: detectedAgents,
-    agentletOnPath,
-    agentletWrapperPath,
-    loading: detectionLoading,
-    error: detectionError,
-    refresh: refreshDetection,
-  } = useAgentCliDetection();
+  // Host-CLI detection — see the shared `useDetectedClis` hook above
+  // for rationale (single fetch, silent on failure). Re-using the hook
+  // keeps Settings and `NewChatMenu`'s inline editor in lockstep.
+  const detectedClis = useDetectedClis();
 
-  // Single-slot UI: the store enforces ≤1 pending ticket via auto-
-  // revoke on create; we render only one ticket so the panel never
-  // grows into a scrolling list. Connected agents remain visible in
-  // the chat panel's agent picker.
-  const [sessionTicketId, setSessionTicketId] = useState<string | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editing, setEditing] = useState<AcpAgentProfile | null>(null);
+  const [restarting, setRestarting] = useState(false);
 
-  // Remember the most recent Connect-flow launch command so the
-  // active-ticket slot can render it as a persistent "paste in your
-  // terminal" instruction. We don't bother clearing it on its own —
-  // `useActivePairingTicket` only surfaces it while it still matches
-  // the current pending ticket, so a stale entry quietly becomes a
-  // no-op once the ticket is claimed, revoked or replaced.
-  const [lastLaunch, setLastLaunch] = useState<LaunchInfo | null>(null);
-
-  const { activeTicket, launchForActive, activeTicketFromConnect } =
-    useActivePairingTicket(sessionTicketId, lastLaunch);
-
-  useRefreshAgentsOnClaim(activeTicket, sessionTicketId);
-
-  // Only tick the countdown clock while there's a pending ticket on
-  // screen — otherwise an open Settings popover would spin a 250ms
-  // interval forever for no UI change.
-  const hasPendingTicket = activeTicket?.status === 'pending';
-  const now = useNow(hasPendingTicket);
-
-  // Detect a Windows host from the wrapper path the server reported
-  // (e.g. `C:\…\bin\agentlet`). Used to surface a one-line hint that
-  // the copied command needs Git Bash / WSL — the wrapper itself is a
-  // POSIX shell script and won't run in cmd.exe or PowerShell.
-  const isWindowsHost = useMemo(
-    () =>
-      agentletWrapperPath !== null &&
-      (/^[A-Za-z]:[\\/]/.test(agentletWrapperPath) ||
-        agentletWrapperPath.includes('\\')),
-    [agentletWrapperPath],
-  );
-
-  // Surface store / detection errors as transient toasts.
+  // Surface fetch errors as transient toasts so the user notices even
+  // if the section isn't scrolled into view. We deliberately ignore
+  // any error that was already cached before this component mounted —
+  // most commonly the workspace-not-configured 503 the store hit when
+  // Settings was opened on the WorkspaceSetupPage. The store wipes
+  // such errors on the next `workspace-changed` event, but the user
+  // might re-open Settings before that fires; replaying a stale
+  // message would be more confusing than helpful.
+  const lastToastedRef = useRef<Error | null>(error);
   useEffect(() => {
-    if (error) toast(error, { variant: 'error' });
+    if (error && error !== lastToastedRef.current) {
+      toast(error.message, { variant: 'error' });
+      lastToastedRef.current = error;
+    }
   }, [error]);
-  useEffect(() => {
-    if (detectionError) toast(detectionError, { variant: 'error' });
-  }, [detectionError]);
 
-  const handleLaunchReady = useCallback((info: LaunchInfo) => {
-    setLastLaunch(info);
-    // Mark this ticket as the one the user just initiated in this
-    // popover session — `useActivePairingTicket` resolves it by id
-    // even after the polling refresh re-shuffles the tickets array.
-    setSessionTicketId(info.ticketId);
+  const handleNew = useCallback(() => {
+    setEditing(null);
+    setEditorOpen(true);
   }, []);
 
-  // Manual flow: mint a bare token. The store auto-revokes any prior
-  // pending ticket (Connect-flow or manual), so clicking this while a
-  // Connect command panel is visible will replace it — the two flows
-  // are mutually exclusive by design, never coexisting.
-  const handleGenerate = useCallback(async () => {
-    setCreatingManual(true);
-    try {
-      const ticket = await createTicket();
-      if (ticket) setSessionTicketId(ticket.id);
-    } finally {
-      setCreatingManual(false);
-    }
-  }, [createTicket]);
+  const handleEdit = useCallback((profile: AcpAgentProfile) => {
+    setEditing(profile);
+    setEditorOpen(true);
+  }, []);
 
-  // Renders the active-ticket slot: rich Connect-flow panel when we
-  // have a bound launch command, otherwise the bare-code variant.
-  // Defined inline so the two slot positions below render an
-  // identical component without duplicating the conditional.
-  const renderActiveTicket = (ticket: AcpPairingTicket) =>
-    launchForActive !== null ? (
-      <LaunchCommandPanel
-        ticket={ticket}
-        command={launchForActive.command}
-        agentDisplayName={launchForActive.agentDisplayName}
-        now={now}
-      />
-    ) : (
-      <PairingCodePanel ticket={ticket} now={now} />
-    );
+  const handleDelete = useCallback(
+    async (profile: AcpAgentProfile) => {
+      // Confirm before delete — profiles often have non-trivial cwd /
+      // cwd config and re-typing them is annoying. `window.confirm`
+      // matches the rest of the codebase's destructive-action UX
+      // (no custom dialog primitive yet).
+      //
+      // Profiles are templates: deleting one removes it from the menu
+      // and prevents new threads from binding, but threads that already
+      // snapshotted the recipe (v3+ records) keep running unchanged.
+      // Phrase the prompt that way so users aren't surprised when an
+      // open chat keeps responding after they delete the profile.
+      if (
+        !window.confirm(
+          `Delete profile "${profile.displayName}"? You won't be able to start new chats with it. Chats already using it keep running with the current settings.`,
+        )
+      ) {
+        return;
+      }
+      try {
+        await deleteAcpProfile(profile.id);
+        toast('Profile deleted', { variant: 'success' });
+        await refresh();
+      } catch (err) {
+        toast(err instanceof Error ? err.message : 'Failed to delete profile', {
+          variant: 'error',
+        });
+      }
+    },
+    [refresh],
+  );
+
+  const handleRestart = useCallback(async () => {
+    setRestarting(true);
+    try {
+      const next = await restartAcpDaemon();
+      // Pull a fresh snapshot so the banner reflects the new state
+      // (and the profile-list runtime flags update).
+      await refresh();
+      if (next.online) {
+        toast('Worker restarted', { variant: 'success' });
+      }
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Failed to restart worker', {
+        variant: 'error',
+      });
+    } finally {
+      setRestarting(false);
+    }
+  }, [refresh]);
+
+  const handleSaved = useCallback(async () => {
+    await refresh();
+  }, [refresh]);
 
   return (
-    <SettingSection title="External Agents">
-      {/* Windows-host banner: the wrapper is a POSIX shell script and
-          won't run in cmd.exe / PowerShell, so we set expectations
-          before the user copies any command. */}
-      {isWindowsHost && (
-        <p className="text-fg-muted bg-hover px-3 py-2 text-[11px] leading-snug">
-          On Windows, run the copied command in{' '}
-          <span className="text-fg-default font-medium">Git Bash</span> or{' '}
-          <span className="text-fg-default font-medium">WSL</span> — cmd.exe and
-          PowerShell can&apos;t execute the <code>agentlet</code> wrapper
-          directly.
-        </p>
-      )}
+    <>
+      {/*
+       * Daemon banner sits OUTSIDE the rounded section card on purpose:
+       * (a) when the banner returns null we render nothing at all
+       *     (no wrapper, no empty padding), and
+       * (b) when it does show, the amber alert reads as a section-level
+       *     warning rather than a torn-looking first row inside the card.
+       */}
+      <DaemonHealthBanner
+        daemon={daemon}
+        onRestart={handleRestart}
+        restarting={restarting}
+      />
 
-      {/* Detected-agent rows: the primary one-click path. */}
-      {detectionLoading ? (
-        <div className="text-fg-subtle px-3 py-2.5 text-xs">
-          Scanning your machine for installed agent CLIs…
-        </div>
-      ) : detectedAgents.length === 0 ? (
-        <div className="px-3 py-2.5 text-xs">
-          <p className="text-fg-muted">
-            No ACP-capable agent CLI found on your <code>PATH</code>.
-          </p>
-          <p className="text-fg-subtle mt-1 leading-snug">
-            Install one of: <code className="font-mono">@github/copilot</code>,{' '}
-            <code className="font-mono">@anthropic-ai/claude-code</code>,{' '}
-            <code className="font-mono">@google/gemini-cli</code> — then{' '}
-            <button
-              type="button"
-              onClick={refreshDetection}
-              className="text-info hover:underline"
+      <SettingSection title="External Agents">
+        {profiles.length === 0 ? (
+          <SettingRow
+            title="No agents configured"
+            description="Add a Copilot / Claude / custom profile to bind chats to an external agent."
+          >
+            <Button
+              variant="outline"
+              tone="info"
+              size="sm"
+              onClick={handleNew}
+              disabled={!loaded}
             >
-              re-scan
-            </button>
-            .
-          </p>
-        </div>
-      ) : (
-        detectedAgents.map((agent) => (
-          <DetectedAgentRow
-            key={agent.id}
-            agent={agent}
-            agentletOnPath={agentletOnPath}
-            agentletWrapperPath={agentletWrapperPath}
-            onLaunchReady={handleLaunchReady}
-          />
-        ))
-      )}
+              <Plus size={12} />
+              <span>Add agent</span>
+            </Button>
+          </SettingRow>
+        ) : (
+          <>
+            {profiles.map((profile) => (
+              <SettingRow key={profile.id} title={profile.displayName}>
+                <div className="flex shrink-0 items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    tone="neutral"
+                    size="sm"
+                    iconOnly
+                    title="Edit profile"
+                    onClick={() => handleEdit(profile)}
+                  >
+                    <Pencil size={12} />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    tone="danger"
+                    size="sm"
+                    iconOnly
+                    title="Delete profile"
+                    onClick={() => void handleDelete(profile)}
+                  >
+                    <Trash2 size={12} />
+                  </Button>
+                </div>
+              </SettingRow>
+            ))}
+            <SettingRow
+              title="Add another agent"
+              description="Configure a new external agent to bind chats to."
+            >
+              <Button
+                variant="outline"
+                tone="info"
+                size="sm"
+                onClick={handleNew}
+                disabled={!loaded}
+              >
+                <Plus size={12} />
+                <span>Add agent</span>
+              </Button>
+            </SettingRow>
+          </>
+        )}
+      </SettingSection>
 
-      {/* Active-code slot — Connect flow: sits right under the
-          detected-agent list so the persistent "paste in your
-          terminal" panel appears immediately below the row the user
-          just clicked. Manual-flow tickets render in the second slot
-          further down, next to the "Connect manually" row. */}
-      {activeTicket !== null &&
-        activeTicketFromConnect &&
-        renderActiveTicket(activeTicket)}
-
-      {/* Manual fallback: bare token for power users. Reuses the
-          shared SettingRow layout — the title + description + right-
-          aligned control pattern matches it exactly, so no need to
-          hand-roll the flex container. */}
-      <SettingRow
-        title="Connect manually (advanced)"
-        description="Mints a bare token. Use this if you launch agentlet yourself with custom args or a remote shell."
-      >
-        <Button
-          variant="outline"
-          tone="neutral"
-          size="sm"
-          onClick={() => {
-            void handleGenerate();
-          }}
-          disabled={creatingManual}
-        >
-          <Plus />
-          <span>{creatingManual ? 'Generating…' : 'Generate code'}</span>
-        </Button>
-      </SettingRow>
-
-      {/* Active-code slot — Manual flow: sits directly under the
-          "Connect manually (advanced)" row for the same proximity
-          reason as the Connect-flow slot above. */}
-      {activeTicket !== null &&
-        !activeTicketFromConnect &&
-        renderActiveTicket(activeTicket)}
-
-      {/* Path-hint footer only shown when needed. */}
-      {!agentletOnPath && detectedAgents.length > 0 && (
-        <p className="text-fg-subtle px-3 py-2 text-[11px] leading-snug">
-          Tip: <code className="font-mono">agentlet</code> isn&apos;t on your{' '}
-          <code>PATH</code> yet — the copied command uses the wrapper&apos;s
-          full path. To use the short form, re-run{' '}
-          <code className="font-mono">pnpm install</code> or open a new
-          terminal.
-        </p>
-      )}
-    </SettingSection>
+      {/*
+       * Modal is portalled to document.body — it doesn't matter where
+       * we mount it in the tree, but keeping it as a sibling of the
+       * section (rather than inside the rounded card) keeps the DOM
+       * sensible when devtools is open.
+       */}
+      <ProfileEditorModal
+        isOpen={editorOpen}
+        editing={editing}
+        detectedClis={detectedClis}
+        onClose={() => setEditorOpen(false)}
+        onSaved={handleSaved}
+      />
+    </>
   );
 };

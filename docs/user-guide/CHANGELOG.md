@@ -4,6 +4,95 @@
 
 ---
 
+## 2026-06-05 · 桌面端启动遇到端口冲突会自动换端口
+
+**What Changed**
+
+- **打包后的桌面端启动时遇到 `EADDRINUSE`（端口被占用）不再静默失败**：之前主进程会拿 `get-port` 探测一次 3001，如果在 `app.listen()` 真正发生前那一瞬间端口被别的进程抢走（最常见的是上一次 `pnpm dev:desktop` 留下的孤儿 `node.exe`），server 子进程会立刻崩溃，但主进程不知情，仍然把 BrowserWindow 指向 `127.0.0.1:3001` —— 结果加载到的其实是占用端口的"另一个" server，于是首页返回 `Route GET:/ not found` 的 JSON 404。
+- **新增的逻辑**：主进程现在最多尝试 3 次，每次拿一个**全新的**空闲端口（避开已经失败过的端口），并把 `waitForPort` 与 server 子进程的 `exit` 事件做了竞速 —— 子进程先死就立刻报错重试，绝不会把 BrowserWindow 接到不属于自己的端口上。
+- **`dev:desktop` 的 orchestrator 端口探测修复 Windows 弱绑定误判**：Windows 下,绑在 `0.0.0.0:N`(wildcard)的进程**不会**和 `127.0.0.1:N`(specific loopback)的 `listen()` 冲突,所以原来只探测 loopback 的逻辑在有僵尸 Vite 占着 5173 时会误以为端口空闲,把 5173 传给新 Vite。新 Vite 用 `host:true` 绑 wildcard 真冲突了,静默滑到 5174,但 orchestrator 不知道,继续告诉 Electron `WEB_DEV_SERVER_URL=http://127.0.0.1:5173` —— 结果 BrowserWindow 加载了那个上周遗留的 Vite,页面空白、Console/Network 都没东西。现在 probe 同时尝试两种地址,只有两个都成功才算端口可用。
+- **`apps/web/vite.config.ts` 加 `strictPort: true`**:Vite 默认遇到端口冲突会静默滑到下一个,这在 orchestrated dev 下很危险。改成 strict 后端口冲突会硬报错,让 orchestrator 立刻看到失败而不是悄悄走偏。
+- **Predev 也覆盖到 `dev:desktop`**：补了一个 `predev:desktop` 钩子，每次 `pnpm dev:desktop` 之前都会跑一次 `pnpm build:agentlet`，避免 agentlet `dist/` 没跟上源码导致 daemon 启动报 `required option '--agent <command>' not specified`。
+
+**Notes**
+
+- 正常机器上你看不到任何变化 —— 端口 3001 没被占,第一次尝试就成功了。
+- 如果三次尝试都失败（极端情况：本机所有 ephemeral port 都被耗光，或防火墙阻止 loopback），会回退到"Huabu failed to start"对话框，而不是 BrowserWindow 加载到无效页面。
+- 退出应用时的端口释放逻辑没变 —— `before-quit` 仍然 `kill()` server 子进程并等最多 3 s。问题只出现在**不正常退出**的场景：dev orchestrator 在 Windows 上靠 `taskkill /T`，如果在 Ctrl+C 的瞬间 tsx-watch 的孙进程还没起完，就有可能漏杀。下次启动遇到孤儿端口现在会自动避开。
+- 如果你以前手动跑 `pnpm dev:web` 习惯端口被占时它自己滑动,现在它会改成报错退出 —— 这是刻意的,可以让你显式处理冲突而不是迷糊地连到一个意外端口。需要的话可以临时在命令前加 `VITE_PORT=5174` 之类的指定一个空闲端口。
+
+---
+
+## 2026-06-05 · 打包后首次连接 External Agent 不再误报 503
+
+**What Changed**
+
+- **拉长了 ChatPanel 等待 agentlet daemon 上线的窗口**：原来固定 5 s，现在改成 20 s。打包后的桌面端首次启动需要付出 ASAR 解包、杀毒软件按需扫描新解出的 Node 子进程二进制等额外开销，daemon 握手在某些 Windows / macOS 机器上很容易突破 5 s，导致 ChatPanel 一进去就拿到 **503 `acp_session_failed`**（前端表现为 `Failed to load resource: the server responded with a status of 503`）。
+- **遇到永久性故障会立刻退出等待**：supervisor 已经判定放弃重启（找不到 daemon 入口、失败预算用尽等）时，等待函数会立即返回 `null`，不会继续轮询到 20 s 才报错。
+
+**Notes**
+
+- 正常情况下 daemon 通常在百毫秒内就上线，所以多数用户不会感知到这个变化。只有首次冷启动或机器很慢的场景下，原来"先弹错、点重试又能用"的体验会被消除。
+- 真正卡住的极端场景（例如 daemon 一直起不来）现在最长会让 ChatPanel loading 状态保持 20 s 才显示失败，但前提是 supervisor 仍在尝试重启；一旦它放弃，错误会立刻浮出来，用户可以走 Settings → External Agents 的 **Restart worker** 重置。
+
+---
+
+## 2026-06-05 · External Agent 编辑器：分区布局 + 折叠高级选项
+
+**What Changed**
+
+- **重排 Profile 编辑器为四个语义分区**，按使用频率从高到低排列：**Agent**（选哪个 CLI / 自动批准开关 / Custom 模式下的 Launch command）→ **Workspace**（Working directory）→ **Advanced**（折叠）→ **Display name**（自动生成、可覆盖）。每个分区有小号大写标题，区块之间用细横线分隔，整页一眼就能扫完。
+- **高级选项默认折叠**。**Extra args**、**Environment variables**、**Auto-restart on crash** 三项搬进 Advanced 区块，点击标题旁的 chevron 才展开；新建 Profile 或关闭对话框后会自动收起，避免一进来就被一堆字段淹没。
+- **"Agent CLI" 重命名为 "Auto detected agent"**，明确这是"系统自动探测到的 CLI 列表"。下拉里仍然提供 **Custom command** 选项给写自定义命令的高级用户。
+- **结构化模式下不再显示 Launch command 预览**。当你选中检测到的 agent 时，命令行完全由勾选项 + Extra args 拼出，不需要再让你确认；只有切到 Custom command 时才会出现可编辑的命令输入框。
+- **Display Name 改为自动生成、可选覆盖**，默认值是 `"<agent> (<working folder basename>)"`（例如 `Claude Code (sediment)`）。输入框的 placeholder 直接显示这个默认值，下方说明文字也以加粗形式重申一次。这个字段移到了对话框最底部——多数人不需要改它。
+
+**Notes**
+
+- 改动只影响编辑器 UI；落到磁盘的 Profile 结构与字段含义与上一版完全一致，老 Profile 打开就是新布局。
+- 折叠状态不持久化（每次打开 Modal 都从"收起"开始），这是刻意的：默认隐藏让你聚焦在主要选项上，需要时一键展开就行。
+- 如果你写了一个完全空的 Display Name 并保存，后端拿到的依然是非空字符串——前端会在提交前把 placeholder 那个默认名填进去。
+
+---
+
+## 2026-06-04 · External Agent 设置面板：结构化编辑器 + 弹窗交互修复
+
+**What Changed**
+
+- **修了 Settings 弹层在打开"New / Edit agent"对话框后会立刻消失的 bug**。原因是 Modal 通过 React portal 挂在 `document.body`，被 Popover 的 outside-click 判定为"点到外面了"。现在 Popover 会忽略任何落在 `[role="dialog"]` 元素（或显式标注了 `data-popover-dismiss-ignore` 的节点）内的 pointer-down，对话框打开时 Settings 弹层保持挂载。
+- **Profile 编辑器加回了结构化的命令拼装界面**：
+  - **Agent CLI** 选择器现在编辑时也可见（以只读形式展示当前绑定的 CLI；底层 `cliId` 不允许修改）。
+  - 选中检测到的 CLI 后会出现 **Auto-approve all tool calls** 复选框（仅对支持该开关的 CLI 显示，例如 Copilot 的 `--allow-all`），勾上会自动把开关追加到启动命令；旁边附有简要的风险提示。
+  - 新增 **Extra args** 文本输入，用来追加结构化复选框未覆盖的 CLI 参数（例如 `--model claude-sonnet-4 --max-tokens 4000`）。
+  - **Launch command** 预览块以只读 `<code>` 展示最终拼出的命令行，所见即所得。
+  - 编辑已有 Profile 时，编辑器会反向解析 `command`：若它仍匹配 `{binary} {acpArgs...} [allowAllFlag] [extraArgs...]` 的形态，会自动还原复选框与 Extra args 的初始值；若用户曾手动改写或绑定的 CLI 已卸载，则自动退回 **Custom command** 模式并保留原始命令不变。
+- **Environment 字段加了说明文案**，明确这是合并到 agent 进程环境变量的额外 `KEY=VALUE`，常见用途包括 API key、HTTPS_PROXY、CLI 自身的配置项；占位符也换成了更具代表性的 `ANTHROPIC_API_KEY=...` / `HTTPS_PROXY=...`。
+- 顺手清理了 External Agents 卡片里那一条多余的空白行——daemon 在线（happy path）时 Health Banner 现在完全不渲染，不再留下一段带顶部分割线的占位条。
+
+**Notes**
+
+- 历史 Profile 数据完全兼容：持久化 schema 没有变化，新增的"结构化 vs 自定义"是纯编辑器层的概念，保存到磁盘的依然是单一的 `command` 字符串 + `cliId`。
+- 结构化模式只显示后端通过 `GET /api/acp/agent-cli` 返回的、当前在 PATH 上探测到的 CLI；想给一个未检出的 CLI 写 Profile（例如自定义安装路径），直接在选择器里挑 **Custom command** 自己写完整命令即可。
+- 如果你自己写的 Popover 弹层里也想嵌入一个非 `role="dialog"` 的浮层而又不希望它被误判为外部点击，可以给浮层根节点加 `data-popover-dismiss-ignore` 属性，效果等价于 Modal。
+
+## 2026-06-10 · 外部 Agent 新版接入：Profile 编辑器 + 后台 Worker
+
+**What Changed**
+
+- 设置面板里的"External Agents"区域被整体重写：旧的"复制启动命令 → 在终端粘贴 → 等配对码"流程已经下线。现在你直接在 Settings 里维护"Agent Profile"列表——每一项就是一份完整的启动配方 `{cli, command, cwd, env, autoRestart}`，由 Sediment 自己负责拉起进程。
+- 新增"Add agent"对话框：
+  - **Agent CLI** 下拉会列出 Sediment 在本机 PATH 上探测到的 ACP 适配的 CLI（Copilot / Claude / Gemini）。选中后会自动填好 `command`（例如 `copilot --acp`）与 `Display name`。
+  - 想要更精细的命令可以选 **Custom command** 自己写，配合 `Working directory`、`Environment`（一行 `KEY=VALUE`）与 `Auto-restart` 复选框。
+- 聊天侧的 `@mention` 与"New chat → external"菜单不再展示"配对成功的临时 agentId"，而是直接展示你创建的 Profile。每个条目右侧会显示运行态：`running · pid N`（worker 当前已经拉起这个 agent）或 `idle`（尚未唤醒，将在第一次发消息时按 Profile 启动）。
+- Sediment 启动时会自动 fork 一个 agentlet daemon worker，并以指数退避兜底重启。绝大多数时候你完全感觉不到它的存在；只有 worker 真的连不上时，设置面板顶部才会出现一条琥珀色提示，附带 **Restart worker** 按钮强制立即重连。
+
+**Notes**
+
+- **迁移影响**：之前已经创建并绑定过外部 agent 的旧聊天线程会因为 binding key 从 `agentletAgentId` 换成 `profileId` 而失效——这些线程会自动回落到内置 agent。**还没有写入消息的空线程会无缝重置**；已经有对话历史的线程建议新开一个并选择 Profile。
+- 配对码 / 启动命令 / wrapper 路径相关的 API 与 UI 都已经移除；如果你写过基于 `/api/acp/pair/*` 的脚本，需要改用 `/api/acp/profiles` 的 CRUD 接口（详见 `packages/shared/src/types/api/acp.ts` 中的 zod 契约）。
+- Worker 的 token 不再经过 HTTP 边界——它由 server 直接通过 IPC 注入到 daemon 进程，前端永远拿不到也不需要它。
+- 想自定义 daemon 二进制路径（例如指向另一个 agentlet build）可以设置环境变量 `HUABU_AGENTLET_DAEMON_PATH`；不设置时 Sediment 会优先用 `<bundleDir>/agentlet/index.js`，最后回落到 monorepo 内的源码路径。
+
 ## 2026-06-05 · 桌面端硬化：快捷键作用域、导航沙箱、退出兜底
 
 **What Changed**

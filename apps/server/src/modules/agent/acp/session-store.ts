@@ -9,11 +9,11 @@
  *
  *   <canvasId>/.history/acp-sessions.json
  *     {
- *       "schemaVersion": 1,
+ *       "schemaVersion": 3,
  *       "records": {
  *         "<threadId>": {
  *           "sessionId":       "...",        // returned by session/new
- *           "agentletAgentId": "...",        // binding identifier
+ *           "profileId": "...",              // user-configured profile id
  *           "cwd":             "/repo",       // cwd passed to session/new
  *           "updatedAt":       1700000000000, // epoch ms
  *           "meta":            { ... }        // OPTIONAL last-known
@@ -63,8 +63,39 @@ import type {
   AvailableCommand,
 } from '@sediment/shared';
 
-/** Bumped only on a breaking layout change. */
-const ACP_SESSION_STORE_SCHEMA_VERSION = 1;
+/**
+ * Bumped only on a breaking layout change.
+ *
+ * v1 (legacy, removed): record carried `agentletAgentId`, the
+ * volatile agentlet connection id of the per-CLI bridge handshake.
+ * v2 carried `profileId` only — the user-configured spawn recipe id.
+ * v3 adds `bindingRecipe` (command/cwd/autoRestart/alias snapshot) so
+ * the thread is fully self-contained: deleting or mutating the
+ * profile no longer affects existing threads. `profileId` is kept
+ * (nullable) purely as provenance for diagnostics; the orchestrator
+ * never reads it. The loader accepts v2 records (recipe-absent) and
+ * uses profile lookup as a fallback in `ensureAcpSessionInner` so
+ * pre-v3 threads keep working until they're re-bound.
+ */
+const ACP_SESSION_STORE_SCHEMA_VERSION = 3;
+
+/**
+ * Snapshot of the spawn recipe at thread-binding time. Decouples
+ * the thread from the profile: once a thread is opened against a
+ * profile, this record is what we use to (re-)spawn the agent for
+ * subsequent prompts. Profile mutations / deletions after this point
+ * are NOT propagated.
+ *
+ * Mirrors the subset of `AcpAgentProfile` that determines spawn
+ * behaviour. `alias` is the profile's display name at snapshot time
+ * — used purely for UI / log labelling.
+ */
+export interface AcpBindingRecipe {
+  command: string;
+  cwd: string;
+  autoRestart: boolean;
+  alias: string;
+}
 
 /**
  * Snapshot of selector/usage state that the agent pushed via
@@ -98,15 +129,23 @@ export interface AcpSessionRecord {
   /** ACP session id returned by `session/new`; the key for `session/load`. */
   sessionId: string;
   /**
-   * agentlet agent id this session was opened against. We compare on
-   * read so a binding change (thread re-pointed at a different agent)
-   * discards the stale record instead of trying to load it.
+   * Profile id this thread was first opened against. Retained as
+   * provenance / diagnostics only — the orchestrator no longer
+   * reads it (recipe-first). May be the empty string for records
+   * created without a profile (future-proofing).
    */
-  agentletAgentId: string;
+  profileId: string;
   /** `cwd` originally passed to `session/new`; replayed on `session/load`. */
   cwd: string;
   /** Epoch ms of the last write. Diagnostic only. */
   updatedAt: number;
+  /**
+   * Self-contained spawn recipe captured at thread-binding time.
+   * Optional ONLY for backwards-compat with v2 records on disk —
+   * newly written records ALWAYS carry it. When absent, callers must
+   * fall back to looking up the profile by id and re-snapshotting.
+   */
+  bindingRecipe?: AcpBindingRecipe;
   /**
    * Last-known snapshot of selector/usage state. Optional — absent for
    * legacy records written before this field existed, and for records
@@ -131,8 +170,7 @@ function isRecord(value: unknown): value is AcpSessionRecord {
     !(
       typeof r.sessionId === 'string' &&
       r.sessionId.length > 0 &&
-      typeof r.agentletAgentId === 'string' &&
-      r.agentletAgentId.length > 0 &&
+      typeof r.profileId === 'string' &&
       typeof r.cwd === 'string' &&
       typeof r.updatedAt === 'number'
     )
@@ -146,7 +184,30 @@ function isRecord(value: unknown): value is AcpSessionRecord {
   if (r.meta !== undefined && (r.meta === null || typeof r.meta !== 'object')) {
     return false;
   }
+  // `bindingRecipe` is optional (absent on v2 records). When present
+  // we require it to be a plain object — individual fields are checked
+  // by `sanitizeBindingRecipe` below.
+  if (
+    r.bindingRecipe !== undefined &&
+    (r.bindingRecipe === null || typeof r.bindingRecipe !== 'object')
+  ) {
+    return false;
+  }
   return true;
+}
+
+function sanitizeBindingRecipe(raw: unknown): AcpBindingRecipe | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.command !== 'string' || r.command.length === 0) return undefined;
+  if (typeof r.cwd !== 'string') return undefined;
+  if (typeof r.alias !== 'string') return undefined;
+  return {
+    command: r.command,
+    cwd: r.cwd,
+    autoRestart: r.autoRestart === true,
+    alias: r.alias,
+  };
 }
 
 /**
@@ -246,8 +307,15 @@ function readFile(canvasId: string): SessionStoreFile {
       // field entirely) so callers can trust whatever they receive
       // without re-validating.
       const meta = sanitizeMeta((value as { meta?: unknown }).meta);
-      records[key] = meta ? { ...value, meta } : { ...value, meta: undefined };
-      if (!meta) delete records[key].meta;
+      const bindingRecipe = sanitizeBindingRecipe(
+        (value as { bindingRecipe?: unknown }).bindingRecipe,
+      );
+      const cleaned: AcpSessionRecord = { ...value };
+      if (meta) cleaned.meta = meta;
+      else delete cleaned.meta;
+      if (bindingRecipe) cleaned.bindingRecipe = bindingRecipe;
+      else delete cleaned.bindingRecipe;
+      records[key] = cleaned;
     }
   }
   return { schemaVersion: ACP_SESSION_STORE_SCHEMA_VERSION, records };
@@ -288,18 +356,19 @@ export function writeAcpSessionRecord(
   const file = readFile(canvasId);
   const next: AcpSessionRecord = {
     sessionId: record.sessionId,
-    agentletAgentId: record.agentletAgentId,
+    profileId: record.profileId,
     cwd: record.cwd,
     updatedAt: Date.now(),
   };
   if (record.meta) next.meta = record.meta;
+  if (record.bindingRecipe) next.bindingRecipe = record.bindingRecipe;
   file.records[threadId] = next;
   atomicWriteJson(acpSessionsPath(canvasId), file);
 }
 
 /**
  * Update only the `meta` field for an existing record, leaving the
- * sessionId / agentletAgentId / cwd untouched. No-op when `canvasId`
+ * sessionId / profileId / cwd untouched. No-op when `canvasId`
  * is empty OR no record exists for `(canvasId, threadId)` — the meta
  * is per-session state, so persisting it without the parent record
  * would leak across recreations.
@@ -322,11 +391,12 @@ export function writeAcpSessionMeta(
   if (!existing) return false;
   const next: AcpSessionRecord = {
     sessionId: existing.sessionId,
-    agentletAgentId: existing.agentletAgentId,
+    profileId: existing.profileId,
     cwd: existing.cwd,
     updatedAt: Date.now(),
   };
   if (meta) next.meta = meta;
+  if (existing.bindingRecipe) next.bindingRecipe = existing.bindingRecipe;
   file.records[threadId] = next;
   atomicWriteJson(acpSessionsPath(canvasId), file);
   return true;

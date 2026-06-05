@@ -80,7 +80,7 @@ export function WindowChrome() {
       // drew — leaving an obviously broken hairline. We rely on the
       // page chrome below (canvas header / route container) to provide
       // its own top edge instead.
-      className="bg-surface flex w-full shrink-0 items-center gap-2 px-2"
+      className="bg-surface relative flex w-full shrink-0 items-center gap-2 px-2"
       style={
         {
           // Sourced from the preload bridge so a change to
@@ -122,11 +122,14 @@ export function WindowChrome() {
       </div>
 
       {/* Center: page / canvas title, or the workspace folder name on
-          the canvas list page. Absolutely positioned via flex so the
-          label stays centred even when the side controls grow.
-          Truncated with ellipsis so long canvas / folder names don't
-          push the settings button off-screen. */}
-      <div className="flex min-w-0 flex-1 items-center justify-center">
+          the canvas list page. Absolutely positioned at the window's
+          true horizontal center (`left-1/2 -translate-x-1/2`) so the
+          label stays centred relative to the whole window rather than
+          the space left between the asymmetric side gutters (macOS
+          traffic-lights on the left, Windows caption buttons on the
+          right). `max-w-[50%]` keeps long canvas / folder names from
+          sliding under the side controls; they truncate with ellipsis. */}
+      <div className="pointer-events-none absolute left-1/2 flex max-w-[50%] min-w-0 -translate-x-1/2 items-center justify-center">
         {showWorkspaceSwitcher ? (
           <Tooltip
             placement="bottom"
@@ -152,9 +155,11 @@ export function WindowChrome() {
               <Link
                 to="/setup"
                 // Opt out of the title bar's drag region so this click
-                // navigates instead of starting a window drag.
+                // navigates instead of starting a window drag. Re-enable
+                // pointer events disabled on the wrapper so the link stays
+                // clickable.
                 style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-                className="text-fg-muted hover:text-fg-default hover:bg-hover max-w-full truncate rounded-md px-2 py-0.5 text-sm font-medium transition-colors"
+                className="text-fg-muted hover:text-fg-default hover:bg-hover pointer-events-auto max-w-full truncate rounded-md px-2 py-0.5 text-sm font-medium transition-colors"
               >
                 {workspaceLabel}
               </Link>
@@ -185,7 +190,7 @@ export function WindowChrome() {
           above the title bar. The buttons are sized `md` so they
           visually match the OS-drawn caption buttons on Windows. */}
       <div
-        className="flex items-center gap-1"
+        className="ml-auto flex items-center gap-1"
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       >
         <Button

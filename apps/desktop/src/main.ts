@@ -24,18 +24,22 @@
  * user can see it (window title, installer, Start Menu entry, log dir, etc.).
  */
 
+import { execFile } from 'node:child_process';
 import {
   createWriteStream,
   existsSync,
   mkdirSync,
   readdirSync,
+  readFileSync,
+  renameSync,
   statSync,
   unlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import net from 'node:net';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 
-import { app, BrowserWindow, dialog, Menu, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron';
 import { utilityProcess, type UtilityProcess } from 'electron';
 import getPort from 'get-port';
 
@@ -100,11 +104,108 @@ process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
   throw err;
 });
 
+// ── Shell PATH harvest ───────────────────────────────────────────────
+
+/**
+ * Packaged apps launched via Finder/Dock/Launchpad inherit a minimal
+ * PATH from launchd (typically `/usr/bin:/bin:/usr/sbin:/sbin` on
+ * macOS), which omits common install locations like `/opt/homebrew/bin`
+ * or `~/.nvm/.../bin` where users keep ACP-capable CLIs (`copilot`,
+ * `claude`, `gemini`). The server's host-CLI detection (`which
+ * <binary>`) then finds nothing and Settings → Built-in shows an empty
+ * agent list — even though the same binaries are reachable from the
+ * user's Terminal.
+ *
+ * To paper over that without forcing a Terminal relaunch, we run the
+ * user's interactive login shell once at startup and harvest its
+ * resolved PATH, then prepend the new entries onto `process.env.PATH`.
+ * `buildServerEnv` already spreads `process.env` into the forked
+ * server, so the child inherits the augmented value transparently.
+ *
+ * Skipped in dev (the Terminal-launched Electron already inherits the
+ * shell PATH) and on Windows (Explorer-launched apps already see the
+ * registry PATH; no dotfile-driven equivalent). Failure is non-fatal —
+ * we keep the launchd PATH and surface the detection gap in the UI.
+ */
+async function ensureShellPath(): Promise<void> {
+  if (IS_DEV) return;
+  if (process.platform === 'win32') return;
+  // Only trust an ABSOLUTE, EXISTING shell path. `process.env.SHELL` is
+  // user-controlled: if it were unset, relative, or pointed at a missing
+  // file, `execFile` would fall back to PATH resolution and could launch
+  // an unintended binary. Anything that fails these checks degrades to the
+  // POSIX-guaranteed `/bin/sh`.
+  const rawShell = process.env.SHELL?.trim();
+  const shellPath =
+    rawShell && isAbsolute(rawShell) && existsSync(rawShell)
+      ? rawShell
+      : '/bin/sh';
+  const MARKER = '__HUABU_PATH__:';
+  try {
+    const harvested = await new Promise<string>((resolve, reject) => {
+      execFile(
+        shellPath,
+        ['-ilc', `printf '%s' "${MARKER}$PATH"`],
+        { timeout: 3_000, windowsHide: true },
+        (err, stdout) => {
+          if (err) return reject(err);
+          const idx = stdout.lastIndexOf(MARKER);
+          if (idx === -1)
+            return reject(new Error('PATH marker missing from shell output'));
+          resolve(stdout.slice(idx + MARKER.length).trim());
+        },
+      );
+    });
+    if (!harvested) return;
+    const existing = (process.env.PATH ?? '').split(':').filter(Boolean);
+    const seen = new Set(existing);
+    const additions: string[] = [];
+    for (const entry of harvested.split(':')) {
+      if (!entry || seen.has(entry)) continue;
+      seen.add(entry);
+      additions.push(entry);
+    }
+    if (additions.length === 0) return;
+    process.env.PATH = [...additions, ...existing].join(':');
+    console.log(
+      `[desktop] augmented PATH from ${shellPath} (+${additions.length} entries)`,
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(
+      `[desktop] login-shell PATH probe failed (${shellPath}): ${message}`,
+    );
+  }
+}
+
 // ── Server process ───────────────────────────────────────────────────
 
 let serverProcess: UtilityProcess | null = null;
 let serverPort = 0;
 let serverLogStream: WriteStream | null = null;
+
+/**
+ * Number of times we'll re-fork the server on a fresh port after an
+ * early bind failure (EADDRINUSE) or immediate exit. Three attempts
+ * covers the realistic case where a stale Huabu / dev orchestrator is
+ * holding the previous port and another local service grabs the next
+ * one before we can bind. After that we surface the original error so
+ * the user can investigate instead of spinning forever.
+ */
+const MAX_SERVER_START_ATTEMPTS = 3;
+
+/**
+ * Resolved when the forked server child exits. We track it on a module
+ * scope so {@link waitForPort} can race against it: if the child dies
+ * before its port becomes reachable we must abort the readiness wait
+ * (otherwise a *foreign* process holding the same port — e.g. a leftover
+ * dev server — would make the wait spuriously succeed and we'd load
+ * a phantom backend into the BrowserWindow).
+ */
+let serverExitPromise: Promise<{
+  code: number | null;
+  signal: string | null;
+}> | null = null;
 
 /**
  * Open (and rotate) a per-launch server log file under `app.getPath('logs')`.
@@ -235,22 +336,6 @@ function buildServerEnv(port: number): NodeJS.ProcessEnv {
       ? '' // Vite owns the SPA in this case
       : join(__dirname, '../../web/dist')
     : join(process.resourcesPath, 'web');
-  // External-agent (ACP) pairing relies on the in-repo `bin/agentlet`
-  // shell wrapper, which auto-builds the local CLI on demand and reads
-  // a `.env` next to it. Both of those assumptions only hold inside the
-  // monorepo checkout — a packaged Electron build has no `pnpm`, no
-  // source tree, and (on Windows) no POSIX shell to run the wrapper.
-  //
-  // So in prod we deliberately do NOT inject `HUABU_AGENTLET_PATH`. The
-  // server's `resolveAgentletWrapperPath()` falls back to `null`, the
-  // `GET /api/acp/agent-cli` response reports a null wrapper, and the
-  // Settings UI's `useAgentCliDetection` hook already handles that
-  // gracefully (the "Connect" command panel shows `bin/agentlet` as a
-  // hint, but the feature is effectively dev-only until we ship a real
-  // bundled CLI here).
-  const agentletPath = IS_DEV
-    ? join(__dirname, '../../../../bin/agentlet')
-    : undefined;
 
   // Ensure the data directory exists so the server doesn't have to
   // race-condition on first-use creation. The workspace directory is
@@ -269,13 +354,21 @@ function buildServerEnv(port: number): NodeJS.ProcessEnv {
 
   // Notably absent: HUABU_WORKSPACE. Omitting it puts the server in
   // free mode, so the web UI shows its workspace picker on first launch.
+  //
+  // External-agent (ACP) integration: the server embeds an `agentlet`
+  // daemon supervisor (`DaemonSupervisor`) which fork()s the daemon
+  // entry point itself. In packaged builds the entry resolves to
+  // `<resources>/server/agentlet/index.js` (copied by tsup + bundled
+  // by electron-builder, see ./electron-builder.yml extraResources);
+  // in dev it falls back to `external/agentlet/packages/local/dist/index.js`.
+  // No env var injection is needed here \u2014 the resolver in
+  // `daemon-supervisor.ts` covers both layouts.
   return {
     ...process.env,
     SERVER_PORT: String(port),
     HUABU_BIND_HOST: '127.0.0.1',
     HUABU_DATA_DIR: dataDir,
     ...(webDistPath ? { WEB_DIST_PATH: webDistPath } : {}),
-    ...(agentletPath ? { HUABU_AGENTLET_PATH: agentletPath } : {}),
     NODE_ENV: IS_DEV ? 'development' : 'production',
   };
 }
@@ -353,15 +446,21 @@ async function startServer(port: number): Promise<void> {
     }
   }
 
-  serverProcess.on('exit', (code) => {
-    if (code !== 0) {
-      console.error(`[desktop] server exited with code ${code}`);
-    }
-    serverProcess = null;
-    // Close the log stream so the file handle is released and the
-    // final buffered bytes hit disk before quit.
-    serverLogStream?.end();
-    serverLogStream = null;
+  serverExitPromise = new Promise((resolve) => {
+    serverProcess!.on('exit', (code) => {
+      if (code !== 0) {
+        console.error(`[desktop] server exited with code ${code}`);
+      }
+      serverProcess = null;
+      // Close the log stream so the file handle is released and the
+      // final buffered bytes hit disk before quit.
+      serverLogStream?.end();
+      serverLogStream = null;
+      // `utilityProcess.fork` only forwards an exit code, never a signal
+      // — keep the shape symmetric with the POSIX-style tuple anyway
+      // so future swaps to child_process don't require call-site edits.
+      resolve({ code: code ?? null, signal: null });
+    });
   });
 }
 
@@ -370,25 +469,172 @@ async function startServer(port: number): Promise<void> {
 /**
  * Poll until the server port accepts a TCP connection or we time out.
  * Uses raw TCP (not HTTP) so it works before Fastify has registered routes.
+ *
+ * When `exitSignal` is provided we race the poll against the child's
+ * exit — if the server we just forked dies first, we reject with the
+ * exit code instead of waiting out the full timeout (and instead of
+ * accidentally "succeeding" because some OTHER process happens to own
+ * the same loopback port).
  */
-function waitForPort(port: number, timeoutMs = 20_000): Promise<void> {
+function waitForPort(
+  port: number,
+  timeoutMs = 20_000,
+  exitSignal?: Promise<{ code: number | null; signal: string | null }>,
+): Promise<void> {
   const start = Date.now();
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const finishOk = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    const finishErr = (err: Error) => {
+      if (settled) return;
+      settled = true;
+      reject(err);
+    };
+
+    if (exitSignal) {
+      void exitSignal.then(({ code, signal }) => {
+        finishErr(
+          new Error(
+            `Server process exited before becoming ready (code=${
+              code ?? 'null'
+            }, signal=${signal ?? 'null'})`,
+          ),
+        );
+      });
+    }
+
     function attempt() {
+      if (settled) return;
       const socket = net.connect(port, '127.0.0.1', () => {
         socket.destroy();
-        resolve();
+        finishOk();
       });
       socket.on('error', () => {
         socket.destroy();
+        if (settled) return;
         if (Date.now() - start > timeoutMs) {
-          reject(new Error(`Server did not start within ${timeoutMs / 1000}s`));
+          finishErr(
+            new Error(`Server did not start within ${timeoutMs / 1000}s`),
+          );
           return;
         }
         setTimeout(attempt, 200);
       });
     }
     attempt();
+  });
+}
+
+// ── Workspace persistence ────────────────────────────────────────────
+
+/**
+ * Persist the user-selected free-mode workspace path (and recent list)
+ * in a JSON file under `app.getPath('userData')` so it survives across
+ * launches independently of the renderer's `localStorage`.
+ *
+ * Why not just rely on `localStorage`? Chromium partitions storage by
+ * origin (scheme + host + port). The Electron shell forks the server on
+ * a fresh port whenever the preferred port (3001) is busy — e.g. a
+ * leftover server process, another local service, or simply a second
+ * launch racing with the first. A different port means a different
+ * origin, which means a separate, empty `localStorage` bucket and the
+ * user is dumped back on the workspace picker even though they picked
+ * a folder yesterday.
+ *
+ * Storing the path in the main process (one location per user,
+ * port-agnostic) and exposing it over IPC sidesteps the partition
+ * entirely. The renderer still keeps `localStorage` writes for
+ * browser/dev mode compatibility, but the Electron bridge takes
+ * precedence when present.
+ */
+
+const WORKSPACE_STORE_FILE = 'workspace.json';
+const MAX_RECENT_WORKSPACES = 5;
+
+interface WorkspaceStore {
+  path: string | null;
+  recent: string[];
+}
+
+function workspaceStorePath(): string {
+  return join(app.getPath('userData'), WORKSPACE_STORE_FILE);
+}
+
+function readWorkspaceStore(): WorkspaceStore {
+  const file = workspaceStorePath();
+  if (!existsSync(file)) return { path: null, recent: [] };
+  try {
+    const raw = readFileSync(file, 'utf8');
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') {
+      return { path: null, recent: [] };
+    }
+    const obj = parsed as Record<string, unknown>;
+    const path =
+      typeof obj.path === 'string' && obj.path.length > 0 ? obj.path : null;
+    const recent = Array.isArray(obj.recent)
+      ? obj.recent.filter((p): p is string => typeof p === 'string')
+      : [];
+    return { path, recent };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[desktop] workspace store unreadable: ${message}`);
+    return { path: null, recent: [] };
+  }
+}
+
+function writeWorkspaceStore(store: WorkspaceStore): void {
+  const file = workspaceStorePath();
+  // Atomic-ish write via tmp + rename so a crash mid-write doesn't
+  // leave a half-truncated JSON the next launch refuses to parse.
+  const tmp = `${file}.tmp`;
+  mkdirSync(app.getPath('userData'), { recursive: true });
+  writeFileSync(tmp, JSON.stringify(store, null, 2), 'utf8');
+  renameSync(tmp, file);
+}
+
+function pushRecentWorkspace(store: WorkspaceStore, path: string): string[] {
+  const next = [path, ...store.recent.filter((p) => p !== path)].slice(
+    0,
+    MAX_RECENT_WORKSPACES,
+  );
+  return next;
+}
+
+function registerWorkspaceIpc(): void {
+  ipcMain.handle('workspace:get', () => readWorkspaceStore());
+
+  ipcMain.handle('workspace:set', (_event, rawPath: unknown) => {
+    if (typeof rawPath !== 'string' || rawPath.length === 0) {
+      throw new Error('workspace:set requires a non-empty string path');
+    }
+    if (!isAbsolute(rawPath)) {
+      throw new Error('workspace:set requires an absolute path');
+    }
+    const current = readWorkspaceStore();
+    const next: WorkspaceStore = {
+      path: rawPath,
+      recent: pushRecentWorkspace(current, rawPath),
+    };
+    writeWorkspaceStore(next);
+    return next;
+  });
+
+  ipcMain.handle('workspace:remove-recent', (_event, rawPath: unknown) => {
+    if (typeof rawPath !== 'string') {
+      throw new Error('workspace:remove-recent requires a string path');
+    }
+    const current = readWorkspaceStore();
+    const next: WorkspaceStore = {
+      path: current.path === rawPath ? null : current.path,
+      recent: current.recent.filter((p) => p !== rawPath),
+    };
+    writeWorkspaceStore(next);
+    return next;
   });
 }
 
@@ -544,6 +790,11 @@ app.whenReady().then(async () => {
   // `before-input-event` inside `createWindow`.
   Menu.setApplicationMenu(null);
 
+  // Register IPC handlers BEFORE any window is created so the preload
+  // script's `ipcRenderer.invoke('workspace:get', …)` calls always have
+  // a handler to talk to, even on the very first render.
+  registerWorkspaceIpc();
+
   // macOS Dock icon. In a packaged .app this comes from the bundle's
   // .icns automatically, but in dev (`electron .`) the Dock would show
   // the generic Electron logo unless we override it explicitly.
@@ -555,6 +806,12 @@ app.whenReady().then(async () => {
   }
 
   try {
+    // Augment PATH from the user's login shell BEFORE forking the
+    // server so host-CLI detection (`which copilot` / `claude` /
+    // `gemini`) sees the same entries the user has in their Terminal.
+    // See `ensureShellPath` for rationale.
+    await ensureShellPath();
+
     const external = getExternalServerUrl();
     if (external) {
       // External dev server: don't fork our own, just point at the
@@ -569,9 +826,50 @@ app.whenReady().then(async () => {
       );
       await waitForPort(serverPort);
     } else {
-      serverPort = await getPort({ port: PREFERRED_PORT });
-      await startServer(serverPort);
-      await waitForPort(serverPort);
+      // Race-resistant port allocation: `get-port` only tells us the
+      // port was free *at the moment we asked*. Between then and the
+      // server's `app.listen()` another process can grab it (a stale
+      // Huabu install, a leftover dev orchestrator, an unrelated
+      // service that just bound 3001). When that happens the child
+      // crashes with EADDRINUSE — retry with a fresh port instead of
+      // surfacing the error to the user.
+      const tried = new Set<number>();
+      let lastErr: Error | null = null;
+      for (let attempt = 1; attempt <= MAX_SERVER_START_ATTEMPTS; attempt++) {
+        // Bias the first attempt toward 3001 for stable origins
+        // (localStorage, OAuth callback URLs, etc.); subsequent
+        // attempts ask for any free port and exclude what we already
+        // tried so we never re-pick the loser.
+        const candidate = await getPort({
+          port: attempt === 1 ? PREFERRED_PORT : undefined,
+          exclude: [...tried],
+        });
+        tried.add(candidate);
+        try {
+          await startServer(candidate);
+          await waitForPort(candidate, 20_000, serverExitPromise ?? undefined);
+          serverPort = candidate;
+          lastErr = null;
+          break;
+        } catch (err) {
+          lastErr = err instanceof Error ? err : new Error(String(err));
+          console.warn(
+            `[desktop] server start attempt ${attempt}/${MAX_SERVER_START_ATTEMPTS} on port ${candidate} failed: ${lastErr.message}`,
+          );
+          // Best-effort cleanup: if the child is somehow still alive
+          // (waitForPort timeout rather than early exit), kill it so
+          // the next attempt doesn't leak a zombie.
+          if (serverProcess) {
+            try {
+              serverProcess.kill();
+            } catch {
+              /* already dead */
+            }
+            serverProcess = null;
+          }
+        }
+      }
+      if (lastErr) throw lastErr;
     }
     createWindow(serverPort);
   } catch (err) {

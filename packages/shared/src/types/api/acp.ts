@@ -1,14 +1,14 @@
 /**
- * ACP (External-agent bridge) API wire types.
+ * ACP (External-agent) API wire types.
  *
- * Read-only visibility surface for the agentlet bridge. Server
- * enumerates currently-connected external agents; the chat UI shows a
- * status indicator and feeds the agent picker in the ChatPanel.
+ * Sediment connects to external agent CLIs (Copilot / Claude / Gemini /
+ * custom) via agentlet's **daemon mode**. The server forks an in-process
+ * agentlet daemon at boot; users configure long-lived **agent profiles**
+ * (cli + cwd + flags) and the daemon spawns agent processes on demand.
  *
- * Schemas live here (and not in `agent.ts`) because ACP is a separate
- * subsystem that may grow its own endpoints (`/api/acp/agents`,
- * eventually `/api/acp/events` SSE). Keeping them isolated lets us
- * delete the file cleanly if ACP is ever removed.
+ * There is one daemon per Sediment instance and the user never has to
+ * pair it manually — it is invisible infrastructure surfaced only when
+ * something has gone wrong (see `AcpDaemonStatus.lastError`).
  *
  * Per docs/api-design.md, zod schemas defined here are server-side
  * truth; the web bundle imports the inferred TS types only
@@ -31,98 +31,116 @@ import type {
   AcpSessionMode,
 } from '../agent/acp-tool.js';
 
-/**
- * One connected ACP agent as exposed to the web client.
- *
- * `alias` is the short, human-readable identifier used in chat (e.g. `claude`).
- * `agentId` is the agentlet-issued unique key (`host:cmd:cwd:uuid`) and is
- * what the server uses internally to dispatch `session/prompt` to the right
- * `AgentConnection`. The client should treat `agentId` as opaque.
- */
-export interface AcpAgentSummary {
-  /** agentlet's globally-unique connection id (opaque to the client). */
-  agentId: string;
-  /** Short display name derived from the agent command (e.g. `claude`). */
-  alias: string;
-  /** Full command line the user launched (e.g. `claude --acp`). */
-  command: string;
-  /** OS process id of the agent on the user's machine. */
-  pid: number;
-  /** Machine info reported via bridge/hello, when provided. */
-  hostname?: string;
-  platform?: string;
-  /** ISO timestamp of the first successful connection. */
-  connectedAt: string;
-}
-
-/** Response body for `GET /api/acp/agents`. */
-export interface AcpAgentsResponse {
-  /** May be empty — bridge always mounted; empty just means nobody's connected. */
-  agents: AcpAgentSummary[];
-}
-
-// ─── Pairing tokens (ephemeral) ────────────────────────────────────────
+// ─── Agent profiles (user-configured spawn recipes) ────────────────────
 //
-// External agents authenticate to the bridge with a short pairing code
-// that the user generates from the Settings UI on demand. Lifecycle:
-//
-//   pending  → just minted, displayed in the UI with a 60s countdown.
-//              The first `bridge/hello` whose token matches claims it.
-//   claimed  → bound to a specific agentId. The same agentId may
-//              reconnect with this token indefinitely (so wifi blips
-//              and dev hot-reloads don't kill the session). UI hides
-//              the code immediately after the pending window closes.
-//   expired  → 60s pending window elapsed with no claim. Removed from
-//              the in-memory store.
-//   revoked  → user clicked Revoke, or the claimed agent disconnected
-//              gracefully. Removed from the in-memory store.
-//
-// Tokens are NOT persisted — a server restart invalidates every ticket.
+// A profile is a stable, user-edited record describing how to spawn one
+// external agent process: which CLI to run, in which working directory,
+// with which env / flags. Profiles are the surface the user picks from
+// in the chat panel; the actual agentlet process is spawned by the
+// daemon on demand and may be torn down between turns.
 
-/** State of a single pairing ticket as observed from the Settings UI. */
-export interface AcpPairingTicket {
-  /** Opaque stable id used for `DELETE /api/acp/pair/:id`. */
+/** A user-configured external agent the daemon spawns on demand. */
+export interface AcpAgentProfile {
+  /** Stable uuid; never reused after delete. */
   id: string;
+  /** User-edited display name (e.g. "Copilot @ project-x"). */
+  displayName: string;
   /**
-   * The pairing code the user types into `bin/agentlet --token <code>`.
-   * Format: `XXXX-XXXX` (8 chars from an unambiguous uppercase charset).
+   * CLI id from {@link AcpAgentCliInfo.id} (`copilot` / `claude` / …),
+   * OR `'custom'` when {@link command} was entered manually.
    */
-  code: string;
-  /** Lifecycle state. See module-level doc for transitions. */
-  status: 'pending' | 'claimed';
-  /**
-   * Epoch ms when the pending window closes. For `claimed` tickets the
-   * field still reflects the original expiry (UI hides the code at this
-   * point regardless of status) but the token remains valid for
-   * same-agentId reconnects.
-   */
-  expiresAt: number;
-  /** Set once `status === 'claimed'`. */
-  claimedAgentId?: string;
-  /** Short display alias of the claimed agent (e.g. `claude`). */
-  claimedAlias?: string;
-  /** Full launcher command reported by the agent (e.g. `claude --acp`). */
-  claimedCommand?: string;
-  /** Epoch ms of the most recent successful bridge/hello against this ticket. */
-  claimedAt?: number;
+  cliId: string;
+  /** Full command line passed to the daemon (e.g. `"copilot --acp --allow-all"`). */
+  command: string;
+  /** Absolute working directory on the daemon's host. */
+  cwd: string;
+  /** Whether the daemon should auto-restart the agent on crash. */
+  autoRestart: boolean;
+  /** Epoch ms. */
+  createdAt: number;
+  /** Epoch ms. */
+  updatedAt: number;
 }
 
-/** Response body for `POST /api/acp/pair` — the newly-minted ticket. */
-export type AcpPairingCreatedResponse = AcpPairingTicket;
+// ─── Daemon status (one daemon per Sediment) ──────────────────────────
+//
+// The server forks the agentlet daemon as a child process at boot and
+// supervises it with exponential-backoff restart. Status is exposed
+// only so the UI can render a single troubleshooting affordance when
+// the supervisor gives up; on the happy path the user never sees it.
 
-/** Response body for `GET /api/acp/pair` — every still-active ticket. */
-export interface AcpPairingListResponse {
-  tickets: AcpPairingTicket[];
+/** Status of the single daemon known to this Sediment instance. */
+export interface AcpDaemonStatus {
+  /** True when a daemon is currently connected to the bridge. */
+  online: boolean;
+  /** Opaque daemon id when online. */
+  daemonId?: string;
+  /** Hostname reported via bridge/hello. */
+  hostname?: string;
+  /** Platform string (e.g. `'darwin'`, `'win32'`). */
+  platform?: string;
+  /** ISO timestamp of the most recent successful daemon connection. */
+  connectedAt?: string;
+  /**
+   * Most recent supervisor error message when the daemon is offline.
+   * Empty / undefined on the happy path.
+   */
+  lastError?: string;
+  /**
+   * Epoch ms of the next scheduled restart attempt while in backoff.
+   * Undefined when not in backoff (either online or supervisor gave up).
+   */
+  nextRestartAt?: number;
 }
+
+// ─── Profile + daemon HTTP wire ───────────────────────────────────────
+
+/** Response body for `GET /api/acp/profiles`. */
+export interface AcpProfilesListResponse {
+  profiles: AcpAgentProfile[];
+  daemon: AcpDaemonStatus;
+}
+
+/** Request body for `POST /api/acp/profiles`. */
+export interface AcpProfileCreateRequest {
+  /** Optional — server fills in a sensible default when omitted. */
+  displayName?: string;
+  cliId: string;
+  command: string;
+  cwd: string;
+  /** Default true. */
+  autoRestart?: boolean;
+}
+
+/** Request body for `PATCH /api/acp/profiles/:id`. All fields optional. */
+export interface AcpProfileUpdateRequest {
+  displayName?: string;
+  command?: string;
+  cwd?: string;
+  autoRestart?: boolean;
+}
+
+/** Response body for `POST` / `PATCH` /api/acp/profiles[/:id]. */
+export type AcpProfileMutationResponse = AcpAgentProfile;
+
+/** Response body for `GET /api/acp/daemon`. */
+export type AcpDaemonStatusResponse = AcpDaemonStatus;
+
+/**
+ * Response body for `POST /api/acp/daemon/restart`.
+ *
+ * Empty request body. The reply is the post-restart snapshot — which
+ * may still be `online: false` if the restart is asynchronous; the UI
+ * should re-poll `/api/acp/daemon` shortly after.
+ */
+export type AcpDaemonRestartResponse = AcpDaemonStatus;
 
 // ─── Local agent CLI detection ────────────────────────────────────────
 //
-// To make first-time onboarding one click, the server probes the host
-// for known ACP-capable CLI binaries (`copilot`, `claude`, `gemini`)
-// and reports the ones it found. The Settings UI uses this to render a
-// "Connect" button per detected agent that mints a fresh pairing code
-// AND builds the exact `bin/agentlet --token … --agent "…"` command,
-// so the user just pastes it into a terminal.
+// The server probes the host for known ACP-capable CLI binaries
+// (`copilot`, `claude`, `gemini`) and reports the ones it found.
+// Powers the CLI dropdown in the Profile Editor — picking a detected
+// CLI pre-fills `command` for the new profile.
 //
 // This endpoint is loopback-only — it shells out to discover host
 // binaries and must never be reachable from a remote browser.
@@ -131,7 +149,7 @@ export interface AcpPairingListResponse {
 export interface AcpAgentCliInfo {
   /** Stable short id used by the UI (`copilot` / `claude` / `gemini`). */
   id: string;
-  /** Display name shown in the Settings UI. */
+  /** Display name shown in the Profile Editor. */
   displayName: string;
   /** Binary name the user must install (`copilot`). */
   binary: string;
@@ -158,32 +176,20 @@ export interface AcpAgentCliInfo {
 /** Response body for `GET /api/acp/agent-cli`. */
 export interface AcpAgentCliListResponse {
   /**
-   * Detected agent CLIs. By default the server filters out
-   * `installed === false` entries; UI shows nothing for missing agents.
+   * Detected agent CLIs. Server filters out `installed === false`
+   * entries by default; UI shows nothing for missing agents.
    */
   agents: AcpAgentCliInfo[];
-  /**
-   * True iff the `agentlet` wrapper itself is on the host's PATH.
-   * When `false`, the UI prefixes generated launch commands with
-   * the absolute path to the in-repo wrapper.
-   */
-  agentletOnPath: boolean;
-  /**
-   * Absolute path to the in-repo `bin/agentlet` wrapper, or `null`
-   * when no wrapper is available on this host (e.g. packaged Electron
-   * builds, which ship without it). Renderer UI degrades to a
-   * `bin/agentlet` placeholder in copy-paste commands when null.
-   */
-  agentletWrapperPath: string | null;
 }
 
 // ─── Thread → agent binding ────────────────────────────────────────────
 //
-// 1 chat thread is permanently bound to a single agent for its entire
-// lifetime
+// Each chat thread is permanently bound to a single agent for its entire
+// lifetime. The binding is a stable reference to either the built-in
+// agent OR a user-configured external profile.
 
 /**
- * Internal binding — chat thread talks to Huabu's built-in agent.
+ * Internal binding — chat thread talks to Sediment's built-in agent.
  * Default for every newly-created thread.
  */
 export interface AgentBindingInternal {
@@ -191,18 +197,21 @@ export interface AgentBindingInternal {
 }
 
 /**
- * External binding — chat thread is bound to a specific ACP-connected agent.
- * `alias` is the short name shown in the UI. `agentletAgentId` is the
- * opaque agentlet connection key that the server uses to dispatch
- * `session/prompt` (matches `AcpAgentSummary.agentId`).
+ * External binding — chat thread is bound to a user-configured ACP
+ * profile. The server resolves `profileId` to a live agentlet agent
+ * (spawning one via the daemon if needed) at request time; the actual
+ * `agentletAgentId` is intentionally NOT part of the binding because
+ * it changes across spawns.
  *
- * Persisted across page reloads via the chat store; cleared when the
- * thread is reset (`clearMessages`).
+ * `alias` is a UI-only mirror of `profile.displayName` captured at
+ * bind-time; it remains stable even if the profile is renamed later.
  */
 export interface AgentBindingExternal {
   kind: 'external';
+  /** Display label shown in the UI (mirror of `profile.displayName`). */
   alias: string;
-  agentletAgentId: string;
+  /** The user-configured profile this thread is bound to. */
+  profileId: string;
 }
 
 export type AgentBinding = AgentBindingInternal | AgentBindingExternal;
@@ -244,18 +253,19 @@ export interface AvailableCommand {
  * Request body for `POST /api/acp/threads/:threadId/session` — eagerly
  * open (or reuse) the per-thread ACP session so the web client can pull
  * slash commands BEFORE the user submits their first prompt.
+ *
+ * The server resolves `profileId` to a live agentlet agent (spawning
+ * one on the daemon if needed) before opening the session.
  */
 export interface EnsureAcpSessionRequest {
   /** Sediment canvasId scoping the session sandbox. Optional only for the no-canvas edge case. */
   canvasId?: string;
-  /** Opaque agentlet connection id (matches `AcpAgentSummary.agentId`). */
-  agentletAgentId: string;
-  /** Short display alias (matches `AcpAgentSummary.alias`). */
-  alias: string;
+  /** The user-configured profile this thread is bound to. */
+  profileId: string;
   /**
-   * Optional `cwd` for `session/new`. When omitted the server sends
-   * the `'/'` sentinel and the agentlet relay substitutes its own
-   * `process.cwd()`. See service.ts for the full rule.
+   * Optional `cwd` override for `session/new`. When omitted the server
+   * uses the profile's `cwd`. (Reserved for future per-thread cwd
+   * pinning; current UI does not expose it.)
    */
   cwd?: string;
 }
@@ -479,8 +489,7 @@ export const acpSessionMetaSnapshotSchema = z.object({
 /** Schema mirror of {@link EnsureAcpSessionRequest}. */
 export const ensureAcpSessionRequestSchema = z.object({
   canvasId: z.string().min(1).optional(),
-  agentletAgentId: z.string().min(1),
-  alias: z.string().min(1),
+  profileId: z.string().min(1),
   cwd: z.string().min(1).optional(),
 }) satisfies z.ZodType<EnsureAcpSessionRequest>;
 
@@ -548,3 +557,56 @@ export const setAcpSessionConfigOptionResponseSchema = z.object({
   configOptionId: z.string().min(1),
   value: z.union([z.string(), z.boolean()]),
 }) satisfies z.ZodType<SetAcpSessionConfigOptionResponse>;
+
+// ─── Agent-profile / daemon schemas ────────────────────────────────────
+
+/** Schema mirror of {@link AcpAgentProfile}. */
+export const acpAgentProfileSchema = z.object({
+  id: z.string().min(1),
+  displayName: z.string().min(1),
+  cliId: z.string().min(1),
+  command: z.string().min(1),
+  cwd: z.string().min(1),
+  autoRestart: z.boolean(),
+  createdAt: z.number().int().nonnegative(),
+  updatedAt: z.number().int().nonnegative(),
+}) satisfies z.ZodType<AcpAgentProfile>;
+
+/** Schema mirror of {@link AcpDaemonStatus}. */
+export const acpDaemonStatusSchema = z.object({
+  online: z.boolean(),
+  daemonId: z.string().min(1).optional(),
+  hostname: z.string().min(1).optional(),
+  platform: z.string().min(1).optional(),
+  connectedAt: z.string().min(1).optional(),
+  lastError: z.string().optional(),
+  nextRestartAt: z.number().int().nonnegative().optional(),
+}) satisfies z.ZodType<AcpDaemonStatus>;
+
+/** Schema mirror of {@link AcpProfilesListResponse}. */
+export const acpProfilesListResponseSchema = z.object({
+  profiles: z.array(acpAgentProfileSchema),
+  daemon: acpDaemonStatusSchema,
+}) satisfies z.ZodType<AcpProfilesListResponse>;
+
+/** Schema mirror of {@link AcpProfileCreateRequest}. */
+export const acpProfileCreateRequestSchema = z.object({
+  displayName: z.string().min(1).optional(),
+  cliId: z.string().min(1),
+  command: z.string().min(1),
+  cwd: z.string().min(1),
+  autoRestart: z.boolean().optional(),
+}) satisfies z.ZodType<AcpProfileCreateRequest>;
+
+/** Schema mirror of {@link AcpProfileUpdateRequest}. */
+export const acpProfileUpdateRequestSchema = z.object({
+  displayName: z.string().min(1).optional(),
+  command: z.string().min(1).optional(),
+  cwd: z.string().min(1).optional(),
+  autoRestart: z.boolean().optional(),
+}) satisfies z.ZodType<AcpProfileUpdateRequest>;
+
+// {@link AcpProfileMutationResponse}, {@link AcpDaemonStatusResponse} and
+// {@link AcpDaemonRestartResponse} are type aliases; reuse
+// `acpAgentProfileSchema` / `acpDaemonStatusSchema` directly
+// at the route boundary.

@@ -1,4 +1,4 @@
-import { Button } from './Button';
+import { Button, type ButtonProps } from './Button';
 import { cn } from './cn';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -13,6 +13,8 @@ type TabGroupProps<T extends string = string> = {
   value: T;
   onChange: (value: T) => void;
   className?: string;
+  /** Underlying `<Button>` size. Defaults to `'md'`. */
+  size?: ButtonProps['size'];
 };
 
 // ─── TabGroup ─────────────────────────────────────────────────────────────────
@@ -35,6 +37,7 @@ export function TabGroup<T extends string = string>({
   value,
   onChange,
   className,
+  size = 'md',
 }: TabGroupProps<T>) {
   return (
     <div className={cn('flex items-center gap-1', className)}>
@@ -42,7 +45,7 @@ export function TabGroup<T extends string = string>({
         <Button
           key={option.value}
           variant="ghost"
-          size="md"
+          size={size}
           className={
             option.value === value
               ? 'bg-bg-default text-fg-default'

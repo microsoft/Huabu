@@ -11,9 +11,10 @@ import { fastify } from 'fastify';
 import { getDataDir } from './data-dir.js';
 import {
   acpAgentCliRoutes,
-  acpAgentsRoutes,
-  acpPairRoutes,
+  acpDaemonRoutes,
+  acpProfilesRoutes,
   acpThreadsRoutes,
+  getDaemonSupervisor,
   mountAgentletServer,
 } from './modules/agent/acp/index.js';
 import agentRoutes from './modules/agent/agent.route.js';
@@ -165,22 +166,22 @@ app.register(skillsRoutes, { prefix: '/api/skills' });
 app.register(workspaceRoutes, { prefix: '/api/workspace' });
 
 // ── External agent (ACP) bridge ───────────────────────────────────────
-// Mount @agentlet/server (WS upgrade at /api/acp/agent) *unconditionally*.
-// The security boundary is the in-memory pairing-token store
-// (`modules/agent/acp/token-store.ts`), which is empty by default and
-// populated on demand when the user clicks "Generate code" in the
-// Settings UI. While no ticket exists, every `bridge/hello` is rejected
-// — but the endpoint stays reachable so the first successful pairing
-// takes effect without a server restart.
+// Mount @agentlet/server in daemon mode: an embedded supervisor
+// (`DaemonSupervisor`) forks `agentlet daemon …` as a child process
+// and connects it to this Fastify server via WebSocket loopback. The
+// daemon owns the agent worker pool; the server tells it which agent
+// CLI to spawn (per user profile). The daemon token never crosses the
+// HTTP boundary — it lives only in-process and on the loopback WS.
 //
 // Legacy migration: older builds persisted an `enabled` flag + shared
 // token in `data/acp-config.json`. The file is no longer read; if it
 // exists we silently delete it so a stale 0600 file does not linger.
+// The daemon supervisor also drops `data/acp-tickets.json` on attach.
 try {
   const legacyAcpConfigPath = join(getDataDir(), 'acp-config.json');
   unlinkSync(legacyAcpConfigPath);
   app.log.info(
-    `[acp] removed legacy ${legacyAcpConfigPath} — pairing is now ephemeral`,
+    `[acp] removed legacy ${legacyAcpConfigPath} \u2014 pairing is now daemon-managed`,
   );
 } catch (err) {
   // ENOENT is the happy path (no legacy file to remove); anything else
@@ -190,12 +191,13 @@ try {
   }
 }
 mountAgentletServer(app);
-app.register(acpAgentsRoutes, { prefix: '/api/acp' });
-app.register(acpPairRoutes, { prefix: '/api/acp' });
+getDaemonSupervisor().attach(app);
+app.register(acpProfilesRoutes, { prefix: '/api/acp' });
+app.register(acpDaemonRoutes, { prefix: '/api/acp' });
 app.register(acpAgentCliRoutes, { prefix: '/api/acp' });
 app.register(acpThreadsRoutes, { prefix: '/api/acp' });
 app.log.info(
-  '[acp] bridge mounted — generate a pairing code from the Settings UI to connect an external agent',
+  '[acp] bridge mounted \u2014 embedded agentlet daemon will start on server ready',
 );
 
 // Memory op-counter: bump the per-canvas counter on every successful

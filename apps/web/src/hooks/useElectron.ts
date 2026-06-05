@@ -15,6 +15,17 @@
  * outside the render phase.
  */
 
+interface WorkspaceStoreSnapshot {
+  path: string | null;
+  recent: string[];
+}
+
+interface ElectronWorkspaceApi {
+  get: () => Promise<WorkspaceStoreSnapshot>;
+  set: (path: string) => Promise<WorkspaceStoreSnapshot>;
+  removeRecent: (path: string) => Promise<WorkspaceStoreSnapshot>;
+}
+
 interface ElectronBridge {
   versions: {
     node: string;
@@ -31,6 +42,15 @@ interface ElectronBridge {
    * number. Always present when the bridge itself is present.
    */
   titleBarHeight: number;
+  /**
+   * Port-agnostic workspace persistence backed by a JSON file under
+   * `app.getPath('userData')` in the main process. Use this in
+   * preference to `localStorage` when present: Electron's renderer
+   * partitions storage by origin (scheme + host + port), and the
+   * shell's server port can change between launches, which would
+   * otherwise reset the saved workspace.
+   */
+  workspace?: ElectronWorkspaceApi;
 }
 
 declare global {

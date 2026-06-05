@@ -24,6 +24,7 @@ import {
   prepareExternalAgentPrompt,
   serializeRawPrompt,
 } from './preprocessor.js';
+import { getProfile } from './profile-store.js';
 import { getAgentletServer } from './server-mount.js';
 import { acpSessionRegistry } from './session-registry.js';
 import {
@@ -32,6 +33,7 @@ import {
   writeAcpSessionMeta,
   writeAcpSessionRecord,
 } from './session-store.js';
+import { ensureAgentForThread, threadKey } from './spawn-orchestrator.js';
 import { acpUpdateToStreamEvent, mergeThinkingChunk } from './translator.js';
 import { canvasRoot as resolveCanvasRoot } from '../../storage/paths.js';
 import {
@@ -44,7 +46,10 @@ import {
 } from '../store/chat-parts-store.js';
 
 import type { AcpSessionEntry } from './session-registry.js';
-import type { AcpSessionPersistedMeta } from './session-store.js';
+import type {
+  AcpBindingRecipe,
+  AcpSessionPersistedMeta,
+} from './session-store.js';
 import type { ChatPartsSidecar } from '../store/chat-parts-store.js';
 import type { AssistantMessage, Context } from '@earendil-works/pi-ai';
 import type {
@@ -94,8 +99,14 @@ function extractText(
 }
 
 export interface RunAcpAgentOptions {
-  /** External binding for the active thread. */
-  binding: { alias: string; agentletAgentId: string };
+  /**
+   * External binding for the active thread. `profileId` references a
+   * user-configured spawn recipe (see `./profile-store.ts`); the
+   * orchestrator resolves it to a live agentlet agent (spawning one
+   * on the daemon if needed). `alias` is purely a label for logs +
+   * `prepared_prompt` events.
+   */
+  binding: { alias: string; profileId: string };
   /** Plain-text or content-block message to send (we extract text below). */
   message: string | ReadonlyArray<{ type: string; text?: string }>;
   /** Sediment thread id \u2014 used as the registry key. */
@@ -119,16 +130,13 @@ export interface RunAcpAgentOptions {
    * `cwd` passed to `session/new` on first prompt for this thread.
    * Ignored for subsequent prompts (the session is already open).
    *
-   * Defaults to `'/'`, which is the **agreed sentinel** with the
-   * agentlet relay: when `params.cwd` is missing or `'/'`, the relay
-   * substitutes its own `process.cwd()` (see
-   * `agentlet/packages/local/src/relay.ts#enrichMessage`). This keeps
-   * the local working directory authoritative on the user's machine
-   * and frees Sediment from guessing repo paths until canvas ↔ repo
-   * binding is wired here.
-   *
-   * **Current user contract**: launch agentlet from the project root
-   * (`cd <repo> && agentlet --agent "claude --acp" --server …`).
+   * When omitted, `ensureAcpSession` resolves it from the bound
+   * profile's `cwd` (set by the user in Settings → External Agents).
+   * If the profile has been deleted and no `bindingRecipe` snapshot
+   * was persisted, the call throws — we never silently fall back to
+   * a sentinel like `'/'` (which the old agentlet relay was meant to
+   * substitute with `process.cwd()` but never did, leaving agents
+   * stranded at the filesystem root).
    */
   cwd?: string;
   /**
@@ -147,14 +155,18 @@ export interface RunAcpAgentOptions {
 
 export interface EnsureAcpSessionOptions {
   threadId: string;
-  /** External binding for the thread. */
-  binding: { alias: string; agentletAgentId: string };
+  /** External binding for the thread (see {@link RunAcpAgentOptions.binding}). */
+  binding: { alias: string; profileId: string };
   /**
    * Sediment canvasId scoping the sandbox. Empty string = no canvas
    * (fs/* will be rejected). Mirrors {@link RunAcpAgentOptions.canvasId}.
    */
   canvasId?: string;
-  /** `cwd` for `session/new`. Defaults to `'/'` (relay substitutes its cwd). */
+  /**
+   * `cwd` for `session/new`. When omitted, resolved from the bound
+   * profile's `cwd` (see {@link RunAcpAgentOptions.cwd} for the full
+   * fallback chain).
+   */
   cwd?: string;
   logger: FastifyBaseLogger;
 }
@@ -162,7 +174,7 @@ export interface EnsureAcpSessionOptions {
 /**
  * Per-key map of in-flight `ensureAcpSession` work, used to coalesce
  * concurrent callers so we never run `initialize() + session/new`
- * twice for the same `{threadId, agentletAgentId, canvasId}` triple.
+ * twice for the same `{threadId, profileId, canvasId}` triple.
  *
  * Why this matters: the ChatPanel mount fires
  * `POST /api/acp/threads/:id/session` to warm the slash-command cache,
@@ -173,7 +185,7 @@ export interface EnsureAcpSessionOptions {
  * `shutdown()`s the first client — which silently invalidates the
  * first request's listener registration and wastes one round-trip.
  *
- * Keying by all three staleness inputs means: different agent / canvas
+ * Keying by all three staleness inputs means: different profile / canvas
  * / thread → independent slots, so a binding switch is never blocked
  * waiting on a stale promise.
  */
@@ -181,10 +193,10 @@ const inflightEnsureSessions = new Map<string, Promise<AcpSessionEntry>>();
 
 function ensureSessionKey(
   threadId: string,
-  agentletAgentId: string,
+  profileId: string,
   canvasId: string,
 ): string {
-  return `${threadId}|${agentletAgentId}|${canvasId}`;
+  return `${threadId}|${profileId}|${canvasId}`;
 }
 
 /**
@@ -327,30 +339,30 @@ function findThreadIdForEntry(entry: AcpSessionEntry): string | null {
 /**
  * Get-or-create the per-thread ACP session, installing the long-lived
  * `available_commands_update` listener on first creation. Idempotent for
- * a given `{threadId, agentletAgentId, canvasId}` triple — repeated calls
+ * a given `{threadId, profileId, canvasId}` triple — repeated calls
  * return the same {@link AcpSessionEntry} without re-issuing `session/new`.
  *
  * Concurrency: thread-safe across overlapping awaits. Multiple calls
- * for the same `{threadId, agentletAgentId, canvasId}` key share the
+ * for the same `{threadId, profileId, canvasId}` key share the
  * same in-flight promise so only one `initialize() + session/new`
  * pair is ever issued for a given coalescing window.
  *
  * Stale-entry rules (mirror the logic previously inlined in
  * `runAcpAgent`):
- *  - Binding switched to a different agent → drop and rebuild.
+ *  - Binding switched to a different profile → drop and rebuild.
  *  - Canvas changed → drop (sandbox scope mismatch).
  *  - Stored client was shut down → drop and reopen.
  *
  * Throws synchronously when the agentlet bridge is not mounted or the
- * agent is not connected — same surface as the inline path so callers
- * can `try`/`catch` uniformly.
+ * daemon refuses to spawn the agent — same surface as the inline path
+ * so callers can `try`/`catch` uniformly.
  */
 export async function ensureAcpSession(
   opts: EnsureAcpSessionOptions,
 ): Promise<AcpSessionEntry> {
   const key = ensureSessionKey(
     opts.threadId,
-    opts.binding.agentletAgentId,
+    opts.binding.profileId,
     opts.canvasId ?? '',
   );
   const existing = inflightEnsureSessions.get(key);
@@ -376,39 +388,56 @@ async function ensureAcpSessionInner(
 ): Promise<AcpSessionEntry> {
   const { threadId, binding, logger } = opts;
   const canvasId = opts.canvasId ?? '';
-  const cwd = opts.cwd ?? '/';
+  const persisted = readAcpSessionRecord(canvasId, threadId);
+
+  // Recipe-first resolution:
+  //   1. Trust the persisted `bindingRecipe` snapshot (returning thread —
+  //      profile mutations / deletions after thread creation must NOT
+  //      reach the running agent).
+  //   2. Fall back to the live profile lookup (first-time thread, or
+  //      legacy v2 record without a recipe). We then snapshot the
+  //      profile onto the record below so subsequent calls hit (1).
+  //   3. If neither is available, the binding is unbound — fail with a
+  //      clear, user-actionable error.
+  let recipe: AcpBindingRecipe | null = persisted?.bindingRecipe ?? null;
+  if (!recipe) {
+    const profile = getProfile(binding.profileId);
+    if (profile) {
+      recipe = {
+        command: profile.command,
+        cwd: profile.cwd,
+        autoRestart: profile.autoRestart,
+        alias: profile.displayName,
+      };
+    }
+  }
+  if (!recipe) {
+    throw new Error(
+      `External agent '${binding.alias}' is no longer configured. Re-create the profile in Settings → External Agents, or start a new chat with another agent.`,
+    );
+  }
+  const cwd = opts.cwd ?? recipe.cwd;
 
   const server = getAgentletServer();
   if (!server) {
     throw new Error(
-      'ACP bridge is not mounted \u2014 enable external agents from the Settings panel',
-    );
-  }
-  const conn = server.getConnection(binding.agentletAgentId);
-  if (!conn || conn.status !== 'connected') {
-    throw new Error(
-      `External agent '${binding.alias}' (id=${binding.agentletAgentId}) is not connected`,
+      'ACP bridge is not mounted \u2014 the embedded agentlet daemon is not running yet',
     );
   }
 
-  let entry = acpSessionRegistry.get(threadId);
-  if (entry && entry.agentletAgentId !== binding.agentletAgentId) {
-    logger.info(
-      {
-        threadId,
-        oldAgentId: entry.agentletAgentId,
-        newAgentId: binding.agentletAgentId,
-      },
-      '[acp] thread binding changed \u2014 discarding stale session',
-    );
-    cancelPersistEntryMeta(entry.canvasId, threadId);
-    acpSessionRegistry.remove(threadId);
-    // Stale binding → persisted sessionId is also stale (it belongs to
-    // the OLD agent). Drop it so we don't try to load it against the
-    // new agent on the next miss.
-    deleteAcpSessionRecord(canvasId, threadId);
-    entry = undefined;
+  // Resolve the thread to a live agentlet agent. Each thread owns its
+  // own CLI process — the orchestrator either returns the cached spawn
+  // or asks the daemon to start a new one keyed on `(canvasId, threadId)`.
+  // Failures here surface as a 503 from the caller with a user-actionable
+  // hint pointing at Settings → External Agents.
+  const tk = threadKey(canvasId, threadId);
+  const { agentletAgentId } = await ensureAgentForThread(tk, recipe);
+  const conn = server.getConnection(agentletAgentId);
+  if (!conn || conn.status !== 'connected') {
+    throw new Error(`External agent '${recipe.alias}' is not connected`);
   }
+
+  let entry = acpSessionRegistry.get(threadId);
   if (entry && entry.canvasId !== canvasId) {
     logger.info(
       {
@@ -448,7 +477,8 @@ async function ensureAcpSessionInner(
   // sessionId via `session/load`; fall back to `session/new` when
   // there is no record, the agent does not support load, or the load
   // call rejects (e.g. agent restarted and forgot the session).
-  const persisted = readAcpSessionRecord(canvasId, threadId);
+  // (`persisted` was read at the top of this function for recipe
+  // resolution and is reused here unchanged.)
   const client = new AcpAgentClient(conn, { canvasId, logger });
   await client.initialize();
 
@@ -458,14 +488,14 @@ async function ensureAcpSessionInner(
   // in place (see {@link handleSessionMetaUpdate}); the sessionId
   // field is filled in below once known. This matters because
   // `session/load` typically replays the full session history as a
-  // stream of `session/update` notifications — far more than the
+  // stream of `session/update` notifications \u2014 far more than the
   // orphan-buffer cap of `MAX_ORPHAN_UPDATES_PER_SESSION = 32` would
   // tolerate. With a listener attached, dispatched updates skip the
   // orphan buffer entirely.
   const created: AcpSessionEntry = {
     client,
     sessionId: '',
-    agentletAgentId: binding.agentletAgentId,
+    profileId: binding.profileId,
     canvasId,
     cwd,
     createdAt: Date.now(),
@@ -484,13 +514,13 @@ async function ensureAcpSessionInner(
   let sessionId: string | null = null;
   let removeListener: (() => void) | null = null;
 
-  if (persisted && persisted.agentletAgentId === binding.agentletAgentId) {
+  if (persisted) {
     if (agentSupportsLoadSession(client.initializeResult)) {
       logger.info(
         {
           threadId,
           canvasId,
-          agentId: binding.agentletAgentId,
+          profileId: binding.profileId,
           sessionId: persisted.sessionId,
           cwd: persisted.cwd,
         },
@@ -520,7 +550,7 @@ async function ensureAcpSessionInner(
         // "Already loaded" is the BEST possible outcome: the agent
         // process is still alive (typical scenario: only the Sediment
         // server restarted, the user's agentlet CLI kept running) and
-        // already holds the session in memory. Adopt it as-is — no
+        // already holds the session in memory. Adopt it as-is \u2014 no
         // replay needed, no fallback. Copilot CLI surfaces this as
         // `Session <id> is already loaded`; other agents may use
         // different wording, hence the permissive substring check.
@@ -529,7 +559,7 @@ async function ensureAcpSessionInner(
           created.sessionId = sessionId;
           // The agent already holds this session in memory and will
           // NOT replay `available_commands_update` / `current_mode_update`
-          // / `usage_update` / etc. on its own — those notifications
+          // / `usage_update` / etc. on its own \u2014 those notifications
           // only fire on the original `session/new` or `session/load`.
           // Without a fallback the registry entry would surface empty
           // selectors and an empty slash-command list to the UI for the
@@ -540,7 +570,7 @@ async function ensureAcpSessionInner(
           // the server restart. By definition that snapshot reflects
           // what THIS agent process most recently advertised, so it is
           // exactly what a fresh `session/new` against the same agent
-          // would return today — modulo any state the user changed
+          // would return today \u2014 modulo any state the user changed
           // out-of-band while the Sediment server was down (a vanishingly
           // narrow race for typical use). Subsequent `session/update`
           // notifications still take precedence; this is purely a seed.
@@ -590,7 +620,7 @@ async function ensureAcpSessionInner(
       }
     } else {
       logger.info(
-        { threadId, agentId: binding.agentletAgentId },
+        { threadId, profileId: binding.profileId },
         '[acp] agent does not advertise loadSession capability \u2014 cannot resume; using session/new',
       );
       // Don't delete the record here: a future agent upgrade may add
@@ -601,7 +631,7 @@ async function ensureAcpSessionInner(
 
   if (!sessionId) {
     logger.info(
-      { threadId, canvasId, agentId: binding.agentletAgentId, cwd },
+      { threadId, canvasId, profileId: binding.profileId, cwd },
       '[acp] opening new session for thread',
     );
     const newResult = await client.newSession({ cwd });
@@ -616,7 +646,7 @@ async function ensureAcpSessionInner(
     // a wired-up listener. The listener registration itself replays
     // any orphan `available_commands_update` notifications that
     // arrived BEFORE `session/new` resolved (a common ACP wire
-    // ordering — see `AcpAgentClient.orphanUpdates`), so we never
+    // ordering \u2014 see `AcpAgentClient.orphanUpdates`), so we never
     // miss the agent's initial command-list push regardless of who
     // wins the response-vs-notification race.
     client.registerSessionListener(sessionId, (update) => {
@@ -638,8 +668,9 @@ async function ensureAcpSessionInner(
   try {
     writeAcpSessionRecord(canvasId, threadId, {
       sessionId,
-      agentletAgentId: binding.agentletAgentId,
+      profileId: binding.profileId,
       cwd,
+      bindingRecipe: recipe,
       meta: snapshotEntryMeta(created),
     });
   } catch (err) {
@@ -971,12 +1002,13 @@ export async function* runAcpAgent(
   //          to `nodes/**` + `.artifacts/**`, scoped to this canvasId.
   //        Reachable only via ACP `fs/read_text_file`.
   //
-  //   2. Agent execution workspace (the agent process' own `cwd`)
-  //        = whatever the agentlet relay substitutes for the `'/'`
-  //          sentinel below, i.e. the relay's `process.cwd()`. By
-  //          contract the user launches agentlet from their project
-  //          root, so the agent's native shell/fs sees the repo,
-  //          not the canvas dir.
+  //   2. Agent execution workspace (the agent process' own `cwd`
+  //        plus the `cwd` we pass to `session/new`)
+  //        = the bound profile's configured working directory. The
+  //          daemon spawns the agent process with `profile.cwd` and
+  //          `ensureAcpSession` opens `session/new` with the same
+  //          value, so the agent's native shell/fs and its ACP
+  //          session-scoped workspace agree.
   //
   // Empirically (see /tmp/copilot-acp-probe.mjs) not every agent
   // honours (1): Copilot CLI's `Read` tool **never** calls
@@ -1001,18 +1033,19 @@ export async function* runAcpAgent(
   // `/canvas/<rel>` virtual paths so any spec-compliant agent can
   // still reach files via the ACP fs handler.
   const canvasCwd = canvasId ? resolveCanvasRoot(canvasId) : undefined;
-  const cwd = opts.cwd ?? '/';
 
   // 1-2. Ensure (open or reuse) the per-thread ACP session. The helper
   //      handles connection lookup, stale-entry eviction, initialize +
   //      session/new, and registers the `available_commands_update`
   //      listener so slash-command pushes outside a turn don't get
-  //      silently dropped.
+  //      silently dropped. We deliberately do NOT pass `cwd` here so
+  //      `ensureAcpSession` derives it from the bound profile; passing
+  //      `'/'` would override the user's configured working directory.
   const entry = await ensureAcpSession({
     threadId,
     binding,
     canvasId,
-    cwd,
+    ...(opts.cwd !== undefined && { cwd: opts.cwd }),
     logger,
   });
 
@@ -1148,7 +1181,7 @@ export async function* runAcpAgent(
     {
       threadId,
       sessionId: entry.sessionId,
-      agentId: binding.agentletAgentId,
+      profileId: binding.profileId,
       promptLength: promptPayload.length,
       preprocessed: preparedPrompt !== null,
     },

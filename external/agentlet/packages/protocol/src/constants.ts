@@ -12,6 +12,10 @@ export const BridgeMethods = {
   PING: 'bridge/ping',
   PONG: 'bridge/pong',
   SHUTDOWN: 'bridge/shutdown',
+  // Daemon control methods (server → daemon)
+  SPAWN: 'bridge/spawn',
+  STOP: 'bridge/stop',
+  LIST: 'bridge/list',
 } as const
 
 /** Error codes used in bridge/hello rejection */
