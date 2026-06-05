@@ -18,6 +18,7 @@ import {
   putNodeContentBodySchema,
 } from '@sediment/shared';
 
+import { CanvasNotFoundError, executeOnServer } from './canvas-executor.js';
 import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
 import { getPreprocessDispatcher } from '../preprocessing/index.js';
 import {
@@ -34,7 +35,6 @@ import {
 } from '../storage/index.js';
 import { canvasRoot } from '../storage/paths.js';
 import { getWorkspacePath } from '../workspace.js';
-import { CanvasNotFoundError, executeOnServer } from './canvas-executor.js';
 
 import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
 import type {
