@@ -804,9 +804,15 @@ export const AcpSettings: React.FC = () => {
       // cwd config and re-typing them is annoying. `window.confirm`
       // matches the rest of the codebase's destructive-action UX
       // (no custom dialog primitive yet).
+      //
+      // Profiles are templates: deleting one removes it from the menu
+      // and prevents new threads from binding, but threads that already
+      // snapshotted the recipe (v3+ records) keep running unchanged.
+      // Phrase the prompt that way so users aren't surprised when an
+      // open chat keeps responding after they delete the profile.
       if (
         !window.confirm(
-          `Delete profile "${profile.displayName}"? Threads bound to it will fall back to the built-in agent.`,
+          `Delete profile "${profile.displayName}"? You won't be able to start new chats with it. Chats already using it keep running with the current settings.`,
         )
       ) {
         return;

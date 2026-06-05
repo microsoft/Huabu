@@ -1,3 +1,5 @@
+import { Pencil, Settings as SettingsIcon, Trash2 } from 'lucide-react';
+
 import {
   Callout,
   Code,
@@ -11,55 +13,54 @@ import {
 } from '../../components';
 
 const toc: TocEntry[] = [
-  { id: 'why-external-agents', label: 'Why use an external agent' },
   { id: 'add-first-agent', label: 'Add your first agent' },
   { id: 'profile-fields', label: 'What goes into a profile' },
   { id: 'using-in-chat', label: 'Using a profile in chat' },
   { id: 'editing-deleting', label: 'Editing & deleting profiles' },
-  { id: 'daemon-health', label: 'Daemon health & troubleshooting' },
+  { id: 'troubleshooting', label: 'Troubleshooting' },
 ];
 
 export default function ExternalAgents() {
   return (
     <PageLayout
       title="External Agents"
-      description="Bring your own coding agent. Huabu can drive the official Copilot, Claude or Gemini CLIs (and any other ACP-compatible binary) through an embedded bridge — no pairing codes, no terminal paste. You configure an agent profile in Settings and Huabu spawns the process on demand."
+      description="The how-to for bringing your own external agent into Huabu: install a supported agent, create an agent profile in Settings, and use it from any chat thread."
       toc={toc}
     >
-      <H2>Why use an external agent</H2>
-      <P>
-        The coding CLIs ship with their own tool catalogue, slash commands,
-        login and quota. Binding one to a Huabu chat thread lets the canvas
-        drive your existing agent setup — your prompts go through Huabu, but the
-        agent itself keeps using your provider account, your local files and its
-        own command set.
-      </P>
-      <P>
-        Under the hood Huabu&apos;s server forks a small <Code>agentlet</Code>{' '}
-        daemon and supervises it for you. You never touch the daemon directly;
-        you only edit <strong>agent profiles</strong> — stable recipes that say{' '}
-        <em>which</em> CLI to run, <em>where</em> to run it, and with which
-        flags.
-      </P>
+      <Callout tone="info">
+        New here? Start with{' '}
+        <DocLink href="/docs/core/pluggable-agents">Pluggable Agents</DocLink>{' '}
+        for the rationale and the security model. This page focuses on the
+        day-to-day workflow: setting up profiles and using them in chat.
+      </Callout>
 
       <H2>Add your first agent</H2>
       <P>
-        Open Settings (gear icon, top-right) → <strong>External Agents</strong>{' '}
-        and click <strong>Add agent</strong>. The editor opens with two tabs:
+        Open Settings (
+        <SettingsIcon
+          aria-label="Settings"
+          className="inline-block size-[1em] align-[-0.15em]"
+        />{' '}
+        in the top-right corner) → <strong>External Agents</strong> and click{' '}
+        <strong>Add agent</strong>. The editor opens with two tabs:
       </P>
       <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
         <li>
-          <strong>Built-in</strong> — pick from the ACP-capable CLIs Huabu
+          <strong>Built-in</strong> — pick from the supported agents Huabu
           detected on your <Code>PATH</Code> (<Code>copilot</Code>,{' '}
-          <Code>claude</Code>, <Code>gemini</Code>). The launch command is
-          assembled for you; you don&apos;t see or edit the command string
-          directly.
+          <Code>claude</Code>, <Code>gemini</Code>, and any other compatible
+          agent that ships with Huabu). The launch command is assembled for you;
+          you don&apos;t see or edit the command string directly.
         </li>
         <li>
           <strong>Custom</strong> — type the full launch command yourself. Use
           this for binaries that aren&apos;t on <Code>PATH</Code>, for flags the
-          structured form doesn&apos;t expose, or for any CLI Huabu didn&apos;t
-          detect.
+          structured form doesn&apos;t expose, or for any agent Huabu
+          didn&apos;t detect. See the{' '}
+          <DocLink href="https://github.com/hai-team/agentlet#readme">
+            agentlet README
+          </DocLink>{' '}
+          for the full list of supported agents and flags.
         </li>
       </ul>
       <P>
@@ -70,48 +71,12 @@ export default function ExternalAgents() {
         every chat surface — no restart, no terminal step.
       </P>
       <Callout tone="info">
-        If no ACP-capable CLI shows up under <strong>Built-in</strong>, install
+        If no supported agent shows up under <strong>Built-in</strong>, install
         one first — for example <Code>npm install -g @github/copilot</Code>,{' '}
         <Code>npm install -g @anthropic-ai/claude-code</Code>, or{' '}
         <Code>npm install -g @google/gemini-cli</Code> — then re-open the
         editor. Detection re-runs every time Settings is opened.
       </Callout>
-
-      <H2>What goes into a profile</H2>
-      <Table
-        headers={['Field', 'Meaning']}
-        rows={[
-          [
-            'Agent',
-            'Which CLI the daemon should spawn. Built-in fills the launch command for you; Custom takes a free-form command line.',
-          ],
-          [
-            'Auto-approve all tool calls',
-            'Only shown for CLIs that expose an explicit allow-all flag (e.g. Copilot\u2019s --allow-all). Convenient for sandboxed runs, risky for anything that touches your filesystem or network.',
-          ],
-          [
-            'Working directory',
-            'Absolute path the agent process is launched in. The agent treats it as the project root for file edits and tool calls. A folder-picker button appears next to the field when the host supports it.',
-          ],
-          [
-            'Display name',
-            'Label shown in the chat panel and @mention menu. Defaults to "<Agent> (<folder basename>)" — leave the field blank to accept the default.',
-          ],
-          [
-            'Auto-restart on crash',
-            'Hidden under the Advanced section. When on, the daemon restarts the agent process if it exits unexpectedly. Default: on.',
-          ],
-          [
-            'Extra args / Environment',
-            'Also under Advanced. Extra args are appended to the structured launch command. Environment is one KEY=VALUE per line, merged into the agent process env (API keys, HTTPS_PROXY, etc.).',
-          ],
-        ]}
-      />
-      <P>
-        The <strong>Agent</strong> field is immutable once a profile exists —
-        editing the profile shows the chosen CLI as a static label. Switching
-        CLIs means creating a new profile.
-      </P>
 
       <H2>Using a profile in chat</H2>
       <P>Every profile appears in two places:</P>
@@ -133,9 +98,10 @@ export default function ExternalAgents() {
       <P>
         Inside a thread bound to an external agent, press <Kbd>/</Kbd> to see
         the agent&apos;s own slash commands — each CLI exposes its own set
-        (Copilot / Claude / Gemini all differ). The agent is spawned lazily on
-        first message and re-used across turns; the daemon may tear it down
-        between sessions to free resources.
+        (Copilot / Claude / Gemini all differ). The agent is started in the
+        background on your first message and re-used for the rest of the chat;
+        Huabu may release it between sessions to free resources, and will start
+        it again automatically the next time you message.
       </P>
       <Callout tone="info">
         One chat thread is permanently bound to one agent. Switching agents
@@ -144,47 +110,67 @@ export default function ExternalAgents() {
 
       <H2>Editing & deleting profiles</H2>
       <P>
-        Each row in Settings → External Agents has a pencil (edit) and a trash
-        (delete) icon. Edits hot-reload — the next message sent to a thread
-        bound to that profile uses the updated command / cwd. Deleting a profile
-        asks for confirmation; threads that were bound to the deleted profile
-        fall back to Huabu&apos;s built-in agent.
+        Each row in Settings → External Agents has a{' '}
+        <Pencil
+          aria-label="Edit"
+          className="inline-block size-[1em] align-[-0.15em]"
+        />{' '}
+        (edit) and a{' '}
+        <Trash2
+          aria-label="Delete"
+          className="inline-block size-[1em] align-[-0.15em]"
+        />{' '}
+        (delete) icon. A profile is a template that&apos;s only consulted when
+        you start a new chat — once a chat is running, it remembers its own copy
+        of the command, working directory and other settings.
       </P>
-      <Callout tone="warning">
-        Profile data persists across server restarts (it lives on disk under the
-        workspace storage path). Pairing codes and per-session daemon tokens are
-        gone in the daemon model — there is no longer anything you need to
-        regenerate after a restart.
+      <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
+        <li>
+          <strong>Editing</strong> a profile updates the template for future
+          chats. Chats that are already open keep using the settings they were
+          started with; start a new chat to pick up the new command or working
+          directory.
+        </li>
+        <li>
+          <strong>Deleting</strong> a profile (after a confirmation prompt)
+          removes it from the menu. Chats that were already using it keep
+          working — you just can&apos;t start a new chat with that profile
+          anymore.
+        </li>
+      </ul>
+      <Callout tone="info">
+        This is deliberate: an open chat&apos;s settings never change underneath
+        a turn that&apos;s already running, so an in-flight reply can&apos;t get
+        confused by a profile edit or deletion.
       </Callout>
 
-      <H2>Daemon health & troubleshooting</H2>
+      <H2>Troubleshooting</H2>
       <P>
-        On the happy path the daemon is invisible. When the supervisor cannot
-        keep it online, an amber <strong>Worker offline</strong> banner appears
-        above the profile list with the last error message and a{' '}
-        <strong>Restart worker</strong> button. The supervisor also retries on
-        its own with exponential backoff; the button is an escape hatch when
-        backoff has stretched too long or you just fixed the underlying problem
-        (installed the missing CLI, freed a port, etc.).
+        If something goes wrong, Huabu surfaces it in two places: an amber{' '}
+        <strong>Worker offline</strong> banner above the profile list in
+        Settings → External Agents (with the last error message and a{' '}
+        <strong>Restart worker</strong> button), and an inline error inside the
+        affected chat thread. The common cases — and what to do about them — are
+        listed below.
       </P>
       <Table
         headers={['Symptom', 'Likely cause / fix']}
         rows={[
           [
             'Built-in tab is empty in the Profile editor',
-            'No supported CLI is on PATH for the Sediment server process. Install at least one (copilot / claude / gemini) and re-open Settings.',
+            'No supported agent is on PATH for the Sediment server. Install at least one (e.g. copilot / claude / gemini, see the install commands above) and re-open Settings.',
           ],
           [
-            'Worker offline banner with "daemon path not found"',
-            'The bundled daemon entry was not found. Set HUABU_AGENTLET_DAEMON_PATH to a built agentlet daemon, or run from the monorepo so the bundled fallback resolves.',
+            'Worker offline banner appears',
+            'Huabu can\u2019t start the background process that drives external agents. Use Restart worker to try again immediately; if the error mentions a missing CLI or path, install / fix it and restart.',
           ],
           [
-            'Profile saves but the agent never responds',
-            'Open the banner area to confirm the daemon is online. If it is, the agent process likely crashed on launch — toggle Auto-restart off, try the command in a terminal manually, then re-enable it.',
+            'Profile saves but the agent never replies',
+            'The agent process probably crashed on launch. Try the launch command in a normal terminal to see the real error, fix the command in the profile (or pick a different CLI), then send a new message.',
           ],
           [
-            'Threads bound to a deleted / renamed profile silently switch agents',
-            'Expected behaviour. The binding is by profileId, so deleting falls back to the built-in agent. Renaming keeps the binding (the alias stored on the thread updates on the next turn).',
+            'Edited a profile but the chat still uses the old command / cwd',
+            'Expected. Open chats keep the settings they were started with. Start a new chat to use the updated profile.',
           ],
         ]}
       />
