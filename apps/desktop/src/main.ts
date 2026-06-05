@@ -30,13 +30,16 @@ import {
   existsSync,
   mkdirSync,
   readdirSync,
+  readFileSync,
+  renameSync,
   statSync,
   unlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import net from 'node:net';
 import { isAbsolute, join } from 'node:path';
 
-import { app, BrowserWindow, dialog, Menu, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron';
 import { utilityProcess, type UtilityProcess } from 'electron';
 import getPort from 'get-port';
 
@@ -459,6 +462,115 @@ function waitForPort(port: number, timeoutMs = 20_000): Promise<void> {
   });
 }
 
+// ── Workspace persistence ────────────────────────────────────────────
+
+/**
+ * Persist the user-selected free-mode workspace path (and recent list)
+ * in a JSON file under `app.getPath('userData')` so it survives across
+ * launches independently of the renderer's `localStorage`.
+ *
+ * Why not just rely on `localStorage`? Chromium partitions storage by
+ * origin (scheme + host + port). The Electron shell forks the server on
+ * a fresh port whenever the preferred port (3001) is busy — e.g. a
+ * leftover server process, another local service, or simply a second
+ * launch racing with the first. A different port means a different
+ * origin, which means a separate, empty `localStorage` bucket and the
+ * user is dumped back on the workspace picker even though they picked
+ * a folder yesterday.
+ *
+ * Storing the path in the main process (one location per user,
+ * port-agnostic) and exposing it over IPC sidesteps the partition
+ * entirely. The renderer still keeps `localStorage` writes for
+ * browser/dev mode compatibility, but the Electron bridge takes
+ * precedence when present.
+ */
+
+const WORKSPACE_STORE_FILE = 'workspace.json';
+const MAX_RECENT_WORKSPACES = 5;
+
+interface WorkspaceStore {
+  path: string | null;
+  recent: string[];
+}
+
+function workspaceStorePath(): string {
+  return join(app.getPath('userData'), WORKSPACE_STORE_FILE);
+}
+
+function readWorkspaceStore(): WorkspaceStore {
+  const file = workspaceStorePath();
+  if (!existsSync(file)) return { path: null, recent: [] };
+  try {
+    const raw = readFileSync(file, 'utf8');
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') {
+      return { path: null, recent: [] };
+    }
+    const obj = parsed as Record<string, unknown>;
+    const path =
+      typeof obj.path === 'string' && obj.path.length > 0 ? obj.path : null;
+    const recent = Array.isArray(obj.recent)
+      ? obj.recent.filter((p): p is string => typeof p === 'string')
+      : [];
+    return { path, recent };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[desktop] workspace store unreadable: ${message}`);
+    return { path: null, recent: [] };
+  }
+}
+
+function writeWorkspaceStore(store: WorkspaceStore): void {
+  const file = workspaceStorePath();
+  // Atomic-ish write via tmp + rename so a crash mid-write doesn't
+  // leave a half-truncated JSON the next launch refuses to parse.
+  const tmp = `${file}.tmp`;
+  mkdirSync(app.getPath('userData'), { recursive: true });
+  writeFileSync(tmp, JSON.stringify(store, null, 2), 'utf8');
+  renameSync(tmp, file);
+}
+
+function pushRecentWorkspace(store: WorkspaceStore, path: string): string[] {
+  const next = [path, ...store.recent.filter((p) => p !== path)].slice(
+    0,
+    MAX_RECENT_WORKSPACES,
+  );
+  return next;
+}
+
+function registerWorkspaceIpc(): void {
+  ipcMain.handle('workspace:get', () => readWorkspaceStore());
+
+  ipcMain.handle('workspace:set', (_event, rawPath: unknown) => {
+    if (typeof rawPath !== 'string' || rawPath.length === 0) {
+      throw new Error('workspace:set requires a non-empty string path');
+    }
+    if (!isAbsolute(rawPath)) {
+      throw new Error('workspace:set requires an absolute path');
+    }
+    const current = readWorkspaceStore();
+    const next: WorkspaceStore = {
+      path: rawPath,
+      recent: pushRecentWorkspace(current, rawPath),
+    };
+    writeWorkspaceStore(next);
+    return next;
+  });
+
+  ipcMain.handle('workspace:remove-recent', (_event, rawPath: unknown) => {
+    if (typeof rawPath !== 'string') {
+      throw new Error('workspace:remove-recent requires a string path');
+    }
+    const current = readWorkspaceStore();
+    const next: WorkspaceStore = {
+      path: current.path === rawPath ? null : current.path,
+      recent: current.recent.filter((p) => p !== rawPath),
+    };
+    writeWorkspaceStore(next);
+    return next;
+  });
+}
+
 // ── BrowserWindow ────────────────────────────────────────────────────
 
 let mainWindow: BrowserWindow | null = null;
@@ -610,6 +722,11 @@ app.whenReady().then(async () => {
   // reload accelerators are re-bound per window via
   // `before-input-event` inside `createWindow`.
   Menu.setApplicationMenu(null);
+
+  // Register IPC handlers BEFORE any window is created so the preload
+  // script's `ipcRenderer.invoke('workspace:get', …)` calls always have
+  // a handler to talk to, even on the very first render.
+  registerWorkspaceIpc();
 
   // macOS Dock icon. In a packaged .app this comes from the bundle's
   // .icns automatically, but in dev (`electron .`) the Dock would show
