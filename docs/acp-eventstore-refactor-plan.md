@@ -1,4 +1,4 @@
-# Refactor: Drop Redundant ACP Re-initialization — Use EventStore Subscriptions
+# Refactor: Drop Redundant ACP Re-initialization
 
 ## 1. Problem
 
@@ -26,26 +26,30 @@ events for `sessionId-1`, while the actual conversation happens on
 
 ### Why it was this way
 
-The `AcpAgentClient` wraps the `@anthropic-ai/acp` SDK's `ClientSideConnection`,
-which enforces a state machine: `initialize() → newSession() → prompt()`. When
-the SDK was first integrated, the daemon did not do session bootstrap — it was
+The `AcpAgentClient` wraps the `@agentclientprotocol/sdk`'s `ClientSideConnection`,
+which was assumed to enforce a state machine: `initialize() → newSession() → prompt()`.
+When the SDK was first integrated, the daemon did not do session bootstrap — it was
 a raw WS relay. The SDK handled the full ACP lifecycle.
 
 The latest agentlet upgrade (`session-bootstrap.ts`) moved initialization into
 the daemon, but Huabu was never updated to stop re-initializing.
 
-## 2. Target Architecture
+### Key Discovery: SDK Has No State Machine Guard
 
-After the agent's WS relay connects (`agent/hello`), the session is **ready**.
-Huabu should:
+Upon auditing the compiled SDK (`@agentclientprotocol/sdk` v0.22.1), the
+`Connection` class is a **pure JSON-RPC 2.0 transport**. Its `sendRequest()`
+method (line 1211 of `acp.js`) only checks `this.abortController.signal.aborted`
+— there is NO `initialized` flag, NO ordering enforcement. **You CAN call
+`.prompt()` without calling `.initialize()` or `.newSession()` first.**
 
-1. Read the `SessionRecord` from `DataStore` for capabilities, `initializeResult`
-2. Subscribe to the `EventStore` for live `session/update` events
-3. Send `session/prompt` directly via `AgentConnection.send()` (raw JSON-RPC)
-4. Handle `session/request_permission` via `AgentConnection.onMessage()`
+This enables a much simpler migration path: **keep the SDK but skip calling
+`initialize()` and `newSession()`**.
 
-This mirrors the `host/subscribe` + `host/send` pattern from the standalone
-agentlet-server, but using in-process TypeScript APIs instead of WebSocket.
+## 2. Target Architecture (Option A — Keep SDK, Skip Re-init)
+
+Instead of replacing the entire SDK with a custom `AcpSessionBridge`, we make a
+surgical change: keep `AcpAgentClient` + the SDK's `ClientSideConnection` for
+their bidirectional dispatch value, but skip the redundant init calls.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -57,19 +61,77 @@ agentlet-server, but using in-process TypeScript APIs instead of WebSocket.
 │    → client.prompt(sid2, …)  ← uses wrong sessionId for EventStore │
 │    → conn.onMessage()        ← session/update dispatch via SDK      │
 │                                                                     │
-│  After (proposed)                                                   │
+│  After (Option A)                                                   │
 │                                                                     │
-│  spawn → getConnection(sid1)                                        │
-│    → dataStore.getSession(sid1)   ← read initializeResult, caps    │
-│    → eventStore.subscribe(sid1, cb) ← live session/update events   │
-│    → conn.send(prompt)            ← raw JSON-RPC, no SDK overhead  │
-│    → conn.onMessage()             ← permission requests + responses │
+│  spawn → getConnection(sid1) → AcpAgentClient(conn)                │
+│    → dataStore.getSession(sid1) ← read initializeResult from DB    │
+│    → client.seedFromRecord(record) ← inject cached capabilities    │
+│    → client.prompt(sid1, …)  ← uses daemon's sessionId directly    │
+│    → conn.onMessage()        ← session/update dispatch via SDK      │
+│                                                                     │
+│  What SDK still provides:                                           │
+│    • JSON-RPC request/response correlation (id → Promise)           │
+│    • Bidirectional dispatch (inbound requests → handlers)           │
+│    • fs/read_text_file + session/request_permission handling        │
+│    • AbortController lifecycle                                      │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
+### Architecture — How SDK Connects to AgentletServer
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│ Huabu Server Process                                                 │
+│                                                                      │
+│  service.ts          client.ts                                       │
+│  ┌──────────┐   ┌──────────────────────────────────────────┐        │
+│  │ensureAcp │──▶│ AcpAgentClient                           │        │
+│  │Session   │   │                                          │        │
+│  │          │   │  ClientSideConnection (SDK)              │        │
+│  │          │   │    ↕ reads/writes via Stream             │        │
+│  │          │   │  streamFromAgentConnection()             │        │
+│  │          │   │    ReadableStream ← conn.onMessage(cb)   │        │
+│  │          │   │    WritableStream → conn.send(msg)       │        │
+│  └──────────┘   └──────────────────┬───────────────────────┘        │
+│                                    │                                 │
+│  ┌─────────────────────────────────▼──────────────────────────────┐ │
+│  │ AgentConnection (from server.getConnection(sessionId))         │ │
+│  │   .send(msg)      → write to WebSocket                        │ │
+│  │   .onMessage(cb)  → read from WebSocket                       │ │
+│  │   .sessionId      → matches daemon's sessionId (sid1)         │ │
+│  └────────────────────────────────┬───────────────────────────────┘ │
+│                                   │ WS (localhost loopback)          │
+│  ┌────────────────────────────────▼───────────────────────────────┐ │
+│  │ AgentletServer (embedded, in-process)                          │ │
+│  │   connections: Map<sessionId, AgentConnectionImpl>             │ │
+│  │   EventStore:  persists all traffic as JSONL                   │ │
+│  │   DataStore:   session metadata in SQLite (sessions.db)        │ │
+│  │   wireEventPersistence(): auto-logs send/recv to EventStore    │ │
+│  └────────────────────────────────┬───────────────────────────────┘ │
+└───────────────────────────────────┼─────────────────────────────────┘
+                                    │ WS (role=session&id=<sessionId>)
+                                    ▼
+                         ┌──────────────────────┐
+                         │ Agent CLI Process     │
+                         │ (forked by daemon)    │
+                         │                      │
+                         │ daemon bootstraps:   │
+                         │   1. initialize      │
+                         │   2. session/new     │
+                         │   3. agent/hello     │
+                         │      → WS relay open │
+                         └──────────────────────┘
+```
+
+### Future Option B (Full refactor — deferred)
+
+Replace `AcpAgentClient` entirely with `AcpSessionBridge` that uses raw
+`conn.send()/onMessage()` + EventStore subscription. Cleaner but more risk.
+Deferred until Option A proves stable.
+
 ## 3. Key In-Process APIs (from @agentlet/server)
 
-These replace the `host/subscribe` + `host/send` WS protocol:
+Available for both Option A (supplement) and future Option B (primary):
 
 | Standalone WS method             | In-process equivalent                                                              |
 | -------------------------------- | ---------------------------------------------------------------------------------- |
@@ -96,47 +158,58 @@ interface EventEntry {
 - Every message passing through `AgentConnection.send()` or `.onMessage()` is
   automatically persisted via `wireEventPersistence()` in the server.
 
-## 4. Migration Steps
+### How the SDK Client Connects to AgentletServer
 
-### Step 1: Create `AcpSessionBridge` (new file)
-
-Replace `AcpAgentClient` with a lighter wrapper that does NOT use the ACP SDK.
+The SDK (`ClientSideConnection`) does NOT directly touch WebSockets. The
+connection path is:
 
 ```
-apps/server/src/modules/agent/acp/session-bridge.ts
+ClientSideConnection
+  └─ reads from: ReadableStream<AnyMessage>  ← conn.onMessage(cb) enqueues
+  └─ writes to:  WritableStream<AnyMessage>  → conn.send(msg) sends to WS
 ```
 
-Responsibilities:
+This bridging is done by `streamFromAgentConnection()` in `client.ts`:
 
-- Accept `AgentConnection` + `sessionId` + `DataStore.SessionRecord`
-- Provide `prompt(text, onUpdate, signal?, onPermission?)` — sends raw
-  `session/prompt` JSON-RPC request, installs `conn.onMessage()` handler
-  to dispatch `session/update` notifications
-- Provide `cancel(sessionId)` — send `session/cancel` notification
-- Provide `setSessionMode/Model/ConfigOption` — send raw JSON-RPC requests
-- Handle `session/request_permission` via the same `onMessage` handler
-- Expose `initializeResult` from the `SessionRecord` (no re-initialize)
-- Expose `subscribeEvents(afterSeq, cb)` — wraps `EventStore.subscribe()` +
-  `getEventsSince()` for replay
+1. Constructs a `ReadableStream` whose `start()` installs `conn.onMessage(cb)`
+   — every ACP message from the agent is enqueued into the SDK's read side.
+2. Constructs a `WritableStream` whose `write(msg)` calls `conn.send(msg)`
+   — every SDK-generated message goes directly out the WS.
+3. An interceptor (`tryInterceptSessionUpdate`) filters `session/update`
+   notifications before they reach the SDK (to avoid zod-strict dropping).
 
-Key differences from `AcpAgentClient`:
+The `AgentConnection` object is obtained from the in-process
+`AgentletServer.getConnection(sessionId)` — no HTTP/WS hop from Huabu's
+perspective; it's a direct reference to the server's connection object that
+bridges to the agent CLI's real WebSocket.
 
-- NO `ClientSideConnection` (no SDK)
-- NO `initialize()` or `newSession()` / `loadSession()`
-- NO `streamFromAgentConnection()` (no ReadableStream/WritableStream wrapping)
-- Uses `conn.send()` and `conn.onMessage()` directly
-- Session/update interception is built-in (no stream adapter needed)
+## 4. Migration Steps (Option A — Keep SDK, Skip Re-init)
 
-### Step 2: Update `ensureAcpSession` in `service.ts`
+### Step 1: Add `seedFromRecord()` to `AcpAgentClient`
+
+Add a method that injects the `initializeResult` (from DataStore) without
+calling `initialize()` over the wire:
+
+```typescript
+// client.ts — new method
+seedFromRecord(initializeResult: AcpInitializeResult): void {
+  this._initializeResult = initializeResult;
+}
+```
+
+This allows callers to use `client.initializeResult` (for `agentSupportsLoadSession`
+checks, meta seeding, etc.) without a network round-trip.
+
+### Step 2: Update `ensureAcpSessionInner` in `service.ts`
 
 Replace the current flow:
 
 ```typescript
-// Current (remove):
+// Current (lines 482-641):
 const client = new AcpAgentClient(conn, { canvasId, logger });
-await client.initialize();
-// ... loadSession / newSession
-const newResult = await client.newSession({ cwd });
+await client.initialize(); // ← REMOVE
+// ... complex loadSession / newSession       // ← REMOVE
+const newResult = await client.newSession({ cwd }); // ← REMOVE
 sessionId = newResult.sessionId;
 ```
 
@@ -144,144 +217,107 @@ With:
 
 ```typescript
 // New:
-const record = server.getDataStore().getSession(agentSessionId);
-if (!record || record.status !== 'active') {
-  throw new Error(`Session ${agentSessionId} not found or not active`);
+const dataStore = server.getDataStore();
+const record = await dataStore.getSession(agentSessionId);
+if (!record) {
+  throw new Error(`Session ${agentSessionId} not found in DataStore`);
 }
-const bridge = new AcpSessionBridge(conn, agentSessionId, record, {
-  canvasId,
-  logger,
-  eventStore: server.getEventStore(),
-});
+
+const client = new AcpAgentClient(conn, { canvasId, logger });
+client.seedFromRecord(record.initializeResult as AcpInitializeResult);
 sessionId = agentSessionId; // USE the daemon's sessionId directly
 ```
 
-The `sessionId` used for prompts is now the SAME one used for the WS relay
-connection and EventStore — no more divergence.
+Key changes:
 
-### Step 3: Update `AcpSessionEntry`
+- **No `client.initialize()`** — capabilities come from DataStore
+- **No `client.newSession()` / `client.loadSession()`** — session already exists
+- **`sessionId` = `agentSessionId`** (from spawn-orchestrator) — no divergence
 
-Replace `client: AcpAgentClient` with `bridge: AcpSessionBridge` in the
-session registry entry type.
+### Step 3: Seed session meta from DataStore record
 
-```typescript
-// session-registry.ts
-export interface AcpSessionEntry {
-  bridge: AcpSessionBridge; // was: client: AcpAgentClient
-  sessionId: string;
-  // ... rest unchanged
-}
-```
-
-### Step 4: Update `runAcpAgent` in `service.ts`
-
-Replace:
-
-```typescript
-void entry.client.prompt(entry.sessionId, promptPayload, (update) => { … });
-```
-
-With:
-
-```typescript
-void entry.bridge.prompt(promptPayload, (update) => { … });
-```
-
-The `sessionId` is already bound in the bridge — no need to pass it.
-
-### Step 5: Update `threads.route.ts`
-
-Replace `entry.client.resolvePermission(…)` → `entry.bridge.resolvePermission(…)`.
-Replace `entry.client.setSessionMode(…)` → `entry.bridge.setSessionMode(…)`.
-Same for `setSessionModel`, `setSessionConfigOption`.
-
-### Step 6: Update session recovery (server restart)
-
-Current recovery path: `session/load` or "already loaded" detection via
-`client.loadSession()`. With the new model:
-
-- The daemon already handles session bootstrap including `session/resume`
-  and `session/load` (see `session-bootstrap.ts:bootstrapResumeOrLoad`)
-- The server's `DataStore.getSession(sessionId)` returns the session record
-  with `supportsLoad`, `supportsResume`, and `initializeResult`
-- On server restart, the daemon re-forks, re-bootstraps, and the session
-  record is refreshed — Huabu just reads it
-
-No more `client.loadSession()` from Huabu's side.
-
-### Step 7: Seed session meta from DataStore
-
-Currently `seedSessionMetaFromResponse(created, newResult, logger)` extracts
-modes, models, config options from the `session/new` response. With the new
-model, this data is available in `record.initializeResult` (which was
-captured during the daemon's bootstrap and persisted by
-`server.persistSessionRecord()`).
+Replace `seedSessionMetaFromResponse(created, newResult, logger)` with seeding
+from the DataStore's persisted `initializeResult` + any session/new response
+fields that the daemon captured:
 
 ```typescript
 const initResult = record.initializeResult as AcpInitializeResult;
+// initializeResult has: agentCapabilities, agentInfo, instructions
+// session/new fields (modes, models, configOptions) should be in DataStore
+// if agentlet-server persists them — verify.
 seedSessionMetaFromResponse(created, initResult, logger);
 ```
 
-Additionally, `session/update` notifications that carry meta updates
-(available_commands, modes, models, etc.) will arrive via the EventStore
-subscription, handled by the existing `handleSessionMetaUpdate()`.
+### Step 4: Remove `loadSession` path
 
-### Step 8: Wire EventStore subscription for chat history
+The entire `if (persisted) { ... loadSession ... }` block (lines 517-630) is
+no longer needed. The daemon handles session resume/load on its own during
+bootstrap. Huabu just reads the resulting session from DataStore.
 
-For the chat panel to survive refresh, subscribe to EventStore on session open:
+For server restart recovery:
+
+- When Huabu restarts → the agentlet daemon also restarts (child process)
+- Daemon re-bootstraps → does `initialize + session/resume` (or `session/load`)
+- Agent/hello → new WS connection registered in server
+- Huabu reads fresh `DataStore.getSession()` → has up-to-date record
+
+### Step 5: Keep everything else unchanged
+
+These remain exactly as-is:
+
+- `client.prompt(sessionId, text, onUpdate, signal, onPermission)` — SDK handles
+  JSON-RPC correlation, the stream adapter routes messages
+- `client.cancel(sessionId)` — same
+- `client.setSessionMode/Model/ConfigOption()` — same
+- `client.resolvePermission()` — same
+- Permission handler, fs handler — same (registered via `createClientHandler()`)
+- `streamFromAgentConnection()` — still bridges `AgentConnection` ↔ SDK Stream
+- `tryInterceptSessionUpdate()` — still filters before SDK
+
+### Step 6 (Future): Wire EventStore subscription for chat history
+
+For the chat panel to survive page refresh, add an endpoint that replays
+events from EventStore. This is INDEPENDENT of Option A and can be done later:
 
 ```typescript
 const eventStore = server.getEventStore();
 
-// Replay + live subscription (same pattern as host-ws.ts handleSubscribe)
-let lastSeq = 0;
-const liveBuffer: EventEntry[] = [];
-let replaying = true;
-
+// Replay + live (same pattern as host-ws.ts handleSubscribe)
 const unsub = eventStore.subscribe(sessionId, (entry) => {
-  if (replaying) {
-    liveBuffer.push(entry);
-  } else if (entry.dir === 'agent') {
-    // Live session/update — translate and push to SSE
-    handleAgentEvent(entry.event);
-  }
+  if (entry.dir === 'agent') handleAgentEvent(entry.event);
 });
-
-// Replay historical events
-for (const entry of eventStore.getEventsSince(sessionId, lastSeq)) {
-  if (entry.dir === 'agent') {
-    handleAgentEvent(entry.event);
-  }
-  lastSeq = entry.seq;
+const history = eventStore.getEventsSince(sessionId, 0);
+for (const entry of history) {
+  if (entry.dir === 'agent') handleAgentEvent(entry.event);
 }
-
-// Drain live buffer, switch to live mode
-for (const entry of liveBuffer) {
-  if (entry.seq > lastSeq && entry.dir === 'agent') {
-    handleAgentEvent(entry.event);
-  }
-}
-replaying = false;
 ```
 
-This gives us durable message history backed by JSONL files, surviving both
-page refresh and server restart.
+This is a separate feature (chat history persistence) — NOT blocking for the
+init-skip fix.
 
-### Step 9: Deprecate & remove old code
+### Step 7: Cleanup
 
-- `AcpAgentClient` → eventually remove (keep temporarily for reference)
-- `@anthropic-ai/acp` SDK dependency → remove once no consumers remain
-- Orphan-update buffering → no longer needed (EventStore handles replay)
-- `streamFromAgentConnection()` → no longer needed
+- Remove the `agentSupportsLoadSession()` / `loadSession()` / "already loaded"
+  retry logic from `ensureAcpSessionInner` (entire block ~115 lines)
+- Remove `readAcpSessionRecord()` / `writeAcpSessionRecord()` calls that
+  persisted `sessionId` separately (DataStore already has it)
+- Keep `AcpAgentClient.initialize()` and `newSession()` methods temporarily
+  (in case we need a fallback), but mark `@deprecated`
 
 ## 5. What Does NOT Change
 
+- **`AcpAgentClient` class** — kept as-is, just skip calling `initialize()`/
+  `newSession()`/`loadSession()` from the caller
+- **`streamFromAgentConnection()`** — still bridges `AgentConnection` ↔ SDK
+- **`ClientSideConnection` (SDK)** — still provides JSON-RPC correlation,
+  inbound request dispatch, permission/fs handlers
+- **`tryInterceptSessionUpdate()`** — still filters `session/update` for
+  permissive parsing before SDK sees them
 - **Agentlet subprocess lifecycle** — `daemon-supervisor.ts` is unchanged
 - **Spawn orchestrator** — `spawnOnAgentlet()` / `ensureAgentForThread()`
-  — same API, just the sessionId is now used directly
+  — same API, just the sessionId is now used directly by Huabu
 - **Translator** — `acpUpdateToStreamEvent()` still converts `session/update`
-  payloads to `AgentStreamEvent`, but now receives them from `EventEntry.event`
-  instead of the SDK's callback
+  payloads to `AgentStreamEvent`
 - **Preprocessor** — `ExternalAgentPrompt` building is unchanged
 - **Web client** — SSE transport, `useAgentStream`, `chatStore` are unchanged
 - **AgentBinding / canvas data model** — stable
@@ -289,9 +325,10 @@ page refresh and server restart.
 
 ## 6. Session/Prompt JSON-RPC Shape
 
-For the raw `conn.send()` approach, the prompt message is:
+The SDK wraps these for us (unchanged behavior), but for reference:
 
 ```json
+// Host → Agent (via conn.send, wrapped by SDK's prompt())
 {
   "jsonrpc": "2.0",
   "method": "session/prompt",
@@ -303,19 +340,17 @@ For the raw `conn.send()` approach, the prompt message is:
 }
 ```
 
-The response arrives via `conn.onMessage()`:
+Response via `conn.onMessage()` (SDK resolves the Promise):
 
 ```json
 {
   "jsonrpc": "2.0",
   "id": 42,
-  "result": {
-    "stopReason": "end_turn"
-  }
+  "result": { "stopReason": "end_turn" }
 }
 ```
 
-Session/update notifications (no `id` field) arrive interleaved:
+`session/update` notifications (intercepted before SDK, dispatched to handlers):
 
 ```json
 {
@@ -323,10 +358,7 @@ Session/update notifications (no `id` field) arrive interleaved:
   "method": "session/update",
   "params": {
     "sessionId": "sess_abc123",
-    "update": {
-      "sessionUpdate": "agent_message_chunk",
-      "content": "Hello!"
-    }
+    "update": { "sessionUpdate": "agent_message_chunk", "content": "Hello!" }
   }
 }
 ```
@@ -391,50 +423,61 @@ A bidirectional JSON-RPC 2.0 state machine bridged to `AgentConnection` via
 ### Verdict
 
 The SDK wraps ~80 lines of JSON-RPC plumbing (correlation + dispatch) behind
-a heavy abstraction that forces a redundant initialization sequence and
-drops valid messages. Replacing it with a thin `AcpSessionBridge` that does
-raw JSON-RPC correlation + dispatch is the right call.
+a moderate abstraction. The **real** problem was the redundant `initialize()` +
+`newSession()` calls — not the SDK itself. Since the SDK has NO state machine
+guard, we can simply skip those calls and keep the SDK's value-add:
+
+- Request/response correlation
+- Bidirectional request dispatch (`fs/read_text_file`, `session/request_permission`)
+- AbortController lifecycle management
+- Type-safe method wrappers (`.prompt()`, `.cancel()`, etc.)
 
 ## 8. Risk Assessment
 
-| Risk                                                                  | Mitigation                                                                                                                                                     |
-| --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Permission handling was deeply integrated with SDK                    | `session/request_permission` is a standard JSON-RPC request; replicate the suspend/resolve pattern from `AcpAgentClient` in `AcpSessionBridge`                 |
-| `fs/read_text_file` capability handler was registered via SDK         | The SDK's `ClientSideConnection` registered this as a server-side handler. Need to handle `fs/*` requests in `conn.onMessage()` and respond with `conn.send()` |
-| Session meta seeding from `initializeResult` may have different shape | Verify `SessionRecord.initializeResult` matches the shape `seedSessionMetaFromResponse()` expects                                                              |
-| EventStore JSONL files grow unbounded                                 | Not a regression (they grow today too), but worth adding rotation later                                                                                        |
-| `session/cancel` timing                                               | Same race as today — best-effort notification                                                                                                                  |
+| Risk                                                                | Mitigation                                                                                             |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Agent rejects `prompt` without prior `initialize` on the same conn  | The daemon already initialized on this conn's STDIO channel; the WS relay is a transparent passthrough |
+| `clientCapabilities` not advertised (agent doesn't know about `fs`) | Daemon bootstrap uses `{}` capabilities → agent may not request `fs/*`. Verify in testing.             |
+| DataStore `getSession()` returns stale/missing record               | Add a retry-wait after spawn (DataStore write is async after `agent/hello`)                            |
+| Session meta shape from DataStore differs from `session/new` result | Verify `SessionRecord` fields match what `seedSessionMetaFromResponse()` expects                       |
+| `loadSession` removal breaks server-restart recovery                | Daemon re-bootstrap handles recovery; test with server restart while agent is alive                    |
 
 ## 9. Effort Estimate
 
-| Step                                   | Effort          |
-| -------------------------------------- | --------------- |
-| 1. `AcpSessionBridge`                  | 3-4 hours       |
-| 2-5. Wire into service/routes          | 2-3 hours       |
-| 6-7. Session recovery + meta seeding   | 1-2 hours       |
-| 8. EventStore subscription for history | 1-2 hours       |
-| 9. Cleanup + tests                     | 1-2 hours       |
-| **Total**                              | **~8-13 hours** |
+| Step                                            | Effort       |
+| ----------------------------------------------- | ------------ |
+| 1. Add `seedFromRecord()` to `AcpAgentClient`   | 15 min       |
+| 2. Update `ensureAcpSessionInner`               | 1-2 hours    |
+| 3. Seed meta from DataStore                     | 30 min       |
+| 4. Remove `loadSession` path                    | 30 min       |
+| 5. Verify all entry points still compile/work   | 1 hour       |
+| 6. EventStore subscription for history (future) | 2-3 hours    |
+| 7. Cleanup deprecated code                      | 30 min       |
+| **Total (core fix)**                            | **~3-5 hrs** |
+| **Total (including history feature)**           | **~6-8 hrs** |
 
 ## 10. Open Questions
 
-1. **`fs/read_text_file` handler**: The current SDK registers this as a
-   capability handler. Without the SDK, we need to intercept `fs/*` requests
-   in `conn.onMessage()` and respond directly. How is this currently
-   implemented in `createClientHandler()`? Need to verify the exact requests
-   the agent sends and replicate the sandbox logic.
+1. **`clientCapabilities` for `fs/read_text_file`**: The daemon's bootstrap
+   sends `clientCapabilities: {}` (empty) to the agent. If the agent uses this
+   to decide whether it CAN request `fs/read_text_file`, it may never ask.
+   Verify: does Copilot CLI agent check capabilities before requesting fs reads?
+   If yes, we may need the daemon to pass `{ fs: { readTextFile: true } }` in
+   its bootstrap — this is an agentlet-level change, not a Huabu change.
 
-2. **SpawnParams.sessionId**: When Huabu calls `spawnOnAgentlet()`, does the
-   agentlet daemon use the `sessionId` from `SpawnParams` or generate a new
-   one from `session/new`? If the daemon ignores `SpawnParams.sessionId`,
-   Huabu can't predict the sessionId upfront — it must wait for the spawn
-   response. (Current code: `session-bootstrap.ts` line 72 — `params.sessionId`
-   is passed as `BootstrapOptions.sessionId`, and if provided, used for
-   `session/resume` or `session/load` instead of `session/new`. If NOT
-   provided, `session/new` returns a new sessionId. Currently Huabu does NOT
-   pass `sessionId` in SpawnParams, so a new one is always created — this is
-   fine, just need to be aware.)
+2. **DataStore timing**: After `spawnOnAgentlet()` returns with `{sessionId}`,
+   is the `DataStore.getSession(sessionId)` record guaranteed to exist? The
+   spawn response means `agent/hello` was processed, which calls
+   `persistSessionRecord()` — but that's async. May need a small poll/wait.
 
-3. **Multiple prompts on same session**: Does the agent support receiving
-   `session/prompt` while a previous one is still in flight? The SDK enforced
-   one-at-a-time; we should keep that guard in `AcpSessionBridge`.
+3. **Orphan updates for initial commands**: When the agent sends
+   `available_commands_update` notification immediately after `session/new`
+   (during daemon bootstrap), those go through the WS relay. If Huabu hasn't
+   yet constructed the `AcpAgentClient` and installed its `onMessage` handler,
+   those notifications are lost. The existing orphan buffer handles this for the
+   current flow — verify it still works when we skip `initialize()`/`newSession()`.
+
+4. **Option B migration path**: Once Option A is stable, should we still pursue
+   removing the SDK? The value proposition is smaller now (saves ~3KB bundle,
+   removes one abstraction layer). May not be worth the risk if Option A works
+   cleanly.
