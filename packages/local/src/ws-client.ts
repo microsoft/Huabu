@@ -1,23 +1,36 @@
 import { EventEmitter } from 'node:events'
 import WebSocket from 'ws'
 import {
-  BridgeMethods,
+  AgentletMethods,
+  AgentMethods,
   PROTOCOL_VERSION,
-  type BridgeHelloParams,
-  type BridgeHelloResult,
+  type AgentletHelloParams,
+  type AgentletHelloResult,
+  type AgentHelloParams,
+  type AgentHelloResult,
+  type AgentletProfile,
+  type SessionProfile,
   type JsonRpcMessage,
 } from '@agentlet/protocol'
-import type { SessionProfile } from './session-bootstrap.js'
+import type { SessionProfile as BootstrapProfile } from './session-bootstrap.js'
 
 export interface WsClientOptions {
   serverUrl: string
   token: string
-  agentCommand: string
-  agentPid: number
-  agentCwd: string
-  agentId: string
-  session?: SessionProfile
-  capabilities: { autoRestart: boolean; bufferLimit: number }
+  sessionId: string
+  /** Connection role — agentlet control channel or per-session relay */
+  role: 'agentlet' | 'session'
+  /** Agentlet identifier (required for role=agentlet, used in agentletProfile for role=session) */
+  agentletId?: string
+  /** Agent process info (required for role=session) */
+  agent?: {
+    command: string
+    pid: number
+    cwd: string
+  }
+  /** ACP session capabilities (from bootstrap) */
+  session?: BootstrapProfile
+  capabilities: { autoRestart: boolean; bufferLimit: number; maxAgents?: number }
   heartbeatInterval?: number
   allowInsecure?: boolean
   machine?: { hostname: string; platform: string }
@@ -28,7 +41,7 @@ export interface WsClientEvents {
   message: [data: JsonRpcMessage]
   close: [code: number, reason: string]
   error: [error: Error]
-  handshake_ok: [result: BridgeHelloResult]
+  handshake_ok: [result: AgentHelloResult]
   handshake_error: [error: { code: number; message: string }]
 }
 
@@ -46,7 +59,6 @@ export class WsClient extends EventEmitter<WsClientEvents> {
     super()
     this.options = options
 
-    // Enforce TLS in production
     if (!options.allowInsecure && !options.serverUrl.startsWith('wss://')) {
       throw new Error(
         `Server URL must use wss:// (got ${options.serverUrl}). ` +
@@ -55,14 +67,20 @@ export class WsClient extends EventEmitter<WsClientEvents> {
     }
   }
 
-  /** Open WebSocket connection to the server */
   connect(): void {
     if (this.ws) {
       throw new Error('WebSocket already connected')
     }
 
     this.handshakeReceived = false
-    this.ws = new WebSocket(this.options.serverUrl)
+    // Token, role, and id go in query params
+    const url = new URL(this.options.serverUrl)
+    url.searchParams.set('token', this.options.token)
+    url.searchParams.set('role', this.options.role === 'agentlet' ? 'agentlet' : 'session')
+    url.searchParams.set('id', this.options.role === 'agentlet'
+      ? (this.options.agentletId ?? this.options.sessionId)
+      : this.options.sessionId)
+    this.ws = new WebSocket(url.toString())
 
     this.ws.on('open', () => {
       this.emit('open')
@@ -96,7 +114,6 @@ export class WsClient extends EventEmitter<WsClientEvents> {
     })
   }
 
-  /** Send a JSON-RPC message over the WebSocket */
   send(message: JsonRpcMessage): boolean {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       return false
@@ -105,39 +122,69 @@ export class WsClient extends EventEmitter<WsClientEvents> {
     return true
   }
 
-  /** Close the WebSocket connection gracefully */
   close(code = 1000, reason = ''): void {
     this.stopHeartbeat()
     this.ws?.close(code, reason)
   }
 
   private sendHello(): void {
-    const params: BridgeHelloParams = {
-      token: this.options.token,
-      agentId: this.options.agentId,
-      bridge: {
-        name: 'agentlet',
-        version: PROTOCOL_VERSION,
-      },
-      agent: {
-        command: this.options.agentCommand,
-        pid: this.options.agentPid,
-        cwd: this.options.agentCwd,
-      },
+    if (this.options.role === 'agentlet') {
+      this.sendAgentletHello()
+    } else {
+      this.sendAgentHello()
+    }
+  }
+
+  private sendAgentletHello(): void {
+    const agentletProfile: AgentletProfile = {
+      bridge: { name: 'agentlet', version: PROTOCOL_VERSION },
+      capabilities: this.options.capabilities,
+    }
+    if (this.options.machine) {
+      agentletProfile.machine = this.options.machine
+    }
+
+    const params: AgentletHelloParams = {
+      agentletId: this.options.agentletId ?? this.options.sessionId,
+      agentletProfile,
+    }
+
+    this.send({
+      jsonrpc: '2.0' as const,
+      method: AgentletMethods.HELLO,
+      id: 1,
+      params: params as unknown as Record<string, unknown>,
+    })
+  }
+
+  private sendAgentHello(): void {
+    const sessionProfile: SessionProfile = {
+      agentletId: this.options.agentletId ?? '',
+      bridge: { name: 'agentlet', version: PROTOCOL_VERSION },
+      agent: this.options.agent!,
       capabilities: this.options.capabilities,
     }
 
     if (this.options.session) {
-      params.session = this.options.session
+      sessionProfile.session = {
+        supportsLoad: this.options.session.supportsLoad,
+        supportsResume: this.options.session.supportsResume,
+        initializeResult: this.options.session.initializeResult,
+      }
     }
 
     if (this.options.machine) {
-      params.machine = this.options.machine
+      sessionProfile.machine = this.options.machine
+    }
+
+    const params: AgentHelloParams = {
+      sessionId: this.options.sessionId,
+      sessionProfile,
     }
 
     const hello = {
       jsonrpc: '2.0' as const,
-      method: BridgeMethods.HELLO,
+      method: AgentMethods.HELLO,
       id: 1,
       params: params as unknown as Record<string, unknown>,
     }
@@ -146,18 +193,16 @@ export class WsClient extends EventEmitter<WsClientEvents> {
   }
 
   private handleMessage(msg: JsonRpcMessage): void {
-    // Check if this is the hello response (id === 1, only intercept once)
     if (!this.handshakeReceived && 'id' in msg && msg.id === 1) {
       this.handshakeReceived = true
       if ('error' in msg && msg.error) {
         this.emit('handshake_error', msg.error)
       } else if ('result' in msg) {
-        this.emit('handshake_ok', msg.result as BridgeHelloResult)
+        this.emit('handshake_ok', msg.result as AgentHelloResult)
       }
       return
     }
 
-    // All other messages are relayed to the consumer
     this.emit('message', msg)
   }
 

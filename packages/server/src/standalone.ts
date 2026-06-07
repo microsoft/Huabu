@@ -9,7 +9,7 @@ import { AgentWebSocket } from './agent-ws.js'
 import { handleRestRequest } from './rest-api.js'
 import { TokenStore } from './token-store.js'
 
-import type { AgentConnection, BridgeHelloParams } from '@agentlet/protocol'
+import type { AgentConnection, AgentHelloParams, AgentletHelloParams } from '@agentlet/protocol'
 
 interface StandaloneOptions {
   host: string
@@ -18,6 +18,7 @@ interface StandaloneOptions {
   adminToken: string
   allowInsecure: boolean
   noUi: boolean
+  storeDir: string
 }
 
 function parseArgs(args: string[]): StandaloneOptions {
@@ -28,6 +29,7 @@ function parseArgs(args: string[]): StandaloneOptions {
     adminToken: '',
     allowInsecure: false,
     noUi: false,
+    storeDir: '',
   }
 
   for (let i = 0; i < args.length; i++) {
@@ -50,6 +52,9 @@ function parseArgs(args: string[]): StandaloneOptions {
         break
       case '--no-ui':
         opts.noUi = true
+        break
+      case '--store-dir':
+        opts.storeDir = args[++i] ?? ''
         break
       case '--help':
       case '-h':
@@ -83,9 +88,14 @@ Options:
   --port <port>         Listen port (default: 8080)
   --token <val|path>    A single token string, or path to a JSON token file (required)
   --admin-token <tok>   Enable admin API with this token (disabled if not set)
+  --store-dir <path>    Persistence directory for sessions and events (default: .agentlet)
   --allow-insecure      Allow ws:// connections (dev only)
   --no-ui               Disable built-in web UI
   -h, --help            Show this help
+
+Store directory layout:
+  <store-dir>/sessions.db     Session metadata (SQLite)
+  <store-dir>/events/         Per-session event logs (JSONL)
 
 Token file format:
   { "tok_abc": { "user": "alice", "expireTime": null }, ... }
@@ -149,58 +159,72 @@ function serveStaticUi(url: string, res: import('node:http').ServerResponse): bo
   return true
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const opts = parseArgs(process.argv.slice(2))
   const tokenStore = new TokenStore()
   tokenStore.loadFromArg(opts.token)
 
-  // Create the AgentletServer with token-based auth
+  // Create the AgentletServer — stores are internalized
   const agentletServer = new AgentletServer({
-    authenticate: async (token: string, _meta: BridgeHelloParams) => {
+    authenticate: async (token: string, _params: AgentHelloParams | AgentletHelloParams) => {
       const entry = tokenStore.validate(token)
       if (!entry) {
         throw new Error('Invalid or expired token')
       }
       return { metadata: { user: entry.user } }
     },
+    storeDir: opts.storeDir || join(process.cwd(), '.agentlet'),
     onConnection: (agent: AgentConnection) => {
-      console.log(`[agentlet-server] Agent connected: ${agent.agentId}`)
-      hostWs.broadcast({
-        type: 'connected',
-        agentId: agent.agentId,
-        agentInfo: agent.agentInfo,
-        machine: agent.machine,
-      })
+      console.log(`[agentlet-server] Connected: ${agent.sessionId}`)
+      const dataStore = agentletServer.getDataStore()
+      const sessionRecord = dataStore.getSession(agent.sessionId)
+      if (sessionRecord?.profile) {
+        try {
+          const profile = JSON.parse(sessionRecord.profile)
+          hostWs.broadcastConnected(agent.sessionId, profile)
+        } catch { /* ignore parse error */ }
+      }
       agent.onMessage((msg) => {
-        hostWs.broadcast({ type: 'message', agentId: agent.agentId, message: msg })
-        agentWs.broadcastToAgent(agent.agentId, msg)
+        agentWs.broadcastToAgent(agent.sessionId, msg)
       })
       agent.onLifecycle((event) => {
-        hostWs.broadcast({ type: 'lifecycle', agentId: agent.agentId, event })
+        hostWs.broadcastLifecycle(agent.sessionId, event)
       })
     },
     onReconnection: (agent: AgentConnection) => {
-      console.log(`[agentlet-server] Agent reconnected: ${agent.agentId}`)
-      hostWs.broadcast({
-        type: 'connected',
-        agentId: agent.agentId,
-        agentInfo: agent.agentInfo,
-        machine: agent.machine,
-      })
+      console.log(`[agentlet-server] Reconnected: ${agent.sessionId}`)
+      const dataStore = agentletServer.getDataStore()
+      const sessionRecord = dataStore.getSession(agent.sessionId)
+      if (sessionRecord?.profile) {
+        try {
+          const profile = JSON.parse(sessionRecord.profile)
+          hostWs.broadcastConnected(agent.sessionId, profile)
+        } catch { /* ignore parse error */ }
+      }
       agent.onMessage((msg) => {
-        hostWs.broadcast({ type: 'message', agentId: agent.agentId, message: msg })
-        agentWs.broadcastToAgent(agent.agentId, msg)
+        agentWs.broadcastToAgent(agent.sessionId, msg)
       })
       agent.onLifecycle((event) => {
-        hostWs.broadcast({ type: 'lifecycle', agentId: agent.agentId, event })
+        hostWs.broadcastLifecycle(agent.sessionId, event)
       })
     },
     onDisconnection: (agent: AgentConnection, reason: string) => {
-      console.log(`[agentlet-server] Agent disconnected: ${agent.agentId} — ${reason}`)
-      hostWs.broadcast({ type: 'disconnected', agentId: agent.agentId, reason })
-      agentWs.handleAgentDisconnected(agent.agentId)
+      console.log(`[agentlet-server] Disconnected: ${agent.sessionId} — ${reason}`)
+      hostWs.broadcastDisconnected(agent.sessionId, reason)
+      agentWs.handleAgentDisconnected(agent.sessionId)
+    },
+    onSessionSuspended: (params, agentletSessionId) => {
+      console.log(`[agentlet-server] Session suspended: ${params.sessionId} (agentlet: ${agentletSessionId}, reason: ${params.reason})`)
+      hostWs.broadcastLifecycle(params.sessionId, {
+        type: 'agent/suspended',
+        sessionId: params.sessionId,
+        reason: params.reason,
+      })
     },
   })
+
+  // Initialize stores (DataStore + EventStore)
+  await agentletServer.init()
 
   // Host-side WebSocket (envelope protocol)
   const hostWs = new HostWebSocket(agentletServer)
@@ -241,11 +265,11 @@ function main(): void {
       return
     }
 
-    // Per-agent raw ACP WebSocket: /agents/:agentId/ws
+    // Per-agent raw ACP WebSocket: /agents/:sessionId/ws (deprecated path)
     const agentMatch = path.match(/^\/agents\/(.+)\/ws$/)
     if (agentMatch) {
-      const agentId = decodeURIComponent(agentMatch[1]!)
-      agentWs.handleUpgrade(req, socket, head, agentId)
+      const sessionId = decodeURIComponent(agentMatch[1]!)
+      agentWs.handleUpgrade(req, socket, head, sessionId)
       return
     }
 
@@ -258,21 +282,22 @@ function main(): void {
   httpServer.listen(opts.port, opts.host, () => {
     console.log(`[agentlet-server] Listening on ${opts.host}:${opts.port}`)
     console.log(`[agentlet-server] Endpoints:`)
-    console.log(`  WS  /api/bridge         — agent-side connections (bridge + daemon)`)
-    console.log(`  WS  /api/host           — host-side envelope protocol`)
-    console.log(`  WS  /agents/:id/ws      — per-agent raw ACP`)
-    console.log(`  GET /api/agents         — list agents (filtered by token)`)
-    console.log(`  GET /api/daemons        — list daemons (filtered by token)`)
-    console.log(`  POST /api/daemons/:id/spawn  — spawn agent on daemon`)
-    console.log(`  POST /api/daemons/:id/stop   — stop agent on daemon`)
-    console.log(`  GET /api/daemons/:id/agents  — list agents on daemon`)
-    console.log(`  GET /api/health         — health check`)
+    console.log(`  WS  /api/bridge                    — agentlet connections`)
+    console.log(`  WS  /api/host                      — host-side (subscribe, send, events)`)
+    console.log(`  WS  /agents/:sessionId/ws           — per-agent raw ACP (deprecated)`)
+    console.log(`  GET /api/sessions                  — list sessions`)
+    console.log(`  GET /api/sessions/:id              — get session info`)
+    console.log(`  GET /api/agents                    — list agents (deprecated)`)
+    console.log(`  GET /api/agentlets                 — list agentlets`)
+    console.log(`  POST /api/agentlets/:id/spawn      — spawn agent session`)
+    console.log(`  POST /api/agentlets/:id/stop       — stop agent session`)
+    console.log(`  GET /api/health                    — health check`)
     if (opts.adminToken) {
-      console.log(`  GET /api/admin/tokens   — admin: list tokens`)
-      console.log(`  POST /api/admin/tokens  — admin: replace tokens`)
+      console.log(`  GET /api/admin/tokens             — admin: list tokens`)
+      console.log(`  POST /api/admin/tokens            — admin: replace tokens`)
     }
     if (!opts.noUi) {
-      console.log(`  GET /                   — Web UI`)
+      console.log(`  GET /                              — Web UI`)
     }
   })
 
@@ -290,4 +315,7 @@ function main(): void {
   process.on('SIGTERM', shutdown)
 }
 
-main()
+main().catch((err) => {
+  console.error('[agentlet-server] Fatal:', err)
+  process.exit(1)
+})

@@ -6,12 +6,12 @@ import type { TokenStore } from './token-store.js'
 import type { AcpMessage } from '@agentlet/protocol'
 
 /**
- * Per-agent raw ACP WebSocket endpoint (WS /agents/:agentId/ws).
+ * Per-session raw ACP WebSocket endpoint (WS /agents/:sessionId/ws).
  *
  * Each connection speaks raw ACP JSON-RPC — no envelope protocol.
  * The server transparently bridges between this endpoint and the
  * internal agent connection. Supports multiple simultaneous clients
- * per agent (e.g., UI + external tool).
+ * per session (e.g., UI + external tool).
  *
  * Pure transparent relay — no ACP-level inspection or rewriting.
  * Session lifecycle is owned by the agentlet (agent-side adapter).
@@ -20,8 +20,8 @@ export class AgentWebSocket {
   private readonly wss: WebSocketServer
   private readonly server: AgentletServer
   private readonly tokenStore: TokenStore
-  // Map agentId → set of connected host clients for that agent
-  private readonly agentClients = new Map<string, Set<WebSocket>>()
+  // Map sessionId → set of connected host clients for that session
+  private readonly sessionClients = new Map<string, Set<WebSocket>>()
 
   constructor(server: AgentletServer, tokenStore: TokenStore) {
     this.server = server
@@ -30,12 +30,12 @@ export class AgentWebSocket {
   }
 
   /**
-   * Handle upgrade for /agents/:agentId/ws.
-   * The agentId must be extracted from the URL before calling this.
+   * Handle upgrade for /agents/:sessionId/ws.
+   * The sessionId must be extracted from the URL before calling this.
    * Token is extracted from ?token= query param.
    */
-  handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer, agentId: string): void {
-    const conn = this.server.getConnection(agentId)
+  handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer, sessionId: string): void {
+    const conn = this.server.getConnection(sessionId)
     if (!conn || conn.status !== 'connected') {
       socket.write('HTTP/1.1 404 Not Found\r\n\r\n')
       socket.destroy()
@@ -46,49 +46,42 @@ export class AgentWebSocket {
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`)
     const token = url.searchParams.get('token') ?? ''
 
-    // Validate token
+    // Validate token via TokenStore
     if (token && !this.tokenStore.validate(token)) {
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n')
       socket.destroy()
       return
     }
 
-    // Verify token matches the agent's token (user can only access their own agents)
-    if (token && conn.token !== token) {
-      socket.write('HTTP/1.1 403 Forbidden\r\n\r\n')
-      socket.destroy()
-      return
-    }
-
     this.wss.handleUpgrade(req, socket, head, (ws) => {
-      this.onClient(ws, agentId, token)
+      this.onClient(ws, sessionId)
     })
   }
 
   close(): void {
-    for (const clients of this.agentClients.values()) {
+    for (const clients of this.sessionClients.values()) {
       for (const ws of clients) {
         ws.close(1001, 'server_shutting_down')
       }
     }
-    this.agentClients.clear()
+    this.sessionClients.clear()
     this.wss.close()
   }
 
   /**
    * Called by standalone wiring when an agent sends an ACP message.
-   * Fans out to all raw WS clients subscribed to that agent.
+   * Fans out to all raw WS clients subscribed to that session.
    * Pure transparent relay — no inspection.
    */
-  broadcastToAgent(agentId: string, message: AcpMessage): void {
-    const clients = this.agentClients.get(agentId)
+  broadcastToAgent(sessionId: string, message: AcpMessage): void {
+    const clients = this.sessionClients.get(sessionId)
     if (!clients || clients.size === 0) {
-      console.log(`[agent-ws] Agent→UI (${agentId}): no clients to broadcast to`)
+      console.log(`[agent-ws] Agent→UI (${sessionId}): no clients to broadcast to`)
       return
     }
 
     const data = JSON.stringify(message)
-    console.log(`[agent-ws] Agent→UI (${agentId}, ${clients.size} clients):`, data.slice(0, 200))
+    console.log(`[agent-ws] Agent→UI (${sessionId}, ${clients.size} clients):`, data.slice(0, 200))
 
     for (const ws of clients) {
       if (ws.readyState === WebSocket.OPEN) {
@@ -97,25 +90,25 @@ export class AgentWebSocket {
     }
   }
 
-  /** Remove all clients for a disconnected agent */
-  handleAgentDisconnected(agentId: string): void {
-    const clients = this.agentClients.get(agentId)
+  /** Remove all clients for a disconnected session */
+  handleAgentDisconnected(sessionId: string): void {
+    const clients = this.sessionClients.get(sessionId)
     if (clients) {
       for (const ws of clients) {
         ws.close(1001, 'agent_disconnected')
       }
-      this.agentClients.delete(agentId)
+      this.sessionClients.delete(sessionId)
     }
   }
 
-  private onClient(ws: WebSocket, agentId: string, token: string): void {
+  private onClient(ws: WebSocket, sessionId: string): void {
     // Track this client
-    if (!this.agentClients.has(agentId)) {
-      this.agentClients.set(agentId, new Set())
+    if (!this.sessionClients.has(sessionId)) {
+      this.sessionClients.set(sessionId, new Set())
     }
-    this.agentClients.get(agentId)!.add(ws)
+    this.sessionClients.get(sessionId)!.add(ws)
 
-    console.log(`[agent-ws] Client connected for agent: ${agentId} (total: ${this.agentClients.get(agentId)!.size})`)
+    console.log(`[agent-ws] Client connected for agent: ${sessionId} (total: ${this.sessionClients.get(sessionId)!.size})`)
 
     // Forward raw ACP messages from client → agent (transparent relay)
     ws.on('message', (data, isBinary) => {
@@ -124,9 +117,9 @@ export class AgentWebSocket {
         return
       }
 
-      const conn = this.server.getConnection(agentId)
+      const conn = this.server.getConnection(sessionId)
       if (!conn || conn.status !== 'connected') {
-        console.log(`[agent-ws] Agent ${agentId} not connected, closing client`)
+        console.log(`[agent-ws] Agent ${sessionId} not connected, closing client`)
         ws.close(1001, 'agent_disconnected')
         return
       }
@@ -138,22 +131,22 @@ export class AgentWebSocket {
         return // skip invalid JSON
       }
 
-      console.log(`[agent-ws] UI→Agent (${agentId}):`, JSON.stringify(msg).slice(0, 200))
+      console.log(`[agent-ws] UI→Agent (${sessionId}):`, JSON.stringify(msg).slice(0, 200))
       conn.send(msg)
     })
 
     ws.on('close', () => {
-      const clients = this.agentClients.get(agentId)
+      const clients = this.sessionClients.get(sessionId)
       if (clients) {
         clients.delete(ws)
         if (clients.size === 0) {
-          this.agentClients.delete(agentId)
+          this.sessionClients.delete(sessionId)
         }
       }
     })
 
     ws.on('error', () => {
-      const clients = this.agentClients.get(agentId)
+      const clients = this.sessionClients.get(sessionId)
       clients?.delete(ws)
     })
   }

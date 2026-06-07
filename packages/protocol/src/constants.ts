@@ -1,28 +1,57 @@
 /** Protocol version */
 export const PROTOCOL_VERSION = '1.0.0'
 
-/** Bridge method names */
-export const BridgeMethods = {
-  HELLO: 'bridge/hello',
-  AGENT_EXITED: 'bridge/agent_exited',
-  AGENT_RESTARTED: 'bridge/agent_restarted',
-  GOODBYE: 'bridge/goodbye',
-  BUFFER_OVERFLOW: 'bridge/buffer_overflow',
-  REPLAY: 'bridge/replay',
-  PING: 'bridge/ping',
-  PONG: 'bridge/pong',
-  SHUTDOWN: 'bridge/shutdown',
-  // Daemon control methods (server → daemon)
-  SPAWN: 'bridge/spawn',
-  STOP: 'bridge/stop',
-  LIST: 'bridge/list',
+/** Agentlet → Server method names */
+export const AgentletMethods = {
+  HELLO: 'agentlet/hello',
 } as const
 
-/** Error codes used in bridge/hello rejection */
-export const BridgeErrorCodes = {
+/** Agent → Server method names */
+export const AgentMethods = {
+  HELLO: 'agent/hello',
+  EXITED: 'agent/exited',
+  RESTARTED: 'agent/restarted',
+  GOODBYE: 'agent/goodbye',
+  OVERFLOW: 'agent/overflow',
+  SUSPENDED: 'agent/suspended',
+  PONG: 'agent/pong',
+} as const
+
+/** Server → Agent method names */
+export const ServerMethods = {
+  REPLAY: 'server/replay',
+  PING: 'server/ping',
+  SHUTDOWN: 'server/shutdown',
+  SPAWN: 'server/spawn',
+  STOP: 'server/stop',
+  LIST: 'server/list',
+} as const
+
+/** Host → Server method names (host channel) */
+export const HostMethods = {
+  SEND: 'host/send',
+  SUBSCRIBE: 'host/subscribe',
+  UNSUBSCRIBE: 'host/unsubscribe',
+} as const
+
+/** Server → Host method names (host channel) */
+export const ServerHostMethods = {
+  EVENT: 'server/event',
+  REPLAYED: 'server/replayed',
+  ERROR: 'server/error',
+  CONNECTED: 'agent/connected',
+  DISCONNECTED: 'agent/disconnected',
+  EXITED: 'agent/exited',
+  RESTARTED: 'agent/restarted',
+  SUSPENDED: 'agent/suspended',
+} as const
+
+/** Error codes used in agent/hello rejection */
+export const ErrorCodes = {
   INVALID_TOKEN: -32001,
   VERSION_MISMATCH: -32002,
   HANDSHAKE_TIMEOUT: -32003,
+  DUPLICATE_SESSION: -32004,
   INVALID_REQUEST: -32600,
   PARSE_ERROR: -32700,
 } as const

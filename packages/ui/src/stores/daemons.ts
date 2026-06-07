@@ -3,7 +3,7 @@ import { ref } from 'vue'
 
 export interface DaemonInfo {
   daemonId: string
-  status: 'connected' | 'disconnected'
+  connected: boolean
   machine?: { hostname: string; platform: string }
   capabilities: { autoRestart: boolean; bufferLimit: number; maxAgents?: number }
   metadata: Record<string, unknown>
@@ -11,7 +11,7 @@ export interface DaemonInfo {
 }
 
 export interface DaemonAgent {
-  agentId: string
+  sessionId: string
   command: string
   pid: number
   cwd: string
@@ -73,7 +73,7 @@ export const useDaemonsStore = defineStore('daemons', () => {
         error.value = data.error ?? 'Spawn failed'
         return null
       }
-      return data as { agentId: string; pid: number }
+      return data as { sessionId: string; pid: number }
     } catch (e) {
       error.value = e instanceof Error ? e.message : 'Spawn failed'
       return null
@@ -82,8 +82,8 @@ export const useDaemonsStore = defineStore('daemons', () => {
     }
   }
 
-  async function stopAgent(token: string, daemonId: string, agentId: string) {
-    if (!token || !daemonId || !agentId) return false
+  async function stopAgent(token: string, daemonId: string, sessionId: string) {
+    if (!token || !daemonId || !sessionId) return false
     error.value = null
     try {
       const headers: Record<string, string> = {
@@ -93,7 +93,7 @@ export const useDaemonsStore = defineStore('daemons', () => {
       const res = await fetch(`/api/daemons/${encodeURIComponent(daemonId)}/stop`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ agentId }),
+        body: JSON.stringify({ sessionId }),
       })
       const data = await res.json()
       if (!res.ok) {

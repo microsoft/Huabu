@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { createServer, type Server } from 'node:http'
-import { writeFileSync, unlinkSync } from 'node:fs'
+import { writeFileSync, unlinkSync, mkdtempSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import WebSocket from 'ws'
@@ -9,7 +9,6 @@ import { HostWebSocket } from '../../server/src/host-ws.js'
 import { AgentWebSocket } from '../../server/src/agent-ws.js'
 import { handleRestRequest } from '../../server/src/rest-api.js'
 import { TokenStore } from '../../server/src/token-store.js'
-import { SessionMap } from '../../server/src/session-map.js'
 import { AgentProcess } from '../../local/src/agent-process.js'
 import { WsClient } from '../../local/src/ws-client.js'
 import { Relay } from '../../local/src/relay.js'
@@ -28,37 +27,35 @@ describe('M4: Standalone server', { timeout: 30000 }, () => {
 
   beforeAll(async () => {
     // Setup standalone-style server with all endpoints
+    const storeDir = mkdtempSync(join(tmpdir(), 'agentlet-standalone-test-'))
     agentletServer = new AgentletServer({
+      storeDir,
       authenticate: async (token) => {
         if (token !== 'test-token') throw new Error('Invalid token')
         return { metadata: { userId: 'test-user' } }
       },
       onConnection: (agent: AgentConnection) => {
-        hostWs.broadcast({
-          type: 'connected',
-          agentId: agent.agentId,
-          agentInfo: agent.agentInfo,
-        })
+        hostWs.broadcastConnected(agent.sessionId, agent.sessionProfile)
         agent.onMessage((msg) => {
-          hostWs.broadcast({ type: 'message', agentId: agent.agentId, message: msg })
-          agentWs.broadcastToAgent(agent.agentId, msg)
+          // Events flow automatically through event store subscriptions
+          agentWs.broadcastToAgent(agent.sessionId, msg)
         })
         agent.onLifecycle((event) => {
-          hostWs.broadcast({ type: 'lifecycle', agentId: agent.agentId, event })
+          hostWs.broadcastLifecycle(agent.sessionId, event)
         })
       },
       onDisconnection: (agent, reason) => {
-        hostWs.broadcast({ type: 'disconnected', agentId: agent.agentId, reason })
-        agentWs.handleAgentDisconnected(agent.agentId)
+        hostWs.broadcastDisconnected(agent.sessionId, reason)
+        agentWs.handleAgentDisconnected(agent.sessionId)
       },
     })
+    await agentletServer.init()
 
     hostWs = new HostWebSocket(agentletServer)
 
     const tokenStore = new TokenStore()
     tokenStore.loadFromArg('test-token')
-    const sessionMap = new SessionMap()
-    agentWs = new AgentWebSocket(agentletServer, sessionMap, tokenStore)
+    agentWs = new AgentWebSocket(agentletServer, tokenStore)
 
     httpServer = createServer((req, res) => {
       if (handleRestRequest(req, res, { server: agentletServer, tokenStore })) return
@@ -113,9 +110,13 @@ describe('M4: Standalone server', { timeout: 30000 }, () => {
     wsClient = new WsClient({
       serverUrl: `${serverUrl}/api/bridge`,
       token: 'test-token',
-      agentCommand: 'echo-agent',
-      agentPid: agent.pid!,
-      agentId: 'test-host:echo-agent:project:m4test01',
+      sessionId: 'test-standalone-session',
+      role: 'session',
+      agent: {
+        command: 'echo-agent',
+        pid: agent.pid!,
+        cwd: process.cwd(),
+      },
       capabilities: { autoRestart: false, bufferLimit: 1000 },
       heartbeatInterval: 0,
       allowInsecure: true,
@@ -157,18 +158,20 @@ describe('M4: Standalone server', { timeout: 30000 }, () => {
   it('GET /api/agents lists connected agents', async () => {
     const res = await fetch(`http://127.0.0.1:${(httpServer.address() as { port: number }).port}/api/agents`)
     expect(res.status).toBe(200)
-    const body = await res.json() as { agents: Array<{ agentId: string; status: string }> }
+    const body = await res.json() as { agents: Array<{ sessionId: string; role: string; status: string }> }
     expect(body.agents).toHaveLength(1)
-    expect(body.agents[0]!.agentId).toBe('test-host:echo-agent:project:m4test01')
+    expect(body.agents[0]!.sessionId).toBe('test-standalone-session')
+    expect(body.agents[0]!.role).toBe('agent-session')
     expect(body.agents[0]!.status).toBe('connected')
   })
 
   it('GET /api/agents/:id returns specific agent', async () => {
     const port = (httpServer.address() as { port: number }).port
-    const res = await fetch(`http://127.0.0.1:${port}/api/agents/${encodeURIComponent('test-host:echo-agent:project:m4test01')}`)
+    const res = await fetch(`http://127.0.0.1:${port}/api/agents/${encodeURIComponent('test-standalone-session')}`)
     expect(res.status).toBe(200)
-    const body = await res.json() as { agentId: string; metadata: { userId: string } }
-    expect(body.agentId).toBe('test-host:echo-agent:project:m4test01')
+    const body = await res.json() as { sessionId: string; role: string; metadata: { userId: string } }
+    expect(body.sessionId).toBe('test-standalone-session')
+    expect(body.role).toBe('agent-session')
     expect(body.metadata.userId).toBe('test-user')
   })
 
@@ -178,7 +181,7 @@ describe('M4: Standalone server', { timeout: 30000 }, () => {
     expect(res.status).toBe(404)
   })
 
-  it('WS /api/host receives envelope messages', async () => {
+  it('WS /api/host receives JSON-RPC messages', async () => {
     const ws = new WebSocket(`${serverUrl}/api/host`)
 
     const messages: unknown[] = []
@@ -190,34 +193,39 @@ describe('M4: Standalone server', { timeout: 30000 }, () => {
       ws.on('open', resolve)
     })
 
-    // Wait for initial "connected" broadcast (sent on host client connect)
+    // Subscribe to the session
+    ws.send(JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'host/subscribe',
+      params: { sessionId: 'test-standalone-session', afterSeq: 0 },
+    }))
+
+    // Wait for subscription and any notifications
     await new Promise((r) => setTimeout(r, 200))
 
-    // Should have received the "connected" notification for the existing agent
-    expect(messages.length).toBeGreaterThanOrEqual(1)
-    const connected = messages[0] as { type: string; agentId: string }
-    expect(connected.type).toBe('connected')
-    expect(connected.agentId).toBe('test-host:echo-agent:project:m4test01')
-
-    // Send ACP message via envelope protocol
+    // Send ACP message via JSON-RPC
     ws.send(JSON.stringify({
-      type: 'send',
-      agentId: 'test-host:echo-agent:project:m4test01',
-      message: { jsonrpc: '2.0', method: 'initialize', id: 100, params: { clientInfo: { name: 'host-test' } } },
+      jsonrpc: '2.0',
+      method: 'host/send',
+      params: {
+        sessionId: 'test-standalone-session',
+        message: { jsonrpc: '2.0', method: 'initialize', id: 100, params: { clientInfo: { name: 'host-test' } } },
+      },
     }))
 
     // Wait for response
     await new Promise((r) => setTimeout(r, 300))
 
-    const response = messages.find((m: any) => m.type === 'message' && m.message?.id === 100)
-    expect(response).toBeDefined()
+    // Should have received server/event notifications
+    const eventMsg = messages.find((m: any) => m.method === 'server/event' && m.params?.event?.id === 100)
+    expect(eventMsg).toBeDefined()
 
     ws.close()
   })
 
-  it('WS /agents/:agentId/ws provides raw ACP relay', async () => {
-    const agentId = encodeURIComponent('test-host:echo-agent:project:m4test01')
-    const ws = new WebSocket(`${serverUrl}/agents/${agentId}/ws`)
+  it('WS /agents/:sessionId/ws provides raw ACP relay', async () => {
+    const sessionId = encodeURIComponent('test-standalone-session')
+    const ws = new WebSocket(`${serverUrl}/agents/${sessionId}/ws`)
 
     await new Promise<void>((resolve) => {
       ws.on('open', resolve)

@@ -1,20 +1,24 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
-export interface AgentInfo {
-  agentId: string
-  status: 'connected' | 'disconnected'
-  agentInfo: { command: string; pid: number; cwd: string }
-  session?: { sessionId: string; supportsLoad: boolean }
-  machine?: { hostname: string; platform: string }
-  metadata: Record<string, unknown>
-  connectedAt: string
+export interface SessionInfo {
+  sessionId: string
+  displayName: string
+  agentletId?: string
+  connected: boolean
+  command: string
+  cwd: string
+  supportsLoad: boolean
+  supportsResume: boolean
+  createdAt: string
+  updatedAt: string
 }
 
 export const useAgentsStore = defineStore('agents', () => {
-  const agents = ref<AgentInfo[]>([])
-  const selectedAgentId = ref<string | null>(null)
+  const sessions = ref<SessionInfo[]>([])
+  const selectedSessionId = ref<string | null>(localStorage.getItem('agentlet-selected-session') ?? null)
   const loading = ref(false)
+  const sessionsLoaded = ref(false)
   const userToken = ref<string>(localStorage.getItem('agentlet-token') ?? '')
 
   function setToken(token: string) {
@@ -22,35 +26,64 @@ export const useAgentsStore = defineStore('agents', () => {
     localStorage.setItem('agentlet-token', token)
   }
 
-  async function fetchAgents() {
+  async function fetchSessions() {
     if (!userToken.value) return
     loading.value = true
     try {
-      const headers: Record<string, string> = {}
-      if (userToken.value) {
-        headers['Authorization'] = `Bearer ${userToken.value}`
+      const headers: Record<string, string> = {
+        'Authorization': `Bearer ${userToken.value}`,
       }
-      const res = await fetch('/api/agents', { headers })
+      const res = await fetch('/api/sessions', { headers })
       const data = await res.json()
-      agents.value = data.agents ?? []
+      sessions.value = data.sessions ?? []
+      sessionsLoaded.value = true
 
-      // Auto-select first connected agent if none selected
-      if (!selectedAgentId.value && agents.value.length > 0) {
-        const connected = agents.value.find(a => a.status === 'connected')
-        if (connected) {
-          selectedAgentId.value = connected.agentId
+      // Auto-select saved session if still available, else first connected
+      if (selectedSessionId.value) {
+        const saved = sessions.value.find(s => s.sessionId === selectedSessionId.value)
+        if (!saved) {
+          // Stale selection — clear it, then try to pick an active one
+          selectedSessionId.value = null
+          localStorage.removeItem('agentlet-selected-session')
+          const active = sessions.value.find(s => s.connected)
+          if (active) selectSession(active.sessionId)
         }
+      } else if (sessions.value.length > 0) {
+        const active = sessions.value.find(s => s.connected)
+        if (active) selectSession(active.sessionId)
       }
     } catch (e) {
-      console.error('Failed to fetch agents:', e)
+      console.error('Failed to fetch sessions:', e)
     } finally {
       loading.value = false
     }
   }
 
-  function selectAgent(agentId: string) {
-    selectedAgentId.value = agentId
+  function selectSession(sessionId: string) {
+    selectedSessionId.value = sessionId
+    localStorage.setItem('agentlet-selected-session', sessionId)
   }
 
-  return { agents, selectedAgentId, loading, userToken, setToken, fetchAgents, selectAgent }
+  async function updateDisplayName(sessionId: string, displayName: string): Promise<boolean> {
+    if (!userToken.value) return false
+    try {
+      const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${userToken.value}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ displayName }),
+      })
+      if (!res.ok) return false
+      // Update local state
+      const session = sessions.value.find(s => s.sessionId === sessionId)
+      if (session) session.displayName = displayName
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  return { sessions, selectedSessionId, sessionsLoaded, loading, userToken, setToken, fetchSessions, selectSession, updateDisplayName }
 })

@@ -1,7 +1,6 @@
-import { randomUUID } from 'node:crypto'
 import { hostname, platform } from 'node:os'
-import { basename, resolve } from 'node:path'
-import { BridgeMethods, type JsonRpcMessage } from '@agentlet/protocol'
+import { resolve } from 'node:path'
+import { AgentMethods, type JsonRpcMessage } from '@agentlet/protocol'
 import { AgentProcess } from './agent-process.js'
 import { WsClient } from './ws-client.js'
 import { Relay } from './relay.js'
@@ -12,18 +11,6 @@ import type { CliOptions } from './cli.js'
 export type BridgeState = 'starting' | 'connecting' | 'handshaking' | 'relaying' | 'reconnecting' | 'shutting_down' | 'stopped'
 
 /**
- * Generate a unique agentId in the format: "<hostname>:<executable>:<cwd-basename>:<8-char-uuid>"
- * This is stable for the lifetime of this bridge process.
- */
-function generateAgentId(command: string, cwd?: string): string {
-  const host = hostname()
-  const executable = basename(command.split(/\s+/)[0]!)
-  const cwdBase = basename(cwd ?? process.cwd())
-  const shortUuid = randomUUID().replace(/-/g, '').slice(0, 8)
-  return `${host}:${executable}:${cwdBase}:${shortUuid}`
-}
-
-/**
  * Bridge is the lifecycle state machine that coordinates:
  * CLI options → Agent Process → WebSocket Client → Relay
  */
@@ -31,7 +18,6 @@ export class Bridge {
   private state: BridgeState = 'starting'
   private readonly options: CliOptions
   private readonly logger: Logger
-  private readonly agentId: string
   private readonly cwd: string
   private agent!: AgentProcess
   private sessionProfile!: SessionProfile
@@ -46,7 +32,6 @@ export class Bridge {
     this.options = options
     this.logger = logger
     this.cwd = resolve(options.cwd)
-    this.agentId = generateAgentId(options.agent, this.cwd)
   }
 
   /** Start the bridge: spawn agent, bootstrap session, connect WebSocket, begin relay */
@@ -63,7 +48,7 @@ export class Bridge {
 
     this.agent.on('exit', (code, signal) => {
       this.logger.info('agent_exited', { code, signal })
-      this.sendBridgeNotification(BridgeMethods.AGENT_EXITED, {
+      this.sendNotification(AgentMethods.EXITED, {
         code, signal, willRestart: this.options.autoRestart && code !== 0,
       })
 
@@ -112,10 +97,14 @@ export class Bridge {
     this.ws = new WsClient({
       serverUrl: this.options.server,
       token: this.options.token,
-      agentCommand: this.options.agent,
-      agentPid: this.agent.pid!,
-      agentCwd: this.cwd,
-      agentId: this.agentId,
+      sessionId: this.sessionProfile.sessionId,
+      role: 'session',
+      agentletId: hostname(),
+      agent: {
+        command: this.options.agent,
+        pid: this.agent.pid!,
+        cwd: this.cwd,
+      },
       session: this.sessionProfile,
       capabilities: {
         autoRestart: this.options.autoRestart,
@@ -134,7 +123,7 @@ export class Bridge {
     this.ws.on('handshake_ok', (result) => {
       this.state = 'relaying'
       this.reconnectAttempt = 0
-      this.logger.info('handshake_ok', { agentId: result.agentId })
+      this.logger.info('handshake_ok', { sessionId: result.sessionId })
 
       // Flush any buffered messages from reconnection
       if (this.buffer.length > 0) {
@@ -191,7 +180,7 @@ export class Bridge {
     const attempt = this.reconnectAttempt + 1
     if (attempt > this.options.restartMax) {
       this.logger.error('max_restarts_exceeded', { max: this.options.restartMax })
-      this.sendBridgeNotification(BridgeMethods.GOODBYE, { reason: 'max_restarts_exceeded' })
+      this.sendNotification(AgentMethods.GOODBYE, { reason: 'max_restarts_exceeded' })
       this.shutdown('max_restarts_exceeded')
       return
     }
@@ -199,13 +188,13 @@ export class Bridge {
     setTimeout(() => {
       this.agent.start()
       this.logger.info('agent_restarted', { pid: this.agent.pid, attempt })
-      this.sendBridgeNotification(BridgeMethods.AGENT_RESTARTED, {
+      this.sendNotification(AgentMethods.RESTARTED, {
         pid: this.agent.pid!, attempt,
       })
     }, this.options.restartDelay)
   }
 
-  private sendBridgeNotification(method: string, params: Record<string, unknown>): void {
+  private sendNotification(method: string, params: Record<string, unknown>): void {
     const msg: JsonRpcMessage = {
       jsonrpc: '2.0',
       method,
@@ -228,7 +217,7 @@ export class Bridge {
     }
 
     // Send goodbye
-    this.sendBridgeNotification(BridgeMethods.GOODBYE, { reason })
+    this.sendNotification(AgentMethods.GOODBYE, { reason })
 
     // Stop relay
     this.relay?.stop()
