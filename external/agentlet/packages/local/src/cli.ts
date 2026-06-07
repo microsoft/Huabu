@@ -1,5 +1,6 @@
 import { Command } from 'commander'
 
+/** Options when --agent is provided (self-spawn / bridge mode) */
 export interface CliOptions {
   agent: string
   server: string
@@ -17,9 +18,11 @@ export interface CliOptions {
   allowInsecure: boolean
 }
 
+/** Options when --agent is NOT provided (idle agentlet / daemon mode) */
 export interface DaemonOptions {
   server: string
   token: string
+  daemonId?: string
   reconnectMax: number
   bufferLimit: number
   maxAgents: number
@@ -41,20 +44,17 @@ export function parseCli(argv: string[]): ParseResult {
   program
     .name('agentlet')
     .description('A network adapter that makes any local ACP agent remotely accessible over WebSocket')
-
-  // Default command (bridge mode)
-  program
-    .command('bridge')
-    .description('Bridge a single agent to the server (default mode)')
-    .requiredOption('--agent <command>', 'Shell command to spawn the agent (must support ACP stdio)')
     .requiredOption('--server <url>', 'Remote server bridge endpoint (WSS URL)')
     .option('--token <token>', 'Authentication token (or set AGENTLET_TOKEN env var)')
+    .option('--agent <command>', 'Shell command to spawn the agent (must support ACP stdio). If omitted, runs as idle agentlet awaiting server/spawn.')
     .option('--cwd <dir>', 'Working directory for the agent subprocess', process.cwd())
     .option('--reconnect-max <seconds>', 'Maximum reconnection backoff in seconds', '300')
     .option('--buffer-limit <count>', 'Max messages buffered during disconnection', '1000')
     .option('--auto-restart', 'Restart agent subprocess if it exits unexpectedly', false)
     .option('--restart-delay <ms>', 'Milliseconds to wait before restarting agent', '2000')
     .option('--restart-max <count>', 'Maximum consecutive restart attempts', '5')
+    .option('--max-agents <count>', 'Maximum concurrent agents (idle mode only)', '10')
+    .option('--agentlet-id <id>', 'Unique agentlet identifier (defaults to hostname, idle mode only)')
     .option('--log-level <level>', 'Logging verbosity: debug, info, warn, error', 'info')
     .option('--log-file <path>', 'Path to write structured log output (JSON lines)')
     .option('--env <KEY=VALUE...>', 'Extra environment variables for the agent (repeatable)', collectEnv, {})
@@ -66,69 +66,47 @@ export function parseCli(argv: string[]): ParseResult {
         console.error('Error: --token is required (or set AGENTLET_TOKEN environment variable)')
         process.exit(1)
       }
-      parsedResult = {
-        mode: 'bridge',
-        options: {
-          agent: opts.agent,
-          server: opts.server,
-          token,
-          cwd: opts.cwd,
-          reconnectMax: parseInt(opts.reconnectMax, 10),
-          bufferLimit: parseInt(opts.bufferLimit, 10),
-          autoRestart: opts.autoRestart,
-          restartDelay: parseInt(opts.restartDelay, 10),
-          restartMax: parseInt(opts.restartMax, 10),
-          logLevel: opts.logLevel as CliOptions['logLevel'],
-          logFile: opts.logFile,
-          env: opts.env,
-          heartbeat: parseInt(opts.heartbeat, 10),
-          allowInsecure: opts.allowInsecure,
-        },
+
+      if (opts.agent) {
+        // Self-spawn mode (bridge)
+        parsedResult = {
+          mode: 'bridge',
+          options: {
+            agent: opts.agent,
+            server: opts.server,
+            token,
+            cwd: opts.cwd,
+            reconnectMax: parseInt(opts.reconnectMax, 10),
+            bufferLimit: parseInt(opts.bufferLimit, 10),
+            autoRestart: opts.autoRestart,
+            restartDelay: parseInt(opts.restartDelay, 10),
+            restartMax: parseInt(opts.restartMax, 10),
+            logLevel: opts.logLevel as CliOptions['logLevel'],
+            logFile: opts.logFile,
+            env: opts.env,
+            heartbeat: parseInt(opts.heartbeat, 10),
+            allowInsecure: opts.allowInsecure,
+          },
+        }
+      } else {
+        // Idle agentlet mode (daemon)
+        parsedResult = {
+          mode: 'daemon',
+          options: {
+            server: opts.server,
+            token,
+            daemonId: opts.agentletId?.trim() || undefined,
+            reconnectMax: parseInt(opts.reconnectMax, 10),
+            bufferLimit: parseInt(opts.bufferLimit, 10),
+            maxAgents: parseInt(opts.maxAgents, 10),
+            heartbeat: parseInt(opts.heartbeat, 10),
+            logLevel: opts.logLevel as DaemonOptions['logLevel'],
+            logFile: opts.logFile,
+            allowInsecure: opts.allowInsecure,
+          },
+        }
       }
     })
-
-  // Daemon subcommand
-  program
-    .command('daemon')
-    .description('Run as a daemon, accepting remote commands to spawn/manage agents')
-    .requiredOption('--server <url>', 'Remote server bridge endpoint (WSS URL)')
-    .option('--token <token>', 'Authentication token (or set AGENTLET_TOKEN env var)')
-    .option('--reconnect-max <seconds>', 'Maximum reconnection backoff in seconds', '300')
-    .option('--buffer-limit <count>', 'Max messages buffered during disconnection', '1000')
-    .option('--max-agents <count>', 'Maximum concurrent agents this daemon can manage', '10')
-    .option('--heartbeat <seconds>', 'WebSocket ping interval in seconds (0 to disable)', '30')
-    .option('--log-level <level>', 'Logging verbosity: debug, info, warn, error', 'info')
-    .option('--log-file <path>', 'Path to write structured log output (JSON lines)')
-    .option('--allow-insecure', 'Allow ws:// (non-TLS) connections (local development only)', false)
-    .action((opts) => {
-      const token = opts.token || process.env['AGENTLET_TOKEN']
-      if (!token) {
-        console.error('Error: --token is required (or set AGENTLET_TOKEN environment variable)')
-        process.exit(1)
-      }
-      parsedResult = {
-        mode: 'daemon',
-        options: {
-          server: opts.server,
-          token,
-          reconnectMax: parseInt(opts.reconnectMax, 10),
-          bufferLimit: parseInt(opts.bufferLimit, 10),
-          maxAgents: parseInt(opts.maxAgents, 10),
-          heartbeat: parseInt(opts.heartbeat, 10),
-          logLevel: opts.logLevel as DaemonOptions['logLevel'],
-          logFile: opts.logFile,
-          allowInsecure: opts.allowInsecure,
-        },
-      }
-    })
-
-  // If no subcommand is specified, default to 'bridge'
-  const userArgs = argv.slice(2)
-  if (userArgs.length > 0 && userArgs[0] !== 'bridge' && userArgs[0] !== 'daemon' && !userArgs[0]!.startsWith('-')) {
-    // Unknown subcommand — let Commander handle the error
-  } else if (userArgs.length === 0 || (userArgs[0] !== 'bridge' && userArgs[0] !== 'daemon')) {
-    argv = [...argv.slice(0, 2), 'bridge', ...userArgs]
-  }
 
   program.parse(argv)
 

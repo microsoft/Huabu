@@ -1,0 +1,1656 @@
+asyncapi: 3.0.0
+info:
+  title: Agentlet WebSocket Protocols
+  version: 1.0.0
+  description: |
+    WebSocket protocols for the Agentlet relay server. Three channels exist:
+
+    1. **Bridge** (`/api/bridge`) — Agent-session / agentlet ↔ Server. Uses JSON-RPC 2.0
+       for handshake, lifecycle notifications, agentlet control, and ACP relay.
+    2. **Host** (`/api/host`) — Host application / UI ↔ Server. Uses JSON-RPC 2.0
+       notifications for multiplexed session access: `host/subscribe` and
+       `host/unsubscribe` for event replay + live streaming, `host/send` for ACP
+       messages, and server notifications for session updates.
+       **Recommended for UIs.**
+    3. **Agent** (`/agents/{sessionId}/ws`) — *(Deprecated)* Per-session raw ACP relay.
+       Transparent bidirectional JSON-RPC 2.0 passthrough to a specific session's agent.
+
+    All messages are JSON-encoded text frames. Binary frames are rejected.
+
+    **Convention note:** Following AsyncAPI convention, all operations in this
+    document are described from the **server's perspective**. An operation with
+    `action: receive` means the server receives that message (i.e., the client
+    sends it); `action: send` means the server sends it. Operation IDs also
+    reflect the server's viewpoint — e.g., `receiveAgentHello` = the server
+    receives the `agent/hello` handshake.
+
+servers:
+  agentletServer:
+    host: '{host}:{port}'
+    protocol: ws
+    description: Agentlet relay server instance
+    variables:
+      host:
+        description: Server hostname
+      port:
+        description: Server port
+
+# ─── Channels ───────────────────────────────────────────────────────────────────
+
+channels:
+
+  # ── Bridge Channel ──────────────────────────────────────────────────────────
+
+  bridge:
+    address: /api/bridge
+    title: Bridge Protocol
+    description: |
+      Agent-session / agentlet ↔ Server communication channel. Carries JSON-RPC 2.0
+      messages for handshake, lifecycle, agentlet control, and ACP relay.
+
+      **Authentication:** `Authorization: Bearer <token>` header on WebSocket upgrade
+      request. Browser clients may use a short-lived `?ticket=<ticket>` query parameter
+      obtained from a REST endpoint.
+
+      **Query parameters:**
+      - `role` — Connection type: `agentlet` (control channel) or `session` (ACP relay)
+      - `id` — Identity: agentlet ID or session ID
+
+      **Connection flow (agentlet):**
+      1. Client opens WebSocket to `/api/bridge?role=agentlet&id=<agentletId>`
+      2. Client sends `agentlet/hello` request within handshake timeout (default: 5s)
+      3. Server authenticates using the `Authorization` header
+      4. Server validates `id` for conflicts, stores agentlet profile
+      5. Connection becomes an agentlet control channel
+
+      **Connection flow (session):**
+      1. Client opens WebSocket to `/api/bridge?role=session&id=<sessionId>`
+      2. Client sends `agent/hello` request within handshake timeout (default: 10s)
+      3. Server authenticates and validates `sessionProfile`
+      4. Connection becomes an agent-session relay
+    messages:
+      # ── Handshake ──
+      agentletHelloRequest:
+        $ref: '#/components/messages/AgentletHelloRequest'
+      agentletHelloResponse:
+        $ref: '#/components/messages/AgentletHelloResponse'
+      agentHelloRequest:
+        $ref: '#/components/messages/AgentHelloRequest'
+      agentHelloResponse:
+        $ref: '#/components/messages/AgentHelloResponse'
+      agentHelloError:
+        $ref: '#/components/messages/AgentHelloError'
+
+      # ── Agent → Server Notifications ──
+      agentExited:
+        $ref: '#/components/messages/AgentExited'
+      agentRestarted:
+        $ref: '#/components/messages/AgentRestarted'
+      agentGoodbye:
+        $ref: '#/components/messages/Goodbye'
+      agentOverflow:
+        $ref: '#/components/messages/BufferOverflow'
+      agentSuspended:
+        $ref: '#/components/messages/SessionSuspended'
+
+      # ── Server → Agent Notifications ──
+      serverReplay:
+        $ref: '#/components/messages/Replay'
+      serverShutdown:
+        $ref: '#/components/messages/Shutdown'
+      serverPing:
+        $ref: '#/components/messages/Ping'
+      agentPong:
+        $ref: '#/components/messages/Pong'
+
+      # ── Agentlet Control (Server → Agentlet, Request/Response) ──
+      serverSpawnRequest:
+        $ref: '#/components/messages/SpawnRequest'
+      serverSpawnResponse:
+        $ref: '#/components/messages/SpawnResponse'
+      serverStopRequest:
+        $ref: '#/components/messages/StopRequest'
+      serverStopResponse:
+        $ref: '#/components/messages/StopResponse'
+      serverListRequest:
+        $ref: '#/components/messages/ListRequest'
+      serverListResponse:
+        $ref: '#/components/messages/ListResponse'
+
+      # ── ACP Passthrough ──
+      acpMessage:
+        $ref: '#/components/messages/AcpMessage'
+  # ── Host Channel ────────────────────────────────────────────────────────────
+
+  host:
+    address: /api/host
+    title: Host JSON-RPC Protocol
+    description: |
+      Host application / UI ↔ Server multiplexed channel. Uses JSON-RPC 2.0
+      notifications for session-based routing, event replay, and live streaming.
+
+      **Methods (Host → Server):**
+      - `host/send` — Send ACP message to an agent session
+      - `host/subscribe` — Subscribe to a session's replay + live event stream
+      - `host/unsubscribe` — Stop receiving events for a session
+
+      **Methods (Server → Host):**
+      - `server/event` — Persisted ACP event
+      - `server/replayed` — Replay finished
+      - `server/error` — Protocol error
+      - `agent/connected` — Agent session connected
+      - `agent/disconnected` — Agent session disconnected
+      - `agent/exited` — Agent process exited
+      - `agent/restarted` — Agent process restarted
+      - `agent/suspended` — Agent session suspended
+    messages:
+      hostSend:
+        $ref: '#/components/messages/HostSend'
+      hostSubscribe:
+        $ref: '#/components/messages/HostSubscribe'
+      hostUnsubscribe:
+        $ref: '#/components/messages/HostUnsubscribe'
+      serverEvent:
+        $ref: '#/components/messages/ServerEvent'
+      serverReplayed:
+        $ref: '#/components/messages/ServerReplayed'
+      agentConnected:
+        $ref: '#/components/messages/AgentConnected'
+      agentDisconnected:
+        $ref: '#/components/messages/AgentDisconnected'
+      agentExited:
+        $ref: '#/components/messages/HostAgentExited'
+      agentRestarted:
+        $ref: '#/components/messages/HostAgentRestarted'
+      agentSuspended:
+        $ref: '#/components/messages/HostAgentSuspended'
+      serverError:
+        $ref: '#/components/messages/ServerError'
+  # ── Per-Agent Raw ACP Channel (Deprecated) ──────────────────────────────────
+
+  agent:
+    address: /agents/{sessionId}/ws
+    title: Per-Session Raw ACP Relay (Deprecated)
+    description: |
+      **⚠️ Deprecated** — use the Host channel (`/api/host`) with
+      `host/subscribe` and `host/unsubscribe` instead.
+
+      Transparent bidirectional JSON-RPC 2.0 relay to a specific session's agent.
+      No envelope wrapping — messages pass through as-is. Does not support
+      event persistence or replay.
+
+      This deprecated route is keyed by `sessionId`.
+
+      **Authentication:** `Authorization: Bearer <token>` header or `?ticket=<ticket>`
+      query parameter. The token must be valid and match the agent's token.
+
+      **Multi-client:** Multiple clients can connect to the same agent
+      simultaneously. Agent responses are broadcast to all connected clients.
+    parameters:
+      sessionId:
+        description: Session ID of the raw relay target
+    messages:
+      acpMessage:
+        $ref: '#/components/messages/AcpMessage'
+
+# ─── Operations ─────────────────────────────────────────────────────────────────
+
+operations:
+
+  # ── Bridge Operations ───────────────────────────────────────────────────────
+
+  receiveAgentletHello:
+    action: receive
+    channel:
+      $ref: '#/channels/bridge'
+    summary: Agentlet sends agentlet/hello registration handshake
+    description: |
+      First message after WebSocket opens with `?role=agentlet`. Must arrive
+      within 5 seconds or the connection is closed.
+    messages:
+      - $ref: '#/channels/bridge/messages/agentletHelloRequest'
+
+  sendAgentletHelloResult:
+    action: send
+    channel:
+      $ref: '#/channels/bridge'
+    summary: Server responds to agentlet/hello with registration result
+    messages:
+      - $ref: '#/channels/bridge/messages/agentletHelloResponse'
+
+  receiveAgentHello:
+    action: receive
+    channel:
+      $ref: '#/channels/bridge'
+    summary: Agent-session sends agent/hello handshake on a per-session WebSocket
+    description: |
+      First message after WebSocket opens with `?role=session`. Must arrive
+      within handshake timeout (default: 10s) or the connection is closed.
+    messages:
+      - $ref: '#/channels/bridge/messages/agentHelloRequest'
+
+  sendAgentHelloResult:
+    action: send
+    channel:
+      $ref: '#/channels/bridge'
+    summary: Server responds to agent/hello
+    messages:
+      - $ref: '#/channels/bridge/messages/agentHelloResponse'
+      - $ref: '#/channels/bridge/messages/agentHelloError'
+
+  receiveAgentLifecycleEvent:
+    action: receive
+    channel:
+      $ref: '#/channels/bridge'
+    summary: Agent-session or agentlet sends lifecycle notifications
+    messages:
+      - $ref: '#/channels/bridge/messages/agentExited'
+      - $ref: '#/channels/bridge/messages/agentRestarted'
+      - $ref: '#/channels/bridge/messages/agentGoodbye'
+      - $ref: '#/channels/bridge/messages/agentOverflow'
+      - $ref: '#/channels/bridge/messages/agentSuspended'
+
+  sendServerControl:
+    action: send
+    channel:
+      $ref: '#/channels/bridge'
+    summary: Server sends control notifications to agent-session or agentlet
+    messages:
+      - $ref: '#/channels/bridge/messages/serverReplay'
+      - $ref: '#/channels/bridge/messages/serverShutdown'
+      - $ref: '#/channels/bridge/messages/serverPing'
+
+  receiveAgentPong:
+    action: receive
+    channel:
+      $ref: '#/channels/bridge'
+    summary: Agent-session or agentlet responds to server/ping
+    messages:
+      - $ref: '#/channels/bridge/messages/agentPong'
+
+  sendServerCommand:
+    action: send
+    channel:
+      $ref: '#/channels/bridge'
+    summary: Server sends agentlet control requests
+    description: Only sent on connections where `sessionProfile.agent` is absent in `agent/hello`.
+    messages:
+      - $ref: '#/channels/bridge/messages/serverSpawnRequest'
+      - $ref: '#/channels/bridge/messages/serverStopRequest'
+      - $ref: '#/channels/bridge/messages/serverListRequest'
+
+  receiveCommandResponse:
+    action: receive
+    channel:
+      $ref: '#/channels/bridge'
+    summary: Agentlet responds to control requests
+    messages:
+      - $ref: '#/channels/bridge/messages/serverSpawnResponse'
+      - $ref: '#/channels/bridge/messages/serverStopResponse'
+      - $ref: '#/channels/bridge/messages/serverListResponse'
+
+  relayAcpFromAgent:
+    action: receive
+    channel:
+      $ref: '#/channels/bridge'
+    summary: ACP messages from agent-session
+    description: In agent-session mode, non-protocol JSON-RPC messages are relayed as ACP traffic.
+    messages:
+      - $ref: '#/channels/bridge/messages/acpMessage'
+
+  relayAcpToAgent:
+    action: send
+    channel:
+      $ref: '#/channels/bridge'
+    summary: ACP messages to agent-session
+    messages:
+      - $ref: '#/channels/bridge/messages/acpMessage'
+
+  # ── Host Operations ─────────────────────────────────────────────────────────
+
+  receiveHostMessage:
+    action: receive
+    channel:
+      $ref: '#/channels/host'
+    summary: Host sends an ACP message to a specific session's agent
+    messages:
+      - $ref: '#/channels/host/messages/hostSend'
+
+  receiveHostSubscribe:
+    action: receive
+    channel:
+      $ref: '#/channels/host'
+    summary: Host subscribes to a session's events (replay + live)
+    description: |
+      Subscribes to events for a specific session. Server replays historical
+      events from afterSeq, sends `server/replayed`, then streams live events.
+      Re-subscribing replaces the previous subscription.
+    messages:
+      - $ref: '#/channels/host/messages/hostSubscribe'
+
+  receiveHostUnsubscribe:
+    action: receive
+    channel:
+      $ref: '#/channels/host'
+    summary: Host unsubscribes from a session's events
+    messages:
+      - $ref: '#/channels/host/messages/hostUnsubscribe'
+
+  sendHostEvents:
+    action: send
+    channel:
+      $ref: '#/channels/host'
+    summary: Server sends events, session notifications, and errors to host
+    messages:
+      - $ref: '#/channels/host/messages/serverEvent'
+      - $ref: '#/channels/host/messages/serverReplayed'
+      - $ref: '#/channels/host/messages/agentConnected'
+      - $ref: '#/channels/host/messages/agentDisconnected'
+      - $ref: '#/channels/host/messages/agentExited'
+      - $ref: '#/channels/host/messages/agentRestarted'
+      - $ref: '#/channels/host/messages/agentSuspended'
+      - $ref: '#/channels/host/messages/serverError'
+
+  # ── Agent Relay Operations (Deprecated) ────────────────────────────────────
+
+  agentRelayToAgent:
+    action: receive
+    channel:
+      $ref: '#/channels/agent'
+    summary: Client sends raw ACP message to agent
+    messages:
+      - $ref: '#/channels/agent/messages/acpMessage'
+
+  agentRelayFromAgent:
+    action: send
+    channel:
+      $ref: '#/channels/agent'
+    summary: Agent response relayed to all connected clients
+    messages:
+      - $ref: '#/channels/agent/messages/acpMessage'
+
+# ─── Components ─────────────────────────────────────────────────────────────────
+
+components:
+  messages:
+
+    # ── Bridge Handshake ────────────────────────────────────────────────────
+
+    AgentletHelloRequest:
+      name: agentlet/hello
+      title: Agentlet Hello Request
+      summary: Agentlet adapter registration handshake
+      contentType: application/json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/JsonRpcRequest'
+          - type: object
+            properties:
+              method:
+                const: agentlet/hello
+              params:
+                $ref: '#/components/schemas/AgentletHelloParams'
+      examples:
+        - name: agentletRegistration
+          summary: Agentlet control connection
+          payload:
+            jsonrpc: '2.0'
+            method: agentlet/hello
+            id: 1
+            params:
+              agentletId: dev-laptop
+              agentletProfile:
+                bridge: { name: agentlet, version: 1.0.0 }
+                machine: { hostname: dev-laptop, platform: linux }
+                capabilities: { autoRestart: true, bufferLimit: 100, maxAgents: 10 }
+
+    AgentletHelloResponse:
+      name: agentlet/hello response
+      title: Agentlet Hello Success
+      contentType: application/json
+      payload:
+        type: object
+        required: [jsonrpc, id, result]
+        properties:
+          jsonrpc:
+            const: '2.0'
+          id:
+            oneOf:
+              - type: string
+              - type: integer
+          result:
+            $ref: '#/components/schemas/AgentletHelloResult'
+
+    AgentHelloRequest:
+      name: agent/hello
+      title: Agent Hello Request
+      summary: Agent-session registration handshake
+      contentType: application/json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/JsonRpcRequest'
+          - type: object
+            properties:
+              method:
+                const: agent/hello
+              params:
+                $ref: '#/components/schemas/AgentHelloParams'
+      examples:
+        - name: agentSession
+          summary: Agent-session connection
+          payload:
+            jsonrpc: '2.0'
+            method: agent/hello
+            id: 1
+            params:
+              sessionId: sess_001
+              sessionProfile:
+                agentletId: dev-laptop
+                agentletProfile:
+                  bridge: { name: agentlet, version: 1.0.0 }
+                  machine: { hostname: dev-laptop, platform: linux }
+                  capabilities: { autoRestart: false, bufferLimit: 100 }
+                bridge: { name: agentlet, version: 1.0.0 }
+                agent: { command: 'node agent.js', pid: 12345, cwd: /home/user/project }
+                session:
+                  supportsLoad: true
+                  supportsResume: false
+                  initializeResult: { agentInfo: { name: my-agent }, capabilities: {} }
+                machine: { hostname: dev-laptop, platform: linux }
+                capabilities: { autoRestart: false, bufferLimit: 100 }
+
+    AgentHelloResponse:
+      name: agent/hello response
+      title: Agent Hello Success
+      contentType: application/json
+      payload:
+        type: object
+        required: [jsonrpc, id, result]
+        properties:
+          jsonrpc:
+            const: '2.0'
+          id:
+            oneOf:
+              - type: string
+              - type: integer
+          result:
+            $ref: '#/components/schemas/AgentHelloResult'
+
+    AgentHelloError:
+      name: agent/hello error
+      title: Agent Hello Error
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/JsonRpcErrorResponse'
+
+    # ── Agent → Server Lifecycle ────────────────────────────────────────────
+
+    AgentExited:
+      name: agent/exited
+      title: Agent Process Exited
+      summary: Sent when the agent process exits
+      contentType: application/json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/JsonRpcNotification'
+          - type: object
+            properties:
+              method:
+                const: agent/exited
+              params:
+                $ref: '#/components/schemas/AgentExitedParams'
+      examples:
+        - name: normalExit
+          payload:
+            jsonrpc: '2.0'
+            method: agent/exited
+            params: { code: 0, signal: null, willRestart: false }
+        - name: signalKill
+          payload:
+            jsonrpc: '2.0'
+            method: agent/exited
+            params: { code: null, signal: SIGTERM, willRestart: true }
+
+    AgentRestarted:
+      name: agent/restarted
+      title: Agent Process Restarted
+      summary: Sent when an agent is auto-restarted after exit
+      contentType: application/json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/JsonRpcNotification'
+          - type: object
+            properties:
+              method:
+                const: agent/restarted
+              params:
+                $ref: '#/components/schemas/AgentRestartedParams'
+      examples:
+        - name: restart
+          payload:
+            jsonrpc: '2.0'
+            method: agent/restarted
+            params: { pid: 12346, attempt: 1 }
+
+    Goodbye:
+      name: agent/goodbye
+      title: Agent Goodbye
+      summary: Sent before the adapter shuts down
+      contentType: application/json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/JsonRpcNotification'
+          - type: object
+            properties:
+              method:
+                const: agent/goodbye
+              params:
+                $ref: '#/components/schemas/GoodbyeParams'
+      examples:
+        - name: userInterrupt
+          payload:
+            jsonrpc: '2.0'
+            method: agent/goodbye
+            params: { reason: user_interrupt }
+
+    BufferOverflow:
+      name: agent/overflow
+      title: Agent Overflow
+      summary: Sent when oldest buffered messages are dropped
+      contentType: application/json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/JsonRpcNotification'
+          - type: object
+            properties:
+              method:
+                const: agent/overflow
+              params:
+                $ref: '#/components/schemas/BufferOverflowParams'
+      examples:
+        - name: overflow
+          payload:
+            jsonrpc: '2.0'
+            method: agent/overflow
+            params: { dropped: 5 }
+
+    SessionSuspended:
+      name: agent/suspended
+      title: Session Suspended
+      summary: Sent by agentlet when an agent session is suspended due to idle timeout
+      contentType: application/json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/JsonRpcNotification'
+          - type: object
+            properties:
+              method:
+                const: agent/suspended
+              params:
+                $ref: '#/components/schemas/SessionSuspendedParams'
+      examples:
+        - name: idleTimeout
+          payload:
+            jsonrpc: '2.0'
+            method: agent/suspended
+            params:
+              sessionId: sess_001
+              reason: idle_timeout
+
+    # ── Server → Agent Control ──────────────────────────────────────────────
+
+    Replay:
+      name: server/replay
+      title: Message Replay
+      summary: Server replays buffered messages after reconnection
+      contentType: application/json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/JsonRpcNotification'
+          - type: object
+            properties:
+              method:
+                const: server/replay
+              params:
+                $ref: '#/components/schemas/ReplayParams'
+      examples:
+        - name: replay
+          payload:
+            jsonrpc: '2.0'
+            method: server/replay
+            params:
+              messages:
+                - { jsonrpc: '2.0', method: test/notify, params: { data: hello } }
+
+    Shutdown:
+      name: server/shutdown
+      title: Shutdown Request
+      summary: Server requests the adapter to shut down
+      contentType: application/json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/JsonRpcNotification'
+          - type: object
+            properties:
+              method:
+                const: server/shutdown
+              params:
+                $ref: '#/components/schemas/ShutdownParams'
+      examples:
+        - name: serverShutdown
+          payload:
+            jsonrpc: '2.0'
+            method: server/shutdown
+            params: { reason: server_shutting_down }
+
+    Ping:
+      name: server/ping
+      title: Ping
+      summary: Server health check ping
+      contentType: application/json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/JsonRpcRequest'
+          - type: object
+            properties:
+              method:
+                const: server/ping
+              params:
+                type: object
+      examples:
+        - name: ping
+          payload:
+            jsonrpc: '2.0'
+            method: server/ping
+            id: 99
+            params: {}
+
+    Pong:
+      name: agent/pong response
+      title: Pong
+      summary: Agent responds to server ping
+      contentType: application/json
+      payload:
+        type: object
+        required: [jsonrpc, id, result]
+        properties:
+          jsonrpc:
+            const: '2.0'
+          id:
+            oneOf:
+              - type: string
+              - type: integer
+          result:
+            type: object
+
+    # ── Agentlet Control ────────────────────────────────────────────────────
+
+    SpawnRequest:
+      name: server/spawn
+      title: Spawn Agent Request
+      summary: Server requests agentlet to spawn an agent subprocess
+      contentType: application/json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/JsonRpcRequest'
+          - type: object
+            properties:
+              method:
+                const: server/spawn
+              params:
+                $ref: '#/components/schemas/SpawnParams'
+      examples:
+        - name: spawn
+          payload:
+            jsonrpc: '2.0'
+            method: server/spawn
+            id: 1
+            params:
+              appId: canvas-node-17
+              sessionSpec:
+                command: node my-agent.js
+                cwd: /home/user/project
+                idleTimeoutSecs: 300
+
+    SpawnResponse:
+      name: server/spawn response
+      title: Spawn Agent Response
+      contentType: application/json
+      payload:
+        type: object
+        required: [jsonrpc, id, result]
+        properties:
+          jsonrpc:
+            const: '2.0'
+          id:
+            oneOf:
+              - type: string
+              - type: integer
+          result:
+            $ref: '#/components/schemas/SpawnResult'
+
+    StopRequest:
+      name: server/stop
+      title: Stop Agent Request
+      summary: Server requests agentlet to stop a specific agent session
+      contentType: application/json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/JsonRpcRequest'
+          - type: object
+            properties:
+              method:
+                const: server/stop
+              params:
+                $ref: '#/components/schemas/StopParams'
+      examples:
+        - name: stop
+          payload:
+            jsonrpc: '2.0'
+            method: server/stop
+            id: 2
+            params:
+              sessionId: sess_001
+
+    StopResponse:
+      name: server/stop response
+      title: Stop Agent Response
+      contentType: application/json
+      payload:
+        type: object
+        required: [jsonrpc, id, result]
+        properties:
+          jsonrpc:
+            const: '2.0'
+          id:
+            oneOf:
+              - type: string
+              - type: integer
+          result:
+            $ref: '#/components/schemas/StopResult'
+
+    ListRequest:
+      name: server/list
+      title: List Agents Request
+      summary: Server requests agentlet to list managed agent sessions
+      contentType: application/json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/JsonRpcRequest'
+          - type: object
+            properties:
+              method:
+                const: server/list
+              params:
+                $ref: '#/components/schemas/ListParams'
+      examples:
+        - name: list
+          payload:
+            jsonrpc: '2.0'
+            method: server/list
+            id: 3
+            params: {}
+
+    ListResponse:
+      name: server/list response
+      title: List Agents Response
+      contentType: application/json
+      payload:
+        type: object
+        required: [jsonrpc, id, result]
+        properties:
+          jsonrpc:
+            const: '2.0'
+          id:
+            oneOf:
+              - type: string
+              - type: integer
+          result:
+            $ref: '#/components/schemas/ListResult'
+
+    # ── Host JSON-RPC ───────────────────────────────────────────────────────
+
+    HostSend:
+      name: host/send
+      title: Host Send Request
+      summary: Host sends an ACP message to a specific session's agent
+      contentType: application/json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/JsonRpcNotification'
+          - type: object
+            properties:
+              method:
+                const: host/send
+              params:
+                type: object
+                required: [sessionId, message]
+                properties:
+                  sessionId:
+                    type: string
+                    description: Target session ID
+                  message:
+                    $ref: '#/components/schemas/AcpMessage'
+      examples:
+        - name: sendPrompt
+          payload:
+            jsonrpc: '2.0'
+            method: host/send
+            params:
+              sessionId: sess_001
+              message:
+                jsonrpc: '2.0'
+                method: session/prompt
+                id: 1
+                params: { sessionId: sess_001, prompt: [{ type: text, text: 'Hello' }] }
+
+    HostSubscribe:
+      name: host/subscribe
+      title: Subscribe to Session Events
+      summary: Subscribe to a session's events with replay from afterSeq
+      contentType: application/json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/JsonRpcNotification'
+          - type: object
+            properties:
+              method:
+                const: host/subscribe
+              params:
+                type: object
+                required: [sessionId]
+                properties:
+                  sessionId:
+                    type: string
+                    description: Session ID to subscribe to
+                  afterSeq:
+                    type: integer
+                    description: Replay events with seq > afterSeq (default 0 = full replay)
+                    default: 0
+      examples:
+        - name: subscribeFull
+          payload:
+            jsonrpc: '2.0'
+            method: host/subscribe
+            params:
+              sessionId: sess_001
+              afterSeq: 0
+        - name: subscribeDelta
+          payload:
+            jsonrpc: '2.0'
+            method: host/subscribe
+            params:
+              sessionId: sess_001
+              afterSeq: 42
+
+    HostUnsubscribe:
+      name: host/unsubscribe
+      title: Unsubscribe from Session Events
+      summary: Stop receiving events for a session
+      contentType: application/json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/JsonRpcNotification'
+          - type: object
+            properties:
+              method:
+                const: host/unsubscribe
+              params:
+                type: object
+                required: [sessionId]
+                properties:
+                  sessionId:
+                    type: string
+      examples:
+        - name: unsubscribe
+          payload:
+            jsonrpc: '2.0'
+            method: host/unsubscribe
+            params:
+              sessionId: sess_001
+
+    ServerEvent:
+      name: server/event
+      title: Session Event
+      summary: A persisted ACP event (replayed or live)
+      contentType: application/json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/JsonRpcNotification'
+          - type: object
+            properties:
+              method:
+                const: server/event
+              params:
+                type: object
+                required: [sessionId, seq, ts, dir, event]
+                properties:
+                  sessionId:
+                    type: string
+                  seq:
+                    type: integer
+                    description: Per-session monotonic sequence number
+                  ts:
+                    type: string
+                    format: date-time
+                    description: Timestamp when the event was persisted
+                  dir:
+                    type: string
+                    enum: [agent, host]
+                    description: Direction of the original ACP message
+                  event:
+                    $ref: '#/components/schemas/AcpMessage'
+      examples:
+        - name: agentResponse
+          payload:
+            jsonrpc: '2.0'
+            method: server/event
+            params:
+              sessionId: sess_001
+              seq: 42
+              ts: '2026-06-05T12:00:00.123Z'
+              dir: agent
+              event:
+                jsonrpc: '2.0'
+                method: session/update
+                params:
+                  sessionId: sess_001
+                  update:
+                    sessionUpdate: agent_message_chunk
+                    content: { type: text, text: 'Hello!' }
+
+    ServerReplayed:
+      name: server/replayed
+      title: Replay Complete
+      summary: All historical events for a subscription have been sent
+      contentType: application/json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/JsonRpcNotification'
+          - type: object
+            properties:
+              method:
+                const: server/replayed
+              params:
+                type: object
+                required: [sessionId, lastSeq]
+                properties:
+                  sessionId:
+                    type: string
+                  lastSeq:
+                    type: integer
+                    description: Sequence number of the last event sent during replay
+      examples:
+        - name: replayDone
+          payload:
+            jsonrpc: '2.0'
+            method: server/replayed
+            params:
+              sessionId: sess_001
+              lastSeq: 42
+
+    AgentConnected:
+      name: agent/connected
+      title: Agent Connected
+      summary: An agent session has connected or reconnected
+      contentType: application/json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/JsonRpcNotification'
+          - type: object
+            properties:
+              method:
+                const: agent/connected
+              params:
+                type: object
+                required: [sessionId, sessionProfile]
+                properties:
+                  sessionId:
+                    type: string
+                  sessionProfile:
+                    $ref: '#/components/schemas/SessionProfile'
+      examples:
+        - name: connected
+          payload:
+            jsonrpc: '2.0'
+            method: agent/connected
+            params:
+              sessionId: sess_001
+              sessionProfile:
+                appId: canvas-node-17
+                bridge: { name: agentlet, version: 1.0.0 }
+                agent: { command: 'node agent.js', pid: 12345, cwd: /home/user/project }
+                machine: { hostname: dev-laptop, platform: linux }
+                capabilities: { autoRestart: false, bufferLimit: 100 }
+
+    AgentDisconnected:
+      name: agent/disconnected
+      title: Agent Disconnected
+      summary: An agent session has disconnected
+      contentType: application/json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/JsonRpcNotification'
+          - type: object
+            properties:
+              method:
+                const: agent/disconnected
+              params:
+                type: object
+                required: [sessionId, reason]
+                properties:
+                  sessionId:
+                    type: string
+                  reason:
+                    type: string
+                    example: websocket_closed
+      examples:
+        - name: disconnected
+          payload:
+            jsonrpc: '2.0'
+            method: agent/disconnected
+            params:
+              sessionId: sess_001
+              reason: websocket_closed
+
+    HostAgentExited:
+      name: agent/exited
+      title: Agent Exited
+      summary: Host notification that an agent process exited
+      contentType: application/json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/JsonRpcNotification'
+          - type: object
+            properties:
+              method:
+                const: agent/exited
+              params:
+                type: object
+                required: [sessionId, code, signal, willRestart]
+                properties:
+                  sessionId:
+                    type: string
+                  code:
+                    type: integer
+                    nullable: true
+                  signal:
+                    type: string
+                    nullable: true
+                  willRestart:
+                    type: boolean
+      examples:
+        - name: exited
+          payload:
+            jsonrpc: '2.0'
+            method: agent/exited
+            params:
+              sessionId: sess_001
+              code: 0
+              signal: null
+              willRestart: false
+
+    HostAgentRestarted:
+      name: agent/restarted
+      title: Agent Restarted
+      summary: Host notification that an agent process restarted
+      contentType: application/json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/JsonRpcNotification'
+          - type: object
+            properties:
+              method:
+                const: agent/restarted
+              params:
+                type: object
+                required: [sessionId, pid, attempt]
+                properties:
+                  sessionId:
+                    type: string
+                  pid:
+                    type: integer
+                  attempt:
+                    type: integer
+      examples:
+        - name: restarted
+          payload:
+            jsonrpc: '2.0'
+            method: agent/restarted
+            params:
+              sessionId: sess_001
+              pid: 12346
+              attempt: 1
+
+    HostAgentSuspended:
+      name: agent/suspended
+      title: Agent Suspended
+      summary: Host notification that an agent session was suspended
+      contentType: application/json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/JsonRpcNotification'
+          - type: object
+            properties:
+              method:
+                const: agent/suspended
+              params:
+                type: object
+                required: [sessionId, reason]
+                properties:
+                  sessionId:
+                    type: string
+                  reason:
+                    type: string
+      examples:
+        - name: suspended
+          payload:
+            jsonrpc: '2.0'
+            method: agent/suspended
+            params:
+              sessionId: sess_001
+              reason: idle_timeout
+
+    ServerError:
+      name: server/error
+      title: Error
+      summary: Error from the host protocol
+      contentType: application/json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/JsonRpcNotification'
+          - type: object
+            properties:
+              method:
+                const: server/error
+              params:
+                type: object
+                required: [code, message]
+                properties:
+                  sessionId:
+                    type: string
+                    description: Session ID if the error is scoped to a session
+                  code:
+                    type: string
+                    enum: [NO_ACTIVE_AGENT, INVALID_REQUEST]
+                  message:
+                    type: string
+      examples:
+        - name: noAgent
+          payload:
+            jsonrpc: '2.0'
+            method: server/error
+            params:
+              sessionId: sess_001
+              code: NO_ACTIVE_AGENT
+              message: No agent is currently connected for this session
+
+    # ── ACP Passthrough ─────────────────────────────────────────────────────
+
+    AcpMessage:
+      name: acp
+      title: ACP Message
+      summary: Raw ACP JSON-RPC 2.0 message (transparent relay)
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/AcpMessage'
+
+  # ── Schemas ─────────────────────────────────────────────────────────────────
+
+  schemas:
+
+    # ── JSON-RPC 2.0 Base ─────────────────────────────────────────────────
+
+    JsonRpcRequest:
+      type: object
+      required: [jsonrpc, method, id]
+      properties:
+        jsonrpc:
+          const: '2.0'
+        method:
+          type: string
+        id:
+          oneOf:
+            - type: string
+            - type: integer
+        params:
+          type: object
+
+    JsonRpcNotification:
+      type: object
+      required: [jsonrpc, method]
+      properties:
+        jsonrpc:
+          const: '2.0'
+        method:
+          type: string
+        params:
+          type: object
+
+    JsonRpcErrorResponse:
+      type: object
+      required: [jsonrpc, id, error]
+      properties:
+        jsonrpc:
+          const: '2.0'
+        id:
+          oneOf:
+            - type: string
+            - type: integer
+        error:
+          $ref: '#/components/schemas/JsonRpcError'
+
+    JsonRpcError:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          $ref: '#/components/schemas/ErrorCodes'
+        message:
+          type: string
+        data:
+          description: Optional additional error data
+
+    AcpMessage:
+      description: |
+        Any JSON-RPC 2.0 message carrying ACP (Agent Communication Protocol)
+        content. The relay does not inspect or validate ACP payloads.
+      oneOf:
+        - $ref: '#/components/schemas/JsonRpcRequest'
+        - $ref: '#/components/schemas/JsonRpcNotification'
+        - type: object
+          required: [jsonrpc, id, result]
+          properties:
+            jsonrpc:
+              const: '2.0'
+            id:
+              oneOf:
+                - type: string
+                - type: integer
+            result: {}
+        - $ref: '#/components/schemas/JsonRpcErrorResponse'
+
+    # ── Bridge Types ──────────────────────────────────────────────────────
+
+    BridgeInfo:
+      type: object
+      required: [name, version]
+      properties:
+        name:
+          type: string
+          description: Always "agentlet"
+        version:
+          type: string
+          description: Agentlet version (semver)
+
+    SessionInfo:
+      type: object
+      description: Present when ACP session bootstrap is complete
+      required: [supportsLoad, supportsResume, initializeResult]
+      properties:
+        supportsLoad:
+          type: boolean
+        supportsResume:
+          type: boolean
+        initializeResult:
+          description: Full ACP initialize response
+
+    Capabilities:
+      type: object
+      required: [autoRestart, bufferLimit]
+      properties:
+        autoRestart:
+          type: boolean
+        bufferLimit:
+          type: integer
+          description: Max messages buffered during disconnect
+        maxAgents:
+          type: integer
+          description: Max concurrent agents (agentlet only)
+
+    SessionProfile:
+      type: object
+      description: Session metadata for agent-session connections (sent in agent/hello)
+      required: [agentletId, bridge, agent, capabilities]
+      properties:
+        agentletId:
+          type: string
+          description: |
+            Parent agentlet identifier. Links this session to its agentlet
+            control channel so the server can correlate per-session WS
+            connections with the agentlet that spawned them.
+        agentletProfile:
+          description: |
+            Copy of the agentlet's profile. Allows the server to have full
+            context about the adapter even if the agentlet control channel
+            disconnects or if the session was self-spawned.
+          $ref: '#/components/schemas/AgentletProfile'
+        appId:
+          type: string
+          description: Host-side correlation ID (for example, a canvas node or tab ID)
+        bridge:
+          $ref: '#/components/schemas/BridgeInfo'
+        agent:
+          description: Spawned agent process info
+          allOf:
+            - $ref: '#/components/schemas/AgentInfo'
+        session:
+          $ref: '#/components/schemas/SessionInfo'
+        machine:
+          $ref: '#/components/schemas/MachineInfo'
+        capabilities:
+          $ref: '#/components/schemas/Capabilities'
+
+    AgentletProfile:
+      type: object
+      description: Agentlet adapter profile (sent in agentlet/hello)
+      required: [bridge, capabilities]
+      properties:
+        bridge:
+          $ref: '#/components/schemas/BridgeInfo'
+        machine:
+          $ref: '#/components/schemas/MachineInfo'
+        capabilities:
+          $ref: '#/components/schemas/Capabilities'
+
+    AgentletHelloParams:
+      type: object
+      required: [agentletId, agentletProfile]
+      properties:
+        agentletId:
+          type: string
+          description: Self-chosen agentlet identifier (should match query param `id`)
+        agentletProfile:
+          $ref: '#/components/schemas/AgentletProfile'
+
+    AgentletHelloResult:
+      type: object
+      required: [agentletId, status]
+      properties:
+        agentletId:
+          type: string
+          description: Server-confirmed agentlet identifier
+        status:
+          const: registered
+
+    AgentHelloParams:
+      type: object
+      required: [sessionId, sessionProfile]
+      properties:
+        sessionId:
+          type: string
+          description: ACP session identifier — primary routing key
+        sessionProfile:
+          $ref: '#/components/schemas/SessionProfile'
+
+    AgentHelloResult:
+      type: object
+      required: [sessionId, status]
+      properties:
+        sessionId:
+          type: string
+          description: Echoed back, confirming registration
+        status:
+          const: connected
+
+    # ── Lifecycle Event Params ────────────────────────────────────────────
+
+    AgentExitedParams:
+      type: object
+      required: [code, signal, willRestart]
+      properties:
+        code:
+          type: integer
+          nullable: true
+          description: Exit code (null if killed by signal)
+        signal:
+          type: string
+          nullable: true
+          description: Signal name, e.g. "SIGTERM" (null if normal exit)
+        willRestart:
+          type: boolean
+          description: Whether auto-restart will attempt recovery
+
+    AgentRestartedParams:
+      type: object
+      required: [pid, attempt]
+      properties:
+        pid:
+          type: integer
+          description: New agent process ID
+        attempt:
+          type: integer
+          description: Restart attempt number (1-based)
+
+    GoodbyeParams:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          description: |
+            Why the adapter is shutting down.
+            Common values: `user_interrupt`, `server_requested`, `max_restarts_exceeded`
+
+    BufferOverflowParams:
+      type: object
+      required: [dropped]
+      properties:
+        dropped:
+          type: integer
+          description: Number of oldest messages dropped
+
+    SessionSuspendedParams:
+      type: object
+      required: [sessionId, reason]
+      properties:
+        sessionId:
+          type: string
+          description: The ACP session ID of the suspended session
+        reason:
+          type: string
+          description: Why the session was suspended (e.g. "idle_timeout")
+
+    # ── Server → Agent Control Params ─────────────────────────────────────
+
+    ReplayParams:
+      type: object
+      required: [messages]
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/AcpMessage'
+          description: Buffered messages from disconnect period
+
+    ShutdownParams:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          description: |
+            Why the server is requesting shutdown.
+            Common values: `token_revoked`, `server_shutting_down`, `idle_timeout`
+
+    # ── Agentlet Control Types ─────────────────────────────────────────────
+
+    SessionSpec:
+      type: object
+      required: [command]
+      properties:
+        command:
+          type: string
+          description: Shell command to spawn the agent (must support ACP stdio)
+        cwd:
+          type: string
+          description: Working directory for the agent subprocess
+        env:
+          type: object
+          additionalProperties:
+            type: string
+          description: Extra environment variables
+        autoRestart:
+          type: boolean
+          description: Enable auto-restart on agent exit
+        idleTimeoutSecs:
+          type: integer
+          description: Idle timeout in seconds (0 or omitted = no timeout)
+
+    SpawnParams:
+      type: object
+      required: [appId, sessionSpec]
+      properties:
+        appId:
+          type: string
+          description: Host-side correlation ID
+        sessionId:
+          type: string
+          description: |
+            When provided, the agentlet resumes an existing suspended session
+            instead of starting a fresh one.
+        sessionSpec:
+          $ref: '#/components/schemas/SessionSpec'
+
+    SpawnResult:
+      type: object
+      required: [sessionId, pid]
+      properties:
+        sessionId:
+          type: string
+          description: Session ID of the newly spawned agent
+        pid:
+          type: integer
+          description: OS process ID
+
+    StopParams:
+      type: object
+      required: [sessionId]
+      properties:
+        sessionId:
+          type: string
+          description: Session ID of the agent to stop
+
+    StopResult:
+      type: object
+      required: [stopped]
+      properties:
+        stopped:
+          type: boolean
+
+    ListParams:
+      type: object
+      additionalProperties: false
+
+    ListResult:
+      type: object
+      required: [agents]
+      properties:
+        agents:
+          type: array
+          items:
+            type: object
+            required: [sessionId, command, pid, cwd, status]
+            properties:
+              sessionId:
+                type: string
+              appId:
+                type: string
+                description: Host-side correlation ID if one was provided at spawn time
+              command:
+                type: string
+              pid:
+                type: integer
+              cwd:
+                type: string
+              status:
+                type: string
+                enum: [running, starting]
+
+    # ── Shared Session Types ───────────────────────────────────────────────
+
+    AgentInfo:
+      type: object
+      required: [command, pid, cwd]
+      properties:
+        command:
+          type: string
+        pid:
+          type: integer
+        cwd:
+          type: string
+
+    MachineInfo:
+      type: object
+      required: [hostname, platform]
+      properties:
+        hostname:
+          type: string
+        platform:
+          type: string
+          enum: [win32, darwin, linux]
+
+    LifecycleEvent:
+      description: Union type — one of the lifecycle event shapes surfaced by the server
+      oneOf:
+        - type: object
+          required: [type, code, signal, willRestart]
+          properties:
+            type:
+              const: agent/exited
+            code:
+              type: integer
+              nullable: true
+            signal:
+              type: string
+              nullable: true
+            willRestart:
+              type: boolean
+        - type: object
+          required: [type, pid, attempt]
+          properties:
+            type:
+              const: agent/restarted
+            pid:
+              type: integer
+            attempt:
+              type: integer
+        - type: object
+          required: [type, dropped]
+          properties:
+            type:
+              const: agent/overflow
+            dropped:
+              type: integer
+        - type: object
+          required: [type, reason]
+          properties:
+            type:
+              const: agent/goodbye
+            reason:
+              type: string
+        - type: object
+          required: [type, sessionId, reason]
+          properties:
+            type:
+              const: agent/suspended
+            sessionId:
+              type: string
+            reason:
+              type: string
+
+    # ── Error Codes Reference ─────────────────────────────────────────────
+
+    ErrorCodes:
+      description: |
+        Bridge protocol error codes used in JSON-RPC error responses:
+        | Code | Name | Description |
+        |------|------|-------------|
+        | -32700 | PARSE_ERROR | Invalid JSON |
+        | -32600 | INVALID_REQUEST | Invalid JSON-RPC structure |
+        | -32001 | INVALID_TOKEN | Authentication failed |
+        | -32002 | VERSION_MISMATCH | Incompatible protocol version |
+        | -32003 | HANDSHAKE_TIMEOUT | agent/hello not received in time |
+        | -32004 | DUPLICATE_SESSION | Session ID already in use by incompatible active connection |
+      type: integer
+      enum: [-32700, -32600, -32001, -32002, -32003, -32004]

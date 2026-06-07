@@ -6,9 +6,9 @@ import { useDaemonsStore } from '../stores/daemons'
 const agents = useAgentsStore()
 const daemons = useDaemonsStore()
 
-const command = ref('')
-const cwd = ref('')
-const autoRestart = ref(false)
+const command = ref(localStorage.getItem('agentlet-spawn-command') ?? '')
+const cwd = ref(localStorage.getItem('agentlet-spawn-cwd') ?? '')
+const autoRestart = ref(localStorage.getItem('agentlet-spawn-autorestart') === 'true')
 const showSpawnForm = ref(false)
 
 watch(() => agents.userToken, (token) => {
@@ -27,6 +27,11 @@ watch(() => agents.userToken, (token) => {
   if (token) { pollInterval = setInterval(() => daemons.fetchDaemons(token), 5000) }
 }, { immediate: true })
 
+// Persist spawn fields on change
+watch(command, (v) => localStorage.setItem('agentlet-spawn-command', v))
+watch(cwd, (v) => localStorage.setItem('agentlet-spawn-cwd', v))
+watch(autoRestart, (v) => localStorage.setItem('agentlet-spawn-autorestart', String(v)))
+
 async function handleSpawn() {
   if (!command.value.trim() || !daemons.selectedDaemonId) return
   const result = await daemons.spawnAgent(agents.userToken, daemons.selectedDaemonId, {
@@ -35,24 +40,22 @@ async function handleSpawn() {
     autoRestart: autoRestart.value,
   })
   if (result) {
-    command.value = ''
-    cwd.value = ''
-    autoRestart.value = false
+    // Keep command/cwd in localStorage for quick re-spawn — don't clear them
     showSpawnForm.value = false
     // Refresh daemon agents and global agents list
     if (daemons.selectedDaemonId) {
       daemons.fetchDaemonAgents(agents.userToken, daemons.selectedDaemonId)
     }
-    setTimeout(() => agents.fetchAgents(), 1000)
+    setTimeout(() => agents.fetchSessions(), 1000)
   }
 }
 
-async function handleStop(agentId: string) {
+async function handleStop(sessionId: string) {
   if (!daemons.selectedDaemonId) return
-  const ok = await daemons.stopAgent(agents.userToken, daemons.selectedDaemonId, agentId)
+  const ok = await daemons.stopAgent(agents.userToken, daemons.selectedDaemonId, sessionId)
   if (ok && daemons.selectedDaemonId) {
     daemons.fetchDaemonAgents(agents.userToken, daemons.selectedDaemonId)
-    setTimeout(() => agents.fetchAgents(), 1000)
+    setTimeout(() => agents.fetchSessions(), 1000)
   }
 }
 </script>
@@ -77,7 +80,7 @@ async function handleStop(agentId: string) {
           :class="{ selected: daemons.selectedDaemonId === daemon.daemonId }"
           @click="daemons.selectDaemon(daemon.daemonId)"
         >
-          <span class="status-dot" :class="daemon.status"></span>
+          <span class="status-dot" :class="daemon.connected ? 'connected' : 'disconnected'"></span>
           <div class="daemon-info">
             <span class="daemon-id">{{ daemon.daemonId }}</span>
             <span class="daemon-meta" v-if="daemon.machine">
@@ -121,13 +124,13 @@ async function handleStop(agentId: string) {
           <div v-if="daemons.daemonAgents.length === 0" class="empty-agents">
             No agents running on this daemon
           </div>
-          <div v-for="agent in daemons.daemonAgents" :key="agent.agentId" class="agent-row">
+          <div v-for="agent in daemons.daemonAgents" :key="agent.sessionId" class="agent-row">
             <div class="agent-info">
-              <span class="agent-id">{{ agent.agentId }}</span>
+              <span class="agent-id">{{ agent.sessionId }}</span>
               <span class="agent-cmd">{{ agent.command }}</span>
               <span class="agent-meta">PID: {{ agent.pid }} | {{ agent.cwd }}</span>
             </div>
-            <button class="stop-btn" @click="handleStop(agent.agentId)">Stop</button>
+            <button class="stop-btn" @click="handleStop(agent.sessionId)">Stop</button>
           </div>
         </div>
       </div>

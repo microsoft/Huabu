@@ -1,6 +1,9 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { AgentletServer } from './server.js'
 import type { TokenStore, TokenMap } from './token-store.js'
+import type { AgentletRecord, SessionRecord } from './data-store.js'
+import { tokenSignature } from './data-store.js'
+import type { AgentConnection } from '@agentlet/protocol'
 
 export interface RestApiOptions {
   server: AgentletServer
@@ -34,75 +37,149 @@ export function handleRestRequest(
     return true
   }
 
-  // GET /api/agents — filtered by Authorization token
+  // GET /api/agents — list all agent connections (DEPRECATED)
   if (method === 'GET' && path === '/api/agents') {
-    const token = extractBearerToken(req)
-    const filter = token ? { token } : undefined
-    const agents = opts.server.getConnections(filter).map(agentToJson)
-    json(res, 200, { agents })
+    const agents = opts.server.getConnections().map(agentToJson)
+    json(res, 200, { agents }, deprecationHeaders())
     return true
   }
 
-  // GET /api/agents/:id or DELETE /api/agents/:id
+  // GET /api/agents/:id or DELETE /api/agents/:id (DEPRECATED — :id is sessionId)
   const agentMatch = path.match(/^\/api\/agents\/(.+?)(?:\/ws)?$/)
   if (agentMatch && !path.endsWith('/ws')) {
-    const agentId = decodeURIComponent(agentMatch[1]!)
+    const sessionId = decodeURIComponent(agentMatch[1]!)
 
     if (method === 'GET') {
-      const conn = opts.server.getConnection(agentId)
+      const conn = opts.server.getConnection(sessionId)
       if (!conn) {
-        json(res, 404, { error: 'Agent not found', agentId })
+        json(res, 404, { error: 'Agent not found', sessionId }, deprecationHeaders())
         return true
       }
-      json(res, 200, agentToJson(conn))
+      json(res, 200, agentToJson(conn), deprecationHeaders())
       return true
     }
 
     if (method === 'DELETE') {
-      const conn = opts.server.getConnection(agentId)
+      const conn = opts.server.getConnection(sessionId)
       if (!conn) {
-        json(res, 404, { error: 'Agent not found', agentId })
+        json(res, 404, { error: 'Agent not found', sessionId }, deprecationHeaders())
         return true
       }
       conn.disconnect('api_requested')
-      json(res, 200, { disconnected: true, agentId })
+      json(res, 200, { disconnected: true, sessionId }, deprecationHeaders())
       return true
     }
   }
 
-  // GET /api/daemons — list connected daemons (filtered by token)
-  if (method === 'GET' && path === '/api/daemons') {
+  // GET /api/sessions — list sessions (filtered by token, optionally by status)
+  if (method === 'GET' && path === '/api/sessions') {
     const token = extractBearerToken(req)
-    const filter = token ? { token } : undefined
-    const daemons = opts.server.getDaemons(filter).map(daemonToJson)
-    json(res, 200, { daemons })
+    if (!token) { json(res, 401, { error: 'Unauthorized' }); return true }
+    if (!opts.tokenStore.validate(token)) { json(res, 401, { error: 'Invalid token' }); return true }
+
+    const dataStore = opts.server.getDataStore()
+
+    const statusFilter = url.searchParams.get('status')
+    const owner = tokenSignature(token)
+    const sessions = dataStore.findSessionsByOwner(owner)
+    const filtered = statusFilter
+      ? sessions.filter(s => statusFilter.split(',').includes(s.status))
+      : sessions
+
+    json(res, 200, { sessions: filtered.map(s => sessionToJson(s, opts.server)) })
     return true
   }
 
-  // GET /api/daemons/:id — get daemon info
-  const daemonInfoMatch = path.match(/^\/api\/daemons\/([^/]+)$/)
-  if (daemonInfoMatch && method === 'GET') {
-    const daemonId = decodeURIComponent(daemonInfoMatch[1]!)
-    const daemon = opts.server.getDaemon(daemonId)
-    if (!daemon) { json(res, 404, { error: 'Daemon not found', daemonId }); return true }
-    json(res, 200, daemonToJson(daemon))
+  // GET /api/sessions/:id — get session info
+  const sessionInfoMatch = path.match(/^\/api\/sessions\/([^/]+)$/)
+  if (sessionInfoMatch && method === 'GET') {
+    const sessionId = decodeURIComponent(sessionInfoMatch[1]!)
+    const token = extractBearerToken(req)
+    if (!token) { json(res, 401, { error: 'Unauthorized' }); return true }
+    if (!opts.tokenStore.validate(token)) { json(res, 401, { error: 'Invalid token' }); return true }
+
+    const dataStore = opts.server.getDataStore()
+
+    const session = dataStore.getSession(sessionId)
+    if (!session) { json(res, 404, { error: 'Session not found', sessionId }); return true }
+    if (session.owner !== tokenSignature(token)) { json(res, 403, { error: 'Forbidden' }); return true }
+
+    json(res, 200, sessionToJson(session, opts.server))
     return true
   }
 
-  // POST /api/daemons/:id/spawn — spawn an agent on a daemon
-  const spawnMatch = path.match(/^\/api\/daemons\/([^/]+)\/spawn$/)
+  // PATCH /api/sessions/:id — update session display name
+  if (sessionInfoMatch && method === 'PATCH') {
+    const sessionId = decodeURIComponent(sessionInfoMatch[1]!)
+    const token = extractBearerToken(req)
+    if (!token) { json(res, 401, { error: 'Unauthorized' }); return true }
+    if (!opts.tokenStore.validate(token)) { json(res, 401, { error: 'Invalid token' }); return true }
+
+    const dataStore = opts.server.getDataStore()
+    const session = dataStore.getSession(sessionId)
+    if (!session) { json(res, 404, { error: 'Session not found', sessionId }); return true }
+    if (session.owner !== tokenSignature(token)) { json(res, 403, { error: 'Forbidden' }); return true }
+
+    readBody(req).then((raw) => {
+      try {
+        const body = JSON.parse(raw)
+        const displayName = body?.displayName
+        if (typeof displayName !== 'string' || !displayName.trim()) {
+          json(res, 400, { error: 'displayName is required and must be a non-empty string' })
+          return
+        }
+        dataStore.updateDisplayName(sessionId, displayName.trim())
+        const updated = dataStore.getSession(sessionId)!
+        json(res, 200, sessionToJson(updated, opts.server))
+      } catch {
+        json(res, 400, { error: 'Invalid JSON body' })
+      }
+    })
+    return true
+  }
+
+  // GET /api/agentlets — list agentlets (from persistent store + live connection status)
+  if (method === 'GET' && path === '/api/agentlets') {
+    const token = extractBearerToken(req)
+    const dataStore = opts.server.getDataStore()
+    const owner = token ? tokenSignature(token) : undefined
+    const agentlets = dataStore.getAgentlets(owner).map(record => {
+      const conn = opts.server.getConnection(record.agentletId)
+      return agentletRecordToJson(record, conn)
+    })
+    json(res, 200, { agentlets })
+    return true
+  }
+
+  // GET /api/agentlets/:id — get agentlet info
+  const agentletInfoMatch = path.match(/^\/api\/agentlets\/([^/]+)$/)
+  if (agentletInfoMatch && method === 'GET') {
+    const agentletId = decodeURIComponent(agentletInfoMatch[1]!)
+    const dataStore = opts.server.getDataStore()
+    const record = dataStore.getAgentlet(agentletId)
+    if (!record) { json(res, 404, { error: 'Agentlet not found', agentletId }); return true }
+    const conn = opts.server.getConnection(agentletId)
+    json(res, 200, agentletRecordToJson(record, conn))
+    return true
+  }
+
+  // POST /api/agentlets/:id/spawn — spawn an agent session on an agentlet
+  const spawnMatch = path.match(/^\/api\/agentlets\/([^/]+)\/spawn$/)
   if (spawnMatch && method === 'POST') {
-    const daemonId = decodeURIComponent(spawnMatch[1]!)
+    const agentletSessionId = decodeURIComponent(spawnMatch[1]!)
     const token = extractBearerToken(req)
-    const daemon = opts.server.getDaemon(daemonId)
-    if (!daemon) { json(res, 404, { error: 'Daemon not found', daemonId }); return true }
-    if (token && daemon.token !== token) { json(res, 403, { error: 'Forbidden' }); return true }
+    if (!token) { json(res, 401, { error: 'Unauthorized' }); return true }
+
+    const dataStore = opts.server.getDataStore()
+    const agentlet = dataStore.getAgentlet(agentletSessionId)
+    if (!agentlet) { json(res, 404, { error: 'Agentlet not found', sessionId: agentletSessionId }); return true }
+    if (agentlet.owner !== tokenSignature(token)) { json(res, 403, { error: 'Forbidden' }); return true }
 
     readBody(req).then(async (body) => {
       try {
         const params = JSON.parse(body)
-        if (!params.command) { json(res, 400, { error: 'Missing required field: command' }); return }
-        const result = await opts.server.spawnOnDaemon(daemonId, params)
+        if (!params.sessionSpec?.command) { json(res, 400, { error: 'Missing required field: sessionSpec.command' }); return }
+        const result = await opts.server.spawnOnAgentlet(agentletSessionId, params)
         json(res, 200, result)
       } catch (err) {
         json(res, 500, { error: err instanceof Error ? err.message : 'Spawn failed' })
@@ -111,20 +188,23 @@ export function handleRestRequest(
     return true
   }
 
-  // POST /api/daemons/:id/stop — stop an agent on a daemon
-  const stopMatch = path.match(/^\/api\/daemons\/([^/]+)\/stop$/)
+  // POST /api/agentlets/:id/stop — stop an agent session on an agentlet
+  const stopMatch = path.match(/^\/api\/agentlets\/([^/]+)\/stop$/)
   if (stopMatch && method === 'POST') {
-    const daemonId = decodeURIComponent(stopMatch[1]!)
+    const agentletSessionId = decodeURIComponent(stopMatch[1]!)
     const token = extractBearerToken(req)
-    const daemon = opts.server.getDaemon(daemonId)
-    if (!daemon) { json(res, 404, { error: 'Daemon not found', daemonId }); return true }
-    if (token && daemon.token !== token) { json(res, 403, { error: 'Forbidden' }); return true }
+    if (!token) { json(res, 401, { error: 'Unauthorized' }); return true }
+
+    const dataStore = opts.server.getDataStore()
+    const agentlet = dataStore.getAgentlet(agentletSessionId)
+    if (!agentlet) { json(res, 404, { error: 'Agentlet not found', sessionId: agentletSessionId }); return true }
+    if (agentlet.owner !== tokenSignature(token)) { json(res, 403, { error: 'Forbidden' }); return true }
 
     readBody(req).then(async (body) => {
       try {
         const params = JSON.parse(body)
-        if (!params.agentId) { json(res, 400, { error: 'Missing required field: agentId' }); return }
-        const result = await opts.server.stopOnDaemon(daemonId, params)
+        if (!params.sessionId) { json(res, 400, { error: 'Missing required field: sessionId' }); return }
+        const result = await opts.server.stopOnAgentlet(agentletSessionId, params)
         json(res, 200, result)
       } catch (err) {
         json(res, 500, { error: err instanceof Error ? err.message : 'Stop failed' })
@@ -133,16 +213,19 @@ export function handleRestRequest(
     return true
   }
 
-  // GET /api/daemons/:id/agents — list agents running on a daemon
-  const listMatch = path.match(/^\/api\/daemons\/([^/]+)\/agents$/)
+  // GET /api/agentlets/:id/sessions — list agent sessions on an agentlet
+  const listMatch = path.match(/^\/api\/agentlets\/([^/]+)\/sessions$/)
   if (listMatch && method === 'GET') {
-    const daemonId = decodeURIComponent(listMatch[1]!)
+    const agentletSessionId = decodeURIComponent(listMatch[1]!)
     const token = extractBearerToken(req)
-    const daemon = opts.server.getDaemon(daemonId)
-    if (!daemon) { json(res, 404, { error: 'Daemon not found', daemonId }); return true }
-    if (token && daemon.token !== token) { json(res, 403, { error: 'Forbidden' }); return true }
+    if (!token) { json(res, 401, { error: 'Unauthorized' }); return true }
 
-    opts.server.listOnDaemon(daemonId)
+    const dataStore = opts.server.getDataStore()
+    const agentlet = dataStore.getAgentlet(agentletSessionId)
+    if (!agentlet) { json(res, 404, { error: 'Agentlet not found', sessionId: agentletSessionId }); return true }
+    if (agentlet.owner !== tokenSignature(token)) { json(res, 403, { error: 'Forbidden' }); return true }
+
+    opts.server.listOnAgentlet(agentletSessionId)
       .then((result) => json(res, 200, result))
       .catch((err) => json(res, 500, { error: err instanceof Error ? err.message : 'List failed' }))
     return true
@@ -215,29 +298,27 @@ function readBody(req: IncomingMessage): Promise<string> {
   })
 }
 
-function agentToJson(agent: { agentId: string; token: string; status: string; agentInfo: { command: string; pid: number; cwd: string }; session?: { sessionId: string; supportsLoad: boolean; initializeResult: unknown }; machine?: { hostname: string; platform: string }; bridge: { name: string; version: string }; capabilities: { autoRestart: boolean; bufferLimit: number }; metadata: Record<string, unknown>; connectedAt: Date }) {
+function agentToJson(agent: AgentConnection) {
   return {
-    agentId: agent.agentId,
+    sessionId: agent.sessionId,
+    agentletId: agent.agentletId,
+    role: agent.role,
     status: agent.status,
-    agentInfo: agent.agentInfo,
-    session: agent.session ? { sessionId: agent.session.sessionId, supportsLoad: agent.session.supportsLoad } : undefined,
-    machine: agent.machine,
-    bridge: agent.bridge,
-    capabilities: agent.capabilities,
     metadata: agent.metadata,
     connectedAt: agent.connectedAt.toISOString(),
   }
 }
 
-function daemonToJson(daemon: { daemonId: string; status: string; machine?: { hostname: string; platform: string }; bridge: { name: string; version: string }; capabilities: { autoRestart: boolean; bufferLimit: number; maxAgents?: number }; metadata: Record<string, unknown>; connectedAt: Date }) {
+function agentletRecordToJson(record: AgentletRecord, conn: AgentConnection | undefined) {
   return {
-    daemonId: daemon.daemonId,
-    status: daemon.status,
-    machine: daemon.machine,
-    bridge: daemon.bridge,
-    capabilities: daemon.capabilities,
-    metadata: daemon.metadata,
-    connectedAt: daemon.connectedAt.toISOString(),
+    agentletId: record.agentletId,
+    connected: conn?.status === 'connected',
+    machine: record.machine,
+    bridge: record.bridge,
+    capabilities: record.capabilities,
+    registeredAt: record.registeredAt,
+    updatedAt: record.updatedAt,
+    connectedAt: conn?.connectedAt.toISOString() ?? null,
   }
 }
 
@@ -249,7 +330,32 @@ function corsHeaders() {
   }
 }
 
-function json(res: ServerResponse, status: number, body: unknown): void {
-  res.writeHead(status, { 'Content-Type': 'application/json', ...corsHeaders() })
+function json(res: ServerResponse, status: number, body: unknown, extraHeaders: Record<string, string> = {}): void {
+  res.writeHead(status, { 'Content-Type': 'application/json', ...corsHeaders(), ...extraHeaders })
   res.end(JSON.stringify(body))
+}
+
+function deprecationHeaders(): Record<string, string> {
+  return {
+    'Deprecation': 'true',
+    'Link': '</api/sessions>; rel="successor-version"',
+    'X-Deprecation-Notice': 'Agent APIs are deprecated. Use /api/sessions/* instead.',
+  }
+}
+
+function sessionToJson(session: { sessionId: string; displayName: string; agentletId?: string; command: string; cwd: string; status: string; supportsLoad: boolean; supportsResume: boolean; createdAt: string; suspendedAt?: string; updatedAt: string }, server?: AgentletServer) {
+  const conn = server?.getConnection(session.sessionId)
+  return {
+    sessionId: session.sessionId,
+    displayName: session.displayName,
+    agentletId: session.agentletId,
+    connected: conn?.status === 'connected',
+    command: session.command,
+    cwd: session.cwd,
+    supportsLoad: session.supportsLoad,
+    supportsResume: session.supportsResume,
+    createdAt: session.createdAt,
+    suspendedAt: session.suspendedAt,
+    updatedAt: session.updatedAt,
+  }
 }

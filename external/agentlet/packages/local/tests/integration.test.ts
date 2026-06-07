@@ -1,5 +1,8 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { createServer, type Server } from 'node:http'
+import { mkdtempSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { AgentletServer } from '../../server/src/server.js'
 import { AgentProcess } from '../../local/src/agent-process.js'
 import { WsClient } from '../../local/src/ws-client.js'
@@ -39,6 +42,7 @@ describe('M1: End-to-end transparent relay', () => {
     let connectedAgent: AgentConnection | undefined
 
     server = new AgentletServer({
+      storeDir: mkdtempSync(join(tmpdir(), 'agentlet-test-')),
       authenticate: async (token, meta) => {
         expect(token).toBe('test-token')
         return { metadata: { test: true } }
@@ -47,6 +51,7 @@ describe('M1: End-to-end transparent relay', () => {
         connectedAgent = agent
       },
     })
+    await server.init()
 
     httpServer = createServer()
     httpServer.on('upgrade', (req, socket, head) => {
@@ -86,9 +91,13 @@ describe('M1: End-to-end transparent relay', () => {
     ws = new WsClient({
       serverUrl,
       token: 'test-token',
-      agentCommand: 'mock-agent',
-      agentPid: agent.pid!,
-      agentId: 'test-host:mock-agent:test-dir:abcd1234',
+      sessionId: 'test-session-1',
+      role: 'session',
+      agent: {
+        command: 'mock-agent',
+        pid: agent.pid!,
+        cwd: process.cwd(),
+      },
       capabilities: { autoRestart: false, bufferLimit: 1000 },
       heartbeatInterval: 0,
       allowInsecure: true,
@@ -100,7 +109,7 @@ describe('M1: End-to-end transparent relay', () => {
 
     // 4. Verify server registered the connection
     expect(connectedAgent).toBeDefined()
-    expect(connectedAgent!.agentId).toBe('test-host:mock-agent:test-dir:abcd1234')
+    expect(connectedAgent!.sessionId).toBe('test-session-1')
     expect(connectedAgent!.status).toBe('connected')
 
     // 5. Start relay
@@ -129,10 +138,12 @@ describe('M1: End-to-end transparent relay', () => {
 
   it('server lists connections and handles disconnect', async () => {
     server = new AgentletServer({
+      storeDir: mkdtempSync(join(tmpdir(), 'agentlet-test-')),
       authenticate: async (_token, _meta) => {
         return { metadata: {} }
       },
     })
+    await server.init()
 
     httpServer = createServer()
     httpServer.on('upgrade', (req, socket, head) => {
@@ -150,9 +161,13 @@ describe('M1: End-to-end transparent relay', () => {
     ws = new WsClient({
       serverUrl: `ws://127.0.0.1:${addr.port}`,
       token: 'tok-1',
-      agentCommand: 'test',
-      agentPid: agent.pid!,
-      agentId: 'my-machine:test:project:aabbccdd',
+      sessionId: 'test-session-2',
+      role: 'session',
+      agent: {
+        command: 'test',
+        pid: agent.pid!,
+        cwd: process.cwd(),
+      },
       capabilities: { autoRestart: false, bufferLimit: 100 },
       heartbeatInterval: 0,
       allowInsecure: true,
@@ -167,7 +182,7 @@ describe('M1: End-to-end transparent relay', () => {
     expect(server.connectionCount).toBe(1)
     const conns = server.getConnections({ status: 'connected' })
     expect(conns).toHaveLength(1)
-    expect(conns[0]!.agentId).toBe('my-machine:test:project:aabbccdd')
+    expect(conns[0]!.sessionId).toBe('test-session-2')
 
     // Disconnect
     ws.close()

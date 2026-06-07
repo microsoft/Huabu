@@ -1,47 +1,45 @@
-import { randomUUID } from 'node:crypto'
 import { hostname, platform } from 'node:os'
-import { basename, resolve } from 'node:path'
+import { resolve } from 'node:path'
 import { existsSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import WebSocket from 'ws'
 import {
-  BridgeMethods,
+  AgentletMethods,
+  AgentMethods,
+  ServerMethods,
   PROTOCOL_VERSION,
-  type BridgeHelloParams,
-  type BridgeHelloResult,
-  type DaemonSpawnParams,
-  type DaemonStopParams,
+  type AgentletHelloParams,
+  type AgentletProfile,
+  type AgentHelloParams,
+  type AgentHelloResult,
+  type SpawnParams,
+  type StopParams,
   type JsonRpcMessage,
 } from '@agentlet/protocol'
 import { AgentProcess } from './agent-process.js'
 import { WsClient } from './ws-client.js'
 import { Relay } from './relay.js'
 import { Logger } from './logger.js'
-import { bootstrapSession, type SessionProfile } from './session-bootstrap.js'
+import { bootstrapSession, type SessionProfile as BootstrapProfile } from './session-bootstrap.js'
 import type { DaemonOptions } from './cli.js'
 
 interface ManagedAgent {
-  agentId: string
+  sessionId: string
   command: string
   cwd: string
   pid: number
   agent: AgentProcess
   ws: WsClient
   relay: Relay | null
-  status: 'starting' | 'running' | 'stopping' | 'stopped'
+  status: 'starting' | 'running' | 'stopping' | 'stopped' | 'suspending'
+  sessionProfile: BootstrapProfile
+  idleTimeoutSecs: number
+  /** Set to true when idle suspension is in progress — suppresses autoRestart */
+  idleSuspending: boolean
 }
 
-function generateDaemonId(): string {
-  const host = hostname()
-  const shortUuid = randomUUID().replace(/-/g, '').slice(0, 8)
-  return `${host}:daemon:agentlet:${shortUuid}`
-}
-
-function generateAgentId(command: string, cwd: string): string {
-  const host = hostname()
-  const executable = basename(command.split(/\s+/)[0]!)
-  const cwdBase = basename(cwd)
-  const shortUuid = randomUUID().replace(/-/g, '').slice(0, 8)
-  return `${host}:${executable}:${cwdBase}:${shortUuid}`
+function defaultDaemonId(): string {
+  return hostname()
 }
 
 export class Daemon {
@@ -58,7 +56,7 @@ export class Daemon {
   constructor(options: DaemonOptions, logger: Logger) {
     this.options = options
     this.logger = logger
-    this.daemonId = generateDaemonId()
+    this.daemonId = options.daemonId ?? defaultDaemonId()
   }
 
   async start(): Promise<void> {
@@ -76,7 +74,14 @@ export class Daemon {
     }
 
     this.handshakeComplete = false
-    this.ws = new WebSocket(this.options.server)
+    // Add token and role to WS URL query params
+    const url = new URL(this.options.server)
+    if (this.options.token) {
+      url.searchParams.set('token', this.options.token)
+    }
+    url.searchParams.set('role', 'agentlet')
+    url.searchParams.set('id', this.daemonId)
+    this.ws = new WebSocket(url.toString())
 
     this.ws.on('open', () => {
       this.logger.info('ws_connected', { server: this.options.server })
@@ -111,10 +116,7 @@ export class Daemon {
   }
 
   private sendDaemonHello(): void {
-    const params: BridgeHelloParams = {
-      token: this.options.token,
-      agentId: this.daemonId,
-      mode: 'daemon',
+    const agentletProfile: AgentletProfile = {
       bridge: { name: 'agentlet', version: PROTOCOL_VERSION },
       machine: { hostname: hostname(), platform: platform() },
       capabilities: {
@@ -123,9 +125,14 @@ export class Daemon {
         maxAgents: this.options.maxAgents,
       },
     }
+    const params: AgentletHelloParams = {
+      agentletId: this.daemonId,
+      agentletProfile,
+    }
+    // Token in query param — add it to the URL before connecting
     const hello: JsonRpcMessage = {
       jsonrpc: '2.0',
-      method: BridgeMethods.HELLO,
+      method: AgentletMethods.HELLO,
       id: 1,
       params: params as unknown as Record<string, unknown>,
     }
@@ -141,10 +148,10 @@ export class Daemon {
         return
       }
       if ('result' in msg) {
-        const result = msg.result as BridgeHelloResult
+        const result = msg.result as AgentHelloResult
         this.handshakeComplete = true
         this.reconnectAttempt = 0
-        this.logger.info('daemon_ready', { daemonId: result.agentId, agents: this.agents.size })
+        this.logger.info('daemon_ready', { daemonId: result.sessionId, agents: this.agents.size })
         return
       }
     }
@@ -157,7 +164,7 @@ export class Daemon {
 
     // Handle notifications (e.g., bridge/shutdown)
     if ('method' in msg && !('id' in msg)) {
-      if (msg.method === BridgeMethods.SHUTDOWN) {
+      if (msg.method === ServerMethods.SHUTDOWN) {
         this.logger.info('shutdown_requested', { params: msg.params })
         this.shutdown('server_requested')
       }
@@ -166,13 +173,13 @@ export class Daemon {
 
   private handleRequest(msg: { jsonrpc: '2.0'; method: string; id: string | number; params?: Record<string, unknown> }): void {
     switch (msg.method) {
-      case BridgeMethods.SPAWN:
-        this.handleSpawn(msg.id, msg.params as unknown as DaemonSpawnParams)
+      case ServerMethods.SPAWN:
+        this.handleSpawn(msg.id, msg.params as unknown as SpawnParams)
         break
-      case BridgeMethods.STOP:
-        this.handleStop(msg.id, msg.params as unknown as DaemonStopParams)
+      case ServerMethods.STOP:
+        this.handleStop(msg.id, msg.params as unknown as StopParams)
         break
-      case BridgeMethods.LIST:
+      case ServerMethods.LIST:
         this.handleList(msg.id)
         break
       default:
@@ -180,9 +187,10 @@ export class Daemon {
     }
   }
 
-  private async handleSpawn(requestId: string | number, params: DaemonSpawnParams): Promise<void> {
-    if (!params?.command) {
-      this.sendResponse(requestId, undefined, { code: -32602, message: 'Missing required param: command' })
+  private async handleSpawn(requestId: string | number, params: SpawnParams): Promise<void> {
+    const sessionSpec = params?.sessionSpec
+    if (!sessionSpec?.command) {
+      this.sendResponse(requestId, undefined, { code: -32602, message: 'Missing required param: sessionSpec.command' })
       return
     }
 
@@ -193,8 +201,8 @@ export class Daemon {
 
     // Validate cwd: must be non-empty if provided, must exist on this machine
     let cwd: string
-    if (params.cwd && params.cwd.trim()) {
-      cwd = resolve(params.cwd.trim())
+    if (sessionSpec.cwd && sessionSpec.cwd.trim()) {
+      cwd = resolve(sessionSpec.cwd.trim())
       if (!existsSync(cwd)) {
         this.sendResponse(requestId, undefined, {
           code: -32602,
@@ -206,82 +214,39 @@ export class Daemon {
       cwd = process.cwd()
     }
 
-    const agentId = generateAgentId(params.command, cwd)
-    const autoRestart = params.autoRestart ?? false
+    const autoRestart = sessionSpec.autoRestart ?? false
 
-    this.logger.info('spawning_agent', { agentId, command: params.command, cwd })
+    this.logger.info('spawning_agent', { command: sessionSpec.command, cwd, sessionId: params.sessionId })
 
     try {
       // Spawn the agent process
       const agent = new AgentProcess({
-        command: params.command,
+        command: sessionSpec.command,
         cwd,
-        env: params.env,
+        env: sessionSpec.env,
       })
 
-      const managed: ManagedAgent = {
-        agentId,
-        command: params.command,
-        cwd,
-        pid: 0,
-        agent,
-        ws: null!,
-        relay: null,
-        status: 'starting',
-      }
-
       agent.on('error', (err) => {
-        this.logger.error('agent_error', { agentId, message: err.message })
+        this.logger.error('agent_error', { command: sessionSpec.command, message: err.message })
       })
 
       agent.on('stderr', (line) => {
-        this.logger.debug('agent_stderr', { agentId, line })
-      })
-
-      agent.on('exit', (code, signal) => {
-        this.logger.info('agent_exited', { agentId, code, signal })
-        managed.status = 'stopped'
-
-        // Notify the agent's own WS connection
-        if (managed.ws?.connected) {
-          const exitNotification: JsonRpcMessage = {
-            jsonrpc: '2.0',
-            method: BridgeMethods.AGENT_EXITED,
-            params: { code, signal, willRestart: autoRestart && code !== 0 },
-          }
-          managed.ws.send(exitNotification)
-        }
-
-        if (autoRestart && code !== 0 && !this.shutdownInProgress) {
-          this.logger.info('agent_restarting', { agentId })
-          setTimeout(() => {
-            if (this.agents.has(agentId) && !this.shutdownInProgress) {
-              agent.start()
-              managed.pid = agent.pid ?? 0
-              managed.status = 'running'
-              this.logger.info('agent_restarted', { agentId, pid: managed.pid })
-            }
-          }, 2000)
-        } else {
-          // Clean up the agent's bridge connection
-          managed.relay?.stop()
-          managed.ws?.close()
-          this.agents.delete(agentId)
-        }
+        this.logger.debug('agent_stderr', { command: sessionSpec.command, line })
       })
 
       agent.start()
-      managed.pid = agent.pid ?? 0
-      this.agents.set(agentId, managed)
+      const pid = agent.pid ?? 0
 
-      // Session bootstrap: initialize + session/new
-      let sessionProfile: SessionProfile
+      // Session bootstrap: initialize + session lifecycle
+      let bootstrap: BootstrapProfile
       try {
-        sessionProfile = await bootstrapSession(agent, { cwd }, this.logger)
+        bootstrap = await bootstrapSession(agent, {
+          cwd,
+          sessionId: params.sessionId,
+        }, this.logger)
       } catch (err) {
-        this.logger.error('session_bootstrap_failed', { agentId, message: err instanceof Error ? err.message : String(err) })
+        this.logger.error('session_bootstrap_failed', { message: err instanceof Error ? err.message : String(err) })
         agent.terminate()
-        this.agents.delete(agentId)
         this.sendResponse(requestId, undefined, {
           code: -32000,
           message: `Session bootstrap failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -289,15 +254,70 @@ export class Daemon {
         return
       }
 
+      const sessionId = bootstrap.sessionId
+
+      const managed: ManagedAgent = {
+        sessionId,
+        command: sessionSpec.command,
+        cwd,
+        pid,
+        agent,
+        ws: null!,
+        relay: null,
+        status: 'starting',
+        sessionProfile: bootstrap,
+        idleTimeoutSecs: sessionSpec.idleTimeoutSecs ?? 0,
+        idleSuspending: false,
+      }
+
+      agent.on('exit', (code, signal) => {
+        this.logger.info('agent_exited', { sessionId, code, signal })
+        managed.status = 'stopped'
+
+        // Notify the agent's own WS connection
+        if (managed.ws?.connected) {
+          const exitNotification: JsonRpcMessage = {
+            jsonrpc: '2.0',
+            method: AgentMethods.EXITED,
+            params: { code, signal, willRestart: autoRestart && code !== 0 && !managed.idleSuspending },
+          }
+          managed.ws.send(exitNotification)
+        }
+
+        // Suppress autoRestart if this exit was caused by idle suspension
+        if (autoRestart && code !== 0 && !this.shutdownInProgress && !managed.idleSuspending) {
+          this.logger.info('agent_restarting', { sessionId })
+          setTimeout(() => {
+            if (this.agents.has(sessionId) && !this.shutdownInProgress) {
+              agent.start()
+              managed.pid = agent.pid ?? 0
+              managed.status = 'running'
+              this.logger.info('agent_restarted', { sessionId, pid: managed.pid })
+            }
+          }, 2000)
+        } else {
+          // Clean up the agent's bridge connection
+          managed.relay?.stop()
+          managed.ws?.close()
+          this.agents.delete(sessionId)
+        }
+      })
+
+      this.agents.set(sessionId, managed)
+
       // Open a new bridge WS connection for this agent
       const agentWs = new WsClient({
         serverUrl: this.options.server,
         token: this.options.token,
-        agentCommand: params.command,
-        agentPid: managed.pid,
-        agentCwd: cwd,
-        agentId,
-        session: sessionProfile,
+        sessionId,
+        role: 'session',
+        agentletId: this.daemonId,
+        agent: {
+          command: sessionSpec.command,
+          pid: managed.pid,
+          cwd,
+        },
+        session: bootstrap,
         capabilities: { autoRestart, bufferLimit: this.options.bufferLimit },
         heartbeatInterval: this.options.heartbeat,
         allowInsecure: this.options.allowInsecure,
@@ -307,22 +327,30 @@ export class Daemon {
       managed.ws = agentWs
 
       agentWs.on('open', () => {
-        this.logger.info('agent_ws_connected', { agentId })
+        this.logger.info('agent_ws_connected', { sessionId })
       })
 
       agentWs.on('handshake_ok', () => {
         managed.status = 'running'
-        this.logger.info('agent_bridge_ready', { agentId })
-        // Set up relay
-        const relay = new Relay(agent, agentWs, this.logger)
+        this.logger.info('agent_bridge_ready', { sessionId })
+        // Set up relay with idle timeout
+        const relay = new Relay(agent, agentWs, this.logger, {
+          idleTimeoutSecs: managed.idleTimeoutSecs,
+        })
         managed.relay = relay
+
+        // Handle idle timeout: notify server and gracefully stop agent
+        relay.on('idle', () => {
+          this.handleIdleSuspend(managed)
+        })
+
         relay.start()
       })
 
       agentWs.on('handshake_error', (err) => {
-        this.logger.error('agent_handshake_failed', { agentId, code: err.code, message: err.message })
+        this.logger.error('agent_handshake_failed', { sessionId, code: err.code, message: err.message })
         agent.terminate()
-        this.agents.delete(agentId)
+        this.agents.delete(sessionId)
       })
 
       agentWs.on('close', () => {
@@ -332,13 +360,13 @@ export class Daemon {
       })
 
       agentWs.on('error', (err) => {
-        this.logger.error('agent_ws_error', { agentId, message: err.message })
+        this.logger.error('agent_ws_error', { sessionId, message: err.message })
       })
 
       agentWs.connect()
 
       // Return spawn result immediately (agent PID is already known)
-      this.sendResponse(requestId, { agentId, pid: managed.pid })
+      this.sendResponse(requestId, { sessionId, pid: managed.pid })
     } catch (err) {
       this.sendResponse(requestId, undefined, {
         code: -32000,
@@ -347,19 +375,19 @@ export class Daemon {
     }
   }
 
-  private async handleStop(requestId: string | number, params: DaemonStopParams): Promise<void> {
-    if (!params?.agentId) {
-      this.sendResponse(requestId, undefined, { code: -32602, message: 'Missing required param: agentId' })
+  private async handleStop(requestId: string | number, params: StopParams): Promise<void> {
+    if (!params?.sessionId) {
+      this.sendResponse(requestId, undefined, { code: -32602, message: 'Missing required param: sessionId' })
       return
     }
 
-    const managed = this.agents.get(params.agentId)
+    const managed = this.agents.get(params.sessionId)
     if (!managed) {
-      this.sendResponse(requestId, undefined, { code: -32000, message: `Agent not found: ${params.agentId}` })
+      this.sendResponse(requestId, undefined, { code: -32000, message: `Agent not found for session: ${params.sessionId}` })
       return
     }
 
-    this.logger.info('stopping_agent', { agentId: params.agentId })
+    this.logger.info('stopping_agent', { sessionId: params.sessionId })
     managed.status = 'stopping'
     managed.relay?.stop()
 
@@ -367,7 +395,7 @@ export class Daemon {
     if (managed.ws?.connected) {
       const goodbye: JsonRpcMessage = {
         jsonrpc: '2.0',
-        method: BridgeMethods.GOODBYE,
+        method: AgentMethods.GOODBYE,
         params: { reason: 'daemon_stop_requested' },
       }
       managed.ws.send(goodbye)
@@ -385,20 +413,79 @@ export class Daemon {
     }
 
     managed.ws?.close()
-    this.agents.delete(params.agentId)
+    this.agents.delete(params.sessionId)
 
     this.sendResponse(requestId, { stopped: true })
   }
 
   private handleList(requestId: string | number): void {
     const agents = Array.from(this.agents.values()).map((m) => ({
-      agentId: m.agentId,
+      sessionId: m.sessionId,
       command: m.command,
       pid: m.pid,
       cwd: m.cwd,
       status: m.status === 'running' ? 'running' as const : 'starting' as const,
     }))
     this.sendResponse(requestId, { agents })
+  }
+
+  /**
+   * Handle idle timeout for a managed agent.
+   * Notifies the server via bridge/session_suspended, then gracefully stops the agent.
+   * Does NOT send ACP session/close (that would invalidate the session for later resume).
+   */
+  private async handleIdleSuspend(managed: ManagedAgent): Promise<void> {
+    if (managed.status !== 'running' || managed.idleSuspending) return
+
+    managed.idleSuspending = true
+    managed.status = 'suspending'
+    const sessionId = managed.sessionId
+
+    this.logger.info('idle_suspend_start', {
+      sessionId,
+      idleTimeoutSecs: managed.idleTimeoutSecs,
+    })
+
+    // Stop relay first to prevent new messages from flowing
+    managed.relay?.stop()
+
+    // Notify server that this session is being suspended
+    if (managed.ws?.connected && sessionId) {
+      const notification: JsonRpcMessage = {
+        jsonrpc: '2.0',
+        method: AgentMethods.SUSPENDED,
+        params: {
+          sessionId,
+          reason: 'idle_timeout',
+        },
+      }
+      managed.ws.send(notification)
+    }
+
+    // Gracefully stop the agent process (same sequence as handleStop)
+    managed.agent.closeStdin()
+    await this.waitForAgentExit(managed.agent, 5000)
+    if (managed.agent.running) {
+      managed.agent.terminate()
+      await this.waitForAgentExit(managed.agent, 2000)
+    }
+    if (managed.agent.running) {
+      managed.agent.kill()
+    }
+
+    // Send goodbye and close the agent's bridge WS
+    if (managed.ws?.connected) {
+      const goodbye: JsonRpcMessage = {
+        jsonrpc: '2.0',
+        method: AgentMethods.GOODBYE,
+        params: { reason: 'idle_timeout' },
+      }
+      managed.ws.send(goodbye)
+    }
+    managed.ws?.close()
+    this.agents.delete(managed.sessionId)
+
+    this.logger.info('idle_suspend_complete', { sessionId })
   }
 
   private sendResponse(id: string | number, result?: unknown, error?: { code: number; message: string }): void {
@@ -431,8 +518,8 @@ export class Daemon {
     }
 
     // Stop all agents
-    for (const [agentId, managed] of this.agents) {
-      this.logger.info('stopping_agent', { agentId })
+    for (const [sessionId, managed] of this.agents) {
+      this.logger.info('stopping_agent', { sessionId })
       managed.relay?.stop()
       managed.agent.closeStdin()
       await this.waitForAgentExit(managed.agent, 3000)
@@ -447,7 +534,7 @@ export class Daemon {
     if (this.ws?.readyState === WebSocket.OPEN) {
       const goodbye: JsonRpcMessage = {
         jsonrpc: '2.0',
-        method: BridgeMethods.GOODBYE,
+        method: AgentMethods.GOODBYE,
         params: { reason },
       }
       this.ws.send(JSON.stringify(goodbye))

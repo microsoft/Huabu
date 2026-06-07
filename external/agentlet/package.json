@@ -5,7 +5,7 @@
   "scripts": {
     "build": "pnpm -r run build",
     "server": "node packages/server/dist/standalone.js --port 8080 --allow-insecure --token",
-    "daemon": "node packages/local/dist/index.js daemon --server ws://localhost:8080/api/bridge --allow-insecure --token",
+    "daemon": "node packages/local/dist/index.js --server ws://localhost:8080/api/bridge --allow-insecure --token",
     "source-install": "pnpm install && pnpm run build && cd packages/local && pnpm link --global && cd ../server && pnpm link --global && cd ../..",
     "test": "vitest run",
     "lint": "pnpm -r run lint",

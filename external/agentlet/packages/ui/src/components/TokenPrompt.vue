@@ -9,7 +9,7 @@ function submit() {
   const token = tokenInput.value.trim()
   if (token) {
     agents.setToken(token)
-    agents.fetchAgents()
+    agents.fetchSessions()
   }
 }
 </script>

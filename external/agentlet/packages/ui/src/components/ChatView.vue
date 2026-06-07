@@ -1,16 +1,66 @@
 <script setup lang="ts">
-import { ref, nextTick, watch } from 'vue'
+import { ref, nextTick, watch, computed } from 'vue'
+import MarkdownIt from 'markdown-it'
 import { useSessionStore } from '../stores/session'
+import { useSlashCommandTypeahead } from '../composables/useSlashCommandTypeahead'
+import SlashCommandMenu from './SlashCommandMenu.vue'
+
+const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
+
+function renderMd(content: string): string {
+  return md.render(content)
+}
 
 const session = useSessionStore()
 const input = ref('')
 const messagesEl = ref<HTMLElement | null>(null)
+const inputEl = ref<HTMLTextAreaElement | null>(null)
+const emptyWarning = ref(false)
+
+// Feature (b): Slash command typeahead
+const commands = computed(() => session.availableCommands)
+const slash = useSlashCommandTypeahead(input, commands)
 
 function send() {
   const text = input.value.trim()
-  if (!text || !session.hasSession || session.isLoading) return
+  if (!session.hasSession) return
+  if (!text) {
+    emptyWarning.value = true
+    setTimeout(() => { emptyWarning.value = false }, 2000)
+    return
+  }
+  emptyWarning.value = false
   session.sendPrompt(text)
   input.value = ''
+  nextTick(() => autoResize())
+}
+
+function onKeyDown(e: KeyboardEvent) {
+  // Let slash typeahead handle first
+  if (slash.handleKeyDown(e)) return
+
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault()
+    send()
+  }
+}
+
+function onInputEvent(e: Event) {
+  const el = e.target as HTMLTextAreaElement
+  slash.syncCaret(el.selectionStart ?? 0)
+  autoResize()
+}
+
+function autoResize() {
+  const el = inputEl.value
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = Math.min(el.scrollHeight, 150) + 'px'
+}
+
+function onSelectCommand(cmd: { name: string; description?: string; input?: { hint?: string } }) {
+  input.value = slash.accept(cmd)
+  nextTick(() => inputEl.value?.focus())
 }
 
 // Auto-scroll on new messages
@@ -49,7 +99,8 @@ watch(() => session.visibleMessages.length, async () => {
           <div class="role-badge">
             {{ msg.type === 'thought' ? '💭 thinking' : msg.type === 'tool_call' ? '🔧 tool' : msg.type === 'setup' ? '⚙️ setup' : msg.role }}
           </div>
-          <div class="content">{{ msg.content }}</div>
+          <div class="content" v-if="msg.role === 'assistant' && msg.type === 'message'" v-html="renderMd(msg.content)"></div>
+          <div class="content" v-else>{{ msg.content }}</div>
         </div>
         <div v-if="session.isLoading" class="message assistant loading">
           <div class="role-badge">assistant</div>
@@ -59,14 +110,30 @@ watch(() => session.visibleMessages.length, async () => {
     </div>
 
     <div class="input-area">
-      <input
-        v-model="input"
-        @keydown.enter="send"
-        :disabled="!session.hasSession || session.isLoading"
-        placeholder="Type a message..."
-        autofocus
-      />
-      <button @click="send" :disabled="!session.hasSession || session.isLoading || !input.trim()">
+      <div class="input-wrapper">
+        <SlashCommandMenu
+          v-if="slash.isOpen.value"
+          :commands="slash.filtered.value"
+          :filter="slash.filter.value"
+          :highlight-index="slash.highlightIndex.value"
+          @select="onSelectCommand"
+          @hover="(idx: number) => slash.highlightIndex.value = idx"
+        />
+        <textarea
+          ref="inputEl"
+          v-model="input"
+          @keydown="onKeyDown"
+          @input="onInputEvent"
+          @click="onInputEvent"
+          @keyup="onInputEvent"
+          :disabled="!session.hasSession"
+          :placeholder="session.hasSession ? 'Type a message... (/ for commands)' : 'Waiting for connection...'"
+          rows="1"
+          autofocus
+        />
+        <span v-if="emptyWarning" class="empty-warning">Please type a message first</span>
+      </div>
+      <button @click="send" :disabled="!session.hasSession">
         Send
       </button>
     </div>
@@ -77,7 +144,8 @@ watch(() => session.visibleMessages.length, async () => {
 .chat-view {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
 }
 .toolbar {
   padding: 6px 16px;
@@ -194,6 +262,62 @@ watch(() => session.visibleMessages.length, async () => {
   white-space: pre-wrap;
   word-break: break-word;
 }
+.content :deep(p) {
+  margin: 0 0 8px;
+}
+.content :deep(p:last-child) {
+  margin-bottom: 0;
+}
+.content :deep(pre) {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  padding: 10px 12px;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 13px;
+  margin: 8px 0;
+}
+.content :deep(code) {
+  background: #e8e8e8;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 13px;
+}
+.content :deep(pre code) {
+  background: none;
+  padding: 0;
+}
+.content :deep(ul),
+.content :deep(ol) {
+  margin: 4px 0;
+  padding-left: 20px;
+}
+.content :deep(blockquote) {
+  border-left: 3px solid #ccc;
+  margin: 8px 0;
+  padding: 4px 12px;
+  color: #666;
+}
+.content :deep(a) {
+  color: #1976d2;
+  text-decoration: none;
+}
+.content :deep(a:hover) {
+  text-decoration: underline;
+}
+.content :deep(table) {
+  border-collapse: collapse;
+  margin: 8px 0;
+}
+.content :deep(th),
+.content :deep(td) {
+  border: 1px solid #ddd;
+  padding: 4px 8px;
+  font-size: 13px;
+}
+.content :deep(th) {
+  background: #f5f5f5;
+}
 .input-area {
   display: flex;
   gap: 8px;
@@ -201,15 +325,24 @@ watch(() => session.visibleMessages.length, async () => {
   border-top: 1px solid #e0e0e0;
   background: #fff;
 }
-input {
+.input-wrapper {
+  position: relative;
   flex: 1;
+}
+textarea {
+  width: 100%;
   padding: 10px 14px;
   border: 1px solid #ccc;
   border-radius: 6px;
   font-size: 14px;
+  font-family: inherit;
   outline: none;
+  box-sizing: border-box;
+  resize: none;
+  overflow-y: auto;
+  line-height: 1.4;
 }
-input:focus {
+textarea:focus {
   border-color: #2196f3;
 }
 button {
@@ -227,5 +360,17 @@ button:disabled {
 }
 button:not(:disabled):hover {
   background: #1976d2;
+}
+.empty-warning {
+  position: absolute;
+  bottom: -20px;
+  left: 14px;
+  font-size: 12px;
+  color: #e53935;
+  animation: fade-in 0.15s ease-in;
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 </style>
