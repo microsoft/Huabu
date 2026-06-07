@@ -331,7 +331,71 @@ Session/update notifications (no `id` field) arrive interleaved:
 }
 ```
 
-## 7. Risk Assessment
+## 7. ACP SDK Audit — What It Does in Huabu
+
+### SDK class: `ClientSideConnection` from `@agentclientprotocol/sdk`
+
+A bidirectional JSON-RPC 2.0 state machine bridged to `AgentConnection` via
+`streamFromAgentConnection()` (ReadableStream ↔ WritableStream adapter).
+
+### Outbound: SDK methods Huabu calls (Client→Agent requests)
+
+| Method                     | Used?               | Where                  |
+| -------------------------- | ------------------- | ---------------------- |
+| `initialize()`             | Yes — **REDUNDANT** | `service.ts:483`       |
+| `newSession()`             | Yes — **REDUNDANT** | `service.ts:637`       |
+| `loadSession()`            | Yes — **REDUNDANT** | `service.ts:537`       |
+| `prompt()`                 | **Yes — KEEP**      | `service.ts:1191`      |
+| `cancel()`                 | **Yes — KEEP**      | `client.ts:488`        |
+| `setSessionMode()`         | **Yes — KEEP**      | `threads.route.ts:245` |
+| `setSessionModel()`        | **Yes — KEEP**      | `threads.route.ts:285` |
+| `setSessionConfigOption()` | **Yes — KEEP**      | `threads.route.ts:327` |
+| `resumeSession()`          | No                  |                        |
+| `closeSession()`           | No                  |                        |
+| `authenticate()`           | No                  |                        |
+
+### Inbound: Agent→Client requests (need JSON-RPC response)
+
+| Agent sends                  | Handler                                      | Complexity                             |
+| ---------------------------- | -------------------------------------------- | -------------------------------------- |
+| `session/request_permission` | Suspend until UI decides (30s timeout)       | Medium — Promise + pending-map + timer |
+| `fs/read_text_file`          | Sandboxed canvas read (`capabilities/fs.ts`) | Low — path validation + readFile       |
+| `fs/write_text_file`         | Always reject `-32601`                       | Trivial                                |
+| `terminal/*` (5 methods)     | Always reject `-32601`                       | Trivial                                |
+
+### Inbound: Agent→Client notifications (no response)
+
+| Agent sends      | Handler                                                                                 | Note                                      |
+| ---------------- | --------------------------------------------------------------------------------------- | ----------------------------------------- |
+| `session/update` | **Intercepted BEFORE SDK** by `tryInterceptSessionUpdate()` → `dispatchSessionUpdate()` | SDK's own handler is a dead-code fallback |
+
+### What the SDK provides (value-add to replicate)
+
+1. **Request/response correlation** — tracks `id` → Promise for outbound
+   requests (`prompt`, `setSessionMode`, etc.). ~30 lines.
+2. **Bidirectional request dispatch** — detects inbound REQUESTS (have `id` +
+   `method`) vs NOTIFICATIONS (have `method`, no `id`), calls the right
+   handler, and auto-sends the JSON-RPC response. ~50 lines.
+3. **Zod schema validation** — validates all messages. Huabu already bypasses
+   this for `session/update` (too strict). Lower value than expected.
+
+### What the SDK does that's harmful/unnecessary
+
+1. **Forces re-initialization** — `initialize + session/new` state machine
+   that conflicts with the daemon's bootstrap.
+2. **Strict zod drops valid messages** — `session/update` with a `null`
+   description field gets silently discarded (hence the interceptor bypass).
+3. **Stream adapter overhead** — `ReadableStream/WritableStream` wrapping
+   around a simple `conn.send()/onMessage()` pair.
+
+### Verdict
+
+The SDK wraps ~80 lines of JSON-RPC plumbing (correlation + dispatch) behind
+a heavy abstraction that forces a redundant initialization sequence and
+drops valid messages. Replacing it with a thin `AcpSessionBridge` that does
+raw JSON-RPC correlation + dispatch is the right call.
+
+## 8. Risk Assessment
 
 | Risk                                                                  | Mitigation                                                                                                                                                     |
 | --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -341,7 +405,7 @@ Session/update notifications (no `id` field) arrive interleaved:
 | EventStore JSONL files grow unbounded                                 | Not a regression (they grow today too), but worth adding rotation later                                                                                        |
 | `session/cancel` timing                                               | Same race as today — best-effort notification                                                                                                                  |
 
-## 8. Effort Estimate
+## 9. Effort Estimate
 
 | Step                                   | Effort          |
 | -------------------------------------- | --------------- |
@@ -352,7 +416,7 @@ Session/update notifications (no `id` field) arrive interleaved:
 | 9. Cleanup + tests                     | 1-2 hours       |
 | **Total**                              | **~8-13 hours** |
 
-## 9. Open Questions
+## 10. Open Questions
 
 1. **`fs/read_text_file` handler**: The current SDK registers this as a
    capability handler. Without the SDK, we need to intercept `fs/*` requests
