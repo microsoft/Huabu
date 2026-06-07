@@ -10,11 +10,11 @@
  * command line that the daemon will execute on this machine; allowing
  * remote writes would be a trivial RCE.
  *
- * The response shape includes a snapshot of {@link AcpDaemonStatus}
- * on the list endpoint so the UI can render the daemon health banner
- * without a second request — there is only ever one daemon per
+ * The response shape includes a snapshot of {@link AcpAgentletStatus}
+ * on the list endpoint so the UI can render the agentlet health banner
+ * without a second request — there is only ever one agentlet per
  * Sediment instance and the two are conceptually coupled (profiles
- * are useless without a running daemon).
+ * are useless without a running agentlet).
  *
  * Profiles are templates: once a thread is created against a profile
  * we snapshot the recipe onto the thread record and the two become
@@ -64,7 +64,7 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
       if (denyRemote(request, reply)) return;
       return {
         profiles: listProfiles(),
-        daemon: getDaemonSupervisor().getStatus(),
+        agentlet: getDaemonSupervisor().getStatus(),
       };
     },
   );

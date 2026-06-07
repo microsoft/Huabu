@@ -38,13 +38,13 @@ import { create } from 'zustand';
 
 import { listAcpProfiles } from '@/api/acp';
 
-import type { AcpAgentProfile, AcpDaemonStatus } from '@/api/acp';
+import type { AcpAgentProfile, AcpAgentletStatus } from '@/api/acp';
 
 interface AcpProfilesState {
   /** Every profile the user has created. Empty until the first fetch. */
   profiles: AcpAgentProfile[];
-  /** Latest daemon snapshot. `null` until the first fetch resolves. */
-  daemon: AcpDaemonStatus | null;
+  /** Latest agentlet snapshot. `null` until the first fetch resolves. */
+  agentlet: AcpAgentletStatus | null;
   /**
    * `true` once a fetch has *succeeded* at least once. A failed initial
    * fetch leaves this `false` (and {@link profiles} empty), so consumers
@@ -67,7 +67,7 @@ interface AcpProfilesState {
 
 export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
   profiles: [],
-  daemon: null,
+  agentlet: null,
   loaded: false,
   error: null,
   loading: false,
@@ -106,7 +106,7 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
       const res = await listAcpProfiles();
       set({
         profiles: res.profiles,
-        daemon: res.daemon,
+        agentlet: res.agentlet,
         loaded: true,
         error: null,
         loading: false,

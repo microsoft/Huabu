@@ -431,8 +431,8 @@ async function ensureAcpSessionInner(
   // Failures here surface as a 503 from the caller with a user-actionable
   // hint pointing at Settings → External Agents.
   const tk = threadKey(canvasId, threadId);
-  const { agentletAgentId } = await ensureAgentForThread(tk, recipe);
-  const conn = server.getConnection(agentletAgentId);
+  const { sessionId: agentSessionId } = await ensureAgentForThread(tk, recipe);
+  const conn = server.getConnection(agentSessionId);
   if (!conn || conn.status !== 'connected') {
     throw new Error(`External agent '${recipe.alias}' is not connected`);
   }

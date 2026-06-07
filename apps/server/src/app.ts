@@ -11,7 +11,7 @@ import { fastify } from 'fastify';
 import { getDataDir } from './data-dir.js';
 import {
   acpAgentCliRoutes,
-  acpDaemonRoutes,
+  acpAgentletRoutes,
   acpProfilesRoutes,
   acpThreadsRoutes,
   getDaemonSupervisor,
@@ -193,11 +193,11 @@ try {
 mountAgentletServer(app);
 getDaemonSupervisor().attach(app);
 app.register(acpProfilesRoutes, { prefix: '/api/acp' });
-app.register(acpDaemonRoutes, { prefix: '/api/acp' });
+app.register(acpAgentletRoutes, { prefix: '/api/acp' });
 app.register(acpAgentCliRoutes, { prefix: '/api/acp' });
 app.register(acpThreadsRoutes, { prefix: '/api/acp' });
 app.log.info(
-  '[acp] bridge mounted \u2014 embedded agentlet daemon will start on server ready',
+  '[acp] agentlet server mounted — embedded agentlet will start on server ready',
 );
 
 // Memory op-counter: bump the per-canvas counter on every successful

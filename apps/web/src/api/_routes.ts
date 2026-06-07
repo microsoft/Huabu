@@ -72,8 +72,8 @@ export const routes = {
   acpProfiles: '/acp/profiles',
   acpProfileItem: (id: string) => `/acp/profiles/${enc(id)}`,
   // Embedded agentlet daemon — health + manual restart.
-  acpDaemon: '/acp/daemon',
-  acpDaemonRestart: '/acp/daemon/restart',
+  acpAgentlet: '/acp/agentlet',
+  acpAgentletRestart: '/acp/agentlet/restart',
   acpThreadSession: (threadId: string) =>
     `/acp/threads/${enc(threadId)}/session`,
   acpThreadCommands: (threadId: string) =>
