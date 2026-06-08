@@ -39,7 +39,15 @@ import {
 import net from 'node:net';
 import { isAbsolute, join } from 'node:path';
 
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  Menu,
+  session,
+  shell,
+} from 'electron';
 import { utilityProcess, type UtilityProcess } from 'electron';
 import getPort from 'get-port';
 
@@ -642,6 +650,60 @@ function registerWorkspaceIpc(): void {
 
 let mainWindow: BrowserWindow | null = null;
 
+/**
+ * Allow cross-origin web pages to be embedded inside our renderer's
+ * `<iframe>` elements.
+ *
+ * Sites commonly block embedding by sending `X-Frame-Options: DENY |
+ * SAMEORIGIN` or `Content-Security-Policy: frame-ancestors …`. Inside an
+ * Electron desktop app these headers are over-protective: the only frame
+ * we ever embed into is the user's own canvas, so we strip the embedding
+ * restrictions on the response headers before Chromium enforces them.
+ *
+ * This is intentionally desktop-only — the plain web build runs in the
+ * user's browser and cannot rewrite response headers, so its Web node
+ * Preview will fall back to the Reader view when the live iframe is
+ * blocked. The renderer still gets full Chromium sandboxing, contextIso-
+ * lation, and `webPreferences.sandbox: true`, so a malicious embedded
+ * page cannot reach into the host.
+ *
+ * Same-origin requests (our own `/api/*`, the SPA chunks) are filtered
+ * out so we never weaken our own security headers.
+ */
+function configureWebSession(serverOrigin: string): void {
+  const filter = { urls: ['<all_urls>'] };
+  session.defaultSession.webRequest.onHeadersReceived(
+    filter,
+    (details, callback) => {
+      // Leave our own origin alone — stripping CSP from our SPA would be
+      // a self-inflicted XSS expansion. Match the runtime origin so HMR
+      // dev servers and the loopback server are both covered.
+      if (details.url.startsWith(serverOrigin)) {
+        callback({});
+        return;
+      }
+
+      const headers: Record<string, string[] | string> = {};
+      for (const [name, value] of Object.entries(
+        details.responseHeaders ?? {},
+      )) {
+        const lower = name.toLowerCase();
+        if (lower === 'x-frame-options') continue;
+        if (lower === 'content-security-policy') {
+          const values = Array.isArray(value) ? value : [value];
+          const cleaned = values
+            .map((v) => v.replace(/frame-ancestors[^;]*;?/gi, '').trim())
+            .filter((v) => v.length > 0);
+          if (cleaned.length > 0) headers[name] = cleaned;
+          continue;
+        }
+        headers[name] = value as string | string[];
+      }
+      callback({ responseHeaders: headers });
+    },
+  );
+}
+
 function createWindow(port: number): void {
   // Per-platform title bar setup. The Huabu renderer always paints
   // its own 36px tall `WindowChrome` strip; what differs across OSes is
@@ -871,6 +933,10 @@ app.whenReady().then(async () => {
       }
       if (lastErr) throw lastErr;
     }
+    const devServerUrl = process.env.WEB_DEV_SERVER_URL;
+    const serverOrigin =
+      IS_DEV && devServerUrl ? devServerUrl : `http://127.0.0.1:${serverPort}`;
+    configureWebSession(serverOrigin);
     createWindow(serverPort);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

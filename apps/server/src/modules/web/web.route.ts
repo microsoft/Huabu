@@ -7,12 +7,16 @@ import { getCanvasStore } from '../storage/index.js';
 
 import type {
   WebLookupQuery,
+  WebPageResponse,
   WebPreviewResponse,
   WebReaderResponse,
 } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
 type Querystring = WebLookupQuery;
+
+const REMOTE_URL_RE = /^https?:\/\//i;
+const DATA_URL_RE = /^data:/i;
 
 function toReaderHtml(markdown: string): string {
   const rawHtml = marked.parse(markdown) as string;
@@ -192,6 +196,8 @@ const webRoutes: FastifyPluginAsync = async (fastify) => {
           typeof meta.siteName === 'string' && meta.siteName.trim()
             ? meta.siteName.trim()
             : hostname || undefined,
+        embeddable:
+          typeof meta.embeddable === 'boolean' ? meta.embeddable : undefined,
       };
       return reply.send(payload);
     },
@@ -241,6 +247,76 @@ const webRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.send(payload);
     },
   );
+
+  /**
+   * Resolve the iframe target for a web node's Preview panel.
+   *
+   * Two flavours:
+   *   - Remote URL nodes  → returns the canonical URL so the iframe loads
+   *                         the live site. Cross-origin; the desktop main
+   *                         process strips `X-Frame-Options` /
+   *                         `frame-ancestors` so most sites render. In a
+   *                         plain browser the iframe will often fail — the
+   *                         client falls back to the reader view.
+   *   - HTML artifact nodes → returns the same-origin artifact URL
+   *                         (`/api/canvas/<id>/artifact/<key>`). Always
+   *                         renders.
+   */
+  fastify.get<{ Querystring: Querystring }>('/page', async (request, reply) => {
+    const parsed = webLookupQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      return reply.code(400).send({ message: 'Invalid query' });
+    }
+
+    const { canvasId, nodeId } = parsed.data;
+
+    const source = getCanvasStore(canvasId).readNode(nodeId);
+    if (!source || source.type !== 'web') {
+      return reply.code(404).send({ message: 'Source not ingested' });
+    }
+
+    const src = (source.src ?? '').trim();
+    if (!src) {
+      return reply.code(404).send({ message: 'Web node has no source' });
+    }
+
+    // `embeddable` was captured during the original fetch and stored as
+    // top-level frontmatter on the node sidecar. Surfaced verbatim so the
+    // plain-browser client can skip the live iframe attempt when we
+    // already know the page refuses embedding. `undefined` for nodes
+    // that predate this signal — the client should optimistically try
+    // live in that case.
+    const meta = source as unknown as Record<string, unknown>;
+    const embeddable =
+      typeof meta.embeddable === 'boolean' ? meta.embeddable : undefined;
+
+    if (REMOTE_URL_RE.test(src)) {
+      const payload: WebPageResponse = { src, kind: 'url', embeddable };
+      return reply.send(payload);
+    }
+
+    // `data:` URLs (AI-generated HTML snippets, inline base64 docs, etc.)
+    // are self-contained — the browser renders them directly, no fetch
+    // round-trip needed. Pass through as-is. Treat them as `html` kind
+    // because they share the artifact security model (we control the
+    // bytes, but the iframe still needs `allow-same-origin` off to keep
+    // them from reaching the host page).
+    if (DATA_URL_RE.test(src)) {
+      const payload: WebPageResponse = { src, kind: 'html', embeddable: true };
+      return reply.send(payload);
+    }
+
+    // Artifact key (e.g. `art_abc.html`) — build the same-origin URL the
+    // browser can request directly. The artifact route serves the file
+    // with its original Content-Type so the iframe gets a real HTML
+    // document. Same-origin URLs are always embeddable.
+    const payload: WebPageResponse = {
+      src: `/api/canvas/${encodeURIComponent(canvasId)}/artifact/${encodeURIComponent(src)}`,
+      kind: 'html',
+      embeddable: true,
+    };
+    return reply.send(payload);
+  });
 };
 
 export default webRoutes;

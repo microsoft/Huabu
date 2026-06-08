@@ -20,7 +20,7 @@ import type { Node } from '@xyflow/react';
 const DEFAULT_SIZES: Record<string, NodeSize> = {
   text: { width: 200 },
   note: { width: 400 },
-  web: { width: 400, height: 600 },
+  web: { width: 400, height: 400 },
   pdf: { width: 400, height: 400 },
   video: { width: 400, height: 300 },
   image: { width: 400, height: 300 },
