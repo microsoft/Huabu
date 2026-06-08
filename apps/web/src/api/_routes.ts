@@ -36,17 +36,21 @@ export const routes = {
     `/canvas/${enc(canvasId)}/nodes/${enc(nodeId)}/content`,
   canvasNodePreprocess: (canvasId: string, nodeId: string) =>
     `/canvas/${enc(canvasId)}/nodes/${enc(nodeId)}/preprocess`,
-  canvasArtifact: (canvasId: string, kind: 'image' | 'pdf' | 'video') =>
-    `/canvas/${enc(canvasId)}/artifact/${kind}`,
+  canvasArtifact: (
+    canvasId: string,
+    kind: 'image' | 'pdf' | 'video' | 'html',
+  ) => `/canvas/${enc(canvasId)}/artifact/${kind}`,
   canvasArtifactCloneFrom: (canvasId: string) =>
     `/canvas/${enc(canvasId)}/artifact/clone-from`,
   canvasEvents: (canvasId: string) => `/canvas/${enc(canvasId)}/events`,
 
-  // ── Web (preview / reader) ────────────────────────────────────────
+  // ── Web (preview / reader / page) ────────────────────────────────
   webPreview: (canvasId: string, nodeId: string) =>
     `/web/preview?canvasId=${enc(canvasId)}&nodeId=${enc(nodeId)}`,
   webReader: (canvasId: string, nodeId: string) =>
     `/web/reader?canvasId=${enc(canvasId)}&nodeId=${enc(nodeId)}`,
+  webPage: (canvasId: string, nodeId: string) =>
+    `/web/page?canvasId=${enc(canvasId)}&nodeId=${enc(nodeId)}`,
 
   // ── Intent ────────────────────────────────────────────────────────
   intentRecognizeStream: '/intent/recognize-stream',

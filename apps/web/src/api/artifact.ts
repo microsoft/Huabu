@@ -13,7 +13,7 @@ import type {
 // web bundle has one obvious place to import from.
 export { parseArtifactUrl };
 
-type ArtifactType = 'image' | 'pdf' | 'video';
+type ArtifactType = 'image' | 'pdf' | 'video' | 'html';
 
 /**
  * Resolve a stored artifact reference into a fully-qualified URL that
@@ -103,6 +103,13 @@ export async function uploadVideo(
   canvasId: string,
 ): Promise<string> {
   return uploadArtifact(file, 'video', canvasId);
+}
+
+export async function uploadHtml(
+  file: File,
+  canvasId: string,
+): Promise<string> {
+  return uploadArtifact(file, 'html', canvasId);
 }
 
 // `apiUrl` is re-exported so callers (e.g. download links) can build the

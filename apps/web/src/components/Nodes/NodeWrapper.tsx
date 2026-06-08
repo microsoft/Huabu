@@ -502,7 +502,7 @@ export const NodeWrapper = memo(
 
         <NodeSideAffordance
           nodeId={id}
-          selected={!!selected}
+          selected={!!selected && selectedCount === 1}
           editing={editing}
           onCreate={handleCreateConnected}
         />

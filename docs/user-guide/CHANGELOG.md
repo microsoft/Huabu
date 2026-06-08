@@ -4,6 +4,46 @@
 
 ---
 
+## 2026-06-05 · Web 节点 Preview：自动判断 Live / Reader，去掉切换条
+
+**What Changed**
+
+- **去掉 Preview 面板顶部的 Live / Reader 切换工具栏**。视图模式现在完全自动判断，不再需要用户操作：
+  - **桌面端**：永远先用 live iframe 加载真站。主进程已经剥掉 `X-Frame-Options` / CSP `frame-ancestors`，几乎所有站点都能正常嵌入。
+  - **纯浏览器**：服务端预处理时**主动嗅探响应头**（`X-Frame-Options` / CSP `frame-ancestors`），存到节点 metadata 的 `embeddable` 字段。前端拿到 `embeddable: false` 就直接跳到 Reader，不会让用户对着空白 iframe 干等。
+- **二次保险：浏览器里 live 加载 3.5 秒还没成功就静默切到 Reader**。覆盖那些预处理时未抓到头（比如旧节点、CDN 缓存）但实际仍然拒嵌的站点。Reader 永远预先加载好，所以切换是瞬间的。
+- **新增右上角悬浮工具条**：刷新按钮（重试 live）+ 外部打开链接，从顶部条搬到右上角的小卡片里，不占主体空间。
+- **预处理管线新增 `embeddable` 元数据字段**。fetch 拿到 HTML 时同时记下嵌入策略，写进 node markdown 的 frontmatter。已存在的旧 web 节点字段会缺失（cache short-circuit 命中时不会重抽），前端把"undefined"当作"未知，乐观尝试 live"。
+
+**Notes**
+
+- 桌面端的体验几乎不变：之前手动切 Live / Reader 现在不用切了，省一步。
+- 浏览器端体验有大幅改善：Google / Twitter / GitHub 这种发了 `X-Frame-Options: DENY` 的站点，之前要等 5 秒看到空白后手动切，现在打开就直接是 Reader。
+- 想强制重试 live 站点：点右上角刷新按钮即可（也会重置自动选择的视图）。
+- 如果你想看到一个具体节点的 `embeddable` 验证值，删掉旧节点重新拖一个 URL 进来即可触发新的 fetch；或者重命名节点（清空 cache）。
+
+---
+
+## 2026-06-05 · Web 节点支持真实网页预览 + 本地 HTML 文件
+
+**What Changed**
+
+- **Web 节点的 Preview 面板现在直接嵌入真实可交互的网站**。双击 Web 节点，新版 Preview 会用 iframe 加载源站本身：可以滚动、点击链接、填表单 —— 就和一个内嵌的浏览器一样。桌面端（Electron）默认会剥掉源站的 `X-Frame-Options` / `Content-Security-Policy: frame-ancestors`，所以**几乎所有网站**都能正常嵌入；纯浏览器环境因为没法改响应头，被拒嵌的站点会自动回退到下面说的 Reader 视图。
+- **Preview 面板顶部新增 Live / Reader 双视图切换**：左边的"地球"图标是真实网页（Live），右边的"书"图标是 AI 提取的可读纯文本版（Reader）。如果 Live 视图 5 秒内没加载出来（多半是浏览器拦了 iframe），会自动切到 Reader。Reader 也可以手动切回 Live 重试。
+- **节点视图也升级了**：进入 canvas 时，Web 节点上半部分会尝试用 iframe 渲染**网站缩略图**（不可交互、仅展示），下半部分仍然是 og:image + AI summary 兜底。Electron 里能看到真实页面静态截图效果；浏览器里如果 iframe 被拦，自动透出 og:image 卡片，外观和原来一致。
+- **Web 节点支持拖入本地 `.html` / `.htm` 文件**了。把文件拖到 canvas 上会自动识别成 Web 节点，HTML 作为 artifact 存进 canvas，预处理管线和远程网页走完全一样的流程（Readability 抽正文 → AI 打 label / summary / keywords），Preview 面板里也能直接打开、交互。
+- **服务端不再依赖 Tavily Extract API**。换成了完全本地的 `@mozilla/readability` + `linkedom` + `turndown` 组合：抽取质量在大多数静态页 / SSR 页面上和 Tavily 相当，但**不再需要 `TAVILY_API_KEY`、不再产生外部 API 调用费用、可以完全离线运行**。仍在用 Tavily 做"网络搜索"的 `web_search` agent tool 没有受影响。
+
+**Notes**
+
+- 这是首次让 Web 节点能"真的"打开网站 —— 之前 Preview 面板里看到的其实是 markdown 转的 reader 版 HTML，从来就没有渲染过原站。
+- 极少数会主动检测 iframe 嵌入（例如银行、登录墙）的页面在桌面端也可能拒绝渲染（页面内部 `top !== self` 自检），这时点工具栏的 **Open externally** 用系统浏览器打开即可。
+- 上传的 HTML 文件 iframe 沙箱**没有** `allow-same-origin`：HTML artifact 是同源的，给它 same-origin 会让一个攻击者上传的 HTML 拿到我们的 cookie。如果你的 HTML 严重依赖访问自己的 localStorage / cookie，先转成远程 URL 再用。
+- 旧的 Web 节点不需要手动迁移，下次预处理触发时会用新管线重新抽内容；如果只想保留以前已存的 markdown，不会动它（cache short-circuit 命中后不会重抽）。
+- 桌面端剥 `X-Frame-Options` 仅作用于 renderer 进程的跨源响应；同源响应（我们自己的 `/api/*`、SPA 资源）不会被修改，主进程安全模型不变。
+
+---
+
 ## 2026-06-05 · 桌面端启动遇到端口冲突会自动换端口
 
 **What Changed**
