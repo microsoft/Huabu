@@ -19,7 +19,7 @@
 
 import { fauxAssistantMessage } from '@earendil-works/pi-ai';
 
-import { AcpAgentClient, agentSupportsLoadSession } from './client.js';
+import { AcpAgentClient, type AcpInitializeResult } from './client.js';
 import {
   prepareExternalAgentPrompt,
   serializeRawPrompt,
@@ -53,10 +53,8 @@ import type {
 import type { ChatPartsSidecar } from '../store/chat-parts-store.js';
 import type { AssistantMessage, Context } from '@earendil-works/pi-ai';
 import type {
-  AcpModelInfo,
   AcpPlanEntry,
   AcpSessionConfigOption,
-  AcpSessionMode,
   AcpSessionUpdate,
 } from '@sediment/shared';
 import type {
@@ -472,29 +470,47 @@ async function ensureAcpSessionInner(
     return entry;
   }
 
-  // No live session for this thread in the registry. Open the SDK
-  // client + run `initialize` first, then try to recover a persisted
-  // sessionId via `session/load`; fall back to `session/new` when
-  // there is no record, the agent does not support load, or the load
-  // call rejects (e.g. agent restarted and forgot the session).
-  // (`persisted` was read at the top of this function for recipe
-  // resolution and is reused here unchanged.)
-  const client = new AcpAgentClient(conn, { canvasId, logger });
-  await client.initialize();
+  // ── New session: skip re-initialization ──────────────────────────
+  //
+  // The agentlet daemon has already bootstrapped the session
+  // (initialize + session/new) during spawn. We seed the client from
+  // the DataStore's SessionRecord instead of calling those RPCs again.
+  // This fixes the split-brain sessionId divergence where Huabu's
+  // second session/new created a different sessionId from the one the
+  // WS relay + EventStore are keyed on.
 
-  // Build the entry skeleton up front so the long-lived
-  // `available_commands_update` listener can be installed BEFORE
-  // `session/load`. The listener mutates `created.availableCommands`
-  // in place (see {@link handleSessionMetaUpdate}); the sessionId
-  // field is filled in below once known. This matters because
-  // `session/load` typically replays the full session history as a
-  // stream of `session/update` notifications \u2014 far more than the
-  // orphan-buffer cap of `MAX_ORPHAN_UPDATES_PER_SESSION = 32` would
-  // tolerate. With a listener attached, dispatched updates skip the
-  // orphan buffer entirely.
+  const client = new AcpAgentClient(conn, { canvasId, logger });
+
+  // Seed initializeResult from the DataStore (persisted by the server
+  // on agent/hello). The record contains the agent's capabilities from
+  // the daemon's bootstrap — no need to re-initialize.
+  const dataStore = server.getDataStore();
+  const sessionRecord = dataStore.getSession(agentSessionId);
+  if (sessionRecord?.initializeResult) {
+    client.seedFromRecord(
+      sessionRecord.initializeResult as AcpInitializeResult,
+    );
+    logger.info(
+      {
+        threadId,
+        sessionId: agentSessionId,
+        agentInfo: (sessionRecord.initializeResult as AcpInitializeResult)
+          .agentInfo,
+      },
+      '[acp] seeded client from DataStore (skipped redundant initialize + session/new)',
+    );
+  } else {
+    logger.warn(
+      { threadId, sessionId: agentSessionId },
+      '[acp] DataStore has no initializeResult for session — agent capabilities unknown',
+    );
+  }
+
+  const sessionId = agentSessionId;
+
   const created: AcpSessionEntry = {
     client,
-    sessionId: '',
+    sessionId,
     profileId: binding.profileId,
     canvasId,
     cwd,
@@ -511,160 +527,39 @@ async function ensureAcpSessionInner(
     metaUpdatedAt: 0,
   };
 
-  let sessionId: string | null = null;
-  let removeListener: (() => void) | null = null;
+  // Install the long-lived listener so live session/update notifications
+  // (available_commands_update, mode updates, etc.) flow to the entry.
+  client.registerSessionListener(sessionId, (update) => {
+    handleSessionMetaUpdate(created, update, logger);
+  });
 
-  if (persisted) {
-    if (agentSupportsLoadSession(client.initializeResult)) {
-      logger.info(
-        {
-          threadId,
-          canvasId,
-          profileId: binding.profileId,
-          sessionId: persisted.sessionId,
-          cwd: persisted.cwd,
-        },
-        '[acp] attempting session/load for persisted session',
-      );
-      // Listener installed BEFORE the load so replay notifications go
-      // straight to handleSessionMetaUpdate (and through it to no-op
-      // for non-meta updates) instead of overflowing the orphan buffer.
-      removeListener = client.registerSessionListener(
-        persisted.sessionId,
-        (update) => handleSessionMetaUpdate(created, update, logger),
-      );
-      try {
-        const loadResult = await client.loadSession({
-          sessionId: persisted.sessionId,
-          cwd,
-        });
-        sessionId = persisted.sessionId;
-        created.sessionId = sessionId;
-        seedSessionMetaFromResponse(created, loadResult, logger);
-        logger.info(
-          { threadId, sessionId },
-          '[acp] session/load succeeded \u2014 resumed external agent memory',
-        );
-      } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        // "Already loaded" is the BEST possible outcome: the agent
-        // process is still alive (typical scenario: only the Sediment
-        // server restarted, the user's agentlet CLI kept running) and
-        // already holds the session in memory. Adopt it as-is \u2014 no
-        // replay needed, no fallback. Copilot CLI surfaces this as
-        // `Session <id> is already loaded`; other agents may use
-        // different wording, hence the permissive substring check.
-        if (/already\s*loaded/i.test(errMsg)) {
-          sessionId = persisted.sessionId;
-          created.sessionId = sessionId;
-          // The agent already holds this session in memory and will
-          // NOT replay `available_commands_update` / `current_mode_update`
-          // / `usage_update` / etc. on its own \u2014 those notifications
-          // only fire on the original `session/new` or `session/load`.
-          // Without a fallback the registry entry would surface empty
-          // selectors and an empty slash-command list to the UI for the
-          // entire lifetime of this re-attached session (until the
-          // agent happens to push a fresh meta update of its own).
-          //
-          // Rehydrate from the last meta snapshot we persisted before
-          // the server restart. By definition that snapshot reflects
-          // what THIS agent process most recently advertised, so it is
-          // exactly what a fresh `session/new` against the same agent
-          // would return today \u2014 modulo any state the user changed
-          // out-of-band while the Sediment server was down (a vanishingly
-          // narrow race for typical use). Subsequent `session/update`
-          // notifications still take precedence; this is purely a seed.
-          if (persisted.meta) {
-            hydrateEntryFromPersistedMeta(created, persisted.meta);
-            logger.info(
-              {
-                threadId,
-                sessionId,
-                commandCount: created.availableCommands.length,
-                modeCount: created.availableModes.length,
-                modelCount: created.availableModels.length,
-                configCount: created.configOptions.length,
-                hasUsage: created.usage !== null,
-                hasSessionInfo: created.sessionInfo !== null,
-              },
-              '[acp] hydrated session meta from persisted snapshot (already-loaded path)',
-            );
-          } else {
-            logger.warn(
-              { threadId, sessionId },
-              '[acp] session already loaded but no persisted meta snapshot \u2014 UI selectors will start empty until the agent pushes a meta update',
-            );
-          }
-          logger.info(
-            { threadId, sessionId },
-            '[acp] session already loaded in live agent \u2014 reusing without replay',
-          );
-        } else {
-          // Real failure (agent forgot the session, wrong sessionId,
-          // capability lied, transport error, ...). Drop the listener
-          // + stale record and fall through to newSession; the user
-          // pays one extra round-trip but the thread keeps working.
-          removeListener();
-          removeListener = null;
-          logger.warn(
-            {
-              threadId,
-              sessionId: persisted.sessionId,
-              err: errMsg,
-            },
-            '[acp] session/load failed \u2014 dropping persisted record and falling back to session/new',
-          );
-          cancelPersistEntryMeta(canvasId, threadId);
-          deleteAcpSessionRecord(canvasId, threadId);
-        }
-      }
-    } else {
-      logger.info(
-        { threadId, profileId: binding.profileId },
-        '[acp] agent does not advertise loadSession capability \u2014 cannot resume; using session/new',
-      );
-      // Don't delete the record here: a future agent upgrade may add
-      // loadSession support, and the existing sessionId might still be
-      // valid in the agent. Keeping it costs nothing.
-    }
-  }
+  // Replay any session/update notifications from EventStore that the
+  // agent sent during the daemon's session bootstrap (before Huabu
+  // constructed the client). These include modes/models/configOptions/
+  // available_commands that would otherwise be lost.
+  replayEventStoreMeta(server, sessionId, created, logger);
 
-  if (!sessionId) {
+  // If the persisted Huabu-side record has a meta snapshot (e.g. from
+  // a previous server lifetime), use it as a fallback seed — it may
+  // carry modes/models/configOptions that the agent doesn't re-push
+  // after bootstrap.
+  if (persisted?.meta && created.metaUpdatedAt === 0) {
+    hydrateEntryFromPersistedMeta(created, persisted.meta);
     logger.info(
-      { threadId, canvasId, profileId: binding.profileId, cwd },
-      '[acp] opening new session for thread',
+      {
+        threadId,
+        sessionId,
+        commandCount: created.availableCommands.length,
+        modeCount: created.availableModes.length,
+      },
+      '[acp] hydrated session meta from persisted snapshot (fallback)',
     );
-    const newResult = await client.newSession({ cwd });
-    sessionId = newResult.sessionId;
-    created.sessionId = sessionId;
-    seedSessionMetaFromResponse(created, newResult, logger);
   }
 
-  if (!removeListener) {
-    // Install the long-lived listener BEFORE adding the entry to the
-    // registry so subsequent registry lookups always see an entry with
-    // a wired-up listener. The listener registration itself replays
-    // any orphan `available_commands_update` notifications that
-    // arrived BEFORE `session/new` resolved (a common ACP wire
-    // ordering \u2014 see `AcpAgentClient.orphanUpdates`), so we never
-    // miss the agent's initial command-list push regardless of who
-    // wins the response-vs-notification race.
-    client.registerSessionListener(sessionId, (update) => {
-      handleSessionMetaUpdate(created, update, logger);
-    });
-  }
   acpSessionRegistry.set(threadId, created);
 
   // Persist (or refresh) the record so a future server restart can
-  // recover this session. Done AFTER the registry insert so the
-  // happy-path memory state is authoritative; persistence failures
-  // (logged below) only forfeit recovery, not the current session.
-  //
-  // We include the current meta snapshot up front so the "already
-  // loaded" branch on a subsequent restart has something to hydrate
-  // from even if the agent never pushes a meta-update notification
-  // for this session (e.g. an idle session that was created, loaded
-  // its mode/model from the response, then sat quiet).
+  // recover this session.
   try {
     writeAcpSessionRecord(canvasId, threadId, {
       sessionId,
@@ -680,11 +575,55 @@ async function ensureAcpSessionInner(
         canvasId,
         err: err instanceof Error ? err.message : String(err),
       },
-      '[acp] failed to persist session record (recovery after restart will fall back to session/new)',
+      '[acp] failed to persist session record (recovery after restart will fall back)',
     );
   }
 
   return created;
+}
+
+/**
+ * Replay `session/update` notifications from the EventStore that arrived
+ * during the daemon's session bootstrap (before Huabu constructed the
+ * AcpAgentClient). This catches modes, models, configOptions, and
+ * available_commands that the agent pushed in response to `session/new`.
+ */
+function replayEventStoreMeta(
+  server: NonNullable<ReturnType<typeof getAgentletServer>>,
+  sessionId: string,
+  entry: AcpSessionEntry,
+  logger: FastifyBaseLogger,
+): void {
+  const eventStore = server.getEventStore();
+  let replayed = 0;
+  try {
+    const events = eventStore.getEventsSince(sessionId, 0);
+    for (const ev of events) {
+      if (ev.dir !== 'agent') continue;
+      const msg = ev.event as unknown as Record<string, unknown>;
+      if (msg.method !== 'session/update') continue;
+      const params = msg.params as
+        | { update?: AcpSessionUpdate }
+        | null
+        | undefined;
+      const update = params?.update;
+      if (update && typeof update === 'object' && 'sessionUpdate' in update) {
+        handleSessionMetaUpdate(entry, update as AcpSessionUpdate, logger);
+        replayed++;
+      }
+    }
+  } catch (err) {
+    logger.warn(
+      { sessionId, err: err instanceof Error ? err.message : String(err) },
+      '[acp] failed to replay EventStore meta — UI selectors may start empty',
+    );
+  }
+  if (replayed > 0) {
+    logger.info(
+      { sessionId, replayed },
+      '[acp] replayed session/update events from EventStore for meta seeding',
+    );
+  }
 }
 
 /**
@@ -916,63 +855,6 @@ function applyUsageUpdate(
     { sessionId: entry.sessionId, used, size },
     '[acp] usage_update applied',
   );
-}
-
-/**
- * Seed the session entry from the `modes` / `models` / `configOptions`
- * fields of a `session/new` or `session/load` response, when present.
- * Permissive — silently skips fields the agent didn't include.
- */
-function seedSessionMetaFromResponse(
-  entry: AcpSessionEntry,
-  response: { modes?: unknown; models?: unknown; configOptions?: unknown },
-  logger: FastifyBaseLogger,
-): void {
-  let touched = false;
-  if (response.modes && typeof response.modes === 'object') {
-    const m = response.modes as {
-      availableModes?: unknown;
-      currentModeId?: unknown;
-    };
-    if (Array.isArray(m.availableModes)) {
-      entry.availableModes = m.availableModes as AcpSessionMode[];
-      touched = true;
-    }
-    if (typeof m.currentModeId === 'string' && m.currentModeId) {
-      entry.currentModeId = m.currentModeId;
-      touched = true;
-    }
-  }
-  if (response.models && typeof response.models === 'object') {
-    const m = response.models as {
-      availableModels?: unknown;
-      currentModelId?: unknown;
-    };
-    if (Array.isArray(m.availableModels)) {
-      entry.availableModels = m.availableModels as AcpModelInfo[];
-      touched = true;
-    }
-    if (typeof m.currentModelId === 'string' && m.currentModelId) {
-      entry.currentModelId = m.currentModelId;
-      touched = true;
-    }
-  }
-  if (Array.isArray(response.configOptions)) {
-    entry.configOptions = response.configOptions as AcpSessionConfigOption[];
-    touched = true;
-  }
-  if (touched) {
-    entry.metaUpdatedAt = Date.now();
-    logger.info(
-      {
-        sessionId: entry.sessionId,
-        modeCount: entry.availableModes.length,
-        modelCount: entry.availableModels.length,
-        configCount: entry.configOptions.length,
-      },
-      '[acp] seeded session-meta from session/new|load response',
-    );
-  }
 }
 
 function readNullableString(v: unknown): string | null | undefined {

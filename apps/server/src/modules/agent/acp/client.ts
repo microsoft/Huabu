@@ -358,6 +358,16 @@ export class AcpAgentClient {
 
   // ── Public API ──────────────────────────────────────────────────────────
 
+  /**
+   * Inject a cached `initializeResult` without calling `initialize()` over
+   * the wire. Use when the agentlet daemon has already bootstrapped the
+   * session — the result comes from the DataStore's `SessionRecord`.
+   */
+  seedFromRecord(initializeResult: AcpInitializeResult): void {
+    this._initializeResult = initializeResult;
+  }
+
+  /** @deprecated Use {@link seedFromRecord} — the daemon already bootstraps. */
   async initialize(): Promise<AcpInitializeResult> {
     if (this._closed) throw new Error('AcpAgentClient is closed');
     const result = await this.sdk.initialize({
@@ -386,6 +396,7 @@ export class AcpAgentClient {
     return this._initializeResult;
   }
 
+  /** @deprecated Use {@link seedFromRecord} — the daemon already bootstraps. */
   async newSession(opts: { cwd: string }): Promise<AcpNewSessionResult> {
     if (this._closed) throw new Error('AcpAgentClient is closed');
     const result = await this.sdk.newSession({
@@ -396,6 +407,8 @@ export class AcpAgentClient {
   }
 
   /**
+   * @deprecated Use {@link seedFromRecord} — the daemon already bootstraps.
+   *
    * Resume a previously-opened ACP session via `session/load`. Requires
    * the agent to advertise `agentCapabilities.loadSession: true` — call
    * {@link agentSupportsLoadSession} on {@link initializeResult} before
