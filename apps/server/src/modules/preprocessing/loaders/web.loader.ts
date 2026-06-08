@@ -281,6 +281,16 @@ export async function getWebSnapshot(params: {
       // falls back to the live-iframe optimism path.
       embeddable = fetched.headers ? isEmbeddable(fetched.headers) : undefined;
     }
+  } else if (/^data:/i.test(params.uri)) {
+    // `data:` URLs are self-contained — the HTML lives inside the URL
+    // itself. Decode the body directly instead of routing through
+    // `fetch()` (its data-URL handling drops our custom headers and
+    // returns the body anyway, so we'd just pay the round-trip cost for
+    // no benefit). Same-origin embed model = always embeddable.
+    if (!rawHtml) {
+      rawHtml = decodeDataUrlBody(params.uri);
+    }
+    embeddable = true;
   } else {
     // Treat as local file path (artifact upload). Same-origin = always
     // embeddable by definition.
@@ -324,6 +334,28 @@ export async function getWebSnapshot(params: {
 }
 
 /**
+ * Decode the body of a `data:` URL into a plain UTF-8 string.
+ *
+ * Supports both the percent-encoded text form (`data:text/html,...`) and
+ * the base64 form (`data:text/html;base64,...`), plus the bare comma form
+ * (`data:,...`). Throws on malformed input so the calling pipeline
+ * surfaces an `EXTRACT_FAILED` diagnostic instead of silently producing
+ * an empty node.
+ */
+function decodeDataUrlBody(input: string): string {
+  const match = /^data:([^,]*),(.*)$/s.exec(input);
+  if (!match) {
+    throw new Error('Malformed data: URL — missing comma separator');
+  }
+  const [, mediaInfo, body] = match;
+  const isBase64 = /;\s*base64\s*$/i.test(mediaInfo);
+  if (isBase64) {
+    return Buffer.from(body, 'base64').toString('utf8');
+  }
+  return decodeURIComponent(body);
+}
+
+/**
  * Inspect the response headers from a successful HTML fetch and decide
  * whether the page advertises itself as embeddable in a cross-origin
  * `<iframe>`.
@@ -347,7 +379,6 @@ export async function getWebSnapshot(params: {
 function isEmbeddable(headers: Headers): boolean {
   const xfo = headers.get('x-frame-options')?.trim().toLowerCase();
   if (xfo === 'deny' || xfo === 'sameorigin') return false;
-
   const csp = headers.get('content-security-policy');
   if (csp) {
     // Find the frame-ancestors directive; CSP directives are

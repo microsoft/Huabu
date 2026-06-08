@@ -224,11 +224,17 @@ export const WebPreview = ({ id, data }: PreviewComponentProps) => {
     };
   }, [mode, pageSrc, iframeBumpKey, inElectron]);
 
-  const externalHref = useMemo(() => {
-    if (REMOTE_URL_RE.test(src)) return src;
-    if (src.length > 0) return resolveArtifactUrl(src, canvasId);
-    return '';
-  }, [src, canvasId]);
+  // URL we'd open in the system browser when the user clicks
+  // "Open externally". Only meaningful when the node points at a real
+  // remote URL — `data:` URLs and uploaded HTML artifacts are both
+  // self-contained / same-origin, so the "open elsewhere" target would
+  // either be the same inline HTML the iframe already renders or a
+  // /api/canvas/.../artifact/... URL that has no meaning outside the
+  // app. Hide the button rather than expose a dead-end link.
+  const externalHref = useMemo(
+    () => (REMOTE_URL_RE.test(src) ? src : ''),
+    [src],
+  );
 
   const handleReload = useCallback(() => {
     setIframeReady(false);

@@ -16,6 +16,7 @@ import type { FastifyPluginAsync } from 'fastify';
 type Querystring = WebLookupQuery;
 
 const REMOTE_URL_RE = /^https?:\/\//i;
+const DATA_URL_RE = /^data:/i;
 
 function toReaderHtml(markdown: string): string {
   const rawHtml = marked.parse(markdown) as string;
@@ -291,6 +292,17 @@ const webRoutes: FastifyPluginAsync = async (fastify) => {
 
     if (REMOTE_URL_RE.test(src)) {
       const payload: WebPageResponse = { src, kind: 'url', embeddable };
+      return reply.send(payload);
+    }
+
+    // `data:` URLs (AI-generated HTML snippets, inline base64 docs, etc.)
+    // are self-contained — the browser renders them directly, no fetch
+    // round-trip needed. Pass through as-is. Treat them as `html` kind
+    // because they share the artifact security model (we control the
+    // bytes, but the iframe still needs `allow-same-origin` off to keep
+    // them from reaching the host page).
+    if (DATA_URL_RE.test(src)) {
+      const payload: WebPageResponse = { src, kind: 'html', embeddable: true };
       return reply.send(payload);
     }
 

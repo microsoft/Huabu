@@ -49,21 +49,31 @@ export const WebNode = memo(
 
     const src = typeof data?.src === 'string' ? data.src : '';
     const isRemoteUrl = REMOTE_URL_RE.test(src);
-    const isHtmlArtifact = src.length > 0 && !isRemoteUrl;
+    const isDataUrl = /^data:/i.test(src);
+    // "Artifact" = canvas-local HTML file uploaded by the user (e.g.
+    // `art_abc.html`). Identified by elimination: has content but isn't
+    // a remote URL or a self-contained `data:` URL.
+    const isHtmlArtifact = src.length > 0 && !isRemoteUrl && !isDataUrl;
 
-    const externalHref = useMemo(() => {
-      if (isRemoteUrl) return src;
-      if (isHtmlArtifact) return resolveArtifactUrl(src, canvasId);
-      return '';
-    }, [src, isRemoteUrl, isHtmlArtifact, canvasId]);
+    // URL surfaced as the "open externally" link in the floating toolbar.
+    // Only remote http(s) URLs have a meaningful destination — uploaded
+    // HTML artifacts live under our same-origin `/api/canvas/...` path
+    // and `data:` URLs are self-contained, so there's no point opening
+    // either in the system browser.
+    const externalHref = useMemo(
+      () => (isRemoteUrl ? src : ''),
+      [isRemoteUrl, src],
+    );
 
     // Iframe target for the live snapshot. Same canonical form the Preview
-    // panel uses — remote URL or same-origin artifact URL.
+    // panel uses — remote URL, self-contained data URL, or same-origin
+    // artifact URL. All three can be set directly as an iframe `src`.
     const livePreviewSrc = useMemo(() => {
       if (isRemoteUrl) return src;
+      if (isDataUrl) return src;
       if (isHtmlArtifact) return resolveArtifactUrl(src, canvasId);
       return '';
-    }, [isRemoteUrl, isHtmlArtifact, src, canvasId]);
+    }, [isRemoteUrl, isDataUrl, isHtmlArtifact, src, canvasId]);
 
     useEffect(() => {
       if (ingestion?.status === 'pending') {

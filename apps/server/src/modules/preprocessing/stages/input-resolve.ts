@@ -53,15 +53,28 @@ export function inputResolve(
 
     case 'web': {
       const src = ((snapshot.src as string) ?? '').trim();
-      // A web node's `src` is either a remote URL or a canvas-local
-      // artifact key (e.g. `art_abc.html`) when the user uploaded an HTML
-      // file. Distinguish by scheme — artifact keys never carry one.
+      // A web node's `src` can be one of three things:
+      //   1. Remote URL (`http(s)://`) — fetched + Readability-extracted.
+      //   2. `data:` URL — AI-generated HTML snippet baked into the src
+      //      itself. Self-contained; Node's native `fetch()` supports
+      //      `data:` URLs out of the box, so we route through the same
+      //      remote-URL path. `normalizeUrl` is bypassed because URL
+      //      normalisation is meaningless (and lossy) for data URLs.
+      //   3. Local artifact key (e.g. `art_abc.html`) — uploaded by the
+      //      user; resolved to an absolute path so extract() can read it.
       const isRemoteUrl = /^https?:\/\//i.test(src);
       if (isRemoteUrl) {
         return {
           ...base,
           normalizedUri: src ? normalizeUrl(src) : undefined,
           prefetchedContent: snapshot.content as string | undefined,
+        };
+      }
+      const isDataUrl = /^data:/i.test(src);
+      if (isDataUrl) {
+        return {
+          ...base,
+          normalizedUri: src,
         };
       }
       // Local HTML artifact: resolve to absolute path so extract() can
