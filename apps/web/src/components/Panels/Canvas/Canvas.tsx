@@ -37,7 +37,11 @@ import { useSketchHoverRouting } from '@/hooks/useSketchHoverRouting';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
 import { NodeToolbar } from './CanvasToolbar.tsx';
-import { LabelledEdge } from './edges/LabelledEdge.tsx';
+import {
+  EDIT_EDGE_LABEL_EVENT,
+  LabelledEdge,
+  type EditEdgeLabelDetail,
+} from './edges/LabelledEdge.tsx';
 import { EdgeStyleToolbar } from './FloatingToolbars/EdgeStyleToolbar.tsx';
 import { MultiSelectToolbar } from './FloatingToolbars/MultiSelectToolbar.tsx';
 import { IntentPopover } from './IntentPopover.tsx';
@@ -806,6 +810,18 @@ export const Canvas: React.FC<CanvasProps> = ({
           if (EXPANDABLE_TYPES.has(node.type ?? '')) {
             openExpanded(node.id);
           }
+        }}
+        onEdgeDoubleClick={(e, edge) => {
+          // Jump straight into the label editor — saves the user the
+          // single-click-then-click-pill dance. `LabelledEdge` listens
+          // for this event by id; see `EDIT_EDGE_LABEL_EVENT`.
+          e.stopPropagation();
+          const detail: EditEdgeLabelDetail = { edgeId: edge.id };
+          window.dispatchEvent(
+            new CustomEvent<EditEdgeLabelDetail>(EDIT_EDGE_LABEL_EVENT, {
+              detail,
+            }),
+          );
         }}
         attributionPosition="bottom-right"
         panOnDrag={

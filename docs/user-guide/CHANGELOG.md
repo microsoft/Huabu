@@ -4,6 +4,26 @@
 
 ---
 
+## 2026-06-08 · 边 label 的交互与外观调整
+
+**What Changed**
+
+- **选中边后会在边中点显示一个实线 label 占位框**，框内用浅色 "Add label" 提示文字。占位框和真正写有 label 的框是同一个 DOM 节点（占位文字由 CSS `::before` 渲染），所以两种状态下框的尺寸完全一致，不会"选中后变形"。
+- **进入编辑的两种方式**：
+  - 边选中、label 还没写时 —— 单击占位框 → 直接 focus 编辑；
+  - 任何状态下 —— 双击边本身（不是节点 / 空白处） → 一步进入编辑。已有内容的 label 框保留"单击不动 / 双击编辑"，避免在画布上选边时误触清光文字。
+- **Label 框的边框样式跟随它所属的边**：边框颜色 = 边的 stroke 颜色，边框粗细 = 边的 strokeWidth（在 1–3px 之间 clamp，避免 8px 粗边带出 8px 粗框）；选中 / 编辑时统一切到 `--color-info` 蓝（和 React Flow 选中边的描边颜色一致）。
+- **边样式工具条不再压住 label 框**：浮动工具条相对边中点的偏移从 12px 提到 36px，工具条和 label 框之间始终有清晰的留白。
+- **Label 框宽度自适应内容**，超过 ~120px 才折行（用 `whitespace-pre-wrap break-words`），不会再被钉死成长条；Shift+Enter 仍可强制换行。
+
+**Notes**
+
+- 单击进入编辑只在"占位框"状态生效（即边选中且 label 仍为空）。如果 label 已经有文字，单击只保持选中状态。
+- 双击进入编辑依赖 React Flow 的 `onEdgeDoubleClick`，通过 `sediment:edit-edge-label` window 事件通知对应的 `LabelledEdge` 进入编辑模式；点到节点 / 空白处行为完全不受影响。
+- 占位文字"Add label"由 `.sediment-edge-label:empty:not(:focus)::before` 渲染。`textContent` 不会包含 `::before` 内容，所以不会污染 label 提交到 store 的字符串。
+
+---
+
 ## 2026-06-08 · macOS 全屏时收起标题栏左侧的"红绿灯"留白
 
 **What Changed**
