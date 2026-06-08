@@ -4,6 +4,21 @@
 
 ---
 
+## 2026-06-08 · macOS 全屏时收起标题栏左侧的"红绿灯"留白
+
+**What Changed**
+
+- **macOS 桌面端进入全屏（绿灯按钮 / `⌃⌘F`）时，标题栏左边给红绿灯按钮预留的 76px 空白会自动收起**，Home 按钮贴回到窗口的左边缘（保留 8px 内边距，和 Windows 一致）。
+- **全屏切换的过程中先把 Home 按钮整体淡出再淡入**，避免动画进行时按钮和移出 / 移回的红绿灯叠在同一像素上：`resize` 事件触发后立刻把 `opacity` 切到 0（无过渡），尺寸稳定 ~180ms 后再带 180ms 淡入。
+- 实现方式：主进程 `enter-full-screen` / `leave-full-screen` 通过新加的 `window:fullscreen` IPC 通道 + `electronBridge.window` 暴露给 renderer，渲染层根据当前全屏状态切换 `paddingLeft`；同时监听 `resize` 做 debounce 触发上面那段淡出 / 淡入。
+
+**Notes**
+
+- 仅影响 macOS。Windows 的标题栏按钮在全屏下不会被系统隐藏，留白逻辑不变；Linux 当前没有自定义关闭按钮，也不受影响。
+- 普通的"最大化（Cmd + 绿灯）"不会进入沉浸式全屏，红绿灯仍然显示，留白保持 76px，行为与之前一致。
+
+---
+
 ## 2026-06-08 · 左侧图层面板新增「外部 .md 文件」提示
 
 **What Changed**

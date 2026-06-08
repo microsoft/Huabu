@@ -26,6 +26,11 @@ interface ElectronWorkspaceApi {
   removeRecent: (path: string) => Promise<WorkspaceStoreSnapshot>;
 }
 
+interface ElectronWindowApi {
+  isFullScreen: () => Promise<boolean>;
+  onFullScreenChange: (cb: (fullScreen: boolean) => void) => () => void;
+}
+
 interface ElectronBridge {
   versions: {
     node: string;
@@ -51,6 +56,7 @@ interface ElectronBridge {
    * otherwise reset the saved workspace.
    */
   workspace?: ElectronWorkspaceApi;
+  window?: ElectronWindowApi;
 }
 
 declare global {

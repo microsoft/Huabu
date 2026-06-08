@@ -646,6 +646,12 @@ function registerWorkspaceIpc(): void {
   });
 }
 
+function registerWindowIpc(): void {
+  ipcMain.handle('window:is-fullscreen', () => {
+    return mainWindow ? mainWindow.isFullScreen() : false;
+  });
+}
+
 // ── BrowserWindow ────────────────────────────────────────────────────
 
 let mainWindow: BrowserWindow | null = null;
@@ -835,6 +841,14 @@ function createWindow(port: number): void {
     mainWindow.webContents.openDevTools();
   }
 
+  const sendFullScreen = (fullScreen: boolean): void => {
+    if (mainWindow && !mainWindow.webContents.isDestroyed()) {
+      mainWindow.webContents.send('window:fullscreen', fullScreen);
+    }
+  };
+  mainWindow.on('enter-full-screen', () => sendFullScreen(true));
+  mainWindow.on('leave-full-screen', () => sendFullScreen(false));
+
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
@@ -856,6 +870,7 @@ app.whenReady().then(async () => {
   // script's `ipcRenderer.invoke('workspace:get', …)` calls always have
   // a handler to talk to, even on the very first render.
   registerWorkspaceIpc();
+  registerWindowIpc();
 
   // macOS Dock icon. In a packaged .app this comes from the bundle's
   // .icns automatically, but in dev (`electron .`) the Dock would show
