@@ -4,6 +4,30 @@
 
 ---
 
+## 2026-06-08 · Bugfix：Settings 现在可以完整配置 Azure OpenAI 了（#220）
+
+**What Changed**
+
+- **修复 Settings → LLM Provider 切到 Azure OpenAI 报「Model is required」、且选中的 Provider 被悄悄回滚到之前那个的问题**。Azure OpenAI 没有内建模型列表（模型名是用户自己的 deployment 名），原先前端在切 Provider 时会立刻用空 model 调一次 `PUT /api/llm/config`，服务端 schema 校验直接 400 退回，导致 Provider 切换看起来没生效。`PUT /api/llm/config` 的请求体现在允许 `model` 为空字符串，先把 Provider 落到本地、再让用户继续填后面的字段。
+- **Settings 里新增 Azure OpenAI 专属配置区**：选中 Azure OpenAI 后会出现四个字段并一次性 Save：
+  - **Endpoint** — 例如 `https://my-resource.cognitiveservices.azure.com`，留空时回退到旧的 `AZURE_OPENAI_API_ENDPOINT` 环境变量。
+  - **Deployment** — Azure 上的 deployment 名（例如 `gpt-5-chat`），同时也用作模型 id。
+  - **API Version** — 例如 `2025-04-01-preview`；留空时使用 pi-ai 默认的 `v1`。
+  - **API Key** — Azure 资源的 key；之前已经 Save 过的话留空即可保留。
+- **后端在调 LLM 时会把这些值作为 `azureBaseUrl` / `azureApiVersion` / `azureDeploymentName` 透传给 pi-ai 的 Azure provider**，不再依赖 `process.env.AZURE_OPENAI_*` 才能用。原先服务端会在 baseUrl 上硬拼一个 `/openai` 后缀，新版 pi-ai 会自己规范化路径并加 `/openai/v1`，所以这个手动后缀拿掉了，避免变成 `/openai/openai/v1`。
+- **同一 Provider 内做局部更新时会合并已保存的字段**：例如只改了 Deployment、没重填 API Key / Endpoint / API Version，之前保存的那些值会被保留，不会被这次 PUT 清空（之前只有 `apiKey` 走合并逻辑）。
+- **`llm-config.json` 现在按 Provider 分桶保存**：切换 Provider 不再覆盖上一个 Provider 的字段。例如先配好 Azure，再切到 OpenAI，再切回 Azure —— Endpoint / Deployment / API Version / API Key 仍在，不用重填。每个 Provider 自己的 model 选择也会被记住（OpenAI 选过的 model、Anthropic 选过的 model 等切换时各自恢复）。
+- 旧版 `llm-config.json`（单一 active 配置的扁平结构）会在下次保存时自动迁移到新结构，无需手工处理；活跃 Provider 由顶层 `active` 字段标记，每个 Provider 的字段挂在 `providers[providerId]` 下。
+- **切到一个还没配置过的内建 Provider 时，服务端会自动挑该 Provider 模型列表里的第一个作为默认 model**（这条逻辑从前端搬到了后端，跟"恢复已保存 model"走同一条路径，避免前端强行用第一个 model 覆盖之前的选择）。
+
+**Notes**
+
+- 旧的 `AZURE_OPENAI_API_ENDPOINT` / `AZURE_OPENAI_API_VERSION` / `AZURE_OPENAI_API_DEPLOYMENT_NAME` / `AZURE_OPENAI_API_KEY` 环境变量在 Settings 里 _没填_ 对应字段时仍然作为兜底；填了就以 Settings 的值为准（每次请求都走 Settings 里的 Endpoint / API Version / Deployment）。
+- 切换 Provider **不再**清掉旧 Provider 的 baseUrl / apiVersion / apiKey；它们各自保留在 `providers[providerId]` 桶里，对当前活跃 Provider 没有副作用（resolveApiKey 只看 active 的字段）。
+- Azure 之外的 Provider 不受影响：仍然是 Provider → Model → API Key 三行。
+
+---
+
 ## 2026-06-08 · Edge 支持文本 Label（人 / AI 都能加）
 
 **What Changed**
