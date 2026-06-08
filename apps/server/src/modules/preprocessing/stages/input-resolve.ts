@@ -53,10 +53,26 @@ export function inputResolve(
 
     case 'web': {
       const src = ((snapshot.src as string) ?? '').trim();
+      // A web node's `src` is either a remote URL or a canvas-local
+      // artifact key (e.g. `art_abc.html`) when the user uploaded an HTML
+      // file. Distinguish by scheme — artifact keys never carry one.
+      const isRemoteUrl = /^https?:\/\//i.test(src);
+      if (isRemoteUrl) {
+        return {
+          ...base,
+          normalizedUri: src ? normalizeUrl(src) : undefined,
+          prefetchedContent: snapshot.content as string | undefined,
+        };
+      }
+      // Local HTML artifact: resolve to absolute path so extract() can
+      // read it from disk.
+      const filename = extractArtifactFilename(src);
+      const filePath =
+        filename && resolveArtifact ? resolveArtifact(filename) : null;
       return {
         ...base,
-        normalizedUri: src ? normalizeUrl(src) : undefined,
-        prefetchedContent: snapshot.content as string | undefined,
+        artifactUri: src || undefined,
+        filePath: filePath ?? undefined,
       };
     }
 

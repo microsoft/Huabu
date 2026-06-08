@@ -4,7 +4,12 @@
  * useCanvasShortcuts.ts (paste) to eliminate duplication.
  */
 
-import { uploadImage, uploadPdf, uploadVideo } from '../../api/artifact';
+import {
+  uploadHtml,
+  uploadImage,
+  uploadPdf,
+  uploadVideo,
+} from '../../api/artifact';
 import {
   detectNodeType,
   detectNodeTypeFromMime,
@@ -70,6 +75,19 @@ export async function uploadFileToNodeInput(
         nodeType: 'note',
         placementPoint,
         data: { content, label: file.name, origin },
+      };
+    }
+
+    if (type === 'web') {
+      // Local .html / .htm file dropped onto the canvas. Upload as an
+      // artifact and store the resulting key in `data.src` — the
+      // preprocess pipeline branch in input-resolve detects the missing
+      // `http://` scheme and reads the file from disk.
+      const src = await uploadHtml(file, canvasId);
+      return {
+        nodeType: 'web',
+        placementPoint,
+        data: { src, label: file.name, origin },
       };
     }
   } catch (error) {

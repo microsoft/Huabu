@@ -33,6 +33,10 @@ export const detectNodeType = (
   if (ext === 'pdf') return 'pdf';
   if (ext === 'md' || ext === 'markdown') return 'note';
   if (VIDEO_EXTS.includes(ext)) return 'video';
+  // Local .html / .htm files are surfaced as web nodes — the uploader
+  // stores them as an artifact and the preprocessing pipeline extracts
+  // their content the same way it does for remote URLs.
+  if (ext === 'html' || ext === 'htm') return 'web';
   return 'web';
 };
 
@@ -46,6 +50,7 @@ export const detectNodeTypeFromMime = (
   if (mimeType === 'application/pdf') return 'pdf';
   if (mimeType === 'text/markdown') return 'note';
   if (mimeType.startsWith('video/')) return 'video';
+  if (mimeType === 'text/html') return 'web';
   return 'web';
 };
 
