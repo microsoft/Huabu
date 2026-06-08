@@ -31,6 +31,7 @@
     "@opendocsg/pdf2md": "^0.2.5",
     "@sediment/shared": "workspace:*",
     "archiver": "^7.0.1",
+    "chokidar": "^5.0.0",
     "dotenv": "^17.2.3",
     "fastify": "^5.2.0",
     "gpt-tokenizer": "^3.4.0",
