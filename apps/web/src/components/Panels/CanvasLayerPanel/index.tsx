@@ -1,9 +1,10 @@
 import { PanelLeftClose, PanelLeftOpen, Search } from 'lucide-react';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   CANVAS_NODE_TYPES,
   type CanvasNodeType,
+  type ExternalNoteItem,
   type QuestionNodeStatus,
   type SketchStroke,
 } from '@sediment/shared';
@@ -13,6 +14,7 @@ import { LayerFilterBar } from './LayerFilterBar';
 import { QuestionStatusDot } from './QuestionStatusDot';
 import { getNodeIcon } from '../../../config/nodeIcons';
 import useCanvasStore from '../../../store/canvasStore';
+import { useExternalImportsStore } from '../../../store/externalImportsStore';
 import { usePanelStore } from '../../../store/panelStore';
 import { Button } from '../../Common/Button';
 import { SketchIcon } from '../../Nodes/sketch/SketchIcon';
@@ -76,6 +78,22 @@ const renderNodeIcon = (node: DataSourceNodeLike) => {
 const getNodeDisplayName = (node: DataSourceNodeLike): string => {
   return node.data.label;
 };
+
+export const EXTERNAL_ROW_ID_PREFIX = 'external::';
+
+const buildExternalTreeItem = (
+  item: ExternalNoteItem,
+  label: string,
+): DataSourceTreeItem => ({
+  id: `${EXTERNAL_ROW_ID_PREFIX}${item.relativePath}`,
+  depth: 0,
+  externalRelativePath: item.relativePath,
+  node: {
+    id: `${EXTERNAL_ROW_ID_PREFIX}${item.relativePath}`,
+    type: 'note',
+    data: { label },
+  },
+});
 
 const buildTreeItems = (nodes: DataSourceNodeLike[]): DataSourceTreeItem[] => {
   const byId = new Map(nodes.map((n) => [n.id, n] as const));
@@ -158,6 +176,17 @@ export const CanvasLayerPanel = ({
   const rawNodes = useCanvasStore(
     (s) => s.nodes,
   ) as unknown as DataSourceNodeLike[];
+  const activeCanvasId = useCanvasStore((s) => s.canvasId);
+  const externalPending = useExternalImportsStore((s) => s.pending);
+  const connectExternal = useExternalImportsStore((s) => s.connect);
+  const disconnectExternal = useExternalImportsStore((s) => s.disconnect);
+
+  useEffect(() => {
+    if (!activeCanvasId) return;
+    connectExternal(activeCanvasId);
+    return () => disconnectExternal();
+  }, [activeCanvasId, connectExternal, disconnectExternal]);
+
   const frozenNodesRef = useRef(rawNodes);
   if (!isLeftCollapsed) {
     // Keep the cached reference in step with the live store whenever the
@@ -207,8 +236,9 @@ export const CanvasLayerPanel = ({
     for (const n of nodes) {
       if (n.type) present.add(n.type);
     }
+    if (externalPending.length > 0) present.add('note');
     return CANVAS_NODE_TYPES.filter((t) => present.has(t));
-  }, [nodes]);
+  }, [nodes, externalPending.length]);
 
   // Compile the regex once per `query` change. Invalid syntax returns a
   // null regex plus an `isRegexInvalid` flag; the bar shows a red border
@@ -287,6 +317,36 @@ export const CanvasLayerPanel = ({
   const itemsToRender = isFilterActive ? (filteredFlatItems ?? []) : layerItems;
   const emptyText = isFilterActive ? 'No matching layers' : undefined;
 
+  // Build external (not-yet-imported) note rows. Filter out any whose
+  // frontmatter id already lives in the canvas state — handles the race
+  // where the watcher saw the file before the canvas autosave landed.
+  const externalItems = useMemo<DataSourceTreeItem[]>(() => {
+    if (externalPending.length === 0) return [];
+    const knownIds = new Set<string>();
+    for (const n of rawNodes) knownIds.add(n.id);
+    const hasTypeFilter = selectedTypes.size > 0;
+    const out: DataSourceTreeItem[] = [];
+    for (const item of externalPending) {
+      if (item.noteId && knownIds.has(item.noteId)) continue;
+      const label = item.fileName.replace(/\.md$/i, '');
+      if (hasTypeFilter && !selectedTypes.has('note')) continue;
+      if (regex && !regex.test(label)) continue;
+      out.push(buildExternalTreeItem(item, label));
+    }
+    return out;
+  }, [externalPending, rawNodes, selectedTypes, regex]);
+
+  // External rows render at the bottom so they don't push the active
+  // canvas nodes off-screen when many `.md` files appear at once.
+  const finalItems = useMemo(
+    () =>
+      externalItems.length === 0
+        ? itemsToRender
+        : [...itemsToRender, ...externalItems],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [externalItems, layerItems, filteredFlatItems, isFilterActive],
+  );
+
   return (
     <SidebarPanel
       title="Layers"
@@ -330,7 +390,7 @@ export const CanvasLayerPanel = ({
         )
       )}
       <CanvasLayerTree
-        items={itemsToRender}
+        items={finalItems}
         getIcon={renderNodeIcon}
         getDisplayName={getNodeDisplayName}
         isFilterActive={isFilterActive}

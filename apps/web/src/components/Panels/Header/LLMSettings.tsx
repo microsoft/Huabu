@@ -1,4 +1,4 @@
-import { Check, ClipboardCopy, Key, LogIn, LogOut } from 'lucide-react';
+import { Check, Copy, Key, LogIn, LogOut } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 
 import { Button } from '@/components/Common/Button';
@@ -34,6 +34,26 @@ export const LLMSettings: React.FC = () => {
   const [apiKeyValue, setApiKeyValue] = useState('');
   const [manualModel, setManualModel] = useState('');
 
+  // ── Azure-specific form state ──
+  // Azure OpenAI needs four discrete fields (endpoint, deployment, api
+  // version, key) that none of the other providers expose, so it has its
+  // own dedicated section instead of trying to overload the generic rows.
+  const [azureEndpoint, setAzureEndpoint] = useState('');
+  const [azureDeployment, setAzureDeployment] = useState('');
+  const [azureApiVersion, setAzureApiVersion] = useState('');
+  const [azureApiKey, setAzureApiKey] = useState('');
+  const isAzure = llmConfig?.provider === 'azure-openai';
+
+  // Sync Azure form fields with the persisted config whenever it changes
+  // (e.g. on initial load, after Save, or when switching to Azure).
+  useEffect(() => {
+    if (!isAzure) return;
+    setAzureEndpoint(llmConfig?.baseUrl ?? '');
+    setAzureDeployment(llmConfig?.model ?? '');
+    setAzureApiVersion(llmConfig?.apiVersion ?? '');
+    setAzureApiKey('');
+  }, [isAzure, llmConfig?.baseUrl, llmConfig?.model, llmConfig?.apiVersion]);
+
   // Surface store errors as transient toasts.
   useEffect(() => {
     if (llmError) {
@@ -45,16 +65,12 @@ export const LLMSettings: React.FC = () => {
     await llmLoadModels(providerId);
     setShowApiKeyInput(false);
     setApiKeyValue('');
-
-    const freshModels = useLLMStore.getState().models;
-    if (freshModels.length > 0) {
-      const firstModel = freshModels[0].id;
-      setManualModel('');
-      await llmUpdateConfig({ provider: providerId, model: firstModel });
-    } else {
-      setManualModel('');
-      await llmUpdateConfig({ provider: providerId, model: '' });
-    }
+    setManualModel('');
+    // Send an empty model — the server restores this provider's
+    // previously-saved model from its per-provider store, or auto-picks
+    // a sensible default for built-in providers. Forcing the catalog's
+    // first model here would overwrite the user's last choice.
+    await llmUpdateConfig({ provider: providerId, model: '' });
   };
 
   const handleManualModelSave = async () => {
@@ -78,6 +94,25 @@ export const LLMSettings: React.FC = () => {
     setShowApiKeyInput(false);
   };
 
+  const handleSaveAzure = async () => {
+    const endpoint = azureEndpoint.trim();
+    const deployment = azureDeployment.trim();
+    const apiVersion = azureApiVersion.trim();
+    const apiKey = azureApiKey.trim();
+    // Endpoint + deployment are the minimum needed for the next LLM call
+    // to even reach Azure; api version + key can be filled in later
+    // (key, in particular, may already be persisted from a prior save).
+    if (!endpoint || !deployment) return;
+    await llmUpdateConfig({
+      provider: 'azure-openai',
+      model: deployment,
+      baseUrl: endpoint,
+      ...(apiVersion ? { apiVersion } : {}),
+      ...(apiKey ? { apiKey } : {}),
+    });
+    setAzureApiKey('');
+  };
+
   const selectedProvider = llmProviders.find(
     (p) => p.id === llmConfig?.provider,
   );
@@ -97,7 +132,7 @@ export const LLMSettings: React.FC = () => {
         </div>
       </SettingRow>
 
-      {llmConfig?.provider && llmModels.length > 0 && (
+      {llmConfig?.provider && llmModels.length > 0 && !isAzure && (
         <SettingRow title="Model">
           <div className="w-44">
             <Select
@@ -113,7 +148,7 @@ export const LLMSettings: React.FC = () => {
         </SettingRow>
       )}
 
-      {llmConfig?.provider && llmModels.length === 0 && (
+      {llmConfig?.provider && llmModels.length === 0 && !isAzure && (
         <SettingRow title="Model">
           <div className="flex w-44 gap-1.5">
             <input
@@ -137,6 +172,81 @@ export const LLMSettings: React.FC = () => {
             </Button>
           </div>
         </SettingRow>
+      )}
+
+      {/* Azure OpenAI — dedicated multi-field form */}
+      {isAzure && (
+        <>
+          <SettingRow title="Endpoint" description="">
+            <input
+              type="text"
+              placeholder="https://…cognitiveservices.azure.com"
+              value={azureEndpoint}
+              onChange={(e) => setAzureEndpoint(e.target.value)}
+              className="border-edge-default bg-surface text-fg-muted focus:ring-info-light w-56 rounded border px-2 py-1.5 text-xs focus:ring-1 focus:outline-none"
+            />
+          </SettingRow>
+
+          <SettingRow title="Deployment" description="">
+            <input
+              type="text"
+              placeholder="e.g. gpt-5-chat"
+              value={azureDeployment}
+              onChange={(e) => setAzureDeployment(e.target.value)}
+              className="border-edge-default bg-surface text-fg-muted focus:ring-info-light w-56 rounded border px-2 py-1.5 text-xs focus:ring-1 focus:outline-none"
+            />
+          </SettingRow>
+
+          <SettingRow title="API Version" description="Optional.">
+            <input
+              type="text"
+              placeholder="e.g. 2025-04-01-preview"
+              value={azureApiVersion}
+              onChange={(e) => setAzureApiVersion(e.target.value)}
+              className="border-edge-default bg-surface text-fg-muted focus:ring-info-light w-56 rounded border px-2 py-1.5 text-xs focus:ring-1 focus:outline-none"
+            />
+          </SettingRow>
+
+          <SettingRow
+            title="API Key"
+            description={
+              llmConfig?.authenticated
+                ? 'A key is already saved — leave empty to keep it.'
+                : 'Required to make requests to Azure OpenAI.'
+            }
+          >
+            <div className="flex items-center gap-1.5">
+              {llmConfig?.authenticated ? (
+                <Check size={14} className="text-success" />
+              ) : (
+                <Key size={14} className="text-warning" />
+              )}
+              <input
+                type="password"
+                placeholder={
+                  llmConfig?.authenticated ? '••••••••' : 'Azure key'
+                }
+                value={azureApiKey}
+                onChange={(e) => setAzureApiKey(e.target.value)}
+                className="border-edge-default bg-surface text-fg-muted focus:ring-info-light w-44 rounded border px-2 py-1.5 text-xs focus:ring-1 focus:outline-none"
+              />
+            </div>
+          </SettingRow>
+
+          <div className="flex justify-end px-3 py-2.5">
+            <Button
+              variant="outline"
+              tone="neutral"
+              size="sm"
+              onClick={() => void handleSaveAzure()}
+              disabled={
+                !azureEndpoint.trim() || !azureDeployment.trim() || llmSaving
+              }
+            >
+              Save
+            </Button>
+          </div>
+        </>
       )}
 
       {/* OAuth auth row */}
@@ -181,9 +291,10 @@ export const LLMSettings: React.FC = () => {
               size="sm"
               tone="info"
               title="Copy code"
+              tooltipPlacement="bottom"
               onClick={() => void copyToClipboard(oauthUserCode)}
             >
-              <ClipboardCopy />
+              <Copy />
             </Button>
           </div>
           {oauthVerificationUri && (
@@ -206,7 +317,7 @@ export const LLMSettings: React.FC = () => {
       )}
 
       {/* API key auth row */}
-      {llmConfig && !isOAuth && (
+      {llmConfig && !isOAuth && !isAzure && (
         <SettingRow title="Authentication">
           <div className="flex items-center gap-1.5">
             {llmConfig.authenticated ? (
@@ -231,7 +342,7 @@ export const LLMSettings: React.FC = () => {
       )}
 
       {/* API key input — full-width row */}
-      {llmConfig && !isOAuth && showApiKeyInput && (
+      {llmConfig && !isOAuth && !isAzure && showApiKeyInput && (
         <div className="flex gap-1.5 px-3 py-2.5">
           <input
             type="password"

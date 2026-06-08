@@ -65,6 +65,7 @@ export interface LLMConfig {
   authenticated: boolean;
   /** Optional custom base URL override. */
   baseUrl?: string;
+  apiVersion?: string;
 }
 
 /**
@@ -72,11 +73,12 @@ export interface LLMConfig {
  */
 export const llmConfigUpdateSchema = z.object({
   provider: z.string().min(1, 'Provider is required'),
-  model: z.string().min(1, 'Model is required'),
+  model: z.string(),
   /** API key — only sent when setting a new key; never returned by GET. */
   apiKey: z.string().optional(),
   /** Optional base URL override. */
   baseUrl: z.string().optional(),
+  apiVersion: z.string().optional(),
 });
 export type LLMConfigUpdate = z.infer<typeof llmConfigUpdateSchema>;
 

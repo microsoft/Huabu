@@ -36,6 +36,7 @@
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 
+import { resetExternalNoteWatcher } from './canvas/external-watcher.js';
 // @deprecated Launch-only legacy migration. Remove once all workspaces have
 // been migrated to the canvas-centric layout.
 import { refreshCanvasDirIndex } from './storage/canvas-dirs.js';
@@ -104,6 +105,7 @@ export function initWorkspaceFromEnv(): void {
   // One-shot move of legacy `<canvas>/memory/preferences.md` into the
   // new `<canvas>/.memory/canvas.md` canvas-memory file (sentinel-gated).
   migrateLegacyMemory(_workspacePath);
+  void resetExternalNoteWatcher();
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -186,6 +188,7 @@ export function setWorkspacePath(newPath: string): void {
   // One-shot move of legacy `<canvas>/memory/preferences.md` into the
   // new `<canvas>/.memory/canvas.md` canvas-memory file (sentinel-gated).
   migrateLegacyMemory(_workspacePath);
+  void resetExternalNoteWatcher();
 }
 
 // ──────────────────────────────────────────────────────────────────────

@@ -253,7 +253,10 @@ export const EdgeStyleToolbar = () => {
     <CanvasFloatingPopover
       anchor={anchor}
       open={!!selectedEdge && !!anchor}
-      offset={12}
+      // The label pill renders centred on the edge midpoint (the same
+      // anchor), so a small offset would overlap it. 36px clears the
+      // pill height (~22px) plus visual breathing room.
+      offset={36}
       side="top"
       className={FLOATING_TOOLBAR_CLASS}
     >

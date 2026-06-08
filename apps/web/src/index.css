@@ -279,6 +279,11 @@ body,
   filter: drop-shadow(0 0 2px var(--color-info-light));
 }
 
+.sediment-edge-label:empty:not(:focus)::before {
+  content: 'Add label';
+  color: var(--color-fg-subtle);
+}
+
 /* Live lasso preview uses a visual-only highlight without mutating selection state. */
 .react-flow__node.canvas-lasso-preview > div {
   box-shadow:

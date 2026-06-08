@@ -16,6 +16,7 @@ import { CSS } from '@dnd-kit/utilities';
 import React, { useCallback, useMemo } from 'react';
 
 import useCanvasStore from '@/store/canvasStore.ts';
+import { useExternalImportsStore } from '@/store/externalImportsStore';
 
 import { TreeRowItem } from './TreeRowItem';
 import { EmptyState } from '../../Common/EmptyState';
@@ -367,7 +368,31 @@ export const CanvasLayerTree = ({
     [toggleNodeLock],
   );
 
-  const itemIds = useMemo(() => visibleItems.map((i) => i.id), [visibleItems]);
+  const { externalItems, sortableItems } = useMemo(() => {
+    const ext: DataSourceTreeItem[] = [];
+    const sort: DataSourceTreeItem[] = [];
+    for (const item of visibleItems) {
+      if (item.externalRelativePath) ext.push(item);
+      else sort.push(item);
+    }
+    return { externalItems: ext, sortableItems: sort };
+  }, [visibleItems]);
+
+  const sortableIds = useMemo(
+    () => sortableItems.map((i) => i.id),
+    [sortableItems],
+  );
+
+  const importExternal = useExternalImportsStore((s) => s.importItem);
+  const externalByPath = useExternalImportsStore((s) => s.pending);
+
+  const handleImport = useCallback(
+    (relativePath: string) => {
+      const item = externalByPath.find((i) => i.relativePath === relativePath);
+      if (item) void importExternal(item);
+    },
+    [externalByPath, importExternal],
+  );
 
   // Build lookup map once for efficient parent-chain traversal
   const visibleItemMap = useMemo(
@@ -384,10 +409,10 @@ export const CanvasLayerTree = ({
       <div className="overflow-hidden">
         <div className="flex flex-col py-1">
           <SortableContext
-            items={itemIds}
+            items={sortableIds}
             strategy={verticalListSortingStrategy}
           >
-            {visibleItems.map((item) => {
+            {sortableItems.map((item) => {
               // Filter mode flattens the list to depth 0 and renders a
               // pure result set, so chevrons / drag are both meaningless
               // and confusing — we force them off here.
@@ -432,6 +457,20 @@ export const CanvasLayerTree = ({
               );
             })}
           </SortableContext>
+
+          {externalItems.map((item) => {
+            const relativePath = item.externalRelativePath ?? '';
+            return (
+              <TreeRowItem
+                key={item.id}
+                depth={0}
+                icon={getIcon(item.node)}
+                label={getDisplayName(item.node)}
+                isExternal
+                onImport={() => handleImport(relativePath)}
+              />
+            );
+          })}
 
           {visibleItems.length === 0 && (
             <EmptyState message={emptyText} className="px-3 py-2" />

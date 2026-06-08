@@ -1,4 +1,5 @@
 import { BookOpen, House } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 
 import { APP_NAME } from '../../../config/app';
@@ -50,10 +51,50 @@ export function WindowChrome() {
   );
   const canvasCount = useWorkspaceStore((s) => s.canvasCount);
 
+  const [isFullScreen, setIsFullScreen] = useState(false);
+  useEffect(() => {
+    const windowApi = bridge?.window;
+    if (!windowApi) return;
+    let cancelled = false;
+    void windowApi.isFullScreen().then((value) => {
+      if (!cancelled) setIsFullScreen(value);
+    });
+    const unsubscribe = windowApi.onFullScreenChange((value) => {
+      setIsFullScreen(value);
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [bridge]);
+
+  const HIDE_DEBOUNCE_MS = 180;
+  const FADE_IN_MS = 180;
+  const [transitioning, setTransitioning] = useState(false);
+  const isMacBridge = bridge?.platform === 'darwin';
+  useEffect(() => {
+    if (!isMacBridge || typeof window === 'undefined') return;
+    let stableTimer: ReturnType<typeof setTimeout> | null = null;
+    const onResize = () => {
+      setTransitioning(true);
+      if (stableTimer) clearTimeout(stableTimer);
+      stableTimer = setTimeout(() => setTransitioning(false), HIDE_DEBOUNCE_MS);
+    };
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      if (stableTimer) clearTimeout(stableTimer);
+    };
+  }, [isMacBridge]);
+
   // Browser mode: leave the page chrome untouched.
   if (!bridge) return null;
 
   const isMac = bridge.platform === 'darwin';
+  // macOS hides the traffic-lights in immersive fullscreen, so the
+  // gutter would just be dead space. Other platforms keep their
+  // padding unchanged.
+  const macLeftPadding = isFullScreen ? 8 : LEFT_GUTTER_MAC_PX;
 
   // Pick the centre label based on the current route:
   //   - On the canvas list ("/"): show the workspace folder name so the
@@ -94,7 +135,9 @@ export function WindowChrome() {
           WebkitAppRegion: 'drag',
           // macOS traffic-lights sit on the left edge of the window. Push
           // our home button to the right of them so they don't overlap.
-          paddingLeft: isMac ? LEFT_GUTTER_MAC_PX : 8,
+          // In immersive fullscreen the OS hides the traffic-lights, so
+          // collapse the gutter to avoid a visible gap to the window edge.
+          paddingLeft: isMac ? macLeftPadding : 8,
           // Windows caption buttons float over the right edge via
           // titleBarOverlay; reserve their width here so our settings
           // button doesn't slip under them.
@@ -108,8 +151,25 @@ export function WindowChrome() {
           renders below the trigger — there is no room above. Box and
           icon sizes mirror the md `<Button iconOnly>` used on the right
           (28px hit area, 16px icon) so all three controls sit on the
-          same baseline. */}
-      <div style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+          same baseline. While the macOS fullscreen animation is
+          running the wrapper is hidden instantly (no transition out)
+          and fades back in only once the window dimensions settle —
+          see the `transitioning` effect above. */}
+      <div
+        style={
+          {
+            WebkitAppRegion: 'no-drag',
+            opacity: transitioning ? 0 : 1,
+            // Instant hide on the way out, soft fade on the way in.
+            // Setting transition to `none` while transitioning means
+            // the opacity 1 → 0 step is a hard snap (the user never
+            // perceives a fade-out); the `else` branch arms a smooth
+            // fade-in for the next render after `transitioning`
+            // flips back to false.
+            transition: transitioning ? 'none' : `opacity ${FADE_IN_MS}ms ease`,
+          } as React.CSSProperties
+        }
+      >
         <Tooltip content="Home" placement="bottom">
           <Link
             to="/"
