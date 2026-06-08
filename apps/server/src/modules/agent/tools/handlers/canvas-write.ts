@@ -96,7 +96,57 @@ export async function handleCanvasCommands(
       };
     }
     if (cmd.type === 'CONNECT_NODES' || cmd.type === 'SET_EDGE_STYLE') {
-      return cmd;
+      // Edges expose a `label` field (same provenance model as the
+      // node-level `label`). When the LLM provides a non-empty label
+      // without an explicit `labelSource`, stamp `'agent'` so the UI
+      // can distinguish AI-authored labels from user-authored ones.
+      // An explicit empty string clears the label — we leave it alone
+      // so the user-side merger can drop the field correctly.
+      const stampStyle = (
+        style: Record<string, unknown> | undefined,
+      ): Record<string, unknown> | undefined => {
+        if (!style || typeof style !== 'object') return style;
+        const hasLabelKey = Object.prototype.hasOwnProperty.call(
+          style,
+          'label',
+        );
+        if (!hasLabelKey) return style;
+        if (typeof style.label !== 'string' || style.label.length === 0) {
+          return style;
+        }
+        if (
+          'labelSource' in style &&
+          typeof style.labelSource === 'string' &&
+          style.labelSource.length > 0
+        ) {
+          return style;
+        }
+        return { ...style, labelSource: 'agent' as const };
+      };
+
+      if (cmd.type === 'CONNECT_NODES') {
+        const edges = cmd.edges as Array<Record<string, unknown>>;
+        return {
+          ...cmd,
+          edges: edges.map((edge) => {
+            const stamped = stampStyle(
+              edge.style as Record<string, unknown> | undefined,
+            );
+            return stamped === edge.style ? edge : { ...edge, style: stamped };
+          }),
+        };
+      }
+      // SET_EDGE_STYLE: each entry is `{ edge, style }`.
+      const patches = cmd.edges as Array<Record<string, unknown>>;
+      return {
+        ...cmd,
+        edges: patches.map((entry) => {
+          const stamped = stampStyle(
+            entry.style as Record<string, unknown> | undefined,
+          );
+          return stamped === entry.style ? entry : { ...entry, style: stamped };
+        }),
+      };
     }
     if (cmd.type === 'CREATE_QUESTION') {
       const raw = cmd as Record<string, unknown>;

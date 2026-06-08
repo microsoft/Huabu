@@ -150,7 +150,7 @@ export interface ChatState {
    */
   clearMessages: (
     canvasId?: string,
-    options?: { binding?: AgentBinding },
+    options?: { binding?: AgentBinding; lastAction?: AgentMode },
   ) => void;
 
   /**
@@ -313,6 +313,11 @@ export const useChatStore = create<ChatState>()(
         } = get();
         const newThreadId = createId('thread');
         const initialBinding = options?.binding ?? DEFAULT_BINDING;
+        // Seed the new thread with the caller-chosen mode so the
+        // persisted `lastAction` (which drives the ChatPanel mode
+        // toggle across refreshes) reflects the user's explicit
+        // pick from NewChatMenu rather than always snapping to 'ask'.
+        const initialLastAction: AgentMode = options?.lastAction ?? 'ask';
         const updatedThreads = canvasId
           ? { ...threadMap, [canvasId]: newThreadId }
           : { ...threadMap };
@@ -330,7 +335,7 @@ export const useChatStore = create<ChatState>()(
           messagesByThread: { ...messagesByThread, [newThreadId]: [] },
           threadId: newThreadId,
           historyLoadedThreads: nextLoaded,
-          lastAction: 'ask',
+          lastAction: initialLastAction,
           pendingAttachments: [],
           selectionAttachment: null,
           threadMap: updatedThreads,
