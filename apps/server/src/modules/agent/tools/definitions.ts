@@ -290,6 +290,12 @@ export const inspectEdgesParamsSchema = Type.Object({
       description: "Filter by line shape. Treats unset as 'bezier'.",
     }),
   ),
+  byLabel: Type.Optional(
+    Type.String({
+      description:
+        'Case-insensitive substring match on the edge label. Edges with no label never match. Useful for finding e.g. all edges labelled "blocks" or "depends on".',
+    }),
+  ),
   limit: Type.Optional(
     Type.Number({
       description: 'Maximum number of edges to return. Default: 50.',
@@ -300,7 +306,7 @@ export const inspectEdgesParamsSchema = Type.Object({
 export const inspectEdgesTool: ToolDefinition = {
   name: 'inspect_edges',
   label: 'Inspect Edges',
-  description: `Find canvas edges by predicate (id / endpoints / EdgeStyle attributes) and return each match with its full EdgeStyle. Predicates AND together; with no predicate, every edge is returned (subject to \`limit\`). Returns JSON: { count, total, truncated, edges: [{ id?, source, target, lineType?, lineStyle?, stroke?, strokeWidth?, direction? }] }. \`count\` is items in this response (≤ limit); \`total\` is the full match count before \`limit\` was applied — when \`truncated:true\`, raise \`limit\` to ≥\`total\` or refine your query. EdgeStyle fields are omitted when unset on disk (defaults: \`direction='none'\`, \`lineStyle='solid'\`, \`lineType='bezier'\`); the \`by*\` predicates apply these same defaults so a query like \`byLineStyle:'solid'\` matches edges with no explicit \`lineStyle\` too. Use this when you need styling info — outline only carries topology. Common flows: pass \`edgeIds\` from \`inspect_nodes({ connectedTo })\` via \`ids\`; or query \`byDirection:'forward'\` to find directed edges; or \`byLineStyle:['dashed','dotted']\` to find annotation edges.`,
+  description: `Find canvas edges by predicate (id / endpoints / EdgeStyle attributes) and return each match with its full EdgeStyle. Predicates AND together; with no predicate, every edge is returned (subject to \`limit\`). Returns JSON: { count, total, truncated, edges: [{ id?, source, target, lineType?, lineStyle?, stroke?, strokeWidth?, direction?, label?, labelSource? }] }. \`count\` is items in this response (≤ limit); \`total\` is the full match count before \`limit\` was applied — when \`truncated:true\`, raise \`limit\` to ≥\`total\` or refine your query. EdgeStyle fields are omitted when unset on disk (defaults: \`direction='none'\`, \`lineStyle='solid'\`, \`lineType='bezier'\`, no label); the \`by*\` predicates apply these same defaults so a query like \`byLineStyle:'solid'\` matches edges with no explicit \`lineStyle\` too. \`label\` is short free-text rendered at the edge midpoint; \`labelSource\` records who last set it ('user' / 'agent' / 'auto'). Use this when you need styling info — outline only carries topology. Common flows: pass \`edgeIds\` from \`inspect_nodes({ connectedTo })\` via \`ids\`; or query \`byDirection:'forward'\` to find directed edges; or \`byLabel:'blocks'\` to find labelled edges.`,
   parameters: inspectEdgesParamsSchema,
 };
 

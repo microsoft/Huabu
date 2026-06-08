@@ -57,6 +57,7 @@ import type {
   EdgeLineType,
   EdgeStrokeWidth,
   EdgeStyle,
+  LabelSource,
   SpatialNode,
 } from '@sediment/shared';
 
@@ -801,6 +802,12 @@ export interface InspectEdgesArgs {
   byDirection?: EdgeDirection | EdgeDirection[];
   byLineStyle?: EdgeLineStyle | EdgeLineStyle[];
   byLineType?: EdgeLineType | EdgeLineType[];
+  /**
+   * Substring match (case-insensitive) on the edge label. Useful for
+   * agents that want to find e.g. "all edges labelled 'blocks'".
+   * Edges with no label never match.
+   */
+  byLabel?: string;
 
   limit?: number;
 }
@@ -816,6 +823,10 @@ export interface InspectEdgeResult {
   stroke?: string;
   strokeWidth?: EdgeStrokeWidth | number;
   direction?: EdgeDirection;
+  /** Text rendered at the edge midpoint. Omitted when no label is set. */
+  label?: string;
+  /** Who last set the label. Omitted when no label is set. */
+  labelSource?: LabelSource;
 }
 
 export interface InspectEdgesResult {
@@ -891,6 +902,10 @@ export function inspectEdges(
         Array.isArray(args.byLineType) ? args.byLineType : [args.byLineType],
       )
     : null;
+  const labelNeedle =
+    typeof args.byLabel === 'string' && args.byLabel.length > 0
+      ? args.byLabel.toLowerCase()
+      : null;
 
   const matched: InspectEdgeResult[] = [];
   for (const e of bundle.rawEdges) {
@@ -926,6 +941,10 @@ export function inspectEdges(
       const lt = style?.lineType ?? 'bezier';
       if (!lineTypes.has(lt)) continue;
     }
+    if (labelNeedle) {
+      const label = typeof style?.label === 'string' ? style.label : '';
+      if (!label.toLowerCase().includes(labelNeedle)) continue;
+    }
 
     const out: InspectEdgeResult = { source: e.source, target: e.target };
     if (e.id) out.id = e.id;
@@ -935,6 +954,10 @@ export function inspectEdges(
       if (style.stroke !== undefined) out.stroke = style.stroke;
       if (style.strokeWidth !== undefined) out.strokeWidth = style.strokeWidth;
       if (style.direction) out.direction = style.direction;
+      if (typeof style.label === 'string' && style.label.length > 0) {
+        out.label = style.label;
+        if (style.labelSource) out.labelSource = style.labelSource;
+      }
     }
     matched.push(out);
   }

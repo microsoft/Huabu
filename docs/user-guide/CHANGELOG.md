@@ -4,6 +4,45 @@
 
 ---
 
+## 2026-06-08 · Edge 支持文本 Label（人 / AI 都能加）
+
+**What Changed**
+
+- **Edge 现在可以挂一段文本 Label**，会渲染在线段中点上、带浅色背景的圆角胶囊里。
+- **在边上双击直接编辑**：选中 edge → 中点出现虚线"Add label"占位 → **双击**进入编辑态、键入文字 → 单击别处（失焦）即提交保留；Enter 也提交，Shift+Enter 插入换行，Esc 撤销，清空即删除 Label。已有 Label 的边再次双击即可继续改字。Label 跟随画布缩放/平移，与边的路径始终对齐。
+- **查看态与编辑态共用同一个元素**（`contentEditable` 切换），字体 / 间距 / 边框 / 宽度逐像素一致 —— 进入编辑模式不会出现宽度跳变。
+- **超长文本自动换行**：胶囊最宽 200px，长文字会按词换行（`break-words` + `whitespace-pre-wrap`），不会撑出去把画布挤偏。
+- **背景色 / 边框色跟随边的选中态**：当 edge 选中或正在编辑时，Label 胶囊的背景和边框统一变成 info-bg / info border —— 与选中 edge 的高亮颜色一致；未选中时回到浅 surface 背景 + edge-default 边框，安静不抢戏。
+- 浮动工具栏不再有 Label 输入框（编辑入口完全搬到边本身）。
+- **AI 也能加 Label**：`CONNECT_NODES` / `SET_EDGE_STYLE` 命令的 `style` 参数里新增了 `label` 和 `labelSource` 字段。Agent 传非空 `label` 时，服务端会自动把 `labelSource` 标成 `'agent'`（除非显式给了别的值），与 node label 现有的 user / agent / auto 来源体系保持一致。
+- **`inspect_edges` 工具的返回值新增 `label` / `labelSource` 字段**，并新增 `byLabel` 谓词（大小写不敏感子串匹配），方便 agent 找"所有写着 'blocks' 的边"之类的场景。
+- Edge label 持久化在 `canvas.json` 的 `edges[].data.edgeStyle.label`，与其它 EdgeStyle 字段同路径，复制粘贴 edge 也会一并复制 Label。
+
+**Notes**
+
+- Label 上限 120 字符；超过会在提交时被截掉，避免被粘贴超长内容时把画布卡住。
+- 没有 Label 的边在未选中时保持视觉干净（不显示任何占位）；选中后才会浮出"Add label"虚线提示，避免画布上一堆空胶囊。
+- 清空 Label 时，`labelSource` 也会被一并清掉；下一次有人 / agent 重新设置时再重新打标记。
+- 旧的 edge 没有 Label 字段，不需要迁移；什么时候被设置过才会出现在 inspect 结果里。
+- 历史 edge 因为以前 `applyEdgeStyle` 给它们打了 `default` / `straight` / `smoothstep` 这些 React Flow 内建 type，本次同时把这三个内建 type 也接管到新的自定义 edge 组件，所以老 edge 也能在边上直接编辑 Label，不需要重建。
+
+---
+
+## 2026-06-08 · Chat 面板：刷新后记住上次选的模式（Chat / Agent）
+
+**What Changed**
+
+- **Chat 面板顶部的模式切换（Chat / Agent，对应内部的 `ask` / `operate`）现在会跨页面刷新保留**。之前刷新后总是回到 Chat，即使当前 thread 之前一直在用 Agent 模式跑；现在会读取持久化在本地的 `lastAction`，恢复到上次离开时的模式。
+- **从「+ New Chat」菜单里选 Agent / Chat 起新会话时，新 thread 会直接以所选模式起步**。原先内部状态会先被重置为 Chat、再被本地 React state 覆盖回 Agent，刷新一次就会暴露这个不一致；现在选什么就持久化什么，刷新表现一致。
+- **Intent 弹窗里选中一个意图自动跑 Agent 时**，模式切换条会立刻并持久地变为 Agent，刷新后仍然停留在 Agent。
+
+**Notes**
+
+- 这是一次纯 UX 修复，不影响消息历史或 agent 绑定逻辑。1 thread = 1 binding 的约束没有变。
+- 模式按"上次使用"全局记忆（与 zustand `persist` 里其他字段一致），不是按 canvas / thread 分别记。在 canvas A 里切到 Agent 后，回到 canvas B 也会先显示 Agent；点 + 新建一条 Chat 会话就会恢复 Chat 模式。
+
+---
+
 ## 2026-06-05 · Web 节点 Preview：自动判断 Live / Reader，去掉切换条
 
 **What Changed**

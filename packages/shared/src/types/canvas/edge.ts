@@ -4,6 +4,7 @@
  */
 
 import type { AccentToken } from './color.js';
+import type { LabelSource } from './node.js';
 
 /**
  * Allowed line shapes for edges. The `as const` array is the single source
@@ -38,4 +39,6 @@ export interface EdgeStyle {
   stroke?: AccentToken | (string & {});
   strokeWidth?: EdgeStrokeWidth | number;
   direction?: EdgeDirection;
+  label?: string;
+  labelSource?: LabelSource;
 }

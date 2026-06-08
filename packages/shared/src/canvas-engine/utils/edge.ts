@@ -186,6 +186,10 @@ export function applyEdgeStyle(edge: Edge, style?: EdgeStyle): Edge {
   const markerColor = resolvedStroke ? { color: resolvedStroke } : {};
   const arrowMarker = { type: 'arrowclosed' as const, ...markerColor };
 
+  // The `label` field is rendered by the custom `LabelledEdge` web
+  // component (it reads `data.edgeStyle.label`), not by React Flow's
+  // built-in SVG label — setting `edge.label` here would render twice.
+
   return {
     ...edge,
     type: rfType ?? edge.type,
