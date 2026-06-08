@@ -222,6 +222,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   );
   const addNode = useCanvasStore((state) => state.addNode);
   const addNodes = useCanvasStore((state) => state.addNodes);
+  const moveNoteExcerpt = useCanvasStore((state) => state.moveNoteExcerpt);
   const setRfInstance = useCanvasStore((state) => state.setRfInstance);
   const setCanvasWrapper = useCanvasStore((state) => state.setCanvasWrapper);
   const setViewport = useCanvasStore((state) => state.setViewport);
@@ -622,7 +623,10 @@ export const Canvas: React.FC<CanvasProps> = ({
         if (!isSediment && !hasFiles && !hasUri && !hasText) return;
         e.preventDefault();
         e.stopPropagation();
-        e.dataTransfer.dropEffect = 'copy';
+        // Shift on an internal Sediment drag means MOVE (source will be
+        // emptied of the dragged range); without Shift it's a COPY.
+        // External drops (files, URLs) are always copies.
+        e.dataTransfer.dropEffect = isSediment && e.shiftKey ? 'move' : 'copy';
       }}
       onDrop={(e) => {
         e.preventDefault();
@@ -667,7 +671,7 @@ export const Canvas: React.FC<CanvasProps> = ({
           }
 
           if (payload.kind === 'note') {
-            newNodeInput = {
+            const newNoteInput: AddNodeInput = {
               nodeType: 'note',
               placementPoint: dropPos,
               data: {
@@ -675,6 +679,27 @@ export const Canvas: React.FC<CanvasProps> = ({
                 origin: payload.origin,
               },
             };
+
+            // Shift = MOVE (source loses the dragged range); plain
+            // drag = COPY. MOVE additionally needs a source node id
+            // and a pre-computed post-MOVE snapshot, both absent when
+            // dragging from non-editable surfaces (AI chat cards).
+            const { sourceNodeId, sourceContentAfterMove } = payload.data;
+            const isMove =
+              e.shiftKey &&
+              sourceNodeId !== undefined &&
+              sourceContentAfterMove !== undefined;
+
+            if (isMove) {
+              moveNoteExcerpt({
+                sourceNodeId,
+                sourceContentAfterMove,
+                newNote: newNoteInput,
+              });
+            } else {
+              addNode(newNoteInput);
+            }
+            return;
           }
 
           if (payload.kind === 'image') {

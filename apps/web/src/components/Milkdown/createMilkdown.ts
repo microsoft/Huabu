@@ -102,6 +102,8 @@ export interface MilkdownDragPayload {
    * block (callers use them to build a stacked drag preview).
    */
   blockElements: HTMLElement[];
+  /** Resolved doc range covered by the drag, in ProseMirror positions. */
+  range: MilkdownDragRange;
 }
 
 /**
@@ -158,6 +160,13 @@ export interface MilkdownInstance {
    * Returns `null` when neither path produces content.
    */
   getDragPayload(range?: MilkdownDragRange | null): MilkdownDragPayload | null;
+
+  /**
+   * Return the markdown the doc would hold if `range` were deleted —
+   * WITHOUT mutating the editor. Returns the current full markdown
+   * when `range` is null or empty.
+   */
+  getDocAfterRangeRemoved(range: MilkdownDragRange | null): string;
 
   // ---------- Phase 4 (block provenance) ----------
 
@@ -1030,7 +1039,7 @@ export async function createMilkdown(
             },
           );
 
-          result = { markdown, blockElements };
+          result = { markdown, blockElements, range };
           return;
         }
 
@@ -1050,9 +1059,33 @@ export async function createMilkdown(
             ? domAtPos
             : (view.dom as HTMLElement);
 
-        result = { markdown, blockElements: [element] };
+        result = {
+          markdown,
+          blockElements: [element],
+          range: { from: selection.from, to: selection.to },
+        };
       });
       return result;
+    },
+
+    getDocAfterRangeRemoved: (range) => {
+      let result: string | null = null;
+      crepe.editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        const serializer = ctx.get(serializerCtx);
+        const doc = view.state.doc;
+
+        if (!range || range.from >= range.to) {
+          result = serializer(doc);
+          return;
+        }
+
+        // Build the post-delete doc off an undispatched transaction;
+        // the live editor state stays untouched.
+        const tr = view.state.tr.delete(range.from, range.to);
+        result = serializer(tr.doc);
+      });
+      return result ?? '';
     },
 
     // ---------- Phase 4 helpers ----------

@@ -16,6 +16,11 @@ export type NoteDragPayload = {
   kind: 'note';
   data: {
     content: string;
+    // Source note id + post-MOVE markdown snapshot, present when the
+    // drag originated from an editable note (NotePreview). Required
+    // for the Shift+drop MOVE path.
+    sourceNodeId?: string;
+    sourceContentAfterMove?: string;
   };
 };
 
@@ -190,10 +195,29 @@ export const getSedimentPayload = (dt: DataTransfer): DragPayload | null => {
       const content = (data as { content?: unknown }).content;
       if (typeof content !== 'string' || content.trim() === '') return null;
 
+      const sourceNodeIdRaw = (data as { sourceNodeId?: unknown }).sourceNodeId;
+      const sourceContentAfterMoveRaw = (
+        data as { sourceContentAfterMove?: unknown }
+      ).sourceContentAfterMove;
+      const sourceNodeId =
+        typeof sourceNodeIdRaw === 'string' && sourceNodeIdRaw.trim() !== ''
+          ? sourceNodeIdRaw
+          : undefined;
+      // Accept empty string here — user may have dragged out the
+      // entire note, leaving the source legitimately empty.
+      const sourceContentAfterMove =
+        typeof sourceContentAfterMoveRaw === 'string'
+          ? sourceContentAfterMoveRaw
+          : undefined;
+
       return {
         kind: 'note',
         data: {
           content,
+          ...(sourceNodeId !== undefined ? { sourceNodeId } : {}),
+          ...(sourceContentAfterMove !== undefined
+            ? { sourceContentAfterMove }
+            : {}),
         },
         dragId: normalizedDragId,
         origin: normalizedOrigin,

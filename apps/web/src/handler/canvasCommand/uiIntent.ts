@@ -14,6 +14,7 @@ import {
   resolveDisconnectEdge,
   resolveGroupRectIntoFrame,
   resolveGroupSelectionIntoFrame,
+  resolveMoveNoteExcerpt,
   resolveNodeDragStop,
   resolvePasteClipboard,
   resolveSelectNodes,
@@ -114,6 +115,16 @@ export type CanvasUiIntent =
   | {
       type: 'ADD_NODES';
       inputs: AddNodeInput[];
+    }
+  | {
+      // Drag-MOVE of an excerpt: atomically creates `newNote` AND
+      // overwrites the source note's content with the pre-computed
+      // `sourceContentAfterMove`, all in a single undo entry. The
+      // COPY variant of the same gesture goes through ADD_NODES.
+      type: 'MOVE_NOTE_EXCERPT';
+      sourceNodeId: string;
+      sourceContentAfterMove: string;
+      newNote: AddNodeInput;
     }
   | { type: 'DELETE_NODES'; nodeIds: string[] }
   | { type: 'UPDATE_NODE_DATA'; nodeId: string; patch: Record<string, unknown> }
@@ -259,6 +270,8 @@ export function resolveUiIntent(
       return resolveReorderSelected(intent, ui);
     case 'ADD_NODES':
       return resolveAddNodes(intent, ui);
+    case 'MOVE_NOTE_EXCERPT':
+      return resolveMoveNoteExcerpt(intent, ui);
     case 'DELETE_NODES':
       return resolveDeleteNodes(intent, ui);
     case 'UPDATE_NODE_DATA':
