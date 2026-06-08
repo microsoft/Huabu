@@ -37,6 +37,7 @@ import { useSketchHoverRouting } from '@/hooks/useSketchHoverRouting';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
 import { NodeToolbar } from './CanvasToolbar.tsx';
+import { LabelledEdge } from './edges/LabelledEdge.tsx';
 import { EdgeStyleToolbar } from './FloatingToolbars/EdgeStyleToolbar.tsx';
 import { MultiSelectToolbar } from './FloatingToolbars/MultiSelectToolbar.tsx';
 import { IntentPopover } from './IntentPopover.tsx';
@@ -74,6 +75,22 @@ const nodeTypes = {
   frame: FrameNode,
   sketch: SketchNode,
   question: QuestionNode,
+} as const;
+
+/**
+ * Override every React Flow edge type with our single `LabelledEdge`
+ * component. Doing so for the built-in names (`default` / `straight` /
+ * `smoothstep`) — not just our own `labelled` key — means edges loaded
+ * from disk that pre-date this change still render with the editable
+ * HTML label, because `applyEdgeStyle` historically stamped one of
+ * those built-in type names onto each edge. The actual line shape is
+ * picked inside the component from `data.edgeStyle.lineType`.
+ */
+const edgeTypes = {
+  default: LabelledEdge,
+  straight: LabelledEdge,
+  smoothstep: LabelledEdge,
+  step: LabelledEdge,
 } as const;
 
 /**
@@ -746,6 +763,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         onNodeDrag={onNodeDrag}
         onNodeDragStop={onNodeDragStop}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         onInit={(instance) => {
           rfInstanceRef.current = instance;
           setRfInstance(instance);

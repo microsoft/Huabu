@@ -3,11 +3,17 @@ import { routes } from './_routes';
 
 import type {
   WebLookupQuery,
+  WebPageResponse,
   WebPreviewResponse,
   WebReaderResponse,
 } from '@sediment/shared';
 
-export type { WebLookupQuery, WebPreviewResponse, WebReaderResponse };
+export type {
+  WebLookupQuery,
+  WebPageResponse,
+  WebPreviewResponse,
+  WebReaderResponse,
+};
 
 export async function getWebPreview(
   query: WebLookupQuery,
@@ -24,5 +30,14 @@ export async function getWebReader(
   return apiFetch<WebReaderResponse>(
     routes.webReader(query.canvasId, query.nodeId),
     { fallbackMessage: 'Failed to fetch web reader content' },
+  );
+}
+
+export async function getWebPage(
+  query: WebLookupQuery,
+): Promise<WebPageResponse> {
+  return apiFetch<WebPageResponse>(
+    routes.webPage(query.canvasId, query.nodeId),
+    { fallbackMessage: 'Failed to resolve web page source' },
   );
 }

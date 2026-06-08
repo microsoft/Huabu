@@ -27,6 +27,17 @@ export const EdgeLineTypeSchema = literalUnion(EDGE_LINE_TYPES);
 export const EdgeLineStyleSchema = literalUnion(EDGE_LINE_STYLES);
 export const EdgeDirectionSchema = literalUnion(EDGE_DIRECTIONS);
 
+/**
+ * Who last set the edge `label`. Mirrors the node-level `labelSource`.
+ * The agent rarely needs to set this directly — the
+ * `canvas_commands` handler auto-stamps `'agent'` whenever an LLM-issued
+ * `CONNECT_NODES` / `SET_EDGE_STYLE` carries a non-empty `label` — but
+ * the field is exposed here so the agent can explicitly preserve a
+ * pre-existing source (e.g. when only restyling color, leave
+ * `labelSource` absent and the existing value is preserved).
+ */
+export const EdgeLabelSourceSchema = literalUnion(['auto', 'user', 'agent']);
+
 /** Visual style applied to an edge (all fields optional). */
 export const EdgeStyleSchema = Type.Object({
   lineType: Type.Optional(EdgeLineTypeSchema),
@@ -34,6 +45,14 @@ export const EdgeStyleSchema = Type.Object({
   stroke: Type.Optional(PaletteColorSchema),
   strokeWidth: Type.Optional(StrokeWidthSchema),
   direction: Type.Optional(EdgeDirectionSchema),
+  label: Type.Optional(
+    Type.String({
+      description:
+        'Short text label rendered at the edge midpoint (e.g. "leads to", "blocks"). Pass an empty string to clear an existing label. Keep it under ~24 chars so it stays legible at the default font size.',
+      maxLength: 120,
+    }),
+  ),
+  labelSource: Type.Optional(EdgeLabelSourceSchema),
 });
 
 /** Single edge entry passed to `CONNECT_NODES`. */

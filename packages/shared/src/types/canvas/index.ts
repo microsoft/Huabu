@@ -64,6 +64,7 @@ export type {
   QuestionNodeData,
   QuestionNodeStatus,
   QuestionInput,
+  LabelSource,
   NodeData,
 } from './node.js';
 

@@ -50,7 +50,13 @@ interface ChatPanelProps {
 
 export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const [input, setInput] = useState('');
-  const [mode, setMode] = useState<AgentMode>('ask');
+  // Mode is derived from the store's persisted `lastAction` so that
+  // page refreshes restore the previously-used mode for this thread
+  // (zustand `persist` writes `lastAction` to localStorage). It also
+  // stays in sync with `useAgentStream.startStream`, which calls
+  // `setLastAction(agentMode)` on every send.
+  const mode = useChatStore((state) => state.lastAction);
+  const setLastAction = useChatStore((state) => state.setLastAction);
 
   // Agent stream hook — manages streaming and loading state
   const { isLoading, setIsLoading, startStream, stopStream } = useAgentStream();
@@ -371,7 +377,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       // Ensure the right panel is visible before running the intent.
       usePanelStore.getState().requestOpenRightPanel();
       // Switch mode to operate
-      setMode('operate');
+      setLastAction('operate');
 
       // Run operate turn, then upsert execution outcome on the episode.
       const writtenCanvasId = useCanvasStore.getState().canvasId || undefined;
@@ -414,7 +420,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     return () => {
       useIntentStore.getState()._setOnIntentChosen(null);
     };
-  }, [startStream]);
+  }, [startStream, setLastAction]);
 
   const handleIntentReselect = useCallback(
     (messageId: string, intent: string) => {
@@ -470,20 +476,19 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     );
   };
 
-  // Atomic "reset thread + apply (mode, binding)". The mode is local
-  // React state so it lands in the same render as the store update
-  // (zustand commits the binding inside `clearMessages`); the user
-  // never sees an intermediate "internal-binding, old-mode" frame.
+  // Atomic "reset thread + apply (mode, binding)". Both the mode
+  // and binding land in the same zustand commit inside
+  // `clearMessages`, so the user never sees an intermediate frame
+  // with the old mode or a stale internal binding.
   const handleStartNewChat = useCallback(
     (choice: NewChatChoice) => {
       if (isLoading) return;
-      setMode(choice.mode);
-      clearMessages(
-        canvasId || undefined,
-        choice.binding.kind === 'external'
+      clearMessages(canvasId || undefined, {
+        ...(choice.binding.kind === 'external'
           ? { binding: choice.binding }
-          : undefined,
-      );
+          : {}),
+        lastAction: choice.mode,
+      });
     },
     [isLoading, canvasId, clearMessages],
   );
