@@ -1,4 +1,4 @@
-import { resolve } from 'node:path';
+import { join } from 'node:path';
 
 import { AgentletServer } from '@agentlet/server';
 
@@ -51,7 +51,11 @@ export function mountAgentletServer(
   if (instance) return instance;
 
   const daemonAuth = getDaemonAuth();
-  const storeDir = resolve(getDataDir(), 'agentlet');
+  // Global, not per-canvas: the AgentletServer is a singleton whose
+  // sessions.db spans every canvas, so it lives in the server-level
+  // data directory (alongside canvas.sqlite, llm-config.json, etc.)
+  // rather than inside a workspace's per-canvas .history/chat/ tree.
+  const storeDir = join(getDataDir(), 'agentlet');
 
   const server = new AgentletServer({
     storeDir,
