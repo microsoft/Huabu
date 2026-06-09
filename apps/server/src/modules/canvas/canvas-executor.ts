@@ -329,9 +329,32 @@ export async function executeOnServer(
       ...(r.reason ? { reason: r.reason } : {}),
     }));
 
+    // Detect order-only mutations that `diffCanvasState` cannot see.
+    //
+    // `diffCanvasState` is id-keyed: it returns INSERT/DELETE/REPLACE rows
+    // by comparing id sets and per-id reference identity. Commands whose
+    // only effect is to reshuffle the nodes/edges array (today only
+    // `REORDER_NODES`, which rebuilds the array with the same refs in a
+    // new order) therefore emit zero structural deltas. Without this
+    // guard the no-op fast path below would skip persistence entirely,
+    // leaving the agent with `applied: true` while canvas.json on disk
+    // is unchanged.
+    //
+    // We do NOT synthesise a delta — Phase A has no order-aware delta
+    // type, and cross-tab broadcast (M3) is not shipped yet. We just
+    // fall through to the persistence branch so canvas.json and the
+    // delta-log version both reflect that something happened. Catch-up
+    // clients on M3 will see the version bump and need to refetch the
+    // full canvas; that's an acceptable Phase-A trade-off.
+    const orderChanged =
+      prestateNodes.length !== finalNodes.length ||
+      prestateEdges.length !== finalEdges.length ||
+      prestateNodes.some((n, i) => n.id !== finalNodes[i]?.id) ||
+      prestateEdges.some((e, i) => e.id !== finalEdges[i]?.id);
+
     // No-op fast path. Returning early preserves the invariant that
     // `toVersion === fromVersion` IFF no row was appended to the log.
-    if (deltas.length === 0) {
+    if (deltas.length === 0 && !orderChanged) {
       return {
         canvasId,
         fromVersion,
