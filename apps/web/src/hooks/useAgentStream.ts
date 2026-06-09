@@ -301,7 +301,9 @@ function animateAgentBatch(commands: CanvasCommand[]): void {
  * Returns the same `{ commands, changes }` shape as before so the
  * downstream tool-card wiring stays untouched.
  */
-function applyCanvasCommandsFromToolResult(toolResult: string | undefined): {
+export function applyCanvasCommandsFromToolResult(
+  toolResult: string | undefined,
+): {
   commands: CanvasCommand[];
   changes: ReturnType<typeof snapshotAndExtractChanges>;
 } | null {
