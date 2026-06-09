@@ -119,36 +119,113 @@ function getDataFilePath(filename: string): string {
 
 const CONFIG_FILE = getDataFilePath('llm-config.json');
 
+/**
+ * Effective active configuration assembled from the persisted store —
+ * the shape consumed by `buildModel` / `resolveApiKey` etc.
+ */
 interface PersistedConfig {
   provider: string;
   model: string;
   apiKey?: string;
   baseUrl?: string;
+  apiVersion?: string;
 }
 
-function loadPersistedConfig(): PersistedConfig | null {
+/**
+ * Per-provider persisted fields. Stored in a map keyed by provider id so
+ * switching providers doesn't wipe the previous provider's credentials
+ * (e.g. switching from Azure → OpenAI → Azure restores the Azure
+ * endpoint / deployment / key / api version exactly as you left them).
+ */
+interface ProviderPersisted {
+  model?: string;
+  apiKey?: string;
+  baseUrl?: string;
+  apiVersion?: string;
+}
+
+/**
+ * On-disk shape of `llm-config.json`. The optional top-level `active`
+ * tracks which provider is currently selected.
+ */
+interface PersistedStore {
+  active?: string;
+  providers: Record<string, ProviderPersisted>;
+}
+
+/**
+ * Load + migrate the persisted store. Migrates the legacy single-config
+ * shape `{ provider, model, apiKey, baseUrl, apiVersion }` into the new
+ * map shape transparently; the migrated shape is only written back on
+ * the next `setLLMConfig` call.
+ */
+function loadPersistedStore(): PersistedStore {
   try {
-    if (existsSync(CONFIG_FILE)) {
-      const raw = readFileSync(CONFIG_FILE, 'utf-8');
-      return JSON.parse(raw) as PersistedConfig;
+    if (!existsSync(CONFIG_FILE)) return { providers: {} };
+    const raw = readFileSync(CONFIG_FILE, 'utf-8');
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+
+    // Legacy shape — single active provider, fields at top level.
+    if (
+      typeof parsed.provider === 'string' &&
+      typeof parsed.providers !== 'object'
+    ) {
+      const provider = parsed.provider;
+      const entry: ProviderPersisted = {};
+      if (typeof parsed.model === 'string') entry.model = parsed.model;
+      if (typeof parsed.apiKey === 'string') entry.apiKey = parsed.apiKey;
+      if (typeof parsed.baseUrl === 'string') entry.baseUrl = parsed.baseUrl;
+      if (typeof parsed.apiVersion === 'string') {
+        entry.apiVersion = parsed.apiVersion;
+      }
+      return { active: provider, providers: { [provider]: entry } };
     }
+
+    const providers =
+      (parsed.providers as Record<string, ProviderPersisted> | undefined) ?? {};
+    const store: PersistedStore = { providers };
+    if (typeof parsed.active === 'string') store.active = parsed.active;
+    return store;
   } catch {
     // Corrupted or missing file — fall through
+    return { providers: {} };
   }
-  return null;
 }
 
-function savePersistedConfig(cfg: PersistedConfig): void {
+function savePersistedStore(store: PersistedStore): void {
   const dir = dirname(CONFIG_FILE);
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
-  writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2), 'utf-8');
+  writeFileSync(CONFIG_FILE, JSON.stringify(store, null, 2), 'utf-8');
   try {
     chmodSync(CONFIG_FILE, 0o600);
   } catch {
     // Non-critical — best effort on platforms that support it
   }
+}
+
+/** Project a persisted store + provider id down to the effective `PersistedConfig`. */
+function buildPersistedConfig(
+  store: PersistedStore,
+  providerId: string,
+): PersistedConfig | null {
+  const entry = store.providers[providerId];
+  if (!entry) return null;
+  return {
+    provider: providerId,
+    model: entry.model ?? '',
+    ...(entry.apiKey ? { apiKey: entry.apiKey } : {}),
+    ...(entry.baseUrl ? { baseUrl: entry.baseUrl } : {}),
+    ...(entry.apiVersion ? { apiVersion: entry.apiVersion } : {}),
+  };
+}
+
+/** Active persisted config (or `null` if no provider has ever been configured). */
+function loadPersistedConfig(): PersistedConfig | null {
+  const store = loadPersistedStore();
+  if (!store.active) return null;
+  return buildPersistedConfig(store, store.active);
 }
 
 // ==================== Runtime State ====================
@@ -224,10 +301,14 @@ function buildModel(cfg: PersistedConfig): Model<Api> {
   const api = providerInfo?.api ?? 'openai-completions';
   let baseUrl = cfg.baseUrl ?? providerInfo?.defaultBaseUrl ?? '';
 
-  // Azure-specific: append /openai to endpoint
+  // Azure: fall back to legacy env var endpoint when no persisted baseUrl.
+  // pi-ai's `normalizeAzureBaseUrl` will append `/openai/v1` as needed, so
+  // we deliberately pass the raw endpoint without our own `/openai` suffix.
   if (cfg.provider === 'azure-openai' && !cfg.baseUrl) {
-    const endpoint = process.env.AZURE_OPENAI_API_ENDPOINT ?? '';
-    baseUrl = endpoint.replace(/\/+$/, '') + '/openai';
+    const endpoint = process.env.AZURE_OPENAI_API_ENDPOINT;
+    if (endpoint) {
+      baseUrl = endpoint.replace(/\/+$/, '');
+    }
   }
 
   let model: Model<Api> = {
@@ -338,13 +419,15 @@ export function getModelsForProvider(providerId: string): LLMModelInfo[] {
         },
       ];
     }
-    // Check persisted config
-    const persisted = loadPersistedConfig();
-    if (persisted?.provider === 'azure-openai') {
+    // Fall back to the saved Azure entry regardless of which provider is
+    // currently active — keeps the deployment visible after switching away
+    // and back.
+    const azureEntry = loadPersistedStore().providers['azure-openai'];
+    if (azureEntry?.model) {
       return [
         {
-          id: persisted.model,
-          name: `Azure: ${persisted.model}`,
+          id: azureEntry.model,
+          name: `Azure: ${azureEntry.model}`,
           provider: 'azure-openai',
           reasoning: false,
           input: ['text', 'image'],
@@ -384,6 +467,7 @@ export async function getLLMConfig(): Promise<LLMConfig> {
       model: cfg.model,
       authenticated,
       baseUrl: cfg.baseUrl,
+      apiVersion: cfg.apiVersion,
     };
   } catch (err) {
     console.warn(
@@ -400,7 +484,12 @@ export async function getLLMConfig(): Promise<LLMConfig> {
 
 /**
  * Update the active LLM provider/model configuration.
- * Clears cached model so the next call uses the new config.
+ *
+ * Persisted as a per-provider map (see {@link PersistedStore}): switching
+ * to a different provider keeps the previous provider's saved fields on
+ * disk, so switching back later restores its model / endpoint / api
+ * version / key without re-entry. Within the same provider, fields
+ * omitted from `update` keep their previously-saved values.
  *
  * Returns an authoritative `authenticated` flag for OAuth providers —
  * see {@link getLLMConfig} for the rationale.
@@ -408,22 +497,47 @@ export async function getLLMConfig(): Promise<LLMConfig> {
 export async function setLLMConfig(
   update: LLMConfigUpdate,
 ): Promise<LLMConfig> {
-  const persisted: PersistedConfig = {
-    provider: update.provider,
-    model: update.model,
-    ...(update.apiKey ? { apiKey: update.apiKey } : {}),
-    ...(update.baseUrl ? { baseUrl: update.baseUrl } : {}),
-  };
+  const store = loadPersistedStore();
+  const existingEntry: ProviderPersisted =
+    store.providers[update.provider] ?? {};
 
-  // Merge with existing persisted apiKey if not provided in this update
-  if (!update.apiKey) {
-    const existing = loadPersistedConfig();
-    if (existing?.provider === update.provider && existing.apiKey) {
-      persisted.apiKey = existing.apiKey;
+  // Resolve the effective model: explicit > previously saved > first
+  // built-in default (so the first time you switch to a registry-backed
+  // provider you get a working model id without having to type one).
+  let resolvedModel = update.model || existingEntry.model || '';
+  if (!resolvedModel) {
+    const providerInfo = getProviderCatalog().find(
+      (p) => p.id === update.provider,
+    );
+    if (providerInfo?.builtIn) {
+      const models = getModelsForProvider(update.provider);
+      if (models.length > 0) resolvedModel = models[0].id;
     }
   }
 
-  savePersistedConfig(persisted);
+  // Build the merged entry. `apiKey` / `baseUrl` / `apiVersion` semantics:
+  // omitted (undefined) → keep previous; empty string → clear.
+  const entry: ProviderPersisted = { ...existingEntry, model: resolvedModel };
+  if (update.apiKey !== undefined) {
+    if (update.apiKey) entry.apiKey = update.apiKey;
+    else delete entry.apiKey;
+  }
+  if (update.baseUrl !== undefined) {
+    if (update.baseUrl) entry.baseUrl = update.baseUrl;
+    else delete entry.baseUrl;
+  }
+  if (update.apiVersion !== undefined) {
+    if (update.apiVersion) entry.apiVersion = update.apiVersion;
+    else delete entry.apiVersion;
+  }
+  store.providers[update.provider] = entry;
+  store.active = update.provider;
+  savePersistedStore(store);
+
+  const persisted = buildPersistedConfig(store, update.provider) ?? {
+    provider: update.provider,
+    model: resolvedModel,
+  };
   activeConfig = persisted;
   cachedModel = null;
   cachedApiKey = null;
@@ -441,6 +555,7 @@ export async function setLLMConfig(
     model: persisted.model,
     authenticated,
     baseUrl: persisted.baseUrl,
+    apiVersion: persisted.apiVersion,
   };
 }
 
@@ -492,6 +607,23 @@ export async function ensureApiKey(): Promise<string> {
   return key;
 }
 
+function getProviderSpecificOptions(): Record<string, unknown> {
+  const cfg = activeConfig;
+  if (!cfg) return {};
+
+  if (cfg.provider === 'azure-openai') {
+    const opts: Record<string, unknown> = {};
+    if (cfg.baseUrl) opts.azureBaseUrl = cfg.baseUrl;
+    if (cfg.apiVersion) opts.azureApiVersion = cfg.apiVersion;
+    // pi-ai uses model.id as the deployment name by default; passing it
+    // explicitly is harmless and keeps intent obvious for future readers.
+    if (cfg.model) opts.azureDeploymentName = cfg.model;
+    return opts;
+  }
+
+  return {};
+}
+
 /**
  * Stream LLM responses with the active model.
  */
@@ -503,6 +635,7 @@ export async function llmStream(
   const apiKey = await ensureApiKey();
   return piStream(model, context, {
     apiKey,
+    ...getProviderSpecificOptions(),
     ...options,
   });
 }
@@ -518,6 +651,7 @@ export async function llmComplete(
   const apiKey = await ensureApiKey();
   return piComplete(model, context, {
     apiKey,
+    ...getProviderSpecificOptions(),
     ...options,
   });
 }

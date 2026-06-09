@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import { ChevronDown, ChevronRight, Lock, Unlock } from 'lucide-react';
+import { ChevronDown, ChevronRight, Lock, Plus, Unlock } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 
 import { Button } from '../../Common/Button';
@@ -28,6 +28,11 @@ export interface TreeRowItemProps extends React.HTMLAttributes<HTMLDivElement> {
   // Lock state
   isLocked?: boolean;
   onToggleLock?: () => void;
+
+  // External (not-yet-imported) markdown file: greys out the row,
+  // disables rename, and shows a hover "add to canvas" button.
+  isExternal?: boolean;
+  onImport?: () => void;
 
   // Interaction overrides
   onClick?: (e: React.MouseEvent) => void;
@@ -62,6 +67,8 @@ export const TreeRowItem = React.memo(
     onToggleCollapse,
     isLocked = false,
     onToggleLock,
+    isExternal = false,
+    onImport,
     onClick,
     onDoubleClick,
     editable = false,
@@ -82,6 +89,11 @@ export const TreeRowItem = React.memo(
     }, [label]);
 
     const handleDoubleClick = (e: React.MouseEvent) => {
+      if (isExternal) {
+        e.stopPropagation();
+        onImport?.();
+        return;
+      }
       if (editable) {
         e.stopPropagation();
         setEditValue(label);
@@ -125,6 +137,11 @@ export const TreeRowItem = React.memo(
     const handleToggleLock = (e: React.MouseEvent) => {
       e.stopPropagation();
       onToggleLock?.();
+    };
+
+    const handleImport = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      onImport?.();
     };
 
     const bgColor = isSelected
@@ -183,7 +200,12 @@ export const TreeRowItem = React.memo(
           </span>
 
           {/* Node type icon */}
-          <span className="text-fg-muted pointer-events-none mr-1 flex shrink-0 items-center">
+          <span
+            className={clsx(
+              'pointer-events-none mr-1 flex shrink-0 items-center',
+              isExternal ? 'text-fg-subtle' : 'text-fg-muted',
+            )}
+          >
             {icon}
           </span>
 
@@ -201,15 +223,33 @@ export const TreeRowItem = React.memo(
               className="bg-surface h-6 w-full min-w-0 flex-1 rounded-sm border px-1 text-xs outline-none"
             />
           ) : (
-            <span className="text-fg-default truncate select-none">
+            <span
+              className={clsx(
+                'truncate select-none',
+                isExternal ? 'text-fg-subtle italic' : 'text-fg-default',
+              )}
+            >
               {label}
             </span>
           )}
 
           {/* Action buttons on the right */}
           <div className="ml-auto flex shrink-0 items-center gap-1">
+            {isExternal && onImport && (
+              <Button
+                variant="ghost"
+                iconOnly
+                size="sm"
+                onClick={handleImport}
+                className="hover:text-fg-default text-fg-subtle opacity-0 transition-opacity group-hover:opacity-100"
+                title="Add to canvas"
+                aria-label="Add to canvas"
+              >
+                <Plus />
+              </Button>
+            )}
             {/* Lock button - always visible if locked, hover visible if unlocked */}
-            {onToggleLock && (
+            {!isExternal && onToggleLock && (
               <Button
                 variant="ghost"
                 iconOnly

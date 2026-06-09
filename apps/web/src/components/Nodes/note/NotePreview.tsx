@@ -381,10 +381,20 @@ export const NotePreview = ({
         {
           kind: 'note',
           origin,
-          data: { content: trimmed },
+          data: {
+            content: trimmed,
+            ...(id
+              ? {
+                  sourceNodeId: id,
+                  sourceContentAfterMove: event.sourceContentAfterMove,
+                }
+              : {}),
+          },
         };
 
-      setDragPayload(event.nativeEvent as unknown as React.DragEvent, payload);
+      setDragPayload(event.nativeEvent as unknown as React.DragEvent, payload, {
+        effectAllowed: 'copyMove',
+      });
     },
     [id],
   );

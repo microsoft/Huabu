@@ -18,6 +18,105 @@
 
 ---
 
+## 2026-06-08 · 边 label 的交互与外观调整
+
+**What Changed**
+
+- **选中边后会在边中点显示一个实线 label 占位框**，框内用浅色 "Add label" 提示文字。占位框和真正写有 label 的框是同一个 DOM 节点（占位文字由 CSS `::before` 渲染），所以两种状态下框的尺寸完全一致，不会"选中后变形"。
+- **进入编辑的两种方式**：
+  - 边选中、label 还没写时 —— 单击占位框 → 直接 focus 编辑；
+  - 任何状态下 —— 双击边本身（不是节点 / 空白处） → 一步进入编辑。已有内容的 label 框保留"单击不动 / 双击编辑"，避免在画布上选边时误触清光文字。
+- **Label 框的边框样式跟随它所属的边**：边框颜色 = 边的 stroke 颜色，边框粗细 = 边的 strokeWidth（在 1–3px 之间 clamp，避免 8px 粗边带出 8px 粗框）；选中 / 编辑时统一切到 `--color-info` 蓝（和 React Flow 选中边的描边颜色一致）。
+- **边样式工具条不再压住 label 框**：浮动工具条相对边中点的偏移从 12px 提到 36px，工具条和 label 框之间始终有清晰的留白。
+- **Label 框宽度自适应内容**，超过 ~120px 才折行（用 `whitespace-pre-wrap break-words`），不会再被钉死成长条；Shift+Enter 仍可强制换行。
+
+**Notes**
+
+- 单击进入编辑只在"占位框"状态生效（即边选中且 label 仍为空）。如果 label 已经有文字，单击只保持选中状态。
+- 双击进入编辑依赖 React Flow 的 `onEdgeDoubleClick`，通过 `sediment:edit-edge-label` window 事件通知对应的 `LabelledEdge` 进入编辑模式；点到节点 / 空白处行为完全不受影响。
+- 占位文字"Add label"由 `.sediment-edge-label:empty:not(:focus)::before` 渲染。`textContent` 不会包含 `::before` 内容，所以不会污染 label 提交到 store 的字符串。
+
+---
+
+## 2026-06-08 · macOS 全屏时收起标题栏左侧的"红绿灯"留白
+
+**What Changed**
+
+- **macOS 桌面端进入全屏（绿灯按钮 / `⌃⌘F`）时，标题栏左边给红绿灯按钮预留的 76px 空白会自动收起**，Home 按钮贴回到窗口的左边缘（保留 8px 内边距，和 Windows 一致）。
+- **全屏切换的过程中先把 Home 按钮整体淡出再淡入**，避免动画进行时按钮和移出 / 移回的红绿灯叠在同一像素上：`resize` 事件触发后立刻把 `opacity` 切到 0（无过渡），尺寸稳定 ~180ms 后再带 180ms 淡入。
+- 实现方式：主进程 `enter-full-screen` / `leave-full-screen` 通过新加的 `window:fullscreen` IPC 通道 + `electronBridge.window` 暴露给 renderer，渲染层根据当前全屏状态切换 `paddingLeft`；同时监听 `resize` 做 debounce 触发上面那段淡出 / 淡入。
+
+**Notes**
+
+- 仅影响 macOS。Windows 的标题栏按钮在全屏下不会被系统隐藏，留白逻辑不变；Linux 当前没有自定义关闭按钮，也不受影响。
+- 普通的"最大化（Cmd + 绿灯）"不会进入沉浸式全屏，红绿灯仍然显示，留白保持 76px，行为与之前一致。
+
+---
+
+## 2026-06-08 · 左侧图层面板新增「外部 .md 文件」提示
+
+**What Changed**
+
+- **选好 workspace 后，服务端会持续监听每个画布目录下的 `nodes/*.md`**：用户在 Finder / 终端 / 其他编辑器里手动拖一个 `.md` 进 `<canvas>/nodes/` 后，左侧图层面板的列表顶部会立刻出现一行**灰色斜体的占位项**（图标 + 文件名）。
+- **悬停时该行右侧出现 `+` 按钮**，点 `+` 或者**双击整行**即可一键导入：服务端读取文件内容、删除原 `.md`、客户端走和"工具栏上传 .md"完全相同的 `addNodes` 路径生成一个 note 节点。
+- **冷启动也算**：选 workspace 时如果已经有未导入的 `.md`，下次打开画布就会直接看到提示项；无需重启。
+- **外部新增的速度受 1.5s 的稳定窗口控制**：编辑器多次保存或拖文件中途生成的临时文件不会重复触发，仅在写完文件稳定后才出现提示。
+- 切换画布 / 切换 workspace 时自动断开旧的 SSE 连接、对新的目录重新订阅。
+
+**Notes**
+
+- 只处理**新增** `.md`：外部修改已存在的 node 文件不会触发提示（节点本身已有 Milkdown 编辑器同步内容）。
+- 删除外部新增的 `.md`（在导入之前）会自动从列表移除；删除已导入的节点的 `.md` 走原有兜底逻辑，无新增行为。
+- 文件的 frontmatter 里如果带 `id:` 且这个 id 已经在当前画布的节点列表里出现过，会被认作"app 自己写出去的文件"，不会重复提示。
+- 仅监听 `<workspace>/<canvasDir>/nodes/*.md` 一层，不会递归扫描更深的目录，避免与 `.artifacts/` `.history/` 等隐藏目录互相干扰。
+
+---
+
+## 2026-06-08 · 从笔记拖内容到画布：新增「按 Shift 移动」（默认保持复制）
+
+**What Changed**
+
+- **从笔记里拖一个 / 多个 block 到画布空白处，默认保持原来的「复制」行为**：被拖出的内容会落地为一个新的 note 节点，**源笔记保持不变**。这是无破坏性默认值，符合"拖出来的是副本"的直觉。
+- **按住 Shift 拖** 切换为「移动」：新 note 出现在画布上，**同时从源笔记中删除**该段内容。
+- 拖动过程中 **鼠标光标会区分 copy / move**：未按 Shift 时显示 copy 指针（→ 带加号）、按 Shift 时显示 move 指针（→ 不带加号）。
+- **「移动」是一次撤销**：⌘Z 一次性恢复源笔记内容并销毁新 note，不需要按两次。
+- 支持多 block 移动（含列表中间的若干项）：源笔记会按拖出的范围精准缩减，新 note 包含完整的多块内容。
+- 同步修复了 **Shift+点击块手柄拖拽根本不启动** 的问题 —— 浏览器原本把 Shift+click 解释成"扩展文本选区"，会中断拖拽；现在在块手柄上侦测到 Shift 时会调用 `preventDefault` 抑制该默认行为，Crepe 自己的 NodeSelection 派发和 `draggable=true` 触发的拖拽均不受影响。
+- 从 **AI 聊天卡片** 拖出始终是复制（聊天消息不可编辑，没有"源"可以从里头移走），Shift 在这一侧无效。
+
+**Notes**
+
+- 「移动」的源笔记被拖空后 **不会被自动删除** —— 留一个空 note 给用户自行处理，避免误删。
+- 「移动」的源内容快照是在 _拖拽开始时_ 算好的；如果在拖拽过程中（极短时间窗口内）外部更新了源笔记，drop 时仍以拖拽开始那一刻的视图为准 —— 用 ⌘Z 即可还原。
+- Shift 是在 _drop 那一刻_ 生效的：如果点击块手柄时不方便先按 Shift，也可以先开始拖拽，半路再按住 Shift，松手时即为移动。
+- Web 浏览器和 Desktop 应用行为完全一致，无 Desktop 专属代码。
+
+---
+
+## 2026-06-08 · Bugfix：Settings 现在可以完整配置 Azure OpenAI 了（#220）
+
+**What Changed**
+
+- **修复 Settings → LLM Provider 切到 Azure OpenAI 报「Model is required」、且选中的 Provider 被悄悄回滚到之前那个的问题**。Azure OpenAI 没有内建模型列表（模型名是用户自己的 deployment 名），原先前端在切 Provider 时会立刻用空 model 调一次 `PUT /api/llm/config`，服务端 schema 校验直接 400 退回，导致 Provider 切换看起来没生效。`PUT /api/llm/config` 的请求体现在允许 `model` 为空字符串，先把 Provider 落到本地、再让用户继续填后面的字段。
+- **Settings 里新增 Azure OpenAI 专属配置区**：选中 Azure OpenAI 后会出现四个字段并一次性 Save：
+  - **Endpoint** — 例如 `https://my-resource.cognitiveservices.azure.com`，留空时回退到旧的 `AZURE_OPENAI_API_ENDPOINT` 环境变量。
+  - **Deployment** — Azure 上的 deployment 名（例如 `gpt-5-chat`），同时也用作模型 id。
+  - **API Version** — 例如 `2025-04-01-preview`；留空时使用 pi-ai 默认的 `v1`。
+  - **API Key** — Azure 资源的 key；之前已经 Save 过的话留空即可保留。
+- **后端在调 LLM 时会把这些值作为 `azureBaseUrl` / `azureApiVersion` / `azureDeploymentName` 透传给 pi-ai 的 Azure provider**，不再依赖 `process.env.AZURE_OPENAI_*` 才能用。原先服务端会在 baseUrl 上硬拼一个 `/openai` 后缀，新版 pi-ai 会自己规范化路径并加 `/openai/v1`，所以这个手动后缀拿掉了，避免变成 `/openai/openai/v1`。
+- **同一 Provider 内做局部更新时会合并已保存的字段**：例如只改了 Deployment、没重填 API Key / Endpoint / API Version，之前保存的那些值会被保留，不会被这次 PUT 清空（之前只有 `apiKey` 走合并逻辑）。
+- **`llm-config.json` 现在按 Provider 分桶保存**：切换 Provider 不再覆盖上一个 Provider 的字段。例如先配好 Azure，再切到 OpenAI，再切回 Azure —— Endpoint / Deployment / API Version / API Key 仍在，不用重填。每个 Provider 自己的 model 选择也会被记住（OpenAI 选过的 model、Anthropic 选过的 model 等切换时各自恢复）。
+- 旧版 `llm-config.json`（单一 active 配置的扁平结构）会在下次保存时自动迁移到新结构，无需手工处理；活跃 Provider 由顶层 `active` 字段标记，每个 Provider 的字段挂在 `providers[providerId]` 下。
+- **切到一个还没配置过的内建 Provider 时，服务端会自动挑该 Provider 模型列表里的第一个作为默认 model**（这条逻辑从前端搬到了后端，跟"恢复已保存 model"走同一条路径，避免前端强行用第一个 model 覆盖之前的选择）。
+
+**Notes**
+
+- 旧的 `AZURE_OPENAI_API_ENDPOINT` / `AZURE_OPENAI_API_VERSION` / `AZURE_OPENAI_API_DEPLOYMENT_NAME` / `AZURE_OPENAI_API_KEY` 环境变量在 Settings 里 _没填_ 对应字段时仍然作为兜底；填了就以 Settings 的值为准（每次请求都走 Settings 里的 Endpoint / API Version / Deployment）。
+- 切换 Provider **不再**清掉旧 Provider 的 baseUrl / apiVersion / apiKey；它们各自保留在 `providers[providerId]` 桶里，对当前活跃 Provider 没有副作用（resolveApiKey 只看 active 的字段）。
+- Azure 之外的 Provider 不受影响：仍然是 Provider → Model → API Key 三行。
+
+---
+
 ## 2026-06-08 · Edge 支持文本 Label（人 / AI 都能加）
 
 **What Changed**

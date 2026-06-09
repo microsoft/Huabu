@@ -273,6 +273,12 @@ type RFState = {
 
   addNodes: (inputs: AddNodeInput[]) => void;
   addNode: (input: AddNodeInput) => void;
+  /** Atomic drag-MOVE: create `newNote` + overwrite source content in one undo entry. */
+  moveNoteExcerpt: (input: {
+    sourceNodeId: string;
+    sourceContentAfterMove: string;
+    newNote: AddNodeInput;
+  }) => void;
   deleteNodes: (nodeIds: string[]) => void;
   disconnectEdges: (edgeIds: string[]) => void;
   setNodeGeometry: (
@@ -1769,6 +1775,15 @@ const useCanvasStore = create<RFState>()(
 
     addNode: (input) => {
       get().addNodes([input]);
+    },
+
+    moveNoteExcerpt: ({ sourceNodeId, sourceContentAfterMove, newNote }) => {
+      get().dispatchUiIntent({
+        type: 'MOVE_NOTE_EXCERPT',
+        sourceNodeId,
+        sourceContentAfterMove,
+        newNote,
+      });
     },
 
     deleteNodes: (nodeIds) => {

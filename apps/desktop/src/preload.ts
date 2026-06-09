@@ -85,4 +85,18 @@ contextBridge.exposeInMainWorld('electronBridge', {
         path,
       ) as Promise<WorkspaceStoreSnapshot>,
   },
+
+  window: {
+    isFullScreen: (): Promise<boolean> =>
+      ipcRenderer.invoke('window:is-fullscreen') as Promise<boolean>,
+    onFullScreenChange: (cb: (fullScreen: boolean) => void): (() => void) => {
+      const listener = (_event: unknown, fullScreen: boolean): void => {
+        cb(fullScreen);
+      };
+      ipcRenderer.on('window:fullscreen', listener);
+      return () => {
+        ipcRenderer.removeListener('window:fullscreen', listener);
+      };
+    },
+  },
 });

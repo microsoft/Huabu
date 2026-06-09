@@ -213,6 +213,17 @@ export function attachBlockDragListeners(
       priorSelection = null;
       return;
     }
+    // Suppress the browser's native Shift+click "extend text
+    // selection" behaviour when the click lands on the block handle.
+    // Without this, holding Shift while mousedown-ing the handle would
+    // either cancel the pending drag (Chrome) or extend the editor
+    // selection through the handle's position (Firefox) instead of
+    // starting a drag. Crepe's own mousedown listener still runs and
+    // installs the NodeSelection via `view.dispatch`, and the browser
+    // still initiates the drag from the handle's `draggable=true`
+    // attribute.
+    const mouseEvent = event as MouseEvent;
+    if (mouseEvent.shiftKey) event.preventDefault();
     const instance = instanceRef.current;
     const range = instance?.getMultiBlockSelectionRange() ?? null;
     priorSelection = range;
@@ -228,7 +239,7 @@ export function attachBlockDragListeners(
     const handle = target?.closest('.milkdown-block-handle');
     if (!handle) return;
 
-    const snapshot = priorSelection;
+    const snapshot = priorSelection ?? instance.getMultiBlockSelectionRange();
     // Clear immediately so a subsequent single-block drag isn't
     // accidentally treated as multi-block.
     priorSelection = null;
@@ -236,9 +247,12 @@ export function attachBlockDragListeners(
     const payload = instance.getDragPayload(snapshot);
     if (!payload) return;
 
-    const { markdown: dragMarkdown, blockElements } = payload;
+    const { markdown: dragMarkdown, blockElements, range } = payload;
+    const sourceContentAfterMove = instance.getDocAfterRangeRemoved(range);
 
     if (blockElements.length > 0 && event.dataTransfer) {
+      // Let the drop site pick move vs copy via Shift.
+      event.dataTransfer.effectAllowed = 'copyMove';
       const preview = buildBlockDragImage(blockElements, mountRoot);
       // Anchor the preview's top-left near the cursor; the block
       // handle sits just to the LEFT of a block, so (0, 0) reads as
@@ -252,6 +266,7 @@ export function attachBlockDragListeners(
 
     callback({
       markdown: dragMarkdown,
+      sourceContentAfterMove,
       nativeEvent: event,
     });
   };

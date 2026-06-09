@@ -43,6 +43,10 @@ export const routes = {
   canvasArtifactCloneFrom: (canvasId: string) =>
     `/canvas/${enc(canvasId)}/artifact/clone-from`,
   canvasEvents: (canvasId: string) => `/canvas/${enc(canvasId)}/events`,
+  canvasExternalStream: (canvasId: string) =>
+    `/canvas/${enc(canvasId)}/external/stream`,
+  canvasExternalImport: (canvasId: string) =>
+    `/canvas/${enc(canvasId)}/external/import`,
 
   // ── Web (preview / reader / page) ────────────────────────────────
   webPreview: (canvasId: string, nodeId: string) =>

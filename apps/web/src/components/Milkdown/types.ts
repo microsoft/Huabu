@@ -43,6 +43,8 @@ export interface MilkdownDecorationSpec {
 export interface MilkdownBlockDragEvent {
   /** Markdown of the block(s) being dragged. */
   markdown: string;
+  /** Markdown the source doc would hold if the dragged range were deleted. */
+  sourceContentAfterMove: string;
   /** Native DragEvent, so callers can call setData. */
   nativeEvent: DragEvent;
 }
