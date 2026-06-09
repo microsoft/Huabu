@@ -139,5 +139,4 @@ jobs:
             assets/*.dmg
             assets/*.exe
             assets/*.blockmap
-            assets/latest*.yml
           fail_on_unmatched_files: true
