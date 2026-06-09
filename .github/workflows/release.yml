@@ -64,6 +64,17 @@ jobs:
         env:
           HUSKY: '0' # skip git-hook install on CI
 
+      # apps/server's tsup bundle imports from @agentlet/protocol and
+      # @agentlet/server — both are workspace packages under
+      # external/agentlet/ whose dist/ outputs don't exist on a fresh
+      # checkout. Root package.json has predev / predev:desktop that
+      # auto-run this, but there's no prebuild:desktop, so the build
+      # scripts assume agentlet is already compiled. Build it
+      # explicitly here so the matrix script doesn't trip on
+      # `Could not resolve "@agentlet/protocol"`.
+      - name: Build agentlet workspace packages
+        run: pnpm run build:agentlet
+
       - name: Build desktop installer
         run: pnpm run ${{ matrix.script }}
         env:
