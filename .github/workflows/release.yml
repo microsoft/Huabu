@@ -43,8 +43,11 @@ jobs:
             script: build:desktop:mac
           - os: windows-latest
             script: build:desktop:win
-          - os: ubuntu-latest
-            script: build:desktop:linux
+          # Linux is intentionally disabled — electron-builder's
+          # AppImage target rejects the scoped package name
+          # `@sediment/desktop` as executableName (slash is unsafe in
+          # file paths). Re-enable by adding `executableName: huabu`
+          # under the `linux:` section in apps/desktop/electron-builder.yml.
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -135,7 +138,6 @@ jobs:
           files: |
             assets/*.dmg
             assets/*.exe
-            assets/*.AppImage
             assets/*.blockmap
             assets/latest*.yml
           fail_on_unmatched_files: true
