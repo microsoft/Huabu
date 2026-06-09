@@ -80,9 +80,16 @@ jobs:
 
       - name: Build desktop installer
         run: pnpm run ${{ matrix.script }}
-        env:
-          # Disable mac/win code signing — we ship unsigned for now.
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        # No CSC_LINK / certificate configured, so:
+        #   • macOS: electron-builder finds no Developer ID identity in
+        #     the runner keychain and falls back to ad-hoc signing
+        #     (identity `-`). Required on Apple Silicon — without it
+        #     the .app won't even launch. Users still see the gentle
+        #     "unidentified developer" prompt and can right-click →
+        #     Open. Set CSC_LINK + CSC_KEY_PASSWORD secrets to ship
+        #     properly-signed builds.
+        #   • Windows: no CSC_LINK → electron-builder silently skips
+        #     signing; the .exe ships unsigned (SmartScreen prompts).
 
       # electron-builder writes outside the repo (../huabu-electron-out/
       # per apps/desktop/electron-builder.yml, to dodge a Windows file-lock
