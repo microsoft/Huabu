@@ -33,6 +33,10 @@ export {
   type SharedPostEffectsOutput,
 } from './postEffects.js';
 
+// ── Deltas (server → client wire diff) ────────────────────────────────────
+export { type Delta, applyDeltas, invertDelta } from './delta.js';
+export { diffCanvasState } from './diff.js';
+
 // ── Command registry (handler / meta maps) ────────────────────────────────
 export {
   HANDLERS,
