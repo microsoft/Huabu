@@ -46,6 +46,7 @@ import {
 import { handleFsWrite, type FsWriteArgs } from './handlers/fs-write.js';
 import { handleWebSearch, type WebSearchArgs } from './handlers/web-search.js';
 
+import type { AgentToolResult } from '@earendil-works/pi-agent-core';
 import type { NodeOrigin } from '@sediment/shared';
 
 /**
@@ -81,7 +82,7 @@ export async function executeTool(
   name: string,
   args: Record<string, unknown>,
   context?: ExecuteContext,
-): Promise<string> {
+): Promise<string | AgentToolResult<unknown>> {
   const requireCanvasId = (toolName: string): string => {
     const canvasId = context?.canvasId;
     if (!canvasId) {

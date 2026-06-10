@@ -4,6 +4,20 @@
 
 ---
 
+## 2026-06-10 · Canvas agent 可以直接读图片节点
+
+**What Changed**
+
+- **Canvas agent 的 `read` 工具现在会把 image artifact 作为 vision 内容内联返回**（仅限光栅图：png / jpg / gif / webp / bmp）。之前 agent 只有在用户**选中**了 image 节点时才能看到图（走 selection → vision attachment 那条路），现在 agent 自己 `read("nodes/<label>.md")` 拿到 frontmatter 里的 `src`、再 `read(src)` 就能直接看图，不需要用户先选中。
+- PDF / video / SVG 之外的二进制（archive / 编译产物等）仍然按"binary, refused"处理；SVG 走文本路径保持不变。
+
+**Notes**
+
+- 对模型侧无感升级：vision-capable 模型自动收到 `ImageContent` part；不支持视觉的模型会被 pi-ai 的下游转换降级为占位文本，不会报错。
+- 改动文件：`apps/server/src/modules/agent/tools/handlers/fs-read.ts`、`executor.ts`、`index.ts` 以及 `prompt/skills/canvas/SKILL.md`。
+
+---
+
 ## 2026-06-10 · Edge Label 失焦后边框颜色和边线保持一致
 
 **What Changed**

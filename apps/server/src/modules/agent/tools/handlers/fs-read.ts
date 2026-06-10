@@ -29,13 +29,16 @@
  */
 
 import { readFileSync, statSync } from 'node:fs';
+import path from 'node:path';
 
 import { normalizeRel, safeResolve } from './fs-sandbox.js';
 import { readSkillFile, resolveSkillPath } from '../../../../prompt/index.js';
+import { IMAGE_MIME_MAP } from '../../../../utils/mime.js';
 import { parseFrontmatter } from '../../../storage/frontmatter.js';
 import { readCanvasMemory, readWorkspaceMemory } from '../../memory/index.js';
 
 import type { readParamsSchema } from '../definitions.js';
+import type { AgentToolResult } from '@earendil-works/pi-agent-core';
 import type { Static } from '@earendil-works/pi-ai';
 
 // ─── Argument types ─────────────────────────────────────────────────────────
@@ -62,7 +65,9 @@ const MAX_READ_FILE_BYTES = 10 * 1024 * 1024;
 
 // ─── Implementation ─────────────────────────────────────────────────────────
 
-export async function handleRead(args: ReadArgs): Promise<string> {
+export async function handleRead(
+  args: ReadArgs,
+): Promise<string | AgentToolResult<undefined>> {
   const { path: requested, offset, limit } = args;
 
   if (typeof requested !== 'string' || requested.length === 0) {
@@ -165,20 +170,42 @@ export async function handleRead(args: ReadArgs): Promise<string> {
     );
   }
 
-  // Read as UTF-8. Binary detection here is intentionally light:
-  // anything with a NUL byte in the first 1 KB we treat as binary
-  // and refuse, which catches images / archives / compiled blobs
-  // without needing a mime database.
   let buf: Buffer;
   try {
     buf = readFileSync(abs);
   } catch (e) {
     throw new Error(`Failed to read file: ${(e as Error).message}`);
   }
+
+  // Raster image artifacts are returned inline as vision content so
+  // vision-capable models can actually see them. SVG is excluded — it
+  // is XML text and the regular text path serves the model better.
+  const ext = path.extname(abs).toLowerCase();
+  const imageMime = ext === '.svg' ? undefined : IMAGE_MIME_MAP[ext];
+  if (imageMime) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            path: rel,
+            mimeType: imageMime,
+            bytes: buf.byteLength,
+          }),
+        },
+        { type: 'image', data: buf.toString('base64'), mimeType: imageMime },
+      ],
+      details: undefined,
+    };
+  }
+
+  // Binary detection: anything with a NUL byte in the first 1 KB we
+  // treat as binary and refuse. Catches pdf / video / archives without
+  // needing a full mime database.
   const head = buf.subarray(0, Math.min(1024, buf.length));
   if (head.includes(0)) {
     throw new Error(
-      `"${rel}" appears to be a binary file. The read tool only handles text. Image / pdf / video nodes store their bytes under .artifacts/ — use the canvas UI to view them; the agent only sees their src URL via the node markdown frontmatter.`,
+      `"${rel}" appears to be a binary file. The read tool handles text and image artifacts only. PDF / video bytes live under .artifacts/ — use the canvas UI to view them; the agent only sees their src URL via the node markdown frontmatter.`,
     );
   }
 
