@@ -4,6 +4,20 @@
 
 ---
 
+## 2026-06-10 · Edge Label 失焦后边框颜色和边线保持一致
+
+**What Changed**
+
+- **新建 edge label 失焦（commit）之后，pill 边框颜色现在会和这条边的实际线条颜色一致**。之前对没有显式设置 `stroke` 的默认 edge，pill 在失焦后边框会回退到 info 蓝（`var(--color-info)`），而 SVG 线条实际是 React Flow 的灰色默认 (`#b1b1b7`)，两者对不上；现在 fallback 改成 React Flow 自身的 `--xy-edge-stroke` 默认 token，所以颜色完全跟随 SVG path 渲染结果。
+- 已经显式选过 palette 颜色的 edge 行为不变（之前就会跟随）。
+- 选中或正在编辑时仍然显示 info 蓝边框，与 `.react-flow__edge.selected` 的 stroke 高亮保持一致，未做改动。
+
+**Notes**
+
+- 仅影响 [LabelledEdge.tsx](apps/web/src/components/Panels/Canvas/edges/LabelledEdge.tsx) 中的 `borderColor` 计算，不涉及数据层或持久化。
+
+---
+
 ## 2026-06-08 · 边 label 的交互与外观调整
 
 **What Changed**
@@ -212,6 +226,7 @@
 
 - 正常情况下 daemon 通常在百毫秒内就上线，所以多数用户不会感知到这个变化。只有首次冷启动或机器很慢的场景下，原来"先弹错、点重试又能用"的体验会被消除。
 - 真正卡住的极端场景（例如 daemon 一直起不来）现在最长会让 ChatPanel loading 状态保持 20 s 才显示失败，但前提是 supervisor 仍在尝试重启；一旦它放弃，错误会立刻浮出来，用户可以走 Settings → External Agents 的 **Restart worker** 重置。
+
 ## 2026-06-05 · AI 画布操作迁移到服务端 Headless Executor
 
 **What Changed**
