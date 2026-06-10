@@ -33,7 +33,7 @@ import {
   writeAcpSessionMeta,
   writeAcpSessionRecord,
 } from './session-store.js';
-import { ensureAgentForThread, threadKey } from './spawn-orchestrator.js';
+import { ensureAgentForThread } from './spawn-orchestrator.js';
 import { acpUpdateToStreamEvent, mergeThinkingChunk } from './translator.js';
 import { canvasRoot as resolveCanvasRoot } from '../../storage/paths.js';
 import {
@@ -425,11 +425,16 @@ async function ensureAcpSessionInner(
 
   // Resolve the thread to a live agentlet agent. Each thread owns its
   // own CLI process — the orchestrator either returns the cached spawn
-  // or asks the daemon to start a new one keyed on `(canvasId, threadId)`.
+  // or asks the daemon to start a new one keyed on `threadId`.
+  // When a persisted sessionId exists, pass it to the orchestrator so
+  // the daemon can resume a suspended session instead of creating new.
   // Failures here surface as a 503 from the caller with a user-actionable
   // hint pointing at Settings → External Agents.
-  const tk = threadKey(canvasId, threadId);
-  const { sessionId: agentSessionId } = await ensureAgentForThread(tk, recipe);
+  const { sessionId: agentSessionId } = await ensureAgentForThread(
+    threadId,
+    recipe,
+    persisted?.sessionId,
+  );
   const conn = server.getConnection(agentSessionId);
   if (!conn || conn.status !== 'connected') {
     throw new Error(`External agent '${recipe.alias}' is not connected`);

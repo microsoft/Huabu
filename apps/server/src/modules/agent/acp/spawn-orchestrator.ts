@@ -11,28 +11,38 @@
  * The agentlet-facing model is a pool of live agent sessions addressed
  * by `sessionId`. This module bridges the two:
  *
- *   `ensureAgentForThread(threadKey, recipe)`
+ *   `ensureAgentForThread(threadId, recipe)`
  *     → returns `{sessionId, pid}` for the agent currently hosting
  *       that thread, spawning a new one on the agentlet if none is
  *       alive. Each thread gets its OWN CLI process; we do not share
  *       processes across threads.
  *
- *   `releaseThread(threadKey)`
+ *   `releaseThread(threadId)`
  *     → drop the cached mapping and best-effort ask the agentlet to
  *       stop the spawned agent. Used when a thread is deleted.
  *
  * Caching: the map lives in this process's memory and is keyed
- * `threadKey → sessionId` where `threadKey = canvasId + ':' + threadId`.
- * An agentlet disconnect invalidates the entire cache because the new
- * agentlet (re-fork by the supervisor) starts with an empty agent pool.
- * We detect the swap by tracking `activeAgentletId` and wiping the map
- * whenever it changes.
+ * `threadId → sessionId`. `threadId` is globally unique so there is
+ * no need to include the canvasId in the key. An agentlet disconnect
+ * invalidates the entire cache because the new agentlet (re-fork by
+ * the supervisor) starts with an empty agent pool. We detect the swap
+ * by tracking `activeAgentletId` and wiping the map whenever it changes.
+ *
+ * Session lifecycle: sessions are NOT eagerly destroyed. The agentlet
+ * daemon auto-suspends idle sessions after `idleTimeoutSecs` and can
+ * resume them when the user revisits the thread.
  */
 
 import { getDaemonSupervisor } from './daemon-supervisor.js';
 import { getAgentletServer } from './server-mount.js';
 
 import type { AcpBindingRecipe } from './session-store.js';
+
+/**
+ * Default idle timeout (seconds) before the agentlet daemon suspends
+ * an inactive session. Resumed transparently on next message.
+ */
+const DEFAULT_IDLE_TIMEOUT_SECS = 600;
 
 /**
  * Cold-start grace window for the embedded agentlet's WS handshake.
@@ -66,9 +76,9 @@ const threadToAgent = new Map<string, CachedAgent>();
  */
 let activeAgentletId: string | null = null;
 
-/** Compose the cache key for a thread on a canvas. */
-export function threadKey(canvasId: string, threadId: string): string {
-  return `${canvasId}:${threadId}`;
+/** @deprecated Use threadId directly — kept for backwards compat during migration. */
+export function threadKey(_canvasId: string, threadId: string): string {
+  return threadId;
 }
 
 /**
@@ -130,13 +140,20 @@ async function waitForAgentConnection(
 }
 
 /**
- * Ensure a live agent process exists for `threadKey`, spawning one
- * via the agentlet if needed.
+ * Ensure a live agent process exists for `threadId`, spawning (or
+ * resuming) one via the agentlet if needed.
  *
  * Each thread gets its OWN process — we never share an agentlet
  * connection across threads, even when the recipes are identical,
  * because the upstream CLI's state (session pool, current model,
  * mode) is per-process and would bleed across threads otherwise.
+ *
+ * Resume: when `existingSessionId` is provided (from the persisted
+ * session store), the spawn request includes it so the agentlet can
+ * resume a suspended session via `session/resume` or `session/load`
+ * instead of creating a new one. If the resume fails (e.g. the
+ * daemon no longer knows that session), the agentlet falls through
+ * to `session/new` automatically.
  *
  * Cold-start tolerance: we wait up to {@link AGENTLET_READY_TIMEOUT_MS}
  * for the agentlet to come online and up to 3 s for the freshly-spawned
@@ -148,12 +165,13 @@ async function waitForAgentConnection(
  *   • the agentlet RPC for spawn fails.
  *
  * Idempotent within a single agentlet's lifetime — repeat calls for
- * the same `threadKey` return the same `sessionId` until the agent
+ * the same `threadId` return the same `sessionId` until the agent
  * dies or the agentlet is re-forked.
  */
 export async function ensureAgentForThread(
-  threadKey: string,
+  threadId: string,
   recipe: AcpBindingRecipe,
+  existingSessionId?: string,
 ): Promise<{ sessionId: string; pid: number }> {
   const agentlet = await waitForActiveAgentlet(AGENTLET_READY_TIMEOUT_MS);
   if (!agentlet) {
@@ -166,7 +184,7 @@ export async function ensureAgentForThread(
     );
   }
 
-  const cached = threadToAgent.get(threadKey);
+  const cached = threadToAgent.get(threadId);
   if (cached && cached.agentletId === agentlet.agentletId) {
     const server = getAgentletServer();
     const conn = server?.getConnection(cached.sessionId);
@@ -176,7 +194,7 @@ export async function ensureAgentForThread(
         pid: cached.pid,
       };
     }
-    threadToAgent.delete(threadKey);
+    threadToAgent.delete(threadId);
   }
 
   const server = getAgentletServer();
@@ -185,17 +203,19 @@ export async function ensureAgentForThread(
   }
 
   const { sessionId, pid } = await server.spawnOnAgentlet(agentlet.agentletId, {
-    appId: threadKey,
+    appId: threadId,
+    ...(existingSessionId ? { sessionId: existingSessionId } : {}),
     sessionSpec: {
       command: recipe.command,
       cwd: recipe.cwd,
       autoRestart: recipe.autoRestart,
+      idleTimeoutSecs: DEFAULT_IDLE_TIMEOUT_SECS,
     },
   });
 
   await waitForAgentConnection(sessionId, 3000);
 
-  threadToAgent.set(threadKey, {
+  threadToAgent.set(threadId, {
     sessionId,
     pid,
     agentletId: agentlet.agentletId,
@@ -204,12 +224,12 @@ export async function ensureAgentForThread(
 }
 
 /**
- * Drop the cached mapping for `threadKey` and best-effort ask the
+ * Drop the cached mapping for `threadId` and best-effort ask the
  * agentlet to stop the spawned agent. Called when a thread is deleted.
  */
-export async function releaseThread(threadKey: string): Promise<void> {
-  const cached = threadToAgent.get(threadKey);
-  threadToAgent.delete(threadKey);
+export async function releaseThread(threadId: string): Promise<void> {
+  const cached = threadToAgent.get(threadId);
+  threadToAgent.delete(threadId);
   if (!cached) return;
   const server = getAgentletServer();
   if (!server) return;

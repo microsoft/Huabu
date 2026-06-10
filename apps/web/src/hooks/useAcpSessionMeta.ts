@@ -3,10 +3,10 @@
  * metadata (modes / models / config options / info / usage) for the
  * active thread's external binding.
  *
- * Companion to {@link useAcpSlashCommands}: same lifecycle (bootstrap
- * + on-demand refresh, gated by an internal binding short-circuit),
- * but the data surface is the ChatPanel's mode/model/config selectors
- * rather than the slash-command typeahead.
+ * Companion to {@link useAcpSlashCommands}: same lazy lifecycle —
+ * no session is created on mount. The first fetch happens on-demand
+ * via `refreshIfStale` (called by ChatInput or message-send path),
+ * gated by an internal binding short-circuit.
  *
  * SSE integration: the consumer (typically `useAgentStream` host) can
  * call {@link UseAcpSessionMetaResult.applyEvent} on each incoming
@@ -317,10 +317,13 @@ export function useAcpSessionMeta({
     [],
   );
 
+  // Reset meta when binding/thread/canvas changes. Session creation
+  // is LAZY — the actual fetch happens on the first `refreshIfStale`
+  // call or explicit `refresh`, not on mount.
   useEffect(() => {
     setMeta(EMPTY_META);
     setError(null);
-    void refresh();
+    lastFetchedAtRef.current = 0;
     return () => {
       // eslint-disable-next-line react-hooks/exhaustive-deps
       epochRef.current++;
