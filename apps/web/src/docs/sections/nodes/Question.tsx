@@ -57,7 +57,8 @@ export default function Question() {
         </li>
         <li>
           Leave the editor or click <em>Run</em> — the node moves to{' '}
-          <em>pending</em>.
+          <em>pending</em>. Press <kbd>Shift</kbd>+<kbd>Enter</kbd> while
+          editing to skip the auto-run countdown and submit immediately.
         </li>
         <li>
           The server sends the question together with its{' '}

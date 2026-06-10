@@ -32,6 +32,23 @@
 
 ---
 
+## 2026-06-10 · Question 节点新增 Shift+Enter 快速执行快捷键
+
+**What Changed**
+
+- **编辑 Question 节点时按 `Shift+Enter` 直接提交并立刻执行**，跳过原本的自动倒计时（默认 ~10s），让用户在确认问题已经写完时可以一键开跑。
+- 行为细节：先把当前 draft 写回节点（如果有变化），然后把节点状态切到 `pending` 并把 `runAt` 设为当前时间，`useQuestionRunner` 会马上拉起执行；同时退出编辑模式。
+- 同时为该快捷键加了一道防护：触发 `Shift+Enter` 之后，textarea blur 不会再覆盖刚刚写好的 `runAt`（否则会被改回 `now + delay`）。
+- 在 `?` 快捷键面板和 docs 的 Keyboard Shortcuts 页 "AI" 分类下新增了这条快捷键说明，文档的 Question 节点 Workflow 步骤里也补了一句提示。
+
+**Notes**
+
+- 普通 `Enter` 行为不变，仍然是在 textarea 里插入换行。
+- 当 `@` mention 菜单展开时，`Shift+Enter` 仍然会直接提交并执行；如果想先选择 agent，请用 `Enter` 或 `Tab` 接受高亮项。
+- 如果当前 draft 为空（trim 后为空字符串），`Shift+Enter` 不会触发任何动作，避免空问题进入 pending。
+
+---
+
 ## 2026-06-08 · 边 label 的交互与外观调整
 
 **What Changed**

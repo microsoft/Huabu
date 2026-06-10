@@ -41,6 +41,7 @@ export const QuestionNode = memo(
     const [isEditing, setIsEditing] = useState(false);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const processingRef = useRef<AbortController>();
+    const suppressBlurAutoRunRef = useRef(false);
 
     const inputContent =
       data.input?.kind === 'text' ? (data.input.content ?? '') : '';
@@ -241,6 +242,13 @@ export const QuestionNode = memo(
 
         setIsEditing(false);
 
+        // Shift+Enter already committed + started the run; skip the
+        // delayed auto-run schedule to avoid clobbering `runAt`.
+        if (suppressBlurAutoRunRef.current) {
+          suppressBlurAutoRunRef.current = false;
+          return;
+        }
+
         const trimmed = surface.draft.trim();
         const contentChanged = trimmed !== inputContent;
 
@@ -393,12 +401,37 @@ export const QuestionNode = memo(
     }, [surface.draft]);
 
     /**
-     * Intercept keys only while the mention menu is visible — the
-     * textarea otherwise behaves identically to plain text input
-     * (Enter inserts a newline; we never submit on Enter).
+     * Commit the current draft and start execution immediately.
+     * Bypasses the auto-run countdown used on blur. Used by the
+     * Shift+Enter shortcut.
      */
+    const submitAndRunNow = useCallback(() => {
+      const trimmed = surface.draft.trim();
+      if (!trimmed) return;
+
+      processingRef.current?.abort();
+      suppressBlurAutoRunRef.current = true;
+      setIsEditing(false);
+
+      if (trimmed !== inputContent) {
+        updateNodeData(id, {
+          input: { kind: 'text', content: trimmed },
+        });
+      }
+
+      patchNodeSilent(id, {
+        status: 'pending',
+        runAt: Date.now(),
+      });
+    }, [surface.draft, inputContent, id, updateNodeData, patchNodeSilent]);
+
     const handleTextareaKeyDown = useCallback(
       (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (e.key === 'Enter' && e.shiftKey) {
+          e.preventDefault();
+          submitAndRunNow();
+          return;
+        }
         if (!mentionState || !mentionMenuRef.current) return;
         if (e.key === 'ArrowDown') {
           e.preventDefault();
@@ -424,7 +457,7 @@ export const QuestionNode = memo(
           return;
         }
       },
-      [mentionState, acceptMention, dismissMention],
+      [mentionState, acceptMention, dismissMention, submitAndRunNow],
     );
 
     const isDoneUnviewed = status === 'done' && !viewed;
