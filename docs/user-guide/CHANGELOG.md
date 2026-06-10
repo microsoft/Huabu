@@ -4,6 +4,70 @@
 
 ---
 
+## 2026-06-10 · Canvas agent 可以直接读图片节点
+
+**What Changed**
+
+- **Canvas agent 的 `read` 工具现在会把 image artifact 作为 vision 内容内联返回**（仅限光栅图：png / jpg / gif / webp / bmp）。之前 agent 只有在用户**选中**了 image 节点时才能看到图（走 selection → vision attachment 那条路），现在 agent 自己 `read("nodes/<label>.md")` 拿到 frontmatter 里的 `src`、再 `read(src)` 就能直接看图，不需要用户先选中。
+- PDF / video / SVG 之外的二进制（archive / 编译产物等）仍然按"binary, refused"处理；SVG 走文本路径保持不变。
+
+**Notes**
+
+- 对模型侧无感升级：vision-capable 模型自动收到 `ImageContent` part；不支持视觉的模型会被 pi-ai 的下游转换降级为占位文本，不会报错。
+- 改动文件：`apps/server/src/modules/agent/tools/handlers/fs-read.ts`、`executor.ts`、`index.ts` 以及 `prompt/skills/canvas/SKILL.md`。
+
+---
+
+## 2026-06-10 · Edge Label 失焦后边框颜色和边线保持一致
+
+**What Changed**
+
+- **新建 edge label 失焦（commit）之后，pill 边框颜色现在会和这条边的实际线条颜色一致**。之前对没有显式设置 `stroke` 的默认 edge，pill 在失焦后边框会回退到 info 蓝（`var(--color-info)`），而 SVG 线条实际是 React Flow 的灰色默认 (`#b1b1b7`)，两者对不上；现在 fallback 改成 React Flow 自身的 `--xy-edge-stroke` 默认 token，所以颜色完全跟随 SVG path 渲染结果。
+- 已经显式选过 palette 颜色的 edge 行为不变（之前就会跟随）。
+- 选中或正在编辑时仍然显示 info 蓝边框，与 `.react-flow__edge.selected` 的 stroke 高亮保持一致，未做改动。
+
+**Notes**
+
+- 仅影响 [LabelledEdge.tsx](apps/web/src/components/Panels/Canvas/edges/LabelledEdge.tsx) 中的 `borderColor` 计算，不涉及数据层或持久化。
+
+---
+
+## 2026-06-10 · Question 节点在 running 阶段也能在 chat panel 中打开
+
+**What Changed**
+
+- **Question 节点进入 `running` 状态后，工具条上的「View conversation」按钮和状态徽章都直接可点**（之前只在 `done` / `error` 才出现），点击后右侧 chat panel 会切到这个 question 的 thread，可以实时看着模型回复一点点流出来。
+- 双击 running 的 question 节点也会直接打开对话面板（之前 running 阶段双击是无效的，因为既不能编辑也没法看回答）。
+- 在 running 状态下按钮 / 徽章 hover 时显示的提示从 "Open conversation" 改为 "Watch live conversation"，更清晰地表达「现在过去会看到流式更新」。
+- 配套调整 `viewed` 标记的时机：以前 `openInChat` 在任何阶段都会立刻把 `viewed` 置 true，导致用户在 running 阶段开了一眼又关掉之后，run 完成时不会再有「done · unread」呼吸光提示。现在改成：
+  - `done` / `error` 时打开 → 立刻 `viewed = true`（和以前一致）；
+  - `running` 时打开 → 不动 `viewed`；改由 runner 的 `onComplete` 检查「用户当前是否还在看这个 thread」，是则置 true，否则留 false，让呼吸光照常出现。
+
+**Notes**
+
+- 实现上 chat panel 这边不需要新增任何逻辑：`useChatHistory` 早就会先 fetch 已经持久化的 user 消息，再检测到 "最后一条是 user 消息" → 通过 `agentApi.reconnectStream` 接回正在跑的 SSE 流，所以打开 running thread 时会自动接上流式输出。
+- 取消（Cancel）按钮在 running 阶段仍然存在，仍可中断当前回答。
+- 这条对应改动文件：`apps/web/src/components/Nodes/question/QuestionNode.tsx` + `apps/web/src/hooks/useQuestionRunner.ts`。
+
+---
+
+## 2026-06-10 · Question 节点新增 Shift+Enter 快速执行快捷键
+
+**What Changed**
+
+- **编辑 Question 节点时按 `Shift+Enter` 直接提交并立刻执行**，跳过原本的自动倒计时（默认 ~10s），让用户在确认问题已经写完时可以一键开跑。
+- 行为细节：先把当前 draft 写回节点（如果有变化），然后把节点状态切到 `pending` 并把 `runAt` 设为当前时间，`useQuestionRunner` 会马上拉起执行；同时退出编辑模式。
+- 同时为该快捷键加了一道防护：触发 `Shift+Enter` 之后，textarea blur 不会再覆盖刚刚写好的 `runAt`（否则会被改回 `now + delay`）。
+- 在 `?` 快捷键面板和 docs 的 Keyboard Shortcuts 页 "AI" 分类下新增了这条快捷键说明，文档的 Question 节点 Workflow 步骤里也补了一句提示。
+
+**Notes**
+
+- 普通 `Enter` 行为不变，仍然是在 textarea 里插入换行。
+- 当 `@` mention 菜单展开时，`Shift+Enter` 仍然会直接提交并执行；如果想先选择 agent，请用 `Enter` 或 `Tab` 接受高亮项。
+- 如果当前 draft 为空（trim 后为空字符串），`Shift+Enter` 不会触发任何动作，避免空问题进入 pending。
+
+---
+
 ## 2026-06-08 · 边 label 的交互与外观调整
 
 **What Changed**
@@ -212,6 +276,7 @@
 
 - 正常情况下 daemon 通常在百毫秒内就上线，所以多数用户不会感知到这个变化。只有首次冷启动或机器很慢的场景下，原来"先弹错、点重试又能用"的体验会被消除。
 - 真正卡住的极端场景（例如 daemon 一直起不来）现在最长会让 ChatPanel loading 状态保持 20 s 才显示失败，但前提是 supervisor 仍在尝试重启；一旦它放弃，错误会立刻浮出来，用户可以走 Settings → External Agents 的 **Restart worker** 重置。
+
 ## 2026-06-05 · AI 画布操作迁移到服务端 Headless Executor
 
 **What Changed**

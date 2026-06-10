@@ -263,9 +263,16 @@ function EdgeLabelEditor({
   const useInfoColors = selected || editing;
   const showPlaceholderHint = !hasLabel && !editing;
 
+  // When the edge has no explicit `style.stroke`, the SVG path renders
+  // with React Flow's default token (`--xy-edge-stroke-default`, which
+  // resolves to `#b1b1b7` light / `#3e3e3e` dark — see
+  // `@xyflow/react/dist/base.css`). Fall back to the same token here
+  // so the pill border matches a freshly-created edge's grey stroke
+  // instead of jumping to info-blue once focus is lost.
   const borderColor = useInfoColors
     ? 'var(--color-info)'
-    : (edgeStrokeColor ?? 'var(--color-info)');
+    : (edgeStrokeColor ??
+      'var(--xy-edge-stroke, var(--xy-edge-stroke-default))');
   const borderPx = Math.min(Math.max(edgeStrokeWidth ?? 1, 1), 3);
   const pillStyle = {
     borderColor,
