@@ -80,6 +80,10 @@ export default function Question() {
         rows={[
           [<strong>idle</strong>, 'Editable. Not yet submitted.'],
           [<strong>pending</strong>, 'Queued / sent; waiting for the model.'],
+          [
+            <strong>running</strong>,
+            'The model is replying — double-click (or use the toolbar / status badge) to open the live conversation in the chat panel and watch it stream.',
+          ],
           [<strong>done</strong>, 'A reply has landed as a connected node.'],
         ]}
       />

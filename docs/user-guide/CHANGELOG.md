@@ -32,6 +32,25 @@
 
 ---
 
+## 2026-06-10 · Question 节点在 running 阶段也能在 chat panel 中打开
+
+**What Changed**
+
+- **Question 节点进入 `running` 状态后，工具条上的「View conversation」按钮和状态徽章都直接可点**（之前只在 `done` / `error` 才出现），点击后右侧 chat panel 会切到这个 question 的 thread，可以实时看着模型回复一点点流出来。
+- 双击 running 的 question 节点也会直接打开对话面板（之前 running 阶段双击是无效的，因为既不能编辑也没法看回答）。
+- 在 running 状态下按钮 / 徽章 hover 时显示的提示从 "Open conversation" 改为 "Watch live conversation"，更清晰地表达「现在过去会看到流式更新」。
+- 配套调整 `viewed` 标记的时机：以前 `openInChat` 在任何阶段都会立刻把 `viewed` 置 true，导致用户在 running 阶段开了一眼又关掉之后，run 完成时不会再有「done · unread」呼吸光提示。现在改成：
+  - `done` / `error` 时打开 → 立刻 `viewed = true`（和以前一致）；
+  - `running` 时打开 → 不动 `viewed`；改由 runner 的 `onComplete` 检查「用户当前是否还在看这个 thread」，是则置 true，否则留 false，让呼吸光照常出现。
+
+**Notes**
+
+- 实现上 chat panel 这边不需要新增任何逻辑：`useChatHistory` 早就会先 fetch 已经持久化的 user 消息，再检测到 "最后一条是 user 消息" → 通过 `agentApi.reconnectStream` 接回正在跑的 SSE 流，所以打开 running thread 时会自动接上流式输出。
+- 取消（Cancel）按钮在 running 阶段仍然存在，仍可中断当前回答。
+- 这条对应改动文件：`apps/web/src/components/Nodes/question/QuestionNode.tsx` + `apps/web/src/hooks/useQuestionRunner.ts`。
+
+---
+
 ## 2026-06-10 · Question 节点新增 Shift+Enter 快速执行快捷键
 
 **What Changed**

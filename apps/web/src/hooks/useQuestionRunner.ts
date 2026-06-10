@@ -15,6 +15,7 @@ import { createId } from '@sediment/shared';
 
 import { agentApi } from '@/api/agent';
 import useCanvasStore from '@/store/canvasStore';
+import { useChatStore } from '@/store/chatStore';
 
 import { applyCanvasCommandsFromToolResult } from './useAgentStream';
 
@@ -166,7 +167,17 @@ async function executeQuestionNode(nodeId: string): Promise<void> {
         },
         onComplete: () => {
           if (!abortController.signal.aborted) {
-            patch(nodeId, { status: 'done' });
+            // If the user is currently watching this question's thread
+            // in the chat panel at completion time, mark `viewed: true`
+            // so the "done · unread" glow doesn't fire (they watched
+            // it stream live). Otherwise leave `viewed` as the runner
+            // set it (false) so the glow surfaces when they next look.
+            const stillViewing =
+              useChatStore.getState().viewingQuestionThread?.nodeId === nodeId;
+            patch(nodeId, {
+              status: 'done',
+              ...(stillViewing ? { viewed: true } : {}),
+            });
           }
           activeRuns.delete(nodeId);
         },
