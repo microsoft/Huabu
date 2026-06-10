@@ -18,22 +18,6 @@ import type {
  */
 const DEFAULT_BINDING: AgentBinding = { kind: 'internal' };
 
-/**
- * Stable key for a (binding, mode) combo used to track which thread
- * belongs to which agent configuration on a given canvas.
- */
-function bindingKey(binding: AgentBinding, mode: AgentMode): string {
-  if (binding.kind === 'external') return `external::${binding.profileId}`;
-  return `internal::${mode}`;
-}
-
-function isSameBinding(a: AgentBinding, b: AgentBinding): boolean {
-  if (a.kind === 'internal' && b.kind === 'internal') return true;
-  if (a.kind === 'external' && b.kind === 'external')
-    return a.profileId === b.profileId;
-  return false;
-}
-
 export interface ChatState {
   /**
    * Per-thread message lists. Indexed by threadId, in-memory only.
@@ -61,12 +45,6 @@ export interface ChatState {
   lastAction: AgentMode;
   /** Map of canvasId → threadId, persisted so each canvas keeps its own thread. */
   threadMap: Record<string, string>;
-  /**
-   * Map of canvasId → (bindingKey → threadId). Persisted so that
-   * switching agents via the NewChatMenu restores the previous thread
-   * for that (binding, mode) combo instead of always creating a new one.
-   */
-  bindingThreadMap: Record<string, Record<string, string>>;
 
   /**
    * Active thread → agent binding. 1 thread = 1 binding for its entire
@@ -176,18 +154,6 @@ export interface ChatState {
   ) => void;
 
   /**
-   * Switch to the thread for the given (binding, mode) combo on a canvas.
-   * Restores the previous thread if one exists for this combo; otherwise
-   * creates a fresh one. If the selection matches the current binding+mode,
-   * always creates a new thread (the "+" / "same agent" fast-path).
-   */
-  switchToBinding: (
-    canvasId: string | undefined,
-    binding: AgentBinding,
-    mode: AgentMode,
-  ) => void;
-
-  /**
    * Change the agent binding for the current thread. Pass `canvasId` to
    * also persist the choice to `bindingMap` so it is remembered the
    * next time the user opens this canvas. UI guards against calling
@@ -263,7 +229,6 @@ export const useChatStore = create<ChatState>()(
       historyLoadedThreads: new Set<string>(),
       lastAction: 'ask',
       threadMap: {},
-      bindingThreadMap: {},
       agentBinding: DEFAULT_BINDING,
       bindingMap: {},
       pendingAttachments: [],
@@ -343,7 +308,6 @@ export const useChatStore = create<ChatState>()(
         const {
           threadMap,
           bindingMap,
-          bindingThreadMap,
           messagesByThread,
           historyLoadedThreads,
         } = get();
@@ -363,18 +327,6 @@ export const useChatStore = create<ChatState>()(
         const updatedBindings = canvasId
           ? { ...bindingMap, [canvasId]: initialBinding }
           : { ...bindingMap };
-        // Record (canvasId, binding+mode) → threadId so switchToBinding
-        // can restore this thread when the user switches back.
-        const key = bindingKey(initialBinding, initialLastAction);
-        const updatedBindingThreads = canvasId
-          ? {
-              ...bindingThreadMap,
-              [canvasId]: {
-                ...(bindingThreadMap[canvasId] ?? {}),
-                [key]: newThreadId,
-              },
-            }
-          : bindingThreadMap;
         // Seed an empty messages list for the new thread and mark it
         // history-loaded so the history hook doesn't try to fetch.
         const nextLoaded = new Set(historyLoadedThreads);
@@ -389,49 +341,8 @@ export const useChatStore = create<ChatState>()(
           threadMap: updatedThreads,
           agentBinding: initialBinding,
           bindingMap: updatedBindings,
-          bindingThreadMap: updatedBindingThreads,
         });
         get().evictInactiveThreads();
-      },
-
-      switchToBinding: (canvasId, binding, mode) => {
-        const state = get();
-        // If the selection matches the current setup, always create a
-        // fresh thread (the "+" shortcut or re-selecting the active row).
-        const sameBind =
-          isSameBinding(state.agentBinding, binding) &&
-          state.lastAction === mode;
-        if (sameBind || !canvasId) {
-          get().clearMessages(canvasId, {
-            ...(binding.kind === 'external' ? { binding } : {}),
-            lastAction: mode,
-          });
-          return;
-        }
-
-        // Check if we already have a thread for this (canvas, binding+mode).
-        const key = bindingKey(binding, mode);
-        const existing = state.bindingThreadMap[canvasId]?.[key];
-
-        if (existing) {
-          const restoredBinding =
-            binding.kind === 'external' ? binding : DEFAULT_BINDING;
-          set({
-            threadId: existing,
-            threadMap: { ...state.threadMap, [canvasId]: existing },
-            agentBinding: restoredBinding,
-            bindingMap: { ...state.bindingMap, [canvasId]: restoredBinding },
-            lastAction: mode,
-            pendingAttachments: [],
-            selectionAttachment: null,
-          });
-          get().evictInactiveThreads();
-        } else {
-          get().clearMessages(canvasId, {
-            ...(binding.kind === 'external' ? { binding } : {}),
-            lastAction: mode,
-          });
-        }
       },
 
       setAgentBinding: (binding, canvasId) => {
@@ -599,7 +510,6 @@ export const useChatStore = create<ChatState>()(
         threadId: state.threadId,
         lastAction: state.lastAction,
         bindingMap: state.bindingMap,
-        bindingThreadMap: state.bindingThreadMap,
       }),
     },
   ),

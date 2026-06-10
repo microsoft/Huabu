@@ -71,7 +71,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const messages = useChatStore(selectCurrentMessages);
   const isHistoryLoaded = useChatStore(selectCurrentHistoryLoaded);
   const updateMessage = useChatStore((state) => state.updateMessage);
-  const switchToBinding = useChatStore((state) => state.switchToBinding);
+  const clearMessages = useChatStore((state) => state.clearMessages);
   const threadId = useChatStore((state) => state.threadId);
   const canvasId = useCanvasStore((state) => state.canvasId);
   const llmConfig = useLLMStore((state) => state.config);
@@ -476,15 +476,21 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     );
   };
 
-  // Switch to the chosen (mode, binding). Restores an existing thread
-  // for that combo when available; creates a fresh one otherwise.
-  // Re-selecting the *current* combo always creates new (the "+" path).
+  // Atomic "reset thread + apply (mode, binding)". Both the mode
+  // and binding land in the same zustand commit inside
+  // `clearMessages`, so the user never sees an intermediate frame
+  // with the old mode or a stale internal binding.
   const handleStartNewChat = useCallback(
     (choice: NewChatChoice) => {
       if (isLoading) return;
-      switchToBinding(canvasId || undefined, choice.binding, choice.mode);
+      clearMessages(canvasId || undefined, {
+        ...(choice.binding.kind === 'external'
+          ? { binding: choice.binding }
+          : {}),
+        lastAction: choice.mode,
+      });
     },
-    [isLoading, canvasId, switchToBinding],
+    [isLoading, canvasId, clearMessages],
   );
 
   return (
