@@ -42,6 +42,7 @@ import {
   canvasRoot,
   chatDir,
   chatPath,
+  deltaLogPath,
   eventsPath,
   intentPath,
   nodeFilePath,
@@ -51,6 +52,7 @@ import {
 import type { Context } from '@earendil-works/pi-ai';
 import type {
   CanvasEventRecord,
+  ExecuteOriginator,
   IntentEpisode,
   RecentAction,
 } from '@sediment/shared';
@@ -111,6 +113,30 @@ export interface NodeContentSummary {
 
 /** Append-only behavioural event for a canvas (re-export of shared schema). */
 export type CanvasEvent = CanvasEventRecord;
+
+/**
+ * One row in `<canvasDir>/.history/delta-log.jsonl` — the persisted
+ * trace of a single headless-executor batch (M2).
+ *
+ * Field names are chosen so a future SQLite migration can use them
+ * verbatim as column names (the planned `delta_log` table mirrors this
+ * shape 1:1). The `command` and `deltas` fields stay opaque (`unknown`)
+ * at the storage layer; the engine owns their schema in
+ * `@sediment/shared/canvas-engine/delta`.
+ */
+export interface DeltaLogEntry {
+  /** Canvas version this batch landed at — also the row's primary key. */
+  version: number;
+  /** Wall-clock time of the append (server clock). */
+  ts: number;
+  /** Optional run id; multiple rows can share one runId in M3 batches. */
+  runId?: string;
+  /** Annotated commands the executor actually applied (origin/labelSource stamped). */
+  commands: unknown[];
+  /** Coarse `Delta[]` produced by diffing prestate → poststate. */
+  deltas: unknown[];
+  originator: ExecuteOriginator;
+}
 
 export type RenameResult =
   | {
@@ -677,6 +703,34 @@ export class CanvasStore {
    */
   readEvents(limit?: number): CanvasEvent[] {
     return readJsonLines<CanvasEvent>(eventsPath(this.canvasId), limit);
+  }
+
+  // ── Delta log (headless executor, M2) ────────────────────────────────────
+  //
+  // Append-only JSONL of `Delta[]` batches produced by the server-side
+  // canvas executor. One line per `POST /:canvasId/execute` call that
+  // mutated state; each row carries the version it landed at, the
+  // commands it applied, and the structural deltas the engine emitted.
+  //
+  // The wire schema (`Delta`, originator) lives in
+  // `@sediment/shared/canvas-engine/delta` and `…/api/canvas` to keep
+  // the contract single-sourced. Lines are line-atomic on POSIX so a
+  // crash mid-write drops the trailing partial line on read.
+
+  appendDeltaLogEntry(entry: DeltaLogEntry): void {
+    appendJsonLine<DeltaLogEntry>(deltaLogPath(this.canvasId), entry);
+  }
+
+  /**
+   * Read every delta-log row whose `version` is strictly greater than
+   * `fromVersion`. Empty when no log exists yet. Returns rows in
+   * write order (which equals version order — the executor mutex
+   * guarantees monotonic appends).
+   */
+  readDeltaLogSince(fromVersion: number): DeltaLogEntry[] {
+    const all = readJsonLines<DeltaLogEntry>(deltaLogPath(this.canvasId));
+    if (fromVersion <= 0) return all;
+    return all.filter((row) => row.version > fromVersion);
   }
 
   // ── Preferences (removed) ────────────────────────────────────────────────

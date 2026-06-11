@@ -15,7 +15,7 @@ import { TOOL_REGISTRY, type ToolDefinition } from './definitions.js';
 import { executeTool } from './executor.js';
 import { loadAgent, type AgentId } from '../../../prompt/index.js';
 
-import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
+import type { AgentTool } from '@earendil-works/pi-agent-core';
 import type { AgentMode, NodeOrigin } from '@sediment/shared';
 
 export { executeTool } from './executor.js';
@@ -70,11 +70,8 @@ export interface ToolBuildContext {
 function toAgentTool(def: ToolDefinition, ctx: ToolBuildContext): AgentTool {
   return {
     ...def,
-    execute: async (
-      _toolCallId,
-      params,
-    ): Promise<AgentToolResult<undefined>> => {
-      const text = await executeTool(
+    execute: async (_toolCallId, params) => {
+      const out = await executeTool(
         def.name,
         params as Record<string, unknown>,
         {
@@ -82,10 +79,17 @@ function toAgentTool(def: ToolDefinition, ctx: ToolBuildContext): AgentTool {
           origin: ctx.origin,
         },
       );
-      return {
-        content: [{ type: 'text', text }],
-        details: undefined,
-      };
+      // Handlers may return either a plain string (the common text
+      // envelope) or a pre-built `AgentToolResult` when they need to
+      // emit non-text parts — e.g. `read` returning an image artifact
+      // inline as vision content.
+      if (typeof out === 'string') {
+        return {
+          content: [{ type: 'text', text: out }],
+          details: undefined,
+        };
+      }
+      return out;
     },
   };
 }

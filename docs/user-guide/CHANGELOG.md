@@ -16,6 +16,67 @@
 
 - 此变更是 session/agent 模型对齐讨论的结果：profile = 模板，session = 按需创建，canvas 不关心 session 生命周期。
 - 还原了 `c9ea5ee` 中的 `bindingThreadMap` / `switchToBinding` 实现（方向不一致）。
+## 2026-06-10 · Canvas agent 可以直接读图片节点
+
+**What Changed**
+
+- **Canvas agent 的 `read` 工具现在会把 image artifact 作为 vision 内容内联返回**（仅限光栅图：png / jpg / gif / webp / bmp）。之前 agent 只有在用户**选中**了 image 节点时才能看到图（走 selection → vision attachment 那条路），现在 agent 自己 `read("nodes/<label>.md")` 拿到 frontmatter 里的 `src`、再 `read(src)` 就能直接看图，不需要用户先选中。
+- PDF / video / SVG 之外的二进制（archive / 编译产物等）仍然按"binary, refused"处理；SVG 走文本路径保持不变。
+
+**Notes**
+
+- 对模型侧无感升级：vision-capable 模型自动收到 `ImageContent` part；不支持视觉的模型会被 pi-ai 的下游转换降级为占位文本，不会报错。
+- 改动文件：`apps/server/src/modules/agent/tools/handlers/fs-read.ts`、`executor.ts`、`index.ts` 以及 `prompt/skills/canvas/SKILL.md`。
+
+---
+
+## 2026-06-10 · Edge Label 失焦后边框颜色和边线保持一致
+
+**What Changed**
+
+- **新建 edge label 失焦（commit）之后，pill 边框颜色现在会和这条边的实际线条颜色一致**。之前对没有显式设置 `stroke` 的默认 edge，pill 在失焦后边框会回退到 info 蓝（`var(--color-info)`），而 SVG 线条实际是 React Flow 的灰色默认 (`#b1b1b7`)，两者对不上；现在 fallback 改成 React Flow 自身的 `--xy-edge-stroke` 默认 token，所以颜色完全跟随 SVG path 渲染结果。
+- 已经显式选过 palette 颜色的 edge 行为不变（之前就会跟随）。
+- 选中或正在编辑时仍然显示 info 蓝边框，与 `.react-flow__edge.selected` 的 stroke 高亮保持一致，未做改动。
+
+**Notes**
+
+- 仅影响 [LabelledEdge.tsx](apps/web/src/components/Panels/Canvas/edges/LabelledEdge.tsx) 中的 `borderColor` 计算，不涉及数据层或持久化。
+
+---
+
+## 2026-06-10 · Question 节点在 running 阶段也能在 chat panel 中打开
+
+**What Changed**
+
+- **Question 节点进入 `running` 状态后，工具条上的「View conversation」按钮和状态徽章都直接可点**（之前只在 `done` / `error` 才出现），点击后右侧 chat panel 会切到这个 question 的 thread，可以实时看着模型回复一点点流出来。
+- 双击 running 的 question 节点也会直接打开对话面板（之前 running 阶段双击是无效的，因为既不能编辑也没法看回答）。
+- 在 running 状态下按钮 / 徽章 hover 时显示的提示从 "Open conversation" 改为 "Watch live conversation"，更清晰地表达「现在过去会看到流式更新」。
+- 配套调整 `viewed` 标记的时机：以前 `openInChat` 在任何阶段都会立刻把 `viewed` 置 true，导致用户在 running 阶段开了一眼又关掉之后，run 完成时不会再有「done · unread」呼吸光提示。现在改成：
+  - `done` / `error` 时打开 → 立刻 `viewed = true`（和以前一致）；
+  - `running` 时打开 → 不动 `viewed`；改由 runner 的 `onComplete` 检查「用户当前是否还在看这个 thread」，是则置 true，否则留 false，让呼吸光照常出现。
+
+**Notes**
+
+- 实现上 chat panel 这边不需要新增任何逻辑：`useChatHistory` 早就会先 fetch 已经持久化的 user 消息，再检测到 "最后一条是 user 消息" → 通过 `agentApi.reconnectStream` 接回正在跑的 SSE 流，所以打开 running thread 时会自动接上流式输出。
+- 取消（Cancel）按钮在 running 阶段仍然存在，仍可中断当前回答。
+- 这条对应改动文件：`apps/web/src/components/Nodes/question/QuestionNode.tsx` + `apps/web/src/hooks/useQuestionRunner.ts`。
+
+---
+
+## 2026-06-10 · Question 节点新增 Shift+Enter 快速执行快捷键
+
+**What Changed**
+
+- **编辑 Question 节点时按 `Shift+Enter` 直接提交并立刻执行**，跳过原本的自动倒计时（默认 ~10s），让用户在确认问题已经写完时可以一键开跑。
+- 行为细节：先把当前 draft 写回节点（如果有变化），然后把节点状态切到 `pending` 并把 `runAt` 设为当前时间，`useQuestionRunner` 会马上拉起执行；同时退出编辑模式。
+- 同时为该快捷键加了一道防护：触发 `Shift+Enter` 之后，textarea blur 不会再覆盖刚刚写好的 `runAt`（否则会被改回 `now + delay`）。
+- 在 `?` 快捷键面板和 docs 的 Keyboard Shortcuts 页 "AI" 分类下新增了这条快捷键说明，文档的 Question 节点 Workflow 步骤里也补了一句提示。
+
+**Notes**
+
+- 普通 `Enter` 行为不变，仍然是在 textarea 里插入换行。
+- 当 `@` mention 菜单展开时，`Shift+Enter` 仍然会直接提交并执行；如果想先选择 agent，请用 `Enter` 或 `Tab` 接受高亮项。
+- 如果当前 draft 为空（trim 后为空字符串），`Shift+Enter` 不会触发任何动作，避免空问题进入 pending。
 
 ---
 
@@ -227,6 +288,21 @@
 
 - 正常情况下 daemon 通常在百毫秒内就上线，所以多数用户不会感知到这个变化。只有首次冷启动或机器很慢的场景下，原来"先弹错、点重试又能用"的体验会被消除。
 - 真正卡住的极端场景（例如 daemon 一直起不来）现在最长会让 ChatPanel loading 状态保持 20 s 才显示失败，但前提是 supervisor 仍在尝试重启；一旦它放弃，错误会立刻浮出来，用户可以走 Settings → External Agents 的 **Restart worker** 重置。
+
+## 2026-06-05 · AI 画布操作迁移到服务端 Headless Executor
+
+**What Changed**
+
+- **AI 的 `canvas_commands` 工具现在在服务端执行，而不是把命令吐给前端再让前端跑引擎**。新增了 `POST /api/canvas/:canvasId/execute` 接口、一个 per-canvas 异步互斥锁、以及共享 `executeCanvasCommands` 引擎在服务端的封装。命令在服务端跑完后，服务端会同步落盘：更新 `canvas.json`（含 `version` 自增）、写入每个 Markdown 化节点的 sidecar 文件、并在 `<canvasDir>/.history/delta-log.jsonl` 追加一条 batch 记录（包含 fromVersion → toVersion、原始 commands、最小化的 deltas、来源标记）。
+- **前端不再二次执行 AI 命令**。`useAgentStream` 现在消费工具响应里携带的 `deltas + toVersion + pendingEffects`，通过新的 `applyDeltasFromAgent` action 把节点/边的最小变更原子地合到本地 store，并把 `mutatedNodes` 交给已有的 web 端 post-effects（预处理调度、Frame fit 等）继续走原来的路径。版本号严格跟随服务端，autosave 不会因此被触发，避免双写。
+- **撤销 / 还原 / "AI 改过的节点" 高亮、Frame 自动 fit、内容预处理调度** 这些既有行为全部保留：snapshot 在调用 `applyDeltasFromAgent` 之前抓取，命令上还是带着服务端预分配好的稳定 id，所以 `useCanvasChanges` 系列逻辑无需改动。
+
+**Notes**
+
+- **Sketch 识别流程在本版本仍走前端执行**（`origin.type === 'sketch-recognized'` 会从 handler 直接返回旧版 envelope，跳过服务端执行），以避免与 `sketch.service` 里已经做的客户端 `executeCommands` 重复施加。Sketch 会在 M3 接入跨标签广播时统一收回到 headless 路径。
+- **既有画布在第一次跑 AI batch 时会自动生成 `.history/delta-log.jsonl` 文件**；老画布不需要任何迁移，没有 AI batch 就不会出现这个文件。
+- **OCC 冲突语义不变**：服务端写盘仍然走原来的 `version` 校验路径；agent 这条链路因为有 per-canvas 互斥锁，多个 AI batch 不会互相打架。
+- 服务端尚未广播 deltas 给其它打开同一画布的客户端 —— 跨标签同步是 M3 的事；本版本只解决"AI 改画布"这一条入口，前端 UI 操作仍然走老的 PUT `/canvas/:id` 路径，不受影响。
 
 ---
 

@@ -56,7 +56,14 @@ export const keyboardShortcutSections: ShortcutSection[] = [
   },
   {
     title: 'AI',
-    items: [{ keys: 'Ctrl/Cmd+I', description: 'Open intent recognition' }],
+    items: [
+      { keys: 'Ctrl/Cmd+I', description: 'Open intent recognition' },
+      {
+        keys: 'Shift+Enter',
+        description:
+          'Submit a Question node and run immediately (while editing)',
+      },
+    ],
   },
   {
     title: 'Help',

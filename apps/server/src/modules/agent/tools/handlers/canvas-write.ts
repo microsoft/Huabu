@@ -1,12 +1,12 @@
 /**
  * Canvas write tool handler — `canvas_commands`.
  *
- * Translates the LLM's command batch into the SSE-bound payload the
- * frontend executes. The handler does not touch the filesystem itself;
- * it only annotates each command with `origin` / `labelSource` so
- * downstream apply logic knows the change came from the agent. The
- * actual canvas mutation happens client-side via the existing
- * canvas-command pipeline once the SSE event lands.
+ * As of M2 (headless executor) this handler runs the batch
+ * **server-side** through {@link executeOnServer} and returns the
+ * structural deltas + per-command outcomes the web client should
+ * apply locally. The handler still owns the origin / labelSource
+ * annotation step — `executeOnServer` is intentionally agnostic to
+ * who the agent is.
  *
  * Phase 4 (Milkdown migration): block-level `provenance` is now stamped
  * client-side by `NotePreview` (it owns the markdown→PM parser needed
@@ -14,13 +14,21 @@
  * `provenance` field. Range-precise provenance generation is tracked
  * separately in Phase 4.5 — see `docs/milkdown-migration-plan.md` §4.
  *
- * Returns the inner payload (`{ source, canvasId, commands }`) on
- * success; the SSE bridge / web client wraps it into the standard
+ * Returns the envelope `{ source, canvasId, commands, fromVersion,
+ * toVersion, deltas, results, pendingEffects, runId }` on success;
+ * the SSE bridge / web client wraps it into the standard
  * `ToolResponse<'canvas_commands', ...>` envelope. Errors throw —
  * pi-agent-core catches and surfaces them as `isError: true`.
  */
 
-import type { NodeOrigin } from '@sediment/shared';
+import { createId } from '@sediment/shared';
+
+import {
+  CanvasNotFoundError,
+  executeOnServer,
+} from '../../../canvas/canvas-executor.js';
+
+import type { CanvasCommand, NodeOrigin } from '@sediment/shared';
 
 /**
  * Args type for `handleCanvasCommands`. Intentionally kept loose
@@ -58,7 +66,7 @@ export async function handleCanvasCommands(
     `[canvas_commands] handler invoked: canvasId=${args.canvasId ?? '(none)'}, origin=${origin.type}, commandCount=${args.commands?.length ?? 0}, types=[${(args.commands ?? []).map((c) => c.type).join(', ')}]`,
   );
 
-  const commands = args.commands.map((cmd) => {
+  const annotated = args.commands.map((cmd) => {
     if (cmd.type === 'CREATE_NODES') {
       const nodes = cmd.nodes as Array<Record<string, unknown>>;
       return {
@@ -158,9 +166,54 @@ export async function handleCanvasCommands(
     return cmd;
   });
 
-  return JSON.stringify({
-    source: 'agent',
-    canvasId: args.canvasId,
-    commands,
-  });
+  const runId = createId('run');
+
+  // M2 sketch carve-out: the sketch pipeline still applies commands
+  // client-side via `useCanvasStore.executeCommands('agent')` after
+  // receiving the SketchCommandResponse. Running the executor here
+  // would double-apply and immediately desync local `version`. The
+  // chat agent path (default origin `ai-operate`) is the one that
+  // benefits from server-side execution today; sketch joins in M3
+  // when broadcast lands.
+  if (origin.type === 'sketch-recognized') {
+    return JSON.stringify({
+      source: 'agent',
+      canvasId: args.canvasId,
+      commands: annotated,
+    });
+  }
+
+  try {
+    const result = await executeOnServer({
+      canvasId: args.canvasId,
+      commands: annotated as unknown as CanvasCommand[],
+      originator: { source: 'agent' },
+      runId,
+    });
+
+    return JSON.stringify({
+      source: 'agent',
+      canvasId: args.canvasId,
+      runId,
+      fromVersion: result.fromVersion,
+      toVersion: result.toVersion,
+      // Carry the executor's annotated commands (ids assigned) so the
+      // web's revert UX can snapshot prestate per command before
+      // applying the deltas.
+      commands: result.commands,
+      deltas: result.deltas,
+      results: result.results,
+      pendingEffects: {
+        mutatedNodes: result.pendingEffects.mutatedNodes,
+        deletedNodeIds: result.pendingEffects.deletedNodeIds,
+        contentEditedNodeIds: result.pendingEffects.contentEditedNodeIds,
+        deferredFitFrameIds: result.pendingEffects.deferredFitFrameIds,
+      },
+    });
+  } catch (err) {
+    if (err instanceof CanvasNotFoundError) {
+      throw new Error(`Canvas not found: ${args.canvasId}`);
+    }
+    throw err;
+  }
 }

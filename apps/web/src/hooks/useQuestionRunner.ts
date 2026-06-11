@@ -15,6 +15,9 @@ import { createId } from '@sediment/shared';
 
 import { agentApi } from '@/api/agent';
 import useCanvasStore from '@/store/canvasStore';
+import { useChatStore } from '@/store/chatStore';
+
+import { applyCanvasCommandsFromToolResult } from './useAgentStream';
 
 import type { AgentBinding, AgentMode } from '@sediment/shared';
 
@@ -77,6 +80,13 @@ async function executeQuestionNode(nodeId: string): Promise<void> {
   // failures or the soft turn cap.
   let sawDone = false;
 
+  // Per-run map of toolCallId → toolName, populated from `tool_call`
+  // events. We need it on `tool_call_update` because the update event
+  // itself doesn't carry the tool name — same trick the chat panel
+  // uses (recovered from the prior tool part there, kept local here
+  // since the question runner doesn't materialise messages).
+  const toolNamesByCallId = new Map<string, string>();
+
   try {
     // Stream to existing /api/agent endpoint.
     //
@@ -93,9 +103,51 @@ async function executeQuestionNode(nodeId: string): Promise<void> {
       mode,
       {
         onEvent: (event) => {
-          if (event.type === 'done') sawDone = true;
-          // Events stream in background — we don't render them live.
-          // The conversation is viewed later via openQuestionThread.
+          if (event.type === 'done') {
+            sawDone = true;
+            return;
+          }
+          // Track tool names so we can identify canvas_commands results
+          // on the matching tool_call_update. The wire field is
+          // `internalToolName` (NOT `toolName`) — it's the
+          // discriminator the server stamps on internal-agent turns;
+          // external ACP turns leave it undefined and we ignore them.
+          if (event.type === 'tool_call') {
+            const d = event.data as {
+              toolCallId?: string;
+              internalToolName?: string;
+            };
+            if (d.toolCallId && d.internalToolName) {
+              toolNamesByCallId.set(d.toolCallId, d.internalToolName);
+            }
+            return;
+          }
+          // Apply canvas_commands tool results to the local store so
+          // the open tab reflects the agent's edits live (without this
+          // the canvas only updates after a page refresh). Crucially,
+          // this also bumps the local `version` to match the server's
+          // `toVersion` — without that, the subsequent `status=done`
+          // patch's autosave PUT 409s, the conflict toast appears, and
+          // every later question-node status update silently fails too.
+          if (event.type === 'tool_call_update') {
+            const d = event.data as {
+              toolCallId?: string;
+              rawOutput?: unknown;
+            };
+            if (!d.toolCallId || d.rawOutput === undefined) return;
+            const toolName = toolNamesByCallId.get(d.toolCallId);
+            if (toolName !== 'canvas_commands') return;
+            const rawText =
+              typeof d.rawOutput === 'string'
+                ? d.rawOutput
+                : JSON.stringify(d.rawOutput);
+            applyCanvasCommandsFromToolResult(rawText);
+            return;
+          }
+          // Other events (text_delta / thinking_delta / plan / meta /
+          // session_*) stream in background — we don't render them
+          // live; the conversation is viewed later via
+          // openQuestionThread.
         },
         onError: (err) => {
           if (!abortController.signal.aborted) {
@@ -115,7 +167,17 @@ async function executeQuestionNode(nodeId: string): Promise<void> {
         },
         onComplete: () => {
           if (!abortController.signal.aborted) {
-            patch(nodeId, { status: 'done' });
+            // If the user is currently watching this question's thread
+            // in the chat panel at completion time, mark `viewed: true`
+            // so the "done · unread" glow doesn't fire (they watched
+            // it stream live). Otherwise leave `viewed` as the runner
+            // set it (false) so the glow surfaces when they next look.
+            const stillViewing =
+              useChatStore.getState().viewingQuestionThread?.nodeId === nodeId;
+            patch(nodeId, {
+              status: 'done',
+              ...(stillViewing ? { viewed: true } : {}),
+            });
           }
           activeRuns.delete(nodeId);
         },

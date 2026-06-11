@@ -28,7 +28,7 @@ Node text, frontmatter, skill files, memory, history. Read with `read`, `find`, 
     <safeLabel>.md         # one file per node: YAML frontmatter + Markdown body
   memory/*.md              # long-form, agent-curated memory
   skills/<id>/SKILL.md     # per-canvas skill overrides (optional)
-  .artifacts/<id><ext>     # raw bytes for image / pdf / video / cover (binary — `read` rejects these)
+  .artifacts/<id><ext>     # raw bytes (image / pdf / video / cover); `read` returns images inline, rejects pdf / video
   .history/                # saved threads, intent, event log (rarely needed)
 ```
 
@@ -86,7 +86,7 @@ Where each node sits, how big it is, which frame it belongs to, what colour it's
 
 - **Selected-node context carries `{ id, type, label, filename }`.** Pass the supplied `filename` straight to `read` for the body — do NOT re-derive it from the label. Only when a node is mentioned outside the selection (e.g. it appears in a canvas snapshot but wasn't selected) do you need to build the path yourself via the safeLabel rule above. For spatial / structural info, call `inspect_nodes({ ids: ["<id>"] })`.
 - **No cross-canvas access.** All paths are scoped to the active canvas.
-- **Binary files are rejected by `read`.** Image / PDF / video bytes live under `.artifacts/`; the `src` URL is in the node markdown frontmatter.
+- **`read` returns image artifacts inline** as vision content; pass the `src` from a node's frontmatter straight to `read`. PDF / video bytes still live under `.artifacts/` but are not readable — their `src` URL is the only handle.
 
 ---
 

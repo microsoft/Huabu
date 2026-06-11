@@ -1,0 +1,149 @@
+name: Release
+
+# Build the desktop app for macOS, Windows, and Linux on every
+# `v*.*.*` tag push, then publish the three installers as a GitHub
+# Release attached to that tag.
+#
+# Trigger:
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# Or run manually from the Actions tab via `workflow_dispatch`,
+# supplying a tag like `v0.1.0-rc1`. Manual runs publish as a
+# *draft* release so you can sanity-check the assets before
+# making them public.
+#
+# Code-signing is intentionally disabled here. Both the macOS and
+# Windows installers ship unsigned — users get the usual
+# "unidentified developer" / SmartScreen prompt on first launch.
+# When signing certificates are ready, set CSC_LINK / CSC_KEY_PASSWORD
+# (mac) and WIN_CSC_LINK / WIN_CSC_KEY_PASSWORD (win) as repo secrets
+# and remove the `CSC_IDENTITY_AUTO_DISCOVERY=false` override below.
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag name (e.g. v0.1.0-rc1) — published as a draft release'
+        required: true
+
+permissions:
+  contents: write # to create the release + upload assets
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            script: build:desktop:mac
+          - os: windows-latest
+            script: build:desktop:win
+          # Linux is intentionally disabled — electron-builder's
+          # AppImage target rejects the scoped package name
+          # `@sediment/desktop` as executableName (slash is unsafe in
+          # file paths). Re-enable by adding `executableName: huabu`
+          # under the `linux:` section in apps/desktop/electron-builder.yml.
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Version is inferred from `packageManager` in package.json
+      # (pnpm@10.28.2+sha512…) — passing it again here would conflict
+      # with the sha-pinned value and fail with ERR_PNPM_BAD_PM_VERSION.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          HUSKY: '0' # skip git-hook install on CI
+
+      # apps/server's tsup bundle imports from @agentlet/protocol and
+      # @agentlet/server — both are workspace packages under
+      # external/agentlet/ whose dist/ outputs don't exist on a fresh
+      # checkout. Root package.json has predev / predev:desktop that
+      # auto-run this, but there's no prebuild:desktop, so the build
+      # scripts assume agentlet is already compiled. Build it
+      # explicitly here so the matrix script doesn't trip on
+      # `Could not resolve "@agentlet/protocol"`.
+      - name: Build agentlet workspace packages
+        run: pnpm run build:agentlet
+
+      - name: Build desktop installer
+        run: pnpm run ${{ matrix.script }}
+        # No CSC_LINK / certificate configured, so:
+        #   • macOS: electron-builder finds no Developer ID identity in
+        #     the runner keychain and falls back to ad-hoc signing
+        #     (identity `-`). Required on Apple Silicon — without it
+        #     the .app won't even launch. Users still see the gentle
+        #     "unidentified developer" prompt and can right-click →
+        #     Open. Set CSC_LINK + CSC_KEY_PASSWORD secrets to ship
+        #     properly-signed builds.
+        #   • Windows: no CSC_LINK → electron-builder silently skips
+        #     signing; the .exe ships unsigned (SmartScreen prompts).
+
+      # electron-builder writes outside the repo (../huabu-electron-out/
+      # per apps/desktop/electron-builder.yml, to dodge a Windows file-lock
+      # issue with VS Code). Copy the artefacts back into the workspace so
+      # actions/upload-artifact can pick them up reliably on all three OSes.
+      - name: Stage release assets
+        shell: bash
+        run: |
+          mkdir -p ./release-assets
+          shopt -s nullglob
+          for ext in dmg exe AppImage blockmap; do
+            for f in ../huabu-electron-out/*."$ext"; do
+              cp "$f" ./release-assets/
+            done
+          done
+          for f in ../huabu-electron-out/latest*.yml; do
+            cp "$f" ./release-assets/
+          done
+          echo "── staged assets ──"
+          ls -lh ./release-assets/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: huabu-${{ matrix.os }}
+          path: release-assets/
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          # Flatten all three matrix uploads into one dir for the
+          # release-asset glob below.
+          merge-multiple: true
+
+      - name: List collected assets
+        run: ls -lh assets/
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: ${{ github.event.inputs.tag || github.ref_name }}
+          # Manual (workflow_dispatch) runs publish as drafts so you can
+          # vet the installers before flipping them public; tag-pushes
+          # publish immediately.
+          draft: ${{ github.event_name == 'workflow_dispatch' }}
+          generate_release_notes: true
+          files: |
+            assets/*.dmg
+            assets/*.exe
+            assets/*.blockmap
+          fail_on_unmatched_files: true

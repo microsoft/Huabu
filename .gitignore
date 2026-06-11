@@ -142,7 +142,6 @@ vite.config.ts.timestamp-*
 
 apps/server/data
 *.sqlite
-pnpm-lock.yaml
 
 # Electron desktop build artifacts
 apps/desktop/dist/

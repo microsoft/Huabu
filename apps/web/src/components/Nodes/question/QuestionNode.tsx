@@ -41,6 +41,7 @@ export const QuestionNode = memo(
     const [isEditing, setIsEditing] = useState(false);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const processingRef = useRef<AbortController>();
+    const suppressBlurAutoRunRef = useRef(false);
 
     const inputContent =
       data.input?.kind === 'text' ? (data.input.content ?? '') : '';
@@ -122,6 +123,16 @@ export const QuestionNode = memo(
     /** Whether this node has been executed at least once. */
     const hasRun = status === 'done' || status === 'error';
 
+    /**
+     * Whether the chat panel can be opened to this question's thread.
+     * True once a `threadId` exists AND the node is no longer being
+     * edited / queued — i.e. running (so the user can watch the
+     * assistant stream live) or finished. `useChatHistory` handles
+     * the running case: it hydrates the persisted user message, then
+     * calls `reconnectStream` to resume the live SSE feed.
+     */
+    const canOpenInChat = !!data.threadId && (hasRun || status === 'running');
+
     // ------------------------------------------------------------------
     // Open question thread in chat panel
     // ------------------------------------------------------------------
@@ -135,8 +146,12 @@ export const QuestionNode = memo(
       // (defaults to internal when the node pre-dates `agentBinding`).
       openQuestionThread(id, data.threadId, data.agentBinding);
       requestOpenRightPanel();
-      // Mark as viewed (persisted via autosave, no undo entry).
-      if (!data.viewed) {
+      // Mark as viewed only once the run has finished — if we marked
+      // it during `running` and the user navigated away before
+      // completion, the "done · unread" glow would never appear. The
+      // runner's `onComplete` checks `viewingQuestionThread` to apply
+      // `viewed: true` when the user is still watching at completion.
+      if (hasRun && !data.viewed) {
         patchNodeSilent(id, { viewed: true });
       }
     }, [
@@ -144,20 +159,23 @@ export const QuestionNode = memo(
       data.threadId,
       data.agentBinding,
       data.viewed,
+      hasRun,
       openQuestionThread,
       requestOpenRightPanel,
       patchNodeSilent,
     ]);
 
     // ------------------------------------------------------------------
-    // Double-click: edit (idle/pending) or open chat (done/error)
+    // Double-click:
+    //   - running / done / error  → open the conversation in chat panel
+    //   - idle / pending          → enter edit mode (cancelling the
+    //                               pending countdown if any)
     // ------------------------------------------------------------------
     const handleDoubleClick = useCallback(
       (e: React.MouseEvent) => {
         e.stopPropagation();
 
-        // After execution, double-click opens the conversation in chat panel
-        if (hasRun && data.threadId) {
+        if (canOpenInChat) {
           openInChat();
           return;
         }
@@ -169,7 +187,7 @@ export const QuestionNode = memo(
         }
         setIsEditing(true);
       },
-      [id, status, hasRun, data.threadId, patchNodeSilent, openInChat],
+      [id, status, canOpenInChat, patchNodeSilent, openInChat],
     );
 
     // ------------------------------------------------------------------
@@ -178,15 +196,23 @@ export const QuestionNode = memo(
     const questionToolbar = useMemo(
       () => (
         <>
-          {/* Edit question (before execution) or View conversation (after execution) */}
-          {hasRun && data.threadId ? (
+          {/* View conversation — available once the run has started
+              (running) or finished (done/error). For running threads the
+              chat panel hydrates persisted messages and `useChatHistory`
+              reconnects to the live SSE stream, so the user can watch
+              the assistant reply tokens land in real time. */}
+          {canOpenInChat ? (
             <FloatingToolbar.ActionButton
-              title="View conversation"
+              title={
+                status === 'running'
+                  ? 'Watch live conversation'
+                  : 'View conversation'
+              }
               onClick={openInChat}
             >
               <MessageSquare size={14} />
             </FloatingToolbar.ActionButton>
-          ) : status !== 'running' && status !== 'pending' ? (
+          ) : status !== 'pending' ? (
             <FloatingToolbar.ActionButton
               title="Edit question"
               onClick={() => {
@@ -224,7 +250,7 @@ export const QuestionNode = memo(
           )}
         </>
       ),
-      [id, status, hasRun, data.threadId, patchNodeSilent, openInChat],
+      [id, status, canOpenInChat, patchNodeSilent, openInChat],
     );
 
     const handleBlur = useCallback(
@@ -240,6 +266,13 @@ export const QuestionNode = memo(
         }
 
         setIsEditing(false);
+
+        // Shift+Enter already committed + started the run; skip the
+        // delayed auto-run schedule to avoid clobbering `runAt`.
+        if (suppressBlurAutoRunRef.current) {
+          suppressBlurAutoRunRef.current = false;
+          return;
+        }
 
         const trimmed = surface.draft.trim();
         const contentChanged = trimmed !== inputContent;
@@ -393,12 +426,37 @@ export const QuestionNode = memo(
     }, [surface.draft]);
 
     /**
-     * Intercept keys only while the mention menu is visible — the
-     * textarea otherwise behaves identically to plain text input
-     * (Enter inserts a newline; we never submit on Enter).
+     * Commit the current draft and start execution immediately.
+     * Bypasses the auto-run countdown used on blur. Used by the
+     * Shift+Enter shortcut.
      */
+    const submitAndRunNow = useCallback(() => {
+      const trimmed = surface.draft.trim();
+      if (!trimmed) return;
+
+      processingRef.current?.abort();
+      suppressBlurAutoRunRef.current = true;
+      setIsEditing(false);
+
+      if (trimmed !== inputContent) {
+        updateNodeData(id, {
+          input: { kind: 'text', content: trimmed },
+        });
+      }
+
+      patchNodeSilent(id, {
+        status: 'pending',
+        runAt: Date.now(),
+      });
+    }, [surface.draft, inputContent, id, updateNodeData, patchNodeSilent]);
+
     const handleTextareaKeyDown = useCallback(
       (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (e.key === 'Enter' && e.shiftKey) {
+          e.preventDefault();
+          submitAndRunNow();
+          return;
+        }
         if (!mentionState || !mentionMenuRef.current) return;
         if (e.key === 'ArrowDown') {
           e.preventDefault();
@@ -424,7 +482,7 @@ export const QuestionNode = memo(
           return;
         }
       },
-      [mentionState, acceptMention, dismissMention],
+      [mentionState, acceptMention, dismissMention, submitAndRunNow],
     );
 
     const isDoneUnviewed = status === 'done' && !viewed;
@@ -485,8 +543,14 @@ export const QuestionNode = memo(
                   ? data.errorMessage
                   : undefined
               }
-              onClick={hasRun && data.threadId ? openInChat : undefined}
-              title={hasRun && data.threadId ? 'Open conversation' : undefined}
+              onClick={canOpenInChat ? openInChat : undefined}
+              title={
+                canOpenInChat
+                  ? status === 'running'
+                    ? 'Watch live conversation'
+                    : 'Open conversation'
+                  : undefined
+              }
             />
           )}
         </TextNodeBody>

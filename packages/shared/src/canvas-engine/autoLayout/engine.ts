@@ -8,10 +8,17 @@
  *   fCoSE uses hard `fixedNodeConstraint` pins, so fixed nodes stay
  *   perfectly still and the new node is positioned via force simulation
  *   without contradictory all-pairs-shortest-path stress.
+ *
+ * The concrete solvers are **not** imported at module load. Both
+ * `colaSolver` and `fcoseSolver` transitively pull in
+ * `cytoscape-layout-utilities`, which reads `window` at module-load
+ * time and crashes any Node-only host (server, vitest --environment
+ * node, headless executor, etc.). Instead the web host calls
+ * `registerLayoutSolvers({...})` once at boot (see `./web.ts`); on
+ * the server the defaults stay `null` and `layout()` / `place()`
+ * return an empty `LayoutResult`, which the coordinator treats as a
+ * no-op.
  */
-
-import { colaSolver } from './solvers/colaSolver.js';
-import { fcoseSolver } from './solvers/fcoseSolver.js';
 
 import type { LayoutSolver } from './solvers/types.js';
 import type { LayoutGraph, LayoutOptions, LayoutResult } from './types.js';
@@ -23,15 +30,40 @@ export const DEFAULT_LAYOUT_OPTIONS: LayoutOptions = {
   nodePadding: 5,
 };
 
+// Returned when no solver is registered (e.g. headless / server). The
+// downstream `applyLayoutResult` treats an empty result as "nothing to
+// do" and returns the input nodes unchanged.
+const EMPTY_LAYOUT_RESULT: LayoutResult = {
+  positions: new Map(),
+  groupSizes: new Map(),
+};
+
+let defaultLayoutSolver: LayoutSolver | null = null;
+let defaultPlaceSolver: LayoutSolver | null = null;
+
+/**
+ * Register the default solvers used by every `LayoutEngine` instance.
+ * Intended to be called exactly once during app startup on hosts that
+ * want auto-layout (currently: the web client via
+ * `@sediment/shared/canvas-engine/web`).
+ */
+export function registerLayoutSolvers(solvers: {
+  layout?: LayoutSolver;
+  place?: LayoutSolver;
+}): void {
+  if (solvers.layout) defaultLayoutSolver = solvers.layout;
+  if (solvers.place) defaultPlaceSolver = solvers.place;
+}
+
 // ── CanvasPage Engine ──────────────────────────────────────────────────────
 
 export class LayoutEngine {
-  private layoutSolver: LayoutSolver;
-  private placeSolver: LayoutSolver;
+  private layoutSolverOverride: LayoutSolver | null;
+  private placeSolverOverride: LayoutSolver | null;
 
   constructor(layoutSolver?: LayoutSolver, placeSolver?: LayoutSolver) {
-    this.layoutSolver = layoutSolver ?? colaSolver;
-    this.placeSolver = placeSolver ?? fcoseSolver;
+    this.layoutSolverOverride = layoutSolver ?? null;
+    this.placeSolverOverride = placeSolver ?? null;
   }
 
   /**
@@ -42,8 +74,10 @@ export class LayoutEngine {
     graph: LayoutGraph,
     options: Partial<LayoutOptions> = {},
   ): LayoutResult {
+    const solver = this.layoutSolverOverride ?? defaultLayoutSolver;
+    if (!solver) return EMPTY_LAYOUT_RESULT;
     const opts = { ...DEFAULT_LAYOUT_OPTIONS, ...options };
-    return this.layoutSolver.solve(graph, opts);
+    return solver.solve(graph, opts);
   }
 
   /**
@@ -55,7 +89,9 @@ export class LayoutEngine {
     graph: LayoutGraph,
     options: Partial<LayoutOptions> = {},
   ): LayoutResult {
+    const solver = this.placeSolverOverride ?? defaultPlaceSolver;
+    if (!solver) return EMPTY_LAYOUT_RESULT;
     const opts = { ...DEFAULT_LAYOUT_OPTIONS, ...options };
-    return this.placeSolver.solve(graph, opts);
+    return solver.solve(graph, opts);
   }
 }

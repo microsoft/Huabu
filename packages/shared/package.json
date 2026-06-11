@@ -13,6 +13,10 @@
     "./canvas-engine": {
       "types": "./src/canvas-engine/index.ts",
       "import": "./src/canvas-engine/index.ts"
+    },
+    "./canvas-engine/web": {
+      "types": "./src/canvas-engine/autoLayout/web.ts",
+      "import": "./src/canvas-engine/autoLayout/web.ts"
     }
   },
   "files": [
