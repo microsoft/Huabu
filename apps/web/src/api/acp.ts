@@ -24,8 +24,8 @@ import { routes } from './_routes';
 
 import type {
   AcpAgentCliListResponse,
-  AcpDaemonStatus,
-  AcpDaemonStatusResponse,
+  AcpAgentletStatus,
+  AcpAgentletStatusResponse,
   AcpPermissionDecisionRequest,
   AcpPermissionDecisionResponse,
   AcpProfileCreateRequest,
@@ -47,8 +47,8 @@ export type {
   AcpAgentCliInfo,
   AcpAgentCliListResponse,
   AcpAgentProfile,
-  AcpDaemonStatus,
-  AcpDaemonStatusResponse,
+  AcpAgentletStatus,
+  AcpAgentletStatusResponse,
   AcpModelInfo,
   AcpProfileCreateRequest,
   AcpProfileMutationResponse,
@@ -137,28 +137,28 @@ export async function deleteAcpProfile(
   });
 }
 
-// ── Daemon status ────────────────────────────────────────────────────
+// ── Agentlet status ──────────────────────────────────────────────────
 
 /**
- * Fetch the embedded agentlet daemon's liveness snapshot. The UI uses
- * this to render the amber troubleshooting banner when `online: false`
+ * Fetch the embedded agentlet's liveness snapshot. The UI uses this
+ * to render the amber troubleshooting banner when `online: false`
  * and `lastError` is non-empty.
  */
-export async function getAcpDaemonStatus(): Promise<AcpDaemonStatus> {
-  return apiFetch<AcpDaemonStatusResponse>(routes.acpDaemon, {
-    fallbackMessage: 'Failed to read agentlet daemon status',
+export async function getAcpAgentletStatus(): Promise<AcpAgentletStatus> {
+  return apiFetch<AcpAgentletStatusResponse>(routes.acpAgentlet, {
+    fallbackMessage: 'Failed to read agentlet status',
   });
 }
 
 /**
- * Force the supervisor to re-fork the daemon immediately, resetting
+ * Force the supervisor to re-fork the agentlet immediately, resetting
  * backoff state. Triggered by the "Restart worker" button in
  * Settings → External Agents.
  */
-export async function restartAcpDaemon(): Promise<AcpDaemonStatus> {
-  return apiFetch<AcpDaemonStatusResponse>(routes.acpDaemonRestart, {
+export async function restartAcpAgentlet(): Promise<AcpAgentletStatus> {
+  return apiFetch<AcpAgentletStatusResponse>(routes.acpAgentletRestart, {
     method: 'POST',
-    fallbackMessage: 'Failed to restart agentlet daemon',
+    fallbackMessage: 'Failed to restart agentlet',
   });
 }
 

@@ -2,34 +2,27 @@ import WebSocket from 'ws'
 import type {
   AgentConnection,
   AcpMessage,
-  BridgeHelloParams,
-  BridgeLifecycleEvent,
+  LifecycleEvent,
   JsonRpcMessage,
 } from '@agentlet/protocol'
-import { BridgeMethods } from '@agentlet/protocol'
+import { AgentMethods, ServerMethods } from '@agentlet/protocol'
+
+export type ConnectionRole = 'agentlet' | 'agent-session'
 
 export interface AgentConnectionImplOptions {
-  agentId: string
-  token: string
+  sessionId: string
+  agentletId: string
+  role: ConnectionRole
   metadata: Record<string, unknown>
-  agentInfo: { command: string; pid: number; cwd: string }
-  session?: { sessionId: string; supportsLoad: boolean; initializeResult: unknown }
-  machine?: { hostname: string; platform: string }
-  bridge: { name: string; version: string }
-  capabilities: { autoRestart: boolean; bufferLimit: number }
   ws: WebSocket
   outboundBufferLimit: number
 }
 
 export class AgentConnectionImpl implements AgentConnection {
-  readonly agentId: string
-  readonly token: string
+  readonly sessionId: string
+  readonly agentletId: string
+  readonly role: ConnectionRole
   readonly metadata: Record<string, unknown>
-  readonly agentInfo: { command: string; pid: number; cwd: string }
-  readonly session?: { sessionId: string; supportsLoad: boolean; initializeResult: unknown }
-  readonly machine?: { hostname: string; platform: string }
-  readonly bridge: { name: string; version: string }
-  readonly capabilities: { autoRestart: boolean; bufferLimit: number }
   readonly connectedAt: Date
 
   private ws: WebSocket | null
@@ -38,35 +31,32 @@ export class AgentConnectionImpl implements AgentConnection {
   private readonly outboundBufferLimit: number
 
   private messageHandlers: Array<(message: AcpMessage) => void> = []
-  private lifecycleHandlers: Array<(event: BridgeLifecycleEvent) => void> = []
+  private lifecycleHandlers: Array<(event: LifecycleEvent) => void> = []
+  private persistCallback?: (dir: 'agent' | 'host', message: AcpMessage) => void
 
   get status(): 'connected' | 'disconnected' {
     return this._status
   }
 
   constructor(options: AgentConnectionImplOptions) {
-    this.agentId = options.agentId
-    this.token = options.token
+    this.sessionId = options.sessionId
+    this.agentletId = options.agentletId
+    this.role = options.role
     this.metadata = options.metadata
-    this.agentInfo = options.agentInfo
-    this.session = options.session
-    this.machine = options.machine
-    this.bridge = options.bridge
-    this.capabilities = options.capabilities
     this.ws = options.ws
     this.outboundBufferLimit = options.outboundBufferLimit
     this.connectedAt = new Date()
   }
 
   send(message: AcpMessage): void {
+    this.persistCallback?.('host', message)
     if (this._status === 'connected' && this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(message))
     } else {
-      // Buffer for replay on reconnection
       if (this.outboundBuffer.length >= this.outboundBufferLimit) {
         throw new Error(
           `Outbound buffer full (${this.outboundBufferLimit} messages). ` +
-          `Cannot buffer more messages for ${this.agentId}.`
+          `Cannot buffer more messages for ${this.sessionId}.`
         )
       }
       this.outboundBuffer.push(message)
@@ -77,14 +67,19 @@ export class AgentConnectionImpl implements AgentConnection {
     this.messageHandlers.push(handler)
   }
 
-  onLifecycle(handler: (event: BridgeLifecycleEvent) => void): void {
+  onLifecycle(handler: (event: LifecycleEvent) => void): void {
     this.lifecycleHandlers.push(handler)
+  }
+
+  /** @internal — set callback for event persistence */
+  setPersistCallback(callback: (dir: 'agent' | 'host', message: AcpMessage) => void): void {
+    this.persistCallback = callback
   }
 
   disconnect(reason?: string): void {
     const shutdownMsg = {
       jsonrpc: '2.0' as const,
-      method: BridgeMethods.SHUTDOWN,
+      method: ServerMethods.SHUTDOWN,
       params: { reason: reason ?? 'server_requested' },
     }
     if (this.ws?.readyState === WebSocket.OPEN) {
@@ -97,13 +92,18 @@ export class AgentConnectionImpl implements AgentConnection {
 
   /** @internal — called by server when a WS message arrives for this connection */
   handleIncomingMessage(msg: JsonRpcMessage): void {
-    // Check if it's a bridge control message
-    if ('method' in msg && typeof msg.method === 'string' && msg.method.startsWith('bridge/')) {
-      this.handleBridgeMessage(msg)
-      return
+    // Check if it's a protocol control message (exact match on known methods)
+    if ('method' in msg && typeof msg.method === 'string') {
+      if (this.isProtocolMethod(msg.method)) {
+        this.handleProtocolMessage(msg)
+        return
+      }
     }
 
-    // Otherwise it's an ACP message from the agent
+    // Persist before dispatching to handlers
+    this.persistCallback?.('agent', msg as AcpMessage)
+
+    // ACP message from the agent
     for (const handler of this.messageHandlers) {
       handler(msg as AcpMessage)
     }
@@ -116,21 +116,13 @@ export class AgentConnectionImpl implements AgentConnection {
   }
 
   /** @internal — called by server on reconnection */
-  handleReconnect(ws: WebSocket, params: BridgeHelloParams): void {
+  handleReconnect(ws: WebSocket): void {
+    // Close old WS if still open
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.close(1000, 'replaced_by_reconnection')
+    }
     this.ws = ws
     this._status = 'connected'
-    // Update agent info (PID/cwd may have changed if agent was restarted)
-    if (params.agent) {
-      ;(this as { agentInfo: { command: string; pid: number; cwd: string } }).agentInfo = {
-        command: params.agent.command,
-        pid: params.agent.pid,
-        cwd: params.agent.cwd,
-      }
-    }
-    // Update session info
-    if (params.session) {
-      ;(this as { session?: { sessionId: string; supportsLoad: boolean; initializeResult: unknown } }).session = params.session
-    }
   }
 
   /** @internal — flush buffered outbound messages after reconnection */
@@ -139,7 +131,7 @@ export class AgentConnectionImpl implements AgentConnection {
 
     const replayMsg = {
       jsonrpc: '2.0' as const,
-      method: BridgeMethods.REPLAY,
+      method: ServerMethods.REPLAY,
       params: { messages: this.outboundBuffer },
     }
 
@@ -155,15 +147,30 @@ export class AgentConnectionImpl implements AgentConnection {
     return this.ws === ws
   }
 
-  private handleBridgeMessage(msg: JsonRpcMessage): void {
+  /** @internal — send a JSON-RPC request to this connection's WS */
+  sendRaw(msg: JsonRpcMessage): void {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(msg))
+    }
+  }
+
+  private isProtocolMethod(method: string): boolean {
+    return method === AgentMethods.EXITED
+      || method === AgentMethods.RESTARTED
+      || method === AgentMethods.GOODBYE
+      || method === AgentMethods.OVERFLOW
+      || method === AgentMethods.SUSPENDED
+  }
+
+  private handleProtocolMessage(msg: JsonRpcMessage): void {
     if (!('method' in msg)) return
     const method = msg.method
     const params = 'params' in msg ? (msg.params as Record<string, unknown>) : {}
 
     switch (method) {
-      case BridgeMethods.AGENT_EXITED: {
-        const event: BridgeLifecycleEvent = {
-          type: 'agent_exited',
+      case AgentMethods.EXITED: {
+        const event: LifecycleEvent = {
+          type: 'agent/exited',
           code: (params['code'] as number | null) ?? null,
           signal: (params['signal'] as string | null) ?? null,
           willRestart: (params['willRestart'] as boolean) ?? false,
@@ -171,26 +178,35 @@ export class AgentConnectionImpl implements AgentConnection {
         for (const handler of this.lifecycleHandlers) handler(event)
         break
       }
-      case BridgeMethods.AGENT_RESTARTED: {
-        const event: BridgeLifecycleEvent = {
-          type: 'agent_restarted',
+      case AgentMethods.RESTARTED: {
+        const event: LifecycleEvent = {
+          type: 'agent/restarted',
           pid: params['pid'] as number,
           attempt: params['attempt'] as number,
         }
         for (const handler of this.lifecycleHandlers) handler(event)
         break
       }
-      case BridgeMethods.BUFFER_OVERFLOW: {
-        const event: BridgeLifecycleEvent = {
-          type: 'buffer_overflow',
+      case AgentMethods.OVERFLOW: {
+        const event: LifecycleEvent = {
+          type: 'agent/overflow',
           dropped: params['dropped'] as number,
         }
         for (const handler of this.lifecycleHandlers) handler(event)
         break
       }
-      case BridgeMethods.GOODBYE: {
-        const event: BridgeLifecycleEvent = {
-          type: 'goodbye',
+      case AgentMethods.GOODBYE: {
+        const event: LifecycleEvent = {
+          type: 'agent/goodbye',
+          reason: (params['reason'] as string) ?? 'unknown',
+        }
+        for (const handler of this.lifecycleHandlers) handler(event)
+        break
+      }
+      case AgentMethods.SUSPENDED: {
+        const event: LifecycleEvent = {
+          type: 'agent/suspended',
+          sessionId: params['sessionId'] as string,
           reason: (params['reason'] as string) ?? 'unknown',
         }
         for (const handler of this.lifecycleHandlers) handler(event)

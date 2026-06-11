@@ -46,7 +46,7 @@ import {
   createAcpProfile,
   deleteAcpProfile,
   listAcpAgentClis,
-  restartAcpDaemon,
+  restartAcpAgentlet,
   updateAcpProfile,
 } from '@/api/acp';
 import { pickFolder } from '@/api/workspace';
@@ -65,42 +65,34 @@ import { useFolderPickerSupported } from '@/store/workspaceStore';
 import type {
   AcpAgentCliInfo,
   AcpAgentProfile,
-  AcpDaemonStatus,
+  AcpAgentletStatus,
   AcpProfileCreateRequest,
   AcpProfileUpdateRequest,
 } from '@sediment/shared';
 
-// ── Daemon health banner ──────────────────────────────────────────────
+// ── Agentlet health banner ────────────────────────────────────────────
 
-interface DaemonHealthBannerProps {
-  daemon: AcpDaemonStatus | null;
+interface AgentletHealthBannerProps {
+  agentlet: AcpAgentletStatus | null;
   onRestart: () => Promise<void>;
   restarting: boolean;
 }
 
 /**
- * Inline amber banner shown only when the daemon supervisor is in a
+ * Inline amber banner shown only when the agentlet supervisor is in a
  * known-failed state. The happy path (`online: true`, no error) renders
  * nothing so the section stays compact.
- *
- * Why amber, not red? The supervisor auto-restarts in the background;
- * a momentary offline period during a daemon respawn is expected
- * behaviour. Red would imply "you need to fix this NOW", which
- * overstates the urgency unless the user just tried Restart and it
- * still failed.
  */
-const DaemonHealthBanner: React.FC<DaemonHealthBannerProps> = ({
-  daemon,
+const AgentletHealthBanner: React.FC<AgentletHealthBannerProps> = ({
+  agentlet,
   onRestart,
   restarting,
 }) => {
-  // Hide on the happy path AND while we're loading the first snapshot —
-  // a blank initial state shouldn't flash an error banner.
-  if (!daemon) return null;
-  if (daemon.online && !daemon.lastError) return null;
+  if (!agentlet) return null;
+  if (agentlet.online && !agentlet.lastError) return null;
 
-  const nextRestartInSec = daemon.nextRestartAt
-    ? Math.max(0, Math.ceil((daemon.nextRestartAt - Date.now()) / 1000))
+  const nextRestartInSec = agentlet.nextRestartAt
+    ? Math.max(0, Math.ceil((agentlet.nextRestartAt - Date.now()) / 1000))
     : null;
 
   return (
@@ -110,9 +102,9 @@ const DaemonHealthBanner: React.FC<DaemonHealthBannerProps> = ({
         <p className="text-fg-default text-xs font-medium">
           External-agent worker is offline
         </p>
-        {daemon.lastError && (
+        {agentlet.lastError && (
           <p className="text-fg-muted mt-0.5 text-[11px] leading-snug wrap-break-word">
-            {daemon.lastError}
+            {agentlet.lastError}
           </p>
         )}
         {nextRestartInSec !== null && nextRestartInSec > 0 && (
@@ -758,7 +750,7 @@ export function useDetectedClis(): AcpAgentCliInfo[] {
 
 export const AcpSettings: React.FC = () => {
   const profiles = useAcpProfilesStore((s) => s.profiles);
-  const daemon = useAcpProfilesStore((s) => s.daemon);
+  const agentlet = useAcpProfilesStore((s) => s.agentlet);
   const loaded = useAcpProfilesStore((s) => s.loaded);
   const error = useAcpProfilesStore((s) => s.error);
   const refresh = useAcpProfilesStore((s) => s.refresh);
@@ -833,7 +825,7 @@ export const AcpSettings: React.FC = () => {
   const handleRestart = useCallback(async () => {
     setRestarting(true);
     try {
-      const next = await restartAcpDaemon();
+      const next = await restartAcpAgentlet();
       // Pull a fresh snapshot so the banner reflects the new state
       // (and the profile-list runtime flags update).
       await refresh();
@@ -862,8 +854,8 @@ export const AcpSettings: React.FC = () => {
        * (b) when it does show, the amber alert reads as a section-level
        *     warning rather than a torn-looking first row inside the card.
        */}
-      <DaemonHealthBanner
-        daemon={daemon}
+      <AgentletHealthBanner
+        agentlet={agentlet}
         onRestart={handleRestart}
         restarting={restarting}
       />

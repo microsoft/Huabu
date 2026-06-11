@@ -6,28 +6,25 @@
  * (`binding.kind === 'external'`). For internal bindings it returns
  * an empty list and never hits the server.
  *
+ * Session creation is **lazy**: selecting an external agent in the
+ * menu does NOT immediately contact the agentlet daemon. The first
+ * ACP session is created on-demand when the user opens the slash
+ * menu or sends the first message — via {@link refreshIfStale}.
+ *
  * Two refresh paths:
- *  1. **Bootstrap** — runs on mount and whenever `{threadId, binding,
- *     canvasId}` changes. Calls `ensureAcpSession` (opens or reuses
- *     the per-thread session) and, if the agent hasn't pushed yet,
- *     re-pulls once after {@link RETRY_DELAY_MS} to catch late
- *     `available_commands_update` arrivals.
- *  2. **On-demand** — {@link UseAcpSlashCommandsResult.refreshIfStale}
+ *  1. **On-demand** — {@link UseAcpSlashCommandsResult.refreshIfStale}
  *     is invoked by the typeahead host (e.g. ChatInput) on the
  *     rising edge of "user wants the slash menu". A TTL gate
  *     ({@link STALE_TTL_MS} by default) suppresses redundant
  *     network traffic when the user opens / closes the menu in
- *     rapid succession. This lets the UI pick up commands the agent
- *     pushes mid-session without polling.
+ *     rapid succession. This is the primary entry point.
+ *  2. **Manual** — {@link UseAcpSlashCommandsResult.refresh} can be
+ *     called explicitly when the caller knows the cache is stale.
  *
- * Why two passes (bootstrap immediate + delayed re-pull):
- *  - ACP's `available_commands_update` is a push from the agent and
- *    the spec does NOT guarantee timing. In practice agents send it
- *    within a few hundred ms of `session/new` resolving, but anywhere
- *    in that window the response could be empty.
- *  - The immediate POST returns whatever's cached right now (possibly
- *    `[]`). A second GET after 200 ms catches the late push so the
- *    typeahead has data by the time the user types `/`.
+ * Why no bootstrap effect: agent profiles are templates — no session
+ * is created until the user actually interacts. The agentlet daemon
+ * auto-suspends idle sessions (via `idleTimeoutSecs`), so avoiding
+ * eager session creation reduces unnecessary daemon traffic.
  *
  * Errors are stored on `error` but never thrown — slash-command
  * typeahead is a convenience, not a critical feature, and a failure
@@ -210,24 +207,16 @@ export function useAcpSlashCommands({
     [refresh],
   );
 
+  // Reset stale commands when binding/thread/canvas changes so an
+  // external→external switch never shows the previous agent's
+  // typeahead. Session creation is LAZY — the actual fetch happens
+  // on the first `refreshIfStale` call (slash menu open or first
+  // message send), not on mount.
   useEffect(() => {
-    // Clear stale commands the moment binding (or thread / canvas)
-    // changes, BEFORE the new fetch resolves. Without this an
-    // external→external switch keeps the previous agent's commands
-    // visible during the loading window, so the user momentarily
-    // sees the wrong typeahead. Internal bindings hit the same
-    // setter inside refresh() but doing it here too avoids a flicker
-    // when the refresh callback identity hasn't changed yet.
     setCommands([]);
     setError(null);
-    void refresh();
+    lastFetchedAtRef.current = 0;
     return () => {
-      // Bump the epoch so any in-flight refresh from this effect
-      // run becomes stale and skips its state writes. The rule
-      // below warns because cleanup may see a different
-      // `epochRef.current` than effect setup did — that's exactly
-      // the behaviour we want here (the value moves forward each
-      // refresh), so the warning does not apply.
       // eslint-disable-next-line react-hooks/exhaustive-deps
       epochRef.current++;
     };

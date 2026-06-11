@@ -4,6 +4,21 @@
 
 ---
 
+## 2026-06-10 · Agent profiles are templates; sessions are lazy
+
+**What Changed**
+
+- 选择外部 Agent 时**不再立即创建 agentlet session**——Agent profile 现在是纯模板（`agentletId, cmd, cwd`），只有在真正发送消息或打开 `/` 命令菜单时才会懒创建 session。
+- **`appId` 简化为 `threadId`**——每个对话线程拥有自己的 session，无需再拼接 `canvasId:threadId`。
+- **空闲自动挂起 + 恢复**——agentlet daemon 会在 10 分钟无活动后自动挂起 session（`idleTimeoutSecs = 600`）；下次发消息时通过 `spawn({ sessionId })` 透明恢复，无需手动管理生命周期。
+
+**Notes**
+
+- 此变更是 session/agent 模型对齐讨论的结果：profile = 模板，session = 按需创建，canvas 不关心 session 生命周期。
+- 还原了 `c9ea5ee` 中的 `bindingThreadMap` / `switchToBinding` 实现（方向不一致）。
+
+---
+
 ## 2026-06-10 · Canvas agent 可以直接读图片节点
 
 **What Changed**

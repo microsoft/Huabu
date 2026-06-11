@@ -59,7 +59,7 @@ import { getDaemonAuth } from './daemon-auth.js';
 import { getAgentletServer } from './server-mount.js';
 import { getDataDir } from '../../../data-dir.js';
 
-import type { AcpDaemonStatus } from '@sediment/shared';
+import type { AcpAgentletStatus } from '@sediment/shared';
 import type { FastifyInstance } from 'fastify';
 import type { ChildProcess } from 'node:child_process';
 
@@ -216,7 +216,7 @@ class DaemonSupervisor {
    * Triggered by `POST /api/acp/daemon/restart` when the user clicks
    * the "Restart worker" button in Settings.
    */
-  restart(): AcpDaemonStatus {
+  restart(): AcpAgentletStatus {
     if (this.state.restartTimer) {
       clearTimeout(this.state.restartTimer);
       this.state.restartTimer = null;
@@ -274,25 +274,22 @@ class DaemonSupervisor {
    * Merge the supervisor's view with the agentlet server's daemon
    * registry to produce the wire snapshot consumed by the UI.
    */
-  getStatus(): AcpDaemonStatus {
+  getStatus(): AcpAgentletStatus {
     const server = getAgentletServer();
-    const live = server?.getDaemons() ?? [];
-    const daemon = live[0];
+    const live = server?.getAgentlets() ?? [];
+    const agentlet = live[0];
 
-    if (daemon) {
+    if (agentlet) {
       return {
         online: true,
-        daemonId: daemon.daemonId,
-        hostname: daemon.machine?.hostname,
-        platform: daemon.machine?.platform,
-        connectedAt: daemon.connectedAt.toISOString(),
-        // We deliberately keep `lastError` blank while a daemon is
-        // actively connected — the previous failure is no longer
-        // user-actionable.
+        agentletId: agentlet.sessionId,
+        hostname: (agentlet.metadata as any)?.machine?.hostname,
+        platform: (agentlet.metadata as any)?.machine?.platform,
+        connectedAt: agentlet.connectedAt.toISOString(),
       };
     }
 
-    const status: AcpDaemonStatus = { online: false };
+    const status: AcpAgentletStatus = { online: false };
     if (this.state.lastError) status.lastError = this.state.lastError;
     if (this.state.nextRestartAt) {
       status.nextRestartAt = this.state.nextRestartAt;
@@ -317,14 +314,9 @@ class DaemonSupervisor {
 
     const token = getDaemonAuth().rotateToken();
     const serverUrl = `ws://127.0.0.1:${this.serverPort}/api/acp/agent`;
-    const args = [
-      'daemon',
-      '--server',
-      serverUrl,
-      '--token',
-      token,
-      '--allow-insecure',
-    ];
+    // Idle agentlet mode: no --agent flag means it waits for
+    // server/spawn requests. Previously used `daemon` subcommand.
+    const args = ['--server', serverUrl, '--token', token, '--allow-insecure'];
 
     this.state.starting = true;
     this.state.nextRestartAt = null;
@@ -474,7 +466,7 @@ export function getDaemonSupervisor(): DaemonSupervisor {
 }
 
 /** Convenience for the route handler. */
-export function getDaemonStatus(): AcpDaemonStatus {
+export function getDaemonStatus(): AcpAgentletStatus {
   return getDaemonSupervisor().getStatus();
 }
 

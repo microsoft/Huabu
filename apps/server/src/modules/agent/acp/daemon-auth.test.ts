@@ -20,20 +20,29 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { _resetDaemonAuthForTests, getDaemonAuth } from './daemon-auth.js';
 
-import type { BridgeHelloParams } from '@agentlet/protocol';
+import type { AgentHelloParams, AgentletHelloParams } from '@agentlet/protocol';
 
-function makeDaemonHello(): BridgeHelloParams {
+function makeAgentletHello(): AgentletHelloParams {
   return {
-    mode: 'daemon',
-    machine: { hostname: 'test', platform: 'linux' },
-  } as BridgeHelloParams;
+    agentletId: 'test:agentlet',
+    agentletProfile: {
+      bridge: { name: 'agentlet', version: '1.0.0' },
+      machine: { hostname: 'test', platform: 'linux' },
+      capabilities: { autoRestart: true, bufferLimit: 1000 },
+    },
+  };
 }
 
-function makeAgentHello(): BridgeHelloParams {
+function makeAgentHello(): AgentHelloParams {
   return {
-    agentId: 'host:copilot:cwd:abc12345',
-    machine: { hostname: 'test', platform: 'linux' },
-  } as BridgeHelloParams;
+    sessionId: 'sess_test123',
+    sessionProfile: {
+      agentletId: 'test:agentlet',
+      bridge: { name: 'agentlet', version: '1.0.0' },
+      agent: { command: 'copilot --acp', pid: 12345, cwd: '/test' },
+      capabilities: { autoRestart: true, bufferLimit: 1000 },
+    },
+  };
 }
 
 beforeEach(() => {
@@ -64,15 +73,15 @@ describe('AcpDaemonAuth.rotateToken', () => {
 describe('AcpDaemonAuth.validate', () => {
   it('throws when no token has been minted yet', () => {
     const auth = getDaemonAuth();
-    expect(() => auth.validate('anything', makeDaemonHello())).toThrow(
+    expect(() => auth.validate('anything', makeAgentletHello())).toThrow(
       /not finished initialising/,
     );
   });
 
-  it('rejects mismatched tokens regardless of handshake mode', () => {
+  it('rejects mismatched tokens regardless of handshake type', () => {
     const auth = getDaemonAuth();
     auth.rotateToken();
-    expect(() => auth.validate('wrong', makeDaemonHello())).toThrow(
+    expect(() => auth.validate('wrong', makeAgentletHello())).toThrow(
       /Invalid daemon token/,
     );
     expect(() => auth.validate('wrong', makeAgentHello())).toThrow(
@@ -83,19 +92,19 @@ describe('AcpDaemonAuth.validate', () => {
   it('rejects empty tokens', () => {
     const auth = getDaemonAuth();
     auth.rotateToken();
-    expect(() => auth.validate('', makeDaemonHello())).toThrow(
+    expect(() => auth.validate('', makeAgentletHello())).toThrow(
       /Invalid daemon token/,
     );
   });
 
-  it('accepts a matching token from the daemon control channel', () => {
+  it('accepts a matching token from the agentlet control channel', () => {
     const auth = getDaemonAuth();
     const token = auth.rotateToken();
-    const result = auth.validate(token, makeDaemonHello());
+    const result = auth.validate(token, makeAgentletHello());
     expect(result).toEqual({ metadata: { source: 'daemon' } });
   });
 
-  it('accepts a matching token from a per-agent relay socket (no mode field)', () => {
+  it('accepts a matching token from a per-session relay socket', () => {
     const auth = getDaemonAuth();
     const token = auth.rotateToken();
     const result = auth.validate(token, makeAgentHello());
@@ -109,7 +118,7 @@ describe('AcpDaemonAuth.close', () => {
     auth.rotateToken();
     auth.close();
     expect(auth.getToken()).toBeNull();
-    expect(() => auth.validate('anything', makeDaemonHello())).toThrow(
+    expect(() => auth.validate('anything', makeAgentletHello())).toThrow(
       /not finished initialising/,
     );
   });
@@ -120,6 +129,6 @@ describe('setDaemonToken', () => {
     const auth = getDaemonAuth();
     auth.setDaemonToken('my-token');
     expect(auth.getToken()).toBe('my-token');
-    expect(() => auth.validate('my-token', makeDaemonHello())).not.toThrow();
+    expect(() => auth.validate('my-token', makeAgentletHello())).not.toThrow();
   });
 });

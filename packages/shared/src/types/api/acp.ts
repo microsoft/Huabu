@@ -8,7 +8,7 @@
  *
  * There is one daemon per Sediment instance and the user never has to
  * pair it manually — it is invisible infrastructure surfaced only when
- * something has gone wrong (see `AcpDaemonStatus.lastError`).
+ * something has gone wrong (see `AcpAgentletStatus.lastError`).
  *
  * Per docs/api-design.md, zod schemas defined here are server-side
  * truth; the web bundle imports the inferred TS types only
@@ -62,27 +62,27 @@ export interface AcpAgentProfile {
   updatedAt: number;
 }
 
-// ─── Daemon status (one daemon per Sediment) ──────────────────────────
+// ─── Agentlet status (one agentlet per Sediment) ──────────────────────
 //
-// The server forks the agentlet daemon as a child process at boot and
+// The server forks an idle agentlet as a child process at boot and
 // supervises it with exponential-backoff restart. Status is exposed
 // only so the UI can render a single troubleshooting affordance when
 // the supervisor gives up; on the happy path the user never sees it.
 
-/** Status of the single daemon known to this Sediment instance. */
-export interface AcpDaemonStatus {
-  /** True when a daemon is currently connected to the bridge. */
+/** Status of the single agentlet known to this Sediment instance. */
+export interface AcpAgentletStatus {
+  /** True when an agentlet is currently connected to the server. */
   online: boolean;
-  /** Opaque daemon id when online. */
-  daemonId?: string;
-  /** Hostname reported via bridge/hello. */
+  /** Opaque agentlet id when online. */
+  agentletId?: string;
+  /** Hostname reported via agentlet/hello. */
   hostname?: string;
   /** Platform string (e.g. `'darwin'`, `'win32'`). */
   platform?: string;
-  /** ISO timestamp of the most recent successful daemon connection. */
+  /** ISO timestamp of the most recent successful agentlet connection. */
   connectedAt?: string;
   /**
-   * Most recent supervisor error message when the daemon is offline.
+   * Most recent supervisor error message when the agentlet is offline.
    * Empty / undefined on the happy path.
    */
   lastError?: string;
@@ -93,12 +93,15 @@ export interface AcpDaemonStatus {
   nextRestartAt?: number;
 }
 
-// ─── Profile + daemon HTTP wire ───────────────────────────────────────
+/** @deprecated Use {@link AcpAgentletStatus} instead. */
+export type AcpDaemonStatus = AcpAgentletStatus;
+
+// ─── Profile + agentlet HTTP wire ─────────────────────────────────────
 
 /** Response body for `GET /api/acp/profiles`. */
 export interface AcpProfilesListResponse {
   profiles: AcpAgentProfile[];
-  daemon: AcpDaemonStatus;
+  agentlet: AcpAgentletStatus;
 }
 
 /** Request body for `POST /api/acp/profiles`. */
@@ -123,17 +126,23 @@ export interface AcpProfileUpdateRequest {
 /** Response body for `POST` / `PATCH` /api/acp/profiles[/:id]. */
 export type AcpProfileMutationResponse = AcpAgentProfile;
 
-/** Response body for `GET /api/acp/daemon`. */
-export type AcpDaemonStatusResponse = AcpDaemonStatus;
+/** Response body for `GET /api/acp/agentlet`. */
+export type AcpAgentletStatusResponse = AcpAgentletStatus;
+
+/** @deprecated Use {@link AcpAgentletStatusResponse} instead. */
+export type AcpDaemonStatusResponse = AcpAgentletStatusResponse;
 
 /**
- * Response body for `POST /api/acp/daemon/restart`.
+ * Response body for `POST /api/acp/agentlet/restart`.
  *
  * Empty request body. The reply is the post-restart snapshot — which
  * may still be `online: false` if the restart is asynchronous; the UI
- * should re-poll `/api/acp/daemon` shortly after.
+ * should re-poll `/api/acp/agentlet` shortly after.
  */
-export type AcpDaemonRestartResponse = AcpDaemonStatus;
+export type AcpAgentletRestartResponse = AcpAgentletStatus;
+
+/** @deprecated Use {@link AcpAgentletRestartResponse} instead. */
+export type AcpDaemonRestartResponse = AcpAgentletRestartResponse;
 
 // ─── Local agent CLI detection ────────────────────────────────────────
 //
@@ -572,21 +581,24 @@ export const acpAgentProfileSchema = z.object({
   updatedAt: z.number().int().nonnegative(),
 }) satisfies z.ZodType<AcpAgentProfile>;
 
-/** Schema mirror of {@link AcpDaemonStatus}. */
-export const acpDaemonStatusSchema = z.object({
+/** Schema mirror of {@link AcpAgentletStatus}. */
+export const acpAgentletStatusSchema = z.object({
   online: z.boolean(),
-  daemonId: z.string().min(1).optional(),
+  agentletId: z.string().min(1).optional(),
   hostname: z.string().min(1).optional(),
   platform: z.string().min(1).optional(),
   connectedAt: z.string().min(1).optional(),
   lastError: z.string().optional(),
   nextRestartAt: z.number().int().nonnegative().optional(),
-}) satisfies z.ZodType<AcpDaemonStatus>;
+}) satisfies z.ZodType<AcpAgentletStatus>;
+
+/** @deprecated Use {@link acpAgentletStatusSchema} instead. */
+export const acpDaemonStatusSchema = acpAgentletStatusSchema;
 
 /** Schema mirror of {@link AcpProfilesListResponse}. */
 export const acpProfilesListResponseSchema = z.object({
   profiles: z.array(acpAgentProfileSchema),
-  daemon: acpDaemonStatusSchema,
+  agentlet: acpAgentletStatusSchema,
 }) satisfies z.ZodType<AcpProfilesListResponse>;
 
 /** Schema mirror of {@link AcpProfileCreateRequest}. */
@@ -606,7 +618,7 @@ export const acpProfileUpdateRequestSchema = z.object({
   autoRestart: z.boolean().optional(),
 }) satisfies z.ZodType<AcpProfileUpdateRequest>;
 
-// {@link AcpProfileMutationResponse}, {@link AcpDaemonStatusResponse} and
-// {@link AcpDaemonRestartResponse} are type aliases; reuse
-// `acpAgentProfileSchema` / `acpDaemonStatusSchema` directly
+// {@link AcpProfileMutationResponse}, {@link AcpAgentletStatusResponse} and
+// {@link AcpAgentletRestartResponse} are type aliases; reuse
+// `acpAgentProfileSchema` / `acpAgentletStatusSchema` directly
 // at the route boundary.

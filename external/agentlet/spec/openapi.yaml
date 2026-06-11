@@ -1,0 +1,974 @@
+openapi: 3.1.0
+info:
+  title: Agentlet Server REST API
+  version: 1.0.0
+  description: |
+    REST API for the Agentlet relay server. Provides endpoints for managing
+    agent connections, agentlet lifecycle, and server administration.
+
+    **Authentication:** Most endpoints accept an optional `Bearer` token in the
+    `Authorization` header. When provided, results are scoped to resources
+    associated with that token (e.g., only agents authenticated with the same
+    token are returned).
+
+servers:
+  - url: https://{host}
+    description: Agentlet relay server
+    variables:
+      host:
+        default: localhost:8080
+        description: Server host and port
+
+tags:
+  - name: Health
+    description: Server health and status
+  - name: Sessions
+    description: Session management and event access
+  - name: Agents
+    description: Connected agent management (deprecated — use Sessions)
+  - name: Agentlets
+    description: Agentlet management and agent spawning
+  - name: WebSocket
+    description: WebSocket upgrade endpoints (bridge and host channels)
+  - name: Admin
+    description: Server administration (requires admin token)
+
+# ─── Paths ──────────────────────────────────────────────────────────────────────
+
+paths:
+  /api/health:
+    get:
+      tags: [Health]
+      summary: Health check
+      operationId: getHealth
+      security: []
+      responses:
+        '200':
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, connections]
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+                  connections:
+                    type: integer
+                    description: Number of active agent connections
+
+  /api/sessions:
+    get:
+      tags: [Sessions]
+      summary: List sessions
+      operationId: listSessions
+      description: |
+        Returns sessions owned by the authenticated user. Requires a Bearer
+        token — only sessions created with the same token are returned.
+
+        Use the optional `status` query parameter to filter by session status
+        (comma-separated, e.g. `?status=active,suspended`).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: |
+            Filter by session status. Comma-separated list of statuses.
+            Valid values: `starting`, `active`, `suspending`, `suspended`,
+            `resuming`, `closed`.
+          schema:
+            type: string
+          example: active,suspended
+      responses:
+        '200':
+          description: List of sessions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sessions]
+                properties:
+                  sessions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Session'
+        '401':
+          description: Missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: No session store configured (server started without `--store-dir`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/sessions/{sessionId}:
+    get:
+      tags: [Sessions]
+      summary: Get session details
+      operationId: getSession
+      description: |
+        Returns details for a specific session. The session must belong to the
+        authenticated user (same token).
+      parameters:
+        - $ref: '#/components/parameters/sessionId'
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Session details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '401':
+          description: Missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Token does not match session owner
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, sessionId]
+                properties:
+                  error:
+                    type: string
+                    example: Session not found
+                  sessionId:
+                    type: string
+
+  /api/agents:
+    get:
+      tags: [Agents]
+      summary: List connected agents
+      operationId: listAgents
+      deprecated: true
+      description: |
+        **⚠️ Deprecated** — use `GET /api/sessions` instead.
+
+        Returns all connected agents. If a Bearer token is provided,
+        only agents authenticated with that token are returned.
+      security:
+        - bearerAuth: []
+        - {}
+      responses:
+        '200':
+          description: List of agents
+          headers:
+            Deprecation:
+              schema:
+                type: string
+                enum: ['true']
+            Link:
+              schema:
+                type: string
+                example: '</api/sessions>; rel="successor-version"'
+            X-Deprecation-Notice:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [agents]
+                properties:
+                  agents:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AgentConnection'
+
+  /api/agents/{sessionId}:
+    get:
+      tags: [Agents]
+      summary: Get agent details
+      operationId: getAgent
+      deprecated: true
+      description: |
+        **⚠️ Deprecated** — use `GET /api/sessions/:sessionId` instead.
+        This deprecated alias is routed by `sessionId`.
+      parameters:
+        - $ref: '#/components/parameters/sessionId'
+      security:
+        - bearerAuth: []
+        - {}
+      responses:
+        '200':
+          description: Agent details
+          headers:
+            Deprecation:
+              schema:
+                type: string
+            Link:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentConnection'
+        '404':
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentNotFound'
+
+    delete:
+      tags: [Agents]
+      summary: Disconnect an agent
+      operationId: disconnectAgent
+      deprecated: true
+      description: |
+        **⚠️ Deprecated.** Sends a graceful shutdown to the agent-side adapter.
+        This deprecated alias is routed by `sessionId`.
+      parameters:
+        - $ref: '#/components/parameters/sessionId'
+      security:
+        - bearerAuth: []
+        - {}
+      responses:
+        '200':
+          description: Agent disconnected
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [disconnected, sessionId]
+                properties:
+                  disconnected:
+                    type: boolean
+                    enum: [true]
+                  sessionId:
+                    type: string
+        '404':
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentNotFound'
+
+  /api/agentlets:
+    get:
+      tags: [Agentlets]
+      summary: List connected agentlets
+      operationId: listAgentlets
+      description: |
+        Returns all connected agentlets. If a Bearer token is provided,
+        only agentlets authenticated with that token are returned.
+      security:
+        - bearerAuth: []
+        - {}
+      responses:
+        '200':
+          description: List of agentlets
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [agentlets]
+                properties:
+                  agentlets:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Agentlet'
+
+  /api/agentlets/{agentletId}:
+    get:
+      tags: [Agentlets]
+      summary: Get agentlet details
+      operationId: getAgentlet
+      parameters:
+        - $ref: '#/components/parameters/agentletId'
+      security:
+        - bearerAuth: []
+        - {}
+      responses:
+        '200':
+          description: Agentlet details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agentlet'
+        '404':
+          description: Agentlet not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentletNotFound'
+
+  /api/agentlets/{agentletId}/spawn:
+    post:
+      tags: [Agentlets]
+      summary: Spawn a session on an agentlet
+      operationId: spawnAgent
+      description: |
+        Sends a `server/spawn` command to the agentlet. The agentlet starts an
+        agent subprocess and returns its session ID and PID. The
+        spawned session connects back to the server via `agent/hello`
+        independently.
+
+        **Resume:** When `sessionId` is provided in the request body, this
+        becomes a **resume** operation. Instead of starting a fresh session,
+        the agentlet restores the specified suspended session's state via
+        `session/load` or `session/resume` (depending on agent capabilities).
+      parameters:
+        - $ref: '#/components/parameters/agentletId'
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SpawnParams'
+      responses:
+        '200':
+          description: Session spawned successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpawnResult'
+        '400':
+          description: Missing required field
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Token does not match agentlet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agentlet not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentletNotFound'
+        '500':
+          description: Spawn failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/agentlets/{agentletId}/stop:
+    post:
+      tags: [Agentlets]
+      summary: Stop a session on an agentlet
+      operationId: stopAgent
+      description: Sends a `server/stop` command to the agentlet to stop a specific session.
+      parameters:
+        - $ref: '#/components/parameters/agentletId'
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StopParams'
+      responses:
+        '200':
+          description: Session stopped
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StopResult'
+        '400':
+          description: Missing required field
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Token does not match agentlet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agentlet not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentletNotFound'
+        '500':
+          description: Stop failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/agentlets/{agentletId}/sessions:
+    get:
+      tags: [Agentlets]
+      summary: List sessions running on an agentlet
+      operationId: listAgentletSessions
+      description: |
+        Sends a `server/list` command to the agentlet and returns the list of
+        sessions currently managed by it.
+      parameters:
+        - $ref: '#/components/parameters/agentletId'
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of sessions on the agentlet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListResult'
+        '403':
+          description: Token does not match agentlet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agentlet not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentletNotFound'
+        '500':
+          description: List request failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ─── WebSocket Upgrade Endpoints ──────────────────────────────────────────────
+
+  /api/bridge:
+    get:
+      tags: [WebSocket]
+      summary: WebSocket upgrade — Bridge (agentlet or session)
+      operationId: bridgeWebSocket
+      description: |
+        Upgrades to a WebSocket connection for agentlet control or per-session
+        ACP relay. The `role` query parameter determines the connection type.
+
+        - `role=agentlet` — Agentlet control channel. First message must be
+          `agentlet/hello` within 5s.
+        - `role=session` — Per-session ACP relay. First message must be
+          `agent/hello` within 10s.
+
+        **Authentication:** `Authorization: Bearer <token>` header. For browser
+        clients unable to set WS headers, use a short-lived single-use ticket
+        via `?ticket=<ticket>` obtained from a REST endpoint.
+
+        See [asyncapi.yaml](asyncapi.yaml) for the full WebSocket message protocol.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: role
+          in: query
+          required: true
+          description: Connection type
+          schema:
+            type: string
+            enum: [agentlet, session]
+        - name: id
+          in: query
+          required: true
+          description: |
+            Identity — agentlet ID (for `role=agentlet`) or session ID (for `role=session`).
+            Server validates for format and conflicts before upgrading.
+          schema:
+            type: string
+        - name: ticket
+          in: query
+          required: false
+          description: |
+            Short-lived single-use ticket for browser clients that cannot set
+            the `Authorization` header on WebSocket upgrade. Mutually exclusive
+            with `Authorization` header.
+          schema:
+            type: string
+      responses:
+        '101':
+          description: Switching Protocols — WebSocket upgrade successful
+        '401':
+          description: Invalid or missing authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: ID conflict — another active connection uses this ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/host:
+    get:
+      tags: [WebSocket]
+      summary: WebSocket upgrade — Host channel
+      operationId: hostWebSocket
+      description: |
+        Upgrades to a WebSocket connection for host application / UI access.
+        Supports multiplexed session access via JSON-RPC 2.0: `host/send`,
+        `host/subscribe`, `host/unsubscribe`.
+
+        **Authentication:** `Authorization: Bearer <token>` header, or
+        `?ticket=<ticket>` for browser clients.
+
+        See [asyncapi.yaml](asyncapi.yaml) for the full WebSocket message protocol.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: ticket
+          in: query
+          required: false
+          description: |
+            Short-lived single-use ticket for browser clients.
+          schema:
+            type: string
+      responses:
+        '101':
+          description: Switching Protocols — WebSocket upgrade successful
+        '401':
+          description: Invalid or missing authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/admin/tokens:
+    get:
+      tags: [Admin]
+      summary: Get token map
+      operationId: getTokens
+      description: Returns the full token map. Requires admin token.
+      security:
+        - adminAuth: []
+      responses:
+        '200':
+          description: Token map
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenMap'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Admin API not enabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    post:
+      tags: [Admin]
+      summary: Replace token map
+      operationId: replaceTokens
+      description: Replaces the entire token map. Requires admin token.
+      security:
+        - adminAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenMap'
+      responses:
+        '200':
+          description: Tokens replaced
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, count]
+                properties:
+                  ok:
+                    type: boolean
+                    enum: [true]
+                  count:
+                    type: integer
+                    description: Number of tokens in the new map
+        '400':
+          description: Invalid JSON body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+# ─── Components ─────────────────────────────────────────────────────────────────
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Agent/agentlet authentication token
+    adminAuth:
+      type: http
+      scheme: bearer
+      description: Admin token (set via `--admin-token`)
+
+  parameters:
+    sessionId:
+      name: sessionId
+      in: path
+      required: true
+      description: |
+        ACP session identifier, assigned by the agent during session bootstrap.
+      schema:
+        type: string
+      example: sess_001
+
+    agentletId:
+      name: agentletId
+      in: path
+      required: true
+      description: |
+        Agentlet identifier. Defaults to hostname, can be overridden with `--agentlet-id`.
+      schema:
+        type: string
+      example: dev-laptop
+
+  schemas:
+    Session:
+      type: object
+      required: [sessionId, command, cwd, status, supportsLoad, supportsResume, createdAt, updatedAt]
+      properties:
+        sessionId:
+          type: string
+          description: ACP session identifier
+          example: sess_001
+        displayName:
+          type: string
+          description: Human-readable session name, derived from command
+          example: agent.js
+        agentletId:
+          type: string
+          description: Agentlet that spawned this session (if managed by an agentlet)
+          example: dev-laptop
+        command:
+          type: string
+          description: Shell command used to spawn the agent
+          example: node agent.js
+        cwd:
+          type: string
+          description: Working directory of the agent process
+          example: /home/user/project
+        status:
+          type: string
+          enum: [starting, active, suspending, suspended, resuming, closed]
+          description: Current session lifecycle status
+        supportsLoad:
+          type: boolean
+          description: Whether the agent supports session/load
+        supportsResume:
+          type: boolean
+          description: Whether the agent supports session/resume
+        createdAt:
+          type: string
+          format: date-time
+        suspendedAt:
+          type: string
+          format: date-time
+          description: When the session was suspended (only present if suspended)
+        updatedAt:
+          type: string
+          format: date-time
+
+    AgentConnection:
+      type: object
+      description: Deprecated agent connection view, routed by sessionId
+      required: [sessionId, agentletId, role, status, metadata, connectedAt]
+      properties:
+        sessionId:
+          type: string
+          description: ACP session identifier
+          example: sess_001
+        agentletId:
+          type: string
+          description: Parent agentlet identifier
+          example: dev-laptop
+        role:
+          type: string
+          enum: [agentlet, agent-session]
+          description: Connection role
+        status:
+          type: string
+          enum: [connected, disconnected]
+        metadata:
+          type: object
+          additionalProperties: true
+          description: Application-specific metadata from authentication
+        connectedAt:
+          type: string
+          format: date-time
+          description: When the connection was first established
+
+    AgentInfo:
+      type: object
+      required: [command, pid, cwd]
+      properties:
+        command:
+          type: string
+          description: Shell command used to spawn the agent
+          example: node agent.js
+        pid:
+          type: integer
+          description: OS process ID
+          example: 12345
+        cwd:
+          type: string
+          description: Working directory of the agent process
+          example: /home/user/my-project
+
+    SessionSummary:
+      type: object
+      description: Active ACP session info (present when session bootstrap is complete)
+      required: [sessionId, supportsLoad]
+      properties:
+        sessionId:
+          type: string
+          description: The active ACP session ID
+        supportsLoad:
+          type: boolean
+          description: Whether the agent supports session/load
+
+    MachineInfo:
+      type: object
+      required: [hostname, platform]
+      properties:
+        hostname:
+          type: string
+          example: dev-laptop
+        platform:
+          type: string
+          enum: [win32, darwin, linux]
+
+    BridgeInfo:
+      type: object
+      required: [name, version]
+      properties:
+        name:
+          type: string
+          description: Always "agentlet"
+          example: agentlet
+        version:
+          type: string
+          description: Bridge version (semver)
+          example: 1.0.0
+
+    AgentCapabilities:
+      type: object
+      required: [autoRestart, bufferLimit]
+      properties:
+        autoRestart:
+          type: boolean
+          description: Whether auto-restart is enabled
+        bufferLimit:
+          type: integer
+          description: Max messages buffered during disconnect
+
+    Agentlet:
+      type: object
+      required: [agentletId, status, bridge, capabilities, metadata, connectedAt]
+      properties:
+        agentletId:
+          type: string
+          description: Agentlet identifier (hostname or custom)
+          example: dev-laptop
+        status:
+          type: string
+          enum: [connected, disconnected]
+        machine:
+          $ref: '#/components/schemas/MachineInfo'
+        bridge:
+          $ref: '#/components/schemas/BridgeInfo'
+        capabilities:
+          type: object
+          required: [autoRestart, bufferLimit]
+          properties:
+            autoRestart:
+              type: boolean
+            bufferLimit:
+              type: integer
+            maxAgents:
+              type: integer
+              description: Max concurrent sessions on this agentlet
+        metadata:
+          type: object
+          additionalProperties: true
+        connectedAt:
+          type: string
+          format: date-time
+
+    AgentletSession:
+      type: object
+      description: Session info as reported by the agentlet via `server/list`
+      required: [sessionId, command, pid, cwd, status]
+      properties:
+        sessionId:
+          type: string
+        appId:
+          type: string
+          description: Host-side correlation ID for the session
+        command:
+          type: string
+        pid:
+          type: integer
+        cwd:
+          type: string
+        status:
+          type: string
+          enum: [running, starting]
+
+    SessionSpec:
+      type: object
+      required: [command]
+      properties:
+        command:
+          type: string
+          description: Shell command to spawn the agent (must support ACP stdio)
+          example: node my-agent.js
+        cwd:
+          type: string
+          description: Working directory for the agent subprocess
+        env:
+          type: object
+          additionalProperties:
+            type: string
+          description: Extra environment variables
+        autoRestart:
+          type: boolean
+          description: Enable auto-restart on agent exit
+        idleTimeoutSecs:
+          type: integer
+          description: Idle timeout in seconds (0 or omitted = no timeout)
+
+    SpawnParams:
+      type: object
+      required: [appId, sessionSpec]
+      properties:
+        appId:
+          type: string
+          description: Host-side correlation ID for the request
+        sessionId:
+          type: string
+          description: |
+            When provided, the agentlet resumes an existing suspended session
+            instead of starting a fresh one. The agent is spawned with the
+            original session state restored via `session/load` or `session/resume`
+            (depending on agent capabilities). The value must be a sessionId
+            of a previously suspended session.
+        sessionSpec:
+          $ref: '#/components/schemas/SessionSpec'
+
+    SpawnResult:
+      type: object
+      required: [sessionId, pid]
+      properties:
+        sessionId:
+          type: string
+          description: Session ID of the newly spawned session
+        pid:
+          type: integer
+          description: OS process ID of the spawned agent
+
+    StopParams:
+      type: object
+      required: [sessionId]
+      properties:
+        sessionId:
+          type: string
+          description: Session ID of the agent session to stop
+
+    StopResult:
+      type: object
+      required: [stopped]
+      properties:
+        stopped:
+          type: boolean
+
+    ListResult:
+      type: object
+      required: [sessions]
+      properties:
+        sessions:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentletSession'
+
+    TokenMap:
+      type: object
+      description: |
+        Map of token strings to token metadata.
+        Keys are the token values, values are objects with user info and expiry.
+      additionalProperties:
+        type: object
+        properties:
+          user:
+            type: string
+          expireTime:
+            oneOf:
+              - type: string
+                format: date-time
+              - type: 'null'
+      example:
+        tok_abc123:
+          user: alice
+          expireTime: null
+        tok_def456:
+          user: bob
+          expireTime: '2026-12-31T23:59:59Z'
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    AgentNotFound:
+      type: object
+      required: [error, sessionId]
+      properties:
+        error:
+          type: string
+          example: Agent not found
+        sessionId:
+          type: string
+
+    AgentletNotFound:
+      type: object
+      required: [error, agentletId]
+      properties:
+        error:
+          type: string
+          example: Agentlet not found
+        agentletId:
+          type: string

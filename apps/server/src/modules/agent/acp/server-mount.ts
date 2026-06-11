@@ -1,21 +1,27 @@
+import { join } from 'node:path';
+
 import { AgentletServer } from '@agentlet/server';
 
 import { getDaemonAuth } from './daemon-auth.js';
+import { getDataDir } from '../../../data-dir.js';
 
 import type { AgentletServerOptions } from '@agentlet/protocol';
 import type { FastifyInstance } from 'fastify';
 
 /**
- * Path prefix on Sediment's HTTP server where agentlet processes connect over
- * WebSocket. Agentlet's CLI sends bridge/hello here after upgrade.
+ * Path prefix on Sediment's HTTP server where agentlet processes connect
+ * over WebSocket. The agentlet CLI sends `agentlet/hello` (for the
+ * control channel) or `agent/hello` (for per-session relay) here.
  *
- * The full URL given to users is `ws://<host>:<port>/api/acp/agent` (or wss://
- * in prod). Token + canvasId are carried inside bridge/hello, not in the URL.
+ * The full URL given to users is `ws://<host>:<port>/api/acp/agent`
+ * (or wss:// in prod). Token is carried in the `Authorization` header
+ * or `?token=` query param — see the agentlet protocol spec.
  *
- * Note: this path uses Sediment's standard `/api` prefix but bypasses Fastify's
- * route/hook chain because it's attached to the raw HTTP server's `upgrade`
- * event. Basic Auth (if enabled) does NOT protect this endpoint — agentlet's
- * own token check inside bridge/hello is the auth boundary.
+ * Note: this path uses Sediment's standard `/api` prefix but bypasses
+ * Fastify's route/hook chain because it's attached to the raw HTTP
+ * server's `upgrade` event. Basic Auth (if enabled) does NOT protect
+ * this endpoint — agentlet's own token check in the hello handshake
+ * is the auth boundary.
  */
 export const ACP_UPGRADE_PATH = '/api/acp/agent';
 
@@ -24,20 +30,19 @@ let instance: AgentletServer | null = null;
 export interface MountAcpOptions {
   /**
    * Override the default authenticator. By default we delegate to
-   * {@link getDaemonAuth}, which only accepts `bridge/hello` calls
-   * carrying `mode: 'daemon'` plus the token minted by the
-   * supervisor at boot — see `./daemon-supervisor.ts`. There is no
-   * persistence and no pairing UI: the only legitimate connection
-   * comes from the daemon we just forked.
+   * {@link getDaemonAuth}, which only accepts connections carrying the
+   * token minted by the supervisor at boot — see
+   * `./daemon-supervisor.ts`. There is no persistence and no pairing
+   * UI: the only legitimate connection comes from the agentlet we just
+   * forked.
    */
   authenticate?: AgentletServerOptions['authenticate'];
 }
 
 /**
  * Embed `@agentlet/server` into the running Fastify HTTP server so the
- * embedded agentlet daemon (forked by {@link getDaemonSupervisor}) can
- * connect over WebSocket. Idempotent — calling twice returns the same
- * instance.
+ * embedded agentlet (forked by {@link getDaemonSupervisor}) can connect
+ * over WebSocket. Idempotent — calling twice returns the same instance.
  */
 export function mountAgentletServer(
   app: FastifyInstance,
@@ -46,28 +51,29 @@ export function mountAgentletServer(
   if (instance) return instance;
 
   const daemonAuth = getDaemonAuth();
+  // Global, not per-canvas: the AgentletServer is a singleton whose
+  // sessions.db spans every canvas, so it lives in the server-level
+  // data directory (alongside canvas.sqlite, llm-config.json, etc.)
+  // rather than inside a workspace's per-canvas .history/chat/ tree.
+  const storeDir = join(getDataDir(), 'agentlet');
 
   const server = new AgentletServer({
+    storeDir,
     authenticate:
       opts.authenticate ??
       (async (token, meta) => daemonAuth.validate(token, meta)),
     onConnection: (agent) => {
       app.log.info(
-        { agentId: agent.agentId, agentInfo: agent.agentInfo },
+        { sessionId: agent.sessionId, role: agent.role },
         '[acp] agent connected',
       );
     },
     onReconnection: (agent) => {
-      app.log.info({ agentId: agent.agentId }, '[acp] agent reconnected');
+      app.log.info({ sessionId: agent.sessionId }, '[acp] agent reconnected');
     },
     onDisconnection: (agent, reason) => {
-      // Daemon-mode connections do not need any post-disconnect
-      // bookkeeping — the supervisor owns the daemon's lifecycle and
-      // will surface failures through `/api/acp/daemon`. For agent
-      // (per-CLI) connections we just emit a log line; reconnect /
-      // retry is the agentlet client's responsibility.
       app.log.info(
-        { agentId: agent.agentId, reason },
+        { sessionId: agent.sessionId, reason },
         '[acp] agent disconnected',
       );
     },
@@ -76,6 +82,8 @@ export function mountAgentletServer(
   // Attach the WS upgrade listener once the underlying HTTP server is bound.
   // Fastify exposes `app.server` after `listen()`, which is what `onReady` waits for.
   app.addHook('onReady', async () => {
+    // Initialize persistent stores before accepting connections.
+    await server.init();
     app.server.on('upgrade', (req, socket, head) => {
       if (req.url && req.url.startsWith(ACP_UPGRADE_PATH)) {
         server.handleUpgrade(req, socket, head);

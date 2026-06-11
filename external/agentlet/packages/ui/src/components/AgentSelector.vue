@@ -6,45 +6,47 @@ import { useSessionStore } from '../stores/session'
 const agents = useAgentsStore()
 const session = useSessionStore()
 
-function onSelect(agentId: string) {
-  agents.selectAgent(agentId)
-  connectIfReady(agentId)
+function onSelect(sessionId: string) {
+  agents.selectSession(sessionId)
+  connectIfReady(sessionId)
 }
 
-// Auto-connect when an agent is auto-selected on load
-watch(() => agents.selectedAgentId, (agentId) => {
-  if (agentId && !session.isConnected) {
-    connectIfReady(agentId)
+// Auto-connect when a session is auto-selected on load
+watch(() => agents.selectedSessionId, (sessionId) => {
+  if (sessionId && !session.isConnected) {
+    connectIfReady(sessionId)
   }
 })
 
-function connectIfReady(agentId: string) {
-  const agent = agents.agents.find(a => a.agentId === agentId)
-  if (!agent || agent.status !== 'connected') return
-  if (!agent.session?.sessionId) {
-    console.warn(`[agentlet-ui] Agent ${agentId} has no active session`)
-    return
+// Re-try connection when sessions list arrives
+watch(() => agents.sessions, () => {
+  if (agents.selectedSessionId && !session.isConnected) {
+    connectIfReady(agents.selectedSessionId)
   }
-  session.connectToAgent(agentId, agent.session.sessionId, agents.userToken || undefined)
+})
+
+function connectIfReady(sessionId: string) {
+  const s = agents.sessions.find(s => s.sessionId === sessionId)
+  if (!s) return
+  session.connectToSession(sessionId, agents.userToken || undefined)
 }
 </script>
 
 <template>
   <div class="agent-selector">
-    <label>Agent:</label>
+    <label>Session:</label>
     <select
-      :value="agents.selectedAgentId ?? ''"
+      :value="agents.selectedSessionId ?? ''"
       @change="onSelect(($event.target as HTMLSelectElement).value)"
-      :disabled="agents.agents.length === 0"
+      :disabled="agents.sessions.length === 0"
     >
-      <option value="" disabled>Select an agent...</option>
+      <option value="" disabled>Select a session...</option>
       <option
-        v-for="agent in agents.agents"
-        :key="agent.agentId"
-        :value="agent.agentId"
-        :disabled="agent.status !== 'connected'"
+        v-for="s in agents.sessions"
+        :key="s.sessionId"
+        :value="s.sessionId"
       >
-        {{ agent.agentId }} ({{ agent.status }})
+        {{ s.sessionId }} ({{ s.connected ? 'connected' : 'disconnected' }})
       </option>
     </select>
     <span class="status" :class="{ online: session.isConnected }">

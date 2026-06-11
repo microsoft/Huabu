@@ -66,8 +66,9 @@ import type {
 /**
  * Bumped only on a breaking layout change.
  *
- * v1 (legacy, removed): record carried `agentletAgentId`, the
- * volatile agentlet connection id of the per-CLI bridge handshake.
+ * v1 (legacy, removed): record carried `agentletAgentId` / `agentId`,
+ * the volatile agentlet connection id which is no longer part of the
+ * protocol — replaced by `sessionId` as the primary routing key.
  * v2 carried `profileId` only — the user-configured spawn recipe id.
  * v3 adds `bindingRecipe` (command/cwd/autoRestart/alias snapshot) so
  * the thread is fully self-contained: deleting or mutating the

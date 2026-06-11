@@ -48,12 +48,12 @@ export interface AcpSessionEntry {
   /**
    * The user-configured profile this session is bound to. Used to
    * detect stale entries when a thread's binding is reassigned to a
-   * different profile. The volatile `agentletAgentId` returned by
-   * the daemon's spawn RPC is NOT stored — sessions follow the
+   * different profile. The volatile `sessionId` returned by the
+   * agentlet's spawn RPC is NOT stored — sessions follow the
    * profile, not the worker process; if the agent is re-spawned
    * (crash + auto-restart, or supervisor re-fork) we transparently
-   * try `session/load` against the new agentlet agent and only
-   * fall back to `session/new` if that fails.
+   * try `session/load` against the new agent and only fall back
+   * to `session/new` if that fails.
    */
   profileId: string;
   /**

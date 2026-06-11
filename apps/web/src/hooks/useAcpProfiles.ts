@@ -14,7 +14,7 @@
  *  - Subsequent fetches are explicit via `refresh()`.
  *  - Errors are stored on `error` but do not throw.
  *  - `loaded` flips true only after the first successful fetch.
- *  - The daemon's current liveness snapshot is exposed alongside the
+ *  - The agentlet's current liveness snapshot is exposed alongside the
  *    profile list so consumers don't need a second GET.
  */
 
@@ -22,13 +22,13 @@ import { useEffect } from 'react';
 
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 
-import type { AcpAgentProfile, AcpDaemonStatus } from '@/api/acp';
+import type { AcpAgentProfile, AcpAgentletStatus } from '@/api/acp';
 
 export interface UseAcpProfilesResult {
   /** Every profile the user has created. Empty until the first fetch resolves. */
   profiles: AcpAgentProfile[];
-  /** Latest daemon snapshot, or `null` while the first fetch is in flight. */
-  daemon: AcpDaemonStatus | null;
+  /** Latest agentlet snapshot, or `null` while the first fetch is in flight. */
+  agentlet: AcpAgentletStatus | null;
   /**
    * `true` once the initial fetch has resolved at least once. Consumers
    * should treat the profile list as authoritative only after this flips
@@ -49,7 +49,7 @@ export interface UseAcpProfilesResult {
 
 export function useAcpProfiles(): UseAcpProfilesResult {
   const profiles = useAcpProfilesStore((s) => s.profiles);
-  const daemon = useAcpProfilesStore((s) => s.daemon);
+  const agentlet = useAcpProfilesStore((s) => s.agentlet);
   const loaded = useAcpProfilesStore((s) => s.loaded);
   const error = useAcpProfilesStore((s) => s.error);
   const loading = useAcpProfilesStore((s) => s.loading);
@@ -62,5 +62,5 @@ export function useAcpProfiles(): UseAcpProfilesResult {
     void init();
   }, [init]);
 
-  return { profiles, daemon, loaded, error, loading, refresh };
+  return { profiles, agentlet, loaded, error, loading, refresh };
 }

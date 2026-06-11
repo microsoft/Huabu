@@ -1,45 +1,41 @@
 /**
- * Daemon authentication for the embedded agentlet bridge.
+ * Agentlet authentication for the embedded agentlet server.
  *
- * One Sediment instance manages exactly one agentlet daemon (forked
- * as a child of the server process — see {@link ../daemon-supervisor.ts}).
- * The auth model is correspondingly trivial:
+ * One Sediment instance manages exactly one agentlet (forked as a child
+ * of the server process — see {@link ../daemon-supervisor.ts}). The auth
+ * model is correspondingly trivial:
  *
  *   1. At each server boot (and on every supervisor-driven re-fork)
  *      a fresh 256-bit hex token is minted via {@link rotateToken}.
  *   2. The supervisor passes that token to the child via env / argv
  *      and {@link setDaemonToken} stores it in this process.
- *   3. The daemon's `bridge/hello` arrives carrying `mode: 'daemon'`
- *      plus the same token. {@link validate} accepts the handshake
- *      iff both checks pass.
+ *   3. The agentlet's `agentlet/hello` arrives carrying its profile.
+ *      {@link validate} accepts the handshake iff the token matches.
  *
  * No persistence: the token only ever lives in memory of the parent
- * server process and the daemon child it just forked. A restart of
- * either side rotates the token; the legacy `data/acp-tickets.json`
- * persistence file used by the old per-CLI pairing flow has been
- * removed (the supervisor unlinks it once on boot).
+ * server process and the agentlet child it just forked. A restart of
+ * either side rotates the token.
  *
  * Two kinds of handshake reach this validator, both legitimate:
  *
- *   - `mode: 'daemon'` — the supervised daemon registering its control
- *     channel after each fork.
- *   - any other mode (effectively the agentlet `WsClient` per-agent
- *     relay handshake, which omits the `mode` field) — opened by our
- *     own daemon every time it spawns a CLI agent, so the agentlet
- *     server can register an `AgentConnection` and ferry ACP traffic.
+ *   - `role: 'agentlet'` — the supervised agentlet registering its
+ *     control channel after each fork.
+ *   - `role: 'session'` — per-agent relay sockets opened by our own
+ *     agentlet every time it spawns a CLI agent, so the server can
+ *     register an `AgentConnection` and ferry ACP traffic.
  *
- * Both paths must present the current daemon token, which is rotated
+ * Both paths must present the current agentlet token, which is rotated
  * per supervisor fork and only ever leaves this process inside the
- * env/argv of the daemon child we just forked. That single shared
- * secret is what closes off the loopback-only escape hatch: anyone
- * without the token is rejected before we look at `mode`, and anyone
- * with the token is — by construction — either our daemon or one of
- * its children.
+ * env/argv of the agentlet child we just forked.
  */
 
 import { randomBytes } from 'node:crypto';
 
-import type { AuthResult, BridgeHelloParams } from '@agentlet/protocol';
+import type {
+  AuthResult,
+  AgentHelloParams,
+  AgentletHelloParams,
+} from '@agentlet/protocol';
 
 /**
  * In-memory daemon token + handshake validator.
@@ -73,23 +69,25 @@ class AcpDaemonAuth {
   }
 
   /**
-   * Validate an incoming `bridge/hello`. Throws on rejection — the
-   * agentlet protocol layer maps the throw to a -32001 INVALID_TOKEN
-   * response and closes the socket (see `external/agentlet/packages/
-   * server/src/server.ts#handleHello`).
+   * Validate an incoming `agentlet/hello` or `agent/hello`. Throws on
+   * rejection — the agentlet protocol layer maps the throw to a -32001
+   * INVALID_TOKEN response and closes the socket.
    *
-   * The supervised daemon opens two kinds of WebSocket against this
-   * bridge: a single `mode: 'daemon'` control channel for itself, and
-   * one per-agent relay socket for every CLI agent it spawns. Both
-   * present the same daemon token (rotated per fork, only ever leaves
-   * this process inside the env/argv of the daemon child) so we
-   * accept any handshake that matches it and don't inspect `mode`.
+   * The supervised agentlet opens two kinds of WebSocket against this
+   * server: a single `role: 'agentlet'` control channel for itself, and
+   * one per-session relay socket (`role: 'session'`) for every CLI agent
+   * it spawns. Both present the same agentlet token (rotated per fork,
+   * only ever leaves this process inside the env/argv of the agentlet
+   * child) so we accept any handshake that matches it.
    *
    * Reasons we reject:
-   *  - The daemon supervisor has not finished booting (no token set).
-   *  - The supplied token doesn't match the current daemon token.
+   *  - The agentlet supervisor has not finished booting (no token set).
+   *  - The supplied token doesn't match the current agentlet token.
    */
-  validate(token: string, _meta: BridgeHelloParams): AuthResult {
+  validate(
+    token: string,
+    _meta: AgentHelloParams | AgentletHelloParams,
+  ): AuthResult {
     if (!this.token) {
       throw new Error('Daemon supervisor has not finished initialising');
     }
