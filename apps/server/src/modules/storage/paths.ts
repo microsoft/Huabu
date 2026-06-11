@@ -180,6 +180,23 @@ export function eventsPath(canvasId: string): string {
 }
 
 /**
+ * Append-only delta log for headless executor batches (M2).
+ *
+ * One JSONL line per `POST /api/canvas/:canvasId/execute` call that
+ * actually mutated state. Lines carry the canvas version, run id,
+ * originator, applied commands, and the resulting structural deltas
+ * (see `shared/canvas-engine/delta.ts`). Used by M3 broadcast / replay
+ * and as the persistence anchor for `canvas.json`'s monotonic version
+ * counter.
+ *
+ * Lives next to `events.jsonl` so the entire `.history/` tier travels
+ * together in canvas export bundles.
+ */
+export function deltaLogPath(canvasId: string): string {
+  return path.join(historyDir(canvasId), 'delta-log.jsonl');
+}
+
+/**
  * ACP session persistence — maps each Sediment thread on this canvas
  * to the live ACP `sessionId` returned by `session/new`, so we can
  * call `session/load` after a server restart instead of opening a

@@ -27,6 +27,7 @@ export { CanvasStore } from './canvas-store.js';
 export type {
   CanvasFile,
   CanvasEvent,
+  DeltaLogEntry,
   NodeContent,
   NodeContentSummary,
 } from './canvas-store.js';

@@ -16,6 +16,7 @@ import { create, type StateCreator } from 'zustand';
 import { ARTIFACT_DATA_FIELDS } from '@sediment/shared';
 import {
   COMMAND_META,
+  applyDeltas,
   applySharedPostEffectsFromWriteResult,
   executeCanvasCommands,
   computeFrameFit,
@@ -24,6 +25,7 @@ import {
   wouldAutoFrame,
   getNodeSize,
   type AlignDirection,
+  type Delta,
   type FrameFitResult,
   type NestableNode,
 } from '@sediment/shared/canvas-engine';
@@ -466,6 +468,29 @@ type RFState = {
     commands: CanvasCommand[],
     source?: CanvasExecutionSource,
   ) => void;
+  /**
+   * @internal Apply a server-authored delta batch (M2 headless executor).
+   *
+   * Bypasses the local engine — the server has already executed the
+   * commands, persisted canvas.json + .md sidecars, and given us the
+   * structural diff to apply. We still snapshot for undo, drive the
+   * web-only post-effects (preprocessing trigger, AI-edit flag, etc.),
+   * and reconcile our local `version` to `toVersion` so the next
+   * autosave PUTs against the right baseline.
+   *
+   * Skips autosave (uses `_setStateNoAutosave`) because the server is
+   * already authoritative for this batch.
+   */
+  applyDeltasFromAgent: (
+    deltas: Delta[],
+    toVersion: number,
+    pendingEffects: {
+      mutatedNodes: Node[];
+      deletedNodeIds: string[];
+      contentEditedNodeIds: string[];
+      deferredFitFrameIds: string[];
+    },
+  ) => void;
   /** @internal Resolve a web-only UiIntent and execute the resulting commands. */
   dispatchUiIntent: (intent: CanvasUiIntent) => void;
   /**
@@ -873,6 +898,72 @@ const useCanvasStore = create<RFState>()(
         canvasId: state.canvasId,
         getNodes: () => get().nodes,
         setNodes: (nodes) => set({ nodes }),
+        triggerPreprocessing: preprocessQueue.schedule,
+      });
+    },
+
+    /**
+     * Apply a server-authored delta batch (M2 headless executor).
+     *
+     * Differs from `executeCommands` in three ways:
+     *   1. No engine execution — we replay `deltas` directly via the
+     *      shared `applyDeltas` helper.
+     *   2. No autosave — server is already authoritative for this
+     *      batch; commit via `_setStateNoAutosave` and reconcile
+     *      local `version` to `toVersion` so the NEXT user edit's
+     *      autosave PUTs against the right baseline.
+     *   3. Snapshots for undo unconditionally; agent batches always
+     *      cross the undo boundary in the existing UX.
+     */
+    applyDeltasFromAgent: (deltas, toVersion, pendingEffects) => {
+      if (deltas.length === 0) {
+        // No-op batch: reconcile the version so a subsequent local
+        // edit's autosave doesn't 409 against our stale view of
+        // server state.
+        if (get().version !== toVersion) {
+          get()._setStateNoAutosave({ version: toVersion });
+        }
+        return;
+      }
+
+      const prevNodes = get().nodes;
+      const prevEdges = get().edges;
+      const canvasId = get().canvasId;
+
+      // Snapshot for undo BEFORE mutating local state — agent batches
+      // are always undoable units in the existing UX.
+      canvasHistoryManager.takeSnapshot(prevNodes, prevEdges);
+
+      // Replay the structural diff. The shared helper tolerates
+      // missing targets (REPLACE/DELETE against an already-absent
+      // node/edge) so out-of-order delivery in future broadcast
+      // scenarios fails open.
+      const applied = applyDeltas(
+        { nodes: prevNodes as NestableNode[], edges: prevEdges },
+        deltas,
+      );
+
+      // No host-agnostic post-effects here — the server already ran
+      // `applySharedPostEffectsFromWriteResult` before computing the
+      // diff, so any reroute is folded into the delta payload.
+
+      get()._setStateNoAutosave({
+        nodes: applied.nodes as Node[],
+        edges: applied.edges as Edge[],
+        version: toVersion,
+      });
+
+      runWebPostEffects({
+        effects: {
+          mutatedNodes: pendingEffects.mutatedNodes,
+          deletedNodeIds: pendingEffects.deletedNodeIds,
+          contentEditedNodeIds: pendingEffects.contentEditedNodeIds,
+          deferredFitFrameIds: pendingEffects.deferredFitFrameIds,
+        },
+        source: 'agent',
+        canvasId,
+        getNodes: () => get().nodes,
+        setNodes: (nodes) => get()._setStateNoAutosave({ nodes }),
         triggerPreprocessing: preprocessQueue.schedule,
       });
     },

@@ -212,3 +212,105 @@ export interface CreateCanvasResponse {
   canvasId: string;
   title: string | null;
 }
+
+// ─── Headless Executor: POST /api/canvas/:canvasId/execute ────────────────
+//
+// The headless executor (M2) accepts a batch of canvas commands and
+// runs them server-side against authoritative `canvas.json` state.
+// It returns the resulting structural deltas plus per-command outcomes
+// so clients can apply the diff locally without re-executing the
+// engine themselves.
+//
+// See `docs/headless-executor-plan.md` §M2 and the implementation at
+// `apps/server/src/modules/canvas/canvas-executor.ts`.
+
+/**
+ * Originator metadata describing who initiated the batch. The server
+ * records this in the delta-log row so audit / replay can distinguish
+ * agent-driven mutations from UI gestures.
+ */
+export const executeOriginatorSchema = z.object({
+  source: z.enum(['ui', 'agent', 'system']),
+  /** Web tab/session identifier; opaque to the server. */
+  tabId: z.string().optional(),
+  /** Authenticated user id when known. */
+  userId: z.string().optional(),
+});
+export type ExecuteOriginator = z.infer<typeof executeOriginatorSchema>;
+
+/**
+ * Body for `POST /api/canvas/:canvasId/execute`.
+ *
+ * `commands` is intentionally `z.array(z.unknown())` — the canvas
+ * command union is large and is validated by the engine's per-handler
+ * guards. The server still parses each command against the engine's
+ * runtime narrowing before it touches state.
+ */
+export const postCanvasExecuteBodySchema = z.object({
+  commands: z.array(z.unknown()),
+  originator: executeOriginatorSchema,
+  /** Optional client-supplied run id for tracing / multi-batch grouping. */
+  runId: z.string().optional(),
+});
+export type PostCanvasExecuteRequest = z.infer<
+  typeof postCanvasExecuteBodySchema
+>;
+
+/** Per-command outcome returned alongside the structural deltas. */
+export interface CanvasExecuteCommandOutcome {
+  /** The (possibly annotated) command the server actually executed. */
+  command: unknown;
+  applied: boolean;
+  /** Engine-supplied failure reason when `applied === false`. */
+  reason?: string;
+}
+
+/**
+ * Server-derived post-effect manifest forwarded to clients so the web
+ * can run web-only verbs (delete tracking, AI-edit flag, deferred
+ * frame fit, preprocessing dispatch) without re-running the shared
+ * engine.
+ *
+ * Mirrors the subset of {@link PendingEffects} that has client-side
+ * meaning.
+ *
+ * `mutatedNodes` is included for now because preprocessing dispatch
+ * still runs on the web in Phase A; once cross-tab broadcast (M3)
+ * lands and the server drives preprocessing directly, this field can
+ * be dropped from the wire and the web preprocessing trigger removed.
+ */
+export interface CanvasExecutePendingEffects {
+  /** Final post-execution snapshots of nodes that were created or edited. */
+  mutatedNodes: unknown[];
+  deletedNodeIds: string[];
+  contentEditedNodeIds: string[];
+  deferredFitFrameIds: string[];
+}
+
+/**
+ * Response body for `POST /api/canvas/:canvasId/execute`.
+ *
+ * `fromVersion` is the canvas version observed at the start of the
+ * batch; `toVersion` is the version after persistence. A no-op batch
+ * (`deltas: []`) leaves the version unchanged so concurrent clients
+ * don't get spurious 409s from idempotent calls.
+ */
+export interface PostCanvasExecuteResponse {
+  canvasId: string;
+  fromVersion: number;
+  toVersion: number;
+  /** Deltas observed between prestate and poststate, in apply order. */
+  deltas: unknown[];
+  /** Per-command outcomes (one entry per submitted command). */
+  results: CanvasExecuteCommandOutcome[];
+  /**
+   * Annotated commands as the server executed them. Carries any
+   * server-assigned ids and `origin` / `labelSource` tags so the
+   * client's revert UX can still derive `revertCommand` per-batch.
+   */
+  commands: unknown[];
+  /** Subset of engine-pending effects that clients should drain. */
+  pendingEffects: CanvasExecutePendingEffects;
+  /** Optional run id; echoed from the request when supplied. */
+  runId?: string;
+}

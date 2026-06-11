@@ -26,6 +26,8 @@ import type {
   ChatAttachment,
   IntentCandidate,
 } from '@sediment/shared';
+import type { Delta } from '@sediment/shared/canvas-engine';
+import type { Node } from '@xyflow/react';
 
 // ==================== Pure Utility Functions ====================
 
@@ -276,17 +278,32 @@ function animateAgentBatch(commands: CanvasCommand[]): void {
 }
 
 /**
- * Parse a canvas_commands tool result, pre-assign missing IDs,
- * snapshot current state for revert, execute commands, and return
- * the enriched commands plus change entries.
+ * Parse a canvas_commands tool result, snapshot prestate for revert,
+ * apply the server-authored deltas, and return the executor's
+ * annotated commands plus change entries.
  *
- * The server's canvas_commands handler returns a flat
- * `{ source, canvasId, commands }` JSON payload (see
- * apps/server/src/modules/agent/tools/handlers/canvas-write.ts). On
- * tool errors, agent.service.ts wraps the payload as
- * `{ tool, status: 'error', error }` — we skip those here.
+ * After M2 (headless executor) the server's `canvas_commands` handler
+ * returns an enriched envelope:
+ *   `{ source, canvasId, commands, runId, fromVersion, toVersion,
+ *      deltas, results, pendingEffects }`
+ * where `commands` are the annotated commands the executor actually
+ * ran (ids assigned), `deltas` is the structural diff we apply
+ * locally via `applyDeltasFromAgent`, and `pendingEffects` carries
+ * the web-only drain manifest (preprocessing dispatch, delete
+ * tracking, AI-edit flag, deferred frame fit).
+ *
+ * Legacy fallback: when the envelope lacks `deltas` (e.g. the sketch
+ * carve-out that still returns `{ source, canvasId, commands }`) we
+ * fall back to local engine execution. This keeps the sketch pipeline
+ * working without touching its API surface — M3 will collapse the two
+ * paths once cross-tab broadcast lands.
+ *
+ * Returns the same `{ commands, changes }` shape as before so the
+ * downstream tool-card wiring stays untouched.
  */
-function applyCanvasCommandsFromToolResult(toolResult: string | undefined): {
+export function applyCanvasCommandsFromToolResult(
+  toolResult: string | undefined,
+): {
   commands: CanvasCommand[];
   changes: ReturnType<typeof snapshotAndExtractChanges>;
 } | null {
@@ -294,20 +311,60 @@ function applyCanvasCommandsFromToolResult(toolResult: string | undefined): {
     const parsed = JSON.parse(toolResult ?? '{}') as {
       status?: string;
       commands?: unknown;
+      deltas?: unknown;
+      toVersion?: unknown;
+      pendingEffects?: {
+        mutatedNodes?: unknown;
+        deletedNodeIds?: unknown;
+        contentEditedNodeIds?: unknown;
+        deferredFitFrameIds?: unknown;
+      };
     };
 
     // Error envelopes produced by the SSE bridge — nothing to apply.
     if (parsed.status === 'error') return null;
 
-    // Be strict about shape: the field must be an array. Anything else
-    // (object, string, missing) is treated as "no commands". This
-    // protects the for-of loop below from a server-side regression
-    // where `commands` accidentally becomes an array-like or arg-pass-
-    // through value with a numeric `length` property.
     const commands = parsed.commands;
     if (!Array.isArray(commands) || commands.length === 0) return null;
 
-    // Pre-assign IDs to nodes/edges that don't have them
+    // Server-authored path (M2): deltas + version are present.
+    const hasServerExecution =
+      Array.isArray(parsed.deltas) && typeof parsed.toVersion === 'number';
+
+    if (hasServerExecution) {
+      // Pre-assigned ids already in `commands` (the executor stamped
+      // them); we only need to snapshot prestate for the revert UX
+      // and then replay the structural diff.
+      const typedCommands = commands as CanvasCommand[];
+      const changes = snapshotAndExtractChanges(typedCommands);
+
+      const pe = parsed.pendingEffects;
+      useCanvasStore
+        .getState()
+        .applyDeltasFromAgent(
+          parsed.deltas as Delta[],
+          parsed.toVersion as number,
+          {
+            mutatedNodes: Array.isArray(pe?.mutatedNodes)
+              ? (pe.mutatedNodes as Node[])
+              : [],
+            deletedNodeIds: Array.isArray(pe?.deletedNodeIds)
+              ? (pe.deletedNodeIds as string[])
+              : [],
+            contentEditedNodeIds: Array.isArray(pe?.contentEditedNodeIds)
+              ? (pe.contentEditedNodeIds as string[])
+              : [],
+            deferredFitFrameIds: Array.isArray(pe?.deferredFitFrameIds)
+              ? (pe.deferredFitFrameIds as string[])
+              : [],
+          },
+        );
+
+      animateAgentBatch(typedCommands);
+      return { commands: typedCommands, changes };
+    }
+
+    // Legacy / sketch carve-out path: execute locally via the engine.
     for (const cmd of commands as CanvasCommand[]) {
       if (cmd.type === 'CREATE_NODES') {
         for (const node of cmd.nodes) {
@@ -324,13 +381,11 @@ function applyCanvasCommandsFromToolResult(toolResult: string | undefined): {
       }
     }
 
-    // Snapshot BEFORE execution so revert commands capture current state
     const typedCommands = commands as CanvasCommand[];
     const changes = snapshotAndExtractChanges(typedCommands);
 
     useCanvasStore.getState().executeCommands(typedCommands, 'agent');
 
-    // Staggered entrance animation following command execution order
     animateAgentBatch(typedCommands);
 
     return { commands: typedCommands, changes };
