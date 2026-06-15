@@ -8,6 +8,7 @@ const REF_WIDTHS: Record<string, number> = {
   note: 400,
   web: 400,
   pdf: 400,
+  office: 400,
 };
 
 /**

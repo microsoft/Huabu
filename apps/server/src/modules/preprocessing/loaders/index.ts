@@ -1,9 +1,11 @@
 export * from './loader.interface.js';
 export * from './pdf.loader.js';
+export * from './office.loader.js';
 export * from './web.loader.js';
 export * from './text.loader.js';
 export * from './youtube.loader.js';
 
+import { OfficeLoader } from './office.loader.js';
 import { PdfLoader } from './pdf.loader.js';
 import { TextLoader } from './text.loader.js';
 import { WebLoader } from './web.loader.js';
@@ -14,6 +16,7 @@ import type { IDocumentLoader } from './loader.interface.js';
 export class DocumentLoaderFactory {
   private static loaders: IDocumentLoader[] = [
     new PdfLoader(),
+    new OfficeLoader(),
     new WebLoader(),
     new TextLoader(),
     new YoutubeLoader(),

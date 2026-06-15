@@ -58,6 +58,7 @@ export type Capability =
 export type NodeContentKind =
   | 'web'
   | 'pdf'
+  | 'office'
   | 'note'
   | 'text'
   | 'image'

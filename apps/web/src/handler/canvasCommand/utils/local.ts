@@ -48,6 +48,7 @@ export function extractSnippet(node: Node): string | undefined {
   if (
     node.type === 'web' ||
     node.type === 'pdf' ||
+    node.type === 'office' ||
     node.type === 'video' ||
     node.type === 'image'
   ) {

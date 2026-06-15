@@ -4,6 +4,46 @@
 
 ---
 
+## 2026-06-15 · Office 节点预览体验打磨
+
+**What Changed**
+
+- **预览顶部不再重复显示文件名**：原先在大屏预览正文上方还有一行重复的文件名和说明文案，与大屏面板自带的标题栏（面包屑）重复。现在 Office 预览只保留正文，下载按钮以图标形式放进面板顶栏右上角的操作槽。
+- **解析后的 Markdown 不再带 YAML 元信息块和多余横线**：之前用 WPS / 部分 Office 工具创建的文件会在正文前出现 `author / created / modified / ICV / KSOProductBuildVer / CalculationRule` 等键值列表，紧接着还有一道空横线。加载器和读回逻辑现在都会自动剥离开头的 YAML frontmatter + 紧随其后的孤立 `---` 横线，预览里只显示真正的文档正文。
+- **画布工具栏「Upload Local Files」对话框允许选择 Office 文件**：副标题更新为 "Supports Images, PDFs, Videos, Office files (Word / Excel / PowerPoint), and HTML pages"；系统文件选择器的 `accept` 过滤器也加入了 `.docx / .xlsx / .pptx / .html / .htm` 以及对应的 OOXML / text/html MIME 类型，之前默认会把 Office 和 HTML 文件灰掉。本地 `.html` 现在和拖拽 / 粘贴一致，走 `uploadHtml` 写入 artifact，由 Web 节点的预处理管线渲染。
+- **预处理完成后，预览无需刷新页面即可显示内容**：之前上传 Office 文件后第一次双击打开大屏，预览是空白的，必须刷新画布才能看到抽取出的正文 —— 服务端已经把内容写进 `.md` 边车，但客户端 `data.content` 没被同步。现在预处理接口会把抽取后（已去除 frontmatter）的 Markdown 直接回传，客户端立刻补丁进画布状态，打开即有内容。
+- **左侧目录的 Office 图标与画布卡片一致**：以前左侧"数据源 / Layer"面板里 `.docx / .xlsx / .pptx` 全都显示同一个通用 Office 图标（`FileType2`），而画布上的节点卡片却是 Word / Excel / PowerPoint 三种彩色专用图标，看起来像两个不同的功能。`getNodeIcon(type, data)` 现在支持读取 `data.format`，目录、大屏预览顶栏面包屑都和画布卡片共用同一份 `OFFICE_FORMAT_ICON` 映射，三个表面图标永远同步。
+- **Layer 面板的类型过滤栏按 Office 子格式拆分**：之前不管画布上有几种 Office 文件，过滤栏都只显示一个通用 "Filter by Office" chip，而下方列表里却清清楚楚是 Word / Excel / PowerPoint 三种不同的图标，视觉上像是"我能看到三类，但只能按一类筛"。现在如果画布上同时存在多种 Office 格式，过滤栏会展开成多个独立 chip（`Filter by Word` / `Filter by Excel` / `Filter by PowerPoint`），每个 chip 用对应格式自己的图标，并且可以独立勾选；只有一种格式时也会显示该格式的专用图标和名字。
+
+**Notes**
+
+- **旧节点不需要重新上传**：剥离同时在「新提取」和「从 .md 边车读回」两层做，已经在画布上的 Office 节点下次打开就会显示干净的正文，磁盘上的边车内容保持不变（保留完整原始抽取结果方便排错）。
+- 双击 Office 节点居中：之前 Office 节点的双击没有被注册到"可展开节点"列表里，所以点了之后画布不会平移。该路径已在上一次修复中加上，新建或现有的 Office 节点双击都会按统一逻辑把节点带到画布可见区。
+- 拖拽上传一直就支持 Office 文件（走的是 `detectNodeType` 同一条路径），这次改动只是把工具栏的"点击上传"对话框也对齐成相同能力。
+- 预处理回传的 `content` 字段只对 Office 节点开启；PDF / Web / 笔记节点的预览不读 `data.content`（分别走原生 PDF 渲染 / iframe / 用户当场编辑的内容），抽取正文动辄几百 KB，没必要塞进响应。
+- 类型过滤栏（Layer Filter）只在画布上**真实存在**对应格式时才会拆 chip：例如只上传了一个 `.xlsx` 时，过滤栏直接显示 Excel chip（不会出现空的 Word / PowerPoint 槽位）；完全没有 Office 文件时也不会保留 Office 类目占位。其他面板里"代表整个 Office 类目"的入口（工具栏、上传对话框分类、`getNodeIcon('office')` 直接调用等）继续使用通用 `FileType2` 图标，因为那种位置不是某个具体节点，没有 `data.format` 可读。
+
+---
+
+## 2026-06-15 · 新增 Office 文档节点（Word / Excel / PPT）
+
+**What Changed**
+
+- **新增 `office` 节点类型**，支持把 `.docx` / `.xlsx` / `.pptx` 三种 Office OOXML 文件**拖入画布**（或粘贴文件）创建节点；和 PDF 节点架构一致：源文件存到 `.artifacts/`，节点元数据写到 `nodes/<label>.md`。
+- **节点封面按文档格式显示不同的彩色图标**（Word → FileText、Excel → FileSpreadsheet、PPT → Presentation），并标注扩展名，避免一眼分不清三种格式。
+- **预处理阶段会自动抽取正文为 Markdown**，写入 `.md` 边车的内容区，AI 检索 / 引用 / 上下文都能直接读到。Excel 多 Sheet 会展开成多段文字；PPT 默认包含每页正文（默认忽略备注与批注）。
+- **双击节点在右侧打开大屏预览**：以 Markdown 文本形式渲染抽取出的正文（用既有的 `MilkdownPreview` 组件），底部 / 顶栏提供下载原始文件按钮。
+
+**Notes**
+
+- **只装一个库**：`officeparser@^7.2.1`（统一处理 docx/xlsx/pptx 解析），不引入 mammoth / xlsx / pptx2json 等多套依赖。
+- **只查看不编辑**：Office 节点定位与 PDF 节点一致 —— 看内容、入库、做 AI 上下文。需要改文档请下载后用本地 Office / WPS / Keynote 打开。
+- **不还原版式**：纯文本 / Markdown 渲染，不包含原文档的字体、图片、复杂表格、公式排版。这是"一个库覆盖三种格式"必然的取舍；如果未来要做版式还原，会拆成单独的渲染节点。
+- **旧格式不支持**：`.doc` / `.xls` / `.ppt`（OLE 二进制）会被识别为通用文件，需要先用 Office 另存为新格式后再拖入。
+- **远程 URL 自动降级为 Web 节点**：粘贴一个指向 `.docx` 的 URL 时，因为我们不下载远程二进制，会回退到 Web 节点（抓取页面）行为。
+
+---
+
 ## 2026-06-15 · 新增 Audio 录音节点
 
 **What Changed**

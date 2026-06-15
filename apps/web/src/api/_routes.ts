@@ -38,7 +38,7 @@ export const routes = {
     `/canvas/${enc(canvasId)}/nodes/${enc(nodeId)}/preprocess`,
   canvasArtifact: (
     canvasId: string,
-    kind: 'image' | 'pdf' | 'video' | 'audio' | 'html',
+    kind: 'image' | 'pdf' | 'office' | 'video' | 'audio' | 'html',
   ) => `/canvas/${enc(canvasId)}/artifact/${kind}`,
   canvasArtifactCloneFrom: (canvasId: string) =>
     `/canvas/${enc(canvasId)}/artifact/clone-from`,

@@ -12,7 +12,13 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 
-import { uploadImage, uploadPdf, uploadVideo } from '@/api/artifact';
+import {
+  uploadHtml,
+  uploadImage,
+  uploadOffice,
+  uploadPdf,
+  uploadVideo,
+} from '@/api/artifact';
 import { isEditableTarget } from '@/hooks/shortcuts';
 import { useIsNotMouse } from '@/hooks/useInputMode';
 import { useIntentStore } from '@/store/intentStore';
@@ -20,7 +26,7 @@ import { useToolStore } from '@/store/toolStore';
 
 import { NODE_ICON } from '../../../config/nodeIcons.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
-import { detectNodeType } from '../../../utils/io/media.ts';
+import { detectNodeType, detectOfficeFormat } from '../../../utils/io/media.ts';
 import { Button } from '../../Common/Button.tsx';
 import { Modal } from '../../Common/Modal.tsx';
 import { Popover } from '../../Common/Popover.tsx';
@@ -241,6 +247,19 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
               naturalDimensions = dims;
             } else if (type === 'pdf') {
               url = await uploadPdf(file, canvasId);
+            } else if (type === 'office') {
+              url = await uploadOffice(file, canvasId);
+              const format = detectOfficeFormat(file.name) ?? 'docx';
+              return {
+                nodeType: 'office',
+                data: {
+                  type: 'office',
+                  src: url,
+                  format,
+                  label: file.name,
+                  origin: { type: 'user-uploaded' },
+                },
+              };
             } else if (type === 'note') {
               const content = await file.text();
               return {
@@ -251,6 +270,11 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
                   origin: { type: 'user-uploaded' },
                 },
               };
+            } else if (type === 'web') {
+              // Local .html / .htm file — store the bytes as an
+              // artifact (same path as drag/drop) so the preprocess
+              // pipeline can render it as a Web node.
+              url = await uploadHtml(file, canvasId);
             }
 
             return {
@@ -288,7 +312,10 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
       if (!url) return [];
 
       const finalUrl = url.startsWith('http') ? url : `https://${url}`;
-      const type = detectNodeType(finalUrl);
+      const detected = detectNodeType(finalUrl);
+      // Remote office docs aren't downloaded; fall back to web so the
+      // page (or its hosted preview) gets fetched instead.
+      const type = detected === 'office' ? 'web' : detected;
 
       return [
         {
@@ -566,7 +593,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
       {/* 1. File Upload Modal */}
       <Modal
         title="Upload Local Files"
-        description="Supports Images, PDFs, and Videos. Select multiple files to upload in batch."
+        description="Supports Images, PDFs, Videos, Office files (Word / Excel / PowerPoint), and HTML pages. Select multiple files to upload in batch."
         isOpen={activeModal === 'upload'}
         onClose={() => setActiveModal(null)}
       >
@@ -587,7 +614,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             ref={fileInputRef}
             className="hidden"
             multiple
-            accept="image/*,application/pdf,video/mp4,.md,.markdown,text/markdown"
+            accept="image/*,application/pdf,video/mp4,.md,.markdown,text/markdown,.docx,.xlsx,.pptx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation,.html,.htm,text/html"
             onChange={handleFileChange}
           />
         </div>

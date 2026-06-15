@@ -46,6 +46,7 @@ export const MD_BACKED_NODE_TYPES: ReadonlySet<string> = new Set([
   'text',
   'web',
   'pdf',
+  'office',
   'image',
   'video',
   'audio',
@@ -63,4 +64,5 @@ export const TEXT_BEARING_NODE_TYPES: ReadonlySet<string> = new Set([
   'text',
   'web',
   'pdf',
+  'office',
 ]);

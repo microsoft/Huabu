@@ -100,6 +100,24 @@ export async function extract(resolved: ResolvedInput): Promise<ExtractResult> {
     };
   }
 
+  // office — use OfficeLoader (Word / Excel / PowerPoint)
+  if (nodeType === 'office') {
+    const filePath = resolved.filePath;
+    if (!filePath) {
+      throw new Error('Missing file path for Office source extraction');
+    }
+    // Derive the format hint from the file extension so the loader can
+    // pick the right parser when magic-bytes detection is ambiguous.
+    const ext = filePath.slice(filePath.lastIndexOf('.') + 1).toLowerCase();
+    const loader = DocumentLoaderFactory.getLoader('office');
+    const result = await loader.load(filePath, { fileType: ext });
+    return {
+      content: result.content,
+      title: result.title,
+      metadata: result.metadata,
+    };
+  }
+
   // video — future: YoutubeLoader
   if (nodeType === 'video') {
     return { skipped: true };

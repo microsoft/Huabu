@@ -90,6 +90,7 @@ const MD_BACKED_NODE_TYPES = new Set([
   'text',
   'web',
   'pdf',
+  'office',
   'image',
   'video',
   'audio',
@@ -97,7 +98,13 @@ const MD_BACKED_NODE_TYPES = new Set([
   'question',
 ]);
 
-const TEXT_BEARING_NODE_TYPES = new Set(['note', 'text', 'web', 'pdf']);
+const TEXT_BEARING_NODE_TYPES = new Set([
+  'note',
+  'text',
+  'web',
+  'pdf',
+  'office',
+]);
 
 const NODE_CONTENT_KEYS = new Set([
   'content',

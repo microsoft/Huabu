@@ -19,6 +19,7 @@ export const CANVAS_NODE_TYPES = [
   'text',
   'image',
   'pdf',
+  'office',
   'video',
   'audio',
   'web',
@@ -41,6 +42,7 @@ export const AGENT_CREATABLE_NODE_TYPES = [
   'web',
   'image',
   'pdf',
+  'office',
   'video',
   'frame',
 ] as const;
@@ -330,6 +332,29 @@ export interface PdfNodeData extends BaseNodeData {
   highlights?: PdfHighlight[];
 }
 
+/**
+ * Office document formats supported by the `office` node.
+ * Backed server-side by `officeparser`; rendered as text-only previews
+ * (the canvas card shows a format icon + AI summary; the expanded
+ * preview shows the extracted markdown body).
+ */
+export const OFFICE_FORMATS = ['docx', 'pptx', 'xlsx'] as const;
+export type OfficeFormat = (typeof OFFICE_FORMATS)[number];
+
+/** Office node: Word / PowerPoint / Excel document (preview + ingest only). */
+export interface OfficeNodeData extends BaseNodeData {
+  type: 'office';
+  src: string;
+  /**
+   * Concrete office format. Inferred from the uploaded file's extension
+   * on the client and persisted so the renderer can pick the right icon
+   * (Word / PowerPoint / Excel) without re-parsing `src`.
+   */
+  format: OfficeFormat;
+  /** Optional manual cover image (mirrors `PdfNodeData.coverUrl`). */
+  coverUrl?: string;
+}
+
 /** Video node: video content */
 export interface VideoNodeData extends BaseNodeData {
   type: 'video';
@@ -488,6 +513,7 @@ export type NodeData =
   | TextNodeData
   | WebNodeData
   | PdfNodeData
+  | OfficeNodeData
   | VideoNodeData
   | ImageNodeData
   | AudioNodeData
@@ -510,10 +536,17 @@ export function isMediaNode(
 ): data is
   | WebNodeData
   | PdfNodeData
+  | OfficeNodeData
   | VideoNodeData
   | ImageNodeData
   | AudioNodeData {
-  return ['web', 'pdf', 'video', 'image', 'audio'].includes(data.type);
+  return ['web', 'pdf', 'office', 'video', 'image', 'audio'].includes(
+    data.type,
+  );
+}
+
+export function isOfficeNode(data: NodeData): data is OfficeNodeData {
+  return data.type === 'office';
 }
 
 export function isAudioNode(data: NodeData): data is AudioNodeData {

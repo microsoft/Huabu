@@ -71,6 +71,23 @@ export const profiles: Record<CanvasNodeType, NodePreprocessProfile> = {
     ],
     watchFields: ['src', 'title', 'labelSource'],
   },
+  office: {
+    nodeType: 'office',
+    contentKind: 'office',
+    capabilities: [
+      'resolve_input',
+      'extract_text',
+      'compute_fingerprint',
+      'resolve_title',
+      'merge_metadata',
+      'generate_label',
+      'generate_summary',
+      'generate_keywords',
+      'persist_source',
+      'build_patch',
+    ],
+    watchFields: ['src', 'title', 'labelSource', 'format'],
+  },
   image: {
     nodeType: 'image',
     contentKind: 'image',

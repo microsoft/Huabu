@@ -17,7 +17,7 @@ import type {
 /**
  * Canvas-scoped artifact route. Mount under `/api/canvas`.
  *
- *   POST /:canvasId/artifact/:type          → upload (image | pdf | video | html)
+ *   POST /:canvasId/artifact/:type          → upload (image | pdf | office | video | audio | html)
  *   GET  /:canvasId/artifact/:filename      → serve (filename = `<id><ext>`)
  *   POST /:canvasId/artifact/clone-from     → cross-canvas copy
  *
@@ -37,11 +37,13 @@ const artifactRoute: FastifyPluginAsync = async (fastify) => {
       video: '.mp4',
       audio: '.webm',
       html: '.html',
+      office: '.docx',
     };
 
     if (!typeExtMap[type]) {
       return reply.code(400).send({
-        message: 'Invalid type. Must be image, pdf, video, audio, or html',
+        message:
+          'Invalid type. Must be image, pdf, video, audio, html, or office',
       });
     }
 

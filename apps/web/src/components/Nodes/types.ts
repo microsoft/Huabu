@@ -6,6 +6,7 @@ import type {
   TextNodeData as SharedTextNodeData,
   WebNodeData as SharedWebNodeData,
   PdfNodeData as SharedPdfNodeData,
+  OfficeNodeData as SharedOfficeNodeData,
   VideoNodeData as SharedVideoNodeData,
   ImageNodeData as SharedImageNodeData,
   AudioNodeData as SharedAudioNodeData,
@@ -29,6 +30,9 @@ export type CanvasTextNodeData = SharedTextNodeData & {
 };
 export type CanvasWebNodeData = SharedWebNodeData & { [key: string]: unknown };
 export type CanvasPdfNodeData = SharedPdfNodeData & { [key: string]: unknown };
+export type CanvasOfficeNodeData = SharedOfficeNodeData & {
+  [key: string]: unknown;
+};
 export type CanvasVideoNodeData = SharedVideoNodeData & {
   [key: string]: unknown;
 };
@@ -54,6 +58,7 @@ export type CanvasNodeData =
   | CanvasTextNodeData
   | CanvasWebNodeData
   | CanvasPdfNodeData
+  | CanvasOfficeNodeData
   | CanvasVideoNodeData
   | CanvasImageNodeData
   | CanvasAudioNodeData
