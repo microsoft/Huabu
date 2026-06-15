@@ -4,6 +4,21 @@
 
 ---
 
+## 2026-06-15 · 桌面版 v0.2.2 紧急修复（沿用 v0.2.1 启动崩溃）
+
+**What Changed**
+
+- **打包安装包终于能启动了**：v0.2.1 修了 `__dirname` 但还是打不开 —— `__dirname` 现在指向 `Contents/Resources/server/`，可那个目录下并没有 `sql-wasm.wasm`，因为 `electron-builder.yml` 的 `extraResources` 根本没把 wasm 列进打包清单（agentlet 子目录的 filter 还显式只保留 `.js` / `.js.map`）。表现就是 server 一行 ENOENT 后直接 `code=1` 退出，弹窗依旧。
+- 在 `extraResources` 里新增 `server/sql-wasm.wasm` 条目，并在 agentlet filter 里追加 `'**/*.wasm'`，让 tsup 生成的两份 wasm 都被打进 `Huabu.app/Contents/Resources/server/` 和 `…/server/agentlet/`。
+
+**Notes**
+
+- v0.2.0 / v0.2.1 都打不开，**请直接升 v0.2.2**；数据目录无兼容性问题，覆盖安装即可。
+- 本地 dev（`pnpm dev`）依旧不受影响，问题只在 electron-builder 打的安装包里出现。
+- 第二处 filter（agentlet/）的 wasm 严格来说只有在外部 agentlet 派生进程也会走 sql.js 时才需要；目前 SDK 主路径走的是主 server bundle 那一份，但为了不留另一颗类型完全相同的雷，两份都包进去。
+
+---
+
 ## 2026-06-15 · 桌面版 v0.2.1 紧急修复（启动崩溃）
 
 **What Changed**
