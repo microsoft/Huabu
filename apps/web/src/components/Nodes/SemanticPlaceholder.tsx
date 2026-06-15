@@ -78,8 +78,19 @@ export function SemanticPlaceholder({
           : undefined
       }
     >
+      {/*
+        Wrapping rules — matched to pretext's greedy line breaker (which
+        `useFitText` uses to size the font). `wrap-break-word` =
+        `overflow-wrap: break-word`: only split inside a word when the
+        word alone wouldn't fit. `text-balance` is intentionally NOT used
+        here: the browser would otherwise pick alternative break points
+        to balance line lengths, and combined with any in-word break
+        permission it loves to slice English words mid-letter — pretext
+        doesn't model balancing so the picked font would then misalign
+        with the actual rendered height anyway.
+      */}
       <span
-        className="inline-flex items-center text-center leading-snug font-medium text-balance [word-break:break-word]"
+        className="inline-flex items-center text-center leading-snug font-medium wrap-break-word"
         style={{ fontSize: `${fontSize}px` }}
       >
         <span>{label}</span>
