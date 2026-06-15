@@ -312,10 +312,14 @@ body,
     0 0 0 3px color-mix(in srgb, var(--color-info) 18%, transparent);
 }
 
-/* Smooth frame resize animation when children are added/removed.
-   Disabled during active drag (ReactFlow adds `.dragging` to dragged nodes)
-   and during manual resize (NodeResizer adds inline transforms). */
-.react-flow__node-frame:not(.dragging) {
+/* Smooth frame resize animation when children are added/removed via
+   auto-layout. Suppressed while the user is actively dragging a
+   resize handle (`body.canvas-resize-active`, toggled by
+   `snapSession.ts`) — otherwise the frame's `width`/`height` would
+   animate ~200ms behind every gesture tick, making the body visibly
+   lag the handle and the selection outline. Also disabled while the
+   node is being dragged (ReactFlow adds `.dragging`). */
+body:not(.canvas-resize-active) .react-flow__node-frame:not(.dragging) {
   transition:
     width 0.2s ease-out,
     height 0.2s ease-out;

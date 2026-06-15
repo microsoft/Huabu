@@ -36,10 +36,12 @@ function createFakeConnection(): FakeConnection {
   const sent: AcpMessage[] = [];
   const handlers: Array<(msg: AcpMessage) => void> = [];
   return {
-    sessionId: 'fake:session',
-    agentletId: 'fake:agentlet',
-    role: 'agent-session',
+    agentId: 'fake:agent',
+    token: 'fake-token',
     metadata: {},
+    agentInfo: { command: 'fake', pid: 0, cwd: '/tmp/fake' },
+    bridge: { name: 'fake', version: '0.0.0' },
+    capabilities: { autoRestart: false, bufferLimit: 0 },
     status: 'connected',
     connectedAt: new Date(),
     send(msg) {

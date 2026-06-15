@@ -26,7 +26,10 @@ import type { PreprocessQueue } from './preprocessQueue';
 import type { StructureScheduler } from './structureScheduler';
 
 /** Minimal shape of the structure-save action invoked by the handler. */
-type SaveCanvasFn = (opts?: { keepalive?: boolean }) => Promise<void>;
+type SaveCanvasFn = (opts?: {
+  keepalive?: boolean;
+  force?: boolean;
+}) => Promise<void>;
 
 export type UnloadFlushDeps = {
   events: CanvasEventBuffer;
@@ -40,6 +43,16 @@ export type UnloadFlushDeps = {
    * inside `create(...)` further down).
    */
   getSaveCanvas: () => SaveCanvasFn;
+  /**
+   * `true` when the store holds structural geometry that hasn't been
+   * confirmed saved — i.e. a regular PUT is in flight (`isSaving`) or
+   * another save is queued behind it (`pendingSave`). Both states are
+   * invisible to `structure.cancelPending()` (its debounce timer has
+   * already fired), yet the in-flight request is a non-keepalive
+   * fetch that the browser aborts on unload. The flush uses this to
+   * fire a forced keepalive PUT so that trailing edit isn't lost.
+   */
+  hasUnsavedStructure: () => boolean;
 };
 
 /**
@@ -51,14 +64,21 @@ export function createUnloadFlush(deps: UnloadFlushDeps): () => void {
     deps.events.flushAllKeepalive();
     deps.nodeContent.flushAllKeepalive();
     deps.preprocess.flushKeepalive();
-    // `cancelPending()` returns `false` when no timer was queued,
-    // meaning the latest structural state is already on the wire
-    // (or never differed from what's on disk), so we skip the PUT
-    // entirely — no more empty diffs bumping `version` on every
-    // page close.
-    if (deps.structure.cancelPending()) {
+    // Structure save has three "unsaved" states on unload:
+    //   1. A debounce timer is still queued — `cancelPending()`
+    //      returns `true`; we cancel it and send the PUT ourselves.
+    //   2. A regular PUT is in flight, or a save is queued behind it
+    //      (`isSaving` / `pendingSave`) — invisible to the timer, but
+    //      the in-flight fetch is non-keepalive and gets aborted by
+    //      the browser on unload, so the edit would be lost.
+    // Either way, push the latest in-store geometry via a forced
+    // keepalive PUT. When none of these hold, the latest structural
+    // state is already on disk — skip the PUT so closing a clean tab
+    // doesn't bump `version` for free.
+    const hadPendingTimer = deps.structure.cancelPending();
+    if (hadPendingTimer || deps.hasUnsavedStructure()) {
       void deps
-        .getSaveCanvas()({ keepalive: true })
+        .getSaveCanvas()({ keepalive: true, force: true })
         .catch(() => undefined);
     }
   };

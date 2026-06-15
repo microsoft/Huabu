@@ -36,6 +36,36 @@ type GesturePreviewState = {
 
   /** Clear the guide list when the gesture ends. */
   clearSnapGuides: () => void;
+
+  /**
+   * Live drop indicator for a node hovering over a structured
+   * (column / row) frame. Absolute flow-space rect plus the picker's
+   * decision (`into-existing` highlights the target track,
+   * `insert-new` draws a thin bar at the gap where a new track opens).
+   * Written by `canvasStore.onNodeDrag`; cleared on drag end. `null`
+   * when the cursor isn't over a structured frame (free-mode frames
+   * never set it).
+   */
+  structuredDropPreview: StructuredDropPreview | null;
+
+  /** Replace the structured drop indicator (called every drag tick). */
+  setStructuredDropPreview: (preview: StructuredDropPreview | null) => void;
+
+  /** Clear the structured drop indicator when the gesture ends. */
+  clearStructuredDropPreview: () => void;
+};
+
+/**
+ * Absolute flow-space drop indicator for a structured frame, produced
+ * by {@link describeStructuredDropZone} and offset to canvas space.
+ */
+export type StructuredDropPreview = {
+  frameId: string;
+  kind: 'into-existing' | 'insert-new';
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 };
 
 /**
@@ -48,6 +78,8 @@ type GesturePreviewState = {
  *   would resize when their children are dragged or resized.
  * - `snapGuides` — Smart-Snap alignment guides shown for *both* drag
  *   and resize gestures.
+ * - `structuredDropPreview` — live drop indicator (column / row band or
+ *   insert bar) shown while dragging a node over a structured frame.
  *
  * Lives in its own store because:
  *
@@ -71,4 +103,8 @@ export const useGesturePreviewStore = create<GesturePreviewState>()((set) => ({
   snapGuides: [],
   setSnapGuides: (guides) => set({ snapGuides: guides }),
   clearSnapGuides: () => set({ snapGuides: [] }),
+  structuredDropPreview: null,
+  setStructuredDropPreview: (preview) =>
+    set({ structuredDropPreview: preview }),
+  clearStructuredDropPreview: () => set({ structuredDropPreview: null }),
 }));

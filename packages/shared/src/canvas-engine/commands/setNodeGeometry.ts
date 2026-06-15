@@ -24,6 +24,22 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
     // cycle.
     const deferredFitFrameIds = new Set<string>();
 
+    // Frames the caller is actively resizing in this batch. We must
+    // not add them to `affectedFrameIds` via a child's `parentId`,
+    // otherwise the executor's end-of-batch `fitFrames` would snap a
+    // free-mode frame back to its children's bounding box — undoing
+    // the user's drag during a cascade-scale gesture. Structured
+    // frames are still added through the explicit `type === 'frame'
+    // && layoutMode === column|row` branch below so the grid solver
+    // can re-flow.
+    const resizedFrameIds = new Set<string>();
+    for (const item of cmd.items) {
+      const node = state.nodes.find((n) => n.id === item.nodeId);
+      if (node && node.type === 'frame') {
+        resizedFrameIds.add(node.id);
+      }
+    }
+
     const nextNodes = state.nodes.map((n) => {
       const update = updateMap.get(n.id);
       if (!update) return n;
@@ -77,11 +93,34 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
         // Track the parent for a post-commit refit only when the child's
         // height was cleared and auto-layout is on. Otherwise the executor's
         // sync `fitFrames` pass is sufficient.
-        if (heightCleared && state.autoLayoutEnabled && updated.parentId) {
+        if (
+          heightCleared &&
+          state.autoLayoutEnabled &&
+          updated.parentId &&
+          !resizedFrameIds.has(updated.parentId)
+        ) {
           deferredFitFrameIds.add(updated.parentId);
         }
       }
-      if (updated.parentId) affectedFrameIds.add(updated.parentId);
+      if (updated.parentId && !resizedFrameIds.has(updated.parentId)) {
+        affectedFrameIds.add(updated.parentId);
+      }
+      // Structured (`column` / `row`) frames that were themselves
+      // resized must be passed through the end-of-batch grid solver
+      // so it re-flows children against the new (manually-pinned)
+      // container size. Free-mode frames are deliberately excluded —
+      // adding them would cause `fitFrames` to immediately snap the
+      // frame back to its children's bounding box, undoing the user's
+      // drag.
+      if (
+        updated.type === 'frame' &&
+        ((updated.data as { layoutMode?: string } | undefined)?.layoutMode ===
+          'column' ||
+          (updated.data as { layoutMode?: string } | undefined)?.layoutMode ===
+            'row')
+      ) {
+        affectedFrameIds.add(updated.id);
+      }
       return updated;
     });
 

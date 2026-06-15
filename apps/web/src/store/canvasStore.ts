@@ -23,6 +23,8 @@ import {
   getAbsolutePosition as getFrameAbsolutePosition,
   wouldUnframe,
   wouldAutoFrame,
+  readFrameGridConfig,
+  describeStructuredDropZone,
   getNodeSize,
   type AlignDirection,
   type Delta,
@@ -49,6 +51,7 @@ import {
   isSnapSessionActive,
   isSnapSessionDragEndCommit,
   isSnapSessionResizeEndCommit,
+  setSnapStructuredSuppressed,
 } from '@/handler/snap/snapSession';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
@@ -61,6 +64,7 @@ import { createPreprocessQueue } from './canvasStore/save/preprocessQueue';
 import { shouldScheduleStructureSave } from './canvasStore/save/structureDirtyDetector';
 import { createStructureScheduler } from './canvasStore/save/structureScheduler';
 import { createUnloadFlush } from './canvasStore/save/unloadFlush';
+import { createResizePreviewController } from './canvasStore/slices/resizePreview';
 import { useGesturePreviewStore } from './gesturePreviewStore';
 import { useToolStore } from './toolStore';
 import { getCanvas, putCanvas } from '../api';
@@ -228,6 +232,16 @@ type RFState = {
 
   expandedNodeId: string | null;
   expandMode: 'replace' | 'split';
+  /**
+   * Monotonic counter bumped on every `openExpanded` call —
+   * including when the user re-triggers expansion on the
+   * currently-expanded node. Preview components subscribe to this
+   * tick so they can re-focus their editable surface when the user
+   * double-clicks the same node a second time (the
+   * `expandedNodeId` itself doesn't change in that case, so a
+   * value-based subscriber would never re-fire).
+   */
+  expandedNodeFocusTick: number;
   openExpanded: (nodeId: string) => void;
   closeExpanded: () => void;
   setExpandMode: (mode: 'replace' | 'split') => void;
@@ -293,6 +307,51 @@ type RFState = {
       position?: { x: number; y: number };
     }>,
   ) => void;
+  /**
+   * Live-preview variant of {@link setNodeGeometry} used during an
+   * active resize gesture. Dispatches the same `RESIZE_NODE` intent
+   * but re-arms the gesture-snapshot flag so subsequent dispatches in
+   * the same gesture (further preview ticks AND the final commit
+   * fired by `NodeWrapper.handleResizeEnd`) don't trigger the
+   * executor's `snapshot:'caller' without beginGesture()` warning.
+   * The undo snapshot was taken once at `onNodeResizeStart`; every
+   * preview tick collapses into that single entry.
+   */
+  previewResizeGeometry: (
+    items: Array<{
+      nodeId: string;
+      size?: { width: number; height?: number };
+      position?: { x: number; y: number };
+    }>,
+  ) => void;
+  /**
+   * Capture the current positions / sizes of a frame's direct
+   * children so {@link applyFrameResizeScale} can scale them
+   * proportionally during the resize gesture. No-op for non-frame
+   * nodes; replaces any prior snapshot.
+   */
+  captureFrameResizeSnapshot: (frameId: string) => void;
+  /**
+   * Scale the children captured by
+   * {@link captureFrameResizeSnapshot} to match the frame's new
+   * dimensions. Dispatches a single `RESIZE_NODE` batch covering the
+   * frame and all snapped children via {@link previewResizeGeometry}.
+   * The frame's new local top-left (`x`, `y`) is part of the batch
+   * so non-BR-corner handle drags pin the frame's origin in the
+   * same dispatch as the children's scaled positions, rather than
+   * depending on a separate `onNodesChange` snap-mirror to commit
+   * it. For structured (column/row) frames the grid solver re-packs
+   * the scaled children; for free frames the scaled positions stick.
+   * No-op if no snapshot is active.
+   */
+  applyFrameResizeScale: (
+    width: number,
+    height: number,
+    x: number,
+    y: number,
+  ) => void;
+  /** Clear the resize snapshot at the end of the gesture. */
+  clearFrameResizeSnapshot: () => void;
   /**
    * Flip note nodes between fixed (pinned) and auto-fit (content-driven)
    * height in a single shared code path.
@@ -442,8 +501,18 @@ type RFState = {
    * label, src, summary, …) is stripped before sending — it rides
    * the per-node content PUT, not this one. Viewport is intentionally
    * excluded: it lives in `sessionStorage` per tab.
+   *
+   * `force` bypasses the in-flight coalescing guard (which normally
+   * defers a concurrent save into `pendingSave`). The `beforeunload`
+   * flush sets it so the latest in-store geometry is pushed even when
+   * a regular (non-keepalive) PUT is already mid-flight — that
+   * in-flight request gets killed by the browser on unload, so we
+   * can't rely on it landing.
    */
-  saveCanvas: (options?: { keepalive?: boolean }) => Promise<void>;
+  saveCanvas: (options?: {
+    keepalive?: boolean;
+    force?: boolean;
+  }) => Promise<void>;
 
   /**
    * Attempt to rename a canvas or node, with collision detection.
@@ -602,6 +671,24 @@ const nodeContentQueue = createNodeContentQueue({
 // memory-pipeline cleanup path that will eventually delete it.
 const intentActionWindow = createIntentActionWindow();
 
+/**
+ * Module-scoped resize-preview controller. Owns the rAF handle and
+ * the free-frame child snapshot used during resize gestures; the
+ * store exposes its methods as actions (`previewResizeGeometry`,
+ * `updateResizePreview`, …) so consumers keep using the existing
+ * `useCanvasStore(state => state.previewResizeGeometry)` API.
+ */
+const resizePreviewController = createResizePreviewController({
+  getState: () => {
+    const state = useCanvasStore.getState();
+    return {
+      autoLayoutEnabled: state.autoLayoutEnabled,
+      nodes: state.nodes,
+      dispatchUiIntent: state.dispatchUiIntent,
+    };
+  },
+});
+
 // Module-scoped singleton listener: intentionally registered once at module
 // load time and never removed. Safe for this app's single-page lifecycle.
 // All keepalive drains live in `./canvasStore/save/unloadFlush.ts`.
@@ -614,6 +701,14 @@ if (typeof window !== 'undefined') {
       preprocess: preprocessQueue,
       structure: structureScheduler,
       getSaveCanvas: () => useCanvasStore.getState().saveCanvas,
+      hasUnsavedStructure: () => {
+        const s = useCanvasStore.getState();
+        // A version conflict means the server already rejected us and
+        // further PUTs are pointless (and would 409). Treat as "nothing
+        // recoverable to flush".
+        if (s.versionConflict) return false;
+        return s.isSaving || s.pendingSave;
+      },
     }),
   );
 }
@@ -700,14 +795,21 @@ const autoSaveMiddleware =
 // onNodeDragStop cancel any pending frame reliably.
 let _dragPreviewRafId: number | null = null;
 
-// Sibling rAF handle for `updateResizePreview`. Same rationale as the
-// drag-time handle: NodeResizer's onResize callback may fire well
-// above 60 Hz on high-refresh displays, and computeFrameFit walks
-// every node + descendant of the parent frame. Coalescing per-frame
-// calls into a single rAF callback caps the work at one fit-pass per
-// paint without dropping any user-visible state — the rAF callback
-// re-reads the latest store snapshot when it actually runs.
-let _resizePreviewRafId: number | null = null;
+// Pre-drag node positions captured on `onNodeDragStart`, keyed by id.
+// Used by `onNodeDragStop` to decide whether a drag actually moved a
+// node and therefore needs a structure save. This is required because
+// live drag ticks commit positions through `_setStateNoAutosave` (to
+// avoid running the dirty detector at 60 fps), and the drag-stop
+// resolver only emits a `SET_NODE_GEOMETRY` command when a frame /
+// parent change is involved — so a plain free-node move produces no
+// command and would otherwise never schedule the autosave PUT.
+let _dragStartPositions: Map<string, { x: number; y: number }> | null = null;
+
+// Resize-preview state (per-paint rAF coalescing + free-frame child
+// baseline snapshot) lives in `./canvasStore/slices/resizePreview.ts`.
+// The store wires the controller's methods directly into the action
+// surface below; `endActiveDragSession` calls `cancelPendingRaf` to
+// tear down the rAF when the canvas unmounts mid-resize.
 
 /**
  * Smart-snap drag-time state lives in a dedicated module
@@ -810,8 +912,17 @@ const useCanvasStore = create<RFState>()(
 
     expandedNodeId: null,
     expandMode: 'split',
-    openExpanded: (nodeId) =>
-      get().dispatchUiIntent({ type: 'EXPAND_NODE', nodeId }),
+    expandedNodeFocusTick: 0,
+    openExpanded: (nodeId) => {
+      get().dispatchUiIntent({ type: 'EXPAND_NODE', nodeId });
+      // Bump the focus tick AFTER the intent resolves so any
+      // already-mounted preview re-focuses its editor on a
+      // repeat double-click. On the first expansion the tick is
+      // bumped before the preview mounts, but the preview's
+      // first-render effect compares against a sentinel ref and
+      // still triggers focus.
+      set((s) => ({ expandedNodeFocusTick: s.expandedNodeFocusTick + 1 }));
+    },
     closeExpanded: () => set({ expandedNodeId: null }),
     setExpandMode: (mode) => set({ expandMode: mode }),
 
@@ -1183,7 +1294,11 @@ const useCanvasStore = create<RFState>()(
       if (get().versionConflict) return;
 
       const { isSaving } = get();
-      if (isSaving) {
+      // `force` (unload path) skips coalescing: we want the latest
+      // geometry on the wire via keepalive even if a regular PUT is
+      // already in flight (that one gets aborted by the browser on
+      // page close, so deferring to it would silently drop the edit).
+      if (isSaving && !options?.force) {
         set({ pendingSave: true });
         return;
       }
@@ -1404,6 +1519,19 @@ const useCanvasStore = create<RFState>()(
       // position updates are applied by ReactFlow.
       get().beginGesture('SET_NODE_GEOMETRY');
 
+      // Record the pre-drag positions of the dragged nodes so
+      // `onNodeDragStop` can tell whether the gesture actually moved
+      // anything (and thus needs a structure save) even when the
+      // resolver emits no command.
+      const liveNodes = get().nodes;
+      _dragStartPositions = new Map(
+        draggedNodes.map((d) => {
+          const live = liveNodes.find((n) => n.id === d.id);
+          const pos = live?.position ?? d.position;
+          return [d.id, { x: pos.x, y: pos.y }];
+        }),
+      );
+
       // The snap session module owns its own defensive cleanup
       // (`beginSnapSession` calls `endSnapSession` internally before
       // setting up the new gesture), so we don't need to do it here.
@@ -1424,8 +1552,24 @@ const useCanvasStore = create<RFState>()(
       // Frame auto-resize preview only applies when auto-layout is enabled.
       if (!autoLayoutEnabled) {
         useGesturePreviewStore.getState().clearFrameFitPreview();
+        useGesturePreviewStore.getState().clearStructuredDropPreview();
+        setSnapStructuredSuppressed(false);
         return;
       }
+
+      // Capture the cursor's screen position now (before the rAF) so the
+      // structured-frame drop indicator can be placed at the actual
+      // pointer, not where the dragged node settled. Guarded against
+      // touch / programmatic emits that lack client coords.
+      const ptrEvent = _event as
+        | { clientX?: number; clientY?: number }
+        | undefined;
+      const pointerScreen =
+        ptrEvent &&
+        typeof ptrEvent.clientX === 'number' &&
+        typeof ptrEvent.clientY === 'number'
+          ? { x: ptrEvent.clientX, y: ptrEvent.clientY }
+          : null;
 
       // Throttle the heavy preview computation to once per animation frame.
       // Mouse events can fire at 120 Hz+ on high-refresh displays; capping at
@@ -1547,6 +1691,114 @@ const useCanvasStore = create<RFState>()(
         }
 
         useGesturePreviewStore.getState().setFrameFitPreviews(previews);
+
+        // ── Structured-frame drop indicator ──────────────────────────
+        // Mirror what NODE_DRAG_STOP will decide, live: if the primary
+        // dragged node is hovering a column / row frame, show where it
+        // would land — a precise insertion line within an existing
+        // track, or a ghost track at the gap when a new one opens. Free
+        // frames have no tracks → no indicator.
+        const primary = nodes.find((n) => n.id === draggedNode.id) as
+          | NestableNode
+          | undefined;
+        // Pointer in flow space — gates the sticky preview below and feeds
+        // the frame-local drop point inside the structured branch.
+        const pointerFlow = pointerScreen
+          ? get().rfInstance?.screenToFlowPosition(pointerScreen)
+          : undefined;
+        const enteringFrameId = wouldAutoFrame(liveNodes, draggedNode.id, {
+          threshold: 0.5,
+        });
+        let targetFrameId = enteringFrameId ?? primary?.parentId;
+        // Sticky case (node already lives in a frame): only keep showing the
+        // structured indicator while the cursor is still inside that frame's
+        // capture zone — the frame rect expanded by the dragged node's size.
+        // This mirrors NODE_DRAG_STOP, which keeps a node in its structured
+        // frame iff the release pointer is in the same zone — so the preview
+        // and the committed drop never disagree (no "shows insert, lands
+        // outside") while the outer prepend / append bands stay reachable.
+        if (!enteringFrameId && targetFrameId && pointerFlow) {
+          const fAbs = getFrameAbsolutePosition(liveNodes, targetFrameId);
+          const fNode = liveNodes.find((n) => n.id === targetFrameId);
+          const fSize = fNode ? getNodeSize(fNode) : null;
+          const dragNode = liveNodes.find((n) => n.id === draggedNode.id);
+          const dragSize = dragNode
+            ? getNodeSize(dragNode)
+            : { width: 0, height: 0 };
+          const inside =
+            fAbs &&
+            fSize &&
+            pointerFlow.x >= fAbs.x - dragSize.width &&
+            pointerFlow.x <= fAbs.x + fSize.width + dragSize.width &&
+            pointerFlow.y >= fAbs.y - dragSize.height &&
+            pointerFlow.y <= fAbs.y + fSize.height + dragSize.height;
+          if (!inside) targetFrameId = undefined;
+        }
+        const targetFrame = targetFrameId
+          ? liveNodes.find((n) => n.id === targetFrameId)
+          : undefined;
+        const gridCfg = readFrameGridConfig(targetFrame);
+
+        if (targetFrameId && targetFrame && gridCfg) {
+          const frameAbs = getFrameAbsolutePosition(liveNodes, targetFrameId);
+          // Frame-local drop point: prefer the cursor, fall back to the
+          // dragged node's live top-left (matches the resolver).
+          const liveDragged = liveNodes.find((n) => n.id === draggedNode.id);
+          const framePoint =
+            pointerFlow && frameAbs
+              ? { x: pointerFlow.x - frameAbs.x, y: pointerFlow.y - frameAbs.y }
+              : liveDragged
+                ? { x: liveDragged.position.x, y: liveDragged.position.y }
+                : null;
+
+          // Frame-local rect of the dragged node so the indicator can
+          // size the new-track ghost and rank the insertion line.
+          const draggedAbs = getFrameAbsolutePosition(
+            liveNodes,
+            draggedNode.id,
+          );
+          const draggedSize = liveDragged ? getNodeSize(liveDragged) : null;
+          const draggedRect =
+            frameAbs && draggedAbs && draggedSize
+              ? {
+                  id: draggedNode.id,
+                  x: draggedAbs.x - frameAbs.x,
+                  y: draggedAbs.y - frameAbs.y,
+                  width: draggedSize.width,
+                  height: draggedSize.height,
+                }
+              : undefined;
+
+          const zone = framePoint
+            ? describeStructuredDropZone(
+                liveNodes,
+                targetFrameId,
+                framePoint,
+                gridCfg.axis,
+                gridCfg.count,
+                draggedRect,
+              )
+            : null;
+
+          if (zone && frameAbs) {
+            useGesturePreviewStore.getState().setStructuredDropPreview({
+              frameId: targetFrameId,
+              kind: zone.kind,
+              x: frameAbs.x + zone.x,
+              y: frameAbs.y + zone.y,
+              width: zone.width,
+              height: zone.height,
+            });
+            // Solver owns the slot here → suppress free-alignment guides.
+            setSnapStructuredSuppressed(true);
+          } else {
+            useGesturePreviewStore.getState().clearStructuredDropPreview();
+            setSnapStructuredSuppressed(false);
+          }
+        } else {
+          useGesturePreviewStore.getState().clearStructuredDropPreview();
+          setSnapStructuredSuppressed(false);
+        }
       });
     },
 
@@ -1557,6 +1809,7 @@ const useCanvasStore = create<RFState>()(
         _dragPreviewRafId = null;
       }
       useGesturePreviewStore.getState().clearFrameFitPreview();
+      useGesturePreviewStore.getState().clearStructuredDropPreview();
 
       // Idempotent safety net. The normal cleanup path runs inside
       // `onNodesChange` when the final `dragging:false` commit lands
@@ -1595,6 +1848,27 @@ const useCanvasStore = create<RFState>()(
         draggedNodeIds: draggedNodes.map((n) => n.id),
         pointerFlowPosition,
       });
+
+      // Ensure a structure save is scheduled whenever the drag actually
+      // moved a node. The resolver only emits a `SET_NODE_GEOMETRY`
+      // command for frame / parent transitions; a plain free-node move
+      // yields no command (the final position is already in the store
+      // from the live `_setStateNoAutosave` ticks), so without this the
+      // new position would never be persisted. Re-scheduling when the
+      // resolver did commit is harmless — it just resets the debounce.
+      const startPositions = _dragStartPositions;
+      _dragStartPositions = null;
+      if (startPositions) {
+        const liveNodes = get().nodes;
+        const moved = draggedNodes.some((d) => {
+          const start = startPositions.get(d.id);
+          if (!start) return false;
+          const live = liveNodes.find((n) => n.id === d.id);
+          if (!live) return false;
+          return live.position.x !== start.x || live.position.y !== start.y;
+        });
+        if (moved) structureScheduler.schedule();
+      }
     },
 
     endActiveDragSession: () => {
@@ -1610,73 +1884,15 @@ const useCanvasStore = create<RFState>()(
       // Same for any in-flight resize preview rAF — unmounting
       // mid-resize would otherwise let the queued fit-pass fire
       // against a torn-down canvas.
-      if (_resizePreviewRafId !== null) {
-        cancelAnimationFrame(_resizePreviewRafId);
-        _resizePreviewRafId = null;
-      }
+      resizePreviewController.cancelPendingRaf();
       useGesturePreviewStore.getState().clearFrameFitPreview();
+      useGesturePreviewStore.getState().clearStructuredDropPreview();
       endSnapSession();
     },
 
-    updateResizePreview: (nodeId: string) => {
-      const { autoLayoutEnabled } = get();
-      if (!autoLayoutEnabled) return;
+    updateResizePreview: resizePreviewController.updateResizePreview,
 
-      // Coalesce all per-frame onResize ticks into one fit-pass per
-      // paint. Cancelling the prior rAF handle (rather than gating on
-      // "already scheduled") means we always recompute against the
-      // *latest* store snapshot — RF may have committed several
-      // intermediate dim changes via applyNodeChanges between this
-      // call and the rAF tick. See the sibling drag preview block
-      // above for the same pattern.
-      if (_resizePreviewRafId !== null) {
-        cancelAnimationFrame(_resizePreviewRafId);
-      }
-      _resizePreviewRafId = requestAnimationFrame(() => {
-        _resizePreviewRafId = null;
-
-        const { nodes } = get();
-        const node = (nodes as NestableNode[]).find((n) => n.id === nodeId);
-        if (!node?.parentId) return;
-        const frame = (nodes as NestableNode[]).find(
-          (n) => n.id === node.parentId,
-        );
-        if (!frame || frame.type !== 'frame') return;
-
-        const fit = computeFrameFit(nodes as NestableNode[], node.parentId);
-        if (!fit) return;
-
-        let absX = fit.position.x;
-        let absY = fit.position.y;
-        if (frame.parentId) {
-          const parentAbsPos = getFrameAbsolutePosition(
-            nodes as NestableNode[],
-            frame.parentId,
-          );
-          if (parentAbsPos) {
-            absX += parentAbsPos.x;
-            absY += parentAbsPos.y;
-          }
-        }
-
-        useGesturePreviewStore.getState().setFrameFitPreviews([
-          {
-            frameId: node.parentId,
-            position: { x: absX, y: absY },
-            width: fit.width,
-            height: fit.height,
-          },
-        ]);
-      });
-    },
-
-    endResizePreview: () => {
-      if (_resizePreviewRafId !== null) {
-        cancelAnimationFrame(_resizePreviewRafId);
-        _resizePreviewRafId = null;
-      }
-      useGesturePreviewStore.getState().clearFrameFitPreview();
-    },
+    endResizePreview: resizePreviewController.endResizePreview,
 
     onNodesChange: (changes) => {
       // Only process RF-internal change types (position, selection, dimensions).
@@ -1896,6 +2112,15 @@ const useCanvasStore = create<RFState>()(
     setNodeGeometry: (items) => {
       get().dispatchUiIntent({ type: 'RESIZE_NODE', items });
     },
+
+    previewResizeGeometry: resizePreviewController.previewResizeGeometry,
+
+    captureFrameResizeSnapshot:
+      resizePreviewController.captureFrameResizeSnapshot,
+
+    applyFrameResizeScale: resizePreviewController.applyFrameResizeScale,
+
+    clearFrameResizeSnapshot: resizePreviewController.clearFrameResizeSnapshot,
 
     setNoteHeightMode: (nodeIds, mode) => {
       if (nodeIds.length === 0) return;
