@@ -94,6 +94,11 @@ export const profiles: Record<CanvasNodeType, NodePreprocessProfile> = {
     ],
     watchFields: ['src'],
   },
+  audio: {
+    nodeType: 'audio',
+    capabilities: ['resolve_input', 'build_patch'],
+    watchFields: ['src'],
+  },
   frame: {
     nodeType: 'frame',
     capabilities: [

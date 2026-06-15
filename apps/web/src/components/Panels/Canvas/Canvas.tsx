@@ -17,6 +17,7 @@ import React, {
 } from 'react';
 import '@xyflow/react/dist/style.css';
 
+import { AudioNode } from '@/components/Nodes/audio/AudioNode';
 import { ImageNode } from '@/components/Nodes/image/ImageNode';
 import { NoteNode } from '@/components/Nodes/note/NoteNode';
 import { PDFNode } from '@/components/Nodes/pdf/PDFNode';
@@ -74,6 +75,7 @@ const nodeTypes = {
   text: TextNode,
   note: NoteNode,
   video: VideoNode,
+  audio: AudioNode,
   web: WebNode,
   pdf: PDFNode,
   frame: FrameNode,
@@ -599,6 +601,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         pendingNodeType === 'text' && 'canvas-pending-text',
         pendingNodeType === 'frame' && 'canvas-pending-frame',
         pendingNodeType === 'sketch' && 'cursor-crosshair',
+        pendingNodeType === 'audio' && 'canvas-pending-audio',
         pendingNodeType === 'question' && 'canvas-pending-question',
         tool === 'lasso' && 'cursor-crosshair',
       )}

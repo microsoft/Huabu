@@ -16,6 +16,7 @@ import {
   Clipboard,
   Type,
   Pencil,
+  Mic,
   MessageCircleQuestionMark,
 } from 'lucide-react';
 
@@ -38,6 +39,7 @@ export const NODE_ICON: Record<CanvasNodeType, LucideIcon> = {
   image: ImageIcon,
   pdf: BookOpen,
   video: Film,
+  audio: Mic,
   web: Globe,
   frame: Frame,
   sketch: Pencil,
@@ -54,6 +56,7 @@ export const NODE_TYPE_LABEL: Record<CanvasNodeType, string> = {
   image: 'Image',
   pdf: 'PDF',
   video: 'Video',
+  audio: 'Audio',
   web: 'Website',
   frame: 'Frame',
   sketch: 'Sketch',

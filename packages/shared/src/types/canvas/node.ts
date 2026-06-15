@@ -20,6 +20,7 @@ export const CANVAS_NODE_TYPES = [
   'image',
   'pdf',
   'video',
+  'audio',
   'web',
   'frame',
   'sketch',
@@ -341,6 +342,12 @@ export interface ImageNodeData extends BaseNodeData {
   src: string;
 }
 
+/** Audio node: audio content (typically recorded in-canvas) */
+export interface AudioNodeData extends BaseNodeData {
+  type: 'audio';
+  src: string;
+}
+
 /**
  * Layout mode applied to a frame's direct children.
  *
@@ -483,6 +490,7 @@ export type NodeData =
   | PdfNodeData
   | VideoNodeData
   | ImageNodeData
+  | AudioNodeData
   | FrameNodeData
   | SketchNodeData
   | QuestionNodeData;
@@ -499,8 +507,17 @@ export function isTextNode(data: NodeData): data is TextNodeData {
 
 export function isMediaNode(
   data: NodeData,
-): data is WebNodeData | PdfNodeData | VideoNodeData | ImageNodeData {
-  return ['web', 'pdf', 'video', 'image'].includes(data.type);
+): data is
+  | WebNodeData
+  | PdfNodeData
+  | VideoNodeData
+  | ImageNodeData
+  | AudioNodeData {
+  return ['web', 'pdf', 'video', 'image', 'audio'].includes(data.type);
+}
+
+export function isAudioNode(data: NodeData): data is AudioNodeData {
+  return data.type === 'audio';
 }
 
 export function isFrameNode(data: NodeData): data is FrameNodeData {

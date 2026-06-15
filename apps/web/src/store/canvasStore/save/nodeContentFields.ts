@@ -48,6 +48,7 @@ export const MD_BACKED_NODE_TYPES: ReadonlySet<string> = new Set([
   'pdf',
   'image',
   'video',
+  'audio',
   'frame',
   'question',
 ]);

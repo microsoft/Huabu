@@ -115,6 +115,7 @@ const MD_BACKED_NODE_TYPES = new Set([
   'pdf',
   'image',
   'video',
+  'audio',
   'frame',
   'question',
 ]);
@@ -181,7 +182,7 @@ const CONTENT_BACKED_NODE_TYPES = new Set(['note', 'text']);
  * referenced file is gone from disk we surface an `artifactMissing` flag
  * so the client can show a placeholder + Remove button.
  */
-const ARTIFACT_BACKED_NODE_TYPES = new Set(['pdf', 'image', 'video']);
+const ARTIFACT_BACKED_NODE_TYPES = new Set(['pdf', 'image', 'video', 'audio']);
 
 /**
  * Extract an artifact storage key from a `data.src` / `data.coverUrl`

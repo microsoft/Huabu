@@ -92,6 +92,7 @@ const MD_BACKED_NODE_TYPES = new Set([
   'pdf',
   'image',
   'video',
+  'audio',
   'frame',
   'question',
 ]);

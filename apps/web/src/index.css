@@ -262,12 +262,33 @@ body,
   cursor: crosshair !important;
 }
 
+.canvas-pending-audio .react-flow__pane,
+.canvas-pending-audio .react-flow__node {
+  cursor: crosshair !important;
+}
+
+/* Apple Voice Memos-style equalizer bars during recording. */
+@keyframes audio-live-bar {
+  0%,
+  100% {
+    height: 25%;
+  }
+  50% {
+    height: 90%;
+  }
+}
+.audio-live-bars > span {
+  animation: audio-live-bar 900ms ease-in-out infinite;
+  height: 25%;
+}
+
 /* Disable node interactivity while placing a new node.
    This lets click/drag events pass through existing nodes to the pane/wrapper
    so creation handlers can fire even when clicking on top of a frame. */
 .canvas-pending-note .react-flow__node,
 .canvas-pending-text .react-flow__node,
 .canvas-pending-question .react-flow__node,
+.canvas-pending-audio .react-flow__node,
 .canvas-pending-frame .react-flow__node {
   pointer-events: none !important;
 }

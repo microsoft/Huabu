@@ -143,6 +143,10 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           setSketchDraft({ mode: 'draw' });
           setPendingNodeType(pendingNodeType === 'sketch' ? null : 'sketch');
           return;
+        case '5':
+          e.preventDefault();
+          setPendingNodeType(pendingNodeType === 'audio' ? null : 'audio');
+          return;
         case 'q':
           e.preventDefault();
           setPendingNodeType(
@@ -419,6 +423,21 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
               <NODE_ICON.sketch />
             </Button>
           </div>
+          <Button
+            variant="ghost"
+            iconOnly
+            title="Audio (5)"
+            shortcutBadge="5"
+            shortcutBadgeActive={pendingNodeType === 'audio'}
+            className={clsx(
+              pendingNodeType === 'audio' && 'text-info bg-bg-default',
+            )}
+            onClick={() =>
+              setPendingNodeType(pendingNodeType === 'audio' ? null : 'audio')
+            }
+          >
+            <NODE_ICON.audio />
+          </Button>
         </div>
 
         <div ref={resourceMenuRef} className="flex items-center gap-1.5">

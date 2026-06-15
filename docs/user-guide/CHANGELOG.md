@@ -4,6 +4,23 @@
 
 ---
 
+## 2026-06-15 · 新增 Audio 录音节点
+
+**What Changed**
+
+- **画布工具栏新增第 5 个快捷工具 "Audio"**（麦克风图标）。点击后鼠标变成 `+`，在画布上单击即可创建一个 200×56 的音频节点。
+- **节点内置录音、播放、删除一体化交互**（参考 Apple 语音备忘录风格）：点击红色圆环按钮开始录制，再次点击停止；停止后展示深色播放按钮 + 22 根静态波形 + 时间码，点击波形任意位置可 seek。
+- **录音文件以 `.webm` 保存在画布的 `.artifacts/` 目录**，并按 image 节点的方式同步生成 `nodes/<label>.md` 边车文件（frontmatter 含 `id` / `type: audio` / `src` / `label`），下次打开画布无需重新录制即可继续播放。
+
+**Notes**
+
+- 浏览器需要授予麦克风权限；未授权或硬件不可用时节点会显示 "Microphone unavailable" 提示。
+- 录音格式按浏览器能力依次降级：`audio/webm;codecs=opus` → `audio/mp4;codecs=mp4a` → `audio/ogg;codecs=opus`，对应文件后缀也会随之变化。
+- MediaRecorder 产出的 WebM blob 通常报告 `duration === Infinity`，节点内部会做一次"seek-to-end"强制扫描以拿到真实时长，时间和进度条显示因此会略晚一帧才到位。
+- 删除节点时只删除 `canvas.json` 与 `.md` 边车；`.artifacts/` 下的原始音频文件保留，方便回收或外部使用。
+
+---
+
 ## 2026-06-15 · Web 节点改为"一次抓取、本地快照"渲染
 
 **What Changed**

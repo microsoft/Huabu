@@ -24,6 +24,8 @@ const DEFAULT_SIZES: Record<string, NodeSize> = {
   pdf: { width: 400, height: 400 },
   video: { width: 400, height: 300 },
   image: { width: 400, height: 300 },
+  // Compact recorder: fits the recording controls on one row.
+  audio: { width: 200, height: 56 },
   frame: { width: 400, height: 300 },
   // Question nodes auto-size to content (height-driven by text), matching
   // the behaviour of text/note nodes. The width sets the wrap width when
