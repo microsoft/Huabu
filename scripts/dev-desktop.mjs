@@ -42,7 +42,7 @@
  * Port resolution mirrors `apps/web/vite.config.ts` and `scripts/dev.mjs`:
  *   process.env  >  apps/web/.env  >  <repo-root>/.env  >  defaults
  */
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -200,17 +200,22 @@ let shuttingDown = false;
  * On POSIX we put each child in its own process group (`detached: true`)
  * and signal the whole group with `kill(-pid)`. On Windows we fall back
  * to `taskkill /T` to walk the process tree.
+ *
+ * On Windows the call is **synchronous** (`spawnSync`): `Ctrl+C` is
+ * broadcast by the console to every attached process, so the `cmd.exe`
+ * wrappers around each `pnpm.cmd` shim would normally race to print the
+ * dreaded "Terminate batch job (Y/N)?" prompt. Blocking until
+ * `taskkill /F /T` returns guarantees the whole subtree is gone before
+ * `process.exit` runs and before cmd.exe can render that prompt on the
+ * shared terminal.
  */
 function killTree(child, signal) {
   if (!child || child.killed || child.exitCode !== null) return;
   if (process.platform === 'win32') {
-    try {
-      spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], {
-        stdio: 'ignore',
-      });
-    } catch {
-      /* best-effort */
-    }
+    spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], {
+      stdio: 'ignore',
+      windowsHide: true,
+    });
     return;
   }
   try {
@@ -230,6 +235,15 @@ function shutdown(code = 0) {
   for (const child of children) {
     killTree(child, 'SIGTERM');
   }
+  // On Windows `killTree` already ran `taskkill /F /T` synchronously, so
+  // the whole tree is gone — no SIGKILL escalation is meaningful (SIGKILL
+  // doesn't even exist on Win32; the old second pass was dead code that
+  // also delayed exit by ~1s and let cmd.exe print the "Terminate batch
+  // job (Y/N)?" prompt on the shared terminal).
+  if (process.platform === 'win32') {
+    process.exit(code);
+    return;
+  }
   setTimeout(() => {
     for (const child of children) {
       killTree(child, 'SIGKILL');
@@ -241,11 +255,61 @@ function shutdown(code = 0) {
 process.on('SIGINT', () => shutdown(0));
 process.on('SIGTERM', () => shutdown(0));
 
+/**
+ * Belt-and-suspenders Ctrl+C handler for Windows.
+ *
+ * `Ctrl+C` is only translated into a `SIGINT` for our process while the
+ * console's `ENABLE_PROCESSED_INPUT` flag is set. Any child that puts
+ * stdin into raw mode (tsx watch, vite, Electron, etc.) clears that flag
+ * for the whole console — from then on `Ctrl+C` arrives as a plain `0x03`
+ * byte on stdin instead of a `CTRL_C_EVENT`, and our `SIGINT` handler
+ * never fires.
+ *
+ * Mitigations:
+ *   1. Long-running children are spawned with
+ *      `stdio: ['ignore', 'inherit', 'inherit']` so they can't grab stdin
+ *      and flip the console mode in the first place.
+ *   2. We also flip our *own* stdin into raw mode and watch for `0x03`
+ *      directly, so even if something still manages to suppress
+ *      `CTRL_C_EVENT`, the keystroke reaches us and triggers `shutdown`.
+ *
+ * Tradeoff: vite/tsx interactive keys (`r`/`h`/`q`/etc.) no longer work,
+ * which is fine for this orchestrator — the dev loop is driven by file
+ * watchers and the Electron window.
+ */
+if (process.stdin.isTTY && typeof process.stdin.setRawMode === 'function') {
+  try {
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.on('data', (buf) => {
+      for (const byte of buf) {
+        // 0x03 = Ctrl+C, 0x04 = Ctrl+D — either tears the orchestrator down.
+        if (byte === 0x03 || byte === 0x04) {
+          shutdown(0);
+          return;
+        }
+      }
+    });
+    process.on('exit', () => {
+      try {
+        process.stdin.setRawMode(false);
+      } catch {
+        /* ignore */
+      }
+    });
+  } catch {
+    /* Non-fatal: SIGINT handler above still covers non-raw cases. */
+  }
+}
+
 /** Spawn a long-running pnpm dev child, tracked for shutdown. */
 function spawnLongRunning(filter, label, extraEnv = {}) {
   const child = spawn('pnpm', ['--filter', filter, 'dev'], {
     cwd: repoRoot,
-    stdio: 'inherit',
+    // Deny stdin so the child can't put the shared console into raw input
+    // mode (which would swallow Ctrl+C on Windows; see the raw-mode
+    // handler above for the full story).
+    stdio: ['ignore', 'inherit', 'inherit'],
     shell: process.platform === 'win32',
     detached: process.platform !== 'win32',
     env: { ...process.env, ...extraEnv },
@@ -349,7 +413,11 @@ async function main() {
 
   console.log('[dev-desktop] Launching Electron …');
   const electron = spawn('pnpm', ['exec', 'electron', '.'], {
-    stdio: 'inherit',
+    // Electron itself wants stdin in dev (DevTools, etc.) only for its own
+    // child processes; the parent process here doesn't need it, and giving
+    // it stdin would let it flip the console into raw mode and break our
+    // Ctrl+C handler. Deny stdin like the other long-running children.
+    stdio: ['ignore', 'inherit', 'inherit'],
     shell: true,
     cwd: path.join(repoRoot, 'apps/desktop'),
     env: electronEnv,
