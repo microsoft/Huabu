@@ -4,6 +4,21 @@
 
 ---
 
+## 2026-06-15 · 桌面版 v0.2.1 紧急修复（启动崩溃）
+
+**What Changed**
+
+- **打包后的桌面版能正常启动了**：v0.2.0 安装包在 Mac 上双击会立刻报 “Server process exited before becoming ready (code=1)”，崩溃日志显示 `ReferenceError: __dirname is not defined`，根因是服务端 ESM bundle 里捆绑的 `sql.js` 默认用 `__dirname` 找 `sql-wasm.wasm`，而 tsup 输出的 ESM 模块里没有这个变量，导致 agentlet 后端初始化数据库时直接抛错把整个 server 进程拉爆。
+- 在 tsup banner 里给 bundle 注入了 `__dirname` / `__filename` 的 ESM polyfill；同时把 `sql-wasm.wasm` 二进制复制到 `dist-bundle/sql-wasm.wasm` 和 `dist-bundle/agentlet/sql-wasm.wasm`，让 sql.js 在打包后的两个进程里都能找到自己的 WASM 文件。
+
+**Notes**
+
+- **v0.2.0 用户请直接升级到 v0.2.1**：v0.2.0 在所有平台上都打不开（只要 server 进程引到 sql.js 这一行就 100% 崩），数据目录没有兼容性问题，直接覆盖安装即可。
+- 开发模式（`pnpm dev`）不受此 bug 影响 —— `tsx` 是 CJS 上下文，`__dirname` 原生存在，所以只有打包后的 ESM bundle 会触发。
+- v0.1.0 也不受影响：那时还没把 `@agentlet/server` 嵌入到主 server 启动流程里，sql.js 的初始化路径根本不会被走到。
+
+---
+
 ## 2026-06-15 · Office 节点预览体验打磨
 
 **What Changed**
