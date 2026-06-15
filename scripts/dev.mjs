@@ -11,7 +11,7 @@
  *   process.env  >  apps/web/.env  >  <repo-root>/.env
  * but we only need SERVER_PORT / PORT here.
  */
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -92,17 +92,22 @@ let shuttingDown = false;
  * On POSIX we put each child in its own process group (`detached: true` +
  * `setsid`) and signal the whole group with `kill(-pid)`. On Windows we
  * fall back to `taskkill /T` to walk the process tree.
+ *
+ * On Windows the call is **synchronous** (`spawnSync`): `Ctrl+C` is
+ * broadcast by the console to every attached process, so the `cmd.exe`
+ * wrappers around each `pnpm.cmd` shim would normally race to print the
+ * dreaded "Terminate batch job (Y/N)?" prompt. By blocking until
+ * `taskkill /F /T` returns we make sure the whole subtree is gone
+ * before `process.exit` runs and before cmd.exe gets a chance to render
+ * that prompt on the shared terminal.
  */
 function killTree(child, signal) {
   if (!child || child.killed || child.exitCode !== null) return;
   if (process.platform === 'win32') {
-    try {
-      spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], {
-        stdio: 'ignore',
-      });
-    } catch {
-      /* best-effort */
-    }
+    spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], {
+      stdio: 'ignore',
+      windowsHide: true,
+    });
     return;
   }
   try {
@@ -123,8 +128,17 @@ function shutdown(code = 0) {
   for (const child of children) {
     killTree(child, 'SIGTERM');
   }
-  // Give children a moment to exit cleanly, then escalate to SIGKILL
-  // for any stragglers before we exit ourselves.
+  // On Windows `killTree` already ran `taskkill /F /T` synchronously, so
+  // the whole tree is gone — no SIGKILL escalation is meaningful (SIGKILL
+  // doesn't even exist on Win32; the old second pass was dead code that
+  // also delayed exit by ~1s and gave cmd.exe a window to print the
+  // "Terminate batch job (Y/N)?" prompt on the shared terminal).
+  if (process.platform === 'win32') {
+    process.exit(code);
+    return;
+  }
+  // POSIX: give children a moment to exit cleanly, then escalate to
+  // SIGKILL for any stragglers before we exit ourselves.
   setTimeout(() => {
     for (const child of children) {
       killTree(child, 'SIGKILL');
@@ -136,11 +150,65 @@ function shutdown(code = 0) {
 process.on('SIGINT', () => shutdown(0));
 process.on('SIGTERM', () => shutdown(0));
 
+/**
+ * Belt-and-suspenders Ctrl+C handler for Windows.
+ *
+ * On Windows, `Ctrl+C` is only translated into a `SIGINT` for our process
+ * while the console's `ENABLE_PROCESSED_INPUT` flag is set. Any child that
+ * puts stdin into raw mode (tsx watch, vite, etc.) clears that flag for the
+ * whole console — from then on `Ctrl+C` arrives as a plain `0x03` byte on
+ * stdin instead of a `CTRL_C_EVENT`, and our `SIGINT` handler never fires.
+ *
+ * We mitigate this two ways:
+ *   1. Children are spawned with `stdio: ['ignore', 'inherit', 'inherit']`
+ *      so they can't grab stdin and flip the console mode in the first
+ *      place (see `spawnPnpmDev` / `spawnAgentletWatch`).
+ *   2. We also flip our *own* stdin into raw mode and watch for the `0x03`
+ *      byte directly, so even if something still manages to suppress
+ *      `CTRL_C_EVENT`, the keystroke reaches us and triggers `shutdown`.
+ *
+ * The tradeoff is that vite/tsx interactive keys (`r` / `h` / `q` / etc.)
+ * no longer reach those tools — acceptable, since the dev loop is driven
+ * by file watchers and the browser, not by terminal keypresses.
+ */
+if (process.stdin.isTTY && typeof process.stdin.setRawMode === 'function') {
+  try {
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.on('data', (buf) => {
+      // 0x03 = Ctrl+C, 0x04 = Ctrl+D — either should tear the orchestrator
+      // down. Everything else is intentionally discarded.
+      for (const byte of buf) {
+        if (byte === 0x03 || byte === 0x04) {
+          shutdown(0);
+          return;
+        }
+      }
+    });
+    // Restore the terminal so the user's shell prompt isn't left in raw
+    // mode after we exit (otherwise their next command echoes weirdly).
+    process.on('exit', () => {
+      try {
+        process.stdin.setRawMode(false);
+      } catch {
+        /* ignore */
+      }
+    });
+  } catch {
+    // Non-fatal: if raw mode isn't available we still have the SIGINT
+    // handler above, which is enough on POSIX and on Windows consoles
+    // where no child has flipped ENABLE_PROCESSED_INPUT.
+  }
+}
+
 /** Spawn a `pnpm --filter <pkg> dev` child wired to our stdio. */
 function spawnPnpmDev(filter, label) {
   const child = spawn('pnpm', ['--filter', filter, 'dev'], {
     cwd: repoRoot,
-    stdio: 'inherit',
+    // Inherit stdout/stderr only — deny stdin so the child can't put the
+    // shared console into raw input mode (which would swallow Ctrl+C on
+    // Windows; see the raw-mode handler above for the full story).
+    stdio: ['ignore', 'inherit', 'inherit'],
     shell: process.platform === 'win32',
     // POSIX: own process group so we can signal the whole subtree.
     detached: process.platform !== 'win32',
@@ -174,7 +242,8 @@ function spawnAgentletWatch(filter, label) {
     ['--filter', filter, 'exec', 'tsc', '-w', '--preserveWatchOutput'],
     {
       cwd: repoRoot,
-      stdio: 'inherit',
+      // Same stdin-denial rationale as `spawnPnpmDev`.
+      stdio: ['ignore', 'inherit', 'inherit'],
       shell: process.platform === 'win32',
       detached: process.platform !== 'win32',
     },
