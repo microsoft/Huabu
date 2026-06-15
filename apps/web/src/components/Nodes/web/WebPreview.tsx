@@ -332,6 +332,7 @@ export const WebPreview = ({ id, data }: PreviewComponentProps) => {
             size="sm"
             iconOnly
             title="Reload"
+            tooltipPlacement="bottom"
             aria-label="Reload page"
             onClick={handleReload}
           >
@@ -345,6 +346,7 @@ export const WebPreview = ({ id, data }: PreviewComponentProps) => {
             size="sm"
             iconOnly
             title="Open externally"
+            tooltipPlacement="bottom"
             aria-label="Open page in external browser"
             onClick={() => window.open(externalHref, '_blank', 'noopener')}
           >

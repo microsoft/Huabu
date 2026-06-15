@@ -32,6 +32,7 @@ import { createPortal } from 'react-dom';
 import { Button } from '@/components/Common/Button';
 import { MilkdownEditor } from '@/components/Milkdown';
 import { usePreviewHeaderSlot } from '@/components/Nodes/PreviewHeaderSlot';
+import useCanvasStore from '@/store/canvasStore';
 import { consumeAiContentEdit } from '@/utils/aiEditFlags';
 import {
   coerceProvenance,
@@ -368,6 +369,27 @@ export const NotePreview = ({
     editor.setBlockDecorations(decorations?.blocks ?? []);
   }, [editor, decorations]);
 
+  // Auto-focus the editor whenever the user triggers "expand this
+  // node" — covering both the first mount (e.g., double-click an
+  // unopened note) AND a repeat double-click on the already-expanded
+  // node. We drive this off `expandedNodeFocusTick`, a store counter
+  // bumped by every `openExpanded` call. The ref-tracked
+  // `lastHandledTickRef` skips redundant focuses on unrelated effect
+  // runs (e.g., toggling raw ↔ wysiwyg) so we never steal focus from
+  // an input elsewhere on the page when no expansion was requested.
+  // The sentinel `-1` guarantees the first valid run (editor ready,
+  // editable, wysiwyg) always focuses even on a fresh mount.
+  const focusTick = useCanvasStore((s) => s.expandedNodeFocusTick);
+  const lastHandledFocusTickRef = useRef<number>(-1);
+  useEffect(() => {
+    if (!editor) return;
+    if (readOnly) return;
+    if (editMode !== 'wysiwyg') return;
+    if (lastHandledFocusTickRef.current === focusTick) return;
+    lastHandledFocusTickRef.current = focusTick;
+    editor.focus();
+  }, [editor, readOnly, editMode, focusTick]);
+
   const handleBlockDragStart = useCallback(
     (event: MilkdownBlockDragEvent) => {
       const trimmed = event.markdown.trim();
@@ -441,6 +463,7 @@ export const NotePreview = ({
           : ''
       }
       title={editMode === 'wysiwyg' ? 'Edit raw markdown' : 'Edit rich text'}
+      tooltipPlacement="bottom"
       aria-label={
         editMode === 'wysiwyg'
           ? 'Switch to raw markdown editor'

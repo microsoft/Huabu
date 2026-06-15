@@ -79,6 +79,25 @@
   font-family: inherit;
 }
 
+/* Virtual-cursor color override.
+   Crepe enables `prosemirror-virtual-cursor`, which renders a CUSTOM
+   blinking caret (a `border-left: 2px solid var(--prosemirror-virtual-
+   cursor-color)` div) on top of the editor and HIDES the native
+   caret via `.ProseMirror.virtual-cursor-enabled { caret-color:
+   transparent }`. Crepe's `cursor.css` then sets that color to
+   `var(--crepe-color-outline)` — which we map to `--edge-default`
+   (#e6e6e6), a near-white border tint. The result is a barely-
+   visible caret with its own 1s blink animation that fades in and
+   out of the page.
+
+   Force the virtual caret to `--fg-default` so it reads as a crisp,
+   theme-aware bar (matching the native-caret override in
+   `index.css`). Specificity matches Crepe's rule, but this file
+   loads AFTER Crepe — so the cascade wins without `!important`. */
+.milkdown .ProseMirror-focused {
+  --prosemirror-virtual-cursor-color: var(--fg-muted);
+}
+
 .milkdown .ProseMirror {
   /* Zero the 60px×120px editor padding; parents already provide their
      own padding (e.g. AIMessage's chat card uses `px-4`). */
