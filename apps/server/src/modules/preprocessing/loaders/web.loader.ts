@@ -49,6 +49,14 @@ export type WebSnapshot = {
     embeddable?: boolean;
     [key: string]: unknown;
   };
+  /**
+   * Original page HTML as fetched. Only present when we actually
+   * performed a network fetch for a remote URL — caller-supplied
+   * `content`, cached short-circuits, and local-file / data: paths
+   * leave this undefined. Consumed by the preprocess pipeline to
+   * write the one-shot `.mhtml` snapshot artifact.
+   */
+  rawHtml?: string;
 };
 
 export type FetchWebContentOptions = {
@@ -101,6 +109,7 @@ export class WebLoader implements IDocumentLoader {
         content: snapshot.content,
         title: snapshot.title,
         metadata: snapshot.metadata,
+        rawHtml: snapshot.rawHtml,
       };
     } catch (error) {
       throw new Error(
@@ -269,12 +278,17 @@ export async function getWebSnapshot(params: {
   let rawHtml = params.content;
   let baseUrl: string | undefined;
   let embeddable: boolean | undefined;
+  // Track whether rawHtml came from a fresh network fetch (vs. a
+  // pre-fetched caller payload or a local file). Only the fresh case
+  // is worth wrapping into a `.mhtml` snapshot artifact downstream.
+  let fetchedRawHtml: string | undefined;
 
   if (REMOTE_URL_RE.test(params.uri)) {
     baseUrl = params.uri;
     if (!rawHtml) {
       const fetched = await fetchHtmlSmart(params.uri);
       rawHtml = fetched.html;
+      fetchedRawHtml = fetched.html;
       // `headers` is `undefined` when the Electron fallback served the
       // response (BrowserWindow doesn't surface raw response headers).
       // Treat unknown as "embeddable status unknown" so the front-end
@@ -330,6 +344,7 @@ export async function getWebSnapshot(params: {
     content: snapshot.content,
     title: params.title ?? snapshot.title,
     metadata: incoming as WebSnapshot['metadata'],
+    rawHtml: fetchedRawHtml,
   };
 }
 

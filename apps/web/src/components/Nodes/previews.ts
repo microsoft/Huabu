@@ -1,5 +1,6 @@
 import { ImagePreview } from './image/ImagePreview';
 import { NotePreview } from './note/NotePreview';
+import { OfficePreview } from './office/OfficePreview';
 import { PDFPreview } from './pdf/PDFPreview';
 import { SketchPreview } from './sketch/SketchPreview';
 import { VideoPreview } from './video/VideoPreview';
@@ -14,6 +15,7 @@ export const NodePreviews: Record<
   note: NotePreview,
   web: WebPreview,
   pdf: PDFPreview,
+  office: OfficePreview,
   image: ImagePreview,
   video: VideoPreview,
   sketch: SketchPreview,

@@ -2,6 +2,13 @@ export interface LoadResult {
   content: string;
   metadata?: Record<string, unknown>;
   title?: string;
+  /**
+   * Raw payload as returned by the source (only populated by loaders
+   * that fetch over the network and want downstream stages to persist
+   * an unmodified snapshot). The web loader sets this to the original
+   * HTML so the pipeline can write a one-shot `.mhtml` artifact.
+   */
+  rawHtml?: string;
 }
 
 export interface IDocumentLoader {

@@ -6,6 +6,7 @@ import { type FastifyPluginAsync } from 'fastify';
 import { cloneArtifactBodySchema, createId } from '@sediment/shared';
 
 import { getCanvasStore } from '../storage/index.js';
+import { extractHtmlFromMhtml, injectBaseHref } from '../web/mhtml.js';
 
 import type {
   ApiResult,
@@ -16,7 +17,7 @@ import type {
 /**
  * Canvas-scoped artifact route. Mount under `/api/canvas`.
  *
- *   POST /:canvasId/artifact/:type          → upload (image | pdf | video | html)
+ *   POST /:canvasId/artifact/:type          → upload (image | pdf | office | video | audio | html)
  *   GET  /:canvasId/artifact/:filename      → serve (filename = `<id><ext>`)
  *   POST /:canvasId/artifact/clone-from     → cross-canvas copy
  *
@@ -34,13 +35,16 @@ const artifactRoute: FastifyPluginAsync = async (fastify) => {
       image: '.png',
       pdf: '.pdf',
       video: '.mp4',
+      audio: '.webm',
       html: '.html',
+      office: '.docx',
     };
 
     if (!typeExtMap[type]) {
-      return reply
-        .code(400)
-        .send({ message: 'Invalid type. Must be image, pdf, video, or html' });
+      return reply.code(400).send({
+        message:
+          'Invalid type. Must be image, pdf, video, audio, html, or office',
+      });
     }
 
     const data = await request.file();
@@ -80,8 +84,45 @@ const artifactRoute: FastifyPluginAsync = async (fastify) => {
     async (request, reply) => {
       const { canvasId, filename } = request.params;
       const store = getCanvasStore(canvasId);
+      const safeName = path.basename(filename);
+
+      // `.mhtml` snapshots are stored as proper multipart/related MHTML
+      // (so they remain valid offline archives — drop the file into
+      // Chromium and it opens correctly). For in-app iframe rendering
+      // we strip the wrapper on the fly and serve the inner HTML as
+      // `text/html` so no browser-side MHTML handler is required.
+      if (safeName.toLowerCase().endsWith('.mhtml')) {
+        const fullPath = store.resolveArtifactFilePath(safeName);
+        if (!fullPath) {
+          return reply.code(404).send({ message: 'Artifact not found' });
+        }
+        try {
+          const buffer = await readFile(fullPath);
+          const extracted = extractHtmlFromMhtml(buffer);
+          if (!extracted) {
+            // Malformed snapshot — fall back to serving the raw bytes so
+            // the user can still download / inspect the file.
+            return reply.header('Content-Type', 'message/rfc822').send(buffer);
+          }
+          const html = extracted.sourceUrl
+            ? injectBaseHref(extracted.html, extracted.sourceUrl)
+            : extracted.html;
+          return (
+            reply
+              .header('Content-Type', 'text/html; charset=utf-8')
+              // Allow same-origin iframe; the canvas web node always
+              // loads us via a sandboxed iframe so this is purely
+              // defensive against accidental top-level navigation.
+              .header('X-Content-Type-Options', 'nosniff')
+              .send(html)
+          );
+        } catch {
+          return reply.code(404).send({ message: 'Artifact not found' });
+        }
+      }
+
       try {
-        return reply.sendFile(path.basename(filename), store.artifactsDir());
+        return reply.sendFile(safeName, store.artifactsDir());
       } catch {
         return reply.code(404).send({ message: 'Artifact not found' });
       }

@@ -1,16 +1,13 @@
 import { PanelLeftClose, PanelLeftOpen, Search } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import {
-  CANVAS_NODE_TYPES,
-  type CanvasNodeType,
-  type ExternalNoteItem,
-  type QuestionNodeStatus,
-  type SketchStroke,
-} from '@sediment/shared';
-
 import { CanvasLayerTree } from './CanvasLayerTree';
 import { LayerFilterBar } from './LayerFilterBar';
+import {
+  buildAvailableFilterKeys,
+  nodeMatchesFilterKey,
+  type LayerFilterKey,
+} from './layerFilterKey';
 import { QuestionStatusDot } from './QuestionStatusDot';
 import { getNodeIcon } from '../../../config/nodeIcons';
 import useCanvasStore from '../../../store/canvasStore';
@@ -21,6 +18,13 @@ import { SketchIcon } from '../../Nodes/sketch/SketchIcon';
 import { SidebarPanel } from '../SidebarPanel';
 
 import type { DataSourceNodeLike, DataSourceTreeItem } from './types';
+import type {
+  CanvasNodeType,
+  ExternalNoteItem,
+  OfficeFormat,
+  QuestionNodeStatus,
+  SketchStroke,
+} from '@sediment/shared';
 
 interface CanvasLayerPanelProps {
   isCollapsed?: boolean;
@@ -50,7 +54,7 @@ const renderNodeIcon = (node: DataSourceNodeLike) => {
     }
   }
 
-  const Icon = getNodeIcon(node.type);
+  const Icon = getNodeIcon(node.type, node.data);
   const iconEl = <Icon size={ICON_SIZE} strokeWidth={ICON_STROKE_WIDTH} />;
 
   // Question nodes carry an execution lifecycle (pending → running →
@@ -202,7 +206,7 @@ export const CanvasLayerPanel = ({
   // (b) no other surface needs to observe these values.
   // ============================================================
   const [query, setQuery] = useState('');
-  const [selectedTypes, setSelectedTypes] = useState<Set<CanvasNodeType>>(
+  const [selectedKeys, setSelectedKeys] = useState<Set<LayerFilterKey>>(
     () => new Set(),
   );
   // The regex *input* row is opt-in to keep the panel chrome quiet —
@@ -214,11 +218,11 @@ export const CanvasLayerPanel = ({
   // intentionally preserved across open/close cycles.
   const [isSearchOpen, setIsSearchOpen] = useState(false);
 
-  const handleToggleType = useCallback((type: CanvasNodeType) => {
-    setSelectedTypes((prev) => {
+  const handleToggleKey = useCallback((key: LayerFilterKey) => {
+    setSelectedKeys((prev) => {
       const next = new Set(prev);
-      if (next.has(type)) next.delete(type);
-      else next.add(type);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   }, []);
@@ -229,15 +233,25 @@ export const CanvasLayerPanel = ({
   }, []);
 
   // Only show chips for types that actually exist on the canvas, in the
-  // canonical `CANVAS_NODE_TYPES` order so toggling doesn't reshuffle the
-  // row.
-  const availableTypes = useMemo<CanvasNodeType[]>(() => {
-    const present = new Set<string>();
+  // canonical `CANVAS_NODE_TYPES` order so toggling doesn't reshuffle
+  // the row. Office is split per-format (Word / Excel / PowerPoint) so
+  // each chip carries the same icon the canvas card and list row use
+  // for that format — see `layerFilterKey.ts`.
+  const availableKeys = useMemo<LayerFilterKey[]>(() => {
+    const presentTypes = new Set<string>();
+    const presentOfficeFormats = new Set<OfficeFormat>();
     for (const n of nodes) {
-      if (n.type) present.add(n.type);
+      if (!n.type) continue;
+      presentTypes.add(n.type);
+      if (n.type === 'office') {
+        const fmt = (n.data as { format?: unknown } | undefined)?.format;
+        if (fmt === 'docx' || fmt === 'xlsx' || fmt === 'pptx') {
+          presentOfficeFormats.add(fmt);
+        }
+      }
     }
-    if (externalPending.length > 0) present.add('note');
-    return CANVAS_NODE_TYPES.filter((t) => present.has(t));
+    if (externalPending.length > 0) presentTypes.add('note');
+    return buildAvailableFilterKeys(presentTypes, presentOfficeFormats);
   }, [nodes, externalPending.length]);
 
   // Compile the regex once per `query` change. Invalid syntax returns a
@@ -256,7 +270,7 @@ export const CanvasLayerPanel = ({
     }
   }, [query]);
 
-  const isFilterActive = query !== '' || selectedTypes.size > 0;
+  const isFilterActive = query !== '' || selectedKeys.size > 0;
 
   // Canvas layer tree: use original node order (hierarchy-based).
   // We cache per-id item refs by content so that selection-only changes
@@ -295,12 +309,28 @@ export const CanvasLayerPanel = ({
     const prev = flatItemCacheRef.current;
     const next = new Map<string, DataSourceTreeItem>();
     const out: DataSourceTreeItem[] = [];
-    const hasTypeFilter = selectedTypes.size > 0;
+    const hasTypeFilter = selectedKeys.size > 0;
     for (const item of layerItems) {
       const t = item.node.type as CanvasNodeType | undefined;
-      // Empty `selectedTypes` means "no type constraint"; otherwise the
-      // chip row acts as a whitelist and the node's type must be in it.
-      if (hasTypeFilter && (!t || !selectedTypes.has(t))) continue;
+      // Empty `selectedKeys` means "no type constraint"; otherwise the
+      // chip row acts as a whitelist and the node must match at least
+      // one selected key (per-format for office, plain type otherwise).
+      if (hasTypeFilter) {
+        let matched = false;
+        for (const key of selectedKeys) {
+          if (
+            nodeMatchesFilterKey(
+              t,
+              item.node.data as Record<string, unknown> | undefined,
+              key,
+            )
+          ) {
+            matched = true;
+            break;
+          }
+        }
+        if (!matched) continue;
+      }
       if (regex && !regex.test(item.node.data.label)) continue;
       const cached = prev.get(item.id);
       const flat =
@@ -312,7 +342,7 @@ export const CanvasLayerPanel = ({
     }
     flatItemCacheRef.current = next;
     return out;
-  }, [layerItems, isFilterActive, isRegexInvalid, query, regex, selectedTypes]);
+  }, [layerItems, isFilterActive, isRegexInvalid, query, regex, selectedKeys]);
 
   const itemsToRender = isFilterActive ? (filteredFlatItems ?? []) : layerItems;
   const emptyText = isFilterActive ? 'No matching layers' : undefined;
@@ -324,17 +354,17 @@ export const CanvasLayerPanel = ({
     if (externalPending.length === 0) return [];
     const knownIds = new Set<string>();
     for (const n of rawNodes) knownIds.add(n.id);
-    const hasTypeFilter = selectedTypes.size > 0;
+    const hasTypeFilter = selectedKeys.size > 0;
     const out: DataSourceTreeItem[] = [];
     for (const item of externalPending) {
       if (item.noteId && knownIds.has(item.noteId)) continue;
       const label = item.fileName.replace(/\.md$/i, '');
-      if (hasTypeFilter && !selectedTypes.has('note')) continue;
+      if (hasTypeFilter && !selectedKeys.has('note')) continue;
       if (regex && !regex.test(label)) continue;
       out.push(buildExternalTreeItem(item, label));
     }
     return out;
-  }, [externalPending, rawNodes, selectedTypes, regex]);
+  }, [externalPending, rawNodes, selectedKeys, regex]);
 
   // External rows render at the bottom so they don't push the active
   // canvas nodes off-screen when many `.md` files appear at once.
@@ -357,14 +387,14 @@ export const CanvasLayerPanel = ({
       className="border-edge-default border-r"
       hideHeader
     >
-      {isSearchOpen || availableTypes.length >= 2 ? (
+      {isSearchOpen || availableKeys.length >= 2 ? (
         <LayerFilterBar
           query={query}
           onQueryChange={setQuery}
           isRegexInvalid={isRegexInvalid}
-          availableTypes={availableTypes}
-          selectedTypes={selectedTypes}
-          onToggleType={handleToggleType}
+          availableKeys={availableKeys}
+          selectedKeys={selectedKeys}
+          onToggleKey={handleToggleKey}
           isSearchOpen={isSearchOpen}
           onOpenSearch={() => setIsSearchOpen(true)}
           onCloseSearch={handleCloseSearch}

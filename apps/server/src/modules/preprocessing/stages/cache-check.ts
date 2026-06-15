@@ -59,6 +59,19 @@ export function tryCacheShortCircuit(
     return false;
   }
 
+  // Migration safeguard: web nodes that pre-date the one-shot MHTML
+  // snapshot feature have no `mhtmlArtifact` recorded. Force a fresh
+  // extract so the pipeline can write the snapshot artifact for them.
+  // Local HTML artifacts (`resolved.filePath` set) and `data:` URLs are
+  // already self-contained on disk — they never need an MHTML wrapper.
+  if (
+    request.nodeType === 'web' &&
+    resolved.normalizedUri &&
+    typeof (existing as Record<string, unknown>).mhtmlArtifact !== 'string'
+  ) {
+    return false;
+  }
+
   diagnostics.push({
     code: 'CACHE_HIT',
     level: 'info',

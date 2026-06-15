@@ -140,6 +140,13 @@ export async function preprocessNodeIfNeeded({
     if (typeof response.src === 'string' && response.src.length > 0) {
       patch.src = response.src;
     }
+    // Adopt the freshly-extracted body for node types whose preview
+    // reads `data.content` directly (currently only `office`). Without
+    // this the office preview would stay blank until the next canvas
+    // reload re-hydrated the `.md` sidecar from disk.
+    if (typeof response.content === 'string') {
+      patch.content = response.content;
+    }
     if (typeof response.summary === 'string' && response.summary.length > 0) {
       patch.summary = response.summary;
     }

@@ -43,6 +43,7 @@ export const preprocessableNodeTypeSchema = z.enum([
   'text',
   'web',
   'pdf',
+  'office',
   'image',
   'video',
   'frame',
@@ -130,6 +131,19 @@ export interface PreprocessNodeResponse {
    * canvas reload re-hydrates the field.
    */
   src?: string;
+  /**
+   * Extracted body content the client should adopt as `data.content`.
+   *
+   * Only emitted for node types whose in-canvas preview reads from
+   * `data.content` directly (currently: `office`). Without this
+   * field the freshly-extracted body lives only in the `.md` sidecar
+   * on disk and the preview stays blank until the next canvas reload
+   * re-hydrates it. PDF / web / note are deliberately excluded — their
+   * previews render the source artifact / iframe / user-typed body
+   * and never consult `data.content`, so shipping the (potentially
+   * large) extracted text would be pure bloat.
+   */
+  content?: string;
   /** LLM-generated summary of the node content (from the Enrich stage). */
   summary?: string;
   /** LLM-generated keywords for the node content (from the Enrich stage). */
