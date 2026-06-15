@@ -46,6 +46,7 @@ export async function extract(resolved: ResolvedInput): Promise<ExtractResult> {
         content: result.content,
         title: result.title,
         metadata: result.metadata,
+        rawHtml: result.rawHtml,
       };
     }
     // Remote URL: hand off to the loader which fetches + Readability-extracts.
@@ -60,6 +61,7 @@ export async function extract(resolved: ResolvedInput): Promise<ExtractResult> {
       content: result.content,
       title: result.title,
       metadata: result.metadata,
+      rawHtml: result.rawHtml,
     };
   }
 

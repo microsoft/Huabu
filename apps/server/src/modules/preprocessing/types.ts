@@ -170,6 +170,13 @@ export interface ExtractResult {
   content?: string;
   title?: string;
   metadata?: Record<string, unknown>;
+  /**
+   * Raw payload forwarded from a loader (e.g. the original HTML the web
+   * loader fetched). Only present for fresh remote fetches; consumed by
+   * the pipeline to write a one-shot snapshot artifact and then
+   * discarded — it is never persisted to the node sidecar.
+   */
+  rawHtml?: string;
   /** True when extraction was skipped (e.g. image, empty note). */
   skipped?: boolean;
 }

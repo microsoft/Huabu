@@ -4,6 +4,24 @@
 
 ---
 
+## 2026-06-15 · Web 节点改为"一次抓取、本地快照"渲染
+
+**What Changed**
+
+- **Web 节点在第一次预处理时会把页面 HTML 保存成 `.mhtml` 快照**，存放在画布的 `.artifacts/` 目录下（文件名形如 `art_xxx.mhtml`），同时仍然像以前一样写一份摘要 `.md` 到 `nodes/` 目录里。
+- **之后画布上每次展示 web 节点，都直接渲染本地这份快照，不再向原网站发请求**。节点元数据里新增了一个 `mhtmlArtifact` 字段，指向上面这份快照；摘要里也会同时写入这个字段，下次打开画布无需重新抓取。
+- **服务端新增 `.mhtml` 解码逻辑**：浏览器请求 `/api/canvas/<id>/artifact/<key>.mhtml` 时，服务端会自动剥掉 MIME 外层、注入 `<base href>` 后以 `text/html` 返回，前端 `<iframe>` 直接就能渲染。原 `.mhtml` 文件本身保持标准格式，拖进 Chrome 也能离线打开。
+- **plain 浏览器（非 Electron）现在也能在画布上看到 web 节点的内联预览**：以前因为 `X-Frame-Options` 限制只有桌面端能 iframe 加载远程站点，现在因为快照走的是同源 artifact 路径，普通浏览器同样可用。
+
+**Notes**
+
+- **老节点会在下一次预处理时自动补抓快照**：当 web 节点的 frontmatter 里没有 `mhtmlArtifact` 字段时，cache-check 阶段会主动跳过缓存、重新走一次 fetch + 持久化流程。无需手动操作。
+- **快照只内联 HTML，不内联外部 CSS / JS / 图片**——这些资源仍由浏览器按 `<base href>` 指向原站点去取。这意味着完全离线时图片可能加载不出来；如果你需要"100% 离线归档"，可以直接把 `.mhtml` 文件用 Chrome 打开（Chrome 会用它自己的资源缓存机制处理）。
+- **快照写入失败不会阻断节点创建**——失败时会回退到旧的"每次实时抓取"行为，并在 `Diagnostics` 里留下 `SNAPSHOT_FAILED` 警告。
+- API 契约：`WebPreviewResponse` 新增可选字段 `mhtmlArtifact?: string`；`WebPageResponse` 行为不变（当快照存在时 `src` 指向同源 artifact 路径，`embeddable` 总是 `true`）。
+
+---
+
 ## 2026-06-10 · Agent profiles are templates; sessions are lazy
 
 **What Changed**

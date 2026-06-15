@@ -30,14 +30,30 @@ export function persist(
   const existing = store.readNode(nodeId);
 
   // Content-based dedup inside this canvas: skip rewrite when canonical
-  // content has not changed. Label may still drift, so refresh it.
+  // content has not changed. Label and a small allow-list of metadata
+  // fields may still drift, so refresh those without rewriting the
+  // (potentially large) body. Currently the only field we care about
+  // here is `mhtmlArtifact` — added by the web pipeline when it captures
+  // a one-shot snapshot. Without this refresh path, legacy web nodes
+  // (which already have markdown content but no snapshot) would never
+  // record the artifact: persist would dedup on content, drop the new
+  // metadata, and the next preprocess would re-fetch + re-write the
+  // artifact forever.
   if (existing && existing.content === normalized.canonicalContent) {
+    const labelDrifted =
+      !!normalized.label && existing.label !== normalized.label;
+    const newMhtml = normalized.metadata?.mhtmlArtifact;
+    const mhtmlDrifted =
+      typeof newMhtml === 'string' &&
+      newMhtml.length > 0 &&
+      (existing as Record<string, unknown>).mhtmlArtifact !== newMhtml;
+
     let persistedLabel: string | undefined;
-    if (normalized.label && existing.label !== normalized.label) {
-      const result = store.writeNode(nodeId, {
-        ...existing,
-        label: normalized.label,
-      });
+    if (labelDrifted || mhtmlDrifted) {
+      const merged: Record<string, unknown> = { ...existing };
+      if (labelDrifted) merged.label = normalized.label;
+      if (mhtmlDrifted) merged.mhtmlArtifact = newMhtml;
+      const result = store.writeNode(nodeId, merged as typeof existing);
       if (result.ok) {
         persistedLabel = result.label ?? undefined;
       }
