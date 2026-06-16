@@ -15,14 +15,10 @@
  * spread out.
  */
 
-type Grant = () => void;
-
-/** FIFO queue of pending hydration grants. */
-const pending: Grant[] = [];
-
-/** Active `requestAnimationFrame` handle, or 0 when idle. */
-let rafId = 0;
-
+/**
+ * `requestAnimationFrame` / `cancelAnimationFrame` with a `setTimeout`
+ * fallback for non-DOM environments (e.g. unit tests, SSR).
+ */
 const raf: (cb: () => void) => number =
   typeof requestAnimationFrame === 'function'
     ? (cb) => requestAnimationFrame(cb)
@@ -32,6 +28,14 @@ const cancelRaf: (handle: number) => void =
   typeof cancelAnimationFrame === 'function'
     ? (handle) => cancelAnimationFrame(handle)
     : (handle) => clearTimeout(handle);
+
+type Grant = () => void;
+
+/** FIFO queue of pending hydration grants. */
+const pending: Grant[] = [];
+
+/** Active `requestAnimationFrame` handle, or 0 when idle. */
+let rafId = 0;
 
 function pump(): void {
   rafId = 0;

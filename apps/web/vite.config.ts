@@ -99,5 +99,20 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
+    // `vite preview` serves the production build but does NOT inherit
+    // `server.proxy`, so mirror the `/api` proxy here to let preview builds
+    // talk to the same backend (useful for profiling real production output
+    // without the dev module-compilation overhead).
+    preview: {
+      port: devPort,
+      strictPort: true,
+      proxy: {
+        '/api': {
+          target: apiTarget,
+          changeOrigin: true,
+          ws: true,
+        },
+      },
+    },
   };
 });

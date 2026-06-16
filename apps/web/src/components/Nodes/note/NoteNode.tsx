@@ -4,7 +4,7 @@ import { ChevronsDown, Fullscreen } from 'lucide-react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
-import { Spinner } from '@/components/Common/Spinner';
+import { SkeletonLines } from '@/components/Common/SkeletonLines';
 import { MilkdownPreview } from '@/components/Milkdown';
 import { useNodeLOD } from '@/hooks/useNodeLOD';
 import { useNodeScale } from '@/hooks/useNodeScale';
@@ -297,25 +297,37 @@ export const NoteNode = memo(
                     />
                   ) : (
                     // Lightweight placeholder while the editor mount is
-                    // deferred. Reuses the same `Spinner` the PDF node
-                    // shows while loading; sized by the persisted height
-                    // seed so the node keeps its footprint and doesn't
-                    // reflow when the real editor takes over.
+                    // deferred. Reuses the same `SkeletonLines` shimmer the
+                    // PDF node shows while loading.
+                    //
+                    // Centering target differs by height mode: in fixed
+                    // mode the host already constrains to the node's visible
+                    // height, so fill it (`h-full`) and center within that
+                    // visible range. In auto mode there is no fixed height,
+                    // so seed `minHeight` from the persisted content height
+                    // to keep the node's footprint and center within it.
                     <div
-                      className="flex w-full items-center justify-center"
-                      style={{
-                        minHeight:
-                          seededHeight > 0
-                            ? seededHeight
-                            : NOTE_AUTO_HEIGHT_MIN,
-                      }}
+                      className={clsx(
+                        'flex w-full items-center justify-center',
+                        hasFixedHeight && 'h-full',
+                      )}
+                      style={
+                        hasFixedHeight
+                          ? undefined
+                          : {
+                              minHeight:
+                                seededHeight > 0
+                                  ? seededHeight
+                                  : NOTE_AUTO_HEIGHT_MIN,
+                            }
+                      }
                       aria-hidden
                     >
-                      {/* No spinner in minimal LOD — the content is
+                      {/* No shimmer in minimal LOD — the content is
                           hidden behind the SemanticPlaceholder, so an
-                          animated spinner would just be wasted work. */}
+                          animated placeholder would just be wasted work. */}
                       {!isMinimalLOD && (
-                        <Spinner size="md" className="text-fg-subtle" />
+                        <SkeletonLines className="w-full max-w-xs" />
                       )}
                     </div>
                   )}

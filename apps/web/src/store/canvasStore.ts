@@ -1052,10 +1052,6 @@ const useCanvasStore = create<RFState>()(
     },
 
     loadCanvas: async (canvasId?: string) => {
-      // [PERF] Temporary instrumentation to locate the canvas-load
-      // bottleneck (network+parse vs synchronous React/React-Flow commit).
-      // Remove once the slow phase is identified.
-      const perfT0 = performance.now();
       set({ isLoading: true, canvasNotFound: false, versionConflict: false });
       try {
         const targetId = canvasId ?? get().canvasId;
@@ -1063,10 +1059,6 @@ const useCanvasStore = create<RFState>()(
           set({ canvasId: targetId });
         }
         const response = await getCanvas(targetId);
-        // [PERF] fetch + response-body JSON.parse done (both block the
-        // main thread only during the synchronous parse; the wire wait is
-        // idle time where the spinner *should* animate).
-        const perfAfterFetch = performance.now();
         if (!response) {
           console.warn('Canvas not found:', targetId);
           canvasHistoryManager.clear();
@@ -1114,34 +1106,6 @@ const useCanvasStore = create<RFState>()(
           ingestionByNodeId: {},
         });
 
-        // [PERF] `set()` returned — Zustand notified subscribers but React
-        // has NOT committed/painted yet. The heavy synchronous React +
-        // React-Flow mount happens between here and the next paint, which
-        // is what freezes the spinner frame on screen.
-        const perfAfterSet = performance.now();
-        // Payload-size proxy: how much node body text the GET response
-        // inlined (drives JSON.parse + state-build cost).
-        let perfContentChars = 0;
-        for (const node of loadedNodes) {
-          const data = node.data as Record<string, unknown> | undefined;
-          const c = data?.['content'];
-          if (typeof c === 'string') perfContentChars += c.length;
-        }
-        // Double rAF: first rAF fires before paint of this commit, second
-        // fires after the browser has painted the freshly-mounted canvas.
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            const perfAfterPaint = performance.now();
-            console.log('[PERF] loadCanvas', {
-              nodes: loadedNodes.length,
-              contentKB: Math.round(perfContentChars / 1024),
-              fetchParseMs: Math.round(perfAfterFetch - perfT0),
-              setMs: Math.round(perfAfterSet - perfAfterFetch),
-              commitPaintMs: Math.round(perfAfterPaint - perfAfterSet),
-              totalToPaintMs: Math.round(perfAfterPaint - perfT0),
-            });
-          });
-        });
         // Backfill: any node with an empty label gets re-queued so the
         // server can regenerate one. The server's preprocessing
         // dispatcher decides per node profile whether there's any

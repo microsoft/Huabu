@@ -8,6 +8,7 @@ import 'react-pdf/dist/Page/TextLayer.css';
 
 import { resolveArtifactUrl } from '@/api/artifact';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
+import { useNodeLOD } from '@/hooks/useNodeLOD';
 import { useNodeScale } from '@/hooks/useNodeScale';
 import useCanvasStore from '@/store/canvasStore';
 
@@ -81,6 +82,7 @@ const FirstPageThumbnail = memo(
 export const PDFNode = memo(
   ({ id, data, selected }: NodeProps<PDFNodeType>) => {
     const scale = useNodeScale(id, 'pdf');
+    const isMinimalLOD = useNodeLOD(id, 'pdf') === 'minimal';
     const openExpanded = useCanvasStore((s) => s.openExpanded);
     const updateNodeData = useCanvasStore((s) => s.updateNodeData);
     const canvasId = useCanvasStore((s) => s.canvasId);
@@ -168,13 +170,17 @@ export const PDFNode = memo(
       >
         <div className="relative flex h-full w-full flex-col overflow-hidden rounded-lg">
           {/* Render the first page off-screen to capture a thumbnail when no manual cover exists */}
-          {!hasCover && src && !thumbnail && !data.artifactMissing && (
-            <FirstPageThumbnail
-              src={src}
-              canvasId={canvasId}
-              onCapture={handleThumbnailCapture}
-            />
-          )}
+          {!hasCover &&
+            src &&
+            !thumbnail &&
+            !data.artifactMissing &&
+            !isMinimalLOD && (
+              <FirstPageThumbnail
+                src={src}
+                canvasId={canvasId}
+                onCapture={handleThumbnailCapture}
+              />
+            )}
 
           <div
             style={{

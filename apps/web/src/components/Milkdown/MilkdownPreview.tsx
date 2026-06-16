@@ -24,7 +24,6 @@ import { createMilkdown, type MilkdownInstance } from './createMilkdown';
 import { markdownEquals, normalizeMarkdown } from './markdownUtils';
 
 import type { MilkdownBlockDragEvent } from './types';
-
 export interface MilkdownPreviewProps {
   markdown: string;
   className?: string;
