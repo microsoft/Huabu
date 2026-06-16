@@ -8,8 +8,6 @@ treating AI as a chat window detached from your work, Huabu places the human and
 the AI inside the same canvas so they can build on each other's contributions
 over time.
 
-This repository (`sediment`) is the reference implementation of Huabu.
-
 ---
 
 ## Two Principles
