@@ -4,6 +4,22 @@
 
 ---
 
+## 2026-06-16 · 修复 Question 节点续聊时 Agent 模式被重置为 Chat
+
+**What Changed**
+
+- **从 Question 节点打开会话后，后续追问会保持该问题运行时的模式**。之前用 `@Agent`（operate 模式）跑出来的 Question 节点，在聊天面板里打开会话再追问时，第二轮对话会退回 Chat（ask）模式——AI 会发现自己「处于只读模式，没有 canvas_commands 工具」，无法再创建节点。根因是「持久化 chat 模式」改造（2026-06-08）后，聊天面板的模式开关从局部 React state 改成读取全局、持久化到 localStorage 的 `lastAction`，而 Question 节点的真实模式其实存在节点自身的 `agentMode` 字段里，两者只靠「打开会话时同步一次」来维持，时序脆弱、容易被覆盖。
+- **现在「Question 回放」模式下的模式直接从该节点的 `agentMode` 派生**，不再读取全局 `lastAction`——节点才是这个会话模式的唯一真相源。这样无论何时打开、`lastAction` 当前是什么值，回放会话的输入框和每一轮追问都结构性地锁定在该问题运行时的模式上。
+
+**Notes**
+
+- **画布聊天不受影响**：画布级聊天的模式仍由 `lastAction` 驱动（刷新后从 localStorage 恢复上次用的模式），这对画布聊天是合理的。改动只影响 Question 回放这一条路径。
+- **`openQuestionThread` 只负责 stash / restore 画布的 `lastAction`**（用于撤销回放期间发送对画布模式造成的污染），不再主动写入它，也不再需要透传 mode 参数。
+- **外部 ACP agent 不受影响**：外部 binding 不区分 ask / operate，其模式由 ACP session selectors 管理，回放时统一派生为 `ask`，行为与之前一致。
+- **遗留 Question 节点**（在 `@` picker 之前创建、没有 `agentMode` 字段的）继续回落到 `ask`，与旧行为一致。
+
+---
+
 ## 2026-06-15 · 桌面版 v0.2.2 紧急修复（沿用 v0.2.1 启动崩溃）
 
 **What Changed**

@@ -38,6 +38,7 @@ import { MessageList } from '../../Messages/MessageList';
 import { SidebarPanel } from '../SidebarPanel';
 
 import type {
+  AgentBinding,
   AgentMode,
   IntentCandidate,
   IntentEpisode,
@@ -50,13 +51,40 @@ interface ChatPanelProps {
 
 export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const [input, setInput] = useState('');
-  // Mode is derived from the store's persisted `lastAction` so that
-  // page refreshes restore the previously-used mode for this thread
-  // (zustand `persist` writes `lastAction` to localStorage). It also
-  // stays in sync with `useAgentStream.startStream`, which calls
-  // `setLastAction(agentMode)` on every send.
-  const mode = useChatStore((state) => state.lastAction);
   const setLastAction = useChatStore((state) => state.setLastAction);
+
+  // Canvas-level chat mode toggle. Persisted to localStorage so a page
+  // refresh restores the last-used mode for the canvas thread; kept in
+  // sync by `useAgentStream.startStream`, which calls
+  // `setLastAction(agentMode)` on every send.
+  const lastAction = useChatStore((state) => state.lastAction);
+
+  // When the panel is replaying a question node's thread, the mode is a
+  // property of that NODE (`data.agentMode`), not the canvas-level
+  // `lastAction` toggle (the replay view hides the mode selector). We
+  // derive it straight from the node rather than mirroring it into
+  // `lastAction` on open, so the composer + every follow-up turn stay
+  // structurally consistent with how the question itself runs: an
+  // `@Agent` (operate) question keeps emitting operate turns, an `@Chat`
+  // question stays in ask. External bindings have no ask/operate split
+  // (their mode is ACP-managed), so they pin to ask. Falls back to ask
+  // for legacy nodes that pre-date the `@` picker.
+  const viewingQuestionThread = useChatStore((s) => s.viewingQuestionThread);
+  const viewingQuestionNodeId = viewingQuestionThread?.nodeId;
+  const questionReplayMode = useCanvasStore((s) => {
+    if (!viewingQuestionNodeId) return undefined;
+    const node = s.nodes.find((n) => n.id === viewingQuestionNodeId);
+    if (!node) return undefined;
+    const d = node.data as {
+      agentBinding?: AgentBinding;
+      agentMode?: AgentMode;
+    };
+    return d.agentBinding?.kind === 'external' ? 'ask' : (d.agentMode ?? 'ask');
+  });
+
+  const mode: AgentMode = viewingQuestionThread
+    ? (questionReplayMode ?? 'ask')
+    : lastAction;
 
   // Agent stream hook — manages streaming and loading state
   const { isLoading, setIsLoading, startStream, stopStream } = useAgentStream();
@@ -324,7 +352,6 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   );
 
   // Question thread replay mode
-  const viewingQuestionThread = useChatStore((s) => s.viewingQuestionThread);
   const closeQuestionThread = useChatStore((s) => s.closeQuestionThread);
 
   // Sketch cluster inspector mode (mutually exclusive with question

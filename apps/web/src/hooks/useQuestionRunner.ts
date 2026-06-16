@@ -34,6 +34,35 @@ function abortRun(nodeId: string): void {
   }
 }
 
+/**
+ * Claim terminal ownership of a finishing run.
+ *
+ * Returns `true` (and removes the run from {@link activeRuns}) only when
+ * `controller` is still the node's registered run — i.e. THIS run is the
+ * one allowed to write a terminal status. Returns `false` when:
+ *
+ *   - the user cancelled the run (the store subscriber demoted the node
+ *     to `idle` and `abortRun` already deleted the entry), or
+ *   - a newer run superseded this one (re-run replaced the entry), or
+ *   - the node was deleted.
+ *
+ * Replaces the previous `!signal.aborted` guard, which left the node
+ * stranded at `running` whenever the stream ended via an abort that was
+ * NOT a deliberate user cancel — `streamMessage` still fires
+ * `onComplete` on abort, but the old guard then skipped the terminal
+ * patch. Keying on run ownership instead terminalizes in every case
+ * except the ones above, so a question node can never stall at
+ * `running` after its stream actually finishes.
+ */
+function claimRunCompletion(
+  nodeId: string,
+  controller: AbortController,
+): boolean {
+  if (activeRuns.get(nodeId) !== controller) return false;
+  activeRuns.delete(nodeId);
+  return true;
+}
+
 // ── Core execution function ────────────────────────────────────
 
 async function executeQuestionNode(nodeId: string): Promise<void> {
@@ -150,36 +179,32 @@ async function executeQuestionNode(nodeId: string): Promise<void> {
           // openQuestionThread.
         },
         onError: (err) => {
-          if (!abortController.signal.aborted) {
-            if (sawDone) {
-              // A final answer was delivered before this error — treat
-              // the run as successful so the node shows the unviewed
-              // glow instead of a red error badge.
-              patch(nodeId, { status: 'done', errorMessage: undefined });
-            } else {
-              patch(nodeId, {
-                status: 'error',
-                errorMessage: err.message,
-              });
-            }
-          }
-          activeRuns.delete(nodeId);
-        },
-        onComplete: () => {
-          if (!abortController.signal.aborted) {
-            // If the user is currently watching this question's thread
-            // in the chat panel at completion time, mark `viewed: true`
-            // so the "done · unread" glow doesn't fire (they watched
-            // it stream live). Otherwise leave `viewed` as the runner
-            // set it (false) so the glow surfaces when they next look.
-            const stillViewing =
-              useChatStore.getState().viewingQuestionThread?.nodeId === nodeId;
+          if (!claimRunCompletion(nodeId, abortController)) return;
+          if (sawDone) {
+            // A final answer was delivered before this error — treat
+            // the run as successful so the node shows the unviewed
+            // glow instead of a red error badge.
+            patch(nodeId, { status: 'done', errorMessage: undefined });
+          } else {
             patch(nodeId, {
-              status: 'done',
-              ...(stillViewing ? { viewed: true } : {}),
+              status: 'error',
+              errorMessage: err.message,
             });
           }
-          activeRuns.delete(nodeId);
+        },
+        onComplete: () => {
+          if (!claimRunCompletion(nodeId, abortController)) return;
+          // If the user is currently watching this question's thread
+          // in the chat panel at completion time, mark `viewed: true`
+          // so the "done · unread" glow doesn't fire (they watched
+          // it stream live). Otherwise leave `viewed` as the runner
+          // set it (false) so the glow surfaces when they next look.
+          const stillViewing =
+            useChatStore.getState().viewingQuestionThread?.nodeId === nodeId;
+          patch(nodeId, {
+            status: 'done',
+            ...(stillViewing ? { viewed: true } : {}),
+          });
         },
       },
       {
@@ -190,17 +215,15 @@ async function executeQuestionNode(nodeId: string): Promise<void> {
       },
     );
   } catch (err) {
-    if (!abortController.signal.aborted) {
-      if (sawDone) {
-        patch(nodeId, { status: 'done', errorMessage: undefined });
-      } else {
-        patch(nodeId, {
-          status: 'error',
-          errorMessage: err instanceof Error ? err.message : 'Unknown error',
-        });
-      }
+    if (!claimRunCompletion(nodeId, abortController)) return;
+    if (sawDone) {
+      patch(nodeId, { status: 'done', errorMessage: undefined });
+    } else {
+      patch(nodeId, {
+        status: 'error',
+        errorMessage: err instanceof Error ? err.message : 'Unknown error',
+      });
     }
-    activeRuns.delete(nodeId);
   }
 }
 

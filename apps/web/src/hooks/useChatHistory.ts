@@ -188,6 +188,34 @@ export function useChatHistory(
       const assistantId = createId('message');
       // Flag set to true once we know the server has an active run
       let streaming = false;
+      // Track whether a usable final `done` event arrived so a late
+      // cap-out error after a complete answer terminalizes as `done`.
+      let sawDone = false;
+
+      // Drive the question node that owns the reconnected thread to a
+      // terminal status. Resolves the node by `data.threadId` so it
+      // works regardless of which thread is currently visible. Only
+      // rescues a still-live node (`running` / `pending`): never
+      // overrides a terminal status the originating run already wrote,
+      // nor resurrects a user cancel (`idle`).
+      const rescueQuestionNode = (
+        forThreadId: string,
+        patch: Record<string, unknown>,
+      ) => {
+        const node = useCanvasStore
+          .getState()
+          .nodes.find(
+            (n) =>
+              n.type === 'question' &&
+              (n.data as Record<string, unknown> | undefined)?.threadId ===
+                forThreadId,
+          );
+        if (!node) return;
+        const curStatus = (node.data as Record<string, unknown> | undefined)
+          ?.status;
+        if (curStatus !== 'running' && curStatus !== 'pending') return;
+        useCanvasStore.getState().patchNodeSilent(node.id, patch);
+      };
 
       // Clear assistant / status messages loaded from history for the
       // current run — the reconnect event buffer replays them fully.
@@ -215,6 +243,7 @@ export function useChatHistory(
       const connected = await agentApi.reconnectStream(ownerThreadId, {
         onEvent: (event: AgentStreamEvent) => {
           if (cancelled) return;
+          if (event.type === 'done') sawDone = true;
           if (!streaming) {
             streaming = true;
             setIsLoading(ownerThreadId, true);
@@ -232,10 +261,29 @@ export function useChatHistory(
             detail: err.message,
           });
           setIsLoading(ownerThreadId, false);
+          // A reconnected run that errors must still terminalize the
+          // owning question node — otherwise it stalls at `running`.
+          rescueQuestionNode(
+            ownerThreadId,
+            sawDone
+              ? { status: 'done', errorMessage: undefined }
+              : { status: 'error', errorMessage: err.message },
+          );
         },
         onComplete: () => {
           if (cancelled) return;
           setIsLoading(ownerThreadId, false);
+          // When the reconnect stream is the consumer that sees the run
+          // finish, the originating `useQuestionRunner` callback may
+          // never fire (its POST stream was superseded / dropped). Drive
+          // the question node to `done` here so the status badge + chat
+          // affordance reappear. The user has this thread open, so the
+          // completion counts as viewed.
+          rescueQuestionNode(ownerThreadId, {
+            status: 'done',
+            errorMessage: undefined,
+            viewed: true,
+          });
         },
       });
 

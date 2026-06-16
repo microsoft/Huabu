@@ -82,6 +82,8 @@ export interface ChatState {
   _savedCanvasThreadId?: string;
   /** @internal Saved canvas agent binding while viewing a question thread. */
   _savedCanvasBinding?: AgentBinding;
+  /** @internal Saved canvas agent mode while viewing a question thread. */
+  _savedCanvasLastAction?: AgentMode;
 
   /**
    * Staged attachments waiting to be sent with the next message.
@@ -176,9 +178,12 @@ export interface ChatState {
 
   /**
    * Open a question node's thread in the chat panel (replay mode).
-   * Pass the question's `binding` so the ChatInput's mode selector
-   * surfaces the agent that actually answered this question — the
-   * canvas-level binding is stashed and restored on close.
+   * Pass the question's `binding` so the panel title + ACP selectors
+   * reflect the agent that answered. The replay mode (ask/operate) is
+   * NOT passed here — ChatPanel derives it directly from the question
+   * node's `agentMode`, making the node the single source of truth.
+   * The canvas thread + binding + lastAction are stashed and restored
+   * on close.
    */
   openQuestionThread: (
     nodeId: string,
@@ -399,6 +404,7 @@ export const useChatStore = create<ChatState>()(
         const {
           threadId: currentThreadId,
           agentBinding: currentBinding,
+          lastAction: currentLastAction,
           viewingQuestionThread: currentViewing,
         } = get();
 
@@ -406,7 +412,7 @@ export const useChatStore = create<ChatState>()(
         if (currentViewing?.threadId === threadId) return;
 
         // If we're already viewing a different question thread, don't
-        // overwrite the saved canvas binding — keep the original.
+        // overwrite the saved canvas state — keep the original.
         const isAlreadyViewing = currentViewing !== null;
 
         // Question-thread binding: prefer the binding the question was
@@ -414,7 +420,15 @@ export const useChatStore = create<ChatState>()(
         // for legacy nodes that pre-date `data.agentBinding`.
         const nextBinding: AgentBinding = binding ?? DEFAULT_BINDING;
 
-        // No need to stash messages — they live in `messagesByThread`
+        // NOTE: we deliberately do NOT touch `lastAction` here. The
+        // replay view's mode is derived directly from the question
+        // node's `data.agentMode` (see ChatPanel), so the node — not
+        // this global toggle — is the single source of truth for which
+        // mode follow-up turns run in. We only STASH the canvas
+        // `lastAction` so `closeQuestionThread` can undo any pollution a
+        // follow-up send caused via `startStream`'s `setLastAction`.
+        //
+        // Messages aren't stashed — they live in `messagesByThread`
         // keyed by their own threadId and survive the navigation. The
         // history hook handles first-time hydration of the question
         // thread; subsequent visits hit the cache.
@@ -425,6 +439,7 @@ export const useChatStore = create<ChatState>()(
           ...(!isAlreadyViewing && {
             _savedCanvasThreadId: currentThreadId,
             _savedCanvasBinding: currentBinding,
+            _savedCanvasLastAction: currentLastAction,
           }),
         });
         get().evictInactiveThreads();
@@ -436,8 +451,10 @@ export const useChatStore = create<ChatState>()(
           viewingQuestionThread: null,
           threadId: state._savedCanvasThreadId ?? state.threadId,
           agentBinding: state._savedCanvasBinding ?? state.agentBinding,
+          lastAction: state._savedCanvasLastAction ?? state.lastAction,
           _savedCanvasThreadId: undefined,
           _savedCanvasBinding: undefined,
+          _savedCanvasLastAction: undefined,
         });
         get().evictInactiveThreads();
       },
@@ -454,8 +471,10 @@ export const useChatStore = create<ChatState>()(
             viewingQuestionThread: null,
             threadId: state._savedCanvasThreadId ?? state.threadId,
             agentBinding: state._savedCanvasBinding ?? state.agentBinding,
+            lastAction: state._savedCanvasLastAction ?? state.lastAction,
             _savedCanvasThreadId: undefined,
             _savedCanvasBinding: undefined,
+            _savedCanvasLastAction: undefined,
           });
         }
         set({ viewingSketchCluster: { clusterId } });
