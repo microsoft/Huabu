@@ -90,10 +90,10 @@
    visible caret with its own 1s blink animation that fades in and
    out of the page.
 
-   Force the virtual caret to `--fg-default` so it reads as a crisp,
-   theme-aware bar (matching the native-caret override in
-   `index.css`). Specificity matches Crepe's rule, but this file
-   loads AFTER Crepe — so the cascade wins without `!important`. */
+   Force the virtual caret to `--fg-muted` so it stays clearly visible
+   and theme-aware (avoids the near-white `--edge-default` tint).
+   Specificity matches Crepe's rule, but this file loads AFTER Crepe
+   — so the cascade wins without `!important`. */
 .milkdown .ProseMirror-focused {
   --prosemirror-virtual-cursor-color: var(--fg-muted);
 }
