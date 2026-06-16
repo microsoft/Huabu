@@ -73,18 +73,18 @@ Requirements: Node.js 20+ and pnpm 10+.
 
 ```bash
 pnpm install
-pnpm dev
+pnpm run dev:desktop
 ```
 
-This starts the server, the web client, and the shared package in watch
-mode. Open the URL it prints (default <http://localhost:5173>) in your
-browser.
+This launches the desktop app (recommended), starting the server, the web
+client, and the shared package in watch mode, then opening Huabu in its
+own desktop window.
 
 ---
 
 ## Configuring an LLM
 
-Sediment needs an LLM to drive chat, intent suggestions, and other
+Huabu needs an LLM to drive chat, intent suggestions, and other
 in-canvas AI features. Open the Settings button → **LLM Provider**.
 
 1. Pick a **Provider** (OpenAI, Anthropic, Google Gemini, OpenRouter,
@@ -104,7 +104,7 @@ The config is persisted on the server side, so you only need to do this once per
 
 ## Connecting external coding agents
 
-Sediment can talk to AI coding agents running on your machine —
+Huabu can talk to AI coding agents running on your machine —
 **GitHub Copilot CLI**, **Claude Code**, **Gemini CLI**, and others that
 speak the [Agent Client Protocol](https://agentclientprotocol.com).
 
