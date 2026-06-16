@@ -53,6 +53,7 @@ import {
 
 import { canvasHistoryManager } from './canvasHistoryManager';
 import { createIntentActionWindow } from './canvasStore/intentActionWindow';
+import { reconcileQuestionStatus } from './canvasStore/load/reconcileQuestionStatus';
 import { createCanvasEventBuffer } from './canvasStore/save/eventBuffer';
 import { NODE_CONTENT_KEYS } from './canvasStore/save/nodeContentFields';
 import { createNodeContentQueue } from './canvasStore/save/nodeContentQueue';
@@ -1081,7 +1082,14 @@ const useCanvasStore = create<RFState>()(
         };
         canvasHistoryManager.clear();
 
-        const loadedNodes = state.nodes ?? [];
+        // Repair question nodes whose execution status drifted to a
+        // stale non-terminal value (most often `idle`) while they
+        // actually completed a run — the `status: 'done'` autosave can
+        // be silently dropped by a 409 when the agent edits the canvas
+        // mid-conversation. Nodes that own a `threadId` always have a
+        // persisted conversation, so a stale status is demoted to
+        // `done` here, restoring the badge + reopen affordance.
+        const loadedNodes = reconcileQuestionStatus(state.nodes ?? []);
         // Prefer this tab's sessionStorage; fall back to whatever the
         // server still has from before viewport was moved client-side.
         // A corrupt entry on either side falls through to `null`, which
