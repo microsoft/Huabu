@@ -28,6 +28,8 @@ import {
   getCopilotApiKey,
   verifyOAuthCredentials,
   applyCopilotModelOverrides,
+  getCopilotStaticHeaders,
+  fetchEntitledCopilotModels,
 } from './oauth.js';
 import { getDataDir } from '../../data-dir.js';
 
@@ -298,7 +300,16 @@ function buildModel(cfg: PersistedConfig): Model<Api> {
   }
 
   // Manual model construction (Azure, custom endpoints, etc.)
-  const api = providerInfo?.api ?? 'openai-completions';
+  //
+  // For github-copilot this path is hit by models newer than the bundled
+  // pi-ai registry. We deliberately ignore the provider's catalog `api`
+  // (which is derived from the first registry entry and happens to be
+  // `anthropic-messages`) and use the OpenAI-compatible `/chat/completions`
+  // endpoint, which Copilot's gateway accepts for every chat model.
+  const api =
+    cfg.provider === 'github-copilot'
+      ? 'openai-completions'
+      : (providerInfo?.api ?? 'openai-completions');
   let baseUrl = cfg.baseUrl ?? providerInfo?.defaultBaseUrl ?? '';
 
   // Azure: fall back to legacy env var endpoint when no persisted baseUrl.
@@ -324,8 +335,17 @@ function buildModel(cfg: PersistedConfig): Model<Api> {
     maxTokens: 16384,
   } as Model<Api>;
 
-  // For Copilot, apply pi-ai's model overrides (baseUrl from token, headers)
+  // For Copilot, apply pi-ai's model overrides (baseUrl from token).
+  //
+  // `modifyModels` only rewrites `baseUrl`, so we must seed the required
+  // Copilot client headers (`Editor-Version`, `Copilot-Integration-Id`, …)
+  // ourselves — otherwise newer ids built on this manual path are rejected
+  // with `400 missing Editor-Version header for IDE auth`.
   if (cfg.provider === 'github-copilot') {
+    model = {
+      ...model,
+      headers: getCopilotStaticHeaders(),
+    } as Model<Api>;
     const [modified] = applyCopilotModelOverrides([model]);
     if (modified) model = modified;
   }
@@ -437,6 +457,48 @@ export function getModelsForProvider(providerId: string): LLMModelInfo[] {
   }
 
   return [];
+}
+
+/**
+ * Like {@link getModelsForProvider}, but for GitHub Copilot it returns the
+ * models the *current account* is actually entitled to — queried live from
+ * Copilot's `GET /models` endpoint (the same source VS Code's model picker
+ * uses).
+ *
+ * The returned list is the live entitlement, enriched per model:
+ *   - If pi-ai's static registry knows the id, we reuse its curated entry
+ *     (accurate reasoning flag, input modalities, display name, and — via
+ *     {@link buildModel} — the optimal request protocol).
+ *   - Otherwise the model is newer than the bundled registry; we surface it
+ *     anyway using the live metadata. Such models are requested over the
+ *     universal `openai-completions` endpoint (see {@link buildModel}),
+ *     which Copilot's gateway accepts for every chat model, so they remain
+ *     usable until a pi-ai upgrade restores the optimal protocol.
+ *
+ * Falls back to the full static list when unauthenticated or the live fetch
+ * fails, preserving the previous behavior.
+ */
+export async function getModelsForProviderLive(
+  providerId: string,
+): Promise<LLMModelInfo[]> {
+  const staticModels = getModelsForProvider(providerId);
+  if (providerId !== 'github-copilot') return staticModels;
+
+  const entitled = await fetchEntitledCopilotModels();
+  if (!entitled || entitled.length === 0) return staticModels;
+
+  const staticById = new Map(staticModels.map((m) => [m.id.toLowerCase(), m]));
+  return entitled.map((live) => {
+    const known = staticById.get(live.id.toLowerCase());
+    if (known) return known;
+    return {
+      id: live.id,
+      name: live.name,
+      provider: 'github-copilot',
+      reasoning: false,
+      input: live.vision ? ['text', 'image'] : ['text'],
+    } satisfies LLMModelInfo;
+  });
 }
 
 /**

@@ -160,7 +160,16 @@ interface NodeWrapperProps {
   borderColor?: string;
 
   onResizeStart?: () => void;
-  onResize?: (width: number, height: number) => void;
+  /**
+   * Live-resize tick callback. Receives the snapped width/height AND
+   * the snapped local top-left (`x`, `y`) for this tick — both are
+   * required so handlers that re-dispatch geometry (e.g. the frame's
+   * cascade-scale path) can commit a self-contained batch that pins
+   * the frame's new origin instead of relying on a separate
+   * `onNodesChange` snap-mirror to set it. For BR-handle drags `x`
+   * and `y` simply equal the gesture-start values.
+   */
+  onResize?: (width: number, height: number, x: number, y: number) => void;
   onResizeEnd?: (width: number, height: number) => void;
   onDoubleClick?: React.MouseEventHandler<HTMLDivElement>;
   resizeEndClearHeight?: boolean;
@@ -215,6 +224,13 @@ export const NodeWrapper = memo(
   }: NodeWrapperProps) => {
     const selectedCount = useCanvasStore((state) =>
       selectSelectedCount(state.nodes),
+    );
+
+    // Hide the floating toolbar + side "add node" affordances while this
+    // node is being dragged, so they don't occlude the drop placeholder
+    // (the structured-frame ghost / snap feedback) under the cursor.
+    const isDragging = useCanvasStore(
+      (state) => state.nodes.find((node) => node.id === id)?.dragging ?? false,
     );
 
     const setNodeGeometry = useCanvasStore((state) => state.setNodeGeometry);
@@ -279,7 +295,12 @@ export const NodeWrapper = memo(
         const snapped = applyResizeProposal(params, zoom);
         // Keep the frame-fit overlay aligned with the live resize.
         updateResizePreview(id);
-        onResizeProp?.(snapped.width, snapped.height);
+        // Forward the snapped local top-left as well as the snapped
+        // size. Non-BR handles move the node's local origin every
+        // tick — callers that cascade-update children (FrameNode)
+        // need the new origin so they can pin the frame's position
+        // in the same batch as the children's scaled positions.
+        onResizeProp?.(snapped.width, snapped.height, snapped.x, snapped.y);
       },
       [id, onResizeProp, updateResizePreview],
     );
@@ -406,7 +427,7 @@ export const NodeWrapper = memo(
             lineClassName="!border-transparent"
           />
         )}
-        {selected && selectedCount === 1 && (
+        {selected && selectedCount === 1 && !isDragging && (
           <NodeFloatingToolbar
             id={id}
             type={type}
@@ -435,7 +456,20 @@ export const NodeWrapper = memo(
 
         <div
           className={cn(
-            'group relative flex h-full w-full flex-col rounded-lg transition-all duration-120',
+            // `transition` (not `transition-all`) intentionally
+            // EXCLUDES width / height from the animated property
+            // list. The outer RF node container's `style.width` /
+            // `style.height` is rewritten on every resize tick
+            // (`SET_NODE_GEOMETRY` + the snap-mirror in
+            // `onNodesChange`); this inner div uses `h-full w-full`
+            // so its computed pixel size derives from the parent.
+            // With `transition-all` here, the resolved percentage
+            // would animate over 120 ms each tick, making the frame
+            // body visibly trail the resize handle by one beat.
+            // `transition` still animates color / bg / border / ring
+            // / shadow / transform / opacity — i.e. all the
+            // selection-state visuals this class is here to smooth.
+            'group relative flex h-full w-full flex-col rounded-lg transition duration-120',
 
             type !== 'text' &&
               type !== 'sketch' &&
@@ -529,7 +563,7 @@ export const NodeWrapper = memo(
 
         <NodeSideAffordance
           nodeId={id}
-          selected={!!selected && selectedCount === 1}
+          selected={!!selected && selectedCount === 1 && !isDragging}
           editing={editing}
           onCreate={handleCreateConnected}
         />

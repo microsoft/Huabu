@@ -6,6 +6,13 @@ import { resolveAccent } from '@sediment/shared';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
 import { useTextNodeSurface } from '@/hooks/useTextNodeSurface';
 import useCanvasStore from '@/store/canvasStore.ts';
+import {
+  FONT_FAMILY_CSS,
+  getTextNodeFontOpts,
+  TEXT_ACCENT_BORDER as ACCENT_BORDER,
+  TEXT_NODE_PADDING as NODE_PADDING,
+  TEXT_NODE_PLACEHOLDER,
+} from '@/utils/node/nodeFontConfig';
 
 import { getAccentTokens } from '../accentTokens';
 import { MissingFileBanner } from '../MissingFileBanner';
@@ -16,25 +23,12 @@ import type { CanvasTextNodeData, NodeStyle } from '../types';
 import type { NodeFontFamily } from '@sediment/shared';
 import type { Node, NodeProps } from '@xyflow/react';
 
-/** Map logical font family names to CSS font stacks. */
-const FONT_FAMILY_CSS: Record<NodeFontFamily, string> = {
-  default: 'ui-sans-serif, system-ui, sans-serif',
-  serif: 'ui-serif, Georgia, Cambria, "Times New Roman", Times, serif',
-  mono: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-  hand: '"Comic Sans MS", "Chalkboard SE", sans-serif',
-};
-
 const FONT_FAMILY_OPTIONS: { name: string; value: NodeFontFamily }[] = [
   { name: 'Default', value: 'default' },
   { name: 'Serif', value: 'serif' },
   { name: 'Mono', value: 'mono' },
   { name: 'Hand', value: 'hand' },
 ];
-
-/** Padding inside the node (px on each side). */
-const NODE_PADDING = 4;
-/** Border width NodeWrapper applies when an accent color is set (`border-3`). */
-const ACCENT_BORDER = 3;
 
 export type TextNodeType = Node<CanvasTextNodeData, 'text'>;
 
@@ -93,13 +87,8 @@ export const TextNode = memo(
     }, [data, accentTokens]);
 
     const fontOpts = useMemo(
-      () => ({
-        fontFamily,
-        fontWeight: isBold ? 'bold' : 'normal',
-        fontStyle: isItalic ? 'italic' : 'normal',
-        lineHeight: 1.5,
-      }),
-      [fontFamily, isBold, isItalic],
+      () => getTextNodeFontOpts(style),
+      [style.fontFamily, style.fontWeight, style.fontStyle],
     );
 
     const borderInset = style.accent ? ACCENT_BORDER : 0;
@@ -116,7 +105,7 @@ export const TextNode = memo(
       padding: NODE_PADDING,
       borderInset,
       fontOpts,
-      placeholder: 'Type...',
+      placeholder: TEXT_NODE_PLACEHOLDER,
     });
 
     // ------------------------------------------------------------------
@@ -218,7 +207,7 @@ export const TextNode = memo(
           onBlur={handleBlur}
           isEditing={isEditing}
           onRequestEdit={handleDoubleClick}
-          placeholder="Type..."
+          placeholder={TEXT_NODE_PLACEHOLDER}
           fontFamily={fontFamily}
           fontWeight={isBold ? 'bold' : 'normal'}
           fontStyle={isItalic ? 'italic' : 'normal'}

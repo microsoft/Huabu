@@ -49,6 +49,7 @@ import { MultiSelectToolbar } from './FloatingToolbars/MultiSelectToolbar.tsx';
 import { IntentPopover } from './IntentPopover.tsx';
 import { MultiSelectResizer } from './MultiSelectResizer.tsx';
 import { SnapGuidesOverlay } from './SnapGuidesOverlay.tsx';
+import { StructuredDropOverlay } from './StructuredDropOverlay.tsx';
 import { GRID_SIZE, MAX_ZOOM, MIN_ZOOM } from '../../../config/canvas.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import { useGesturePreviewStore } from '../../../store/gesturePreviewStore.ts';
@@ -922,6 +923,12 @@ export const Canvas: React.FC<CanvasProps> = ({
           wrapperRef={wrapperRef}
         />
       ))}
+
+      {/* Structured-frame drop indicator — column/row track highlight or insert bar */}
+      <StructuredDropOverlay
+        rfInstance={rfInstanceRef.current}
+        wrapperRef={wrapperRef}
+      />
 
       {/* Smart-snap alignment guides — shown while dragging nodes */}
       <SnapGuidesOverlay

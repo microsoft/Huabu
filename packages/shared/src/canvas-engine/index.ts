@@ -66,11 +66,13 @@ export {
   applyStructuredFrameRelayout,
   clampGridCount,
   readFrameGridConfig,
-  pickColumnSlotFromFramePoint,
-  pickRowSlotFromFramePoint,
-  GRID_INTRA_TRACK_GAP,
-  GRID_INTER_TRACK_GAP,
+  pickColumnDropTarget,
+  pickRowDropTarget,
+  describeStructuredDropZone,
   type FrameGridLayoutResult,
+  type StructuredDropTarget,
+  type StructuredDropZone,
+  type DraggedNodeRect,
 } from './autoLayout/gridLayout.js';
 
 // ── Pure utilities re-exported for web consumers ──────────────────────────

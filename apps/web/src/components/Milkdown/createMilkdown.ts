@@ -227,6 +227,14 @@ export interface MilkdownInstance {
     specs: ReadonlyArray<{ key: string; className: string }>,
   ): void;
 
+  /**
+   * Move the browser focus into the editor's contenteditable surface.
+   * Safe to call after mount; no-op once the view has been destroyed.
+   * Used by hosts that want the user's caret to land in the editor as
+   * soon as it opens (e.g. expanding a note node).
+   */
+  focus(): void;
+
   /** Tear down the ProseMirror view and release resources. */
   destroy(): Promise<void>;
 }
@@ -1167,6 +1175,19 @@ export async function createMilkdown(
         const view = ctx.get(editorViewCtx);
         view.dispatch(view.state.tr.setMeta(META_KEY, specs));
       });
+    },
+
+    focus: () => {
+      // Wrap in try/catch: the editor may have been destroyed between
+      // the caller scheduling the focus and this action running
+      // (e.g. the host panel unmounted in the same tick).
+      try {
+        crepe.editor.action((ctx) => {
+          ctx.get(editorViewCtx).focus();
+        });
+      } catch {
+        // View already torn down — nothing to focus.
+      }
     },
 
     destroy: async () => {

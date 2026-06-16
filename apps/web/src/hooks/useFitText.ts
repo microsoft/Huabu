@@ -1,4 +1,4 @@
-import { prepare, layout } from '@chenglou/pretext';
+import { prepareWithSegments, layoutWithLines } from '@chenglou/pretext';
 import { useMemo } from 'react';
 
 const DEFAULT_FONT = 'Inter, ui-sans-serif, system-ui, sans-serif';
@@ -67,18 +67,31 @@ export function fitFontSize(
   if (cached !== undefined) return cached;
 
   // Measure once; every probe below scales this single run arithmetically.
-  const prepared = prepare(text, `${REF_SIZE}px ${font}`);
+  const prepared = prepareWithSegments(text, `${REF_SIZE}px ${font}`);
 
   let lo = min;
   let hi = max;
   for (let i = 0; i < FIT_ITERATIONS; i++) {
     const mid = (lo + hi) / 2;
-    const { height: h } = layout(
+    // Wrapping the REF_SIZE run at this scaled width is equivalent to
+    // wrapping the actual `mid`-size run at the real box width, because
+    // both glyph advances and the width scale by the same `mid / REF_SIZE`.
+    const scaledWidth = (width * REF_SIZE) / mid;
+    const { height: h, lines } = layoutWithLines(
       prepared,
-      (width * REF_SIZE) / mid,
+      scaledWidth,
       mid * lhRatio,
     );
-    if (h <= height) lo = mid;
+    // Constrain BOTH height and width: an unbreakable token (e.g. a single
+    // long word with no soft-break points) would otherwise be allowed to
+    // grow until it fills the box height while its line width overflows
+    // horizontally. Line widths are measured in REF_SIZE units, so compare
+    // them against `scaledWidth` (the box width expressed in those units).
+    let widest = 0;
+    for (const ln of lines) {
+      if (ln.width > widest) widest = ln.width;
+    }
+    if (h <= height && widest <= scaledWidth) lo = mid;
     else hi = mid;
   }
   const snapped = Math.floor(lo / 4) * 4;

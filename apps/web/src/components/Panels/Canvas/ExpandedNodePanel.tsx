@@ -136,6 +136,9 @@ export const ExpandedNodePanel = ({
   // `PreviewHeaderSlot` context + `createPortal` to render their own
   // action buttons here. `useState` (instead of a plain ref) gives us
   // a re-render once the element mounts so portal consumers wake up.
+  // Portalled buttons are responsible for setting their own
+  // `tooltipPlacement="bottom"` — the header sits flush against the top
+  // of the panel, so the default `'top'` tooltip would escape upward.
   const [headerSlotEl, setHeaderSlotEl] = useState<HTMLDivElement | null>(null);
   const headerSlotValue = useMemo(() => ({ el: headerSlotEl }), [headerSlotEl]);
 
@@ -206,6 +209,7 @@ export const ExpandedNodePanel = ({
               iconOnly
               size="sm"
               title={backTitle}
+              tooltipPlacement="bottom"
               onClick={activeItem.close}
             >
               <ArrowLeft />
@@ -252,6 +256,7 @@ export const ExpandedNodePanel = ({
                   : ''
               }
               title={isChatCollapsed ? 'Open Chat' : 'Close Chat'}
+              tooltipPlacement="bottom"
               aria-label={
                 isChatCollapsed ? 'Open chat panel' : 'Close chat panel'
               }
@@ -268,6 +273,7 @@ export const ExpandedNodePanel = ({
             size="sm"
             className={!isReplace ? 'text-fg-default bg-bg-default' : ''}
             title={isReplace ? 'Split view' : 'Full view'}
+            tooltipPlacement="bottom"
             onClick={() => activeItem.setMode(isReplace ? 'split' : 'replace')}
           >
             <Columns2 />
@@ -278,6 +284,7 @@ export const ExpandedNodePanel = ({
             iconOnly
             size="sm"
             title="Close"
+            tooltipPlacement="bottom"
             onClick={(e) => {
               e.stopPropagation();
               activeItem.close();

@@ -7,7 +7,7 @@ import {
 import {
   getAvailableProviders,
   getLLMConfig,
-  getModelsForProvider,
+  getModelsForProviderLive,
   setLLMConfig,
 } from './llm.js';
 import {
@@ -81,7 +81,7 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
         .send({ message: parsed.error.issues[0]?.message ?? 'Invalid query' });
     }
 
-    const models = getModelsForProvider(parsed.data.provider);
+    const models = await getModelsForProviderLive(parsed.data.provider);
     return { provider: parsed.data.provider, models };
   });
 

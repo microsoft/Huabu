@@ -1,6 +1,6 @@
 import clsx from 'clsx';
 import { Columns3, Move, Rows3, Ungroup } from 'lucide-react';
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   FRAME_GRID_DEFAULT_COUNT,
@@ -49,6 +49,18 @@ export const FrameNode = memo(
     const unframe = useCanvasStore((state) => state.unframe);
     const tryRename = useCanvasStore((state) => state.tryRename);
     const dispatchUiIntent = useCanvasStore((state) => state.dispatchUiIntent);
+    const captureFrameResizeSnapshot = useCanvasStore(
+      (state) => state.captureFrameResizeSnapshot,
+    );
+    const applyFrameResizeScale = useCanvasStore(
+      (state) => state.applyFrameResizeScale,
+    );
+    const clearFrameResizeSnapshot = useCanvasStore(
+      (state) => state.clearFrameResizeSnapshot,
+    );
+    const flushFrameResizeScale = useCanvasStore(
+      (state) => state.flushFrameResizeScale,
+    );
     // Subscribe to the live child count so the count input's upper
     // bound tracks "items inside this frame". Returns a plain number,
     // so this subscription only re-renders FrameNode when the count
@@ -213,6 +225,60 @@ export const FrameNode = memo(
       setIsEditingLabel(false);
     };
 
+    // ── Resize gesture handlers ────────────────────────────────────────
+    //
+    // Wired into NodeWrapper's NodeResizer callbacks so the frame
+    // shows a live preview while the user drags, instead of jumping
+    // to the final layout at gesture end. All layout modes share the
+    // same content-driven path:
+    //
+    //  - At resize-start we snapshot every direct child's pre-gesture
+    //    position + size.
+    //  - On every tick we scale the children proportionally (both
+    //    axes) to the frame's new dimensions and dispatch them in a
+    //    single batch via `applyFrameResizeScale`, together with the
+    //    frame's NEW local top-left (`x`, `y`). Forwarding the new
+    //    origin matters for non-BR-corner handles (TL/TR/BL/T/L):
+    //    the frame's TL moves every tick and the dispatched batch
+    //    pins it directly, instead of leaving the position update
+    //    to a separate `onNodesChange` snap-mirror pass — which
+    //    used to leave the preview (and the post-resize commit)
+    //    one frame stale and produced visibly mis-placed children.
+    //  - `free` keeps the scaled child positions; `column` / `row`
+    //    let the grid solver re-pack the scaled children at the end
+    //    of each tick's batch, so the content-driven frame size
+    //    tracks the drag while preserving each child's size ratios.
+    //  - The per-tick dispatch is rAF-coalesced (one batch per paint)
+    //    so high-refresh `onResize` floods don't re-run the command
+    //    pipeline + grid solver dozens of times per frame. At
+    //    resize-end we `flushFrameResizeScale()` first so the trailing
+    //    (coalesced-away) tick lands before the snapshot is cleared.
+    //  - The snapshot is cleared at resize-end.
+    //
+    // Every path re-uses the single undo snapshot taken at
+    // `onNodeResizeStart` — preview ticks dispatch through
+    // `previewResizeGeometry`, which re-arms the gesture-snapshot
+    // flag so the executor's safety warning stays quiet without any
+    // extra history entries being pushed.
+    const handleFrameResizeStart = useCallback(() => {
+      captureFrameResizeSnapshot(id);
+    }, [id, captureFrameResizeSnapshot]);
+
+    const handleFrameResize = useCallback(
+      (width: number, height: number, x: number, y: number) => {
+        applyFrameResizeScale(width, height, x, y);
+      },
+      [applyFrameResizeScale],
+    );
+
+    const handleFrameResizeEnd = useCallback(() => {
+      // Land the trailing rAF-coalesced scale tick (if any) before
+      // tearing down the snapshot, so children don't end the gesture
+      // one paint behind the frame's committed final size.
+      flushFrameResizeScale();
+      clearFrameResizeSnapshot();
+    }, [flushFrameResizeScale, clearFrameResizeSnapshot]);
+
     // Rendered in the zoom-invariant overlay so the label keeps a fixed screen size
     const labelOverlay = (
       <div className="relative inline-grid items-center">
@@ -273,10 +339,18 @@ export const FrameNode = memo(
         overlayContent={labelOverlay}
         overlayOffsetY={-24}
         keepAspectRatio={false}
-        // In structured layout the container size is content-driven;
-        // disable manual resize handles so the user can't drift the
-        // bounds off the layout.
-        resizable={!isStructuredLayout}
+        // Resize is enabled for every layout mode and shares one
+        // content-driven path: dragging the frame scales every direct
+        // child proportionally (both axes) about the frame origin.
+        //  - `free`:  children keep their scaled positions, so the
+        //    whole cluster grows/shrinks with the box.
+        //  - `column` / `row`: the grid solver re-packs the scaled
+        //    children, so the frame snaps to the new content size
+        //    while each child's size ratio is preserved.
+        resizable
+        onResizeStart={handleFrameResizeStart}
+        onResize={handleFrameResize}
+        onResizeEnd={handleFrameResizeEnd}
         allowOverflow
       >
         <div className="h-full w-full" />

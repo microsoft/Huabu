@@ -170,6 +170,17 @@ let _abortController: AbortController | null = null;
 let _kind: GestureKind = 'drag';
 
 /**
+ * When `true`, the drag path in `applySnap` skips both the snap delta
+ * and the alignment guides. Set per drag tick by the canvas store when
+ * the dragged node currently hovers a structured (column / row) frame:
+ * there the drop position is decided by the layout solver, not free
+ * placement, so smart-alignment guides would point at positions the
+ * node will never actually land on. The structured drop ghost takes
+ * over the visual feedback instead. Reset on session end.
+ */
+let _structuredSuppressed = false;
+
+/**
  * Per-resize-gesture context captured at `handleResizeStart`. Holds
  * the pre-resize bounds + parent offset for the single resized node.
  * `null` outside a resize session.
@@ -284,6 +295,15 @@ export function beginSnapSession(opts: BeginSnapSessionOptions): void {
   _resizeContext = kind === 'resize' ? (resizeContext ?? null) : null;
   _lastResizeSnapped = null;
 
+  // Flip a body-level class for the duration of a resize gesture.
+  // The frame node CSS uses this to suppress its `width/height`
+  // auto-layout smoothing transition (~200ms ease-out) — otherwise
+  // the frame body visibly lags behind the resize handle and
+  // selection outline during the gesture.
+  if (kind === 'resize' && typeof document !== 'undefined') {
+    document.body.classList.add('canvas-resize-active');
+  }
+
   // Attach window-level Alt listeners so users can toggle bypass
   // mid-drag. Bound to a fresh AbortController whose `signal` is
   // passed to every `addEventListener` call — a single
@@ -342,6 +362,11 @@ export function endSnapSession(): void {
   _kind = 'drag';
   _resizeContext = null;
   _lastResizeSnapped = null;
+  _structuredSuppressed = false;
+  // Drop the resize-gesture marker (idempotent — safe when not set).
+  if (typeof document !== 'undefined') {
+    document.body.classList.remove('canvas-resize-active');
+  }
   // Aborting the controller detaches every listener registered with
   // its signal in one shot. Safe to call when null (no active drag)
   // or when the controller is already aborted (idempotent).
@@ -357,6 +382,17 @@ export function endSnapSession(): void {
  */
 export function isSnapSessionActive(): boolean {
   return _index !== null && _gestureIds.size > 0;
+}
+
+/**
+ * Toggle structured-frame snap suppression for the active drag. Called
+ * every drag tick by the canvas store: `true` while the dragged node
+ * hovers a column / row frame (solver decides the slot, so alignment
+ * guides are misleading), `false` otherwise. No-op outside a drag
+ * session; always reset by `endSnapSession`.
+ */
+export function setSnapStructuredSuppressed(suppressed: boolean): void {
+  _structuredSuppressed = suppressed;
 }
 
 /**
@@ -483,11 +519,32 @@ export function applySnap(changes: NodeChange[], zoom: number): NodeChange[] {
     // pre-snapped geometry. Non-tracked changes pass through, and the
     // final `resizing:false` flag is preserved so end-of-gesture
     // detection still works.
+    //
+    // Drop child position changes that XYResizer auto-emits during
+    // a non-BR-handle drag (TL/T/L/TR/BL): the underlying
+    // `@xyflow/system` XYResizer translates direct children by
+    // `-(x_new - x_prev)` every tick so they stay visually stationary
+    // in absolute space (pure-translation model). For frame nodes we
+    // instead want children to SCALE proportionally with the frame
+    // (handled by `applyFrameResizeScale` → RESIZE_NODE → setNodeGeometry),
+    // so the auto-translate emissions must be filtered out — otherwise
+    // `applyNodeChanges` overwrites our scaled child positions in the
+    // same tick and the children visually misalign while the user
+    // drags a non-BR handle.
+    //
+    // Filter by `c.id !== ctx.nodeId`: during a resize gesture, the
+    // only position changes that reach onNodesChange are XYResizer's
+    // own emissions for the resized node + its direct children. ResizeObserver
+    // emits dimension changes (not position), and no drag can run
+    // concurrently with a resize.
     const ctx = _resizeContext;
     const snapped = _lastResizeSnapped;
     if (!ctx) return changes;
     if (!snapped) return changes;
-    return changes.map((c) => {
+    const filtered = changes.filter(
+      (c) => !(c.type === 'position' && 'id' in c && c.id !== ctx.nodeId),
+    );
+    return filtered.map((c) => {
       if (!('id' in c) || c.id !== ctx.nodeId) return c;
       if (c.type === 'dimensions') {
         const dim = c as NodeDimensionChange;
@@ -513,6 +570,14 @@ export function applySnap(changes: NodeChange[], zoom: number): NodeChange[] {
   }
 
   // ── Drag path ────────────────────────────────────────────────────
+  // Structured-frame target: the layout solver picks the final slot, so
+  // free-alignment snapping (and its guides) would be misleading. Skip
+  // both — the structured drop ghost is the feedback there instead.
+  if (_structuredSuppressed) {
+    useGesturePreviewStore.getState().clearSnapGuides();
+    return changes;
+  }
+
   const dragChanges = changes.filter(isDragPositionChange);
   if (dragChanges.length === 0) return changes;
 

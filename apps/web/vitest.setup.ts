@@ -9,4 +9,45 @@
  *
  * Add globally-needed test setup (matchers, mocks) below.
  */
+
+// ---------------------------------------------------------------------------
+// Canvas 2D text-metrics stub.
+//
+// `@chenglou/pretext` (used by `utils/node/textMeasure`) measures text via a
+// canvas 2D context. happy-dom does not implement `getContext('2d')`, so it
+// returns null and pretext throws when setting `.font`. We provide a minimal,
+// deterministic context: `measureText` returns a width proportional to the
+// string length and the current font's px size. It is intentionally crude —
+// tests that exercise font fitting assert against the SAME measurement path,
+// so only determinism and monotonicity matter, not pixel accuracy.
+// ---------------------------------------------------------------------------
+const measureCtx = {
+  font: '10px sans-serif',
+  measureText(text: string): TextMetrics {
+    const match = /(\d+(?:\.\d+)?)px/.exec(this.font);
+    const size = match ? parseFloat(match[1]) : 10;
+    const width = text.length * size * 0.6;
+    return {
+      width,
+      actualBoundingBoxAscent: size * 0.8,
+      actualBoundingBoxDescent: size * 0.2,
+      actualBoundingBoxLeft: 0,
+      actualBoundingBoxRight: width,
+      fontBoundingBoxAscent: size * 0.8,
+      fontBoundingBoxDescent: size * 0.2,
+    } as TextMetrics;
+  },
+};
+
+if (typeof HTMLCanvasElement !== 'undefined') {
+  const originalGetContext = HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext = function getContext(
+    contextId: string,
+    options?: unknown,
+  ): unknown {
+    if (contextId === '2d') return measureCtx;
+    return originalGetContext.call(this, contextId as never, options as never);
+  } as HTMLCanvasElement['getContext'];
+}
+
 export {};

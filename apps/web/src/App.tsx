@@ -8,6 +8,7 @@ import {
   Routes,
 } from 'react-router-dom';
 
+import { LoadingState } from './components/Common/LoadingState';
 import { ToastContainer } from './components/Common/Toast';
 import { WindowChrome } from './components/Panels/WindowChrome';
 import DocsPage from './docs/DocsPage';
@@ -25,11 +26,8 @@ import { useWorkspaceStore } from './store/workspaceStore';
  */
 function LoadingScreen() {
   return (
-    <div className="bg-bg-default flex h-full items-center justify-center">
-      <div className="flex flex-col items-center gap-3">
-        <span className="border-fg-subtle inline-block h-6 w-6 animate-spin rounded-full border-2 border-t-transparent" />
-        <span className="text-fg-subtle text-sm">Loading workspace…</span>
-      </div>
+    <div className="bg-bg-default h-full">
+      <LoadingState message="Loading workspace…" fullScreen />
     </div>
   );
 }

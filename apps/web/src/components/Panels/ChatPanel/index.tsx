@@ -595,7 +595,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           isLoading={
             viewingSketchCluster ? false : isLoading || !isHistoryLoaded
           }
-          hideAIActions={mode === 'operate' || !!viewingSketchCluster}
+          hideAIActions={!!viewingSketchCluster}
           onIntentReselect={handleIntentReselect}
           onRetry={() => {
             // Find the last user message and re-send it

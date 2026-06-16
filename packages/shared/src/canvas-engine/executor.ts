@@ -103,6 +103,13 @@ export function executeCanvasCommands(
   // Aggregated parent frame IDs to refit at the end of the batch.
   const allAffectedFrameIds = new Set<string>();
 
+  // Frames whose track count was explicitly (re)set this batch (via
+  // `SET_FRAME_LAYOUT`). These use the `'fill'` empty-track policy so the
+  // structured relayout spreads children to occupy every requested track;
+  // all other affected frames `'compact'` away tracks emptied by organic
+  // child changes (deletions, drags).
+  const fillFrameIds = new Set<string>();
+
   // Track which commands were actually applied.
   let anyApplied = false;
 
@@ -158,6 +165,9 @@ export function executeCanvasCommands(
       if (result.affectedFrameIds) {
         for (const id of result.affectedFrameIds) {
           allAffectedFrameIds.add(id);
+          // The count stepper / layout-mode switch wants its tracks
+          // filled, not compacted away.
+          if (cmd.type === 'SET_FRAME_LAYOUT') fillFrameIds.add(id);
         }
       }
     }
@@ -185,6 +195,7 @@ export function executeCanvasCommands(
     const structured = applyStructuredFrameRelayout(
       currentNodes,
       allAffectedFrameIds,
+      fillFrameIds,
     );
     currentNodes = fitFrames(
       structured.nodes as NestableNode[],
