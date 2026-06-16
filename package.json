@@ -20,7 +20,8 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "typecheck": "pnpm -r --parallel typecheck",
-    "prepare": "husky",
+    "hooks:install": "git config core.hooksPath .githooks",
+    "hooks:uninstall": "git config --unset core.hooksPath",
     "postinstall": "node scripts/install-agentlet-to-path.mjs"
   },
   "devDependencies": {
@@ -35,7 +36,6 @@
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.0.1",
     "globals": "^17.2.0",
-    "husky": "^9.1.7",
     "lint-staged": "^16.2.7",
     "prettier": "3.8.1",
     "prettier-plugin-tailwindcss": "^0.7.2",

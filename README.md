@@ -80,6 +80,25 @@ This launches the desktop app (recommended), starting the server, the web
 client, and the shared package in watch mode, then opening Huabu in its
 own desktop window.
 
+### Local quality checks (optional)
+
+The repository ships opt-in git hooks that give you fast feedback before
+you commit or push. Enable them once per clone:
+
+```bash
+pnpm run hooks:install
+```
+
+This sets `core.hooksPath` to [.githooks](./.githooks), which runs:
+
+- **pre-commit** — `lint-staged` (ESLint `--fix` + Prettier on staged files)
+- **pre-push** — `pnpm run typecheck`
+
+Skip a single run with `--no-verify`, or disable the hooks again with
+`pnpm run hooks:uninstall`. These hooks are purely a local convenience —
+the authoritative gate is CI (`.github/workflows/ci.yml`), which runs lint,
+format, and typecheck on every pull request regardless of local setup.
+
 ---
 
 ## Configuring an LLM

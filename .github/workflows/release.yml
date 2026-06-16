@@ -64,8 +64,6 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-        env:
-          HUSKY: '0' # skip git-hook install on CI
 
       # apps/server's tsup bundle imports from @agentlet/protocol and
       # @agentlet/server — both are workspace packages under

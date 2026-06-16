@@ -1,0 +1,11 @@
+#!/usr/bin/env sh
+# Optional local hook for fast pre-commit feedback.
+# Enable once per clone with:  pnpm run hooks:install
+# Disable with:                pnpm run hooks:uninstall
+#
+# This is NOT a substitute for CI. CI (.github/workflows/ci.yml) is the
+# authoritative gate; these hooks only give you quicker local feedback.
+#
+# Skip a single commit with:  git commit --no-verify
+
+pnpm exec lint-staged
