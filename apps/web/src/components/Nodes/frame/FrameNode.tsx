@@ -58,6 +58,9 @@ export const FrameNode = memo(
     const clearFrameResizeSnapshot = useCanvasStore(
       (state) => state.clearFrameResizeSnapshot,
     );
+    const flushFrameResizeScale = useCanvasStore(
+      (state) => state.flushFrameResizeScale,
+    );
     // Subscribe to the live child count so the count input's upper
     // bound tracks "items inside this frame". Returns a plain number,
     // so this subscription only re-renders FrameNode when the count
@@ -245,6 +248,11 @@ export const FrameNode = memo(
     //    let the grid solver re-pack the scaled children at the end
     //    of each tick's batch, so the content-driven frame size
     //    tracks the drag while preserving each child's size ratios.
+    //  - The per-tick dispatch is rAF-coalesced (one batch per paint)
+    //    so high-refresh `onResize` floods don't re-run the command
+    //    pipeline + grid solver dozens of times per frame. At
+    //    resize-end we `flushFrameResizeScale()` first so the trailing
+    //    (coalesced-away) tick lands before the snapshot is cleared.
     //  - The snapshot is cleared at resize-end.
     //
     // Every path re-uses the single undo snapshot taken at
@@ -264,8 +272,12 @@ export const FrameNode = memo(
     );
 
     const handleFrameResizeEnd = useCallback(() => {
+      // Land the trailing rAF-coalesced scale tick (if any) before
+      // tearing down the snapshot, so children don't end the gesture
+      // one paint behind the frame's committed final size.
+      flushFrameResizeScale();
       clearFrameResizeSnapshot();
-    }, [clearFrameResizeSnapshot]);
+    }, [flushFrameResizeScale, clearFrameResizeSnapshot]);
 
     // Rendered in the zoom-invariant overlay so the label keeps a fixed screen size
     const labelOverlay = (

@@ -90,10 +90,16 @@ export function SemanticPlaceholder({
         with the actual rendered height anyway.
       */}
       <span
-        className="inline-flex items-center text-center leading-snug font-medium wrap-break-word"
+        // `block w-full` constrains the text to the padded box width so
+        // `overflow-wrap: break-word` actually wraps. An `inline-flex`
+        // span would shrink-wrap to the word's max-content width and
+        // never wrap — an unbreakable token (e.g. "Hubua") would then
+        // render as one oversized line overflowing the frame, even
+        // though `useFitText` sized the font assuming the word wraps.
+        className="block w-full text-center leading-snug font-medium wrap-break-word"
         style={{ fontSize: `${fontSize}px` }}
       >
-        <span>{label}</span>
+        {label}
       </span>
     </div>
   );

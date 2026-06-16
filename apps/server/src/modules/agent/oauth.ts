@@ -15,6 +15,7 @@ import {
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 
+import { getModels } from '@earendil-works/pi-ai';
 import {
   getOAuthApiKey,
   getOAuthProvider,
@@ -24,7 +25,7 @@ import {
 import { getDataDir } from '../../data-dir.js';
 
 import type { OAuthCredentials } from '@earendil-works/pi-ai';
-import type { Api, Model } from '@earendil-works/pi-ai';
+import type { Api, KnownProvider, Model } from '@earendil-works/pi-ai';
 
 // ==================== Persisted Credentials ====================
 
@@ -252,6 +253,142 @@ export function applyCopilotModelOverrides(models: Model<Api>[]): Model<Api>[] {
   const provider = getOAuthProvider('github-copilot');
   if (!provider?.modifyModels) return models;
   return provider.modifyModels(models, creds);
+}
+
+/**
+ * The Copilot client headers (`Editor-Version`, `Copilot-Integration-Id`, …)
+ * that the gateway requires for IDE auth. These live on pi-ai's static model
+ * registry entries; pi-ai's `modifyModels` only rewrites `baseUrl`, so models
+ * we build manually for ids newer than the bundled registry (e.g.
+ * `claude-opus-4.8`) must copy them explicitly — otherwise chat requests fail
+ * with `400 missing Editor-Version header for IDE auth`.
+ *
+ * Returns an empty object if no static Copilot model is available.
+ */
+export function getCopilotStaticHeaders(): Record<string, string> {
+  const seed = getModels('github-copilot' as KnownProvider)[0] as
+    | (Model<Api> & { headers?: Record<string, string> })
+    | undefined;
+  return seed?.headers ? { ...seed.headers } : {};
+}
+
+/** Shape of a single entry in Copilot's `GET /models` response. */
+interface CopilotModelEntry {
+  id?: string;
+  name?: string;
+  capabilities?: {
+    type?: string;
+    supports?: { vision?: boolean };
+  };
+  model_picker_enabled?: boolean;
+}
+
+/** A chat model the current account is entitled to, per Copilot's `/models`. */
+export interface CopilotLiveModel {
+  id: string;
+  name: string;
+  /** Whether the model accepts image input. */
+  vision: boolean;
+}
+
+/**
+ * Resolve the live Copilot API endpoint + auth headers for the current
+ * account.
+ *
+ * pi-ai's `modifyModels` only rewrites `baseUrl` (from the token's
+ * `proxy-ep`), so we seed it with a *real* static Copilot model — whose
+ * registry entry already carries the required client headers
+ * (`Copilot-Integration-Id`, `Editor-Version`, …) — rather than a bare
+ * probe. Without those headers Copilot rejects the `/models` request.
+ *
+ * Returns `null` when not authenticated.
+ */
+async function resolveCopilotRequestContext(): Promise<{
+  apiKey: string;
+  baseUrl: string;
+  headers: Record<string, string>;
+} | null> {
+  const apiKey = await getCopilotApiKey();
+  if (!apiKey) return null;
+
+  const seed = getModels('github-copilot' as KnownProvider)[0] as
+    | Model<Api>
+    | undefined;
+  if (!seed) return null;
+
+  const [resolved] = applyCopilotModelOverrides([seed]);
+  const baseUrl =
+    resolved?.baseUrl ??
+    seed.baseUrl ??
+    'https://api.individual.githubcopilot.com';
+  const headers =
+    (resolved as { headers?: Record<string, string> } | undefined)?.headers ??
+    {};
+  return { apiKey, baseUrl, headers };
+}
+
+/**
+ * Fetch the chat models the *current account* is actually entitled to, by
+ * calling Copilot's `GET /models` endpoint (the same source VS Code's
+ * model picker uses).
+ *
+ * Mirrors VS Code's picker: only chat models flagged `model_picker_enabled`
+ * are returned, which both surfaces brand-new models and drops the dated
+ * snapshot / internal noise the endpoint also lists.
+ *
+ * Returns the entitled chat models on success, or `null` when
+ * unauthenticated, unreachable, or the response is unusable — letting
+ * callers fall back to the static pi-ai catalog instead of showing an
+ * empty list.
+ */
+export async function fetchEntitledCopilotModels(): Promise<
+  CopilotLiveModel[] | null
+> {
+  const ctx = await resolveCopilotRequestContext();
+  if (!ctx) return null;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(`${ctx.baseUrl.replace(/\/+$/, '')}/models`, {
+      method: 'GET',
+      headers: {
+        ...ctx.headers,
+        Authorization: `Bearer ${ctx.apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      console.warn(`[oauth] Copilot /models returned HTTP ${res.status}.`);
+      return null;
+    }
+    const json = (await res.json()) as { data?: CopilotModelEntry[] };
+    const entries = Array.isArray(json.data) ? json.data : [];
+    const seen = new Set<string>();
+    const models: CopilotLiveModel[] = [];
+    for (const entry of entries) {
+      if (!entry.id) continue;
+      // Match VS Code's picker: chat-capable AND explicitly picker-enabled.
+      const type = entry.capabilities?.type;
+      if (type && type !== 'chat') continue;
+      if (entry.model_picker_enabled !== true) continue;
+      // Copilot can list multiple snapshot rows per id; keep the first.
+      if (seen.has(entry.id)) continue;
+      seen.add(entry.id);
+      models.push({
+        id: entry.id,
+        name: entry.name ?? entry.id,
+        vision: entry.capabilities?.supports?.vision === true,
+      });
+    }
+    return models.length > 0 ? models : null;
+  } catch (err) {
+    console.warn('[oauth] Failed to fetch Copilot /models:', err);
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 /**

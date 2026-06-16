@@ -112,12 +112,11 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
       // adding them would cause `fitFrames` to immediately snap the
       // frame back to its children's bounding box, undoing the user's
       // drag.
+      const layoutMode = (updated.data as { layoutMode?: string } | undefined)
+        ?.layoutMode;
       if (
         updated.type === 'frame' &&
-        ((updated.data as { layoutMode?: string } | undefined)?.layoutMode ===
-          'column' ||
-          (updated.data as { layoutMode?: string } | undefined)?.layoutMode ===
-            'row')
+        (layoutMode === 'column' || layoutMode === 'row')
       ) {
         affectedFrameIds.add(updated.id);
       }

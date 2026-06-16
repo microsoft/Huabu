@@ -280,6 +280,17 @@
   margin-left: 16px;
   margin-top: 2px;
   gap: 0;
+
+  /* Crepe's `block-edit.css` paints the grip/add glyphs with
+     `fill: var(--crepe-color-outline)`, which we map onto
+     `--edge-default` (a near-white border tint) for surface outlines.
+     That makes the dots all but invisible on the chat card. Our
+     explicit `fill` override below only TIES Crepe's selector on
+     specificity, so it can lose the cascade after a Crepe bump.
+     Locally remap the variable to the muted foreground token so
+     Crepe's own rule resolves to a visible color no matter who wins
+     the tie; `--fg-default` on hover is restored via the rule below. */
+  --crepe-color-outline: var(--fg-subtle);
 }
 
 .milkdown-preview-host .milkdown-block-handle .operation-item,
@@ -307,13 +318,40 @@
   display: block;
   width: 16px;
   height: 16px;
-  fill: var(--fg-subtle);
   transition: fill 0.15s ease;
 }
 
-.milkdown-preview-host .milkdown-block-handle .operation-item:hover svg,
-.milkdown-note-preview .milkdown-block-handle .operation-item:hover svg {
-  fill: var(--fg-default);
+/* Crepe's `block-edit.css` paints the grip + plus glyphs with
+   `fill: var(--crepe-color-outline)`, which this file maps onto the
+   near-white `--edge-default` border token — leaving the icons all
+   but invisible. Scope the fix to `.milkdown` (the SAME ancestor
+   Crepe's own rule uses, so it matches the handle wherever Crepe
+   mounts it) and use `!important` so it can never lose the cascade to
+   Crepe after a version bump. Both the `svg` and its inner `path` are
+   targeted because the menu/plus glyphs leave `fill` unset on the
+   path and inherit it from the svg. */
+.milkdown .milkdown-block-handle .operation-item svg,
+.milkdown .milkdown-block-handle .operation-item svg path {
+  fill: var(--fg-subtle) !important;
+}
+
+.milkdown .milkdown-block-handle .operation-item:hover svg,
+.milkdown .milkdown-block-handle .operation-item:hover svg path {
+  fill: var(--fg-default) !important;
+}
+
+/* The Crepe 7.21.x grip/plus glyphs wrap their `<path>` in a
+   `<g clip-path="url(#clip0_…)">`. Crepe re-injects this markup through
+   `DOMPurify.sanitize`, and in the live app the `clip-path` reference
+   ends up clipping the glyph to an EMPTY region — the path paints with
+   the correct `fill` but renders to nothing, so the icon looks
+   invisible even though its computed `fill` is right. The clip is a
+   no-op by design (a full 24×24 viewBox rect), so neutralize it; a
+   plain CSS rule overrides the SVG presentation attribute. */
+.milkdown .milkdown-block-handle .operation-item svg,
+.milkdown .milkdown-block-handle .operation-item svg g,
+.milkdown .milkdown-block-handle .operation-item svg path {
+  clip-path: none !important;
 }
 
 /* ── Chat preview overrides ─────────────────────────────────────────

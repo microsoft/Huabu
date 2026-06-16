@@ -32,8 +32,7 @@ import type { Node, XYPosition } from '@xyflow/react';
 
 /**
  * Gap-to-cell ratio. Gaps breathe with content size: an extent is
- * multiplied by this ratio to produce a gap. 0.06 ≈ 12px at the
- * canonical 200px cell.
+ * multiplied by this ratio to produce a gap.
  *
  * The basis differs per gap kind so a single oversized node can't
  * inflate spacing where it doesn't belong:
@@ -45,7 +44,7 @@ import type { Node, XYPosition } from '@xyflow/react';
  *    child size along the stack axis, so every track stacks with the
  *    same rhythm and one tall / wide node can't distort it.
  */
-const GAP_TO_CELL_RATIO = 0.06;
+const GAP_TO_CELL_RATIO = 0.1;
 
 /**
  * Floor applied to every derived gap so tiny nodes still get a little
@@ -536,18 +535,27 @@ export function pickColumnDropTarget(
   const colLeft = new Array<number>(count).fill(FRAME_PADDING);
   const colRight = new Array<number>(count).fill(FRAME_PADDING);
   let cursor = FRAME_PADDING;
+  // Right edge of the last non-empty column. `cursor` advances *past*
+  // the final column by one trailing `interGap`, so it can't be used
+  // directly for the content-driven width (that would over-count by one
+  // gap vs. applyColumnLayout's `contentRight + FRAME_PADDING`).
+  let contentRight = FRAME_PADDING;
   for (let c = 0; c < count; c += 1) {
     colLeft[c] = cursor;
     colRight[c] = cursor + colWidth[c];
-    if (colWidth[c] > 0) cursor += colWidth[c] + interGap;
+    if (colWidth[c] > 0) {
+      contentRight = cursor + colWidth[c];
+      cursor += colWidth[c] + interGap;
+    }
   }
 
   // Prefer the actually-rendered frame width; fall back to the
-  // content-driven width we just computed.
+  // content-driven width we just computed (mirrors applyColumnLayout:
+  // contentRight + FRAME_PADDING, with no trailing inter-column gap).
   const frameWidth =
     (frame.style as { width?: number } | undefined)?.width ??
     (frame.measured as { width?: number } | undefined)?.width ??
-    cursor + FRAME_PADDING;
+    contentRight + FRAME_PADDING;
 
   const x = framePoint.x;
 
@@ -623,16 +631,24 @@ export function pickRowDropTarget(
   const rowTop = new Array<number>(count).fill(FRAME_PADDING);
   const rowBottom = new Array<number>(count).fill(FRAME_PADDING);
   let cursor = FRAME_PADDING;
+  // Bottom edge of the last non-empty row. `cursor` advances *past* the
+  // final row by one trailing `interGap`, so it can't be used directly
+  // for the content-driven height (that would over-count by one gap vs.
+  // applyRowLayout's `contentBottom + FRAME_PADDING`).
+  let contentBottom = FRAME_PADDING;
   for (let r = 0; r < count; r += 1) {
     rowTop[r] = cursor;
     rowBottom[r] = cursor + rowHeight[r];
-    if (rowHeight[r] > 0) cursor += rowHeight[r] + interGap;
+    if (rowHeight[r] > 0) {
+      contentBottom = cursor + rowHeight[r];
+      cursor += rowHeight[r] + interGap;
+    }
   }
 
   const frameHeight =
     (frame.style as { height?: number } | undefined)?.height ??
     (frame.measured as { height?: number } | undefined)?.height ??
-    cursor + FRAME_PADDING;
+    contentBottom + FRAME_PADDING;
 
   const y = framePoint.y;
 
@@ -812,19 +828,27 @@ export function describeStructuredDropZone(
     // pixel size) so a tall / wide dragged node can't occlude the
     // neighbours it lands between.
     mainStart = start[target.slot];
-    mainLen = Math.max(
-      extent[target.slot],
-      dragged ? (isCol ? dragged.width : dragged.height) : 0,
-      GHOST_TRACK_FALLBACK,
-    );
+    // Span the *current* track extent (column width / row height) so the
+    // caret matches the row / column it slots into, rather than the
+    // dragged node's size. Fall back to the dragged size / a default only
+    // when the track has no measurable extent (no laid-out items yet).
+    mainLen =
+      extent[target.slot] > 0
+        ? extent[target.slot]
+        : Math.max(
+            dragged ? (isCol ? dragged.width : dragged.height) : 0,
+            GHOST_TRACK_FALLBACK,
+          );
 
     const siblings = items[target.slot]
       .filter((c) => !dragged || c.node.id !== dragged.id)
       .sort((a, b) => crossTop(a) - crossTop(b));
-    const intra =
-      siblings.length > 0
-        ? gapFromExtent(Math.max(...siblings.map(crossSize)))
-        : MIN_GAP;
+    // Mirror the solver's intra-track spacing exactly: it derives the gap
+    // from the *median* cross-size across ALL frame children
+    // (`gapFromExtent(median(children.map(crossSize)))`), not the per-track
+    // max. Using the same formula keeps the insertion caret aligned with
+    // where the node will actually land after the layout runs.
+    const intra = gapFromExtent(median(allChildren.map(crossSize)));
     const ref = dragged
       ? isCol
         ? dragged.y

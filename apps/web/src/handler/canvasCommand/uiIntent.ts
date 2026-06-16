@@ -144,6 +144,17 @@ export type CanvasUiIntent =
         size?: { width: number; height?: number };
         position?: { x: number; y: number };
       }>;
+      /**
+       * `true` for per-paint gesture *preview* ticks (the rAF-coalesced
+       * live resize dispatch). The commands still execute so the
+       * column/row grid solver re-flows during the drag, but
+       * `dispatchUiIntent` skips behavioural-event + recent-action
+       * recording for these so a single resize gesture doesn't emit one
+       * persisted event per animation frame. The authoritative end-of-
+       * gesture commit (`setNodeGeometry`) carries no flag and records
+       * exactly one event.
+       */
+      preview?: boolean;
     }
   | {
       type: 'REORDER_NODE';

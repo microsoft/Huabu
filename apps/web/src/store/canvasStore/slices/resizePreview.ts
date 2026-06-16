@@ -50,10 +50,18 @@ import {
   type NestableNode,
 } from '@sediment/shared/canvas-engine';
 
+import { FRAME_PADDING } from '@/config/canvas';
+import {
+  getNodeFontFit,
+  refitFont,
+  type NodeFontFit,
+} from '@/utils/node/fontFit';
+
 import { canvasHistoryManager } from '../../canvasHistoryManager';
 import { useGesturePreviewStore } from '../../gesturePreviewStore';
 
 import type { CanvasUiIntent } from '@/handler/canvasCommand/uiIntent';
+import type { NodeStyle } from '@sediment/shared';
 import type { Node } from '@xyflow/react';
 
 /**
@@ -75,6 +83,14 @@ export type ResizePreviewSliceState = {
   autoLayoutEnabled: boolean;
   nodes: readonly Node[];
   dispatchUiIntent: (intent: CanvasUiIntent) => void;
+  /**
+   * Silent (no-undo) node-data patch. Used to scale text-bearing
+   * children's locked `data.style.fontSize` in step with the frame —
+   * the same write path `useTextAutoSize` uses at a node's own
+   * resize-end, so the cascade font change collapses into the
+   * gesture's single undo entry.
+   */
+  patchNodeSilent: (nodeId: string, patch: Record<string, unknown>) => void;
 };
 
 /**
@@ -95,6 +111,16 @@ export type ResizePreviewController = {
     x: number,
     y: number,
   ): void;
+  /**
+   * Synchronously run any rAF-coalesced scale tick that is still
+   * pending, then drop the queued rAF. Called at gesture end (before
+   * {@link ResizePreviewController.clearFrameResizeSnapshot}) so the
+   * final child-scaling tick — which the per-paint throttle in
+   * {@link ResizePreviewController.applyFrameResizeScale} may have
+   * coalesced away — isn't lost, which would otherwise leave children
+   * one frame behind the frame's committed final size.
+   */
+  flushFrameResizeScale(): void;
   clearFrameResizeSnapshot(): void;
   /**
    * Cancel any pending resize-preview rAF without clearing the
@@ -115,6 +141,20 @@ type FrameResizeChildSnapshot = {
   y: number;
   width: number;
   height: number;
+  /**
+   * The child's full `data.style` at gesture start. `patchNodeSilent`
+   * replaces `data.style` wholesale, so we preserve every other field
+   * (fontFamily, accent, colors, …) and only override `fontSize`.
+   */
+  style?: NodeStyle;
+  /**
+   * Content-aware font fit captured at gesture start (text + fontOpts +
+   * inset). `null` for non-text nodes. Lets the cascade re-derive the
+   * child's fontSize for its NEW box with the same pretext fit the node
+   * uses for its own resize, instead of a crude `min(sx, sy)` multiplier
+   * that ignores re-wrapping.
+   */
+  fontFit?: NodeFontFit | null;
 };
 
 type FrameResizeSnapshot = {
@@ -143,13 +183,50 @@ export function createResizePreviewController(opts: {
   // snapshot when it actually runs.
   let rafId: number | null = null;
 
+  // Separate rAF handle + latest-wins payload for the geometry-scale
+  // dispatch (`applyFrameResizeScale`). Kept distinct from `rafId` (the
+  // overlay-fit handle) so cancelling one never drops the other:
+  // `endResizePreview` cancels the overlay rAF but must NOT discard a
+  // still-pending final scale tick — that one is flushed synchronously
+  // at gesture end via `flushFrameResizeScale`.
+  let scaleRafId: number | null = null;
+  let pendingScale: {
+    width: number;
+    height: number;
+    x: number;
+    y: number;
+  } | null = null;
+
   let freeSnapshot: FrameResizeSnapshot | null = null;
 
-  const cancelPendingRaf = () => {
+  // Last fontSize actually written per child during the current
+  // gesture. Lets `flushScale` skip redundant `patchNodeSilent` calls
+  // when the rounded scaled font is unchanged across coalesced ticks,
+  // keeping store churn (and autosave middleware passes) minimal.
+  const lastAppliedFont = new Map<string, number>();
+
+  // Cancels only the overlay-fit rAF (`updateResizePreview`).
+  const cancelOverlayRaf = () => {
     if (rafId !== null) {
       cancelAnimationFrame(rafId);
       rafId = null;
     }
+  };
+
+  // Cancels only the geometry-scale rAF and drops its queued payload.
+  const cancelScaleRaf = () => {
+    if (scaleRafId !== null) {
+      cancelAnimationFrame(scaleRafId);
+      scaleRafId = null;
+    }
+    pendingScale = null;
+  };
+
+  // Public teardown (mid-gesture canvas unmount): drop BOTH rAFs and
+  // any queued scale payload. No flush — we're tearing down.
+  const cancelPendingRaf = () => {
+    cancelOverlayRaf();
+    cancelScaleRaf();
   };
 
   // Defined as a local function so `applyFrameResizeScale` can
@@ -166,8 +243,116 @@ export function createResizePreviewController(opts: {
     // beginGesture()" warning. The original undo snapshot was
     // taken once at `onNodeResizeStart`; preview ticks don't add
     // new snapshots — they all collapse into that single entry.
-    opts.getState().dispatchUiIntent({ type: 'RESIZE_NODE', items });
+    //
+    // `preview: true` flags this as a transient gesture tick so
+    // `dispatchUiIntent` runs the commands but skips behavioural-event
+    // + recent-action recording. Without it, the rAF-coalesced ticks
+    // would each persist an event (≈ one per paint), so a single drag
+    // emitted many RESIZE events. The authoritative single event is
+    // recorded by the end-of-gesture `setNodeGeometry` commit.
+    opts
+      .getState()
+      .dispatchUiIntent({ type: 'RESIZE_NODE', items, preview: true });
     canvasHistoryManager.markGestureSnapshot();
+  };
+
+  // Actual geometry computation + dispatch for ONE scale tick. Reads
+  // the captured child baselines and scales them proportionally to the
+  // frame's new size, dispatching frame + children as a single batch.
+  // Invoked from the rAF callback in `applyFrameResizeScale` (per
+  // paint) and synchronously from `flushFrameResizeScale` at gesture
+  // end. No-op once the snapshot has been cleared.
+  const flushScale = (width: number, height: number, x: number, y: number) => {
+    const snap = freeSnapshot;
+    if (!snap) return;
+    if (snap.frameWidth <= 0 || snap.frameHeight <= 0) return;
+    // Scale strictly against the CONTENT area (the frame box minus its
+    // fixed `FRAME_PADDING` inset on both sides), not the full box. The
+    // padding is a constant — it does not grow with the frame — so a
+    // full-box ratio (`width / frameWidth`) over-scales children and
+    // makes the content-driven frame size overshoot the drag target by
+    // `2 * FRAME_PADDING * (1 - sx)` each tick (visible jitter). Using
+    // the inner ratio keeps the recomputed frame size equal to the
+    // dragged size: `inner' = inner0 * sx`, so `frame' = inner0 * sx +
+    // 2p = width`.
+    const pad2 = FRAME_PADDING * 2;
+    const innerW0 = Math.max(1, snap.frameWidth - pad2);
+    const innerH0 = Math.max(1, snap.frameHeight - pad2);
+    const sx = Math.max(0, width - pad2) / innerW0;
+    const sy = Math.max(0, height - pad2) / innerH0;
+    // Always include the frame's NEW local origin in the batch so
+    // non-BR handle drags don't depend on the `onNodesChange`
+    // snap-mirror running in a separate pass to commit the frame's
+    // position. For BR-handle drags `(x, y)` simply equal the
+    // gesture-start values and the dispatch is a no-op for the
+    // frame's position.
+    const items: ResizeGeometryItem[] = [
+      {
+        nodeId: snap.frameId,
+        size: { width, height },
+        position: { x, y },
+      },
+    ];
+    for (const child of snap.children) {
+      const childWidth = Math.max(1, child.width * sx);
+      const childHeight = Math.max(1, child.height * sy);
+      items.push({
+        nodeId: child.id,
+        size: {
+          width: childWidth,
+          height: childHeight,
+        },
+        // Local positions are anchored to the constant `FRAME_PADDING`
+        // inset and only their offset INSIDE the content area scales.
+        // This keeps the top-left padding fixed while the inner gaps
+        // grow/shrink with the content-area ratio — consistent with the
+        // content-area size scaling above. (Structured column/row frames
+        // ignore these positions: the grid solver re-packs the scaled
+        // children at the end of the batch.)
+        position: {
+          x: FRAME_PADDING + (child.x - FRAME_PADDING) * sx,
+          y: FRAME_PADDING + (child.y - FRAME_PADDING) * sy,
+        },
+      });
+    }
+    // Route through the canonical dispatch path so the gesture
+    // snapshot flag stays re-armed. For structured (column/row)
+    // frames the grid solver re-packs the scaled children at the
+    // end of the batch; for free frames the scaled positions stick.
+    previewResizeGeometry(items);
+
+    // Re-derive text-bearing children's locked fontSize for their NEW
+    // box using the same content-aware pretext fit the node uses for its
+    // own resize (`computeFontSizeForHeight` via `useTextAutoSize`), so a
+    // cascaded frame resize and a direct node resize land on the same
+    // size. A plain `min(sx, sy)` multiplier handles text poorly: it
+    // ignores re-wrapping, so widening a node while keeping its height
+    // would cap the font to the smaller axis even though the rewrapped
+    // text could grow.
+    //
+    // EVERY text-bearing child is refit — including nodes that did not
+    // yet persist a locked `fontSize`. `setNodeGeometry` pins each
+    // child's `style.width`, so after the cascade an auto-sizing node is
+    // no longer width-auto; its rendered font is then `lockedFontSize ??
+    // baseFontSize` (16) and would stay 16 in the now-larger box unless
+    // we lock a refitted size here — the same lock a direct node resize
+    // would establish. Written via `patchNodeSilent` — the same silent
+    // style-patch path `useTextAutoSize` uses at resize-end — so it
+    // collapses into the gesture's single undo entry and the child's
+    // height stays content-driven (re-derived from the new font).
+    const patchNodeSilent = opts.getState().patchNodeSilent;
+    for (const child of snap.children) {
+      if (!child.fontFit) continue;
+      const childWidth = Math.max(1, child.width * sx);
+      const childHeight = Math.max(1, child.height * sy);
+      const next = refitFont(child.fontFit, childWidth, childHeight);
+      if (!Number.isFinite(next) || next <= 0) continue;
+      if (lastAppliedFont.get(child.id) === next) continue;
+      lastAppliedFont.set(child.id, next);
+      patchNodeSilent(child.id, {
+        style: { ...(child.style ?? {}), fontSize: next },
+      });
+    }
   };
 
   return {
@@ -182,7 +367,7 @@ export function createResizePreviewController(opts: {
       // snapshot — RF may have committed several intermediate dim
       // changes via applyNodeChanges between this call and the rAF
       // tick.
-      cancelPendingRaf();
+      cancelOverlayRaf();
       rafId = requestAnimationFrame(() => {
         rafId = null;
 
@@ -222,7 +407,7 @@ export function createResizePreviewController(opts: {
     },
 
     endResizePreview() {
-      cancelPendingRaf();
+      cancelOverlayRaf();
       useGesturePreviewStore.getState().clearFrameFitPreview();
     },
 
@@ -242,14 +427,19 @@ export function createResizePreviewController(opts: {
       for (const node of nodes) {
         if (node.parentId !== frameId) continue;
         const ns = getNodeSize(node);
+        const style = (node.data as { style?: NodeStyle } | undefined)?.style;
         children.push({
           id: node.id,
           x: node.position.x,
           y: node.position.y,
           width: ns.width,
           height: ns.height,
+          style,
+          fontFit: getNodeFontFit(node),
         });
       }
+      // Fresh gesture — drop any stale per-child font dedupe state.
+      lastAppliedFont.clear();
       freeSnapshot = {
         frameId,
         frameWidth: frameSize.width,
@@ -259,47 +449,42 @@ export function createResizePreviewController(opts: {
     },
 
     applyFrameResizeScale(width, height, x, y) {
-      const snap = freeSnapshot;
-      if (!snap) return;
-      if (snap.frameWidth <= 0 || snap.frameHeight <= 0) return;
-      const sx = width / snap.frameWidth;
-      const sy = height / snap.frameHeight;
-      // Always include the frame's NEW local origin in the batch so
-      // non-BR handle drags don't depend on the `onNodesChange`
-      // snap-mirror running in a separate pass to commit the frame's
-      // position. For BR-handle drags `(x, y)` simply equal the
-      // gesture-start values and the dispatch is a no-op for the
-      // frame's position.
-      const items: ResizeGeometryItem[] = [
-        {
-          nodeId: snap.frameId,
-          size: { width, height },
-          position: { x, y },
-        },
-      ];
-      for (const child of snap.children) {
-        items.push({
-          nodeId: child.id,
-          size: {
-            width: Math.max(1, child.width * sx),
-            height: Math.max(1, child.height * sy),
-          },
-          // Local positions scale uniformly with the frame regardless
-          // of which handle is dragged: when the frame's own TL moves
-          // (TL/T/L handles) the children's absolute positions follow
-          // the frame so the user-visible content stays anchored at
-          // the corner the handle is NOT moving.
-          position: { x: child.x * sx, y: child.y * sy },
-        });
+      // Coalesce per-pointermove ticks into a single dispatch per
+      // paint. NodeResizer.onResize fires at the pointermove rate
+      // (120 Hz+ on high-refresh displays); routing every tick straight
+      // to `flushScale` would run the whole command pipeline + the
+      // structured (column/row) grid solver that many times a second.
+      // Store the latest target dims (latest-wins) and schedule one
+      // rAF that consumes them. The authoritative final commit is the
+      // `setNodeGeometry` in `NodeWrapper.handleResizeEnd`; the trailing
+      // scale tick is run synchronously by `flushFrameResizeScale` at
+      // gesture end so children never lag the frame's committed size.
+      pendingScale = { width, height, x, y };
+      if (scaleRafId !== null) return;
+      scaleRafId = requestAnimationFrame(() => {
+        scaleRafId = null;
+        const p = pendingScale;
+        pendingScale = null;
+        if (p) flushScale(p.width, p.height, p.x, p.y);
+      });
+    },
+
+    flushFrameResizeScale() {
+      if (scaleRafId !== null) {
+        cancelAnimationFrame(scaleRafId);
+        scaleRafId = null;
       }
-      // Route through the canonical dispatch path so the gesture
-      // snapshot flag stays re-armed. For structured (column/row)
-      // frames the grid solver re-packs the scaled children at the
-      // end of the batch; for free frames the scaled positions stick.
-      previewResizeGeometry(items);
+      const p = pendingScale;
+      pendingScale = null;
+      if (p) flushScale(p.width, p.height, p.x, p.y);
     },
 
     clearFrameResizeSnapshot() {
+      // Defensive: drop any still-queued scale tick so a late rAF can't
+      // fire after the gesture's authoritative commit (it would
+      // early-return against the now-null snapshot anyway).
+      cancelScaleRaf();
+      lastAppliedFont.clear();
       freeSnapshot = null;
     },
 

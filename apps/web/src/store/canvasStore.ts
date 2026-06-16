@@ -350,6 +350,14 @@ type RFState = {
     x: number,
     y: number,
   ) => void;
+  /**
+   * Synchronously commit any rAF-coalesced scale tick still pending
+   * from {@link applyFrameResizeScale}. Called at gesture end before
+   * {@link clearFrameResizeSnapshot} so the trailing child-scaling
+   * frame isn't dropped by the per-paint throttle. No-op when nothing
+   * is queued.
+   */
+  flushFrameResizeScale: () => void;
   /** Clear the resize snapshot at the end of the gesture. */
   clearFrameResizeSnapshot: () => void;
   /**
@@ -685,6 +693,7 @@ const resizePreviewController = createResizePreviewController({
       autoLayoutEnabled: state.autoLayoutEnabled,
       nodes: state.nodes,
       dispatchUiIntent: state.dispatchUiIntent,
+      patchNodeSilent: state.patchNodeSilent,
     };
   },
 });
@@ -1117,7 +1126,16 @@ const useCanvasStore = create<RFState>()(
       // are store-external on purpose — no Zustand subscriber
       // observes them, so writing them through `set` would only
       // cost every other selector a re-run per click.
-      if (execution.trace.length > 0) {
+      //
+      // Transient gesture-preview ticks (rAF-coalesced live resize)
+      // set `preview: true`: their commands already ran above so the
+      // grid solver re-flows during the drag, but we skip event +
+      // recent-action recording so one resize gesture doesn't persist
+      // an event per animation frame. The authoritative single event
+      // is recorded by the end-of-gesture `setNodeGeometry` commit.
+      const isTransientPreview =
+        intent.type === 'RESIZE_NODE' && intent.preview === true;
+      if (!isTransientPreview && execution.trace.length > 0) {
         intentActionWindow.pushMany(execution.trace);
         canvasEvents.bufferMany(get().canvasId, execution.trace);
       }
@@ -1298,6 +1316,19 @@ const useCanvasStore = create<RFState>()(
       // geometry on the wire via keepalive even if a regular PUT is
       // already in flight (that one gets aborted by the browser on
       // page close, so deferring to it would silently drop the edit).
+      //
+      // CONTRACT: `force` must stay unload-only and always pair with
+      // `keepalive`. Outside unload the bypassed in-flight PUT is *not*
+      // aborted, so a forced second PUT would race it and can land a
+      // stale-baseline write → server 409 (CANVAS_VERSION_CONFLICT).
+      // The dev tripwire below flags any accidental non-unload use.
+      if (import.meta.env.DEV && options?.force && !options?.keepalive) {
+        console.warn(
+          '[saveCanvas] `force` is unload-only and must be paired with ' +
+            '`keepalive`; a forced non-keepalive save can 409 by racing an ' +
+            'in-flight PUT.',
+        );
+      }
       if (isSaving && !options?.force) {
         set({ pendingSave: true });
         return;
@@ -2119,6 +2150,8 @@ const useCanvasStore = create<RFState>()(
       resizePreviewController.captureFrameResizeSnapshot,
 
     applyFrameResizeScale: resizePreviewController.applyFrameResizeScale,
+
+    flushFrameResizeScale: resizePreviewController.flushFrameResizeScale,
 
     clearFrameResizeSnapshot: resizePreviewController.clearFrameResizeSnapshot,
 

@@ -9,6 +9,12 @@ import { useTextNodeSurface } from '@/hooks/useTextNodeSurface';
 import useCanvasStore from '@/store/canvasStore.ts';
 import { useChatStore } from '@/store/chatStore.ts';
 import { usePanelStore } from '@/store/panelStore.ts';
+import {
+  getQuestionFontOpts,
+  QUESTION_FONT_FAMILY,
+  QUESTION_NODE_PADDING as NODE_PADDING,
+  QUESTION_NODE_PLACEHOLDER,
+} from '@/utils/node/nodeFontConfig';
 
 import { AgentMentionMenu } from './AgentMentionMenu';
 import { NodeWrapper } from '../NodeWrapper';
@@ -23,13 +29,6 @@ import type { AgentBinding } from '@sediment/shared';
 import type { Node, NodeProps } from '@xyflow/react';
 
 export type QuestionNodeType = Node<CanvasQuestionNodeData, 'question'>;
-
-/** Padding inside the node (px). */
-const NODE_PADDING = 12;
-
-/** Font family for the question sticky-note style. */
-const QUESTION_FONT_FAMILY =
-  '"Comic Sans MS", STXingkai, KaiTi, "Kaiti SC", cursive';
 
 /** Sticky-note warm background colour (design token). */
 const STICKY_BG = 'var(--question-bg)';
@@ -77,15 +76,7 @@ export const QuestionNode = memo(
     // ------------------------------------------------------------------
     // Shared surface (auto-size + draft state + wrapper/body prop bundles)
     // ------------------------------------------------------------------
-    const fontOpts = useMemo(
-      () => ({
-        fontFamily: QUESTION_FONT_FAMILY,
-        fontWeight: 'normal',
-        fontStyle: 'normal',
-        lineHeight: 1.5,
-      }),
-      [],
-    );
+    const fontOpts = useMemo(() => getQuestionFontOpts(), []);
 
     const surface = useTextNodeSurface({
       nodeId: id,
@@ -95,7 +86,7 @@ export const QuestionNode = memo(
       baseFontSize: 16,
       padding: NODE_PADDING,
       fontOpts,
-      placeholder: 'Ask a question… type @ to pick an agent',
+      placeholder: QUESTION_NODE_PLACEHOLDER,
     });
 
     const status = data.status ?? 'idle';
@@ -516,7 +507,7 @@ export const QuestionNode = memo(
           onSelect={syncCaret}
           isEditing={isEditing}
           onRequestEdit={handleDoubleClick}
-          placeholder="Ask a question… type @ to pick an agent"
+          placeholder={QUESTION_NODE_PLACEHOLDER}
           fontFamily={QUESTION_FONT_FAMILY}
           color="var(--question-fg)"
           textareaClassName="placeholder:text-fg-default/40"
