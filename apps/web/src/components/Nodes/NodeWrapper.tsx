@@ -166,6 +166,26 @@ interface NodeWrapperProps {
   resizeEndClearHeight?: boolean;
 }
 
+// Reference-memoized count of selected nodes. Every NodeWrapper needs to
+// know whether it is the *sole* selected node (to show its own resize
+// handles / floating toolbar vs. deferring to the multi-select bounding
+// box). Filtering `nodes` inside each node's selector made this O(n) per
+// node — 25 nodes × scanning 25 nodes on every store update. Since all
+// selectors run during the same store notification and share the same
+// immutable `nodes` array reference, we scan once per unique array and
+// hand every node the cached scalar (25×O(n) → 1×O(n)).
+let selectedCountNodesRef: readonly { selected?: boolean }[] | null = null;
+let selectedCountCache = 0;
+function selectSelectedCount(nodes: readonly { selected?: boolean }[]): number {
+  if (nodes !== selectedCountNodesRef) {
+    selectedCountNodesRef = nodes;
+    let count = 0;
+    for (const node of nodes) if (node.selected) count++;
+    selectedCountCache = count;
+  }
+  return selectedCountCache;
+}
+
 export const NodeWrapper = memo(
   ({
     id,
@@ -193,8 +213,8 @@ export const NodeWrapper = memo(
     onDoubleClick,
     resizeEndClearHeight = false,
   }: NodeWrapperProps) => {
-    const selectedCount = useCanvasStore(
-      (state) => state.nodes.filter((node) => node.selected).length,
+    const selectedCount = useCanvasStore((state) =>
+      selectSelectedCount(state.nodes),
     );
 
     const setNodeGeometry = useCanvasStore((state) => state.setNodeGeometry);
@@ -350,6 +370,17 @@ export const NodeWrapper = memo(
 
     const isMinimal = renderMode === 'minimal';
 
+    // Per-node resize handles are only ever shown when this is the *sole*
+    // selected node (multi-selection draws a single bounding-box resizer
+    // via `MultiSelectResizer` instead). Mounting `<NodeResizer>` only
+    // when that holds — rather than keeping it permanently mounted and
+    // toggling `isVisible` — keeps it off the first paint for every
+    // unselected node on a freshly loaded canvas. Selecting a node already
+    // re-renders this component, so the handles still mount in the same
+    // commit as the selection highlight (no perceptible delay).
+    const showResizer =
+      selected && resizable && !data.locked && selectedCount === 1;
+
     // Derive accent-tinted tokens once so border/shadow stay in sync with
     // the rest of the canvas (PreviewCard, SemanticPlaceholder, ...).
     // Stored value is a palette token (or legacy hex); resolve to CSS color.
@@ -358,27 +389,23 @@ export const NodeWrapper = memo(
 
     return (
       <>
-        <NodeResizer
-          color="var(--color-info-light)"
-          // Per-node handles only when this is the sole selected node.
-          // For multi-selection, a single set of handles is rendered on
-          // the selection bounding box by `MultiSelectResizer` instead.
-          isVisible={
-            selected && resizable && !data.locked && selectedCount === 1
-          }
-          minWidth={minWidth}
-          minHeight={minHeight}
-          keepAspectRatio={keepAspectRatio}
-          onResizeStart={handleResizeStart}
-          onResize={handleResize}
-          onResizeEnd={handleResizeEnd}
-          handleStyle={{
-            width: isNotMouse ? 12 : 8,
-            height: isNotMouse ? 12 : 8,
-            borderRadius: 0,
-          }}
-          lineClassName="!border-transparent"
-        />
+        {showResizer && (
+          <NodeResizer
+            color="var(--color-info-light)"
+            minWidth={minWidth}
+            minHeight={minHeight}
+            keepAspectRatio={keepAspectRatio}
+            onResizeStart={handleResizeStart}
+            onResize={handleResize}
+            onResizeEnd={handleResizeEnd}
+            handleStyle={{
+              width: isNotMouse ? 12 : 8,
+              height: isNotMouse ? 12 : 8,
+              borderRadius: 0,
+            }}
+            lineClassName="!border-transparent"
+          />
+        )}
         {selected && selectedCount === 1 && (
           <NodeFloatingToolbar
             id={id}

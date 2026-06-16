@@ -13,6 +13,7 @@ import {
   renameSync,
   writeFileSync,
 } from 'node:fs';
+import { readFile as readFileAsync } from 'node:fs/promises';
 import path from 'node:path';
 
 /** Pattern allowed for canvas / node / thread identifiers. */
@@ -68,6 +69,45 @@ export function readText(filePath: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Async, non-blocking variant of {@link readText}. Returns null when the
+ * file is missing or unreadable. Skips the pre-flight `existsSync` stat
+ * and treats a failed read (e.g. `ENOENT`) as `null`, so it costs one
+ * syscall on the happy path and never blocks the event loop.
+ */
+export async function readTextAsync(filePath: string): Promise<string | null> {
+  try {
+    return await readFileAsync(filePath, 'utf-8');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Map `items` through an async `fn` with a bounded number of in-flight
+ * calls. A fixed pool of `limit` workers pulls from a shared cursor so
+ * at most `limit` promises are pending at once — this caps peak memory
+ * and open file descriptors when fanning out many filesystem reads,
+ * while still overlapping I/O for throughput. Results are returned in
+ * input order regardless of completion order.
+ */
+export async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const workerCount = Math.max(1, Math.min(limit, items.length));
+  const workers = Array.from({ length: workerCount }, async () => {
+    for (let i = next++; i < items.length; i = next++) {
+      results[i] = await fn(items[i], i);
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }
 
 /** Atomic write of a UTF-8 text file. */

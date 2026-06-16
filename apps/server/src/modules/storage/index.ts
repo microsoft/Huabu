@@ -22,6 +22,7 @@ import { canvasJsonPath } from './paths.js';
 import { getWorkspacePath } from '../workspace.js';
 
 import type { CanvasFile } from './canvas-store.js';
+import type { CanvasSummary } from '@sediment/shared';
 
 export { CanvasStore } from './canvas-store.js';
 export type {
@@ -90,6 +91,44 @@ export function listCanvases(): CanvasFile[] {
     if (canvas) out.push(canvas);
   }
   return out;
+}
+
+/**
+ * Lightweight list of canvas summaries for the list endpoint.
+ *
+ * Unlike {@link listCanvases}, this builds each row straight from the
+ * in-memory canvas-dir index — whose entries already carry the summary
+ * fields (`nodeCount` / `createdAt` / `updatedAt`) captured when
+ * `scanWorkspace()` parsed each `canvas.json`. That avoids re-reading
+ * and re-parsing every canvas file a second time just to render the
+ * list.
+ *
+ * The displayed `title` mirrors {@link CanvasStore.read}'s Finder-rename
+ * self-heal (adopt the on-disk directory name when it diverges from the
+ * sanitised title) but WITHOUT the write-back — a read path must not
+ * mutate disk. The persisted `canvas.json` is reconciled lazily the next
+ * time the canvas is opened via `read()`.
+ */
+export function listCanvasSummaries(): CanvasSummary[] {
+  const ws = getWorkspacePath();
+  if (!existsSync(ws)) return [];
+  // Re-scan so external file changes are reflected, matching listCanvases.
+  refreshCanvasDirIndex();
+
+  return listCanvasDirEntries().map((entry) => {
+    const expectedDir = toSafeFilename(entry.title, entry.id);
+    const title =
+      entry.filename && entry.filename !== expectedDir
+        ? entry.filename
+        : entry.title;
+    return {
+      canvasId: entry.id,
+      title,
+      nodeCount: entry.nodeCount ?? 0,
+      createdAt: entry.createdAt ?? 0,
+      updatedAt: entry.updatedAt ?? 0,
+    };
+  });
 }
 
 /**

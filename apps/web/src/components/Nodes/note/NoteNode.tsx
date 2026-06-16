@@ -4,7 +4,9 @@ import { ChevronsDown, Fullscreen } from 'lucide-react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
+import { Spinner } from '@/components/Common/Spinner';
 import { MilkdownPreview } from '@/components/Milkdown';
+import { useNodeLOD } from '@/hooks/useNodeLOD';
 import { useNodeScale } from '@/hooks/useNodeScale';
 import useCanvasStore from '@/store/canvasStore';
 
@@ -12,6 +14,7 @@ import { MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
 import { NOTE_AUTO_HEIGHT_MIN } from './autoHeight';
 import { useTrackNoteFixedHeight } from './heightMemory';
+import { requestNoteHydration } from './noteHydrationScheduler';
 
 import type { CanvasNoteNodeData } from '../types';
 
@@ -23,6 +26,12 @@ export const NoteNode = memo(
     const setNoteHeightMode = useCanvasStore((s) => s.setNoteHeightMode);
     const patchNodeSilent = useCanvasStore((s) => s.patchNodeSilent);
     const scale = useNodeScale(id, 'note');
+    // When the node is zoomed out far enough, `NodeWrapper` hides this
+    // content and overlays a cheap `SemanticPlaceholder` instead. There is
+    // no point building (or even staggering) a Milkdown editor that the
+    // user can't see — gate hydration on the same LOD so a zoomed-out
+    // canvas mounts zero editors until a node is actually zoomed in.
+    const isMinimalLOD = useNodeLOD(id, 'note') === 'minimal';
     const viewportZoom = useStore((s) => s.transform[2]);
     const counterZoomScale = Math.min(3, Math.max(1, 1 / viewportZoom));
     const hasFixedHeight = useStore(
@@ -53,6 +62,25 @@ export const NoteNode = memo(
         : 0;
     const [contentHeight, setContentHeight] = useState(seededHeight);
     const [hostHeight, setHostHeight] = useState(0);
+
+    // Defer the (expensive) Milkdown editor mount so a canvas full of
+    // notes doesn't build every Crepe/ProseMirror instance inside one
+    // blocking React commit on load. Until granted a turn by the shared
+    // scheduler we render a lightweight spinner placeholder (the same
+    // `Spinner` the PDF node shows while loading), sized by the persisted
+    // `measuredHeight` seed so the node keeps its real footprint. The
+    // upgrade to the real editor is visually identical — only the timing
+    // of the build work changes. See `noteHydrationScheduler`.
+    const [hydrated, setHydrated] = useState(false);
+    useEffect(() => {
+      // Skip while the node is a semantic-zoom placeholder; it re-runs and
+      // registers once the node zooms into full LOD. Once hydrated we keep
+      // the editor mounted (never tear down) so zooming back out and in
+      // again doesn't re-pay the build cost.
+      if (hydrated || isMinimalLOD) return;
+      const cancel = requestNoteHydration(() => setHydrated(true));
+      return cancel;
+    }, [hydrated, isMinimalLOD]);
 
     // Session-scoped memory of "last pinned height" for this note. Lets a
     // "fixed → auto → fixed" round-trip restore the previous size instead
@@ -99,6 +127,11 @@ export const NoteNode = memo(
     useEffect(() => {
       const host = previewHostRef.current;
       if (!host) return;
+      // While the spinner placeholder is showing there is no `.ProseMirror`
+      // to measure; skip entirely so we never persist the placeholder's
+      // height as the note's `measuredHeight`. The seeded `contentHeight`
+      // keeps the footprint correct until the real editor mounts.
+      if (!hydrated) return;
 
       const measure = () => {
         const prose = host.querySelector('.ProseMirror') as HTMLElement | null;
@@ -149,7 +182,7 @@ export const NoteNode = memo(
         mo.disconnect();
         ro.disconnect();
       };
-    }, []);
+    }, [hydrated]);
 
     // Truncation only matters in fixed-height mode. Both heights are state,
     // so this re-evaluates when the user resizes the node or the content
@@ -257,10 +290,35 @@ export const NoteNode = memo(
                     hasFixedHeight ? 'flex h-full flex-col' : 'flex flex-col',
                   )}
                 >
-                  <MilkdownPreview
-                    markdown={markdown}
-                    className="pointer-events-none w-full select-none"
-                  />
+                  {hydrated ? (
+                    <MilkdownPreview
+                      markdown={markdown}
+                      className="pointer-events-none w-full select-none"
+                    />
+                  ) : (
+                    // Lightweight placeholder while the editor mount is
+                    // deferred. Reuses the same `Spinner` the PDF node
+                    // shows while loading; sized by the persisted height
+                    // seed so the node keeps its footprint and doesn't
+                    // reflow when the real editor takes over.
+                    <div
+                      className="flex w-full items-center justify-center"
+                      style={{
+                        minHeight:
+                          seededHeight > 0
+                            ? seededHeight
+                            : NOTE_AUTO_HEIGHT_MIN,
+                      }}
+                      aria-hidden
+                    >
+                      {/* No spinner in minimal LOD — the content is
+                          hidden behind the SemanticPlaceholder, so an
+                          animated spinner would just be wasted work. */}
+                      {!isMinimalLOD && (
+                        <Spinner size="md" className="text-fg-subtle" />
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
               {isTruncated && (

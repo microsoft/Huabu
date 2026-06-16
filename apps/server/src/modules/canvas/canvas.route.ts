@@ -31,6 +31,7 @@ import {
   deleteCanvas,
   getCanvasStore,
   listCanvases,
+  listCanvasSummaries,
   type CanvasFile,
 } from '../storage/index.js';
 import { canvasRoot } from '../storage/paths.js';
@@ -224,10 +225,20 @@ function isArtifactMissing(
  * {@link hydrateNodeContent}; also used by the per-node GET endpoint so
  * batch and single-node hydration stay in lock-step.
  *
+ * `preloaded` lets the batch path inject content from a one-pass
+ * directory scan (see {@link CanvasStore.readAllNodes}) so we don't
+ * re-read every `.md` file per node. Pass `undefined` to fall back to
+ * the targeted single-node `store.readNode(nodeId)` lookup; pass
+ * `null` to indicate the batch scan ran but found no sidecar.
+ *
  * Returns the original `node` reference when nothing was mutated so
  * callers can rely on identity-based diffing.
  */
-function hydrateOneNode(store: CanvasStore, node: NodeLike): NodeLike {
+function hydrateOneNode(
+  store: CanvasStore,
+  node: NodeLike,
+  preloaded?: NodeContent | null,
+): NodeLike {
   const nodeId = typeof node.id === 'string' ? node.id : '';
   if (!nodeId) return node;
 
@@ -241,11 +252,15 @@ function hydrateOneNode(store: CanvasStore, node: NodeLike): NodeLike {
   // is the only source of truth for those fields, so we read it before
   // any check that depends on them (notably the artifact-missing probe,
   // which needs the hydrated `src`).
-  let nodeContent: NodeContent | null = null;
-  try {
-    nodeContent = store.readNode(nodeId);
-  } catch {
-    nodeContent = null;
+  let nodeContent: NodeContent | null;
+  if (preloaded !== undefined) {
+    nodeContent = preloaded;
+  } else {
+    try {
+      nodeContent = store.readNode(nodeId);
+    } catch {
+      nodeContent = null;
+    }
   }
 
   if (!nodeContent) {
@@ -335,9 +350,24 @@ function hydrateOneNode(store: CanvasStore, node: NodeLike): NodeLike {
  * `artifactMissing` hints when the underlying file has been deleted or
  * renamed outside the app, so the client can render a non-blocking
  * placeholder instead of silently rendering an empty / broken node.
+ *
+ * Performance: uses a one-pass `readAllNodes()` scan so the total
+ * filesystem cost is `1 × readdirSync + N × readText` regardless of
+ * node count. The previous per-node `readNode()` path triggered an
+ * extra full-directory scan (via `nodeIndex()`) plus a second
+ * `readText` on every file, making large canvases noticeably slow to
+ * load on cold cache.
  */
-function hydrateNodeContent(store: CanvasStore, nodes: NodeLike[]): NodeLike[] {
-  return nodes.map((node) => hydrateOneNode(store, node));
+function hydrateNodeContent(
+  store: CanvasStore,
+  nodes: NodeLike[],
+): Promise<NodeLike[]> {
+  return store.readAllNodes().then((contentByNodeId) =>
+    nodes.map((node) => {
+      const nodeId = typeof node.id === 'string' ? node.id : '';
+      return hydrateOneNode(store, node, contentByNodeId.get(nodeId) ?? null);
+    }),
+  );
 }
 
 const canvasRoutes: FastifyPluginAsync = async (fastify) => {
@@ -346,15 +376,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get<{ Reply: ApiResult<ListCanvasesResponse> }>(
     '/',
     async function (_request, reply) {
-      const canvases = listCanvases();
-
-      const summaries = canvases.map((c) => ({
-        canvasId: c.canvasId,
-        title: c.title,
-        nodeCount: Array.isArray(c.state.nodes) ? c.state.nodes.length : 0,
-        createdAt: c.createdAt,
-        updatedAt: c.updatedAt,
-      }));
+      // Built straight from the canvas-dir index (single parse per
+      // canvas.json) rather than re-reading every file via listCanvases().
+      const summaries = listCanvasSummaries();
 
       // Sort by most recently updated first
       summaries.sort((a, b) => b.updatedAt - a.updatedAt);
@@ -769,7 +793,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     // Hydrate node content from the per-canvas store so clients always
     // receive fresh markdown bodies.
     const nodes = canvas.state.nodes as NodeLike[];
-    const hydratedNodes = hydrateNodeContent(store, nodes);
+    const hydratedNodes = await hydrateNodeContent(store, nodes);
 
     return reply.send({
       canvasId: canvas.canvasId,

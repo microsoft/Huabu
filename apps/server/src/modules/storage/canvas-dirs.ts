@@ -16,6 +16,15 @@ export interface CanvasDirEntry {
   id: string;
   filename: string;
   title: string | null;
+  /**
+   * Summary fields captured from `canvas.json` during {@link
+   * scanWorkspace} so the list endpoint can build its response without a
+   * second read of every canvas file. Undefined for entries registered
+   * via {@link registerCanvasDir} before the next workspace re-scan.
+   */
+  nodeCount?: number;
+  createdAt?: number;
+  updatedAt?: number;
 }
 
 const index = new NameIndex<CanvasDirEntry>();
@@ -36,14 +45,23 @@ function scanWorkspace(): void {
     } catch {
       continue;
     }
-    const json = readJson<{ canvasId?: string; title?: string | null }>(
-      path.join(full, 'canvas.json'),
-    );
+    const json = readJson<{
+      canvasId?: string;
+      title?: string | null;
+      state?: { nodes?: unknown[] };
+      createdAt?: number;
+      updatedAt?: number;
+    }>(path.join(full, 'canvas.json'));
     if (!json?.canvasId) continue;
     index.add({
       id: json.canvasId,
       filename: entry,
       title: json.title ?? null,
+      // Capture summary fields from the canvas.json we just parsed so
+      // `listCanvasSummaries()` never has to re-read these files.
+      nodeCount: Array.isArray(json.state?.nodes) ? json.state.nodes.length : 0,
+      createdAt: typeof json.createdAt === 'number' ? json.createdAt : 0,
+      updatedAt: typeof json.updatedAt === 'number' ? json.updatedAt : 0,
     });
   }
   scanned = true;

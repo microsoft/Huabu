@@ -27,10 +27,12 @@ import {
   appendJsonLines,
   atomicWriteJson,
   atomicWriteText,
+  mapWithConcurrency,
   mkdirp,
   readJson,
   readJsonLines,
   readText,
+  readTextAsync,
   sanitizeId,
 } from './io.js';
 import { NameIndex } from './name-index.js';
@@ -253,6 +255,14 @@ function nodeFilenameFor(nodeId: string, label: string | null): string {
 
 // ─── CanvasStore ────────────────────────────────────────────────────────────
 
+/**
+ * Upper bound on concurrent `nodes/*.md` reads in {@link
+ * CanvasStore.readAllNodes}. Caps in-flight promises (and therefore peak
+ * memory + open file descriptors) while still overlapping I/O so large
+ * canvases hydrate faster than the previous serial-synchronous scan.
+ */
+const NODE_READ_CONCURRENCY = 32;
+
 export class CanvasStore {
   readonly canvasId: string;
   private nodes: NameIndex<NodeFileEntry> | null = null;
@@ -389,6 +399,58 @@ export class CanvasStore {
       if (raw === null) return null;
     }
     return markdownToNodeContent(nodeId, raw);
+  }
+
+  /**
+   * One-pass batch read of every node's markdown sidecar. Returns a
+   * `Map<nodeId, NodeContent>` so the canvas GET route can hydrate the
+   * full node list with a single `readdirSync` + one `readText` per
+   * file, instead of the N+1 pattern (`nodeIndex` scan reads every file
+   * once to build the id index, then `readNode` reads each file again
+   * to get the body). Also primes the in-memory `nodeIndex` cache as a
+   * side-effect so any follow-up `readNode` / `writeNode` in the same
+   * request skips a re-scan.
+   *
+   * Only used on the batch hydrate path — single-node lookups should
+   * continue to call `readNode(nodeId)`.
+   *
+   * Reads run concurrently (bounded by {@link NODE_READ_CONCURRENCY})
+   * via async, non-blocking `readFile` calls so the event loop stays
+   * free and large canvases hydrate with overlapped I/O. The id index
+   * is still built in stable `readdirSync` order so the derived keys
+   * match the previous synchronous implementation exactly.
+   */
+  async readAllNodes(): Promise<Map<string, NodeContent>> {
+    const contents = new Map<string, NodeContent>();
+    const idx = new NameIndex<NodeFileEntry>();
+    const dir = nodesDir(this.canvasId);
+    if (existsSync(dir)) {
+      const files = readdirSync(dir).filter((file) => file.endsWith('.md'));
+      const raws = await mapWithConcurrency(
+        files,
+        NODE_READ_CONCURRENCY,
+        (file) => readTextAsync(path.join(dir, file)),
+      );
+      for (let i = 0; i < files.length; i++) {
+        const raw = raws[i];
+        if (raw === null) continue;
+        const file = files[i];
+        // Mirror `nodeIndex()`'s id derivation so the keys in the
+        // returned map align 1:1 with what `readNode(nodeId)` would
+        // resolve to. Frontmatter `id` wins; fall back to the
+        // filename-without-extension exactly like the index does.
+        const { meta } = parseFrontmatter(raw);
+        const rawId = meta['id'];
+        const id =
+          typeof rawId === 'string' && rawId
+            ? rawId
+            : file.replace(/\.md$/, '');
+        idx.add({ id, filename: file });
+        contents.set(id, markdownToNodeContent(id, raw));
+      }
+    }
+    this.nodes = idx;
+    return contents;
   }
 
   /**
