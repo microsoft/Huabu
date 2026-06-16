@@ -40,8 +40,13 @@ const measureCtx = {
 };
 
 if (typeof HTMLCanvasElement !== 'undefined') {
-  HTMLCanvasElement.prototype.getContext = function getContext(): unknown {
-    return measureCtx;
+  const originalGetContext = HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext = function getContext(
+    contextId: string,
+    options?: unknown,
+  ): unknown {
+    if (contextId === '2d') return measureCtx;
+    return originalGetContext.call(this, contextId as never, options as never);
   } as HTMLCanvasElement['getContext'];
 }
 
