@@ -1918,6 +1918,7 @@ const useCanvasStore = create<RFState>()(
       resizePreviewController.cancelPendingRaf();
       useGesturePreviewStore.getState().clearFrameFitPreview();
       useGesturePreviewStore.getState().clearStructuredDropPreview();
+      _dragStartPositions = null;
       endSnapSession();
     },
 
