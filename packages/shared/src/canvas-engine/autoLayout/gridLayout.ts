@@ -86,11 +86,13 @@ function insertBetweenHalfBand(
   minHalf: number,
 ): number {
   const desired = Math.max(gap / 2, minHalf);
-  const cap = Math.min(
-    prevExtent * INSERT_BETWEEN_NEIGHBOUR_RATIO,
-    nextExtent * INSERT_BETWEEN_NEIGHBOUR_RATIO,
-  );
-  return Math.min(desired, Math.max(gap / 2, cap));
+  // Cap the widened band at half the literal gap plus a bounded reach
+  // into the *narrower* neighbour, so each track's centre always stays
+  // `into-existing` while the between-tracks zone is still easy to hit.
+  const maxReachIntoNeighbour =
+    Math.min(prevExtent, nextExtent) * INSERT_BETWEEN_NEIGHBOUR_RATIO;
+  const cap = gap / 2 + maxReachIntoNeighbour;
+  return Math.min(desired, cap);
 }
 
 /**
@@ -184,8 +186,18 @@ function clampInt(raw: number, lo: number, hi: number): number {
  *   1. Honour the stored `frameSlot` when present.
  *   2. Unassigned children go into the track with the fewest items
  *      (ties → first such track).
- *   3. While any track is empty AND total children ≥ count, pull the
- *      nearest item from the busiest track into the empty one.
+ *   3. Resolve empty tracks per `emptyTrackPolicy`:
+ *      - `'fill'`    — pull the nearest item from the busiest track into
+ *        each empty one (the "no empty track" invariant). Used when the
+ *        caller explicitly asked for N tracks (e.g. the count stepper)
+ *        and wants the children spread to fill them.
+ *      - `'compact'` — drop empty tracks instead, renumbering survivors
+ *        to a contiguous range. Used for organic child changes (a
+ *        deletion that empties a track, a drag that vacates one): the
+ *        track simply disappears rather than being back-filled.
+ *
+ * Returns the assignment plus the **effective** track count, which is
+ * `count` for `'fill'` and ≤ `count` for `'compact'`.
  *
  * `sortKey(child)` decides the natural ordering — Y for column mode,
  * X for row mode — used both for tie-breaking and "nearest" selection.
@@ -194,7 +206,8 @@ function assignTrackSlots(
   children: ChildSlot[],
   count: number,
   sortKey: (c: ChildSlot) => number,
-): Map<string, number> {
+  emptyTrackPolicy: 'fill' | 'compact',
+): { assignment: Map<string, number>; count: number } {
   const ordered = [...children].sort((a, b) => sortKey(a) - sortKey(b));
   const buckets: string[][] = Array.from({ length: count }, () => []);
   const assignment = new Map<string, number>();
@@ -223,10 +236,13 @@ function assignTrackSlots(
     assignment.set(child.node.id, target);
   }
 
-  // Pass 3 — no empty track invariant.
-  rebalanceEmptyTracks(buckets, count, assignment);
-
-  return assignment;
+  // Pass 3 — resolve empty tracks (fill vs. compact).
+  if (emptyTrackPolicy === 'fill') {
+    rebalanceEmptyTracks(buckets, count, assignment);
+    return { assignment, count };
+  }
+  const compactCount = compactEmptyTracks(buckets, assignment);
+  return { assignment, count: compactCount };
 }
 
 /** Pull one item from the nearest busy track into any empty track. */
@@ -265,6 +281,32 @@ function rebalanceEmptyTracks(
   }
 }
 
+/**
+ * Drop empty tracks and renumber the survivors to a contiguous
+ * `0..M-1` range, preserving order (so column 0 stays leftmost).
+ * Rewrites `assignment` in place and returns the resulting track
+ * count `M` (≥ 1 whenever there is at least one item).
+ */
+function compactEmptyTracks(
+  buckets: string[][],
+  assignment: Map<string, number>,
+): number {
+  const remap = new Map<number, number>();
+  let next = 0;
+  for (let i = 0; i < buckets.length; i += 1) {
+    if (buckets[i].length === 0) continue;
+    remap.set(i, next);
+    next += 1;
+  }
+  // No empty track in range → identity, nothing to renumber.
+  if (next === buckets.length) return buckets.length;
+  for (const [id, slot] of assignment) {
+    const mapped = remap.get(slot);
+    if (mapped !== undefined && mapped !== slot) assignment.set(id, mapped);
+  }
+  return Math.max(next, 1);
+}
+
 // ── Result types ──────────────────────────────────────────────────────
 
 /**
@@ -281,6 +323,13 @@ export interface FrameGridLayoutResult {
   childPositions: Map<string, XYPosition>;
   slotAssignments: Map<string, number>;
   frameSize: { width: number; height: number };
+  /**
+   * The track count the layout actually resolved to. Equals the
+   * requested `count` under the `'fill'` policy; may be smaller under
+   * `'compact'` when empty tracks were dropped. Callers persist this as
+   * the frame's `gridCount`.
+   */
+  effectiveCount: number;
 }
 
 // ── Column masonry ────────────────────────────────────────────────────
@@ -307,6 +356,7 @@ export function applyColumnLayout(
   nodes: Node[],
   frameId: string,
   count: number,
+  emptyTrackPolicy: 'fill' | 'compact' = 'compact',
 ): FrameGridLayoutResult | null {
   const frame = nodes.find((n) => n.id === frameId);
   if (!frame || frame.type !== 'frame' || isLocked(frame)) return null;
@@ -315,10 +365,18 @@ export function applyColumnLayout(
   if (children.length === 0) return null;
 
   const cols = clampGridCount(count);
-  const assignment = assignTrackSlots(children, cols, (c) => c.node.position.y);
+  const { assignment, count: effectiveCols } = assignTrackSlots(
+    children,
+    cols,
+    (c) => c.node.position.y,
+    emptyTrackPolicy,
+  );
 
   // Bucket by column, sort each column by current Y.
-  const colItems: ChildSlot[][] = Array.from({ length: cols }, () => []);
+  const colItems: ChildSlot[][] = Array.from(
+    { length: effectiveCols },
+    () => [],
+  );
   for (const child of children) {
     const slot = assignment.get(child.node.id) ?? 0;
     colItems[slot].push(child);
@@ -342,8 +400,8 @@ export function applyColumnLayout(
   const intraGap = gapFromExtent(median(children.map((c) => c.height)));
 
   // Cumulative left edge of each column.
-  const colOriginX = new Array<number>(cols).fill(FRAME_PADDING);
-  for (let c = 1; c < cols; c += 1) {
+  const colOriginX = new Array<number>(effectiveCols).fill(FRAME_PADDING);
+  for (let c = 1; c < effectiveCols; c += 1) {
     colOriginX[c] =
       colOriginX[c - 1] +
       (colWidth[c - 1] > 0 ? colWidth[c - 1] + interGap : 0);
@@ -351,7 +409,7 @@ export function applyColumnLayout(
 
   const positions = new Map<string, XYPosition>();
   let tallest = 0;
-  for (let c = 0; c < cols; c += 1) {
+  for (let c = 0; c < effectiveCols; c += 1) {
     let y = FRAME_PADDING;
     for (const item of colItems[c]) {
       positions.set(item.node.id, { x: colOriginX[c], y });
@@ -361,9 +419,9 @@ export function applyColumnLayout(
     if (bottom > tallest) tallest = bottom;
   }
 
-  const lastCol = cols - 1;
+  const lastCol = effectiveCols - 1;
   const contentRight =
-    cols > 0 ? colOriginX[lastCol] + colWidth[lastCol] : FRAME_PADDING;
+    effectiveCols > 0 ? colOriginX[lastCol] + colWidth[lastCol] : FRAME_PADDING;
   const width = contentRight + FRAME_PADDING;
   const height = tallest + FRAME_PADDING;
 
@@ -371,6 +429,7 @@ export function applyColumnLayout(
     childPositions: positions,
     slotAssignments: assignment,
     frameSize: { width, height },
+    effectiveCount: effectiveCols,
   };
 }
 
@@ -387,6 +446,7 @@ export function applyRowLayout(
   nodes: Node[],
   frameId: string,
   count: number,
+  emptyTrackPolicy: 'fill' | 'compact' = 'compact',
 ): FrameGridLayoutResult | null {
   const frame = nodes.find((n) => n.id === frameId);
   if (!frame || frame.type !== 'frame' || isLocked(frame)) return null;
@@ -395,9 +455,17 @@ export function applyRowLayout(
   if (children.length === 0) return null;
 
   const rows = clampGridCount(count);
-  const assignment = assignTrackSlots(children, rows, (c) => c.node.position.x);
+  const { assignment, count: effectiveRows } = assignTrackSlots(
+    children,
+    rows,
+    (c) => c.node.position.x,
+    emptyTrackPolicy,
+  );
 
-  const rowItems: ChildSlot[][] = Array.from({ length: rows }, () => []);
+  const rowItems: ChildSlot[][] = Array.from(
+    { length: effectiveRows },
+    () => [],
+  );
   for (const child of children) {
     const slot = assignment.get(child.node.id) ?? 0;
     rowItems[slot].push(child);
@@ -418,8 +486,8 @@ export function applyRowLayout(
   const interGap = gapFromExtent(median(rowHeight.filter((h) => h > 0)));
   const intraGap = gapFromExtent(median(children.map((c) => c.width)));
 
-  const rowOriginY = new Array<number>(rows).fill(FRAME_PADDING);
-  for (let r = 1; r < rows; r += 1) {
+  const rowOriginY = new Array<number>(effectiveRows).fill(FRAME_PADDING);
+  for (let r = 1; r < effectiveRows; r += 1) {
     rowOriginY[r] =
       rowOriginY[r - 1] +
       (rowHeight[r - 1] > 0 ? rowHeight[r - 1] + interGap : 0);
@@ -427,7 +495,7 @@ export function applyRowLayout(
 
   const positions = new Map<string, XYPosition>();
   let widest = 0;
-  for (let r = 0; r < rows; r += 1) {
+  for (let r = 0; r < effectiveRows; r += 1) {
     let x = FRAME_PADDING;
     for (const item of rowItems[r]) {
       positions.set(item.node.id, { x, y: rowOriginY[r] });
@@ -437,9 +505,11 @@ export function applyRowLayout(
     if (right > widest) widest = right;
   }
 
-  const lastRow = rows - 1;
+  const lastRow = effectiveRows - 1;
   const contentBottom =
-    rows > 0 ? rowOriginY[lastRow] + rowHeight[lastRow] : FRAME_PADDING;
+    effectiveRows > 0
+      ? rowOriginY[lastRow] + rowHeight[lastRow]
+      : FRAME_PADDING;
   const width = widest + FRAME_PADDING;
   const height = contentBottom + FRAME_PADDING;
 
@@ -447,6 +517,7 @@ export function applyRowLayout(
     childPositions: positions,
     slotAssignments: assignment,
     frameSize: { width, height },
+    effectiveCount: effectiveRows,
   };
 }
 
@@ -945,15 +1016,26 @@ export function describeStructuredDropZone(
  * - Children's `position` → `result.childPositions`
  * - Children's `data.frameSlot` → `result.slotAssignments`
  * - Frame's `style.width` / `style.height` / `measured` → `result.frameSize`
+ * - Frame's `data.gridCount` → `result.effectiveCount` (so a track the
+ *   layout dropped is reflected in the stored count and the UI stepper)
+ *
+ * `fillFrameIds` selects the empty-track policy per frame: those in the
+ * set use `'fill'` (spread children to occupy every requested track —
+ * the count stepper's intent), everything else uses `'compact'` (drop
+ * tracks that organic child changes left empty). The frame owns this
+ * decision; callers (e.g. `DELETE_NODES`) only need to report the frame
+ * as affected.
  *
  * Pure (returns new arrays); the input is left untouched.
  */
 export function applyStructuredFrameRelayout(
   nodes: Node[],
   frameIds: Iterable<string>,
+  fillFrameIds?: Iterable<string>,
 ): { nodes: Node[]; handledFrameIds: Set<string> } {
   const handled = new Set<string>();
   const seen = new Set<string>();
+  const fillSet = fillFrameIds ? new Set(fillFrameIds) : null;
 
   // Compute layout for each opted-in frame against the evolving array.
   let working = nodes;
@@ -966,10 +1048,11 @@ export function applyStructuredFrameRelayout(
     const cfg = readFrameGridConfig(frame);
     if (!cfg) continue;
 
+    const policy = fillSet?.has(frameId) ? 'fill' : 'compact';
     const result =
       cfg.axis === 'column'
-        ? applyColumnLayout(working, frameId, cfg.count)
-        : applyRowLayout(working, frameId, cfg.count);
+        ? applyColumnLayout(working, frameId, cfg.count, policy)
+        : applyRowLayout(working, frameId, cfg.count, policy);
     if (!result) continue;
 
     handled.add(frameId);
@@ -977,13 +1060,22 @@ export function applyStructuredFrameRelayout(
     working = working.map((n) => {
       // Frame itself — write content-driven size into both style + measured
       // so any ancestor frame's fit pass (cascade) sees the post-layout size.
+      // Also persist the effective track count so a dropped (compacted)
+      // track shrinks the stored `gridCount`.
       if (n.id === frameId) {
         const prevMeasured = (n.measured ?? {}) as {
           width?: number;
           height?: number;
         };
+        const prevData = (n.data ?? {}) as Record<string, unknown>;
+        const gridChanged =
+          (prevData as { gridCount?: number }).gridCount !==
+          result.effectiveCount;
         return {
           ...n,
+          ...(gridChanged
+            ? { data: { ...prevData, gridCount: result.effectiveCount } }
+            : {}),
           style: {
             ...(n.style ?? {}),
             width: result.frameSize.width,

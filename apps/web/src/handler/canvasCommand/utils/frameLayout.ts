@@ -199,6 +199,18 @@ export function buildStructuredFrameRelayoutCommands(
         patch: { frameSlot: slot },
       });
     }
+
+    // Frame gridCount — the layout uses the `'compact'` policy here, so a
+    // drag that vacated a track shrinks the count. Persist it so the
+    // stored value and the UI stepper stay in sync.
+    const priorGrid = (frame?.data as { gridCount?: number } | undefined)
+      ?.gridCount;
+    if (priorGrid !== result.effectiveCount) {
+      dataPatches.push({
+        nodeId: id as CanvasNodeId,
+        patch: { gridCount: result.effectiveCount },
+      });
+    }
   }
 
   const commands: CanvasCommand[] = [];
