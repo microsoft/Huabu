@@ -34,17 +34,13 @@ import type { Node, XYPosition } from '@xyflow/react';
  * Gap-to-cell ratio. Gaps breathe with content size: an extent is
  * multiplied by this ratio to produce a gap.
  *
- * The basis differs per gap kind so a single oversized node can't
- * inflate spacing where it doesn't belong:
- *  - **inter-track** gap (between columns / rows) uses the **median**
- *    non-empty track size along the count axis — uniform spacing that
- *    ignores outlier tracks;
- *  - **intra-track** gap (between items stacked inside one track) is
- *    likewise **uniform** across all tracks, derived from the median
- *    child size along the stack axis, so every track stacks with the
- *    same rhythm and one tall / wide node can't distort it.
+ * A single uniform gap is used for both the **inter-track** spacing
+ * (between columns / rows) and the **intra-track** spacing (between
+ * items stacked inside one track). It is derived from the **median** of
+ * all children's extents (width + height pooled), so spacing is even
+ * everywhere and one oversized node can't distort it.
  */
-const GAP_TO_CELL_RATIO = 0.1;
+const GAP_TO_CELL_RATIO = 0.08;
 
 /**
  * Floor applied to every derived gap so tiny nodes still get a little
@@ -96,9 +92,8 @@ function insertBetweenHalfBand(
 }
 
 /**
- * Derive a gap from a representative child extent — the median track
- * size for inter-track gaps, the median child size for intra-track
- * gaps. Floored at {@link MIN_GAP}.
+ * Derive a gap from a representative child extent — the median of all
+ * children's pooled extents. Floored at {@link MIN_GAP}.
  */
 function gapFromExtent(extent: number): number {
   if (!Number.isFinite(extent) || extent <= 0) return MIN_GAP;
@@ -107,8 +102,8 @@ function gapFromExtent(extent: number): number {
 
 /**
  * Median of a numeric list (0 for an empty list). Used as a robust
- * basis for the inter-track gap so one oversized track doesn't blow
- * out the spacing between every track.
+ * basis for the uniform gap so one oversized node doesn't blow out the
+ * spacing across the frame.
  */
 function median(values: number[]): number {
   if (values.length === 0) return 0;
@@ -341,12 +336,11 @@ export interface FrameGridLayoutResult {
  * Everything is **content-driven** — there is no pinned container
  * size. Each column's width is the widest child in that column (empty
  * columns are width 0 and collapse). Gaps breathe with content (see
- * {@link gapFromExtent}): the inter-column gap is uniform and follows
- * the **median** non-empty column width, and the intra (vertical
- * stacking) gap is likewise uniform across all columns, following the
- * **median** child height — so spacing stays even and one oversized
- * node can't distort it. The frame's own width / height are sized
- * to fit the resulting content.
+ * {@link gapFromExtent}): a single uniform gap is used for both the
+ * inter-column spacing and the intra (vertical stacking) spacing,
+ * derived from the **median** of all children's pooled extents — so
+ * spacing stays even and one oversized node can't distort it. The
+ * frame's own width / height are sized to fit the resulting content.
  *
  * Resizing the frame is handled upstream by proportionally scaling
  * every child's stored size; this solver then re-packs them, so the
@@ -390,21 +384,19 @@ export function applyColumnLayout(
     items.length === 0 ? 0 : Math.max(...items.map((i) => i.width)),
   );
 
-  // Inter-column gap is uniform but derived from the *median* non-empty
-  // column width, so one oversized column can't inflate the spacing
-  // between every column. The intra-column (vertical) gap is likewise
-  // uniform across all columns, derived from the *median* child height,
-  // so every column stacks with the same rhythm and one tall node can't
-  // distort it.
-  const interGap = gapFromExtent(median(colWidth.filter((w) => w > 0)));
-  const intraGap = gapFromExtent(median(children.map((c) => c.height)));
+  // A single uniform gap is used for both the inter-column (horizontal)
+  // and intra-column (vertical) spacing, derived from the *median* of
+  // all children's extents (width + height pooled). Using the median
+  // keeps spacing even and stops one oversized node from distorting it.
+  const gap = gapFromExtent(
+    median(children.flatMap((c) => [c.width, c.height])),
+  );
 
   // Cumulative left edge of each column.
   const colOriginX = new Array<number>(effectiveCols).fill(FRAME_PADDING);
   for (let c = 1; c < effectiveCols; c += 1) {
     colOriginX[c] =
-      colOriginX[c - 1] +
-      (colWidth[c - 1] > 0 ? colWidth[c - 1] + interGap : 0);
+      colOriginX[c - 1] + (colWidth[c - 1] > 0 ? colWidth[c - 1] + gap : 0);
   }
 
   const positions = new Map<string, XYPosition>();
@@ -413,9 +405,9 @@ export function applyColumnLayout(
     let y = FRAME_PADDING;
     for (const item of colItems[c]) {
       positions.set(item.node.id, { x: colOriginX[c], y });
-      y += item.height + intraGap;
+      y += item.height + gap;
     }
-    const bottom = colItems[c].length > 0 ? y - intraGap : 0;
+    const bottom = colItems[c].length > 0 ? y - gap : 0;
     if (bottom > tallest) tallest = bottom;
   }
 
@@ -438,9 +430,9 @@ export function applyColumnLayout(
 /**
  * N-row layout. Children stack left-to-right inside their row,
  * top-aligned. Mirror of {@link applyColumnLayout}: content-driven row
- * heights (tallest child per row), a uniform inter-row gap from the
- * median non-empty row height, and a uniform intra-row (horizontal)
- * gap from the median child width, frame sized to fit.
+ * heights (tallest child per row) and a single uniform gap (from the
+ * median of all children's pooled extents) for both the inter-row and
+ * intra-row spacing, frame sized to fit.
  */
 export function applyRowLayout(
   nodes: Node[],
@@ -478,19 +470,18 @@ export function applyRowLayout(
     items.length === 0 ? 0 : Math.max(...items.map((i) => i.height)),
   );
 
-  // Inter-row gap is uniform but derived from the *median* non-empty
-  // row height. The intra-row (horizontal) gap is likewise uniform
-  // across all rows, derived from the *median* child width, so every
-  // row stacks with the same rhythm and one oversized node can't
-  // distort it.
-  const interGap = gapFromExtent(median(rowHeight.filter((h) => h > 0)));
-  const intraGap = gapFromExtent(median(children.map((c) => c.width)));
+  // A single uniform gap is used for both the inter-row (vertical) and
+  // intra-row (horizontal) spacing, derived from the *median* of all
+  // children's extents (width + height pooled). Using the median keeps
+  // spacing even and stops one oversized node from distorting it.
+  const gap = gapFromExtent(
+    median(children.flatMap((c) => [c.width, c.height])),
+  );
 
   const rowOriginY = new Array<number>(effectiveRows).fill(FRAME_PADDING);
   for (let r = 1; r < effectiveRows; r += 1) {
     rowOriginY[r] =
-      rowOriginY[r - 1] +
-      (rowHeight[r - 1] > 0 ? rowHeight[r - 1] + interGap : 0);
+      rowOriginY[r - 1] + (rowHeight[r - 1] > 0 ? rowHeight[r - 1] + gap : 0);
   }
 
   const positions = new Map<string, XYPosition>();
@@ -499,9 +490,9 @@ export function applyRowLayout(
     let x = FRAME_PADDING;
     for (const item of rowItems[r]) {
       positions.set(item.node.id, { x, y: rowOriginY[r] });
-      x += item.width + intraGap;
+      x += item.width + gap;
     }
-    const right = rowItems[r].length > 0 ? x - intraGap : 0;
+    const right = rowItems[r].length > 0 ? x - gap : 0;
     if (right > widest) widest = right;
   }
 
@@ -549,8 +540,8 @@ export type StructuredDropTarget =
  * Map a flow-space drop point to a column-mode drop target. The
  * geometry mirrors {@link applyColumnLayout} **exactly** — fully
  * content-driven: each column's width is the widest child in it (empty
- * columns are width 0 and collapse), and the inter-column gap is the
- * median non-empty column width times the gap ratio.
+ * columns are width 0 and collapse), and the gap is a single uniform
+ * value from the median of all children's pooled extents.
  *
  *  - The dragged node is **not** excluded from width computation — it
  *    is visually still in its pre-drag column during the drag, and
@@ -597,9 +588,11 @@ export function pickColumnDropTarget(
   const colWidth = colItems.map((items) =>
     items.length === 0 ? 0 : Math.max(...items.map((i) => i.width)),
   );
-  // Mirror applyColumnLayout: uniform inter-column gap from the median
-  // non-empty column width.
-  const interGap = gapFromExtent(median(colWidth.filter((w) => w > 0)));
+  // Mirror applyColumnLayout: a single uniform gap derived from the
+  // median of all children's extents (width + height pooled).
+  const gap = gapFromExtent(
+    median(allChildren.flatMap((c) => [c.width, c.height])),
+  );
 
   // Cumulative left/right per column. Empty columns collapse — they
   // share their neighbour's coord and don't advance the cursor.
@@ -607,7 +600,7 @@ export function pickColumnDropTarget(
   const colRight = new Array<number>(count).fill(FRAME_PADDING);
   let cursor = FRAME_PADDING;
   // Right edge of the last non-empty column. `cursor` advances *past*
-  // the final column by one trailing `interGap`, so it can't be used
+  // the final column by one trailing `gap`, so it can't be used
   // directly for the content-driven width (that would over-count by one
   // gap vs. applyColumnLayout's `contentRight + FRAME_PADDING`).
   let contentRight = FRAME_PADDING;
@@ -616,7 +609,7 @@ export function pickColumnDropTarget(
     colRight[c] = cursor + colWidth[c];
     if (colWidth[c] > 0) {
       contentRight = cursor + colWidth[c];
-      cursor += colWidth[c] + interGap;
+      cursor += colWidth[c] + gap;
     }
   }
 
@@ -642,7 +635,7 @@ export function pickColumnDropTarget(
     // aiming, while the columns' centres stay `into-existing`.
     const gapCenter = (colRight[c] + colLeft[c + 1]) / 2;
     const half = insertBetweenHalfBand(
-      interGap,
+      gap,
       colWidth[c],
       colWidth[c + 1],
       INSERT_BETWEEN_MIN_HALF_COLUMN,
@@ -695,15 +688,17 @@ export function pickRowDropTarget(
   const rowHeight = rowItems.map((items) =>
     items.length === 0 ? 0 : Math.max(...items.map((i) => i.height)),
   );
-  // Mirror applyRowLayout: uniform inter-row gap from the median
-  // non-empty row height.
-  const interGap = gapFromExtent(median(rowHeight.filter((h) => h > 0)));
+  // Mirror applyRowLayout: a single uniform gap derived from the median
+  // of all children's extents (width + height pooled).
+  const gap = gapFromExtent(
+    median(allChildren.flatMap((c) => [c.width, c.height])),
+  );
 
   const rowTop = new Array<number>(count).fill(FRAME_PADDING);
   const rowBottom = new Array<number>(count).fill(FRAME_PADDING);
   let cursor = FRAME_PADDING;
   // Bottom edge of the last non-empty row. `cursor` advances *past* the
-  // final row by one trailing `interGap`, so it can't be used directly
+  // final row by one trailing `gap`, so it can't be used directly
   // for the content-driven height (that would over-count by one gap vs.
   // applyRowLayout's `contentBottom + FRAME_PADDING`).
   let contentBottom = FRAME_PADDING;
@@ -712,7 +707,7 @@ export function pickRowDropTarget(
     rowBottom[r] = cursor + rowHeight[r];
     if (rowHeight[r] > 0) {
       contentBottom = cursor + rowHeight[r];
-      cursor += rowHeight[r] + interGap;
+      cursor += rowHeight[r] + gap;
     }
   }
 
@@ -735,7 +730,7 @@ export function pickRowDropTarget(
     // while the rows' centres stay `into-existing`.
     const gapCenter = (rowBottom[r] + rowTop[r + 1]) / 2;
     const half = insertBetweenHalfBand(
-      interGap,
+      gap,
       rowHeight[r],
       rowHeight[r + 1],
       INSERT_BETWEEN_MIN_HALF_ROW,
