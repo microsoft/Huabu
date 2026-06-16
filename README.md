@@ -89,7 +89,8 @@ you commit or push. Enable them once per clone:
 pnpm run hooks:install
 ```
 
-This sets `core.hooksPath` to [.githooks](./.githooks), which runs:
+This generates the hooks into your local `.git/hooks` directory (they are
+not tracked in the repository), wiring up:
 
 - **pre-commit** — `lint-staged` (ESLint `--fix` + Prettier on staged files)
 - **pre-push** — `pnpm run typecheck`

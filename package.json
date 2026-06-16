@@ -20,8 +20,8 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "typecheck": "pnpm -r --parallel typecheck",
-    "hooks:install": "git config core.hooksPath .githooks",
-    "hooks:uninstall": "git config --unset core.hooksPath",
+    "hooks:install": "node scripts/install-git-hooks.mjs",
+    "hooks:uninstall": "node scripts/uninstall-git-hooks.mjs",
     "postinstall": "node scripts/install-agentlet-to-path.mjs"
   },
   "devDependencies": {
