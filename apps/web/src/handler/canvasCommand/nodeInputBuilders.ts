@@ -7,12 +7,14 @@
 import {
   uploadHtml,
   uploadImage,
+  uploadOffice,
   uploadPdf,
   uploadVideo,
 } from '../../api/artifact';
 import {
   detectNodeType,
   detectNodeTypeFromMime,
+  detectOfficeFormat,
   getImageDimensionsFromBlob,
   normalizeUrl,
 } from '../../utils/io/media';
@@ -69,6 +71,21 @@ export async function uploadFileToNodeInput(
       };
     }
 
+    if (type === 'office') {
+      // Derive the concrete Office format from the file extension so
+      // the renderer can pick the right icon without re-parsing `src`.
+      // Fall back to `docx` only if extension detection somehow fails
+      // — the upload would still succeed and the server-side parser
+      // auto-detects format from magic bytes.
+      const format = detectOfficeFormat(file.name) ?? 'docx';
+      const src = await uploadOffice(file, canvasId);
+      return {
+        nodeType: 'office',
+        placementPoint,
+        data: { src, format, label: file.name, origin },
+      };
+    }
+
     if (type === 'note') {
       const content = await file.text();
       return {
@@ -107,7 +124,11 @@ export function urlToNodeInput(
   origin: NodeOrigin,
 ): AddNodeInput {
   const finalUrl = normalizeUrl(url);
-  const nodeType = detectNodeType(finalUrl);
+  const detected = detectNodeType(finalUrl);
+  // Remote Office files are uncommon and cannot be ingested without a
+  // local copy; surface them as a generic web node so the link still
+  // round-trips through the canvas.
+  const nodeType = detected === 'office' ? 'web' : detected;
   return {
     nodeType,
     placementPoint,

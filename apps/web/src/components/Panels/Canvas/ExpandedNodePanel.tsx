@@ -12,7 +12,9 @@ import { PreviewHeaderSlotContext } from '../../Nodes/PreviewHeaderSlot.tsx';
 // Helper to get meta info (icon, title) for the header
 const getOverlayMeta = (type: string, data: Record<string, unknown>) => {
   const label = data.label as string;
-  const Icon = getNodeIcon(type);
+  // Pass `data` so the office breadcrumb resolves to the format-specific
+  // Word / Excel / PowerPoint icon instead of the generic Office glyph.
+  const Icon = getNodeIcon(type, data);
 
   return {
     title: label,

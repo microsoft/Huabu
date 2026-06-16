@@ -198,6 +198,10 @@ const webRoutes: FastifyPluginAsync = async (fastify) => {
             : hostname || undefined,
         embeddable:
           typeof meta.embeddable === 'boolean' ? meta.embeddable : undefined,
+        mhtmlArtifact:
+          typeof meta.mhtmlArtifact === 'string' && meta.mhtmlArtifact.trim()
+            ? meta.mhtmlArtifact.trim()
+            : undefined,
       };
       return reply.send(payload);
     },
@@ -289,6 +293,25 @@ const webRoutes: FastifyPluginAsync = async (fastify) => {
     const meta = source as unknown as Record<string, unknown>;
     const embeddable =
       typeof meta.embeddable === 'boolean' ? meta.embeddable : undefined;
+
+    // One-shot snapshot wins over the live URL: when the preprocess
+    // pipeline has captured an `.mhtml` artifact, point the iframe at
+    // the same-origin artifact route instead of refetching the remote
+    // site every render. The artifact route decodes `.mhtml` payloads
+    // and serves the inner HTML as `text/html`, so the embed model is
+    // identical to a regular HTML artifact — always embeddable.
+    const mhtmlArtifact =
+      typeof meta.mhtmlArtifact === 'string' && meta.mhtmlArtifact.trim()
+        ? meta.mhtmlArtifact.trim()
+        : null;
+    if (mhtmlArtifact) {
+      const payload: WebPageResponse = {
+        src: `/api/canvas/${encodeURIComponent(canvasId)}/artifact/${encodeURIComponent(mhtmlArtifact)}`,
+        kind: 'html',
+        embeddable: true,
+      };
+      return reply.send(payload);
+    }
 
     if (REMOTE_URL_RE.test(src)) {
       const payload: WebPageResponse = { src, kind: 'url', embeddable };

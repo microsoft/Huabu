@@ -17,8 +17,10 @@ import React, {
 } from 'react';
 import '@xyflow/react/dist/style.css';
 
+import { AudioNode } from '@/components/Nodes/audio/AudioNode';
 import { ImageNode } from '@/components/Nodes/image/ImageNode';
 import { NoteNode } from '@/components/Nodes/note/NoteNode';
+import { OfficeNode } from '@/components/Nodes/office/OfficeNode';
 import { PDFNode } from '@/components/Nodes/pdf/PDFNode';
 import { TextNode } from '@/components/Nodes/text/TextNode';
 import {
@@ -74,8 +76,10 @@ const nodeTypes = {
   text: TextNode,
   note: NoteNode,
   video: VideoNode,
+  audio: AudioNode,
   web: WebNode,
   pdf: PDFNode,
+  office: OfficeNode,
   frame: FrameNode,
   sketch: SketchNode,
   question: QuestionNode,
@@ -144,7 +148,14 @@ const FrameFitPreviewOverlay: React.FC<{
 });
 
 /** Node types that support expand-on-double-click. */
-const EXPANDABLE_TYPES = new Set(['image', 'video', 'web', 'pdf', 'note']);
+const EXPANDABLE_TYPES = new Set([
+  'image',
+  'video',
+  'web',
+  'pdf',
+  'office',
+  'note',
+]);
 
 /**
  * `--color-info` is a design-system token that does not change at runtime,
@@ -599,6 +610,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         pendingNodeType === 'text' && 'canvas-pending-text',
         pendingNodeType === 'frame' && 'canvas-pending-frame',
         pendingNodeType === 'sketch' && 'cursor-crosshair',
+        pendingNodeType === 'audio' && 'canvas-pending-audio',
         pendingNodeType === 'question' && 'canvas-pending-question',
         tool === 'lasso' && 'cursor-crosshair',
       )}

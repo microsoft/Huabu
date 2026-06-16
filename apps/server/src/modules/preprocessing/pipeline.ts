@@ -7,6 +7,9 @@
 
 import { randomUUID } from 'node:crypto';
 
+import { createId } from '@sediment/shared';
+
+import { wrapAsMhtml } from '../web/mhtml.js';
 import { tryCacheShortCircuit } from './stages/cache-check.js';
 import { enrich } from './stages/enrich.js';
 import { extract } from './stages/extract.js';
@@ -106,6 +109,60 @@ export async function runPipeline(
       if (has('extract_text')) usedCapabilities.push('extract_text');
       if (has('fetch_remote_content'))
         usedCapabilities.push('fetch_remote_content');
+
+      // Web one-shot snapshot: persist the fetched HTML as a `.mhtml`
+      // artifact so subsequent renders can load from disk instead of
+      // re-hitting the live URL. Only fires when the loader actually
+      // performed a network fetch (i.e. `rawHtml` is set) and the
+      // resolved input is a remote URL. Failures are non-fatal — the
+      // node still works in degraded "refetch every time" mode.
+      if (
+        request.nodeType === 'web' &&
+        ctx.extracted?.rawHtml &&
+        ctx.resolved.normalizedUri
+      ) {
+        try {
+          const artifactId = createId('artifact');
+          const ext = '.mhtml';
+          const buffer = wrapAsMhtml(
+            ctx.extracted.rawHtml,
+            ctx.resolved.normalizedUri,
+            typeof ctx.extracted.title === 'string'
+              ? ctx.extracted.title
+              : ctx.resolved.normalizedUri,
+          );
+          const record = await deps.store.writeArtifactBuffer(
+            { id: artifactId, ext, mimeType: 'message/rfc822' },
+            buffer,
+          );
+          // Inject the artifact key into metadata so the Normalize →
+          // Persist chain writes it as a top-level YAML field on the
+          // node sidecar. The web route reads `mhtmlArtifact` directly
+          // from frontmatter to point the iframe at the snapshot.
+          ctx.extracted = {
+            ...ctx.extracted,
+            metadata: {
+              ...(ctx.extracted.metadata ?? {}),
+              mhtmlArtifact: record.filename,
+            },
+          };
+        } catch (snapshotError) {
+          diagnostics.push({
+            code: 'SNAPSHOT_FAILED',
+            level: 'warning',
+            message:
+              snapshotError instanceof Error
+                ? snapshotError.message
+                : String(snapshotError),
+          });
+        }
+        // Drop rawHtml before normalize so it never round-trips into the
+        // frontmatter.
+        if (ctx.extracted) {
+          const { rawHtml: _rawHtml, ...rest } = ctx.extracted;
+          ctx.extracted = rest;
+        }
+      }
     } catch (error) {
       diagnostics.push({
         code: 'EXTRACT_FAILED',

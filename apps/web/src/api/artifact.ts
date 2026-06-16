@@ -13,7 +13,7 @@ import type {
 // web bundle has one obvious place to import from.
 export { parseArtifactUrl };
 
-type ArtifactType = 'image' | 'pdf' | 'video' | 'html';
+type ArtifactType = 'image' | 'pdf' | 'office' | 'video' | 'audio' | 'html';
 
 /**
  * Resolve a stored artifact reference into a fully-qualified URL that
@@ -98,11 +98,25 @@ export async function uploadPdf(file: File, canvasId: string): Promise<string> {
   return uploadArtifact(file, 'pdf', canvasId);
 }
 
+export async function uploadOffice(
+  file: File,
+  canvasId: string,
+): Promise<string> {
+  return uploadArtifact(file, 'office', canvasId);
+}
+
 export async function uploadVideo(
   file: File,
   canvasId: string,
 ): Promise<string> {
   return uploadArtifact(file, 'video', canvasId);
+}
+
+export async function uploadAudio(
+  file: File,
+  canvasId: string,
+): Promise<string> {
+  return uploadArtifact(file, 'audio', canvasId);
 }
 
 export async function uploadHtml(

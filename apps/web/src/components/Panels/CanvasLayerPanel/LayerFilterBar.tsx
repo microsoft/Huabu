@@ -2,10 +2,10 @@ import clsx from 'clsx';
 import { Search, X } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 
-import { NODE_ICON, NODE_TYPE_LABEL } from '../../../config/nodeIcons';
+import { getFilterKeyMeta } from './layerFilterKey';
 import { Button } from '../../Common/Button';
 
-import type { CanvasNodeType } from '@sediment/shared';
+import type { LayerFilterKey } from './layerFilterKey';
 
 interface LayerFilterBarProps {
   /** Current regex source (case-insensitive, applied to node labels). */
@@ -17,18 +17,19 @@ interface LayerFilterBarProps {
    */
   isRegexInvalid: boolean;
   /**
-   * Node types currently present on the canvas, in canonical order. The
-   * chip row is built from this list so users never see types that
-   * cannot match anything.
+   * Filter keys currently present on the canvas, in canonical order.
+   * Office is split per format (Word / Excel / PowerPoint) so the chip
+   * row mirrors what the user sees in the list rows below — see
+   * {@link LayerFilterKey} for the encoding.
    */
-  availableTypes: CanvasNodeType[];
+  availableKeys: LayerFilterKey[];
   /**
-   * Whitelist of node types the user has clicked. An empty set means
+   * Whitelist of filter keys the user has clicked. An empty set means
    * "no type constraint" — the list shows every type. Otherwise only
-   * nodes whose type is in this set survive the filter.
+   * nodes whose key is in this set survive the filter.
    */
-  selectedTypes: Set<CanvasNodeType>;
-  onToggleType: (type: CanvasNodeType) => void;
+  selectedKeys: Set<LayerFilterKey>;
+  onToggleKey: (key: LayerFilterKey) => void;
   /** Whether the regex search input row is currently expanded. */
   isSearchOpen: boolean;
   onOpenSearch: () => void;
@@ -45,9 +46,9 @@ export const LayerFilterBar = ({
   query,
   onQueryChange,
   isRegexInvalid,
-  availableTypes,
-  selectedTypes,
-  onToggleType,
+  availableKeys,
+  selectedKeys,
+  onToggleKey,
   isSearchOpen,
   onOpenSearch,
   onCloseSearch,
@@ -60,7 +61,7 @@ export const LayerFilterBar = ({
     if (isSearchOpen) inputRef.current?.focus();
   }, [isSearchOpen]);
 
-  const showChipRow = availableTypes.length >= 2;
+  const showChipRow = availableKeys.length >= 2;
 
   return (
     // The sticky `bg-surface` occludes list rows during scroll, plus a
@@ -133,22 +134,22 @@ export const LayerFilterBar = ({
         // explicit non-chip control on this row.
         <div className="flex items-center gap-1.5">
           <div className="flex flex-1 flex-wrap items-center gap-0.5">
-            {availableTypes.map((type) => {
-              const Icon = NODE_ICON[type];
-              const isSelected = selectedTypes.has(type);
+            {availableKeys.map((key) => {
+              const { icon: Icon, label } = getFilterKeyMeta(key);
+              const isSelected = selectedKeys.has(key);
               return (
                 <Button
-                  key={type}
+                  key={key}
                   variant="ghost"
                   tone={isSelected ? 'info' : 'neutral'}
                   iconOnly
                   size="sm"
                   shape="pill"
-                  onClick={() => onToggleType(type)}
+                  onClick={() => onToggleKey(key)}
                   title={
                     isSelected
-                      ? `Stop filtering by ${NODE_TYPE_LABEL[type]}`
-                      : `Filter by ${NODE_TYPE_LABEL[type]}`
+                      ? `Stop filtering by ${label}`
+                      : `Filter by ${label}`
                   }
                   className={clsx(
                     'p-1!',

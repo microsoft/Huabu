@@ -68,12 +68,28 @@ export const WebNode = memo(
     // Iframe target for the live snapshot. Same canonical form the Preview
     // panel uses — remote URL, self-contained data URL, or same-origin
     // artifact URL. All three can be set directly as an iframe `src`.
+    //
+    // When the preprocess pipeline has captured a one-shot `.mhtml`
+    // snapshot for this URL, prefer that over the live remote URL: the
+    // artifact route serves it as same-origin `text/html` so we (a)
+    // avoid re-hitting the network on every render and (b) sidestep
+    // X-Frame-Options entirely — meaning the iframe works in a plain
+    // browser too, not just Electron.
     const livePreviewSrc = useMemo(() => {
+      if (preview?.mhtmlArtifact)
+        return resolveArtifactUrl(preview.mhtmlArtifact, canvasId);
       if (isRemoteUrl) return src;
       if (isDataUrl) return src;
       if (isHtmlArtifact) return resolveArtifactUrl(src, canvasId);
       return '';
-    }, [isRemoteUrl, isDataUrl, isHtmlArtifact, src, canvasId]);
+    }, [
+      preview?.mhtmlArtifact,
+      isRemoteUrl,
+      isDataUrl,
+      isHtmlArtifact,
+      src,
+      canvasId,
+    ]);
 
     useEffect(() => {
       if (ingestion?.status === 'pending') {
@@ -119,15 +135,20 @@ export const WebNode = memo(
       };
     }, [src, canvasId, ingestion?.status, id]);
 
-    // Live iframe is reserved for the desktop build only. The Electron
-    // main process strips `X-Frame-Options` / CSP `frame-ancestors`, so
-    // the iframe always loads. In a plain browser those headers stay in
-    // place and ~50% of real sites would render as a blank gray box —
-    // we'd rather always show the og:image / favicon fallback than gamble
-    // on the iframe. Interaction with the live page still lives in the
-    // Preview panel (which the toolbar's Fullscreen button opens).
+    // Live iframe is reserved for the desktop build only — *unless* the
+    // src is a same-origin artifact (uploaded HTML, or a captured `.mhtml`
+    // snapshot). In Electron the main process strips `X-Frame-Options`
+    // and CSP `frame-ancestors`, so any URL embeds cleanly. In a plain
+    // browser those headers stay in place and ~50% of real sites would
+    // render as a blank gray box — we'd rather show the og:image /
+    // favicon fallback than gamble on the iframe. Artifact-backed
+    // sources (`/api/canvas/.../artifact/...`) are same-origin and have
+    // no embedding restrictions, so we always render them inline.
     const inElectron = useMemo(() => isElectron(), []);
-    const liveIframeSrc = inElectron ? livePreviewSrc : '';
+    const isSameOriginPreview =
+      !!preview?.mhtmlArtifact || isHtmlArtifact || isDataUrl;
+    const liveIframeSrc =
+      inElectron || isSameOriginPreview ? livePreviewSrc : '';
 
     // Track the live iframe's load state so we can fade it in (avoids
     // a flash of about:blank while the page paints).

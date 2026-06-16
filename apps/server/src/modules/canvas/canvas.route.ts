@@ -21,6 +21,7 @@ import {
 import { CanvasNotFoundError, executeOnServer } from './canvas-executor.js';
 import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
 import { getPreprocessDispatcher } from '../preprocessing/index.js';
+import { stripOfficeparserPreamble } from '../preprocessing/loaders/office-strip.js';
 import {
   refreshCanvasDirIndex,
   registerCanvasDir,
@@ -114,14 +115,22 @@ const MD_BACKED_NODE_TYPES = new Set([
   'text',
   'web',
   'pdf',
+  'office',
   'image',
   'video',
+  'audio',
   'frame',
   'question',
 ]);
 
 /** Subset that carries a textual body in the markdown. */
-const TEXT_BEARING_NODE_TYPES = new Set(['note', 'text', 'web', 'pdf']);
+const TEXT_BEARING_NODE_TYPES = new Set([
+  'note',
+  'text',
+  'web',
+  'pdf',
+  'office',
+]);
 
 /**
  * Per-node `data` keys whose values live exclusively in the markdown
@@ -182,7 +191,13 @@ const CONTENT_BACKED_NODE_TYPES = new Set(['note', 'text']);
  * referenced file is gone from disk we surface an `artifactMissing` flag
  * so the client can show a placeholder + Remove button.
  */
-const ARTIFACT_BACKED_NODE_TYPES = new Set(['pdf', 'image', 'video']);
+const ARTIFACT_BACKED_NODE_TYPES = new Set([
+  'pdf',
+  'office',
+  'image',
+  'video',
+  'audio',
+]);
 
 /**
  * Extract an artifact storage key from a `data.src` / `data.coverUrl`
@@ -281,7 +296,11 @@ function hydrateOneNode(
   // markdown is metadata-only and the canvas state does not carry
   // a content field for them.
   if (TEXT_BEARING_NODE_TYPES.has(nodeType)) {
-    data['content'] = nodeContent.content;
+    let body = nodeContent.content;
+    if (nodeType === 'office' && typeof body === 'string') {
+      body = stripOfficeparserPreamble(body);
+    }
+    data['content'] = body;
   }
 
   // Rehydrate the source URL for artifact-backed (image/pdf/video) and
@@ -754,6 +773,19 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         // the client never receives a redundant src write.
         src:
           typeof result.patch.src === 'string' ? result.patch.src : undefined,
+        // For office nodes the in-canvas preview reads `data.content`
+        // directly, so ship the freshly-extracted body back so the
+        // client doesn't need a full canvas reload (or a follow-up
+        // GET /content) before the preview can render. The OfficeLoader
+        // already strips officeparser's auto-prepended YAML frontmatter
+        // and stray horizontal rule, so this value is preview-ready.
+        // Other text-bearing types (pdf / web / note) deliberately do
+        // NOT echo `content` here — their previews never read it and
+        // the extracted text can be hundreds of KB.
+        content:
+          nodeType === 'office' && typeof result.extracted?.content === 'string'
+            ? result.extracted.content
+            : undefined,
         summary: result.enriched?.summary,
         keywords: result.enriched?.keywords,
         error:

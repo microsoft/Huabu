@@ -33,6 +33,16 @@ export interface WebPreviewResponse {
    * strategy without making a second `/api/web/page` round-trip.
    */
   embeddable?: boolean;
+  /**
+   * Bare artifact key (e.g. `art_abc.mhtml`) of the one-shot snapshot
+   * captured the first time the URL was fetched. Present once the
+   * preprocess pipeline has written the artifact; `undefined` for
+   * snapshot-less nodes (local HTML, `data:` URLs, legacy nodes that
+   * have not been re-preprocessed yet). When present, the canvas-level
+   * WebNode renders this via `/api/canvas/<id>/artifact/<key>` instead
+   * of pointing the iframe at the live remote URL.
+   */
+  mhtmlArtifact?: string;
 }
 
 export interface WebReaderResponse {
