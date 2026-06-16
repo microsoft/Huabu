@@ -141,9 +141,11 @@ export const QuestionNode = memo(
 
     const openInChat = useCallback(() => {
       if (!data.threadId) return;
-      // Forward the node's binding so the ChatInput mode selector
-      // reflects the agent that actually answered this question
-      // (defaults to internal when the node pre-dates `agentBinding`).
+      // Forward the node's binding so the panel title + ACP selectors
+      // reflect the agent that answered. The replay mode (ask/operate)
+      // is derived from this node's `agentMode` inside ChatPanel, so
+      // follow-up turns stay locked to the mode the question runs in
+      // without us threading it through here.
       openQuestionThread(id, data.threadId, data.agentBinding);
       requestOpenRightPanel();
       // Mark as viewed only once the run has finished — if we marked
