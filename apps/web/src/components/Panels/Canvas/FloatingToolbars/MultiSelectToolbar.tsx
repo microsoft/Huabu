@@ -3,7 +3,7 @@ import { useCallback, useMemo } from 'react';
 
 import {
   ACCENT_NONE_TOKEN,
-  ACCENT_PICKER_OPTIONS,
+  ACCENT_PALETTE,
   ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT,
 } from '@sediment/shared';
 import {
@@ -81,7 +81,7 @@ export const MultiSelectToolbar = () => {
     () =>
       selectedNodes.length > 0 && selectedNodes.every((n) => n.type === 'text')
         ? ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT
-        : ACCENT_PICKER_OPTIONS,
+        : ACCENT_PALETTE,
     [selectedNodes],
   );
 

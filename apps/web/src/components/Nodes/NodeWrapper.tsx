@@ -15,7 +15,7 @@ import React, {
 } from 'react';
 import { createPortal } from 'react-dom';
 
-import { resolveSurface, resolveAccent } from '@sediment/shared';
+import { resolveAccent } from '@sediment/shared';
 import {
   createAbsolutePositionGetter,
   indexById,
@@ -47,8 +47,6 @@ import {
 import { SemanticPlaceholder } from './SemanticPlaceholder.tsx';
 
 import type { CanvasNodeType, NodeData } from './types.ts';
-
-const NODE_BG_OPACITY_PCT = 100;
 
 const OverlayPortal = memo(
   ({
@@ -157,7 +155,14 @@ interface NodeWrapperProps {
 
   keepAspectRatio?: boolean;
   resizable?: boolean;
-  borderColor?: string;
+  /**
+   * Escape hatch for node types whose fill is not the user-facing accent
+   * — currently only `QuestionNode`, which paints a fixed sticky-yellow
+   * background regardless of any `style.accent`. Leave `undefined` for
+   * every other node type: the wrapper derives the fill from
+   * `data.style.accent` so border + fill + text tint stay in sync.
+   */
+  fillColor?: string;
 
   onResizeStart?: () => void;
   /**
@@ -214,7 +219,7 @@ export const NodeWrapper = memo(
 
     allowOverflow = false,
 
-    borderColor,
+    fillColor,
 
     onResizeStart,
     onResize: onResizeProp,
@@ -474,9 +479,9 @@ export const NodeWrapper = memo(
             type !== 'text' &&
               type !== 'sketch' &&
               type !== 'question' &&
-              (!data.style?.accent || data.style.accent === 'white') &&
+              !accentTokens &&
               'shadow',
-            !data.style?.backgroundColor && 'bg-transparent',
+            !accentTokens && !fillColor && 'bg-transparent',
             selected
               ? type === 'sketch'
                 ? 'ring-info/50 ring'
@@ -491,23 +496,20 @@ export const NodeWrapper = memo(
             className,
           )}
           style={{
-            ...(() => {
-              const bg = resolveSurface(data.style?.backgroundColor);
-              if (!bg || bg === 'transparent') return {};
-
-              return {
-                backgroundColor: `color-mix(in srgb, ${bg} ${NODE_BG_OPACITY_PCT}%, transparent)`,
-              };
-            })(),
+            // Fill priority: explicit override (`fillColor`, used by
+            // QuestionNode) > accent-derived tint > nothing (let the
+            // `bg-transparent` class above show the canvas through).
+            ...(fillColor
+              ? { backgroundColor: fillColor }
+              : accentTokens
+                ? { backgroundColor: accentTokens.bg }
+                : {}),
             ...(accentTokens && {
               borderColor: accentTokens.border,
             }),
             ...(type === 'question' && {
               borderColor: 'transparent',
             }),
-            // Node-level override (e.g. NoteNode forces solid white when
-            // the picked accent is `white`). Applied last so it always wins.
-            ...(borderColor && { borderColor }),
           }}
           onDoubleClick={onDoubleClick}
           onPointerEnter={() => setHovered(true)}

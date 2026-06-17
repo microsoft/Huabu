@@ -112,7 +112,7 @@ export const getCanvasOutlineParamsSchema = Type.Object({
   includeStyle: Type.Optional(
     Type.Boolean({
       description:
-        "Attach each node's visual style (accent / backgroundColor / text styling). Default: false. Set true only for visual / styling tasks.",
+        "Attach each node's visual style (accent color token + text styling). Default: false. Set true only for visual / styling tasks.",
     }),
   ),
 });

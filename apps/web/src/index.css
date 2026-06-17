@@ -363,6 +363,30 @@ body:not(.canvas-resize-active) .react-flow__node-frame:not(.dragging) {
   filter: drop-shadow(0 0 2px var(--color-info-light));
 }
 
+/* Expand the hit area of NodeResizer edge controls. xyflow defaults to a
+   1 px wide line, which is nearly impossible to grab precisely. The
+   visible border stays hidden via `lineClassName="!border-transparent"`
+   on `<NodeResizer>` (see `NodeWrapper.tsx`), so widening the line only
+   grows the invisible clickable strip — the selection outline still
+   appears as a hairline. Corner handles (`.handle`) are unaffected; their
+   size is controlled by `handleStyle` in `NodeWrapper.tsx`.
+
+   `!important` is required because `@xyflow/react/dist/style.css` is
+   imported AFTER this file (via `Canvas.tsx`) and would otherwise win
+   the cascade with the same selector specificity. The `z-index` keeps
+   the widened strip above the node body so internal content doesn't
+   intercept the click. */
+.react-flow__resize-control.line.left,
+.react-flow__resize-control.line.right {
+  width: 12px !important;
+  z-index: 5;
+}
+.react-flow__resize-control.line.top,
+.react-flow__resize-control.line.bottom {
+  height: 12px !important;
+  z-index: 5;
+}
+
 /* Keep pdf.js text-layer spans invisible during text selection so the
   HTML text (which uses system fonts) doesn't bleed through the canvas
   rendering that shows the actual PDF fonts.  A semi-transparent background

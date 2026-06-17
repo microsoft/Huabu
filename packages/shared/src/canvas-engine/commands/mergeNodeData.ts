@@ -32,12 +32,41 @@ const mergeNodeData: CommandDefinition<Cmd> = {
       const patchRec = patch as Record<string, unknown>;
       const dataRec = (n.data ?? {}) as Record<string, unknown>;
 
+      // `data` merges shallowly; `data.style` merges one level deeper.
+      // Top-level fields (`label`, `content`, `provenance`, …) are owned
+      // by independent code paths so a shallow replace is the right
+      // semantics. `style`, however, is a *bag* of visual fields
+      // (`accent`, `fontFamily`, `fontSize`, …) and the natural caller
+      // intent — including every LLM-issued restyle — is "change this
+      // one knob, leave the rest alone". A shallow replace there would
+      // silently wipe sibling style fields (the exact bug surfaced in
+      // 2026-06-17 when an AI accent patch was erasing user-set font
+      // sizes). Deep-merging at this single key keeps the predictable
+      // shallow-merge contract everywhere else while plugging that
+      // footgun. Pass `style: undefined` (or `null`) to clear the whole
+      // bag explicitly.
+      const mergedData: Record<string, unknown> = {
+        ...dataRec,
+        ...patchRec,
+      };
+      if ('style' in patchRec) {
+        const incomingStyle = patchRec.style;
+        if (incomingStyle && typeof incomingStyle === 'object') {
+          const existingStyle =
+            dataRec.style && typeof dataRec.style === 'object'
+              ? (dataRec.style as Record<string, unknown>)
+              : {};
+          mergedData.style = {
+            ...existingStyle,
+            ...(incomingStyle as Record<string, unknown>),
+          };
+        }
+        // `null` / `undefined` flow through unchanged as a clear-all signal.
+      }
+
       const updated: Node = {
         ...n,
-        data: {
-          ...dataRec,
-          ...patchRec,
-        },
+        data: mergedData,
       };
       mutatedNodes.push(updated);
       // Engine-neutral fact: the node's `content` field was rewritten.

@@ -17,7 +17,7 @@ Everything you need to mutate a canvas. **Load this before issuing your first `c
 - **CREATE_NODES** — create one or more nodes. If you supply an explicit `position` it is honoured verbatim; omit `position` to let the force-directed engine pick a non-overlapping slot.
 - **CREATE_QUESTION** — create a question node the user is expected to answer. Use this to surface follow-ups instead of asking in chat.
 - **DELETE_NODES** — remove nodes by id. Incident edges are removed automatically.
-- **MERGE_NODE_DATA** — shallow-merge a patch into `node.data` (label / content / style). Style supports `accent` (palette token, top stripe + edge stroke) and `backgroundColor` on every node type; text-only style fields apply only to text nodes.
+- **MERGE_NODE_DATA** — shallow-merge a patch into `node.data` (label / content / style). `data.style.accent` is the single color knob that drives border + fill + text tint together; font fields apply only to text-bearing nodes.
 - **CONNECT_NODES** — create edges. Style fields (lineType, lineStyle, stroke, strokeWidth, direction) are optional and pulled from the edge schema.
 - **DISCONNECT_EDGES** — remove edges by id or by source/target pair.
 - **SET_EDGE_STYLE** — patch visual style on existing edges.
@@ -58,11 +58,11 @@ Everything you need to mutate a canvas. **Load this before issuing your first `c
 
 **Accent tokens (`data.style.accent`)**
 
-- The accent renders as a coloured stripe / shadow that stays visible at low zoom — it is the primary visual signal for "these nodes belong together".
-- Use the **same accent** for every node in one logical group; use **distinct accents** to separate groups.
+- The accent is the **single color knob** for a node: it drives the node's border, fill tint, and text tint together. There is no separate background-color or text-color field — do not invent one.
+- Use the **same accent** for every node in one logical group; use **distinct accents** to separate groups. The grouping reads even at low zoom.
 - Reserve `"grey"` for de-emphasised / neutral material.
-- Allowed tokens are enumerated on the `CREATE_NODES` schema (`data.style.accent`, e.g. `"purple"`, `"cyan"`, `"amber"`). **Never invent hex values.**
-- Apply via `CREATE_NODES` (on creation) or `MERGE_NODE_DATA` (on existing nodes); the merge is shallow on `data` so a `{ data: { style: { accent: "purple" } } }` patch leaves every other field untouched.
+- Allowed tokens are enumerated on the `CREATE_NODES` schema (`data.style.accent`): `"grey"`, `"red"`, `"orange"`, `"amber"`, `"green"`, `"blue"`, `"purple"`, or `null` to clear. **Never invent hex values or other token names.**
+- Apply via `CREATE_NODES` (on creation) or `MERGE_NODE_DATA` (on existing nodes); the engine deep-merges `data.style`, so a `{ data: { style: { accent: "purple" } } }` patch leaves every other style field (`fontFamily`, `fontSize`, …) untouched.
 
 ## See also
 

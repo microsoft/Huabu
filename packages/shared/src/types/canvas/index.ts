@@ -15,24 +15,16 @@ export type {
   AccentEntry,
   AccentToken,
   AccentValue,
-  SurfaceEntry,
-  SurfaceToken,
-  SurfaceValue,
   ColorPickerOption,
 } from './color.js';
 export {
   ACCENT_PALETTE,
   ACCENT_NONE_TOKEN,
-  ACCENT_PICKER_OPTIONS,
   ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT,
-  SURFACE_PALETTE,
   isAccentToken,
-  isSurfaceToken,
   isHexColor,
   resolveAccent,
-  resolveSurface,
   accentName,
-  surfaceName,
 } from './color.js';
 
 // Node types

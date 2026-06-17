@@ -3,7 +3,7 @@
  *
  * Style fields are split between `node.ts` and `edge.ts` even when they
  * share a palette so each module owns one cohesive domain (node-only
- * font/background fields here; edge-only line type/style fields there).
+ * font fields here; edge-only line type/style fields there).
  * Truly cross-cutting primitives — palette colour, point, size —
  * live in `./common.ts`.
  */
@@ -16,46 +16,30 @@ import {
   NODE_FONT_FAMILIES,
   NODE_FONT_STYLES,
   NODE_FONT_WEIGHTS,
-  SURFACE_PALETTE,
 } from '@sediment/shared';
 
-import {
-  literalUnion,
-  NodeSizeSchema,
-  PaletteColorSchema,
-  PointSchema,
-} from './common.js';
+import { literalUnion, NodeSizeSchema, PointSchema } from './common.js';
 
 /** Node `type` discriminator restricted to the agent-creatable set. */
 export const NodeTypeSchema = literalUnion(AGENT_CREATABLE_NODE_TYPES);
-
-/** Node background colour token (own palette, distinct from accent). */
-export const NodeBgColorSchema = Type.Union(
-  SURFACE_PALETTE.map((c) => Type.Literal(c.token)),
-  {
-    description: `Node background color token. Tokens map to: ${SURFACE_PALETTE.map((c) => `"${c.token}"=${c.value} (${c.name})`).join(', ')}`,
-  },
-);
 
 export const NodeFontFamilySchema = literalUnion(NODE_FONT_FAMILIES);
 export const NodeFontWeightSchema = literalUnion(NODE_FONT_WEIGHTS);
 export const NodeFontStyleSchema = literalUnion(NODE_FONT_STYLES);
 
 /**
- * Visual style applied to a node. Most fields are text-node only; the
- * description below restates which apply where so the LLM doesn't burn
- * a turn checking node types.
+ * Visual style applied to a node. `accent` is the single color knob —
+ * it drives the node's border, fill tint, and text tint together. Font
+ * fields apply only to text-bearing nodes (note / text / question); the
+ * other node types ignore them.
  */
 export const NodeStyleSchema = Type.Object(
   {
-    backgroundColor: Type.Optional(NodeBgColorSchema),
-    textColor: Type.Optional(PaletteColorSchema),
     accent: Type.Optional(
       Type.Union(
         [...ACCENT_PALETTE.map((c) => Type.Literal(c.token)), Type.Null()],
         {
-          description:
-            'Accent color token shown as a colored shadow on the bottom-right. Use a palette token (e.g. "purple") or null to remove. Shared palette with edge stroke and text color.',
+          description: `Single color token for the node. Drives border, fill tint, and text tint together — there is no separate background/text color field. Pass \`null\` to clear. Tokens map to: ${ACCENT_PALETTE.map((c) => `"${c.token}"=${c.value} (${c.name})`).join(', ')}.`,
         },
       ),
     ),
@@ -71,7 +55,7 @@ export const NodeStyleSchema = Type.Object(
   },
   {
     description:
-      'Visual style — full support on text nodes only. backgroundColor and accent apply to all node types.',
+      'Visual style. `accent` is the single color knob and applies to every node type; font fields apply only to text-bearing nodes (note / text / question).',
   },
 );
 

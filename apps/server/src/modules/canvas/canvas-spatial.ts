@@ -81,7 +81,7 @@ interface RawNode {
   /**
    * Top-level `style` carries explicit width/height for resizable nodes.
    * Distinct from `data.style`, which holds the *visual* style
-   * (accent / backgroundColor / text styling) — we surface that under
+   * (accent + text styling) — we surface that under
    * the result `style` field.
    */
   style?: { width?: number | string; height?: number | string };

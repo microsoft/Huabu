@@ -483,12 +483,18 @@ export const QuestionNode = memo(
     return (
       <NodeWrapper
         id={id}
-        data={{ ...data, style: { ...data.style, backgroundColor: STICKY_BG } }}
+        data={data}
         type={'question'}
         selected={selected}
         actions={questionToolbar}
         keepAspectRatio={false}
         allowOverflow
+        // QuestionNode owns its sticky-yellow fill: it is not driven by
+        // the user's accent palette (which collapses border + fill + text
+        // tint into one token for every other node type), so we hand
+        // NodeWrapper the literal sticky color via the dedicated escape
+        // hatch instead of forging it into `data.style.backgroundColor`.
+        fillColor={STICKY_BG}
         className={clsx(
           'question-sticky rounded-lg transition-all duration-200',
           isDoneUnviewed && 'question-node-done-unviewed',
