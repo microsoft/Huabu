@@ -4,6 +4,35 @@
 
 ---
 
+## 2026-06-17 · 桌面端 / 网页端 Logo 升级为带圆角白底的新版
+
+**What Changed**
+
+- **桌面端窗口图标、Dock 图标、安装包图标（`.icns` / `.ico` / `.png`）和网页端 favicon 全部更新为新版 Logo**：在原来的彩色圆点 + 黑色哑铃图形外，新增了圆角白底背景，整体观感更接近 macOS / Windows 原生应用图标的视觉层级。
+- 之前 `apps/web/public/favicon.svg` 已经升级到新版，但同目录下的 `favicon.png` 和 `apps/desktop/build-resources/` 中三个二进制图标文件（`.icns` / `.ico` / `.png`）从未根据新 SVG 重新生成，导致打包后的桌面应用在 Dock / 任务栏 / 标题栏依旧显示旧版 Logo。
+- 新增 `apps/desktop/scripts/build-icons.mjs` 脚本，使用 `sharp` + `png2icons` 把 `apps/desktop/build-resources/logo.svg` 一键转换为所有目标平台所需的位图格式；今后调整 Logo 时只需要更新这个 SVG，然后执行 `pnpm --filter @sediment/desktop run icons:build` 即可同步所有平台的图标。
+
+**Notes**
+
+- macOS Dock 在首次启动新版应用时可能依旧显示缓存中的旧图标，可执行 `killall Dock` 或重新登录账户清除缓存。
+- Windows 资源管理器同样存在图标缓存（`IconCache.db`），如有需要可通过任务管理器重启 `explorer.exe` 刷新。
+- 浏览器端 favicon 的更新依赖浏览器缓存策略，必要时使用强制刷新（Cmd/Ctrl + Shift + R）。
+
+---
+
+## 2026-06-17 · 桌面端画布标题旁恢复 Logo
+
+**What Changed**
+
+- **桌面端（Electron）画布页面的 `CanvasHeader` 现在会在画布名称（如 "测试"）左侧重新显示站点 Logo**。之前为了避免与窗口标题栏 `WindowChrome` 顶部的 Home 图标重复，桌面端隐藏了这个 Logo，导致浮动 / 内嵌头部和网页端样式不一致。现在两端表现一致，Logo 始终可见。
+
+**Notes**
+
+- 网页端外观不变。
+- 桌面端窗口标题栏顶部的 Home 房子图标依然保留——现在标题栏和画布头部各自有一个返回首页的入口，两者都链接到 `/`，使用上等价。
+
+---
+
 ## 2026-06-17 · 节点配色统一为单一 accent 字段
 
 **What Changed**
