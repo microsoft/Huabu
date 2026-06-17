@@ -2005,9 +2005,17 @@ const useCanvasStore = create<RFState>()(
       // detector (and resetting the autosave debounce) on every frame.
       get()._setStateNoAutosave({ nodes: nextNodes });
 
-      // ── Structured frame relayout on measured-size changes ─────────
-
+      // ── Frame relayout on measured-size changes ────────────────────
+      // Both structured (`column` / `row`) and free-mode frames refit
+      // when a child's measured size changes (e.g. a note growing as
+      // its content is edited, or a freshly-added note settling on its
+      // content height — which has no committed `style.height` yet, so
+      // the executor's synchronous fit treated it as zero). The deferred
+      // relayout runs the structured grid solver (a no-op for free
+      // frames) followed by a bounding-box `fitFrames` pass that handles
+      // free frames and cascades to ancestors.
       if (!resizeCtx && !isSnapSessionActive()) {
+        const autoLayoutEnabled = get().autoLayoutEnabled;
         let framesToRelayout: Set<string> | undefined;
         for (const c of sanitized) {
           if (c.type !== 'dimensions') continue;
@@ -2016,9 +2024,16 @@ const useCanvasStore = create<RFState>()(
           if (!child?.parentId) continue;
           const parent = nextNodes.find((n) => n.id === child.parentId);
           if (!parent || parent.type !== 'frame') continue;
+          // Free-mode frames only chase their children's measured size
+          // when auto-layout is on — consistent with the executor's
+          // synchronous fit and the command-level `deferredFitFrameIds`
+          // path. Structured (`column` / `row`) frames always reflow:
+          // their layout mode is an explicit per-frame opt-in that is
+          // independent of the global auto-layout toggle.
           const mode = (parent.data as { layoutMode?: string } | undefined)
             ?.layoutMode;
-          if (mode !== 'column' && mode !== 'row') continue;
+          const isStructured = mode === 'column' || mode === 'row';
+          if (!isStructured && !autoLayoutEnabled) continue;
           // Skip when measured matches the explicitly-pinned size —
           // the RO is just confirming the size we already committed
           // (typical echo right after a `SET_NODE_GEOMETRY` commit)
