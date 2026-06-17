@@ -6,14 +6,12 @@ import {
   FRAME_GRID_DEFAULT_COUNT,
   FRAME_GRID_MAX_COUNT,
   FRAME_GRID_MIN_COUNT,
-  resolveAccent,
   type FrameLayoutMode,
 } from '@sediment/shared';
 import { clampGridCount } from '@sediment/shared/canvas-engine';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
 import { Input } from '@/components/Common/Input.tsx';
-import { getAccentTokens } from '@/components/Nodes/accentTokens.ts';
 import { NodeWrapper } from '@/components/Nodes/NodeWrapper.tsx';
 import useCanvasStore from '@/store/canvasStore.ts';
 
@@ -115,17 +113,6 @@ export const FrameNode = memo(
         gridCount: next,
       });
     };
-
-    // Accent picker → derived background colour (unchanged).
-    const accent = resolveAccent(data.style?.accent);
-    const accentTokens = accent ? getAccentTokens(accent) : null;
-    const wrapperData = useMemo(() => {
-      const baseStyle = data.style ?? {};
-      const nextStyle = accentTokens
-        ? { ...baseStyle, backgroundColor: accentTokens.bg }
-        : { ...baseStyle, backgroundColor: undefined };
-      return { ...data, style: nextStyle };
-    }, [data, accentTokens]);
 
     const setMode = (next: FrameLayoutMode) => {
       dispatchUiIntent({
@@ -332,7 +319,7 @@ export const FrameNode = memo(
     return (
       <NodeWrapper
         id={id}
-        data={wrapperData}
+        data={data}
         type={'frame'}
         selected={selected && !isEditingLabel}
         actions={FrameActions}

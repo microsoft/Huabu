@@ -4,7 +4,7 @@ import { memo, useCallback, useMemo, type ReactNode } from 'react';
 
 import {
   ACCENT_NONE_TOKEN,
-  ACCENT_PICKER_OPTIONS,
+  ACCENT_PALETTE,
   ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT,
 } from '@sediment/shared';
 
@@ -202,7 +202,7 @@ export const NodeFloatingToolbar = memo(
             colors={
               type === 'text'
                 ? ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT
-                : ACCENT_PICKER_OPTIONS
+                : ACCENT_PALETTE
             }
             value={data.style?.accent ?? ACCENT_NONE}
             onSelect={(t) =>

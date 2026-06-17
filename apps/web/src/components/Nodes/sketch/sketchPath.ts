@@ -1,6 +1,6 @@
 import getStroke from 'perfect-freehand';
 
-import { ACCENT_PICKER_OPTIONS } from '@sediment/shared';
+import { ACCENT_PALETTE, type ColorPickerOption } from '@sediment/shared';
 
 export const SKETCH_OPTIONS = {
   size: 4,
@@ -17,8 +17,9 @@ export const SKETCH_OPTIONS = {
  *
  * Stored as a picker token (e.g. `'black'`, `'grey'`); resolved to a CSS
  * color at render time via `resolveAccent`. `'black'` and `'white'` are
- * picker-only entries that fall through to the CSS keyword via the
- * passthrough branch (see shared `color.ts`).
+ * sketch-only picker entries that are not part of `ACCENT_PALETTE`, so
+ * they fall through `resolveAccent`'s passthrough branch and render as
+ * the literal CSS color keyword.
  */
 export const DEFAULT_STROKE_COLOR = 'black';
 
@@ -30,16 +31,20 @@ export const SKETCH_SIZE_MIN = 1;
 export const SKETCH_SIZE_MAX = 32;
 
 /**
- * Sketch palette. Reuses the shared `ACCENT_PICKER_OPTIONS` so sketch
- * strokes share the canvas's emphasis-color vocabulary (grey / red /
- * orange / amber / green / blue / purple, plus white).
+ * Sketch stroke palette.
  *
- * Stored as a palette **token** on `SketchNodeData.strokeColor`;
- * resolved to a CSS color at render time via `resolveAccent` so a future
- * theme swap propagates automatically. Legacy hex strings still render
- * thanks to `resolveAccent`'s passthrough behaviour.
+ * Diverges from node `style.accent` (which is `ACCENT_PALETTE` only):
+ * sketch ink legitimately needs `black` (and, for "highlighter on a dark
+ * canvas" workflows, `white`), neither of which is a node-accent token.
+ * Stored as a picker token on `SketchNodeData.strokeColor` and resolved
+ * at render time via `resolveAccent`, which passes unknown tokens
+ * through as literal CSS colors.
  */
-export const SKETCH_COLOR_OPTIONS = ACCENT_PICKER_OPTIONS;
+export const SKETCH_COLOR_OPTIONS: readonly ColorPickerOption[] = [
+  { token: 'black', name: 'Black', value: '#000000' },
+  { token: 'white', name: 'White', value: '#ffffff' },
+  ...ACCENT_PALETTE,
+];
 
 /**
  * Convert a perfect-freehand stroke (array of [x,y] points) to an SVG

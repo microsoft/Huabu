@@ -4,6 +4,37 @@
 
 ---
 
+## 2026-06-17 · 节点配色统一为单一 accent 字段
+
+**What Changed**
+
+- **节点颜色现在只有一个旋钮：`style.accent`**。原来分开的 `style.backgroundColor`（SURFACE_PALETTE）和 `style.textColor` 字段已被移除，所有节点（note / text / frame / question / 图片 / pdf / 网页 / sketch）的边框、填充和文本色都由同一个 accent token 同时驱动（边框 50% / 填充 10% / 文本 60% 的 `color-mix`）。
+- **浮动工具栏的色板从 9 色精简为 7 色**：去掉只供 sketch 笔触使用的纯黑 / 纯白条目（grey / red / orange / amber / green / blue / purple）。Sketch 节点的画笔色盘保留黑白，因为画线需要不依赖填充的纯色。
+- **AI agent 改颜色更可预测**：`canvas_commands` schema 同步收窄到只接受 `style.accent`，并且 `MERGE_NODE_DATA` 在合并 `data.style` 时改为深合并一层——AI 只想改 accent 时不会再把用户设置的 `fontSize` / `fontFamily` 等同级字段清空。
+- **修复 NoteNode 只有边框上色、填充不变的 bug**：之前 Note 走的是单独的 white-accent hack，现在改成与 TextNode / FrameNode 共用 `NodeWrapper` 的统一上色路径。
+
+**Notes**
+
+- **历史数据兼容**：旧画布里残留的 `style.backgroundColor` / `style.textColor` 会被静默忽略——节点不会崩溃，但会回退到无 accent 的默认外观；用户重新从工具栏选一次颜色即可恢复。原来的 `accent: 'white'` 在新模型里会渲染成几乎不可见的浅色（白色与白底 mix），建议改选 `grey` 或清空。
+- **QuestionNode 的浅黄背景没有变**：它现在通过 `NodeWrapper` 新增的 `fillColor` escape hatch 注入固定色，不再借用 `style.backgroundColor` 通道。
+- AI 提示词里关于 "colored shadow on bottom-right" / "top stripe" / `cyan` 示例等错误描述已一并修正为实际的 7 个 token。
+
+---
+
+## 2026-06-17 · 画布节点边缘 resize 命中区扩大
+
+**What Changed**
+
+- **画布节点 4 条边的 resize 命中区从默认的 1 px 扩大到 8 px**。之前 `@xyflow/react` 的 `NodeResizer` line 控件只有 1 px 宽的透明命中条，极难精准抓取边缘；现在边缘上下/左右各有 8 px 的可点击区域，鼠标更容易拖动改变节点宽高。
+- 4 个角点（corner handle）尺寸不变（鼠标 8 px / 触屏 12 px），多选 bounding box resizer 也不受影响。
+
+**Notes**
+
+- 改动仅在 `apps/web/src/index.css` 覆盖 `.react-flow__resize-control.line.*` 的 width/height，**视觉无变化**——边框依旧由组件层 `lineClassName="!border-transparent"` 隐藏，只是隐形的可点击区域更大。
+- 如果未来感觉 8 px 还不够，可继续把这两条规则调到 10 px / 12 px。
+
+---
+
 ## 2026-06-10 · Agent profiles are templates; sessions are lazy
 
 **What Changed**

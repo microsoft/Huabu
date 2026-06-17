@@ -1,50 +1,36 @@
 /**
  * Canvas Color Types
- * Shared color palettes for canvas styling.
  *
- * Two palettes, two purposes
- * --------------------------
- * The app maintains two **independent** palettes that are NOT interchangeable.
- * Their hex families are deliberately tuned for different visual roles and
- * neither is a valid substitute for the other.
+ * Single source of truth for canvas color styling: `ACCENT_PALETTE`.
  *
- *   ACCENT_PALETTE  — saturated colors, used for emphasis:
- *                     `style.accent`, `style.textColor`, edge `stroke`.
- *                     "No accent" is encoded as `null` (field absent), not as
- *                     a transparent color — the renderer skips the layer.
- *
- *   SURFACE_PALETTE — very light tinted fills, used for node backgrounds
- *                     (`style.backgroundColor`). The first entry is
- *                     `transparent`, which is the conceptual default: the
- *                     node lets the canvas show through.
+ * One token, three visuals
+ * ------------------------
+ * A single `style.accent` token drives a node's **border**, **fill tint**,
+ * and **text tint** via `accentTokens` (web side). The previous parallel
+ * `style.backgroundColor` (SURFACE_PALETTE) and `style.textColor` fields
+ * were removed in 2026-06-17 so the AI and the UI cannot desynchronise the
+ * three layers. "No accent" is encoded as `null` (field absent); the
+ * renderer falls back to a neutral surface.
  *
  * Storage model
  * -------------
- * All four color-style fields are stored as **palette tokens** (e.g. `'purple'`,
- * `'transparent'`).  Tokens are stable identifiers that map to a current hex
- * via the palettes below — re-skinning the app means changing those `value`s
+ * `style.accent` is stored as a **palette token** (e.g. `'purple'`).
+ * Tokens are stable identifiers that map to a current hex via
+ * `ACCENT_PALETTE` — re-skinning the app means changing those `value`s
  * once and every existing canvas follows automatically.
  *
  * Two kinds of string may legitimately appear in stored data:
  *   1. A known token  → resolved through the palette (theme-aware)
- *   2. A literal hex  → treated as a user-fixed custom color (theme-frozen)
- *
- * Read boundaries (renderer) are tolerant: unknown values pass through
- * unchanged so unusual one-off CSS strings — e.g. `var(--question-bg)` on
- * the Question node — keep working. Write boundaries (tool schemas, REST
- * endpoints, importers) are responsible for their own validation.
- *
- * Naming convention
- * -----------------
- * Helpers come in symmetric `accent*` / `surface*` pairs:
- *   - `resolveAccent`  / `resolveSurface`  (read boundary)
- *   - `isAccentToken`  / `isSurfaceToken`  (type guards)
- *   - `accentName`     / `surfaceName`     (display labels)
+ *   2. A literal hex / CSS keyword → treated as a user-fixed custom
+ *      color (theme-frozen). Tolerated by `resolveAccent` for legacy
+ *      data; write boundaries (agent schema, UI pickers) restrict input
+ *      to palette tokens.
  */
 
 /**
  * Accent palette — saturated colors for emphasis layers.
- * Used by `style.accent`, `style.textColor`, and edge `stroke`.
+ * Used by `style.accent`, edge `stroke`, and (passthrough-only) sketch
+ * `strokeColor`.
  *
  * Entry shape:
  * - `token`: stable code/data identifier — NEVER change once shipped.
@@ -77,9 +63,9 @@ export type AccentValue = AccentEntry['value'];
 export const ACCENT_NONE_TOKEN = 'none' as const;
 
 /**
- * One swatch entry as consumed by the accent / surface color pickers.
- * Mirrors the structural shape of `ACCENT_PALETTE` / `SURFACE_PALETTE`
- * entries and the web app's `ColorPreset` interface.
+ * One swatch entry as consumed by the accent color picker.
+ * Mirrors the structural shape of `ACCENT_PALETTE` entries and the web
+ * app's `ColorPreset` interface.
  */
 export interface ColorPickerOption {
   token: string;
@@ -88,66 +74,23 @@ export interface ColorPickerOption {
 }
 
 /**
- * Default accent picker swatches. Starts with neutral Black + White swatches
- * followed by the saturated palette. **Does not** include a "Transparent"
- * option — used by every node type whose visual identity depends on a solid
- * background (frame, note, image, pdf, video, web, sketch), since a
- * transparent fill would make those nodes effectively invisible.
- *
- * Black and White are picker-only entries (not part of `ACCENT_PALETTE`):
- * neither token resolves through `ACCENT_BY_TOKEN`, so they fall through
- * `resolveAccent`'s passthrough branch and render as the literal CSS color
- * keyword. That's intentional — they're fixed neutrals that should not
- * shift with theme re-skins of the saturated palette.
- */
-export const ACCENT_PICKER_OPTIONS: readonly ColorPickerOption[] = [
-  { token: 'black', name: 'Black', value: '#000000' },
-  { token: 'white', name: 'White', value: '#ffffff' },
-  ...ACCENT_PALETTE,
-];
-
-/**
  * Accent picker swatches **with** a leading "Transparent" sentinel.
- * Used only by node types that render as plain floating content on the
- * canvas (currently `text`), where "no background fill" is a meaningful and
- * common selection.
+ * Used by node types where "no accent / no fill" is a meaningful and
+ * common selection (currently `text`). The non-text node toolbar uses
+ * `ACCENT_PALETTE` directly — every other node type always has at least
+ * a neutral surface, so a Transparent entry would be visually identical
+ * to picking nothing and only adds noise.
  */
 export const ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT: readonly ColorPickerOption[] =
   [
     { token: ACCENT_NONE_TOKEN, name: 'Transparent', value: 'transparent' },
-    ...ACCENT_PICKER_OPTIONS,
+    ...ACCENT_PALETTE,
   ];
-
-/**
- * Surface palette — very light tinted fills for node backgrounds.
- * Used by `style.backgroundColor`.
- *
- * The first entry (`transparent`) is the visual default: the node simply
- * lets the canvas background show through.
- */
-export const SURFACE_PALETTE = [
-  { token: 'transparent', name: 'Default', value: 'transparent' },
-  { token: 'white', name: 'White', value: '#ffffff' },
-  { token: 'red', name: 'Red', value: '#fef2f2' },
-  { token: 'orange', name: 'Orange', value: '#fff7ed' },
-  { token: 'yellow', name: 'Yellow', value: '#fefce8' },
-  { token: 'green', name: 'Green', value: '#f0fdf4' },
-  { token: 'blue', name: 'Blue', value: '#eff6ff' },
-  { token: 'purple', name: 'Purple', value: '#faf5ff' },
-] as const;
-
-export type SurfaceEntry = (typeof SURFACE_PALETTE)[number];
-export type SurfaceToken = SurfaceEntry['token'];
-export type SurfaceValue = SurfaceEntry['value'];
 
 // ---- Lookups (built once at module load) ----
 
 const ACCENT_BY_TOKEN: Readonly<Record<string, AccentEntry>> = Object.freeze(
   Object.fromEntries(ACCENT_PALETTE.map((c) => [c.token, c])),
-);
-
-const SURFACE_BY_TOKEN: Readonly<Record<string, SurfaceEntry>> = Object.freeze(
-  Object.fromEntries(SURFACE_PALETTE.map((c) => [c.token, c])),
 );
 
 /** Matches `#RGB`, `#RRGGBB`, `#RRGGBBAA`. */
@@ -157,10 +100,6 @@ const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
 
 export function isAccentToken(x: unknown): x is AccentToken {
   return typeof x === 'string' && x in ACCENT_BY_TOKEN;
-}
-
-export function isSurfaceToken(x: unknown): x is SurfaceToken {
-  return typeof x === 'string' && x in SURFACE_BY_TOKEN;
 }
 
 export function isHexColor(x: unknown): x is string {
@@ -173,9 +112,8 @@ export function isHexColor(x: unknown): x is string {
  * Resolve a stored accent value to a CSS color string.
  * - Known token → current hex from `ACCENT_PALETTE` (theme-aware).
  * - Anything else (hex, CSS keyword, `var(...)`, etc.) → returned as-is so
- *   the renderer can still display it. Unknown values are NOT rejected here
- *   because read-side must be tolerant of legacy data and one-off CSS values
- *   used by special node types (e.g. QuestionNode's `var(--question-bg)`).
+ *   the renderer can still display legacy data and one-off CSS values
+ *   (e.g. sketch `strokeColor: 'black'`, QuestionNode's sticky fill).
  * - `null` / `undefined` / empty → `null`.
  */
 export function resolveAccent(input: string | null | undefined): string | null {
@@ -184,25 +122,8 @@ export function resolveAccent(input: string | null | undefined): string | null {
   return input;
 }
 
-/**
- * Resolve a stored surface (node background) value to a CSS color string.
- * Same passthrough behaviour as `resolveAccent`, but uses `SURFACE_PALETTE`
- * (which includes `'transparent'` as a token).
- */
-export function resolveSurface(
-  input: string | null | undefined,
-): string | null {
-  if (!input) return null;
-  if (isSurfaceToken(input)) return SURFACE_BY_TOKEN[input].value;
-  return input;
-}
-
 // ---- Display helpers (English fallback; swap for t() once i18n lands) ----
 
 export function accentName(token: AccentToken): string {
   return ACCENT_BY_TOKEN[token].name;
-}
-
-export function surfaceName(token: SurfaceToken): string {
-  return SURFACE_BY_TOKEN[token].name;
 }

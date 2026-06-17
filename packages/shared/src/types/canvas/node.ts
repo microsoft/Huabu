@@ -3,7 +3,7 @@
  * Node data structures and type guards
  */
 
-import type { AccentToken, SurfaceToken } from './color.js';
+import type { AccentToken } from './color.js';
 import type { AgentMode } from '../agent/agent.js';
 import type { AgentBinding } from '../api/acp.js';
 
@@ -104,20 +104,15 @@ export type NodeTextDecoration = 'underline' | 'line-through';
 
 export interface NodeStyle {
   /**
-   * Palette token (preferred — e.g. `'transparent'`, `'blue'`) or a
-   * literal CSS color string for legacy data / one-off custom colors.
-   * Resolved via `resolveSurface` at render time.
-   */
-  backgroundColor?: SurfaceToken | (string & {});
-  /**
-   * Accent palette token (preferred) or a literal CSS color string.
-   * Resolved via `resolveAccent` at render time.
-   */
-  textColor?: AccentToken | (string & {});
-  /**
-   * Accent palette token (e.g. `'purple'`) shown as a top border stripe
-   * for visual grouping. `null` / absent means no accent. Legacy hex
-   * strings are also accepted and rendered as-is.
+   * Single color knob for the node. Accent palette token (e.g.
+   * `'purple'`) or — for legacy data only — a literal CSS color string;
+   * resolved via `resolveAccent` at render time. `null` / absent means
+   * no accent (renderer falls back to the neutral surface).
+   *
+   * Drives the node's **border**, **fill tint**, and **text tint** in
+   * one shot via `accentTokens` on the web side. The previous
+   * `backgroundColor` / `textColor` siblings were removed in 2026-06-17
+   * so the three layers cannot fall out of sync.
    */
   accent?: AccentToken | (string & {});
   fontFamily?: NodeFontFamily;
@@ -224,9 +219,10 @@ export interface BaseNodeData {
    */
   locked?: boolean;
   /**
-   * Visual style. Only `accent` and `backgroundColor` are supported on all
-   * node types; text-related fields (fontFamily, textColor, etc.) are only
-   * used by note and text nodes.
+   * Visual style. `accent` is supported on every node type and is the
+   * single source of color (drives border + fill + text tint via
+   * `accentTokens`). Font fields apply only to text-bearing nodes
+   * (note / text / question).
    */
   style?: NodeStyle;
   /**

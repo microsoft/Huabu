@@ -212,12 +212,11 @@ export const NoteNode = memo(
     // the editor with a full-card placeholder.
     const isContentMissing = data.contentMissing && !markdown.trim();
 
-    // When the picked accent is `white`, the wrapper's default border —
-    // a 50%-transparent mix of white over `transparent` — is effectively
-    // invisible. Force a solid white border instead so the swatch and the
-    // rendered border match exactly.
-    const borderColorOverride =
-      data.style?.accent === 'white' ? '#ffffff' : undefined;
+    // When the user picks an accent the wrapper paints both the border
+    // and the accent-tinted fill. Drop the inner paper surfaces in that
+    // case so the fill is visible through the note body; otherwise we
+    // keep `bg-surface` so the no-accent note still reads as paper.
+    const hasAccent = !!data.style?.accent;
 
     return (
       <NodeWrapper
@@ -227,7 +226,6 @@ export const NoteNode = memo(
         selected={selected}
         actions={isContentMissing ? undefined : NoteActions}
         keepAspectRatio={false}
-        borderColor={borderColorOverride}
       >
         {isContentMissing ? (
           <MissingFileBanner
@@ -239,7 +237,8 @@ export const NoteNode = memo(
           <>
             <div
               className={clsx(
-                'bg-surface relative w-full',
+                'relative w-full',
+                !hasAccent && 'bg-surface',
                 hasFixedHeight && 'h-full overflow-hidden',
               )}
               // In auto-height mode the inner content is visually scaled via
@@ -286,7 +285,8 @@ export const NoteNode = memo(
                 <div
                   ref={previewHostRef}
                   className={clsx(
-                    'bg-surface rounded p-2',
+                    'rounded p-2',
+                    !hasAccent && 'bg-surface',
                     hasFixedHeight ? 'flex h-full flex-col' : 'flex flex-col',
                   )}
                 >

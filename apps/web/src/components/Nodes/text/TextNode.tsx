@@ -61,30 +61,14 @@ export const TextNode = memo(
     const isItalic = style.fontStyle === 'italic';
     const textDecoration = style.textDecoration || '';
 
-    // Accent is the single source of color styling. The dedicated text-color
-    // and background-color pickers were removed in favour of one accent token,
-    // which derives both fg and bg via the same formulas as SemanticPlaceholder
-    // (so full LOD and minimal LOD stay in sync across semantic zoom).
+    // Accent is the single source of color styling. NodeWrapper paints
+    // both the border and the fill from `data.style.accent` (using the
+    // same `accentTokens` formulas as SemanticPlaceholder, so semantic
+    // zoom doesn't visibly shift the color). Locally we only need the
+    // foreground tint for the editable text body.
     const accent = resolveAccent(style.accent);
     const accentTokens = accent ? getAccentTokens(accent) : null;
     const textColor = accentTokens?.fg ?? undefined;
-
-    // Build the data object passed to NodeWrapper so its existing rendering
-    // path tints the card. When no accent is set we explicitly null out any
-    // legacy persisted backgroundColor / textColor so toggling back to
-    // Transparent really clears the card instead of falling through to a
-    // stale value from the pre-picker era.
-    const wrapperData = useMemo(() => {
-      const baseStyle = data.style ?? {};
-      const nextStyle = accentTokens
-        ? {
-            ...baseStyle,
-            backgroundColor: accentTokens.bg,
-            textColor: undefined,
-          }
-        : { ...baseStyle, backgroundColor: undefined, textColor: undefined };
-      return { ...data, style: nextStyle };
-    }, [data, accentTokens]);
 
     const fontOpts = useMemo(
       () => getTextNodeFontOpts(style),
@@ -191,7 +175,7 @@ export const TextNode = memo(
     return (
       <NodeWrapper
         id={id}
-        data={wrapperData}
+        data={data}
         type={'text'}
         selected={selected}
         toolbar={TextToolbar}
