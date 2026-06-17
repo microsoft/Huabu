@@ -227,7 +227,7 @@ export default function CanvasListPage() {
           workspace folder name + switcher tooltip in the title bar. */}
       {!isElectronApp && (
         <Header>
-          <h1 className="text-fg-default pl-1 text-lg font-semibold">
+          <h1 className="text-fg-default -ml-1 text-lg font-semibold">
             {APP_NAME}
           </h1>
           {workspaceLabel && (
