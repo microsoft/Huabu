@@ -6,16 +6,17 @@ Composed `canvas_commands` batches for common user intents. Each recipe is a sin
 
 ## Quick patterns
 
-| Intent                            | Batch composition                                                                                                                             |
-| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| Group existing nodes into a frame | `CREATE_NODES` (frame) → `SET_NODE_PARENT` (children → frame)                                                                                 |
-| Brainstorm from a source          | `CREATE_NODES` (multiple ideas with explicit ids) → `CONNECT_NODES` (each → source)                                                           |
-| Merge / synthesize                | `read("nodes/<filename>.md")` for inputs → `CREATE_NODES` (synthesised note) → `DELETE_NODES` (originals) → `CONNECT_NODES` (link to context) |
-| Restyle a cluster                 | `MERGE_NODE_DATA` with `style.accent` on each member                                                                                          |
-| Tidy a row of nodes               | `ALIGN_NODES` (axis) → `DISTRIBUTE_NODES`                                                                                                     |
-| Convert a frame back to siblings  | `DISSOLVE_FRAME`                                                                                                                              |
-| Move a node into a frame          | `SET_NODE_PARENT { nodeId, parentId }`                                                                                                        |
-| Detach a node from its frame      | `SET_NODE_PARENT { nodeId, parentId: null }`                                                                                                  |
+| Intent                                  | Batch composition                                                                                                                             |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Group existing nodes into a frame       | `CREATE_NODES` (frame) → `SET_NODE_PARENT` (children → frame)                                                                                 |
+| Brainstorm from a source                | `CREATE_NODES` (multiple ideas with explicit ids) → `CONNECT_NODES` (each → source)                                                           |
+| Merge / synthesize                      | `read("nodes/<filename>.md")` for inputs → `CREATE_NODES` (synthesised note) → `DELETE_NODES` (originals) → `CONNECT_NODES` (link to context) |
+| Restyle a cluster                       | `MERGE_NODE_DATA` with `style.accent` on each member                                                                                          |
+| Tidy a row of nodes                     | `ALIGN_NODES` (axis) → `DISTRIBUTE_NODES`                                                                                                     |
+| Convert a frame back to siblings        | `DISSOLVE_FRAME`                                                                                                                              |
+| Move a node into a frame                | `SET_NODE_PARENT { nodeId, parentId }`                                                                                                        |
+| Detach a node from its frame            | `SET_NODE_PARENT { nodeId, parentId: null } `                                                                                                 |
+| Add standalone nodes to existing canvas | `inspect_nodes`(anchor) → `CREATE_NODES` with position = anchor.position + (anchor.size.width + 100, 0).                                      |
 
 ## Recipe: brainstorm from a source
 
