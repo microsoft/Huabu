@@ -7,6 +7,7 @@ import {
   autoFrameNodeByOverlap,
   autoUnframeNodeByNonOverlap,
   fitFrames,
+  FRAME_POINTER_CAPTURE_MARGIN,
   pickColumnDropTarget,
   pickRowDropTarget,
   readFrameGridConfig,
@@ -64,12 +65,39 @@ export default function resolveNodeDragStop(
         dragSize.height,
       );
     if (!stickToStructured) {
+      // Free-mode frames use a pointer-capture halo so a child node
+      // stays parented while the user repositions it inside the frame —
+      // even when the node's body grazes or briefly extends past the
+      // frame edge. The structured-frame branch above handles its own
+      // (much larger) capture zone, so this only applies to free
+      // frames. The pre-existing `margin: 10` body-gap rule remains as
+      // the fallback when the pointer leaves the halo.
+      //
+      // Halo scales with the dragged node's size (0.3× per axis,
+      // floored at `FRAME_POINTER_CAPTURE_MARGIN`) so that big nodes —
+      // whose body easily reaches well past a small frame's edge during
+      // ordinary repositioning — still feel sticky. Tiny nodes keep the
+      // fixed 24 px floor so the halo is always at least visible to the
+      // eye.
       result = autoUnframeNodeByNonOverlap(result, id, {
         epsilon: 0,
         margin: 10,
+        pointer: intent.pointerFlowPosition,
+        pointerCaptureMargin: {
+          x: Math.max(FRAME_POINTER_CAPTURE_MARGIN, dragSize.width * 0.3),
+          y: Math.max(FRAME_POINTER_CAPTURE_MARGIN, dragSize.height * 0.3),
+        },
       });
     }
-    result = autoFrameNodeByOverlap(result, id, { threshold: 0.5 });
+    // Cursor-based entry: a candidate frame qualifies when the pointer
+    // is inside its rect AND there is any positive body overlap, in
+    // addition to the original 50% area-ratio threshold. Lets users
+    // drop a node by hovering near the frame edge or drop a node larger
+    // than the frame without having to centre it.
+    result = autoFrameNodeByOverlap(result, id, {
+      threshold: 0.5,
+      pointer: intent.pointerFlowPosition,
+    });
   }
 
   // Collect geometry updates and parent changes.

@@ -20,6 +20,7 @@ import {
   applySharedPostEffectsFromWriteResult,
   executeCanvasCommands,
   computeFrameFit,
+  FRAME_POINTER_CAPTURE_MARGIN,
   getAbsolutePosition as getFrameAbsolutePosition,
   wouldUnframe,
   wouldAutoFrame,
@@ -1625,6 +1626,14 @@ const useCanvasStore = create<RFState>()(
           return n;
         }) as NestableNode[];
 
+        // Pointer in flow space — feeds the pointer-aware
+        // wouldUnframe / wouldAutoFrame predicates so the live preview
+        // mirrors the actual drop rules used by `resolveNodeDragStop`,
+        // and gates the structured-frame indicator below.
+        const pointerFlow = pointerScreen
+          ? get().rfInstance?.screenToFlowPosition(pointerScreen)
+          : undefined;
+
         // Collect frame IDs that need a preview, and which dragged children
         // would leave each frame (so we exclude them from the fit preview).
         const leavingByFrame = new Map<string, Set<string>>();
@@ -1642,7 +1651,29 @@ const useCanvasStore = create<RFState>()(
             const parentId = originalNode.parentId;
             previewFrameIds.add(parentId);
 
-            if (wouldUnframe(liveNodes, dn.id, { epsilon: 0, margin: 10 })) {
+            // Per-axis halo scaled with the dragged node — mirrors
+            // `resolveNodeDragStop` so preview and commit stay in sync.
+            const liveNode = liveNodes.find((n) => n.id === dn.id);
+            const dragSize = liveNode
+              ? getNodeSize(liveNode)
+              : { width: 0, height: 0 };
+            if (
+              wouldUnframe(liveNodes, dn.id, {
+                epsilon: 0,
+                margin: 10,
+                pointer: pointerFlow,
+                pointerCaptureMargin: {
+                  x: Math.max(
+                    FRAME_POINTER_CAPTURE_MARGIN,
+                    dragSize.width * 0.3,
+                  ),
+                  y: Math.max(
+                    FRAME_POINTER_CAPTURE_MARGIN,
+                    dragSize.height * 0.3,
+                  ),
+                },
+              })
+            ) {
               let leaving = leavingByFrame.get(parentId);
               if (!leaving) {
                 leaving = new Set();
@@ -1653,10 +1684,12 @@ const useCanvasStore = create<RFState>()(
           }
 
           // Check if the node would enter a different frame (both root and cross-frame).
-          // Only show a preview when the 50% overlap threshold is already met so the
-          // preview is always consistent with the actual drop behaviour.
+          // Preview triggers when either the 50% overlap threshold is met OR the
+          // cursor is hovering inside a candidate frame with any positive overlap —
+          // identical to what `resolveNodeDragStop` will commit.
           const targetFrameId = wouldAutoFrame(liveNodes, dn.id, {
             threshold: 0.5,
+            pointer: pointerFlow,
           });
           if (targetFrameId) {
             previewFrameIds.add(targetFrameId);
@@ -1732,13 +1765,9 @@ const useCanvasStore = create<RFState>()(
         const primary = nodes.find((n) => n.id === draggedNode.id) as
           | NestableNode
           | undefined;
-        // Pointer in flow space — gates the sticky preview below and feeds
-        // the frame-local drop point inside the structured branch.
-        const pointerFlow = pointerScreen
-          ? get().rfInstance?.screenToFlowPosition(pointerScreen)
-          : undefined;
         const enteringFrameId = wouldAutoFrame(liveNodes, draggedNode.id, {
           threshold: 0.5,
+          pointer: pointerFlow,
         });
         let targetFrameId = enteringFrameId ?? primary?.parentId;
         // Sticky case (node already lives in a frame): only keep showing the

@@ -22,7 +22,9 @@ import {
 /**
  * Pure predicate: would the given node be unframed under the current
  * `autoUnframeNodeByNonOverlap` rules? Returns `true` when the node has
- * no overlap with its parent frame AND the edge-to-edge gap exceeds `margin`.
+ * no overlap with its parent frame AND the edge-to-edge gap exceeds
+ * `margin`, except when a `pointer` + `pointerCaptureMargin` capture
+ * zone is provided and the pointer falls inside it (sticky parent).
  *
  * Used by the drag-preview system to decide whether to exclude a node
  * from the fit preview of its current parent frame.
@@ -72,7 +74,13 @@ export function wouldAutoFrame(
   const getAbs = createAbsolutePositionGetter(byId);
   const getRect = createRectGetter(byId, getAbs);
 
-  return findBestFrameForNode(nodes, nodeId, threshold, getRect);
+  return findBestFrameForNode(
+    nodes,
+    nodeId,
+    threshold,
+    getRect,
+    options.pointer,
+  );
 }
 
 /**
