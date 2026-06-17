@@ -447,6 +447,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       return {
         ...e,
         selected: true,
+        zIndex: (typeof e.zIndex === 'number' ? e.zIndex : 0) + 1,
         markerEnd: nextMarkerEnd,
         markerStart: nextMarkerStart,
       };

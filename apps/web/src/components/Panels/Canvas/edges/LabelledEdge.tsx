@@ -13,6 +13,7 @@ import {
   getBezierPath,
   getSmoothStepPath,
   getStraightPath,
+  useStore,
 } from '@xyflow/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -173,6 +174,40 @@ function EdgeLabelEditor({
   const [editing, setEditing] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
+  // Keep the label on the *same* layer as its edge instead of a fixed
+  // high value. The shared `.react-flow__edgelabel-renderer` portal has
+  // no z-index of its own and does NOT establish a stacking context, so
+  // this number competes directly with the edge SVGs and node wrappers
+  // in the viewport (DOM order: edges → edge-label renderer → nodes).
+  //
+  // This is a faithful mirror of the edge's own computed z-index
+  // (`edge.zIndex + max(endpoints.internals.z)`), so the label always
+  // shares its edge line's exact layer. Because DOM order paints the
+  // label after the edge but before nodes, at equal z the label sits
+  // above its own edge line yet behind any node on the same level — and
+  // naturally stays below higher nodes / above lower ones, exactly like
+  // the edge. Selection lift is handled by Canvas bumping the edge's
+  // `zIndex` in `displayEdges`, which the label inherits via `baseZ`.
+  const edgeZIndex = useStore(
+    useCallback(
+      (s) => {
+        const edge = s.edgeLookup.get(edgeId);
+        if (!edge) return 0;
+        const baseZ = typeof edge.zIndex === 'number' ? edge.zIndex : 0;
+        const endpointZ = (node: ReturnType<typeof s.nodeLookup.get>) =>
+          node?.internals.z ?? 0;
+        return (
+          baseZ +
+          Math.max(
+            endpointZ(s.nodeLookup.get(edge.source)),
+            endpointZ(s.nodeLookup.get(edge.target)),
+          )
+        );
+      },
+      [edgeId],
+    ),
+  );
+
   // The contentEditable element is managed entirely imperatively —
   // React must never render children into it, or toggling
   // `contentEditable` makes React reconcile children against DOM nodes
@@ -313,6 +348,10 @@ function EdgeLabelEditor({
       style={{
         transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
         pointerEvents: 'all',
+        // Match the edge's own z-index (see `edgeZIndex` above) so the
+        // label tracks its edge's layer: above the edge line, behind
+        // sibling nodes on the same frame level.
+        zIndex: edgeZIndex,
       }}
       onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => {
