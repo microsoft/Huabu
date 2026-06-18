@@ -25,24 +25,36 @@ interface MilkdownMessageCardProps {
 }
 
 /**
- * Markdown image syntax matcher: `![alt](src)` or `![alt](src "title")`.
+ * Markdown image AND link syntax matcher: `![alt](src)` or `[text](src)`,
+ * each with optional `"title"` suffix.
  *
- *  - `alt` may contain anything except `]` (greedy stops at first `]`)
- *  - `src` is the bare URL/key (no whitespace, no closing paren)
- *  - optional title in double quotes after one or more spaces
+ *  - `!` (capturing group 1, empty for plain links) distinguishes the two
+ *    forms so the rewriter can preserve the original sigil.
+ *  - `alt` / `text` may contain anything except `]`.
+ *  - `src` is the bare URL/key (no whitespace, no closing paren).
+ *  - optional `"title"` after one or more spaces.
+ *
+ * We promote bare artifact keys in BOTH forms because some agents emit
+ * `[caption](art_xxx.png)` link syntax thinking it gives the user a
+ * "download link" — without rewriting, the resulting `<a href>` points
+ * to a non-resolvable bare key. After the rewrite the link at least
+ * opens the image in a new tab; image embeds (`![]()`) keep working as
+ * before.
  *
  * Stays intentionally simple: we don't try to skip code blocks because
- * (a) AI chat replies almost never embed `![...](...)` inside fenced
- * code, and (b) even if they do, `resolveArtifactUrl` is idempotent so
- * a false-positive rewrite is still legal markdown — only cosmetic.
+ * (a) AI chat replies almost never embed `![...](...)` or
+ * `[...](...)` inside fenced code aimed at the user, and (b)
+ * `resolveArtifactUrl` is idempotent so a false-positive rewrite is
+ * still legal markdown — only cosmetic.
  */
-const MD_IMAGE_RE = /!\[([^\]]*)\]\(([^)\s]+)(\s+"[^"]*")?\)/g;
+const MD_LINK_OR_IMAGE_RE = /(!?)\[([^\]]*)\]\(([^)\s]+)(\s+"[^"]*")?\)/g;
 
 /**
- * Rewrite `![alt](src)` images so bare artifact keys (e.g.
- * `art_xyz.png`, the form returned by the `generate_image` tool)
- * become fully-qualified `/api/canvas/<id>/artifact/<key>` URLs the
- * browser can actually fetch.
+ * Rewrite `![alt](src)` images AND `[text](src)` links so bare
+ * artifact keys (e.g. `art_xyz.png`, the form returned by the
+ * `generate_image` tool) become fully-qualified
+ * `/api/canvas/<id>/artifact/<key>` URLs the browser can actually
+ * fetch.
  *
  * Pass-through for `data:` URLs, full `http(s)` URLs, and `/api/`
  * paths — `resolveArtifactUrl` handles every shape idempotently.
@@ -52,11 +64,14 @@ export function rewriteChatImageUrls(
   canvasId: string | null,
 ): string {
   if (!markdown || !canvasId) return markdown;
-  return markdown.replace(MD_IMAGE_RE, (match, alt, src, title) => {
-    const resolved = resolveArtifactUrl(String(src), canvasId);
-    if (resolved === src) return match;
-    return `![${alt}](${resolved}${title ?? ''})`;
-  });
+  return markdown.replace(
+    MD_LINK_OR_IMAGE_RE,
+    (match, bang, alt, src, title) => {
+      const resolved = resolveArtifactUrl(String(src), canvasId);
+      if (resolved === src) return match;
+      return `${bang}[${alt}](${resolved}${title ?? ''})`;
+    },
+  );
 }
 
 /**
