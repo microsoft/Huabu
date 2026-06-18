@@ -73,10 +73,10 @@ export const CanvasMenu: React.FC<CanvasMenuProps> = ({ onOpenShortcuts }) => {
     setIsOpen(false);
     try {
       await exportCanvas(canvasId);
-      toast('Export started', { variant: 'success' });
+      toast('Export started', { tone: 'success' });
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Export failed', {
-        variant: 'error',
+        tone: 'danger',
       });
     }
   }, [canvasId]);

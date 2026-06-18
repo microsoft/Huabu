@@ -7,13 +7,19 @@ import type { ButtonHTMLAttributes, ReactNode } from 'react';
 
 type ButtonVariant = 'solid' | 'outline' | 'ghost';
 type ButtonShape = 'default' | 'pill';
-type ButtonTone = 'neutral' | 'info' | 'danger';
+/**
+ * Semantic color family shared across surface components (e.g. `Button`,
+ * `Toast`) so a container's tone can map 1:1 onto an inner button's
+ * tone. Standardized vocabulary: `neutral | info | success | warning |
+ * danger`.
+ */
+export type Tone = 'neutral' | 'info' | 'success' | 'warning' | 'danger';
 
 export type ButtonProps = {
   children: ReactNode;
   variant?: ButtonVariant;
   shape?: ButtonShape;
-  tone?: ButtonTone;
+  tone?: Tone;
   size?: 'sm' | 'md' | 'lg';
   iconOnly?: boolean;
   className?: string;
@@ -40,25 +46,37 @@ export type ButtonProps = {
   shortcutBadgeActive?: boolean;
 } & Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children' | 'className'>;
 
-const variantToneClasses: Record<ButtonVariant, Record<ButtonTone, string>> = {
+const variantToneClasses: Record<ButtonVariant, Record<Tone, string>> = {
   solid: {
     neutral:
       'border border-transparent bg-inverse text-fg-inverse enabled:hover:bg-inverse/80',
     info: 'border border-transparent bg-info text-fg-inverse enabled:hover:bg-info/80',
+    success:
+      'border border-transparent bg-success text-fg-inverse enabled:hover:bg-success/80',
+    warning:
+      'border border-transparent bg-warning text-fg-inverse enabled:hover:bg-warning/80',
     danger:
       'border border-transparent bg-danger text-fg-inverse enabled:hover:bg-danger/80',
   },
   outline: {
     neutral:
       'border border-edge-default bg-surface text-fg-muted enabled:hover:bg-hover',
-    info: 'border border-info-light bg-surface text-info enabled:hover:bg-info-bg',
+    info: 'border border-info bg-surface text-info enabled:hover:bg-info-bg',
+    success:
+      'border border-success bg-surface text-success enabled:hover:bg-success-bg',
+    warning:
+      'border border-warning bg-surface text-warning enabled:hover:bg-warning-bg',
     danger:
-      'border border-danger-light bg-surface text-danger enabled:hover:bg-danger-bg',
+      'border border-danger bg-surface text-danger enabled:hover:bg-danger-bg',
   },
   ghost: {
     neutral:
       'cursor-pointer border-none bg-transparent text-fg-muted enabled:hover:bg-hover',
     info: 'cursor-pointer border-none bg-transparent text-info enabled:hover:bg-info-bg',
+    success:
+      'cursor-pointer border-none bg-transparent text-success enabled:hover:bg-success-bg',
+    warning:
+      'cursor-pointer border-none bg-transparent text-warning enabled:hover:bg-warning-bg',
     danger:
       'cursor-pointer border-none bg-transparent text-danger enabled:hover:bg-danger-bg',
   },

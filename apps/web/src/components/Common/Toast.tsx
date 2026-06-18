@@ -1,16 +1,44 @@
+import { AlertTriangle, Check, Info, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import { Button, type Tone } from './Button';
 import { cn } from './cn';
+import { getElectronBridge } from '../../hooks/useElectron';
 
-export type ToastVariant = 'default' | 'info' | 'success' | 'error';
+import type { ComponentType, SVGProps } from 'react';
+
+/**
+ * Toast color family. Re-exports the shared `Tone` vocabulary used by
+ * `Button` so a toast's tone maps 1:1 onto an inner button's tone.
+ */
+export type ToastTone = Tone;
+
+/**
+ * Primary action button rendered inline in the toast (e.g. "Reload",
+ * "Undo"). Pair with `duration: 0` to keep the toast visible until the
+ * user explicitly acts. The toast auto-dismisses once the handler runs.
+ */
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
 
 export interface ToastItem {
   id: string;
   message: string;
-  variant?: ToastVariant;
+  tone?: ToastTone;
   /** Auto-dismiss duration in ms. Set 0 to persist. Defaults to 3000. */
   duration?: number;
+  /** Optional inline action button (e.g. Reload / Undo). */
+  action?: ToastAction;
+  /**
+   * Whether to render a × close button. Defaults to true whenever the
+   * toast is persistent (`duration <= 0`) or carries an action — those
+   * cases must always be user-dismissible. Auto-dismissing info toasts
+   * stay clean (no × needed).
+   */
+  dismissible?: boolean;
 }
 
 // ─── Global toast state ────────────────────────────────────────────────
@@ -29,7 +57,12 @@ let _nextId = 0;
  */
 export function toast(
   message: string,
-  opts?: { variant?: ToastVariant; duration?: number },
+  opts?: {
+    tone?: ToastTone;
+    duration?: number;
+    action?: ToastAction;
+    dismissible?: boolean;
+  },
 ): string {
   const id = `toast-${++_nextId}`;
   _toasts = [..._toasts, { id, message, ...opts }];
@@ -45,11 +78,66 @@ export function dismissToast(id: string) {
 
 // ─── React component ──────────────────────────────────────────────────
 
-const variantClasses: Record<ToastVariant, string> = {
-  default: 'bg-inverse text-fg-inverse',
+/**
+ * Toast surface — soft tinted background (`*-bg`) + 1px border in the
+ * full tone color (same hue as the message text / status badge). Pairs
+ * a low-saturation fill with a high-saturation outline so the toast
+ * reads as a single colour family from across the canvas.
+ */
+const toneSurfaceClasses: Record<ToastTone, string> = {
+  neutral: 'bg-surface border-fg-default',
+  info: 'bg-info-bg border-info',
+  success: 'bg-success-bg border-success',
+  warning: 'bg-warning-bg border-warning',
+  danger: 'bg-danger-bg border-danger',
+};
+
+/** Message text color per tone — matches the badge so the toast reads
+ * as a single color family. Neutral falls back to the default fg. */
+const toneTextClasses: Record<ToastTone, string> = {
+  neutral: 'text-fg-default',
+  info: 'text-info',
+  success: 'text-success',
+  warning: 'text-warning',
+  danger: 'text-danger',
+};
+
+/**
+ * Status badge — a small solid-colored circle with a white icon. Sits
+ * at the left of the toast and is the primary severity signal so the
+ * message text can stay neutral.
+ */
+const toneBadgeClasses: Record<ToastTone, string> = {
+  neutral: 'bg-inverse text-fg-inverse',
   info: 'bg-info text-fg-inverse',
   success: 'bg-success text-fg-inverse',
-  error: 'bg-danger text-fg-inverse',
+  warning: 'bg-warning text-fg-inverse',
+  danger: 'bg-danger text-fg-inverse',
+};
+
+/**
+ * Per-tone style for the inline action / close buttons. Text uses the
+ * full tone color so the buttons read as part of the toast's color
+ * scheme; hover uses the existing `*-bg-hover` design tokens (one
+ * shade darker than the toast surface) — no opacity math required.
+ */
+const toneButtonClasses: Record<ToastTone, string> = {
+  neutral: 'text-fg-default enabled:hover:bg-hover',
+  info: 'text-info enabled:hover:bg-info-bg-hover',
+  success: 'text-success enabled:hover:bg-success-bg-hover',
+  warning: 'text-warning enabled:hover:bg-warning-bg-hover',
+  danger: 'text-danger enabled:hover:bg-danger-bg-hover',
+};
+
+type IconComponent = ComponentType<SVGProps<SVGSVGElement>>;
+
+/** Status icon rendered inside the badge, keyed by tone. */
+const toneIcons: Record<ToastTone, IconComponent> = {
+  neutral: Info,
+  info: Info,
+  success: Check,
+  warning: AlertTriangle,
+  danger: X,
 };
 
 function ToastEntry({ item }: { item: ToastItem }) {
@@ -68,16 +156,65 @@ function ToastEntry({ item }: { item: ToastItem }) {
     return () => clearTimeout(timer);
   }, [item.id, item.duration]);
 
+  const isPersistent = (item.duration ?? 3000) <= 0;
+  // Persistent toasts and action-bearing toasts must always be
+  // user-dismissible — they don't fade on their own, and the user may
+  // want to act on the message later (e.g. copy unsaved text before
+  // reloading) rather than commit immediately.
+  const showClose = item.dismissible ?? (isPersistent || !!item.action);
+  // Hoist into a local so the click handler closes over a non-null
+  // reference (avoids the non-null assertion lint).
+  const action = item.action;
+  const tone = item.tone ?? 'info';
+  const StatusIcon = toneIcons[tone];
+  const buttonClass = toneButtonClasses[tone];
+
   return (
     <div
       className={cn(
-        'pointer-events-auto w-fit max-w-sm rounded-lg px-4 py-2 text-sm shadow-lg transition-all duration-200',
+        'pointer-events-auto flex w-fit max-w-md items-center gap-3 rounded-xl border px-3 py-2.5 text-sm shadow-lg transition-all duration-200',
         visible ? 'translate-y-0 opacity-100' : '-translate-y-2 opacity-0',
-        variantClasses[item.variant ?? 'info'],
+        toneSurfaceClasses[tone],
+        toneTextClasses[tone],
       )}
       role="status"
     >
-      {item.message}
+      <span
+        aria-hidden
+        className={cn(
+          'flex h-5 w-5 shrink-0 items-center justify-center rounded-full',
+          toneBadgeClasses[tone],
+        )}
+      >
+        <StatusIcon className="h-3 w-3" strokeWidth={3} />
+      </span>
+      <span className="min-w-0 flex-1">{item.message}</span>
+      {action && (
+        <Button
+          variant="outline"
+          size="sm"
+          tone={tone}
+          className={buttonClass}
+          onClick={() => {
+            action.onClick();
+            dismissToast(item.id);
+          }}
+        >
+          {action.label}
+        </Button>
+      )}
+      {showClose && (
+        <Button
+          variant="ghost"
+          size="sm"
+          iconOnly
+          className={buttonClass}
+          aria-label="Dismiss"
+          onClick={() => dismissToast(item.id)}
+        >
+          <X />
+        </Button>
+      )}
     </div>
   );
 }
@@ -100,8 +237,19 @@ export function ToastContainer() {
 
   if (toasts.length === 0) return null;
 
+  // In the Electron shell the OS / `WindowChrome` paints a draggable
+  // title bar at the top of the window. Push the toast stack below it
+  // so notifications don't overlap the canvas title / settings menu.
+  // In a plain browser there is no such chrome, so a small 24px offset
+  // from the viewport edge is enough.
+  const bridge = getElectronBridge();
+  const topOffset = bridge ? bridge.titleBarHeight + 8 : 24;
+
   return createPortal(
-    <div className="pointer-events-none fixed top-6 left-1/2 z-[9999] flex -translate-x-1/2 flex-col items-center gap-2">
+    <div
+      className="pointer-events-none fixed left-1/2 z-9999 flex -translate-x-1/2 flex-col items-center gap-2"
+      style={{ top: topOffset }}
+    >
       {toasts.map((t) => (
         <ToastEntry key={t.id} item={t} />
       ))}

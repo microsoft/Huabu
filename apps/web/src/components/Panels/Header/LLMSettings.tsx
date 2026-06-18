@@ -57,7 +57,7 @@ export const LLMSettings: React.FC = () => {
   // Surface store errors as transient toasts.
   useEffect(() => {
     if (llmError) {
-      toast(llmError, { variant: 'error' });
+      toast(llmError, { tone: 'danger' });
     }
   }, [llmError]);
 

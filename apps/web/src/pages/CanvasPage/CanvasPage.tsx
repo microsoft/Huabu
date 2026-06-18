@@ -11,7 +11,9 @@ import { ChatPanel } from '../../components/Panels/ChatPanel';
 import { CanvasHeader } from '../../components/Panels/Header/CanvasHeader.tsx';
 import { KeyboardShortcutsModal } from '../../components/Panels/Header/KeyboardShortcutsModal.tsx';
 import { usePageShortcuts } from '../../hooks/shortcuts';
-import useStore from '../../store/canvasStore.ts';
+import useStore, {
+  dismissVersionConflictToast,
+} from '../../store/canvasStore.ts';
 
 /**
  * Page component for a single canvas.
@@ -51,6 +53,20 @@ export default function CanvasPage() {
       void switchCanvas(canvasId);
     }
   }, [canvasId, storeCanvasId, loadCanvas, switchCanvas, navigate]);
+
+  // When the user leaves the canvas page (e.g. clicks the back arrow
+  // to the canvas list, navigates into settings, or opens the docs),
+  // dismiss the persistent "modified elsewhere" toast so it doesn't
+  // bleed into other routes where the stale baseline isn't relevant.
+  // Pending save drains are handled by the navigation blocker in
+  // `RootLayout` (which lives in the data router and never unmounts),
+  // not here — putting the blocker on this component would leak stale
+  // entries under React.StrictMode and freeze later navigations.
+  useEffect(() => {
+    return () => {
+      dismissVersionConflictToast();
+    };
+  }, []);
 
   // Treat any mismatch between the URL canvas and the store canvas as a
   // loading state — covers the gap between this page mounting and the

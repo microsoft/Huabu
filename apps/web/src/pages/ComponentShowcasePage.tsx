@@ -575,35 +575,142 @@ export default function ComponentShowcasePage() {
           {/* ────────────────────── Toast ─────────────────────── */}
           <Section
             title="Toast"
-            description="Imperative toast via toast() function. Three variants: info, success, error. Auto-dismisses after 3 seconds."
+            description="Imperative toast via toast() function. Five tones (neutral, info, success, warning, danger) shared with Button. Auto-dismisses after 3 seconds."
           >
-            <SubSection label="Click to trigger">
+            <SubSection label="Tones (auto-dismiss)">
               <Button
                 variant="solid"
+                tone="neutral"
                 size="sm"
-                onClick={() => toast('This is an info toast')}
+                onClick={() =>
+                  toast('Neutral toast — plain status update', {
+                    tone: 'neutral',
+                  })
+                }
               >
-                Info toast
+                Neutral
               </Button>
               <Button
                 variant="solid"
                 tone="info"
                 size="sm"
                 onClick={() =>
-                  toast('Operation completed!', { variant: 'success' })
+                  toast('Info toast — heads up, nothing wrong', {
+                    tone: 'info',
+                  })
                 }
               >
-                Success toast
+                Info
+              </Button>
+              <Button
+                variant="solid"
+                tone="success"
+                size="sm"
+                onClick={() =>
+                  toast('Success toast — operation completed', {
+                    tone: 'success',
+                  })
+                }
+              >
+                Success
+              </Button>
+              <Button
+                variant="solid"
+                tone="warning"
+                size="sm"
+                onClick={() =>
+                  toast('Warning toast — your input has a problem', {
+                    tone: 'warning',
+                  })
+                }
+              >
+                Warning
               </Button>
               <Button
                 variant="solid"
                 tone="danger"
                 size="sm"
                 onClick={() =>
-                  toast('Something went wrong', { variant: 'error' })
+                  toast('Danger toast — something failed', { tone: 'danger' })
                 }
               >
-                Error toast
+                Danger
+              </Button>
+            </SubSection>
+            <SubSection label="With action button (persistent)">
+              <Button
+                variant="solid"
+                tone="info"
+                size="sm"
+                onClick={() =>
+                  toast('Saved as draft — undo within 10 seconds.', {
+                    tone: 'info',
+                    duration: 0,
+                    action: {
+                      label: 'Undo',
+                      onClick: () => toast('Undone', { tone: 'success' }),
+                    },
+                  })
+                }
+              >
+                Info + Undo
+              </Button>
+              <Button
+                variant="solid"
+                tone="warning"
+                size="sm"
+                onClick={() =>
+                  toast(
+                    'Name "Sketch 1" is already in use. Choose a different name.',
+                    {
+                      tone: 'warning',
+                      duration: 0,
+                      action: {
+                        label: 'Rename',
+                        onClick: () =>
+                          toast('Opening rename…', { tone: 'info' }),
+                      },
+                    },
+                  )
+                }
+              >
+                Warning + Rename
+              </Button>
+              <Button
+                variant="solid"
+                tone="danger"
+                size="sm"
+                onClick={() =>
+                  toast(
+                    "This canvas was modified elsewhere. Your recent edits won't be saved.",
+                    {
+                      tone: 'danger',
+                      duration: 0,
+                      action: {
+                        label: 'Reload',
+                        onClick: () =>
+                          toast('Would reload page', { tone: 'neutral' }),
+                      },
+                    },
+                  )
+                }
+              >
+                Danger + Reload
+              </Button>
+            </SubSection>
+            <SubSection label="Dismissible only (no action)">
+              <Button
+                variant="solid"
+                tone="neutral"
+                size="sm"
+                onClick={() =>
+                  toast(
+                    'Long-running task started. This toast stays until you dismiss it.',
+                    { tone: 'neutral', duration: 0 },
+                  )
+                }
+              >
+                Persistent neutral
               </Button>
             </SubSection>
           </Section>
