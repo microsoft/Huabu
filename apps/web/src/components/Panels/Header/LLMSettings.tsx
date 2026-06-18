@@ -42,6 +42,11 @@ export const LLMSettings: React.FC = () => {
   const [azureDeployment, setAzureDeployment] = useState('');
   const [azureApiVersion, setAzureApiVersion] = useState('');
   const [azureApiKey, setAzureApiKey] = useState('');
+  // Optional 5th field: deployment name for image generation
+  // (`gpt-image-1` family). Persisted alongside `model` (chat
+  // deployment) so chat + image can share the same endpoint / key /
+  // apiVersion but target different deployments.
+  const [azureImageDeployment, setAzureImageDeployment] = useState('');
   const isAzure = llmConfig?.provider === 'azure-openai';
 
   // Sync Azure form fields with the persisted config whenever it changes
@@ -51,8 +56,15 @@ export const LLMSettings: React.FC = () => {
     setAzureEndpoint(llmConfig?.baseUrl ?? '');
     setAzureDeployment(llmConfig?.model ?? '');
     setAzureApiVersion(llmConfig?.apiVersion ?? '');
+    setAzureImageDeployment(llmConfig?.imageModel ?? '');
     setAzureApiKey('');
-  }, [isAzure, llmConfig?.baseUrl, llmConfig?.model, llmConfig?.apiVersion]);
+  }, [
+    isAzure,
+    llmConfig?.baseUrl,
+    llmConfig?.model,
+    llmConfig?.apiVersion,
+    llmConfig?.imageModel,
+  ]);
 
   // Surface store errors as transient toasts.
   useEffect(() => {
@@ -99,6 +111,7 @@ export const LLMSettings: React.FC = () => {
     const deployment = azureDeployment.trim();
     const apiVersion = azureApiVersion.trim();
     const apiKey = azureApiKey.trim();
+    const imageDeployment = azureImageDeployment.trim();
     // Endpoint + deployment are the minimum needed for the next LLM call
     // to even reach Azure; api version + key can be filled in later
     // (key, in particular, may already be persisted from a prior save).
@@ -109,6 +122,9 @@ export const LLMSettings: React.FC = () => {
       baseUrl: endpoint,
       ...(apiVersion ? { apiVersion } : {}),
       ...(apiKey ? { apiKey } : {}),
+      // Always send imageModel — empty string clears a previously saved
+      // value (per setLLMConfig's undefined-vs-empty semantics).
+      imageModel: imageDeployment,
     });
     setAzureApiKey('');
   };
@@ -203,6 +219,19 @@ export const LLMSettings: React.FC = () => {
               placeholder="e.g. 2025-04-01-preview"
               value={azureApiVersion}
               onChange={(e) => setAzureApiVersion(e.target.value)}
+              className="border-edge-default bg-surface text-fg-muted focus:ring-info-light w-56 rounded border px-2 py-1.5 text-xs focus:ring-1 focus:outline-none"
+            />
+          </SettingRow>
+
+          <SettingRow
+            title="Image Deployment"
+            description="Optional. Enables the `generate_image` agent tool. Use your gpt-image-1 deployment name (separate from the chat deployment above)."
+          >
+            <input
+              type="text"
+              placeholder="e.g. gpt-image-1"
+              value={azureImageDeployment}
+              onChange={(e) => setAzureImageDeployment(e.target.value)}
               className="border-edge-default bg-surface text-fg-muted focus:ring-info-light w-56 rounded border px-2 py-1.5 text-xs focus:ring-1 focus:outline-none"
             />
           </SettingRow>

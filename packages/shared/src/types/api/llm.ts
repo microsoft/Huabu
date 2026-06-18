@@ -66,6 +66,16 @@ export interface LLMConfig {
   /** Optional custom base URL override. */
   baseUrl?: string;
   apiVersion?: string;
+  /**
+   * Azure-only: deployment name for image generation
+   * (gpt-image-1 family). Separate from {@link model} because Azure
+   * customers typically deploy chat and image models under the same
+   * resource (sharing `baseUrl` / `apiKey` / `apiVersion`) but at
+   * different deployment names. Empty / undefined means "image
+   * generation not configured" and the `generate_image` agent tool
+   * will return a clean error.
+   */
+  imageModel?: string;
 }
 
 /**
@@ -79,6 +89,12 @@ export const llmConfigUpdateSchema = z.object({
   /** Optional base URL override. */
   baseUrl: z.string().optional(),
   apiVersion: z.string().optional(),
+  /**
+   * Azure-only image-generation deployment name. Same omission
+   * semantics as the other optional fields: omitted (undefined) keeps
+   * the previously-saved value, empty string clears it.
+   */
+  imageModel: z.string().optional(),
 });
 export type LLMConfigUpdate = z.infer<typeof llmConfigUpdateSchema>;
 

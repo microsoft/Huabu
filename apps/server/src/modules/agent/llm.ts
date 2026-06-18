@@ -131,6 +131,13 @@ interface PersistedConfig {
   apiKey?: string;
   baseUrl?: string;
   apiVersion?: string;
+  /**
+   * Azure-only image-generation deployment name. Surfaced here so
+   * {@link getAzureImageConfig} can read it through the same
+   * `activeConfig` / `loadPersistedConfig` path as the chat fields
+   * without a second round-trip to disk.
+   */
+  imageModel?: string;
 }
 
 /**
@@ -144,6 +151,13 @@ interface ProviderPersisted {
   apiKey?: string;
   baseUrl?: string;
   apiVersion?: string;
+  /**
+   * Azure-only image-generation deployment name. Persisted alongside
+   * `model` (chat deployment) because customers typically run both
+   * under the same resource (endpoint + key + apiVersion) but at
+   * different deployment names.
+   */
+  imageModel?: string;
 }
 
 /**
@@ -179,6 +193,9 @@ function loadPersistedStore(): PersistedStore {
       if (typeof parsed.baseUrl === 'string') entry.baseUrl = parsed.baseUrl;
       if (typeof parsed.apiVersion === 'string') {
         entry.apiVersion = parsed.apiVersion;
+      }
+      if (typeof parsed.imageModel === 'string') {
+        entry.imageModel = parsed.imageModel;
       }
       return { active: provider, providers: { [provider]: entry } };
     }
@@ -220,6 +237,7 @@ function buildPersistedConfig(
     ...(entry.apiKey ? { apiKey: entry.apiKey } : {}),
     ...(entry.baseUrl ? { baseUrl: entry.baseUrl } : {}),
     ...(entry.apiVersion ? { apiVersion: entry.apiVersion } : {}),
+    ...(entry.imageModel ? { imageModel: entry.imageModel } : {}),
   };
 }
 
@@ -530,6 +548,7 @@ export async function getLLMConfig(): Promise<LLMConfig> {
       authenticated,
       baseUrl: cfg.baseUrl,
       apiVersion: cfg.apiVersion,
+      imageModel: cfg.imageModel,
     };
   } catch (err) {
     console.warn(
@@ -592,6 +611,10 @@ export async function setLLMConfig(
     if (update.apiVersion) entry.apiVersion = update.apiVersion;
     else delete entry.apiVersion;
   }
+  if (update.imageModel !== undefined) {
+    if (update.imageModel) entry.imageModel = update.imageModel;
+    else delete entry.imageModel;
+  }
   store.providers[update.provider] = entry;
   store.active = update.provider;
   savePersistedStore(store);
@@ -618,7 +641,44 @@ export async function setLLMConfig(
     authenticated,
     baseUrl: persisted.baseUrl,
     apiVersion: persisted.apiVersion,
+    imageModel: persisted.imageModel,
   };
+}
+
+/**
+ * Resolved Azure image-generation config, for the `generate_image`
+ * agent tool. Reads from the persisted Azure provider entry
+ * regardless of which provider is currently active for chat — image
+ * generation is a side-channel that always targets Azure for now,
+ * and tying it to `active` would force users to switch their chat
+ * provider to Azure just to generate an image.
+ *
+ * Throws a user-actionable error when any required field is missing
+ * so the agent tool surfaces a clear "open Settings" message in chat
+ * instead of a cryptic 4xx from Azure.
+ */
+export function getAzureImageConfig(): {
+  endpoint: string;
+  deployment: string;
+  apiKey: string;
+  apiVersion: string;
+} {
+  const azure = loadPersistedStore().providers['azure-openai'];
+  const endpoint = azure?.baseUrl?.replace(/\/+$/, '') ?? '';
+  const deployment = azure?.imageModel?.trim() ?? '';
+  const apiKey = azure?.apiKey ?? '';
+  const apiVersion = azure?.apiVersion?.trim() ?? '';
+  const missing: string[] = [];
+  if (!endpoint) missing.push('Endpoint');
+  if (!deployment) missing.push('Image Deployment');
+  if (!apiKey) missing.push('API Key');
+  if (!apiVersion) missing.push('API Version');
+  if (missing.length > 0) {
+    throw new Error(
+      `Azure image generation not configured. Open Settings → LLM Provider → Azure OpenAI and fill in: ${missing.join(', ')}.`,
+    );
+  }
+  return { endpoint, deployment, apiKey, apiVersion };
 }
 
 /**

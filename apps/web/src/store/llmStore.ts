@@ -12,6 +12,7 @@ import {
 
 import type {
   LLMConfig,
+  LLMConfigUpdate,
   LLMModelInfo,
   LLMProviderInfo,
 } from '@sediment/shared';
@@ -43,12 +44,7 @@ interface LLMState {
   /** Load models for a specific provider. */
   loadModels: (provider: string) => Promise<void>;
   /** Update provider/model (and optionally API key). */
-  updateConfig: (update: {
-    provider: string;
-    model: string;
-    apiKey?: string;
-    baseUrl?: string;
-  }) => Promise<void>;
+  updateConfig: (update: LLMConfigUpdate) => Promise<void>;
   /** Start an OAuth device code login flow. */
   startOAuth: () => Promise<void>;
   /** Cancel an in-progress OAuth flow. */
