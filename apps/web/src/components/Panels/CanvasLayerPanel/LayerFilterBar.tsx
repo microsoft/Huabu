@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import { Search, X } from 'lucide-react';
+import { ChevronsDownUp, ChevronsUpDown, Search, X } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 
 import { getFilterKeyMeta } from './layerFilterKey';
@@ -40,6 +40,21 @@ interface LayerFilterBarProps {
    * tied to the search input's lifecycle).
    */
   onCloseSearch: () => void;
+  /**
+   * Whether the canvas currently contains at least one frame / group.
+   * Controls visibility of the collapse-all toggle (no frames → no
+   * point showing the button).
+   */
+  hasAnyFrame: boolean;
+  /**
+   * `true` when at least one frame is currently expanded. Drives the
+   * collapse-all toggle's icon + tooltip:
+   * - expanded present → "Collapse all frames" (`ChevronsDownUp`)
+   * - all collapsed    → "Expand all frames"   (`ChevronsUpDown`)
+   */
+  hasAnyExpandedFrame: boolean;
+  /** Bulk collapse / expand toggle handler. */
+  onToggleAllFrames: () => void;
 }
 
 export const LayerFilterBar = ({
@@ -52,6 +67,9 @@ export const LayerFilterBar = ({
   isSearchOpen,
   onOpenSearch,
   onCloseSearch,
+  hasAnyFrame,
+  hasAnyExpandedFrame,
+  onToggleAllFrames,
 }: LayerFilterBarProps) => {
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -62,16 +80,28 @@ export const LayerFilterBar = ({
   }, [isSearchOpen]);
 
   const showChipRow = availableKeys.length >= 2;
+  const CollapseAllIcon = hasAnyExpandedFrame ? ChevronsDownUp : ChevronsUpDown;
+  const collapseAllTitle = hasAnyExpandedFrame
+    ? 'Collapse all frames'
+    : 'Expand all frames';
 
   return (
-    // The sticky `bg-surface` occludes list rows during scroll, plus a
-    // *very* light hairline (~40% of the default edge token) hints at
+    // A very light hairline (~40% of the default edge token) hints at
     // the section boundary without competing with the workspace-header
     // divider above it. Plain `border-edge-default` was too heavy and
     // stacked with that header into "two parallel rules"; a drop shadow
     // looked muddy on the warm-paper background. The diluted hairline
     // splits the difference.
-    <div className="bg-surface border-edge-default/40 sticky top-0 z-10 flex flex-col gap-1 border-b px-2 py-1.5">
+    //
+    // The toolbar wrapper sits ABOVE the layer-list's scroll container
+    // (see CanvasLayerPanel) so it doesn't need `sticky top-0` — the
+    // scrollbar lane only spans the list below, not the toolbar.
+    //
+    // The toolbar wrapper renders unconditionally so the collapse-all
+    // and Search triggers keep a fixed home — they don't migrate
+    // between an in-bar slot and a floating corner depending on chip
+    // availability. The chip row inside is still conditional.
+    <div className="bg-surface border-edge-default/40 flex shrink-0 flex-col gap-1 border-b px-2 py-1.5">
       {/* Regex search row — only present when the user has explicitly
           opened it. The wrapper is the focus / error surface; the inner
           <input> has no border of its own so the field reads as a single
@@ -121,20 +151,19 @@ export const LayerFilterBar = ({
         </div>
       )}
 
-      {/* Default chip row — the "always there" affordance. Chips on the
-          left whitelist node types; the Search button on the right opens
-          the regex input above. Hidden when fewer than two node types
-          exist on the canvas (the parent then falls back to a corner-
-          floating Search trigger). */}
-      {showChipRow && (
-        // No text label by design — "Filter" is jargon and adds a
-        // language barrier; the chips themselves carry the affordance
-        // (icon-only buttons with per-type tooltips like "Filter by
-        // Image"). The search trigger sits on the right as the only
-        // explicit non-chip control on this row.
-        <div className="flex items-center gap-1.5">
-          <div className="flex flex-1 flex-wrap items-center gap-0.5">
-            {availableKeys.map((key) => {
+      {/* Tools row — always rendered. Left side is the optional chip
+          strip (whitelist by node type); right side is the action
+          cluster (collapse-all toggle + regex-search trigger). The
+          right cluster never moves, so muscle memory holds across
+          chip-row presence and search-open state. */}
+      <div className="flex items-center gap-1.5">
+        <div className="flex flex-1 flex-wrap items-center gap-0.5">
+          {showChipRow &&
+            // No text label by design — "Filter" is jargon and adds a
+            // language barrier; the chips themselves carry the
+            // affordance (icon-only buttons with per-type tooltips like
+            // "Filter by Image").
+            availableKeys.map((key) => {
               const { icon: Icon, label } = getFilterKeyMeta(key);
               const isSelected = selectedKeys.has(key);
               return (
@@ -161,21 +190,36 @@ export const LayerFilterBar = ({
                 </Button>
               );
             })}
-          </div>
-          {!isSearchOpen && (
+        </div>
+        <div className="flex shrink-0 items-center gap-0.5">
+          {hasAnyFrame && (
             <Button
               variant="ghost"
               iconOnly
               size="sm"
-              onClick={onOpenSearch}
-              title="Find by regex"
-              className="text-fg-muted shrink-0 p-1!"
+              onClick={onToggleAllFrames}
+              title={collapseAllTitle}
+              className="text-fg-muted p-1!"
             >
-              <Search size={12} />
+              <CollapseAllIcon size={12} />
             </Button>
           )}
+          <Button
+            variant="ghost"
+            iconOnly
+            size="sm"
+            onClick={isSearchOpen ? onCloseSearch : onOpenSearch}
+            title={isSearchOpen ? 'Close search (Esc)' : 'Find by regex'}
+            className={clsx(
+              'text-fg-muted p-1!',
+              isSearchOpen && 'bg-info-bg!',
+            )}
+            aria-pressed={isSearchOpen}
+          >
+            <Search size={12} />
+          </Button>
         </div>
-      )}
+      </div>
     </div>
   );
 };

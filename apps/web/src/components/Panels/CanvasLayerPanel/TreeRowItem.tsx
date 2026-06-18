@@ -34,6 +34,46 @@ export interface TreeRowItemProps extends React.HTMLAttributes<HTMLDivElement> {
   isExternal?: boolean;
   onImport?: () => void;
 
+  /**
+   * Live drop indicator shown during a layer-panel drag-over:
+   *
+   *   - `'before'` → thin `bg-info` caret on the row's TOP edge
+   *     (insert above). Caret's `left` offset reflects
+   *     `dropIntentDepth`.
+   *   - `'after'`  → same caret on the row's BOTTOM edge (insert
+   *     below).
+   *   - `'into'`   → NO caret. The frame row's inner pill gets a
+   *     soft `bg-info/15` fill so the row itself reads as the drop
+   *     target (= drop as first child of THIS frame). Avoids the
+   *     ambiguity of a thin caret line near the frame's bottom
+   *     border, which users can perceive as "below / outside the
+   *     frame".
+   *
+   * `null` means no indicator. Set by `CanvasLayerTree` from its
+   * `dnd-kit` `onDragOver` handler.
+   */
+  dropIntent?: 'before' | 'after' | 'into' | null;
+
+  /**
+   * Hierarchy depth the caret should anchor to — usually the depth of
+   * the future parent's children at this slot. The caret's left offset
+   * is `8 + dropIntentDepth * 25 px`, matching the indent of a row at
+   * that depth. This is what makes the caret visually "live inside"
+   * the destination frame: a deeper caret = nested deeper. When the
+   * dragged node would land at top-level, pass `0`. Only meaningful
+   * when `dropIntent` is `'before'` or `'after'`. Defaults to `depth`.
+   */
+  dropIntentDepth?: number;
+
+  /**
+   * Apply the soft `bg-info/15` fill to this row's pill EVEN when
+   * `dropIntent` isn't `'into'`. Used by `CanvasLayerTree` to mark a
+   * frame row as the destination parent when the caret is rendered at
+   * its bottom edge for the "drop as first child" slot — the fill
+   * disambiguates the caret from "after this row as a sibling".
+   */
+  isIntoFrameHighlight?: boolean;
+
   // Interaction overrides
   onClick?: (e: React.MouseEvent) => void;
   onDoubleClick?: (e: React.MouseEvent) => void;
@@ -73,6 +113,9 @@ export const TreeRowItem = React.memo(
     onDoubleClick,
     editable = false,
     onRename,
+    dropIntent = null,
+    dropIntentDepth,
+    isIntoFrameHighlight = false,
     forwardedRef,
     dndAttributes,
     dndListeners,
@@ -167,15 +210,60 @@ export const TreeRowItem = React.memo(
         onClick={onClick}
         onDoubleClick={handleDoubleClick}
         className={clsx(
-          'bg-surface flex h-9 w-full cursor-pointer touch-none items-center gap-1 px-2',
+          'bg-surface flex h-9 w-full cursor-pointer touch-none items-center gap-1 px-2 focus:outline-none focus-visible:outline-none',
           className,
         )}
         {...rest}
       >
+        {/* Reorder caret — a single info-coloured line spanning the
+            row width at the destination indent. The caret's left
+            offset reflects `dropIntentDepth` (= the indent of a row
+            at the destination depth), so a deeper drop site visually
+            nests further inside its parent frame.
+
+            `'into'` is intentionally NOT rendered as a caret — the
+            destination frame's row gets a dashed `outline-info`
+            highlight instead (see below) so the row itself reads as
+            the drop target. */}
+        {(dropIntent === 'before' || dropIntent === 'after') && (
+          <span
+            className={clsx(
+              'pointer-events-none absolute right-2 z-10 h-0',
+              dropIntent === 'before' ? 'top-0' : 'bottom-0',
+            )}
+            style={{ left: 8 + (dropIntentDepth ?? depth) * 25 }}
+            aria-hidden
+          >
+            <span className="bg-info absolute inset-x-0 top-1/2 h-0.5 -translate-y-1/2 rounded-full" />
+          </span>
+        )}
         <div
           className={clsx(
             'group flex w-full items-center gap-1 rounded px-1 py-1 text-sm transition-colors',
             bgColor,
+            // `'into'` / `isIntoFrameHighlight` paints the destination
+            // frame's row with a soft `bg-info-bg` fill PLUS a dashed
+            // `outline-info` border — bg makes it obvious at a glance,
+            // outline gives the crisp frame-target affordance.
+            //
+            // - `bg-info-bg` (semantic token: light blue in light
+            //   mode, blue tint in dark mode).
+            // - `hover:bg-info-bg` explicitly overrides the default
+            //   row's `hover:bg-bg-default` (a hover variant beats a
+            //   base class on :hover regardless of `clsx` order).
+            // - `outline` (not `border`) is drawn outside the box
+            //   model so it doesn't shift the row's layout.
+            //
+            // Set when:
+            //   1. `dropIntent === 'into'` (this row IS the
+            //      destination frame, collapsed case).
+            //   2. `isIntoFrameHighlight` (this row is the
+            //      destination frame, expanded case where the caret
+            //      shows at its bottom edge; OR this row is the
+            //      parent frame for a sibling-insert between its
+            //      existing children).
+            (dropIntent === 'into' || isIntoFrameHighlight) &&
+              'bg-info-bg hover:bg-info-bg outline-info outline-1 -outline-offset-1 outline-dashed',
           )}
         >
           {/* Chevron — always reserves space to keep sibling indentation stable */}
