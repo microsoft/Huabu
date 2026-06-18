@@ -51,10 +51,67 @@ import type {
   SetAcpSessionModelResponse,
   SetAcpSessionModeResponse,
 } from '@sediment/shared';
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyBaseLogger, FastifyPluginAsync } from 'fastify';
 
 interface ThreadParams {
   threadId: string;
+}
+
+/**
+ * Resolve the live session entry for a set-RPC (mode / model / config
+ * option), opening it on-demand when none exists yet.
+ *
+ * The selector dropdowns are seeded from the no-spawn `/cached-meta`
+ * snapshot, so the user can switch a value BEFORE the session has ever
+ * been spawned. Per the `/cached-meta` contract a real ensure-session
+ * is expected on "any set-RPC" — so rather than 404 when the registry
+ * is cold, we spawn (or reuse) the session using the `profileId` the
+ * client supplies, then let the caller apply the actual switch.
+ *
+ * Returns either the resolved entry or a ready-to-send error envelope:
+ *   • 404 `session_not_found` — no live session AND no `profileId` to
+ *     spawn with (legacy callers that didn't send spawn context).
+ *   • 503 — the on-demand spawn failed; `code` mirrors the ensure
+ *     route's `AcpEnsureErrorCode`.
+ */
+async function resolveSetRpcEntry(
+  threadId: string,
+  ctx: { profileId?: string; canvasId?: string; cwd?: string },
+  logger: FastifyBaseLogger,
+): Promise<
+  | { ok: true; entry: AcpSessionEntry }
+  | { ok: false; status: number; body: { message: string; code: string } }
+> {
+  const existing = acpSessionRegistry.get(threadId);
+  if (existing) return { ok: true, entry: existing };
+  if (!ctx.profileId) {
+    return {
+      ok: false,
+      status: 404,
+      body: {
+        message: 'No ACP session for this thread',
+        code: 'session_not_found',
+      },
+    };
+  }
+  try {
+    const entry = await ensureAcpSession({
+      threadId,
+      binding: { alias: ctx.profileId, profileId: ctx.profileId },
+      canvasId: ctx.canvasId,
+      cwd: ctx.cwd,
+      logger,
+    });
+    return { ok: true, entry };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const code = err instanceof AcpServiceError ? err.code : 'internal';
+    logger.warn(
+      { threadId, code, err: message },
+      '[acp/threads] on-demand ensureAcpSession for set-RPC failed',
+    );
+    return { ok: false, status: 503, body: { message, code } };
+  }
 }
 
 /**
@@ -351,13 +408,6 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
     Reply: SetAcpSessionModeResponse | { message: string; code?: string };
   }>('/threads/:threadId/mode', async (request, reply) => {
     const { threadId } = request.params;
-    const entry = acpSessionRegistry.get(threadId);
-    if (!entry) {
-      return reply.status(404).send({
-        message: 'No ACP session for this thread',
-        code: 'session_not_found',
-      });
-    }
     const parsed = setAcpSessionModeRequestSchema.safeParse(request.body);
     if (!parsed.success) {
       request.log.warn(
@@ -369,6 +419,19 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
         code: 'validation_failed',
       });
     }
+    const resolved = await resolveSetRpcEntry(
+      threadId,
+      {
+        profileId: parsed.data.profileId,
+        canvasId: parsed.data.canvasId,
+        cwd: parsed.data.cwd,
+      },
+      request.log,
+    );
+    if (!resolved.ok) {
+      return reply.status(resolved.status).send(resolved.body);
+    }
+    const entry = resolved.entry;
     try {
       await entry.client.setSessionMode(entry.sessionId, parsed.data.modeId);
       // Optimistic local update so the next GET returns the new id
@@ -391,13 +454,6 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
     Reply: SetAcpSessionModelResponse | { message: string; code?: string };
   }>('/threads/:threadId/model', async (request, reply) => {
     const { threadId } = request.params;
-    const entry = acpSessionRegistry.get(threadId);
-    if (!entry) {
-      return reply.status(404).send({
-        message: 'No ACP session for this thread',
-        code: 'session_not_found',
-      });
-    }
     const parsed = setAcpSessionModelRequestSchema.safeParse(request.body);
     if (!parsed.success) {
       request.log.warn(
@@ -409,6 +465,19 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
         code: 'validation_failed',
       });
     }
+    const resolved = await resolveSetRpcEntry(
+      threadId,
+      {
+        profileId: parsed.data.profileId,
+        canvasId: parsed.data.canvasId,
+        cwd: parsed.data.cwd,
+      },
+      request.log,
+    );
+    if (!resolved.ok) {
+      return reply.status(resolved.status).send(resolved.body);
+    }
+    const entry = resolved.entry;
     try {
       await entry.client.setSessionModel(entry.sessionId, parsed.data.modelId);
       entry.currentModelId = parsed.data.modelId;
@@ -431,13 +500,6 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
       | { message: string; code?: string };
   }>('/threads/:threadId/config-option', async (request, reply) => {
     const { threadId } = request.params;
-    const entry = acpSessionRegistry.get(threadId);
-    if (!entry) {
-      return reply.status(404).send({
-        message: 'No ACP session for this thread',
-        code: 'session_not_found',
-      });
-    }
     const parsed = setAcpSessionConfigOptionRequestSchema.safeParse(
       request.body,
     );
@@ -451,6 +513,19 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
         code: 'validation_failed',
       });
     }
+    const resolved = await resolveSetRpcEntry(
+      threadId,
+      {
+        profileId: parsed.data.profileId,
+        canvasId: parsed.data.canvasId,
+        cwd: parsed.data.cwd,
+      },
+      request.log,
+    );
+    if (!resolved.ok) {
+      return reply.status(resolved.status).send(resolved.body);
+    }
+    const entry = resolved.entry;
     try {
       await entry.client.setSessionConfigOption(
         entry.sessionId,

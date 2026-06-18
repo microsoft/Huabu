@@ -37,8 +37,68 @@ import { ensureAcpSession, getAcpThreadCommands } from '@/api/acp';
 
 import type { AgentBinding, AvailableCommand } from '@sediment/shared';
 
-/** Delay before the follow-up re-pull, in ms. See file header for rationale. */
-const RETRY_DELAY_MS = 200;
+/**
+ * Backoff schedule (ms) for the follow-up re-pulls issued while the
+ * command list is still empty after `ensureAcpSession`.
+ *
+ * The agent pushes `available_commands_update` shortly after
+ * `session/new`, but `ensureAcpSession` returns the sessionId before
+ * the agentlet relay has even attached (the daemon answers the spawn
+ * RPC right after opening the bridge socket). So the commands land in
+ * the server-side registry a few hundred ms LATER. On a cold spawn
+ * the agent CLI itself can take many seconds to boot before it even
+ * emits the list, so we poll persistently with growing gaps until it
+ * arrives. The cumulative budget below spans ~30 s, after which we
+ * give up and let the short empty-state TTL drive the next attempt on
+ * the following menu open.
+ */
+const EMPTY_POLL_BACKOFF_MS = [
+  200, 300, 500, 800, 1200, 1500, 2000, 2500, 3000, 3000, 3000, 3000, 3000,
+  3000,
+];
+
+/**
+ * localStorage key prefix for the per-profile slash-command cache.
+ * The agent's command catalogue is effectively static per profile
+ * (Copilot advertises the same ~34 commands for every session), so we
+ * persist the last-known list keyed by `profileId` and seed the menu
+ * from it OPTIMISTICALLY on the next thread. This collapses the cold
+ * spawn wait (agent boot + first `available_commands_update`) from
+ * many seconds to instant for any agent the user has used before; the
+ * real list silently reconciles once the fresh fetch resolves.
+ */
+const CACHE_KEY_PREFIX = 'sediment.acp.slashCommands.';
+
+/** Read the cached command list for a profile, or `[]` on miss/parse error. */
+function readCachedCommands(profileId: string): AvailableCommand[] {
+  if (!profileId) return [];
+  try {
+    const raw = localStorage.getItem(CACHE_KEY_PREFIX + profileId);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as AvailableCommand[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Persist the command list for a profile. Best-effort; swallows quota errors. */
+function writeCachedCommands(
+  profileId: string,
+  commands: AvailableCommand[],
+): void {
+  if (!profileId) return;
+  try {
+    localStorage.setItem(
+      CACHE_KEY_PREFIX + profileId,
+      JSON.stringify(commands),
+    );
+  } catch {
+    // localStorage unavailable or over quota — the cache is a pure
+    // optimization, so a write failure degrades gracefully to the
+    // network path.
+  }
+}
 
 /**
  * Default "freshness" window used by {@link UseAcpSlashCommandsResult.refreshIfStale}.
@@ -48,6 +108,19 @@ const RETRY_DELAY_MS = 200;
  * few keystrokes apart will pick up a freshly-pushed command set.
  */
 const STALE_TTL_MS = 10_000;
+
+/**
+ * Much shorter staleness window applied while the command cache is
+ * still EMPTY. The agent pushes `available_commands_update` right
+ * after `session/new`, but that arrives in the server registry a
+ * short moment after `ensureAcpSession` has already returned the
+ * sessionId (the bridge relay attaches asynchronously). So once the
+ * cache is non-empty {@link STALE_TTL_MS} throttles re-pulls, but
+ * while it is empty we re-pull aggressively so the menu recovers the
+ * moment the agent's list lands instead of being suppressed by the
+ * full 10 s freshness window.
+ */
+const EMPTY_RETRY_TTL_MS = 1_500;
 
 export interface UseAcpSlashCommandsResult {
   /** Currently-known slash commands. Empty until a fetch resolves with data. */
@@ -99,7 +172,19 @@ export function useAcpSlashCommands({
   canvasId,
   enabled = true,
 }: UseAcpSlashCommandsOptions): UseAcpSlashCommandsResult {
-  const [commands, setCommands] = useState<AvailableCommand[]>([]);
+  // Destructure binding into stable scalars so the useCallback dep
+  // array is a flat list of primitives. Internal bindings get empty
+  // strings — the early-return in `refresh` skips work then.
+  const bindingKind = binding.kind;
+  const profileId = binding.kind === 'external' ? binding.profileId : '';
+
+  // Seed OPTIMISTICALLY from the per-profile cache so a returning
+  // agent's menu paints instantly instead of waiting for a cold
+  // spawn. Lazy initializer runs once; the binding-change effect
+  // below keeps it in sync when the thread/profile switches.
+  const [commands, setCommands] = useState<AvailableCommand[]>(() =>
+    enabled && bindingKind === 'external' ? readCachedCommands(profileId) : [],
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
@@ -121,11 +206,11 @@ export function useAcpSlashCommands({
   const loadingRef = useRef(false);
   const lastFetchedAtRef = useRef(0);
 
-  // Destructure binding into stable scalars so the useCallback dep
-  // array is a flat list of primitives. Internal bindings get empty
-  // strings — the early-return in `refresh` skips work then.
-  const bindingKind = binding.kind;
-  const profileId = binding.kind === 'external' ? binding.profileId : '';
+  // Synchronous mirror of `commands.length > 0`, read inside the
+  // stable `refreshIfStale` callback so it can pick a shorter
+  // staleness window while the cache is empty without subscribing the
+  // callback identity to the `commands` value.
+  const hasCommandsRef = useRef(false);
 
   // ── Refresh: ensure session → optional delayed re-pull ───────────
   const refresh = useCallback(async () => {
@@ -155,23 +240,39 @@ export function useAcpSlashCommands({
         profileId,
       });
       if (!isCurrent()) return;
-      setCommands(res.availableCommands);
       setError(null);
       lastFetchedAtRef.current = Date.now();
 
+      // Authoritative result — the agent has actually reported its
+      // catalogue (non-empty list, OR an empty list with a real
+      // `updatedAt` meaning "this agent genuinely has no commands").
+      // Adopt it and refresh the per-profile cache. We deliberately
+      // do NOT overwrite an optimistically-seeded list with an empty
+      // array while `updatedAt === 0` (commands simply haven't landed
+      // yet) — that would blank a returning agent's menu mid-spawn.
+      if (res.availableCommands.length > 0 || res.updatedAt > 0) {
+        setCommands(res.availableCommands);
+        writeCachedCommands(profileId, res.availableCommands);
+      }
+
       // If the agent had not pushed yet (commands empty AND
-      // updatedAt === 0), schedule a follow-up GET to catch the late
-      // push. Spec offers no timing guarantee but in practice agents
-      // emit `available_commands_update` within tens of ms after
-      // `session/new`.
+      // updatedAt === 0), poll with growing gaps to catch the push
+      // that lands in the registry once the bridge relay attaches and
+      // the (possibly cold-booting) agent emits its list. Stop as
+      // soon as the list arrives or this resume goes stale. Any
+      // optimistic cache stays visible throughout.
       if (res.availableCommands.length === 0 && res.updatedAt === 0) {
-        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
-        if (!isCurrent()) return;
-        const followup = await getAcpThreadCommands(threadId);
-        if (!isCurrent()) return;
-        if (followup) {
-          setCommands(followup.availableCommands);
-          lastFetchedAtRef.current = Date.now();
+        for (const delay of EMPTY_POLL_BACKOFF_MS) {
+          await new Promise((r) => setTimeout(r, delay));
+          if (!isCurrent()) return;
+          const followup = await getAcpThreadCommands(threadId);
+          if (!isCurrent()) return;
+          if (followup && followup.availableCommands.length > 0) {
+            setCommands(followup.availableCommands);
+            writeCachedCommands(profileId, followup.availableCommands);
+            lastFetchedAtRef.current = Date.now();
+            break;
+          }
         }
       }
     } catch (err) {
@@ -200,27 +301,48 @@ export function useAcpSlashCommands({
   const refreshIfStale = useCallback(
     (ttlMs: number = STALE_TTL_MS) => {
       if (loadingRef.current) return;
+      // While the cache is empty, fall back to the aggressive
+      // empty-state window so a late `available_commands_update`
+      // (pushed shortly after `session/new`) is picked up on the next
+      // menu open instead of being throttled by the full freshness
+      // TTL.
+      const effectiveTtl = hasCommandsRef.current
+        ? ttlMs
+        : Math.min(ttlMs, EMPTY_RETRY_TTL_MS);
       const last = lastFetchedAtRef.current;
-      if (last > 0 && Date.now() - last < ttlMs) return;
+      if (last > 0 && Date.now() - last < effectiveTtl) return;
       void refresh();
     },
     [refresh],
   );
 
-  // Reset stale commands when binding/thread/canvas changes so an
-  // external→external switch never shows the previous agent's
-  // typeahead. Session creation is LAZY — the actual fetch happens
-  // on the first `refreshIfStale` call (slash menu open or first
-  // message send), not on mount.
+  // Keep the synchronous mirror in lock-step with the rendered list
+  // so `refreshIfStale` can branch on "do we have commands yet?"
+  // without taking `commands` as a callback dependency.
   useEffect(() => {
-    setCommands([]);
+    hasCommandsRef.current = commands.length > 0;
+  }, [commands]);
+
+  // Re-seed the menu when binding/thread/canvas changes so an
+  // external→external switch never shows the previous agent's
+  // typeahead. We seed from the new profile's cache (not empty) so a
+  // returning agent paints instantly; an unknown profile or internal
+  // binding seeds empty. Session creation stays LAZY — the actual
+  // fetch happens on the first `refreshIfStale` call (slash menu open
+  // or first message send), not on mount.
+  useEffect(() => {
+    setCommands(
+      enabled && bindingKind === 'external'
+        ? readCachedCommands(profileId)
+        : [],
+    );
     setError(null);
     lastFetchedAtRef.current = 0;
     return () => {
       // eslint-disable-next-line react-hooks/exhaustive-deps
       epochRef.current++;
     };
-  }, [refresh]);
+  }, [refresh, enabled, bindingKind, profileId]);
 
   return { commands, loading, error, refresh, refreshIfStale };
 }

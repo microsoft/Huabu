@@ -196,6 +196,9 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const slashCommands = acpExternalReachable
     ? acpSlash.commands
     : internalSlash.commands;
+  const slashLoading = acpExternalReachable
+    ? acpSlash.loading
+    : internalSlash.loading;
   const refreshSlashCommands = acpExternalReachable
     ? acpSlash.refreshIfStale
     : internalSlash.refreshIfStale;
@@ -277,6 +280,21 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   // chosen value into the local snapshot immediately, then fire the
   // REST set-RPC. On failure, revert the snapshot and surface a toast
   // so the user knows the agent rejected the change.
+  //
+  // Spawn context threaded into every set-RPC: the selector dropdowns
+  // are seeded from the no-spawn cached-meta snapshot, so the user can
+  // switch a value before the session has ever been opened. Passing
+  // `{ profileId, canvasId }` lets the server open the session
+  // on-demand instead of rejecting the switch with `session_not_found`.
+  const acpSetRpcSpawnCtx = useMemo(
+    () => ({
+      profileId:
+        agentBinding.kind === 'external' ? agentBinding.profileId : undefined,
+      canvasId: canvasId ?? undefined,
+    }),
+    [agentBinding, canvasId],
+  );
+
   const handleAcpSelectMode = useCallback(
     async (modeId: string) => {
       if (!threadId) return;
@@ -287,7 +305,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         data: { currentModeId: modeId },
       });
       try {
-        await setAcpSessionMode(threadId, { modeId });
+        await setAcpSessionMode(threadId, { modeId, ...acpSetRpcSpawnCtx });
       } catch (err) {
         applyAcpSessionMetaOptimistic({ currentModeId: previousModeId });
         toast(
@@ -298,7 +316,12 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         );
       }
     },
-    [threadId, applyAcpSessionMetaEvent, applyAcpSessionMetaOptimistic],
+    [
+      threadId,
+      applyAcpSessionMetaEvent,
+      applyAcpSessionMetaOptimistic,
+      acpSetRpcSpawnCtx,
+    ],
   );
 
   const handleAcpSelectModel = useCallback(
@@ -308,7 +331,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       if (previousModelId === modelId) return;
       applyAcpSessionMetaOptimistic({ currentModelId: modelId });
       try {
-        await setAcpSessionModel(threadId, { modelId });
+        await setAcpSessionModel(threadId, { modelId, ...acpSetRpcSpawnCtx });
       } catch (err) {
         applyAcpSessionMetaOptimistic({ currentModelId: previousModelId });
         toast(
@@ -319,7 +342,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         );
       }
     },
-    [threadId, applyAcpSessionMetaOptimistic],
+    [threadId, applyAcpSessionMetaOptimistic, acpSetRpcSpawnCtx],
   );
 
   const handleAcpSelectConfigOption = useCallback(
@@ -341,6 +364,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         await setAcpSessionConfigOption(threadId, {
           configOptionId: optionId,
           value,
+          ...acpSetRpcSpawnCtx,
         });
       } catch (err) {
         if (previousValueTyped !== undefined) {
@@ -356,7 +380,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         );
       }
     },
-    [threadId, applyAcpSessionMetaOptimistic],
+    [threadId, applyAcpSessionMetaOptimistic, acpSetRpcSpawnCtx],
   );
 
   // Question thread replay mode
@@ -628,6 +652,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
               isStreaming={isLoading}
               mode={mode}
               slashCommands={slashCommands}
+              slashLoading={slashLoading}
               onSlashMenuIntent={refreshSlashCommands}
               acpSelectorsSlot={
                 agentBinding.kind === 'external' ? (

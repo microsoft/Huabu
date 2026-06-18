@@ -56,7 +56,9 @@ import type { ChatPartsSidecar } from '../store/chat-parts-store.js';
 import type { AssistantMessage, Context } from '@earendil-works/pi-ai';
 import type {
   AcpPlanEntry,
+  AcpModelInfo,
   AcpSessionConfigOption,
+  AcpSessionMode,
   AcpSessionUpdate,
 } from '@sediment/shared';
 import type {
@@ -267,6 +269,74 @@ function hydrateEntryFromPersistedMeta(
   if (typeof meta.metaUpdatedAt === 'number') {
     entry.metaUpdatedAt = meta.metaUpdatedAt;
   }
+}
+
+/**
+ * Seed a fresh entry's meta from the agent's `session/new` response.
+ *
+ * The ACP spec lets an agent inline `models` / `modes` / `configOptions`
+ * in the NewSessionResponse instead of (or as well as) pushing them via
+ * later `session/update` notifications. Copilot CLI does exactly this,
+ * so without reading the blob here the UI shows empty model / mode
+ * selectors until the user sends the first prompt.
+ *
+ * The blob is opaque (persisted verbatim by agentlet), so every field is
+ * validated defensively. Called BEFORE {@link replayEventStoreMeta} so a
+ * genuinely-newer replayed notification still overrides this seed.
+ */
+function seedEntryFromNewSessionResult(
+  entry: AcpSessionEntry,
+  newSessionResult: unknown,
+  logger: FastifyBaseLogger,
+): void {
+  if (!newSessionResult || typeof newSessionResult !== 'object') return;
+  const r = newSessionResult as Record<string, unknown>;
+  let seeded = false;
+
+  const models = r.models as Record<string, unknown> | undefined;
+  if (models && typeof models === 'object') {
+    if (Array.isArray(models.availableModels)) {
+      entry.availableModels = models.availableModels as AcpModelInfo[];
+      seeded = true;
+    }
+    if (typeof models.currentModelId === 'string') {
+      entry.currentModelId = models.currentModelId;
+      seeded = true;
+    }
+  }
+
+  const modes = r.modes as Record<string, unknown> | undefined;
+  if (modes && typeof modes === 'object') {
+    if (Array.isArray(modes.availableModes)) {
+      entry.availableModes = modes.availableModes as AcpSessionMode[];
+      seeded = true;
+    }
+    if (typeof modes.currentModeId === 'string') {
+      entry.currentModeId = modes.currentModeId;
+      seeded = true;
+    }
+  }
+
+  if (Array.isArray(r.configOptions)) {
+    entry.configOptions = r.configOptions as AcpSessionConfigOption[];
+    seeded = true;
+  }
+
+  if (!seeded) return;
+
+  entry.metaUpdatedAt = Date.now();
+  // Propagate the schema to the per-profile cache so sibling threads of
+  // the same profile resolve `/cached-meta` without re-spawning.
+  mirrorEntryToProfileCache(entry);
+  logger.info(
+    {
+      sessionId: entry.sessionId,
+      modelCount: entry.availableModels.length,
+      modeCount: entry.availableModes.length,
+      configCount: entry.configOptions.length,
+    },
+    '[acp] seeded session meta from session/new response',
+  );
 }
 
 /**
@@ -599,6 +669,26 @@ async function ensureAcpSessionInner(
   client.registerSessionListener(sessionId, (update) => {
     handleSessionMetaUpdate(created, update, logger);
   });
+
+  // Seed modes/models/configOptions inline from the agent's `session/new`
+  // response (Copilot CLI delivers them here rather than via notifications).
+  // Done BEFORE replay so a genuinely-newer notification still wins.
+  //
+  // Gated on the ABSENCE of a per-thread persisted snapshot: the
+  // `session/new` blob is frozen at session-creation time, so its
+  // `current*` fields (currentModelId / currentModeId / configOption
+  // currentValues) are the agent's defaults from back then. On a fresh
+  // session that is exactly right (no user choice exists yet). On RESUME
+  // (`persisted.meta` present) those frozen defaults are the STALEST
+  // source of `current*` — staler than the user's last selection in
+  // `persisted.meta` and staler than any replayed/live notification — so
+  // we skip the seed entirely and let `replay` + `hydrateEntryFromPersistedMeta`
+  // restore the up-to-date state instead of clobbering it.
+  seedEntryFromNewSessionResult(
+    created,
+    persisted?.meta ? undefined : sessionRecord?.newSessionResult,
+    logger,
+  );
 
   // Replay any session/update notifications from EventStore that the
   // agent sent during the daemon's session bootstrap (before Huabu

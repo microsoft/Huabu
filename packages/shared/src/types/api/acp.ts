@@ -415,6 +415,17 @@ export interface AcpSessionMetaSnapshot {
  */
 export interface SetAcpSessionModeRequest {
   modeId: string;
+  /**
+   * Optional spawn context. The selector dropdowns are populated from
+   * a no-spawn cached-meta snapshot, so the user can switch mode
+   * BEFORE any live session exists. When set, the server opens (or
+   * reuses) the session on-demand before applying the RPC instead of
+   * failing with `session_not_found`. Omit only when the caller knows
+   * a live session already exists.
+   */
+  profileId?: string;
+  canvasId?: string;
+  cwd?: string;
 }
 
 /** Response body for `POST /api/acp/threads/:threadId/mode`. */
@@ -430,6 +441,10 @@ export interface SetAcpSessionModeResponse {
  */
 export interface SetAcpSessionModelRequest {
   modelId: string;
+  /** Optional spawn context — see {@link SetAcpSessionModeRequest}. */
+  profileId?: string;
+  canvasId?: string;
+  cwd?: string;
 }
 
 /** Response body for `POST /api/acp/threads/:threadId/model`. */
@@ -448,6 +463,10 @@ export interface SetAcpSessionModelResponse {
 export interface SetAcpSessionConfigOptionRequest {
   configOptionId: string;
   value: string | boolean;
+  /** Optional spawn context — see {@link SetAcpSessionModeRequest}. */
+  profileId?: string;
+  canvasId?: string;
+  cwd?: string;
 }
 
 /** Response body for `POST /api/acp/threads/:threadId/config-option`. */
@@ -588,6 +607,9 @@ export const acpPermissionDecisionResponseSchema = z.object({
 /** Schema mirror of {@link SetAcpSessionModeRequest}. */
 export const setAcpSessionModeRequestSchema = z.object({
   modeId: z.string().min(1),
+  profileId: z.string().min(1).optional(),
+  canvasId: z.string().min(1).optional(),
+  cwd: z.string().min(1).optional(),
 }) satisfies z.ZodType<SetAcpSessionModeRequest>;
 
 /** Schema mirror of {@link SetAcpSessionModeResponse}. */
@@ -599,6 +621,9 @@ export const setAcpSessionModeResponseSchema = z.object({
 /** Schema mirror of {@link SetAcpSessionModelRequest}. */
 export const setAcpSessionModelRequestSchema = z.object({
   modelId: z.string().min(1),
+  profileId: z.string().min(1).optional(),
+  canvasId: z.string().min(1).optional(),
+  cwd: z.string().min(1).optional(),
 }) satisfies z.ZodType<SetAcpSessionModelRequest>;
 
 /** Schema mirror of {@link SetAcpSessionModelResponse}. */
@@ -611,6 +636,9 @@ export const setAcpSessionModelResponseSchema = z.object({
 export const setAcpSessionConfigOptionRequestSchema = z.object({
   configOptionId: z.string().min(1),
   value: z.union([z.string(), z.boolean()]),
+  profileId: z.string().min(1).optional(),
+  canvasId: z.string().min(1).optional(),
+  cwd: z.string().min(1).optional(),
 }) satisfies z.ZodType<SetAcpSessionConfigOptionRequest>;
 
 /** Schema mirror of {@link SetAcpSessionConfigOptionResponse}. */

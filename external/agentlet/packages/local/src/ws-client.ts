@@ -170,6 +170,7 @@ export class WsClient extends EventEmitter<WsClientEvents> {
         supportsLoad: this.options.session.supportsLoad,
         supportsResume: this.options.session.supportsResume,
         initializeResult: this.options.session.initializeResult,
+        newSessionResult: this.options.session.newSessionResult,
       }
     }
 
