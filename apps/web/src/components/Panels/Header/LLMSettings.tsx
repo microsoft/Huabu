@@ -47,6 +47,11 @@ export const LLMSettings: React.FC = () => {
   // deployment) so chat + image can share the same endpoint / key /
   // apiVersion but target different deployments.
   const [azureImageDeployment, setAzureImageDeployment] = useState('');
+  // Default `quality` sent to gpt-image-1. `'low'` is the fastest and
+  // cheapest tier; agent calls can still override per request.
+  const [azureImageQuality, setAzureImageQuality] = useState<
+    'low' | 'medium' | 'high' | 'auto'
+  >('low');
   const isAzure = llmConfig?.provider === 'azure-openai';
 
   // Sync Azure form fields with the persisted config whenever it changes
@@ -57,6 +62,7 @@ export const LLMSettings: React.FC = () => {
     setAzureDeployment(llmConfig?.model ?? '');
     setAzureApiVersion(llmConfig?.apiVersion ?? '');
     setAzureImageDeployment(llmConfig?.imageModel ?? '');
+    setAzureImageQuality(llmConfig?.imageQuality ?? 'low');
     setAzureApiKey('');
   }, [
     isAzure,
@@ -64,6 +70,7 @@ export const LLMSettings: React.FC = () => {
     llmConfig?.model,
     llmConfig?.apiVersion,
     llmConfig?.imageModel,
+    llmConfig?.imageQuality,
   ]);
 
   // Surface store errors as transient toasts.
@@ -125,6 +132,7 @@ export const LLMSettings: React.FC = () => {
       // Always send imageModel — empty string clears a previously saved
       // value (per setLLMConfig's undefined-vs-empty semantics).
       imageModel: imageDeployment,
+      imageQuality: azureImageQuality,
     });
     setAzureApiKey('');
   };
@@ -223,10 +231,7 @@ export const LLMSettings: React.FC = () => {
             />
           </SettingRow>
 
-          <SettingRow
-            title="Image Deployment"
-            description="Optional. Enables the `generate_image` agent tool. Use your gpt-image-1 deployment name (separate from the chat deployment above)."
-          >
+          <SettingRow title="Image Deployment" description="Optional.">
             <input
               type="text"
               placeholder="e.g. gpt-image-1"
@@ -234,6 +239,26 @@ export const LLMSettings: React.FC = () => {
               onChange={(e) => setAzureImageDeployment(e.target.value)}
               className="border-edge-default bg-surface text-fg-muted focus:ring-info-light w-56 rounded border px-2 py-1.5 text-xs focus:ring-1 focus:outline-none"
             />
+          </SettingRow>
+
+          <SettingRow
+            title="Image Quality"
+            description="Default render quality for AI-generated images. `low` is the fastest and cheapest; `medium`/`high` look better but cost more and are slower."
+          >
+            <div className="w-56">
+              <Select
+                options={[
+                  { value: 'low', label: 'Low (fastest)' },
+                  { value: 'medium', label: 'Medium' },
+                  { value: 'high', label: 'High (best)' },
+                  { value: 'auto', label: 'Auto (Azure decides)' },
+                ]}
+                value={azureImageQuality}
+                onChange={(v) =>
+                  setAzureImageQuality(v as 'low' | 'medium' | 'high' | 'auto')
+                }
+              />
+            </div>
           </SettingRow>
 
           <SettingRow

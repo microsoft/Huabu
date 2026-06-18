@@ -8,6 +8,7 @@ import {
   type CanvasCommand,
   type CanvasEdgeId,
   type CanvasNodeId,
+  type GenerateImageToolResponse,
   type ToolResponse,
   type WebSearchToolResponse,
 } from '@sediment/shared';
@@ -563,6 +564,17 @@ function mergeToolPart(
       return {
         ...base,
         variant: 'web_search',
+        ...(data ? { data } : {}),
+      };
+    }
+    case 'generate_image': {
+      const data = (patch.data ??
+        (existing?.variant === 'generate_image'
+          ? existing.data
+          : undefined)) as GenerateImageToolResponse | undefined;
+      return {
+        ...base,
+        variant: 'generate_image',
         ...(data ? { data } : {}),
       };
     }

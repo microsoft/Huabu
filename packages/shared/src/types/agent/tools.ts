@@ -57,3 +57,26 @@ export type WebSearchToolResponse = ToolResponse<
   'web_search',
   WebSearchToolData
 >;
+
+// --- generate_image ---------------------------------------------------------
+
+export interface GenerateImageToolData {
+  /** Bare artifact key (e.g. `art_xxx.png`), resolvable via `resolveArtifactUrl`. */
+  src: string;
+  /** Output width in pixels. */
+  width: number;
+  /** Output height in pixels. */
+  height: number;
+  /**
+   * Optional revised prompt returned by the model (gpt-image-1 may
+   * rewrite the prompt for safety / quality before generation). Useful
+   * to surface in the UI so the user understands what the model
+   * actually drew if it differs from their input.
+   */
+  revisedPrompt?: string;
+}
+
+export type GenerateImageToolResponse = ToolResponse<
+  'generate_image',
+  GenerateImageToolData
+>;

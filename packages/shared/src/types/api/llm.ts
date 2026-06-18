@@ -76,6 +76,12 @@ export interface LLMConfig {
    * will return a clean error.
    */
   imageModel?: string;
+  /**
+   * Default rendering quality for {@link imageModel}. Each step up
+   * roughly multiplies cost and latency, so we default to `'low'`.
+   * The agent's `generate_image` tool can override per call.
+   */
+  imageQuality?: 'low' | 'medium' | 'high' | 'auto';
 }
 
 /**
@@ -95,6 +101,12 @@ export const llmConfigUpdateSchema = z.object({
    * the previously-saved value, empty string clears it.
    */
   imageModel: z.string().optional(),
+  /**
+   * Default rendering quality for image generation. Same omission
+   * semantics as the other optional fields. Server treats an absent
+   * value as `'low'`.
+   */
+  imageQuality: z.enum(['low', 'medium', 'high', 'auto']).optional(),
 });
 export type LLMConfigUpdate = z.infer<typeof llmConfigUpdateSchema>;
 

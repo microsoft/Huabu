@@ -2,7 +2,11 @@
  * Milkdown-backed renderer for AI chat messages.
  */
 
+import { useMemo } from 'react';
+
+import { resolveArtifactUrl } from '@/api/artifact';
 import { MilkdownPreview } from '@/components/Milkdown';
+import useCanvasStore from '@/store/canvasStore';
 import { setDragPayload } from '@/utils/io/dragDrop';
 
 import type { NoteDragPayload } from '@/utils/io/dragDrop';
@@ -18,6 +22,41 @@ interface MilkdownMessageCardProps {
    * we don't subscribe N times for N rendered cards.
    */
   threadId: string;
+}
+
+/**
+ * Markdown image syntax matcher: `![alt](src)` or `![alt](src "title")`.
+ *
+ *  - `alt` may contain anything except `]` (greedy stops at first `]`)
+ *  - `src` is the bare URL/key (no whitespace, no closing paren)
+ *  - optional title in double quotes after one or more spaces
+ *
+ * Stays intentionally simple: we don't try to skip code blocks because
+ * (a) AI chat replies almost never embed `![...](...)` inside fenced
+ * code, and (b) even if they do, `resolveArtifactUrl` is idempotent so
+ * a false-positive rewrite is still legal markdown — only cosmetic.
+ */
+const MD_IMAGE_RE = /!\[([^\]]*)\]\(([^)\s]+)(\s+"[^"]*")?\)/g;
+
+/**
+ * Rewrite `![alt](src)` images so bare artifact keys (e.g.
+ * `art_xyz.png`, the form returned by the `generate_image` tool)
+ * become fully-qualified `/api/canvas/<id>/artifact/<key>` URLs the
+ * browser can actually fetch.
+ *
+ * Pass-through for `data:` URLs, full `http(s)` URLs, and `/api/`
+ * paths — `resolveArtifactUrl` handles every shape idempotently.
+ */
+export function rewriteChatImageUrls(
+  markdown: string,
+  canvasId: string | null,
+): string {
+  if (!markdown || !canvasId) return markdown;
+  return markdown.replace(MD_IMAGE_RE, (match, alt, src, title) => {
+    const resolved = resolveArtifactUrl(String(src), canvasId);
+    if (resolved === src) return match;
+    return `![${alt}](${resolved}${title ?? ''})`;
+  });
 }
 
 /**
@@ -51,9 +90,21 @@ export const MilkdownMessageCard: FC<MilkdownMessageCardProps> = ({
   content,
   threadId,
 }) => {
+  // Pull the active canvas id so we can rewrite bare artifact keys
+  // (which the `generate_image` tool emits as `art_xxx.png`) into
+  // fully-qualified `/api/canvas/<id>/artifact/<key>` URLs. Without
+  // this, AI-generated images render as broken-image placeholders
+  // in chat because the browser tries to GET `art_xxx.png` against
+  // the SPA origin.
+  const canvasId = useCanvasStore((s) => s.canvasId);
+  const rewritten = useMemo(
+    () => rewriteChatImageUrls(content, canvasId),
+    [content, canvasId],
+  );
+
   return (
     <MilkdownPreview
-      markdown={content}
+      markdown={rewritten}
       enableBlockDrag
       onBlockDragStart={({ markdown, nativeEvent }) => {
         const built = buildNoteDragPayload(markdown, threadId);

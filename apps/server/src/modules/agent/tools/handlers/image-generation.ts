@@ -91,11 +91,48 @@ export async function handleGenerateImage(
   }
 
   // ── Build request ─────────────────────────────────────────────────────
+  // Azure now exposes two completely different protocols for image
+  // generation, and the right one is chosen by the *shape of the
+  // baseUrl* the user pasted into Settings:
+  //
+  //   (a) NEW — Azure AI Foundry "OpenAI-compatible v1 path"
+  //       baseUrl ends in `/openai/v1` (or `/v1`).
+  //       This path mirrors the public OpenAI API 1:1:
+  //         POST {endpoint}/images/{generations|edits}
+  //         Authorization: Bearer <key>
+  //         body: { model: <deployment>, prompt, size, quality, n }
+  //         (no api-version, no `response_format` — gpt-image-1
+  //          always returns b64_json on this path)
+  //
+  //   (b) LEGACY — classic Azure deployment routing
+  //       baseUrl is the bare resource hostname (no trailing /openai…).
+  //         POST {endpoint}/openai/deployments/{name}/images/...
+  //                ?api-version=YYYY-MM-DD[-preview]
+  //         api-key: <key>
+  //         body: { prompt, size, quality, n }
+  //
+  // We auto-detect which one to use from the endpoint suffix so both
+  // styles work without forcing the user to maintain two separate
+  // base URLs (chat and images share the same one).
+  const trimmedEndpoint = azure.endpoint.replace(/\/+$/, '');
+  const v1Match = trimmedEndpoint.match(/^(.*?)(?:\/openai)?\/v1$/i);
+  const isV1Style = v1Match !== null;
   const isEdit = refPaths.length > 0;
-  const url =
-    `${azure.endpoint}/openai/deployments/${encodeURIComponent(azure.deployment)}` +
-    `/images/${isEdit ? 'edits' : 'generations'}` +
-    `?api-version=${encodeURIComponent(azure.apiVersion)}`;
+  const url = isV1Style
+    ? `${trimmedEndpoint}/images/${isEdit ? 'edits' : 'generations'}`
+    : `${trimmedEndpoint}/openai/deployments/${encodeURIComponent(azure.deployment)}/images/${isEdit ? 'edits' : 'generations'}?api-version=${encodeURIComponent(azure.apiVersion)}`;
+
+  console.log(
+    `[generate_image] ${isV1Style ? 'v1' : 'legacy'} POST ${url} (refs=${refPaths.length}, quality=${args.quality ?? azure.quality})`,
+  );
+
+  // gpt-image-1 does not accept `response_format` (it is hard-coded to
+  // b64_json) — passing it returns a 400. Quality resolution:
+  // explicit tool arg > Settings default > 'low' (cheapest).
+  const quality = args.quality ?? azure.quality;
+  const authHeader: Record<string, string> = isV1Style
+    ? { Authorization: `Bearer ${azure.apiKey}` }
+    : { 'api-key': azure.apiKey };
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -107,7 +144,10 @@ export async function handleGenerateImage(
       form.set('prompt', prompt);
       form.set('size', size);
       form.set('n', '1');
-      form.set('response_format', 'b64_json');
+      form.set('quality', quality);
+      // On the v1 path the model name must travel in the body,
+      // because the URL itself no longer carries the deployment.
+      if (isV1Style) form.set('model', azure.deployment);
       for (const ref of refPaths) {
         const bytes = await readFile(ref.absPath);
         // FormData wants a Blob/File; pass mime type explicitly so
@@ -120,23 +160,25 @@ export async function handleGenerateImage(
       }
       response = await fetch(url, {
         method: 'POST',
-        headers: { 'api-key': azure.apiKey },
+        headers: authHeader,
         body: form,
         signal: controller.signal,
       });
     } else {
+      const body: Record<string, unknown> = {
+        prompt,
+        size,
+        n: 1,
+        quality,
+      };
+      if (isV1Style) body.model = azure.deployment;
       response = await fetch(url, {
         method: 'POST',
         headers: {
-          'api-key': azure.apiKey,
+          ...authHeader,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          prompt,
-          size,
-          n: 1,
-          response_format: 'b64_json',
-        }),
+        body: JSON.stringify(body),
         signal: controller.signal,
       });
     }
@@ -163,8 +205,15 @@ export async function handleGenerateImage(
     } catch {
       // Body wasn't JSON; ignore.
     }
+    // Include the URL that 4xx'd so users can quickly tell whether the
+    // endpoint / deployment / api-version is the problem. The API key
+    // is sent as a header, not in the URL, so this is safe to log.
+    const hint =
+      response.status === 404
+        ? ` Common causes: (1) the deployment "${azure.deployment}" doesn't exist on this Azure resource, (2) the api-version "${azure.apiVersion}" is malformed (must be YYYY-MM-DD, e.g. 2025-04-01-preview), (3) your region doesn't host gpt-image-1.`
+        : '';
     throw new Error(
-      `Azure image request failed with HTTP ${response.status}${detail}.`,
+      `Azure image request failed with HTTP ${response.status}${detail}.\nURL: ${url}${hint}`,
     );
   }
 

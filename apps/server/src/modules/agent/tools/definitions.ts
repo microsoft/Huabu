@@ -601,6 +601,20 @@ export const generateImageParamsSchema = Type.Object({
       },
     ),
   ),
+  quality: Type.Optional(
+    Type.Union(
+      [
+        Type.Literal('low'),
+        Type.Literal('medium'),
+        Type.Literal('high'),
+        Type.Literal('auto'),
+      ],
+      {
+        description:
+          "Rendering quality. Default `'low'` (fast + cheap, fine for most chat-driven asks). Use `'medium'` or `'high'` only when the user explicitly asks for a polished / hi-res result — each step up roughly multiplies cost and latency.",
+      },
+    ),
+  ),
 });
 
 export const generateImageTool: ToolDefinition = {

@@ -138,6 +138,8 @@ interface PersistedConfig {
    * without a second round-trip to disk.
    */
   imageModel?: string;
+  /** Persisted default image quality (gpt-image-1 `quality` field). */
+  imageQuality?: 'low' | 'medium' | 'high' | 'auto';
 }
 
 /**
@@ -158,6 +160,8 @@ interface ProviderPersisted {
    * different deployment names.
    */
   imageModel?: string;
+  /** Persisted default image quality (gpt-image-1 `quality` field). */
+  imageQuality?: 'low' | 'medium' | 'high' | 'auto';
 }
 
 /**
@@ -196,6 +200,14 @@ function loadPersistedStore(): PersistedStore {
       }
       if (typeof parsed.imageModel === 'string') {
         entry.imageModel = parsed.imageModel;
+      }
+      if (
+        parsed.imageQuality === 'low' ||
+        parsed.imageQuality === 'medium' ||
+        parsed.imageQuality === 'high' ||
+        parsed.imageQuality === 'auto'
+      ) {
+        entry.imageQuality = parsed.imageQuality;
       }
       return { active: provider, providers: { [provider]: entry } };
     }
@@ -238,6 +250,7 @@ function buildPersistedConfig(
     ...(entry.baseUrl ? { baseUrl: entry.baseUrl } : {}),
     ...(entry.apiVersion ? { apiVersion: entry.apiVersion } : {}),
     ...(entry.imageModel ? { imageModel: entry.imageModel } : {}),
+    ...(entry.imageQuality ? { imageQuality: entry.imageQuality } : {}),
   };
 }
 
@@ -549,6 +562,7 @@ export async function getLLMConfig(): Promise<LLMConfig> {
       baseUrl: cfg.baseUrl,
       apiVersion: cfg.apiVersion,
       imageModel: cfg.imageModel,
+      imageQuality: cfg.imageQuality,
     };
   } catch (err) {
     console.warn(
@@ -615,6 +629,14 @@ export async function setLLMConfig(
     if (update.imageModel) entry.imageModel = update.imageModel;
     else delete entry.imageModel;
   }
+  if (update.imageQuality !== undefined) {
+    // Empty-string isn't reachable through the enum schema, but the
+    // "omitted keeps / explicit clears" intent still maps cleanly:
+    // sending one of the four valid values overwrites, undefined
+    // keeps. There is no "clear" operation today because the
+    // handler falls back to 'low' when the field is absent.
+    entry.imageQuality = update.imageQuality;
+  }
   store.providers[update.provider] = entry;
   store.active = update.provider;
   savePersistedStore(store);
@@ -642,6 +664,7 @@ export async function setLLMConfig(
     baseUrl: persisted.baseUrl,
     apiVersion: persisted.apiVersion,
     imageModel: persisted.imageModel,
+    imageQuality: persisted.imageQuality,
   };
 }
 
@@ -662,12 +685,15 @@ export function getAzureImageConfig(): {
   deployment: string;
   apiKey: string;
   apiVersion: string;
+  /** Default quality (`'low' | 'medium' | 'high' | 'auto'`). */
+  quality: 'low' | 'medium' | 'high' | 'auto';
 } {
   const azure = loadPersistedStore().providers['azure-openai'];
   const endpoint = azure?.baseUrl?.replace(/\/+$/, '') ?? '';
   const deployment = azure?.imageModel?.trim() ?? '';
   const apiKey = azure?.apiKey ?? '';
   const apiVersion = azure?.apiVersion?.trim() ?? '';
+  const quality = azure?.imageQuality ?? 'low';
   const missing: string[] = [];
   if (!endpoint) missing.push('Endpoint');
   if (!deployment) missing.push('Image Deployment');
@@ -678,7 +704,7 @@ export function getAzureImageConfig(): {
       `Azure image generation not configured. Open Settings → LLM Provider → Azure OpenAI and fill in: ${missing.join(', ')}.`,
     );
   }
-  return { endpoint, deployment, apiKey, apiVersion };
+  return { endpoint, deployment, apiKey, apiVersion, quality };
 }
 
 /**

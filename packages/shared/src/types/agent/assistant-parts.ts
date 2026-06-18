@@ -20,7 +20,11 @@ import type {
   AcpToolCallStatus,
   AcpToolKind,
 } from './acp-tool.js';
-import type { ToolResponse, WebSearchToolResponse } from './tools.js';
+import type {
+  GenerateImageToolResponse,
+  ToolResponse,
+  WebSearchToolResponse,
+} from './tools.js';
 
 // ─── Permission outcome ───────────────────────────────────────────────
 //
@@ -166,7 +170,8 @@ export type AssistantToolPart =
   | GenericToolPart
   | AgentToolPart
   | CanvasCommandsToolPart
-  | WebSearchToolPart;
+  | WebSearchToolPart
+  | GenerateImageToolPart;
 
 /** Shared lifecycle/identity fields carried by every tool variant. */
 interface ToolPartBase {
@@ -244,6 +249,17 @@ export interface WebSearchToolPart extends ToolPartBase {
   data?: WebSearchToolResponse;
 }
 
+/**
+ * The `generate_image` tool. Rendered by `GenerateImageToolDisplay`
+ * as an inline preview thumbnail so every successful call surfaces a
+ * visible image in chat regardless of whether the AI subsequently
+ * embeds it in its text response.
+ */
+export interface GenerateImageToolPart extends ToolPartBase {
+  variant: 'generate_image';
+  data?: GenerateImageToolResponse;
+}
+
 // ─── Variant resolution ───────────────────────────────────────────────
 //
 // Single source of truth shared by every producer (server history
@@ -258,6 +274,7 @@ export type AssistantToolVariant = AssistantToolPart['variant'];
 const VARIANT_BY_INTERNAL_TOOL: Record<string, AssistantToolVariant> = {
   canvas_commands: 'canvas_commands',
   web_search: 'web_search',
+  generate_image: 'generate_image',
   read: 'agent_tool',
   grep: 'agent_tool',
   find: 'agent_tool',
