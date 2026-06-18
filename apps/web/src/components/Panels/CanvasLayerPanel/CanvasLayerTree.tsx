@@ -658,7 +658,11 @@ export const CanvasLayerTree = ({
     intoHighlightId?: string;
   };
   const resolveDrop = useCallback(
-    (activeId: string, overId: string, rawIntent: DropIntent): ResolvedDrop => {
+    (
+      _activeId: string,
+      overId: string,
+      rawIntent: DropIntent,
+    ): ResolvedDrop => {
       const overItem = visibleItemMap.get(overId);
       if (!overItem) {
         return {
