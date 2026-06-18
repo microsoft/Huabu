@@ -18,6 +18,7 @@ export const routes = {
 
   // ── LLM ───────────────────────────────────────────────────────────
   llmConfig: '/llm/config',
+  llmImageConfig: '/llm/image-config',
   llmProviders: '/llm/providers',
   llmModels: (provider: string) => `/llm/models?provider=${enc(provider)}`,
   llmOAuthDeviceCode: '/llm/oauth/device-code',

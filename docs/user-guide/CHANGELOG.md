@@ -4,6 +4,44 @@
 
 ---
 
+## 2026-06-18 · 从 chat 拖拽 AI 生成的图片到画布会直接建图片节点
+
+**What Changed**
+
+- **在 chat 面板里，把 AI 回复中的图片块拖到画布上现在会创建 image 节点**，而不是像以前那样创建一条包含 `![](src)` 原始 markdown 的 note 节点。比如让 AI 「画一只穿宇航服的猫」并拿到一张图，用 Crepe 的块拖拽手柄把它拖到画布上，就会得到一个原生的图片节点，可以直接调整尺寸、做为后续 AI 调用的视觉参考。
+- 拖拽逻辑会先识别**整块是否只是一张图片**：纯 `![alt](src)` 走 image 节点；混排（图片 + 文字、列表里嵌图、外面包了链接 `[![](src)](href)` 等）依然走 note 节点，避免丢失上下文。
+- 如果图片指向当前画布的 artifact（被 `rewriteChatImageUrls` 展开过的 `/api/canvas/<id>/artifact/<key>` URL），新建的 image 节点会把 `data.src` 还原成裸 key `art_xxx.png`，与上传 / 粘贴产生的图片保持同一存储形式；指向其他画布或外部 URL 的图片则保留绝对地址。
+
+**Notes**
+
+- 拖拽时按住 Shift 仍然是「MOVE」语义，但 chat 卡片本身是只读的（没有可写入的 source node），所以 Shift 在此场景下等价于 Copy。
+- AI 回复中的图片 alt 文本会作为新 image 节点的 `label`；alt 为空时 label 留空，由后续的 preprocess 流程自动生成标题。
+
+---
+
+## 2026-06-18 · Settings 拆成 LLM Provider + Image Provider，输入即保存
+
+**What Changed**
+
+- **「Image Provider」从「LLM Provider」里独立出来**，现在是两个完全分开的 Settings 区块，凭据互不影响：
+  - **LLM Provider** — 驱动聊天 (`llmStream` / `llmComplete`)，可以是 OpenAI / Anthropic / GitHub Copilot / Azure …
+  - **Image Provider** — 驱动 `generate_image` 工具，目前只支持 Azure OpenAI，但 endpoint / deployment / API version / API key 都是独立保存的。
+  - 这样就可以「聊天用 GitHub Copilot，生图用 Azure」之类的组合，不用为了生图把聊天 provider 切到 Azure。
+- **删除所有 Save 按钮，所有输入框现在都是输入即保存**（debounce 600ms）：
+  - 文本输入 / 密码输入 — 你停止打字 600ms 后自动保存；
+  - 下拉菜单（Provider / Model / Quality） — 选择后立即保存；
+  - API Key 字段为空时不会触发保存（避免误清空已存的 key）。
+- 服务端会自动迁移老配置：原来存在 `providers["azure-openai"].imageModel` 下的 `imageModel` / `imageQuality` 字段会被搬到新的顶层 `imageConfig`，并复用原 Azure chat 的 endpoint / apiVersion / apiKey 作为默认值。下一次保存时老字段会被自然清掉。
+
+**Notes**
+
+- 新增两个 API endpoint：`GET /api/llm/image-config`、`PUT /api/llm/image-config`，仍受 loopback-only 保护。
+- 共享类型层面：`LLMConfig` 现在只承载聊天字段（移除了 `imageModel` / `imageQuality`），图片字段移到了新的 `LLMImageConfig`。
+- 图片 provider 目前只有 Azure 一个选项，但 UI 已经按下拉菜单方式设计，未来加 OpenAI native / Replicate 等不需要再改 UI 结构。
+- 如果同时在快速修改多个输入框，每个字段会各自单独发送一次保存请求（不会合并），按 600ms 各自防抖。
+
+---
+
 ## 2026-06-18 · Settings 里可调图片生成质量（图片预览统一走 markdown）
 
 **What Changed**

@@ -43,6 +43,8 @@ import type {
 import type {
   LLMConfig,
   LLMConfigUpdate,
+  LLMImageConfig,
+  LLMImageConfigUpdate,
   LLMModelInfo,
   LLMProviderInfo,
 } from '@sediment/shared';
@@ -131,15 +133,6 @@ interface PersistedConfig {
   apiKey?: string;
   baseUrl?: string;
   apiVersion?: string;
-  /**
-   * Azure-only image-generation deployment name. Surfaced here so
-   * {@link getAzureImageConfig} can read it through the same
-   * `activeConfig` / `loadPersistedConfig` path as the chat fields
-   * without a second round-trip to disk.
-   */
-  imageModel?: string;
-  /** Persisted default image quality (gpt-image-1 `quality` field). */
-  imageQuality?: 'low' | 'medium' | 'high' | 'auto';
 }
 
 /**
@@ -153,15 +146,23 @@ interface ProviderPersisted {
   apiKey?: string;
   baseUrl?: string;
   apiVersion?: string;
-  /**
-   * Azure-only image-generation deployment name. Persisted alongside
-   * `model` (chat deployment) because customers typically run both
-   * under the same resource (endpoint + key + apiVersion) but at
-   * different deployment names.
-   */
-  imageModel?: string;
-  /** Persisted default image quality (gpt-image-1 `quality` field). */
-  imageQuality?: 'low' | 'medium' | 'high' | 'auto';
+}
+
+/**
+ * Persisted image-generation provider entry. Lives at the top level
+ * of {@link PersistedStore} — not inside `providers` — because chat
+ * and image are now fully independent (different provider /
+ * endpoint / key). Today only `azure-openai` is supported but the
+ * shape is provider-agnostic so future image providers don't need a
+ * schema migration.
+ */
+interface ImageConfigPersisted {
+  provider?: string;
+  baseUrl?: string;
+  model?: string;
+  apiVersion?: string;
+  apiKey?: string;
+  quality?: 'low' | 'medium' | 'high' | 'auto';
 }
 
 /**
@@ -171,13 +172,26 @@ interface ProviderPersisted {
 interface PersistedStore {
   active?: string;
   providers: Record<string, ProviderPersisted>;
+  /**
+   * Separate image-provider config, independent of `active` and
+   * `providers`. See {@link ImageConfigPersisted}.
+   */
+  imageConfig?: ImageConfigPersisted;
 }
 
 /**
- * Load + migrate the persisted store. Migrates the legacy single-config
- * shape `{ provider, model, apiKey, baseUrl, apiVersion }` into the new
- * map shape transparently; the migrated shape is only written back on
- * the next `setLLMConfig` call.
+ * Load + migrate the persisted store. Two migrations applied lazily:
+ *  1. **Legacy single-config shape** `{ provider, model, apiKey,
+ *     baseUrl, apiVersion, imageModel?, imageQuality? }` \u2192 the new
+ *     `{ active, providers: { [id]: \u2026 } }` map shape, with image
+ *     fields lifted into the new top-level `imageConfig`.
+ *  2. **Pre-split image fields** under `providers['azure-openai']`
+ *     (an in-flight intermediate format from earlier today) \u2192
+ *     lifted into top-level `imageConfig` so chat and image become
+ *     independent. The chat entry keeps its endpoint/key/apiVersion;
+ *     the legacy `imageModel` / `imageQuality` keys are dropped.
+ *
+ * The migrated shape is only written back on the next `setLLMConfig`\n * / `setImageConfig` call \u2014 we never write on a pure load.
  */
 function loadPersistedStore(): PersistedStore {
   try {
@@ -198,29 +212,92 @@ function loadPersistedStore(): PersistedStore {
       if (typeof parsed.apiVersion === 'string') {
         entry.apiVersion = parsed.apiVersion;
       }
-      if (typeof parsed.imageModel === 'string') {
-        entry.imageModel = parsed.imageModel;
-      }
-      if (
-        parsed.imageQuality === 'low' ||
-        parsed.imageQuality === 'medium' ||
-        parsed.imageQuality === 'high' ||
-        parsed.imageQuality === 'auto'
-      ) {
-        entry.imageQuality = parsed.imageQuality;
-      }
-      return { active: provider, providers: { [provider]: entry } };
+      const store: PersistedStore = {
+        active: provider,
+        providers: { [provider]: entry },
+      };
+      // Hoist legacy top-level image fields into the new
+      // `imageConfig` (only meaningful when the legacy provider was
+      // Azure, but we mirror whatever was on disk so nothing is lost).
+      const legacyImageConfig = extractLegacyImageConfig(parsed, entry);
+      if (legacyImageConfig) store.imageConfig = legacyImageConfig;
+      return store;
     }
 
     const providers =
       (parsed.providers as Record<string, ProviderPersisted> | undefined) ?? {};
     const store: PersistedStore = { providers };
     if (typeof parsed.active === 'string') store.active = parsed.active;
+    const existingImageConfig = parsed.imageConfig as
+      | ImageConfigPersisted
+      | undefined;
+    if (existingImageConfig && typeof existingImageConfig === 'object') {
+      store.imageConfig = existingImageConfig;
+    }
+    // Migrate pre-split shape: image fields nested under the Azure
+    // chat entry. Only seed `imageConfig` when it isn't already set,
+    // so a later explicit image-config save wins.
+    const azureEntry = providers['azure-openai'] as
+      | (ProviderPersisted & {
+          imageModel?: string;
+          imageQuality?: 'low' | 'medium' | 'high' | 'auto';
+        })
+      | undefined;
+    if (
+      !store.imageConfig &&
+      azureEntry &&
+      (azureEntry.imageModel || azureEntry.imageQuality)
+    ) {
+      const migrated: ImageConfigPersisted = { provider: 'azure-openai' };
+      if (azureEntry.baseUrl) migrated.baseUrl = azureEntry.baseUrl;
+      if (azureEntry.apiVersion) migrated.apiVersion = azureEntry.apiVersion;
+      if (azureEntry.apiKey) migrated.apiKey = azureEntry.apiKey;
+      if (azureEntry.imageModel) migrated.model = azureEntry.imageModel;
+      if (azureEntry.imageQuality) migrated.quality = azureEntry.imageQuality;
+      store.imageConfig = migrated;
+    }
+    // Strip the in-memory legacy keys so they don't leak back into a
+    // re-serialised PersistedStore on the next save.
+    if (azureEntry) {
+      delete (azureEntry as { imageModel?: unknown }).imageModel;
+      delete (azureEntry as { imageQuality?: unknown }).imageQuality;
+    }
     return store;
   } catch {
     // Corrupted or missing file — fall through
     return { providers: {} };
   }
+}
+
+/**
+ * Build an {@link ImageConfigPersisted} from a legacy top-level
+ * config blob, falling back to the migrated chat entry's
+ * endpoint / apiVersion / apiKey when the legacy file already has
+ * an `imageModel` / `imageQuality` but no dedicated image
+ * credentials. Returns `null` when there is nothing image-related
+ * to migrate.
+ */
+function extractLegacyImageConfig(
+  parsed: Record<string, unknown>,
+  chatEntry: ProviderPersisted,
+): ImageConfigPersisted | null {
+  const imageModel =
+    typeof parsed.imageModel === 'string' ? parsed.imageModel : undefined;
+  const imageQuality =
+    parsed.imageQuality === 'low' ||
+    parsed.imageQuality === 'medium' ||
+    parsed.imageQuality === 'high' ||
+    parsed.imageQuality === 'auto'
+      ? parsed.imageQuality
+      : undefined;
+  if (!imageModel && !imageQuality) return null;
+  const migrated: ImageConfigPersisted = { provider: 'azure-openai' };
+  if (chatEntry.baseUrl) migrated.baseUrl = chatEntry.baseUrl;
+  if (chatEntry.apiVersion) migrated.apiVersion = chatEntry.apiVersion;
+  if (chatEntry.apiKey) migrated.apiKey = chatEntry.apiKey;
+  if (imageModel) migrated.model = imageModel;
+  if (imageQuality) migrated.quality = imageQuality;
+  return migrated;
 }
 
 function savePersistedStore(store: PersistedStore): void {
@@ -249,8 +326,6 @@ function buildPersistedConfig(
     ...(entry.apiKey ? { apiKey: entry.apiKey } : {}),
     ...(entry.baseUrl ? { baseUrl: entry.baseUrl } : {}),
     ...(entry.apiVersion ? { apiVersion: entry.apiVersion } : {}),
-    ...(entry.imageModel ? { imageModel: entry.imageModel } : {}),
-    ...(entry.imageQuality ? { imageQuality: entry.imageQuality } : {}),
   };
 }
 
@@ -561,8 +636,6 @@ export async function getLLMConfig(): Promise<LLMConfig> {
       authenticated,
       baseUrl: cfg.baseUrl,
       apiVersion: cfg.apiVersion,
-      imageModel: cfg.imageModel,
-      imageQuality: cfg.imageQuality,
     };
   } catch (err) {
     console.warn(
@@ -625,18 +698,6 @@ export async function setLLMConfig(
     if (update.apiVersion) entry.apiVersion = update.apiVersion;
     else delete entry.apiVersion;
   }
-  if (update.imageModel !== undefined) {
-    if (update.imageModel) entry.imageModel = update.imageModel;
-    else delete entry.imageModel;
-  }
-  if (update.imageQuality !== undefined) {
-    // Empty-string isn't reachable through the enum schema, but the
-    // "omitted keeps / explicit clears" intent still maps cleanly:
-    // sending one of the four valid values overwrites, undefined
-    // keeps. There is no "clear" operation today because the
-    // handler falls back to 'low' when the field is absent.
-    entry.imageQuality = update.imageQuality;
-  }
   store.providers[update.provider] = entry;
   store.active = update.provider;
   savePersistedStore(store);
@@ -663,18 +724,79 @@ export async function setLLMConfig(
     authenticated,
     baseUrl: persisted.baseUrl,
     apiVersion: persisted.apiVersion,
-    imageModel: persisted.imageModel,
-    imageQuality: persisted.imageQuality,
   };
 }
 
 /**
+ * Get the currently saved image-generation configuration. Independent
+ * of {@link getLLMConfig} so chat and image can target different
+ * providers / endpoints / keys.
+ *
+ * Returns an empty (`provider:''`, `authenticated:false`) config when
+ * nothing has been saved yet — callers should treat that as "image
+ * generation not configured" rather than an error.
+ */
+export function getImageConfig(): LLMImageConfig {
+  const image = loadPersistedStore().imageConfig;
+  if (!image) {
+    return { provider: '', authenticated: false };
+  }
+  return {
+    provider: image.provider ?? '',
+    authenticated: !!image.apiKey,
+    ...(image.baseUrl ? { baseUrl: image.baseUrl } : {}),
+    ...(image.model ? { model: image.model } : {}),
+    ...(image.apiVersion ? { apiVersion: image.apiVersion } : {}),
+    ...(image.quality ? { quality: image.quality } : {}),
+  };
+}
+
+/**
+ * Update the image-generation configuration. Same omission semantics
+ * as {@link setLLMConfig}: a field that is `undefined` in `update`
+ * keeps its previously-saved value; an empty string clears it.
+ */
+export function setImageConfig(update: LLMImageConfigUpdate): LLMImageConfig {
+  const store = loadPersistedStore();
+  const existing: ImageConfigPersisted = store.imageConfig ?? {};
+  const next: ImageConfigPersisted = { ...existing };
+
+  if (update.provider !== undefined) {
+    if (update.provider) next.provider = update.provider;
+    else delete next.provider;
+  }
+  if (update.baseUrl !== undefined) {
+    if (update.baseUrl) next.baseUrl = update.baseUrl;
+    else delete next.baseUrl;
+  }
+  if (update.model !== undefined) {
+    if (update.model) next.model = update.model;
+    else delete next.model;
+  }
+  if (update.apiVersion !== undefined) {
+    if (update.apiVersion) next.apiVersion = update.apiVersion;
+    else delete next.apiVersion;
+  }
+  if (update.apiKey !== undefined) {
+    if (update.apiKey) next.apiKey = update.apiKey;
+    else delete next.apiKey;
+  }
+  if (update.quality !== undefined) {
+    // Enum schema rejects empty strings, so a present value always
+    // overwrites. Absent means "keep".
+    next.quality = update.quality;
+  }
+
+  store.imageConfig = next;
+  savePersistedStore(store);
+  return getImageConfig();
+}
+
+/**
  * Resolved Azure image-generation config, for the `generate_image`
- * agent tool. Reads from the persisted Azure provider entry
- * regardless of which provider is currently active for chat — image
- * generation is a side-channel that always targets Azure for now,
- * and tying it to `active` would force users to switch their chat
- * provider to Azure just to generate an image.
+ * agent tool. Reads from the dedicated top-level `imageConfig`
+ * (independent of which chat provider is active) so users can pair an
+ * Azure image deployment with any chat provider.
  *
  * Throws a user-actionable error when any required field is missing
  * so the agent tool surfaces a clear "open Settings" message in chat
@@ -688,20 +810,26 @@ export function getAzureImageConfig(): {
   /** Default quality (`'low' | 'medium' | 'high' | 'auto'`). */
   quality: 'low' | 'medium' | 'high' | 'auto';
 } {
-  const azure = loadPersistedStore().providers['azure-openai'];
-  const endpoint = azure?.baseUrl?.replace(/\/+$/, '') ?? '';
-  const deployment = azure?.imageModel?.trim() ?? '';
-  const apiKey = azure?.apiKey ?? '';
-  const apiVersion = azure?.apiVersion?.trim() ?? '';
-  const quality = azure?.imageQuality ?? 'low';
+  const image = loadPersistedStore().imageConfig;
+  const provider = image?.provider ?? '';
+  if (provider && provider !== 'azure-openai') {
+    throw new Error(
+      `Image provider "${provider}" is not supported yet. Open Settings → Image Provider and select Azure OpenAI.`,
+    );
+  }
+  const endpoint = image?.baseUrl?.replace(/\/+$/, '') ?? '';
+  const deployment = image?.model?.trim() ?? '';
+  const apiKey = image?.apiKey ?? '';
+  const apiVersion = image?.apiVersion?.trim() ?? '';
+  const quality = image?.quality ?? 'low';
   const missing: string[] = [];
   if (!endpoint) missing.push('Endpoint');
-  if (!deployment) missing.push('Image Deployment');
+  if (!deployment) missing.push('Deployment');
   if (!apiKey) missing.push('API Key');
   if (!apiVersion) missing.push('API Version');
   if (missing.length > 0) {
     throw new Error(
-      `Azure image generation not configured. Open Settings → LLM Provider → Azure OpenAI and fill in: ${missing.join(', ')}.`,
+      `Azure image generation not configured. Open Settings → Image Provider → Azure OpenAI and fill in: ${missing.join(', ')}.`,
     );
   }
   return { endpoint, deployment, apiKey, apiVersion, quality };

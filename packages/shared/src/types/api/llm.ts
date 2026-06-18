@@ -55,6 +55,11 @@ export interface LLMModelInfo {
 /**
  * The currently active LLM configuration, persisted on the server
  * and displayed/editable on the frontend.
+ *
+ * **Chat-only fields.** Image generation lives in {@link LLMImageConfig}
+ * and a separate endpoint pair, so users can pair (for example) a
+ * GitHub Copilot chat model with an Azure image deployment without
+ * either side overwriting the other's credentials.
  */
 export interface LLMConfig {
   /** Active provider ID. */
@@ -66,22 +71,35 @@ export interface LLMConfig {
   /** Optional custom base URL override. */
   baseUrl?: string;
   apiVersion?: string;
+}
+
+/**
+ * The image-generation configuration, persisted on the server and
+ * displayed/editable on the frontend. Independent of {@link LLMConfig}
+ * so chat and image can target different providers / endpoints /
+ * keys.
+ *
+ * Today only `azure-openai` is supported; the `provider` field is
+ * carried explicitly anyway so future image providers (OpenAI native,
+ * Replicate, …) don't require a schema migration.
+ */
+export interface LLMImageConfig {
+  /** Active image provider ID (e.g. `'azure-openai'`). Empty string when unconfigured. */
+  provider: string;
+  /** Whether the image provider has a saved API key. */
+  authenticated: boolean;
+  /** Optional custom base URL / endpoint. */
+  baseUrl?: string;
+  /** Deployment / model name (e.g. `'gpt-image-1'`). */
+  model?: string;
+  /** Optional API version (Azure-only). */
+  apiVersion?: string;
   /**
-   * Azure-only: deployment name for image generation
-   * (gpt-image-1 family). Separate from {@link model} because Azure
-   * customers typically deploy chat and image models under the same
-   * resource (sharing `baseUrl` / `apiKey` / `apiVersion`) but at
-   * different deployment names. Empty / undefined means "image
-   * generation not configured" and the `generate_image` agent tool
-   * will return a clean error.
+   * Default rendering quality. Each step up roughly multiplies cost
+   * and latency, so the server treats absence as `'low'`. The agent's
+   * `generate_image` tool can override per call.
    */
-  imageModel?: string;
-  /**
-   * Default rendering quality for {@link imageModel}. Each step up
-   * roughly multiplies cost and latency, so we default to `'low'`.
-   * The agent's `generate_image` tool can override per call.
-   */
-  imageQuality?: 'low' | 'medium' | 'high' | 'auto';
+  quality?: 'low' | 'medium' | 'high' | 'auto';
 }
 
 /**
@@ -95,20 +113,25 @@ export const llmConfigUpdateSchema = z.object({
   /** Optional base URL override. */
   baseUrl: z.string().optional(),
   apiVersion: z.string().optional(),
-  /**
-   * Azure-only image-generation deployment name. Same omission
-   * semantics as the other optional fields: omitted (undefined) keeps
-   * the previously-saved value, empty string clears it.
-   */
-  imageModel: z.string().optional(),
-  /**
-   * Default rendering quality for image generation. Same omission
-   * semantics as the other optional fields. Server treats an absent
-   * value as `'low'`.
-   */
-  imageQuality: z.enum(['low', 'medium', 'high', 'auto']).optional(),
 });
 export type LLMConfigUpdate = z.infer<typeof llmConfigUpdateSchema>;
+
+/**
+ * Body for `PUT /api/llm/image-config`. Every field is optional so a
+ * single update can patch one field at a time (the UI auto-saves on
+ * every keystroke). Omitting a field keeps the previously-saved value;
+ * sending an empty string clears it.
+ */
+export const llmImageConfigUpdateSchema = z.object({
+  provider: z.string().optional(),
+  baseUrl: z.string().optional(),
+  model: z.string().optional(),
+  apiVersion: z.string().optional(),
+  /** API key — only sent when setting a new key; never returned by GET. */
+  apiKey: z.string().optional(),
+  quality: z.enum(['low', 'medium', 'high', 'auto']).optional(),
+});
+export type LLMImageConfigUpdate = z.infer<typeof llmImageConfigUpdateSchema>;
 
 /** Querystring for `GET /api/llm/models`. */
 export const llmModelsQuerySchema = z.object({

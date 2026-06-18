@@ -2,17 +2,21 @@ import { create } from 'zustand';
 
 import {
   getLLMConfig,
+  getLLMImageConfig,
   getLLMModels,
   getLLMProviders,
   logoutOAuth,
   pollOAuthLogin,
   putLLMConfig,
+  putLLMImageConfig,
   startOAuthLogin,
 } from '../api/llm';
 
 import type {
   LLMConfig,
   LLMConfigUpdate,
+  LLMImageConfig,
+  LLMImageConfigUpdate,
   LLMModelInfo,
   LLMProviderInfo,
 } from '@sediment/shared';
@@ -20,6 +24,8 @@ import type {
 interface LLMState {
   /** Current LLM configuration from the server. */
   config: LLMConfig | null;
+  /** Current image-generation configuration from the server. */
+  imageConfig: LLMImageConfig | null;
   /** Available providers. */
   providers: LLMProviderInfo[];
   /** Models for the currently selected provider. */
@@ -28,6 +34,8 @@ interface LLMState {
   loading: boolean;
   /** Whether a config update is in progress. */
   saving: boolean;
+  /** Whether an image-config update is in progress. */
+  imageSaving: boolean;
   /** Last error message. */
   error: string | null;
 
@@ -45,6 +53,8 @@ interface LLMState {
   loadModels: (provider: string) => Promise<void>;
   /** Update provider/model (and optionally API key). */
   updateConfig: (update: LLMConfigUpdate) => Promise<void>;
+  /** Update image-generation provider config. */
+  updateImageConfig: (update: LLMImageConfigUpdate) => Promise<void>;
   /** Start an OAuth device code login flow. */
   startOAuth: () => Promise<void>;
   /** Cancel an in-progress OAuth flow. */
@@ -55,10 +65,12 @@ interface LLMState {
 
 export const useLLMStore = create<LLMState>()((set, get) => ({
   config: null,
+  imageConfig: null,
   providers: [],
   models: [],
   loading: false,
   saving: false,
+  imageSaving: false,
   error: null,
   oauthPending: false,
   oauthUserCode: null,
@@ -68,11 +80,12 @@ export const useLLMStore = create<LLMState>()((set, get) => ({
     if (get().loading) return;
     set({ loading: true, error: null });
     try {
-      const [config, providers] = await Promise.all([
+      const [config, imageConfig, providers] = await Promise.all([
         getLLMConfig(),
+        getLLMImageConfig(),
         getLLMProviders(),
       ]);
-      set({ config, providers, loading: false });
+      set({ config, imageConfig, providers, loading: false });
 
       // Pre-load models for the active provider
       if (config.provider) {
@@ -108,6 +121,20 @@ export const useLLMStore = create<LLMState>()((set, get) => ({
         error:
           err instanceof Error ? err.message : 'Failed to update LLM config',
         saving: false,
+      });
+    }
+  },
+
+  updateImageConfig: async (update) => {
+    set({ imageSaving: true, error: null });
+    try {
+      const imageConfig = await putLLMImageConfig(update);
+      set({ imageConfig, imageSaving: false });
+    } catch (err) {
+      set({
+        error:
+          err instanceof Error ? err.message : 'Failed to update image config',
+        imageSaving: false,
       });
     }
   },
