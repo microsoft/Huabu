@@ -543,6 +543,78 @@ export const fsWriteTool: ToolDefinition = {
   executionMode: 'sequential',
 };
 
+// ==================== Image Tools ====================
+//
+// Two-tool surface for "AI fabricates a new image and puts it on the
+// canvas":
+//
+//   - `rasterize_node`   — turn an existing canvas node (image / pdf
+//     cover / sketch) into a PNG artifact key the agent can pass as
+//     a visual reference. Cheap pass-through for image/pdf; runs an
+//     SVG → PNG render for sketches.
+//   - `generate_image`   — call Azure OpenAI gpt-image-1 (text-only
+//     or with one+ reference images) and persist the result into the
+//     canvas's artifact store. Returns `{src, width, height}` — the
+//     agent must follow up with `canvas_commands` to actually place
+//     the image on the canvas.
+//
+// Both are write-adjacent (generate_image writes a file; rasterize_node
+// writes a file only for sketches) but neither mutates `canvas.json` —
+// that remains the exclusive job of `canvas_commands`.
+
+export const rasterizeNodeParamsSchema = Type.Object({
+  nodeId: Type.String({
+    description:
+      'Id of the node to rasterize, as it appears in `get_canvas_outline` / `inspect_nodes`. The node must live on the current canvas.',
+  }),
+});
+
+export const rasterizeNodeTool: ToolDefinition = {
+  name: 'rasterize_node',
+  label: 'Rasterize node',
+  description:
+    'Produce a PNG artifact key for an existing canvas node so it can be passed as a visual reference to `generate_image`. Supported node types: `image` / `video` (pass-through of existing src, no extra work), `pdf` (returns the cover image), `sketch` (renders strokes to PNG). For `note` / `text` nodes use `read("nodes/<file>.md")` instead — text belongs in the prompt, not as a raster. Returns JSON `{src, width, height}`; `src` is the artifact key to feed into `generate_image.referenceArtifactSrcs`.',
+  parameters: rasterizeNodeParamsSchema,
+};
+
+export const generateImageParamsSchema = Type.Object({
+  prompt: Type.String({
+    description:
+      "Plain-text description of the image to generate, in the user's language. Be specific about subject, style, lighting, composition. When using reference images, describe what to change / preserve relative to them.",
+  }),
+  referenceArtifactSrcs: Type.Optional(
+    Type.Array(Type.String(), {
+      description:
+        'Optional list of artifact keys (the `src` strings from `rasterize_node` or from existing `image` nodes) to use as visual references. When provided, the tool calls the image-edit endpoint instead of pure text-to-image. Pass each key as a bare string, e.g. `"art_xyz.png"`.',
+    }),
+  ),
+  size: Type.Optional(
+    Type.Union(
+      [
+        Type.Literal('1024x1024'),
+        Type.Literal('1024x1536'),
+        Type.Literal('1536x1024'),
+      ],
+      {
+        description:
+          "Output dimensions. Default `'1024x1024'`. Use `'1024x1536'` for portrait and `'1536x1024'` for landscape.",
+      },
+    ),
+  ),
+});
+
+export const generateImageTool: ToolDefinition = {
+  name: 'generate_image',
+  label: 'Generate image',
+  description:
+    "Generate a new image with Azure OpenAI gpt-image-1 and persist it into the current canvas's artifact store. Returns JSON `{src, width, height, revisedPrompt?}` — `src` is an artifact key like `art_xyz.png`. **This tool does NOT place the image on the canvas.** To make the image visible, follow up with a `canvas_commands` call: `{type:'CREATE_NODES', nodes:[{nodeType:'image', data:{src:'<the src>', label:'<short caption>'}, position:{x,y}, size:{width,height}}]}` — pick a free spot near the user's current focus. To use existing canvas content as visual reference, first call `rasterize_node` on each source node and pass the returned `src` strings via `referenceArtifactSrcs`. Requires Azure OpenAI with an Image Deployment configured in Settings → LLM Provider.",
+  parameters: generateImageParamsSchema,
+  // Image generation is slow (5-30s); marking sequential prevents the
+  // agent from racing two parallel generations against the same
+  // canvas which would also fight for the same name slot.
+  executionMode: 'sequential',
+};
+
 // ==================== Tool Registry ====================
 
 /**
@@ -568,6 +640,8 @@ export const TOOL_REGISTRY: Readonly<Record<string, ToolDefinition>> =
         findTool,
         lsTool,
         fsWriteTool,
+        rasterizeNodeTool,
+        generateImageTool,
       ].map((t) => [t.name, t] as const),
     ),
   );

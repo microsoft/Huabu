@@ -4,6 +4,24 @@
 
 ---
 
+## 2026-06-18 · AI 现在可以直接为你生成图片并加到画布
+
+**What Changed**
+
+- **AI 助手新增两件工具：`generate_image` 和 `rasterize_node`。** 你可以直接在对话里让 AI 生成图片（例如「帮我画一只穿宇航服的猫，加到画布右下角」），AI 会调用 Azure OpenAI 的 `gpt-image-1` 生成图片，然后通过既有的 `canvas_commands` 把图片节点放到你指定的位置。
+- **AI 能把画布上已有的内容作为参考图**。如果你说「参考这张涂鸦，把它改成水彩风格」并选中一个 sketch 节点，AI 会先用 `rasterize_node` 把 sketch / image / pdf 封面光栅化成 PNG，再喂给 `generate_image` 当视觉参考。支持参考的节点类型：`image` / `video`（直接复用原图）、`pdf`（用封面图）、`sketch`（服务端实时把笔迹渲染成 PNG）。
+- **Settings → LLM Provider → Azure OpenAI 新增「Image Deployment」输入框**。需要在这里填入你的 `gpt-image-1` 部署名，AI 才会启用 `generate_image` 工具。
+
+**Notes**
+
+- 这个能力目前**仅支持 Azure OpenAI**。其他 provider（Copilot / Anthropic 等）的 chat 模型即使支持图片生成，也暂未接入这条管线。
+- **图片部署和聊天部署是两个不同的 Azure 部署**：聊天用的 `Deployment` 字段不变，图片走新加的 `Image Deployment` 字段。这两个字段共用同一组 Endpoint / API Key / API Version。
+- AI 生成的图片会写入当前画布的 `.artifacts/` 目录，与你自己上传的图片采用同一套存储和清理机制；删除节点后随画布的常规清理流程一起回收。
+- 当前不支持把整个 `frame` 节点光栅化作为参考；如果需要参考一组节点，让 AI 分别参考其中的图片或 sketch 子节点即可。
+- 对 `note` / `text` 节点 AI 不会把它们渲染成图片，而是直接读取其 markdown 文本写进 prompt——文字不适合当成视觉参考。
+
+---
+
 ## 2026-06-17 · 桌面端 / 网页端 Logo 升级为带圆角白底的新版
 
 **What Changed**
