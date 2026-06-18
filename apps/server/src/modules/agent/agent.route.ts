@@ -55,7 +55,6 @@ import type {
   ChatHistoryResponse,
   ContextTokensResponse,
   ExternalAgentPrompt,
-  GenerateImageToolResponse,
   StopThreadResponse,
   ToolResponse,
   WebSearchToolResponse,
@@ -860,17 +859,6 @@ function buildHistoryItems(
                 ...(toolData
                   ? {
                       data: toolData as WebSearchToolResponse,
-                    }
-                  : {}),
-              });
-              break;
-            case 'generate_image':
-              parts.push({
-                ...base,
-                variant: 'generate_image',
-                ...(toolData
-                  ? {
-                      data: toolData as GenerateImageToolResponse,
                     }
                   : {}),
               });

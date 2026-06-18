@@ -4,23 +4,20 @@
 
 ---
 
-## 2026-06-18 · 生成的图片现在直接在 chat 里预览 + Settings 里可调质量
+## 2026-06-18 · Settings 里可调图片生成质量（图片预览统一走 markdown）
 
 **What Changed**
 
-- **AI 每次调用 `generate_image` 工具，生成的图片会直接以缩略图形式出现在对话流里**，不再依赖 AI 是否在文本中写 `![]()` markdown。`generate_image` 现在是一种独立的工具变体（和 `web_search` / `canvas_commands` 同等地位），有自己的预览组件 `GenerateImageToolDisplay`：成功时显示一张最大 384px 宽的图片缩略图；失败时显示一个紧凑的错误卡片。
 - **Settings → LLM Provider → Azure OpenAI 新增「Image Quality」下拉菜单**，可选 `low / medium / high / auto`：
   - `low`（默认）— 最快最便宜，适合日常对话；
   - `medium / high` — 出图更精细但更慢、成本更高；
   - `auto` — 让 Azure 自己决定。
     Agent 调用工具时也可以通过 `quality` 参数临时覆盖默认值。
-- 同时也修了：之前 AI 写在 chat 里的 `![](art_xxx.png)` markdown 不会渲染，因为 `art_xxx.png` 是裸 artifact key，浏览器不知道怎么解析；现在 chat markdown 渲染前会自动把裸 key 转成完整的 `/api/canvas/<id>/artifact/<key>` URL。
+- 同时也修了：之前 AI 写在 chat 里的 `![](art_xxx.png)` markdown 不会渲染，因为 `art_xxx.png` 是裸 artifact key，浏览器不知道怎么解析；现在 chat markdown 渲染前会自动把裸 key 转成完整的 `/api/canvas/<id>/artifact/<key>` URL。这样 AI 在回复里写一句 `![](art_xxx.png)` 就能看到图。
 
 **Notes**
 
-- 老对话回放时也能看到图片预览（服务端 history 重建支持新变体）。
-- 缩略图最大显示 384px 宽（`max-w-md` + `max-h-96`），原图分辨率仍由 `quality` 决定（low 是 1024×1024）。
-- 图片同时还存在于画布 `.artifacts/` 中，AI 也可以紧跟着 `canvas_commands` 把它放到画布上，两种渲染并不互斥。
+- `generate_image` 工具调用本身在 chat 里的展示和其他通用工具一致（紧凑 pill 显示标题 + 状态），没有专门的大缩略图卡片——图片预览统一通过 AI 在文本中插入 markdown 的方式呈现。
 - 修改 quality 设置后立即对**下一次**生成生效，已生成的图片不受影响。
 
 ---

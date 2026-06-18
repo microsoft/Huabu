@@ -20,7 +20,6 @@ import {
   Command,
   Download,
   FolderOpen,
-  Image as ImageIcon,
   Workflow,
   Pencil,
   BookOpen,
@@ -96,9 +95,6 @@ export function ToolKindIcon({
         break;
       case 'web_search':
         Icon = Search;
-        break;
-      case 'generate_image':
-        Icon = ImageIcon;
         break;
       case 'agent_tool':
         Icon = INTERNAL_TOOL_ICON[part.toolName] ?? classifyTitle(part.title);

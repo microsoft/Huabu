@@ -241,10 +241,7 @@ export const LLMSettings: React.FC = () => {
             />
           </SettingRow>
 
-          <SettingRow
-            title="Image Quality"
-            description="Default render quality for AI-generated images. `low` is the fastest and cheapest; `medium`/`high` look better but cost more and are slower."
-          >
+          <SettingRow title="Image Quality" description="Optional.">
             <div className="w-56">
               <Select
                 options={[

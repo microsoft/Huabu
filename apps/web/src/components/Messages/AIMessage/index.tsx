@@ -7,7 +7,6 @@ import { PlanCard } from './PlanCard';
 import { ThinkingCard } from './ThinkingCard';
 import { ThinkingPhaseCard } from './ThinkingPhaseCard';
 import { CanvasCommandCard } from './Tool/CanvasCommandCard';
-import { GenerateImageToolDisplay } from './Tool/GenerateImageToolDisplay';
 import { MergedAgentToolRow } from './Tool/MergedAgentToolRow';
 import { ToolCallCard } from './Tool/ToolCallCard';
 import { WebSearchToolDisplay } from './Tool/WebSearchToolDisplay';
@@ -66,14 +65,6 @@ function renderToolGroup(
         <div key={key} className="flex flex-col gap-1">
           {group.parts.map((p) => (
             <WebSearchToolDisplay key={p.toolCallId} part={p} />
-          ))}
-        </div>
-      );
-    case 'generate_image':
-      return (
-        <div key={key} className="flex flex-col gap-1">
-          {group.parts.map((p) => (
-            <GenerateImageToolDisplay key={p.toolCallId} part={p} />
           ))}
         </div>
       );
