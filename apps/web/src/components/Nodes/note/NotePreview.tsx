@@ -484,7 +484,7 @@ export const NotePreview = ({
 
       <div
         ref={containerRef}
-        className={`custom-scrollbar relative h-full w-full overflow-auto py-3 ${
+        className={`relative h-full w-full overflow-auto py-3 ${
           editMode === 'raw' ? 'px-3' : 'pr-3'
         }`}
       >
