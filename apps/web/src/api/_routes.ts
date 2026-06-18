@@ -86,6 +86,17 @@ export const routes = {
     `/acp/threads/${enc(threadId)}/session`,
   acpThreadCommands: (threadId: string) =>
     `/acp/threads/${enc(threadId)}/commands`,
+  acpThreadCachedMeta: (
+    threadId: string,
+    canvasId?: string,
+    profileId?: string,
+  ) => {
+    const qs: string[] = [];
+    if (canvasId) qs.push(`canvasId=${enc(canvasId)}`);
+    if (profileId) qs.push(`profileId=${enc(profileId)}`);
+    const params = qs.length ? `?${qs.join('&')}` : '';
+    return `/acp/threads/${enc(threadId)}/cached-meta${params}`;
+  },
   acpThreadPermission: (threadId: string) =>
     `/acp/threads/${enc(threadId)}/permission`,
   acpThreadMode: (threadId: string) => `/acp/threads/${enc(threadId)}/mode`,

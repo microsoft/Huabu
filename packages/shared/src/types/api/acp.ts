@@ -314,6 +314,54 @@ export interface AcpThreadCommandsResponse {
   sessionMeta: AcpSessionMetaSnapshot;
 }
 
+/**
+ * Response body for `GET /api/acp/threads/:threadId/cached-meta`.
+ *
+ * Read-only, **never spawns** an agent. Returns whatever snapshot the
+ * server has on disk (from a prior live session) plus, if a live
+ * session is still in the in-process registry, the freshest in-memory
+ * state on top.
+ *
+ * Cache miss (no persisted record and no live entry) returns an empty
+ * snapshot with `updatedAt === 0`. The UI uses this to seed the
+ * selector dropdowns and badge "optimistic green" state before any
+ * real ensure-session call is made — i.e. opening a thread no longer
+ * needs to spawn an agentlet just to populate the toolbar.
+ */
+export interface AcpThreadCachedMetaResponse {
+  sessionMeta: AcpSessionMetaSnapshot;
+}
+
+/**
+ * Categorical error codes returned in `ApiErrorBody.code` from
+ * `POST /api/acp/threads/:threadId/session` on 503.
+ *
+ * Mirrors the server's `AcpEnsureErrorCode` (in
+ * `apps/server/src/modules/agent/acp/errors.ts`). The web client
+ * switches on this to render a remediation-specific badge tooltip
+ * and CTA (e.g. "Restart worker", "Re-create profile").
+ *
+ * Wire-stable: renaming or removing a code is a breaking change for
+ * any out-of-tree client. Adding a new code is safe (clients fall
+ * back to the generic message).
+ *
+ *   • `profile_missing` — bound profile no longer exists.
+ *   • `bridge_not_mounted` — embedded agentlet bridge still booting.
+ *   • `worker_not_ready` — agentlet daemon worker never came online.
+ *   • `spawn_failed` — daemon rejected the spawn RPC (bad recipe).
+ *   • `connect_timeout` — agent process started but never opened WS
+ *     (most often: interactive auth needed, e.g. expired Copilot
+ *     OAuth, or immediate crash).
+ *   • `internal` — uncategorised throw; treat as a bug.
+ */
+export type AcpEnsureErrorCode =
+  | 'profile_missing'
+  | 'bridge_not_mounted'
+  | 'worker_not_ready'
+  | 'spawn_failed'
+  | 'connect_timeout'
+  | 'internal';
+
 // ─── Session-meta snapshot & set-RPCs ──────────────────────────────────
 //
 // ACP exposes four kinds of mutable session metadata, surfaced to the
@@ -517,6 +565,11 @@ export const acpThreadCommandsResponseSchema = z.object({
   updatedAt: z.number().int().nonnegative(),
   sessionMeta: acpSessionMetaSnapshotSchema,
 }) satisfies z.ZodType<AcpThreadCommandsResponse>;
+
+/** Schema mirror of {@link AcpThreadCachedMetaResponse}. */
+export const acpThreadCachedMetaResponseSchema = z.object({
+  sessionMeta: acpSessionMetaSnapshotSchema,
+}) satisfies z.ZodType<AcpThreadCachedMetaResponse>;
 
 /** Schema mirror of {@link AcpPermissionDecisionRequest}. */
 export const acpPermissionDecisionSchema = z.object({

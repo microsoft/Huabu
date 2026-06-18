@@ -219,6 +219,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     meta: acpSessionMeta,
     loading: acpSessionMetaLoading,
     error: acpSessionMetaError,
+    errorCode: acpSessionMetaErrorCode,
     applyEvent: applyAcpSessionMetaEvent,
     applyOptimistic: applyAcpSessionMetaOptimistic,
   } = useAcpSessionMeta({
@@ -237,16 +238,23 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   }, [acpSessionMeta]);
 
   // Three-state connection summary for the header badge, derived from
-  // `useAcpSessionMeta` after it has had a chance to fire its first
-  // ensure-session call. We deliberately do NOT regress to `connecting`
-  // on subsequent transient `loading` (set-mode / set-model / refresh)
-  // — once we have a meta snapshot the agent is, by definition,
-  // connected and the user shouldn't see the dot flicker on every
-  // dropdown change.
+  // `useAcpSessionMeta`. **Optimistic green by default** — opening a
+  // thread is no longer a "connection in flight" event because we
+  // hydrate selectors from the server's cached meta snapshot without
+  // spawning the agentlet (see `useAcpSessionMeta`'s mount effect).
+  // The badge only deviates from `connected` when there is positive
+  // evidence of trouble:
   //
-  //   connecting: first ensure in flight, no snapshot yet
-  //   connected:  snapshot received and no recent error
-  //   failed:     ensure rejected and no snapshot has ever arrived
+  //   connecting: a real `ensureAcpSession` (refresh / set-RPC) is
+  //               currently in flight
+  //   failed:     the last `ensureAcpSession` rejected AND we have
+  //               no cached snapshot to fall back on (`updatedAt === 0`)
+  //   connected:  everything else — cache hit, post-success steady
+  //               state, or transient ensure failure that still leaves
+  //               us with a valid (if possibly stale) snapshot. We
+  //               degrade gracefully here: showing red just because a
+  //               background refresh failed while the cached state is
+  //               perfectly usable would be noise.
   //
   // Internal bindings get `null` — the parent only renders the badge
   // for `agentBinding.kind === 'external'`.
@@ -259,11 +267,11 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const acpConnectionStatus: AcpConnectionStatus | null =
     agentBinding.kind !== 'external'
       ? null
-      : acpSessionMeta.updatedAt > 0 && !acpSessionMetaError
-        ? 'connected'
-        : !acpSessionMetaLoading && acpSessionMetaError
+      : acpSessionMetaLoading
+        ? 'connecting'
+        : acpSessionMetaError && acpSessionMeta.updatedAt === 0
           ? 'failed'
-          : 'connecting';
+          : 'connected';
 
   // Optimistic onChange handlers for the ACP selectors: merge the
   // chosen value into the local snapshot immediately, then fire the
@@ -286,7 +294,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           err instanceof Error
             ? `Failed to switch mode: ${err.message}`
             : 'Failed to switch mode',
-          { variant: 'error' },
+          { tone: 'danger' },
         );
       }
     },
@@ -307,7 +315,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           err instanceof Error
             ? `Failed to switch model: ${err.message}`
             : 'Failed to switch model',
-          { variant: 'error' },
+          { tone: 'danger' },
         );
       }
     },
@@ -344,7 +352,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           err instanceof Error
             ? `Failed to update option: ${err.message}`
             : 'Failed to update option',
-          { variant: 'error' },
+          { tone: 'danger' },
         );
       }
     },
@@ -546,6 +554,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
               status={acpConnectionStatus}
               alias={agentBinding.alias}
               errorMessage={acpSessionMetaError?.message ?? null}
+              errorCode={acpSessionMetaErrorCode}
             />
           )}
         </span>

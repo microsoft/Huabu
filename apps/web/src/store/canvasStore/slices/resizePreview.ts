@@ -401,6 +401,11 @@ export function createResizePreviewController(opts: {
             position: { x: absX, y: absY },
             width: fit.width,
             height: fit.height,
+            // A resize gesture reshapes its parent frame in real time:
+            // there is no "leaving" semantics here, so always paint it
+            // as the active target so the user can see exactly which
+            // frame is currently being reflowed.
+            role: 'target',
           },
         ]);
       });

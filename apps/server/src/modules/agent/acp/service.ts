@@ -20,10 +20,12 @@
 import { fauxAssistantMessage } from '@earendil-works/pi-ai';
 
 import { AcpAgentClient, type AcpInitializeResult } from './client.js';
+import { AcpServiceError } from './errors.js';
 import {
   prepareExternalAgentPrompt,
   serializeRawPrompt,
 } from './preprocessor.js';
+import { mergeProfileSchemaCache } from './profile-schema-cache.js';
 import { getProfile } from './profile-store.js';
 import { getAgentletServer } from './server-mount.js';
 import { acpSessionRegistry } from './session-registry.js';
@@ -318,6 +320,47 @@ function cancelPersistEntryMeta(canvasId: string, threadId: string): void {
 }
 
 /**
+ * One-shot promotion of a freshly-opened ACP session to the on-disk
+ * record. Called after the FIRST successful `session/prompt` on a
+ * thread — see {@link AcpSessionEntry.persistedToDisk} for the full
+ * rationale. No-op when the entry is already persisted, when it has
+ * no `canvasId` (anonymous-canvas threads aren't persisted at all),
+ * or when the reverse lookup fails (entry already removed).
+ *
+ * Failures are logged and swallowed: missing the promotion just
+ * means the user has to re-open the thread on the next server
+ * restart, which is the pre-fix behaviour anyway.
+ */
+function promoteEntryToPersisted(
+  entry: AcpSessionEntry,
+  logger: FastifyBaseLogger,
+): void {
+  if (entry.persistedToDisk) return;
+  if (!entry.canvasId) return;
+  const threadId = findThreadIdForEntry(entry);
+  if (!threadId) return;
+  try {
+    writeAcpSessionRecord(entry.canvasId, threadId, {
+      sessionId: entry.sessionId,
+      profileId: entry.profileId,
+      cwd: entry.cwd,
+      bindingRecipe: entry.bindingRecipe,
+      meta: snapshotEntryMeta(entry),
+    });
+    entry.persistedToDisk = true;
+  } catch (err) {
+    logger.warn(
+      {
+        threadId,
+        canvasId: entry.canvasId,
+        err: err instanceof Error ? err.message : String(err),
+      },
+      '[acp] failed to persist session record on first-prompt promotion (recovery after restart will fall back)',
+    );
+  }
+}
+
+/**
  * Reverse-lookup the threadId for a registry entry. The registry maps
  * threadId → entry but the entry itself doesn't carry the threadId
  * (it would be redundant in normal flow). We need it here because the
@@ -410,7 +453,8 @@ async function ensureAcpSessionInner(
     }
   }
   if (!recipe) {
-    throw new Error(
+    throw new AcpServiceError(
+      'profile_missing',
       `External agent '${binding.alias}' is no longer configured. Re-create the profile in Settings → External Agents, or start a new chat with another agent.`,
     );
   }
@@ -418,7 +462,8 @@ async function ensureAcpSessionInner(
 
   const server = getAgentletServer();
   if (!server) {
-    throw new Error(
+    throw new AcpServiceError(
+      'bridge_not_mounted',
       'ACP bridge is not mounted \u2014 the embedded agentlet daemon is not running yet',
     );
   }
@@ -437,7 +482,15 @@ async function ensureAcpSessionInner(
   );
   const conn = server.getConnection(agentSessionId);
   if (!conn || conn.status !== 'connected') {
-    throw new Error(`External agent '${recipe.alias}' is not connected`);
+    // Agentlet acknowledged the spawn but the agent's own WS session
+    // never reached `connected` (or has since dropped). Surfaces the
+    // same root cause as a `connect_timeout` from the orchestrator:
+    // the agent process is up but not talking — almost always an
+    // interactive auth wait (Copilot OAuth) or an immediate crash.
+    throw new AcpServiceError(
+      'connect_timeout',
+      `External agent '${recipe.alias}' is not connected`,
+    );
   }
 
   let entry = acpSessionRegistry.get(threadId);
@@ -520,6 +573,15 @@ async function ensureAcpSessionInner(
     canvasId,
     cwd,
     createdAt: Date.now(),
+    bindingRecipe: recipe,
+    // Resume path (`persisted?.sessionId` was supplied + agent
+    // accepted it) already has a valid on-disk record we want to
+    // keep alive; refresh it below. Fresh `session/new` sessions
+    // start as NOT persisted — the record is created lazily on
+    // first user prompt (see `promoteEntryToPersisted`) so an
+    // unused thread never leaves a stale sessionId for the next
+    // server lifetime to choke on.
+    persistedToDisk: !!persisted?.sessionId,
     availableCommands: [],
     commandsUpdatedAt: 0,
     availableModes: [],
@@ -563,25 +625,30 @@ async function ensureAcpSessionInner(
 
   acpSessionRegistry.set(threadId, created);
 
-  // Persist (or refresh) the record so a future server restart can
-  // recover this session.
-  try {
-    writeAcpSessionRecord(canvasId, threadId, {
-      sessionId,
-      profileId: binding.profileId,
-      cwd,
-      bindingRecipe: recipe,
-      meta: snapshotEntryMeta(created),
-    });
-  } catch (err) {
-    logger.warn(
-      {
-        threadId,
-        canvasId,
-        err: err instanceof Error ? err.message : String(err),
-      },
-      '[acp] failed to persist session record (recovery after restart will fall back)',
-    );
+  // Refresh the on-disk record ONLY when we're resuming a session
+  // that already has a record (so the next restart can recover it
+  // again). For fresh sessions we defer this write to first prompt
+  // — see the field doc for `AcpSessionEntry.persistedToDisk` and
+  // the `promoteEntryToPersisted` helper above.
+  if (created.persistedToDisk) {
+    try {
+      writeAcpSessionRecord(canvasId, threadId, {
+        sessionId,
+        profileId: binding.profileId,
+        cwd,
+        bindingRecipe: recipe,
+        meta: snapshotEntryMeta(created),
+      });
+    } catch (err) {
+      logger.warn(
+        {
+          threadId,
+          canvasId,
+          err: err instanceof Error ? err.message : String(err),
+        },
+        '[acp] failed to refresh persisted session record (recovery after restart will fall back)',
+      );
+    }
   }
 
   return created;
@@ -661,9 +728,11 @@ function handleSessionMetaUpdate(
       return;
     case 'config_option_update':
       applyConfigOptionUpdate(entry, update, logger);
+      mirrorEntryToProfileCache(entry);
       return;
     case 'current_mode_update':
       applyCurrentModeUpdate(entry, update, logger);
+      mirrorEntryToProfileCache(entry);
       return;
     case 'session_info_update':
       applySessionInfoUpdate(entry, update, logger);
@@ -674,6 +743,28 @@ function handleSessionMetaUpdate(
     default:
       return;
   }
+}
+
+/**
+ * Mirror the entry's schema + last-known state into the per-profile
+ * cache. Called after any meta update that changes a field shared
+ * across all threads of the profile (mode catalogue, model catalogue,
+ * config options). NOT called for per-session pushes
+ * (`session_info_update`, `usage_update`, `available_commands_update`).
+ *
+ * The cache is what `/cached-meta` falls back to when a brand-new
+ * thread has no per-thread disk record — see `threads.route.ts`.
+ */
+function mirrorEntryToProfileCache(entry: AcpSessionEntry): void {
+  if (!entry.profileId) return;
+  mergeProfileSchemaCache(entry.profileId, {
+    availableModes: entry.availableModes,
+    currentModeId: entry.currentModeId,
+    availableModels: entry.availableModels,
+    currentModelId: entry.currentModelId,
+    configOptions: entry.configOptions,
+    metaUpdatedAt: entry.metaUpdatedAt,
+  });
 }
 
 function applyAvailableCommandsUpdate(
@@ -1171,6 +1262,12 @@ export async function* runAcpAgent(
     )
     .then((result) => {
       stopReason = result.stopReason;
+      // First-prompt promotion: now that the agent has actually
+      // processed a user turn, its session is genuinely recoverable
+      // (Copilot CLI in particular doesn't persist an empty session
+      // across process lifetimes). Lock the sessionId into the disk
+      // record so a future server restart can `session/load` it.
+      promoteEntryToPersisted(entry, logger);
     })
     .catch((err: unknown) => {
       promptError = err;

@@ -8,6 +8,8 @@ import {
   autoUnframeNodeByNonOverlap,
   fitFrames,
   FRAME_POINTER_CAPTURE_MARGIN,
+  moveNodeIntoFrame,
+  moveNodeOutOfFrame,
   pickColumnDropTarget,
   pickRowDropTarget,
   readFrameGridConfig,
@@ -43,6 +45,62 @@ export default function resolveNodeDragStop(
   // Apply auto-frame / auto-unframe for every dragged node.
   let result = nodes as NestableNode[];
   for (const id of intent.draggedNodeIds) {
+    // Space-held drag opts out of auto-reparenting (entering /
+    // leaving frames). Skip the per-node frame-detection logic so
+    // this node keeps its current parent regardless of release
+    // position. The downstream frame-fit, geometry-diff, and
+    // structured-slot reorder logic still runs so the new position
+    // commits and the parent frame refits / re-flows around it.
+    if (intent.bypassReparent) continue;
+
+    // ── Cached-decision fast path ───────────────────────────────────
+    // When the live preview tick recorded a decision for this node,
+    // honour it verbatim — the user's last rendered frame is the
+    // source of truth (WYSIWYG). Skipping the fresh predicate calls
+    // here eliminates the preview/resolver drift caused by smart-snap
+    // rewriting positions and the mouseup pointer being a different
+    // DOM event from the last `mousemove`.
+    //
+    // The cache stores only the boolean / target-id decisions, not
+    // pre-computed mutated trees, so the resolver still owns position
+    // preservation (delegated to `moveNodeIntoFrame` /
+    // `moveNodeOutOfFrame`, which keep the absolute placement
+    // identical across the parent swap).
+    const cached = intent.cachedDecisions?.get(id);
+    if (cached) {
+      const post = result.find((n) => n.id === id);
+      const currentParent = post?.parentId ?? null;
+
+      // Cache says "leave the current frame" and we still have one to
+      // leave: detach. When `currentParent` is already null, the
+      // cache must have been computed against a stale tree (or the
+      // node was already detached by a previous iteration) — either
+      // way there is nothing to unframe.
+      if (cached.unframe && currentParent) {
+        result = moveNodeOutOfFrame(result, id);
+      }
+      // Cache says "enter this frame" and we are not already there:
+      // attach. Re-reading `result.find` after the potential unframe
+      // above so the parent check sees the freshly-detached node.
+      // `moveNodeIntoFrame` is a no-op when the node is already
+      // parented to the target, so the duplicate check is purely
+      // defensive against future API drift.
+      if (cached.enterFrameId) {
+        const refreshed = result.find((n) => n.id === id);
+        if (refreshed?.parentId !== cached.enterFrameId) {
+          result = moveNodeIntoFrame(result, id, cached.enterFrameId);
+        }
+      }
+      continue;
+    }
+
+    // ── Fresh-recomputation fallback ────────────────────────────────
+    // No cached decision means the live preview tick never ran for
+    // this drag (instant click-release, `autoLayoutEnabled === false`,
+    // or the preview short-circuited before reaching this node). Fall
+    // back to the original halo / overlap logic — there is no
+    // "previous preview" contract to honour.
+    //
     // Keep a node inside its structured (column / row) frame whenever the
     // release pointer is within the frame's *capture zone* — the frame
     // rect expanded by the dragged node's size. Appending / prepending a

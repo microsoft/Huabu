@@ -30,13 +30,21 @@ import {
   setAcpSessionModelRequestSchema,
 } from '@sediment/shared';
 
+import { AcpServiceError } from './errors.js';
+import {
+  getProfileSchemaCache,
+  type AcpProfileSchemaCacheEntry,
+} from './profile-schema-cache.js';
 import { ensureAcpSession } from './service.js';
 import { acpSessionRegistry } from './session-registry.js';
+import { readAcpSessionRecord } from './session-store.js';
 
 import type { AcpSessionEntry } from './session-registry.js';
+import type { AcpSessionPersistedMeta } from './session-store.js';
 import type {
   AcpPermissionDecisionResponse,
   AcpSessionMetaSnapshot,
+  AcpThreadCachedMetaResponse,
   AcpThreadCommandsResponse,
   EnsureAcpSessionResponse,
   SetAcpSessionConfigOptionResponse,
@@ -63,6 +71,64 @@ function snapshotSessionMeta(entry: AcpSessionEntry): AcpSessionMetaSnapshot {
     sessionInfo: entry.sessionInfo,
     usage: entry.usage,
     updatedAt: entry.metaUpdatedAt,
+  };
+}
+
+/** Empty wire-shape snapshot returned when no cache exists. */
+function emptySessionMetaSnapshot(): AcpSessionMetaSnapshot {
+  return {
+    availableModes: [],
+    currentModeId: null,
+    availableModels: [],
+    currentModelId: null,
+    configOptions: [],
+    sessionInfo: null,
+    usage: null,
+    updatedAt: 0,
+  };
+}
+
+/**
+ * Project the persisted on-disk meta blob (which has every field
+ * optional) into the wire-shape clients consume (which has concrete
+ * defaults for every field). Used only by the read-only cached-meta
+ * endpoint — the live registry's `snapshotSessionMeta` is preferred
+ * whenever an in-memory entry exists.
+ */
+function snapshotMetaFromPersisted(
+  meta: AcpSessionPersistedMeta,
+): AcpSessionMetaSnapshot {
+  return {
+    availableModes: meta.availableModes ?? [],
+    currentModeId: meta.currentModeId ?? null,
+    availableModels: meta.availableModels ?? [],
+    currentModelId: meta.currentModelId ?? null,
+    configOptions: meta.configOptions ?? [],
+    sessionInfo: meta.sessionInfo ?? null,
+    usage: meta.usage ?? null,
+    updatedAt: meta.metaUpdatedAt ?? 0,
+  };
+}
+
+/**
+ * Project the per-profile schema cache entry into the wire snapshot.
+ * Used by `/cached-meta` when no per-thread record exists — schema
+ * fields (catalogues) and last-known defaults (`current*`) are
+ * preserved; per-session fields (`sessionInfo`, `usage`) default to
+ * neutral values because they're not profile-scoped.
+ */
+function snapshotMetaFromProfileCache(
+  entry: AcpProfileSchemaCacheEntry,
+): AcpSessionMetaSnapshot {
+  return {
+    availableModes: entry.availableModes ?? [],
+    currentModeId: entry.currentModeId ?? null,
+    availableModels: entry.availableModels ?? [],
+    currentModelId: entry.currentModelId ?? null,
+    configOptions: entry.configOptions ?? [],
+    sessionInfo: null,
+    usage: null,
+    updatedAt: entry.metaUpdatedAt ?? 0,
   };
 }
 
@@ -121,11 +187,17 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      // Surface the categorical code when the service layer threw an
+      // `AcpServiceError` — the web client switches on it to render
+      // a remediation-specific tooltip / CTA. Unrecognised throws
+      // collapse to `'internal'` so the client can still tell them
+      // apart from the categorised failures.
+      const code = err instanceof AcpServiceError ? err.code : 'internal';
       request.log.warn(
-        { threadId, err: message },
+        { threadId, code, err: message },
         '[acp/threads] ensureAcpSession failed',
       );
-      return reply.status(503).send({ message, code: 'acp_session_failed' });
+      return reply.status(503).send({ message, code });
     }
   });
 
@@ -156,6 +228,62 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
       updatedAt: entry.commandsUpdatedAt,
       sessionMeta: snapshotSessionMeta(entry),
     };
+  });
+
+  /**
+   * Read-only **no-spawn** meta snapshot for a thread.
+   *
+   * Unlike `POST /threads/:threadId/session`, this route NEVER
+   * contacts the agentlet — it returns whatever the server already
+   * has cached, in priority order:
+   *
+   *   1. Live entry in `acpSessionRegistry` (some prior call already
+   *      opened the session this lifetime) → freshest state.
+   *   2. Per-thread persisted record (`session-store`) → last known
+   *      state of THIS thread (includes per-thread `current*` choices
+   *      and per-session `sessionInfo` / `usage`).
+   *   3. Per-profile schema cache (`profile-schema-cache`) → schema
+   *      (model / mode / config option catalogues) shared across all
+   *      threads of the same profile, plus the last-known
+   *      `current*` defaults from any session of this profile.
+   *      Used when opening a BRAND-NEW thread bound to a profile the
+   *      user has used before — toolbar populates instantly, no spawn.
+   *   4. Cache miss (truly first use of this profile on this server)
+   *      → empty snapshot with `updatedAt === 0`. UI treats as
+   *      "neutral / no data yet", NOT a failure.
+   *
+   * Designed for the web's `useAcpSessionMeta` hydrate-on-mount path:
+   * opening a thread populates dropdowns from cache (so the user can
+   * pre-select before sending) without paying the agentlet cold-start
+   * tax. Real ensure-session still happens on `/` menu open, first
+   * message send, or any set-RPC — all of which write the freshest
+   * snapshot back to disk via `schedulePersistEntryMeta` AND mirror
+   * to the per-profile cache via `mirrorEntryToProfileCache`.
+   *
+   * Always responds 200 — absence of cache is a normal state.
+   */
+  app.get<{
+    Params: ThreadParams;
+    Querystring: { canvasId?: string; profileId?: string };
+    Reply: AcpThreadCachedMetaResponse;
+  }>('/threads/:threadId/cached-meta', async (request) => {
+    const { threadId } = request.params;
+    const { canvasId, profileId } = request.query;
+    const live = acpSessionRegistry.get(threadId);
+    if (live) return { sessionMeta: snapshotSessionMeta(live) };
+    if (canvasId) {
+      const persisted = readAcpSessionRecord(canvasId, threadId);
+      if (persisted?.meta) {
+        return { sessionMeta: snapshotMetaFromPersisted(persisted.meta) };
+      }
+    }
+    if (profileId) {
+      const profileCache = getProfileSchemaCache(profileId);
+      if (profileCache && (profileCache.metaUpdatedAt ?? 0) > 0) {
+        return { sessionMeta: snapshotMetaFromProfileCache(profileCache) };
+      }
+    }
+    return { sessionMeta: emptySessionMetaSnapshot() };
   });
 
   /**
