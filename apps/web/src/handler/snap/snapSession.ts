@@ -134,15 +134,23 @@ let _bypass = false;
 let _reparentBypassed = false;
 
 /**
- * Snapshot of `_reparentBypassed` taken inside `endSnapSession` so
- * `onNodeDragStop` can still read the flag — the snap session is
- * normally torn down by `onNodesChange` (when the final
- * `dragging:false` commit lands) *before* RF emits `onNodeDragStop`,
- * which would otherwise leave the consumer with a freshly-reset
- * `_reparentBypassed`. Cleared by `consumeLastDragReparentBypass`
- * after one read so a second drag can't inherit a stale value.
+ * Snapshot taken inside `endSnapSession` so `onNodeDragStop` can
+ * still recover decisions / flags that lived in the active session.
+ * The teardown order is normally `onNodesChange` → `endSnapSession`
+ * → `onNodeDragStop`, so the stop handler reads from this slot
+ * after the active session has already been wiped. Cleared on
+ * single-read via the `consumeLast*` accessors so a follow-up drag
+ * cannot inherit stale values.
+ *
+ * `null` outside the window between teardown and the stop event.
  */
-let _lastDragReparentBypass = false;
+interface LastEndedSnapshot {
+  /** Space-bypass state at the moment the gesture ended. */
+  reparentBypass: boolean;
+  /** Per-node frame-membership decisions from the last preview tick. */
+  dragDecisions: Map<string, DragDecision> | null;
+}
+let _lastEnded: LastEndedSnapshot | null = null;
 
 /**
  * Per-dragged-node frame-membership decision captured by the live
@@ -193,18 +201,6 @@ export interface DragDecision {
  * partial mix of two ticks.
  */
 let _dragDecisions: Map<string, DragDecision> | null = null;
-
-/**
- * Snapshot of `_dragDecisions` taken inside `endSnapSession`, read
- * once by `onNodeDragStop` via {@link consumeLastDragDecisions}.
- * Mirrors the `_lastDragReparentBypass` pattern because of the same
- * teardown-before-stop event ordering (`onNodesChange` →
- * `endSnapSession` → `onNodeDragStop`). Without the snapshot, the
- * stop handler would see a freshly-cleared cache and fall back to
- * fresh recomputation — exactly the behaviour the cache is designed
- * to replace.
- */
-let _lastDragDecisions: Map<string, DragDecision> | null = null;
 
 /**
  * Cached id→node map and absolute-position getter for the duration
@@ -381,7 +377,7 @@ export function beginSnapSession(opts: BeginSnapSessionOptions): void {
   // (consumed by `onNodeDragStop`) must start empty so a previous
   // drag's decisions can never bleed into this one.
   _dragDecisions = null;
-  _lastDragDecisions = null;
+  _lastEnded = null;
 
   // Flip a body-level class for the duration of a resize gesture.
   // The frame node CSS uses this to suppress its `width/height`
@@ -477,18 +473,17 @@ export function endSnapSession(): void {
   _resizeContext = null;
   _lastResizeSnapped = null;
   _structuredSuppressed = false;
-  // Snapshot the Space-bypass flag for the drag-stop consumer to
-  // read *after* this teardown runs (the typical order is
-  // `onNodesChange` → `endSnapSession` → `onNodeDragStop`, so
-  // `onNodeDragStop` would otherwise see a freshly-reset flag).
-  _lastDragReparentBypass = _reparentBypassed;
+  // Snapshot the post-teardown state (Space-bypass flag + per-node
+  // drag decisions) into a single slot for `onNodeDragStop` to read
+  // *after* this teardown runs (typical order: `onNodesChange` →
+  // `endSnapSession` → `onNodeDragStop`). The stop handler consumes
+  // this slot via `consumeLast*` accessors which clear it on read,
+  // so the next gesture starts fresh.
+  _lastEnded = {
+    reparentBypass: _reparentBypassed,
+    dragDecisions: _dragDecisions,
+  };
   _reparentBypassed = false;
-  // Same teardown-before-stop ordering as the bypass flag above:
-  // snapshot the working drag-decision cache so `onNodeDragStop`
-  // (which fires *after* `endSnapSession`) can read the decisions
-  // produced by the last rAF tick. Clearing `_dragDecisions` after
-  // the swap prevents the next gesture from inheriting them.
-  _lastDragDecisions = _dragDecisions;
   _dragDecisions = null;
   // Drop the resize-gesture marker (idempotent — safe when not set).
   if (typeof document !== 'undefined') {
@@ -539,8 +534,8 @@ export function isReparentBypassed(): boolean {
  * before release. Returns `false` outside a just-ended drag.
  */
 export function consumeLastDragReparentBypass(): boolean {
-  const v = _lastDragReparentBypass;
-  _lastDragReparentBypass = false;
+  const v = _lastEnded?.reparentBypass ?? false;
+  if (_lastEnded) _lastEnded.reparentBypass = false;
   return v;
 }
 
@@ -584,8 +579,8 @@ export function clearDragDecisions(): void {
  * belongs to one drop event and a follow-up drag must not see it.
  */
 export function consumeLastDragDecisions(): Map<string, DragDecision> | null {
-  const v = _lastDragDecisions;
-  _lastDragDecisions = null;
+  const v = _lastEnded?.dragDecisions ?? null;
+  if (_lastEnded) _lastEnded.dragDecisions = null;
   return v;
 }
 

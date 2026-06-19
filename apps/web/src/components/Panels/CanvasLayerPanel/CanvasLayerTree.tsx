@@ -22,6 +22,12 @@ import React, {
 import useCanvasStore from '@/store/canvasStore.ts';
 import { useExternalImportsStore } from '@/store/externalImportsStore';
 
+import {
+  computeCollision as computeCollisionPure,
+  resolveDrop as resolveDropPure,
+  type DropIntent,
+  type ResolvedDrop,
+} from './dropResolver';
 import { TreeRowItem } from './TreeRowItem';
 import { EmptyState } from '../../Common/EmptyState';
 
@@ -33,19 +39,8 @@ import type {
 } from '@dnd-kit/core';
 
 /**
- * Layer-panel drop intent computed from the pointer position within
- * the hovered row. Drives both the indicator visuals on
- * {@link TreeRowItem} and the move/reorder action dispatched on drop.
- *
- *  - `'before' | 'after'` → drop in the slot above / below this row.
- *    If the row's parent differs from the dragged node's parent the
- *    drop changes hierarchy (move-into / move-out); otherwise it is a
- *    pure reorder at the same level.
- *  - `'into'` → drop INTO this row (only meaningful when the row is a
- *    frame / group). Adds the dragged node as the topmost visible
- *    child of that frame.
+ * See {@link DropIntent} in `./dropResolver` for the full intent model.
  */
-type DropIntent = 'before' | 'after' | 'into';
 
 /**
  * Resolved caret placement for the current drag-over. Computed from
@@ -396,206 +391,36 @@ export const CanvasLayerTree = ({
   }, [items]);
 
   /**
-   * Custom collision detection: pick the row whose vertical range
-   * contains the pointer (falling back to nearest-by-center when the
-   * pointer is above the first / below the last row), and encode the
-   * drop intent in `Collision.data.intent` so `onDragOver` /
-   * `onDragEnd` can read it without re-measuring.
-   *
-   * Layout zones inside the row:
-   *  - frame / group target (middle row): top 15% = before, middle
-   *    70% = into, bottom 15% = after. `into` dominates so dropping
-   *    INTO a frame (the most common gesture when the source is
-   *    outside) just needs to hover anywhere over the row body.
-   *  - non-container target: top 50% = before, bottom 50% = after.
-   *  - PANEL-FIRST frame row: top 30% = before, bottom 70% = into,
-   *    no `after`. Removes the panel-top-vs-into UX collision: the
-   *    `after` slot (= sibling just below this frame) is reachable
-   *    by the next row's top edge, freeing the bottom 70% for the
-   *    common `into` gesture. The top 30% keeps the panel-top
-   *    sibling drop reachable.
-   *  - PANEL-LAST frame row: symmetric (top 70% = into, bottom
-   *    30% = after, no `before`).
-   *  - ONLY frame row (panel-first AND panel-last): 25% before /
-   *    50% into / 25% after — all three intents reachable in the
-   *    single-row case.
-   *  - PANEL-FIRST non-container row: ENTIRE row = before. There is
-   *    no `into` to compete for the row, and the `after` semantic
-   *    (= just below panel-top) is reachable from the next row's
-   *    top edge.
-   *  - PANEL-LAST non-container row: symmetric (entire row = after).
-   *
-   * `into` is suppressed when the candidate target is the active node
-   * itself or any of its descendants (would create a parent cycle), in
-   * which case the zone collapses to the simple before / after split.
+   * dnd-kit adapter around the pure {@link computeCollisionPure} —
+   * extracts `pointerY` + per-candidate rect data from the dnd-kit
+   * event shape, runs the zone rules (see `./dropResolver`), and
+   * wraps the result back into dnd-kit's `Collision[]` format with
+   * the `DropIntent` encoded in `data.intent`.
    */
   const collisionDetection: CollisionDetection = useCallback(
     ({ pointerCoordinates, droppableContainers, droppableRects, active }) => {
       if (!pointerCoordinates) return [];
-      const py = pointerCoordinates.y;
-      const activeId = active.id as string;
-      const activeDescendants = descendantsByFrameId.get(activeId);
-
-      let bestId: string | null = null;
-      let bestRect: { top: number; height: number } | null = null;
-      let bestContainsExact = false;
-      let bestDist = Infinity;
-
+      const candidates = [];
       for (const c of droppableContainers) {
-        const id = c.id as string;
-        if (id === activeId) continue;
         const rect = droppableRects.get(c.id);
         if (!rect) continue;
-        const top = rect.top;
-        const bottom = rect.top + rect.height;
-        const contains = py >= top && py <= bottom;
-        const center = top + rect.height / 2;
-        const dist = Math.abs(py - center);
-        if (contains && !bestContainsExact) {
-          bestId = id;
-          bestRect = { top, height: rect.height };
-          bestContainsExact = true;
-          bestDist = dist;
-          continue;
-        }
-        if (contains && dist < bestDist) {
-          bestId = id;
-          bestRect = { top, height: rect.height };
-          bestDist = dist;
-          continue;
-        }
-        if (!bestContainsExact && dist < bestDist) {
-          bestId = id;
-          bestRect = { top, height: rect.height };
-          bestDist = dist;
-        }
+        candidates.push({
+          id: c.id as string,
+          top: rect.top,
+          height: rect.height,
+        });
       }
-
-      if (!bestId || !bestRect) return [];
-
-      const target = itemById.get(bestId);
-      const isContainer =
-        target?.node.type === 'frame' || target?.node.type === 'group';
-      const canDropInto =
-        isContainer &&
-        bestId !== activeId &&
-        !(activeDescendants && activeDescendants.has(bestId));
-
-      const ratio = Math.min(
-        1,
-        Math.max(0, (py - bestRect.top) / bestRect.height),
-      );
-      let intent: DropIntent;
-      if (canDropInto) {
-        // `into` is the dominant intent on a frame row — dropping
-        // INTO a frame is the most common gesture when the source is
-        // outside. The narrow before/after strips at the top/bottom
-        // serve the rarer "sibling above/below this frame" need.
-        //
-        // For EXPANDED frames there is no `after` strip — the visual
-        // row below an expanded frame is its first child, so an
-        // `after`-the-frame zone would conflict with `before`-the-
-        // first-child zone (geometrically the same seam). Sibling-
-        // below-frame is reachable via Rule 4 (escape from the
-        // panel-bottom child) or by dropping on the next ancestor-
-        // level row.
-        //
-        // For panel-edge frames the edge-most intent is also removed
-        // (its semantic is reachable from the next row's opposite
-        // edge), freeing more of the row for `into` while still
-        // leaving a strip for the panel-top/bottom drop.
-        const overIdx = visibleItems.findIndex((v) => v.id === bestId);
-        const isPanelFirst = overIdx === 0;
-        const isPanelLast = overIdx === visibleItems.length - 1;
-        const isOnlyRow = isPanelFirst && isPanelLast;
-        const isExpandedFrame = !collapsedFrameIds.has(bestId);
-        let beforeMax: number;
-        let afterMin: number;
-        if (isOnlyRow) {
-          beforeMax = 0.25;
-          afterMin = isExpandedFrame ? 1.1 : 0.75;
-        } else if (isPanelFirst) {
-          // No `after` zone — reachable from the next row's `before`
-          // edge. Top 30% = before (panel-top sibling drop), rest =
-          // into.
-          beforeMax = 0.3;
-          afterMin = 1.1; // > 1 → unreachable
-        } else if (isPanelLast) {
-          // Mirror: no `before` zone on panel-bottom. Only collapsed
-          // frames keep the after strip (sibling-below); expanded
-          // would collide with the next child row.
-          beforeMax = -0.1; // < 0 → unreachable
-          afterMin = isExpandedFrame ? 1.1 : 0.7;
-        } else {
-          beforeMax = 0.15;
-          afterMin = isExpandedFrame ? 1.1 : 0.85;
-        }
-        if (ratio < beforeMax) intent = 'before';
-        else if (ratio > afterMin) intent = 'after';
-        else intent = 'into';
-        // DEBUG (temporary): trace the per-frame drop computation so we
-        // can verify whether `into` zones actually fire on frame rows.
-        // Remove once the UX is confirmed.
-        if (
-          typeof window !== 'undefined' &&
-          (window as unknown as { __LAYER_DND_DEBUG__?: boolean })
-            .__LAYER_DND_DEBUG__ !== false
-        ) {
-          console.debug('[layer-dnd] container-row collision', {
-            py,
-            bestId,
-            targetLabel: target?.node.id,
-            rectTop: bestRect.top,
-            rectHeight: bestRect.height,
-            ratio: ratio.toFixed(3),
-            overIdx,
-            isPanelFirst,
-            isPanelLast,
-            beforeMax,
-            afterMin,
-            intent,
-            visibleCount: visibleItems.length,
-          });
-        }
-      } else {
-        // Non-container. Default 50/50 before/after. For the
-        // PANEL-FIRST row the ENTIRE row maps to `before`: there's
-        // no `into` zone to preserve, and the `after` semantic
-        // (= just below panel-top) is reachable from the next row's
-        // top edge. Dragging up from below naturally lands in the
-        // row's lower half first, so this keeps the panel-top drop
-        // gesture from fighting the user's motion. Mirror for
-        // PANEL-LAST.
-        const overIdx = visibleItems.findIndex((v) => v.id === bestId);
-        const isPanelFirst = overIdx === 0;
-        const isPanelLast = overIdx === visibleItems.length - 1;
-        const cutoff =
-          isPanelFirst && !isPanelLast
-            ? 1.1
-            : isPanelLast && !isPanelFirst
-              ? -0.1
-              : 0.5;
-        intent = ratio < cutoff ? 'before' : 'after';
-        if (
-          typeof window !== 'undefined' &&
-          (window as unknown as { __LAYER_DND_DEBUG__?: boolean })
-            .__LAYER_DND_DEBUG__ !== false
-        ) {
-          console.debug('[layer-dnd] leaf-row collision', {
-            py,
-            bestId,
-            ratio: ratio.toFixed(3),
-            overIdx,
-            isPanelFirst,
-            isPanelLast,
-            cutoff,
-            intent,
-            canDropIntoSuppressed: isContainer,
-          });
-        }
-      }
-
-      return [{ id: bestId, data: { intent } }];
+      const out = computeCollisionPure({
+        pointerY: pointerCoordinates.y,
+        activeId: active.id as string,
+        candidates,
+        visibleItems,
+        itemById,
+        descendantsByFrameId,
+        collapsedFrameIds,
+      });
+      if (!out) return [];
+      return [{ id: out.id, data: { intent: out.intent } }];
     },
     [collapsedFrameIds, descendantsByFrameId, itemById, visibleItems],
   );
@@ -643,140 +468,24 @@ export const CanvasLayerTree = ({
    *      on the parent reads as "inside this frame, between these
    *      two children").
    */
-  type ResolvedDrop = {
-    anchorId: string;
-    anchorIntent: DropIntent;
-    anchorDepth: number;
-    effectiveOverId: string;
-    effectiveIntent: DropIntent;
-    /**
-     * Optional. Set when the drop lands as a child of a frame /
-     * group. The row with this id gets a soft `bg-info-bg` fill +
-     * dashed `outline-info` border, so the destination frame is
-     * unambiguous regardless of where the caret is drawn.
-     */
-    intoHighlightId?: string;
-  };
+  /**
+   * Adapter around the pure {@link resolveDropPure}. Closes over
+   * the panel's current `itemById` / `visibleItemMap` /
+   * `visibleItems` / `collapsedFrameIds` so call sites can pass
+   * just `(overId, rawIntent)`.
+   *
+   * See `./dropResolver` for the rules.
+   */
   const resolveDrop = useCallback(
-    (
-      _activeId: string,
-      overId: string,
-      rawIntent: DropIntent,
-    ): ResolvedDrop => {
-      const overItem = visibleItemMap.get(overId);
-      if (!overItem) {
-        return {
-          anchorId: overId,
-          anchorIntent: rawIntent,
-          anchorDepth: 0,
-          effectiveOverId: overId,
-          effectiveIntent: rawIntent,
-        };
-      }
-
-      const isContainer =
-        overItem.node.type === 'frame' || overItem.node.type === 'group';
-      const isExpandedContainer = isContainer && !collapsedFrameIds.has(overId);
-
-      // Rule 1: into a container → drop as the container's first child.
-      // Visual:
-      //   EXPANDED → caret at frame row's BOTTOM edge, indented to
-      //     child depth (sits in the new first-child slot the user
-      //     can actually see). Fill + outline on the frame row also
-      //     fires via `intoHighlightId`, so the caret-at-bottom
-      //     (which alone reads as "after this row as a sibling") is
-      //     unambiguously attributed to the destination frame.
-      //   COLLAPSED → NO caret. The children aren't rendered so the
-      //     caret would have no visible slot to sit in. The fill +
-      //     outline on the frame row is the sole drop signal.
-      if (rawIntent === 'into' && isContainer) {
-        return {
-          anchorId: overId,
-          anchorIntent: isExpandedContainer ? 'after' : 'into',
-          anchorDepth: isExpandedContainer
-            ? overItem.depth + 1
-            : overItem.depth,
-          effectiveOverId: overId,
-          effectiveIntent: 'into',
-          intoHighlightId: overId,
-        };
-      }
-
-      // Rule 2: after the panel-bottom direct child of a frame, when
-      // that child is a NON-container row. Escapes one nesting level.
-      if (rawIntent === 'after' && !isContainer && overItem.node.parentId) {
-        const parent = itemById.get(overItem.node.parentId);
-        if (
-          parent &&
-          (parent.node.type === 'frame' || parent.node.type === 'group')
-        ) {
-          // For a leaf, the next row in `visibleItems` is either its
-          // next sibling (same parent, same depth → NOT panel-bottom)
-          // or jumps back up to an ancestor's level (depth < ours →
-          // IS panel-bottom). Leaves have no descendants between.
-          const overIdx = visibleItems.findIndex((v) => v.id === overId);
-          const next = visibleItems[overIdx + 1];
-          const isPanelBottom =
-            !next ||
-            next.depth < overItem.depth ||
-            next.node.parentId !== overItem.node.parentId;
-          if (isPanelBottom) {
-            // The drop escapes `parent` (= the inner frame) and
-            // lands as `parent`'s sibling. If `parent` itself sits
-            // inside a grandparent frame, the drop lands INSIDE the
-            // grandparent → highlight the grandparent so the user
-            // sees the destination frame. If `parent` is at the
-            // top level there's no frame to highlight.
-            let grandparentHighlight: string | undefined;
-            const grandparentId = parent.node.parentId;
-            if (grandparentId) {
-              const grandparent = itemById.get(grandparentId);
-              if (
-                grandparent &&
-                (grandparent.node.type === 'frame' ||
-                  grandparent.node.type === 'group')
-              ) {
-                grandparentHighlight = grandparentId;
-              }
-            }
-            return {
-              anchorId: overId,
-              anchorIntent: 'after',
-              anchorDepth: parent.depth,
-              effectiveOverId: parent.id,
-              effectiveIntent: 'after',
-              intoHighlightId: grandparentHighlight,
-            };
-          }
-        }
-      }
-
-      // Default: pass-through. When the target row sits inside a
-      // frame, the drop lands as that frame's child (just at a
-      // different slot than `into`), so attribute the highlight to
-      // the parent frame too — the caret + parent-frame fill
-      // together communicate "dropping inside this frame between
-      // existing children".
-      let defaultHighlight: string | undefined;
-      const parentId = overItem.node.parentId;
-      if (parentId) {
-        const parentItem = itemById.get(parentId);
-        if (
-          parentItem &&
-          (parentItem.node.type === 'frame' || parentItem.node.type === 'group')
-        ) {
-          defaultHighlight = parentId;
-        }
-      }
-      return {
-        anchorId: overId,
-        anchorIntent: rawIntent,
-        anchorDepth: overItem.depth,
-        effectiveOverId: overId,
-        effectiveIntent: rawIntent,
-        intoHighlightId: defaultHighlight,
-      };
-    },
+    (_activeId: string, overId: string, rawIntent: DropIntent): ResolvedDrop =>
+      resolveDropPure({
+        overId,
+        rawIntent,
+        itemById,
+        visibleItemMap,
+        visibleItems,
+        collapsedFrameIds,
+      }),
     [collapsedFrameIds, itemById, visibleItemMap, visibleItems],
   );
 
@@ -796,27 +505,6 @@ export const CanvasLayerTree = ({
 
       const resolved = resolveDrop(activeId, overId, rawIntent);
       lastResolvedRef.current = { activeId, resolved };
-      if (
-        typeof window !== 'undefined' &&
-        (window as unknown as { __LAYER_DND_DEBUG__?: boolean })
-          .__LAYER_DND_DEBUG__ !== false
-      ) {
-        console.debug('[layer-dnd] dragMove resolved', {
-          activeId,
-          overId,
-          rawIntent,
-          anchor: {
-            id: resolved.anchorId,
-            intent: resolved.anchorIntent,
-            depth: resolved.anchorDepth,
-          },
-          effective: {
-            id: resolved.effectiveOverId,
-            intent: resolved.effectiveIntent,
-          },
-          intoHighlightId: resolved.intoHighlightId,
-        });
-      }
       setDropTarget((prev) =>
         prev &&
         prev.id === resolved.anchorId &&
@@ -909,20 +597,6 @@ export const CanvasLayerTree = ({
           : resolveDrop(activeId, rawOverId, rawIntent);
       lastResolvedRef.current = null;
       const { effectiveOverId, effectiveIntent } = resolved;
-      if (
-        typeof window !== 'undefined' &&
-        (window as unknown as { __LAYER_DND_DEBUG__?: boolean })
-          .__LAYER_DND_DEBUG__ !== false
-      ) {
-        console.debug('[layer-dnd] dragEnd dispatch', {
-          activeId,
-          rawOverId,
-          rawIntent,
-          usedCachedResolve: Boolean(cached && cached.activeId === activeId),
-          effectiveOverId,
-          effectiveIntent,
-        });
-      }
       if (activeId === effectiveOverId) return;
 
       const activeItem = itemById.get(activeId);

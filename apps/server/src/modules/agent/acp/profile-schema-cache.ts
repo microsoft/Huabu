@@ -28,10 +28,15 @@
  * push corrections via SSE and overwrite. This matches the user
  * expectation of "use my usual settings" when starting a new chat.
  *
- * `availableCommands` is intentionally **excluded** — slash command
- * catalogues can vary per session (some agents expose
- * session-specific commands like `/load <previous-session-id>`).
- * Those still come from per-thread state only.
+ * `availableCommands` is included on an **optimistic** basis — the
+ * agent's slash-command catalogue is effectively static per profile
+ * (e.g. Copilot CLI advertises the same ~34 commands across every
+ * session), so caching the last-seen list lets a brand-new thread
+ * paint its `/` menu instantly on warm spawn. The agent's authoritative
+ * `available_commands_update` push silently overwrites the cached
+ * list once it arrives, so any per-session drift (e.g. a `/load`
+ * variant exposed only on resumed sessions) self-corrects on the
+ * first SSE notification.
  *
  * ### Storage shape
  *
@@ -39,8 +44,7 @@
  *     {
  *       "schemaVersion": 1,
  *       "profiles": {
- *         "<profileId>": { ...AcpSessionPersistedMeta (sans
- *                          availableCommands) }
+ *         "<profileId>": { ...AcpSessionPersistedMeta subset }
  *       }
  *     }
  *
@@ -64,10 +68,10 @@ import { getDataDir } from '../../../data-dir.js';
 import { atomicWriteJson, readJson } from '../../storage/io.js';
 
 import type {
-  AcpCost,
   AcpModelInfo,
   AcpSessionConfigOption,
   AcpSessionMode,
+  AvailableCommand,
 } from '@sediment/shared';
 
 const CACHE_FILE = 'acp-profile-schema-cache.json';
@@ -76,10 +80,11 @@ const DEBOUNCE_MS = 250;
 
 /**
  * Subset of {@link AcpSessionPersistedMeta} suitable for per-profile
- * caching. `availableCommands` is excluded (per-session). Everything
- * else mirrors the on-the-wire snapshot shape — schema fields are
+ * caching. Mirrors the on-the-wire snapshot shape — schema fields are
  * shared across all threads of the profile; `current*` fields are
- * stored as "last-known default" for a new thread.
+ * stored as "last-known default" for a new thread. `availableCommands`
+ * is cached optimistically (see the file header); the SSE
+ * `available_commands_update` replaces it wholesale on each session.
  */
 export interface AcpProfileSchemaCacheEntry {
   availableModes?: AcpSessionMode[];
@@ -87,6 +92,11 @@ export interface AcpProfileSchemaCacheEntry {
   availableModels?: AcpModelInfo[];
   currentModelId?: string | null;
   configOptions?: AcpSessionConfigOption[];
+  availableCommands?: AvailableCommand[];
+  /** Epoch ms of the last `availableCommands` write; mirrors
+   * {@link AcpSessionPersistedMeta.commandsUpdatedAt}. `0` means the
+   * field was never populated. */
+  commandsUpdatedAt?: number;
   /**
    * Epoch ms of the last write; mirrors {@link AcpSessionPersistedMeta.metaUpdatedAt}
    * so the cached-meta route can project this into the wire snapshot's
@@ -107,7 +117,7 @@ function cachePath(): string {
 /** Lazy module-level state — loaded from disk on first access. */
 let memoryCache: Map<string, AcpProfileSchemaCacheEntry> | null = null;
 let loaded = false;
-const pendingWriteTimers = new Map<string, NodeJS.Timeout>();
+let pendingWriteTimer: NodeJS.Timeout | null = null;
 
 function ensureLoaded(): Map<string, AcpProfileSchemaCacheEntry> {
   if (loaded && memoryCache) return memoryCache;
@@ -155,13 +165,18 @@ function sanitizeEntry(raw: unknown): AcpProfileSchemaCacheEntry | undefined {
     out.configOptions = r.configOptions as AcpSessionConfigOption[];
     touched = true;
   }
+  if (Array.isArray(r.availableCommands)) {
+    out.availableCommands = r.availableCommands as AvailableCommand[];
+    touched = true;
+  }
+  if (typeof r.commandsUpdatedAt === 'number') {
+    out.commandsUpdatedAt = r.commandsUpdatedAt;
+    touched = true;
+  }
   if (typeof r.metaUpdatedAt === 'number') {
     out.metaUpdatedAt = r.metaUpdatedAt;
     touched = true;
   }
-  // Touch unused `AcpCost` import (it's transitively referenced by
-  // configOptions / usage in the parent type but TS doesn't see it).
-  void (null as unknown as AcpCost | null);
   return touched ? out : undefined;
 }
 
@@ -213,6 +228,12 @@ export function mergeProfileSchemaCache(
   if (patch.configOptions !== undefined) {
     next.configOptions = patch.configOptions;
   }
+  if (patch.availableCommands !== undefined) {
+    next.availableCommands = patch.availableCommands;
+    next.commandsUpdatedAt = patch.commandsUpdatedAt ?? Date.now();
+  } else if (typeof patch.commandsUpdatedAt === 'number') {
+    next.commandsUpdatedAt = patch.commandsUpdatedAt;
+  }
   next.metaUpdatedAt = patch.metaUpdatedAt ?? Date.now();
 
   cache.set(profileId, next);
@@ -225,22 +246,51 @@ export function mergeProfileSchemaCache(
  * within milliseconds of each other on session warm-up).
  */
 function scheduleWrite(): void {
-  const prior = pendingWriteTimers.get('global');
-  if (prior) clearTimeout(prior);
-  const timer = setTimeout(() => {
-    pendingWriteTimers.delete('global');
-    try {
-      const file: CacheFile = {
-        schemaVersion: SCHEMA_VERSION,
-        profiles: Object.fromEntries(ensureLoaded()),
-      };
-      atomicWriteJson(cachePath(), file);
-    } catch {
-      // Best-effort. A failed write is recovered on the next update.
-    }
+  if (pendingWriteTimer) clearTimeout(pendingWriteTimer);
+  pendingWriteTimer = setTimeout(() => {
+    pendingWriteTimer = null;
+    flushWriteNow();
   }, DEBOUNCE_MS);
-  if (typeof timer.unref === 'function') timer.unref();
-  pendingWriteTimers.set('global', timer);
+  if (typeof pendingWriteTimer.unref === 'function') pendingWriteTimer.unref();
+}
+
+/**
+ * Immediate, synchronous flush of the in-memory cache to disk.
+ * Cancels any pending debounced write so the caller's write is the
+ * one that lands. Used by {@link invalidateProfileSchemaCache} where
+ * we want the deletion to survive a crash within the debounce window.
+ */
+function flushWriteNow(): void {
+  if (pendingWriteTimer) {
+    clearTimeout(pendingWriteTimer);
+    pendingWriteTimer = null;
+  }
+  try {
+    const file: CacheFile = {
+      schemaVersion: SCHEMA_VERSION,
+      profiles: Object.fromEntries(ensureLoaded()),
+    };
+    atomicWriteJson(cachePath(), file);
+  } catch {
+    // Best-effort. A failed write is recovered on the next update.
+  }
+}
+
+/**
+ * Drop the cached schema entry for a profile and flush to disk
+ * immediately. Call when the profile is deleted, or when a profile
+ * edit changes binding-relevant fields (command / cwd) that may shift
+ * the agent's reported model / mode / config schema.
+ *
+ * No-op when the profile has no cache entry. Safe to call from a
+ * route handler — the disk write is synchronous (`atomicWriteJson`)
+ * so the response races nothing against the next read.
+ */
+export function invalidateProfileSchemaCache(profileId: string): void {
+  if (!profileId) return;
+  const cache = ensureLoaded();
+  if (!cache.delete(profileId)) return;
+  flushWriteNow();
 }
 
 /**
@@ -250,6 +300,8 @@ function scheduleWrite(): void {
 export function __resetProfileSchemaCacheForTests(): void {
   memoryCache = null;
   loaded = false;
-  for (const t of pendingWriteTimers.values()) clearTimeout(t);
-  pendingWriteTimers.clear();
+  if (pendingWriteTimer) {
+    clearTimeout(pendingWriteTimer);
+    pendingWriteTimer = null;
+  }
 }

@@ -19,6 +19,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import useCanvasStore from '@/store/canvasStore';
 
+import { getEdgeRenderZ } from './edgeZ';
+
 import type { CanvasEdgeId, EdgeStyle } from '@sediment/shared';
 import type { EdgeProps } from '@xyflow/react';
 
@@ -95,7 +97,7 @@ export function LabelledEdge(props: EdgeProps) {
         style={style}
       />
       <EdgeLabelRenderer>
-        <EdgeLabelEditor
+        <EdgeLabelHost
           edgeId={id}
           labelX={labelX}
           labelY={labelY}
@@ -131,6 +133,32 @@ export interface EditEdgeLabelDetail {
 }
 
 /**
+ * Lightweight gate around {@link EdgeLabelEditor}. Owns the `editing`
+ * state so we can decide whether to mount the heavy editor at all
+ * without breaking its in-progress edit lifecycle. When the label is
+ * empty AND the edge isn't selected AND the user isn't editing, this
+ * returns null and the editor (with its per-edge `useStore`
+ * subscription on `edgeLookup`/`nodeLookup`) is never mounted —
+ * which keeps render cost flat for canvases full of unlabelled edges.
+ */
+function EdgeLabelHost(props: {
+  edgeId: string;
+  labelX: number;
+  labelY: number;
+  value: string;
+  selected: boolean;
+  edgeStrokeColor: string | undefined;
+  edgeStrokeWidth: number | undefined;
+}) {
+  const [editing, setEditing] = useState(false);
+  const hasLabel = props.value.length > 0;
+  if (!hasLabel && !props.selected && !editing) return null;
+  return (
+    <EdgeLabelEditor {...props} editing={editing} setEditing={setEditing} />
+  );
+}
+
+/**
  * Editable pill rendered on top of the edge midpoint.
  *
  * Visibility:
@@ -151,6 +179,8 @@ function EdgeLabelEditor({
   selected,
   edgeStrokeColor,
   edgeStrokeWidth,
+  editing,
+  setEditing,
 }: {
   edgeId: string;
   labelX: number;
@@ -169,9 +199,10 @@ function EdgeLabelEditor({
    * a small range so chunky edges don't produce chunky pills.
    */
   edgeStrokeWidth: number | undefined;
+  editing: boolean;
+  setEditing: (next: boolean) => void;
 }) {
   const executeCommands = useCanvasStore((s) => s.executeCommands);
-  const [editing, setEditing] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   // Keep the label on the *same* layer as its edge instead of a fixed
@@ -180,28 +211,24 @@ function EdgeLabelEditor({
   // this number competes directly with the edge SVGs and node wrappers
   // in the viewport (DOM order: edges → edge-label renderer → nodes).
   //
-  // This is a faithful mirror of the edge's own computed z-index
-  // (`edge.zIndex + max(endpoints.internals.z)`), so the label always
-  // shares its edge line's exact layer. Because DOM order paints the
-  // label after the edge but before nodes, at equal z the label sits
-  // above its own edge line yet behind any node on the same level — and
-  // naturally stays below higher nodes / above lower ones, exactly like
-  // the edge. Selection lift is handled by Canvas bumping the edge's
-  // `zIndex` in `displayEdges`, which the label inherits via `baseZ`.
+  // `getEdgeRenderZ` is a faithful mirror of React Flow's internal
+  // edge render formula (`edge.zIndex + max(endpoints.internals.z)`),
+  // so the label always shares its edge line's exact layer. Because DOM
+  // order paints the label after the edge but before nodes, at equal z
+  // the label sits above its own edge line yet behind any node on the
+  // same level — and naturally stays below higher nodes / above lower
+  // ones, exactly like the edge. Selection lift is handled by Canvas
+  // bumping the edge's `zIndex` by `EDGE_SELECTED_Z_BUMP` in
+  // `displayEdges`, which the label inherits via `edge.zIndex`.
   const edgeZIndex = useStore(
     useCallback(
       (s) => {
         const edge = s.edgeLookup.get(edgeId);
         if (!edge) return 0;
-        const baseZ = typeof edge.zIndex === 'number' ? edge.zIndex : 0;
-        const endpointZ = (node: ReturnType<typeof s.nodeLookup.get>) =>
-          node?.internals.z ?? 0;
-        return (
-          baseZ +
-          Math.max(
-            endpointZ(s.nodeLookup.get(edge.source)),
-            endpointZ(s.nodeLookup.get(edge.target)),
-          )
+        return getEdgeRenderZ(
+          edge.zIndex,
+          s.nodeLookup.get(edge.source)?.internals.z,
+          s.nodeLookup.get(edge.target)?.internals.z,
         );
       },
       [edgeId],
@@ -239,7 +266,7 @@ function EdgeLabelEditor({
       sel?.removeAllRanges();
       sel?.addRange(range);
     });
-  }, [editing]);
+  }, [editing, setEditing]);
 
   const commit = useCallback(() => {
     setEditing(false);
@@ -267,12 +294,12 @@ function EdgeLabelEditor({
         ],
       },
     ]);
-  }, [edgeId, executeCommands, value]);
+  }, [edgeId, executeCommands, setEditing, value]);
 
   const cancel = useCallback(() => {
     if (ref.current) ref.current.textContent = value;
     setEditing(false);
-  }, [value]);
+  }, [setEditing, value]);
 
   // Listen for the canvas-level `onEdgeDoubleClick` signal so a
   // double-click on the edge path jumps straight into edit mode
@@ -287,7 +314,6 @@ function EdgeLabelEditor({
   }, [edgeId, enterEdit]);
 
   const hasLabel = value.length > 0;
-  if (!hasLabel && !selected && !editing) return null;
 
   // Background tint tracks the selection / edit state, but the border
   // is always solid: selected / editing -> info blue (matches React

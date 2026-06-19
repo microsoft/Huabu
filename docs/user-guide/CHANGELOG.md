@@ -2,6 +2,18 @@
 
 每次重要功能变更都会记录在此文件中，按时间倒序排列。
 
+## 2026-06-19 · External agent：换电脑/清浏览器缓存后，斜杠菜单仍能秒显
+
+**What Changed**
+
+把每个 agent profile 最近一次拿到的斜杠命令列表也纳入 server 端的 **L3 per-profile cache**（落盘到 `data/acp-profile-schema-cache.json`）。之前这层缓存只覆盖 model / mode / config option 三类 schema 字段，斜杠命令的乐观秒显完全依赖前端 `localStorage`——清浏览器数据、换设备、隐私模式下都会退化成"等 agent 冷启动 + 首次推送"，最长十几秒。现在 server 也会缓存，新 thread 在 `ensureAcpSession` 创建 entry 时若命令仍为空，就用 L3 里的列表 warm-start，agent 实际推送 `available_commands_update` 后再静默对账。
+
+**Notes**
+
+- L3 与 localStorage 是双层乐观缓存，互不依赖：任一层命中即可秒显，任一层失效（清盘 / 清浏览器）都能由另一层兜底。
+- 写入触发点保持对齐——`mirrorEntryToProfileCache` 现在也在 `available_commands_update` SSE 处理后调用，和 mode / model 的更新路径同源。
+- 改动文件：[profile-schema-cache.ts](apps/server/src/modules/agent/acp/profile-schema-cache.ts)（entry 新增 `availableCommands` / `commandsUpdatedAt`，sanitize + merge 同步扩展）、[service.ts](apps/server/src/modules/agent/acp/service.ts)（mirror 包含命令，新建 entry 时从 L3 warm-start）。
+
 ## 2026-06-18 · External agent：服务器重启后，没发过消息的 thread 也能重新打开
 
 **What Changed**

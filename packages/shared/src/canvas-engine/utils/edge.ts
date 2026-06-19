@@ -67,6 +67,17 @@ const L_CANDIDATES: HandlePair[] = [
 /** Padding (px) added around each obstacle so edges don't graze corners. */
 const OBSTACLE_MARGIN = 8;
 
+/**
+ * Map our domain `lineType` to React Flow edge type names.
+ * Hoisted to module scope so `applyEdgeStyle` does not re-allocate
+ * it on every edge update during canvas re-renders.
+ */
+const LINE_TYPE_TO_RF: Record<string, string> = {
+  bezier: 'default',
+  straight: 'straight',
+  step: 'smoothstep',
+};
+
 interface Rect {
   x: number;
   y: number;
@@ -289,9 +300,30 @@ export function getSmartHandles(
   const tgtRect: Rect = { x: tx, y: ty, w: tw, h: th };
 
   const candidates = CANDIDATES;
-  const obstacleList = obstacles ?? [];
   const skipSource = sourceNode.id;
   const skipTarget = targetNode.id;
+
+  // Early prune: every candidate path lives inside the union of the
+  // two endpoint rects inflated by `ROUTE_STUB_PX` (L-shaped stubs)
+  // plus `OBSTACLE_MARGIN` (hit-test slop). Obstacles outside this
+  // search bbox can never be crossed by any candidate, so we filter
+  // the list once instead of testing all N obstacles per candidate.
+  // On large canvases this turns the per-edge cost from O(12 · N)
+  // into O(12 · k) where k is the local obstacle density.
+  let obstacleList = obstacles ?? [];
+  if (obstacleList.length > 0) {
+    const slack = ROUTE_STUB_PX + OBSTACLE_MARGIN;
+    const minX = Math.min(sx, tx) - slack;
+    const minY = Math.min(sy, ty) - slack;
+    const maxX = Math.max(sx + sw, tx + tw) + slack;
+    const maxY = Math.max(sy + sh, ty + th) + slack;
+    obstacleList = obstacleList.filter((o) => {
+      if (o.id === skipSource || o.id === skipTarget) return false;
+      return (
+        o.x <= maxX && o.x + o.w >= minX && o.y <= maxY && o.y + o.h >= minY
+      );
+    });
+  }
 
   // Virtual length (px) charged for each obstacle a connector crosses.
   // The router will only detour around an obstacle when doing so adds less
@@ -329,7 +361,6 @@ export function getSmartHandles(
 
     let hits = 0;
     for (const o of obstacleList) {
-      if (o.id === skipSource || o.id === skipTarget) continue;
       if (polylineHitsRect(path, o, OBSTACLE_MARGIN)) hits++;
     }
 
@@ -487,14 +518,10 @@ export function applyEdgeStyle(edge: Edge, style?: EdgeStyle): Edge {
     rfStyle.strokeLinecap = 'round';
   }
 
-  // Map our domain lineType to React Flow edge type names.
-  // Only known types are forwarded; unknown values (e.g. from LLM) fall back
-  // to 'default' (React Flow's bezier) to avoid "edge type not found" warnings.
-  const LINE_TYPE_TO_RF: Record<string, string> = {
-    bezier: 'default',
-    straight: 'straight',
-    step: 'smoothstep',
-  };
+  // Map our domain lineType to React Flow edge type names via the
+  // module-level LINE_TYPE_TO_RF table. Unknown values (e.g. from an
+  // LLM) fall back to 'default' (React Flow's bezier) to avoid
+  // "edge type not found" warnings.
   const rfType = style.lineType
     ? (LINE_TYPE_TO_RF[style.lineType] ?? 'default')
     : undefined;

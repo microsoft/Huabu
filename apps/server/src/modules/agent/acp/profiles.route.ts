@@ -30,6 +30,7 @@ import {
 } from '@sediment/shared';
 
 import { getDaemonSupervisor } from './daemon-supervisor.js';
+import { invalidateProfileSchemaCache } from './profile-schema-cache.js';
 import {
   deleteProfile,
   getProfile,
@@ -132,6 +133,20 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
       }),
       updatedAt: Date.now(),
     });
+    // Binding-relevant edits (`command` / `cwd`) can shift the agent's
+    // reported model / mode / config schema, so the per-profile schema
+    // cache must be dropped — the next session of this profile will
+    // repopulate it from the live agent. Pure cosmetic edits
+    // (`displayName`, `autoRestart`) leave the cache untouched so the
+    // toolbar stays optimistically populated.
+    const commandChanged =
+      parsed.data.command !== undefined &&
+      parsed.data.command !== existing.command;
+    const cwdChanged =
+      parsed.data.cwd !== undefined && parsed.data.cwd !== existing.cwd;
+    if (commandChanged || cwdChanged) {
+      invalidateProfileSchemaCache(updated.id);
+    }
     return updated;
   });
 
@@ -151,6 +166,10 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
         code: 'profile_not_found',
       });
     }
+    // Drop the per-profile schema cache too so the deleted profile
+    // does not leave an orphan entry that could be resurrected if a
+    // future create somehow reused the same id.
+    invalidateProfileSchemaCache(request.params.id);
     return { deleted: true };
   });
 };

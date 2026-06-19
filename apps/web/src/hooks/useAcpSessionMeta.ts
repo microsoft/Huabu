@@ -444,9 +444,9 @@ export function useAcpSessionMeta({
   // immediately from the server's last-known snapshot.
   //
   // Why split this from `refresh`: `refresh` triggers `ensureAcpSession`
-  // Reset meta when binding/thread/canvas changes, then fire a
-  // no-spawn cache hydrate so the selector dropdowns can populate
-  // immediately from the server's last-known snapshot.
+  // (which spawns / resumes the agent), whereas this cache hydrate hits
+  // the read-only `/cached-meta` endpoint and never spawns — so opening
+  // a thread populates the toolbar without paying the cold-start tax.
   //
   // Server-side `/cached-meta` checks three tiers in order:
   //   1. live registry entry (in-memory),

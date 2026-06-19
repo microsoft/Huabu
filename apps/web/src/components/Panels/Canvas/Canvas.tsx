@@ -40,6 +40,7 @@ import { useSketchHoverRouting } from '@/hooks/useSketchHoverRouting';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
 import { NodeToolbar } from './CanvasToolbar.tsx';
+import { EDGE_SELECTED_Z_BUMP } from './edges/edgeZ.ts';
 import {
   EDIT_EDGE_LABEL_EVENT,
   LabelledEdge,
@@ -452,7 +453,8 @@ export const Canvas: React.FC<CanvasProps> = ({
       return {
         ...e,
         selected: true,
-        zIndex: (typeof e.zIndex === 'number' ? e.zIndex : 0) + 1,
+        zIndex:
+          (typeof e.zIndex === 'number' ? e.zIndex : 0) + EDGE_SELECTED_Z_BUMP,
         markerEnd: nextMarkerEnd,
         markerStart: nextMarkerStart,
       };
