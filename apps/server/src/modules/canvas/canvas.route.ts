@@ -133,6 +133,26 @@ const TEXT_BEARING_NODE_TYPES = new Set([
 ]);
 
 /**
+ * Subset of {@link TEXT_BEARING_NODE_TYPES} whose `data.content` is
+ * actually consumed by the web renderer (preview body, AI block
+ * provenance, …) — and therefore worth inlining into the batched
+ * `GET /:canvasId` response so first paint can render without a
+ * follow-up per-node fetch.
+ *
+ * `pdf` is intentionally excluded: the canvas card and the expanded
+ * preview both render directly from `data.src` via pdf.js, and the
+ * in-page text selection layer re-extracts text on demand with
+ * `page.getTextContent()`. Shipping the server-side extracted body
+ * here would add hundreds of KB to every canvas load for zero
+ * rendering benefit. Server-side agent / context paths still read the
+ * sidecar directly via `store.readNode()`, and the per-node
+ * `GET /:canvasId/nodes/:nodeId/content` endpoint still returns the
+ * full body (falling back to `existing.content` when this hydrate
+ * skips it) so search / AI features can fetch on demand.
+ */
+const WIRE_INLINE_CONTENT_TYPES = new Set(['note', 'text', 'web', 'office']);
+
+/**
  * Per-node `data` keys whose values live exclusively in the markdown
  * sidecar (`nodes/<safe(label)>.md`). The structure PUT strips these
  * before persisting to `canvas.json` so the two stores cannot drift;
@@ -292,10 +312,14 @@ function hydrateOneNode(
   if ('contentMissing' in data) {
     delete data['contentMissing'];
   }
-  // Only restore body for text-bearing types — image/video/frame
-  // markdown is metadata-only and the canvas state does not carry
-  // a content field for them.
-  if (TEXT_BEARING_NODE_TYPES.has(nodeType)) {
+  // Only restore body for types whose preview actually renders
+  // `data.content`. `pdf` is text-bearing on disk (the .md sidecar
+  // holds the extracted body for AI context) but the web renderer
+  // works straight off `data.src` via pdf.js, so we deliberately
+  // skip the inline copy here — see `WIRE_INLINE_CONTENT_TYPES`.
+  // image/video/audio/frame markdown is metadata-only and the canvas
+  // state does not carry a content field for them.
+  if (WIRE_INLINE_CONTENT_TYPES.has(nodeType)) {
     let body = nodeContent.content;
     if (nodeType === 'office' && typeof body === 'string') {
       body = stripOfficeparserPreamble(body);
