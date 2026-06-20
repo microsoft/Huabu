@@ -106,7 +106,11 @@ export const AcpConnectionBadge: FC<AcpConnectionBadgeProps> = ({
       ? `${headline}\n\n${errorMessage}`
       : headline;
   return (
-    <Tooltip content={tooltipText} placement="bottom">
+    <Tooltip
+      content={tooltipText}
+      placement="bottom"
+      contentClassName="whitespace-pre-line"
+    >
       <span
         className="text-danger inline-flex shrink-0 items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase"
         aria-label={tooltipText}
