@@ -268,7 +268,6 @@ body,
 /* Cursor enters the scrollbar lane (over the track) → reveal the
    thumb. This fires only when the pointer is in the ~8px gutter,
    not when it's over the panel content. */
-*::-webkit-scrollbar:hover ::-webkit-scrollbar-thumb,
 *::-webkit-scrollbar-track:hover,
 *::-webkit-scrollbar-thumb:hover {
   background-color: var(--fg-subtle);
