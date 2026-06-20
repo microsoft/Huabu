@@ -410,11 +410,11 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
     const command = buildCommand(form, detectedClis);
     const cwd = form.cwd.trim();
     if (!command) {
-      toast('Command is required', { variant: 'error' });
+      toast('Command is required', { tone: 'danger' });
       return;
     }
     if (!cwd) {
-      toast('Working directory is required', { variant: 'error' });
+      toast('Working directory is required', { tone: 'danger' });
       return;
     }
     // Empty input → fall back to the computed default so the user
@@ -431,7 +431,7 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
           autoRestart: form.autoRestart,
         };
         await updateAcpProfile(editing.id, patch);
-        toast('Profile updated', { variant: 'success' });
+        toast('Profile updated', { tone: 'success' });
       } else {
         const payload: AcpProfileCreateRequest = {
           displayName,
@@ -441,13 +441,13 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
           autoRestart: form.autoRestart,
         };
         await createAcpProfile(payload);
-        toast('Profile created', { variant: 'success' });
+        toast('Profile created', { tone: 'success' });
       }
       await onSaved();
       onClose();
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Failed to save profile', {
-        variant: 'error',
+        tone: 'danger',
       });
     } finally {
       setSaving(false);
@@ -516,8 +516,11 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
       if (result.ok) {
         setForm((p) => ({ ...p, cwd: result.path }));
       } else if (result.reason === 'no-picker') {
+        // Not a failure: headless / remote servers can't open a native
+        // dialog. Warn so the user knows to type the path manually
+        // instead of red-flagging it as an error.
         toast('No folder picker available on this server', {
-          variant: 'error',
+          tone: 'warning',
         });
       }
       // 'cancelled' is silent.
@@ -525,7 +528,7 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
       toast(
         err instanceof Error ? err.message : 'Failed to open folder picker',
         {
-          variant: 'error',
+          tone: 'danger',
         },
       );
     } finally {
@@ -775,7 +778,7 @@ export const AcpSettings: React.FC = () => {
   const lastToastedRef = useRef<Error | null>(error);
   useEffect(() => {
     if (error && error !== lastToastedRef.current) {
-      toast(error.message, { variant: 'error' });
+      toast(error.message, { tone: 'danger' });
       lastToastedRef.current = error;
     }
   }, [error]);
@@ -811,11 +814,11 @@ export const AcpSettings: React.FC = () => {
       }
       try {
         await deleteAcpProfile(profile.id);
-        toast('Profile deleted', { variant: 'success' });
+        toast('Profile deleted', { tone: 'success' });
         await refresh();
       } catch (err) {
         toast(err instanceof Error ? err.message : 'Failed to delete profile', {
-          variant: 'error',
+          tone: 'danger',
         });
       }
     },
@@ -830,11 +833,11 @@ export const AcpSettings: React.FC = () => {
       // (and the profile-list runtime flags update).
       await refresh();
       if (next.online) {
-        toast('Worker restarted', { variant: 'success' });
+        toast('Worker restarted', { tone: 'success' });
       }
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Failed to restart worker', {
-        variant: 'error',
+        tone: 'danger',
       });
     } finally {
       setRestarting(false);

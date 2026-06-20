@@ -3,6 +3,29 @@ import { create } from 'zustand';
 import type { Guide } from '@/handler/snap/types';
 import type { FrameFitResult } from '@sediment/shared/canvas-engine';
 
+/**
+ * Visual role of a frame-fit preview, used by the overlay layer to
+ * paint each affected frame with a distinct style during a drag.
+ *
+ * - `target` — the frame the dragged node will land in (or, for
+ *   resize previews, the frame currently being reshaped). Rendered as
+ *   the visually-loudest accent so nested-frame scenarios make the
+ *   landing target unambiguous.
+ * - `source` — a frame whose child is leaving. Rendered muted to
+ *   signal "this frame is about to shrink" without competing for
+ *   attention with the target.
+ */
+export type FrameFitPreviewRole = 'target' | 'source';
+
+/**
+ * Frame-fit preview entry with a UI role tag. The geometric fields
+ * come straight from {@link FrameFitResult}; `role` is added at the
+ * writer site (canvas drag handler / resize-preview slice) so the
+ * overlay can render target vs source distinctly without re-deriving
+ * intent at paint time.
+ */
+export type FrameFitPreview = FrameFitResult & { role: FrameFitPreviewRole };
+
 type GesturePreviewState = {
   /**
    * Previews of how frames would resize based on the current drag/resize.
@@ -13,13 +36,13 @@ type GesturePreviewState = {
    * `canvasStore.updateResizePreview` (during resize of a frame child).
    * Cleared in `canvasStore.onNodeDragStop` and on resize-end.
    */
-  frameFitPreviews: FrameFitResult[];
+  frameFitPreviews: FrameFitPreview[];
 
   /**
    * Replace the preview list. Called by `canvasStore` after it has
    * computed the fit for each affected frame.
    */
-  setFrameFitPreviews: (previews: FrameFitResult[]) => void;
+  setFrameFitPreviews: (previews: FrameFitPreview[]) => void;
 
   /** Clear the frame fit previews (e.g. when drag or resize ends). */
   clearFrameFitPreview: () => void;

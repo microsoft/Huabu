@@ -2,6 +2,302 @@
 
 每次重要功能变更都会记录在此文件中，按时间倒序排列。
 
+## 2026-06-19 · External agent：换电脑/清浏览器缓存后，斜杠菜单仍能秒显
+
+**What Changed**
+
+把每个 agent profile 最近一次拿到的斜杠命令列表也纳入 server 端的 **L3 per-profile cache**（落盘到 `data/acp-profile-schema-cache.json`）。之前这层缓存只覆盖 model / mode / config option 三类 schema 字段，斜杠命令的乐观秒显完全依赖前端 `localStorage`——清浏览器数据、换设备、隐私模式下都会退化成"等 agent 冷启动 + 首次推送"，最长十几秒。现在 server 也会缓存，新 thread 在 `ensureAcpSession` 创建 entry 时若命令仍为空，就用 L3 里的列表 warm-start，agent 实际推送 `available_commands_update` 后再静默对账。
+
+**Notes**
+
+- L3 与 localStorage 是双层乐观缓存，互不依赖：任一层命中即可秒显，任一层失效（清盘 / 清浏览器）都能由另一层兜底。
+- 写入触发点保持对齐——`mirrorEntryToProfileCache` 现在也在 `available_commands_update` SSE 处理后调用，和 mode / model 的更新路径同源。
+- 改动文件：[profile-schema-cache.ts](apps/server/src/modules/agent/acp/profile-schema-cache.ts)（entry 新增 `availableCommands` / `commandsUpdatedAt`，sanitize + merge 同步扩展）、[service.ts](apps/server/src/modules/agent/acp/service.ts)（mirror 包含命令，新建 entry 时从 L3 warm-start）。
+
+## 2026-06-18 · External agent：服务器重启后，没发过消息的 thread 也能重新打开
+
+**What Changed**
+
+修复"服务器重启后，打开之前那条还没发消息的 external agent thread，弹出红色 `Failed to spawn external agent: Session bootstrap failed: session/load failed: Resource not found: Session ...`"。
+
+根因：thread 在 `session/new` 成功的那一刻就把 sessionId 写到了磁盘（[session-store.ts](apps/server/src/modules/agent/acp/session-store.ts)），这样下次启动时能 resume。但 **Copilot CLI 不在进程之间持久化"空 session"** —— 没收到过 user prompt 的 session 重启后 Copilot 那边压根不存在，旧 sessionId 对它而言是 unknown id。服务器拿着这个旧 id 让 agentlet 走 `session/load`，Copilot 直接返回 `-32002 Resource not found`，agentlet 把它当 hard failure 上抛，spawn 整个失败。
+
+修法是**把 per-thread 的 sessionId 落盘时机推迟到"第一次 prompt 成功之后"**：
+
+- [session-registry.ts](apps/server/src/modules/agent/acp/session-registry.ts) 给 `AcpSessionEntry` 加了两个字段：`bindingRecipe`（保存 spawn recipe，方便 promotion 时不用重新查 profile）和 `persistedToDisk: boolean`（标记这条记录有没有进过 `acp-sessions.json`）。
+- [service.ts](apps/server/src/modules/agent/acp/service.ts) 的 `openOrReuseSession`：fresh session（`!persisted?.sessionId`）创建时只放进 in-memory registry，**不**写盘；resume session（已有持久记录）照旧刷新一遍盘上记录，保持下次重启还能 recover。
+- 同文件 prompt 派发处的 `.then(result => ...)` 里加 `promoteEntryToPersisted(entry, logger)`：第一次 prompt 真正跑完（Copilot 已经处理过一轮 user turn、内部 session 已经被它持久化）之后，才把 sessionId/profileId/cwd/recipe/meta 一次性写进 `acp-sessions.json` 并把 flag 翻成 `true`。后续 prompt 再调时是 no-op。
+
+这样空 thread 重启后**根本不会有 stale record**，orchestrator 拿不到 `existingSessionId` → 直接走 fresh `session/new` → 干净打开。
+
+**Notes**
+
+- 调试用的 meta 写入（toolbar 上的 model/mode/configOptions 等）走的是 `writeAcpSessionMeta`，它内部有 `if (!existing) return false;` 保护，第一次 prompt 之前调用是安全 no-op，**不会**漏写 meta —— 真正的 meta 会在 promotion 那一步随 record 一起持久化。
+- Per-profile 的 schema cache（toolbar 选项的来源，参见上一条 changelog）仍然在 agent push 时立刻填充，所以空 thread 第一次打开的 toolbar 体验完全不受影响。
+- Resume 路径上的 `writeAcpSessionRecord` 仍然在 open 时跑，所以**真正发过消息的 thread**重启后照旧能 recover；只是把"还没开口"的 thread 排除掉了。
+- 改动文件：[session-registry.ts](apps/server/src/modules/agent/acp/session-registry.ts)（加字段），[service.ts](apps/server/src/modules/agent/acp/service.ts)（推迟写入 + `promoteEntryToPersisted` helper），[spawn-orchestrator.ts](apps/server/src/modules/agent/acp/spawn-orchestrator.ts)（更新过时的 fallback 注释，说明新的 deferred-persistence 模型）。
+
+## 2026-06-18 · Frame 拖拽提示：不再压在被拖节点上面
+
+**What Changed**
+
+接着上一条嵌套 frame 提示的工作，把 overlay 的层级修正了：之前 overlay 放在 `<ReactFlow>` 外面的 wrapper 里、`z-40`，处于一个独立的 stacking context，导致它高于 React Flow 内部所有节点（包括被拖到 `+1000` 的那个），看起来像"提示框把节点盖住了"。现在把 overlay 用 `<ViewportPortal>` 挪到 ReactFlow viewport 里、显式 `zIndex: 0`，正好夹在 frame body（`zIndex: -1`）之上、被拖节点（drag 期间 `zIndex` 被 React Flow 抬到 999~1000）之下。
+
+Overlay 描绘的内容**保持上一条的设定不变** —— 还是用 `computeFrameFit` 算出"假如松手会变成的尺寸"，既兼顾 targeting 提示又预告 post-drop 布局。
+
+**Notes**
+
+- 改用 ViewportPortal 同时把"屏幕坐标换算"全省掉了：原 overlay 要算 `rfInstance.flowToScreenPosition` 再减 wrapper bounding rect；现在直接拿 flow 空间的 `position.x/y` 当 `left/top`，pan/zoom 由 viewport 的 CSS transform 自动负责，rAF tick 少做几次 layout 读。
+- 改动文件：[Canvas.tsx](apps/web/src/components/Panels/Canvas/Canvas.tsx)（`FrameFitPreviewOverlay` 改 flow-space + `zIndex: 0`，渲染点移入 `<ViewportPortal>`，新增 `ViewportPortal` 导入）。
+
+## 2026-06-18 · 嵌套 frame 拖拽：现在能一眼看出节点要进哪个 frame
+
+**What Changed**
+
+之前拖一个节点经过嵌套 frame（frame 套 frame）的时候，preview 会把所有"受影响的 frame"都用同一种淡蓝色填充画出来——既包括节点正要进入的内层 frame，也包括它正在离开的外层 frame，还包括只是被路过的父 frame。结果就是用户**看不出最后到底要落在哪一个 frame 里**。
+
+现在每个 preview 都按"语义角色"上色：
+
+- **Target（节点会落进去）** — 实线 `border-info` 蓝色边框 + 较深的 `info-bg` 填充 + shadow，视觉上最显眼。包括两种情况：拖到一个新 frame、或继续留在当前父 frame 里。
+- **Source（节点正要离开）** — 虚线 `edge-default` 中性灰边框 + 很淡的 `bg-subtle` 填充，存在感弱，告诉用户"这个 frame 会缩"但不抢戏。
+
+嵌套场景下：内层 frame 亮蓝、外层 frame 灰淡，一眼区分；同 frame 内部移动时，那个 frame 自己亮蓝，符合"我的目的地就是这里"的直觉。
+
+**Notes**
+
+- Role 在写入 `gesturePreviewStore` 时就定下，overlay 只负责按 role 切换样式，没有运行时再推导意图——避免每帧都重算。
+- Resize 手势（拖 frame 子节点的尺寸柄触发父 frame reflow）一律是 `target`，因为没有"离开"语义，只有"这个 frame 正在被实时重排"。
+- 分配规则在 [canvasStore.ts](apps/web/src/store/canvasStore.ts) 的 `onNodeDrag` 里：`leaving && !entering → source`，其它都是 `target`。注意"merely-current-parent"分支：节点在自己 frame 内部移动时，那个 frame 既不在 leaving 也不在 entering，依然算 `target`。
+- 改动文件：[gesturePreviewStore.ts](apps/web/src/store/gesturePreviewStore.ts)（新增 `FrameFitPreviewRole` / `FrameFitPreview` 类型）、[canvasStore.ts](apps/web/src/store/canvasStore.ts)（drag 写入 role）、[resizePreview.ts](apps/web/src/store/canvasStore/slices/resizePreview.ts)（resize 写入 `'target'`）、[Canvas.tsx](apps/web/src/components/Panels/Canvas/Canvas.tsx)（`FrameFitPreviewOverlay` 按 role 渲染）。
+
+## 2026-06-18 · 拖拽节点贴近 frame 边缘：所见即所得，松手不再"反悔"
+
+**What Changed**
+
+之前在 smart-snap 打开时存在一个偶发但很别扭的"漂移"现象：拖一个节点贴着 frame 边缘移动，**preview（拖动中实时显示）已经把节点收进 frame**，但松开鼠标的一瞬间节点又被弹出去回到 root；或者反过来——preview 显示已经脱离，松手却又被吸进去。根因是 preview 走 rAF 用的是"上一次 mousemove 的指针 + 未 snap 的原始位置"，而落点 resolver 走 mouseup 用的是"最终 snap 后的位置 + mouseup 指针"，这两套输入在边缘几像素的窗口里可能给出不一样的 unframe / 入框判断。
+
+现在拖拽结束时严格按"用户最后一次看到的 preview"来落子：
+
+- 每次 rAF preview tick 都把当前的 unframe / enterFrame 决定写进一个 gesture-scoped 的 cache；
+- `endSnapSession` 把 cache 快照一份（与现有的 `_lastDragReparentBypass` 同一时机）；
+- `onNodeDragStop` 把快照塞进 `NODE_DRAG_STOP` intent；
+- resolver 看到 `cachedDecisions` 就直接按它执行（仍用 `moveNodeIntoFrame` / `moveNodeOutOfFrame` 走标准的位置保持），跳过自己重新计算 overlap / 指针 halo 的环节。
+
+**Notes**
+
+- WYSIWYG 契约：屏幕 60Hz，最后一次 paint 到 mouseup 之间最多 16ms，用户看不见这个间隙；与其在 mouseup 时再算一遍冒着不一致的风险，不如直接 honor 最后一次 cache。
+- 三条 fallback 路径保留：① 没有 rAF 触发的极速点-放（无 cache）→ 走原来的 fresh 重算；② `autoLayoutEnabled === false` → 走 fresh 重算；③ 拖拽手势显式 `bypassReparent` → 仍优先生效，cache 让位。
+- 改动文件：[snapSession.ts](apps/web/src/handler/snap/snapSession.ts)（新增 `DragDecision` + cache 与三个访问器）、[canvasStore.ts](apps/web/src/store/canvasStore.ts)（rAF 写 + dragStop 读）、[uiIntent.ts](apps/web/src/handler/canvasCommand/uiIntent.ts)（`NODE_DRAG_STOP` 新增 `cachedDecisions` 字段）、[resolveNodeDragStop.ts](apps/web/src/handler/canvasCommand/resolvers/resolveNodeDragStop.ts)（cache 快路径）。
+- 新增覆盖 WYSIWYG 契约的 5 个 case：[resolveNodeDragStop.cache.test.ts](apps/web/src/handler/canvasCommand/resolvers/__tests__/resolveNodeDragStop.cache.test.ts)，分别验证 cache 在"fresh 想 unframe 但 cache 说不"、"fresh 想保留但 cache 说脱"、"cache 指定入新 frame"、"无 cache 时 fallback 正确"、"`bypassReparent` 优先于 cache" 这五种边界。
+
+## 2026-06-18 · External agent：新 thread 第一次打开也能立刻看到 model / config 选项
+
+**What Changed**
+
+修复"新建 session、显示已连接、但 model 下拉是空的；发一条消息后才出现"的体验断层。
+
+根因：`session/new` 在 agent 确认 session id 时就 resolve，**早于** agent 异步推送的 `config_option_update` / 模式&模型目录（Copilot CLI 通常晚 1-3s）。这些推送会落到 server 的 registry entry，**但只在 SSE 流打开时**（也就是用户发消息时）才会被送到 web 端。结果就是：badge 已经变绿、但 toolbar 是空的，必须发一条消息才会"突然"出来。
+
+修法：`useAcpSessionMeta` 的 `refresh()` 在 ensure resolve 后，**如果 snapshot 是 schema-empty**（`configOptions` / `availableModes` / `availableModels` 三个 list 全空），按 `[400, 1000, 2000, 3000, 5000, 8000, 12000, 15000, 15000]ms` 偏移持续轮询 `/cached-meta`（read-only、不 spawn），总窗口 ~60s，抓到 schema 内容立刻 commit 然后停。
+
+窗口必须够长：Copilot CLI 在一个全新 cwd 启动时，**auth 握手 + workspace 索引经常把第一次 `config_option_update` 推迟到 15–30s**，短窗口会悄无声息地退化成"只能靠首条消息触发 SSE 才有 options"——也就是这次修复的目标 bug。
+
+**Notes**
+
+- 只在 schema-empty 时才 poll：cache hit（profile cache / 持久化记录）已经有内容，直接跳过 polling，0 额外开销。
+- `loading` 在 ensure resolve 瞬间就翻 false，**badge 不会在 polling 的 60s 窗口里一直显示 connecting**——polling 是后台 top-up，不是用户可见的"是否在连"信号。
+- 每次 poll 失败（网络抖动）静默吞掉，不影响 badge（ensure 已经成功，错误状态不应该回滚）。
+- 一旦 schema 落到了 profile cache，**同 profile 的所有后续新 thread 都直接命中 cache**，根本不会触发这条 polling 路径。所以这次修复只影响"profile 在本机的第一次使用"。
+- 改动文件：[useAcpSessionMeta.ts](apps/web/src/hooks/useAcpSessionMeta.ts)。
+
+## 2026-06-18 · External agent：连接失败现在告诉你"为什么"和"怎么修"
+
+**What Changed**
+
+之前 `POST /api/acp/threads/:threadId/session` 任何失败都返回 `{code: 'acp_session_failed', message: '<原始错误>'}`，UI 只能渲染一个通用的红色"FAILED"和原始 message。现在按失败原因分了 6 个稳定的 `code`，前端按 code 渲染针对性的提示和下一步动作：
+
+| code                 | 含义                               | tooltip headline                                                                           |
+| -------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------ |
+| `profile_missing`    | 绑定的 profile 被删了              | "Profile for ... no longer exists. Re-create it in Settings."                              |
+| `bridge_not_mounted` | 内嵌 agentlet bridge 还没起来      | "Sediment is still starting up. Try again in a moment."                                    |
+| `worker_not_ready`   | agentlet worker daemon 没连上      | "Agent worker is offline. Try Restart worker in Settings."                                 |
+| `spawn_failed`       | daemon 拒绝 spawn（recipe 不合法） | "Could not start ... Check command path / cwd."                                            |
+| `connect_timeout`    | agent 进程起来了但 3s 内 WS 没握手 | "... started but never responded. May need to re-authenticate (Copilot OAuth) or crashed." |
+| `internal`           | 兜底                               | 通用错误                                                                                   |
+
+红色徽章上的短标签也按 code 切换：`Worker` / `Profile` / `Spawn` / `Timeout` / `Starting` / `Failed`，鼠标悬停看完整 headline + 原始 message。
+
+**Notes**
+
+- 服务端新增 [errors.ts](apps/server/src/modules/agent/acp/errors.ts) 定义 `AcpServiceError` 和 `AcpEnsureErrorCode`，所有可分类的失败点都用 `throw new AcpServiceError(code, msg)`；其它意外异常 fallback 到 `'internal'`。
+- 此外把 `spawn-orchestrator.ts` 里的 `waitForAgentConnection(...)` 由"超时静默返回 false"改成"超时显式抛 `connect_timeout`"——这是之前 `503` 经常发生但日志里几乎看不到原因的根本原因之一。
+- 共享类型 [packages/shared/src/types/api/acp.ts](packages/shared/src/types/api/acp.ts) 导出 `AcpEnsureErrorCode` 联合类型，web 端用它做穷举 switch。
+- Hook [useAcpSessionMeta.ts](apps/web/src/hooks/useAcpSessionMeta.ts) 新增 `errorCode` 字段，从 `ApiError.code` 解析；未识别的 code（旧服务端 / 网络错误）返回 `null`。
+- Wire 兼容：旧客户端只读 message，不影响；新客户端读 code 走分支。
+- 改动文件：[errors.ts](apps/server/src/modules/agent/acp/errors.ts) (新增)、[service.ts](apps/server/src/modules/agent/acp/service.ts)、[spawn-orchestrator.ts](apps/server/src/modules/agent/acp/spawn-orchestrator.ts)、[threads.route.ts](apps/server/src/modules/agent/acp/threads.route.ts)、[packages/shared/src/types/api/acp.ts](packages/shared/src/types/api/acp.ts)、[useAcpSessionMeta.ts](apps/web/src/hooks/useAcpSessionMeta.ts)、[AcpConnectionBadge.tsx](apps/web/src/components/Panels/ChatPanel/AcpConnectionBadge.tsx)、[ChatPanel/index.tsx](apps/web/src/components/Panels/ChatPanel/index.tsx)。
+
+## 2026-06-18 · Toast 与 Button 共享统一的 `tone` 语义；toast 内按钮匹配 toast 背景色
+
+**What Changed**
+
+之前 `Toast` 用 `variant` 描述颜色家族（`default | info | success | warning | error`），`Button` 用 `tone` 描述颜色家族（`neutral | info | danger`），词汇与命名都不一致；而 toast 里的 action / × 按钮统一用 `bg-inverse`（深色），落在彩色 toast 上（`info` / `success` / `warning` / `danger`）时会像贴了一块黑色"补丁"，视觉上和 toast 主体割裂。
+
+- **`Button` 新增共享类型 `Tone = 'neutral' | 'info' | 'success' | 'warning' | 'danger'`**（[apps/web/src/components/Common/Button.tsx](apps/web/src/components/Common/Button.tsx)），原 `ButtonTone` 收敛为 `Tone`；`solid` / `outline` / `ghost` 三种 variant 都补齐了 `success` / `warning` 两档配色。
+- **`Toast` 的 `variant` prop 重命名为 `tone`**（[apps/web/src/components/Common/Toast.tsx](apps/web/src/components/Common/Toast.tsx)），值集合改为复用 `Tone`：`default → neutral`、`error → danger`。`ToastTone` 现在是 `Tone` 的别名。
+- **Toast 内的 action / × 按钮自动继承 toast 的 `tone`**，所以红色 toast 上的按钮也是红色（同色家族），靠 label / icon 的对比 + hover 提亮提供可见性，不再出现深色"补丁"。
+- **同步更新所有调用点**（约 19 处）：`toast(msg, { variant: 'error' })` → `toast(msg, { tone: 'danger' })`，`variant: 'warning'` → `tone: 'warning'`，`variant: 'success'` → `tone: 'success'`。涉及 [apps/web/src/store/canvasStore.ts](apps/web/src/store/canvasStore.ts)、[apps/web/src/store/canvasHistoryManager.ts](apps/web/src/store/canvasHistoryManager.ts)、[apps/web/src/store/canvasStore/save/nodeContentQueue.ts](apps/web/src/store/canvasStore/save/nodeContentQueue.ts)、[apps/web/src/components/Panels/Header/AcpSettings.tsx](apps/web/src/components/Panels/Header/AcpSettings.tsx)、[apps/web/src/components/Panels/Header/CanvasMenu.tsx](apps/web/src/components/Panels/Header/CanvasMenu.tsx)、[apps/web/src/components/Panels/Header/LLMSettings.tsx](apps/web/src/components/Panels/Header/LLMSettings.tsx)、[apps/web/src/components/Panels/ChatPanel/index.tsx](apps/web/src/components/Panels/ChatPanel/index.tsx)、[apps/web/src/pages/CanvasListPage.tsx](apps/web/src/pages/CanvasListPage.tsx) 等。
+
+**Notes**
+
+- 决策依据：一个设计系统中"颜色家族"这个概念只该有一套词汇。原先 `Button.tone` 已经在内部消化了 `variant`（形状/风格）与 `tone`（颜色）的区分，`Toast` 没有多形状需求所以把颜色塞进了 `variant`——现在统一到 `tone`，`variant` 这个词在整个系统里只表示"形状/风格"。
+- `error → danger` 跟随设计 token（`--danger` / `bg-danger`），命名与底层一致。
+- `default → neutral` 跟随 `Button.tone` 既有命名（更具描述性，避免"默认"二义）。
+- toast 内按钮的"同色"策略：用 label / icon 的 `text-fg-inverse` 与 `enabled:hover:bg-X/80` 共同提供可见性。如果未来想要更强对比，可以在按钮上叠 `bg-black/10` 之类的 overlay，但目前无 issue。
+- 该变更是**调用方有破坏性**的（参数名 `variant` → `tone`、值 `error` → `danger`、值 `default` → `neutral`），所有 in-repo 调用点已同步更新；如果有 fork 或 plugin 在用 `toast(msg, { variant: 'error' })`，请一并迁移。
+
+---
+
+## 2026-06-18 · "Canvas 已被其他端修改"提示加上 Reload 按钮 + 离开画布自动消失
+
+**What Changed**
+
+之前 `CANVAS_VERSION_CONFLICT` 弹出的红色 toast 是 `duration: 0` 永久挂着的（[apps/web/src/store/canvasStore.ts](apps/web/src/store/canvasStore.ts) `saveCanvas` 409 分支），但 toast 自身没有任何关闭手段，用户被迫看到刷新为止；而且就算用户切回 canvas 列表，提示还在屏幕上漂着，跟当前页毫无关系。
+
+- **`Toast` 组件新增 `action` 槽位 + `dismissible` × 按钮**（[apps/web/src/components/Common/Toast.tsx](apps/web/src/components/Common/Toast.tsx)）。`duration === 0` 或带 `action` 的 toast 默认显示 × 关闭按钮，普通自动消失的 toast 保持原样不变。点 action 按钮会执行回调并自动 dismiss。
+- **版本冲突 toast 加上 "Reload" 按钮**：点一下直接 `window.location.reload()`，比手动按 F5 / 找浏览器刷新按钮更顺手；同时保留 × 让用户先把未保存的文字复制出来再决定何时刷新。
+- **离开 canvas 自动消失**：[apps/web/src/pages/CanvasPage/CanvasPage.tsx](apps/web/src/pages/CanvasPage/CanvasPage.tsx) 的 unmount cleanup 会调 `dismissVersionConflictToast()`，所以点左上角箭头回 canvas 列表 / 打开 settings / 进 docs 时，提示自动消失。
+- **切换到别的 canvas 也消失**：`loadCanvas` / `switchCanvas` 在 reset `versionConflict: false` 时同步 dismiss 该 toast——新 canvas 有新的 version baseline，旧提示已无意义。
+
+**Notes**
+
+- 决策依据：modal 会遮住画布，用户没法先复制未保存文字；banner 改造范围太大。toast + action 按钮是 Sonner / MUI Snackbar / Radix Toast 行业标配，匹配"持续状态提示 + 可恢复操作"语义。
+- toast id 用模块级变量 `_versionConflictToastId` 跟踪，不进 zustand state——纯 UI ephemera，没有组件 subscribe。
+- `loadCanvas` 同时清 `versionConflict` flag 和 toast，保证 store 跟 UI 不漂移。
+- 改动文件：[apps/web/src/components/Common/Toast.tsx](apps/web/src/components/Common/Toast.tsx)、[apps/web/src/store/canvasStore.ts](apps/web/src/store/canvasStore.ts)、[apps/web/src/pages/CanvasPage/CanvasPage.tsx](apps/web/src/pages/CanvasPage/CanvasPage.tsx)。
+
+---
+
+## 2026-06-18 · Rename / delete 失败提示：彻底告别 `window.alert`，warning vs error 分开
+
+**What Changed**
+
+接上一版"DELETE/rename 失败现在会通过 toast 告诉你"，这一版进一步把所有阻塞式 `window.alert` 换成非阻塞 toast，并按"用户输入问题"vs"系统真实故障"分了不同的视觉层级。也区分了**主动**（用户点改名）和**自动**（agent / 后台代码改 label）两条路径的 UX。
+
+- **`Toast` 组件新增 `warning` variant**（[apps/web/src/components/Common/Toast.tsx](apps/web/src/components/Common/Toast.tsx)）。底色用设计系统的 `bg-warning` token（琥珀色），跟现有的 `info` / `success` / `error` 三档拉开层级，专用于"你输入的东西有问题，改一下就行"。
+- **所有 rename / canvas-title 的 409 冲突由 `alert` 改为 `toast warning`**（[apps/web/src/store/canvasStore.ts](apps/web/src/store/canvasStore.ts) `tryRename`）。duration 5000ms，比默认的 3000ms 长一点，让用户来得及看完。
+  - 用户主动改名命中本地 sibling 预检 → `toast warning`。
+  - 服务端 409 `NODE_LABEL_CONFLICT` / `CANVAS_TITLE_CONFLICT` → 自动 revert 乐观更新 + `toast warning`。
+- **`nodeContentQueue.flushNow` 新增 `source: 'user' | 'auto'` 参数**（[apps/web/src/store/canvasStore/save/nodeContentQueue.ts](apps/web/src/store/canvasStore/save/nodeContentQueue.ts)），缺省 `'user'`。debounce 自动保存 / `flushAll` / `flushAllKeepalive` 一律用 `'auto'`，只有 `tryRename` 显式传 `'user'`。
+- **`handleSaveFailure` 按 source 分流**：500 失败时
+  - `source === 'user'` → `toast error` + 自动 revert label。
+  - `source === 'auto'` → 只 `console.error` + 自动 revert label。**不再弹 toast**，避免 agent 频繁改名时刷屏。
+  - 两条路径都仍然做 label revert，保证 store 跟磁盘不漂移。
+
+**Notes**
+
+- 决策依据：409 是"用户输入跟现有数据冲突"（warning，用户可以马上修），500 是"磁盘/文件锁出问题"（error，系统侧故障，已自动回滚）。两类的紧迫度不同，分两个 variant。
+- 自动 rename 的失败提示从"toast"降级为"只在 console"——理由是自动改名一般来自 agent 或 paste 去重器，用户没有"我刚改了名"的预期，弹 toast 反而打扰；label revert 本身就是足够的视觉反馈。
+- 用户主动改名的 500 失败仍然弹 toast，因为用户有"我刚点了改名"的预期，需要明确告诉他"没成"。
+- 改动文件：[apps/web/src/components/Common/Toast.tsx](apps/web/src/components/Common/Toast.tsx)、[apps/web/src/store/canvasStore/save/nodeContentQueue.ts](apps/web/src/store/canvasStore/save/nodeContentQueue.ts)、[apps/web/src/store/canvasStore.ts](apps/web/src/store/canvasStore.ts)。
+
+---
+
+## 2026-06-18 · External agent：per-profile schema 缓存——同 profile 新对话也立刻有工具栏
+
+**What Changed**
+
+把 ACP meta 缓存从 per-thread 升级为 per-profile + per-thread 双层。schema（`availableModels` / `availableModes` / `configOptions` 类型 + 可选值）对同一个 profile 的所有 thread 都是相同的，没必要每个新 thread 都重 spawn 一次去问。
+
+- **服务端新增** `data/acp-profile-schema-cache.json`：按 `profileId` 缓存 schema + 上次该 profile 任意 session 推送过的 `currentModelId` / `currentModeId` / 每个 option 的 `currentValue`。每次 `config_option_update` / `current_mode_update` 落到 entry 上时，自动 mirror 一份到 profile cache（debounced 250ms）。
+- **`GET /api/acp/threads/:threadId/cached-meta` 新增 `?profileId=` 参数**。查找顺序：
+  1. 内存 registry（最新）
+  2. 当前 thread 的磁盘记录（per-thread state）
+  3. **per-profile schema cache**（同 profile 共享）
+  4. 空快照
+- **Web `useAcpSessionMeta` 把 `profileId` 也传上**。三层 cache 任意一层命中就**不再 auto-ensure**——同一个 profile 已经用过一次后，**所有新 thread 打开都是 0 spawn + 工具栏立刻可用**。
+- **去掉了上一版的 post-ensure 后台轮询**（200/800/2000/4000ms 那个）。轮询是为了等 Copilot 异步推 config_options；现在第一次推完会写进 profile cache，下一个 thread 直接读，根本不需要再等。
+
+**Notes**
+
+- 真正 spawn 的入口缩到三个：发送消息 / 打开 `/` 菜单 / 切换 model · mode · config option。**打开新 thread 不再自动 spawn**（前提是该 profile 之前有 thread 用过）。
+- 全新 profile 的**第一个 thread** 仍会 auto-ensure 一次（badge 蓝呼吸 → 绿）；ensure 完成 + agent 推送 schema 后写进 profile cache，**该 profile 之后所有 thread 都直接命中 cache**。
+- 用户预选的 `current*` 是"上次该 profile 用过的"——绝大多数情况就是用户想要的（同一个 Copilot 几乎总是用同一个模型）；万一 agent 在 session/new 给出不同的 default，SSE 推送会自动覆盖。
+- 新增文件：[apps/server/src/modules/agent/acp/profile-schema-cache.ts](apps/server/src/modules/agent/acp/profile-schema-cache.ts)。
+- 修改：[service.ts](apps/server/src/modules/agent/acp/service.ts)、[threads.route.ts](apps/server/src/modules/agent/acp/threads.route.ts)、[\_routes.ts](apps/web/src/api/_routes.ts)、[acp.ts](apps/web/src/api/acp.ts)、[useAcpSessionMeta.ts](apps/web/src/hooks/useAcpSessionMeta.ts)。
+
+---
+
+## 2026-06-18 · 图层面板：into 提示叠加浅蓝底 + 虚线框；frame 子节点间插入也高亮 parent
+
+**What Changed**
+
+把 `into` / `isIntoFrameHighlight` 的视觉再加强一版：
+
+- **浅蓝底 `bg-info-bg` + 虚线框 `outline-info` 叠加**：之前只有虚线框 → 后来改成只浅蓝底（被默认行的 `hover:bg-bg-default` 抢） → 现在两者叠加 + `hover:bg-info-bg` 显式覆盖 hover，最显著且不会被 hover 状态吃掉。
+- **新增：在 frame 子节点之间插入也高亮 parent frame**。之前只有 `effectiveIntent === 'into'` 才高亮 frame；现在 `before`/`after` 落到 frame 的某个 child 上（drop 仍然落在 parent frame 里）也会高亮 parent，配合 caret 一起读 = "在这个 frame 内、在这两行之间插入"。
+
+**Notes**
+
+- Rule 4（after panel-bottom child → 跳出 parent frame）仍然 NOT 高亮 parent，因为 drop 实际离开了 parent。
+- 改动文件：[apps/web/src/components/Panels/CanvasLayerPanel/CanvasLayerTree.tsx](apps/web/src/components/Panels/CanvasLayerPanel/CanvasLayerTree.tsx)、[apps/web/src/components/Panels/CanvasLayerPanel/TreeRowItem.tsx](apps/web/src/components/Panels/CanvasLayerPanel/TreeRowItem.tsx)。
+
+---
+
+## 2026-06-18 · 节点删除/重命名：失败现在会通过 toast 告诉你
+
+**What Changed**
+
+之前节点删除或重命名（包括用户主动改名 + label 自动保存）一旦在服务端 `.md` 写盘失败，前端是**完全静默**的——画布上节点看起来已经删了/改名了，磁盘上要么留下孤儿 `.md`，要么保留旧文件名，但 UI 没有任何提示，下次刷新才会发现"回滚"了。
+
+这一版做了两件事：
+
+- **删除失败 → toast 错误提示**。服务端的 `deleteNode` 现在返回 `'deleted' | 'absent' | 'fs-error'`，DELETE 路由在 `fs-error`（Windows EPERM/EBUSY 之类）时返回 500 而不是假装成功。前端的 `canvasHistoryManager.trackDelete` / 撤销重做同步路径在收到非 abort 的失败时，弹出 toast：「Couldn't delete a node's file on disk — it may be locked by another process.」。
+- **重命名失败 → 回滚到上一个文件名 + toast**。`nodeContentQueue` 在每次成功 PUT 后记录"服务端确认持久化的 `label`/`labelSource`"。任何非 409 的 PUT 失败如果当前 store 里的 `label` 已经偏离了上次成功值，会自动把 `label` 回滚到上次成功值（保留 content/src/summary，只回退 label），并弹 toast：「Couldn't rename node — reverted to "<旧名字>".」。如果失败的 PUT 没改 label（纯内容编辑失败）或这是节点的首个 PUT（没有"上次成功值"可回退），则只 toast 不动 store。
+
+**Notes**
+
+- 这层逻辑同样覆盖用户主动改名（图层面板 / frame 标题 / Header CanvasMenu）和后台自动保存（label 在节点上被外部代码改、agent 改名等）——`tryRename` 走的就是 `flushNow → serializedFlush → performSaveSafely` 同一条链路。
+- 409 行为不变：用户主动改名遇到 sibling label 冲突仍然走 `tryRename` 自己的 toast warning + revert 路径，不会被双重提示。
+- 改动文件：[apps/server/src/modules/storage/canvas-store.ts](apps/server/src/modules/storage/canvas-store.ts)、[apps/server/src/modules/canvas/canvas.route.ts](apps/server/src/modules/canvas/canvas.route.ts)、[apps/server/src/modules/canvas/canvas-executor.ts](apps/server/src/modules/canvas/canvas-executor.ts)、[apps/web/src/store/canvasHistoryManager.ts](apps/web/src/store/canvasHistoryManager.ts)、[apps/web/src/store/canvasStore/save/nodeContentQueue.ts](apps/web/src/store/canvasStore/save/nodeContentQueue.ts)。
+
+---
+
+## 2026-06-18 · External agent：打开对话不再 spawn；工具栏立刻可用；badge 默认 connected
+
+**What Changed**
+
+- 修复"打开 external agent 对话一直显示 Connecting"的问题。原因是 `8bc97a2f`（lazy session creation）之后，`useAcpSessionMeta` 不再在 mount 时发起 ensure，但 badge 状态机仍按"启动即尝试"设计，初始 `{updatedAt: 0, loading: false, error: null}` 落到 `'connecting'` 默认分支。
+- 新增 `GET /api/acp/threads/:threadId/cached-meta?canvasId=...` 端点：read-only、**绝不 spawn agentlet**。优先返回内存 registry 的最新快照，否则从磁盘读取上次持久化的 meta，cache miss 时返回空快照（200，不报错）。
+- `useAcpSessionMeta` 在 mount / threadId 切换时**先调用 cached-meta 端点 hydrate**：
+  - **cache hit**（老 thread，磁盘上有上次会话的 meta）→ 工具栏的 model / mode / config option 下拉**立刻填充**，badge 直接 connected，**0 spawn**。
+  - **cache miss**（新建 thread / 磁盘无快照）→ 自动 chain 一次真正的 `ensureAcpSession`：badge `connecting`（蓝呼吸）→ ensure 返回后立刻 `connected` 并填充工具栏；之后在后台按 200ms / 800ms / 2s / 4s 轮询 cached-meta，把 agent 异步推送的 `config_option_update` / `current_mode_update`（Copilot 冷启动通常要 1-3s）拾回来填到下拉里——**badge 不会因为这段后台轮询继续 connecting**。
+- Badge 状态机：
+  - 默认（有 cache 或 idle）→ `connected`（绿色静默点）
+  - 真正 ensure 在飞 → `connecting`（蓝色呼吸）
+  - 最近一次 ensure 失败且**没有任何 cached snapshot** → `failed`（红色"FAILED"）
+
+**Notes**
+
+- **Slash menu (`/`) 行为不变**：仍然在打开时触发 `ensureAcpSession`，那是用户的明确意图。
+- 真正触发 spawn 的入口：发送消息 / 打开 `/` 菜单 / 切换 model · mode · config option / **新 thread 首次打开（自动）**。这些动作完成后服务器会把最新 meta 写回磁盘，下次打开同一 thread 立刻可用（cache hit 路径，0 spawn）。
+- 设计意图：**只要看到过一次的 thread 就不再 spawn**；新 thread 主动 spawn 一次把"启动开销"摊到首次开启，之后永远走 cache。
+- 改动文件：`packages/shared/src/types/api/acp.ts`、`apps/server/src/modules/agent/acp/threads.route.ts`、`apps/web/src/api/_routes.ts`、`apps/web/src/api/acp.ts`、`apps/web/src/hooks/useAcpSessionMeta.ts`、`apps/web/src/components/Panels/ChatPanel/index.tsx`、`apps/web/src/components/Panels/ChatPanel/AcpConnectionBadge.tsx`。
+
+## 2026-06-17 · Frame 拖拽：贴边即可放入，frame 内移动不再容易飞出
+
+**What Changed**
+
+- **拖拽节点到 frame 边缘也能放进去了。** 以前需要节点的 bbox 与 frame 至少有 50% 重叠才会被认定为"放入"，导致贴边或把比 frame 还大的节点拖入时不生效。现在只要**鼠标进入 frame 且节点与 frame 有任何正向重叠**即可放入，原本的 50% 面积重叠规则作为无指针位置时的兜底依然有效。
+- **在 frame 内部移动子节点不会再被轻易"挤出去"了。** 以前节点的 bbox 一旦完全越出 frame 边界（且边距超过 10px）就会被解除父子关系，连带"用户只是想在 frame 里调整位置"也会被误判。现在 free-mode frame 也获得了一个**逐轴的指针捕获 halo**：halo 半径按 `max(24px, 节点尺寸 × 0.3)` 计算（横纵分别算），节点越大粘性越强；只要鼠标仍在 frame 或其周围 halo 范围内，节点就保持在 frame 里。结构化（`column` / `row`）frame 原有的 capture zone 保持不变。
+- **拖拽预览同步对齐新规则。** 实时的 frame fit 虚框与"结构化 frame 插入位置 caret"都改为使用同样的指针感知判定，**所见即所得**——预览出现的时刻就是松手会真正生效的时刻。
+
+**Notes**
+
+- 实现层面：在 `wouldAutoFrame` / `wouldUnframe` / `autoFrameNodeByOverlap` / `autoUnframeNodeByNonOverlap` 这一组 frame 检测/变更原语上新增了可选的 `pointer` 与 `pointerCaptureMargin` 选项（后者支持 `number` 或 `{ x, y }` 两种形式以表达逐轴的 halo）；resolver (`resolveNodeDragStop`) 与画布拖拽预览 (`canvasStore` 内 `onNodeDrag` 的双 rAF 块) 都改为传入当前鼠标的 flow 坐标，并按 `max(FRAME_POINTER_CAPTURE_MARGIN, 节点尺寸 × 0.3)` 逐轴计算 halo。
+- 新增常量 `FRAME_POINTER_CAPTURE_MARGIN = 24`（导出自 `@sediment/shared/canvas-engine`），作为 halo 的**下限**；想全局调整最小粘性距离只需改这一处。
+- 不带 `pointer` 调用时所有原语行为完全保持不变，向后兼容；既有的 `margin: 10` 体积溢出兜底规则也保留。
+- 改动文件：`packages/shared/src/canvas-engine/{utils/constants.ts, frame/{geometry,mutation,detection}.ts, index.ts}`、`apps/web/src/handler/canvasCommand/resolvers/resolveNodeDragStop.ts`、`apps/web/src/store/canvasStore.ts`；新增测试 `packages/shared/src/canvas-engine/frame/__tests__/pointerDrop.test.ts`。
+
 ---
 
 ## 2026-06-17 · 桌面端 / 网页端 Logo 升级为带圆角白底的新版

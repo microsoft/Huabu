@@ -20,6 +20,7 @@ import {
   applySharedPostEffectsFromWriteResult,
   executeCanvasCommands,
   computeFrameFit,
+  FRAME_POINTER_CAPTURE_MARGIN,
   getAbsolutePosition as getFrameAbsolutePosition,
   wouldUnframe,
   wouldAutoFrame,
@@ -28,7 +29,6 @@ import {
   getNodeSize,
   type AlignDirection,
   type Delta,
-  type FrameFitResult,
   type NestableNode,
 } from '@sediment/shared/canvas-engine';
 
@@ -45,13 +45,18 @@ import {
 import {
   applySnap,
   beginSnapSession,
+  clearDragDecisions,
+  consumeLastDragDecisions,
+  consumeLastDragReparentBypass,
   endSnapSession,
   getResizeContext,
   getResizeSnappedRect,
+  isReparentBypassed,
   isSnapSessionActive,
   isSnapSessionDragEndCommit,
   isSnapSessionResizeEndCommit,
   setSnapStructuredSuppressed,
+  writeDragDecision,
 } from '@/handler/snap/snapSession';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
@@ -70,11 +75,15 @@ import { useToolStore } from './toolStore';
 import { getCanvas, putCanvas } from '../api';
 import { cloneArtifactToCanvas } from '../api/artifact';
 import { CanvasConflictError } from '../api/canvas';
-import { toast } from '../components/Common/Toast';
+import { toast, dismissToast } from '../components/Common/Toast';
 import { seedNoteFixedHeight } from '../components/Nodes/note/autoHeight';
 import { getNoteFixedHeight } from '../components/Nodes/note/heightMemory';
 import { copyToClipboard } from '../utils/io/clipboard';
 
+import type {
+  FrameFitPreview,
+  FrameFitPreviewRole,
+} from './gesturePreviewStore';
 import type { NodeIngestionInfo } from '@/handler/canvasCommand/preprocess';
 import type {
   AgentChatContext,
@@ -144,6 +153,55 @@ function writeViewportToSession(
     );
   } catch {
     // Ignore: viewport is a UX nicety, never block the user on it.
+  }
+}
+
+// ─── Version-conflict toast singleton ─────────────────────────────────
+//
+// `CANVAS_VERSION_CONFLICT` puts the store into a sticky `versionConflict`
+// state that blocks every subsequent autosave until the canvas reloads.
+// The accompanying toast must be persistent (no auto-fade) so the user
+// doesn't keep editing while their writes silently no-op, but it also
+// needs to disappear once the conflict is gone (canvas reload / switch)
+// or once the user navigates away from this canvas (back to canvas
+// list, into settings, etc.) — otherwise it leaks into routes where the
+// stale baseline isn't relevant. We track the toast id at module scope
+// instead of in zustand state because it's pure UI ephemera that no
+// component subscribes to.
+
+let _versionConflictToastId: string | null = null;
+
+function showVersionConflictToast(): void {
+  // Guard against duplicate toasts if `saveCanvas` somehow re-enters
+  // the 409 branch before `versionConflict` flips true.
+  if (_versionConflictToastId) return;
+  _versionConflictToastId = toast(
+    "This canvas was modified elsewhere. Your recent edits won't be saved.",
+    {
+      tone: 'danger',
+      duration: 0,
+      action: {
+        label: 'Reload',
+        onClick: () => window.location.reload(),
+      },
+    },
+  );
+}
+
+/**
+ * Dismiss the persistent "canvas modified elsewhere" toast if it's
+ * currently visible. Idempotent; safe to call when no toast is shown.
+ *
+ * Called from:
+ *  - `loadCanvas` / `switchCanvas` — fresh baseline clears the warning.
+ *  - `CanvasPage` unmount cleanup — leaving the canvas (e.g. back to
+ *    list) shouldn't keep nagging the user about a canvas they're no
+ *    longer editing.
+ */
+export function dismissVersionConflictToast(): void {
+  if (_versionConflictToastId) {
+    dismissToast(_versionConflictToastId);
+    _versionConflictToastId = null;
   }
 }
 
@@ -249,6 +307,13 @@ type RFState = {
   collapsedFrameIds: Set<string>;
   toggleFrameCollapse: (frameId: string) => void;
   isFrameCollapsed: (frameId: string) => boolean;
+  /**
+   * Bulk-collapse or bulk-expand every frame/group on the canvas.
+   * Drives the "collapse all / expand all" toolbar action in the
+   * layer panel — purely a UI-state mutation (no canvas command,
+   * no undo entry), mirroring single-frame {@link toggleFrameCollapse}.
+   */
+  setAllFramesCollapsed: (collapsed: boolean) => void;
 
   onNodesChange: OnNodesChange;
   onEdgesChange: OnEdgesChange;
@@ -662,6 +727,33 @@ const nodeContentQueue = createNodeContentQueue({
   getState: () => useCanvasStore.getState(),
 });
 
+/**
+ * Promote every pending canvas-level structure save AND every pending
+ * debounced per-node content save into an immediate flush, then
+ * resolve once both have settled.
+ *
+ * Called from `CanvasPage` via `useBlocker` so that navigating away
+ * from a canvas (back to list, into settings, into docs, into another
+ * canvas) holds the navigation until every queued PUT has been sent
+ * and its response received. Without this, trailing edits would fire
+ * later under a stale captured `canvasId` — by which time the user
+ * has moved on and there's nothing left in the store to revert if the
+ * PUT fails. Failures inside the drain are surfaced through each
+ * queue's own `handleSaveFailure` (toast + console.error) and do NOT
+ * reject this promise — the navigation should always proceed even if
+ * a save failed, because keeping the user trapped on the canvas
+ * doesn't help.
+ *
+ * Order mirrors {@link switchCanvas}: structure first (canvas-level
+ * version PUT), then per-node content. The two queues touch disjoint
+ * server resources, so the order is purely for consistency with the
+ * canvas-switch path.
+ */
+export async function drainPendingSaves(): Promise<void> {
+  await structureScheduler.flushAsync();
+  await nodeContentQueue.flushAll();
+}
+
 // ─── Action-history ring ──────────────────────────────────────────────────
 //
 // The short, in-memory action trail (cap 10, no timestamps) that
@@ -949,6 +1041,32 @@ const useCanvasStore = create<RFState>()(
     isFrameCollapsed: (frameId) => {
       return get().collapsedFrameIds.has(frameId);
     },
+    setAllFramesCollapsed: (collapsed) => {
+      if (!collapsed) {
+        // Expand-all: drop every entry in a single write.
+        if (get().collapsedFrameIds.size === 0) return;
+        set({ collapsedFrameIds: new Set<string>() });
+        return;
+      }
+      // Collapse-all: gather every frame/group id from the live nodes.
+      const next = new Set<string>();
+      for (const n of get().nodes) {
+        if (n.type === 'frame' || n.type === 'group') next.add(n.id);
+      }
+      // Skip the set() if nothing would change (avoids a useless render).
+      const current = get().collapsedFrameIds;
+      if (next.size === current.size) {
+        let identical = true;
+        for (const id of next) {
+          if (!current.has(id)) {
+            identical = false;
+            break;
+          }
+        }
+        if (identical) return;
+      }
+      set({ collapsedFrameIds: next });
+    },
 
     // -----------------------------------------------------------------------
     // Action history & agent context
@@ -1183,6 +1301,10 @@ const useCanvasStore = create<RFState>()(
 
     loadCanvas: async (canvasId?: string) => {
       set({ isLoading: true, canvasNotFound: false, versionConflict: false });
+      // Clear any stale "modified elsewhere" toast before we fetch a
+      // fresh baseline — the warning is bound to the old version we're
+      // about to replace.
+      dismissVersionConflictToast();
       try {
         const targetId = canvasId ?? get().canvasId;
         if (canvasId) {
@@ -1273,6 +1395,10 @@ const useCanvasStore = create<RFState>()(
         canvasNotFound: false,
         versionConflict: false,
       });
+      // Same rationale as `loadCanvas`: the persistent conflict toast
+      // is bound to the outgoing canvas; clear it so it doesn't bleed
+      // into the new one (which has its own fresh version baseline).
+      dismissVersionConflictToast();
 
       // Flush any pending save for the current canvas before switching
       await structureScheduler.flushAsync();
@@ -1361,14 +1487,14 @@ const useCanvasStore = create<RFState>()(
           if (error.code === 'CANVAS_VERSION_CONFLICT') {
             // Server is ahead of us (another tab / device / agent wrote
             // first). Stop the autosave loop and surface a persistent
-            // toast so the user knows their edits aren't being saved.
-            // `loadCanvas` clears the flag once the client re-syncs.
+            // toast (with a Reload action) so the user knows their edits
+            // aren't being saved and has a one-click recovery. The toast
+            // is dismissable so the user can copy any unsaved text out
+            // first; `loadCanvas` clears the flag (and the toast) once
+            // the client re-syncs.
             if (!get().versionConflict) {
               set({ versionConflict: true });
-              toast(
-                "This canvas was modified elsewhere. Your recent edits won't be saved — please refresh the page to continue.",
-                { variant: 'error', duration: 0 },
-              );
+              showVersionConflictToast();
             }
             return;
           }
@@ -1439,9 +1565,10 @@ const useCanvasStore = create<RFState>()(
             err.code === 'CANVAS_TITLE_CONFLICT'
           ) {
             set({ canvasTitle: previous });
-            const target = err.conflictWith ?? trimmed;
-            window.alert(
-              `Canvas name "${target}" is already in use. Please choose a different name.`,
+            const taken = err.conflictWith ?? trimmed;
+            toast(
+              `Canvas name "${taken}" is already in use. Choose a different name.`,
+              { tone: 'warning', duration: 5000 },
             );
             return false;
           }
@@ -1485,27 +1612,28 @@ const useCanvasStore = create<RFState>()(
         return normalize(label) === normalize(trimmed);
       });
       if (collision) {
-        window.alert(
-          `Name "${trimmed}" is already used by another node on this canvas. Please choose a different name.`,
+        toast(
+          `Name "${trimmed}" is already used by another node on this canvas. Choose a different name.`,
+          { tone: 'warning', duration: 5000 },
         );
         return false;
       }
       // Optimistic patch — the per-node content middleware schedules a
       // debounced PUT. We force-flush immediately so the user sees the
-      // 409 alert at rename time rather than ~500 ms later.
+      // 409 toast at rename time rather than ~500 ms later.
       get().updateNodeData(id, { label: trimmed, labelSource: 'user' });
       try {
-        await nodeContentQueue.flushNow(canvasId, id);
+        await nodeContentQueue.flushNow(canvasId, id, { source: 'user' });
         return true;
       } catch (err) {
         if (
           err instanceof CanvasConflictError &&
           err.code === 'NODE_LABEL_CONFLICT'
         ) {
-          // Revert the optimistic label and surface the same alert UX
-          // the legacy structure-PUT path used. `_setStateNoAutosave`
-          // skips both autosave scheduling and the content-diff hook
-          // so reverting doesn't schedule another doomed PUT.
+          // Revert the optimistic label and surface the conflict as a
+          // toast. `_setStateNoAutosave` skips both autosave scheduling
+          // and the content-diff hook so reverting doesn't schedule
+          // another doomed PUT.
           get()._setStateNoAutosave({
             nodes: get().nodes.map((n) => {
               if (n.id !== id) return n;
@@ -1531,11 +1659,16 @@ const useCanvasStore = create<RFState>()(
             }),
           });
           const taken = err.conflictWith ?? trimmed;
-          window.alert(
-            `Name "${taken}" is already used by another node on this canvas. Please choose a different name.`,
+          toast(
+            `Name "${taken}" is already used by another node on this canvas. Choose a different name.`,
+            { tone: 'warning', duration: 5000 },
           );
           return false;
         }
+        // Non-conflict failures (500 after retry, network) have already
+        // been handled by `nodeContentQueue.handleSaveFailure` — it
+        // reverted the label and toasted. Just propagate the rejection
+        // as `return false` so the caller knows the rename didn't stick.
         console.error('Failed to rename node:', err);
         return false;
       }
@@ -1617,6 +1750,17 @@ const useCanvasStore = create<RFState>()(
         // updates between the event and the rAF tick).
         const { nodes } = get();
 
+        // Space-held drag opts out of *parent membership changes* only.
+        // The current parent's frame still refits around the child's
+        // new position (so the virtual outline grows / shrinks live),
+        // and the structured-frame caret still tracks slot reorders
+        // inside the existing parent. Reflected below by skipping the
+        // `wouldUnframe` / `wouldAutoFrame` branches that would
+        // otherwise mark the node as leaving its parent or entering a
+        // different one. Mirrors the `continue` short-circuit in
+        // `resolveNodeDragStop`.
+        const bypassReparent = isReparentBypassed();
+
         const liveNodes = nodes.map((n) => {
           if (n.id === draggedNode.id)
             return { ...n, position: draggedNode.position };
@@ -1624,6 +1768,14 @@ const useCanvasStore = create<RFState>()(
           if (live) return { ...n, position: live.position };
           return n;
         }) as NestableNode[];
+
+        // Pointer in flow space — feeds the pointer-aware
+        // wouldUnframe / wouldAutoFrame predicates so the live preview
+        // mirrors the actual drop rules used by `resolveNodeDragStop`,
+        // and gates the structured-frame indicator below.
+        const pointerFlow = pointerScreen
+          ? get().rfInstance?.screenToFlowPosition(pointerScreen)
+          : undefined;
 
         // Collect frame IDs that need a preview, and which dragged children
         // would leave each frame (so we exclude them from the fit preview).
@@ -1634,15 +1786,51 @@ const useCanvasStore = create<RFState>()(
         >();
         const previewFrameIds = new Set<string>();
 
+        // Reset the per-tick drag-decision cache before recomputing.
+        // The resolver consumes this map at drop-time as the single
+        // source of truth for "did the gesture cross a frame
+        // boundary?" — so the cache must reflect *only* the current
+        // tick's predicates, not a stale mix with prior ticks.
+        // Decisions are written inside the per-node loop below.
+        // Skipped entirely when Space-bypass is active: no decisions
+        // are recorded, the resolver sees an empty cache for those
+        // ids and short-circuits via `intent.bypassReparent`.
+        clearDragDecisions();
+
         for (const dn of draggedNodes) {
           const originalNode = nodes.find((n) => n.id === dn.id);
           if (!originalNode) continue;
           // If the node is currently in a frame, check whether it would unframe.
+          let wouldUnframeNow = false;
           if (originalNode.parentId) {
             const parentId = originalNode.parentId;
             previewFrameIds.add(parentId);
 
-            if (wouldUnframe(liveNodes, dn.id, { epsilon: 0, margin: 10 })) {
+            // Per-axis halo scaled with the dragged node — mirrors
+            // `resolveNodeDragStop` so preview and commit stay in sync.
+            const liveNode = liveNodes.find((n) => n.id === dn.id);
+            const dragSize = liveNode
+              ? getNodeSize(liveNode)
+              : { width: 0, height: 0 };
+            if (
+              !bypassReparent &&
+              wouldUnframe(liveNodes, dn.id, {
+                epsilon: 0,
+                margin: 10,
+                pointer: pointerFlow,
+                pointerCaptureMargin: {
+                  x: Math.max(
+                    FRAME_POINTER_CAPTURE_MARGIN,
+                    dragSize.width * 0.3,
+                  ),
+                  y: Math.max(
+                    FRAME_POINTER_CAPTURE_MARGIN,
+                    dragSize.height * 0.3,
+                  ),
+                },
+              })
+            ) {
+              wouldUnframeNow = true;
               let leaving = leavingByFrame.get(parentId);
               if (!leaving) {
                 leaving = new Set();
@@ -1653,11 +1841,15 @@ const useCanvasStore = create<RFState>()(
           }
 
           // Check if the node would enter a different frame (both root and cross-frame).
-          // Only show a preview when the 50% overlap threshold is already met so the
-          // preview is always consistent with the actual drop behaviour.
-          const targetFrameId = wouldAutoFrame(liveNodes, dn.id, {
-            threshold: 0.5,
-          });
+          // Preview triggers when either the 50% overlap threshold is met OR the
+          // cursor is hovering inside a candidate frame with any positive overlap —
+          // identical to what `resolveNodeDragStop` will commit.
+          const targetFrameId = bypassReparent
+            ? undefined
+            : wouldAutoFrame(liveNodes, dn.id, {
+                threshold: 0.5,
+                pointer: pointerFlow,
+              });
           if (targetFrameId) {
             previewFrameIds.add(targetFrameId);
             // Track the dragged node's absolute rect so the fit preview can
@@ -1681,11 +1873,39 @@ const useCanvasStore = create<RFState>()(
               }
             }
           }
+
+          // Persist this tick's decision so `onNodeDragStop` (via the
+          // resolver) can honour exactly what the user last saw —
+          // bypassing fresh halo / overlap recomputation against the
+          // store's snapped positions and the mouseup pointer, which
+          // can disagree with the live preview by a few px under
+          // smart-snap. Skipped when Space-bypass is active (cache
+          // stays empty for those ids; resolver handles via
+          // `intent.bypassReparent`).
+          if (!bypassReparent) {
+            writeDragDecision(dn.id, {
+              unframe: wouldUnframeNow,
+              enterFrameId: targetFrameId ?? null,
+            });
+          }
         }
 
         // Compute fit previews for all affected frames and show them all
         // simultaneously — e.g. source frame shrinking + target frame expanding.
-        const previews: FrameFitResult[] = [];
+        // Each entry is tagged with a UI role so the overlay can paint the
+        // landing target (`enteringByFrame`) distinctly from a frame that
+        // is merely losing a child (`leavingByFrame`).
+        //
+        // Role assignment per frame:
+        //   - `leaving && !entering`  → the dragged child is exiting
+        //     this frame and is not coming back  →  paint as `source`.
+        //   - everything else (entering, or merely-current-parent
+        //     with no exit)  →  the node will land here  →  `target`.
+        // The "merely-current-parent" branch matters when a child is
+        // dragged around *inside* its own frame: that frame is still
+        // the landing destination, so painting it `source` would
+        // wrongly mute the only relevant overlay.
+        const previews: FrameFitPreview[] = [];
 
         for (const frameId of previewFrameIds) {
           const leaving = leavingByFrame.get(frameId);
@@ -1713,11 +1933,14 @@ const useCanvasStore = create<RFState>()(
             }
           }
 
+          const role: FrameFitPreviewRole =
+            leaving && !entering ? 'source' : 'target';
           previews.push({
             frameId,
             position: { x: absX, y: absY },
             width: fit.width,
             height: fit.height,
+            role,
           });
         }
 
@@ -1732,14 +1955,12 @@ const useCanvasStore = create<RFState>()(
         const primary = nodes.find((n) => n.id === draggedNode.id) as
           | NestableNode
           | undefined;
-        // Pointer in flow space — gates the sticky preview below and feeds
-        // the frame-local drop point inside the structured branch.
-        const pointerFlow = pointerScreen
-          ? get().rfInstance?.screenToFlowPosition(pointerScreen)
-          : undefined;
-        const enteringFrameId = wouldAutoFrame(liveNodes, draggedNode.id, {
-          threshold: 0.5,
-        });
+        const enteringFrameId = bypassReparent
+          ? undefined
+          : wouldAutoFrame(liveNodes, draggedNode.id, {
+              threshold: 0.5,
+              pointer: pointerFlow,
+            });
         let targetFrameId = enteringFrameId ?? primary?.parentId;
         // Sticky case (node already lives in a frame): only keep showing the
         // structured indicator while the cursor is still inside that frame's
@@ -1842,6 +2063,29 @@ const useCanvasStore = create<RFState>()(
       useGesturePreviewStore.getState().clearFrameFitPreview();
       useGesturePreviewStore.getState().clearStructuredDropPreview();
 
+      // Read the Space-bypass snapshot taken by `endSnapSession`.
+      // The snap session is normally torn down by `onNodesChange`
+      // (when the final `dragging:false` commit lands) *before* RF
+      // emits `onNodeDragStop`, so `isReparentBypassed()` at this
+      // point would already be false. `consumeLastDragReparentBypass`
+      // returns the value the user was holding at release, then
+      // clears it so a follow-up drag can't inherit a stale value.
+      // Also covers the rare path where this handler runs first by
+      // OR-ing with the live flag.
+      const bypassReparent =
+        consumeLastDragReparentBypass() || isReparentBypassed();
+
+      // Read the per-dragged-node frame-membership decisions captured
+      // by the live preview tick. Same teardown-before-stop ordering
+      // as the bypass flag: `endSnapSession` snapshots the working
+      // cache into `_lastDragDecisions`, this consumes it. Null when
+      // no `rAF` tick ran during the drag (instant click-release, or
+      // `autoLayoutEnabled === false` where the preview returns
+      // early) — the resolver falls back to fresh recomputation in
+      // that case. The cache always wins when present so the drop
+      // honours what the user last saw.
+      const cachedDecisions = consumeLastDragDecisions() ?? undefined;
+
       // Idempotent safety net. The normal cleanup path runs inside
       // `onNodesChange` when the final `dragging:false` commit lands
       // — that ordering is what keeps the release frame correctly
@@ -1878,6 +2122,8 @@ const useCanvasStore = create<RFState>()(
         type: 'NODE_DRAG_STOP',
         draggedNodeIds: draggedNodes.map((n) => n.id),
         pointerFlowPosition,
+        bypassReparent,
+        cachedDecisions,
       });
 
       // Ensure a structure save is scheduled whenever the drag actually
@@ -2005,9 +2251,17 @@ const useCanvasStore = create<RFState>()(
       // detector (and resetting the autosave debounce) on every frame.
       get()._setStateNoAutosave({ nodes: nextNodes });
 
-      // ── Structured frame relayout on measured-size changes ─────────
-
+      // ── Frame relayout on measured-size changes ────────────────────
+      // Both structured (`column` / `row`) and free-mode frames refit
+      // when a child's measured size changes (e.g. a note growing as
+      // its content is edited, or a freshly-added note settling on its
+      // content height — which has no committed `style.height` yet, so
+      // the executor's synchronous fit treated it as zero). The deferred
+      // relayout runs the structured grid solver (a no-op for free
+      // frames) followed by a bounding-box `fitFrames` pass that handles
+      // free frames and cascades to ancestors.
       if (!resizeCtx && !isSnapSessionActive()) {
+        const autoLayoutEnabled = get().autoLayoutEnabled;
         let framesToRelayout: Set<string> | undefined;
         for (const c of sanitized) {
           if (c.type !== 'dimensions') continue;
@@ -2016,9 +2270,16 @@ const useCanvasStore = create<RFState>()(
           if (!child?.parentId) continue;
           const parent = nextNodes.find((n) => n.id === child.parentId);
           if (!parent || parent.type !== 'frame') continue;
+          // Free-mode frames only chase their children's measured size
+          // when auto-layout is on — consistent with the executor's
+          // synchronous fit and the command-level `deferredFitFrameIds`
+          // path. Structured (`column` / `row`) frames always reflow:
+          // their layout mode is an explicit per-frame opt-in that is
+          // independent of the global auto-layout toggle.
           const mode = (parent.data as { layoutMode?: string } | undefined)
             ?.layoutMode;
-          if (mode !== 'column' && mode !== 'row') continue;
+          const isStructured = mode === 'column' || mode === 'row';
+          if (!isStructured && !autoLayoutEnabled) continue;
           // Skip when measured matches the explicitly-pinned size —
           // the RO is just confirming the size we already committed
           // (typical echo right after a `SET_NODE_GEOMETRY` commit)

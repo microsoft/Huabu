@@ -31,6 +31,7 @@
  */
 
 import type { AcpAgentClient } from './client.js';
+import type { AcpBindingRecipe } from './session-store.js';
 import type {
   AcpCost,
   AcpModelInfo,
@@ -70,6 +71,30 @@ export interface AcpSessionEntry {
   cwd: string;
   /** Epoch ms at which this session was first created. */
   createdAt: number;
+  /**
+   * Spawn recipe used to (re)launch the agent for this session.
+   * Kept on the entry so the deferred `writeAcpSessionRecord` call
+   * on first prompt has everything it needs without re-resolving the
+   * profile (which may have been edited mid-session).
+   */
+  bindingRecipe: AcpBindingRecipe;
+  /**
+   * Whether this session's `sessionId` has been committed to the
+   * per-thread disk record (`session-store`). False for freshly-
+   * created sessions until the first user prompt actually goes out
+   * — we used to write the record immediately at `session/new`
+   * resolve time, but agents like Copilot CLI don't persist a
+   * session until at least one prompt arrives, so a server restart
+   * mid-thread (no message yet) would replay a stale sessionId via
+   * `session/load` and blow up with `Resource not found`. Deferring
+   * the write until first prompt removes that trap: empty threads
+   * keep no on-disk record, so the next open just creates fresh.
+   *
+   * True from the start when we're resuming a session that already
+   * has a record on disk (we refresh that record at open time so a
+   * subsequent restart can recover again).
+   */
+  persistedToDisk: boolean;
   /**
    * Latest snapshot of slash commands the agent advertised via
    * `session/update.available_commands_update`. Initialised to `[]`

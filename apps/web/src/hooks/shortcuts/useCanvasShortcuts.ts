@@ -13,6 +13,7 @@ import {
   textToNoteNodeInput,
   textToTextNodeInput,
 } from '../../handler/canvasCommand/nodeInputBuilders';
+import { isSnapSessionActive } from '../../handler/snap/snapSession';
 import useCanvasStore from '../../store/canvasStore';
 import { useIntentStore } from '../../store/intentStore';
 import { looksLikeUrl } from '../../utils/io/media';
@@ -138,6 +139,11 @@ export function useCanvasShortcuts(
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== ' ' || e.repeat) return;
       if (isEditableTarget(e.target)) return;
+      // While a node drag is in flight, Space is reinterpreted as
+      // "opt out of auto-reparent" by the snap session (it owns the
+      // keydown listener for the duration of the drag). Skip the
+      // pan-tool switch so the two interpretations don't fight.
+      if (isSnapSessionActive()) return;
       setTool((prev) => {
         if (prev === 'pan') return prev;
         e.preventDefault();

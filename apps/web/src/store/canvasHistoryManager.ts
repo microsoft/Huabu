@@ -1,4 +1,5 @@
-import { deleteNode } from '../api';
+import { ApiError, deleteNode } from '../api';
+import { toast } from '../components/Common/Toast';
 
 import type { RecentAction } from '@sediment/shared';
 import type { Node, Edge } from '@xyflow/react';
@@ -27,6 +28,39 @@ export type CanvasPreviewSnapshot = CanvasSnapshot & {
  * preprocessing for nodes that reappear after undo/redo.
  */
 export type TriggerPreprocessingFn = (node: Node) => void;
+
+// ---------------------------------------------------------------------------
+// Error message mapping
+// ---------------------------------------------------------------------------
+
+/**
+ * Translate a thrown error from `deleteNode()` into a user-facing toast
+ * string. Drives off the shared `CanvasErrorCode` contract — never off
+ * the HTTP `message`, which the server only owns as a developer-facing
+ * fallback. See `packages/shared/src/types/api/canvas.ts`.
+ *
+ * Buckets the three real failure modes:
+ * - **`NODE_FILE_DELETE_FAILED` (500)** — `.md` unlink threw (Windows
+ *   EPERM / EBUSY from AV or a file-watcher).
+ * - **`CANVAS_NOT_FOUND` (404)** — canvas vanished server-side
+ *   (deleted from another tab, reset, etc.).
+ * - **Network / unknown** — `fetch` itself threw (offline, server
+ *   down, origin guard, timeout), so there is no `ApiError` to read.
+ */
+function describeDeleteFailure(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.code === 'NODE_FILE_DELETE_FAILED') {
+      return "Couldn't delete a node's file on disk — it may be locked by another process.";
+    }
+    if (error.code === 'CANVAS_NOT_FOUND') {
+      return 'This canvas no longer exists on the server.';
+    }
+    // Unknown server-emitted code: fall back to the server's English
+    // message so the user at least sees *something* meaningful.
+    return error.message;
+  }
+  return "Couldn't reach the server to delete this node.";
+}
 
 // ---------------------------------------------------------------------------
 // Snapshot helpers
@@ -222,6 +256,7 @@ class CanvasHistoryManager {
               node.id,
               error,
             );
+            toast(describeDeleteFailure(error), { tone: 'danger' });
           })
           .finally(() => {
             if (this.inflightDeletes.get(node.id) === controller) {
@@ -250,6 +285,7 @@ class CanvasHistoryManager {
         if (error instanceof DOMException && error.name === 'AbortError')
           return;
         console.error('Failed to delete node:', nodeId, error);
+        toast(describeDeleteFailure(error), { tone: 'danger' });
       })
       .finally(() => {
         if (this.inflightDeletes.get(nodeId) === controller) {

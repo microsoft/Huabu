@@ -368,7 +368,7 @@ export const PDFPreview = ({
       {/* ── PDF pages ── */}
       <div
         ref={scrollContainerRef}
-        className="custom-scrollbar bg-surface flex-1 overflow-x-hidden overflow-y-auto p-1"
+        className="bg-surface flex-1 overflow-x-hidden overflow-y-auto p-1"
       >
         {src ? (
           <div

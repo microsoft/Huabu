@@ -33,6 +33,12 @@ interface ChatInputProps {
    */
   slashCommands?: AvailableCommand[];
   /**
+   * True while the ACP slash-command list is being (re)fetched. Lets
+   * the typeahead show a loading affordance on a cold agent spawn
+   * instead of suppressing the menu entirely.
+   */
+  slashLoading?: boolean;
+  /**
    * Called on the rising edge of "user wants the slash menu" — i.e.
    * the textarea transitions from "doesn't look like a slash" to
    * "starts with `/<letter>` and caret sits in that token". The
@@ -72,6 +78,7 @@ export const ChatInput = ({
   isStreaming = false,
   mode,
   slashCommands = [],
+  slashLoading = false,
   onSlashMenuIntent,
   acpSelectorsSlot,
   contextUsageOverride,
@@ -104,6 +111,7 @@ export const ChatInput = ({
     onChange,
     textareaRef,
     slashCommands,
+    loading: slashLoading,
     onSlashMenuIntent,
   });
 
@@ -534,6 +542,7 @@ export const ChatInput = ({
                 ref={slash.slashMenuRef}
                 commands={slashCommands}
                 filter={slash.slashState.filter}
+                loading={slash.slashState.loading}
                 onSelect={slash.acceptSlashCommand}
               />
             )}

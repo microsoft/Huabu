@@ -314,6 +314,54 @@ export interface AcpThreadCommandsResponse {
   sessionMeta: AcpSessionMetaSnapshot;
 }
 
+/**
+ * Response body for `GET /api/acp/threads/:threadId/cached-meta`.
+ *
+ * Read-only, **never spawns** an agent. Returns whatever snapshot the
+ * server has on disk (from a prior live session) plus, if a live
+ * session is still in the in-process registry, the freshest in-memory
+ * state on top.
+ *
+ * Cache miss (no persisted record and no live entry) returns an empty
+ * snapshot with `updatedAt === 0`. The UI uses this to seed the
+ * selector dropdowns and badge "optimistic green" state before any
+ * real ensure-session call is made — i.e. opening a thread no longer
+ * needs to spawn an agentlet just to populate the toolbar.
+ */
+export interface AcpThreadCachedMetaResponse {
+  sessionMeta: AcpSessionMetaSnapshot;
+}
+
+/**
+ * Categorical error codes returned in `ApiErrorBody.code` from
+ * `POST /api/acp/threads/:threadId/session` on 503.
+ *
+ * Mirrors the server's `AcpEnsureErrorCode` (in
+ * `apps/server/src/modules/agent/acp/errors.ts`). The web client
+ * switches on this to render a remediation-specific badge tooltip
+ * and CTA (e.g. "Restart worker", "Re-create profile").
+ *
+ * Wire-stable: renaming or removing a code is a breaking change for
+ * any out-of-tree client. Adding a new code is safe (clients fall
+ * back to the generic message).
+ *
+ *   • `profile_missing` — bound profile no longer exists.
+ *   • `bridge_not_mounted` — embedded agentlet bridge still booting.
+ *   • `worker_not_ready` — agentlet daemon worker never came online.
+ *   • `spawn_failed` — daemon rejected the spawn RPC (bad recipe).
+ *   • `connect_timeout` — agent process started but never opened WS
+ *     (most often: interactive auth needed, e.g. expired Copilot
+ *     OAuth, or immediate crash).
+ *   • `internal` — uncategorised throw; treat as a bug.
+ */
+export type AcpEnsureErrorCode =
+  | 'profile_missing'
+  | 'bridge_not_mounted'
+  | 'worker_not_ready'
+  | 'spawn_failed'
+  | 'connect_timeout'
+  | 'internal';
+
 // ─── Session-meta snapshot & set-RPCs ──────────────────────────────────
 //
 // ACP exposes four kinds of mutable session metadata, surfaced to the
@@ -367,6 +415,17 @@ export interface AcpSessionMetaSnapshot {
  */
 export interface SetAcpSessionModeRequest {
   modeId: string;
+  /**
+   * Optional spawn context. The selector dropdowns are populated from
+   * a no-spawn cached-meta snapshot, so the user can switch mode
+   * BEFORE any live session exists. When set, the server opens (or
+   * reuses) the session on-demand before applying the RPC instead of
+   * failing with `session_not_found`. Omit only when the caller knows
+   * a live session already exists.
+   */
+  profileId?: string;
+  canvasId?: string;
+  cwd?: string;
 }
 
 /** Response body for `POST /api/acp/threads/:threadId/mode`. */
@@ -382,6 +441,10 @@ export interface SetAcpSessionModeResponse {
  */
 export interface SetAcpSessionModelRequest {
   modelId: string;
+  /** Optional spawn context — see {@link SetAcpSessionModeRequest}. */
+  profileId?: string;
+  canvasId?: string;
+  cwd?: string;
 }
 
 /** Response body for `POST /api/acp/threads/:threadId/model`. */
@@ -400,6 +463,10 @@ export interface SetAcpSessionModelResponse {
 export interface SetAcpSessionConfigOptionRequest {
   configOptionId: string;
   value: string | boolean;
+  /** Optional spawn context — see {@link SetAcpSessionModeRequest}. */
+  profileId?: string;
+  canvasId?: string;
+  cwd?: string;
 }
 
 /** Response body for `POST /api/acp/threads/:threadId/config-option`. */
@@ -518,6 +585,11 @@ export const acpThreadCommandsResponseSchema = z.object({
   sessionMeta: acpSessionMetaSnapshotSchema,
 }) satisfies z.ZodType<AcpThreadCommandsResponse>;
 
+/** Schema mirror of {@link AcpThreadCachedMetaResponse}. */
+export const acpThreadCachedMetaResponseSchema = z.object({
+  sessionMeta: acpSessionMetaSnapshotSchema,
+}) satisfies z.ZodType<AcpThreadCachedMetaResponse>;
+
 /** Schema mirror of {@link AcpPermissionDecisionRequest}. */
 export const acpPermissionDecisionSchema = z.object({
   requestId: z.string().min(1),
@@ -535,6 +607,9 @@ export const acpPermissionDecisionResponseSchema = z.object({
 /** Schema mirror of {@link SetAcpSessionModeRequest}. */
 export const setAcpSessionModeRequestSchema = z.object({
   modeId: z.string().min(1),
+  profileId: z.string().min(1).optional(),
+  canvasId: z.string().min(1).optional(),
+  cwd: z.string().min(1).optional(),
 }) satisfies z.ZodType<SetAcpSessionModeRequest>;
 
 /** Schema mirror of {@link SetAcpSessionModeResponse}. */
@@ -546,6 +621,9 @@ export const setAcpSessionModeResponseSchema = z.object({
 /** Schema mirror of {@link SetAcpSessionModelRequest}. */
 export const setAcpSessionModelRequestSchema = z.object({
   modelId: z.string().min(1),
+  profileId: z.string().min(1).optional(),
+  canvasId: z.string().min(1).optional(),
+  cwd: z.string().min(1).optional(),
 }) satisfies z.ZodType<SetAcpSessionModelRequest>;
 
 /** Schema mirror of {@link SetAcpSessionModelResponse}. */
@@ -558,6 +636,9 @@ export const setAcpSessionModelResponseSchema = z.object({
 export const setAcpSessionConfigOptionRequestSchema = z.object({
   configOptionId: z.string().min(1),
   value: z.union([z.string(), z.boolean()]),
+  profileId: z.string().min(1).optional(),
+  canvasId: z.string().min(1).optional(),
+  cwd: z.string().min(1).optional(),
 }) satisfies z.ZodType<SetAcpSessionConfigOptionRequest>;
 
 /** Schema mirror of {@link SetAcpSessionConfigOptionResponse}. */

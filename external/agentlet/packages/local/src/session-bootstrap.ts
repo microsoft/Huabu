@@ -3,6 +3,24 @@ import type { AgentProcess } from './agent-process.js'
 import type { Logger } from './logger.js'
 
 /**
+ * Grace window (ms) to keep collecting `session/update` notifications after the
+ * `session/new` response arrives. Copilot pushes `available_commands_update`
+ * within ~1ms of the response (occasionally just after it), so a short window
+ * reliably captures it without meaningfully delaying bootstrap (the spawn
+ * itself already takes seconds).
+ */
+const SESSION_NEW_NOTIFICATION_GRACE_MS = 300
+
+/**
+ * No grace window for `initialize`: no known agent pushes `session/update`
+ * notifications during initialize (the session does not yet exist), but we
+ * still route the call through the collector so any unexpected notification
+ * is captured rather than silently dropped. graceMs=0 means: resolve as soon
+ * as the response arrives, no extra wait.
+ */
+const INITIALIZE_NOTIFICATION_GRACE_MS = 0
+
+/**
  * Result of a successful ACP session bootstrap (initialize + session/new or session/load/resume).
  * Stored as the "agent session profile" and reported to the server.
  */
@@ -15,6 +33,25 @@ export interface SessionProfile {
   supportsResume: boolean
   /** The full ACP initialize response */
   initializeResult: unknown
+  /**
+   * The full ACP `session/new` response, when this profile came from a
+   * freshly-created session (absent on resume/load). Stored opaquely —
+   * agentlet does not interpret its contents. The ACP spec allows agents
+   * (e.g. Copilot) to inline `models` / `modes` / `configOptions` here
+   * instead of pushing them via later `session/update` notifications, so
+   * the consumer (host) reads them from this blob to seed its UI without
+   * waiting for the first prompt.
+   */
+  newSessionResult?: unknown
+  /**
+   * `session/update` notifications captured during `session/new` (and a short
+   * grace window after its response). Some agents (e.g. Copilot) push
+   * `available_commands_update` within a millisecond of the session/new
+   * response — sometimes just before it — so it would otherwise be dropped in
+   * the gap before the relay attaches its live listener. The daemon replays
+   * these to the host the moment the relay connects.
+   */
+  bootstrapNotifications?: JsonRpcMessage[]
 }
 
 export interface BootstrapOptions {
@@ -41,16 +78,25 @@ export async function bootstrapSession(
 ): Promise<SessionProfile> {
   const timeout = options.timeout ?? 30_000
 
-  // 1. Send initialize
+  // 1. Send initialize. Routed through the collector helper so any unexpected
+  // notification that arrives during initialize is captured (and replayed by
+  // the daemon) instead of being silently dropped by an id-only handler.
   logger.info('session_bootstrap_initialize', { cwd: options.cwd })
-  const initResponse = await sendRequest(agent, 1, 'initialize', {
+  const initResponse = await sendRequestCollectingNotifications(agent, 1, 'initialize', {
     protocolVersion: 1,
     clientCapabilities: {},
     clientInfo: { name: 'agentlet', version: '1.0.0' },
-  }, timeout)
+  }, timeout, INITIALIZE_NOTIFICATION_GRACE_MS)
 
   if (!initResponse.result) {
     throw new Error(`initialize failed: ${JSON.stringify(initResponse.error ?? 'no result')}`)
+  }
+
+  if (initResponse.notifications.length > 0) {
+    logger.info('session_bootstrap_initialize_notifications', {
+      count: initResponse.notifications.length,
+      methods: initResponse.notifications.map((n) => (n as { method?: string }).method),
+    })
   }
 
   const initResult = initResponse.result as Record<string, unknown>
@@ -68,13 +114,21 @@ export async function bootstrapSession(
 
   // 2. Session lifecycle: new, resume, or load
   let sessionId: string
+  let newSessionResult: unknown
+  // Seed with anything captured during initialize so replay order matches
+  // wire arrival order (initialize-time notifications first, session/new
+  // notifications second).
+  let bootstrapNotifications: JsonRpcMessage[] = [...initResponse.notifications]
 
   if (options.sessionId) {
     // Resuming an existing session
     sessionId = await bootstrapResumeOrLoad(agent, options, { supportsLoad, supportsResume }, logger, timeout)
   } else {
     // Creating a new session
-    sessionId = await bootstrapNew(agent, options, logger, timeout)
+    const created = await bootstrapNew(agent, options, logger, timeout)
+    sessionId = created.sessionId
+    newSessionResult = created.newSessionResult
+    bootstrapNotifications.push(...created.notifications)
   }
 
   logger.info('session_bootstrap_complete', { sessionId, supportsLoad, supportsResume })
@@ -84,23 +138,29 @@ export async function bootstrapSession(
     supportsLoad,
     supportsResume,
     initializeResult: initResult,
+    newSessionResult,
+    bootstrapNotifications,
   }
 }
 
 /**
  * Create a new ACP session via session/new.
+ *
+ * Returns both the sessionId and the full opaque response so the caller
+ * can forward inline `models` / `modes` / `configOptions` (if the agent
+ * provides them) to the host without re-issuing session/new.
  */
 async function bootstrapNew(
   agent: AgentProcess,
   options: BootstrapOptions,
   logger: Logger,
   timeout: number,
-): Promise<string> {
+): Promise<{ sessionId: string; newSessionResult: unknown; notifications: JsonRpcMessage[] }> {
   logger.info('session_bootstrap_session_new', { cwd: options.cwd })
-  const response = await sendRequest(agent, 2, 'session/new', {
+  const response = await sendRequestCollectingNotifications(agent, 2, 'session/new', {
     cwd: options.cwd,
     mcpServers: [],
-  }, timeout)
+  }, timeout, SESSION_NEW_NOTIFICATION_GRACE_MS)
 
   if (!response.result) {
     throw new Error(`session/new failed: ${JSON.stringify(response.error ?? 'no result')}`)
@@ -111,7 +171,13 @@ async function bootstrapNew(
   if (!sessionId) {
     throw new Error('session/new response missing sessionId')
   }
-  return sessionId
+  if (response.notifications.length > 0) {
+    logger.info('session_bootstrap_captured_notifications', {
+      count: response.notifications.length,
+      methods: response.notifications.map((n) => (n as { method?: string }).method),
+    })
+  }
+  return { sessionId, newSessionResult: result, notifications: response.notifications }
 }
 
 /**
@@ -193,6 +259,110 @@ function sendRequest(
 
     function cleanup() {
       clearTimeout(timer)
+      agent.removeListener('message', handler)
+    }
+
+    agent.on('message', handler)
+
+    const request: JsonRpcMessage = {
+      jsonrpc: '2.0',
+      method,
+      id,
+      params: params as Record<string, unknown>,
+    }
+
+    const written = agent.write(request)
+    if (!written) {
+      cleanup()
+      reject(new Error(`Failed to write '${method}' to agent stdin`))
+    }
+  })
+}
+
+/**
+ * Send a JSON-RPC request and collect any `session/update` notifications that
+ * arrive during the call — both BEFORE the response and within a short grace
+ * window AFTER it. Used for session/new: agents like Copilot push the
+ * `available_commands_update` notification within a millisecond of the
+ * session/new response (sometimes just before it), so a plain handler that only
+ * matches the response id would drop it. Returning the collected notifications
+ * lets the daemon replay them to the host the moment the relay connects,
+ * instead of losing them in the bootstrap gap.
+ */
+function sendRequestCollectingNotifications(
+  agent: AgentProcess,
+  id: number,
+  method: string,
+  params: unknown,
+  timeout: number,
+  graceMs: number,
+): Promise<{ result?: unknown; error?: { code: number; message: string }; notifications: JsonRpcMessage[] }> {
+  return new Promise((resolve, reject) => {
+    const notifications: JsonRpcMessage[] = []
+    let graceTimer: ReturnType<typeof setTimeout> | null = null
+    let settled = false
+
+    const timer = setTimeout(() => {
+      cleanup()
+      reject(new Error(`ACP request '${method}' timed out after ${timeout}ms`))
+    }, timeout)
+
+    const finalize = (payload: { result?: unknown; error?: { code: number; message: string } }) => {
+      // Snapshot before resolving so any late append (during the deferred
+      // cleanup window below) does not mutate the caller's view.
+      const snapshot = notifications.slice()
+      resolve({ ...payload, notifications: snapshot })
+      // Defer listener removal by one microtask so the awaiting caller can
+      // synchronously attach its own listener before we detach — closing the
+      // gap where a notification could arrive with no subscriber. Microtasks
+      // drain before the event loop processes the next pipe read, so no
+      // 'message' event can fire between resolve and the caller attaching.
+      queueMicrotask(cleanup)
+    }
+
+    const settle = (payload: { result?: unknown; error?: { code: number; message: string } }) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      // Error path: short-circuit. No need to wait the grace window for
+      // notifications that wouldn't matter — the caller will throw.
+      // Grace=0 path: caller opted out (e.g. initialize), resolve immediately.
+      if (payload.error || graceMs <= 0) {
+        finalize(payload)
+        return
+      }
+      // Success path: keep collecting for a short grace window so we also
+      // catch notifications emitted immediately AFTER the response.
+      graceTimer = setTimeout(() => {
+        graceTimer = null
+        finalize(payload)
+      }, graceMs)
+    }
+
+    const handler = (data: unknown) => {
+      const msg = data as JsonRpcMessage
+      if ('id' in msg && msg.id === id) {
+        if ('error' in msg && msg.error) {
+          settle({ error: msg.error })
+        } else if ('result' in msg) {
+          settle({ result: msg.result })
+        } else {
+          settle({})
+        }
+        return
+      }
+      // Otherwise it's a notification (e.g. available_commands_update) — keep it.
+      if ('method' in msg && !('id' in msg)) {
+        notifications.push(msg)
+      }
+    }
+
+    function cleanup() {
+      clearTimeout(timer)
+      if (graceTimer) {
+        clearTimeout(graceTimer)
+        graceTimer = null
+      }
       agent.removeListener('message', handler)
     }
 

@@ -76,7 +76,12 @@ export {
 } from './autoLayout/gridLayout.js';
 
 // ── Pure utilities re-exported for web consumers ──────────────────────────
-export { GRID_SIZE, FRAME_PADDING, snapToGrid } from './utils/constants.js';
+export {
+  GRID_SIZE,
+  FRAME_PADDING,
+  FRAME_POINTER_CAPTURE_MARGIN,
+  snapToGrid,
+} from './utils/constants.js';
 export { stripMarkdown } from './utils/markdown.js';
 export {
   getNodeDefaultSize,

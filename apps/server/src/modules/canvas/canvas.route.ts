@@ -469,10 +469,27 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     const store = getCanvasStore(canvasId);
     const canvas = store.read();
     if (!canvas) {
-      return reply.code(404).send({ message: 'Canvas not found' });
+      return reply.code(404).send({
+        code: 'CANVAS_NOT_FOUND',
+        message: 'Canvas not found',
+      });
     }
 
-    store.deleteNode(nodeId);
+    const result = store.deleteNode(nodeId);
+    if (result === 'fs-error') {
+      // Surface the failure so the client can revert its optimistic
+      // delete (or at least toast). Silently returning success here
+      // would leave the canvas.json with no reference to the node but
+      // its `.md` orphaned on disk forever.
+      //
+      // `code` is the stable contract — the client maps it to a
+      // localised toast. `message` is the English fallback used for
+      // server logs and unknown-code situations.
+      return reply.code(500).send({
+        code: 'NODE_FILE_DELETE_FAILED',
+        message: `Failed to delete node file for "${nodeId}"`,
+      });
+    }
 
     return reply.send({ success: true });
   });

@@ -170,7 +170,13 @@ export function autoFrameNodeByOverlap(
   const getAbs = createAbsolutePositionGetter(byId);
   const getRect = createRectGetter(byId, getAbs);
 
-  const bestFrameId = findBestFrameForNode(nodes, nodeId, threshold, getRect);
+  const bestFrameId = findBestFrameForNode(
+    nodes,
+    nodeId,
+    threshold,
+    getRect,
+    options.pointer,
+  );
   if (!bestFrameId) return nodes;
 
   // Delegate to moveNodeIntoFrame for consistent validation and movement logic

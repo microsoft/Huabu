@@ -568,20 +568,39 @@ export class CanvasStore {
     return { ok: true, filename: target, label: finalLabel };
   }
 
-  deleteNode(nodeId: string): boolean {
+  /**
+   * Delete a node's markdown sidecar.
+   *
+   * Returns:
+   * - `'deleted'`: the file existed and was successfully unlinked.
+   * - `'absent'`: no sidecar on disk to begin with (idempotent success).
+   * - `'fs-error'`: the file existed but `unlinkSync` threw (e.g. Windows
+   *   `EPERM` from AV / file-watcher). The in-memory NameIndex is
+   *   deliberately left untouched so a retry sees the same state.
+   *
+   * Callers (route + executor) are expected to translate `'fs-error'`
+   * into a user-visible failure rather than silently swallowing it —
+   * otherwise the canvas.json no longer references the node but its
+   * `.md` stays on disk as a permanent orphan.
+   */
+  deleteNode(nodeId: string): 'deleted' | 'absent' | 'fs-error' {
     const idx = this.nodeIndex();
     const filename = idx.get(nodeId)?.filename ?? this.nodeFilenameOf(nodeId);
     const filePath = nodeFilePath(this.canvasId, filename);
     if (!existsSync(filePath)) {
       idx.remove(nodeId);
-      return false;
+      return 'absent';
     }
     try {
       unlinkSync(filePath);
       idx.remove(nodeId);
-      return true;
-    } catch {
-      return false;
+      return 'deleted';
+    } catch (err) {
+      console.warn(
+        `[canvas-store] deleteNode unlink failed for ${nodeId} (${filePath}):`,
+        err,
+      );
+      return 'fs-error';
     }
   }
 

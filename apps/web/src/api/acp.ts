@@ -32,6 +32,7 @@ import type {
   AcpProfileMutationResponse,
   AcpProfileUpdateRequest,
   AcpProfilesListResponse,
+  AcpThreadCachedMetaResponse,
   AcpThreadCommandsResponse,
   EnsureAcpSessionRequest,
   EnsureAcpSessionResponse,
@@ -57,6 +58,7 @@ export type {
   AcpSessionConfigOption,
   AcpSessionMetaSnapshot,
   AcpSessionMode,
+  AcpThreadCachedMetaResponse,
   AcpThreadCommandsResponse,
   AvailableCommand,
   EnsureAcpSessionRequest,
@@ -203,6 +205,28 @@ export async function getAcpThreadCommands(
     if (err instanceof ApiError && err.status === 404) return null;
     throw err;
   }
+}
+
+/**
+ * Fetch the server-cached session-meta snapshot WITHOUT spawning the
+ * agentlet. Always resolves to a snapshot (possibly the empty
+ * `updatedAt === 0` form) — the server returns 200 even on cache
+ * miss so the UI can render an optimistic neutral state.
+ *
+ * Used by `useAcpSessionMeta` on mount to populate selector dropdowns
+ * (model / mode / config options) from the last-known state of the
+ * thread, so the user can pre-select a model before sending the first
+ * message without paying the cold-start tax of `ensureAcpSession`.
+ */
+export async function getAcpThreadCachedMeta(
+  threadId: string,
+  canvasId?: string,
+  profileId?: string,
+): Promise<AcpThreadCachedMetaResponse> {
+  return apiFetch<AcpThreadCachedMetaResponse>(
+    routes.acpThreadCachedMeta(threadId, canvasId, profileId),
+    { fallbackMessage: 'Failed to fetch ACP session meta cache' },
+  );
 }
 
 /**
