@@ -84,9 +84,10 @@ The agentlet daemon prepares the sideband environment for each spawned agent ses
 | Variable | Description |
 |---|---|
 | `AGENTLET_SIDEBAND_DIR` | Directory containing the HST script(s) |
-| `AGENTLET_TOKEN` | Authentication token for the Huabu server. Also serves as user identification (per-token access scoping, consistent with existing Huabu auth design). |
-| `HUABU_CANVAS_ID` | The canvas ID that this agent session is scoped to. Injected at spawn time from the `sessionSpec`. HST reads this automatically so commands don't need a per-call `--canvas` flag. |
-| `HUABU_SERVER` | Base URL of the Huabu server (e.g., `http://localhost:3001`). Required — HST uses this to construct API request URLs. |
+| `AGENTLET_TOKEN` | Authentication token for the Huabu server. Also serves as user identification (per-token access scoping, consistent with existing Huabu auth design). Injected by the daemon from its `--token` startup argument. |
+| `AGENTLET_SERVER` | The daemon's WebSocket URL (e.g., `ws://127.0.0.1:3001/api/acp/agent`). HST derives the HTTP base URL automatically (`ws://` → `http://`, strip path). Injected by the daemon from its `--server` startup argument. |
+| `HUABU_CANVAS_ID` | The canvas ID that this agent session is scoped to. Passed by Sediment via `sessionSpec.env` at spawn time. HST reads this automatically so commands don't need a per-call `--canvas` flag. |
+| `HUABU_SERVER` | (Optional override) If set, HST uses this HTTP base URL directly instead of deriving from `AGENTLET_SERVER`. Useful for testing or non-standard deployments. |
 
 ### Script Distribution
 

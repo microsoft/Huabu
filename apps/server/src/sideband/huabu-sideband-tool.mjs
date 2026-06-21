@@ -10,8 +10,10 @@
  *
  * Environment variables (set by agentlet daemon):
  *   AGENTLET_TOKEN       — Bearer token for Huabu server auth
+ *   AGENTLET_SERVER      — Daemon's WS URL (e.g. ws://127.0.0.1:3001/api/acp/agent)
+ *                          HST derives HTTP base URL from this automatically.
  *   HUABU_CANVAS_ID      — Canvas ID this session is scoped to
- *   HUABU_SERVER         — Huabu server base URL (e.g. http://localhost:3001)
+ *   HUABU_SERVER         — (optional override) HTTP base URL; if set, takes priority
  *   AGENTLET_SIDEBAND_DIR — Directory containing this script (informational)
  *
  * Commands:
@@ -28,7 +30,27 @@ import path from 'node:path';
 
 const TOKEN = process.env.AGENTLET_TOKEN;
 const CANVAS_ID = process.env.HUABU_CANVAS_ID;
-const SERVER = process.env.HUABU_SERVER;
+
+/**
+ * Derive the HTTP base URL from AGENTLET_SERVER (WS URL injected by
+ * the daemon), or use HUABU_SERVER as explicit override.
+ * e.g., ws://127.0.0.1:3001/api/acp/agent → http://127.0.0.1:3001
+ */
+function getServerBaseUrl() {
+  if (process.env.HUABU_SERVER) return process.env.HUABU_SERVER;
+  const wsUrl = process.env.AGENTLET_SERVER;
+  if (!wsUrl) {
+    process.stderr.write(
+      'Error: neither HUABU_SERVER nor AGENTLET_SERVER environment variable is set\n',
+    );
+    process.exit(1);
+  }
+  const url = new URL(wsUrl);
+  const scheme = url.protocol === 'wss:' ? 'https:' : 'http:';
+  return `${scheme}//${url.host}`;
+}
+
+const SERVER = getServerBaseUrl();
 
 function requireEnv(name, value) {
   if (!value) {
@@ -41,7 +63,7 @@ function requireEnv(name, value) {
 // ── HTTP helpers ─────────────────────────────────────────────────────
 
 async function request(method, urlPath, body) {
-  const url = `${requireEnv('HUABU_SERVER', SERVER)}${urlPath}`;
+  const url = `${SERVER}${urlPath}`;
   const headers = {
     Authorization: `Bearer ${requireEnv('AGENTLET_TOKEN', TOKEN)}`,
   };
@@ -368,8 +390,9 @@ Options:
 
 Environment variables (set by agentlet daemon):
   AGENTLET_TOKEN    Auth token for Huabu server (required)
+  AGENTLET_SERVER   Daemon WS URL — HTTP base URL derived automatically (required*)
   HUABU_CANVAS_ID   Canvas ID this session is scoped to (required)
-  HUABU_SERVER      Server base URL, e.g. http://localhost:3001 (required)
+  HUABU_SERVER      HTTP base URL override (optional, takes priority over AGENTLET_SERVER)
 
 Examples:
   node huabu-sideband-tool.mjs read-node node-abc123

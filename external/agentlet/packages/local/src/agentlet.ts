@@ -410,11 +410,16 @@ export class Agentlet {
     this.logger.info('spawning_agent', { command: sessionSpec.command, cwd, sessionId: params.sessionId })
 
     try {
-      // Spawn the agent process
+      // Spawn the agent process — inject AGENTLET_SERVER (the WS URL
+      // this daemon is connected to) so sideband tools can derive the
+      // HTTP base URL of the host application.
       const agent = new AgentProcess({
         command: sessionSpec.command,
         cwd,
-        env: sessionSpec.env,
+        env: {
+          AGENTLET_SERVER: this.options.server,
+          ...sessionSpec.env,
+        },
       })
 
       agent.on('error', (err) => {
