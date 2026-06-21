@@ -9,6 +9,7 @@ import staticPlugin from '@fastify/static';
 import { fastify } from 'fastify';
 
 import { getDataDir } from './data-dir.js';
+import { getDaemonAuth } from './modules/agent/acp/daemon-auth.js';
 import {
   acpAgentCliRoutes,
   acpAgentletRoutes,
@@ -107,27 +108,61 @@ app.register(multipart, {
   },
 });
 
-// ── HTTP Basic Auth gate ─────────────────────────────────────────────
-// When HUABU_BASIC_AUTH_USER and HUABU_BASIC_AUTH_PASS are both set,
-// every request (except CORS preflight) must include matching Basic Auth
-// credentials. The Vite dev server applies the same check at the edge,
-// but the backend must enforce it independently because port 3001 may be
-// reachable directly (e.g. when bound to 0.0.0.0 on a public IP).
+// ── HTTP Auth gate ───────────────────────────────────────────────────
+// Two auth mechanisms coexist:
+//
+// 1. Basic Auth (browser/Vite): when HUABU_BASIC_AUTH_USER and
+//    HUABU_BASIC_AUTH_PASS are set, requests with matching Basic creds
+//    are accepted.
+//
+// 2. Bearer token (sideband/HST): requests with
+//    `Authorization: Bearer <AGENTLET_TOKEN>` are accepted. This allows
+//    the Huabu Sideband Tool to call canvas/agent APIs without knowing
+//    the Basic Auth credentials.
+//
+// CORS preflight (OPTIONS) always passes through unauthenticated.
+
 const basicAuthUser = process.env.HUABU_BASIC_AUTH_USER;
 const basicAuthPass = process.env.HUABU_BASIC_AUTH_PASS;
 if (basicAuthUser && basicAuthPass) {
-  const expected =
+  const expectedBasic =
     'Basic ' +
     Buffer.from(`${basicAuthUser}:${basicAuthPass}`, 'utf8').toString('base64');
   app.addHook('onRequest', async (request, reply) => {
     if (request.method === 'OPTIONS') return;
-    if (request.headers.authorization === expected) return;
+    const authHeader = request.headers.authorization || '';
+
+    // Basic Auth (browser / Vite proxy)
+    if (authHeader === expectedBasic) return;
+
+    // Bearer token (agentlet sideband)
+    if (authHeader.startsWith('Bearer ')) {
+      const daemonToken = getDaemonAuth().getToken();
+      if (daemonToken && authHeader.slice(7) === daemonToken) return;
+    }
+
     reply
       .header('WWW-Authenticate', 'Basic realm="Sediment"')
       .status(401)
       .send({ message: 'Authentication required' });
   });
-  app.log.info('Basic Auth enabled for all routes');
+  app.log.info('HTTP Auth enabled (Basic + Bearer)');
+} else {
+  // No Basic Auth configured — still gate Bearer-only sideband routes
+  app.addHook('onRequest', async (request, reply) => {
+    if (request.method === 'OPTIONS') return;
+    // Without Basic Auth, all routes are open EXCEPT /api/sideband/*
+    // which always requires a valid Bearer token.
+    if (!request.url.startsWith('/api/sideband/')) return;
+    const authHeader = request.headers.authorization || '';
+    if (authHeader.startsWith('Bearer ')) {
+      const daemonToken = getDaemonAuth().getToken();
+      if (daemonToken && authHeader.slice(7) === daemonToken) return;
+    }
+    reply
+      .status(401)
+      .send({ message: 'Authentication required' });
+  });
 }
 
 // Register @fastify/static to enable `reply.sendFile()`.
