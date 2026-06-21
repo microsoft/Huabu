@@ -133,6 +133,23 @@ export class AgentletServer {
     return this.sendAgentletRequest(conn, ServerMethods.LIST, {})
   }
 
+  /**
+   * Push a resource file to a connected agentlet daemon.
+   * The daemon resolves ${ENV_VAR} in `destination` and writes the file.
+   */
+  sendResource(agentletSessionId: string, params: { destination: string; content: string }): void {
+    const conn = this.connections.get(agentletSessionId)
+    if (!conn || conn.role !== 'agentlet' || conn.status !== 'connected') {
+      return
+    }
+    const msg: JsonRpcMessage = {
+      jsonrpc: '2.0',
+      method: ServerMethods.SEND_RESOURCE,
+      params: params as unknown as Record<string, unknown>,
+    }
+    conn.sendRaw(msg)
+  }
+
   /** Gracefully close all connections and release resources */
   async close(): Promise<void> {
     for (const conn of this.connections.values()) {

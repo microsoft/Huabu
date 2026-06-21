@@ -1,4 +1,6 @@
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { AgentletServer } from '@agentlet/server';
 
@@ -7,6 +9,10 @@ import { getDataDir } from '../../../data-dir.js';
 
 import type { AgentletServerOptions } from '@agentlet/protocol';
 import type { FastifyInstance } from 'fastify';
+
+// Resolve HST script path relative to this module
+const __dirname = fileURLToPath(new URL('.', import.meta.url));
+const HST_SCRIPT_PATH = join(__dirname, '..', '..', 'sideband', 'huabu-sideband-tool.mjs');
 
 /**
  * Path prefix on Sediment's HTTP server where agentlet processes connect
@@ -67,6 +73,19 @@ export function mountAgentletServer(
         { sessionId: agent.sessionId, role: agent.role },
         '[acp] agent connected',
       );
+      // Push sideband tools to newly-connected agentlet daemons
+      if (agent.role === 'agentlet') {
+        try {
+          const content = readFileSync(HST_SCRIPT_PATH, 'utf8');
+          server.sendResource(agent.sessionId, {
+            destination: '${AGENTLET_SIDEBAND_DIR}/huabu-sideband-tool.mjs',
+            content,
+          });
+          app.log.info('[acp] sideband tools pushed to agentlet');
+        } catch (err) {
+          app.log.warn({ err }, '[acp] failed to push sideband tools');
+        }
+      }
     },
     onReconnection: (agent) => {
       app.log.info({ sessionId: agent.sessionId }, '[acp] agent reconnected');

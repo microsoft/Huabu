@@ -25,6 +25,7 @@ export const ServerMethods = {
   SPAWN: 'server/spawn',
   STOP: 'server/stop',
   LIST: 'server/list',
+  SEND_RESOURCE: 'server/sendResource',
 } as const
 
 /** Host → Server method names (host channel) */

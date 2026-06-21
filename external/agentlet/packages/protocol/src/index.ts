@@ -48,6 +48,7 @@ export type {
   StopResult,
   ListParams,
   ListResult,
+  SendResourceParams,
   LifecycleEvent,
 } from './messages.js'
 

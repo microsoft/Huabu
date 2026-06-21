@@ -1,6 +1,6 @@
-import { hostname, platform } from 'node:os'
-import { resolve } from 'node:path'
-import { existsSync } from 'node:fs'
+import { hostname, platform, tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import WebSocket from 'ws'
 import {
   AgentletMethods,
@@ -13,6 +13,7 @@ import {
   type AgentHelloResult,
   type SpawnParams,
   type StopParams,
+  type SendResourceParams,
   type JsonRpcMessage,
 } from '@agentlet/protocol'
 import { AgentProcess } from './agent-process.js'
@@ -73,11 +74,21 @@ export class Agentlet {
   private readonly agents = new Map<string, ManagedAgent>()
   private handshakeComplete = false
 
+  /**
+   * Unified env registry — all daemon-managed environment variables that
+   * are injected into spawned agent processes. Individual dirs are created
+   * lazily when resources are received via server/sendResource.
+   */
+  private readonly envRegistry: Record<string, string> = {}
+
   constructor(options: AgentletOptions, logger: Logger) {
     this.options = options
     this.logger = logger
     this.mode = options.agent ? 'bridge' : 'daemon'
     this.daemonId = options.agentletId ?? hostname()
+
+    // Initialize well-known env registry entries
+    this.envRegistry.AGENTLET_SIDEBAND_DIR = join(tmpdir(), `agentlet-${this.daemonId}`, 'sideband')
   }
 
   async start(): Promise<void> {
@@ -251,6 +262,41 @@ export class Agentlet {
     this.sessionWs?.send(msg)
   }
 
+  // ── Resource handling ───────────────────────────────────────────────
+
+  /**
+   * Resolve `${ENV_VAR}` references in a destination path against
+   * the daemon's envRegistry.
+   */
+  private resolveDestination(destination: string): string {
+    return destination.replace(/\$\{([^}]+)\}/g, (_match, varName) => {
+      const value = this.envRegistry[varName]
+      if (!value) {
+        throw new Error(`Unknown env var in destination: ${varName}`)
+      }
+      return value
+    })
+  }
+
+  /**
+   * Handle server/sendResource — save a pushed file to the resolved
+   * destination path (creating parent directories as needed).
+   */
+  private handleSendResource(params: SendResourceParams): void {
+    try {
+      const resolvedPath = this.resolveDestination(params.destination)
+      const dir = resolve(resolvedPath, '..')
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(resolvedPath, params.content, 'utf8')
+      this.logger.info('resource_saved', { destination: resolvedPath })
+    } catch (err) {
+      this.logger.warn('resource_save_failed', {
+        destination: params.destination,
+        message: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
+
   // ── Daemon mode ──────────────────────────────────────────────────────
 
   private startDaemon(): void {
@@ -353,11 +399,13 @@ export class Agentlet {
       return
     }
 
-    // Handle notifications (e.g., bridge/shutdown)
+    // Handle notifications (e.g., server/shutdown, server/sendResource)
     if ('method' in msg && !('id' in msg)) {
       if (msg.method === ServerMethods.SHUTDOWN) {
         this.logger.info('shutdown_requested', { params: msg.params })
         this.shutdown('server_requested')
+      } else if (msg.method === ServerMethods.SEND_RESOURCE) {
+        this.handleSendResource(msg.params as unknown as SendResourceParams)
       }
     }
   }
@@ -410,14 +458,16 @@ export class Agentlet {
     this.logger.info('spawning_agent', { command: sessionSpec.command, cwd, sessionId: params.sessionId })
 
     try {
-      // Spawn the agent process — inject AGENTLET_SERVER (the WS URL
-      // this daemon is connected to) so sideband tools can derive the
-      // HTTP base URL of the host application.
+      // Inject daemon-managed env vars into the spawned agent process:
+      // - AGENTLET_SERVER: WS URL for sideband HTTP derivation
+      // - envRegistry: all well-known dirs (AGENTLET_SIDEBAND_DIR, etc.)
+      // sessionSpec.env (from host app) is merged last to allow overrides.
       const agent = new AgentProcess({
         command: sessionSpec.command,
         cwd,
         env: {
           AGENTLET_SERVER: this.options.server,
+          ...this.envRegistry,
           ...sessionSpec.env,
         },
       })
