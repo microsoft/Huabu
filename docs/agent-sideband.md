@@ -91,7 +91,13 @@ The agentlet daemon prepares the sideband environment for each spawned agent ses
 
 ### Script Distribution
 
-The HST source lives in the Sediment (Huabu) project. The Huabu server serves it as a ZIP package via `GET /api/sideband/tools` (see Daemon API below). The agentlet daemon downloads and extracts it to `${AGENTLET_SIDEBAND_DIR}` on first session spawn (or at daemon startup), ensuring the script version always matches the running server's API. ETag-based caching avoids redundant downloads. Future: auto-update when the server is upgraded.
+The HST source lives in the Sediment (Huabu) project. Distribution uses the agentlet protocol's `server/sendResource` mechanism: when the agentlet daemon connects, the Huabu server pushes the HST script over the existing authenticated WebSocket control channel. The daemon saves it to `${AGENTLET_SIDEBAND_DIR}` and injects that path into all spawned agent processes.
+
+This approach:
+- Reuses the already-authenticated WS connection (no separate HTTP endpoint needed)
+- Ensures script version matches the running server (pushed on every connect)
+- Allows future proactive updates (server can re-push after hot-reload)
+- Is general-purpose: `server/sendResource` supports any `${ENV_VAR}/filename` destination
 
 ### Agent Prompt Injection
 
@@ -215,22 +221,6 @@ The standalone CLI script (`huabu-sideband-tool.mjs`) running in the external ag
 
 New REST API endpoints for sideband operations, grouped by consumer.
 
-#### Daemon API (consumed by agentlet daemon)
-
-**`GET /api/sideband/tools`** — Download HST tool package
-
-| Field | Value |
-|---|---|
-| Auth | `Authorization: Bearer ${AGENTLET_TOKEN}` |
-| Response | `application/zip` — ZIP archive containing the HST script(s) |
-| Headers | `ETag: <version-hash>` — for cache validation |
-| Conditional | `If-None-Match: <hash>` → `304 Not Modified` if unchanged |
-| Errors | `401` invalid token |
-
-The agentlet daemon calls this endpoint to fetch the latest HST tools and extracts the ZIP directly to `${AGENTLET_SIDEBAND_DIR}`. ZIP format is chosen for cross-platform compatibility (natively supported on Windows, macOS, and Linux).
-
-In v1, one daemon connects to one Huabu server, so no namespace/subfolder isolation is needed. Future: if multi-server support is added, tools can be extracted to `${AGENTLET_SIDEBAND_DIR}/<server-id>/`.
-
 #### HST API (consumed by the HST script itself, not involving agentlet daemon)
 
 **`GET /api/canvas/:canvasId/nodes/:nodeId/content`** — Read node content (existing endpoint)
@@ -265,10 +255,10 @@ Note: HST translates its CLI flags (`--type`, `--id`, `--link-to`, `--link-from`
 
 #### Server-side work items
 
-- [ ] Add Bearer token auth as an alternative to Basic Auth (Fastify `preHandler` hook that accepts either) — enables HST to call existing canvas endpoints
+- [x] Add Bearer token auth as an alternative to Basic Auth (Fastify `preHandler` hook that accepts either) — enables HST to call existing canvas endpoints
 - [ ] Implement `POST /api/sideband/ask-agent` — new endpoint that calls `runAgent()` internally, scoped to a sideband-appropriate tool set
 - [ ] Implement notification dispatch: after execute with `notify` flag, fire-and-forget internal event to built-in agent
-- [ ] Serve HST tool package: `GET /api/sideband/tools` with ETag caching
+- [x] Push HST script to agentlet daemon via `server/sendResource` on connect (replaces `GET /api/sideband/tools`)
 - [ ] Error responses: ensure existing endpoints return consistent `{ message }` format for HST consumption
 
 ### Component: Huabu (Host App)
@@ -277,21 +267,23 @@ The host application that orchestrates agent sessions and canvas interactions.
 
 - [ ] Prompt injection: include sideband usage description in the agent's system prompt when spawning an external agent session
 - [ ] Node ID embedding: pass referenced node IDs into the agent's initial context
-- [ ] Pass `HUABU_CANVAS_ID` and `HUABU_SERVER` via `sessionSpec.env` when spawning an external agent session
+- [x] Pass `HUABU_CANVAS_ID` via `sessionSpec.env` when spawning an external agent session
 
 ### Component: Agentlet Protocol (`@agentlet/protocol`)
 
 Shared protocol definition between agentlet server and daemon.
 
 - [x] `env?: Record<string, string>` field already exists on `SessionSpec` — used to pass host-app-specific environment variables into the spawned agent process
+- [x] `server/sendResource` method — general-purpose file distribution from server to daemon over the control WS channel (`SendResourceParams: { destination, content }`)
 
 ### Component: Agentlet Daemon (worker-side)
 
 The daemon running on the remote machine that spawns agent processes.
 
-- [ ] Environment setup: set `AGENTLET_SIDEBAND_DIR` for each spawned session; `AGENTLET_TOKEN` is already available from the daemon's own `--token` startup argument and injected into the spawned process env if not already set
-- [x] `env` forwarding: agentlet daemon already merges `sessionSpec.env` (including `HUABU_CANVAS_ID`, `HUABU_SERVER`) into the spawned process environment
-- [ ] Script download: fetch HST script from `${HUABU_SERVER}/api/sideband/tools` and save to `${AGENTLET_SIDEBAND_DIR}` (on first spawn or at daemon startup)
+- [x] Environment setup: unified `envRegistry` manages `AGENTLET_SIDEBAND_DIR` (and future dirs); respects `process.env` overrides; injected into all spawned agents
+- [x] `env` forwarding: agentlet daemon merges `sessionSpec.env` (including `HUABU_CANVAS_ID`) into the spawned process environment
+- [x] `AGENTLET_SERVER` injection: daemon's `--server` WS URL injected into spawned agents for HTTP derivation
+- [x] `server/sendResource` handler: receives files pushed by server, resolves `${ENV_VAR}` paths, saves to disk
 
 ### Component: Built-in Agent (Huabu-side)
 
