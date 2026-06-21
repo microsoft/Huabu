@@ -434,6 +434,7 @@ async function ensureAcpSessionInner(
     threadId,
     recipe,
     persisted?.sessionId,
+    canvasId,
   );
   const conn = server.getConnection(agentSessionId);
   if (!conn || conn.status !== 'connected') {

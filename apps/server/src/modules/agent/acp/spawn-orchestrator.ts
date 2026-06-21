@@ -33,6 +33,7 @@
  * resume them when the user revisits the thread.
  */
 
+import { getDaemonAuth } from './daemon-auth.js';
 import { getDaemonSupervisor } from './daemon-supervisor.js';
 import { getAgentletServer } from './server-mount.js';
 
@@ -43,6 +44,17 @@ import type { AcpBindingRecipe } from './session-store.js';
  * an inactive session. Resumed transparently on next message.
  */
 const DEFAULT_IDLE_TIMEOUT_SECS = 600;
+
+/**
+ * Derive the HTTP base URL of this Huabu server for use in spawned
+ * agent environments. The daemon is always local (loopback), so we
+ * use 127.0.0.1 with the active port.
+ */
+function getSidebandServerUrl(): string {
+  const port =
+    process.env.SERVER_PORT || process.env.PORT || '3001';
+  return `http://127.0.0.1:${port}`;
+}
 
 /**
  * Cold-start grace window for the embedded agentlet's WS handshake.
@@ -172,6 +184,7 @@ export async function ensureAgentForThread(
   threadId: string,
   recipe: AcpBindingRecipe,
   existingSessionId?: string,
+  canvasId?: string,
 ): Promise<{ sessionId: string; pid: number }> {
   const agentlet = await waitForActiveAgentlet(AGENTLET_READY_TIMEOUT_MS);
   if (!agentlet) {
@@ -202,6 +215,17 @@ export async function ensureAgentForThread(
     throw new Error('agentlet server is not mounted');
   }
 
+  const sidebandEnv: Record<string, string> = {
+    HUABU_SERVER: getSidebandServerUrl(),
+  };
+  if (canvasId) {
+    sidebandEnv.HUABU_CANVAS_ID = canvasId;
+  }
+  const token = getDaemonAuth().getToken();
+  if (token) {
+    sidebandEnv.AGENTLET_TOKEN = token;
+  }
+
   const { sessionId, pid } = await server.spawnOnAgentlet(agentlet.agentletId, {
     appId: threadId,
     ...(existingSessionId ? { sessionId: existingSessionId } : {}),
@@ -210,6 +234,7 @@ export async function ensureAgentForThread(
       cwd: recipe.cwd,
       autoRestart: recipe.autoRestart,
       idleTimeoutSecs: DEFAULT_IDLE_TIMEOUT_SECS,
+      env: sidebandEnv,
     },
   });
 
