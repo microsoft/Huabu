@@ -86,6 +86,7 @@ The agentlet daemon prepares the sideband environment for each spawned agent ses
 | `AGENTLET_SIDEBAND_DIR` | Directory containing the HST script(s) |
 | `AGENTLET_TOKEN` | Authentication token for the Huabu server. Also serves as user identification (per-token access scoping, consistent with existing Huabu auth design). |
 | `HUABU_CANVAS_ID` | The canvas ID that this agent session is scoped to. Injected at spawn time from the `sessionSpec`. HST reads this automatically so commands don't need a per-call `--canvas` flag. |
+| `HUABU_SERVER` | Base URL of the Huabu server (e.g., `http://localhost:3001`). Required — HST uses this to construct API request URLs. |
 
 ### Script Distribution
 
@@ -103,7 +104,7 @@ When spawning an external agent session, Huabu includes a short usage descriptio
 node ${AGENTLET_SIDEBAND_DIR}/huabu-sideband-tool.mjs <command> [args...]
 ```
 
-The HST automatically reads `${AGENTLET_TOKEN}` for authentication. Results are printed to stdout; errors go to stderr with non-zero exit codes.
+The HST automatically reads `${AGENTLET_TOKEN}` for authentication. Machine-consumable results are printed to stdout; metadata and errors go to stderr. Non-zero exit codes indicate failure. Use `--help` or `-h` on any command for usage details.
 
 ### Commands
 
@@ -112,11 +113,13 @@ The HST automatically reads `${AGENTLET_TOKEN}` for authentication. Results are 
 **`read-node`** — Read node content to a file
 
 ```bash
-node ${AGENTLET_SIDEBAND_DIR}/huabu-sideband-tool.mjs read-node --output-dir <folder> <node-id>
+node ${AGENTLET_SIDEBAND_DIR}/huabu-sideband-tool.mjs read-node [--output-dir <folder>] <node-id>
 ```
 
+- `--output-dir` is optional; defaults to the current working directory.
 - Saves the node content to `<folder>/<node-id>.<ext>`, where `.<ext>` is automatically determined by HST based on the node's type (e.g., `.md` for note, `.html` for web).
-- Stdout receives the saved file path, node type, and content size — the agent uses the file path for subsequent operations.
+- **stdout**: the saved file path (one line) — usable directly in shell composition.
+- **stderr**: node metadata (`type=<type> size=<bytes>`).
 
 **`write-node`** — Create or update a node
 
@@ -131,6 +134,8 @@ node ${AGENTLET_SIDEBAND_DIR}/huabu-sideband-tool.mjs write-node --id <node-id> 
 - `--type <type>`: create a new node (e.g., `note`, `web`). Returns the new node id to stdout.
 - `--id <node-id>`: update an existing node. Overwrites current content directly.
 - Only one of `--type` or `--id` may be specified.
+- **stdout**: the node ID (created or updated).
+- **stderr**: action metadata (`action=created|updated nodeId=<id>`).
 
 **Additional options:**
 
@@ -195,15 +200,15 @@ No automatic retry or recovery in HST — the external agent decides how to hand
 
 The standalone CLI script (`huabu-sideband-tool.mjs`) running in the external agent's environment. The source lives in the **Sediment (Huabu) project** since it's a thin client tightly coupled to the server's sideband API — keeping them in the same repo ensures API and client stay in sync. The script is shipped as a build artifact that the agentlet daemon bundles during installation.
 
-- [ ] CLI argument parser: command routing (`read-node`, `write-node`, `ask-agent`), flag parsing
-- [ ] `read-node` implementation: call server API, write content to `<output-dir>/<node-id>.<ext>`, print summary to stdout
-- [ ] `write-node` implementation: read content file, call server API (create or update), print node id to stdout
-- [ ] `write-node --link-to` / `--link-from`: include link creation in the write request
-- [ ] `write-node --notify`: include notification flag in the write request
-- [ ] `ask-agent` implementation: send prompt (inline or `@file`) to server API, print response to stdout
-- [ ] Auth: read `${AGENTLET_TOKEN}` from env, attach to all HTTP requests
-- [ ] Error handling: map HTTP errors to stderr messages + non-zero exit codes
-- [ ] Package as standalone `.mjs` with zero external dependencies (or bundled)
+- [x] CLI argument parser: command routing (`read-node`, `write-node`, `ask-agent`), flag parsing, `--help` / `-h` support
+- [x] `read-node` implementation: call server API, write content to `<output-dir>/<node-id>.<ext>`, print file path to stdout, metadata to stderr
+- [x] `write-node` implementation: read content file, call server API (create or update), print node id to stdout, action metadata to stderr
+- [x] `write-node --link-to` / `--link-from`: include link creation in the write request
+- [ ] `write-node --notify`: include notification flag in the write request (pending server-side support)
+- [x] `ask-agent` implementation: send prompt (inline or `@file`) to server API, print response to stdout
+- [x] Auth: read `${AGENTLET_TOKEN}` from env, attach to all HTTP requests
+- [x] Error handling: map HTTP errors to stderr messages + non-zero exit codes
+- [x] Package as standalone `.mjs` with zero external dependencies
 
 ### Component: Huabu Server
 
@@ -271,20 +276,20 @@ The host application that orchestrates agent sessions and canvas interactions.
 
 - [ ] Prompt injection: include sideband usage description in the agent's system prompt when spawning an external agent session
 - [ ] Node ID embedding: pass referenced node IDs into the agent's initial context
-- [ ] Pass `HUABU_CANVAS_ID` via `sessionSpec.envVars` when spawning an external agent session (e.g., `{ envVars: { HUABU_CANVAS_ID: canvasId } }`)
+- [ ] Pass `HUABU_CANVAS_ID` and `HUABU_SERVER` via `sessionSpec.env` when spawning an external agent session
 
 ### Component: Agentlet Protocol (`@agentlet/protocol`)
 
 Shared protocol definition between agentlet server and daemon.
 
-- [ ] Add `envVars?: Record<string, string>` field to `SessionSpec` — a generic pass-through for host-app-specific environment variables to be injected into the spawned agent process
+- [x] `env?: Record<string, string>` field already exists on `SessionSpec` — used to pass host-app-specific environment variables into the spawned agent process
 
 ### Component: Agentlet Daemon (worker-side)
 
 The daemon running on the remote machine that spawns agent processes.
 
 - [ ] Environment setup: set `AGENTLET_SIDEBAND_DIR` for each spawned session; `AGENTLET_TOKEN` is already available from the daemon's own `--token` startup argument and injected into the spawned process env if not already set
-- [ ] `envVars` forwarding: merge `sessionSpec.envVars` (including `HUABU_CANVAS_ID`) into the spawned process environment alongside daemon-native vars
+- [x] `env` forwarding: agentlet daemon already merges `sessionSpec.env` (including `HUABU_CANVAS_ID`, `HUABU_SERVER`) into the spawned process environment
 - [ ] Script download: fetch HST script from `${HUABU_SERVER}/api/sideband/tools` and save to `${AGENTLET_SIDEBAND_DIR}` (on first spawn or at daemon startup)
 
 ### Component: Built-in Agent (Huabu-side)
