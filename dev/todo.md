@@ -67,9 +67,9 @@ UI `SessionPanel.vue` should leverage both `connected` boolean and `status` fiel
 
 ## Deferred — Code Cleanup
 
-### Rename: `Bridge` class and file
+### ✅ Rename: `Bridge` / `Daemon` → unified `Agentlet` class
 
-`bridge.ts` / `Bridge` class / `BridgeState` type / `mode: 'bridge'` in CLI — these refer to the self-spawn lifecycle but use stale "bridge" naming. Consider renaming to `AgentSession` / `SelfSpawn` or similar.
+Merged `bridge.ts` (`Bridge` class) and `daemon.ts` (`Daemon` class) into a single `agentlet.ts` with one `Agentlet` class. CLI types unified into `AgentletOptions`. Mode is determined by whether `--agent` is provided.
 
 Note: The protocol field `bridge: { name, version }` in `AgentletProfile`/`SessionProfile` and the WS endpoint `/api/bridge` are **intentionally** named "bridge" — don't rename those.
 
