@@ -76,7 +76,8 @@ export class Agentlet {
 
   /**
    * Unified env registry — all daemon-managed environment variables that
-   * are injected into spawned agent processes. Individual dirs are created
+   * are injected into spawned agent processes. Initialized from defaults,
+   * then overridden by process.env if present. Individual dirs are created
    * lazily when resources are received via server/sendResource.
    */
   private readonly envRegistry: Record<string, string> = {}
@@ -87,8 +88,13 @@ export class Agentlet {
     this.mode = options.agent ? 'bridge' : 'daemon'
     this.daemonId = options.agentletId ?? hostname()
 
-    // Initialize well-known env registry entries
-    this.envRegistry.AGENTLET_SIDEBAND_DIR = join(tmpdir(), `agentlet-${this.daemonId}`, 'sideband')
+    // Well-known env vars with defaults — process.env overrides if set
+    const defaults: Record<string, string> = {
+      AGENTLET_SIDEBAND_DIR: join(tmpdir(), `agentlet-${this.daemonId}`, 'sideband'),
+    }
+    for (const [key, fallback] of Object.entries(defaults)) {
+      this.envRegistry[key] = process.env[key] || fallback
+    }
   }
 
   async start(): Promise<void> {
