@@ -38,6 +38,7 @@ import {
 } from './modules/workspace.js';
 import workspaceRoutes from './modules/workspace.route.js';
 import { preloadSkills } from './prompt/index.js';
+import sidebandRoutes from './sideband/sideband.route.js';
 
 // Lock the workspace at startup if HUABU_WORKSPACE is set (managed mode).
 // In free mode this is a no-op and the client will activate at runtime.
@@ -159,9 +160,7 @@ if (basicAuthUser && basicAuthPass) {
       const daemonToken = getDaemonAuth().getToken();
       if (daemonToken && authHeader.slice(7) === daemonToken) return;
     }
-    reply
-      .status(401)
-      .send({ message: 'Authentication required' });
+    reply.status(401).send({ message: 'Authentication required' });
   });
 }
 
@@ -201,6 +200,7 @@ app.register(intentRoutes, { prefix: '/api/intent' });
 app.register(llmRoutes, { prefix: '/api/llm' });
 app.register(skillsRoutes, { prefix: '/api/skills' });
 app.register(workspaceRoutes, { prefix: '/api/workspace' });
+app.register(sidebandRoutes, { prefix: '/api/sideband' });
 
 // ── External agent (ACP) bridge ───────────────────────────────────────
 // Mount @agentlet/server in daemon mode: an embedded supervisor

@@ -162,24 +162,51 @@ node ${AGENTLET_SIDEBAND_DIR}/huabu-sideband-tool.mjs ask-agent "<prompt>"
 
 # Prompt from file (@ convention, like curl -d @file)
 node ${AGENTLET_SIDEBAND_DIR}/huabu-sideband-tool.mjs ask-agent @path/to/prompt.txt
+
+# Show intermediate steps (tool calls, thinking) on stdout
+node ${AGENTLET_SIDEBAND_DIR}/huabu-sideband-tool.mjs ask-agent --show-steps "<prompt>"
+
+# Save full session events to file (auto-named JSONL in sideband dir) — this is the DEFAULT
+node ${AGENTLET_SIDEBAND_DIR}/huabu-sideband-tool.mjs ask-agent "<prompt>"
+
+# Disable session saving
+node ${AGENTLET_SIDEBAND_DIR}/huabu-sideband-tool.mjs ask-agent --no-save-session "<prompt>"
 ```
 
 - Sends a natural language prompt to a built-in agent with full canvas context.
 - The built-in agent can perform complex reasoning: spatial queries, semantic search, multi-node operations, neighbor discovery, interaction history lookup, etc.
 - If the argument starts with `@`, the prompt is read from the specified file (useful for long or multi-line prompts).
 - In v1, a single default built-in agent handles all requests. (Future: `--agent <agent-id>` for targeting a specific agent.)
-- Response is printed to stdout.
+- **stdout** (default): final result text only. With `--show-steps`: intermediate events (tool calls, thinking deltas) are also printed.
+- **stderr**: progress status line (e.g., "⏳ Agent working...") emitted on first server event — keeps the harness aware the tool is alive and prevents idle timeout. Session file path also printed here.
+- By default, all events are saved to `${AGENTLET_SIDEBAND_DIR}/sessions/<timestamp>.jsonl`. Use `--no-save-session` to disable. Useful for debugging or future `--resume` support.
 
-### Sync/Async Behavior
+**Additional options:**
+
+| Option | Description |
+|---|---|
+| `--show-steps` | Print intermediate events (tool calls, thinking) to stdout in addition to the final result |
+| `--no-save-session` | Disable saving event log (default: saves to auto-named JSONL file) |
+
+### Sync/Async Behavior & Timeout Resistance
 
 All HST commands are **blocking** — they run until the operation completes, then print the result and exit. This is the same model as `curl`: the caller waits for the response, however long it takes.
 
 This works because modern agent harnesses (Copilot CLI, Claude Code, Cursor, etc.) already handle long-running CLI commands gracefully — they start the command synchronously, and if it exceeds an internal timeout, the harness automatically promotes it to a background task and retrieves the output later. The harness, not the HST, is responsible for managing timing.
 
+**Timeout resistance for `ask-agent`:**
+
+The `ask-agent` command uses **SSE (Server-Sent Events)** streaming — the server sends events incrementally as the built-in agent works. This prevents timeouts at two layers:
+
+1. **HTTP layer**: chunked `text/event-stream` response keeps the TCP connection alive with periodic data (events or heartbeat comments). No socket idle timeout.
+2. **Harness layer**: HST emits a stderr status line on the first received event ("⏳ Agent working..."). The harness sees process output → knows the tool is alive → does not kill or retry.
+
+Because the connection stays active throughout, the timeout→retry→duplicate-execution problem is eliminated without needing request-level idempotency.
+
 This means:
 - HST does not need `--timeout`, `poll-result`, or explicit async modes.
 - The interface stays maximally simple (single blocking call per command).
-- Agent harnesses that support streaming CLI output will naturally benefit if HST streams partial responses in the future.
+- Intermediate events flow to HST in real-time; `--show-steps` surfaces them to stdout, `--save-session` persists them to disk.
 
 ### Error Handling (v1)
 
@@ -196,6 +223,7 @@ No automatic retry or recovery in HST — the external agent decides how to hand
 ## Known Issues & Future Work
 
 - **Concurrency / versioning**: `write-node --id` currently overwrites without conflict detection. An ETag-based CAS mechanism (`--expect-version` flag) should be added for concurrent edit scenarios. This is interface-compatible — no breaking changes when added.
+- **Stateful conversations (`--resume`)**: v1 `ask-agent` is stateless. The returned `threadId` is reserved for future `--resume <threadId>` support that would maintain conversation context across calls. Requires server-side thread/context persistence.
 - **Target agent identification**: Both `write-node --notify-to <agent-id>` and `ask-agent --to <agent-id>` need a way to specify a target built-in agent. This requires defining agent identification (agent-id vs agent-template-id), discovery mechanism, and routing logic. For v1, all requests go to the single default built-in agent.
 - **Structured output**: v1 uses plain text output (curl-style). A `--format json` flag can be added later if needed for programmatic consumption.
 - **Script versioning**: v1 guarantees script existence via bundled installation. Auto-update mechanism TBD.
@@ -212,7 +240,7 @@ The standalone CLI script (`huabu-sideband-tool.mjs`) running in the external ag
 - [x] `write-node` implementation: read content file, call server API (create or update), print node id to stdout, action metadata to stderr
 - [x] `write-node --link-to` / `--link-from`: include link creation in the write request
 - [ ] `write-node --notify`: include notification flag in the write request (pending server-side support)
-- [x] `ask-agent` implementation: send prompt (inline or `@file`) to server API, print response to stdout
+- [x] `ask-agent` implementation: SSE streaming consumer with `--show-steps` and `--no-save-session` flags, progress on stderr, session JSONL persistence
 - [x] Auth: read `${AGENTLET_TOKEN}` from env, attach to all HTTP requests
 - [x] Error handling: map HTTP errors to stderr messages + non-zero exit codes
 - [x] Package as standalone `.mjs` with zero external dependencies
@@ -242,21 +270,29 @@ New REST API endpoints for sideband operations, grouped by consumer.
 
 Note: HST translates its CLI flags (`--type`, `--id`, `--link-to`, `--link-from`, `--notify`) into the appropriate `CanvasCommand[]` array internally. The external agent never sees `CanvasCommand` directly.
 
-**`POST /api/sideband/ask-agent`** — Send prompt to built-in agent
+**`POST /api/sideband/ask-agent`** — Send prompt to built-in agent (SSE streaming)
 
 | Field | Value |
 |---|---|
 | Auth | `Authorization: Bearer ${AGENTLET_TOKEN}` |
 | Body | `{ prompt, canvasId }` |
-| Response | `{ response }` (plain text from the built-in agent) |
+| Response | `Content-Type: text/event-stream` — SSE stream of typed events |
+| Events | `text_delta`, `thinking_delta`, `tool_call`, `tool_call_update`, `done`, `error` |
+| Final event | `done: { message, threadId }` |
 | Errors | `401` invalid token, `503` agent unavailable |
 
-> **TBD (implementation detail):** The server internally consumes `runAgent()` (an `AsyncGenerator<StreamEvent>`) and must decide how to surface the result to HST — options include buffered JSON response, chunked transfer, or SSE. This does not affect the HST CLI interface (HST always prints final text to stdout). To be resolved during implementation.
+Design notes:
+
+- **Transport**: SSE (Server-Sent Events) streaming. The server pipes `runAgent()` events directly to the HTTP response as `data: {type, ...}\n\n` frames. HST reads the stream incrementally, prints progress to stderr on first event, and collects the final `done` message for stdout.
+- **Timeout resistance**: Streaming keeps the connection alive — no idle timeout at HTTP or harness layer. No request-level idempotency needed.
+- **Tool scope**: Uses `'operate'` scope (full canvas read + write tools). **TODO**: discuss with project maintainers offline whether a restricted `'sideband'` scope is warranted to limit surface area.
+- **System prompt**: Minimal static prompt providing canvas context awareness. **TODO**: discuss prompt design offline — should include canvas outline, caller identity, usage guidelines.
+- **Statefulness**: Each call is stateless (fresh context, no memory of previous calls). The `done` event includes a `threadId`. For future `--resume` support, HST can send a saved session file back to reconstruct context. For v1, every call is independent.
 
 #### Server-side work items
 
 - [x] Add Bearer token auth as an alternative to Basic Auth (Fastify `preHandler` hook that accepts either) — enables HST to call existing canvas endpoints
-- [ ] Implement `POST /api/sideband/ask-agent` — new endpoint that calls `runAgent()` internally, scoped to a sideband-appropriate tool set
+- [x] Implement `POST /api/sideband/ask-agent` — SSE streaming endpoint that pipes `runAgent()` events to the client
 - [ ] Implement notification dispatch: after execute with `notify` flag, fire-and-forget internal event to built-in agent
 - [x] Push HST script to agentlet daemon via `server/sendResource` on connect (replaces `GET /api/sideband/tools`)
 - [ ] Error responses: ensure existing endpoints return consistent `{ message }` format for HST consumption
@@ -289,6 +325,8 @@ The daemon running on the remote machine that spawns agent processes.
 
 The default built-in agent that handles `ask-agent` requests and `--notify` events.
 
-- [ ] `ask-agent` handler: receive natural language prompt, execute with full canvas context, return response
+- [x] `ask-agent` handler: receive natural language prompt, execute with `'operate'` scope (TODO: scope TBD), stream events back via SSE, include `threadId` in `done` event
+- [x] `--save-session` support: HST-side only (saves SSE events to JSONL); no server changes needed
 - [ ] Notification handler: receive write-node notification, decide canvas positioning, create layout/links
 - [ ] Canvas context access: read nodes, edges, spatial info, interaction history for reasoning
+- [ ] System prompt: minimal v1 prompt (TODO: design offline with maintainers)

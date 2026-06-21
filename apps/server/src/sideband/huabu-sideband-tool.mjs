@@ -315,31 +315,39 @@ Examples:
 }
 
 async function askAgent(args) {
-  const { positional } = parseArgs(args, {
+  const { flags, positional } = parseArgs(args, {
+    boolean: ['--show-steps', '--no-save-session'],
     help: `ask-agent — Send a prompt to a built-in Huabu agent
 
-Usage: node huabu-sideband-tool.mjs ask-agent <prompt | @prompt-file>
+Usage: node huabu-sideband-tool.mjs ask-agent [options] <prompt | @prompt-file>
 
 Arguments:
   <prompt>               Inline prompt text (multiple words joined)
   @<path>                Read prompt from file (e.g., @./question.txt)
 
 Options:
+  --show-steps           Print intermediate events (tool calls, thinking) to stdout
+  --no-save-session      Disable saving event log (default: saves to JSONL in sideband dir)
   -h, --help             Show this help message
 
 Output:
-  stdout: agent response text
+  stdout: agent response text (default) or interleaved steps (with --show-steps)
+  stderr: progress status, session file path
 
 Examples:
   node huabu-sideband-tool.mjs ask-agent "summarize node-abc123"
-  node huabu-sideband-tool.mjs ask-agent @./prompt.txt
+  node huabu-sideband-tool.mjs ask-agent --show-steps "what nodes link to node-xyz?"
+  node huabu-sideband-tool.mjs ask-agent --no-save-session @./prompt.txt
 `,
   });
 
   if (positional.length === 0) {
-    process.stderr.write('Usage: ask-agent <prompt | @prompt-file>\n');
+    process.stderr.write('Usage: ask-agent [options] <prompt | @prompt-file>\n');
     process.exit(1);
   }
+
+  const showSteps = flags['--show-steps'] || false;
+  const saveSession = !flags['--no-save-session'];
 
   const rawPrompt = positional.join(' ');
   let prompt;
@@ -357,13 +365,130 @@ Examples:
   }
 
   const canvasId = requireEnv('HUABU_CANVAS_ID', CANVAS_ID);
-  const res = await request('POST', `/api/sideband/ask-agent`, {
-    prompt,
-    canvasId,
+  const url = `${SERVER}/api/sideband/ask-agent`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${requireEnv('AGENTLET_TOKEN', TOKEN)}`,
+      'Content-Type': 'application/json',
+      Accept: 'text/event-stream',
+    },
+    body: JSON.stringify({ prompt, canvasId }),
   });
-  const data = await res.json();
 
-  process.stdout.write(`${data.response || ''}\n`);
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try {
+      const errBody = await res.json();
+      if (errBody.message) msg = errBody.message;
+    } catch { /* ignore parse errors */ }
+    process.stderr.write(`Error: ${msg}\n`);
+    process.exit(1);
+  }
+
+  // Consume SSE stream
+  const events = [];
+  let finalMessage = '';
+  let threadId = '';
+  let firstEventReceived = false;
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    // Parse SSE frames (event: <type>\ndata: <json>\n\n)
+    const frames = buffer.split('\n\n');
+    buffer = frames.pop(); // Keep incomplete frame in buffer
+
+    for (const frame of frames) {
+      if (!frame.trim()) continue;
+      // Skip SSE comments (lines starting with :)
+      const lines = frame.split('\n').filter((l) => !l.startsWith(':'));
+      if (lines.length === 0) continue;
+
+      let eventType = '';
+      let eventData = '';
+      for (const line of lines) {
+        if (line.startsWith('event: ')) eventType = line.slice(7);
+        else if (line.startsWith('data: ')) eventData = line.slice(6);
+      }
+      if (!eventType || !eventData) continue;
+
+      // Signal progress on first real event
+      if (!firstEventReceived) {
+        firstEventReceived = true;
+        process.stderr.write('⏳ Agent working...\n');
+      }
+
+      let parsed;
+      try {
+        parsed = JSON.parse(eventData);
+      } catch {
+        continue;
+      }
+
+      const event = { type: eventType, data: parsed };
+      if (saveSession) events.push(event);
+
+      switch (eventType) {
+        case 'text_delta':
+          if (showSteps) process.stdout.write(parsed.content || '');
+          break;
+        case 'thinking_delta':
+          if (showSteps)
+            process.stdout.write(`[thinking] ${parsed.content || ''}`);
+          break;
+        case 'tool_call':
+          if (showSteps)
+            process.stdout.write(
+              `\n[tool] ${parsed.internalToolName || parsed.title} ...\n`,
+            );
+          break;
+        case 'tool_call_update':
+          if (showSteps)
+            process.stdout.write(`[tool result] ${(parsed.rawOutput || '').slice(0, 200)}\n`);
+          break;
+        case 'done':
+          finalMessage = parsed.message || '';
+          threadId = parsed.threadId || '';
+          break;
+        case 'error':
+          process.stderr.write(`Error: ${parsed.error || 'agent error'}\n`);
+          if (!finalMessage) process.exit(1);
+          break;
+      }
+    }
+  }
+
+  // Save session if requested
+  if (saveSession && events.length > 0) {
+    const sidebandDir = process.env.AGENTLET_SIDEBAND_DIR || '.';
+    const sessionsDir = path.join(sidebandDir, 'sessions');
+    await mkdir(sessionsDir, { recursive: true });
+    const filename = `${Date.now()}.jsonl`;
+    const filePath = path.join(sessionsDir, filename);
+    const content = events.map((e) => JSON.stringify(e)).join('\n') + '\n';
+    await writeFile(filePath, content, 'utf8');
+    process.stderr.write(`Session saved: ${filePath}\n`);
+  }
+
+  // Print thread ID to stderr for future --resume support
+  if (threadId) {
+    process.stderr.write(`threadId=${threadId}\n`);
+  }
+
+  // Final result to stdout (if --show-steps was used, text_delta already printed it)
+  if (!showSteps) {
+    process.stdout.write(`${finalMessage}\n`);
+  } else {
+    // Ensure trailing newline after streamed output
+    process.stdout.write('\n');
+  }
 }
 
 // ── Main ─────────────────────────────────────────────────────────────
