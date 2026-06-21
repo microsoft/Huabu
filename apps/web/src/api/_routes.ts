@@ -37,6 +37,7 @@ export const routes = {
     `/canvas/${enc(canvasId)}/nodes/${enc(nodeId)}/content`,
   canvasNodePreprocess: (canvasId: string, nodeId: string) =>
     `/canvas/${enc(canvasId)}/nodes/${enc(nodeId)}/preprocess`,
+  canvasSearch: (canvasId: string) => `/canvas/${enc(canvasId)}/search`,
   canvasArtifact: (
     canvasId: string,
     kind: 'image' | 'pdf' | 'office' | 'video' | 'audio' | 'html',

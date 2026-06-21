@@ -16,9 +16,11 @@ import {
   preprocessNodeBodySchema,
   putCanvasBodySchema,
   putNodeContentBodySchema,
+  canvasSearchRequestSchema,
 } from '@sediment/shared';
 
 import { CanvasNotFoundError, executeOnServer } from './canvas-executor.js';
+import { searchCanvas } from './canvas-search.js';
 import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
 import { getPreprocessDispatcher } from '../preprocessing/index.js';
 import { stripOfficeparserPreamble } from '../preprocessing/loaders/office-strip.js';
@@ -43,6 +45,7 @@ import type {
   ApiResult,
   CanvasCommand,
   CanvasConflictResponse,
+  CanvasSearchEvent,
   CreateCanvasRequest,
   CreateCanvasResponse,
   DeleteCanvasResponse,
@@ -571,13 +574,19 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       existing = null;
     }
 
-    const isTextBearing = TEXT_BEARING_NODE_TYPES.has(nodeType);
+    // Question nodes are not text-bearing in the strict sense (their
+    // canonical text lives at `data.input.content`, not `data.content`),
+    // but the autosave queue mirrors that prompt into the sidecar body
+    // so canvas search can find it. Treat them as text-bearing only at
+    // the write boundary.
+    const acceptsBody =
+      TEXT_BEARING_NODE_TYPES.has(nodeType) || nodeType === 'question';
     // Body resolution:
     //   - text-bearing nodes: prefer caller content; fall back to
     //     existing on-disk body to avoid wiping it when the caller
     //     only meant to update e.g. the label.
     //   - frontmatter-only nodes (image/video/frame): always empty.
-    const body = isTextBearing
+    const body = acceptsBody
       ? (incomingContent ?? existing?.content ?? '')
       : '';
 
@@ -586,7 +595,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     // existing markdown is non-empty, refuse the body write but still
     // update frontmatter (label / src / summary / keywords / provenance).
     const wouldClobber =
-      isTextBearing &&
+      acceptsBody &&
       incomingContent === '' &&
       typeof existing?.content === 'string' &&
       existing.content.length > 0;
@@ -1305,6 +1314,79 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           await rm(stagingDir, { recursive: true, force: true }).catch(
             () => {},
           );
+        }
+      }
+    },
+  );
+
+  // --- Search canvas (NDJSON stream) ---
+  //
+  // Streams matches across the canvas as `application/x-ndjson` — one
+  // JSON `CanvasSearchEvent` per line. Metadata-tier hits (label /
+  // summary / keywords) ship first, then body-content hits, so the UI
+  // can populate immediately while the heavier scan finishes. The
+  // client cancels a superseded query by closing the socket
+  // (`AbortController.abort()`); we mirror that into the scanner via
+  // an `AbortController` so it short-circuits between nodes.
+  fastify.post<{ Params: { canvasId: string } }>(
+    '/:canvasId/search',
+    async function (request, reply) {
+      const { canvasId } = request.params;
+      const parsed = canvasSearchRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({
+          message: parsed.error.issues[0]?.message ?? 'Invalid request body',
+        });
+      }
+
+      const store = getCanvasStore(canvasId);
+      const canvas = store.read();
+      if (!canvas) {
+        return reply.code(404).send({ message: 'Canvas not found' });
+      }
+
+      reply.hijack();
+      reply.raw.writeHead(200, {
+        'Content-Type': 'application/x-ndjson',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      });
+      reply.raw.flushHeaders?.();
+
+      const abort = new AbortController();
+      let closed = false;
+      const writeEvent = (event: CanvasSearchEvent): void => {
+        if (closed) return;
+        try {
+          reply.raw.write(JSON.stringify(event) + '\n');
+        } catch {
+          closed = true;
+        }
+      };
+
+      const onClose = (): void => {
+        closed = true;
+        abort.abort();
+      };
+      request.raw.on('close', onClose);
+
+      try {
+        await searchCanvas(store, parsed.data, writeEvent, abort.signal);
+      } catch (err) {
+        request.log.error({ err, canvasId }, 'Canvas search failed');
+        writeEvent({
+          type: 'error',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      } finally {
+        request.raw.off('close', onClose);
+        if (!closed) {
+          try {
+            reply.raw.end();
+          } catch {
+            /* already closed */
+          }
         }
       }
     },

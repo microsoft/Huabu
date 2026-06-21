@@ -629,3 +629,44 @@ body:not(.canvas-resize-active) .react-flow__node-frame:not(.dragging) {
 [data-animate-width][data-resizing='true'] {
   transition: none;
 }
+
+/* ===================================================================
+  Canvas search — CSS Custom Highlight API paint rule.
+  The `useTextHighlight` hook registers ranges under the name
+  `sediment-search`; without this selector the browser has nowhere
+  to draw them. Uses the warning-bg token so it reads as a "found"
+  marker without competing with selection (which uses --info).
+
+  We intentionally do NOT set `color` here. pdf.js's text layer
+  paints `color: transparent` spans on top of the rendered page
+  bitmap so the user can select text; if our highlight forced a
+  visible foreground color, those normally-invisible glyphs would
+  appear in the text-layer font (typically a generic sans), ghosting
+  next to the actual PDF glyphs. Letting `color` inherit keeps the
+  text-layer transparent (matching native `::selection`) while still
+  showing the warning background.
+
+  The background uses the same semi-transparent token as native
+  `::selection` (`--pdf-highlight-bg`, ~45% alpha) so the highlight
+  rectangle on PDF text spans doesn't obscure the rendered glyphs
+  on the underlying canvas. Standard CSS Custom Highlight backgrounds
+  paint as opaque fills above the page bitmap, which is the correct
+  behavior on note / text bodies but hides PDF text.
+  =================================================================== */
+::highlight(sediment-search) {
+  background-color: var(--pdf-highlight-bg);
+}
+
+/* Inside pdf.js's text layer, match the dilution used by
+  `.textLayer span::selection` (~20% warning-light) so the search
+  highlight doesn't read as a grayer wash over the canvas-rendered
+  PDF glyphs than the user's own manual selection. CSS Custom
+  Highlight pseudo-elements can be scoped by ancestor selectors per
+  the CSS Highlight API spec. */
+.textLayer ::highlight(sediment-search) {
+  background-color: color-mix(
+    in srgb,
+    var(--pdf-highlight-bg) 45%,
+    transparent
+  );
+}

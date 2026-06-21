@@ -8,6 +8,7 @@ import { usePreviewStore } from '../../../store/previewStore.ts';
 import { Button } from '../../Common/Button.tsx';
 import { NodePreviewContent } from '../../Nodes/NodePreviewContent.tsx';
 import { PreviewHeaderSlotContext } from '../../Nodes/PreviewHeaderSlot.tsx';
+import { InPreviewSearchBar } from '../../Search/InPreviewSearchBar.tsx';
 
 // Helper to get meta info (icon, title) for the header
 const getOverlayMeta = (type: string, data: Record<string, unknown>) => {
@@ -130,6 +131,15 @@ export const ExpandedNodePanel = ({
   }, [activeItem]);
 
   const panelRef = useRef<HTMLDivElement>(null);
+  // Scroll container of the preview body. Stored in component state
+  // (not a plain ref) so that mounting the div triggers a re-render —
+  // `InPreviewSearchBar` receives this as a prop and would otherwise
+  // be stuck with `null` on first open, since a plain ref update does
+  // not propagate to children. Matches the pattern used for
+  // `headerSlotEl` below.
+  const [previewBodyEl, setPreviewBodyEl] = useState<HTMLDivElement | null>(
+    null,
+  );
   const setSelectionAttachment = useChatStore((s) => s.setSelectionAttachment);
 
   // Slot element rendered in the header bar. Nested previews use the
@@ -194,9 +204,21 @@ export const ExpandedNodePanel = ({
 
   const backTitle = activeItem.isNode ? 'Back to Canvas' : 'Close Preview';
 
+  // Search node id — the find bar's scope dispatcher only consumes this
+  // when scope.kind === 'node'. Canvas-node previews always have one;
+  // free-floating previews (e.g. raw file preview) may not, in which
+  // case the bar falls back to a DOM-only highlight walk with an empty id.
+  const previewNodeId = (() => {
+    if (activeItem.isNode && expandedNodeId) return expandedNodeId;
+    const id = previewData?.nodeId;
+    return typeof id === 'string' ? id : '';
+  })();
+
   return (
     <div
       ref={panelRef}
+      data-search-scope="node"
+      data-search-node-id={previewNodeId}
       className="border-edge-default bg-surface flex h-full w-full flex-col overflow-hidden border-l"
     >
       {/* Header bar */}
@@ -295,8 +317,16 @@ export const ExpandedNodePanel = ({
         </div>
       </div>
 
-      {/* Content */}
-      <div className="flex-1 overflow-hidden">
+      {/* Content. `relative` anchors the floating in-preview find
+          bar (Cmd+F) to the top-right of this body — keeps the
+          preview document underneath fully visible instead of
+          pushing it down with an inline find row. */}
+      <div ref={setPreviewBodyEl} className="relative flex-1 overflow-hidden">
+        {/* In-preview find bar — renders nothing unless search scope
+            is `'node'`. Wires the highlight walk to the body element
+            (via state-as-ref) so only the visible preview gets
+            `::highlight()` ranges. */}
+        <InPreviewSearchBar scopeEl={previewBodyEl} />
         <PreviewHeaderSlotContext.Provider value={headerSlotValue}>
           <NodePreviewContent
             key={expandedNodeId ?? previewType}

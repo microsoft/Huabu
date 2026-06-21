@@ -10,7 +10,9 @@ import { CanvasLayerPanel } from '../../components/Panels/CanvasLayerPanel';
 import { ChatPanel } from '../../components/Panels/ChatPanel';
 import { CanvasHeader } from '../../components/Panels/Header/CanvasHeader.tsx';
 import { KeyboardShortcutsModal } from '../../components/Panels/Header/KeyboardShortcutsModal.tsx';
+import { SearchOverlay } from '../../components/Search/SearchOverlay';
 import { usePageShortcuts } from '../../hooks/shortcuts';
+import { useGlobalSearchHotkey } from '../../hooks/useGlobalSearchHotkey';
 import useStore, {
   dismissVersionConflictToast,
 } from '../../store/canvasStore.ts';
@@ -34,6 +36,9 @@ export default function CanvasPage() {
   const storeCanvasId = useStore((s) => s.canvasId);
   const initialised = useRef(false);
   const { isShortcutsOpen, openShortcuts, closeShortcuts } = usePageShortcuts();
+  // Cmd+F / Ctrl+F → open the canvas-wide search overlay (or, when
+  // focus is inside the expanded preview, the in-preview find bar).
+  useGlobalSearchHotkey();
 
   useEffect(() => {
     if (!canvasId) {
@@ -114,6 +119,7 @@ export default function CanvasPage() {
         isOpen={isShortcutsOpen}
         onClose={closeShortcuts}
       />
+      <SearchOverlay />
     </>
   );
 }

@@ -608,6 +608,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     <div
       ref={wrapperRef}
       data-canvas-root=""
+      data-search-scope="canvas"
       className={clsx(
         'bg-bg-default relative flex h-full w-full flex-col',
         pendingNodeType === 'note' && 'canvas-pending-note',

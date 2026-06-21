@@ -71,6 +71,56 @@
 - 版本号选用 `text-fg-subtle` + `text-[11px]` + `font-mono`，跟周围的"次要信息"风格一致，可以选中复制，便于反馈 bug 时贴出来。
 - web 包自己的 `package.json` 一直是 `0.0.0`，不是有效的产品版本号；桌面端 `package.json` 才是真正发版用的，因此选它作为单一信源。后续只要 bump 桌面端的版本，UI 上就会自动跟上。
 - 新增的全局类型 `__APP_VERSION__` 声明在 [vite-env.d.ts](apps/web/src/vite-env.d.ts)，所有客户端代码都能直接引用。
+## 2026-06-22 · Canvas 搜索：流式 meta 命中 + 就地查找条手感修复
+
+**What Changed**
+
+继上次"补齐 text / question 节点高亮和 PDF 视图入口"之后，本轮主要打磨[画布搜索](#2026-06-20--canvas-搜索cmd-f-一键找节点和正文)的响应速度和就地查找条的导航手感：
+
+- **Meta 命中现在边读边返** —— 之前服务端 `searchCanvas` 要先 `await readAllNodes()` 一次性把所有 sidecar 都读上来才开始扫第一个字段，大画布上首条结果有明显的延迟。改为 `streamAllNodes` 边读边扫：每个 sidecar 一落盘就立刻匹配 label / summary / keywords 并通过 NDJSON 推到前端，第一条命中往往在剩余文件还在读的时候就显示了。content tier 仍走全量缓存，零额外 I/O。
+- **预览查找条第一次按 `Enter` 跳到第 1 条而不是第 2 条** —— 之前打开就地查找条、视觉上"光标已经落在第 1 个高亮上"，但首次回车会把游标推到第 2 个，对惯了 VS Code 的人比较反直觉。现在第一次 `Enter` 锚定到 #1，第二次开始才前进 / 回退。
+- **`n/m` 命中计数会跟随异步渲染自动刷新** —— pdf.js 的文本层和 Milkdown 的懒加载编辑器都是初次挂载之后才填字符，之前计数只在打开查找条那一刻数一次，pdf 翻页后数字不变。现在 `useTextHighlight` 把命中数和它内部的 `MutationObserver` 绑在一起，DOM 一变就自动重算。
+- **搜索请求失败时不再泄漏一个 fetch 连接** —— 快速重打需求词时，老逻辑会在 `response.ok === false` 路径上直接 `throw` 而不消费响应体，Chromium 会保留底层 socket 直到 GC，长时间高频搜索会肉眼可见地积压网络面板的 pending 项。修复方法是在抛错之前先 `body?.cancel()`。
+
+**Notes**
+
+- 行为完全向后兼容，无需任何用户操作；老的 in-memory 测试入口 `runCanvasSearch` 也仍保留供单测使用。
+- 如果你写了画布插件并直接调用了 `/canvas/:id/search` 的流式接口：事件顺序没变，仅 meta 阶段命中到达更早。
+
+## 2026-06-21 · Canvas 搜索：补齐 text / question 节点高亮和 PDF 视图入口
+
+**What Changed**
+
+修复 [Canvas 搜索](#2026-06-20--canvas-搜索cmd-f-一键找节点和正文)落地后用户反馈的三类小问题：
+
+- **文本类节点（`text` / `question`）也能被高亮** —— 这两类节点正文渲染在 `<textarea>` 内，浏览器原生 [CSS Custom Highlight API](https://developer.mozilla.org/docs/Web/API/CSS_Custom_Highlight_API) 无法穿透到 textarea 内部。新增一个只在"非编辑态"出现的同字体同布局只读镜像 `<div>`，让高亮层有真实 DOM 文本可以指向。编辑态自动还原成普通 textarea，无视觉切换感。
+- **`question` 节点的 prompt 现在纳入画布搜索索引** —— 之前 question 节点的提问文本只活在内存中（`data.input.content`），不会落到 markdown sidecar，导致服务端扫描器看不到它。现在前端 autosave 会把 prompt 镜像到 sidecar 的 `content` 字段（服务端同步放行了 `question` 类型的 body 写入），下次再编辑提问后即可被搜到。
+- **结果列表里的命中高亮不再撑开字距** —— `<mark>` 之前带了 `px-0.5` 内边距，看上去像把命中文字和左右字隔开了。改为只用背景色，字距复原。
+- **PDF 展开预览也能用 `Cmd+F` 唤起就地查找条** —— 之前 PDF viewer 不接管键盘焦点，焦点停在 `<body>`，全局热键解析不到"节点 scope"就退到了画布浮层。现在如果当前页面已经挂着展开预览面板（`[data-search-scope="node"]`），即便焦点不在里面也优先把 `Cmd+F` 路由到这块预览。
+- **PDF 命中高亮不再露出文本层的"幽灵字"** —— 之前 `::highlight(sediment-search)` 顺手把 `color` 也强设成 `--fg-default`，导致 pdf.js 那层本来 `color: transparent` 的可选中文本被强制可见，叠在真实页面之上像换了一种字体。去掉 `color` 属性，与浏览器原生 `::selection` 行为对齐：背景照亮，文字色继续 inherit。
+- **画布搜索 ↑/↓ 现在实时聚焦到当前命中节点** —— 之前只有 `Enter` 或鼠标点击才会 `fitView`，所以方向键翻列表时视口不动，看上去就像"每次只聚焦在第一个"。改为 `activeIdx` 变化即触发 `fitView`（不打开预览），`Enter` 仍保留"内容命中则打开预览"的最终动作。
+
+**Notes**
+
+- 老的 question 节点要先被编辑一次，prompt 才会写入 sidecar 变成可搜索；纯历史节点不会自动回填。
+- TextNodeBody 的镜像层仅在 `draft.length > 0 && !isEditing` 时挂载，空节点 / 编辑中保持原结构，避免影响光标定位和占位符渲染。
+
+## 2026-06-20 · Canvas 搜索：`Cmd+F` 一键找节点和正文
+
+**What Changed**
+
+新增按节点级别的画布搜索能力，入口统一为 `Ctrl/Cmd+F`，按焦点位置自动分发到两种搜索面：
+
+- **画布搜索浮层** —— 焦点在画布时打开，顶部居中弹出。结果分两段流式返回：先回 Meta 命中（标题 / 摘要 / 关键词），随后回 Content 命中（正文）。`↑ / ↓` 切换、`Enter` 跳转（自动 `fitView` 到目标节点，若命中正文则同时打开预览），`Esc` 关闭。
+- **就地查找条** —— 焦点在右侧展开的节点预览中时打开，紧贴预览顶部。使用浏览器原生 [CSS Custom Highlight API](https://developer.mozilla.org/docs/Web/API/CSS_Custom_Highlight_API) 在预览正文上做无侵入式高亮（不会改动 Milkdown / pdf.js 自己的 DOM）。`Enter` / `Shift+Enter` 上下跳，`Esc` 关闭。
+
+后端是新增的 `POST /canvas/:canvasId/search` 路由，走 **NDJSON 流式协议**：服务端按"先 Meta 后 Content"的两阶段顺序边扫边推（`progress` 帧包含 `phase: 'meta-done'` 与 `phase: 'content'` 的扫描进度），并发读取节点 sidecar。每次按键都通过 `AbortController` 取消上一次未完成的请求，socket 关闭后服务端会立即停止扫描。
+
+**Notes**
+
+- 不做应用层缓存：搜索是低频操作，OS 页缓存 + 一次性并发读已经足够；待单画布稳定突破 30MB 再评估接入 ripgrep。
+- 默认 `limit = 100`（画布浮层）/ `200`（预览内）。命中过多时服务端会截断并在最后的 `done` 帧里把 `truncated: true` 透传到前端。
+- 已注册的快捷键参考请见 [08 · 快捷键参考 → 搜索](./08-shortcuts.md#搜索)。
 
 ## 2026-06-19 · External agent：换电脑/清浏览器缓存后，斜杠菜单仍能秒显
 
