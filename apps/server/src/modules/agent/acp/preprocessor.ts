@@ -242,7 +242,10 @@ export async function prepareExternalAgentPrompt(
 
   return {
     prompt,
-    serialized: serializePrompt(prompt, { canvasRoot }),
+    serialized: serializePrompt(prompt, {
+      canvasRoot,
+      sidebandEnabled: !!canvasId,
+    }),
   };
 }
 
@@ -291,7 +294,7 @@ export async function prepareExternalAgentPrompt(
  */
 export function serializePrompt(
   prompt: ExternalAgentPrompt,
-  opts: { canvasRoot?: string } = {},
+  opts: { canvasRoot?: string; sidebandEnabled?: boolean } = {},
 ): string {
   const lines: string[] = [prompt.task.trim()];
   if (prompt.attachments.length > 0) {
@@ -304,8 +307,28 @@ export function serializePrompt(
       const wirePath = opts.canvasRoot
         ? path.join(opts.canvasRoot, ref.path)
         : `${ACP_CANVAS_VFS_PREFIX}${ref.path}`;
-      lines.push(`- \`${wirePath}\` — ${ref.reason}`);
+      const nodeHint =
+        opts.sidebandEnabled && ref.nodeId
+          ? ` (node ID: \`${ref.nodeId}\`)`
+          : '';
+      lines.push(`- \`${wirePath}\`${nodeHint} — ${ref.reason}`);
     }
+  }
+  if (opts.sidebandEnabled) {
+    lines.push('', '## Canvas Tools (Sideband)', '');
+    lines.push(
+      'You have the Huabu Sideband Tool (HST) available for reading/writing canvas nodes and querying the built-in agent.',
+      '',
+      'Usage: `node ${AGENTLET_SIDEBAND_DIR}/huabu-sideband-tool.mjs <command> [args...]`',
+      '',
+      'Commands:',
+      "- `read-node <node-id>` — Download a node's content to a local file, prints file path to stdout",
+      '- `write-node --type <type> <content-file>` — Create a new canvas node from a file',
+      '- `write-node --id <node-id> <content-file>` — Update an existing node from a file',
+      '- `ask-agent "<prompt>"` — Ask the built-in canvas agent a question (supports complex reasoning, spatial queries, multi-node operations)',
+      '',
+      'Run with `--help` for full usage details on each command.',
+    );
   }
   return lines.join('\n');
 }
@@ -366,6 +389,9 @@ function parsePromptJson(
   if (!task) return null;
 
   const knownPaths = new Set<string>(selectedRefs.map((r) => r.filename));
+  const pathToNodeId = new Map<string, string>(
+    selectedRefs.map((r) => [r.filename, r.id]),
+  );
 
   const rawRefs = Array.isArray(obj.attachments) ? obj.attachments : [];
   const attachments: ExternalAgentPrompt['attachments'] = [];
@@ -387,6 +413,9 @@ function parsePromptJson(
     attachments.push({
       path: refPath,
       reason: rawReason ? truncate(rawReason, 80) : 'verbatim content required',
+      ...(pathToNodeId.has(refPath)
+        ? { nodeId: pathToNodeId.get(refPath) }
+        : {}),
     });
     if (attachments.length >= 8) break;
   }

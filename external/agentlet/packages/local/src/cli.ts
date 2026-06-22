@@ -1,45 +1,35 @@
 import { Command } from 'commander'
 
-/** Options when --agent is provided (self-spawn / bridge mode) */
-export interface CliOptions {
-  agent: string
+export interface AgentletOptions {
+  // Core connection
   server: string
   token: string
-  cwd: string
   reconnectMax: number
   bufferLimit: number
+  heartbeat: number
+  allowInsecure: boolean
+
+  // Logging
+  logLevel: 'debug' | 'info' | 'warn' | 'error'
+  logFile?: string
+
+  // Bridge mode (--agent provided): spawn and relay a single agent
+  agent?: string
+  cwd: string
+  env: Record<string, string>
   autoRestart: boolean
   restartDelay: number
   restartMax: number
-  logLevel: 'debug' | 'info' | 'warn' | 'error'
-  logFile?: string
-  env: Record<string, string>
-  heartbeat: number
-  allowInsecure: boolean
-}
 
-/** Options when --agent is NOT provided (idle agentlet / daemon mode) */
-export interface DaemonOptions {
-  server: string
-  token: string
-  daemonId?: string
-  reconnectMax: number
-  bufferLimit: number
+  // Daemon mode (--agent omitted): idle agentlet awaiting server/spawn
+  agentletId?: string
   maxAgents: number
-  heartbeat: number
-  logLevel: 'debug' | 'info' | 'warn' | 'error'
-  logFile?: string
-  allowInsecure: boolean
 }
 
-export type ParseResult =
-  | { mode: 'bridge'; options: CliOptions }
-  | { mode: 'daemon'; options: DaemonOptions }
-
-export function parseCli(argv: string[]): ParseResult {
+export function parseCli(argv: string[]): AgentletOptions {
   const program = new Command()
 
-  let parsedResult: ParseResult | undefined
+  let parsed: AgentletOptions | undefined
 
   program
     .name('agentlet')
@@ -67,55 +57,34 @@ export function parseCli(argv: string[]): ParseResult {
         process.exit(1)
       }
 
-      if (opts.agent) {
-        // Self-spawn mode (bridge)
-        parsedResult = {
-          mode: 'bridge',
-          options: {
-            agent: opts.agent,
-            server: opts.server,
-            token,
-            cwd: opts.cwd,
-            reconnectMax: parseInt(opts.reconnectMax, 10),
-            bufferLimit: parseInt(opts.bufferLimit, 10),
-            autoRestart: opts.autoRestart,
-            restartDelay: parseInt(opts.restartDelay, 10),
-            restartMax: parseInt(opts.restartMax, 10),
-            logLevel: opts.logLevel as CliOptions['logLevel'],
-            logFile: opts.logFile,
-            env: opts.env,
-            heartbeat: parseInt(opts.heartbeat, 10),
-            allowInsecure: opts.allowInsecure,
-          },
-        }
-      } else {
-        // Idle agentlet mode (daemon)
-        parsedResult = {
-          mode: 'daemon',
-          options: {
-            server: opts.server,
-            token,
-            daemonId: opts.agentletId?.trim() || undefined,
-            reconnectMax: parseInt(opts.reconnectMax, 10),
-            bufferLimit: parseInt(opts.bufferLimit, 10),
-            maxAgents: parseInt(opts.maxAgents, 10),
-            heartbeat: parseInt(opts.heartbeat, 10),
-            logLevel: opts.logLevel as DaemonOptions['logLevel'],
-            logFile: opts.logFile,
-            allowInsecure: opts.allowInsecure,
-          },
-        }
+      parsed = {
+        server: opts.server,
+        token,
+        reconnectMax: parseInt(opts.reconnectMax, 10),
+        bufferLimit: parseInt(opts.bufferLimit, 10),
+        heartbeat: parseInt(opts.heartbeat, 10),
+        allowInsecure: opts.allowInsecure,
+        logLevel: opts.logLevel as AgentletOptions['logLevel'],
+        logFile: opts.logFile,
+        agent: opts.agent,
+        cwd: opts.cwd,
+        env: opts.env,
+        autoRestart: opts.autoRestart,
+        restartDelay: parseInt(opts.restartDelay, 10),
+        restartMax: parseInt(opts.restartMax, 10),
+        agentletId: opts.agentletId?.trim() || undefined,
+        maxAgents: parseInt(opts.maxAgents, 10),
       }
     })
 
   program.parse(argv)
 
-  if (!parsedResult) {
+  if (!parsed) {
     program.help()
     process.exit(1)
   }
 
-  return parsedResult
+  return parsed
 }
 
 function collectEnv(value: string, previous: Record<string, string>): Record<string, string> {

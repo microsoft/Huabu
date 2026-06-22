@@ -491,37 +491,191 @@ npm install @agentlet/server
 
 ### 5.3. Embedded Mode (Library API)
 
+Import `AgentletServer` into your own HTTP server for in-process access to agents. The host app is responsible for four things: **mounting** the server, **orchestrating** thread-to-session mapping, **communicating** via the ACP SDK, and **persisting** sessions for recovery after restart.
+
+#### Quick start
+
 ```ts
-import { AgentletServer, type AgentConnection } from '@agentlet/server'
+import { AgentletServer } from '@agentlet/server'
 
 const server = new AgentletServer({
-  storeDir: './data',  // enables event persistence (JSONL logs in ./data/events/)
+  storeDir: './data',
   authenticate: async (token, meta) => {
-    const record = await db.findToken(token)
-    if (!record || record.expired) throw new Error('Invalid token')
-    return { metadata: { userId: record.userId } }
+    if (token !== process.env.AGENTLET_TOKEN) throw new Error('Invalid token')
+    return { metadata: {} }
   },
   onConnection: (agent) => console.log(`Agent connected: ${agent.sessionId}`),
-  onReconnection: (agent) => console.log(`Agent reconnected: ${agent.sessionId}`),
-  onDisconnection: (agent, reason) => console.log(`Agent disconnected: ${agent.sessionId} — ${reason}`),
+  onDisconnection: (agent, reason) => console.log(`Agent disconnected: ${reason}`),
+})
+```
+
+#### Mounting on your HTTP server
+
+Initialize the server and attach the WebSocket upgrade handler. The `handleUpgrade` call works with any Node.js HTTP framework:
+
+```ts
+// Fastify
+app.addHook('onReady', async () => {
+  await server.init()
+  app.server.on('upgrade', (req, socket, head) => {
+    if (req.url?.startsWith('/api/bridge')) server.handleUpgrade(req, socket, head)
+  })
 })
 
-// Initialize stores (required when storeDir is set)
+// Express
+const httpServer = app.listen(3001)
 await server.init()
-
-// Mount on your HTTP server (works with any framework)
 httpServer.on('upgrade', (req, socket, head) => {
-  if (req.url === '/api/bridge') {
-    server.handleUpgrade(req, socket, head)
-  }
+  if (req.url?.startsWith('/api/bridge')) server.handleUpgrade(req, socket, head)
 })
 
-// Graceful shutdown
+// Plain Node.js http
+const httpServer = http.createServer()
+await server.init()
+httpServer.on('upgrade', (req, socket, head) => {
+  server.handleUpgrade(req, socket, head)
+})
+httpServer.listen(3001)
+```
+
+> ⚠️ Call `server.init()` **after** the HTTP server is bound, not at import time. In Fastify, use `onReady` or `onListen`; in Express, call it inside the `listen()` callback.
+
+#### Spawning agents per thread
+
+The agentlet daemon connects once; the host spawns individual agent sessions on demand using `spawnOnAgentlet()`. Each application thread should get its **own** agent process to prevent state bleed (conversation history, model, mode).
+
+```ts
+// Resolve the connected daemon
+const agentlets = server.getAgentlets()
+const agentlet = agentlets[0]
+if (!agentlet) throw new Error('No agent worker online')
+
+// Spawn an agent for this thread (one process per thread)
+const { sessionId, pid } = await server.spawnOnAgentlet(agentlet.sessionId, {
+  appId: threadId,
+  sessionSpec: { command: 'claude', cwd: '/projects/myapp', idleTimeoutSecs: 600 },
+})
+
+// Wait for the agent to finish its WS handshake
+// (poll server.getConnection(sessionId) until status === 'connected')
+```
+
+#### Sending prompts
+
+The daemon already bootstraps the ACP session (`initialize` → `session/new`) during spawn. The host should **not** re-issue these RPCs. Instead, seed capabilities from the DataStore and send prompts directly.
+
+**Using raw JSON-RPC** (simplest, but no request correlation or schema validation):
+
+```ts
+const conn = server.getConnection(sessionId)
+if (!conn || conn.status !== 'connected') throw new Error('Agent offline')
+
+// Send prompt — no initialize or session/new needed
+conn.send({
+  jsonrpc: '2.0', method: 'session/prompt', id: 1,
+  params: { sessionId, prompt: [{ type: 'text', text: 'Refactor the auth module' }] },
+})
+
+// Listen for responses
+conn.onMessage((msg) => {
+  if (msg.method === 'session/update') renderToUI(msg.params)
+  if (msg.id === 1 && msg.result) console.log('Prompt finished')
+})
+```
+
+**Using `@agentclientprotocol/sdk`** (recommended for production — gives you request/response correlation, typed results, capability handler dispatch, and abort support):
+
+```ts
+import {
+  ClientSideConnection,
+  type Stream, type AnyMessage, type Client as SdkClient, type Agent as SdkAgent,
+} from '@agentclientprotocol/sdk'
+
+// Adapt AgentConnection to the SDK's Stream interface
+function streamFromAgentConnection(conn: AgentConnection): {
+  stream: Stream; close: () => void
+} {
+  let controller: ReadableStreamDefaultController<AnyMessage> | null = null
+  let closed = false
+  const readable = new ReadableStream<AnyMessage>({
+    start(c) {
+      controller = c
+      conn.onMessage((msg) => {
+        if (!closed) try { controller?.enqueue(msg as unknown as AnyMessage) } catch {}
+      })
+    },
+  })
+  const writable = new WritableStream<AnyMessage>({
+    write(msg) { if (!closed) conn.send(msg) },
+  })
+  return {
+    stream: { readable, writable },
+    close: () => { closed = true; try { controller?.close() } catch {} },
+  }
+}
+
+// Create the SDK connection with capability handlers
+const conn = server.getConnection(sessionId)
+const { stream, close } = streamFromAgentConnection(conn)
+const sdk = new ClientSideConnection(
+  (_agent: SdkAgent): SdkClient => ({
+    sessionUpdate: async (params) => { renderToUI(params.update) },
+    requestPermission: async (req) => {
+      const option = req.options.find(o => o.kind === 'allow_always') ?? req.options[0]
+      return { optionId: option.optionId }
+    },
+    readTextFile: async (req) => {
+      return { content: fs.readFileSync(resolve(projectRoot, req.path), 'utf-8') }
+    },
+    writeTextFile: async () => { throw new Error('Write not supported') },
+  }),
+  stream,
+)
+
+// Seed capabilities from DataStore — skip redundant initialize()
+const record = server.getDataStore().getSession(sessionId)
+// record.initializeResult contains agentCapabilities from the daemon's bootstrap
+
+// Send a prompt — resolves when the agent finishes the turn
+const result = await sdk.prompt({
+  sessionId,
+  prompt: [{ type: 'text', text: 'Refactor the auth module' }],
+})
+console.log('Prompt finished:', result.stopReason)
+
+// Cancel mid-turn (from a UI button, for example)
+// await sdk.cancel({ sessionId })
+
+// Cleanup
+close()
+```
+
+For a full production wrapper class (with session listeners, orphan-update buffering, and permission gating), see the [**Host App Integration Guide** §6](spec/host.md#6-acp-client-wrapper).
+
+#### Graceful shutdown
+
+```ts
+// Fastify
+app.addHook('onClose', () => server.close())
+
+// Or manually
 process.on('SIGTERM', async () => {
-  await server.close()
+  await server.close()  // sends server/shutdown to all agents
   process.exit(0)
 })
 ```
+
+#### Production integration guide
+
+The examples above cover the basics. For production host apps, the [**Host App Integration Guide**](spec/host.md) covers the additional patterns you will need:
+
+- **Spawn orchestration** — `threadId → sessionId` cache with daemon-swap invalidation
+- **Skip redundant handshake** — seed from DataStore + replay EventStore notifications
+- **Concurrency guards** — in-flight promise coalescing to prevent duplicate sessions
+- **Stale-entry eviction** — detect binding/scope changes and closed clients
+- **Session persistence & recovery** — resume after host restart via `session/load`
+- **ACP SDK wrapper** — `ClientSideConnection` with capability handlers (fs, permissions)
+- **Error handling** — daemon-offline errors, mid-prompt disconnects, status endpoints
 
 > See [Protocol Specification — Protocol Type Reference](spec/protocol.md#protocol-type-reference) for full `AgentletServerOptions` and `AgentConnection` definitions.
 
@@ -774,64 +928,6 @@ UI opens WebSocket, sets sessionId locally → immediately ready for session/pro
 - **`supportsLoad` flag** — if the agent supports `session/load` (from `initializeResult.agentCapabilities.loadSession`), a future reconnecting agentlet can resume the session instead of creating a new one.
 
 ---
-
-### 5.13. Framework Integration Examples (Embedded Mode)
-
-```ts
-// Express
-const app = express()
-const httpServer = app.listen(3001)
-httpServer.on('upgrade', (req, socket, head) => {
-  if (req.url === '/api/bridge') server.handleUpgrade(req, socket, head)
-})
-
-// Fastify
-fastify.server.on('upgrade', (req, socket, head) => {
-  if (req.url === '/api/bridge') server.handleUpgrade(req, socket, head)
-})
-
-// Plain Node.js http
-const httpServer = http.createServer()
-httpServer.on('upgrade', (req, socket, head) => {
-  server.handleUpgrade(req, socket, head)
-})
-httpServer.listen(3001)
-```
-
-### 5.14. Host App Usage Pattern (Embedded Mode)
-
-```ts
-// When user triggers an action that requires the agent:
-const agent = server.getConnection('sess_abc123')
-if (!agent || agent.status !== 'connected') {
-  throw new Error('Agent is offline')
-}
-
-// Session is already active (bootstrapped by agentlet)
-// Just read the sessionId from the connection profile:
-const sessionId = agent.session?.sessionId
-if (!sessionId) {
-  throw new Error('Agent has no active session')
-}
-
-// Send prompts directly — no initialize or session/new needed
-agent.send({
-  jsonrpc: '2.0', method: 'session/prompt', id: 1,
-  params: { sessionId, prompt: [{ type: 'text', text: 'Refactor the auth module' }] }
-})
-
-// Listen for responses
-agent.onMessage((msg) => {
-  if (msg.method === 'session/update') {
-    // Streaming content from agent
-    renderToUI(msg.params)
-  }
-  if (msg.id === 1 && msg.result) {
-    // Prompt completed
-    console.log('Prompt finished')
-  }
-})
-```
 
 ---
 

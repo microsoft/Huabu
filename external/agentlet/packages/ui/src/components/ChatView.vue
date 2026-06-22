@@ -17,6 +17,15 @@ const messagesEl = ref<HTMLElement | null>(null)
 const inputEl = ref<HTMLTextAreaElement | null>(null)
 const emptyWarning = ref(false)
 
+// Message display limit
+const displayLimitOptions = [50, 100, 200, 500, 0] // 0 means "All"
+const displayLimit = ref(50)
+const displayedMessages = computed(() => {
+  const msgs = session.visibleMessages
+  if (displayLimit.value === 0 || msgs.length <= displayLimit.value) return msgs
+  return msgs.slice(msgs.length - displayLimit.value)
+})
+
 // Feature (b): Slash command typeahead
 const commands = computed(() => session.availableCommands)
 const slash = useSlashCommandTypeahead(input, commands)
@@ -63,13 +72,16 @@ function onSelectCommand(cmd: { name: string; description?: string; input?: { hi
   nextTick(() => inputEl.value?.focus())
 }
 
-// Auto-scroll on new messages
-watch(() => session.visibleMessages.length, async () => {
-  await nextTick()
-  if (messagesEl.value) {
-    messagesEl.value.scrollTop = messagesEl.value.scrollHeight
+// Auto-scroll when new messages arrive or display limit changes
+watch(
+  () => [session.visibleMessages.length, displayLimit.value] as const,
+  async () => {
+    await nextTick()
+    if (messagesEl.value) {
+      messagesEl.value.scrollTop = messagesEl.value.scrollHeight
+    }
   }
-})
+)
 </script>
 
 <template>
@@ -79,6 +91,18 @@ watch(() => session.visibleMessages.length, async () => {
         <input type="checkbox" :checked="!session.showVerbose" @change="session.showVerbose = !session.showVerbose" />
         <span class="slider"></span>
         <span class="label">Hide thinking &amp; tools</span>
+      </label>
+      <label class="display-limit">
+        <span class="label">Show last</span>
+        <select v-model.number="displayLimit">
+          <option v-for="opt in displayLimitOptions" :key="opt" :value="opt">
+            {{ opt === 0 ? 'All' : opt }}
+          </option>
+        </select>
+        <span class="label">messages</span>
+        <span v-if="displayLimit > 0 && session.visibleMessages.length > displayLimit" class="truncated-hint">
+          ({{ session.visibleMessages.length - displayLimit }} hidden)
+        </span>
       </label>
     </div>
 
@@ -91,7 +115,7 @@ watch(() => session.visibleMessages.length, async () => {
       </div>
       <template v-else>
         <div
-          v-for="msg in session.visibleMessages"
+          v-for="msg in displayedMessages"
           :key="msg.id"
           class="message"
           :class="[msg.role, msg.type]"
@@ -151,6 +175,10 @@ watch(() => session.visibleMessages.length, async () => {
   padding: 6px 16px;
   border-bottom: 1px solid #e0e0e0;
   background: #fafafa;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 .toggle-switch {
   display: flex;
@@ -190,6 +218,25 @@ watch(() => session.visibleMessages.length, async () => {
 }
 .toggle-switch .label {
   user-select: none;
+}
+.display-limit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #555;
+}
+.display-limit select {
+  padding: 2px 6px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 12px;
+  background: #fff;
+  cursor: pointer;
+}
+.display-limit .truncated-hint {
+  color: #999;
+  font-style: italic;
 }
 .messages {
   flex: 1;

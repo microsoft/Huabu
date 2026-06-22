@@ -180,6 +180,7 @@ export async function ensureAgentForThread(
   threadId: string,
   recipe: AcpBindingRecipe,
   existingSessionId?: string,
+  canvasId?: string,
 ): Promise<{ sessionId: string; pid: number }> {
   const agentlet = await waitForActiveAgentlet(AGENTLET_READY_TIMEOUT_MS);
   if (!agentlet) {
@@ -214,6 +215,13 @@ export async function ensureAgentForThread(
     );
   }
 
+  // HUABU_CANVAS_ID is a host-app variable that the daemon doesn't know.
+  // AGENTLET_SERVER and AGENTLET_TOKEN are injected by the daemon itself.
+  const sidebandEnv: Record<string, string> = {};
+  if (canvasId) {
+    sidebandEnv.HUABU_CANVAS_ID = canvasId;
+  }
+
   let sessionId: string;
   let pid: number;
   try {
@@ -225,6 +233,7 @@ export async function ensureAgentForThread(
         cwd: recipe.cwd,
         autoRestart: recipe.autoRestart,
         idleTimeoutSecs: DEFAULT_IDLE_TIMEOUT_SECS,
+        env: Object.keys(sidebandEnv).length > 0 ? sidebandEnv : undefined,
       },
     });
     sessionId = result.sessionId;
