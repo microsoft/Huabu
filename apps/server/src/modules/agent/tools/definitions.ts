@@ -544,23 +544,6 @@ export const fsWriteTool: ToolDefinition = {
 };
 
 // ==================== Image Tools ====================
-//
-// Two-tool surface for "AI fabricates a new image and puts it on the
-// canvas":
-//
-//   - `rasterize_node`   — turn an existing canvas node (image / pdf
-//     cover / sketch) into a PNG artifact key the agent can pass as
-//     a visual reference. Cheap pass-through for image/pdf; runs an
-//     SVG → PNG render for sketches.
-//   - `generate_image`   — call Azure OpenAI gpt-image-1 (text-only
-//     or with one+ reference images) and persist the result into the
-//     canvas's artifact store. Returns `{src, width, height}` — the
-//     agent must follow up with `canvas_commands` to actually place
-//     the image on the canvas.
-//
-// Both are write-adjacent (generate_image writes a file; rasterize_node
-// writes a file only for sketches) but neither mutates `canvas.json` —
-// that remains the exclusive job of `canvas_commands`.
 
 export const rasterizeNodeParamsSchema = Type.Object({
   nodeId: Type.String({
@@ -621,7 +604,7 @@ export const generateImageTool: ToolDefinition = {
   name: 'generate_image',
   label: 'Generate image',
   description:
-    "Generate a new image with Azure OpenAI gpt-image-1 and persist it into the current canvas's artifact store. Returns JSON `{src, width, height, revisedPrompt?}` — `src` is an artifact key like `art_xyz.png`. **This tool does NOT place the image on the canvas.** To make the image visible, follow up with a `canvas_commands` call: `{type:'CREATE_NODES', nodes:[{nodeType:'image', data:{src:'<the src>', label:'<short caption>'}, position:{x,y}, size:{width,height}}]}` — pick a free spot near the user's current focus. To use existing canvas content as visual reference, first call `rasterize_node` on each source node and pass the returned `src` strings via `referenceArtifactSrcs`. **In your final chat reply, embed the generated image inline using markdown image syntax `![<short caption>](<the src>)` so the user sees it immediately** — do NOT use link syntax `[…](…)` (renders as a broken link, not an image), do NOT describe what's in the image (the user can see it), do NOT list pixel dimensions, and keep any surrounding text to a brief one-line confirmation. Requires Azure OpenAI with an Image Deployment configured in Settings → LLM Provider.",
+    "Generate a new image with Azure OpenAI gpt-image-1 and persist it into the current canvas's artifact store. Returns JSON `{src, width, height, revisedPrompt?}` — `src` is an artifact key like `art_xyz.png`. **If you need to place the image on the canvas**, follow up with a `canvas_commands` call: `{type:'CREATE_NODES', nodes:[{nodeType:'image', data:{src:'<the src>', label:'<short caption>'}, position:{x,y}, size:{width,height}}]}` — pick a free spot near the user's current focus. To use existing canvas content as visual reference, first call `rasterize_node` on each source node and pass the returned `src` strings via `referenceArtifactSrcs`. **In your final chat reply, embed the generated image inline using markdown image syntax `![<short caption>](<the src>)` so the user sees it immediately** — do NOT use link syntax `[…](…)` (renders as a broken link, not an image), do NOT describe what's in the image (the user can see it), do NOT list pixel dimensions, and keep any surrounding text to a brief one-line confirmation. Requires Azure OpenAI with an Image Deployment configured in Settings → LLM Provider.",
   parameters: generateImageParamsSchema,
   // Image generation is slow (5-30s); marking sequential prevents the
   // agent from racing two parallel generations against the same
