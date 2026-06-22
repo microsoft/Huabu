@@ -528,7 +528,7 @@ Examples:
   const canvasId = requireEnv('HUABU_CANVAS_ID', CANVAS_ID);
   const { finalMessage } = await callAskAgent(prompt, canvasId, {
     showSteps,
-    saveSession: !flags['--no-save-session'],
+    saveSession,
   });
 
   // Final result to stdout (if --show-steps was used, text_delta already printed it)

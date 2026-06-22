@@ -125,6 +125,7 @@ export default typescriptEslint.config(
     // Node.js Env (Server & Shared)
     files: [
       'apps/server/src/**/*.{ts,tsx}',
+      'apps/server/src/**/*.{js,mjs,cjs}',
       'apps/desktop/src/**/*.{ts,tsx}',
       'apps/desktop/scripts/**/*.{js,mjs,cjs}',
       'packages/shared/src/**/*.{ts,tsx}',
