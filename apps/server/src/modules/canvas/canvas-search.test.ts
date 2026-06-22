@@ -1,11 +1,12 @@
 /**
  * Tests for the per-canvas search scanner.
  *
- * Covers the pure {@link runCanvasSearch} driver (no Fastify, no disk):
- * the route layer is a thin NDJSON adapter so the interesting behaviour
- * — tiered emission order, field filtering, snippet construction,
- * limits, abort semantics — all lives here and is easy to test in
- * memory.
+ * Covers the streaming {@link searchCanvas} driver. The route layer is
+ * a thin NDJSON adapter, so the interesting behaviour — tiered emission
+ * order, field filtering, snippet construction, limits, abort semantics
+ * — all lives here and is exercised against a fake `CanvasStore` whose
+ * `streamAllNodes` walks an in-memory snapshot. Production reads sidecars
+ * off disk, but the scanner takes a callback so the two are wire-compatible.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -13,13 +14,13 @@ import { describe, expect, it } from 'vitest';
 import {
   extractSearchableNodes,
   extractSearchableEdges,
-  runCanvasSearch,
+  searchCanvas,
   type SearchableEdge,
   type SearchableNode,
 } from './canvas-search.js';
 
-import type { NodeContent } from '../storage/canvas-store.js';
-import type { CanvasSearchEvent } from '@sediment/shared';
+import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
+import type { CanvasSearchEvent, CanvasSearchRequest } from '@sediment/shared';
 
 function mkNode(id: string, type: string): SearchableNode {
   return { id, type };
@@ -48,35 +49,65 @@ function mkEdge(
   return { id, sourceNodeId, targetNodeId, label };
 }
 
-function collect(
+/**
+ * Build a duck-typed `CanvasStore` that satisfies just the two methods
+ * `searchCanvas` actually reads from: `read()` (for the static node + edge
+ * shape) and `streamAllNodes()` (for the sidecar bodies). The rest of the
+ * store surface is irrelevant here, so we cast through `unknown`.
+ */
+function makeFakeStore(opts: {
+  nodes: readonly SearchableNode[];
+  contents: readonly NodeContent[];
+  edges?: readonly SearchableEdge[];
+}): CanvasStore {
+  const stateNodes = opts.nodes.map((n) => ({ id: n.id, type: n.type }));
+  const stateEdges = (opts.edges ?? []).map((e) => ({
+    id: e.id,
+    source: e.sourceNodeId,
+    target: e.targetNodeId,
+    data:
+      e.label !== null ? { edgeStyle: { label: e.label } } : { edgeStyle: {} },
+  }));
+  const fake = {
+    read: () => ({ state: { nodes: stateNodes, edges: stateEdges } }),
+    streamAllNodes: async (
+      onNode: (id: string, content: NodeContent) => void,
+      signal?: { readonly aborted: boolean },
+    ): Promise<Map<string, NodeContent>> => {
+      const map = new Map<string, NodeContent>();
+      for (const c of opts.contents) {
+        if (signal?.aborted) return map;
+        map.set(c.nodeId, c);
+        onNode(c.nodeId, c);
+      }
+      return map;
+    },
+  };
+  return fake as unknown as CanvasStore;
+}
+
+async function collect(
   nodes: SearchableNode[],
   contents: NodeContent[],
-  request: Parameters<typeof runCanvasSearch>[0]['request'],
+  request: CanvasSearchRequest,
   signal?: AbortSignal,
   edges?: SearchableEdge[],
-): CanvasSearchEvent[] {
-  const map = new Map(contents.map((c) => [c.nodeId, c]));
+): Promise<CanvasSearchEvent[]> {
+  const store = makeFakeStore({ nodes, contents, edges });
   const events: CanvasSearchEvent[] = [];
-  runCanvasSearch({
-    nodes,
-    edges,
-    contentByNodeId: map,
-    request,
-    signal,
-    emit: (e) => events.push(e),
-  });
+  await searchCanvas(store, request, (e) => events.push(e), signal);
   return events;
 }
 
-describe('runCanvasSearch — tiered emission', () => {
-  it('emits metadata-tier matches before content-tier matches', () => {
+describe('searchCanvas — tiered emission', () => {
+  it('emits metadata-tier matches before content-tier matches', async () => {
     const nodes = [mkNode('n1', 'note'), mkNode('n2', 'text')];
     const contents = [
       mkContent('n1', 'note', { label: 'banana split', content: 'apple pie' }),
       mkContent('n2', 'text', { label: 'pie chart', content: 'banana bread' }),
     ];
 
-    const events = collect(nodes, contents, { query: 'banana' });
+    const events = await collect(nodes, contents, { query: 'banana' });
 
     const matches = events.filter((e) => e.type === 'match');
     expect(matches.map((m) => m.type === 'match' && m.tier)).toEqual([
@@ -89,8 +120,8 @@ describe('runCanvasSearch — tiered emission', () => {
     ]);
   });
 
-  it('always emits a meta-done progress frame between tiers', () => {
-    const events = collect(
+  it('always emits a meta-done progress frame between tiers', async () => {
+    const events = await collect(
       [mkNode('n1', 'note')],
       [mkContent('n1', 'note', { label: 'hello', content: 'world' })],
       { query: 'zzz' },
@@ -101,8 +132,8 @@ describe('runCanvasSearch — tiered emission', () => {
     expect(progress).toHaveLength(1);
   });
 
-  it('emits a final done frame with the total emitted count', () => {
-    const events = collect(
+  it('emits a final done frame with the total emitted count', async () => {
+    const events = await collect(
       [mkNode('n1', 'note'), mkNode('n2', 'note')],
       [
         mkContent('n1', 'note', { label: 'foo', content: 'foo' }),
@@ -118,9 +149,9 @@ describe('runCanvasSearch — tiered emission', () => {
   });
 });
 
-describe('runCanvasSearch — field filtering', () => {
-  it('omitting `content` from fields skips body scan entirely', () => {
-    const events = collect(
+describe('searchCanvas — field filtering', () => {
+  it('omitting `content` from fields skips body scan entirely', async () => {
+    const events = await collect(
       [mkNode('n1', 'note')],
       [
         mkContent('n1', 'note', {
@@ -134,8 +165,8 @@ describe('runCanvasSearch — field filtering', () => {
     expect(matches).toHaveLength(0);
   });
 
-  it('finds matches in summary and keywords frontmatter', () => {
-    const events = collect(
+  it('finds matches in summary and keywords frontmatter', async () => {
+    const events = await collect(
       [mkNode('n1', 'note')],
       [
         mkContent('n1', 'note', {
@@ -155,9 +186,9 @@ describe('runCanvasSearch — field filtering', () => {
   });
 });
 
-describe('runCanvasSearch — node filtering', () => {
-  it('nodeTypes filter restricts scan to matching types', () => {
-    const events = collect(
+describe('searchCanvas — node filtering', () => {
+  it('nodeTypes filter restricts scan to matching types', async () => {
+    const events = await collect(
       [mkNode('n1', 'note'), mkNode('n2', 'pdf')],
       [
         mkContent('n1', 'note', { label: 'hit-1', content: '' }),
@@ -171,8 +202,8 @@ describe('runCanvasSearch — node filtering', () => {
     expect(ids).toEqual(['n1']);
   });
 
-  it('nodeId filter restricts scan to a single node', () => {
-    const events = collect(
+  it('nodeId filter restricts scan to a single node', async () => {
+    const events = await collect(
       [mkNode('n1', 'note'), mkNode('n2', 'note')],
       [
         mkContent('n1', 'note', { label: 'foo', content: 'foo' }),
@@ -189,9 +220,9 @@ describe('runCanvasSearch — node filtering', () => {
   });
 });
 
-describe('runCanvasSearch — snippet construction', () => {
-  it('returns the full label as the snippet for label hits', () => {
-    const events = collect(
+describe('searchCanvas — snippet construction', () => {
+  it('returns the full label as the snippet for label hits', async () => {
+    const events = await collect(
       [mkNode('n1', 'note')],
       [mkContent('n1', 'note', { label: 'My Banana Plan', content: '' })],
       { query: 'banana' },
@@ -203,9 +234,9 @@ describe('runCanvasSearch — snippet construction', () => {
     expect(m.match.matchLength).toBe(6);
   });
 
-  it('adds ellipses when snippet is clipped at both ends', () => {
+  it('adds ellipses when snippet is clipped at both ends', async () => {
     const long = 'a'.repeat(200) + ' the needle is here ' + 'b'.repeat(200);
-    const events = collect(
+    const events = await collect(
       [mkNode('n1', 'note')],
       [mkContent('n1', 'note', { label: 'doc', content: long })],
       { query: 'needle', fields: ['content'] },
@@ -220,8 +251,8 @@ describe('runCanvasSearch — snippet construction', () => {
     ).toBe('needle');
   });
 
-  it('collapses whitespace runs (incl. newlines) inside the snippet', () => {
-    const events = collect(
+  it('collapses whitespace runs (incl. newlines) inside the snippet', async () => {
+    const events = await collect(
       [mkNode('n1', 'note')],
       [
         mkContent('n1', 'note', {
@@ -239,9 +270,9 @@ describe('runCanvasSearch — snippet construction', () => {
   });
 });
 
-describe('runCanvasSearch — case insensitivity', () => {
-  it('matches ignoring case', () => {
-    const events = collect(
+describe('searchCanvas — case insensitivity', () => {
+  it('matches ignoring case', async () => {
+    const events = await collect(
       [mkNode('n1', 'note')],
       [mkContent('n1', 'note', { label: 'Hello WORLD', content: '' })],
       { query: 'hello world' },
@@ -251,15 +282,15 @@ describe('runCanvasSearch — case insensitivity', () => {
   });
 });
 
-describe('runCanvasSearch — limit + truncation', () => {
-  it('stops emitting after `limit` matches and reports truncated', () => {
+describe('searchCanvas — limit + truncation', () => {
+  it('stops emitting after `limit` matches and reports truncated', async () => {
     const nodes: SearchableNode[] = [];
     const contents: NodeContent[] = [];
     for (let i = 0; i < 30; i++) {
       nodes.push(mkNode(`n${i}`, 'note'));
       contents.push(mkContent(`n${i}`, 'note', { label: 'hit', content: '' }));
     }
-    const events = collect(nodes, contents, { query: 'hit', limit: 10 });
+    const events = await collect(nodes, contents, { query: 'hit', limit: 10 });
     const matches = events.filter((e) => e.type === 'match');
     expect(matches).toHaveLength(10);
     const done = events.find((e) => e.type === 'done');
@@ -268,11 +299,11 @@ describe('runCanvasSearch — limit + truncation', () => {
     expect(done.total).toBe(10);
   });
 
-  it('emits every hit within a single field — no per-field cap', () => {
+  it('emits every hit within a single field — no per-field cap', async () => {
     // A body containing 12 occurrences of the needle. Prior to the
     // cap removal, only the first 3 would have been emitted.
     const body = Array.from({ length: 12 }).fill('foo').join(' bar ');
-    const events = collect(
+    const events = await collect(
       [mkNode('n1', 'note')],
       [mkContent('n1', 'note', { label: 'doc', content: body })],
       { query: 'foo', limit: 50 },
@@ -287,10 +318,10 @@ describe('runCanvasSearch — limit + truncation', () => {
   });
 });
 
-describe('runCanvasSearch — occurrenceIndex', () => {
-  it('stamps a monotonic 0-based ordinal per (nodeId, field)', () => {
+describe('searchCanvas — occurrenceIndex', () => {
+  it('stamps a monotonic 0-based ordinal per (nodeId, field)', async () => {
     const body = 'foo bar foo baz foo qux foo';
-    const events = collect(
+    const events = await collect(
       [mkNode('n1', 'note')],
       [
         mkContent('n1', 'note', {
@@ -318,8 +349,8 @@ describe('runCanvasSearch — occurrenceIndex', () => {
   });
 });
 
-describe('runCanvasSearch — abort', () => {
-  it('breaks out of meta scan when the signal aborts mid-scan', () => {
+describe('searchCanvas — abort', () => {
+  it('breaks out of meta scan when the signal aborts mid-scan', async () => {
     const nodes: SearchableNode[] = [];
     const contents: NodeContent[] = [];
     for (let i = 0; i < 100; i++) {
@@ -328,17 +359,16 @@ describe('runCanvasSearch — abort', () => {
     }
     const ctrl = new AbortController();
     const events: CanvasSearchEvent[] = [];
-    const map = new Map(contents.map((c) => [c.nodeId, c]));
-    runCanvasSearch({
-      nodes,
-      contentByNodeId: map,
-      request: { query: 'hit' },
-      signal: ctrl.signal,
-      emit: (e) => {
+    const store = makeFakeStore({ nodes, contents });
+    await searchCanvas(
+      store,
+      { query: 'hit' },
+      (e) => {
         events.push(e);
         if (events.length === 5) ctrl.abort();
       },
-    });
+      ctrl.signal,
+    );
     // Scan should bail before processing all 100; no done frame either
     // because we return early on abort.
     expect(events.length).toBeLessThan(100);
@@ -406,9 +436,9 @@ describe('extractSearchableEdges', () => {
   });
 });
 
-describe('runCanvasSearch — edge labels', () => {
-  it('emits edge label matches in the meta tier with kind="edge"', () => {
-    const events = collect(
+describe('searchCanvas — edge labels', () => {
+  it('emits edge label matches in the meta tier with kind="edge"', async () => {
+    const events = await collect(
       [mkNode('a', 'note'), mkNode('b', 'note')],
       [
         mkContent('a', 'note', { label: 'A', content: '' }),
@@ -432,8 +462,8 @@ describe('runCanvasSearch — edge labels', () => {
     expect(m.match.label).toBe('A blocks B');
   });
 
-  it('skips edges with empty / missing labels', () => {
-    const events = collect(
+  it('skips edges with empty / missing labels', async () => {
+    const events = await collect(
       [mkNode('a', 'note')],
       [mkContent('a', 'note', { label: 'A', content: '' })],
       { query: 'foo' },
@@ -443,10 +473,10 @@ describe('runCanvasSearch — edge labels', () => {
     expect(events.filter((e) => e.type === 'match')).toHaveLength(0);
   });
 
-  it('does not scan edges when the request is scoped to a single nodeId', () => {
+  it('does not scan edges when the request is scoped to a single nodeId', async () => {
     // Per-node search asks about that node's content, not its
     // surrounding connections.
-    const events = collect(
+    const events = await collect(
       [mkNode('a', 'note'), mkNode('b', 'note')],
       [
         mkContent('a', 'note', { label: 'A', content: '' }),
@@ -459,8 +489,8 @@ describe('runCanvasSearch — edge labels', () => {
     expect(events.filter((e) => e.type === 'match')).toHaveLength(0);
   });
 
-  it('does not scan edges when `label` is excluded from the fields filter', () => {
-    const events = collect(
+  it('does not scan edges when `label` is excluded from the fields filter', async () => {
+    const events = await collect(
       [mkNode('a', 'note')],
       [mkContent('a', 'note', { label: 'A', content: '' })],
       { query: 'edge', fields: ['content'] },
@@ -470,8 +500,8 @@ describe('runCanvasSearch — edge labels', () => {
     expect(events.filter((e) => e.type === 'match')).toHaveLength(0);
   });
 
-  it('only keeps edges with at least one endpoint matching `nodeTypes`', () => {
-    const events = collect(
+  it('only keeps edges with at least one endpoint matching `nodeTypes`', async () => {
+    const events = await collect(
       [
         mkNode('note-a', 'note'),
         mkNode('text-b', 'text'),

@@ -80,26 +80,6 @@ export interface SearchableEdge {
   label: string | null;
 }
 
-export interface RunSearchOptions {
-  /** Persisted canvas state nodes — supplies node ids + types. */
-  nodes: readonly SearchableNode[];
-  /**
-   * Persisted canvas state edges — supplies labels + endpoints.
-   * Optional for back-compat with older test call sites; treated as
-   * an empty list when omitted, in which case no edge matches will
-   * ever be emitted.
-   */
-  edges?: readonly SearchableEdge[];
-  /** Single-shot sidecar snapshot. Keyed by node id. */
-  contentByNodeId: ReadonlyMap<string, NodeContent>;
-  /** Request as parsed by zod (already validated). */
-  request: CanvasSearchRequest;
-  /** Sink for stream frames. Called synchronously per emit. */
-  emit: (event: CanvasSearchEvent) => void;
-  /** Optional abort signal. Polled between nodes. */
-  signal?: AbortSignal;
-}
-
 const DEFAULT_LIMIT = 1000;
 const ALL_FIELDS: readonly SearchField[] = [
   'label',
@@ -108,127 +88,9 @@ const ALL_FIELDS: readonly SearchField[] = [
   'content',
 ];
 
-/**
- * In-memory driver. Walks the requested fields tier-by-tier, emits
- * `match` frames as it finds hits, and closes with a `done` frame.
- *
- * This entry point takes a fully-materialised `contentByNodeId` map
- * and never touches disk — used by tests and any callers that already
- * have a hydrated snapshot. The production route uses
- * {@link searchCanvas} instead, which streams sidecars off disk and
- * forwards matches as each lands.
- *
- * Caller responsibilities:
- *   - Validate `request` first (zod safeParse) — we trust the input.
- *   - Wrap the call in try/catch and emit an `error` frame on throw.
- */
-export function runCanvasSearch(opts: RunSearchOptions): void {
-  const { nodes, edges, contentByNodeId, request, emit, signal } = opts;
-  const limit = request.limit ?? DEFAULT_LIMIT;
-  const fields = new Set<SearchField>(request.fields ?? ALL_FIELDS);
-
-  const needle = request.query;
-  const needleLower = needle.toLowerCase();
-  const needleLen = needle.length;
-
-  // Apply node-id / node-type filters once up front so both tiers
-  // walk the same set in the same order (callers rely on the order
-  // for deterministic test output).
-  const candidates = filterCandidates(nodes, request);
-
-  let totalEmitted = 0;
-  let truncated = false;
-
-  const tryEmitMatch = (
-    tier: 'meta' | 'content',
-    match: CanvasSearchMatch,
-  ): boolean => {
-    if (totalEmitted >= limit) {
-      truncated = true;
-      return false;
-    }
-    emit({ type: 'match', tier, match });
-    totalEmitted += 1;
-    return true;
-  };
-
-  // ── Tier 1: metadata (label / summary / keywords) ────────────────────
-  const wantsMeta = META_SEARCH_FIELDS.some((f) => fields.has(f));
-  if (wantsMeta) {
-    for (const node of candidates) {
-      if (signal?.aborted) return;
-      if (totalEmitted >= limit) {
-        truncated = true;
-        break;
-      }
-      const content = contentByNodeId.get(node.id);
-      scanNodeMeta(node, content, fields, needleLower, needleLen, (m) =>
-        tryEmitMatch('meta', m),
-      );
-    }
-
-    // Edge labels are conceptually metadata (no body to read, no
-    // sidecar to await), so they ride with the meta tier. Emitted
-    // after all node-meta has been scanned so node hits surface
-    // first in the UI — edges are usually a secondary concern.
-    // Skipped entirely when the caller restricted the scan to a
-    // specific `nodeId` (a single-node search asked for the contents
-    // of one node, not its surrounding edges).
-    if (
-      fields.has('label') &&
-      !request.nodeId &&
-      totalEmitted < limit &&
-      edges &&
-      edges.length > 0
-    ) {
-      const edgeCandidates = filterEdgeCandidates(edges, request, candidates);
-      for (const edge of edgeCandidates) {
-        if (signal?.aborted) return;
-        if (totalEmitted >= limit) {
-          truncated = true;
-          break;
-        }
-        scanEdgeLabel(edge, needleLower, needleLen, (m) =>
-          tryEmitMatch('meta', m),
-        );
-      }
-    }
-  }
-
-  // Always emit a `meta-done` boundary so the client can flip its
-  // "searching titles…" indicator to "searching contents…" even when
-  // the meta tier was empty.
-  emit({ type: 'progress', phase: 'meta-done' });
-
-  // ── Tier 2: content (markdown body) ──────────────────────────────────
-  if (fields.has('content') && totalEmitted < limit) {
-    const total = candidates.length;
-    let scanned = 0;
-    for (const node of candidates) {
-      if (signal?.aborted) return;
-      if (totalEmitted >= limit) {
-        truncated = true;
-        break;
-      }
-      const content = contentByNodeId.get(node.id);
-      scanNodeContent(node, content, needleLower, needleLen, (m) =>
-        tryEmitMatch('content', m),
-      );
-      scanned += 1;
-      // Coarse progress every 25 nodes so a 100+ node canvas can show
-      // a determinate bar without flooding the wire.
-      if (scanned % 25 === 0 && scanned < total) {
-        emit({ type: 'progress', phase: 'content', scanned, total });
-      }
-    }
-  }
-
-  emit({ type: 'done', total: totalEmitted, truncated });
-}
-
 // ─── Internals ──────────────────────────────────────────────────────────────
 
-/** Shared filter used by both the in-memory and the streaming driver. */
+/** Shared filter used by the streaming driver. */
 function filterCandidates(
   nodes: readonly SearchableNode[],
   request: CanvasSearchRequest,
