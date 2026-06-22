@@ -1,10 +1,6 @@
 import { clsx } from 'clsx';
 import { Download, Fullscreen, ImageOff } from 'lucide-react';
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { Document, Page } from 'react-pdf';
-
-import 'react-pdf/dist/Page/AnnotationLayer.css';
-import 'react-pdf/dist/Page/TextLayer.css';
+import { lazy, memo, Suspense, useCallback, useEffect, useState } from 'react';
 
 import { resolveArtifactUrl } from '@/api/artifact';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
@@ -15,69 +11,26 @@ import useCanvasStore from '@/store/canvasStore';
 import { MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
 import { PreviewCard } from '../PreviewCard';
-import { PDF_DOCUMENT_OPTIONS } from './pdfWorker';
+import { useDeferredHydration } from '../shared/nodeHydrationScheduler';
 
 import type { CanvasPdfNodeData } from '../types';
 import type { Node, NodeProps } from '@xyflow/react';
 
 export type PDFNodeType = Node<CanvasPdfNodeData, 'pdf'>;
 
-/** Width used to render the first-page thumbnail canvas. */
-const THUMBNAIL_WIDTH = 400;
-
 /**
- * Renders the first page of a PDF into a hidden canvas and converts it to a
- * data-URL that can be used as the cover image in a PreviewCard.
+ * Lazy-loaded first-page renderer.
+ *
+ * Splits `react-pdf` + `pdfjs-dist` + `pdfWorker.ts` (which side-effect-
+ * imports the ~1 MB worker bundle) out of the initial canvas chunk.
+ * Canvases whose PDF nodes already have a cached `coverUrl` never
+ * render this component, so pdf.js never loads — first-paint cost for
+ * the common "open an existing canvas" path drops by exactly that
+ * bundle's parse+compile budget.
+ *
+ * See {@link ./PDFFirstPageThumbnail.tsx}.
  */
-const FirstPageThumbnail = memo(
-  ({
-    src,
-    canvasId,
-    onCapture,
-  }: {
-    src: string;
-    canvasId: string;
-    onCapture: (dataUrl: string) => void;
-  }) => {
-    const captured = useRef(false);
-    const containerRef = useRef<HTMLDivElement>(null);
-
-    const handleRenderSuccess = useCallback(
-      (_page: { width: number }) => {
-        if (captured.current) return;
-        const canvas = containerRef.current?.querySelector('canvas');
-        if (canvas) {
-          captured.current = true;
-          onCapture(canvas.toDataURL('image/jpeg', 0.85));
-        }
-      },
-      [onCapture],
-    );
-
-    return (
-      <div
-        ref={containerRef}
-        style={{ position: 'absolute', left: -9999, top: -9999 }}
-        aria-hidden
-      >
-        <Document
-          file={resolveArtifactUrl(src, canvasId)}
-          options={PDF_DOCUMENT_OPTIONS}
-          loading={null}
-          error={null}
-        >
-          <Page
-            pageNumber={1}
-            width={THUMBNAIL_WIDTH}
-            renderAnnotationLayer={false}
-            renderTextLayer={false}
-            onRenderSuccess={handleRenderSuccess}
-          />
-        </Document>
-      </div>
-    );
-  },
-);
+const FirstPageThumbnail = lazy(() => import('./PDFFirstPageThumbnail'));
 
 export const PDFNode = memo(
   ({ id, data, selected }: NodeProps<PDFNodeType>) => {
@@ -101,6 +54,23 @@ export const PDFNode = memo(
     useEffect(() => {
       setThumbnail(null);
     }, [src]);
+
+    // Whether a fresh first-page capture is required *for this node*. Drives
+    // both the shared hydration gate (so N un-covered PDFs don't fire pdf.js
+    // worker startup in the same frame) and the lazy module load (no cover ⇒
+    // download `react-pdf` chunk; cover already cached ⇒ pdf.js never loads).
+    const needsThumbnailCapture =
+      !hasCover &&
+      !!src &&
+      !thumbnail &&
+      !data.artifactMissing &&
+      !isMinimalLOD;
+
+    // Gate the heavy pdf.js mount behind the shared per-frame scheduler.
+    // `skip` short-circuits the queue entirely when no capture is needed,
+    // so a fully-cached canvas yields its hydration slot back to other
+    // node types (notes, web previews) instead of holding a no-op grant.
+    const thumbnailHydrated = useDeferredHydration(!needsThumbnailCapture);
 
     const coverImage = hasCover
       ? resolveArtifactUrl(data.coverUrl as string, canvasId)
@@ -169,18 +139,22 @@ export const PDFNode = memo(
         className={clsx('bg-surface transition-all duration-300 ease-in-out')}
       >
         <div className="relative flex h-full w-full flex-col overflow-hidden rounded-lg">
-          {/* Render the first page off-screen to capture a thumbnail when no manual cover exists */}
-          {!hasCover &&
-            src &&
-            !thumbnail &&
-            !data.artifactMissing &&
-            !isMinimalLOD && (
+          {/* Render the first page off-screen to capture a thumbnail when no
+              manual cover exists. Gated behind the per-frame hydration
+              scheduler *and* React.lazy so:
+                - many un-covered PDFs stream their pdf.js builds one per
+                  frame instead of fighting for the main thread, and
+                - canvases whose PDFs all have cached covers never download
+                  the `react-pdf` chunk at all. */}
+          {needsThumbnailCapture && thumbnailHydrated && (
+            <Suspense fallback={null}>
               <FirstPageThumbnail
                 src={src}
                 canvasId={canvasId}
                 onCapture={handleThumbnailCapture}
               />
-            )}
+            </Suspense>
+          )}
 
           <div
             style={{

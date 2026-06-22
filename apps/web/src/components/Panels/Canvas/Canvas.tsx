@@ -212,8 +212,50 @@ type CanvasProps = {
 export const Canvas: React.FC<CanvasProps> = ({
   shortcutsDisabled = false,
 }) => {
+  // ── Reactive state subscriptions ─────────────────────────────
+  // Only fields that actually change at runtime are subscribed. Anything
+  // else (action fns) is read non-reactively below to avoid registering
+  // a dedicated `useStore` subscription per accessor on mount — the
+  // canvas component used to install ~16 of them just for stable
+  // action refs, which dominated initial commit work on canvas open.
   const nodes = useCanvasStore((state) => state.nodes);
   const edges = useCanvasStore((state) => state.edges);
+  const expandedNodeId = useCanvasStore((state) => state.expandedNodeId);
+  const expandMode = useCanvasStore((state) => state.expandMode);
+  const canvasId = useCanvasStore((state) => state.canvasId);
+  const minimapEnabled = useCanvasStore((state) => state.minimapEnabled);
+  const pendingNodeType = useToolStore((state) => state.pendingNodeType);
+  const frameFitPreviews = useGesturePreviewStore(
+    (state) => state.frameFitPreviews,
+  );
+
+  // ── Non-reactive action handles ──────────────────────────────
+  // Action functions are defined once in the Zustand `create()` factory
+  // and never change identity, so reading them via `getState()` yields
+  // the same ref every render — useCallback / useEffect deps still
+  // match across renders, but the subscription bookkeeping cost on
+  // canvas mount drops to zero.
+  const {
+    onNodesChange,
+    onEdgesChange,
+    onConnect,
+    onNodeDragStart,
+    onNodeDrag,
+    onNodeDragStop,
+    endActiveDragSession,
+    addNode,
+    addNodes,
+    moveNoteExcerpt,
+    setRfInstance,
+    setCanvasWrapper,
+    setViewport,
+    openExpanded,
+    closeExpanded,
+    frameNodesInRect,
+    selectNodes,
+  } = useCanvasStore.getState();
+  const { setPendingNodeType } = useToolStore.getState();
+
   const [isBoxSelecting, setIsBoxSelecting] = useState(false);
   const selectedNodeIds = useMemo(
     () => new Set(nodes.filter((node) => node.selected).map((node) => node.id)),
@@ -226,34 +268,6 @@ export const Canvas: React.FC<CanvasProps> = ({
       ),
     [edges, selectedNodeIds],
   );
-  const onNodesChange = useCanvasStore((state) => state.onNodesChange);
-  const onEdgesChange = useCanvasStore((state) => state.onEdgesChange);
-  const onConnect = useCanvasStore((state) => state.onConnect);
-  const onNodeDragStart = useCanvasStore((state) => state.onNodeDragStart);
-  const onNodeDrag = useCanvasStore((state) => state.onNodeDrag);
-  const onNodeDragStop = useCanvasStore((state) => state.onNodeDragStop);
-  const endActiveDragSession = useCanvasStore(
-    (state) => state.endActiveDragSession,
-  );
-  const frameFitPreviews = useGesturePreviewStore(
-    (state) => state.frameFitPreviews,
-  );
-  const addNode = useCanvasStore((state) => state.addNode);
-  const addNodes = useCanvasStore((state) => state.addNodes);
-  const moveNoteExcerpt = useCanvasStore((state) => state.moveNoteExcerpt);
-  const setRfInstance = useCanvasStore((state) => state.setRfInstance);
-  const setCanvasWrapper = useCanvasStore((state) => state.setCanvasWrapper);
-  const setViewport = useCanvasStore((state) => state.setViewport);
-  const openExpanded = useCanvasStore((state) => state.openExpanded);
-  const closeExpanded = useCanvasStore((state) => state.closeExpanded);
-  const expandedNodeId = useCanvasStore((state) => state.expandedNodeId);
-  const expandMode = useCanvasStore((state) => state.expandMode);
-  const frameNodesInRect = useCanvasStore((state) => state.frameNodesInRect);
-  const canvasId = useCanvasStore((state) => state.canvasId);
-  const selectNodes = useCanvasStore((state) => state.selectNodes);
-  const minimapEnabled = useCanvasStore((state) => state.minimapEnabled);
-  const pendingNodeType = useToolStore((state) => state.pendingNodeType);
-  const setPendingNodeType = useToolStore((state) => state.setPendingNodeType);
 
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const rfInstanceRef = useRef<ReactFlowInstance | null>(null);
