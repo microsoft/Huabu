@@ -335,7 +335,9 @@ export const WebNode = memo(
                     />
                   ) : null}
 
-                  {previewLoading && !preview ? <LoadingState overlay /> : null}
+                  {previewLoading && !preview ? (
+                    <LoadingState overlay variant="skeleton" />
+                  ) : null}
                 </div>
 
                 {/* ── Footer: icon + title + AI summary ───────────────
@@ -377,7 +379,7 @@ export const WebNode = memo(
 
           {/* Loading overlay while preprocessing is in-flight. */}
           {ingestion?.status === 'pending' && !preview ? (
-            <LoadingState overlay message="Processing..." />
+            <LoadingState overlay variant="skeleton" message="Processing..." />
           ) : null}
 
           {/* Subtle "no preview" hint when extraction failed but the node still mounts. */}

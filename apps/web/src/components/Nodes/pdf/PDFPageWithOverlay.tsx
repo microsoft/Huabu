@@ -276,7 +276,7 @@ export const PDFPageWithOverlay = ({
       />
 
       {/* Spinner overlay until canvas is actually painted */}
-      {!rendered && <LoadingState overlay />}
+      {!rendered && <LoadingState overlay variant="skeleton" />}
 
       {/* Selection box feedback (shown while dragging) */}
       {selectionStyle && (

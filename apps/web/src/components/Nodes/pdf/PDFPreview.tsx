@@ -364,7 +364,7 @@ export const PDFPreview = ({
   return (
     <div className="relative flex h-full flex-col">
       {/* Loading overlay — visible until document metadata is parsed */}
-      {src && !docLoaded && <LoadingState overlay />}
+      {src && !docLoaded && <LoadingState overlay variant="skeleton" />}
       {/* ── PDF pages ── */}
       <div
         ref={scrollContainerRef}
