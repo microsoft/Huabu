@@ -27,6 +27,7 @@
 import { ChevronDown, ChevronUp, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
+import { findNthRange, scrollRangeIntoView } from '../../hooks/searchDom';
 import { useTextHighlight } from '../../hooks/useTextHighlight';
 import { useSearchStore } from '../../store/searchStore';
 import { Button } from '../Common/Button';
@@ -67,7 +68,16 @@ export const InPreviewSearchBar = ({
   // same MutationObserver that re-paints highlights, so the "n/m"
   // readout below stays accurate as pdf.js / Milkdown mount text
   // asynchronously.
-  const { matchCount } = useTextHighlight({ container: scopeEl, query });
+  //
+  // Only paint when *this* find bar owns the search scope. Canvas-wide
+  // search uses the same `HIGHLIGHT_NAME` and includes the preview
+  // body itself as a paint target; if we also painted here on canvas
+  // scope, the two registrations would race and the canvas overlay's
+  // multi-container set would get clobbered.
+  const { matchCount } = useTextHighlight({
+    container: isNodeScope ? scopeEl : null,
+    query,
+  });
 
   // Reset cursor whenever the query changes so Next/Prev starts from top.
   useEffect(() => {
@@ -81,18 +91,7 @@ export const InPreviewSearchBar = ({
     setActiveMatchIdx(normalised);
     setHasNavigated(true);
     const range = findNthRange(scopeEl, query, normalised);
-    if (range) {
-      // Scroll the match centre into view, no smooth so it's snappy.
-      const rect = range.getBoundingClientRect();
-      const target = rect.top + rect.height / 2;
-      const viewport = window.innerHeight;
-      if (target < 80 || target > viewport - 80) {
-        range.startContainer.parentElement?.scrollIntoView({
-          block: 'center',
-          behavior: 'auto',
-        });
-      }
-    }
+    if (range) scrollRangeIntoView(range);
   };
 
   if (!isNodeScope) return null;
@@ -170,35 +169,3 @@ export const InPreviewSearchBar = ({
     </div>
   );
 };
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-function findNthRange(
-  root: HTMLElement,
-  query: string,
-  nth: number,
-): Range | null {
-  const needle = query.toLowerCase();
-  if (!needle) return null;
-  let remaining = nth;
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  let current = walker.nextNode();
-  while (current) {
-    const text = (current.textContent ?? '').toLowerCase();
-    let from = 0;
-    while (true) {
-      const idx = text.indexOf(needle, from);
-      if (idx === -1) break;
-      if (remaining === 0) {
-        const range = document.createRange();
-        range.setStart(current, idx);
-        range.setEnd(current, idx + needle.length);
-        return range;
-      }
-      remaining -= 1;
-      from = idx + Math.max(1, needle.length);
-    }
-    current = walker.nextNode();
-  }
-  return null;
-}

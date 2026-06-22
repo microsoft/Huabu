@@ -28,11 +28,18 @@ import { useEffect, useState } from 'react';
 const HIGHLIGHT_NAME = 'sediment-search';
 
 interface UseTextHighlightOptions {
-  /** Container whose descendant text nodes get scanned. */
-  container: HTMLElement | null;
+  /**
+   * Container(s) whose descendant text nodes get scanned. Pass an
+   * array to merge ranges from multiple subtrees into a single
+   * `::highlight()` registration — used when the canvas-wide search
+   * needs to paint matches on both the canvas root and the expanded
+   * preview panel at the same time. `null` (or an array of only
+   * `null`s) clears the highlight set.
+   */
+  container: HTMLElement | (HTMLElement | null)[] | null;
   /** Needle. Empty string clears the highlight set. */
   query: string;
-  /** Soft cap on Range objects we'll register. */
+  /** Soft cap on Range objects we'll register (across all containers). */
   maxRanges?: number;
 }
 
@@ -78,6 +85,27 @@ export function useTextHighlight({
 }: UseTextHighlightOptions): UseTextHighlightResult {
   const [matchCount, setMatchCount] = useState(0);
 
+  // Normalise to an array of live elements so the dependency array
+  // below stays stable when the caller switches between single and
+  // multi-container forms. `useMemo` would re-allocate on every
+  // render anyway since the array literal is fresh; we instead
+  // compare element identity inside the effect by feeding a serialised
+  // key through the deps.
+  const containerList: (HTMLElement | null)[] = Array.isArray(container)
+    ? container
+    : [container];
+  // Deps key built from element identity. React only re-runs the
+  // effect when an underlying element swaps in/out — adding or
+  // removing a `null` from the array does not retrigger.
+  const liveContainers = containerList.filter(
+    (c): c is HTMLElement => c !== null,
+  );
+  // Stringify identities via a WeakRef-free trick: tag each element
+  // with a sequential id so the dep value is a primitive string.
+  // Cheaper than a `useMemo` + array-equality check, and avoids the
+  // pitfall of `[a, b]` deps being a fresh array each render.
+  const depKey = liveContainers.map(elementId).join('|');
+
   useEffect(() => {
     const HighlightCtor: typeof Highlight | undefined = (
       globalThis as unknown as { Highlight?: typeof Highlight }
@@ -88,7 +116,7 @@ export function useTextHighlight({
 
     // No-container / no-query / no-API → make sure count is zeroed
     // even when the API isn't available (jsdom in tests).
-    if (!container || !query) {
+    if (liveContainers.length === 0 || !query) {
       highlights?.delete(HIGHLIGHT_NAME);
       setMatchCount(0);
       return;
@@ -97,13 +125,25 @@ export function useTextHighlight({
       // API unavailable — still surface a count so the find bar can
       // advance, since the fallback `findNthRange` walk uses the same
       // DOM independently of the registered highlight.
-      const initial = findRanges(container, query, maxRanges).length;
+      let initial = 0;
+      for (const c of liveContainers) {
+        initial += findRanges(c, query, maxRanges - initial).length;
+        if (initial >= maxRanges) break;
+      }
       setMatchCount(initial);
       return;
     }
 
     const apply = (): void => {
-      const ranges = findRanges(container, query, maxRanges);
+      const ranges: Range[] = [];
+      for (const c of liveContainers) {
+        const remaining = maxRanges - ranges.length;
+        if (remaining <= 0) break;
+        // `findRanges` checks `document.contains` implicitly via
+        // `createTreeWalker`; a container that detached between
+        // renders just yields zero ranges.
+        ranges.push(...findRanges(c, query, remaining));
+      }
       // Only update state when the count actually changes — avoids
       // a render storm during pdf.js's per-page text-layer mounts.
       setMatchCount((prev) => (prev === ranges.length ? prev : ranges.length));
@@ -131,21 +171,40 @@ export function useTextHighlight({
       });
     };
 
-    const observer = new MutationObserver(schedule);
-    observer.observe(container, {
-      childList: true,
-      subtree: true,
-      characterData: true,
+    const observers = liveContainers.map((c) => {
+      const o = new MutationObserver(schedule);
+      o.observe(c, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+      });
+      return o;
     });
 
     return () => {
       if (scheduled) cancelAnimationFrame(scheduled);
-      observer.disconnect();
+      for (const o of observers) o.disconnect();
       highlights.delete(HIGHLIGHT_NAME);
     };
-  }, [container, query, maxRanges]);
+    // `liveContainers` is rebuilt every render but `depKey` collapses
+    // it into a primitive identity string, so the effect only re-runs
+    // when an actual element comes/goes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [depKey, query, maxRanges]);
 
   return { matchCount };
+}
+
+/** Monotonic id-per-element used to build a stable effect dep key. */
+const elementIds = new WeakMap<HTMLElement, number>();
+let nextElementId = 1;
+function elementId(el: HTMLElement): string {
+  let id = elementIds.get(el);
+  if (id === undefined) {
+    id = nextElementId++;
+    elementIds.set(el, id);
+  }
+  return String(id);
 }
 
 function findRanges(

@@ -55,11 +55,14 @@ export const canvasSearchRequestSchema = z.object({
   /** Search needle. Treated as a literal (case-insensitive) substring. */
   query: z.string().min(1).max(200),
   /**
-   * Cap on matches per tier. Defaults to 50. Hard upper bound 500 so
-   * a malicious / runaway query can't pin the server. Client paginates
-   * by re-issuing with a narrower query, not by offset.
+   * Cap on total matches in the response. Defaults to 1000 (server
+   * `DEFAULT_LIMIT`). Hard upper bound 2000 so a malicious / runaway
+   * query can't pin the server. Client paginates by re-issuing with a
+   * narrower query, not by offset; once the cap is hit the server
+   * emits `done { truncated: true }` and the UI shows a "narrow your
+   * query" banner.
    */
-  limit: z.number().int().positive().max(500).optional(),
+  limit: z.number().int().positive().max(2000).optional(),
   /**
    * Restrict scan to a subset of node types (e.g. `['note', 'text']`).
    * Empty / omitted means "all types". Useful for the in-preview search
@@ -90,6 +93,21 @@ export type CanvasSearchRequest = z.infer<typeof canvasSearchRequestSchema>;
  * the regex. For the `label` field, snippet === field value.
  */
 export interface CanvasSearchMatch {
+  /**
+   * What kind of canvas entity this match belongs to.
+   *
+   * - `'node'` (default — also assumed when omitted by older
+   *   payloads): the match is on a node field. `nodeId` is the
+   *   node's id, `nodeType` is its React Flow type.
+   * - `'edge'`: the match is on an edge label. `nodeId` is the
+   *   edge's id (we keep the field name for back-compat with the
+   *   original node-only schema; semantically it's "the matched
+   *   entity's primary id"), `nodeType` is the literal `'edge'`,
+   *   `field` is always `'label'`, and the source/target endpoints
+   *   live in `sourceNodeId` / `targetNodeId` so the client can
+   *   `fitView` on both ends of the edge.
+   */
+  kind?: 'node' | 'edge';
   nodeId: string;
   nodeType: string;
   /** The node's display label at scan time (handy for result rows). */
@@ -99,6 +117,25 @@ export interface CanvasSearchMatch {
   /** Match start offset within `snippet` (not within the original field). */
   matchStart: number;
   matchLength: number;
+  /**
+   * 0-based ordinal of this hit among all hits in the same
+   * `(nodeId, field)`. Server-stamped at emission time so the client
+   * can address the n-th occurrence inside a preview without having
+   * to count `matchStart` values itself — which goes wrong as soon
+   * as results truncate (global `limit` hits before this node's
+   * earlier hits ship) or stream out of order (a later-stream-arriving
+   * hit with a smaller `matchStart` would otherwise retroactively
+   * change an already-clicked row's perceived ordinal).
+   *
+   * Always equals the count of matches the server has already emitted
+   * for this `(nodeId, field)` pair — i.e. it survives truncation and
+   * is monotonically increasing per (nodeId, field).
+   */
+  occurrenceIndex: number;
+  /** Edge-only — source endpoint node id. Set iff `kind === 'edge'`. */
+  sourceNodeId?: string;
+  /** Edge-only — target endpoint node id. Set iff `kind === 'edge'`. */
+  targetNodeId?: string;
 }
 
 /** NDJSON frame types emitted by the server. */

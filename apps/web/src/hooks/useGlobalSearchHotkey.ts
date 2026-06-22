@@ -2,34 +2,37 @@
  * Global Cmd+F / Ctrl+F dispatcher for canvas search.
  *
  * Dispatches based on **focus location** rather than expanded-panel
- * state so the gesture matches user intuition: if you press Cmd+F
- * while typing inside the open preview, the in-preview search bar
- * pops up; if you press it anywhere else on the canvas, the canvas-
- * wide overlay opens.
+ * state so the gesture matches user intuition:
  *
- * Mechanism:
- *   Each container that wants its own scope sets
- *   `data-search-scope="canvas" | "node"` on its root element. We walk
- *   up from `document.activeElement` to find the nearest such ancestor
- *   and dispatch accordingly. If neither is found we open the canvas
- *   scope by default (so Cmd+F always does *something*).
+ *   - Focus inside an open preview (`data-search-scope="node"`)
+ *     → open the in-preview find bar (node scope, content-only).
+ *   - Focus inside the canvas (`data-search-scope="canvas"`) or
+ *     anywhere else → make sure the canvas-wide search input in
+ *     the left layer panel is focused, the panel is expanded, and
+ *     the search store has a `{kind:'canvas', canvasId}` scope so
+ *     typing immediately fires a query.
  *
  * Bypass:
  *   When focus is inside a native `<input>` / `<textarea>` /
  *   contenteditable, browser's built-in find-in-text is the wrong
- *   target — we still steal Cmd+F because our overlay subsumes the
+ *   target — we still steal Cmd+F because our search subsumes the
  *   browser one for the canvas surface, and the native one would
  *   only find DOM text (not PDF body, not collapsed nodes). The
- *   user can hit Esc to close ours and fall back to the page native
- *   if they really need it.
+ *   user can hit Esc to dismiss ours and fall back to the page
+ *   native if they really need it.
  */
 
 import { useEffect } from 'react';
 
+import { ensureCanvasSearchScope } from '../components/Panels/CanvasLayerPanel/CanvasSearchInput';
 import useCanvasStore from '../store/canvasStore';
+import { usePanelStore } from '../store/panelStore';
 import { useSearchStore } from '../store/searchStore';
 
 type SearchScopeAttr = 'canvas' | 'node';
+
+/** DOM hook the in-panel `CanvasSearchInput` tags on its `<input>`. */
+const CANVAS_SEARCH_INPUT_SELECTOR = 'input[aria-label="Search this canvas"]';
 
 function resolveScopeFromFocus(active: Element | null): SearchScopeAttr | null {
   if (!active) return null;
@@ -62,6 +65,40 @@ function findMountedNodeScope(): {
   const el = document.querySelector('[data-search-scope="node"]');
   if (!el) return null;
   return { scope: 'node', nodeId: el.getAttribute('data-search-node-id') };
+}
+
+/**
+ * Auto-expand the left panel (if collapsed), reveal the canvas-
+ * wide search input (panel-side `isSearchOpen=true` triggers its
+ * mount), and as a safety net focus the input once it has rendered.
+ *
+ * `CanvasSearchInput` auto-focuses itself on mount so this rAF
+ * focus retry is only needed when the component was already
+ * mounted (re-press of Cmd+F while open) or when the panel was
+ * still animating open at the moment React rendered.
+ */
+function focusCanvasSearchInput(canvasId: string): void {
+  usePanelStore.getState().setLeftCollapsed(false);
+  usePanelStore.getState().setSearchOpen(true);
+  ensureCanvasSearchScope(canvasId);
+  const tryFocus = (): boolean => {
+    const input = document.querySelector<HTMLInputElement>(
+      CANVAS_SEARCH_INPUT_SELECTOR,
+    );
+    if (!input) return false;
+    input.focus();
+    input.select();
+    return true;
+  };
+  if (!tryFocus()) {
+    // The panel column animates open over ~220ms; rAF on the next
+    // frame is usually enough because the inner subtree is already
+    // mounted (only the column width animates). One retry, no loop
+    // — if both attempts fail the user can just press Cmd+F again.
+    requestAnimationFrame(() => {
+      tryFocus();
+    });
+  }
 }
 
 export function useGlobalSearchHotkey(): void {
@@ -99,7 +136,7 @@ export function useGlobalSearchHotkey(): void {
         return;
       }
 
-      useSearchStore.getState().open({ kind: 'canvas', canvasId });
+      focusCanvasSearchInput(canvasId);
     };
 
     // Capture phase so we win against textarea / contenteditable

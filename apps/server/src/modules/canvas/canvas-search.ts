@@ -44,9 +44,18 @@ import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
 /** Window of characters shown around each match in `snippet`. */
 const SNIPPET_RADIUS = 60;
 
-/** Maximum matches emitted per node per field — keeps one huge body
- *  from drowning out everything else. */
-const MAX_HITS_PER_FIELD = 3;
+/**
+ * Per-(node, field) hits are not capped here on the server. The only
+ * back-pressure is the global request `limit` — once that many matches
+ * have been emitted across all (node, field) groups, the scan stops
+ * and the `done` frame carries `truncated: true`. The client renders
+ * a banner explaining the user should narrow their query.
+ *
+ * Rationale: capping per-(node, field) (the old `MAX_HITS_PER_FIELD = 3`)
+ * silently hid hits beyond the cap with no UI affordance, so users had
+ * no way to tell whether a node had 3 matches or 300. The global cap
+ * is a single, surfaceable limit that matches VS Code's behaviour.
+ */
 
 /**
  * Loose shape of a persisted node (id + type + data). We avoid coupling
@@ -58,9 +67,29 @@ export interface SearchableNode {
   type: string;
 }
 
+/**
+ * Loose shape of a persisted edge for the scanner. Carries only what
+ * we actually search on (`label`) plus the endpoints so the client
+ * can `fitView` on both ends when the user activates a result.
+ */
+export interface SearchableEdge {
+  id: string;
+  sourceNodeId: string;
+  targetNodeId: string;
+  /** `data.edgeStyle.label` if set, else `null`. */
+  label: string | null;
+}
+
 export interface RunSearchOptions {
   /** Persisted canvas state nodes — supplies node ids + types. */
   nodes: readonly SearchableNode[];
+  /**
+   * Persisted canvas state edges — supplies labels + endpoints.
+   * Optional for back-compat with older test call sites; treated as
+   * an empty list when omitted, in which case no edge matches will
+   * ever be emitted.
+   */
+  edges?: readonly SearchableEdge[];
   /** Single-shot sidecar snapshot. Keyed by node id. */
   contentByNodeId: ReadonlyMap<string, NodeContent>;
   /** Request as parsed by zod (already validated). */
@@ -71,7 +100,7 @@ export interface RunSearchOptions {
   signal?: AbortSignal;
 }
 
-const DEFAULT_LIMIT = 50;
+const DEFAULT_LIMIT = 1000;
 const ALL_FIELDS: readonly SearchField[] = [
   'label',
   'summary',
@@ -94,7 +123,7 @@ const ALL_FIELDS: readonly SearchField[] = [
  *   - Wrap the call in try/catch and emit an `error` frame on throw.
  */
 export function runCanvasSearch(opts: RunSearchOptions): void {
-  const { nodes, contentByNodeId, request, emit, signal } = opts;
+  const { nodes, edges, contentByNodeId, request, emit, signal } = opts;
   const limit = request.limit ?? DEFAULT_LIMIT;
   const fields = new Set<SearchField>(request.fields ?? ALL_FIELDS);
 
@@ -136,6 +165,33 @@ export function runCanvasSearch(opts: RunSearchOptions): void {
       scanNodeMeta(node, content, fields, needleLower, needleLen, (m) =>
         tryEmitMatch('meta', m),
       );
+    }
+
+    // Edge labels are conceptually metadata (no body to read, no
+    // sidecar to await), so they ride with the meta tier. Emitted
+    // after all node-meta has been scanned so node hits surface
+    // first in the UI — edges are usually a secondary concern.
+    // Skipped entirely when the caller restricted the scan to a
+    // specific `nodeId` (a single-node search asked for the contents
+    // of one node, not its surrounding edges).
+    if (
+      fields.has('label') &&
+      !request.nodeId &&
+      totalEmitted < limit &&
+      edges &&
+      edges.length > 0
+    ) {
+      const edgeCandidates = filterEdgeCandidates(edges, request, candidates);
+      for (const edge of edgeCandidates) {
+        if (signal?.aborted) return;
+        if (totalEmitted >= limit) {
+          truncated = true;
+          break;
+        }
+        scanEdgeLabel(edge, needleLower, needleLen, (m) =>
+          tryEmitMatch('meta', m),
+        );
+      }
     }
   }
 
@@ -185,6 +241,31 @@ function filterCandidates(
     if (nodeTypes && !nodeTypes.has(n.type)) return false;
     return true;
   });
+}
+
+/**
+ * Edge counterpart to {@link filterCandidates}.
+ *
+ * Edges have no concept of `nodeType`, so the `nodeTypes` request
+ * filter applies indirectly: an edge is kept only when at least one
+ * of its endpoints survives the node-type filter. Without this an
+ * `nodeTypes: ['note']`-scoped search would still surface edges
+ * connecting two non-note nodes, which is surprising. The single
+ * `nodeId` filter is handled upstream (we skip edge scanning entirely
+ * when `request.nodeId` is set \u2014 a per-node search asked for that
+ * node's content, not its surrounding connections).
+ */
+function filterEdgeCandidates(
+  edges: readonly SearchableEdge[],
+  request: CanvasSearchRequest,
+  candidateNodes: readonly SearchableNode[],
+): SearchableEdge[] {
+  if (!request.nodeTypes?.length) return [...edges];
+  const allowedNodeIds = new Set(candidateNodes.map((n) => n.id));
+  return edges.filter(
+    (e) =>
+      allowedNodeIds.has(e.sourceNodeId) || allowedNodeIds.has(e.targetNodeId),
+  );
 }
 
 /** Emit all label/summary/keywords matches for one node. */
@@ -249,6 +330,48 @@ function scanNodeContent(
   }
 }
 
+/**
+ * Emit every match in one edge's label. Edge matches are tagged
+ * `kind: 'edge'` so the client can render them with an edge-shaped
+ * icon and `fitView` on both endpoints instead of trying to open an
+ * (non-existent) preview. `nodeId` carries the edge's id \u2014 the field
+ * is named for back-compat with the original node-only schema but
+ * semantically means "the matched entity's primary id".
+ */
+function scanEdgeLabel(
+  edge: SearchableEdge,
+  needleLower: string,
+  needleLen: number,
+  tryEmit: (match: CanvasSearchMatch) => boolean,
+): void {
+  const label = edge.label;
+  if (!label) return;
+  const lower = label.toLowerCase();
+  let from = 0;
+  let occurrenceIndex = 0;
+  while (true) {
+    const idx = lower.indexOf(needleLower, from);
+    if (idx === -1) break;
+    const snippet = buildSnippet(label, idx, needleLen);
+    const keepGoing = tryEmit({
+      kind: 'edge',
+      nodeId: edge.id,
+      nodeType: 'edge',
+      label,
+      field: 'label',
+      snippet: snippet.text,
+      matchStart: snippet.matchStart,
+      matchLength: snippet.matchLength,
+      occurrenceIndex,
+      sourceNodeId: edge.sourceNodeId,
+      targetNodeId: edge.targetNodeId,
+    });
+    if (!keepGoing) return;
+    from = idx + Math.max(1, needleLen);
+    occurrenceIndex += 1;
+  }
+}
+
 interface FieldEmitContext {
   nodeId: string;
   nodeType: string;
@@ -258,9 +381,11 @@ interface FieldEmitContext {
 }
 
 /**
- * Find up to {@link MAX_HITS_PER_FIELD} occurrences of `needleLower`
- * inside `haystack` (case-insensitive). For each, build a
- * SNIPPET_RADIUS-wide window centred on the hit and emit a match.
+ * Find every occurrence of `needleLower` inside `haystack`
+ * (case-insensitive). For each, build a SNIPPET_RADIUS-wide window
+ * centred on the hit and emit a match. Stops only when the global
+ * request limit is exhausted (signalled by `tryEmit` returning false)
+ * or the haystack runs out — there is no per-field cap.
  *
  * Uses `String.prototype.indexOf` on the lower-cased haystack — V8's
  * implementation is a SIMD-accelerated literal search and runs at
@@ -276,8 +401,15 @@ function emitFieldHits(
 ): void {
   const lower = haystack.toLowerCase();
   let from = 0;
-  let count = 0;
-  while (count < MAX_HITS_PER_FIELD) {
+  // 0-based ordinal of the hit *within this (nodeId, field) call*.
+  // `emitFieldHits` is invoked exactly once per (node, field) in
+  // `scanNodeMeta` / `scanNodeContent`, so a local counter is enough
+  // to stamp the wire field documented as "monotonically increasing
+  // per (nodeId, field)". Survives truncation: if the global limit
+  // chokes us mid-loop the indices already shipped are 0..k-1 and
+  // map cleanly to the n-th DOM occurrence on the client.
+  let occurrenceIndex = 0;
+  while (true) {
     const idx = lower.indexOf(needleLower, from);
     if (idx === -1) break;
     const snippet = buildSnippet(haystack, idx, needleLen);
@@ -293,10 +425,11 @@ function emitFieldHits(
       // `needleLen` here would over-extend when the match contained
       // whitespace runs (e.g. needle `"a  b"`, snippet `"a b"`).
       matchLength: snippet.matchLength,
+      occurrenceIndex,
     });
     if (!keepGoing) return;
     from = idx + Math.max(1, needleLen);
-    count += 1;
+    occurrenceIndex += 1;
   }
 }
 
@@ -381,6 +514,43 @@ export function extractSearchableNodes(state: unknown): SearchableNode[] {
 }
 
 /**
+ * Adapter: collect persisted edges from a `CanvasStore.read()` payload.
+ * Reads only what the scanner needs (`id`, endpoints, `label`); other
+ * `EdgeStyle` fields (lineStyle, stroke, …) are intentionally
+ * dropped so the in-memory footprint stays bounded.
+ */
+export function extractSearchableEdges(state: unknown): SearchableEdge[] {
+  if (!state || typeof state !== 'object') return [];
+  const maybeEdges = (state as { edges?: unknown }).edges;
+  if (!Array.isArray(maybeEdges)) return [];
+  const out: SearchableEdge[] = [];
+  for (const raw of maybeEdges) {
+    if (!raw || typeof raw !== 'object') continue;
+    const id = (raw as { id?: unknown }).id;
+    const source = (raw as { source?: unknown }).source;
+    const target = (raw as { target?: unknown }).target;
+    if (typeof id !== 'string' || !id) continue;
+    if (typeof source !== 'string' || !source) continue;
+    if (typeof target !== 'string' || !target) continue;
+    // Label lives at `data.edgeStyle.label` (see `LabelledEdge.tsx`
+    // and the 2026-06-08 changelog entry for the storage layout).
+    const data = (raw as { data?: unknown }).data;
+    let label: string | null = null;
+    if (data && typeof data === 'object') {
+      const edgeStyle = (data as { edgeStyle?: unknown }).edgeStyle;
+      if (edgeStyle && typeof edgeStyle === 'object') {
+        const rawLabel = (edgeStyle as { label?: unknown }).label;
+        if (typeof rawLabel === 'string' && rawLabel.length > 0) {
+          label = rawLabel;
+        }
+      }
+    }
+    out.push({ id, sourceNodeId: source, targetNodeId: target, label });
+  }
+  return out;
+}
+
+/**
  * Drive a search directly off a {@link CanvasStore}.
  *
  * Streams meta-tier matches as each sidecar lands (no `await`-all
@@ -451,6 +621,37 @@ export async function searchCanvas(
   }, signal);
 
   if (signal?.aborted) return;
+
+  // Edge labels live in `canvas.json` (no sidecar read needed), so
+  // scan them synchronously once the streaming meta tier has flushed.
+  // Same gating as the in-memory driver: skip when the request is
+  // scoped to a single node (a per-node search isn't asking about
+  // edges) or when `label` isn't in the requested field set.
+  if (
+    !signal?.aborted &&
+    fields.has('label') &&
+    !request.nodeId &&
+    totalEmitted < limit
+  ) {
+    const allEdges = extractSearchableEdges(file.state);
+    if (allEdges.length > 0) {
+      const edgeCandidates = filterEdgeCandidates(
+        allEdges,
+        request,
+        candidates,
+      );
+      for (const edge of edgeCandidates) {
+        if (signal?.aborted) return;
+        if (totalEmitted >= limit) {
+          truncated = true;
+          break;
+        }
+        scanEdgeLabel(edge, needleLower, needleLen, (m) =>
+          tryEmitMatch('meta', m),
+        );
+      }
+    }
+  }
 
   emit({ type: 'progress', phase: 'meta-done' });
 

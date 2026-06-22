@@ -12,7 +12,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   extractSearchableNodes,
+  extractSearchableEdges,
   runCanvasSearch,
+  type SearchableEdge,
   type SearchableNode,
 } from './canvas-search.js';
 
@@ -37,16 +39,27 @@ function mkContent(
   };
 }
 
+function mkEdge(
+  id: string,
+  sourceNodeId: string,
+  targetNodeId: string,
+  label: string | null,
+): SearchableEdge {
+  return { id, sourceNodeId, targetNodeId, label };
+}
+
 function collect(
   nodes: SearchableNode[],
   contents: NodeContent[],
   request: Parameters<typeof runCanvasSearch>[0]['request'],
   signal?: AbortSignal,
+  edges?: SearchableEdge[],
 ): CanvasSearchEvent[] {
   const map = new Map(contents.map((c) => [c.nodeId, c]));
   const events: CanvasSearchEvent[] = [];
   runCanvasSearch({
     nodes,
+    edges,
     contentByNodeId: map,
     request,
     signal,
@@ -254,6 +267,55 @@ describe('runCanvasSearch — limit + truncation', () => {
     expect(done.truncated).toBe(true);
     expect(done.total).toBe(10);
   });
+
+  it('emits every hit within a single field — no per-field cap', () => {
+    // A body containing 12 occurrences of the needle. Prior to the
+    // cap removal, only the first 3 would have been emitted.
+    const body = Array.from({ length: 12 }).fill('foo').join(' bar ');
+    const events = collect(
+      [mkNode('n1', 'note')],
+      [mkContent('n1', 'note', { label: 'doc', content: body })],
+      { query: 'foo', limit: 50 },
+    );
+    const contentMatches = events.filter(
+      (e) => e.type === 'match' && e.match.field === 'content',
+    );
+    expect(contentMatches).toHaveLength(12);
+    const done = events.find((e) => e.type === 'done');
+    if (done?.type !== 'done') throw new Error('expected done');
+    expect(done.truncated).toBe(false);
+  });
+});
+
+describe('runCanvasSearch — occurrenceIndex', () => {
+  it('stamps a monotonic 0-based ordinal per (nodeId, field)', () => {
+    const body = 'foo bar foo baz foo qux foo';
+    const events = collect(
+      [mkNode('n1', 'note')],
+      [
+        mkContent('n1', 'note', {
+          label: 'foo doc with foo and foo',
+          content: body,
+        }),
+      ],
+      { query: 'foo', limit: 50 },
+    );
+    const matches = events.filter((e) => e.type === 'match');
+    // Group by field and check each is 0..N-1 in order.
+    const byField = new Map<string, number[]>();
+    for (const m of matches) {
+      if (m.type !== 'match') continue;
+      const arr = byField.get(m.match.field) ?? [];
+      arr.push(m.match.occurrenceIndex);
+      byField.set(m.match.field, arr);
+    }
+    for (const [, arr] of byField) {
+      for (let i = 0; i < arr.length; i++) expect(arr[i]).toBe(i);
+    }
+    // And the counters per field are independent — content has 4, label has 3.
+    expect(byField.get('content')).toEqual([0, 1, 2, 3]);
+    expect(byField.get('label')).toEqual([0, 1, 2]);
+  });
 });
 
 describe('runCanvasSearch — abort', () => {
@@ -307,5 +369,131 @@ describe('extractSearchableNodes', () => {
     expect(extractSearchableNodes(null)).toEqual([]);
     expect(extractSearchableNodes({})).toEqual([]);
     expect(extractSearchableNodes({ nodes: 'oops' })).toEqual([]);
+  });
+});
+
+describe('extractSearchableEdges', () => {
+  it('reads id + endpoints + edgeStyle.label off the canvas state', () => {
+    const got = extractSearchableEdges({
+      edges: [
+        {
+          id: 'e1',
+          source: 'a',
+          target: 'b',
+          data: { edgeStyle: { label: 'blocks' } },
+        },
+        // No label — kept (label = null) so the scanner can still
+        // skip it cheaply without re-querying state.
+        { id: 'e2', source: 'b', target: 'c', data: { edgeStyle: {} } },
+        // Missing data entirely.
+        { id: 'e3', source: 'c', target: 'a' },
+        // Malformed entries dropped.
+        { id: 'bad-no-source', target: 'a' },
+        null,
+      ],
+    });
+    expect(got).toEqual([
+      { id: 'e1', sourceNodeId: 'a', targetNodeId: 'b', label: 'blocks' },
+      { id: 'e2', sourceNodeId: 'b', targetNodeId: 'c', label: null },
+      { id: 'e3', sourceNodeId: 'c', targetNodeId: 'a', label: null },
+    ]);
+  });
+
+  it('returns empty array for missing / malformed state', () => {
+    expect(extractSearchableEdges(null)).toEqual([]);
+    expect(extractSearchableEdges({})).toEqual([]);
+    expect(extractSearchableEdges({ edges: 'oops' })).toEqual([]);
+  });
+});
+
+describe('runCanvasSearch — edge labels', () => {
+  it('emits edge label matches in the meta tier with kind="edge"', () => {
+    const events = collect(
+      [mkNode('a', 'note'), mkNode('b', 'note')],
+      [
+        mkContent('a', 'note', { label: 'A', content: '' }),
+        mkContent('b', 'note', { label: 'B', content: '' }),
+      ],
+      { query: 'blocks' },
+      undefined,
+      [mkEdge('e1', 'a', 'b', 'A blocks B')],
+    );
+    const matches = events.filter((e) => e.type === 'match');
+    expect(matches).toHaveLength(1);
+    const m = matches[0];
+    if (m.type !== 'match') throw new Error('unreachable');
+    expect(m.tier).toBe('meta');
+    expect(m.match.kind).toBe('edge');
+    expect(m.match.nodeId).toBe('e1');
+    expect(m.match.nodeType).toBe('edge');
+    expect(m.match.field).toBe('label');
+    expect(m.match.sourceNodeId).toBe('a');
+    expect(m.match.targetNodeId).toBe('b');
+    expect(m.match.label).toBe('A blocks B');
+  });
+
+  it('skips edges with empty / missing labels', () => {
+    const events = collect(
+      [mkNode('a', 'note')],
+      [mkContent('a', 'note', { label: 'A', content: '' })],
+      { query: 'foo' },
+      undefined,
+      [mkEdge('e1', 'a', 'a', null), mkEdge('e2', 'a', 'a', '')],
+    );
+    expect(events.filter((e) => e.type === 'match')).toHaveLength(0);
+  });
+
+  it('does not scan edges when the request is scoped to a single nodeId', () => {
+    // Per-node search asks about that node's content, not its
+    // surrounding connections.
+    const events = collect(
+      [mkNode('a', 'note'), mkNode('b', 'note')],
+      [
+        mkContent('a', 'note', { label: 'A', content: '' }),
+        mkContent('b', 'note', { label: 'B', content: '' }),
+      ],
+      { query: 'edge', nodeId: 'a' },
+      undefined,
+      [mkEdge('e1', 'a', 'b', 'edge label hit')],
+    );
+    expect(events.filter((e) => e.type === 'match')).toHaveLength(0);
+  });
+
+  it('does not scan edges when `label` is excluded from the fields filter', () => {
+    const events = collect(
+      [mkNode('a', 'note')],
+      [mkContent('a', 'note', { label: 'A', content: '' })],
+      { query: 'edge', fields: ['content'] },
+      undefined,
+      [mkEdge('e1', 'a', 'a', 'edge label hit')],
+    );
+    expect(events.filter((e) => e.type === 'match')).toHaveLength(0);
+  });
+
+  it('only keeps edges with at least one endpoint matching `nodeTypes`', () => {
+    const events = collect(
+      [
+        mkNode('note-a', 'note'),
+        mkNode('text-b', 'text'),
+        mkNode('text-c', 'text'),
+      ],
+      [
+        mkContent('note-a', 'note', { label: 'A', content: '' }),
+        mkContent('text-b', 'text', { label: 'B', content: '' }),
+        mkContent('text-c', 'text', { label: 'C', content: '' }),
+      ],
+      { query: 'hit', nodeTypes: ['note'] },
+      undefined,
+      [
+        mkEdge('e1', 'note-a', 'text-b', 'hit edge'),
+        mkEdge('e2', 'text-b', 'text-c', 'hit edge'),
+      ],
+    );
+    const edgeMatches = events.filter(
+      (e) => e.type === 'match' && e.match.kind === 'edge',
+    );
+    expect(edgeMatches).toHaveLength(1);
+    if (edgeMatches[0].type !== 'match') throw new Error('unreachable');
+    expect(edgeMatches[0].match.nodeId).toBe('e1');
   });
 });
