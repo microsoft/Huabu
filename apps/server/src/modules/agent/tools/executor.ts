@@ -44,6 +44,14 @@ import {
   type LsArgs,
 } from './handlers/fs-search.js';
 import { handleFsWrite, type FsWriteArgs } from './handlers/fs-write.js';
+import {
+  handleGenerateImage,
+  type GenerateImageArgs,
+} from './handlers/image-generation.js';
+import {
+  handleRasterizeNode,
+  type RasterizeNodeArgs,
+} from './handlers/rasterize-node.js';
 import { handleWebSearch, type WebSearchArgs } from './handlers/web-search.js';
 
 import type { AgentToolResult } from '@earendil-works/pi-agent-core';
@@ -139,6 +147,16 @@ export async function executeTool(
         ...args,
         canvasId: context?.canvasId,
       } as FsWriteArgs);
+
+    case 'rasterize_node':
+      return handleRasterizeNode(
+        withCanvasId<RasterizeNodeArgs>(args, 'rasterize_node'),
+      );
+
+    case 'generate_image':
+      return handleGenerateImage(
+        withCanvasId<GenerateImageArgs>(args, 'generate_image'),
+      );
 
     default:
       throw new Error(`Unknown tool: ${name}`);

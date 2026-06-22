@@ -56,6 +56,12 @@ extraResources:
   # with code 1 and Electron shows the "failed to start" dialog.
   - from: ../server/dist-bundle/sql-wasm.wasm
     to: server/sql-wasm.wasm
+  # @resvg/resvg-wasm — loaded on demand by the `rasterize_node` agent
+  # tool via `path.join(__dirname, 'resvg-bg.wasm')` (bundle layout
+  # fallback). Missing this file is non-fatal at boot but the tool
+  # throws "no such file" on first sketch rasterization.
+  - from: ../server/dist-bundle/resvg-bg.wasm
+    to: server/resvg-bg.wasm
   - from: ../server/dist-bundle/prompt
     to: server/prompt
     filter:

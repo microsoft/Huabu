@@ -4,6 +4,8 @@ import { routes } from './_routes';
 import type {
   LLMConfig,
   LLMConfigUpdate,
+  LLMImageConfig,
+  LLMImageConfigUpdate,
   LLMModelInfo,
   LLMModelsResponse,
   LLMProviderInfo,
@@ -30,6 +32,24 @@ export async function putLLMConfig(
     method: 'PUT',
     json: update,
     fallbackMessage: 'Failed to update LLM config',
+  });
+}
+
+/** Fetch the current image-generation configuration. */
+export async function getLLMImageConfig(): Promise<LLMImageConfig> {
+  return apiFetch<LLMImageConfig>(routes.llmImageConfig, {
+    fallbackMessage: 'Failed to get image config',
+  });
+}
+
+/** Update the image-generation configuration. */
+export async function putLLMImageConfig(
+  update: LLMImageConfigUpdate,
+): Promise<LLMImageConfig> {
+  return apiFetch<LLMImageConfig>(routes.llmImageConfig, {
+    method: 'PUT',
+    json: update,
+    fallbackMessage: 'Failed to update image config',
   });
 }
 

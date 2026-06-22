@@ -300,6 +300,94 @@ Overlay 描绘的内容**保持上一条的设定不变** —— 还是用 `comp
 
 ---
 
+## 2026-06-22 · Settings 中的 Provider 区块可折叠
+
+**What Changed**
+
+- **Settings 里的「LLM Provider」和「Image Provider」两个区块现在可以折叠**。区块标题右侧加了一个 ghost chevron 图标，点击标题（或图标）整张卡片就会收起 / 展开，方便在配置项较多时快速浏览。
+- 默认是**展开**状态，所以打开 Settings 看到的内容和以前一样，需要折叠时再手动收起即可。
+
+**Notes**
+
+- 折叠状态目前不会持久化 —— 关掉 Settings 再打开会重新回到展开。
+- 这是 `SettingSection` 通用组件的能力（新增 `collapsible` / `defaultCollapsed` 两个可选 prop），其他 Settings 区块（如 Canvas、External Agents）保持现有行为不变。
+
+---
+
+## 2026-06-18 · 从 chat 拖拽 AI 生成的图片到画布会直接建图片节点
+
+**What Changed**
+
+- **在 chat 面板里，把 AI 回复中的图片块拖到画布上现在会创建 image 节点**，而不是像以前那样创建一条包含 `![](src)` 原始 markdown 的 note 节点。比如让 AI 「画一只穿宇航服的猫」并拿到一张图，用 Crepe 的块拖拽手柄把它拖到画布上，就会得到一个原生的图片节点，可以直接调整尺寸、做为后续 AI 调用的视觉参考。
+- 拖拽逻辑会先识别**整块是否只是一张图片**：纯 `![alt](src)` 走 image 节点；混排（图片 + 文字、列表里嵌图、外面包了链接 `[![](src)](href)` 等）依然走 note 节点，避免丢失上下文。
+- 如果图片指向当前画布的 artifact（被 `rewriteChatImageUrls` 展开过的 `/api/canvas/<id>/artifact/<key>` URL），新建的 image 节点会把 `data.src` 还原成裸 key `art_xxx.png`，与上传 / 粘贴产生的图片保持同一存储形式；指向其他画布或外部 URL 的图片则保留绝对地址。
+
+**Notes**
+
+- 拖拽时按住 Shift 仍然是「MOVE」语义，但 chat 卡片本身是只读的（没有可写入的 source node），所以 Shift 在此场景下等价于 Copy。
+- AI 回复中的图片 alt 文本会作为新 image 节点的 `label`；alt 为空时 label 留空，由后续的 preprocess 流程自动生成标题。
+
+---
+
+## 2026-06-18 · Settings 拆成 LLM Provider + Image Provider，输入即保存
+
+**What Changed**
+
+- **「Image Provider」从「LLM Provider」里独立出来**，现在是两个完全分开的 Settings 区块，凭据互不影响：
+  - **LLM Provider** — 驱动聊天 (`llmStream` / `llmComplete`)，可以是 OpenAI / Anthropic / GitHub Copilot / Azure …
+  - **Image Provider** — 驱动 `generate_image` 工具，目前只支持 Azure OpenAI，但 endpoint / deployment / API version / API key 都是独立保存的。
+  - 这样就可以「聊天用 GitHub Copilot，生图用 Azure」之类的组合，不用为了生图把聊天 provider 切到 Azure。
+- **删除所有 Save 按钮，所有输入框现在都是输入即保存**（debounce 600ms）：
+  - 文本输入 / 密码输入 — 你停止打字 600ms 后自动保存；
+  - 下拉菜单（Provider / Model / Quality） — 选择后立即保存；
+  - API Key 字段为空时不会触发保存（避免误清空已存的 key）。
+- 服务端会自动迁移老配置：原来存在 `providers["azure-openai"].imageModel` 下的 `imageModel` / `imageQuality` 字段会被搬到新的顶层 `imageConfig`，并复用原 Azure chat 的 endpoint / apiVersion / apiKey 作为默认值。下一次保存时老字段会被自然清掉。
+
+**Notes**
+
+- 新增两个 API endpoint：`GET /api/llm/image-config`、`PUT /api/llm/image-config`，仍受 loopback-only 保护。
+- 共享类型层面：`LLMConfig` 现在只承载聊天字段（移除了 `imageModel` / `imageQuality`），图片字段移到了新的 `LLMImageConfig`。
+- 图片 provider 目前只有 Azure 一个选项，但 UI 已经按下拉菜单方式设计，未来加 OpenAI native / Replicate 等不需要再改 UI 结构。
+- 如果同时在快速修改多个输入框，每个字段会各自单独发送一次保存请求（不会合并），按 600ms 各自防抖。
+
+---
+
+## 2026-06-18 · Settings 里可调图片生成质量（图片预览统一走 markdown）
+
+**What Changed**
+
+- **Settings → LLM Provider → Azure OpenAI 新增「Image Quality」下拉菜单**，可选 `low / medium / high / auto`：
+  - `low`（默认）— 最快最便宜，适合日常对话；
+  - `medium / high` — 出图更精细但更慢、成本更高；
+  - `auto` — 让 Azure 自己决定。
+    Agent 调用工具时也可以通过 `quality` 参数临时覆盖默认值。
+- 同时也修了：之前 AI 写在 chat 里的 `![](art_xxx.png)` markdown 不会渲染，因为 `art_xxx.png` 是裸 artifact key，浏览器不知道怎么解析；现在 chat markdown 渲染前会自动把裸 key 转成完整的 `/api/canvas/<id>/artifact/<key>` URL。这样 AI 在回复里写一句 `![](art_xxx.png)` 就能看到图。
+
+**Notes**
+
+- `generate_image` 工具调用本身在 chat 里的展示和其他通用工具一致（紧凑 pill 显示标题 + 状态），没有专门的大缩略图卡片——图片预览统一通过 AI 在文本中插入 markdown 的方式呈现。
+- 修改 quality 设置后立即对**下一次**生成生效，已生成的图片不受影响。
+
+---
+
+## 2026-06-18 · AI 现在可以直接为你生成图片并加到画布
+
+**What Changed**
+
+- **AI 助手新增两件工具：`generate_image` 和 `rasterize_node`。** 你可以直接在对话里让 AI 生成图片（例如「帮我画一只穿宇航服的猫，加到画布右下角」），AI 会调用 Azure OpenAI 的 `gpt-image-1` 生成图片，然后通过既有的 `canvas_commands` 把图片节点放到你指定的位置。
+- **AI 能把画布上已有的内容作为参考图**。如果你说「参考这张涂鸦，把它改成水彩风格」并选中一个 sketch 节点，AI 会先用 `rasterize_node` 把 sketch / image / pdf 封面光栅化成 PNG，再喂给 `generate_image` 当视觉参考。支持参考的节点类型：`image` / `video`（直接复用原图）、`pdf`（用封面图）、`sketch`（服务端实时把笔迹渲染成 PNG）。
+- **Settings → LLM Provider → Azure OpenAI 新增「Image Deployment」输入框**。需要在这里填入你的 `gpt-image-1` 部署名，AI 才会启用 `generate_image` 工具。
+
+**Notes**
+
+- 这个能力目前**仅支持 Azure OpenAI**。其他 provider（Copilot / Anthropic 等）的 chat 模型即使支持图片生成，也暂未接入这条管线。
+- **图片部署和聊天部署是两个不同的 Azure 部署**：聊天用的 `Deployment` 字段不变，图片走新加的 `Image Deployment` 字段。这两个字段共用同一组 Endpoint / API Key / API Version。
+- AI 生成的图片会写入当前画布的 `.artifacts/` 目录，与你自己上传的图片采用同一套存储和清理机制；删除节点后随画布的常规清理流程一起回收。
+- 当前不支持把整个 `frame` 节点光栅化作为参考；如果需要参考一组节点，让 AI 分别参考其中的图片或 sketch 子节点即可。
+- 对 `note` / `text` 节点 AI 不会把它们渲染成图片，而是直接读取其 markdown 文本写进 prompt——文字不适合当成视觉参考。
+
+---
+
 ## 2026-06-17 · 桌面端 / 网页端 Logo 升级为带圆角白底的新版
 
 **What Changed**

@@ -18,6 +18,7 @@ import React, {
 } from 'react';
 import '@xyflow/react/dist/style.css';
 
+import { resolveArtifactUrl } from '@/api/artifact';
 import { AudioNode } from '@/components/Nodes/audio/AudioNode';
 import { ImageNode } from '@/components/Nodes/image/ImageNode';
 import { NoteNode } from '@/components/Nodes/note/NoteNode';
@@ -739,10 +740,19 @@ export const Canvas: React.FC<CanvasProps> = ({
               });
             };
 
+            // `src` may be a bare artifact key (e.g. `art_xyz.png`) when
+            // the drag originated from a chat block produced by
+            // `generate_image`. The browser can't fetch a bare key —
+            // resolving it here lets the naturalDimensions probe succeed
+            // so the dropped image lands with the correct aspect ratio
+            // instead of falling back to `getNodeDefaultSize('image')`.
+            // `resolveArtifactUrl` is idempotent for already-fetchable
+            // inputs (data:, http(s)://, /api/...), so existing payload
+            // shapes (FloatingDragHandle, user-excerpt) are unaffected.
             const img = new Image();
             img.onload = () => doAdd(img.naturalWidth, img.naturalHeight);
             img.onerror = () => doAdd(0, 0);
-            img.src = src;
+            img.src = resolveArtifactUrl(src, canvasId ?? undefined);
             return;
           }
 

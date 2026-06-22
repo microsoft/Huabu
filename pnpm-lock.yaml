@@ -117,6 +117,9 @@ importers:
       '@opendocsg/pdf2md':
         specifier: ^0.2.5
         version: 0.2.7(@napi-rs/canvas@0.1.100)
+      '@resvg/resvg-wasm':
+        specifier: ^2.6.2
+        version: 2.6.2
       '@sediment/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -144,6 +147,9 @@ importers:
       officeparser:
         specifier: ^7.2.1
         version: 7.2.1
+      perfect-freehand:
+        specifier: ^1.2.3
+        version: 1.2.3
       sanitize-html:
         specifier: ^2.17.0
         version: 2.17.5
@@ -1899,6 +1905,10 @@ packages:
 
   '@protobufjs/utf8@1.1.1':
     resolution: {integrity: sha512-oOAWABowe8EAbMyWKM0tYDKi8Yaox52D+HWZhAIJqQXbqe0xI/GV7FhLWqlEKreMkfDjshR5FKgi3mnle0h6Eg==}
+
+  '@resvg/resvg-wasm@2.6.2':
+    resolution: {integrity: sha512-FqALmHI8D4o6lk/LRWDnhw95z5eO+eAa6ORjVg09YRR7BkcM6oPHU9uyC0gtQG5vpFLvgpeU4+zEAz2H8APHNw==}
+    engines: {node: '>= 10'}
 
   '@rolldown/pluginutils@1.0.0-beta.27':
     resolution: {integrity: sha512-+d0F4MKMCbeVUJwG96uQ4SgAznZNSq93I3V+9NHA4OpvqG8mRCpGdKmK8l/dl02h2CCDHwW2FqilnTyDcAnqjA==}
@@ -8553,6 +8563,8 @@ snapshots:
   '@protobufjs/pool@1.1.0': {}
 
   '@protobufjs/utf8@1.1.1': {}
+
+  '@resvg/resvg-wasm@2.6.2': {}
 
   '@rolldown/pluginutils@1.0.0-beta.27': {}
 
