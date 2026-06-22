@@ -2,6 +2,22 @@
 
 每次重要功能变更都会记录在此文件中，按时间倒序排列。
 
+## 2026-06-22 · Agent Sideband：HST 工具能正常下发、write-node 正确回传节点 ID
+
+**What Changed**
+
+修复 Agent Sideband 的三个问题，让外部 agent 真正能用上 Huabu Sideband Tool（HST）：
+
+1. **HST 脚本一直没被下发到 agentlet daemon。** agentlet 控制连接握手成功后，server 端从不触发 `onConnection`/`onReconnection` 回调（只有 agent-session 角色会触发），导致 `server-mount` 里"推送 HST 脚本"的逻辑形同虚设——daemon 永远收不到资源，缓存目录也不会被创建。
+2. **`write-node` 拿不到新建节点的 ID。** HST 之前从 `result.results[0].command.nodes[0].id` 取 ID，但引擎在内部用 `createId('node')` 生成 ID 后并不会回写到提交的命令上；真正的 ID 是通过 `pendingEffects.mutatedNodes`（新建节点排在最前）返回的。
+3. **`AGENTLET_SIDEBAND_DIR` 在 Windows 下的临时目录路径有 bug。** 改为指向可丢弃且默认被 gitignore 的 `node_modules/.cache/agentlet/sideband`，并统一 `resolve()` 成绝对路径（相对 daemon cwd），避免外部 agent 用不同 cwd 时找不到脚本。
+
+**Notes**
+
+- HST 现在在 daemon 首次连接和挂起后重连（idle 自动 suspend / resume）时都会重新下发，缓存被清掉也能恢复。
+- 修复后 daemon 日志会出现 `[acp] sideband tools pushed to agentlet` 与 `resource_saved`。
+- 改动文件：[server.ts](external/agentlet/packages/server/src/server.ts)（agentlet 握手补上 `onConnection`/`onReconnection`）、[agentlet.ts](external/agentlet/packages/local/src/agentlet.ts)（sideband 目录默认值 + 绝对化）、[server-mount.ts](apps/server/src/modules/agent/acp/server-mount.ts)（提取 `pushSidebandTools`、连接/重连都下发、修正 HST 脚本路径层级）、[huabu-sideband-tool.mjs](apps/server/src/sideband/huabu-sideband-tool.mjs)（从 `pendingEffects.mutatedNodes` 取新建节点 ID）。
+
 ## 2026-06-19 · External agent：换电脑/清浏览器缓存后，斜杠菜单仍能秒显
 
 **What Changed**

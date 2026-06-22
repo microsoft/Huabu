@@ -321,6 +321,7 @@ export class AgentletServer {
         }
         ws.send(JSON.stringify(response))
         existingConn.flushOutboundBuffer()
+        this.options.onReconnection?.(existingConn)
       } else {
         const conn = new AgentConnectionImpl({
           sessionId: agentletId,
@@ -340,6 +341,7 @@ export class AgentletServer {
         }
         ws.send(JSON.stringify(response))
         console.log(`[agentlet-server] Agentlet registered: ${agentletId}`)
+        this.options.onConnection?.(conn)
       }
     } catch (err) {
       const response = {

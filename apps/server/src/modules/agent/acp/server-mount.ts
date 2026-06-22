@@ -12,7 +12,14 @@ import type { FastifyInstance } from 'fastify';
 
 // Resolve HST script path relative to this module
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
-const HST_SCRIPT_PATH = join(__dirname, '..', '..', 'sideband', 'huabu-sideband-tool.mjs');
+const HST_SCRIPT_PATH = join(
+  __dirname,
+  '..',
+  '..',
+  '..',
+  'sideband',
+  'huabu-sideband-tool.mjs',
+);
 
 /**
  * Path prefix on Sediment's HTTP server where agentlet processes connect
@@ -75,20 +82,19 @@ export function mountAgentletServer(
       );
       // Push sideband tools to newly-connected agentlet daemons
       if (agent.role === 'agentlet') {
-        try {
-          const content = readFileSync(HST_SCRIPT_PATH, 'utf8');
-          server.sendResource(agent.sessionId, {
-            destination: '${AGENTLET_SIDEBAND_DIR}/huabu-sideband-tool.mjs',
-            content,
-          });
-          app.log.info('[acp] sideband tools pushed to agentlet');
-        } catch (err) {
-          app.log.warn({ err }, '[acp] failed to push sideband tools');
-        }
+        pushSidebandTools(agent.sessionId);
       }
     },
     onReconnection: (agent) => {
-      app.log.info({ sessionId: agent.sessionId }, '[acp] agent reconnected');
+      app.log.info(
+        { sessionId: agent.sessionId, role: agent.role },
+        '[acp] agent reconnected',
+      );
+      // Re-push sideband tools on resume — the daemon's cache dir may have
+      // been cleared while it was suspended.
+      if (agent.role === 'agentlet') {
+        pushSidebandTools(agent.sessionId);
+      }
     },
     onDisconnection: (agent, reason) => {
       app.log.info(
@@ -97,6 +103,22 @@ export function mountAgentletServer(
       );
     },
   });
+
+  // Push the HST script to an agentlet daemon over its control channel.
+  // Called on both initial connect and resume (the daemon's cache dir may
+  // have been cleared while suspended).
+  function pushSidebandTools(agentletSessionId: string): void {
+    try {
+      const content = readFileSync(HST_SCRIPT_PATH, 'utf8');
+      server.sendResource(agentletSessionId, {
+        destination: '${AGENTLET_SIDEBAND_DIR}/huabu-sideband-tool.mjs',
+        content,
+      });
+      app.log.info('[acp] sideband tools pushed to agentlet');
+    } catch (err) {
+      app.log.warn({ err }, '[acp] failed to push sideband tools');
+    }
+  }
 
   // Attach the WS upgrade listener once the underlying HTTP server is bound.
   // Fastify exposes `app.server` after `listen()`, which is what `onReady` waits for.

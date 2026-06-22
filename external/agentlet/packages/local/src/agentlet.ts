@@ -1,4 +1,4 @@
-import { hostname, platform, tmpdir } from 'node:os'
+import { hostname, platform } from 'node:os'
 import { join, resolve } from 'node:path'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import WebSocket from 'ws'
@@ -99,12 +99,14 @@ export class Agentlet {
     this.mode = options.agent ? 'bridge' : 'daemon'
     this.daemonId = options.agentletId ?? hostname()
 
-    // Well-known env vars with defaults — process.env overrides if set
+    // Well-known env vars with defaults — process.env overrides if set.
+    // Values are resolved to absolute paths against the daemon cwd so that
+    // spawned agents (which run in a different cwd) reference the same dir.
     const defaults: Record<string, string> = {
-      AGENTLET_SIDEBAND_DIR: join(tmpdir(), `agentlet-${this.daemonId}`, 'sideband'),
+      AGENTLET_SIDEBAND_DIR: join('node_modules', '.cache', 'agentlet', 'sideband'),
     }
     for (const [key, fallback] of Object.entries(defaults)) {
-      this.envRegistry[key] = process.env[key] || fallback
+      this.envRegistry[key] = resolve(process.env[key] || fallback)
     }
   }
 

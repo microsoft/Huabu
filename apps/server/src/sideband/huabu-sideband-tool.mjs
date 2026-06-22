@@ -180,7 +180,9 @@ async function callAskAgent(prompt, canvasId, opts = {}) {
     try {
       const errBody = await res.json();
       if (errBody.message) msg = errBody.message;
-    } catch { /* ignore parse errors */ }
+    } catch {
+      /* ignore parse errors */
+    }
     process.stderr.write(`Error: ${msg}\n`);
     if (exitOnError) process.exit(1);
     return { finalMessage: '', threadId: '', error: msg };
@@ -248,7 +250,9 @@ async function callAskAgent(prompt, canvasId, opts = {}) {
           break;
         case 'tool_call_update':
           if (showSteps)
-            process.stdout.write(`[tool result] ${(parsed.rawOutput || '').slice(0, 200)}\n`);
+            process.stdout.write(
+              `[tool result] ${(parsed.rawOutput || '').slice(0, 200)}\n`,
+            );
           break;
         case 'done':
           finalMessage = parsed.message || '';
@@ -409,18 +413,20 @@ Examples:
 
   const res = await request('POST', `/api/canvas/${canvasId}/execute`, {
     commands,
-    originator: { type: 'sideband' },
+    originator: { source: 'agent' },
   });
   const result = await res.json();
 
   let nodeId = id;
-  if (type && result.results && result.results.length > 0) {
-    const createResult = result.results[0];
-    if (createResult.ok && createResult.command?.type === 'CREATE_NODES') {
-      const createdNodes = createResult.command.nodes;
-      if (createdNodes && createdNodes.length > 0) {
-        nodeId = createdNodes[0].id;
-      }
+  if (type) {
+    // The engine assigns the new node's id internally (input.id ?? createId)
+    // and surfaces created nodes via pendingEffects.mutatedNodes — created
+    // nodes come first, ahead of any affected parent frames. It is NOT
+    // echoed back onto the submitted command. For a single CREATE_NODES the
+    // first mutated node is the one we just created.
+    const mutatedNodes = result.pendingEffects?.mutatedNodes;
+    if (Array.isArray(mutatedNodes) && mutatedNodes.length > 0) {
+      nodeId = mutatedNodes[0]?.id ?? nodeId;
     }
   }
 
@@ -440,7 +446,7 @@ Examples:
   if (linkCommands.length > 0) {
     await request('POST', `/api/canvas/${canvasId}/execute`, {
       commands: linkCommands,
-      originator: { type: 'sideband' },
+      originator: { source: 'agent' },
     });
   }
 
@@ -495,7 +501,9 @@ Examples:
   });
 
   if (positional.length === 0) {
-    process.stderr.write('Usage: ask-agent [options] <prompt | @prompt-file>\n');
+    process.stderr.write(
+      'Usage: ask-agent [options] <prompt | @prompt-file>\n',
+    );
     process.exit(1);
   }
 
