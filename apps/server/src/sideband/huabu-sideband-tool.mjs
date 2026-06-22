@@ -279,7 +279,7 @@ async function callAskAgent(prompt, canvasId, opts = {}) {
   }
 
   return { finalMessage, threadId };
-}────
+}
 
 async function readNode(args) {
   const { flags, positional } = parseArgs(args, {
