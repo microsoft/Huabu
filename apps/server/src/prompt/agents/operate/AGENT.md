@@ -13,6 +13,8 @@ tools:
   - ls
   - canvas_commands
   - fs_write
+  - rasterize_node
+  - generate_image
 skillScope: operate
 runtime:
   maxIterations: 20

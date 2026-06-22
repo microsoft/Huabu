@@ -1,13 +1,16 @@
 import {
   llmConfigUpdateSchema,
+  llmImageConfigUpdateSchema,
   llmModelsQuerySchema,
   oauthStatusQuerySchema,
 } from '@sediment/shared';
 
 import {
   getAvailableProviders,
+  getImageConfig,
   getLLMConfig,
   getModelsForProviderLive,
+  setImageConfig,
   setLLMConfig,
 } from './llm.js';
 import {
@@ -22,6 +25,8 @@ import type {
   ApiResult,
   LLMConfig,
   LLMConfigUpdate,
+  LLMImageConfig,
+  LLMImageConfigUpdate,
   LLMModelsQuery,
   LLMModelsResponse,
   LLMProvidersResponse,
@@ -57,6 +62,33 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
       }
 
       const result = await setLLMConfig(parsed.data);
+      return reply.send(result);
+    },
+  );
+
+  // GET /api/llm/image-config — return image-generation config
+  app.get<{ Reply: ApiResult<LLMImageConfig> }>('/image-config', async () => {
+    return getImageConfig();
+  });
+
+  // PUT /api/llm/image-config — update image-generation config
+  app.put<{ Body: LLMImageConfigUpdate; Reply: ApiResult<LLMImageConfig> }>(
+    '/image-config',
+    async (request, reply) => {
+      if (!isLoopbackRequest(request)) {
+        return reply.status(403).send({
+          message: 'Forbidden: LLM settings can only be changed from localhost',
+        });
+      }
+
+      const parsed = llmImageConfigUpdateSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply
+          .status(400)
+          .send({ message: parsed.error.issues[0]?.message ?? 'Invalid body' });
+      }
+
+      const result = setImageConfig(parsed.data);
       return reply.send(result);
     },
   );

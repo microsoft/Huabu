@@ -43,6 +43,7 @@
     "gpt-tokenizer": "^3.4.0",
     "html-to-image": "^1.11.13",
     "katex": "^0.16.47",
+    "lottie-react": "^2.4.1",
     "lucide-react": "^0.577.0",
     "pdfjs-dist": "5.4.296",
     "perfect-freehand": "^1.2.3",

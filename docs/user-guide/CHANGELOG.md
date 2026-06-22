@@ -17,6 +17,59 @@
 - HST 现在在 daemon 首次连接和挂起后重连（idle 自动 suspend / resume）时都会重新下发，缓存被清掉也能恢复。
 - 修复后 daemon 日志会出现 `[acp] sideband tools pushed to agentlet` 与 `resource_saved`。
 - 改动文件：[server.ts](external/agentlet/packages/server/src/server.ts)（agentlet 握手补上 `onConnection`/`onReconnection`）、[agentlet.ts](external/agentlet/packages/local/src/agentlet.ts)（sideband 目录默认值 + 绝对化）、[server-mount.ts](apps/server/src/modules/agent/acp/server-mount.ts)（提取 `pushSidebandTools`、连接/重连都下发、修正 HST 脚本路径层级）、[huabu-sideband-tool.mjs](apps/server/src/sideband/huabu-sideband-tool.mjs)（从 `pendingEffects.mutatedNodes` 取新建节点 ID）。
+## 2026-06-22 · 画布：frame ↔ 内部节点的边走"同侧外绕"
+
+**What Changed**
+
+修复 frame 节点和它**内部**的某个节点直接连边时，edge 角度奇怪的问题。
+
+原先的智能 handle 选择（[`getSmartHandles`](packages/shared/src/canvas-engine/utils/edge.ts)）只考虑了两个矩形**并排（外部）**的情形，会从 12 个候选 handle 对里挑最短、最少穿障的一对。这套规则套到"一个 rect 完全在另一个里"的容器场景时，每条直线候选都从容器内部斜着穿过去，最后画出来的曲线就是一条丑陋的内部斜线。
+
+现在在打分循环之前新增一段**几何包含检测**：
+
+- 若 target 完全在 source 里 → source 是容器（通常是 frame），target 是内部节点
+- 若 source 完全在 target 里 → 反过来
+
+任一命中后，沿容器对角线把它划成 4 个三角形楔形（上 / 下 / 左 / 右），看内部节点中心落在哪个楔里——然后两端都用同侧 handle（`top-source ↔ top-target` / `left-source ↔ left-target` 等等）。React Flow 的 bezier / smooth-step 路径会沿每个 handle 的外法线方向离开，所以渲染出来就是一条**从容器同侧出去，沿外缘绕回到内部节点同侧**的干净外环，符合直觉。
+
+楔形判断用的是**比例**（`|offsetX| > |offsetY|`），不是绝对像素距离：frame 通常宽 > 高，如果按"哪条边像素更近"算，几乎永远是上 / 下赢，左 / 右死活出不来；按比例分则左半边的子节点真的会走左侧。
+
+**Notes**
+
+- 用**几何**而不是 `parentId` 判断"是否在内部"：拖动过程中如果子节点暂时超出 frame 边界（甚至超过 4 px 容差），会自动 fallback 到原有的外部走法——视觉上"它现在不在里面了"，应该按外部走，行为反而对。
+- 同样规则对**嵌套**容器也成立：outer frame → leaf 直接连边时，leaf 在 outer 的绝对 rect 内 → 同侧。
+- 4 px `INSIDE_SLACK_PX` 容差用来吞掉拖拽中的半像素抖动和子节点贴边的常见情况，确保贴边布局也能命中。
+- 改动文件：[edge.ts](packages/shared/src/canvas-engine/utils/edge.ts)（新增 `isInsideRect` / `closestContainerSide` / `sameSidePair` helper + `getSmartHandles` 短路分支）。
+
+## 2026-06-22 · 画布：可选的 MiniMap 缩略图
+
+**What Changed**
+
+画布右下角现在可以开 MiniMap（缩略图），跟着画布内容实时更新。**默认关闭**——去 Settings → Canvas 里打开 "Show MiniMap" 开关即可启用。
+
+打开后支持两种交互：
+
+- **拖拽缩略图** 直接平移主画布视口；
+- **在缩略图上滚轮** 直接缩放主画布。
+
+视觉上沿用 xyflow 自带的默认配色（亮/暗模式自动适配），只在外面加了一圈 `border-edge-default` 描边 + 圆角 + 微弱阴影，跟其它浮层组件保持一致。
+
+**Notes**
+
+- 偏好持久化在 `localStorage`（key: `sediment.minimapEnabled`），是**全局**设置，所有画布共享，刷新 / 重启后保持。Private mode / 配额报错会静默 fallback 到 in-memory（仍可在当前会话切换，只是不落盘）。
+- 改动文件：[Canvas.tsx](apps/web/src/components/Panels/Canvas/Canvas.tsx)（按 store 状态条件渲染 MiniMap）、[canvasStore.ts](apps/web/src/store/canvasStore.ts)（新增 `minimapEnabled` / `toggleMinimap` + localStorage read/write helper）、[CanvasSettings.tsx](apps/web/src/components/Panels/Header/CanvasSettings.tsx)（新增 Toggle 行）。
+
+## 2026-06-22 · Settings 面板：底部新增当前版本号
+
+**What Changed**
+
+打开 Settings 弹窗，左下角现在会显示一行小字 `v0.1.2`（跟随桌面端 `apps/desktop/package.json` 的 `version` 字段，构建时通过 Vite `define` 内联进 bundle）。Close 按钮维持在右下角，整体一行排开。
+
+**Notes**
+
+- 版本号选用 `text-fg-subtle` + `text-[11px]` + `font-mono`，跟周围的"次要信息"风格一致，可以选中复制，便于反馈 bug 时贴出来。
+- web 包自己的 `package.json` 一直是 `0.0.0`，不是有效的产品版本号；桌面端 `package.json` 才是真正发版用的，因此选它作为单一信源。后续只要 bump 桌面端的版本，UI 上就会自动跟上。
+- 新增的全局类型 `__APP_VERSION__` 声明在 [vite-env.d.ts](apps/web/src/vite-env.d.ts)，所有客户端代码都能直接引用。
 
 ## 2026-06-19 · External agent：换电脑/清浏览器缓存后，斜杠菜单仍能秒显
 
@@ -313,6 +366,94 @@ Overlay 描绘的内容**保持上一条的设定不变** —— 还是用 `comp
 - 新增常量 `FRAME_POINTER_CAPTURE_MARGIN = 24`（导出自 `@sediment/shared/canvas-engine`），作为 halo 的**下限**；想全局调整最小粘性距离只需改这一处。
 - 不带 `pointer` 调用时所有原语行为完全保持不变，向后兼容；既有的 `margin: 10` 体积溢出兜底规则也保留。
 - 改动文件：`packages/shared/src/canvas-engine/{utils/constants.ts, frame/{geometry,mutation,detection}.ts, index.ts}`、`apps/web/src/handler/canvasCommand/resolvers/resolveNodeDragStop.ts`、`apps/web/src/store/canvasStore.ts`；新增测试 `packages/shared/src/canvas-engine/frame/__tests__/pointerDrop.test.ts`。
+
+---
+
+## 2026-06-22 · Settings 中的 Provider 区块可折叠
+
+**What Changed**
+
+- **Settings 里的「LLM Provider」和「Image Provider」两个区块现在可以折叠**。区块标题右侧加了一个 ghost chevron 图标，点击标题（或图标）整张卡片就会收起 / 展开，方便在配置项较多时快速浏览。
+- 默认是**展开**状态，所以打开 Settings 看到的内容和以前一样，需要折叠时再手动收起即可。
+
+**Notes**
+
+- 折叠状态目前不会持久化 —— 关掉 Settings 再打开会重新回到展开。
+- 这是 `SettingSection` 通用组件的能力（新增 `collapsible` / `defaultCollapsed` 两个可选 prop），其他 Settings 区块（如 Canvas、External Agents）保持现有行为不变。
+
+---
+
+## 2026-06-18 · 从 chat 拖拽 AI 生成的图片到画布会直接建图片节点
+
+**What Changed**
+
+- **在 chat 面板里，把 AI 回复中的图片块拖到画布上现在会创建 image 节点**，而不是像以前那样创建一条包含 `![](src)` 原始 markdown 的 note 节点。比如让 AI 「画一只穿宇航服的猫」并拿到一张图，用 Crepe 的块拖拽手柄把它拖到画布上，就会得到一个原生的图片节点，可以直接调整尺寸、做为后续 AI 调用的视觉参考。
+- 拖拽逻辑会先识别**整块是否只是一张图片**：纯 `![alt](src)` 走 image 节点；混排（图片 + 文字、列表里嵌图、外面包了链接 `[![](src)](href)` 等）依然走 note 节点，避免丢失上下文。
+- 如果图片指向当前画布的 artifact（被 `rewriteChatImageUrls` 展开过的 `/api/canvas/<id>/artifact/<key>` URL），新建的 image 节点会把 `data.src` 还原成裸 key `art_xxx.png`，与上传 / 粘贴产生的图片保持同一存储形式；指向其他画布或外部 URL 的图片则保留绝对地址。
+
+**Notes**
+
+- 拖拽时按住 Shift 仍然是「MOVE」语义，但 chat 卡片本身是只读的（没有可写入的 source node），所以 Shift 在此场景下等价于 Copy。
+- AI 回复中的图片 alt 文本会作为新 image 节点的 `label`；alt 为空时 label 留空，由后续的 preprocess 流程自动生成标题。
+
+---
+
+## 2026-06-18 · Settings 拆成 LLM Provider + Image Provider，输入即保存
+
+**What Changed**
+
+- **「Image Provider」从「LLM Provider」里独立出来**，现在是两个完全分开的 Settings 区块，凭据互不影响：
+  - **LLM Provider** — 驱动聊天 (`llmStream` / `llmComplete`)，可以是 OpenAI / Anthropic / GitHub Copilot / Azure …
+  - **Image Provider** — 驱动 `generate_image` 工具，目前只支持 Azure OpenAI，但 endpoint / deployment / API version / API key 都是独立保存的。
+  - 这样就可以「聊天用 GitHub Copilot，生图用 Azure」之类的组合，不用为了生图把聊天 provider 切到 Azure。
+- **删除所有 Save 按钮，所有输入框现在都是输入即保存**（debounce 600ms）：
+  - 文本输入 / 密码输入 — 你停止打字 600ms 后自动保存；
+  - 下拉菜单（Provider / Model / Quality） — 选择后立即保存；
+  - API Key 字段为空时不会触发保存（避免误清空已存的 key）。
+- 服务端会自动迁移老配置：原来存在 `providers["azure-openai"].imageModel` 下的 `imageModel` / `imageQuality` 字段会被搬到新的顶层 `imageConfig`，并复用原 Azure chat 的 endpoint / apiVersion / apiKey 作为默认值。下一次保存时老字段会被自然清掉。
+
+**Notes**
+
+- 新增两个 API endpoint：`GET /api/llm/image-config`、`PUT /api/llm/image-config`，仍受 loopback-only 保护。
+- 共享类型层面：`LLMConfig` 现在只承载聊天字段（移除了 `imageModel` / `imageQuality`），图片字段移到了新的 `LLMImageConfig`。
+- 图片 provider 目前只有 Azure 一个选项，但 UI 已经按下拉菜单方式设计，未来加 OpenAI native / Replicate 等不需要再改 UI 结构。
+- 如果同时在快速修改多个输入框，每个字段会各自单独发送一次保存请求（不会合并），按 600ms 各自防抖。
+
+---
+
+## 2026-06-18 · Settings 里可调图片生成质量（图片预览统一走 markdown）
+
+**What Changed**
+
+- **Settings → LLM Provider → Azure OpenAI 新增「Image Quality」下拉菜单**，可选 `low / medium / high / auto`：
+  - `low`（默认）— 最快最便宜，适合日常对话；
+  - `medium / high` — 出图更精细但更慢、成本更高；
+  - `auto` — 让 Azure 自己决定。
+    Agent 调用工具时也可以通过 `quality` 参数临时覆盖默认值。
+- 同时也修了：之前 AI 写在 chat 里的 `![](art_xxx.png)` markdown 不会渲染，因为 `art_xxx.png` 是裸 artifact key，浏览器不知道怎么解析；现在 chat markdown 渲染前会自动把裸 key 转成完整的 `/api/canvas/<id>/artifact/<key>` URL。这样 AI 在回复里写一句 `![](art_xxx.png)` 就能看到图。
+
+**Notes**
+
+- `generate_image` 工具调用本身在 chat 里的展示和其他通用工具一致（紧凑 pill 显示标题 + 状态），没有专门的大缩略图卡片——图片预览统一通过 AI 在文本中插入 markdown 的方式呈现。
+- 修改 quality 设置后立即对**下一次**生成生效，已生成的图片不受影响。
+
+---
+
+## 2026-06-18 · AI 现在可以直接为你生成图片并加到画布
+
+**What Changed**
+
+- **AI 助手新增两件工具：`generate_image` 和 `rasterize_node`。** 你可以直接在对话里让 AI 生成图片（例如「帮我画一只穿宇航服的猫，加到画布右下角」），AI 会调用 Azure OpenAI 的 `gpt-image-1` 生成图片，然后通过既有的 `canvas_commands` 把图片节点放到你指定的位置。
+- **AI 能把画布上已有的内容作为参考图**。如果你说「参考这张涂鸦，把它改成水彩风格」并选中一个 sketch 节点，AI 会先用 `rasterize_node` 把 sketch / image / pdf 封面光栅化成 PNG，再喂给 `generate_image` 当视觉参考。支持参考的节点类型：`image` / `video`（直接复用原图）、`pdf`（用封面图）、`sketch`（服务端实时把笔迹渲染成 PNG）。
+- **Settings → LLM Provider → Azure OpenAI 新增「Image Deployment」输入框**。需要在这里填入你的 `gpt-image-1` 部署名，AI 才会启用 `generate_image` 工具。
+
+**Notes**
+
+- 这个能力目前**仅支持 Azure OpenAI**。其他 provider（Copilot / Anthropic 等）的 chat 模型即使支持图片生成，也暂未接入这条管线。
+- **图片部署和聊天部署是两个不同的 Azure 部署**：聊天用的 `Deployment` 字段不变，图片走新加的 `Image Deployment` 字段。这两个字段共用同一组 Endpoint / API Key / API Version。
+- AI 生成的图片会写入当前画布的 `.artifacts/` 目录，与你自己上传的图片采用同一套存储和清理机制；删除节点后随画布的常规清理流程一起回收。
+- 当前不支持把整个 `frame` 节点光栅化作为参考；如果需要参考一组节点，让 AI 分别参考其中的图片或 sketch 子节点即可。
+- 对 `note` / `text` 节点 AI 不会把它们渲染成图片，而是直接读取其 markdown 文本写进 prompt——文字不适合当成视觉参考。
 
 ---
 
