@@ -43,25 +43,61 @@ const SOURCE_SVG = join(RESOURCES, 'logo.svg');
  * default (72) avoids the soft / blurry edges you get when downscaling from
  * an under-sampled raster. We tie it to the requested size so even 1024px
  * exports have a sharp source.
+ *
+ * `pad` is the transparent margin on EACH side, expressed as a fraction of
+ * `size` (so `0.10` = 10% margin per side, artwork fills the central 80%).
+ * Apple's macOS app-icon template expects ~10% margin around the artwork
+ * so the Dock / Launchpad cell renders the icon at the same visual size as
+ * native apps (WeChat / Figma / Safari). Without this, our edge-to-edge
+ * rounded square fills the entire cell and looks oversized.
  */
-async function renderPng(size) {
+async function renderPng(size, pad = 0) {
   const svg = await readFile(SOURCE_SVG);
-  return sharp(svg, { density: Math.max(384, size) })
-    .resize(size, size, {
+  const inner = Math.max(1, Math.round(size * (1 - pad * 2)));
+
+  const innerPng = await sharp(svg, { density: Math.max(384, inner) })
+    .resize(inner, inner, {
       fit: 'contain',
       background: { r: 0, g: 0, b: 0, alpha: 0 },
     })
     .png({ compressionLevel: 9 })
     .toBuffer();
+
+  if (pad === 0) return innerPng;
+
+  // Composite the artwork onto a transparent square so the margin
+  // becomes the visual padding macOS expects. `extract_area` /
+  // `extend` would also work; `composite` keeps the alpha cleanest.
+  const margin = Math.round((size - inner) / 2);
+  return sharp({
+    create: {
+      width: size,
+      height: size,
+      channels: 4,
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+    },
+  })
+    .composite([{ input: innerPng, left: margin, top: margin }])
+    .png({ compressionLevel: 9 })
+    .toBuffer();
 }
 
 async function main() {
+  // Apple's macOS app icon template expects ~10% transparent margin on
+  // every side so the Dock / Launchpad / Mission Control cells render
+  // us at the same visual size as native apps. Windows + Linux
+  // installers tolerate the margin fine, so we apply it uniformly to
+  // every desktop binary. The browser favicon stays edge-to-edge
+  // because a browser tab's favicon slot is small enough that any
+  // margin just shrinks the artwork.
+  const ICON_PAD = 0.1;
+
   // 1024px master used as input for ICNS / ICO so the embedded
   // 512px and 256px representations are still down-sampled from a
   // hi-res source rather than the 512px file we ship as icon.png.
-  const png1024 = await renderPng(1024);
+  const png1024 = await renderPng(1024, ICON_PAD);
 
-  const png512 = await renderPng(512);
+  const png512 = await renderPng(512, ICON_PAD);
   await writeFile(join(RESOURCES, 'icon.png'), png512);
   console.log(`✓ build-resources/icon.png        (${png512.length} bytes)`);
 
