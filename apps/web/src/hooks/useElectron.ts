@@ -31,6 +31,24 @@ interface ElectronWindowApi {
   onFullScreenChange: (cb: (fullScreen: boolean) => void) => () => void;
 }
 
+/**
+ * Native OS dialogs forwarded from the Electron main process.
+ *
+ * `pickFolder` swaps the server's legacy PowerShell folder picker for
+ * Electron's `dialog.showOpenDialog({ properties: ['openDirectory'] })`,
+ * which uses the modern Vista+ IFileOpenDialog on Windows (Explorer
+ * sidebar + path bar + "New folder" button) and NSOpenPanel on macOS.
+ *
+ * The result shape mirrors `PickFolderResult` from `@sediment/shared`
+ * minus the `'no-picker'` reason — Electron always has a GUI, so only
+ * `'cancelled'` is possible on the non-`ok` branch.
+ */
+interface ElectronDialogApi {
+  pickFolder: (
+    title?: string,
+  ) => Promise<{ ok: true; path: string } | { ok: false; reason: 'cancelled' }>;
+}
+
 interface ElectronBridge {
   versions: {
     node: string;
@@ -57,6 +75,7 @@ interface ElectronBridge {
    */
   workspace?: ElectronWorkspaceApi;
   window?: ElectronWindowApi;
+  dialog?: ElectronDialogApi;
 }
 
 declare global {
