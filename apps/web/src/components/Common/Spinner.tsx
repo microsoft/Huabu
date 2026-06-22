@@ -1,4 +1,6 @@
-import { Loader2 } from 'lucide-react';
+import Lottie from 'lottie-react';
+
+import loadingAnimation from '@/assets/loading.json';
 
 import { cn } from './cn';
 
@@ -7,6 +9,11 @@ type SpinnerSize = 'xs' | 'sm' | 'md';
 interface SpinnerProps {
   /** xs = 12px, sm = 16px (default), md = 18px */
   size?: SpinnerSize;
+  /**
+   * Passed through for layout (margin, alignment, etc.). Text-color
+   * utilities like `text-fg-subtle` have no effect here — the Lottie
+   * has its own brand palette baked in.
+   */
   className?: string;
 }
 
@@ -17,23 +24,25 @@ const sizeMap: Record<SpinnerSize, number> = {
 };
 
 export function Spinner({ size = 'sm', className }: SpinnerProps) {
-  // The rotation lives on a plain HTML <span> rather than on the <svg>
-  // itself: Chromium does not reliably promote SVG transform animations to
-  // the compositor, so an `animate-spin` applied directly to the icon keeps
-  // running on the main thread and freezes whenever a long synchronous task
-  // (e.g. building a large canvas) blocks it. Spinning a composited HTML
-  // element instead — `will-change: transform` forces its own layer — lets
-  // the GPU/compositor thread drive the rotation, so it keeps turning even
-  // while the main thread is janked. The icon inside is static and just
-  // rides along.
+  const px = sizeMap[size];
+  // Wrap in a fixed-size <span> so flex parents lay us out predictably;
+  // the Lottie fills it with `width/height: 100%`. lottie-react drives
+  // the SVG animation off requestAnimationFrame (main thread) so a long
+  // synchronous task on the JS thread will still pause the spinner —
+  // an inherent trade-off vs. the old composited-CSS rotation.
   return (
     <span
-      className={cn(
-        'inline-flex animate-spin [will-change:transform]',
-        className,
-      )}
+      role="status"
+      aria-label="Loading"
+      className={cn('inline-flex shrink-0', className)}
+      style={{ width: px, height: px }}
     >
-      <Loader2 size={sizeMap[size]} />
+      <Lottie
+        animationData={loadingAnimation}
+        loop
+        autoplay
+        style={{ width: '100%', height: '100%' }}
+      />
     </span>
   );
 }

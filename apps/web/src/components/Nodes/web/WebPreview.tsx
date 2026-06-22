@@ -364,7 +364,7 @@ export const WebPreview = ({ id, data }: PreviewComponentProps) => {
       <div className="relative h-full flex-1 overflow-hidden">
         {showLive ? (
           loadingPage ? (
-            <LoadingState message="Loading..." />
+            <LoadingState message="Loading..." variant="skeleton" />
           ) : pageError ? (
             <div className="text-fg-subtle flex h-full w-full flex-col items-center justify-center gap-2 text-sm">
               <div>Failed to load page</div>
@@ -421,7 +421,7 @@ export const WebPreview = ({ id, data }: PreviewComponentProps) => {
             </div>
           )
         ) : loadingReader ? (
-          <LoadingState message="Loading..." />
+          <LoadingState message="Loading..." variant="skeleton" />
         ) : readerError ? (
           <div className="text-fg-subtle flex h-full w-full flex-col items-center justify-center gap-2 text-sm">
             <div>Failed to load reader view</div>

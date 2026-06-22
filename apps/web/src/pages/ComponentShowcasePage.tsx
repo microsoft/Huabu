@@ -718,7 +718,7 @@ export default function ComponentShowcasePage() {
           {/* ────────────────────── Spinner ─────────────────────── */}
           <Section
             title="Spinner"
-            description="Animated loading indicator using Lucide Loader2. Three sizes with color via className."
+            description="Brand Lottie loading animation (four colored dots orbiting the central logo). Three sizes; colors are baked in, so text-color utilities have no effect."
           >
             <div className="space-y-4">
               <SubSection label="Sizes">
@@ -737,33 +737,13 @@ export default function ComponentShowcasePage() {
                   </div>
                 </div>
               </SubSection>
-              <SubSection label="Colors via className">
-                <div className="flex items-center gap-6">
-                  <div className="flex flex-col items-center gap-2">
-                    <Spinner className="text-fg-subtle" />
-                    <span className="text-fg-muted text-xs">
-                      text-fg-subtle
-                    </span>
-                  </div>
-                  <div className="flex flex-col items-center gap-2">
-                    <Spinner className="text-info" />
-                    <span className="text-fg-muted text-xs">text-info</span>
-                  </div>
-                  <div className="bg-inverse flex flex-col items-center gap-2 rounded px-3 py-2">
-                    <Spinner className="text-fg-inverse" />
-                    <span className="text-fg-inverse text-xs">
-                      text-fg-inverse
-                    </span>
-                  </div>
-                </div>
-              </SubSection>
               <SubSection label="Inline in buttons">
                 <Button variant="solid" disabled>
-                  <Spinner size="sm" className="text-fg-inverse" />
+                  <Spinner size="sm" />
                   Saving…
                 </Button>
                 <Button variant="outline" disabled>
-                  <Spinner size="sm" className="text-fg-subtle" />
+                  <Spinner size="sm" />
                   Loading…
                 </Button>
               </SubSection>
