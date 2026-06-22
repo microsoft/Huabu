@@ -2,6 +2,18 @@
 
 每次重要功能变更都会记录在此文件中，按时间倒序排列。
 
+## 2026-06-22 · Settings 面板：底部新增当前版本号
+
+**What Changed**
+
+打开 Settings 弹窗，左下角现在会显示一行小字 `v0.1.2`（跟随桌面端 `apps/desktop/package.json` 的 `version` 字段，构建时通过 Vite `define` 内联进 bundle）。Close 按钮维持在右下角，整体一行排开。
+
+**Notes**
+
+- 版本号选用 `text-fg-subtle` + `text-[11px]` + `font-mono`，跟周围的"次要信息"风格一致，可以选中复制，便于反馈 bug 时贴出来。
+- web 包自己的 `package.json` 一直是 `0.0.0`，不是有效的产品版本号；桌面端 `package.json` 才是真正发版用的，因此选它作为单一信源。后续只要 bump 桌面端的版本，UI 上就会自动跟上。
+- 新增的全局类型 `__APP_VERSION__` 声明在 [vite-env.d.ts](apps/web/src/vite-env.d.ts)，所有客户端代码都能直接引用。
+
 ## 2026-06-19 · External agent：换电脑/清浏览器缓存后，斜杠菜单仍能秒显
 
 **What Changed**
