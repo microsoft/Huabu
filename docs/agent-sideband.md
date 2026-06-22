@@ -226,6 +226,7 @@ No automatic retry or recovery in HST — the external agent decides how to hand
 - **Stateful conversations (`--resume`)**: v1 `ask-agent` is stateless. The returned `threadId` is reserved for future `--resume <threadId>` support that would maintain conversation context across calls. Requires server-side thread/context persistence.
 - **Target agent identification**: Both `write-node --notify-to <agent-id>` and `ask-agent --to <agent-id>` need a way to specify a target built-in agent. This requires defining agent identification (agent-id vs agent-template-id), discovery mechanism, and routing logic. For v1, all requests go to the single default built-in agent.
 - **Structured output**: v1 uses plain text output (curl-style). A `--format json` flag can be added later if needed for programmatic consumption.
+- **Selected node IDs in prompt**: Currently node IDs are embedded in `ExternalAgentPrompt.attachments` only when the preprocessor LLM decides to attach a file (path→nodeId reverse lookup). Selected nodes that appear in the `task` text but are NOT attached don't carry their IDs. A future improvement would pass all `selectedRefs` node IDs explicitly (e.g., a `## Referenced Nodes` section) so the external agent can always use `read-node <id>` / `write-node --id <id>` regardless of whether the preprocessor chose to attach them.
 - **Script versioning**: v1 guarantees script existence via bundled installation. Auto-update mechanism TBD.
 - **Push notifications (server→agent)**: Currently all sideband communication is agent-initiated. Server-push (e.g., "node X was edited by another user") is a future consideration.
 
@@ -301,8 +302,8 @@ Design notes:
 
 The host application that orchestrates agent sessions and canvas interactions.
 
-- [ ] Prompt injection: include sideband usage description in the agent's system prompt when spawning an external agent session
-- [ ] Node ID embedding: pass referenced node IDs into the agent's initial context
+- [x] Prompt injection: include sideband usage description in the agent's system prompt when spawning an external agent session
+- [x] Node ID embedding: pass referenced node IDs into the agent's initial context
 - [x] Pass `HUABU_CANVAS_ID` via `sessionSpec.env` when spawning an external agent session
 
 ### Component: Agentlet Protocol (`@agentlet/protocol`)

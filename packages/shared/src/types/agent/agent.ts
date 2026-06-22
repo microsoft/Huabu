@@ -153,6 +153,8 @@ export interface ExternalAgentPrompt {
     path: string;
     /** Why verbatim reading is required (≤ ~80 chars). */
     reason: string;
+    /** Canvas node ID (when the attachment maps to a known node). */
+    nodeId?: string;
   }>;
 }
 

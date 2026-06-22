@@ -304,7 +304,11 @@ export function serializePrompt(
       const wirePath = opts.canvasRoot
         ? path.join(opts.canvasRoot, ref.path)
         : `${ACP_CANVAS_VFS_PREFIX}${ref.path}`;
-      lines.push(`- \`${wirePath}\` — ${ref.reason}`);
+      const nodeHint =
+        opts.sidebandEnabled && ref.nodeId
+          ? ` (node ID: \`${ref.nodeId}\`)`
+          : '';
+      lines.push(`- \`${wirePath}\`${nodeHint} — ${ref.reason}`);
     }
   }
   if (opts.sidebandEnabled) {
@@ -382,6 +386,9 @@ function parsePromptJson(
   if (!task) return null;
 
   const knownPaths = new Set<string>(selectedRefs.map((r) => r.filename));
+  const pathToNodeId = new Map<string, string>(
+    selectedRefs.map((r) => [r.filename, r.id]),
+  );
 
   const rawRefs = Array.isArray(obj.attachments) ? obj.attachments : [];
   const attachments: ExternalAgentPrompt['attachments'] = [];
@@ -403,6 +410,7 @@ function parsePromptJson(
     attachments.push({
       path: refPath,
       reason: rawReason ? truncate(rawReason, 80) : 'verbatim content required',
+      ...(pathToNodeId.has(refPath) ? { nodeId: pathToNodeId.get(refPath) } : {}),
     });
     if (attachments.length >= 8) break;
   }
