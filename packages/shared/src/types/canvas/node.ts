@@ -460,17 +460,17 @@ export type QuestionNodeStatus =
   | 'done'
   | 'error';
 
-/**
- * Extensible input union for question nodes.
- * Discriminated on `kind` — add new modalities (sketch, voice, etc.) here.
- */
-export type QuestionInput = { kind: 'text'; content: string };
-
 /** Question node: AI interaction medium embedded on canvas. */
 export interface QuestionNodeData extends BaseNodeData {
   type: 'question';
-  /** User's input (extensible discriminated union). */
-  input: QuestionInput;
+  /**
+   * The user's prompt. Persisted into the markdown sidecar body just
+   * like text/note/web bodies (see `TEXT_BEARING_NODE_TYPES`) so a
+   * single rule covers every searchable node type. Empty string when
+   * the node has just been created and the user has not yet typed
+   * anything.
+   */
+  content: string;
   /** Current execution status. */
   status: QuestionNodeStatus;
   /** Epoch ms when auto-run triggers. Transient — not persisted. */
@@ -489,7 +489,7 @@ export interface QuestionNodeData extends BaseNodeData {
    * Agent dispatch binding chosen via the in-node `@` mention. When
    * omitted (default), the question runs against the built-in agent
    * with `agentMode='ask'`. The mention text (e.g. `@claude`) is also
-   * kept in `input.content` so the user can see/edit which agent was
+   * kept in `data.content` so the user can see/edit which agent was
    * picked.
    */
   agentBinding?: AgentBinding;

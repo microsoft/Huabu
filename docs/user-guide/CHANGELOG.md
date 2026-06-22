@@ -71,6 +71,21 @@
 - 版本号选用 `text-fg-subtle` + `text-[11px]` + `font-mono`，跟周围的"次要信息"风格一致，可以选中复制，便于反馈 bug 时贴出来。
 - web 包自己的 `package.json` 一直是 `0.0.0`，不是有效的产品版本号；桌面端 `package.json` 才是真正发版用的，因此选它作为单一信源。后续只要 bump 桌面端的版本，UI 上就会自动跟上。
 - 新增的全局类型 `__APP_VERSION__` 声明在 [vite-env.d.ts](apps/web/src/vite-env.d.ts)，所有客户端代码都能直接引用。
+## 2026-06-23 · Question 节点正文统一到 `data.content`
+
+**What Changed**
+
+之前 Question 节点的提示词单独住在 `data.input.content`（一个只有 `kind: 'text'` 一种变体的 discriminated union），其它文本类节点（note / text / web / pdf / office）则统一住在扁平的 `data.content`。这种"特例"导致 web 自动保存队列、服务端 PUT 路由和 AI executor 三处都得各自写一段"如果是 question 就读 `data.input.content`"的分支，正好被这次代码评审标记为 P1。
+
+- **数据形状统一** —— Question 节点的提示词现在写在 `data.content`，与所有其他文本类节点一致；`QuestionInput` 类型从 `@sediment/shared` 移除；三处自动保存 / 写盘的特例分支随之删除，新增一种文本类节点时只要往 `TEXT_BEARING_NODE_TYPES` 加一行字符串就行。
+- **首次启动会自动迁移老画布** —— 服务端在 workspace 引导阶段会把每个 `canvas.json` 里的 question 节点从 `data.input.content` 平铺到 `data.content` 并删除旧字段，同时把提示词回填到 `nodes/<label>.md` 的正文里（之前老版本不写 sidecar 正文，仅迁移 JSON 会在下一次结构 PUT 被 `stripNodesForCanvas` 抹掉）。迁移由 `<workspace>/.question-content-v1` 哨兵控制，跑一次即终结。
+
+**Notes**
+
+- 用户无感知，无需任何操作；启动后 Question 节点的内容、AI 提问、画布搜索全部照常工作。
+- 如果你写了画布插件并直接构造 `QuestionNodeData`：旧的 `input: { kind: 'text', content: '…' }` 形状不再被前后端接受，请改用 `content: '…'`。
+- 哨兵 `.question-content-v1` 留在 workspace 根目录，请勿手动删除（否则下次启动会重复扫描，但语义上仍然幂等不会丢数据）。
+
 ## 2026-06-22 · Canvas 搜索：流式 meta 命中 + 就地查找条手感修复
 
 **What Changed**

@@ -155,21 +155,6 @@ export function createNodeContentQueue(opts: {
       if (typeof content === 'string') body.content = content;
     }
 
-    // Question nodes keep their prompt under `data.input.content`
-    // (the discriminated `QuestionInput` union, see
-    // `packages/shared/.../node.ts`). Without persisting it into the
-    // sidecar body, canvas search has no way to find question text.
-    // Treat the prompt as the markdown body — it's free-form text
-    // that's semantically equivalent to a note for search purposes.
-    if (nodeType === 'question') {
-      const input = data['input'] as
-        | { kind?: string; content?: string }
-        | undefined;
-      if (input?.kind === 'text' && typeof input.content === 'string') {
-        body.content = input.content;
-      }
-    }
-
     const label = data['label'];
     if (typeof label === 'string') body.label = label;
     else if (label === null) body.label = null;

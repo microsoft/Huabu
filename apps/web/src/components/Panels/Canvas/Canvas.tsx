@@ -508,7 +508,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         const data: Record<string, unknown> =
           pendingNodeType === 'question'
             ? {
-                input: { kind: 'text', content: '' },
+                content: '',
                 status: 'idle',
                 origin: { type: 'user-created' },
               }

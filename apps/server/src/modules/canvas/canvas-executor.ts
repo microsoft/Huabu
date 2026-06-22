@@ -104,6 +104,7 @@ const TEXT_BEARING_NODE_TYPES = new Set([
   'web',
   'pdf',
   'office',
+  'question',
 ]);
 
 const NODE_CONTENT_KEYS = new Set([
@@ -149,27 +150,6 @@ function hydrateNodes(
     const data: Record<string, unknown> = { ...(node.data ?? {}) };
     if (TEXT_BEARING_NODE_TYPES.has(nodeType)) {
       data['content'] = content.content;
-    } else if (
-      nodeType === 'question' &&
-      typeof content.content === 'string' &&
-      content.content.length > 0
-    ) {
-      // Question nodes keep their canonical prompt at `data.input.content`
-      // (discriminated `QuestionInput` union, kind === 'text'). The
-      // sidecar body is a mirror of that prompt — see
-      // `nodeContentQueue.buildRequest` on the web and the
-      // `acceptsBody` branch in `canvas.route.ts`. We rehydrate it here
-      // only when the in-memory node has no fresher text prompt, so a
-      // mid-batch edit (UPDATE_NODE_DATA) is never clobbered by the
-      // disk's stale value.
-      const input = data['input'] as
-        | { kind?: string; content?: string }
-        | undefined;
-      const hasFreshPrompt =
-        input?.kind === 'text' && typeof input.content === 'string';
-      if (!hasFreshPrompt) {
-        data['input'] = { kind: 'text', content: content.content };
-      }
     }
     if (typeof content.src === 'string' && content.src.length > 0) {
       data['src'] = content.src;
@@ -219,30 +199,19 @@ function buildNodeContent(node: CanvasNode): NodeContent | null {
 /**
  * Resolve the markdown body that should be written for `nodeType`.
  *
- * Mirrors the same prompt-as-body rule applied at the route layer
- * (`canvas.route.ts` `acceptsBody`) and on the web (`nodeContentQueue`
- * `buildRequest`) so the AI command path can never silently strip a
- * question node's prompt from disk. Centralising the rule here keeps
- * the three write paths from drifting again.
+ * The three write paths — `canvas.route.ts` PUT, this AI executor, and
+ * the web's `nodeContentQueue.buildRequest` — all derive the sidecar
+ * body from `data.content`. Keeping that one rule shared (via
+ * `TEXT_BEARING_NODE_TYPES`) is the whole reason question prompts now
+ * live at `data.content` rather than the nested `data.input.content`
+ * shape they once had.
  */
 function extractSidecarBody(
   nodeType: string,
   data: Record<string, unknown>,
 ): string {
-  if (TEXT_BEARING_NODE_TYPES.has(nodeType)) {
-    return typeof data['content'] === 'string'
-      ? (data['content'] as string)
-      : '';
-  }
-  if (nodeType === 'question') {
-    const input = data['input'] as
-      | { kind?: string; content?: string }
-      | undefined;
-    if (input?.kind === 'text' && typeof input.content === 'string') {
-      return input.content;
-    }
-  }
-  return '';
+  if (!TEXT_BEARING_NODE_TYPES.has(nodeType)) return '';
+  return typeof data['content'] === 'string' ? (data['content'] as string) : '';
 }
 
 // ── ID pre-assignment ────────────────────────────────────────────────────

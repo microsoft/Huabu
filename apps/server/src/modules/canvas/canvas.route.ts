@@ -133,6 +133,7 @@ const TEXT_BEARING_NODE_TYPES = new Set([
   'web',
   'pdf',
   'office',
+  'question',
 ]);
 
 /**
@@ -152,8 +153,20 @@ const TEXT_BEARING_NODE_TYPES = new Set([
  * `GET /:canvasId/nodes/:nodeId/content` endpoint still returns the
  * full body (falling back to `existing.content` when this hydrate
  * skips it) so search / AI features can fetch on demand.
+ *
+ * `question` IS inlined: the prompt is short, the QuestionNode reads
+ * `data.content` to render the textarea, and skipping the inline copy
+ * would leave every question node blank on first paint (its
+ * `data.content` is stripped by `stripNodesForCanvas` on the PUT, so
+ * the sidecar body is the only surviving copy).
  */
-const WIRE_INLINE_CONTENT_TYPES = new Set(['note', 'text', 'web', 'office']);
+const WIRE_INLINE_CONTENT_TYPES = new Set([
+  'note',
+  'text',
+  'web',
+  'office',
+  'question',
+]);
 
 /**
  * Per-node `data` keys whose values live exclusively in the markdown
@@ -574,18 +587,14 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       existing = null;
     }
 
-    // Question nodes are not text-bearing in the strict sense (their
-    // canonical text lives at `data.input.content`, not `data.content`),
-    // but the autosave queue mirrors that prompt into the sidecar body
-    // so canvas search can find it. Treat them as text-bearing only at
-    // the write boundary.
-    const acceptsBody =
-      TEXT_BEARING_NODE_TYPES.has(nodeType) || nodeType === 'question';
     // Body resolution:
-    //   - text-bearing nodes: prefer caller content; fall back to
-    //     existing on-disk body to avoid wiping it when the caller
-    //     only meant to update e.g. the label.
+    //   - text-bearing nodes (including `question`, whose prompt is
+    //     stored at `data.content` and mirrored into the sidecar so
+    //     canvas search can hit it): prefer the caller's content; fall
+    //     back to the existing on-disk body to avoid wiping it when
+    //     the caller only meant to update e.g. the label.
     //   - frontmatter-only nodes (image/video/frame): always empty.
+    const acceptsBody = TEXT_BEARING_NODE_TYPES.has(nodeType);
     const body = acceptsBody
       ? (incomingContent ?? existing?.content ?? '')
       : '';

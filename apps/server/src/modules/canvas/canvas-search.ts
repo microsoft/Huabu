@@ -193,10 +193,55 @@ function scanNodeContent(
 }
 
 /**
+ * Walk every occurrence of `needleLower` inside `haystack`
+ * (case-insensitive) and let the caller shape each match. Centralises
+ * the lowercase-`indexOf` loop, snippet construction, and zero-width
+ * progress guard so the per-(node, field) scanner and the per-edge
+ * scanner can't drift on `from = idx + max(1, needleLen)` or on the
+ * `occurrenceIndex` ordinal.
+ *
+ * Uses `String.prototype.indexOf` on the lower-cased haystack — V8's
+ * implementation is a SIMD-accelerated literal search and runs at
+ * ~1 GB/s, fast enough for typical canvas sidecars without a
+ * dedicated regex compiler.
+ */
+function scanOccurrences(
+  haystack: string,
+  needleLower: string,
+  needleLen: number,
+  tryEmit: (match: CanvasSearchMatch) => boolean,
+  buildMatch: (
+    snippet: { text: string; matchStart: number; matchLength: number },
+    occurrenceIndex: number,
+  ) => CanvasSearchMatch,
+): void {
+  const lower = haystack.toLowerCase();
+  let from = 0;
+  // 0-based ordinal of the hit *within this scan*. The wire contract
+  // documents `occurrenceIndex` as monotonically increasing per
+  // (entity, field), and every caller invokes `scanOccurrences` once
+  // per entity+field, so a local counter is enough. Survives
+  // truncation: if the global limit chokes us mid-loop the indices
+  // already shipped are 0..k-1 and map cleanly to the n-th DOM
+  // occurrence on the client.
+  let occurrenceIndex = 0;
+  while (true) {
+    const idx = lower.indexOf(needleLower, from);
+    if (idx === -1) return;
+    const snippet = buildSnippet(haystack, idx, needleLen);
+    if (!tryEmit(buildMatch(snippet, occurrenceIndex))) return;
+    // `max(1, needleLen)` guards against a zero-width needle locking
+    // the loop — schema-bounded to >= 1 char today, but cheap insurance.
+    from = idx + Math.max(1, needleLen);
+    occurrenceIndex += 1;
+  }
+}
+
+/**
  * Emit every match in one edge's label. Edge matches are tagged
  * `kind: 'edge'` so the client can render them with an edge-shaped
  * icon and `fitView` on both endpoints instead of trying to open an
- * (non-existent) preview. `nodeId` carries the edge's id \u2014 the field
+ * (non-existent) preview. `nodeId` carries the edge's id — the field
  * is named for back-compat with the original node-only schema but
  * semantically means "the matched entity's primary id".
  */
@@ -208,14 +253,12 @@ function scanEdgeLabel(
 ): void {
   const label = edge.label;
   if (!label) return;
-  const lower = label.toLowerCase();
-  let from = 0;
-  let occurrenceIndex = 0;
-  while (true) {
-    const idx = lower.indexOf(needleLower, from);
-    if (idx === -1) break;
-    const snippet = buildSnippet(label, idx, needleLen);
-    const keepGoing = tryEmit({
+  scanOccurrences(
+    label,
+    needleLower,
+    needleLen,
+    tryEmit,
+    (snippet, occurrenceIndex) => ({
       kind: 'edge',
       nodeId: edge.id,
       nodeType: 'edge',
@@ -227,11 +270,8 @@ function scanEdgeLabel(
       occurrenceIndex,
       sourceNodeId: edge.sourceNodeId,
       targetNodeId: edge.targetNodeId,
-    });
-    if (!keepGoing) return;
-    from = idx + Math.max(1, needleLen);
-    occurrenceIndex += 1;
-  }
+    }),
+  );
 }
 
 interface FieldEmitContext {
@@ -261,21 +301,12 @@ function emitFieldHits(
   needleLen: number,
   ctx: FieldEmitContext,
 ): void {
-  const lower = haystack.toLowerCase();
-  let from = 0;
-  // 0-based ordinal of the hit *within this (nodeId, field) call*.
-  // `emitFieldHits` is invoked exactly once per (node, field) in
-  // `scanNodeMeta` / `scanNodeContent`, so a local counter is enough
-  // to stamp the wire field documented as "monotonically increasing
-  // per (nodeId, field)". Survives truncation: if the global limit
-  // chokes us mid-loop the indices already shipped are 0..k-1 and
-  // map cleanly to the n-th DOM occurrence on the client.
-  let occurrenceIndex = 0;
-  while (true) {
-    const idx = lower.indexOf(needleLower, from);
-    if (idx === -1) break;
-    const snippet = buildSnippet(haystack, idx, needleLen);
-    const keepGoing = ctx.tryEmit({
+  scanOccurrences(
+    haystack,
+    needleLower,
+    needleLen,
+    ctx.tryEmit,
+    (snippet, occurrenceIndex) => ({
       nodeId: ctx.nodeId,
       nodeType: ctx.nodeType,
       label: ctx.label,
@@ -288,11 +319,8 @@ function emitFieldHits(
       // whitespace runs (e.g. needle `"a  b"`, snippet `"a b"`).
       matchLength: snippet.matchLength,
       occurrenceIndex,
-    });
-    if (!keepGoing) return;
-    from = idx + Math.max(1, needleLen);
-    occurrenceIndex += 1;
-  }
+    }),
+  );
 }
 
 /**

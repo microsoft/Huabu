@@ -50,7 +50,7 @@ const createQuestion: CommandDefinition<Cmd> = {
       data: {
         type: nodeType,
         label,
-        input: { kind: 'text', content: cmd.content },
+        content: cmd.content,
         status: hasContent ? 'pending' : 'idle',
         ...(hasContent ? { runAt: Date.now() + AUTO_RUN_DELAY_S * 1000 } : {}),
       },

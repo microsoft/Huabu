@@ -101,8 +101,20 @@ export function useDeferredHydration(skip = false): boolean {
   const [hydrated, setHydrated] = useState(false);
   useEffect(() => {
     if (hydrated || skip) return;
-    const cancel = requestNodeHydration(() => setHydrated(true));
-    return cancel;
+    // `requestNodeHydration` runs `grant` on a future animation frame.
+    // Without this guard, a frame fired between scheduling and effect
+    // cleanup would call `setHydrated(true)` on a possibly-unmounted
+    // component. React 18 no-ops the setter, but we still want to
+    // avoid the placeholder->heavy mount work being kicked off for a
+    // node that's already on its way out (e.g. canvas swap mid-frame).
+    let alive = true;
+    const cancel = requestNodeHydration(() => {
+      if (alive) setHydrated(true);
+    });
+    return () => {
+      alive = false;
+      cancel();
+    };
   }, [hydrated, skip]);
   return hydrated;
 }

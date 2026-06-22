@@ -71,9 +71,7 @@ async function executeQuestionNode(nodeId: string): Promise<void> {
   if (!node) return;
 
   const data = node.data as Record<string, unknown>;
-  const input = data.input as { kind: string; content?: string } | undefined;
-  const question =
-    input?.kind === 'text' ? ((input.content as string) ?? '') : '';
+  const question = typeof data.content === 'string' ? data.content : '';
   if (!question.trim()) return;
 
   // Resolve the binding chosen via the in-node `@` mention. Defaults
@@ -265,8 +263,19 @@ export function useQuestionRunner(): void {
         knownStates.set(nodeId, { status, runAt });
 
         if (status === 'pending' && runAt) {
-          // Already has a timer? Skip.
-          if (timersRef.current.has(nodeId)) continue;
+          // A timer may already exist from a prior `runAt` (the typical
+          // shape: edit auto-arms a 10s countdown, then the user
+          // presses the "Run now" Play button which patches
+          // `runAt: Date.now()` to fire immediately). The old timer is
+          // pinned to the OLD `runAt`, so blindly skipping when a
+          // timer exists would leave "Run now" waiting out the
+          // original countdown — and during that wait `status` stays
+          // `pending`, so a double-click would fall into the
+          // "idle/pending → edit mode" branch instead of opening the
+          // chat. Always clear-and-reschedule so the active timer
+          // tracks the latest `runAt`.
+          const existing = timersRef.current.get(nodeId);
+          if (existing) clearTimeout(existing);
 
           const delay = Math.max(0, runAt - Date.now());
           const timer = setTimeout(() => {

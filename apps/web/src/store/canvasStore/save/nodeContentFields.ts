@@ -58,6 +58,10 @@ export const MD_BACKED_NODE_TYPES: ReadonlySet<string> = new Set([
  * Subset of {@link MD_BACKED_NODE_TYPES} that carry a `content` field
  * (free-form markdown body). The other md-backed types still have
  * label / src / etc. but no body text.
+ *
+ * `question` is in here: its prompt lives at `data.content` exactly
+ * like a note / text body, so a single rule handles persistence and
+ * canvas search picks it up for free.
  */
 export const TEXT_BEARING_NODE_TYPES: ReadonlySet<string> = new Set([
   'note',
@@ -65,4 +69,5 @@ export const TEXT_BEARING_NODE_TYPES: ReadonlySet<string> = new Set([
   'web',
   'pdf',
   'office',
+  'question',
 ]);
