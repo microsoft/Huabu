@@ -55,6 +55,13 @@ export interface SessionProfile {
     supportsLoad: boolean
     supportsResume: boolean
     initializeResult: unknown
+    /**
+     * The full ACP `session/new` response when this profile came from a
+     * freshly-created session (absent on resume/load). Opaque to agentlet;
+     * may carry inline `models` / `modes` / `configOptions` that the host
+     * uses to seed its UI without waiting for the first prompt.
+     */
+    newSessionResult?: unknown
   }
 
   /** Machine info (informational) */

@@ -36,10 +36,32 @@ export class Relay extends EventEmitter {
     this.idleTimeoutMs = (options?.idleTimeoutSecs ?? 0) * 1000
   }
 
-  /** Start relaying messages bidirectionally */
-  start(): void {
+  /**
+   * Start relaying messages bidirectionally.
+   *
+   * @param replay Agent messages captured before the relay attached (e.g.
+   *   notifications the agent emitted in the window between `session/new`
+   *   completing and this relay starting — Copilot pushes
+   *   `available_commands_update` there). They are flushed to the host in
+   *   order before live relaying begins so no early notification is lost.
+   */
+  start(replay: JsonRpcMessage[] = []): void {
     if (this.active) return
     this.active = true
+
+    // Flush buffered early messages first so the host sees them in arrival
+    // order, ahead of any live message produced after this point.
+    for (const msg of replay) {
+      if (!this.isValidJsonRpc(msg)) {
+        this.logger.warn('invalid_agent_message', { reason: 'buffered message is not valid JSON-RPC' })
+        continue
+      }
+      this.logger.debug('relay_replay_to_ws', { method: (msg as unknown as Record<string, unknown>).method, id: (msg as unknown as Record<string, unknown>).id })
+      const sent = this.ws.send(msg)
+      if (!sent) {
+        this.logger.warn('ws_send_failed', { reason: 'WebSocket not connected (replay)' })
+      }
+    }
 
     // Agent stdout → WebSocket
     this.agent.on('message', (data) => {

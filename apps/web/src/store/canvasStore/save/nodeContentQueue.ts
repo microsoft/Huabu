@@ -21,6 +21,7 @@
  */
 
 import { CanvasConflictError, putNodeContent } from '@/api/canvas';
+import { toast } from '@/components/Common/Toast';
 
 import {
   MD_BACKED_NODE_TYPES,
@@ -70,8 +71,22 @@ export type NodeContentQueue = {
    * Used by `tryRename('node')` so the caller can observe (and react
    * to) a `NODE_LABEL_CONFLICT` instead of waiting on a fire-and-
    * forget debounced save.
+   *
+   * `source` controls failure UX inside the queue:
+   * - `'user'` (default for `flushNow`): user kicked off this flush
+   *   directly (e.g. clicked rename / blurred a label input). On a
+   *   non-409 failure the queue still reverts the label, but also
+   *   pops a toast so the user sees their action didn't stick.
+   * - `'auto'`: the flush was triggered by debounced autosave / agent
+   *   edits / canvas-switch flush. Same revert, but only
+   *   `console.error` — no toast spam for changes the user didn't
+   *   explicitly request.
    */
-  flushNow(canvasId: string, nodeId: string): Promise<void>;
+  flushNow(
+    canvasId: string,
+    nodeId: string,
+    opts?: { source?: 'user' | 'auto' },
+  ): Promise<void>;
 
   /**
    * Promote every pending debounced content save into an immediate
@@ -104,6 +119,21 @@ export function createNodeContentQueue(opts: {
 }): NodeContentQueue {
   const debouncer = createPerKeyDebouncer<string>(opts.delayMs);
   const inflight = new Map<string, Promise<void>>();
+  /**
+   * Last `(label, labelSource)` the server confirmed it persisted for
+   * each nodeId. Used by {@link handleSaveFailure} to revert an
+   * optimistic rename back to the last-known-good name when a PUT
+   * fails. Brand-new nodes have no entry until their first PUT
+   * succeeds, so a first-write failure cannot be reverted (we toast
+   * without rolling back the user's typing).
+   *
+   * Keyed by nodeId alone: node ids are workspace-unique UUIDs, so a
+   * canvas switch can't introduce a collision.
+   */
+  const lastSuccessful = new Map<
+    string,
+    { label: string | null; labelSource: string | undefined }
+  >();
 
   /**
    * Build the `PutNodeContentRequest` body for `nodeId` from the
@@ -178,6 +208,15 @@ export function createNodeContentQueue(opts: {
     const body = buildRequest(nodeId);
     if (!body) return;
     const response = await putNodeContent(canvasId, nodeId, body, kOpts);
+    // Record the label the server actually persisted so a later
+    // failure can revert to it. Capture `labelSource` from the body
+    // we just sent — it's the provenance attached to that label
+    // server-side.
+    lastSuccessful.set(nodeId, {
+      label: response.label,
+      labelSource:
+        typeof body.labelSource === 'string' ? body.labelSource : undefined,
+    });
     // Only patch when the resolved label actually differs from what's
     // in the store right now — avoids spurious re-renders when the
     // server echoes back exactly what we sent.
@@ -203,6 +242,120 @@ export function createNodeContentQueue(opts: {
   }
 
   /**
+   * Wrap {@link performSave} with the standard failure routing:
+   * `CanvasConflictError` (409) is re-thrown immediately so
+   * `tryRename`'s awaited path can revert the optimistic label and
+   * surface the conflict. All other errors are handed to
+   * {@link handleSaveFailure} (which reverts a stale rename and, for
+   * user-initiated flushes, toasts) and then re-thrown so callers
+   * can still observe the failure.
+   *
+   * `source` is forwarded to {@link handleSaveFailure} so it can
+   * decide whether to toast (user-initiated) or just log
+   * (background autosave / agent edits).
+   */
+  async function performSaveSafely(
+    canvasId: string,
+    nodeId: string,
+    source: 'user' | 'auto',
+    kOpts?: { keepalive?: boolean },
+  ): Promise<void> {
+    try {
+      await performSave(canvasId, nodeId, kOpts);
+    } catch (err) {
+      if (err instanceof CanvasConflictError) throw err;
+      handleSaveFailure(canvasId, nodeId, source, err);
+      throw err;
+    }
+  }
+
+  /**
+   * Final failure handler invoked after a non-conflict error. Always
+   * reverts the label to the last-persisted value when the failing
+   * PUT was changing the label (state-consistency win, no matter who
+   * triggered the flush).
+   *
+   * `source` decides the user-visible UX:
+   * - `'user'` → toast (the user expects feedback because they just
+   *   clicked rename / typed in the label input).
+   * - `'auto'` → only `console.error`; the silent revert is feedback
+   *   enough for background edits and keeps the canvas from spamming
+   *   toasts during heavy agent activity.
+   *
+   * Callers guarantee the canvas hasn't been swapped out from under
+   * us by draining the queue on every canvas exit: `switchCanvas`
+   * awaits `flushAll()` before changing `state.canvasId`, and
+   * `CanvasPage` fires `flushPendingNodeContent()` on unmount. So
+   * by the time a failure lands here, `state.canvasId` and the
+   * captured `canvasId` are still the same canvas — no need to
+   * branch on a mismatch. `canvasId` stays in the signature so
+   * `performSaveSafely` can keep forwarding it for future
+   * per-canvas logging without churning every call site.
+   */
+  function handleSaveFailure(
+    canvasId: string,
+    nodeId: string,
+    source: 'user' | 'auto',
+    err: unknown,
+  ): void {
+    void canvasId;
+    const state = opts.getState();
+    const node = state.nodes.find((n) => n.id === nodeId);
+    if (!node) return; // node was deleted mid-flight — nothing to do
+
+    const data = (node.data ?? {}) as Record<string, unknown>;
+    const currentLabel =
+      typeof data['label'] === 'string' ? (data['label'] as string) : null;
+    const lastGood = lastSuccessful.get(nodeId);
+
+    // Rename failure: we have a previously-persisted label AND the
+    // store's label drifted away from it. Roll back the label only —
+    // preserve content / src / summary so the user's other edits
+    // survive. labelSource is restored to whatever was attached to
+    // the last successful PUT (or stripped entirely if none).
+    if (lastGood && lastGood.label !== currentLabel) {
+      state._setStateNoAutosave({
+        nodes: state.nodes.map((n) => {
+          if (n.id !== nodeId) return n;
+          const { labelSource: _omitted, ...rest } = (n.data ?? {}) as Record<
+            string,
+            unknown
+          >;
+          return {
+            ...n,
+            data: {
+              ...rest,
+              label: lastGood.label,
+              ...(lastGood.labelSource !== undefined
+                ? { labelSource: lastGood.labelSource }
+                : {}),
+            },
+          };
+        }),
+      });
+      const displayName = lastGood.label ?? 'previous name';
+      if (source === 'user') {
+        toast(`Couldn't rename node — reverted to "${displayName}".`, {
+          tone: 'danger',
+        });
+      }
+      console.error('Node rename failed; reverted:', nodeId, err);
+      return;
+    }
+
+    // Content-only failure (or first-ever write with no last-good
+    // anchor to revert to): toast (user path) or log (auto path); the
+    // in-store body is left alone so the user's typing isn't lost.
+    if (source === 'user') {
+      toast(
+        "Couldn't save a node's changes — your latest edits may not be persisted.",
+        { tone: 'danger' },
+      );
+    }
+    console.error('Node content save failed:', nodeId, err);
+  }
+
+  /**
    * Serialize per-node PUTs: chain each new flush onto any pending
    * one so the server never sees two writes for the same node in
    * flight at once. Always exposes the latest in-flight promise via
@@ -211,6 +364,7 @@ export function createNodeContentQueue(opts: {
   function serializedFlush(
     canvasId: string,
     nodeId: string,
+    source: 'user' | 'auto',
     kOpts?: { keepalive?: boolean },
   ): Promise<void> {
     const prev = inflight.get(nodeId) ?? Promise.resolve();
@@ -219,7 +373,7 @@ export function createNodeContentQueue(opts: {
       // the chain — tryRename has already handled that error via its
       // own await.
       .catch(() => undefined)
-      .then(() => performSave(canvasId, nodeId, kOpts));
+      .then(() => performSaveSafely(canvasId, nodeId, source, kOpts));
     inflight.set(nodeId, next);
     // `.finally()` returns a new promise that re-rejects when `next`
     // rejects. The outer caller (`schedule` / `flushNow` / `flushAll`)
@@ -246,14 +400,12 @@ export function createNodeContentQueue(opts: {
   function schedule(canvasId: string, nodeId: string): void {
     if (!canvasId || !nodeId) return;
     debouncer.schedule(nodeId, () => {
-      serializedFlush(canvasId, nodeId).catch((err) => {
-        // Conflicts are surfaced via `tryRename`'s own await path;
-        // only log non-conflict errors here so the fire-and-forget
-        // rejection doesn't escape into the runtime as unhandled.
-        if (!(err instanceof CanvasConflictError)) {
-          console.error('Node content save failed:', err);
-        }
-      });
+      // Conflicts are surfaced via `tryRename`'s own await path; other
+      // failures are handled (toast + optional label-revert) by
+      // {@link handleSaveFailure} inside `performSaveSafely`. Just
+      // swallow here to keep the fire-and-forget rejection from
+      // escaping into the runtime.
+      serializedFlush(canvasId, nodeId, 'auto').catch(() => undefined);
     });
   }
 
@@ -282,16 +434,21 @@ export function createNodeContentQueue(opts: {
       }
     },
 
-    flushNow(canvasId, nodeId) {
+    flushNow(canvasId, nodeId, flushOpts) {
       debouncer.cancel(nodeId);
-      return serializedFlush(canvasId, nodeId);
+      // Default to `'user'` so explicit `flushNow` callers
+      // (`tryRename`, blur-on-input handlers) get user-facing toasts
+      // on failure. Background callers that still want to flush
+      // synchronously can opt into `'auto'`.
+      const source = flushOpts?.source ?? 'user';
+      return serializedFlush(canvasId, nodeId, source);
     },
 
     async flushAll() {
       const canvasId = opts.getState().canvasId;
       const pendingIds = debouncer.cancelAll();
       for (const nodeId of pendingIds) {
-        void serializedFlush(canvasId, nodeId).catch(() => undefined);
+        void serializedFlush(canvasId, nodeId, 'auto').catch(() => undefined);
       }
       await Promise.all(
         Array.from(inflight.values()).map((p) => p.catch(() => undefined)),
@@ -304,9 +461,9 @@ export function createNodeContentQueue(opts: {
       for (const nodeId of pendingIds) {
         // Fire-and-forget keepalive PUT — browser caps these at ~64 KB
         // per request, which is plenty for a single node's markdown.
-        void serializedFlush(canvasId, nodeId, { keepalive: true }).catch(
-          () => undefined,
-        );
+        void serializedFlush(canvasId, nodeId, 'auto', {
+          keepalive: true,
+        }).catch(() => undefined);
       }
     },
   };

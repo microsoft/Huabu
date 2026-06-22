@@ -27,6 +27,7 @@ import {
   getSelectedNodeIds,
 } from './utils';
 
+import type { DragDecision } from '@/handler/snap/snapSession';
 import type {
   CanvasAlignDirection,
   CanvasCommand,
@@ -94,6 +95,30 @@ export type CanvasUiIntent =
       type: 'NODE_DRAG_STOP';
       draggedNodeIds: string[];
       pointerFlowPosition?: Point;
+      /**
+       * When true, the user was holding Space at drag-stop (the "opt
+       * out of auto-reparent" gesture). The resolver should leave
+       * every dragged node's `parentId` untouched and skip both
+       * auto-frame entry and auto-unframe exit — only the new
+       * position should be committed.
+       */
+      bypassReparent?: boolean;
+      /**
+       * Per-dragged-node frame-membership decisions captured by the
+       * live preview tick (`onNodeDrag` rAF callback). When present,
+       * the resolver MUST use these verbatim — bypassing its own
+       * `wouldUnframe` / `wouldAutoFrame` recomputation — so the
+       * committed result always matches the **last rendered preview**
+       * the user saw, even when smart-snap rewrote the dragged node's
+       * position or the mouseup pointer drifted past the halo edge in
+       * the ≤16 ms between the last `rAF` tick and release.
+       *
+       * Absent when no rAF tick ran during the drag (e.g. instant
+       * click-release, or `autoLayoutEnabled === false` where the
+       * preview short-circuits). In that case the resolver falls
+       * back to fresh recomputation against the current store state.
+       */
+      cachedDecisions?: Map<string, DragDecision>;
     }
   | {
       type: 'SELECT_NODES';

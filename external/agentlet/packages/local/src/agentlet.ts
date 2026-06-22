@@ -40,6 +40,17 @@ interface ManagedAgent {
   idleSuspending: boolean
 }
 
+function defaultDaemonId(): string {
+  return hostname()
+}
+
+/**
+ * Upper bound on the early-message buffer (notifications collected between
+ * bootstrap completing and the relay attaching). If the WS handshake stalls,
+ * this prevents unbounded memory growth from streamed agent output.
+ */
+const EARLY_MESSAGE_BUFFER_CAP = 1000
+
 /**
  * Agentlet is the unified lifecycle state machine for the agentlet CLI.
  *
@@ -508,6 +519,47 @@ export class Agentlet {
 
       const sessionId = bootstrap.sessionId
 
+      // Buffer agent messages emitted between bootstrap completing and the
+      // relay attaching. Agents (e.g. Copilot) push `available_commands_update`
+      // as a `session/update` notification immediately after `session/new`
+      // returns; without this buffer that notification lands in a window with
+      // no 'message' listener and is silently dropped, so the host never learns
+      // the slash commands. The relay flushes these on start (see relay.start).
+      //
+      // The notification can also arrive *during* session/new (within ~1ms of
+      // its response, sometimes just before it). Those are captured by the
+      // bootstrap itself and seeded here so they're replayed too.
+      //
+      // The buffer is capped (FIFO drop) so a stalled handshake cannot leak
+      // unbounded memory, and the listener is detached idempotently from every
+      // teardown path (handshake ok/error, agent exit) to avoid leaks.
+      const earlyMessages: JsonRpcMessage[] = Array.isArray(bootstrap.bootstrapNotifications)
+        ? [...bootstrap.bootstrapNotifications]
+        : []
+      let earlyDropped = 0
+      const bufferEarlyMessage = (data: unknown) => {
+        if (earlyMessages.length >= EARLY_MESSAGE_BUFFER_CAP) {
+          earlyMessages.shift()
+          earlyDropped++
+          // Log on first drop and then sparsely so noisy stalls don't spam.
+          if (earlyDropped === 1 || earlyDropped % 100 === 0) {
+            this.logger.warn('early_message_buffer_overflow', {
+              sessionId: bootstrap.sessionId,
+              dropped: earlyDropped,
+              cap: EARLY_MESSAGE_BUFFER_CAP,
+            })
+          }
+        }
+        earlyMessages.push(data as JsonRpcMessage)
+      }
+      let earlyBufferDetached = false
+      const detachEarlyBuffer = () => {
+        if (earlyBufferDetached) return
+        earlyBufferDetached = true
+        agent.removeListener('message', bufferEarlyMessage)
+      }
+      agent.on('message', bufferEarlyMessage)
+
       const managed: ManagedAgent = {
         sessionId,
         command: sessionSpec.command,
@@ -525,6 +577,9 @@ export class Agentlet {
       agent.on('exit', (code, signal) => {
         this.logger.info('agent_exited', { sessionId, code, signal })
         managed.status = 'stopped'
+        // Drop the early-message buffer listener if the agent exits before
+        // handshake_ok (idempotent if already detached).
+        detachEarlyBuffer()
 
         // Notify the agent's own WS connection
         if (managed.ws?.connected) {
@@ -596,11 +651,15 @@ export class Agentlet {
           this.handleIdleSuspend(managed)
         })
 
-        relay.start()
+        // Stop buffering and hand the captured early messages to the relay so
+        // they are flushed to the host before live relaying begins.
+        detachEarlyBuffer()
+        relay.start(earlyMessages.splice(0))
       })
 
       agentWs.on('handshake_error', (err) => {
         this.logger.error('agent_handshake_failed', { sessionId, code: err.code, message: err.message })
+        detachEarlyBuffer()
         agent.terminate()
         this.agents.delete(sessionId)
       })

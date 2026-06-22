@@ -112,8 +112,7 @@
 }
 
 /* Headings inherit our app font + scale proportionally to the 14px
-   base, mirroring the `.block-note-view [data-level=…]` ladder in
-   `index.css`. */
+   base */
 .milkdown .ProseMirror h1,
 .milkdown .ProseMirror h2,
 .milkdown .ProseMirror h3,

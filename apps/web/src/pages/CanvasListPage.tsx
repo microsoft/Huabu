@@ -93,10 +93,10 @@ export default function CanvasListPage() {
     setExportingId(canvasId);
     try {
       await exportCanvas(canvasId);
-      toast('Export started', { variant: 'success' });
+      toast('Export started', { tone: 'success' });
     } catch (error) {
       toast(error instanceof Error ? error.message : 'Export failed', {
-        variant: 'error',
+        tone: 'danger',
       });
     } finally {
       setExportingId(null);

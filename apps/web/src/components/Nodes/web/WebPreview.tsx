@@ -428,7 +428,7 @@ export const WebPreview = ({ id, data }: PreviewComponentProps) => {
             <p className="text-xs">{readerError}</p>
           </div>
         ) : readerHtml ? (
-          <div className="custom-scrollbar bg-surface h-full overflow-x-hidden overflow-y-auto p-1">
+          <div className="bg-surface h-full overflow-x-hidden overflow-y-auto p-1">
             <iframe
               className="nodrag w-full border-0"
               style={{ height: readerHeight ? `${readerHeight}px` : '100%' }}

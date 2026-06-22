@@ -1,4 +1,4 @@
-import { PanelLeftClose, PanelLeftOpen, Search } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { CanvasLayerTree } from './CanvasLayerTree';
@@ -13,7 +13,6 @@ import { getNodeIcon } from '../../../config/nodeIcons';
 import useCanvasStore from '../../../store/canvasStore';
 import { useExternalImportsStore } from '../../../store/externalImportsStore';
 import { usePanelStore } from '../../../store/panelStore';
-import { Button } from '../../Common/Button';
 import { SketchIcon } from '../../Nodes/sketch/SketchIcon';
 import { SidebarPanel } from '../SidebarPanel';
 
@@ -181,6 +180,8 @@ export const CanvasLayerPanel = ({
     (s) => s.nodes,
   ) as unknown as DataSourceNodeLike[];
   const activeCanvasId = useCanvasStore((s) => s.canvasId);
+  const collapsedFrameIds = useCanvasStore((s) => s.collapsedFrameIds);
+  const setAllFramesCollapsed = useCanvasStore((s) => s.setAllFramesCollapsed);
   const externalPending = useExternalImportsStore((s) => s.pending);
   const connectExternal = useExternalImportsStore((s) => s.connect);
   const disconnectExternal = useExternalImportsStore((s) => s.disconnect);
@@ -366,6 +367,29 @@ export const CanvasLayerPanel = ({
     return out;
   }, [externalPending, rawNodes, selectedKeys, regex]);
 
+  // Drive the collapse-all toolbar toggle: we need to know whether any
+  // frame/group exists at all (to decide if the button renders) and
+  // whether at least one of them is currently expanded (to flip the
+  // icon between "collapse all" and "expand all"). Both derive from the
+  // same single pass over `nodes`.
+  const { hasAnyFrame, hasAnyExpandedFrame } = useMemo(() => {
+    let any = false;
+    let anyExpanded = false;
+    for (const n of nodes) {
+      if (n.type !== 'frame' && n.type !== 'group') continue;
+      any = true;
+      if (!collapsedFrameIds.has(n.id)) {
+        anyExpanded = true;
+        break; // We have everything the toggle needs.
+      }
+    }
+    return { hasAnyFrame: any, hasAnyExpandedFrame: anyExpanded };
+  }, [nodes, collapsedFrameIds]);
+
+  const handleToggleAllFrames = useCallback(() => {
+    setAllFramesCollapsed(hasAnyExpandedFrame);
+  }, [hasAnyExpandedFrame, setAllFramesCollapsed]);
+
   // External rows render at the bottom so they don't push the active
   // canvas nodes off-screen when many `.md` files appear at once.
   const finalItems = useMemo(
@@ -387,7 +411,12 @@ export const CanvasLayerPanel = ({
       className="border-edge-default border-r"
       hideHeader
     >
-      {isSearchOpen || availableKeys.length >= 2 ? (
+      {/* Two-row split inside the panel so the scrollbar lane only
+          spans the layer list, not the toolbar. SidebarPanel's own
+          content wrapper still has `overflow-y-auto`, but the inner
+          column here is `h-full` with its own scrolling region — the
+          outer wrapper has no overflow to manage. */}
+      <div className="flex h-full flex-col">
         <LayerFilterBar
           query={query}
           onQueryChange={setQuery}
@@ -398,34 +427,20 @@ export const CanvasLayerPanel = ({
           isSearchOpen={isSearchOpen}
           onOpenSearch={() => setIsSearchOpen(true)}
           onCloseSearch={handleCloseSearch}
+          hasAnyFrame={hasAnyFrame}
+          hasAnyExpandedFrame={hasAnyExpandedFrame}
+          onToggleAllFrames={handleToggleAllFrames}
         />
-      ) : (
-        nodes.length > 0 && (
-          // Fallback when the chip row would be empty (canvas has 0–1
-          // node types): float a tiny Search trigger over the top-right
-          // corner so users can still open the regex input on demand
-          // without the bar eating a row on every render.
-          <div className="pointer-events-none sticky top-0 z-10 flex h-0 justify-end pt-1.5 pr-1.5">
-            <Button
-              variant="ghost"
-              iconOnly
-              size="sm"
-              onClick={() => setIsSearchOpen(true)}
-              title="Find layers"
-              className="pointer-events-auto p-1! opacity-50 hover:opacity-100"
-            >
-              <Search size={12} />
-            </Button>
-          </div>
-        )
-      )}
-      <CanvasLayerTree
-        items={finalItems}
-        getIcon={renderNodeIcon}
-        getDisplayName={getNodeDisplayName}
-        isFilterActive={isFilterActive}
-        emptyText={emptyText}
-      />
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <CanvasLayerTree
+            items={finalItems}
+            getIcon={renderNodeIcon}
+            getDisplayName={getNodeDisplayName}
+            isFilterActive={isFilterActive}
+            emptyText={emptyText}
+          />
+        </div>
+      </div>
     </SidebarPanel>
   );
 };

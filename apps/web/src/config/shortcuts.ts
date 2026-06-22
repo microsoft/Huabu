@@ -36,6 +36,11 @@ export const keyboardShortcutSections: ShortcutSection[] = [
     title: 'Toolbar',
     items: [
       { keys: 'Space (hold)', description: 'Temporarily switch to pan tool' },
+      {
+        keys: 'Space (hold while dragging)',
+        description:
+          'Move a node without entering or leaving any frame (opt out of auto-reparent)',
+      },
       { keys: 'S', description: 'Select tool' },
       { keys: 'P', description: 'Pan tool' },
       { keys: 'L', description: 'Lasso tool' },

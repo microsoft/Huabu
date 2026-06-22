@@ -6,6 +6,7 @@ import {
   SelectionMode,
   type ReactFlowInstance,
   Panel,
+  ViewportPortal,
 } from '@xyflow/react';
 import clsx from 'clsx';
 import React, {
@@ -39,6 +40,7 @@ import { useSketchHoverRouting } from '@/hooks/useSketchHoverRouting';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
 import { NodeToolbar } from './CanvasToolbar.tsx';
+import { EDGE_SELECTED_Z_BUMP } from './edges/edgeZ.ts';
 import {
   EDIT_EDGE_LABEL_EVENT,
   LabelledEdge,
@@ -69,8 +71,8 @@ import { VideoNode } from '../../Nodes/video/VideoNode.tsx';
 import { WebNode } from '../../Nodes/web/WebNode.tsx';
 
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
+import type { FrameFitPreview } from '@/store/gesturePreviewStore';
 import type { CanvasViewport } from '@sediment/shared';
-import type { FrameFitResult } from '@sediment/shared/canvas-engine';
 
 const nodeTypes = {
   image: ImageNode,
@@ -103,46 +105,50 @@ const edgeTypes = {
 } as const;
 
 /**
- * Renders a dashed-border preview overlay showing the target frame size
- * when a node is being dragged near or inside a frame.
+ * Renders the auto-fit preview rectangle for a frame affected by an
+ * in-progress drag — the rectangle the frame *would* become if the
+ * user released right now (computed by `computeFrameFit` in the canvas
+ * store: source frames shrink to wrap their remaining children, target
+ * frames grow to include the incoming node). This gives the user both
+ * a targeting cue and a forecast of the post-drop layout.
+ *
+ * Two visual roles communicate which frame is the active landing
+ * target vs which one is merely losing a child:
+ *
+ * - `target` — painted with a solid `--color-info` border + stronger
+ *   `info-bg` fill so it visually pops above sibling/parent frames.
+ *   This is the frame the dragged node will commit into when the
+ *   user releases.
+ * - `source` — painted with a muted dashed `edge-default` border + a
+ *   pale `bg-subtle` fill so the user sees "this frame will shrink"
+ *   without it competing for attention with the target. Critical
+ *   under nested frames where the outer parent and the inner target
+ *   would otherwise look identical.
+ *
+ * The overlay is rendered inside `<ViewportPortal>` so it lives in
+ * flow space (pan/zoom for free) and shares React Flow's stacking
+ * context. With `zIndex: 0` it sits above frame bodies (which carry
+ * `zIndex: -1`) but below any dragged node — React Flow elevates the
+ * dragged node by +1000 during the gesture, so the overlay never
+ * paints on top of the node the user is moving.
  */
 const FrameFitPreviewOverlay: React.FC<{
-  preview: FrameFitResult;
-  rfInstance: ReactFlowInstance | null;
-  wrapperRef: React.RefObject<HTMLDivElement | null>;
-}> = React.memo(({ preview, rfInstance, wrapperRef }) => {
-  const screenRect = useMemo(() => {
-    if (!rfInstance || !wrapperRef.current) return null;
-
-    const topLeft = rfInstance.flowToScreenPosition({
-      x: preview.position.x,
-      y: preview.position.y,
-    });
-    const bottomRight = rfInstance.flowToScreenPosition({
-      x: preview.position.x + preview.width,
-      y: preview.position.y + preview.height,
-    });
-
-    // Convert from screen coords to wrapper-relative coords
-    const wrapperRect = wrapperRef.current.getBoundingClientRect();
-    return {
-      left: topLeft.x - wrapperRect.left,
-      top: topLeft.y - wrapperRect.top,
-      width: bottomRight.x - topLeft.x,
-      height: bottomRight.y - topLeft.y,
-    };
-  }, [preview, rfInstance, wrapperRef]);
-
-  if (!screenRect) return null;
+  preview: FrameFitPreview;
+}> = React.memo(({ preview }) => {
+  const isTarget = preview.role === 'target';
+  const styleClass = isTarget
+    ? 'border-info bg-info-bg/50 shadow-bottom border border-dashed'
+    : 'border-edge-default bg-bg-subtle/30 border border-dashed';
 
   return (
     <div
-      className="bg-info-bg/40 shadow-bottom pointer-events-none absolute z-40 transition-all duration-150"
+      className={`${styleClass} pointer-events-none absolute rounded transition-all duration-150`}
       style={{
-        left: screenRect.left,
-        top: screenRect.top,
-        width: screenRect.width,
-        height: screenRect.height,
+        left: preview.position.x,
+        top: preview.position.y,
+        width: preview.width,
+        height: preview.height,
+        zIndex: 0,
       }}
     />
   );
@@ -447,6 +453,8 @@ export const Canvas: React.FC<CanvasProps> = ({
       return {
         ...e,
         selected: true,
+        zIndex:
+          (typeof e.zIndex === 'number' ? e.zIndex : 0) + EDGE_SELECTED_Z_BUMP,
         markerEnd: nextMarkerEnd,
         markerStart: nextMarkerStart,
       };
@@ -883,6 +891,19 @@ export const Canvas: React.FC<CanvasProps> = ({
 
         {/* Sketch intent processing overlay — lives in flow space so it pans/zooms with the canvas */}
         <SketchProcessingOverlay />
+
+        {/* Frame auto-fit preview overlays — rendered in flow space so they
+            (1) pan/zoom with the canvas and (2) sit inside React Flow's
+            viewport stacking context, which keeps them below the dragged
+            node (React Flow elevates the dragged node's zIndex by +1000
+            for the duration of the gesture). */}
+        {frameFitPreviews.length > 0 && (
+          <ViewportPortal>
+            {frameFitPreviews.map((preview) => (
+              <FrameFitPreviewOverlay key={preview.frameId} preview={preview} />
+            ))}
+          </ViewportPortal>
+        )}
       </ReactFlow>
 
       {lassoPreviewPath && (
@@ -914,15 +935,9 @@ export const Canvas: React.FC<CanvasProps> = ({
         />
       )}
 
-      {/* Frame auto-fit preview overlays — shown while dragging nodes near frames */}
-      {frameFitPreviews.map((preview) => (
-        <FrameFitPreviewOverlay
-          key={preview.frameId}
-          preview={preview}
-          rfInstance={rfInstanceRef.current}
-          wrapperRef={wrapperRef}
-        />
-      ))}
+      {/* Frame auto-fit preview overlays are rendered inside <ReactFlow>
+          above via <ViewportPortal> so they share the viewport's flow
+          coordinate space and stacking context. */}
 
       {/* Structured-frame drop indicator — column/row track highlight or insert bar */}
       <StructuredDropOverlay

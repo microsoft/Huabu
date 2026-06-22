@@ -42,6 +42,12 @@ export interface SlashCommandMenuProps {
   filter: string;
   /** Fired when the user clicks a command (caller inserts it into the input). */
   onSelect: (command: AvailableCommand) => void;
+  /**
+   * True when the command list is empty because a fetch is still in
+   * flight (cold agent spawn). Renders a loading row instead of
+   * collapsing the popover, so the user knows commands are on the way.
+   */
+  loading?: boolean;
 }
 
 /**
@@ -69,7 +75,7 @@ function filterCommands(
 export const SlashCommandMenu = forwardRef<
   SlashCommandMenuRef,
   SlashCommandMenuProps
->(({ commands, filter, onSelect }, ref) => {
+>(({ commands, filter, onSelect, loading = false }, ref) => {
   const filtered = useMemo(
     () => filterCommands(commands, filter),
     [commands, filter],
@@ -118,7 +124,31 @@ export const SlashCommandMenu = forwardRef<
     item?.scrollIntoView({ block: 'nearest' });
   }, [clampedHighlight]);
 
-  if (filtered.length === 0) return null;
+  if (filtered.length === 0) {
+    // Cold-spawn affordance: the agent session is still booting and
+    // the command list hasn't landed. Show a loading row so the user
+    // knows the feature exists and commands are on the way, instead
+    // of collapsing the popover into silence.
+    if (loading) {
+      return (
+        <div
+          role="listbox"
+          aria-label="Slash commands"
+          aria-busy="true"
+          className="border-edge-default bg-surface absolute right-0 bottom-full left-0 z-50 mb-2 rounded-lg border shadow-lg"
+        >
+          <div className="text-fg-muted flex items-center gap-2 px-3 py-2.5 text-xs">
+            <span
+              aria-hidden
+              className="border-edge-default border-t-fg-muted size-3.5 animate-spin rounded-full border-2"
+            />
+            Loading commands…
+          </div>
+        </div>
+      );
+    }
+    return null;
+  }
 
   return (
     <div
@@ -151,7 +181,7 @@ export const SlashCommandMenu = forwardRef<
             }`}
           >
             <div className="flex w-full items-baseline gap-2">
-              <span className="font-mono text-sm font-medium">/{cmd.name}</span>
+              <span className="font-mono text-xs font-medium">/{cmd.name}</span>
               {cmd.input?.hint && (
                 <span className="text-fg-subtle truncate text-xs">
                   {cmd.input.hint}

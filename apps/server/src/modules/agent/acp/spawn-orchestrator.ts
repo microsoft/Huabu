@@ -34,6 +34,7 @@
  */
 
 import { getDaemonSupervisor } from './daemon-supervisor.js';
+import { AcpServiceError } from './errors.js';
 import { getAgentletServer } from './server-mount.js';
 
 import type { AcpBindingRecipe } from './session-store.js';
@@ -151,9 +152,16 @@ async function waitForAgentConnection(
  * Resume: when `existingSessionId` is provided (from the persisted
  * session store), the spawn request includes it so the agentlet can
  * resume a suspended session via `session/resume` or `session/load`
- * instead of creating a new one. If the resume fails (e.g. the
- * daemon no longer knows that session), the agentlet falls through
- * to `session/new` automatically.
+ * instead of creating a new one. The Sediment-side store only
+ * persists a sessionId after the FIRST successful prompt for that
+ * thread (see `AcpSessionEntry.persistedToDisk` in `session-registry.ts`),
+ * which sidesteps the otherwise-common case where an agent like
+ * Copilot CLI doesn't persist empty in-memory sessions across
+ * process lifetimes \u2014 trying to `session/load` such an id would
+ * return `Resource not found` and fail the whole spawn. If a resume
+ * still fails for a stored id (e.g. the agent itself was wiped
+ * between restarts), the orchestrator surfaces the agentlet error to
+ * the caller; the user can drop the thread and start a fresh one.
  *
  * Cold-start tolerance: we wait up to {@link AGENTLET_READY_TIMEOUT_MS}
  * for the agentlet to come online and up to 3 s for the freshly-spawned
@@ -180,7 +188,8 @@ export async function ensureAgentForThread(
     const hint = supervisorStatus.lastError
       ? ` (${supervisorStatus.lastError})`
       : '';
-    throw new Error(
+    throw new AcpServiceError(
+      'worker_not_ready',
       `External agent worker is not ready${hint}. Try "Restart worker" in Settings → External Agents.`,
     );
   }
@@ -200,7 +209,10 @@ export async function ensureAgentForThread(
 
   const server = getAgentletServer();
   if (!server) {
-    throw new Error('agentlet server is not mounted');
+    throw new AcpServiceError(
+      'bridge_not_mounted',
+      'agentlet server is not mounted',
+    );
   }
 
   // HUABU_CANVAS_ID is a host-app variable that the daemon doesn't know.
@@ -210,19 +222,46 @@ export async function ensureAgentForThread(
     sidebandEnv.HUABU_CANVAS_ID = canvasId;
   }
 
-  const { sessionId, pid } = await server.spawnOnAgentlet(agentlet.agentletId, {
-    appId: threadId,
-    ...(existingSessionId ? { sessionId: existingSessionId } : {}),
-    sessionSpec: {
-      command: recipe.command,
-      cwd: recipe.cwd,
-      autoRestart: recipe.autoRestart,
-      idleTimeoutSecs: DEFAULT_IDLE_TIMEOUT_SECS,
-      env: Object.keys(sidebandEnv).length > 0 ? sidebandEnv : undefined,
-    },
-  });
+  let sessionId: string;
+  let pid: number;
+  try {
+    const result = await server.spawnOnAgentlet(agentlet.agentletId, {
+      appId: threadId,
+      ...(existingSessionId ? { sessionId: existingSessionId } : {}),
+      sessionSpec: {
+        command: recipe.command,
+        cwd: recipe.cwd,
+        autoRestart: recipe.autoRestart,
+        idleTimeoutSecs: DEFAULT_IDLE_TIMEOUT_SECS,
+        env: Object.keys(sidebandEnv).length > 0 ? sidebandEnv : undefined,
+      },
+    });
+    sessionId = result.sessionId;
+    pid = result.pid;
+  } catch (err) {
+    // The agentlet RPC itself rejected — typically a bad recipe
+    // (command not found, cwd missing) or a daemon-side validation
+    // failure. Preserve the daemon's message so the UI can surface
+    // the specific reason (e.g. ENOENT path).
+    const message = err instanceof Error ? err.message : String(err);
+    throw new AcpServiceError(
+      'spawn_failed',
+      `Failed to spawn external agent '${recipe.alias}': ${message}`,
+    );
+  }
 
-  await waitForAgentConnection(sessionId, 3000);
+  // Wait for the agent's WS handshake to complete before reporting
+  // success. If the agent never reaches `connected` within the window
+  // we surface a `connect_timeout` — the spawn succeeded but the
+  // process is silent. Common when the agent is blocked on
+  // interactive auth (Copilot OAuth expired) or crashed on startup.
+  const connected = await waitForAgentConnection(sessionId, 3000);
+  if (!connected) {
+    throw new AcpServiceError(
+      'connect_timeout',
+      `External agent '${recipe.alias}' started but did not respond within 3s. The agent may need to re-authenticate (e.g. Copilot OAuth) or has crashed on startup.`,
+    );
+  }
 
   threadToAgent.set(threadId, {
     sessionId,

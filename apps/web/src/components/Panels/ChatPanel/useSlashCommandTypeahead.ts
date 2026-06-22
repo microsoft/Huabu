@@ -43,6 +43,14 @@ export interface UseSlashCommandTypeaheadOptions {
    */
   slashCommands: AvailableCommand[];
   /**
+   * True while the command list is being (re)fetched. When the list
+   * is still empty but a fetch is in flight, the menu stays open in a
+   * loading state instead of being suppressed — so the user gets a
+   * "commands are coming" affordance on a cold spawn rather than
+   * silence that reads as "this feature doesn't exist".
+   */
+  loading?: boolean;
+  /**
    * Fired on the rising edge of "user wants the slash menu". The
    * data hook can decide via its own TTL gate whether to actually
    * re-fetch; this fires liberally and is cheap to debounce.
@@ -52,10 +60,12 @@ export interface UseSlashCommandTypeaheadOptions {
 
 export interface UseSlashCommandTypeaheadResult {
   /**
-   * When non-null, the menu should render; `filter` is the text
-   * after the leading `/` (empty string means "show everything").
+   * When non-null, the menu should render. `filter` is the text
+   * after the leading `/` (empty string means "show everything");
+   * `loading` is true when we're showing the menu purely as a
+   * cold-spawn loading affordance (no commands yet).
    */
-  slashState: { filter: string } | null;
+  slashState: { filter: string; loading: boolean } | null;
   /** Ref to attach to `<SlashCommandMenu>`. */
   slashMenuRef: RefObject<SlashCommandMenuRef>;
   /** Pass to `<SlashCommandMenu onSelect>`. */
@@ -78,6 +88,7 @@ export function useSlashCommandTypeahead({
   onChange,
   textareaRef,
   slashCommands,
+  loading = false,
   onSlashMenuIntent,
 }: UseSlashCommandTypeaheadOptions): UseSlashCommandTypeaheadResult {
   const slashMenuRef = useRef<SlashCommandMenuRef | null>(null);
@@ -113,17 +124,23 @@ export function useSlashCommandTypeahead({
   }, [value, caretPos, slashDismissedFor]);
 
   /**
-   * Adds the "non-empty command cache" gate on top of `wantsSlashMenu`,
-   * so the popover itself is suppressed when there's nothing to show
-   * even though the user clearly wants it.
+   * Adds the "non-empty command cache OR a fetch in flight" gate on
+   * top of `wantsSlashMenu`. The popover is suppressed only when
+   * there's nothing to show AND nothing being fetched — so a cold
+   * spawn (empty list, loading) still shows a loading affordance
+   * instead of silence.
    */
-  const slashState = useMemo<{ filter: string } | null>(() => {
+  const slashState = useMemo<{
+    filter: string;
+    loading: boolean;
+  } | null>(() => {
     if (!wantsSlashMenu) return null;
-    if (slashCommands.length === 0) return null;
+    const isLoading = slashCommands.length === 0 && loading;
+    if (slashCommands.length === 0 && !loading) return null;
     const firstSpace = value.search(/\s/);
     const tokenEnd = firstSpace === -1 ? value.length : firstSpace;
-    return { filter: value.slice(1, tokenEnd) };
-  }, [wantsSlashMenu, value, slashCommands.length]);
+    return { filter: value.slice(1, tokenEnd), loading: isLoading };
+  }, [wantsSlashMenu, value, slashCommands.length, loading]);
 
   // Rising-edge intent: notify the data hook the moment the user
   // starts wanting the menu. We fire on the rising edge (not on

@@ -52,7 +52,10 @@ export default function CanvasBasics() {
       />
       <P>
         Hold <Kbd>Space</Kbd> to temporarily switch to Pan mode (release to go
-        back). Middle-mouse drag also pans without changing tools.
+        back). Middle-mouse drag also pans without changing tools. While
+        dragging a node, holding <Kbd>Space</Kbd> instead opts the gesture out
+        of auto-reparenting — the node moves freely but won't enter or leave any
+        frame.
       </P>
 
       <H2>Node creators</H2>

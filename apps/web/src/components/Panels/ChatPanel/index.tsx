@@ -196,6 +196,9 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const slashCommands = acpExternalReachable
     ? acpSlash.commands
     : internalSlash.commands;
+  const slashLoading = acpExternalReachable
+    ? acpSlash.loading
+    : internalSlash.loading;
   const refreshSlashCommands = acpExternalReachable
     ? acpSlash.refreshIfStale
     : internalSlash.refreshIfStale;
@@ -219,6 +222,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     meta: acpSessionMeta,
     loading: acpSessionMetaLoading,
     error: acpSessionMetaError,
+    errorCode: acpSessionMetaErrorCode,
     applyEvent: applyAcpSessionMetaEvent,
     applyOptimistic: applyAcpSessionMetaOptimistic,
   } = useAcpSessionMeta({
@@ -237,16 +241,23 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   }, [acpSessionMeta]);
 
   // Three-state connection summary for the header badge, derived from
-  // `useAcpSessionMeta` after it has had a chance to fire its first
-  // ensure-session call. We deliberately do NOT regress to `connecting`
-  // on subsequent transient `loading` (set-mode / set-model / refresh)
-  // — once we have a meta snapshot the agent is, by definition,
-  // connected and the user shouldn't see the dot flicker on every
-  // dropdown change.
+  // `useAcpSessionMeta`. **Optimistic green by default** — opening a
+  // thread is no longer a "connection in flight" event because we
+  // hydrate selectors from the server's cached meta snapshot without
+  // spawning the agentlet (see `useAcpSessionMeta`'s mount effect).
+  // The badge only deviates from `connected` when there is positive
+  // evidence of trouble:
   //
-  //   connecting: first ensure in flight, no snapshot yet
-  //   connected:  snapshot received and no recent error
-  //   failed:     ensure rejected and no snapshot has ever arrived
+  //   connecting: a real `ensureAcpSession` (refresh / set-RPC) is
+  //               currently in flight
+  //   failed:     the last `ensureAcpSession` rejected AND we have
+  //               no cached snapshot to fall back on (`updatedAt === 0`)
+  //   connected:  everything else — cache hit, post-success steady
+  //               state, or transient ensure failure that still leaves
+  //               us with a valid (if possibly stale) snapshot. We
+  //               degrade gracefully here: showing red just because a
+  //               background refresh failed while the cached state is
+  //               perfectly usable would be noise.
   //
   // Internal bindings get `null` — the parent only renders the badge
   // for `agentBinding.kind === 'external'`.
@@ -259,16 +270,31 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const acpConnectionStatus: AcpConnectionStatus | null =
     agentBinding.kind !== 'external'
       ? null
-      : acpSessionMeta.updatedAt > 0 && !acpSessionMetaError
-        ? 'connected'
-        : !acpSessionMetaLoading && acpSessionMetaError
+      : acpSessionMetaLoading
+        ? 'connecting'
+        : acpSessionMetaError && acpSessionMeta.updatedAt === 0
           ? 'failed'
-          : 'connecting';
+          : 'connected';
 
   // Optimistic onChange handlers for the ACP selectors: merge the
   // chosen value into the local snapshot immediately, then fire the
   // REST set-RPC. On failure, revert the snapshot and surface a toast
   // so the user knows the agent rejected the change.
+  //
+  // Spawn context threaded into every set-RPC: the selector dropdowns
+  // are seeded from the no-spawn cached-meta snapshot, so the user can
+  // switch a value before the session has ever been opened. Passing
+  // `{ profileId, canvasId }` lets the server open the session
+  // on-demand instead of rejecting the switch with `session_not_found`.
+  const acpSetRpcSpawnCtx = useMemo(
+    () => ({
+      profileId:
+        agentBinding.kind === 'external' ? agentBinding.profileId : undefined,
+      canvasId: canvasId ?? undefined,
+    }),
+    [agentBinding, canvasId],
+  );
+
   const handleAcpSelectMode = useCallback(
     async (modeId: string) => {
       if (!threadId) return;
@@ -279,18 +305,23 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         data: { currentModeId: modeId },
       });
       try {
-        await setAcpSessionMode(threadId, { modeId });
+        await setAcpSessionMode(threadId, { modeId, ...acpSetRpcSpawnCtx });
       } catch (err) {
         applyAcpSessionMetaOptimistic({ currentModeId: previousModeId });
         toast(
           err instanceof Error
             ? `Failed to switch mode: ${err.message}`
             : 'Failed to switch mode',
-          { variant: 'error' },
+          { tone: 'danger' },
         );
       }
     },
-    [threadId, applyAcpSessionMetaEvent, applyAcpSessionMetaOptimistic],
+    [
+      threadId,
+      applyAcpSessionMetaEvent,
+      applyAcpSessionMetaOptimistic,
+      acpSetRpcSpawnCtx,
+    ],
   );
 
   const handleAcpSelectModel = useCallback(
@@ -300,18 +331,18 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       if (previousModelId === modelId) return;
       applyAcpSessionMetaOptimistic({ currentModelId: modelId });
       try {
-        await setAcpSessionModel(threadId, { modelId });
+        await setAcpSessionModel(threadId, { modelId, ...acpSetRpcSpawnCtx });
       } catch (err) {
         applyAcpSessionMetaOptimistic({ currentModelId: previousModelId });
         toast(
           err instanceof Error
             ? `Failed to switch model: ${err.message}`
             : 'Failed to switch model',
-          { variant: 'error' },
+          { tone: 'danger' },
         );
       }
     },
-    [threadId, applyAcpSessionMetaOptimistic],
+    [threadId, applyAcpSessionMetaOptimistic, acpSetRpcSpawnCtx],
   );
 
   const handleAcpSelectConfigOption = useCallback(
@@ -333,6 +364,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         await setAcpSessionConfigOption(threadId, {
           configOptionId: optionId,
           value,
+          ...acpSetRpcSpawnCtx,
         });
       } catch (err) {
         if (previousValueTyped !== undefined) {
@@ -344,11 +376,11 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           err instanceof Error
             ? `Failed to update option: ${err.message}`
             : 'Failed to update option',
-          { variant: 'error' },
+          { tone: 'danger' },
         );
       }
     },
-    [threadId, applyAcpSessionMetaOptimistic],
+    [threadId, applyAcpSessionMetaOptimistic, acpSetRpcSpawnCtx],
   );
 
   // Question thread replay mode
@@ -546,6 +578,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
               status={acpConnectionStatus}
               alias={agentBinding.alias}
               errorMessage={acpSessionMetaError?.message ?? null}
+              errorCode={acpSessionMetaErrorCode}
             />
           )}
         </span>
@@ -619,6 +652,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
               isStreaming={isLoading}
               mode={mode}
               slashCommands={slashCommands}
+              slashLoading={slashLoading}
               onSlashMenuIntent={refreshSlashCommands}
               acpSelectorsSlot={
                 agentBinding.kind === 'external' ? (

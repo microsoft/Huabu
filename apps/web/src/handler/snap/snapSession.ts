@@ -125,6 +125,84 @@ let _parentId: string | undefined = undefined;
 let _bypass = false;
 
 /**
+ * When true, Space is currently held during a drag — used to bypass
+ * auto-reparenting (entering / leaving frames) so the user can
+ * reposition a node freely without changing parent membership. This
+ * is the "opt out of auto reparent" gesture, matching Figma's
+ * Space-drag semantics. Always false outside an active drag session.
+ */
+let _reparentBypassed = false;
+
+/**
+ * Snapshot taken inside `endSnapSession` so `onNodeDragStop` can
+ * still recover decisions / flags that lived in the active session.
+ * The teardown order is normally `onNodesChange` → `endSnapSession`
+ * → `onNodeDragStop`, so the stop handler reads from this slot
+ * after the active session has already been wiped. Cleared on
+ * single-read via the `consumeLast*` accessors so a follow-up drag
+ * cannot inherit stale values.
+ *
+ * `null` outside the window between teardown and the stop event.
+ */
+interface LastEndedSnapshot {
+  /** Space-bypass state at the moment the gesture ended. */
+  reparentBypass: boolean;
+  /** Per-node frame-membership decisions from the last preview tick. */
+  dragDecisions: Map<string, DragDecision> | null;
+}
+let _lastEnded: LastEndedSnapshot | null = null;
+
+/**
+ * Per-dragged-node frame-membership decision captured by the live
+ * preview tick (`onNodeDrag` rAF callback). The drop resolver reads
+ * this map at `onNodeDragStop` and uses it verbatim — bypassing its
+ * own `wouldUnframe` / `wouldAutoFrame` recomputation — so the
+ * committed result always matches the **last rendered preview** the
+ * user saw, even when smart-snap rewrote the dragged node's
+ * position or the mouseup pointer drifted a few pixels past the
+ * halo edge in the ≤16 ms between the last `rAF` tick and release.
+ *
+ * The cache is the single source of truth for "did the gesture
+ * cross a frame boundary?" — every other input (current store
+ * positions, mouseup pointer, halo math) is ignored when the
+ * decision exists. See the WYSIWYG argument in the design doc.
+ */
+export interface DragDecision {
+  /**
+   * True iff the dragged node should detach from its current
+   * parent at drop-time. `false` means "stay parented" (the
+   * pointer-halo / overlap test said the node belongs in its
+   * current frame).
+   *
+   * Only meaningful when the node had a parent at preview time —
+   * otherwise the field is `false`.
+   */
+  unframe: boolean;
+  /**
+   * Frame id the dragged node should enter at drop-time, or `null`
+   * when no entry was decided. Covers both root → frame and
+   * cross-frame moves. The resolver trusts this value over its own
+   * `findBestFrameForNode` recomputation.
+   */
+  enterFrameId: string | null;
+}
+
+/**
+ * Working cache for the active drag — written every `rAF` tick of
+ * `onNodeDrag` via {@link writeDragDecision}, cleared at the start
+ * of each tick via {@link clearDragDecisions}. Held here (not in
+ * Zustand) for the same reason as the rest of the snap-session
+ * state: no component subscribes, so passing it through React
+ * state would churn the autosave middleware many times per second.
+ *
+ * Becomes `null` outside an active drag. The atomic "clear then
+ * re-write inside one rAF tick" pattern guarantees the cache always
+ * reflects the latest fully-computed preview frame — never a
+ * partial mix of two ticks.
+ */
+let _dragDecisions: Map<string, DragDecision> | null = null;
+
+/**
  * Cached id→node map and absolute-position getter for the duration
  * of a drag. Built once in `beginSnapSession` so the per-frame
  * `applySnap` pass doesn't pay an O(N) `Array.find` and an O(N)
@@ -294,6 +372,12 @@ export function beginSnapSession(opts: BeginSnapSessionOptions): void {
   // not from the (already mutating mid-gesture) store state.
   _resizeContext = kind === 'resize' ? (resizeContext ?? null) : null;
   _lastResizeSnapped = null;
+  // Reset drag-decision caches for a fresh gesture. Both the working
+  // cache (written by every rAF tick) and the post-gesture snapshot
+  // (consumed by `onNodeDragStop`) must start empty so a previous
+  // drag's decisions can never bleed into this one.
+  _dragDecisions = null;
+  _lastEnded = null;
 
   // Flip a body-level class for the duration of a resize gesture.
   // The frame node CSS uses this to suppress its `width/height`
@@ -325,6 +409,32 @@ export function beginSnapSession(opts: BeginSnapSessionOptions): void {
       'keyup',
       (e: KeyboardEvent) => {
         if (e.key === 'Alt') _bypass = false;
+      },
+      { signal },
+    );
+    // Space-while-dragging opts out of auto-reparenting (entering /
+    // leaving frames). `preventDefault` swallows the native scroll
+    // and stops the canvas's global Space-to-pan shortcut from
+    // switching tools mid-drag — Space's drag-context interpretation
+    // takes precedence. Outside a drag, the global listener still
+    // owns Space.
+    window.addEventListener(
+      'keydown',
+      (e: KeyboardEvent) => {
+        if (e.key === ' ' || e.code === 'Space') {
+          _reparentBypassed = true;
+          e.preventDefault();
+        }
+      },
+      { signal },
+    );
+    window.addEventListener(
+      'keyup',
+      (e: KeyboardEvent) => {
+        if (e.key === ' ' || e.code === 'Space') {
+          _reparentBypassed = false;
+          e.preventDefault();
+        }
       },
       { signal },
     );
@@ -363,6 +473,18 @@ export function endSnapSession(): void {
   _resizeContext = null;
   _lastResizeSnapped = null;
   _structuredSuppressed = false;
+  // Snapshot the post-teardown state (Space-bypass flag + per-node
+  // drag decisions) into a single slot for `onNodeDragStop` to read
+  // *after* this teardown runs (typical order: `onNodesChange` →
+  // `endSnapSession` → `onNodeDragStop`). The stop handler consumes
+  // this slot via `consumeLast*` accessors which clear it on read,
+  // so the next gesture starts fresh.
+  _lastEnded = {
+    reparentBypass: _reparentBypassed,
+    dragDecisions: _dragDecisions,
+  };
+  _reparentBypassed = false;
+  _dragDecisions = null;
   // Drop the resize-gesture marker (idempotent — safe when not set).
   if (typeof document !== 'undefined') {
     document.body.classList.remove('canvas-resize-active');
@@ -393,6 +515,73 @@ export function isSnapSessionActive(): boolean {
  */
 export function setSnapStructuredSuppressed(suppressed: boolean): void {
   _structuredSuppressed = suppressed;
+}
+
+/**
+ * True while the user is holding Space during an active drag —
+ * meaning auto-reparenting (entering / leaving frames) should be
+ * skipped for this gesture. Mirrors Figma's Space-drag opt-out.
+ * Always false outside a drag session.
+ */
+export function isReparentBypassed(): boolean {
+  return _reparentBypassed;
+}
+
+/**
+ * Read-and-clear accessor for the post-`endSnapSession` snapshot of
+ * `_reparentBypassed`. Use this from `onNodeDragStop` (which fires
+ * *after* `endSnapSession`) to recover the value the user pressed
+ * before release. Returns `false` outside a just-ended drag.
+ */
+export function consumeLastDragReparentBypass(): boolean {
+  const v = _lastEnded?.reparentBypass ?? false;
+  if (_lastEnded) _lastEnded.reparentBypass = false;
+  return v;
+}
+
+/**
+ * Record the live preview's frame-membership decision for one
+ * dragged node. Called from `canvasStore.onNodeDrag` inside the
+ * `rAF` tick that just finished computing the per-node
+ * `wouldUnframe` / `wouldAutoFrame` predicates — the cache is
+ * cleared via {@link clearDragDecisions} at the start of the same
+ * tick so multi-node drags always commit a coherent snapshot.
+ *
+ * No-op outside an active drag (the cache stays `null` so
+ * `consumeLastDragDecisions` returns `null` and the resolver
+ * falls back to fresh recomputation).
+ */
+export function writeDragDecision(
+  nodeId: string,
+  decision: DragDecision,
+): void {
+  if (!_dragDecisions) _dragDecisions = new Map();
+  _dragDecisions.set(nodeId, decision);
+}
+
+/**
+ * Wipe the working drag-decision cache. Call from the `rAF` tick
+ * *before* re-writing per-node decisions so a node that no longer
+ * has a decision (e.g. removed from the dragged set, or now in a
+ * Space-bypass state) can't carry forward a stale entry from the
+ * previous tick.
+ */
+export function clearDragDecisions(): void {
+  _dragDecisions = null;
+}
+
+/**
+ * Read-and-clear accessor for the post-`endSnapSession` snapshot of
+ * `_dragDecisions`. Returns `null` (not an empty map) when no
+ * decisions were recorded — distinguishing "preview ran and decided
+ * nothing for this drag" from "preview never ran" so the resolver
+ * can pick the right fallback. Single-read by design: the cache
+ * belongs to one drop event and a follow-up drag must not see it.
+ */
+export function consumeLastDragDecisions(): Map<string, DragDecision> | null {
+  const v = _lastEnded?.dragDecisions ?? null;
+  if (_lastEnded) _lastEnded.dragDecisions = null;
+  return v;
 }
 
 /**

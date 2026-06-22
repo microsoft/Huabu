@@ -1,7 +1,11 @@
-import { prepareWithSegments, layoutWithLines } from '@chenglou/pretext';
 import { useMemo } from 'react';
 
+import { fitFontSize, type FontOpts } from '@/utils/node/textMeasure';
+
 const DEFAULT_FONT = 'Inter, ui-sans-serif, system-ui, sans-serif';
+
+/** Shared across all calls — zoom-out renders hundreds of placeholders at once. */
+const FIT_CACHE = new Map<string, number>();
 
 interface FitTextOptions {
   minSize?: number;
@@ -11,100 +15,34 @@ interface FitTextOptions {
 }
 
 /**
- * The result snaps to a multiple of 4 (see `Math.floor(lo / 4) * 4`), so
- * the binary search only needs enough iterations to resolve the threshold
- * to better than 4px. Over the default [10, 144] range, 10 iterations
- * resolve to ~0.13px — visually identical to the previous 15 iterations.
+ * Largest font size whose label fits inside `width × height`. Thin
+ * preset on top of {@link fitFontSize}: coarse 4 px snap, global cache,
+ * `floorSize: 4` so a single long word descends below `minSize` rather
+ * than letting pretext's `overflow-wrap: break-word` split it.
  */
-const FIT_ITERATIONS = 10;
-
-/**
- * Reference size at which the text is measured exactly once per call. Glyph
- * advances scale linearly with font px, so a single `prepare` at this size
- * lets every binary-search probe reuse the same measured run — only the
- * (cheap, measureText-free) `layout` wrap pass repeats. Picked large enough
- * that sub-pixel rounding in the measured advances is negligible.
- */
-const REF_SIZE = 100;
-
-/**
- * Cache of computed fit sizes keyed by the exact inputs. A canvas zoomed
- * out to fit shows every node as a minimal-LOD placeholder at once, and
- * the same (text, width, height) recurs across StrictMode's double render,
- * virtualized remounts, and zoom round-trips. Memoising globally collapses
- * all of those into a single measurement. Bounded to avoid unbounded growth
- * across long sessions with many distinct labels.
- */
-const fitCache = new Map<string, number>();
-const FIT_CACHE_MAX = 4096;
-
-/**
- * Binary-search the largest font size whose laid-out text fits inside
- * `width × height`, using pretext (pure arithmetic — no DOM reflow).
- *
- * The text is measured a single time via `prepare` at `REF_SIZE`; each probe
- * then reuses that prepared run and only re-runs `layout` (which does not
- * touch `measureText`). Because glyph advances scale linearly with font size,
- * fitting at size `s` is equivalent to wrapping the `REF_SIZE` run at width
- * `width * REF_SIZE / s` with line height `s * lhRatio` — pretext's own wrap
- * logic (CJK / soft-break aware) is preserved, just fed a scaled width.
- */
-export function fitFontSize(
+export function fitFontSizeForLabel(
   text: string,
   width: number,
   height: number,
   opts?: FitTextOptions,
 ): number {
-  const min = opts?.minSize ?? 10;
-  const max = opts?.maxSize ?? 144;
-  const font = opts?.font ?? DEFAULT_FONT;
-  const lhRatio = opts?.lineHeightRatio ?? 1.4;
-
-  if (width <= 0 || height <= 0 || !text.trim()) return min;
-
-  const key = `${min}|${max}|${lhRatio}|${font}|${width}|${height}|${text}`;
-  const cached = fitCache.get(key);
-  if (cached !== undefined) return cached;
-
-  // Measure once; every probe below scales this single run arithmetically.
-  const prepared = prepareWithSegments(text, `${REF_SIZE}px ${font}`);
-
-  let lo = min;
-  let hi = max;
-  for (let i = 0; i < FIT_ITERATIONS; i++) {
-    const mid = (lo + hi) / 2;
-    // Wrapping the REF_SIZE run at this scaled width is equivalent to
-    // wrapping the actual `mid`-size run at the real box width, because
-    // both glyph advances and the width scale by the same `mid / REF_SIZE`.
-    const scaledWidth = (width * REF_SIZE) / mid;
-    const { height: h, lines } = layoutWithLines(
-      prepared,
-      scaledWidth,
-      mid * lhRatio,
-    );
-    // Constrain BOTH height and width: an unbreakable token (e.g. a single
-    // long word with no soft-break points) would otherwise be allowed to
-    // grow until it fills the box height while its line width overflows
-    // horizontally. Line widths are measured in REF_SIZE units, so compare
-    // them against `scaledWidth` (the box width expressed in those units).
-    let widest = 0;
-    for (const ln of lines) {
-      if (ln.width > widest) widest = ln.width;
-    }
-    if (h <= height && widest <= scaledWidth) lo = mid;
-    else hi = mid;
-  }
-  const snapped = Math.floor(lo / 4) * 4;
-  const result = Math.max(min, snapped);
-
-  if (fitCache.size >= FIT_CACHE_MAX) fitCache.clear();
-  fitCache.set(key, result);
-  return result;
+  const font: FontOpts = {
+    fontFamily: opts?.font ?? DEFAULT_FONT,
+    fontWeight: 'normal',
+    fontStyle: 'normal',
+    lineHeight: opts?.lineHeightRatio ?? 1.4,
+  };
+  return fitFontSize(text, width, height, font, {
+    minSize: opts?.minSize ?? 10,
+    maxSize: opts?.maxSize ?? 144,
+    floorSize: 4,
+    snapStep: 4,
+    iterations: 10,
+    cache: FIT_CACHE,
+  });
 }
 
-/**
- * React hook wrapping `fitFontSize` in a memo.
- */
+/** React hook wrapping {@link fitFontSizeForLabel} in a `useMemo`. */
 export function useFitText(
   text: string,
   width: number,
@@ -112,7 +50,7 @@ export function useFitText(
   opts?: FitTextOptions,
 ): number {
   return useMemo(
-    () => fitFontSize(text, width, height, opts),
+    () => fitFontSizeForLabel(text, width, height, opts),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       text,

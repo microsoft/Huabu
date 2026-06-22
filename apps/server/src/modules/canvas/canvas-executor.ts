@@ -404,10 +404,13 @@ export async function executeOnServer(
       }
     }
     for (const nodeId of pendingEffects.deletedNodeIds) {
-      try {
-        store.deleteNode(nodeId);
-      } catch (err) {
-        console.warn(`[canvas-executor] deleteNode failed for ${nodeId}:`, err);
+      const result = store.deleteNode(nodeId);
+      if (result === 'fs-error') {
+        // Best-effort inside the agent batch: log so the operator can
+        // investigate an orphan `.md`, but don't abort the whole batch
+        // — the canvas.json write below still records the structural
+        // delete the agent asked for.
+        console.warn(`[canvas-executor] deleteNode failed for ${nodeId}`);
       }
     }
 

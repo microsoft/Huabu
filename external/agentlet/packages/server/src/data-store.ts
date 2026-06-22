@@ -25,6 +25,12 @@ export interface SessionRecord {
   supportsLoad: boolean
   supportsResume: boolean
   initializeResult?: unknown
+  /**
+   * The full ACP `session/new` response for freshly-created sessions
+   * (absent on resume/load). Stored opaquely — may carry inline
+   * `models` / `modes` / `configOptions` the host reads to seed its UI.
+   */
+  newSessionResult?: unknown
   profile?: string
   idleTimeoutSecs: number
   autoRestart: boolean
@@ -81,6 +87,7 @@ export class DataStore {
     }
 
     this.createSchema()
+    this.migrateSchema()
     this.initialized = true
   }
 
@@ -151,9 +158,9 @@ export class DataStore {
     this.db!.run(`
       INSERT OR REPLACE INTO sessions (
         session_id, display_name, agentlet_id, owner, command, cwd, env, status,
-        supports_load, supports_resume, initialize_result, profile,
+        supports_load, supports_resume, initialize_result, new_session_result, profile,
         idle_timeout_secs, auto_restart, created_at, suspended_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       record.sessionId,
       record.displayName,
@@ -166,6 +173,7 @@ export class DataStore {
       record.supportsLoad ? 1 : 0,
       record.supportsResume ? 1 : 0,
       record.initializeResult ? JSON.stringify(record.initializeResult) : null,
+      record.newSessionResult ? JSON.stringify(record.newSessionResult) : null,
       record.profile ?? null,
       record.idleTimeoutSecs,
       record.autoRestart ? 1 : 0,
@@ -356,6 +364,7 @@ export class DataStore {
         supports_load INTEGER NOT NULL DEFAULT 0,
         supports_resume INTEGER NOT NULL DEFAULT 0,
         initialize_result TEXT,
+        new_session_result TEXT,
         profile TEXT,
         idle_timeout_secs INTEGER NOT NULL DEFAULT 0,
         auto_restart INTEGER NOT NULL DEFAULT 0,
@@ -383,6 +392,27 @@ export class DataStore {
       CREATE INDEX IF NOT EXISTS idx_sessions_owner
       ON sessions(owner, updated_at DESC)
     `)
+  }
+
+  /**
+   * Apply additive schema migrations for databases created by an older
+   * version. `CREATE TABLE IF NOT EXISTS` does not add columns to an
+   * existing table, so new columns must be backfilled via ALTER TABLE.
+   * Each ALTER is guarded against the "duplicate column" error so the
+   * migration is idempotent across restarts.
+   */
+  private migrateSchema(): void {
+    const existing = new Set<string>()
+    const stmt = this.db!.prepare(`PRAGMA table_info(sessions)`)
+    while (stmt.step()) {
+      const col = stmt.getAsObject()
+      if (typeof col['name'] === 'string') existing.add(col['name'])
+    }
+    stmt.free()
+
+    if (!existing.has('new_session_result')) {
+      this.db!.run(`ALTER TABLE sessions ADD COLUMN new_session_result TEXT`)
+    }
   }
 
   // ─── Private: Flush ─────────────────────────────────────────────────────
@@ -417,6 +447,7 @@ export class DataStore {
       supportsLoad: row['supports_load'] === 1,
       supportsResume: row['supports_resume'] === 1,
       initializeResult: row['initialize_result'] ? JSON.parse(row['initialize_result'] as string) : undefined,
+      newSessionResult: row['new_session_result'] ? JSON.parse(row['new_session_result'] as string) : undefined,
       profile: (row['profile'] as string) ?? undefined,
       idleTimeoutSecs: row['idle_timeout_secs'] as number,
       autoRestart: row['auto_restart'] === 1,

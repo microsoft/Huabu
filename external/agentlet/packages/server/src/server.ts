@@ -515,6 +515,9 @@ export class AgentletServer {
       supportsLoad: profile.session?.supportsLoad ?? false,
       supportsResume: profile.session?.supportsResume ?? false,
       initializeResult: profile.session?.initializeResult ?? null,
+      // Preserve a previously-stored session/new blob across resume/load
+      // (which never carries one) so the host doesn't lose inline meta.
+      newSessionResult: profile.session?.newSessionResult ?? existing?.newSessionResult ?? null,
       owner,
       profile: JSON.stringify(profile),
       idleTimeoutSecs: existing?.idleTimeoutSecs ?? 0,

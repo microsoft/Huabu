@@ -125,15 +125,28 @@ export interface CanvasVersionMismatchError {
 // ─── Rename / conflict errors ─────────────────────────────────────────────
 
 /**
- * Structured 4xx error codes returned from canvas mutation endpoints.
- * Front-end uses the `code` discriminator to pick a UX (toast vs alert
- * vs reload).
+ * Structured error codes returned from canvas mutation endpoints.
+ *
+ * Front-end uses the `code` discriminator — *not* the HTTP message —
+ * to pick a UX (toast vs alert vs reload) and to localise the copy.
+ * The server's `message` field stays an English fallback for
+ * developer-facing logs and unknown-code situations.
+ *
+ * Codes fall into two buckets:
+ * - **4xx conflicts**: caller submitted something that collides with
+ *   existing state. Carried by {@link CanvasConflictResponse} with
+ *   extra context (`conflictWith`, `nodeId`, `serverVersion`).
+ * - **4xx/5xx operational failures**: request was well-formed but the
+ *   server couldn't honour it (canvas missing, fs lock, etc.).
+ *   Carried by the standard {@link ApiErrorBody}.
  */
 export type CanvasErrorCode =
   | 'CANVAS_TITLE_CONFLICT'
   | 'NODE_LABEL_CONFLICT'
   | 'CANVAS_VERSION_CONFLICT'
-  | 'INVALID_REQUEST';
+  | 'INVALID_REQUEST'
+  | 'CANVAS_NOT_FOUND'
+  | 'NODE_FILE_DELETE_FAILED';
 
 /**
  * Body shape for 4xx responses from canvas mutation endpoints.

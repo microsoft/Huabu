@@ -14,6 +14,16 @@ import type { XYPosition } from '@xyflow/react';
 export type AutoFrameByOverlapOptions = {
   /** Portion of the dragged node area that must be inside the frame. */
   threshold?: number;
+  /**
+   * Cursor position in absolute flow coordinates. When provided, any
+   * candidate frame whose rect contains `pointer` AND has any positive
+   * body overlap with the dragged node qualifies, in addition to the
+   * area-ratio threshold. Lets users drop a node by hovering the cursor
+   * inside the frame even when the node's bounding box overlaps only
+   * marginally (e.g. dropping near the edge, or a node larger than the
+   * frame whose centre stays outside).
+   */
+  pointer?: { x: number; y: number };
 };
 
 export type AutoUnframeByNonOverlapOptions = {
@@ -25,6 +35,27 @@ export type AutoUnframeByNonOverlapOptions = {
    * some overlap. Default: 0 (disabled).
    */
   margin?: number;
+  /**
+   * Cursor position in absolute flow coordinates. When provided together
+   * with `pointerCaptureMargin`, the node stays parented while the
+   * pointer is still inside the parent frame rect expanded by
+   * `pointerCaptureMargin`. Lets users reposition a child inside its
+   * frame even when the node's bbox momentarily extends past the frame
+   * edge, without the node escaping on each grazing drag.
+   */
+  pointer?: { x: number; y: number };
+  /**
+   * Halo (in px) added around the parent frame for the pointer capture
+   * test. Either a single number (symmetric on both axes) or an object
+   * with separate horizontal / vertical values. Ignored when `pointer`
+   * is not provided. Default: 0.
+   *
+   * Per-axis form lets callers scale the halo with the dragged node's
+   * size (e.g. `0.25 * nodeSize` floored at a minimum), so that pulling
+   * a large node out of its frame still feels deliberate rather than
+   * trivial.
+   */
+  pointerCaptureMargin?: number | { x: number; y: number };
 };
 
 export type Rect = { x: number; y: number; width: number; height: number };
@@ -82,7 +113,10 @@ export function createRectGetter(
  * Shared predicate: should a child node leave its parent frame?
  *
  * Returns `true` when the node has no (or negligible) overlap with the
- * parent frame AND the edge-to-edge gap exceeds `margin`.
+ * parent frame AND the edge-to-edge gap exceeds `margin`. If `pointer`
+ * is provided together with `pointerCaptureMargin`, a pointer inside the
+ * parent rect expanded by `pointerCaptureMargin` short-circuits the test
+ * (the node stays parented), making intra-frame drags sticky.
  *
  * Used by both `autoUnframeNodeByNonOverlap` (mutates) and
  * `wouldUnframe` (pure predicate) so the decision logic is defined once.
@@ -92,6 +126,29 @@ export function checkShouldUnframe(
   parentRect: Rect,
   options: AutoUnframeByNonOverlapOptions,
 ): boolean {
+  // Pointer capture zone: while the cursor is still in (or close to) the
+  // parent frame, keep the node parented regardless of bbox geometry.
+  // This is the free-frame analogue of the structured-frame capture zone
+  // in `resolveNodeDragStop.ts` — both implement the same UX rule:
+  // "intent to leave" requires the user to pull the *cursor* clearly out
+  // of the frame, not just nudge the node's body across the edge.
+  const pointer = options.pointer;
+  if (pointer) {
+    const captureMargin = options.pointerCaptureMargin ?? 0;
+    const captureX =
+      typeof captureMargin === 'number' ? captureMargin : captureMargin.x;
+    const captureY =
+      typeof captureMargin === 'number' ? captureMargin : captureMargin.y;
+    if (
+      pointer.x >= parentRect.x - captureX &&
+      pointer.x <= parentRect.x + parentRect.width + captureX &&
+      pointer.y >= parentRect.y - captureY &&
+      pointer.y <= parentRect.y + parentRect.height + captureY
+    ) {
+      return false;
+    }
+  }
+
   const intersection = rectIntersectionArea(nodeRect, parentRect);
   const epsilon = options.epsilon ?? 0;
   if (intersection > epsilon) return false; // Still overlapping, keep in frame
@@ -121,12 +178,23 @@ export function checkShouldUnframe(
  * Returns the frame ID with the best overlap ratio, or `null`.
  * Used by both `autoFrameNodeByOverlap` (mutates) and
  * `wouldAutoFrame` (pure predicate).
+ *
+ * Two qualifying paths:
+ *   - "area-ratio": body overlap ratio ≥ `threshold` (the original rule).
+ *   - "pointer-inside": when `pointer` is provided, candidates whose rect
+ *     contains the pointer AND have any positive body overlap also
+ *     qualify. Lets users drop a node by hovering the cursor inside the
+ *     frame even when the bbox overlap is well below `threshold`.
+ *
+ * The deepest-first + highest-ratio tiebreak applies to the combined
+ * candidate set.
  */
 export function findBestFrameForNode(
   nodes: NestableNode[],
   nodeId: string,
   threshold: number,
   getRect: (id: string) => Rect | null,
+  pointer?: { x: number; y: number },
 ): string | null {
   const nodeRect = getRect(nodeId);
   if (!nodeRect) return null;
@@ -151,7 +219,21 @@ export function findBestFrameForNode(
     const frameArea = frameRect.width * frameRect.height;
     const intersection = rectIntersectionArea(nodeRect, frameRect);
     const ratio = intersection / Math.min(nodeArea, frameArea);
-    if (ratio < threshold) continue;
+
+    const pointerInside =
+      pointer !== undefined &&
+      pointer.x >= frameRect.x &&
+      pointer.x <= frameRect.x + frameRect.width &&
+      pointer.y >= frameRect.y &&
+      pointer.y <= frameRect.y + frameRect.height;
+
+    // Pointer-inside path: any positive overlap qualifies. Otherwise
+    // fall back to the strict area-ratio threshold.
+    if (pointerInside) {
+      if (intersection <= 0) continue;
+    } else {
+      if (ratio < threshold) continue;
+    }
 
     candidates.push({ frameId: candidate.id, ratio });
   }

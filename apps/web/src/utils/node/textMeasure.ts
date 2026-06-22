@@ -1,8 +1,11 @@
 /**
- * Pure text measurement utilities using pretext.
+ * Pure pretext-based text measurement, shared by TextNode/QuestionNode
+ * auto-sizing (via {@link computeFontSizeForHeight}) and SemanticPlaceholder
+ * labels (via the `useFitText` hook → {@link fitFontSize}).
  *
- * Shared by TextNode and QuestionNode for auto-sizing and font-fill behaviour.
- * No DOM access — all arithmetic is done via canvas text-metrics.
+ * Both paths use a single binary-search core that prepares the text
+ * once at `REF_SIZE`, then reuses that measurement in every probe by
+ * scaling the wrap budget — no `measureText` calls inside the loop.
  */
 
 import { prepareWithSegments, layoutWithLines } from '@chenglou/pretext';
@@ -15,9 +18,27 @@ export interface FontOpts {
   lineHeight: number;
 }
 
+/** Reference size for the single per-call `prepare`; advances scale linearly. */
+const REF_SIZE = 100;
+
 /**
- * Build the CSS font shorthand string for pretext's prepare().
+ * Strip `ui-*` CSS Fonts L4 generics from the family stack before
+ * handing it to canvas. Some browsers silently reject them; `ctx.font`
+ * then keeps its previous value (`10px sans-serif`) and every
+ * `measureText` returns widths ~10× too small, breaking the word-fit
+ * guard. The DOM-rendered font keeps the original stack.
  */
+function sanitizeFontFamilyForCanvas(family: string): string {
+  return (
+    family
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => !/^ui-(sans-serif|serif|monospace|rounded)$/i.test(s))
+      .join(', ') || 'sans-serif'
+  );
+}
+
+/** Build the CSS font shorthand string for pretext's prepare(). */
 export function buildFontStr(
   fontSize: number,
   fontFamily: string,
@@ -27,18 +48,35 @@ export function buildFontStr(
   let s = '';
   if (fontStyle === 'italic') s += 'italic ';
   if (fontWeight === 'bold') s += 'bold ';
-  return `${s}${fontSize}px ${fontFamily}`;
+  return `${s}${fontSize}px ${sanitizeFontFamilyForCanvas(fontFamily)}`;
 }
 
 /**
- * Pretext treats `\n` as a line terminator (matching CSS layout): a
- * string that ends with `\n` produces the same number of laid-out lines
- * as the same string without the trailing newline. Inside an editable
- * textarea, however, the caret sits on a visually empty line right after
- * the trailing `\n`, so the container must reserve a line of height for
- * it — otherwise pressing Enter at the end of the text does not grow
- * the node until the user types the next character. Returns 1 when the
- * text ends with `\n`, else 0.
+ * Maximal runs of non-CJK, non-whitespace chars (Latin words, URLs, …).
+ * CJK is excluded because it breaks per-character; ZWS/soft hyphen are
+ * treated as separators to mirror pretext's break opportunities.
+ */
+function extractUnbreakableTokens(text: string): string[] {
+  const wordCharRe =
+    /[^\s\u00AD\u200B\u3000-\u303F\u3040-\u30FF\u31F0-\u31FF\u3400-\u4DBF\u4E00-\u9FFF\uA000-\uA4CF\uAC00-\uD7AF\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFFEF]/;
+  const tokens: string[] = [];
+  let current = '';
+  for (const ch of text) {
+    if (wordCharRe.test(ch)) {
+      current += ch;
+    } else if (current) {
+      tokens.push(current);
+      current = '';
+    }
+  }
+  if (current) tokens.push(current);
+  return tokens;
+}
+
+/**
+ * 1 if `text` ends with `\n`: pretext drops the trailing empty line
+ * (matches CSS), but a textarea still shows a caret line there, so the
+ * editor path reserves one extra line of height.
  */
 function trailingEditableLines(text: string): number {
   return text.endsWith('\n') ? 1 : 0;
@@ -46,7 +84,7 @@ function trailingEditableLines(text: string): number {
 
 /**
  * Measure the natural content dimensions using pretext (no DOM reflow).
- * maxWidth controls the wrap boundary.
+ * `maxWidth` controls the wrap boundary.
  */
 export function measureTextContent(
   text: string,
@@ -73,62 +111,8 @@ export function measureTextContent(
 }
 
 /**
- * Binary-search for the font size that makes text fill a target height
- * at a given content width.  Uses pretext — pure arithmetic, no DOM access.
- */
-export function computeFontSizeForHeight(
-  text: string,
-  contentWidth: number,
-  contentHeight: number,
-  opts: FontOpts,
-): number {
-  if (contentWidth <= 0 || contentHeight <= 0) return 16;
-  if (!text.trim()) {
-    return Math.max(
-      1,
-      Math.min(Math.round(contentHeight / opts.lineHeight), 200),
-    );
-  }
-
-  // Reserve a small margin so browser rendering differences don't clip
-  // the last line. 2px height absorbs sub-pixel rounding; 4px narrower
-  // width forces pretext to wrap at least as aggressively as the browser
-  // (especially for CJK + Latin mixed text where break opportunities differ).
-  const safeHeight = contentHeight - 2;
-  const safeWidth = contentWidth - 4;
-  if (safeHeight <= 0 || safeWidth <= 0) return 1;
-
-  let lo = 1;
-  let hi = 200;
-  const trailingLines = trailingEditableLines(text);
-  for (let i = 0; i < 15; i++) {
-    const mid = (lo + hi) / 2;
-    const fontStr = buildFontStr(
-      mid,
-      opts.fontFamily,
-      opts.fontWeight,
-      opts.fontStyle,
-    );
-    const prepared = prepareWithSegments(text, fontStr, {
-      whiteSpace: 'pre-wrap',
-    });
-    const lineH = mid * opts.lineHeight;
-    const { height } = layoutWithLines(prepared, safeWidth, lineH);
-    const totalHeight = height + trailingLines * lineH;
-    if (totalHeight <= safeHeight) {
-      lo = mid;
-    } else {
-      hi = mid;
-    }
-  }
-  return Math.max(1, Math.floor(lo * 2) / 2);
-}
-
-/**
- * Measure the rendered height of `text` laid out at a fixed `fontSize`
- * inside a fixed `contentWidth`. Used by text-flow nodes to derive the
- * container height after the font size has been locked by a resize gesture.
- * Pure arithmetic via pretext — no DOM reflow.
+ * Height of `text` laid out at a fixed `fontSize` inside `contentWidth`.
+ * Used after a resize gesture locks the font, to derive the container height.
  */
 export function measureTextHeight(
   text: string,
@@ -150,4 +134,178 @@ export function measureTextHeight(
   const { height } = layoutWithLines(prepared, contentWidth, lineH);
   const extra = trailingEditableLines(text) * lineH;
   return Math.ceil(height + extra);
+}
+
+/* ---------------- Unified font-fit core ---------------- */
+
+/** Options accepted by {@link fitFontSize}. */
+export interface FitFontOptions {
+  /** Default 1. */
+  minSize?: number;
+  /** Default 200. */
+  maxSize?: number;
+  /**
+   * Allow descending below `minSize` down to this floor when even
+   * `minSize` can't keep the widest unbreakable token on one line.
+   * Default = `minSize` (no descent; word breaks).
+   */
+  floorSize?: number;
+  /** Snap result down to a multiple of this many px (default 0.5). */
+  snapStep?: number;
+  /** Default 12. */
+  iterations?: number;
+  /** Reserve one line of height when text ends with `\n` (default false). */
+  reserveTrailingLine?: boolean;
+  /** Default 0. */
+  widthInset?: number;
+  /** Default 0. */
+  heightInset?: number;
+  /** Optional global cache (used by the placeholder path on zoom-out bursts). */
+  cache?: Map<string, number>;
+  /** Default 4096; cleared when exceeded. */
+  cacheMax?: number;
+  /** If true, empty text returns size = contentHeight / lineHeight. */
+  emptyTextFillsHeight?: boolean;
+}
+
+/**
+ * Binary-search the largest font size whose laid-out text fits inside
+ * `contentWidth × contentHeight`. Guarantees the widest unbreakable
+ * token stays on one line (pretext otherwise applies `overflow-wrap:
+ * break-word`). Single `prepare` at `REF_SIZE`; each probe wraps the
+ * prepared run at the scaled budget `realBudget * REF_SIZE / mid` —
+ * no `measureText` calls inside the loop.
+ */
+export function fitFontSize(
+  text: string,
+  contentWidth: number,
+  contentHeight: number,
+  font: FontOpts,
+  opts: FitFontOptions = {},
+): number {
+  const minSize = opts.minSize ?? 1;
+  const maxSize = opts.maxSize ?? 200;
+  const floorSize = Math.min(opts.floorSize ?? minSize, minSize);
+  const snapStep = opts.snapStep ?? 0.5;
+  const iterations = opts.iterations ?? 12;
+  const reserveTrailingLine = opts.reserveTrailingLine ?? false;
+  const widthInset = opts.widthInset ?? 0;
+  const heightInset = opts.heightInset ?? 0;
+  const cache = opts.cache;
+  const cacheMax = opts.cacheMax ?? 4096;
+  const emptyTextFillsHeight = opts.emptyTextFillsHeight ?? false;
+
+  const safeWidth = contentWidth - widthInset;
+  const safeHeight = contentHeight - heightInset;
+  if (safeWidth <= 0 || safeHeight <= 0) return Math.max(floorSize, 1);
+
+  if (!text.trim()) {
+    if (emptyTextFillsHeight) {
+      return Math.max(
+        floorSize,
+        Math.min(Math.round(contentHeight / font.lineHeight), maxSize),
+      );
+    }
+    return Math.max(floorSize, minSize);
+  }
+
+  const cacheKey = cache
+    ? `${minSize}|${maxSize}|${floorSize}|${snapStep}|${reserveTrailingLine}|${widthInset}|${heightInset}|${font.fontFamily}|${font.fontWeight}|${font.fontStyle}|${font.lineHeight}|${safeWidth}|${safeHeight}|${text}`
+    : null;
+  if (cacheKey && cache) {
+    const hit = cache.get(cacheKey);
+    if (hit !== undefined) return hit;
+  }
+
+  const refFontStr = buildFontStr(
+    REF_SIZE,
+    font.fontFamily,
+    font.fontWeight,
+    font.fontStyle,
+  );
+  const prepared = prepareWithSegments(text, refFontStr, {
+    whiteSpace: 'pre-wrap',
+  });
+
+  // widestTokenAtRef = the exact value pretext compares against
+  // `maxWidth` when deciding whether to break a word, so the guard
+  // `widestTokenAtRef <= scaledWidth` fires iff pretext would break.
+  let widestTokenAtRef = 0;
+  for (const tok of extractUnbreakableTokens(text)) {
+    const tokPrepared = prepareWithSegments(tok, refFontStr, {
+      whiteSpace: 'pre-wrap',
+    });
+    const { lines: tokLines } = layoutWithLines(
+      tokPrepared,
+      Number.POSITIVE_INFINITY,
+      1,
+    );
+    for (const ln of tokLines) {
+      if (ln.width > widestTokenAtRef) widestTokenAtRef = ln.width;
+    }
+  }
+
+  const trailingLines = reserveTrailingLine ? trailingEditableLines(text) : 0;
+  // lineH in REF units is constant (real lineH = mid*ratio → REF units = REF*ratio).
+  const lineHRef = REF_SIZE * font.lineHeight;
+
+  const fitsAt = (size: number): boolean => {
+    const scaledWidth = (safeWidth * REF_SIZE) / size;
+    const scaledHeight = (safeHeight * REF_SIZE) / size;
+    const { height } = layoutWithLines(prepared, scaledWidth, lineHRef);
+    const totalHeight = height + trailingLines * lineHRef;
+    return totalHeight <= scaledHeight && widestTokenAtRef <= scaledWidth;
+  };
+
+  // Phase 1: search [minSize, maxSize]. Phase 2 (only if min doesn't
+  // even fit and `floorSize < minSize`): descend [floorSize, minSize]
+  // so a single oversized word can shrink below min instead of breaking.
+  let lo: number;
+  let hi: number;
+  if (fitsAt(minSize)) {
+    lo = minSize;
+    hi = maxSize;
+  } else if (floorSize < minSize) {
+    lo = floorSize;
+    hi = minSize;
+  } else {
+    lo = hi = floorSize;
+  }
+  for (let i = 0; i < iterations && lo < hi; i++) {
+    const mid = (lo + hi) / 2;
+    if (fitsAt(mid)) lo = mid;
+    else hi = mid;
+  }
+
+  const snapped = Math.max(floorSize, Math.floor(lo / snapStep) * snapStep);
+  if (cacheKey && cache) {
+    if (cache.size >= cacheMax) cache.clear();
+    cache.set(cacheKey, snapped);
+  }
+  return snapped;
+}
+
+/**
+ * Largest font size that fills `contentHeight` at `contentWidth` for
+ * TextNode / QuestionNode / frame-resize cascade. Fine snap, reserves a
+ * trailing caret line, small safety inset, no cache.
+ */
+export function computeFontSizeForHeight(
+  text: string,
+  contentWidth: number,
+  contentHeight: number,
+  opts: FontOpts,
+): number {
+  if (contentWidth <= 0 || contentHeight <= 0) return 16;
+  return fitFontSize(text, contentWidth, contentHeight, opts, {
+    minSize: 1,
+    maxSize: 200,
+    floorSize: 1,
+    snapStep: 0.5,
+    iterations: 15,
+    reserveTrailingLine: true,
+    widthInset: 4,
+    heightInset: 2,
+    emptyTextFillsHeight: true,
+  });
 }
