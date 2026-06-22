@@ -195,7 +195,7 @@ export const LLMSettings: React.FC = () => {
 
   return (
     <>
-      <SettingSection title="LLM Provider">
+      <SettingSection title="LLM Provider" collapsible>
         <SettingRow title="Provider">
           <div className="w-44">
             <Select
@@ -439,7 +439,7 @@ export const LLMSettings: React.FC = () => {
         )}
       </SettingSection>
 
-      <SettingSection title="Image Provider">
+      <SettingSection title="Image Provider" collapsible>
         <SettingRow title="Provider">
           <div className="w-44">
             <Select

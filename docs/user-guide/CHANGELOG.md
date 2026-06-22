@@ -4,6 +4,20 @@
 
 ---
 
+## 2026-06-22 · Settings 中的 Provider 区块可折叠
+
+**What Changed**
+
+- **Settings 里的「LLM Provider」和「Image Provider」两个区块现在可以折叠**。区块标题右侧加了一个 ghost chevron 图标，点击标题（或图标）整张卡片就会收起 / 展开，方便在配置项较多时快速浏览。
+- 默认是**展开**状态，所以打开 Settings 看到的内容和以前一样，需要折叠时再手动收起即可。
+
+**Notes**
+
+- 折叠状态目前不会持久化 —— 关掉 Settings 再打开会重新回到展开。
+- 这是 `SettingSection` 通用组件的能力（新增 `collapsible` / `defaultCollapsed` 两个可选 prop），其他 Settings 区块（如 Canvas、External Agents）保持现有行为不变。
+
+---
+
 ## 2026-06-18 · 从 chat 拖拽 AI 生成的图片到画布会直接建图片节点
 
 **What Changed**
