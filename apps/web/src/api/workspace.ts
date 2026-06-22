@@ -1,5 +1,6 @@
 import { apiFetch } from './_client';
 import { routes } from './_routes';
+import { getElectronBridge } from '../hooks/useElectron';
 
 import type {
   PickFolderResult,
@@ -48,18 +49,31 @@ export async function putWorkspacePath(
 }
 
 /**
- * (Free mode) Open a native OS folder picker dialog on the server.
+ * (Free mode) Open a native OS folder picker dialog.
+ *
+ * In the Electron desktop shell this is routed through the main
+ * process's `dialog.showOpenDialog({ properties: ['openDirectory'] })`,
+ * which uses the modern IFileOpenDialog on Windows and NSOpenPanel on
+ * macOS — the Explorer-style picker with a sidebar, breadcrumb path
+ * bar and "New folder" button. In a plain browser we fall back to the
+ * server route, which spawns a native picker on the host (with
+ * `'no-picker'` reported when the server is headless).
  *
  * Returns a discriminated result rather than throwing for the two
  * "expected non-success" cases:
  *   - `{ ok: false, reason: 'cancelled' }` — user dismissed the dialog
  *   - `{ ok: false, reason: 'no-picker' }` — server is headless; the
- *     caller should fall back to a text-input UI.
+ *     caller should fall back to a text-input UI. Never happens in
+ *     Electron mode.
  *
  * Genuine HTTP errors (managed mode, non-localhost, etc.) are thrown
  * by `apiFetch` so callers don't have to pattern-match three states.
  */
 export async function pickFolder(): Promise<PickFolderResult> {
+  const bridge = getElectronBridge();
+  if (bridge?.dialog) {
+    return bridge.dialog.pickFolder();
+  }
   return apiFetch<PickFolderResult>(routes.workspacePickFolder, {
     method: 'POST',
     fallbackMessage: 'Failed to open folder picker',

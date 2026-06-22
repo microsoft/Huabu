@@ -652,6 +652,60 @@ function registerWindowIpc(): void {
   });
 }
 
+/**
+ * Native folder-picker IPC.
+ *
+ * Routes the renderer's `pickFolder()` call to Electron's
+ * `dialog.showOpenDialog` instead of having the Fastify server spawn
+ * PowerShell + `System.Windows.Forms.FolderBrowserDialog`. Two wins:
+ *
+ *   - **Modern look on Windows**: Electron's openDirectory dialog is
+ *     backed by the IFileOpenDialog COM API (Vista+), i.e. the same
+ *     Explorer-style picker with a sidebar, breadcrumb path bar and
+ *     "New folder" button that File → Open in any modern app shows.
+ *     The PowerShell `FolderBrowserDialog` we used previously is the
+ *     legacy SHBrowseForFolder tree control — visually XP-era.
+ *   - **No PowerShell spawn per click**: faster, no shell flash, no
+ *     stdout parsing.
+ *
+ * The result shape matches `PickFolderResult` from
+ * `@sediment/shared` so the renderer can use the same branching
+ * (`ok`, `reason: 'cancelled'`) it already had for the server route.
+ * `'no-picker'` is impossible in Electron — we always have a GUI.
+ *
+ * Anchored to the focused BrowserWindow when one exists so the OS
+ * draws it as a true modal child of Huabu rather than a free-floating
+ * window the user can lose behind the app.
+ */
+function registerDialogIpc(): void {
+  ipcMain.handle(
+    'dialog:pick-folder',
+    async (
+      _event,
+      rawTitle: unknown,
+    ): Promise<
+      { ok: true; path: string } | { ok: false; reason: 'cancelled' }
+    > => {
+      const title =
+        typeof rawTitle === 'string' && rawTitle.length > 0
+          ? rawTitle
+          : undefined;
+      const parent = BrowserWindow.getFocusedWindow() ?? mainWindow;
+      const options: Electron.OpenDialogOptions = {
+        properties: ['openDirectory', 'createDirectory', 'dontAddToRecent'],
+        ...(title ? { title } : {}),
+      };
+      const result = parent
+        ? await dialog.showOpenDialog(parent, options)
+        : await dialog.showOpenDialog(options);
+      if (result.canceled || result.filePaths.length === 0) {
+        return { ok: false, reason: 'cancelled' };
+      }
+      return { ok: true, path: result.filePaths[0] };
+    },
+  );
+}
+
 // ── BrowserWindow ────────────────────────────────────────────────────
 
 let mainWindow: BrowserWindow | null = null;
@@ -871,6 +925,7 @@ app.whenReady().then(async () => {
   // a handler to talk to, even on the very first render.
   registerWorkspaceIpc();
   registerWindowIpc();
+  registerDialogIpc();
 
   // macOS Dock icon. In a packaged .app this comes from the bundle's
   // .icns automatically, but in dev (`electron .`) the Dock would show

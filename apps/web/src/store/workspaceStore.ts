@@ -360,15 +360,21 @@ export function useWorkspaceLabel(): string | null {
 }
 
 /**
- * Whether the server can open a native folder-picker dialog. This is a
- * server-level capability (GUI present) rather than a workspace
- * property — surfaced via a dedicated hook so callers that only need
- * the flag don't have to reach into `useWorkspaceStore` and accidentally
- * imply they're mutating workspace state.
+ * Whether the user-facing folder-picker button should be shown.
+ *
+ * In the Electron desktop shell we always have a GUI and route the
+ * picker through `dialog.showOpenDialog` (see
+ * `apps/web/src/api/workspace.ts`), so the answer is unconditionally
+ * `true`. In a plain browser the picker still runs on the server, so
+ * we defer to the server's `capabilities.nativePicker` capability
+ * flag (false on headless Linux hosts).
  *
  * Returns `false` while the first capability snapshot is still loading,
  * matching the conservative behaviour of the workspace setup flow.
  */
 export function useFolderPickerSupported(): boolean {
-  return useWorkspaceStore((s) => s.capabilities?.nativePicker ?? false);
+  const serverCanPick = useWorkspaceStore(
+    (s) => s.capabilities?.nativePicker ?? false,
+  );
+  return getElectronBridge()?.dialog ? true : serverCanPick;
 }
