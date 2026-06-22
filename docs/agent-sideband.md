@@ -30,12 +30,12 @@ For the sideband transport, we adopt a **CLI-first approach** — the Huabu Side
 
 **Why CLI over MCP for sideband:**
 
-| Consideration | MCP | CLI |
-|---|---|---|
-| Setup | Zero-install, JSON config | Requires script distribution |
-| Sync/Async | Sync only (blocking tool calls) | Both sync & async, streaming |
-| Flexibility | Fixed request-response | Rich interaction patterns |
-| Agent support | Widely supported | Universally supported |
+| Consideration | MCP                             | CLI                          |
+| ------------- | ------------------------------- | ---------------------------- |
+| Setup         | Zero-install, JSON config       | Requires script distribution |
+| Sync/Async    | Sync only (blocking tool calls) | Both sync & async, streaming |
+| Flexibility   | Fixed request-response          | Rich interaction patterns    |
+| Agent support | Widely supported                | Universally supported        |
 
 While MCP is excellent for simple synchronous operations, the sideband needs to support potentially asynchronous agent-to-agent communication. CLI provides the flexibility needed while remaining universally supported by agent harnesses. The distribution cost is mitigated by bundling HST with the agentlet daemon.
 
@@ -81,19 +81,20 @@ The agentlet daemon prepares the sideband environment for each spawned agent ses
 
 ### Environment Variables
 
-| Variable | Description |
-|---|---|
-| `AGENTLET_SIDEBAND_DIR` | Directory containing the HST script(s) |
-| `AGENTLET_TOKEN` | Authentication token for the Huabu server. Also serves as user identification (per-token access scoping, consistent with existing Huabu auth design). Injected by the daemon from its `--token` startup argument. |
-| `AGENTLET_SERVER` | The daemon's WebSocket URL (e.g., `ws://127.0.0.1:3001/api/acp/agent`). HST derives the HTTP base URL automatically (`ws://` → `http://`, strip path). Injected by the daemon from its `--server` startup argument. |
-| `HUABU_CANVAS_ID` | The canvas ID that this agent session is scoped to. Passed by Sediment via `sessionSpec.env` at spawn time. HST reads this automatically so commands don't need a per-call `--canvas` flag. |
-| `HUABU_SERVER` | (Optional override) If set, HST uses this HTTP base URL directly instead of deriving from `AGENTLET_SERVER`. Useful for testing or non-standard deployments. |
+| Variable                | Description                                                                                                                                                                                                         |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AGENTLET_SIDEBAND_DIR` | Directory containing the HST script(s)                                                                                                                                                                              |
+| `AGENTLET_TOKEN`        | Authentication token for the Huabu server. Also serves as user identification (per-token access scoping, consistent with existing Huabu auth design). Injected by the daemon from its `--token` startup argument.   |
+| `AGENTLET_SERVER`       | The daemon's WebSocket URL (e.g., `ws://127.0.0.1:3001/api/acp/agent`). HST derives the HTTP base URL automatically (`ws://` → `http://`, strip path). Injected by the daemon from its `--server` startup argument. |
+| `HUABU_CANVAS_ID`       | The canvas ID that this agent session is scoped to. Passed by Sediment via `sessionSpec.env` at spawn time. HST reads this automatically so commands don't need a per-call `--canvas` flag.                         |
+| `HUABU_SERVER`          | (Optional override) If set, HST uses this HTTP base URL directly instead of deriving from `AGENTLET_SERVER`. Useful for testing or non-standard deployments.                                                        |
 
 ### Script Distribution
 
 The HST source lives in the Sediment (Huabu) project. Distribution uses the agentlet protocol's `server/sendResource` mechanism: when the agentlet daemon connects, the Huabu server pushes the HST script over the existing authenticated WebSocket control channel. The daemon saves it to `${AGENTLET_SIDEBAND_DIR}` and injects that path into all spawned agent processes.
 
 This approach:
+
 - Reuses the already-authenticated WS connection (no separate HTTP endpoint needed)
 - Ensures script version matches the running server (pushed on every connect)
 - Allows future proactive updates (server can re-push after hot-reload)
@@ -146,11 +147,11 @@ node ${AGENTLET_SIDEBAND_DIR}/huabu-sideband-tool.mjs write-node --id <node-id> 
 
 **Additional options:**
 
-| Option | Description |
-|---|---|
-| `--link-to <node-id>` | Link the new/updated node → specified node |
-| `--link-from <node-id>` | Link the specified node → new/updated node |
-| `--notify` | Fire-and-forget notification to the default built-in agent for canvas positioning. Non-blocking. (Future: `--notify-to <agent-id>` for targeting a specific agent.) |
+| Option                  | Description                                                                                                                                                         |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--link-to <node-id>`   | Link the new/updated node → specified node                                                                                                                          |
+| `--link-from <node-id>` | Link the specified node → new/updated node                                                                                                                          |
+| `--notify`              | Fire-and-forget notification to the default built-in agent for canvas positioning. Non-blocking. (Future: `--notify-to <agent-id>` for targeting a specific agent.) |
 
 #### Built-in Agent Commands (semantic, LLM-mediated)
 
@@ -183,10 +184,10 @@ node ${AGENTLET_SIDEBAND_DIR}/huabu-sideband-tool.mjs ask-agent --no-save-sessio
 
 **Additional options:**
 
-| Option | Description |
-|---|---|
-| `--show-steps` | Print intermediate events (tool calls, thinking) to stdout in addition to the final result |
-| `--no-save-session` | Disable saving event log (default: saves to auto-named JSONL file) |
+| Option              | Description                                                                                |
+| ------------------- | ------------------------------------------------------------------------------------------ |
+| `--show-steps`      | Print intermediate events (tool calls, thinking) to stdout in addition to the final result |
+| `--no-save-session` | Disable saving event log (default: saves to auto-named JSONL file)                         |
 
 ### Sync/Async Behavior & Timeout Resistance
 
@@ -204,6 +205,7 @@ The `ask-agent` command uses **SSE (Server-Sent Events)** streaming — the serv
 Because the connection stays active throughout, the timeout→retry→duplicate-execution problem is eliminated without needing request-level idempotency.
 
 This means:
+
 - HST does not need `--timeout`, `poll-result`, or explicit async modes.
 - The interface stays maximally simple (single blocking call per command).
 - Intermediate events flow to HST in real-time; `--show-steps` surfaces them to stdout, `--save-session` persists them to disk.
@@ -254,33 +256,33 @@ New REST API endpoints for sideband operations, grouped by consumer.
 
 **`GET /api/canvas/:canvasId/nodes/:nodeId/content`** — Read node content (existing endpoint)
 
-| Field | Value |
-|---|---|
-| Auth | `Authorization: Bearer ${AGENTLET_TOKEN}` |
-| Response | `{ nodeId, type, content, ... }` |
-| Errors | `404` node not found, `401` invalid token |
+| Field    | Value                                     |
+| -------- | ----------------------------------------- |
+| Auth     | `Authorization: Bearer ${AGENTLET_TOKEN}` |
+| Response | `{ nodeId, type, content, ... }`          |
+| Errors   | `404` node not found, `401` invalid token |
 
 **`POST /api/canvas/:canvasId/execute`** — Create/update node + link (existing endpoint)
 
-| Field | Value |
-|---|---|
-| Auth | `Authorization: Bearer ${AGENTLET_TOKEN}` |
-| Body | `{ commands: CanvasCommand[], originator }` — HST constructs appropriate add-node/edit-content/add-edge commands |
-| Response | `{ canvasId, fromVersion, toVersion, deltas, results }` |
-| Errors | `401` invalid token, `404` canvas not found |
+| Field    | Value                                                                                                            |
+| -------- | ---------------------------------------------------------------------------------------------------------------- |
+| Auth     | `Authorization: Bearer ${AGENTLET_TOKEN}`                                                                        |
+| Body     | `{ commands: CanvasCommand[], originator }` — HST constructs appropriate add-node/edit-content/add-edge commands |
+| Response | `{ canvasId, fromVersion, toVersion, deltas, results }`                                                          |
+| Errors   | `401` invalid token, `404` canvas not found                                                                      |
 
 Note: HST translates its CLI flags (`--type`, `--id`, `--link-to`, `--link-from`, `--notify`) into the appropriate `CanvasCommand[]` array internally. The external agent never sees `CanvasCommand` directly.
 
 **`POST /api/sideband/ask-agent`** — Send prompt to built-in agent (SSE streaming)
 
-| Field | Value |
-|---|---|
-| Auth | `Authorization: Bearer ${AGENTLET_TOKEN}` |
-| Body | `{ prompt, canvasId }` |
-| Response | `Content-Type: text/event-stream` — SSE stream of typed events |
-| Events | `text_delta`, `thinking_delta`, `tool_call`, `tool_call_update`, `done`, `error` |
-| Final event | `done: { message, threadId }` |
-| Errors | `401` invalid token, `503` agent unavailable |
+| Field       | Value                                                                            |
+| ----------- | -------------------------------------------------------------------------------- |
+| Auth        | `Authorization: Bearer ${AGENTLET_TOKEN}`                                        |
+| Body        | `{ prompt, canvasId }`                                                           |
+| Response    | `Content-Type: text/event-stream` — SSE stream of typed events                   |
+| Events      | `text_delta`, `thinking_delta`, `tool_call`, `tool_call_update`, `done`, `error` |
+| Final event | `done: { message, threadId }`                                                    |
+| Errors      | `401` invalid token, `503` agent unavailable                                     |
 
 Design notes:
 

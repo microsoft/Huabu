@@ -17,6 +17,7 @@
 - HST 现在在 daemon 首次连接和挂起后重连（idle 自动 suspend / resume）时都会重新下发，缓存被清掉也能恢复。
 - 修复后 daemon 日志会出现 `[acp] sideband tools pushed to agentlet` 与 `resource_saved`。
 - 改动文件：[server.ts](external/agentlet/packages/server/src/server.ts)（agentlet 握手补上 `onConnection`/`onReconnection`）、[agentlet.ts](external/agentlet/packages/local/src/agentlet.ts)（sideband 目录默认值 + 绝对化）、[server-mount.ts](apps/server/src/modules/agent/acp/server-mount.ts)（提取 `pushSidebandTools`、连接/重连都下发、修正 HST 脚本路径层级）、[huabu-sideband-tool.mjs](apps/server/src/sideband/huabu-sideband-tool.mjs)（从 `pendingEffects.mutatedNodes` 取新建节点 ID）。
+
 ## 2026-06-22 · 画布：frame ↔ 内部节点的边走"同侧外绕"
 
 **What Changed**
