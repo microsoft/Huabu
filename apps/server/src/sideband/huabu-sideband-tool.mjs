@@ -142,7 +142,144 @@ function parseArgs(args, spec = {}) {
   return { flags, positional };
 }
 
-// ── Commands ─────────────────────────────────────────────────────────
+// ── SSE ask-agent helper ─────────────────────────────────────────────
+
+/**
+ * Call POST /api/sideband/ask-agent and consume the SSE stream.
+ * Returns { finalMessage, threadId }.
+ *
+ * @param {string} prompt - The prompt to send
+ * @param {string} canvasId - Canvas ID
+ * @param {Object} opts
+ * @param {boolean} opts.showSteps - Print intermediate events to stdout
+ * @param {boolean} opts.saveSession - Save events to JSONL file
+ * @param {string}  opts.progressPrefix - Prefix for the "working" stderr line
+ * @param {boolean} opts.exitOnError - Whether to process.exit(1) on error (default true)
+ */
+async function callAskAgent(prompt, canvasId, opts = {}) {
+  const {
+    showSteps = false,
+    saveSession = true,
+    progressPrefix = '⏳ Agent working...',
+    exitOnError = true,
+  } = opts;
+
+  const url = `${SERVER}/api/sideband/ask-agent`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${requireEnv('AGENTLET_TOKEN', TOKEN)}`,
+      'Content-Type': 'application/json',
+      Accept: 'text/event-stream',
+    },
+    body: JSON.stringify({ prompt, canvasId }),
+  });
+
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try {
+      const errBody = await res.json();
+      if (errBody.message) msg = errBody.message;
+    } catch { /* ignore parse errors */ }
+    process.stderr.write(`Error: ${msg}\n`);
+    if (exitOnError) process.exit(1);
+    return { finalMessage: '', threadId: '', error: msg };
+  }
+
+  // Consume SSE stream
+  const events = [];
+  let finalMessage = '';
+  let threadId = '';
+  let firstEventReceived = false;
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const frames = buffer.split('\n\n');
+    buffer = frames.pop();
+
+    for (const frame of frames) {
+      if (!frame.trim()) continue;
+      const lines = frame.split('\n').filter((l) => !l.startsWith(':'));
+      if (lines.length === 0) continue;
+
+      let eventType = '';
+      let eventData = '';
+      for (const line of lines) {
+        if (line.startsWith('event: ')) eventType = line.slice(7);
+        else if (line.startsWith('data: ')) eventData = line.slice(6);
+      }
+      if (!eventType || !eventData) continue;
+
+      if (!firstEventReceived) {
+        firstEventReceived = true;
+        process.stderr.write(`${progressPrefix}\n`);
+      }
+
+      let parsed;
+      try {
+        parsed = JSON.parse(eventData);
+      } catch {
+        continue;
+      }
+
+      const event = { type: eventType, data: parsed };
+      if (saveSession) events.push(event);
+
+      switch (eventType) {
+        case 'text_delta':
+          if (showSteps) process.stdout.write(parsed.content || '');
+          break;
+        case 'thinking_delta':
+          if (showSteps)
+            process.stdout.write(`[thinking] ${parsed.content || ''}`);
+          break;
+        case 'tool_call':
+          if (showSteps)
+            process.stdout.write(
+              `\n[tool] ${parsed.internalToolName || parsed.title} ...\n`,
+            );
+          break;
+        case 'tool_call_update':
+          if (showSteps)
+            process.stdout.write(`[tool result] ${(parsed.rawOutput || '').slice(0, 200)}\n`);
+          break;
+        case 'done':
+          finalMessage = parsed.message || '';
+          threadId = parsed.threadId || '';
+          break;
+        case 'error':
+          process.stderr.write(`Error: ${parsed.error || 'agent error'}\n`);
+          if (exitOnError && !finalMessage) process.exit(1);
+          break;
+      }
+    }
+  }
+
+  // Save session if requested
+  if (saveSession && events.length > 0) {
+    const sidebandDir = process.env.AGENTLET_SIDEBAND_DIR || '.';
+    const sessionsDir = path.join(sidebandDir, 'sessions');
+    await mkdir(sessionsDir, { recursive: true });
+    const filename = `${Date.now()}.jsonl`;
+    const filePath = path.join(sessionsDir, filename);
+    const content = events.map((e) => JSON.stringify(e)).join('\n') + '\n';
+    await writeFile(filePath, content, 'utf8');
+    process.stderr.write(`Session saved: ${filePath}\n`);
+  }
+
+  if (threadId) {
+    process.stderr.write(`threadId=${threadId}\n`);
+  }
+
+  return { finalMessage, threadId };
+}────
 
 async function readNode(args) {
   const { flags, positional } = parseArgs(args, {
@@ -307,11 +444,27 @@ Examples:
     });
   }
 
-  // TODO: handle --notify (fire-and-forget notification to built-in agent)
+  // Notify built-in agent for layout/positioning
+  if (notify && nodeId) {
+    const action = type ? 'created' : 'updated';
+    process.stderr.write(`action=${action} nodeId=${nodeId}\n`);
+    process.stdout.write(`${nodeId}\n`);
 
-  const action = type ? 'created' : 'updated';
-  process.stderr.write(`action=${action} nodeId=${nodeId || 'unknown'}\n`);
-  process.stdout.write(`${nodeId || 'unknown'}\n`);
+    process.stderr.write('⏳ Notifying built-in agent for layout...\n');
+    const notifyPrompt = `An external agent just ${action} a canvas node with ID "${nodeId}". Please inspect the canvas, decide where to position this node relative to existing content, and create any relevant links.`;
+    const { finalMessage } = await callAskAgent(notifyPrompt, canvasId, {
+      saveSession: true,
+      exitOnError: false,
+      progressPrefix: '⏳ Built-in agent working on layout...',
+    });
+    if (finalMessage) {
+      process.stderr.write(`✅ ${finalMessage.slice(0, 200)}\n`);
+    }
+  } else {
+    const action = type ? 'created' : 'updated';
+    process.stderr.write(`action=${action} nodeId=${nodeId || 'unknown'}\n`);
+    process.stdout.write(`${nodeId || 'unknown'}\n`);
+  }
 }
 
 async function askAgent(args) {
@@ -365,128 +518,15 @@ Examples:
   }
 
   const canvasId = requireEnv('HUABU_CANVAS_ID', CANVAS_ID);
-  const url = `${SERVER}/api/sideband/ask-agent`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${requireEnv('AGENTLET_TOKEN', TOKEN)}`,
-      'Content-Type': 'application/json',
-      Accept: 'text/event-stream',
-    },
-    body: JSON.stringify({ prompt, canvasId }),
+  const { finalMessage } = await callAskAgent(prompt, canvasId, {
+    showSteps,
+    saveSession: !flags['--no-save-session'],
   });
-
-  if (!res.ok) {
-    let msg = `HTTP ${res.status}`;
-    try {
-      const errBody = await res.json();
-      if (errBody.message) msg = errBody.message;
-    } catch { /* ignore parse errors */ }
-    process.stderr.write(`Error: ${msg}\n`);
-    process.exit(1);
-  }
-
-  // Consume SSE stream
-  const events = [];
-  let finalMessage = '';
-  let threadId = '';
-  let firstEventReceived = false;
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-
-    // Parse SSE frames (event: <type>\ndata: <json>\n\n)
-    const frames = buffer.split('\n\n');
-    buffer = frames.pop(); // Keep incomplete frame in buffer
-
-    for (const frame of frames) {
-      if (!frame.trim()) continue;
-      // Skip SSE comments (lines starting with :)
-      const lines = frame.split('\n').filter((l) => !l.startsWith(':'));
-      if (lines.length === 0) continue;
-
-      let eventType = '';
-      let eventData = '';
-      for (const line of lines) {
-        if (line.startsWith('event: ')) eventType = line.slice(7);
-        else if (line.startsWith('data: ')) eventData = line.slice(6);
-      }
-      if (!eventType || !eventData) continue;
-
-      // Signal progress on first real event
-      if (!firstEventReceived) {
-        firstEventReceived = true;
-        process.stderr.write('⏳ Agent working...\n');
-      }
-
-      let parsed;
-      try {
-        parsed = JSON.parse(eventData);
-      } catch {
-        continue;
-      }
-
-      const event = { type: eventType, data: parsed };
-      if (saveSession) events.push(event);
-
-      switch (eventType) {
-        case 'text_delta':
-          if (showSteps) process.stdout.write(parsed.content || '');
-          break;
-        case 'thinking_delta':
-          if (showSteps)
-            process.stdout.write(`[thinking] ${parsed.content || ''}`);
-          break;
-        case 'tool_call':
-          if (showSteps)
-            process.stdout.write(
-              `\n[tool] ${parsed.internalToolName || parsed.title} ...\n`,
-            );
-          break;
-        case 'tool_call_update':
-          if (showSteps)
-            process.stdout.write(`[tool result] ${(parsed.rawOutput || '').slice(0, 200)}\n`);
-          break;
-        case 'done':
-          finalMessage = parsed.message || '';
-          threadId = parsed.threadId || '';
-          break;
-        case 'error':
-          process.stderr.write(`Error: ${parsed.error || 'agent error'}\n`);
-          if (!finalMessage) process.exit(1);
-          break;
-      }
-    }
-  }
-
-  // Save session if requested
-  if (saveSession && events.length > 0) {
-    const sidebandDir = process.env.AGENTLET_SIDEBAND_DIR || '.';
-    const sessionsDir = path.join(sidebandDir, 'sessions');
-    await mkdir(sessionsDir, { recursive: true });
-    const filename = `${Date.now()}.jsonl`;
-    const filePath = path.join(sessionsDir, filename);
-    const content = events.map((e) => JSON.stringify(e)).join('\n') + '\n';
-    await writeFile(filePath, content, 'utf8');
-    process.stderr.write(`Session saved: ${filePath}\n`);
-  }
-
-  // Print thread ID to stderr for future --resume support
-  if (threadId) {
-    process.stderr.write(`threadId=${threadId}\n`);
-  }
 
   // Final result to stdout (if --show-steps was used, text_delta already printed it)
   if (!showSteps) {
     process.stdout.write(`${finalMessage}\n`);
   } else {
-    // Ensure trailing newline after streamed output
     process.stdout.write('\n');
   }
 }

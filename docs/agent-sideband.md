@@ -240,7 +240,7 @@ The standalone CLI script (`huabu-sideband-tool.mjs`) running in the external ag
 - [x] `read-node` implementation: call server API, write content to `<output-dir>/<node-id>.<ext>`, print file path to stdout, metadata to stderr
 - [x] `write-node` implementation: read content file, call server API (create or update), print node id to stdout, action metadata to stderr
 - [x] `write-node --link-to` / `--link-from`: include link creation in the write request
-- [ ] `write-node --notify`: include notification flag in the write request (pending server-side support)
+- [x] `write-node --notify`: after successful write, calls `ask-agent` internally to trigger built-in agent layout
 - [x] `ask-agent` implementation: SSE streaming consumer with `--show-steps` and `--no-save-session` flags, progress on stderr, session JSONL persistence
 - [x] Auth: read `${AGENTLET_TOKEN}` from env, attach to all HTTP requests
 - [x] Error handling: map HTTP errors to stderr messages + non-zero exit codes
@@ -294,7 +294,7 @@ Design notes:
 
 - [x] Add Bearer token auth as an alternative to Basic Auth (Fastify `preHandler` hook that accepts either) — enables HST to call existing canvas endpoints
 - [x] Implement `POST /api/sideband/ask-agent` — SSE streaming endpoint that pipes `runAgent()` events to the client
-- [ ] Implement notification dispatch: after execute with `notify` flag, fire-and-forget internal event to built-in agent
+- [x] Notification dispatch: `--notify` reuses `ask-agent` internally — no separate endpoint needed
 - [x] Push HST script to agentlet daemon via `server/sendResource` on connect (replaces `GET /api/sideband/tools`)
 - [ ] Error responses: ensure existing endpoints return consistent `{ message }` format for HST consumption
 
@@ -328,6 +328,6 @@ The default built-in agent that handles `ask-agent` requests and `--notify` even
 
 - [x] `ask-agent` handler: receive natural language prompt, execute with `'operate'` scope (TODO: scope TBD), stream events back via SSE, include `threadId` in `done` event
 - [x] `--save-session` support: HST-side only (saves SSE events to JSONL); no server changes needed
-- [ ] Notification handler: receive write-node notification, decide canvas positioning, create layout/links
+- [x] Notification handler: `--notify` calls `ask-agent` with a layout prompt — built-in agent uses canvas tools to position and link
 - [ ] Canvas context access: read nodes, edges, spatial info, interaction history for reasoning
 - [ ] System prompt: minimal v1 prompt (TODO: design offline with maintainers)
