@@ -1,5 +1,12 @@
 /// <reference types="vite/client" />
 
+/**
+ * Inlined at build time by Vite (`define`) from the desktop package's
+ * version field. See `vite.config.ts`. Available to all client code as
+ * a global string literal — no runtime fetch required.
+ */
+declare const __APP_VERSION__: string;
+
 declare module 'simplify-js' {
   interface SimplifyPoint {
     x: number;

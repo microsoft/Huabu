@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
 
@@ -62,6 +63,15 @@ export default defineConfig(({ mode }) => {
     console.log('[sediment] Vite dev server: Basic Auth enabled');
   }
 
+  // The desktop app's `package.json` is the single source of truth for
+  // the user-facing product version (web's own version is `0.0.0`).
+  // Inline it at build time so the Settings panel can render `v<x.y.z>`
+  // without a runtime fetch.
+  const desktopPkg = JSON.parse(
+    readFileSync(path.resolve(here, '../desktop/package.json'), 'utf8'),
+  ) as { version?: string };
+  const appVersion = desktopPkg.version ?? '0.0.0';
+
   return {
     plugins: [
       react(),
@@ -69,6 +79,9 @@ export default defineConfig(({ mode }) => {
         ? [basicAuthPlugin(authUser as string, authPass as string)]
         : []),
     ],
+    define: {
+      __APP_VERSION__: JSON.stringify(appVersion),
+    },
     resolve: {
       alias: {
         '@': fileURLToPath(new URL('./src', import.meta.url)),

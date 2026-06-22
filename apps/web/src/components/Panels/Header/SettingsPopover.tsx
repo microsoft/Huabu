@@ -114,7 +114,13 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
             <CanvasSettings />
           </div>
 
-          <div className="mt-4 flex shrink-0 justify-end">
+          <div className="mt-4 flex shrink-0 items-center justify-between">
+            <span
+              className="text-fg-subtle font-mono text-[11px] select-text"
+              title="App version"
+            >
+              v{__APP_VERSION__}
+            </span>
             <Button
               variant="outline"
               tone="neutral"

@@ -249,7 +249,7 @@ export const LLMSettings: React.FC = () => {
             <SettingRow title="Endpoint">
               <input
                 type="text"
-                placeholder="https://…cognitiveservices.azure.com"
+                placeholder="https://…cognitiveservices.azure.com/openai/v1"
                 value={azureEndpoint}
                 onChange={(e) => {
                   const v = e.target.value;

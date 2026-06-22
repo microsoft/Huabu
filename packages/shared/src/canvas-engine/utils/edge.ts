@@ -124,6 +124,78 @@ function isHorizontalHandle(handle: string): boolean {
   return side === 'left' || side === 'right';
 }
 
+/**
+ * Handle side prefix shared by `${side}-source` / `${side}-target` ids.
+ * Distinct from `RouteDir` (which encodes movement direction); a
+ * `HandleSide` is the spatial side a handle sits on.
+ */
+type HandleSide = 'top' | 'right' | 'bottom' | 'left';
+
+/**
+ * Slack (px) granted around containment checks. A child positioned
+ * flush against (or barely past) its parent's edge — e.g. during a
+ * drag, or because of half-pixel rounding — should still register as
+ * “inside” so the inside-case routing kicks in.
+ */
+const INSIDE_SLACK_PX = 4;
+
+/** True when `inner` is fully contained by `outer` (with light slack). */
+function isInsideRect(inner: Rect, outer: Rect): boolean {
+  return (
+    inner.x >= outer.x - INSIDE_SLACK_PX &&
+    inner.y >= outer.y - INSIDE_SLACK_PX &&
+    inner.x + inner.w <= outer.x + outer.w + INSIDE_SLACK_PX &&
+    inner.y + inner.h <= outer.y + outer.h + INSIDE_SLACK_PX
+  );
+}
+
+/**
+ * Which side of `outer` corresponds to the position of `inner` inside it.
+ *
+ * Uses a **proportional** (normalised) offset rather than absolute edge
+ * distance: dividing the container into 4 triangular quadrants split by
+ * its two diagonals. The inner node's center falls into exactly one
+ * quadrant — top / right / bottom / left — and that picks the side.
+ *
+ * Why not "nearest absolute edge"? Frames are typically much wider than
+ * tall, so `height/2` is almost always smaller than `width/2`; an
+ * absolute-distance scorer would then pick top or bottom for *any*
+ * child that isn't hugging a vertical side, and left/right would
+ * essentially never fire. The proportional comparison fixes that: a
+ * child in the left half of a wide frame proportionally favours the
+ * left side, even though the top edge is fewer pixels away.
+ *
+ * Ties (child exactly on a diagonal, or precisely centred) break to the
+ * vertical axis first (top / bottom), matching the `Math.abs(x) > y`
+ * branch order — picked arbitrarily, no visual difference at the tie
+ * point.
+ */
+function closestContainerSide(inner: Rect, outer: Rect): HandleSide {
+  const cx = inner.x + inner.w / 2;
+  const cy = inner.y + inner.h / 2;
+  const fcx = outer.x + outer.w / 2;
+  const fcy = outer.y + outer.h / 2;
+  // Half-extents; guard against zero-sized containers so the division
+  // can't produce NaN / Infinity (caller would have bailed already, but
+  // defensively keep the function pure-numeric).
+  const halfW = outer.w / 2 || 1;
+  const halfH = outer.h / 2 || 1;
+  const offsetX = (cx - fcx) / halfW;
+  const offsetY = (cy - fcy) / halfH;
+  if (Math.abs(offsetX) > Math.abs(offsetY)) {
+    return offsetX > 0 ? 'right' : 'left';
+  }
+  return offsetY > 0 ? 'bottom' : 'top';
+}
+
+/** Build the same-side `HandlePair` (e.g. `top-source` ↔ `top-target`). */
+function sameSidePair(side: HandleSide): HandlePair {
+  return {
+    sourceHandle: `${side}-source`,
+    targetHandle: `${side}-target`,
+  };
+}
+
 type Pt = { x: number; y: number };
 
 /**
@@ -240,11 +312,31 @@ const CANDIDATES: HandlePair[] = [
  * Returns the best source/target handle pair for an edge between two nodes
  * based on their relative positions on the canvas.
  *
- * Picks the handles that produce the most direct, least-crossing path:
+ * Two regimes:
+ *
+ * **Outside (the two rects are side-by-side, possibly diagonal):** scores
+ * 12 candidate pairs (4 direct + 8 L-shaped) on length, obstacle hits,
+ * axis miss, and facing. Picks the handles that produce the most direct,
+ * least-crossing path:
  * - Target primarily to the right → right-source / left-target
  * - Target primarily to the left  → left-source  / right-target
  * - Target primarily below        → bottom-source / top-target
  * - Target primarily above        → top-source   / bottom-target
+ *
+ * **Inside (one rect fully contains the other — typically a frame and a
+ * descendant):** the generic scoring would route a chord through the
+ * container interior, which looks broken. Instead we short-circuit:
+ * divide the container into 4 triangular wedges along its diagonals,
+ * see which wedge the inner node's centre lands in (top / right /
+ * bottom / left), and use the *same* side on both handles
+ * (`left-source` ↔ `left-target`, etc.) so the rendered curve exits
+ * the container on that side, arcs around the outside, and re-enters
+ * the inner node on the matching side — a clean external loop. The
+ * wedge test is a proportional comparison (`|offsetX| > |offsetY|`),
+ * not nearest absolute edge, so wide frames still produce left/right
+ * connections when the child sits in the left/right half. Detected by
+ * geometry so a child dragged past the frame edge falls back to the
+ * outside regime.
  *
  * When `obstacles` are supplied, each candidate is scored by:
  *   score = pathLength
@@ -298,6 +390,39 @@ export function getSmartHandles(
 
   const srcRect: Rect = { x: sx, y: sy, w: sw, h: sh };
   const tgtRect: Rect = { x: tx, y: ty, w: tw, h: th };
+
+  // ─── Inside-container case (frame ↔ contained node) ─────────────────────────────
+  //
+  // The generic candidate scoring below assumes the two rects sit
+  // side-by-side and picks the handle pair that produces the shortest
+  // unobstructed line between them. That fails when one rect (typically
+  // a frame) fully contains the other: every “direct” candidate has the
+  // two handles pointing at each other across an interior gap, so the
+  // resulting edge cuts diagonally through the container, which looks
+  // broken.
+  //
+  // Visual fix: split the container into 4 triangular wedges along its
+  // diagonals, see which wedge the inner node's centre lands in, and
+  // use the *same* side on both endpoints (`left-source` ↔
+  // `left-target`, etc.). React Flow leaves each handle along its
+  // outward normal, so the rendered curve exits the container on that
+  // side, arcs around the outside, and re-enters the inner node on the
+  // matching side — a clean external loop instead of an interior chord.
+  // The wedge test is proportional (`|offsetX| > |offsetY|`) rather
+  // than nearest absolute edge, otherwise wide frames would always pick
+  // top / bottom (height is the smaller dimension) and left / right
+  // would essentially never fire.
+  //
+  // We detect containment by geometry (not `parentId`) so the rule
+  // tracks what the user actually sees: a child positioned past the
+  // frame edge during a drag falls back to the regular outside
+  // routing, which is what you'd want visually anyway.
+  if (isInsideRect(tgtRect, srcRect)) {
+    return sameSidePair(closestContainerSide(tgtRect, srcRect));
+  }
+  if (isInsideRect(srcRect, tgtRect)) {
+    return sameSidePair(closestContainerSide(srcRect, tgtRect));
+  }
 
   const candidates = CANDIDATES;
   const skipSource = sourceNode.id;

@@ -156,6 +156,33 @@ function writeViewportToSession(
   }
 }
 
+// ─── MiniMap-visibility localStorage ──────────────────────────────────────
+//
+// Whether the canvas MiniMap overlay is shown is a global UI preference
+// (not per-canvas, not per-tab), so it lives in `localStorage` rather
+// than the per-tab `sessionStorage` used for viewport above. Defaults to
+// off so first-time users get the cleaner canvas; once toggled in
+// Settings the choice survives refreshes / restarts.
+
+const MINIMAP_STORAGE_KEY = 'sediment.minimapEnabled';
+
+function readMinimapEnabledFromStorage(): boolean {
+  try {
+    return localStorage.getItem(MINIMAP_STORAGE_KEY) === 'true';
+  } catch {
+    // Private mode / disabled storage — treat as off.
+    return false;
+  }
+}
+
+function writeMinimapEnabledToStorage(value: boolean): void {
+  try {
+    localStorage.setItem(MINIMAP_STORAGE_KEY, String(value));
+  } catch {
+    // Ignore quota / private-mode errors; in-memory state still toggles.
+  }
+}
+
 // ─── Version-conflict toast singleton ─────────────────────────────────
 //
 // `CANVAS_VERSION_CONFLICT` puts the store into a sticky `versionConflict`
@@ -540,6 +567,10 @@ type RFState = {
   /** Auto-layout: whether new nodes are automatically placed. */
   autoLayoutEnabled: boolean;
   toggleAutoLayout: () => void;
+
+  /** MiniMap: whether the React Flow MiniMap overlay is visible. */
+  minimapEnabled: boolean;
+  toggleMinimap: () => void;
 
   moveNodeIntoFrame: (
     nodeId: string,
@@ -2573,6 +2604,13 @@ const useCanvasStore = create<RFState>()(
     autoLayoutEnabled: true,
     toggleAutoLayout: () => {
       set({ autoLayoutEnabled: !get().autoLayoutEnabled });
+    },
+
+    minimapEnabled: readMinimapEnabledFromStorage(),
+    toggleMinimap: () => {
+      const next = !get().minimapEnabled;
+      writeMinimapEnabledToStorage(next);
+      set({ minimapEnabled: next });
     },
 
     moveNodeIntoFrame: (nodeId, frameId, reorderTarget) => {
