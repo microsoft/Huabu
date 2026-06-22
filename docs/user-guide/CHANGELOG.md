@@ -2,6 +2,24 @@
 
 每次重要功能变更都会记录在此文件中，按时间倒序排列。
 
+## 2026-06-22 · 画布：可选的 MiniMap 缩略图
+
+**What Changed**
+
+画布右下角现在可以开 MiniMap（缩略图），跟着画布内容实时更新。**默认关闭**——去 Settings → Canvas 里打开 "Show MiniMap" 开关即可启用。
+
+打开后支持两种交互：
+
+- **拖拽缩略图** 直接平移主画布视口；
+- **在缩略图上滚轮** 直接缩放主画布。
+
+视觉上沿用 xyflow 自带的默认配色（亮/暗模式自动适配），只在外面加了一圈 `border-edge-default` 描边 + 圆角 + 微弱阴影，跟其它浮层组件保持一致。
+
+**Notes**
+
+- 偏好持久化在 `localStorage`（key: `sediment.minimapEnabled`），是**全局**设置，所有画布共享，刷新 / 重启后保持。Private mode / 配额报错会静默 fallback 到 in-memory（仍可在当前会话切换，只是不落盘）。
+- 改动文件：[Canvas.tsx](apps/web/src/components/Panels/Canvas/Canvas.tsx)（按 store 状态条件渲染 MiniMap）、[canvasStore.ts](apps/web/src/store/canvasStore.ts)（新增 `minimapEnabled` / `toggleMinimap` + localStorage read/write helper）、[CanvasSettings.tsx](apps/web/src/components/Panels/Header/CanvasSettings.tsx)（新增 Toggle 行）。
+
 ## 2026-06-22 · Settings 面板：底部新增当前版本号
 
 **What Changed**
