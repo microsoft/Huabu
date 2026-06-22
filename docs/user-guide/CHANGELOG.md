@@ -2,6 +2,30 @@
 
 每次重要功能变更都会记录在此文件中，按时间倒序排列。
 
+## 2026-06-22 · 画布：frame ↔ 内部节点的边走"同侧外绕"
+
+**What Changed**
+
+修复 frame 节点和它**内部**的某个节点直接连边时，edge 角度奇怪的问题。
+
+原先的智能 handle 选择（[`getSmartHandles`](packages/shared/src/canvas-engine/utils/edge.ts)）只考虑了两个矩形**并排（外部）**的情形，会从 12 个候选 handle 对里挑最短、最少穿障的一对。这套规则套到"一个 rect 完全在另一个里"的容器场景时，每条直线候选都从容器内部斜着穿过去，最后画出来的曲线就是一条丑陋的内部斜线。
+
+现在在打分循环之前新增一段**几何包含检测**：
+
+- 若 target 完全在 source 里 → source 是容器（通常是 frame），target 是内部节点
+- 若 source 完全在 target 里 → 反过来
+
+任一命中后，沿容器对角线把它划成 4 个三角形楔形（上 / 下 / 左 / 右），看内部节点中心落在哪个楔里——然后两端都用同侧 handle（`top-source ↔ top-target` / `left-source ↔ left-target` 等等）。React Flow 的 bezier / smooth-step 路径会沿每个 handle 的外法线方向离开，所以渲染出来就是一条**从容器同侧出去，沿外缘绕回到内部节点同侧**的干净外环，符合直觉。
+
+楔形判断用的是**比例**（`|offsetX| > |offsetY|`），不是绝对像素距离：frame 通常宽 > 高，如果按"哪条边像素更近"算，几乎永远是上 / 下赢，左 / 右死活出不来；按比例分则左半边的子节点真的会走左侧。
+
+**Notes**
+
+- 用**几何**而不是 `parentId` 判断"是否在内部"：拖动过程中如果子节点暂时超出 frame 边界（甚至超过 4 px 容差），会自动 fallback 到原有的外部走法——视觉上"它现在不在里面了"，应该按外部走，行为反而对。
+- 同样规则对**嵌套**容器也成立：outer frame → leaf 直接连边时，leaf 在 outer 的绝对 rect 内 → 同侧。
+- 4 px `INSIDE_SLACK_PX` 容差用来吞掉拖拽中的半像素抖动和子节点贴边的常见情况，确保贴边布局也能命中。
+- 改动文件：[edge.ts](packages/shared/src/canvas-engine/utils/edge.ts)（新增 `isInsideRect` / `closestContainerSide` / `sameSidePair` helper + `getSmartHandles` 短路分支）。
+
 ## 2026-06-22 · 画布：可选的 MiniMap 缩略图
 
 **What Changed**
