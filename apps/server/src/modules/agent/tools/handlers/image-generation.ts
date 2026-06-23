@@ -26,6 +26,14 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { createId } from '@sediment/shared';
+// FormData must come from the same realm as the fetch implementation used
+// at runtime. setup-proxy.ts swaps globalThis.fetch for undici's when a
+// proxy is configured, and undici's `instanceof FormData` check is class-
+// identity based — globalThis.FormData (Node's bundled copy) silently fails
+// the check and undici falls back to String(body) + text/plain.
+// (Blob is not exported from undici; the global one is structurally OK as
+// a FormData entry.)
+import { FormData } from 'undici';
 
 import { getCanvasStore } from '../../../storage/index.js';
 import { getAzureImageConfig } from '../../llm.js';
