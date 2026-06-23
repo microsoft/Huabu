@@ -18,7 +18,7 @@ import { useChatStore } from '@/store/chatStore';
 
 import { snapshotAndExtractChanges } from './useCanvasChanges';
 
-import type { AssistantSegment, ResourceLabel } from '../store/chatTypes';
+import type { AssistantSegment } from '../store/chatTypes';
 import type {
   AgentMode,
   AgentStreamEvent,
@@ -83,27 +83,6 @@ export function extractCanvasChangesFromCommands(commands: CanvasCommand[]) {
   // Delegate to snapshotAndExtractChanges which reads current canvas state
   // NOTE: This must be called BEFORE commands are executed.
   return snapshotAndExtractChanges(commands);
-}
-
-/** Extract ResourceLabel entries from a canvas_commands batch. */
-export function extractResourcesFromCommands(
-  commands: CanvasCommand[],
-): ResourceLabel[] {
-  const resources: ResourceLabel[] = [];
-  for (const cmd of commands) {
-    if (cmd.type === 'CREATE_NODES') {
-      for (const node of cmd.nodes) {
-        const label = (node.data as Record<string, unknown> | undefined)?.label;
-        resources.push({
-          type: node.nodeType === 'frame' ? 'frame' : 'node',
-          nodeType: node.nodeType,
-          label: (label as string) ?? 'untitled',
-          id: node.id as string,
-        });
-      }
-    }
-  }
-  return resources;
 }
 
 // ==================== Constants ====================
@@ -407,8 +386,6 @@ interface StreamEventContext {
    */
   threadId: string;
   assistantId: string;
-  /** Called after canvas_commands are applied. */
-  onCanvasCommands?: (commands: CanvasCommand[]) => void;
   /**
    * ID of the pending PreparedPromptCard message inserted by
    * `startStream` for external-agent turns. When the server emits its
@@ -715,7 +692,6 @@ function applyInternalToolResult(
           },
         );
       }
-      ctx.onCanvasCommands?.(result.commands);
     }
   }
 }
@@ -959,8 +935,8 @@ export interface UseAgentStreamReturn {
 }
 
 /**
- * Hook that manages agent streaming, including starting/stopping streams,
- * processing SSE events, and tracking resources.
+ * Hook that manages agent streaming, including starting/stopping streams
+ * and processing SSE events.
  */
 export function useAgentStream(): UseAgentStreamReturn {
   const threadId = useChatStore((state) => state.threadId);
@@ -1079,10 +1055,6 @@ export function useAgentStream(): UseAgentStreamReturn {
 
       setThreadLoading(threadId, true);
 
-      // Operate: track resources produced by this run. Local to the
-      // closure so a concurrent run on another thread can't clobber it.
-      const resources: ResourceLabel[] = [];
-
       const assistantId = createId('message');
 
       // Guard: ensure only one of onError / catch adds an error status
@@ -1181,14 +1153,6 @@ export function useAgentStream(): UseAgentStreamReturn {
                 threadId,
                 assistantId,
                 preparedPromptId,
-                onCanvasCommands: (commands) => {
-                  if (agentMode === 'operate') {
-                    const newResources = extractResourcesFromCommands(commands);
-                    if (newResources.length > 0) {
-                      resources.push(...newResources);
-                    }
-                  }
-                },
               });
             },
             onError: (err) => {
@@ -1230,13 +1194,6 @@ export function useAgentStream(): UseAgentStreamReturn {
               }
               setThreadLoading(threadId, false);
               releaseAbort();
-              if (agentMode === 'operate' && resources.length > 0) {
-                updateMessage(threadId, assistantId, (m) =>
-                  m.role === 'assistant'
-                    ? { ...m, resources: [...resources] }
-                    : m,
-                );
-              }
             },
           },
           {
@@ -1299,7 +1256,6 @@ export function useAgentStream(): UseAgentStreamReturn {
       addMessage,
       setLastAction,
       threadId,
-      updateMessage,
       getAgentChatContext,
       canvasId,
       setThreadLoading,
