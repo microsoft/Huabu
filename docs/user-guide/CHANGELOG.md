@@ -2,6 +2,24 @@
 
 每次重要功能变更都会记录在此文件中，按时间倒序排列。
 
+## 2026-06-23 · 外部 Agent：prompt 拆分为 system / user 两段，HST 说明只下发一次
+
+**What Changed**
+
+在确定性 prompt 编排的基础上，按 prompt engineering 的实践把下发文本拆成两段独立模板：
+
+1. **`system_prompt.md`（一次性 system preamble）**：包含角色设定（"你是与用户共享 Huabu 画布工作区的助手……"）+ `## Canvas Tools (Sideband)` 工具说明。只在每个新建会话的**第一轮**拼到用户消息前面下发一次。
+2. **`user_prompt.md`（每轮 user prompt）**：`## Request`（用户原始消息）+ 可选的 `## Selected Nodes` 表格。每一轮都下发。
+
+第一轮 = `system_prompt.md` + `user_prompt.md` 拼成一条 `session/prompt`（ACP 的 `session/prompt` 必然触发一次模型回合，所以把 system 段搭车在首条用户消息上，避免多浪费一个回合）；之后每轮只下发 `user_prompt.md`。
+
+**Notes**
+
+- HST 的可用性与 `canvasId` **解耦**：HST 脚本对每个 agentlet-backed 外部 agent 都会无条件下发（见 `server-mount.ts` 的 `pushSidebandTools`），所以工具说明（system 段）总会下发，不再用 `canvasId` 去 gate。`## Selected Nodes` 表格仍然只在有选中节点时出现（有选中必然在画布上）。
+- 新增会话实体字段 `AcpSessionEntry.systemPreambleSent`：新建会话（`session/new`）初始为 `false`，恢复会话（`session/load`，转录已含 preamble）初始为 `true`。在首轮 `session/prompt` **成功之后**才置 `true`；失败的回合或 slash command 短路（逐字下发、不含 preamble）都不会消费该标志，下一轮真实消息会重发。
+- `prepareExternalAgentPrompt` 新增入参 `includeSystem`、返回值 `includedSystem`，由 service 层基于 `systemPreambleSent` 驱动。
+- 改动文件：[preprocessor.ts](apps/server/src/modules/agent/acp/preprocessor.ts)、[system_prompt.md](apps/server/src/prompt/external-agent/system_prompt.md)（新增）、[user_prompt.md](apps/server/src/prompt/external-agent/user_prompt.md)（新增，替换原 `prompt.md`）、[service.ts](apps/server/src/modules/agent/acp/service.ts)、[session-registry.ts](apps/server/src/modules/agent/acp/session-registry.ts)。
+
 ## 2026-06-23 · 外部 Agent：上下文编排改为确定性构建（去掉预处理 LLM）
 
 **What Changed**

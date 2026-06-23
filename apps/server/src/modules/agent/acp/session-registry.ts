@@ -96,6 +96,27 @@ export interface AcpSessionEntry {
    */
   persistedToDisk: boolean;
   /**
+   * Whether the deterministic system preamble (persona + canvas-tool
+   * docs, rendered from `external-agent/system_prompt.md`) has already
+   * been delivered to the agent for this session.
+   *
+   * The preamble is prepended to the FIRST user `session/prompt` of a
+   * freshly-created session rather than sent as a standalone turn (ACP
+   * `session/prompt` always elicits a model turn, so a separate send
+   * would waste one). It is therefore sent exactly once per blank
+   * session and read at prompt-build time to decide whether to include
+   * it.
+   *
+   * False for freshly-created (`session/new`) sessions — they start
+   * with no context. True from the start when resuming (`session/load`)
+   * an existing session, whose restored transcript already contains the
+   * preamble. Flipped to true in the post-success `.then` of the first
+   * prompt that actually carried it (so a failed first turn, or a
+   * slash-command short-circuit that forwards verbatim, re-sends it on
+   * the next real turn).
+   */
+  systemPreambleSent: boolean;
+  /**
    * Latest snapshot of slash commands the agent advertised via
    * `session/update.available_commands_update`. Initialised to `[]`
    * because the push is best-effort: agents that never send the

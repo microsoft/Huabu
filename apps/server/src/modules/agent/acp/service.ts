@@ -655,6 +655,14 @@ async function ensureAcpSessionInner(
     // unused thread never leaves a stale sessionId for the next
     // server lifetime to choke on.
     persistedToDisk: !!persisted?.sessionId,
+    // Resume-from-disk (`persisted.sessionId` set) means the agent's
+    // transcript is restored via `session/load`, so the one-shot system
+    // preamble it already received is back in context — mark it sent.
+    // A fresh `session/new` starts blank, so the preamble must ride
+    // along with this thread's first user prompt (see
+    // `AcpSessionEntry.systemPreambleSent` and the preprocessor's
+    // `includeSystem`).
+    systemPreambleSent: !!persisted?.sessionId,
     availableCommands: [],
     commandsUpdatedAt: 0,
     availableModes: [],
@@ -1121,16 +1129,22 @@ export async function* runAcpAgent(
   let preparedPrompt: ExternalAgentPrompt | null = null;
   let preparedError: string | undefined;
   let promptPayload = rawText;
+  // Whether this turn's payload actually carried the one-shot system
+  // preamble. Drives the post-success flip of `entry.systemPreambleSent`
+  // below — so a failed turn (or a slash-command short-circuit, which
+  // never includes it) re-sends the preamble on the next real turn.
+  let includedSystem = false;
   try {
     const result = prepareExternalAgentPrompt({
       rawText,
       agentAlias: binding.alias,
       canvasContext,
-      canvasId,
+      includeSystem: !entry.systemPreambleSent,
       logger,
     });
     preparedPrompt = result.prompt;
     promptPayload = result.serialized;
+    includedSystem = result.includedSystem;
   } catch (err) {
     preparedError = err instanceof Error ? err.message : String(err);
     logger.warn(
@@ -1353,6 +1367,11 @@ export async function* runAcpAgent(
       // across process lifetimes). Lock the sessionId into the disk
       // record so a future server restart can `session/load` it.
       promoteEntryToPersisted(entry, logger);
+      // Mark the one-shot system preamble delivered, but only if this
+      // turn actually carried it — a failed turn or slash-command
+      // short-circuit leaves the flag untouched so the next real turn
+      // re-sends it.
+      if (includedSystem) entry.systemPreambleSent = true;
     })
     .catch((err: unknown) => {
       promptError = err;

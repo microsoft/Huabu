@@ -2,8 +2,9 @@
  * Tests for the deterministic preprocessor.
  *
  * Lock the on-the-wire shape of `serializePrompt` (rendered from
- * `prompt/external-agent/prompt.md`) and the slash-command
- * short-circuit / node-flattening behaviour of
+ * `prompt/external-agent/user_prompt.md`, with the one-shot
+ * `system_prompt.md` preamble prepended on the first turn) and the
+ * slash-command short-circuit / node-flattening behaviour of
  * `prepareExternalAgentPrompt`, so the format the external agent sees
  * can't regress silently.
  */
@@ -24,7 +25,7 @@ const logger = {
 } as unknown as FastifyBaseLogger;
 
 describe('serializePrompt', () => {
-  it('emits task-only output when there are no selected nodes', () => {
+  it('emits the verbatim task and no Selected Nodes section when nothing is selected', () => {
     const prompt: ExternalAgentPrompt = {
       task: 'Explain the difference between async iterators and generators.',
       selectedNodes: [],
@@ -32,9 +33,10 @@ describe('serializePrompt', () => {
 
     const out = serializePrompt(prompt);
 
-    expect(out).toBe(
+    expect(out).toContain(
       'Explain the difference between async iterators and generators.',
     );
+    expect(out).not.toContain('## Selected Nodes');
   });
 
   it('renders a Selected Nodes table when nodes are present', () => {
@@ -56,28 +58,13 @@ describe('serializePrompt', () => {
     expect(out).toContain('| `node-b` | image | — |');
   });
 
-  it('omits the sideband section unless sidebandEnabled is set', () => {
+  it('mentions read-node in the Selected Nodes intro', () => {
     const prompt: ExternalAgentPrompt = {
       task: 'task',
       selectedNodes: [{ nodeId: 'n1', type: 'note' }],
     };
 
-    expect(serializePrompt(prompt)).not.toContain('## Canvas Tools (Sideband)');
-    expect(serializePrompt(prompt, { sidebandEnabled: true })).toContain(
-      '## Canvas Tools (Sideband)',
-    );
-  });
-
-  it('mentions read-node in the intro only when sideband is enabled', () => {
-    const prompt: ExternalAgentPrompt = {
-      task: 'task',
-      selectedNodes: [{ nodeId: 'n1', type: 'note' }],
-    };
-
-    expect(serializePrompt(prompt, { sidebandEnabled: true })).toContain(
-      'read-node <node-id>',
-    );
-    expect(serializePrompt(prompt)).not.toContain('read-node <node-id>');
+    expect(serializePrompt(prompt)).toContain('read-node <node-id>');
   });
 
   it('escapes pipe characters in labels so the table cannot break', () => {
@@ -88,14 +75,30 @@ describe('serializePrompt', () => {
 
     expect(serializePrompt(prompt)).toContain('| `n1` | note | a \\| b |');
   });
+
+  it('omits the system preamble by default and prepends it when includeSystem is set', () => {
+    const prompt: ExternalAgentPrompt = { task: 'task', selectedNodes: [] };
+
+    const withoutSystem = serializePrompt(prompt);
+    expect(withoutSystem).not.toContain('## Canvas Tools (Sideband)');
+    expect(withoutSystem).not.toContain('Huabu');
+
+    const withSystem = serializePrompt(prompt, { includeSystem: true });
+    expect(withSystem).toContain('## Canvas Tools (Sideband)');
+    expect(withSystem).toContain('Huabu');
+    // The preamble precedes the per-turn request body.
+    expect(withSystem.indexOf('## Canvas Tools (Sideband)')).toBeLessThan(
+      withSystem.indexOf('## Request'),
+    );
+  });
 });
 
 describe('prepareExternalAgentPrompt', () => {
-  it('forwards slash commands verbatim without extra sections', () => {
+  it('forwards slash commands verbatim and never includes the system preamble', () => {
     const result = prepareExternalAgentPrompt({
       rawText: '/compact please',
       agentAlias: 'claude',
-      canvasId: 'canvas-1',
+      includeSystem: true,
       logger,
     });
 
@@ -104,6 +107,9 @@ describe('prepareExternalAgentPrompt', () => {
       selectedNodes: [],
     });
     expect(result.serialized).toBe('/compact please');
+    // Even when asked to include it, a slash short-circuit must not —
+    // so the flag stays unsent for the next real turn.
+    expect(result.includedSystem).toBe(false);
   });
 
   it('builds selectedNodes from the (flattened) selection', () => {
@@ -120,7 +126,6 @@ describe('prepareExternalAgentPrompt', () => {
       rawText: 'do something',
       agentAlias: 'claude',
       canvasContext: { selectedNodes },
-      canvasId: 'canvas-1',
       logger,
     });
 
@@ -130,21 +135,19 @@ describe('prepareExternalAgentPrompt', () => {
       { nodeId: 'child-1', type: 'note', label: 'Child' },
     ]);
     expect(result.serialized).toContain('| `child-1` | note | Child |');
-    // canvasId present → sideband section rendered.
-    expect(result.serialized).toContain('## Canvas Tools (Sideband)');
+    expect(result.includedSystem).toBe(false);
   });
 
-  it('omits the sideband section when no canvasId is bound', () => {
+  it('includes the system preamble on the first turn when includeSystem is set', () => {
     const result = prepareExternalAgentPrompt({
-      rawText: 'no canvas here',
+      rawText: 'first message',
       agentAlias: 'claude',
-      canvasContext: {
-        selectedNodes: [{ id: 'n1', type: 'note', label: 'L' }],
-      },
+      includeSystem: true,
       logger,
     });
 
-    expect(result.serialized).not.toContain('## Canvas Tools (Sideband)');
-    expect(result.serialized).toContain('## Selected Nodes');
+    expect(result.includedSystem).toBe(true);
+    expect(result.serialized).toContain('## Canvas Tools (Sideband)');
+    expect(result.serialized).toContain('first message');
   });
 });

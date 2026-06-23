@@ -23,10 +23,14 @@
  *     content by ID, all we need to hand it deterministically is the
  *     user's words + the IDs of what they selected.
  *
- * The serialized wire text is rendered from the standalone template
- * `prompt/external-agent/prompt.md` via {@link renderPromptFile}; the
- * per-node table rows are assembled here in TS (the in-house template
- * engine has no loops) and injected as a single variable.
+ * The serialized wire text is rendered from two standalone templates
+ * under `prompt/external-agent/` via {@link renderPromptFile}:
+ * `user_prompt.md` (the per-turn `task` + selected-node table) and, on
+ * the first turn of a freshly-created session, `system_prompt.md` (the
+ * one-shot persona + `## Canvas Tools (Sideband)` preamble) prepended in
+ * front of it. The per-node table rows are assembled here in TS (the
+ * in-house template engine has no loops) and injected as a single
+ * variable.
  *
  * Failure model: this builder does no network/LLM I/O and effectively
  * cannot fail, but callers still `try`/`catch` and fall back to the raw
@@ -57,8 +61,15 @@ import type { FastifyBaseLogger } from 'fastify';
  */
 export const SLASH_COMMAND_RE = /^\/[a-zA-Z][\w-]*(?:\s|$)/;
 
-/** PROMPT_ROOT-relative path of the external-agent prompt template. */
-const PROMPT_TEMPLATE = 'external-agent/prompt.md';
+/** PROMPT_ROOT-relative path of the per-turn user prompt template. */
+const USER_TEMPLATE = 'external-agent/user_prompt.md';
+
+/**
+ * PROMPT_ROOT-relative path of the one-shot system preamble template
+ * (persona + canvas-tool docs). Prepended to the first user prompt of a
+ * freshly-created session — see {@link PreparePromptInput.includeSystem}.
+ */
+const SYSTEM_TEMPLATE = 'external-agent/system_prompt.md';
 
 // ─── Public API ───────────────────────────────────────────────────────────
 
@@ -70,13 +81,14 @@ export interface PreparePromptInput {
   /** Canvas chat context for this turn (may be omitted when client didn't send one). */
   canvasContext?: AgentChatContext;
   /**
-   * Sediment canvasId for the current thread. Used only to gate the
-   * `## Canvas Tools (Sideband)` section: the Huabu Sideband Tool is
-   * only reachable when the thread is bound to a canvas. Omit for the
-   * no-canvas edge case — the agent then gets `task` + selected-node
-   * metadata but no sideband instructions.
+   * Prepend the one-shot system preamble (persona + canvas-tool docs,
+   * from `external-agent/system_prompt.md`) to this turn's prompt. Set
+   * by the service layer for the FIRST user turn of a freshly-created
+   * session and never again (the agent keeps it in context); see
+   * `AcpSessionEntry.systemPreambleSent`. Ignored for the slash-command
+   * short-circuit, which forwards verbatim.
    */
-  canvasId?: string;
+  includeSystem?: boolean;
   logger: FastifyBaseLogger;
 }
 
@@ -89,6 +101,14 @@ export interface PreparePromptResult {
    * so server, log, and external agent all see the same wording.
    */
   serialized: string;
+  /**
+   * Whether {@link serializePrompt} actually prepended the system
+   * preamble to this payload. The service layer flips
+   * `AcpSessionEntry.systemPreambleSent` to `true` only when this is
+   * `true` and the turn succeeds — so a slash-command short-circuit
+   * (always `false`) or a failed turn re-sends the preamble next time.
+   */
+  includedSystem: boolean;
 }
 
 /**
@@ -99,15 +119,16 @@ export interface PreparePromptResult {
 export function prepareExternalAgentPrompt(
   input: PreparePromptInput,
 ): PreparePromptResult {
-  const { rawText, agentAlias, canvasContext, canvasId, logger } = input;
+  const { rawText, agentAlias, canvasContext, includeSystem, logger } = input;
 
   // ── Slash-command short-circuit ────────────────────────────────────
   //
   // ACP agents recognise slash commands (`/<name> <args>`) natively
   // inside `session/prompt` text. Wrapping them in our `## Selected
-  // Nodes` / sideband scaffolding could corrupt that wire format, so
+  // Nodes` / preamble scaffolding could corrupt that wire format, so
   // when the raw user input starts with a slash command we forward it
-  // verbatim with no extra sections.
+  // verbatim with no extra sections (and no system preamble — it stays
+  // unsent so the next real turn delivers it).
   if (SLASH_COMMAND_RE.test(rawText.trim())) {
     const trimmed = rawText.trim();
     logger.debug(
@@ -117,6 +138,7 @@ export function prepareExternalAgentPrompt(
     return {
       prompt: { task: trimmed, selectedNodes: [] },
       serialized: trimmed,
+      includedSystem: false,
     };
   }
 
@@ -144,29 +166,34 @@ export function prepareExternalAgentPrompt(
 
   return {
     prompt,
-    serialized: serializePrompt(prompt, { sidebandEnabled: !!canvasId }),
+    serialized: serializePrompt(prompt, { includeSystem: !!includeSystem }),
+    includedSystem: !!includeSystem,
   };
 }
 
 /**
  * Convert an {@link ExternalAgentPrompt} into the plain-text payload
- * sent over ACP `session/prompt`, rendering the standalone template at
- * {@link PROMPT_TEMPLATE}.
+ * sent over ACP `session/prompt`.
  *
- * The template emits the verbatim `task`, an optional `## Selected
- * Nodes` table (IDs / types / labels of the selected nodes so the
- * agent can read or update them by ID) and an optional `## Canvas
- * Tools (Sideband)` section (gated by `sidebandEnabled`) documenting
- * the Huabu Sideband Tool. The whole markdown table is assembled here
- * and injected as `selectedNodesTable` because the template engine has
- * no loop construct.
+ * The per-turn body is rendered from {@link USER_TEMPLATE}: the
+ * verbatim `task` plus an optional `## Selected Nodes` table (IDs /
+ * types / labels so the agent can read or update them by ID). The whole
+ * markdown table is assembled here and injected as `selectedNodesTable`
+ * because the in-house template engine has no loop construct.
+ *
+ * When `opts.includeSystem` is set, the one-shot system preamble
+ * (persona + `## Canvas Tools (Sideband)` docs, from
+ * {@link SYSTEM_TEMPLATE}) is rendered and prepended — used only for the
+ * first user turn of a freshly-created session. The Huabu Sideband Tool
+ * itself is pushed to every agentlet-backed agent unconditionally (see
+ * `server-mount.ts` `pushSidebandTools`); the preamble just documents
+ * how to call it, once.
  */
 export function serializePrompt(
   prompt: ExternalAgentPrompt,
-  opts: { sidebandEnabled?: boolean } = {},
+  opts: { includeSystem?: boolean } = {},
 ): string {
   const hasNodes = prompt.selectedNodes.length > 0;
-  const sideband = !!opts.sidebandEnabled;
 
   // The full markdown table (header + separator + rows) is assembled
   // here rather than in the template: the in-house engine has no loop
@@ -183,18 +210,19 @@ export function serializePrompt(
       ].join('\n')
     : '';
 
-  const selectedNodesIntro = sideband
-    ? 'The user selected the canvas nodes below. Read any you need with the Huabu Sideband Tool (`read-node <node-id>`); update them with `write-node --id <node-id>`.'
-    : 'The user selected the canvas nodes below.';
-
-  return renderPromptFile(PROMPT_TEMPLATE, {
+  const userBlock = renderPromptFile(USER_TEMPLATE, {
     task: prompt.task.trim(),
-    // Conditional-block flags: any non-empty string keeps the block.
+    // Conditional-block flag: any non-empty string keeps the block.
     selectedNodes: hasNodes ? '1' : '',
-    sideband: sideband ? '1' : '',
-    selectedNodesIntro,
+    selectedNodesIntro:
+      'The user selected the canvas nodes below. Read any you need with the Huabu Sideband Tool (`read-node <node-id>`); update them with `write-node --id <node-id>`.',
     selectedNodesTable,
   });
+
+  if (!opts.includeSystem) return userBlock;
+
+  const systemBlock = renderPromptFile(SYSTEM_TEMPLATE, {});
+  return `${systemBlock}\n\n${userBlock}`;
 }
 
 /**
