@@ -156,6 +156,42 @@ export const NodeFloatingToolbar = memo(
       setNoteHeightMode([id], isNoteAutoHeight ? 'fixed' : 'auto');
     }, [id, isNoteAutoHeight, setNoteHeightMode]);
 
+    // ─── Frame: hug ↔ manual ↔ size input linkage ──────────────────────
+    //
+    // For frame nodes, the size picker doubles as the hug / manual
+    // toggle:
+    //  - `hug`    → W and H render as italic hints showing the
+    //               content-driven measured size. Typing into either
+    //               input pins the frame to manual size in the same
+    //               undo step as the geometry change.
+    //  - `manual` → W and H render normally; typing dispatches a
+    //               plain resize. The toggle next to H flips back to
+    //               hug, which immediately refits the frame to its
+    //               children via the engine's end-of-batch pass.
+    //
+    // Wired here (rather than inside `FrameNode`) so the size picker
+    // stays in Group 2 alongside every other node type's geometry
+    // controls.
+    const dispatchUiIntent = useCanvasStore((s) => s.dispatchUiIntent);
+    const isFrame = type === 'frame';
+    const frameData = isFrame
+      ? (data as {
+          sizing?: 'hug' | 'manual';
+          layoutMode?: 'free' | 'column' | 'row';
+        })
+      : null;
+    const frameSizing = frameData?.sizing ?? 'hug';
+    const frameLayoutMode = frameData?.layoutMode ?? 'free';
+    const isFrameHug = isFrame && frameSizing === 'hug';
+    const toggleFrameSizing = useCallback(() => {
+      dispatchUiIntent({
+        type: 'SET_FRAME_LAYOUT_MODE',
+        frameId: id,
+        mode: frameLayoutMode,
+        sizing: frameSizing === 'hug' ? 'manual' : 'hug',
+      });
+    }, [dispatchUiIntent, id, frameLayoutMode, frameSizing]);
+
     return (
       <CanvasFloatingPopover
         anchor={anchor}
@@ -231,6 +267,20 @@ export const NodeFloatingToolbar = memo(
             });
             if (!resolved) return;
             beginGesture('SET_NODE_GEOMETRY');
+            // Frame in hug mode: typing an explicit W or H is a
+            // direct-manipulation signal to switch the frame's sizing
+            // policy to manual. Dispatch the policy change first
+            // (inside the same gesture) so both intents fold into one
+            // undo entry and the geometry write isn't reverted by the
+            // engine's end-of-batch refit pass.
+            if (isFrameHug) {
+              dispatchUiIntent({
+                type: 'SET_FRAME_LAYOUT_MODE',
+                frameId: id,
+                mode: frameLayoutMode,
+                sizing: 'manual',
+              });
+            }
             setNodeGeometry([
               {
                 nodeId: id,
@@ -238,6 +288,18 @@ export const NodeFloatingToolbar = memo(
               },
             ]);
           }}
+          autoSize={
+            isFrame
+              ? {
+                  dimensions: 'both',
+                  active: isFrameHug,
+                  onToggle: toggleFrameSizing,
+                  title: isFrameHug
+                    ? 'Switch to manual size'
+                    : 'Fit size to content',
+                }
+              : undefined
+          }
           heightAuto={
             type === 'note'
               ? {
