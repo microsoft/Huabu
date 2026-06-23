@@ -5,7 +5,7 @@ import {
   findContextImageNodes,
   type ContextImage,
   type RawNode,
-} from './rasterize-node.js';
+} from './snapshot-node.js';
 
 // Minimal 1x1 transparent PNG (so we can verify the data URL embed
 // without bringing real image bytes into the test).

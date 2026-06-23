@@ -545,19 +545,19 @@ export const fsWriteTool: ToolDefinition = {
 
 // ==================== Image Tools ====================
 
-export const rasterizeNodesParamsSchema = Type.Object({
+export const snapshotNodesParamsSchema = Type.Object({
   nodeIds: Type.Array(Type.String(), {
     description:
-      'Ids of the nodes to rasterize, as they appear in `get_canvas_outline` / `inspect_nodes`. All nodes must live on the current canvas. Pass a single-element array for a one-shot rasterize; pass multiple ids to let the tool spatially cluster related sketches into one image per cluster.',
+      'Ids of the nodes to snapshot, as they appear in `get_canvas_outline` / `inspect_nodes`. All nodes must live on the current canvas. Pass a single id for a one-shot snapshot; pass multiple ids to let the tool spatially cluster related sketches into one image per cluster.',
   }),
 });
 
-export const rasterizeNodesTool: ToolDefinition = {
-  name: 'rasterize_nodes',
-  label: 'Rasterize nodes',
+export const snapshotNodesTool: ToolDefinition = {
+  name: 'snapshot_nodes',
+  label: 'Snapshot nodes',
   description:
-    'Produce PNG artifact keys for one or more canvas nodes so they can be passed as visual references to `generate_image`. Supported node types: `image` / `video` (pass-through of existing src, no extra work), `pdf` (returns the cover image), `sketch` (renders strokes to PNG). For `note` / `text` nodes use `read("nodes/<file>.md")` instead — text belongs in the prompt, not as a raster. Sketch handling: ids are bucketed by parent frame and then spatially clustered (200 px edge-to-edge), so multiple stroke nodes belonging to the same gesture collapse into a single picture; sketches in different frames or far apart stay separate. Each `sketch` cluster is content-addressed — re-calling on an unchanged cluster returns the same `src` without rewriting the artifact. Returns JSON `Array<{src, width, height, originNodeIds}>`; `src` is the artifact key to feed into `generate_image.referenceArtifactSrcs`, `originNodeIds` lists every canvas node that contributed to that artifact (single id for pass-through, N ids for a sketch cluster).',
-  parameters: rasterizeNodesParamsSchema,
+    'Produce a PNG snapshot of one or more canvas nodes — used both as a vision attachment so the LLM can SEE the node and as `generate_image.referenceArtifactSrcs` input. Supported types: `sketch` (renders strokes to PNG; overlapping `image` siblings are composited as a backdrop so the snapshot matches the on-canvas view) and `image` (reuses the node\'s existing artifact key, no new file). For anything else (`note` / `text` / `pdf` / `video` / `frame`) use `read("nodes/<file>.md")` instead — there is no still image to snapshot. Multiple sketches in one call are bucketed by parent frame and spatially clustered (200 px edge-to-edge); each cluster is content-addressed, so re-snapshotting an unchanged cluster reuses its `src`. The chat route auto-runs this on selected sketches before the LLM\'s first turn (the keys appear in the user-message metadata), so call manually only for non-selected nodes. Returns `Array<{src, width, height, originNodeIds}>`; `originNodeIds` lists the ids that share this artifact (one id for image; N stroke ids for a sketch cluster — backdrop image siblings are not listed).',
+  parameters: snapshotNodesParamsSchema,
 };
 
 export const generateImageParamsSchema = Type.Object({
@@ -568,7 +568,7 @@ export const generateImageParamsSchema = Type.Object({
   referenceArtifactSrcs: Type.Optional(
     Type.Array(Type.String(), {
       description:
-        'Optional list of artifact keys (the `src` strings from `rasterize_nodes` or from existing `image` nodes) to use as visual references. When provided, the tool calls the image-edit endpoint instead of pure text-to-image. Pass each key as a bare string, e.g. `"art_xyz.png"`.',
+        'Optional list of artifact keys (the `src` strings from `snapshot_nodes` or from existing `image` nodes) to use as visual references. When provided, the tool calls the image-edit endpoint instead of pure text-to-image. Pass each key as a bare string, e.g. `"art_xyz.png"`.',
     }),
   ),
   size: Type.Optional(
@@ -604,7 +604,7 @@ export const generateImageTool: ToolDefinition = {
   name: 'generate_image',
   label: 'Generate image',
   description:
-    "Generate a new image with Azure OpenAI gpt-image-1 and persist it into the current canvas's artifact store. Returns JSON `{src, width, height, revisedPrompt?}` — `src` is an artifact key like `art_xyz.png`. **If you need to place the image on the canvas**, follow up with a `canvas_commands` call: `{type:'CREATE_NODES', nodes:[{nodeType:'image', data:{src:'<the src>', label:'<short caption>'}, position:{x,y}, size:{width,height}}]}` — pick a free spot near the user's current focus. To use existing canvas content as visual reference, call `rasterize_nodes` with the source node ids and pass the returned `src` strings via `referenceArtifactSrcs`. **In your final chat reply, embed the generated image inline using markdown image syntax `![<short caption>](<the src>)` so the user sees it immediately** — do NOT use link syntax `[…](…)` (renders as a broken link, not an image), do NOT describe what's in the image (the user can see it), do NOT list pixel dimensions, and keep any surrounding text to a brief one-line confirmation. Requires Azure OpenAI with an Image Deployment configured in Settings → LLM Provider.",
+    "Generate a new image and persist it into the current canvas's artifact store. Returns JSON `{src, width, height, revisedPrompt?}` — `src` is an artifact key like `art_xyz.png`. **If you need to place the image on the canvas**, follow up with a `canvas_commands` call: `{type:'CREATE_NODES', nodes:[{nodeType:'image', data:{src:'<the src>', label:'<short caption>'}, position:{x,y}, size:{width,height}}]}` — pick a free spot near the user's current focus. To use existing canvas content as visual reference, call `snapshot_nodes` with the source node ids and pass the returned `src` strings via `referenceArtifactSrcs`. **In your final chat reply, embed the generated image inline using markdown image syntax `![<short caption>](<the src>)` so the user sees it immediately** — do NOT use link syntax `[…](…)` (renders as a broken link, not an image), do NOT describe what's in the image (the user can see it), do NOT list pixel dimensions, and keep any surrounding text to a brief one-line confirmation. Requires Azure OpenAI with an Image Deployment configured in Settings → LLM Provider.",
   parameters: generateImageParamsSchema,
   // Image generation is slow (5-30s); marking sequential prevents the
   // agent from racing two parallel generations against the same
@@ -637,7 +637,7 @@ export const TOOL_REGISTRY: Readonly<Record<string, ToolDefinition>> =
         findTool,
         lsTool,
         fsWriteTool,
-        rasterizeNodesTool,
+        snapshotNodesTool,
         generateImageTool,
       ].map((t) => [t.name, t] as const),
     ),

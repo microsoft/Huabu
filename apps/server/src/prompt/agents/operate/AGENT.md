@@ -13,7 +13,7 @@ tools:
   - ls
   - canvas_commands
   - fs_write
-  - rasterize_nodes
+  - snapshot_nodes
   - generate_image
 skillScope: operate
 runtime:

@@ -4,7 +4,7 @@ export interface UserMessageMetadata {
   selectedNodeIds?: string[];
   /**
    * Full attachment list for this turn — pass server-internal items
-   * (e.g. auto-rasterized sketches) alongside user-uploaded ones.
+   * (e.g. auto-snapshotted sketches) alongside user-uploaded ones.
    * `appendMetadataTags` will persist only the user-visible subset as
    * a UI breadcrumb and synthesise the LLM hint from the rest.
    */
@@ -68,7 +68,7 @@ function projectAttachment(a: ChatAttachment): Partial<ChatAttachment> {
 }
 
 /**
- * Pre-rasterized sketch artifacts are server-internal: they exist so
+ * Pre-snapshotted sketch artifacts are server-internal: they exist so
  * the LLM can see the strokes as a vision part on the first turn, but
  * they are NOT user-visible references — the user's reference is the
  * underlying stroke nodes carried in `selectedNodeIds`.
@@ -82,9 +82,9 @@ function isSketchRasterAttachment(a: ChatAttachment): boolean {
 }
 
 /**
- * If `attachments` includes pre-rasterized sketch artifacts, build a
+ * If `attachments` includes pre-snapshotted sketch artifacts, build a
  * one-line directive pointing the agent at those urls so it does not
- * re-issue `rasterize_nodes` for the same node ids on this turn.
+ * re-issue `snapshot_nodes` for the same node ids on this turn.
  */
 function buildSketchRasterHint(
   attachments: ChatAttachment[],
@@ -98,7 +98,7 @@ function buildSketchRasterHint(
       return shortIds ? `${a.url} (nodes: ${shortIds})` : a.url;
     })
     .join('; ');
-  return `pre-rasterized sketch artifacts are ready for generate_image.referenceArtifactSrcs — pass these urls directly without re-calling rasterize_nodes for the same node ids: ${items}`;
+  return `pre-snapshotted sketch artifacts are ready for generate_image.referenceArtifactSrcs — pass these urls directly without re-calling snapshot_nodes for the same node ids: ${items}`;
 }
 
 const TAG_SPECS = {

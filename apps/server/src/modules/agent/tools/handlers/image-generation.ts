@@ -15,7 +15,7 @@
  *     including each reference image as a file part. References are
  *     looked up from the canvas's artifact store by key, so the
  *     agent passes opaque artifact keys it obtained via
- *     `rasterize_node` (or that already live on `image` nodes).
+ *     `snapshot_nodes` (or that already live on `image` nodes).
  *
  * Returns `JSON.stringify({src, width, height, revisedPrompt?})` on
  * success. Errors throw — pi-agent-core wraps them as
@@ -25,6 +25,8 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { FormData } from 'undici';
+
 import { createId } from '@sediment/shared';
 // FormData must come from the same realm as the fetch implementation used
 // at runtime. setup-proxy.ts swaps globalThis.fetch for undici's when a
@@ -33,7 +35,6 @@ import { createId } from '@sediment/shared';
 // the check and undici falls back to String(body) + text/plain.
 // (Blob is not exported from undici; the global one is structurally OK as
 // a FormData entry.)
-import { FormData } from 'undici';
 
 import { getCanvasStore } from '../../../storage/index.js';
 import { getAzureImageConfig } from '../../llm.js';
@@ -86,7 +87,7 @@ export async function handleGenerateImage(
   for (const key of refs) {
     if (typeof key !== 'string' || !key.trim()) {
       throw new Error(
-        `Invalid reference artifact key: ${JSON.stringify(key)}. Use the bare \`src\` string returned by rasterize_node.`,
+        `Invalid reference artifact key: ${JSON.stringify(key)}. Use the bare \`src\` string returned by snapshot_nodes.`,
       );
     }
     const abs = store.resolveArtifactFilePath(key);

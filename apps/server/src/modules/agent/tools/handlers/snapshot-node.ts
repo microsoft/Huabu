@@ -1,10 +1,9 @@
 /**
- * `rasterize_nodes` handler — produce PNG artifacts from canvas nodes.
+ * `snapshot_nodes` handler — produce PNG snapshots of canvas nodes.
  *
  * Accepts a list of node ids and returns one artifact entry per group:
- *   - Each `image` / `video` node is a pass-through (its existing
- *     `data.src` artifact key is returned, no extra disk write).
- *   - Each `pdf` node returns its `data.coverUrl` (or throws if none).
+ *   - Each `image` node is a pass-through (its existing `data.src`
+ *     artifact key is returned, no extra disk write).
  *   - `sketch` nodes are bucketed by `parentId` and then spatially
  *     clustered (single-linkage, 200 px threshold — same rule the web
  *     selection pipeline used to apply). Each cluster is rendered in
@@ -13,26 +12,28 @@
  *     spatial relationship on the canvas. The cluster is then
  *     rasterized via `@resvg/resvg-wasm`.
  *
- * Sketch rasters are **content-addressed**: the artifact filename
+ * Sketch snapshots are **content-addressed**: the artifact filename
  * embeds a SHA-256 fingerprint of the cluster's strokes + geometry.
- * Re-rasterising an unchanged sketch returns the same `src` without
+ * Re-snapshotting an unchanged sketch returns the same `src` without
  * writing a new file, which prevents `.artifacts/` from exploding when
- * the agent route auto-rasterises selections on every send.
+ * the agent route auto-snapshots selections on every send.
  *
  * Out of scope (each yields a clear error directing the caller to a
  * better path):
- *   - `note` / `text`   — read `nodes/<file>.md` instead.
- *   - `frame`           — rasterize individual children.
- *   - `audio` / `web` / `office` / `question` — no meaningful raster.
+ *   - `note` / `text` / `pdf` — read `nodes/<file>.md` and weave the
+ *                               sidecar content into the prompt instead.
+ *   - `video`           — not a still image; gpt-image-1 can't use it.
+ *   - `frame`           — snapshot individual children.
+ *   - `audio` / `web` / `office` / `question` — no meaningful snapshot.
  *
  * Returns a JSON-stringified `Array<{src, width, height, originNodeIds}>`.
  * `originNodeIds` lists every node that contributed to that artifact —
  * a sketch cluster of N strokes lists all N ids; a pass-through image
  * lists its single id.
  *
- * For internal callers (e.g. `agent.route.ts` auto-rasterising the
+ * For internal callers (e.g. `agent.route.ts` auto-snapshotting the
  * user's sketch selection at chat send time) we also export
- * {@link rasterizeNodesToArtifacts}, which returns the typed array
+ * {@link snapshotNodesToArtifacts}, which returns the typed array
  * directly so callers don't have to JSON-parse it back.
  */
 
@@ -48,16 +49,16 @@ import { findClusters, resolveAccent } from '@sediment/shared';
 
 import { getCanvasStore } from '../../../storage/index.js';
 
-import type { rasterizeNodesParamsSchema } from '../definitions.js';
+import type { snapshotNodesParamsSchema } from '../definitions.js';
 import type { Static } from '@earendil-works/pi-ai';
 import type { SpatialNode } from '@sediment/shared';
 
-export type RasterizeNodesArgs = Static<typeof rasterizeNodesParamsSchema> & {
+export type SnapshotNodesArgs = Static<typeof snapshotNodesParamsSchema> & {
   canvasId: string;
 };
 
 /** Typed shape of one entry in the JSON result array. */
-export interface RasterizeNodeResult {
+export interface SnapshotNodeResult {
   /** Artifact key — bare filename like `<id>.png`, ready for `data.src`. */
   src: string;
   /** Width in PNG pixels (0 = unknown, e.g. for pass-through). */
@@ -99,9 +100,8 @@ const CLUSTER_DISTANCE_THRESHOLD = 200;
 // artifact-backed nodes (image / video / pdf / web) are stripped
 // before write by `stripNodesForCanvas`; they live exclusively in
 // the per-node markdown frontmatter (`nodes/<label>.md`). So
-// `node.data.src` and `node.data.coverUrl` on a `RawNode` parsed
-// from canvas.json are ALWAYS undefined — always read them via
-// {@link readSidecarString} below.
+// `node.data.src` on a `RawNode` parsed from canvas.json is ALWAYS
+// undefined — always read it via {@link readSidecarString} below.
 export interface RawNode {
   id: string;
   parentId?: string;
@@ -117,7 +117,6 @@ export interface RawNode {
   data?: {
     type?: string;
     src?: string;
-    coverUrl?: string;
     strokes?: Array<{
       points: number[][];
       color?: string;
@@ -153,7 +152,7 @@ function nodeBoxSize(n: RawNode): { width: number; height: number } {
 // ─── Resvg WASM init ───────────────────────────────────────────────────────
 // initWasm() must run exactly once before any Resvg constructor call.
 // We lazy-init on first use and memoise the promise so concurrent
-// rasterize calls (e.g. agent rasterising 3 sketches in parallel) all
+// snapshot calls (e.g. agent snapshotting 3 sketches in parallel) all
 // await the same init.
 let wasmInitPromise: Promise<void> | null = null;
 async function ensureResvgReady(): Promise<void> {
@@ -279,7 +278,7 @@ function clusterFingerprint(
 // ─── Context backdrop helpers ──────────────────────────────────────────────
 /**
  * An image node loaded into memory, ready to be composited under a
- * sketch cluster as a backdrop in the rasterized PNG.
+ * sketch cluster as a backdrop in the snapshot PNG.
  */
 export interface ContextImage {
   node: RawNode;
@@ -375,14 +374,14 @@ const IMAGE_EXT_MIME: Record<string, string> = {
 /**
  * Read a non-empty string value from a node's markdown sidecar
  * frontmatter. The sidecar is the canonical (and sole) home for
- * `src` / `coverUrl` on artifact-backed nodes — see the comment on
- * {@link RawNode}. Returns `null` when the node has no sidecar or
- * the key is missing/blank.
+ * `src` on artifact-backed nodes — see the comment on {@link RawNode}.
+ * Returns `null` when the node has no sidecar or the key is
+ * missing/blank.
  */
 function readSidecarString(
   store: ReturnType<typeof getCanvasStore>,
   nodeId: string,
-  key: 'src' | 'coverUrl',
+  key: 'src',
 ): string | null {
   const sidecar = store.readNode(nodeId);
   if (!sidecar) return null;
@@ -592,12 +591,12 @@ async function renderClusterPng(svg: string, width: number): Promise<Buffer> {
 /**
  * Typed internal API. Returns the parsed result array directly so
  * callers (e.g. `agent.route.ts`) don't have to JSON-parse it back.
- * The tool-facing {@link handleRasterizeNodes} wraps this in
+ * The tool-facing {@link handleSnapshotNodes} wraps this in
  * `JSON.stringify`.
  */
-export async function rasterizeNodesToArtifacts(
-  args: RasterizeNodesArgs,
-): Promise<RasterizeNodeResult[]> {
+export async function snapshotNodesToArtifacts(
+  args: SnapshotNodesArgs,
+): Promise<SnapshotNodeResult[]> {
   const ids = args.nodeIds ?? [];
   if (ids.length === 0) return [];
 
@@ -619,7 +618,7 @@ export async function rasterizeNodesToArtifacts(
     orderedIds.push(id);
   }
 
-  const results: RasterizeNodeResult[] = [];
+  const results: SnapshotNodeResult[] = [];
   const sketchNodes: RawNode[] = [];
 
   for (const id of orderedIds) {
@@ -629,42 +628,37 @@ export async function rasterizeNodesToArtifacts(
     }
     const type = node.data?.type;
 
-    if (type === 'image' || type === 'video') {
+    if (type === 'image') {
       const src = readSidecarString(store, id, 'src');
       if (!src) {
         throw new Error(
-          `Node ${id} (${type}) has no src — nothing to rasterize. The artifact may have been deleted, or the node's markdown sidecar (nodes/<label>.md) is missing its \`src:\` frontmatter entry.`,
+          `Node ${id} (image) has no src — nothing to return. The artifact may have been deleted, or the node's markdown sidecar (nodes/<label>.md) is missing its \`src:\` frontmatter entry.`,
         );
       }
       results.push({ src, width: 0, height: 0, originNodeIds: [id] });
-      continue;
-    }
-    if (type === 'pdf') {
-      const cover = readSidecarString(store, id, 'coverUrl');
-      if (!cover) {
-        throw new Error(
-          `PDF node ${id} has no cover image. Open the node and capture a cover first, or rasterize a different node.`,
-        );
-      }
-      results.push({ src: cover, width: 0, height: 0, originNodeIds: [id] });
       continue;
     }
     if (type === 'sketch') {
       sketchNodes.push(node);
       continue;
     }
-    if (type === 'note' || type === 'text') {
+    if (type === 'note' || type === 'text' || type === 'pdf') {
       throw new Error(
-        `Node ${id} is a ${type} node. Rasterizing text is wasteful — use \`read("nodes/<file>.md")\` to fetch its content and weave that into your image prompt instead.`,
+        `Node ${id} is a ${type} node — it has no still image to convert. Use \`read("nodes/<file>.md")\` to fetch the sidecar (text, frontmatter, etc.) and weave that into your prompt instead.`,
+      );
+    }
+    if (type === 'video') {
+      throw new Error(
+        `Video node ${id} cannot be converted to a still image by this tool. If you need a frame, capture it on the canvas first; otherwise weave the node's sidecar content into your prompt via \`read("nodes/<file>.md")\`.`,
       );
     }
     if (type === 'frame') {
       throw new Error(
-        `Frame rasterization is not yet supported. Rasterize individual children (image / sketch / pdf cover) instead.`,
+        `Frame conversion is not yet supported. Pass individual children (image / sketch) instead.`,
       );
     }
     throw new Error(
-      `Node type "${type ?? 'unknown'}" cannot be rasterized. Supported: image, video, pdf, sketch.`,
+      `Node type "${type ?? 'unknown'}" cannot be converted to an image. Supported: image, sketch.`,
     );
   }
 
@@ -714,9 +708,9 @@ export async function rasterizeNodesToArtifacts(
 }
 
 /** Tool-facing handler — same logic, JSON-stringified. */
-export async function handleRasterizeNodes(
-  args: RasterizeNodesArgs,
+export async function handleSnapshotNodes(
+  args: SnapshotNodesArgs,
 ): Promise<string> {
-  const results = await rasterizeNodesToArtifacts(args);
+  const results = await snapshotNodesToArtifacts(args);
   return JSON.stringify(results);
 }
