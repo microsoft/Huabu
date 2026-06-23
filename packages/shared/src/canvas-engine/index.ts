@@ -78,7 +78,6 @@ export {
 // ── Pure utilities re-exported for web consumers ──────────────────────────
 export {
   GRID_SIZE,
-
   FRAME_POINTER_CAPTURE_MARGIN,
   snapToGrid,
   paddingFromExtent,

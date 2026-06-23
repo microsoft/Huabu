@@ -71,6 +71,7 @@
 - 版本号选用 `text-fg-subtle` + `text-[11px]` + `font-mono`，跟周围的"次要信息"风格一致，可以选中复制，便于反馈 bug 时贴出来。
 - web 包自己的 `package.json` 一直是 `0.0.0`，不是有效的产品版本号；桌面端 `package.json` 才是真正发版用的，因此选它作为单一信源。后续只要 bump 桌面端的版本，UI 上就会自动跟上。
 - 新增的全局类型 `__APP_VERSION__` 声明在 [vite-env.d.ts](apps/web/src/vite-env.d.ts)，所有客户端代码都能直接引用。
+
 ## 2026-06-23 · Question 节点正文统一到 `data.content`
 
 **What Changed**
