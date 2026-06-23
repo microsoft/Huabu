@@ -250,10 +250,12 @@ export const ExpandedNodePanel = ({
     setIsEditingTitle(false);
   };
 
-  // Search node id — the find bar's scope dispatcher only consumes this
-  // when scope.kind === 'node'. Canvas-node previews always have one;
+  // Search node id — the find bar's scope dispatcher (see
+  // `useGlobalSearchHotkey`) requires a non-empty value to open the
+  // in-preview find bar. Canvas-node previews always have one;
   // free-floating previews (e.g. raw file preview) may not, in which
-  // case the bar falls back to a DOM-only highlight walk with an empty id.
+  // case `previewNodeId` falls back to `''` and Cmd+F routes to the
+  // canvas-wide search overlay instead of the in-preview bar.
   const previewNodeId = (() => {
     if (activeItem.isNode && expandedNodeId) return expandedNodeId;
     const id = previewData?.nodeId;

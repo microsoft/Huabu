@@ -1370,7 +1370,14 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         try {
           reply.raw.write(JSON.stringify(event) + '\n');
         } catch {
+          // Socket already closed / errored. Mark closed AND abort
+          // the scanner so it stops doing disk/CPU work right away —
+          // otherwise we'd wait for `request.raw`'s `'close'` event,
+          // which may not have fired yet (or at all, for a half-open
+          // TCP connection) and would let `searchCanvas()` keep
+          // streaming sidecars into a dead pipe.
           closed = true;
+          abort.abort();
         }
       };
 

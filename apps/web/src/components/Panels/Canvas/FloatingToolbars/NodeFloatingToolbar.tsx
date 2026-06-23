@@ -4,7 +4,6 @@ import { memo, useCallback, useMemo, type ReactNode } from 'react';
 
 import {
   ACCENT_NONE_TOKEN,
-  ACCENT_PALETTE,
   ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT,
 } from '@sediment/shared';
 
@@ -99,31 +98,39 @@ export const NodeFloatingToolbar = memo(
     // Anchor rect in flow (canvas) coordinates. `useInternalNode`
     // gives us live position + measured size, so the toolbar follows
     // drag without any extra subscription.
+    //
+    // Prefer the explicit `style.{width,height}` over
+    // `measured.{width,height}` whenever it is pinned: during a live
+    // resize, the snap-mirror writes the authoritative snapped rect to
+    // `style` *every* `onNodesChange` tick, while `measured` is updated
+    // asynchronously by RF's `ResizeObserver` and therefore lags by one
+    // frame. Using `measured` first made both the toolbar's anchor
+    // position and the W/H values in the size picker trail the resize
+    // handle by a frame (visible jitter at gesture end). For auto-sized
+    // nodes (notes in auto-height mode, etc.) `style.height` is
+    // `undefined`, so we still fall through to `measured` and the
+    // displayed value reflects the content-driven height.
     const anchor = useMemo(() => {
       if (!internalNode) return null;
       const x = internalNode.internals.positionAbsolute?.x ?? 0;
       const y = internalNode.internals.positionAbsolute?.y ?? 0;
-      const width =
-        internalNode.measured?.width ??
-        (internalNode.style?.width as number | undefined) ??
-        0;
-      const height =
-        internalNode.measured?.height ??
-        (internalNode.style?.height as number | undefined) ??
-        0;
+      const styleW = internalNode.style?.width as number | undefined;
+      const styleH = internalNode.style?.height as number | undefined;
+      const width = styleW ?? internalNode.measured?.width ?? 0;
+      const height = styleH ?? internalNode.measured?.height ?? 0;
       return { x, y, width, height };
     }, [internalNode]);
 
-    // Current size shown in the size picker. Use measured dimensions
-    // (browser-actual) as the source of truth so the popup reflects the
-    // node's true on-screen size, including content-driven auto-sizing.
+    // Current size shown in the size picker. Same source-of-truth
+    // ordering as the anchor above: pinned `style` first, content-driven
+    // `measured` only when the style entry is undefined.
     const currentWidth =
-      internalNode?.measured?.width ??
       (internalNode?.style?.width as number | undefined) ??
+      internalNode?.measured?.width ??
       null;
     const currentHeight =
-      internalNode?.measured?.height ??
       (internalNode?.style?.height as number | undefined) ??
+      internalNode?.measured?.height ??
       null;
 
     // ─── Note: fit-height ↔ H input linkage ────────────────────────────
@@ -199,11 +206,7 @@ export const NodeFloatingToolbar = memo(
         {/* ── Group 2: Style — color + size ── */}
         {type !== 'question' && type !== 'sketch' && (
           <FloatingToolbar.ColorPicker
-            colors={
-              type === 'text'
-                ? ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT
-                : ACCENT_PALETTE
-            }
+            colors={ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT}
             value={data.style?.accent ?? ACCENT_NONE}
             onSelect={(t) =>
               updateNodeData(id, {

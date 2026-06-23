@@ -375,6 +375,21 @@ body,
   pointer-events: none !important;
 }
 
+/* Neutralize React Flow's built-in "selected/focus" stroke fallback (#555 in
+   light theme, #727272 in dark). Without this override, an unstyled edge that
+   gains :focus (e.g. between mousedown and the `.selected` class arriving, or
+   via keyboard nav) briefly flashes a dark-grey stroke that reads as black.
+   Edges with an explicit `style.stroke` are unaffected because inline styles
+   already beat these CSS variables. The `.selected` rule below still wins
+   thanks to `!important`. */
+.react-flow {
+  --xy-edge-stroke-selected: var(
+    --xy-edge-stroke,
+    var(--xy-edge-stroke-default)
+  );
+  --xy-edge-stroke-selected-default: var(--xy-edge-stroke-default);
+}
+
 /* Highlight selected edges with a glow effect for clear visual feedback. */
 .react-flow__edge.selected path,
 .react-flow__edge.selected .react-flow__edge-interaction {

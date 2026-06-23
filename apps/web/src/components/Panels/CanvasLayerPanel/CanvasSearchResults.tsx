@@ -26,7 +26,8 @@
  *     `CanvasSearchInput` above this list inside the same panel.
  *   - No "Start typing to search…" placeholder either: the parent
  *     only mounts this component when there's an active query, so
- *     the empty-state copy is just "No mn */
+ *     the empty-state copy is just "No matches".
+ */
 
 import { Spline, ChevronDown, ChevronRight, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -541,6 +542,7 @@ const NodeHeaderItem = ({
     <button
       type="button"
       onClick={onClick}
+      aria-expanded={!collapsed}
       className={cn(
         'border-edge-default hover:bg-hover flex w-full items-center gap-1.5 border-b px-2 py-1.5 text-left text-xs',
         active && 'bg-info-bg',
@@ -581,12 +583,12 @@ const NodeMatchItem = ({
   active,
   onClick,
 }: NodeMatchItemProps): JSX.Element => (
-  <div
-    role="button"
+  <button
+    type="button"
     tabIndex={-1}
     style={{ minHeight: ROW_HEIGHT }}
     className={cn(
-      'border-edge-default hover:bg-hover flex cursor-pointer flex-col gap-0.5 border-b px-3 py-2 pl-7',
+      'border-edge-default hover:bg-hover flex w-full cursor-pointer flex-col gap-0.5 border-b px-3 py-2 pl-7 text-left',
       active && 'bg-info-bg',
     )}
     onClick={onClick}
@@ -601,7 +603,7 @@ const NodeMatchItem = ({
       matchStart={row.match.matchStart}
       matchLength={row.match.matchLength}
     />
-  </div>
+  </button>
 );
 
 const SnippetLine = ({

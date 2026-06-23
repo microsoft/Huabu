@@ -50,7 +50,6 @@ import {
   type NestableNode,
 } from '@sediment/shared/canvas-engine';
 
-import { FRAME_PADDING } from '@/config/canvas';
 import {
   getNodeFontFit,
   refitFont,
@@ -266,20 +265,26 @@ export function createResizePreviewController(opts: {
     const snap = freeSnapshot;
     if (!snap) return;
     if (snap.frameWidth <= 0 || snap.frameHeight <= 0) return;
-    // Scale strictly against the CONTENT area (the frame box minus its
-    // fixed `FRAME_PADDING` inset on both sides), not the full box. The
-    // padding is a constant — it does not grow with the frame — so a
-    // full-box ratio (`width / frameWidth`) over-scales children and
-    // makes the content-driven frame size overshoot the drag target by
-    // `2 * FRAME_PADDING * (1 - sx)` each tick (visible jitter). Using
-    // the inner ratio keeps the recomputed frame size equal to the
-    // dragged size: `inner' = inner0 * sx`, so `frame' = inner0 * sx +
-    // 2p = width`.
-    const pad2 = FRAME_PADDING * 2;
-    const innerW0 = Math.max(1, snap.frameWidth - pad2);
-    const innerH0 = Math.max(1, snap.frameHeight - pad2);
-    const sx = Math.max(0, width - pad2) / innerW0;
-    const sy = Math.max(0, height - pad2) / innerH0;
+    // ---- Scale-factor selection ------------------------------------
+    // Per-axis (sx, sy) for all layouts (free, column, row). For
+    // structured (`column` / `row`) frames the grid solver derives
+    // padding + gap per-axis (widths drive padX + interGapX, heights
+    // drive padY + intraGapY — see
+    // `packages/shared/src/canvas-engine/autoLayout/gridLayout.ts`),
+    // so scaling all child widths by `sx` makes the resulting frame
+    // width = `oldW × sx` exactly, and same for height with `sy`.
+    // Single-edge drags therefore track the pointer pixel-perfect on
+    // the dragged axis and leave the orthogonal axis untouched —
+    // children scale per-axis along with the frame. Diagonal drags
+    // stretch children per-axis (children may look non-square); users
+    // who want uniform scaling can hold Shift (TODO: wire up the
+    // modifier).
+    const sx = width / snap.frameWidth;
+    const sy = height / snap.frameHeight;
+    const frameWidth = width;
+    const frameHeight = height;
+    const frameX = x;
+    const frameY = y;
     // Always include the frame's NEW local origin in the batch so
     // non-BR handle drags don't depend on the `onNodesChange`
     // snap-mirror running in a separate pass to commit the frame's
@@ -289,8 +294,8 @@ export function createResizePreviewController(opts: {
     const items: ResizeGeometryItem[] = [
       {
         nodeId: snap.frameId,
-        size: { width, height },
-        position: { x, y },
+        size: { width: frameWidth, height: frameHeight },
+        position: { x: frameX, y: frameY },
       },
     ];
     for (const child of snap.children) {
@@ -302,16 +307,15 @@ export function createResizePreviewController(opts: {
           width: childWidth,
           height: childHeight,
         },
-        // Local positions are anchored to the constant `FRAME_PADDING`
-        // inset and only their offset INSIDE the content area scales.
-        // This keeps the top-left padding fixed while the inner gaps
-        // grow/shrink with the content-area ratio — consistent with the
-        // content-area size scaling above. (Structured column/row frames
-        // ignore these positions: the grid solver re-packs the scaled
+        // Local positions scale uniformly from the frame origin too,
+        // so the relative gap between any two points (including the
+        // gap between a child and the frame edge) scales by the same
+        // ratio as their sizes. (Structured column / row frames ignore
+        // these positions: the grid solver re-packs the scaled
         // children at the end of the batch.)
         position: {
-          x: FRAME_PADDING + (child.x - FRAME_PADDING) * sx,
-          y: FRAME_PADDING + (child.y - FRAME_PADDING) * sy,
+          x: child.x * sx,
+          y: child.y * sy,
         },
       });
     }

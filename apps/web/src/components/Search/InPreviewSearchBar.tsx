@@ -13,12 +13,14 @@
  *      `::highlight()` ranges over all visible matches without
  *      mutating Milkdown / pdf.js text nodes. The paint rule lives
  *      in `index.css` (`::highlight(sediment-search)`).
- *   2. Optional: a server-side `nodeId`-restricted search query so
- *      the count and "Next / Prev" navigation can address matches
- *      outside the visible viewport (e.g. inside a collapsed Milkdown
- *      block). For v1 we rely on the inline DOM walk for count + nav
- *      — the server call is reserved for a follow-up that adds
- *      jump-to-PDF-page support.
+ *   2. A server-side `nodeId`-restricted search query, driven via
+ *      `searchStore.setQuery` whenever the find-bar input changes
+ *      (the store routes node-scope queries to the same NDJSON
+ *      endpoint with `nodeId` + `fields: ['content']` set). This
+ *      backs server-aware counts and "Next / Prev" navigation for
+ *      matches outside the visible viewport (e.g. inside a
+ *      collapsed Milkdown block) without needing the inline DOM
+ *      walk to scan offscreen content.
  *
  * Esc closes the bar (the parent panel's existing Esc handler still
  * closes the panel itself when the bar is gone).

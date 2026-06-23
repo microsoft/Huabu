@@ -3,7 +3,6 @@ import { useCallback, useMemo } from 'react';
 
 import {
   ACCENT_NONE_TOKEN,
-  ACCENT_PALETTE,
   ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT,
 } from '@sediment/shared';
 import {
@@ -73,17 +72,14 @@ export const MultiSelectToolbar = () => {
     return allSame ? (first ?? ACCENT_NONE) : ACCENT_NONE;
   }, [selectedNodes]);
 
-  // Only expose the "Transparent" swatch when *every* selected node is a
-  // text node. The moment the selection contains any other type (frame,
-  // note, image, pdf, video, web, annotation), transparent is hidden
-  // because those types need a solid background to remain visible.
-  const accentPickerOptions = useMemo(
-    () =>
-      selectedNodes.length > 0 && selectedNodes.every((n) => n.type === 'text')
-        ? ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT
-        : ACCENT_PALETTE,
-    [selectedNodes],
-  );
+  // Always include the "Transparent" swatch so users can revert a node
+  // back to the default (no-accent / neutral surface) state. Hiding it
+  // for non-text selections used to be the design (the assumption being
+  // that other types "need a solid background"), but in practice every
+  // node defaults to a null accent and the picker had no way to express
+  // that state — once a coloured swatch was clicked it could not be
+  // undone.
+  const accentPickerOptions = ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT;
 
   // Common width / height across selected nodes. `null` when the
   // selected nodes do not all share the same value — the size picker

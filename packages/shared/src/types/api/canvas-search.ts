@@ -90,7 +90,10 @@ export type CanvasSearchRequest = z.infer<typeof canvasSearchRequestSchema>;
  * One match. `snippet` is a ~120-char window around the first hit with
  * the match offset (relative to the snippet, not the original field)
  * so the client can render a highlighted excerpt without re-running
- * the regex. For the `label` field, snippet === field value.
+ * the regex. Snippets are always windowed/whitespace-collapsed —
+ * including for short fields like `label` — so clients that need the
+ * untruncated value should read it from a dedicated field instead
+ * (e.g. the per-match `label` for node titles).
  */
 export interface CanvasSearchMatch {
   /**
@@ -165,7 +168,12 @@ export type CanvasSearchEvent =
       type: 'done';
       /** Total matches emitted across both tiers. */
       total: number;
-      /** True when the per-tier `limit` was hit and the scan stopped early. */
+      /**
+       * True when the request-level `limit` (a single global cap
+       * across both the meta and content tiers — see the field docs
+       * on {@link CanvasSearchRequest.limit}) was hit and the scan
+       * stopped early.
+       */
       truncated: boolean;
     }
   | {

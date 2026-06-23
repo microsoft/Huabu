@@ -97,6 +97,13 @@ export function markdownEquals(a: string, b: string): boolean {
  *     their own lines).
  *   - `\(…\)` is emitted as inline math `$<inner>$` and is not
  *     allowed to span newlines.
+ *   - `$$…$$` whose inner contains a newline (e.g. AI emits the
+ *     opener / closer glued to `\begin{aligned}` / `\end{aligned}`
+ *     on the same line as content) is rewritten to the same
+ *     canonical paragraph-form block. Single-line `$$x$$` is left
+ *     alone because `micromark-extension-math` accepts it as
+ *     inline-style block math; multi-line is the only shape
+ *     `remark-math` rejects without the fences on their own lines.
  *   - The transformation is idempotent: running it on the converted
  *     output is a no-op.
  */
@@ -282,6 +289,25 @@ function convertMathInPlain(text: string): string {
   let out = text.replace(
     /\\\[((?:(?!\\\])[\s\S])*)\\\]/g,
     (_match, inner: string) => {
+      const trimmed = inner.trim();
+      return `\n\n$$\n${trimmed}\n$$\n\n`;
+    },
+  );
+  // Block math: multi-line `$$ … $$`. `micromark-extension-math`
+  // requires the opening and closing `$$` to sit on their own
+  // lines for block math. AI assistants frequently emit a tight
+  // form (`$$\begin{aligned}\n…\n\end{aligned}$$`) that fails to
+  // parse and renders as broken inline math. Rewrite any `$$…$$`
+  // whose inner spans a newline AND whose fences are glued to
+  // content. Single-line `$$x$$` and already-canonical
+  // `$$\n…\n$$` are left untouched (the latter to keep the
+  // transform idempotent).
+  out = out.replace(
+    /\$\$((?:(?!\$\$)[\s\S])*?\n(?:(?!\$\$)[\s\S])*?)\$\$/g,
+    (match, inner: string) => {
+      const openerGlued = !inner.startsWith('\n');
+      const closerGlued = !inner.endsWith('\n');
+      if (!openerGlued && !closerGlued) return match;
       const trimmed = inner.trim();
       return `\n\n$$\n${trimmed}\n$$\n\n`;
     },

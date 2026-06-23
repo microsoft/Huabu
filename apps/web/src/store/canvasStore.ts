@@ -1372,6 +1372,7 @@ const useCanvasStore = create<RFState>()(
         // persisted conversation, so a stale status is demoted to
         // `done` here, restoring the badge + reopen affordance.
         const loadedNodes = reconcileQuestionStatus(state.nodes ?? []);
+        const loadedEdges = state.edges ?? [];
         // Prefer this tab's sessionStorage; fall back to whatever the
         // server still has from before viewport was moved client-side.
         // A corrupt entry on either side falls through to `null`, which
@@ -1388,7 +1389,7 @@ const useCanvasStore = create<RFState>()(
         const loadedViewport = sessionViewport ?? legacyServerViewport;
         set({
           nodes: loadedNodes,
-          edges: state.edges ?? [],
+          edges: loadedEdges,
           viewport: loadedViewport,
           canvasTitle: response.title || 'Untitled',
           version: response.version,
@@ -2258,6 +2259,16 @@ const useCanvasStore = create<RFState>()(
       const resizeCtx = getResizeContext();
       const snappedRect = resizeCtx ? getResizeSnappedRect() : null;
       if (resizeCtx && snappedRect) {
+        // Per-axis pass-through. The snap session's authoritative
+        // post-snap rect is mirrored directly onto the resized node's
+        // `position` + `style`. This matches what `flushScale`
+        // dispatches on the next rAF tick: with the grid solver now
+        // using per-axis padding + gap
+        // (`packages/shared/src/canvas-engine/autoLayout/gridLayout.ts`),
+        // a single-edge drag scales only the dragged axis and the
+        // frame size = `oldSize × axisScale` exactly on that axis, so
+        // mirroring the pointer-driven rect here can't put the frame
+        // body smaller than the children's still-old-size snapshot.
         nextNodes = nextNodes.map((n) =>
           n.id === resizeCtx.nodeId
             ? {

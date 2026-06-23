@@ -181,11 +181,20 @@ export function executeCanvasCommands(
   // because the LLM cannot predict rendered dimensions accurately).
   //
   // Order: structured (`column` / `row`) frames first — they reposition
-  // children into tracks and set their own content-driven size — then
-  // the generic bounding-box `fitFrames` pass, which is a no-op for
-  // frames the structured pass already handled (children are placed
-  // exactly at `FRAME_PADDING` so the box matches) but still cascades
-  // to ancestor frames so outer wrappers stay correctly sized.
+  // children into tracks and set their own content-driven size using
+  // per-axis `paddingFromExtent` (widths drive `padX` + `interGapX`,
+  // heights drive `padY` + `intraGapY`). Then the generic bounding-box
+  // `fitFrames` pass for ancestor wrappers — structured frames
+  // themselves short-circuit inside `fitFrameToChildren` (defensive:
+  // in the happy path both passes compute identical sizes, but
+  // skipping guards against non-uniform child mutations from agent
+  // dispatches that would let `computeFrameFit` clobber the
+  // structured solver's output). Per-axis padding makes the solver
+  // self-consistent under per-axis resize: scaling all child widths
+  // by `sx` makes `padX` + `interGapX` scale by `sx` too, so the
+  // resulting frame width = `oldWidth × sx` exactly — `flushScale`
+  // therefore passes the raw (sx, sy) from the resize gesture
+  // through without collapsing to a uniform scalar.
   // ------------------------------------------------------------------
   if (
     anyApplied &&

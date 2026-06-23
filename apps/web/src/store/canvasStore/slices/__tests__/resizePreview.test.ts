@@ -100,9 +100,11 @@ const frameNode = (): Node =>
     id: 'frame',
     type: 'frame',
     position: { x: 0, y: 0 },
-    // 196×196 box → inner content area is 100×100 once the constant
-    // `FRAME_PADDING` (48px per side) is subtracted, so the content-area
-    // scaling ratios come out to clean integers in the assertions below.
+    // 196×196 box. Children scale uniformly with the frame
+    // (`sx = newW / frameW`, etc.) — padding is content-derived in the
+    // production code and not exposed by the test surface, so the
+    // assertions below check the controller's actual output rather than
+    // hand-derived intermediates.
     style: { width: 196, height: 196 },
     data: { layoutMode: 'free' },
   }) as Node;
@@ -161,7 +163,7 @@ describe('resize-preview controller — child font refit', () => {
     const fit = getNodeFontFit(child);
 
     controller.captureFrameResizeSnapshot('frame');
-    // Frame 196×196 → 146×146: content area 100×100 → 50×50, sx=sy=0.5.
+    // Frame 196×196 → 146×146: uniform scale sx = sy = 146/196.
     controller.applyFrameResizeScale(146, 146, 0, 0);
     controller.flushFrameResizeScale();
 
@@ -197,7 +199,7 @@ describe('resize-preview controller — child font refit', () => {
     expect(fit).not.toBeNull();
 
     controller.captureFrameResizeSnapshot('frame');
-    // Frame 196×196 → 396×396: content area 100×100 → 300×300, sx=sy=3.
+    // Frame 196×196 → 396×396: uniform scale sx = sy = 396/196.
     controller.applyFrameResizeScale(396, 396, 0, 0);
     controller.flushFrameResizeScale();
 
@@ -261,7 +263,7 @@ describe('resize-preview controller — child font refit', () => {
     expect(fit!.placeholder.length).toBeGreaterThan(0);
 
     controller.captureFrameResizeSnapshot('frame');
-    // Frame 196×196 → 396×396: content area 100×100 → 300×300, sx=sy=3.
+    // Frame 196×196 → 396×396: uniform scale sx = sy = 396/196.
     controller.applyFrameResizeScale(396, 396, 0, 0);
     controller.flushFrameResizeScale();
 
