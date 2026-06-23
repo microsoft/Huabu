@@ -56,6 +56,7 @@ import { Modal } from '@/components/Common/Modal';
 import { Select } from '@/components/Common/Select';
 import { SettingRow } from '@/components/Common/SettingRow';
 import { SettingSection } from '@/components/Common/SettingSection';
+import { Spinner } from '@/components/Common/Spinner';
 import { TabGroup } from '@/components/Common/TabGroup';
 import { toast } from '@/components/Common/Toast';
 import { Tooltip } from '@/components/Common/Tooltip';
@@ -766,6 +767,16 @@ export const AcpSettings: React.FC = () => {
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<AcpAgentProfile | null>(null);
   const [restarting, setRestarting] = useState(false);
+  // Destructive confirmation uses a `Modal` rather than `window.confirm` so
+  // the dialog matches the rest of the app's UX (see `CanvasListPage` for
+  // the same pattern). `pendingDelete` holds the profile awaiting
+  // confirmation; `isDeleting` blocks the modal during the network call so
+  // accidental backdrop / Escape dismissals don't strand the request.
+  const [pendingDelete, setPendingDelete] = useState<AcpAgentProfile | null>(
+    null,
+  );
+  const [isDeleting, setIsDeleting] = useState(false);
+  const confirmDeleteButtonRef = useRef<HTMLButtonElement>(null);
 
   // Surface fetch errors as transient toasts so the user notices even
   // if the section isn't scrolled into view. We deliberately ignore
@@ -793,37 +804,41 @@ export const AcpSettings: React.FC = () => {
     setEditorOpen(true);
   }, []);
 
-  const handleDelete = useCallback(
-    async (profile: AcpAgentProfile) => {
-      // Confirm before delete — profiles often have non-trivial cwd /
-      // cwd config and re-typing them is annoying. `window.confirm`
-      // matches the rest of the codebase's destructive-action UX
-      // (no custom dialog primitive yet).
-      //
-      // Profiles are templates: deleting one removes it from the menu
-      // and prevents new threads from binding, but threads that already
-      // snapshotted the recipe (v3+ records) keep running unchanged.
-      // Phrase the prompt that way so users aren't surprised when an
-      // open chat keeps responding after they delete the profile.
-      if (
-        !window.confirm(
-          `Delete profile "${profile.displayName}"? You won't be able to start new chats with it. Chats already using it keep running with the current settings.`,
-        )
-      ) {
-        return;
-      }
-      try {
-        await deleteAcpProfile(profile.id);
-        toast('Profile deleted', { tone: 'success' });
-        await refresh();
-      } catch (err) {
-        toast(err instanceof Error ? err.message : 'Failed to delete profile', {
-          tone: 'danger',
-        });
-      }
-    },
-    [refresh],
-  );
+  const handleDelete = useCallback((profile: AcpAgentProfile) => {
+    // Open the confirmation modal — the actual delete runs from
+    // `confirmDelete` once the user clicks through. Profiles often have
+    // non-trivial cwd config and re-typing them is annoying, so we want a
+    // deliberate confirmation step.
+    //
+    // Profiles are templates: deleting one removes it from the menu and
+    // prevents new threads from binding, but threads that already
+    // snapshotted the recipe (v3+ records) keep running unchanged. The
+    // modal copy below makes that explicit so users aren't surprised when
+    // an open chat keeps responding after they delete the profile.
+    setPendingDelete(profile);
+  }, []);
+
+  const closeDeleteModal = useCallback(() => {
+    if (isDeleting) return;
+    setPendingDelete(null);
+  }, [isDeleting]);
+
+  const confirmDelete = useCallback(async () => {
+    if (!pendingDelete) return;
+    setIsDeleting(true);
+    try {
+      await deleteAcpProfile(pendingDelete.id);
+      toast('Profile deleted', { tone: 'success' });
+      await refresh();
+      setPendingDelete(null);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Failed to delete profile', {
+        tone: 'danger',
+      });
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [pendingDelete, refresh]);
 
   const handleRestart = useCallback(async () => {
     setRestarting(true);
@@ -901,7 +916,7 @@ export const AcpSettings: React.FC = () => {
                     size="sm"
                     iconOnly
                     title="Delete profile"
-                    onClick={() => void handleDelete(profile)}
+                    onClick={() => handleDelete(profile)}
                   >
                     <Trash2 size={12} />
                   </Button>
@@ -939,6 +954,59 @@ export const AcpSettings: React.FC = () => {
         detectedClis={detectedClis}
         onClose={() => setEditorOpen(false)}
         onSaved={handleSaved}
+      />
+
+      {/*
+       * Confirmation modal for destructive profile deletion. Mirrors the
+       * `CanvasListPage` delete dialog so the app speaks with one voice
+       * for destructive actions — no `window.confirm` anywhere.
+       */}
+      <Modal
+        isOpen={pendingDelete !== null}
+        title="Delete external agent?"
+        description={
+          pendingDelete ? (
+            <>
+              Are you sure you want to delete{' '}
+              <span className="text-fg-default font-medium">
+                “{pendingDelete.displayName}”
+              </span>
+              ? You won't be able to start new chats with it. Chats already
+              using it keep running with the current settings.
+            </>
+          ) : null
+        }
+        onClose={closeDeleteModal}
+        initialFocusRef={confirmDeleteButtonRef}
+        closeOnBackdropClick={!isDeleting}
+        closeOnEscape={!isDeleting}
+        footer={
+          <>
+            <Button
+              variant="outline"
+              tone="neutral"
+              size="sm"
+              onClick={closeDeleteModal}
+              disabled={isDeleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              ref={confirmDeleteButtonRef}
+              variant="solid"
+              tone="danger"
+              size="sm"
+              onClick={() => void confirmDelete()}
+              disabled={isDeleting}
+            >
+              {isDeleting ? (
+                <Spinner size="sm" className="text-fg-inverse" />
+              ) : (
+                'Delete'
+              )}
+            </Button>
+          </>
+        }
       />
     </>
   );

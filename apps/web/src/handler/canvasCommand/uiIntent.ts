@@ -33,6 +33,7 @@ import type {
   CanvasCommand,
   CanvasNodeId,
   FrameLayoutMode,
+  FrameSizing,
   NodeSize,
   CanvasNodeType,
   Point,
@@ -114,9 +115,8 @@ export type CanvasUiIntent =
        * the ≤16 ms between the last `rAF` tick and release.
        *
        * Absent when no rAF tick ran during the drag (e.g. instant
-       * click-release, or `autoLayoutEnabled === false` where the
-       * preview short-circuits). In that case the resolver falls
-       * back to fresh recomputation against the current store state.
+       * click-release). In that case the resolver falls back to
+       * fresh recomputation against the current store state.
        */
       cachedDecisions?: Map<string, DragDecision>;
     }
@@ -191,15 +191,22 @@ export type CanvasUiIntent =
   | { type: 'TOGGLE_NODE_LOCK'; nodeId: string }
   | {
       /**
-       * Change a frame's layout mode and (when switching into `column`
-       * or `row`) the track count. The resolver folds the data patch
-       * and the resulting re-flow into one batch so they share an
-       * undo step.
+       * Change a frame's layout mode and / or sizing policy. The
+       * resolver folds the data patch and the resulting re-flow into
+       * one batch so they share an undo step.
+       *
+       * Fields are independently optional in spirit:
+       *  - `mode` is required (single source of truth for the
+       *    structured-children axis);
+       *  - `gridCount` is honoured only for `column` / `row` modes;
+       *  - `sizing` toggles the frame-size policy and is independent
+       *    of `mode`. Omit to keep the frame's current sizing.
        */
       type: 'SET_FRAME_LAYOUT_MODE';
       frameId: string;
       mode: FrameLayoutMode;
       gridCount?: number;
+      sizing?: FrameSizing;
     }
   | {
       type: 'MOVE_NODE_INTO_FRAME';
@@ -241,7 +248,6 @@ export interface UiIntentResolution {
 export interface UiResolverState {
   nodes: Node[];
   edges: Edge[];
-  autoLayoutEnabled: boolean;
   /**
    * Flow-space coordinate of the current viewport centre. Filled in by
    * `dispatchUiIntent` from the live React Flow instance + canvas wrapper
@@ -710,6 +716,7 @@ function resolveSetFrameLayoutMode(
         ...(typeof intent.gridCount === 'number' && {
           gridCount: intent.gridCount,
         }),
+        ...(intent.sizing && { sizing: intent.sizing }),
       },
     ],
     trace: [],

@@ -78,12 +78,8 @@ export function getNodeFontFit(node: Node): NodeFontFit | null {
   }
 
   if (node.type === 'question') {
-    const input = data.input;
     return {
-      text:
-        input?.kind === 'text' && typeof input.content === 'string'
-          ? input.content
-          : '',
+      text: typeof data.content === 'string' ? data.content : '',
       placeholder: QUESTION_NODE_PLACEHOLDER,
       fontOpts: getQuestionFontOpts(),
       inset: QUESTION_NODE_PADDING,

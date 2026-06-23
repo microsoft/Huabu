@@ -91,6 +91,24 @@ export default defineConfig(({ mode }) => {
       include: ['gpt-tokenizer/encoding/o200k_base'],
     },
     server: {
+      // Pre-transform the heavy CanvasPage import graph in the background
+      // right after `pnpm dev` finishes starting, so by the time you open the
+      // browser the modules are already cached and there is no on-demand
+      // compile penalty on first navigation.
+      //
+      // Only list the *entry* files of the slowest route; Vite recursively
+      // crawls their imports. Keep this list small — listing too many files
+      // burns extra CPU at server start without proportional benefit.
+      warmup: {
+        clientFiles: [
+          './src/App.tsx',
+          './src/pages/CanvasPage/CanvasPage.tsx',
+          './src/pages/CanvasPage/MainLayout.tsx',
+          './src/pages/CanvasPage/CenterArea.tsx',
+          './src/components/Panels/Canvas/Canvas.tsx',
+          './src/store/canvasStore.ts',
+        ],
+      },
       host: true,
       port: devPort,
       // `strictPort: true` makes Vite ABORT instead of silently sliding

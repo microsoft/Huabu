@@ -78,9 +78,10 @@ export {
 // ── Pure utilities re-exported for web consumers ──────────────────────────
 export {
   GRID_SIZE,
-  FRAME_PADDING,
   FRAME_POINTER_CAPTURE_MARGIN,
   snapToGrid,
+  paddingFromExtent,
+  medianOfChildExtents,
 } from './utils/constants.js';
 export { stripMarkdown } from './utils/markdown.js';
 export {
@@ -128,6 +129,7 @@ export {
   computeFrameFit,
   fitFrameToChildren,
   fitFrames,
+  getFrameSizing,
   moveNodeOutOfFrame,
 } from './frame/index.js';
 export {

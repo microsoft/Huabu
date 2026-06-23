@@ -50,7 +50,6 @@ function createStoreDouble(initialNodes: Node[]) {
   };
 
   const getState = (): ResizePreviewSliceState => ({
-    autoLayoutEnabled: false,
     nodes,
     dispatchUiIntent,
     patchNodeSilent,
@@ -100,9 +99,11 @@ const frameNode = (): Node =>
     id: 'frame',
     type: 'frame',
     position: { x: 0, y: 0 },
-    // 196×196 box → inner content area is 100×100 once the constant
-    // `FRAME_PADDING` (48px per side) is subtracted, so the content-area
-    // scaling ratios come out to clean integers in the assertions below.
+    // 196×196 box. Children scale uniformly with the frame
+    // (`sx = newW / frameW`, etc.) — padding is content-derived in the
+    // production code and not exposed by the test surface, so the
+    // assertions below check the controller's actual output rather than
+    // hand-derived intermediates.
     style: { width: 196, height: 196 },
     data: { layoutMode: 'free' },
   }) as Node;
@@ -161,7 +162,7 @@ describe('resize-preview controller — child font refit', () => {
     const fit = getNodeFontFit(child);
 
     controller.captureFrameResizeSnapshot('frame');
-    // Frame 196×196 → 146×146: content area 100×100 → 50×50, sx=sy=0.5.
+    // Frame 196×196 → 146×146: uniform scale sx = sy = 146/196.
     controller.applyFrameResizeScale(146, 146, 0, 0);
     controller.flushFrameResizeScale();
 
@@ -197,7 +198,7 @@ describe('resize-preview controller — child font refit', () => {
     expect(fit).not.toBeNull();
 
     controller.captureFrameResizeSnapshot('frame');
-    // Frame 196×196 → 396×396: content area 100×100 → 300×300, sx=sy=3.
+    // Frame 196×196 → 396×396: uniform scale sx = sy = 396/196.
     controller.applyFrameResizeScale(396, 396, 0, 0);
     controller.flushFrameResizeScale();
 
@@ -261,7 +262,7 @@ describe('resize-preview controller — child font refit', () => {
     expect(fit!.placeholder.length).toBeGreaterThan(0);
 
     controller.captureFrameResizeSnapshot('frame');
-    // Frame 196×196 → 396×396: content area 100×100 → 300×300, sx=sy=3.
+    // Frame 196×196 → 396×396: uniform scale sx = sy = 396/196.
     controller.applyFrameResizeScale(396, 396, 0, 0);
     controller.flushFrameResizeScale();
 
@@ -276,6 +277,155 @@ describe('resize-preview controller — child font refit', () => {
     const inset = fit!.inset;
     const oneLineFont = (box.height - inset * 2) / fit!.fontOpts.lineHeight;
     expect(fontSize).toBeLessThan(oneLineFont);
+
+    controller.clearFrameResizeSnapshot();
+  });
+});
+
+describe('resize-preview controller — manual sizing skips child cascade', () => {
+  it('does not scale or move children when the frame is sizing: manual', () => {
+    // A manual frame owns its own box: resizing the frame must NOT drag
+    // children with it. The child should keep its pre-gesture size and
+    // position; the frame itself still updates.
+    const manualFrame: Node = {
+      id: 'frame',
+      type: 'frame',
+      position: { x: 0, y: 0 },
+      style: { width: 200, height: 200 },
+      data: { layoutMode: 'free', sizing: 'manual' },
+    } as Node;
+    const child = textNode('text', 16, 'pinned');
+    const store = createStoreDouble([manualFrame, child]);
+    const controller = createResizePreviewController({
+      getState: store.getState,
+    });
+
+    const before = findNode(store.getNodes(), 'text');
+    const beforeBox = boxOf(before);
+    const beforePos = { x: before.position.x, y: before.position.y };
+    const beforeFont = (before.data as { style: { fontSize: number } }).style
+      .fontSize;
+
+    controller.captureFrameResizeSnapshot('frame');
+    // BR-handle drag: frame origin (0, 0) unchanged, just grow to 400×400.
+    controller.applyFrameResizeScale(400, 400, 0, 0);
+    controller.flushFrameResizeScale();
+
+    const after = findNode(store.getNodes(), 'text');
+    expect(boxOf(after)).toEqual(beforeBox);
+    expect(after.position).toEqual(beforePos);
+    expect((after.data as { style: { fontSize: number } }).style.fontSize).toBe(
+      beforeFont,
+    );
+
+    // The frame itself still receives its new geometry through the
+    // gesture-tick dispatch.
+    const frameAfter = findNode(store.getNodes(), 'frame');
+    expect((frameAfter.style as { width: number; height: number }).width).toBe(
+      400,
+    );
+    expect((frameAfter.style as { width: number; height: number }).height).toBe(
+      400,
+    );
+
+    controller.clearFrameResizeSnapshot();
+  });
+
+  it("preserves the child's ABSOLUTE position when a manual frame's TL moves", () => {
+    // TL/TR/BL/T/L-handle drags shift the frame's `(x, y)`. Children's
+    // positions are stored local to the frame, so leaving the local
+    // position unchanged would shift the absolute position by the same
+    // delta — exactly what the cascade was hiding before. The fix:
+    // compensate child local positions by the inverse of the frame
+    // origin delta so each child stays put on screen.
+    const manualFrame: Node = {
+      id: 'frame',
+      type: 'frame',
+      position: { x: 100, y: 100 },
+      style: { width: 200, height: 200 },
+      data: { layoutMode: 'free', sizing: 'manual' },
+    } as Node;
+    const child = textNode('text', 16, 'pinned', {
+      // Local (10, 10) → absolute (110, 110) at gesture start.
+      position: { x: 10, y: 10 },
+    });
+    const store = createStoreDouble([manualFrame, child]);
+    const controller = createResizePreviewController({
+      getState: store.getState,
+    });
+
+    const beforeChild = findNode(store.getNodes(), 'text');
+    const beforeBox = boxOf(beforeChild);
+    const beforeAbsX = 100 + beforeChild.position.x;
+    const beforeAbsY = 100 + beforeChild.position.y;
+
+    controller.captureFrameResizeSnapshot('frame');
+    // TL-handle drag: shrink to 150×150 by moving the frame origin
+    // from (100, 100) → (150, 150). BR stays at (300, 300).
+    controller.applyFrameResizeScale(150, 150, 150, 150);
+    controller.flushFrameResizeScale();
+
+    const afterFrame = findNode(store.getNodes(), 'frame');
+    expect(afterFrame.position).toEqual({ x: 150, y: 150 });
+
+    const afterChild = findNode(store.getNodes(), 'text');
+    // Child size pinned.
+    expect(boxOf(afterChild)).toEqual(beforeBox);
+    // Local position should be compensated by the frame origin delta
+    // (50, 50), so child goes from (10, 10) → (-40, -40) — yielding the
+    // same absolute (110, 110) as before. The child is now visually
+    // OUTSIDE the shrunken frame's bounds, which is the expected manual
+    // behaviour: the frame is just a box, the child does not follow.
+    const afterAbsX = 150 + afterChild.position.x;
+    const afterAbsY = 150 + afterChild.position.y;
+    expect(afterAbsX).toBe(beforeAbsX);
+    expect(afterAbsY).toBe(beforeAbsY);
+
+    controller.clearFrameResizeSnapshot();
+  });
+
+  it('does not scale children when a structured (column) frame is sizing: manual', () => {
+    // PR 2: `column|row + manual` is supported. The resize gesture
+    // must behave the same as `free + manual` — children keep their
+    // pre-gesture size and absolute position; only the frame's box
+    // changes. The end-of-batch structured solver may still re-pack
+    // children's local positions, but the controller itself must NOT
+    // scale them.
+    const structuredManual: Node = {
+      id: 'frame',
+      type: 'frame',
+      position: { x: 0, y: 0 },
+      style: { width: 200, height: 200 },
+      data: { layoutMode: 'column', gridCount: 2, sizing: 'manual' },
+    } as Node;
+    const child = textNode('text', 16, 'pinned');
+    const store = createStoreDouble([structuredManual, child]);
+    const controller = createResizePreviewController({
+      getState: store.getState,
+    });
+
+    const before = findNode(store.getNodes(), 'text');
+    const beforeBox = boxOf(before);
+    const beforeFont = (before.data as { style: { fontSize: number } }).style
+      .fontSize;
+
+    controller.captureFrameResizeSnapshot('frame');
+    controller.applyFrameResizeScale(400, 400, 0, 0);
+    controller.flushFrameResizeScale();
+
+    const after = findNode(store.getNodes(), 'text');
+    // Size pinned — no scaling cascade even though the layout is
+    // structured.
+    expect(boxOf(after)).toEqual(beforeBox);
+    // Font untouched — no refit.
+    expect((after.data as { style: { fontSize: number } }).style.fontSize).toBe(
+      beforeFont,
+    );
+
+    const frameAfter = findNode(store.getNodes(), 'frame');
+    expect((frameAfter.style as { width: number; height: number }).width).toBe(
+      400,
+    );
 
     controller.clearFrameResizeSnapshot();
   });

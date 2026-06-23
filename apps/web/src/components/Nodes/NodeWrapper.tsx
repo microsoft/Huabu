@@ -373,6 +373,19 @@ export const NodeWrapper = memo(
           !!ctx &&
           (finalLocalPos.x !== ctx.startLocalPos.x ||
             finalLocalPos.y !== ctx.startLocalPos.y);
+
+        // Run the per-node `onResizeEnd` BEFORE the canonical
+        // `setNodeGeometry` commit. For frames this drains any trailing
+        // rAF-coalesced cascade-scale tick (`flushFrameResizeScale`) so
+        // the scaled-children batch lands in the same React commit as
+        // the frame's pinned size — otherwise the geometry commit runs
+        // once with stale child sizes (last preview tick before the
+        // trailing rAF was coalesced away) and then the flush re-runs
+        // RESIZE_NODE a second time with the trailing values, producing
+        // a visible one-frame children kick on pointer release. For
+        // non-frame nodes `onResizeEnd` is undefined so this is a no-op.
+        onResizeEnd?.(finalSize.width, finalSize.height);
+
         setNodeGeometry([
           {
             nodeId: id,
@@ -382,8 +395,8 @@ export const NodeWrapper = memo(
             position: positionChanged ? finalLocalPos : undefined,
           },
         ]);
+
         endSnapSession();
-        onResizeEnd?.(finalSize.width, finalSize.height);
       },
       [
         endResizePreview,

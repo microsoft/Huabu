@@ -99,4 +99,22 @@ contextBridge.exposeInMainWorld('electronBridge', {
       };
     },
   },
+
+  /**
+   * Native OS dialogs forwarded from the main process. Currently only
+   * `pickFolder` is exposed — used by Settings panels and the
+   * workspace setup flow to swap the server's legacy PowerShell
+   * `FolderBrowserDialog` for Electron's modern `openDirectory`
+   * dialog (IFileOpenDialog on Windows, NSOpenPanel on macOS).
+   */
+  dialog: {
+    pickFolder: (
+      title?: string,
+    ): Promise<
+      { ok: true; path: string } | { ok: false; reason: 'cancelled' }
+    > =>
+      ipcRenderer.invoke('dialog:pick-folder', title) as Promise<
+        { ok: true; path: string } | { ok: false; reason: 'cancelled' }
+      >,
+  },
 });

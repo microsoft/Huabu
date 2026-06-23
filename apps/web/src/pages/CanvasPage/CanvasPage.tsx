@@ -11,6 +11,7 @@ import { ChatPanel } from '../../components/Panels/ChatPanel';
 import { CanvasHeader } from '../../components/Panels/Header/CanvasHeader.tsx';
 import { KeyboardShortcutsModal } from '../../components/Panels/Header/KeyboardShortcutsModal.tsx';
 import { usePageShortcuts } from '../../hooks/shortcuts';
+import { useGlobalSearchHotkey } from '../../hooks/useGlobalSearchHotkey';
 import useStore, {
   dismissVersionConflictToast,
 } from '../../store/canvasStore.ts';
@@ -34,6 +35,10 @@ export default function CanvasPage() {
   const storeCanvasId = useStore((s) => s.canvasId);
   const initialised = useRef(false);
   const { isShortcutsOpen, openShortcuts, closeShortcuts } = usePageShortcuts();
+  // Cmd+F / Ctrl+F → focus the canvas-wide search input in the
+  // left layer panel (or, when focus is inside the expanded
+  // preview, the in-preview find bar).
+  useGlobalSearchHotkey();
 
   useEffect(() => {
     if (!canvasId) {

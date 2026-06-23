@@ -48,9 +48,10 @@ export interface CommandHandlerResult {
    * Parent frame IDs whose children's geometry changed in this command.
    * Handlers no longer call `fitFrames` themselves — they only declare
    * which frames are affected, and the executor performs a single
-   * synchronous `fitFrames` pass at the end of the batch (gated by
-   * `state.autoLayoutEnabled` or the caller's `forceFitFrames` option).
-   * This keeps the fit policy in one place and avoids redundant passes.
+   * synchronous `fitFrames` pass at the end of the batch. The pass is
+   * filtered per-frame by `data.sizing` (`'hug'` participates, `'manual'`
+   * is skipped); `options.forceFitFrames` (set for agent batches)
+   * bypasses the per-frame filter.
    */
   affectedFrameIds?: string[];
   /**

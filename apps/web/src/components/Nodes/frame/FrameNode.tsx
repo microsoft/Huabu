@@ -71,6 +71,14 @@ export const FrameNode = memo(
     const isStructuredLayout = layoutMode === 'column' || layoutMode === 'row';
     const count = clampGridCount(data.gridCount);
 
+    // Sizing policy lives in `data.sizing` (default `'hug'`) and is
+    // surfaced through the shared size picker's auto-toggle that
+    // `NodeFloatingToolbar` renders for frame nodes. The toggle and
+    // the W/H inputs both dispatch `SET_FRAME_LAYOUT_MODE` /
+    // `RESIZE_NODE` directly from there — this node only owns the
+    // layout-mode + grid-count controls (rendered below as
+    // `FrameActions`).
+
     // Local draft for the count input so the user can type freely
     // without the value reformatting on every keystroke. Re-synced
     // from the canonical value when it changes externally.

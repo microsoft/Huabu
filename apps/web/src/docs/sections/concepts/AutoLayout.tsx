@@ -3,7 +3,6 @@ import {
   Code,
   DocLink,
   H2,
-  Kbd,
   P,
   PageLayout,
   Table,
@@ -12,7 +11,7 @@ import {
 
 const toc: TocEntry[] = [
   { id: 'what-it-does', label: 'What Auto-layout does' },
-  { id: 'turning-it-on', label: 'Turning it on / off' },
+  { id: 'frame-sizing', label: 'Frame sizing' },
   { id: 'incremental', label: 'Incremental placement' },
   { id: 'semantic-edges', label: 'Implicit semantic relationships' },
   { id: 'algorithm', label: 'The algorithm' },
@@ -28,35 +27,37 @@ export default function AutoLayout() {
     >
       <H2>What Auto-layout does</H2>
       <P>
-        Without Auto-layout, every new node drops in the centre of the viewport
-        and waits for you to drag it somewhere useful. With Auto-layout, the
-        layout engine looks at the whole canvas, picks the sensible
-        neighbourhood for the new node, and slots it in. Frames grow or shrink
-        to fit their children, and dragging a node shows a target-frame outline.
+        Whenever a node is created without an explicit position, the layout
+        engine looks at the whole canvas, picks a sensible neighbourhood for it
+        based on its relationships, and slots it in. Frames grow or shrink to
+        fit their children (unless the frame opts into manual sizing — see
+        below) and dragging a node shows a target-frame outline.
       </P>
 
-      <H2>Turning it on / off</H2>
+      <H2>Frame sizing</H2>
       <P>
-        The ✨ toolbar toggle (also <Kbd>Ctrl</Kbd>/<Kbd>Cmd</Kbd>+
-        <Kbd>Shift</Kbd>+<Kbd>A</Kbd>) controls whether new nodes get
-        auto-placed:
+        Frame size is controlled by a per-frame <em>sizing policy</em> in the
+        Frame node toolbar — not by any global setting. Two options:
       </P>
       <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
         <li>
-          <strong>On</strong> (button highlighted) — every new node slots into a
-          sensible spot beside related content. Best for fast capture and
-          AI-driven work, when many nodes appear at once.
+          <strong>Hug</strong> (default) — the frame auto-fits to wrap its
+          children. Adding, removing, dragging, or resizing a child reshapes the
+          frame in real time, with a live preview during the drag.
         </li>
         <li>
-          <strong>Off</strong> (default) — new nodes drop in the centre and stay
-          put. Best when you want full manual control of placement.
+          <strong>Manual</strong> — the frame keeps the size you set. The engine
+          never reshapes it, so children can move freely inside (or even past
+          the edges) without the container shifting.
         </li>
       </ul>
-      <Callout tone="tip">
-        Flip Auto-layout on for AI-heavy sessions (where{' '}
-        <DocLink href="/docs/ai/intent">Intent</DocLink> or{' '}
-        <DocLink href="/docs/ai/agent-mode">Agent Mode</DocLink> is creating
-        clusters of nodes) and back off when you&apos;re hand-arranging.
+      <Callout tone="info">
+        <strong>Manual</strong> sizing also works for <strong>Column</strong>{' '}
+        and <strong>Row</strong> frames: the structured solver still packs
+        children into tracks (so order and track assignment stay valid), but
+        leaves the frame size pinned to whatever you set. Children that
+        don&apos;t fit may overflow the main axis (top edge for column, left
+        edge for row).
       </Callout>
 
       <H2>Incremental placement</H2>
@@ -122,8 +123,10 @@ export default function AutoLayout() {
       <H2>Tips</H2>
       <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
         <li>
-          <strong>During research</strong>: leave Auto-layout on so AI-created
-          nodes cluster near related content.
+          <strong>Pin a frame&apos;s size</strong>: switch a free-layout frame
+          to <strong>Manual</strong> sizing when you want a fixed canvas region
+          — e.g. a workspace zone you&apos;ll resize by hand instead of
+          following its contents.
         </li>
         <li>
           <strong>After tidying</strong>: lock the key nodes (from the Layers

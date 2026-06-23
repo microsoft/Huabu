@@ -88,6 +88,19 @@ export function LabelledEdge(props: EdgeProps) {
     });
   }
 
+  // ── Arrow rendering ────────────────────────────────────────────────
+  //
+  // We use React Flow's built-in SVG `<marker>` (via `markerEnd` /
+  // `markerStart` from `applyEdgeStyle`) for every edge type. An earlier
+  // attempt to render bezier arrows manually as a `<polygon>` rotated by
+  // a non-endpoint tangent was reverted: SVG's `orient="auto"` (= tangent
+  // at the endpoint) combined with the path's auto-shortening to the
+  // marker's `refX` is what guarantees (a) the arrow back is always
+  // flush with the line where the line meets it, and (b) the line is
+  // never visible past the arrowhead. A custom rotation breaks both
+  // invariants; for our bezier construction `orient="auto"` happens to
+  // be axis-aligned, but that's still less jarring than the artifacts
+  // a non-matching rotation introduces.
   return (
     <>
       <BaseEdge

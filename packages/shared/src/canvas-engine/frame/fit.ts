@@ -14,13 +14,21 @@ import {
   indexById,
   type NestableNode,
 } from './tree.js';
-import { FRAME_PADDING } from '../utils/constants.js';
+import { medianOfChildExtents, paddingFromExtent } from '../utils/constants.js';
 import { getNodeSize } from '../utils/nodeSizes.js';
 
+import type { FrameLayoutMode } from '../../types/canvas/node.js';
 import type { XYPosition } from '@xyflow/react';
 
 export type FitFrameOptions = {
-  /** Padding around the bounding box of children. Default: FRAME_PADDING (48). */
+  /**
+   * Padding around the bounding box of children. Default: derived
+   * from the children's pooled-extent median via
+   * `paddingFromExtent`, matching `applyColumnLayout` /
+   * `applyRowLayout` so structured and free frames breathe the same
+   * way. Falls back to the floor (16 px, `FRAME_PADDING_MIN`) when
+   * the frame has no measurable children.
+   */
   padding?: number;
   /** Minimum frame width. Default: 20. */
   minWidth?: number;
@@ -74,7 +82,6 @@ export function computeFrameFit(
   if (frame.type !== 'frame') return null;
   if (frame.data?.locked) return null;
 
-  const padding = options.padding ?? FRAME_PADDING;
   const minWidth = options.minWidth ?? 20;
   const minHeight = options.minHeight ?? 20;
 
@@ -86,14 +93,30 @@ export function computeFrameFit(
   const hasExtraRects = (options.includeAbsoluteRects?.length ?? 0) > 0;
   if (children.length === 0 && !hasExtraRects) return null;
 
+  // Derive padding from the children's pooled-extent median, the same
+  // basis structured-frame layouts use (`gapFromExtent` /
+  // `paddingFromExtent`). Caller may override with `options.padding`.
+  // Including any extra-rects here too keeps the preview pass (which
+  // feeds a yet-to-enter node's rect via `includeAbsoluteRects`)
+  // matched against the same median the post-drop fit will see.
+  const childSizes = children.map((c) => getNodeSize(c));
+  const extraSizes = (options.includeAbsoluteRects ?? []).map((r) => ({
+    width: r.width,
+    height: r.height,
+  }));
+  const padding =
+    options.padding ??
+    paddingFromExtent(medianOfChildExtents([...childSizes, ...extraSizes]));
+
   // Build bounding box from children's relative positions
   let minX = Number.POSITIVE_INFINITY;
   let minY = Number.POSITIVE_INFINITY;
   let maxX = Number.NEGATIVE_INFINITY;
   let maxY = Number.NEGATIVE_INFINITY;
 
-  for (const child of children) {
-    const size = getNodeSize(child);
+  for (let i = 0; i < children.length; i += 1) {
+    const child = children[i];
+    const size = childSizes[i];
     minX = Math.min(minX, child.position.x);
     minY = Math.min(minY, child.position.y);
     maxX = Math.max(maxX, child.position.x + size.width);
@@ -150,10 +173,26 @@ export function fitFrameToChildren(
   frameId: string,
   options: FitFrameOptions = {},
 ): NestableNode[] {
+  // Defensive: structured (`column` / `row`) frames are sized by
+  // `applyStructuredFrameRelayout` using the same pooled-median
+  // `paddingFromExtent` as `computeFrameFit`, so in the happy path
+  // both compute identical sizes and the fit pass is a no-op. The
+  // short-circuit guards against callers that mutate child geometry
+  // non-uniformly outside the resize gesture (e.g. an agent dispatch
+  // that resizes a single child) — `computeFrameFit` would otherwise
+  // override the structured solver's content-driven output. Skipping
+  // keeps the structured pass authoritative; the ancestor cascade in
+  // `fitFrames` still walks up to refit any outer free-mode wrappers.
+  const frame = nodes.find((n) => n.id === frameId);
+  if (frame && frame.type === 'frame') {
+    const layoutMode = (frame.data as { layoutMode?: FrameLayoutMode })
+      ?.layoutMode;
+    if (layoutMode === 'column' || layoutMode === 'row') return nodes;
+  }
+
   const fit = computeFrameFit(nodes, frameId, options);
   if (!fit) return nodes;
 
-  const frame = nodes.find((n) => n.id === frameId);
   if (!frame) return nodes;
 
   // Compute the delta between old and new frame origins so we can offset

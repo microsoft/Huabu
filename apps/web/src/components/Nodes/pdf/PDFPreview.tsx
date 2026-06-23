@@ -1,9 +1,11 @@
 import clsx from 'clsx';
 import { Highlighter, Scan } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Document } from 'react-pdf';
 
 import { resolveArtifactUrl, uploadImage } from '@/api/artifact';
+import { usePreviewHeaderSlot } from '@/components/Nodes/PreviewHeaderSlot';
 import {
   computeHighlightUpdate,
   mergeLineRects,
@@ -361,8 +363,62 @@ export const PDFPreview = ({
     [onDataChange],
   );
 
+  // Host header slot — rendered by `ExpandedNodePanel`. When present
+  // we portal the capture / highlight toggles into the shared header
+  // (same pattern as NotePreview / WebPreview / OfficePreview) so they
+  // sit next to the universal Split view / Close buttons instead of
+  // floating over the PDF content. In surfaces that don't provide a
+  // slot (e.g. the canvas node form), `el` is null and the toolbar
+  // simply isn't rendered.
+  const { el: headerSlotEl } = usePreviewHeaderSlot();
+  const headerActions = (
+    <>
+      <Button
+        variant="ghost"
+        tone="neutral"
+        size="sm"
+        iconOnly
+        title="Select Area"
+        tooltipPlacement="bottom"
+        aria-label="Select area to capture"
+        aria-pressed={captureMode}
+        className={clsx(captureMode && 'text-info bg-bg-default')}
+        onClick={() => {
+          const next = !captureMode;
+          setCaptureMode(next);
+          if (next) setHighlightMode(false);
+          if (!next) setPendingCapture(null);
+        }}
+      >
+        <Scan />
+      </Button>
+      <Button
+        variant="ghost"
+        tone="neutral"
+        size="sm"
+        iconOnly
+        title="Highlight Text"
+        tooltipPlacement="bottom"
+        aria-label="Highlight text"
+        aria-pressed={highlightMode}
+        className={clsx(highlightMode && 'bg-bg-default text-warning-light')}
+        onClick={() => {
+          const next = !highlightMode;
+          setHighlightMode(next);
+          if (next) {
+            setCaptureMode(false);
+            setPendingCapture(null);
+          }
+        }}
+      >
+        <Highlighter />
+      </Button>
+    </>
+  );
+
   return (
     <div className="relative flex h-full flex-col">
+      {headerSlotEl ? createPortal(headerActions, headerSlotEl) : null}
       {/* Loading overlay — visible until document metadata is parsed */}
       {src && !docLoaded && <LoadingState overlay variant="skeleton" />}
       {/* ── PDF pages ── */}
@@ -413,46 +469,6 @@ export const PDFPreview = ({
             No PDF Source
           </div>
         )}
-      </div>
-
-      {/* ── Floating toolbar (top-left, vertical) ── */}
-      <div className="pointer-events-none absolute top-3 left-3 z-10">
-        <div className="border-edge-default bg-surface pointer-events-auto flex flex-col items-center gap-1 rounded-sm border p-0">
-          <Button
-            variant="ghost"
-            iconOnly
-            size="sm"
-            title="Select Area"
-            className={clsx(captureMode && 'text-info bg-bg-default')}
-            onClick={() => {
-              const next = !captureMode;
-              setCaptureMode(next);
-              if (next) setHighlightMode(false);
-              if (!next) setPendingCapture(null);
-            }}
-          >
-            <Scan />
-          </Button>
-          <Button
-            variant="ghost"
-            iconOnly
-            size="sm"
-            title="Highlight Text"
-            className={clsx(
-              highlightMode && 'bg-bg-default text-warning-light',
-            )}
-            onClick={() => {
-              const next = !highlightMode;
-              setHighlightMode(next);
-              if (next) {
-                setCaptureMode(false);
-                setPendingCapture(null);
-              }
-            }}
-          >
-            <Highlighter />
-          </Button>
-        </div>
       </div>
 
       {/* ── Floating drag handle (area capture) */}

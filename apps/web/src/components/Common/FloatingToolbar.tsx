@@ -358,8 +358,41 @@ interface ToolbarSizePickerProps {
    *   automatically pins the height.
    * - `active: false` → currently fixed; toggle hands control back to
    *   auto-fit.
+   *
+   * Legacy shorthand for `autoSize={{ dimensions: 'height', ... }}`.
+   * Prefer `autoSize` for new call sites; `heightAuto` is kept so
+   * existing note callers stay untouched.
    */
   heightAuto?: {
+    active: boolean;
+    onToggle: () => void;
+    title?: string;
+  };
+  /**
+   * Generalised auto-size toggle. Like `heightAuto` but also covers
+   * the W input when `dimensions: 'both'` (e.g. frame hug-mode where
+   * both axes track the content).
+   *
+   * When `active` is `true`:
+   * - The affected inputs (`H` only for `'height'`; `W` AND `H` for
+   *   `'both'`) render with a subtle italic hint style.
+   * - Typing into an affected input always dispatches via `onApply`,
+   *   even when the typed value matches the current measured size,
+   *   so the host can treat the keystroke as an explicit "pin this
+   *   dimension" request and flip the node out of auto-size mode.
+   *
+   * Mutually exclusive with {@link ToolbarSizePickerProps.heightAuto}:
+   * `autoSize` is the canonical, generalised form and the legacy
+   * `heightAuto` is just a shorthand for `{ dimensions: 'height' }`.
+   * If a caller passes both, `autoSize` wins and `heightAuto` is
+   * silently ignored — new call sites should only pass `autoSize`.
+   * (TypeScript does not enforce this at the type level because
+   * `heightAuto` is kept around for existing note callers; treat both
+   * fields as the union of two opt-ins, not independent toggles.)
+   */
+  autoSize?: {
+    /** Which axes are auto-sized when `active`. Defaults to `'height'`. */
+    dimensions?: 'height' | 'both';
     active: boolean;
     onToggle: () => void;
     title?: string;
@@ -394,7 +427,18 @@ function ToolbarSizePicker({
   onApply,
   minSize = 20,
   heightAuto,
+  autoSize,
 }: ToolbarSizePickerProps) {
+  // Normalise: `autoSize` wins over the legacy `heightAuto` shorthand
+  // so a caller passing both gets predictable behaviour (instead of
+  // them silently fighting).
+  const auto =
+    autoSize ??
+    (heightAuto ? { dimensions: 'height' as const, ...heightAuto } : undefined);
+  const autoActive = auto?.active === true;
+  const heightIsAuto = autoActive;
+  const widthIsAuto = autoActive && auto?.dimensions === 'both';
+
   // Local draft state per input. Synced from the canonical canvas value
   // whenever it changes externally (drag-resize, undo, auto/fixed toggle).
   // Kept separate from the prop so the user can type freely without the
@@ -424,7 +468,14 @@ function ToolbarSizePicker({
     }
     const next = Math.max(minSize, Math.round(parsed));
     setWText(String(next));
-    if (typeof width !== 'number' || next !== Math.round(width)) {
+    // In auto-size-both mode, always dispatch so typing pins the
+    // width even when the typed value matches the current measured
+    // size (the host promotes the node out of auto mode).
+    if (
+      widthIsAuto ||
+      typeof width !== 'number' ||
+      next !== Math.round(width)
+    ) {
       onApply({ width: next });
     }
   };
@@ -444,13 +495,14 @@ function ToolbarSizePicker({
     setHText(String(next));
     // In auto-fit mode, always dispatch so typing pins the height even
     // when the typed value matches the current measured size.
-    const isAuto = heightAuto?.active === true;
-    if (isAuto || typeof height !== 'number' || next !== Math.round(height)) {
+    if (
+      heightIsAuto ||
+      typeof height !== 'number' ||
+      next !== Math.round(height)
+    ) {
       onApply({ height: next });
     }
   };
-
-  const isAuto = heightAuto?.active === true;
 
   return (
     <div className="flex items-center gap-1">
@@ -481,7 +533,10 @@ function ToolbarSizePicker({
               (e.target as HTMLInputElement).blur();
             }
           }}
-          className={SIZE_INPUT_CLASS}
+          className={cn(
+            SIZE_INPUT_CLASS,
+            widthIsAuto && 'text-fg-subtle italic',
+          )}
         />
       </label>
       <label className="flex items-center gap-1">
@@ -511,17 +566,26 @@ function ToolbarSizePicker({
               (e.target as HTMLInputElement).blur();
             }
           }}
-          className={cn(SIZE_INPUT_CLASS, isAuto && 'text-fg-subtle italic')}
+          className={cn(
+            SIZE_INPUT_CLASS,
+            heightIsAuto && 'text-fg-subtle italic',
+          )}
         />
       </label>
-      {heightAuto && (
+      {auto && (
         <ToggleButton
-          active={isAuto}
+          active={autoActive}
           title={
-            heightAuto.title ??
-            (isAuto ? 'Switch to fixed height' : 'Fit height to content')
+            auto.title ??
+            (auto.dimensions === 'both'
+              ? autoActive
+                ? 'Switch to manual size'
+                : 'Fit size to content'
+              : autoActive
+                ? 'Switch to fixed height'
+                : 'Fit height to content')
           }
-          onClick={heightAuto.onToggle}
+          onClick={auto.onToggle}
         >
           <MoveVertical />
         </ToggleButton>

@@ -2,9 +2,12 @@ import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { CanvasLayerTree } from './CanvasLayerTree';
+import { CanvasSearchInput } from './CanvasSearchInput';
+import { CanvasSearchResults } from './CanvasSearchResults';
 import { LayerFilterBar } from './LayerFilterBar';
 import {
   buildAvailableFilterKeys,
+  isOfficeFilterKey,
   nodeMatchesFilterKey,
   type LayerFilterKey,
 } from './layerFilterKey';
@@ -13,6 +16,7 @@ import { getNodeIcon } from '../../../config/nodeIcons';
 import useCanvasStore from '../../../store/canvasStore';
 import { useExternalImportsStore } from '../../../store/externalImportsStore';
 import { usePanelStore } from '../../../store/panelStore';
+import { useSearchStore } from '../../../store/searchStore';
 import { SketchIcon } from '../../Nodes/sketch/SketchIcon';
 import { SidebarPanel } from '../SidebarPanel';
 
@@ -202,22 +206,82 @@ export const CanvasLayerPanel = ({
   const nodes = isLeftCollapsed ? frozenNodesRef.current : rawNodes;
 
   // ============================================================
-  // Filter state — purely panel-local. Lives in `useState` because
-  // (a) the panel component stays mounted across collapse/expand,
-  // (b) no other surface needs to observe these values.
+  // Filter state — purely panel-local. The type-chip whitelist
+  // lives in `useState` because (a) the panel component stays
+  // mounted across collapse/expand, (b) no other surface needs
+  // to observe these values. The text query lives in
+  // `searchStore` (a global zustand store) because it doubles
+  // as the canvas-wide search input — see `CanvasSearchInput`
+  // and `CanvasSearchResults`. When the query is non-empty the
+  // tree below is replaced by the result list; when empty, the
+  // chip whitelist still applies to the tree as before.
   // ============================================================
-  const [query, setQuery] = useState('');
   const [selectedKeys, setSelectedKeys] = useState<Set<LayerFilterKey>>(
     () => new Set(),
   );
-  // The regex *input* row is opt-in to keep the panel chrome quiet —
-  // typed search is far less frequent than the at-a-glance chip toggles.
-  // The type-chip row, on the other hand, is shown by default whenever
-  // the canvas has at least two node types: chips ARE the filter
-  // affordance the user sees first. Closing the search (× / Esc) only
-  // hides the input row and clears `query`; chip selections are
-  // intentionally preserved across open/close cycles.
-  const [isSearchOpen, setIsSearchOpen] = useState(false);
+
+  // Canvas-wide search query (lives in searchStore so the input
+  // and the result list can both read / write it). When non-empty
+  // we hide the tree + chip toolbar and render the streamed result
+  // list in their place; when empty the tree comes back.
+  const searchQuery = useSearchStore((s) => s.query);
+  const isSearchActive = searchQuery.trim().length > 0;
+
+  // Reveal / dismiss state for the search input row itself. Lives
+  // in `panelStore` so the toggle button in `LayerFilterBar` and
+  // the global `Cmd+F` hotkey can both flip it, and so a future
+  // entry point (command palette, etc.) can drop in without
+  // threading new props through this component.
+  const isSearchOpen = usePanelStore((s) => s.isSearchOpen);
+  const toggleSearchOpen = usePanelStore((s) => s.toggleSearchOpen);
+
+  // Auto-expand the left panel whenever the search input is
+  // revealed OR a query is in flight. Cmd+F also calls this path
+  // (the hotkey flips `isSearchOpen` first), so the user never has
+  // to manually un-collapse the panel just to start searching. We
+  // only force-open — never force-close — so the user can
+  // collapse mid-search if they want to peek at the canvas
+  // without losing the query.
+  const setLeftCollapsed = usePanelStore((s) => s.setLeftCollapsed);
+  useEffect(() => {
+    if ((isSearchOpen || isSearchActive) && isLeftCollapsed) {
+      setLeftCollapsed(false);
+    }
+  }, [isSearchOpen, isSearchActive, isLeftCollapsed, setLeftCollapsed]);
+
+  // Mirror the chip whitelist into the search store so chip
+  // toggles also narrow the canvas-wide search request (the
+  // server reads `nodeTypes` and skips non-matching nodes /
+  // edges entirely). The tree below already filters on
+  // `selectedKeys` directly — this effect simply teaches the
+  // search request the same vocabulary, without coupling the
+  // chip UI to search state.
+  //
+  // Translation: plain keys map 1:1 to a CanvasNodeType; the
+  // Office sub-format keys (`office:docx|xlsx|pptx`) all collapse
+  // back to `'office'` because the server's filter is type-level
+  // only. This loses the per-format granularity in search results
+  // (selecting only "Word" still returns matching Excel /
+  // PowerPoint nodes), but the tree-side chips already render
+  // the correct icons in the result list itself, and extending
+  // the wire schema with an `officeFormats` filter is a larger
+  // change than this change should carry.
+  const setSearchNodeTypes = useSearchStore((s) => s.setNodeTypes);
+  useEffect(() => {
+    if (selectedKeys.size === 0) {
+      setSearchNodeTypes([]);
+      return;
+    }
+    const types = new Set<CanvasNodeType>();
+    for (const key of selectedKeys) {
+      if (isOfficeFilterKey(key)) {
+        types.add('office');
+      } else {
+        types.add(key);
+      }
+    }
+    setSearchNodeTypes([...types]);
+  }, [selectedKeys, setSearchNodeTypes]);
 
   const handleToggleKey = useCallback((key: LayerFilterKey) => {
     setSelectedKeys((prev) => {
@@ -226,11 +290,6 @@ export const CanvasLayerPanel = ({
       else next.add(key);
       return next;
     });
-  }, []);
-
-  const handleCloseSearch = useCallback(() => {
-    setIsSearchOpen(false);
-    setQuery('');
   }, []);
 
   // Only show chips for types that actually exist on the canvas, in the
@@ -255,23 +314,11 @@ export const CanvasLayerPanel = ({
     return buildAvailableFilterKeys(presentTypes, presentOfficeFormats);
   }, [nodes, externalPending.length]);
 
-  // Compile the regex once per `query` change. Invalid syntax returns a
-  // null regex plus an `isRegexInvalid` flag; the bar shows a red border
-  // and the filtered list is forced empty (see below) so the UX is
-  // unambiguous — no silent "fallback to substring match".
-  const { regex, isRegexInvalid } = useMemo(() => {
-    if (!query) return { regex: null as RegExp | null, isRegexInvalid: false };
-    try {
-      return {
-        regex: new RegExp(query, 'i'),
-        isRegexInvalid: false,
-      };
-    } catch {
-      return { regex: null as RegExp | null, isRegexInvalid: true };
-    }
-  }, [query]);
-
-  const isFilterActive = query !== '' || selectedKeys.size > 0;
+  // The text query for filtering the tree has been folded into
+  // the canvas-wide search (see `CanvasSearchInput`), so the
+  // tree itself now only filters by the chip whitelist —
+  // matching the historical "chips alone are active" code path.
+  const isFilterActive = selectedKeys.size > 0;
 
   // Canvas layer tree: use original node order (hierarchy-based).
   // We cache per-id item refs by content so that selection-only changes
@@ -304,35 +351,28 @@ export const CanvasLayerPanel = ({
   const flatItemCacheRef = useRef<Map<string, DataSourceTreeItem>>(new Map());
   const filteredFlatItems = useMemo(() => {
     if (!isFilterActive) return null;
-    // Invalid regex → empty list, the bar already shows the danger border.
-    if (query !== '' && isRegexInvalid) return [] as DataSourceTreeItem[];
 
     const prev = flatItemCacheRef.current;
     const next = new Map<string, DataSourceTreeItem>();
     const out: DataSourceTreeItem[] = [];
-    const hasTypeFilter = selectedKeys.size > 0;
     for (const item of layerItems) {
       const t = item.node.type as CanvasNodeType | undefined;
-      // Empty `selectedKeys` means "no type constraint"; otherwise the
-      // chip row acts as a whitelist and the node must match at least
-      // one selected key (per-format for office, plain type otherwise).
-      if (hasTypeFilter) {
-        let matched = false;
-        for (const key of selectedKeys) {
-          if (
-            nodeMatchesFilterKey(
-              t,
-              item.node.data as Record<string, unknown> | undefined,
-              key,
-            )
-          ) {
-            matched = true;
-            break;
-          }
+      // Chip row is a whitelist: node must match at least one
+      // selected key (per-format for office, plain type otherwise).
+      let matched = false;
+      for (const key of selectedKeys) {
+        if (
+          nodeMatchesFilterKey(
+            t,
+            item.node.data as Record<string, unknown> | undefined,
+            key,
+          )
+        ) {
+          matched = true;
+          break;
         }
-        if (!matched) continue;
       }
-      if (regex && !regex.test(item.node.data.label)) continue;
+      if (!matched) continue;
       const cached = prev.get(item.id);
       const flat =
         cached && cached.node === item.node && cached.depth === 0
@@ -343,7 +383,7 @@ export const CanvasLayerPanel = ({
     }
     flatItemCacheRef.current = next;
     return out;
-  }, [layerItems, isFilterActive, isRegexInvalid, query, regex, selectedKeys]);
+  }, [layerItems, isFilterActive, selectedKeys]);
 
   const itemsToRender = isFilterActive ? (filteredFlatItems ?? []) : layerItems;
   const emptyText = isFilterActive ? 'No matching layers' : undefined;
@@ -361,11 +401,10 @@ export const CanvasLayerPanel = ({
       if (item.noteId && knownIds.has(item.noteId)) continue;
       const label = item.fileName.replace(/\.md$/i, '');
       if (hasTypeFilter && !selectedKeys.has('note')) continue;
-      if (regex && !regex.test(label)) continue;
       out.push(buildExternalTreeItem(item, label));
     }
     return out;
-  }, [externalPending, rawNodes, selectedKeys, regex]);
+  }, [externalPending, rawNodes, selectedKeys]);
 
   // Drive the collapse-all toolbar toggle: we need to know whether any
   // frame/group exists at all (to decide if the button renders) and
@@ -411,34 +450,48 @@ export const CanvasLayerPanel = ({
       className="border-edge-default border-r"
       hideHeader
     >
-      {/* Two-row split inside the panel so the scrollbar lane only
-          spans the layer list, not the toolbar. SidebarPanel's own
-          content wrapper still has `overflow-y-auto`, but the inner
-          column here is `h-full` with its own scrolling region — the
-          outer wrapper has no overflow to manage. */}
+      {/* Three-row split inside the panel so the scrollbar lane only
+          spans the tree / result list, not the toolbars above. The
+          search input row is mounted only while `panelStore.isSearchOpen`
+          is true — entered via the search icon in the chip toolbar
+          or the global `Cmd+F` hotkey, dismissed via `Esc` or by
+          re-clicking the icon. The chip toolbar stays mounted in
+          both modes so chip toggles can narrow / widen the search
+          request live (selected chips feed `searchStore.nodeTypes`).
+          The tree below is replaced by the streamed result list once
+          the query is non-empty. SidebarPanel's content wrapper still
+          has `overflow-y-auto`, but the inner column here is `h-full`
+          with its own scrolling region — the outer wrapper has no
+          overflow to manage. */}
       <div className="flex h-full flex-col">
+        {isSearchOpen && (
+          <div className="bg-surface border-edge-default/40 shrink-0 border-b px-2 py-1.5">
+            <CanvasSearchInput />
+          </div>
+        )}
         <LayerFilterBar
-          query={query}
-          onQueryChange={setQuery}
-          isRegexInvalid={isRegexInvalid}
           availableKeys={availableKeys}
           selectedKeys={selectedKeys}
           onToggleKey={handleToggleKey}
-          isSearchOpen={isSearchOpen}
-          onOpenSearch={() => setIsSearchOpen(true)}
-          onCloseSearch={handleCloseSearch}
           hasAnyFrame={hasAnyFrame}
           hasAnyExpandedFrame={hasAnyExpandedFrame}
           onToggleAllFrames={handleToggleAllFrames}
+          isSearchActive={isSearchActive}
+          isSearchOpen={isSearchOpen}
+          onToggleSearch={toggleSearchOpen}
         />
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <CanvasLayerTree
-            items={finalItems}
-            getIcon={renderNodeIcon}
-            getDisplayName={getNodeDisplayName}
-            isFilterActive={isFilterActive}
-            emptyText={emptyText}
-          />
+          {isSearchActive ? (
+            <CanvasSearchResults />
+          ) : (
+            <CanvasLayerTree
+              items={finalItems}
+              getIcon={renderNodeIcon}
+              getDisplayName={getNodeDisplayName}
+              isFilterActive={isFilterActive}
+              emptyText={emptyText}
+            />
+          )}
         </div>
       </div>
     </SidebarPanel>

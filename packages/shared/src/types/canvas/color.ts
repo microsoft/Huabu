@@ -75,11 +75,12 @@ export interface ColorPickerOption {
 
 /**
  * Accent picker swatches **with** a leading "Transparent" sentinel.
- * Used by node types where "no accent / no fill" is a meaningful and
- * common selection (currently `text`). The non-text node toolbar uses
- * `ACCENT_PALETTE` directly — every other node type always has at least
- * a neutral surface, so a Transparent entry would be visually identical
- * to picking nothing and only adds noise.
+ * Every node renders with a null accent by default (a neutral surface or
+ * fully transparent shell), so the picker always needs a swatch that can
+ * represent that "no accent" state — otherwise selecting a colour would
+ * be a one-way trip with no path back to the default. The legacy palette
+ * without a transparent entry remains exported as `ACCENT_PALETTE` for
+ * non-picker call sites (edge stroke, sketch stroke colour, etc.).
  */
 export const ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT: readonly ColorPickerOption[] =
   [
