@@ -1,60 +1,44 @@
 /**
- * ACP Preprocessor — intent translator.
+ * ACP Preprocessor — deterministic prompt builder.
  *
  * The external agent (Claude Code, Copilot CLI, …) **never sees the
- * canvas**. This module runs the dedicated `acp-preprocessor` agent
- * (see `prompt/agents/acp-preprocessor/AGENT.md`) which receives the
- * user's raw message + the selected-node refs, decides whether to
- * explore the canvas via its read-only tool surface
- * (`get_canvas_outline` / `inspect_nodes` / `inspect_edges` / `read`
- * / `grep` / `find` / `ls`), and emits an {@link ExternalAgentPrompt}:
- * a self-contained `task` briefing the external agent can act on with
- * no other context, plus a small `attachments` list reserved for
- * cases where verbatim file access is essential.
+ * canvas** directly. This module turns the raw user message plus the
+ * user's node selection into an {@link ExternalAgentPrompt} *without
+ * any LLM call*:
  *
- * Why a sub-agent instead of a one-shot LLM call:
- *   - The preprocessor used to inline a fixed-size slice of every
- *     selected node's body (≤ 16 KB). That ignored the spatial /
- *     edge context and forced the route to pay the cost of every
- *     selected node even when the user's intent didn't actually
- *     need it. Pushing the decision into the agent lets it skip
- *     reads for trivial turns and dig deeper (read neighbours,
- *     grep across nodes) when the user's request demands it.
- *   - The system prompt now lives alongside every other agent in
- *     `prompt/agents/<id>/AGENT.md` and reuses the canvas SKILL
- *     verbatim via `{{include:skills/canvas/SKILL.md}}` — no more
- *     copy-paste drift between the preprocessor's mental model and
- *     the read-only canvas tooling.
+ *   - `task` is the user's message forwarded **verbatim**.
+ *   - `selectedNodes` is a metadata-only table (node ID + type +
+ *     label) of whatever the user had selected. Content is **not**
+ *     inlined and files are **not** attached — the external agent
+ *     pulls node bodies on demand through the Huabu Sideband Tool
+ *     (`read-node <node-id>`), documented in the serialized prompt's
+ *     `## Canvas Tools (Sideband)` section.
  *
- * Verbatim reading is still a fallback (e.g. "review this code",
- * binary artifacts, oversize nodes). The agent's prompt explains
- * when to attach vs. synthesise; {@link parsePromptJson} validates
- * the resulting paths against the known canvas surface.
+ * Why deterministic instead of a preprocessor sub-agent:
+ *   - An earlier design ran a dedicated `acp-preprocessor` LLM that
+ *     explored the canvas (read-only tools) and synthesised a briefing.
+ *     That paid an extra model round-trip on every turn, added latency,
+ *     was non-deterministic, and could fail to emit valid JSON. Since
+ *     the sideband tool already lets the external agent fetch node
+ *     content by ID, all we need to hand it deterministically is the
+ *     user's words + the IDs of what they selected.
  *
- * Attachments render as absolute disk paths so OS-native `Read`
- * tools (Copilot CLI) and ACP-fs-bridging agents (Claude Code) both
- * reach the file. See {@link serializePrompt} for the wire-format
- * trade-off.
+ * The serialized wire text is rendered from the standalone template
+ * `prompt/external-agent/prompt.md` via {@link renderPromptFile}; the
+ * per-node table rows are assembled here in TS (the in-house template
+ * engine has no loops) and injected as a single variable.
  *
- * Failure model: callers `try`/`catch` and fall back to the raw user
- * text. The route-level service emits a `prepared_prompt` SSE event
- * with `prompt: null` + an `error` description so the UI can replace
- * its "Preparing…" placeholder with a visible failure note.
+ * Failure model: this builder does no network/LLM I/O and effectively
+ * cannot fail, but callers still `try`/`catch` and fall back to the raw
+ * user text via {@link serializeRawPrompt} for safety. The route-level
+ * service emits a `prepared_prompt` SSE event so the UI can render the
+ * PreparedPromptCard.
  */
 
-import path from 'node:path';
-
-import { loadAgent } from '../../../prompt/agents/loader.js';
-import { runAgent } from '../agent.service.js';
+import { renderPromptFile } from '../../../prompt/index.js';
 import { buildAgentNodeRef } from '../node-ref.js';
-import { ACP_CANVAS_VFS_PREFIX } from './capabilities/fs.js';
 
 import type { AgentNodeRef } from '../node-ref.js';
-import type {
-  AssistantMessage,
-  Context,
-  TextContent,
-} from '@earendil-works/pi-ai';
 import type {
   AgentChatContext,
   ExternalAgentPrompt,
@@ -73,6 +57,9 @@ import type { FastifyBaseLogger } from 'fastify';
  */
 export const SLASH_COMMAND_RE = /^\/[a-zA-Z][\w-]*(?:\s|$)/;
 
+/** PROMPT_ROOT-relative path of the external-agent prompt template. */
+const PROMPT_TEMPLATE = 'external-agent/prompt.md';
+
 // ─── Public API ───────────────────────────────────────────────────────────
 
 export interface PreparePromptInput {
@@ -83,24 +70,13 @@ export interface PreparePromptInput {
   /** Canvas chat context for this turn (may be omitted when client didn't send one). */
   canvasContext?: AgentChatContext;
   /**
-   * Sediment canvasId for the current thread. Forwarded to
-   * `runAgent` so the preprocessor's read-only canvas tools
-   * (`get_canvas_outline`, `inspect_nodes`, `read`, …) resolve
-   * against the correct canvas root. Omit only for the no-canvas
-   * edge case — the agent then runs without canvas tooling and is
-   * limited to whatever it can synthesise from `rawMessage` alone.
+   * Sediment canvasId for the current thread. Used only to gate the
+   * `## Canvas Tools (Sideband)` section: the Huabu Sideband Tool is
+   * only reachable when the thread is bound to a canvas. Omit for the
+   * no-canvas edge case — the agent then gets `task` + selected-node
+   * metadata but no sideband instructions.
    */
   canvasId?: string;
-  /**
-   * Absolute on-disk path of the canvas directory. When supplied,
-   * {@link serializePrompt} renders `attachments[].path` as **real
-   * absolute on-disk paths** under this root so OS-native `Read`
-   * tools (Copilot CLI) and ACP-fs-bridging agents (Claude Code)
-   * both reach the file. When omitted (no-canvas edge case),
-   * `serializePrompt` falls back to the `/canvas/<rel>` virtual
-   * prefix. In practice service.ts always supplies `canvasRoot`.
-   */
-  canvasRoot?: string;
   logger: FastifyBaseLogger;
 }
 
@@ -116,29 +92,22 @@ export interface PreparePromptResult {
 }
 
 /**
- * Run the preprocessor sub-agent. Throws on network / parse / shape
- * errors; callers should catch and fall back to
- * {@link serializeRawPrompt}.
+ * Build the {@link ExternalAgentPrompt} deterministically from the raw
+ * user message + node selection. Synchronous and free of network/LLM
+ * I/O (it only reads the on-disk prompt template).
  */
-export async function prepareExternalAgentPrompt(
+export function prepareExternalAgentPrompt(
   input: PreparePromptInput,
-): Promise<PreparePromptResult> {
-  const { rawText, agentAlias, canvasContext, canvasId, canvasRoot, logger } =
-    input;
+): PreparePromptResult {
+  const { rawText, agentAlias, canvasContext, canvasId, logger } = input;
 
   // ── Slash-command short-circuit ────────────────────────────────────
   //
   // ACP agents recognise slash commands (`/<name> <args>`) natively
-  // inside `session/prompt` text. The intent-translator LLM rewrites
-  // would corrupt that wire format — e.g. wrap `/compact` in prose,
-  // strip the leading `/`, or attach noise. When the raw user input
-  // starts with a slash command we forward it verbatim and skip the
-  // sub-agent run entirely. Cheaper AND correct.
-  //
-  // Match rule: starts with `/`, followed by an ASCII letter and zero
-  // or more word/dash chars, then whitespace OR end of input. Avoids
-  // false positives for forward-slashes inside URLs / paths the user
-  // might paste mid-sentence.
+  // inside `session/prompt` text. Wrapping them in our `## Selected
+  // Nodes` / sideband scaffolding could corrupt that wire format, so
+  // when the raw user input starts with a slash command we forward it
+  // verbatim with no extra sections.
   if (SLASH_COMMAND_RE.test(rawText.trim())) {
     const trimmed = rawText.trim();
     logger.debug(
@@ -146,10 +115,7 @@ export async function prepareExternalAgentPrompt(
       '[acp/preprocessor] slash command detected — forwarding verbatim',
     );
     return {
-      // Surface as a minimal ExternalAgentPrompt so the UI's
-      // PreparedPromptCard still has something to render. No
-      // attachments by design — slash commands speak for themselves.
-      prompt: { task: trimmed, attachments: [] },
+      prompt: { task: trimmed, selectedNodes: [] },
       serialized: trimmed,
     };
   }
@@ -158,185 +124,83 @@ export async function prepareExternalAgentPrompt(
     ? flattenSelection(canvasContext.selectedNodes)
     : [];
 
-  // Build the input the agent receives. Note we deliberately pass
-  // only the *refs* (id + filename + label + type) and not the body:
-  // the agent decides per-turn whether it needs the content and uses
-  // its `read` tool to fetch it. This replaces the old "always inline
-  // every selected body up to 16 KB" heuristic and lets trivial turns
-  // (general questions, slash-style commands the LLM rewrites) skip
-  // the read cost entirely.
-  const userPayload = {
-    rawMessage: rawText,
-    agentAlias,
+  const prompt: ExternalAgentPrompt = {
+    task: rawText.trim(),
     selectedNodes: selectedRefs.map((ref) => ({
-      id: ref.id,
+      nodeId: ref.id,
       type: ref.type,
       ...(ref.label ? { label: ref.label } : {}),
-      filename: ref.filename,
     })),
   };
-
-  const cfg = loadAgent('acp-preprocessor');
-
-  // Isolated context — the preprocessor must NEVER share state with
-  // the main ACP thread's `context.messages`. `runAgent` mutates the
-  // context in place (replaces its messages with the agent's final
-  // transcript); keeping it scoped here means the only thing that
-  // escapes is the parsed JSON we return.
-  const piContext: Context = {
-    systemPrompt: cfg.systemPrompt,
-    messages: [
-      {
-        role: 'user',
-        content: JSON.stringify(userPayload, null, 2),
-        timestamp: Date.now(),
-      },
-    ],
-  };
-
-  // Drive the sub-agent loop. We discard every stream event — the UI
-  // never sees the preprocessor's intermediate tool calls or partial
-  // text; it only sees the final `prepared_prompt` SSE that
-  // service.ts emits after we return. `FastifyBaseLogger.info`
-  // satisfies the `AgentLogger` shape (single-string form).
-  for await (const _ev of runAgent({
-    scope: 'acp-preprocessor',
-    canvasId,
-    context: piContext,
-    logger: { info: (msg) => logger.info(msg) },
-    maxIterations: cfg.runtime.maxIterations,
-  })) {
-    // Intentionally empty: drain to completion.
-  }
-
-  // Extract the final assistant text from the mutated context. The
-  // agent's final turn must emit the ExternalAgentPrompt JSON
-  // envelope as a plain text message (see AGENT.md for the rule);
-  // any tool-call-only or empty assistant message is a contract
-  // violation and falls through to the parse-error branch below.
-  const lastAssistant = [...piContext.messages]
-    .reverse()
-    .find((m): m is AssistantMessage => m.role === 'assistant');
-  const raw = lastAssistant
-    ? lastAssistant.content
-        .filter((b): b is TextContent => b.type === 'text')
-        .map((b) => b.text)
-        .join('')
-    : '';
-
-  const prompt = parsePromptJson(raw, selectedRefs);
-  if (!prompt) {
-    throw new Error(
-      '[acp/preprocessor] agent response was not valid ExternalAgentPrompt JSON',
-    );
-  }
 
   logger.debug(
     {
       agentAlias,
       taskLength: prompt.task.length,
-      attachmentsCount: prompt.attachments.length,
+      selectedNodesCount: prompt.selectedNodes.length,
     },
     '[acp/preprocessor] prepared prompt',
   );
 
   return {
     prompt,
-    serialized: serializePrompt(prompt, {
-      canvasRoot,
-      sidebandEnabled: !!canvasId,
-    }),
+    serialized: serializePrompt(prompt, { sidebandEnabled: !!canvasId }),
   };
 }
 
 /**
  * Convert an {@link ExternalAgentPrompt} into the plain-text payload
- * sent over ACP `session/prompt`. Format is deliberately simple
- * markdown so any agent's text rendering picks it up cleanly.
+ * sent over ACP `session/prompt`, rendering the standalone template at
+ * {@link PROMPT_TEMPLATE}.
  *
- * Most turns should produce **just `task`** — the intent-translator
- * design synthesises selected-node content inline. The optional
- * `## Attachments` section is rendered only when the preprocessor
- * decided verbatim access is essential (large nodes, code-review
- * asks, `.artifacts/` files).
- *
- * Path rendering is **gated by `canvasRoot`** because not every agent
- * honours ACP's `fs/read_text_file` capability:
- *
- *   - **With `canvasRoot`** (normal case): each `attachments[].path`
- *     is joined onto `canvasRoot` to produce a real absolute on-disk
- *     path (e.g. `/home/me/sediment-data/huabu/<dir>/nodes/foo.md`).
- *     Empirically Copilot CLI's `Read` tool **never** calls
- *     `fs/read_text_file` — it always uses the OS directly (and asks
- *     `session/request_permission` for paths outside its trusted
- *     dirs). Feeding it absolute paths is the only way it can reach
- *     canvas content. Spec-compliant agents (Claude Code) read those
- *     same absolute paths fine via either channel.
- *
- *   - **Without `canvasRoot`** (no-canvas edge case): paths are
- *     rendered under the virtual prefix `/canvas/<rel>` so agents
- *     that DO route Read through ACP fs hit the `fs/read_text_file`
- *     handler in `acp/capabilities/fs.ts`. Reserved for threads
- *     without a bound canvas; in practice service.ts always supplies
- *     `canvasRoot`.
- *
- * Trade-off: the absolute-path mode effectively re-extends the
- * agent's OS reach into the canvas dir, so the `/canvas/` VFS
- * sandbox is **bypassed** by native-fs agents — they read canvas
- * files directly via syscall and the allowlist in
- * `acp/capabilities/fs.ts` never gets a chance to refuse. Real
- * isolation against an adversarial agent would require OS-level
- * sandboxing (FUSE / containers); ACP fs capabilities alone are a
- * cooperative protocol.
- *
- * Either way `attachments[].path` itself stays canvas-relative so
- * storage / UI / future internal consumers stay free of wire concerns.
+ * The template emits the verbatim `task`, an optional `## Selected
+ * Nodes` table (IDs / types / labels of the selected nodes so the
+ * agent can read or update them by ID) and an optional `## Canvas
+ * Tools (Sideband)` section (gated by `sidebandEnabled`) documenting
+ * the Huabu Sideband Tool. The whole markdown table is assembled here
+ * and injected as `selectedNodesTable` because the template engine has
+ * no loop construct.
  */
 export function serializePrompt(
   prompt: ExternalAgentPrompt,
-  opts: { canvasRoot?: string; sidebandEnabled?: boolean } = {},
+  opts: { sidebandEnabled?: boolean } = {},
 ): string {
-  const lines: string[] = [prompt.task.trim()];
-  if (prompt.attachments.length > 0) {
-    lines.push('', '## Attachments', '');
-    lines.push(
-      'Read each file below before answering — they were attached because verbatim content is required:',
-      '',
-    );
-    for (const ref of prompt.attachments) {
-      const wirePath = opts.canvasRoot
-        ? path.join(opts.canvasRoot, ref.path)
-        : `${ACP_CANVAS_VFS_PREFIX}${ref.path}`;
-      const nodeHint =
-        opts.sidebandEnabled && ref.nodeId
-          ? ` (node ID: \`${ref.nodeId}\`)`
-          : '';
-      lines.push(`- \`${wirePath}\`${nodeHint} — ${ref.reason}`);
-    }
-  }
-  if (opts.sidebandEnabled) {
-    lines.push('', '## Canvas Tools (Sideband)', '');
-    lines.push(
-      'You have the Huabu Sideband Tool (HST) available for reading/writing canvas nodes and querying the built-in agent.',
-      '',
-      'Usage: `node ${AGENTLET_SIDEBAND_DIR}/huabu-sideband-tool.mjs <command> [args...]`',
-      '',
-      'Commands:',
-      "- `read-node <node-id>` — Download a node's content to a local file, prints file path to stdout",
-      '- `write-node --type <type> <content-file>` — Create a new canvas node from a file',
-      '- `write-node --id <node-id> <content-file>` — Update an existing node from a file',
-      '- `ask-agent "<prompt>"` — Ask the built-in canvas agent a question (supports complex reasoning, spatial queries, multi-node operations)',
-      '',
-      'Run with `--help` for full usage details on each command.',
-    );
-  }
-  return lines.join('\n');
+  const hasNodes = prompt.selectedNodes.length > 0;
+  const sideband = !!opts.sidebandEnabled;
+
+  // The full markdown table (header + separator + rows) is assembled
+  // here rather than in the template: the in-house engine has no loop
+  // construct, and keeping the table out of the `.md` also stops the
+  // markdown formatter from reflowing / splitting it on save.
+  const selectedNodesTable = hasNodes
+    ? [
+        '| Node ID | Type | Label |',
+        '| --- | --- | --- |',
+        ...prompt.selectedNodes.map((node) => {
+          const label = node.label ? escapeCell(node.label) : '—';
+          return `| \`${node.nodeId}\` | ${node.type} | ${label} |`;
+        }),
+      ].join('\n')
+    : '';
+
+  const selectedNodesIntro = sideband
+    ? 'The user selected the canvas nodes below. Read any you need with the Huabu Sideband Tool (`read-node <node-id>`); update them with `write-node --id <node-id>`.'
+    : 'The user selected the canvas nodes below.';
+
+  return renderPromptFile(PROMPT_TEMPLATE, {
+    task: prompt.task.trim(),
+    // Conditional-block flags: any non-empty string keeps the block.
+    selectedNodes: hasNodes ? '1' : '',
+    sideband: sideband ? '1' : '',
+    selectedNodesIntro,
+    selectedNodesTable,
+  });
 }
 
 /**
- * Fallback used when the preprocessor throws: just hand the raw user
- * text straight through. Kept here so the route layer doesn't have to
- * know about the prompt shape.
+ * Fallback used when the caller decides to bypass the structured
+ * prompt: just hand the raw user text straight through. Kept here so
+ * the route layer doesn't have to know about the prompt shape.
  */
 export function serializeRawPrompt(rawText: string): string {
   return rawText;
@@ -357,68 +221,7 @@ function flattenSelection(nodes: WireSelectionNode[]): AgentNodeRef[] {
   return refs;
 }
 
-function truncate(s: string, max: number): string {
-  return s.length > max ? `${s.slice(0, max)}…` : s;
-}
-
-/**
- * Parse the LLM's JSON output into an ExternalAgentPrompt, clipping
- * malformed entries. Returns `null` if the JSON itself is unusable.
- * `selectedRefs` is used to validate `attachments[].path` against the
- * known canvas surface (selected node filenames + a small allowlist).
- */
-function parsePromptJson(
-  raw: string,
-  selectedRefs: AgentNodeRef[],
-): ExternalAgentPrompt | null {
-  const cleaned = raw
-    .trim()
-    .replace(/^```(?:json)?\s*/, '')
-    .replace(/\s*```$/, '');
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(cleaned);
-  } catch {
-    return null;
-  }
-
-  if (!parsed || typeof parsed !== 'object') return null;
-  const obj = parsed as Record<string, unknown>;
-  const task = typeof obj.task === 'string' ? obj.task.trim() : '';
-  if (!task) return null;
-
-  const knownPaths = new Set<string>(selectedRefs.map((r) => r.filename));
-  const pathToNodeId = new Map<string, string>(
-    selectedRefs.map((r) => [r.filename, r.id]),
-  );
-
-  const rawRefs = Array.isArray(obj.attachments) ? obj.attachments : [];
-  const attachments: ExternalAgentPrompt['attachments'] = [];
-  for (const r of rawRefs) {
-    if (!r || typeof r !== 'object') continue;
-    const ref = r as Record<string, unknown>;
-    const refPath = typeof ref.path === 'string' ? ref.path.trim() : '';
-    if (!refPath) continue;
-    // Allowlist mirrors the runtime fs/read_text_file handler
-    // (`capabilities/fs.ts:isAllowedRead`): only canvas nodes and
-    // artifact files. canvas.json is intentionally excluded — the
-    // canvas structure was already synthesised into `task`.
-    const allowed =
-      knownPaths.has(refPath) ||
-      refPath.startsWith('nodes/') ||
-      refPath.startsWith('.artifacts/');
-    if (!allowed) continue;
-    const rawReason = typeof ref.reason === 'string' ? ref.reason.trim() : '';
-    attachments.push({
-      path: refPath,
-      reason: rawReason ? truncate(rawReason, 80) : 'verbatim content required',
-      ...(pathToNodeId.has(refPath)
-        ? { nodeId: pathToNodeId.get(refPath) }
-        : {}),
-    });
-    if (attachments.length >= 8) break;
-  }
-
-  return { task, attachments };
+/** Escape pipe / newline chars so a label can't break the markdown table. */
+function escapeCell(s: string): string {
+  return s.replace(/\r?\n/g, ' ').replace(/\|/g, '\\|').trim();
 }

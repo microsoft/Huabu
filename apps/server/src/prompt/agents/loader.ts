@@ -57,13 +57,7 @@ import type { NodeOrigin } from '@sediment/shared';
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 /** Agent identifiers backed by an `AGENT.md` config file. */
-export type AgentId =
-  | 'ask'
-  | 'operate'
-  | 'intent'
-  | 'sketch'
-  | 'memory'
-  | 'acp-preprocessor';
+export type AgentId = 'ask' | 'operate' | 'intent' | 'sketch' | 'memory';
 
 const VALID_AGENT_IDS: ReadonlySet<AgentId> = new Set<AgentId>([
   'ask',
@@ -71,7 +65,6 @@ const VALID_AGENT_IDS: ReadonlySet<AgentId> = new Set<AgentId>([
   'intent',
   'sketch',
   'memory',
-  'acp-preprocessor',
 ]);
 
 /** Runtime knobs forwarded to `runAgent` / direct LLM callers. */
@@ -433,6 +426,55 @@ export function renderAgentTemplate(
     );
   }
   return renderTemplate(tpl, vars).replace(/\n$/, '');
+}
+
+/**
+ * Render a standalone prompt template file that is **not** attached to
+ * any `AgentId` / `messageTemplates` entry.
+ *
+ * `relPath` is resolved against {@link PROMPT_ROOT} (the shared parent
+ * of `agents/` and `skills/`) and read from disk, then rendered with
+ * the same Mustache-flavoured engine as the agent prompts — so it
+ * supports `{{include:<rel>}}`, `{{#key}}…{{/key}}` conditional blocks
+ * and `{{key}}` substitution. Use this for context that Sediment
+ * assembles deterministically in code (e.g. the external-agent prompt)
+ * where the surrounding prose should live next to the prompt tree
+ * rather than being string-concatenated in a service file.
+ *
+ * Throws (via {@link resolveTemplateInclude}-style checks) on path
+ * traversal / absolute paths / missing files so a typo fails loudly at
+ * the call site. The trailing newline is stripped — callers control
+ * their own separators.
+ */
+export function renderPromptFile(
+  relPath: string,
+  vars: Record<string, string> = {},
+): string {
+  const trimmed = relPath.trim();
+  if (!trimmed) {
+    throw new Error(
+      `[agent-loader] renderPromptFile requires a non-empty path`,
+    );
+  }
+  if (path.isAbsolute(trimmed)) {
+    throw new Error(
+      `[agent-loader] renderPromptFile path must be PROMPT-ROOT relative, not absolute: ${trimmed}`,
+    );
+  }
+  const resolved = path.resolve(PROMPT_ROOT, trimmed);
+  const inside = path.relative(PROMPT_ROOT, resolved);
+  if (inside.startsWith('..') || path.isAbsolute(inside)) {
+    throw new Error(
+      `[agent-loader] renderPromptFile path escapes the prompt root (${PROMPT_ROOT}): ${trimmed}`,
+    );
+  }
+  if (!existsSync(resolved)) {
+    throw new Error(
+      `[agent-loader] renderPromptFile → file not found at ${resolved}`,
+    );
+  }
+  const body = readFileSync(resolved, 'utf8');
+  return renderTemplate(body, vars).replace(/\n$/, '');
 }
 
 // ─── Loader ─────────────────────────────────────────────────────────────────

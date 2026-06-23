@@ -2,6 +2,25 @@
 
 每次重要功能变更都会记录在此文件中，按时间倒序排列。
 
+## 2026-06-23 · 外部 Agent：上下文编排改为确定性构建（去掉预处理 LLM）
+
+**What Changed**
+
+简化外部（ACP）agent 的 prompt 编排：彻底移除 `acp-preprocessor` 这个预处理 LLM 子 agent。之前每次给外部 agent 发消息，都要先跑一个内部 LLM 去探索画布、合成 `task` briefing、再产出 `ExternalAgentPrompt` JSON（`task` + `attachments`）；这带来一次额外的模型往返、延迟、不确定性和 JSON 解析失败的风险。
+
+现在 prompt 完全**确定性**构建，无任何 LLM 调用：
+
+1. **`task`** = 用户原始消息，原样转发（slash command 仍走原有短路逻辑，逐字下发）。
+2. **`selectedNodes`** = 用户选中节点的元数据表（`nodeId` / `type` / `label`），不再内联节点正文、也不再走文件 attachment。外部 agent 按需用 Huabu Sideband Tool（`read-node <node-id>`）自取内容。
+3. 下发文本由独立的 prompt 模板 `src/prompt/external-agent/prompt.md` 渲染：`task` + `## Selected Nodes` 表格 + `## Canvas Tools (Sideband)`（仅在绑定画布时出现）。模板用仓库自带的 Mustache 风格引擎（`{{var}}` / `{{#block}}` / `{{include}}`），逐行表格在 TS 里拼好后注入。
+
+**Notes**
+
+- 类型 `ExternalAgentPrompt` **原地变更**：`attachments[]` → `selectedNodes[] { nodeId, type, label? }`。聊天历史里旧的 `[SYSTEM PreparedPrompt]` sidecar（含 `attachments`）在 UI 卡片里有兜底渲染（`selectedNodes ?? []`），不会崩。
+- `prepareExternalAgentPrompt` 现在是同步函数；`runAcpAgent` 不再 `await` 它，也不再传 `canvasRoot`（去掉了把 attachment 渲染成绝对盘符路径的逻辑）。
+- 移除了 `acp-preprocessor` agent（`AgentId` / `ToolScope` 枚举 + `AGENT.md`）。
+- 改动文件：[agent.ts](packages/shared/src/types/agent/agent.ts)、[preprocessor.ts](apps/server/src/modules/agent/acp/preprocessor.ts)、[loader.ts](apps/server/src/prompt/agents/loader.ts)（导出 `renderPromptFile`）、[external-agent/prompt.md](apps/server/src/prompt/external-agent/prompt.md)（新增）、[service.ts](apps/server/src/modules/agent/acp/service.ts)、[tools/index.ts](apps/server/src/modules/agent/tools/index.ts)、[PreparedPromptMessage.tsx](apps/web/src/components/Messages/PreparedPromptMessage.tsx)。
+
 ## 2026-06-22 · Agent Sideband：HST 工具能正常下发、write-node 正确回传节点 ID
 
 **What Changed**

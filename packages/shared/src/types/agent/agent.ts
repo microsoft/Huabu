@@ -16,6 +16,7 @@ import type {
   AcpToolCallStatus,
   AcpToolKind,
 } from './acp-tool.js';
+import type { CanvasNodeType } from '../canvas/node.js';
 
 // ==================== Agent Modes ====================
 
@@ -137,24 +138,29 @@ export interface AgentErrorEventData {
 export interface AgentEndEventData {}
 
 /**
- * Structured rewrite of a raw user message for an external (ACP) agent.
+ * Structured prompt handed to an external (ACP) agent.
  *
- * `task` is a self-contained briefing — the external agent should be
- * able to act on it alone, with no visibility into the canvas.
- * `attachments` is a fallback channel for payloads that must be read
- * verbatim (paths relative to the canvas directory).
+ * Built **deterministically** from the raw user message + the canvas
+ * selection — no preprocessing LLM is involved. `task` is the user's
+ * message forwarded verbatim. `selectedNodes` is a metadata-only table
+ * of the nodes the user had selected; the external agent fetches their
+ * content on demand through the Huabu Sideband Tool (`read-node <id>`)
+ * rather than receiving inlined bodies or file attachments.
  */
 export interface ExternalAgentPrompt {
-  /** Self-contained task description handed to the external agent. */
+  /** The user's raw message, forwarded verbatim. */
   task: string;
-  /** Files the external agent MUST read verbatim before acting. */
-  attachments: Array<{
-    /** Path relative to the canvas directory. */
-    path: string;
-    /** Why verbatim reading is required (≤ ~80 chars). */
-    reason: string;
-    /** Canvas node ID (when the attachment maps to a known node). */
-    nodeId?: string;
+  /**
+   * Metadata for the nodes the user had selected. Content is NOT
+   * inlined — the agent reads it on demand via `read-node <nodeId>`.
+   */
+  selectedNodes: Array<{
+    /** Canvas node ID — pass straight to `read-node` / `write-node --id`. */
+    nodeId: string;
+    /** Node type (e.g. `note`, `image`). */
+    type: CanvasNodeType;
+    /** Display label, when the node has one. */
+    label?: string;
   }>;
 }
 
