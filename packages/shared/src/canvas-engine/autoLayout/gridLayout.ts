@@ -63,7 +63,7 @@ const MIN_GAP = 8;
  *
  * Axis-specific: columns are usually much wider than rows are tall, so a
  * generous 40px floor reads well between columns but would swallow the
- * top of a (shorter) row �?making a cursor in a row's upper area target
+ * top of a (shorter) row — making a cursor in a row's upper area target
  * the gap above it. Rows therefore use a smaller floor.
  */
 const INSERT_BETWEEN_MIN_HALF_COLUMN = 40;
@@ -185,22 +185,22 @@ function clampInt(raw: number, lo: number, hi: number): number {
  * Assign each child to a track index (0..count-1):
  *   1. Honour the stored `frameSlot` when present.
  *   2. Unassigned children go into the track with the fewest items
- *      (ties �?first such track).
+ *      (ties → first such track).
  *   3. Resolve empty tracks per `emptyTrackPolicy`:
- *      - `'fill'`    �?pull the nearest item from the busiest track into
+ *      - `'fill'`    — pull the nearest item from the busiest track into
  *        each empty one (the "no empty track" invariant). Used when the
  *        caller explicitly asked for N tracks (e.g. the count stepper)
  *        and wants the children spread to fill them.
- *      - `'compact'` �?drop empty tracks instead, renumbering survivors
+ *      - `'compact'` — drop empty tracks instead, renumbering survivors
  *        to a contiguous range. Used for organic child changes (a
  *        deletion that empties a track, a drag that vacates one): the
  *        track simply disappears rather than being back-filled.
  *
  * Returns the assignment plus the **effective** track count, which is
- * `count` for `'fill'` and �?`count` for `'compact'`.
+ * `count` for `'fill'` and ≤ `count` for `'compact'`.
  *
- * `sortKey(child)` decides the natural ordering �?Y for column mode,
- * X for row mode �?used both for tie-breaking and "nearest" selection.
+ * `sortKey(child)` decides the natural ordering — Y for column mode,
+ * X for row mode — used both for tie-breaking and "nearest" selection.
  */
 function assignTrackSlots(
   children: ChildSlot[],
@@ -212,7 +212,7 @@ function assignTrackSlots(
   const buckets: string[][] = Array.from({ length: count }, () => []);
   const assignment = new Map<string, number>();
 
-  // Pass 1 �?honour stored slots.
+  // Pass 1 — honour stored slots.
   const unassigned: ChildSlot[] = [];
   for (const child of ordered) {
     const raw = (child.node.data as { frameSlot?: number } | undefined)
@@ -226,7 +226,7 @@ function assignTrackSlots(
     }
   }
 
-  // Pass 2 �?place leftovers into the least-full track.
+  // Pass 2 — place leftovers into the least-full track.
   for (const child of unassigned) {
     let target = 0;
     for (let i = 1; i < count; i += 1) {
@@ -236,7 +236,7 @@ function assignTrackSlots(
     assignment.set(child.node.id, target);
   }
 
-  // Pass 3 �?resolve empty tracks (fill vs. compact).
+  // Pass 3 — resolve empty tracks (fill vs. compact).
   if (emptyTrackPolicy === 'fill') {
     rebalanceEmptyTracks(buckets, count, assignment);
     return { assignment, count };
@@ -259,7 +259,7 @@ function rebalanceEmptyTracks(
     const emptyIdx = buckets.findIndex((b) => b.length === 0);
     if (emptyIdx === -1) return;
 
-    // Nearest track with �?2 items.
+    // Nearest track with ≥ 2 items.
     let src = -1;
     let bestDist = Number.POSITIVE_INFINITY;
     for (let i = 0; i < count; i += 1) {
@@ -272,7 +272,7 @@ function rebalanceEmptyTracks(
     }
     if (src === -1) return;
 
-    // Move the *last* item �?keeps remaining items in their original
+    // Move the *last* item — keeps remaining items in their original
     // order while still satisfying the invariant.
     const moved = buckets[src].pop();
     if (!moved) return;
@@ -285,7 +285,7 @@ function rebalanceEmptyTracks(
  * Drop empty tracks and renumber the survivors to a contiguous
  * `0..M-1` range, preserving order (so column 0 stays leftmost).
  * Rewrites `assignment` in place and returns the resulting track
- * count `M` (�?1 whenever there is at least one item).
+ * count `M` (≥ 1 whenever there is at least one item).
  */
 function compactEmptyTracks(
   buckets: string[][],
@@ -298,7 +298,7 @@ function compactEmptyTracks(
     remap.set(i, next);
     next += 1;
   }
-  // No empty track in range �?identity, nothing to renumber.
+  // No empty track in range — identity, nothing to renumber.
   if (next === buckets.length) return buckets.length;
   for (const [id, slot] of assignment) {
     const mapped = remap.get(slot);
@@ -545,10 +545,10 @@ export function applyRowLayout(
  * Result of mapping a drop point inside a structured frame to a target
  * track.
  *
- *  - `into-existing` �?drop into an existing track at `slot` (range
+ *  - `into-existing` — drop into an existing track at `slot` (range
  *    `[0, count - 1]`). Only the dragged child's `frameSlot` changes;
  *    siblings stay put.
- *  - `insert-new`    �?create a brand-new track at `slot` (range
+ *  - `insert-new`    — create a brand-new track at `slot` (range
  *    `[0, count]`; `count` means append at the end). Every existing
  *    child with `frameSlot >= slot` must be shifted by +1 by the
  *    caller, the dragged child takes `slot`, and the frame's
@@ -576,17 +576,19 @@ export type StructuredDropTarget =
  *    excluding it would synthesise a fake gap right where the user is
  *    releasing.
  *
- * Classification rules:
+ * Classification rules (padding here means the per-axis `padX`
+ * derived from the median of child widths — see {@link paddingFromExtent}):
  *
- *  1. Cursor in the left padding (`x < FRAME_PADDING`) �? *     `insert-new` at slot `0` (prepend).
+ *  1. Cursor in the left padding (`x < padX`) →
+ *     `insert-new` at slot `0` (prepend).
  *  2. Cursor in the right padding
- *     (`x > frameWidth - FRAME_PADDING`) �?`insert-new` at slot
+ *     (`x > frameWidth - padX`) → `insert-new` at slot
  *     `count` (append).
  *  3. Cursor in the gap between two **non-empty** adjacent columns
- *     (`c` and `c + 1`) �?`insert-new` at slot `c + 1`. Gaps that
+ *     (`c` and `c + 1`) → `insert-new` at slot `c + 1`. Gaps that
  *     touch an empty column are ignored (the empty side already
  *     provides an unused slot).
- *  4. Otherwise �?`into-existing` at the column whose centre is
+ *  4. Otherwise → `into-existing` at the column whose centre is
  *     closest to the cursor. Empty columns are not candidates. If no
  *     non-empty columns exist (first-ever drop into a fresh frame),
  *     fall back to slot `0`.
@@ -796,8 +798,8 @@ export function pickRowDropTarget(
 const GHOST_TRACK_FALLBACK = 160;
 
 /** Cross thickness (flow units) of the `into-existing` insertion
- *  caret's hit band. The visible caret �?a full-width line with end
- *  brackets and a centre plus �?is drawn at a fixed pixel size by the
+ *  caret's hit band. The visible caret — a full-width line with end
+ *  brackets and a centre plus — is drawn at a fixed pixel size by the
  *  overlay; this constant only positions the band on the insertion gap
  *  so a tall / wide dragged node can never occlude its neighbours. */
 const INSERT_CARET_THICKNESS = 2;
@@ -817,12 +819,12 @@ export interface DraggedNodeRect {
  * Frame-local rect describing where a live drag would land inside a
  * structured frame, so the UI can render a drop indicator.
  *
- *  - `into-existing` �?`rect` is a full-track-width **insertion caret**
+ *  - `into-existing` — `rect` is a full-track-width **insertion caret**
  *    (a thin band the overlay decorates with end brackets + a centre
  *    plus) placed at the exact stack gap the node would slot into. A
  *    caret (rather than a node-sized footprint) is used so a tall /
  *    wide dragged node can't occlude the neighbours it lands between.
- *  - `insert-new`    �?`rect` is a **ghost block** (the dragged node's
+ *  - `insert-new`    — `rect` is a **ghost block** (the dragged node's
  *    width × height) at the gap where a new track would open.
  */
 export interface StructuredDropZone {
@@ -837,15 +839,15 @@ export interface StructuredDropZone {
 /**
  * Build the on-canvas indicator rect for a live drag hovering over a
  * structured frame. The drop **decision** is delegated to
- * {@link pickColumnDropTarget} / {@link pickRowDropTarget} �?the exact
- * same call `resolveNodeDragStop` makes on release �?so the preview can
+ * {@link pickColumnDropTarget} / {@link pickRowDropTarget} — the exact
+ * same call `resolveNodeDragStop` makes on release — so the preview can
  * never disagree with the committed drop. This helper only adds the
  * matching geometry.
  *
  * `dragged` (frame-local rect of the node under the cursor) lets the
  * preview size the `insert-new` ghost block to the actual node and
  * rank the `into-existing` insertion caret against the dragged node's
- * top edge �?exactly how the solver re-sorts the track on release.
+ * top edge — exactly how the solver re-sorts the track on release.
  *
  * Returns `null` when the frame is missing. All coordinates are
  * frame-local; the caller offsets by the frame's absolute position.
@@ -1004,7 +1006,7 @@ export function describeStructuredDropZone(
     let center: number;
     if (target.slot <= 0) {
       // Prepend: sit the ghost just LEFT of (above, for rows) the first
-      // track �?in the new space it would occupy �?instead of starting at
+      // track — in the new space it would occupy — instead of starting at
       // `pad`, which overlaps the existing first column. Mirrors the
       // append branch below.
       center = mainPad - newTrackGap - ghostMain / 2;
@@ -1044,7 +1046,7 @@ export function describeStructuredDropZone(
  * are skipped (caller's `fitFrames` handles them).
  *
  * Returns the new nodes array and the set of frame IDs that were
- * actually relaid out �?the executor uses this set to subtract from
+ * actually relaid out — the executor uses this set to subtract from
  * its bounding-box `fitFrames` pass, since structured frames already
  * carry their own content-driven size from this pass.
  *
@@ -1060,7 +1062,7 @@ export function describeStructuredDropZone(
  *   the frame box on the main axis (start-aligned, allowed to spill).
  *
  * `fillFrameIds` selects the empty-track policy per frame: those in the
- * set use `'fill'` (spread children to occupy every requested track �? * the count stepper's intent), everything else uses `'compact'` (drop
+ * set use `'fill'` (spread children to occupy every requested track — * the count stepper's intent), everything else uses `'compact'` (drop
  * tracks that organic child changes left empty). The frame owns this
  * decision; callers (e.g. `DELETE_NODES`) only need to report the frame
  * as affected.
@@ -1148,7 +1150,7 @@ export function applyStructuredFrameRelayout(
           },
         };
       }
-      // Direct children �?position + slot only (sizes are content-driven
+      // Direct children — position + slot only (sizes are content-driven
       // and owned by each child; the solver never overrides them).
       if (n.parentId !== frameId) return n;
       const nextPos = result.childPositions.get(n.id);

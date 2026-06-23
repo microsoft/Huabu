@@ -5,6 +5,7 @@ import { memo, useCallback, useMemo, type ReactNode } from 'react';
 import {
   ACCENT_NONE_TOKEN,
   ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT,
+  type FrameNodeData,
 } from '@sediment/shared';
 
 import { CanvasFloatingPopover } from '@/components/Common/CanvasFloatingPopover';
@@ -174,12 +175,7 @@ export const NodeFloatingToolbar = memo(
     // controls.
     const dispatchUiIntent = useCanvasStore((s) => s.dispatchUiIntent);
     const isFrame = type === 'frame';
-    const frameData = isFrame
-      ? (data as {
-          sizing?: 'hug' | 'manual';
-          layoutMode?: 'free' | 'column' | 'row';
-        })
-      : null;
+    const frameData = isFrame ? (data as FrameNodeData) : null;
     const frameSizing = frameData?.sizing ?? 'hug';
     const frameLayoutMode = frameData?.layoutMode ?? 'free';
     const isFrameHug = isFrame && frameSizing === 'hug';

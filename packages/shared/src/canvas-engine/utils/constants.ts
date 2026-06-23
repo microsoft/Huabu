@@ -10,21 +10,6 @@
 export const GRID_SIZE = 18;
 
 /**
- * Fallback internal padding (in px) for frame nodes that have no
- * children to derive a content-aware padding from (see
- * {@link paddingFromExtent}). Also used as the upper-tier minimum for
- * empty frames so a freshly created frame keeps its established
- * visual weight until children arrive.
- *
- * Live frames with children derive their padding dynamically via
- * `paddingFromExtent(median(children-pooled-extents))` so that edge
- * spacing scales with content size, mirroring the way `gapFromExtent`
- * (in `autoLayout/gridLayout.ts`) derives the inter-item gap from the
- * same median.
- */
-export const FRAME_PADDING = 48;
-
-/**
  * Lower bound (px) on the dynamically-derived frame padding. Below the
  * floor a frame's label/toolbar would run out of room. No upper bound
  * is enforced: padding scales linearly with content above the floor so
@@ -51,16 +36,19 @@ const FRAME_PADDING_TO_EXTENT_RATIO = 0.1;
  * value paired with the layout engine's `gapFromExtent`: as a frame's
  * content scales up, padding scales with it.
  *
- * Returns {@link FRAME_PADDING} (the legacy 48 px) for an empty or
- * invalid extent so empty frames keep their established visual weight
- * until children arrive, then floors any positive extent at
- * {@link FRAME_PADDING_MIN}. There is no upper clamp: padding grows
- * unbounded with content so a uniform-scale resize keeps the frame
- * body flush with the user's drag rect (see {@link FRAME_PADDING_MIN}
- * for the rationale).
+ * For an empty or invalid extent the function falls back to
+ * {@link FRAME_PADDING_MIN} (the lower-bound floor) — this keeps the
+ * transition smooth as the first child arrives (a tiny child whose
+ * extent ≤ floor/ratio also resolves to the floor, so empty →
+ * first-child sees no visible jump). Any positive extent is then
+ * scaled by {@link FRAME_PADDING_TO_EXTENT_RATIO} and floored at the
+ * same minimum. There is no upper clamp: padding grows unbounded with
+ * content so a uniform-scale resize keeps the frame body flush with
+ * the user's drag rect (see {@link FRAME_PADDING_MIN} for the
+ * rationale).
  */
 export function paddingFromExtent(extent: number): number {
-  if (!Number.isFinite(extent) || extent <= 0) return FRAME_PADDING;
+  if (!Number.isFinite(extent) || extent <= 0) return FRAME_PADDING_MIN;
   return Math.max(FRAME_PADDING_MIN, extent * FRAME_PADDING_TO_EXTENT_RATIO);
 }
 

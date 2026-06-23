@@ -10,7 +10,6 @@
 // the headless executor and the web renderer agree on snapping & padding.
 export {
   GRID_SIZE,
-  FRAME_PADDING,
   snapToGrid,
 } from '@sediment/shared/canvas-engine';
 

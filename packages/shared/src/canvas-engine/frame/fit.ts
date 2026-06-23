@@ -17,6 +17,7 @@ import {
 import { medianOfChildExtents, paddingFromExtent } from '../utils/constants.js';
 import { getNodeSize } from '../utils/nodeSizes.js';
 
+import type { FrameLayoutMode } from '../../types/canvas/node.js';
 import type { XYPosition } from '@xyflow/react';
 
 export type FitFrameOptions = {
@@ -25,8 +26,8 @@ export type FitFrameOptions = {
    * from the children's pooled-extent median via
    * `paddingFromExtent`, matching `applyColumnLayout` /
    * `applyRowLayout` so structured and free frames breathe the same
-   * way. Falls back to `FRAME_PADDING` (48 px) when the frame has no
-   * measurable children.
+   * way. Falls back to the floor (16 px, `FRAME_PADDING_MIN`) when
+   * the frame has no measurable children.
    */
   padding?: number;
   /** Minimum frame width. Default: 20. */
@@ -184,7 +185,7 @@ export function fitFrameToChildren(
   // `fitFrames` still walks up to refit any outer free-mode wrappers.
   const frame = nodes.find((n) => n.id === frameId);
   if (frame && frame.type === 'frame') {
-    const layoutMode = (frame.data as { layoutMode?: string } | undefined)
+    const layoutMode = (frame.data as { layoutMode?: FrameLayoutMode })
       ?.layoutMode;
     if (layoutMode === 'column' || layoutMode === 'row') return nodes;
   }

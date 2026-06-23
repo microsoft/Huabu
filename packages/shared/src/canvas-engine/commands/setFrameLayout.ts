@@ -59,7 +59,10 @@ const setFrameLayout: CommandDefinition<Cmd> = {
 
     // Resolve the next sizing:
     //  - explicit caller value wins (validated against the enum);
-    //  - else preserve the previously-stored value.
+    //  - else preserve the previously-stored value, so callers that
+    //    don't touch the sizing axis (e.g. the gridCount stepper, the
+    //    `setMode` toggle, the drag-stop track-compact dispatch) never
+    //    silently reset a frame the user pinned to `'manual'`.
     //  PR 2: `column|row + manual` is supported — the structured
     //  solver re-packs children and leaves the user-pinned frame size
     //  alone; children may overflow the main axis (start-aligned).
@@ -91,7 +94,13 @@ const setFrameLayout: CommandDefinition<Cmd> = {
       if (nextSizing) {
         nextData.sizing = nextSizing;
       } else {
-        // Explicitly clear when caller wants to revert to default.
+        // Reached only when neither the caller nor the prior data
+        // carried a `sizing` value — the field was already absent on
+        // `dataRec`, so the spread above left it unset. The delete is
+        // a defensive no-op that documents "no sizing entry should
+        // exist on this frame yet"; it does NOT clear a user-pinned
+        // `'manual'` because `prior.sizing` would have populated
+        // `nextSizing` via the `?? prior.sizing` fallback above.
         delete nextData.sizing;
       }
       return { ...n, data: nextData };

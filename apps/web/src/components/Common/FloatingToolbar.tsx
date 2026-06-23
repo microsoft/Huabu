@@ -381,8 +381,14 @@ interface ToolbarSizePickerProps {
    *   so the host can treat the keystroke as an explicit "pin this
    *   dimension" request and flip the node out of auto-size mode.
    *
-   * Mutually exclusive with `heightAuto` — if both are passed, only
-   * `autoSize` is honoured.
+   * Mutually exclusive with {@link ToolbarSizePickerProps.heightAuto}:
+   * `autoSize` is the canonical, generalised form and the legacy
+   * `heightAuto` is just a shorthand for `{ dimensions: 'height' }`.
+   * If a caller passes both, `autoSize` wins and `heightAuto` is
+   * silently ignored — new call sites should only pass `autoSize`.
+   * (TypeScript does not enforce this at the type level because
+   * `heightAuto` is kept around for existing note callers; treat both
+   * fields as the union of two opt-ins, not independent toggles.)
    */
   autoSize?: {
     /** Which axes are auto-sized when `active`. Defaults to `'height'`. */

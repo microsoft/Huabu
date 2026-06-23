@@ -67,10 +67,18 @@ import type { Node } from '@xyflow/react';
 /**
  * Item shape accepted by `previewResizeGeometry` — mirrors the
  * RESIZE_NODE intent payload exactly.
+ *
+ * Both `size` and `position` are independently optional: omitting a
+ * field means "leave that part of the node's geometry unchanged",
+ * NOT "reset it". The manual-frame branch in `flushScale` relies on
+ * this to move children's local positions (to compensate for a frame
+ * origin shift) without touching their pinned width / height.
  */
 export type ResizeGeometryItem = {
   nodeId: string;
+  /** Omit to keep the node's current width / height. */
   size?: { width: number; height?: number };
+  /** Omit to keep the node's current `(x, y)`. */
   position?: { x: number; y: number };
 };
 
