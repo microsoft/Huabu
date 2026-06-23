@@ -13,7 +13,6 @@ import {
 } from '@sediment/shared';
 
 import { agentApi } from '@/api/agent';
-import { buildSketchAttachmentsFromSelection } from '@/handler/sketch/buildSketchAttachments';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 
@@ -23,7 +22,6 @@ import type { AssistantSegment, ResourceLabel } from '../store/chatTypes';
 import type {
   AgentMode,
   AgentStreamEvent,
-  ChatAttachment,
   IntentCandidate,
 } from '@sediment/shared';
 import type { Delta } from '@sediment/shared/canvas-engine';
@@ -1032,35 +1030,25 @@ export function useAgentStream(): UseAgentStreamReturn {
 
       setLastAction(agentMode);
 
-      // Merge pending attachments + selection attachment into a single array
+      // Merge pending attachments + selection attachment into a single array.
+      // Sketch-rasterization is now performed server-side in `agent.route.ts`
+      // for any `sketch` nodes present in `canvasContext.selectedNodes`, so we
+      // no longer build PNG attachments client-side.
       const allPending = [
         ...pendingAttachments,
         ...(selectionAttachment ? [selectionAttachment] : []),
       ];
 
-      const allNodes = useCanvasStore.getState().nodes;
-      const selectedNodeIds = allNodes
-        .filter((n) => n.selected)
+      // Selected node ids are still recorded on the persisted user
+      // message so the UI can re-render the selection chip after a
+      // reload, even though we no longer derive any attachments from
+      // them client-side.
+      const selectedNodeIds = useCanvasStore
+        .getState()
+        .nodes.filter((n) => n.selected)
         .map((n) => n.id);
 
-      // If the user selected sketch nodes, rasterise each spatial cluster
-      // (scoped per parent frame) into a PNG attachment so the vision
-      // pipeline can see the gesture without a separate sketch-recognition
-      // round-trip. Failure here must not block the chat send — we log
-      // and proceed with whatever attachments did succeed.
-      let sketchAttachments: ChatAttachment[] = [];
-      if (selectedNodeIds.length > 0) {
-        try {
-          sketchAttachments = await buildSketchAttachmentsFromSelection(
-            selectedNodeIds,
-            allNodes,
-          );
-        } catch (err) {
-          console.error('[useAgentStream] sketch attachment build failed', err);
-        }
-      }
-
-      const mergedAttachments = [...allPending, ...sketchAttachments];
+      const mergedAttachments = [...allPending];
       const attachments =
         mergedAttachments.length > 0 ? mergedAttachments : undefined;
       if (allPending.length > 0) {

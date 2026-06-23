@@ -49,8 +49,8 @@ import {
   type GenerateImageArgs,
 } from './handlers/image-generation.js';
 import {
-  handleRasterizeNode,
-  type RasterizeNodeArgs,
+  handleRasterizeNodes,
+  type RasterizeNodesArgs,
 } from './handlers/rasterize-node.js';
 import { handleWebSearch, type WebSearchArgs } from './handlers/web-search.js';
 
@@ -148,9 +148,9 @@ export async function executeTool(
         canvasId: context?.canvasId,
       } as FsWriteArgs);
 
-    case 'rasterize_node':
-      return handleRasterizeNode(
-        withCanvasId<RasterizeNodeArgs>(args, 'rasterize_node'),
+    case 'rasterize_nodes':
+      return handleRasterizeNodes(
+        withCanvasId<RasterizeNodesArgs>(args, 'rasterize_nodes'),
       );
 
     case 'generate_image':

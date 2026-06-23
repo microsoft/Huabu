@@ -34,6 +34,7 @@ import { buildAgentNodeRef } from '../agent/node-ref.js';
 import { isUserInvokableSkill } from '../agent/skills.route.js';
 import { readChatParts } from '../agent/store/chat-parts-store.js';
 import { loadContext, saveContext } from '../agent/store/chat-store.js';
+import { rasterizeNodesToArtifacts } from '../agent/tools/handlers/rasterize-node.js';
 import {
   ARTIFACT_URL_REGEX,
   resolveArtifactImageUrl,
@@ -377,6 +378,24 @@ function collectImageAttachments(nodes: WireSelectionNode[]): ChatAttachment[] {
   }
 
   return attachments;
+}
+
+/**
+ * Walk the wire selection (frame children included) and collect the
+ * ids of every `sketch` node. Used to drive the auto-rasterize step
+ * that turns selected strokes into a vision-ready PNG attachment
+ * before the LLM ever sees the user's prompt.
+ */
+function collectSketchNodeIds(nodes: WireSelectionNode[]): string[] {
+  const ids: string[] = [];
+  const walk = (list: WireSelectionNode[]) => {
+    for (const n of list) {
+      if (n.type === 'sketch') ids.push(n.id);
+      if (n.children) walk(n.children);
+    }
+  };
+  walk(nodes);
+  return ids;
 }
 
 /**
@@ -1179,10 +1198,54 @@ const agentRoutes: FastifyPluginAsync = async (
     const selectedImageAttachments = canvasContext?.selectedNodes
       ? collectImageAttachments(canvasContext.selectedNodes)
       : [];
+
+    // Auto-rasterize any selected sketches into PNG artifacts so the
+    // LLM sees the strokes as a vision part on the very first turn,
+    // without having to call `rasterize_nodes` itself. We piggy-back
+    // on the same content-addressed pipeline the tool uses, so
+    // selecting an unchanged cluster repeatedly is essentially free.
+    // Failures are logged but never block the user's prompt — the
+    // worst case is the agent has to call `rasterize_nodes` manually.
+    const sketchAttachments: ChatAttachment[] = [];
+    if (canvasContext?.selectedNodes && canvasId) {
+      const sketchIds = collectSketchNodeIds(canvasContext.selectedNodes);
+      if (sketchIds.length > 0) {
+        try {
+          const rasterResults = await rasterizeNodesToArtifacts({
+            nodeIds: sketchIds,
+            canvasId,
+          });
+          for (const r of rasterResults) {
+            const n = r.originNodeIds.length;
+            sketchAttachments.push({
+              type: 'image',
+              source: 'selection',
+              url: r.src,
+              label:
+                n === 1
+                  ? 'Sketch (1 stroke node)'
+                  : `Sketch cluster (${n} stroke nodes)`,
+              originNodeIds: r.originNodeIds,
+            });
+          }
+        } catch (err) {
+          fastify.log.warn(
+            { err, sketchIds, canvasId },
+            '[agent.route] sketch auto-rasterize failed',
+          );
+        }
+      }
+    }
+
     const allAttachments =
       selectedImageAttachments.length > 0 ||
+      sketchAttachments.length > 0 ||
       (attachments && attachments.length > 0)
-        ? [...(attachments ?? []), ...selectedImageAttachments]
+        ? [
+            ...(attachments ?? []),
+            ...selectedImageAttachments,
+            ...sketchAttachments,
+          ]
         : undefined;
 
     // Build user message
