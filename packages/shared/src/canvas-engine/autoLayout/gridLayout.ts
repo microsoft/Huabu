@@ -22,6 +22,7 @@ import {
   FRAME_GRID_MAX_COUNT,
   FRAME_GRID_MIN_COUNT,
 } from '../../types/canvas/node.js';
+import { getFrameSizing } from '../frame/sizing.js';
 import { paddingFromExtent } from '../utils/constants.js';
 import { getNodeSize } from '../utils/nodeSizes.js';
 
@@ -1048,11 +1049,15 @@ export function describeStructuredDropZone(
  * carry their own content-driven size from this pass.
  *
  * Mutations applied per handled frame:
- * - Children's `position` �?`result.childPositions`
- * - Children's `data.frameSlot` �?`result.slotAssignments`
- * - Frame's `style.width` / `style.height` / `measured` �?`result.frameSize`
- * - Frame's `data.gridCount` �?`result.effectiveCount` (so a track the
+ * - Children's `position` — `result.childPositions`
+ * - Children's `data.frameSlot` — `result.slotAssignments`
+ * - Frame's `data.gridCount` — `result.effectiveCount` (so a track the
  *   layout dropped is reflected in the stored count and the UI stepper)
+ * - Frame's `style.width` / `style.height` / `measured` — `result.frameSize`,
+ *   **only when** `getFrameSizing(frame) === 'hug'`. Manual-sized
+ *   structured frames keep their user-pinned size; children still get
+ *   re-packed by the solver (positions / `frameSlot`) but may overflow
+ *   the frame box on the main axis (start-aligned, allowed to spill).
  *
  * `fillFrameIds` selects the empty-track policy per frame: those in the
  * set use `'fill'` (spread children to occupy every requested track �? * the count stepper's intent), everything else uses `'compact'` (drop
@@ -1091,11 +1096,25 @@ export function applyStructuredFrameRelayout(
 
     handled.add(frameId);
 
+    // PR 2: structured frames respect per-frame sizing.
+    //   • `hug`    — write the solver's content-driven frame size into
+    //                `style` + `measured` so the frame wraps its
+    //                children (and ancestor fits cascade correctly).
+    //   • `manual` — keep the user-pinned frame size untouched; only
+    //                children positions / `frameSlot` and the frame's
+    //                `gridCount` are written. Children may overflow on
+    //                the main axis when the user pins a frame smaller
+    //                than its packed content; that's the documented
+    //                trade-off for unlocking `column|row + manual`.
+    const sizing = getFrameSizing(frame);
+    const writeFrameSize = sizing === 'hug';
+
     working = working.map((n) => {
-      // Frame itself �?write content-driven size into both style + measured
-      // so any ancestor frame's fit pass (cascade) sees the post-layout size.
-      // Also persist the effective track count so a dropped (compacted)
-      // track shrinks the stored `gridCount`.
+      // Frame itself — for `hug`, write content-driven size into both
+      // style + measured so any ancestor frame's fit pass (cascade)
+      // sees the post-layout size. For `manual`, leave style/measured
+      // alone (user owns the size). Always persist the effective track
+      // count so a dropped (compacted) track shrinks `gridCount`.
       if (n.id === frameId) {
         const prevMeasured = (n.measured ?? {}) as {
           width?: number;
@@ -1105,6 +1124,13 @@ export function applyStructuredFrameRelayout(
         const gridChanged =
           (prevData as { gridCount?: number }).gridCount !==
           result.effectiveCount;
+        if (!writeFrameSize) {
+          if (!gridChanged) return n;
+          return {
+            ...n,
+            data: { ...prevData, gridCount: result.effectiveCount },
+          };
+        }
         return {
           ...n,
           ...(gridChanged

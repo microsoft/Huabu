@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import { Columns3, Move, Rows3, Ungroup } from 'lucide-react';
+import { Columns3, Lock, Maximize2, Move, Rows3, Ungroup } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
@@ -7,6 +7,7 @@ import {
   FRAME_GRID_MAX_COUNT,
   FRAME_GRID_MIN_COUNT,
   type FrameLayoutMode,
+  type FrameSizing,
 } from '@sediment/shared';
 import { clampGridCount } from '@sediment/shared/canvas-engine';
 
@@ -30,6 +31,25 @@ const LAYOUT_MODE_OPTIONS: Array<{
   { value: 'free', label: 'Free', icon: <Move /> },
   { value: 'column', label: 'Column', icon: <Columns3 /> },
   { value: 'row', label: 'Row', icon: <Rows3 /> },
+];
+
+/**
+ * Sizing options expose the frame's size policy:
+ *  - `hug`    — auto-fit to children (default behaviour).
+ *  - `manual` — keep the user-controlled size; the engine's
+ *               end-of-batch fit pass skips this frame. For structured
+ *               (`column` / `row`) frames, children are still re-packed
+ *               into tracks by the solver but the frame size stays
+ *               pinned (children may overflow the main axis,
+ *               start-aligned).
+ */
+const SIZING_OPTIONS_BASE: Array<{
+  value: FrameSizing;
+  label: string;
+  icon: React.ReactNode;
+}> = [
+  { value: 'hug', label: 'Hug', icon: <Maximize2 /> },
+  { value: 'manual', label: 'Manual', icon: <Lock /> },
 ];
 
 /**
@@ -70,6 +90,14 @@ export const FrameNode = memo(
     const layoutMode: FrameLayoutMode = data.layoutMode ?? 'free';
     const isStructuredLayout = layoutMode === 'column' || layoutMode === 'row';
     const count = clampGridCount(data.gridCount);
+
+    // Sizing policy — orthogonal to layout mode, defaults to `hug`.
+    // Both modes are supported for every layout (`free`, `column`,
+    // `row`). `manual` keeps the user-pinned frame size; for
+    // structured frames the solver still re-packs children but leaves
+    // the frame box alone.
+    const sizing: FrameSizing = data.sizing ?? 'hug';
+    const sizingOptions = SIZING_OPTIONS_BASE;
 
     // Local draft for the count input so the user can type freely
     // without the value reformatting on every keystroke. Re-synced
@@ -127,6 +155,20 @@ export const FrameNode = memo(
       });
     };
 
+    const setSizing = (next: FrameSizing) => {
+      // PR 1 guard mirrors the engine: never emit `manual` for a
+      // structured layout. UI also disables the option, so this is
+      // defence-in-depth against keyboard / programmatic dispatch.
+      if (isStructuredLayout && next === 'manual') return;
+      if (next === sizing) return;
+      dispatchUiIntent({
+        type: 'SET_FRAME_LAYOUT_MODE',
+        frameId: id,
+        mode: layoutMode,
+        sizing: next,
+      });
+    };
+
     const FrameActions = (
       <>
         <FloatingToolbar.Select
@@ -165,6 +207,14 @@ export const FrameNode = memo(
             className={COUNT_INPUT_CLASS}
           />
         )}
+
+        <FloatingToolbar.Divider />
+
+        <FloatingToolbar.Select
+          options={sizingOptions}
+          value={sizing}
+          onChange={setSizing}
+        />
 
         <FloatingToolbar.Divider />
 

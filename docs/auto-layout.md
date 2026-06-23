@@ -14,13 +14,38 @@ One layout operation is exposed to users today:
 
 All layout changes are undoable with a single `Ctrl+Z`.
 
-## Auto-Layout Mode
+## Frame Sizing (Hug vs Manual)
 
-A single global toggle controls whether layout runs automatically on node creation. Open the **Settings** popover in the header (gear icon), expand the **Canvas** section, and flip the **Auto Layout** toggle. When enabled:
+Frame size is governed by a **per-frame** `sizing` policy on
+`FrameNodeData`, not a global toggle. Each frame's toolbar exposes
+two options:
 
-- Every new node added to the canvas is automatically placed via `placeNode`.
-- Frames automatically resize to tightly wrap their children whenever children are added, removed, moved in/out, or resized.
-- While dragging a node, an animated preview shows how the source and target frames would resize before the drop is committed.
+| Sizing            | Behaviour                                                                                                                                                            |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Hug** (default) | The engine refits the frame to wrap its children after every child mutation (add / remove / drag / resize). Live drag previews are shown.                            |
+| **Manual**        | The frame's size is user/agent-controlled. The engine's end-of-batch fit pass skips this frame's own size; children can move freely without reshaping the container. |
+
+The policy is fully orthogonal to `layoutMode`:
+
+- `free + hug` — the default: frame wraps its free-floating children.
+- `free + manual` — user-pinned frame box; children sit wherever placed.
+- `column|row + hug` — the structured solver packs children into tracks
+  AND writes the resulting content-driven frame size.
+- `column|row + manual` — the structured solver still packs children
+  into tracks (so order / track assignment stays valid), but leaves
+  the user-pinned frame size alone. Children may overflow the main
+  axis (column = vertical, row = horizontal) when the user pins a
+  frame smaller than the packed content — overflow is start-aligned
+  (top for column, left for row) and allowed to spill.
+
+`placeNode` (force-directed positioning of newly created nodes) runs
+unconditionally when a `CREATE_NODES` command omits an explicit
+position — it is independent of the per-frame sizing policy.
+
+Agent batches set `executor.options.forceFitFrames = true`, which
+refits every affected frame regardless of `sizing`. This is a
+safety net for LLM dispatches that mutate child geometry without
+explicitly specifying the new frame size.
 
 ## Implicit Edges
 

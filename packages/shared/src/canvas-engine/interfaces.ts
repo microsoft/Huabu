@@ -33,16 +33,6 @@ export interface CanvasReadState {
   nodes: CanvasNode[];
   edges: CanvasEdge[];
   canvasId: string;
-  /**
-   * UI preference for "auto-fit frames after edits".
-   *
-   * Optional: when undefined (e.g. on a headless server caller that has
-   * no per-tab UI toggle), the executor treats it as `true` so that
-   * structural commands keep frames consistent without the host having
-   * to opt in explicitly. Web callers always pass an explicit boolean
-   * matching the user's toolbar toggle.
-   */
-  autoLayoutEnabled?: boolean;
 }
 
 /**

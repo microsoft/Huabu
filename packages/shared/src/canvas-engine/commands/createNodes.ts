@@ -164,9 +164,10 @@ const createNodes: CommandDefinition<Cmd> = {
     //      undo/redo restore, …) has already chosen where the node
     //      belongs and the canvas must not move it.
     //    - `position` omitted → no anchor available; run force-directed
-    //      `placeNode` to find a non-overlapping slot. This runs
-    //      independently of `autoLayoutEnabled` since otherwise the
-    //      node would land at (0,0) on top of existing content.
+    //      `placeNode` to find a non-overlapping slot. Always runs when
+    //      the caller omits a position, regardless of any frame-sizing
+    //      policy — otherwise the node would land at (0,0) on top of
+    //      existing content.
     // ---------------------------------------------------------------
     for (const [i, n] of newNodes.entries()) {
       if (cmd.nodes[i].position) continue;

@@ -330,7 +330,6 @@ export async function executeOnServer(
           nodes: prestateNodes,
           edges: prestateEdges,
           canvasId,
-          autoLayoutEnabled: true,
         },
         { forceFitFrames: originator.source === 'agent' },
       );

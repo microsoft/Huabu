@@ -8,15 +8,19 @@
  * - Sequential command execution within a batch (each command sees the
  *   previous command's result state).
  * - Collects affected parent frame IDs from each handler and performs a
- *   single end-of-batch `fitFrames` pass (gated by `autoLayoutEnabled`
- *   or the caller's `forceFitFrames` option). Handlers no longer fit
- *   frames themselves — they only declare which frames are affected.
+ *   single end-of-batch `fitFrames` pass, filtered to frames whose
+ *   `data.sizing` is `'hug'` (the default). Frames with `sizing:
+ *   'manual'` are excluded so the user's pinned size sticks across
+ *   child mutations. Handlers no longer fit frames themselves — they
+ *   only declare which frames are affected.
  * - Uses COMMAND_META to determine snapshot policy and edge reroute needs.
  * - Collects pending effects from all commands.
  *
  * Source-agnostic: behaviour does not depend on `execution.source`. The
- * caller decides whether to force a frame fit (e.g. when applying agent
- * commands that may have unrealistic geometries) via the options arg.
+ * caller can still force a refit pass over every affected frame (even
+ * `sizing: 'manual'`) via `options.forceFitFrames`, but the default
+ * behaviour now respects each frame's own sizing policy without any
+ * global toggle.
  *
  * Does NOT:
  * - Call set() on the store.
@@ -29,6 +33,7 @@
 import { applyStructuredFrameRelayout } from './autoLayout/gridLayout.js';
 import { HANDLERS, COMMAND_META } from './commands/index.js';
 import { fitFrames, type NestableNode } from './frame/index.js';
+import { getFrameSizing } from './frame/sizing.js';
 
 import type {
   CanvasReadState,
@@ -44,11 +49,16 @@ import type { CommandHandler } from './commands/index.js';
 
 export interface ExecutorOptions {
   /**
-   * When true, run a final `fitFrames` pass over all affected parent
-   * frames even if `state.autoLayoutEnabled` is false. The web caller
-   * sets this for agent-sourced batches because LLMs cannot accurately
-   * predict rendered frame dimensions, so frames must always be sized
-   * to fit their children regardless of the user's auto-layout setting.
+   * When true, the end-of-batch fit pass runs over *every* affected
+   * parent frame, ignoring per-frame `sizing: 'manual'`. The web
+   * caller sets this for agent-sourced batches because LLMs cannot
+   * accurately predict rendered frame dimensions, so frames must
+   * always be sized to fit their children unless the agent itself
+   * explicitly set the frame's geometry in the same batch (the
+   * `setNodeGeometry` handler protects those via `resizedFrameIds`).
+   *
+   * Default behaviour (false / omitted) honours each frame's
+   * `sizing` policy.
    */
   forceFitFrames?: boolean;
 }
@@ -93,13 +103,6 @@ export function executeCanvasCommands(
   let currentNodes = state.nodes;
   let currentEdges = state.edges;
 
-  // TODO(headless): `state.autoLayoutEnabled` is optional on the type so
-  // headless callers can omit it. Today we still propagate the raw value
-  // (undefined → falsy → auto-layout off). Once the headless executor
-  // wiring lands, normalise to `state.autoLayoutEnabled ?? true` here so
-  // server-side runs default to auto-layout on without requiring callers
-  // to pass a flag.
-
   // Aggregated parent frame IDs to refit at the end of the batch.
   const allAffectedFrameIds = new Set<string>();
 
@@ -129,7 +132,6 @@ export function executeCanvasCommands(
       nodes: currentNodes,
       edges: currentEdges,
       canvasId: state.canvasId,
-      autoLayoutEnabled: state.autoLayoutEnabled,
     });
 
     // Record the command result.
@@ -176,40 +178,62 @@ export function executeCanvasCommands(
   // ------------------------------------------------------------------
   // Centralised frame auto-fit (single end-of-batch pass).
   //
-  // Runs when either the user has auto-layout enabled OR the caller
-  // explicitly opted in (e.g. agent batches must always refit frames
-  // because the LLM cannot predict rendered dimensions accurately).
+  // Two sub-passes with different sizing gates:
   //
-  // Order: structured (`column` / `row`) frames first — they reposition
-  // children into tracks and set their own content-driven size using
-  // per-axis `paddingFromExtent` (widths drive `padX` + `interGapX`,
-  // heights drive `padY` + `intraGapY`). Then the generic bounding-box
-  // `fitFrames` pass for ancestor wrappers — structured frames
-  // themselves short-circuit inside `fitFrameToChildren` (defensive:
-  // in the happy path both passes compute identical sizes, but
-  // skipping guards against non-uniform child mutations from agent
-  // dispatches that would let `computeFrameFit` clobber the
-  // structured solver's output). Per-axis padding makes the solver
-  // self-consistent under per-axis resize: scaling all child widths
-  // by `sx` makes `padX` + `interGapX` scale by `sx` too, so the
-  // resulting frame width = `oldWidth × sx` exactly — `flushScale`
-  // therefore passes the raw (sx, sy) from the resize gesture
-  // through without collapsing to a uniform scalar.
+  //   1. `applyStructuredFrameRelayout` — runs for **all** affected
+  //      structured (`column` / `row`) frames regardless of sizing.
+  //      Internally:
+  //        - `hug`    → re-pack children **and** write the solver's
+  //                     content-driven frame size into style+measured.
+  //        - `manual` → re-pack children only; the user-pinned frame
+  //                     size is preserved (children may overflow the
+  //                     main axis when the pin is smaller than the
+  //                     packed content — start-aligned, allowed to
+  //                     spill). Free-mode frames are no-ops here
+  //                     (filtered by `readFrameGridConfig`).
+  //
+  //   2. `fitFrames` — generic bounding-box pass for free-mode
+  //      ancestors. Gated by `getFrameSizing === 'hug'` (or
+  //      `options.forceFitFrames` for agent batches). Structured
+  //      frames short-circuit inside `fitFrameToChildren` anyway, so
+  //      passing them through is defensive but harmless.
+  //
+  // Order matters: structured solver may resize a hug frame, which
+  // then needs to be reflected in the bounding-box pass for any
+  // ancestor wrappers.
+  //
+  // Per-axis padding makes the structured solver self-consistent
+  // under per-axis resize: scaling all child widths by `sx` makes
+  // `padX` + `interGapX` scale by `sx` too, so the resulting frame
+  // width = `oldWidth × sx` exactly — `flushScale` therefore passes
+  // the raw (sx, sy) from the resize gesture through without
+  // collapsing to a uniform scalar.
   // ------------------------------------------------------------------
-  if (
-    anyApplied &&
-    allAffectedFrameIds.size > 0 &&
-    (state.autoLayoutEnabled || options.forceFitFrames)
-  ) {
+  if (anyApplied && allAffectedFrameIds.size > 0) {
+    // fitFrames gate: hug-only (or all, when forced).
+    const fitTargets = options.forceFitFrames
+      ? allAffectedFrameIds
+      : new Set<string>();
+    if (!options.forceFitFrames) {
+      const nodeById = new Map(currentNodes.map((n) => [n.id, n]));
+      for (const id of allAffectedFrameIds) {
+        if (getFrameSizing(nodeById.get(id)) === 'hug') {
+          fitTargets.add(id);
+        }
+      }
+    }
+    // Structured relayout runs for every affected frame; the function
+    // itself skips free-mode frames and per-frame branches on sizing
+    // to decide whether to write the frame's own size.
     const structured = applyStructuredFrameRelayout(
       currentNodes,
       allAffectedFrameIds,
       fillFrameIds,
     );
-    currentNodes = fitFrames(
-      structured.nodes as NestableNode[],
-      allAffectedFrameIds,
-    );
+    currentNodes = structured.nodes;
+    if (fitTargets.size > 0) {
+      currentNodes = fitFrames(currentNodes as NestableNode[], fitTargets);
+    }
   }
 
   // ------------------------------------------------------------------

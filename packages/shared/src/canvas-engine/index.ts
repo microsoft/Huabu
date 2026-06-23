@@ -130,6 +130,7 @@ export {
   computeFrameFit,
   fitFrameToChildren,
   fitFrames,
+  getFrameSizing,
   moveNodeOutOfFrame,
 } from './frame/index.js';
 export {

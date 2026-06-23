@@ -2,6 +2,8 @@ import { noop, type CommandDefinition } from './types.js';
 import {
   FRAME_GRID_DEFAULT_COUNT,
   FRAME_LAYOUT_MODES,
+  FRAME_SIZING_MODES,
+  type FrameSizing,
 } from '../../types/canvas/node.js';
 import { clampGridCount } from '../autoLayout/gridLayout.js';
 
@@ -37,6 +39,7 @@ const setFrameLayout: CommandDefinition<Cmd> = {
     const prior = (frame.data ?? {}) as {
       layoutMode?: (typeof FRAME_LAYOUT_MODES)[number];
       gridCount?: number;
+      sizing?: FrameSizing;
     };
 
     // Resolve the next gridCount:
@@ -54,8 +57,24 @@ const setFrameLayout: CommandDefinition<Cmd> = {
           ? (prior.gridCount ?? FRAME_GRID_DEFAULT_COUNT)
           : prior.gridCount;
 
+    // Resolve the next sizing:
+    //  - explicit caller value wins (validated against the enum);
+    //  - else preserve the previously-stored value.
+    //  PR 2: `column|row + manual` is supported — the structured
+    //  solver re-packs children and leaves the user-pinned frame size
+    //  alone; children may overflow the main axis (start-aligned).
+    const explicitSizing =
+      cmd.sizing && FRAME_SIZING_MODES.includes(cmd.sizing)
+        ? cmd.sizing
+        : undefined;
+    const nextSizing: FrameSizing | undefined = explicitSizing ?? prior.sizing;
+
     // No-op short-circuit when nothing changed.
-    if (prior.layoutMode === cmd.mode && prior.gridCount === nextGridCount) {
+    if (
+      prior.layoutMode === cmd.mode &&
+      prior.gridCount === nextGridCount &&
+      prior.sizing === nextSizing
+    ) {
       return noop(state, 'no-op');
     }
 
@@ -68,6 +87,12 @@ const setFrameLayout: CommandDefinition<Cmd> = {
       };
       if (typeof nextGridCount === 'number') {
         nextData.gridCount = nextGridCount;
+      }
+      if (nextSizing) {
+        nextData.sizing = nextSizing;
+      } else {
+        // Explicitly clear when caller wants to revert to default.
+        delete nextData.sizing;
       }
       return { ...n, data: nextData };
     });
