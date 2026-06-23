@@ -374,6 +374,7 @@ function collectImageAttachments(nodes: WireSelectionNode[]): ChatAttachment[] {
         source: 'selection',
         url: node.src,
         label: node.label ?? `Image node ${node.id}`,
+        originNodeId: node.id,
       });
     }
     if (node.children) {

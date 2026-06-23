@@ -144,12 +144,21 @@ export function appendMetadataTags(
   content: UserContent,
   meta: UserMessageMetadata,
 ): UserContent {
-  // Split server-internal artifacts (sketch-raster) out of the
-  // persisted attachments and auto-derive the LLM hint from them.
+  // Drop attachments that the UI would render as a duplicate chip:
+  // (1) sketch-raster artifacts are server-internal — their info
+  // survives as the LLM-only `hint` below, never as a chip;
+  // (2) selection-sourced items whose origin nodes are already
+  // carried by `selectedNodeIds`, because the UI already renders
+  // one chip per selected node.
   const allAttachments = meta.attachments ?? [];
-  const userVisibleAttachments = allAttachments.filter(
-    (a) => !isSketchRasterAttachment(a),
-  );
+  const selectedSet = new Set(meta.selectedNodeIds ?? []);
+  const userVisibleAttachments = allAttachments.filter((a) => {
+    if (isSketchRasterAttachment(a)) return false;
+    if (a.source !== 'selection') return true;
+    const origin = a.originNodeId ? [a.originNodeId] : (a.originNodeIds ?? []);
+    if (origin.length === 0) return true;
+    return !origin.every((id) => selectedSet.has(id));
+  });
   const derivedHint =
     meta.hint ?? buildSketchRasterHint(allAttachments) ?? undefined;
 

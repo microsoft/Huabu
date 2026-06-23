@@ -95,12 +95,25 @@ const CLUSTER_MAX_PIXELS = 2048;
 const CLUSTER_DISTANCE_THRESHOLD = 200;
 
 // ─── Raw node shape (parsed loosely from canvas.json) ──────────────────────
-interface RawNode {
+// IMPORTANT: `canvas.json` is geometry/style only. Source URLs for
+// artifact-backed nodes (image / video / pdf / web) are stripped
+// before write by `stripNodesForCanvas`; they live exclusively in
+// the per-node markdown frontmatter (`nodes/<label>.md`). So
+// `node.data.src` and `node.data.coverUrl` on a `RawNode` parsed
+// from canvas.json are ALWAYS undefined — always read them via
+// {@link readSidecarString} below.
+export interface RawNode {
   id: string;
   parentId?: string;
   position?: { x: number; y: number };
+  /** Top-level width/height. Set for sketches; typically absent for
+   *  resizable nodes like images which use `style` / `measured` instead. */
   width?: number;
   height?: number;
+  /** Browser-measured bbox; authoritative for resizable nodes (image). */
+  measured?: { width?: number; height?: number };
+  /** Explicit style width/height set via the resize handles. */
+  style?: { width?: number | string; height?: number | string };
   data?: {
     type?: string;
     src?: string;
@@ -113,6 +126,28 @@ interface RawNode {
     initialSize?: { width: number; height: number };
     [key: string]: unknown;
   };
+}
+
+/**
+ * Read a node's effective on-canvas size for non-sketch nodes (images
+ * etc.), mirroring `readSize` in canvas-spatial.ts: prefer
+ * `measured` (browser-truth) → `style` (user-resize) → top-level
+ * `width`/`height`. Sketches keep their own helper because they also
+ * fall back to `data.initialSize`.
+ */
+function nodeBoxSize(n: RawNode): { width: number; height: number } {
+  const num = (v: unknown): number | undefined => {
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+    if (typeof v === 'string') {
+      const parsed = Number.parseFloat(v);
+      return Number.isFinite(parsed) ? parsed : undefined;
+    }
+    return undefined;
+  };
+  const w = num(n.measured?.width) ?? num(n.style?.width) ?? num(n.width) ?? 0;
+  const h =
+    num(n.measured?.height) ?? num(n.style?.height) ?? num(n.height) ?? 0;
+  return { width: w, height: h };
 }
 
 // ─── Resvg WASM init ───────────────────────────────────────────────────────
@@ -193,14 +228,18 @@ function sketchEffectiveSize(n: RawNode): { width: number; height: number } {
 }
 
 /**
- * SHA-256 fingerprint over the cluster's geometry + strokes. Stable
- * under re-ordering of nodes (sort by id) but sensitive to any change
- * in position / size / stroke points / colour / thickness — which is
- * exactly what changes the rendered PNG. First 16 hex chars (~64 bits
- * of entropy) is plenty for per-canvas dedup.
+ * SHA-256 fingerprint over the cluster's geometry + strokes plus any
+ * backdrop image nodes composited under the strokes. Stable under
+ * re-ordering of nodes (sort by id) but sensitive to any change in
+ * position / size / stroke points / colour / thickness / backdrop
+ * src — which is exactly what changes the rendered PNG. First 16 hex
+ * chars (~64 bits of entropy) is plenty for per-canvas dedup.
  */
-function clusterFingerprint(nodes: RawNode[]): string {
-  const canonical = nodes
+function clusterFingerprint(
+  nodes: RawNode[],
+  contextImages: ContextImage[] = [],
+): string {
+  const sketches = nodes
     .map((n) => {
       const { width, height } = sketchEffectiveSize(n);
       return {
@@ -218,14 +257,158 @@ function clusterFingerprint(nodes: RawNode[]): string {
       };
     })
     .sort((a, b) => a.id.localeCompare(b.id));
+  const context = contextImages
+    .map((ci) => {
+      const { width, height } = nodeBoxSize(ci.node);
+      return {
+        id: ci.node.id,
+        src: ci.resolvedSrc,
+        x: ci.node.position?.x ?? 0,
+        y: ci.node.position?.y ?? 0,
+        w: width,
+        h: height,
+      };
+    })
+    .sort((a, b) => a.id.localeCompare(b.id));
   return createHash('sha256')
-    .update(JSON.stringify(canonical))
+    .update(JSON.stringify({ sketches, context }))
     .digest('hex')
     .slice(0, 16);
 }
 
+// ─── Context backdrop helpers ──────────────────────────────────────────────
 /**
- * Build a complete SVG document from a cluster of sketch nodes.
+ * An image node loaded into memory, ready to be composited under a
+ * sketch cluster as a backdrop in the rasterized PNG.
+ */
+export interface ContextImage {
+  node: RawNode;
+  /**
+   * Artifact key actually used to load the bytes — may come from
+   * `node.data.src` (canvas.json) or from the node's sidecar markdown
+   * frontmatter (`nodes/<label>.md`). Image nodes only persist their
+   * `src` in the sidecar; `canvas.json` keeps geometry/style only.
+   */
+  resolvedSrc: string;
+  bytes: Buffer;
+  mimeType: string;
+}
+
+interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+function rectsOverlap(a: Rect, b: Rect): boolean {
+  return (
+    a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
+  );
+}
+
+/**
+ * Image nodes that share the cluster's `parentId` and whose bbox
+ * overlaps at least one sketch in the cluster. These are treated as
+ * the visual backdrop the user drew the annotation over.
+ *
+ * Same-frame only: an "accidental" overlap across frame boundaries is
+ * ignored, matching the cluster-by-frame rule used elsewhere in this
+ * file.
+ */
+export function findContextImageNodes(
+  cluster: RawNode[],
+  allNodes: RawNode[],
+): RawNode[] {
+  if (cluster.length === 0) return [];
+  const parentKey = cluster[0].parentId ?? null;
+  const sketchRects: Rect[] = cluster
+    .map((n) => {
+      const { width, height } = sketchEffectiveSize(n);
+      return {
+        x: n.position?.x ?? 0,
+        y: n.position?.y ?? 0,
+        w: width,
+        h: height,
+      };
+    })
+    .filter((r) => r.w > 0 && r.h > 0);
+  if (sketchRects.length === 0) return [];
+
+  const out: RawNode[] = [];
+  const seen = new Set<string>();
+  for (const n of allNodes) {
+    if ((n.parentId ?? null) !== parentKey) continue;
+    if (n.data?.type !== 'image') continue;
+    // NOTE: `data.src` is intentionally NOT checked here — image
+    // nodes only persist their `src` in the sidecar markdown
+    // (`nodes/<label>.md` frontmatter), so `canvas.json` always shows
+    // `data.src === undefined`. `loadContextImage` is the layer that
+    // resolves the real src (sidecar fallback) and drops candidates
+    // whose artifact is missing or has an unsupported MIME.
+    const { width: w, height: h } = nodeBoxSize(n);
+    if (w <= 0 || h <= 0) continue;
+    const rect: Rect = {
+      x: n.position?.x ?? 0,
+      y: n.position?.y ?? 0,
+      w,
+      h,
+    };
+    if (!sketchRects.some((s) => rectsOverlap(rect, s))) continue;
+    if (seen.has(n.id)) continue;
+    seen.add(n.id);
+    out.push(n);
+  }
+  return out;
+}
+
+// resvg supports PNG, JPEG, GIF embeds via <image href="data:..." />.
+// Anything else (webp/svg/avif) is silently skipped: the sketch still
+// renders, just without that backdrop.
+const IMAGE_EXT_MIME: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+};
+
+/**
+ * Read a non-empty string value from a node's markdown sidecar
+ * frontmatter. The sidecar is the canonical (and sole) home for
+ * `src` / `coverUrl` on artifact-backed nodes — see the comment on
+ * {@link RawNode}. Returns `null` when the node has no sidecar or
+ * the key is missing/blank.
+ */
+function readSidecarString(
+  store: ReturnType<typeof getCanvasStore>,
+  nodeId: string,
+  key: 'src' | 'coverUrl',
+): string | null {
+  const sidecar = store.readNode(nodeId);
+  if (!sidecar) return null;
+  const value = sidecar[key];
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+async function loadContextImage(
+  store: ReturnType<typeof getCanvasStore>,
+  node: RawNode,
+): Promise<ContextImage | null> {
+  const src = readSidecarString(store, node.id, 'src');
+  if (!src) return null;
+  const abs = store.resolveArtifactFilePath(src);
+  if (!abs) return null;
+  const ext = path.extname(abs).toLowerCase();
+  const mimeType = IMAGE_EXT_MIME[ext];
+  if (!mimeType) return null;
+  const bytes = await readFile(abs);
+  return { node, resolvedSrc: src, bytes, mimeType };
+}
+
+/**
+ * Build a complete SVG document from a cluster of sketch nodes,
+ * optionally composited over backdrop image nodes the user drew on
+ * top of.
  *
  * Every stroke is transformed into **world coordinates** (i.e. each
  * point is multiplied by the node's `effectiveSize / initialSize` and
@@ -235,14 +418,22 @@ function clusterFingerprint(nodes: RawNode[]): string {
  * relationship between the contributing strokes — exactly what
  * `sketchToImage.ts` used to do client-side.
  *
+ * Backdrop images are placed at their on-canvas world rect with
+ * `preserveAspectRatio="xMidYMid meet"`, mirroring the web
+ * `<img className="object-contain" />` so the strokes land on the
+ * same pixels the user saw when drawing them.
+ *
  * Returns `null` when the cluster contributes no painted area (no
  * strokes anywhere, or every node has zero size) so callers can drop
  * it without surfacing a misleading 1×1 PNG.
  */
-function clusterToSvg(
+export function clusterToSvg(
   nodes: RawNode[],
+  contextImages: ContextImage[] = [],
 ): { svg: string; width: number; height: number } | null {
-  // World bbox = union of every contributing node's rect.
+  // World bbox = union of every contributing sketch + backdrop rect.
+  // Including backdrops keeps the surrounding image context visible
+  // even when the user circled only a small region.
   let x1 = Infinity;
   let y1 = Infinity;
   let x2 = -Infinity;
@@ -256,6 +447,16 @@ function clusterToSvg(
     y1 = Math.min(y1, py);
     x2 = Math.max(x2, px + width);
     y2 = Math.max(y2, py + height);
+  }
+  for (const ci of contextImages) {
+    const { width: w, height: h } = nodeBoxSize(ci.node);
+    if (w <= 0 || h <= 0) continue;
+    const px = ci.node.position?.x ?? 0;
+    const py = ci.node.position?.y ?? 0;
+    x1 = Math.min(x1, px);
+    y1 = Math.min(y1, py);
+    x2 = Math.max(x2, px + w);
+    y2 = Math.max(y2, py + h);
   }
   if (!isFinite(x1) || !isFinite(y1)) return null;
   const bboxW = x2 - x1;
@@ -272,6 +473,19 @@ function clusterToSvg(
   const scale = Math.min(1, CLUSTER_MAX_PIXELS / Math.max(vbW, vbH));
   const pxW = Math.max(1, Math.round(vbW * scale));
   const pxH = Math.max(1, Math.round(vbH * scale));
+
+  const backdrops: string[] = [];
+  for (const ci of contextImages) {
+    const { width: w, height: h } = nodeBoxSize(ci.node);
+    if (w <= 0 || h <= 0) continue;
+    const ix = ci.node.position?.x ?? 0;
+    const iy = ci.node.position?.y ?? 0;
+    const href = `data:${ci.mimeType};base64,${ci.bytes.toString('base64')}`;
+    backdrops.push(
+      `<image x="${ix}" y="${iy}" width="${w}" height="${h}" ` +
+        `preserveAspectRatio="xMidYMid meet" href="${href}" />`,
+    );
+  }
 
   const innerPaths: string[] = [];
   let anyStrokes = false;
@@ -308,12 +522,13 @@ function clusterToSvg(
   }
   if (!anyStrokes) return null;
 
-  // White background so the rasterized sketch looks like paper rather
-  // than a transparent void when the AI receives it.
+  // White background under everything: matches the canvas surface
+  // (and fills any object-contain letterbox around backdrops).
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" ` +
     `viewBox="${vbX} ${vbY} ${vbW} ${vbH}" width="${pxW}" height="${pxH}">` +
     `<rect x="${vbX}" y="${vbY}" width="${vbW}" height="${vbH}" fill="#ffffff" />` +
+    backdrops.join('') +
     innerPaths.join('') +
     `</svg>`;
   return { svg, width: pxW, height: pxH };
@@ -415,17 +630,17 @@ export async function rasterizeNodesToArtifacts(
     const type = node.data?.type;
 
     if (type === 'image' || type === 'video') {
-      const src = node.data?.src;
+      const src = readSidecarString(store, id, 'src');
       if (!src) {
         throw new Error(
-          `Node ${id} (${type}) has no src — nothing to rasterize. The artifact may have been deleted.`,
+          `Node ${id} (${type}) has no src — nothing to rasterize. The artifact may have been deleted, or the node's markdown sidecar (nodes/<label>.md) is missing its \`src:\` frontmatter entry.`,
         );
       }
       results.push({ src, width: 0, height: 0, originNodeIds: [id] });
       continue;
     }
     if (type === 'pdf') {
-      const cover = node.data?.coverUrl;
+      const cover = readSidecarString(store, id, 'coverUrl');
       if (!cover) {
         throw new Error(
           `PDF node ${id} has no cover image. Open the node and capture a cover first, or rasterize a different node.`,
@@ -457,14 +672,22 @@ export async function rasterizeNodesToArtifacts(
   if (sketchNodes.length > 0) {
     const clusters = clusterSketchesByFrame(sketchNodes);
     for (const cluster of clusters) {
-      const built = clusterToSvg(cluster);
+      // Sibling image nodes the sketch overlaps act as visual
+      // backdrops so the AI sees the same composition the user did.
+      const backdropNodes = findContextImageNodes(cluster, allNodes);
+      const contextImages: ContextImage[] = [];
+      for (const bn of backdropNodes) {
+        const loaded = await loadContextImage(store, bn);
+        if (loaded) contextImages.push(loaded);
+      }
+      const built = clusterToSvg(cluster, contextImages);
       const originNodeIds = cluster.map((n) => n.id);
       if (!built) {
         // Empty cluster (no strokes / zero area). Skip silently —
         // emitting a 1×1 placeholder would just confuse the model.
         continue;
       }
-      const fingerprint = clusterFingerprint(cluster);
+      const fingerprint = clusterFingerprint(cluster, contextImages);
       // `sketch-raster-<hash>.png` — the `sketch-raster-` prefix makes
       // these recognisable in `.artifacts/` listings and the hash
       // gives deterministic content-addressed dedup.

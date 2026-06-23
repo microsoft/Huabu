@@ -102,6 +102,49 @@ describe('appendMetadataTags / stripMetadataTags round-trip', () => {
     expect(meta.hint).toContain('sketch-raster-cafe.png');
   });
 
+  it('drops selection-sourced attachments whose origin is already in selectedNodeIds', () => {
+    // The image node is already represented by `selectedNodeIds`;
+    // the auto-derived vision attachment must not show up as a
+    // second chip on rehydrate.
+    const tagged = appendMetadataTags('look', {
+      selectedNodeIds: ['img-node-1', 'sketch-node-1'],
+      attachments: [
+        {
+          type: 'image',
+          source: 'selection',
+          url: 'artifact://cat.png',
+          label: 'Cute cat',
+          originNodeId: 'img-node-1',
+        },
+        { type: 'image', source: 'upload', url: 'artifact://uploaded.png' },
+      ],
+    });
+    const { meta } = stripMetadataTags(tagged as string);
+    expect(meta.selectedNodeIds).toEqual(['img-node-1', 'sketch-node-1']);
+    expect(meta.attachments).toHaveLength(1);
+    expect(meta.attachments?.[0]?.url).toBe('artifact://uploaded.png');
+  });
+
+  it('keeps a selection-sourced attachment whose origin is NOT covered by selectedNodeIds', () => {
+    // Defensive: if a selection-sourced attachment somehow points at
+    // a node outside the current selection, preserve it so the user
+    // does not silently lose the reference.
+    const tagged = appendMetadataTags('look', {
+      selectedNodeIds: ['other-node'],
+      attachments: [
+        {
+          type: 'image',
+          source: 'selection',
+          url: 'artifact://cat.png',
+          originNodeId: 'img-node-1',
+        },
+      ],
+    });
+    const { meta } = stripMetadataTags(tagged as string);
+    expect(meta.attachments).toHaveLength(1);
+    expect(meta.attachments?.[0]?.url).toBe('artifact://cat.png');
+  });
+
   it('lets an explicit hint override the auto-derived one', () => {
     const tagged = appendMetadataTags('go', {
       attachments: [
