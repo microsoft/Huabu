@@ -8,6 +8,8 @@ import {
   type CanvasCommand,
   type CanvasEdgeId,
   type CanvasNodeId,
+  type ImageGenerationData,
+  type SnapshotNodesData,
   type ToolResponse,
   type WebSearchToolResponse,
 } from '@sediment/shared';
@@ -83,6 +85,29 @@ export function extractCanvasChangesFromCommands(commands: CanvasCommand[]) {
   // Delegate to snapshotAndExtractChanges which reads current canvas state
   // NOTE: This must be called BEFORE commands are executed.
   return snapshotAndExtractChanges(commands);
+}
+
+/**
+ * Normalize an internal tool's success payload before it gets
+ * shallow-merged with the call args on `data.data`.
+ *
+ * Most tools return an object payload that merges cleanly, but
+ * `snapshot_nodes` returns a bare array (`SnapshotEntry[]`) — spreading
+ * that into the args object would corrupt the merge with numeric keys.
+ * Wrap it under `snapshots` so the rich renderer (`SnapshotNodesCard`)
+ * can read a stable shape.
+ */
+function normalizeInternalToolResultData(
+  toolName: string,
+  data: unknown,
+): Record<string, unknown> {
+  if (toolName === 'snapshot_nodes' && Array.isArray(data)) {
+    return { snapshots: data };
+  }
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    return data as Record<string, unknown>;
+  }
+  return {};
 }
 
 // ==================== Constants ====================
@@ -541,6 +566,32 @@ function mergeToolPart(
         ...(data ? { data } : {}),
       };
     }
+    case 'image_generation': {
+      const data = (patch.data ??
+        (existing?.variant === 'image_generation'
+          ? existing.data
+          : undefined)) as
+        | ToolResponse<'generate_image', ImageGenerationData>
+        | undefined;
+      return {
+        ...base,
+        variant: 'image_generation',
+        ...(data ? { data } : {}),
+      };
+    }
+    case 'snapshot_nodes': {
+      const data = (patch.data ??
+        (existing?.variant === 'snapshot_nodes'
+          ? existing.data
+          : undefined)) as
+        | ToolResponse<'snapshot_nodes', SnapshotNodesData>
+        | undefined;
+      return {
+        ...base,
+        variant: 'snapshot_nodes',
+        ...(data ? { data } : {}),
+      };
+    }
     case 'generic':
       return { ...base, variant: 'generic' };
   }
@@ -629,9 +680,9 @@ function applyInternalToolResult(
     ...toolResponse,
     data: {
       ...existingArgs,
-      ...((toolResponse.status === 'success'
-        ? toolResponse.data
-        : {}) as Record<string, unknown>),
+      ...(toolResponse.status === 'success'
+        ? normalizeInternalToolResultData(toolName, toolResponse.data)
+        : {}),
     },
   } as ToolResponse<string, unknown>;
 
@@ -801,7 +852,11 @@ export function handleStreamEvent(
         : priorPart?.variant === 'canvas_commands' ||
             priorPart?.variant === 'web_search'
           ? priorPart.variant
-          : undefined;
+          : priorPart?.variant === 'image_generation'
+            ? 'generate_image'
+            : priorPart?.variant === 'snapshot_nodes'
+              ? 'snapshot_nodes'
+              : undefined;
 
     if (internalToolName && data.rawOutput !== undefined) {
       const rawText =

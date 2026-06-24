@@ -8,6 +8,10 @@
 
 import { z } from 'zod';
 
+import { IMAGE_MODEL_FAMILIES } from '../../llm/image-capabilities.js';
+
+import type { ImageModelFamily } from '../../llm/image-capabilities.js';
+
 // ==================== Provider Registry ====================
 
 /**
@@ -90,13 +94,21 @@ export interface LLMImageConfig {
   authenticated: boolean;
   /** Optional custom base URL / endpoint. */
   baseUrl?: string;
-  /** Deployment / model name (e.g. `'gpt-image-1'`). */
+  /** Azure deployment name configured by the user (free-form string). */
   model?: string;
+  /**
+   * Model family this deployment belongs to. Drives the per-family
+   * capability lookup (legal sizes / qualities / default quality)
+   * via {@link import('../../llm/image-capabilities.js').getImageCapabilities}.
+   * Defaults to `'gpt-image-2'` server-side when unset.
+   */
+  modelFamily?: ImageModelFamily;
   /** Optional API version (Azure-only). */
   apiVersion?: string;
   /**
    * Default rendering quality. Each step up roughly multiplies cost
-   * and latency, so the server treats absence as `'low'`. The agent's
+   * and latency. When unset, the server uses the family's
+   * `defaultQuality` from the capability registry. The agent's
    * `generate_image` tool can override per call.
    */
   quality?: 'low' | 'medium' | 'high' | 'auto';
@@ -126,6 +138,14 @@ export const llmImageConfigUpdateSchema = z.object({
   provider: z.string().optional(),
   baseUrl: z.string().optional(),
   model: z.string().optional(),
+  modelFamily: z
+    .enum(
+      IMAGE_MODEL_FAMILIES as unknown as [
+        ImageModelFamily,
+        ...ImageModelFamily[],
+      ],
+    )
+    .optional(),
   apiVersion: z.string().optional(),
   /** API key — only sent when setting a new key; never returned by GET. */
   apiKey: z.string().optional(),

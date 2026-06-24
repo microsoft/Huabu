@@ -1,22 +1,26 @@
 /**
  * `snapshot_nodes` handler — produce PNG snapshots of canvas nodes.
  *
- * Accepts a list of node ids and returns one artifact entry per group:
- *   - Each `image` node is a pass-through (its existing `data.src`
- *     artifact key is returned, no extra disk write).
- *   - `sketch` nodes are bucketed by `parentId` and then spatially
- *     clustered (single-linkage, 200 px threshold — same rule the web
- *     selection pipeline used to apply). Each cluster is rendered in
- *     **world coordinates** so multiple strokes share one SVG
- *     `viewBox` and the resulting PNG faithfully reproduces their
- *     spatial relationship on the canvas. The cluster is then
- *     rasterized via `@resvg/resvg-wasm`.
+ * The tool snapshots **only the nodes the caller asked for**. It
+ * never reaches into `allNodes` to grab uninvited neighbours.
  *
- * Sketch snapshots are **content-addressed**: the artifact filename
- * embeds a SHA-256 fingerprint of the cluster's strokes + geometry.
- * Re-snapshotting an unchanged sketch returns the same `src` without
- * writing a new file, which prevents `.artifacts/` from exploding when
- * the agent route auto-snapshots selections on every send.
+ * Pipeline (one rule for every snapshottable node, no special cases
+ * for image-vs-sketch):
+ *
+ *   1. `frame` ids are recursively expanded into their children;
+ *      non-snapshottable children are silently dropped.
+ *   2. The resulting `image` + `sketch` nodes are bucketed by
+ *      `parentId` and single-linkage clustered in flow space
+ *      (200 px edge-to-edge). Cross-frame overlaps never merge —
+ *      a frame is an explicit container in the user's mental model.
+ *   3. Each cluster becomes ONE PNG: image members are drawn at
+ *      their world-space rect as backdrop and sketch strokes are
+ *      layered on top, all sharing one `viewBox` so the artifact
+ *      preserves the on-canvas spatial relationships.
+ *   4. A singleton image cluster short-circuits: instead of
+ *      re-rastering, the node's existing artifact key is returned
+ *      as-is (or a content-addressed downscaled copy when its
+ *      longest edge exceeds `maxPixels`).
  *
  * Out of scope (each yields a clear error directing the caller to a
  * better path):
@@ -25,19 +29,20 @@
  *   - `video`           — not a still image; gpt-image-1 can't use it.
  *   - `audio` / `web` / `office` / `question` — no meaningful snapshot.
  *
- * Selecting a `frame` is a UX shortcut for "snapshot what's inside this
- * frame": the handler recursively expands the frame to its children
- * (images + sketches contribute results, other child types are skipped
- * silently because the caller's intent was the visual whole, not each
- * non-renderable child).
+ * Rendered cluster snapshots are **content-addressed**: the artifact
+ * filename embeds a SHA-256 fingerprint of every member's geometry +
+ * strokes + backdrop bytes, so re-snapshotting an unchanged input
+ * returns the same `src` without writing a new file. This keeps
+ * `.artifacts/` bounded under the chat-route auto-snapshot path that
+ * runs on every send.
  *
  * Returns a JSON-stringified `Array<{src, width, height, originNodeIds}>`.
- * `originNodeIds` lists every node that contributed to that artifact —
- * a sketch cluster of N strokes lists all N ids; a pass-through image
- * lists its single id.
+ * `originNodeIds` lists every node that contributed pixels to that
+ * artifact — a multi-member cluster lists all stroke + backdrop image
+ * ids; a singleton image pass-through lists its single id.
  *
  * For internal callers (e.g. `agent.route.ts` auto-snapshotting the
- * user's sketch selection at chat send time) we also export
+ * user's selection at chat send time) we also export
  * {@link snapshotNodesToArtifacts}, which returns the typed array
  * directly so callers don't have to JSON-parse it back.
  */
@@ -96,7 +101,18 @@ const DEFAULT_STROKE_COLOR = 'black';
 // apps/web/src/handler/sketch/sketchToImage.ts DEFAULT_PADDING.
 const CLUSTER_PADDING = 16;
 // Max PNG dimension. Clusters larger than this are scaled to fit.
-const CLUSTER_MAX_PIXELS = 2048;
+// Kept at 1280 because:
+//   1. The output is lossless PNG (resvg-wasm has no JPEG encoder),
+//      and the bytes scale ~linearly with pixel count. A 1878×1790
+//      cluster at 2048 px produced a 3.6 MB PNG in the wild and
+//      tipped one thread over the upstream LLM's 8 MB request-body
+//      limit (Anthropic / Copilot return 413 around there).
+//   2. Every vision provider we target downscales to ≤1024–1568 on
+//      the long edge internally, so anything above ~1280 is wasted
+//      bytes on the request, not on the model's actual input.
+//   3. 1280 still leaves enough resolution for `gpt-image-1` to use
+//      the cluster as a reference image without visible blur.
+const CLUSTER_MAX_PIXELS = 1280;
 // Edge-to-edge clustering threshold (flow-space px). Mirrors
 // apps/web/src/handler/sketch/sketchClustering.ts CLUSTER_DISTANCE_THRESHOLD.
 const CLUSTER_DISTANCE_THRESHOLD = 200;
@@ -160,10 +176,9 @@ function readStyle(
  * Read a node's effective on-canvas size for non-sketch nodes (images
  * etc.). Priority `measured` (browser-truth) → `style` (engine-persisted
  * size from `CREATE_NODES`), mirroring the web
- * `node.measured?.width ?? node.style?.width` chain used in
- * `SketchProcessingOverlay`, `sketchContext`, `intentStore`, etc.
- * Top-level `n.width` / `n.height` is never persisted by the canvas
- * engine so it is intentionally not consulted.
+ * `node.measured?.width ?? node.style?.width` chain used throughout
+ * the renderer. Top-level `n.width` / `n.height` is never persisted
+ * by the canvas engine so it is intentionally not consulted.
  */
 function nodeBoxSize(n: CanvasNode): { width: number; height: number } {
   const style = readStyle(n);
@@ -296,17 +311,14 @@ function clusterFingerprint(
     })
     .sort((a, b) => a.id.localeCompare(b.id));
   const context = contextImages
-    .map((ci) => {
-      const { width, height } = nodeBoxSize(ci.node);
-      return {
-        id: ci.node.id,
-        src: ci.resolvedSrc,
-        x: ci.node.position?.x ?? 0,
-        y: ci.node.position?.y ?? 0,
-        w: width,
-        h: height,
-      };
-    })
+    .map((ci) => ({
+      id: ci.node.id,
+      src: ci.resolvedSrc,
+      x: ci.node.position?.x ?? 0,
+      y: ci.node.position?.y ?? 0,
+      w: ci.width,
+      h: ci.height,
+    }))
     .sort((a, b) => a.id.localeCompare(b.id));
   return createHash('sha256')
     .update(JSON.stringify({ sketches, context }))
@@ -314,94 +326,13 @@ function clusterFingerprint(
     .slice(0, 16);
 }
 
-// ─── Context backdrop helpers ──────────────────────────────────────────────
-/**
- * An image node loaded into memory, ready to be composited under a
- * sketch cluster as a backdrop in the snapshot PNG.
- */
-export interface ContextImage {
-  node: CanvasNode;
-  /**
-   * Artifact key actually used to load the bytes — may come from
-   * `node.data.src` (canvas.json) or from the node's sidecar markdown
-   * frontmatter (`nodes/<label>.md`). Image nodes only persist their
-   * `src` in the sidecar; `canvas.json` keeps geometry/style only.
-   */
-  resolvedSrc: string;
-  bytes: Buffer;
-  mimeType: string;
-}
-
-interface Rect {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
-
-function rectsOverlap(a: Rect, b: Rect): boolean {
-  return (
-    a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
-  );
-}
-
-/**
- * Image nodes that share the cluster's `parentId` and whose bbox
- * overlaps at least one sketch in the cluster. These are treated as
- * the visual backdrop the user drew the annotation over.
- *
- * Same-frame only: an "accidental" overlap across frame boundaries is
- * ignored, matching the cluster-by-frame rule used elsewhere in this
- * file.
- */
-export function findContextImageNodes(
-  cluster: CanvasNode[],
-  allNodes: CanvasNode[],
-): CanvasNode[] {
-  if (cluster.length === 0) return [];
-  const parentKey = cluster[0].parentId ?? null;
-  const sketchRects: Rect[] = cluster
-    .map((n) => {
-      const { width, height } = sketchEffectiveSize(n);
-      return {
-        x: n.position?.x ?? 0,
-        y: n.position?.y ?? 0,
-        w: width,
-        h: height,
-      };
-    })
-    .filter((r) => r.w > 0 && r.h > 0);
-  if (sketchRects.length === 0) return [];
-
-  const out: CanvasNode[] = [];
-  const seen = new Set<string>();
-  for (const n of allNodes) {
-    if ((n.parentId ?? null) !== parentKey) continue;
-    if (getNodeType(n) !== 'image') continue;
-    // NOTE: `data.src` is intentionally NOT checked here — image
-    // nodes only persist their `src` in the sidecar markdown
-    // (`nodes/<label>.md` frontmatter), so `canvas.json` always shows
-    // `data.src === undefined`. `loadContextImage` is the layer that
-    // resolves the real src (sidecar fallback) and drops candidates
-    // whose artifact is missing or has an unsupported MIME.
-    const { width: w, height: h } = nodeBoxSize(n);
-    if (w <= 0 || h <= 0) continue;
-    const rect: Rect = {
-      x: n.position?.x ?? 0,
-      y: n.position?.y ?? 0,
-      w,
-      h,
-    };
-    if (!sketchRects.some((s) => rectsOverlap(rect, s))) continue;
-    if (seen.has(n.id)) continue;
-    seen.add(n.id);
-    out.push(n);
-  }
-  return out;
-}
-
-// resvg supports PNG, JPEG, GIF embeds via <image href="data:..." />.
-// Anything else (webp/svg/avif) is silently skipped: the sketch still
+// ─── Image artifact MIME map ───────────────────────────────────────────────
+// Used by `maybeResizeImageArtifact` to wrap raw image bytes inside an
+// SVG `<image>` element for resvg-driven downscaling, and by
+// `loadContextImage` to pick a base64 MIME for the backdrop embed.
+// resvg supports PNG / JPEG / GIF via `<image href="data:..." />`.
+// Anything outside this map (webp / svg / avif) is left at its original
+// size and is skipped for backdrop compositing — the sketch still
 // renders, just without that backdrop.
 const IMAGE_EXT_MIME: Record<string, string> = {
   '.png': 'image/png',
@@ -428,6 +359,30 @@ function readSidecarString(
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
+/**
+ * An image node loaded into memory, ready to be composited under a
+ * sketch cluster as a backdrop in the snapshot PNG.
+ */
+export interface ContextImage {
+  node: CanvasNode;
+  /** Artifact key actually used to load the bytes (sidecar `src`). */
+  resolvedSrc: string;
+  bytes: Buffer;
+  mimeType: string;
+  /** On-canvas width — resolved via {@link nodeBoxSize}. */
+  width: number;
+  /** On-canvas height — resolved via {@link nodeBoxSize}. */
+  height: number;
+}
+
+/**
+ * Load an image node's bytes from the artifact store and pack into a
+ * {@link ContextImage}. Returns `null` when the node has no resolvable
+ * src, the artifact file is missing, the format is unsupported by
+ * resvg, or the node has no measurable size on canvas — in any of
+ * those cases the caller proceeds without backdrop compositing for
+ * this image.
+ */
 async function loadContextImage(
   store: ReturnType<typeof getCanvasStore>,
   node: CanvasNode,
@@ -439,14 +394,16 @@ async function loadContextImage(
   const ext = path.extname(abs).toLowerCase();
   const mimeType = IMAGE_EXT_MIME[ext];
   if (!mimeType) return null;
+  const { width, height } = nodeBoxSize(node);
+  if (width <= 0 || height <= 0) return null;
   const bytes = await readFile(abs);
-  return { node, resolvedSrc: src, bytes, mimeType };
+  return { node, resolvedSrc: src, bytes, mimeType, width, height };
 }
 
 /**
  * Build a complete SVG document from a cluster of sketch nodes,
- * optionally composited over backdrop image nodes the user drew on
- * top of.
+ * optionally composited over backdrop image nodes the caller also
+ * passed in.
  *
  * Every stroke is transformed into **world coordinates** (i.e. each
  * point is multiplied by the node's `effectiveSize / initialSize` and
@@ -459,19 +416,21 @@ async function loadContextImage(
  * Backdrop images are placed at their on-canvas world rect with
  * `preserveAspectRatio="xMidYMid meet"`, mirroring the web
  * `<img className="object-contain" />` so the strokes land on the
- * same pixels the user saw when drawing them.
+ * same pixels the user saw when drawing them. The viewBox is unioned
+ * with each backdrop rect so context around the strokes stays visible
+ * even when only a small region was circled.
  *
  * Returns `null` when the cluster contributes no painted area (no
- * strokes anywhere, or every node has zero size) so callers can drop
- * it without surfacing a misleading 1×1 PNG.
+ * strokes anywhere AND no loadable backdrop images, or every node has
+ * zero size) so callers can drop it without surfacing a misleading
+ * 1×1 PNG.
  */
 export function clusterToSvg(
   nodes: CanvasNode[],
   contextImages: ContextImage[] = [],
+  maxEdge: number = CLUSTER_MAX_PIXELS,
 ): { svg: string; width: number; height: number } | null {
   // World bbox = union of every contributing sketch + backdrop rect.
-  // Including backdrops keeps the surrounding image context visible
-  // even when the user circled only a small region.
   let x1 = Infinity;
   let y1 = Infinity;
   let x2 = -Infinity;
@@ -487,14 +446,13 @@ export function clusterToSvg(
     y2 = Math.max(y2, py + height);
   }
   for (const ci of contextImages) {
-    const { width: w, height: h } = nodeBoxSize(ci.node);
-    if (w <= 0 || h <= 0) continue;
+    if (ci.width <= 0 || ci.height <= 0) continue;
     const px = ci.node.position?.x ?? 0;
     const py = ci.node.position?.y ?? 0;
     x1 = Math.min(x1, px);
     y1 = Math.min(y1, py);
-    x2 = Math.max(x2, px + w);
-    y2 = Math.max(y2, py + h);
+    x2 = Math.max(x2, px + ci.width);
+    y2 = Math.max(y2, py + ci.height);
   }
   if (!isFinite(x1) || !isFinite(y1)) return null;
   const bboxW = x2 - x1;
@@ -506,21 +464,22 @@ export function clusterToSvg(
   const vbW = bboxW + CLUSTER_PADDING * 2;
   const vbH = bboxH + CLUSTER_PADDING * 2;
 
-  // Fit-to-CLUSTER_MAX_PIXELS so very large clusters do not produce
-  // multi-megabyte PNGs.
-  const scale = Math.min(1, CLUSTER_MAX_PIXELS / Math.max(vbW, vbH));
+  // Fit-to-`maxEdge` so very large clusters do not produce
+  // multi-megabyte PNGs. Defaults to `CLUSTER_MAX_PIXELS` (1280);
+  // the agent can lower it via the tool's `maxPixels` parameter
+  // when a previous turn returned an "image too large" placeholder.
+  const scale = Math.min(1, maxEdge / Math.max(vbW, vbH));
   const pxW = Math.max(1, Math.round(vbW * scale));
   const pxH = Math.max(1, Math.round(vbH * scale));
 
   const backdrops: string[] = [];
   for (const ci of contextImages) {
-    const { width: w, height: h } = nodeBoxSize(ci.node);
-    if (w <= 0 || h <= 0) continue;
+    if (ci.width <= 0 || ci.height <= 0) continue;
     const ix = ci.node.position?.x ?? 0;
     const iy = ci.node.position?.y ?? 0;
     const href = `data:${ci.mimeType};base64,${ci.bytes.toString('base64')}`;
     backdrops.push(
-      `<image x="${ix}" y="${iy}" width="${w}" height="${h}" ` +
+      `<image x="${ix}" y="${iy}" width="${ci.width}" height="${ci.height}" ` +
         `preserveAspectRatio="xMidYMid meet" href="${href}" />`,
     );
   }
@@ -559,7 +518,7 @@ export function clusterToSvg(
       anyStrokes = true;
     }
   }
-  if (!anyStrokes) return null;
+  if (!anyStrokes && backdrops.length === 0) return null;
 
   // White background under everything: matches the canvas surface
   // (and fills any object-contain letterbox around backdrops).
@@ -574,45 +533,66 @@ export function clusterToSvg(
 }
 
 /**
- * Bucket sketch nodes by their `parentId` and run single-linkage
- * spatial clustering inside each bucket. Two sketches that overlap in
- * flow space but live in different frames stay in separate clusters —
- * the user's mental model is that a frame is an explicit container, so
- * an "accidental overlap" across frames should not collapse two
- * separate gestures into one picture.
+ * One snapshottable node tagged with whether it came in directly or
+ * via a `frame` expansion. `fromFrame` controls error leniency: a
+ * direct id with a missing src throws (the caller asked for it
+ * explicitly); the same node swept in via a frame is silently dropped.
  */
-function clusterSketchesByFrame(nodes: CanvasNode[]): CanvasNode[][] {
-  const buckets = new Map<string, CanvasNode[]>();
-  for (const n of nodes) {
-    const key = n.parentId ?? '__root__';
+interface SnapshotEntry {
+  node: CanvasNode;
+  /** 'image' or 'sketch' — pre-resolved via {@link getNodeType}. */
+  type: 'image' | 'sketch';
+  fromFrame: boolean;
+}
+
+/**
+ * Bucket snapshottable nodes (image + sketch alike) by their
+ * `parentId` and run single-linkage spatial clustering inside each
+ * bucket. Two nodes that overlap in flow space but live in different
+ * frames stay in separate clusters — the user's mental model is that
+ * a frame is an explicit container, so an "accidental overlap" across
+ * frames should not collapse two separate gestures into one picture.
+ *
+ * Image and sketch nodes go through the same pipeline: any
+ * proximity-bound mix (image+image, image+sketch, sketch+sketch)
+ * becomes a single composite cluster.
+ */
+function clusterByFrame(entries: SnapshotEntry[]): SnapshotEntry[][] {
+  const buckets = new Map<string, SnapshotEntry[]>();
+  for (const e of entries) {
+    const key = e.node.parentId ?? '__root__';
     const bucket = buckets.get(key);
-    if (bucket) bucket.push(n);
-    else buckets.set(key, [n]);
+    if (bucket) bucket.push(e);
+    else buckets.set(key, [e]);
   }
 
   // findClusters wants `SpatialNode` ({ id, rect }). Build thin shims
-  // that wrap each CanvasNode so we can recover the original after.
-  type Shim = SpatialNode & { node: CanvasNode };
-  const out: CanvasNode[][] = [];
+  // that wrap each entry so we can recover the original after.
+  type Shim = SpatialNode & { entry: SnapshotEntry };
+  const out: SnapshotEntry[][] = [];
   for (const bucket of buckets.values()) {
-    const shims: Shim[] = bucket.map((n) => {
-      const { width, height } = sketchEffectiveSize(n);
+    const shims: Shim[] = bucket.map((e) => {
+      // Sketches need `sketchEffectiveSize` (it falls back to
+      // `data.initialSize` on first paint before xyflow writes
+      // `measured`); images only ever carry `measured` / `style`.
+      const { width, height } =
+        e.type === 'sketch' ? sketchEffectiveSize(e.node) : nodeBoxSize(e.node);
       return {
-        id: n.id,
+        id: e.node.id,
         rect: {
-          x: n.position?.x ?? 0,
-          y: n.position?.y ?? 0,
+          x: e.node.position?.x ?? 0,
+          y: e.node.position?.y ?? 0,
           width,
           height,
         },
-        node: n,
+        entry: e,
       };
     });
     // `findClusters` uses strict `<` so bump the threshold by 1 to
     // match the web pipeline's historical `<=` semantics.
     const groups = findClusters(shims, CLUSTER_DISTANCE_THRESHOLD + 1);
     for (const group of groups) {
-      if (group.length > 0) out.push(group.map((g) => g.node));
+      if (group.length > 0) out.push(group.map((g) => g.entry));
     }
   }
   return out;
@@ -627,6 +607,191 @@ async function renderClusterPng(svg: string, width: number): Promise<Buffer> {
   return Buffer.from(resvg.render().asPng());
 }
 
+// ─── Image dimension parsing ───────────────────────────────────────────────
+// Minimal PNG + JPEG header readers used by the image-downscale path
+// below. We deliberately avoid a heavyweight `image-size` dependency:
+// the formats we need to size are exactly the ones our snapshot
+// pipeline + canvas image inputs produce, and both lay their pixel
+// dimensions in a fixed prefix that's a few bytes to read.
+
+function readPngDimensions(
+  buf: Buffer,
+): { width: number; height: number } | null {
+  // PNG: 8-byte signature + 4-byte IHDR length + 4-byte 'IHDR' +
+  // 4-byte width + 4-byte height. All big-endian.
+  if (buf.length < 24) return null;
+  if (
+    buf[0] !== 0x89 ||
+    buf[1] !== 0x50 ||
+    buf[2] !== 0x4e ||
+    buf[3] !== 0x47
+  ) {
+    return null;
+  }
+  const width = buf.readUInt32BE(16);
+  const height = buf.readUInt32BE(20);
+  if (width <= 0 || height <= 0) return null;
+  return { width, height };
+}
+
+function readJpegDimensions(
+  buf: Buffer,
+): { width: number; height: number } | null {
+  // JPEG: SOI (FF D8), then a sequence of segments. Each non-SOI/EOI
+  // segment is `FF <marker> <2-byte length>`. SOFn markers (`C0..CF`
+  // except `C4` DHT, `C8` reserved, `CC` DAC) hold pixel dimensions:
+  // after the segment length, byte 0 is precision, bytes 1-2 height,
+  // bytes 3-4 width (big-endian).
+  if (buf.length < 4) return null;
+  if (buf[0] !== 0xff || buf[1] !== 0xd8) return null;
+  let i = 2;
+  while (i < buf.length) {
+    // Skip 0xFF fill bytes.
+    while (i < buf.length && buf[i] === 0xff) i++;
+    if (i >= buf.length) return null;
+    const marker = buf[i++];
+    // Standalone markers (no length): RSTn, SOI, EOI, TEM.
+    if (
+      marker === 0xd8 ||
+      marker === 0xd9 ||
+      (marker >= 0xd0 && marker <= 0xd7) ||
+      marker === 0x01
+    ) {
+      continue;
+    }
+    if (i + 1 >= buf.length) return null;
+    const segLen = buf.readUInt16BE(i);
+    if (
+      (marker >= 0xc0 && marker <= 0xc3) ||
+      (marker >= 0xc5 && marker <= 0xc7) ||
+      (marker >= 0xc9 && marker <= 0xcb) ||
+      (marker >= 0xcd && marker <= 0xcf)
+    ) {
+      // SOFn — height @ +3, width @ +5 from segLen start.
+      if (i + 7 >= buf.length) return null;
+      const height = buf.readUInt16BE(i + 3);
+      const width = buf.readUInt16BE(i + 5);
+      if (width <= 0 || height <= 0) return null;
+      return { width, height };
+    }
+    i += segLen;
+  }
+  return null;
+}
+
+function readImageDimensions(
+  buf: Buffer,
+  mimeType: string,
+): { width: number; height: number } | null {
+  if (mimeType === 'image/png') return readPngDimensions(buf);
+  if (mimeType === 'image/jpeg') return readJpegDimensions(buf);
+  // gif / webp / etc. — not common enough on the canvas to be worth
+  // a parser today. Falling back to `null` here means the image is
+  // returned unchanged (the original artifact src), which matches
+  // the pre-`maxPixels` behaviour.
+  return null;
+}
+
+/**
+ * Re-rasterize a loaded image at a smaller `maxEdge`. Uses resvg-wasm
+ * (already a dep for sketch rendering) by wrapping the image bytes in
+ * a thin SVG. Returns a PNG `Buffer` and the new dimensions.
+ *
+ * Caller must have established that `Math.max(width, height) > maxEdge`
+ * — we never upscale.
+ */
+async function resampleImageBytes(
+  bytes: Buffer,
+  mimeType: string,
+  origWidth: number,
+  origHeight: number,
+  maxEdge: number,
+): Promise<{ png: Buffer; width: number; height: number }> {
+  await ensureResvgReady();
+  const scale = maxEdge / Math.max(origWidth, origHeight);
+  const newW = Math.max(1, Math.round(origWidth * scale));
+  const newH = Math.max(1, Math.round(origHeight * scale));
+  const href = `data:${mimeType};base64,${bytes.toString('base64')}`;
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" ` +
+    `viewBox="0 0 ${origWidth} ${origHeight}" width="${newW}" height="${newH}">` +
+    `<image x="0" y="0" width="${origWidth}" height="${origHeight}" ` +
+    `preserveAspectRatio="none" href="${href}" />` +
+    `</svg>`;
+  const resvg = new Resvg(svg, {
+    fitTo: { mode: 'width', value: newW },
+    background: 'rgba(0,0,0,0)',
+  });
+  return {
+    png: Buffer.from(resvg.render().asPng()),
+    width: newW,
+    height: newH,
+  };
+}
+
+/**
+ * If the artifact at `src` is larger than `maxEdge` on its longest
+ * side, write a downscaled PNG copy and return its key + new
+ * dimensions. Otherwise (already small enough, missing file, or
+ * unsupported format) returns `null` so the caller can fall back to
+ * the original artifact unchanged.
+ *
+ * Downscaled output is content-addressed by `<originalKey>-<maxEdge>`
+ * so repeated calls with the same parameters are O(1) cache hits.
+ */
+async function maybeResizeImageArtifact(
+  store: ReturnType<typeof getCanvasStore>,
+  src: string,
+  maxEdge: number,
+): Promise<{ src: string; width: number; height: number } | null> {
+  const abs = store.resolveArtifactFilePath(src);
+  if (!abs) return null;
+  const ext = path.extname(abs).toLowerCase();
+  const mimeType = IMAGE_EXT_MIME[ext];
+  if (!mimeType) return null;
+  const bytes = await readFile(abs);
+  const dims = readImageDimensions(bytes, mimeType);
+  if (!dims) return null;
+  if (Math.max(dims.width, dims.height) <= maxEdge) return null;
+
+  // Content-address: <originalStem>-resized-<edge>.png. Keeping the
+  // original stem in the filename makes the lineage obvious when
+  // browsing `.artifacts/` and prevents collisions across nodes.
+  const originalStem = path.basename(src, path.extname(src));
+  const id = `${originalStem}-resized-${maxEdge}`;
+  const filename = `${id}.png`;
+  const existing = store.resolveArtifactFilePath(filename);
+  if (existing) {
+    // Re-derive dimensions from the cached file so the result is
+    // accurate without paying for another resvg pass.
+    try {
+      const cachedBytes = await readFile(existing);
+      const cachedDims = readPngDimensions(cachedBytes);
+      if (cachedDims) {
+        return {
+          src: filename,
+          width: cachedDims.width,
+          height: cachedDims.height,
+        };
+      }
+    } catch {
+      // Fall through and re-render below.
+    }
+  }
+  const resized = await resampleImageBytes(
+    bytes,
+    mimeType,
+    dims.width,
+    dims.height,
+    maxEdge,
+  );
+  await store.writeArtifactBuffer(
+    { id, ext: '.png', mimeType: 'image/png' },
+    resized.png,
+  );
+  return { src: filename, width: resized.width, height: resized.height };
+}
+
 // ─── Handler ───────────────────────────────────────────────────────────────
 /**
  * Typed internal API. Returns the parsed result array directly so
@@ -639,6 +804,15 @@ export async function snapshotNodesToArtifacts(
 ): Promise<SnapshotNodeResult[]> {
   const ids = args.nodeIds ?? [];
   if (ids.length === 0) return [];
+
+  // `maxPixels` is the longest-edge cap for all rasterized output.
+  // The agent can lower this to recover from oversize-image errors;
+  // we clamp into the schema range as a defence in depth so callers
+  // bypassing the schema can't request a 1×1 or a 1 GB PNG.
+  const maxEdge = Math.max(
+    256,
+    Math.min(4096, args.maxPixels ?? CLUSTER_MAX_PIXELS),
+  );
 
   const store = getCanvasStore(args.canvasId);
   const canvas = store.read();
@@ -688,7 +862,11 @@ export async function snapshotNodesToArtifacts(
   for (const id of orderedIds) expand(id, false);
 
   const results: SnapshotNodeResult[] = [];
-  const sketchNodes: CanvasNode[] = [];
+  // All snapshottable nodes (image + sketch) feed into the same
+  // bucket-by-frame + spatial-cluster pipeline. There is no
+  // image-only or sketch-only special path here — only a singleton
+  // image cluster short-circuits below, to skip the SVG raster.
+  const snapshottable: SnapshotEntry[] = [];
 
   for (const { id, fromFrame } of expansion) {
     // expansion only ever holds ids resolved via `byId`, so we can
@@ -696,19 +874,8 @@ export async function snapshotNodesToArtifacts(
     const node = byId.get(id)!;
     const type = getNodeType(node);
 
-    if (type === 'image') {
-      const src = readSidecarString(store, id, 'src');
-      if (!src) {
-        if (fromFrame) continue;
-        throw new Error(
-          `Node ${id} (image) has no src — nothing to return. The artifact may have been deleted, or the node's markdown sidecar (nodes/<label>.md) is missing its \`src:\` frontmatter entry.`,
-        );
-      }
-      results.push({ src, width: 0, height: 0, originNodeIds: [id] });
-      continue;
-    }
-    if (type === 'sketch') {
-      sketchNodes.push(node);
+    if (type === 'image' || type === 'sketch') {
+      snapshottable.push({ node, type, fromFrame });
       continue;
     }
     // Non-snapshottable types coming via frame expansion are skipped
@@ -729,46 +896,115 @@ export async function snapshotNodesToArtifacts(
     );
   }
 
-  // ── Sketches: cluster, render, content-address ────────────────────────
-  if (sketchNodes.length > 0) {
-    const clusters = clusterSketchesByFrame(sketchNodes);
-    for (const cluster of clusters) {
-      // Sibling image nodes the sketch overlaps act as visual
-      // backdrops so the AI sees the same composition the user did.
-      const backdropNodes = findContextImageNodes(cluster, allNodes);
-      const contextImages: ContextImage[] = [];
-      for (const bn of backdropNodes) {
-        const loaded = await loadContextImage(store, bn);
-        if (loaded) contextImages.push(loaded);
-      }
-      const built = clusterToSvg(cluster, contextImages);
-      const originNodeIds = cluster.map((n) => n.id);
-      if (!built) {
-        // Empty cluster (no strokes / zero area). Skip silently —
-        // emitting a 1×1 placeholder would just confuse the model.
-        continue;
-      }
-      const fingerprint = clusterFingerprint(cluster, contextImages);
-      // `sketch-raster-<hash>.png` — the `sketch-raster-` prefix makes
-      // these recognisable in `.artifacts/` listings and the hash
-      // gives deterministic content-addressed dedup.
-      const id = `sketch-raster-${fingerprint}`;
-      const filename = `${id}.png`;
-      const existing = store.resolveArtifactFilePath(filename);
-      if (!existing) {
-        const png = await renderClusterPng(built.svg, built.width);
-        await store.writeArtifactBuffer(
-          { id, ext: '.png', mimeType: 'image/png' },
-          png,
+  if (snapshottable.length === 0) return results;
+
+  const clusters = clusterByFrame(snapshottable);
+
+  for (const cluster of clusters) {
+    // ── Singleton image: pass-through (or maxPixels-resized copy) ──
+    // Skipping the SVG raster here keeps the common "user asked
+    // about one photo" case as cheap as a sidecar read + maybe one
+    // resvg downscale, instead of building a full composite SVG.
+    if (cluster.length === 1 && cluster[0].type === 'image') {
+      const entry = cluster[0];
+      const src = readSidecarString(store, entry.node.id, 'src');
+      if (!src) {
+        if (entry.fromFrame) continue;
+        throw new Error(
+          `Node ${entry.node.id} (image) has no src — nothing to return. The artifact may have been deleted, or the node's markdown sidecar (nodes/<label>.md) is missing its \`src:\` frontmatter entry.`,
         );
       }
-      results.push({
-        src: filename,
-        width: built.width,
-        height: built.height,
-        originNodeIds,
-      });
+      const resized = await maybeResizeImageArtifact(store, src, maxEdge);
+      if (resized) {
+        results.push({
+          src: resized.src,
+          width: resized.width,
+          height: resized.height,
+          originNodeIds: [entry.node.id],
+        });
+      } else {
+        results.push({
+          src,
+          width: 0,
+          height: 0,
+          originNodeIds: [entry.node.id],
+        });
+      }
+      continue;
     }
+
+    // ── Composite cluster: render strokes over any loadable image
+    //    backdrops as a single content-addressed PNG. ──────────────
+    const sketchNodes: CanvasNode[] = [];
+    const imageEntries: SnapshotEntry[] = [];
+    for (const member of cluster) {
+      if (member.type === 'sketch') sketchNodes.push(member.node);
+      else imageEntries.push(member);
+    }
+
+    const contextImages: ContextImage[] = [];
+    for (const entry of imageEntries) {
+      const loaded = await loadContextImage(store, entry.node);
+      if (loaded) {
+        contextImages.push(loaded);
+        continue;
+      }
+      // Loadable means: sidecar src is set, file exists, format is
+      // PNG / JPEG / GIF, and the node has a measurable on-canvas
+      // size. A missing-src on a directly-requested node is the
+      // only failure that should surface to the caller — frame
+      // expansions and unsupported formats just drop silently
+      // (the strokes will still render; losing one backdrop is
+      // preferable to failing the whole batch).
+      if (entry.fromFrame) continue;
+      const src = readSidecarString(store, entry.node.id, 'src');
+      if (!src) {
+        throw new Error(
+          `Node ${entry.node.id} (image) has no src — nothing to return. The artifact may have been deleted, or the node's markdown sidecar (nodes/<label>.md) is missing its \`src:\` frontmatter entry.`,
+        );
+      }
+    }
+
+    const built = clusterToSvg(sketchNodes, contextImages, maxEdge);
+    if (!built) {
+      // Empty cluster — no strokes AND no loadable backdrops, or
+      // every member has zero size. Nothing meaningful to emit.
+      continue;
+    }
+    // `originNodeIds` lists every node whose pixels live in this
+    // artifact — stroke ids + any backdrop image ids — so the
+    // caller can correctly attribute the composite.
+    const originNodeIds = [
+      ...sketchNodes.map((n) => n.id),
+      ...contextImages.map((ci) => ci.node.id),
+    ];
+    const fingerprint = clusterFingerprint(sketchNodes, contextImages);
+    // `sketch-raster-<hash>-<edge>.png` — the prefix is kept for
+    // historical compatibility with existing `.artifacts/` listings;
+    // it now also covers image-only clusters that go through the
+    // same SVG raster. The geometry hash + edge cap together give
+    // deterministic content-addressed dedup that survives
+    // `maxPixels` overrides (calling at 1280 then 768 produces two
+    // distinct artifacts, not the second overwriting the first).
+    const id =
+      maxEdge === CLUSTER_MAX_PIXELS
+        ? `sketch-raster-${fingerprint}`
+        : `sketch-raster-${fingerprint}-${maxEdge}`;
+    const filename = `${id}.png`;
+    const existing = store.resolveArtifactFilePath(filename);
+    if (!existing) {
+      const png = await renderClusterPng(built.svg, built.width);
+      await store.writeArtifactBuffer(
+        { id, ext: '.png', mimeType: 'image/png' },
+        png,
+      );
+    }
+    results.push({
+      src: filename,
+      width: built.width,
+      height: built.height,
+      originNodeIds,
+    });
   }
 
   return results;

@@ -96,6 +96,7 @@ const MD_BACKED_NODE_TYPES = new Set([
   'audio',
   'frame',
   'question',
+  'sketch',
 ]);
 
 const TEXT_BEARING_NODE_TYPES = new Set([

@@ -7,6 +7,7 @@ import { PreparedPromptMessage } from './PreparedPromptMessage';
 import { StatusMessage } from './StatusMessage';
 import { UserMessage } from './UserMessage';
 import { Button } from '../Common/Button';
+import { SkeletonLines } from '../Common/SkeletonLines';
 import { ThinkingIndicator } from '../Common/ThinkingIndicator';
 
 import type { ChatMessage } from '../../store/chatTypes';
@@ -14,6 +15,12 @@ import type { ChatMessage } from '../../store/chatTypes';
 interface MessageListProps {
   messages: ChatMessage[];
   isLoading: boolean;
+  /**
+   * True while the chat history is being hydrated from the server.
+   * Rendered as a skeleton placeholder — distinct from `isLoading`
+   * (which means the agent is actively producing a response).
+   */
+  isHistoryLoading?: boolean;
   /** Hide action buttons on AI messages (e.g. in operate mode). */
   hideAIActions?: boolean;
   /** Called when user re-selects an intent from the intent-select message. */
@@ -25,6 +32,7 @@ interface MessageListProps {
 export const MessageList = ({
   messages,
   isLoading,
+  isHistoryLoading,
   hideAIActions,
   onIntentReselect,
   onRetry,
@@ -181,6 +189,12 @@ export const MessageList = ({
             <div className="px-3 py-2">
               <ThinkingIndicator />
             </div>
+          </div>
+        )}
+
+        {isHistoryLoading && messages.length === 0 && (
+          <div className="px-3 py-2">
+            <SkeletonLines />
           </div>
         )}
 

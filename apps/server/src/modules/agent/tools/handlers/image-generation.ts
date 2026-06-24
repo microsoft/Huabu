@@ -1,21 +1,36 @@
 /**
  * `generate_image` handler — Azure OpenAI gpt-image family.
  *
- * Calls the Azure image deployment configured under Settings → LLM
- * Provider → Azure OpenAI → Image Deployment (separate from the chat
- * deployment, since Azure provisions them per-model). The image bytes
- * are decoded from `response_format: b64_json`, written into the
- * canvas's `.artifacts/` folder, and the artifact key (`art_xxx.png`)
- * is returned to the agent so it can compose a follow-up
- * `canvas_commands` call to drop the image onto the canvas.
+ * Calls the Azure image deployment configured under Settings → Image
+ * Provider → Azure OpenAI. The image bytes are decoded from the
+ * `b64_json` response, written into the canvas's `.artifacts/`
+ * folder, and the artifact key (`gen_xxx.png`) is returned to the
+ * agent so it can compose a follow-up `canvas_commands` call to drop
+ * the image onto the canvas.
  *
  * Two modes:
- *   - **text-only**  → POST `/images/generations` with JSON body.
- *   - **with refs**  → POST `/images/edits` with multipart/form-data
- *     including each reference image as a file part. References are
- *     looked up from the canvas's artifact store by key, so the
- *     agent passes opaque artifact keys it obtained via
- *     `snapshot_nodes` (or that already live on `image` nodes).
+ *   - **text-only**  → `images.generate({...})`
+ *   - **with refs**  → `images.edit({ image:[…], prompt, … })` — refs
+ *     are looked up from the canvas's artifact store by key.
+ *
+ * Wire-layer (HTTP / multipart / Azure deployment routing / api
+ * versioning / b64 decode / retries / aborts) is delegated to the
+ * official `openai` SDK. We auto-pick between two clients based on
+ * the configured `baseUrl`:
+ *
+ *   - When `baseUrl` ends in `/openai/v1` (the Azure AI Foundry
+ *     OpenAI-compatible path), use the plain `OpenAI` client so it
+ *     posts to `{baseURL}/images/{generations|edits}` with a bearer
+ *     token — exactly what that endpoint expects.
+ *   - Otherwise treat the URL as a classic Azure resource hostname
+ *     and use `AzureOpenAI`, which routes through
+ *     `/openai/deployments/{name}/images/...?api-version=…` with the
+ *     `api-key` header.
+ *
+ * Pre-flight validation against the per-family capability registry
+ * means the agent gets a structured "size 512x512 not supported by
+ * gpt-image-1; try 1024x1024 / 1024x1536 / 1536x1024" before any
+ * HTTP call goes out.
  *
  * Returns `JSON.stringify({src, width, height, revisedPrompt?})` on
  * success. Errors throw — pi-agent-core wraps them as
@@ -25,23 +40,15 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-// `fetch` and `FormData` must come from the same realm: undici's
-// `instanceof FormData` check is class-identity based, and Node's built-in
-// `globalThis.fetch` uses Node's *bundled* undici copy whose `FormData`
-// class is not identity-equal to the one re-exported from this package's
-// `undici` dependency. When the realms mismatch, undici silently falls
-// back to `String(body)` and sends the request as `text/plain`, which
-// Azure rejects with HTTP 400 (`unsupported_content_type`).
-//
-// Importing `fetch` from `undici` here guarantees the realm matches the
-// `FormData` we instantiate below. We pass the proxy dispatcher
-// explicitly because Node's built-in fetch wrapper in setup-proxy.ts
-// does not propagate to direct undici.fetch calls.
-import { fetch as undiciFetch, FormData } from 'undici';
+import { AzureOpenAI, OpenAI, toFile } from 'openai';
 
-import { createId } from '@sediment/shared';
+import {
+  createId,
+  getImageCapabilities,
+  validateImageQuality,
+  validateImageSize,
+} from '@sediment/shared';
 
-import { getProxyDispatcher } from '../../../../setup-proxy.js';
 import { getCanvasStore } from '../../../storage/index.js';
 import { getAzureImageConfig } from '../../llm.js';
 
@@ -52,20 +59,22 @@ export type GenerateImageArgs = Static<typeof generateImageParamsSchema> & {
   canvasId: string;
 };
 
-// Azure's gpt-image-1 has a hard cap on prompt length; trim early so we
-// surface a clean local error rather than a 4xx from upstream.
+// Azure caps prompt length on gpt-image-*; trim early so we surface a
+// clean local error rather than a 4xx from upstream.
 const MAX_PROMPT_LEN = 4000;
 const REQUEST_TIMEOUT_MS = 120_000;
 
-interface AzureImageResponse {
-  data?: Array<{
-    b64_json?: string;
-    revised_prompt?: string;
-  }>;
-  error?: {
-    message?: string;
-    code?: string;
-  };
+/**
+ * Format a {@link import('@sediment/shared').ValidationResult}
+ * failure as an actionable error message.
+ */
+function formatValidationFailure(
+  label: string,
+  reason: string,
+  suggestions: string[],
+): string {
+  if (suggestions.length === 0) return `${label} ${reason}`;
+  return `${label} ${reason} Try: ${suggestions.join(' / ')}.`;
 }
 
 export async function handleGenerateImage(
@@ -82,8 +91,37 @@ export async function handleGenerateImage(
   }
 
   const refs = args.referenceArtifactSrcs ?? [];
-  const size = args.size ?? '1024x1024';
   const azure = getAzureImageConfig(); // throws with actionable message
+  const caps = getImageCapabilities(azure.modelFamily);
+
+  // ── Capability validation ────────────────────────────────────────────
+  // Run BEFORE any artifact IO so the error path is fast and the
+  // suggestion list survives back to the agent.
+  const size = args.size ?? '1024x1024';
+  const sizeCheck = validateImageSize(azure.modelFamily, size);
+  if (!sizeCheck.ok) {
+    throw new Error(
+      formatValidationFailure(
+        '[generate_image]',
+        sizeCheck.reason,
+        sizeCheck.suggestions,
+      ),
+    );
+  }
+  // Tool arg > Settings default > family default. The Settings value
+  // is a user-set override; the family default is the safe baseline
+  // when neither is set.
+  const quality = args.quality ?? azure.quality ?? caps.defaultQuality;
+  const qualityCheck = validateImageQuality(azure.modelFamily, quality);
+  if (!qualityCheck.ok) {
+    throw new Error(
+      formatValidationFailure(
+        '[generate_image]',
+        qualityCheck.reason,
+        qualityCheck.suggestions,
+      ),
+    );
+  }
 
   // ── Resolve reference artifacts to absolute paths upfront ─────────────
   // Any missing/invalid ref is an early hard error — better than sending
@@ -105,148 +143,117 @@ export async function handleGenerateImage(
     refPaths.push({ key, absPath: abs });
   }
 
-  // ── Build request ─────────────────────────────────────────────────────
-  // Azure now exposes two completely different protocols for image
-  // generation, and the right one is chosen by the *shape of the
-  // baseUrl* the user pasted into Settings:
+  // ── Pick the right OpenAI SDK client for the configured baseUrl ───────
+  // Azure now exposes two completely different routing styles for
+  // image generation and the right one is chosen by the *shape of
+  // the baseUrl* the user pasted into Settings:
   //
-  //   (a) NEW — Azure AI Foundry "OpenAI-compatible v1 path"
+  //   (a) NEW — Azure AI Foundry "OpenAI-compatible v1 path".
   //       baseUrl ends in `/openai/v1` (or `/v1`).
-  //       This path mirrors the public OpenAI API 1:1:
-  //         POST {endpoint}/images/{generations|edits}
-  //         Authorization: Bearer <key>
-  //         body: { model: <deployment>, prompt, size, quality, n }
-  //         (no api-version, no `response_format` — gpt-image-1
-  //          always returns b64_json on this path)
+  //       This path mirrors the public OpenAI API 1:1 (`Bearer`
+  //       auth, deployment passed as `model` in the body, no
+  //       `api-version` query string). The plain `OpenAI` client
+  //       with `baseURL` does the right thing.
   //
-  //   (b) LEGACY — classic Azure deployment routing
-  //       baseUrl is the bare resource hostname (no trailing /openai…).
-  //         POST {endpoint}/openai/deployments/{name}/images/...
-  //                ?api-version=YYYY-MM-DD[-preview]
-  //         api-key: <key>
-  //         body: { prompt, size, quality, n }
+  //   (b) LEGACY — classic Azure deployment routing.
+  //       baseUrl is the bare resource hostname. The `AzureOpenAI`
+  //       client routes through
+  //       `/openai/deployments/{name}/images/...?api-version=…`
+  //       with the `api-key` header.
   //
-  // We auto-detect which one to use from the endpoint suffix so both
-  // styles work without forcing the user to maintain two separate
-  // base URLs (chat and images share the same one).
+  // Auto-detecting from the endpoint suffix means chat + image can
+  // share one baseUrl without forcing the user to maintain two.
   const trimmedEndpoint = azure.endpoint.replace(/\/+$/, '');
-  const v1Match = trimmedEndpoint.match(/^(.*?)(?:\/openai)?\/v1$/i);
-  const isV1Style = v1Match !== null;
+  const isV1Style = /(?:^|\/)(?:openai\/)?v1$/i.test(trimmedEndpoint);
   const isEdit = refPaths.length > 0;
-  const url = isV1Style
-    ? `${trimmedEndpoint}/images/${isEdit ? 'edits' : 'generations'}`
-    : `${trimmedEndpoint}/openai/deployments/${encodeURIComponent(azure.deployment)}/images/${isEdit ? 'edits' : 'generations'}?api-version=${encodeURIComponent(azure.apiVersion)}`;
+
+  // The `openai` SDK uses `globalThis.fetch`, which Node routes
+  // through the undici global dispatcher installed by `setup-proxy.ts`
+  // when HTTPS_PROXY is configured. Built-in fetch + built-in
+  // FormData stay realm-aligned, which keeps `images.edit` multipart
+  // uploads working.
+  const client = isV1Style
+    ? new OpenAI({
+        baseURL: trimmedEndpoint,
+        apiKey: azure.apiKey,
+        timeout: REQUEST_TIMEOUT_MS,
+      })
+    : new AzureOpenAI({
+        endpoint: trimmedEndpoint,
+        apiKey: azure.apiKey,
+        apiVersion: azure.apiVersion,
+        deployment: azure.deployment,
+        timeout: REQUEST_TIMEOUT_MS,
+      });
 
   console.log(
-    `[generate_image] ${isV1Style ? 'v1' : 'legacy'} POST ${url} (refs=${refPaths.length}, quality=${args.quality ?? azure.quality})`,
+    `[generate_image] ${isV1Style ? 'v1' : 'azure-legacy'} ${isEdit ? 'edit' : 'generate'} deployment=${azure.deployment} family=${azure.modelFamily} size=${size} quality=${quality} refs=${refPaths.length}`,
   );
 
-  // gpt-image-1 does not accept `response_format` (it is hard-coded to
-  // b64_json) — passing it returns a 400. Quality resolution:
-  // explicit tool arg > Settings default > 'low' (cheapest).
-  const quality = args.quality ?? azure.quality;
-  const authHeader: Record<string, string> = isV1Style
-    ? { Authorization: `Bearer ${azure.apiKey}` }
-    : { 'api-key': azure.apiKey };
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
-  // Resolve the proxy dispatcher once (undefined when no proxy is
-  // configured or when the target host is on the NO_PROXY bypass list).
-  const dispatcher = getProxyDispatcher(url);
-
-  let response: Response;
+  // ── Call SDK ──────────────────────────────────────────────────────────
+  // Both client types expose the same `images.{generate,edit}` API.
+  // `model` is `deployment` on Azure but on the v1 path it's the
+  // deployment name passed in the body; we always send it so the v1
+  // path works and the Azure path treats it as a confirmation.
+  let revisedPrompt: string | undefined;
+  let b64: string | undefined;
   try {
     if (isEdit) {
-      const form = new FormData();
-      form.set('prompt', prompt);
-      form.set('size', size);
-      form.set('n', '1');
-      form.set('quality', quality);
-      // On the v1 path the model name must travel in the body,
-      // because the URL itself no longer carries the deployment.
-      if (isV1Style) form.set('model', azure.deployment);
-      for (const ref of refPaths) {
-        const bytes = await readFile(ref.absPath);
-        // FormData wants a Blob/File; pass mime type explicitly so
-        // Azure validates correctly.
-        form.append(
-          'image[]',
-          new Blob([bytes], { type: 'image/png' }),
-          path.basename(ref.absPath),
-        );
-      }
-      response = (await undiciFetch(url, {
-        method: 'POST',
-        headers: authHeader,
-        body: form,
-        signal: controller.signal,
-        dispatcher,
-      })) as unknown as Response;
-    } else {
-      const body: Record<string, unknown> = {
+      const imageFiles = await Promise.all(
+        refPaths.map(async (ref) => {
+          const bytes = await readFile(ref.absPath);
+          return toFile(bytes, path.basename(ref.absPath), {
+            type: 'image/png',
+          });
+        }),
+      );
+      const res = await client.images.edit({
+        model: azure.deployment,
         prompt,
-        size,
+        image: imageFiles,
+        size: size as 'auto',
+        quality: quality as 'auto',
         n: 1,
-        quality,
-      };
-      if (isV1Style) body.model = azure.deployment;
-      response = (await undiciFetch(url, {
-        method: 'POST',
-        headers: {
-          ...authHeader,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-        dispatcher,
-      })) as unknown as Response;
+      });
+      const first = res.data?.[0];
+      b64 = first?.b64_json;
+      revisedPrompt = first?.revised_prompt ?? undefined;
+    } else {
+      const res = await client.images.generate({
+        model: azure.deployment,
+        prompt,
+        size: size as 'auto',
+        quality: quality as 'auto',
+        n: 1,
+      });
+      const first = res.data?.[0];
+      b64 = first?.b64_json;
+      revisedPrompt = first?.revised_prompt ?? undefined;
     }
   } catch (err) {
-    if ((err as Error)?.name === 'AbortError') {
-      throw new Error(
-        `Azure image request timed out after ${Math.round(REQUEST_TIMEOUT_MS / 1000)}s.`,
-      );
-    }
+    // OpenAI SDK throws `APIError` with `.status` / `.code` /
+    // `.message`. Surface a short, agent-friendly message plus a
+    // 404-only hint that matches the most common misconfig.
+    const apiErr = err as { status?: number; code?: string; message?: string };
+    const status = apiErr?.status;
+    const code = apiErr?.code ? ` (${apiErr.code})` : '';
+    const msg = apiErr?.message ?? String(err);
+    const hint =
+      status === 404
+        ? ` Common causes: (1) the deployment "${azure.deployment}" doesn't exist on this Azure resource, (2) the api-version "${azure.apiVersion}" is malformed (must be YYYY-MM-DD, e.g. 2025-04-01-preview), (3) your region doesn't host ${azure.modelFamily}.`
+        : '';
     throw new Error(
-      `Azure image request failed: ${(err as Error)?.message ?? String(err)}`,
+      `Azure image request failed${status ? ` (HTTP ${status})` : ''}${code}: ${msg}.${hint}`,
     );
-  } finally {
-    clearTimeout(timeout);
   }
 
-  if (!response.ok) {
-    let detail = '';
-    try {
-      const body = (await response.json()) as AzureImageResponse;
-      detail = body?.error?.message
-        ? ` — ${body.error.message}${body.error.code ? ` (${body.error.code})` : ''}`
-        : '';
-    } catch {
-      // Body wasn't JSON; ignore.
-    }
-    // Include the URL that 4xx'd so users can quickly tell whether the
-    // endpoint / deployment / api-version is the problem. The API key
-    // is sent as a header, not in the URL, so this is safe to log.
-    const hint =
-      response.status === 404
-        ? ` Common causes: (1) the deployment "${azure.deployment}" doesn't exist on this Azure resource, (2) the api-version "${azure.apiVersion}" is malformed (must be YYYY-MM-DD, e.g. 2025-04-01-preview), (3) your region doesn't host gpt-image-1.`
-        : '';
+  if (!b64 || typeof b64 !== 'string') {
     throw new Error(
-      `Azure image request failed with HTTP ${response.status}${detail}.\nURL: ${url}${hint}`,
+      `Azure response missing data[0].b64_json — the deployment may have returned a URL instead. Confirm the deployment is a gpt-image-* model (not dall-e-3).`,
     );
   }
 
   // ── Decode + persist ──────────────────────────────────────────────────
-  const body = (await response.json()) as AzureImageResponse;
-  const first = body?.data?.[0];
-  const b64 = first?.b64_json;
-  if (!b64 || typeof b64 !== 'string') {
-    throw new Error(
-      `Azure response missing data[0].b64_json. Did you set response_format correctly?`,
-    );
-  }
   const png = Buffer.from(b64, 'base64');
   // Use a `gen-` prefix (vs the generic `artifact-` used by uploads and
   // preprocessing) so future GC can distinguish model-generated images
@@ -258,16 +265,25 @@ export async function handleGenerateImage(
     png,
   );
 
-  // size is fixed by the request; we don't decode the PNG header to
-  // double-check (gpt-image-1 honours the request size).
-  const [w, h] = size.split('x').map((n) => Number.parseInt(n, 10));
+  // The requested size string ("auto" included) drives what we
+  // report back; gpt-image-* generally honours the request size, and
+  // "auto" reports 0×0 because the actual chosen size isn't echoed
+  // back in the response body — the agent typically doesn't need it.
+  let w = 0;
+  let h = 0;
+  if (size !== 'auto') {
+    const parsed = size.split('x').map((n) => Number.parseInt(n, 10));
+    if (parsed.length === 2 && parsed.every((n) => Number.isFinite(n))) {
+      [w, h] = parsed;
+    }
+  }
   const result: Record<string, unknown> = {
     src: record.filename,
     width: w,
     height: h,
   };
-  if (first?.revised_prompt) {
-    result.revisedPrompt = first.revised_prompt;
+  if (revisedPrompt) {
+    result.revisedPrompt = revisedPrompt;
   }
   return JSON.stringify(result);
 }

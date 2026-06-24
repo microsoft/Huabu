@@ -548,15 +548,23 @@ export const fsWriteTool: ToolDefinition = {
 export const snapshotNodesParamsSchema = Type.Object({
   nodeIds: Type.Array(Type.String(), {
     description:
-      'Ids of the nodes to snapshot, as they appear in `get_canvas_outline` / `inspect_nodes`. All nodes must live on the current canvas. Pass a single id for a one-shot snapshot; pass multiple ids to let the tool spatially cluster related sketches into one image per cluster.',
+      'Ids of the nodes to snapshot, as they appear in `get_canvas_outline` / `inspect_nodes`. All nodes must live on the current canvas. Pass a single id for a one-shot snapshot; pass multiple ids to let the tool spatially cluster nearby image and sketch nodes into one composite PNG per cluster.',
   }),
+  maxPixels: Type.Optional(
+    Type.Integer({
+      minimum: 256,
+      maximum: 4096,
+      description:
+        'Optional longest-edge pixel cap for the output PNG (256-4096). Defaults to 1280 — enough resolution for vision while keeping a single attachment well under the upstream LLM’s body-size limit. Reduce this (e.g. to 768 or 512) when a previous turn returned `[Attached Image: … omitted from vision (~X.X MB exceeds the inline cap)]` so the resulting PNG is small enough to actually be sent. Applies uniformly to: rendered clusters (re-rendered at the new cap), and singleton image pass-throughs (re-rasterized only when the source’s longest edge exceeds `maxPixels`; otherwise the original artifact is returned unchanged). Result is content-addressed by `(source, maxPixels)`, so the same call is essentially free on repeat.',
+    }),
+  ),
 });
 
 export const snapshotNodesTool: ToolDefinition = {
   name: 'snapshot_nodes',
   label: 'Snapshot nodes',
   description:
-    'Produce a PNG snapshot of one or more canvas nodes — used both as a vision attachment so the LLM can SEE the node and as `generate_image.referenceArtifactSrcs` input. Supported types: `sketch` (renders strokes to PNG; overlapping `image` siblings are composited as a backdrop so the snapshot matches the on-canvas view), `image` (reuses the node\'s existing artifact key, no new file), and `frame` (recursively expands to its children — image/sketch children produce snapshots, other child types are skipped silently). For standalone `note` / `text` / `pdf` / `video` use `read("nodes/<file>.md")` instead — there is no still image to snapshot. Multiple sketches in one call are bucketed by parent frame and spatially clustered (200 px edge-to-edge); each cluster is content-addressed, so re-snapshotting an unchanged cluster reuses its `src`. The chat route auto-runs this on selected sketches before the LLM\'s first turn (the keys appear in the user-message metadata), so call manually only for non-selected nodes. Returns `Array<{src, width, height, originNodeIds}>`; `originNodeIds` lists the ids that share this artifact (one id for image; N stroke ids for a sketch cluster — backdrop image siblings are not listed).',
+    "Snapshot canvas nodes into PNG attachments — use the returned `src` as a vision attachment (so you can SEE the node) or as `generate_image.referenceArtifactSrcs`. Call this for any `image` / `sketch` node you've located via `get_canvas_outline` / `inspect_nodes`; `frame` is also accepted and recursively expands to its image/sketch children. For `note` / `text` / `pdf` / `video` use `read(\"nodes/<file>.md\")` instead — they have no still image.\n\nMultiple ids are spatially clustered per parent frame (edge-to-edge ≤ 200 px): nearby image+sketch nodes composite into ONE PNG (images as backdrop, strokes on top); distant ids stay separate. A single image id short-circuits to that node's original artifact (or a downscaled copy when its longest edge exceeds `maxPixels`), so pass one id at a time when you want full-resolution pixels — e.g. drilling into a member of an earlier cluster.\n\nReturns `Array<{src, width, height, originNodeIds}>`; `originNodeIds` lists every contributing node. The chat route already auto-snapshots the user's selection on your first turn (keys appear in user-message metadata), so don't re-snapshot the same selection unless you need full-res single-image pixels or a smaller `maxPixels` retry.",
   parameters: snapshotNodesParamsSchema,
 };
 
