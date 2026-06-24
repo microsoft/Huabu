@@ -181,6 +181,6 @@ describe('describe* helpers', () => {
 
   it('emits a quality summary that includes the default keyword', () => {
     const text = describeQualitiesForPrompt('gpt-image-2');
-    expect(text).toMatch(/default: high/);
+    expect(text).toMatch(/default: low/);
   });
 });
