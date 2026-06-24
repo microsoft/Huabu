@@ -46,11 +46,11 @@
 import {
   computeFrameFit,
   getAbsolutePosition as getFrameAbsolutePosition,
+  getFrameSizing,
   getNodeSize,
   type NestableNode,
 } from '@sediment/shared/canvas-engine';
 
-import { FRAME_PADDING } from '@/config/canvas';
 import {
   getNodeFontFit,
   refitFont,
@@ -61,16 +61,24 @@ import { canvasHistoryManager } from '../../canvasHistoryManager';
 import { useGesturePreviewStore } from '../../gesturePreviewStore';
 
 import type { CanvasUiIntent } from '@/handler/canvasCommand/uiIntent';
-import type { NodeStyle } from '@sediment/shared';
+import type { FrameSizing, NodeStyle } from '@sediment/shared';
 import type { Node } from '@xyflow/react';
 
 /**
  * Item shape accepted by `previewResizeGeometry` — mirrors the
  * RESIZE_NODE intent payload exactly.
+ *
+ * Both `size` and `position` are independently optional: omitting a
+ * field means "leave that part of the node's geometry unchanged",
+ * NOT "reset it". The manual-frame branch in `flushScale` relies on
+ * this to move children's local positions (to compensate for a frame
+ * origin shift) without touching their pinned width / height.
  */
 export type ResizeGeometryItem = {
   nodeId: string;
+  /** Omit to keep the node's current width / height. */
   size?: { width: number; height?: number };
+  /** Omit to keep the node's current `(x, y)`. */
   position?: { x: number; y: number };
 };
 
@@ -80,7 +88,6 @@ export type ResizeGeometryItem = {
  * coupling and import cycles.
  */
 export type ResizePreviewSliceState = {
-  autoLayoutEnabled: boolean;
   nodes: readonly Node[];
   dispatchUiIntent: (intent: CanvasUiIntent) => void;
   /**
@@ -159,8 +166,16 @@ type FrameResizeChildSnapshot = {
 
 type FrameResizeSnapshot = {
   frameId: string;
+  frameX: number;
+  frameY: number;
   frameWidth: number;
   frameHeight: number;
+  /**
+   * Sizing policy at gesture start. Drives the `flushScale` branch
+   * (hug → scale children, manual → freeze child sizes and only
+   * compensate their local positions for the frame's origin shift).
+   */
+  sizing: FrameSizing;
   children: FrameResizeChildSnapshot[];
 };
 
@@ -257,7 +272,8 @@ export function createResizePreviewController(opts: {
   };
 
   // Actual geometry computation + dispatch for ONE scale tick. Reads
-  // the captured child baselines and scales them proportionally to the
+  // the captured child baselines and either scales them proportionally
+  // (hug) or freezes their absolute position (manual) against the
   // frame's new size, dispatching frame + children as a single batch.
   // Invoked from the rAF callback in `applyFrameResizeScale` (per
   // paint) and synchronously from `flushFrameResizeScale` at gesture
@@ -266,20 +282,10 @@ export function createResizePreviewController(opts: {
     const snap = freeSnapshot;
     if (!snap) return;
     if (snap.frameWidth <= 0 || snap.frameHeight <= 0) return;
-    // Scale strictly against the CONTENT area (the frame box minus its
-    // fixed `FRAME_PADDING` inset on both sides), not the full box. The
-    // padding is a constant — it does not grow with the frame — so a
-    // full-box ratio (`width / frameWidth`) over-scales children and
-    // makes the content-driven frame size overshoot the drag target by
-    // `2 * FRAME_PADDING * (1 - sx)` each tick (visible jitter). Using
-    // the inner ratio keeps the recomputed frame size equal to the
-    // dragged size: `inner' = inner0 * sx`, so `frame' = inner0 * sx +
-    // 2p = width`.
-    const pad2 = FRAME_PADDING * 2;
-    const innerW0 = Math.max(1, snap.frameWidth - pad2);
-    const innerH0 = Math.max(1, snap.frameHeight - pad2);
-    const sx = Math.max(0, width - pad2) / innerW0;
-    const sy = Math.max(0, height - pad2) / innerH0;
+    const frameWidth = width;
+    const frameHeight = height;
+    const frameX = x;
+    const frameY = y;
     // Always include the frame's NEW local origin in the batch so
     // non-BR handle drags don't depend on the `onNodesChange`
     // snap-mirror running in a separate pass to commit the frame's
@@ -289,10 +295,49 @@ export function createResizePreviewController(opts: {
     const items: ResizeGeometryItem[] = [
       {
         nodeId: snap.frameId,
-        size: { width, height },
-        position: { x, y },
+        size: { width: frameWidth, height: frameHeight },
+        position: { x: frameX, y: frameY },
       },
     ];
+    if (snap.sizing === 'manual') {
+      // Manual frames own their own box. Children must keep their
+      // pre-gesture size AND absolute position. Local positions are
+      // stored relative to the frame's origin, so if the frame's TL
+      // moved (TL/TR/BL/T/L handle drags), compensate each child's
+      // local position by the inverse delta. BR/B/R-handle drags
+      // leave `(frameX, frameY)` equal to the gesture-start origin
+      // and the compensation is a no-op.
+      const dx = frameX - snap.frameX;
+      const dy = frameY - snap.frameY;
+      for (const child of snap.children) {
+        items.push({
+          nodeId: child.id,
+          // No `size`: keep the pre-gesture pinned width/height.
+          position: {
+            x: child.x - dx,
+            y: child.y - dy,
+          },
+        });
+      }
+      previewResizeGeometry(items);
+      return;
+    }
+    // ---- Hug branch: per-axis scaling ------------------------------
+    // Per-axis (sx, sy) for all hug layouts (free, column, row). For
+    // structured (`column` / `row`) frames the grid solver derives
+    // padding + gap per-axis (widths drive padX + interGapX, heights
+    // drive padY + intraGapY — see
+    // `packages/shared/src/canvas-engine/autoLayout/gridLayout.ts`),
+    // so scaling all child widths by `sx` makes the resulting frame
+    // width = `oldW × sx` exactly, and same for height with `sy`.
+    // Single-edge drags therefore track the pointer pixel-perfect on
+    // the dragged axis and leave the orthogonal axis untouched —
+    // children scale per-axis along with the frame. Diagonal drags
+    // stretch children per-axis (children may look non-square); users
+    // who want uniform scaling can hold Shift (TODO: wire up the
+    // modifier).
+    const sx = width / snap.frameWidth;
+    const sy = height / snap.frameHeight;
     for (const child of snap.children) {
       const childWidth = Math.max(1, child.width * sx);
       const childHeight = Math.max(1, child.height * sy);
@@ -302,16 +347,15 @@ export function createResizePreviewController(opts: {
           width: childWidth,
           height: childHeight,
         },
-        // Local positions are anchored to the constant `FRAME_PADDING`
-        // inset and only their offset INSIDE the content area scales.
-        // This keeps the top-left padding fixed while the inner gaps
-        // grow/shrink with the content-area ratio — consistent with the
-        // content-area size scaling above. (Structured column/row frames
-        // ignore these positions: the grid solver re-packs the scaled
+        // Local positions scale uniformly from the frame origin too,
+        // so the relative gap between any two points (including the
+        // gap between a child and the frame edge) scales by the same
+        // ratio as their sizes. (Structured column / row frames ignore
+        // these positions: the grid solver re-packs the scaled
         // children at the end of the batch.)
         position: {
-          x: FRAME_PADDING + (child.x - FRAME_PADDING) * sx,
-          y: FRAME_PADDING + (child.y - FRAME_PADDING) * sy,
+          x: child.x * sx,
+          y: child.y * sy,
         },
       });
     }
@@ -359,9 +403,6 @@ export function createResizePreviewController(opts: {
     previewResizeGeometry,
 
     updateResizePreview(nodeId) {
-      const { autoLayoutEnabled } = opts.getState();
-      if (!autoLayoutEnabled) return;
-
       // Cancel the prior rAF handle (rather than gating on "already
       // scheduled") so we always recompute against the latest store
       // snapshot — RF may have committed several intermediate dim
@@ -378,6 +419,10 @@ export function createResizePreviewController(opts: {
           (n) => n.id === node.parentId,
         );
         if (!frame || frame.type !== 'frame') return;
+        // Per-frame sizing gate: only `hug` parents preview a refit
+        // around the resizing child. `manual` parents keep their
+        // pinned size — there is nothing to reflow.
+        if (getFrameSizing(frame) !== 'hug') return;
 
         const fit = computeFrameFit(nodes as NestableNode[], node.parentId);
         if (!fit) return;
@@ -428,6 +473,11 @@ export function createResizePreviewController(opts: {
         freeSnapshot = null;
         return;
       }
+      const sizing = getFrameSizing(frame);
+      // Children are always snapshotted — `manual` frames need them
+      // too so `flushScale` can compensate child local positions for
+      // the frame's origin shift (TL/TR/BL/T/L handles all move the
+      // frame's `(x, y)`), keeping absolute child positions stable.
       const children: FrameResizeChildSnapshot[] = [];
       for (const node of nodes) {
         if (node.parentId !== frameId) continue;
@@ -447,8 +497,11 @@ export function createResizePreviewController(opts: {
       lastAppliedFont.clear();
       freeSnapshot = {
         frameId,
+        frameX: frame.position.x,
+        frameY: frame.position.y,
         frameWidth: frameSize.width,
         frameHeight: frameSize.height,
+        sizing,
         children,
       };
     },

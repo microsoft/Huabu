@@ -16,9 +16,11 @@ import {
   preprocessNodeBodySchema,
   putCanvasBodySchema,
   putNodeContentBodySchema,
+  canvasSearchRequestSchema,
 } from '@sediment/shared';
 
 import { CanvasNotFoundError, executeOnServer } from './canvas-executor.js';
+import { searchCanvas } from './canvas-search.js';
 import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
 import { getPreprocessDispatcher } from '../preprocessing/index.js';
 import { stripOfficeparserPreamble } from '../preprocessing/loaders/office-strip.js';
@@ -43,6 +45,7 @@ import type {
   ApiResult,
   CanvasCommand,
   CanvasConflictResponse,
+  CanvasSearchEvent,
   CreateCanvasRequest,
   CreateCanvasResponse,
   DeleteCanvasResponse,
@@ -130,6 +133,39 @@ const TEXT_BEARING_NODE_TYPES = new Set([
   'web',
   'pdf',
   'office',
+  'question',
+]);
+
+/**
+ * Subset of {@link TEXT_BEARING_NODE_TYPES} whose `data.content` is
+ * actually consumed by the web renderer (preview body, AI block
+ * provenance, …) — and therefore worth inlining into the batched
+ * `GET /:canvasId` response so first paint can render without a
+ * follow-up per-node fetch.
+ *
+ * `pdf` is intentionally excluded: the canvas card and the expanded
+ * preview both render directly from `data.src` via pdf.js, and the
+ * in-page text selection layer re-extracts text on demand with
+ * `page.getTextContent()`. Shipping the server-side extracted body
+ * here would add hundreds of KB to every canvas load for zero
+ * rendering benefit. Server-side agent / context paths still read the
+ * sidecar directly via `store.readNode()`, and the per-node
+ * `GET /:canvasId/nodes/:nodeId/content` endpoint still returns the
+ * full body (falling back to `existing.content` when this hydrate
+ * skips it) so search / AI features can fetch on demand.
+ *
+ * `question` IS inlined: the prompt is short, the QuestionNode reads
+ * `data.content` to render the textarea, and skipping the inline copy
+ * would leave every question node blank on first paint (its
+ * `data.content` is stripped by `stripNodesForCanvas` on the PUT, so
+ * the sidecar body is the only surviving copy).
+ */
+const WIRE_INLINE_CONTENT_TYPES = new Set([
+  'note',
+  'text',
+  'web',
+  'office',
+  'question',
 ]);
 
 /**
@@ -292,10 +328,14 @@ function hydrateOneNode(
   if ('contentMissing' in data) {
     delete data['contentMissing'];
   }
-  // Only restore body for text-bearing types — image/video/frame
-  // markdown is metadata-only and the canvas state does not carry
-  // a content field for them.
-  if (TEXT_BEARING_NODE_TYPES.has(nodeType)) {
+  // Only restore body for types whose preview actually renders
+  // `data.content`. `pdf` is text-bearing on disk (the .md sidecar
+  // holds the extracted body for AI context) but the web renderer
+  // works straight off `data.src` via pdf.js, so we deliberately
+  // skip the inline copy here — see `WIRE_INLINE_CONTENT_TYPES`.
+  // image/video/audio/frame markdown is metadata-only and the canvas
+  // state does not carry a content field for them.
+  if (WIRE_INLINE_CONTENT_TYPES.has(nodeType)) {
     let body = nodeContent.content;
     if (nodeType === 'office' && typeof body === 'string') {
       body = stripOfficeparserPreamble(body);
@@ -547,13 +587,15 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       existing = null;
     }
 
-    const isTextBearing = TEXT_BEARING_NODE_TYPES.has(nodeType);
     // Body resolution:
-    //   - text-bearing nodes: prefer caller content; fall back to
-    //     existing on-disk body to avoid wiping it when the caller
-    //     only meant to update e.g. the label.
+    //   - text-bearing nodes (including `question`, whose prompt is
+    //     stored at `data.content` and mirrored into the sidecar so
+    //     canvas search can hit it): prefer the caller's content; fall
+    //     back to the existing on-disk body to avoid wiping it when
+    //     the caller only meant to update e.g. the label.
     //   - frontmatter-only nodes (image/video/frame): always empty.
-    const body = isTextBearing
+    const acceptsBody = TEXT_BEARING_NODE_TYPES.has(nodeType);
+    const body = acceptsBody
       ? (incomingContent ?? existing?.content ?? '')
       : '';
 
@@ -562,7 +604,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     // existing markdown is non-empty, refuse the body write but still
     // update frontmatter (label / src / summary / keywords / provenance).
     const wouldClobber =
-      isTextBearing &&
+      acceptsBody &&
       incomingContent === '' &&
       typeof existing?.content === 'string' &&
       existing.content.length > 0;
@@ -1281,6 +1323,86 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           await rm(stagingDir, { recursive: true, force: true }).catch(
             () => {},
           );
+        }
+      }
+    },
+  );
+
+  // --- Search canvas (NDJSON stream) ---
+  //
+  // Streams matches across the canvas as `application/x-ndjson` — one
+  // JSON `CanvasSearchEvent` per line. Metadata-tier hits (label /
+  // summary / keywords) ship first, then body-content hits, so the UI
+  // can populate immediately while the heavier scan finishes. The
+  // client cancels a superseded query by closing the socket
+  // (`AbortController.abort()`); we mirror that into the scanner via
+  // an `AbortController` so it short-circuits between nodes.
+  fastify.post<{ Params: { canvasId: string } }>(
+    '/:canvasId/search',
+    async function (request, reply) {
+      const { canvasId } = request.params;
+      const parsed = canvasSearchRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({
+          message: parsed.error.issues[0]?.message ?? 'Invalid request body',
+        });
+      }
+
+      const store = getCanvasStore(canvasId);
+      const canvas = store.read();
+      if (!canvas) {
+        return reply.code(404).send({ message: 'Canvas not found' });
+      }
+
+      reply.hijack();
+      reply.raw.writeHead(200, {
+        'Content-Type': 'application/x-ndjson',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      });
+      reply.raw.flushHeaders?.();
+
+      const abort = new AbortController();
+      let closed = false;
+      const writeEvent = (event: CanvasSearchEvent): void => {
+        if (closed) return;
+        try {
+          reply.raw.write(JSON.stringify(event) + '\n');
+        } catch {
+          // Socket already closed / errored. Mark closed AND abort
+          // the scanner so it stops doing disk/CPU work right away —
+          // otherwise we'd wait for `request.raw`'s `'close'` event,
+          // which may not have fired yet (or at all, for a half-open
+          // TCP connection) and would let `searchCanvas()` keep
+          // streaming sidecars into a dead pipe.
+          closed = true;
+          abort.abort();
+        }
+      };
+
+      const onClose = (): void => {
+        closed = true;
+        abort.abort();
+      };
+      request.raw.on('close', onClose);
+
+      try {
+        await searchCanvas(store, parsed.data, writeEvent, abort.signal);
+      } catch (err) {
+        request.log.error({ err, canvasId }, 'Canvas search failed');
+        writeEvent({
+          type: 'error',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      } finally {
+        request.raw.off('close', onClose);
+        if (!closed) {
+          try {
+            reply.raw.end();
+          } catch {
+            /* already closed */
+          }
         }
       }
     },

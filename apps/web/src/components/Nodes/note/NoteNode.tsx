@@ -14,7 +14,7 @@ import { MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
 import { NOTE_AUTO_HEIGHT_MIN } from './autoHeight';
 import { useTrackNoteFixedHeight } from './heightMemory';
-import { requestNoteHydration } from './noteHydrationScheduler';
+import { useDeferredHydration } from '../shared/nodeHydrationScheduler';
 
 import type { CanvasNoteNodeData } from '../types';
 
@@ -66,21 +66,16 @@ export const NoteNode = memo(
     // Defer the (expensive) Milkdown editor mount so a canvas full of
     // notes doesn't build every Crepe/ProseMirror instance inside one
     // blocking React commit on load. Until granted a turn by the shared
-    // scheduler we render a lightweight spinner placeholder (the same
-    // `Spinner` the PDF node shows while loading), sized by the persisted
-    // `measuredHeight` seed so the node keeps its real footprint. The
-    // upgrade to the real editor is visually identical — only the timing
-    // of the build work changes. See `noteHydrationScheduler`.
-    const [hydrated, setHydrated] = useState(false);
-    useEffect(() => {
-      // Skip while the node is a semantic-zoom placeholder; it re-runs and
-      // registers once the node zooms into full LOD. Once hydrated we keep
-      // the editor mounted (never tear down) so zooming back out and in
-      // again doesn't re-pay the build cost.
-      if (hydrated || isMinimalLOD) return;
-      const cancel = requestNoteHydration(() => setHydrated(true));
-      return cancel;
-    }, [hydrated, isMinimalLOD]);
+    // scheduler we render a lightweight spinner placeholder, sized by
+    // the persisted `measuredHeight` seed so the node keeps its real
+    // footprint. The upgrade to the real editor is visually identical —
+    // only the timing of the build work changes. The `isMinimalLOD`
+    // gate skips the queue entirely while the node is a semantic-zoom
+    // placeholder; once zoom crosses back into full LOD the hook
+    // re-enqueues. Once hydrated we keep the editor mounted (never tear
+    // down) so zooming back out and in again doesn't re-pay the build
+    // cost. See `../shared/nodeHydrationScheduler`.
+    const hydrated = useDeferredHydration(isMinimalLOD);
 
     // Session-scoped memory of "last pinned height" for this note. Lets a
     // "fixed → auto → fixed" round-trip restore the previous size instead

@@ -49,9 +49,9 @@ import {
   type GenerateImageArgs,
 } from './handlers/image-generation.js';
 import {
-  handleRasterizeNode,
-  type RasterizeNodeArgs,
-} from './handlers/rasterize-node.js';
+  handleSnapshotNodes,
+  type SnapshotNodesArgs,
+} from './handlers/snapshot-node.js';
 import { handleWebSearch, type WebSearchArgs } from './handlers/web-search.js';
 
 import type { AgentToolResult } from '@earendil-works/pi-agent-core';
@@ -148,9 +148,9 @@ export async function executeTool(
         canvasId: context?.canvasId,
       } as FsWriteArgs);
 
-    case 'rasterize_node':
-      return handleRasterizeNode(
-        withCanvasId<RasterizeNodeArgs>(args, 'rasterize_node'),
+    case 'snapshot_nodes':
+      return handleSnapshotNodes(
+        withCanvasId<SnapshotNodesArgs>(args, 'snapshot_nodes'),
       );
 
     case 'generate_image':

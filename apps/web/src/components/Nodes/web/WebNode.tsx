@@ -15,6 +15,7 @@ import { FloatingToolbar } from '../../Common/FloatingToolbar.tsx';
 import { LoadingState } from '../../Common/LoadingState.tsx';
 import { getAccentTokens } from '../accentTokens.ts';
 import { NodeWrapper } from '../NodeWrapper.tsx';
+import { useDeferredHydration } from '../shared/nodeHydrationScheduler.ts';
 
 import type { CanvasWebNodeData } from '../types.ts';
 import type { Node, NodeProps } from '@xyflow/react';
@@ -46,6 +47,14 @@ export const WebNode = memo(
     > | null>(null);
     const [previewLoading, setPreviewLoading] = useState(false);
     const [previewError, setPreviewError] = useState<string | null>(null);
+
+    // Defer the per-node preview fetch through the shared per-frame
+    // hydration scheduler. Without this, every WebNode on a freshly-
+    // opened canvas would fire its `/api/web/preview` request in the
+    // same tick and trigger a setState storm as each result lands
+    // ~simultaneously. The hook flips to `true` one node per frame so
+    // requests + paints stream in. See `../shared/nodeHydrationScheduler`.
+    const webHydrated = useDeferredHydration();
 
     const src = typeof data?.src === 'string' ? data.src : '';
     const isRemoteUrl = REMOTE_URL_RE.test(src);
@@ -106,6 +115,16 @@ export const WebNode = memo(
         return;
       }
 
+      // Stagger the preview fetch through the shared hydration
+      // scheduler so a canvas full of web nodes doesn't fire N
+      // /api/web/preview requests + N React setState bursts in the
+      // same frame on first mount. The hook returns `true` once this
+      // node is granted a slot; subsequent re-runs (ingestion status
+      // changes, src updates) re-enter this effect with `webHydrated`
+      // already true, so the staggering cost is paid exactly once per
+      // node lifetime.
+      if (!webHydrated) return;
+
       let cancelled = false;
       setPreviewLoading(true);
       setPreviewError(null);
@@ -133,7 +152,7 @@ export const WebNode = memo(
       return () => {
         cancelled = true;
       };
-    }, [src, canvasId, ingestion?.status, id]);
+    }, [src, canvasId, ingestion?.status, id, webHydrated]);
 
     // Live iframe is reserved for the desktop build only — *unless* the
     // src is a same-origin artifact (uploaded HTML, or a captured `.mhtml`

@@ -4,7 +4,12 @@
 
 import type { EdgeStyle } from './edge.js';
 import type { Point } from './layout.js';
-import type { CanvasNodeType, FrameLayoutMode, NodeData } from './node.js';
+import type {
+  CanvasNodeType,
+  FrameLayoutMode,
+  FrameSizing,
+  NodeData,
+} from './node.js';
 import type { PrefixedId } from '../../utils/id.js';
 /**
  * Canvas node ids follow the standard `node-<uuid>` convention.
@@ -162,11 +167,18 @@ export type CanvasCommand =
        * clamped to `[FRAME_GRID_MIN_COUNT, FRAME_GRID_MAX_COUNT]`. When
        * omitted while staying in a grid mode, the frame keeps its
        * previously-stored `gridCount` (or `FRAME_GRID_DEFAULT_COUNT`).
+       *
+       * `sizing` toggles the frame's size policy independently of
+       * `mode`. When omitted the previously-stored `sizing` is kept
+       * (defaulting to `'hug'`). Note: PR 1 forbids `'manual'` sizing
+       * when `mode` is `'column'` or `'row'`; the engine clamps the
+       * combination back to `'hug'`.
        */
       type: 'SET_FRAME_LAYOUT';
       frameId: CanvasNodeId;
       mode: FrameLayoutMode;
       gridCount?: number;
+      sizing?: FrameSizing;
     }
   | {
       /**

@@ -8,11 +8,7 @@
 
 // Layout-grid primitives are owned by the shared canvas-engine so that
 // the headless executor and the web renderer agree on snapping & padding.
-export {
-  GRID_SIZE,
-  FRAME_PADDING,
-  snapToGrid,
-} from '@sediment/shared/canvas-engine';
+export { GRID_SIZE, snapToGrid } from '@sediment/shared/canvas-engine';
 
 import { GRID_SIZE } from '@sediment/shared/canvas-engine';
 

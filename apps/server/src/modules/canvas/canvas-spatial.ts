@@ -21,9 +21,10 @@
  * Heavy lifting (clustering, proximity, arrangement detection) lives
  * in the zero-dep shared library `@sediment/shared/utils/spatial`.
  * This module is just an adapter: it loads `canvas.json`, normalizes
- * node sizes (mirroring `apps/web/src/utils/node/size.ts`), resolves
- * absolute positions for nested nodes, then forwards to the shared
- * primitives.
+ * node sizes via the canvas-engine helper
+ * (`@sediment/shared/canvas-engine/utils/nodeSizes.ts → getNodeSize`),
+ * resolves absolute positions for nested nodes, then forwards to the
+ * shared primitives.
  *
  * Boundary with `read`:
  *   - `read("nodes/<nodeId>.md")` owns content/label/summary/
@@ -43,6 +44,10 @@ import {
   nodesInRect,
   sortByReadingOrder,
 } from '@sediment/shared';
+import {
+  getLayoutNodeSize,
+  type CanvasNode,
+} from '@sediment/shared/canvas-engine';
 
 import { buildAgentNodeOutline } from '../agent/node-ref.js';
 import { getCanvasStore } from '../storage/index.js';
@@ -63,35 +68,12 @@ import type {
 
 // ─── Raw shapes parsed loosely from canvas.json ─────────────────────────────
 //
-// We type these narrowly enough to extract the fields we need, but
-// avoid pulling the full React Flow types — `state.nodes` is `unknown[]`
-// in the on-disk schema and may carry extra runtime keys that we do not
-// want to constrain here.
-
-interface RawNode {
-  id: string;
-  type?: string;
-  parentId?: string | null;
-  position?: { x?: number; y?: number };
-  /** Top-level width/height (when persisted directly on the React Flow node). */
-  width?: number;
-  height?: number;
-  /** Browser-measured bounding box; authoritative when present. */
-  measured?: { width?: number; height?: number };
-  /**
-   * Top-level `style` carries explicit width/height for resizable nodes.
-   * Distinct from `data.style`, which holds the *visual* style
-   * (accent + text styling) — we surface that under
-   * the result `style` field.
-   */
-  style?: { width?: number | string; height?: number | string };
-  data?: {
-    label?: string | null;
-    style?: Record<string, unknown>;
-    content?: string;
-    [key: string]: unknown;
-  };
-}
+// Nodes are typed as the canonical {@link CanvasNode} (= ReactFlow
+// `Node`); we narrow `data` field-by-field at the read site because
+// `canvas.json` stores them as generic JSON objects. Edges still need
+// a narrow shim below because xyflow's `Edge['data']` does not know
+// about our {@link EdgeStyle} sub-object — the canonical edge style
+// lives in `@sediment/shared`.
 
 interface RawEdge {
   id?: string;
@@ -112,32 +94,7 @@ interface RawEdge {
   [key: string]: unknown;
 }
 
-// ─── Size + position normalization ──────────────────────────────────────────
-
-/**
- * Read a node's effective width/height.
- *
- * Priority `measured > top-level style > top-level w/h > 0`, mirroring
- * the frontend `getNodeSize` ([apps/web/src/utils/node/size.ts]) so
- * agents see the same dimensions the UI does.
- */
-function readSize(n: RawNode): { width: number; height: number } {
-  const num = (v: unknown): number | undefined => {
-    if (typeof v === 'number') return v;
-    if (typeof v === 'string') {
-      const parsed = Number.parseFloat(v);
-      return Number.isFinite(parsed) ? parsed : undefined;
-    }
-    return undefined;
-  };
-  const w = num(n.measured?.width) ?? num(n.style?.width) ?? num(n.width) ?? 0;
-  const h =
-    num(n.measured?.height) ?? num(n.style?.height) ?? num(n.height) ?? 0;
-  return {
-    width: Number.isFinite(w) ? w : 0,
-    height: Number.isFinite(h) ? h : 0,
-  };
-}
+// ─── Position normalization ────────────────────────────────────────────────
 
 /**
  * Walk the parent chain to express the node's position in absolute
@@ -145,12 +102,12 @@ function readSize(n: RawNode): { width: number; height: number } {
  * parent frame; agents reasoning about proximity want absolutes.
  */
 function resolveAbsolutePosition(
-  node: RawNode,
-  byId: ReadonlyMap<string, RawNode>,
+  node: CanvasNode,
+  byId: ReadonlyMap<string, CanvasNode>,
 ): { x: number; y: number } {
   let x = 0;
   let y = 0;
-  let cur: RawNode | undefined = node;
+  let cur: CanvasNode | undefined = node;
   while (cur) {
     x += cur.position?.x ?? 0;
     y += cur.position?.y ?? 0;
@@ -169,7 +126,7 @@ export interface SpatialBundle {
   /**
    * Lookup back to the raw on-disk node (for style / data.label / etc.).
    */
-  rawById: Map<string, RawNode>;
+  rawById: Map<string, CanvasNode>;
   /** Lookup of spatial nodes by id — handy for proximity targets. */
   spatialById: Map<string, SpatialNode>;
   /** Original edge entries (preserves id + style for outline output). */
@@ -183,24 +140,19 @@ export interface SpatialBundle {
  * own analysis (instead of re-implementing size + position fallbacks).
  */
 export function buildSpatialBundle(canvas: CanvasFile): SpatialBundle {
-  const rawNodes = (canvas.state.nodes ?? []) as RawNode[];
+  const rawNodes = (canvas.state.nodes ?? []) as CanvasNode[];
   const rawEdges = (canvas.state.edges ?? []) as RawEdge[];
   const byId = new Map(rawNodes.map((n) => [n.id, n]));
 
   const spatialNodes: SpatialNode[] = rawNodes.map((n) => {
-    const size = readSize(n);
+    // `getLayoutNodeSize` applies the same `measured → style` priority
+    // the web UI uses, then falls back to 200×100 so unmeasured nodes
+    // still cluster sanely.
+    const { w, h } = getLayoutNodeSize(n);
     const abs = resolveAbsolutePosition(n, byId);
     return {
       id: n.id,
-      // Apply 200×100 fallback for spatial reasoning so unmeasured nodes
-      // still cluster sanely. The outline output below uses these same
-      // values — agents don't need a separate "raw vs effective" axis.
-      rect: {
-        x: abs.x,
-        y: abs.y,
-        width: size.width || 200,
-        height: size.height || 100,
-      },
+      rect: { x: abs.x, y: abs.y, width: w, height: h },
       type: n.type,
       parentId: n.parentId ?? null,
       label: typeof n.data?.label === 'string' ? n.data.label : undefined,
@@ -213,21 +165,23 @@ export function buildSpatialBundle(canvas: CanvasFile): SpatialBundle {
 
 // ─── Helpers shared by outline + inspect ────────────────────────────────────
 
-function readLabel(raw: RawNode | undefined): string | null {
+function readLabel(raw: CanvasNode | undefined): string | null {
   return raw && typeof raw.data?.label === 'string' ? raw.data.label : null;
 }
 
 function readVisualStyle(
-  raw: RawNode | undefined,
+  raw: CanvasNode | undefined,
 ): Record<string, unknown> | undefined {
   const s = raw?.data?.style;
-  return s && typeof s === 'object' ? s : undefined;
+  return s && typeof s === 'object'
+    ? (s as Record<string, unknown>)
+    : undefined;
 }
 
 function readPreview(
   canvasId: string,
   nodeId: string,
-  raw: RawNode | undefined,
+  raw: CanvasNode | undefined,
 ): string | undefined {
   const meta = getCanvasStore(canvasId).readNode(nodeId);
   if (meta) {

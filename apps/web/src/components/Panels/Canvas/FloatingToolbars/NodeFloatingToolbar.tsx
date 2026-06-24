@@ -4,8 +4,8 @@ import { memo, useCallback, useMemo, type ReactNode } from 'react';
 
 import {
   ACCENT_NONE_TOKEN,
-  ACCENT_PALETTE,
   ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT,
+  type FrameNodeData,
 } from '@sediment/shared';
 
 import { CanvasFloatingPopover } from '@/components/Common/CanvasFloatingPopover';
@@ -99,31 +99,39 @@ export const NodeFloatingToolbar = memo(
     // Anchor rect in flow (canvas) coordinates. `useInternalNode`
     // gives us live position + measured size, so the toolbar follows
     // drag without any extra subscription.
+    //
+    // Prefer the explicit `style.{width,height}` over
+    // `measured.{width,height}` whenever it is pinned: during a live
+    // resize, the snap-mirror writes the authoritative snapped rect to
+    // `style` *every* `onNodesChange` tick, while `measured` is updated
+    // asynchronously by RF's `ResizeObserver` and therefore lags by one
+    // frame. Using `measured` first made both the toolbar's anchor
+    // position and the W/H values in the size picker trail the resize
+    // handle by a frame (visible jitter at gesture end). For auto-sized
+    // nodes (notes in auto-height mode, etc.) `style.height` is
+    // `undefined`, so we still fall through to `measured` and the
+    // displayed value reflects the content-driven height.
     const anchor = useMemo(() => {
       if (!internalNode) return null;
       const x = internalNode.internals.positionAbsolute?.x ?? 0;
       const y = internalNode.internals.positionAbsolute?.y ?? 0;
-      const width =
-        internalNode.measured?.width ??
-        (internalNode.style?.width as number | undefined) ??
-        0;
-      const height =
-        internalNode.measured?.height ??
-        (internalNode.style?.height as number | undefined) ??
-        0;
+      const styleW = internalNode.style?.width as number | undefined;
+      const styleH = internalNode.style?.height as number | undefined;
+      const width = styleW ?? internalNode.measured?.width ?? 0;
+      const height = styleH ?? internalNode.measured?.height ?? 0;
       return { x, y, width, height };
     }, [internalNode]);
 
-    // Current size shown in the size picker. Use measured dimensions
-    // (browser-actual) as the source of truth so the popup reflects the
-    // node's true on-screen size, including content-driven auto-sizing.
+    // Current size shown in the size picker. Same source-of-truth
+    // ordering as the anchor above: pinned `style` first, content-driven
+    // `measured` only when the style entry is undefined.
     const currentWidth =
-      internalNode?.measured?.width ??
       (internalNode?.style?.width as number | undefined) ??
+      internalNode?.measured?.width ??
       null;
     const currentHeight =
-      internalNode?.measured?.height ??
       (internalNode?.style?.height as number | undefined) ??
+      internalNode?.measured?.height ??
       null;
 
     // ─── Note: fit-height ↔ H input linkage ────────────────────────────
@@ -148,6 +156,37 @@ export const NodeFloatingToolbar = memo(
     const toggleNoteAutoHeight = useCallback(() => {
       setNoteHeightMode([id], isNoteAutoHeight ? 'fixed' : 'auto');
     }, [id, isNoteAutoHeight, setNoteHeightMode]);
+
+    // ─── Frame: hug ↔ manual ↔ size input linkage ──────────────────────
+    //
+    // For frame nodes, the size picker doubles as the hug / manual
+    // toggle:
+    //  - `hug`    → W and H render as italic hints showing the
+    //               content-driven measured size. Typing into either
+    //               input pins the frame to manual size in the same
+    //               undo step as the geometry change.
+    //  - `manual` → W and H render normally; typing dispatches a
+    //               plain resize. The toggle next to H flips back to
+    //               hug, which immediately refits the frame to its
+    //               children via the engine's end-of-batch pass.
+    //
+    // Wired here (rather than inside `FrameNode`) so the size picker
+    // stays in Group 2 alongside every other node type's geometry
+    // controls.
+    const dispatchUiIntent = useCanvasStore((s) => s.dispatchUiIntent);
+    const isFrame = type === 'frame';
+    const frameData = isFrame ? (data as FrameNodeData) : null;
+    const frameSizing = frameData?.sizing ?? 'hug';
+    const frameLayoutMode = frameData?.layoutMode ?? 'free';
+    const isFrameHug = isFrame && frameSizing === 'hug';
+    const toggleFrameSizing = useCallback(() => {
+      dispatchUiIntent({
+        type: 'SET_FRAME_LAYOUT_MODE',
+        frameId: id,
+        mode: frameLayoutMode,
+        sizing: frameSizing === 'hug' ? 'manual' : 'hug',
+      });
+    }, [dispatchUiIntent, id, frameLayoutMode, frameSizing]);
 
     return (
       <CanvasFloatingPopover
@@ -199,11 +238,7 @@ export const NodeFloatingToolbar = memo(
         {/* ── Group 2: Style — color + size ── */}
         {type !== 'question' && type !== 'sketch' && (
           <FloatingToolbar.ColorPicker
-            colors={
-              type === 'text'
-                ? ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT
-                : ACCENT_PALETTE
-            }
+            colors={ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT}
             value={data.style?.accent ?? ACCENT_NONE}
             onSelect={(t) =>
               updateNodeData(id, {
@@ -228,6 +263,20 @@ export const NodeFloatingToolbar = memo(
             });
             if (!resolved) return;
             beginGesture('SET_NODE_GEOMETRY');
+            // Frame in hug mode: typing an explicit W or H is a
+            // direct-manipulation signal to switch the frame's sizing
+            // policy to manual. Dispatch the policy change first
+            // (inside the same gesture) so both intents fold into one
+            // undo entry and the geometry write isn't reverted by the
+            // engine's end-of-batch refit pass.
+            if (isFrameHug) {
+              dispatchUiIntent({
+                type: 'SET_FRAME_LAYOUT_MODE',
+                frameId: id,
+                mode: frameLayoutMode,
+                sizing: 'manual',
+              });
+            }
             setNodeGeometry([
               {
                 nodeId: id,
@@ -235,6 +284,18 @@ export const NodeFloatingToolbar = memo(
               },
             ]);
           }}
+          autoSize={
+            isFrame
+              ? {
+                  dimensions: 'both',
+                  active: isFrameHug,
+                  onToggle: toggleFrameSizing,
+                  title: isFrameHug
+                    ? 'Switch to manual size'
+                    : 'Fit size to content',
+                }
+              : undefined
+          }
           heightAuto={
             type === 'note'
               ? {

@@ -151,38 +151,112 @@ interface NodeConnectionHandlesProps {
 export const NodeConnectionHandles = memo(
   ({ hovered, selected, isNotMouse }: NodeConnectionHandlesProps) => {
     const baseHandleSize = isNotMouse ? 14 : 8;
-    const handleStyle: React.CSSProperties = useStore((s) => {
+    const dotSize = useStore((s) => {
       const factor = Math.max(1 / s.transform[2], 1);
-      const size = baseHandleSize * factor;
-      return { width: size, height: size };
+      return baseHandleSize * factor;
     });
 
     return (
       <>
-        {HANDLE_DEFS.map((h) => (
-          <Handle
-            key={h.id}
-            type={h.type}
-            id={h.id}
-            position={h.position}
-            style={handleStyle}
-            className={cn(
-              'bg-info! z-20 border-none! transition-opacity',
-              // 抵消外层 div 固有的 border-3，让圆点贴在节点边缘上
-              h.position === Position.Top && '!-top-[3.5px]',
-              h.position === Position.Bottom && '!-bottom-[3.5px]',
-              h.position === Position.Left && '!-left-[3.5px]',
-              h.position === Position.Right && '!-right-[3.5px]',
-              isNotMouse
-                ? selected
-                  ? 'opacity-40 active:opacity-100'
-                  : 'pointer-events-none opacity-0'
-                : hovered
-                  ? 'opacity-100'
-                  : 'pointer-events-none opacity-0',
-            )}
-          />
-        ))}
+        {HANDLE_DEFS.map((h) => {
+          // Two flavours of "handle position" are consumed by React Flow:
+          //   - `getHandlePosition(..., center=false)` returns the bbox's
+          //     *outer edge* on the relevant axis (e.g. `bbox.y` for
+          //     Position.Top). This drives committed-edge endpoints.
+          //   - `getHandlePosition(..., center=true)` returns the bbox
+          //     *centre*. This drives the connection-line preview that
+          //     renders while the user drags from a handle.
+          //
+          // We want BOTH points to land exactly on the visible node
+          // edge so the preview start, the dot, the corner resize
+          // handles, the side-affordance triangles, and the committed
+          // edge endpoint all align on a single line.
+          //
+          // A non-zero square bbox cannot satisfy both — its outer edge
+          // and its centre are always `size/2` apart. So we collapse
+          // the bbox to *zero thickness* on the perpendicular axis: for
+          // top/bottom handles `width=dotSize, height=0`; for left/
+          // right, `width=0, height=dotSize`. With height/width = 0 on
+          // that axis, `bbox.y === bbox.y + height/2`, so the two
+          // flavours of `getHandlePosition` return the same point.
+          //
+          // The visible circle is rendered as an absolutely-positioned
+          // child centred on the bbox (50%/50% + translate). It has
+          // `pointer-events: auto` so the click target is the dot, not
+          // the 0-thickness bbox; events still bubble up to the Handle
+          // so connection drags start correctly.
+          //
+          // The `-3px` perpendicular offset cancels the inner wrapper's
+          // `border-3`: the Handle is positioned absolutely against its
+          // containing block's *padding box* (inside the border), so
+          // `top: 0` would land 3px inside the visible border.
+          const edgeAlign: React.CSSProperties =
+            h.position === Position.Top
+              ? {
+                  top: -3,
+                  width: dotSize,
+                  height: 0,
+                  transform: 'translate(-50%, 0)',
+                }
+              : h.position === Position.Bottom
+                ? {
+                    bottom: -3,
+                    width: dotSize,
+                    height: 0,
+                    transform: 'translate(-50%, 0)',
+                  }
+                : h.position === Position.Left
+                  ? {
+                      left: -3,
+                      width: 0,
+                      height: dotSize,
+                      transform: 'translate(0, -50%)',
+                    }
+                  : {
+                      right: -3,
+                      width: 0,
+                      height: dotSize,
+                      transform: 'translate(0, -50%)',
+                    };
+          // Dot is centred on the (collapsed) bbox; `pointer-events:
+          // auto` makes the dot the actual click target.
+          const dotStyle: React.CSSProperties = {
+            width: dotSize,
+            height: dotSize,
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+          };
+          return (
+            <Handle
+              key={h.id}
+              type={h.type}
+              id={h.id}
+              position={h.position}
+              style={{
+                ...edgeAlign,
+                background: 'transparent',
+                border: 'none',
+              }}
+              className={cn(
+                'z-20 transition-opacity',
+                isNotMouse
+                  ? selected
+                    ? 'opacity-40 active:opacity-100'
+                    : 'pointer-events-none opacity-0'
+                  : hovered
+                    ? 'opacity-100'
+                    : 'pointer-events-none opacity-0',
+              )}
+            >
+              <span
+                aria-hidden
+                className="bg-info pointer-events-auto absolute rounded-full"
+                style={dotStyle}
+              />
+            </Handle>
+          );
+        })}
       </>
     );
   },

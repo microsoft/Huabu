@@ -13,17 +13,15 @@ import {
 } from '@sediment/shared';
 
 import { agentApi } from '@/api/agent';
-import { buildSketchAttachmentsFromSelection } from '@/handler/sketch/buildSketchAttachments';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 
 import { snapshotAndExtractChanges } from './useCanvasChanges';
 
-import type { AssistantSegment, ResourceLabel } from '../store/chatTypes';
+import type { AssistantSegment } from '../store/chatTypes';
 import type {
   AgentMode,
   AgentStreamEvent,
-  ChatAttachment,
   IntentCandidate,
 } from '@sediment/shared';
 import type { Delta } from '@sediment/shared/canvas-engine';
@@ -85,27 +83,6 @@ export function extractCanvasChangesFromCommands(commands: CanvasCommand[]) {
   // Delegate to snapshotAndExtractChanges which reads current canvas state
   // NOTE: This must be called BEFORE commands are executed.
   return snapshotAndExtractChanges(commands);
-}
-
-/** Extract ResourceLabel entries from a canvas_commands batch. */
-export function extractResourcesFromCommands(
-  commands: CanvasCommand[],
-): ResourceLabel[] {
-  const resources: ResourceLabel[] = [];
-  for (const cmd of commands) {
-    if (cmd.type === 'CREATE_NODES') {
-      for (const node of cmd.nodes) {
-        const label = (node.data as Record<string, unknown> | undefined)?.label;
-        resources.push({
-          type: node.nodeType === 'frame' ? 'frame' : 'node',
-          nodeType: node.nodeType,
-          label: (label as string) ?? 'untitled',
-          id: node.id as string,
-        });
-      }
-    }
-  }
-  return resources;
 }
 
 // ==================== Constants ====================
@@ -409,8 +386,6 @@ interface StreamEventContext {
    */
   threadId: string;
   assistantId: string;
-  /** Called after canvas_commands are applied. */
-  onCanvasCommands?: (commands: CanvasCommand[]) => void;
   /**
    * ID of the pending PreparedPromptCard message inserted by
    * `startStream` for external-agent turns. When the server emits its
@@ -717,7 +692,6 @@ function applyInternalToolResult(
           },
         );
       }
-      ctx.onCanvasCommands?.(result.commands);
     }
   }
 }
@@ -961,8 +935,8 @@ export interface UseAgentStreamReturn {
 }
 
 /**
- * Hook that manages agent streaming, including starting/stopping streams,
- * processing SSE events, and tracking resources.
+ * Hook that manages agent streaming, including starting/stopping streams
+ * and processing SSE events.
  */
 export function useAgentStream(): UseAgentStreamReturn {
   const threadId = useChatStore((state) => state.threadId);
@@ -1032,35 +1006,25 @@ export function useAgentStream(): UseAgentStreamReturn {
 
       setLastAction(agentMode);
 
-      // Merge pending attachments + selection attachment into a single array
+      // Merge pending attachments + selection attachment into a single array.
+      // Sketch-rasterization is now performed server-side in `agent.route.ts`
+      // for any `sketch` nodes present in `canvasContext.selectedNodes`, so we
+      // no longer build PNG attachments client-side.
       const allPending = [
         ...pendingAttachments,
         ...(selectionAttachment ? [selectionAttachment] : []),
       ];
 
-      const allNodes = useCanvasStore.getState().nodes;
-      const selectedNodeIds = allNodes
-        .filter((n) => n.selected)
+      // Selected node ids are still recorded on the persisted user
+      // message so the UI can re-render the selection chip after a
+      // reload, even though we no longer derive any attachments from
+      // them client-side.
+      const selectedNodeIds = useCanvasStore
+        .getState()
+        .nodes.filter((n) => n.selected)
         .map((n) => n.id);
 
-      // If the user selected sketch nodes, rasterise each spatial cluster
-      // (scoped per parent frame) into a PNG attachment so the vision
-      // pipeline can see the gesture without a separate sketch-recognition
-      // round-trip. Failure here must not block the chat send — we log
-      // and proceed with whatever attachments did succeed.
-      let sketchAttachments: ChatAttachment[] = [];
-      if (selectedNodeIds.length > 0) {
-        try {
-          sketchAttachments = await buildSketchAttachmentsFromSelection(
-            selectedNodeIds,
-            allNodes,
-          );
-        } catch (err) {
-          console.error('[useAgentStream] sketch attachment build failed', err);
-        }
-      }
-
-      const mergedAttachments = [...allPending, ...sketchAttachments];
+      const mergedAttachments = [...allPending];
       const attachments =
         mergedAttachments.length > 0 ? mergedAttachments : undefined;
       if (allPending.length > 0) {
@@ -1090,10 +1054,6 @@ export function useAgentStream(): UseAgentStreamReturn {
       }
 
       setThreadLoading(threadId, true);
-
-      // Operate: track resources produced by this run. Local to the
-      // closure so a concurrent run on another thread can't clobber it.
-      const resources: ResourceLabel[] = [];
 
       const assistantId = createId('message');
 
@@ -1193,14 +1153,6 @@ export function useAgentStream(): UseAgentStreamReturn {
                 threadId,
                 assistantId,
                 preparedPromptId,
-                onCanvasCommands: (commands) => {
-                  if (agentMode === 'operate') {
-                    const newResources = extractResourcesFromCommands(commands);
-                    if (newResources.length > 0) {
-                      resources.push(...newResources);
-                    }
-                  }
-                },
               });
             },
             onError: (err) => {
@@ -1242,13 +1194,6 @@ export function useAgentStream(): UseAgentStreamReturn {
               }
               setThreadLoading(threadId, false);
               releaseAbort();
-              if (agentMode === 'operate' && resources.length > 0) {
-                updateMessage(threadId, assistantId, (m) =>
-                  m.role === 'assistant'
-                    ? { ...m, resources: [...resources] }
-                    : m,
-                );
-              }
             },
           },
           {
@@ -1311,7 +1256,6 @@ export function useAgentStream(): UseAgentStreamReturn {
       addMessage,
       setLastAction,
       threadId,
-      updateMessage,
       getAgentChatContext,
       canvasId,
       setThreadLoading,

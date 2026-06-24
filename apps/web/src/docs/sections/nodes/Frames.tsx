@@ -13,6 +13,7 @@ import {
 const toc: TocEntry[] = [
   { id: 'what-a-frame-is', label: 'What a frame is' },
   { id: 'layout-modes', label: 'Layout modes' },
+  { id: 'frame-sizing', label: 'Frame sizing' },
   { id: 'auto-reflow', label: 'Auto-reflow on child resize' },
   { id: 'locking-frames', label: 'Locking frames' },
   { id: 'creating-and-dissolving', label: 'Creating & dissolving' },
@@ -56,6 +57,32 @@ export default function Frames() {
           ],
         ]}
       />
+
+      <H2>Frame sizing</H2>
+      <P>
+        Independently of the layout mode, each frame has a <em>sizing</em>{' '}
+        policy you can flip from its toolbar:
+      </P>
+      <Table
+        headers={['Sizing', 'Behaviour']}
+        rows={[
+          [
+            <strong>Hug</strong>,
+            'Default. The frame auto-fits to wrap its children — adding, removing, dragging, or resizing a child reshapes the frame.',
+          ],
+          [
+            <strong>Manual</strong>,
+            'The frame keeps the size you set. Children can move freely inside without reshaping the container. Useful when you want a fixed canvas region.',
+          ],
+        ]}
+      />
+      <Callout tone="info">
+        <strong>Manual</strong> sizing also applies to <strong>Column</strong>{' '}
+        and <strong>Row</strong> frames: the structured solver still packs
+        children into tracks, but the frame box stays pinned to whatever size
+        you set. Children that don&apos;t fit overflow the main axis (top edge
+        for column, left edge for row).
+      </Callout>
 
       <H2>Auto-reflow on child resize</H2>
       <P>

@@ -22,6 +22,7 @@ import {
   computeFrameFit,
   FRAME_POINTER_CAPTURE_MARGIN,
   getAbsolutePosition as getFrameAbsolutePosition,
+  getFrameSizing,
   wouldUnframe,
   wouldAutoFrame,
   readFrameGridConfig,
@@ -564,10 +565,6 @@ type RFState = {
   /** Spread apart overlapping selected nodes (frame children stay in their frame). */
   spreadSelectedNodes: () => void;
 
-  /** Auto-layout: whether new nodes are automatically placed. */
-  autoLayoutEnabled: boolean;
-  toggleAutoLayout: () => void;
-
   /** MiniMap: whether the React Flow MiniMap overlay is visible. */
   minimapEnabled: boolean;
   toggleMinimap: () => void;
@@ -813,7 +810,6 @@ const resizePreviewController = createResizePreviewController({
   getState: () => {
     const state = useCanvasStore.getState();
     return {
-      autoLayoutEnabled: state.autoLayoutEnabled,
       nodes: state.nodes,
       dispatchUiIntent: state.dispatchUiIntent,
       patchNodeSilent: state.patchNodeSilent,
@@ -1116,7 +1112,6 @@ const useCanvasStore = create<RFState>()(
         nodes: get().nodes,
         edges: get().edges,
         canvasId: get().canvasId,
-        autoLayoutEnabled: get().autoLayoutEnabled,
       };
 
       const { writeResult, commandResults, pendingEffects } =
@@ -1258,7 +1253,6 @@ const useCanvasStore = create<RFState>()(
       const uiState: UiResolverState = {
         nodes: get().nodes,
         edges: get().edges,
-        autoLayoutEnabled: get().autoLayoutEnabled,
         ...(viewportCenter ? { viewportCenter } : {}),
       };
       const execution = resolveUiIntent(intent, uiState);
@@ -1372,6 +1366,7 @@ const useCanvasStore = create<RFState>()(
         // persisted conversation, so a stale status is demoted to
         // `done` here, restoring the badge + reopen affordance.
         const loadedNodes = reconcileQuestionStatus(state.nodes ?? []);
+        const loadedEdges = state.edges ?? [];
         // Prefer this tab's sessionStorage; fall back to whatever the
         // server still has from before viewport was moved client-side.
         // A corrupt entry on either side falls through to `null`, which
@@ -1388,7 +1383,7 @@ const useCanvasStore = create<RFState>()(
         const loadedViewport = sessionViewport ?? legacyServerViewport;
         set({
           nodes: loadedNodes,
-          edges: state.edges ?? [],
+          edges: loadedEdges,
           viewport: loadedViewport,
           canvasTitle: response.title || 'Untitled',
           version: response.version,
@@ -1742,16 +1737,6 @@ const useCanvasStore = create<RFState>()(
     },
 
     onNodeDrag: (_event, draggedNode, draggedNodes) => {
-      const { autoLayoutEnabled } = get();
-
-      // Frame auto-resize preview only applies when auto-layout is enabled.
-      if (!autoLayoutEnabled) {
-        useGesturePreviewStore.getState().clearFrameFitPreview();
-        useGesturePreviewStore.getState().clearStructuredDropPreview();
-        setSnapStructuredSuppressed(false);
-        return;
-      }
-
       // Capture the cursor's screen position now (before the rAF) so the
       // structured-frame drop indicator can be placed at the actual
       // pointer, not where the dragged node settled. Guarded against
@@ -1939,6 +1924,10 @@ const useCanvasStore = create<RFState>()(
         const previews: FrameFitPreview[] = [];
 
         for (const frameId of previewFrameIds) {
+          // Per-frame sizing gate: only `hug` frames preview a refit;
+          // `manual` frames keep their pinned size during the drag.
+          const frameNode = liveNodes.find((n) => n.id === frameId);
+          if (getFrameSizing(frameNode) !== 'hug') continue;
           const leaving = leavingByFrame.get(frameId);
           const entering = enteringByFrame.get(frameId);
           const fit = computeFrameFit(liveNodes, frameId, {
@@ -2110,11 +2099,10 @@ const useCanvasStore = create<RFState>()(
       // by the live preview tick. Same teardown-before-stop ordering
       // as the bypass flag: `endSnapSession` snapshots the working
       // cache into `_lastDragDecisions`, this consumes it. Null when
-      // no `rAF` tick ran during the drag (instant click-release, or
-      // `autoLayoutEnabled === false` where the preview returns
-      // early) — the resolver falls back to fresh recomputation in
-      // that case. The cache always wins when present so the drop
-      // honours what the user last saw.
+      // no `rAF` tick ran during the drag (instant click-release) —
+      // the resolver falls back to fresh recomputation in that case.
+      // The cache always wins when present so the drop honours what
+      // the user last saw.
       const cachedDecisions = consumeLastDragDecisions() ?? undefined;
 
       // Idempotent safety net. The normal cleanup path runs inside
@@ -2258,6 +2246,16 @@ const useCanvasStore = create<RFState>()(
       const resizeCtx = getResizeContext();
       const snappedRect = resizeCtx ? getResizeSnappedRect() : null;
       if (resizeCtx && snappedRect) {
+        // Per-axis pass-through. The snap session's authoritative
+        // post-snap rect is mirrored directly onto the resized node's
+        // `position` + `style`. This matches what `flushScale`
+        // dispatches on the next rAF tick: with the grid solver now
+        // using per-axis padding + gap
+        // (`packages/shared/src/canvas-engine/autoLayout/gridLayout.ts`),
+        // a single-edge drag scales only the dragged axis and the
+        // frame size = `oldSize × axisScale` exactly on that axis, so
+        // mirroring the pointer-driven rect here can't put the frame
+        // body smaller than the children's still-old-size snapshot.
         nextNodes = nextNodes.map((n) =>
           n.id === resizeCtx.nodeId
             ? {
@@ -2292,7 +2290,6 @@ const useCanvasStore = create<RFState>()(
       // frames) followed by a bounding-box `fitFrames` pass that handles
       // free frames and cascades to ancestors.
       if (!resizeCtx && !isSnapSessionActive()) {
-        const autoLayoutEnabled = get().autoLayoutEnabled;
         let framesToRelayout: Set<string> | undefined;
         for (const c of sanitized) {
           if (c.type !== 'dimensions') continue;
@@ -2301,16 +2298,16 @@ const useCanvasStore = create<RFState>()(
           if (!child?.parentId) continue;
           const parent = nextNodes.find((n) => n.id === child.parentId);
           if (!parent || parent.type !== 'frame') continue;
-          // Free-mode frames only chase their children's measured size
-          // when auto-layout is on — consistent with the executor's
-          // synchronous fit and the command-level `deferredFitFrameIds`
-          // path. Structured (`column` / `row`) frames always reflow:
-          // their layout mode is an explicit per-frame opt-in that is
-          // independent of the global auto-layout toggle.
+          // Per-frame sizing gate: structured (`column` / `row`)
+          // frames always reflow (their layout mode is an explicit
+          // opt-in), free-mode frames only chase their children's
+          // measured size when `data.sizing === 'hug'`. `'manual'`
+          // free frames keep their pinned size regardless of child
+          // re-measurement.
           const mode = (parent.data as { layoutMode?: string } | undefined)
             ?.layoutMode;
           const isStructured = mode === 'column' || mode === 'row';
-          if (!isStructured && !autoLayoutEnabled) continue;
+          if (!isStructured && getFrameSizing(parent) !== 'hug') continue;
           // Skip when measured matches the explicitly-pinned size —
           // the RO is just confirming the size we already committed
           // (typical echo right after a `SET_NODE_GEOMETRY` commit)
@@ -2599,11 +2596,6 @@ const useCanvasStore = create<RFState>()(
       get().dispatchUiIntent({
         type: 'DISTRIBUTE_SELECTED_NODES',
       });
-    },
-
-    autoLayoutEnabled: true,
-    toggleAutoLayout: () => {
-      set({ autoLayoutEnabled: !get().autoLayoutEnabled });
     },
 
     minimapEnabled: readMinimapEnabledFromStorage(),

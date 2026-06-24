@@ -454,6 +454,59 @@ export class CanvasStore {
   }
 
   /**
+   * Streaming variant of {@link readAllNodes}: invokes `onNode(id, content)`
+   * synchronously each time a sidecar finishes reading and parsing, while
+   * the remaining files continue to load concurrently. Returns the full
+   * map once every file has been processed, identical to `readAllNodes`,
+   * so the caller can do a follow-up batch scan without re-hitting disk.
+   *
+   * Useful for the canvas search route: the metadata tier can emit
+   * matches as each `.md` lands rather than waiting for the full
+   * `readdir` + `mapWithConcurrency` round-trip to settle.
+   *
+   * `signal` is polled inside each worker before issuing the file read;
+   * workers that observe an aborted signal exit early without touching
+   * disk. The shared cursor still drains so the returned `Promise`
+   * always resolves (callers should check `signal.aborted` themselves
+   * and ignore the result).
+   *
+   * Concurrency bound is the same {@link NODE_READ_CONCURRENCY} the
+   * non-streaming path uses, so memory / FD pressure is identical.
+   */
+  async streamAllNodes(
+    onNode: (id: string, content: NodeContent) => void,
+    signal?: { readonly aborted: boolean },
+  ): Promise<Map<string, NodeContent>> {
+    const contents = new Map<string, NodeContent>();
+    const idx = new NameIndex<NodeFileEntry>();
+    const dir = nodesDir(this.canvasId);
+    if (existsSync(dir)) {
+      const files = readdirSync(dir).filter((file) => file.endsWith('.md'));
+      await mapWithConcurrency(files, NODE_READ_CONCURRENCY, async (file) => {
+        if (signal?.aborted) return;
+        const raw = await readTextAsync(path.join(dir, file));
+        if (raw === null) return;
+        // Same id derivation as `readAllNodes()` / `nodeIndex()`.
+        const { meta } = parseFrontmatter(raw);
+        const rawId = meta['id'];
+        const id =
+          typeof rawId === 'string' && rawId
+            ? rawId
+            : file.replace(/\.md$/, '');
+        idx.add({ id, filename: file });
+        const content = markdownToNodeContent(id, raw);
+        contents.set(id, content);
+        // JS is single-threaded between awaits, so even though
+        // multiple workers may be in-flight, exactly one onNode call
+        // runs at a time. Callers can mutate shared counters safely.
+        onNode(id, content);
+      });
+    }
+    this.nodes = idx;
+    return contents;
+  }
+
+  /**
    * Predict whether a strict {@link writeNode} for `nodeId` with `label`
    * would collide with another node on disk. Pure: never touches the
    * filesystem or mutates state. Returns `desired` (the filename that

@@ -1,4 +1,5 @@
 import { noop, type CommandDefinition } from './types.js';
+import { getFrameSizing } from '../frame/sizing.js';
 
 import type { CanvasCommand } from '../../index.js';
 
@@ -91,13 +92,16 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
         };
 
         // Track the parent for a post-commit refit only when the child's
-        // height was cleared and auto-layout is on. Otherwise the executor's
-        // sync `fitFrames` pass is sufficient.
+        // height was cleared and the parent frame's sizing policy opts
+        // into hug. Otherwise the executor's sync `fitFrames` pass is
+        // sufficient (or, for `sizing: 'manual'` parents, no refit at
+        // all — the user pinned that size deliberately).
         if (
           heightCleared &&
-          state.autoLayoutEnabled &&
           updated.parentId &&
-          !resizedFrameIds.has(updated.parentId)
+          !resizedFrameIds.has(updated.parentId) &&
+          getFrameSizing(state.nodes.find((n) => n.id === updated.parentId)) ===
+            'hug'
         ) {
           deferredFitFrameIds.add(updated.parentId);
         }

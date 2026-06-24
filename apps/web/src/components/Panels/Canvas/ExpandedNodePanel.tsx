@@ -1,26 +1,15 @@
+import clsx from 'clsx';
 import { ArrowLeft, Bot, Columns2, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { getNodeIcon } from '../../../config/nodeIcons.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import { useChatStore } from '../../../store/chatStore.ts';
 import { usePreviewStore } from '../../../store/previewStore.ts';
 import { Button } from '../../Common/Button.tsx';
+import { Input } from '../../Common/Input.tsx';
 import { NodePreviewContent } from '../../Nodes/NodePreviewContent.tsx';
 import { PreviewHeaderSlotContext } from '../../Nodes/PreviewHeaderSlot.tsx';
-
-// Helper to get meta info (icon, title) for the header
-const getOverlayMeta = (type: string, data: Record<string, unknown>) => {
-  const label = data.label as string;
-  // Pass `data` so the office breadcrumb resolves to the format-specific
-  // Word / Excel / PowerPoint icon instead of the generic Office glyph.
-  const Icon = getNodeIcon(type, data);
-
-  return {
-    title: label,
-    icon: <Icon size={14} />,
-  };
-};
+import { InPreviewSearchBar } from '../../Search/InPreviewSearchBar.tsx';
 
 /* ------------------------------------------------------------------ */
 /*  ExpandedNodePanel – inline panel that replaces or sits beside     */
@@ -43,6 +32,10 @@ export const ExpandedNodePanel = ({
   const setCanvasExpandMode = useCanvasStore((s) => s.setExpandMode);
   const nodes = useCanvasStore((s) => s.nodes);
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
+  // Routed through `tryRename` so a sibling-label collision triggers the
+  // shared alert + revert flow (same path used by the layer tree and
+  // FrameNode's inline label editor).
+  const tryRename = useCanvasStore((s) => s.tryRename);
 
   // Preview Store State
   const previewType = usePreviewStore((s) => s.previewType);
@@ -130,6 +123,15 @@ export const ExpandedNodePanel = ({
   }, [activeItem]);
 
   const panelRef = useRef<HTMLDivElement>(null);
+  // Scroll container of the preview body. Stored in component state
+  // (not a plain ref) so that mounting the div triggers a re-render —
+  // `InPreviewSearchBar` receives this as a prop and would otherwise
+  // be stuck with `null` on first open, since a plain ref update does
+  // not propagate to children. Matches the pattern used for
+  // `headerSlotEl` below.
+  const [previewBodyEl, setPreviewBodyEl] = useState<HTMLDivElement | null>(
+    null,
+  );
   const setSelectionAttachment = useChatStore((s) => s.setSelectionAttachment);
 
   // Slot element rendered in the header bar. Nested previews use the
@@ -141,6 +143,40 @@ export const ExpandedNodePanel = ({
   // of the panel, so the default `'top'` tooltip would escape upward.
   const [headerSlotEl, setHeaderSlotEl] = useState<HTMLDivElement | null>(null);
   const headerSlotValue = useMemo(() => ({ el: headerSlotEl }), [headerSlotEl]);
+
+  // ─── Inline title editor ─────────────────────────────────────────
+  // Single source of truth for the displayed label, regardless of
+  // whether the surface is a canvas-node (editable) or a preview
+  // (read-only). Effects below sync the draft to the live label
+  // whenever we're not actively editing — covers external renames
+  // (e.g. via the layer tree) and switches between expanded nodes.
+  const liveLabel = useMemo(() => {
+    if (isPreview && previewData)
+      return typeof previewData.label === 'string' ? previewData.label : '';
+    if (isNode && node)
+      return typeof node.data.label === 'string' ? node.data.label : '';
+    return '';
+  }, [isPreview, previewData, isNode, node]);
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [draftTitle, setDraftTitle] = useState(liveLabel);
+  const titleInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isEditingTitle) return;
+    setDraftTitle(liveLabel);
+  }, [liveLabel, isEditingTitle]);
+
+  useEffect(() => {
+    if (!isEditingTitle) return;
+    titleInputRef.current?.focus();
+    titleInputRef.current?.select();
+  }, [isEditingTitle]);
+
+  // Always exit edit mode when the underlying expanded item changes,
+  // so an unsubmitted draft never leaks onto the next node's title.
+  useEffect(() => {
+    setIsEditingTitle(false);
+  }, [expandedNodeId, previewType]);
 
   // Listen for text selection inside the panel and auto-attach as pending
   const handleSelectionChange = useCallback(() => {
@@ -189,19 +225,58 @@ export const ExpandedNodePanel = ({
 
   if (!activeItem) return null;
 
-  const meta = getOverlayMeta(activeItem.type, activeItem.data);
   const isReplace = activeItem.expandMode === 'replace';
 
   const backTitle = activeItem.isNode ? 'Back to Canvas' : 'Close Preview';
 
+  // Inline rename is available only when the panel is hosting a real
+  // canvas node (previews are intentionally read-only).
+  const canEditTitle = activeItem.isNode && !!expandedNodeId;
+  const commitTitle = () => {
+    if (!canEditTitle || !expandedNodeId) {
+      setIsEditingTitle(false);
+      setDraftTitle(liveLabel);
+      return;
+    }
+    const next = draftTitle.trim();
+    if (!next || next === liveLabel.trim()) {
+      setIsEditingTitle(false);
+      setDraftTitle(liveLabel);
+      return;
+    }
+    void tryRename('node', expandedNodeId, next).then((ok) => {
+      if (!ok) setDraftTitle(liveLabel);
+    });
+    setIsEditingTitle(false);
+  };
+
+  // Search node id — the find bar's scope dispatcher (see
+  // `useGlobalSearchHotkey`) requires a non-empty value to open the
+  // in-preview find bar. Canvas-node previews always have one;
+  // free-floating previews (e.g. raw file preview) may not, in which
+  // case `previewNodeId` falls back to `''` and Cmd+F routes to the
+  // canvas-wide search overlay instead of the in-preview bar.
+  const previewNodeId = (() => {
+    if (activeItem.isNode && expandedNodeId) return expandedNodeId;
+    const id = previewData?.nodeId;
+    return typeof id === 'string' ? id : '';
+  })();
+
   return (
     <div
       ref={panelRef}
+      data-search-scope="node"
+      data-search-node-id={previewNodeId}
       className="border-edge-default bg-surface flex h-full w-full flex-col overflow-hidden border-l"
     >
       {/* Header bar */}
       <div className="border-edge-default bg-surface flex h-12 shrink-0 items-center justify-between gap-3 border-b px-3">
-        {/* Left: back button (replace mode) + icon + title */}
+        {/* Left: back button (replace mode) + title (inline-editable for
+            node mode, read-only for previews). Content-sized so short
+            labels hug their text — the title region must not stretch,
+            otherwise the trailing divider gets pushed far away from
+            the action group and the header reads as having a giant
+            empty middle. */}
         <div className="flex min-w-0 items-center gap-2">
           {isReplace && (
             <Button
@@ -216,8 +291,54 @@ export const ExpandedNodePanel = ({
             </Button>
           )}
 
-          <div className="text-fg-muted flex min-w-0 items-center gap-2 text-sm font-medium">
-            <span className="truncate">{meta.title}</span>
+          <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
+            {canEditTitle && isEditingTitle ? (
+              <Input
+                ref={titleInputRef}
+                value={draftTitle}
+                placeholder="Untitled"
+                wrapperClassName="min-w-0"
+                className="text-fg-default bg-bg-default border-edge-default w-64 max-w-lg min-w-0 truncate rounded border px-1 py-0.5 text-sm font-medium outline-none"
+                onChange={(e) => setDraftTitle(e.target.value)}
+                onBlur={commitTitle}
+                onKeyDown={(e) => {
+                  // Keep keystrokes (notably Escape) from reaching the
+                  // window-level Escape handler that closes the panel.
+                  e.stopPropagation();
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    commitTitle();
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    setDraftTitle(liveLabel);
+                    setIsEditingTitle(false);
+                  }
+                }}
+              />
+            ) : (
+              <span
+                className={clsx(
+                  'text-fg-muted max-w-lg truncate rounded border border-transparent px-1 py-0.5',
+                  canEditTitle && 'hover:text-fg-default cursor-text',
+                )}
+                title={canEditTitle ? 'Rename node' : undefined}
+                role={canEditTitle ? 'button' : undefined}
+                tabIndex={canEditTitle ? 0 : undefined}
+                onClick={() => {
+                  if (canEditTitle) setIsEditingTitle(true);
+                }}
+                onKeyDown={(e) => {
+                  if (!canEditTitle) return;
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setIsEditingTitle(true);
+                  }
+                }}
+              >
+                {liveLabel || 'Untitled'}
+              </span>
+            )}
             {activeItem.readOnly && (
               <span className="bg-bg-default text-fg-muted rounded px-1.5 py-0.5 text-xs uppercase">
                 Preview
@@ -228,6 +349,13 @@ export const ExpandedNodePanel = ({
 
         {/* Right: mode toggle + close */}
         <div className="text-fg-muted flex items-center gap-1">
+          {/* Divider separating the title region from the action group
+              so the header reads as two clear zones (identity ↔
+              actions). Always visible — even a bare preview still has
+              the universal mode-toggle + close buttons on this side.
+              Padding matches the inner header-slot divider below so
+              the spacing rhythm reads as a single coherent grid. */}
+          <div aria-hidden="true" className="bg-edge-default mx-1 h-5 w-px" />
           {/* Per-preview action slot (filled via portal by NotePreview
               and friends). Sits to the LEFT of the universal Bot /
               mode / close buttons so preview-specific controls feel
@@ -295,8 +423,16 @@ export const ExpandedNodePanel = ({
         </div>
       </div>
 
-      {/* Content */}
-      <div className="flex-1 overflow-hidden">
+      {/* Content. `relative` anchors the floating in-preview find
+          bar (Cmd+F) to the top-right of this body — keeps the
+          preview document underneath fully visible instead of
+          pushing it down with an inline find row. */}
+      <div ref={setPreviewBodyEl} className="relative flex-1 overflow-hidden">
+        {/* In-preview find bar — renders nothing unless search scope
+            is `'node'`. Wires the highlight walk to the body element
+            (via state-as-ref) so only the visible preview gets
+            `::highlight()` ranges. */}
+        <InPreviewSearchBar scopeEl={previewBodyEl} />
         <PreviewHeaderSlotContext.Provider value={headerSlotValue}>
           <NodePreviewContent
             key={expandedNodeId ?? previewType}

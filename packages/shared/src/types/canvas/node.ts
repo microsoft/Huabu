@@ -385,6 +385,24 @@ export interface AudioNodeData extends BaseNodeData {
 export const FRAME_LAYOUT_MODES = ['free', 'column', 'row'] as const;
 export type FrameLayoutMode = (typeof FRAME_LAYOUT_MODES)[number];
 
+/**
+ * Frame size policy — orthogonal to {@link FrameLayoutMode}.
+ *
+ * - `hug`    — frame size is content-driven: it auto-fits to wrap its
+ *              children (the "fit-to-children" behaviour). This is the
+ *              default and matches the historical Auto-Layout-on flow.
+ * - `manual` — frame size is user/agent-controlled: drag/resize sticks,
+ *              and child additions / removals never reshape the frame.
+ *
+ * Note: in PR 1 only `'free' + manual` and `'free' + hug` and
+ * `'column'/'row' + hug` are reachable through the UI. The combination
+ * of a structured layout mode with `'manual'` sizing is reserved for a
+ * future iteration that decouples the structured solver's children
+ * pass from its frame-size pass.
+ */
+export const FRAME_SIZING_MODES = ['hug', 'manual'] as const;
+export type FrameSizing = (typeof FRAME_SIZING_MODES)[number];
+
 /** Min / max bounds for the track count picker. */
 export const FRAME_GRID_MIN_COUNT = 1;
 export const FRAME_GRID_MAX_COUNT = 12;
@@ -403,6 +421,13 @@ export interface FrameNodeData extends BaseNodeData {
    * `FRAME_GRID_MAX_COUNT`]; defaults to `FRAME_GRID_DEFAULT_COUNT`.
    */
   gridCount?: number;
+  /**
+   * Frame size policy. Defaults to `'hug'`. When `'manual'` the frame
+   * is excluded from the engine's end-of-batch fit pass — its size is
+   * persisted as-is and only changes when the user / agent explicitly
+   * sets it via `SET_NODE_GEOMETRY`.
+   */
+  sizing?: FrameSizing;
 }
 
 /**
@@ -460,17 +485,17 @@ export type QuestionNodeStatus =
   | 'done'
   | 'error';
 
-/**
- * Extensible input union for question nodes.
- * Discriminated on `kind` — add new modalities (sketch, voice, etc.) here.
- */
-export type QuestionInput = { kind: 'text'; content: string };
-
 /** Question node: AI interaction medium embedded on canvas. */
 export interface QuestionNodeData extends BaseNodeData {
   type: 'question';
-  /** User's input (extensible discriminated union). */
-  input: QuestionInput;
+  /**
+   * The user's prompt. Persisted into the markdown sidecar body just
+   * like text/note/web bodies (see `TEXT_BEARING_NODE_TYPES`) so a
+   * single rule covers every searchable node type. Empty string when
+   * the node has just been created and the user has not yet typed
+   * anything.
+   */
+  content: string;
   /** Current execution status. */
   status: QuestionNodeStatus;
   /** Epoch ms when auto-run triggers. Transient — not persisted. */
@@ -489,7 +514,7 @@ export interface QuestionNodeData extends BaseNodeData {
    * Agent dispatch binding chosen via the in-node `@` mention. When
    * omitted (default), the question runs against the built-in agent
    * with `agentMode='ask'`. The mention text (e.g. `@claude`) is also
-   * kept in `input.content` so the user can see/edit which agent was
+   * kept in `data.content` so the user can see/edit which agent was
    * picked.
    */
   agentBinding?: AgentBinding;

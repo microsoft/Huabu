@@ -117,11 +117,10 @@ export default function CanvasBasics() {
         which pops up 3–5 AI-suggested next moves you can run with one click.
       </P>
       <Callout tone="info">
-        Looking for the auto-layout toggle? It no longer lives on the canvas
-        toolbar — open the Settings popover in the header (gear icon), expand{' '}
-        <strong>Canvas</strong>, and flip <strong>Auto Layout</strong>. See{' '}
-        <DocLink href="/docs/concepts/auto-layout">Auto-layout</DocLink> for
-        what changes when it&apos;s on.
+        Frame sizing (hug vs manual) is now controlled per-frame from the Frame
+        toolbar, not from a global setting. See{' '}
+        <DocLink href="/docs/concepts/auto-layout">Auto-layout</DocLink> for the
+        details.
       </Callout>
 
       <H2>Selecting & multi-select</H2>

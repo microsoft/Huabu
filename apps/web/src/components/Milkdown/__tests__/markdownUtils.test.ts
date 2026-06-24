@@ -211,6 +211,49 @@ describe('normalizeMathDelimiters', () => {
     expect(normalizeMathDelimiters(input)).toBe(input);
   });
 
+  it('canonicalises multi-line $$…$$ whose fences are not on their own lines', () => {
+    // remark-math rejects this shape (fences must sit on their own
+    // lines for block math). AI assistants emit it frequently when
+    // wrapping a `\begin{aligned}` environment.
+    const input = [
+      '$$\\begin{aligned}',
+      '(r_i, a_i) &\\sim \\pi_\\theta(\\cdot \\mid S, q, h_{i-1}), \\\\',
+      'o_i &= e(a_i, h_{i-1}), \\\\',
+      'h_i &= h_{i-1} \\circ (r_i, a_i, o_i).',
+      '\\end{aligned}$$',
+    ].join('\n');
+    const expected = [
+      '',
+      '',
+      '$$',
+      '\\begin{aligned}',
+      '(r_i, a_i) &\\sim \\pi_\\theta(\\cdot \\mid S, q, h_{i-1}), \\\\',
+      'o_i &= e(a_i, h_{i-1}), \\\\',
+      'h_i &= h_{i-1} \\circ (r_i, a_i, o_i).',
+      '\\end{aligned}',
+      '$$',
+      '',
+      '',
+    ].join('\n');
+    expect(normalizeMathDelimiters(input)).toBe(expected);
+  });
+
+  it('canonicalising multi-line $$…$$ is idempotent', () => {
+    const input = '$$\\begin{aligned}\na &= b\n\\end{aligned}$$';
+    const once = normalizeMathDelimiters(input);
+    expect(normalizeMathDelimiters(once)).toBe(once);
+  });
+
+  it('leaves single-line $$x$$ untouched (already valid inline block math)', () => {
+    const input = 'See $$x^2 + y^2$$ done.';
+    expect(normalizeMathDelimiters(input)).toBe(input);
+  });
+
+  it('does not rewrite multi-line $$ inside a fenced code block', () => {
+    const input = '```\n$$\\begin{aligned}\na = b\n\\end{aligned}$$\n```';
+    expect(normalizeMathDelimiters(input)).toBe(input);
+  });
+
   it('is idempotent', () => {
     const input = 'Given \\( x \\), \\[ x^2 \\].';
     const once = normalizeMathDelimiters(input);

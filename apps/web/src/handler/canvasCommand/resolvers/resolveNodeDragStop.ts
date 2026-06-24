@@ -8,6 +8,7 @@ import {
   autoUnframeNodeByNonOverlap,
   fitFrames,
   FRAME_POINTER_CAPTURE_MARGIN,
+  getFrameSizing,
   moveNodeIntoFrame,
   moveNodeOutOfFrame,
   pickColumnDropTarget,
@@ -96,10 +97,10 @@ export default function resolveNodeDragStop(
 
     // ── Fresh-recomputation fallback ────────────────────────────────
     // No cached decision means the live preview tick never ran for
-    // this drag (instant click-release, `autoLayoutEnabled === false`,
-    // or the preview short-circuited before reaching this node). Fall
-    // back to the original halo / overlap logic — there is no
-    // "previous preview" contract to honour.
+    // this drag (instant click-release or the preview short-circuited
+    // before reaching this node). Fall back to the original halo /
+    // overlap logic — there is no "previous preview" contract to
+    // honour.
     //
     // Keep a node inside its structured (column / row) frame whenever the
     // release pointer is within the frame's *capture zone* — the frame
@@ -181,7 +182,11 @@ export default function resolveNodeDragStop(
     }
   }
 
-  // Fit affected frames.
+  // Fit affected frames — per-frame sizing gate: only `hug` parents
+  // chase their children's new positions; `manual` parents keep their
+  // pinned size. The engine's end-of-batch pass applies the same
+  // filter; we pre-fit here only so the geometry-update diff below
+  // sees the new frame positions / sizes.
   const affectedFrameIds = new Set<string>();
   for (const id of intent.draggedNodeIds) {
     const prevParentId = preParentIds.get(id);
@@ -189,8 +194,13 @@ export default function resolveNodeDragStop(
     if (prevParentId) affectedFrameIds.add(prevParentId);
     if (node?.parentId) affectedFrameIds.add(node.parentId);
   }
-  if (ui.autoLayoutEnabled && affectedFrameIds.size > 0) {
-    result = fitFrames(result, affectedFrameIds);
+  const hugFrameIds = new Set<string>();
+  for (const frameId of affectedFrameIds) {
+    const frame = result.find((n) => n.id === frameId);
+    if (getFrameSizing(frame) === 'hug') hugFrameIds.add(frameId);
+  }
+  if (hugFrameIds.size > 0) {
+    result = fitFrames(result, hugFrameIds);
   }
 
   const dropPlans = collectGridDropPlans(

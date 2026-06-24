@@ -104,6 +104,7 @@ const TEXT_BEARING_NODE_TYPES = new Set([
   'web',
   'pdf',
   'office',
+  'question',
 ]);
 
 const NODE_CONTENT_KEYS = new Set([
@@ -178,11 +179,7 @@ function buildNodeContent(node: CanvasNode): NodeContent | null {
     nodeId,
     type: nodeType,
     label: typeof data['label'] === 'string' ? (data['label'] as string) : null,
-    content:
-      TEXT_BEARING_NODE_TYPES.has(nodeType) &&
-      typeof data['content'] === 'string'
-        ? (data['content'] as string)
-        : '',
+    content: extractSidecarBody(nodeType, data),
   };
   if (typeof data['src'] === 'string') out['src'] = data['src'] as string;
   if (typeof data['summary'] === 'string') out['summary'] = data['summary'];
@@ -197,6 +194,24 @@ function buildNodeContent(node: CanvasNode): NodeContent | null {
     out['labelSource'] = labelSource;
   }
   return out;
+}
+
+/**
+ * Resolve the markdown body that should be written for `nodeType`.
+ *
+ * The three write paths — `canvas.route.ts` PUT, this AI executor, and
+ * the web's `nodeContentQueue.buildRequest` — all derive the sidecar
+ * body from `data.content`. Keeping that one rule shared (via
+ * `TEXT_BEARING_NODE_TYPES`) is the whole reason question prompts now
+ * live at `data.content` rather than the nested `data.input.content`
+ * shape they once had.
+ */
+function extractSidecarBody(
+  nodeType: string,
+  data: Record<string, unknown>,
+): string {
+  if (!TEXT_BEARING_NODE_TYPES.has(nodeType)) return '';
+  return typeof data['content'] === 'string' ? (data['content'] as string) : '';
 }
 
 // ── ID pre-assignment ────────────────────────────────────────────────────
@@ -315,7 +330,6 @@ export async function executeOnServer(
           nodes: prestateNodes,
           edges: prestateEdges,
           canvasId,
-          autoLayoutEnabled: true,
         },
         { forceFitFrames: originator.source === 'agent' },
       );

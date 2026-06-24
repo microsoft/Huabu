@@ -63,7 +63,7 @@ function makeFramedChildScene(): {
 }
 
 function makeResolverState(nodes: Node[]): UiResolverState {
-  return { nodes, edges: [], autoLayoutEnabled: true };
+  return { nodes, edges: [] };
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────
@@ -202,7 +202,7 @@ describe('resolveNodeDragStop · cachedDecisions WYSIWYG contract', () => {
     // Same scene as the first test, but no cache supplied. Fresh path
     // SHOULD unframe (child is well past the frame edge and the
     // pointer is far outside the halo). Proves the fallback still
-    // works for the no-rAF / autoLayoutEnabled=false code paths.
+    // works for the no-rAF code path.
     const { nodes, childId } = makeFramedChildScene();
     const child = nodes.find((n) => n.id === childId);
     if (!child) throw new Error('child fixture missing');

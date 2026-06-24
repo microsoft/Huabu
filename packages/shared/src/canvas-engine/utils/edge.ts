@@ -651,10 +651,16 @@ export function applyEdgeStyle(edge: Edge, style?: EdgeStyle): Edge {
     ? (LINE_TYPE_TO_RF[style.lineType] ?? 'default')
     : undefined;
 
-  // Build arrow markers based on direction
+  // Build arrow markers based on direction. Use React Flow's defaults
+  // (`markerUnits: 'strokeWidth'` and the built-in 12.5 × 12.5 box) so
+  // the arrowhead stays visually balanced against the line stroke
+  // across all canvases.
   const direction = style.direction ?? 'none';
   const markerColor = resolvedStroke ? { color: resolvedStroke } : {};
-  const arrowMarker = { type: 'arrowclosed' as const, ...markerColor };
+  const arrowMarker = {
+    type: 'arrowclosed' as const,
+    ...markerColor,
+  };
 
   // The `label` field is rendered by the custom `LabelledEdge` web
   // component (it reads `data.edgeStyle.label`), not by React Flow's

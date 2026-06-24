@@ -1,4 +1,4 @@
-import { FolderOpen, History, X } from 'lucide-react';
+import { FolderOpen, X } from 'lucide-react';
 import { useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 
@@ -68,11 +68,6 @@ export default function WorkspaceSetupPage() {
         {storeError && (
           <p className="text-danger mt-3 text-center text-xs">{storeError}</p>
         )}
-
-        <p className="text-fg-subtle mt-8 text-center text-[11px] leading-relaxed">
-          This folder will contain your canvas files, node content, and
-          artifacts. You can change it later in Settings.
-        </p>
       </div>
     </div>
   );
@@ -216,7 +211,6 @@ function FreeSetup({
       {recentWorkspaces.length > 0 && (
         <div className="mt-6">
           <div className="text-fg-subtle mb-2 flex items-center gap-1.5 text-xs font-medium">
-            <History size={12} />
             <span>Recent Workspaces</span>
           </div>
           <ul className="space-y-1">

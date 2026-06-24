@@ -10,7 +10,11 @@
 
 import { Type } from '@earendil-works/pi-ai';
 
-import { CANVAS_ALIGN_DIRECTIONS, FRAME_LAYOUT_MODES } from '@sediment/shared';
+import {
+  CANVAS_ALIGN_DIRECTIONS,
+  FRAME_LAYOUT_MODES,
+  FRAME_SIZING_MODES,
+} from '@sediment/shared';
 
 import { literalUnion, NodeSizeSchema, PointSchema } from './common.js';
 import {
@@ -122,6 +126,12 @@ export const AgentCanvasCommandSchema = Type.Union([
           "Number of tracks (columns or rows) when mode is `column`/`row`. Clamped to [1, 12]. Ignored for `free`. Omit to keep the frame's previous value (or the default of 1).",
         minimum: 1,
         maximum: 12,
+      }),
+    ),
+    sizing: Type.Optional(
+      literalUnion(FRAME_SIZING_MODES, {
+        description:
+          "`hug` (default) auto-fits the frame to its children; `manual` keeps the frame's user-pinned size and excludes the frame's own size from the engine's end-of-batch fit pass. For `column` / `row` frames, `manual` still re-packs children into tracks but leaves the frame size pinned (children may overflow the main axis). Omit to leave the frame's current sizing unchanged.",
       }),
     ),
   }),

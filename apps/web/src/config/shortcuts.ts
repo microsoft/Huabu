@@ -71,6 +71,23 @@ export const keyboardShortcutSections: ShortcutSection[] = [
     ],
   },
   {
+    title: 'Search',
+    items: [
+      {
+        keys: 'Ctrl/Cmd+F',
+        description:
+          'Search the canvas (or find inside the active preview when focus is in an expanded node)',
+      },
+      { keys: 'Enter', description: 'Jump to active result / next match' },
+      { keys: 'Shift+Enter', description: 'Previous match (in preview)' },
+      {
+        keys: '↑ / ↓',
+        description: 'Move between results (in canvas overlay)',
+      },
+      { keys: 'Esc', description: 'Close the search bar' },
+    ],
+  },
+  {
     title: 'Help',
     items: [
       { keys: '?', description: 'Show keyboard shortcuts' },

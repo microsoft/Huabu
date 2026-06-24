@@ -43,6 +43,7 @@ import { refreshCanvasDirIndex } from './storage/canvas-dirs.js';
 import { migrateBareArtifactKeys } from './storage/migrate-artifact-keys.js';
 import { migrateLabeledNames } from './storage/migrate-labels.js';
 import { migrateLegacyMemory } from './storage/migrate-memory.js';
+import { migrateQuestionContent } from './storage/migrate-question-content.js';
 import {
   flattenLegacyMetaJson,
   runMigrationIfNeeded,
@@ -105,6 +106,9 @@ export function initWorkspaceFromEnv(): void {
   // One-shot move of legacy `<canvas>/memory/preferences.md` into the
   // new `<canvas>/.memory/canvas.md` canvas-memory file (sentinel-gated).
   migrateLegacyMemory(_workspacePath);
+  // One-shot flatten of question `data.input.content` -> `data.content`
+  // and sidecar backfill (sentinel-gated).
+  migrateQuestionContent(_workspacePath);
   void resetExternalNoteWatcher();
 }
 
@@ -188,6 +192,9 @@ export function setWorkspacePath(newPath: string): void {
   // One-shot move of legacy `<canvas>/memory/preferences.md` into the
   // new `<canvas>/.memory/canvas.md` canvas-memory file (sentinel-gated).
   migrateLegacyMemory(_workspacePath);
+  // One-shot flatten of question `data.input.content` -> `data.content`
+  // and sidecar backfill (sentinel-gated).
+  migrateQuestionContent(_workspacePath);
   void resetExternalNoteWatcher();
 }
 

@@ -35,7 +35,7 @@ export type TriggerReason = z.infer<typeof triggerReasonSchema>;
  *
  * `sketch` is excluded — it never carries a preprocessable payload.
  * `question` IS included: although it never persists ingest text,
- * its `data.input.content` flows through the same Enrich path used
+ * its `data.content` flows through the same Enrich path used
  * by `note` / `text` to derive an auto-label from the user's prompt.
  */
 export const preprocessableNodeTypeSchema = z.enum([

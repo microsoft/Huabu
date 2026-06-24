@@ -149,6 +149,38 @@ export const TextNodeBody = forwardRef<HTMLTextAreaElement, TextNodeBodyProps>(
             onDoubleClick={onRequestEdit}
           />
         )}
+        {/*
+          Read-only text mirror. While not editing the textarea's value
+          is unreachable to the document-wide TreeWalker (textarea
+          content is not real DOM text), so the canvas search highlight
+          (`::highlight(sediment-search)`) cannot paint over it. We
+          render an identically-laid-out, pointer-events-none mirror
+          carrying the same text so the highlight layer can target it.
+          The textarea's text color is forced transparent while not
+          editing so only the mirror is visible. Placeholder color is
+          unaffected (`::placeholder` ignores `color`), so empty-state
+          remains identical to before.
+        */}
+        {!isEditing && draft.length > 0 && (
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 z-1 overflow-hidden"
+            style={{
+              padding: `${padding}px`,
+              color,
+              fontFamily,
+              fontWeight,
+              fontStyle,
+              fontSize: `${effectiveFontSize}px`,
+              lineHeight,
+              textDecoration,
+              wordBreak: 'break-word',
+              whiteSpace: 'pre-wrap',
+            }}
+          >
+            {draft}
+          </div>
+        )}
         <textarea
           ref={textareaRef}
           className={clsx(
@@ -168,7 +200,7 @@ export const TextNodeBody = forwardRef<HTMLTextAreaElement, TextNodeBodyProps>(
           style={{
             padding: 0,
             border: 'none',
-            color,
+            color: !isEditing && draft.length > 0 ? 'transparent' : color,
             fontFamily,
             fontWeight,
             fontStyle,
