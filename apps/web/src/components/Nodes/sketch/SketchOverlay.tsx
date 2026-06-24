@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { createId, resolveAccent } from '@sediment/shared';
 
@@ -114,7 +114,17 @@ export function SketchOverlay({
   rfInstance: ReactFlowInstance | null;
 }) {
   const addNode = useCanvasStore((s) => s.addNode);
+  const selectNodes = useCanvasStore((s) => s.selectNodes);
   const sketchDraft = useToolStore((s) => s.sketchDraft);
+
+  // Drop any prior canvas selection the moment the sketch tool
+  // activates: the overlay swallows all pointer events so the user
+  // can't (de)select anything by clicking either, and a stale
+  // selection would otherwise still be sent as context on the next
+  // chat turn and surfaced in selection-aware toolbars.
+  useEffect(() => {
+    selectNodes([], false);
+  }, [selectNodes]);
   const strokeColor = sketchDraft.strokeColor || DEFAULT_STROKE_COLOR;
   const strokeSize = sketchDraft.strokeSize || DEFAULT_STROKE_SIZE;
   const mode = sketchDraft.mode ?? 'draw';

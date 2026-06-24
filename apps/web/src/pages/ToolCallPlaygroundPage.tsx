@@ -121,7 +121,6 @@ function normalize(raw: unknown): NormalizeResult {
         id,
         role: 'assistant',
         segments: Array.isArray(parts) ? parts : [],
-        resources: msg.resources,
         attachments: msg.attachments,
         selectedNodeIds: msg.selectedNodeIds,
       } as ChatMessage);

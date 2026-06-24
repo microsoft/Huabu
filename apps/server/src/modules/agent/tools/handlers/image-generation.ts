@@ -15,7 +15,7 @@
  *     including each reference image as a file part. References are
  *     looked up from the canvas's artifact store by key, so the
  *     agent passes opaque artifact keys it obtained via
- *     `rasterize_node` (or that already live on `image` nodes).
+ *     `snapshot_nodes` (or that already live on `image` nodes).
  *
  * Returns `JSON.stringify({src, width, height, revisedPrompt?})` on
  * success. Errors throw — pi-agent-core wraps them as
@@ -25,8 +25,23 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
+// `fetch` and `FormData` must come from the same realm: undici's
+// `instanceof FormData` check is class-identity based, and Node's built-in
+// `globalThis.fetch` uses Node's *bundled* undici copy whose `FormData`
+// class is not identity-equal to the one re-exported from this package's
+// `undici` dependency. When the realms mismatch, undici silently falls
+// back to `String(body)` and sends the request as `text/plain`, which
+// Azure rejects with HTTP 400 (`unsupported_content_type`).
+//
+// Importing `fetch` from `undici` here guarantees the realm matches the
+// `FormData` we instantiate below. We pass the proxy dispatcher
+// explicitly because Node's built-in fetch wrapper in setup-proxy.ts
+// does not propagate to direct undici.fetch calls.
+import { fetch as undiciFetch, FormData } from 'undici';
+
 import { createId } from '@sediment/shared';
 
+import { getProxyDispatcher } from '../../../../setup-proxy.js';
 import { getCanvasStore } from '../../../storage/index.js';
 import { getAzureImageConfig } from '../../llm.js';
 
@@ -78,7 +93,7 @@ export async function handleGenerateImage(
   for (const key of refs) {
     if (typeof key !== 'string' || !key.trim()) {
       throw new Error(
-        `Invalid reference artifact key: ${JSON.stringify(key)}. Use the bare \`src\` string returned by rasterize_node.`,
+        `Invalid reference artifact key: ${JSON.stringify(key)}. Use the bare \`src\` string returned by snapshot_nodes.`,
       );
     }
     const abs = store.resolveArtifactFilePath(key);
@@ -137,6 +152,10 @@ export async function handleGenerateImage(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
+  // Resolve the proxy dispatcher once (undefined when no proxy is
+  // configured or when the target host is on the NO_PROXY bypass list).
+  const dispatcher = getProxyDispatcher(url);
+
   let response: Response;
   try {
     if (isEdit) {
@@ -158,12 +177,13 @@ export async function handleGenerateImage(
           path.basename(ref.absPath),
         );
       }
-      response = await fetch(url, {
+      response = (await undiciFetch(url, {
         method: 'POST',
         headers: authHeader,
         body: form,
         signal: controller.signal,
-      });
+        dispatcher,
+      })) as unknown as Response;
     } else {
       const body: Record<string, unknown> = {
         prompt,
@@ -172,7 +192,7 @@ export async function handleGenerateImage(
         quality,
       };
       if (isV1Style) body.model = azure.deployment;
-      response = await fetch(url, {
+      response = (await undiciFetch(url, {
         method: 'POST',
         headers: {
           ...authHeader,
@@ -180,7 +200,8 @@ export async function handleGenerateImage(
         },
         body: JSON.stringify(body),
         signal: controller.signal,
-      });
+        dispatcher,
+      })) as unknown as Response;
     }
   } catch (err) {
     if ((err as Error)?.name === 'AbortError') {
@@ -227,8 +248,13 @@ export async function handleGenerateImage(
     );
   }
   const png = Buffer.from(b64, 'base64');
+  // Use a `gen-` prefix (vs the generic `artifact-` used by uploads and
+  // preprocessing) so future GC can distinguish model-generated images
+  // — which start life as orphans until the agent follows up with a
+  // `canvas_commands` insert or embeds them in a note body — from
+  // user-uploaded artifacts that should never be auto-collected.
   const record = await store.writeArtifactBuffer(
-    { id: createId('artifact'), ext: '.png', mimeType: 'image/png' },
+    { id: createId('gen'), ext: '.png', mimeType: 'image/png' },
     png,
   );
 

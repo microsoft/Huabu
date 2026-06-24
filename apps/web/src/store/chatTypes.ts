@@ -15,14 +15,6 @@ import type {
   IntentCandidate,
 } from '@sediment/shared';
 
-/** A resource label created by an agent tool call (e.g. node, edge, frame). */
-export interface ResourceLabel {
-  type: 'node' | 'edge' | 'frame' | 'source';
-  nodeType?: string;
-  label: string;
-  id?: string;
-}
-
 /**
  * Ordered piece of an assistant turn. Aliased to {@link AssistantPart}
  * from the shared types package — the same union the SSE pipeline,
@@ -74,8 +66,6 @@ export type ChatMessage =
       segments: AssistantSegment[];
       /** Image/file attachments included with this message. */
       attachments?: ChatAttachment[];
-      /** Resources created during the agent's response. */
-      resources?: ResourceLabel[];
       /** IDs of canvas nodes selected when this message was sent. */
       selectedNodeIds?: string[];
     }

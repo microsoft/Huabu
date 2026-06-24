@@ -33,7 +33,7 @@ const sqlWasmSrc = createRequire(
 ).resolve('sql.js/dist/sql-wasm.wasm');
 
 // @resvg/resvg-wasm ships its WebAssembly as `index_bg.wasm`. The agent
-// tool `rasterize_node` calls `initWasm(readFile('resvg-bg.wasm'))` at
+// tool `snapshot_nodes` calls `initWasm(readFile('resvg-bg.wasm'))` at
 // first use; the fallback path it uses in bundle layout is sibling-of-
 // server.js, so copy the file there. Same pnpm-agnostic resolution
 // pattern as sqlWasmSrc above.
@@ -90,7 +90,7 @@ export default defineConfig([
       cpSync(sqlWasmSrc, wasmDst);
       console.log(`[tsup] copied sql-wasm.wasm -> ${wasmDst}`);
       // @resvg/resvg-wasm — copied next to server.js so the
-      // rasterize_node tool's bundle-layout fallback finds it via
+      // snapshot_nodes tool's bundle-layout fallback finds it via
       // `path.join(__dirname, 'resvg-bg.wasm')`.
       const resvgWasmDst = path.resolve('dist-bundle/resvg-bg.wasm');
       cpSync(resvgWasmSrc, resvgWasmDst);

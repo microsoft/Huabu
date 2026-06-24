@@ -125,7 +125,6 @@ export const MessageList = ({
                   messageId={msg.id}
                   segments={msg.segments}
                   isStreaming={msg.id === streamingAssistantId}
-                  resources={msg.resources}
                   hideActions={hideAIActions}
                 />,
               );
