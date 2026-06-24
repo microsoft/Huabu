@@ -76,8 +76,17 @@ const HOST = '127.0.0.1';
 const SERVER_PORT = Number.parseInt(env.SERVER_PORT || env.PORT || '3001', 10);
 const VITE_PORT = Number.parseInt(env.VITE_PORT || env.WEB_PORT || '5173', 10);
 const PORT_SCAN_RANGE = 50;
-const READY_TIMEOUT_MS = 60_000;
+// Cold starts (first tsx/esbuild compile, Windows Defender scanning a fresh
+// node_modules, or a loaded machine) can blow past a tight window, so the
+// default is generous and overridable via DEV_SERVER_READY_TIMEOUT_MS.
+const READY_TIMEOUT_MS = Number.parseInt(
+  env.DEV_SERVER_READY_TIMEOUT_MS || '120000',
+  10,
+);
 const POLL_INTERVAL_MS = 250;
+// Emit a "still waiting" heartbeat at this cadence so a slow boot is visible
+// instead of looking hung until the timeout fires.
+const WAIT_LOG_INTERVAL_MS = 10_000;
 
 /* ─── helpers ─────────────────────────────────────────────────────── */
 
@@ -142,7 +151,9 @@ async function findAvailablePort(startPort) {
 }
 
 function waitForPort(host, port, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
+  const start = Date.now();
+  const deadline = start + timeoutMs;
+  let lastLog = start;
   return new Promise((resolve, reject) => {
     const tryOnce = () => {
       const sock = net.connect({ host, port });
@@ -152,13 +163,22 @@ function waitForPort(host, port, timeoutMs) {
       });
       sock.once('error', () => {
         sock.destroy();
-        if (Date.now() > deadline) {
+        const now = Date.now();
+        if (now > deadline) {
           reject(
             new Error(
               `Timed out after ${timeoutMs}ms waiting for ${host}:${port}`,
             ),
           );
           return;
+        }
+        if (now - lastLog >= WAIT_LOG_INTERVAL_MS) {
+          lastLog = now;
+          console.log(
+            `[dev-desktop] still waiting for ${host}:${port} … ${Math.round(
+              (now - start) / 1000,
+            )}s elapsed (timeout ${Math.round(timeoutMs / 1000)}s, override with DEV_SERVER_READY_TIMEOUT_MS)`,
+          );
         }
         setTimeout(tryOnce, POLL_INTERVAL_MS);
       });
