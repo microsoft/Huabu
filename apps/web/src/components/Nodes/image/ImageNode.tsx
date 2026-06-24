@@ -1,9 +1,8 @@
-import { Fullscreen } from 'lucide-react';
+import { Fullscreen, Image as ImageIcon } from 'lucide-react';
 import { memo, useEffect, useState } from 'react';
 
 import { resolveArtifactUrl } from '@/api/artifact';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
-import { SkeletonLines } from '@/components/Common/SkeletonLines';
 import useCanvasStore from '@/store/canvasStore.ts';
 
 import { MissingFileBanner } from '../MissingFileBanner';
@@ -20,14 +19,14 @@ export const ImageNode = memo(
     const canvasId = useCanvasStore((s) => s.canvasId);
 
     // Track whether the underlying `<img>` element has finished loading
-    // (or failed). While the bytes are still in flight we render a
-    // `SkeletonLines` shimmer overlay — same pattern other nodes (PDF,
-    // Note, PreviewCard) use for their loading state.
+    // (or failed). While the bytes are still in flight we show a
+    // centered, gently pulsing image icon — semantically signals
+    // "image goes here" without competing with the surrounding canvas.
     const src = data?.src;
     const [imgLoaded, setImgLoaded] = useState(false);
     useEffect(() => {
-      // Reset loading state whenever the source changes so the skeleton
-      // re-appears for the new image.
+      // Reset loading state whenever the source changes so the
+      // placeholder re-appears for the new image.
       setImgLoaded(false);
     }, [src]);
 
@@ -72,10 +71,24 @@ export const ImageNode = memo(
                 />
                 {!imgLoaded && (
                   <div
-                    className="pointer-events-none absolute inset-0 flex items-center justify-center"
+                    className="bg-surface pointer-events-none absolute inset-0 flex items-center justify-center rounded-lg"
+                    // `container-type: size` exposes the node's dimensions
+                    // to CSS `cqmin` units below so the icon scales with
+                    // the smaller of width/height instead of staying a
+                    // fixed size regardless of node size.
+                    style={{ containerType: 'size' }}
                     aria-hidden
                   >
-                    <SkeletonLines className="w-full max-w-xs" />
+                    <ImageIcon
+                      className="text-fg-subtle animate-pulse"
+                      // 70% of the node's shorter side, clamped between
+                      // 48px (tiny thumbnails) and 200px (huge nodes).
+                      style={{
+                        width: 'clamp(48px, 70cqmin, 200px)',
+                        height: 'clamp(48px, 70cqmin, 200px)',
+                      }}
+                      strokeWidth={1.5}
+                    />
                   </div>
                 )}
               </>
