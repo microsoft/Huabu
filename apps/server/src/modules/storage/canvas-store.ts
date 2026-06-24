@@ -6,6 +6,7 @@ import {
   createWriteStream,
   existsSync,
   readdirSync,
+  renameSync,
   rmSync,
   statSync,
   unlinkSync,
@@ -263,6 +264,40 @@ function nodeFilenameFor(nodeId: string, label: string | null): string {
  */
 const NODE_READ_CONCURRENCY = 32;
 
+function toErrnoString(err: unknown): string {
+  if (err && typeof err === 'object') {
+    const e = err as { code?: string; message?: string };
+    if (e.code) return `${e.code}: ${e.message ?? ''}`.trim();
+    if (e.message) return e.message;
+  }
+  return String(err);
+}
+
+/**
+ * Add a sidecar `<id, filename>` entry to the per-canvas index during a
+ * directory scan. Loudly warns when the same `id` is seen in more than
+ * one file (orphan caused by a failed rename in a previous session) so
+ * the operator can investigate; the surviving entry is whichever the
+ * scan visited last, matching the legacy upsert semantics of
+ * `NameIndex.put`.
+ */
+function addSidecarToIndex(
+  idx: NameIndex<NodeFileEntry>,
+  canvasId: string,
+  id: string,
+  filename: string,
+): void {
+  const existing = idx.get(id);
+  if (existing && existing.filename !== filename) {
+    console.warn(
+      `[canvas-store] duplicate node sidecar for id ${id} in canvas ${canvasId}: ` +
+        `"${existing.filename}" vs "${filename}" — keeping "${filename}". ` +
+        `delete the stale file manually after confirming which one is current.`,
+    );
+  }
+  idx.add({ id, filename });
+}
+
 export class CanvasStore {
   readonly canvasId: string;
   private nodes: NameIndex<NodeFileEntry> | null = null;
@@ -370,7 +405,7 @@ export class CanvasStore {
           typeof rawId === 'string' && rawId
             ? rawId
             : file.replace(/\.md$/, '');
-        idx.add({ id, filename: file });
+        addSidecarToIndex(idx, this.canvasId, id, file);
       }
     }
     this.nodes = idx;
@@ -445,7 +480,7 @@ export class CanvasStore {
           typeof rawId === 'string' && rawId
             ? rawId
             : file.replace(/\.md$/, '');
-        idx.add({ id, filename: file });
+        addSidecarToIndex(idx, this.canvasId, id, file);
         contents.set(id, markdownToNodeContent(id, raw));
       }
     }
@@ -493,7 +528,7 @@ export class CanvasStore {
           typeof rawId === 'string' && rawId
             ? rawId
             : file.replace(/\.md$/, '');
-        idx.add({ id, filename: file });
+        addSidecarToIndex(idx, this.canvasId, id, file);
         const content = markdownToNodeContent(id, raw);
         contents.set(id, content);
         // JS is single-threaded between awaits, so even though
@@ -585,16 +620,7 @@ export class CanvasStore {
       }
     }
 
-    if (existing && existing.filename !== target) {
-      try {
-        unlinkSync(nodeFilePath(this.canvasId, existing.filename));
-      } catch {
-        // best effort; index update below keeps things consistent
-      }
-      idx.rename(nodeId, target);
-    } else if (!existing) {
-      idx.add({ id: nodeId, filename: target });
-    }
+    const isRename = !!existing && existing.filename !== target;
 
     // Compute the dedupe suffix (e.g. ` (2)`) by diffing the desired
     // safe-filename stem against the actual on-disk stem and apply it to
@@ -614,10 +640,50 @@ export class CanvasStore {
     const finalContent: NodeContent =
       suffix && trimmedLabel ? { ...content, label: finalLabel } : content;
 
-    atomicWriteText(
-      nodeFilePath(this.canvasId, target),
-      nodeContentToMarkdown(finalContent),
-    );
+    // POSIX rename(2) is atomic within the same filesystem, so the
+    // rename + content write below is a 2-step but each step is
+    // individually atomic and a failure at either point leaves the
+    // store in a consistent state (caller gets fs-error and can
+    // retry; nothing is ever left as a same-id orphan on disk).
+    const newPath = nodeFilePath(this.canvasId, target);
+
+    if (isRename) {
+      const oldFilename = existing.filename;
+      const oldPath = nodeFilePath(this.canvasId, oldFilename);
+      try {
+        renameSync(oldPath, newPath);
+      } catch (err) {
+        // Old sidecar untouched on disk; idx still points at it.
+        // Surface the failure so the caller can toast / retry instead
+        // of silently leaving the canvas in a half-renamed state.
+        const message = `Failed to rename node sidecar from "${oldFilename}" to "${target}": ${toErrnoString(err)}`;
+        console.warn(
+          `[canvas-store] ${message} (canvas=${this.canvasId}, node=${nodeId})`,
+        );
+        return { ok: false, reason: 'fs-error', message };
+      }
+      idx.rename(nodeId, target);
+    }
+
+    try {
+      atomicWriteText(newPath, nodeContentToMarkdown(finalContent));
+    } catch (err) {
+      // For first writes the idx entry has not been added yet (we add
+      // it below on success), so failing here leaves both disk and idx
+      // consistent. For renames the file at `newPath` now holds the
+      // pre-rename content — still a valid sidecar for this nodeId,
+      // just with stale body. Either way the caller learns about it.
+      const message = `Failed to write node content to "${target}": ${toErrnoString(err)}`;
+      console.warn(
+        `[canvas-store] ${message} (canvas=${this.canvasId}, node=${nodeId})`,
+      );
+      return { ok: false, reason: 'fs-error', message };
+    }
+
+    if (!existing) {
+      idx.add({ id: nodeId, filename: target });
+    }
+
     return { ok: true, filename: target, label: finalLabel };
   }
 

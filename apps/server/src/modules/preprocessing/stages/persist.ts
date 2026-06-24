@@ -56,6 +56,17 @@ export function persist(
       const result = store.writeNode(nodeId, merged as typeof existing);
       if (result.ok) {
         persistedLabel = result.label ?? undefined;
+      } else {
+        // Body is already on disk and matches canonical content; only
+        // label/mhtml metadata refresh failed. The next preprocess of
+        // this node will retry the refresh, so we tolerate the failure
+        // here — but log so a persistent failure (perms, disk full)
+        // surfaces in operator logs instead of silently looping.
+        console.warn(
+          `[persist] metadata refresh failed for ${nodeId}: ${
+            result.reason === 'fs-error' ? result.message : result.reason
+          }`,
+        );
       }
     }
     // Surface the on-disk `src` even when content was unchanged so the
@@ -83,11 +94,24 @@ export function persist(
     content: normalized.canonicalContent,
   });
 
+  if (!result.ok) {
+    // Body write failed — there is no `.md` on disk for this node, so
+    // we must NOT return `contentChanged: true` (which would tell
+    // downstream the node is persisted). Throw so the pipeline records
+    // a retryable `PERSIST_FAILED` diagnostic instead of silently
+    // accumulating `contentMissing` nodes on the canvas.
+    throw new Error(
+      `persist: writeNode failed for ${nodeId}: ${
+        result.reason === 'fs-error' ? result.message : result.reason
+      }`,
+    );
+  }
+
   return {
     nodeId,
     isNew: !existing,
     contentChanged: true,
-    persistedLabel: result.ok ? (result.label ?? undefined) : undefined,
+    persistedLabel: result.label ?? undefined,
     persistedSrc: src,
   };
 }

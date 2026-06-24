@@ -269,6 +269,19 @@ export interface ExecuteOnServerOutput {
   /** Commands as the executor saw them — ids assigned, source-stamped. */
   commands: CanvasCommand[];
   /**
+   * Per-node sidecar persistence failures encountered while applying
+   * this batch. Surfaced so the agent tool wrapper can include them in
+   * its JSON response — the agent then knows which writes did not
+   * actually land on disk and can retry / inform the user. The batch
+   * still commits canvas.json so the structural change is recorded;
+   * the markdown body is what may be stale.
+   */
+  writeFailures?: Array<{
+    nodeId: string;
+    kind: 'write' | 'delete';
+    message: string;
+  }>;
+  /**
    * Subset of `PendingEffects` that clients need to drain locally.
    *
    * `mutatedNodes` is included so the web's existing `triggerPreprocessing`
@@ -400,32 +413,48 @@ export async function executeOnServer(
     // markdown file that does not exist on disk. A crash between this
     // loop and the canvas.json write leaves orphan .md files (harmless),
     // not orphan node references (would render as `contentMissing`).
+    const writeFailures: NonNullable<ExecuteOnServerOutput['writeFailures']> =
+      [];
     for (const node of pendingEffects.mutatedNodes) {
       const nodeContent = buildNodeContent(node);
       if (!nodeContent) continue;
+      let writeOk = false;
+      let failureMessage: string | null = null;
       try {
-        store.writeNode(nodeContent.nodeId, nodeContent, {
+        const result = store.writeNode(nodeContent.nodeId, nodeContent, {
           strictRename: nodeContent['labelSource'] === 'user',
         });
+        writeOk = result.ok;
+        if (!result.ok) {
+          failureMessage =
+            result.reason === 'fs-error'
+              ? result.message
+              : result.reason === 'conflict'
+                ? `Label conflicts with existing node "${result.conflictWith.filename}"`
+                : `writeNode failed: ${result.reason}`;
+        }
       } catch (err) {
-        // Best-effort: a sidecar write failure for one node should not
-        // abort the whole batch — the canvas.json write below still
-        // captures the structural change.
-
+        failureMessage = err instanceof Error ? err.message : String(err);
+      }
+      if (!writeOk) {
+        const message =
+          failureMessage ?? 'writeNode failed with an unknown error';
         console.warn(
-          `[canvas-executor] writeNode failed for ${nodeContent.nodeId}:`,
-          err,
+          `[canvas-executor] writeNode failed for ${nodeContent.nodeId}: ${message}`,
         );
+        writeFailures.push({
+          nodeId: nodeContent.nodeId,
+          kind: 'write',
+          message,
+        });
       }
     }
     for (const nodeId of pendingEffects.deletedNodeIds) {
       const result = store.deleteNode(nodeId);
       if (result === 'fs-error') {
-        // Best-effort inside the agent batch: log so the operator can
-        // investigate an orphan `.md`, but don't abort the whole batch
-        // — the canvas.json write below still records the structural
-        // delete the agent asked for.
-        console.warn(`[canvas-executor] deleteNode failed for ${nodeId}`);
+        const message = `deleteNode failed (unlink threw); sidecar may remain on disk as an orphan`;
+        console.warn(`[canvas-executor] ${message} (node=${nodeId})`);
+        writeFailures.push({ nodeId, kind: 'delete', message });
       }
     }
 
@@ -459,6 +488,7 @@ export async function executeOnServer(
       deltas,
       results,
       commands,
+      ...(writeFailures.length > 0 ? { writeFailures } : {}),
       pendingEffects: {
         mutatedNodes: pendingEffects.mutatedNodes,
         deletedNodeIds: pendingEffects.deletedNodeIds,

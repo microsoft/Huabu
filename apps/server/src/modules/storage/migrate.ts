@@ -271,7 +271,15 @@ function migrateOneCanvas(
         content: src.content,
       };
       try {
-        store.writeNode(nodeId, nodeContent);
+        const result = store.writeNode(nodeId, nodeContent);
+        if (!result.ok) {
+          logger.warn('failed to write node markdown', {
+            canvasId,
+            nodeId,
+            reason: result.reason,
+            message: result.reason === 'fs-error' ? result.message : undefined,
+          });
+        }
       } catch (err) {
         logger.warn('failed to write node markdown', {
           canvasId,
@@ -291,7 +299,15 @@ function migrateOneCanvas(
         content: data['content'] as string,
       };
       try {
-        store.writeNode(nodeId, nodeContent);
+        const result = store.writeNode(nodeId, nodeContent);
+        if (!result.ok) {
+          logger.warn('failed to write inline node markdown', {
+            canvasId,
+            nodeId,
+            reason: result.reason,
+            message: result.reason === 'fs-error' ? result.message : undefined,
+          });
+        }
       } catch (err) {
         logger.warn('failed to write inline node markdown', {
           canvasId,
@@ -574,7 +590,19 @@ export function flattenLegacyMetaJson(
           });
           continue;
         }
-        store.writeNode(nodeId, { ...legacy, ...node });
+        const writeResult = store.writeNode(nodeId, { ...legacy, ...node });
+        if (!writeResult.ok) {
+          logger.warn('failed to flatten node frontmatter', {
+            canvasId,
+            nodeId,
+            reason: writeResult.reason,
+            message:
+              writeResult.reason === 'fs-error'
+                ? writeResult.message
+                : undefined,
+          });
+          continue;
+        }
         rewritten++;
       } catch (err) {
         logger.warn('failed to flatten node frontmatter', {
