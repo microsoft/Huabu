@@ -1170,6 +1170,20 @@ export function useAgentStream(): UseAgentStreamReturn {
               }
               setThreadLoading(threadId, false);
               releaseAbort();
+              // If the turn failed before the server emitted its
+              // `prepared_prompt` (e.g. the agent never connected), the
+              // pending "Connecting to <agent>…" card would otherwise
+              // spin forever. Resolve it to the failed state so the
+              // spinner stops; the detailed reason shows in the status
+              // row appended below. Guard on still-pending so a card the
+              // server already populated isn't clobbered.
+              if (preparedPromptId) {
+                updateMessage(threadId, preparedPromptId, (m) =>
+                  m.role === 'prepared-prompt' && m.prompt === null && !m.error
+                    ? { ...m, error: err.message }
+                    : m,
+                );
+              }
               addMessage(threadId, {
                 id: createId('status'),
                 role: 'status',
@@ -1259,6 +1273,7 @@ export function useAgentStream(): UseAgentStreamReturn {
       getAgentChatContext,
       canvasId,
       setThreadLoading,
+      updateMessage,
     ],
   );
 

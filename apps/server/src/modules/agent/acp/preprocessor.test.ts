@@ -149,5 +149,21 @@ describe('prepareExternalAgentPrompt', () => {
     expect(result.includedSystem).toBe(true);
     expect(result.serialized).toContain('## Canvas Tools (Sideband)');
     expect(result.serialized).toContain('first message');
+    // The structured prompt also carries the rendered preamble so the
+    // UI can show the complete prompt the agent saw.
+    expect(result.prompt.systemPreamble).toContain(
+      '## Canvas Tools (Sideband)',
+    );
+  });
+
+  it('omits systemPreamble from the structured prompt when includeSystem is unset', () => {
+    const result = prepareExternalAgentPrompt({
+      rawText: 'later message',
+      agentAlias: 'claude',
+      logger,
+    });
+
+    expect(result.includedSystem).toBe(false);
+    expect(result.prompt.systemPreamble).toBeUndefined();
   });
 });

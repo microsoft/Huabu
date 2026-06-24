@@ -89,14 +89,14 @@ export type ChatMessage =
       id: string;
       role: 'prepared-prompt';
       /**
-       * Structured prompt the ACP preprocessor produced for the
-       * external agent. `null` while we're still waiting on the
-       * preprocessor's LLM call (pending state) or when the call
-       * failed outright (in which case `error` is set).
+       * Structured prompt Huabu deterministically built for the external
+       * agent. `null` while the agent's connection is still being
+       * established (pending state) or when the turn failed before a
+       * prompt was delivered (in which case `error` is set).
        */
       prompt: ExternalAgentPrompt | null;
       /** Short alias of the bound external agent (`'claude'`, etc.). */
       agentAlias: string;
-      /** Preprocessor failure detail; presence indicates the fallback path ran. */
+      /** Failure detail; presence flips the card to its failed state. */
       error?: string;
     };

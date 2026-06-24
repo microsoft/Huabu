@@ -153,6 +153,10 @@ export function prepareExternalAgentPrompt(
       type: ref.type,
       ...(ref.label ? { label: ref.label } : {}),
     })),
+    // On the first turn of a fresh session we also carry the rendered
+    // system preamble so the UI can show the complete prompt the agent
+    // saw. The serialized wire text below prepends the same block.
+    ...(includeSystem ? { systemPreamble: renderSystemPreamble() } : {}),
   };
 
   logger.debug(
@@ -221,8 +225,20 @@ export function serializePrompt(
 
   if (!opts.includeSystem) return userBlock;
 
-  const systemBlock = renderPromptFile(SYSTEM_TEMPLATE, {});
+  const systemBlock = renderSystemPreamble();
   return `${systemBlock}\n\n${userBlock}`;
+}
+
+/**
+ * Render the one-shot system preamble (persona + `## Canvas Tools
+ * (Sideband)` docs) from {@link SYSTEM_TEMPLATE}. Shared by
+ * {@link serializePrompt} (which prepends it to the wire text) and
+ * {@link prepareExternalAgentPrompt} (which attaches it to the structured
+ * prompt so the UI can show the complete prompt). Static — no template
+ * variables.
+ */
+export function renderSystemPreamble(): string {
+  return renderPromptFile(SYSTEM_TEMPLATE, {});
 }
 
 /**

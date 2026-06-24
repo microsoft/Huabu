@@ -3,12 +3,16 @@
  * built deterministically for an external agent turn.
  *
  * Three states drive the visual:
- *   - **pending**: `prompt === null && !error` — prompt is still being
- *     built. Shows a small spinner + "Preparing prompt for <alias>…"
+ *   - **pending**: `prompt === null && !error` — the external agent's
+ *     connection is still being established (prompt building itself is
+ *     instant/deterministic on the server). Shows a small spinner +
+ *     "Connecting to <alias>…".
  *   - **ready**: `prompt !== null` — collapsed by default, click to
- *     expand and see the `task` body + (optional) selected-node list.
+ *     expand and see the (optional) one-shot system preamble, the `task`
+ *     body, and the (optional) selected-node list.
  *   - **failed**: `prompt === null && error` — small error chip; the
- *     external agent received the raw user text as fallback.
+ *     turn failed before a prompt was delivered (e.g. the agent never
+ *     connected). The detailed reason shows in the separate status row.
  *
  * `task` is the user's message forwarded verbatim. `selectedNodes`
  * lists the canvas nodes the user had selected (metadata only); the
@@ -42,7 +46,7 @@ export function PreparedPromptMessage({
     return (
       <AssistantDisclosure
         icon={<Loader2 size={12} className="animate-spin" />}
-        title={`Preparing prompt for ${agentAlias}…`}
+        title={`Connecting to ${agentAlias}…`}
       />
     );
   }
@@ -52,7 +56,7 @@ export function PreparedPromptMessage({
     return (
       <AssistantDisclosure
         icon={<FileText size={12} className="text-fg-muted/60" />}
-        title={`Prompt preprocessing failed for ${agentAlias} — sent raw message.`}
+        title={`Couldn't reach ${agentAlias}.`}
       />
     );
   }
@@ -76,6 +80,17 @@ export function PreparedPromptMessage({
       title={`${summary} → ${agentAlias}`}
       bodyClassName="ml-5 space-y-2"
     >
+      {prompt.systemPreamble && (
+        <div>
+          <div className="text-fg-muted/70 mb-0.5 text-[10px] font-medium tracking-wide uppercase">
+            System
+          </div>
+          <div className="text-fg-muted/80 wrap-break-word whitespace-pre-wrap">
+            {prompt.systemPreamble}
+          </div>
+        </div>
+      )}
+
       <div>
         <div className="text-fg-muted/70 mb-0.5 text-[10px] font-medium tracking-wide uppercase">
           Task

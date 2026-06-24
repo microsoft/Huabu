@@ -162,21 +162,29 @@ export interface ExternalAgentPrompt {
     /** Display label, when the node has one. */
     label?: string;
   }>;
+  /**
+   * The one-shot system preamble (persona + `## Canvas Tools (Sideband)`
+   * docs) prepended to this turn's wire payload. Present only on the
+   * first turn of a freshly-created session — omitted thereafter, since
+   * the agent keeps it in context (see `AcpSessionEntry.systemPreambleSent`).
+   * Carried here so the UI can render the *complete* prompt the agent saw.
+   */
+  systemPreamble?: string;
 }
 
 /**
  * `event: prepared_prompt` — emitted once per external-agent turn,
- * before the first `text_delta`, when Huabu's preprocessor has
- * rewritten the user's raw message into a structured
- * {@link ExternalAgentPrompt}. Internal-agent turns never emit this.
+ * before the first `text_delta`, carrying the {@link ExternalAgentPrompt}
+ * Huabu deterministically built from the user's raw message + canvas
+ * selection. Internal-agent turns never emit this.
  *
- * When the preprocessor fails the server still emits this event with
- * `prompt: null` + an `error` description so the UI can replace its
- * pending "Preparing…" placeholder with a concrete failure note
- * (and Huabu falls back to forwarding the raw user message).
+ * On the (effectively impossible) build failure the server still emits
+ * this event with `prompt: null` + an `error` description so the UI can
+ * replace its pending placeholder with a concrete failure note (and
+ * Huabu falls back to forwarding the raw user message).
  */
 export interface AgentPreparedPromptEventData {
-  /** Structured prompt produced by the preprocessor, or `null` on failure. */
+  /** Structured prompt Huabu built, or `null` on failure. */
   prompt: ExternalAgentPrompt | null;
   /** Short alias of the bound external agent (e.g. `'claude'`). */
   agentAlias: string;

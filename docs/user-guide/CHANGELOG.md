@@ -2,6 +2,22 @@
 
 每次重要功能变更都会记录在此文件中，按时间倒序排列。
 
+## 2026-06-24 · 外部 Agent：prompt 卡片不再被「连接 agent」阻塞，并展示完整 system 段
+
+**What Changed**
+
+外部（ACP）agent 的 prompt 卡片（PreparedPromptCard）做了三处体验修复：
+
+1. **pending 文案改为「Connecting to *agent*…」**：之前卡片在等待期一直显示「Preparing prompt for *agent*…」。但 prompt 现在是确定性、瞬时构建的——这段 spinner 实际等待的是 ACP 会话连上外部 agent，而不是「准备 prompt」。文案改得名副其实（且不向用户暴露内部「session」概念）。
+2. **连接失败不再无限转圈**：如果这一轮在 prompt 下发前就失败（最常见是 agent 没连上），卡片以前会永远停在 spinner。现在前端在收到 `error` 时会把仍处于 pending 的卡片落定为失败态（spinner 停止），具体原因照旧显示在下方的错误状态行里。
+3. **卡片展开后能看到完整 prompt**：首轮会话会把一次性 system preamble（角色设定 + `## Canvas Tools (Sideband)` 工具说明）随首条用户消息搭车下发；现在这段 preamble 也会随 `ExternalAgentPrompt.systemPreamble` 带到前端，卡片展开后在 `Task` 之上多出一个 `System` 段，让用户看到 agent 实际收到的完整 prompt。后续轮次不含 preamble，卡片也就不显示 `System` 段。
+
+**Notes**
+
+- 后端下发顺序不变（连接 → 确定性构建 → `prepared_prompt`）；只是把「等待期」的语义讲清楚，并让构建结果带上 `systemPreamble`。
+- `systemPreamble` 只在新建会话首轮存在（恢复会话的转录里已含 preamble，不再重发），所以历史回填时也只有首轮卡片显示 `System` 段。
+- 改动文件：[agent.ts](packages/shared/src/types/agent/agent.ts)（`ExternalAgentPrompt.systemPreamble`）、[preprocessor.ts](apps/server/src/modules/agent/acp/preprocessor.ts)、[PreparedPromptMessage.tsx](apps/web/src/components/Messages/PreparedPromptMessage.tsx)、[useAgentStream.ts](apps/web/src/hooks/useAgentStream.ts)、[chatTypes.ts](apps/web/src/store/chatTypes.ts)。
+
 ## 2026-06-23 · 外部 Agent：prompt 拆分为 system / user 两段，HST 说明只下发一次
 
 **What Changed**
