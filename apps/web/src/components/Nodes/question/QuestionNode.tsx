@@ -42,8 +42,8 @@ export const QuestionNode = memo(
     const processingRef = useRef<AbortController>();
     const suppressBlurAutoRunRef = useRef(false);
 
-    const inputContent =
-      data.input?.kind === 'text' ? (data.input.content ?? '') : '';
+    const input = (data as any).input;
+    const inputContent = input?.kind === 'text' ? (input.content ?? '') : '';
 
     // ------------------------------------------------------------------
     // Configured external-agent profiles — feeds the `@` mention picker.
