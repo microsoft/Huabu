@@ -7,6 +7,12 @@ import React, {
   useState,
 } from 'react';
 
+import {
+  DEFAULT_IMAGE_MODEL_FAMILY,
+  IMAGE_MODEL_FAMILIES,
+  getImageCapabilities,
+} from '@sediment/shared';
+
 import { Button } from '@/components/Common/Button';
 import { Select } from '@/components/Common/Select';
 import { SettingRow } from '@/components/Common/SettingRow';
@@ -15,7 +21,20 @@ import { toast } from '@/components/Common/Toast';
 import { useLLMStore } from '@/store/llmStore';
 import { copyToClipboard } from '@/utils/io/clipboard';
 
-import type { LLMConfigUpdate, LLMImageConfigUpdate } from '@sediment/shared';
+import type {
+  ImageModelFamily,
+  LLMConfigUpdate,
+  LLMImageConfigUpdate,
+} from '@sediment/shared';
+
+/** Default Azure API version we pre-fill into the Settings input. */
+const DEFAULT_AZURE_IMAGE_API_VERSION = '2025-04-01-preview';
+
+/** Static family options for the model-family dropdown. */
+const IMAGE_MODEL_FAMILY_OPTIONS = IMAGE_MODEL_FAMILIES.map((f) => ({
+  value: f,
+  label: f,
+}));
 
 /**
  * Debounce a save callback so the parent can call it on every keystroke
@@ -101,6 +120,9 @@ export const LLMSettings: React.FC = () => {
   // second image provider later is purely a data change.
   const [imgEndpoint, setImgEndpoint] = useState('');
   const [imgDeployment, setImgDeployment] = useState('');
+  const [imgModelFamily, setImgModelFamily] = useState<ImageModelFamily>(
+    DEFAULT_IMAGE_MODEL_FAMILY,
+  );
   const [imgApiVersion, setImgApiVersion] = useState('');
   const [imgApiKey, setImgApiKey] = useState('');
   const [imgQuality, setImgQuality] = useState<
@@ -125,18 +147,37 @@ export const LLMSettings: React.FC = () => {
   }, [isAzure, llmConfig?.baseUrl, llmConfig?.model, llmConfig?.apiVersion]);
 
   // Sync image fields with the persisted image config.
+  //
+  // `apiVersion` is pre-filled with {@link DEFAULT_AZURE_IMAGE_API_VERSION}
+  // when nothing has been saved yet — the API requires `2025-04-01-preview`
+  // or later, and asking the user to look it up adds friction.
+  // `modelFamily` falls back to {@link DEFAULT_IMAGE_MODEL_FAMILY}
+  // which matches the server-side default in `getAzureImageConfig`.
   useEffect(() => {
     setImgEndpoint(llmImageConfig?.baseUrl ?? '');
     setImgDeployment(llmImageConfig?.model ?? '');
-    setImgApiVersion(llmImageConfig?.apiVersion ?? '');
-    setImgQuality(llmImageConfig?.quality ?? 'low');
+    setImgModelFamily(
+      llmImageConfig?.modelFamily ?? DEFAULT_IMAGE_MODEL_FAMILY,
+    );
+    setImgApiVersion(
+      llmImageConfig?.apiVersion ?? DEFAULT_AZURE_IMAGE_API_VERSION,
+    );
     setImgApiKey('');
   }, [
     llmImageConfig?.baseUrl,
     llmImageConfig?.model,
+    llmImageConfig?.modelFamily,
     llmImageConfig?.apiVersion,
-    llmImageConfig?.quality,
   ]);
+
+  // Image quality default depends on the selected family (see
+  // shared capability registry). Recompute whenever the family or
+  // persisted quality changes so the dropdown selection lines up with
+  // what the server will actually use.
+  useEffect(() => {
+    const caps = getImageCapabilities(imgModelFamily);
+    setImgQuality(llmImageConfig?.quality ?? caps.defaultQuality);
+  }, [imgModelFamily, llmImageConfig?.quality]);
 
   // Surface store errors as transient toasts.
   useEffect(() => {
@@ -274,7 +315,7 @@ export const LLMSettings: React.FC = () => {
               />
             </SettingRow>
 
-            <SettingRow title="API Version" description="Optional.">
+            <SettingRow title="API Version">
               <input
                 type="text"
                 placeholder="e.g. 2025-04-01-preview"
@@ -439,7 +480,7 @@ export const LLMSettings: React.FC = () => {
         )}
       </SettingSection>
 
-      <SettingSection title="Image Provider" collapsible>
+      <SettingSection title="Image Provider" collapsible defaultCollapsed>
         <SettingRow title="Provider">
           <div className="w-44">
             <Select
@@ -465,10 +506,27 @@ export const LLMSettings: React.FC = () => {
           />
         </SettingRow>
 
-        <SettingRow title="Deployment">
+        <SettingRow title="Model">
+          <div className="w-56">
+            <Select
+              options={IMAGE_MODEL_FAMILY_OPTIONS}
+              value={imgModelFamily}
+              onChange={(v) => {
+                const next = v as ImageModelFamily;
+                setImgModelFamily(next);
+                saveImage({ modelFamily: next });
+              }}
+            />
+          </div>
+        </SettingRow>
+
+        <SettingRow
+          title="Deployment"
+          description="Optional. Override only if your Azure deployment name differs from the model above."
+        >
           <input
             type="text"
-            placeholder="e.g. gpt-image-1"
+            placeholder={imgModelFamily}
             value={imgDeployment}
             onChange={(e) => {
               const v = e.target.value;
@@ -482,7 +540,7 @@ export const LLMSettings: React.FC = () => {
         <SettingRow title="API Version" description="Optional.">
           <input
             type="text"
-            placeholder="e.g. 2025-04-01-preview"
+            placeholder="Use 2025-04-01-preview or later."
             value={imgApiVersion}
             onChange={(e) => {
               const v = e.target.value;
@@ -496,12 +554,16 @@ export const LLMSettings: React.FC = () => {
         <SettingRow title="Image Quality">
           <div className="w-56">
             <Select
-              options={[
-                { value: 'low', label: 'Low (fastest)' },
-                { value: 'medium', label: 'Medium' },
-                { value: 'high', label: 'High (best)' },
-                { value: 'auto', label: 'Auto (Azure decides)' },
-              ]}
+              options={getImageCapabilities(imgModelFamily).qualities.map(
+                (q) => {
+                  const isDefault =
+                    q === getImageCapabilities(imgModelFamily).defaultQuality;
+                  return {
+                    value: q,
+                    label: isDefault ? `${q} (default)` : q,
+                  };
+                },
+              )}
               value={imgQuality}
               onChange={(v) => {
                 const next = v as 'low' | 'medium' | 'high' | 'auto';

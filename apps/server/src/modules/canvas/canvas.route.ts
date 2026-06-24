@@ -106,12 +106,18 @@ function toMessage(error: unknown): string {
 /**
  * Node types that have a sibling `nodes/<safe(label)>.md`. The body is
  * markdown content for note/text/web/pdf and empty for
- * image/video/frame/question (which only carry frontmatter).
+ * image/video/frame/question/sketch (which only carry frontmatter).
  *
  * `question` is included so its auto-generated label / labelSource
  * (written by the preprocess pipeline via `patchNodeSilent` on the
  * client) survives canvas reloads — the structure PUT strips those
  * fields, so the sidecar is the only persistence path.
+ *
+ * `sketch` is included for the same reason: the canvas engine
+ * auto-stamps a `Sketch N` label on `CREATE_NODES` and the user can
+ * rename it from the layer panel. Stroke geometry stays inline in
+ * `canvas.json` — only the label / labelSource live in the sidecar's
+ * frontmatter.
  */
 const MD_BACKED_NODE_TYPES = new Set([
   'note',
@@ -124,6 +130,7 @@ const MD_BACKED_NODE_TYPES = new Set([
   'audio',
   'frame',
   'question',
+  'sketch',
 ]);
 
 /** Subset that carries a textual body in the markdown. */

@@ -25,6 +25,11 @@ import {
 } from '@earendil-works/pi-ai';
 
 import {
+  DEFAULT_IMAGE_MODEL_FAMILY,
+  isImageModelFamily,
+} from '@sediment/shared';
+
+import {
   getCopilotApiKey,
   verifyOAuthCredentials,
   applyCopilotModelOverrides,
@@ -41,6 +46,7 @@ import type {
   ProviderStreamOptions,
 } from '@earendil-works/pi-ai';
 import type {
+  ImageModelFamily,
   LLMConfig,
   LLMConfigUpdate,
   LLMImageConfig,
@@ -160,6 +166,14 @@ interface ImageConfigPersisted {
   provider?: string;
   baseUrl?: string;
   model?: string;
+  /**
+   * Model family this deployment belongs to (see
+   * `@sediment/shared/llm/image-capabilities`). When absent on a
+   * legacy entry we default to `gpt-image-2` at read time — that
+   * matches the only image model Sediment shipped before this field
+   * was introduced.
+   */
+  modelFamily?: ImageModelFamily;
   apiVersion?: string;
   apiKey?: string;
   quality?: 'low' | 'medium' | 'high' | 'auto';
@@ -746,6 +760,7 @@ export function getImageConfig(): LLMImageConfig {
     authenticated: !!image.apiKey,
     ...(image.baseUrl ? { baseUrl: image.baseUrl } : {}),
     ...(image.model ? { model: image.model } : {}),
+    ...(image.modelFamily ? { modelFamily: image.modelFamily } : {}),
     ...(image.apiVersion ? { apiVersion: image.apiVersion } : {}),
     ...(image.quality ? { quality: image.quality } : {}),
   };
@@ -772,6 +787,9 @@ export function setImageConfig(update: LLMImageConfigUpdate): LLMImageConfig {
   if (update.model !== undefined) {
     if (update.model) next.model = update.model;
     else delete next.model;
+  }
+  if (update.modelFamily !== undefined) {
+    next.modelFamily = update.modelFamily;
   }
   if (update.apiVersion !== undefined) {
     if (update.apiVersion) next.apiVersion = update.apiVersion;
@@ -807,8 +825,14 @@ export function getAzureImageConfig(): {
   deployment: string;
   apiKey: string;
   apiVersion: string;
-  /** Default quality (`'low' | 'medium' | 'high' | 'auto'`). */
-  quality: 'low' | 'medium' | 'high' | 'auto';
+  /** Model family driving capability lookups (sizes / qualities). */
+  modelFamily: ImageModelFamily;
+  /**
+   * Optional default quality override from Settings. When absent the
+   * caller should fall back to the family's `defaultQuality` from the
+   * shared capability registry.
+   */
+  quality?: 'low' | 'medium' | 'high' | 'auto';
 } {
   const image = loadPersistedStore().imageConfig;
   const provider = image?.provider ?? '';
@@ -818,13 +842,21 @@ export function getAzureImageConfig(): {
     );
   }
   const endpoint = image?.baseUrl?.replace(/\/+$/, '') ?? '';
-  const deployment = image?.model?.trim() ?? '';
+  const explicitDeployment = image?.model?.trim() ?? '';
   const apiKey = image?.apiKey ?? '';
   const apiVersion = image?.apiVersion?.trim() ?? '';
-  const quality = image?.quality ?? 'low';
+  // Legacy configs (saved before `modelFamily` existed) all targeted
+  // gpt-image-2, so that's the safe default — no heuristic guessing
+  // from the deployment string is required.
+  const modelFamily: ImageModelFamily = isImageModelFamily(image?.modelFamily)
+    ? image!.modelFamily!
+    : DEFAULT_IMAGE_MODEL_FAMILY;
+  // Most users name their Azure deployment after the model itself, so
+  // when the Deployment field is blank we fall back to the model family
+  // name. Users with custom deployment names still set it explicitly.
+  const deployment = explicitDeployment || modelFamily;
   const missing: string[] = [];
   if (!endpoint) missing.push('Endpoint');
-  if (!deployment) missing.push('Deployment');
   if (!apiKey) missing.push('API Key');
   if (!apiVersion) missing.push('API Version');
   if (missing.length > 0) {
@@ -832,7 +864,26 @@ export function getAzureImageConfig(): {
       `Azure image generation not configured. Open Settings → Image Provider → Azure OpenAI and fill in: ${missing.join(', ')}.`,
     );
   }
-  return { endpoint, deployment, apiKey, apiVersion, quality };
+  return {
+    endpoint,
+    deployment,
+    apiKey,
+    apiVersion,
+    modelFamily,
+    ...(image?.quality ? { quality: image.quality } : {}),
+  };
+}
+
+/**
+ * Best-effort read of the currently configured image model family,
+ * for callers that only need capability metadata (e.g. dynamic
+ * `generate_image` tool-description injection) and must not throw
+ * when image generation is unconfigured. Falls back to
+ * {@link DEFAULT_IMAGE_MODEL_FAMILY}.
+ */
+export function getConfiguredImageModelFamily(): ImageModelFamily {
+  const family = loadPersistedStore().imageConfig?.modelFamily;
+  return isImageModelFamily(family) ? family : DEFAULT_IMAGE_MODEL_FAMILY;
 }
 
 /**

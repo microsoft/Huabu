@@ -4,8 +4,9 @@
  * `parts`/`segments` array) on the left and the right pane renders it
  * through the real {@link MessageList} dispatch — the same renderer the
  * live chat panel uses — so every part variant (text, thinking, plan,
- * tool: generic / agent_tool / canvas_commands / web_search) is exercised
- * exactly as it would appear in production.
+ * tool: generic / agent_tool / canvas_commands / web_search /
+ * image_generation / snapshot_nodes) is exercised exactly as it would
+ * appear in production.
  *
  * Route: `/playground/tool-calls`
  */
@@ -21,9 +22,18 @@ import type { ChatMessage } from '../store/chatTypes';
 // Shows the accepted shapes: a top-level array of messages, where an
 // assistant turn may carry its parts under either `segments` or `parts`.
 // Ids are optional — they're generated when missing.
+//
+// The sample is intentionally a tour: it exercises every rich-tool
+// variant the renderer dispatches on (generic / image_generation /
+// snapshot_nodes) plus the executing / failed states so visual
+// regressions are obvious. External image URLs (picsum.photos) are
+// used for image_generation / snapshot_nodes previews because the
+// playground has no live canvas to resolve artifact keys against —
+// `resolveArtifactUrl` passes `https://` URLs through unchanged.
 
 const SAMPLE_JSON = JSON.stringify(
   [
+    // ── Section 1: generic ACP tool call ─────────────────────────────
     {
       role: 'user',
       content: 'Read app.ts and tell me what it does.',
@@ -53,6 +63,185 @@ const SAMPLE_JSON = JSON.stringify(
         {
           kind: 'text',
           text: 'It exports `buildApp()`, which constructs the Hono server instance.',
+        },
+      ],
+    },
+
+    // ── Section 2: snapshot_nodes + generate_image (edit mode) ───────
+    {
+      role: 'user',
+      content: 'Snapshot my selected sketches and turn them into a watercolor.',
+    },
+    {
+      role: 'assistant',
+      parts: [
+        {
+          kind: 'thinking',
+          text: 'I need to snapshot the sketches first so the image-edit endpoint can use them as visual references.',
+        },
+        {
+          kind: 'tool',
+          toolCallId: 't-snap-1',
+          title: 'snapshot_nodes',
+          variant: 'snapshot_nodes',
+          status: 'completed',
+          data: {
+            tool: 'snapshot_nodes',
+            status: 'success',
+            data: {
+              nodeIds: ['sketch-a3', 'sketch-b1', 'sketch-c2'],
+              snapshots: [
+                {
+                  src: 'https://picsum.photos/seed/snap-1/512/384',
+                  width: 512,
+                  height: 384,
+                  originNodeIds: ['sketch-a3', 'sketch-b1'],
+                },
+                {
+                  src: 'https://picsum.photos/seed/snap-2/512/384',
+                  width: 512,
+                  height: 384,
+                  originNodeIds: ['sketch-c2'],
+                },
+              ],
+            },
+          },
+        },
+        {
+          kind: 'thinking',
+          text: 'Now I can feed those PNGs into generate_image as references.',
+        },
+        {
+          kind: 'tool',
+          toolCallId: 't-img-1',
+          title: 'generate_image',
+          variant: 'image_generation',
+          status: 'completed',
+          data: {
+            tool: 'generate_image',
+            status: 'success',
+            data: {
+              prompt: 'Reinterpret the sketches as a soft watercolor painting.',
+              size: '1024x1024',
+              quality: 'medium',
+              referenceArtifactSrcs: [
+                'https://picsum.photos/seed/snap-1/512/384',
+                'https://picsum.photos/seed/snap-2/512/384',
+              ],
+              src: 'https://picsum.photos/seed/watercolor/1024/1024',
+              width: 1024,
+              height: 1024,
+              revisedPrompt:
+                'A soft, dreamy watercolor painting reinterpreting the input sketches with pastel washes and visible brush strokes.',
+            },
+          },
+        },
+        {
+          kind: 'text',
+          text: "Here's the watercolor version — drag it onto the canvas if you like it.",
+        },
+      ],
+    },
+
+    // ── Section 3: text-only generate_image (success + executing + failed) ─
+    {
+      role: 'user',
+      content:
+        'Now make a fantasy castle, and also try once with a bad prompt.',
+    },
+    {
+      role: 'assistant',
+      parts: [
+        {
+          kind: 'tool',
+          toolCallId: 't-img-2',
+          title: 'generate_image',
+          variant: 'image_generation',
+          status: 'completed',
+          data: {
+            tool: 'generate_image',
+            status: 'success',
+            data: {
+              prompt:
+                'A grand fantasy castle on a misty mountain at sunset, painted in the style of a matte oil painting.',
+              size: '1536x1024',
+              quality: 'high',
+              src: 'https://picsum.photos/seed/castle/1536/1024',
+              width: 1536,
+              height: 1024,
+            },
+          },
+        },
+        {
+          kind: 'tool',
+          toolCallId: 't-img-3',
+          title: 'generate_image',
+          variant: 'image_generation',
+          status: 'pending',
+          data: {
+            tool: 'generate_image',
+            status: 'success',
+            data: {
+              prompt: 'A cyberpunk fox holding a neon umbrella.',
+              size: '1024x1024',
+              quality: 'low',
+            },
+          },
+        },
+        {
+          kind: 'tool',
+          toolCallId: 't-img-4',
+          title: 'generate_image',
+          variant: 'image_generation',
+          status: 'failed',
+          data: {
+            tool: 'generate_image',
+            status: 'error',
+            error:
+              'Azure image request failed (HTTP 404): The API deployment for this resource does not exist. Common causes: (1) the deployment "gpt-image-1" doesn\'t exist on this Azure resource, (2) the api-version is malformed.',
+          },
+        },
+        {
+          kind: 'text',
+          text: 'The castle is ready; the cyberpunk fox is still rendering, and the third attempt failed because the deployment is misconfigured.',
+        },
+      ],
+    },
+
+    // ── Section 4: snapshot_nodes pending + failed ───────────────────
+    {
+      role: 'user',
+      content: 'Show me the executing / failed snapshot states.',
+    },
+    {
+      role: 'assistant',
+      parts: [
+        {
+          kind: 'tool',
+          toolCallId: 't-snap-2',
+          title: 'snapshot_nodes',
+          variant: 'snapshot_nodes',
+          status: 'pending',
+          data: {
+            tool: 'snapshot_nodes',
+            status: 'success',
+            data: {
+              nodeIds: ['sketch-x', 'sketch-y', 'sketch-z'],
+            },
+          },
+        },
+        {
+          kind: 'tool',
+          toolCallId: 't-snap-3',
+          title: 'snapshot_nodes',
+          variant: 'snapshot_nodes',
+          status: 'failed',
+          data: {
+            tool: 'snapshot_nodes',
+            status: 'error',
+            error:
+              'Node "sketch-deleted" not found on this canvas — it may have been deleted between the selection and the tool call.',
+          },
         },
       ],
     },

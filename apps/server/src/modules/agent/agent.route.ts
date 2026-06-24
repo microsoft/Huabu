@@ -12,8 +12,6 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { encode } from 'gpt-tokenizer';
-
 import {
   AGENT_SSE_EVENTS,
   agentCanvasIdQuerySchema,
@@ -29,6 +27,7 @@ import {
 } from '../../prompt/index.js';
 import { runAcpAgent } from '../agent/acp/service.js';
 import { runAgent } from '../agent/agent.service.js';
+import { getLLMModel } from '../agent/llm.js';
 import { readWorkspaceMemory } from '../agent/memory/index.js';
 import { buildAgentNodeRef } from '../agent/node-ref.js';
 import { isUserInvokableSkill } from '../agent/skills.route.js';
@@ -60,6 +59,8 @@ import type {
   ChatHistoryResponse,
   ContextTokensResponse,
   ExternalAgentPrompt,
+  ImageGenerationData,
+  SnapshotNodesData,
   StopThreadResponse,
   ToolResponse,
   WebSearchToolResponse,
@@ -429,21 +430,20 @@ function collectSelectedNodeRefs(nodes: WireSelectionNode[]): AgentNodeRef[] {
 }
 
 /**
- * Flatten the wire selection (frame children included) into a unique
- * id list. Used to materialise the `[SYSTEM selectedNodeIds:[...]]`
- * metadata tag on the persisted user message — the same selection
- * info already lives in `canvasContext.selectedNodes`, so the wire
- * never has to carry the id list separately.
+ * Collect the ids the user **explicitly selected** on the canvas
+ * (top-level entries only — frame children are intentionally skipped).
+ * Used to materialise the `[SYSTEM selectedNodeIds:[...]]` metadata
+ * tag on the persisted user message so reloaded history renders the
+ * same NodeRef chips the live composer showed at submit time
+ * (`SelectedNodeRefs` likewise only renders `n.selected` top-level
+ * nodes). The richer subtree (frame children w/ labels) is still
+ * available to the LLM via `collectSelectedNodeRefs` / the wire
+ * `canvasContext.selectedNodes`, which this list deliberately does
+ * not duplicate.
  */
 function collectSelectedNodeIds(nodes: WireSelectionNode[]): string[] {
   const seen = new Set<string>();
-  const walk = (list: WireSelectionNode[]) => {
-    for (const n of list) {
-      seen.add(n.id);
-      if (n.children) walk(n.children);
-    }
-  };
-  walk(nodes);
+  for (const n of nodes) seen.add(n.id);
   return Array.from(seen);
 }
 
@@ -556,6 +556,16 @@ function parseToolResultText(
       'status' in parsed
     ) {
       return parsed as ToolResponse<string, unknown>;
+    }
+    // `snapshot_nodes` returns a bare array; wrap it under `snapshots`
+    // so the rich `SnapshotNodesToolPart.data.data` carries a stable
+    // object shape (matching what the live stream merger produces).
+    if (toolName === 'snapshot_nodes' && Array.isArray(parsed)) {
+      return {
+        tool: toolName,
+        status: 'success',
+        data: { snapshots: parsed },
+      };
     }
     return {
       tool: toolName,
@@ -837,6 +847,34 @@ function buildHistoryItems(
                   : {}),
               });
               break;
+            case 'image_generation':
+              parts.push({
+                ...base,
+                variant: 'image_generation',
+                ...(toolData
+                  ? {
+                      data: toolData as ToolResponse<
+                        'generate_image',
+                        ImageGenerationData
+                      >,
+                    }
+                  : {}),
+              });
+              break;
+            case 'snapshot_nodes':
+              parts.push({
+                ...base,
+                variant: 'snapshot_nodes',
+                ...(toolData
+                  ? {
+                      data: toolData as ToolResponse<
+                        'snapshot_nodes',
+                        SnapshotNodesData
+                      >,
+                    }
+                  : {}),
+              });
+              break;
             case 'generic':
               parts.push({ ...base, variant: 'generic' });
               break;
@@ -999,6 +1037,13 @@ const agentRoutes: FastifyPluginAsync = async (
   /**
    * GET /agent/context-tokens/:threadId
    * Returns the current context token count for a conversation thread.
+   *
+   * Prefers the provider's authoritative `usage` from the last
+   * `AssistantMessage` (input + output = exact size of the context the
+   * next turn will re-submit, including system prompt, tool schemas,
+   * role overhead and JSON framing). Falls back to a tokenizer estimate
+   * of stored message text only on cold start, before any assistant
+   * turn has run.
    */
   fastify.get<{
     Params: { threadId: string };
@@ -1013,46 +1058,77 @@ const agentRoutes: FastifyPluginAsync = async (
       });
     }
     const { canvasId } = parsedQuery.data;
-    const CONTEXT_WINDOW = 128_000;
 
     if (!threadId || threadId.trim().length === 0) {
       return reply.code(400).send({ message: 'threadId is required' });
     }
 
-    const context = loadContext(threadId, canvasId);
-    if (!context) {
-      return reply.send({ contextTokens: 0, contextWindow: CONTEXT_WINDOW });
+    // Resolve the real window of the currently bound model. Fall back
+    // to a conservative GPT-4o-class default if model resolution fails
+    // (e.g. unconfigured provider on first run).
+    let contextWindow = 128_000;
+    try {
+      const window = getLLMModel().contextWindow;
+      if (typeof window === 'number' && window > 0) contextWindow = window;
+    } catch {
+      /* keep fallback */
     }
 
-    // Count tokens from system prompt + all messages, including non-text blocks
-    const textParts: string[] = [];
-    if (context.systemPrompt) {
-      textParts.push(context.systemPrompt);
+    const context = loadContext(threadId, canvasId);
+    if (!context) {
+      return reply.send({
+        contextTokens: 0,
+        contextWindow,
+        cost: null,
+        fromProvider: false,
+      });
     }
+
+    // ---- Preferred path: provider-reported usage ----
+    let lastUsage: AssistantMessage['usage'] | null = null;
+    let totalCost = 0;
+    let hasCost = false;
     for (const msg of context.messages) {
-      if (typeof msg.content === 'string') {
-        textParts.push(msg.content);
-      } else if (Array.isArray(msg.content)) {
-        for (const part of msg.content) {
-          if (typeof part === 'object' && part !== null && 'type' in part) {
-            const typed = part as { type: string; text?: string };
-            if (typed.type === 'text' && typed.text) {
-              textParts.push(typed.text);
-            } else {
-              // Include non-text blocks (toolCall, thinking, etc.) via serialization
-              try {
-                textParts.push(JSON.stringify(part));
-              } catch {
-                /* skip */
-              }
-            }
-          }
+      if (msg.role !== 'assistant') continue;
+      const am = msg as AssistantMessage;
+      if (am.usage) {
+        lastUsage = am.usage;
+        const c = am.usage.cost?.total;
+        if (typeof c === 'number' && Number.isFinite(c)) {
+          totalCost += c;
         }
       }
     }
+    // Only surface cost when at least one turn billed > 0. Providers
+    // without per-call billing (e.g. GitHub Copilot OAuth, self-hosted
+    // OSS models) report 0 across the board; hiding the field is
+    // truer than showing "$0.0000".
+    hasCost = totalCost > 0;
 
-    const contextTokens = encode(textParts.join('\n')).length;
-    return reply.send({ contextTokens, contextWindow: CONTEXT_WINDOW });
+    if (lastUsage) {
+      // `input` already includes system prompt + tool schemas + every
+      // prior message as the provider tokenizes them; adding `output`
+      // gives the size of the assistant turn that will be re-sent on
+      // the next call. This matches what the provider will bill.
+      const contextTokens = (lastUsage.input ?? 0) + (lastUsage.output ?? 0);
+      return reply.send({
+        contextTokens,
+        contextWindow,
+        cost: hasCost ? { amount: totalCost, currency: 'USD' } : null,
+        fromProvider: true,
+      });
+    }
+
+    // Cold start (no assistant turn yet) — no authoritative number
+    // exists. Return 0 with `fromProvider: false`; the UI renders an
+    // empty ring rather than a misleading tokenizer estimate that
+    // would ignore tool schemas, role overhead and JSON framing.
+    return reply.send({
+      contextTokens: 0,
+      contextWindow,
+      cost: null,
+      fromProvider: false,
+    });
   });
 
   /**

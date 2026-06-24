@@ -625,9 +625,8 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       <div className="flex h-full flex-col gap-2 overflow-visible pt-3">
         <MessageList
           messages={viewingSketchCluster ? sketchMessages : messages}
-          isLoading={
-            viewingSketchCluster ? false : isLoading || !isHistoryLoaded
-          }
+          isLoading={viewingSketchCluster ? false : isLoading}
+          isHistoryLoading={!viewingSketchCluster && !isHistoryLoaded}
           hideAIActions={!!viewingSketchCluster}
           onIntentReselect={handleIntentReselect}
           onRetry={() => {

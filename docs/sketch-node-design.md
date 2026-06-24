@@ -20,13 +20,13 @@
 
 ### 2.1 数据落盘
 
-| 节点类型                                                      | canvas.json 内 inline | 同名 `nodes/<safe(label)>.md` | 备注                                                                                 |
-| ------------------------------------------------------------- | --------------------- | ----------------------------- | ------------------------------------------------------------------------------------ |
-| `note` / `text` / `web` / `pdf` / `image` / `video` / `frame` | 元数据                | ✅ 有                         | 文本类有 markdown body；媒体类只有 frontmatter                                       |
-| `sketch`                                                      | **全部数据**          | ❌ 无                         | `points: number[][]` / `initialSize` / `executed` 等 inline 进 `state.nodes[i].data` |
-| `question`                                                    | 元数据 + input/status | ❌ 无                         | 同上                                                                                 |
+| 节点类型                                                      | canvas.json 内 inline | 同名 `nodes/<safe(label)>.md` | 备注                                                                                                                               |
+| ------------------------------------------------------------- | --------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `note` / `text` / `web` / `pdf` / `image` / `video` / `frame` | 元数据                | ✅ 有                         | 文本类有 markdown body；媒体类只有 frontmatter                                                                                     |
+| `sketch`                                                      | **笔迹几何**          | ✅ 有（frontmatter-only）     | `points: number[][]` / `initialSize` / `executed` 等幾何数据 inline 在 `state.nodes[i].data`；sidecar 只持久化 label / labelSource |
+| `question`                                                    | 元数据 + input/status | ✅ 有（frontmatter-only）     | 同上，label / labelSource 走 sidecar                                                                                               |
 
-`MD_BACKED_NODE_TYPES` 白名单见 [canvas.route.ts:97-108](../apps/server/src/modules/canvas/canvas.route.ts#L97-L108)。Sketch **故意**不在里面：笔迹是几何数据，没有 markdown 文本，没有 frontmatter，给 LLM `read("nodes/<label>.md")` 拿到也是空，所以 inline 是合理选择。落盘体积：单笔草图 ~ 0.5–3 KB，对 canvas.json 影响可忽略。
+`MD_BACKED_NODE_TYPES` 白名单见 [canvas.route.ts](../apps/server/src/modules/canvas/canvas.route.ts) `MD_BACKED_NODE_TYPES`。Sketch 以 frontmatter-only sidecar 参与：笔迹几何仍然 inline 在 `canvas.json`，sidecar 仅用于持久化 canvas-engine 自动生成（或用户手动改名）的 `label` / `labelSource`——同 structure PUT 会剧脱这些字段，不走 sidecar 则刷新后会丢。模式与 `question` / `image` / `video` / `frame` 一致。落盘体积：单笔草图 ~ 0.5–3 KB，对 canvas.json 影响可忽略。
 
 ### 2.2 已有基础设施（Phase 1 直接复用）
 

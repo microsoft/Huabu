@@ -51,8 +51,29 @@ export interface ArtifactUploadResponse {
 
 /** Response for `GET /api/agent/context-tokens/:threadId`. */
 export interface ContextTokensResponse {
+  /**
+   * Tokens the provider reported as `prompt_tokens` on the last LLM
+   * call (`AssistantMessage.usage.input + .output`) — i.e. the true
+   * size of the conversation context that will be re-submitted on the
+   * next turn, including system prompt, tool schemas, role overhead
+   * and JSON framing. Falls back to a tokenizer estimate of the
+   * stored message text only when no assistant turn exists yet.
+   */
   contextTokens: number;
+  /** Effective context window of the currently bound model, in tokens. */
   contextWindow: number;
+  /**
+   * Cumulative USD cost for this thread, summed from
+   * `AssistantMessage.usage.cost.total` across all turns. `null` when
+   * the provider does not report cost (e.g. self-hosted OSS models).
+   */
+  cost?: { amount: number; currency: 'USD' } | null;
+  /**
+   * `true` when `contextTokens` is derived from provider-reported
+   * usage; `false` when it is a tokenizer estimate (no assistant turn
+   * yet). The ring uses this to decide whether to trust the number.
+   */
+  fromProvider: boolean;
 }
 
 /** Response for `POST /api/agent/stop/:threadId`. */

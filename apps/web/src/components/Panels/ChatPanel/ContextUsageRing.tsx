@@ -1,13 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { agentApi } from '@/api/agent';
 import { Tooltip } from '@/components/Common/Tooltip';
 import useCanvasStore from '@/store/canvasStore';
 import { selectCurrentMessages, useChatStore } from '@/store/chatStore';
-import { countTokens } from '@/utils/tokenCount';
-
-/** Fallback context window in tokens — used only for the built-in pi-agent path. */
-const DEFAULT_CONTEXT_WINDOW = 128_000;
 
 /**
  * Authoritative usage reported by an external (ACP) agent itself.
@@ -51,44 +47,45 @@ function describeArc(
 // ==================== Component ====================
 
 interface ContextUsageRingProps {
-  /** Current draft text from the input */
-  draftText?: string;
   /** Whether the agent is currently streaming */
   isStreaming?: boolean;
   /**
    * Authoritative usage supplied by the bound agent.
    *
-   * - `undefined` (default): internal pi-agent binding — fetch token
-   *   count from `/agent/context-tokens` and use the GPT-4o window.
+   * - `undefined` (default): internal pi-agent binding — fetch usage
+   *   from `/agent/context-tokens`, which returns the provider's own
+   *   `usage.prompt_tokens + .completion_tokens` from the last turn.
    * - `null`: external (ACP) binding but no usage reported yet — the
-   *   internal fetch returns 0 and the GPT-4o window is wrong, so the
-   *   ring renders nothing rather than show a misleading value.
-   * - `{used, size}`: external binding with agent-reported usage; these
-   *   numbers drive the history arc and total budget.
+   *   ring renders nothing.
+   * - `{used, size}`: external binding with agent-reported usage.
    */
   usageOverride?: ContextUsageOverride | undefined;
 }
 
 /**
- * Circular progress ring showing context window usage.
- * - Red arc: tokens already consumed by the conversation history
- * - Orange arc: estimated tokens for the current input (draft + selected nodes)
+ * Circular progress ring showing the provider's authoritative context
+ * window usage. Only renders a filled arc when the provider has
+ * reported real `usage` numbers — never extrapolates from a local
+ * tokenizer, because that systematically undercounts tool schemas,
+ * role overhead and JSON framing.
  */
 export const ContextUsageRing = ({
-  draftText = '',
   isStreaming,
   usageOverride,
 }: ContextUsageRingProps) => {
   const messages = useChatStore(selectCurrentMessages);
   const threadId = useChatStore((s) => s.threadId);
-  const pendingAttachments = useChatStore((s) => s.pendingAttachments);
   const canvasId = useCanvasStore((s) => s.canvasId);
-  const nodes = useCanvasStore((s) => s.nodes);
 
   const useInternalFetch = usageOverride === undefined;
 
-  // ---- Backend context token count (internal binding only) ----
-  const [internalTokens, setInternalTokens] = useState(0);
+  // ---- Backend context usage (internal binding only) ----
+  const [internalUsage, setInternalUsage] = useState<{
+    tokens: number;
+    window: number;
+    cost: { amount: number; currency: string } | null;
+    fromProvider: boolean;
+  } | null>(null);
   const fetchIdRef = useRef(0);
 
   const fetchContextTokens = useCallback(() => {
@@ -97,9 +94,13 @@ export const ContextUsageRing = ({
     agentApi
       .fetchContextTokens(threadId, canvasId ?? undefined)
       .then((res) => {
-        if (id === fetchIdRef.current) {
-          setInternalTokens(res.contextTokens);
-        }
+        if (id !== fetchIdRef.current) return;
+        setInternalUsage({
+          tokens: res.contextTokens,
+          window: res.contextWindow,
+          cost: res.cost ?? null,
+          fromProvider: res.fromProvider ?? false,
+        });
       })
       .catch(() => {
         /* ignore */
@@ -113,73 +114,38 @@ export const ContextUsageRing = ({
     fetchContextTokens();
   }, [useInternalFetch, fetchContextTokens, messages.length, isStreaming]);
 
-  // ---- Frontend estimated input tokens ----
-  const estimatedInputTokens = useMemo(() => {
-    let total = 0;
-
-    // Draft text
-    if (draftText.trim()) {
-      total += countTokens(draftText);
-    }
-
-    // Pending attachments — approximate server-side wrapper formatting
-    for (const att of pendingAttachments) {
-      let attachmentText = '';
-      if (att.content) {
-        const sourceLabel = att.label ?? 'attachment';
-        attachmentText += `[Extracted text from ${sourceLabel}]:\n${att.content}\n`;
-      }
-      if (att.label) {
-        attachmentText += `[Attached ${att.type}: ${att.label}]\n`;
-      }
-      if (attachmentText) {
-        total += countTokens(attachmentText);
-      }
-    }
-
-    // Selected nodes — approximate "[Selected Nodes]\n${JSON.stringify(...)}"
-    const selectedNodes = nodes.filter((n) => n.selected);
-    const selectionPayload = selectedNodes
-      .map((node) => {
-        const data = node.data as Record<string, unknown> | undefined;
-        const content = data?.content;
-        const label = data?.label;
-        const hasContent = typeof content === 'string' && content.length > 0;
-        const hasLabel = typeof label === 'string' && label.length > 0;
-        if (!hasContent && !hasLabel) return null;
-        return {
-          id: node.id,
-          ...(hasLabel ? { label: label as string } : {}),
-          ...(hasContent ? { content: content as string } : {}),
-        };
-      })
-      .filter((entry) => entry !== null);
-    if (selectionPayload.length > 0) {
-      total += countTokens(
-        `[Selected Nodes]\n${JSON.stringify(selectionPayload, null, 2)}`,
-      );
-    }
-
-    return total;
-  }, [draftText, pendingAttachments, nodes]);
-
-  // External binding hasn't reported usage yet — any number we could
-  // show would be a guess, so render nothing until the agent pushes.
+  // External binding hasn't reported usage yet — render nothing.
   if (usageOverride === null) {
     return null;
   }
 
+  // Internal binding hasn't received a provider-reported turn yet —
+  // render nothing. We refuse to show estimated numbers.
+  if (useInternalFetch && (!internalUsage || !internalUsage.fromProvider)) {
+    return null;
+  }
+
   // ---- Rendering ----
-  const actualTokens = usageOverride ? usageOverride.used : internalTokens;
+  const usedTokens = usageOverride
+    ? usageOverride.used
+    : (internalUsage?.tokens ?? 0);
   const contextWindow = usageOverride
     ? usageOverride.size
-    : DEFAULT_CONTEXT_WINDOW;
-  const cost = usageOverride?.cost ?? null;
-  const projectedTotal = actualTokens + estimatedInputTokens;
-  const safeWindow = contextWindow > 0 ? contextWindow : DEFAULT_CONTEXT_WINDOW;
-  const actualRatio = Math.min(actualTokens / safeWindow, 1);
-  const projectedRatio = Math.min(projectedTotal / safeWindow, 1);
-  const percentage = Math.round(projectedRatio * 100);
+    : (internalUsage?.window ?? 0);
+  // Hide cost rows that are missing or exactly $0 — typical for
+  // subscription/OAuth providers (GitHub Copilot) and self-hosted
+  // models where pi-ai's price table is 0. Showing "$0.0000" there is
+  // misleading.
+  const rawCost = usageOverride?.cost ?? internalUsage?.cost ?? null;
+  const cost = rawCost && rawCost.amount > 0 ? rawCost : null;
+
+  // Without a valid window we have no denominator to draw against.
+  if (contextWindow <= 0) {
+    return null;
+  }
+
+  const ratio = Math.min(usedTokens / contextWindow, 1);
+  const percentage = Math.round(ratio * 100);
 
   // SVG parameters
   const size = 16;
@@ -187,10 +153,7 @@ export const ContextUsageRing = ({
   const radius = (size - strokeWidth) / 2;
   const cx = size / 2;
   const cy = size / 2;
-
-  // Arc angles (0–360)
-  const actualEnd = actualRatio * 360;
-  const projectedEnd = projectedRatio * 360;
+  const arcEnd = ratio * 360;
 
   const formatTokens = (n: number) => {
     if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
@@ -200,22 +163,17 @@ export const ContextUsageRing = ({
   const tooltipContent = (
     <div className="space-y-0.5 text-xs">
       <div>
-        History: <strong>{formatTokens(actualTokens)}</strong>
-      </div>
-      {estimatedInputTokens > 0 && (
-        <div>
-          Pending: <strong>~{formatTokens(estimatedInputTokens)}</strong>
-        </div>
-      )}
-      <div>
-        Total: {formatTokens(projectedTotal)} / {formatTokens(safeWindow)} (
-        {percentage}%)
+        Context:{' '}
+        <strong>
+          {formatTokens(usedTokens)} / {formatTokens(contextWindow)}
+        </strong>{' '}
+        ({percentage}%)
       </div>
       {cost && (
         <div>
           Cost:{' '}
           <strong>
-            {cost.amount.toFixed(4)} {cost.currency}
+            ${cost.amount.toFixed(4)} {cost.currency}
           </strong>
         </div>
       )}
@@ -226,7 +184,7 @@ export const ContextUsageRing = ({
     <Tooltip content={tooltipContent}>
       <span
         tabIndex={0}
-        aria-label={`Context usage ${formatTokens(projectedTotal)} of ${formatTokens(safeWindow)} tokens, ${percentage} percent`}
+        aria-label={`Context usage ${formatTokens(usedTokens)} of ${formatTokens(contextWindow)} tokens, ${percentage} percent`}
         className="inline-flex cursor-default items-center justify-center focus:outline-none"
       >
         <svg
@@ -244,20 +202,10 @@ export const ContextUsageRing = ({
             strokeWidth={strokeWidth}
             className="stroke-edge-default"
           />
-          {/* Estimated input arc (orange) — continues after the red arc */}
-          {estimatedInputTokens > 0 && projectedEnd > actualEnd && (
+          {/* Used context arc — starts at 12 o'clock */}
+          {usedTokens > 0 && (
             <path
-              d={describeArc(cx, cy, radius, actualEnd, projectedEnd)}
-              fill="none"
-              strokeWidth={strokeWidth}
-              strokeLinecap="round"
-              className="stroke-fg-subtle"
-            />
-          )}
-          {/* Actual context arc (red) — starts at 12 o'clock */}
-          {actualTokens > 0 && (
-            <path
-              d={describeArc(cx, cy, radius, 0, actualEnd)}
+              d={describeArc(cx, cy, radius, 0, arcEnd)}
               fill="none"
               strokeWidth={strokeWidth}
               strokeLinecap="round"

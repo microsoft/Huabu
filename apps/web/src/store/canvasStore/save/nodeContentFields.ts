@@ -40,6 +40,14 @@ export const NODE_CONTENT_KEYS: ReadonlySet<string> = new Set([
  * its auto-generated label / labelSource survive canvas reloads —
  * without this, `patchNodeSilent({label, labelSource})` would only
  * live in memory because the structure PUT strips both fields.
+ *
+ * `sketch` is included for the same reason as `question`: the canvas
+ * engine auto-stamps a `Sketch N` label on creation (and the user can
+ * rename it from the layer panel) but the structure PUT strips
+ * `label` / `labelSource`. Without a sidecar those fields would only
+ * live in memory and the layer panel would show a blank row after
+ * reload. The sidecar is frontmatter-only — stroke geometry stays
+ * inline in `canvas.json`.
  */
 export const MD_BACKED_NODE_TYPES: ReadonlySet<string> = new Set([
   'note',
@@ -52,6 +60,7 @@ export const MD_BACKED_NODE_TYPES: ReadonlySet<string> = new Set([
   'audio',
   'frame',
   'question',
+  'sketch',
 ]);
 
 /**
