@@ -1,13 +1,11 @@
 /**
  * Vitest setup file. Runs before any test file is imported.
  *
- * The test environment is `happy-dom` (see `vitest.config.ts`), which is
- * required because CommonJS modules like `cytoscape-layout-utilities`
- * — pulled in transitively when the shared canvas-engine command
- * registry loads — reference `window` at module-load time. happy-dom
- * supplies a real `window` shim, so no manual polyfill is needed here.
- *
- * Add globally-needed test setup (matchers, mocks) below.
+ * The test environment is `happy-dom` (see `vitest.config.ts`) so the
+ * web tests have access to a real `window` shim — required by browser
+ * APIs that some of our modules touch at import time (DOM-only React
+ * Flow internals, etc.). Add globally-needed test setup (matchers,
+ * mocks) below.
  */
 
 // ---------------------------------------------------------------------------

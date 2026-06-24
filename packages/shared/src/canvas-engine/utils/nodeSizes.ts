@@ -7,8 +7,9 @@
  *  2. `getNodeSize` / `getLayoutNodeSize` — read the rendered dimensions of
  *     an existing `Node`, with priority `measured` → `style` → fallback.
  *
- * Consumed by frameHelper (frame fitting), layout/graphModel (Cola/fCoSE),
- * alignment (align/spread), and the create-node commands.
+ * Consumed by frameHelper (frame fitting), the frame grid layout
+ * (column / row child packing), alignment (align/spread), and the
+ * create-node commands.
  */
 
 import type { NodeSize } from '../../index.js';

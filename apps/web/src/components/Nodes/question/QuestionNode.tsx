@@ -42,7 +42,8 @@ export const QuestionNode = memo(
     const processingRef = useRef<AbortController>();
     const suppressBlurAutoRunRef = useRef(false);
 
-    const inputContent = typeof data.content === 'string' ? data.content : '';
+    const inputContent =
+      data.input?.kind === 'text' ? (data.input.content ?? '') : '';
 
     // ------------------------------------------------------------------
     // Configured external-agent profiles — feeds the `@` mention picker.
@@ -272,7 +273,7 @@ export const QuestionNode = memo(
         // Commit input to store if changed.
         if (contentChanged) {
           updateNodeData(id, {
-            content: trimmed,
+            input: { kind: 'text', content: trimmed },
           });
         }
 
@@ -432,7 +433,7 @@ export const QuestionNode = memo(
 
       if (trimmed !== inputContent) {
         updateNodeData(id, {
-          content: trimmed,
+          input: { kind: 'text', content: trimmed },
         });
       }
 
@@ -488,11 +489,6 @@ export const QuestionNode = memo(
         actions={questionToolbar}
         keepAspectRatio={false}
         allowOverflow
-        // QuestionNode owns its sticky-yellow fill: it is not driven by
-        // the user's accent palette (which collapses border + fill + text
-        // tint into one token for every other node type), so we hand
-        // NodeWrapper the literal sticky color via the dedicated escape
-        // hatch instead of forging it into `data.style.backgroundColor`.
         fillColor={STICKY_BG}
         className={clsx(
           'question-sticky rounded-lg transition-all duration-200',

@@ -105,7 +105,10 @@ export const AgentCanvasCommandSchema = Type.Union([
       Type.String({ description: 'Explicit node ID (node-<uuid>)' }),
     ),
     content: Type.String({ description: 'The question text content' }),
-    position: Type.Optional(PointSchema),
+    position: Type.Optional(PointSchema, {
+      description:
+        'Required. The top-left position of the question node. Although marked optional in the schema for compatibility, you MUST always specify explicit coordinates because the auto-layout engine has been removed.',
+    }),
     size: Type.Optional(NodeSizeSchema),
     parentId: Type.Optional(
       Type.Union([Type.String(), Type.Null()], {

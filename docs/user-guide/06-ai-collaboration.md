@@ -6,7 +6,7 @@ Huabu 的 AI 与你**共享同一块画布**。它能读到画布的整体语境
 
 - **Chat 面板** —— Ask / Operate 两种模式
 - **Question 节点** —— 把 Ask 直接放到画布上（详见 [04 · 节点详解](./04-nodes.md#question问题节点)）
-- **Intent 系统** —— `Ctrl/Cmd+I` 让 AI 推荐"接下来做什么"（详见 [07 · 意图与自动布局](./07-intent-and-auto-layout.md)）
+- **Intent 系统** —— `Ctrl/Cmd+I` 让 AI 推荐"接下来做什么"（详见 [07 · 意图系统](./07-intent.md)）
 
 ---
 
@@ -105,7 +105,7 @@ Huabu 的 AI 与你**共享同一块画布**。它能读到画布的整体语境
 
 ## 从对话到画布
 
-- AI 在对话中创建的节点会带 `chat` 来源标记，自动布局时会跟同线程节点聚集（详见 [07 · 意图与自动布局](./07-intent-and-auto-layout.md#隐式语义边)）
+- AI 在对话中创建的节点会带 `chat` 来源标记，便于后续追溯来自哪个线程
 - 你可以**把对话消息中的内容直接拖到画布**，自动创建一个 Note
 - PDF 选区可以一键作为附件发送给 Chat
 
@@ -119,4 +119,4 @@ Huabu 的 AI 与你**共享同一块画布**。它能读到画布的整体语境
 
 ---
 
-[← 05 · Sources 与知识库](./05-sources-and-knowledge.md) ｜ [07 · 意图与自动布局 →](./07-intent-and-auto-layout.md)
+[← 05 · Sources 与知识库](./05-sources-and-knowledge.md) ｜ [07 · 意图系统 →](./07-intent.md)

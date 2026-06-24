@@ -138,17 +138,20 @@ function materializeAddNode(
 
   // Fallback: no explicit anchor was given (e.g. "Add as note" button in
   // a chat panel). Centre the node in the current viewport so it lands
-  // in the visible area instead of being dropped at (0, 0) and then
-  // shuffled by the force-directed `placeNode` solver in the engine.
-  // Skipped when no viewport centre is available (initial boot before
-  // the React Flow instance registers); the engine fallback then runs.
-  if (!position && ui.viewportCenter) {
-    position = viewportCenterAnchor(
-      input.nodeType,
-      size,
-      ui.viewportCenter,
-      fallbackStaggerIndex,
-    );
+  // in the visible area. The shared engine no longer ships a layout
+  // fallback, so the resolver must always commit to a position — when
+  // `viewportCenter` is also missing (initial boot before React Flow
+  // registers) we default to `(0, 0)` rather than letting the engine
+  // see an undefined slot.
+  if (!position) {
+    position = ui.viewportCenter
+      ? viewportCenterAnchor(
+          input.nodeType,
+          size,
+          ui.viewportCenter,
+          fallbackStaggerIndex,
+        )
+      : { x: 0, y: 0 };
   }
 
   return {
@@ -156,7 +159,7 @@ function materializeAddNode(
       id: nodeId,
       nodeType: input.nodeType,
       data: input.data as never,
-      ...(position && { position }),
+      position,
       ...(size && { size }),
       ...(parentId && { parentId }),
     },

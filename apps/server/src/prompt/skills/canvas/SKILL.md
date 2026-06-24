@@ -84,7 +84,8 @@ Where each node sits, how big it is, which frame it belongs to, what colour it's
 
 ## Gotchas
 
-- **Selected-node context carries `{ id, type, label, filename }`.** Pass the supplied `filename` straight to `read` for the body — do NOT re-derive it from the label. Only when a node is mentioned outside the selection (e.g. it appears in a canvas snapshot but wasn't selected) do you need to build the path yourself via the safeLabel rule above. For spatial / structural info, call `inspect_nodes({ ids: ["<id>"] })`.
+- ** Selection & Position Geometry (CRITICAL):** The selected-node / anchor context **DOES NOT** directly contain position, size, parent frame, or geometry coordinates. If you need to place a new node near, relative to, or offset from a selected or anchor node, **you MUST first call `inspect_nodes({ ids: ["<anchorId>"] })`** (or `get_canvas_outline`) to query its absolute `(x, y)` position and size.
+- **Selected-node context carries `{ id, type, label, filename }`.** Pass the supplied `filename` straight to `read` for the body — do NOT re-derive it from the label. Only when a node is mentioned outside the selection (e.g. it appears in a canvas snapshot but wasn't selected) do you need to build the path yourself via the safeLabel rule above. For spatial / structural info (including position), call `inspect_nodes({ ids: ["<id>"] })`.
 - **No cross-canvas access.** All paths are scoped to the active canvas.
 - **`read` returns image artifacts inline** as vision content; pass the `src` from a node's frontmatter straight to `read`. PDF / video bytes still live under `.artifacts/` but are not readable — their `src` URL is the only handle.
 - Before placing new nodes, anchor on the selection / a referenced node / a focal cluster — never pick coordinates from the global bbox alone, or new nodes land outside the user's viewport.

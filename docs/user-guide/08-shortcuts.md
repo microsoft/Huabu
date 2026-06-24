@@ -28,8 +28,6 @@
 
 > 拖拽节点时 `Space` 与 "切换抓手" 的两种语义按上下文区分：正在拖一个节点时优先解释为 "禁用 reparent"，没有拖拽时仍是切换抓手。
 
-> 自动布局开关没有快捷键，请打开 Header 右上角的设置弹窗（齿轮图标）→ Canvas 区块切换 **Auto Layout**。
-
 ---
 
 ## 层级与分组
@@ -94,4 +92,4 @@
 
 ---
 
-[← 07 · 意图与自动布局](./07-intent-and-auto-layout.md) ｜ [09 · 设置与 LLM →](./09-settings-and-llm.md)
+[← 07 · 意图系统](./07-intent.md) ｜ [09 · 设置与 LLM →](./09-settings-and-llm.md)

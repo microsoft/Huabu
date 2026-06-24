@@ -120,7 +120,6 @@ export default function Frames() {
         </li>
         <li>The frame stops auto-resizing to fit its content.</li>
         <li>The frame stops accepting / releasing children on drag-over.</li>
-        <li>Children are treated as fixed points by auto-layout.</li>
       </ul>
       <P>
         Lock a frame to freeze an arrangement you&apos;ve carefully tuned.

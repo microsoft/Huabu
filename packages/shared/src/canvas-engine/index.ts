@@ -46,20 +46,11 @@ export {
   type CommandDefinition,
 } from './commands/index.js';
 
-// ── Auto-layout ───────────────────────────────────────────────────────────
-// NOTE: We intentionally do NOT re-export the layout coordinator entry
-// point (`placeNode`, `DEFAULT_LAYOUT_OPTIONS`) from this barrel. Those
-// eagerly pull in cytoscape + cytoscape-fcose +
-// cytoscape-layout-utilities, the last of which references `window` at
-// module-load time and crashes Node-only test runs. Command handlers that
-// need them import `./autoLayout/index.js` directly; web/server consumers
-// only need the lighter pieces below.
-export { applyLayoutResult } from './autoLayout/applier.js';
-export type {
-  LayoutOptions,
-  LayoutResult,
-  LayoutGraph,
-} from './autoLayout/types.js';
+// ── Frame grid layout (column / row child packing) ───────────────────────
+// The engine no longer ships a fallback layout for free-form nodes — every
+// caller must commit to an explicit `position` in `CREATE_NODES` /
+// `CREATE_QUESTION`. The only structured layout that still lives here is
+// the column / row child packing for `frame` nodes.
 export {
   applyColumnLayout,
   applyRowLayout,

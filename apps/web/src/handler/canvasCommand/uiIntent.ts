@@ -68,8 +68,10 @@ export interface AddNodeInput {
    *
    * Providing `placementPoint` is a contract that the caller has chosen
    * the node's position (drag-drop, paste, toolbar click, sketch overlay,
-   * group-into-frame, etc.). Omit it for programmatic / AI creation where
-   * the canvas should pick a slot via force-directed `placeNode`.
+   * group-into-frame, etc.). When omitted the resolver falls back to the
+   * viewport centre (or `(0, 0)` when the canvas is not yet mounted), so
+   * a final explicit position is always emitted in the `CREATE_NODES`
+   * command — the shared engine no longer ships a layout fallback.
    */
   placementPoint?: Point;
 }
@@ -253,10 +255,10 @@ export interface UiResolverState {
    * `dispatchUiIntent` from the live React Flow instance + canvas wrapper
    * rect. Resolvers use it as the anchor when a new node has no explicit
    * `placementPoint` (e.g. "Add as note" from a chat panel), so the node
-   * lands in the visible area instead of being placed by the force-directed
-   * fallback in the shared engine. Undefined when the canvas DOM is not
-   * yet mounted (initial boot) or when the React Flow instance has not
-   * registered yet.
+   * lands in the visible area. Undefined when the canvas DOM is not yet
+   * mounted (initial boot) or when the React Flow instance has not
+   * registered yet — resolvers then default the position to `(0, 0)`
+   * because the shared engine no longer ships a layout fallback.
    */
   viewportCenter?: Point;
 }

@@ -119,8 +119,7 @@ export default function CanvasBasics() {
       <Callout tone="info">
         Frame sizing (hug vs manual) is now controlled per-frame from the Frame
         toolbar, not from a global setting. See{' '}
-        <DocLink href="/docs/concepts/auto-layout">Auto-layout</DocLink> for the
-        details.
+        <DocLink href="/docs/nodes/frames">Frame Node</DocLink> for the details.
       </Callout>
 
       <H2>Selecting & multi-select</H2>
@@ -208,8 +207,7 @@ export default function CanvasBasics() {
       <H3>Locking</H3>
       <P>
         Hover any row in the Layers panel for a lock toggle. Locked nodes
-        can&apos;t be dragged or resized and are treated as fixed points by
-        auto-layout — but their content remains editable.
+        can&apos;t be dragged or resized — but their content remains editable.
       </P>
 
       <H2>Edges</H2>

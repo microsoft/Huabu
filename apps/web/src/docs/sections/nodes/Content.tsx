@@ -3,7 +3,6 @@ import {
   Callout,
   Code,
   CodeBlock,
-  DocLink,
   H2,
   P,
   PageLayout,
@@ -108,14 +107,6 @@ keywords: [transformer, attention, ...]
           node it&apos;s curious about.
         </li>
       </ol>
-
-      <H2>Implicit semantic edges</H2>
-      <P>
-        Auto-layout doesn&apos;t only look at the edges you drew — it also picks
-        up reference relationships between nodes and pulls related ones closer.
-        See the weight table in{' '}
-        <DocLink href="/docs/concepts/auto-layout">Auto-layout</DocLink>.
-      </P>
     </PageLayout>
   );
 }

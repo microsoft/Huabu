@@ -1,6 +1,5 @@
 import { noop, type CommandDefinition } from './types.js';
 import { createId, type CanvasCommand } from '../../index.js';
-import { placeNode } from '../autoLayout/index.js';
 import { normalizeTreeOrder, type NestableNode } from '../frame/index.js';
 import { deduplicateLabel, generateNextLabel } from '../utils/labels.js';
 import { getNodeDefaultSize } from '../utils/nodeSizes.js';
@@ -152,28 +151,17 @@ const createNodes: CommandDefinition<Cmd> = {
     const newSelectedIds = newNodes
       .filter((n) => n.type !== 'sketch')
       .map((n) => n.id);
-    let finalNodes =
+    const finalNodes =
       newSelectedIds.length > 0
         ? selectOnly(orderedNodes, newSelectedIds)
         : orderedNodes;
 
     // ---------------------------------------------------------------
-    // 5. Resolve position. Honour the caller's contract:
-    //    - `position` provided → use it verbatim. The caller (drag-drop,
-    //      paste, toolbar placement, sketch overlay, group-into-frame,
-    //      undo/redo restore, …) has already chosen where the node
-    //      belongs and the canvas must not move it.
-    //    - `position` omitted → no anchor available; run force-directed
-    //      `placeNode` to find a non-overlapping slot. Always runs when
-    //      the caller omits a position, regardless of any frame-sizing
-    //      policy — otherwise the node would land at (0,0) on top of
-    //      existing content.
+    // 5. Position is honoured verbatim — every caller (UI gestures and
+    //    agents alike) commits to a slot. There is no fallback layout
+    //    pass; the schema marks `position` required, so the type system
+    //    guarantees an explicit value is always present here.
     // ---------------------------------------------------------------
-    for (const [i, n] of newNodes.entries()) {
-      if (cmd.nodes[i].position) continue;
-      const placed = placeNode(finalNodes, state.edges, n.id);
-      if (placed) finalNodes = placed;
-    }
 
     // ---------------------------------------------------------------
     // 6. Declare affected parent frames; the executor performs a single

@@ -54,8 +54,6 @@ Around these primitives Huabu adds:
 
 - **Intent system** — press `Ctrl/Cmd+I` and the AI proposes the next useful
   moves based on what is currently on the canvas.
-- **Auto layout** — semantic, force-directed arrangement so the canvas stays
-  legible as it grows.
 - **Per-canvas node content storage** — each canvas owns its node content
   locally, so the AI can read and write directly against the same material
   the user is working on without a separate indexing step.
@@ -141,7 +139,6 @@ appears in the chat panel and can read and modify files under that folder.
 - [Changelog](./docs/user-guide/CHANGELOG.md) — user-facing changes
 - Design notes in [docs/](./docs):
   - [Canvas command architecture](./docs/canvas-command-architecture.md)
-  - [Auto layout](./docs/auto-layout.md)
   - [Node preprocessing design](./docs/node_preprocessing_design.md)
   - [Content-before-AI design](./docs/content-before-ai-design.md)
   - [Prompt node design](./docs/prompt-node-design.md)

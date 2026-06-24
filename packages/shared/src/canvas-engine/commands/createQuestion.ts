@@ -1,5 +1,4 @@
 import { createId, type CanvasCommand } from '../../index.js';
-import { placeNode } from '../autoLayout/index.js';
 import { normalizeTreeOrder, type NestableNode } from '../frame/index.js';
 import { deduplicateLabel, generateNextLabel } from '../utils/labels.js';
 import { getNodeDefaultSize } from '../utils/nodeSizes.js';
@@ -68,18 +67,13 @@ const createQuestion: CommandDefinition<Cmd> = {
       node.parentId = cmd.parentId;
     }
 
-    let finalNodes = selectOnly(
+    // Position is honoured verbatim — `position` is required by the
+    // command schema, so every caller commits to a slot up front. The
+    // engine no longer ships a fallback layout pass.
+    const finalNodes = selectOnly(
       normalizeTreeOrder([...state.nodes, node] as NestableNode[]),
       [node.id],
     );
-
-    // Position: honour the caller's contract — if `position` is provided
-    // it is used verbatim; otherwise run force-directed `placeNode` to
-    // find a non-overlapping slot.
-    if (!cmd.position) {
-      const placed = placeNode(finalNodes, state.edges, node.id);
-      if (placed) finalNodes = placed;
-    }
 
     return {
       applied: true,
