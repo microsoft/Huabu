@@ -25,6 +25,7 @@ import {
 } from '@earendil-works/pi-ai';
 
 import {
+  DEFAULT_AZURE_IMAGE_API_VERSION,
   DEFAULT_IMAGE_MODEL_FAMILY,
   isImageModelFamily,
 } from '@sediment/shared';
@@ -844,7 +845,11 @@ export function getAzureImageConfig(): {
   const endpoint = image?.baseUrl?.replace(/\/+$/, '') ?? '';
   const explicitDeployment = image?.model?.trim() ?? '';
   const apiKey = image?.apiKey ?? '';
-  const apiVersion = image?.apiVersion?.trim() ?? '';
+  // Fall back to the same default the Settings input is pre-filled
+  // with, so users who never touched the API Version field (and thus
+  // never triggered a save for it) still get a working request.
+  const apiVersion =
+    image?.apiVersion?.trim() || DEFAULT_AZURE_IMAGE_API_VERSION;
   // Legacy configs (saved before `modelFamily` existed) all targeted
   // gpt-image-2, so that's the safe default — no heuristic guessing
   // from the deployment string is required.
@@ -858,7 +863,6 @@ export function getAzureImageConfig(): {
   const missing: string[] = [];
   if (!endpoint) missing.push('Endpoint');
   if (!apiKey) missing.push('API Key');
-  if (!apiVersion) missing.push('API Version');
   if (missing.length > 0) {
     throw new Error(
       `Azure image generation not configured. Open Settings → Image Provider → Azure OpenAI and fill in: ${missing.join(', ')}.`,

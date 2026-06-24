@@ -136,6 +136,17 @@ export const IMAGE_CAPABILITIES: Readonly<
 /** Default family used when no Settings entry exists yet. */
 export const DEFAULT_IMAGE_MODEL_FAMILY: ImageModelFamily = 'gpt-image-2';
 
+/**
+ * Default Azure OpenAI API version for image generation. Used as both
+ * the value pre-filled into the Settings input and as the server-side
+ * fallback when nothing has been persisted — so a user who leaves the
+ * pre-filled field untouched still gets a working configuration.
+ *
+ * The `/images/generations` endpoint for `gpt-image-1` / `gpt-image-2`
+ * requires `2025-04-01-preview` or later.
+ */
+export const DEFAULT_AZURE_IMAGE_API_VERSION = '2025-04-01-preview';
+
 // ─── Accessors ────────────────────────────────────────────────────────────
 
 /** Narrow {@link IMAGE_MODEL_FAMILIES} membership check. */

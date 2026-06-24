@@ -8,6 +8,7 @@ import React, {
 } from 'react';
 
 import {
+  DEFAULT_AZURE_IMAGE_API_VERSION,
   DEFAULT_IMAGE_MODEL_FAMILY,
   IMAGE_MODEL_FAMILIES,
   getImageCapabilities,
@@ -26,9 +27,6 @@ import type {
   LLMConfigUpdate,
   LLMImageConfigUpdate,
 } from '@sediment/shared';
-
-/** Default Azure API version we pre-fill into the Settings input. */
-const DEFAULT_AZURE_IMAGE_API_VERSION = '2025-04-01-preview';
 
 /** Static family options for the model-family dropdown. */
 const IMAGE_MODEL_FAMILY_OPTIONS = IMAGE_MODEL_FAMILIES.map((f) => ({
