@@ -160,14 +160,32 @@ export type RenameResult =
       reason: 'conflict';
       conflictWith: { id: string; filename: string };
     }
-  | { ok: false; reason: 'not-found' }
-  | { ok: false; reason: 'fs-error'; message: string };
+  | { ok: false; reason: 'not-found' };
 
 export type RenameSelfResult =
   | { ok: true; dirName: string }
   | { ok: false; reason: 'conflict'; conflictWith: string }
   | { ok: false; reason: 'not-found' }
   | { ok: false; reason: 'fs-error'; message: string };
+
+/**
+ * Thrown by {@link CanvasStore} mutators when a filesystem operation
+ * fails for environmental reasons (ENOSPC, EACCES, EROFS, EXDEV, …).
+ *
+ * This is intentionally distinct from the structured `{ ok: false }`
+ * results that signal *business-level* failures the caller can act on
+ * (label conflict, not-found). Filesystem failures cannot be acted on
+ * by the caller — they should bubble to the request boundary (HTTP 500
+ * / startup abort) and never end up inside an LLM tool transcript.
+ */
+export class CanvasStoreIOError extends Error {
+  readonly cause?: unknown;
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message);
+    this.name = 'CanvasStoreIOError';
+    if (options?.cause !== undefined) this.cause = options.cause;
+  }
+}
 
 export interface WriteArtifactInput {
   /** Stable artifact id. Doubles as the URL key stem. */
@@ -642,9 +660,10 @@ export class CanvasStore {
 
     // POSIX rename(2) is atomic within the same filesystem, so the
     // rename + content write below is a 2-step but each step is
-    // individually atomic and a failure at either point leaves the
-    // store in a consistent state (caller gets fs-error and can
-    // retry; nothing is ever left as a same-id orphan on disk).
+    // individually atomic. Either step throws CanvasStoreIOError on
+    // failure; the in-memory idx is mutated only after the matching
+    // disk step succeeds so a thrown error never leaves idx and disk
+    // disagreeing about which filename owns this nodeId.
     const newPath = nodeFilePath(this.canvasId, target);
 
     if (isRename) {
@@ -653,14 +672,11 @@ export class CanvasStore {
       try {
         renameSync(oldPath, newPath);
       } catch (err) {
-        // Old sidecar untouched on disk; idx still points at it.
-        // Surface the failure so the caller can toast / retry instead
-        // of silently leaving the canvas in a half-renamed state.
         const message = `Failed to rename node sidecar from "${oldFilename}" to "${target}": ${toErrnoString(err)}`;
         console.warn(
           `[canvas-store] ${message} (canvas=${this.canvasId}, node=${nodeId})`,
         );
-        return { ok: false, reason: 'fs-error', message };
+        throw new CanvasStoreIOError(message, { cause: err });
       }
       idx.rename(nodeId, target);
     }
@@ -669,15 +685,15 @@ export class CanvasStore {
       atomicWriteText(newPath, nodeContentToMarkdown(finalContent));
     } catch (err) {
       // For first writes the idx entry has not been added yet (we add
-      // it below on success), so failing here leaves both disk and idx
-      // consistent. For renames the file at `newPath` now holds the
-      // pre-rename content — still a valid sidecar for this nodeId,
-      // just with stale body. Either way the caller learns about it.
+      // it below on success). For renames the file at `newPath` now
+      // holds the pre-rename content — still a valid sidecar for this
+      // nodeId, just with stale body. Either way the failure bubbles
+      // to the caller as an environmental error.
       const message = `Failed to write node content to "${target}": ${toErrnoString(err)}`;
       console.warn(
         `[canvas-store] ${message} (canvas=${this.canvasId}, node=${nodeId})`,
       );
-      return { ok: false, reason: 'fs-error', message };
+      throw new CanvasStoreIOError(message, { cause: err });
     }
 
     if (!existing) {
@@ -693,16 +709,16 @@ export class CanvasStore {
    * Returns:
    * - `'deleted'`: the file existed and was successfully unlinked.
    * - `'absent'`: no sidecar on disk to begin with (idempotent success).
-   * - `'fs-error'`: the file existed but `unlinkSync` threw (e.g. Windows
-   *   `EPERM` from AV / file-watcher). The in-memory NameIndex is
-   *   deliberately left untouched so a retry sees the same state.
    *
-   * Callers (route + executor) are expected to translate `'fs-error'`
-   * into a user-visible failure rather than silently swallowing it —
-   * otherwise the canvas.json no longer references the node but its
-   * `.md` stays on disk as a permanent orphan.
+   * Throws {@link CanvasStoreIOError} when the file exists but
+   * `unlinkSync` fails (e.g. Windows `EPERM` from AV / file-watcher,
+   * EROFS, EACCES). The in-memory NameIndex is left untouched so a
+   * retry sees the same state. Callers must let the error bubble —
+   * silently swallowing it would leave the canvas.json without a
+   * reference to the node while its `.md` stays on disk as a permanent
+   * orphan.
    */
-  deleteNode(nodeId: string): 'deleted' | 'absent' | 'fs-error' {
+  deleteNode(nodeId: string): 'deleted' | 'absent' {
     const idx = this.nodeIndex();
     const filename = idx.get(nodeId)?.filename ?? this.nodeFilenameOf(nodeId);
     const filePath = nodeFilePath(this.canvasId, filename);
@@ -715,11 +731,9 @@ export class CanvasStore {
       idx.remove(nodeId);
       return 'deleted';
     } catch (err) {
-      console.warn(
-        `[canvas-store] deleteNode unlink failed for ${nodeId} (${filePath}):`,
-        err,
-      );
-      return 'fs-error';
+      const message = `deleteNode unlink failed for ${nodeId} (${filePath}): ${toErrnoString(err)}`;
+      console.warn(`[canvas-store] ${message}`);
+      throw new CanvasStoreIOError(message, { cause: err });
     }
   }
 

@@ -277,7 +277,6 @@ function migrateOneCanvas(
             canvasId,
             nodeId,
             reason: result.reason,
-            message: result.reason === 'fs-error' ? result.message : undefined,
           });
         }
       } catch (err) {
@@ -305,7 +304,6 @@ function migrateOneCanvas(
             canvasId,
             nodeId,
             reason: result.reason,
-            message: result.reason === 'fs-error' ? result.message : undefined,
           });
         }
       } catch (err) {
@@ -596,10 +594,6 @@ export function flattenLegacyMetaJson(
             canvasId,
             nodeId,
             reason: writeResult.reason,
-            message:
-              writeResult.reason === 'fs-error'
-                ? writeResult.message
-                : undefined,
           });
           continue;
         }

@@ -203,12 +203,6 @@ export async function handleCanvasCommands(
       commands: result.commands,
       deltas: result.deltas,
       results: result.results,
-      // Per-node sidecar write failures, if any. Included so the
-      // agent learns that some markdown bodies did not actually land
-      // on disk even though the structural change in canvas.json did
-      // (best-effort batch semantics). Field is omitted when empty so
-      // tool transcripts stay clean for the happy path.
-      ...(result.writeFailures ? { writeFailures: result.writeFailures } : {}),
       pendingEffects: {
         mutatedNodes: result.pendingEffects.mutatedNodes,
         deletedNodeIds: result.pendingEffects.deletedNodeIds,

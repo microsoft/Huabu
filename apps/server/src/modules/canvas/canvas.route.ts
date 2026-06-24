@@ -522,16 +522,22 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       });
     }
 
-    const result = store.deleteNode(nodeId);
-    if (result === 'fs-error') {
-      // Surface the failure so the client can revert its optimistic
-      // delete (or at least toast). Silently returning success here
-      // would leave the canvas.json with no reference to the node but
-      // its `.md` orphaned on disk forever.
+    try {
+      store.deleteNode(nodeId);
+    } catch (error) {
+      // CanvasStoreIOError (unlink rejected by the OS, e.g. EPERM /
+      // EACCES). Surface the failure so the client can revert its
+      // optimistic delete (or at least toast). Silently returning
+      // success here would leave the canvas.json with no reference to
+      // the node but its `.md` orphaned on disk forever.
       //
       // `code` is the stable contract — the client maps it to a
       // localised toast. `message` is the English fallback used for
       // server logs and unknown-code situations.
+      request.log.error(
+        { canvasId, nodeId, err: toMessage(error) },
+        'Failed to delete node sidecar',
+      );
       return reply.code(500).send({
         code: 'NODE_FILE_DELETE_FAILED',
         message: `Failed to delete node file for "${nodeId}"`,
@@ -657,6 +663,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     try {
       writeResult = store.writeNode(nodeId, nodeContent, { strictRename });
     } catch (error) {
+      // CanvasStoreIOError (ENOSPC, EACCES, EROFS, …) and any other
+      // unexpected throw — all environmental, none actionable by the
+      // client. Surface as 500 so the web shows a toast.
       request.log.error(
         { canvasId, nodeId, err: toMessage(error) },
         'Failed to write node markdown',
@@ -673,8 +682,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       } satisfies CanvasConflictResponse);
     }
     if (!writeResult.ok) {
-      // not-found / fs-error — treat as 500; not-found should not
-      // happen here because we constructed the file via writeNode.
+      // `not-found` should not happen here — we constructed the file
+      // via writeNode. Treat as 500 defensively.
       request.log.error({ canvasId, nodeId, writeResult }, 'Node write failed');
       return reply.code(500).send({ message: 'Failed to write node content' });
     }

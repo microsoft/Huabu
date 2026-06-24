@@ -58,14 +58,14 @@ export function persist(
         persistedLabel = result.label ?? undefined;
       } else {
         // Body is already on disk and matches canonical content; only
-        // label/mhtml metadata refresh failed. The next preprocess of
-        // this node will retry the refresh, so we tolerate the failure
-        // here — but log so a persistent failure (perms, disk full)
-        // surfaces in operator logs instead of silently looping.
+        // label/mhtml metadata refresh hit a structural rejection
+        // (conflict / not-found). Environmental failures throw
+        // `CanvasStoreIOError` and bubble past this branch. The next
+        // preprocess of this node will retry the refresh, so we
+        // tolerate it here — but log so persistent rejections surface
+        // in operator logs instead of silently looping.
         console.warn(
-          `[persist] metadata refresh failed for ${nodeId}: ${
-            result.reason === 'fs-error' ? result.message : result.reason
-          }`,
+          `[persist] metadata refresh failed for ${nodeId}: ${result.reason}`,
         );
       }
     }
@@ -95,15 +95,15 @@ export function persist(
   });
 
   if (!result.ok) {
-    // Body write failed — there is no `.md` on disk for this node, so
-    // we must NOT return `contentChanged: true` (which would tell
-    // downstream the node is persisted). Throw so the pipeline records
-    // a retryable `PERSIST_FAILED` diagnostic instead of silently
-    // accumulating `contentMissing` nodes on the canvas.
+    // Structural rejection (conflict / not-found). Environmental
+    // failures throw `CanvasStoreIOError` and bypass this branch.
+    // There is no `.md` on disk for this node, so we must NOT return
+    // `contentChanged: true` (which would tell downstream the node is
+    // persisted). Throw so the pipeline records a retryable
+    // `PERSIST_FAILED` diagnostic instead of silently accumulating
+    // `contentMissing` nodes on the canvas.
     throw new Error(
-      `persist: writeNode failed for ${nodeId}: ${
-        result.reason === 'fs-error' ? result.message : result.reason
-      }`,
+      `persist: writeNode failed for ${nodeId}: ${result.reason}`,
     );
   }
 

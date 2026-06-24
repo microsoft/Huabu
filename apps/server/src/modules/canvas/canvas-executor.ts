@@ -269,19 +269,6 @@ export interface ExecuteOnServerOutput {
   /** Commands as the executor saw them — ids assigned, source-stamped. */
   commands: CanvasCommand[];
   /**
-   * Per-node sidecar persistence failures encountered while applying
-   * this batch. Surfaced so the agent tool wrapper can include them in
-   * its JSON response — the agent then knows which writes did not
-   * actually land on disk and can retry / inform the user. The batch
-   * still commits canvas.json so the structural change is recorded;
-   * the markdown body is what may be stale.
-   */
-  writeFailures?: Array<{
-    nodeId: string;
-    kind: 'write' | 'delete';
-    message: string;
-  }>;
-  /**
    * Subset of `PendingEffects` that clients need to drain locally.
    *
    * `mutatedNodes` is included so the web's existing `triggerPreprocessing`
@@ -413,49 +400,35 @@ export async function executeOnServer(
     // markdown file that does not exist on disk. A crash between this
     // loop and the canvas.json write leaves orphan .md files (harmless),
     // not orphan node references (would render as `contentMissing`).
-    const writeFailures: NonNullable<ExecuteOnServerOutput['writeFailures']> =
-      [];
+    //
+    // `writeNode` throws `CanvasStoreIOError` on environmental failures
+    // (ENOSPC, EACCES, …); we deliberately do NOT catch it so the
+    // batch aborts before canvas.json is mutated. The exception bubbles
+    // through `handleCanvasCommands` and surfaces as an `isError: true`
+    // tool result to the LLM (and as a 500 / error event upstream).
+    // Structural `conflict` / `not-found` results are programmer errors
+    // in the agent path (engine should have rejected them upstream and
+    // `strictRename` is rarely set for agent-authored labels); we throw
+    // a regular Error rather than letting the in-memory mutation drift
+    // away from disk.
     for (const node of pendingEffects.mutatedNodes) {
       const nodeContent = buildNodeContent(node);
       if (!nodeContent) continue;
-      let writeOk = false;
-      let failureMessage: string | null = null;
-      try {
-        const result = store.writeNode(nodeContent.nodeId, nodeContent, {
-          strictRename: nodeContent['labelSource'] === 'user',
-        });
-        writeOk = result.ok;
-        if (!result.ok) {
-          failureMessage =
-            result.reason === 'fs-error'
-              ? result.message
-              : result.reason === 'conflict'
-                ? `Label conflicts with existing node "${result.conflictWith.filename}"`
-                : `writeNode failed: ${result.reason}`;
-        }
-      } catch (err) {
-        failureMessage = err instanceof Error ? err.message : String(err);
-      }
-      if (!writeOk) {
-        const message =
-          failureMessage ?? 'writeNode failed with an unknown error';
-        console.warn(
-          `[canvas-executor] writeNode failed for ${nodeContent.nodeId}: ${message}`,
+      const result = store.writeNode(nodeContent.nodeId, nodeContent, {
+        strictRename: nodeContent['labelSource'] === 'user',
+      });
+      if (!result.ok) {
+        const detail =
+          result.reason === 'conflict'
+            ? `label conflicts with existing node "${result.conflictWith.filename}"`
+            : result.reason;
+        throw new Error(
+          `[canvas-executor] writeNode rejected ${nodeContent.nodeId}: ${detail}`,
         );
-        writeFailures.push({
-          nodeId: nodeContent.nodeId,
-          kind: 'write',
-          message,
-        });
       }
     }
     for (const nodeId of pendingEffects.deletedNodeIds) {
-      const result = store.deleteNode(nodeId);
-      if (result === 'fs-error') {
-        const message = `deleteNode failed (unlink threw); sidecar may remain on disk as an orphan`;
-        console.warn(`[canvas-executor] ${message} (node=${nodeId})`);
-        writeFailures.push({ nodeId, kind: 'delete', message });
-      }
+      store.deleteNode(nodeId);
     }
 
     const slimNodes = stripNodesForCanvas(finalNodes);
@@ -488,7 +461,6 @@ export async function executeOnServer(
       deltas,
       results,
       commands,
-      ...(writeFailures.length > 0 ? { writeFailures } : {}),
       pendingEffects: {
         mutatedNodes: pendingEffects.mutatedNodes,
         deletedNodeIds: pendingEffects.deletedNodeIds,
