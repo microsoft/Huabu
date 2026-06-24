@@ -139,7 +139,7 @@ describe('clusterToSvg', () => {
     expect(built!.svg).toMatch(/viewBox="34 34 282 162"/);
   });
 
-  it('returns null when the cluster has no strokes (avoids 1x1 placeholder PNG)', () => {
+  it('returns null when the cluster has no strokes AND no backdrops (avoids 1x1 placeholder PNG)', () => {
     const empty = makeSketch({
       id: 'sk0',
       x: 50,
@@ -150,6 +150,56 @@ describe('clusterToSvg', () => {
     });
     const built = clusterToSvg([empty]);
     expect(built).toBeNull();
+  });
+
+  it('renders an image-only cluster (backdrops without any strokes)', () => {
+    // A cluster that holds only image members — produced by the
+    // unified clustering path when two nearby images get bucketed
+    // together without any sketch — must still raster, otherwise
+    // the caller would silently drop the merged result.
+    const imageA = makeImageNode({
+      id: 'imgA',
+      x: 0,
+      y: 0,
+      w: 100,
+      h: 100,
+    });
+    const imageB = makeImageNode({
+      id: 'imgB',
+      x: 200,
+      y: 50,
+      w: 100,
+      h: 100,
+    });
+    const context: ContextImage[] = [
+      {
+        node: imageA,
+        resolvedSrc: 'a.png',
+        bytes: TINY_PNG,
+        mimeType: 'image/png',
+        width: 100,
+        height: 100,
+      },
+      {
+        node: imageB,
+        resolvedSrc: 'b.png',
+        bytes: TINY_PNG,
+        mimeType: 'image/png',
+        width: 100,
+        height: 100,
+      },
+    ];
+    // No sketches passed — only backdrops.
+    const built = clusterToSvg([], context);
+    expect(built).not.toBeNull();
+    const svg = built!.svg;
+    // Both backdrops embedded, no stroke paths.
+    expect(svg).not.toContain('<path');
+    expect(svg.match(/<image/g)?.length).toBe(2);
+    // viewBox unions both image rects:
+    //   A [0..100]x[0..100], B [200..300]x[50..150]
+    //   union [0..300]x[0..150] + padding 16 → x=-16 y=-16 w=332 h=182
+    expect(svg).toMatch(/viewBox="-16 -16 332 182"/);
   });
 
   it('respects maxEdge: a 2000-px-wide cluster downscales to fit', () => {

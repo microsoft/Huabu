@@ -12,7 +12,15 @@ export interface UserMessageMetadata {
   invokedSkills?: string[];
   /**
    * Override the auto-derived hint. Most callers should leave this
-   * undefined. LLM-only; stripped on rehydrate, never replayed.
+   * undefined.
+   *
+   * LLM-only: the `[SYSTEM hint:…]` tag is always stripped from the
+   * persisted user-visible content. `stripMetadataTags` will still
+   * decode it back onto `meta.hint` for inspection, but the history
+   * rehydration path in `agent.route.ts#buildHistoryItems`
+   * deliberately ignores that field, so a hint never re-enters a
+   * reconstructed turn — it is consumed once, on the turn that
+   * generated it.
    */
   hint?: string;
 }

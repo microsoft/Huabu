@@ -167,10 +167,11 @@ export async function handleGenerateImage(
   const isV1Style = /(?:^|\/)(?:openai\/)?v1$/i.test(trimmedEndpoint);
   const isEdit = refPaths.length > 0;
 
-  // The `openai` SDK uses `globalThis.fetch`, which `setup-proxy.ts`
-  // has already wrapped with the configured ProxyAgent dispatcher,
-  // so HTTPS_PROXY / NO_PROXY are honoured transparently — we don't
-  // need to pass `dispatcher` here ourselves.
+  // The `openai` SDK uses `globalThis.fetch`, which Node routes
+  // through the undici global dispatcher installed by `setup-proxy.ts`
+  // when HTTPS_PROXY is configured. Built-in fetch + built-in
+  // FormData stay realm-aligned, which keeps `images.edit` multipart
+  // uploads working.
   const client = isV1Style
     ? new OpenAI({
         baseURL: trimmedEndpoint,

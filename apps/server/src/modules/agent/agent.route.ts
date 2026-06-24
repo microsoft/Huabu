@@ -1319,38 +1319,33 @@ const agentRoutes: FastifyPluginAsync = async (
       ? collectImageAttachments(canvasContext.selectedNodes)
       : [];
 
-    // Auto-snapshot any selected sketches into PNG artifacts so the
-    // LLM sees the strokes as a vision part on the very first turn,
-    // without having to call `snapshot_nodes` itself. We piggy-back
-    // on the same content-addressed pipeline the tool uses, so
-    // selecting an unchanged cluster repeatedly is essentially free.
-    // Failures are logged but never block the user's prompt — the
-    // worst case is the agent has to call `snapshot_nodes` manually.
+    // Auto-snapshot every selected sketch and image into PNG
+    // artifacts so the LLM sees them as vision parts on the very
+    // first turn, without having to call `snapshot_nodes` itself.
+    // We piggy-back on the same content-addressed pipeline the tool
+    // uses, so selecting an unchanged cluster repeatedly is
+    // essentially free. Failures are logged but never block the
+    // user's prompt — the worst case is the agent has to call
+    // `snapshot_nodes` manually.
     //
-    // When the selection contains BOTH a sketch and an image node
-    // that spatially overlaps it (e.g. the user annotated a photo),
-    // we hand both ids to `snapshotNodesToArtifacts` so it can
-    // composite them into one PNG instead of sending two vision parts
-    // for the same pixels. Any image that came back consumed inside a
-    // composite is removed from `selectedImageAttachments` below so
-    // it isn't sent a second time as a standalone part — duplicating
-    // image bytes was the direct cause of the 8 MB request bodies that
-    // tripped `413 Request Entity Too Large` on Anthropic / Copilot.
+    // The handler clusters per parent frame (≤ 200 px gap): nearby
+    // image+sketch nodes composite into ONE PNG (images as backdrop,
+    // strokes on top), distant nodes stay separate, and a singleton
+    // image short-circuits to its original artifact (or a downscaled
+    // copy when oversized). Any image whose pixels end up inside a
+    // composite — or whose ids get merged with other images into a
+    // single overview cluster — is marked consumed below so its
+    // standalone `selectedImageAttachments` entry is dropped. Sending
+    // the same image bytes twice was the direct cause of the 8 MB
+    // request bodies that tripped `413 Request Entity Too Large` on
+    // Anthropic / Copilot.
     const snapshotAttachments: ChatAttachment[] = [];
     const consumedSelectionImageIds = new Set<string>();
     if (canvasContext?.selectedNodes && canvasId) {
       const sketchIds = collectSketchNodeIds(canvasContext.selectedNodes);
-      // Only pull image ids into the snapshot call when there are also
-      // sketches in the selection — without strokes there is nothing
-      // to composite the image under, and a standalone pass-through is
-      // already produced by `selectedImageAttachments`. This keeps the
-      // pure-image path completely unchanged.
-      const selectedImageIds =
-        sketchIds.length > 0
-          ? selectedImageAttachments
-              .map((a) => a.originNodeId)
-              .filter((id): id is string => typeof id === 'string')
-          : [];
+      const selectedImageIds = selectedImageAttachments
+        .map((a) => a.originNodeId)
+        .filter((id): id is string => typeof id === 'string');
       const snapshotIds = [...sketchIds, ...selectedImageIds];
       if (snapshotIds.length > 0) {
         try {
@@ -1366,28 +1361,33 @@ const agentRoutes: FastifyPluginAsync = async (
             const imageIds = r.originNodeIds.filter((id) =>
               selectedImageIdSet.has(id),
             );
-            // Pure pass-through (image returned as its own artifact,
-            // no strokes composited in): leave it alone. The original
-            // `selectedImageAttachments` entry already owns that vision
-            // part with its richer label, so we neither emit a
+            // Singleton image pass-through (no strokes, exactly one
+            // image — handler short-circuited to that node's original
+            // artifact): leave it alone. The original
+            // `selectedImageAttachments` entry already owns that
+            // vision part with its richer label, so we neither emit a
             // duplicate `snapshotAttachment` here NOR mark the id as
             // consumed (otherwise the dedup filter below would drop
             // the pass-through entry too, losing the image entirely).
-            if (strokeIds.length === 0) continue;
-            // Composite: the image's pixels are now baked into this
-            // sketch artifact, so mark them consumed and drop the
-            // standalone entry below to avoid sending them twice.
+            if (strokeIds.length === 0 && imageIds.length === 1) continue;
+            // Anything else is a composite owned by this snapshot:
+            //   - strokes + 0-or-N images → sketch cluster
+            //   - 0 strokes + N images    → pure image overview cluster
+            // Mark every contributing image as consumed so its
+            // standalone pass-through is dropped below.
             for (const iid of imageIds) consumedSelectionImageIds.add(iid);
             const nStrokes = strokeIds.length;
             const nImages = imageIds.length;
             const label =
-              nImages > 0
-                ? `Sketch cluster (${nStrokes} stroke node${
-                    nStrokes === 1 ? '' : 's'
-                  } + ${nImages} backdrop image${nImages === 1 ? '' : 's'})`
-                : nStrokes === 1
-                  ? 'Sketch (1 stroke node)'
-                  : `Sketch cluster (${nStrokes} stroke nodes)`;
+              nStrokes === 0
+                ? `Image cluster (${nImages} images)`
+                : nImages > 0
+                  ? `Sketch cluster (${nStrokes} stroke node${
+                      nStrokes === 1 ? '' : 's'
+                    } + ${nImages} backdrop image${nImages === 1 ? '' : 's'})`
+                  : nStrokes === 1
+                    ? 'Sketch (1 stroke node)'
+                    : `Sketch cluster (${nStrokes} stroke nodes)`;
             snapshotAttachments.push({
               type: 'image',
               source: 'selection',
@@ -1399,7 +1399,7 @@ const agentRoutes: FastifyPluginAsync = async (
         } catch (err) {
           fastify.log.warn(
             { err, snapshotIds, canvasId },
-            '[agent.route] sketch auto-snapshot failed',
+            '[agent.route] selection auto-snapshot failed',
           );
         }
       }
