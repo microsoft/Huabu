@@ -4,8 +4,9 @@ import {
   clusterToSvg,
   findContextImageNodes,
   type ContextImage,
-  type RawNode,
 } from './snapshot-node.js';
+
+import type { CanvasNode } from '@sediment/shared/canvas-engine';
 
 // Minimal 1x1 transparent PNG (so we can verify the data URL embed
 // without bringing real image bytes into the test).
@@ -21,24 +22,32 @@ function makeImage(opts: {
   y: number;
   w: number;
   h: number;
-  src?: string;
   parentId?: string;
+  /** When true, size is on `measured` (ReactFlow-measured at runtime)
+   *  rather than `style` (engine-persisted size). */
   measured?: boolean;
-}): RawNode {
+}): CanvasNode {
   const size = opts.measured
     ? { measured: { width: opts.w, height: opts.h } }
     : { style: { width: opts.w, height: opts.h } };
+  // Note: `data.src` is intentionally omitted — `canvas.json` strips
+  // it via `stripNodesForCanvas`; the artifact key lives in the
+  // markdown sidecar and is resolved by `loadContextImage`.
   return {
     id: opts.id,
-    parentId: opts.parentId,
+    type: 'image',
     position: { x: opts.x, y: opts.y },
+    ...(opts.parentId ? { parentId: opts.parentId } : {}),
     ...size,
-    data: {
-      type: 'image',
-      src: opts.src ?? 'cat.png',
-    },
+    data: { type: 'image' },
   };
 }
+
+type SketchStroke = {
+  points: number[][];
+  color?: string;
+  size?: number;
+};
 
 function makeSketch(opts: {
   id: string;
@@ -47,18 +56,19 @@ function makeSketch(opts: {
   w: number;
   h: number;
   parentId?: string;
-  strokes?: RawNode['data'] extends infer D
-    ? D extends { strokes?: infer S }
-      ? S
-      : never
-    : never;
-}): RawNode {
+  strokes?: SketchStroke[];
+}): CanvasNode {
+  // Real on-disk shape: the canvas engine (`CREATE_NODES`) writes size
+  // into `style.width` / `style.height`; ReactFlow may also write
+  // `measured` at render time. Top-level `node.width` / `node.height`
+  // is NOT persisted by the engine. `data.initialSize` is the
+  // author-time canonical size used to normalize stroke coordinates.
   return {
     id: opts.id,
-    parentId: opts.parentId,
+    type: 'sketch',
     position: { x: opts.x, y: opts.y },
-    width: opts.w,
-    height: opts.h,
+    ...(opts.parentId ? { parentId: opts.parentId } : {}),
+    style: { width: opts.w, height: opts.h },
     data: {
       type: 'sketch',
       initialSize: { width: opts.w, height: opts.h },
@@ -114,8 +124,9 @@ describe('findContextImageNodes', () => {
     // artifact key lives in the sidecar markdown frontmatter. So this
     // filter must NOT require src; `loadContextImage` resolves it.
     const sketch = makeSketch({ id: 'sk1', x: 50, y: 50, w: 100, h: 100 });
-    const image: RawNode = {
+    const image: CanvasNode = {
       id: 'img-no-src',
+      type: 'image',
       position: { x: 80, y: 80 },
       measured: { width: 200, height: 200 },
       style: { width: 200, height: 200 },

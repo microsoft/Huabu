@@ -25,17 +25,23 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { FormData } from 'undici';
+// `fetch` and `FormData` must come from the same realm: undici's
+// `instanceof FormData` check is class-identity based, and Node's built-in
+// `globalThis.fetch` uses Node's *bundled* undici copy whose `FormData`
+// class is not identity-equal to the one re-exported from this package's
+// `undici` dependency. When the realms mismatch, undici silently falls
+// back to `String(body)` and sends the request as `text/plain`, which
+// Azure rejects with HTTP 400 (`unsupported_content_type`).
+//
+// Importing `fetch` from `undici` here guarantees the realm matches the
+// `FormData` we instantiate below. We pass the proxy dispatcher
+// explicitly because Node's built-in fetch wrapper in setup-proxy.ts
+// does not propagate to direct undici.fetch calls.
+import { fetch as undiciFetch, FormData } from 'undici';
 
 import { createId } from '@sediment/shared';
-// FormData must come from the same realm as the fetch implementation used
-// at runtime. setup-proxy.ts swaps globalThis.fetch for undici's when a
-// proxy is configured, and undici's `instanceof FormData` check is class-
-// identity based — globalThis.FormData (Node's bundled copy) silently fails
-// the check and undici falls back to String(body) + text/plain.
-// (Blob is not exported from undici; the global one is structurally OK as
-// a FormData entry.)
 
+import { getProxyDispatcher } from '../../../../setup-proxy.js';
 import { getCanvasStore } from '../../../storage/index.js';
 import { getAzureImageConfig } from '../../llm.js';
 
@@ -146,6 +152,10 @@ export async function handleGenerateImage(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
+  // Resolve the proxy dispatcher once (undefined when no proxy is
+  // configured or when the target host is on the NO_PROXY bypass list).
+  const dispatcher = getProxyDispatcher(url);
+
   let response: Response;
   try {
     if (isEdit) {
@@ -167,12 +177,13 @@ export async function handleGenerateImage(
           path.basename(ref.absPath),
         );
       }
-      response = await fetch(url, {
+      response = (await undiciFetch(url, {
         method: 'POST',
         headers: authHeader,
         body: form,
         signal: controller.signal,
-      });
+        dispatcher,
+      })) as unknown as Response;
     } else {
       const body: Record<string, unknown> = {
         prompt,
@@ -181,7 +192,7 @@ export async function handleGenerateImage(
         quality,
       };
       if (isV1Style) body.model = azure.deployment;
-      response = await fetch(url, {
+      response = (await undiciFetch(url, {
         method: 'POST',
         headers: {
           ...authHeader,
@@ -189,7 +200,8 @@ export async function handleGenerateImage(
         },
         body: JSON.stringify(body),
         signal: controller.signal,
-      });
+        dispatcher,
+      })) as unknown as Response;
     }
   } catch (err) {
     if ((err as Error)?.name === 'AbortError') {
@@ -236,8 +248,13 @@ export async function handleGenerateImage(
     );
   }
   const png = Buffer.from(b64, 'base64');
+  // Use a `gen-` prefix (vs the generic `artifact-` used by uploads and
+  // preprocessing) so future GC can distinguish model-generated images
+  // — which start life as orphans until the agent follows up with a
+  // `canvas_commands` insert or embeds them in a note body — from
+  // user-uploaded artifacts that should never be auto-collected.
   const record = await store.writeArtifactBuffer(
-    { id: createId('artifact'), ext: '.png', mimeType: 'image/png' },
+    { id: createId('gen'), ext: '.png', mimeType: 'image/png' },
     png,
   );
 

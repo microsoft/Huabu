@@ -556,7 +556,7 @@ export const snapshotNodesTool: ToolDefinition = {
   name: 'snapshot_nodes',
   label: 'Snapshot nodes',
   description:
-    'Produce a PNG snapshot of one or more canvas nodes — used both as a vision attachment so the LLM can SEE the node and as `generate_image.referenceArtifactSrcs` input. Supported types: `sketch` (renders strokes to PNG; overlapping `image` siblings are composited as a backdrop so the snapshot matches the on-canvas view) and `image` (reuses the node\'s existing artifact key, no new file). For anything else (`note` / `text` / `pdf` / `video` / `frame`) use `read("nodes/<file>.md")` instead — there is no still image to snapshot. Multiple sketches in one call are bucketed by parent frame and spatially clustered (200 px edge-to-edge); each cluster is content-addressed, so re-snapshotting an unchanged cluster reuses its `src`. The chat route auto-runs this on selected sketches before the LLM\'s first turn (the keys appear in the user-message metadata), so call manually only for non-selected nodes. Returns `Array<{src, width, height, originNodeIds}>`; `originNodeIds` lists the ids that share this artifact (one id for image; N stroke ids for a sketch cluster — backdrop image siblings are not listed).',
+    'Produce a PNG snapshot of one or more canvas nodes — used both as a vision attachment so the LLM can SEE the node and as `generate_image.referenceArtifactSrcs` input. Supported types: `sketch` (renders strokes to PNG; overlapping `image` siblings are composited as a backdrop so the snapshot matches the on-canvas view), `image` (reuses the node\'s existing artifact key, no new file), and `frame` (recursively expands to its children — image/sketch children produce snapshots, other child types are skipped silently). For standalone `note` / `text` / `pdf` / `video` use `read("nodes/<file>.md")` instead — there is no still image to snapshot. Multiple sketches in one call are bucketed by parent frame and spatially clustered (200 px edge-to-edge); each cluster is content-addressed, so re-snapshotting an unchanged cluster reuses its `src`. The chat route auto-runs this on selected sketches before the LLM\'s first turn (the keys appear in the user-message metadata), so call manually only for non-selected nodes. Returns `Array<{src, width, height, originNodeIds}>`; `originNodeIds` lists the ids that share this artifact (one id for image; N stroke ids for a sketch cluster — backdrop image siblings are not listed).',
   parameters: snapshotNodesParamsSchema,
 };
 
@@ -572,17 +572,10 @@ export const generateImageParamsSchema = Type.Object({
     }),
   ),
   size: Type.Optional(
-    Type.Union(
-      [
-        Type.Literal('1024x1024'),
-        Type.Literal('1024x1536'),
-        Type.Literal('1536x1024'),
-      ],
-      {
-        description:
-          "Output dimensions. Default `'1024x1024'`. Use `'1024x1536'` for portrait and `'1536x1024'` for landscape.",
-      },
-    ),
+    Type.String({
+      description:
+        "Output dimensions as a `WIDTHxHEIGHT` string. Default `'1024x1024'`. The legal set depends on the image deployment the user has configured in Settings — pass what the user asked for and the server will forward it to the provider. Common values: gpt-image-1 accepts `'1024x1024'` / `'1024x1536'` (portrait) / `'1536x1024'` (landscape) / `'auto'`; dall-e-3 accepts `'1024x1024'` / `'1024x1792'` (portrait) / `'1792x1024'` (landscape). If unsure, omit this and accept the square default.",
+    }),
   ),
   quality: Type.Optional(
     Type.Union(

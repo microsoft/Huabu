@@ -23,8 +23,13 @@
  *   - `note` / `text` / `pdf` — read `nodes/<file>.md` and weave the
  *                               sidecar content into the prompt instead.
  *   - `video`           — not a still image; gpt-image-1 can't use it.
- *   - `frame`           — snapshot individual children.
  *   - `audio` / `web` / `office` / `question` — no meaningful snapshot.
+ *
+ * Selecting a `frame` is a UX shortcut for "snapshot what's inside this
+ * frame": the handler recursively expands the frame to its children
+ * (images + sketches contribute results, other child types are skipped
+ * silently because the caller's intent was the visual whole, not each
+ * non-renderable child).
  *
  * Returns a JSON-stringified `Array<{src, width, height, originNodeIds}>`.
  * `originNodeIds` lists every node that contributed to that artifact —
@@ -51,7 +56,8 @@ import { getCanvasStore } from '../../../storage/index.js';
 
 import type { snapshotNodesParamsSchema } from '../definitions.js';
 import type { Static } from '@earendil-works/pi-ai';
-import type { SpatialNode } from '@sediment/shared';
+import type { SketchNodeData, SpatialNode } from '@sediment/shared';
+import type { CanvasNode } from '@sediment/shared/canvas-engine';
 
 export type SnapshotNodesArgs = Static<typeof snapshotNodesParamsSchema> & {
   canvasId: string;
@@ -95,57 +101,74 @@ const CLUSTER_MAX_PIXELS = 2048;
 // apps/web/src/handler/sketch/sketchClustering.ts CLUSTER_DISTANCE_THRESHOLD.
 const CLUSTER_DISTANCE_THRESHOLD = 200;
 
-// ─── Raw node shape (parsed loosely from canvas.json) ──────────────────────
-// IMPORTANT: `canvas.json` is geometry/style only. Source URLs for
-// artifact-backed nodes (image / video / pdf / web) are stripped
-// before write by `stripNodesForCanvas`; they live exclusively in
-// the per-node markdown frontmatter (`nodes/<label>.md`). So
-// `node.data.src` on a `RawNode` parsed from canvas.json is ALWAYS
-// undefined — always read it via {@link readSidecarString} below.
-export interface RawNode {
-  id: string;
-  parentId?: string;
-  position?: { x: number; y: number };
-  /** Top-level width/height. Set for sketches; typically absent for
-   *  resizable nodes like images which use `style` / `measured` instead. */
-  width?: number;
-  height?: number;
-  /** Browser-measured bbox; authoritative for resizable nodes (image). */
-  measured?: { width?: number; height?: number };
-  /** Explicit style width/height set via the resize handles. */
-  style?: { width?: number | string; height?: number | string };
-  data?: {
-    type?: string;
-    src?: string;
-    strokes?: Array<{
-      points: number[][];
-      color?: string;
-      size?: number;
-    }>;
-    initialSize?: { width: number; height: number };
-    [key: string]: unknown;
-  };
+// ─── Node `data` access (loose, defensive) ─────────────────────────────────
+// Top-level node fields come from {@link CanvasNode} (= ReactFlow `Node`):
+// `id`, `type`, `position`, `parentId`, `measured`, `style`, `data`. The
+// canvas engine (see `createNodes.ts`) persists size into `style.width` /
+// `style.height`; ReactFlow writes `measured.{width,height}` at render
+// time. Top-level `node.width` / `node.height` are **never** written by
+// the engine, so we do not consult them here.
+//
+// `canvas.json` is geometry/style only: content keys on `data`
+// (`content` / `label` / `labelSource` / `src` / `summary` / `keywords` /
+// `provenance`) are stripped by `stripNodesForCanvas` before write and
+// re-hydrated from the markdown sidecar on read. Sketch nodes are the
+// exception: their `strokes` + `initialSize` live in `canvas.json` and
+// match {@link SketchNodeData} exactly. We read it as a `Partial<…>`
+// because canvas.json is JSON-deserialized and may be missing fields on
+// legacy or in-flight nodes.
+
+/**
+ * Read a sketch node's payload as a partial of the canonical
+ * {@link SketchNodeData}. Returns `undefined` when `data` is missing.
+ * Read `src` for image-like nodes via {@link readSidecarString} — image
+ * `src` is never present in `data`.
+ */
+function getSketchData(n: CanvasNode): Partial<SketchNodeData> | undefined {
+  return n.data as Partial<SketchNodeData> | undefined;
+}
+
+/**
+ * Read the node-type tag, preferring ReactFlow's canonical top-level
+ * `node.type` and falling back to the legacy `data.type` field that
+ * older canvases may still carry.
+ */
+function getNodeType(n: CanvasNode): string | undefined {
+  if (typeof n.type === 'string') return n.type;
+  const legacy = (n.data as { type?: unknown } | undefined)?.type;
+  return typeof legacy === 'string' ? legacy : undefined;
+}
+
+function num(v: unknown): number | undefined {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string') {
+    const parsed = Number.parseFloat(v);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
+function readStyle(
+  n: CanvasNode,
+): { width?: number | string; height?: number | string } | undefined {
+  return n.style as
+    | { width?: number | string; height?: number | string }
+    | undefined;
 }
 
 /**
  * Read a node's effective on-canvas size for non-sketch nodes (images
- * etc.), mirroring `readSize` in canvas-spatial.ts: prefer
- * `measured` (browser-truth) → `style` (user-resize) → top-level
- * `width`/`height`. Sketches keep their own helper because they also
- * fall back to `data.initialSize`.
+ * etc.). Priority `measured` (browser-truth) → `style` (engine-persisted
+ * size from `CREATE_NODES`), mirroring the web
+ * `node.measured?.width ?? node.style?.width` chain used in
+ * `SketchProcessingOverlay`, `sketchContext`, `intentStore`, etc.
+ * Top-level `n.width` / `n.height` is never persisted by the canvas
+ * engine so it is intentionally not consulted.
  */
-function nodeBoxSize(n: RawNode): { width: number; height: number } {
-  const num = (v: unknown): number | undefined => {
-    if (typeof v === 'number' && Number.isFinite(v)) return v;
-    if (typeof v === 'string') {
-      const parsed = Number.parseFloat(v);
-      return Number.isFinite(parsed) ? parsed : undefined;
-    }
-    return undefined;
-  };
-  const w = num(n.measured?.width) ?? num(n.style?.width) ?? num(n.width) ?? 0;
-  const h =
-    num(n.measured?.height) ?? num(n.style?.height) ?? num(n.height) ?? 0;
+function nodeBoxSize(n: CanvasNode): { width: number; height: number } {
+  const style = readStyle(n);
+  const w = num(n.measured?.width) ?? num(style?.width) ?? 0;
+  const h = num(n.measured?.height) ?? num(style?.height) ?? 0;
   return { width: w, height: h };
 }
 
@@ -173,6 +196,7 @@ async function ensureResvgReady(): Promise<void> {
         path.dirname(decodeURIComponent(new URL(import.meta.url).pathname)),
         'resvg-bg.wasm',
       );
+      wasmBytes = await readFile(wasmPath);
     }
     await initWasm(wasmBytes);
   })();
@@ -216,12 +240,27 @@ function escapeXml(s: string): string {
 // ─── Sketch helpers ────────────────────────────────────────────────────────
 /**
  * Effective on-canvas size for a sketch node. Prefers React Flow's
- * measured `width` / `height` (which reflect any user resize), then
- * `data.initialSize`, then 0.
+ * `measured` (reflects any user resize), then engine-persisted
+ * `style.{width,height}`, then `data.initialSize`, then 0. The
+ * `initialSize` fallback matters on first paint before xyflow has had
+ * a chance to write `measured`.
  */
-function sketchEffectiveSize(n: RawNode): { width: number; height: number } {
-  const w = n.width ?? n.data?.initialSize?.width ?? 0;
-  const h = n.height ?? n.data?.initialSize?.height ?? 0;
+function sketchEffectiveSize(n: CanvasNode): {
+  width: number;
+  height: number;
+} {
+  const style = readStyle(n);
+  const data = getSketchData(n);
+  const w =
+    num(n.measured?.width) ??
+    num(style?.width) ??
+    data?.initialSize?.width ??
+    0;
+  const h =
+    num(n.measured?.height) ??
+    num(style?.height) ??
+    data?.initialSize?.height ??
+    0;
   return { width: w, height: h };
 }
 
@@ -234,20 +273,21 @@ function sketchEffectiveSize(n: RawNode): { width: number; height: number } {
  * chars (~64 bits of entropy) is plenty for per-canvas dedup.
  */
 function clusterFingerprint(
-  nodes: RawNode[],
+  nodes: CanvasNode[],
   contextImages: ContextImage[] = [],
 ): string {
   const sketches = nodes
     .map((n) => {
       const { width, height } = sketchEffectiveSize(n);
+      const data = getSketchData(n);
       return {
         id: n.id,
         x: n.position?.x ?? 0,
         y: n.position?.y ?? 0,
         w: width,
         h: height,
-        init: n.data?.initialSize ?? null,
-        strokes: (n.data?.strokes ?? []).map((s) => ({
+        init: data?.initialSize ?? null,
+        strokes: (data?.strokes ?? []).map((s) => ({
           c: s.color ?? null,
           z: s.size ?? null,
           p: s.points,
@@ -280,7 +320,7 @@ function clusterFingerprint(
  * sketch cluster as a backdrop in the snapshot PNG.
  */
 export interface ContextImage {
-  node: RawNode;
+  node: CanvasNode;
   /**
    * Artifact key actually used to load the bytes — may come from
    * `node.data.src` (canvas.json) or from the node's sidecar markdown
@@ -315,9 +355,9 @@ function rectsOverlap(a: Rect, b: Rect): boolean {
  * file.
  */
 export function findContextImageNodes(
-  cluster: RawNode[],
-  allNodes: RawNode[],
-): RawNode[] {
+  cluster: CanvasNode[],
+  allNodes: CanvasNode[],
+): CanvasNode[] {
   if (cluster.length === 0) return [];
   const parentKey = cluster[0].parentId ?? null;
   const sketchRects: Rect[] = cluster
@@ -333,11 +373,11 @@ export function findContextImageNodes(
     .filter((r) => r.w > 0 && r.h > 0);
   if (sketchRects.length === 0) return [];
 
-  const out: RawNode[] = [];
+  const out: CanvasNode[] = [];
   const seen = new Set<string>();
   for (const n of allNodes) {
     if ((n.parentId ?? null) !== parentKey) continue;
-    if (n.data?.type !== 'image') continue;
+    if (getNodeType(n) !== 'image') continue;
     // NOTE: `data.src` is intentionally NOT checked here — image
     // nodes only persist their `src` in the sidecar markdown
     // (`nodes/<label>.md` frontmatter), so `canvas.json` always shows
@@ -373,7 +413,7 @@ const IMAGE_EXT_MIME: Record<string, string> = {
 /**
  * Read a non-empty string value from a node's markdown sidecar
  * frontmatter. The sidecar is the canonical (and sole) home for
- * `src` on artifact-backed nodes — see the comment on {@link RawNode}.
+ * `src` on artifact-backed nodes — see the note above {@link SketchData}.
  * Returns `null` when the node has no sidecar or the key is
  * missing/blank.
  */
@@ -390,7 +430,7 @@ function readSidecarString(
 
 async function loadContextImage(
   store: ReturnType<typeof getCanvasStore>,
-  node: RawNode,
+  node: CanvasNode,
 ): Promise<ContextImage | null> {
   const src = readSidecarString(store, node.id, 'src');
   if (!src) return null;
@@ -426,7 +466,7 @@ async function loadContextImage(
  * it without surfacing a misleading 1×1 PNG.
  */
 export function clusterToSvg(
-  nodes: RawNode[],
+  nodes: CanvasNode[],
   contextImages: ContextImage[] = [],
 ): { svg: string; width: number; height: number } | null {
   // World bbox = union of every contributing sketch + backdrop rect.
@@ -488,9 +528,10 @@ export function clusterToSvg(
   const innerPaths: string[] = [];
   let anyStrokes = false;
   for (const n of nodes) {
-    const strokes = n.data?.strokes ?? [];
+    const data = getSketchData(n);
+    const strokes = data?.strokes ?? [];
     if (strokes.length === 0) continue;
-    const init = n.data?.initialSize ?? { width: 1, height: 1 };
+    const init = data?.initialSize ?? { width: 1, height: 1 };
     const { width, height } = sketchEffectiveSize(n);
     // Same point transform the on-canvas renderer uses: scale points by
     // (current size / initial size) but keep stroke thickness untouched.
@@ -540,8 +581,8 @@ export function clusterToSvg(
  * an "accidental overlap" across frames should not collapse two
  * separate gestures into one picture.
  */
-function clusterSketchesByFrame(nodes: RawNode[]): RawNode[][] {
-  const buckets = new Map<string, RawNode[]>();
+function clusterSketchesByFrame(nodes: CanvasNode[]): CanvasNode[][] {
+  const buckets = new Map<string, CanvasNode[]>();
   for (const n of nodes) {
     const key = n.parentId ?? '__root__';
     const bucket = buckets.get(key);
@@ -550,9 +591,9 @@ function clusterSketchesByFrame(nodes: RawNode[]): RawNode[][] {
   }
 
   // findClusters wants `SpatialNode` ({ id, rect }). Build thin shims
-  // that wrap each RawNode so we can recover the original after.
-  type Shim = SpatialNode & { node: RawNode };
-  const out: RawNode[][] = [];
+  // that wrap each CanvasNode so we can recover the original after.
+  type Shim = SpatialNode & { node: CanvasNode };
+  const out: CanvasNode[][] = [];
   for (const bucket of buckets.values()) {
     const shims: Shim[] = bucket.map((n) => {
       const { width, height } = sketchEffectiveSize(n);
@@ -604,7 +645,7 @@ export async function snapshotNodesToArtifacts(
   if (!canvas) {
     throw new Error(`Canvas ${args.canvasId} not found`);
   }
-  const allNodes = (canvas.state.nodes ?? []) as RawNode[];
+  const allNodes = (canvas.state.nodes ?? []) as CanvasNode[];
   const byId = new Map(allNodes.map((n) => [n.id, n] as const));
 
   // Dedup ids while preserving first-seen order so the result reads
@@ -617,19 +658,48 @@ export async function snapshotNodesToArtifacts(
     orderedIds.push(id);
   }
 
-  const results: SnapshotNodeResult[] = [];
-  const sketchNodes: RawNode[] = [];
-
-  for (const id of orderedIds) {
+  // Pre-expand any frame ids into their (non-frame) descendants. A
+  // frame is a container — selecting one is a UX shortcut for
+  // "snapshot what's inside this frame" — so we recursively walk its
+  // children. `fromFrame` marks ids that were swept in via expansion
+  // so the main loop can be lenient about non-snapshottable types
+  // (note / text / pdf / video etc.) that happened to live inside the
+  // frame: the caller wanted the visual whole, not an error about
+  // each non-renderable child. Top-level ids still throw on
+  // unsupported types so direct misuse stays loud.
+  const expansion: Array<{ id: string; fromFrame: boolean }> = [];
+  const expansionSeen = new Set<string>();
+  const expand = (id: string, fromFrame: boolean): void => {
+    if (expansionSeen.has(id)) return;
     const node = byId.get(id);
     if (!node) {
+      if (fromFrame) return;
       throw new Error(`Node ${id} not found on canvas ${args.canvasId}.`);
     }
-    const type = node.data?.type;
+    if (getNodeType(node) === 'frame') {
+      for (const child of allNodes) {
+        if (child.parentId === id) expand(child.id, true);
+      }
+      return;
+    }
+    expansionSeen.add(id);
+    expansion.push({ id, fromFrame });
+  };
+  for (const id of orderedIds) expand(id, false);
+
+  const results: SnapshotNodeResult[] = [];
+  const sketchNodes: CanvasNode[] = [];
+
+  for (const { id, fromFrame } of expansion) {
+    // expansion only ever holds ids resolved via `byId`, so we can
+    // safely re-read without an existence guard.
+    const node = byId.get(id)!;
+    const type = getNodeType(node);
 
     if (type === 'image') {
       const src = readSidecarString(store, id, 'src');
       if (!src) {
+        if (fromFrame) continue;
         throw new Error(
           `Node ${id} (image) has no src — nothing to return. The artifact may have been deleted, or the node's markdown sidecar (nodes/<label>.md) is missing its \`src:\` frontmatter entry.`,
         );
@@ -641,6 +711,9 @@ export async function snapshotNodesToArtifacts(
       sketchNodes.push(node);
       continue;
     }
+    // Non-snapshottable types coming via frame expansion are skipped
+    // silently — the caller asked for the frame, not these children.
+    if (fromFrame) continue;
     if (type === 'note' || type === 'text' || type === 'pdf') {
       throw new Error(
         `Node ${id} is a ${type} node — it has no still image to convert. Use \`read("nodes/<file>.md")\` to fetch the sidecar (text, frontmatter, etc.) and weave that into your prompt instead.`,
@@ -651,13 +724,8 @@ export async function snapshotNodesToArtifacts(
         `Video node ${id} cannot be converted to a still image by this tool. If you need a frame, capture it on the canvas first; otherwise weave the node's sidecar content into your prompt via \`read("nodes/<file>.md")\`.`,
       );
     }
-    if (type === 'frame') {
-      throw new Error(
-        `Frame conversion is not yet supported. Pass individual children (image / sketch) instead.`,
-      );
-    }
     throw new Error(
-      `Node type "${type ?? 'unknown'}" cannot be converted to an image. Supported: image, sketch.`,
+      `Node type "${type ?? 'unknown'}" cannot be converted to an image. Supported: image, sketch, frame (expands to its children).`,
     );
   }
 
