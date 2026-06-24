@@ -605,7 +605,9 @@ async function renderClusterPng(svg: string, width: number): Promise<Buffer> {
 // pipeline + canvas image inputs produce, and both lay their pixel
 // dimensions in a fixed prefix that's a few bytes to read.
 
-function readPngDimensions(buf: Buffer): { width: number; height: number } | null {
+function readPngDimensions(
+  buf: Buffer,
+): { width: number; height: number } | null {
   // PNG: 8-byte signature + 4-byte IHDR length + 4-byte 'IHDR' +
   // 4-byte width + 4-byte height. All big-endian.
   if (buf.length < 24) return null;
@@ -623,7 +625,9 @@ function readPngDimensions(buf: Buffer): { width: number; height: number } | nul
   return { width, height };
 }
 
-function readJpegDimensions(buf: Buffer): { width: number; height: number } | null {
+function readJpegDimensions(
+  buf: Buffer,
+): { width: number; height: number } | null {
   // JPEG: SOI (FF D8), then a sequence of segments. Each non-SOI/EOI
   // segment is `FF <marker> <2-byte length>`. SOFn markers (`C0..CF`
   // except `C4` DHT, `C8` reserved, `CC` DAC) hold pixel dimensions:

@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  clusterToSvg,
-  type ContextImage,
-} from './snapshot-node.js';
+import { clusterToSvg, type ContextImage } from './snapshot-node.js';
 
 import type { CanvasNode } from '@sediment/shared/canvas-engine';
 

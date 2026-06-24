@@ -125,9 +125,7 @@ type ResolvedImage =
       sizeBytes?: number;
     };
 
-function parseDataUrl(
-  url: string,
-): { mimeType: string; data: string } | null {
+function parseDataUrl(url: string): { mimeType: string; data: string } | null {
   const match = /^data:([^;]+);base64,(.+)$/.exec(url);
   if (!match) return null;
   return { mimeType: match[1], data: match[2] };
@@ -1416,7 +1414,8 @@ const agentRoutes: FastifyPluginAsync = async (
       consumedSelectionImageIds.size === 0
         ? selectedImageAttachments
         : selectedImageAttachments.filter(
-            (a) => !a.originNodeId || !consumedSelectionImageIds.has(a.originNodeId),
+            (a) =>
+              !a.originNodeId || !consumedSelectionImageIds.has(a.originNodeId),
           );
 
     const allAttachments =
