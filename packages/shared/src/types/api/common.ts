@@ -56,8 +56,7 @@ export interface ContextTokensResponse {
    * call (`AssistantMessage.usage.input + .output`) — i.e. the true
    * size of the conversation context that will be re-submitted on the
    * next turn, including system prompt, tool schemas, role overhead
-   * and JSON framing. Falls back to a tokenizer estimate of the
-   * stored message text only when no assistant turn exists yet.
+   * and JSON framing. Returns `0` when no assistant turn exists yet.
    */
   contextTokens: number;
   /** Effective context window of the currently bound model, in tokens. */
