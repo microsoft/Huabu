@@ -170,10 +170,9 @@ async function ensureResvgReady(): Promise<void> {
     } catch {
       // Bundle path
       const wasmPath = path.join(
-        path.dirname(new URL(import.meta.url).pathname),
+        path.dirname(decodeURIComponent(new URL(import.meta.url).pathname)),
         'resvg-bg.wasm',
       );
-      wasmBytes = await readFile(wasmPath);
     }
     await initWasm(wasmBytes);
   })();
