@@ -102,14 +102,14 @@ export const IMAGE_CAPABILITIES: Readonly<
     sizeMode: 'enum',
     sizes: ['1024x1024', '1024x1536', '1536x1024', 'auto'] as const,
     qualities: ['low', 'medium', 'high', 'auto'] as const,
-    defaultQuality: 'medium',
+    defaultQuality: 'low',
   },
   'gpt-image-1-mini': {
     family: 'gpt-image-1-mini',
     sizeMode: 'enum',
     sizes: ['1024x1024', '1024x1536', '1536x1024', 'auto'] as const,
     qualities: ['low', 'medium', 'high', 'auto'] as const,
-    defaultQuality: 'medium',
+    defaultQuality: 'low',
   },
   'gpt-image-2': {
     family: 'gpt-image-2',
@@ -129,7 +129,7 @@ export const IMAGE_CAPABILITIES: Readonly<
       pixelCountMax: 8_294_400,
     },
     qualities: ['low', 'medium', 'high', 'auto'] as const,
-    defaultQuality: 'medium',
+    defaultQuality: 'low',
   },
 });
 

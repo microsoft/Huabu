@@ -71,24 +71,72 @@ import type { FastifyPluginAsync } from 'fastify';
 // ==================== Helpers ====================
 
 /**
- * Hard cap on the byte size of an external image we are willing to
+ * Hard cap on the decoded byte size of an image we are willing to
  * inline as base64 in a vision content part. Anything larger is
- * returned as a bare URL (the model will see the link but not the
- * pixels) so a hostile or accidentally-huge URL cannot blow up the
- * Node process. 10 MB comfortably accommodates UI screenshots while
- * keeping memory pressure bounded.
+ * dropped (an explanatory text part is emitted in its place so the
+ * agent can request a downsampled version) so a hostile or
+ * accidentally-huge artifact cannot blow up the Node process — and,
+ * just as importantly, so the resulting request body stays below
+ * every upstream LLM provider's body-size limit. Most providers
+ * we target reject requests around 8–10 MB total; vision-capable
+ * Copilot endpoints can be tighter still. 4 MB per image leaves
+ * head-room for system prompt + tool schemas + multiple attachments
+ * without tripping `413 Request Entity Too Large` from the provider.
+ *
+ * Applies uniformly to:
+ *  - external `http(s)://` images fetched into memory below,
+ *  - canvas-scoped `data:` URLs already resolved upstream,
+ *  - pre-rendered sketch snapshots (whose PNG size is also
+ *    bounded at the source by `CLUSTER_MAX_PIXELS`).
  */
-const MAX_INLINE_IMAGE_BYTES = 10 * 1024 * 1024;
+const MAX_INLINE_IMAGE_BYTES = 4 * 1024 * 1024;
+
+/** Decoded byte size of a base64 string (no allocation). */
+function base64DecodedByteLength(b64: string): number {
+  const len = b64.length;
+  if (len === 0) return 0;
+  let padding = 0;
+  if (b64.charCodeAt(len - 1) === 61 /* '=' */) padding++;
+  if (b64.charCodeAt(len - 2) === 61 /* '=' */) padding++;
+  return Math.floor((len * 3) / 4) - padding;
+}
 
 function getOrCreateThreadId(value: unknown): string {
   if (typeof value === 'string' && value.trim().length > 0) return value;
   return createId('thread');
 }
 
+/**
+ * Outcome of resolving an image URL for vision inlining.
+ *
+ * - `inline`: we have base64 bytes the LLM can see.
+ * - `skipped`: we resolved the URL but the image was too large to
+ *   inline (`reason: 'too_large'`) or the source wasn't an image
+ *   (`reason: 'not_image'` / `'fetch_failed'`). The caller should
+ *   surface a textual placeholder instead of dropping the part
+ *   silently — the agent then knows to ask for a downsampled
+ *   version or to inspect the node directly.
+ */
+type ResolvedImage =
+  | { kind: 'inline'; data: string; mimeType: string }
+  | {
+      kind: 'skipped';
+      reason: 'too_large' | 'not_image' | 'fetch_failed';
+      sizeBytes?: number;
+    };
+
+function parseDataUrl(
+  url: string,
+): { mimeType: string; data: string } | null {
+  const match = /^data:([^;]+);base64,(.+)$/.exec(url);
+  if (!match) return null;
+  return { mimeType: match[1], data: match[2] };
+}
+
 async function resolveImageUrl(
   url: string,
   defaultCanvasId: string | null,
-): Promise<string> {
+): Promise<ResolvedImage> {
   // Canvas-scoped artifacts + already-baked data: URLs go through the
   // shared helper. It returns the input unchanged for unrelated URLs
   // (external http(s), bare paths, etc.).
@@ -108,7 +156,20 @@ async function resolveImageUrl(
     },
     defaultCanvasId,
   );
-  if (resolved.startsWith('data:')) return resolved;
+  if (resolved.startsWith('data:')) {
+    const parsed = parseDataUrl(resolved);
+    if (!parsed) {
+      return { kind: 'skipped', reason: 'not_image' };
+    }
+    // Apply the same byte cap we enforce on external fetches — a
+    // multi-MB canvas artifact would otherwise sail through and tip
+    // the request over the upstream LLM's body limit.
+    const sizeBytes = base64DecodedByteLength(parsed.data);
+    if (sizeBytes > MAX_INLINE_IMAGE_BYTES) {
+      return { kind: 'skipped', reason: 'too_large', sizeBytes };
+    }
+    return { kind: 'inline', data: parsed.data, mimeType: parsed.mimeType };
+  }
 
   // External image URLs: fetch and inline as base64 so the LLM can see them.
   if (resolved.startsWith('http://') || resolved.startsWith('https://')) {
@@ -116,9 +177,11 @@ async function resolveImageUrl(
       const res = await fetch(resolved, {
         signal: AbortSignal.timeout(10_000),
       });
-      if (!res.ok) return resolved;
+      if (!res.ok) return { kind: 'skipped', reason: 'fetch_failed' };
       const contentType = res.headers.get('content-type') ?? '';
-      if (!contentType.startsWith('image/')) return resolved;
+      if (!contentType.startsWith('image/')) {
+        return { kind: 'skipped', reason: 'not_image' };
+      }
 
       // Cap the inlined payload so a hostile / accidentally-huge URL
       // (e.g. a multi-GB camera RAW served from a CDN) cannot exhaust
@@ -131,7 +194,11 @@ async function resolveImageUrl(
         Number.isFinite(declaredSize) &&
         declaredSize > MAX_INLINE_IMAGE_BYTES
       ) {
-        return resolved;
+        return {
+          kind: 'skipped',
+          reason: 'too_large',
+          sizeBytes: declaredSize,
+        };
       }
 
       const body = res.body;
@@ -139,8 +206,18 @@ async function resolveImageUrl(
         // No streamable body — fall back to the buffered path but still
         // bound the result.
         const buffer = Buffer.from(await res.arrayBuffer());
-        if (buffer.byteLength > MAX_INLINE_IMAGE_BYTES) return resolved;
-        return `data:${contentType.split(';')[0]};base64,${buffer.toString('base64')}`;
+        if (buffer.byteLength > MAX_INLINE_IMAGE_BYTES) {
+          return {
+            kind: 'skipped',
+            reason: 'too_large',
+            sizeBytes: buffer.byteLength,
+          };
+        }
+        return {
+          kind: 'inline',
+          data: buffer.toString('base64'),
+          mimeType: contentType.split(';')[0],
+        };
       }
 
       const reader = body.getReader();
@@ -154,18 +231,23 @@ async function resolveImageUrl(
         if (total > MAX_INLINE_IMAGE_BYTES) {
           // Release the stream so the underlying connection can close.
           await reader.cancel().catch(() => {});
-          return resolved;
+          return { kind: 'skipped', reason: 'too_large', sizeBytes: total };
         }
         chunks.push(value);
       }
       const buffer = Buffer.concat(chunks);
-      return `data:${contentType.split(';')[0]};base64,${buffer.toString('base64')}`;
+      return {
+        kind: 'inline',
+        data: buffer.toString('base64'),
+        mimeType: contentType.split(';')[0],
+      };
     } catch {
-      return resolved;
+      return { kind: 'skipped', reason: 'fetch_failed' };
     }
   }
 
-  return resolved;
+  // Unknown scheme (bare relative path, etc.) — we can't load bytes.
+  return { kind: 'skipped', reason: 'fetch_failed' };
 }
 
 /**
@@ -231,15 +313,24 @@ async function buildUserContent(
         // Resolve image URL to base64 for vision
         if (att.url) {
           const resolved = await resolveImageUrl(att.url, canvasId);
-          if (resolved.startsWith('data:')) {
-            const match = /^data:([^;]+);base64,(.+)$/.exec(resolved);
-            if (match) {
-              parts.push({
-                type: 'image',
-                data: match[2],
-                mimeType: match[1],
-              });
-            }
+          if (resolved.kind === 'inline') {
+            parts.push({
+              type: 'image',
+              data: resolved.data,
+              mimeType: resolved.mimeType,
+            });
+          } else if (resolved.reason === 'too_large') {
+            // Don't silently drop a too-large image — tell the agent
+            // exactly why and how to recover. The placeholder mentions
+            // the origin node ids (already in `originRef`) so the
+            // model can call `snapshot_nodes` for a downscaled PNG.
+            const mb = resolved.sizeBytes
+              ? (resolved.sizeBytes / (1024 * 1024)).toFixed(1)
+              : '?';
+            parts.push({
+              type: 'text',
+              text: `[Attached Image: ${label}${originRef} — omitted from vision (~${mb} MB exceeds the ${(MAX_INLINE_IMAGE_BYTES / (1024 * 1024)).toFixed(0)} MB inline cap). Call \`snapshot_nodes\` on the origin node id to get a downscaled PNG, or \`read\` the node's sidecar for its description.]`,
+            });
           }
         }
         // If the image also carries extracted text content (e.g. PDF capture with OCR text)
@@ -1237,45 +1328,105 @@ const agentRoutes: FastifyPluginAsync = async (
     // selecting an unchanged cluster repeatedly is essentially free.
     // Failures are logged but never block the user's prompt — the
     // worst case is the agent has to call `snapshot_nodes` manually.
-    const sketchAttachments: ChatAttachment[] = [];
+    //
+    // When the selection contains BOTH a sketch and an image node
+    // that spatially overlaps it (e.g. the user annotated a photo),
+    // we hand both ids to `snapshotNodesToArtifacts` so it can
+    // composite them into one PNG instead of sending two vision parts
+    // for the same pixels. Any image that came back consumed inside a
+    // composite is removed from `selectedImageAttachments` below so
+    // it isn't sent a second time as a standalone part — duplicating
+    // image bytes was the direct cause of the 8 MB request bodies that
+    // tripped `413 Request Entity Too Large` on Anthropic / Copilot.
+    const snapshotAttachments: ChatAttachment[] = [];
+    const consumedSelectionImageIds = new Set<string>();
     if (canvasContext?.selectedNodes && canvasId) {
       const sketchIds = collectSketchNodeIds(canvasContext.selectedNodes);
-      if (sketchIds.length > 0) {
+      // Only pull image ids into the snapshot call when there are also
+      // sketches in the selection — without strokes there is nothing
+      // to composite the image under, and a standalone pass-through is
+      // already produced by `selectedImageAttachments`. This keeps the
+      // pure-image path completely unchanged.
+      const selectedImageIds =
+        sketchIds.length > 0
+          ? selectedImageAttachments
+              .map((a) => a.originNodeId)
+              .filter((id): id is string => typeof id === 'string')
+          : [];
+      const snapshotIds = [...sketchIds, ...selectedImageIds];
+      if (snapshotIds.length > 0) {
         try {
           const rasterResults = await snapshotNodesToArtifacts({
-            nodeIds: sketchIds,
+            nodeIds: snapshotIds,
             canvasId,
           });
+          const selectedImageIdSet = new Set(selectedImageIds);
           for (const r of rasterResults) {
-            const n = r.originNodeIds.length;
-            sketchAttachments.push({
+            const strokeIds = r.originNodeIds.filter(
+              (id) => !selectedImageIdSet.has(id),
+            );
+            const imageIds = r.originNodeIds.filter((id) =>
+              selectedImageIdSet.has(id),
+            );
+            // Pure pass-through (image returned as its own artifact,
+            // no strokes composited in): leave it alone. The original
+            // `selectedImageAttachments` entry already owns that vision
+            // part with its richer label, so we neither emit a
+            // duplicate `snapshotAttachment` here NOR mark the id as
+            // consumed (otherwise the dedup filter below would drop
+            // the pass-through entry too, losing the image entirely).
+            if (strokeIds.length === 0) continue;
+            // Composite: the image's pixels are now baked into this
+            // sketch artifact, so mark them consumed and drop the
+            // standalone entry below to avoid sending them twice.
+            for (const iid of imageIds) consumedSelectionImageIds.add(iid);
+            const nStrokes = strokeIds.length;
+            const nImages = imageIds.length;
+            const label =
+              nImages > 0
+                ? `Sketch cluster (${nStrokes} stroke node${
+                    nStrokes === 1 ? '' : 's'
+                  } + ${nImages} backdrop image${nImages === 1 ? '' : 's'})`
+                : nStrokes === 1
+                  ? 'Sketch (1 stroke node)'
+                  : `Sketch cluster (${nStrokes} stroke nodes)`;
+            snapshotAttachments.push({
               type: 'image',
               source: 'selection',
               url: r.src,
-              label:
-                n === 1
-                  ? 'Sketch (1 stroke node)'
-                  : `Sketch cluster (${n} stroke nodes)`,
+              label,
               originNodeIds: r.originNodeIds,
             });
           }
         } catch (err) {
           fastify.log.warn(
-            { err, sketchIds, canvasId },
+            { err, snapshotIds, canvasId },
             '[agent.route] sketch auto-snapshot failed',
           );
         }
       }
     }
 
+    // Drop selection image attachments that are already composited
+    // inside a snapshot artifact. The model still learns about them
+    // via the `[SYSTEM selectedNodeIds:...]` metadata and the
+    // snapshot's `originNodeIds` caption, so it can still call
+    // `inspect_nodes` / `read` on them if needed.
+    const dedupedImageAttachments =
+      consumedSelectionImageIds.size === 0
+        ? selectedImageAttachments
+        : selectedImageAttachments.filter(
+            (a) => !a.originNodeId || !consumedSelectionImageIds.has(a.originNodeId),
+          );
+
     const allAttachments =
-      selectedImageAttachments.length > 0 ||
-      sketchAttachments.length > 0 ||
+      dedupedImageAttachments.length > 0 ||
+      snapshotAttachments.length > 0 ||
       (attachments && attachments.length > 0)
         ? [
             ...(attachments ?? []),
-            ...selectedImageAttachments,
-            ...sketchAttachments,
+            ...dedupedImageAttachments,
+            ...snapshotAttachments,
           ]
         : undefined;
 

@@ -550,13 +550,21 @@ export const snapshotNodesParamsSchema = Type.Object({
     description:
       'Ids of the nodes to snapshot, as they appear in `get_canvas_outline` / `inspect_nodes`. All nodes must live on the current canvas. Pass a single id for a one-shot snapshot; pass multiple ids to let the tool spatially cluster related sketches into one image per cluster.',
   }),
+  maxPixels: Type.Optional(
+    Type.Integer({
+      minimum: 256,
+      maximum: 4096,
+      description:
+        'Optional longest-edge pixel cap for the output PNG (256-4096). Defaults to 1280 — enough resolution for vision while keeping a single attachment well under the upstream LLM’s body-size limit. Reduce this (e.g. to 768 or 512) when a previous turn returned `[Attached Image: … omitted from vision (~X.X MB exceeds the inline cap)]` so the resulting PNG is small enough to actually be sent. Applies uniformly to: sketch clusters (re-rendered at the new cap), and image / pdf-derived artifacts (re-rasterized only when the source’s longest edge exceeds `maxPixels`; otherwise the original artifact is returned unchanged). Result is content-addressed by `(source, maxPixels)`, so the same call is essentially free on repeat.',
+    }),
+  ),
 });
 
 export const snapshotNodesTool: ToolDefinition = {
   name: 'snapshot_nodes',
   label: 'Snapshot nodes',
   description:
-    'Produce a PNG snapshot of one or more canvas nodes — used both as a vision attachment so the LLM can SEE the node and as `generate_image.referenceArtifactSrcs` input. Supported types: `sketch` (renders strokes to PNG; overlapping `image` siblings are composited as a backdrop so the snapshot matches the on-canvas view), `image` (reuses the node\'s existing artifact key, no new file), and `frame` (recursively expands to its children — image/sketch children produce snapshots, other child types are skipped silently). For standalone `note` / `text` / `pdf` / `video` use `read("nodes/<file>.md")` instead — there is no still image to snapshot. Multiple sketches in one call are bucketed by parent frame and spatially clustered (200 px edge-to-edge); each cluster is content-addressed, so re-snapshotting an unchanged cluster reuses its `src`. The chat route auto-runs this on selected sketches before the LLM\'s first turn (the keys appear in the user-message metadata), so call manually only for non-selected nodes. Returns `Array<{src, width, height, originNodeIds}>`; `originNodeIds` lists the ids that share this artifact (one id for image; N stroke ids for a sketch cluster — backdrop image siblings are not listed).',
+    'Produce a PNG snapshot of one or more canvas nodes — used both as a vision attachment so the LLM can SEE the node and as `generate_image.referenceArtifactSrcs` input. Supported types: `sketch` (renders strokes to PNG), `image` (reuses the node\'s existing artifact key, no new file — unless `maxPixels` forces a downscale), and `frame` (recursively expands to its children — image/sketch children produce snapshots, other child types are skipped silently). For standalone `note` / `text` / `pdf` / `video` use `read("nodes/<file>.md")` instead — there is no still image to snapshot. **Snapshots contain only the nodes you ask for** — the tool never scans for uninvited neighbours. When you pass an `image` id together with a `sketch` id and the two **spatially overlap** in the same frame, the image is composited under the strokes as a backdrop and you receive ONE artifact for that pair (the image\'s `originNodeId` appears inside the sketch artifact\'s `originNodeIds`, not as a separate entry). Non-overlapping images, and images passed without any sketch, pass through as their own artifact. Multiple sketches in one call are bucketed by parent frame and spatially clustered (200 px edge-to-edge); each cluster is content-addressed, so re-snapshotting an unchanged input reuses its `src`. The chat route auto-runs this on the user\'s selection before the LLM\'s first turn (any selected sketches plus, when a sketch is also selected, the selected images so they can be composited as backdrop). The resulting keys appear in the user-message metadata, so call this tool manually only for non-selected nodes — or to retry an oversized image with a smaller `maxPixels`. Returns `Array<{src, width, height, originNodeIds}>`; `originNodeIds` lists every node that contributed pixels to that artifact (a composited sketch+image cluster lists all stroke ids plus the backdrop image ids).',
   parameters: snapshotNodesParamsSchema,
 };
 
