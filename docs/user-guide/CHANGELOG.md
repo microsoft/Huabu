@@ -8,7 +8,7 @@
 
 外部（ACP）agent 的 prompt 卡片（PreparedPromptCard）做了三处体验修复：
 
-1. **pending 文案改为「Connecting to *agent*…」**：之前卡片在等待期一直显示「Preparing prompt for *agent*…」。但 prompt 现在是确定性、瞬时构建的——这段 spinner 实际等待的是 ACP 会话连上外部 agent，而不是「准备 prompt」。文案改得名副其实（且不向用户暴露内部「session」概念）。
+1. **pending 文案改为「Connecting to _agent_…」**：之前卡片在等待期一直显示「Preparing prompt for _agent_…」。但 prompt 现在是确定性、瞬时构建的——这段 spinner 实际等待的是 ACP 会话连上外部 agent，而不是「准备 prompt」。文案改得名副其实（且不向用户暴露内部「session」概念）。
 2. **连接失败不再无限转圈**：如果这一轮在 prompt 下发前就失败（最常见是 agent 没连上），卡片以前会永远停在 spinner。现在前端在收到 `error` 时会把仍处于 pending 的卡片落定为失败态（spinner 停止），具体原因照旧显示在下方的错误状态行里。
 3. **卡片展开后能看到完整 prompt**：首轮会话会把一次性 system preamble（角色设定 + `## Canvas Tools (Sideband)` 工具说明）随首条用户消息搭车下发；现在这段 preamble 也会随 `ExternalAgentPrompt.systemPreamble` 带到前端，卡片展开后在 `Task` 之上多出一个 `System` 段，让用户看到 agent 实际收到的完整 prompt。后续轮次不含 preamble，卡片也就不显示 `System` 段。
 
