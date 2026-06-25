@@ -42,8 +42,7 @@ export const QuestionNode = memo(
     const processingRef = useRef<AbortController>();
     const suppressBlurAutoRunRef = useRef(false);
 
-    const input = (data as any).input;
-    const inputContent = input?.kind === 'text' ? (input.content ?? '') : '';
+    const inputContent = typeof data.content === 'string' ? data.content : '';
 
     // ------------------------------------------------------------------
     // Configured external-agent profiles — feeds the `@` mention picker.
@@ -285,7 +284,7 @@ export const QuestionNode = memo(
         // Commit input to store if changed.
         if (contentChanged) {
           updateNodeData(id, {
-            input: { kind: 'text', content: trimmed },
+            content: trimmed,
           });
         }
 
@@ -445,7 +444,7 @@ export const QuestionNode = memo(
 
       if (trimmed !== inputContent) {
         updateNodeData(id, {
-          input: { kind: 'text', content: trimmed },
+          content: trimmed,
         });
       }
 

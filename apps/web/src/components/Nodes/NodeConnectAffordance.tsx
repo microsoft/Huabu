@@ -115,7 +115,7 @@ export function useCreateConnectedNode(id: string) {
         kind === 'note'
           ? { content: '', origin: { type: 'user-created' as const } }
           : {
-              input: { kind: 'text' as const, content: '' },
+              content: '',
               origin: { type: 'user-created' as const },
             };
       addNode({

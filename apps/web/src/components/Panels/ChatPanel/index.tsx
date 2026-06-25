@@ -577,7 +577,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       nodeType: 'question',
       data: {
         type: 'question',
-        input: { kind: 'text', content },
+        content,
         status: 'done',
         viewed: true,
         threadId,
