@@ -106,10 +106,18 @@ function toMessage(error: unknown): string {
 }
 
 /**
- * Open a directory in the host OS file manager. Detached + unref'd so the
- * server never waits on (or is killed with) the spawned process, and we
- * deliberately ignore the exit code — Windows `explorer` returns 1 even
- * on success. Throws only if the binary itself cannot be spawned.
+ * Best-effort: open a directory in the host OS file manager. Detached +
+ * unref'd so the server never waits on (or is killed with) the spawned
+ * process, and we deliberately ignore the exit code — Windows `explorer`
+ * returns 1 even on success.
+ *
+ * Fire-and-forget by design: `spawn` reports a missing binary
+ * asynchronously via the `'error'` event rather than throwing, so the
+ * caller can't synchronously tell whether the open succeeded. Both that
+ * async failure and the rare synchronous spawn throw (EMFILE / ENOMEM)
+ * are swallowed — the user simply sees nothing open. The route already
+ * guarded the path with existsSync, so there is no state to roll back.
+ * Never throws.
  */
 function openInFileManager(targetPath: string): void {
   const cmd =
@@ -118,16 +126,19 @@ function openInFileManager(targetPath: string): void {
       : process.platform === 'darwin'
         ? 'open'
         : 'xdg-open';
-  const child = spawn(cmd, [targetPath], {
-    detached: true,
-    stdio: 'ignore',
-  });
-  child.on('error', () => {
-    // Swallow async spawn errors (e.g. missing xdg-open on a headless
-    // box); the user simply sees nothing open. The route already guarded
-    // the path with existsSync, so there is no state to roll back.
-  });
-  child.unref();
+  try {
+    const child = spawn(cmd, [targetPath], {
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.on('error', () => {
+      // Swallow async spawn errors (e.g. missing xdg-open on a headless
+      // box). Best-effort — nothing to roll back.
+    });
+    child.unref();
+  } catch {
+    // Rare synchronous spawn throw (EMFILE / ENOMEM). Best-effort.
+  }
 }
 
 /**
@@ -1244,15 +1255,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     if (!existsSync(dir)) {
       return reply.code(404).send({ message: 'Nodes folder not found' });
     }
-    try {
-      openInFileManager(dir);
-    } catch (error) {
-      request.log.error(
-        { canvasId, err: error instanceof Error ? error.message : error },
-        'Failed to open nodes folder',
-      );
-      return reply.code(500).send({ message: 'Failed to open nodes folder' });
-    }
+    // Fire-and-forget: `openInFileManager` is best-effort and never
+    // throws (spawn surfaces a missing binary asynchronously, which it
+    // swallows). There's no reliable synchronous success signal to gate
+    // a 500 on, so we always report success once the spawn is issued.
+    openInFileManager(dir);
     return reply.send({ success: true });
   });
 

@@ -898,13 +898,15 @@ export class CanvasStore {
    * - `'deleted'`: the file existed and was successfully unlinked.
    * - `'absent'`: no sidecar on disk to begin with (idempotent success).
    *
-   * Throws {@link CanvasStoreIOError} when the file exists but
-   * `unlinkSync` fails (e.g. Windows `EPERM` from AV / file-watcher,
-   * EROFS, EACCES). The in-memory NameIndex is left untouched so a
-   * retry sees the same state. Callers must let the error bubble —
-   * silently swallowing it would leave the canvas.json without a
-   * reference to the node while its `.md` stays on disk as a permanent
-   * orphan.
+   * Throws {@link CanvasStoreIOError} when the file exists but every
+   * unlink attempt fails (e.g. Windows `EPERM` from AV / file-watcher,
+   * EROFS, EACCES). Like {@link writeNode}'s rename path, the unlink is
+   * routed through {@link tryUnlink} so an ultra-transient lock is ridden
+   * out with a few immediate retries before we give up. The in-memory
+   * NameIndex is left untouched on failure so a retry sees the same
+   * state. Callers must let the error bubble — silently swallowing it
+   * would leave the canvas.json without a reference to the node while its
+   * `.md` stays on disk as a permanent orphan.
    */
   deleteNode(nodeId: string): 'deleted' | 'absent' {
     const idx = this.nodeIndex();
@@ -914,15 +916,17 @@ export class CanvasStore {
       idx.remove(nodeId);
       return 'absent';
     }
-    try {
-      unlinkSync(filePath);
-      idx.remove(nodeId);
-      return 'deleted';
-    } catch (err) {
-      const message = `deleteNode unlink failed for ${nodeId} (${filePath}): ${toErrnoString(err)}`;
-      log.warn({ err, canvasId: this.canvasId, nodeId, filePath }, message);
-      throw new CanvasStoreIOError(message, { cause: err });
+    const removed = this.tryUnlink(filePath);
+    if (!removed.ok) {
+      const message = `deleteNode unlink failed for ${nodeId} (${filePath}): ${toErrnoString(removed.error)}`;
+      log.warn(
+        { err: removed.error, canvasId: this.canvasId, nodeId, filePath },
+        message,
+      );
+      throw new CanvasStoreIOError(message, { cause: removed.error });
     }
+    idx.remove(nodeId);
+    return 'deleted';
   }
 
   listNodes(): NodeContentSummary[] {

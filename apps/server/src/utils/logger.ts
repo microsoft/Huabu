@@ -135,11 +135,23 @@ const options: LoggerOptions = {
   // keys, basic-auth headers, etc. never land on disk. Pino's redact
   // paths are AST-checked at logger construction time, so a malformed
   // path here would throw on boot rather than silently fail.
+  //
+  // Each secret name is listed twice: once bare (matches a top-level
+  // field, e.g. `log.warn({ apiKey })`) and once wildcarded `*.<name>`
+  // (matches one level of nesting, e.g. `{ config: { apiKey } }`). Pino
+  // wildcards only span a single segment, so deeply-nested secrets are
+  // still not covered — callers must avoid burying credentials inside
+  // arbitrary logged objects.
   redact: {
     paths: [
       'req.headers.authorization',
       'req.headers.cookie',
       'req.headers["proxy-authorization"]',
+      'apiKey',
+      'api_key',
+      'token',
+      'password',
+      'authorization',
       '*.apiKey',
       '*.api_key',
       '*.token',
@@ -177,5 +189,3 @@ export function getLogger(
  * tooling (e.g. an "export support bundle" feature) and tests.
  */
 export const LOG_FILE_PATH = logFilePath;
-
-console.log('allowed in logger.ts');
