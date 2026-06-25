@@ -87,9 +87,6 @@ export default defineConfig(({ mode }) => {
         '@': fileURLToPath(new URL('./src', import.meta.url)),
       },
     },
-    optimizeDeps: {
-      include: ['gpt-tokenizer/encoding/o200k_base'],
-    },
     server: {
       // Pre-transform the heavy CanvasPage import graph in the background
       // right after `pnpm dev` finishes starting, so by the time you open the

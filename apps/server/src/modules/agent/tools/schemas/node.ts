@@ -94,7 +94,12 @@ export const NodeCreateInputSchema = Type.Object({
   ),
   nodeType: NodeTypeSchema,
   data: Type.Optional(NodeDataSchema),
-  position: Type.Optional(PointSchema),
+  position: Type.Optional(
+    Type.Object(PointSchema.properties, {
+      description:
+        'Required. The top-left position of the new node. Although marked optional in the schema for compatibility, you MUST always specify explicit coordinates because the auto-layout engine has been removed.',
+    }),
+  ),
   size: Type.Optional(NodeSizeSchema),
   parentId: Type.Optional(
     Type.Union([Type.String(), Type.Null()], {

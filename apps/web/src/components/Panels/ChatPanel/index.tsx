@@ -102,6 +102,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const clearMessages = useChatStore((state) => state.clearMessages);
   const threadId = useChatStore((state) => state.threadId);
   const canvasId = useCanvasStore((state) => state.canvasId);
+  const addNode = useCanvasStore((state) => state.addNode);
   const llmConfig = useLLMStore((state) => state.config);
   const llmModels = useLLMStore((state) => state.models);
   const llmLoading = useLLMStore((state) => state.loading);
@@ -552,23 +553,52 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     [isLoading, canvasId, clearMessages],
   );
 
+  const canSave =
+    !viewingQuestionThread &&
+    !viewingSketchCluster &&
+    !isLoading &&
+    messages.some((m) => m.role === 'user' && m.content.trim().length > 0);
+  const handleSaveChat = useCallback(() => {
+    if (isLoading) return;
+    const firstUser = messages.find(
+      (m): m is Extract<typeof m, { role: 'user' }> => m.role === 'user',
+    );
+    if (!firstUser) return;
+    const content = firstUser.content.trim();
+    if (!content) return;
+
+    addNode({
+      nodeType: 'question',
+      data: {
+        type: 'question',
+        input: { kind: 'text', content },
+        status: 'done',
+        viewed: true,
+        threadId,
+        agentBinding,
+        agentMode: mode,
+      },
+    });
+
+    clearMessages(canvasId || undefined, {
+      ...(agentBinding.kind === 'external' ? { binding: agentBinding } : {}),
+      lastAction: mode,
+    });
+  }, [
+    isLoading,
+    messages,
+    threadId,
+    agentBinding,
+    mode,
+    canvasId,
+    addNode,
+    clearMessages,
+  ]);
+
   return (
     <SidebarPanel
       title={panelTitle}
       tabs={
-        // The panel title doubles as the "who am I chatting with"
-        // readout (e.g. "Chat with claude"). The active binding is
-        // immutable for the life of the thread, so the title is a
-        // pure label — switching agents happens through the
-        // `NewChatMenu` in the tools slot (it forks a fresh thread).
-        //
-        // For external bindings whose agent has dropped off the
-        // connected list we render an inline "Disconnected" pill so
-        // the user sees up-front why the next send will fail (the
-        // server throws "External agent '<alias>' is not connected"
-        // and the failure ends up in thread history as a system
-        // error). The pill stays subtle (warning, not danger) since
-        // the agent can come back at any moment.
         <span className="flex min-w-0 flex-1 items-center gap-2">
           <span className="min-w-0 truncate" title={panelTitle}>
             {panelTitle}
@@ -616,6 +646,8 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
             profiles={acpProfiles}
             onRefreshProfiles={refreshAcpProfiles}
             onSelect={handleStartNewChat}
+            onSave={handleSaveChat}
+            canSave={canSave}
             disabled={!isHistoryLoaded}
             busy={isLoading}
           />
@@ -625,9 +657,8 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       <div className="flex h-full flex-col gap-2 overflow-visible pt-3">
         <MessageList
           messages={viewingSketchCluster ? sketchMessages : messages}
-          isLoading={
-            viewingSketchCluster ? false : isLoading || !isHistoryLoaded
-          }
+          isLoading={viewingSketchCluster ? false : isLoading}
+          isHistoryLoading={!viewingSketchCluster && !isHistoryLoaded}
           hideAIActions={!!viewingSketchCluster}
           onIntentReselect={handleIntentReselect}
           onRetry={() => {

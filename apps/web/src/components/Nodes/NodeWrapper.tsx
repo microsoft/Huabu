@@ -495,13 +495,14 @@ export const NodeWrapper = memo(
               !accentTokens &&
               'shadow',
             !accentTokens && !fillColor && 'bg-transparent',
-            selected
-              ? type === 'sketch'
-                ? 'ring-info/50 ring'
-                : 'ring-info ring'
-              : type === 'sketch'
-                ? ''
-                : 'ring-edge-default hover:ring',
+            // Selection outline is rendered as a screen-space HUD overlay
+            // by `<SelectionOutlines />` (Canvas-level), not as a ring on
+            // the node DOM. Mirroring Figma: clicking a node MUST NOT
+            // change its z-order, so the selection indicator lives on a
+            // layer that is always on top regardless of node stacking.
+            // Hover ring (only for non-sketch) stays here because it
+            // tracks `:hover`, which the overlay cannot observe.
+            !selected && type !== 'sketch' && 'ring-edge-default hover:ring',
 
             type !== 'sketch' && 'border-3 border-transparent',
             // Question nodes need visible overflow for status badges and progress bar

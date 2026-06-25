@@ -7,7 +7,9 @@ import { PlanCard } from './PlanCard';
 import { ThinkingCard } from './ThinkingCard';
 import { ThinkingPhaseCard } from './ThinkingPhaseCard';
 import { CanvasCommandCard } from './Tool/CanvasCommandCard';
+import { ImageGenerationCard } from './Tool/ImageGenerationCard';
 import { MergedAgentToolRow } from './Tool/MergedAgentToolRow';
+import { SnapshotNodesCard } from './Tool/SnapshotNodesCard';
 import { ToolCallCard } from './Tool/ToolCallCard';
 import { WebSearchToolDisplay } from './Tool/WebSearchToolDisplay';
 import { NODE_ICON } from '../../../config/nodeIcons';
@@ -61,6 +63,22 @@ function renderToolGroup(
         <div key={key} className="flex flex-col gap-1">
           {group.parts.map((p) => (
             <WebSearchToolDisplay key={p.toolCallId} part={p} />
+          ))}
+        </div>
+      );
+    case 'image_generation':
+      return (
+        <div key={key} className="flex flex-col gap-1">
+          {group.parts.map((p) => (
+            <ImageGenerationCard key={p.toolCallId} part={p} />
+          ))}
+        </div>
+      );
+    case 'snapshot_nodes':
+      return (
+        <div key={key} className="flex flex-col gap-1">
+          {group.parts.map((p) => (
+            <SnapshotNodesCard key={p.toolCallId} part={p} />
           ))}
         </div>
       );

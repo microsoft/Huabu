@@ -1237,9 +1237,10 @@ const useCanvasStore = create<RFState>()(
     dispatchUiIntent: (intent) => {
       const { rfInstance, canvasWrapper } = get();
       // Compute the viewport centre in flow coordinates so resolvers can
-      // anchor "no placement point" additions to the visible area instead
-      // of letting the shared engine fall back to force-directed layout.
-      // Skips silently when the canvas DOM is not yet mounted.
+      // anchor "no placement point" additions to the visible area. The
+      // shared engine no longer ships a layout fallback, so resolvers
+      // default to `(0, 0)` when neither a placement point nor a viewport
+      // centre is available (initial boot before React Flow registers).
       let viewportCenter: Point | undefined;
       if (rfInstance && canvasWrapper) {
         const rect = canvasWrapper.getBoundingClientRect();

@@ -189,11 +189,6 @@ const groupsRaw: RawGroup[] = [
         load: () => import('./sections/nodes/Edges'),
       },
       {
-        to: '/docs/concepts/auto-layout',
-        label: 'Auto-layout',
-        load: () => import('./sections/concepts/AutoLayout'),
-      },
-      {
         to: '/docs/concepts/alignment',
         label: 'Layout & Alignment',
         load: () => import('./sections/concepts/Alignment'),

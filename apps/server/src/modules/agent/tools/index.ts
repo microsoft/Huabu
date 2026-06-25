@@ -11,9 +11,16 @@
  * {@link buildAgentToolsByNames} resolves names against `TOOL_REGISTRY`.
  */
 
+import {
+  describeQualitiesForPrompt,
+  describeSizesForPrompt,
+  getImageCapabilities,
+} from '@sediment/shared';
+
 import { TOOL_REGISTRY, type ToolDefinition } from './definitions.js';
 import { executeTool } from './executor.js';
 import { loadAgent, type AgentId } from '../../../prompt/index.js';
+import { getConfiguredImageModelFamily } from '../llm.js';
 
 import type { AgentTool } from '@earendil-works/pi-agent-core';
 import type { AgentMode, NodeOrigin } from '@sediment/shared';
@@ -51,6 +58,26 @@ export interface ToolBuildContext {
 }
 
 /**
+ * Append a per-deployment "Active image deployment" section to
+ * `generate_image`'s description so the agent sees the legal size /
+ * quality values for the user's currently configured family
+ * (`gpt-image-1` vs `gpt-image-2` vs `gpt-image-1-mini`). Resolved
+ * at bind time rather than at module load so changing Settings
+ * takes effect on the next chat turn.
+ */
+function patchGenerateImageDescription(def: ToolDefinition): ToolDefinition {
+  if (def.name !== 'generate_image') return def;
+  const family = getConfiguredImageModelFamily();
+  const caps = getImageCapabilities(family);
+  const block =
+    `\n\n--- Active image deployment ---\n` +
+    `Model family: ${caps.family}.\n` +
+    `${describeSizesForPrompt(family)}\n` +
+    `${describeQualitiesForPrompt(family)}`;
+  return { ...def, description: `${def.description ?? ''}${block}` };
+}
+
+/**
  * Wrap a `ToolDefinition` into a runnable `AgentTool` by attaching an
  * `execute` closure that delegates to the existing `executeTool`
  * dispatcher.
@@ -65,8 +92,9 @@ export interface ToolBuildContext {
  * `ToolResponse<status: 'error'>` envelope.
  */
 function toAgentTool(def: ToolDefinition, ctx: ToolBuildContext): AgentTool {
+  const enriched = patchGenerateImageDescription(def);
   return {
-    ...def,
+    ...enriched,
     execute: async (_toolCallId, params) => {
       const out = await executeTool(
         def.name,

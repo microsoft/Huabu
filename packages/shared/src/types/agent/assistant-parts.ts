@@ -166,7 +166,9 @@ export type AssistantToolPart =
   | GenericToolPart
   | AgentToolPart
   | CanvasCommandsToolPart
-  | WebSearchToolPart;
+  | WebSearchToolPart
+  | ImageGenerationToolPart
+  | SnapshotNodesToolPart;
 
 /** Shared lifecycle/identity fields carried by every tool variant. */
 interface ToolPartBase {
@@ -244,6 +246,79 @@ export interface WebSearchToolPart extends ToolPartBase {
   data?: WebSearchToolResponse;
 }
 
+/**
+ * Per-snapshot entry returned by the `snapshot_nodes` tool. Mirrors
+ * `SnapshotNodeResult` on the server.
+ */
+export interface SnapshotEntry {
+  /** Artifact key, e.g. `art_xyz.png`. */
+  src: string;
+  /** PNG width in pixels (0 = unknown for pass-through). */
+  width: number;
+  /** PNG height in pixels (0 = unknown for pass-through). */
+  height: number;
+  /** Canvas node ids that contributed to this artifact. */
+  originNodeIds: string[];
+}
+
+/**
+ * Render-side data envelope for `snapshot_nodes`. The bare array
+ * result returned by the tool is wrapped under `snapshots` by the
+ * stream merger so it can co-exist with the call args (`nodeIds`).
+ */
+export interface SnapshotNodesData {
+  /** Args echoed back from the originating tool call. */
+  nodeIds?: string[];
+  /** Result entries — one per produced PNG / pass-through image. */
+  snapshots?: SnapshotEntry[];
+}
+
+/**
+ * The `snapshot_nodes` tool. Rendered by `SnapshotNodesCard` as a
+ * thumbnail grid so the user can verify what the AI actually "saw"
+ * — critical for debugging vision attachments.
+ */
+export interface SnapshotNodesToolPart extends ToolPartBase {
+  variant: 'snapshot_nodes';
+  data?: ToolResponse<'snapshot_nodes', SnapshotNodesData>;
+}
+
+/**
+ * Render-side data envelope for `generate_image`. Call args
+ * (`prompt`, `size`, `quality`, `referenceArtifactSrcs`) and result
+ * fields (`src`, `width`, `height`, `revisedPrompt`) are flat-merged
+ * — the two sets do not collide.
+ */
+export interface ImageGenerationData {
+  /** Prompt sent by the agent. */
+  prompt?: string;
+  /** Requested output dimensions (e.g. `"1024x1024"`, `"auto"`). */
+  size?: string;
+  /** Requested quality tier. */
+  quality?: string;
+  /** Reference artifact keys passed in for image-edit mode. */
+  referenceArtifactSrcs?: string[];
+  /** Final artifact key for the generated PNG. */
+  src?: string;
+  /** Width of the generated PNG (0 = unknown, e.g. `size: "auto"`). */
+  width?: number;
+  /** Height of the generated PNG. */
+  height?: number;
+  /** Provider's revised prompt, when surfaced by the model. */
+  revisedPrompt?: string;
+}
+
+/**
+ * The `generate_image` tool. Rendered by `ImageGenerationCard` so
+ * the user can preview the generated PNG inline — debugging slow /
+ * cost-heavy generations without first dropping the result onto the
+ * canvas.
+ */
+export interface ImageGenerationToolPart extends ToolPartBase {
+  variant: 'image_generation';
+  data?: ToolResponse<'generate_image', ImageGenerationData>;
+}
+
 // ─── Variant resolution ───────────────────────────────────────────────
 //
 // Single source of truth shared by every producer (server history
@@ -265,6 +340,8 @@ const VARIANT_BY_INTERNAL_TOOL: Record<string, AssistantToolVariant> = {
   inspect_nodes: 'agent_tool',
   inspect_edges: 'agent_tool',
   get_canvas_outline: 'agent_tool',
+  generate_image: 'image_generation',
+  snapshot_nodes: 'snapshot_nodes',
 };
 
 /**

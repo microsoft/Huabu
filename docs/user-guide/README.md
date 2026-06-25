@@ -16,7 +16,7 @@ Huabu 是一个面向人机协作的画布框架。你的想法、笔记、文�
 | [04 · 节点详解](./04-nodes.md)                         | 9 种节点类型与各自的交互                       |
 | [05 · Sources 与知识库](./05-sources-and-knowledge.md) | 来源管理、入库流程、与画布的引用关系           |
 | [06 · 人机协作](./06-ai-collaboration.md)              | Ask 与 Operate 两种模式、上下文构成、可用工具  |
-| [07 · 意图与自动布局](./07-intent-and-auto-layout.md)  | Ctrl+I 意图识别 + 力导向布局与隐式语义边       |
+| [07 · 意图系统](./07-intent.md)                        | Ctrl+I 意图识别：AI 推荐下一步并一键执行       |
 | [08 · 快捷键参考](./08-shortcuts.md)                   | 完整快捷键速查表                               |
 | [09 · 设置与 LLM](./09-settings-and-llm.md)            | 模型提供商、API Key、GitHub Copilot OAuth      |
 | [10 · 数据存储](./10-data-storage.md)                  | 工作区目录结构、应用全局数据、备份建议         |

@@ -553,7 +553,6 @@ export const ChatInput = ({
               {acpSelectorsSlot}
               <span className="ml-2 inline-flex shrink-0 items-center">
                 <ContextUsageRing
-                  draftText={value}
                   isStreaming={isStreaming}
                   usageOverride={contextUsageOverride}
                 />

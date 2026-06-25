@@ -395,12 +395,17 @@ Examples:
   const commands = [];
 
   if (type) {
+    // The shared canvas engine no longer ships a layout fallback, so
+    // `CREATE_NODES` always requires an explicit `position`. The CLI
+    // has no viewport context, so emit `(0, 0)` and let the user move
+    // it after the fact.
     commands.push({
       type: 'CREATE_NODES',
       nodes: [
         {
           nodeType: type,
           data: { content },
+          position: { x: 0, y: 0 },
         },
       ],
     });

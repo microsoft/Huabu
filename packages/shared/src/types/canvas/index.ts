@@ -102,16 +102,7 @@ export {
 } from './edge.js';
 
 // CanvasPage types
-export type {
-  Point,
-  Bounds,
-  CanvasViewport,
-  LayoutStrategy,
-  LayoutConfig,
-  PlacementStrategy,
-  CalculateLayoutParams,
-  LayoutResult,
-} from './layout.js';
+export type { Point, Bounds, CanvasViewport } from './layout.js';
 
 // Command types
 export type {

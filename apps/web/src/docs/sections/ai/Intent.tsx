@@ -107,11 +107,6 @@ export default function Intent() {
           after you&apos;ve dumped a lot of raw material on the canvas and want
           a hand structuring it.
         </li>
-        <li>
-          <strong>Pair with Auto-layout.</strong> When Intent emits new nodes,{' '}
-          <DocLink href="/docs/concepts/auto-layout">Auto-layout</DocLink>{' '}
-          places them next to related content automatically.
-        </li>
       </ul>
       <Callout tone="info">
         Every AI-driven change is shown in the change list before it&apos;s

@@ -23,7 +23,7 @@ export default function Alignment() {
   return (
     <PageLayout
       title="Layout & Alignment"
-      description="Four ways the canvas helps you keep things tidy: the multi-select toolbar (align + distribute), smart-snap guides while dragging, Frame layout modes, and Auto-layout for AI-created nodes."
+      description="Three ways the canvas helps you keep things tidy: the multi-select toolbar (align + distribute), smart-snap guides while dragging, and Frame layout modes."
       toc={toc}
     >
       <H2>Why alignment exists</H2>
@@ -119,12 +119,6 @@ export default function Alignment() {
           <strong>Group while you tidy.</strong> Once a cluster looks the way
           you want, <Kbd>Ctrl</Kbd>/<Kbd>Cmd</Kbd>+<Kbd>G</Kbd> wraps it in a
           Frame so you can drag the whole thing as one.
-        </li>
-        <li>
-          <strong>Let Auto-layout do the rest.</strong> For AI-created nodes,{' '}
-          <DocLink href="/docs/concepts/auto-layout">Auto-layout</DocLink>{' '}
-          already drops them next to related content — you usually don&apos;t
-          need to align after.
         </li>
       </ul>
     </PageLayout>

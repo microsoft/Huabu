@@ -57,7 +57,7 @@ Workspace（你选的本地文件夹）
 - **Question 节点** — 在画布上写下一个问题，节点会自动调用 AI 把回答接到画布旁边
 - **Intent 系统**（`Ctrl/Cmd+I`） — 让 AI 基于当前画布状态推荐"接下来做什么"，一键执行
 
-详见 [06 · 人机协作](./06-ai-collaboration.md) 与 [07 · 意图与自动布局](./07-intent-and-auto-layout.md)。
+详见 [06 · 人机协作](./06-ai-collaboration.md) 与 [07 · 意图系统](./07-intent.md)。
 
 ---
 

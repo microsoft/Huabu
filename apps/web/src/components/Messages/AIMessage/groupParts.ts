@@ -26,6 +26,8 @@ import type {
   AssistantToolPart,
   CanvasCommandsToolPart,
   GenericToolPart,
+  ImageGenerationToolPart,
+  SnapshotNodesToolPart,
   WebSearchToolPart,
 } from '@sediment/shared';
 
@@ -48,6 +50,16 @@ export type SegmentGroup =
       kind: 'tool-group';
       variant: 'web_search';
       parts: WebSearchToolPart[];
+    }
+  | {
+      kind: 'tool-group';
+      variant: 'image_generation';
+      parts: ImageGenerationToolPart[];
+    }
+  | {
+      kind: 'tool-group';
+      variant: 'snapshot_nodes';
+      parts: SnapshotNodesToolPart[];
     };
 
 /**
@@ -61,6 +73,8 @@ function mergeKey(part: AssistantToolPart): string | null {
       return `agent_tool:${part.toolName}`;
     case 'canvas_commands':
     case 'web_search':
+    case 'image_generation':
+    case 'snapshot_nodes':
     case 'generic':
       return null;
   }
@@ -119,6 +133,20 @@ export function groupAdjacentToolParts(
           kind: 'tool-group',
           variant: 'web_search',
           parts: parts as WebSearchToolPart[],
+        });
+        break;
+      case 'image_generation':
+        groups.push({
+          kind: 'tool-group',
+          variant: 'image_generation',
+          parts: parts as ImageGenerationToolPart[],
+        });
+        break;
+      case 'snapshot_nodes':
+        groups.push({
+          kind: 'tool-group',
+          variant: 'snapshot_nodes',
+          parts: parts as SnapshotNodesToolPart[],
         });
         break;
       case 'generic':

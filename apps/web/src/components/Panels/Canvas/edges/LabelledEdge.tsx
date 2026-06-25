@@ -230,9 +230,9 @@ function EdgeLabelEditor({
   // order paints the label after the edge but before nodes, at equal z
   // the label sits above its own edge line yet behind any node on the
   // same level — and naturally stays below higher nodes / above lower
-  // ones, exactly like the edge. Selection lift is handled by Canvas
-  // bumping the edge's `zIndex` by `EDGE_SELECTED_Z_BUMP` in
-  // `displayEdges`, which the label inherits via `edge.zIndex`.
+  // ones, exactly like the edge. Selection does NOT lift the label
+  // (Figma-style: `<ReactFlow elevateNodesOnSelect={false}>` and no
+  // edge-z bump); selection feedback comes from stroke/marker styling.
   const edgeZIndex = useStore(
     useCallback(
       (s) => {

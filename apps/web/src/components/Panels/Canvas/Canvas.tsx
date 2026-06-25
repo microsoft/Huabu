@@ -50,6 +50,7 @@ import { EdgeStyleToolbar } from './FloatingToolbars/EdgeStyleToolbar.tsx';
 import { MultiSelectToolbar } from './FloatingToolbars/MultiSelectToolbar.tsx';
 import { IntentPopover } from './IntentPopover.tsx';
 import { MultiSelectResizer } from './MultiSelectResizer.tsx';
+import { SelectionOutlines } from './SelectionOutlines.tsx';
 import { SnapGuidesOverlay } from './SnapGuidesOverlay.tsx';
 import { StructuredDropOverlay } from './StructuredDropOverlay.tsx';
 import { GRID_SIZE, MAX_ZOOM, MIN_ZOOM } from '../../../config/canvas.ts';
@@ -875,6 +876,14 @@ export const Canvas: React.FC<CanvasProps> = ({
         minZoom={MIN_ZOOM}
         maxZoom={MAX_ZOOM}
         onlyRenderVisibleElements
+        // Figma-style: selecting a node MUST NOT alter its z-order. The
+        // selection indicator (drawn by `<SelectionOutlines />` below)
+        // lives on a separate overlay layer that is always on top, so we
+        // do not need xyflow's `+1000` internal-z bump to make the ring
+        // visible. Disabling this also stops a selected covered node
+        // from popping above the node covering it, which previously felt
+        // like the click silently reordered the layers.
+        elevateNodesOnSelect={false}
       >
         <CanvasGestures wrapperRef={wrapperRef} rfInstanceRef={rfInstanceRef} />
         <SelectionAutoPan
@@ -886,6 +895,7 @@ export const Canvas: React.FC<CanvasProps> = ({
           <NodeToolbar activeTool={tool} onToolChange={setTool} />
         </Panel>
         {!isBoxSelecting && <MultiSelectResizer />}
+        {!isBoxSelecting && <SelectionOutlines />}
         {!isBoxSelecting && <MultiSelectToolbar />}
         {!isBoxSelecting && <EdgeStyleToolbar />}
         <IntentPopover />

@@ -17,9 +17,11 @@
 import {
   ArrowRightLeft,
   Sparkle,
+  Camera,
   Command,
   Download,
   FolderOpen,
+  ImagePlus,
   Workflow,
   Pencil,
   BookOpen,
@@ -95,6 +97,12 @@ export function ToolKindIcon({
         break;
       case 'web_search':
         Icon = Search;
+        break;
+      case 'image_generation':
+        Icon = ImagePlus;
+        break;
+      case 'snapshot_nodes':
+        Icon = Camera;
         break;
       case 'agent_tool':
         Icon = INTERNAL_TOOL_ICON[part.toolName] ?? classifyTitle(part.title);

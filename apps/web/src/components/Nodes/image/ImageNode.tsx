@@ -1,5 +1,5 @@
-import { Fullscreen } from 'lucide-react';
-import { memo } from 'react';
+import { Fullscreen, Image as ImageIcon } from 'lucide-react';
+import { memo, useEffect, useState } from 'react';
 
 import { resolveArtifactUrl } from '@/api/artifact';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
@@ -17,6 +17,18 @@ export const ImageNode = memo(
   ({ id, data, selected }: NodeProps<ImageNodeType>) => {
     const openExpanded = useCanvasStore((s) => s.openExpanded);
     const canvasId = useCanvasStore((s) => s.canvasId);
+
+    // Track whether the underlying `<img>` element has finished loading
+    // (or failed). While the bytes are still in flight we show a
+    // centered, gently pulsing image icon — semantically signals
+    // "image goes here" without competing with the surrounding canvas.
+    const src = data?.src;
+    const [imgLoaded, setImgLoaded] = useState(false);
+    useEffect(() => {
+      // Reset loading state whenever the source changes so the
+      // placeholder re-appears for the new image.
+      setImgLoaded(false);
+    }, [src]);
 
     const ImageActions = (
       <FloatingToolbar.ActionButton
@@ -47,12 +59,39 @@ export const ImageNode = memo(
                 title="Image file missing"
                 description="The artifact for this node was deleted or renamed outside the app."
               />
-            ) : data?.src ? (
-              <img
-                src={resolveArtifactUrl(data.src, canvasId)}
-                alt={data.label || 'Node image'}
-                className="pointer-events-none h-full w-full rounded-lg border-0 object-contain"
-              />
+            ) : src ? (
+              <>
+                <img
+                  src={resolveArtifactUrl(src, canvasId)}
+                  alt={data?.label || 'Node image'}
+                  className="pointer-events-none h-full w-full rounded-lg border-0 object-contain"
+                  onLoad={() => setImgLoaded(true)}
+                  onError={() => setImgLoaded(true)}
+                  style={imgLoaded ? undefined : { visibility: 'hidden' }}
+                />
+                {!imgLoaded && (
+                  <div
+                    className="bg-surface pointer-events-none absolute inset-0 flex items-center justify-center rounded-lg"
+                    // `container-type: size` exposes the node's dimensions
+                    // to CSS `cqmin` units below so the icon scales with
+                    // the smaller of width/height instead of staying a
+                    // fixed size regardless of node size.
+                    style={{ containerType: 'size' }}
+                    aria-hidden
+                  >
+                    <ImageIcon
+                      className="text-fg-subtle animate-pulse"
+                      // 70% of the node's shorter side, clamped between
+                      // 48px (tiny thumbnails) and 200px (huge nodes).
+                      style={{
+                        width: 'clamp(48px, 70cqmin, 200px)',
+                        height: 'clamp(48px, 70cqmin, 200px)',
+                      }}
+                      strokeWidth={1.5}
+                    />
+                  </div>
+                )}
+              </>
             ) : (
               <div className="text-fg-subtle flex h-full w-full items-center justify-center text-sm">
                 No Image Source
