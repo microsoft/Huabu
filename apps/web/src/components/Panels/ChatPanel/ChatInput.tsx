@@ -1,7 +1,7 @@
 import { ArrowUp, Square, X } from 'lucide-react';
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 
-import { uploadImage, uploadPdf } from '@/api/artifact';
+import { resolveArtifactUrl, uploadImage, uploadPdf } from '@/api/artifact';
 import useCanvasStore from '@/store/canvasStore';
 import { selectCurrentMessages, useChatStore } from '@/store/chatStore';
 
@@ -469,9 +469,9 @@ export const ChatInput = ({
                     key={att.url || `att-${idx}`}
                     className="group border-edge-default relative flex items-center justify-center rounded-md border"
                   >
-                    {att.type === 'image' ? (
+                    {att.type === 'image' && att.url ? (
                       <img
-                        src={att.url}
+                        src={resolveArtifactUrl(att.url, canvasId ?? undefined)}
                         alt={att.label ?? 'Attached image'}
                         className="h-12 w-12 rounded-md object-contain"
                       />
