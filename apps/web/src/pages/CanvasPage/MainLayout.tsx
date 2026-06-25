@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 
 import { usePanelStore } from '@/store/panelStore';
 
@@ -15,13 +15,16 @@ export const MainLayout = ({
   rightPanel,
   children,
 }: MainLayoutProps) => {
-  // Left collapse lives in `panelStore` so the layer panel subtree can
-  // read it and freeze its `nodes` ref while collapsed (skipping the
-  // O(N) tree rebuild). Right collapse remains local because nothing
-  // outside `MainLayout` needs to read it today.
+  // Both side-panel collapse states live in `panelStore`. Left was
+  // moved there earlier so the layer panel subtree could freeze its
+  // `nodes` ref while collapsed (skipping the O(N) tree rebuild); right
+  // followed so the open/closed state survives refresh + canvas re-entry
+  // via the store's `persist` config — including the case where the
+  // user left the chat panel open on a question replay.
   const isLeftCollapsed = usePanelStore((s) => s.isLeftCollapsed);
   const toggleLeftPanel = usePanelStore((s) => s.toggleLeftPanel);
-  const [isRightCollapsed, setIsRightCollapsed] = useState(true);
+  const isRightCollapsed = usePanelStore((s) => s.isRightCollapsed);
+  const toggleRightPanel = usePanelStore((s) => s.toggleRightPanel);
 
   const contentRef = useRef<HTMLDivElement | null>(null);
 
@@ -78,18 +81,6 @@ export const MainLayout = ({
       ? 'pointer-events-none w-0 opacity-0'
       : 'cursor-col-resize'
   }`;
-
-  const toggleRightPanel = () => {
-    setIsRightCollapsed((prev) => !prev);
-  };
-
-  // Open right panel programmatically when requested via panelStore
-  const openRequest = usePanelStore((s) => s.rightPanelOpenRequest);
-  useEffect(() => {
-    if (openRequest > 0) {
-      setIsRightCollapsed(false);
-    }
-  }, [openRequest]);
 
   const dragConstraints = useMemo(() => {
     const totalWidth = contentRef.current?.getBoundingClientRect().width ?? 0;

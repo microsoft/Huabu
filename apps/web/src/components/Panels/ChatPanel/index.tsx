@@ -386,6 +386,12 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
 
   // Question thread replay mode
   const closeQuestionThread = useChatStore((s) => s.closeQuestionThread);
+  // Bind canvasId so closing also drops the per-canvas replay pointer
+  // in `questionReplayByCanvas` — otherwise a refresh would re-open the
+  // replay the user just dismissed.
+  const handleCloseQuestionThread = useCallback(() => {
+    closeQuestionThread(canvasId || undefined);
+  }, [closeQuestionThread, canvasId]);
 
   // Sketch cluster inspector mode (mutually exclusive with question
   // replay). When set, MessageList renders synthesized messages built from
@@ -571,7 +577,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       nodeType: 'question',
       data: {
         type: 'question',
-        input: { kind: 'text', content },
+        content,
         status: 'done',
         viewed: true,
         threadId,
@@ -633,7 +639,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           <Button
             variant="ghost"
             iconOnly
-            onClick={closeQuestionThread}
+            onClick={handleCloseQuestionThread}
             title="Back to chat"
             tooltipPlacement="bottom"
           >

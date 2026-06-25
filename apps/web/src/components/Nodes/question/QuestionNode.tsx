@@ -42,8 +42,7 @@ export const QuestionNode = memo(
     const processingRef = useRef<AbortController>();
     const suppressBlurAutoRunRef = useRef(false);
 
-    const input = (data as any).input;
-    const inputContent = input?.kind === 'text' ? (input.content ?? '') : '';
+    const inputContent = typeof data.content === 'string' ? data.content : '';
 
     // ------------------------------------------------------------------
     // Configured external-agent profiles — feeds the `@` mention picker.
@@ -129,6 +128,10 @@ export const QuestionNode = memo(
     // ------------------------------------------------------------------
     const openQuestionThread = useChatStore((s) => s.openQuestionThread);
     const requestOpenRightPanel = usePanelStore((s) => s.requestOpenRightPanel);
+    // Read canvasId so we can persist the replay pointer per canvas;
+    // omit it via `undefined` for the (rare) case where the node renders
+    // outside an active canvas context.
+    const canvasId = useCanvasStore((s) => s.canvasId);
 
     const openInChat = useCallback(() => {
       if (!data.threadId) return;
@@ -136,8 +139,15 @@ export const QuestionNode = memo(
       // reflect the agent that answered. The replay mode (ask/operate)
       // is derived from this node's `agentMode` inside ChatPanel, so
       // follow-up turns stay locked to the mode the question runs in
-      // without us threading it through here.
-      openQuestionThread(id, data.threadId, data.agentBinding);
+      // without us threading it through here. The trailing `canvasId`
+      // lets chatStore record this replay in `questionReplayByCanvas`
+      // so a refresh / canvas re-entry restores the view.
+      openQuestionThread(
+        id,
+        data.threadId,
+        data.agentBinding,
+        canvasId || undefined,
+      );
       requestOpenRightPanel();
       // Mark as viewed only once the run has finished — if we marked
       // it during `running` and the user navigated away before
@@ -153,6 +163,7 @@ export const QuestionNode = memo(
       data.agentBinding,
       data.viewed,
       hasRun,
+      canvasId,
       openQuestionThread,
       requestOpenRightPanel,
       patchNodeSilent,
@@ -273,7 +284,7 @@ export const QuestionNode = memo(
         // Commit input to store if changed.
         if (contentChanged) {
           updateNodeData(id, {
-            input: { kind: 'text', content: trimmed },
+            content: trimmed,
           });
         }
 
@@ -433,7 +444,7 @@ export const QuestionNode = memo(
 
       if (trimmed !== inputContent) {
         updateNodeData(id, {
-          input: { kind: 'text', content: trimmed },
+          content: trimmed,
         });
       }
 

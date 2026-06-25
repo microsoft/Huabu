@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 
 interface PanelState {
   /**
@@ -29,22 +30,53 @@ interface PanelState {
   setSearchOpen: (open: boolean) => void;
   toggleSearchOpen: () => void;
 
-  /** When > 0, the right panel should be open. Incremented to trigger re-open. */
-  rightPanelOpenRequest: number;
-  /** Request the right (chat) panel to open. */
+  /**
+   * Collapse state for the right (chat) panel. Hoisted out of
+   * `MainLayout`'s local `useState` and persisted to localStorage so
+   * a refresh / canvas re-entry keeps whatever open/closed state the
+   * user last left the chat panel in. Defaults to `true` (closed) for
+   * first-time users.
+   */
+  isRightCollapsed: boolean;
+  setRightCollapsed: (collapsed: boolean) => void;
+  toggleRightPanel: () => void;
+  /**
+   * Request the right (chat) panel to open. Kept as a named action
+   * (instead of a bare `setRightCollapsed(false)` at every call site)
+   * so the open-on-event intent reads clearly at the surface and so we
+   * can layer extra behaviour here later (focus, scroll, telemetry)
+   * without touching callers.
+   */
   requestOpenRightPanel: () => void;
 }
 
-export const usePanelStore = create<PanelState>()((set) => ({
-  isLeftCollapsed: true,
-  setLeftCollapsed: (collapsed) => set({ isLeftCollapsed: collapsed }),
-  toggleLeftPanel: () => set((s) => ({ isLeftCollapsed: !s.isLeftCollapsed })),
+export const usePanelStore = create<PanelState>()(
+  persist(
+    (set) => ({
+      isLeftCollapsed: true,
+      setLeftCollapsed: (collapsed) => set({ isLeftCollapsed: collapsed }),
+      toggleLeftPanel: () =>
+        set((s) => ({ isLeftCollapsed: !s.isLeftCollapsed })),
 
-  isSearchOpen: false,
-  setSearchOpen: (open) => set({ isSearchOpen: open }),
-  toggleSearchOpen: () => set((s) => ({ isSearchOpen: !s.isSearchOpen })),
+      isSearchOpen: false,
+      setSearchOpen: (open) => set({ isSearchOpen: open }),
+      toggleSearchOpen: () => set((s) => ({ isSearchOpen: !s.isSearchOpen })),
 
-  rightPanelOpenRequest: 0,
-  requestOpenRightPanel: () =>
-    set((s) => ({ rightPanelOpenRequest: s.rightPanelOpenRequest + 1 })),
-}));
+      isRightCollapsed: true,
+      setRightCollapsed: (collapsed) => set({ isRightCollapsed: collapsed }),
+      toggleRightPanel: () =>
+        set((s) => ({ isRightCollapsed: !s.isRightCollapsed })),
+      requestOpenRightPanel: () => set({ isRightCollapsed: false }),
+    }),
+    {
+      name: 'sediment-panel',
+      // Only the chat panel's open state is persisted. `isLeftCollapsed`
+      // stays per-session (always collapsed on fresh load — matches the
+      // pre-persist default) and `isSearchOpen` is intentionally
+      // transient.
+      partialize: (state) => ({
+        isRightCollapsed: state.isRightCollapsed,
+      }),
+    },
+  ),
+);

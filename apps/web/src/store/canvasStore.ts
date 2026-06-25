@@ -71,6 +71,7 @@ import { shouldScheduleStructureSave } from './canvasStore/save/structureDirtyDe
 import { createStructureScheduler } from './canvasStore/save/structureScheduler';
 import { createUnloadFlush } from './canvasStore/save/unloadFlush';
 import { createResizePreviewController } from './canvasStore/slices/resizePreview';
+import { useChatStore } from './chatStore';
 import { useGesturePreviewStore } from './gesturePreviewStore';
 import { useToolStore } from './toolStore';
 import { getCanvas, putCanvas } from '../api';
@@ -1391,6 +1392,17 @@ const useCanvasStore = create<RFState>()(
           isLoading: false,
           ingestionByNodeId: {},
         });
+
+        // If the user left a question-replay open on this canvas in a
+        // previous session and that question node has since been
+        // deleted, drop the now-dangling pointer in chatStore so the
+        // panel doesn't end up stuck on a foreign thread.
+        useChatStore
+          .getState()
+          .validateQuestionReplay(
+            targetId,
+            new Set(loadedNodes.map((n) => n.id)),
+          );
 
         // Backfill: any node with an empty label gets re-queued so the
         // server can regenerate one. The server's preprocessing
