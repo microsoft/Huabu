@@ -33,16 +33,14 @@ export const SKETCH_SIZE_MAX = 32;
 /**
  * Sketch stroke palette.
  *
- * Diverges from node `style.accent` (which is `ACCENT_PALETTE` only):
- * sketch ink legitimately needs `black` (and, for "highlighter on a dark
- * canvas" workflows, `white`), neither of which is a node-accent token.
- * Stored as a picker token on `SketchNodeData.strokeColor` and resolved
- * at render time via `resolveAccent`, which passes unknown tokens
- * through as literal CSS colors.
+ * Diverges from node `style.accent` only by prepending `black` — sketch
+ * ink legitimately needs a true black for high-contrast strokes, which
+ * is not part of `ACCENT_PALETTE`. `white` lives in `ACCENT_PALETTE`
+ * itself so it's picked up via the spread; resolved to its hex value at
+ * render time via `resolveAccent`.
  */
 export const SKETCH_COLOR_OPTIONS: readonly ColorPickerOption[] = [
   { token: 'black', name: 'Black', value: '#000000' },
-  { token: 'white', name: 'White', value: '#ffffff' },
   ...ACCENT_PALETTE,
 ];
 
