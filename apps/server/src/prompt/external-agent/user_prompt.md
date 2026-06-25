@@ -2,6 +2,7 @@
 
 {{task}}
 {{#selectedNodes}}
+
 ## Selected Nodes
 
 {{selectedNodesIntro}}
