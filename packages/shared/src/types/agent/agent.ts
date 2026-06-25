@@ -16,6 +16,7 @@ import type {
   AcpToolCallStatus,
   AcpToolKind,
 } from './acp-tool.js';
+import type { CanvasNodeType } from '../canvas/node.js';
 
 // ==================== Agent Modes ====================
 
@@ -137,40 +138,53 @@ export interface AgentErrorEventData {
 export interface AgentEndEventData {}
 
 /**
- * Structured rewrite of a raw user message for an external (ACP) agent.
+ * Structured prompt handed to an external (ACP) agent.
  *
- * `task` is a self-contained briefing — the external agent should be
- * able to act on it alone, with no visibility into the canvas.
- * `attachments` is a fallback channel for payloads that must be read
- * verbatim (paths relative to the canvas directory).
+ * Built **deterministically** from the raw user message + the canvas
+ * selection — no preprocessing LLM is involved. `task` is the user's
+ * message forwarded verbatim. `selectedNodes` is a metadata-only table
+ * of the nodes the user had selected; the external agent fetches their
+ * content on demand through the Huabu Sideband Tool (`read-node <id>`)
+ * rather than receiving inlined bodies or file attachments.
  */
 export interface ExternalAgentPrompt {
-  /** Self-contained task description handed to the external agent. */
+  /** The user's raw message, forwarded verbatim. */
   task: string;
-  /** Files the external agent MUST read verbatim before acting. */
-  attachments: Array<{
-    /** Path relative to the canvas directory. */
-    path: string;
-    /** Why verbatim reading is required (≤ ~80 chars). */
-    reason: string;
-    /** Canvas node ID (when the attachment maps to a known node). */
-    nodeId?: string;
+  /**
+   * Metadata for the nodes the user had selected. Content is NOT
+   * inlined — the agent reads it on demand via `read-node <nodeId>`.
+   */
+  selectedNodes: Array<{
+    /** Canvas node ID — pass straight to `read-node` / `write-node --id`. */
+    nodeId: string;
+    /** Node type (e.g. `note`, `image`). */
+    type: CanvasNodeType;
+    /** Display label, when the node has one. */
+    label?: string;
   }>;
+  /**
+   * The one-shot system preamble (persona + `## Canvas Tools (Sideband)`
+   * docs) prepended to this turn's wire payload. Present only on the
+   * first turn of a freshly-created session — omitted thereafter, since
+   * the agent keeps it in context (see `AcpSessionEntry.systemPreambleSent`).
+   * Carried here so the UI can render the *complete* prompt the agent saw.
+   */
+  systemPreamble?: string;
 }
 
 /**
  * `event: prepared_prompt` — emitted once per external-agent turn,
- * before the first `text_delta`, when Huabu's preprocessor has
- * rewritten the user's raw message into a structured
- * {@link ExternalAgentPrompt}. Internal-agent turns never emit this.
+ * before the first `text_delta`, carrying the {@link ExternalAgentPrompt}
+ * Huabu deterministically built from the user's raw message + canvas
+ * selection. Internal-agent turns never emit this.
  *
- * When the preprocessor fails the server still emits this event with
- * `prompt: null` + an `error` description so the UI can replace its
- * pending "Preparing…" placeholder with a concrete failure note
- * (and Huabu falls back to forwarding the raw user message).
+ * On the (effectively impossible) build failure the server still emits
+ * this event with `prompt: null` + an `error` description so the UI can
+ * replace its pending placeholder with a concrete failure note (and
+ * Huabu falls back to forwarding the raw user message).
  */
 export interface AgentPreparedPromptEventData {
-  /** Structured prompt produced by the preprocessor, or `null` on failure. */
+  /** Structured prompt Huabu built, or `null` on failure. */
   prompt: ExternalAgentPrompt | null;
   /** Short alias of the bound external agent (e.g. `'claude'`). */
   agentAlias: string;

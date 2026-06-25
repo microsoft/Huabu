@@ -40,7 +40,6 @@ import {
 } from './session-store.js';
 import { ensureAgentForThread } from './spawn-orchestrator.js';
 import { acpUpdateToStreamEvent, mergeThinkingChunk } from './translator.js';
-import { canvasRoot as resolveCanvasRoot } from '../../storage/paths.js';
 import {
   emptySidecar,
   readChatParts,
@@ -656,6 +655,14 @@ async function ensureAcpSessionInner(
     // unused thread never leaves a stale sessionId for the next
     // server lifetime to choke on.
     persistedToDisk: !!persisted?.sessionId,
+    // Resume-from-disk (`persisted.sessionId` set) means the agent's
+    // transcript is restored via `session/load`, so the one-shot system
+    // preamble it already received is back in context — mark it sent.
+    // A fresh `session/new` starts blank, so the preamble must ride
+    // along with this thread's first user prompt (see
+    // `AcpSessionEntry.systemPreambleSent` and the preprocessor's
+    // `includeSystem`).
+    systemPreambleSent: !!persisted?.sessionId,
     availableCommands: [],
     commandsUpdatedAt: 0,
     availableModes: [],
@@ -1098,46 +1105,6 @@ export async function* runAcpAgent(
   const { binding, threadId, context, canvasContext, signal, logger } = opts;
   const canvasId = opts.canvasId ?? '';
   const rawText = extractText(opts.message);
-  // ── Workspace model for the bound external agent ───────────────────
-  //
-  // ACP separates two notions that we deliberately keep distinct here:
-  //
-  //   1. Protocol workspace (what `acp/capabilities/fs.ts` exposes)
-  //        = the virtual `/canvas/` namespace, read-only, allowlisted
-  //          to `nodes/**` + `.artifacts/**`, scoped to this canvasId.
-  //        Reachable only via ACP `fs/read_text_file`.
-  //
-  //   2. Agent execution workspace (the agent process' own `cwd`
-  //        plus the `cwd` we pass to `session/new`)
-  //        = the bound profile's configured working directory. The
-  //          daemon spawns the agent process with `profile.cwd` and
-  //          `ensureAcpSession` opens `session/new` with the same
-  //          value, so the agent's native shell/fs and its ACP
-  //          session-scoped workspace agree.
-  //
-  // Empirically (see /tmp/copilot-acp-probe.mjs) not every agent
-  // honours (1): Copilot CLI's `Read` tool **never** calls
-  // `fs/read_text_file` — it always issues an OS syscall, asking
-  // `session/request_permission` only when the path falls outside
-  // its own trusted-dirs list. To keep Copilot useful for canvas
-  // work, the preprocessor renders `fileRefs` as **real absolute
-  // paths** under `canvasCwd` so Copilot's OS-level Read can open
-  // them (after a one-shot permission prompt). Claude Code and other
-  // ACP-fs-bridging agents get the same absolute paths and can read
-  // them either way.
-  //
-  // Trade-off: the absolute-path projection effectively re-extends
-  // the agent's OS reach into the canvas dir, so the `/canvas/` VFS
-  // sandbox in `acp/capabilities/fs.ts` is bypassed for native-fs
-  // agents. Real isolation against a hostile agent would require an
-  // OS-level boundary (container / FUSE); ACP fs capabilities alone
-  // are cooperative.
-  //
-  // For the (currently unused) edge case of a thread with no canvasId
-  // we omit `canvasCwd`; the preprocessor then falls back to
-  // `/canvas/<rel>` virtual paths so any spec-compliant agent can
-  // still reach files via the ACP fs handler.
-  const canvasCwd = canvasId ? resolveCanvasRoot(canvasId) : undefined;
 
   // 1-2. Ensure (open or reuse) the per-thread ACP session. The helper
   //      handles connection lookup, stale-entry eviction, initialize +
@@ -1162,17 +1129,22 @@ export async function* runAcpAgent(
   let preparedPrompt: ExternalAgentPrompt | null = null;
   let preparedError: string | undefined;
   let promptPayload = rawText;
+  // Whether this turn's payload actually carried the one-shot system
+  // preamble. Drives the post-success flip of `entry.systemPreambleSent`
+  // below — so a failed turn (or a slash-command short-circuit, which
+  // never includes it) re-sends the preamble on the next real turn.
+  let includedSystem = false;
   try {
-    const result = await prepareExternalAgentPrompt({
+    const result = prepareExternalAgentPrompt({
       rawText,
       agentAlias: binding.alias,
       canvasContext,
-      canvasId,
-      canvasRoot: canvasCwd,
+      includeSystem: !entry.systemPreambleSent,
       logger,
     });
     preparedPrompt = result.prompt;
     promptPayload = result.serialized;
+    includedSystem = result.includedSystem;
   } catch (err) {
     preparedError = err instanceof Error ? err.message : String(err);
     logger.warn(
@@ -1395,6 +1367,11 @@ export async function* runAcpAgent(
       // across process lifetimes). Lock the sessionId into the disk
       // record so a future server restart can `session/load` it.
       promoteEntryToPersisted(entry, logger);
+      // Mark the one-shot system preamble delivered, but only if this
+      // turn actually carried it — a failed turn or slash-command
+      // short-circuit leaves the flag untouched so the next real turn
+      // re-sends it.
+      if (includedSystem) entry.systemPreambleSent = true;
     })
     .catch((err: unknown) => {
       promptError = err;

@@ -1,19 +1,23 @@
 /**
- * PreparedPromptMessage — renders the structured prompt that the ACP
- * preprocessor produced for an external agent turn.
+ * PreparedPromptMessage — renders the structured prompt that Sediment
+ * built deterministically for an external agent turn.
  *
  * Three states drive the visual:
- *   - **pending**: `prompt === null && !error` — preprocessor is still
- *     running. Shows a small spinner + "Preparing prompt for <alias>…"
+ *   - **pending**: `prompt === null && !error` — the external agent's
+ *     connection is still being established (prompt building itself is
+ *     instant/deterministic on the server). Shows a small spinner +
+ *     "Connecting to <alias>…".
  *   - **ready**: `prompt !== null` — collapsed by default, click to
- *     expand and see the `task` body + (optional) `attachments` list.
+ *     expand and see the (optional) one-shot system preamble, the `task`
+ *     body, and the (optional) selected-node list.
  *   - **failed**: `prompt === null && error` — small error chip; the
- *     external agent received the raw user text as fallback.
+ *     turn failed before a prompt was delivered (e.g. the agent never
+ *     connected). The detailed reason shows in the separate status row.
  *
- * Most turns produce a task-only prompt — selected-node content is
- * synthesised inline by the preprocessor. `attachments` only appears
- * when the preprocessor decided verbatim file access was essential
- * (oversize node, `.artifacts/` file, code-review-style ask).
+ * `task` is the user's message forwarded verbatim. `selectedNodes`
+ * lists the canvas nodes the user had selected (metadata only); the
+ * external agent fetches their content on demand via the Huabu
+ * Sideband Tool (`read-node <node-id>`).
  *
  * Visual shell (icon slot, title row, chevron, expand/collapse) is
  * provided by `AssistantDisclosure` so this card stays visually
@@ -42,7 +46,7 @@ export function PreparedPromptMessage({
     return (
       <AssistantDisclosure
         icon={<Loader2 size={12} className="animate-spin" />}
-        title={`Preparing prompt for ${agentAlias}…`}
+        title={`Connecting to ${agentAlias}…`}
       />
     );
   }
@@ -52,7 +56,7 @@ export function PreparedPromptMessage({
     return (
       <AssistantDisclosure
         icon={<FileText size={12} className="text-fg-muted/60" />}
-        title={`Prompt preprocessing failed for ${agentAlias} — sent raw message.`}
+        title={`Couldn't reach ${agentAlias}.`}
       />
     );
   }
@@ -61,10 +65,13 @@ export function PreparedPromptMessage({
   // (Non-null prompt is guaranteed by the two guards above.)
   if (!prompt) return null;
 
-  const attachmentCount = prompt.attachments.length;
+  // Defensive `?? []` so chat history persisted before the deterministic
+  // rewrite (which used `attachments`) still renders without crashing.
+  const selectedNodes = prompt.selectedNodes ?? [];
+  const nodeCount = selectedNodes.length;
   const summary =
-    attachmentCount > 0
-      ? `Prepared prompt · ${attachmentCount} attachment${attachmentCount === 1 ? '' : 's'}`
+    nodeCount > 0
+      ? `Prepared prompt · ${nodeCount} node${nodeCount === 1 ? '' : 's'}`
       : 'Prepared prompt';
 
   return (
@@ -73,6 +80,17 @@ export function PreparedPromptMessage({
       title={`${summary} → ${agentAlias}`}
       bodyClassName="ml-5 space-y-2"
     >
+      {prompt.systemPreamble && (
+        <div>
+          <div className="text-fg-muted/70 mb-0.5 text-[10px] font-medium tracking-wide uppercase">
+            System
+          </div>
+          <div className="text-fg-muted/80 wrap-break-word whitespace-pre-wrap">
+            {prompt.systemPreamble}
+          </div>
+        </div>
+      )}
+
       <div>
         <div className="text-fg-muted/70 mb-0.5 text-[10px] font-medium tracking-wide uppercase">
           Task
@@ -80,21 +98,23 @@ export function PreparedPromptMessage({
         <div className="wrap-break-word whitespace-pre-wrap">{prompt.task}</div>
       </div>
 
-      {attachmentCount > 0 && (
+      {nodeCount > 0 && (
         <div>
           <div className="text-fg-muted/70 mb-0.5 text-[10px] font-medium tracking-wide uppercase">
-            Attachments
+            Selected Nodes
           </div>
           <ul className="space-y-0.5">
-            {prompt.attachments.map((ref) => (
+            {selectedNodes.map((node) => (
               <li
-                key={ref.path}
+                key={node.nodeId}
                 className="flex items-baseline gap-1.5 leading-snug"
               >
                 <code className="bg-surface-1/50 rounded px-1 text-[11px]">
-                  {ref.path}
+                  {node.nodeId}
                 </code>
-                <span className="text-fg-muted/80">— {ref.reason}</span>
+                <span className="text-fg-muted/80">
+                  {node.label ? `${node.label} · ${node.type}` : node.type}
+                </span>
               </li>
             ))}
           </ul>

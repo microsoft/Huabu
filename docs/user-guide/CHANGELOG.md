@@ -2,6 +2,59 @@
 
 每次重要功能变更都会记录在此文件中，按时间倒序排列。
 
+## 2026-06-24 · 外部 Agent：prompt 卡片不再被「连接 agent」阻塞，并展示完整 system 段
+
+**What Changed**
+
+外部（ACP）agent 的 prompt 卡片（PreparedPromptCard）做了三处体验修复：
+
+1. **pending 文案改为「Connecting to _agent_…」**：之前卡片在等待期一直显示「Preparing prompt for _agent_…」。但 prompt 现在是确定性、瞬时构建的——这段 spinner 实际等待的是 ACP 会话连上外部 agent，而不是「准备 prompt」。文案改得名副其实（且不向用户暴露内部「session」概念）。
+2. **连接失败不再无限转圈**：如果这一轮在 prompt 下发前就失败（最常见是 agent 没连上），卡片以前会永远停在 spinner。现在前端在收到 `error` 时会把仍处于 pending 的卡片落定为失败态（spinner 停止），具体原因照旧显示在下方的错误状态行里。
+3. **卡片展开后能看到完整 prompt**：首轮会话会把一次性 system preamble（角色设定 + `## Canvas Tools (Sideband)` 工具说明）随首条用户消息搭车下发；现在这段 preamble 也会随 `ExternalAgentPrompt.systemPreamble` 带到前端，卡片展开后在 `Task` 之上多出一个 `System` 段，让用户看到 agent 实际收到的完整 prompt。后续轮次不含 preamble，卡片也就不显示 `System` 段。
+
+**Notes**
+
+- 后端下发顺序不变（连接 → 确定性构建 → `prepared_prompt`）；只是把「等待期」的语义讲清楚，并让构建结果带上 `systemPreamble`。
+- `systemPreamble` 只在新建会话首轮存在（恢复会话的转录里已含 preamble，不再重发），所以历史回填时也只有首轮卡片显示 `System` 段。
+- 改动文件：[agent.ts](packages/shared/src/types/agent/agent.ts)（`ExternalAgentPrompt.systemPreamble`）、[preprocessor.ts](apps/server/src/modules/agent/acp/preprocessor.ts)、[PreparedPromptMessage.tsx](apps/web/src/components/Messages/PreparedPromptMessage.tsx)、[useAgentStream.ts](apps/web/src/hooks/useAgentStream.ts)、[chatTypes.ts](apps/web/src/store/chatTypes.ts)。
+
+## 2026-06-23 · 外部 Agent：prompt 拆分为 system / user 两段，HST 说明只下发一次
+
+**What Changed**
+
+在确定性 prompt 编排的基础上，按 prompt engineering 的实践把下发文本拆成两段独立模板：
+
+1. **`system_prompt.md`（一次性 system preamble）**：包含角色设定（"你是与用户共享 Huabu 画布工作区的助手……"）+ `## Canvas Tools (Sideband)` 工具说明。只在每个新建会话的**第一轮**拼到用户消息前面下发一次。
+2. **`user_prompt.md`（每轮 user prompt）**：`## Request`（用户原始消息）+ 可选的 `## Selected Nodes` 表格。每一轮都下发。
+
+第一轮 = `system_prompt.md` + `user_prompt.md` 拼成一条 `session/prompt`（ACP 的 `session/prompt` 必然触发一次模型回合，所以把 system 段搭车在首条用户消息上，避免多浪费一个回合）；之后每轮只下发 `user_prompt.md`。
+
+**Notes**
+
+- HST 的可用性与 `canvasId` **解耦**：HST 脚本对每个 agentlet-backed 外部 agent 都会无条件下发（见 `server-mount.ts` 的 `pushSidebandTools`），所以工具说明（system 段）总会下发，不再用 `canvasId` 去 gate。`## Selected Nodes` 表格仍然只在有选中节点时出现（有选中必然在画布上）。
+- 新增会话实体字段 `AcpSessionEntry.systemPreambleSent`：新建会话（`session/new`）初始为 `false`，恢复会话（`session/load`，转录已含 preamble）初始为 `true`。在首轮 `session/prompt` **成功之后**才置 `true`；失败的回合或 slash command 短路（逐字下发、不含 preamble）都不会消费该标志，下一轮真实消息会重发。
+- `prepareExternalAgentPrompt` 新增入参 `includeSystem`、返回值 `includedSystem`，由 service 层基于 `systemPreambleSent` 驱动。
+- 改动文件：[preprocessor.ts](apps/server/src/modules/agent/acp/preprocessor.ts)、[system_prompt.md](apps/server/src/prompt/external-agent/system_prompt.md)（新增）、[user_prompt.md](apps/server/src/prompt/external-agent/user_prompt.md)（新增，替换原 `prompt.md`）、[service.ts](apps/server/src/modules/agent/acp/service.ts)、[session-registry.ts](apps/server/src/modules/agent/acp/session-registry.ts)。
+
+## 2026-06-23 · 外部 Agent：上下文编排改为确定性构建（去掉预处理 LLM）
+
+**What Changed**
+
+简化外部（ACP）agent 的 prompt 编排：彻底移除 `acp-preprocessor` 这个预处理 LLM 子 agent。之前每次给外部 agent 发消息，都要先跑一个内部 LLM 去探索画布、合成 `task` briefing、再产出 `ExternalAgentPrompt` JSON（`task` + `attachments`）；这带来一次额外的模型往返、延迟、不确定性和 JSON 解析失败的风险。
+
+现在 prompt 完全**确定性**构建，无任何 LLM 调用：
+
+1. **`task`** = 用户原始消息，原样转发（slash command 仍走原有短路逻辑，逐字下发）。
+2. **`selectedNodes`** = 用户选中节点的元数据表（`nodeId` / `type` / `label`），不再内联节点正文、也不再走文件 attachment。外部 agent 按需用 Huabu Sideband Tool（`read-node <node-id>`）自取内容。
+3. 下发文本由独立的 prompt 模板 `src/prompt/external-agent/prompt.md` 渲染：`task` + `## Selected Nodes` 表格 + `## Canvas Tools (Sideband)`（仅在绑定画布时出现）。模板用仓库自带的 Mustache 风格引擎（`{{var}}` / `{{#block}}` / `{{include}}`），逐行表格在 TS 里拼好后注入。
+
+**Notes**
+
+- 类型 `ExternalAgentPrompt` **原地变更**：`attachments[]` → `selectedNodes[] { nodeId, type, label? }`。聊天历史里旧的 `[SYSTEM PreparedPrompt]` sidecar（含 `attachments`）在 UI 卡片里有兜底渲染（`selectedNodes ?? []`），不会崩。
+- `prepareExternalAgentPrompt` 现在是同步函数；`runAcpAgent` 不再 `await` 它，也不再传 `canvasRoot`（去掉了把 attachment 渲染成绝对盘符路径的逻辑）。
+- 移除了 `acp-preprocessor` agent（`AgentId` / `ToolScope` 枚举 + `AGENT.md`）。
+- 改动文件：[agent.ts](packages/shared/src/types/agent/agent.ts)、[preprocessor.ts](apps/server/src/modules/agent/acp/preprocessor.ts)、[loader.ts](apps/server/src/prompt/agents/loader.ts)（导出 `renderPromptFile`）、[external-agent/prompt.md](apps/server/src/prompt/external-agent/prompt.md)（新增）、[service.ts](apps/server/src/modules/agent/acp/service.ts)、[tools/index.ts](apps/server/src/modules/agent/tools/index.ts)、[PreparedPromptMessage.tsx](apps/web/src/components/Messages/PreparedPromptMessage.tsx)。
+
 ## 2026-06-23 · Chat Panel：把当前会话一键保存为画布上的 Question 节点
 
 **What Changed**
