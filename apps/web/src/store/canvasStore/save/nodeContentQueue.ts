@@ -46,6 +46,7 @@ export type NodeContentQueueState = {
   canvasId: string;
   nodes: readonly Node[];
   _setStateNoAutosave: (partial: { nodes: Node[] }) => void;
+  patchNodeSilent: (nodeId: string, patch: Record<string, unknown>) => void;
 };
 
 /**
@@ -107,6 +108,16 @@ export type NodeContentQueue = {
    * `flushAllKeepalive` pattern.
    */
   flushAllKeepalive(): void;
+
+  /**
+   * Drop the once-per-node duplicate-toast guard so a future
+   * recurrence re-alerts. Called when the duplicate is resolved
+   * *outside* a successful save — i.e. the node's Refresh button
+   * confirmed the on-disk collision is gone. Without this, the guard
+   * set during the first refusal would suppress the toast for a
+   * second duplicate created later in the same session.
+   */
+  clearDuplicateGuard(nodeId: string): void;
 };
 
 /**
@@ -223,8 +234,15 @@ export function createNodeContentQueue(opts: {
     const response = await putNodeContent(canvasId, nodeId, body, kOpts);
     // A write that succeeded means any prior duplicate has been
     // resolved — drop the once-per-node toast guard so a future
-    // recurrence alerts again.
-    duplicateToasted.delete(nodeId);
+    // recurrence alerts again, and clear the node's duplicate banner
+    // (it was only set transiently by `notifyDuplicate`, never
+    // persisted) so editing re-enables without a reload.
+    if (duplicateToasted.delete(nodeId)) {
+      opts.getState().patchNodeSilent(nodeId, {
+        contentDuplicate: false,
+        duplicateFiles: [],
+      });
+    }
     // Record the label the server actually persisted so a later
     // failure can revert to it. Capture `labelSource` from the body
     // we just sent — it's the provenance attached to that label
@@ -294,11 +312,25 @@ export function createNodeContentQueue(opts: {
    * Surface a duplicate-sidecar refusal. Unlike ordinary save
    * failures this is an unresolved on-disk state (two `.md` files
    * claim the same node id) that the user must fix in their file
-   * manager, so we pop a persistent, manually-dismissed toast
-   * regardless of `source` (background autosave hits this path too).
-   * Guarded by {@link duplicateToasted} so retries don't spam.
+   * manager. The node's duplicate flags are patched on *every*
+   * refusal so the NodeWrapper's full-cover banner always reflects
+   * the current on-disk state — even a repeat refusal whose toast was
+   * already shown. Gating the patch behind {@link duplicateToasted}
+   * (as the toast is) would miss a *second* duplicate raised after
+   * the first was resolved via the node's Refresh button, which
+   * clears the banner but not the toast guard, leaving the node
+   * silently uneditable.
+   *
+   * The flags are transient client hints (never persisted);
+   * `performSave` clears them on the next successful write. The toast
+   * itself is rate-limited to once per node (until the duplicate is
+   * resolved) so autosave retries don't spam.
    */
   function notifyDuplicate(nodeId: string, err: NodeDuplicateFilesError): void {
+    opts.getState().patchNodeSilent(nodeId, {
+      contentDuplicate: true,
+      duplicateFiles: err.duplicateFiles,
+    });
     if (duplicateToasted.has(nodeId)) return;
     duplicateToasted.add(nodeId);
     toast(err.message, { tone: 'danger', duration: 0, dismissible: true });
@@ -501,6 +533,10 @@ export function createNodeContentQueue(opts: {
           keepalive: true,
         }).catch(() => undefined);
       }
+    },
+
+    clearDuplicateGuard(nodeId) {
+      duplicateToasted.delete(nodeId);
     },
   };
 }

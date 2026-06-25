@@ -753,6 +753,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           `(${writeResult.files.join(', ')}); ` +
           'resolve the duplicate before editing.',
         nodeId,
+        duplicateFiles: writeResult.files,
       } satisfies CanvasConflictResponse);
     }
     if (!writeResult.ok) {

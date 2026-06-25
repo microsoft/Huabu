@@ -60,17 +60,28 @@ function isCanvasConflictResponse(
  */
 export class NodeDuplicateFilesError extends Error {
   readonly nodeId?: string;
+  readonly duplicateFiles: string[];
 
-  constructor(payload: { message: string; nodeId?: string }) {
+  constructor(payload: {
+    message: string;
+    nodeId?: string;
+    duplicateFiles?: string[];
+  }) {
     super(payload.message);
     this.name = 'NodeDuplicateFilesError';
     this.nodeId = payload.nodeId;
+    this.duplicateFiles = Array.isArray(payload.duplicateFiles)
+      ? payload.duplicateFiles
+      : [];
   }
 }
 
-function isNodeDuplicateResponse(
-  value: unknown,
-): value is { code: 'NODE_DUPLICATE_FILES'; message: string; nodeId?: string } {
+function isNodeDuplicateResponse(value: unknown): value is {
+  code: 'NODE_DUPLICATE_FILES';
+  message: string;
+  nodeId?: string;
+  duplicateFiles?: string[];
+} {
   if (!value || typeof value !== 'object') return false;
   const v = value as Record<string, unknown>;
   return v.code === 'NODE_DUPLICATE_FILES' && typeof v.message === 'string';

@@ -2,6 +2,9 @@ import './load-env.js';
 import './setup-proxy.js';
 import { app } from './app.js';
 import { resolveBindHost } from './bind-host.js';
+import { getLogger } from './utils/logger.js';
+
+const log = getLogger('server');
 
 const DEFAULT_PORT = 3001;
 const parsedPort = Number.parseInt(
@@ -15,7 +18,7 @@ const HOST = resolveBindHost();
 
 app.listen({ port: PORT, host: HOST }, (err: Error | null) => {
   if (err) {
-    console.error(err);
+    log.error({ err }, 'Failed to start server');
     process.exit(1);
   }
   // When bound to a wildcard address, "localhost" is still the URL a
@@ -23,5 +26,5 @@ app.listen({ port: PORT, host: HOST }, (err: Error | null) => {
   // remote machine know how to reach the server.
   const displayHost =
     HOST === '0.0.0.0' || HOST === '::' ? `localhost (bound on ${HOST})` : HOST;
-  console.log(`Server running at http://${displayHost}:${PORT}`);
+  log.info(`Server running at http://${displayHost}:${PORT}`);
 });

@@ -177,6 +177,12 @@ export interface CanvasConflictResponse {
   nodeId?: string;
   /** For version conflicts. */
   serverVersion?: number;
+  /**
+   * For `NODE_DUPLICATE_FILES`: every markdown sidecar filename on disk
+   * that currently claims the node's id, so the client can list them in
+   * the duplicate banner instead of forcing a reload to learn them.
+   */
+  duplicateFiles?: string[];
 }
 
 export interface UpdateCanvasStateParams {

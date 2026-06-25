@@ -783,6 +783,17 @@ export async function drainPendingSaves(): Promise<void> {
   await nodeContentQueue.flushAll();
 }
 
+/**
+ * Reset the per-node duplicate-toast guard. Called when a node's
+ * duplicate-sidecar collision was resolved on disk and confirmed via
+ * the node's Refresh button (which does not go through a successful
+ * save, so it can't clear the guard itself). Without this a later
+ * duplicate on the same node would be silently swallowed.
+ */
+export function clearNodeDuplicateGuard(nodeId: string): void {
+  nodeContentQueue.clearDuplicateGuard(nodeId);
+}
+
 // ─── Action-history ring ──────────────────────────────────────────────────
 //
 // The short, in-memory action trail (cap 10, no timestamps) that

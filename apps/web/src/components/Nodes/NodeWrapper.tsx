@@ -39,7 +39,9 @@ import {
 } from '@/handler/snap/snapSession.ts';
 import { useIsNotMouse } from '@/hooks/useInputMode.ts';
 import { useNodeLOD } from '@/hooks/useNodeLOD.ts';
-import useCanvasStore from '@/store/canvasStore.ts';
+import useCanvasStore, {
+  clearNodeDuplicateGuard,
+} from '@/store/canvasStore.ts';
 import { coerceProvenance } from '@/utils/blockProvenance';
 
 import { getAccentTokens } from './accentTokens.ts';
@@ -297,6 +299,11 @@ export const NodeWrapper = memo(
             duplicateFiles: res.duplicateFiles ?? [],
           });
           if (!res.contentDuplicate) {
+            // Resolved on disk — drop the once-per-node toast guard so a
+            // *later* duplicate on this node alerts again (resolving via
+            // Refresh never goes through a successful save, which is the
+            // only other place the guard is cleared).
+            clearNodeDuplicateGuard(id);
             toast('Duplicate resolved — editing re-enabled.', {
               tone: 'success',
             });
