@@ -61,7 +61,7 @@ Everything you need to mutate a canvas. **Load this before issuing your first `c
 - The accent is the **single color knob** for a node: it drives the node's border, fill tint, and text tint together. There is no separate background-color or text-color field — do not invent one.
 - Use the **same accent** for every node in one logical group; use **distinct accents** to separate groups. The grouping reads even at low zoom.
 - Reserve `"grey"` for de-emphasised / neutral material.
-- Allowed tokens are enumerated on the `CREATE_NODES` schema (`data.style.accent`): `"grey"`, `"red"`, `"orange"`, `"amber"`, `"green"`, `"blue"`, `"purple"`, or `null` to clear. **Never invent hex values or other token names.**
+- Allowed tokens are enumerated on the `CREATE_NODES` schema (`data.style.accent`): `"grey"`, `"white"`, `"red"`, `"orange"`, `"amber"`, `"green"`, `"blue"`, `"purple"`, or `null` to clear. **Never invent hex values or other token names.**
 - Apply via `CREATE_NODES` (on creation) or `MERGE_NODE_DATA` (on existing nodes); the engine deep-merges `data.style`, so a `{ data: { style: { accent: "purple" } } }` patch leaves every other style field (`fontFamily`, `fontSize`, …) untouched.
 
 ## See also

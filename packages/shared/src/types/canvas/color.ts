@@ -41,6 +41,7 @@
  * but "no accent" itself is `null`, not a palette entry.
  */
 export const ACCENT_PALETTE = [
+  { token: 'white', name: 'White', value: '#ffffff' },
   { token: 'grey', name: 'Grey', value: '#A8A29E' },
   { token: 'red', name: 'Red', value: '#D07C74' },
   { token: 'orange', name: 'Orange', value: '#D89A5B' },
@@ -74,13 +75,19 @@ export interface ColorPickerOption {
 }
 
 /**
- * Accent picker swatches **with** a leading "Transparent" sentinel.
- * Every node renders with a null accent by default (a neutral surface or
- * fully transparent shell), so the picker always needs a swatch that can
- * represent that "no accent" state — otherwise selecting a colour would
- * be a one-way trip with no path back to the default. The legacy palette
- * without a transparent entry remains exported as `ACCENT_PALETTE` for
- * non-picker call sites (edge stroke, sketch stroke colour, etc.).
+ * Accent picker swatches **with** a leading `Transparent` sentinel.
+ *
+ * `Transparent` (`token: 'none'`, `value: 'transparent'`) represents the
+ * true "no accent" state — canvas data encodes this as
+ * `style.accent: null` and the node renders with `bg-transparent`
+ * (showing the canvas through). Without the sentinel, picking any
+ * colour would be a one-way trip with no path back to the neutral
+ * surface. The legacy palette without the sentinel remains exported as
+ * `ACCENT_PALETTE` for non-picker call sites (edge stroke, sketch
+ * stroke colour, agent tool schemas).
+ *
+ * `White` is part of `ACCENT_PALETTE` itself, so it arrives via the
+ * spread alongside the saturated tokens.
  */
 export const ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT: readonly ColorPickerOption[] =
   [
