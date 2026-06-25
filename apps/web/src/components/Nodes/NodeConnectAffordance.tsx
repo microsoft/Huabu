@@ -111,13 +111,7 @@ export function useCreateConnectedNode(id: string) {
       }
 
       const newId = createId('node');
-      const data =
-        kind === 'note'
-          ? { content: '', origin: { type: 'user-created' as const } }
-          : {
-              content: '',
-              origin: { type: 'user-created' as const },
-            };
+      const data = { content: '', origin: { type: 'user-created' as const } };
       addNode({
         id: newId,
         nodeType: kind,
