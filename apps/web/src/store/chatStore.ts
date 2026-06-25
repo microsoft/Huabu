@@ -66,6 +66,18 @@ export interface ChatState {
    */
   viewingQuestionThread: { nodeId: string; threadId: string } | null;
 
+  questionReplayByCanvas: Record<
+    string,
+    {
+      nodeId: string;
+      threadId: string;
+      binding: AgentBinding;
+      savedCanvasThreadId: string;
+      savedCanvasBinding: AgentBinding;
+      savedCanvasLastAction: AgentMode;
+    }
+  >;
+
   /**
    * When set, the chat panel is inspecting a single sketch cluster
    * (showing its synthesized tool-call style trace). Mutually exclusive
@@ -184,19 +196,45 @@ export interface ChatState {
    * node's `agentMode`, making the node the single source of truth.
    * The canvas thread + binding + lastAction are stashed and restored
    * on close.
+   *
+   * Pass `canvasId` to also persist the replay pointer to
+   * `questionReplayByCanvas` so a refresh / canvas re-entry restores
+   * this view automatically.
    */
   openQuestionThread: (
     nodeId: string,
     threadId: string,
     binding?: AgentBinding,
+    canvasId?: string,
   ) => void;
-  /** Close question thread replay and return to normal canvas chat. */
-  closeQuestionThread: () => void;
+  /**
+   * Close question thread replay and return to normal canvas chat.
+   * Pass `canvasId` to also drop the persisted replay pointer so the
+   * next visit to this canvas opens the plain chat thread.
+   */
+  closeQuestionThread: (canvasId?: string) => void;
 
-  /** Open the inspector view for a single sketch cluster. */
-  openSketchCluster: (clusterId: string) => void;
+  /**
+   * Open the inspector view for a single sketch cluster. Pass
+   * `canvasId` to clear any persisted question-replay pointer for that
+   * canvas — the two views are mutually exclusive, so an active sketch
+   * inspection supersedes the prior replay on restore.
+   */
+  openSketchCluster: (clusterId: string, canvasId?: string) => void;
   /** Close the sketch cluster inspector view. */
   closeSketchCluster: () => void;
+
+  /**
+   * Drop the persisted `questionReplayByCanvas[canvasId]` entry when
+   * its `nodeId` is no longer present in the supplied set. Called by
+   * `canvasStore.loadCanvas` once nodes settle, so a question that was
+   * deleted while the user was elsewhere doesn't strand the chat panel
+   * on a foreign thread.
+   */
+  validateQuestionReplay: (
+    canvasId: string,
+    nodeIds: ReadonlySet<string>,
+  ) => void;
 
   /** Mark / unmark a thread as having an active streaming run. */
   setThreadLoading: (threadId: string, loading: boolean) => void;
@@ -239,6 +277,7 @@ export const useChatStore = create<ChatState>()(
       pendingAttachments: [],
       selectionAttachment: null,
       viewingQuestionThread: null,
+      questionReplayByCanvas: {},
       viewingSketchCluster: null,
       loadingThreadIds: new Set<string>(),
 
@@ -361,7 +400,48 @@ export const useChatStore = create<ChatState>()(
       },
 
       switchToCanvas: (canvasId: string) => {
-        const { threadMap, bindingMap } = get();
+        const { threadMap, bindingMap, questionReplayByCanvas } = get();
+        const replay = questionReplayByCanvas[canvasId];
+
+        if (replay) {
+          // Restore the question-replay view for this canvas. The
+          // saved canvas thread / binding / lastAction travel with the
+          // entry so `closeQuestionThread` can roll back without
+          // consulting the canvas, even after a full page refresh.
+          set({
+            viewingQuestionThread: {
+              nodeId: replay.nodeId,
+              threadId: replay.threadId,
+            },
+            threadId: replay.threadId,
+            agentBinding: replay.binding,
+            _savedCanvasThreadId: replay.savedCanvasThreadId,
+            _savedCanvasBinding: replay.savedCanvasBinding,
+            _savedCanvasLastAction: replay.savedCanvasLastAction,
+            // Keep `threadMap` aligned with the saved canvas thread so
+            // closing the replay later returns to a thread the user
+            // would recognise as the canvas chat — even if some other
+            // path advanced `threadMap[canvasId]` since the replay
+            // opened.
+            threadMap: {
+              ...threadMap,
+              [canvasId]: replay.savedCanvasThreadId,
+            },
+            bindingMap: bindingMap[canvasId]
+              ? bindingMap
+              : { ...bindingMap, [canvasId]: replay.savedCanvasBinding },
+            pendingAttachments: [],
+            selectionAttachment: null,
+            // Sketch inspector is mutually exclusive with replay.
+            viewingSketchCluster: null,
+          });
+          get().evictInactiveThreads();
+          return;
+        }
+
+        // No replay for this canvas — switch to its plain chat thread.
+        // Clear any dangling question/sketch view + stash from a
+        // previous canvas so the panel isn't stuck on a foreign thread.
         let tid = threadMap[canvasId];
         if (!tid) {
           tid = createId('thread');
@@ -379,6 +459,11 @@ export const useChatStore = create<ChatState>()(
           bindingMap: bindingMap[canvasId]
             ? bindingMap
             : { ...bindingMap, [canvasId]: binding },
+          viewingQuestionThread: null,
+          viewingSketchCluster: null,
+          _savedCanvasThreadId: undefined,
+          _savedCanvasBinding: undefined,
+          _savedCanvasLastAction: undefined,
         });
         get().evictInactiveThreads();
       },
@@ -400,12 +485,16 @@ export const useChatStore = create<ChatState>()(
       setSelectionAttachment: (attachment) =>
         set({ selectionAttachment: attachment }),
 
-      openQuestionThread: (nodeId, threadId, binding) => {
+      openQuestionThread: (nodeId, threadId, binding, canvasId) => {
         const {
           threadId: currentThreadId,
           agentBinding: currentBinding,
           lastAction: currentLastAction,
           viewingQuestionThread: currentViewing,
+          _savedCanvasThreadId: savedThreadIdSlot,
+          _savedCanvasBinding: savedBindingSlot,
+          _savedCanvasLastAction: savedLastActionSlot,
+          questionReplayByCanvas,
         } = get();
 
         // Already viewing this exact question thread — nothing to do.
@@ -432,6 +521,24 @@ export const useChatStore = create<ChatState>()(
         // keyed by their own threadId and survive the navigation. The
         // history hook handles first-time hydration of the question
         // thread; subsequent visits hit the cache.
+        //
+        // When `canvasId` is supplied we also write the same triple
+        // (saved canvas thread / binding / lastAction) into
+        // `questionReplayByCanvas[canvasId]` so a refresh or canvas
+        // re-entry restores this view via `switchToCanvas`. When
+        // already viewing another replay, we reuse the previously
+        // stashed slots so the canvas state we eventually roll back to
+        // is the user's pre-replay state, not the previous replay.
+        const persistedSavedThreadId = isAlreadyViewing
+          ? (savedThreadIdSlot ?? currentThreadId)
+          : currentThreadId;
+        const persistedSavedBinding = isAlreadyViewing
+          ? (savedBindingSlot ?? currentBinding)
+          : currentBinding;
+        const persistedSavedLastAction = isAlreadyViewing
+          ? (savedLastActionSlot ?? currentLastAction)
+          : currentLastAction;
+
         set({
           viewingQuestionThread: { nodeId, threadId },
           threadId: threadId,
@@ -441,12 +548,34 @@ export const useChatStore = create<ChatState>()(
             _savedCanvasBinding: currentBinding,
             _savedCanvasLastAction: currentLastAction,
           }),
+          ...(canvasId && {
+            questionReplayByCanvas: {
+              ...questionReplayByCanvas,
+              [canvasId]: {
+                nodeId,
+                threadId,
+                binding: nextBinding,
+                savedCanvasThreadId: persistedSavedThreadId,
+                savedCanvasBinding: persistedSavedBinding,
+                savedCanvasLastAction: persistedSavedLastAction,
+              },
+            },
+          }),
         });
         get().evictInactiveThreads();
       },
 
-      closeQuestionThread: () => {
+      closeQuestionThread: (canvasId) => {
         const state = get();
+        const nextReplayMap = (() => {
+          if (!canvasId) return state.questionReplayByCanvas;
+          if (!(canvasId in state.questionReplayByCanvas)) {
+            return state.questionReplayByCanvas;
+          }
+          const next = { ...state.questionReplayByCanvas };
+          delete next[canvasId];
+          return next;
+        })();
         set({
           viewingQuestionThread: null,
           threadId: state._savedCanvasThreadId ?? state.threadId,
@@ -455,18 +584,30 @@ export const useChatStore = create<ChatState>()(
           _savedCanvasThreadId: undefined,
           _savedCanvasBinding: undefined,
           _savedCanvasLastAction: undefined,
+          questionReplayByCanvas: nextReplayMap,
         });
         get().evictInactiveThreads();
       },
 
-      openSketchCluster: (clusterId) => {
+      openSketchCluster: (clusterId, canvasId) => {
         // Sketch inspector is a pure overlay over the existing chat
         // state — no thread switch needed. We just flip a flag and the
         // ChatPanel renders synthesized messages from the intent
         // store. Closing any active question thread first keeps the
-        // two modes mutually exclusive.
+        // two modes mutually exclusive — including its persisted
+        // replay pointer for this canvas, so a refresh doesn't
+        // re-resurrect the replay underneath the sketch view.
         const state = get();
         if (state.viewingQuestionThread) {
+          const nextReplayMap = (() => {
+            if (!canvasId) return state.questionReplayByCanvas;
+            if (!(canvasId in state.questionReplayByCanvas)) {
+              return state.questionReplayByCanvas;
+            }
+            const next = { ...state.questionReplayByCanvas };
+            delete next[canvasId];
+            return next;
+          })();
           set({
             viewingQuestionThread: null,
             threadId: state._savedCanvasThreadId ?? state.threadId,
@@ -475,6 +616,7 @@ export const useChatStore = create<ChatState>()(
             _savedCanvasThreadId: undefined,
             _savedCanvasBinding: undefined,
             _savedCanvasLastAction: undefined,
+            questionReplayByCanvas: nextReplayMap,
           });
         }
         set({ viewingSketchCluster: { clusterId } });
@@ -482,6 +624,25 @@ export const useChatStore = create<ChatState>()(
 
       closeSketchCluster: () => {
         set({ viewingSketchCluster: null });
+      },
+
+      validateQuestionReplay: (canvasId, nodeIds) => {
+        const { questionReplayByCanvas, viewingQuestionThread } = get();
+        const replay = questionReplayByCanvas[canvasId];
+        if (!replay) return;
+        if (nodeIds.has(replay.nodeId)) return;
+        // The question node owning this replay was deleted while we
+        // were elsewhere. If the panel is currently showing it, roll
+        // back to the canvas chat — `closeQuestionThread` also wipes
+        // the persisted pointer in the same set. Otherwise just drop
+        // the dangling entry.
+        if (viewingQuestionThread?.nodeId === replay.nodeId) {
+          get().closeQuestionThread(canvasId);
+          return;
+        }
+        const next = { ...questionReplayByCanvas };
+        delete next[canvasId];
+        set({ questionReplayByCanvas: next });
       },
 
       setThreadLoading: (threadId, loading) =>
@@ -529,6 +690,12 @@ export const useChatStore = create<ChatState>()(
         threadId: state.threadId,
         lastAction: state.lastAction,
         bindingMap: state.bindingMap,
+        // Per-canvas replay pointers survive refresh so re-entering a
+        // canvas while a question replay was open restores that view
+        // instead of silently falling back to canvas chat. The
+        // `_saved*` slots travel inside each entry, so they don't need
+        // to be persisted as top-level fields.
+        questionReplayByCanvas: state.questionReplayByCanvas,
       }),
     },
   ),

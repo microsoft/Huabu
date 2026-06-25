@@ -116,9 +116,13 @@ const ClusterOverlay = memo(
     const revertCluster = useIntentStore((s) => s.revertCluster);
     const openSketchCluster = useChatStore((s) => s.openSketchCluster);
     const requestOpenRightPanel = usePanelStore((s) => s.requestOpenRightPanel);
+    // Pass canvasId so opening the sketch inspector also evicts any
+    // persisted question-replay pointer for this canvas — sketch and
+    // replay are mutually exclusive views.
+    const canvasId = useCanvasStore((s) => s.canvasId);
 
     const handleOpenInspector = () => {
-      openSketchCluster(cluster.id);
+      openSketchCluster(cluster.id, canvasId || undefined);
       requestOpenRightPanel();
     };
 

@@ -129,6 +129,10 @@ export const QuestionNode = memo(
     // ------------------------------------------------------------------
     const openQuestionThread = useChatStore((s) => s.openQuestionThread);
     const requestOpenRightPanel = usePanelStore((s) => s.requestOpenRightPanel);
+    // Read canvasId so we can persist the replay pointer per canvas;
+    // omit it via `undefined` for the (rare) case where the node renders
+    // outside an active canvas context.
+    const canvasId = useCanvasStore((s) => s.canvasId);
 
     const openInChat = useCallback(() => {
       if (!data.threadId) return;
@@ -136,8 +140,15 @@ export const QuestionNode = memo(
       // reflect the agent that answered. The replay mode (ask/operate)
       // is derived from this node's `agentMode` inside ChatPanel, so
       // follow-up turns stay locked to the mode the question runs in
-      // without us threading it through here.
-      openQuestionThread(id, data.threadId, data.agentBinding);
+      // without us threading it through here. The trailing `canvasId`
+      // lets chatStore record this replay in `questionReplayByCanvas`
+      // so a refresh / canvas re-entry restores the view.
+      openQuestionThread(
+        id,
+        data.threadId,
+        data.agentBinding,
+        canvasId || undefined,
+      );
       requestOpenRightPanel();
       // Mark as viewed only once the run has finished — if we marked
       // it during `running` and the user navigated away before
@@ -153,6 +164,7 @@ export const QuestionNode = memo(
       data.agentBinding,
       data.viewed,
       hasRun,
+      canvasId,
       openQuestionThread,
       requestOpenRightPanel,
       patchNodeSilent,
