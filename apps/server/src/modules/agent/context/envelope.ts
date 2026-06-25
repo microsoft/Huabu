@@ -1,0 +1,364 @@
+/**
+ * Structured chat-request envelope.
+ *
+ * The envelope is the single structured representation of "what context
+ * does the agent see this turn", decoupled from how any particular
+ * backend renders it. {@link buildChatEnvelope} performs all the
+ * derivation with side effects (workspace-memory read, sketch/image
+ * auto-snapshot, invoked-skill resolution, node-neighbourhood render);
+ * the serializers (`serializeChatEnvelopeToPiAi`, and later intent /
+ * ACP variants) are pure functions over the result.
+ *
+ * Field grouping mirrors the four orthogonal concerns the design calls
+ * out:
+ *   - `preamble`   — background context unrelated to this turn's focus
+ *     (cross-canvas memory, neighbourhood disambiguation).
+ *   - `user`       — what the user directly typed / uploaded.
+ *   - `skills`     — capabilities the user invoked this turn.
+ *   - `focus`      — where the user pointed on the canvas, plus anything
+ *     derived from that selection (composite snapshots).
+ */
+
+import { getSkill } from '../../../prompt/index.js';
+import { renderNodeNeighbourhoodMarkdown } from '../../canvas/node-neighbourhood.js';
+import { readWorkspaceMemory } from '../memory/index.js';
+import { buildAgentNodeRef } from '../node-ref.js';
+import { isUserInvokableSkill } from '../skills.route.js';
+import { snapshotNodesToArtifacts } from '../tools/handlers/snapshot-node.js';
+
+import type { AgentNodeRef } from '../node-ref.js';
+import type { ChatAttachment, WireSelectionNode } from '@sediment/shared';
+import type { FastifyBaseLogger } from 'fastify';
+
+/** A user-invoked skill resolved to its body for this turn. */
+export interface ResolvedSkill {
+  id: string;
+  name: string;
+  body: string;
+}
+
+/** The structured context for one chat turn. */
+export interface ChatEnvelope {
+  /** Background context unrelated to this turn's canvas focus. */
+  preamble: {
+    /** Cross-canvas user profile, eagerly injected on the first turn. */
+    workspaceMemory?: string;
+    /** Neighbourhood markdown for an anchored request, if any. */
+    nodeNeighbourhood?: string;
+  };
+  /** What the user directly contributed this turn. */
+  user: {
+    text: string;
+    /** Off-canvas uploads carried in the request body. */
+    attachments: ChatAttachment[];
+  };
+  /** Capabilities the user invoked this turn. */
+  skills: {
+    /** Raw request ids, preserved for the persisted breadcrumb tag. */
+    invokedIds: string[];
+    /** Resolved, user-invokable skill bodies for the preamble. */
+    resolved: ResolvedSkill[];
+  };
+  /** Where the user pointed on the canvas + derived artifacts. */
+  focus: {
+    selection: {
+      /**
+       * Full reference list (frame children included) — the agent's
+       * up-front map of the selection.
+       */
+      refs: AgentNodeRef[];
+      /**
+       * Ids the user explicitly selected (top-level only) — drives the
+       * persisted `selectedNodeIds` breadcrumb so reloaded history
+       * renders the same chips the composer showed.
+       */
+      topLevelIds: string[];
+      /** Selection image attachments not consumed by a composite. */
+      imageAttachments: ChatAttachment[];
+      /** Composite PNG snapshots derived from selected sketch/image nodes. */
+      snapshotAttachments: ChatAttachment[];
+    };
+  };
+}
+
+/** Inputs needed to assemble one chat turn's envelope. */
+export interface ChatEnvelopeParams {
+  /** Raw user prompt text. */
+  content: string;
+  /** User-uploaded (off-canvas) attachments from the request body. */
+  attachments?: ChatAttachment[];
+  /** Wire selection (top-level + frame children) for this turn. */
+  selectedNodes?: WireSelectionNode[];
+  /** Anchor node for neighbourhood preamble (e.g. question nodes). */
+  anchorNodeId?: string;
+  /** User-invoked skill ids parsed from `/<id>` tokens. */
+  invokedSkills?: string[];
+  /** Current canvas id (null for canvas-less threads). */
+  canvasId: string | null;
+  /** True on the first turn of a thread (drives memory pre-read). */
+  isFirstTurn: boolean;
+  /** Logger for non-fatal diagnostics (auto-snapshot failures, dropped skills). */
+  logger: FastifyBaseLogger;
+}
+
+/**
+ * Collect image attachments from selected canvas nodes (including frame
+ * children). Enables vision analysis when users select image nodes.
+ */
+function collectImageAttachments(nodes: WireSelectionNode[]): ChatAttachment[] {
+  const attachments: ChatAttachment[] = [];
+  for (const node of nodes) {
+    if (node.type === 'image' && node.src) {
+      attachments.push({
+        type: 'image',
+        source: 'selection',
+        url: node.src,
+        label: node.label ?? `Image node ${node.id}`,
+        originNodeId: node.id,
+      });
+    }
+    if (node.children) {
+      attachments.push(...collectImageAttachments(node.children));
+    }
+  }
+  return attachments;
+}
+
+/**
+ * Walk the wire selection (frame children included) and collect the
+ * ids of every `sketch` node. Drives the auto-snapshot step.
+ */
+function collectSketchNodeIds(nodes: WireSelectionNode[]): string[] {
+  const ids: string[] = [];
+  const walk = (list: WireSelectionNode[]) => {
+    for (const n of list) {
+      if (n.type === 'sketch') ids.push(n.id);
+      if (n.children) walk(n.children);
+    }
+  };
+  walk(nodes);
+  return ids;
+}
+
+/**
+ * Flatten the wire selection (frame children included) into the L0
+ * `AgentNodeRef` payload of `{ id, type, label?, filename }`. Richer
+ * detail is one tool call away, so we do not pay its token cost here.
+ */
+function collectSelectedNodeRefs(nodes: WireSelectionNode[]): AgentNodeRef[] {
+  const refs: AgentNodeRef[] = [];
+  const walk = (list: WireSelectionNode[]) => {
+    for (const n of list) {
+      refs.push(buildAgentNodeRef({ id: n.id, type: n.type, label: n.label }));
+      if (n.children) walk(n.children);
+    }
+  };
+  walk(nodes);
+  return refs;
+}
+
+/**
+ * Collect the ids the user **explicitly selected** (top-level only —
+ * frame children are intentionally skipped).
+ */
+function collectSelectedNodeIds(nodes: WireSelectionNode[]): string[] {
+  const seen = new Set<string>();
+  for (const n of nodes) seen.add(n.id);
+  return Array.from(seen);
+}
+
+/**
+ * Resolve user-invoked skill ids to their bodies, dropping unknown or
+ * non-invokable ids (logged for diagnostics).
+ */
+function resolveInvokedSkills(
+  invokedSkills: string[] | undefined,
+  logger: FastifyBaseLogger,
+): ResolvedSkill[] {
+  if (!invokedSkills || invokedSkills.length === 0) return [];
+  const seen = new Set<string>();
+  const injected: ResolvedSkill[] = [];
+  const dropped: { id: string; reason: 'unknown' | 'not-invokable' }[] = [];
+  for (const rawId of invokedSkills) {
+    const id = rawId.trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    const skill = getSkill(id);
+    if (!skill) {
+      dropped.push({ id, reason: 'unknown' });
+      continue;
+    }
+    if (!isUserInvokableSkill(skill)) {
+      dropped.push({ id, reason: 'not-invokable' });
+      continue;
+    }
+    injected.push({ id: skill.id, name: skill.name, body: skill.body });
+  }
+  if (dropped.length > 0) {
+    logger.warn(
+      { dropped },
+      '[agent] invokedSkills: dropped ids (unknown or not user-invokable)',
+    );
+  }
+  return injected;
+}
+
+/**
+ * Derive the composite snapshot attachments for a selection and the set
+ * of selection image ids those composites consumed.
+ *
+ * Auto-snapshots every selected sketch and image into PNG artifacts so
+ * the LLM sees them as vision parts without calling `snapshot_nodes`.
+ * The handler clusters per parent frame (≤ 200 px gap); a singleton
+ * image short-circuits to its original artifact and is left to its
+ * standalone attachment. Any image folded into a composite is marked
+ * consumed so its standalone entry can be dropped — sending the same
+ * image bytes twice tripped `413 Request Entity Too Large`.
+ */
+async function deriveSnapshotAttachments(
+  selectedNodes: WireSelectionNode[],
+  selectionImageAttachments: ChatAttachment[],
+  canvasId: string,
+  logger: FastifyBaseLogger,
+): Promise<{
+  snapshotAttachments: ChatAttachment[];
+  consumedImageIds: Set<string>;
+}> {
+  const snapshotAttachments: ChatAttachment[] = [];
+  const consumedImageIds = new Set<string>();
+
+  const sketchIds = collectSketchNodeIds(selectedNodes);
+  const selectedImageIds = selectionImageAttachments
+    .map((a) => a.originNodeId)
+    .filter((id): id is string => typeof id === 'string');
+  const snapshotIds = [...sketchIds, ...selectedImageIds];
+  if (snapshotIds.length === 0) {
+    return { snapshotAttachments, consumedImageIds };
+  }
+
+  try {
+    const rasterResults = await snapshotNodesToArtifacts({
+      nodeIds: snapshotIds,
+      canvasId,
+    });
+    const selectedImageIdSet = new Set(selectedImageIds);
+    for (const r of rasterResults) {
+      const strokeIds = r.originNodeIds.filter(
+        (id) => !selectedImageIdSet.has(id),
+      );
+      const imageIds = r.originNodeIds.filter((id) =>
+        selectedImageIdSet.has(id),
+      );
+      // Singleton image pass-through (no strokes, exactly one image —
+      // handler short-circuited to that node's original artifact):
+      // leave it to its standalone `selectionImageAttachments` entry.
+      if (strokeIds.length === 0 && imageIds.length === 1) continue;
+      // Anything else is a composite owned by this snapshot.
+      for (const iid of imageIds) consumedImageIds.add(iid);
+      const nStrokes = strokeIds.length;
+      const nImages = imageIds.length;
+      const label =
+        nStrokes === 0
+          ? `Image cluster (${nImages} images)`
+          : nImages > 0
+            ? `Sketch cluster (${nStrokes} stroke node${
+                nStrokes === 1 ? '' : 's'
+              } + ${nImages} backdrop image${nImages === 1 ? '' : 's'})`
+            : nStrokes === 1
+              ? 'Sketch (1 stroke node)'
+              : `Sketch cluster (${nStrokes} stroke nodes)`;
+      snapshotAttachments.push({
+        type: 'image',
+        source: 'selection',
+        url: r.src,
+        label,
+        originNodeIds: r.originNodeIds,
+      });
+    }
+  } catch (err) {
+    logger.warn(
+      { err, snapshotIds, canvasId },
+      '[agent.route] selection auto-snapshot failed',
+    );
+  }
+
+  return { snapshotAttachments, consumedImageIds };
+}
+
+/**
+ * Build the structured {@link ChatEnvelope} for one chat turn. Performs
+ * all side-effectful derivation (memory read, auto-snapshot, skill
+ * resolution, neighbourhood render); the result is a plain data object
+ * the serializers turn into backend-specific messages.
+ */
+export async function buildChatEnvelope(
+  params: ChatEnvelopeParams,
+): Promise<ChatEnvelope> {
+  const {
+    content,
+    attachments,
+    selectedNodes,
+    anchorNodeId,
+    invokedSkills,
+    canvasId,
+    isFirstTurn,
+    logger,
+  } = params;
+
+  // Preamble: workspace memory (first turn) + node neighbourhood.
+  const workspaceMemory = isFirstTurn
+    ? (readWorkspaceMemory() ?? undefined)
+    : undefined;
+  const nodeNeighbourhood =
+    anchorNodeId && canvasId
+      ? (renderNodeNeighbourhoodMarkdown(canvasId, anchorNodeId) ?? undefined)
+      : undefined;
+
+  // Focus: selection refs + derived snapshot artifacts.
+  const selectionImageAttachments = selectedNodes
+    ? collectImageAttachments(selectedNodes)
+    : [];
+
+  let snapshotAttachments: ChatAttachment[] = [];
+  let consumedImageIds = new Set<string>();
+  if (selectedNodes && canvasId) {
+    const derived = await deriveSnapshotAttachments(
+      selectedNodes,
+      selectionImageAttachments,
+      canvasId,
+      logger,
+    );
+    snapshotAttachments = derived.snapshotAttachments;
+    consumedImageIds = derived.consumedImageIds;
+  }
+
+  const dedupedImageAttachments =
+    consumedImageIds.size === 0
+      ? selectionImageAttachments
+      : selectionImageAttachments.filter(
+          (a) => !a.originNodeId || !consumedImageIds.has(a.originNodeId),
+        );
+
+  return {
+    preamble: {
+      ...(workspaceMemory ? { workspaceMemory } : {}),
+      ...(nodeNeighbourhood ? { nodeNeighbourhood } : {}),
+    },
+    user: {
+      text: content,
+      attachments: attachments ?? [],
+    },
+    skills: {
+      invokedIds: invokedSkills ?? [],
+      resolved: resolveInvokedSkills(invokedSkills, logger),
+    },
+    focus: {
+      selection: {
+        refs: selectedNodes ? collectSelectedNodeRefs(selectedNodes) : [],
+        topLevelIds: selectedNodes ? collectSelectedNodeIds(selectedNodes) : [],
+        imageAttachments: dedupedImageAttachments,
+        snapshotAttachments,
+      },
+    },
+  };
+}

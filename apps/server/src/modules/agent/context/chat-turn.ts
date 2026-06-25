@@ -17,24 +17,18 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { renderAgentTemplate } from '../../../prompt/index.js';
-import { getSkill } from '../../../prompt/index.js';
 import {
   ARTIFACT_URL_REGEX,
   resolveArtifactImageUrl,
 } from '../../artifact/utils.js';
-import { renderNodeNeighbourhoodMarkdown } from '../../canvas/node-neighbourhood.js';
 import { getCanvasStore } from '../../storage/index.js';
-import { readWorkspaceMemory } from '../memory/index.js';
-import { buildAgentNodeRef } from '../node-ref.js';
-import { isUserInvokableSkill } from '../skills.route.js';
-import { snapshotNodesToArtifacts } from '../tools/handlers/snapshot-node.js';
 import { appendMetadataTags } from '../user-message-metadata.js';
+import { buildChatEnvelope } from './envelope.js';
 
+import type { ChatEnvelope, ChatEnvelopeParams } from './envelope.js';
 import type { LoadedAgent } from '../../../prompt/index.js';
-import type { AgentNodeRef } from '../node-ref.js';
 import type { Context } from '@earendil-works/pi-ai';
-import type { ChatAttachment, WireSelectionNode } from '@sediment/shared';
-import type { FastifyBaseLogger } from 'fastify';
+import type { ChatAttachment } from '@sediment/shared';
 
 /**
  * Hard cap on the decoded byte size of an image we are willing to
@@ -408,382 +402,117 @@ async function buildUserContent(
 }
 
 /**
- * Collect image attachments from selected canvas nodes (including frame children).
- * Enables vision analysis when users select image nodes on the canvas.
+ * Inputs needed to assemble one chat turn: everything the envelope
+ * builder needs, plus the resolved agent config the pi-ai serializer
+ * uses for its message templates.
  */
-function collectImageAttachments(nodes: WireSelectionNode[]): ChatAttachment[] {
-  const attachments: ChatAttachment[] = [];
-
-  for (const node of nodes) {
-    if (node.type === 'image' && node.src) {
-      attachments.push({
-        type: 'image',
-        source: 'selection',
-        url: node.src,
-        label: node.label ?? `Image node ${node.id}`,
-        originNodeId: node.id,
-      });
-    }
-    if (node.children) {
-      attachments.push(...collectImageAttachments(node.children));
-    }
-  }
-
-  return attachments;
-}
-
-/**
- * Walk the wire selection (frame children included) and collect the
- * ids of every `sketch` node. Used to drive the auto-snapshot step
- * that turns selected strokes into a vision-ready PNG attachment
- * before the LLM ever sees the user's prompt.
- */
-function collectSketchNodeIds(nodes: WireSelectionNode[]): string[] {
-  const ids: string[] = [];
-  const walk = (list: WireSelectionNode[]) => {
-    for (const n of list) {
-      if (n.type === 'sketch') ids.push(n.id);
-      if (n.children) walk(n.children);
-    }
-  };
-  walk(nodes);
-  return ids;
-}
-
-/**
- * Flatten the wire selection (including frame children) into the
- * absolute minimum the agent needs to know up front: the L0
- * `AgentNodeRef` payload of `{ id, type, label?, filename }`. Anything
- * richer (content / preview / position / style) is one tool call away
- * via `read` or `inspect_nodes`, so we deliberately do not pay the
- * token cost of including it in every turn.
- *
- * `filename` is derived server-side via `buildAgentNodeRef` so the LLM
- * never has to apply the safeLabel rule itself — empirically it
- * mis-handles spaces and other kept-as-is characters often enough to
- * waste a turn on a 404'd `read`.
- */
-function collectSelectedNodeRefs(nodes: WireSelectionNode[]): AgentNodeRef[] {
-  const refs: AgentNodeRef[] = [];
-  const walk = (list: WireSelectionNode[]) => {
-    for (const n of list) {
-      refs.push(buildAgentNodeRef({ id: n.id, type: n.type, label: n.label }));
-      if (n.children) walk(n.children);
-    }
-  };
-  walk(nodes);
-  return refs;
-}
-
-/**
- * Collect the ids the user **explicitly selected** on the canvas
- * (top-level entries only — frame children are intentionally skipped).
- * Used to materialise the `[SYSTEM selectedNodeIds:[...]]` metadata
- * tag on the persisted user message so reloaded history renders the
- * same NodeRef chips the live composer showed at submit time.
- */
-function collectSelectedNodeIds(nodes: WireSelectionNode[]): string[] {
-  const seen = new Set<string>();
-  for (const n of nodes) seen.add(n.id);
-  return Array.from(seen);
-}
-
-/** Inputs needed to assemble one chat turn's user messages. */
-export interface ChatTurnParams {
-  /** Raw user prompt text. */
-  content: string;
-  /** User-uploaded (off-canvas) attachments from the request body. */
-  attachments?: ChatAttachment[];
-  /** Wire selection (top-level + frame children) for this turn. */
-  selectedNodes?: WireSelectionNode[];
-  /** Anchor node for neighbourhood preamble (e.g. question nodes). */
-  anchorNodeId?: string;
-  /** User-invoked skill ids parsed from `/<id>` tokens. */
-  invokedSkills?: string[];
-  /** Current canvas id (null for canvas-less threads). */
-  canvasId: string | null;
+export interface ChatTurnParams extends ChatEnvelopeParams {
   /** Resolved agent config (provides message templates). */
   agentCfg: LoadedAgent;
-  /** True on the first turn of a thread (drives memory pre-read). */
-  isFirstTurn: boolean;
-  /** Logger for non-fatal diagnostics (auto-snapshot failures). */
-  logger: FastifyBaseLogger;
 }
 
 /**
- * Assemble and push every per-turn user message onto `context.messages`
- * in canonical order:
+ * Serialize a structured {@link ChatEnvelope} into the per-turn pi-ai
+ * user messages, pushing them onto `context.messages` in canonical
+ * order:
  *   1. workspace-memory pre-read (first turn only)
  *   2. selected-node reference preamble
  *   3. node-neighbourhood preamble (anchored requests)
  *   4. user-invoked skill bodies
  *   5. the user's message (with selection / skill / attachment tags)
  *
- * Mutates `context.messages` in place — the caller owns persistence.
- *
- * Returns the final tagged user-message content so the caller can also
- * forward it to the external-agent (ACP) dispatch path, which consumes
- * the same payload as the message body.
+ * This is the one place the pi-ai-specific `[SYSTEM …]` encoding and
+ * base64 vision-part resolution live. Returns the final tagged
+ * user-message content so the caller can forward it to the
+ * external-agent (ACP) dispatch path.
  */
-export async function applyChatTurnMessages(
+export async function serializeChatEnvelopeToPiAi(
   context: Context,
-  params: ChatTurnParams,
+  env: ChatEnvelope,
+  opts: { canvasId: string | null; agentCfg: LoadedAgent },
 ): Promise<UserContent> {
-  const {
-    content,
-    attachments,
-    selectedNodes,
-    anchorNodeId,
-    invokedSkills,
-    canvasId,
-    agentCfg,
-    isFirstTurn,
-    logger,
-  } = params;
+  const { canvasId, agentCfg } = opts;
 
-  // Workspace-memory pre-read.
-  //
-  // For the *first turn* of a thread we eagerly inject workspace
-  // memory as a SYSTEM context block. Reason: cross-canvas user
-  // preferences (style, voice, response length) should influence
-  // the very first reply, and we can't trust the agent to remember
-  // to read memory/workspace.md before answering a trivial prompt.
-  if (isFirstTurn) {
-    const workspace = readWorkspaceMemory();
-    if (workspace) {
-      context.messages.push({
-        role: 'user',
-        content: `[SYSTEM Workspace memory \u2014 cross-canvas user profile, eagerly loaded for the first turn]\n${workspace}`,
-        timestamp: Date.now(),
-      });
-    }
+  // 1. Workspace-memory pre-read (cross-canvas profile; first turn only).
+  if (env.preamble.workspaceMemory) {
+    context.messages.push({
+      role: 'user',
+      content: `[SYSTEM Workspace memory \u2014 cross-canvas user profile, eagerly loaded for the first turn]\n${env.preamble.workspaceMemory}`,
+      timestamp: Date.now(),
+    });
   }
 
-  // Collect image attachments from selected canvas nodes for vision analysis
-  const selectedImageAttachments = selectedNodes
-    ? collectImageAttachments(selectedNodes)
-    : [];
-
-  // Auto-snapshot every selected sketch and image into PNG artifacts
-  // so the LLM sees them as vision parts on the very first turn,
-  // without having to call `snapshot_nodes` itself. We piggy-back on
-  // the same content-addressed pipeline the tool uses, so selecting
-  // an unchanged cluster repeatedly is essentially free. Failures are
-  // logged but never block the user's prompt.
-  //
-  // The handler clusters per parent frame (≤ 200 px gap): nearby
-  // image+sketch nodes composite into ONE PNG (images as backdrop,
-  // strokes on top), distant nodes stay separate, and a singleton
-  // image short-circuits to its original artifact. Any image whose
-  // pixels end up inside a composite is marked consumed below so its
-  // standalone `selectedImageAttachments` entry is dropped — sending
-  // the same image bytes twice was the direct cause of 8 MB request
-  // bodies that tripped `413 Request Entity Too Large`.
-  const snapshotAttachments: ChatAttachment[] = [];
-  const consumedSelectionImageIds = new Set<string>();
-  if (selectedNodes && canvasId) {
-    const sketchIds = collectSketchNodeIds(selectedNodes);
-    const selectedImageIds = selectedImageAttachments
-      .map((a) => a.originNodeId)
-      .filter((id): id is string => typeof id === 'string');
-    const snapshotIds = [...sketchIds, ...selectedImageIds];
-    if (snapshotIds.length > 0) {
-      try {
-        const rasterResults = await snapshotNodesToArtifacts({
-          nodeIds: snapshotIds,
-          canvasId,
-        });
-        const selectedImageIdSet = new Set(selectedImageIds);
-        for (const r of rasterResults) {
-          const strokeIds = r.originNodeIds.filter(
-            (id) => !selectedImageIdSet.has(id),
-          );
-          const imageIds = r.originNodeIds.filter((id) =>
-            selectedImageIdSet.has(id),
-          );
-          // Singleton image pass-through (no strokes, exactly one
-          // image — handler short-circuited to that node's original
-          // artifact): leave it alone. The original
-          // `selectedImageAttachments` entry already owns that vision
-          // part with its richer label, so we neither emit a duplicate
-          // `snapshotAttachment` here NOR mark the id as consumed.
-          if (strokeIds.length === 0 && imageIds.length === 1) continue;
-          // Anything else is a composite owned by this snapshot:
-          //   - strokes + 0-or-N images → sketch cluster
-          //   - 0 strokes + N images    → pure image overview cluster
-          for (const iid of imageIds) consumedSelectionImageIds.add(iid);
-          const nStrokes = strokeIds.length;
-          const nImages = imageIds.length;
-          const label =
-            nStrokes === 0
-              ? `Image cluster (${nImages} images)`
-              : nImages > 0
-                ? `Sketch cluster (${nStrokes} stroke node${
-                    nStrokes === 1 ? '' : 's'
-                  } + ${nImages} backdrop image${nImages === 1 ? '' : 's'})`
-                : nStrokes === 1
-                  ? 'Sketch (1 stroke node)'
-                  : `Sketch cluster (${nStrokes} stroke nodes)`;
-          snapshotAttachments.push({
-            type: 'image',
-            source: 'selection',
-            url: r.src,
-            label,
-            originNodeIds: r.originNodeIds,
-          });
-        }
-      } catch (err) {
-        logger.warn(
-          { err, snapshotIds, canvasId },
-          '[agent.route] selection auto-snapshot failed',
-        );
-      }
-    }
-  }
-
-  // Drop selection image attachments that are already composited
-  // inside a snapshot artifact. The model still learns about them via
-  // the `[SYSTEM selectedNodeIds:...]` metadata and the snapshot's
-  // `originNodeIds` caption, so it can still call `inspect_nodes` /
-  // `read` on them if needed.
-  const dedupedImageAttachments =
-    consumedSelectionImageIds.size === 0
-      ? selectedImageAttachments
-      : selectedImageAttachments.filter(
-          (a) =>
-            !a.originNodeId || !consumedSelectionImageIds.has(a.originNodeId),
-        );
-
+  // Merge the off-canvas uploads with selection-derived vision parts.
+  // Order matches the legacy assembly: uploads, deduped selection
+  // images, then composite snapshots. `undefined` when all empty so
+  // `buildUserContent` short-circuits to a plain string.
+  const { imageAttachments, snapshotAttachments } = env.focus.selection;
   const allAttachments =
-    dedupedImageAttachments.length > 0 ||
-    snapshotAttachments.length > 0 ||
-    (attachments && attachments.length > 0)
-      ? [
-          ...(attachments ?? []),
-          ...dedupedImageAttachments,
-          ...snapshotAttachments,
-        ]
+    env.user.attachments.length > 0 ||
+    imageAttachments.length > 0 ||
+    snapshotAttachments.length > 0
+      ? [...env.user.attachments, ...imageAttachments, ...snapshotAttachments]
       : undefined;
 
-  // Build user message
   let userContent = await buildUserContent(
-    content,
+    env.user.text,
     allAttachments,
     canvasId ?? null,
   );
 
-  // Inject a minimal selected-node reference list as a system message.
-  // Each entry carries { id, type, label?, filename } — the `filename`
-  // is pre-computed (`nodes/<safeLabel>.md`) so the agent can `read`
-  // it verbatim without re-deriving the safeLabel rule. Anything
-  // richer (content via `read`, layout/style via `inspect_nodes`) is
-  // fetched on demand.
-  if (selectedNodes && selectedNodes.length > 0) {
-    const refs = collectSelectedNodeRefs(selectedNodes);
-    if (refs.length > 0) {
-      context.messages.push({
-        role: 'user',
-        content: renderAgentTemplate(agentCfg, 'selectedNodesPreamble', {
-          refsJson: JSON.stringify(refs, null, 2),
-        }),
-        timestamp: Date.now(),
-      });
-    }
+  // 2. Selected-node reference preamble. Each entry carries
+  // { id, type, label?, filename } — `filename` is pre-computed so the
+  // agent can `read` it verbatim. Richer detail is fetched on demand.
+  if (env.focus.selection.refs.length > 0) {
+    context.messages.push({
+      role: 'user',
+      content: renderAgentTemplate(agentCfg, 'selectedNodesPreamble', {
+        refsJson: JSON.stringify(env.focus.selection.refs, null, 2),
+      }),
+      timestamp: Date.now(),
+    });
   }
 
-  // Node-neighbourhood preamble. The actual user message arrives as
-  // the next pipeline push, so this preamble carries ONLY the
-  // surrounding-canvas markdown. The server resolves the
-  // neighbourhood from canvas.json — the client just supplies the
-  // anchor node id, no graph data on the wire. Empty result
-  // (canvas/node missing, or no useful context) means we skip the
-  // push entirely — no orphan `[SYSTEM Context]`.
-  if (anchorNodeId && canvasId) {
-    const spatial = renderNodeNeighbourhoodMarkdown(canvasId, anchorNodeId);
-    if (spatial) {
-      context.messages.push({
-        role: 'user',
-        content: renderAgentTemplate(agentCfg, 'nodeNeighbourhoodPreamble', {
-          spatial,
-        }),
-        timestamp: Date.now(),
-      });
-    }
+  // 3. Node-neighbourhood preamble (anchored requests only).
+  if (env.preamble.nodeNeighbourhood) {
+    context.messages.push({
+      role: 'user',
+      content: renderAgentTemplate(agentCfg, 'nodeNeighbourhoodPreamble', {
+        spatial: env.preamble.nodeNeighbourhood,
+      }),
+      timestamp: Date.now(),
+    });
   }
 
-  // User-invoked skills preamble.
-  //
-  // When the user typed `/<id>` tokens in the chat input (parsed
-  // client-side, see `useInternalSlashCommands`), the skill ids are
-  // forwarded here. We fetch each skill body and prepend a single
-  // SYSTEM message so the agent treats the bodies as authoritative
-  // for this turn — distinct from the on-demand catalogue surface
-  // where the model decides whether to `read()` a skill.
-  //
-  // Security/scope rule: honoured ids must satisfy
-  // {@link isUserInvokableSkill}. Unknown or non-invokable ids are
-  // dropped silently (logged for diagnostics).
-  if (invokedSkills && invokedSkills.length > 0) {
-    const seen = new Set<string>();
-    const injected: { id: string; name: string; body: string }[] = [];
-    const dropped: {
-      id: string;
-      reason: 'unknown' | 'not-invokable';
-    }[] = [];
-    for (const rawId of invokedSkills) {
-      const id = rawId.trim();
-      if (!id || seen.has(id)) continue;
-      seen.add(id);
-      const skill = getSkill(id);
-      if (!skill) {
-        dropped.push({ id, reason: 'unknown' });
-        continue;
-      }
-      if (!isUserInvokableSkill(skill)) {
-        dropped.push({ id, reason: 'not-invokable' });
-        continue;
-      }
-      injected.push({ id: skill.id, name: skill.name, body: skill.body });
-    }
-
-    if (dropped.length > 0) {
-      logger.warn(
-        { dropped },
-        '[agent] invokedSkills: dropped ids (unknown or not user-invokable)',
-      );
-    }
-
-    if (injected.length > 0) {
-      const sections = injected
-        .map(
-          (s) =>
-            `<skill id="${s.id}" name="${s.name}">\n${s.body.trimEnd()}\n</skill>`,
-        )
-        .join('\n\n');
-      const quotedIds = injected.map((s) => `"${s.id}"`).join(', ');
-      const header =
-        injected.length === 1
-          ? `[SYSTEM Skill — the user explicitly invoked ${quotedIds}. Apply its guidance to this turn.]`
-          : `[SYSTEM Skills — the user explicitly invoked ${quotedIds}. Apply their guidance to this turn.]`;
-      context.messages.push({
-        role: 'user',
-        content: `${header}\n\n${sections}`,
-        timestamp: Date.now(),
-      });
-    }
+  // 4. User-invoked skill bodies. The agent treats these as
+  // authoritative for this turn — distinct from the on-demand
+  // catalogue surface where the model decides whether to `read()`.
+  if (env.skills.resolved.length > 0) {
+    const sections = env.skills.resolved
+      .map(
+        (s) =>
+          `<skill id="${s.id}" name="${s.name}">\n${s.body.trimEnd()}\n</skill>`,
+      )
+      .join('\n\n');
+    const quotedIds = env.skills.resolved.map((s) => `"${s.id}"`).join(', ');
+    const header =
+      env.skills.resolved.length === 1
+        ? `[SYSTEM Skill — the user explicitly invoked ${quotedIds}. Apply its guidance to this turn.]`
+        : `[SYSTEM Skills — the user explicitly invoked ${quotedIds}. Apply their guidance to this turn.]`;
+    context.messages.push({
+      role: 'user',
+      content: `${header}\n\n${sections}`,
+      timestamp: Date.now(),
+    });
   }
 
-  // Embed selection / skill / attachment breadcrumbs. selectedNodeIds
-  // is derived from the wire selection — the wire never carries the id
-  // list separately. `appendMetadataTags` partitions `attachments`
+  // 5. The user's message, with selection / skill / attachment
+  // breadcrumbs. `appendMetadataTags` partitions `attachments`
   // internally: user-visible items become the UI breadcrumb tag,
   // sketch-raster artifacts become the LLM-only hint tag.
-  const selectedNodeIds = selectedNodes
-    ? collectSelectedNodeIds(selectedNodes)
-    : [];
   userContent = appendMetadataTags(userContent, {
-    selectedNodeIds,
-    invokedSkills,
+    selectedNodeIds: env.focus.selection.topLevelIds,
+    invokedSkills: env.skills.invokedIds,
     attachments: allAttachments,
   });
   context.messages.push({
@@ -793,4 +522,23 @@ export async function applyChatTurnMessages(
   });
 
   return userContent;
+}
+
+/**
+ * Assemble one chat turn: build the structured {@link ChatEnvelope}
+ * (memory read, auto-snapshot, skill resolution, neighbourhood render)
+ * and serialize it into pi-ai messages on `context`.
+ *
+ * Mutates `context.messages` in place — the caller owns persistence.
+ * Returns the final tagged user-message content for the ACP path.
+ */
+export async function applyChatTurnMessages(
+  context: Context,
+  params: ChatTurnParams,
+): Promise<UserContent> {
+  const env = await buildChatEnvelope(params);
+  return serializeChatEnvelopeToPiAi(context, env, {
+    canvasId: params.canvasId,
+    agentCfg: params.agentCfg,
+  });
 }
