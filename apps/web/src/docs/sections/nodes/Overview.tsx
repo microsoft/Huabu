@@ -141,9 +141,8 @@ export default function NodesOverview() {
       <H2>Locking</H2>
       <P>
         Lock any node from the Layers panel. Locked nodes can&apos;t be dragged
-        or resized and are treated as fixed points by auto-layout — but content
-        remains editable. Locking a frame freezes its children too and stops it
-        from auto-resizing.
+        or resized — but content remains editable. Locking a frame freezes its
+        children too and stops it from auto-resizing.
       </P>
       <Callout tone="info">
         Want more on how node content is stored and retrieved by the AI? See{' '}

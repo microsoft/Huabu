@@ -1,6 +1,6 @@
 # Command Cookbook
 
-Composed `canvas_commands` batches for common user intents. Each recipe is a single batch unless noted, and every recipe assumes the conventions in [`commands.md`](commands.md): explicit ids when later commands reference earlier creations, an explicit `position` whenever you care about layout (it is honoured verbatim), one batch per user intent.
+Composed `canvas_commands` batches for common user intents. Each recipe is a single batch unless noted, and every recipe assumes the conventions in [`commands.md`](commands.md): explicit ids when later commands reference earlier creations, an **explicit `position` on every `CREATE_NODES` / `CREATE_QUESTION` entry**.
 
 > **Schema is the source of truth.** Field names below come from the `canvas_commands` schemas; this file is about _which commands to compose_, not which fields to type.
 
@@ -84,6 +84,5 @@ Single `SET_NODE_PARENT { nodeId: "<child>", parentId: null }`. Keeps the node's
 ## Anti-patterns
 
 - **Splitting a coherent intent across two batches.** Each batch is one undo step — splitting forces the user to undo twice and may cause an intermediate render flash.
-- **Omitting `position` on `CREATE_NODES` when you care about layout.** Without a `position`, the force-directed engine picks a slot and your intended geometry is lost. Always set explicit `position` for structured layouts.
 - **Inventing edge ids.** Edge ids only come from existing canvas state (via `inspect_nodes` / `inspect_edges`) or from edges you create in the same batch.
 - **Restyling via `MERGE_NODE_DATA` with `data: { style: { accent: ... } }` plus other fields you did not mean to touch.** Merge is shallow on `data` — keep the patch minimal and explicit.

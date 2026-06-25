@@ -1,12 +1,5 @@
 // TODO: fill in real handbook content for this section.
-import {
-  Callout,
-  H2,
-  P,
-  PageLayout,
-  Table,
-  type TocEntry,
-} from '../../components';
+import { H2, P, PageLayout, Table, type TocEntry } from '../../components';
 
 const toc: TocEntry[] = [
   { id: 'creating-edges', label: 'Creating edges' },
@@ -81,18 +74,6 @@ export default function Edges() {
         expressing. You see them in the change list before they&apos;re
         committed and can edit or delete them like any other edge.
       </P>
-      <Callout tone="info">
-        Auto-layout also uses <em>invisible</em> semantic edges (e.g. between a
-        Note and its source PDF) to keep related nodes close. Those don&apos;t
-        render but they influence layout. See{' '}
-        <a
-          className="font-medium text-gray-900 underline decoration-gray-400 underline-offset-2 hover:decoration-gray-900"
-          href="/docs/concepts/auto-layout"
-        >
-          Auto-layout
-        </a>{' '}
-        for the weight table.
-      </Callout>
     </PageLayout>
   );
 }

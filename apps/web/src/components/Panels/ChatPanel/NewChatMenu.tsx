@@ -3,35 +3,16 @@
  * header. Replaces the previous `ModeSelector` whose dropdown only
  * became interactive on an *empty* thread (a confusing affordance once
  * the thread had messages: every option looked greyed-out).
- *
- * Layout:
- *   ┌─────┬─────┐
- *   │  +  │  ▾  │
- *   └─────┴─────┘
- *      │     │
- *      │     └─ Opens a menu: pick the (mode, agent) for a brand-new
- *      │        thread. An **Add agent** entry lives in the menu
- *      │        footer; clicking it opens the same Profile editor used
- *      │        by Settings → External Agents, so adding a new external
- *      │        agent never requires leaving the chat surface.
- *      │
- *      └─ Shortcut: starts a new thread bound to the *current* config
- *         (so "+" while chatting with claude → another claude thread).
- *
- * Why a split button instead of "+" plus a separate picker:
- *   - "1 thread = 1 binding" is still the rule, so "switch agent" is
- *     fundamentally "new thread + new binding". Surfacing both halves
- *     in a single control collapses the previous two-step flow (new
- *     thread → change binding) into a single click.
- *   - The most-common action ("new chat, same agent") stays a single
- *     click via the left `+` half.
- *
- * The thread's *current* (mode, binding) is shown as the panel title
- * ("Chat with claude"); this menu is purely about starting a *new*
- * thread, so menu rows are actions, not radio options.
  */
 
-import { ChevronDown, MessageSquare, Plus, Route, Sprout } from 'lucide-react';
+import {
+  Bookmark,
+  ChevronDown,
+  MessageSquare,
+  Plus,
+  Route,
+  Sprout,
+} from 'lucide-react';
 import { useCallback, useRef, useState, type ReactNode } from 'react';
 
 import { Button } from '../../Common/Button';
@@ -65,6 +46,8 @@ interface NewChatMenuProps {
   onRefreshProfiles?: () => void | Promise<void>;
   /** Atomic "reset thread + apply (mode, binding)". */
   onSelect: (choice: NewChatChoice) => void;
+  onSave?: () => void;
+  canSave?: boolean;
   /** Disable the control completely (e.g. history not yet loaded). */
   disabled?: boolean;
   /**
@@ -91,6 +74,8 @@ export const NewChatMenu = ({
   profiles,
   onRefreshProfiles,
   onSelect,
+  onSave,
+  canSave = false,
   disabled = false,
   busy = false,
 }: NewChatMenuProps) => {
@@ -150,6 +135,21 @@ export const NewChatMenu = ({
   return (
     <>
       <div ref={triggerRef} className="flex items-center">
+        {onSave && (
+          <Button
+            variant="ghost"
+            tone="neutral"
+            size="md"
+            iconOnly
+            onClick={onSave}
+            disabled={disabled || busy || !canSave}
+            title="Save chat as question node"
+            tooltipPlacement="bottom"
+            className="rounded-r-none"
+          >
+            <Bookmark />
+          </Button>
+        )}
         <Button
           variant="ghost"
           tone="neutral"
@@ -159,7 +159,7 @@ export const NewChatMenu = ({
           disabled={disabled || busy}
           title={shortcutTitle}
           tooltipPlacement="bottom"
-          className="rounded-r-none"
+          className={cn(onSave ? 'rounded-none' : 'rounded-r-none')}
         >
           <Plus />
         </Button>

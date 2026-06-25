@@ -139,7 +139,7 @@ components/
 
 ## `handler/`
 
-Core processing logic — pure functions and algorithms, no React components. Contains the canvas command system, auto-layout engine, and PDF utilities.
+Core processing logic — pure functions and algorithms, no React components. Contains the canvas command system and PDF utilities.
 
 ```
 handler/
@@ -183,19 +183,6 @@ handler/
 │       ├── edge.ts           # Smart handles, edge rerouting
 │       ├── frame.ts         # Frame tree operations
 │       └── screenshot.ts
-│
-├── autoLayout/              # Force-directed layout engine
-│   ├── index.ts             # Barrel exports
-│   ├── coordinator.ts       # Entry point: layoutAll / layoutGroup / placeNode
-│   ├── engine.ts            # Solver delegation (Cola vs fCoSE)
-│   ├── graphModel.ts        # Canvas → LayoutGraph conversion
-│   ├── applier.ts           # Maps layout results onto canvas nodes
-│   ├── types.ts             # UI-agnostic layout types
-│   └── solvers/
-│       ├── types.ts         # LayoutSolver interface
-│       ├── solverUtils.ts   # Absolute position resolution
-│       ├── colaSolver.ts    # WebCola (full relayout)
-│       └── fcoseSolver.ts   # fCoSE (incremental placement)
 │
 └── pdfHighlight/            # PDF highlight computation
     └── highlight.ts         # Rect merging, overlap, toggle

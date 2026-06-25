@@ -2,6 +2,29 @@
 
 每次重要功能变更都会记录在此文件中，按时间倒序排列。
 
+## 2026-06-23 · Chat Panel：把当前会话一键保存为画布上的 Question 节点
+
+**What Changed**
+
+Chat Panel 顶部的"+"（新会话）旁边多了一个 **保存（书签 +）** 按钮，三段拼接成一组：`[💾 Save] [+] [▾]`。
+
+点击 Save 后做两件事：
+
+1. 用当前 thread 的**第一条 user 消息**为文字内容，在画布视口中心创建一个 `question` 节点（`status='done'`、`viewed=true`），并把当前的 `threadId` / `agentBinding` / `agentMode` 都写到节点 `data` 上；
+2. 立刻调 `clearMessages` 铸一个新的空 thread，沿用当前 mode + 当前 binding（行为与"+"完全一致），让你接着开新会话——不会和已保存的那条混在一起。
+
+后续双击画布上这个 question 节点，会复用 `QuestionNode.canOpenInChat` 既有的"打开对话"路径：Chat Panel 进入 Question Replay 模式，从服务器把这个 `threadId` 的完整历史拉回来显示——零额外服务端改动，因为每个 thread 本来就以 `<canvasId>/.history/chat/<threadId>.json` 的形式落盘了。
+
+**Notes**
+
+- Save 按钮在以下情况下灰掉：
+  - 当前 thread 还没有任何 user 消息；
+  - 正在流式生成（`isLoading`）；
+  - Chat Panel 处于 Question Replay / Sketch Cluster Inspector 模式（这两种模式下整组按钮已经被换成"返回"，问题不存在）。
+- 不会触发 `useQuestionRunner` 重跑模型——它只挑 `status==='pending'` 的节点，`done` 节点完全是数据快照。
+- 节点上显示的文字 = 第一条 user 消息全文。如果是 `@Agent` 之类的外部 binding 会话，保存出来的节点也会带上对应 binding，replay 时仍然走 ACP 路径。
+- 改动文件：[apps/web/src/components/Panels/ChatPanel/NewChatMenu.tsx](apps/web/src/components/Panels/ChatPanel/NewChatMenu.tsx)、[apps/web/src/components/Panels/ChatPanel/index.tsx](apps/web/src/components/Panels/ChatPanel/index.tsx)。
+
 ## 2026-06-22 · Agent Sideband：HST 工具能正常下发、write-node 正确回传节点 ID
 
 **What Changed**

@@ -54,15 +54,13 @@ type CanvasNodeCreateInputByType<T extends CanvasNodeType> = {
   nodeType: T;
   data?: Partial<Omit<Extract<NodeData, { type: T }>, 'type'>>;
   /**
-   * Top-left position of the new node.
-   *
-   * Providing `position` is a contract that the caller has chosen where
-   * the node belongs (drag-drop, paste, toolbar placement, group-into-frame,
-   * etc.) — the create handler honours it verbatim. Omit `position` for
-   * programmatic / AI creation paths where the canvas should pick a slot
-   * via force-directed `placeNode`.
+   * Top-left position of the new node. Required for every caller —
+   * the engine no longer ships a fallback layout. UI callers (drag-drop,
+   * paste, toolbar placement, group-into-frame, etc.) chose the slot
+   * themselves; agents must always emit an explicit position via the
+   * `canvas_commands` schema.
    */
-  position?: Point;
+  position: Point;
   size?: NodeSize;
   parentId?: CanvasNodeId | null;
 };
@@ -146,10 +144,10 @@ export type CanvasCommand =
       /** The question text content. */
       content: string;
       /**
-       * Top-left position. Honoured verbatim when provided; when omitted
-       * the canvas picks a slot via force-directed `placeNode`.
+       * Top-left position. Required — the engine no longer ships a
+       * fallback layout, so every caller must commit to a slot.
        */
-      position?: Point;
+      position: Point;
       size?: NodeSize;
       parentId?: CanvasNodeId | null;
     }

@@ -1,7 +1,6 @@
 // TODO: fill in real handbook content for this section.
 import {
   Callout,
-  DocLink,
   H2,
   P,
   PageLayout,
@@ -54,9 +53,8 @@ export default function PdfNode() {
         </li>
       </ul>
       <Callout tone="tip">
-        Either way the new node keeps an invisible semantic edge back to the PDF
-        so auto-layout keeps them together. See{' '}
-        <DocLink href="/docs/concepts/auto-layout">Auto-layout</DocLink>.
+        Either way the new node lives next to the PDF on the canvas so you can
+        revisit the source quickly.
       </Callout>
 
       <H2>Toolbar</H2>

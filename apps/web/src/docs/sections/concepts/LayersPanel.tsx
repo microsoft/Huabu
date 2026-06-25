@@ -59,9 +59,9 @@ export default function LayersPanel() {
         ]}
       />
       <P>
-        Locked nodes can&apos;t be dragged or resized on the canvas and act as
-        fixed points for auto-layout. Locked frames freeze their children too
-        and stop auto-resizing. Locked nodes can still be edited and deleted.
+        Locked nodes can&apos;t be dragged or resized on the canvas. Locked
+        frames freeze their children too and stop auto-resizing. Locked nodes
+        can still be edited and deleted.
       </P>
 
       <H2>Collapsing frames</H2>
