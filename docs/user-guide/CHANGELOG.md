@@ -54,6 +54,7 @@
 - `prepareExternalAgentPrompt` 现在是同步函数；`runAcpAgent` 不再 `await` 它，也不再传 `canvasRoot`（去掉了把 attachment 渲染成绝对盘符路径的逻辑）。
 - 移除了 `acp-preprocessor` agent（`AgentId` / `ToolScope` 枚举 + `AGENT.md`）。
 - 改动文件：[agent.ts](packages/shared/src/types/agent/agent.ts)、[preprocessor.ts](apps/server/src/modules/agent/acp/preprocessor.ts)、[loader.ts](apps/server/src/prompt/agents/loader.ts)（导出 `renderPromptFile`）、[external-agent/prompt.md](apps/server/src/prompt/external-agent/prompt.md)（新增）、[service.ts](apps/server/src/modules/agent/acp/service.ts)、[tools/index.ts](apps/server/src/modules/agent/tools/index.ts)、[PreparedPromptMessage.tsx](apps/web/src/components/Messages/PreparedPromptMessage.tsx)。
+
 ## 2026-06-23 · Chat Panel：把当前会话一键保存为画布上的 Question 节点
 
 **What Changed**
