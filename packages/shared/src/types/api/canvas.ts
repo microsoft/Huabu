@@ -103,10 +103,23 @@ export interface GetNodeContentResponse {
   keywords?: string[];
   contentMissing?: boolean;
   artifactMissing?: boolean;
+  /** Mirror of {@link BaseNodeData.contentDuplicate} for single-node refresh. */
+  contentDuplicate?: boolean;
+  /** Mirror of {@link BaseNodeData.duplicateFiles} for single-node refresh. */
+  duplicateFiles?: string[];
 }
 
 /** Response for DELETE /api/canvas/:canvasId. */
 export interface DeleteCanvasResponse {
+  success: boolean;
+}
+
+/**
+ * Response for `POST /api/canvas/:canvasId/reveal-nodes` — opens the
+ * canvas's `nodes/` folder in the host file manager (used to let the
+ * user resolve duplicate markdown sidecars by hand).
+ */
+export interface RevealNodesFolderResponse {
   success: boolean;
 }
 
@@ -143,6 +156,7 @@ export interface CanvasVersionMismatchError {
 export type CanvasErrorCode =
   | 'CANVAS_TITLE_CONFLICT'
   | 'NODE_LABEL_CONFLICT'
+  | 'NODE_DUPLICATE_FILES'
   | 'CANVAS_VERSION_CONFLICT'
   | 'INVALID_REQUEST'
   | 'CANVAS_NOT_FOUND'

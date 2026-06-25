@@ -20,7 +20,11 @@
  * See `docs/node-content-api-split.md`.
  */
 
-import { CanvasConflictError, putNodeContent } from '@/api/canvas';
+import {
+  CanvasConflictError,
+  NodeDuplicateFilesError,
+  putNodeContent,
+} from '@/api/canvas';
 import { toast } from '@/components/Common/Toast';
 
 import {
@@ -136,6 +140,15 @@ export function createNodeContentQueue(opts: {
   >();
 
   /**
+   * Node ids for which we have already shown the persistent
+   * "duplicate files on disk" toast. Autosave retries while the
+   * duplicate persists would otherwise pop a fresh toast on every
+   * keystroke; we toast once and clear the flag on the next
+   * successful write (so a recurrence later in the session re-alerts).
+   */
+  const duplicateToasted = new Set<string>();
+
+  /**
    * Build the `PutNodeContentRequest` body for `nodeId` from the
    * latest store snapshot. Returns `null` when the node has gone
    * away (e.g. deleted between debounce-schedule and flush) or its
@@ -208,6 +221,10 @@ export function createNodeContentQueue(opts: {
     const body = buildRequest(nodeId);
     if (!body) return;
     const response = await putNodeContent(canvasId, nodeId, body, kOpts);
+    // A write that succeeded means any prior duplicate has been
+    // resolved — drop the once-per-node toast guard so a future
+    // recurrence alerts again.
+    duplicateToasted.delete(nodeId);
     // Record the label the server actually persisted so a later
     // failure can revert to it. Capture `labelSource` from the body
     // we just sent — it's the provenance attached to that label
@@ -263,10 +280,29 @@ export function createNodeContentQueue(opts: {
     try {
       await performSave(canvasId, nodeId, kOpts);
     } catch (err) {
+      if (err instanceof NodeDuplicateFilesError) {
+        notifyDuplicate(nodeId, err);
+        throw err;
+      }
       if (err instanceof CanvasConflictError) throw err;
       handleSaveFailure(canvasId, nodeId, source, err);
       throw err;
     }
+  }
+
+  /**
+   * Surface a duplicate-sidecar refusal. Unlike ordinary save
+   * failures this is an unresolved on-disk state (two `.md` files
+   * claim the same node id) that the user must fix in their file
+   * manager, so we pop a persistent, manually-dismissed toast
+   * regardless of `source` (background autosave hits this path too).
+   * Guarded by {@link duplicateToasted} so retries don't spam.
+   */
+  function notifyDuplicate(nodeId: string, err: NodeDuplicateFilesError): void {
+    if (duplicateToasted.has(nodeId)) return;
+    duplicateToasted.add(nodeId);
+    toast(err.message, { tone: 'danger', duration: 0, dismissible: true });
+    console.error('Node write refused — duplicate files on disk:', nodeId, err);
   }
 
   /**

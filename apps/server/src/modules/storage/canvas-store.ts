@@ -6,7 +6,6 @@ import {
   createWriteStream,
   existsSync,
   readdirSync,
-  renameSync,
   rmSync,
   statSync,
   unlinkSync,
@@ -163,6 +162,12 @@ export type RenameResult =
       reason: 'conflict';
       conflictWith: { id: string; filename: string };
     }
+  | {
+      ok: false;
+      reason: 'duplicate';
+      /** All sidecar filenames currently claiming this nodeId on disk. */
+      files: string[];
+    }
   | { ok: false; reason: 'not-found' };
 
 export type RenameSelfResult =
@@ -296,20 +301,23 @@ function toErrnoString(err: unknown): string {
 
 /**
  * Add a sidecar `<id, filename>` entry to the per-canvas index during a
- * directory scan. Loudly warns when the same `id` is seen in more than
- * one file (orphan caused by a failed rename in a previous session) so
- * the operator can investigate; the surviving entry is whichever the
- * scan visited last, matching the legacy upsert semantics of
- * `NameIndex.put`.
+ * directory scan. Records the `id` into `duplicates` and loudly warns
+ * when the same `id` is seen in more than one file (orphan caused by a
+ * failed rename in a previous session) so the operator — and the
+ * access-time guard in {@link CanvasStore.writeNode} / readers — can
+ * surface it; the surviving index entry is whichever the scan visited
+ * last, matching the legacy upsert semantics of `NameIndex.put`.
  */
 function addSidecarToIndex(
   idx: NameIndex<NodeFileEntry>,
+  duplicates: Set<string>,
   canvasId: string,
   id: string,
   filename: string,
 ): void {
   const existing = idx.get(id);
   if (existing && existing.filename !== filename) {
+    duplicates.add(id);
     log.warn(
       { canvasId, nodeId: id, kept: filename, conflicting: existing.filename },
       `duplicate node sidecar for id ${id} in canvas ${canvasId}: ` +
@@ -323,6 +331,14 @@ function addSidecarToIndex(
 export class CanvasStore {
   readonly canvasId: string;
   private nodes: NameIndex<NodeFileEntry> | null = null;
+  /**
+   * Ids that resolve to more than one `.md` sidecar on disk, captured
+   * during the most recent index scan. Kept in sync with {@link nodes}:
+   * every rebuild reassigns both. Consumed by the access-time duplicate
+   * guard so reads/writes of an affected node can surface the conflict
+   * instead of silently picking one file.
+   */
+  private nodeDuplicateIds = new Set<string>();
 
   constructor(canvasId: string) {
     this.canvasId = sanitizeId(canvasId, 'canvasId');
@@ -415,6 +431,7 @@ export class CanvasStore {
   private nodeIndex(): NameIndex<NodeFileEntry> {
     if (this.nodes) return this.nodes;
     const idx = new NameIndex<NodeFileEntry>();
+    const duplicates = new Set<string>();
     const dir = nodesDir(this.canvasId);
     if (existsSync(dir)) {
       for (const file of readdirSync(dir)) {
@@ -427,15 +444,128 @@ export class CanvasStore {
           typeof rawId === 'string' && rawId
             ? rawId
             : file.replace(/\.md$/, '');
-        addSidecarToIndex(idx, this.canvasId, id, file);
+        addSidecarToIndex(idx, duplicates, this.canvasId, id, file);
       }
     }
     this.nodes = idx;
+    this.nodeDuplicateIds = duplicates;
     return idx;
   }
 
   invalidateNodeIndex(): void {
     this.nodes = null;
+  }
+
+  /**
+   * Reconcile the cached node index against disk for a single-node read
+   * (the manual-refresh path), dropping the cache only when a rescan is
+   * actually warranted. Two triggers force the drop:
+   *
+   *   1. `nodeId` is currently flagged duplicate. The cheap count probe
+   *      below can't see a duplicate being *resolved*: while duplicated,
+   *      the index collapses the two sidecars to one id, so deleting one
+   *      file makes the on-disk `.md` count match the cached index size
+   *      again (1 === 1) and the probe reads "fresh". A flagged node
+   *      therefore always re-reads so the resolution is detected.
+   *   2. the on-disk `.md` count drifted from the index size — a sibling
+   *      sidecar appeared or vanished since the last scan (e.g. a new
+   *      duplicate, or another CanvasStore instance's write).
+   *
+   * Otherwise the warm cache is trusted. The probe is a names-only
+   * `readdir`; per-file contents are only re-read when a rescan fires.
+   */
+  revalidateNodeForRead(nodeId: string): void {
+    const idx = this.nodeIndex();
+    if (this.nodeDuplicateIds.has(nodeId) || this.nodeIndexCountStale(idx)) {
+      this.invalidateNodeIndex();
+    }
+  }
+
+  /**
+   * True when more than one `.md` sidecar currently claims `nodeId`.
+   * Ensures the index has been scanned (so the duplicate set reflects the
+   * last disk read) before answering. Cheap on a warm cache; consumers on
+   * the hydrate path call it after {@link readAllNodes} has already
+   * populated the set, so no extra scan happens there.
+   */
+  isDuplicateNode(nodeId: string): boolean {
+    this.nodeIndex();
+    return this.nodeDuplicateIds.has(nodeId);
+  }
+
+  /**
+   * Disk-truth list of every sidecar filename currently claiming
+   * `nodeId`. Public surface for the hydrate / reveal paths so the
+   * client can show the user exactly which files collide and let them
+   * pick one to keep. Returns `[]` when the node is not duplicated.
+   * O(directory size) — only called on the rare duplicate path.
+   */
+  duplicateNodeFiles(nodeId: string): string[] {
+    return this.duplicateNodeFilenames(nodeId);
+  }
+
+  /**
+   * Cheap staleness probe: compare the number of `.md` files currently on
+   * disk against the cached index size. A names-only `readdirSync` (no
+   * file contents read) is enough to notice that a sidecar appeared or
+   * vanished since the last scan — the signal {@link writeNode} uses to
+   * decide whether a full content rescan is needed before treating a
+   * write as a create. Returns `true` when a rescan is warranted.
+   */
+  private nodeIndexCountStale(idx: NameIndex<NodeFileEntry>): boolean {
+    const dir = nodesDir(this.canvasId);
+    if (!existsSync(dir)) return idx.size() > 0;
+    let count = 0;
+    for (const file of readdirSync(dir)) {
+      if (file.endsWith('.md')) count++;
+    }
+    return count !== idx.size();
+  }
+
+  /**
+   * Disk-truth list of every sidecar filename that resolves to `nodeId`.
+   * O(directory size); only called on the rare duplicate-resolution path
+   * (e.g. building the error surfaced to the user), never on hot writes.
+   */
+  private duplicateNodeFilenames(nodeId: string): string[] {
+    const dir = nodesDir(this.canvasId);
+    if (!existsSync(dir)) return [];
+    const out: string[] = [];
+    for (const file of readdirSync(dir)) {
+      if (!file.endsWith('.md')) continue;
+      const raw = readText(path.join(dir, file));
+      if (raw == null) continue;
+      const { meta } = parseFrontmatter(raw);
+      const rawId = meta['id'];
+      const id =
+        typeof rawId === 'string' && rawId ? rawId : file.replace(/\.md$/, '');
+      if (id === nodeId) out.push(file);
+    }
+    return out;
+  }
+
+  /**
+   * Unlink with a few immediate retries to ride out an ultra-transient
+   * lock (Windows `EPERM` / `EBUSY` from AV or a file watcher). Stays
+   * synchronous on purpose — {@link writeNode} must not become async, so
+   * we never sleep between attempts. If the file is already gone we treat
+   * it as success; otherwise we report the last error to the caller,
+   * which decides how to roll back.
+   */
+  private tryUnlink(
+    filePath: string,
+  ): { ok: true } | { ok: false; error: unknown } {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        unlinkSync(filePath);
+        return { ok: true };
+      } catch (err) {
+        if (!existsSync(filePath)) return { ok: true };
+        lastError = err;
+      }
+    }
+    return { ok: false, error: lastError };
   }
 
   private nodeFilenameOf(nodeId: string): string {
@@ -480,6 +610,7 @@ export class CanvasStore {
   async readAllNodes(): Promise<Map<string, NodeContent>> {
     const contents = new Map<string, NodeContent>();
     const idx = new NameIndex<NodeFileEntry>();
+    const duplicates = new Set<string>();
     const dir = nodesDir(this.canvasId);
     if (existsSync(dir)) {
       const files = readdirSync(dir).filter((file) => file.endsWith('.md'));
@@ -502,11 +633,12 @@ export class CanvasStore {
           typeof rawId === 'string' && rawId
             ? rawId
             : file.replace(/\.md$/, '');
-        addSidecarToIndex(idx, this.canvasId, id, file);
+        addSidecarToIndex(idx, duplicates, this.canvasId, id, file);
         contents.set(id, markdownToNodeContent(id, raw));
       }
     }
     this.nodes = idx;
+    this.nodeDuplicateIds = duplicates;
     return contents;
   }
 
@@ -536,6 +668,7 @@ export class CanvasStore {
   ): Promise<Map<string, NodeContent>> {
     const contents = new Map<string, NodeContent>();
     const idx = new NameIndex<NodeFileEntry>();
+    const duplicates = new Set<string>();
     const dir = nodesDir(this.canvasId);
     if (existsSync(dir)) {
       const files = readdirSync(dir).filter((file) => file.endsWith('.md'));
@@ -550,7 +683,7 @@ export class CanvasStore {
           typeof rawId === 'string' && rawId
             ? rawId
             : file.replace(/\.md$/, '');
-        addSidecarToIndex(idx, this.canvasId, id, file);
+        addSidecarToIndex(idx, duplicates, this.canvasId, id, file);
         const content = markdownToNodeContent(id, raw);
         contents.set(id, content);
         // JS is single-threaded between awaits, so even though
@@ -560,6 +693,7 @@ export class CanvasStore {
       });
     }
     this.nodes = idx;
+    this.nodeDuplicateIds = duplicates;
     return contents;
   }
 
@@ -609,8 +743,44 @@ export class CanvasStore {
     }
     mkdirp(nodesDir(this.canvasId));
 
-    const idx = this.nodeIndex();
-    const existing = idx.get(nodeId);
+    let idx = this.nodeIndex();
+    let existing = idx.get(nodeId);
+
+    // ── Optimization 1: reconcile the in-memory index against disk before
+    // deciding whether this is an edit or a first write. The cached index
+    // can drift from disk in several ways — another live CanvasStore
+    // instance wrote the sidecar, a concurrent readAllNodes() rebuilt the
+    // index, or the file was renamed/moved/deleted outside the app. If we
+    // trusted a stale index we could recreate a second sidecar under a
+    // fresh name (a duplicate) or rename the wrong file. Two cheap probes
+    // decide whether a full content rescan is warranted:
+    //   1. the file the index points at for this id is gone, or
+    //   2. the on-disk `.md` count no longer matches the index size
+    //      (a sibling appeared / vanished — e.g. another instance's write).
+    // Only then do we pay for a rescan, which also refreshes the
+    // duplicate-id set consulted by the guard below. Steady-state edits
+    // and batch creates skip the rescan and stay on the fast path.
+    const knownGone =
+      existing != null &&
+      !existsSync(nodeFilePath(this.canvasId, existing.filename));
+    if (knownGone || this.nodeIndexCountStale(idx)) {
+      this.invalidateNodeIndex();
+      idx = this.nodeIndex();
+      existing = idx.get(nodeId);
+    }
+
+    // ── Access-time detection: refuse to write while two sidecars claim
+    // this id. Writing now would pick one arbitrarily and risk clobbering
+    // the wrong file; surface a hard error so the user resolves the
+    // duplicate instead of letting the app silently compound it.
+    if (this.nodeDuplicateIds.has(nodeId)) {
+      return {
+        ok: false,
+        reason: 'duplicate',
+        files: this.duplicateNodeFilenames(nodeId),
+      };
+    }
+
     // Empty / nullish label → fall back to whatever filename is already on
     // disk for this nodeId (don't churn it into `<nodeId>.md`). Only on a
     // genuine first write do we let `nodeFilenameFor` pick the nodeId
@@ -662,24 +832,48 @@ export class CanvasStore {
     const finalContent: NodeContent =
       suffix && trimmedLabel ? { ...content, label: finalLabel } : content;
 
-    // POSIX rename(2) is atomic within the same filesystem, so the
-    // rename + content write below is a 2-step but each step is
-    // individually atomic. Either step throws CanvasStoreIOError on
-    // failure; the in-memory idx is mutated only after the matching
-    // disk step succeeds so a thrown error never leaves idx and disk
-    // disagreeing about which filename owns this nodeId.
+    // ── Optimization 2: write-then-swap ordering. Write the new body to
+    // the target filename first (atomicWriteText = temp file + atomic
+    // rename, which also atomically replaces any existing file at the
+    // target). Only after the new file is safely in place do we remove the
+    // old sidecar. This guarantees every failure point below leaves the
+    // original file (old name + old body) intact and the in-memory idx
+    // unchanged, so a caller retry sees a consistent state and we never
+    // strand two files claiming this id from a partially-applied rename.
     const newPath = nodeFilePath(this.canvasId, target);
 
+    try {
+      atomicWriteText(newPath, nodeContentToMarkdown(finalContent));
+    } catch (err) {
+      // Nothing has been moved or deleted yet — the original sidecar (if
+      // any) is untouched and idx still points at it. Bubble as an
+      // environmental error for the caller to retry / surface.
+      const message = `Failed to write node content to "${target}": ${toErrnoString(err)}`;
+      log.warn({ err, canvasId: this.canvasId, nodeId, target }, message);
+      throw new CanvasStoreIOError(message, { cause: err });
+    }
+
     if (isRename) {
-      const oldFilename = existing.filename;
+      // `isRename` is only true when `existing` is set; the non-null
+      // assertion documents that invariant (TS cannot narrow a `let`
+      // through the aliased `isRename` boolean).
+      const oldFilename = existing!.filename;
       const oldPath = nodeFilePath(this.canvasId, oldFilename);
-      try {
-        renameSync(oldPath, newPath);
-      } catch (err) {
-        const message = `Failed to rename node sidecar from "${oldFilename}" to "${target}": ${toErrnoString(err)}`;
+      const removed = this.tryUnlink(oldPath);
+      if (!removed.ok) {
+        // Could not delete the old sidecar, so the rename effectively
+        // failed and we'd otherwise leave two files claiming this id.
+        // Roll back by removing the file we just wrote so the original
+        // stays the single source of truth, then surface a hard error to
+        // the user — a failed rename should be reported, not hidden. If
+        // the rollback unlink ALSO fails (double failure) the duplicate is
+        // now persistent: flag the id so the next read/write reports it.
+        const rollback = this.tryUnlink(newPath);
+        if (!rollback.ok) this.nodeDuplicateIds.add(nodeId);
+        const message = `Failed to remove stale node sidecar "${oldFilename}" after writing "${target}": ${toErrnoString(removed.error)}`;
         log.warn(
           {
-            err,
+            err: removed.error,
             canvasId: this.canvasId,
             nodeId,
             from: oldFilename,
@@ -687,25 +881,10 @@ export class CanvasStore {
           },
           message,
         );
-        throw new CanvasStoreIOError(message, { cause: err });
+        throw new CanvasStoreIOError(message, { cause: removed.error });
       }
       idx.rename(nodeId, target);
-    }
-
-    try {
-      atomicWriteText(newPath, nodeContentToMarkdown(finalContent));
-    } catch (err) {
-      // For first writes the idx entry has not been added yet (we add
-      // it below on success). For renames the file at `newPath` now
-      // holds the pre-rename content — still a valid sidecar for this
-      // nodeId, just with stale body. Either way the failure bubbles
-      // to the caller as an environmental error.
-      const message = `Failed to write node content to "${target}": ${toErrnoString(err)}`;
-      log.warn({ err, canvasId: this.canvasId, nodeId, target }, message);
-      throw new CanvasStoreIOError(message, { cause: err });
-    }
-
-    if (!existing) {
+    } else if (!existing) {
       idx.add({ id: nodeId, filename: target });
     }
 
