@@ -11,8 +11,12 @@
  * `ToolResponse<'web_search', WebSearchToolData>` envelope.
  */
 
+import { getLogger } from '../../../../utils/logger.js';
+
 import type { webSearchParamsSchema } from '../definitions.js';
 import type { Static } from '@earendil-works/pi-ai';
+
+const log = getLogger('tool.web-search');
 
 export type WebSearchArgs = Static<typeof webSearchParamsSchema>;
 
@@ -76,7 +80,7 @@ export async function handleWebSearch(args: WebSearchArgs): Promise<string> {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.warn('[web_search] Tavily request failed:', message);
+    log.warn({ err: error }, 'Tavily request failed');
     throw new Error(`Tavily request failed: ${message}`);
   } finally {
     clearTimeout(timeout);

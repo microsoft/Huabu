@@ -43,23 +43,17 @@ import { CanvasStore } from './canvas-store.js';
 import { parseFrontmatter } from './frontmatter.js';
 import { atomicWriteJson, mkdirp } from './io.js';
 import { readJson } from './io.js';
+import {
+  createMigrationLogger,
+  type MigrationLogger,
+} from './migration-logger.js';
 import { canvasJsonPath, canvasRoot } from './paths.js';
 
 import type { CanvasFile, NodeContent } from './canvas-store.js';
 
 const LEGACY_ARTIFACT_RE = /\/api\/artifact\/([^/?#]+)/;
 
-interface MigrationLogger {
-  info(msg: string, meta?: Record<string, unknown>): void;
-  warn(msg: string, meta?: Record<string, unknown>): void;
-  error(msg: string, meta?: Record<string, unknown>): void;
-}
-
-const defaultLogger: MigrationLogger = {
-  info: (m, meta) => console.log(`[migrate] ${m}`, meta ?? ''),
-  warn: (m, meta) => console.warn(`[migrate] ${m}`, meta ?? ''),
-  error: (m, meta) => console.error(`[migrate] ${m}`, meta ?? ''),
-};
+const defaultLogger: MigrationLogger = createMigrationLogger('legacy');
 
 // ─── Detection ──────────────────────────────────────────────────────────────
 
@@ -271,7 +265,14 @@ function migrateOneCanvas(
         content: src.content,
       };
       try {
-        store.writeNode(nodeId, nodeContent);
+        const result = store.writeNode(nodeId, nodeContent);
+        if (!result.ok) {
+          logger.warn('failed to write node markdown', {
+            canvasId,
+            nodeId,
+            reason: result.reason,
+          });
+        }
       } catch (err) {
         logger.warn('failed to write node markdown', {
           canvasId,
@@ -291,7 +292,14 @@ function migrateOneCanvas(
         content: data['content'] as string,
       };
       try {
-        store.writeNode(nodeId, nodeContent);
+        const result = store.writeNode(nodeId, nodeContent);
+        if (!result.ok) {
+          logger.warn('failed to write inline node markdown', {
+            canvasId,
+            nodeId,
+            reason: result.reason,
+          });
+        }
       } catch (err) {
         logger.warn('failed to write inline node markdown', {
           canvasId,
@@ -574,7 +582,15 @@ export function flattenLegacyMetaJson(
           });
           continue;
         }
-        store.writeNode(nodeId, { ...legacy, ...node });
+        const writeResult = store.writeNode(nodeId, { ...legacy, ...node });
+        if (!writeResult.ok) {
+          logger.warn('failed to flatten node frontmatter', {
+            canvasId,
+            nodeId,
+            reason: writeResult.reason,
+          });
+          continue;
+        }
         rewritten++;
       } catch (err) {
         logger.warn('failed to flatten node frontmatter', {

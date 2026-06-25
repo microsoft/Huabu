@@ -1,4 +1,8 @@
+import { getLogger } from '../../../utils/logger.js';
+
 import type { IDocumentLoader, LoadResult } from './loader.interface.js';
+
+const log = getLogger('preprocessing.youtube');
 
 export interface YoutubeTranscriptItem {
   startMs: string;
@@ -47,7 +51,7 @@ export class YoutubeLoader implements IDocumentLoader {
       const [transcriptResult, videoInfo] = await Promise.all([
         this.fetchTranscript(videoId),
         this.fetchVideoInfo(videoId).catch((err) => {
-          console.warn(`Failed to fetch video info for ${videoId}:`, err);
+          log.warn({ err, videoId }, 'Failed to fetch video info');
           return null;
         }),
       ]);
@@ -144,9 +148,7 @@ export class YoutubeLoader implements IDocumentLoader {
 
     // Some videos might not have transcripts, handle gracefully
     if (!data || !data.transcript || !Array.isArray(data.transcript)) {
-      console.warn(
-        `No transcript found for video ${videoId} or invalid format.`,
-      );
+      log.warn({ videoId }, 'No transcript found or invalid format');
       return { transcript: [] };
     }
 

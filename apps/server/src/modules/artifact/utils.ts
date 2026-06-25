@@ -3,7 +3,10 @@ import path from 'node:path';
 
 import { ARTIFACT_URL_REGEX } from '@sediment/shared';
 
+import { getLogger } from '../../utils/logger.js';
 import { IMAGE_MIME_MAP } from '../../utils/mime.js';
+
+const log = getLogger('artifact');
 
 // Re-export the canonical wire helpers so existing server-side imports
 // (`./utils.js`) keep working without each call site reaching into the
@@ -60,7 +63,7 @@ export async function resolveArtifactImageUrl(
     const mime = IMAGE_MIME_MAP[ext] ?? 'image/png';
     return `data:${mime};base64,${buffer.toString('base64')}`;
   } catch (err) {
-    console.warn(`Failed to read artifact: ${filePath}`, err);
+    log.warn({ err, filePath }, 'Failed to read artifact');
     return url;
   }
 }

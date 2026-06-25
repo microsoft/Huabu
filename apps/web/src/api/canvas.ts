@@ -19,6 +19,7 @@ import type {
   CreateCanvasResponse,
   PreprocessNodeRequest,
   PreprocessNodeResponse,
+  RevealNodesFolderResponse,
 } from '@sediment/shared';
 
 /**
@@ -48,6 +49,42 @@ function isCanvasConflictResponse(
   if (!value || typeof value !== 'object') return false;
   const v = value as Record<string, unknown>;
   return typeof v.code === 'string' && typeof v.message === 'string';
+}
+
+/**
+ * Error thrown when a per-node content write is refused because more than
+ * one markdown sidecar on disk claims the node's id (`NODE_DUPLICATE_FILES`).
+ * Unlike {@link CanvasConflictError} (a label collision handled silently by
+ * `tryRename`), this is an unresolved on-disk state the user must fix, so
+ * callers surface it with a persistent toast rather than swallowing it.
+ */
+export class NodeDuplicateFilesError extends Error {
+  readonly nodeId?: string;
+  readonly duplicateFiles: string[];
+
+  constructor(payload: {
+    message: string;
+    nodeId?: string;
+    duplicateFiles?: string[];
+  }) {
+    super(payload.message);
+    this.name = 'NodeDuplicateFilesError';
+    this.nodeId = payload.nodeId;
+    this.duplicateFiles = Array.isArray(payload.duplicateFiles)
+      ? payload.duplicateFiles
+      : [];
+  }
+}
+
+function isNodeDuplicateResponse(value: unknown): value is {
+  code: 'NODE_DUPLICATE_FILES';
+  message: string;
+  nodeId?: string;
+  duplicateFiles?: string[];
+} {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as Record<string, unknown>;
+  return v.code === 'NODE_DUPLICATE_FILES' && typeof v.message === 'string';
 }
 
 /**
@@ -160,6 +197,13 @@ export async function putNodeContent(
 
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as unknown;
+    // Duplicate-sidecar refusal must be checked before the generic
+    // conflict branch: it also carries a `code`, so `isCanvasConflictResponse`
+    // would otherwise claim it and route it through `tryRename`'s silent
+    // swallow instead of surfacing the persistent toast.
+    if (response.status === 409 && isNodeDuplicateResponse(body)) {
+      throw new NodeDuplicateFilesError(body);
+    }
     if (response.status === 409 && isCanvasConflictResponse(body)) {
       throw new CanvasConflictError(body);
     }
@@ -272,6 +316,23 @@ export async function preprocessNode(
       json: body,
       keepalive: options?.keepalive ?? false,
       fallbackMessage: 'Failed to preprocess node',
+    },
+  );
+}
+
+/**
+ * Open the canvas's `nodes/` folder in the host OS file manager so the
+ * user can resolve a duplicate-markdown collision by hand. Desktop-first:
+ * the server runs locally and owns the only reliable filesystem path.
+ */
+export async function revealCanvasNodesFolder(
+  canvasId: string,
+): Promise<RevealNodesFolderResponse> {
+  return apiFetch<RevealNodesFolderResponse>(
+    routes.canvasRevealNodes(canvasId),
+    {
+      method: 'POST',
+      fallbackMessage: 'Failed to open nodes folder',
     },
   );
 }

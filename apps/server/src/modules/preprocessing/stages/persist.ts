@@ -9,12 +9,16 @@
  * canvas node id rather than a global source id.
  */
 
+import { getLogger } from '../../../utils/logger.js';
+
 import type { CanvasStore } from '../../storage/canvas-store.js';
 import type {
   NodeContentKind,
   NormalizeResult,
   PersistResult,
 } from '../types.js';
+
+const log = getLogger('preprocessing.persist');
 
 export function persist(
   normalized: NormalizeResult,
@@ -56,6 +60,15 @@ export function persist(
       const result = store.writeNode(nodeId, merged as typeof existing);
       if (result.ok) {
         persistedLabel = result.label ?? undefined;
+      } else {
+        // Body is already on disk and matches canonical content; only
+        // label/mhtml metadata refresh hit a structural rejection
+        // (conflict / not-found). Environmental failures throw
+        // `CanvasStoreIOError` and bubble past this branch. The next
+        // preprocess of this node will retry the refresh, so we
+        // tolerate it here — but log so persistent rejections surface
+        // in operator logs instead of silently looping.
+        log.warn({ nodeId, reason: result.reason }, 'metadata refresh failed');
       }
     }
     // Surface the on-disk `src` even when content was unchanged so the
@@ -83,11 +96,24 @@ export function persist(
     content: normalized.canonicalContent,
   });
 
+  if (!result.ok) {
+    // Structural rejection (conflict / not-found). Environmental
+    // failures throw `CanvasStoreIOError` and bypass this branch.
+    // There is no `.md` on disk for this node, so we must NOT return
+    // `contentChanged: true` (which would tell downstream the node is
+    // persisted). Throw so the pipeline records a retryable
+    // `PERSIST_FAILED` diagnostic instead of silently accumulating
+    // `contentMissing` nodes on the canvas.
+    throw new Error(
+      `persist: writeNode failed for ${nodeId}: ${result.reason}`,
+    );
+  }
+
   return {
     nodeId,
     isNew: !existing,
     contentChanged: true,
-    persistedLabel: result.ok ? (result.label ?? undefined) : undefined,
+    persistedLabel: result.label ?? undefined,
     persistedSrc: src,
   };
 }

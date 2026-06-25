@@ -400,33 +400,35 @@ export async function executeOnServer(
     // markdown file that does not exist on disk. A crash between this
     // loop and the canvas.json write leaves orphan .md files (harmless),
     // not orphan node references (would render as `contentMissing`).
+    //
+    // `writeNode` throws `CanvasStoreIOError` on environmental failures
+    // (ENOSPC, EACCES, …); we deliberately do NOT catch it so the
+    // batch aborts before canvas.json is mutated. The exception bubbles
+    // through `handleCanvasCommands` and surfaces as an `isError: true`
+    // tool result to the LLM (and as a 500 / error event upstream).
+    // Structural `conflict` / `not-found` results are programmer errors
+    // in the agent path (engine should have rejected them upstream and
+    // `strictRename` is rarely set for agent-authored labels); we throw
+    // a regular Error rather than letting the in-memory mutation drift
+    // away from disk.
     for (const node of pendingEffects.mutatedNodes) {
       const nodeContent = buildNodeContent(node);
       if (!nodeContent) continue;
-      try {
-        store.writeNode(nodeContent.nodeId, nodeContent, {
-          strictRename: nodeContent['labelSource'] === 'user',
-        });
-      } catch (err) {
-        // Best-effort: a sidecar write failure for one node should not
-        // abort the whole batch — the canvas.json write below still
-        // captures the structural change.
-
-        console.warn(
-          `[canvas-executor] writeNode failed for ${nodeContent.nodeId}:`,
-          err,
+      const result = store.writeNode(nodeContent.nodeId, nodeContent, {
+        strictRename: nodeContent['labelSource'] === 'user',
+      });
+      if (!result.ok) {
+        const detail =
+          result.reason === 'conflict'
+            ? `label conflicts with existing node "${result.conflictWith.filename}"`
+            : result.reason;
+        throw new Error(
+          `[canvas-executor] writeNode rejected ${nodeContent.nodeId}: ${detail}`,
         );
       }
     }
     for (const nodeId of pendingEffects.deletedNodeIds) {
-      const result = store.deleteNode(nodeId);
-      if (result === 'fs-error') {
-        // Best-effort inside the agent batch: log so the operator can
-        // investigate an orphan `.md`, but don't abort the whole batch
-        // — the canvas.json write below still records the structural
-        // delete the agent asked for.
-        console.warn(`[canvas-executor] deleteNode failed for ${nodeId}`);
-      }
+      store.deleteNode(nodeId);
     }
 
     const slimNodes = stripNodesForCanvas(finalNodes);

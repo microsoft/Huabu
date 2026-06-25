@@ -53,18 +53,14 @@ import path from 'node:path';
 
 import { parseFrontmatter, toFrontmatter } from './frontmatter.js';
 import { atomicWriteJson, atomicWriteText, mkdirp, readJson } from './io.js';
+import {
+  createMigrationLogger,
+  type MigrationLogger,
+} from './migration-logger.js';
 import { toSafeFilename } from './naming.js';
 
-interface MigrationLogger {
-  info(msg: string, meta?: Record<string, unknown>): void;
-  warn(msg: string, meta?: Record<string, unknown>): void;
-}
-
-const defaultLogger: MigrationLogger = {
-  info: (m, meta) => console.log(`[migrate-question-content] ${m}`, meta ?? ''),
-  warn: (m, meta) =>
-    console.warn(`[migrate-question-content] ${m}`, meta ?? ''),
-};
+const defaultLogger: MigrationLogger =
+  createMigrationLogger('question-content');
 
 const SENTINEL = '.question-content-v1';
 

@@ -78,6 +78,114 @@ const FAILURE_WINDOW_MS = 60_000;
 const STABLE_AFTER_MS = 5_000;
 
 /**
+ * Map a daemon-reported log level (string) to one of pino's standard
+ * method names. Unknown values fall back to the caller-provided default.
+ */
+const DAEMON_LEVELS = new Set([
+  'trace',
+  'debug',
+  'info',
+  'warn',
+  'error',
+  'fatal',
+] as const);
+type DaemonLevel = typeof DAEMON_LEVELS extends Set<infer T> ? T : never;
+
+interface PinoLikeLogger {
+  trace(obj: object, msg?: string): void;
+  debug(obj: object, msg?: string): void;
+  info(obj: object, msg?: string): void;
+  warn(obj: object, msg?: string): void;
+  error(obj: object, msg?: string): void;
+  fatal(obj: object, msg?: string): void;
+}
+
+/**
+ * Forward the daemon's stdout/stderr to our pino logger, parsing each
+ * line as JSON whenever possible so the daemon's `event`, `level`,
+ * `daemonId`, … fields surface as first-class pino bindings instead
+ * of a nested string blob inside `msg`.
+ *
+ * Behaviour:
+ *   - Lines are buffered across chunk boundaries; partial trailing
+ *     content waits for the next chunk (or stream end).
+ *   - Lines that parse as a JSON object with a recognised `level`
+ *     are re-emitted at the matching pino level. Daemon-side fields
+ *     (`event`, `daemonId`, `ts`, …) become top-level bindings.
+ *   - Lines that don't parse are forwarded verbatim at `fallbackLevel`
+ *     (typically `debug` for stdout, `warn` for stderr). This keeps
+ *     ad-hoc `console.log` / crash stack traces visible.
+ *   - The daemon's `ts` field is preserved alongside pino's own
+ *     `time` (when the server received the chunk). The slight skew is
+ *     usually < 100ms but tracking both lets us spot pipe backpressure.
+ */
+function forwardDaemonOutput(
+  stream: NodeJS.ReadableStream,
+  log: PinoLikeLogger,
+  fallbackLevel: DaemonLevel,
+): void {
+  let buffer = '';
+
+  const emitLine = (line: string): void => {
+    const trimmed = line.trimEnd();
+    if (!trimmed) return;
+
+    // Fast-path: only attempt JSON parse for object-shaped lines.
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+        const rawLevel = typeof parsed.level === 'string' ? parsed.level : '';
+        const level = (
+          DAEMON_LEVELS.has(rawLevel as DaemonLevel)
+            ? (rawLevel as DaemonLevel)
+            : fallbackLevel
+        ) satisfies DaemonLevel;
+
+        // Strip pino-reserved keys from the daemon payload to avoid
+        // double-emit / collision. We surface the daemon's level via
+        // the method we call; its `time` would shadow pino's own.
+        const { level: _level, time: _time, pid: _pid, ...rest } = parsed;
+        void _level;
+        void _time;
+        void _pid;
+
+        const event = typeof rest.event === 'string' ? rest.event : undefined;
+        const msgField = typeof rest.msg === 'string' ? rest.msg : undefined;
+        const msg = msgField ?? event ?? 'agentlet-daemon event';
+
+        log[level]({ source: 'agentlet-daemon', ...rest }, msg);
+        return;
+      } catch {
+        // Fall through to verbatim path on malformed JSON.
+      }
+    }
+
+    log[fallbackLevel]({ source: 'agentlet-daemon' }, trimmed);
+  };
+
+  stream.on('data', (chunk: Buffer | string) => {
+    buffer += typeof chunk === 'string' ? chunk : chunk.toString('utf-8');
+    let newlineIdx = buffer.indexOf('\n');
+    while (newlineIdx !== -1) {
+      emitLine(buffer.slice(0, newlineIdx));
+      buffer = buffer.slice(newlineIdx + 1);
+      newlineIdx = buffer.indexOf('\n');
+    }
+  });
+
+  // Flush any trailing partial line when the stream ends so we don't
+  // silently drop the last record on a daemon that exits without a
+  // trailing newline.
+  const flush = (): void => {
+    if (buffer.length === 0) return;
+    emitLine(buffer);
+    buffer = '';
+  };
+  stream.once('end', flush);
+  stream.once('close', flush);
+}
+
+/**
  * Resolve the absolute path to the agentlet daemon entry script.
  * Returns `null` when no candidate exists — the caller surfaces a
  * permanent supervisor error in that case.
@@ -355,16 +463,15 @@ class DaemonSupervisor {
       '[acp/supervisor] agentlet daemon forked',
     );
 
-    // Forward child stdout/stderr to Fastify logs as `debug` so they
-    // do not spam production logs but stay searchable when needed.
-    child.stdout?.on('data', (chunk: Buffer) => {
-      const text = chunk.toString('utf-8').trimEnd();
-      if (text) log.debug({ source: 'agentlet-daemon' }, text);
-    });
-    child.stderr?.on('data', (chunk: Buffer) => {
-      const text = chunk.toString('utf-8').trimEnd();
-      if (text) log.warn({ source: 'agentlet-daemon' }, text);
-    });
+    // Forward child stdout/stderr to our pino logger. Each line is
+    // parsed as JSON and re-emitted at its self-reported level (info /
+    // warn / error / …) with the daemon's `event`, `daemonId`, etc.
+    // hoisted to first-class bindings — see {@link forwardDaemonOutput}.
+    // Non-JSON lines (crash stack traces, stray `console.log`) are
+    // forwarded verbatim at a sensible fallback level so they remain
+    // searchable without polluting the warn/error tier.
+    if (child.stdout) forwardDaemonOutput(child.stdout, log, 'debug');
+    if (child.stderr) forwardDaemonOutput(child.stderr, log, 'warn');
 
     child.once('exit', (code, signal) => {
       // Distinguish supervisor-initiated kill from a daemon crash.

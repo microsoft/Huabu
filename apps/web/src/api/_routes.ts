@@ -37,6 +37,8 @@ export const routes = {
     `/canvas/${enc(canvasId)}/nodes/${enc(nodeId)}/content`,
   canvasNodePreprocess: (canvasId: string, nodeId: string) =>
     `/canvas/${enc(canvasId)}/nodes/${enc(nodeId)}/preprocess`,
+  canvasRevealNodes: (canvasId: string) =>
+    `/canvas/${enc(canvasId)}/reveal-nodes`,
   canvasSearch: (canvasId: string) => `/canvas/${enc(canvasId)}/search`,
   canvasArtifact: (
     canvasId: string,

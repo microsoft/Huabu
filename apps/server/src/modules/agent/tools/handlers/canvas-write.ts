@@ -23,12 +23,15 @@
 
 import { createId } from '@sediment/shared';
 
+import { getLogger } from '../../../../utils/logger.js';
 import {
   CanvasNotFoundError,
   executeOnServer,
 } from '../../../canvas/canvas-executor.js';
 
 import type { CanvasCommand, NodeOrigin } from '@sediment/shared';
+
+const log = getLogger('tool.canvas-commands');
 
 /**
  * Args type for `handleCanvasCommands`. Intentionally kept loose
@@ -62,8 +65,14 @@ export async function handleCanvasCommands(
   args: CanvasCommandsArgs,
   origin: NodeOrigin = DEFAULT_ORIGIN,
 ): Promise<string> {
-  console.log(
-    `[canvas_commands] handler invoked: canvasId=${args.canvasId ?? '(none)'}, origin=${origin.type}, commandCount=${args.commands?.length ?? 0}, types=[${(args.commands ?? []).map((c) => c.type).join(', ')}]`,
+  log.info(
+    {
+      canvasId: args.canvasId ?? null,
+      origin: origin.type,
+      commandCount: args.commands?.length ?? 0,
+      types: (args.commands ?? []).map((c) => c.type),
+    },
+    'canvas_commands handler invoked',
   );
 
   const annotated = args.commands.map((cmd) => {

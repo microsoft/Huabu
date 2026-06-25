@@ -47,6 +47,9 @@ import { fileURLToPath } from 'node:url';
 import { parseFrontmatter } from '../../modules/storage/frontmatter.js';
 import { userSkillsDir } from '../../modules/storage/paths.js';
 import { getWorkspacePath } from '../../modules/workspace.js';
+import { getLogger } from '../../utils/logger.js';
+
+const log = getLogger('skill-loader');
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -355,10 +358,9 @@ function rescanUserSkills(
       // User-authored content must never brick the loader. Log and
       // skip — the skill simply won't be advertised until the user
       // fixes it.
-      console.warn(
-        `[skill-loader] skipping invalid user skill "${id}": ${
-          (err as Error).message
-        }`,
+      log.warn(
+        { id, err: (err as Error).message },
+        'skipping invalid user skill',
       );
     }
   }

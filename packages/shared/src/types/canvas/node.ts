@@ -241,6 +241,22 @@ export interface BaseNodeData {
    */
   artifactMissing?: boolean;
   /**
+   * Server-set hint: more than one markdown sidecar on disk currently
+   * claims this node's id (a failed rename or an external copy). The
+   * node still renders (the index keeps the last-scanned file), but the
+   * frontend surfaces a non-blocking badge so the user resolves the
+   * duplicate. Writes to this node are refused until then. Cleared
+   * automatically on the next GET once the duplicate is gone.
+   */
+  contentDuplicate?: boolean;
+  /**
+   * Server-set hint paired with {@link contentDuplicate}: the list of
+   * sidecar filenames on disk that currently claim this node's id, so
+   * the frontend can show the user exactly which files collide and let
+   * them keep one / delete the rest. Empty / absent when not duplicated.
+   */
+  duplicateFiles?: string[];
+  /**
    * Track index inside the parent frame when that frame is in a grid
    * layout mode. Means the **column index** when the parent is in
    * `column` mode, the **row index** when the parent is in `row`

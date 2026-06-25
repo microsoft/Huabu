@@ -26,7 +26,6 @@
 
 import { execFile } from 'node:child_process';
 import {
-  createWriteStream,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -52,8 +51,6 @@ import { utilityProcess, type UtilityProcess } from 'electron';
 import getPort from 'get-port';
 
 import { TITLE_BAR_HEIGHT } from './title-bar.js';
-
-import type { WriteStream } from 'node:fs';
 
 // ── Constants ────────────────────────────────────────────────────────
 
@@ -95,12 +92,21 @@ function resolveIconPath(filename: string): string | undefined {
 const PREFERRED_PORT = 3001;
 
 /**
- * Number of per-launch server log files to keep on disk before pruning
- * the oldest. Each launch creates one timestamped file in
- * `app.getPath('logs')`; typical size is single-digit MBs, so capping at
- * 10 keeps total disk usage well under 100MB.
+ * How much of the server's stderr to keep in memory at any given time.
+ * On non-zero exit we dump this ring buffer to a `crash-<ts>-exit<code>.log`
+ * file under `app.getPath('logs')/crashes/` for post-mortem investigation.
+ *
+ * 256 KB easily covers a typical Node stack trace + a few hundred lines
+ * of pino JSON leading up to the failure, while keeping idle memory cost
+ * trivial. The on-disk crash file is also bounded to this size.
  */
-const MAX_LOG_FILES = 10;
+const STDERR_RING_BYTES = 256 * 1024;
+
+/**
+ * Cap on retained `crash-*.log` files. After each crash dump we prune
+ * the oldest beyond this count so a flapping server can't fill the disk.
+ */
+const MAX_CRASH_FILES = 10;
 
 // Last-resort safety net: log EIO/EPIPE on stdio so the main process
 // doesn't die silently when its parent terminal closes. Anything else
@@ -190,7 +196,14 @@ async function ensureShellPath(): Promise<void> {
 
 let serverProcess: UtilityProcess | null = null;
 let serverPort = 0;
-let serverLogStream: WriteStream | null = null;
+/**
+ * Ring buffer of the server child's most recent stderr output. Reset on
+ * each fork. Drained to a crash-dump file only when the child exits with
+ * a non-zero code; otherwise it's discarded silently — successful runs
+ * leave no extra files behind. The server's own pino logger (writing to
+ * `<userData>/data/logs/server.log`) remains the canonical persistent log.
+ */
+let stderrRing: Buffer = Buffer.alloc(0);
 
 /**
  * Number of times we'll re-fork the server on a fresh port after an
@@ -216,52 +229,34 @@ let serverExitPromise: Promise<{
 }> | null = null;
 
 /**
- * Open (and rotate) a per-launch server log file under `app.getPath('logs')`.
- *
- * The trailing folder name is derived by Electron from `productName` in
- * `electron-builder.yml`, which is "Huabu".
- *
- * macOS  → `~/Library/Logs/Huabu/`
- * Win    → `%APPDATA%\Huabu\logs\`
- * Linux  → `~/.config/Huabu/logs/`
- *
- * Layout: one file per launch, timestamped, so a crash investigation
- * maps cleanly to a single file. At open time we prune everything
- * beyond {@link MAX_LOG_FILES} so the directory does not grow without
- * bound across long-running installs.
- *
- * The returned stream has an `error` handler attached that **unpipes
- * itself from the server's stdio** on any I/O failure (disk full,
- * antivirus lock, permission revoked). This is critical: without it,
- * stream backpressure from a broken log file would propagate all the
- * way back to the server's `console.log`/pino writes and stall request
- * handling. The always-on no-op drain installed in {@link startServer}
- * keeps the pipe buffer flushed even after we detach.
- *
- * Returns `null` if the logs directory can't be created (very rare —
- * permission issues on a fresh install). Callers should treat that
- * as "prod runs without persistent logs" rather than fatal.
+ * Append a chunk to the bounded {@link stderrRing} buffer, trimming the
+ * oldest bytes once we exceed {@link STDERR_RING_BYTES}. Cheap enough to
+ * run on every stderr chunk; never throws.
  */
-function openServerLogStream(): WriteStream | null {
-  let logsDir: string;
-  try {
-    logsDir = app.getPath('logs');
-    mkdirSync(logsDir, { recursive: true });
-  } catch (err) {
-    console.error('[desktop] could not prepare logs dir:', err);
-    return null;
+function appendStderrRing(chunk: Buffer): void {
+  stderrRing =
+    stderrRing.length === 0
+      ? Buffer.from(chunk)
+      : Buffer.concat([stderrRing, chunk]);
+  if (stderrRing.length > STDERR_RING_BYTES) {
+    stderrRing = stderrRing.subarray(stderrRing.length - STDERR_RING_BYTES);
   }
+}
 
-  // Rotate: delete oldest files beyond MAX_LOG_FILES. Best-effort —
-  // a single failed unlink should not block server startup.
+/**
+ * Drop the oldest `crash-*.log` files in `dir` once the count exceeds
+ * {@link MAX_CRASH_FILES}. Best-effort — any FS error is swallowed so a
+ * single broken file can't block subsequent crash captures.
+ */
+function pruneOldCrashFiles(dir: string): void {
   try {
-    const existing = readdirSync(logsDir)
-      .filter((f) => f.startsWith('server-') && f.endsWith('.log'))
-      .map((f) => ({ f, mtime: statSync(join(logsDir, f)).mtimeMs }))
+    const existing = readdirSync(dir)
+      .filter((f) => f.startsWith('crash-') && f.endsWith('.log'))
+      .map((f) => ({ f, mtime: statSync(join(dir, f)).mtimeMs }))
       .sort((a, b) => b.mtime - a.mtime); // newest first
-    for (const { f } of existing.slice(MAX_LOG_FILES - 1)) {
+    for (const { f } of existing.slice(MAX_CRASH_FILES)) {
       try {
-        unlinkSync(join(logsDir, f));
+        unlinkSync(join(dir, f));
       } catch {
         /* best-effort prune */
       }
@@ -269,23 +264,34 @@ function openServerLogStream(): WriteStream | null {
   } catch {
     /* best-effort prune */
   }
+}
 
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const file = join(logsDir, `server-${stamp}.log`);
-  const stream = createWriteStream(file, { flags: 'a' });
-
-  stream.on('error', (err) => {
-    console.error('[desktop] server log stream error, detaching:', err);
-    // Detach from the server pipes so future writes don't accumulate
-    // backpressure. The no-op drain in startServer keeps consuming.
-    if (serverLogStream === stream) {
-      serverProcess?.stdout?.unpipe(stream);
-      serverProcess?.stderr?.unpipe(stream);
-      serverLogStream = null;
-    }
-  });
-
-  return stream;
+/**
+ * Write the captured stderr ring buffer to a crash-dump file under
+ * `app.getPath('logs')/crashes/` and prune old entries. Called only on
+ * non-zero server exit; no-ops if the ring is empty.
+ *
+ * Folder layout:
+ *   macOS  → `~/Library/Logs/Huabu/crashes/crash-<ts>-exit<code>.log`
+ *   Win    → `%APPDATA%\Huabu\logs\crashes\crash-<ts>-exit<code>.log`
+ *   Linux  → `~/.config/Huabu/logs/crashes/crash-<ts>-exit<code>.log`
+ *
+ * Errors are swallowed: a missing crash dump is annoying but must never
+ * block the rest of shutdown / restart logic.
+ */
+function dumpServerCrash(exitCode: number): void {
+  if (stderrRing.length === 0) return;
+  try {
+    const crashDir = join(app.getPath('logs'), 'crashes');
+    mkdirSync(crashDir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const file = join(crashDir, `crash-${stamp}-exit${exitCode}.log`);
+    writeFileSync(file, stderrRing);
+    pruneOldCrashFiles(crashDir);
+    console.error(`[desktop] server crash dump written → ${file}`);
+  } catch (err) {
+    console.error('[desktop] failed to write server crash dump:', err);
+  }
 }
 
 /**
@@ -414,6 +420,14 @@ async function startServer(port: number): Promise<void> {
   serverProcess.stdout?.on('error', () => {});
   serverProcess.stderr?.on('error', () => {});
 
+  // Reset the per-fork stderr ring so a previous successful run's tail
+  // can't bleed into a new crash dump.
+  stderrRing = Buffer.alloc(0);
+
+  // Always capture stderr into the ring buffer in both dev and prod —
+  // it's tiny and gives us identical crash-dump behaviour everywhere.
+  serverProcess.stderr?.on('data', (chunk: Buffer) => appendStderrRing(chunk));
+
   if (IS_DEV) {
     // Forward server logs to our stdio. Wrap in try/catch + ignore EIO
     // because the parent process's stdout can be closed/unavailable (e.g.
@@ -438,32 +452,20 @@ async function startServer(port: number): Promise<void> {
     serverProcess.stderr?.on('data', (chunk: Buffer) =>
       safeWrite(process.stderr, '[server]', chunk),
     );
-  } else {
-    // Prod: tee stdout/stderr to a rotating per-launch log file under
-    // `app.getPath('logs')`. `{ end: false }` keeps the file handle
-    // alive across the server's own stream lifecycle so we don't lose
-    // it if/when the server is restarted within the same Electron
-    // session. If `openServerLogStream` returns null (rare disk-perm
-    // issue), we silently fall back to the no-op drain above — server
-    // keeps running, we just have no persistent logs.
-    serverLogStream = openServerLogStream();
-    if (serverLogStream) {
-      serverProcess.stdout?.pipe(serverLogStream, { end: false });
-      serverProcess.stderr?.pipe(serverLogStream, { end: false });
-      console.log(`[desktop] server logs → ${serverLogStream.path}`);
-    }
   }
+  // Prod: stdout is consumed by the always-on no-op drain installed
+  // above; the server's own pino logger writes structured JSON to
+  // `<HUABU_DATA_DIR>/logs/server.log` (see apps/server/src/utils/logger.ts),
+  // so there's no need to also tee a duplicate copy to disk. On
+  // non-zero exit we dump the captured stderr ring as a crash file.
 
   serverExitPromise = new Promise((resolve) => {
     serverProcess!.on('exit', (code) => {
       if (code !== 0) {
         console.error(`[desktop] server exited with code ${code}`);
+        dumpServerCrash(code ?? -1);
       }
       serverProcess = null;
-      // Close the log stream so the file handle is released and the
-      // final buffered bytes hit disk before quit.
-      serverLogStream?.end();
-      serverLogStream = null;
       // `utilityProcess.fork` only forwards an exit code, never a signal
       // — keep the shape symmetric with the POSIX-style tuple anyway
       // so future swaps to child_process don't require call-site edits.

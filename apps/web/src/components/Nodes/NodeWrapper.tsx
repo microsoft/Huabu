@@ -5,6 +5,7 @@ import {
   useStore,
 } from '@xyflow/react';
 import clsx from 'clsx';
+import { FileWarning, FolderOpen, RefreshCw } from 'lucide-react';
 import React, {
   memo,
   useCallback,
@@ -22,8 +23,11 @@ import {
   type NestableNode,
 } from '@sediment/shared/canvas-engine';
 
+import { getNodeContent, revealCanvasNodesFolder } from '@/api/canvas.ts';
+import { Button } from '@/components/Common/Button.tsx';
 import { cn } from '@/components/Common/cn.ts';
 import { Spinner } from '@/components/Common/Spinner.tsx';
+import { toast } from '@/components/Common/Toast';
 import { Tooltip } from '@/components/Common/Tooltip.tsx';
 import { NodeFloatingToolbar } from '@/components/Panels/Canvas/FloatingToolbars/NodeFloatingToolbar.tsx';
 import {
@@ -35,7 +39,9 @@ import {
 } from '@/handler/snap/snapSession.ts';
 import { useIsNotMouse } from '@/hooks/useInputMode.ts';
 import { useNodeLOD } from '@/hooks/useNodeLOD.ts';
-import useCanvasStore from '@/store/canvasStore.ts';
+import useCanvasStore, {
+  clearNodeDuplicateGuard,
+} from '@/store/canvasStore.ts';
 import { coerceProvenance } from '@/utils/blockProvenance';
 
 import { getAccentTokens } from './accentTokens.ts';
@@ -254,6 +260,66 @@ export const NodeWrapper = memo(
     const [editing, setEditing] = useState(false);
 
     const handleCreateConnected = useCreateConnectedNode(id);
+
+    // Open the canvas's `nodes/` folder so the user can resolve a
+    // duplicate-sidecar collision by hand (keep one file, delete the
+    // rest). `canvasId` is read lazily from the store so the wrapper
+    // doesn't subscribe every node to it. Both outcomes toast so the
+    // user gets explicit feedback on whether the folder opened.
+    const handleOpenDuplicateFolder = useCallback(() => {
+      const canvasId = useCanvasStore.getState().canvasId;
+      if (!canvasId) return;
+      void revealCanvasNodesFolder(canvasId)
+        .then(() => {
+          toast('Opened the node folder in your file manager.', {
+            tone: 'success',
+          });
+        })
+        .catch((error: unknown) => {
+          toast(
+            error instanceof Error ? error.message : 'Failed to open folder',
+            { tone: 'danger' },
+          );
+        });
+    }, []);
+
+    // Re-fetch just this node's server state so the duplicate hint
+    // clears once the user has deleted the extra file on disk — no full
+    // page reload. `getNodeContent` runs the same hydration as the
+    // canvas GET, so it reports the current duplicate status; we patch
+    // the flags silently (these are transient hints, never persisted).
+    const handleRefreshDuplicate = useCallback(() => {
+      const canvasId = useCanvasStore.getState().canvasId;
+      if (!canvasId) return;
+      void getNodeContent(canvasId, id)
+        .then((res) => {
+          if (!res) return;
+          useCanvasStore.getState().patchNodeSilent(id, {
+            contentDuplicate: res.contentDuplicate ?? false,
+            duplicateFiles: res.duplicateFiles ?? [],
+          });
+          if (!res.contentDuplicate) {
+            // Resolved on disk — drop the once-per-node toast guard so a
+            // *later* duplicate on this node alerts again (resolving via
+            // Refresh never goes through a successful save, which is the
+            // only other place the guard is cleared).
+            clearNodeDuplicateGuard(id);
+            toast('Duplicate resolved — editing re-enabled.', {
+              tone: 'success',
+            });
+          } else {
+            toast('Still more than one file on disk for this node.', {
+              tone: 'warning',
+            });
+          }
+        })
+        .catch((error: unknown) => {
+          toast(
+            error instanceof Error ? error.message : 'Failed to refresh node',
+            { tone: 'danger' },
+          );
+        });
+    }, [id]);
 
     const renderMode = useNodeLOD(id, type);
     const isNotMouse = useIsNotMouse();
@@ -555,6 +621,59 @@ export const NodeWrapper = memo(
                 <span>AI</span>
               </div>
             </Tooltip>
+          )}
+
+          {/* Duplicate-sidecar warning: more than one `.md` on disk claims
+              this node's id. Server-set hint (`data.contentDuplicate`);
+              the node still renders off the last-scanned file, but writes
+              are refused until the user removes the extra file on disk.
+              Rendered as a full-cover overlay (occupying the whole node)
+              so the warning is unmissable and the now-uneditable body is
+              hidden behind it. Lists the colliding filenames so the user
+              can decide which one to keep, and offers an "Open folder"
+              shortcut. No Remove button: the fix is to delete the
+              duplicate file in the folder, not the node. */}
+          {data.contentDuplicate && (
+            <div className="border-warning-light bg-surface absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 overflow-hidden rounded-md border border-dashed p-3 text-center">
+              <FileWarning className="text-warning h-7 w-7 shrink-0" />
+              <div className="text-fg-default text-sm font-medium">
+                Duplicate files on disk
+              </div>
+              <div className="text-fg-subtle max-w-[32ch] text-xs">
+                More than one file represents this node, so editing is disabled.
+                Keep one and delete the rest, then reload.
+              </div>
+              {Array.isArray(data.duplicateFiles) &&
+                data.duplicateFiles.length > 0 && (
+                  <ul className="border-edge-default bg-bg-default text-fg-muted max-h-20 w-full max-w-[36ch] overflow-auto rounded border px-2 py-1 text-left text-[11px] leading-relaxed">
+                    {data.duplicateFiles.map((file) => (
+                      <li key={file} className="truncate" title={file}>
+                        {file}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  tone="neutral"
+                  onClick={handleOpenDuplicateFolder}
+                >
+                  <FolderOpen className="h-3.5 w-3.5" />
+                  Open folder
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  tone="neutral"
+                  onClick={handleRefreshDuplicate}
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  Refresh
+                </Button>
+              </div>
+            </div>
           )}
 
           <div

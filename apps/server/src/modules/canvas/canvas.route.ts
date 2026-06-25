@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { createWriteStream, existsSync, mkdirSync, renameSync } from 'node:fs';
 import { mkdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -37,7 +38,7 @@ import {
   listCanvasSummaries,
   type CanvasFile,
 } from '../storage/index.js';
-import { canvasRoot } from '../storage/paths.js';
+import { canvasRoot, nodesDir } from '../storage/paths.js';
 import { getWorkspacePath } from '../workspace.js';
 
 import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
@@ -68,6 +69,7 @@ import type {
   PutCanvasResponse,
   PutNodeContentRequest,
   PutNodeContentResponse,
+  RevealNodesFolderResponse,
 } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
@@ -101,6 +103,42 @@ function generateDefaultTitle(existingCanvases: CanvasFile[]): string {
 
 function toMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Best-effort: open a directory in the host OS file manager. Detached +
+ * unref'd so the server never waits on (or is killed with) the spawned
+ * process, and we deliberately ignore the exit code — Windows `explorer`
+ * returns 1 even on success.
+ *
+ * Fire-and-forget by design: `spawn` reports a missing binary
+ * asynchronously via the `'error'` event rather than throwing, so the
+ * caller can't synchronously tell whether the open succeeded. Both that
+ * async failure and the rare synchronous spawn throw (EMFILE / ENOMEM)
+ * are swallowed — the user simply sees nothing open. The route already
+ * guarded the path with existsSync, so there is no state to roll back.
+ * Never throws.
+ */
+function openInFileManager(targetPath: string): void {
+  const cmd =
+    process.platform === 'win32'
+      ? 'explorer'
+      : process.platform === 'darwin'
+        ? 'open'
+        : 'xdg-open';
+  try {
+    const child = spawn(cmd, [targetPath], {
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.on('error', () => {
+      // Swallow async spawn errors (e.g. missing xdg-open on a headless
+      // box). Best-effort — nothing to roll back.
+    });
+    child.unref();
+  } catch {
+    // Rare synchronous spawn throw (EMFILE / ENOMEM). Best-effort.
+  }
 }
 
 /**
@@ -335,6 +373,24 @@ function hydrateOneNode(
   if ('contentMissing' in data) {
     delete data['contentMissing'];
   }
+  // Surface a non-blocking hint when more than one `.md` sidecar on disk
+  // claims this nodeId. Unlike a write (which hard-fails), a read stays
+  // best-effort — the index keeps the last-scanned file so the node still
+  // renders — but the client can flag it so the user resolves the
+  // duplicate. The duplicate set was already populated by the
+  // `readAllNodes()` scan that produced `preloaded`, so this is a cheap
+  // in-memory lookup with no extra disk I/O.
+  if (store.isDuplicateNode(nodeId)) {
+    data['contentDuplicate'] = true;
+    data['duplicateFiles'] = store.duplicateNodeFiles(nodeId);
+  } else {
+    if ('contentDuplicate' in data) {
+      delete data['contentDuplicate'];
+    }
+    if ('duplicateFiles' in data) {
+      delete data['duplicateFiles'];
+    }
+  }
   // Only restore body for types whose preview actually renders
   // `data.content`. `pdf` is text-bearing on disk (the .md sidecar
   // holds the extracted body for AI context) but the web renderer
@@ -522,16 +578,22 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       });
     }
 
-    const result = store.deleteNode(nodeId);
-    if (result === 'fs-error') {
-      // Surface the failure so the client can revert its optimistic
-      // delete (or at least toast). Silently returning success here
-      // would leave the canvas.json with no reference to the node but
-      // its `.md` orphaned on disk forever.
+    try {
+      store.deleteNode(nodeId);
+    } catch (error) {
+      // CanvasStoreIOError (unlink rejected by the OS, e.g. EPERM /
+      // EACCES). Surface the failure so the client can revert its
+      // optimistic delete (or at least toast). Silently returning
+      // success here would leave the canvas.json with no reference to
+      // the node but its `.md` orphaned on disk forever.
       //
       // `code` is the stable contract — the client maps it to a
       // localised toast. `message` is the English fallback used for
       // server logs and unknown-code situations.
+      request.log.error(
+        { canvasId, nodeId, err: toMessage(error) },
+        'Failed to delete node sidecar',
+      );
       return reply.code(500).send({
         code: 'NODE_FILE_DELETE_FAILED',
         message: `Failed to delete node file for "${nodeId}"`,
@@ -657,6 +719,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     try {
       writeResult = store.writeNode(nodeId, nodeContent, { strictRename });
     } catch (error) {
+      // CanvasStoreIOError (ENOSPC, EACCES, EROFS, …) and any other
+      // unexpected throw — all environmental, none actionable by the
+      // client. Surface as 500 so the web shows a toast.
       request.log.error(
         { canvasId, nodeId, err: toMessage(error) },
         'Failed to write node markdown',
@@ -672,9 +737,28 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         conflictWith: writeResult.conflictWith.filename,
       } satisfies CanvasConflictResponse);
     }
+    if (!writeResult.ok && writeResult.reason === 'duplicate') {
+      // Two `.md` sidecars on disk currently claim this nodeId (a failed
+      // rename or an external copy). writeNode refuses to pick one
+      // arbitrarily; surface a 409 so the user resolves the duplicate
+      // before editing instead of letting the app compound it.
+      request.log.warn(
+        { canvasId, nodeId, files: writeResult.files },
+        'Refusing node write: duplicate sidecars on disk',
+      );
+      return reply.code(409).send({
+        code: 'NODE_DUPLICATE_FILES',
+        message:
+          `Node "${nodeId}" has multiple markdown files on disk ` +
+          `(${writeResult.files.join(', ')}); ` +
+          'resolve the duplicate before editing.',
+        nodeId,
+        duplicateFiles: writeResult.files,
+      } satisfies CanvasConflictResponse);
+    }
     if (!writeResult.ok) {
-      // not-found / fs-error — treat as 500; not-found should not
-      // happen here because we constructed the file via writeNode.
+      // `not-found` should not happen here — we constructed the file
+      // via writeNode. Treat as 500 defensively.
       request.log.error({ canvasId, nodeId, writeResult }, 'Node write failed');
       return reply.code(500).send({ message: 'Failed to write node content' });
     }
@@ -713,6 +797,14 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     if (!canvas) {
       return reply.code(404).send({ message: 'Canvas not found' });
     }
+
+    // Reconcile the cached node index against disk before this read.
+    // Only re-scans when warranted: a node already flagged duplicate
+    // always re-reads (so a hand-resolved duplicate is detected — the
+    // cheap count probe alone can't see that case), otherwise it falls
+    // back to the names-only staleness probe. Keeps the common healthy
+    // read off the full content rescan.
+    store.revalidateNodeForRead(nodeId);
 
     // Find this node in the persisted canvas state so we know its type
     // (without it we can't apply the artifact-missing branch). For
@@ -781,6 +873,15 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     }
     if (data['artifactMissing'] === true) {
       response.artifactMissing = true;
+    }
+    // Forward the duplicate-sidecar hints so a single-node refresh can
+    // clear (or re-confirm) the editor overlay without a full canvas
+    // reload. `hydrateOneNode` already computed these onto `data`.
+    if (data['contentDuplicate'] === true) {
+      response.contentDuplicate = true;
+      if (Array.isArray(data['duplicateFiles'])) {
+        response.duplicateFiles = data['duplicateFiles'] as string[];
+      }
     }
     return reply.send(response);
   });
@@ -1135,6 +1236,34 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
    * memory/, .history/) with a `manifest.json` at the root identifying
    * the export version and source canvas id.
    */
+  /**
+   * Open the canvas's `nodes/` folder in the host file manager so the
+   * user can resolve a duplicate-markdown collision by hand (keep one
+   * file, delete the rest). Desktop-first: the server runs on the same
+   * machine as the UI, so it owns the only reliable filesystem path.
+   * The folder is sandboxed to the workspace via {@link nodesDir}.
+   */
+  fastify.post<{
+    Params: { canvasId: string };
+    Reply: ApiResult<RevealNodesFolderResponse>;
+  }>('/:canvasId/reveal-nodes', async function (request, reply) {
+    const { canvasId } = request.params;
+    const store = getCanvasStore(canvasId);
+    if (!store.read()) {
+      return reply.code(404).send({ message: 'Canvas not found' });
+    }
+    const dir = nodesDir(canvasId);
+    if (!existsSync(dir)) {
+      return reply.code(404).send({ message: 'Nodes folder not found' });
+    }
+    // Fire-and-forget: `openInFileManager` is best-effort and never
+    // throws (spawn surfaces a missing binary asynchronously, which it
+    // swallows). There's no reliable synchronous success signal to gate
+    // a 500 on, so we always report success once the spawn is issued.
+    openInFileManager(dir);
+    return reply.send({ success: true });
+  });
+
   fastify.get<{
     Params: { canvasId: string };
     Querystring: ExportCanvasQuery;

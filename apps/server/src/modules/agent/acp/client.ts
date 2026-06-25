@@ -35,6 +35,7 @@ import {
 } from '@agentclientprotocol/sdk';
 
 import { FsCapabilityError, handleFsReadTextFile } from './capabilities/fs.js';
+import { getLogger } from '../../../utils/logger.js';
 
 import type { AgentConnection, AcpMessage } from '@agentlet/protocol';
 import type {
@@ -339,12 +340,10 @@ export class AcpAgentClient {
 
   constructor(connection: AgentConnection, opts: AcpAgentClientOptions) {
     this.canvasId = opts.canvasId ?? '';
-    this.logger = opts.logger ?? {
-      debug: (o, m) => console.debug('[acp-client]', m ?? '', o),
-      info: (o, m) => console.info('[acp-client]', m ?? '', o),
-      warn: (o, m) => console.warn('[acp-client]', m ?? '', o),
-      error: (o, m) => console.error('[acp-client]', m ?? '', o),
-    };
+    // The ACP SDK's logger contract `(obj, msg) => void` aligns exactly
+    // with pino's child logger surface, so we can hand it a tagged
+    // child logger directly — no shim layer needed.
+    this.logger = opts.logger ?? getLogger('acp-client');
 
     const { stream, close } = streamFromAgentConnection(connection, (msg) =>
       this.tryInterceptSessionUpdate(msg),
