@@ -42,16 +42,12 @@ import { ARTIFACT_DATA_FIELDS, ARTIFACT_URL_REGEX } from '@sediment/shared';
 
 import { parseFrontmatter, toFrontmatter } from './frontmatter.js';
 import { readJson } from './io.js';
+import {
+  createMigrationLogger,
+  type MigrationLogger,
+} from './migration-logger.js';
 
-interface MigrationLogger {
-  info(msg: string, meta?: Record<string, unknown>): void;
-  warn(msg: string, meta?: Record<string, unknown>): void;
-}
-
-const defaultLogger: MigrationLogger = {
-  info: (m, meta) => console.log(`[migrate-artifact-keys] ${m}`, meta ?? ''),
-  warn: (m, meta) => console.warn(`[migrate-artifact-keys] ${m}`, meta ?? ''),
-};
+const defaultLogger: MigrationLogger = createMigrationLogger('artifact-keys');
 
 const SENTINEL = '.bare-artifact-keys-v1';
 

@@ -49,11 +49,14 @@ import {
   validateImageSize,
 } from '@sediment/shared';
 
+import { getLogger } from '../../../../utils/logger.js';
 import { getCanvasStore } from '../../../storage/index.js';
 import { getAzureImageConfig } from '../../llm.js';
 
 import type { generateImageParamsSchema } from '../definitions.js';
 import type { Static } from '@earendil-works/pi-ai';
+
+const log = getLogger('tool.generate-image');
 
 export type GenerateImageArgs = Static<typeof generateImageParamsSchema> & {
   canvasId: string;
@@ -186,8 +189,17 @@ export async function handleGenerateImage(
         timeout: REQUEST_TIMEOUT_MS,
       });
 
-  console.log(
-    `[generate_image] ${isV1Style ? 'v1' : 'azure-legacy'} ${isEdit ? 'edit' : 'generate'} deployment=${azure.deployment} family=${azure.modelFamily} size=${size} quality=${quality} refs=${refPaths.length}`,
+  log.info(
+    {
+      style: isV1Style ? 'v1' : 'azure-legacy',
+      op: isEdit ? 'edit' : 'generate',
+      deployment: azure.deployment,
+      family: azure.modelFamily,
+      size,
+      quality,
+      refs: refPaths.length,
+    },
+    'generate_image invoke',
   );
 
   // ── Call SDK ──────────────────────────────────────────────────────────

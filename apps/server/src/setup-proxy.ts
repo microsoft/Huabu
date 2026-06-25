@@ -20,6 +20,10 @@
  */
 import { EnvHttpProxyAgent, setGlobalDispatcher } from 'undici';
 
+import { getLogger } from './utils/logger.js';
+
+const log = getLogger('proxy');
+
 const proxyUrl =
   process.env.HTTPS_PROXY ||
   process.env.https_proxy ||
@@ -46,6 +50,6 @@ if (proxyUrl) {
   setGlobalDispatcher(new EnvHttpProxyAgent());
 
   if (existingNoProxy) {
-    console.log(`NO_PROXY: ${existingNoProxy}`);
+    log.info({ noProxy: existingNoProxy }, 'proxy NO_PROXY active');
   }
 }

@@ -28,21 +28,17 @@ import { refreshCanvasDirIndex } from './canvas-dirs.js';
 import { parseFrontmatter, toFrontmatter } from './frontmatter.js';
 import { readJson } from './io.js';
 import {
+  createMigrationLogger,
+  type MigrationLogger,
+} from './migration-logger.js';
+import {
   dedupeArtifactFilename,
   dedupeName,
   normalizeForCompare,
   toSafeFilename,
 } from './naming.js';
 
-interface MigrationLogger {
-  info(msg: string, meta?: Record<string, unknown>): void;
-  warn(msg: string, meta?: Record<string, unknown>): void;
-}
-
-const defaultLogger: MigrationLogger = {
-  info: (m, meta) => console.log(`[migrate-labels] ${m}`, meta ?? ''),
-  warn: (m, meta) => console.warn(`[migrate-labels] ${m}`, meta ?? ''),
-};
+const defaultLogger: MigrationLogger = createMigrationLogger('labels');
 
 interface CanvasDirRecord {
   canvasId: string;

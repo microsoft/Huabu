@@ -9,6 +9,7 @@ import { llmComplete, llmStream } from './llm.js';
 import { readCanvasMemory, readWorkspaceMemory } from './memory/index.js';
 import { logIntentEpisode as storeEpisode } from './store/intent-store.js';
 import { loadAgent } from '../../prompt/index.js';
+import { getLogger } from '../../utils/logger.js';
 
 import type { Context } from '@earendil-works/pi-ai';
 import type {
@@ -17,6 +18,8 @@ import type {
   IntentEpisode,
   RecentAction,
 } from '@sediment/shared';
+
+const log = getLogger('intent');
 
 // ---------------------------------------------------------------------------
 // Context → natural-language serialization
@@ -318,7 +321,7 @@ async function llmIntentRecognition(
     }));
     return dedupeCandidates(mapped).slice(0, MAX_INTENT_CANDIDATES);
   } catch {
-    console.error('[intent] Failed to parse LLM response:', raw);
+    log.error({ raw }, 'Failed to parse LLM response');
     return [];
   }
 }
@@ -334,7 +337,7 @@ export async function recognizeIntent(
   try {
     return await llmIntentRecognition(ctx, canvasId);
   } catch (err) {
-    console.error('[intent] LLM intent recognition failed:', err);
+    log.error({ err }, 'LLM intent recognition failed');
     return [];
   }
 }

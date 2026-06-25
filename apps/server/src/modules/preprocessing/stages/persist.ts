@@ -9,12 +9,16 @@
  * canvas node id rather than a global source id.
  */
 
+import { getLogger } from '../../../utils/logger.js';
+
 import type { CanvasStore } from '../../storage/canvas-store.js';
 import type {
   NodeContentKind,
   NormalizeResult,
   PersistResult,
 } from '../types.js';
+
+const log = getLogger('preprocessing.persist');
 
 export function persist(
   normalized: NormalizeResult,
@@ -64,9 +68,7 @@ export function persist(
         // preprocess of this node will retry the refresh, so we
         // tolerate it here — but log so persistent rejections surface
         // in operator logs instead of silently looping.
-        console.warn(
-          `[persist] metadata refresh failed for ${nodeId}: ${result.reason}`,
-        );
+        log.warn({ nodeId, reason: result.reason }, 'metadata refresh failed');
       }
     }
     // Surface the on-disk `src` even when content was unchanged so the

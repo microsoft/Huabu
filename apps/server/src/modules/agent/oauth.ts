@@ -23,9 +23,12 @@ import {
 } from '@earendil-works/pi-ai/oauth';
 
 import { getDataDir } from '../../data-dir.js';
+import { getLogger } from '../../utils/logger.js';
 
 import type { OAuthCredentials } from '@earendil-works/pi-ai';
 import type { Api, KnownProvider, Model } from '@earendil-works/pi-ai';
+
+const log = getLogger('oauth');
 
 // ==================== Persisted Credentials ====================
 
@@ -220,7 +223,7 @@ export async function pollDeviceCode(): Promise<
 export async function getCopilotApiKey(): Promise<string | null> {
   const creds = loadCredentials();
   if (!creds) {
-    console.warn('[oauth] No persisted GitHub Copilot credentials found.');
+    log.warn('No persisted GitHub Copilot credentials found.');
     return null;
   }
 
@@ -229,16 +232,14 @@ export async function getCopilotApiKey(): Promise<string | null> {
       'github-copilot': creds,
     });
     if (!result) {
-      console.warn(
-        '[oauth] pi-ai getOAuthApiKey returned no result for github-copilot.',
-      );
+      log.warn('pi-ai getOAuthApiKey returned no result for github-copilot.');
       return null;
     }
     // Persist potentially refreshed credentials
     saveCredentials(result.newCredentials);
     return result.apiKey;
   } catch (err) {
-    console.error('[oauth] getCopilotApiKey failed:', err);
+    log.error({ err }, 'getCopilotApiKey failed');
     return null;
   }
 }
@@ -360,7 +361,10 @@ export async function fetchEntitledCopilotModels(): Promise<
       signal: controller.signal,
     });
     if (!res.ok) {
-      console.warn(`[oauth] Copilot /models returned HTTP ${res.status}.`);
+      log.warn(
+        { status: res.status },
+        'Copilot /models returned non-OK HTTP status',
+      );
       return null;
     }
     const json = (await res.json()) as { data?: CopilotModelEntry[] };
@@ -384,7 +388,7 @@ export async function fetchEntitledCopilotModels(): Promise<
     }
     return models.length > 0 ? models : null;
   } catch (err) {
-    console.warn('[oauth] Failed to fetch Copilot /models:', err);
+    log.warn({ err }, 'Failed to fetch Copilot /models');
     return null;
   } finally {
     clearTimeout(timeout);

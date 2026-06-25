@@ -38,6 +38,7 @@ import {
   fetchEntitledCopilotModels,
 } from './oauth.js';
 import { getDataDir } from '../../data-dir.js';
+import { getLogger } from '../../utils/logger.js';
 
 import type {
   Api,
@@ -55,6 +56,8 @@ import type {
   LLMModelInfo,
   LLMProviderInfo,
 } from '@sediment/shared';
+
+const log = getLogger('llm');
 
 // ==================== Provider Catalog ====================
 
@@ -653,10 +656,7 @@ export async function getLLMConfig(): Promise<LLMConfig> {
       apiVersion: cfg.apiVersion,
     };
   } catch (err) {
-    console.warn(
-      'Failed to load LLM config:',
-      err instanceof Error ? err.message : err,
-    );
+    log.warn({ err }, 'Failed to load LLM config');
     return {
       provider: '',
       model: '',

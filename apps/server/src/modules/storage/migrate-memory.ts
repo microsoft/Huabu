@@ -36,15 +36,12 @@ import path from 'node:path';
 
 const SENTINEL = '.memory-v1';
 
-interface MigrationLogger {
-  info(msg: string, meta?: Record<string, unknown>): void;
-  warn(msg: string, meta?: Record<string, unknown>): void;
-}
+import {
+  createMigrationLogger,
+  type MigrationLogger,
+} from './migration-logger.js';
 
-const defaultLogger: MigrationLogger = {
-  info: (msg, meta) => console.log(`[migrate-memory] ${msg}`, meta ?? {}),
-  warn: (msg, meta) => console.warn(`[migrate-memory] ${msg}`, meta ?? {}),
-};
+const defaultLogger: MigrationLogger = createMigrationLogger('memory');
 
 /**
  * Migrate every canvas under `workspaceRoot` from the legacy

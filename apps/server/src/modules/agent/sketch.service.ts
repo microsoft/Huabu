@@ -17,6 +17,7 @@
 import { runAgent } from './agent.service.js';
 import { buildAgentNodeRef } from './node-ref.js';
 import { loadAgent, renderAgentTemplate } from '../../prompt/index.js';
+import { getLogger } from '../../utils/logger.js';
 
 import type { Context } from '@earendil-works/pi-ai';
 import type {
@@ -25,6 +26,8 @@ import type {
   CanvasCommand,
   WireNodeRef,
 } from '@sediment/shared';
+
+const log = getLogger('sketch');
 
 // ---------------------------------------------------------------------------
 // Cluster context serialization
@@ -158,8 +161,16 @@ export async function recognizeSketchCommands(
       const n = (toolStartCounts.get(toolName) ?? 0) + 1;
       toolStartCounts.set(toolName, n);
       const argsStr = JSON.stringify(event.data.rawInput ?? {});
-      console.log(
-        `[sketch] → tool_call #${n} ${toolName} args=${argsStr.length > 800 ? argsStr.slice(0, 800) + `…(${argsStr.length} chars total)` : argsStr}`,
+      log.debug(
+        {
+          n,
+          tool: toolName,
+          args:
+            argsStr.length > 800
+              ? `${argsStr.slice(0, 800)}…(${argsStr.length} chars total)`
+              : argsStr,
+        },
+        'tool_call',
       );
     } else if (
       event.type === 'tool_call_update' &&
@@ -170,13 +181,20 @@ export async function recognizeSketchCommands(
       toolResultCounts.set(toolName, n);
       const result =
         typeof event.data.rawOutput === 'string' ? event.data.rawOutput : '';
-      console.log(
-        `[sketch] ← tool_call_update #${n} ${toolName} (${result.length} chars): ${result.length > 800 ? result.slice(0, 800) + '…' : result}`,
+      log.debug(
+        {
+          n,
+          tool: toolName,
+          chars: result.length,
+          preview: result.length > 800 ? `${result.slice(0, 800)}…` : result,
+        },
+        'tool_call_update',
       );
       if (toolName === 'canvas_commands') {
         const extracted = extractCommandsFromToolResult(result);
-        console.log(
-          `[sketch]   ↳ canvas_commands extracted ${extracted.length} command(s): [${extracted.map((c) => c.type).join(', ')}]`,
+        log.debug(
+          { count: extracted.length, types: extracted.map((c) => c.type) },
+          'canvas_commands extracted',
         );
         if (extracted.length === 0) {
           canvasCommandsErrorPayload = result;
@@ -191,24 +209,27 @@ export async function recognizeSketchCommands(
       // turn cap (no `done` event in that branch).
       reasoningParts.push(event.data.content);
     } else if (event.type === 'error') {
-      console.warn('[sketch] error event:', event.data.error);
+      log.warn({ error: event.data.error }, 'error event');
     }
   }
 
   const reasoningText = reasoningParts.join('').trim();
-  console.log('[sketch] run summary', {
-    toolStarts: Object.fromEntries(toolStartCounts),
-    toolResults: Object.fromEntries(toolResultCounts),
-    canvasCommandsCalled: (toolStartCounts.get('canvas_commands') ?? 0) > 0,
-    collectedCommandCount: collectedCommands.length,
-    reasoningPreview: reasoningText.slice(0, 200),
-    suspectedFailureMode:
-      (toolStartCounts.get('canvas_commands') ?? 0) === 0
-        ? 'LLM_NEVER_INVOKED_TOOL (JSON likely written into assistant text)'
-        : canvasCommandsErrorPayload
-          ? 'TOOL_INVOKED_BUT_RESULT_HAD_NO_COMMANDS'
-          : 'OK',
-  });
+  log.info(
+    {
+      toolStarts: Object.fromEntries(toolStartCounts),
+      toolResults: Object.fromEntries(toolResultCounts),
+      canvasCommandsCalled: (toolStartCounts.get('canvas_commands') ?? 0) > 0,
+      collectedCommandCount: collectedCommands.length,
+      reasoningPreview: reasoningText.slice(0, 200),
+      suspectedFailureMode:
+        (toolStartCounts.get('canvas_commands') ?? 0) === 0
+          ? 'LLM_NEVER_INVOKED_TOOL (JSON likely written into assistant text)'
+          : canvasCommandsErrorPayload
+            ? 'TOOL_INVOKED_BUT_RESULT_HAD_NO_COMMANDS'
+            : 'OK',
+    },
+    'run summary',
+  );
 
   return {
     reasoning: reasoningText,

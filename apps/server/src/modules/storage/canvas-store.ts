@@ -51,6 +51,7 @@ import {
   nodeFilePath,
   nodesDir,
 } from './paths.js';
+import { getLogger } from '../../utils/logger.js';
 
 import type { Context } from '@earendil-works/pi-ai';
 import type {
@@ -59,6 +60,8 @@ import type {
   IntentEpisode,
   RecentAction,
 } from '@sediment/shared';
+
+const log = getLogger('canvas-store');
 
 interface NodeFileEntry {
   id: string;
@@ -307,8 +310,9 @@ function addSidecarToIndex(
 ): void {
   const existing = idx.get(id);
   if (existing && existing.filename !== filename) {
-    console.warn(
-      `[canvas-store] duplicate node sidecar for id ${id} in canvas ${canvasId}: ` +
+    log.warn(
+      { canvasId, nodeId: id, kept: filename, conflicting: existing.filename },
+      `duplicate node sidecar for id ${id} in canvas ${canvasId}: ` +
         `"${existing.filename}" vs "${filename}" — keeping "${filename}". ` +
         `delete the stale file manually after confirming which one is current.`,
     );
@@ -673,8 +677,15 @@ export class CanvasStore {
         renameSync(oldPath, newPath);
       } catch (err) {
         const message = `Failed to rename node sidecar from "${oldFilename}" to "${target}": ${toErrnoString(err)}`;
-        console.warn(
-          `[canvas-store] ${message} (canvas=${this.canvasId}, node=${nodeId})`,
+        log.warn(
+          {
+            err,
+            canvasId: this.canvasId,
+            nodeId,
+            from: oldFilename,
+            to: target,
+          },
+          message,
         );
         throw new CanvasStoreIOError(message, { cause: err });
       }
@@ -690,9 +701,7 @@ export class CanvasStore {
       // nodeId, just with stale body. Either way the failure bubbles
       // to the caller as an environmental error.
       const message = `Failed to write node content to "${target}": ${toErrnoString(err)}`;
-      console.warn(
-        `[canvas-store] ${message} (canvas=${this.canvasId}, node=${nodeId})`,
-      );
+      log.warn({ err, canvasId: this.canvasId, nodeId, target }, message);
       throw new CanvasStoreIOError(message, { cause: err });
     }
 
@@ -732,7 +741,7 @@ export class CanvasStore {
       return 'deleted';
     } catch (err) {
       const message = `deleteNode unlink failed for ${nodeId} (${filePath}): ${toErrnoString(err)}`;
-      console.warn(`[canvas-store] ${message}`);
+      log.warn({ err, canvasId: this.canvasId, nodeId, filePath }, message);
       throw new CanvasStoreIOError(message, { cause: err });
     }
   }

@@ -6,7 +6,7 @@ import compress from '@fastify/compress';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import staticPlugin from '@fastify/static';
-import { fastify } from 'fastify';
+import { fastify, type FastifyBaseLogger } from 'fastify';
 
 import { getDataDir } from './data-dir.js';
 import { getDaemonAuth } from './modules/agent/acp/daemon-auth.js';
@@ -39,6 +39,7 @@ import {
 import workspaceRoutes from './modules/workspace.route.js';
 import { preloadSkills } from './prompt/index.js';
 import sidebandRoutes from './sideband/sideband.route.js';
+import { logger } from './utils/logger.js';
 
 // Lock the workspace at startup if HUABU_WORKSPACE is set (managed mode).
 // In free mode this is a no-op and the client will activate at runtime.
@@ -51,10 +52,22 @@ initWorkspaceFromEnv();
 // being consistent — see apps/server/src/prompt/skills/loader.ts.
 preloadSkills();
 
+// Inject our shared pino instance (see utils/logger.ts) so that
+// Fastify's request-scoped `request.log.*` and service-layer
+// `getLogger('subsystem')` calls share the same streams, level config,
+// and on-disk log file. Avoids the historical split between Fastify's
+// own structured logs and ad-hoc `console.*` calls scattered across
+// the service layer.
+//
+// The cast through `FastifyBaseLogger` is a TS-only workaround:
+// pino 10 added `msgPrefix` to its `BaseLogger` interface but
+// Fastify 5's `FastifyBaseLogger` doesn't declare it. Runtime is
+// fully compatible — pino's `Logger` is a superset of every method
+// Fastify actually invokes. Without the cast, every downstream
+// plugin / route that takes `FastifyInstance` would see the generic
+// resolved to pino's stricter `Logger` and fail to type-check.
 export const app = fastify({
-  logger: {
-    level: process.env.LOG_LEVEL ?? 'info',
-  },
+  loggerInstance: logger as unknown as FastifyBaseLogger,
   bodyLimit: 100 * 1024 * 1024, // 100MB for file uploads
 });
 

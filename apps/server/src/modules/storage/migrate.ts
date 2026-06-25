@@ -43,23 +43,17 @@ import { CanvasStore } from './canvas-store.js';
 import { parseFrontmatter } from './frontmatter.js';
 import { atomicWriteJson, mkdirp } from './io.js';
 import { readJson } from './io.js';
+import {
+  createMigrationLogger,
+  type MigrationLogger,
+} from './migration-logger.js';
 import { canvasJsonPath, canvasRoot } from './paths.js';
 
 import type { CanvasFile, NodeContent } from './canvas-store.js';
 
 const LEGACY_ARTIFACT_RE = /\/api\/artifact\/([^/?#]+)/;
 
-interface MigrationLogger {
-  info(msg: string, meta?: Record<string, unknown>): void;
-  warn(msg: string, meta?: Record<string, unknown>): void;
-  error(msg: string, meta?: Record<string, unknown>): void;
-}
-
-const defaultLogger: MigrationLogger = {
-  info: (m, meta) => console.log(`[migrate] ${m}`, meta ?? ''),
-  warn: (m, meta) => console.warn(`[migrate] ${m}`, meta ?? ''),
-  error: (m, meta) => console.error(`[migrate] ${m}`, meta ?? ''),
-};
+const defaultLogger: MigrationLogger = createMigrationLogger('legacy');
 
 // ─── Detection ──────────────────────────────────────────────────────────────
 
