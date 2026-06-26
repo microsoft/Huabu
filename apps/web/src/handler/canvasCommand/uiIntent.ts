@@ -14,6 +14,7 @@ import {
   resolveDisconnectEdge,
   resolveGroupRectIntoFrame,
   resolveGroupSelectionIntoFrame,
+  resolveMoveNoteBlockIntoNote,
   resolveMoveNoteExcerpt,
   resolveNodeDragStop,
   resolvePasteClipboard,
@@ -152,6 +153,25 @@ export type CanvasUiIntent =
       sourceNodeId: string;
       sourceContentAfterMove: string;
       newNote: AddNodeInput;
+    }
+  | {
+      /**
+       * Cross-note block drop. Atomically:
+       *   - replaces source note's `content` with `sourceContentAfterMove`
+       *     (so the dragged block disappears from its origin), AND
+       *   - replaces target note's `content` with
+       *     `targetContentAfterInsert` (the caller has already stitched
+       *     the dragged Markdown into the right place).
+       *
+       * One undo entry. When the gesture is a COPY (default modifier
+       * Ctrl/Cmd held), callers should issue a plain `UPDATE_NODE_DATA`
+       * on the target instead — the source must stay untouched.
+       */
+      type: 'MOVE_NOTE_BLOCK_INTO_NOTE';
+      sourceNodeId: string;
+      sourceContentAfterMove: string;
+      targetNodeId: string;
+      targetContentAfterInsert: string;
     }
   | { type: 'DELETE_NODES'; nodeIds: string[] }
   | { type: 'UPDATE_NODE_DATA'; nodeId: string; patch: Record<string, unknown> }
@@ -316,6 +336,8 @@ export function resolveUiIntent(
       return resolveAddNodes(intent, ui);
     case 'MOVE_NOTE_EXCERPT':
       return resolveMoveNoteExcerpt(intent, ui);
+    case 'MOVE_NOTE_BLOCK_INTO_NOTE':
+      return resolveMoveNoteBlockIntoNote(intent, ui);
     case 'DELETE_NODES':
       return resolveDeleteNodes(intent, ui);
     case 'UPDATE_NODE_DATA':

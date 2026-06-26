@@ -9,6 +9,12 @@ import { MilkdownPreview } from '@/components/Milkdown';
 import { useNodeLOD } from '@/hooks/useNodeLOD';
 import { useNodeScale } from '@/hooks/useNodeScale';
 import useCanvasStore from '@/store/canvasStore';
+import {
+  canMoveSedimentPayload,
+  canReadSedimentPayload,
+  getSedimentPayload,
+} from '@/utils/io/dragDrop';
+import { dragPayloadToMarkdown } from '@/utils/io/payloadToMarkdown';
 
 import { MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
@@ -20,11 +26,42 @@ import type { CanvasNoteNodeData } from '../types';
 
 export type NoteNodeType = Node<CanvasNoteNodeData, 'note'>;
 
+/**
+ * Join an existing note's Markdown with a newly-inserted Markdown
+ * snippet, preserving block boundaries. Ensures the new snippet
+ * starts on a fresh paragraph:
+ *  - empty target → just the snippet (trimmed)
+ *  - target ends with a blank line → single `\n` separator
+ *  - otherwise → `\n\n` separator
+ *
+ * Trailing whitespace on the existing content is preserved so the
+ * user's intentional spacing isn't clobbered.
+ */
+function appendMarkdownBlock(existing: string, snippet: string): string {
+  const trimmedSnippet = snippet.trim();
+  if (trimmedSnippet === '') return existing;
+  if (existing === '') return trimmedSnippet;
+  // Already ends with a blank-line separator (e.g. "foo\n\n").
+  if (/\n\s*\n\s*$/.test(existing)) return existing + trimmedSnippet;
+  // Ends with a single newline → add one more to make a blank line.
+  if (existing.endsWith('\n')) return existing + '\n' + trimmedSnippet;
+  return existing + '\n\n' + trimmedSnippet;
+}
+
 export const NoteNode = memo(
   ({ id, data, selected }: NodeProps<NoteNodeType>) => {
     const openExpanded = useCanvasStore((s) => s.openExpanded);
     const setNoteHeightMode = useCanvasStore((s) => s.setNoteHeightMode);
     const patchNodeSilent = useCanvasStore((s) => s.patchNodeSilent);
+    const updateNodeData = useCanvasStore((s) => s.updateNodeData);
+    const moveNoteBlockIntoNote = useCanvasStore(
+      (s) => s.moveNoteBlockIntoNote,
+    );
+    // Needed to resolve artifact-key image srcs (e.g. `art_xxx.png`)
+    // into fetchable HTTP URLs before they're written into the note's
+    // markdown — without it the inserted `<img>` would silently fail
+    // to load.
+    const canvasId = useCanvasStore((s) => s.canvasId);
     const scale = useNodeScale(id, 'note');
     // When the node is zoomed out far enough, `NodeWrapper` hides this
     // content and overlays a cheap `SemanticPlaceholder` instead. There is
@@ -213,6 +250,130 @@ export const NoteNode = memo(
     // keep `bg-surface` so the no-accent note still reads as paper.
     const hasAccent = !!data.style?.accent;
 
+    // ── Drop target: accept Sediment payloads (note blocks from
+    // chat / other notes, image cards, web cards) and append the
+    // payload's Markdown to this note's content. Locked notes opt
+    // out so the gesture falls through to canvas's "create new
+    // node" handler instead.
+    const isLocked = !!data.locked;
+    // We use a small counter to track dragenter / dragleave events so
+    // hovering between child elements doesn't flicker the highlight.
+    const dragCounterRef = useRef(0);
+    const [isDropTarget, setIsDropTarget] = useState(false);
+    const handleNoteDragEnter = useCallback(
+      (e: React.DragEvent) => {
+        if (isLocked) return;
+        if (!canReadSedimentPayload(e.dataTransfer)) return;
+        dragCounterRef.current += 1;
+        if (dragCounterRef.current === 1) setIsDropTarget(true);
+      },
+      [isLocked],
+    );
+    const handleNoteDragOver = useCallback(
+      (e: React.DragEvent) => {
+        if (isLocked) return;
+        if (!canReadSedimentPayload(e.dataTransfer)) return;
+        e.preventDefault();
+        // Prevent the canvas-level `onDragOver` from also marking this
+        // event as a "create new node" candidate — we are claiming
+        // this gesture for "insert into this note".
+        e.stopPropagation();
+        const isCopyModifier = e.ctrlKey || e.metaKey;
+        const canMove = canMoveSedimentPayload(e.dataTransfer);
+        e.dataTransfer.dropEffect =
+          canMove && !isCopyModifier ? 'move' : 'copy';
+      },
+      [isLocked],
+    );
+    const handleNoteDragLeave = useCallback(
+      (e: React.DragEvent) => {
+        if (isLocked) return;
+        if (!canReadSedimentPayload(e.dataTransfer)) return;
+        dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
+        if (dragCounterRef.current === 0) setIsDropTarget(false);
+      },
+      [isLocked],
+    );
+    const resetDragState = useCallback(() => {
+      dragCounterRef.current = 0;
+      setIsDropTarget(false);
+    }, []);
+    const handleNoteDrop = useCallback(
+      (e: React.DragEvent) => {
+        if (isLocked) return;
+        if (!canReadSedimentPayload(e.dataTransfer)) return;
+        const payload = getSedimentPayload(e.dataTransfer);
+        if (!payload) {
+          resetDragState();
+          return;
+        }
+        // Block dragged from this same note → ignore; let Crepe's
+        // own block-handle / canvas-level handler decide. (Dropping
+        // a note back onto its own tile is meaningless.)
+        if (payload.kind === 'note' && payload.data.sourceNodeId === id) {
+          resetDragState();
+          return;
+        }
+
+        const snippet = dragPayloadToMarkdown(payload, {
+          ...(canvasId ? { canvasId } : {}),
+        });
+        if (!snippet) {
+          resetDragState();
+          return;
+        }
+
+        // Claim the gesture so the canvas's `onDrop` doesn't also fire
+        // and create a brand-new note next to us.
+        e.preventDefault();
+        e.stopPropagation();
+
+        const currentContent =
+          typeof data.content === 'string' ? data.content : '';
+        const targetContentAfterInsert = appendMarkdownBlock(
+          currentContent,
+          snippet,
+        );
+
+        const isCopyModifier = e.ctrlKey || e.metaKey;
+        const sourceNodeId =
+          payload.kind === 'note' ? payload.data.sourceNodeId : undefined;
+        const sourceContentAfterMove =
+          payload.kind === 'note'
+            ? payload.data.sourceContentAfterMove
+            : undefined;
+        const canMove =
+          typeof sourceNodeId === 'string' &&
+          typeof sourceContentAfterMove === 'string';
+
+        if (canMove && !isCopyModifier) {
+          // Atomic cross-note move: one undo entry covers both source
+          // and target updates.
+          moveNoteBlockIntoNote({
+            sourceNodeId: sourceNodeId as string,
+            sourceContentAfterMove: sourceContentAfterMove as string,
+            targetNodeId: id,
+            targetContentAfterInsert,
+          });
+        } else {
+          // COPY (modifier held) or external source (chat / image /
+          // web) → only the target gets a content patch.
+          updateNodeData(id, { content: targetContentAfterInsert });
+        }
+
+        resetDragState();
+      },
+      [
+        canvasId,
+        data.content,
+        id,
+        isLocked,
+        moveNoteBlockIntoNote,
+        resetDragState,
+        updateNodeData,
+      ],
+    );
+
     return (
       <NodeWrapper
         id={id}
@@ -235,7 +396,18 @@ export const NoteNode = memo(
                 'relative w-full',
                 !hasAccent && 'bg-surface',
                 hasFixedHeight && 'h-full overflow-hidden',
+                // Highlight ring while a Sediment drag hovers this
+                // tile — uses the same info-toned token as other
+                // "active target" indicators (search hit, focused
+                // input). Inside the wrapper so it tracks the node's
+                // rounded corners.
+                isDropTarget &&
+                  'ring-info ring-2 ring-offset-1 ring-offset-transparent',
               )}
+              onDragEnter={handleNoteDragEnter}
+              onDragOver={handleNoteDragOver}
+              onDragLeave={handleNoteDragLeave}
+              onDrop={handleNoteDrop}
               // In auto-height mode the inner content is visually scaled via
               // CSS `transform: scale(scale)`, but transforms do NOT affect
               // layout — the parent would only reserve the *unscaled* height

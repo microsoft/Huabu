@@ -219,6 +219,14 @@ export interface MilkdownInstance {
    */
   insertBlocksAfter(anchorKey: string | null, markdown: string): boolean;
   /**
+   * Resolve the viewport-space coordinate `(x, y)` to the fingerprint
+   * key of the top-level block it lands inside, or `null` if the point
+   * is outside the editor or in a region with no resolvable block
+   * (e.g. above the first or below the last block). Used by drop
+   * handlers to pick an anchor for `insertBlocksAfter`.
+   */
+  getBlockKeyAtPoint(x: number, y: number): string | null;
+  /**
    * Replace the active block-decoration set. Each entry highlights the
    * top-level block whose fingerprint key matches by adding `className`
    * via a `Decoration.node`. Pass `[]` to clear.
@@ -1057,7 +1065,21 @@ export async function createMilkdown(
         if (!(selection instanceof NodeSelection)) return;
 
         const node = selection.node;
-        const docNode = view.state.schema.topNodeType.create(null, node);
+        // A `list_item` can't be a direct child of `doc` (schema-
+        // invalid), so `doc > list_item` serializes to an empty
+        // string — `getDragPayload` then returns `null` and the whole
+        // drag silently carries no Sediment payload (bullet items
+        // become un-droppable everywhere). Wrap the item in a copy of
+        // its parent list (`bullet_list` / `ordered_list`) so the
+        // serializer sees a well-formed `<list> > <list_item>`.
+        let contentNode = node;
+        if (node.type.name === 'list_item') {
+          const listParent = selection.$from.parent;
+          if (listParent && LIST_NODE_NAMES.has(listParent.type.name)) {
+            contentNode = listParent.type.create(listParent.attrs, node);
+          }
+        }
+        const docNode = view.state.schema.topNodeType.create(null, contentNode);
         const markdown = serializer(docNode);
         if (!markdown.trim()) return;
 
@@ -1168,6 +1190,27 @@ export async function createMilkdown(
         ok = true;
       });
       return ok;
+    },
+
+    getBlockKeyAtPoint: (x, y) => {
+      let result: string | null = null;
+      crepe.editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        // `posAtCoords` returns null when the point falls outside the
+        // editor surface (including the gaps above the first / below
+        // the last block).
+        const coords = view.posAtCoords({ left: x, top: y });
+        if (!coords) return;
+        const $pos = view.state.doc.resolve(coords.pos);
+        // Walk up to depth 1 — that's the top-level block index inside
+        // the doc node. Depth 0 = doc itself; > 1 happens for nested
+        // structures like list items.
+        if ($pos.depth < 1) return;
+        const blockIndex = $pos.index(0);
+        const snap = buildSnapshotFromView(view);
+        result = snap.keys[blockIndex] ?? null;
+      });
+      return result;
     },
 
     setBlockDecorations: (specs) => {
