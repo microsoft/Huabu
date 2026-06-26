@@ -16,13 +16,13 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { isSketchRasterAttachment } from './attachment-visibility.js';
 import { renderAgentTemplate } from '../../../prompt/index.js';
 import {
   ARTIFACT_URL_REGEX,
   resolveArtifactImageUrl,
 } from '../../artifact/utils.js';
 import { getCanvasStore } from '../../storage/index.js';
-import { appendMetadataTags } from '../user-message-metadata.js';
 
 import type { ChatEnvelope } from './envelope.js';
 import type { LoadedAgent } from '../../../prompt/index.js';
@@ -203,6 +203,39 @@ type UserContent =
       | { type: 'text'; text: string }
       | { type: 'image'; data: string; mimeType: string }
     >;
+
+/**
+ * If `attachments` includes pre-snapshotted sketch artifacts, build a
+ * one-line directive pointing the agent at those urls so it does not
+ * re-issue `snapshot_nodes` for the same node ids on this turn. Returns
+ * `undefined` when there are no sketch-raster artifacts.
+ */
+function buildSketchRasterHint(
+  attachments: ChatAttachment[],
+): string | undefined {
+  const sketchRasters = attachments.filter(isSketchRasterAttachment);
+  if (sketchRasters.length === 0) return undefined;
+  const items = sketchRasters
+    .map((a) => {
+      const ids = a.originNodeIds ?? (a.originNodeId ? [a.originNodeId] : []);
+      const shortIds = ids.map((id) => id.slice(0, 13)).join(', ');
+      return shortIds ? `${a.url} (nodes: ${shortIds})` : a.url;
+    })
+    .join('; ');
+  return `pre-snapshotted sketch artifacts are ready for generate_image.referenceArtifactSrcs — pass these urls directly without re-calling snapshot_nodes for the same node ids: ${items}`;
+}
+
+/**
+ * Append the LLM-only `[SYSTEM hint:…]` directive to the user content.
+ * This is the only render-time `[SYSTEM]` metadata tag still consumed
+ * by anyone (the model); selection / skills / attachments are NOT
+ * re-encoded — history reload reads them straight from the envelope.
+ */
+function appendHintTag(content: UserContent, hint: string): UserContent {
+  const tag = `\n[SYSTEM hint:${hint}]`;
+  if (typeof content === 'string') return `${content}${tag}`;
+  return [...content, { type: 'text', text: tag }];
+}
 
 /**
  * Build a pi-ai user message content array, supporting text + images.
@@ -499,15 +532,16 @@ export async function renderEnvelopeMessages(
     });
   }
 
-  // 5. The user's message, with selection / skill / attachment
-  // breadcrumbs. `appendMetadataTags` partitions `attachments`
-  // internally: user-visible items become the UI breadcrumb tag,
-  // sketch-raster artifacts become the LLM-only hint tag.
-  userContent = appendMetadataTags(userContent, {
-    selectedNodeIds: env.focus.selection.selectedIds,
-    invokedSkills: env.skills.invokedIds,
-    attachments: allAttachments,
-  });
+  // 5. The user's message. The only render-time `[SYSTEM]` metadata
+  // tag still consumed by anyone is the LLM-only sketch-raster hint
+  // ("reuse the pre-snapshotted rasters, don't re-call
+  // snapshot_nodes"). Selection / skills / attachments are NOT
+  // re-encoded here — history reload reads them straight from the
+  // stored envelope.
+  const hint = buildSketchRasterHint(allAttachments ?? []);
+  if (hint) {
+    userContent = appendHintTag(userContent, hint);
+  }
   messages.push({
     role: 'user',
     content: userContent,

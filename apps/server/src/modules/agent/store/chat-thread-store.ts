@@ -7,8 +7,8 @@
  * The legacy {@link import('./chat-store.js')} persists a pi-ai
  * `Context` (a flat `messages` array) directly, with the user's
  * selection / skills / attachments smuggled into the message string as
- * `[SYSTEM …]` tags and recovered on reload by `stripMetadataTags`.
- * That round-trip is the cause of several papercuts (hint loss on
+ * `[SYSTEM …]` tags and recovered on reload by reverse-parsing them.
+ * That round-trip was the cause of several papercuts (hint loss on
  * reload, `[SYSTEM]` leakage, redundant tail tags).
  *
  * This store records, per turn, the structured {@link ChatEnvelope}

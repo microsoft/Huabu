@@ -21,6 +21,7 @@ import {
 import { loadAgent } from '../../prompt/index.js';
 import { runAcpAgent } from '../agent/acp/service.js';
 import { runAgent } from '../agent/agent.service.js';
+import { projectUserVisibleAttachments } from '../agent/context/attachment-visibility.js';
 import {
   rebuildContextMessages,
   renderEnvelopeMessages,
@@ -35,7 +36,6 @@ import {
   loadTurns,
   writeActiveTurn,
 } from '../agent/store/chat-thread-store.js';
-import { projectUserVisibleAttachments } from '../agent/user-message-metadata.js';
 
 import type {
   ChatTurnRecord,
