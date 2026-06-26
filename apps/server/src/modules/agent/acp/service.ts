@@ -40,21 +40,14 @@ import {
 } from './session-store.js';
 import { ensureAgentForThread } from './spawn-orchestrator.js';
 import { acpUpdateToStreamEvent, mergeThinkingChunk } from './translator.js';
-import {
-  emptySidecar,
-  readChatParts,
-  recordMessageTimestamp,
-  setPlanForMessage,
-  upsertToolExt,
-  writeChatParts,
-} from '../store/chat-parts-store.js';
+import { applyToolExt } from '../store/chat-thread-store.js';
 
 import type { AcpSessionEntry } from './session-registry.js';
 import type {
   AcpBindingRecipe,
   AcpSessionPersistedMeta,
 } from './session-store.js';
-import type { ChatPartsSidecar } from '../store/chat-parts-store.js';
+import type { AcpTurnOverlay } from '../store/chat-thread-store.js';
 import type { AssistantMessage, Context } from '@earendil-works/pi-ai';
 import type {
   AcpPlanEntry,
@@ -130,6 +123,13 @@ export interface RunAcpAgentOptions {
   canvasId?: string;
   /** pi-ai context; we mutate `context.messages` to append the assistant reply. */
   context: Context;
+  /**
+   * Mutable per-turn ACP overlay. We accumulate tool extensions
+   * (keyed by `toolCallId`) and the turn's plan here; the route folds
+   * it into the persisted turn record. Replaces the old `.parts.json`
+   * sidecar — no timestamps, no position arrays.
+   */
+  overlay: AcpTurnOverlay;
   /**
    * `cwd` passed to `session/new` on first prompt for this thread.
    * Ignored for subsequent prompts (the session is already open).
@@ -1102,7 +1102,8 @@ function readNullableString(v: unknown): string | null | undefined {
 export async function* runAcpAgent(
   opts: RunAcpAgentOptions,
 ): AsyncGenerator<AgentStreamEvent> {
-  const { binding, threadId, context, canvasContext, signal, logger } = opts;
+  const { binding, threadId, context, canvasContext, signal, logger, overlay } =
+    opts;
   const canvasId = opts.canvasId ?? '';
   const rawText = extractText(opts.message);
 
@@ -1222,29 +1223,11 @@ export async function* runAcpAgent(
     string,
     Extract<AssistantContentBlock, { type: 'toolCall' }>
   >();
-  let sidecar: ChatPartsSidecar =
-    readChatParts(threadId, canvasId) ?? emptySidecar();
-  const assistantIndex = context.messages.length;
-  let sidecarDirty = false;
+  // ACP overlay (tool extensions + plan) accumulates into the
+  // route-owned `overlay`, which is persisted into the turn record.
+  // Plan entries are staged until the turn ends (full-replacement
+  // wire semantics: latest plan wins).
   let pendingPlan: AcpPlanEntry[] | null = null;
-  const persistSidecar = () => {
-    if (!sidecarDirty || !canvasId) return;
-    try {
-      writeChatParts(threadId, sidecar, canvasId);
-      sidecarDirty = false;
-    } catch (err) {
-      // Sidecar failures must NEVER abort the turn — chat history is
-      // still functional from the pi-ai file alone. Log + continue.
-      logger.warn(
-        {
-          threadId,
-          canvasId,
-          err: err instanceof Error ? err.message : String(err),
-        },
-        '[acp] failed to write chat-parts sidecar',
-      );
-    }
-  };
 
   const wake = () => {
     if (resolveWaiter) {
@@ -1302,14 +1285,13 @@ export async function* runAcpAgent(
             });
           }
         } else if (evt.type === 'tool_call') {
-          sidecar = upsertToolExt(sidecar, evt.data.toolCallId, {
+          applyToolExt(overlay, evt.data.toolCallId, {
             toolKind: evt.data.toolKind,
             status: evt.data.status,
             locations: evt.data.locations,
             content: evt.data.content,
             rawOutput: undefined,
           });
-          sidecarDirty = true;
           // `rawInput` may be any JSON shape; pi-ai's `ToolCall.arguments`
           // requires a plain object, so narrow defensively.
           const rawInput = evt.data.rawInput;
@@ -1328,13 +1310,12 @@ export async function* runAcpAgent(
           contentBlocks.push(block);
           toolCallByCallId.set(evt.data.toolCallId, block);
         } else if (evt.type === 'tool_call_update') {
-          sidecar = upsertToolExt(sidecar, evt.data.toolCallId, {
+          applyToolExt(overlay, evt.data.toolCallId, {
             status: evt.data.status,
             locations: evt.data.locations,
             content: evt.data.content,
             rawOutput: evt.data.rawOutput,
           });
-          sidecarDirty = true;
           // ACP allows refining the title mid-flight (e.g. "Reading"
           // → "Reading app.ts"); mirror onto the persisted block.
           if (evt.data.title) {
@@ -1431,20 +1412,14 @@ export async function* runAcpAgent(
           timestamp,
         }),
       );
-      // Stamp arrival time AFTER the push so the sidecar's
-      // `messageTimestamps` stays index-aligned with `Context.messages`.
-      // First-write-wins guards against retry overwrites.
-      sidecar = recordMessageTimestamp(sidecar, assistantIndex, timestamp);
-      sidecarDirty = true;
-      if (pendingPlan) {
-        sidecar = setPlanForMessage(sidecar, timestamp, pendingPlan);
-        pendingPlan = null;
-      }
     }
-    // 6b. Persist the rich-ACP sidecar regardless of error/abort —
-    //     partial tool calls captured before the failure still
-    //     survive a refresh.
-    persistSidecar();
+    // 6b. Commit the turn's plan (full-replacement; latest wins) into
+    //     the route-owned overlay so it persists in the turn record.
+    //     Tool extensions were already accumulated as events arrived.
+    if (pendingPlan) {
+      overlay.plan = pendingPlan;
+      pendingPlan = null;
+    }
   }
 
   // 7. Yield terminal event \u2014 error wins over done.

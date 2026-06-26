@@ -62,13 +62,96 @@ import {
   chatTurnsPath,
 } from '../../storage/paths.js';
 
-import type { ToolAcpExtension } from './chat-parts-store.js';
 import type { ChatEnvelope } from '../context/envelope.js';
 import type { Context } from '@earendil-works/pi-ai';
-import type { AcpPlanEntry } from '@sediment/shared';
+import type {
+  AcpPlanEntry,
+  AcpToolCallContent,
+  AcpToolCallLocation,
+  AcpToolCallStatus,
+  AcpToolKind,
+  ToolPermissionState,
+} from '@sediment/shared';
 
 /** A pi-ai message as stored on a {@link Context}. */
 export type PiMessage = Context['messages'][number];
+
+/**
+ * The ACP-specific subset of a `tool_call` / `tool_call_update` payload
+ * that does NOT round-trip through pi-ai's `ToolResultMessage`: the
+ * semantic envelope (`toolKind`, lifecycle `status`, source `locations`,
+ * structured `content`) plus any permission decision. Stored on the
+ * turn record (keyed by `toolCallId`) so external-agent tool calls
+ * re-render with their rich UI on reload.
+ *
+ * Append-only fields (`locations`, `content`) merge with prior values
+ * via {@link mergeToolExtension}; replace-semantics fields (`status`,
+ * `toolKind`, `permission`, `rawOutput`) overwrite.
+ */
+export interface ToolAcpExtension {
+  toolKind?: AcpToolKind;
+  status?: AcpToolCallStatus;
+  locations?: AcpToolCallLocation[];
+  content?: AcpToolCallContent[];
+  rawOutput?: unknown;
+  permission?: ToolPermissionState;
+}
+
+/**
+ * Merge two {@link ToolAcpExtension} values. Append-only fields
+ * (`locations`, `content`) concatenate; replace-semantics fields
+ * overwrite when the new value is defined.
+ */
+export function mergeToolExtension(
+  prev: ToolAcpExtension,
+  next: ToolAcpExtension,
+): ToolAcpExtension {
+  return {
+    toolKind: next.toolKind ?? prev.toolKind,
+    status: next.status ?? prev.status,
+    locations:
+      next.locations !== undefined
+        ? [...(prev.locations ?? []), ...next.locations]
+        : prev.locations,
+    content:
+      next.content !== undefined
+        ? [...(prev.content ?? []), ...next.content]
+        : prev.content,
+    rawOutput: next.rawOutput !== undefined ? next.rawOutput : prev.rawOutput,
+    permission: next.permission ?? prev.permission,
+  };
+}
+
+/**
+ * Mutable per-turn ACP overlay accumulator. The external-agent dispatch
+ * (`runAcpAgent`) mutates this in place as tool / plan events arrive;
+ * the route folds it into the {@link ChatTurnRecord} when the turn is
+ * persisted. Keyed by stable ids — no timestamps, no position arrays.
+ */
+export interface AcpTurnOverlay {
+  toolExtras: Record<string, ToolAcpExtension>;
+  plan?: AcpPlanEntry[];
+}
+
+/** Construct an empty {@link AcpTurnOverlay}. */
+export function emptyAcpOverlay(): AcpTurnOverlay {
+  return { toolExtras: {} };
+}
+
+/**
+ * Upsert (merge) a tool extension into the overlay in place, keyed by
+ * `toolCallId`.
+ */
+export function applyToolExt(
+  overlay: AcpTurnOverlay,
+  toolCallId: string,
+  extension: ToolAcpExtension,
+): void {
+  const prev = overlay.toolExtras[toolCallId];
+  overlay.toolExtras[toolCallId] = prev
+    ? mergeToolExtension(prev, extension)
+    : extension;
+}
 
 /**
  * One turn: the user's structured input envelope, the assistant/tool

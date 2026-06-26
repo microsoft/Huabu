@@ -158,20 +158,6 @@ export function chatPath(canvasId: string, threadId: string): string {
 }
 
 /**
- * Sidecar JSON paired with `chatPath` — holds rich-ACP overlay parts
- * (plan entries, tool-call extension fields, permission outcomes)
- * that don't fit inside the pi-ai `Context` shape. See
- * `chat-parts-store.ts` for the schema. Optional: a thread without
- * ACP enrichment simply has no `.parts.json` file.
- */
-export function chatPartsPath(canvasId: string, threadId: string): string {
-  return path.join(
-    chatDir(canvasId),
-    `${sanitizeId(threadId, 'threadId')}.parts.json`,
-  );
-}
-
-/**
  * Structured thread record paired with a thread — the source of truth
  * for chat history in the envelope-persistence model. An append-only
  * JSONL log of finalized turns, each carrying the user's structured

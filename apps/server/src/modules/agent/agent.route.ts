@@ -26,21 +26,20 @@ import {
 } from '../agent/context/chat-turn.js';
 import { buildChatEnvelope } from '../agent/context/envelope.js';
 import { getLLMModel } from '../agent/llm.js';
-import { readChatParts } from '../agent/store/chat-parts-store.js';
 import {
   appendTurn,
   clearActiveTurn,
+  emptyAcpOverlay,
   finalizeActiveTurn,
   loadTurns,
   writeActiveTurn,
 } from '../agent/store/chat-thread-store.js';
 import { projectUserVisibleAttachments } from '../agent/user-message-metadata.js';
 
-import type { ToolAcpExtension } from '../agent/store/chat-parts-store.js';
-import type { ChatPartsSidecar } from '../agent/store/chat-parts-store.js';
 import type {
   ChatTurnRecord,
   PiMessage,
+  ToolAcpExtension,
 } from '../agent/store/chat-thread-store.js';
 import type { AssistantMessage, Context } from '@earendil-works/pi-ai';
 import type {
@@ -361,18 +360,12 @@ function buildAssistantParts(
  * (no `[SYSTEM …]` tag stripping — selection / skills / attachments
  * are already structured fields) followed by the assistant/tool/status
  * items reconstructed from the turn's transcript. Message ORDER comes
- * from the transcript array; the ACP overlay joins by stable
- * `toolCallId`, and plans are turn-level.
- *
- * `sidecar` is a transitional fallback: until the ACP path writes its
- * overlay into the turn record (see chat-parts-store removal), tool
- * extras and plans for external-agent turns are still read from the
- * `.parts.json` sidecar — but keyed off each transcript message's own
- * `toolCallId` / `timestamp`, never a parallel position array.
+ * from the transcript array; the ACP overlay (`turn.toolExtras` /
+ * `turn.plan`) joins by stable `toolCallId` and is turn-level — no
+ * timestamps, no position arrays, no separate sidecar.
  */
 function buildHistoryFromTurns(
   turns: readonly ChatTurnRecord[],
-  sidecar: ChatPartsSidecar | null,
   messages: ChatHistoryItem[],
 ): void {
   for (const turn of turns) {
@@ -421,7 +414,7 @@ function buildHistoryFromTurns(
     };
 
     const toolResultByCallId = indexToolResults(turn.transcript);
-    const toolExtras = turn.toolExtras ?? sidecar?.toolExtras;
+    const toolExtras = turn.toolExtras;
 
     for (const msg of turn.transcript) {
       if (msg.role === 'user') {
@@ -462,15 +455,6 @@ function buildHistoryFromTurns(
         continue;
       } else if (msg.role === 'assistant') {
         const parts = buildAssistantParts(msg, toolResultByCallId, toolExtras);
-        // Per-message plan fallback (sidecar, keyed by the message's own
-        // timestamp) only when the turn has no folded-in plan.
-        if (!turn.plan && typeof msg.timestamp === 'number') {
-          const planEntries =
-            sidecar?.planByMessageTimestamp[String(msg.timestamp)];
-          if (planEntries && planEntries.length > 0) {
-            parts.push({ kind: 'plan', entries: planEntries });
-          }
-        }
         if (parts.length > 0) {
           if (currentAssistant) {
             currentAssistant.parts.push(...parts);
@@ -534,10 +518,7 @@ const agentRoutes: FastifyPluginAsync = async (
     }
 
     const messages: ChatHistoryItem[] = [];
-    // Transitional fallback for ACP tool extras / plans until the ACP
-    // path folds them into the turn record.
-    const sidecar = readChatParts(threadId, canvasId);
-    buildHistoryFromTurns(turns, sidecar, messages);
+    buildHistoryFromTurns(turns, messages);
 
     return reply.send({ threadId, messages });
   });
@@ -841,23 +822,31 @@ const agentRoutes: FastifyPluginAsync = async (
     };
     activeRuns.set(resolvedThreadId, run);
 
+    // Per-turn ACP overlay (tool extensions + plan). Empty for internal
+    // turns; mutated by `runAcpAgent` for external-agent dispatch and
+    // folded into the persisted turn record below.
+    const acpOverlay = emptyAcpOverlay();
+    const buildTurnRecord = (): ChatTurnRecord => ({
+      envelope: env,
+      transcript: context.messages.slice(transcriptStart),
+      ...(Object.keys(acpOverlay.toolExtras).length > 0 && {
+        toolExtras: acpOverlay.toolExtras,
+      }),
+      ...(acpOverlay.plan &&
+        acpOverlay.plan.length > 0 && {
+          plan: acpOverlay.plan,
+        }),
+    });
+
     // Persist this turn's in-progress state (envelope + transcript so
     // far) to the active sidecar. The finalized JSONL log is appended
     // only once, when the turn completes (see `finalizeTurn` below), so
     // streaming saves never rewrite the whole thread.
     const persistActiveTurn = () => {
-      writeActiveTurn(
-        resolvedThreadId,
-        { envelope: env, transcript: context.messages.slice(transcriptStart) },
-        canvasId,
-      );
+      writeActiveTurn(resolvedThreadId, buildTurnRecord(), canvasId);
     };
     const finalizeTurn = () => {
-      appendTurn(
-        resolvedThreadId,
-        { envelope: env, transcript: context.messages.slice(transcriptStart) },
-        canvasId,
-      );
+      appendTurn(resolvedThreadId, buildTurnRecord(), canvasId);
       clearActiveTurn(resolvedThreadId, canvasId);
     };
 
@@ -928,6 +917,7 @@ const agentRoutes: FastifyPluginAsync = async (
               threadId: resolvedThreadId,
               canvasId,
               context,
+              overlay: acpOverlay,
               canvasContext,
               signal: abortController.signal,
               logger: request.log,
