@@ -2,6 +2,41 @@
 
 每次重要功能变更都会记录在此文件中，按时间倒序排列。
 
+## 2026-06-26 · 术语更名：Agent Sideband → Agent Reachback（HST → HRT）
+
+**What Changed**
+
+把「Sideband」这一术语整体更名为「Reachback」。原名借自网络/硬件领域的「边带（sideband）」，对没有网络背景的用户和开发者不够直观；新名「Reachback」直接表达语义——被 spawn 出来的外部 agent「反向触达（reach back）」启动它的宿主应用，在主 prompt→response 对话之外读写共享状态。
+
+更名同时明确了两层结构：
+
+1. **agentlet 层（与宿主无关）**：负责工具脚本的*传输与分发*，定义 **Reachback Interface**。
+2. **宿主应用层（如 Huabu）**：*提供*实现该接口的具体工具脚本；Huabu 的实现即 **Huabu Reachback Tool（HRT）**。
+
+**Notes**
+
+- 这是一次彻底的清理式更名（前后端均在本仓库内，可同步改）：环境变量 `AGENTLET_SIDEBAND_DIR` → `AGENTLET_REACHBACK_DIR`、路由前缀 `/api/sideband` → `/api/reachback`、脚本 `huabu-sideband-tool.mjs` → `huabu-reachback-tool.mjs`、目录 `apps/server/src/sideband/` → `apps/server/src/reachback/`、文档 `docs/agent-sideband.md` → `docs/agent-reachback.md`。
+- 缓存目录默认值从 `node_modules/.cache/agentlet/sideband` 改为 `.../reachback`。
+- agent system prompt 中的 `## Canvas Tools (Sideband)` 段改名为 `## Canvas Tools (Reachback)`。
+- 本文件中 2026-06-26 之前的历史条目保持原样（作为当时的记录），不做回溯改名。
+
+## 2026-06-26 · 拖拽语义：Note 块 → 画布 默认改为「移动」
+
+**What Changed**
+
+把 Note 编辑器里的某个块拖到画布时，默认行为从「复制」改为「移动」，与 Windows 资源管理器 / macOS Finder 的文件拖拽语义保持一致：
+
+1. **直接拖拽 = 移动**：源 Note 删除该块，画布上新建一个内容相同的 Note。
+2. **`Ctrl/Cmd` + 拖拽 = 复制**：源 Note 保留原文，画布上新建一个 Note。
+3. **光标反馈**：浏览器原生 `dropEffect` 会随修饰键切换，复制时显示 `+` 号，移动时是普通箭头，所见即所得。
+4. **来源无法回写时强制复制**：从 AI 对话卡片 / Web / Image 卡片 / 外部文件 / URL 拖出来的内容没有源块概念，按不按 `Ctrl/Cmd` 都是复制。
+
+**Notes**
+
+- 之前是「默认复制，Shift 强制移动」。Shift 这个键在 DnD 里几乎从不代表 copy/move 切换（一般用于多选 / 区间），用 `Ctrl/Cmd` 更贴近用户预期，也把 Shift 释放出来留给将来扩展。
+- 实现上新增了 `application/x-sediment-dnd-movable` 哨兵 MIME：浏览器在 `dragover` 阶段会屏蔽 `getData(...)` 的 JSON 读取，所以无法从 payload 判断源是否可移动；改用 MIME 类型列表（在 `dragover` 时可见）来透传"我支持移动"这个标志，决定光标该显示 `+` 还是普通箭头。
+- 改动文件：[dragDrop.ts](apps/web/src/utils/io/dragDrop.ts)、[Canvas.tsx](apps/web/src/components/Panels/Canvas/Canvas.tsx)、[03-canvas-basics.md](docs/user-guide/03-canvas-basics.md)、[08-shortcuts.md](docs/user-guide/08-shortcuts.md)、[Shortcuts.tsx](apps/web/src/docs/sections/reference/Shortcuts.tsx)。
+
 ## 2026-06-24 · 外部 Agent：prompt 卡片不再被「连接 agent」阻塞，并展示完整 system 段
 
 **What Changed**

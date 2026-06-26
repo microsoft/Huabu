@@ -5,20 +5,17 @@
  * the thread had messages: every option looked greyed-out).
  */
 
-import {
-  Bookmark,
-  ChevronDown,
-  MessageSquare,
-  Plus,
-  Route,
-  Sprout,
-} from 'lucide-react';
-import { useCallback, useRef, useState, type ReactNode } from 'react';
+import { Bookmark, ChevronDown, Plus } from 'lucide-react';
+import { useCallback, useRef, useState } from 'react';
 
+import {
+  AgentMenuOptions,
+  useAddAgentEditor,
+  type AgentChoice,
+} from './agentMenu';
 import { Button } from '../../Common/Button';
 import { cn } from '../../Common/cn';
 import { Popover } from '../../Common/Popover';
-import { ProfileEditorModal, useDetectedClis } from '../Header/AcpSettings';
 
 import type {
   AcpAgentProfile,
@@ -26,10 +23,7 @@ import type {
   AgentMode,
 } from '@sediment/shared';
 
-export interface NewChatChoice {
-  mode: AgentMode;
-  binding: AgentBinding;
-}
+export type NewChatChoice = AgentChoice;
 
 interface NewChatMenuProps {
   /** Built-in mode of the *current* thread. Used to mark the matching menu row. */
@@ -58,16 +52,6 @@ interface NewChatMenuProps {
   busy?: boolean;
 }
 
-const INTERNAL: AgentBinding = { kind: 'internal' };
-
-function bindingsEqual(a: AgentBinding, b: AgentBinding): boolean {
-  if (a.kind === 'internal' && b.kind === 'internal') return true;
-  if (a.kind === 'external' && b.kind === 'external') {
-    return a.profileId === b.profileId;
-  }
-  return false;
-}
-
 export const NewChatMenu = ({
   currentMode,
   currentBinding,
@@ -80,14 +64,9 @@ export const NewChatMenu = ({
   busy = false,
 }: NewChatMenuProps) => {
   const [isOpen, setIsOpen] = useState(false);
-  const [editorOpen, setEditorOpen] = useState(false);
   const triggerRef = useRef<HTMLDivElement>(null);
   const justDismissedRef = useRef(false);
-  // CLI detection is cheap (single fetch, cached for the menu's
-  // lifetime). We do it eagerly so opening the editor modal feels
-  // instant even on a cold mount — same reason the Settings section
-  // fetches at mount instead of on dialog-open.
-  const detectedClis = useDetectedClis();
+  const { openEditor, editor } = useAddAgentEditor(onRefreshProfiles);
 
   const handleDismiss = useCallback(() => {
     justDismissedRef.current = true;
@@ -126,11 +105,6 @@ export const NewChatMenu = ({
     },
     [onSelect],
   );
-
-  const modeItems: { mode: AgentMode; label: string; icon: ReactNode }[] = [
-    { mode: 'ask', label: 'Chat', icon: <MessageSquare size={14} /> },
-    { mode: 'operate', label: 'Agent', icon: <Sprout size={14} /> },
-  ];
 
   return (
     <>
@@ -191,144 +165,28 @@ export const NewChatMenu = ({
           offset={{ x: 0, y: 4 }}
           className="flex max-w-[min(20rem,calc(100vw-1rem))] flex-col overflow-hidden py-1"
         >
-          <div
-            role="presentation"
-            className="text-fg-muted px-3 pt-1.5 pb-1 text-[10px] tracking-wider uppercase select-none"
-          >
-            Start new chat with
-          </div>
-          {modeItems.map((m) => {
-            const isCurrent =
-              currentBinding.kind === 'internal' && currentMode === m.mode;
-            return (
-              <MenuRow
-                key={`mode:${m.mode}`}
-                icon={m.icon}
-                label={m.label}
-                hint="Huabu"
-                current={isCurrent}
-                disabled={busy}
-                onClick={() =>
-                  handleSelect({ mode: m.mode, binding: INTERNAL })
-                }
-              />
-            );
-          })}
-          {profiles.length > 0 && (
-            <div
-              role="presentation"
-              className="text-fg-muted mt-1 flex items-center gap-2 px-3 pt-1 pb-0.5 text-[10px] tracking-wider uppercase select-none"
-            >
-              <span className="bg-edge-default h-px flex-1" />
-              <span>External Agents</span>
-              <span className="bg-edge-default h-px flex-1" />
-            </div>
-          )}
-          {profiles.map((profile) => {
-            const binding: AgentBinding = {
-              kind: 'external',
-              alias: profile.displayName,
-              profileId: profile.id,
-            };
-            const isCurrent = bindingsEqual(currentBinding, binding);
-            return (
-              <MenuRow
-                key={`profile:${profile.id}`}
-                icon={<Route size={14} />}
-                label={profile.displayName}
-                current={isCurrent}
-                disabled={busy}
-                onClick={() => handleSelect({ mode: currentMode, binding })}
-              />
-            );
-          })}
-          {onRefreshProfiles && (
-            <>
-              <div
-                role="presentation"
-                className="bg-edge-default mt-1 h-px w-full"
-              />
-              <div className="px-1 py-1">
-                <Button
-                  variant="ghost"
-                  tone="neutral"
-                  size="sm"
-                  onClick={() => {
+          <AgentMenuOptions
+            heading="Start new chat with"
+            currentBinding={currentBinding}
+            currentMode={currentMode}
+            profiles={profiles}
+            busy={busy}
+            currentRowTitle="Current — starts another thread with the same setup"
+            onSelect={handleSelect}
+            onAddAgent={
+              onRefreshProfiles
+                ? () => {
                     // Close the popover before opening the modal so the
-                    // two surfaces don't visually stack. The modal then
-                    // owns focus management for the rest of the flow.
+                    // two surfaces don't visually stack.
                     setIsOpen(false);
-                    setEditorOpen(true);
-                  }}
-                  className="w-full justify-start gap-1.5 rounded px-2 py-1.5 text-left"
-                >
-                  <Plus size={14} />
-                  <span className="text-xs">Add agent</span>
-                </Button>
-              </div>
-            </>
-          )}
+                    openEditor();
+                  }
+                : undefined
+            }
+          />
         </Popover>
       )}
-      {onRefreshProfiles && (
-        <ProfileEditorModal
-          isOpen={editorOpen}
-          editing={null}
-          detectedClis={detectedClis}
-          onClose={() => setEditorOpen(false)}
-          onSaved={async () => {
-            // Refresh the profile list so the newly-created agent
-            // appears in this menu (and everywhere else that subscribes
-            // to the profiles store) without forcing the user to open
-            // Settings or reload the page.
-            await onRefreshProfiles();
-          }}
-        />
-      )}
+      {editor}
     </>
   );
 };
-
-interface MenuRowProps {
-  icon: ReactNode;
-  label: string;
-  hint?: string;
-  current?: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-}
-
-const MenuRow = ({
-  icon,
-  label,
-  hint,
-  current,
-  disabled,
-  onClick,
-}: MenuRowProps) => (
-  <Button
-    variant="ghost"
-    tone="neutral"
-    size="sm"
-    role="menuitem"
-    disabled={disabled}
-    onClick={onClick}
-    title={
-      current
-        ? 'Current — starts another thread with the same setup'
-        : undefined
-    }
-    className={cn(
-      'w-full justify-start gap-2 rounded-none px-3 py-1.5 text-left',
-      current ? 'text-info' : 'text-fg-default',
-    )}
-  >
-    <span className="shrink-0">{icon}</span>
-    <span className="shrink-0">{label}</span>
-    {hint && (
-      <span className="text-fg-muted ml-auto block min-w-0 truncate pl-2 text-xs">
-        {hint}
-      </span>
-    )}
-  </Button>
-);

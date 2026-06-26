@@ -36,7 +36,6 @@ const DOT_COLORS: Record<
   Exclude<QuestionNodeStatus, 'idle'>,
   { bg: string; pulse?: boolean }
 > = {
-  pending: { bg: 'var(--warning)' },
   running: { bg: 'var(--info)' },
   done: { bg: 'var(--success)', pulse: true },
   error: { bg: 'var(--danger)' },

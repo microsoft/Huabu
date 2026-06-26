@@ -80,14 +80,14 @@ describe('serializePrompt', () => {
     const prompt: ExternalAgentPrompt = { task: 'task', selectedNodes: [] };
 
     const withoutSystem = serializePrompt(prompt);
-    expect(withoutSystem).not.toContain('## Canvas Tools (Sideband)');
+    expect(withoutSystem).not.toContain('## Canvas Tools (Reachback)');
     expect(withoutSystem).not.toContain('Huabu');
 
     const withSystem = serializePrompt(prompt, { includeSystem: true });
-    expect(withSystem).toContain('## Canvas Tools (Sideband)');
+    expect(withSystem).toContain('## Canvas Tools (Reachback)');
     expect(withSystem).toContain('Huabu');
     // The preamble precedes the per-turn request body.
-    expect(withSystem.indexOf('## Canvas Tools (Sideband)')).toBeLessThan(
+    expect(withSystem.indexOf('## Canvas Tools (Reachback)')).toBeLessThan(
       withSystem.indexOf('## Request'),
     );
   });
@@ -147,12 +147,12 @@ describe('prepareExternalAgentPrompt', () => {
     });
 
     expect(result.includedSystem).toBe(true);
-    expect(result.serialized).toContain('## Canvas Tools (Sideband)');
+    expect(result.serialized).toContain('## Canvas Tools (Reachback)');
     expect(result.serialized).toContain('first message');
     // The structured prompt also carries the rendered preamble so the
     // UI can show the complete prompt the agent saw.
     expect(result.prompt.systemPreamble).toContain(
-      '## Canvas Tools (Sideband)',
+      '## Canvas Tools (Reachback)',
     );
   });
 

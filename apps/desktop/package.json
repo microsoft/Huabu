@@ -12,7 +12,7 @@
     "dist:mac": "pnpm run build && electron-builder --mac",
     "dist:win": "pnpm run build && electron-builder --win",
     "dist:linux": "pnpm run build && electron-builder --linux",
-    "dev": "pnpm run build && env -u ELECTRON_RUN_AS_NODE electron ."
+    "dev": "pnpm run build && node scripts/dev.mjs"
   },
   "dependencies": {
     "get-port": "^7.1.0"

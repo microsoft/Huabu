@@ -1,25 +1,26 @@
 #!/usr/bin/env node
 
 /**
- * Huabu Sideband Tool (HST)
+ * Huabu Reachback Tool (HRT)
  *
  * Standalone CLI script for external agents to interact with the Huabu
- * canvas through the Agent Sideband channel. Invoked via:
+ * canvas through the Agent Reachback channel. Invoked via:
  *
- *   node huabu-sideband-tool.mjs <command> [args...]
+ *   node huabu-reachback-tool.mjs <command> [args...]
  *
  * Environment variables (set by agentlet daemon):
  *   AGENTLET_TOKEN       — Bearer token for Huabu server auth
  *   AGENTLET_SERVER      — Daemon's WS URL (e.g. ws://127.0.0.1:3001/api/acp/agent)
- *                          HST derives HTTP base URL from this automatically.
+ *                          HRT derives HTTP base URL from this automatically.
  *   HUABU_CANVAS_ID      — Canvas ID this session is scoped to
  *   HUABU_SERVER         — (optional override) HTTP base URL; if set, takes priority
- *   AGENTLET_SIDEBAND_DIR — Directory containing this script (informational)
+ *   AGENTLET_REACHBACK_DIR — Directory containing this script (informational)
  *
  * Commands:
  *   read-node   [--output-dir <dir>] <node-id>
  *   write-node  --type <type> [options] <content-file>
  *   write-node  --id <node-id> [options] <content-file>
+ *   snapshot    [--output-dir <dir>] [--max-pixels <n>] <node-id> [<node-id>...]
  *   ask-agent   <prompt | @prompt-file>
  */
 
@@ -145,7 +146,7 @@ function parseArgs(args, spec = {}) {
 // ── SSE ask-agent helper ─────────────────────────────────────────────
 
 /**
- * Call POST /api/sideband/ask-agent and consume the SSE stream.
+ * Call POST /api/reachback/ask-agent and consume the SSE stream.
  * Returns { finalMessage, threadId }.
  *
  * @param {string} prompt - The prompt to send
@@ -164,7 +165,7 @@ async function callAskAgent(prompt, canvasId, opts = {}) {
     exitOnError = true,
   } = opts;
 
-  const url = `${SERVER}/api/sideband/ask-agent`;
+  const url = `${SERVER}/api/reachback/ask-agent`;
   const res = await fetch(url, {
     method: 'POST',
     headers: {
@@ -268,8 +269,8 @@ async function callAskAgent(prompt, canvasId, opts = {}) {
 
   // Save session if requested
   if (saveSession && events.length > 0) {
-    const sidebandDir = process.env.AGENTLET_SIDEBAND_DIR || '.';
-    const sessionsDir = path.join(sidebandDir, 'sessions');
+    const reachbackDir = process.env.AGENTLET_REACHBACK_DIR || '.';
+    const sessionsDir = path.join(reachbackDir, 'sessions');
     await mkdir(sessionsDir, { recursive: true });
     const filename = `${Date.now()}.jsonl`;
     const filePath = path.join(sessionsDir, filename);
@@ -290,7 +291,7 @@ async function readNode(args) {
     valued: ['--output-dir'],
     help: `read-node — Read a canvas node's content to a local file
 
-Usage: node huabu-sideband-tool.mjs read-node [options] <node-id>
+Usage: node huabu-reachback-tool.mjs read-node [options] <node-id>
 
 Arguments:
   <node-id>              ID of the canvas node to read
@@ -304,7 +305,7 @@ Output:
   stderr: node metadata (type, size)
 
 Example:
-  node huabu-sideband-tool.mjs read-node --output-dir ./tmp node-abc123
+  node huabu-reachback-tool.mjs read-node --output-dir ./tmp node-abc123
 `,
   });
 
@@ -346,7 +347,7 @@ async function writeNode(args) {
     boolean: ['--notify'],
     help: `write-node — Create or update a canvas node
 
-Usage: node huabu-sideband-tool.mjs write-node [options] <content-file>
+Usage: node huabu-reachback-tool.mjs write-node [options] <content-file>
 
 Arguments:
   <content-file>         Path to file containing node content
@@ -366,8 +367,8 @@ Output:
   stderr: action metadata (action, type/id)
 
 Examples:
-  node huabu-sideband-tool.mjs write-node --type text ./draft.md
-  node huabu-sideband-tool.mjs write-node --id node-abc123 ./updated.md
+  node huabu-reachback-tool.mjs write-node --type text ./draft.md
+  node huabu-reachback-tool.mjs write-node --id node-abc123 ./updated.md
 `,
   });
 
@@ -478,12 +479,92 @@ Examples:
   }
 }
 
+async function snapshot(args) {
+  const { flags, positional } = parseArgs(args, {
+    valued: ['--output-dir', '--max-pixels'],
+    help: `snapshot — Render sketch / image nodes to PNG image(s)
+
+Usage: node huabu-reachback-tool.mjs snapshot [options] <node-id> [<node-id>...]
+
+Arguments:
+  <node-id>...           One or more canvas node ids. image / sketch nodes
+                         are spatially clustered into one PNG per cluster;
+                         a frame id expands to its children.
+
+Options:
+  --output-dir <dir>     Directory to write the PNG file(s) into (default: .)
+  --max-pixels <n>       Longest-edge pixel cap for output PNGs (256-4096, default 1280)
+  -h, --help             Show this help message
+
+Output:
+  stdout: file path(s) of the written PNG(s), one per line
+  stderr: per-image metadata (key, dimensions, origin node ids)
+
+Example:
+  node huabu-reachback-tool.mjs snapshot --output-dir ./tmp node-abc node-def
+`,
+  });
+
+  if (positional.length === 0) {
+    process.stderr.write(
+      'Usage: snapshot [--output-dir <dir>] [--max-pixels <n>] <node-id> [<node-id>...]\n',
+    );
+    process.exit(1);
+  }
+
+  const outputDir = flags['--output-dir'] || '.';
+  const canvasId = requireEnv('HUABU_CANVAS_ID', CANVAS_ID);
+
+  const query = new URLSearchParams({
+    canvasId,
+    nodeIds: positional.join(','),
+  });
+  if (flags['--max-pixels']) {
+    query.set('maxPixels', String(flags['--max-pixels']));
+  }
+
+  const manifestRes = await request(
+    'GET',
+    `/api/reachback/snapshot?${query.toString()}`,
+  );
+  const manifest = await manifestRes.json();
+  const images = Array.isArray(manifest.images) ? manifest.images : [];
+
+  if (images.length === 0) {
+    process.stderr.write('Error: no snapshottable nodes in selection\n');
+    process.exit(1);
+  }
+
+  await mkdir(outputDir, { recursive: true });
+
+  for (const image of images) {
+    // Download the PNG bytes from the canvas artifact route. The key is
+    // a bare filename (`<id>.png`); the artifact route is Bearer-reachable.
+    const fileRes = await request(
+      'GET',
+      `/api/canvas/${canvasId}/artifact/${image.key}`,
+    );
+    const bytes = Buffer.from(await fileRes.arrayBuffer());
+    const filePath = path.join(outputDir, image.key);
+    await writeFile(filePath, bytes);
+
+    const dims =
+      image.width && image.height
+        ? `${image.width}x${image.height}`
+        : 'unknown';
+    process.stderr.write(
+      `key=${image.key} size=${dims} originNodeIds=${(image.originNodeIds || []).join(',')}\n`,
+    );
+    process.stdout.write(`${filePath}\n`);
+  }
+}
+
 async function askAgent(args) {
   const { flags, positional } = parseArgs(args, {
     boolean: ['--show-steps', '--no-save-session'],
     help: `ask-agent — Send a prompt to a built-in Huabu agent
 
-Usage: node huabu-sideband-tool.mjs ask-agent [options] <prompt | @prompt-file>
+Usage: node huabu-reachback-tool.mjs ask-agent [options] <prompt | @prompt-file>
 
 Arguments:
   <prompt>               Inline prompt text (multiple words joined)
@@ -491,7 +572,7 @@ Arguments:
 
 Options:
   --show-steps           Print intermediate events (tool calls, thinking) to stdout
-  --no-save-session      Disable saving event log (default: saves to JSONL in sideband dir)
+  --no-save-session      Disable saving event log (default: saves to JSONL in reachback dir)
   -h, --help             Show this help message
 
 Output:
@@ -499,9 +580,9 @@ Output:
   stderr: progress status, session file path
 
 Examples:
-  node huabu-sideband-tool.mjs ask-agent "summarize node-abc123"
-  node huabu-sideband-tool.mjs ask-agent --show-steps "what nodes link to node-xyz?"
-  node huabu-sideband-tool.mjs ask-agent --no-save-session @./prompt.txt
+  node huabu-reachback-tool.mjs ask-agent "summarize node-abc123"
+  node huabu-reachback-tool.mjs ask-agent --show-steps "what nodes link to node-xyz?"
+  node huabu-reachback-tool.mjs ask-agent --no-save-session @./prompt.txt
 `,
   });
 
@@ -551,16 +632,18 @@ const [command, ...args] = process.argv.slice(2);
 const COMMANDS = {
   'read-node': readNode,
   'write-node': writeNode,
+  snapshot: snapshot,
   'ask-agent': askAgent,
 };
 
-const MAIN_HELP = `Huabu Sideband Tool (HST)
+const MAIN_HELP = `Huabu Reachback Tool (HRT)
 
-Usage: node huabu-sideband-tool.mjs <command> [args...]
+Usage: node huabu-reachback-tool.mjs <command> [args...]
 
 Commands:
   read-node   Read a canvas node's content to a local file
   write-node  Create or update a canvas node
+  snapshot    Render sketch / image nodes to PNG image(s)
   ask-agent   Send a prompt to a built-in Huabu agent
 
 Options:
@@ -573,10 +656,10 @@ Environment variables (set by agentlet daemon):
   HUABU_SERVER      HTTP base URL override (optional, takes priority over AGENTLET_SERVER)
 
 Examples:
-  node huabu-sideband-tool.mjs read-node node-abc123
-  node huabu-sideband-tool.mjs write-node --type text ./draft.md
-  node huabu-sideband-tool.mjs ask-agent "place the new node near node-xyz"
-  node huabu-sideband-tool.mjs read-node --help
+  node huabu-reachback-tool.mjs read-node node-abc123
+  node huabu-reachback-tool.mjs write-node --type text ./draft.md
+  node huabu-reachback-tool.mjs ask-agent "place the new node near node-xyz"
+  node huabu-reachback-tool.mjs read-node --help
 `;
 
 if (!command || command === '--help' || command === '-h') {

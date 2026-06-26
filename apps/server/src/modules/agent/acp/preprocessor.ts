@@ -10,16 +10,16 @@
  *   - `selectedNodes` is a metadata-only table (node ID + type +
  *     label) of whatever the user had selected. Content is **not**
  *     inlined and files are **not** attached — the external agent
- *     pulls node bodies on demand through the Huabu Sideband Tool
+ *     pulls node bodies on demand through the Huabu Reachback Tool
  *     (`read-node <node-id>`), documented in the serialized prompt's
- *     `## Canvas Tools (Sideband)` section.
+ *     `## Canvas Tools (Reachback)` section.
  *
  * Why deterministic instead of a preprocessor sub-agent:
  *   - An earlier design ran a dedicated `acp-preprocessor` LLM that
  *     explored the canvas (read-only tools) and synthesised a briefing.
  *     That paid an extra model round-trip on every turn, added latency,
  *     was non-deterministic, and could fail to emit valid JSON. Since
- *     the sideband tool already lets the external agent fetch node
+ *     the reachback tool already lets the external agent fetch node
  *     content by ID, all we need to hand it deterministically is the
  *     user's words + the IDs of what they selected.
  *
@@ -27,7 +27,7 @@
  * under `prompt/external-agent/` via {@link renderPromptFile}:
  * `user_prompt.md` (the per-turn `task` + selected-node table) and, on
  * the first turn of a freshly-created session, `system_prompt.md` (the
- * one-shot persona + `## Canvas Tools (Sideband)` preamble) prepended in
+ * one-shot persona + `## Canvas Tools (Reachback)` preamble) prepended in
  * front of it. The per-node table rows are assembled here in TS (the
  * in-house template engine has no loops) and injected as a single
  * variable.
@@ -186,11 +186,11 @@ export function prepareExternalAgentPrompt(
  * because the in-house template engine has no loop construct.
  *
  * When `opts.includeSystem` is set, the one-shot system preamble
- * (persona + `## Canvas Tools (Sideband)` docs, from
+ * (persona + `## Canvas Tools (Reachback)` docs, from
  * {@link SYSTEM_TEMPLATE}) is rendered and prepended — used only for the
- * first user turn of a freshly-created session. The Huabu Sideband Tool
+ * first user turn of a freshly-created session. The Huabu Reachback Tool
  * itself is pushed to every agentlet-backed agent unconditionally (see
- * `server-mount.ts` `pushSidebandTools`); the preamble just documents
+ * `server-mount.ts` `pushReachbackTools`); the preamble just documents
  * how to call it, once.
  */
 export function serializePrompt(
@@ -219,7 +219,7 @@ export function serializePrompt(
     // Conditional-block flag: any non-empty string keeps the block.
     selectedNodes: hasNodes ? '1' : '',
     selectedNodesIntro:
-      'The user selected the canvas nodes below. Read any you need with the Huabu Sideband Tool (`read-node <node-id>`); update them with `write-node --id <node-id>`.',
+      'The user selected the canvas nodes below. Read any you need with the Huabu Reachback Tool (`read-node <node-id>`); update them with `write-node --id <node-id>`.',
     selectedNodesTable,
   });
 
@@ -231,7 +231,7 @@ export function serializePrompt(
 
 /**
  * Render the one-shot system preamble (persona + `## Canvas Tools
- * (Sideband)` docs) from {@link SYSTEM_TEMPLATE}. Shared by
+ * (Reachback)` docs) from {@link SYSTEM_TEMPLATE}. Shared by
  * {@link serializePrompt} (which prepends it to the wire text) and
  * {@link prepareExternalAgentPrompt} (which attaches it to the structured
  * prompt so the UI can show the complete prompt). Static — no template

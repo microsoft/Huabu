@@ -220,6 +220,8 @@ agentlet spawns agent → initialize → session/new or session/resume → sessi
 
 The host app uses JSON-RPC 2.0 over WebSocket to send ACP messages to a specific agent and receive ACP, lifecycle, and connection-state events. The agent channel protocol (connection establishment, handshake, control messages, reconnection) is documented in detail in [`spec/protocol.md`](spec/protocol.md).
 
+The [`spec/agent-reachback.md`](spec/agent-reachback.md) guide describes the host-agnostic **Agent Reachback Interface** — how the daemon distributes host-provided tool scripts to spawned agents (via `server/sendResource`) and provisions their environment so the agents can reach back into the host app out-of-band.
+
 For machine-readable API contracts:
 - [`spec/openapi.yaml`](spec/openapi.yaml) — REST API (OpenAPI 3.1.0), viewable in [Swagger Editor](https://editor.swagger.io/) or [Swagger Viewer VSC Ext](https://marketplace.visualstudio.com/items?itemName=Arjun.swagger-viewer)
 - [`spec/asyncapi.yaml`](spec/asyncapi.yaml) — WebSocket protocols (AsyncAPI 3.0.0), viewable in [AsyncAPI Studio](https://studio.asyncapi.com/) or [AsyncAPI Preview VSC Ext](https://marketplace.visualstudio.com/items?itemName=asyncapi.asyncapi-preview)

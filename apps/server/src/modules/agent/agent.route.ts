@@ -14,6 +14,7 @@ import {
   agentCanvasIdQuerySchema,
   agentRequestSchema,
   createId,
+  forkThreadBodySchema,
   variantForInternalTool,
 } from '@sediment/shared';
 
@@ -53,6 +54,8 @@ import type {
   ChatHistoryResponse,
   ContextTokensResponse,
   ExternalAgentPrompt,
+  ForkThreadBody,
+  ForkThreadResponse,
   ImageGenerationData,
   SnapshotNodesData,
   StopThreadResponse,
@@ -521,6 +524,71 @@ const agentRoutes: FastifyPluginAsync = async (
     buildHistoryFromTurns(turns, messages);
 
     return reply.send({ threadId, messages });
+  });
+
+  /**
+   * POST /agent/history/:threadId/fork
+   * Copy a thread's persisted conversation onto a fresh thread id so a
+   * duplicated question node owns an independent continuation that still
+   * starts from the same history. Built-in agent only — the caller is
+   * responsible for not forking external (ACP) threads, whose live
+   * session state lives inside the agent process and cannot be copied.
+   */
+  fastify.post<{
+    Params: { threadId: string };
+    Querystring: AgentCanvasIdQuery;
+    Body: ForkThreadBody;
+    Reply: ApiResult<ForkThreadResponse>;
+  }>('/history/:threadId/fork', async function (request, reply) {
+    const { threadId } = request.params;
+    const parsedQuery = agentCanvasIdQuerySchema.safeParse(request.query);
+    if (!parsedQuery.success) {
+      return reply.code(400).send({
+        message: parsedQuery.error.issues[0]?.message ?? 'Invalid query',
+      });
+    }
+    const parsedBody = forkThreadBodySchema.safeParse(request.body);
+    if (!parsedBody.success) {
+      return reply.code(400).send({
+        message: parsedBody.error.issues[0]?.message ?? 'Invalid body',
+      });
+    }
+
+    const { canvasId } = parsedQuery.data;
+    const { targetThreadId, targetCanvasId } = parsedBody.data;
+    const dstCanvasId = targetCanvasId ?? canvasId;
+
+    if (!threadId || threadId.trim().length === 0) {
+      return reply.code(400).send({ message: 'threadId is required' });
+    }
+    if (!canvasId || !dstCanvasId) {
+      return reply.code(400).send({ message: 'canvasId is required' });
+    }
+    if (targetThreadId === threadId && dstCanvasId === canvasId) {
+      return reply
+        .code(400)
+        .send({ message: 'target thread must differ from source' });
+    }
+
+    // Copy the source thread's structured turn log onto the target
+    // thread. `loadTurns` yields the finalized JSONL turns plus any
+    // in-progress active turn; each is appended as a finalized turn to
+    // the (fresh, empty) target so the fork owns an independent,
+    // immutable snapshot — the rich-ACP overlay (`toolExtras`, `plan`)
+    // travels inside each record, so there is no separate sidecar to
+    // copy.
+    const turns = loadTurns(threadId, canvasId);
+    if (turns.length === 0) {
+      // Source has no persisted history — nothing to fork. The copy
+      // simply starts as a fresh (empty) thread.
+      return reply.send({ threadId: targetThreadId, forked: false });
+    }
+
+    for (const turn of turns) {
+      appendTurn(targetThreadId, turn, dstCanvasId);
+    }
+
+    return reply.send({ threadId: targetThreadId, forked: true });
   });
 
   /**

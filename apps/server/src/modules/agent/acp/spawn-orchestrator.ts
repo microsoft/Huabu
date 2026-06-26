@@ -217,9 +217,9 @@ export async function ensureAgentForThread(
 
   // HUABU_CANVAS_ID is a host-app variable that the daemon doesn't know.
   // AGENTLET_SERVER and AGENTLET_TOKEN are injected by the daemon itself.
-  const sidebandEnv: Record<string, string> = {};
+  const reachbackEnv: Record<string, string> = {};
   if (canvasId) {
-    sidebandEnv.HUABU_CANVAS_ID = canvasId;
+    reachbackEnv.HUABU_CANVAS_ID = canvasId;
   }
 
   let sessionId: string;
@@ -233,7 +233,7 @@ export async function ensureAgentForThread(
         cwd: recipe.cwd,
         autoRestart: recipe.autoRestart,
         idleTimeoutSecs: DEFAULT_IDLE_TIMEOUT_SECS,
-        env: Object.keys(sidebandEnv).length > 0 ? sidebandEnv : undefined,
+        env: Object.keys(reachbackEnv).length > 0 ? reachbackEnv : undefined,
       },
     });
     sessionId = result.sessionId;

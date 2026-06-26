@@ -28,6 +28,7 @@ import {
   type DropIntent,
   type ResolvedDrop,
 } from './dropResolver';
+import { focusNodesOnCanvas } from './focusNodesOnCanvas';
 import { TreeRowItem } from './TreeRowItem';
 import { EmptyState } from '../../Common/EmptyState';
 
@@ -745,13 +746,14 @@ export const CanvasLayerTree = ({
       selectNodes(targetIds, false);
       selectionAnchorRef.current = nextAnchor;
 
+      // Re-center the canvas on the just-selected node(s). See
+      // `focusNodesOnCanvas` for why we don't use `rfInstance.fitView`
+      // here — short version: `onlyRenderVisibleElements` leaves
+      // offscreen nodes unmeasured, and `fitView` silently no-ops on
+      // them. The helper falls back to `style.width|height` and uses
+      // `setCenter` directly.
       if (rfInstance && targetIds.length > 0) {
-        const nodesToFit = targetIds.map((nid) => ({ id: nid }));
-        void rfInstance.fitView({
-          nodes: nodesToFit,
-          duration: 800,
-          maxZoom: 1,
-        });
+        focusNodesOnCanvas(rfInstance, targetIds, 800);
       }
     },
     [selectNodes, rfInstance, visibleItems],

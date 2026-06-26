@@ -48,6 +48,17 @@ interface PanelState {
    * without touching callers.
    */
   requestOpenRightPanel: () => void;
+
+  /**
+   * Monotonic counter bumped whenever some surface wants the chat input
+   * focused (e.g. opening a question node into compose mode). `ChatInput`
+   * watches this value and focuses its textarea on every change. A nonce
+   * (rather than a boolean) lets repeated requests re-fire focus without
+   * a manual reset.
+   */
+  focusChatInputNonce: number;
+  /** Request the chat input textarea be focused. */
+  requestFocusChatInput: () => void;
 }
 
 export const usePanelStore = create<PanelState>()(
@@ -67,6 +78,10 @@ export const usePanelStore = create<PanelState>()(
       toggleRightPanel: () =>
         set((s) => ({ isRightCollapsed: !s.isRightCollapsed })),
       requestOpenRightPanel: () => set({ isRightCollapsed: false }),
+
+      focusChatInputNonce: 0,
+      requestFocusChatInput: () =>
+        set((s) => ({ focusChatInputNonce: s.focusChatInputNonce + 1 })),
     }),
     {
       name: 'sediment-panel',

@@ -103,7 +103,7 @@ export class Agentlet {
     // Values are resolved to absolute paths against the daemon cwd so that
     // spawned agents (which run in a different cwd) reference the same dir.
     const defaults: Record<string, string> = {
-      AGENTLET_SIDEBAND_DIR: join('node_modules', '.cache', 'agentlet', 'sideband'),
+      AGENTLET_REACHBACK_DIR: join('node_modules', '.cache', 'agentlet', 'reachback'),
     }
     for (const [key, fallback] of Object.entries(defaults)) {
       this.envRegistry[key] = resolve(process.env[key] || fallback)
@@ -478,8 +478,8 @@ export class Agentlet {
 
     try {
       // Inject daemon-managed env vars into the spawned agent process:
-      // - AGENTLET_SERVER: WS URL for sideband HTTP derivation
-      // - envRegistry: all well-known dirs (AGENTLET_SIDEBAND_DIR, etc.)
+      // - AGENTLET_SERVER: WS URL for reachback HTTP derivation
+      // - envRegistry: all well-known dirs (AGENTLET_REACHBACK_DIR, etc.)
       // sessionSpec.env (from host app) is merged last to allow overrides.
       const agent = new AgentProcess({
         command: sessionSpec.command,

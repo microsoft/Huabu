@@ -225,7 +225,7 @@ export interface ListResult {
 /**
  * server/sendResource — push a file to the daemon for local storage.
  * The `destination` supports `${ENV_VAR}` interpolation against the
- * daemon's env registry (e.g., `${AGENTLET_SIDEBAND_DIR}/tool.mjs`).
+ * daemon's env registry (e.g., `${AGENTLET_REACHBACK_DIR}/tool.mjs`).
  */
 export interface SendResourceParams {
   /** Destination path with ${ENV_VAR} interpolation */

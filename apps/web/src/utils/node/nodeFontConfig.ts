@@ -39,8 +39,7 @@ export const QUESTION_FONT_FAMILY =
  * whole height with a single oversized line.
  */
 export const TEXT_NODE_PLACEHOLDER = 'Type...';
-export const QUESTION_NODE_PLACEHOLDER =
-  'Ask a question… type @ to pick an agent';
+export const QUESTION_NODE_PLACEHOLDER = 'Ask a question…';
 
 /** Line-height used by every text-bearing node's measurement. */
 export const NODE_LINE_HEIGHT = 1.5;

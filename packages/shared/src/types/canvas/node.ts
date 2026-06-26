@@ -494,12 +494,7 @@ export interface SketchNodeData extends BaseNodeData {
 // ==================== Question Node ====================
 
 /** Execution status of a question node. */
-export type QuestionNodeStatus =
-  | 'idle'
-  | 'pending'
-  | 'running'
-  | 'done'
-  | 'error';
+export type QuestionNodeStatus = 'idle' | 'running' | 'done' | 'error';
 
 /** Question node: AI interaction medium embedded on canvas. */
 export interface QuestionNodeData extends BaseNodeData {
@@ -514,11 +509,7 @@ export interface QuestionNodeData extends BaseNodeData {
   content: string;
   /** Current execution status. */
   status: QuestionNodeStatus;
-  /** Epoch ms when auto-run triggers. Transient — not persisted. */
-  runAt?: number;
-  /** Per-node auto-run delay override (seconds). */
-  autoRunDelay?: number;
-  /** Agent thread ID (set when run starts). */
+  /** Agent thread ID (set when the node is opened for composition). */
   threadId?: string;
   /** Error message when status === 'error'. */
   errorMessage?: string;
@@ -527,11 +518,10 @@ export interface QuestionNodeData extends BaseNodeData {
   /** Whether the user has viewed the completed response in the chat panel. */
   viewed?: boolean;
   /**
-   * Agent dispatch binding chosen via the in-node `@` mention. When
-   * omitted (default), the question runs against the built-in agent
-   * with `agentMode='ask'`. The mention text (e.g. `@claude`) is also
-   * kept in `data.content` so the user can see/edit which agent was
-   * picked.
+   * Agent dispatch binding for this question, chosen via the inline
+   * agent selector in the chat panel and written on the first send.
+   * When omitted (default), the question runs against the built-in
+   * agent with `agentMode='ask'`.
    */
   agentBinding?: AgentBinding;
   /**
