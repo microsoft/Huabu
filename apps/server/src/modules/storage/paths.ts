@@ -173,16 +173,30 @@ export function chatPartsPath(canvasId: string, threadId: string): string {
 
 /**
  * Structured thread record paired with a thread — the source of truth
- * for chat history in the envelope-persistence model: a versioned list
- * of turns, each carrying the user's structured {@link ChatEnvelope}
- * plus the assistant/tool transcript it produced. Kept on a distinct
- * `.turns.json` path so legacy `.json` pi-ai `Context` files are simply
- * ignored (no migration). See `chat-thread-store.ts` for the schema.
+ * for chat history in the envelope-persistence model. An append-only
+ * JSONL log of finalized turns, each carrying the user's structured
+ * {@link ChatEnvelope} plus the assistant/tool transcript it produced.
+ * Kept on a distinct `.turns.jsonl` path so legacy `.json` pi-ai
+ * `Context` files are simply ignored (no migration). See
+ * `chat-thread-store.ts` for the schema.
  */
 export function chatTurnsPath(canvasId: string, threadId: string): string {
   return path.join(
     chatDir(canvasId),
-    `${sanitizeId(threadId, 'threadId')}.turns.json`,
+    `${sanitizeId(threadId, 'threadId')}.turns.jsonl`,
+  );
+}
+
+/**
+ * The single in-progress turn for a thread, rewritten on each debounced
+ * save during streaming so a mid-generation reload still shows partial
+ * progress. Promoted to a `.turns.jsonl` line (and deleted) when the
+ * turn finalizes. See `chat-thread-store.ts`.
+ */
+export function chatActiveTurnPath(canvasId: string, threadId: string): string {
+  return path.join(
+    chatDir(canvasId),
+    `${sanitizeId(threadId, 'threadId')}.active.json`,
   );
 }
 

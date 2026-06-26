@@ -27,10 +27,7 @@ import { buildChatEnvelope } from './envelope.js';
 
 import type { ChatEnvelope, ChatEnvelopeParams } from './envelope.js';
 import type { LoadedAgent } from '../../../prompt/index.js';
-import type {
-  ChatThreadRecord,
-  PiMessage,
-} from '../store/chat-thread-store.js';
+import type { ChatTurnRecord, PiMessage } from '../store/chat-thread-store.js';
 import type { Context } from '@earendil-works/pi-ai';
 import type { ChatAttachment } from '@sediment/shared';
 
@@ -577,18 +574,18 @@ export async function applyChatTurnMessages(
 
 /**
  * Rebuild the flat pi-ai message array for a thread from its stored
- * {@link ChatThreadRecord}: re-serialise each turn's envelope into the
- * canonical user messages, then append that turn's persisted
- * assistant/tool transcript. This is how the structured-persistence
- * path reconstructs the `Context.messages` the agent runs over, so the
- * `[SYSTEM …]` encoding never has to be the source of truth on disk.
+ * turns: re-serialise each turn's envelope into the canonical user
+ * messages, then append that turn's persisted assistant/tool
+ * transcript. This is how the structured-persistence path reconstructs
+ * the `Context.messages` the agent runs over, so the `[SYSTEM …]`
+ * encoding never has to be the source of truth on disk.
  */
 export async function rebuildContextMessages(
-  record: ChatThreadRecord,
+  turns: readonly ChatTurnRecord[],
   opts: { canvasId: string | null; agentCfg: LoadedAgent },
 ): Promise<PiMessage[]> {
   const out: PiMessage[] = [];
-  for (const turn of record.turns) {
+  for (const turn of turns) {
     const { messages } = await renderEnvelopeMessages(turn.envelope, opts);
     out.push(...messages, ...turn.transcript);
   }
