@@ -47,7 +47,7 @@ function sampleEnvelope(text = 'hello'): ChatEnvelope {
     focus: {
       selection: {
         refs: [],
-        topLevelIds: [],
+        selectedIds: [],
         imageAttachments: [],
         snapshotAttachments: [],
       },

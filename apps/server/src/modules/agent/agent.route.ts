@@ -386,9 +386,9 @@ function buildHistoryFromTurns(
     ];
     const attachments = projectUserVisibleAttachments(
       allAttachments,
-      env.focus.selection.topLevelIds,
+      env.focus.selection.selectedIds,
     );
-    const selectedNodeIds = env.focus.selection.topLevelIds;
+    const selectedNodeIds = env.focus.selection.selectedIds;
     const invokedSkills = env.skills.invokedIds;
     if (
       env.user.text.trim() ||

@@ -504,7 +504,7 @@ export async function renderEnvelopeMessages(
   // internally: user-visible items become the UI breadcrumb tag,
   // sketch-raster artifacts become the LLM-only hint tag.
   userContent = appendMetadataTags(userContent, {
-    selectedNodeIds: env.focus.selection.topLevelIds,
+    selectedNodeIds: env.focus.selection.selectedIds,
     invokedSkills: env.skills.invokedIds,
     attachments: allAttachments,
   });

@@ -68,11 +68,11 @@ export interface ChatEnvelope {
        */
       refs: AgentNodeRef[];
       /**
-       * Ids the user explicitly selected (top-level only) — drives the
-       * persisted `selectedNodeIds` breadcrumb so reloaded history
-       * renders the same chips the composer showed.
+       * Ids the user directly selected (top-level only, frame children
+       * excluded) — drives the reloaded user-message node chips so
+       * history shows the same selection the composer did.
        */
-      topLevelIds: string[];
+      selectedIds: string[];
       /** Selection image attachments not consumed by a composite. */
       imageAttachments: ChatAttachment[];
       /** Composite PNG snapshots derived from selected sketch/image nodes. */
@@ -355,7 +355,7 @@ export async function buildChatEnvelope(
     focus: {
       selection: {
         refs: selectedNodes ? collectSelectedNodeRefs(selectedNodes) : [],
-        topLevelIds: selectedNodes ? collectSelectedNodeIds(selectedNodes) : [],
+        selectedIds: selectedNodes ? collectSelectedNodeIds(selectedNodes) : [],
         imageAttachments: dedupedImageAttachments,
         snapshotAttachments,
       },
