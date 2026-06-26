@@ -312,8 +312,8 @@ endpoint)
 
 | Field    | Value                                                                                  |
 | -------- | -------------------------------------------------------------------------------------- |
-| Query    | `canvasId` (required), `nodeIds` (required, comma-separated), `maxPixels` (256–4096)    |
-| Response | `{ canvasId, images: [{ key, width, height, originNodeIds }] }`                         |
+| Query    | `canvasId` (required), `nodeIds` (required, comma-separated), `maxPixels` (256–4096)   |
+| Response | `{ canvasId, images: [{ key, width, height, originNodeIds }] }`                        |
 | Errors   | `400` empty / oversized / non-snapshottable ids or unknown canvas, `401` invalid token |
 
 Thin exposure of the internal `snapshot_nodes` tool

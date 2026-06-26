@@ -549,7 +549,9 @@ Example:
     await writeFile(filePath, bytes);
 
     const dims =
-      image.width && image.height ? `${image.width}x${image.height}` : 'unknown';
+      image.width && image.height
+        ? `${image.width}x${image.height}`
+        : 'unknown';
     process.stderr.write(
       `key=${image.key} size=${dims} originNodeIds=${(image.originNodeIds || []).join(',')}\n`,
     );

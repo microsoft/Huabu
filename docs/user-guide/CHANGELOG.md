@@ -19,6 +19,7 @@
 - 缓存目录默认值从 `node_modules/.cache/agentlet/sideband` 改为 `.../reachback`。
 - agent system prompt 中的 `## Canvas Tools (Sideband)` 段改名为 `## Canvas Tools (Reachback)`。
 - 本文件中 2026-06-26 之前的历史条目保持原样（作为当时的记录），不做回溯改名。
+
 ## 2026-06-26 · 拖拽语义：Note 块 → 画布 默认改为「移动」
 
 **What Changed**
