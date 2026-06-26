@@ -318,6 +318,15 @@ type RFState = {
   setNodeIngestion: (nodeId: string, info: NodeIngestionInfo) => void;
   clearNodeIngestion: (nodeId: string) => void;
 
+  /**
+   * Thread ids whose server-side history fork (kicked off by pasting a
+   * question node that already owns a conversation) is still in flight.
+   * While a thread id is present here the copied node must not be opened:
+   * its history hasn't finished copying server-side yet, so the chat
+   * panel would load an empty conversation. Runtime-only, never persisted.
+   */
+  pendingForkThreadIds: Record<string, true>;
+
   expandedNodeId: string | null;
   expandMode: 'replace' | 'split';
   /**
@@ -1051,6 +1060,8 @@ const useCanvasStore = create<RFState>()(
       set({ ingestionByNodeId: next });
     },
 
+    pendingForkThreadIds: {},
+
     expandedNodeId: null,
     expandMode: 'split',
     expandedNodeFocusTick: 0,
@@ -1357,6 +1368,7 @@ const useCanvasStore = create<RFState>()(
             isLoading: false,
             canvasNotFound: true,
             ingestionByNodeId: {},
+            pendingForkThreadIds: {},
           });
           return;
         }
@@ -1403,6 +1415,7 @@ const useCanvasStore = create<RFState>()(
           version: response.version,
           isLoading: false,
           ingestionByNodeId: {},
+          pendingForkThreadIds: {},
         });
 
         // If the user left a question-replay open on this canvas in a
@@ -2781,13 +2794,31 @@ const useCanvasStore = create<RFState>()(
       if (prepared.length === 0) return;
       clipboardNodes = prepared;
 
-      // Fire the server-side history forks for built-in copies. Order vs
-      // node creation is irrelevant — the copy already points at its new
-      // threadId; the server just needs to have copied the history before
-      // the user opens the node.
+      // Fire the server-side history forks for built-in copies. The copy
+      // already points at its new threadId, but until the server finishes
+      // copying the history the node must not be opened (it would load an
+      // empty conversation). We flag each new threadId as fork-pending up
+      // front and clear it when the fork settles, so `QuestionNode` can
+      // gate opening until the history is ready.
       const runForks = () => {
         if (forkTasks.length === 0) return;
         const sourceCanvasId = srcCanvasId ?? dstCanvasId;
+
+        set({
+          pendingForkThreadIds: {
+            ...get().pendingForkThreadIds,
+            ...Object.fromEntries(
+              forkTasks.map((t) => [t.dstThreadId, true as const]),
+            ),
+          },
+        });
+
+        const clearPending = (threadId: string) => {
+          const next = { ...get().pendingForkThreadIds };
+          delete next[threadId];
+          set({ pendingForkThreadIds: next });
+        };
+
         void Promise.all(
           forkTasks.map((t) =>
             agentApi
@@ -2803,7 +2834,8 @@ const useCanvasStore = create<RFState>()(
                   err,
                 );
                 toast('Failed to copy a conversation', { tone: 'danger' });
-              }),
+              })
+              .finally(() => clearPending(t.dstThreadId)),
           ),
         );
       };

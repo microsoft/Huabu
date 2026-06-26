@@ -494,12 +494,7 @@ export interface SketchNodeData extends BaseNodeData {
 // ==================== Question Node ====================
 
 /** Execution status of a question node. */
-export type QuestionNodeStatus =
-  | 'idle'
-  | 'pending'
-  | 'running'
-  | 'done'
-  | 'error';
+export type QuestionNodeStatus = 'idle' | 'running' | 'done' | 'error';
 
 /** Question node: AI interaction medium embedded on canvas. */
 export interface QuestionNodeData extends BaseNodeData {

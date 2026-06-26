@@ -68,15 +68,26 @@ export const QuestionNode = memo(
     const status = data.status ?? 'idle';
     const viewed = data.viewed ?? false;
 
+    // True while this node is a freshly-pasted copy whose conversation
+    // history is still being forked server-side. Until that settles the
+    // thread has no persisted messages, so opening it would show an empty
+    // conversation — we hold the node in a transient "running" state and
+    // block opening instead.
+    const isForkPending = useCanvasStore((s) =>
+      data.threadId ? s.pendingForkThreadIds[data.threadId] === true : false,
+    );
+
     /** Whether this node has been executed at least once. */
     const hasRun = status === 'done' || status === 'error';
 
     /**
      * Whether the chat panel can be opened to this question's thread —
      * true once a `threadId` exists AND the node is running (watch live)
-     * or finished (replay).
+     * or finished (replay). A pending paste-fork blocks opening until its
+     * history has finished copying.
      */
-    const canOpenInChat = !!data.threadId && (hasRun || status === 'running');
+    const canOpenInChat =
+      !!data.threadId && (hasRun || status === 'running') && !isForkPending;
 
     const openQuestionThread = useChatStore((s) => s.openQuestionThread);
     const openQuestionCompose = useChatStore((s) => s.openQuestionCompose);
@@ -140,25 +151,29 @@ export const QuestionNode = memo(
     // Double-click:
     //   - running / done / error → open conversation in chat panel
     //   - idle (not yet asked)    → open compose in chat panel
+    //   - fork still copying      → no-op (history not ready yet)
     // ------------------------------------------------------------------
     const handleActivate = useCallback(
       (e: React.MouseEvent) => {
         e.stopPropagation();
+        if (isForkPending) return;
         if (canOpenInChat) {
           openInChat();
         } else {
           openInCompose();
         }
       },
-      [canOpenInChat, openInChat, openInCompose],
+      [isForkPending, canOpenInChat, openInChat, openInCompose],
     );
 
     // ------------------------------------------------------------------
     // Toolbar — a single action that opens the conversation or compose.
+    // While a paste-fork is still copying its history the node has no
+    // openable conversation yet, so no action is offered.
     // ------------------------------------------------------------------
     const questionToolbar = useMemo(
       () =>
-        canOpenInChat ? (
+        isForkPending ? null : canOpenInChat ? (
           <FloatingToolbar.ActionButton
             title={
               status === 'running'
@@ -174,7 +189,7 @@ export const QuestionNode = memo(
             <MessageSquare size={14} />
           </FloatingToolbar.ActionButton>
         ),
-      [canOpenInChat, status, openInChat, openInCompose],
+      [isForkPending, canOpenInChat, status, openInChat, openInCompose],
     );
 
     const isDoneUnviewed = status === 'done' && !viewed;
@@ -210,9 +225,9 @@ export const QuestionNode = memo(
         >
           {status !== 'idle' && (
             <StatusBadge
-              status={status}
+              status={isForkPending ? 'running' : status}
               offset={{ top: -22, left: -2 }}
-              shake={status === 'error'}
+              shake={!isForkPending && status === 'error'}
               className={isDoneUnviewed ? 'question-done-pill' : undefined}
               tooltip={
                 status === 'error' && data.errorMessage
