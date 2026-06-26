@@ -26,6 +26,7 @@ import {
   rebuildContextMessages,
   renderEnvelopeMessages,
 } from '../agent/context/chat-turn.js';
+import { dumpAssembledPrompt } from '../agent/context/debug-prompt.js';
 import { buildChatEnvelope } from '../agent/context/envelope.js';
 import { getLLMModel } from '../agent/llm.js';
 import {
@@ -859,6 +860,23 @@ const agentRoutes: FastifyPluginAsync = async (
     // appends from here on (assistant / tool / status rows) is the
     // transcript we persist alongside the envelope.
     const transcriptStart = context.messages.length;
+
+    // Optional developer aid: when HUABU_DEBUG_PROMPT is set, dump the
+    // fully-assembled prompt (system prompt + every message) to a
+    // per-thread, turn-separated log file. No-op otherwise; never throws.
+    dumpAssembledPrompt({
+      systemPrompt: context.systemPrompt ?? '',
+      messages: context.messages,
+      newMessageCount: userMessages.length,
+      turnNumber: priorTurns.length + 1,
+      threadId: resolvedThreadId,
+      canvasId: canvasId ?? null,
+      mode:
+        agentBinding?.kind === 'external'
+          ? `external:${agentBinding.alias}`
+          : mode,
+      logger: request.log,
+    });
 
     // SSE streaming
     reply.hijack();

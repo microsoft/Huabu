@@ -186,6 +186,19 @@ export function chatActiveTurnPath(canvasId: string, threadId: string): string {
   );
 }
 
+/**
+ * Human-readable debug dump of the assembled prompt sent to the agent,
+ * one block per turn with strong turn separators. Append-only, written
+ * only when the `HUABU_DEBUG_PROMPT` env flag is set. Never read by the
+ * app — purely a developer post-mortem aid. See `context/debug-prompt.ts`.
+ */
+export function chatPromptLogPath(canvasId: string, threadId: string): string {
+  return path.join(
+    chatDir(canvasId),
+    `${sanitizeId(threadId, 'threadId')}.prompt.log`,
+  );
+}
+
 export function intentPath(canvasId: string): string {
   return path.join(historyDir(canvasId), 'intent.json');
 }
