@@ -28,6 +28,11 @@ sequenceDiagram
     CLI->>Server: agentlet/hello { agentletId, agentletProfile }
     Server-->>CLI: { agentletId, status: "registered" }
     Note over Server: Close if no agentlet/hello within 5s
+    opt Resource (tool) distribution — host onConnection
+        Note over Server: Host pushes Reachback tool(s) on connect
+        Server->>CLI: server/sendResource { destination, content }
+        Note over CLI: Save to ${AGENTLET_REACHBACK_DIR} (see §9)
+    end
 
     rect rgb(245, 245, 255)
     Note over CLI: Phase 2 — Spawn Request (one of two sources)
