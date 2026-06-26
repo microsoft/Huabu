@@ -173,7 +173,7 @@ Agent stdout → Agentlet → Server:  ACP responses (results, notifications, st
 
 ## 4. Control Messages
 
-Control methods follow an **entity/verb** naming convention where the entity is the sender or subject: `agentlet/*` for agentlet adapter messages, `agent/*` for agent-session messages, `server/*` for server-originated messages, and `host/*` on the host channel. Lifecycle notifications use `agent/exited`, `agent/restarted`, `agent/goodbye`, `agent/overflow`, and `agent/suspended`. Server control uses `server/replay`, `server/ping`, `server/shutdown`, `server/spawn`, `server/stop`, and `server/list`.
+Control methods follow an **entity/verb** naming convention where the entity is the sender or subject: `agentlet/*` for agentlet adapter messages, `agent/*` for agent-session messages, `server/*` for server-originated messages, and `host/*` on the host channel. Lifecycle notifications use `agent/exited`, `agent/restarted`, `agent/goodbye`, `agent/overflow`, and `agent/suspended`. Server control uses `server/replay`, `server/ping`, `server/shutdown`, `server/spawn`, `server/stop`, `server/list`, and `server/sendResource` (file/tool distribution — see [§9](#resource-distribution)).
 
 - `agentlet/hello`, `agent/hello`, `server/spawn`, `server/stop`, and `server/list` are **requests** (have `id`, expect a response). All others are **notifications** (no `id`, no response expected).
 - Heartbeat: The agent-side adapter sends WebSocket-level pings at `--heartbeat` interval. `server/ping` / `agent/pong` are application-level keepalives initiated by the server for connection liveness detection.
@@ -227,7 +227,7 @@ The definitive type contract for the protocol lives in `@agentlet/protocol` (sou
 | **Agentlet Handshake** — `AgentletProfile`, `AgentletHelloParams`, `AgentletHelloResult` | [`packages/protocol/src/messages.ts`](../packages/protocol/src/messages.ts) |
 | **Agent Handshake** — `AgentHelloParams`, `AgentHelloResult`, `AgentHelloError` | [`packages/protocol/src/messages.ts`](../packages/protocol/src/messages.ts) |
 | **Agent Notifications** — `AgentExitedParams`, `AgentRestartedParams`, `AgentGoodbyeParams`, `AgentOverflowParams`, `AgentSuspendedParams`, `AgentPongParams` | [`packages/protocol/src/messages.ts`](../packages/protocol/src/messages.ts) |
-| **Server Control** — `ServerReplayParams`, `ServerPingParams`, `ServerShutdownParams`, `SpawnParams`, `SpawnResult`, `StopParams`, `StopResult`, `ListParams`, `ListResult` | [`packages/protocol/src/messages.ts`](../packages/protocol/src/messages.ts) |
+| **Server Control** — `ServerReplayParams`, `ServerPingParams`, `ServerShutdownParams`, `SpawnParams`, `SpawnResult`, `StopParams`, `StopResult`, `ListParams`, `ListResult`, `SendResourceParams` | [`packages/protocol/src/messages.ts`](../packages/protocol/src/messages.ts) |
 | **Lifecycle Events** — `LifecycleEvent` | [`packages/protocol/src/messages.ts`](../packages/protocol/src/messages.ts) |
 | **Server Configuration** — `AgentletServerOptions`, `AuthResult` | [`packages/protocol/src/gateway-types.ts`](../packages/protocol/src/gateway-types.ts) |
 | **AgentConnection** — the interface host apps interact with | [`packages/protocol/src/gateway-types.ts`](../packages/protocol/src/gateway-types.ts) |
@@ -313,3 +313,83 @@ This enables:
 - **Ecosystem reuse** — Any application (IDE backend, AI canvas, CI orchestrator, research platform) can integrate by implementing the server side of this contract.
 - **User trust** — Agentlet is open-source and auditable. Users can verify it doesn't exfiltrate code (it's ~500 lines of relay logic with no network calls beyond the configured server).
 - **Minimal install** — Users install one small tool. No SDK, no heavy dependencies.
+
+<a id="resource-distribution"></a>
+
+## 9. Resource Distribution
+
+The server can push files to a connected agentlet daemon over the control
+channel using the `server/sendResource` notification. The primary use is **tool
+distribution for [Agent Reachback](agent-reachback.md)** — delivering the
+host-provided tool script(s) that spawned agents invoke to reach back into the
+host app — but the mechanism is general-purpose and can place any file.
+
+### When it happens
+
+Resource pushes ride the **agentlet control channel** (the `role=agentlet`
+connection), not a per-session channel. The host app (via `@agentlet/server`)
+should push on the daemon's `onConnection` and re-push on `onReconnection`:
+
+- **On connect** — the daemon's cache directory may be empty (fresh start), so
+  the tool must be delivered before any agent is spawned.
+- **On reconnect** — the cache may have been cleared while the daemon was
+  suspended (idle auto-suspend → resume), so the resource is re-pushed.
+
+Delivery is **idempotent** — a plain overwrite at a fixed path — so re-pushing
+is always safe and keeps the delivered script version in lock-step with the
+running server.
+
+```mermaid
+sequenceDiagram
+    participant Host as Host App
+    participant Server as @agentlet/server
+    participant Daemon as agentlet (control conn)
+
+    Daemon->>Server: agentlet/hello { agentletId, agentletProfile }
+    Server-->>Daemon: { status: "registered" }
+    Note over Server: onConnection fires
+    Host->>Server: sendResource(agentletId, { destination, content })
+    Server->>Daemon: server/sendResource { destination, content }
+    Note over Daemon: resolve ${ENV_VAR} → mkdir -p → write file
+    Daemon-->>Daemon: log resource_saved
+    Note over Daemon,Server: (on later reconnect, server re-pushes)
+```
+
+### Message
+
+`server/sendResource` is a **notification** (no `id`, no response expected) sent
+from server to agentlet on the control connection:
+
+```jsonc
+// Server → Agentlet (control channel)
+{
+  "jsonrpc": "2.0",
+  "method": "server/sendResource",
+  "params": {
+    // Destination path; supports ${ENV_VAR} interpolation
+    "destination": "${AGENTLET_REACHBACK_DIR}/my-reachback-tool.mjs",
+    // File content (text)
+    "content": "#!/usr/bin/env node\n…"
+  }
+}
+```
+
+### Daemon behavior
+
+1. **Interpolate** `${ENV_VAR}` references in `destination` against the daemon's
+   `envRegistry` (the same well-known variables injected into spawned agents,
+   e.g. `AGENTLET_REACHBACK_DIR`). An unknown variable is an error and the write
+   is skipped.
+2. **Create** parent directories (`mkdir -p`) for the resolved path.
+3. **Write** `content` to the resolved absolute path (UTF-8), overwriting any
+   existing file.
+4. **Log** `resource_saved` on success, or `resource_save_failed` (non-fatal) on
+   error.
+
+Because destinations are resolved against the env registry and that same
+registry seeds every spawned agent's environment, a pushed tool is automatically
+discoverable to agents via the corresponding `${ENV_VAR}` path — no absolute
+paths cross the wire. See the [Agent Reachback Interface](agent-reachback.md)
+for how this composes into the full tool-distribution + environment contract,
+and [`SendResourceParams`](../packages/protocol/src/messages.ts) for the type.
+
