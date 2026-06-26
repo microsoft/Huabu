@@ -59,6 +59,7 @@ import { useGesturePreviewStore } from '../../../store/gesturePreviewStore.ts';
 import { usePreviewStore } from '../../../store/previewStore.ts';
 import { useToolStore } from '../../../store/toolStore.ts';
 import {
+  canMoveSedimentPayload,
   canReadSedimentPayload,
   getSedimentPayload,
 } from '../../../utils/io/dragDrop.ts';
@@ -659,10 +660,16 @@ export const Canvas: React.FC<CanvasProps> = ({
         if (!isSediment && !hasFiles && !hasUri && !hasText) return;
         e.preventDefault();
         e.stopPropagation();
-        // Shift on an internal Sediment drag means MOVE (source will be
-        // emptied of the dragged range); without Shift it's a COPY.
-        // External drops (files, URLs) are always copies.
-        e.dataTransfer.dropEffect = isSediment && e.shiftKey ? 'move' : 'copy';
+        // Default drag of an internal note that knows how to MOVE
+        // its source range is treated as MOVE (matches Windows /
+        // macOS file-manager conventions). Holding Ctrl or ⌘
+        // downgrades it to a COPY. Everything else — chat
+        // excerpts, web/image cards, external file drops — stays
+        // a COPY because no source mutation is possible.
+        const isCopyModifier = e.ctrlKey || e.metaKey;
+        const canMove = isSediment && canMoveSedimentPayload(e.dataTransfer);
+        e.dataTransfer.dropEffect =
+          canMove && !isCopyModifier ? 'move' : 'copy';
       }}
       onDrop={(e) => {
         e.preventDefault();
@@ -716,15 +723,18 @@ export const Canvas: React.FC<CanvasProps> = ({
               },
             };
 
-            // Shift = MOVE (source loses the dragged range); plain
-            // drag = COPY. MOVE additionally needs a source node id
-            // and a pre-computed post-MOVE snapshot, both absent when
-            // dragging from non-editable surfaces (AI chat cards).
+            // Default = MOVE (source loses the dragged range);
+            // Ctrl / ⌘ downgrades to COPY. MOVE additionally
+            // requires a source node id and a pre-computed post-MOVE
+            // snapshot, both absent when dragging from non-editable
+            // surfaces (AI chat cards) — those always fall back to
+            // COPY regardless of modifier state.
             const { sourceNodeId, sourceContentAfterMove } = payload.data;
-            const isMove =
-              e.shiftKey &&
+            const canMove =
               sourceNodeId !== undefined &&
               sourceContentAfterMove !== undefined;
+            const isCopyModifier = e.ctrlKey || e.metaKey;
+            const isMove = canMove && !isCopyModifier;
 
             if (isMove) {
               moveNoteExcerpt({

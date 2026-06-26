@@ -19,6 +19,22 @@
 - 缓存目录默认值从 `node_modules/.cache/agentlet/sideband` 改为 `.../reachback`。
 - agent system prompt 中的 `## Canvas Tools (Sideband)` 段改名为 `## Canvas Tools (Reachback)`。
 - 本文件中 2026-06-26 之前的历史条目保持原样（作为当时的记录），不做回溯改名。
+## 2026-06-26 · 拖拽语义：Note 块 → 画布 默认改为「移动」
+
+**What Changed**
+
+把 Note 编辑器里的某个块拖到画布时，默认行为从「复制」改为「移动」，与 Windows 资源管理器 / macOS Finder 的文件拖拽语义保持一致：
+
+1. **直接拖拽 = 移动**：源 Note 删除该块，画布上新建一个内容相同的 Note。
+2. **`Ctrl/Cmd` + 拖拽 = 复制**：源 Note 保留原文，画布上新建一个 Note。
+3. **光标反馈**：浏览器原生 `dropEffect` 会随修饰键切换，复制时显示 `+` 号，移动时是普通箭头，所见即所得。
+4. **来源无法回写时强制复制**：从 AI 对话卡片 / Web / Image 卡片 / 外部文件 / URL 拖出来的内容没有源块概念，按不按 `Ctrl/Cmd` 都是复制。
+
+**Notes**
+
+- 之前是「默认复制，Shift 强制移动」。Shift 这个键在 DnD 里几乎从不代表 copy/move 切换（一般用于多选 / 区间），用 `Ctrl/Cmd` 更贴近用户预期，也把 Shift 释放出来留给将来扩展。
+- 实现上新增了 `application/x-sediment-dnd-movable` 哨兵 MIME：浏览器在 `dragover` 阶段会屏蔽 `getData(...)` 的 JSON 读取，所以无法从 payload 判断源是否可移动；改用 MIME 类型列表（在 `dragover` 时可见）来透传"我支持移动"这个标志，决定光标该显示 `+` 还是普通箭头。
+- 改动文件：[dragDrop.ts](apps/web/src/utils/io/dragDrop.ts)、[Canvas.tsx](apps/web/src/components/Panels/Canvas/Canvas.tsx)、[03-canvas-basics.md](docs/user-guide/03-canvas-basics.md)、[08-shortcuts.md](docs/user-guide/08-shortcuts.md)、[Shortcuts.tsx](apps/web/src/docs/sections/reference/Shortcuts.tsx)。
 
 ## 2026-06-24 · 外部 Agent：prompt 卡片不再被「连接 agent」阻塞，并展示完整 system 段
 
