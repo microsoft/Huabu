@@ -17,6 +17,7 @@ import {
   agentCanvasIdQuerySchema,
   agentRequestSchema,
   createId,
+  forkThreadBodySchema,
   variantForInternalTool,
 } from '@sediment/shared';
 
@@ -31,7 +32,10 @@ import { getLLMModel } from '../agent/llm.js';
 import { readWorkspaceMemory } from '../agent/memory/index.js';
 import { buildAgentNodeRef } from '../agent/node-ref.js';
 import { isUserInvokableSkill } from '../agent/skills.route.js';
-import { readChatParts } from '../agent/store/chat-parts-store.js';
+import {
+  readChatParts,
+  writeChatParts,
+} from '../agent/store/chat-parts-store.js';
 import { loadContext, saveContext } from '../agent/store/chat-store.js';
 import { snapshotNodesToArtifacts } from '../agent/tools/handlers/snapshot-node.js';
 import {
@@ -59,6 +63,8 @@ import type {
   ChatHistoryResponse,
   ContextTokensResponse,
   ExternalAgentPrompt,
+  ForkThreadBody,
+  ForkThreadResponse,
   ImageGenerationData,
   SnapshotNodesData,
   StopThreadResponse,
@@ -1048,6 +1054,66 @@ const agentRoutes: FastifyPluginAsync = async (
     buildHistoryItems(context, sidecar, messages);
 
     return reply.send({ threadId, messages });
+  });
+
+  /**
+   * POST /agent/history/:threadId/fork
+   * Copy a thread's persisted conversation onto a fresh thread id so a
+   * duplicated question node owns an independent continuation that still
+   * starts from the same history. Built-in agent only — the caller is
+   * responsible for not forking external (ACP) threads, whose live
+   * session state lives inside the agent process and cannot be copied.
+   */
+  fastify.post<{
+    Params: { threadId: string };
+    Querystring: AgentCanvasIdQuery;
+    Body: ForkThreadBody;
+    Reply: ApiResult<ForkThreadResponse>;
+  }>('/history/:threadId/fork', async function (request, reply) {
+    const { threadId } = request.params;
+    const parsedQuery = agentCanvasIdQuerySchema.safeParse(request.query);
+    if (!parsedQuery.success) {
+      return reply.code(400).send({
+        message: parsedQuery.error.issues[0]?.message ?? 'Invalid query',
+      });
+    }
+    const parsedBody = forkThreadBodySchema.safeParse(request.body);
+    if (!parsedBody.success) {
+      return reply.code(400).send({
+        message: parsedBody.error.issues[0]?.message ?? 'Invalid body',
+      });
+    }
+
+    const { canvasId } = parsedQuery.data;
+    const { targetThreadId, targetCanvasId } = parsedBody.data;
+    const dstCanvasId = targetCanvasId ?? canvasId;
+
+    if (!threadId || threadId.trim().length === 0) {
+      return reply.code(400).send({ message: 'threadId is required' });
+    }
+    if (!canvasId || !dstCanvasId) {
+      return reply.code(400).send({ message: 'canvasId is required' });
+    }
+    if (targetThreadId === threadId && dstCanvasId === canvasId) {
+      return reply
+        .code(400)
+        .send({ message: 'target thread must differ from source' });
+    }
+
+    const srcContext = loadContext(threadId, canvasId);
+    if (!srcContext) {
+      // Source has no persisted history — nothing to fork. The copy
+      // simply starts as a fresh (empty) thread.
+      return reply.send({ threadId: targetThreadId, forked: false });
+    }
+
+    getCanvasStore(dstCanvasId).writeChat(targetThreadId, srcContext);
+    const sidecar = readChatParts(threadId, canvasId);
+    if (sidecar) {
+      writeChatParts(targetThreadId, sidecar, dstCanvasId);
+    }
+
+    return reply.send({ threadId: targetThreadId, forked: true });
   });
 
   /**

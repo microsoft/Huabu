@@ -28,6 +28,7 @@ import {
   type AcpConnectionStatus,
 } from './AcpConnectionBadge';
 import { AcpSessionSelectors } from './AcpSessionSelectors';
+import { AgentSelector, type AgentChoice } from './AgentSelector';
 import { ChatInput } from './ChatInput';
 import { NewChatMenu, type NewChatChoice } from './NewChatMenu';
 import { parseSlashInvocations } from './parseSlashInvocations';
@@ -71,6 +72,11 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   // for legacy nodes that pre-date the `@` picker.
   const viewingQuestionThread = useChatStore((s) => s.viewingQuestionThread);
   const viewingQuestionNodeId = viewingQuestionThread?.nodeId;
+  // Compose = the initial authoring of a freshly-created question node:
+  // the binding is still mutable and the mode follows the user's inline
+  // pick (`lastAction`) rather than the node's not-yet-written
+  // `agentMode`. Replay (already-run node) keeps deriving from the node.
+  const isComposingQuestion = viewingQuestionThread?.compose === true;
   const questionReplayMode = useCanvasStore((s) => {
     if (!viewingQuestionNodeId) return undefined;
     const node = s.nodes.find((n) => n.id === viewingQuestionNodeId);
@@ -82,9 +88,22 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     return d.agentBinding?.kind === 'external' ? 'ask' : (d.agentMode ?? 'ask');
   });
 
-  const mode: AgentMode = viewingQuestionThread
-    ? (questionReplayMode ?? 'ask')
-    : lastAction;
+  // The viewing question node's authored label, used as the panel title
+  // when replaying so the header reflects *which* question is open rather
+  // than a generic "Question Replay". Empty while composing a brand-new
+  // node (no content authored yet) — the title falls back accordingly.
+  const viewingQuestionLabel = useCanvasStore((s) => {
+    if (!viewingQuestionNodeId) return undefined;
+    const node = s.nodes.find((n) => n.id === viewingQuestionNodeId);
+    const d = node?.data as { label?: string } | undefined;
+    const label = typeof d?.label === 'string' ? d.label.trim() : '';
+    return label || undefined;
+  });
+
+  const mode: AgentMode =
+    viewingQuestionThread && !isComposingQuestion
+      ? (questionReplayMode ?? 'ask')
+      : lastAction;
 
   // Agent stream hook — manages streaming and loading state
   const { isLoading, setIsLoading, startStream, stopStream } = useAgentStream();
@@ -417,7 +436,12 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
 
   const panelTitle = useMemo(() => {
     if (viewingSketchCluster) return 'Sketch Recognition';
-    if (viewingQuestionThread) return 'Question Replay';
+    if (viewingQuestionThread) {
+      // Composing a fresh node: it has no real label yet, so show a
+      // neutral title instead of the auto-generated "Question N".
+      if (isComposingQuestion) return 'New question';
+      return viewingQuestionLabel ?? 'Question';
+    }
     // When the thread is delegated to an external ACP agent, the
     // built-in model name is irrelevant — surface the agent alias
     // instead so the header reflects who's actually answering.
@@ -429,6 +453,8 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     activeModelName,
     agentBinding,
     viewingQuestionThread,
+    isComposingQuestion,
+    viewingQuestionLabel,
     viewingSketchCluster,
   ]);
 
@@ -559,6 +585,23 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     [isLoading, canvasId, clearMessages],
   );
 
+  // Inline agent selector (left of the chat input toolbar). The binding
+  // is mutable only while the thread has no user message yet — once a
+  // turn is sent, 1-thread-1-binding locks it and the selector renders
+  // read-only. Picking an agent rebinds the *current* (empty) thread in
+  // place; it never mints a new thread (that is `NewChatMenu`'s job).
+  const threadHasUserMessage = messages.some((m) => m.role === 'user');
+  const agentSelectorEditable =
+    !viewingSketchCluster && !threadHasUserMessage && !isLoading;
+  const handleSelectAgent = useCallback(
+    (choice: AgentChoice) => {
+      if (isLoading) return;
+      setAgentBinding(choice.binding, canvasId || undefined);
+      setLastAction(choice.mode);
+    },
+    [isLoading, setAgentBinding, setLastAction, canvasId],
+  );
+
   const canSave =
     !viewingQuestionThread &&
     !viewingSketchCluster &&
@@ -605,7 +648,23 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     <SidebarPanel
       title={panelTitle}
       tabs={
-        <span className="flex min-w-0 flex-1 items-center gap-2">
+        <span className="flex min-w-0 flex-1 items-center gap-1">
+          {(viewingSketchCluster || viewingQuestionThread) && (
+            <Button
+              variant="ghost"
+              iconOnly
+              onClick={
+                viewingSketchCluster
+                  ? closeSketchCluster
+                  : handleCloseQuestionThread
+              }
+              title="Back to chat"
+              tooltipPlacement="bottom"
+              className="-ml-1 shrink-0"
+            >
+              <ArrowLeft size={16} />
+            </Button>
+          )}
           <span className="min-w-0 truncate" title={panelTitle}>
             {panelTitle}
           </span>
@@ -623,29 +682,9 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       onToggle={onToggle}
       iconCollapsed={<PanelRightOpen size={16} />}
       iconExpanded={<ListIndentIncrease size={16} />}
-      className="border-l border-[#eeece7]"
+      className="border-edge-default border-l"
       tools={
-        viewingSketchCluster ? (
-          <Button
-            variant="ghost"
-            iconOnly
-            onClick={closeSketchCluster}
-            title="Back to chat"
-            tooltipPlacement="bottom"
-          >
-            <ArrowLeft />
-          </Button>
-        ) : viewingQuestionThread ? (
-          <Button
-            variant="ghost"
-            iconOnly
-            onClick={handleCloseQuestionThread}
-            title="Back to chat"
-            tooltipPlacement="bottom"
-          >
-            <ArrowLeft />
-          </Button>
-        ) : (
+        viewingSketchCluster || viewingQuestionThread ? null : (
           <NewChatMenu
             currentMode={mode}
             currentBinding={agentBinding}
@@ -680,7 +719,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
 
         {/* Input is hidden in sketch inspector mode — it's a read-only view. */}
         {!viewingSketchCluster && (
-          <div className="px-3 pb-3">
+          <div className="px-3 pb-2">
             <ChatInput
               value={input}
               onChange={setInput}
@@ -691,6 +730,17 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
               slashCommands={slashCommands}
               slashLoading={slashLoading}
               onSlashMenuIntent={refreshSlashCommands}
+              agentSelectorSlot={
+                <AgentSelector
+                  currentBinding={agentBinding}
+                  currentMode={mode}
+                  profiles={acpProfiles}
+                  editable={agentSelectorEditable}
+                  onSelect={handleSelectAgent}
+                  onRefreshProfiles={refreshAcpProfiles}
+                  disabled={!isHistoryLoaded}
+                />
+              }
               acpSelectorsSlot={
                 agentBinding.kind === 'external' ? (
                   <AcpSessionSelectors

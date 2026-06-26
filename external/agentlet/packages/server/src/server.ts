@@ -21,6 +21,15 @@ import { DataStore, tokenSignature } from './data-store.js'
 import { EventStore } from './event-store.js'
 import { JsonlStorage } from './jsonl-storage.js'
 
+/**
+ * Timeout for a server→agentlet control request (server/spawn, server/stop,
+ * server/list). Spawn dominates: a cold-start of some external CLIs (e.g.
+ * GitHub Copilot CLI) spends 20–30s in the ACP `initialize` + `session/new`
+ * handshake before returning, so a tighter budget rejected spawns that
+ * would have succeeded a fraction of a second later.
+ */
+const AGENTLET_REQUEST_TIMEOUT_MS = 60_000
+
 export class AgentletServer {
   private readonly options: Required<Pick<AgentletServerOptions, 'authenticate'>> & AgentletServerOptions
   private readonly connections = new Map<string, AgentConnectionImpl>()
@@ -459,7 +468,7 @@ export class AgentletServer {
           this.pendingRequests.delete(requestKey)
           reject(new Error(`Agentlet request timed out: ${method}`))
         }
-      }, 30_000)
+      }, AGENTLET_REQUEST_TIMEOUT_MS)
     })
   }
 

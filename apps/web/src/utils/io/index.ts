@@ -2,6 +2,7 @@ export { copyToClipboard } from './clipboard';
 
 export {
   SEDIMENT_DND_MIME,
+  SEDIMENT_DND_MOVABLE_MIME,
   type WebDragPayload,
   type NoteDragPayload,
   type ImageDragPayload,
@@ -11,6 +12,7 @@ export {
   createDragId,
   setDragPayload,
   canReadSedimentPayload,
+  canMoveSedimentPayload,
   getSedimentPayload,
 } from './dragDrop';
 

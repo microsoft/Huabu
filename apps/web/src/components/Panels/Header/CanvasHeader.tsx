@@ -60,7 +60,7 @@ export const CanvasHeader: React.FC<CanvasHeaderProps> = ({
         // the canvas.
         isCollapsed
           ? 'shadow-bottom h-10 max-w-[18rem] rounded-lg border-0'
-          : 'h-12 border-r border-b border-[#eeece7]',
+          : 'border-edge-default h-12 border-r border-b',
       )}
     >
       <Link to="/" aria-label="Back to home" className="shrink-0">

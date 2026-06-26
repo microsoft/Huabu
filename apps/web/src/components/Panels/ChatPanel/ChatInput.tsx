@@ -1,9 +1,16 @@
 import { ArrowUp, Square, X } from 'lucide-react';
-import { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 
 import { resolveArtifactUrl, uploadImage, uploadPdf } from '@/api/artifact';
 import useCanvasStore from '@/store/canvasStore';
 import { selectCurrentMessages, useChatStore } from '@/store/chatStore';
+import { usePanelStore } from '@/store/panelStore';
 
 import { ContextUsageRing } from './ContextUsageRing';
 import { SourceCount } from './SelectedNodeRefs';
@@ -59,6 +66,13 @@ interface ChatInputProps {
    */
   acpSelectorsSlot?: React.ReactNode;
   /**
+   * Slot rendered at the very left of the toolbar, before
+   * `acpSelectorsSlot`. ChatPanel mounts the inline `AgentSelector`
+   * here so picking / displaying the thread's agent sits right under
+   * the text the user is typing.
+   */
+  agentSelectorSlot?: React.ReactNode;
+  /**
    * Authoritative context usage forwarded straight to
    * `ContextUsageRing`. Set by ChatPanel for ACP-bound threads so the
    * ring reflects the agent's own token budget instead of the
@@ -81,6 +95,7 @@ export const ChatInput = ({
   slashLoading = false,
   onSlashMenuIntent,
   acpSelectorsSlot,
+  agentSelectorSlot,
   contextUsageOverride,
   disabled = false,
   placeholder = 'Asking anything here...',
@@ -99,6 +114,25 @@ export const ChatInput = ({
   );
   const [isDragOver, setIsDragOver] = useState(false);
   const canvasId = useCanvasStore((s) => s.canvasId);
+
+  // Focus the textarea whenever a surface requests it (e.g. opening a
+  // question node into compose mode). Keyed on a monotonic nonce so
+  // repeated requests re-fire even without an intervening blur.
+  const focusChatInputNonce = usePanelStore((s) => s.focusChatInputNonce);
+  useEffect(() => {
+    if (focusChatInputNonce === 0) return;
+    // Defer to the next frame so the panel has finished expanding and the
+    // textarea is mounted + interactive before we move focus to it.
+    const raf = requestAnimationFrame(() => {
+      const ta = textareaRef.current;
+      if (!ta) return;
+      ta.focus();
+      const len = ta.value.length;
+      ta.selectionStart = len;
+      ta.selectionEnd = len;
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [focusChatInputNonce]);
 
   // ── Slash-command typeahead ──────────────────────────────────────
   //
@@ -548,17 +582,13 @@ export const ChatInput = ({
             )}
           </div>
 
-          <div className="mt-2 flex items-center justify-between gap-3">
+          {/* Send row (inside the input box): ACP session selectors
+              (model / mode / config) on the left, selected-node sources +
+              the send / stop button on the right. */}
+          <div className="flex items-center justify-between gap-3">
             <div className="flex min-w-0 flex-1 items-center overflow-hidden">
               {acpSelectorsSlot}
-              <span className="ml-2 inline-flex shrink-0 items-center">
-                <ContextUsageRing
-                  isStreaming={isStreaming}
-                  usageOverride={contextUsageOverride}
-                />
-              </span>
             </div>
-
             <div className="flex shrink-0 items-center gap-2">
               <SourceCount />
 
@@ -591,6 +621,21 @@ export const ChatInput = ({
               )}
             </div>
           </div>
+        </div>
+
+        {/* Agent + context-usage row — rendered OUTSIDE the input box, on
+            its own line below it: the inline agent selector on the left,
+            the context-usage ring on the right. */}
+        <div className="mt-1 flex items-center justify-between gap-3 px-1">
+          <div className="flex min-w-0 flex-1 items-center overflow-hidden">
+            {agentSelectorSlot}
+          </div>
+          <span className="inline-flex shrink-0 items-center">
+            <ContextUsageRing
+              isStreaming={isStreaming}
+              usageOverride={contextUsageOverride}
+            />
+          </span>
         </div>
       </form>
     </div>

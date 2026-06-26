@@ -36,12 +36,6 @@ const createQuestion: CommandDefinition<Cmd> = {
 
     const size = cmd.size ?? getNodeDefaultSize(nodeType);
 
-    // When content is provided, auto-schedule execution after 10s.
-    // This matches the behavior of manually editing a question node and
-    // blurring — useQuestionRunner watches for status==='pending' + runAt.
-    const hasContent = cmd.content.trim().length > 0;
-    const AUTO_RUN_DELAY_S = 10;
-
     const node: Node = {
       id: nodeId,
       type: nodeType,
@@ -50,8 +44,9 @@ const createQuestion: CommandDefinition<Cmd> = {
         type: nodeType,
         label,
         content: cmd.content,
-        status: hasContent ? 'pending' : 'idle',
-        ...(hasContent ? { runAt: Date.now() + AUTO_RUN_DELAY_S * 1000 } : {}),
+        // Created idle: the user opens the node in the chat panel to
+        // engage with it. There is no headless auto-run anymore.
+        status: 'idle',
       },
       ...(size
         ? {

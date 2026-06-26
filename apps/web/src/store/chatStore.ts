@@ -62,9 +62,20 @@ export interface ChatState {
 
   /**
    * When set, the chat panel is viewing a question node's conversation thread
-   * in read/replay mode instead of the normal canvas chat.
+   * instead of the normal canvas chat.
+   *
+   * `compose: true` marks the *initial* composition of a freshly-created
+   * question node: the thread is still empty, the agent binding is mutable
+   * (the inline agent selector is editable), and the first message the user
+   * sends authors the node's `content` + locks its binding. Without the flag
+   * the panel is in replay mode for an already-run node (binding locked,
+   * mode derived from the node).
    */
-  viewingQuestionThread: { nodeId: string; threadId: string } | null;
+  viewingQuestionThread: {
+    nodeId: string;
+    threadId: string;
+    compose?: boolean;
+  } | null;
 
   questionReplayByCanvas: Record<
     string,
@@ -205,6 +216,24 @@ export interface ChatState {
     nodeId: string,
     threadId: string,
     binding?: AgentBinding,
+    canvasId?: string,
+  ) => void;
+  /**
+   * Open a freshly-created question node for *composition*: switch the
+   * panel to the node's (empty) thread, focus the input, and leave the
+   * agent binding mutable so the inline selector can change it before the
+   * first message is sent. Unlike `openQuestionThread` this does not enter
+   * read-only replay — the user types the question directly in the chat
+   * input. The first send (handled in `useAgentStream.startStream`) authors
+   * the node's `content` and locks its binding.
+   *
+   * Inherits the canvas's last-used binding as the default so the common
+   * case needs no agent pick. Stashes the canvas thread / binding /
+   * lastAction so leaving compose restores the plain canvas chat.
+   */
+  openQuestionCompose: (
+    nodeId: string,
+    threadId: string,
     canvasId?: string,
   ) => void;
   /**
@@ -560,6 +589,57 @@ export const useChatStore = create<ChatState>()(
                 savedCanvasLastAction: persistedSavedLastAction,
               },
             },
+          }),
+        });
+        get().evictInactiveThreads();
+      },
+
+      openQuestionCompose: (nodeId, threadId, canvasId) => {
+        const {
+          threadId: currentThreadId,
+          agentBinding: currentBinding,
+          lastAction: currentLastAction,
+          viewingQuestionThread: currentViewing,
+          messagesByThread,
+          historyLoadedThreads,
+          bindingMap,
+        } = get();
+
+        // Already composing/viewing this exact thread — nothing to do.
+        if (currentViewing?.threadId === threadId) return;
+
+        // Default the new node to the canvas's last-used agent so the
+        // common case (one agent per canvas) needs no explicit pick.
+        const initialBinding: AgentBinding = canvasId
+          ? (bindingMap[canvasId] ?? DEFAULT_BINDING)
+          : DEFAULT_BINDING;
+
+        // Seed an empty message list for the node's thread and mark it
+        // history-loaded so `useChatHistory` doesn't round-trip for a
+        // thread that has never been sent.
+        const nextLoaded = new Set(historyLoadedThreads);
+        nextLoaded.add(threadId);
+
+        // Stash the canvas chat state so leaving compose restores it —
+        // but only when not already inside a question view, so the saved
+        // slots always point at the user's real canvas chat.
+        const isAlreadyViewing = currentViewing !== null;
+
+        set({
+          viewingQuestionThread: { nodeId, threadId, compose: true },
+          threadId,
+          agentBinding: initialBinding,
+          messagesByThread: messagesByThread[threadId]
+            ? messagesByThread
+            : { ...messagesByThread, [threadId]: [] },
+          historyLoadedThreads: nextLoaded,
+          pendingAttachments: [],
+          selectionAttachment: null,
+          viewingSketchCluster: null,
+          ...(!isAlreadyViewing && {
+            _savedCanvasThreadId: currentThreadId,
+            _savedCanvasBinding: currentBinding,
+            _savedCanvasLastAction: currentLastAction,
           }),
         });
         get().evictInactiveThreads();

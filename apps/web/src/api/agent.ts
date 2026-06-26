@@ -20,6 +20,7 @@ import type {
   ChatAttachment,
   ChatHistoryResponse,
   ContextTokensResponse,
+  ForkThreadResponse,
   IntentCandidate,
   StopThreadResponse,
 } from '@sediment/shared';
@@ -101,6 +102,27 @@ export const agentApi = {
       }
       throw err;
     }
+  },
+
+  /**
+   * Fork a thread's conversation onto a new thread id so a duplicated
+   * question node continues independently from the same history. Returns
+   * the (server-confirmed) new thread id. Built-in agent only.
+   */
+  forkThread: async (
+    threadId: string,
+    targetThreadId: string,
+    canvasId?: string,
+    targetCanvasId?: string,
+  ): Promise<ForkThreadResponse> => {
+    return await apiFetch<ForkThreadResponse>(
+      routes.agentHistoryFork(threadId, canvasId),
+      {
+        method: 'POST',
+        json: { targetThreadId, targetCanvasId },
+        fallbackMessage: 'Failed to fork conversation',
+      },
+    );
   },
 
   /**

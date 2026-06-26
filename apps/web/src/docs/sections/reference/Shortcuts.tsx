@@ -145,6 +145,14 @@ export default function Shortcuts() {
         Shortcuts adapt to your platform automatically — the modifier shows up
         as <Kbd>Cmd</Kbd> on macOS and <Kbd>Ctrl</Kbd> on Windows / Linux.
       </Callout>
+
+      <Callout tone="info">
+        On the <strong>Drag and drop</strong> row above: the cursor reflects the
+        active mode — a <strong>+</strong> badge means copy, no badge means
+        move. Drags that can&apos;t mutate their source (AI chat cards, web /
+        image cards, external files or URLs) always fall back to copy regardless
+        of the modifier.
+      </Callout>
     </PageLayout>
   );
 }

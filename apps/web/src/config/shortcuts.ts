@@ -60,6 +60,16 @@ export const keyboardShortcutSections: ShortcutSection[] = [
     ],
   },
   {
+    title: 'Drag and drop',
+    items: [
+      {
+        keys: 'Ctrl/Cmd (hold while dragging)',
+        description:
+          'Copy a Note block to the canvas instead of moving it (the default is move — the source loses the block)',
+      },
+    ],
+  },
+  {
     title: 'AI',
     items: [
       { keys: 'Ctrl/Cmd+I', description: 'Open intent recognition' },

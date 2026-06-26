@@ -33,6 +33,7 @@ import { Spline, ChevronDown, ChevronRight, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 
+import { focusNodesOnCanvas } from './focusNodesOnCanvas';
 import { getNodeIcon } from '../../../config/nodeIcons';
 import { scheduleScrollToMatch } from '../../../hooks/searchDom';
 import { useTextHighlight } from '../../../hooks/useTextHighlight';
@@ -208,11 +209,7 @@ export const CanvasSearchResults = (): JSX.Element => {
     (nodeId: string) => {
       selectNodes([nodeId], false);
       if (rfInstance) {
-        void rfInstance.fitView({
-          nodes: [{ id: nodeId }],
-          duration: 400,
-          maxZoom: 1,
-        });
+        focusNodesOnCanvas(rfInstance, [nodeId], 400);
       }
     },
     [selectNodes, rfInstance],
@@ -229,14 +226,11 @@ export const CanvasSearchResults = (): JSX.Element => {
     (group: NodeGroup) => {
       if (group.edgeEndpoints) {
         if (rfInstance) {
-          void rfInstance.fitView({
-            nodes: [
-              { id: group.edgeEndpoints.source },
-              { id: group.edgeEndpoints.target },
-            ],
-            duration: 400,
-            maxZoom: 1,
-          });
+          focusNodesOnCanvas(
+            rfInstance,
+            [group.edgeEndpoints.source, group.edgeEndpoints.target],
+            400,
+          );
         }
         return;
       }

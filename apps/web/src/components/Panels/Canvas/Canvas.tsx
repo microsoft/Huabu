@@ -18,6 +18,8 @@ import React, {
 } from 'react';
 import '@xyflow/react/dist/style.css';
 
+import { createId } from '@sediment/shared';
+
 import { resolveArtifactUrl } from '@/api/artifact';
 import { AudioNode } from '@/components/Nodes/audio/AudioNode';
 import { ImageNode } from '@/components/Nodes/image/ImageNode';
@@ -36,7 +38,6 @@ import { useCanvasGestures } from '@/hooks/useCanvasGestures';
 import { useCanvasLasso } from '@/hooks/useCanvasLasso';
 import { useFrameDragToCreate } from '@/hooks/useFrameDragToCreate';
 import { useIsNotMouse } from '@/hooks/useInputMode';
-import { useQuestionRunner } from '@/hooks/useQuestionRunner';
 import { useSketchHoverRouting } from '@/hooks/useSketchHoverRouting';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
@@ -55,10 +56,13 @@ import { SnapGuidesOverlay } from './SnapGuidesOverlay.tsx';
 import { StructuredDropOverlay } from './StructuredDropOverlay.tsx';
 import { GRID_SIZE, MAX_ZOOM, MIN_ZOOM } from '../../../config/canvas.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
+import { useChatStore } from '../../../store/chatStore.ts';
 import { useGesturePreviewStore } from '../../../store/gesturePreviewStore.ts';
+import { usePanelStore } from '../../../store/panelStore.ts';
 import { usePreviewStore } from '../../../store/previewStore.ts';
 import { useToolStore } from '../../../store/toolStore.ts';
 import {
+  canMoveSedimentPayload,
   canReadSedimentPayload,
   getSedimentPayload,
 } from '../../../utils/io/dragDrop.ts';
@@ -72,7 +76,7 @@ import { VideoNode } from '../../Nodes/video/VideoNode.tsx';
 import { WebNode } from '../../Nodes/web/WebNode.tsx';
 
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
-import type { CanvasViewport } from '@sediment/shared';
+import type { CanvasNodeId, CanvasViewport } from '@sediment/shared';
 import type { FrameFitResult } from '@sediment/shared/canvas-engine';
 
 const nodeTypes = {
@@ -302,9 +306,6 @@ export const Canvas: React.FC<CanvasProps> = ({
     selectNodes(nodes.filter((n) => n.selected).map((n) => n.id));
   }, [nodes, selectNodes, tool]);
 
-  // Run question nodes when their timers expire.
-  useQuestionRunner();
-
   // When a connection drag ends without landing on a handle, check if the
   // pointer is over a node element and create the connection anyway.
   // This makes connecting much easier on touch devices.
@@ -506,17 +507,38 @@ export const Canvas: React.FC<CanvasProps> = ({
           y: event.clientY,
         });
 
-        const data: Record<string, unknown> =
-          pendingNodeType === 'question'
-            ? {
-                content: '',
-                status: 'idle',
-                origin: { type: 'user-created' },
-              }
-            : {
-                content: '',
-                origin: { type: 'user-created' },
-              };
+        // Question nodes are born bound to a chat thread: mint the node
+        // id + thread id up front so we can drop the node AND jump
+        // straight into compose (open the panel, focus the input, pick
+        // the agent inline). Presetting `id` is supported by the
+        // ADD_NODES resolver and already used by paste.
+        if (pendingNodeType === 'question') {
+          const nodeId = createId('node') as CanvasNodeId;
+          const threadId = createId('thread');
+          addNode({
+            nodeType: 'question',
+            placementPoint: position,
+            id: nodeId,
+            data: {
+              content: '',
+              status: 'idle',
+              threadId,
+              origin: { type: 'user-created' },
+            },
+          });
+          setPendingNodeType(null);
+          useChatStore
+            .getState()
+            .openQuestionCompose(nodeId, threadId, canvasId || undefined);
+          usePanelStore.getState().requestOpenRightPanel();
+          usePanelStore.getState().requestFocusChatInput();
+          return;
+        }
+
+        const data: Record<string, unknown> = {
+          content: '',
+          origin: { type: 'user-created' },
+        };
 
         addNode({
           nodeType: pendingNodeType,
@@ -550,6 +572,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       setPendingNodeType,
       expandedNodeId,
       closeExpanded,
+      canvasId,
     ],
   );
 
@@ -659,10 +682,16 @@ export const Canvas: React.FC<CanvasProps> = ({
         if (!isSediment && !hasFiles && !hasUri && !hasText) return;
         e.preventDefault();
         e.stopPropagation();
-        // Shift on an internal Sediment drag means MOVE (source will be
-        // emptied of the dragged range); without Shift it's a COPY.
-        // External drops (files, URLs) are always copies.
-        e.dataTransfer.dropEffect = isSediment && e.shiftKey ? 'move' : 'copy';
+        // Default drag of an internal note that knows how to MOVE
+        // its source range is treated as MOVE (matches Windows /
+        // macOS file-manager conventions). Holding Ctrl or ⌘
+        // downgrades it to a COPY. Everything else — chat
+        // excerpts, web/image cards, external file drops — stays
+        // a COPY because no source mutation is possible.
+        const isCopyModifier = e.ctrlKey || e.metaKey;
+        const canMove = isSediment && canMoveSedimentPayload(e.dataTransfer);
+        e.dataTransfer.dropEffect =
+          canMove && !isCopyModifier ? 'move' : 'copy';
       }}
       onDrop={(e) => {
         e.preventDefault();
@@ -716,15 +745,18 @@ export const Canvas: React.FC<CanvasProps> = ({
               },
             };
 
-            // Shift = MOVE (source loses the dragged range); plain
-            // drag = COPY. MOVE additionally needs a source node id
-            // and a pre-computed post-MOVE snapshot, both absent when
-            // dragging from non-editable surfaces (AI chat cards).
+            // Default = MOVE (source loses the dragged range);
+            // Ctrl / ⌘ downgrades to COPY. MOVE additionally
+            // requires a source node id and a pre-computed post-MOVE
+            // snapshot, both absent when dragging from non-editable
+            // surfaces (AI chat cards) — those always fall back to
+            // COPY regardless of modifier state.
             const { sourceNodeId, sourceContentAfterMove } = payload.data;
-            const isMove =
-              e.shiftKey &&
+            const canMove =
               sourceNodeId !== undefined &&
               sourceContentAfterMove !== undefined;
+            const isCopyModifier = e.ctrlKey || e.metaKey;
+            const isMove = canMove && !isCopyModifier;
 
             if (isMove) {
               moveNoteExcerpt({
