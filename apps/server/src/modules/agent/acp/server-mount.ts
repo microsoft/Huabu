@@ -10,15 +10,15 @@ import { getDataDir } from '../../../data-dir.js';
 import type { AgentletServerOptions } from '@agentlet/protocol';
 import type { FastifyInstance } from 'fastify';
 
-// Resolve HST script path relative to this module
+// Resolve HRT script path relative to this module
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
-const HST_SCRIPT_PATH = join(
+const HRT_SCRIPT_PATH = join(
   __dirname,
   '..',
   '..',
   '..',
-  'sideband',
-  'huabu-sideband-tool.mjs',
+  'reachback',
+  'huabu-reachback-tool.mjs',
 );
 
 /**
@@ -80,9 +80,9 @@ export function mountAgentletServer(
         { sessionId: agent.sessionId, role: agent.role },
         '[acp] agent connected',
       );
-      // Push sideband tools to newly-connected agentlet daemons
+      // Push reachback tools to newly-connected agentlet daemons
       if (agent.role === 'agentlet') {
-        pushSidebandTools(agent.sessionId);
+        pushReachbackTools(agent.sessionId);
       }
     },
     onReconnection: (agent) => {
@@ -90,10 +90,10 @@ export function mountAgentletServer(
         { sessionId: agent.sessionId, role: agent.role },
         '[acp] agent reconnected',
       );
-      // Re-push sideband tools on resume — the daemon's cache dir may have
+      // Re-push reachback tools on resume — the daemon's cache dir may have
       // been cleared while it was suspended.
       if (agent.role === 'agentlet') {
-        pushSidebandTools(agent.sessionId);
+        pushReachbackTools(agent.sessionId);
       }
     },
     onDisconnection: (agent, reason) => {
@@ -104,19 +104,19 @@ export function mountAgentletServer(
     },
   });
 
-  // Push the HST script to an agentlet daemon over its control channel.
+  // Push the HRT script to an agentlet daemon over its control channel.
   // Called on both initial connect and resume (the daemon's cache dir may
   // have been cleared while suspended).
-  function pushSidebandTools(agentletSessionId: string): void {
+  function pushReachbackTools(agentletSessionId: string): void {
     try {
-      const content = readFileSync(HST_SCRIPT_PATH, 'utf8');
+      const content = readFileSync(HRT_SCRIPT_PATH, 'utf8');
       server.sendResource(agentletSessionId, {
-        destination: '${AGENTLET_SIDEBAND_DIR}/huabu-sideband-tool.mjs',
+        destination: '${AGENTLET_REACHBACK_DIR}/huabu-reachback-tool.mjs',
         content,
       });
-      app.log.info('[acp] sideband tools pushed to agentlet');
+      app.log.info('[acp] reachback tools pushed to agentlet');
     } catch (err) {
-      app.log.warn({ err }, '[acp] failed to push sideband tools');
+      app.log.warn({ err }, '[acp] failed to push reachback tools');
     }
   }
 

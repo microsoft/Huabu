@@ -1,4 +1,4 @@
-# Agent Sideband: External Agent Access to Huabu
+# Agent Reachback: External Agent Access to Huabu
 
 ## Overview
 
@@ -8,27 +8,29 @@ External agents connect to Huabu through **agentlet**, a lightweight ACP (Agent 
 
 The **primary channel** between Huabu and an external agent is the ACP prompt→response flow: Huabu sends prompts, the agent responds with messages that appear on the canvas.
 
-The **Agent Sideband** is a parallel, out-of-band channel that enables external agents to read from and write to the Huabu canvas and workspace — operations that don't fit naturally into the sequential prompt flow. The term "sideband" is borrowed from networking/hardware, where it refers to an auxiliary channel running alongside the main data path for control and metadata operations.
+The **Agent Reachback** is a parallel, out-of-band channel that enables external agents to read from and write to the Huabu canvas and workspace — operations that don't fit naturally into the sequential prompt flow. The name captures the intent: a spawned external agent _reaches back_ into the host application that launched it to inspect and modify shared state, independently of the main prompt→response conversation.
+
+Reachback is layered. The **agentlet** layer is host-agnostic and owns the _transport and distribution_ — it defines the **Reachback Interface** and pushes tool scripts into each spawned agent's environment. The **host app** layer (Huabu, and other hosts in the future) _provides_ the concrete tool scripts that implement that interface; Huabu's implementation is the **Huabu Reachback Tool (HRT)**.
 
 ## Motivating Example
 
 On the Huabu canvas, there is a `note` node (`node-id-123456`) containing a user's idea for a new project feature. The user spawns an external agent session (`session-id-7890`) via the agentlet daemon on a remote machine with the project's development environment. The agent is instructed to read the content of `node-id-123456` and implement the feature.
 
-Typical sideband interactions:
+Typical Reachback interactions:
 
-1. **Read**: The agent reads the content of `node-id-123456` through the sideband to understand the feature request.
+1. **Read**: The agent reads the content of `node-id-123456` through the Reachback to understand the feature request.
 2. **Write + Link**: After implementation, the agent writes a summary to a new node on the canvas and links it back to `node-id-123456`.
 3. **Context gathering**: The agent queries neighboring nodes and interaction history around `node-id-123456` for additional context (via a built-in agent).
 
-All three interactions are initiated by the external agent through the sideband.
+All three interactions are initiated by the external agent through the Reachback.
 
 ## Design Choices
 
 ### Transport: CLI-first
 
-For the sideband transport, we adopt a **CLI-first approach** — the Huabu Sideband Tool (HST) is a standalone script that the external agent invokes via shell commands, analogous to how one uses `curl` to interact with HTTP APIs.
+For the Reachback transport, we adopt a **CLI-first approach** — the Huabu Reachback Tool (HRT) is a standalone script that the external agent invokes via shell commands, analogous to how one uses `curl` to interact with HTTP APIs.
 
-**Why CLI over MCP for sideband:**
+**Why CLI over MCP for Reachback:**
 
 | Consideration | MCP                             | CLI                          |
 | ------------- | ------------------------------- | ---------------------------- |
@@ -37,11 +39,11 @@ For the sideband transport, we adopt a **CLI-first approach** — the Huabu Side
 | Flexibility   | Fixed request-response          | Rich interaction patterns    |
 | Agent support | Widely supported                | Universally supported        |
 
-While MCP is excellent for simple synchronous operations, the sideband needs to support potentially asynchronous agent-to-agent communication. CLI provides the flexibility needed while remaining universally supported by agent harnesses. The distribution cost is mitigated by bundling HST with the agentlet daemon.
+While MCP is excellent for simple synchronous operations, the Reachback needs to support potentially asynchronous agent-to-agent communication. CLI provides the flexibility needed while remaining universally supported by agent harnesses. The distribution cost is mitigated by bundling HRT with the agentlet daemon.
 
 ### Interaction Model: A2A Skeleton + Shortcuts
 
-The sideband exposes two types of commands:
+The Reachback exposes two types of commands:
 
 - **Shortcuts**: deterministic, server-handled CRUD operations (fast, no LLM reasoning)
 - **Built-in agent commands**: natural language requests routed to built-in agents with full canvas context (flexible, semantic)
@@ -52,7 +54,7 @@ The external agent doesn't need to decide the routing — the command name itsel
 flowchart TD
     A[External Agent<br/><i>agent session</i>]
 
-    subgraph HST[Huabu Sideband Tool]
+    subgraph HRT[Huabu Reachback Tool]
         B[CLI Interface]
     end
 
@@ -71,27 +73,27 @@ flowchart TD
 
 **Why this hybrid:**
 
-- Shortcuts cover the high-frequency, deterministic operations (~80% of sideband calls) with minimal latency and zero LLM cost.
+- Shortcuts cover the high-frequency, deterministic operations (~80% of Reachback calls) with minimal latency and zero LLM cost.
 - Built-in agents handle the long tail of complex, semantic operations (spatial reasoning, multi-node queries, context understanding) without bloating the shortcut surface.
 - The shortcut boundary is intentionally minimal: **if it takes an explicit ID and does one atomic CRUD operation, it's a shortcut. Everything else goes to `ask-agent`.**
 
-## Agentlet Sideband Setup
+## Agentlet Reachback Setup
 
-The agentlet daemon prepares the sideband environment for each spawned agent session:
+The agentlet daemon prepares the Reachback environment for each spawned agent session:
 
 ### Environment Variables
 
 | Variable                | Description                                                                                                                                                                                                         |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `AGENTLET_SIDEBAND_DIR` | Directory containing the HST script(s)                                                                                                                                                                              |
+| `AGENTLET_Reachback_DIR` | Directory containing the HRT script(s)                                                                                                                                                                              |
 | `AGENTLET_TOKEN`        | Authentication token for the Huabu server. Also serves as user identification (per-token access scoping, consistent with existing Huabu auth design). Injected by the daemon from its `--token` startup argument.   |
-| `AGENTLET_SERVER`       | The daemon's WebSocket URL (e.g., `ws://127.0.0.1:3001/api/acp/agent`). HST derives the HTTP base URL automatically (`ws://` → `http://`, strip path). Injected by the daemon from its `--server` startup argument. |
-| `HUABU_CANVAS_ID`       | The canvas ID that this agent session is scoped to. Passed by Sediment via `sessionSpec.env` at spawn time. HST reads this automatically so commands don't need a per-call `--canvas` flag.                         |
-| `HUABU_SERVER`          | (Optional override) If set, HST uses this HTTP base URL directly instead of deriving from `AGENTLET_SERVER`. Useful for testing or non-standard deployments.                                                        |
+| `AGENTLET_SERVER`       | The daemon's WebSocket URL (e.g., `ws://127.0.0.1:3001/api/acp/agent`). HRT derives the HTTP base URL automatically (`ws://` → `http://`, strip path). Injected by the daemon from its `--server` startup argument. |
+| `HUABU_CANVAS_ID`       | The canvas ID that this agent session is scoped to. Passed by Sediment via `sessionSpec.env` at spawn time. HRT reads this automatically so commands don't need a per-call `--canvas` flag.                         |
+| `HUABU_SERVER`          | (Optional override) If set, HRT uses this HTTP base URL directly instead of deriving from `AGENTLET_SERVER`. Useful for testing or non-standard deployments.                                                        |
 
 ### Script Distribution
 
-The HST source lives in the Sediment (Huabu) project. Distribution uses the agentlet protocol's `server/sendResource` mechanism: when the agentlet daemon connects, the Huabu server pushes the HST script over the existing authenticated WebSocket control channel. The daemon saves it to `${AGENTLET_SIDEBAND_DIR}` and injects that path into all spawned agent processes.
+The HRT source lives in the Sediment (Huabu) project. Distribution uses the agentlet protocol's `server/sendResource` mechanism: when the agentlet daemon connects, the Huabu server pushes the HRT script over the existing authenticated WebSocket control channel. The daemon saves it to `${AGENTLET_Reachback_DIR}` and injects that path into all spawned agent processes.
 
 This approach:
 
@@ -102,17 +104,17 @@ This approach:
 
 ### Agent Prompt Injection
 
-When spawning an external agent session, Huabu includes a short usage description of the sideband commands in the agent's system prompt. This eliminates discovery overhead — the agent knows how to use the sideband from the start.
+When spawning an external agent session, Huabu includes a short usage description of the Reachback commands in the agent's system prompt. This eliminates discovery overhead — the agent knows how to use the Reachback from the start.
 
-## Huabu Sideband Tool (HST)
+## Huabu Reachback Tool (HRT)
 
 ### Invocation
 
 ```bash
-node ${AGENTLET_SIDEBAND_DIR}/huabu-sideband-tool.mjs <command> [args...]
+node ${AGENTLET_Reachback_DIR}/huabu-Reachback-tool.mjs <command> [args...]
 ```
 
-The HST automatically reads `${AGENTLET_TOKEN}` for authentication. Machine-consumable results are printed to stdout; metadata and errors go to stderr. Non-zero exit codes indicate failure. Use `--help` or `-h` on any command for usage details.
+The HRT automatically reads `${AGENTLET_TOKEN}` for authentication. Machine-consumable results are printed to stdout; metadata and errors go to stderr. Non-zero exit codes indicate failure. Use `--help` or `-h` on any command for usage details.
 
 ### Commands
 
@@ -121,11 +123,11 @@ The HST automatically reads `${AGENTLET_TOKEN}` for authentication. Machine-cons
 **`read-node`** — Read node content to a file
 
 ```bash
-node ${AGENTLET_SIDEBAND_DIR}/huabu-sideband-tool.mjs read-node [--output-dir <folder>] <node-id>
+node ${AGENTLET_Reachback_DIR}/huabu-Reachback-tool.mjs read-node [--output-dir <folder>] <node-id>
 ```
 
 - `--output-dir` is optional; defaults to the current working directory.
-- Saves the node content to `<folder>/<node-id>.<ext>`, where `.<ext>` is automatically determined by HST based on the node's type (e.g., `.md` for note, `.html` for web).
+- Saves the node content to `<folder>/<node-id>.<ext>`, where `.<ext>` is automatically determined by HRT based on the node's type (e.g., `.md` for note, `.html` for web).
 - **stdout**: the saved file path (one line) — usable directly in shell composition.
 - **stderr**: node metadata (`type=<type> size=<bytes>`).
 
@@ -133,10 +135,10 @@ node ${AGENTLET_SIDEBAND_DIR}/huabu-sideband-tool.mjs read-node [--output-dir <f
 
 ```bash
 # Create a new node
-node ${AGENTLET_SIDEBAND_DIR}/huabu-sideband-tool.mjs write-node --type <type> [options] <path-to-content-file>
+node ${AGENTLET_Reachback_DIR}/huabu-Reachback-tool.mjs write-node --type <type> [options] <path-to-content-file>
 
 # Update an existing node
-node ${AGENTLET_SIDEBAND_DIR}/huabu-sideband-tool.mjs write-node --id <node-id> [options] <path-to-content-file>
+node ${AGENTLET_Reachback_DIR}/huabu-Reachback-tool.mjs write-node --id <node-id> [options] <path-to-content-file>
 ```
 
 - `--type <type>`: create a new node (e.g., `note`, `web`). Returns the new node id to stdout.
@@ -159,19 +161,19 @@ node ${AGENTLET_SIDEBAND_DIR}/huabu-sideband-tool.mjs write-node --id <node-id> 
 
 ```bash
 # Inline prompt
-node ${AGENTLET_SIDEBAND_DIR}/huabu-sideband-tool.mjs ask-agent "<prompt>"
+node ${AGENTLET_Reachback_DIR}/huabu-Reachback-tool.mjs ask-agent "<prompt>"
 
 # Prompt from file (@ convention, like curl -d @file)
-node ${AGENTLET_SIDEBAND_DIR}/huabu-sideband-tool.mjs ask-agent @path/to/prompt.txt
+node ${AGENTLET_Reachback_DIR}/huabu-Reachback-tool.mjs ask-agent @path/to/prompt.txt
 
 # Show intermediate steps (tool calls, thinking) on stdout
-node ${AGENTLET_SIDEBAND_DIR}/huabu-sideband-tool.mjs ask-agent --show-steps "<prompt>"
+node ${AGENTLET_Reachback_DIR}/huabu-Reachback-tool.mjs ask-agent --show-steps "<prompt>"
 
-# Save full session events to file (auto-named JSONL in sideband dir) — this is the DEFAULT
-node ${AGENTLET_SIDEBAND_DIR}/huabu-sideband-tool.mjs ask-agent "<prompt>"
+# Save full session events to file (auto-named JSONL in Reachback dir) — this is the DEFAULT
+node ${AGENTLET_Reachback_DIR}/huabu-Reachback-tool.mjs ask-agent "<prompt>"
 
 # Disable session saving
-node ${AGENTLET_SIDEBAND_DIR}/huabu-sideband-tool.mjs ask-agent --no-save-session "<prompt>"
+node ${AGENTLET_Reachback_DIR}/huabu-Reachback-tool.mjs ask-agent --no-save-session "<prompt>"
 ```
 
 - Sends a natural language prompt to a built-in agent with full canvas context.
@@ -180,7 +182,7 @@ node ${AGENTLET_SIDEBAND_DIR}/huabu-sideband-tool.mjs ask-agent --no-save-sessio
 - In v1, a single default built-in agent handles all requests. (Future: `--agent <agent-id>` for targeting a specific agent.)
 - **stdout** (default): final result text only. With `--show-steps`: intermediate events (tool calls, thinking deltas) are also printed.
 - **stderr**: progress status line (e.g., "⏳ Agent working...") emitted on first server event — keeps the harness aware the tool is alive and prevents idle timeout. Session file path also printed here.
-- By default, all events are saved to `${AGENTLET_SIDEBAND_DIR}/sessions/<timestamp>.jsonl`. Use `--no-save-session` to disable. Useful for debugging or future `--resume` support.
+- By default, all events are saved to `${AGENTLET_Reachback_DIR}/sessions/<timestamp>.jsonl`. Use `--no-save-session` to disable. Useful for debugging or future `--resume` support.
 
 **Additional options:**
 
@@ -191,24 +193,24 @@ node ${AGENTLET_SIDEBAND_DIR}/huabu-sideband-tool.mjs ask-agent --no-save-sessio
 
 ### Sync/Async Behavior & Timeout Resistance
 
-All HST commands are **blocking** — they run until the operation completes, then print the result and exit. This is the same model as `curl`: the caller waits for the response, however long it takes.
+All HRT commands are **blocking** — they run until the operation completes, then print the result and exit. This is the same model as `curl`: the caller waits for the response, however long it takes.
 
-This works because modern agent harnesses (Copilot CLI, Claude Code, Cursor, etc.) already handle long-running CLI commands gracefully — they start the command synchronously, and if it exceeds an internal timeout, the harness automatically promotes it to a background task and retrieves the output later. The harness, not the HST, is responsible for managing timing.
+This works because modern agent harnesses (Copilot CLI, Claude Code, Cursor, etc.) already handle long-running CLI commands gracefully — they start the command synchronously, and if it exceeds an internal timeout, the harness automatically promotes it to a background task and retrieves the output later. The harness, not the HRT, is responsible for managing timing.
 
 **Timeout resistance for `ask-agent`:**
 
 The `ask-agent` command uses **SSE (Server-Sent Events)** streaming — the server sends events incrementally as the built-in agent works. This prevents timeouts at two layers:
 
 1. **HTTP layer**: chunked `text/event-stream` response keeps the TCP connection alive with periodic data (events or heartbeat comments). No socket idle timeout.
-2. **Harness layer**: HST emits a stderr status line on the first received event ("⏳ Agent working..."). The harness sees process output → knows the tool is alive → does not kill or retry.
+2. **Harness layer**: HRT emits a stderr status line on the first received event ("⏳ Agent working..."). The harness sees process output → knows the tool is alive → does not kill or retry.
 
 Because the connection stays active throughout, the timeout→retry→duplicate-execution problem is eliminated without needing request-level idempotency.
 
 This means:
 
-- HST does not need `--timeout`, `poll-result`, or explicit async modes.
+- HRT does not need `--timeout`, `poll-result`, or explicit async modes.
 - The interface stays maximally simple (single blocking call per command).
-- Intermediate events flow to HST in real-time; `--show-steps` surfaces them to stdout, `--save-session` persists them to disk.
+- Intermediate events flow to HRT in real-time; `--show-steps` surfaces them to stdout, `--save-session` persists them to disk.
 
 ### Error Handling (v1)
 
@@ -220,7 +222,7 @@ All error cases produce a descriptive message on stderr and a non-zero exit code
 - Target node deleted during operation
 - Notified agent offline or not found
 
-No automatic retry or recovery in HST — the external agent decides how to handle errors.
+No automatic retry or recovery in HRT — the external agent decides how to handle errors.
 
 ## Known Issues & Future Work
 
@@ -228,15 +230,15 @@ No automatic retry or recovery in HST — the external agent decides how to hand
 - **Stateful conversations (`--resume`)**: v1 `ask-agent` is stateless. The returned `threadId` is reserved for future `--resume <threadId>` support that would maintain conversation context across calls. Requires server-side thread/context persistence.
 - **Target agent identification**: Both `write-node --notify-to <agent-id>` and `ask-agent --to <agent-id>` need a way to specify a target built-in agent. This requires defining agent identification (agent-id vs agent-template-id), discovery mechanism, and routing logic. For v1, all requests go to the single default built-in agent.
 - **Structured output**: v1 uses plain text output (curl-style). A `--format json` flag can be added later if needed for programmatic consumption.
-- **Selected node IDs in prompt**: Resolved. The external-agent prompt is now built deterministically (no preprocessor LLM): every selected node is listed in a `## Selected Nodes` table carrying its `nodeId`, `type` and `label`, so the external agent can always `read-node <id>` / `write-node --id <id>` on demand. The wire text is split across two templates — `prompt/external-agent/user_prompt.md` (per-turn `task` + the table) and `prompt/external-agent/system_prompt.md` (a one-shot persona + `## Canvas Tools (Sideband)` preamble prepended to the first turn of each fresh session). See `apps/server/src/modules/agent/acp/preprocessor.ts`.
+- **Selected node IDs in prompt**: Resolved. The external-agent prompt is now built deterministically (no preprocessor LLM): every selected node is listed in a `## Selected Nodes` table carrying its `nodeId`, `type` and `label`, so the external agent can always `read-node <id>` / `write-node --id <id>` on demand. The wire text is split across two templates — `prompt/external-agent/user_prompt.md` (per-turn `task` + the table) and `prompt/external-agent/system_prompt.md` (a one-shot persona + `## Canvas Tools (Reachback)` preamble prepended to the first turn of each fresh session). See `apps/server/src/modules/agent/acp/preprocessor.ts`.
 - **Script versioning**: v1 guarantees script existence via bundled installation. Auto-update mechanism TBD.
-- **Push notifications (server→agent)**: Currently all sideband communication is agent-initiated. Server-push (e.g., "node X was edited by another user") is a future consideration.
+- **Push notifications (server→agent)**: Currently all Reachback communication is agent-initiated. Server-push (e.g., "node X was edited by another user") is a future consideration.
 
 ## Implementation Plan
 
-### Component: Huabu Sideband Tool (HST)
+### Component: Huabu Reachback Tool (HRT)
 
-The standalone CLI script (`huabu-sideband-tool.mjs`) running in the external agent's environment. The source lives in the **Sediment (Huabu) project** since it's a thin client tightly coupled to the server's sideband API — keeping them in the same repo ensures API and client stay in sync. The script is shipped as a build artifact that the agentlet daemon bundles during installation.
+The standalone CLI script (`huabu-Reachback-tool.mjs`) running in the external agent's environment. The source lives in the **Sediment (Huabu) project** since it's a thin client tightly coupled to the server's Reachback API — keeping them in the same repo ensures API and client stay in sync. The script is shipped as a build artifact that the agentlet daemon bundles during installation.
 
 - [x] CLI argument parser: command routing (`read-node`, `write-node`, `ask-agent`), flag parsing, `--help` / `-h` support
 - [x] `read-node` implementation: call server API, write content to `<output-dir>/<node-id>.<ext>`, print file path to stdout, metadata to stderr
@@ -250,9 +252,9 @@ The standalone CLI script (`huabu-sideband-tool.mjs`) running in the external ag
 
 ### Component: Huabu Server
 
-New REST API endpoints for sideband operations, grouped by consumer.
+New REST API endpoints for Reachback operations, grouped by consumer.
 
-#### HST API (consumed by the HST script itself, not involving agentlet daemon)
+#### HRT API (consumed by the HRT script itself, not involving agentlet daemon)
 
 **`GET /api/canvas/:canvasId/nodes/:nodeId/content`** — Read node content (existing endpoint)
 
@@ -267,13 +269,13 @@ New REST API endpoints for sideband operations, grouped by consumer.
 | Field    | Value                                                                                                            |
 | -------- | ---------------------------------------------------------------------------------------------------------------- |
 | Auth     | `Authorization: Bearer ${AGENTLET_TOKEN}`                                                                        |
-| Body     | `{ commands: CanvasCommand[], originator }` — HST constructs appropriate add-node/edit-content/add-edge commands |
+| Body     | `{ commands: CanvasCommand[], originator }` — HRT constructs appropriate add-node/edit-content/add-edge commands |
 | Response | `{ canvasId, fromVersion, toVersion, deltas, results }`                                                          |
 | Errors   | `401` invalid token, `404` canvas not found                                                                      |
 
-Note: HST translates its CLI flags (`--type`, `--id`, `--link-to`, `--link-from`, `--notify`) into the appropriate `CanvasCommand[]` array internally. The external agent never sees `CanvasCommand` directly.
+Note: HRT translates its CLI flags (`--type`, `--id`, `--link-to`, `--link-from`, `--notify`) into the appropriate `CanvasCommand[]` array internally. The external agent never sees `CanvasCommand` directly.
 
-**`POST /api/sideband/ask-agent`** — Send prompt to built-in agent (SSE streaming)
+**`POST /api/Reachback/ask-agent`** — Send prompt to built-in agent (SSE streaming)
 
 | Field       | Value                                                                            |
 | ----------- | -------------------------------------------------------------------------------- |
@@ -286,25 +288,25 @@ Note: HST translates its CLI flags (`--type`, `--id`, `--link-to`, `--link-from`
 
 Design notes:
 
-- **Transport**: SSE (Server-Sent Events) streaming. The server pipes `runAgent()` events directly to the HTTP response as `data: {type, ...}\n\n` frames. HST reads the stream incrementally, prints progress to stderr on first event, and collects the final `done` message for stdout.
+- **Transport**: SSE (Server-Sent Events) streaming. The server pipes `runAgent()` events directly to the HTTP response as `data: {type, ...}\n\n` frames. HRT reads the stream incrementally, prints progress to stderr on first event, and collects the final `done` message for stdout.
 - **Timeout resistance**: Streaming keeps the connection alive — no idle timeout at HTTP or harness layer. No request-level idempotency needed.
-- **Tool scope**: Uses `'operate'` scope (full canvas read + write tools). **TODO**: discuss with project maintainers offline whether a restricted `'sideband'` scope is warranted to limit surface area.
+- **Tool scope**: Uses `'operate'` scope (full canvas read + write tools). **TODO**: discuss with project maintainers offline whether a restricted `'Reachback'` scope is warranted to limit surface area.
 - **System prompt**: Minimal static prompt providing canvas context awareness. **TODO**: discuss prompt design offline — should include canvas outline, caller identity, usage guidelines.
-- **Statefulness**: Each call is stateless (fresh context, no memory of previous calls). The `done` event includes a `threadId`. For future `--resume` support, HST can send a saved session file back to reconstruct context. For v1, every call is independent.
+- **Statefulness**: Each call is stateless (fresh context, no memory of previous calls). The `done` event includes a `threadId`. For future `--resume` support, HRT can send a saved session file back to reconstruct context. For v1, every call is independent.
 
 #### Server-side work items
 
-- [x] Add Bearer token auth as an alternative to Basic Auth (Fastify `preHandler` hook that accepts either) — enables HST to call existing canvas endpoints
-- [x] Implement `POST /api/sideband/ask-agent` — SSE streaming endpoint that pipes `runAgent()` events to the client
+- [x] Add Bearer token auth as an alternative to Basic Auth (Fastify `preHandler` hook that accepts either) — enables HRT to call existing canvas endpoints
+- [x] Implement `POST /api/Reachback/ask-agent` — SSE streaming endpoint that pipes `runAgent()` events to the client
 - [x] Notification dispatch: `--notify` reuses `ask-agent` internally — no separate endpoint needed
-- [x] Push HST script to agentlet daemon via `server/sendResource` on connect (replaces `GET /api/sideband/tools`)
-- [ ] Error responses: ensure existing endpoints return consistent `{ message }` format for HST consumption
+- [x] Push HRT script to agentlet daemon via `server/sendResource` on connect (replaces `GET /api/Reachback/tools`)
+- [ ] Error responses: ensure existing endpoints return consistent `{ message }` format for HRT consumption
 
 ### Component: Huabu (Host App)
 
 The host application that orchestrates agent sessions and canvas interactions.
 
-- [x] Prompt injection: include sideband usage description in the agent's system prompt when spawning an external agent session
+- [x] Prompt injection: include Reachback usage description in the agent's system prompt when spawning an external agent session
 - [x] Node ID embedding: pass referenced node IDs into the agent's initial context
 - [x] Pass `HUABU_CANVAS_ID` via `sessionSpec.env` when spawning an external agent session
 
@@ -319,7 +321,7 @@ Shared protocol definition between agentlet server and daemon.
 
 The daemon running on the remote machine that spawns agent processes.
 
-- [x] Environment setup: unified `envRegistry` manages `AGENTLET_SIDEBAND_DIR` (and future dirs); respects `process.env` overrides; injected into all spawned agents
+- [x] Environment setup: unified `envRegistry` manages `AGENTLET_Reachback_DIR` (and future dirs); respects `process.env` overrides; injected into all spawned agents
 - [x] `env` forwarding: agentlet daemon merges `sessionSpec.env` (including `HUABU_CANVAS_ID`) into the spawned process environment
 - [x] `AGENTLET_SERVER` injection: daemon's `--server` WS URL injected into spawned agents for HTTP derivation
 - [x] `server/sendResource` handler: receives files pushed by server, resolves `${ENV_VAR}` paths, saves to disk
@@ -329,7 +331,7 @@ The daemon running on the remote machine that spawns agent processes.
 The default built-in agent that handles `ask-agent` requests and `--notify` events.
 
 - [x] `ask-agent` handler: receive natural language prompt, execute with `'operate'` scope (TODO: scope TBD), stream events back via SSE, include `threadId` in `done` event
-- [x] `--save-session` support: HST-side only (saves SSE events to JSONL); no server changes needed
+- [x] `--save-session` support: HRT-side only (saves SSE events to JSONL); no server changes needed
 - [x] Notification handler: `--notify` calls `ask-agent` with a layout prompt — built-in agent uses canvas tools to position and link
 - [ ] Canvas context access: read nodes, edges, spatial info, interaction history for reasoning
 - [ ] System prompt: minimal v1 prompt (TODO: design offline with maintainers)

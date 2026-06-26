@@ -17,7 +17,7 @@
  * `task` is the user's message forwarded verbatim. `selectedNodes`
  * lists the canvas nodes the user had selected (metadata only); the
  * external agent fetches their content on demand via the Huabu
- * Sideband Tool (`read-node <node-id>`).
+ * Reachback Tool (`read-node <node-id>`).
  *
  * Visual shell (icon slot, title row, chevron, expand/collapse) is
  * provided by `AssistantDisclosure` so this card stays visually

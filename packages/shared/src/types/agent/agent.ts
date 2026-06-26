@@ -144,7 +144,7 @@ export interface AgentEndEventData {}
  * selection — no preprocessing LLM is involved. `task` is the user's
  * message forwarded verbatim. `selectedNodes` is a metadata-only table
  * of the nodes the user had selected; the external agent fetches their
- * content on demand through the Huabu Sideband Tool (`read-node <id>`)
+ * content on demand through the Huabu Reachback Tool (`read-node <id>`)
  * rather than receiving inlined bodies or file attachments.
  */
 export interface ExternalAgentPrompt {
@@ -163,7 +163,7 @@ export interface ExternalAgentPrompt {
     label?: string;
   }>;
   /**
-   * The one-shot system preamble (persona + `## Canvas Tools (Sideband)`
+   * The one-shot system preamble (persona + `## Canvas Tools (Reachback)`
    * docs) prepended to this turn's wire payload. Present only on the
    * first turn of a freshly-created session — omitted thereafter, since
    * the agent keeps it in context (see `AcpSessionEntry.systemPreambleSent`).

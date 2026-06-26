@@ -1,20 +1,20 @@
 #!/usr/bin/env node
 
 /**
- * Huabu Sideband Tool (HST)
+ * Huabu Reachback Tool (HRT)
  *
  * Standalone CLI script for external agents to interact with the Huabu
- * canvas through the Agent Sideband channel. Invoked via:
+ * canvas through the Agent Reachback channel. Invoked via:
  *
- *   node huabu-sideband-tool.mjs <command> [args...]
+ *   node huabu-reachback-tool.mjs <command> [args...]
  *
  * Environment variables (set by agentlet daemon):
  *   AGENTLET_TOKEN       — Bearer token for Huabu server auth
  *   AGENTLET_SERVER      — Daemon's WS URL (e.g. ws://127.0.0.1:3001/api/acp/agent)
- *                          HST derives HTTP base URL from this automatically.
+ *                          HRT derives HTTP base URL from this automatically.
  *   HUABU_CANVAS_ID      — Canvas ID this session is scoped to
  *   HUABU_SERVER         — (optional override) HTTP base URL; if set, takes priority
- *   AGENTLET_SIDEBAND_DIR — Directory containing this script (informational)
+ *   AGENTLET_REACHBACK_DIR — Directory containing this script (informational)
  *
  * Commands:
  *   read-node   [--output-dir <dir>] <node-id>
@@ -145,7 +145,7 @@ function parseArgs(args, spec = {}) {
 // ── SSE ask-agent helper ─────────────────────────────────────────────
 
 /**
- * Call POST /api/sideband/ask-agent and consume the SSE stream.
+ * Call POST /api/reachback/ask-agent and consume the SSE stream.
  * Returns { finalMessage, threadId }.
  *
  * @param {string} prompt - The prompt to send
@@ -164,7 +164,7 @@ async function callAskAgent(prompt, canvasId, opts = {}) {
     exitOnError = true,
   } = opts;
 
-  const url = `${SERVER}/api/sideband/ask-agent`;
+  const url = `${SERVER}/api/reachback/ask-agent`;
   const res = await fetch(url, {
     method: 'POST',
     headers: {
@@ -268,8 +268,8 @@ async function callAskAgent(prompt, canvasId, opts = {}) {
 
   // Save session if requested
   if (saveSession && events.length > 0) {
-    const sidebandDir = process.env.AGENTLET_SIDEBAND_DIR || '.';
-    const sessionsDir = path.join(sidebandDir, 'sessions');
+    const reachbackDir = process.env.AGENTLET_REACHBACK_DIR || '.';
+    const sessionsDir = path.join(reachbackDir, 'sessions');
     await mkdir(sessionsDir, { recursive: true });
     const filename = `${Date.now()}.jsonl`;
     const filePath = path.join(sessionsDir, filename);
@@ -290,7 +290,7 @@ async function readNode(args) {
     valued: ['--output-dir'],
     help: `read-node — Read a canvas node's content to a local file
 
-Usage: node huabu-sideband-tool.mjs read-node [options] <node-id>
+Usage: node huabu-reachback-tool.mjs read-node [options] <node-id>
 
 Arguments:
   <node-id>              ID of the canvas node to read
@@ -304,7 +304,7 @@ Output:
   stderr: node metadata (type, size)
 
 Example:
-  node huabu-sideband-tool.mjs read-node --output-dir ./tmp node-abc123
+  node huabu-reachback-tool.mjs read-node --output-dir ./tmp node-abc123
 `,
   });
 
@@ -346,7 +346,7 @@ async function writeNode(args) {
     boolean: ['--notify'],
     help: `write-node — Create or update a canvas node
 
-Usage: node huabu-sideband-tool.mjs write-node [options] <content-file>
+Usage: node huabu-reachback-tool.mjs write-node [options] <content-file>
 
 Arguments:
   <content-file>         Path to file containing node content
@@ -366,8 +366,8 @@ Output:
   stderr: action metadata (action, type/id)
 
 Examples:
-  node huabu-sideband-tool.mjs write-node --type text ./draft.md
-  node huabu-sideband-tool.mjs write-node --id node-abc123 ./updated.md
+  node huabu-reachback-tool.mjs write-node --type text ./draft.md
+  node huabu-reachback-tool.mjs write-node --id node-abc123 ./updated.md
 `,
   });
 
@@ -483,7 +483,7 @@ async function askAgent(args) {
     boolean: ['--show-steps', '--no-save-session'],
     help: `ask-agent — Send a prompt to a built-in Huabu agent
 
-Usage: node huabu-sideband-tool.mjs ask-agent [options] <prompt | @prompt-file>
+Usage: node huabu-reachback-tool.mjs ask-agent [options] <prompt | @prompt-file>
 
 Arguments:
   <prompt>               Inline prompt text (multiple words joined)
@@ -491,7 +491,7 @@ Arguments:
 
 Options:
   --show-steps           Print intermediate events (tool calls, thinking) to stdout
-  --no-save-session      Disable saving event log (default: saves to JSONL in sideband dir)
+  --no-save-session      Disable saving event log (default: saves to JSONL in reachback dir)
   -h, --help             Show this help message
 
 Output:
@@ -499,9 +499,9 @@ Output:
   stderr: progress status, session file path
 
 Examples:
-  node huabu-sideband-tool.mjs ask-agent "summarize node-abc123"
-  node huabu-sideband-tool.mjs ask-agent --show-steps "what nodes link to node-xyz?"
-  node huabu-sideband-tool.mjs ask-agent --no-save-session @./prompt.txt
+  node huabu-reachback-tool.mjs ask-agent "summarize node-abc123"
+  node huabu-reachback-tool.mjs ask-agent --show-steps "what nodes link to node-xyz?"
+  node huabu-reachback-tool.mjs ask-agent --no-save-session @./prompt.txt
 `,
   });
 
@@ -554,9 +554,9 @@ const COMMANDS = {
   'ask-agent': askAgent,
 };
 
-const MAIN_HELP = `Huabu Sideband Tool (HST)
+const MAIN_HELP = `Huabu Reachback Tool (HRT)
 
-Usage: node huabu-sideband-tool.mjs <command> [args...]
+Usage: node huabu-reachback-tool.mjs <command> [args...]
 
 Commands:
   read-node   Read a canvas node's content to a local file
@@ -573,10 +573,10 @@ Environment variables (set by agentlet daemon):
   HUABU_SERVER      HTTP base URL override (optional, takes priority over AGENTLET_SERVER)
 
 Examples:
-  node huabu-sideband-tool.mjs read-node node-abc123
-  node huabu-sideband-tool.mjs write-node --type text ./draft.md
-  node huabu-sideband-tool.mjs ask-agent "place the new node near node-xyz"
-  node huabu-sideband-tool.mjs read-node --help
+  node huabu-reachback-tool.mjs read-node node-abc123
+  node huabu-reachback-tool.mjs write-node --type text ./draft.md
+  node huabu-reachback-tool.mjs ask-agent "place the new node near node-xyz"
+  node huabu-reachback-tool.mjs read-node --help
 `;
 
 if (!command || command === '--help' || command === '-h') {

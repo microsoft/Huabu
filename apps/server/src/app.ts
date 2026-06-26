@@ -38,7 +38,7 @@ import {
 } from './modules/workspace.js';
 import workspaceRoutes from './modules/workspace.route.js';
 import { preloadSkills } from './prompt/index.js';
-import sidebandRoutes from './sideband/sideband.route.js';
+import reachbackRoutes from './reachback/reachback.route.js';
 import { logger } from './utils/logger.js';
 
 // Lock the workspace at startup if HUABU_WORKSPACE is set (managed mode).
@@ -129,9 +129,9 @@ app.register(multipart, {
 //    HUABU_BASIC_AUTH_PASS are set, requests with matching Basic creds
 //    are accepted.
 //
-// 2. Bearer token (sideband/HST): requests with
+// 2. Bearer token (reachback/HRT): requests with
 //    `Authorization: Bearer <AGENTLET_TOKEN>` are accepted. This allows
-//    the Huabu Sideband Tool to call canvas/agent APIs without knowing
+//    the Huabu Reachback Tool to call canvas/agent APIs without knowing
 //    the Basic Auth credentials.
 //
 // CORS preflight (OPTIONS) always passes through unauthenticated.
@@ -149,7 +149,7 @@ if (basicAuthUser && basicAuthPass) {
     // Basic Auth (browser / Vite proxy)
     if (authHeader === expectedBasic) return;
 
-    // Bearer token (agentlet sideband)
+    // Bearer token (agentlet reachback)
     if (authHeader.startsWith('Bearer ')) {
       const daemonToken = getDaemonAuth().getToken();
       if (daemonToken && authHeader.slice(7) === daemonToken) return;
@@ -162,12 +162,12 @@ if (basicAuthUser && basicAuthPass) {
   });
   app.log.info('HTTP Auth enabled (Basic + Bearer)');
 } else {
-  // No Basic Auth configured — still gate Bearer-only sideband routes
+  // No Basic Auth configured — still gate Bearer-only reachback routes
   app.addHook('onRequest', async (request, reply) => {
     if (request.method === 'OPTIONS') return;
-    // Without Basic Auth, all routes are open EXCEPT /api/sideband/*
+    // Without Basic Auth, all routes are open EXCEPT /api/reachback/*
     // which always requires a valid Bearer token.
-    if (!request.url.startsWith('/api/sideband/')) return;
+    if (!request.url.startsWith('/api/reachback/')) return;
     const authHeader = request.headers.authorization || '';
     if (authHeader.startsWith('Bearer ')) {
       const daemonToken = getDaemonAuth().getToken();
@@ -213,7 +213,7 @@ app.register(intentRoutes, { prefix: '/api/intent' });
 app.register(llmRoutes, { prefix: '/api/llm' });
 app.register(skillsRoutes, { prefix: '/api/skills' });
 app.register(workspaceRoutes, { prefix: '/api/workspace' });
-app.register(sidebandRoutes, { prefix: '/api/sideband' });
+app.register(reachbackRoutes, { prefix: '/api/reachback' });
 
 // ── External agent (ACP) bridge ───────────────────────────────────────
 // Mount @agentlet/server in daemon mode: an embedded supervisor

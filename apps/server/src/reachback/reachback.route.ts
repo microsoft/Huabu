@@ -1,7 +1,7 @@
 /**
- * Sideband API Routes
+ * Reachback API Routes
  *
- * Endpoints consumed by the HST (Huabu Sideband Tool) running inside
+ * Endpoints consumed by the HRT (Huabu Reachback Tool) running inside
  * external agent processes. All routes require Bearer token auth
  * (validated by the global preHandler in app.ts).
  *
@@ -18,7 +18,7 @@ import type { FastifyPluginAsync } from 'fastify';
 
 // ── System prompt (minimal v1 — TODO: design offline with maintainers) ──
 
-const SIDEBAND_AGENT_SYSTEM_PROMPT = `You are a built-in assistant for the Huabu canvas workspace.
+const REACHBACK_AGENT_SYSTEM_PROMPT = `You are a built-in assistant for the Huabu canvas workspace.
 You have access to canvas tools (read nodes, create nodes, edit content, manage edges).
 When the user (an external AI agent) asks you a question or requests an action,
 use the available tools to inspect or modify the canvas, then respond concisely.
@@ -33,7 +33,7 @@ interface AskAgentBody {
 
 // ── Route plugin ──
 
-const sidebandRoutes: FastifyPluginAsync = async (app) => {
+const reachbackRoutes: FastifyPluginAsync = async (app) => {
   app.post<{ Body: AskAgentBody }>(
     '/ask-agent',
     {
@@ -50,7 +50,7 @@ const sidebandRoutes: FastifyPluginAsync = async (app) => {
     },
     async (request, reply) => {
       const { prompt, canvasId } = request.body;
-      const threadId = createId('sideband');
+      const threadId = createId('reachback');
 
       // Build a minimal context with the user's prompt
       const userMessage: UserMessage = {
@@ -59,7 +59,7 @@ const sidebandRoutes: FastifyPluginAsync = async (app) => {
         timestamp: Date.now(),
       };
       const context: Context = {
-        systemPrompt: SIDEBAND_AGENT_SYSTEM_PROMPT,
+        systemPrompt: REACHBACK_AGENT_SYSTEM_PROMPT,
         messages: [userMessage],
         tools: [],
       };
@@ -117,9 +117,9 @@ function writeSSE(
   event: StreamEvent,
   threadId: string,
 ): void {
-  // Inject threadId into done events so HST can capture it
+  // Inject threadId into done events so HRT can capture it
   const data = event.type === 'done' ? { ...event.data, threadId } : event.data;
   raw.write(`event: ${event.type}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
-export default sidebandRoutes;
+export default reachbackRoutes;

@@ -151,7 +151,7 @@ export default typescriptEslint.config(
     //   • apps/server/src/utils/logger.ts — the logger module itself
     //     may need to fall back to console during its own
     //     initialization failure paths.
-    //   • apps/server/src/sideband/huabu-sideband-tool.mjs — a
+    //   • apps/server/src/reachback/huabu-reachback-tool.mjs — a
     //     standalone CLI tool spawned as a child process by ACP. Its
     //     stdout is the protocol channel, so it writes diagnostics to
     //     process.stderr directly; console usage here is intentional.
@@ -163,7 +163,7 @@ export default typescriptEslint.config(
   {
     files: [
       'apps/server/src/utils/logger.ts',
-      'apps/server/src/sideband/huabu-sideband-tool.mjs',
+      'apps/server/src/reachback/huabu-reachback-tool.mjs',
     ],
     rules: {
       'no-console': 'off',

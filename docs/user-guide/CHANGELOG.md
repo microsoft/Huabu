@@ -2,6 +2,24 @@
 
 每次重要功能变更都会记录在此文件中，按时间倒序排列。
 
+## 2026-06-26 · 术语更名：Agent Sideband → Agent Reachback（HST → HRT）
+
+**What Changed**
+
+把「Sideband」这一术语整体更名为「Reachback」。原名借自网络/硬件领域的「边带（sideband）」，对没有网络背景的用户和开发者不够直观；新名「Reachback」直接表达语义——被 spawn 出来的外部 agent「反向触达（reach back）」启动它的宿主应用，在主 prompt→response 对话之外读写共享状态。
+
+更名同时明确了两层结构：
+
+1. **agentlet 层（与宿主无关）**：负责工具脚本的*传输与分发*，定义 **Reachback Interface**。
+2. **宿主应用层（如 Huabu）**：*提供*实现该接口的具体工具脚本；Huabu 的实现即 **Huabu Reachback Tool（HRT）**。
+
+**Notes**
+
+- 这是一次彻底的清理式更名（前后端均在本仓库内，可同步改）：环境变量 `AGENTLET_SIDEBAND_DIR` → `AGENTLET_REACHBACK_DIR`、路由前缀 `/api/sideband` → `/api/reachback`、脚本 `huabu-sideband-tool.mjs` → `huabu-reachback-tool.mjs`、目录 `apps/server/src/sideband/` → `apps/server/src/reachback/`、文档 `docs/agent-sideband.md` → `docs/agent-reachback.md`。
+- 缓存目录默认值从 `node_modules/.cache/agentlet/sideband` 改为 `.../reachback`。
+- agent system prompt 中的 `## Canvas Tools (Sideband)` 段改名为 `## Canvas Tools (Reachback)`。
+- 本文件中 2026-06-26 之前的历史条目保持原样（作为当时的记录），不做回溯改名。
+
 ## 2026-06-24 · 外部 Agent：prompt 卡片不再被「连接 agent」阻塞，并展示完整 system 段
 
 **What Changed**
