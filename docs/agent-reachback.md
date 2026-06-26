@@ -172,6 +172,27 @@ node ${AGENTLET_REACHBACK_DIR}/huabu-reachback-tool.mjs write-node --id <node-id
 | `--link-from <node-id>` | Link the specified node → new/updated node                                                                                                                          |
 | `--notify`              | Fire-and-forget notification to the default built-in agent for canvas positioning. Non-blocking. (Future: `--notify-to <agent-id>` for targeting a specific agent.) |
 
+**`snapshot`** — Render sketch / image nodes to PNG image(s)
+
+```bash
+node ${AGENTLET_REACHBACK_DIR}/huabu-reachback-tool.mjs snapshot [--output-dir <folder>] [--max-pixels <n>] <node-id> [<node-id>...]
+```
+
+- Rasterizes `sketch` and `image` nodes to PNG so a vision-capable agent can
+  actually _see_ the drawings (text-only `read-node` can't). A `frame` id
+  expands to its children.
+- Nearby image + sketch nodes are spatially clustered into **one composite PNG
+  per cluster** (sharing one viewBox so on-canvas relationships are preserved),
+  so a request may yield more than one file.
+- `--output-dir` is optional; defaults to the current working directory. Each
+  PNG is written as `<folder>/<artifact-key>.png`.
+- `--max-pixels <n>` (256–4096, default 1280): longest-edge cap for the output.
+  Lower it (e.g. 768) if a downstream LLM rejects the attachment as too large.
+- Non-snapshottable node types (`note` / `text` / `pdf` / `video`) passed as a
+  top-level id return an error directing you to `read-node` instead.
+- **stdout**: the saved PNG file path(s), one per line.
+- **stderr**: per-image metadata (`key=<key> size=<WxH> originNodeIds=<ids>`).
+
 ### Built-in Agent Commands (semantic, LLM-mediated)
 
 **`ask-agent`** — Query a built-in agent
@@ -285,6 +306,23 @@ endpoint)
 HRT translates its CLI flags (`--type`, `--id`, `--link-to`, `--link-from`,
 `--notify`) into the appropriate `CanvasCommand[]` internally. The external agent
 never sees `CanvasCommand` directly.
+
+**`GET /api/reachback/snapshot`** — Render sketch / image nodes to PNG (new
+endpoint)
+
+| Field    | Value                                                                                  |
+| -------- | -------------------------------------------------------------------------------------- |
+| Query    | `canvasId` (required), `nodeIds` (required, comma-separated), `maxPixels` (256–4096)    |
+| Response | `{ canvasId, images: [{ key, width, height, originNodeIds }] }`                         |
+| Errors   | `400` empty / oversized / non-snapshottable ids or unknown canvas, `401` invalid token |
+
+Thin exposure of the internal `snapshot_nodes` tool
+(`snapshotNodesToArtifacts`): it clusters image + sketch nodes by frame,
+rasterizes each cluster to one content-addressed PNG in the canvas
+`.artifacts/` store, and returns the artifact `key` per image. HRT then
+downloads each PNG via `GET /api/canvas/:canvasId/artifact/:key` (also
+Bearer-reachable) and writes it to disk. Re-snapshotting unchanged input is
+free — keys are content-addressed by geometry + strokes + `maxPixels`.
 
 **`POST /api/reachback/ask-agent`** — Send prompt to built-in agent (SSE
 streaming)

@@ -20,6 +20,7 @@
  *   read-node   [--output-dir <dir>] <node-id>
  *   write-node  --type <type> [options] <content-file>
  *   write-node  --id <node-id> [options] <content-file>
+ *   snapshot    [--output-dir <dir>] [--max-pixels <n>] <node-id> [<node-id>...]
  *   ask-agent   <prompt | @prompt-file>
  */
 
@@ -478,6 +479,84 @@ Examples:
   }
 }
 
+async function snapshot(args) {
+  const { flags, positional } = parseArgs(args, {
+    valued: ['--output-dir', '--max-pixels'],
+    help: `snapshot — Render sketch / image nodes to PNG image(s)
+
+Usage: node huabu-reachback-tool.mjs snapshot [options] <node-id> [<node-id>...]
+
+Arguments:
+  <node-id>...           One or more canvas node ids. image / sketch nodes
+                         are spatially clustered into one PNG per cluster;
+                         a frame id expands to its children.
+
+Options:
+  --output-dir <dir>     Directory to write the PNG file(s) into (default: .)
+  --max-pixels <n>       Longest-edge pixel cap for output PNGs (256-4096, default 1280)
+  -h, --help             Show this help message
+
+Output:
+  stdout: file path(s) of the written PNG(s), one per line
+  stderr: per-image metadata (key, dimensions, origin node ids)
+
+Example:
+  node huabu-reachback-tool.mjs snapshot --output-dir ./tmp node-abc node-def
+`,
+  });
+
+  if (positional.length === 0) {
+    process.stderr.write(
+      'Usage: snapshot [--output-dir <dir>] [--max-pixels <n>] <node-id> [<node-id>...]\n',
+    );
+    process.exit(1);
+  }
+
+  const outputDir = flags['--output-dir'] || '.';
+  const canvasId = requireEnv('HUABU_CANVAS_ID', CANVAS_ID);
+
+  const query = new URLSearchParams({
+    canvasId,
+    nodeIds: positional.join(','),
+  });
+  if (flags['--max-pixels']) {
+    query.set('maxPixels', String(flags['--max-pixels']));
+  }
+
+  const manifestRes = await request(
+    'GET',
+    `/api/reachback/snapshot?${query.toString()}`,
+  );
+  const manifest = await manifestRes.json();
+  const images = Array.isArray(manifest.images) ? manifest.images : [];
+
+  if (images.length === 0) {
+    process.stderr.write('Error: no snapshottable nodes in selection\n');
+    process.exit(1);
+  }
+
+  await mkdir(outputDir, { recursive: true });
+
+  for (const image of images) {
+    // Download the PNG bytes from the canvas artifact route. The key is
+    // a bare filename (`<id>.png`); the artifact route is Bearer-reachable.
+    const fileRes = await request(
+      'GET',
+      `/api/canvas/${canvasId}/artifact/${image.key}`,
+    );
+    const bytes = Buffer.from(await fileRes.arrayBuffer());
+    const filePath = path.join(outputDir, image.key);
+    await writeFile(filePath, bytes);
+
+    const dims =
+      image.width && image.height ? `${image.width}x${image.height}` : 'unknown';
+    process.stderr.write(
+      `key=${image.key} size=${dims} originNodeIds=${(image.originNodeIds || []).join(',')}\n`,
+    );
+    process.stdout.write(`${filePath}\n`);
+  }
+}
+
 async function askAgent(args) {
   const { flags, positional } = parseArgs(args, {
     boolean: ['--show-steps', '--no-save-session'],
@@ -551,6 +630,7 @@ const [command, ...args] = process.argv.slice(2);
 const COMMANDS = {
   'read-node': readNode,
   'write-node': writeNode,
+  snapshot: snapshot,
   'ask-agent': askAgent,
 };
 
@@ -561,6 +641,7 @@ Usage: node huabu-reachback-tool.mjs <command> [args...]
 Commands:
   read-node   Read a canvas node's content to a local file
   write-node  Create or update a canvas node
+  snapshot    Render sketch / image nodes to PNG image(s)
   ask-agent   Send a prompt to a built-in Huabu agent
 
 Options:

@@ -11,6 +11,7 @@
 import { createId } from '@sediment/shared';
 
 import { runAgent } from '../modules/agent/agent.service.js';
+import { snapshotNodesToArtifacts } from '../modules/agent/tools/handlers/snapshot-node.js';
 
 import type { StreamEvent } from '../modules/agent/agent.service.js';
 import type { Context, UserMessage } from '@earendil-works/pi-ai';
@@ -30,6 +31,32 @@ interface AskAgentBody {
   prompt: string;
   canvasId: string;
 }
+
+interface SnapshotQuery {
+  canvasId: string;
+  nodeIds: string;
+  maxPixels?: number;
+}
+
+/** One rendered PNG in the snapshot manifest. */
+interface SnapshotImage {
+  /** Artifact key (`<id>.png`); download via `/api/canvas/:canvasId/artifact/:key`. */
+  key: string;
+  /** PNG width in pixels (0 = unknown, e.g. an image pass-through). */
+  width: number;
+  /** PNG height in pixels (0 = unknown). */
+  height: number;
+  /** Canvas node ids whose pixels contributed to this PNG. */
+  originNodeIds: string[];
+}
+
+interface SnapshotResponse {
+  canvasId: string;
+  images: SnapshotImage[];
+}
+
+/** Hard cap on node ids accepted in one snapshot request. */
+const SNAPSHOT_MAX_NODE_IDS = 200;
 
 // ── Route plugin ──
 
@@ -105,6 +132,81 @@ const reachbackRoutes: FastifyPluginAsync = async (app) => {
       } finally {
         request.raw.socket?.removeListener('close', onClose);
         reply.raw.end();
+      }
+    },
+  );
+
+  // ── GET /snapshot — render sketch/image nodes to PNG artifact(s) ──
+  //
+  // Thin exposure of the internal `snapshot_nodes` tool. Given a set of
+  // node ids, it spatially clusters image + sketch nodes (frames expand
+  // to their children) and rasterizes each cluster to one
+  // content-addressed PNG in the canvas `.artifacts/` store. The agent
+  // then downloads each PNG via the (Bearer-reachable) canvas artifact
+  // route `GET /api/canvas/:canvasId/artifact/:key`.
+  app.get<{ Querystring: SnapshotQuery }>(
+    '/snapshot',
+    {
+      schema: {
+        querystring: {
+          type: 'object',
+          required: ['canvasId', 'nodeIds'],
+          properties: {
+            canvasId: { type: 'string', minLength: 1 },
+            nodeIds: { type: 'string', minLength: 1 },
+            maxPixels: { type: 'integer', minimum: 256, maximum: 4096 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { canvasId, nodeIds, maxPixels } = request.query;
+
+      // Comma-separated list; trim, drop empties, dedupe (preserve order).
+      const seen = new Set<string>();
+      const ids: string[] = [];
+      for (const raw of nodeIds.split(',')) {
+        const id = raw.trim();
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        ids.push(id);
+      }
+
+      if (ids.length === 0) {
+        return reply
+          .code(400)
+          .send({ message: 'nodeIds must contain at least one node id' });
+      }
+      if (ids.length > SNAPSHOT_MAX_NODE_IDS) {
+        return reply.code(400).send({
+          message: `Too many node ids (${ids.length}); max ${SNAPSHOT_MAX_NODE_IDS}`,
+        });
+      }
+
+      try {
+        const results = await snapshotNodesToArtifacts({
+          canvasId,
+          nodeIds: ids,
+          ...(maxPixels !== undefined ? { maxPixels } : {}),
+        });
+        const payload: SnapshotResponse = {
+          canvasId,
+          images: results.map((r) => ({
+            key: r.src,
+            width: r.width,
+            height: r.height,
+            originNodeIds: r.originNodeIds,
+          })),
+        };
+        return reply.send(payload);
+      } catch (err: unknown) {
+        // `snapshotNodesToArtifacts` throws on missing / non-snapshottable
+        // top-level nodes and on a missing canvas. Surface the message so
+        // the HRT caller learns why, as a 400 (caller-supplied bad ids).
+        const message =
+          err instanceof Error ? err.message : 'Failed to snapshot nodes';
+        request.log.info({ canvasId, message }, 'reachback snapshot failed');
+        return reply.code(400).send({ message });
       }
     },
   );
