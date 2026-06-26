@@ -171,6 +171,21 @@ export function chatPartsPath(canvasId: string, threadId: string): string {
   );
 }
 
+/**
+ * Structured thread record paired with a thread — the source of truth
+ * for chat history in the envelope-persistence model: a versioned list
+ * of turns, each carrying the user's structured {@link ChatEnvelope}
+ * plus the assistant/tool transcript it produced. Kept on a distinct
+ * `.turns.json` path so legacy `.json` pi-ai `Context` files are simply
+ * ignored (no migration). See `chat-thread-store.ts` for the schema.
+ */
+export function chatTurnsPath(canvasId: string, threadId: string): string {
+  return path.join(
+    chatDir(canvasId),
+    `${sanitizeId(threadId, 'threadId')}.turns.json`,
+  );
+}
+
 export function intentPath(canvasId: string): string {
   return path.join(historyDir(canvasId), 'intent.json');
 }

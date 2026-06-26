@@ -27,6 +27,10 @@ import { buildChatEnvelope } from './envelope.js';
 
 import type { ChatEnvelope, ChatEnvelopeParams } from './envelope.js';
 import type { LoadedAgent } from '../../../prompt/index.js';
+import type {
+  ChatThreadRecord,
+  PiMessage,
+} from '../store/chat-thread-store.js';
 import type { Context } from '@earendil-works/pi-ai';
 import type { ChatAttachment } from '@sediment/shared';
 
@@ -431,11 +435,39 @@ export async function serializeChatEnvelopeToPiAi(
   env: ChatEnvelope,
   opts: { canvasId: string | null; agentCfg: LoadedAgent },
 ): Promise<UserContent> {
+  const { messages, userContent } = await renderEnvelopeMessages(env, opts);
+  context.messages.push(...messages);
+  return userContent;
+}
+
+/**
+ * Render a {@link ChatEnvelope} into the ordered pi-ai user messages
+ * for one turn, WITHOUT touching any `Context`. This is the pure core
+ * behind {@link serializeChatEnvelopeToPiAi}; it is also used to
+ * rebuild historical turns from their persisted envelopes (the
+ * structured-persistence path) so the `[SYSTEM …]` encoding is never
+ * the source of truth on disk.
+ *
+ * Canonical order:
+ *   1. workspace-memory pre-read (first turn only)
+ *   2. selected-node reference preamble
+ *   3. node-neighbourhood preamble (anchored requests)
+ *   4. user-invoked skill bodies
+ *   5. the user's message (with selection / skill / attachment tags)
+ *
+ * Returns the rendered messages plus the final tagged user-message
+ * content (the ACP dispatch path consumes the latter).
+ */
+export async function renderEnvelopeMessages(
+  env: ChatEnvelope,
+  opts: { canvasId: string | null; agentCfg: LoadedAgent },
+): Promise<{ messages: PiMessage[]; userContent: UserContent }> {
   const { canvasId, agentCfg } = opts;
+  const messages: PiMessage[] = [];
 
   // 1. Workspace-memory pre-read (cross-canvas profile; first turn only).
   if (env.preamble.workspaceMemory) {
-    context.messages.push({
+    messages.push({
       role: 'user',
       content: `[SYSTEM Workspace memory \u2014 cross-canvas user profile, eagerly loaded for the first turn]\n${env.preamble.workspaceMemory}`,
       timestamp: Date.now(),
@@ -464,7 +496,7 @@ export async function serializeChatEnvelopeToPiAi(
   // { id, type, label?, filename } — `filename` is pre-computed so the
   // agent can `read` it verbatim. Richer detail is fetched on demand.
   if (env.focus.selection.refs.length > 0) {
-    context.messages.push({
+    messages.push({
       role: 'user',
       content: renderAgentTemplate(agentCfg, 'selectedNodesPreamble', {
         refsJson: JSON.stringify(env.focus.selection.refs, null, 2),
@@ -475,7 +507,7 @@ export async function serializeChatEnvelopeToPiAi(
 
   // 3. Node-neighbourhood preamble (anchored requests only).
   if (env.preamble.nodeNeighbourhood) {
-    context.messages.push({
+    messages.push({
       role: 'user',
       content: renderAgentTemplate(agentCfg, 'nodeNeighbourhoodPreamble', {
         spatial: env.preamble.nodeNeighbourhood,
@@ -499,7 +531,7 @@ export async function serializeChatEnvelopeToPiAi(
       env.skills.resolved.length === 1
         ? `[SYSTEM Skill — the user explicitly invoked ${quotedIds}. Apply its guidance to this turn.]`
         : `[SYSTEM Skills — the user explicitly invoked ${quotedIds}. Apply their guidance to this turn.]`;
-    context.messages.push({
+    messages.push({
       role: 'user',
       content: `${header}\n\n${sections}`,
       timestamp: Date.now(),
@@ -515,13 +547,13 @@ export async function serializeChatEnvelopeToPiAi(
     invokedSkills: env.skills.invokedIds,
     attachments: allAttachments,
   });
-  context.messages.push({
+  messages.push({
     role: 'user',
     content: userContent,
     timestamp: Date.now(),
   });
 
-  return userContent;
+  return { messages, userContent };
 }
 
 /**
@@ -541,4 +573,24 @@ export async function applyChatTurnMessages(
     canvasId: params.canvasId,
     agentCfg: params.agentCfg,
   });
+}
+
+/**
+ * Rebuild the flat pi-ai message array for a thread from its stored
+ * {@link ChatThreadRecord}: re-serialise each turn's envelope into the
+ * canonical user messages, then append that turn's persisted
+ * assistant/tool transcript. This is how the structured-persistence
+ * path reconstructs the `Context.messages` the agent runs over, so the
+ * `[SYSTEM …]` encoding never has to be the source of truth on disk.
+ */
+export async function rebuildContextMessages(
+  record: ChatThreadRecord,
+  opts: { canvasId: string | null; agentCfg: LoadedAgent },
+): Promise<PiMessage[]> {
+  const out: PiMessage[] = [];
+  for (const turn of record.turns) {
+    const { messages } = await renderEnvelopeMessages(turn.envelope, opts);
+    out.push(...messages, ...turn.transcript);
+  }
+  return out;
 }
