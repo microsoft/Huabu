@@ -28,6 +28,7 @@ import {
   type AcpConnectionStatus,
 } from './AcpConnectionBadge';
 import { AcpSessionSelectors } from './AcpSessionSelectors';
+import { AgentSelector, type AgentChoice } from './AgentSelector';
 import { ChatInput } from './ChatInput';
 import { NewChatMenu, type NewChatChoice } from './NewChatMenu';
 import { parseSlashInvocations } from './parseSlashInvocations';
@@ -71,6 +72,11 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   // for legacy nodes that pre-date the `@` picker.
   const viewingQuestionThread = useChatStore((s) => s.viewingQuestionThread);
   const viewingQuestionNodeId = viewingQuestionThread?.nodeId;
+  // Compose = the initial authoring of a freshly-created question node:
+  // the binding is still mutable and the mode follows the user's inline
+  // pick (`lastAction`) rather than the node's not-yet-written
+  // `agentMode`. Replay (already-run node) keeps deriving from the node.
+  const isComposingQuestion = viewingQuestionThread?.compose === true;
   const questionReplayMode = useCanvasStore((s) => {
     if (!viewingQuestionNodeId) return undefined;
     const node = s.nodes.find((n) => n.id === viewingQuestionNodeId);
@@ -82,9 +88,10 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     return d.agentBinding?.kind === 'external' ? 'ask' : (d.agentMode ?? 'ask');
   });
 
-  const mode: AgentMode = viewingQuestionThread
-    ? (questionReplayMode ?? 'ask')
-    : lastAction;
+  const mode: AgentMode =
+    viewingQuestionThread && !isComposingQuestion
+      ? (questionReplayMode ?? 'ask')
+      : lastAction;
 
   // Agent stream hook — manages streaming and loading state
   const { isLoading, setIsLoading, startStream, stopStream } = useAgentStream();
@@ -559,6 +566,23 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     [isLoading, canvasId, clearMessages],
   );
 
+  // Inline agent selector (left of the chat input toolbar). The binding
+  // is mutable only while the thread has no user message yet — once a
+  // turn is sent, 1-thread-1-binding locks it and the selector renders
+  // read-only. Picking an agent rebinds the *current* (empty) thread in
+  // place; it never mints a new thread (that is `NewChatMenu`'s job).
+  const threadHasUserMessage = messages.some((m) => m.role === 'user');
+  const agentSelectorEditable =
+    !viewingSketchCluster && !threadHasUserMessage && !isLoading;
+  const handleSelectAgent = useCallback(
+    (choice: AgentChoice) => {
+      if (isLoading) return;
+      setAgentBinding(choice.binding, canvasId || undefined);
+      setLastAction(choice.mode);
+    },
+    [isLoading, setAgentBinding, setLastAction, canvasId],
+  );
+
   const canSave =
     !viewingQuestionThread &&
     !viewingSketchCluster &&
@@ -680,7 +704,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
 
         {/* Input is hidden in sketch inspector mode — it's a read-only view. */}
         {!viewingSketchCluster && (
-          <div className="px-3 pb-3">
+          <div className="px-3 pb-2">
             <ChatInput
               value={input}
               onChange={setInput}
@@ -691,6 +715,17 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
               slashCommands={slashCommands}
               slashLoading={slashLoading}
               onSlashMenuIntent={refreshSlashCommands}
+              agentSelectorSlot={
+                <AgentSelector
+                  currentBinding={agentBinding}
+                  currentMode={mode}
+                  profiles={acpProfiles}
+                  editable={agentSelectorEditable}
+                  onSelect={handleSelectAgent}
+                  onRefreshProfiles={refreshAcpProfiles}
+                  disabled={!isHistoryLoaded}
+                />
+              }
               acpSelectorsSlot={
                 agentBinding.kind === 'external' ? (
                   <AcpSessionSelectors

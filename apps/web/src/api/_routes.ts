@@ -71,6 +71,10 @@ export const routes = {
     const params = canvasId ? `?canvasId=${enc(canvasId)}` : '';
     return `/agent/history/${enc(threadId)}${params}`;
   },
+  agentHistoryFork: (threadId: string, canvasId?: string) => {
+    const params = canvasId ? `?canvasId=${enc(canvasId)}` : '';
+    return `/agent/history/${enc(threadId)}/fork${params}`;
+  },
   agentStop: (threadId: string) => `/agent/stop/${enc(threadId)}`,
   agentStream: (threadId: string) => `/agent/stream/${enc(threadId)}`,
   agentContextTokens: (threadId: string, canvasId?: string) => {

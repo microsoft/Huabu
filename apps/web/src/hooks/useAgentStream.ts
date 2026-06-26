@@ -1070,13 +1070,21 @@ export function useAgentStream(): UseAgentStreamReturn {
         ...(selectionAttachment ? [selectionAttachment] : []),
       ];
 
+      // The anchored question node (when composing/replaying a question
+      // thread) is the conversation's spatial anchor — the server already
+      // injects its neighbourhood via `anchorNodeId`. Exclude it from the
+      // selected-node context so the node isn't also attached to itself as
+      // a "source".
+      const anchorQuestionNodeId =
+        useChatStore.getState().viewingQuestionThread?.nodeId ?? null;
+
       // Selected node ids are still recorded on the persisted user
       // message so the UI can re-render the selection chip after a
       // reload, even though we no longer derive any attachments from
       // them client-side.
       const selectedNodeIds = useCanvasStore
         .getState()
-        .nodes.filter((n) => n.selected)
+        .nodes.filter((n) => n.selected && n.id !== anchorQuestionNodeId)
         .map((n) => n.id);
 
       const mergedAttachments = [...allPending];
@@ -1149,6 +1157,33 @@ export function useAgentStream(): UseAgentStreamReturn {
       let sawDone = false;
 
       if (questionNodeId) {
+        // First send of a freshly-composed question node: author the
+        // node's `content` from this prompt and lock in the agent the
+        // user picked in the inline selector (binding + built-in mode).
+        // Clearing the `compose` flag flips the panel from "editable
+        // composer" to replay semantics for every follow-up turn.
+        const isCompose = viewingQuestion?.compose === true;
+        if (isCompose) {
+          useChatStore.setState({
+            viewingQuestionThread: {
+              nodeId: questionNodeId,
+              threadId,
+              compose: false,
+            },
+          });
+          // Author content through the intent pipeline so it gets a
+          // markdown sidecar save + server-side label preprocessing —
+          // matching how the inline editor used to commit the prompt.
+          useCanvasStore
+            .getState()
+            .updateNodeData(questionNodeId, { content: prompt });
+        }
+        const composeBinding = isCompose
+          ? {
+              agentBinding: useChatStore.getState().agentBinding,
+              agentMode,
+            }
+          : {};
         // Reset `viewed` so the layer-panel dot + on-canvas "done · unread"
         // glow re-appear when the follow-up answer lands (mirrors
         // `useQuestionRunner`'s initial-run behaviour). `onComplete`
@@ -1157,6 +1192,7 @@ export function useAgentStream(): UseAgentStreamReturn {
           status: 'running',
           errorMessage: undefined,
           viewed: false,
+          ...composeBinding,
         });
       }
 
@@ -1190,13 +1226,20 @@ export function useAgentStream(): UseAgentStreamReturn {
         });
       }
 
-      try {
-        // Per-thread messages live in `messagesByThread[threadId]`, so
-        // SSE writes can land on the owning thread regardless of which
-        // chat the user is currently looking at — no `isStillOwnerThread`
-        // guard needed for messages. Loading / abort cleanup is also
-        // keyed to this thread so cross-thread state stays clean.
+      // Build the canvas context, dropping the anchored question node
+      // from `selectedNodes` for the same reason as `selectedNodeIds`
+      // above — it is the conversation anchor, not a separate source.
+      const baseCanvasContext = getAgentChatContext();
+      const canvasContext = anchorQuestionNodeId
+        ? {
+            ...baseCanvasContext,
+            selectedNodes: baseCanvasContext.selectedNodes.filter(
+              (n) => n.id !== anchorQuestionNodeId,
+            ),
+          }
+        : baseCanvasContext;
 
+      try {
         await agentApi.streamMessage(
           prompt,
           threadId,
@@ -1266,7 +1309,7 @@ export function useAgentStream(): UseAgentStreamReturn {
             },
           },
           {
-            canvasContext: getAgentChatContext(),
+            canvasContext,
             canvasId: canvasId || undefined,
             attachments,
             intentData,

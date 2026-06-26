@@ -13,7 +13,7 @@ import {
 } from '@xyflow/react';
 import { create, type StateCreator } from 'zustand';
 
-import { ARTIFACT_DATA_FIELDS } from '@sediment/shared';
+import { ARTIFACT_DATA_FIELDS, createId } from '@sediment/shared';
 import {
   COMMAND_META,
   applyDeltas,
@@ -75,6 +75,7 @@ import { useChatStore } from './chatStore';
 import { useGesturePreviewStore } from './gesturePreviewStore';
 import { useToolStore } from './toolStore';
 import { getCanvas, putCanvas } from '../api';
+import { agentApi } from '../api/agent';
 import { cloneArtifactToCanvas } from '../api/artifact';
 import { CanvasConflictError } from '../api/canvas';
 import { toast, dismissToast } from '../components/Common/Toast';
@@ -2721,6 +2722,92 @@ const useCanvasStore = create<RFState>()(
       const dstCanvasId = get().canvasId;
       if (!dstCanvasId || clipboardNodes.length === 0) return;
 
+      // ── Question-node conversation handling ─────────────────────────
+      // A copied question node that already holds a conversation is
+      // special-cased:
+      //   - built-in agent → fork the thread server-side so the copy
+      //     keeps the same history but continues on its own independent
+      //     thread (`resolvePasteClipboard` preserves the new threadId
+      //     for nodes flagged `__forkConversation`).
+      //   - external (ACP) agent → cannot be forked (the protocol has no
+      //     session-copy primitive), so skip the node and toast.
+      // Never-run / empty question nodes fall through to a plain fresh
+      // copy (the resolver resets their runtime state as before).
+      const forkTasks: { srcThreadId: string; dstThreadId: string }[] = [];
+      let blockedExternal = 0;
+      const prepared: Node[] = [];
+      for (const node of clipboardNodes) {
+        const data = (node.data ?? {}) as Record<string, unknown>;
+        const isQuestion = node.type === 'question' || data.type === 'question';
+        const threadId =
+          typeof data.threadId === 'string' ? data.threadId : undefined;
+        const status = data.status;
+        const hasConversation =
+          isQuestion &&
+          !!threadId &&
+          (status === 'done' || status === 'error' || status === 'running');
+        if (hasConversation) {
+          const binding = data.agentBinding as { kind?: string } | undefined;
+          if (binding?.kind === 'external') {
+            blockedExternal += 1;
+            continue;
+          }
+          const dstThreadId = createId('thread');
+          forkTasks.push({ srcThreadId: threadId, dstThreadId });
+          prepared.push({
+            ...node,
+            data: {
+              ...data,
+              threadId: dstThreadId,
+              status: 'done',
+              errorMessage: undefined,
+              __forkConversation: true,
+            },
+          });
+          continue;
+        }
+        prepared.push(node);
+      }
+
+      if (blockedExternal > 0) {
+        toast(
+          blockedExternal === 1
+            ? "External agent conversations can't be copied — node skipped"
+            : `External agent conversations can't be copied — ${blockedExternal} nodes skipped`,
+          { tone: 'warning' },
+        );
+      }
+      // Everything in the clipboard was a blocked external conversation.
+      if (prepared.length === 0) return;
+      clipboardNodes = prepared;
+
+      // Fire the server-side history forks for built-in copies. Order vs
+      // node creation is irrelevant — the copy already points at its new
+      // threadId; the server just needs to have copied the history before
+      // the user opens the node.
+      const runForks = () => {
+        if (forkTasks.length === 0) return;
+        const sourceCanvasId = srcCanvasId ?? dstCanvasId;
+        void Promise.all(
+          forkTasks.map((t) =>
+            agentApi
+              .forkThread(
+                t.srcThreadId,
+                t.dstThreadId,
+                sourceCanvasId,
+                dstCanvasId,
+              )
+              .catch((err) => {
+                console.warn(
+                  '[paste] Failed to fork question conversation',
+                  err,
+                );
+                toast('Failed to copy a conversation', { tone: 'danger' });
+              }),
+          ),
+        );
+      };
+
       // Same-canvas pastes leave artifact keys as-is (the artifact is
       // already owned by this canvas). Cross-canvas pastes clone the
       // underlying file so the destination canvas owns its own copy —
@@ -2759,6 +2846,7 @@ const useCanvasStore = create<RFState>()(
       // behaviour so simple intra-canvas pastes feel instant.
       if (!needsClone || !srcCanvasId) {
         dispatch(clipboardNodes);
+        runForks();
         return;
       }
 
@@ -2800,6 +2888,7 @@ const useCanvasStore = create<RFState>()(
           }),
         );
         dispatch(remapped);
+        runForks();
       })();
     },
 

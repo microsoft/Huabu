@@ -25,16 +25,18 @@
  *
  * ## Invariant enforced here
  *
- * A question node that owns a `threadId` has been dispatched to an agent
- * at least once and therefore has a conversation to show. After a fresh
- * load there is never an in-flight run (run controllers / auto-run timers
- * live only in memory), so any non-terminal status on such a node is
- * stale. We demote it to `done` — the conversation exists, the badge
- * reappears, and `canOpenInChat` (threadId + done) lets the user reopen
- * the thread. The repaired status persists on the next structural save.
+ * A question node that owns a `threadId` AND has authored `content` has
+ * been dispatched to an agent at least once and therefore has a
+ * conversation to show. After a fresh load there is never an in-flight
+ * run (run controllers live only in memory), so any non-terminal status
+ * on such a node is stale. We demote it to `done` — the conversation
+ * exists, the badge reappears, and `canOpenInChat` (threadId + done)
+ * lets the user reopen the thread. The repaired status persists on the
+ * next structural save.
  *
- * Nodes *without* a `threadId` are left untouched so the normal auto-run
- * path (`status: 'pending'` + `runAt`) still re-fires on reload.
+ * Nodes without a `threadId`, or with a `threadId` but empty `content`
+ * (a thread minted for composition that never received a message), are
+ * left untouched so a never-asked node stays `idle`.
  */
 
 import type { Node } from '@xyflow/react';
@@ -54,16 +56,25 @@ function reconcileOne(node: Node): Node {
   if (!data) return node;
 
   const threadId = data.threadId;
-  // No dispatch has happened yet → leave the auto-run / idle state alone.
+  // No thread yet → nothing has ever been dispatched. Leave it alone.
   if (typeof threadId !== 'string' || threadId.length === 0) return node;
+
+  // A question node mints its `threadId` the moment it is opened for
+  // composition — BEFORE any message is sent. So a thread id alone no
+  // longer proves a conversation exists. The authored `content` does:
+  // it is written on the first send. An empty-content node has never
+  // been asked (the user dropped it / opened compose but didn't send),
+  // so its `idle` state is correct and must not be promoted to `done`.
+  const content = data.content;
+  if (typeof content !== 'string' || content.trim().length === 0) return node;
 
   const status = data.status;
   // Already terminal → trust it.
   if (typeof status === 'string' && TERMINAL_STATUSES.has(status)) return node;
 
-  // Stale non-terminal status (idle / pending / running) on a node that
-  // already owns a conversation → repair to `done` and drop any stale
-  // auto-run timestamp so the runner does not re-fire it.
+  // Stale non-terminal status (idle / running) on a node that already
+  // owns a conversation → repair to `done` and drop any legacy auto-run
+  // timestamp so nothing tries to re-fire it.
   const nextData: Record<string, unknown> = { ...data, status: 'done' };
   if ('runAt' in nextData) delete nextData.runAt;
 

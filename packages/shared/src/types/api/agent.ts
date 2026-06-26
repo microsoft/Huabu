@@ -272,6 +272,29 @@ export const agentCanvasIdQuerySchema = z.object({
 });
 export type AgentCanvasIdQuery = z.infer<typeof agentCanvasIdQuerySchema>;
 
+/**
+ * Body for `POST /api/agent/history/:threadId/fork`.
+ *
+ * Forks a thread's conversation onto a brand-new thread id so a copied
+ * question node owns an independent continuation that nonetheless starts
+ * from the same history. The `canvasId` query selects the SOURCE canvas;
+ * `targetCanvasId` (when set) lets a cross-canvas paste land the copy on
+ * a different canvas. Only meaningful for the built-in agent — external
+ * ACP sessions cannot be duplicated (the protocol has no session fork).
+ */
+export const forkThreadBodySchema = z.object({
+  targetThreadId: z.string().min(1),
+  targetCanvasId: z.string().min(1).optional(),
+});
+export type ForkThreadBody = z.infer<typeof forkThreadBodySchema>;
+
+export interface ForkThreadResponse {
+  /** The new thread id the history was copied onto. */
+  threadId: string;
+  /** False when the source thread had no persisted history to copy. */
+  forked: boolean;
+}
+
 /** Body for `POST /api/intent/recognize` and `/recognize-stream`. */
 export const intentRequestSchema = z.object({
   canvasContext: intentContextSchema,
