@@ -23,12 +23,10 @@ import {
 } from '../../artifact/utils.js';
 import { getCanvasStore } from '../../storage/index.js';
 import { appendMetadataTags } from '../user-message-metadata.js';
-import { buildChatEnvelope } from './envelope.js';
 
-import type { ChatEnvelope, ChatEnvelopeParams } from './envelope.js';
+import type { ChatEnvelope } from './envelope.js';
 import type { LoadedAgent } from '../../../prompt/index.js';
 import type { ChatTurnRecord, PiMessage } from '../store/chat-thread-store.js';
-import type { Context } from '@earendil-works/pi-ai';
 import type { ChatAttachment } from '@sediment/shared';
 
 /**
@@ -403,47 +401,13 @@ async function buildUserContent(
 }
 
 /**
- * Inputs needed to assemble one chat turn: everything the envelope
- * builder needs, plus the resolved agent config the pi-ai serializer
- * uses for its message templates.
- */
-export interface ChatTurnParams extends ChatEnvelopeParams {
-  /** Resolved agent config (provides message templates). */
-  agentCfg: LoadedAgent;
-}
-
-/**
- * Serialize a structured {@link ChatEnvelope} into the per-turn pi-ai
- * user messages, pushing them onto `context.messages` in canonical
- * order:
- *   1. workspace-memory pre-read (first turn only)
- *   2. selected-node reference preamble
- *   3. node-neighbourhood preamble (anchored requests)
- *   4. user-invoked skill bodies
- *   5. the user's message (with selection / skill / attachment tags)
- *
- * This is the one place the pi-ai-specific `[SYSTEM …]` encoding and
- * base64 vision-part resolution live. Returns the final tagged
- * user-message content so the caller can forward it to the
- * external-agent (ACP) dispatch path.
- */
-export async function serializeChatEnvelopeToPiAi(
-  context: Context,
-  env: ChatEnvelope,
-  opts: { canvasId: string | null; agentCfg: LoadedAgent },
-): Promise<UserContent> {
-  const { messages, userContent } = await renderEnvelopeMessages(env, opts);
-  context.messages.push(...messages);
-  return userContent;
-}
-
-/**
  * Render a {@link ChatEnvelope} into the ordered pi-ai user messages
- * for one turn, WITHOUT touching any `Context`. This is the pure core
- * behind {@link serializeChatEnvelopeToPiAi}; it is also used to
- * rebuild historical turns from their persisted envelopes (the
- * structured-persistence path) so the `[SYSTEM …]` encoding is never
- * the source of truth on disk.
+ * for one turn, WITHOUT touching any `Context`. This is the one place
+ * the pi-ai-specific `[SYSTEM …]` encoding and base64 vision-part
+ * resolution live. It is used both to build the current turn's
+ * messages and to rebuild historical turns from their persisted
+ * envelopes (the structured-persistence path), so the `[SYSTEM …]`
+ * encoding is never the source of truth on disk.
  *
  * Canonical order:
  *   1. workspace-memory pre-read (first turn only)
@@ -551,25 +515,6 @@ export async function renderEnvelopeMessages(
   });
 
   return { messages, userContent };
-}
-
-/**
- * Assemble one chat turn: build the structured {@link ChatEnvelope}
- * (memory read, auto-snapshot, skill resolution, neighbourhood render)
- * and serialize it into pi-ai messages on `context`.
- *
- * Mutates `context.messages` in place — the caller owns persistence.
- * Returns the final tagged user-message content for the ACP path.
- */
-export async function applyChatTurnMessages(
-  context: Context,
-  params: ChatTurnParams,
-): Promise<UserContent> {
-  const env = await buildChatEnvelope(params);
-  return serializeChatEnvelopeToPiAi(context, env, {
-    canvasId: params.canvasId,
-    agentCfg: params.agentCfg,
-  });
 }
 
 /**

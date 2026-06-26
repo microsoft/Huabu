@@ -148,25 +148,60 @@ const TAG_ORDER: readonly TagKey[] = [
   'hint',
 ] as const;
 
-export function appendMetadataTags(
-  content: UserContent,
-  meta: UserMessageMetadata,
-): UserContent {
-  // Drop attachments that the UI would render as a duplicate chip:
-  // (1) sketch-raster artifacts are server-internal — their info
-  // survives as the LLM-only `hint` below, never as a chip;
-  // (2) selection-sourced items whose origin nodes are already
-  // carried by `selectedNodeIds`, because the UI already renders
-  // one chip per selected node.
-  const allAttachments = meta.attachments ?? [];
-  const selectedSet = new Set(meta.selectedNodeIds ?? []);
-  const userVisibleAttachments = allAttachments.filter((a) => {
+/**
+ * Filter the full attachment list down to the user-visible subset the
+ * UI renders as chips, dropping:
+ *   (1) sketch-raster artifacts — server-internal, surfaced to the LLM
+ *       only via the `hint` tag, never as a chip;
+ *   (2) selection-sourced items whose origin nodes are already carried
+ *       by `selectedNodeIds`, because the UI renders one chip per
+ *       selected node.
+ *
+ * Shared by `appendMetadataTags` (tag emission) and the structured
+ * history builder (reload), so both agree on which attachments a
+ * reloaded user message shows.
+ */
+export function selectUserVisibleAttachments(
+  attachments: ChatAttachment[],
+  selectedNodeIds: string[],
+): ChatAttachment[] {
+  const selectedSet = new Set(selectedNodeIds);
+  return attachments.filter((a) => {
     if (isSketchRasterAttachment(a)) return false;
     if (a.source !== 'selection') return true;
     const origin = a.originNodeId ? [a.originNodeId] : (a.originNodeIds ?? []);
     if (origin.length === 0) return true;
     return !origin.every((id) => selectedSet.has(id));
   });
+}
+
+/**
+ * Project the user-visible attachments to the persisted/display shape
+ * (drops bulky `content`, keeps identity + label + url). Used by the
+ * history builder so reloaded chips match what the live composer
+ * showed.
+ */
+export function projectUserVisibleAttachments(
+  attachments: ChatAttachment[],
+  selectedNodeIds: string[],
+): Partial<ChatAttachment>[] {
+  return selectUserVisibleAttachments(attachments, selectedNodeIds).map(
+    projectAttachment,
+  );
+}
+
+export function appendMetadataTags(
+  content: UserContent,
+  meta: UserMessageMetadata,
+): UserContent {
+  // Drop attachments that the UI would render as a duplicate chip
+  // (sketch-raster artifacts + selection items already covered by a
+  // node chip). See `selectUserVisibleAttachments`.
+  const allAttachments = meta.attachments ?? [];
+  const userVisibleAttachments = selectUserVisibleAttachments(
+    allAttachments,
+    meta.selectedNodeIds ?? [],
+  );
   const derivedHint =
     meta.hint ?? buildSketchRasterHint(allAttachments) ?? undefined;
 

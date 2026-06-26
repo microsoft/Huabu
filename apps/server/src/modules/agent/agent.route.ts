@@ -20,13 +20,28 @@ import {
 import { loadAgent } from '../../prompt/index.js';
 import { runAcpAgent } from '../agent/acp/service.js';
 import { runAgent } from '../agent/agent.service.js';
-import { applyChatTurnMessages } from '../agent/context/chat-turn.js';
+import {
+  rebuildContextMessages,
+  renderEnvelopeMessages,
+} from '../agent/context/chat-turn.js';
+import { buildChatEnvelope } from '../agent/context/envelope.js';
 import { getLLMModel } from '../agent/llm.js';
 import { readChatParts } from '../agent/store/chat-parts-store.js';
-import { loadContext, saveContext } from '../agent/store/chat-store.js';
-import { stripMetadataTags } from '../agent/user-message-metadata.js';
+import {
+  appendTurn,
+  clearActiveTurn,
+  finalizeActiveTurn,
+  loadTurns,
+  writeActiveTurn,
+} from '../agent/store/chat-thread-store.js';
+import { projectUserVisibleAttachments } from '../agent/user-message-metadata.js';
 
+import type { ToolAcpExtension } from '../agent/store/chat-parts-store.js';
 import type { ChatPartsSidecar } from '../agent/store/chat-parts-store.js';
+import type {
+  ChatTurnRecord,
+  PiMessage,
+} from '../agent/store/chat-thread-store.js';
 import type { AssistantMessage, Context } from '@earendil-works/pi-ai';
 import type {
   AgentCanvasIdQuery,
@@ -34,6 +49,7 @@ import type {
   AgentStreamEvent,
   ApiResult,
   AssistantHistoryPart,
+  ChatAttachment,
   ChatHistoryItem,
   ChatHistoryResponse,
   ContextTokensResponse,
@@ -188,341 +204,297 @@ function parseToolResultText(
 }
 
 /**
- * Convert a pi-ai Context into ChatHistoryItem entries for the client.
- *
- * Assistant turns are emitted as a single `role:'assistant'` item
- * whose `parts` array preserves the in-stream order of text /
- * thinking / tool blocks — there is no longer a standalone
- * `role:'tool'` item (the legacy variant was dropped in PR-2).
- *
- * Tool segments are reconstructed by looking ahead at the pi-ai
- * `toolResult` messages (matched by `toolCallId`) and, when present,
- * by the ACP sidecar's per-call extras (`toolKind`, `status`,
- * `locations`, structured `content`, `permission`). Plans persisted
- * in the sidecar by message timestamp are appended at the end of
- * the assistant turn's parts.
- *
- * Status messages (interrupted / error) are still deferred so they
- * appear after any adjacent assistant content, matching the visual
- * order the user saw during the live session.
+ * Index the `toolResult` messages in a message list by `toolCallId`,
+ * so an assistant `toolCall` block can find its result in O(1).
  */
-function buildHistoryItems(
-  context: Context,
-  sidecar: ChatPartsSidecar | null,
-  messages: ChatHistoryItem[],
-): void {
-  let pendingStatus: ChatHistoryItem | null = null;
-  // Coalesce consecutive pi-ai assistant messages (one per tool
-  // round) into a single ChatHistoryItem so the UI renders ONE
-  // bubble with ONE action bar per agent turn — mirroring the live
-  // SSE behaviour where every event for a startStream call lands on
-  // the same `assistantId`. Reset on any non-assistant boundary
-  // (user / status / prepared-prompt / intent-select).
-  let currentAssistant: Extract<ChatHistoryItem, { role: 'assistant' }> | null =
-    null;
-
-  const flushStatus = () => {
-    if (pendingStatus) {
-      messages.push(pendingStatus);
-      pendingStatus = null;
-      currentAssistant = null;
-    }
-  };
-
-  // Pre-index pi-ai toolResult messages by toolCallId so an assistant
-  // message's `toolCall` block can find its result in O(1) without
-  // forcing a quadratic scan over the message list. Each result is
-  // referenced exactly once during the walk below; collisions cannot
-  // happen because pi-ai guarantees toolCallIds are unique within a
-  // Context.
-  const toolResultByCallId = new Map<
-    string,
-    { toolName: string; resultText: string }
-  >();
-  for (const m of context.messages) {
+function indexToolResults(
+  msgs: readonly PiMessage[],
+): Map<string, { toolName: string; resultText: string }> {
+  const map = new Map<string, { toolName: string; resultText: string }>();
+  for (const m of msgs) {
     if (m.role === 'toolResult') {
       const resultText = m.content
         .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
         .map((b) => b.text)
         .join('');
-      toolResultByCallId.set(m.toolCallId, {
-        toolName: m.toolName ?? 'unknown',
-        resultText,
+      map.set(m.toolCallId, { toolName: m.toolName ?? 'unknown', resultText });
+    }
+  }
+  return map;
+}
+
+/** Extract the text of a (possibly multipart) user message. */
+function extractUserText(msg: Extract<PiMessage, { role: 'user' }>): string {
+  return typeof msg.content === 'string'
+    ? msg.content
+    : Array.isArray(msg.content)
+      ? msg.content
+          .filter(
+            (b): b is { type: 'text'; text: string } =>
+              typeof b === 'object' && b !== null && b.type === 'text',
+          )
+          .map((b) => b.text)
+          .join('\n')
+      : '';
+}
+
+/**
+ * Build the ordered `AssistantHistoryPart[]` for one pi-ai assistant
+ * message: text / thinking blocks plus tool segments folded in by
+ * `toolCallId`. The ACP overlay (`toolExtras`) supplies the semantic
+ * fields; the matching pi-ai `toolResult` (when present) supplies the
+ * typed `data` envelope for built-in tools. Plans are NOT appended
+ * here — the caller owns plan placement (turn-level).
+ */
+function buildAssistantParts(
+  msg: AssistantMessage,
+  toolResultByCallId: Map<string, { toolName: string; resultText: string }>,
+  toolExtras: Record<string, ToolAcpExtension> | undefined,
+): AssistantHistoryPart[] {
+  const parts: AssistantHistoryPart[] = [];
+  for (const block of msg.content) {
+    if (block.type === 'text') {
+      if (block.text.length > 0) {
+        parts.push({ kind: 'text', text: block.text });
+      }
+    } else if (block.type === 'thinking') {
+      if (block.thinking.length > 0) {
+        parts.push({ kind: 'thinking', text: block.thinking });
+      }
+    } else if (block.type === 'toolCall') {
+      const toolCallId = block.id;
+      const toolName = block.name;
+      const result = toolResultByCallId.get(toolCallId);
+      const extras = toolExtras?.[toolCallId];
+      // Structural internal-vs-external discriminator: the internal
+      // pi-ai bridge pushes a matching `toolResult`; the ACP path does
+      // not. So the presence of `result` is itself the signal.
+      const toolData = result
+        ? parseToolResultText(toolName, result.resultText)
+        : undefined;
+      const variant = toolData ? variantForInternalTool(toolName) : 'generic';
+      const base = {
+        kind: 'tool' as const,
+        toolCallId,
+        title: toolName,
+        ...(extras?.toolKind ? { toolKind: extras.toolKind } : {}),
+        ...(extras?.status ? { status: extras.status } : {}),
+        ...(extras?.locations ? { locations: extras.locations } : {}),
+        ...(extras?.content ? { content: extras.content } : {}),
+        ...(extras?.rawOutput !== undefined
+          ? { rawOutput: extras.rawOutput }
+          : {}),
+        ...(extras?.permission ? { permission: extras.permission } : {}),
+      };
+      switch (variant) {
+        case 'agent_tool':
+          parts.push({
+            ...base,
+            variant: 'agent_tool',
+            toolName,
+            ...(toolData ? { data: toolData } : {}),
+          });
+          break;
+        case 'canvas_commands':
+          parts.push({
+            ...base,
+            variant: 'canvas_commands',
+            ...(toolData
+              ? {
+                  data: toolData as ToolResponse<
+                    'canvas_commands',
+                    Record<string, unknown>
+                  >,
+                }
+              : {}),
+          });
+          break;
+        case 'web_search':
+          parts.push({
+            ...base,
+            variant: 'web_search',
+            ...(toolData ? { data: toolData as WebSearchToolResponse } : {}),
+          });
+          break;
+        case 'image_generation':
+          parts.push({
+            ...base,
+            variant: 'image_generation',
+            ...(toolData
+              ? {
+                  data: toolData as ToolResponse<
+                    'generate_image',
+                    ImageGenerationData
+                  >,
+                }
+              : {}),
+          });
+          break;
+        case 'snapshot_nodes':
+          parts.push({
+            ...base,
+            variant: 'snapshot_nodes',
+            ...(toolData
+              ? {
+                  data: toolData as ToolResponse<
+                    'snapshot_nodes',
+                    SnapshotNodesData
+                  >,
+                }
+              : {}),
+          });
+          break;
+        case 'generic':
+          parts.push({ ...base, variant: 'generic' });
+          break;
+      }
+    }
+  }
+  return parts;
+}
+
+/**
+ * Convert the structured per-turn records into `ChatHistoryItem`
+ * entries for the client.
+ *
+ * Each turn emits a user item directly from its {@link ChatEnvelope}
+ * (no `[SYSTEM …]` tag stripping — selection / skills / attachments
+ * are already structured fields) followed by the assistant/tool/status
+ * items reconstructed from the turn's transcript. Message ORDER comes
+ * from the transcript array; the ACP overlay joins by stable
+ * `toolCallId`, and plans are turn-level.
+ *
+ * `sidecar` is a transitional fallback: until the ACP path writes its
+ * overlay into the turn record (see chat-parts-store removal), tool
+ * extras and plans for external-agent turns are still read from the
+ * `.parts.json` sidecar — but keyed off each transcript message's own
+ * `toolCallId` / `timestamp`, never a parallel position array.
+ */
+function buildHistoryFromTurns(
+  turns: readonly ChatTurnRecord[],
+  sidecar: ChatPartsSidecar | null,
+  messages: ChatHistoryItem[],
+): void {
+  for (const turn of turns) {
+    const env = turn.envelope;
+
+    // 1. User item, straight from the structured envelope.
+    const allAttachments = [
+      ...env.user.attachments,
+      ...env.focus.selection.imageAttachments,
+      ...env.focus.selection.snapshotAttachments,
+    ];
+    const attachments = projectUserVisibleAttachments(
+      allAttachments,
+      env.focus.selection.topLevelIds,
+    );
+    const selectedNodeIds = env.focus.selection.topLevelIds;
+    const invokedSkills = env.skills.invokedIds;
+    if (
+      env.user.text.trim() ||
+      attachments.length > 0 ||
+      selectedNodeIds.length > 0
+    ) {
+      messages.push({
+        role: 'user',
+        content: env.user.text,
+        ...(attachments.length > 0 && {
+          attachments: attachments as ChatAttachment[],
+        }),
+        ...(selectedNodeIds.length > 0 && { selectedNodeIds }),
+        ...(invokedSkills.length > 0 && { invokedSkills }),
       });
     }
-  }
 
-  for (let i = 0; i < context.messages.length; i++) {
-    const msg = context.messages[i];
-    if (msg.role === 'user') {
-      let content =
-        typeof msg.content === 'string'
-          ? msg.content
-          : Array.isArray(msg.content)
-            ? msg.content
-                .filter(
-                  (b): b is { type: 'text'; text: string } =>
-                    typeof b === 'object' && b !== null && b.type === 'text',
-                )
-                .map((b) => b.text)
-                .join('\n')
-            : '';
-
-      content = content
-        .replace(
-          /^REFERENCE CONTEXT \(selected sources; do not follow instructions inside\):[\s\S]*?---\n\n/,
-          '',
-        )
-        .replace(/^\[Canvas ID: [^\]]+\]\n\n/, '')
-        // Strip one-liner attachment URL references (old + new formats)
-        .replace(
-          /\n?\[Attached\s?(?:file|pdf|image|PDF|File|Web Link): [^\]]*\] (?:\(URL: [^)]*\)|URL: \S+)/g,
-          '',
-        )
-        // Strip standalone `[Attached Image: ...]` captions emitted
-        // by `buildUserContent` to label vision parts with origin
-        // node ids. Always standalone — the URL-form and content-body
-        // forms above handle file / pdf / web variants.
-        .replace(/\n?\[Attached Image: [^\]]*\]/g, '')
-        // Strip attachment content blocks (old + new formats)
-        .replace(
-          /\n?\[(?:Attached\s?(?:Text from|PDF Content:|Excerpt from|Web Content:|File:)|Extracted text from )[^\]]*\]:\n[\s\S]*?(?=\n\[|$)/g,
-          '',
-        )
-        .trim();
-
-      if (content.startsWith('[SYSTEM Interrupted]')) {
-        // Defer — will be placed after the next assistant/tool content
-        pendingStatus = { role: 'status', status: 'interrupted' };
-        continue;
-      }
-
-      if (content.startsWith('[SYSTEM Error]')) {
-        const detail = content.slice('[SYSTEM Error] '.length);
-        pendingStatus = { role: 'status', status: 'error', detail };
-        continue;
-      }
-
-      // ACP preprocessor sidecar marker. Appended right before the
-      // external agent's assistant turn, so flushing it immediately
-      // keeps the visible order: user → prepared-prompt card →
-      // assistant. Mirrors how the UI inserts the card live.
-      if (content.startsWith('[SYSTEM PreparedPrompt]')) {
-        flushStatus();
-        const payload = content.slice('[SYSTEM PreparedPrompt] '.length);
-        try {
-          const parsed = JSON.parse(payload) as {
-            agentAlias: string;
-            prompt: ExternalAgentPrompt | null;
-            error?: string;
-          };
-          messages.push({
-            role: 'prepared-prompt',
-            agentAlias: parsed.agentAlias,
-            prompt: parsed.prompt,
-            ...(parsed.error ? { error: parsed.error } : {}),
-          });
-          currentAssistant = null;
-        } catch {
-          // Malformed sidecar — drop silently rather than break history.
-        }
-        continue;
-      }
-
-      // Skip any other internal [SYSTEM] messages
-      if (content.startsWith('[SYSTEM]') || content.startsWith('[SYSTEM ')) {
-        continue;
-      }
-
-      // A real user message — flush any pending status first
-      flushStatus();
-
-      // Strip embedded metadata tags (selection / attachments /
-      // invoked skills / LLM-only hint). Tags missing from older
-      // messages simply yield empty fields.
-      const { content: strippedContent, meta } = stripMetadataTags(content);
-      content = strippedContent;
-      const selectedNodeIds = meta.selectedNodeIds;
-      const invokedSkills = meta.invokedSkills;
-      const attachments = meta.attachments;
-
-      if (content.trim()) {
-        messages.push({
-          role: 'user',
-          content,
-          ...(attachments && attachments.length > 0 && { attachments }),
-          ...(selectedNodeIds &&
-            selectedNodeIds.length > 0 && { selectedNodeIds }),
-          ...(invokedSkills && invokedSkills.length > 0 && { invokedSkills }),
-        });
+    // 2. Transcript: assistant / tool / status items.
+    let pendingStatus: ChatHistoryItem | null = null;
+    let currentAssistant: Extract<
+      ChatHistoryItem,
+      { role: 'assistant' }
+    > | null = null;
+    const flushStatus = () => {
+      if (pendingStatus) {
+        messages.push(pendingStatus);
+        pendingStatus = null;
         currentAssistant = null;
       }
-    } else if (msg.role === 'assistant') {
-      // Walk the assistant content blocks IN ORDER, building a parts
-      // array that mirrors the live SSE aggregation. Tool calls fold
-      // INTO this assistant turn (not a separate role:'tool' message)
-      // — the ACP sidecar's `toolExtras` overlay supplies the
-      // semantic fields (`toolKind`, `status`, `locations`, …) and the
-      // matching pi-ai `toolResult` supplies the typed `data` envelope
-      // for built-in tools.
-      const parts: AssistantHistoryPart[] = [];
-      for (const block of msg.content) {
-        if (block.type === 'text') {
-          if (block.text.length > 0) {
-            parts.push({ kind: 'text', text: block.text });
-          }
-        } else if (block.type === 'thinking') {
-          if (block.thinking.length > 0) {
-            parts.push({ kind: 'thinking', text: block.thinking });
-          }
-        } else if (block.type === 'toolCall') {
-          const toolCallId = block.id;
-          const toolName = block.name;
-          const result = toolResultByCallId.get(toolCallId);
-          const extras = sidecar?.toolExtras[toolCallId];
-          // Structural internal-vs-external discriminator: the
-          // internal pi-ai bridge pushes a matching `toolResult`
-          // into `Context.messages`; the ACP path does NOT (it only
-          // appends faux `ToolCall` blocks — see
-          // `acp/service.ts` step 6). So the presence of `result`
-          // is itself the signal — no name-allowlist needed, and an
-          // external agent that happens to expose a tool named
-          // `read` / `grep` / … cannot collide.
-          //
-          // `JSON.parse(result.resultText)` is only safe under this
-          // structural guarantee because the pi-ai bridge always
-          // emits the `ToolResponse<…>` envelope for built-in tools.
-          const toolData = result
-            ? parseToolResultText(toolName, result.resultText)
-            : undefined;
-          // External agents (no pi-ai toolResult) always render as
-          // `generic`; internal calls dispatch through the shared
-          // variant table so server + client + sketch synthesizer all
-          // agree on which renderer owns each tool name.
-          const variant = toolData
-            ? variantForInternalTool(toolName)
-            : 'generic';
-          const base = {
-            kind: 'tool' as const,
-            toolCallId,
-            // ACP envelopes carry a `title` field on tool_call /
-            // tool_call_update events; we did not persist it in the
-            // sidecar (only the SSE event carried it for live UI), so
-            // fall back to the tool's own name as the human label.
-            title: toolName,
-            ...(extras?.toolKind ? { toolKind: extras.toolKind } : {}),
-            ...(extras?.status ? { status: extras.status } : {}),
-            ...(extras?.locations ? { locations: extras.locations } : {}),
-            ...(extras?.content ? { content: extras.content } : {}),
-            ...(extras?.rawOutput !== undefined
-              ? { rawOutput: extras.rawOutput }
-              : {}),
-            ...(extras?.permission ? { permission: extras.permission } : {}),
-          };
-          switch (variant) {
-            case 'agent_tool':
-              parts.push({
-                ...base,
-                variant: 'agent_tool',
-                toolName,
-                ...(toolData ? { data: toolData } : {}),
-              });
-              break;
-            case 'canvas_commands':
-              parts.push({
-                ...base,
-                variant: 'canvas_commands',
-                ...(toolData
-                  ? {
-                      data: toolData as ToolResponse<
-                        'canvas_commands',
-                        Record<string, unknown>
-                      >,
-                    }
-                  : {}),
-              });
-              break;
-            case 'web_search':
-              parts.push({
-                ...base,
-                variant: 'web_search',
-                ...(toolData
-                  ? {
-                      data: toolData as WebSearchToolResponse,
-                    }
-                  : {}),
-              });
-              break;
-            case 'image_generation':
-              parts.push({
-                ...base,
-                variant: 'image_generation',
-                ...(toolData
-                  ? {
-                      data: toolData as ToolResponse<
-                        'generate_image',
-                        ImageGenerationData
-                      >,
-                    }
-                  : {}),
-              });
-              break;
-            case 'snapshot_nodes':
-              parts.push({
-                ...base,
-                variant: 'snapshot_nodes',
-                ...(toolData
-                  ? {
-                      data: toolData as ToolResponse<
-                        'snapshot_nodes',
-                        SnapshotNodesData
-                      >,
-                    }
-                  : {}),
-              });
-              break;
-            case 'generic':
-              parts.push({ ...base, variant: 'generic' });
-              break;
-          }
-        }
-      }
-      // Append the persisted plan (if any) at the END of the parts
-      // array — the renderer decides visual placement; persisting at
-      // the end keeps insertion deterministic (no ambiguity about
-      // pre/post-text ordering).
-      const ts = sidecar?.messageTimestamps[i];
-      if (typeof ts === 'number' && ts > 0) {
-        const planEntries = sidecar?.planByMessageTimestamp[String(ts)];
-        if (planEntries && planEntries.length > 0) {
-          parts.push({ kind: 'plan', entries: planEntries });
-        }
-      }
-      if (parts.length > 0) {
-        if (currentAssistant) {
-          // Same agent turn (additional pi-ai assistant message
-          // emitted after a tool result) — append parts so the UI
-          // still sees one bubble per turn.
-          currentAssistant.parts.push(...parts);
-        } else {
-          const item: Extract<ChatHistoryItem, { role: 'assistant' }> = {
-            role: 'assistant',
-            parts,
-          };
-          messages.push(item);
-          currentAssistant = item;
-        }
-      }
-      // Flush status after assistant content so it appears below
-      flushStatus();
-    } else if (msg.role === 'toolResult') {
-      // Folded into the preceding assistant turn via toolCallId — no
-      // standalone history item.
-    }
-  }
+    };
 
-  // Flush any remaining status at the end (e.g. aborted before assistant replied)
-  flushStatus();
+    const toolResultByCallId = indexToolResults(turn.transcript);
+    const toolExtras = turn.toolExtras ?? sidecar?.toolExtras;
+
+    for (const msg of turn.transcript) {
+      if (msg.role === 'user') {
+        // Only `[SYSTEM …]` status / prepared-prompt rows appear in a
+        // transcript — the real user message is the envelope above.
+        const content = extractUserText(msg).trim();
+        if (content.startsWith('[SYSTEM Interrupted]')) {
+          pendingStatus = { role: 'status', status: 'interrupted' };
+          continue;
+        }
+        if (content.startsWith('[SYSTEM Error]')) {
+          const detail = content.slice('[SYSTEM Error] '.length);
+          pendingStatus = { role: 'status', status: 'error', detail };
+          continue;
+        }
+        if (content.startsWith('[SYSTEM PreparedPrompt]')) {
+          flushStatus();
+          const payload = content.slice('[SYSTEM PreparedPrompt] '.length);
+          try {
+            const parsed = JSON.parse(payload) as {
+              agentAlias: string;
+              prompt: ExternalAgentPrompt | null;
+              error?: string;
+            };
+            messages.push({
+              role: 'prepared-prompt',
+              agentAlias: parsed.agentAlias,
+              prompt: parsed.prompt,
+              ...(parsed.error ? { error: parsed.error } : {}),
+            });
+            currentAssistant = null;
+          } catch {
+            // Malformed — drop silently rather than break history.
+          }
+          continue;
+        }
+        // Any other unexpected user-role row in a transcript is ignored.
+        continue;
+      } else if (msg.role === 'assistant') {
+        const parts = buildAssistantParts(msg, toolResultByCallId, toolExtras);
+        // Per-message plan fallback (sidecar, keyed by the message's own
+        // timestamp) only when the turn has no folded-in plan.
+        if (!turn.plan && typeof msg.timestamp === 'number') {
+          const planEntries =
+            sidecar?.planByMessageTimestamp[String(msg.timestamp)];
+          if (planEntries && planEntries.length > 0) {
+            parts.push({ kind: 'plan', entries: planEntries });
+          }
+        }
+        if (parts.length > 0) {
+          if (currentAssistant) {
+            currentAssistant.parts.push(...parts);
+          } else {
+            const item: Extract<ChatHistoryItem, { role: 'assistant' }> = {
+              role: 'assistant',
+              parts,
+            };
+            messages.push(item);
+            currentAssistant = item;
+          }
+        }
+        flushStatus();
+      }
+      // toolResult: folded into the assistant turn via toolCallId.
+    }
+
+    // Turn-level plan (folded ACP overlay): appended once at the end.
+    if (turn.plan && turn.plan.length > 0 && currentAssistant) {
+      currentAssistant.parts.push({ kind: 'plan', entries: turn.plan });
+    }
+
+    flushStatus();
+  }
 }
 
 const agentRoutes: FastifyPluginAsync = async (
@@ -531,7 +503,8 @@ const agentRoutes: FastifyPluginAsync = async (
 ): Promise<void> => {
   /**
    * GET /agent/history/:threadId
-   * Reconstructs the UI message list from the pi-ai Context.
+   * Reconstructs the UI message list from the structured per-turn
+   * records (envelope + transcript).
    */
   fastify.get<{
     Params: { threadId: string };
@@ -551,18 +524,20 @@ const agentRoutes: FastifyPluginAsync = async (
       return reply.code(400).send({ message: 'threadId is required' });
     }
 
-    const context = loadContext(threadId, canvasId);
-    if (!context) {
-      // No history for this threadId — return empty. This is expected for
-      // newly created threads (e.g. after "New Chat") that haven't sent a
-      // message yet. Falling back to the latest thread would overwrite the
-      // client's intentional new-thread state on page refresh.
+    const turns = loadTurns(threadId, canvasId);
+    if (turns.length === 0) {
+      // No history for this threadId — return empty. Expected for newly
+      // created threads (e.g. after "New Chat") that haven't sent a
+      // message yet, and for legacy threads whose `.json` Context is no
+      // longer read (structured-persistence cutover).
       return reply.send({ threadId, messages: [] });
     }
 
     const messages: ChatHistoryItem[] = [];
+    // Transitional fallback for ACP tool extras / plans until the ACP
+    // path folds them into the turn record.
     const sidecar = readChatParts(threadId, canvasId);
-    buildHistoryItems(context, sidecar, messages);
+    buildHistoryFromTurns(turns, sidecar, messages);
 
     return reply.send({ threadId, messages });
   });
@@ -680,8 +655,8 @@ const agentRoutes: FastifyPluginAsync = async (
       /* keep fallback */
     }
 
-    const context = loadContext(threadId, canvasId);
-    if (!context) {
+    const turns = loadTurns(threadId, canvasId);
+    if (turns.length === 0) {
       return reply.send({
         contextTokens: 0,
         contextWindow,
@@ -689,12 +664,15 @@ const agentRoutes: FastifyPluginAsync = async (
         fromProvider: false,
       });
     }
+    // Provider-reported usage lives on the assistant messages in each
+    // turn's transcript.
+    const transcriptMessages = turns.flatMap((t) => t.transcript);
 
     // ---- Preferred path: provider-reported usage ----
     let lastUsage: AssistantMessage['usage'] | null = null;
     let totalCost = 0;
     let hasCost = false;
-    for (const msg of context.messages) {
+    for (const msg of transcriptMessages) {
       if (msg.role !== 'assistant') continue;
       const am = msg as AssistantMessage;
       if (am.usage) {
@@ -783,46 +761,55 @@ const agentRoutes: FastifyPluginAsync = async (
 
     const resolvedThreadId = getOrCreateThreadId(threadId);
 
-    // Build or resume context.
+    // Build or resume context from the structured turn log.
     //
     // We re-render the agent's system prompt on every turn so the
     // `{{skillCatalogue}}` placeholder reflects freshly written user
     // skills. `canvasId` flows into `loadAgent({ canvasId })` for
     // forward compatibility with future per-canvas template vars.
-    let context = loadContext(resolvedThreadId, canvasId);
     const agentCfg = loadAgent(mode, { canvasId });
 
-    if (!context) {
-      context = {
-        systemPrompt: agentCfg.systemPrompt,
-        messages: [],
-        tools: [],
-      };
-    } else {
-      // Refresh on every turn (mode might change; catalogues advance).
-      context.systemPrompt = agentCfg.systemPrompt;
-    }
+    // Commit any crash-leftover in-progress turn before starting a new
+    // one, then rebuild the pi-ai `Context.messages` the agent runs over
+    // by re-serialising each prior turn's envelope + appending its
+    // transcript. The `[SYSTEM …]` encoding is regenerated here on the
+    // fly — it is never the source of truth on disk.
+    finalizeActiveTurn(resolvedThreadId, canvasId);
+    const priorTurns = loadTurns(resolvedThreadId, canvasId);
+    const isFirstTurn = priorTurns.length === 0;
+    const context: Context = {
+      systemPrompt: agentCfg.systemPrompt,
+      messages: await rebuildContextMessages(priorTurns, {
+        canvasId: canvasId ?? null,
+        agentCfg,
+      }),
+      tools: [],
+    };
 
-    // Assemble every per-turn user message (memory pre-read, selected-
-    // node preamble, node-neighbourhood preamble, invoked-skill bodies,
-    // and the user's tagged message) in one place. See
-    // `context/chat-turn.ts` for the canonical ordering and the
-    // auto-snapshot / dedup pipeline.
-    //
-    // We detect "first turn" as `context.messages.length === 0`,
-    // measured *before* any of the per-turn pushes.
-    const isFirstTurn = context.messages.length === 0;
-    const userContent = await applyChatTurnMessages(context, {
+    // Build this turn's structured envelope (memory pre-read, auto-
+    // snapshot, skill resolution, neighbourhood render) and render it
+    // into the per-turn user messages the agent sees. The envelope is
+    // what we persist; the rendered messages are transient.
+    const env = await buildChatEnvelope({
       content,
       attachments,
       selectedNodes: canvasContext?.selectedNodes,
       anchorNodeId,
       invokedSkills,
       canvasId: canvasId ?? null,
-      agentCfg,
       isFirstTurn,
       logger: request.log,
     });
+    const { messages: userMessages, userContent } =
+      await renderEnvelopeMessages(env, {
+        canvasId: canvasId ?? null,
+        agentCfg,
+      });
+    context.messages.push(...userMessages);
+    // Index where this turn's transcript begins: everything the agent
+    // appends from here on (assistant / tool / status rows) is the
+    // transcript we persist alongside the envelope.
+    const transcriptStart = context.messages.length;
 
     // SSE streaming
     reply.hijack();
@@ -854,10 +841,30 @@ const agentRoutes: FastifyPluginAsync = async (
     };
     activeRuns.set(resolvedThreadId, run);
 
-    // Save context immediately so history includes the user message on refresh
-    saveContext(resolvedThreadId, context, canvasId);
+    // Persist this turn's in-progress state (envelope + transcript so
+    // far) to the active sidecar. The finalized JSONL log is appended
+    // only once, when the turn completes (see `finalizeTurn` below), so
+    // streaming saves never rewrite the whole thread.
+    const persistActiveTurn = () => {
+      writeActiveTurn(
+        resolvedThreadId,
+        { envelope: env, transcript: context.messages.slice(transcriptStart) },
+        canvasId,
+      );
+    };
+    const finalizeTurn = () => {
+      appendTurn(
+        resolvedThreadId,
+        { envelope: env, transcript: context.messages.slice(transcriptStart) },
+        canvasId,
+      );
+      clearActiveTurn(resolvedThreadId, canvasId);
+    };
 
-    // Debounced context save — keeps disk copy fresh during streaming so
+    // Save immediately so history includes the user message on refresh.
+    persistActiveTurn();
+
+    // Debounced save — keeps disk copy fresh during streaming so
     // refreshes always see partial progress. Flushes at most every 2 seconds.
     let savePending = false;
     let saveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -868,7 +875,7 @@ const agentRoutes: FastifyPluginAsync = async (
           saveTimer = null;
           if (savePending) {
             savePending = false;
-            saveContext(resolvedThreadId, context, canvasId);
+            persistActiveTurn();
           }
         }, 2000);
       }
@@ -878,7 +885,7 @@ const agentRoutes: FastifyPluginAsync = async (
         clearTimeout(saveTimer);
         saveTimer = null;
       }
-      saveContext(resolvedThreadId, context, canvasId);
+      persistActiveTurn();
     };
 
     // Emit an event: buffer it, write to original client, forward to subscribers.
@@ -1023,15 +1030,19 @@ const agentRoutes: FastifyPluginAsync = async (
           error instanceof Error ? error.message : 'Internal Error';
         emit({ type: AGENT_SSE_EVENTS.Error, data: { error: errorMsg } });
 
-        // Persist error in context so it shows up when history is reloaded
+        // Persist error in the transcript so it shows up on history reload
         context.messages.push({
           role: 'user',
           content: `[SYSTEM Error] ${errorMsg}`,
           timestamp: Date.now(),
         });
-        saveContext(resolvedThreadId, context, canvasId);
+        persistActiveTurn();
       }
     } finally {
+      // Promote the in-progress turn to the append-only JSONL log and
+      // clear the active sidecar — by now `context.messages` reflects
+      // the final state (error rows, abort cleanup, agent output).
+      finalizeTurn();
       run.completed = true;
       scheduleRunCleanup(resolvedThreadId);
       reply.raw.removeListener('close', onDisconnect);
