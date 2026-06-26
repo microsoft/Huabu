@@ -82,15 +82,16 @@ export default function resolvePasteClipboard(
 
     // Resolve label.
     const originalLabel = String(node.data?.label ?? '').trim();
-    const originalLabelSource = (
-      node.data as Record<string, unknown> | undefined
-    )?.labelSource as string | undefined;
-    const isAutoLabel =
-      !originalLabel || !originalLabelSource || originalLabelSource === 'auto';
     const nodeType = (node.type ?? 'note') as CanvasNodeType;
-    const label = isAutoLabel
-      ? generateNextLabel(node.type || 'node', existingLabels)
-      : deduplicateLabel(originalLabel, existingLabels);
+    // Keep the source's label (deduped) instead of regenerating one.
+    // A node's label - whether an explicit user rename or an auto label
+    // derived from its content/first message - already describes the
+    // copy just as well, so deduping the original reads better instantly
+    // and matches what post-paste preprocessing would regenerate anyway.
+    // Only truly empty labels fall back to a generated placeholder.
+    const label = originalLabel
+      ? deduplicateLabel(originalLabel, existingLabels)
+      : generateNextLabel(node.type || 'node', existingLabels);
     existingLabels.push(label);
 
     // Clone data.
@@ -98,7 +99,7 @@ export default function resolvePasteClipboard(
     clonedData.label = label;
     clonedData.origin = { type: 'user-pasted' };
 
-    // Reset question node runtime state so the copy starts fresh —
+    // Reset question node runtime state so the copy starts fresh -
     // UNLESS it's a forked copy (`__forkConversation`), in which case
     // `pasteNodes` already assigned a new threadId + status and queued a
     // server-side history fork, so we keep the conversation pointer and

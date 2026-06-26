@@ -88,6 +88,18 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     return d.agentBinding?.kind === 'external' ? 'ask' : (d.agentMode ?? 'ask');
   });
 
+  // The viewing question node's authored label, used as the panel title
+  // when replaying so the header reflects *which* question is open rather
+  // than a generic "Question Replay". Empty while composing a brand-new
+  // node (no content authored yet) — the title falls back accordingly.
+  const viewingQuestionLabel = useCanvasStore((s) => {
+    if (!viewingQuestionNodeId) return undefined;
+    const node = s.nodes.find((n) => n.id === viewingQuestionNodeId);
+    const d = node?.data as { label?: string } | undefined;
+    const label = typeof d?.label === 'string' ? d.label.trim() : '';
+    return label || undefined;
+  });
+
   const mode: AgentMode =
     viewingQuestionThread && !isComposingQuestion
       ? (questionReplayMode ?? 'ask')
@@ -424,7 +436,12 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
 
   const panelTitle = useMemo(() => {
     if (viewingSketchCluster) return 'Sketch Recognition';
-    if (viewingQuestionThread) return 'Question Replay';
+    if (viewingQuestionThread) {
+      // Composing a fresh node: it has no real label yet, so show a
+      // neutral title instead of the auto-generated "Question N".
+      if (isComposingQuestion) return 'New question';
+      return viewingQuestionLabel ?? 'Question';
+    }
     // When the thread is delegated to an external ACP agent, the
     // built-in model name is irrelevant — surface the agent alias
     // instead so the header reflects who's actually answering.
@@ -436,6 +453,8 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     activeModelName,
     agentBinding,
     viewingQuestionThread,
+    isComposingQuestion,
+    viewingQuestionLabel,
     viewingSketchCluster,
   ]);
 
@@ -629,7 +648,23 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     <SidebarPanel
       title={panelTitle}
       tabs={
-        <span className="flex min-w-0 flex-1 items-center gap-2">
+        <span className="flex min-w-0 flex-1 items-center gap-1">
+          {(viewingSketchCluster || viewingQuestionThread) && (
+            <Button
+              variant="ghost"
+              iconOnly
+              onClick={
+                viewingSketchCluster
+                  ? closeSketchCluster
+                  : handleCloseQuestionThread
+              }
+              title="Back to chat"
+              tooltipPlacement="bottom"
+              className="-ml-1 shrink-0"
+            >
+              <ArrowLeft size={16} />
+            </Button>
+          )}
           <span className="min-w-0 truncate" title={panelTitle}>
             {panelTitle}
           </span>
@@ -647,29 +682,9 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       onToggle={onToggle}
       iconCollapsed={<PanelRightOpen size={16} />}
       iconExpanded={<ListIndentIncrease size={16} />}
-      className="border-l border-[#eeece7]"
+      className="border-edge-default border-l"
       tools={
-        viewingSketchCluster ? (
-          <Button
-            variant="ghost"
-            iconOnly
-            onClick={closeSketchCluster}
-            title="Back to chat"
-            tooltipPlacement="bottom"
-          >
-            <ArrowLeft />
-          </Button>
-        ) : viewingQuestionThread ? (
-          <Button
-            variant="ghost"
-            iconOnly
-            onClick={handleCloseQuestionThread}
-            title="Back to chat"
-            tooltipPlacement="bottom"
-          >
-            <ArrowLeft />
-          </Button>
-        ) : (
+        viewingSketchCluster || viewingQuestionThread ? null : (
           <NewChatMenu
             currentMode={mode}
             currentBinding={agentBinding}
