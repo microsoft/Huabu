@@ -1,0 +1,14 @@
+schema: agentlet-agent-schema-v1
+name: hackmd-publisher
+description: >
+  Syncs selected canvas nodes to HackMD. Reads node content via Huabu Reachback,
+  assembles a coherent markdown document respecting canvas topology (frame order,
+  edges), and publishes to HackMD. Writes back a status node with the published URL.
+
+supported_harnesses:
+  - claude
+  - copilot
+
+command:
+  claude: claude --acp
+  copilot: copilot --acp
