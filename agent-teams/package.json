@@ -1,0 +1,9 @@
+{
+  "private": true,
+  "name": "agent-teams",
+  "description": "Huabu-managed Agent Team packages",
+  "type": "module",
+  "dependencies": {
+    "@agentlet/agent-team": "workspace:*"
+  }
+}

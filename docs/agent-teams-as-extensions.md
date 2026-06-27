@@ -47,7 +47,7 @@ Huabu uses **Agent Teams** as its managed external-agent extension mechanism.
   usually bundled under `agent-teams/`
 
 The generic mechanics — `agentlet.yaml`, `agent-setup.mjs`,
-`@agentlet/agent-team-runtime`, and `workspaces/` — are
+`@agentlet/agent-team`, and `workspaces/` — are
 defined in the agentlet spec. Users set up packages themselves
 (`node agent-setup.mjs unpack`); Huabu sends `{ agent_dir, harness }` to the
 agentlet daemon, which resolves the manifest and spawns from the prepared
@@ -66,7 +66,7 @@ monorepo, this is handled automatically:
 ```bash
 pnpm install
 # postinstall adds bin/agentlet to PATH
-# @agentlet/agent-team-runtime is resolvable via pnpm workspace
+# @agentlet/agent-team is resolvable via pnpm workspace
 ```
 
 After that, any bundled agent-team can be set up with:
@@ -351,7 +351,7 @@ Huabu's current direction is:
 3. **Setup is explicit** — users unpack an Agent Team package before runtime
    launch.
 4. **Per-team setup uses shared runtime primitives** — common setup logic lives
-   in `@agentlet/agent-team-runtime`, while each package provides only
+   in `@agentlet/agent-team`, while each package provides only
    team-specific callbacks.
 5. **Huabu focuses on product UX** — discovery, selection, launch, and canvas
    integration, rather than inventing a separate extension protocol.

@@ -57,6 +57,12 @@ importers:
         specifier: ^8.54.0
         version: 8.61.0(eslint@9.39.4(jiti@2.7.0))(typescript@5.9.3)
 
+  agent-teams:
+    dependencies:
+      '@agentlet/agent-team':
+        specifier: workspace:*
+        version: link:../external/agentlet/packages/agent-team
+
   apps/desktop:
     dependencies:
       get-port:
@@ -353,6 +359,22 @@ importers:
       vitest:
         specifier: ^4.0.18
         version: 4.1.8(@types/node@22.19.21)(happy-dom@15.11.7)(vite@6.4.3(@types/node@22.19.21)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.22.4)(yaml@2.9.0))
+
+  external/agentlet/packages/agent-team:
+    dependencies:
+      commander:
+        specifier: ^13.0.0
+        version: 13.1.0
+      yaml:
+        specifier: ^2.7.0
+        version: 2.9.0
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.21
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
 
   external/agentlet/packages/local:
     dependencies:
