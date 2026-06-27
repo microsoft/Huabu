@@ -142,14 +142,14 @@ node agent-setup.mjs doctor
 ### 5.1 Prerequisites
 
 Agent Teams require **agentlet** to be installed. Agentlet provides both the
-daemon (runtime spawn) and the `@agentlet/agent-team-runtime` package (setup
+daemon (runtime spawn) and the `@agentlet/agent-team` package (setup
 utilities).
 
 Agentlet is not yet open-sourced. Current installation paths:
 
 - **Monorepo consumers**: if agentlet is included as a subtree or workspace
   dependency, `npm/pnpm install` at the repo root makes both the CLI and
-  `@agentlet/agent-team-runtime` available.
+  `@agentlet/agent-team` available.
 - **Standalone / future**: once published, `npm install -g agentlet` (or
   equivalent) will provide both the CLI and the runtime package globally.
 
@@ -170,32 +170,22 @@ Agentlet is not yet open-sourced. Current installation paths:
 
 ### 5.3 Typical implementation
 
-`agent-setup.mjs` should be a thin wrapper over `@agentlet/agent-team-runtime`,
+`agent-setup.mjs` should be a thin wrapper over `@agentlet/agent-team`,
 providing only package-specific callbacks:
 
 ```js
-import { runSetup } from '@agentlet/agent-team-runtime';
+import { runSetup } from '@agentlet/agent-team';
 
 runSetup({
-  onInstall({ harness, workspaceDir, packageDir, fs, log }) {
-    // Distribute prompt to harness-specific location
-    const targets = {
-      claude: 'CLAUDE.md',
-      copilot: '.github/copilot-instructions.md',
-    };
-    const target = targets[harness];
-    if (target) {
-      fs.copySync(
-        path.join(packageDir, 'system_prompt.md'),
-        path.join(workspaceDir, target),
-      );
-    }
-    log.info('Prompt distributed');
+  onInstall(harness, workspaceDir, ctx) {
+    // Install harness-specific dependencies
+    execSync('npm init -y && npm install hackmd-cli', { cwd: workspaceDir });
+    ctx.log.info('Dependencies installed');
   },
 });
 ```
 
-## 6. `@agentlet/agent-team-runtime`
+## 6. `@agentlet/agent-team`
 
 Most setup flows share the same skeleton, so common logic lives in a shared
 runtime package.
@@ -212,7 +202,7 @@ runtime package.
 ### 6.2 Package name
 
 ```text
-@agentlet/agent-team-runtime
+@agentlet/agent-team
 ```
 
 ### 6.3 Intended consumers
@@ -236,36 +226,37 @@ reimplementing the whole pipeline.
 
 ```ts
 runSetup({
-  onValidate,
-  onInstall,
-  onUnpack,
-  onDoctor,
+  onInstall(harness, workspaceDir, ctx) { ... },
+  onUnpack(harness, workspaceDir, ctx) { ... },
+  onValidate(harness, workspaceDir, ctx) { ... },
+  onDoctor(harness, workspaceDir, ctx) { ... },
 })
 ```
 
-The exact API is TBD, but the shape is:
+Each callback is invoked once per harness being processed. Arguments:
 
-- runtime owns the standard flow (parse args, read manifest, detect harness,
-  create workspace)
-- package script provides callbacks for agent-specific behavior
+- `harness` — the harness name (e.g., `"claude"`, `"copilot"`)
+- `workspaceDir` — absolute path to `workspaces/<harness>/`
+- `ctx` — `{ packageDir, manifest, log }`
+
+The runtime owns the standard flow (parse args, read manifest, detect harness,
+create workspace, distribute prompts). Package scripts provide callbacks for
+agent-specific behavior only.
 
 ### 7.2 Responsibilities
 
 | Layer | Responsibility |
 |---|---|
-| runtime | parse manifest, detect harness, create workspace |
-| package callbacks | distribute prompt files, install harness-specific assets, validate local assumptions |
+| runtime | parse manifest, detect harness, create workspace, distribute prompts |
+| package callbacks | install deps, copy extra files, validate assumptions, emit diagnostics |
 
-### 7.3 Context object
+### 7.3 Context object (`ctx`)
 
-A rich context object should be passed to callbacks:
+The third argument passed to callbacks:
 
+- `packageDir` — absolute path to the source package (where `agentlet.yaml` lives)
 - `manifest` — parsed `agentlet.yaml`
-- `packageDir` — absolute path to the source package
-- `workspaceDir` — absolute path to the target workspace being prepared
-- `harness` — which harness is being prepared
-- `fs` — filesystem helpers
-- `log` — logging helpers
+- `log` — logging helpers (`info`, `warn`, `error`, `success`)
 
 ## 8. `workspaces/`
 
@@ -281,7 +272,7 @@ them, debug them, or run the resolved command manually inside them.
 
 Harness detection logic should be shared, not reimplemented by every package.
 
-That logic belongs in `@agentlet/agent-team-runtime` so that:
+That logic belongs in `@agentlet/agent-team` so that:
 
 - `agent-setup.mjs` can use it
 - host apps can reuse the same behavior
@@ -336,7 +327,6 @@ internally. The host only needs to know:
 
 ## 11. Open Questions
 
-- exact callback API shape in `@agentlet/agent-team-runtime`
 - how the Agent Team `SessionSpec` variant combines with the existing
   `SessionSpec` type (union, subtype, flag, etc.)
 
@@ -346,3 +336,5 @@ internally. The host only needs to know:
 - **`.env` loading**: daemon loads `.env` before spawning the process
 - **lock file**: dropped — `node agent-setup.mjs validate` covers workspace
   readiness checks; no separate lock artifact needed
+- **callback API**: `(harness, workspaceDir, ctx)` where `ctx = { packageDir, manifest, log }`
+- **package name**: `@agentlet/agent-team`
