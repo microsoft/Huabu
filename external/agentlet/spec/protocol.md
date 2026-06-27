@@ -118,7 +118,18 @@ The server registers the connection in a **connection registry**. Registered age
 
 For the full control message schemas (`server/spawn`, `server/stop`, `server/list`, `agent/suspended`), see the [Bridge channel in asyncapi.yaml](asyncapi.yaml).
 
-**Spawn lifecycle:** On `server/spawn`, the agentlet validates `sessionSpec.command` / `sessionSpec.cwd`, spawns the process, performs session bootstrap (`session/new` or `session/resume` / `session/load` if `sessionId` is provided), opens a second WebSocket (standard `agent/hello` with attached `sessionProfile.agent`), and returns the result. If bootstrap fails, the agentlet terminates the agent and returns a JSON-RPC error.
+**Spawn lifecycle:** On `server/spawn`, the agentlet validates `sessionSpec.command` / `sessionSpec.cwd` (or resolves them from `sessionSpec.agentTeam` — see below), spawns the process, performs session bootstrap (`session/new` or `session/resume` / `session/load` if `sessionId` is provided), opens a second WebSocket (standard `agent/hello` with attached `sessionProfile.agent`), and returns the result. If bootstrap fails, the agentlet terminates the agent and returns a JSON-RPC error.
+
+**Agent Team resolution:** If `sessionSpec.agentTeam` is present (containing `agentDir` and optionally `harness`), the agentlet resolves the concrete spawn parameters from the Agent Team package before proceeding with the normal spawn flow:
+
+1. Read `agentlet.yaml` from `agentDir`
+2. Determine harness — explicit `harness` field, or first entry in `supported_harnesses`, or `"default"`
+3. Validate that `workspaces/<harness>/` exists (reject with error if not)
+4. Resolve `command` from the manifest (string or per-harness map)
+5. Set `cwd` to `agentDir/workspaces/<harness>/`
+6. Load `.env` from `agentDir` and merge: daemon defaults < `.env` < `sessionSpec.env`
+
+See [`spec/agent-team.md`](agent-team.md) for the full Agent Team packaging model.
 
 **Session resume:** If the spawn request includes a `sessionId`, the agentlet will attempt to resume the session (preferring `session/resume`, falling back to `session/load` if the agent supports it). The spawn arguments (`cwd`, `mcpServers`, etc.) are re-passed to the resume request. The session store records the latest spawn params so callers can omit unchanged fields.
 

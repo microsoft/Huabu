@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.22.1",
+    "@agentlet/agent-team": "workspace:*",
     "@agentlet/protocol": "workspace:*",
     "commander": "^13.0.0",
     "ws": "^8.18.0"

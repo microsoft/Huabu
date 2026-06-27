@@ -80,8 +80,8 @@ export interface SessionProfile {
 
 /** Specification for spawning a new agent */
 export interface SessionSpec {
-  /** Shell command to spawn the agent (must support ACP stdio) */
-  command: string
+  /** Shell command to spawn the agent (must support ACP stdio). Required unless agentTeam is set. */
+  command?: string
   /** Working directory for the agent subprocess */
   cwd?: string
   /** Extra environment variables for the agent */
@@ -90,6 +90,13 @@ export interface SessionSpec {
   autoRestart?: boolean
   /** Seconds of inactivity before suspending. 0 or omitted = no timeout. */
   idleTimeoutSecs?: number
+  /** Agent Team resolution — if set, command/cwd are resolved from the manifest. */
+  agentTeam?: {
+    /** Absolute path to the agent-team package folder (containing agentlet.yaml). */
+    agentDir: string
+    /** Target harness. If omitted, uses the first from manifest supported_harnesses, or 'default'. */
+    harness?: string
+  }
 }
 
 // ─── agentlet/hello (Request/Response) ────────────────────────────────────────
