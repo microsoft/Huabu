@@ -6,11 +6,13 @@ description: >
   edges), and publishes to HackMD. Writes back a result node with the published URL.
 
 command:
-  claude: claude --acp
+  claude: claude --acp --allow-all
   copilot: copilot --acp
 
 require:
   cli-tools:
-    - hackmd-cli
+    - "@hackmd/hackmd-cli"
+  skills:
+    - https://github.com/hackmdio/hackmd-cli/tree/develop/hackmd-cli
   prompts:
     - system_prompt.md
