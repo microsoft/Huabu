@@ -425,7 +425,11 @@ export const NotePreview = ({
         };
 
       setDragPayload(event.nativeEvent as unknown as React.DragEvent, payload, {
-        effectAllowed: 'copyMove',
+        // 'all' (not 'copyMove') so macOS Cmd-modified drags still
+        // dispatch a `drop` event — Cmd is reported as NSDragOperation
+        // Generic/Link at the OS layer, which fails to intersect with
+        // 'copyMove' and silently aborts the gesture.
+        effectAllowed: 'all',
       });
     },
     [id],

@@ -1,3 +1,5 @@
+import { isMac } from '@/utils/platform';
+
 export type ShortcutItem = {
   keys: string;
   description: string;
@@ -63,7 +65,13 @@ export const keyboardShortcutSections: ShortcutSection[] = [
     title: 'Drag and drop',
     items: [
       {
-        keys: 'Ctrl/Cmd (hold while dragging)',
+        // Platform-aware: macOS uses Option (matches Finder; Cmd is
+        // reserved by the OS for NSDragOperation and cannot be read
+        // reliably as a JS drag modifier), Windows / Linux use Ctrl
+        // (matches Explorer / Files).
+        keys: isMac
+          ? 'Option / ⌥ (hold while dragging)'
+          : 'Ctrl (hold while dragging)',
         description:
           'Copy a Note block to the canvas instead of moving it (the default is move — the source loses the block)',
       },

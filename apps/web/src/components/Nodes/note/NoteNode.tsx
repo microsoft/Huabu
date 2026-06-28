@@ -15,6 +15,7 @@ import {
   getSedimentPayload,
 } from '@/utils/io/dragDrop';
 import { dragPayloadToMarkdown } from '@/utils/io/payloadToMarkdown';
+import { isMac } from '@/utils/platform';
 
 import { MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
@@ -278,7 +279,13 @@ export const NoteNode = memo(
         // event as a "create new node" candidate — we are claiming
         // this gesture for "insert into this note".
         e.stopPropagation();
-        const isCopyModifier = e.ctrlKey || e.metaKey;
+        // Platform-aware copy modifier: macOS uses Option (matches
+        // Finder), Windows/Linux uses Ctrl (matches Explorer). Cmd is
+        // deliberately NOT honored on macOS — the OS reserves Cmd for
+        // a system-level drag operation, and reading it here would
+        // conflict with the NSDragOperation and cause `drop` to never
+        // fire (the gesture silently aborts).
+        const isCopyModifier = isMac ? e.altKey : e.ctrlKey;
         const canMove = canMoveSedimentPayload(e.dataTransfer);
         e.dataTransfer.dropEffect =
           canMove && !isCopyModifier ? 'move' : 'copy';
@@ -335,7 +342,7 @@ export const NoteNode = memo(
           snippet,
         );
 
-        const isCopyModifier = e.ctrlKey || e.metaKey;
+        const isCopyModifier = isMac ? e.altKey : e.ctrlKey;
         const sourceNodeId =
           payload.kind === 'note' ? payload.data.sourceNodeId : undefined;
         const sourceContentAfterMove =
