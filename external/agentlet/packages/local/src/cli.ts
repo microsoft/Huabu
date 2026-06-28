@@ -1,4 +1,5 @@
 import { Command } from 'commander'
+import type { SetupCommandArgs } from '@agentlet/agent-team'
 
 export interface AgentletOptions {
   // Core connection
@@ -26,14 +27,27 @@ export interface AgentletOptions {
   maxAgents: number
 }
 
-export function parseCli(argv: string[]): AgentletOptions {
+/**
+ * Result of parsing the `agentlet` CLI: either run the daemon, or run an
+ * Agent Team setup command. The two roles are exposed as explicit
+ * subcommands (`agentlet daemon …` / `agentlet agent-team …`).
+ */
+export type CliResult =
+  | { mode: 'daemon'; options: AgentletOptions }
+  | { mode: 'agent-team'; args: SetupCommandArgs }
+
+export function parseCli(argv: string[]): CliResult {
   const program = new Command()
 
-  let parsed: AgentletOptions | undefined
+  let result: CliResult | undefined
 
   program
     .name('agentlet')
     .description('A network adapter that makes any local ACP agent remotely accessible over WebSocket')
+
+  program
+    .command('daemon')
+    .description('Run the agentlet daemon, bridging local ACP agents to a remote server over WebSocket')
     .requiredOption('--server <url>', 'Remote server bridge endpoint (WSS URL)')
     .option('--token <token>', 'Authentication token (or set AGENTLET_TOKEN env var)')
     .option('--agent <command>', 'Shell command to spawn the agent (must support ACP stdio). If omitted, runs as idle agentlet awaiting server/spawn.')
@@ -57,34 +71,66 @@ export function parseCli(argv: string[]): AgentletOptions {
         process.exit(1)
       }
 
-      parsed = {
-        server: opts.server,
-        token,
-        reconnectMax: parseInt(opts.reconnectMax, 10),
-        bufferLimit: parseInt(opts.bufferLimit, 10),
-        heartbeat: parseInt(opts.heartbeat, 10),
-        allowInsecure: opts.allowInsecure,
-        logLevel: opts.logLevel as AgentletOptions['logLevel'],
-        logFile: opts.logFile,
-        agent: opts.agent,
-        cwd: opts.cwd,
-        env: opts.env,
-        autoRestart: opts.autoRestart,
-        restartDelay: parseInt(opts.restartDelay, 10),
-        restartMax: parseInt(opts.restartMax, 10),
-        agentletId: opts.agentletId?.trim() || undefined,
-        maxAgents: parseInt(opts.maxAgents, 10),
+      result = {
+        mode: 'daemon',
+        options: {
+          server: opts.server,
+          token,
+          reconnectMax: parseInt(opts.reconnectMax, 10),
+          bufferLimit: parseInt(opts.bufferLimit, 10),
+          heartbeat: parseInt(opts.heartbeat, 10),
+          allowInsecure: opts.allowInsecure,
+          logLevel: opts.logLevel as AgentletOptions['logLevel'],
+          logFile: opts.logFile,
+          agent: opts.agent,
+          cwd: opts.cwd,
+          env: opts.env,
+          autoRestart: opts.autoRestart,
+          restartDelay: parseInt(opts.restartDelay, 10),
+          restartMax: parseInt(opts.restartMax, 10),
+          agentletId: opts.agentletId?.trim() || undefined,
+          maxAgents: parseInt(opts.maxAgents, 10),
+        },
       }
+    })
+
+  const agentTeam = program
+    .command('agent-team')
+    .description('Manage Agent Team packages (setup, validate, doctor)')
+
+  agentTeam
+    .command('setup [dir]')
+    .alias('unpack')
+    .description('Prepare per-harness workspaces from an agent-team manifest')
+    .option('--harness <name>', 'Target a specific harness (defaults to all in the manifest)')
+    .action((dir, opts) => {
+      result = { mode: 'agent-team', args: { command: 'setup', dir, harness: opts.harness } }
+    })
+
+  agentTeam
+    .command('validate [dir]')
+    .description('Validate that an agent-team manifest is well-formed and ready')
+    .option('--harness <name>', 'Target a specific harness (defaults to all in the manifest)')
+    .action((dir, opts) => {
+      result = { mode: 'agent-team', args: { command: 'validate', dir, harness: opts.harness } }
+    })
+
+  agentTeam
+    .command('doctor [dir]')
+    .description('Diagnose the readiness of an agent-team package')
+    .option('--harness <name>', 'Target a specific harness (defaults to all in the manifest)')
+    .action((dir, opts) => {
+      result = { mode: 'agent-team', args: { command: 'doctor', dir, harness: opts.harness } }
     })
 
   program.parse(argv)
 
-  if (!parsed) {
+  if (!result) {
     program.help()
     process.exit(1)
   }
 
-  return parsed
+  return result
 }
 
 function collectEnv(value: string, previous: Record<string, string>): Record<string, string> {

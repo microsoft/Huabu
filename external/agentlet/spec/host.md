@@ -754,7 +754,7 @@ app.listen({ port: 3001 }).then(() => {
 AGENTLET_TOKEN=my-secret-token node host-app.js
 
 # Terminal 2: start the agentlet daemon (idle mode — waits for spawn requests)
-agentlet --server ws://localhost:3001/api/acp/agent --token my-secret-token --allow-insecure
+agentlet daemon --server ws://localhost:3001/api/acp/agent --token my-secret-token --allow-insecure
 ```
 
 ---

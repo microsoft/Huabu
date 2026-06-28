@@ -2,7 +2,7 @@
  * Main entry point for Agent Team setup.
  *
  * Two modes:
- *   1. CLI mode: `npx @agentlet/agent-team setup <dir> --harness <name>`
+ *   1. CLI mode: `agentlet agent-team setup <dir> --harness <name>`
  *      The CLI reads the manifest and runs the declarative pipeline.
  *   2. Script mode: per-package agent-setup.mjs calls `runSetup(callbacks)`.
  *      Kept for backward compat and complex custom setups.
@@ -346,14 +346,28 @@ async function runDoctor(
 }
 
 /**
- * Main entry point — can be called two ways:
- *
- * 1. As a library: `runSetup(callbacks)` from per-package agent-setup.mjs
- * 2. As the CLI: `npx @agentlet/agent-team setup <dir> --harness <name>`
- *    (callbacks are empty; the manifest drives everything declaratively)
+ * Arguments for an Agent Team setup command, decoupled from argv parsing
+ * so external CLIs (e.g. the `agentlet` daemon CLI) can invoke setup
+ * directly without re-parsing `process.argv`.
  */
-export async function runSetup(callbacks: SetupCallbacks = {}): Promise<void> {
-  const args = parseSetupArgs();
+export interface SetupCommandArgs {
+  command: 'setup' | 'unpack' | 'validate' | 'doctor';
+  /** Target agent-team directory (defaults to cwd). */
+  dir?: string;
+  /** Specific harness to target. */
+  harness?: string;
+}
+
+/**
+ * Run an Agent Team setup command from explicit args (no argv parsing).
+ *
+ * This is the programmatic entry point used by the `agentlet agent-team`
+ * subcommand. The legacy {@link runSetup} wraps this after parsing argv.
+ */
+export async function runSetupCommand(
+  args: SetupCommandArgs,
+  callbacks: SetupCallbacks = {},
+): Promise<void> {
   const packageDir = args.dir ? resolve(args.dir) : resolve('.');
   const log = createLogger();
 
@@ -375,4 +389,16 @@ export async function runSetup(callbacks: SetupCallbacks = {}): Promise<void> {
     log.error(msg);
     process.exitCode = 1;
   }
+}
+
+/**
+ * Legacy entry point for per-package agent-setup.mjs scripts.
+ *
+ * Parses `process.argv` and delegates to {@link runSetupCommand}. Kept
+ * for backward compatibility; new setups are driven declaratively from
+ * the manifest via the `agentlet agent-team` subcommand.
+ */
+export async function runSetup(callbacks: SetupCallbacks = {}): Promise<void> {
+  const args = parseSetupArgs();
+  await runSetupCommand(args, callbacks);
 }

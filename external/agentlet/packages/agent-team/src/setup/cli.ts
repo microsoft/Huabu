@@ -1,9 +1,9 @@
 /**
- * CLI definition for @agentlet/agent-team.
+ * Argv parser for the legacy `runSetup()` entry point.
  *
- * Two usage modes:
- *   1. Standalone CLI: `npx @agentlet/agent-team setup <dir> --harness <name>`
- *   2. Per-package script: `node agent-setup.mjs unpack --harness <name>`
+ * Used by per-package `agent-setup.mjs` scripts that call `runSetup()`.
+ * The primary CLI is exposed via the `agentlet agent-team` subcommand,
+ * which parses args itself and calls `runSetupCommand()` directly.
  */
 
 import { Command } from 'commander';

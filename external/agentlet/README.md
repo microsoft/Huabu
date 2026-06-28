@@ -83,7 +83,7 @@ The server is now listening on `http://localhost:8080` with the Web UI, REST API
 In the agent-side terminal, where you previously ran the agent command (e.g., `copilot --allow-all` or `claude`, etc.), run the `agentlet` CLI to start an agent instance in the current directory and connect it to the server:
 
 ```bash
-agentlet --agent "copilot --acp --allow-all" \
+agentlet daemon --agent "copilot --acp --allow-all" \
          --server "ws://localhost:8080/api/bridge" \
          --token "tok_dev_123" \
          --allow-insecure
@@ -94,7 +94,7 @@ agentlet --agent "copilot --acp --allow-all" \
 Instead of manually specifying which agent to run, start an idle agentlet and let the server decide:
 
 ```bash
-agentlet --server "ws://localhost:8080/api/bridge" \
+agentlet daemon --server "ws://localhost:8080/api/bridge" \
          --token "tok_dev_123" \
          --allow-insecure
 ```
@@ -152,14 +152,21 @@ graph LR
     Server -->|"WSS frames"| Client
 ```
 
-### 3.2. Single CLI, two roles
+### 3.2. The `agentlet` CLI: daemon and agent-team roles
 
-The `agentlet` CLI has a single command — the presence of `--agent` determines the role:
+The `agentlet` CLI exposes two subcommands:
+
+| Subcommand | Purpose |
+|---|---|
+| `agentlet daemon …` | Run the network adapter that bridges local ACP agents to a remote server. |
+| `agentlet agent-team …` | Prepare and inspect [Agent Team](#) packages (`setup` / `validate` / `doctor`). |
+
+Within `agentlet daemon`, the presence of `--agent` determines the role:
 
 | Role | Use case | How |
 |---|---|---|
-| **Self-spawn** | User explicitly spawns one agent (ad-hoc / development) | `agentlet --agent "copilot --acp" --server wss://...` |
-| **Idle agentlet** | Machine is an always-on worker node; server controls which agents to spawn | `agentlet --server wss://...` (no `--agent`) |
+| **Self-spawn** | User explicitly spawns one agent (ad-hoc / development) | `agentlet daemon --agent "copilot --acp" --server wss://...` |
+| **Idle agentlet** | Machine is an always-on worker node; server controls which agents to spawn | `agentlet daemon --server wss://...` (no `--agent`) |
 
 When `--agent` is provided, the agentlet spawns the agent, bootstraps its ACP session, and immediately begins relaying. Without `--agent`, the agentlet connects to the server and waits for `server/spawn` requests — analogous to `kubelet` in Kubernetes. Each spawned agent gets its own session — from the server's perspective, server-spawned agents are indistinguishable from self-spawned agents.
 
@@ -361,15 +368,19 @@ npm install -g agentlet
 ### 4.5. Usage
 
 ```bash
-agentlet --server <wss-url> --token <token> [--agent <command>] [options]
+agentlet daemon --server <wss-url> --token <token> [--agent <command>] [options]
+agentlet agent-team <setup|validate|doctor> [dir] [--harness <name>]
 ```
 
-With `--agent`: spawns the agent locally, bootstraps the ACP session, and relays immediately (**self-spawn**).
-Without `--agent`: connects to the server and waits for `server/spawn` requests (**idle agentlet** — analogous to `kubelet`).
+With `agentlet daemon --agent`: spawns the agent locally, bootstraps the ACP session, and relays immediately (**self-spawn**).
+With `agentlet daemon` and no `--agent`: connects to the server and waits for `server/spawn` requests (**idle agentlet** — analogous to `kubelet`).
+With `agentlet agent-team`: prepares per-harness workspaces from an Agent Team manifest, or inspects readiness.
 
-> **Sources:** [`packages/local/src/bridge.ts`](packages/local/src/bridge.ts) (self-spawn), [`packages/local/src/daemon.ts`](packages/local/src/daemon.ts) (idle mode)
+> **Sources:** [`packages/local/src/bridge.ts`](packages/local/src/bridge.ts) (self-spawn), [`packages/local/src/daemon.ts`](packages/local/src/daemon.ts) (idle mode), [`packages/agent-team`](packages/agent-team) (agent-team)
 
 ### 4.6. Arguments
+
+The arguments below apply to `agentlet daemon`.
 
 | Argument | Required | Default | Description |
 |---|---|---|---|
@@ -389,37 +400,50 @@ Without `--agent`: connects to the server and waits for `server/spawn` requests 
 | `--heartbeat` | — | `30` | WebSocket ping interval in seconds (0 to disable) |
 | `--allow-insecure` | — | `false` | Allow ws:// (non-TLS) connections (local development only) |
 
+The `agentlet agent-team <subcommand> [dir]` arguments:
+
+| Argument | Required | Default | Description |
+|---|---|---|---|
+| `dir` | — | Current directory | Path to the Agent Team package directory (the folder containing `agentlet.yaml`). |
+| `--harness` | — | (all in manifest) | Restrict the action to a single harness (e.g. `claude`, `copilot`). |
+
 ### 4.7. Examples
 
 ```bash
 # Self-spawn: connect Claude Code to a remote server
-agentlet --agent "claude --acp --stdio" \
+agentlet daemon --agent "claude --acp --stdio" \
          --server "wss://app.example.com/api/bridge" \
          --token "tok_from_server_ui"
 
 # Self-spawn: Copilot CLI with a specific project directory
-agentlet --agent "copilot --acp --stdio" \
+agentlet daemon --agent "copilot --acp --stdio" \
          --server "wss://localhost:3001/api/bridge" \
          --token "tok_dev_local" \
          --cwd "/home/user/my-project" \
          --auto-restart
 
 # Self-spawn: custom environment for the agent
-agentlet --agent "gemini-cli --stdio" \
+agentlet daemon --agent "gemini-cli --stdio" \
          --server "wss://app.example.com/api/bridge" \
          --token "tok_xyz" \
          --env "GEMINI_API_KEY=sk-..." \
          --env "PROJECT_ROOT=/workspace"
 
 # Idle agentlet: worker node waiting for server-driven spawn
-agentlet --server "wss://app.example.com/api/bridge" \
+agentlet daemon --server "wss://app.example.com/api/bridge" \
          --token "tok_worker_node_1"
 
 # Idle agentlet: local development with higher agent limit
-agentlet --server "ws://localhost:8080/api/bridge" \
+agentlet daemon --server "ws://localhost:8080/api/bridge" \
          --token "tok_dev_123" \
          --max-agents 20 \
          --allow-insecure
+
+# Agent Team: prepare a package's workspaces for all declared harnesses
+agentlet agent-team setup ./agent-teams/hackmd-publisher
+
+# Agent Team: check readiness for a single harness
+agentlet agent-team doctor ./agent-teams/hackmd-publisher --harness copilot
 ```
 
 ### 4.8. How it works
@@ -1008,7 +1032,7 @@ The current architecture is **forward-compatible**: the `agent/hello` handshake 
 
 **Current design:** The relay server and Web UI **natively support multiple agents** — any number of agent-side adapters can connect simultaneously, each identified by its unique `sessionId`. The server maintains a connection registry (`Map<sessionId, AgentConnection>`), the REST API lists all sessions, and the UI provides an agent selector.
 
-**Agent-side (self-spawn):** Each `agentlet --agent ...` instance spawns and manages exactly **one** agent process. To connect multiple agents, run multiple `agentlet` instances (one per agent). This keeps each adapter simple and independently restartable.
+**Agent-side (self-spawn):** Each `agentlet daemon --agent ...` instance spawns and manages exactly **one** agent process. To connect multiple agents, run multiple `agentlet daemon` instances (one per agent). This keeps each adapter simple and independently restartable.
 
 **Agent-side (idle agentlet):** A single idle `agentlet` instance can manage **multiple** agent processes concurrently — each spawned on demand from the server. This is the recommended approach for worker nodes that need to run multiple agents.
 

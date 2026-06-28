@@ -30,7 +30,7 @@ author writes package
         ↓
 user clones / downloads folder
         ↓
-user runs `npx @agentlet/agent-team setup <dir> --harness <name>`
+user runs `agentlet agent-team setup <dir> --harness <name>`
         ├─ validates manifest
         ├─ creates workspaces/<harness>/
         ├─ installs tools (npm packages)
@@ -180,19 +180,20 @@ The function receives a context object with:
 
 ## 5. `@agentlet/agent-team`
 
-The shared runtime package that provides both the CLI and library API.
+The shared runtime package that provides the library API. Its setup CLI is
+exposed through the `agentlet` daemon binary as the `agent-team` subcommand.
 
 ### 5.1 CLI Usage
 
 ```bash
 # Set up an agent team for a specific harness
-npx @agentlet/agent-team setup ./my-agent --harness claude
+agentlet agent-team setup ./my-agent --harness claude
 
 # Validate workspace readiness
-npx @agentlet/agent-team validate ./my-agent --harness claude
+agentlet agent-team validate ./my-agent --harness claude
 
 # Run diagnostics
-npx @agentlet/agent-team doctor ./my-agent
+agentlet agent-team doctor ./my-agent
 ```
 
 ### 5.2 Capabilities

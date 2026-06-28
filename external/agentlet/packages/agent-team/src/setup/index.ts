@@ -2,7 +2,8 @@
  * Setup module — CLI orchestration for `agent-setup.mjs` entry points.
  */
 
-export { runSetup } from './run-setup.js';
+export { runSetup, runSetupCommand } from './run-setup.js';
+export type { SetupCommandArgs } from './run-setup.js';
 export { readManifest } from './manifest.js';
 export { HARNESS_REGISTRY } from './harness-registry.js';
 export type { HarnessInfo } from './harness-registry.js';
