@@ -25,15 +25,15 @@ Select nodes on your canvas, tell the agent "publish these to HackMD", and it wi
    # Edit .env with your token
    ```
 
-2. Unpack the Agent Team package:
+2. From inside this folder, prepare the workspace (installs `@hackmd/hackmd-cli`,
+   skills, and the prompt for each installed harness):
    ```bash
-   node agent-setup.mjs unpack --harness claude
+   agentlet agent-team setup            # or target one: --harness copilot
    ```
 
-3. If the unpack/setup flow reports missing local dependencies, install them as
-   directed for your chosen harness. For example:
+3. Check readiness if needed:
    ```bash
-   npm install -g @hackmd/cli
+   agentlet agent-team doctor
    ```
 
 For the generic Agent Team packaging/runtime model, see:
