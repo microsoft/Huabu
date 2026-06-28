@@ -5,15 +5,12 @@ description: >
   assembles a coherent markdown document respecting canvas topology (frame order,
   edges), and publishes to HackMD. Writes back a result node with the published URL.
 
-supported_harnesses:
-  - claude
-  - copilot
-
 command:
   claude: claude --acp
   copilot: copilot --acp
 
-tools:
-  - hackmd-cli
-
-system_prompt: system_prompt.md
+require:
+  cli-tools:
+    - hackmd-cli
+  prompts:
+    - system_prompt.md
