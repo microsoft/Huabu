@@ -178,6 +178,28 @@ export interface ExternalAgentPrompt {
    * Absent for non-anchored turns.
    */
   neighbourhood?: string;
+  /**
+   * Off-canvas attachments the user added directly to this turn (text
+   * excerpts, web captures, uploaded files). Unlike {@link selectedNodes},
+   * these are NOT on the canvas, so the external agent cannot fetch them
+   * via `read-node` — their textual content is therefore inlined into
+   * the prompt here. Image attachments cannot travel over the text-only
+   * ACP wire, so they are surfaced as a short locator note rather than
+   * pixels. Absent when the turn carried no attachments.
+   */
+  attachments?: Array<{
+    /** Attachment kind (`text`, `web`, `pdf`, `file`, `image`). */
+    type: string;
+    /** Display label / filename, when known. */
+    label?: string;
+    /** Source URL, when the attachment came from one. */
+    url?: string;
+    /**
+     * Inlined textual content, or a short locator note for image /
+     * binary attachments that cannot be transmitted as text.
+     */
+    content: string;
+  }>;
 }
 
 /**

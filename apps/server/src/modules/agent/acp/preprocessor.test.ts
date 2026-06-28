@@ -15,7 +15,11 @@ import { prepareExternalAgentPrompt, serializePrompt } from './preprocessor.js';
 import { buildAgentNodeRef } from '../node-ref.js';
 
 import type { ChatEnvelope } from '../context/envelope.js';
-import type { CanvasNodeType, ExternalAgentPrompt } from '@sediment/shared';
+import type {
+  CanvasNodeType,
+  ChatAttachment,
+  ExternalAgentPrompt,
+} from '@sediment/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
 /** Minimal logger stub — only `debug` is exercised. */
@@ -36,12 +40,13 @@ function makeEnvelope(opts: {
   text: string;
   selection?: { id: string; type: CanvasNodeType; label?: string }[];
   neighbourhood?: string;
+  attachments?: ChatAttachment[];
 }): ChatEnvelope {
   return {
     preamble: opts.neighbourhood
       ? { nodeNeighbourhood: opts.neighbourhood }
       : {},
-    user: { text: opts.text, attachments: [] },
+    user: { text: opts.text, attachments: opts.attachments ?? [] },
     skills: { invokedIds: [], resolved: [] },
     focus: {
       selection: {
@@ -116,7 +121,35 @@ describe('serializePrompt', () => {
 
     expect(serializePrompt(prompt)).toContain('| `n1` | note | a \\| b |');
   });
+  it('wraps off-canvas attachments in <attachments> before the user request', () => {
+    const prompt: ExternalAgentPrompt = {
+      task: 'summarize the attached note',
+      selectedNodes: [],
+      attachments: [
+        { type: 'text', label: 'excerpt', content: 'the quick brown fox' },
+        {
+          type: 'web',
+          label: 'FX outlook',
+          url: 'https://example.com/fx',
+          content: 'continued volatility into Q4',
+        },
+      ],
+    };
 
+    const out = serializePrompt(prompt);
+
+    expect(out).toContain('<attachments>');
+    expect(out).toContain('</attachments>');
+    expect(out).toContain('<attachment type="text" name="excerpt">');
+    expect(out).toContain('the quick brown fox');
+    expect(out).toContain(
+      '<attachment type="web" name="FX outlook" url="https://example.com/fx">',
+    );
+    // The user's words still come last.
+    expect(out.indexOf('<attachments>')).toBeLessThan(
+      out.indexOf('<user_request>'),
+    );
+  });
   it('omits the system preamble by default and prepends it when includeSystem is set', () => {
     const prompt: ExternalAgentPrompt = {
       task: 'ZZ_UNIQUE_TASK_BODY',
@@ -250,5 +283,58 @@ describe('prepareExternalAgentPrompt', () => {
 
     expect(result.prompt).toEqual({ task: '/compact now', selectedNodes: [] });
     expect(result.serialized).toBe('/compact now');
+  });
+
+  it('forwards off-canvas text uploads into the prompt attachments', () => {
+    const result = prepareExternalAgentPrompt({
+      envelope: makeEnvelope({
+        text: 'use the attached excerpt',
+        attachments: [
+          {
+            type: 'text',
+            source: 'upload',
+            label: 'excerpt',
+            content: 'Q3 exposure rose 12% on fx volatility.',
+          },
+        ],
+      }),
+      agentAlias: 'claude',
+      logger,
+    });
+
+    expect(result.prompt.attachments).toEqual([
+      {
+        type: 'text',
+        label: 'excerpt',
+        content: 'Q3 exposure rose 12% on fx volatility.',
+      },
+    ]);
+    expect(result.serialized).toContain('<attachments>');
+    expect(result.serialized).toContain(
+      'Q3 exposure rose 12% on fx volatility.',
+    );
+  });
+
+  it('reduces a content-less image upload to a locator note', () => {
+    const result = prepareExternalAgentPrompt({
+      envelope: makeEnvelope({
+        text: 'look at this',
+        attachments: [
+          {
+            type: 'image',
+            source: 'upload',
+            label: 'diagram.png',
+            url: 'blob:abc',
+          },
+        ],
+      }),
+      agentAlias: 'claude',
+      logger,
+    });
+
+    expect(result.prompt.attachments).toHaveLength(1);
+    expect(result.prompt.attachments?.[0].content).toContain(
+      'not visible to this agent',
+    );
   });
 });

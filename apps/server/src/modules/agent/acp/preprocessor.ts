@@ -24,8 +24,8 @@
  *     user's words + the IDs of what they selected.
  *
  * The per-turn wire text is built **inline as XML** (`<selected_nodes>`,
- * `<canvas_neighbourhood>`, `<user_request>`) — the same tag vocabulary
- * the built-in agent emits (`buildContextSections` in
+ * `<canvas_neighbourhood>`, `<attachments>`, `<user_request>`) — the same
+ * tag vocabulary the built-in agent emits (`buildContextSections` in
  * `context/chat-turn.ts`), so both backends present one structure. On
  * the first turn of a freshly-created session the one-shot persona +
  * `## Canvas Tools (Reachback)` preamble (`system_prompt.md`, rendered
@@ -43,7 +43,7 @@
 import { renderPromptFile } from '../../../prompt/index.js';
 
 import type { ChatEnvelope } from '../context/envelope.js';
-import type { ExternalAgentPrompt } from '@sediment/shared';
+import type { ChatAttachment, ExternalAgentPrompt } from '@sediment/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
 // ─── Constants ────────────────────────────────────────────────────────────
@@ -152,6 +152,12 @@ export function prepareExternalAgentPrompt(
   // agent observe the identical set by construction.
   const selectedRefs = envelope.focus.selection.refs;
   const neighbourhood = envelope.preamble.nodeNeighbourhood;
+  // Off-canvas uploads the user attached to this turn. They are NOT on
+  // the canvas, so the external agent cannot reach them via `read-node`;
+  // their textual content is inlined into the prompt instead. (Selection
+  // image / snapshot attachments are deliberately excluded — those are
+  // canvas nodes the agent fetches through reachback.)
+  const attachments = buildAcpAttachments(envelope.user.attachments);
 
   const prompt: ExternalAgentPrompt = {
     task: rawText.trim(),
@@ -164,6 +170,9 @@ export function prepareExternalAgentPrompt(
     // the turn carried one — same source as the built-in agent's
     // node-neighbourhood preamble, so both backends agree.
     ...(neighbourhood ? { neighbourhood } : {}),
+    // Off-canvas attachment text (uploads / web captures) that the agent
+    // cannot otherwise see, since it has no canvas access for them.
+    ...(attachments.length > 0 ? { attachments } : {}),
     // On the first turn of a fresh session we also carry the rendered
     // system preamble so the UI can show the complete prompt the agent
     // saw. The serialized wire text below prepends the same block.
@@ -191,15 +200,16 @@ export function prepareExternalAgentPrompt(
  * sent over ACP `session/prompt`.
  *
  * The per-turn body is built inline as XML — the SAME tag vocabulary
- * (`<selected_nodes>`, `<canvas_neighbourhood>`, `<user_request>`) the
- * built-in agent emits (`buildContextSections` in
+ * (`<selected_nodes>`, `<canvas_neighbourhood>`, `<attachments>`,
+ * `<user_request>`) the built-in agent emits (`buildContextSections` in
  * `context/chat-turn.ts`), with the user's words LAST — so a reader
  * (human or model) sees one structure across both backends. A bare task
  * (no context sections) is sent unwrapped, mirroring the built-in
  * plain-text fast path. The inner guidance legitimately differs:
  * external agents read / write nodes through the Huabu Reachback Tool
  * (`read-node` / `write-node`) rather than the built-in `read()` over a
- * pre-computed `filename`.
+ * pre-computed `filename`. Off-canvas uploads, which the agent cannot
+ * reach via `read-node`, are inlined under `<attachments>`.
  *
  * When `opts.includeSystem` is set, the one-shot system preamble
  * (persona + `## Canvas Tools (Reachback)` docs, from
@@ -249,6 +259,33 @@ export function serializePrompt(
     );
   }
 
+  if (prompt.attachments && prompt.attachments.length > 0) {
+    // Each attachment is wrapped in its own `<attachment>` tag (mirroring
+    // the built-in agent's `<attachment>` items) so multiple bodies stay
+    // unambiguously separated; the whole group is bounded by
+    // `<attachments>`.
+    const items = prompt.attachments
+      .map((att) => {
+        const attrs = [
+          `type="${escapeAttr(att.type)}"`,
+          att.label ? `name="${escapeAttr(att.label)}"` : '',
+          att.url ? `url="${escapeAttr(att.url)}"` : '',
+        ]
+          .filter(Boolean)
+          .join(' ');
+        return `<attachment ${attrs}>\n${att.content}\n</attachment>`;
+      })
+      .join('\n');
+    sections.push(
+      [
+        '<attachments>',
+        'The user attached the content below directly. It is NOT on the canvas, so you cannot fetch it with `read-node` — use it as given.',
+        items,
+        '</attachments>',
+      ].join('\n'),
+    );
+  }
+
   // The user's own words come LAST, mirroring the built-in layout. With
   // no context sections, send the bare task — symmetric with the
   // built-in plain-text fast path (no XML scaffolding for the common
@@ -287,8 +324,52 @@ export function serializeRawPrompt(rawText: string): string {
 }
 
 // ─── Internals ────────────────────────────────────────────────────────────
-
+/**
+ * Project the turn's off-canvas uploads into the structured prompt's
+ * `attachments`. Text-bearing attachments forward their content
+ * verbatim; an image upload — which cannot travel over the text-only
+ * ACP wire — is reduced to a short locator note so the agent at least
+ * knows it exists. Content-less, URL-only attachments forward their
+ * source URL. Empty attachments (no content, no url) are dropped.
+ */
+function buildAcpAttachments(
+  atts: ChatAttachment[],
+): NonNullable<ExternalAgentPrompt['attachments']> {
+  const out: NonNullable<ExternalAgentPrompt['attachments']> = [];
+  for (const att of atts) {
+    const label = att.label ?? att.filename;
+    const base = {
+      type: att.type,
+      ...(label ? { label } : {}),
+      ...(att.url ? { url: att.url } : {}),
+    };
+    const text = att.content?.trim();
+    if (text) {
+      out.push({ ...base, content: text });
+    } else if (att.type === 'image') {
+      out.push({
+        ...base,
+        content:
+          '(image attachment — not visible to this agent; ask the user to describe it, or place it on the canvas to read via read-node)',
+      });
+    } else if (att.url) {
+      out.push({ ...base, content: `(no inline content; source: ${att.url})` });
+    }
+  }
+  return out;
+}
 /** Escape pipe / newline chars so a label can't break the markdown table. */
 function escapeCell(s: string): string {
   return s.replace(/\r?\n/g, ' ').replace(/\|/g, '\\|').trim();
+}
+
+/** Escape a string for safe inclusion in an XML attribute value. */
+function escapeAttr(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/\r?\n/g, ' ')
+    .trim();
 }

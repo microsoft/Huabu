@@ -221,6 +221,17 @@ function buildSketchRasterHint(
   return `pre-snapshotted sketch artifacts are ready for generate_image.referenceArtifactSrcs — pass these urls directly without re-calling snapshot_nodes for the same node ids: ${items}`;
 }
 
+/** Escape a string for safe inclusion in an XML attribute value. */
+function escapeXmlAttr(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/\r?\n/g, ' ')
+    .trim();
+}
+
 /**
  * Resolve a turn's attachments into pi-ai content parts (text excerpts
  * + base64 vision images). Unlike the former `buildUserContent`, this
@@ -253,12 +264,12 @@ async function buildAttachmentParts(
       : att.originNodeId
         ? [att.originNodeId]
         : [];
-    const originRef =
+    // Origin node ids surface as an XML `origin` attribute so the model
+    // can follow up via inspect_nodes() / read() for surrounding context.
+    const originAttr =
       originIds.length === 0
         ? ''
-        : originIds.length === 1
-          ? ` (origin node id: ${originIds[0]})`
-          : ` (origin node ids: ${originIds.join(', ')})`;
+        : ` origin="${escapeXmlAttr(originIds.join(', '))}"`;
 
     switch (att.type) {
       case 'image': {
@@ -270,7 +281,7 @@ async function buildAttachmentParts(
         if (originIds.length > 0) {
           parts.push({
             type: 'text',
-            text: `[Attached Image: ${label}${originRef}]`,
+            text: `<attachment type="image" name="${escapeXmlAttr(label)}"${originAttr} />`,
           });
         }
         // Resolve image URL to base64 for vision
@@ -284,15 +295,15 @@ async function buildAttachmentParts(
             });
           } else if (resolved.reason === 'too_large') {
             // Don't silently drop a too-large image — tell the agent
-            // exactly why and how to recover. The placeholder mentions
-            // the origin node ids (already in `originRef`) so the
-            // model can call `snapshot_nodes` for a downscaled PNG.
+            // exactly why and how to recover. The placeholder carries the
+            // origin node ids (in the `origin` attribute) so the model
+            // can call `snapshot_nodes` for a downscaled PNG.
             const mb = resolved.sizeBytes
               ? (resolved.sizeBytes / (1024 * 1024)).toFixed(1)
               : '?';
             parts.push({
               type: 'text',
-              text: `[Attached Image: ${label}${originRef} — omitted from vision (~${mb} MB exceeds the ${(MAX_INLINE_IMAGE_BYTES / (1024 * 1024)).toFixed(0)} MB inline cap). Call \`snapshot_nodes\` on the origin node id to get a downscaled PNG, or \`read\` the node's sidecar for its description.]`,
+              text: `<attachment type="image" name="${escapeXmlAttr(label)}"${originAttr}>\nomitted from vision (~${mb} MB exceeds the ${(MAX_INLINE_IMAGE_BYTES / (1024 * 1024)).toFixed(0)} MB inline cap). Call \`snapshot_nodes\` on the origin node id to get a downscaled PNG, or \`read\` the node's sidecar for its description.\n</attachment>`,
             });
           }
         }
@@ -300,7 +311,7 @@ async function buildAttachmentParts(
         if (att.content && att.content.trim().length > 0) {
           parts.push({
             type: 'text',
-            text: `[Attached Text from ${label}${originRef}]:\n${att.content}`,
+            text: `<attachment type="text" name="${escapeXmlAttr(label)}"${originAttr}>\n${att.content}\n</attachment>`,
           });
         }
         break;
@@ -310,12 +321,12 @@ async function buildAttachmentParts(
         if (att.content && att.content.trim().length > 0) {
           parts.push({
             type: 'text',
-            text: `[Attached PDF: ${label}${originRef}]:\n${att.content}`,
+            text: `<attachment type="pdf" name="${escapeXmlAttr(label)}"${originAttr}>\n${att.content}\n</attachment>`,
           });
         } else {
           parts.push({
             type: 'text',
-            text: `[Attached PDF: ${label}]${att.url ? ` (URL: ${att.url})` : ''}`,
+            text: `<attachment type="pdf" name="${escapeXmlAttr(label)}"${att.url ? ` url="${escapeXmlAttr(att.url)}"` : ''} />`,
           });
         }
         break;
@@ -326,7 +337,7 @@ async function buildAttachmentParts(
         if (att.content && att.content.trim().length > 0) {
           parts.push({
             type: 'text',
-            text: `[Attached Excerpt from ${originRef}]:\n${att.content}`,
+            text: `<attachment type="text"${originAttr}>\n${att.content}\n</attachment>`,
           });
         }
         break;
@@ -337,12 +348,12 @@ async function buildAttachmentParts(
         if (att.content && att.content.trim().length > 0) {
           parts.push({
             type: 'text',
-            text: `[Attached Web Content: ${label}${att.url ? ` (${att.url})` : ''}]:\n${att.content}`,
+            text: `<attachment type="web" name="${escapeXmlAttr(label)}"${att.url ? ` url="${escapeXmlAttr(att.url)}"` : ''}>\n${att.content}\n</attachment>`,
           });
         } else if (att.url) {
           parts.push({
             type: 'text',
-            text: `[Attached Web Link: ${label}] URL: ${att.url}`,
+            text: `<attachment type="web" name="${escapeXmlAttr(label)}" url="${escapeXmlAttr(att.url)}" />`,
           });
         }
         break;
@@ -354,7 +365,7 @@ async function buildAttachmentParts(
         if (att.content && att.content.trim().length > 0) {
           parts.push({
             type: 'text',
-            text: `[Attached File: ${label}${originRef}]:\n${att.content}`,
+            text: `<attachment type="file" name="${escapeXmlAttr(label)}"${originAttr}>\n${att.content}\n</attachment>`,
           });
         } else if (att.url) {
           let fileContent: string | null = null;
@@ -399,12 +410,12 @@ async function buildAttachmentParts(
           if (fileContent) {
             parts.push({
               type: 'text',
-              text: `[AttachedFile: ${label}]:\n${fileContent}`,
+              text: `<attachment type="file" name="${escapeXmlAttr(label)}">\n${fileContent}\n</attachment>`,
             });
           } else {
             parts.push({
               type: 'text',
-              text: `[Attached File: ${label}] (URL: ${att.url})`,
+              text: `<attachment type="file" name="${escapeXmlAttr(label)}" url="${escapeXmlAttr(att.url)}" />`,
             });
           }
         }
@@ -487,7 +498,8 @@ function buildContextSections(env: ChatEnvelope): string | undefined {
  * separate user messages). Its content is laid out as:
  *   1. an XML context block (`<selected_nodes>`, `<canvas_neighbourhood>`,
  *      `<invoked_skills>`) — present only when the turn carries any;
- *   2. attachment parts (text excerpts + base64 vision images);
+ *   2. an `<attachments>` block of `<attachment>` items (text excerpts +
+ *      base64 vision images) — present only when the turn carries any;
  *   3. the user's own words last, wrapped in `<user_request>` (with the
  *      LLM-only sketch-raster hint appended when present).
  *
@@ -547,7 +559,19 @@ export async function renderEnvelopeMessages(
   } else {
     const parts: ContentPart[] = [];
     if (contextSections) parts.push({ type: 'text', text: contextSections });
-    parts.push(...attachmentParts);
+    if (attachmentParts.length > 0) {
+      // Delimit the attachment parts with an <attachments> tag so the
+      // block is as unambiguously bounded as the other context sections.
+      // The opening / closing tags are their own text parts because the
+      // attachment list can interleave vision (image) parts that cannot
+      // carry inline markup.
+      parts.push({
+        type: 'text',
+        text: '<attachments>\nThe user attached the content below to this turn (off-canvas uploads and node excerpts).',
+      });
+      parts.push(...attachmentParts);
+      parts.push({ type: 'text', text: '</attachments>' });
+    }
     parts.push({
       type: 'text',
       text: `<user_request>\n${userText}\n</user_request>`,

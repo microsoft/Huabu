@@ -17,7 +17,8 @@
  * `task` is the user's message forwarded verbatim. `selectedNodes`
  * lists the canvas nodes the user had selected (metadata only); the
  * external agent fetches their content on demand via the Huabu
- * Reachback Tool (`read-node <node-id>`).
+ * Reachback Tool (`read-node <node-id>`). `attachments` are off-canvas
+ * uploads the agent cannot reach that way, so their content is inlined.
  *
  * Visual shell (icon slot, title row, chevron, expand/collapse) is
  * provided by `AssistantDisclosure` so this card stays visually
@@ -69,6 +70,7 @@ export function PreparedPromptMessage({
   // rewrite (which used `attachments`) still renders without crashing.
   const selectedNodes = prompt.selectedNodes ?? [];
   const nodeCount = selectedNodes.length;
+  const attachments = prompt.attachments ?? [];
   const summary =
     nodeCount > 0
       ? `Prepared prompt · ${nodeCount} node${nodeCount === 1 ? '' : 's'}`
@@ -114,6 +116,29 @@ export function PreparedPromptMessage({
                 </code>
                 <span className="text-fg-muted/80">
                   {node.label ? `${node.label} · ${node.type}` : node.type}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {attachments.length > 0 && (
+        <div>
+          <div className="text-fg-muted/70 mb-0.5 text-[10px] font-medium tracking-wide uppercase">
+            Attachments
+          </div>
+          <ul className="space-y-0.5">
+            {attachments.map((att, i) => (
+              <li
+                key={`${att.type}-${i}`}
+                className="flex items-baseline gap-1.5 leading-snug"
+              >
+                <code className="bg-surface-1/50 rounded px-1 text-[11px]">
+                  {att.type}
+                </code>
+                <span className="text-fg-muted/80">
+                  {att.label ?? att.url ?? 'attachment'}
                 </span>
               </li>
             ))}

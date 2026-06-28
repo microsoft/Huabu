@@ -153,7 +153,10 @@ describe('renderEnvelopeMessages', () => {
 
     // No selection/neighbourhood/skills → no context block.
     expect(flat).not.toContain('<selected_nodes>');
-    // Attachment excerpt is present and ordered before the user request.
+    // Attachment excerpt is wrapped in <attachments>/<attachment> and
+    // ordered before the user request.
+    expect(flat).toContain('<attachments>');
+    expect(flat).toContain('<attachment type="text"');
     expect(flat).toContain('the quick brown fox');
     expect(flat).toContain(
       '<user_request>\nwhat does this say?\n</user_request>',
