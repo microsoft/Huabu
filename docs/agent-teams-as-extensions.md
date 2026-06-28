@@ -65,7 +65,7 @@ monorepo, this is handled automatically:
 
 ```bash
 pnpm install
-# postinstall adds bin/agentlet to PATH
+# postinstall adds the bin/ wrappers (agentlet + start-agentlet-daemon) to PATH
 # @agentlet/agent-team is resolvable via pnpm workspace
 ```
 
@@ -74,6 +74,11 @@ After that, any bundled agent-team can be set up with:
 ```bash
 agentlet agent-team setup agent-teams/<team-name> --harness claude
 ```
+
+> The global `agentlet` command forwards straight to the CLI (both
+> `agentlet daemon …` and `agentlet agent-team …`). `start-agentlet-daemon`
+> is a separate convenience that autofills `--server`/`--allow-insecure`
+> from the repo's `.env` for the manual daemon self-spawn scenario.
 
 No additional global installs are needed beyond `pnpm install` at the repo root.
 
