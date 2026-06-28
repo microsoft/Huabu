@@ -138,4 +138,4 @@ if [ -n "$agent_cmd" ]; then
   esac
 fi
 
-exec node "$cli" --server "$url" $insecure_flag "$@"
+exec node "$cli" daemon --server "$url" $insecure_flag "$@"

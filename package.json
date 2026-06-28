@@ -10,7 +10,7 @@
     "predev:desktop": "pnpm run build:agentlet",
     "dev:desktop": "node scripts/dev-desktop.mjs",
     "start:desktop": "pnpm run build:agentlet && pnpm --filter @sediment/shared build && pnpm --filter @sediment/server bundle && pnpm --filter @sediment/web build && pnpm --filter @sediment/desktop dev",
-    "build:agentlet": "pnpm --filter @agentlet/protocol --filter @agentlet/server --filter agentlet run build",
+    "build:agentlet": "pnpm --filter @agentlet/protocol --filter @agentlet/agent-team --filter @agentlet/server --filter agentlet run build",
     "build:desktop": "pnpm --filter @sediment/shared build && pnpm --filter @sediment/server bundle && pnpm --filter @sediment/web build && pnpm --filter @sediment/desktop dist",
     "build:desktop:mac": "pnpm --filter @sediment/shared build && pnpm --filter @sediment/server bundle && pnpm --filter @sediment/web build && pnpm --filter @sediment/desktop dist:mac",
     "build:desktop:win": "pnpm --filter @sediment/shared build && pnpm --filter @sediment/server bundle && pnpm --filter @sediment/web build && pnpm --filter @sediment/desktop dist:win",
