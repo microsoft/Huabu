@@ -16,7 +16,7 @@ export interface AgentTeamManifest {
   system_prompt?: string;
   /** Path to a custom setup script (relative to package root), dynamically imported after the declarative pipeline. */
   onInstall?: string;
-  /** @deprecated Use top-level fields instead. Kept for backward compat. */
+  /** Harnesses this package supports. Setup prepares a workspace for each. */
   supported_harnesses?: string[];
 }
 

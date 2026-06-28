@@ -95,6 +95,10 @@ schema: agentlet-agent-schema-v1
 name: hackmd-publisher
 description: Syncs canvas nodes to HackMD
 
+supported_harnesses:
+  - claude
+  - copilot
+
 command:
   claude: claude --acp
   copilot: copilot --acp
@@ -117,7 +121,7 @@ system_prompt: system_prompt.md
 | `skills` | `string[]` | no | Skill paths to install via `npx skills add --agent <harness>`. May be relative paths (resolved against package root) or npm package names. |
 | `system_prompt` | `string` | no | Path to the canonical prompt file (relative to package root). Default: `system_prompt.md`. Placed at the harness-specific location during setup. |
 | `onInstall` | `string` | no | Path to a custom setup script (relative to package root). Dynamically imported after the declarative pipeline. Must export a default async function. |
-| `supported_harnesses` | `string[]` | no | _(Deprecated)_ Harnesses this package supports. Prefer using `command` map keys to declare harness support. |
+| `supported_harnesses` | `string[]` | no | Harnesses this package supports. When present, `setup` (without `--harness`) prepares a workspace for each. Also used for auto-detection of installed harnesses. |
 
 ### 4.3 `command`
 
