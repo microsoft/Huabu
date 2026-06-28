@@ -132,10 +132,16 @@ function installSkills(
   for (const skill of skills) {
     // Resolve relative skill paths against packageDir
     const skillPath = skill.startsWith('.') ? resolve(packageDir, skill) : skill;
-    execSync(`npx skills add ${skillPath} --agent ${harnessInfo.skillsAgent}`, {
-      cwd: workspaceDir,
-      stdio: 'inherit',
-    });
+    // `npx --yes` auto-confirms the one-time install of the `skills`
+    // package; the trailing `--yes` skips the skills tool's own prompts
+    // (e.g. installation scope) so setup stays fully non-interactive.
+    execSync(
+      `npx --yes skills add ${skillPath} --agent ${harnessInfo.skillsAgent} --yes`,
+      {
+        cwd: workspaceDir,
+        stdio: 'inherit',
+      },
+    );
   }
   log.success('Skills installed');
 }
