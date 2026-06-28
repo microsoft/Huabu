@@ -510,9 +510,7 @@ export const NotePreview = ({
         return;
       }
 
-      const snippet = dragPayloadToMarkdown(payload, {
-        ...(canvasId ? { canvasId } : {}),
-      });
+      const snippet = dragPayloadToMarkdown(payload, { canvasId });
       if (!snippet) return;
 
       // Cross-source: claim the gesture. preventDefault flips the

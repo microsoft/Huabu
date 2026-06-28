@@ -322,9 +322,7 @@ export const NoteNode = memo(
           return;
         }
 
-        const snippet = dragPayloadToMarkdown(payload, {
-          ...(canvasId ? { canvasId } : {}),
-        });
+        const snippet = dragPayloadToMarkdown(payload, { canvasId });
         if (!snippet) {
           resetDragState();
           return;
