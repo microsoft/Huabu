@@ -57,12 +57,6 @@ importers:
         specifier: ^8.54.0
         version: 8.61.0(eslint@9.39.4(jiti@2.7.0))(typescript@5.9.3)
 
-  agent-teams:
-    dependencies:
-      '@agentlet/agent-team':
-        specifier: workspace:*
-        version: link:../external/agentlet/packages/agent-team
-
   apps/desktop:
     dependencies:
       get-port:
