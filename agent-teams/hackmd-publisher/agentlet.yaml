@@ -11,7 +11,7 @@ command:
 
 require:
   cli-tools:
-    - "@hackmd/hackmd-cli"
+    - '@hackmd/hackmd-cli'
   skills:
     - https://github.com/hackmdio/hackmd-cli/tree/develop/hackmd-cli
   prompts:

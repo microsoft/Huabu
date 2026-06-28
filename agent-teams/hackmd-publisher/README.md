@@ -20,6 +20,7 @@ Select nodes on your canvas, tell the agent "publish these to HackMD", and it wi
 ## Setup
 
 1. Copy `.env.example` to `.env` and fill in your HackMD token:
+
    ```bash
    cp .env.example .env
    # Edit .env with your token
@@ -27,6 +28,7 @@ Select nodes on your canvas, tell the agent "publish these to HackMD", and it wi
 
 2. From inside this folder, prepare the workspace (installs `@hackmd/hackmd-cli`,
    skills, and the prompt for each installed harness):
+
    ```bash
    agentlet agent-team setup            # or target one: --harness copilot
    ```
@@ -43,6 +45,7 @@ For the generic Agent Team packaging/runtime model, see:
 ## Usage
 
 Once connected to Huabu:
+
 - Select the nodes you want to publish
 - Open the agent chat and say: **"Publish these notes to HackMD"**
 - The agent will assemble and publish, then write back a link node
