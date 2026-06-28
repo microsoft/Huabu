@@ -119,228 +119,7 @@ No additional global installs are needed beyond `pnpm install` at the repo root.
 
 ---
 
-## 4. Example Gallery: Agent-as-Plugin Scenarios
-
-### 4.1 Publishing Agent — "Sync to HackMD"
-
-**Scenario**: User has a collection of markdown notes on the canvas. They want to publish selected ones to HackMD.
-
-**How it works**:
-1. User selects nodes on canvas, opens external agent chat
-2. Types: "Publish these notes to HackMD as a single document"
-3. Agent uses **reachback** to read each node's full content (`read-node <id>` → saves to local file)
-4. Agent understands the spatial layout (via `ask-agent "describe the layout of these nodes"`)
-5. Agent assembles a coherent markdown document, respecting the canvas topology
-6. Agent uses `hackmd-cli` (or HackMD API directly) to create/update the note
-7. Agent **writes back** via `write-node --type note --link-to <original-id> result.md`
-
-```
-Canvas:                          HackMD:
-┌─────────────────┐              ┌──────────────────────┐
-│ Frame: "Blog"   │    agent     │ hackmd.io/@user/blog  │
-│  [Intro]        │ ──────────►  │                       │
-│  [Chapter 1]    │              │ # My Blog Post        │
-│  [Chapter 2]    │              │ ## Introduction ...    │
-│  [Conclusion]   │              │ ## Chapter 1 ...      │
-└─────────────────┘              └──────────────────────┘
-        │
-  [📎 Published to HackMD]  ◄── agent writes back
-  [URL: hackmd.io/...]
-  [Last sync: 2026-06-26]
-```
-
-**Agent implementation**: A simple agent wrapper around `hackmd-cli` or the HackMD API. The agent:
-- Has `hackmd-cli` installed in its environment
-- Uses reachback to read canvas nodes
-- Maintains sync state (could be stored in a `.artifacts/hackmd-sync.json`)
-- Can do incremental updates on subsequent invocations
-
-**Why this is better than a plugin**: No HackMD-specific plugin API needed. Tomorrow, the user says "also publish to Medium" — same agent pattern, different CLI tool. The agent handles format differences, API quirks, error recovery.
-
----
-
-### 4.2 Research Agent — "Deep Dive with Citations"
-
-**Scenario**: User has a topic node. They want deep research with sources.
-
-**How it works**:
-1. User writes a question node: "What are the latest advances in protein folding?"
-2. External agent (e.g., a research-focused agent with web access) receives the context
-3. Agent uses web search tools, academic APIs (Semantic Scholar, arXiv), reads papers
-4. Agent writes back multiple nodes to the canvas:
-   - Summary node connected to the question
-   - Individual citation nodes (each linked to source URL)
-   - A "methodology comparison" frame with structured notes
-5. All nodes are spatially organized relative to the question
-
-```
-                    [Question: protein folding?]
-                           │
-              ┌────────────┼────────────────┐
-              │            │                │
-     [AlphaFold3]    [RoseTTAFold]    [ESMFold]
-     arxiv:2401...   nature:2024...   science:...
-              │            │                │
-              └────────┬───┘                │
-                       │                    │
-               [Comparison Table]    [Open Problems]
-```
-
-**Why this is better than a plugin**: A "research plugin" would need a rigid data model for citations, a UI for results, API integrations for each academic source. An agent just... does research. It adapts to what it finds. It can decide to create 3 nodes or 30, to add a comparison table or not, based on what it discovers.
-
----
-
-### 4.3 Code Execution Agent — "Run My Code"
-
-**Scenario**: User has pseudocode or real code in a note node. They want to execute it and see results.
-
-**How it works**:
-1. User selects a code node, sends to external agent (Claude Code / Copilot CLI)
-2. Agent reads the code via reachback
-3. Agent writes the code to a temporary file, executes it
-4. Agent writes results back as a new node connected to the code node:
-   - Output/result node
-   - Error node (if failed, with fix suggestions)
-   - Visualization node (if the code produces charts/images)
-
-```
-[Code: fibonacci.py]  ────►  [Output: 1, 1, 2, 3, 5, 8, ...]
-       │
-       └──── [Agent: fixed import error, re-ran successfully]
-```
-
-**Extension — Notebook-like experience**:
-- Frame = "notebook", child nodes = "cells"
-- Agent executes cells in order, maintaining state
-- Results appear as connected nodes below each cell
-- This is a Jupyter notebook... built from canvas primitives + an agent
-
----
-
-### 4.4 Project Management Agent — "Canvas → Jira/Linear"
-
-**Scenario**: User plans a project on canvas using frames and notes. They want to sync this to their project management tool.
-
-**How it works**:
-1. User organizes nodes in frames: "Sprint 1", "Sprint 2", "Backlog"
-2. External agent reads the canvas structure via reachback
-3. Agent maps: Frame → Epic, Note → Ticket, Edge → Dependency
-4. Agent uses `jira-cli` or Linear API to create/update issues
-5. Agent writes back ticket IDs and statuses as node metadata
-6. On subsequent runs, agent syncs bidirectionally: status changes in Jira update node labels on canvas
-
-```
-Canvas:                          Jira:
-┌─────────────────┐              ┌──────────────────────┐
-│ Sprint 1        │              │ Sprint 1 (Active)     │
-│  [Auth System]──┤─────sync────►│  AUTH-101: Auth System│
-│  [User API]     │              │  AUTH-102: User API   │
-│       │         │              │    blocked by AUTH-101│
-│       ▼         │              └──────────────────────┘
-│  [Dashboard]    │
-└─────────────────┘
-```
-
----
-
-### 4.5 Design System Agent — "Figma ↔ Canvas"
-
-**Scenario**: Designer exports Figma frames; agent imports them as image + annotation nodes, maintaining the design hierarchy.
-
-**How it works**:
-1. Agent has Figma API access
-2. Reads a Figma file URL from a canvas node
-3. Exports each frame as PNG, creates image nodes
-4. Adds annotation notes extracted from Figma comments
-5. Preserves hierarchy: Figma pages → Huabu frames, Figma frames → child image nodes
-
----
-
-### 4.6 Knowledge Graph Agent — "Connect the Dots"
-
-**Scenario**: User has many disparate notes. Agent reads them all, identifies relationships, and creates edges + summary nodes.
-
-**How it works**:
-1. Agent reads all nodes via `get_canvas_outline` + batch `read-node`
-2. Uses NLP/embeddings to find semantic relationships
-3. Creates edges between related nodes
-4. Creates "bridge" summary nodes that explain connections
-5. Suggests spatial reorganization (move related nodes closer)
-
----
-
-### 4.7 Data Pipeline Agent — "CSV → Canvas Intelligence"
-
-**Scenario**: User uploads a CSV. Agent analyzes it and creates a data exploration canvas.
-
-**How it works**:
-1. Agent reads the CSV from the node content
-2. Runs analysis: distributions, correlations, outliers
-3. Creates a structured exploration:
-   - Summary statistics node
-   - Key findings frame with individual insight nodes
-   - Chart images (generated via matplotlib/plotly)
-   - Recommended next analysis steps
-
----
-
-### 4.8 Meeting Notes Agent — "Record → Canvas"
-
-**Scenario**: User has a meeting recording (audio node). Agent transcribes and structures it.
-
-**How it works**:
-1. Agent reads audio file reference from node
-2. Uses Whisper or similar for transcription
-3. Creates structured output:
-   - Full transcript node
-   - Key decisions frame
-   - Action items (each as a note, assigned to people)
-   - Follow-up questions
-4. Connects action items to existing project nodes on the canvas
-
----
-
-### 4.9 Version Control Agent — "Canvas History"
-
-**Scenario**: User wants to snapshot the current canvas state, compare with previous versions, or branch their thinking.
-
-**How it works**:
-1. Agent reads the full canvas via reachback
-2. Uses `git` to commit the canvas state
-3. Can show diffs between versions as canvas annotations
-4. Can "branch" thinking: duplicate a frame, let the user explore alternatives
-
----
-
-### 4.10 Multi-Agent Orchestration — "Agent Teams"
-
-**Scenario**: Complex task requiring multiple specialized agents working together.
-
-**How it works**:
-1. User describes a complex goal in a question node
-2. An "orchestrator" agent reads it and decomposes into subtasks
-3. Each subtask is assigned to a specialized agent:
-   - Research agent gathers information
-   - Code agent implements prototypes
-   - Design agent creates mockups
-   - Writing agent produces documentation
-4. Each agent writes to its own frame on the canvas
-5. Orchestrator agent monitors progress and creates synthesis nodes
-
-```
-[Goal: Build MVP for idea X]
-         │
-    [Orchestrator Agent]
-         │
-    ┌────┼────┬─────────┐
-    │    │    │         │
- [Research] [Code]  [Design]  [Docs]
-  Frame     Frame    Frame    Frame
-```
-
----
-
-## 5. Implementation Direction
+## 4. Implementation Direction
 
 Huabu's current direction is:
 
@@ -365,7 +144,7 @@ Longer term, Huabu can still grow:
 
 ---
 
-## 6. The Bigger Picture: Canvas as OS
+## 5. The Bigger Picture: Canvas as OS
 
 The ultimate vision is that the canvas becomes an **operating system for thought**:
 
@@ -387,7 +166,7 @@ In a traditional OS, you don't need a "plugin" to connect `grep` to `sort` — y
 
 ---
 
-## 7. What Makes This Uniquely Powerful for Huabu
+## 6. What Makes This Uniquely Powerful for Huabu
 
 Huabu's **spatial canvas** adds a dimension that pure chat-based agent systems lack:
 
@@ -401,7 +180,7 @@ This is why "agent as the universal interface" is not just a nice idea for Huabu
 
 ---
 
-## 8. Immediate Next Steps
+## 7. Immediate Next Steps
 
 1. **Pick 2-3 concrete examples** to implement as working agent templates
 2. **Keep the generic mechanics in the agentlet spec** and avoid duplicating the
@@ -414,4 +193,4 @@ This is why "agent as the universal interface" is not just a nice idea for Huabu
 
 ---
 
-*This document is a living vision. The examples above are meant to inspire and demonstrate the pattern, not to prescribe a fixed roadmap. The beauty of the agent-as-plugin model is that we don't need to anticipate every use case — we just need to make the read/write interface rich enough, and agents will fill the gaps.*
+*This document is a living vision. Concrete examples live in [`agent-teams/`](../agent-teams/) as working implementations. The beauty of the agent-as-plugin model is that we don't need to anticipate every use case — we just need to make the read/write interface rich enough, and agents will fill the gaps.*
