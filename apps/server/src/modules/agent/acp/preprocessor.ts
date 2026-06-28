@@ -42,7 +42,7 @@
 
 import { renderPromptFile } from '../../../prompt/index.js';
 import { serializeNodeNeighbourhood } from '../../canvas/node-neighbourhood.js';
-import { renderAgentNodeList } from '../node-ref.js';
+import { renderAgentNodeList } from '../context/render/node-element.js';
 
 import type { ChatEnvelope } from '../context/envelope.js';
 import type { ChatAttachment, ExternalAgentPrompt } from '@sediment/shared';

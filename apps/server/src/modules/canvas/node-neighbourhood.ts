@@ -38,10 +38,12 @@ import {
 
 import { buildSpatialBundle } from './canvas-spatial.js';
 import {
-  buildAgentNodePreview,
   escapeXmlAttr,
-  extractAgentNodePreview,
   renderAgentNodeList,
+} from '../agent/context/render/node-element.js';
+import {
+  buildAgentNodePreview,
+  extractAgentNodePreview,
 } from '../agent/node-ref.js';
 import { getCanvasStore } from '../storage/index.js';
 
