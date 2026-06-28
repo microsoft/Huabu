@@ -161,6 +161,18 @@ export interface ExternalAgentPrompt {
     type: CanvasNodeType;
     /** Display label, when the node has one. */
     label?: string;
+    /**
+     * Pre-resolved `nodes/<safeLabel>.md` path. Carried for parity with
+     * the built-in agent; omitted on the external/ACP wire, which reads
+     * by id (`read-node`) and would mis-handle the virtual path.
+     */
+    filename?: string;
+    /**
+     * Short preview line (frontmatter `summary` > content[:120] > src),
+     * picked server-side so the agent can scan the selection without a
+     * `read` per node. Absent when nothing meaningful is available.
+     */
+    preview?: string;
   }>;
   /**
    * The one-shot system preamble (persona + `## Canvas Tools (Reachback)`

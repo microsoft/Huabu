@@ -116,6 +116,7 @@ export function PreparedPromptMessage({
                 </code>
                 <span className="text-fg-muted/80">
                   {node.label ? `${node.label} · ${node.type}` : node.type}
+                  {node.preview ? ` — ${node.preview}` : ''}
                 </span>
               </li>
             ))}

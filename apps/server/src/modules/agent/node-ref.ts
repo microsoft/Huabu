@@ -224,3 +224,75 @@ export function buildAgentNodeOutline(
   if (input.style) out.style = input.style;
   return out;
 }
+
+// ─── Renderers ───────────────────────────────────────────────────────────────
+
+/** Escape a string for safe inclusion in an XML attribute value. */
+function escapeXmlAttr(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/\r?\n/g, ' ')
+    .trim();
+}
+
+/** Minimum shape {@link renderAgentNodeList} needs to render one node. */
+export interface RenderableNode {
+  id: string;
+  type: string;
+  label?: string;
+  /** Pre-computed `nodes/<safeLabel>.md`; only emitted when `includeFile`. */
+  filename?: string;
+  /** Short preview line; becomes the element body when present. */
+  preview?: string;
+}
+
+/**
+ * Render a flat node list into the canonical `<node>` element list the
+ * agent sees inside `<selected_nodes>`. The single source of truth for
+ * "node list → text", shared by the built-in and external/ACP backends
+ * so the two cannot drift.
+ *
+ * Each node is a metadata-only, self-closing element: `id`, `type`,
+ * `label`, optional `file`, and an optional `preview`. The preview is a
+ * clearly-named ATTRIBUTE rather than the element body on purpose — a
+ * body would invite the model to mistake the ~120-char excerpt for the
+ * node's full content. As an attribute it reads as what it is: a scan
+ * hint. Callers still tell the model to `read` / `read-node` for the
+ * complete body in the surrounding intro.
+ *
+ * Why `<node>` elements rather than a JSON array or a markdown table:
+ *   - previews are free text (flattened, but still arbitrary); a markdown
+ *     table cell would break on stray pipes and pretty-JSON wastes tokens
+ *     on repeated keys / punctuation;
+ *   - the element shape matches the sibling `<skill>` / `<attachment>`
+ *     conventions, so the whole prompt reads uniformly.
+ *
+ * `file` is opt-in because only the built-in agent reads by filename
+ * (`read(file)`); the external agent reads by id through the reachback
+ * tool (`read-node <id>`), where the virtual `nodes/<file>.md` path would
+ * be a misleading dead reference.
+ */
+export function renderAgentNodeList(
+  nodes: readonly RenderableNode[],
+  opts: { includeFile?: boolean } = {},
+): string {
+  const includeFile = opts.includeFile ?? true;
+  return nodes
+    .map((n) => {
+      const preview = n.preview?.trim();
+      const attrs = [
+        `id="${escapeXmlAttr(n.id)}"`,
+        `type="${escapeXmlAttr(n.type)}"`,
+        n.label ? `label="${escapeXmlAttr(n.label)}"` : '',
+        includeFile && n.filename ? `file="${escapeXmlAttr(n.filename)}"` : '',
+        preview ? `preview="${escapeXmlAttr(preview)}"` : '',
+      ]
+        .filter(Boolean)
+        .join(' ');
+      return `<node ${attrs} />`;
+    })
+    .join('\n');
+}

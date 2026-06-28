@@ -22,6 +22,7 @@ import {
   resolveArtifactImageUrl,
 } from '../../artifact/utils.js';
 import { getCanvasStore } from '../../storage/index.js';
+import { renderAgentNodeList } from '../node-ref.js';
 
 import type { ChatEnvelope } from './envelope.js';
 import type { ChatTurnRecord, PiMessage } from '../store/chat-thread-store.js';
@@ -438,14 +439,15 @@ function buildContextSections(env: ChatEnvelope): string | undefined {
   const blocks: string[] = [];
 
   // Selected-node references. Each entry carries { id, type, label?,
-  // filename } — `filename` is pre-computed so the agent can `read` it
-  // verbatim; richer detail is one tool call away.
+  // filename, preview? } — `filename` is pre-computed so the agent can
+  // `read` it verbatim; `preview` is a short scan hint (NOT the full
+  // body). Richer detail is one tool call away.
   if (env.focus.selection.refs.length > 0) {
     blocks.push(
       [
         '<selected_nodes>',
-        'Nodes the user selected. Pass `filename` straight to read() for full content; use `id` with inspect_nodes() for layout / style / spatial relations.',
-        JSON.stringify(env.focus.selection.refs, null, 2),
+        'Nodes the user selected. Each <node> is metadata only: pass `file` straight to read() for the full body, or use `id` with inspect_nodes() for layout / style / spatial relations. `preview` is a short scan hint, not the full content.',
+        renderAgentNodeList(env.focus.selection.refs, { includeFile: true }),
         '</selected_nodes>',
       ].join('\n'),
     );

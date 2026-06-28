@@ -41,6 +41,7 @@
  */
 
 import { renderPromptFile } from '../../../prompt/index.js';
+import { renderAgentNodeList } from '../node-ref.js';
 
 import type { ChatEnvelope } from '../context/envelope.js';
 import type { ChatAttachment, ExternalAgentPrompt } from '@sediment/shared';
@@ -165,6 +166,11 @@ export function prepareExternalAgentPrompt(
       nodeId: ref.id,
       type: ref.type,
       ...(ref.label ? { label: ref.label } : {}),
+      // `preview` rides along (same server-side ladder as the built-in
+      // agent); `filename` is intentionally NOT forwarded — the external
+      // agent reads by id via `read-node`, so the virtual path would be a
+      // dead reference.
+      ...(ref.preview ? { preview: ref.preview } : {}),
     })),
     // Canvas neighbourhood (spatial context around an anchor node) when
     // the turn carried one — same source as the built-in agent's
@@ -226,23 +232,23 @@ export function serializePrompt(
   const sections: string[] = [];
 
   if (prompt.selectedNodes.length > 0) {
-    // The markdown table (header + separator + rows) is assembled here
-    // rather than round-tripped through a template engine: it keeps the
-    // whole prompt in one place and stops a markdown formatter from
-    // reflowing / splitting the table.
-    const table = [
-      '| Node ID | Type | Label |',
-      '| --- | --- | --- |',
-      ...prompt.selectedNodes.map((node) => {
-        const label = node.label ? escapeCell(node.label) : '—';
-        return `| \`${node.nodeId}\` | ${node.type} | ${label} |`;
-      }),
-    ].join('\n');
+    // Rendered through the SAME `renderAgentNodeList` the built-in agent
+    // uses, so the two backends present one `<node>` shape. `file` is
+    // omitted here: the external agent reads by id (`read-node <id>`).
+    const nodeList = renderAgentNodeList(
+      prompt.selectedNodes.map((node) => ({
+        id: node.nodeId,
+        type: node.type,
+        label: node.label,
+        preview: node.preview,
+      })),
+      { includeFile: false },
+    );
     sections.push(
       [
         '<selected_nodes>',
-        'The user selected the canvas nodes below. Read any you need with the Huabu Reachback Tool (`read-node <node-id>`); update them with `write-node --id <node-id>`.',
-        table,
+        'The user selected the canvas nodes below. Each <node> is metadata only: read any you need with the Huabu Reachback Tool (`read-node <node-id>`); update them with `write-node --id <node-id>`. `preview` is a short scan hint, not the full content.',
+        nodeList,
         '</selected_nodes>',
       ].join('\n'),
     );
@@ -357,10 +363,6 @@ function buildAcpAttachments(
     }
   }
   return out;
-}
-/** Escape pipe / newline chars so a label can't break the markdown table. */
-function escapeCell(s: string): string {
-  return s.replace(/\r?\n/g, ' ').replace(/\|/g, '\\|').trim();
 }
 
 /** Escape a string for safe inclusion in an XML attribute value. */

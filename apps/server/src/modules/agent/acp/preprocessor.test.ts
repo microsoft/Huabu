@@ -78,7 +78,7 @@ describe('serializePrompt', () => {
     expect(out).not.toContain('<selected_nodes>');
   });
 
-  it('wraps a selected-nodes table in <selected_nodes> when nodes are present', () => {
+  it('wraps a selected-nodes list in <selected_nodes> when nodes are present', () => {
     const prompt: ExternalAgentPrompt = {
       task: 'Compare these notes.',
       selectedNodes: [
@@ -91,10 +91,9 @@ describe('serializePrompt', () => {
 
     expect(out).toContain('<selected_nodes>');
     expect(out).toContain('</selected_nodes>');
-    expect(out).toContain('| Node ID | Type | Label |');
-    expect(out).toContain('| `node-a` | note | Intro |');
-    // Label-less node renders an em-dash placeholder.
-    expect(out).toContain('| `node-b` | image | — |');
+    expect(out).toContain('<node id="node-a" type="note" label="Intro" />');
+    // Label-less node renders with just id + type.
+    expect(out).toContain('<node id="node-b" type="image" />');
     // The user's words come last, wrapped in <user_request>.
     expect(out).toContain(
       '<user_request>\nCompare these notes.\n</user_request>',
@@ -113,13 +112,15 @@ describe('serializePrompt', () => {
     expect(serializePrompt(prompt)).toContain('read-node <node-id>');
   });
 
-  it('escapes pipe characters in labels so the table cannot break', () => {
+  it('escapes XML-special characters in labels so the attribute cannot break', () => {
     const prompt: ExternalAgentPrompt = {
       task: 'task',
-      selectedNodes: [{ nodeId: 'n1', type: 'note', label: 'a | b' }],
+      selectedNodes: [{ nodeId: 'n1', type: 'note', label: 'a " <b>' }],
     };
 
-    expect(serializePrompt(prompt)).toContain('| `n1` | note | a \\| b |');
+    expect(serializePrompt(prompt)).toContain(
+      '<node id="n1" type="note" label="a &quot; &lt;b&gt;" />',
+    );
   });
   it('wraps off-canvas attachments in <attachments> before the user request', () => {
     const prompt: ExternalAgentPrompt = {
@@ -207,7 +208,9 @@ describe('prepareExternalAgentPrompt', () => {
       { nodeId: 'frame-1', type: 'frame', label: 'Group' },
       { nodeId: 'child-1', type: 'note', label: 'Child' },
     ]);
-    expect(result.serialized).toContain('| `child-1` | note | Child |');
+    expect(result.serialized).toContain(
+      '<node id="child-1" type="note" label="Child" />',
+    );
     expect(result.includedSystem).toBe(false);
   });
 

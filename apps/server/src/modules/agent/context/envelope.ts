@@ -21,11 +21,12 @@
 
 import { getSkill } from '../../../prompt/index.js';
 import { renderNodeNeighbourhoodMarkdown } from '../../canvas/node-neighbourhood.js';
-import { buildAgentNodeRef } from '../node-ref.js';
+import { getCanvasStore } from '../../storage/index.js';
+import { buildAgentNodePreview } from '../node-ref.js';
 import { isUserInvokableSkill } from '../skills.route.js';
 import { snapshotNodesToArtifacts } from '../tools/handlers/snapshot-node.js';
 
-import type { AgentNodeRef } from '../node-ref.js';
+import type { AgentNodePreview } from '../node-ref.js';
 import type { ChatAttachment, WireSelectionNode } from '@sediment/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
@@ -61,9 +62,10 @@ export interface ChatEnvelope {
     selection: {
       /**
        * Full reference list (frame children included) — the agent's
-       * up-front map of the selection.
+       * up-front map of the selection, each enriched with a short
+       * `preview` line (server-side, same ladder as the neighbourhood).
        */
-      refs: AgentNodeRef[];
+      refs: AgentNodePreview[];
       /**
        * Ids the user directly selected (top-level only, frame children
        * excluded) — drives the reloaded user-message node chips so
@@ -136,15 +138,53 @@ function collectSketchNodeIds(nodes: WireSelectionNode[]): string[] {
 }
 
 /**
- * Flatten the wire selection (frame children included) into the L0
- * `AgentNodeRef` payload of `{ id, type, label?, filename }`. Richer
- * detail is one tool call away, so we do not pay its token cost here.
+ * Flatten the wire selection (frame children included) into the L1
+ * `AgentNodePreview` payload of `{ id, type, label?, filename, preview? }`.
+ * The `preview` is picked server-side via the shared
+ * {@link extractAgentNodePreview} ladder (`summary > content[:120] > src`)
+ * — the SAME policy the node-neighbourhood uses — by reading each node's
+ * on-disk sidecar from the canvas store. Full content is still one tool
+ * call away; the preview is only a scan hint. When `canvasId` is null the
+ * store is unavailable, so refs fall back to bare `{ id, type, label?,
+ * filename }` (no preview).
  */
-function collectSelectedNodeRefs(nodes: WireSelectionNode[]): AgentNodeRef[] {
-  const refs: AgentNodeRef[] = [];
+function collectSelectedNodeRefs(
+  nodes: WireSelectionNode[],
+  canvasId: string | null,
+): AgentNodePreview[] {
+  let store: ReturnType<typeof getCanvasStore> | null = null;
+  if (canvasId) {
+    try {
+      store = getCanvasStore(canvasId);
+    } catch {
+      store = null;
+    }
+  }
+  const readPreviewInputs = (n: WireSelectionNode) => {
+    const meta = store?.readNode(n.id) as Record<string, unknown> | null;
+    return {
+      summary: typeof meta?.summary === 'string' ? meta.summary : undefined,
+      content:
+        typeof meta?.content === 'string' && meta.content
+          ? meta.content
+          : undefined,
+      src: n.src,
+    };
+  };
+  const refs: AgentNodePreview[] = [];
   const walk = (list: WireSelectionNode[]) => {
     for (const n of list) {
-      refs.push(buildAgentNodeRef({ id: n.id, type: n.type, label: n.label }));
+      const { summary, content, src } = readPreviewInputs(n);
+      refs.push(
+        buildAgentNodePreview({
+          id: n.id,
+          type: n.type,
+          label: n.label,
+          summary,
+          content,
+          src,
+        }),
+      );
       if (n.children) walk(n.children);
     }
   };
@@ -345,7 +385,9 @@ export async function buildChatEnvelope(
     },
     focus: {
       selection: {
-        refs: selectedNodes ? collectSelectedNodeRefs(selectedNodes) : [],
+        refs: selectedNodes
+          ? collectSelectedNodeRefs(selectedNodes, canvasId)
+          : [],
         selectedIds: selectedNodes ? collectSelectedNodeIds(selectedNodes) : [],
         imageAttachments: dedupedImageAttachments,
         snapshotAttachments,

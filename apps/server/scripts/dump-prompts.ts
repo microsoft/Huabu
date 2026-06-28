@@ -99,12 +99,14 @@ const CASES: Array<{ name: string; env: ChatEnvelope }> = [
           type: 'note',
           label: 'Risks',
           filename: 'nodes/risks.md',
+          preview: 'supply chain, regulatory, fx',
         },
         {
           id: 'node-bbbb',
           type: 'note',
           label: 'Mitigations',
           filename: 'nodes/mitigations.md',
+          preview: 'hedging, dual-sourcing',
         },
       ],
       nodeNeighbourhood:

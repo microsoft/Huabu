@@ -108,7 +108,9 @@ describe('renderEnvelopeMessages', () => {
 
     // All three sections are present and XML-tagged.
     expect(flat).toContain('<selected_nodes>');
-    expect(flat).toContain('"id": "n1"');
+    expect(flat).toContain(
+      '<node id="n1" type="note" label="First" file="nodes/first.md" />',
+    );
     expect(flat).toContain('<canvas_neighbourhood>');
     expect(flat).toContain('- "First" [note] — alpha');
     expect(flat).toContain('<invoked_skills>');
