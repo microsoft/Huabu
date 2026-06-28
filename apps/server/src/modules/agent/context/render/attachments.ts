@@ -33,7 +33,7 @@ import { resolveImageUrl, MAX_INLINE_IMAGE_BYTES } from './image-inlining.js';
 import { escapeXmlAttr } from './node-element.js';
 import { ARTIFACT_URL_REGEX } from '../../../artifact/utils.js';
 import { getCanvasStore } from '../../../storage/index.js';
-import { isSketchRasterAttachment } from '../attachment-visibility.js';
+import { isSketchRasterAttachment } from '../attachment-chips.js';
 
 import type { ChatAttachment } from '@sediment/shared';
 

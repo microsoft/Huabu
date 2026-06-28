@@ -4,7 +4,7 @@ import {
   isSketchRasterAttachment,
   projectUserVisibleAttachments,
   selectUserVisibleAttachments,
-} from './attachment-visibility.js';
+} from './attachment-chips.js';
 
 import type { ChatAttachment } from '@sediment/shared';
 

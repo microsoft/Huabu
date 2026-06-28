@@ -1,13 +1,15 @@
 /**
- * Attachment visibility — which of a turn's attachments the user sees
- * as a chip, and the slim shape they are projected to for display /
- * persistence.
+ * Attachment chips — which of a turn's attachments the user sees as a
+ * chip in the composer, and the slim shape they are projected to for
+ * display / persistence.
  *
- * This is pure `ChatAttachment` domain logic, independent of pi-ai and
- * of the `[SYSTEM …]` render encoding. It is shared by the chat-turn
- * renderer (to derive the LLM sketch-raster hint) and by the history
- * builder (to rebuild a reloaded user message's attachment chips), so
- * both agree on the visible subset.
+ * Distinct from `render/attachments.ts`, which turns attachments into
+ * the prompt text / vision parts the MODEL sees. This file is the
+ * USER-facing / persistence side: pure `ChatAttachment` domain logic,
+ * independent of pi-ai and of the `[SYSTEM …]` render encoding. It is
+ * shared by the chat-turn renderer (to derive the LLM sketch-raster
+ * hint) and by the history builder (to rebuild a reloaded user
+ * message's attachment chips), so both agree on the visible subset.
  */
 
 import type { ChatAttachment } from '@sediment/shared';
