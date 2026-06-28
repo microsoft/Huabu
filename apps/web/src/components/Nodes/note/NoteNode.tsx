@@ -382,6 +382,14 @@ export const NoteNode = memo(
         selected={selected}
         actions={isContentMissing ? undefined : NoteActions}
         keepAspectRatio={false}
+        // Active drop-target highlight: thick `--info-light` ring on
+        // the wrapper's true outer edge plus a translucent
+        // `--info-light` wash over the whole node — same hue family
+        // as NotePreview's insertion bar but softer so it reads as a
+        // "zone" rather than a precise insertion point.
+        className={
+          isDropTarget ? 'ring-info-light bg-info-light/60 ring-4' : undefined
+        }
       >
         {isContentMissing ? (
           <MissingFileBanner
@@ -396,13 +404,6 @@ export const NoteNode = memo(
                 'relative w-full',
                 !hasAccent && 'bg-surface',
                 hasFixedHeight && 'h-full overflow-hidden',
-                // Highlight ring while a Sediment drag hovers this
-                // tile — uses the same info-toned token as other
-                // "active target" indicators (search hit, focused
-                // input). Inside the wrapper so it tracks the node's
-                // rounded corners.
-                isDropTarget &&
-                  'ring-info ring-2 ring-offset-1 ring-offset-transparent',
               )}
               onDragEnter={handleNoteDragEnter}
               onDragOver={handleNoteDragOver}
