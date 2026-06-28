@@ -44,7 +44,7 @@ export function resolveAgentTeam(ref: AgentTeamRef): ResolvedSpawn {
   if (!existsSync(cwd)) {
     throw new Error(
       `Agent Team workspace not prepared for harness "${harness}": ${cwd}\n` +
-        `Run: cd ${agentDir} && node agent-setup.mjs unpack --harness ${harness}`,
+        `Run: npx @agentlet/agent-team setup ${agentDir} --harness ${harness}`,
     );
   }
 

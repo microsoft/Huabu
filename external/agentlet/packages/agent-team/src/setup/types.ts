@@ -7,8 +7,17 @@ export interface AgentTeamManifest {
   schema: string;
   name: string;
   description: string;
-  supported_harnesses?: string[];
   command: string | Record<string, string>;
+  /** Harness-agnostic CLI tools to install via npm. */
+  tools?: string[];
+  /** Skill paths to install via `npx skills add`. */
+  skills?: string[];
+  /** Path to the canonical system prompt file (relative to package root). */
+  system_prompt?: string;
+  /** Path to a custom setup script (relative to package root), dynamically imported after the declarative pipeline. */
+  onInstall?: string;
+  /** @deprecated Use top-level fields instead. Kept for backward compat. */
+  supported_harnesses?: string[];
 }
 
 /** Known harness identifiers. */
@@ -28,6 +37,10 @@ export interface CallbackContext {
   packageDir: string;
   /** Parsed manifest from agentlet.yaml. */
   manifest: AgentTeamManifest;
+  /** The harness being set up. */
+  harness: string;
+  /** Absolute path to workspaces/<harness>/. */
+  workspaceDir: string;
   /** Logging helpers. */
   log: SetupLogger;
 }

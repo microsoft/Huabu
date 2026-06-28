@@ -10,14 +10,14 @@ An **Agent Team** is a self-contained agent package. It lets an author publish a
 folder that describes:
 
 - what the agent is
-- which harnesses it supports
+- which tools and skills it needs
 - how to launch it
 - how to prepare harness-specific runnable workspaces
 
 The key design principle is to separate:
 
 - **source package** — authored files checked into the repository
-- **setup (unpack)** — explicit user-approved materialization
+- **setup** — explicit user-approved materialization
 - **runtime launch** — later spawning from a prepared workspace
 
 Setup is never hidden inside the first spawn. The user explicitly runs setup,
@@ -30,11 +30,13 @@ author writes package
         ↓
 user clones / downloads folder
         ↓
-user runs `node agent-setup.mjs unpack [--harness ...]`
+user runs `npx @agentlet/agent-team setup <dir> --harness <name>`
         ├─ validates manifest
-        ├─ detects / selects harnesses
         ├─ creates workspaces/<harness>/
-        └─ runs package-specific setup callbacks
+        ├─ installs tools (npm packages)
+        ├─ installs skills (npx skills add)
+        ├─ places system prompt at harness-specific location
+        └─ runs onInstall script (if declared)
         ↓
 host app sends { agent_dir, harness } to agentlet daemon
         ↓
@@ -50,10 +52,10 @@ Typical authored layout:
 ```text
 <agent-team>/
   agentlet.yaml        ← declarative manifest
-  agent-setup.mjs      ← setup entry point (thin wrapper over runtime)
-  system_prompt.md     ← canonical prompt (distributed during setup)
+  system_prompt.md     ← canonical prompt (placed by setup utility)
   .env                 ← runtime secrets (not committed)
   .env.example         ← template for .env
+  skills/              ← optional local skills
   scripts/             ← optional helper scripts
   assets/              ← optional static assets
 ```
@@ -63,9 +65,13 @@ Typical generated layout after setup:
 ```text
 <agent-team>/
   workspaces/
-    default/           ← if no harness specified
     claude/            ← harness-specific prepared workspace
+      CLAUDE.md        ← prompt placed by setup
+      node_modules/    ← tools installed by setup
     copilot/
+      .github/
+        copilot-instructions.md
+      node_modules/
 ```
 
 Notes:
@@ -73,13 +79,14 @@ Notes:
 - `workspaces/` is intentionally visible, not hidden. Users may inspect it,
   debug it, or run the resolved command manually from it.
 - `.env` is runtime input, not generated output.
-- The exact authored files are up to the package. `system_prompt.md` is a
-  common convention, not a required schema field.
+- `agent-setup.mjs` is no longer required — the `@agentlet/agent-team` CLI
+  handles setup declaratively from the manifest.
 
 ## 4. Manifest: `agentlet.yaml`
 
-`agentlet.yaml` is the declarative identity and launch contract for the package.
-It should stay small, inspectable, and safe to read without executing code.
+`agentlet.yaml` is the declarative identity, setup, and launch contract for the
+package. It should stay small, inspectable, and safe to read without executing
+code.
 
 ### 4.1 Example
 
@@ -88,13 +95,14 @@ schema: agentlet-agent-schema-v1
 name: hackmd-publisher
 description: Syncs canvas nodes to HackMD
 
-supported_harnesses:
-  - claude
-  - copilot
-
 command:
   claude: claude --acp
   copilot: copilot --acp
+
+tools:
+  - hackmd-cli
+
+system_prompt: system_prompt.md
 ```
 
 ### 4.2 Fields
@@ -104,21 +112,14 @@ command:
 | `schema` | `string` | yes | Manifest schema version. Current value: `agentlet-agent-schema-v1`. |
 | `name` | `string` | yes | Stable package name. |
 | `description` | `string` | yes | Human-readable summary. |
-| `supported_harnesses` | `string[]` | no | Harnesses this package is known to support, such as `claude`, `copilot`, `codex`, `pi`. |
 | `command` | `string \| Record<string, string>` | yes | Command used to launch the agent process over ACP stdio. May be generic or per-harness. |
+| `tools` | `string[]` | no | npm packages to install in the workspace (e.g., `hackmd-cli`). |
+| `skills` | `string[]` | no | Skill paths to install via `npx skills add --agent <harness>`. May be relative paths (resolved against package root) or npm package names. |
+| `system_prompt` | `string` | no | Path to the canonical prompt file (relative to package root). Default: `system_prompt.md`. Placed at the harness-specific location during setup. |
+| `onInstall` | `string` | no | Path to a custom setup script (relative to package root). Dynamically imported after the declarative pipeline. Must export a default async function. |
+| `supported_harnesses` | `string[]` | no | _(Deprecated)_ Harnesses this package supports. Prefer using `command` map keys to declare harness support. |
 
-### 4.3 `supported_harnesses`
-
-If present, `supported_harnesses` constrains what setup should prepare.
-
-- Setup validates `--harness <name>` against this list.
-- Setup can auto-detect installed harnesses from this list.
-- By default, setup prepares all supported harnesses.
-
-If omitted, the package is treated as harness-agnostic and setup creates
-`workspaces/default/`.
-
-### 4.4 `command`
+### 4.3 `command`
 
 `command` is the runtime launch command.
 
@@ -127,138 +128,139 @@ If omitted, the package is treated as harness-agnostic and setup creates
 
 The daemon reads this field at spawn time to determine what process to launch.
 
-## 5. `agent-setup.mjs`
+### 4.4 Declarative Setup Pipeline
 
-`agent-setup.mjs` is the **user-facing entry point** for setting up the
-package. The user runs it directly:
+The `@agentlet/agent-team` CLI processes these manifest fields in order:
 
-```bash
-node agent-setup.mjs unpack
-node agent-setup.mjs unpack --harness claude
-node agent-setup.mjs validate
-node agent-setup.mjs doctor
+1. **`tools`** — installs npm packages in the workspace (`npm install <pkg>`)
+2. **`skills`** — installs skills via `npx skills add <path> --agent <harness>`,
+   using a built-in harness→agent mapping (e.g., `claude` → `claude`,
+   `copilot` → `github-copilot`)
+3. **`system_prompt`** — copies the prompt file to the harness-specific
+   location (e.g., `CLAUDE.md` for Claude, `.github/copilot-instructions.md`
+   for Copilot)
+4. **`onInstall`** — if declared, dynamically imports and runs the script
+   after the above steps complete
+
+Most agent teams need only `tools`, `skills`, and `system_prompt`. The
+`onInstall` script is for truly custom logic beyond what the declarative fields
+cover (generating config files, fetching external data, etc.).
+
+### 4.5 `onInstall` Script Contract
+
+When `onInstall` is declared in the manifest:
+
+```yaml
+onInstall: ./custom-setup.mjs
 ```
 
-### 5.1 Prerequisites
+The script must export a default async function:
 
-Agent Teams require **agentlet** to be installed. Agentlet provides both the
-daemon (runtime spawn) and the `@agentlet/agent-team` package (setup
-utilities).
+```js
+export default async function({ packageDir, manifest, harness, workspaceDir, log }) {
+  // Custom setup logic runs AFTER tools/skills/prompt are in place
+  log.info('Running custom setup...');
+}
+```
 
-Agentlet is not yet open-sourced. Current installation paths:
+The function receives a context object with:
+- `packageDir` — absolute path to the package root
+- `manifest` — parsed agentlet.yaml
+- `harness` — the harness being set up
+- `workspaceDir` — absolute path to `workspaces/<harness>/`
+- `log` — logging helpers (`info`, `warn`, `error`, `success`)
 
-- **Monorepo consumers**: if agentlet is included as a subtree or workspace
-  dependency, `npm/pnpm install` at the repo root makes both the CLI and
-  `@agentlet/agent-team` available.
-- **Standalone / future**: once published, `npm install -g agentlet` (or
-  equivalent) will provide both the CLI and the runtime package globally.
+## 5. `@agentlet/agent-team`
 
-### 5.2 Why a script entry point
+The shared runtime package that provides both the CLI and library API.
 
-- **Each package is self-contained** — clone folder, `node agent-setup.mjs
-  unpack`, done.
-- **Custom logic is first-class** — the script IS the entry point, not a
-  side-channel invoked by a generic tool.
-- **agentlet daemon stays focused** — daemon handles spawn/relay, not package
-  management.
+### 5.1 CLI Usage
 
-### 5.2 Why MJS, not shell commands in YAML
+```bash
+# Set up an agent team for a specific harness
+npx @agentlet/agent-team setup ./my-agent --harness claude
 
-- Shell snippets like `cp`, `mkdir -p`, or env expansion are not portable.
-- Setup often needs real logic, not just linear commands.
-- Node's `fs`/`path` APIs make cross-platform behavior straightforward.
+# Validate workspace readiness
+npx @agentlet/agent-team validate ./my-agent --harness claude
 
-### 5.3 Typical implementation
+# Run diagnostics
+npx @agentlet/agent-team doctor ./my-agent
+```
 
-`agent-setup.mjs` should be a thin wrapper over `@agentlet/agent-team`,
-providing only package-specific callbacks:
+### 5.2 Capabilities
+
+- manifest parsing and validation
+- harness detection (which CLIs are on PATH)
+- harness-specific prompt file placement
+- npm tool installation
+- skill installation via `npx skills add`
+- custom onInstall script loading
+- workspace creation and validation
+- doctor diagnostics
+
+### 5.3 Package name
+
+```text
+@agentlet/agent-team
+```
+
+### 5.4 Intended consumers
+
+- CLI users setting up agent teams
+- host applications — can reuse harness detection, manifest parsing, and
+  validation logic from their own build/runtime pipeline
+
+### 5.5 Library API (backward compat)
+
+For agent teams that need complex custom setup, a per-package script can still
+import `runSetup`:
 
 ```js
 import { runSetup } from '@agentlet/agent-team';
 
 runSetup({
   onInstall(harness, workspaceDir, ctx) {
-    // Install harness-specific dependencies
-    execSync('npm init -y && npm install hackmd-cli', { cwd: workspaceDir });
-    ctx.log.info('Dependencies installed');
+    // Custom setup logic
   },
 });
 ```
 
-## 6. `@agentlet/agent-team`
+This is the legacy pattern and is optional — the CLI + declarative manifest
+covers most use cases.
 
-Most setup flows share the same skeleton, so common logic lives in a shared
-runtime package.
-
-### 6.1 Capabilities
-
-- harness detection
-- argument parsing for setup subcommands (`unpack`, `validate`, `doctor`)
-- workspace creation (`workspaces/<harness>/`)
-- common copy/link helpers
-- validation helpers
-- logging / doctor output
-
-### 6.2 Package name
-
-```text
-@agentlet/agent-team
-```
-
-### 6.3 Intended consumers
-
-- per-package `agent-setup.mjs` — primary consumer
-- host applications — can reuse harness detection, manifest parsing, and
-  validation logic from their own build/runtime pipeline
-
-### 6.4 Design constraints
+### 5.6 Design constraints
 
 - Node-focused and reusable
 - No hardwiring to CLI-only output or daemon lifecycle internals
 - Should not import from `@agentlet/server` or `@agentlet/local`
 
-## 7. Callback-Based Setup Model
+## 6. Harness-Specific Mappings
 
-Per-package setup scripts should be thin adapters over the runtime rather than
-reimplementing the whole pipeline.
+The setup utility maintains internal mappings for harness-specific behavior.
+Agent team authors don't need to know these details — the manifest is
+harness-agnostic.
 
-### 7.1 Conceptual API
+### 6.1 Prompt File Placement
 
-```ts
-runSetup({
-  onInstall(harness, workspaceDir, ctx) { ... },
-  onUnpack(harness, workspaceDir, ctx) { ... },
-  onValidate(harness, workspaceDir, ctx) { ... },
-  onDoctor(harness, workspaceDir, ctx) { ... },
-})
-```
-
-Each callback is invoked once per harness being processed. Arguments:
-
-- `harness` — the harness name (e.g., `"claude"`, `"copilot"`)
-- `workspaceDir` — absolute path to `workspaces/<harness>/`
-- `ctx` — `{ packageDir, manifest, log }`
-
-The runtime owns the standard flow (parse args, read manifest, detect harness,
-create workspace, distribute prompts). Package scripts provide callbacks for
-agent-specific behavior only.
-
-### 7.2 Responsibilities
-
-| Layer | Responsibility |
+| Harness | Prompt location |
 |---|---|
-| runtime | parse manifest, detect harness, create workspace, distribute prompts |
-| package callbacks | install deps, copy extra files, validate assumptions, emit diagnostics |
+| `claude` | `CLAUDE.md` |
+| `copilot` | `.github/copilot-instructions.md` |
+| `codex` | `AGENTS.md` |
+| _(unknown)_ | `system_prompt.md` (fallback) |
 
-### 7.3 Context object (`ctx`)
+### 6.2 Skills Agent Mapping
 
-The third argument passed to callbacks:
+| Harness | `--agent` value for `npx skills add` |
+|---|---|
+| `claude` | `claude` |
+| `copilot` | `github-copilot` |
+| `codex` | `codex` |
 
-- `packageDir` — absolute path to the source package (where `agentlet.yaml` lives)
-- `manifest` — parsed `agentlet.yaml`
-- `log` — logging helpers (`info`, `warn`, `error`, `success`)
+See https://github.com/vercel-labs/skills#supported-agents for the
+authoritative list.
 
-## 8. `workspaces/`
+## 7. `workspaces/`
 
 `workspaces/` contains the generated runnable outputs of setup.
 
@@ -268,35 +270,28 @@ The third argument passed to callbacks:
 These folders are intentionally visible and user-facing: users may inspect
 them, debug them, or run the resolved command manually inside them.
 
-## 9. Harness Detection
-
-Harness detection logic should be shared, not reimplemented by every package.
-
-That logic belongs in `@agentlet/agent-team` so that:
-
-- `agent-setup.mjs` can use it
-- host apps can reuse the same behavior
-
-Packages should declare support; the runtime should detect availability.
-
-## 10. Daemon Integration
+## 8. Daemon Integration
 
 The agentlet daemon is **per-machine infrastructure**. It gains thin Agent Team
 awareness — just enough to resolve a folder into a spawnable process — but does
 not run setup or understand package-specific callbacks.
 
-### 10.1 Agent Team SessionSpec variant
+### 8.1 Agent Team SessionSpec variant
 
 In addition to the existing `SessionSpec { command, cwd, env, ... }`, there is
-a new variant for Agent Team launches:
+an Agent Team variant:
 
 ```text
 { agent_dir, harness }
 ```
 
-How this combines with the existing `SessionSpec` union is TBD.
+This is represented as a nested field on `SessionSpec`:
 
-### 10.2 Daemon behavior on Agent Team spawn
+```ts
+agentTeam?: { agentDir: string; harness?: string }
+```
+
+### 8.2 Daemon behavior on Agent Team spawn
 
 When the daemon receives `{ agent_dir, harness }`:
 
@@ -312,11 +307,10 @@ When the daemon receives `{ agent_dir, harness }`:
 The daemon does **not**:
 
 - run setup / unpack
-- parse or invoke `agent-setup.mjs`
 - install dependencies
 - understand package-specific callbacks
 
-### 10.3 Host-app integration
+### 8.3 Host-app integration
 
 Host applications send `{ agent_dir, harness }` to the daemon
 instead of a fully-resolved `SessionSpec`. The daemon handles resolution
@@ -325,16 +319,15 @@ internally. The host only needs to know:
 1. where the Agent Team folder is
 2. which harness to use (or let the daemon pick from the manifest)
 
-## 11. Open Questions
-
-- how the Agent Team `SessionSpec` variant combines with the existing
-  `SessionSpec` type (union, subtype, flag, etc.)
+## 9. Open Questions
 
 ### Resolved
 
 - **manifest filename**: keeping `agentlet.yaml`
 - **`.env` loading**: daemon loads `.env` before spawning the process
-- **lock file**: dropped — `node agent-setup.mjs validate` covers workspace
-  readiness checks; no separate lock artifact needed
-- **callback API**: `(harness, workspaceDir, ctx)` where `ctx = { packageDir, manifest, log }`
+- **lock file**: dropped — `validate` subcommand covers workspace readiness
+- **callback API**: `(harness, workspaceDir, ctx)` where `ctx = { packageDir, manifest, harness, workspaceDir, log }`
 - **package name**: `@agentlet/agent-team`
+- **setup entry point**: `@agentlet/agent-team` CLI is the primary entry point; per-package `agent-setup.mjs` is optional
+- **declarative setup**: `tools`, `skills`, `system_prompt` in manifest; `onInstall` for custom logic
+- **SessionSpec variant**: nested `agentTeam?: { agentDir, harness? }` field on existing `SessionSpec`

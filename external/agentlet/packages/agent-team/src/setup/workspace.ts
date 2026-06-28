@@ -25,15 +25,19 @@ export function isWorkspaceReady(workspaceDir: string): boolean {
 }
 
 /**
- * Distribute the system_prompt.md to the workspace using the
+ * Distribute the system prompt to the workspace using the
  * harness-specific prompt convention.
+ *
+ * @param promptFile - relative path to the prompt file within packageDir
+ *                     (defaults to 'system_prompt.md')
  */
 export function distributePrompt(
   packageDir: string,
   workspaceDir: string,
   harness: string,
+  promptFile: string = 'system_prompt.md',
 ): void {
-  const promptSource = join(packageDir, 'system_prompt.md');
+  const promptSource = join(packageDir, promptFile);
   if (!existsSync(promptSource)) {
     return;
   }

@@ -1,16 +1,21 @@
 /**
- * Main entry point for Agent Team setup scripts.
+ * Main entry point for Agent Team setup.
  *
- * Per-package agent-setup.mjs calls `runSetup(callbacks)` and the runtime
- * handles everything else: arg parsing, manifest reading, harness resolution,
- * workspace creation, and callback orchestration.
+ * Two modes:
+ *   1. CLI mode: `npx @agentlet/agent-team setup <dir> --harness <name>`
+ *      The CLI reads the manifest and runs the declarative pipeline.
+ *   2. Script mode: per-package agent-setup.mjs calls `runSetup(callbacks)`.
+ *      Kept for backward compat and complex custom setups.
  */
 
-import { resolve } from 'node:path';
+import { execSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { resolve, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { parseSetupArgs } from './cli.js';
-import { detectInstalledHarnesses } from './harness.js';
+import { detectInstalledHarnesses, getPromptTarget } from './harness.js';
 import { readManifest } from './manifest.js';
-import type { CallbackContext, SetupCallbacks, SetupLogger } from './types.js';
+import type { AgentTeamManifest, CallbackContext, SetupCallbacks, SetupLogger } from './types.js';
 import {
   createWorkspace,
   distributePrompt,
@@ -67,7 +72,117 @@ function resolveHarnesses(
   return ['default'];
 }
 
-/** Run the `unpack` command. */
+// ── Declarative pipeline steps ─────────────────────────────────────────
+
+/** Install CLI tools declared in manifest.tools via npm. */
+function installTools(
+  manifest: AgentTeamManifest,
+  workspaceDir: string,
+  log: SetupLogger,
+): void {
+  if (!manifest.tools || manifest.tools.length === 0) return;
+  log.info(`Installing tools: ${manifest.tools.join(', ')}`);
+
+  // Ensure package.json exists so npm install works
+  const pkgJson = join(workspaceDir, 'package.json');
+  if (!existsSync(pkgJson)) {
+    execSync('npm init -y --silent', { cwd: workspaceDir, stdio: 'pipe' });
+  }
+
+  const pkgs = manifest.tools.join(' ');
+  execSync(`npm install ${pkgs}`, { cwd: workspaceDir, stdio: 'inherit' });
+  log.success('Tools installed');
+}
+
+/**
+ * Skills agent name mapping for `npx skills add --agent <name>`.
+ * See https://github.com/vercel-labs/skills#supported-agents
+ */
+const SKILLS_AGENT_MAP: Record<string, string> = {
+  claude: 'claude',
+  copilot: 'github-copilot',
+  codex: 'codex',
+};
+
+/** Install skills declared in manifest.skills via `npx skills add`. */
+function installSkills(
+  manifest: AgentTeamManifest,
+  harness: string,
+  workspaceDir: string,
+  packageDir: string,
+  log: SetupLogger,
+): void {
+  if (!manifest.skills || manifest.skills.length === 0) return;
+  const agentName = SKILLS_AGENT_MAP[harness] ?? harness;
+  log.info(`Installing skills for agent "${agentName}": ${manifest.skills.join(', ')}`);
+
+  for (const skill of manifest.skills) {
+    // Resolve relative skill paths against packageDir
+    const skillPath = skill.startsWith('.') ? resolve(packageDir, skill) : skill;
+    execSync(`npx skills add ${skillPath} --agent ${agentName}`, {
+      cwd: workspaceDir,
+      stdio: 'inherit',
+    });
+  }
+  log.success('Skills installed');
+}
+
+/** Place the system prompt at the harness-specific location. */
+function placeSystemPrompt(
+  manifest: AgentTeamManifest,
+  packageDir: string,
+  workspaceDir: string,
+  harness: string,
+  log: SetupLogger,
+): void {
+  // Use manifest.system_prompt if declared, otherwise fall back to convention
+  const promptFile = manifest.system_prompt ?? 'system_prompt.md';
+  const promptSource = resolve(packageDir, promptFile);
+
+  if (!existsSync(promptSource)) {
+    if (manifest.system_prompt) {
+      log.warn(`Declared system_prompt not found: ${promptSource}`);
+    }
+    return;
+  }
+
+  distributePrompt(packageDir, workspaceDir, harness, promptFile);
+  const target = getPromptTarget(harness);
+  log.success(`Prompt placed at ${target.path}/${target.filename}`);
+}
+
+/**
+ * Load and invoke the custom onInstall script declared in the manifest.
+ * The script must export a default async function.
+ */
+async function runCustomOnInstall(
+  manifest: AgentTeamManifest,
+  packageDir: string,
+  ctx: CallbackContext,
+  log: SetupLogger,
+): Promise<void> {
+  if (!manifest.onInstall) return;
+
+  const scriptPath = resolve(packageDir, manifest.onInstall);
+  if (!existsSync(scriptPath)) {
+    log.warn(`onInstall script not found: ${scriptPath}`);
+    return;
+  }
+
+  log.info(`Running custom onInstall: ${manifest.onInstall}`);
+  const mod = await import(pathToFileURL(scriptPath).href);
+  const fn = mod.default ?? mod.onInstall;
+  if (typeof fn !== 'function') {
+    throw new Error(
+      `onInstall script must export a default function: ${scriptPath}`,
+    );
+  }
+  await fn(ctx);
+}
+
+// ── Command runners ────────────────────────────────────────────────────
+
+/** Run the `unpack` (or `setup`) command. */
 async function runUnpack(
   packageDir: string,
   requestedHarness: string | undefined,
@@ -77,24 +192,32 @@ async function runUnpack(
   const manifest = readManifest(packageDir);
   const harnesses = resolveHarnesses(manifest, requestedHarness, log);
 
-  console.log(`\nUnpacking "${manifest.name}" for: ${harnesses.join(', ')}\n`);
+  console.log(`\nSetting up "${manifest.name}" for: ${harnesses.join(', ')}\n`);
 
   for (const harness of harnesses) {
     log.info(`Preparing workspace for "${harness}"...`);
     const workspaceDir = resolveWorkspaceDir(packageDir, harness);
 
     createWorkspace(workspaceDir);
-    distributePrompt(packageDir, workspaceDir, harness);
 
-    const ctx: CallbackContext = { packageDir, manifest, log };
+    // Declarative pipeline: tools → skills → prompt
+    installTools(manifest, workspaceDir, log);
+    installSkills(manifest, harness, workspaceDir, packageDir, log);
+    placeSystemPrompt(manifest, packageDir, workspaceDir, harness, log);
 
+    const ctx: CallbackContext = { packageDir, manifest, harness, workspaceDir, log };
+
+    // Custom onInstall from manifest (dynamic import)
+    await runCustomOnInstall(manifest, packageDir, ctx, log);
+
+    // Legacy callbacks from runSetup({ onInstall, onUnpack })
     if (callbacks.onInstall) {
-      log.info('Running install...');
+      log.info('Running callback install...');
       await callbacks.onInstall(harness, workspaceDir, ctx);
     }
 
     if (callbacks.onUnpack) {
-      log.info('Running unpack...');
+      log.info('Running callback unpack...');
       await callbacks.onUnpack(harness, workspaceDir, ctx);
     }
 
@@ -122,7 +245,7 @@ async function runValidate(
 
     if (!isWorkspaceReady(workspaceDir)) {
       log.error(`Workspace missing for "${harness}": ${workspaceDir}`);
-      log.info('Run `node agent-setup.mjs unpack` first');
+      log.info('Run setup first: npx @agentlet/agent-team setup <dir>');
       allValid = false;
       continue;
     }
@@ -131,7 +254,7 @@ async function runValidate(
 
     if (callbacks.onValidate) {
       try {
-        const ctx: CallbackContext = { packageDir, manifest, log };
+        const ctx: CallbackContext = { packageDir, manifest, harness, workspaceDir, log };
         await callbacks.onValidate(harness, workspaceDir, ctx);
         log.success(`Package validation passed for "${harness}"`);
       } catch (err) {
@@ -161,9 +284,13 @@ async function runDoctor(
 
   console.log(`\nDiagnostics for "${manifest.name}"\n`);
 
-  log.info(`Package:   ${manifest.name}`);
-  log.info(`Schema:    ${manifest.schema}`);
-  log.info(`Harnesses: ${harnesses.join(', ')}`);
+  log.info(`Package:      ${manifest.name}`);
+  log.info(`Schema:       ${manifest.schema}`);
+  log.info(`Harnesses:    ${harnesses.join(', ')}`);
+  if (manifest.tools?.length) log.info(`Tools:        ${manifest.tools.join(', ')}`);
+  if (manifest.skills?.length) log.info(`Skills:       ${manifest.skills.join(', ')}`);
+  if (manifest.system_prompt) log.info(`Prompt:       ${manifest.system_prompt}`);
+  if (manifest.onInstall) log.info(`Custom setup: ${manifest.onInstall}`);
   console.log();
 
   for (const harness of harnesses) {
@@ -180,7 +307,7 @@ async function runDoctor(
     log.info(`  Command:   ${command ?? '(not defined for this harness)'}`);
 
     if (callbacks.onDoctor && ready) {
-      const ctx: CallbackContext = { packageDir, manifest, log };
+      const ctx: CallbackContext = { packageDir, manifest, harness, workspaceDir, log };
       await callbacks.onDoctor(harness, workspaceDir, ctx);
     }
 
@@ -189,25 +316,20 @@ async function runDoctor(
 }
 
 /**
- * Main entry point for per-package agent-setup.mjs scripts.
+ * Main entry point — can be called two ways:
  *
- * Usage in agent-setup.mjs:
- * ```js
- * import { runSetup } from '@agentlet/agent-team-runtime';
- *
- * runSetup({
- *   onInstall(ctx) { ... },
- *   onUnpack(ctx)  { ... },
- * });
- * ```
+ * 1. As a library: `runSetup(callbacks)` from per-package agent-setup.mjs
+ * 2. As the CLI: `npx @agentlet/agent-team setup <dir> --harness <name>`
+ *    (callbacks are empty; the manifest drives everything declaratively)
  */
 export async function runSetup(callbacks: SetupCallbacks = {}): Promise<void> {
   const args = parseSetupArgs();
-  const packageDir = resolve('.');
+  const packageDir = args.dir ? resolve(args.dir) : resolve('.');
   const log = createLogger();
 
   try {
     switch (args.command) {
+      case 'setup':
       case 'unpack':
         await runUnpack(packageDir, args.harness, callbacks, log);
         break;

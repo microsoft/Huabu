@@ -68,6 +68,37 @@ function validateManifest(
     errors.push('`command` map values must all be strings');
   }
 
+  // Declarative setup fields
+  if (doc.tools !== undefined) {
+    if (
+      !Array.isArray(doc.tools) ||
+      !doc.tools.every((t: unknown) => typeof t === 'string')
+    ) {
+      errors.push('`tools` must be an array of strings');
+    }
+  }
+
+  if (doc.skills !== undefined) {
+    if (
+      !Array.isArray(doc.skills) ||
+      !doc.skills.every((s: unknown) => typeof s === 'string')
+    ) {
+      errors.push('`skills` must be an array of strings');
+    }
+  }
+
+  if (doc.system_prompt !== undefined) {
+    if (typeof doc.system_prompt !== 'string') {
+      errors.push('`system_prompt` must be a string');
+    }
+  }
+
+  if (doc.onInstall !== undefined) {
+    if (typeof doc.onInstall !== 'string') {
+      errors.push('`onInstall` must be a string (path to setup script)');
+    }
+  }
+
   if (errors.length > 0) {
     throw new Error(
       `Invalid manifest (${sourcePath}):\n  - ${errors.join('\n  - ')}`,
