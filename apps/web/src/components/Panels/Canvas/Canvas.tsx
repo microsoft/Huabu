@@ -39,6 +39,7 @@ import { useCanvasLasso } from '@/hooks/useCanvasLasso';
 import { useFrameDragToCreate } from '@/hooks/useFrameDragToCreate';
 import { useIsNotMouse } from '@/hooks/useInputMode';
 import { useSketchHoverRouting } from '@/hooks/useSketchHoverRouting';
+import { isMac } from '@/utils/platform';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
 import { NodeToolbar } from './CanvasToolbar.tsx';
@@ -684,11 +685,15 @@ export const Canvas: React.FC<CanvasProps> = ({
         e.stopPropagation();
         // Default drag of an internal note that knows how to MOVE
         // its source range is treated as MOVE (matches Windows /
-        // macOS file-manager conventions). Holding Ctrl or ⌘
-        // downgrades it to a COPY. Everything else — chat
-        // excerpts, web/image cards, external file drops — stays
-        // a COPY because no source mutation is possible.
-        const isCopyModifier = e.ctrlKey || e.metaKey;
+        // macOS file-manager conventions). Holding Option (macOS) or
+        // Ctrl (Windows / Linux) downgrades it to a COPY. Everything
+        // else — chat excerpts, web/image cards, external file drops
+        // — stays a COPY because no source mutation is possible.
+        // Cmd is deliberately NOT honored on macOS: the OS reserves
+        // it for system-level NSDragOperation negotiation, so reading
+        // it here would conflict with the OS-supplied operation and
+        // cause `drop` to never fire.
+        const isCopyModifier = isMac ? e.altKey : e.ctrlKey;
         const canMove = isSediment && canMoveSedimentPayload(e.dataTransfer);
         e.dataTransfer.dropEffect =
           canMove && !isCopyModifier ? 'move' : 'copy';
@@ -746,16 +751,17 @@ export const Canvas: React.FC<CanvasProps> = ({
             };
 
             // Default = MOVE (source loses the dragged range);
-            // Ctrl / ⌘ downgrades to COPY. MOVE additionally
-            // requires a source node id and a pre-computed post-MOVE
-            // snapshot, both absent when dragging from non-editable
-            // surfaces (AI chat cards) — those always fall back to
-            // COPY regardless of modifier state.
+            // Option (macOS) / Ctrl (others) downgrades to COPY.
+            // MOVE additionally requires a source node id and a
+            // pre-computed post-MOVE snapshot, both absent when
+            // dragging from non-editable surfaces (AI chat cards) —
+            // those always fall back to COPY regardless of modifier
+            // state.
             const { sourceNodeId, sourceContentAfterMove } = payload.data;
             const canMove =
               sourceNodeId !== undefined &&
               sourceContentAfterMove !== undefined;
-            const isCopyModifier = e.ctrlKey || e.metaKey;
+            const isCopyModifier = isMac ? e.altKey : e.ctrlKey;
             const isMove = canMove && !isCopyModifier;
 
             if (isMove) {

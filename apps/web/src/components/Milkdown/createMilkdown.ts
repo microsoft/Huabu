@@ -219,6 +219,25 @@ export interface MilkdownInstance {
    */
   insertBlocksAfter(anchorKey: string | null, markdown: string): boolean;
   /**
+   * Resolve a viewport-space coordinate to the fingerprint key of the
+   * top-level block that `insertBlocksAfter` should anchor on so the
+   * insertion lands where ProseMirror's drop cursor visually pointed.
+   *
+   * Return values:
+   *  - `string` — anchor on this block (`insertBlocksAfter(key, …)`).
+   *  - `null`   — the point sits in the gap ABOVE the first block;
+   *             caller should `insertBlocksAfter(null, …)` to insert
+   *             at the doc head.
+   *  - `undefined` — the point lies outside the editor surface
+   *             entirely (no insertion target). Caller decides the
+   *             fallback (e.g. append to end).
+   *
+   * Inside-block hits split on the block DOM's vertical midpoint to
+   * mirror PM's `dropcursor`: upper half maps to the block ABOVE
+   * (or `null` for the first block), lower half to the block itself.
+   */
+  getBlockKeyAtPoint(x: number, y: number): string | null | undefined;
+  /**
    * Replace the active block-decoration set. Each entry highlights the
    * top-level block whose fingerprint key matches by adding `className`
    * via a `Decoration.node`. Pass `[]` to clear.
@@ -226,6 +245,19 @@ export interface MilkdownInstance {
   setBlockDecorations(
     specs: ReadonlyArray<{ key: string; className: string }>,
   ): void;
+
+  /**
+   * Force `prosemirror-dropcursor` (the blue insertion bar) to
+   * disappear. PM only clears the cursor when it observes a `drop` /
+   * `dragend` / out-of-editor `dragleave` on `view.dom`. When a host
+   * handler claims the drop in the capture phase (so PM's bubble
+   * listener never fires) AND the drag source lives outside this
+   * editor (so the browser's follow-up `dragend` fires on the source,
+   * not on `view.dom`), the cursor would otherwise linger until the
+   * 5s safety timeout. Call this from your drop handler after the
+   * insertion is committed.
+   */
+  clearDropIndicator(): void;
 
   /**
    * Move the browser focus into the editor's contenteditable surface.
@@ -1057,7 +1089,21 @@ export async function createMilkdown(
         if (!(selection instanceof NodeSelection)) return;
 
         const node = selection.node;
-        const docNode = view.state.schema.topNodeType.create(null, node);
+        // A `list_item` can't be a direct child of `doc` (schema-
+        // invalid), so `doc > list_item` serializes to an empty
+        // string — `getDragPayload` then returns `null` and the whole
+        // drag silently carries no Sediment payload (bullet items
+        // become un-droppable everywhere). Wrap the item in a copy of
+        // its parent list (`bullet_list` / `ordered_list`) so the
+        // serializer sees a well-formed `<list> > <list_item>`.
+        let contentNode = node;
+        if (node.type.name === 'list_item') {
+          const listParent = selection.$from.parent;
+          if (listParent && LIST_NODE_NAMES.has(listParent.type.name)) {
+            contentNode = listParent.type.create(listParent.attrs, node);
+          }
+        }
+        const docNode = view.state.schema.topNodeType.create(null, contentNode);
         const markdown = serializer(docNode);
         if (!markdown.trim()) return;
 
@@ -1170,11 +1216,86 @@ export async function createMilkdown(
       return ok;
     },
 
+    getBlockKeyAtPoint: (x, y) => {
+      // Tri-state: `undefined` = outside editor (caller fallback),
+      // `null` = head gap, `string` = anchor key.
+      let result: string | null | undefined = undefined;
+      crepe.editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        // `posAtCoords` returns null when the point falls outside the
+        // editor surface entirely.
+        const coords = view.posAtCoords({ left: x, top: y });
+        if (!coords) return;
+        const snap = buildSnapshotFromView(view);
+        if (snap.keys.length === 0) {
+          result = null; // empty doc — anchor on head
+          return;
+        }
+        const $pos = view.state.doc.resolve(coords.pos);
+        // Depth 0 = the position resolves at the doc root, i.e. the
+        // gap BETWEEN two top-level blocks (or at the doc's leading /
+        // trailing edge). `$pos.index(0)` then equals the number of
+        // blocks that precede the gap, so the anchor for an "insert
+        // after" call is that-many-blocks-minus-one (null for the
+        // gap above the first block).
+        if ($pos.depth === 0) {
+          const beforeCount = $pos.index(0);
+          result =
+            beforeCount === 0 ? null : (snap.keys[beforeCount - 1] ?? null);
+          return;
+        }
+        // Inside a top-level block. `posAtCoords` resolves to a text
+        // position, so on its own it can't tell us whether the user
+        // meant "insert above" or "insert below" this block. Match
+        // PM's `dropcursor` behaviour by splitting on the block DOM's
+        // vertical midpoint: upper half maps to the previous block
+        // (or doc head), lower half maps to this block.
+        const blockIndex = $pos.index(0);
+        const blockKey = snap.keys[blockIndex];
+        if (!blockKey) return;
+        const dom = view.nodeDOM(snap.posByIndex[blockIndex] ?? 0);
+        if (!(dom instanceof HTMLElement)) {
+          // Couldn't measure — fall back to "insert after this block".
+          result = blockKey;
+          return;
+        }
+        const rect = dom.getBoundingClientRect();
+        const mid = (rect.top + rect.bottom) / 2;
+        if (y < mid) {
+          result =
+            blockIndex === 0 ? null : (snap.keys[blockIndex - 1] ?? null);
+        } else {
+          result = blockKey;
+        }
+      });
+      return result;
+    },
+
     setBlockDecorations: (specs) => {
       crepe.editor.action((ctx) => {
         const view = ctx.get(editorViewCtx);
         view.dispatch(view.state.tr.setMeta(META_KEY, specs));
       });
+    },
+
+    clearDropIndicator: () => {
+      // `prosemirror-dropcursor` listens for `dragend` directly on
+      // `view.dom` (bubble phase) and clears the cursor through its
+      // own `scheduleRemoval(20)` path. Dispatching a synthetic
+      // `dragend` is the only public-API-friendly way to flush it
+      // when the real `dragend` lands on a drag source outside this
+      // editor (cross-source drops). The handler doesn't read any
+      // dataTransfer fields, so a plain `Event` is enough — no need
+      // to construct a full `DragEvent` (which would require a
+      // `DataTransfer` instance that isn't constructable in Safari).
+      try {
+        crepe.editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          view.dom.dispatchEvent(new Event('dragend', { bubbles: false }));
+        });
+      } catch {
+        // Editor already destroyed — nothing to clear.
+      }
     },
 
     focus: () => {

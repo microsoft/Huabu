@@ -251,8 +251,13 @@ export function attachBlockDragListeners(
     const sourceContentAfterMove = instance.getDocAfterRangeRemoved(range);
 
     if (blockElements.length > 0 && event.dataTransfer) {
-      // Let the drop site pick move vs copy via Shift.
-      event.dataTransfer.effectAllowed = 'copyMove';
+      // 'all' (vs 'copyMove') so that macOS Cmd-modified drags — which
+      // the OS reports as NSDragOperationGeneric / Link — still pass
+      // the browser's effectAllowed/dropEffect intersection check.
+      // The actual move-vs-copy decision is made by the drop target
+      // based on a platform-aware modifier key (Option on macOS, Ctrl
+      // elsewhere); see `handleNoteDrop` / Canvas `onDrop`.
+      event.dataTransfer.effectAllowed = 'all';
       const preview = buildBlockDragImage(blockElements, mountRoot);
       // Anchor the preview's top-left near the cursor; the block
       // handle sits just to the LEFT of a block, so (0, 0) reads as
