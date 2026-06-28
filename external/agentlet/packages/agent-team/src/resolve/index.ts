@@ -4,7 +4,7 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { delimiter, join, resolve } from 'node:path';
 import { readManifest } from '../setup/manifest.js';
 import type { AgentTeamManifest } from '../setup/types.js';
 
@@ -44,7 +44,7 @@ export function resolveAgentTeam(ref: AgentTeamRef): ResolvedSpawn {
   if (!existsSync(cwd)) {
     throw new Error(
       `Agent Team workspace not prepared for harness "${harness}": ${cwd}\n` +
-        `Run: npx @agentlet/agent-team setup ${agentDir} --harness ${harness}`,
+        `Run: cd ${agentDir} && agentlet agent-team setup --harness ${harness}`,
     );
   }
 
@@ -53,6 +53,15 @@ export function resolveAgentTeam(ref: AgentTeamRef): ResolvedSpawn {
 
   // 5. Load .env
   const env = loadDotEnv(agentDir);
+
+  // 6. Make workspace-local CLI tools reachable on the agent's PATH.
+  //    `agentlet agent-team setup` installs cli-tools via a local `npm install`
+  //    into <cwd>/node_modules, so their executables land in
+  //    <cwd>/node_modules/.bin. Shells do not add this to PATH automatically,
+  //    so prepend it here (preserving the inherited PATH).
+  const binDir = join(cwd, 'node_modules', '.bin');
+  const basePath = env.PATH ?? process.env.PATH ?? '';
+  env.PATH = basePath ? `${binDir}${delimiter}${basePath}` : binDir;
 
   return { command, cwd, env };
 }
