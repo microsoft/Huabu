@@ -15,25 +15,27 @@
 import { describe, expect, it } from 'vitest';
 
 import { renderEnvelopeMessages, rebuildContextMessages } from './chat-turn.js';
+import { buildAgentNodePreview } from '../node-ref.js';
 
 import type { ChatEnvelope, ResolvedSkill } from './envelope.js';
+import type { NodeNeighbourhoodContext } from '../../canvas/node-neighbourhood.js';
 import type { AgentNodeRef } from '../node-ref.js';
 import type { ChatTurnRecord, PiMessage } from '../store/chat-thread-store.js';
 import type { ChatAttachment } from '@sediment/shared';
 
-// ─── Fixtures ────────────────────────────────────────────────────────────────
+// ─── Fixtures ────────────────────────────────────────────────────────────
 
 function makeEnvelope(over: {
   text?: string;
   attachments?: ChatAttachment[];
   refs?: AgentNodeRef[];
-  nodeNeighbourhood?: string;
+  neighbourhood?: NodeNeighbourhoodContext;
   resolvedSkills?: ResolvedSkill[];
   imageAttachments?: ChatAttachment[];
   snapshotAttachments?: ChatAttachment[];
 }): ChatEnvelope {
   return {
-    preamble: { nodeNeighbourhood: over.nodeNeighbourhood },
+    preamble: over.neighbourhood ? { neighbourhood: over.neighbourhood } : {},
     user: { text: over.text ?? '', attachments: over.attachments ?? [] },
     skills: {
       invokedIds: (over.resolvedSkills ?? []).map((s) => s.id),
@@ -95,7 +97,28 @@ describe('renderEnvelopeMessages', () => {
       makeEnvelope({
         text: 'summarize these',
         refs,
-        nodeNeighbourhood: '- "First" [note] — alpha',
+        neighbourhood: {
+          layers: [
+            {
+              groups: [
+                {
+                  dx: 0,
+                  dy: -100,
+                  arrangement: 'single node',
+                  _minEdgeDist: 10,
+                  nodes: [
+                    buildAgentNodePreview({
+                      id: 'near-1',
+                      type: 'note',
+                      label: 'Above',
+                    }),
+                  ],
+                },
+              ],
+            },
+          ],
+          relevantEdges: [],
+        },
         resolvedSkills: skills,
       }),
       NO_CANVAS,
@@ -112,7 +135,10 @@ describe('renderEnvelopeMessages', () => {
       '<node id="n1" type="note" label="First" file="nodes/first.md" />',
     );
     expect(flat).toContain('<canvas_neighbourhood>');
-    expect(flat).toContain('- "First" [note] — alpha');
+    expect(flat).toContain(
+      '<group direction="above" arrangement="single node">',
+    );
+    expect(flat).toContain('<node id="near-1" type="note" label="Above"');
     expect(flat).toContain('<invoked_skills>');
     expect(flat).toContain('<skill id="brainstorm" name="Brainstorm">');
 

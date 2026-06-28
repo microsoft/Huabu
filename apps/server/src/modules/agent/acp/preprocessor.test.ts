@@ -12,8 +12,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { prepareExternalAgentPrompt, serializePrompt } from './preprocessor.js';
-import { buildAgentNodeRef } from '../node-ref.js';
+import { buildAgentNodePreview, buildAgentNodeRef } from '../node-ref.js';
 
+import type { NodeNeighbourhoodContext } from '../../canvas/node-neighbourhood.js';
 import type { ChatEnvelope } from '../context/envelope.js';
 import type {
   CanvasNodeType,
@@ -33,19 +34,17 @@ const logger = {
 /**
  * Build a minimal {@link ChatEnvelope} for preprocessor tests. Only the
  * fields the ACP serializer reads (`user.text`, `focus.selection.refs`,
- * `preamble.nodeNeighbourhood`) carry meaningful values; the rest are
+ * `preamble.neighbourhood`) carry meaningful values; the rest are
  * inert defaults so the envelope type-checks.
  */
 function makeEnvelope(opts: {
   text: string;
   selection?: { id: string; type: CanvasNodeType; label?: string }[];
-  neighbourhood?: string;
+  neighbourhood?: NodeNeighbourhoodContext;
   attachments?: ChatAttachment[];
 }): ChatEnvelope {
   return {
-    preamble: opts.neighbourhood
-      ? { nodeNeighbourhood: opts.neighbourhood }
-      : {},
+    preamble: opts.neighbourhood ? { neighbourhood: opts.neighbourhood } : {},
     user: { text: opts.text, attachments: opts.attachments ?? [] },
     skills: { invokedIds: [], resolved: [] },
     focus: {
@@ -244,8 +243,28 @@ describe('prepareExternalAgentPrompt', () => {
   });
 
   it('renders a canvas-neighbourhood section when the envelope carries one', () => {
-    const neighbourhood =
-      '### Canvas Level\n\n**to the left** (2 nodes):\n- "sketch-a" [sketch]';
+    const neighbourhood: NodeNeighbourhoodContext = {
+      layers: [
+        {
+          groups: [
+            {
+              dx: -200,
+              dy: 0,
+              arrangement: '2 nodes',
+              _minEdgeDist: 40,
+              nodes: [
+                buildAgentNodePreview({
+                  id: 'sketch-a',
+                  type: 'sketch',
+                  label: 'Sketch A',
+                }),
+              ],
+            },
+          ],
+        },
+      ],
+      relevantEdges: [],
+    };
 
     const result = prepareExternalAgentPrompt({
       envelope: makeEnvelope({ text: 'generate an image', neighbourhood }),
@@ -253,9 +272,14 @@ describe('prepareExternalAgentPrompt', () => {
       logger,
     });
 
-    expect(result.prompt.neighbourhood).toBe(neighbourhood);
     expect(result.serialized).toContain('<canvas_neighbourhood>');
-    expect(result.serialized).toContain('**to the left** (2 nodes):');
+    expect(result.serialized).toContain(
+      '<group direction="to the left" arrangement="2 nodes">',
+    );
+    // `file=` is omitted for the external agent (read-by-id).
+    expect(result.serialized).toContain(
+      '<node id="sketch-a" type="sketch" label="Sketch A" />',
+    );
     // The user's request comes LAST; the neighbourhood precedes it.
     expect(result.serialized.indexOf('<canvas_neighbourhood>')).toBeLessThan(
       result.serialized.indexOf('generate an image'),
@@ -277,7 +301,22 @@ describe('prepareExternalAgentPrompt', () => {
     const result = prepareExternalAgentPrompt({
       envelope: makeEnvelope({
         text: '/compact now',
-        neighbourhood: '### Canvas Level\n\n- "x" [note]',
+        neighbourhood: {
+          layers: [
+            {
+              groups: [
+                {
+                  dx: 0,
+                  dy: -100,
+                  arrangement: 'single node',
+                  _minEdgeDist: 5,
+                  nodes: [buildAgentNodePreview({ id: 'x', type: 'note' })],
+                },
+              ],
+            },
+          ],
+          relevantEdges: [],
+        },
       }),
       agentAlias: 'claude',
       includeSystem: true,

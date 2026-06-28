@@ -21,12 +21,14 @@
 
 import { prepareExternalAgentPrompt } from '../src/modules/agent/acp/preprocessor.js';
 import { renderEnvelopeMessages } from '../src/modules/agent/context/chat-turn.js';
+import { buildAgentNodePreview } from '../src/modules/agent/node-ref.js';
 
 import type {
   ChatEnvelope,
   ResolvedSkill,
 } from '../src/modules/agent/context/envelope.js';
 import type { AgentNodeRef } from '../src/modules/agent/node-ref.js';
+import type { NodeNeighbourhoodContext } from '../src/modules/canvas/node-neighbourhood.js';
 import type { ChatAttachment } from '@sediment/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
@@ -43,11 +45,11 @@ function envelope(over: {
   text?: string;
   attachments?: ChatAttachment[];
   refs?: AgentNodeRef[];
-  nodeNeighbourhood?: string;
+  neighbourhood?: NodeNeighbourhoodContext;
   resolvedSkills?: ResolvedSkill[];
 }): ChatEnvelope {
   return {
-    preamble: { nodeNeighbourhood: over.nodeNeighbourhood },
+    preamble: over.neighbourhood ? { neighbourhood: over.neighbourhood } : {},
     user: { text: over.text ?? '', attachments: over.attachments ?? [] },
     skills: {
       invokedIds: (over.resolvedSkills ?? []).map((s) => s.id),
@@ -109,8 +111,51 @@ const CASES: Array<{ name: string; env: ChatEnvelope }> = [
           preview: 'hedging, dual-sourcing',
         },
       ],
-      nodeNeighbourhood:
-        '- "Risks" [note] — supply chain, regulatory, fx\n- "Mitigations" [note] — hedging, dual-sourcing',
+      neighbourhood: {
+        layers: [
+          {
+            frameLabel: 'Strategy',
+            groups: [
+              {
+                dx: 0,
+                dy: -120,
+                arrangement: 'horizontal row',
+                _minEdgeDist: 30,
+                nodes: [
+                  buildAgentNodePreview({
+                    id: 'node-dddd',
+                    type: 'note',
+                    label: 'Assumptions',
+                    summary: 'demand flat, fx stable',
+                  }),
+                ],
+              },
+              {
+                dx: 260,
+                dy: 0,
+                arrangement: 'single node',
+                _minEdgeDist: 50,
+                nodes: [
+                  buildAgentNodePreview({
+                    id: 'node-eeee',
+                    type: 'note',
+                    label: 'Open Questions',
+                    summary: 'pricing, timeline',
+                  }),
+                ],
+              },
+            ],
+          },
+        ],
+        relevantEdges: [
+          {
+            source: 'node-aaaa',
+            target: 'node-eeee',
+            sourceLabel: 'Risks',
+            targetLabel: 'Open Questions',
+          },
+        ],
+      },
       resolvedSkills: [
         {
           id: 'synthesize',

@@ -228,7 +228,7 @@ export function buildAgentNodeOutline(
 // ─── Renderers ───────────────────────────────────────────────────────────────
 
 /** Escape a string for safe inclusion in an XML attribute value. */
-function escapeXmlAttr(s: string): string {
+export function escapeXmlAttr(s: string): string {
   return s
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -245,7 +245,7 @@ export interface RenderableNode {
   label?: string;
   /** Pre-computed `nodes/<safeLabel>.md`; only emitted when `includeFile`. */
   filename?: string;
-  /** Short preview line; becomes the element body when present. */
+  /** Short preview line; emitted as the `preview` attribute when present. */
   preview?: string;
 }
 

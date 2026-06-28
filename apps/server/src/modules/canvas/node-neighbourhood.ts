@@ -13,10 +13,11 @@
  *      loads the canvas, normalises geometry via the shared
  *      `buildSpatialBundle`, owns the preview-extraction policy
  *      (label > content[:120] > src), and feeds the algorithm.
- *   3. Renderer — `renderNodeNeighbourhoodMarkdown(canvasId,
- *      anchorNodeId)` is the public entry point: serialises the
- *      structured context into the Markdown block consumed by the
- *      AGENT.md template.
+ *   3. Renderer — `serializeNodeNeighbourhood(ctx, { includeFile })`
+ *      serialises the structured context into the XML block that sits
+ *      inside `<canvas_neighbourhood>`. Each backend calls it with its
+ *      own `includeFile` (built-in reads by path, ACP by id), so the two
+ *      stay in lock-step the same way `<selected_nodes>` does.
  *
  * Originally driven by question nodes (`useQuestionRunner` ships the
  * question node id as the anchor), but anchor-type agnostic.
@@ -38,7 +39,9 @@ import {
 import { buildSpatialBundle } from './canvas-spatial.js';
 import {
   buildAgentNodePreview,
+  escapeXmlAttr,
   extractAgentNodePreview,
+  renderAgentNodeList,
 } from '../agent/node-ref.js';
 import { getCanvasStore } from '../storage/index.js';
 
@@ -46,20 +49,6 @@ import type { AgentNodePreview } from '../agent/node-ref.js';
 import type { CanvasNodeType, SpatialNode } from '@sediment/shared';
 
 // ─── Public entry point ─────────────────────────────────────────────────────
-
-/**
- * Build the Markdown block for the `nodeNeighbourhoodPreamble.spatial`
- * template variable. Returns an empty string when no preamble should
- * be pushed (canvas missing, anchor missing, or no useful context).
- */
-export function renderNodeNeighbourhoodMarkdown(
-  canvasId: string,
-  anchorNodeId: string,
-): string {
-  const ctx = getNodeNeighbourhood(canvasId, anchorNodeId);
-  if (!ctx) return '';
-  return serializeNodeNeighbourhoodContext(ctx);
-}
 
 // ─── Adapter: canvasId + anchorNodeId → NodeNeighbourhoodContext ────────────
 
@@ -489,55 +478,84 @@ function minEdgeDistFromCluster(
   return Math.round(min);
 }
 
-// ─── Renderer: NodeNeighbourhoodContext → Markdown ──────────────────────────
+// ─── Renderer: NodeNeighbourhoodContext → XML ───────────────────────────────
 
 /**
- * Render a {@link NodeNeighbourhoodContext} as a Markdown block. Kept
- * separate from {@link renderNodeNeighbourhoodMarkdown} so it can be
- * reused or unit-tested without touching the canvas store.
+ * Serialize a {@link NodeNeighbourhoodContext} into the XML body that
+ * sits inside `<canvas_neighbourhood>`. Each spatial group becomes a
+ * `<group>` element carrying its `direction` / `arrangement` / `frame`
+ * as attributes and wrapping the same `<node>` elements
+ * {@link renderAgentNodeList} emits for `<selected_nodes>` — so a
+ * neighbourhood node is addressable (id + optional `file` + `preview`)
+ * exactly like a selected one, instead of an un-actionable bullet line.
+ * Cross-group edges are listed under `<connections>` as `<edge>`
+ * elements (both endpoints carry the node id plus a `*-label` hint).
+ *
+ * `opts.includeFile` is threaded straight to {@link renderAgentNodeList}:
+ * the built-in agent reads by the pre-computed `nodes/<file>.md` path
+ * (`includeFile: true`), while the external/ACP agent reads by id
+ * (`read-node <id>`, `includeFile: false`) where a virtual file path
+ * would be a dead reference. The two backends therefore serialize the
+ * SAME structured context differently, mirroring `<selected_nodes>`.
+ *
+ * Kept separate from {@link getNodeNeighbourhood} so it can be
+ * unit-tested without touching the canvas store, and so each backend can
+ * pick its own `includeFile`.
  */
-function serializeNodeNeighbourhoodContext(
+export function serializeNodeNeighbourhood(
   ctx: NodeNeighbourhoodContext,
+  opts: { includeFile?: boolean } = {},
 ): string {
-  const sections: string[] = [];
+  const blocks: string[] = [];
 
   for (const layer of ctx.layers) {
-    const heading = layer.frameLabel
-      ? `### Inside "${layer.frameLabel}" frame`
-      : '### Canvas Level';
-    const groups = layer.groups
-      .map((g) => {
-        const dir =
-          g.dx === 0 && g.dy === 0
-            ? 'overlapping'
-            : g.dy < -50
-              ? 'above'
-              : g.dy > 50
-                ? 'below'
-                : g.dx < 0
-                  ? 'to the left'
-                  : 'to the right';
-        const nodeLines = g.nodes
-          .map(
-            (n) =>
-              `- "${n.label ?? n.id}" [${n.type}]${n.preview ? ` — ${n.preview}` : ''}`,
-          )
-          .join('\n');
-        return `**${dir}** (${g.arrangement}):\n${nodeLines}`;
-      })
-      .join('\n\n');
-    sections.push(`${heading}\n\n${groups}`);
+    for (const g of layer.groups) {
+      const direction =
+        g.dx === 0 && g.dy === 0
+          ? 'overlapping'
+          : g.dy < -50
+            ? 'above'
+            : g.dy > 50
+              ? 'below'
+              : g.dx < 0
+                ? 'to the left'
+                : 'to the right';
+      // A group's own frame wins over the layer's; either disambiguates
+      // which frame the cluster sits in when the canvas nests them.
+      const frame = g.frameLabel ?? layer.frameLabel;
+      const attrs = [
+        `direction="${escapeXmlAttr(direction)}"`,
+        `arrangement="${escapeXmlAttr(g.arrangement)}"`,
+        frame ? `frame="${escapeXmlAttr(frame)}"` : '',
+      ]
+        .filter(Boolean)
+        .join(' ');
+      blocks.push(
+        [
+          `<group ${attrs}>`,
+          renderAgentNodeList(g.nodes, { includeFile: opts.includeFile }),
+          '</group>',
+        ].join('\n'),
+      );
+    }
   }
 
   if (ctx.relevantEdges.length > 0) {
-    const edgeLines = ctx.relevantEdges
-      .map(
-        (e) =>
-          `- "${e.sourceLabel ?? e.source}" → "${e.targetLabel ?? e.target}"`,
-      )
+    const edges = ctx.relevantEdges
+      .map((e) => {
+        const a = [
+          `from="${escapeXmlAttr(e.source)}"`,
+          e.sourceLabel ? `from-label="${escapeXmlAttr(e.sourceLabel)}"` : '',
+          `to="${escapeXmlAttr(e.target)}"`,
+          e.targetLabel ? `to-label="${escapeXmlAttr(e.targetLabel)}"` : '',
+        ]
+          .filter(Boolean)
+          .join(' ');
+        return `<edge ${a} />`;
+      })
       .join('\n');
-    sections.push(`### Connections\n\n${edgeLines}`);
+    blocks.push(['<connections>', edges, '</connections>'].join('\n'));
   }
 
-  return sections.join('\n\n');
+  return blocks.join('\n');
 }

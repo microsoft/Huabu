@@ -41,6 +41,7 @@
  */
 
 import { renderPromptFile } from '../../../prompt/index.js';
+import { serializeNodeNeighbourhood } from '../../canvas/node-neighbourhood.js';
 import { renderAgentNodeList } from '../node-ref.js';
 
 import type { ChatEnvelope } from '../context/envelope.js';
@@ -148,11 +149,18 @@ export function prepareExternalAgentPrompt(
   }
 
   // Already-derived selection refs (frame children included) and
-  // neighbourhood markdown — read straight from the envelope rather than
+  // neighbourhood — read straight from the envelope rather than
   // re-deriving from the raw wire selection, so ACP and the built-in
-  // agent observe the identical set by construction.
+  // agent observe the identical set by construction. The neighbourhood
+  // is serialized WITHOUT `file=` (the external agent reads by id via
+  // `read-node`, so a virtual path would be a dead reference) — the same
+  // structured context the built-in agent renders with `file=`.
   const selectedRefs = envelope.focus.selection.refs;
-  const neighbourhood = envelope.preamble.nodeNeighbourhood;
+  const neighbourhood = envelope.preamble.neighbourhood
+    ? serializeNodeNeighbourhood(envelope.preamble.neighbourhood, {
+        includeFile: false,
+      })
+    : undefined;
   // Off-canvas uploads the user attached to this turn. They are NOT on
   // the canvas, so the external agent cannot reach them via `read-node`;
   // their textual content is inlined into the prompt instead. (Selection
@@ -258,7 +266,7 @@ export function serializePrompt(
     sections.push(
       [
         '<canvas_neighbourhood>',
-        'The request was anchored at a specific node on the canvas. Use this neighbourhood to disambiguate references like "this" or "the one above", and to choose sensible positions when creating nodes nearby.',
+        'The request was anchored at a specific node on the canvas. Use this neighbourhood to disambiguate references like "this" or "the one above", and to choose sensible positions when creating nodes nearby. Each <node> is addressable just like a selected one — read any with `read-node <node-id>`.',
         prompt.neighbourhood,
         '</canvas_neighbourhood>',
       ].join('\n'),

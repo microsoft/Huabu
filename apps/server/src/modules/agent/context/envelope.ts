@@ -20,12 +20,13 @@
  */
 
 import { getSkill } from '../../../prompt/index.js';
-import { renderNodeNeighbourhoodMarkdown } from '../../canvas/node-neighbourhood.js';
+import { getNodeNeighbourhood } from '../../canvas/node-neighbourhood.js';
 import { getCanvasStore } from '../../storage/index.js';
 import { buildAgentNodePreview } from '../node-ref.js';
 import { isUserInvokableSkill } from '../skills.route.js';
 import { snapshotNodesToArtifacts } from '../tools/handlers/snapshot-node.js';
 
+import type { NodeNeighbourhoodContext } from '../../canvas/node-neighbourhood.js';
 import type { AgentNodePreview } from '../node-ref.js';
 import type { ChatAttachment, WireSelectionNode } from '@sediment/shared';
 import type { FastifyBaseLogger } from 'fastify';
@@ -41,8 +42,13 @@ export interface ResolvedSkill {
 export interface ChatEnvelope {
   /** Background context unrelated to this turn's canvas focus. */
   preamble: {
-    /** Neighbourhood markdown for an anchored request, if any. */
-    nodeNeighbourhood?: string;
+    /**
+     * Structured neighbourhood for an anchored request, if any. Stored
+     * as the algorithm's output (not pre-rendered text) so each backend
+     * can serialize it with its own `includeFile` via
+     * {@link serializeNodeNeighbourhood}.
+     */
+    neighbourhood?: NodeNeighbourhoodContext;
   };
   /** What the user directly contributed this turn. */
   user: {
@@ -341,9 +347,11 @@ export async function buildChatEnvelope(
 
   // Preamble: node neighbourhood for anchored requests. (Workspace
   // memory now rides in the agent's system prompt, not the envelope.)
-  const nodeNeighbourhood =
+  // Stored structured; each backend serializes it with its own
+  // `includeFile`.
+  const neighbourhood =
     anchorNodeId && canvasId
-      ? (renderNodeNeighbourhoodMarkdown(canvasId, anchorNodeId) ?? undefined)
+      ? (getNodeNeighbourhood(canvasId, anchorNodeId) ?? undefined)
       : undefined;
 
   // Focus: selection refs + derived snapshot artifacts.
@@ -373,7 +381,7 @@ export async function buildChatEnvelope(
 
   return {
     preamble: {
-      ...(nodeNeighbourhood ? { nodeNeighbourhood } : {}),
+      ...(neighbourhood ? { neighbourhood } : {}),
     },
     user: {
       text: content,

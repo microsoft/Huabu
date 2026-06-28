@@ -21,6 +21,7 @@ import {
   ARTIFACT_URL_REGEX,
   resolveArtifactImageUrl,
 } from '../../artifact/utils.js';
+import { serializeNodeNeighbourhood } from '../../canvas/node-neighbourhood.js';
 import { getCanvasStore } from '../../storage/index.js';
 import { renderAgentNodeList } from '../node-ref.js';
 
@@ -455,16 +456,26 @@ function buildContextSections(env: ChatEnvelope): string | undefined {
 
   // Node-neighbourhood context for anchored requests (e.g. question
   // nodes). Lets the agent resolve references like "this" / "the one
-  // above" against the surrounding canvas.
-  if (env.preamble.nodeNeighbourhood) {
-    blocks.push(
-      [
-        '<canvas_neighbourhood>',
-        'The user\'s request was anchored at a node on the canvas. Use this neighbourhood to disambiguate references like "this", "the one above", or implicit pronouns.',
-        env.preamble.nodeNeighbourhood,
-        '</canvas_neighbourhood>',
-      ].join('\n'),
+  // above" against the surrounding canvas. Serialized with `file=` so
+  // the built-in agent can `read` neighbours straight away; an empty
+  // result (anchor with no useful neighbours) drops the whole block.
+  if (env.preamble.neighbourhood) {
+    const neighbourhood = serializeNodeNeighbourhood(
+      env.preamble.neighbourhood,
+      {
+        includeFile: true,
+      },
     );
+    if (neighbourhood) {
+      blocks.push(
+        [
+          '<canvas_neighbourhood>',
+          'The user\'s request was anchored at a node on the canvas. Use this neighbourhood to disambiguate references like "this", "the one above", or implicit pronouns. Each <node> is addressable just like a selected one — pass `file` to read() for the full body.',
+          neighbourhood,
+          '</canvas_neighbourhood>',
+        ].join('\n'),
+      );
+    }
   }
 
   // User-invoked skill bodies — authoritative for this turn, distinct
