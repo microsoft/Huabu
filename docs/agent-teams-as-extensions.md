@@ -46,10 +46,10 @@ Huabu uses **Agent Teams** as its managed external-agent extension mechanism.
 - **Huabu-managed Agent Team** — an Agent Team packaged for Huabu workflows,
   usually bundled under `agent-teams/`
 
-The generic mechanics — `agentlet.yaml`, `agent-setup.mjs`,
+The generic mechanics — `agentlet.yaml`, the `agentlet agent-team` setup CLI,
 `@agentlet/agent-team`, and `workspaces/` — are
 defined in the agentlet spec. Users set up packages themselves
-(`node agent-setup.mjs unpack`); Huabu sends `{ agent_dir, harness }` to the
+(`agentlet agent-team setup`); Huabu sends `{ agent_dir, harness }` to the
 agentlet daemon, which resolves the manifest and spawns from the prepared
 workspace. Huabu builds on that foundation and contributes:
 
@@ -72,8 +72,7 @@ pnpm install
 After that, any bundled agent-team can be set up with:
 
 ```bash
-cd agent-teams/<team-name>
-node agent-setup.mjs unpack --harness claude
+agentlet agent-team setup agent-teams/<team-name> --harness claude
 ```
 
 No additional global installs are needed beyond `pnpm install` at the repo root.

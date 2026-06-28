@@ -423,8 +423,9 @@ class DaemonSupervisor {
     const token = getDaemonAuth().rotateToken();
     const serverUrl = `ws://127.0.0.1:${this.serverPort}/api/acp/agent`;
     // Idle agentlet mode: no --agent flag means it waits for
-    // server/spawn requests. Previously used `daemon` subcommand.
-    const args = ['--server', serverUrl, '--token', token, '--allow-insecure'];
+    // server/spawn requests. The `daemon` subcommand selects the
+    // daemon role of the agentlet CLI.
+    const args = ['daemon', '--server', serverUrl, '--token', token, '--allow-insecure'];
 
     this.state.starting = true;
     this.state.nextRestartAt = null;
