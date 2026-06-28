@@ -30,7 +30,7 @@ author writes package
         ↓
 user clones / downloads folder
         ↓
-user runs `agentlet agent-team setup <dir> --harness <name>`
+user runs `agentlet agent-team setup --harness <name>` (from inside the folder)
         ├─ validates manifest
         ├─ creates workspaces/<harness>/
         ├─ installs tools (npm packages)
@@ -185,15 +185,20 @@ exposed through the `agentlet` daemon binary as the `agent-team` subcommand.
 
 ### 5.1 CLI Usage
 
+Run these from inside the agent-team folder (the directory containing
+`agentlet.yaml`); all commands operate on the current working directory.
+
 ```bash
+cd my-agent
+
 # Set up an agent team for a specific harness
-agentlet agent-team setup ./my-agent --harness claude
+agentlet agent-team setup --harness claude
 
 # Validate workspace readiness
-agentlet agent-team validate ./my-agent --harness claude
+agentlet agent-team validate --harness claude
 
 # Run diagnostics
-agentlet agent-team doctor ./my-agent
+agentlet agent-team doctor
 ```
 
 ### 5.2 Capabilities

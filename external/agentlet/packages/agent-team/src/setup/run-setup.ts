@@ -2,8 +2,9 @@
  * Main entry point for Agent Team setup.
  *
  * Two modes:
- *   1. CLI mode: `agentlet agent-team setup <dir> --harness <name>`
- *      The CLI reads the manifest and runs the declarative pipeline.
+ *   1. CLI mode: `agentlet agent-team setup --harness <name>` (run from
+ *      inside the agent-team folder). The CLI reads ./agentlet.yaml and
+ *      runs the declarative pipeline.
  *   2. Script mode: per-package agent-setup.mjs calls `runSetup(callbacks)`.
  *      Kept for backward compat and complex custom setups.
  */
@@ -273,7 +274,7 @@ async function runValidate(
 
     if (!isWorkspaceReady(workspaceDir)) {
       log.error(`Workspace missing for "${harness}": ${workspaceDir}`);
-      log.info('Run setup first: npx @agentlet/agent-team setup <dir>');
+      log.info('Run setup first: agentlet agent-team setup (from this folder)');
       allValid = false;
       continue;
     }
@@ -349,11 +350,14 @@ async function runDoctor(
  * Arguments for an Agent Team setup command, decoupled from argv parsing
  * so external CLIs (e.g. the `agentlet` daemon CLI) can invoke setup
  * directly without re-parsing `process.argv`.
+ *
+ * The command always operates on the current working directory: it must
+ * be run from inside the agent-team folder (the one containing
+ * `agentlet.yaml`). There is no directory argument by design — this keeps
+ * relative paths in the manifest unambiguous (always anchored to cwd).
  */
 export interface SetupCommandArgs {
   command: 'setup' | 'unpack' | 'validate' | 'doctor';
-  /** Target agent-team directory (defaults to cwd). */
-  dir?: string;
   /** Specific harness to target. */
   harness?: string;
 }
@@ -363,13 +367,24 @@ export interface SetupCommandArgs {
  *
  * This is the programmatic entry point used by the `agentlet agent-team`
  * subcommand. The legacy {@link runSetup} wraps this after parsing argv.
+ *
+ * Always operates on the current working directory; run it from inside
+ * the agent-team folder.
  */
 export async function runSetupCommand(
   args: SetupCommandArgs,
   callbacks: SetupCallbacks = {},
 ): Promise<void> {
-  const packageDir = args.dir ? resolve(args.dir) : resolve('.');
+  const packageDir = resolve('.');
   const log = createLogger();
+
+  if (!existsSync(join(packageDir, 'agentlet.yaml'))) {
+    log.error(
+      'No agentlet.yaml in the current directory — run this from inside an agent-team folder.',
+    );
+    process.exitCode = 1;
+    return;
+  }
 
   try {
     switch (args.command) {

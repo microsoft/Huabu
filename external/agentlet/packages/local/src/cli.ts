@@ -96,31 +96,31 @@ export function parseCli(argv: string[]): CliResult {
 
   const agentTeam = program
     .command('agent-team')
-    .description('Manage Agent Team packages (setup, validate, doctor)')
+    .description('Manage Agent Team packages (setup, validate, doctor). Run from inside the agent-team folder.')
 
   agentTeam
-    .command('setup [dir]')
+    .command('setup')
     .alias('unpack')
-    .description('Prepare per-harness workspaces from an agent-team manifest')
+    .description('Prepare per-harness workspaces from the agentlet.yaml in the current directory')
     .option('--harness <name>', 'Target a specific harness (defaults to all in the manifest)')
-    .action((dir, opts) => {
-      result = { mode: 'agent-team', args: { command: 'setup', dir, harness: opts.harness } }
+    .action((opts) => {
+      result = { mode: 'agent-team', args: { command: 'setup', harness: opts.harness } }
     })
 
   agentTeam
-    .command('validate [dir]')
-    .description('Validate that an agent-team manifest is well-formed and ready')
+    .command('validate')
+    .description('Validate that the agentlet.yaml in the current directory is well-formed and ready')
     .option('--harness <name>', 'Target a specific harness (defaults to all in the manifest)')
-    .action((dir, opts) => {
-      result = { mode: 'agent-team', args: { command: 'validate', dir, harness: opts.harness } }
+    .action((opts) => {
+      result = { mode: 'agent-team', args: { command: 'validate', harness: opts.harness } }
     })
 
   agentTeam
-    .command('doctor [dir]')
-    .description('Diagnose the readiness of an agent-team package')
+    .command('doctor')
+    .description('Diagnose the readiness of the agent-team package in the current directory')
     .option('--harness <name>', 'Target a specific harness (defaults to all in the manifest)')
-    .action((dir, opts) => {
-      result = { mode: 'agent-team', args: { command: 'doctor', dir, harness: opts.harness } }
+    .action((opts) => {
+      result = { mode: 'agent-team', args: { command: 'doctor', harness: opts.harness } }
     })
 
   program.parse(argv)

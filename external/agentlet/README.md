@@ -400,11 +400,12 @@ The arguments below apply to `agentlet daemon`.
 | `--heartbeat` | — | `30` | WebSocket ping interval in seconds (0 to disable) |
 | `--allow-insecure` | — | `false` | Allow ws:// (non-TLS) connections (local development only) |
 
-The `agentlet agent-team <subcommand> [dir]` arguments:
+The `agentlet agent-team <subcommand>` arguments. **Run these from inside the
+agent-team folder** (the directory containing `agentlet.yaml`); the command
+always operates on the current working directory.
 
 | Argument | Required | Default | Description |
 |---|---|---|---|
-| `dir` | — | Current directory | Path to the Agent Team package directory (the folder containing `agentlet.yaml`). |
 | `--harness` | — | (all in manifest) | Restrict the action to a single harness (e.g. `claude`, `copilot`). |
 
 ### 4.7. Examples
@@ -440,10 +441,11 @@ agentlet daemon --server "ws://localhost:8080/api/bridge" \
          --allow-insecure
 
 # Agent Team: prepare a package's workspaces for all declared harnesses
-agentlet agent-team setup ./agent-teams/hackmd-publisher
+cd agent-teams/hackmd-publisher
+agentlet agent-team setup
 
-# Agent Team: check readiness for a single harness
-agentlet agent-team doctor ./agent-teams/hackmd-publisher --harness copilot
+# Agent Team: check readiness for a single harness (from inside the folder)
+agentlet agent-team doctor --harness copilot
 ```
 
 ### 4.8. How it works

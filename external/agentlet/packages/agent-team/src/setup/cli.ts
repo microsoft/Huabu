@@ -4,6 +4,9 @@
  * Used by per-package `agent-setup.mjs` scripts that call `runSetup()`.
  * The primary CLI is exposed via the `agentlet agent-team` subcommand,
  * which parses args itself and calls `runSetupCommand()` directly.
+ *
+ * All commands operate on the current working directory: run them from
+ * inside the agent-team folder (the one containing `agentlet.yaml`).
  */
 
 import { Command } from 'commander';
@@ -11,8 +14,6 @@ import { Command } from 'commander';
 export interface ParsedArgs {
   command: 'setup' | 'unpack' | 'validate' | 'doctor';
   harness?: string;
-  /** Target agent-team directory (standalone CLI mode). */
-  dir?: string;
 }
 
 /** Build and parse the CLI from process.argv. */
@@ -25,39 +26,39 @@ export function parseSetupArgs(argv: string[] = process.argv): ParsedArgs {
     .version('0.1.0');
 
   program
-    .command('setup [dir]')
+    .command('setup')
     .description(
       'Prepare workspace(s) for one or all supported harnesses (alias: unpack)',
     )
     .option('-H, --harness <name>', 'target a specific harness')
-    .action((dir: string | undefined, opts: { harness?: string }) => {
-      result = { command: 'setup', harness: opts.harness, dir };
+    .action((opts: { harness?: string }) => {
+      result = { command: 'setup', harness: opts.harness };
     });
 
   program
-    .command('unpack [dir]')
+    .command('unpack')
     .description(
       'Prepare workspace(s) for one or all supported harnesses',
     )
     .option('-H, --harness <name>', 'target a specific harness')
-    .action((dir: string | undefined, opts: { harness?: string }) => {
-      result = { command: 'unpack', harness: opts.harness, dir };
+    .action((opts: { harness?: string }) => {
+      result = { command: 'unpack', harness: opts.harness };
     });
 
   program
-    .command('validate [dir]')
+    .command('validate')
     .description('Check that workspace(s) are properly set up')
     .option('-H, --harness <name>', 'check a specific harness')
-    .action((dir: string | undefined, opts: { harness?: string }) => {
-      result = { command: 'validate', harness: opts.harness, dir };
+    .action((opts: { harness?: string }) => {
+      result = { command: 'validate', harness: opts.harness };
     });
 
   program
-    .command('doctor [dir]')
+    .command('doctor')
     .description('Run diagnostics and print status')
     .option('-H, --harness <name>', 'diagnose a specific harness')
-    .action((dir: string | undefined, opts: { harness?: string }) => {
-      result = { command: 'doctor', harness: opts.harness, dir };
+    .action((opts: { harness?: string }) => {
+      result = { command: 'doctor', harness: opts.harness };
     });
 
   program.parse(argv);
