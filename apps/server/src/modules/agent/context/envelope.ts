@@ -21,7 +21,6 @@
 
 import { getSkill } from '../../../prompt/index.js';
 import { renderNodeNeighbourhoodMarkdown } from '../../canvas/node-neighbourhood.js';
-import { readWorkspaceMemory } from '../memory/index.js';
 import { buildAgentNodeRef } from '../node-ref.js';
 import { isUserInvokableSkill } from '../skills.route.js';
 import { snapshotNodesToArtifacts } from '../tools/handlers/snapshot-node.js';
@@ -41,8 +40,6 @@ export interface ResolvedSkill {
 export interface ChatEnvelope {
   /** Background context unrelated to this turn's canvas focus. */
   preamble: {
-    /** Cross-canvas user profile, eagerly injected on the first turn. */
-    workspaceMemory?: string;
     /** Neighbourhood markdown for an anchored request, if any. */
     nodeNeighbourhood?: string;
   };
@@ -95,8 +92,6 @@ export interface ChatEnvelopeParams {
   invokedSkills?: string[];
   /** Current canvas id (null for canvas-less threads). */
   canvasId: string | null;
-  /** True on the first turn of a thread (drives memory pre-read). */
-  isFirstTurn: boolean;
   /** Logger for non-fatal diagnostics (auto-snapshot failures, dropped skills). */
   logger: FastifyBaseLogger;
 }
@@ -301,14 +296,11 @@ export async function buildChatEnvelope(
     anchorNodeId,
     invokedSkills,
     canvasId,
-    isFirstTurn,
     logger,
   } = params;
 
-  // Preamble: workspace memory (first turn) + node neighbourhood.
-  const workspaceMemory = isFirstTurn
-    ? (readWorkspaceMemory() ?? undefined)
-    : undefined;
+  // Preamble: node neighbourhood for anchored requests. (Workspace
+  // memory now rides in the agent's system prompt, not the envelope.)
   const nodeNeighbourhood =
     anchorNodeId && canvasId
       ? (renderNodeNeighbourhoodMarkdown(canvasId, anchorNodeId) ?? undefined)
@@ -341,7 +333,6 @@ export async function buildChatEnvelope(
 
   return {
     preamble: {
-      ...(workspaceMemory ? { workspaceMemory } : {}),
       ...(nodeNeighbourhood ? { nodeNeighbourhood } : {}),
     },
     user: {

@@ -443,11 +443,10 @@ async function buildUserContent(
  * encoding is never the source of truth on disk.
  *
  * Canonical order:
- *   1. workspace-memory pre-read (first turn only)
- *   2. selected-node reference preamble
- *   3. node-neighbourhood preamble (anchored requests)
- *   4. user-invoked skill bodies
- *   5. the user's message (with selection / skill / attachment tags)
+ *   1. selected-node reference preamble
+ *   2. node-neighbourhood preamble (anchored requests)
+ *   3. user-invoked skill bodies
+ *   4. the user's message (with selection / skill / attachment tags)
  *
  * Returns the rendered messages plus the final tagged user-message
  * content (the ACP dispatch path consumes the latter).
@@ -458,15 +457,6 @@ export async function renderEnvelopeMessages(
 ): Promise<{ messages: PiMessage[]; userContent: UserContent }> {
   const { canvasId, agentCfg } = opts;
   const messages: PiMessage[] = [];
-
-  // 1. Workspace-memory pre-read (cross-canvas profile; first turn only).
-  if (env.preamble.workspaceMemory) {
-    messages.push({
-      role: 'user',
-      content: `[SYSTEM Workspace memory \u2014 cross-canvas user profile, eagerly loaded for the first turn]\n${env.preamble.workspaceMemory}`,
-      timestamp: Date.now(),
-    });
-  }
 
   // Merge the off-canvas uploads with selection-derived vision parts.
   // Order matches the legacy assembly: uploads, deduped selection

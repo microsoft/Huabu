@@ -29,6 +29,7 @@ import {
 import { dumpAssembledPrompt } from '../agent/context/debug-prompt.js';
 import { buildChatEnvelope } from '../agent/context/envelope.js';
 import { getLLMModel } from '../agent/llm.js';
+import { readWorkspaceMemory } from '../agent/memory/index.js';
 import {
   appendTurn,
   clearActiveTurn,
@@ -826,9 +827,19 @@ const agentRoutes: FastifyPluginAsync = async (
     // fly — it is never the source of truth on disk.
     finalizeActiveTurn(resolvedThreadId, canvasId);
     const priorTurns = loadTurns(resolvedThreadId, canvasId);
-    const isFirstTurn = priorTurns.length === 0;
+
+    // Workspace memory (cross-canvas user profile) is part of the agent's
+    // stable system instructions, so it rides in the system prompt as a
+    // tagged block — grounding every turn and staying cache-friendly —
+    // rather than as a one-shot first-turn user message. Built-in path
+    // only; the external/ACP path has its own preamble and never reads it.
+    const workspaceMemory = readWorkspaceMemory();
+    const systemPrompt = workspaceMemory
+      ? `${agentCfg.systemPrompt}\n\n<workspace_memory>\n${workspaceMemory}\n</workspace_memory>`
+      : agentCfg.systemPrompt;
+
     const context: Context = {
-      systemPrompt: agentCfg.systemPrompt,
+      systemPrompt,
       messages: await rebuildContextMessages(priorTurns, {
         canvasId: canvasId ?? null,
         agentCfg,
@@ -847,7 +858,6 @@ const agentRoutes: FastifyPluginAsync = async (
       anchorNodeId,
       invokedSkills,
       canvasId: canvasId ?? null,
-      isFirstTurn,
       logger: request.log,
     });
     const { messages: userMessages, userContent } =
