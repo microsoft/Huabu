@@ -71,6 +71,17 @@ function resolveHarnesses(
     return declaredHarnesses;
   }
 
+  const skipped = declaredHarnesses.filter((h) => !installed.includes(h));
+  if (skipped.length > 0) {
+    log.warn(
+      `Skipping declared harness(es) not installed on this machine: [${skipped.join(', ')}]`,
+    );
+    log.info(
+      `Preparing installed harness(es): [${installed.join(', ')}]. ` +
+        'Use --harness <name> to prepare a non-installed one anyway.',
+    );
+  }
+
   return installed;
 }
 
