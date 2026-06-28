@@ -57,7 +57,7 @@ function makeEnvelope(opts: {
 }
 
 describe('serializePrompt', () => {
-  it('emits the verbatim task and no Selected Nodes section when nothing is selected', () => {
+  it('emits the verbatim task and no selected-nodes section when nothing is selected', () => {
     const prompt: ExternalAgentPrompt = {
       task: 'Explain the difference between async iterators and generators.',
       selectedNodes: [],
@@ -65,13 +65,15 @@ describe('serializePrompt', () => {
 
     const out = serializePrompt(prompt);
 
-    expect(out).toContain(
+    // No context sections → bare task, no XML scaffolding (mirrors the
+    // built-in plain-text fast path).
+    expect(out).toBe(
       'Explain the difference between async iterators and generators.',
     );
-    expect(out).not.toContain('## Selected Nodes');
+    expect(out).not.toContain('<selected_nodes>');
   });
 
-  it('renders a Selected Nodes table when nodes are present', () => {
+  it('wraps a selected-nodes table in <selected_nodes> when nodes are present', () => {
     const prompt: ExternalAgentPrompt = {
       task: 'Compare these notes.',
       selectedNodes: [
@@ -82,15 +84,22 @@ describe('serializePrompt', () => {
 
     const out = serializePrompt(prompt);
 
-    expect(out).toContain('Compare these notes.');
-    expect(out).toContain('## Selected Nodes');
+    expect(out).toContain('<selected_nodes>');
+    expect(out).toContain('</selected_nodes>');
     expect(out).toContain('| Node ID | Type | Label |');
     expect(out).toContain('| `node-a` | note | Intro |');
     // Label-less node renders an em-dash placeholder.
     expect(out).toContain('| `node-b` | image | — |');
+    // The user's words come last, wrapped in <user_request>.
+    expect(out).toContain(
+      '<user_request>\nCompare these notes.\n</user_request>',
+    );
+    expect(out.indexOf('<selected_nodes>')).toBeLessThan(
+      out.indexOf('<user_request>'),
+    );
   });
 
-  it('mentions read-node in the Selected Nodes intro', () => {
+  it('mentions read-node in the selected-nodes intro', () => {
     const prompt: ExternalAgentPrompt = {
       task: 'task',
       selectedNodes: [{ nodeId: 'n1', type: 'note' }],
@@ -109,7 +118,10 @@ describe('serializePrompt', () => {
   });
 
   it('omits the system preamble by default and prepends it when includeSystem is set', () => {
-    const prompt: ExternalAgentPrompt = { task: 'task', selectedNodes: [] };
+    const prompt: ExternalAgentPrompt = {
+      task: 'ZZ_UNIQUE_TASK_BODY',
+      selectedNodes: [],
+    };
 
     const withoutSystem = serializePrompt(prompt);
     expect(withoutSystem).not.toContain('## Canvas Tools (Reachback)');
@@ -120,7 +132,7 @@ describe('serializePrompt', () => {
     expect(withSystem).toContain('Huabu');
     // The preamble precedes the per-turn request body.
     expect(withSystem.indexOf('## Canvas Tools (Reachback)')).toBeLessThan(
-      withSystem.indexOf('## Request'),
+      withSystem.indexOf('ZZ_UNIQUE_TASK_BODY'),
     );
   });
 });
@@ -195,7 +207,7 @@ describe('prepareExternalAgentPrompt', () => {
     expect(result.prompt.systemPreamble).toBeUndefined();
   });
 
-  it('renders a Canvas Neighbourhood section when the envelope carries one', () => {
+  it('renders a canvas-neighbourhood section when the envelope carries one', () => {
     const neighbourhood =
       '### Canvas Level\n\n**to the left** (2 nodes):\n- "sketch-a" [sketch]';
 
@@ -206,15 +218,15 @@ describe('prepareExternalAgentPrompt', () => {
     });
 
     expect(result.prompt.neighbourhood).toBe(neighbourhood);
-    expect(result.serialized).toContain('## Canvas Neighbourhood');
+    expect(result.serialized).toContain('<canvas_neighbourhood>');
     expect(result.serialized).toContain('**to the left** (2 nodes):');
-    // The user's request still leads the prompt; neighbourhood follows.
-    expect(result.serialized.indexOf('generate an image')).toBeLessThan(
-      result.serialized.indexOf('## Canvas Neighbourhood'),
+    // The user's request comes LAST; the neighbourhood precedes it.
+    expect(result.serialized.indexOf('<canvas_neighbourhood>')).toBeLessThan(
+      result.serialized.indexOf('generate an image'),
     );
   });
 
-  it('omits the Canvas Neighbourhood section when the envelope has none', () => {
+  it('omits the canvas-neighbourhood section when the envelope has none', () => {
     const result = prepareExternalAgentPrompt({
       envelope: makeEnvelope({ text: 'plain request' }),
       agentAlias: 'claude',
@@ -222,7 +234,7 @@ describe('prepareExternalAgentPrompt', () => {
     });
 
     expect(result.prompt.neighbourhood).toBeUndefined();
-    expect(result.serialized).not.toContain('## Canvas Neighbourhood');
+    expect(result.serialized).not.toContain('<canvas_neighbourhood>');
   });
 
   it('drops the neighbourhood for slash-command short-circuits', () => {

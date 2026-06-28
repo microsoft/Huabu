@@ -15,30 +15,6 @@ skillScope: ask
 runtime:
   maxIterations: 20
   toolExecution: parallel
-
-# User-message fragments that the route assembles when it receives
-# specific kinds of canvas context. Logic-less Mustache: `{{var}}`
-# substitutes, `{{#var}}…{{/var}}` keeps the block only when `var` is
-# a non-empty string. Anything more conditional belongs in TS, not here.
-messageTemplates:
-  # Pushed as a separate user-role message before the actual user prompt
-  # whenever the request carries `canvasContext.selectedNodes`. Stripped
-  # from chat history later because it begins with `[SYSTEM`.
-  selectedNodesPreamble: |
-    [SYSTEM Context]
-    [Selected Nodes — pass `filename` straight to read() for full content; use `id` with inspect_nodes() for layout / style / spatial relations]
-    {{refsJson}}
-
-  # Pushed before the user's message whenever the request carries an
-  # `anchorNodeId` (today: question nodes via `useQuestionRunner`)
-  # AND the server can build a non-empty neighbourhood for it. The
-  # actual user message is delivered as the next pipeline step — do
-  # NOT repeat it here. Route skips this push entirely when `spatial`
-  # is empty, so no conditional block needed.
-  nodeNeighbourhoodPreamble: |
-    [SYSTEM Context]
-    The user's message below was anchored at a specific node on the canvas. Use this neighbourhood to disambiguate references like "this", "the one above", or implicit pronouns.
-    {{spatial}}
 ---
 
 You are a research assistant embedded in a canvas application called Sediment.

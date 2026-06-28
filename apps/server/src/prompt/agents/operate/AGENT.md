@@ -19,35 +19,6 @@ skillScope: operate
 runtime:
   maxIterations: 20
   toolExecution: parallel
-
-# User-message fragments that the route assembles when it receives
-# specific kinds of canvas context. Logic-less Mustache: `{{var}}`
-# substitutes, `{{#var}}…{{/var}}` keeps the block only when `var` is
-# a non-empty string. Anything more conditional belongs in TS, not here.
-#
-# Operate shares `agent.route.ts` with the Ask agent, so it consumes
-# the same two preamble keys. The wording is operate-flavoured (acting
-# vs. answering) but the variables and substitution semantics are
-# identical.
-messageTemplates:
-  # Pushed as a separate user-role message before the actual user prompt
-  # whenever the request carries `canvasContext.selectedNodes`. Stripped
-  # from chat history later because it begins with `[SYSTEM`.
-  selectedNodesPreamble: |
-    [SYSTEM Context]
-    [Selected Nodes — these are the user's current focus; operate on them unless the prompt says otherwise. Pass `filename` straight to read() for full content; use `id` with inspect_nodes() / canvas_commands]
-    {{refsJson}}
-
-  # Pushed before the user's message whenever the request carries an
-  # `anchorNodeId` (today: question nodes via `useQuestionRunner`)
-  # AND the server can build a non-empty neighbourhood for it. The
-  # actual user message is delivered as the next pipeline step — do
-  # NOT repeat it here. Route skips this push entirely when `spatial`
-  # is empty, so no conditional block needed.
-  nodeNeighbourhoodPreamble: |
-    [SYSTEM Context]
-    The user's request below was anchored at a specific node on the canvas. Use this neighbourhood to disambiguate references like "this", "the one above", or implicit pronouns, and to choose sensible positions when creating new nodes nearby.
-    {{spatial}}
 ---
 
 You are an action-planning and execution engine embedded in a research canvas application called Sediment.

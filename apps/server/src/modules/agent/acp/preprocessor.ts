@@ -23,14 +23,15 @@
  *     content by ID, all we need to hand it deterministically is the
  *     user's words + the IDs of what they selected.
  *
- * The serialized wire text is rendered from two standalone templates
- * under `prompt/external-agent/` via {@link renderPromptFile}:
- * `user_prompt.md` (the per-turn `task` + selected-node table) and, on
- * the first turn of a freshly-created session, `system_prompt.md` (the
- * one-shot persona + `## Canvas Tools (Reachback)` preamble) prepended in
- * front of it. The per-node table rows are assembled here in TS (the
- * in-house template engine has no loops) and injected as a single
- * variable.
+ * The per-turn wire text is built **inline as XML** (`<selected_nodes>`,
+ * `<canvas_neighbourhood>`, `<user_request>`) — the same tag vocabulary
+ * the built-in agent emits (`buildContextSections` in
+ * `context/chat-turn.ts`), so both backends present one structure. On
+ * the first turn of a freshly-created session the one-shot persona +
+ * `## Canvas Tools (Reachback)` preamble (`system_prompt.md`, rendered
+ * via {@link renderPromptFile}) is prepended in front of it. The
+ * per-node table rows are assembled here in TS and wrapped in the
+ * `<selected_nodes>` tag.
  *
  * Failure model: this builder does no network/LLM I/O and effectively
  * cannot fail, but callers still `try`/`catch` and fall back to the raw
@@ -55,9 +56,6 @@ import type { FastifyBaseLogger } from 'fastify';
  * it. Exported for tests.
  */
 export const SLASH_COMMAND_RE = /^\/[a-zA-Z][\w-]*(?:\s|$)/;
-
-/** PROMPT_ROOT-relative path of the per-turn user prompt template. */
-const USER_TEMPLATE = 'external-agent/user_prompt.md';
 
 /**
  * PROMPT_ROOT-relative path of the one-shot system preamble template
@@ -130,8 +128,8 @@ export function prepareExternalAgentPrompt(
   // ── Slash-command short-circuit ────────────────────────────────────
   //
   // ACP agents recognise slash commands (`/<name> <args>`) natively
-  // inside `session/prompt` text. Wrapping them in our `## Selected
-  // Nodes` / preamble scaffolding could corrupt that wire format, so
+  // inside `session/prompt` text. Wrapping them in our `<selected_nodes>`
+  // / preamble scaffolding could corrupt that wire format, so
   // when the raw user input starts with a slash command we forward it
   // verbatim with no extra sections (and no system preamble — it stays
   // unsent so the next real turn delivers it).
@@ -192,11 +190,16 @@ export function prepareExternalAgentPrompt(
  * Convert an {@link ExternalAgentPrompt} into the plain-text payload
  * sent over ACP `session/prompt`.
  *
- * The per-turn body is rendered from {@link USER_TEMPLATE}: the
- * verbatim `task` plus an optional `## Selected Nodes` table (IDs /
- * types / labels so the agent can read or update them by ID). The whole
- * markdown table is assembled here and injected as `selectedNodesTable`
- * because the in-house template engine has no loop construct.
+ * The per-turn body is built inline as XML — the SAME tag vocabulary
+ * (`<selected_nodes>`, `<canvas_neighbourhood>`, `<user_request>`) the
+ * built-in agent emits (`buildContextSections` in
+ * `context/chat-turn.ts`), with the user's words LAST — so a reader
+ * (human or model) sees one structure across both backends. A bare task
+ * (no context sections) is sent unwrapped, mirroring the built-in
+ * plain-text fast path. The inner guidance legitimately differs:
+ * external agents read / write nodes through the Huabu Reachback Tool
+ * (`read-node` / `write-node`) rather than the built-in `read()` over a
+ * pre-computed `filename`.
  *
  * When `opts.includeSystem` is set, the one-shot system preamble
  * (persona + `## Canvas Tools (Reachback)` docs, from
@@ -210,36 +213,51 @@ export function serializePrompt(
   prompt: ExternalAgentPrompt,
   opts: { includeSystem?: boolean } = {},
 ): string {
-  const hasNodes = prompt.selectedNodes.length > 0;
+  const sections: string[] = [];
 
-  // The full markdown table (header + separator + rows) is assembled
-  // here rather than in the template: the in-house engine has no loop
-  // construct, and keeping the table out of the `.md` also stops the
-  // markdown formatter from reflowing / splitting it on save.
-  const selectedNodesTable = hasNodes
-    ? [
-        '| Node ID | Type | Label |',
-        '| --- | --- | --- |',
-        ...prompt.selectedNodes.map((node) => {
-          const label = node.label ? escapeCell(node.label) : '—';
-          return `| \`${node.nodeId}\` | ${node.type} | ${label} |`;
-        }),
-      ].join('\n')
-    : '';
+  if (prompt.selectedNodes.length > 0) {
+    // The markdown table (header + separator + rows) is assembled here
+    // rather than round-tripped through a template engine: it keeps the
+    // whole prompt in one place and stops a markdown formatter from
+    // reflowing / splitting the table.
+    const table = [
+      '| Node ID | Type | Label |',
+      '| --- | --- | --- |',
+      ...prompt.selectedNodes.map((node) => {
+        const label = node.label ? escapeCell(node.label) : '—';
+        return `| \`${node.nodeId}\` | ${node.type} | ${label} |`;
+      }),
+    ].join('\n');
+    sections.push(
+      [
+        '<selected_nodes>',
+        'The user selected the canvas nodes below. Read any you need with the Huabu Reachback Tool (`read-node <node-id>`); update them with `write-node --id <node-id>`.',
+        table,
+        '</selected_nodes>',
+      ].join('\n'),
+    );
+  }
 
-  const userBlock = renderPromptFile(USER_TEMPLATE, {
-    task: prompt.task.trim(),
-    // Conditional-block flag: any non-empty string keeps the block. The
-    // intro prose lives in the template itself (static — no need to
-    // round-trip it through TS); only the data-driven flag + table are
-    // injected here.
-    selectedNodes: hasNodes ? '1' : '',
-    selectedNodesTable,
-    // Conditional-block flag + body for the spatial neighbourhood; the
-    // intro prose is likewise inlined in the template.
-    neighbourhood: prompt.neighbourhood ? '1' : '',
-    neighbourhoodBody: prompt.neighbourhood ?? '',
-  });
+  if (prompt.neighbourhood) {
+    sections.push(
+      [
+        '<canvas_neighbourhood>',
+        'The request was anchored at a specific node on the canvas. Use this neighbourhood to disambiguate references like "this" or "the one above", and to choose sensible positions when creating nodes nearby.',
+        prompt.neighbourhood,
+        '</canvas_neighbourhood>',
+      ].join('\n'),
+    );
+  }
+
+  // The user's own words come LAST, mirroring the built-in layout. With
+  // no context sections, send the bare task — symmetric with the
+  // built-in plain-text fast path (no XML scaffolding for the common
+  // case).
+  const task = prompt.task.trim();
+  const userBlock =
+    sections.length > 0
+      ? [...sections, `<user_request>\n${task}\n</user_request>`].join('\n')
+      : task;
 
   if (!opts.includeSystem) return userBlock;
 
