@@ -39,8 +39,8 @@ selector, and talk to it.
 
 ## Example agents
 
-| Agent | What it does | Requires | Harnesses |
-| --- | --- | --- | --- |
+| Agent                                      | What it does                                                                                                                                                      | Requires                                        | Harnesses           |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- | ------------------- |
 | [`hackmd-publisher/`](./hackmd-publisher/) | Assembles selected canvas nodes into a markdown document (respecting frames/edges) and publishes it to [HackMD](https://hackmd.io), then writes back a link node. | HackMD API token (`.env`), `@hackmd/hackmd-cli` | `claude`, `copilot` |
 
 More teams will be added as concrete extension patterns emerge.
@@ -72,7 +72,7 @@ command:
   copilot: copilot --acp
 require:
   cli-tools:
-    - "@hackmd/hackmd-cli"
+    - '@hackmd/hackmd-cli'
   skills:
     - https://github.com/hackmdio/hackmd-cli/tree/develop/hackmd-cli
   prompts:

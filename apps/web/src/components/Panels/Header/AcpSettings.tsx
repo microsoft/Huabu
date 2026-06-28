@@ -467,10 +467,9 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
         await onSaved();
         onClose();
       } catch (err) {
-        toast(
-          err instanceof Error ? err.message : 'Failed to save profile',
-          { tone: 'danger' },
-        );
+        toast(err instanceof Error ? err.message : 'Failed to save profile', {
+          tone: 'danger',
+        });
       } finally {
         setSaving(false);
       }
@@ -677,155 +676,155 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
             editing.cliId === 'agent-team' ? (
               <div className="flex flex-col gap-3">
                 <label className="flex flex-col gap-1 text-xs">
-                 <FieldLabel>Agent</FieldLabel>
-                 <div className="border-edge-default bg-surface text-fg-default rounded border px-2 py-1 text-xs">
-                   Agent Team
-                 </div>
+                  <FieldLabel>Agent</FieldLabel>
+                  <div className="border-edge-default bg-surface text-fg-default rounded border px-2 py-1 text-xs">
+                    Agent Team
+                  </div>
                 </label>
                 <label className="flex flex-col gap-1 text-xs">
-                 <FieldLabel hint="Absolute path to the agent-team directory containing agentlet.yaml.">
-                   Agent directory
-                 </FieldLabel>
-                 <div className="flex items-stretch gap-1.5">
-                   <Input
-                     value={form.agentDir}
-                     onChange={(e) =>
-                       setForm((p) => ({ ...p, agentDir: e.target.value }))
-                     }
-                     placeholder="/path/to/agent-teams/my-agent"
-                     wrapperClassName="flex-1"
-                     className="border-edge-default bg-surface w-full rounded border px-2 py-1 font-mono text-xs"
-                   />
-                   {folderPickerSupported && (
-                     <Button
-                       variant="outline"
-                       tone="neutral"
-                       size="sm"
-                       iconOnly
-                       title="Pick a folder"
-                       onClick={() => void handlePickAgentDir()}
-                       disabled={picking}
-                     >
-                       <Folder size={14} />
-                     </Button>
-                   )}
-                 </div>
+                  <FieldLabel hint="Absolute path to the agent-team directory containing agentlet.yaml.">
+                    Agent directory
+                  </FieldLabel>
+                  <div className="flex items-stretch gap-1.5">
+                    <Input
+                      value={form.agentDir}
+                      onChange={(e) =>
+                        setForm((p) => ({ ...p, agentDir: e.target.value }))
+                      }
+                      placeholder="/path/to/agent-teams/my-agent"
+                      wrapperClassName="flex-1"
+                      className="border-edge-default bg-surface w-full rounded border px-2 py-1 font-mono text-xs"
+                    />
+                    {folderPickerSupported && (
+                      <Button
+                        variant="outline"
+                        tone="neutral"
+                        size="sm"
+                        iconOnly
+                        title="Pick a folder"
+                        onClick={() => void handlePickAgentDir()}
+                        disabled={picking}
+                      >
+                        <Folder size={14} />
+                      </Button>
+                    )}
+                  </div>
                 </label>
                 <label className="flex flex-col gap-1 text-xs">
-                 <FieldLabel hint="Optional harness override. Leave blank to use the manifest default.">
-                   Harness <span className="text-fg-subtle">(optional)</span>
-                 </FieldLabel>
-                 <Input
-                   value={form.harness}
-                   onChange={(e) =>
-                     setForm((p) => ({ ...p, harness: e.target.value }))
-                   }
-                   placeholder="claude"
-                   className="border-edge-default bg-surface rounded border px-2 py-1 font-mono text-xs"
-                 />
+                  <FieldLabel hint="Optional harness override. Leave blank to use the manifest default.">
+                    Harness <span className="text-fg-subtle">(optional)</span>
+                  </FieldLabel>
+                  <Input
+                    value={form.harness}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, harness: e.target.value }))
+                    }
+                    placeholder="claude"
+                    className="border-edge-default bg-surface rounded border px-2 py-1 font-mono text-xs"
+                  />
                 </label>
               </div>
             ) : (
               <label className="flex flex-col gap-1 text-xs">
                 <FieldLabel>Agent</FieldLabel>
                 <div className="border-edge-default bg-surface text-fg-default rounded border px-2 py-1 text-xs">
-                 {detectedClis.find((c) => c.id === form.cliId)?.displayName ??
-                   (form.cliId === 'custom' ? 'Custom command' : form.cliId)}
+                  {detectedClis.find((c) => c.id === form.cliId)?.displayName ??
+                    (form.cliId === 'custom' ? 'Custom command' : form.cliId)}
                 </div>
               </label>
             )
           ) : (
-           <div className="flex flex-col gap-2">
-             <TabGroup
-               value={agentMode}
-               onChange={handleAgentModeChange}
-               options={[
-                 { value: 'detected', label: 'Built-in' },
-                 { value: 'custom', label: 'Custom' },
-                 { value: 'agent-team', label: 'Agent Team' },
-               ]}
-               size="sm"
-               className="self-start"
-             />
-             {agentMode === 'agent-team' ? (
-               <div className="flex flex-col gap-3">
-                 <label className="flex flex-col gap-1 text-xs">
-                   <FieldLabel hint="Absolute path to the agent-team directory containing agentlet.yaml. The daemon resolves the manifest to determine the launch command and working directory.">
-                     Agent directory
-                   </FieldLabel>
-                   <div className="flex items-stretch gap-1.5">
-                     <Input
-                       value={form.agentDir}
-                       onChange={(e) =>
-                         setForm((p) => ({ ...p, agentDir: e.target.value }))
-                       }
-                       placeholder="/path/to/agent-teams/my-agent"
-                       wrapperClassName="flex-1"
-                       className="border-edge-default bg-surface w-full rounded border px-2 py-1 font-mono text-xs"
-                     />
-                     {folderPickerSupported && (
-                       <Button
-                         variant="outline"
-                         tone="neutral"
-                         size="sm"
-                         iconOnly
-                         title="Pick a folder"
-                         onClick={() => void handlePickAgentDir()}
-                         disabled={picking}
-                       >
-                         <Folder size={14} />
-                       </Button>
-                     )}
-                   </div>
-                 </label>
-                 <label className="flex flex-col gap-1 text-xs">
-                   <FieldLabel hint="Optional harness override (e.g. 'claude', 'copilot'). Leave blank to use the first harness declared in the manifest.">
-                     Harness <span className="text-fg-subtle">(optional)</span>
-                   </FieldLabel>
-                   <Input
-                     value={form.harness}
-                     onChange={(e) =>
-                       setForm((p) => ({ ...p, harness: e.target.value }))
-                     }
-                     placeholder="claude"
-                     className="border-edge-default bg-surface rounded border px-2 py-1 font-mono text-xs"
-                   />
-                 </label>
-               </div>
-             ) : agentMode === 'detected' ? (
-               <label className="flex flex-col gap-1 text-xs">
-                 <FieldLabel>Agent</FieldLabel>
-                 {cliOptions.length > 0 ? (
-                   <Select
-                     value={form.cliId}
-                     onChange={handleCliChange}
-                     options={cliOptions}
-                   />
-                 ) : (
-                   <div className="border-edge-default bg-surface text-fg-muted rounded border px-2 py-1 text-xs leading-snug">
-                     No ACP-capable CLIs found on your PATH. Switch to{' '}
-                     <strong>Custom</strong> to type a launch command yourself.
-                   </div>
-                 )}
-               </label>
-             ) : (
-               <label className="flex flex-col gap-1 text-xs">
-                 <FieldLabel hint="Full command line the worker should spawn (binary + all flags). Use this for binaries that aren't on PATH or for flags not exposed by an auto-detected agent.">
-                   Launch command
-                 </FieldLabel>
-                 <Input
-                   value={form.customCommand}
-                   onChange={(e) =>
-                     setForm((p) => ({
-                       ...p,
-                       customCommand: e.target.value,
-                     }))
-                   }
-                   placeholder="/usr/local/bin/copilot --acp --allow-all"
-                   className="border-edge-default bg-surface rounded border px-2 py-1 font-mono text-xs"
-                 />
-               </label>
-             )}
+            <div className="flex flex-col gap-2">
+              <TabGroup
+                value={agentMode}
+                onChange={handleAgentModeChange}
+                options={[
+                  { value: 'detected', label: 'Built-in' },
+                  { value: 'custom', label: 'Custom' },
+                  { value: 'agent-team', label: 'Agent Team' },
+                ]}
+                size="sm"
+                className="self-start"
+              />
+              {agentMode === 'agent-team' ? (
+                <div className="flex flex-col gap-3">
+                  <label className="flex flex-col gap-1 text-xs">
+                    <FieldLabel hint="Absolute path to the agent-team directory containing agentlet.yaml. The daemon resolves the manifest to determine the launch command and working directory.">
+                      Agent directory
+                    </FieldLabel>
+                    <div className="flex items-stretch gap-1.5">
+                      <Input
+                        value={form.agentDir}
+                        onChange={(e) =>
+                          setForm((p) => ({ ...p, agentDir: e.target.value }))
+                        }
+                        placeholder="/path/to/agent-teams/my-agent"
+                        wrapperClassName="flex-1"
+                        className="border-edge-default bg-surface w-full rounded border px-2 py-1 font-mono text-xs"
+                      />
+                      {folderPickerSupported && (
+                        <Button
+                          variant="outline"
+                          tone="neutral"
+                          size="sm"
+                          iconOnly
+                          title="Pick a folder"
+                          onClick={() => void handlePickAgentDir()}
+                          disabled={picking}
+                        >
+                          <Folder size={14} />
+                        </Button>
+                      )}
+                    </div>
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs">
+                    <FieldLabel hint="Optional harness override (e.g. 'claude', 'copilot'). Leave blank to use the first harness declared in the manifest.">
+                      Harness <span className="text-fg-subtle">(optional)</span>
+                    </FieldLabel>
+                    <Input
+                      value={form.harness}
+                      onChange={(e) =>
+                        setForm((p) => ({ ...p, harness: e.target.value }))
+                      }
+                      placeholder="claude"
+                      className="border-edge-default bg-surface rounded border px-2 py-1 font-mono text-xs"
+                    />
+                  </label>
+                </div>
+              ) : agentMode === 'detected' ? (
+                <label className="flex flex-col gap-1 text-xs">
+                  <FieldLabel>Agent</FieldLabel>
+                  {cliOptions.length > 0 ? (
+                    <Select
+                      value={form.cliId}
+                      onChange={handleCliChange}
+                      options={cliOptions}
+                    />
+                  ) : (
+                    <div className="border-edge-default bg-surface text-fg-muted rounded border px-2 py-1 text-xs leading-snug">
+                      No ACP-capable CLIs found on your PATH. Switch to{' '}
+                      <strong>Custom</strong> to type a launch command yourself.
+                    </div>
+                  )}
+                </label>
+              ) : (
+                <label className="flex flex-col gap-1 text-xs">
+                  <FieldLabel hint="Full command line the worker should spawn (binary + all flags). Use this for binaries that aren't on PATH or for flags not exposed by an auto-detected agent.">
+                    Launch command
+                  </FieldLabel>
+                  <Input
+                    value={form.customCommand}
+                    onChange={(e) =>
+                      setForm((p) => ({
+                        ...p,
+                        customCommand: e.target.value,
+                      }))
+                    }
+                    placeholder="/usr/local/bin/copilot --acp --allow-all"
+                    className="border-edge-default bg-surface rounded border px-2 py-1 font-mono text-xs"
+                  />
+                </label>
+              )}
             </div>
           )}
 
@@ -849,37 +848,37 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
 
         {/* ─── Workspace (hidden for Agent Team — daemon resolves cwd) */}
         {agentMode !== 'agent-team' && (
-        <div className="flex flex-col gap-3">
-          <label className="flex flex-col gap-1 text-xs">
-            <FieldLabel hint="The agent is spawned with this as its working directory and treats it as the project root for file edits and tool calls.">
-              Working directory
-            </FieldLabel>
-            <div className="flex items-stretch gap-1.5">
-              <Input
-                value={form.cwd}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, cwd: e.target.value }))
-                }
-                placeholder="/Users/me/project-x"
-                wrapperClassName="flex-1"
-                className="border-edge-default bg-surface w-full rounded border px-2 py-1 font-mono text-xs"
-              />
-              {folderPickerSupported && (
-                <Button
-                  variant="outline"
-                  tone="neutral"
-                  size="sm"
-                  iconOnly
-                  title="Pick a folder"
-                  onClick={() => void handlePickCwd()}
-                  disabled={picking}
-                >
-                  <Folder size={14} />
-                </Button>
-              )}
-            </div>
-          </label>
-        </div>
+          <div className="flex flex-col gap-3">
+            <label className="flex flex-col gap-1 text-xs">
+              <FieldLabel hint="The agent is spawned with this as its working directory and treats it as the project root for file edits and tool calls.">
+                Working directory
+              </FieldLabel>
+              <div className="flex items-stretch gap-1.5">
+                <Input
+                  value={form.cwd}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, cwd: e.target.value }))
+                  }
+                  placeholder="/Users/me/project-x"
+                  wrapperClassName="flex-1"
+                  className="border-edge-default bg-surface w-full rounded border px-2 py-1 font-mono text-xs"
+                />
+                {folderPickerSupported && (
+                  <Button
+                    variant="outline"
+                    tone="neutral"
+                    size="sm"
+                    iconOnly
+                    title="Pick a folder"
+                    onClick={() => void handlePickCwd()}
+                    disabled={picking}
+                  >
+                    <Folder size={14} />
+                  </Button>
+                )}
+              </div>
+            </label>
+          </div>
         )}
 
         {/* ─── Display name (placed last per UX request) ─────────── */}

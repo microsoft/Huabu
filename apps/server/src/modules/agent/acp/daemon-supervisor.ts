@@ -425,7 +425,14 @@ class DaemonSupervisor {
     // Idle agentlet mode: no --agent flag means it waits for
     // server/spawn requests. The `daemon` subcommand selects the
     // daemon role of the agentlet CLI.
-    const args = ['daemon', '--server', serverUrl, '--token', token, '--allow-insecure'];
+    const args = [
+      'daemon',
+      '--server',
+      serverUrl,
+      '--token',
+      token,
+      '--allow-insecure',
+    ];
 
     this.state.starting = true;
     this.state.nextRestartAt = null;

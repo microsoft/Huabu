@@ -1,6 +1,6 @@
 # Huabu Managed Agent Teams — Vision & Examples
 
-> **Core thesis**: In the AI/Agent era, **the agent IS the plugin system**. Instead of designing extension points, hooks, event buses, and SDK APIs — you connect an agent. The agent reads context, reasons about intent, uses whatever tools exist in its environment (CLIs, APIs, SDKs), and writes results back. This is fundamentally more powerful than any plugin system because the interface is *natural language* + *tool use* — infinitely flexible, self-describing, and composable.
+> **Core thesis**: In the AI/Agent era, **the agent IS the plugin system**. Instead of designing extension points, hooks, event buses, and SDK APIs — you connect an agent. The agent reads context, reasons about intent, uses whatever tools exist in its environment (CLIs, APIs, SDKs), and writes results back. This is fundamentally more powerful than any plugin system because the interface is _natural language_ + _tool use_ — infinitely flexible, self-describing, and composable.
 
 This document is the **Huabu product/vision layer** for Agent Teams. The
 generic packaging/runtime model lives in
@@ -11,30 +11,31 @@ Huabu's bundled teams live under [`agent-teams/`](../agent-teams/).
 
 ## 1. Why Agent > Plugin
 
-| Dimension | Traditional Plugin | Agent-as-Plugin |
-|---|---|---|
-| **Interface contract** | Rigid API: hooks, lifecycle events, typed schemas | Natural language prompt + reachback tools |
-| **Integration cost** | Write adapter code per plugin API | Describe the task; agent uses existing CLIs/APIs |
-| **Composability** | Plugin A can't easily call Plugin B | Agent A can delegate to Agent B (A2A) |
-| **Context understanding** | Gets only what the host explicitly passes | Agent actively explores — reads nodes, understands spatial layout, queries neighbors |
-| **Error recovery** | Crash or return error code | Agent reasons about errors, retries, asks for clarification |
-| **Upgrade path** | Breaking API changes | Prompt evolution — backward compatible by nature |
-| **User customization** | Config files, settings panels | "Hey agent, from now on do X instead of Y" |
-| **Discovery** | Plugin marketplace, manual install | Agent can discover and invoke other agents/tools dynamically |
+| Dimension                 | Traditional Plugin                                | Agent-as-Plugin                                                                      |
+| ------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| **Interface contract**    | Rigid API: hooks, lifecycle events, typed schemas | Natural language prompt + reachback tools                                            |
+| **Integration cost**      | Write adapter code per plugin API                 | Describe the task; agent uses existing CLIs/APIs                                     |
+| **Composability**         | Plugin A can't easily call Plugin B               | Agent A can delegate to Agent B (A2A)                                                |
+| **Context understanding** | Gets only what the host explicitly passes         | Agent actively explores — reads nodes, understands spatial layout, queries neighbors |
+| **Error recovery**        | Crash or return error code                        | Agent reasons about errors, retries, asks for clarification                          |
+| **Upgrade path**          | Breaking API changes                              | Prompt evolution — backward compatible by nature                                     |
+| **User customization**    | Config files, settings panels                     | "Hey agent, from now on do X instead of Y"                                           |
+| **Discovery**             | Plugin marketplace, manual install                | Agent can discover and invoke other agents/tools dynamically                         |
 
 ### The Key Insight
 
-A plugin system answers: *"What hooks do I expose?"*
-An agent system answers: *"What can you read, and what can you write?"*
+A plugin system answers: _"What hooks do I expose?"_
+An agent system answers: _"What can you read, and what can you write?"_
 
 Huabu already has this foundation via the **Huabu Reachback Tool (HRT)**:
+
 - **Read**: `read-node <id>` — fetch any node's content to a local file
 - **Write**: `write-node --type note <file>` (create) / `write-node --id <id> <file>` (update), with `--link-to` / `--link-from` for edge creation
 - **Vision**: `snapshot <id>` — rasterize sketch/image nodes to PNG for vision-capable agents
 - **Semantic**: `ask-agent "<prompt>"` — delegate complex spatial/semantic queries to built-in agents with full canvas context
 - **Internal tools**: `get_canvas_outline`, `inspect_nodes`, `canvas_commands` (14 commands) for the built-in agent
 
-The "plugin API" is simply: *the reachback tool* + *whatever external tools the agent has access to*. No SDK, no hooks — just CLI commands.
+The "plugin API" is simply: _the reachback tool_ + _whatever external tools the agent has access to_. No SDK, no hooks — just CLI commands.
 
 ---
 
@@ -154,17 +155,17 @@ Longer term, Huabu can still grow:
 
 The ultimate vision is that the canvas becomes an **operating system for thought**:
 
-| OS Concept | Canvas Equivalent |
-|---|---|
-| Files | Nodes |
-| Folders | Frames |
-| Symlinks | Edges |
-| Processes | Agents |
-| Pipes | Agent-to-agent communication via canvas |
-| Shell | Question nodes / chat |
-| Package manager | Agent marketplace |
-| Permissions | Reachback capability scoping |
-| Filesystem events (inotify) | Canvas change events → reactive agents |
+| OS Concept                  | Canvas Equivalent                       |
+| --------------------------- | --------------------------------------- |
+| Files                       | Nodes                                   |
+| Folders                     | Frames                                  |
+| Symlinks                    | Edges                                   |
+| Processes                   | Agents                                  |
+| Pipes                       | Agent-to-agent communication via canvas |
+| Shell                       | Question nodes / chat                   |
+| Package manager             | Agent marketplace                       |
+| Permissions                 | Reachback capability scoping            |
+| Filesystem events (inotify) | Canvas change events → reactive agents  |
 
 In a traditional OS, you don't need a "plugin" to connect `grep` to `sort` — you just pipe them. Similarly, in the agent-as-plugin model, you don't need a plugin API to connect HackMD publishing to Jira tracking — you just describe the workflow, and agents compose naturally.
 
@@ -199,4 +200,4 @@ This is why "agent as the universal interface" is not just a nice idea for Huabu
 
 ---
 
-*This document is a living vision. Concrete examples live in [`agent-teams/`](../agent-teams/) as working implementations. The beauty of the agent-as-plugin model is that we don't need to anticipate every use case — we just need to make the read/write interface rich enough, and agents will fill the gaps.*
+_This document is a living vision. Concrete examples live in [`agent-teams/`](../agent-teams/) as working implementations. The beauty of the agent-as-plugin model is that we don't need to anticipate every use case — we just need to make the read/write interface rich enough, and agents will fill the gaps._

@@ -20,6 +20,7 @@
 - `agentlet` CLI 重构为显式子命令：`agentlet daemon …`（原顶层守护模式）与 `agentlet agent-team …`；`bin/agentlet`（轻量全局命令）与 `bin/start-agentlet-daemon`（守护启动便捷脚本）拆分。
 - 注意 `pnpm install` 不会重新构建 agentlet，需 `pnpm run build:agentlet`。
 - 文档：[agent-teams/README.md](../../agent-teams/README.md)（快速上手 + how-to + 示例表）、[docs/agent-teams-as-extensions.md](../agent-teams-as-extensions.md)（产品/愿景）、[external/agentlet/spec/agent-team.md](../../external/agentlet/spec/agent-team.md)（打包/运行时规范）。
+
 ## 2026-06-26 · Note 作为拖拽落点：精确插入 + 末尾追加 + 跨 Note 原子移动
 
 **What Changed**
