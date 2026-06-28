@@ -229,8 +229,9 @@ export async function ensureAgentForThread(
       appId: threadId,
       ...(existingSessionId ? { sessionId: existingSessionId } : {}),
       sessionSpec: {
-        command: recipe.command,
-        cwd: recipe.cwd,
+        ...(recipe.agentTeam
+          ? { agentTeam: recipe.agentTeam }
+          : { command: recipe.command, cwd: recipe.cwd }),
         autoRestart: recipe.autoRestart,
         idleTimeoutSecs: DEFAULT_IDLE_TIMEOUT_SECS,
         env: Object.keys(reachbackEnv).length > 0 ? reachbackEnv : undefined,

@@ -2,6 +2,25 @@
 
 每次重要功能变更都会记录在此文件中，按时间倒序排列。
 
+## 2026-06-28 · Agent Teams：把外部 agent 打包成 Huabu「插件」
+
+**What Changed**
+
+新增 **Agent Teams**——一套打包 + 运行时模型，让 Huabu 把外部 AI agent（Claude、Copilot…）当作一等公民的扩展/插件来用。AI 时代里 agent 本身就是集成层：与其为每个服务写一套定制插件，不如打包一个已经会驱动该服务 CLI / skill 的 agent，通过 **Huabu Reachback** 把它接到画布上，让它直接干活。
+
+1. **每个 agent 是一个自包含目录**：放在仓库 `agent-teams/` 下，由 `agentlet.yaml` 清单描述——按 harness 声明启动 `command`，并在 `require` 里声明所需的 `cli-tools`（npm 包）、`skills`、`prompts`。
+2. **新增 `agentlet agent-team` CLI**：`setup`（别名 `unpack`）/ `validate` / `doctor` 三个子命令，**只作用于当前目录**的 `agentlet.yaml`（无路径参数，需在 agent 目录内执行），负责安装工具/技能、放置 prompt、按 harness 生成 `workspaces/<harness>/` 工作区。
+3. **UI 新增「Agent Team」档案模式**：在 **设置 → External Agents → Add agent** 里选 Agent Team，填入 agent 目录的**绝对路径**（含 `agentlet.yaml`）和可选 harness，即可把某个会话/问题线程绑定到这个打包好的 agent。
+4. **首个示例 `hackmd-publisher`**：把画布上选中的节点（尊重 frame / edge 的拓扑顺序）拼装成 markdown 文档并发布到 HackMD，再写回一个带链接的结果节点。
+
+**Notes**
+
+- 通用模型放在 `external/agentlet/`（git subtree，会回推上游），宿主侧（server / web / shared 类型）单独提交，二者分开。
+- 守护进程通过 `resolveAgentTeam({ agentDir, harness })` 把「目录 + harness」解析成 `{ command, cwd, env }`，并把工作区 `node_modules/.bin` 前置到 agent 的 `PATH`，这样 `cli-tools` 里本地安装的命令才能被 agent 找到。
+- `agentlet` CLI 重构为显式子命令：`agentlet daemon …`（原顶层守护模式）与 `agentlet agent-team …`；`bin/agentlet`（轻量全局命令）与 `bin/start-agentlet-daemon`（守护启动便捷脚本）拆分。
+- 注意 `pnpm install` 不会重新构建 agentlet，需 `pnpm run build:agentlet`。
+- 文档：[agent-teams/README.md](../../agent-teams/README.md)（快速上手 + how-to + 示例表）、[docs/agent-teams-as-extensions.md](../agent-teams-as-extensions.md)（产品/愿景）、[external/agentlet/spec/agent-team.md](../../external/agentlet/spec/agent-team.md)（打包/运行时规范）。
+
 ## 2026-06-26 · Note 作为拖拽落点：精确插入 + 末尾追加 + 跨 Note 原子移动
 
 **What Changed**

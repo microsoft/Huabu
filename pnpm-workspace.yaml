@@ -4,6 +4,7 @@ packages:
   - external/agentlet/packages/protocol
   - external/agentlet/packages/server
   - external/agentlet/packages/local
+  - external/agentlet/packages/agent-team
 
 ignoredBuiltDependencies:
   - electron-winstaller

@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 /**
- * postinstall hook — make `agentlet` discoverable on the user's PATH
- * so first-time setup is "pnpm install && pnpm dev" instead of
- * "pnpm install, then manually edit your shell rc, then pnpm dev".
+ * postinstall hook — make the `bin/` wrappers (`agentlet` and
+ * `start-agentlet-daemon`) discoverable on the user's PATH so first-time
+ * setup is "pnpm install && pnpm dev" instead of "pnpm install, then
+ * manually edit your shell rc, then pnpm dev". We add the whole `bin/`
+ * directory, so both wrappers become available at once.
  *
  * Behaviour:
  *  • POSIX (macOS / Linux / WSL / Git Bash on Windows):
@@ -139,9 +141,9 @@ function installWindows() {
 }
 
 function main() {
-  // Sanity check: the wrapper file must actually exist (we only ship
-  // the script once `bin/agentlet` lands; if for some reason the user
-  // is installing a stripped-down checkout, skip silently).
+  // Sanity check: the wrapper must actually exist (we only ship the
+  // `bin/agentlet` pass-through in a full checkout; if for some reason
+  // the user is installing a stripped-down checkout, skip silently).
   if (!existsSync(path.join(binDir, 'agentlet'))) {
     return;
   }

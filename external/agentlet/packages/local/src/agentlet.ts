@@ -16,6 +16,7 @@ import {
   type SendResourceParams,
   type JsonRpcMessage,
 } from '@agentlet/protocol'
+import { resolveAgentTeam } from '@agentlet/agent-team'
 import { AgentProcess } from './agent-process.js'
 import { WsClient } from './ws-client.js'
 import { Relay } from './relay.js'
@@ -447,8 +448,30 @@ export class Agentlet {
 
   private async handleSpawn(requestId: string | number, params: SpawnParams): Promise<void> {
     const sessionSpec = params?.sessionSpec
+
+    // Agent Team resolution: translate { agentDir, harness } → { command, cwd, env }
+    if (sessionSpec?.agentTeam) {
+      try {
+        const resolved = resolveAgentTeam(sessionSpec.agentTeam)
+        sessionSpec.command = resolved.command
+        sessionSpec.cwd = resolved.cwd
+        // Env merge: daemon defaults < .env from agentDir < sessionSpec.env from host
+        sessionSpec.env = { ...resolved.env, ...sessionSpec.env }
+        this.logger.info('agent_team_resolved', {
+          agentDir: sessionSpec.agentTeam.agentDir,
+          harness: sessionSpec.agentTeam.harness,
+          command: resolved.command,
+          cwd: resolved.cwd,
+        })
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        this.sendDaemonResponse(requestId, undefined, { code: -32602, message: `Agent Team resolution failed: ${msg}` })
+        return
+      }
+    }
+
     if (!sessionSpec?.command) {
-      this.sendDaemonResponse(requestId, undefined, { code: -32602, message: 'Missing required param: sessionSpec.command' })
+      this.sendDaemonResponse(requestId, undefined, { code: -32602, message: 'Missing required param: sessionSpec.command (or sessionSpec.agentTeam)' })
       return
     }
 

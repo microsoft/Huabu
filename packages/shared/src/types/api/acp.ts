@@ -47,15 +47,26 @@ export interface AcpAgentProfile {
   displayName: string;
   /**
    * CLI id from {@link AcpAgentCliInfo.id} (`copilot` / `claude` / …),
-   * OR `'custom'` when {@link command} was entered manually.
+   * `'custom'` when {@link command} was entered manually,
+   * or `'agent-team'` when this profile is backed by an Agent Team package.
    */
   cliId: string;
-  /** Full command line passed to the daemon (e.g. `"copilot --acp --allow-all"`). */
-  command: string;
-  /** Absolute working directory on the daemon's host. */
-  cwd: string;
+  /** Full command line passed to the daemon. Absent for agent-team profiles. */
+  command?: string;
+  /** Absolute working directory on the daemon's host. Absent for agent-team profiles. */
+  cwd?: string;
   /** Whether the daemon should auto-restart the agent on crash. */
   autoRestart: boolean;
+  /**
+   * Agent Team reference. When present, the daemon resolves command/cwd
+   * from the agent-team manifest instead of using stored command/cwd.
+   */
+  agentTeam?: {
+    /** Absolute path to the agent-team package folder (containing agentlet.yaml). */
+    agentDir: string;
+    /** Target harness. If omitted, uses the first from manifest supported_harnesses. */
+    harness?: string;
+  };
   /** Epoch ms. */
   createdAt: number;
   /** Epoch ms. */
@@ -109,10 +120,17 @@ export interface AcpProfileCreateRequest {
   /** Optional — server fills in a sensible default when omitted. */
   displayName?: string;
   cliId: string;
-  command: string;
-  cwd: string;
+  /** Required for direct profiles; absent for agent-team profiles. */
+  command?: string;
+  /** Required for direct profiles; absent for agent-team profiles. */
+  cwd?: string;
   /** Default true. */
   autoRestart?: boolean;
+  /** Agent Team reference. Required when cliId is 'agent-team'. */
+  agentTeam?: {
+    agentDir: string;
+    harness?: string;
+  };
 }
 
 /** Request body for `PATCH /api/acp/profiles/:id`. All fields optional. */
@@ -121,6 +139,10 @@ export interface AcpProfileUpdateRequest {
   command?: string;
   cwd?: string;
   autoRestart?: boolean;
+  agentTeam?: {
+    agentDir: string;
+    harness?: string;
+  };
 }
 
 /** Response body for `POST` / `PATCH` /api/acp/profiles[/:id]. */
@@ -650,14 +672,21 @@ export const setAcpSessionConfigOptionResponseSchema = z.object({
 
 // ─── Agent-profile / daemon schemas ────────────────────────────────────
 
+/** Zod schema for the agentTeam sub-object. */
+const agentTeamFieldSchema = z.object({
+  agentDir: z.string().min(1),
+  harness: z.string().min(1).optional(),
+});
+
 /** Schema mirror of {@link AcpAgentProfile}. */
 export const acpAgentProfileSchema = z.object({
   id: z.string().min(1),
   displayName: z.string().min(1),
   cliId: z.string().min(1),
-  command: z.string().min(1),
-  cwd: z.string().min(1),
+  command: z.string().min(1).optional(),
+  cwd: z.string().min(1).optional(),
   autoRestart: z.boolean(),
+  agentTeam: agentTeamFieldSchema.optional(),
   createdAt: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative(),
 }) satisfies z.ZodType<AcpAgentProfile>;
@@ -686,9 +715,10 @@ export const acpProfilesListResponseSchema = z.object({
 export const acpProfileCreateRequestSchema = z.object({
   displayName: z.string().min(1).optional(),
   cliId: z.string().min(1),
-  command: z.string().min(1),
-  cwd: z.string().min(1),
+  command: z.string().min(1).optional(),
+  cwd: z.string().min(1).optional(),
   autoRestart: z.boolean().optional(),
+  agentTeam: agentTeamFieldSchema.optional(),
 }) satisfies z.ZodType<AcpProfileCreateRequest>;
 
 /** Schema mirror of {@link AcpProfileUpdateRequest}. */
@@ -697,6 +727,7 @@ export const acpProfileUpdateRequestSchema = z.object({
   command: z.string().min(1).optional(),
   cwd: z.string().min(1).optional(),
   autoRestart: z.boolean().optional(),
+  agentTeam: agentTeamFieldSchema.optional(),
 }) satisfies z.ZodType<AcpProfileUpdateRequest>;
 
 // {@link AcpProfileMutationResponse}, {@link AcpAgentletStatusResponse} and
