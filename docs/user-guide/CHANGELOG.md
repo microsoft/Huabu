@@ -2,6 +2,27 @@
 
 每次重要功能变更都会记录在此文件中，按时间倒序排列。
 
+## 2026-06-26 · Note 作为拖拽落点：精确插入 + 末尾追加 + 跨 Note 原子移动
+
+**What Changed**
+
+Note 节点现在不仅是拖拽的**源**，也是拖拽的**落点**。这意味着 chat 消息可以直接拖进 Note、Note A 的某块可以一次性搬到 Note B：
+
+1. **拖到画布上的 Note 瓦片** → 内容**追加到该 Note 末尾**（按 block 间隔分隔，自动处理换行）。瓦片在拖拽悬停时高亮一圈 `ring-info` 蓝色环作为反馈。
+2. **拖到右侧展开编辑面板里的 Note** → 内容在**光标所在 block 之后精确插入**。Chat 消息 → 当前编辑 Note 是这条路径的典型用法。
+3. **修饰键**沿用画布上的约定：默认 = Move（源 Note 删掉该块），`Ctrl/Cmd` = Copy（源保留）。
+4. **跨 Note 移动是一次原子写入**（一条 undo 记录）。新增 `MOVE_NOTE_BLOCK_INTO_NOTE` intent + 同名 resolver，输出单条 `MERGE_NODE_DATA` 携带源 + 目标两个 patch。
+5. **锁定的 Note 不接收拖入**，事件继续冒泡到画布，行为退化为"在该位置新建节点"。
+6. **自我拖拽**（把自己的块拖回自己的瓦片或展开面板）→ 早返回，交给 Crepe 的 in-editor block 重排接管。
+
+**Notes**
+
+- 来源不可回写的拖拽（chat 消息、Web / Image / 外部文件 / URL）即使按 `Ctrl/Cmd` 也只能 Copy，行为与画布一致。
+- 落点精确插入靠新增的 `MilkdownInstance.getBlockKeyAtPoint(x, y)`：用 ProseMirror 的 `view.posAtCoords` resolve 到顶层 block，反查 fingerprint key 后调 `insertBlocksAfter`。drop 落在编辑器 padding 上时回退为末尾追加。
+- 单一 expanded view 的 UX 假设下，"两个 Note 都展开互拖"不会发生 —— 跨 Note move 的真实路径是「展开 A 中的某块 → 拖到画布上 B 的瓦片」，这条路径走原子 `moveNoteBlockIntoNote` action。
+- 拖图片到 Note 时（chat 图片块 / 节点内 image 浮动把手），payload 里的 `src` 通常是 artifact key（`art_xxx.png`），note 渲染器不认这种协议。`dragPayloadToMarkdown` 接受可选的 `canvasId` 选项，落点端把它传进来后会先 `resolveArtifactUrl(src, canvasId)`，最终插入到 note 里的 markdown 是一个可访问的 `/api/canvas/<id>/artifact/<key>` URL。
+- 新增 / 修改文件：[NoteNode.tsx](apps/web/src/components/Nodes/note/NoteNode.tsx)、[NotePreview.tsx](apps/web/src/components/Nodes/note/NotePreview.tsx)、[createMilkdown.ts](apps/web/src/components/Milkdown/createMilkdown.ts)、[resolveMoveNoteBlockIntoNote.ts](apps/web/src/handler/canvasCommand/resolvers/resolveMoveNoteBlockIntoNote.ts)、[uiIntent.ts](apps/web/src/handler/canvasCommand/uiIntent.ts)、[canvasStore.ts](apps/web/src/store/canvasStore.ts)、[payloadToMarkdown.ts](apps/web/src/utils/io/payloadToMarkdown.ts)。
+
 ## 2026-06-26 · 术语更名：Agent Sideband → Agent Reachback（HST → HRT）
 
 **What Changed**

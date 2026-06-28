@@ -42,7 +42,12 @@ import {
   shiftProvenance,
   stampAiEdit,
 } from '@/utils/blockProvenance';
-import { setDragPayload } from '@/utils/io/dragDrop';
+import {
+  canReadSedimentPayload,
+  getSedimentPayload,
+  setDragPayload,
+} from '@/utils/io/dragDrop';
+import { dragPayloadToMarkdown } from '@/utils/io/payloadToMarkdown';
 
 import { ProvenanceOverlay } from './ProvenanceOverlay';
 
@@ -380,6 +385,11 @@ export const NotePreview = ({
   // The sentinel `-1` guarantees the first valid run (editor ready,
   // editable, wysiwyg) always focuses even on a fresh mount.
   const focusTick = useCanvasStore((s) => s.expandedNodeFocusTick);
+  // Needed to resolve artifact-key image srcs (e.g. `art_xxx.png`)
+  // dragged in from chat so the inserted markdown carries a
+  // fetchable HTTP URL rather than a bare key the renderer can't
+  // dereference.
+  const canvasId = useCanvasStore((s) => s.canvasId);
   const lastHandledFocusTickRef = useRef<number>(-1);
   useEffect(() => {
     if (!editor) return;
@@ -415,7 +425,11 @@ export const NotePreview = ({
         };
 
       setDragPayload(event.nativeEvent as unknown as React.DragEvent, payload, {
-        effectAllowed: 'copyMove',
+        // 'all' (not 'copyMove') so macOS Cmd-modified drags still
+        // dispatch a `drop` event — Cmd is reported as NSDragOperation
+        // Generic/Link at the OS layer, which fails to intersect with
+        // 'copyMove' and silently aborts the gesture.
+        effectAllowed: 'all',
       });
     },
     [id],
@@ -436,6 +450,108 @@ export const NotePreview = ({
       writePatch({ content: next });
     },
     [readOnly, onContentChange, onDataChange, writePatch],
+  );
+
+  // ── Drop target: external Sediment payloads (chat messages, image
+  // / web cards) can be dropped into the editor to insert a new
+  // block at the cursor position. Blocks dragged out of THIS note
+  // and dropped back into it fall through to Crepe's native
+  // in-editor reorder handler.
+  //
+  // CAPTURE-phase listeners on purpose. Crepe / Milkdown sets
+  // `text/html` + `text/plain` on dataTransfer during dragstart
+  // (see `blockDrag.ts`). ProseMirror's drop handler lives on the
+  // inner `view.dom` element in the BUBBLE phase, so if we attached
+  // bubble-phase React handlers they would fire AFTER ProseMirror
+  // had already pasted the text/html fallback — producing a double
+  // insertion. Capture phase fires top-down, lets us mark
+  // `event.defaultPrevented`, and ProseMirror's bubble handler
+  // checks that flag and bails out. Raw-markdown mode delegates to
+  // the textarea's native drop behaviour.
+  const handlePreviewDragOverCapture = useCallback(
+    (e: React.DragEvent) => {
+      if (readOnly || editMode !== 'wysiwyg') return;
+      if (!canReadSedimentPayload(e.dataTransfer)) return;
+      // We can't tell self-vs-cross-source until drop (dataTransfer
+      // JSON is gated). preventDefault here unconditionally so the
+      // browser permits the drop; the dropCapture handler does the
+      // final routing. Self-source still benefits from the cursor
+      // showing as a drop target.
+      //
+      // CRITICAL: do NOT stopPropagation here. ProseMirror's
+      // `prosemirror-dropcursor` plugin attaches its dragover
+      // listener directly on `editorView.dom` in the BUBBLE phase
+      // and only renders the drop indicator when it receives the
+      // event. Stopping propagation at the outer capture phase
+      // suppresses that listener entirely — the user sees no
+      // insertion indicator at all. preventDefault alone is enough
+      // to keep the browser drop allowed AND to flip
+      // `defaultPrevented` so PM's drop handler bails (see the drop
+      // handler's own check).
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    },
+    [readOnly, editMode],
+  );
+  const handlePreviewDropCapture = useCallback(
+    (e: React.DragEvent) => {
+      if (readOnly || editMode !== 'wysiwyg') return;
+      if (!canReadSedimentPayload(e.dataTransfer)) return;
+      const payload = getSedimentPayload(e.dataTransfer);
+      if (!payload) return;
+      // Self-source (a block from this same note) → let Crepe's
+      // bubble-phase in-editor reorder run. We must NOT
+      // preventDefault or stopPropagation here.
+      if (
+        payload.kind === 'note' &&
+        typeof payload.data.sourceNodeId === 'string' &&
+        payload.data.sourceNodeId === id
+      ) {
+        return;
+      }
+
+      const snippet = dragPayloadToMarkdown(payload, { canvasId });
+      if (!snippet) return;
+
+      // Cross-source: claim the gesture. preventDefault flips the
+      // native event's `defaultPrevented`, which ProseMirror's drop
+      // handler checks and skips on. stopPropagation suppresses
+      // further React handlers.
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (!editor) return;
+      const anchorKey = editor.getBlockKeyAtPoint(e.clientX, e.clientY);
+      // `getBlockKeyAtPoint` returns:
+      //   string    — anchor on this block (insert AFTER it)
+      //   null      — insert at doc head (the gap above the first
+      //               block was the visible drop target)
+      //   undefined — the drop landed outside the editor surface
+      //               (top / bottom padding); append to the last block.
+      let resolvedAnchor: string | null;
+      if (anchorKey === undefined) {
+        const keys = editor.getBlockKeys();
+        resolvedAnchor = keys.length > 0 ? keys[keys.length - 1] : null;
+      } else {
+        resolvedAnchor = anchorKey;
+      }
+      editor.insertBlocksAfter(resolvedAnchor, snippet);
+      // PM's `dropcursor` only clears the bar when it observes the
+      // drop / dragend / out-of-editor dragleave on `view.dom`. Our
+      // capture-phase `stopPropagation` above suppresses the drop
+      // event before it reaches PM, AND the browser's follow-up
+      // `dragend` fires on the drag source (a chat message / other
+      // note) which sits outside this editor — so without an
+      // explicit nudge the blue bar would linger until PM's 5s
+      // safety timeout.
+      editor.clearDropIndicator();
+      // The editor's `onChange` fires synchronously after the insert
+      // and patches `content` through `handleEditorChange`. Cross-note
+      // MOVE (source patch) isn't applied here because only one note
+      // can be expanded at a time — the cross-note flow happens via
+      // dropping on the SOURCE-OTHER note's tile in `NoteNode`.
+    },
+    [readOnly, editMode, id, editor, canvasId],
   );
 
   const totalPending =
@@ -487,6 +603,8 @@ export const NotePreview = ({
         className={`relative h-full w-full overflow-auto py-3 ${
           editMode === 'raw' ? 'px-3' : 'pr-3'
         }`}
+        onDragOverCapture={handlePreviewDragOverCapture}
+        onDropCapture={handlePreviewDropCapture}
       >
         {editMode === 'wysiwyg' ? (
           <>

@@ -98,6 +98,24 @@
   --prosemirror-virtual-cursor-color: var(--fg-muted);
 }
 
+/* Drop-indicator (Crepe `cursor` feature) repaint.
+   Crepe's `theme/common/cursor.css` paints `.crepe-drop-cursor` with
+   `background: color-mix(in srgb, var(--crepe-color-outline),
+   transparent 50%); opacity: 0.5;`. We map `--crepe-color-outline`
+   to `--edge-default` (a near-white border tint), which compounds
+   into roughly 25% alpha of a near-white color — basically invisible
+   on the default surface. Repaint with the `--info` accent at full
+   opacity so the insertion bar reads clearly while dragging blocks
+   between notes.
+
+   Same specificity as Crepe's rule (`.milkdown .crepe-drop-cursor`);
+   this file loads AFTER Crepe so the cascade wins without
+   `!important`. */
+.milkdown .crepe-drop-cursor {
+  background: var(--info);
+  opacity: 0.6;
+}
+
 .milkdown .ProseMirror {
   /* Zero the 60px×120px editor padding; parents already provide their
      own padding (e.g. AIMessage's chat card uses `px-4`). */

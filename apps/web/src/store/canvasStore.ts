@@ -400,6 +400,21 @@ type RFState = {
     sourceContentAfterMove: string;
     newNote: AddNodeInput;
   }) => void;
+  /**
+   * Atomic cross-note drop-MOVE: in one undo entry, the source note
+   * loses its dragged block (its content becomes
+   * `sourceContentAfterMove`) and the target note adopts
+   * `targetContentAfterInsert` (caller has already spliced the dragged
+   * Markdown into the right position). For COPY semantics use
+   * `updateNodeData` on the target alone — the source must not be
+   * touched.
+   */
+  moveNoteBlockIntoNote: (input: {
+    sourceNodeId: string;
+    sourceContentAfterMove: string;
+    targetNodeId: string;
+    targetContentAfterInsert: string;
+  }) => void;
   deleteNodes: (nodeIds: string[]) => void;
   disconnectEdges: (edgeIds: string[]) => void;
   setNodeGeometry: (
@@ -2457,6 +2472,21 @@ const useCanvasStore = create<RFState>()(
         sourceNodeId,
         sourceContentAfterMove,
         newNote,
+      });
+    },
+
+    moveNoteBlockIntoNote: ({
+      sourceNodeId,
+      sourceContentAfterMove,
+      targetNodeId,
+      targetContentAfterInsert,
+    }) => {
+      get().dispatchUiIntent({
+        type: 'MOVE_NOTE_BLOCK_INTO_NOTE',
+        sourceNodeId,
+        sourceContentAfterMove,
+        targetNodeId,
+        targetContentAfterInsert,
       });
     },
 
