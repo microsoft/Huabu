@@ -47,6 +47,30 @@ function escapeLabel(label: string): string {
   return label.replace(/[\\[\]]/g, (m) => `\\${m}`);
 }
 
+/**
+ * Reject URLs whose scheme could execute script when the Markdown is
+ * later rendered (`javascript:`, `vbscript:`, and HTML-bearing
+ * `data:text/html` payloads). Defense-in-depth: drag payloads are
+ * internal, and the Markdown renderer also sanitizes, but we refuse
+ * to embed a dangerous src in the first place.
+ *
+ * Schemeless (relative / artifact-key) and ordinary `http(s):` /
+ * image `data:` URLs pass through unchanged.
+ */
+function isSafeUrl(url: string): boolean {
+  // Only a leading `scheme:` token matters; strip it and inspect.
+  const match = /^\s*([a-z][a-z0-9+.-]*):/i.exec(url);
+  if (!match) return true; // relative / artifact key — safe
+  const scheme = match[1].toLowerCase();
+  if (scheme === 'javascript' || scheme === 'vbscript') return false;
+  if (scheme === 'data') {
+    // Allow only binary media data URLs (e.g. `data:image/png;...`),
+    // never `data:text/html` which can carry inline script.
+    return /^data:(image|audio|video)\//i.test(url.trim());
+  }
+  return true;
+}
+
 export function dragPayloadToMarkdown(
   payload: DragPayload,
   options: PayloadToMarkdownOptions = {},
@@ -62,6 +86,7 @@ export function dragPayloadToMarkdown(
       const src = options.canvasId
         ? resolveArtifactUrl(rawSrc, options.canvasId)
         : rawSrc;
+      if (!isSafeUrl(src)) return null;
       const rawLabel =
         typeof payload.data.label === 'string' ? payload.data.label.trim() : '';
       const alt = rawLabel === '' ? '' : escapeLabel(rawLabel);
@@ -70,6 +95,7 @@ export function dragPayloadToMarkdown(
     case 'web': {
       const src = payload.data.src.trim();
       if (src === '') return null;
+      if (!isSafeUrl(src)) return null;
       // Markdown autolink — renders as a clickable link with the URL
       // as its visible text. Easier to retitle later than a bare URL.
       return `<${src}>`;

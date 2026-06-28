@@ -163,9 +163,10 @@ export type CanvasUiIntent =
        *     `targetContentAfterInsert` (the caller has already stitched
        *     the dragged Markdown into the right place).
        *
-       * One undo entry. When the gesture is a COPY (default modifier
-       * Ctrl/Cmd held), callers should issue a plain `UPDATE_NODE_DATA`
-       * on the target instead — the source must stay untouched.
+       * One undo entry. When the gesture is a COPY (modifier held —
+       * Option on macOS, Ctrl on Windows / Linux), callers should
+       * issue a plain `UPDATE_NODE_DATA` on the target instead — the
+       * source must stay untouched.
        */
       type: 'MOVE_NOTE_BLOCK_INTO_NOTE';
       sourceNodeId: string;

@@ -139,4 +139,46 @@ describe('dragPayloadToMarkdown', () => {
     };
     expect(dragPayloadToMarkdown(payload)).toBeNull();
   });
+
+  it('rejects javascript: scheme for web payloads', () => {
+    const payload: DragPayload = {
+      kind: 'web',
+      dragId: 'd9',
+      origin: baseOrigin,
+
+      data: { src: 'javascript:alert(1)' },
+    };
+    expect(dragPayloadToMarkdown(payload)).toBeNull();
+  });
+
+  it('rejects javascript: scheme for image payloads', () => {
+    const payload: DragPayload = {
+      kind: 'image',
+      dragId: 'd10',
+      origin: baseOrigin,
+
+      data: { src: 'javascript:alert(1)', label: 'x' },
+    };
+    expect(dragPayloadToMarkdown(payload)).toBeNull();
+  });
+
+  it('rejects data:text/html image src but keeps data:image', () => {
+    const html: DragPayload = {
+      kind: 'image',
+      dragId: 'd11',
+      origin: baseOrigin,
+      data: { src: 'data:text/html,<script>alert(1)</script>' },
+    };
+    expect(dragPayloadToMarkdown(html)).toBeNull();
+
+    const img: DragPayload = {
+      kind: 'image',
+      dragId: 'd12',
+      origin: baseOrigin,
+      data: { src: 'data:image/png;base64,AAAA', label: 'ok' },
+    };
+    expect(dragPayloadToMarkdown(img)).toBe(
+      '![ok](data:image/png;base64,AAAA)',
+    );
+  });
 });
