@@ -12,6 +12,7 @@
     "start": "tsx src/server.ts",
     "test": "vitest run",
     "test:watch": "vitest",
+    "dump:prompts": "tsx scripts/dump-prompts.ts",
     "eval": "tsx evals/cli.ts run",
     "eval:list": "tsx evals/cli.ts list",
     "eval:baseline": "tsx evals/cli.ts baseline",

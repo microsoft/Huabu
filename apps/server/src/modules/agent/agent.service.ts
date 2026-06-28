@@ -15,9 +15,12 @@
 
 import { Agent, convertToLlm } from '@earendil-works/pi-agent-core';
 
+import { renderEnvelopeMessages } from './context/chat-turn.js';
+import { dumpAssembledPrompt } from './context/debug-prompt.js';
 import { ensureApiKey, getLLMModel } from './llm.js';
 import { buildToolsForScope, type ToolScope } from './tools/index.js';
 
+import type { ChatEnvelope } from './context/envelope.js';
 import type {
   AgentEvent,
   AgentToolResult,
@@ -29,6 +32,7 @@ import type {
   TextContent,
 } from '@earendil-works/pi-ai';
 import type { AgentStreamEvent, NodeOrigin } from '@sediment/shared';
+import type { FastifyBaseLogger } from 'fastify';
 
 /**
  * SSE events yielded by `runAgent`.
@@ -59,8 +63,29 @@ export interface AgentRunOptions {
    * not mis-tagged as AI-initiated.
    */
   origin?: NodeOrigin;
-  /** pi-ai Context (systemPrompt + messages). Will be mutated with responses. */
+  /**
+   * pi-ai Context for this thread: `systemPrompt` + the PRIOR
+   * conversation history (rebuilt from earlier turns). It does NOT
+   * include this turn's user message — that lives in {@link envelope}
+   * and is rendered internally so the two backends share one timing.
+   * Mutated in place: after the run, `messages` holds prior history +
+   * this turn's assistant/tool output (the transcript the route slices).
+   */
   context: Context;
+  /**
+   * This turn's structured input. When provided (the chat route), it is
+   * rendered into the per-turn user message internally — symmetric with
+   * the external/ACP path, which takes the same envelope — and the
+   * rendered message is kept OUT of `context.messages` so the envelope
+   * stays the single source of truth on reload.
+   *
+   * Optional for the internal, envelope-less callers (memory analyzer,
+   * sketch recognition, reachback operate) that assemble
+   * `context.messages` directly: with no envelope, `runAgent` runs over
+   * `context.messages` as-is and syncs the full final transcript back
+   * (the legacy behaviour).
+   */
+  envelope?: ChatEnvelope;
   /** Structured logger for request-scoped diagnostics */
   logger?: AgentLogger;
   /** Abort signal for cancellation */
@@ -71,6 +96,18 @@ export interface AgentRunOptions {
    * Mirrors the previous self-rolled `maxIterations`.
    */
   maxIterations?: number;
+  /**
+   * Optional developer aid: when present (and `HUABU_DEBUG_PROMPT` is
+   * set), dump the fully-assembled prompt for this turn. Lives here
+   * rather than in the route because the route no longer holds the
+   * rendered messages — they are built inside {@link runAgent}.
+   */
+  debugPrompt?: {
+    turnNumber: number;
+    threadId: string;
+    mode: string;
+    logger: FastifyBaseLogger;
+  };
 }
 
 // ==================== Helpers ====================
@@ -104,12 +141,51 @@ export async function* runAgent(
     canvasId,
     origin,
     context,
+    envelope,
     logger,
     signal,
     maxIterations = 20,
+    debugPrompt,
   } = options;
 
   const tools = buildToolsForScope(scope, { canvasId, origin });
+
+  // Render THIS turn's envelope into its single user message, then run
+  // the agent over [prior history + this turn] held in a LOCAL array.
+  // `context.messages` keeps only prior history during the run; the
+  // `finally` below appends just the output delta. The current user
+  // message therefore never enters `context.messages` (and so never the
+  // persisted transcript) — it lives in the envelope and is re-derived
+  // on reload, exactly mirroring the external/ACP path's split between
+  // session history and the per-turn prompt.
+  //
+  // Envelope-less callers (memory analyzer, sketch, reachback) assemble
+  // `context.messages` themselves; for them `turnMessages` is empty and
+  // the run proceeds over `context.messages` directly, with the legacy
+  // full-transcript sync in the `finally`.
+  const turnMessages = envelope
+    ? (await renderEnvelopeMessages(envelope, { canvasId: canvasId ?? null }))
+        .messages
+    : [];
+  const priorLen = context.messages.length;
+  const runMessages = envelope
+    ? [...context.messages, ...turnMessages]
+    : context.messages;
+
+  // Optional developer aid: dump the fully-assembled prompt (system +
+  // prior history + this turn). No-op unless HUABU_DEBUG_PROMPT is set.
+  if (debugPrompt) {
+    dumpAssembledPrompt({
+      systemPrompt: context.systemPrompt ?? '',
+      messages: runMessages,
+      newMessageCount: turnMessages.length,
+      turnNumber: debugPrompt.turnNumber,
+      threadId: debugPrompt.threadId,
+      canvasId: canvasId ?? null,
+      mode: debugPrompt.mode,
+      logger: debugPrompt.logger,
+    });
+  }
 
   // Soft turn cap: replaces the old self-rolled `maxIterations` counter.
   // pi-agent-core 0.74's `Agent` class doesn't expose `shouldStopAfterTurn`
@@ -131,7 +207,10 @@ export async function* runAgent(
       // stay identical, so route-side mutations on individual messages
       // continue to work — but the array identity differs after
       // construction, which is why we re-sync below in the `finally`.
-      messages: context.messages,
+      // We pass the LOCAL `runMessages` (prior history + this turn) so
+      // `context.messages` is left untouched (prior history only) until
+      // the `finally` appends the output delta.
+      messages: runMessages,
     },
     convertToLlm: (msgs) => msgs as Message[],
     // pi-agent-core invokes this before every LLM call, including across
@@ -409,7 +488,26 @@ export async function* runAgent(
     // in `context.messages`. `convertToLlm` is the official downcast
     // from pi-agent-core: it drops / flattens harness roles into the
     // user / assistant / toolResult triple `Message` expects.
-    context.messages.length = 0;
-    context.messages.push(...convertToLlm(agent.state.messages));
+    //
+    // We append ONLY the output delta — everything after the input
+    // prefix (`priorLen` prior-history messages + `turnMessages.length`
+    // rendered user messages for this turn). The prefix is plain
+    // user/assistant/toolResult rows with no harness roles, so it
+    // survives `convertToLlm` 1:1 and the slice index stays valid. This
+    // keeps the current turn's user message OUT of `context.messages`
+    // (and thus the persisted transcript): it is re-derived from the
+    // envelope on reload, so persisting it here would duplicate it.
+    //
+    // Envelope-less callers never rendered a turn message, so there is
+    // no prefix to preserve — they keep the legacy full replace.
+    const converted = convertToLlm(agent.state.messages);
+    if (envelope) {
+      const outputDelta = converted.slice(priorLen + turnMessages.length);
+      context.messages.length = priorLen;
+      context.messages.push(...outputDelta);
+    } else {
+      context.messages.length = 0;
+      context.messages.push(...converted);
+    }
   }
 }

@@ -40,6 +40,7 @@ import {
 } from './session-store.js';
 import { ensureAgentForThread } from './spawn-orchestrator.js';
 import { acpUpdateToStreamEvent, mergeThinkingChunk } from './translator.js';
+import { dumpAssembledPrompt } from '../context/debug-prompt.js';
 import { applyToolExt } from '../store/chat-thread-store.js';
 
 import type { AcpSessionEntry } from './session-registry.js';
@@ -47,6 +48,7 @@ import type {
   AcpBindingRecipe,
   AcpSessionPersistedMeta,
 } from './session-store.js';
+import type { ChatEnvelope } from '../context/envelope.js';
 import type { AcpTurnOverlay } from '../store/chat-thread-store.js';
 import type { AssistantMessage, Context } from '@earendil-works/pi-ai';
 import type {
@@ -57,7 +59,6 @@ import type {
   AcpSessionUpdate,
 } from '@sediment/shared';
 import type {
-  AgentChatContext,
   AgentStreamEvent,
   AvailableCommand,
   ExternalAgentPrompt,
@@ -75,26 +76,6 @@ function mapStopReason(
   return 'stop';
 }
 
-/** Extract the plain-text payload Sediment will hand to `session/prompt`. */
-function extractText(
-  content: string | ReadonlyArray<{ type: string; text?: string }> | unknown,
-): string {
-  if (typeof content === 'string') return content;
-  if (Array.isArray(content)) {
-    return content
-      .filter(
-        (b): b is { type: 'text'; text: string } =>
-          !!b &&
-          typeof b === 'object' &&
-          (b as { type?: unknown }).type === 'text' &&
-          typeof (b as { text?: unknown }).text === 'string',
-      )
-      .map((b) => b.text)
-      .join('\n');
-  }
-  return '';
-}
-
 export interface RunAcpAgentOptions {
   /**
    * External binding for the active thread. `profileId` references a
@@ -104,8 +85,13 @@ export interface RunAcpAgentOptions {
    * `prepared_prompt` events.
    */
   binding: { alias: string; profileId: string };
-  /** Plain-text or content-block message to send (we extract text below). */
-  message: string | ReadonlyArray<{ type: string; text?: string }>;
+  /**
+   * This turn's structured envelope — the single source of truth shared
+   * with the built-in path. The preprocessor reads the user's text,
+   * selection, and neighbourhood from it, so the external prompt cannot
+   * drift from what the built-in serializer renders.
+   */
+  envelope: ChatEnvelope;
   /** Sediment thread id \u2014 used as the registry key. */
   threadId: string;
   /**
@@ -143,16 +129,21 @@ export interface RunAcpAgentOptions {
    * stranded at the filesystem root).
    */
   cwd?: string;
-  /**
-   * Optional canvas context (selected nodes, etc.) used by the
-   * preprocessor to build a focused prompt for the external agent.
-   * When omitted, the preprocessor still runs but with no
-   * canvas-aware fileRefs hints.
-   */
-  canvasContext?: AgentChatContext;
   /** Cancellation signal \u2014 wired through to `session/cancel`. */
   signal?: AbortSignal;
   logger: FastifyBaseLogger;
+  /**
+   * Optional developer aid: when present (and `HUABU_DEBUG_PROMPT` is
+   * set), dump the serialized text payload handed to ACP. Mirrors the
+   * built-in path's {@link AgentRunOptions.debugPrompt} so both
+   * backends surface a comparable prompt log.
+   */
+  debugPrompt?: {
+    turnNumber: number;
+    threadId: string;
+    mode: string;
+    logger: FastifyBaseLogger;
+  };
 }
 
 // ─── Session lifecycle helper ─────────────────────────────────────────────
@@ -1102,10 +1093,12 @@ function readNullableString(v: unknown): string | null | undefined {
 export async function* runAcpAgent(
   opts: RunAcpAgentOptions,
 ): AsyncGenerator<AgentStreamEvent> {
-  const { binding, threadId, context, canvasContext, signal, logger, overlay } =
-    opts;
+  const { binding, threadId, context, signal, logger, overlay } = opts;
   const canvasId = opts.canvasId ?? '';
-  const rawText = extractText(opts.message);
+  // Verbatim user text for the fallback payload + slash detection. The
+  // preprocessor derives the same value from the envelope; we keep a
+  // local copy only for the raw-text fallback below.
+  const rawText = opts.envelope.user.text;
 
   // 1-2. Ensure (open or reuse) the per-thread ACP session. The helper
   //      handles connection lookup, stale-entry eviction, initialize +
@@ -1137,9 +1130,8 @@ export async function* runAcpAgent(
   let includedSystem = false;
   try {
     const result = prepareExternalAgentPrompt({
-      rawText,
+      envelope: opts.envelope,
       agentAlias: binding.alias,
-      canvasContext,
       includeSystem: !entry.systemPreambleSent,
       logger,
     });
@@ -1153,6 +1145,25 @@ export async function* runAcpAgent(
       '[acp] preprocessor failed — falling back to raw user text',
     );
     promptPayload = serializeRawPrompt(rawText);
+  }
+
+  // Optional developer aid: dump the exact text payload handed to ACP
+  // `session/prompt` (the deterministic serialized prompt, NOT pi-ai
+  // messages — the external agent keeps its own session history). No-op
+  // unless HUABU_DEBUG_PROMPT is set.
+  if (opts.debugPrompt) {
+    dumpAssembledPrompt({
+      systemPrompt: '',
+      messages: [
+        { role: 'user', content: promptPayload, timestamp: Date.now() },
+      ],
+      newMessageCount: 1,
+      turnNumber: opts.debugPrompt.turnNumber,
+      threadId: opts.debugPrompt.threadId,
+      canvasId: canvasId || null,
+      mode: opts.debugPrompt.mode,
+      logger: opts.debugPrompt.logger,
+    });
   }
 
   // Persist a sidecar marker on the user's history slot so chat

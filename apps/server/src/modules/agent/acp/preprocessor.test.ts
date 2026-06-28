@@ -12,8 +12,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { prepareExternalAgentPrompt, serializePrompt } from './preprocessor.js';
+import { buildAgentNodeRef } from '../node-ref.js';
 
-import type { ExternalAgentPrompt, WireSelectionNode } from '@sediment/shared';
+import type { ChatEnvelope } from '../context/envelope.js';
+import type { CanvasNodeType, ExternalAgentPrompt } from '@sediment/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
 /** Minimal logger stub — only `debug` is exercised. */
@@ -23,6 +25,36 @@ const logger = {
   warn: vi.fn(),
   error: vi.fn(),
 } as unknown as FastifyBaseLogger;
+
+/**
+ * Build a minimal {@link ChatEnvelope} for preprocessor tests. Only the
+ * fields the ACP serializer reads (`user.text`, `focus.selection.refs`,
+ * `preamble.nodeNeighbourhood`) carry meaningful values; the rest are
+ * inert defaults so the envelope type-checks.
+ */
+function makeEnvelope(opts: {
+  text: string;
+  selection?: { id: string; type: CanvasNodeType; label?: string }[];
+  neighbourhood?: string;
+}): ChatEnvelope {
+  return {
+    preamble: opts.neighbourhood
+      ? { nodeNeighbourhood: opts.neighbourhood }
+      : {},
+    user: { text: opts.text, attachments: [] },
+    skills: { invokedIds: [], resolved: [] },
+    focus: {
+      selection: {
+        refs: (opts.selection ?? []).map((n) =>
+          buildAgentNodeRef({ id: n.id, type: n.type, label: n.label }),
+        ),
+        selectedIds: (opts.selection ?? []).map((n) => n.id),
+        imageAttachments: [],
+        snapshotAttachments: [],
+      },
+    },
+  };
+}
 
 describe('serializePrompt', () => {
   it('emits the verbatim task and no Selected Nodes section when nothing is selected', () => {
@@ -96,7 +128,7 @@ describe('serializePrompt', () => {
 describe('prepareExternalAgentPrompt', () => {
   it('forwards slash commands verbatim and never includes the system preamble', () => {
     const result = prepareExternalAgentPrompt({
-      rawText: '/compact please',
+      envelope: makeEnvelope({ text: '/compact please' }),
       agentAlias: 'claude',
       includeSystem: true,
       logger,
@@ -112,20 +144,16 @@ describe('prepareExternalAgentPrompt', () => {
     expect(result.includedSystem).toBe(false);
   });
 
-  it('builds selectedNodes from the (flattened) selection', () => {
-    const selectedNodes: WireSelectionNode[] = [
-      {
-        id: 'frame-1',
-        type: 'frame',
-        label: 'Group',
-        children: [{ id: 'child-1', type: 'note', label: 'Child' }],
-      },
-    ];
-
+  it('builds selectedNodes from the envelope selection refs', () => {
     const result = prepareExternalAgentPrompt({
-      rawText: 'do something',
+      envelope: makeEnvelope({
+        text: 'do something',
+        selection: [
+          { id: 'frame-1', type: 'frame', label: 'Group' },
+          { id: 'child-1', type: 'note', label: 'Child' },
+        ],
+      }),
       agentAlias: 'claude',
-      canvasContext: { selectedNodes },
       logger,
     });
 
@@ -140,7 +168,7 @@ describe('prepareExternalAgentPrompt', () => {
 
   it('includes the system preamble on the first turn when includeSystem is set', () => {
     const result = prepareExternalAgentPrompt({
-      rawText: 'first message',
+      envelope: makeEnvelope({ text: 'first message' }),
       agentAlias: 'claude',
       includeSystem: true,
       logger,
@@ -158,12 +186,57 @@ describe('prepareExternalAgentPrompt', () => {
 
   it('omits systemPreamble from the structured prompt when includeSystem is unset', () => {
     const result = prepareExternalAgentPrompt({
-      rawText: 'later message',
+      envelope: makeEnvelope({ text: 'later message' }),
       agentAlias: 'claude',
       logger,
     });
 
     expect(result.includedSystem).toBe(false);
     expect(result.prompt.systemPreamble).toBeUndefined();
+  });
+
+  it('renders a Canvas Neighbourhood section when the envelope carries one', () => {
+    const neighbourhood =
+      '### Canvas Level\n\n**to the left** (2 nodes):\n- "sketch-a" [sketch]';
+
+    const result = prepareExternalAgentPrompt({
+      envelope: makeEnvelope({ text: 'generate an image', neighbourhood }),
+      agentAlias: 'claude',
+      logger,
+    });
+
+    expect(result.prompt.neighbourhood).toBe(neighbourhood);
+    expect(result.serialized).toContain('## Canvas Neighbourhood');
+    expect(result.serialized).toContain('**to the left** (2 nodes):');
+    // The user's request still leads the prompt; neighbourhood follows.
+    expect(result.serialized.indexOf('generate an image')).toBeLessThan(
+      result.serialized.indexOf('## Canvas Neighbourhood'),
+    );
+  });
+
+  it('omits the Canvas Neighbourhood section when the envelope has none', () => {
+    const result = prepareExternalAgentPrompt({
+      envelope: makeEnvelope({ text: 'plain request' }),
+      agentAlias: 'claude',
+      logger,
+    });
+
+    expect(result.prompt.neighbourhood).toBeUndefined();
+    expect(result.serialized).not.toContain('## Canvas Neighbourhood');
+  });
+
+  it('drops the neighbourhood for slash-command short-circuits', () => {
+    const result = prepareExternalAgentPrompt({
+      envelope: makeEnvelope({
+        text: '/compact now',
+        neighbourhood: '### Canvas Level\n\n- "x" [note]',
+      }),
+      agentAlias: 'claude',
+      includeSystem: true,
+      logger,
+    });
+
+    expect(result.prompt).toEqual({ task: '/compact now', selectedNodes: [] });
+    expect(result.serialized).toBe('/compact now');
   });
 });

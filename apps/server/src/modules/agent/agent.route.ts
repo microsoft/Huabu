@@ -22,11 +22,7 @@ import { loadAgent } from '../../prompt/index.js';
 import { runAcpAgent } from '../agent/acp/service.js';
 import { runAgent } from '../agent/agent.service.js';
 import { projectUserVisibleAttachments } from '../agent/context/attachment-visibility.js';
-import {
-  rebuildContextMessages,
-  renderEnvelopeMessages,
-} from '../agent/context/chat-turn.js';
-import { dumpAssembledPrompt } from '../agent/context/debug-prompt.js';
+import { rebuildContextMessages } from '../agent/context/chat-turn.js';
 import { buildChatEnvelope } from '../agent/context/envelope.js';
 import { getLLMModel } from '../agent/llm.js';
 import { readWorkspaceMemory } from '../agent/memory/index.js';
@@ -374,28 +370,28 @@ function buildHistoryFromTurns(
   messages: ChatHistoryItem[],
 ): void {
   for (const turn of turns) {
-    const env = turn.envelope;
+    const envelope = turn.envelope;
 
     // 1. User item, straight from the structured envelope.
     const allAttachments = [
-      ...env.user.attachments,
-      ...env.focus.selection.imageAttachments,
-      ...env.focus.selection.snapshotAttachments,
+      ...envelope.user.attachments,
+      ...envelope.focus.selection.imageAttachments,
+      ...envelope.focus.selection.snapshotAttachments,
     ];
     const attachments = projectUserVisibleAttachments(
       allAttachments,
-      env.focus.selection.selectedIds,
+      envelope.focus.selection.selectedIds,
     );
-    const selectedNodeIds = env.focus.selection.selectedIds;
-    const invokedSkills = env.skills.invokedIds;
+    const selectedNodeIds = envelope.focus.selection.selectedIds;
+    const invokedSkills = envelope.skills.invokedIds;
     if (
-      env.user.text.trim() ||
+      envelope.user.text.trim() ||
       attachments.length > 0 ||
       selectedNodeIds.length > 0
     ) {
       messages.push({
         role: 'user',
-        content: env.user.text,
+        content: envelope.user.text,
         ...(attachments.length > 0 && {
           attachments: attachments as ChatAttachment[],
         }),
@@ -842,16 +838,17 @@ const agentRoutes: FastifyPluginAsync = async (
       systemPrompt,
       messages: await rebuildContextMessages(priorTurns, {
         canvasId: canvasId ?? null,
-        agentCfg,
       }),
       tools: [],
     };
 
     // Build this turn's structured envelope (memory pre-read, auto-
-    // snapshot, skill resolution, neighbourhood render) and render it
-    // into the per-turn user messages the agent sees. The envelope is
-    // what we persist; the rendered messages are transient.
-    const env = await buildChatEnvelope({
+    // snapshot, skill resolution, neighbourhood render). The envelope is
+    // what we persist AND dispatch; it is rendered into the per-turn
+    // user message INSIDE the dispatch layer (runAgent / runAcpAgent),
+    // so both backends share one render timing and the route never bakes
+    // it into `context.messages`.
+    const envelope = await buildChatEnvelope({
       content,
       attachments,
       selectedNodes: canvasContext?.selectedNodes,
@@ -860,33 +857,26 @@ const agentRoutes: FastifyPluginAsync = async (
       canvasId: canvasId ?? null,
       logger: request.log,
     });
-    const { messages: userMessages, userContent } =
-      await renderEnvelopeMessages(env, {
-        canvasId: canvasId ?? null,
-        agentCfg,
-      });
-    context.messages.push(...userMessages);
-    // Index where this turn's transcript begins: everything the agent
-    // appends from here on (assistant / tool / status rows) is the
-    // transcript we persist alongside the envelope.
+
+    // Index where this turn's transcript begins: `context.messages`
+    // currently holds prior history only, so everything the dispatch
+    // layer appends from here on (assistant / tool / status rows) is the
+    // transcript we persist alongside the envelope. The rendered user
+    // message is intentionally excluded — it is re-derived from the
+    // envelope on reload, never duplicated into the transcript.
     const transcriptStart = context.messages.length;
 
-    // Optional developer aid: when HUABU_DEBUG_PROMPT is set, dump the
-    // fully-assembled prompt (system prompt + every message) to a
-    // per-thread, turn-separated log file. No-op otherwise; never throws.
-    dumpAssembledPrompt({
-      systemPrompt: context.systemPrompt ?? '',
-      messages: context.messages,
-      newMessageCount: userMessages.length,
+    // Debug-prompt metadata, forwarded to the dispatch layer (which now
+    // owns the assembled messages). No-op unless HUABU_DEBUG_PROMPT is set.
+    const debugPrompt = {
       turnNumber: priorTurns.length + 1,
       threadId: resolvedThreadId,
-      canvasId: canvasId ?? null,
       mode:
         agentBinding?.kind === 'external'
           ? `external:${agentBinding.alias}`
           : mode,
       logger: request.log,
-    });
+    };
 
     // SSE streaming
     reply.hijack();
@@ -923,7 +913,7 @@ const agentRoutes: FastifyPluginAsync = async (
     // folded into the persisted turn record below.
     const acpOverlay = emptyAcpOverlay();
     const buildTurnRecord = (): ChatTurnRecord => ({
-      envelope: env,
+      envelope,
       transcript: context.messages.slice(transcriptStart),
       ...(Object.keys(acpOverlay.toolExtras).length > 0 && {
         toolExtras: acpOverlay.toolExtras,
@@ -1009,22 +999,24 @@ const agentRoutes: FastifyPluginAsync = async (
                 alias: agentBinding.alias,
                 profileId: agentBinding.profileId,
               },
-              message: userContent,
+              envelope,
               threadId: resolvedThreadId,
               canvasId,
               context,
               overlay: acpOverlay,
-              canvasContext,
               signal: abortController.signal,
               logger: request.log,
+              debugPrompt,
             })
           : runAgent({
               scope: mode,
               canvasId,
               context,
+              envelope,
               logger: request.log,
               maxIterations: 20,
               signal: abortController.signal,
+              debugPrompt,
             });
 
       // Track the latest agent error so we can persist it AFTER the stream

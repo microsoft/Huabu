@@ -40,14 +40,9 @@
  */
 
 import { renderPromptFile } from '../../../prompt/index.js';
-import { buildAgentNodeRef } from '../node-ref.js';
 
-import type { AgentNodeRef } from '../node-ref.js';
-import type {
-  AgentChatContext,
-  ExternalAgentPrompt,
-  WireSelectionNode,
-} from '@sediment/shared';
+import type { ChatEnvelope } from '../context/envelope.js';
+import type { ExternalAgentPrompt } from '@sediment/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
 // ─── Constants ────────────────────────────────────────────────────────────
@@ -74,12 +69,17 @@ const SYSTEM_TEMPLATE = 'external-agent/system_prompt.md';
 // ─── Public API ───────────────────────────────────────────────────────────
 
 export interface PreparePromptInput {
-  /** Raw user text Sediment is about to send via ACP `session/prompt`. */
-  rawText: string;
+  /**
+   * This turn's structured envelope — the single source of truth for
+   * the user's text, node selection, and neighbourhood. The ACP
+   * serializer reads from it exactly as the built-in serializer
+   * (`renderEnvelopeMessages`) does, so the two backends cannot drift:
+   * any field added to the envelope is available to both without
+   * per-field plumbing through the dispatch layers.
+   */
+  envelope: ChatEnvelope;
   /** Short alias of the bound external agent (e.g. `'claude'`). */
   agentAlias: string;
-  /** Canvas chat context for this turn (may be omitted when client didn't send one). */
-  canvasContext?: AgentChatContext;
   /**
    * Prepend the one-shot system preamble (persona + canvas-tool docs,
    * from `external-agent/system_prompt.md`) to this turn's prompt. Set
@@ -119,8 +119,14 @@ export interface PreparePromptResult {
 export function prepareExternalAgentPrompt(
   input: PreparePromptInput,
 ): PreparePromptResult {
-  const { rawText, agentAlias, canvasContext, includeSystem, logger } = input;
-
+  const { envelope, agentAlias, includeSystem, logger } = input;
+  // Verbatim user words — the ACP `task`. Sourced from the envelope so
+  // it matches what the built-in path renders. The built-in path may
+  // append an LLM-only sketch-raster hint that references built-in-only
+  // tools (`snapshot_nodes` / `generate_image`); that hint is
+  // intentionally absent here, as external agents fetch node content via
+  // reachback instead.
+  const rawText = envelope.user.text;
   // ── Slash-command short-circuit ────────────────────────────────────
   //
   // ACP agents recognise slash commands (`/<name> <args>`) natively
@@ -142,9 +148,12 @@ export function prepareExternalAgentPrompt(
     };
   }
 
-  const selectedRefs = canvasContext?.selectedNodes
-    ? flattenSelection(canvasContext.selectedNodes)
-    : [];
+  // Already-derived selection refs (frame children included) and
+  // neighbourhood markdown — read straight from the envelope rather than
+  // re-deriving from the raw wire selection, so ACP and the built-in
+  // agent observe the identical set by construction.
+  const selectedRefs = envelope.focus.selection.refs;
+  const neighbourhood = envelope.preamble.nodeNeighbourhood;
 
   const prompt: ExternalAgentPrompt = {
     task: rawText.trim(),
@@ -153,6 +162,10 @@ export function prepareExternalAgentPrompt(
       type: ref.type,
       ...(ref.label ? { label: ref.label } : {}),
     })),
+    // Canvas neighbourhood (spatial context around an anchor node) when
+    // the turn carried one — same source as the built-in agent's
+    // node-neighbourhood preamble, so both backends agree.
+    ...(neighbourhood ? { neighbourhood } : {}),
     // On the first turn of a fresh session we also carry the rendered
     // system preamble so the UI can show the complete prompt the agent
     // saw. The serialized wire text below prepends the same block.
@@ -216,11 +229,16 @@ export function serializePrompt(
 
   const userBlock = renderPromptFile(USER_TEMPLATE, {
     task: prompt.task.trim(),
-    // Conditional-block flag: any non-empty string keeps the block.
+    // Conditional-block flag: any non-empty string keeps the block. The
+    // intro prose lives in the template itself (static — no need to
+    // round-trip it through TS); only the data-driven flag + table are
+    // injected here.
     selectedNodes: hasNodes ? '1' : '',
-    selectedNodesIntro:
-      'The user selected the canvas nodes below. Read any you need with the Huabu Reachback Tool (`read-node <node-id>`); update them with `write-node --id <node-id>`.',
     selectedNodesTable,
+    // Conditional-block flag + body for the spatial neighbourhood; the
+    // intro prose is likewise inlined in the template.
+    neighbourhood: prompt.neighbourhood ? '1' : '',
+    neighbourhoodBody: prompt.neighbourhood ?? '',
   });
 
   if (!opts.includeSystem) return userBlock;
@@ -251,19 +269,6 @@ export function serializeRawPrompt(rawText: string): string {
 }
 
 // ─── Internals ────────────────────────────────────────────────────────────
-
-/** Flatten the wire selection (frame children included) into AgentNodeRefs. */
-function flattenSelection(nodes: WireSelectionNode[]): AgentNodeRef[] {
-  const refs: AgentNodeRef[] = [];
-  const walk = (list: WireSelectionNode[]) => {
-    for (const n of list) {
-      refs.push(buildAgentNodeRef({ id: n.id, type: n.type, label: n.label }));
-      if (n.children) walk(n.children);
-    }
-  };
-  walk(nodes);
-  return refs;
-}
 
 /** Escape pipe / newline chars so a label can't break the markdown table. */
 function escapeCell(s: string): string {

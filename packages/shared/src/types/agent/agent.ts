@@ -170,6 +170,14 @@ export interface ExternalAgentPrompt {
    * Carried here so the UI can render the *complete* prompt the agent saw.
    */
   systemPreamble?: string;
+  /**
+   * Canvas neighbourhood markdown for an anchored request — the spatial
+   * map of nodes around the anchor (directions, clusters, connections,
+   * and short previews). Mirrors the built-in agent's node-neighbourhood
+   * preamble so both backends see the same surrounding-node context.
+   * Absent for non-anchored turns.
+   */
+  neighbourhood?: string;
 }
 
 /**

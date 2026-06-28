@@ -17,7 +17,6 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { isSketchRasterAttachment } from './attachment-visibility.js';
-import { renderAgentTemplate } from '../../../prompt/index.js';
 import {
   ARTIFACT_URL_REGEX,
   resolveArtifactImageUrl,
@@ -25,7 +24,6 @@ import {
 import { getCanvasStore } from '../../storage/index.js';
 
 import type { ChatEnvelope } from './envelope.js';
-import type { LoadedAgent } from '../../../prompt/index.js';
 import type { ChatTurnRecord, PiMessage } from '../store/chat-thread-store.js';
 import type { ChatAttachment } from '@sediment/shared';
 
@@ -197,12 +195,10 @@ async function resolveImageUrl(
 }
 
 /** pi-ai user-message content: text and/or vision parts. */
-type UserContent =
-  | string
-  | Array<
-      | { type: 'text'; text: string }
-      | { type: 'image'; data: string; mimeType: string }
-    >;
+type ContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image'; data: string; mimeType: string };
+type UserContent = string | ContentPart[];
 
 /**
  * If `attachments` includes pre-snapshotted sketch artifacts, build a
@@ -226,19 +222,11 @@ function buildSketchRasterHint(
 }
 
 /**
- * Append the LLM-only `[SYSTEM hint:…]` directive to the user content.
- * This is the only render-time `[SYSTEM]` metadata tag still consumed
- * by anyone (the model); selection / skills / attachments are NOT
- * re-encoded — history reload reads them straight from the envelope.
- */
-function appendHintTag(content: UserContent, hint: string): UserContent {
-  const tag = `\n[SYSTEM hint:${hint}]`;
-  if (typeof content === 'string') return `${content}${tag}`;
-  return [...content, { type: 'text', text: tag }];
-}
-
-/**
- * Build a pi-ai user message content array, supporting text + images.
+ * Resolve a turn's attachments into pi-ai content parts (text excerpts
+ * + base64 vision images). Unlike the former `buildUserContent`, this
+ * returns ONLY the attachment-derived parts — the user's own text is
+ * composed separately by {@link renderEnvelopeMessages} so it can be
+ * placed last, after every context section.
  *
  * Attachment types handled:
  *  - image  → resolve URL to base64 and include as vision input
@@ -247,17 +235,11 @@ function appendHintTag(content: UserContent, hint: string): UserContent {
  *  - file   → use content if available, otherwise try reading from artifact
  *  - web    → inline content as text part
  */
-async function buildUserContent(
-  text: string,
-  attachments: ChatAttachment[] | undefined,
+async function buildAttachmentParts(
+  attachments: ChatAttachment[],
   canvasId: string | null,
-): Promise<UserContent> {
-  if (!attachments || attachments.length === 0) return text;
-
-  const parts: Array<
-    | { type: 'text'; text: string }
-    | { type: 'image'; data: string; mimeType: string }
-  > = [{ type: 'text', text }];
+): Promise<ContentPart[]> {
+  const parts: ContentPart[] = [];
 
   for (const att of attachments) {
     const label = att.label ?? att.filename ?? 'attachment';
@@ -434,124 +416,167 @@ async function buildUserContent(
 }
 
 /**
- * Render a {@link ChatEnvelope} into the ordered pi-ai user messages
- * for one turn, WITHOUT touching any `Context`. This is the one place
- * the pi-ai-specific `[SYSTEM …]` encoding and base64 vision-part
- * resolution live. It is used both to build the current turn's
- * messages and to rebuild historical turns from their persisted
- * envelopes (the structured-persistence path), so the `[SYSTEM …]`
- * encoding is never the source of truth on disk.
- *
- * Canonical order:
- *   1. selected-node reference preamble
- *   2. node-neighbourhood preamble (anchored requests)
- *   3. user-invoked skill bodies
- *   4. the user's message (with selection / skill / attachment tags)
- *
- * Returns the rendered messages plus the final tagged user-message
- * content (the ACP dispatch path consumes the latter).
+ * Render the per-turn context sections (selected nodes, neighbourhood,
+ * invoked skills) into a single XML-tagged text block, or `undefined`
+ * when the turn carries none. Each section is wrapped in its own tag so
+ * the model can parse the boundaries unambiguously; the user's own
+ * words are intentionally NOT included here — the caller appends them
+ * last (see {@link renderEnvelopeMessages}).
  */
-export async function renderEnvelopeMessages(
-  env: ChatEnvelope,
-  opts: { canvasId: string | null; agentCfg: LoadedAgent },
-): Promise<{ messages: PiMessage[]; userContent: UserContent }> {
-  const { canvasId, agentCfg } = opts;
-  const messages: PiMessage[] = [];
+function buildContextSections(env: ChatEnvelope): string | undefined {
+  const blocks: string[] = [];
 
-  // Merge the off-canvas uploads with selection-derived vision parts.
-  // Order matches the legacy assembly: uploads, deduped selection
-  // images, then composite snapshots. `undefined` when all empty so
-  // `buildUserContent` short-circuits to a plain string.
-  const { imageAttachments, snapshotAttachments } = env.focus.selection;
-  const allAttachments =
-    env.user.attachments.length > 0 ||
-    imageAttachments.length > 0 ||
-    snapshotAttachments.length > 0
-      ? [...env.user.attachments, ...imageAttachments, ...snapshotAttachments]
-      : undefined;
-
-  let userContent = await buildUserContent(
-    env.user.text,
-    allAttachments,
-    canvasId ?? null,
-  );
-
-  // 2. Selected-node reference preamble. Each entry carries
-  // { id, type, label?, filename } — `filename` is pre-computed so the
-  // agent can `read` it verbatim. Richer detail is fetched on demand.
+  // Selected-node references. Each entry carries { id, type, label?,
+  // filename } — `filename` is pre-computed so the agent can `read` it
+  // verbatim; richer detail is one tool call away.
   if (env.focus.selection.refs.length > 0) {
-    messages.push({
-      role: 'user',
-      content: renderAgentTemplate(agentCfg, 'selectedNodesPreamble', {
-        refsJson: JSON.stringify(env.focus.selection.refs, null, 2),
-      }),
-      timestamp: Date.now(),
-    });
+    blocks.push(
+      [
+        '<selected_nodes>',
+        'Nodes the user selected. Pass `filename` straight to read() for full content; use `id` with inspect_nodes() for layout / style / spatial relations.',
+        JSON.stringify(env.focus.selection.refs, null, 2),
+        '</selected_nodes>',
+      ].join('\n'),
+    );
   }
 
-  // 3. Node-neighbourhood preamble (anchored requests only).
+  // Node-neighbourhood context for anchored requests (e.g. question
+  // nodes). Lets the agent resolve references like "this" / "the one
+  // above" against the surrounding canvas.
   if (env.preamble.nodeNeighbourhood) {
-    messages.push({
-      role: 'user',
-      content: renderAgentTemplate(agentCfg, 'nodeNeighbourhoodPreamble', {
-        spatial: env.preamble.nodeNeighbourhood,
-      }),
-      timestamp: Date.now(),
-    });
+    blocks.push(
+      [
+        '<canvas_neighbourhood>',
+        'The user\'s request was anchored at a node on the canvas. Use this neighbourhood to disambiguate references like "this", "the one above", or implicit pronouns.',
+        env.preamble.nodeNeighbourhood,
+        '</canvas_neighbourhood>',
+      ].join('\n'),
+    );
   }
 
-  // 4. User-invoked skill bodies. The agent treats these as
-  // authoritative for this turn — distinct from the on-demand
-  // catalogue surface where the model decides whether to `read()`.
+  // User-invoked skill bodies — authoritative for this turn, distinct
+  // from the on-demand catalogue the model may `read()` itself.
   if (env.skills.resolved.length > 0) {
-    const sections = env.skills.resolved
+    const quotedIds = env.skills.resolved.map((s) => `"${s.id}"`).join(', ');
+    const intro =
+      env.skills.resolved.length === 1
+        ? `The user explicitly invoked the ${quotedIds} skill. Apply its guidance to this turn.`
+        : `The user explicitly invoked the ${quotedIds} skills. Apply their guidance to this turn.`;
+    const skillTags = env.skills.resolved
       .map(
         (s) =>
           `<skill id="${s.id}" name="${s.name}">\n${s.body.trimEnd()}\n</skill>`,
       )
-      .join('\n\n');
-    const quotedIds = env.skills.resolved.map((s) => `"${s.id}"`).join(', ');
-    const header =
-      env.skills.resolved.length === 1
-        ? `[SYSTEM Skill — the user explicitly invoked ${quotedIds}. Apply its guidance to this turn.]`
-        : `[SYSTEM Skills — the user explicitly invoked ${quotedIds}. Apply their guidance to this turn.]`;
-    messages.push({
-      role: 'user',
-      content: `${header}\n\n${sections}`,
-      timestamp: Date.now(),
+      .join('\n');
+    blocks.push(
+      ['<invoked_skills>', intro, skillTags, '</invoked_skills>'].join('\n'),
+    );
+  }
+
+  return blocks.length > 0 ? blocks.join('\n') : undefined;
+}
+
+/**
+ * Render a {@link ChatEnvelope} into the per-turn pi-ai user message,
+ * WITHOUT touching any `Context`. Used both to build the current turn's
+ * message and to rebuild historical turns from their persisted
+ * envelopes (the structured-persistence path), so the rendered shape is
+ * never the source of truth on disk.
+ *
+ * A turn now collapses to a SINGLE user message (previously up to four
+ * separate user messages). Its content is laid out as:
+ *   1. an XML context block (`<selected_nodes>`, `<canvas_neighbourhood>`,
+ *      `<invoked_skills>`) — present only when the turn carries any;
+ *   2. attachment parts (text excerpts + base64 vision images);
+ *   3. the user's own words last, wrapped in `<user_request>` (with the
+ *      LLM-only sketch-raster hint appended when present).
+ *
+ * When the turn has no context sections and no attachments, the message
+ * is just the user's plain text — no XML scaffolding for the common case.
+ *
+ * Returns an array of zero or one message: empty only when the turn is
+ * entirely empty (no text, attachments, selection, or skills), which the
+ * caller treats as "nothing to render".
+ */
+export async function renderEnvelopeMessages(
+  env: ChatEnvelope,
+  opts: { canvasId: string | null },
+): Promise<{ messages: PiMessage[] }> {
+  const { canvasId } = opts;
+
+  // Merge the off-canvas uploads with selection-derived vision parts.
+  // Order matches the legacy assembly: uploads, deduped selection
+  // images, then composite snapshots.
+  const { imageAttachments, snapshotAttachments } = env.focus.selection;
+  const allAttachments = [
+    ...env.user.attachments,
+    ...imageAttachments,
+    ...snapshotAttachments,
+  ];
+
+  const contextSections = buildContextSections(env);
+  const attachmentParts =
+    allAttachments.length > 0
+      ? await buildAttachmentParts(allAttachments, canvasId ?? null)
+      : [];
+
+  // The user's own words go last. The only render-time metadata still
+  // appended is the LLM-only sketch-raster hint ("reuse the
+  // pre-snapshotted rasters, don't re-call snapshot_nodes"). Selection /
+  // skills / attachments are NOT re-encoded here — history reload reads
+  // them straight from the stored envelope.
+  const hint = buildSketchRasterHint(allAttachments);
+  const userText = hint
+    ? `${env.user.text}\n[SYSTEM hint:${hint}]`
+    : env.user.text;
+
+  // Empty turn → nothing to render.
+  if (
+    !env.user.text.trim() &&
+    attachmentParts.length === 0 &&
+    !contextSections
+  ) {
+    return { messages: [] };
+  }
+
+  // Common case: plain text only, no context sections, no attachments.
+  // Skip the XML scaffolding entirely.
+  let content: UserContent;
+  if (!contextSections && attachmentParts.length === 0) {
+    content = userText;
+  } else {
+    const parts: ContentPart[] = [];
+    if (contextSections) parts.push({ type: 'text', text: contextSections });
+    parts.push(...attachmentParts);
+    parts.push({
+      type: 'text',
+      text: `<user_request>\n${userText}\n</user_request>`,
     });
+    content = parts;
   }
 
-  // 5. The user's message. The only render-time `[SYSTEM]` metadata
-  // tag still consumed by anyone is the LLM-only sketch-raster hint
-  // ("reuse the pre-snapshotted rasters, don't re-call
-  // snapshot_nodes"). Selection / skills / attachments are NOT
-  // re-encoded here — history reload reads them straight from the
-  // stored envelope.
-  const hint = buildSketchRasterHint(allAttachments ?? []);
-  if (hint) {
-    userContent = appendHintTag(userContent, hint);
-  }
-  messages.push({
-    role: 'user',
-    content: userContent,
-    timestamp: Date.now(),
-  });
-
-  return { messages, userContent };
+  return {
+    messages: [
+      {
+        role: 'user',
+        content,
+        timestamp: Date.now(),
+      },
+    ],
+  };
 }
 
 /**
  * Rebuild the flat pi-ai message array for a thread from its stored
  * turns: re-serialise each turn's envelope into the canonical user
- * messages, then append that turn's persisted assistant/tool
- * transcript. This is how the structured-persistence path reconstructs
- * the `Context.messages` the agent runs over, so the `[SYSTEM …]`
- * encoding never has to be the source of truth on disk.
+ * message, then append that turn's persisted assistant/tool transcript.
+ * This is how the structured-persistence path reconstructs the
+ * `Context.messages` the agent runs over, so the rendered shape never
+ * has to be the source of truth on disk.
  */
 export async function rebuildContextMessages(
   turns: readonly ChatTurnRecord[],
-  opts: { canvasId: string | null; agentCfg: LoadedAgent },
+  opts: { canvasId: string | null },
 ): Promise<PiMessage[]> {
   const out: PiMessage[] = [];
   for (const turn of turns) {
