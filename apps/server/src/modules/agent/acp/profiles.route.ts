@@ -82,6 +82,20 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
           code: 'validation_failed',
         });
       }
+      // Validate: either command+cwd or agentTeam must be provided
+      const isAgentTeam = parsed.data.cliId === 'agent-team';
+      if (isAgentTeam && !parsed.data.agentTeam?.agentDir) {
+        return reply.status(400).send({
+          message: 'agentTeam.agentDir is required for agent-team profiles',
+          code: 'validation_failed',
+        });
+      }
+      if (!isAgentTeam && (!parsed.data.command || !parsed.data.cwd)) {
+        return reply.status(400).send({
+          message: 'command and cwd are required for non-agent-team profiles',
+          code: 'validation_failed',
+        });
+      }
       const now = Date.now();
       const profile: AcpAgentProfile = {
         id: randomUUID(),
@@ -92,6 +106,7 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
         command: parsed.data.command,
         cwd: parsed.data.cwd,
         autoRestart: parsed.data.autoRestart ?? true,
+        ...(parsed.data.agentTeam && { agentTeam: parsed.data.agentTeam }),
         createdAt: now,
         updatedAt: now,
       };
@@ -130,6 +145,9 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
       ...(parsed.data.cwd !== undefined && { cwd: parsed.data.cwd }),
       ...(parsed.data.autoRestart !== undefined && {
         autoRestart: parsed.data.autoRestart,
+      }),
+      ...(parsed.data.agentTeam !== undefined && {
+        agentTeam: parsed.data.agentTeam,
       }),
       updatedAt: Date.now(),
     });

@@ -521,6 +521,7 @@ async function ensureAcpSessionInner(
         cwd: profile.cwd,
         autoRestart: profile.autoRestart,
         alias: profile.displayName,
+        ...(profile.agentTeam && { agentTeam: profile.agentTeam }),
       };
     }
   }
@@ -530,7 +531,7 @@ async function ensureAcpSessionInner(
       `External agent '${binding.alias}' is no longer configured. Re-create the profile in Settings → External Agents, or start a new chat with another agent.`,
     );
   }
-  const cwd = opts.cwd ?? recipe.cwd;
+  const cwd = opts.cwd ?? recipe.cwd ?? recipe.agentTeam?.agentDir ?? '';
 
   const server = getAgentletServer();
   if (!server) {

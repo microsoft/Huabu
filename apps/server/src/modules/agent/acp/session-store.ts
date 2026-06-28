@@ -92,10 +92,14 @@ const ACP_SESSION_STORE_SCHEMA_VERSION = 3;
  * — used purely for UI / log labelling.
  */
 export interface AcpBindingRecipe {
-  command: string;
-  cwd: string;
+  command?: string;
+  cwd?: string;
   autoRestart: boolean;
   alias: string;
+  agentTeam?: {
+    agentDir: string;
+    harness?: string;
+  };
 }
 
 /**
@@ -200,9 +204,28 @@ function isRecord(value: unknown): value is AcpSessionRecord {
 function sanitizeBindingRecipe(raw: unknown): AcpBindingRecipe | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const r = raw as Record<string, unknown>;
+  if (typeof r.alias !== 'string') return undefined;
+
+  // Agent Team recipe — requires agentTeam.agentDir
+  if (r.agentTeam && typeof r.agentTeam === 'object') {
+    const at = r.agentTeam as Record<string, unknown>;
+    if (typeof at.agentDir === 'string' && at.agentDir.length > 0) {
+      return {
+        autoRestart: r.autoRestart === true,
+        alias: r.alias,
+        agentTeam: {
+          agentDir: at.agentDir,
+          ...(typeof at.harness === 'string' && at.harness.length > 0
+            ? { harness: at.harness }
+            : {}),
+        },
+      };
+    }
+  }
+
+  // Standard recipe — requires command + cwd
   if (typeof r.command !== 'string' || r.command.length === 0) return undefined;
   if (typeof r.cwd !== 'string') return undefined;
-  if (typeof r.alias !== 'string') return undefined;
   return {
     command: r.command,
     cwd: r.cwd,
