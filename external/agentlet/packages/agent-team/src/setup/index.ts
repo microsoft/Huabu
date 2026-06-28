@@ -4,7 +4,10 @@
 
 export { runSetup } from './run-setup.js';
 export { readManifest } from './manifest.js';
+export { HARNESS_REGISTRY } from './harness-registry.js';
+export type { HarnessInfo } from './harness-registry.js';
 export {
+  getHarnessInfo,
   isHarnessInstalled,
   detectInstalledHarnesses,
   getPromptTarget,

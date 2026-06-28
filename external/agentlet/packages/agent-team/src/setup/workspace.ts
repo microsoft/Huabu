@@ -29,13 +29,12 @@ export function isWorkspaceReady(workspaceDir: string): boolean {
  * harness-specific prompt convention.
  *
  * @param promptFile - relative path to the prompt file within packageDir
- *                     (defaults to 'system_prompt.md')
  */
 export function distributePrompt(
   packageDir: string,
   workspaceDir: string,
   harness: string,
-  promptFile: string = 'system_prompt.md',
+  promptFile: string,
 ): void {
   const promptSource = join(packageDir, promptFile);
   if (!existsSync(promptSource)) {
@@ -43,7 +42,11 @@ export function distributePrompt(
   }
 
   const target = getPromptTarget(harness);
-  const targetDir = join(workspaceDir, target.path);
+  if (!target) {
+    return;
+  }
+
+  const targetDir = join(workspaceDir, target.dir);
   mkdirSync(targetDir, { recursive: true });
 
   const content = readFileSync(promptSource, 'utf8');

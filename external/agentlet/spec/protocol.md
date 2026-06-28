@@ -123,9 +123,9 @@ For the full control message schemas (`server/spawn`, `server/stop`, `server/lis
 **Agent Team resolution:** If `sessionSpec.agentTeam` is present (containing `agentDir` and optionally `harness`), the agentlet resolves the concrete spawn parameters from the Agent Team package before proceeding with the normal spawn flow:
 
 1. Read `agentlet.yaml` from `agentDir`
-2. Determine harness — explicit `harness` field, or first entry in `supported_harnesses`, or `"default"`
+2. Determine harness — explicit `harness` field, or the first key in `command`
 3. Validate that `workspaces/<harness>/` exists (reject with error if not)
-4. Resolve `command` from the manifest (string or per-harness map)
+4. Resolve `command` from the manifest
 5. Set `cwd` to `agentDir/workspaces/<harness>/`
 6. Load `.env` from `agentDir` and merge: daemon defaults < `.env` < `sessionSpec.env`
 
@@ -408,4 +408,3 @@ discoverable to agents via the corresponding `${ENV_VAR}` path — no absolute
 paths cross the wire. See the [Agent Reachback Interface](agent-reachback.md)
 for how this composes into the full tool-distribution + environment contract,
 and [`SendResourceParams`](../packages/protocol/src/messages.ts) for the type.
-

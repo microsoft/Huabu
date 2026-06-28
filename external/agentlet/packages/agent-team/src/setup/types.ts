@@ -7,26 +7,27 @@ export interface AgentTeamManifest {
   schema: string;
   name: string;
   description: string;
-  command: string | Record<string, string>;
-  /** Harness-agnostic CLI tools to install via npm. */
-  tools?: string[];
-  /** Skill paths to install via `npx skills add`. */
-  skills?: string[];
-  /** Path to the canonical system prompt file (relative to package root). */
-  system_prompt?: string;
+  command: Record<string, string>;
+  /** Declarative requirements to materialize in each workspace. */
+  require?: {
+    /** Harness-agnostic CLI tools to install via npm. */
+    'cli-tools'?: string[];
+    /** Canonical prompt files relative to the package root. */
+    prompts?: string[];
+    /** Skill paths to install via `npx skills add`. */
+    skills?: string[];
+  };
   /** Path to a custom setup script (relative to package root), dynamically imported after the declarative pipeline. */
   onInstall?: string;
-  /** Harnesses this package supports. Setup prepares a workspace for each. */
-  supported_harnesses?: string[];
 }
 
 /** Known harness identifiers. */
-export type HarnessName = 'claude' | 'copilot' | 'codex' | 'pi' | (string & {});
+export type HarnessName = 'claude' | 'copilot' | 'codex' | (string & {});
 
 /** Prompt file target for a given harness. */
 export interface HarnessPromptTarget {
-  /** Relative path within the workspace where the prompt file should be placed. */
-  path: string;
+  /** Relative directory within the workspace where the prompt file should be placed. */
+  dir: string;
   /** Filename for the prompt file. */
   filename: string;
 }

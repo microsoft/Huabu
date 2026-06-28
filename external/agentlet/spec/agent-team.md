@@ -52,7 +52,7 @@ Typical authored layout:
 ```text
 <agent-team>/
   agentlet.yaml        ← declarative manifest
-  system_prompt.md     ← canonical prompt (placed by setup utility)
+  system_prompt.md     ← canonical prompt (referenced from require.prompts)
   .env                 ← runtime secrets (not committed)
   .env.example         ← template for .env
   skills/              ← optional local skills
@@ -95,18 +95,17 @@ schema: agentlet-agent-schema-v1
 name: hackmd-publisher
 description: Syncs canvas nodes to HackMD
 
-supported_harnesses:
-  - claude
-  - copilot
-
 command:
   claude: claude --acp
   copilot: copilot --acp
 
-tools:
-  - hackmd-cli
-
-system_prompt: system_prompt.md
+require:
+  cli-tools:
+    - hackmd-cli
+  prompts:
+    - system_prompt.md
+  skills:
+    - ./skills/huabu-read
 ```
 
 ### 4.2 Fields
@@ -116,19 +115,18 @@ system_prompt: system_prompt.md
 | `schema` | `string` | yes | Manifest schema version. Current value: `agentlet-agent-schema-v1`. |
 | `name` | `string` | yes | Stable package name. |
 | `description` | `string` | yes | Human-readable summary. |
-| `command` | `string \| Record<string, string>` | yes | Command used to launch the agent process over ACP stdio. May be generic or per-harness. |
-| `tools` | `string[]` | no | npm packages to install in the workspace (e.g., `hackmd-cli`). |
-| `skills` | `string[]` | no | Skill paths to install via `npx skills add --agent <harness>`. May be relative paths (resolved against package root) or npm package names. |
-| `system_prompt` | `string` | no | Path to the canonical prompt file (relative to package root). Default: `system_prompt.md`. Placed at the harness-specific location during setup. |
+| `command` | `Record<string, string>` | yes | Command used to launch the agent process over ACP stdio. The keys implicitly define the supported harnesses. |
+| `require` | `{ cli-tools?: string[]; prompts?: string[]; skills?: string[] }` | no | Declarative setup requirements: npm CLI tools, prompt files, and skills to materialize in each workspace. |
 | `onInstall` | `string` | no | Path to a custom setup script (relative to package root). Dynamically imported after the declarative pipeline. Must export a default async function. |
-| `supported_harnesses` | `string[]` | no | Harnesses this package supports. When present, `setup` (without `--harness`) prepares a workspace for each. Also used for auto-detection of installed harnesses. |
 
 ### 4.3 `command`
 
 `command` is the runtime launch command.
 
-- If it is a string, the same command is used for all harnesses.
-- If it is a map, each selected harness resolves to its own command.
+- It is always a map of `harness -> command`.
+- The map keys are the supported harnesses for the package.
+- If no `--harness` is specified, setup/resolve uses the first command key (or
+  auto-detects from the installed known harnesses during setup).
 
 The daemon reads this field at spawn time to determine what process to launch.
 
@@ -136,19 +134,25 @@ The daemon reads this field at spawn time to determine what process to launch.
 
 The `@agentlet/agent-team` CLI processes these manifest fields in order:
 
-1. **`tools`** — installs npm packages in the workspace (`npm install <pkg>`)
-2. **`skills`** — installs skills via `npx skills add <path> --agent <harness>`,
-   using a built-in harness→agent mapping (e.g., `claude` → `claude`,
-   `copilot` → `github-copilot`)
-3. **`system_prompt`** — copies the prompt file to the harness-specific
+1. **`require.cli-tools`** — installs npm packages in the workspace (`npm install <pkg>`)
+2. **`require.skills`** — installs skills via `npx skills add <path> --agent <agent>`,
+   using the harness registry's `skillsAgent` mapping (e.g., `claude` →
+   `claude-code`, `copilot` → `github-copilot`)
+3. **`require.prompts`** — places the first prompt file at the harness-specific
    location (e.g., `CLAUDE.md` for Claude, `.github/copilot-instructions.md`
    for Copilot)
 4. **`onInstall`** — if declared, dynamically imports and runs the script
    after the above steps complete
 
-Most agent teams need only `tools`, `skills`, and `system_prompt`. The
-`onInstall` script is for truly custom logic beyond what the declarative fields
-cover (generating config files, fetching external data, etc.).
+Unknown harness keys are allowed in `command`, but they are treated as
+best-effort during setup: the CLI still installs `require.cli-tools` and runs
+`onInstall`, but skips skills installation and prompt placement because those
+need harness-specific registry entries.
+
+Most agent teams need only `require.cli-tools`, `require.skills`, and
+`require.prompts`. The `onInstall` script is for truly custom logic beyond what
+the declarative fields cover (generating config files, fetching external data,
+etc.).
 
 ### 4.5 `onInstall` Script Contract
 
@@ -251,13 +255,13 @@ harness-agnostic.
 | `claude` | `CLAUDE.md` |
 | `copilot` | `.github/copilot-instructions.md` |
 | `codex` | `AGENTS.md` |
-| _(unknown)_ | `system_prompt.md` (fallback) |
+| _(unknown)_ | skipped (no registry entry) |
 
 ### 6.2 Skills Agent Mapping
 
 | Harness | `--agent` value for `npx skills add` |
 |---|---|
-| `claude` | `claude` |
+| `claude` | `claude-code` |
 | `copilot` | `github-copilot` |
 | `codex` | `codex` |
 
@@ -333,5 +337,5 @@ internally. The host only needs to know:
 - **callback API**: `(harness, workspaceDir, ctx)` where `ctx = { packageDir, manifest, harness, workspaceDir, log }`
 - **package name**: `@agentlet/agent-team`
 - **setup entry point**: `@agentlet/agent-team` CLI is the primary entry point; per-package `agent-setup.mjs` is optional
-- **declarative setup**: `tools`, `skills`, `system_prompt` in manifest; `onInstall` for custom logic
+- **declarative setup**: `require.cli-tools`, `require.skills`, `require.prompts` in manifest; `onInstall` for custom logic
 - **SessionSpec variant**: nested `agentTeam?: { agentDir, harness? }` field on existing `SessionSpec`

@@ -4,30 +4,22 @@
 
 import { execFileSync } from 'node:child_process';
 import type { HarnessName, HarnessPromptTarget } from './types.js';
+import {
+  HARNESS_REGISTRY,
+  type HarnessInfo,
+} from './harness-registry.js';
 
-/** Map of harness name to its CLI binary. */
-const HARNESS_BINARIES: Record<string, string> = {
-  claude: 'claude',
-  copilot: 'copilot',
-  codex: 'codex',
-  pi: 'pi',
-};
-
-/**
- * Prompt file conventions per harness.
- * Each harness discovers its system prompt from a different file/location.
- */
-const PROMPT_TARGETS: Record<string, HarnessPromptTarget> = {
-  claude: { path: '.', filename: 'CLAUDE.md' },
-  copilot: { path: '.github', filename: 'copilot-instructions.md' },
-  codex: { path: '.', filename: 'AGENTS.md' },
-  // pi uses CLAUDE.md convention for now
-  pi: { path: '.', filename: 'CLAUDE.md' },
-};
+/** Get the registered harness info, if known. */
+export function getHarnessInfo(harness: string): HarnessInfo | undefined {
+  return HARNESS_REGISTRY[harness];
+}
 
 /** Check whether a harness CLI is available on PATH. */
 export function isHarnessInstalled(harness: HarnessName): boolean {
-  const binary = HARNESS_BINARIES[harness] ?? harness;
+  const binary = getHarnessInfo(harness)?.binary;
+  if (!binary) {
+    return false;
+  }
   try {
     execFileSync('which', [binary], { stdio: 'ignore' });
     return true;
@@ -41,9 +33,9 @@ export function detectInstalledHarnesses(candidates: string[]): string[] {
   return candidates.filter(isHarnessInstalled);
 }
 
-/** Get the prompt file target for a harness. Falls back to root-level system_prompt.md. */
-export function getPromptTarget(harness: string): HarnessPromptTarget {
-  return (
-    PROMPT_TARGETS[harness] ?? { path: '.', filename: 'system_prompt.md' }
-  );
+/** Get the prompt file target for a harness, if the harness is known. */
+export function getPromptTarget(
+  harness: string,
+): HarnessPromptTarget | undefined {
+  return getHarnessInfo(harness)?.prompt;
 }

@@ -25,7 +25,7 @@ export interface ResolvedSpawn {
  * Resolve an Agent Team reference into concrete spawn parameters.
  *
  * 1. Read agentlet.yaml from agentDir
- * 2. Determine harness (explicit > first supported > 'default')
+ * 2. Determine harness (explicit > first command key)
  * 3. Validate workspace exists
  * 4. Resolve command from manifest
  * 5. Load .env if present
@@ -62,20 +62,24 @@ function resolveHarness(
   requested: string | undefined,
   manifest: AgentTeamManifest,
 ): string {
+  const harnesses = Object.keys(manifest.command);
+  if (harnesses.length === 0) {
+    throw new Error('No harness commands defined in agentlet.yaml');
+  }
+
   if (requested) {
+    if (!harnesses.includes(requested)) {
+      throw new Error(
+        `Harness "${requested}" is not defined in agentlet.yaml. Available: [${harnesses.join(', ')}]`,
+      );
+    }
     return requested;
   }
-  if (manifest.supported_harnesses && manifest.supported_harnesses.length > 0) {
-    return manifest.supported_harnesses[0];
-  }
-  return 'default';
+  return harnesses[0];
 }
 
 /** Resolve the command string from the manifest for a given harness. */
 function resolveCommand(manifest: AgentTeamManifest, harness: string): string {
-  if (typeof manifest.command === 'string') {
-    return manifest.command;
-  }
   const cmd = manifest.command[harness];
   if (!cmd) {
     throw new Error(

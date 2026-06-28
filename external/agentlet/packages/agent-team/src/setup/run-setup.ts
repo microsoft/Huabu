@@ -13,7 +13,11 @@ import { existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseSetupArgs } from './cli.js';
-import { detectInstalledHarnesses, getPromptTarget } from './harness.js';
+import {
+  detectInstalledHarnesses,
+  getHarnessInfo,
+  getPromptTarget,
+} from './harness.js';
 import { readManifest } from './manifest.js';
 import type { AgentTeamManifest, CallbackContext, SetupCallbacks, SetupLogger } from './types.js';
 import {
@@ -37,51 +41,61 @@ function createLogger(): SetupLogger {
  * Resolve which harnesses to process.
  *
  * - If `--harness` is given, use that (validated against manifest).
- * - Otherwise, use all supported harnesses from manifest.
- * - If no supported_harnesses in manifest, use 'default'.
+ * - Otherwise, use the harnesses declared in manifest.command.
+ * - Prefer installed harnesses when auto-detecting.
  */
 function resolveHarnesses(
-  manifest: { supported_harnesses?: string[] },
+  manifest: Pick<AgentTeamManifest, 'command'>,
   requestedHarness: string | undefined,
   log: SetupLogger,
 ): string[] {
+  const declaredHarnesses = Object.keys(manifest.command);
+  if (declaredHarnesses.length === 0) {
+    throw new Error('No harness commands defined in agentlet.yaml');
+  }
+
   if (requestedHarness) {
-    if (
-      manifest.supported_harnesses &&
-      !manifest.supported_harnesses.includes(requestedHarness)
-    ) {
+    if (!declaredHarnesses.includes(requestedHarness)) {
       throw new Error(
-        `Harness "${requestedHarness}" is not in supported_harnesses: [${manifest.supported_harnesses.join(', ')}]`,
+        `Harness "${requestedHarness}" is not defined in command: [${declaredHarnesses.join(', ')}]`,
       );
     }
     return [requestedHarness];
   }
 
-  if (manifest.supported_harnesses && manifest.supported_harnesses.length > 0) {
-    const installed = detectInstalledHarnesses(manifest.supported_harnesses);
-    if (installed.length === 0) {
-      log.warn(
-        `None of the supported harnesses are installed: [${manifest.supported_harnesses.join(', ')}]`,
-      );
-      log.info('Use --harness <name> to prepare for a specific harness anyway');
-      return manifest.supported_harnesses;
-    }
-    return installed;
+  const installed = detectInstalledHarnesses(declaredHarnesses);
+  if (installed.length === 0) {
+    log.warn(`None of the declared harnesses are installed: [${declaredHarnesses.join(', ')}]`);
+    log.info('Use --harness <name> to prepare for a specific harness anyway');
+    return declaredHarnesses;
   }
 
-  return ['default'];
+  return installed;
 }
 
 // ── Declarative pipeline steps ─────────────────────────────────────────
 
-/** Install CLI tools declared in manifest.tools via npm. */
+function getRequiredCliTools(manifest: AgentTeamManifest): string[] {
+  return manifest.require?.['cli-tools'] ?? [];
+}
+
+function getRequiredSkills(manifest: AgentTeamManifest): string[] {
+  return manifest.require?.skills ?? [];
+}
+
+function getRequiredPrompts(manifest: AgentTeamManifest): string[] {
+  return manifest.require?.prompts ?? [];
+}
+
+/** Install CLI tools declared in manifest.require['cli-tools'] via npm. */
 function installTools(
   manifest: AgentTeamManifest,
   workspaceDir: string,
   log: SetupLogger,
 ): void {
-  if (!manifest.tools || manifest.tools.length === 0) return;
-  log.info(`Installing tools: ${manifest.tools.join(', ')}`);
+  const cliTools = getRequiredCliTools(manifest);
+  if (cliTools.length === 0) return;
+  log.info(`Installing tools: ${cliTools.join(', ')}`);
 
   // Ensure package.json exists so npm install works
   const pkgJson = join(workspaceDir, 'package.json');
@@ -89,22 +103,12 @@ function installTools(
     execSync('npm init -y --silent', { cwd: workspaceDir, stdio: 'pipe' });
   }
 
-  const pkgs = manifest.tools.join(' ');
+  const pkgs = cliTools.join(' ');
   execSync(`npm install ${pkgs}`, { cwd: workspaceDir, stdio: 'inherit' });
   log.success('Tools installed');
 }
 
-/**
- * Skills agent name mapping for `npx skills add --agent <name>`.
- * See https://github.com/vercel-labs/skills#supported-agents
- */
-const SKILLS_AGENT_MAP: Record<string, string> = {
-  claude: 'claude',
-  copilot: 'github-copilot',
-  codex: 'codex',
-};
-
-/** Install skills declared in manifest.skills via `npx skills add`. */
+/** Install skills declared in manifest.require.skills via `npx skills add`. */
 function installSkills(
   manifest: AgentTeamManifest,
   harness: string,
@@ -112,14 +116,22 @@ function installSkills(
   packageDir: string,
   log: SetupLogger,
 ): void {
-  if (!manifest.skills || manifest.skills.length === 0) return;
-  const agentName = SKILLS_AGENT_MAP[harness] ?? harness;
-  log.info(`Installing skills for agent "${agentName}": ${manifest.skills.join(', ')}`);
+  const skills = getRequiredSkills(manifest);
+  if (skills.length === 0) return;
 
-  for (const skill of manifest.skills) {
+  const harnessInfo = getHarnessInfo(harness);
+  if (!harnessInfo) {
+    return;
+  }
+
+  log.info(
+    `Installing skills for agent "${harnessInfo.skillsAgent}": ${skills.join(', ')}`,
+  );
+
+  for (const skill of skills) {
     // Resolve relative skill paths against packageDir
     const skillPath = skill.startsWith('.') ? resolve(packageDir, skill) : skill;
-    execSync(`npx skills add ${skillPath} --agent ${agentName}`, {
+    execSync(`npx skills add ${skillPath} --agent ${harnessInfo.skillsAgent}`, {
       cwd: workspaceDir,
       stdio: 'inherit',
     });
@@ -135,20 +147,29 @@ function placeSystemPrompt(
   harness: string,
   log: SetupLogger,
 ): void {
-  // Use manifest.system_prompt if declared, otherwise fall back to convention
-  const promptFile = manifest.system_prompt ?? 'system_prompt.md';
+  const prompts = getRequiredPrompts(manifest);
+  const promptFile = prompts[0];
+  if (!promptFile) {
+    return;
+  }
+
+  const harnessInfo = getHarnessInfo(harness);
+  if (!harnessInfo) {
+    return;
+  }
+
   const promptSource = resolve(packageDir, promptFile);
 
   if (!existsSync(promptSource)) {
-    if (manifest.system_prompt) {
-      log.warn(`Declared system_prompt not found: ${promptSource}`);
-    }
+    log.warn(`Declared prompt not found: ${promptSource}`);
     return;
   }
 
   distributePrompt(packageDir, workspaceDir, harness, promptFile);
   const target = getPromptTarget(harness);
-  log.success(`Prompt placed at ${target.path}/${target.filename}`);
+  if (target) {
+    log.success(`Prompt placed at ${target.dir}/${target.filename}`);
+  }
 }
 
 /**
@@ -197,8 +218,15 @@ async function runUnpack(
   for (const harness of harnesses) {
     log.info(`Preparing workspace for "${harness}"...`);
     const workspaceDir = resolveWorkspaceDir(packageDir, harness);
+    const harnessInfo = getHarnessInfo(harness);
 
     createWorkspace(workspaceDir);
+
+    if (!harnessInfo) {
+      log.warn(
+        `Unknown harness '${harness}', skipping prompt placement and skills installation`,
+      );
+    }
 
     // Declarative pipeline: tools → skills → prompt
     installTools(manifest, workspaceDir, log);
@@ -287,9 +315,15 @@ async function runDoctor(
   log.info(`Package:      ${manifest.name}`);
   log.info(`Schema:       ${manifest.schema}`);
   log.info(`Harnesses:    ${harnesses.join(', ')}`);
-  if (manifest.tools?.length) log.info(`Tools:        ${manifest.tools.join(', ')}`);
-  if (manifest.skills?.length) log.info(`Skills:       ${manifest.skills.join(', ')}`);
-  if (manifest.system_prompt) log.info(`Prompt:       ${manifest.system_prompt}`);
+  if (getRequiredCliTools(manifest).length) {
+    log.info(`CLI tools:    ${getRequiredCliTools(manifest).join(', ')}`);
+  }
+  if (getRequiredSkills(manifest).length) {
+    log.info(`Skills:       ${getRequiredSkills(manifest).join(', ')}`);
+  }
+  if (getRequiredPrompts(manifest).length) {
+    log.info(`Prompts:      ${getRequiredPrompts(manifest).join(', ')}`);
+  }
   if (manifest.onInstall) log.info(`Custom setup: ${manifest.onInstall}`);
   console.log();
 
@@ -299,11 +333,7 @@ async function runDoctor(
 
     console.log(`  [${harness}]`);
     log.info(`  Workspace: ${ready ? '✔ ready' : '✖ not prepared'}`);
-
-    const command =
-      typeof manifest.command === 'string'
-        ? manifest.command
-        : manifest.command[harness];
+    const command = manifest.command[harness];
     log.info(`  Command:   ${command ?? '(not defined for this harness)'}`);
 
     if (callbacks.onDoctor && ready) {

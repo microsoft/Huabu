@@ -46,50 +46,67 @@ function validateManifest(
     errors.push('`description` is required and must be a non-empty string');
   }
 
-  if (doc.supported_harnesses !== undefined) {
-    if (
-      !Array.isArray(doc.supported_harnesses) ||
-      !doc.supported_harnesses.every((h: unknown) => typeof h === 'string')
-    ) {
-      errors.push('`supported_harnesses` must be an array of strings');
-    }
-  }
-
   if (doc.command === undefined) {
     errors.push('`command` is required');
-  } else if (typeof doc.command !== 'string' && typeof doc.command !== 'object') {
-    errors.push('`command` must be a string or a map of harness → command');
   } else if (
-    typeof doc.command === 'object' &&
-    !Object.values(doc.command as Record<string, unknown>).every(
-      (v) => typeof v === 'string',
-    )
+    typeof doc.command !== 'object' ||
+    doc.command === null ||
+    Array.isArray(doc.command)
   ) {
-    errors.push('`command` map values must all be strings');
-  }
-
-  // Declarative setup fields
-  if (doc.tools !== undefined) {
+    errors.push('`command` must be a map of harness → command');
+  } else {
+    const commandEntries = Object.entries(doc.command as Record<string, unknown>);
+    if (commandEntries.length === 0) {
+      errors.push('`command` must define at least one harness');
+    }
     if (
-      !Array.isArray(doc.tools) ||
-      !doc.tools.every((t: unknown) => typeof t === 'string')
+      commandEntries.some(
+        ([key, value]) => key.trim() === '' || typeof value !== 'string',
+      )
     ) {
-      errors.push('`tools` must be an array of strings');
+      errors.push(
+        '`command` map keys must be non-empty strings and values must all be strings',
+      );
     }
   }
 
-  if (doc.skills !== undefined) {
+  if (doc.require !== undefined) {
     if (
-      !Array.isArray(doc.skills) ||
-      !doc.skills.every((s: unknown) => typeof s === 'string')
+      typeof doc.require !== 'object' ||
+      doc.require === null ||
+      Array.isArray(doc.require)
     ) {
-      errors.push('`skills` must be an array of strings');
+      errors.push('`require` must be an object');
+    } else {
+      const requireDoc = doc.require as Record<string, unknown>;
+      const requireArrays = [
+        ['cli-tools', requireDoc['cli-tools']],
+        ['prompts', requireDoc.prompts],
+        ['skills', requireDoc.skills],
+      ] as const;
+
+      for (const [field, value] of requireArrays) {
+        if (
+          value !== undefined &&
+          (!Array.isArray(value) ||
+            !value.every((entry: unknown) => typeof entry === 'string'))
+        ) {
+          errors.push(`\`require.${field}\` must be an array of strings`);
+        }
+      }
     }
   }
 
-  if (doc.system_prompt !== undefined) {
-    if (typeof doc.system_prompt !== 'string') {
-      errors.push('`system_prompt` must be a string');
+  for (const deprecatedField of [
+    'tools',
+    'skills',
+    'system_prompt',
+    'supported_harnesses',
+  ] as const) {
+    if (deprecatedField in doc) {
+      errors.push(
+        `\`${deprecatedField}\` is no longer supported; use \`require\` and \`command\` keys instead`,
+      );
     }
   }
 
