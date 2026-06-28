@@ -69,10 +69,12 @@ pnpm install
 # @agentlet/agent-team is resolvable via pnpm workspace
 ```
 
-After that, any bundled agent-team can be set up with:
+After that, any bundled agent-team can be set up by running the command from
+inside its folder:
 
 ```bash
-agentlet agent-team setup agent-teams/<team-name> --harness claude
+cd agent-teams/<team-name>
+agentlet agent-team setup --harness claude
 ```
 
 > The global `agentlet` command forwards straight to the CLI (both
