@@ -2,9 +2,11 @@
  * Attachment → content-part renderer.
  *
  * Turns a turn's attachments (off-canvas uploads + node excerpts) into
- * the pi-ai content parts that sit inside the `<attachments>` block. The
- * user's own words are composed separately by the orchestrator
- * (`render-turn.ts`) so they land last, after every context section.
+ * the pi-ai content parts. The orchestrator (`render-turn.ts`) calls
+ * this once per provenance group and wraps each result in its own block
+ * (`<selected_nodes_visuals>` for selection, `<attachments>` for
+ * uploads). The user's own words are composed separately so they land
+ * last, after every context section.
  *
  * Output shape (one `<attachment>` element per item; image attachments
  * additionally contribute a base64 vision part):
@@ -33,7 +35,6 @@ import { resolveImageUrl, MAX_INLINE_IMAGE_BYTES } from './image-inlining.js';
 import { escapeXmlAttr } from './node-element.js';
 import { ARTIFACT_URL_REGEX } from '../../../artifact/utils.js';
 import { getCanvasStore } from '../../../storage/index.js';
-import { isSketchRasterAttachment } from '../attachment-chips.js';
 
 import type { ChatAttachment } from '@sediment/shared';
 
@@ -44,31 +45,13 @@ export type ContentPart =
 export type UserContent = string | ContentPart[];
 
 /**
- * If `attachments` includes pre-snapshotted sketch artifacts, build a
- * one-line directive pointing the agent at those urls so it does not
- * re-issue `snapshot_nodes` for the same node ids on this turn. Returns
- * `undefined` when there are no sketch-raster artifacts.
- */
-export function buildSketchRasterHint(
-  attachments: ChatAttachment[],
-): string | undefined {
-  const sketchRasters = attachments.filter(isSketchRasterAttachment);
-  if (sketchRasters.length === 0) return undefined;
-  const items = sketchRasters
-    .map((a) => {
-      const ids = a.originNodeIds ?? (a.originNodeId ? [a.originNodeId] : []);
-      const shortIds = ids.map((id) => id.slice(0, 13)).join(', ');
-      return shortIds ? `${a.url} (nodes: ${shortIds})` : a.url;
-    })
-    .join('; ');
-  return `pre-snapshotted sketch artifacts are ready for generate_image.referenceArtifactSrcs — pass these urls directly without re-calling snapshot_nodes for the same node ids: ${items}`;
-}
-
-/**
- * Resolve a turn's attachments into pi-ai content parts (text excerpts
+ * Resolve a list of attachments into pi-ai content parts (text excerpts
  * + base64 vision images). Returns ONLY the attachment-derived parts —
  * the user's own text is composed separately by the orchestrator so it
  * can be placed last, after every context section.
+ *
+ * Called once per provenance group by the orchestrator (selection-derived
+ * visuals vs off-canvas uploads) so each group lands in its own block.
  *
  * Attachment types handled:
  *  - image  → resolve URL to base64 and include as vision input

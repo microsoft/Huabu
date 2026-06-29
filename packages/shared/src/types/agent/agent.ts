@@ -195,9 +195,10 @@ export interface ExternalAgentPrompt {
    * excerpts, web captures, uploaded files). Unlike {@link selectedNodes},
    * these are NOT on the canvas, so the external agent cannot fetch them
    * via `read-node` — their textual content is therefore inlined into
-   * the prompt here. Image attachments cannot travel over the text-only
-   * ACP wire, so they are surfaced as a short locator note rather than
-   * pixels. Absent when the turn carried no attachments.
+   * the prompt here. Image attachments additionally ride as base64 ACP
+   * `image` content blocks (resolved separately), with a short locator
+   * note kept here for agents that don't accept images. Absent when the
+   * turn carried no attachments.
    */
   attachments?: Array<{
     /** Attachment kind (`text`, `web`, `pdf`, `file`, `image`). */

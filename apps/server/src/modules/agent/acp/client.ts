@@ -452,6 +452,10 @@ export class AcpAgentClient {
    * `session/request_permission` calls during this turn are surfaced to it
    * and suspended until {@link resolvePermission} answers (or a timeout /
    * abort cancels them). Without it, permission requests auto-allow.
+   *
+   * `images` are appended after the text as ACP `image` content blocks
+   * (base64 vision bytes); whether the agent consumes them depends on its
+   * advertised image capability.
    */
   async prompt(
     sessionId: string,
@@ -459,6 +463,7 @@ export class AcpAgentClient {
     onUpdate: SessionUpdateHandler,
     signal?: AbortSignal,
     onPermissionRequest?: PermissionNotifier,
+    images?: Array<{ mimeType: string; data: string }>,
   ): Promise<AcpPromptResult> {
     if (this._closed) throw new Error('AcpAgentClient is closed');
     if (this.updateHandlers.has(sessionId)) {
@@ -485,7 +490,14 @@ export class AcpAgentClient {
     try {
       const result = await this.sdk.prompt({
         sessionId,
-        prompt: [{ type: 'text', text }],
+        prompt: [
+          { type: 'text', text },
+          ...(images ?? []).map((img) => ({
+            type: 'image' as const,
+            data: img.data,
+            mimeType: img.mimeType,
+          })),
+        ],
       });
       return result as AcpPromptResult;
     } finally {

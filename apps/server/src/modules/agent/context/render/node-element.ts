@@ -20,7 +20,7 @@
  *   - `id`      — always; the addressable handle.
  *   - `type`    — always; the canvas node type.
  *   - `label`   — when the node has one.
- *   - `file`    — only when `includeFile` (the built-in agent reads by
+ *   - `file`    — only when `includeFileName` (the built-in agent reads by
  *                 the pre-computed `nodes/<file>.md` path; the external
  *                 agent reads by id, where that path would be a dead
  *                 reference).
@@ -51,7 +51,7 @@ export interface RenderableNode {
   id: string;
   type: string;
   label?: string;
-  /** Pre-computed `nodes/<safeLabel>.md`; only emitted when `includeFile`. */
+  /** Pre-computed `nodes/<safeLabel>.md`; only emitted when `includeFileName`. */
   filename?: string;
   /** Short preview line; emitted as the `preview` attribute when present. */
   preview?: string;
@@ -71,9 +71,9 @@ export interface RenderableNode {
  */
 export function renderAgentNodeList(
   nodes: readonly RenderableNode[],
-  opts: { includeFile?: boolean } = {},
+  opts: { includeFileName?: boolean } = {},
 ): string {
-  const includeFile = opts.includeFile ?? true;
+  const includeFileName = opts.includeFileName ?? true;
   return nodes
     .map((n) => {
       const preview = n.preview?.trim();
@@ -81,7 +81,9 @@ export function renderAgentNodeList(
         `id="${escapeXmlAttr(n.id)}"`,
         `type="${escapeXmlAttr(n.type)}"`,
         n.label ? `label="${escapeXmlAttr(n.label)}"` : '',
-        includeFile && n.filename ? `file="${escapeXmlAttr(n.filename)}"` : '',
+        includeFileName && n.filename
+          ? `file="${escapeXmlAttr(n.filename)}"`
+          : '',
         preview ? `preview="${escapeXmlAttr(preview)}"` : '',
       ]
         .filter(Boolean)

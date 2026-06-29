@@ -182,8 +182,19 @@ const CASES: Array<{ name: string; env: ChatEnvelope }> = [
     }),
   },
   {
-    name: 'slash command (ACP forwards verbatim)',
-    env: envelope({ text: '/review focus on security' }),
+    name: 'slash command (ACP leads with command, context appended)',
+    env: envelope({
+      text: '/review focus on security',
+      refs: [
+        {
+          id: 'node-aaaa',
+          type: 'note',
+          label: 'Risks',
+          filename: 'nodes/risks.md',
+          preview: 'supply chain, regulatory, fx',
+        },
+      ],
+    }),
   },
 ];
 
@@ -205,7 +216,7 @@ async function main(): Promise<void> {
       console.log(renderBuiltInContent(messages[0].content as never));
     }
 
-    const acp = prepareExternalAgentPrompt({
+    const acp = await prepareExternalAgentPrompt({
       envelope: env,
       agentAlias: 'claude',
       includeSystem: false,

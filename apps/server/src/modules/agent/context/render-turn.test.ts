@@ -89,7 +89,7 @@ describe('renderEnvelopeMessages', () => {
     expect(messages).toEqual([]);
   });
 
-  it('merges selection, neighbourhood, and skills into one ordered XML block with user text last', async () => {
+  it('orders skills, selection, and neighbourhood sections with user text last', async () => {
     const refs: AgentNodeRef[] = [
       { id: 'n1', type: 'note', label: 'First', filename: 'nodes/first.md' },
     ];
@@ -145,17 +145,17 @@ describe('renderEnvelopeMessages', () => {
     expect(flat).toContain('<invoked_skills>');
     expect(flat).toContain('<skill id="brainstorm" name="Brainstorm">');
 
-    // Order: selected_nodes → canvas_neighbourhood → invoked_skills.
+    // Order: invoked_skills → selected_nodes → canvas_neighbourhood.
+    expect(flat.indexOf('<invoked_skills>')).toBeLessThan(
+      flat.indexOf('<selected_nodes>'),
+    );
     expect(flat.indexOf('<selected_nodes>')).toBeLessThan(
       flat.indexOf('<canvas_neighbourhood>'),
-    );
-    expect(flat.indexOf('<canvas_neighbourhood>')).toBeLessThan(
-      flat.indexOf('<invoked_skills>'),
     );
 
     // The user's own words come LAST, wrapped in <user_request>.
     expect(flat).toContain('<user_request>\nsummarize these\n</user_request>');
-    expect(flat.indexOf('<invoked_skills>')).toBeLessThan(
+    expect(flat.indexOf('<canvas_neighbourhood>')).toBeLessThan(
       flat.indexOf('<user_request>'),
     );
   });
@@ -197,7 +197,7 @@ describe('renderEnvelopeMessages', () => {
     );
   });
 
-  it('appends the sketch-raster hint inside the user request', async () => {
+  it('places the sketch-raster hint with the selection visuals', async () => {
     const { messages } = await renderEnvelopeMessages(
       makeEnvelope({
         text: 'enhance this sketch',
@@ -216,10 +216,11 @@ describe('renderEnvelopeMessages', () => {
 
     expect(messages).toHaveLength(1);
     const flat = textOf(messages[0].content);
-    // The LLM-only hint rides inside the user_request, after the text.
-    expect(flat).toContain('<user_request>');
-    expect(flat).toContain('[SYSTEM hint:');
+    // The LLM-only hint rides inside the selection-visuals block, not uploads.
+    expect(flat).toContain('<selected_nodes_visuals>');
+    expect(flat).toContain('referenceArtifactSrcs');
     expect(flat).toContain('sketch-raster-abc.png');
+    expect(flat).not.toContain('[SYSTEM hint:');
   });
 });
 

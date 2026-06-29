@@ -171,8 +171,8 @@ describe('serializePrompt', () => {
 });
 
 describe('prepareExternalAgentPrompt', () => {
-  it('forwards slash commands verbatim and never includes the system preamble', () => {
-    const result = prepareExternalAgentPrompt({
+  it('forwards slash commands verbatim and never includes the system preamble', async () => {
+    const result = await prepareExternalAgentPrompt({
       envelope: makeEnvelope({ text: '/compact please' }),
       agentAlias: 'claude',
       includeSystem: true,
@@ -189,8 +189,8 @@ describe('prepareExternalAgentPrompt', () => {
     expect(result.includedSystem).toBe(false);
   });
 
-  it('builds selectedNodes from the envelope selection refs', () => {
-    const result = prepareExternalAgentPrompt({
+  it('builds selectedNodes from the envelope selection refs', async () => {
+    const result = await prepareExternalAgentPrompt({
       envelope: makeEnvelope({
         text: 'do something',
         selection: [
@@ -213,8 +213,8 @@ describe('prepareExternalAgentPrompt', () => {
     expect(result.includedSystem).toBe(false);
   });
 
-  it('includes the system preamble on the first turn when includeSystem is set', () => {
-    const result = prepareExternalAgentPrompt({
+  it('includes the system preamble on the first turn when includeSystem is set', async () => {
+    const result = await prepareExternalAgentPrompt({
       envelope: makeEnvelope({ text: 'first message' }),
       agentAlias: 'claude',
       includeSystem: true,
@@ -231,8 +231,8 @@ describe('prepareExternalAgentPrompt', () => {
     );
   });
 
-  it('omits systemPreamble from the structured prompt when includeSystem is unset', () => {
-    const result = prepareExternalAgentPrompt({
+  it('omits systemPreamble from the structured prompt when includeSystem is unset', async () => {
+    const result = await prepareExternalAgentPrompt({
       envelope: makeEnvelope({ text: 'later message' }),
       agentAlias: 'claude',
       logger,
@@ -242,7 +242,7 @@ describe('prepareExternalAgentPrompt', () => {
     expect(result.prompt.systemPreamble).toBeUndefined();
   });
 
-  it('renders a canvas-neighbourhood section when the envelope carries one', () => {
+  it('renders a canvas-neighbourhood section when the envelope carries one', async () => {
     const neighbourhood: NodeNeighbourhoodContext = {
       layers: [
         {
@@ -266,7 +266,7 @@ describe('prepareExternalAgentPrompt', () => {
       relevantEdges: [],
     };
 
-    const result = prepareExternalAgentPrompt({
+    const result = await prepareExternalAgentPrompt({
       envelope: makeEnvelope({ text: 'generate an image', neighbourhood }),
       agentAlias: 'claude',
       logger,
@@ -286,8 +286,8 @@ describe('prepareExternalAgentPrompt', () => {
     );
   });
 
-  it('omits the canvas-neighbourhood section when the envelope has none', () => {
-    const result = prepareExternalAgentPrompt({
+  it('omits the canvas-neighbourhood section when the envelope has none', async () => {
+    const result = await prepareExternalAgentPrompt({
       envelope: makeEnvelope({ text: 'plain request' }),
       agentAlias: 'claude',
       logger,
@@ -297,8 +297,8 @@ describe('prepareExternalAgentPrompt', () => {
     expect(result.serialized).not.toContain('<canvas_neighbourhood>');
   });
 
-  it('drops the neighbourhood for slash-command short-circuits', () => {
-    const result = prepareExternalAgentPrompt({
+  it('appends neighbourhood context after the slash command, never the preamble', async () => {
+    const result = await prepareExternalAgentPrompt({
       envelope: makeEnvelope({
         text: '/compact now',
         neighbourhood: {
@@ -323,12 +323,19 @@ describe('prepareExternalAgentPrompt', () => {
       logger,
     });
 
-    expect(result.prompt).toEqual({ task: '/compact now', selectedNodes: [] });
-    expect(result.serialized).toBe('/compact now');
+    expect(result.prompt.task).toBe('/compact now');
+    expect(result.prompt.neighbourhood).toBeDefined();
+    // The command must lead so ACP still recognises it; the
+    // neighbourhood is appended afterwards as supplementary context.
+    expect(result.serialized.startsWith('/compact now')).toBe(true);
+    expect(result.serialized).toContain('<canvas_neighbourhood>');
+    // No system preamble for slash turns, even when asked.
+    expect(result.serialized).not.toContain('## Canvas Tools (Reachback)');
+    expect(result.includedSystem).toBe(false);
   });
 
-  it('forwards off-canvas text uploads into the prompt attachments', () => {
-    const result = prepareExternalAgentPrompt({
+  it('forwards off-canvas text uploads into the prompt attachments', async () => {
+    const result = await prepareExternalAgentPrompt({
       envelope: makeEnvelope({
         text: 'use the attached excerpt',
         attachments: [
@@ -357,8 +364,8 @@ describe('prepareExternalAgentPrompt', () => {
     );
   });
 
-  it('reduces a content-less image upload to a locator note', () => {
-    const result = prepareExternalAgentPrompt({
+  it('reduces a content-less image upload to a locator note', async () => {
+    const result = await prepareExternalAgentPrompt({
       envelope: makeEnvelope({
         text: 'look at this',
         attachments: [
@@ -376,7 +383,9 @@ describe('prepareExternalAgentPrompt', () => {
 
     expect(result.prompt.attachments).toHaveLength(1);
     expect(result.prompt.attachments?.[0].content).toContain(
-      'not visible to this agent',
+      'sent as vision pixels',
     );
+    // No resolvable bytes for a blob: url, so no wire image block.
+    expect(result.images).toEqual([]);
   });
 });

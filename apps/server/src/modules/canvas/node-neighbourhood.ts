@@ -13,10 +13,10 @@
  *      loads the canvas, normalises geometry via the shared
  *      `buildSpatialBundle`, owns the preview-extraction policy
  *      (label > content[:120] > src), and feeds the algorithm.
- *   3. Renderer — `serializeNodeNeighbourhood(ctx, { includeFile })`
+ *   3. Renderer — `serializeNodeNeighbourhood(ctx, { includeFileName })`
  *      serialises the structured context into the XML block that sits
  *      inside `<canvas_neighbourhood>`. Each backend calls it with its
- *      own `includeFile` (built-in reads by path, ACP by id), so the two
+ *      own `includeFileName` (built-in reads by path, ACP by id), so the two
  *      stay in lock-step the same way `<selected_nodes>` does.
  *
  * Originally driven by question nodes (`useQuestionRunner` ships the
@@ -493,20 +493,20 @@ function minEdgeDistFromCluster(
  * Cross-group edges are listed under `<connections>` as `<edge>`
  * elements (both endpoints carry the node id plus a `*-label` hint).
  *
- * `opts.includeFile` is threaded straight to {@link renderAgentNodeList}:
+ * `opts.includeFileName` is threaded straight to {@link renderAgentNodeList}:
  * the built-in agent reads by the pre-computed `nodes/<file>.md` path
- * (`includeFile: true`), while the external/ACP agent reads by id
- * (`read-node <id>`, `includeFile: false`) where a virtual file path
+ * (`includeFileName: true`), while the external/ACP agent reads by id
+ * (`read-node <id>`, `includeFileName: false`) where a virtual file path
  * would be a dead reference. The two backends therefore serialize the
  * SAME structured context differently, mirroring `<selected_nodes>`.
  *
  * Kept separate from {@link getNodeNeighbourhood} so it can be
  * unit-tested without touching the canvas store, and so each backend can
- * pick its own `includeFile`.
+ * pick its own `includeFileName`.
  */
 export function serializeNodeNeighbourhood(
   ctx: NodeNeighbourhoodContext,
-  opts: { includeFile?: boolean } = {},
+  opts: { includeFileName?: boolean } = {},
 ): string {
   const blocks: string[] = [];
 
@@ -535,7 +535,9 @@ export function serializeNodeNeighbourhood(
       blocks.push(
         [
           `<group ${attrs}>`,
-          renderAgentNodeList(g.nodes, { includeFile: opts.includeFile }),
+          renderAgentNodeList(g.nodes, {
+            includeFileName: opts.includeFileName,
+          }),
           '</group>',
         ].join('\n'),
       );

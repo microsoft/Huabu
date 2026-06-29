@@ -14,145 +14,139 @@
  *   render/neighbourhood.ts  — `<canvas_neighbourhood>` block (anchor)
  *   render/invoked-skills.ts — `<invoked_skills>`       block
  *   render/attachments.ts    — `<attachment>` parts (+ vision images)
+ *   render/sketch-hint.ts    — sketch-raster reuse hint (selection)
  *   render/image-inlining.ts — image URL → base64 vision bytes
+ *   render/profile.ts        — per-backend switches (built-in / ACP)
  *
- * The final per-turn message is laid out as:
- *   1. an XML context block (selected nodes / neighbourhood / skills),
- *   2. an `<attachments>` block (text excerpts + base64 vision images),
- *   3. the user's own words last, wrapped in `<user_request>`.
- * When the turn carries no context and no attachments, the message is
- * just the user's plain text — no XML scaffolding for the common case.
+ * `renderTurn(env, profile)` builds the shared `ContentPart[]`; both
+ * backends call it and differ only by their {@link RenderProfile}.
+ * `renderEnvelopeMessages` wraps it for the built-in pi-ai path.
  */
 
-import {
-  buildAttachmentParts,
-  buildSketchRasterHint,
-} from './render/attachments.js';
+import { buildAttachmentParts } from './render/attachments.js';
 import { renderInvokedSkillsSection } from './render/invoked-skills.js';
 import { renderNeighbourhoodSection } from './render/neighbourhood.js';
+import { INTERNAL_PROFILE } from './render/profile.js';
 import { renderSelectedNodesSection } from './render/selected-nodes.js';
+import { renderSketchRasterHint } from './render/sketch-hint.js';
 
 import type { ChatEnvelope } from './envelope.js';
 import type { ContentPart, UserContent } from './render/attachments.js';
+import type { RenderProfile } from './render/profile.js';
 import type { ChatTurnRecord, PiMessage } from '../store/chat-thread-store.js';
 
 /**
- * Render the per-turn context sections (selected nodes, neighbourhood,
- * invoked skills) into a single XML-tagged text block, or `undefined`
- * when the turn carries none. Each section is wrapped in its own tag so
- * the model can parse the boundaries unambiguously; the user's own
- * words are intentionally NOT included here — the caller appends them
- * last (see {@link renderEnvelopeMessages}).
+ * Render a {@link ChatEnvelope} into a flat `ContentPart[]` (text +
+ * vision parts) per the backend {@link RenderProfile}. This is the
+ * single source of truth for per-turn composition; both backends call
+ * it and only differ by their profile. The built-in agent feeds the
+ * parts straight to pi-ai; the external/ACP adapter maps them onto its
+ * content-block wire. Returns an empty array when the turn has nothing.
  */
-function buildContextSections(env: ChatEnvelope): string | undefined {
-  const blocks = [
-    renderSelectedNodesSection(env.focus.selection.refs),
-    renderNeighbourhoodSection(env.preamble.neighbourhood),
-    renderInvokedSkillsSection(env.skills.resolved),
-  ].filter((block): block is string => Boolean(block));
+export async function renderTurn(
+  env: ChatEnvelope,
+  profile: RenderProfile,
+  opts: { canvasId: string | null },
+): Promise<ContentPart[]> {
+  const { canvasId } = opts;
+  const { imageAttachments, snapshotAttachments } = env.focus.selection;
+  const uploads = env.user.attachments;
+  const selection = [...imageAttachments, ...snapshotAttachments];
 
-  return blocks.length > 0 ? blocks.join('\n') : undefined;
+  const skillsSection = renderInvokedSkillsSection(env.skills.resolved);
+  const selectedNodesSection = renderSelectedNodesSection(
+    env.focus.selection.refs,
+    profile,
+  );
+  const neighbourhoodSection = renderNeighbourhoodSection(
+    env.preamble.neighbourhood,
+    profile,
+  );
+  const hasContext = Boolean(
+    skillsSection || selectedNodesSection || neighbourhoodSection,
+  );
+  const selectionParts =
+    profile.includeSelectionVisuals && selection.length > 0
+      ? await buildAttachmentParts(selection, canvasId ?? null)
+      : [];
+  const uploadParts =
+    uploads.length > 0
+      ? await buildAttachmentParts(uploads, canvasId ?? null)
+      : [];
+  const hint =
+    profile.includeSelectionVisuals && selectionParts.length > 0
+      ? renderSketchRasterHint(selection)
+      : undefined;
+  const userText = env.user.text;
+
+  // Empty turn → nothing to render.
+  if (
+    !userText.trim() &&
+    selectionParts.length === 0 &&
+    uploadParts.length === 0 &&
+    !hasContext
+  ) {
+    return [];
+  }
+
+  // Common case: bare text only.
+  if (!hasContext && selectionParts.length === 0 && uploadParts.length === 0) {
+    return [{ type: 'text', text: userText }];
+  }
+
+  const parts: ContentPart[] = [];
+  if (skillsSection) parts.push({ type: 'text', text: skillsSection });
+  if (selectedNodesSection) {
+    parts.push({ type: 'text', text: selectedNodesSection });
+  }
+  if (selectionParts.length > 0) {
+    const followUp =
+      profile.nodeReadVerb === 'read-node'
+        ? 'read-node <id> for more'
+        : 'read() / inspect_nodes() for more';
+    parts.push({
+      type: 'text',
+      text: `<selected_nodes_visuals>\nRenders of the selected canvas nodes. Each has an \`origin\` id — ${followUp}.${hint ? `\n${hint}` : ''}`,
+    });
+    parts.push(...selectionParts);
+    parts.push({ type: 'text', text: '</selected_nodes_visuals>' });
+  }
+  if (neighbourhoodSection) {
+    parts.push({ type: 'text', text: neighbourhoodSection });
+  }
+  if (uploadParts.length > 0) {
+    parts.push({
+      type: 'text',
+      text: '<attachments>\nThe user uploaded the content below to this turn (off-canvas, not on the canvas).',
+    });
+    parts.push(...uploadParts);
+    parts.push({ type: 'text', text: '</attachments>' });
+  }
+  const taskBlock = {
+    type: 'text' as const,
+    text: `<user_request>\n${userText}\n</user_request>`,
+  };
+  if (profile.leadWithTask) parts.unshift(taskBlock);
+  else parts.push(taskBlock);
+  return parts;
 }
 
 /**
  * Render a {@link ChatEnvelope} into the per-turn pi-ai user message,
- * WITHOUT touching any `Context`. Used both to build the current turn's
- * message and to rebuild historical turns from their persisted
- * envelopes (the structured-persistence path), so the rendered shape is
- * never the source of truth on disk.
- *
- * A turn collapses to a SINGLE user message. Its content is laid out as:
- *   1. an XML context block (`<selected_nodes>`, `<canvas_neighbourhood>`,
- *      `<invoked_skills>`) — present only when the turn carries any;
- *   2. an `<attachments>` block of `<attachment>` items (text excerpts +
- *      base64 vision images) — present only when the turn carries any;
- *   3. the user's own words last, wrapped in `<user_request>` (with the
- *      LLM-only sketch-raster hint appended when present).
- *
- * When the turn has no context sections and no attachments, the message
- * is just the user's plain text — no XML scaffolding for the common case.
- *
- * Returns an array of zero or one message: empty only when the turn is
- * entirely empty (no text, attachments, selection, or skills), which the
- * caller treats as "nothing to render".
+ * WITHOUT touching any `Context`. Wraps {@link renderTurn} with the
+ * built-in profile; the shape is never the source of truth on disk.
  */
 export async function renderEnvelopeMessages(
   env: ChatEnvelope,
   opts: { canvasId: string | null },
 ): Promise<{ messages: PiMessage[] }> {
-  const { canvasId } = opts;
-
-  // Merge the off-canvas uploads with selection-derived vision parts.
-  // Order matches the legacy assembly: uploads, deduped selection
-  // images, then composite snapshots.
-  const { imageAttachments, snapshotAttachments } = env.focus.selection;
-  const allAttachments = [
-    ...env.user.attachments,
-    ...imageAttachments,
-    ...snapshotAttachments,
-  ];
-
-  const contextSections = buildContextSections(env);
-  const attachmentParts =
-    allAttachments.length > 0
-      ? await buildAttachmentParts(allAttachments, canvasId ?? null)
-      : [];
-
-  // The user's own words go last. The only render-time metadata still
-  // appended is the LLM-only sketch-raster hint ("reuse the
-  // pre-snapshotted rasters, don't re-call snapshot_nodes"). Selection /
-  // skills / attachments are NOT re-encoded here — history reload reads
-  // them straight from the stored envelope.
-  const hint = buildSketchRasterHint(allAttachments);
-  const userText = hint
-    ? `${env.user.text}\n[SYSTEM hint:${hint}]`
-    : env.user.text;
-
-  // Empty turn → nothing to render.
-  if (
-    !env.user.text.trim() &&
-    attachmentParts.length === 0 &&
-    !contextSections
-  ) {
-    return { messages: [] };
-  }
-
-  // Common case: plain text only, no context sections, no attachments.
-  // Skip the XML scaffolding entirely.
-  let content: UserContent;
-  if (!contextSections && attachmentParts.length === 0) {
-    content = userText;
-  } else {
-    const parts: ContentPart[] = [];
-    if (contextSections) parts.push({ type: 'text', text: contextSections });
-    if (attachmentParts.length > 0) {
-      // Delimit the attachment parts with an <attachments> tag so the
-      // block is as unambiguously bounded as the other context sections.
-      // The opening / closing tags are their own text parts because the
-      // attachment list can interleave vision (image) parts that cannot
-      // carry inline markup.
-      parts.push({
-        type: 'text',
-        text: '<attachments>\nThe user attached the content below to this turn (off-canvas uploads and node excerpts).',
-      });
-      parts.push(...attachmentParts);
-      parts.push({ type: 'text', text: '</attachments>' });
-    }
-    parts.push({
-      type: 'text',
-      text: `<user_request>\n${userText}\n</user_request>`,
-    });
-    content = parts;
-  }
-
+  const parts = await renderTurn(env, INTERNAL_PROFILE, opts);
+  if (parts.length === 0) return { messages: [] };
+  // Bare-text fast path: a single text part collapses to a plain string.
+  const content: UserContent =
+    parts.length === 1 && parts[0].type === 'text' ? parts[0].text : parts;
   return {
-    messages: [
-      {
-        role: 'user',
-        content,
-        timestamp: Date.now(),
-      },
-    ],
+    messages: [{ role: 'user', content, timestamp: Date.now() }],
   };
 }
 

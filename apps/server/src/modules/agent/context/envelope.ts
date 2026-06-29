@@ -45,7 +45,7 @@ export interface ChatEnvelope {
     /**
      * Structured neighbourhood for an anchored request, if any. Stored
      * as the algorithm's output (not pre-rendered text) so each backend
-     * can serialize it with its own `includeFile` via
+     * can serialize it with its own `includeFileName` via
      * {@link serializeNodeNeighbourhood}.
      */
     neighbourhood?: NodeNeighbourhoodContext;
@@ -348,7 +348,7 @@ export async function buildChatEnvelope(
   // Preamble: node neighbourhood for anchored requests. (Workspace
   // memory now rides in the agent's system prompt, not the envelope.)
   // Stored structured; each backend serializes it with its own
-  // `includeFile`.
+  // `includeFileName`.
   const neighbourhood =
     anchorNodeId && canvasId
       ? (getNodeNeighbourhood(canvasId, anchorNodeId) ?? undefined)

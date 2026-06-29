@@ -1128,16 +1128,19 @@ export async function* runAcpAgent(
   // below — so a failed turn (or a slash-command short-circuit, which
   // never includes it) re-sends the preamble on the next real turn.
   let includedSystem = false;
+  let promptImages: Array<{ mimeType: string; data: string }> = [];
   try {
-    const result = prepareExternalAgentPrompt({
+    const result = await prepareExternalAgentPrompt({
       envelope: opts.envelope,
       agentAlias: binding.alias,
+      canvasId: canvasId || null,
       includeSystem: !entry.systemPreambleSent,
       logger,
     });
     preparedPrompt = result.prompt;
     promptPayload = result.serialized;
     includedSystem = result.includedSystem;
+    promptImages = result.images;
   } catch (err) {
     preparedError = err instanceof Error ? err.message : String(err);
     logger.warn(
@@ -1350,6 +1353,7 @@ export async function* runAcpAgent(
         queue.push({ type: 'permission_request', data: req });
         wake();
       },
+      promptImages,
     )
     .then((result) => {
       stopReason = result.stopReason;

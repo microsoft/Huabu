@@ -42,16 +42,23 @@
 
 import { renderPromptFile } from '../../../prompt/index.js';
 import { serializeNodeNeighbourhood } from '../../canvas/node-neighbourhood.js';
+import { resolveImageUrl } from '../context/render/image-inlining.js';
 import { renderAgentNodeList } from '../context/render/node-element.js';
 
 import type { ChatEnvelope } from '../context/envelope.js';
 import type { ChatAttachment, ExternalAgentPrompt } from '@sediment/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
+/** A base64 vision block sent alongside the text payload over ACP. */
+export interface AcpImageBlock {
+  mimeType: string;
+  data: string;
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────
 
 /**
- * Pattern for the slash-command short-circuit (see
+ * Pattern for the slash-command lead-with-task path (see
  * {@link prepareExternalAgentPrompt}). Matches `/<name>` followed by
  * whitespace OR end of string. The leading character class is ASCII
  * letters only so URLs / Windows paths pasted mid-thought don't trip
@@ -81,12 +88,18 @@ export interface PreparePromptInput {
   /** Short alias of the bound external agent (e.g. `'claude'`). */
   agentAlias: string;
   /**
+   * Canvas the turn was sent from, used to resolve relative image URLs
+   * to base64 vision bytes (mirrors the built-in agent's image inlining).
+   * `null` when off-canvas.
+   */
+  canvasId?: string | null;
+  /**
    * Prepend the one-shot system preamble (persona + canvas-tool docs,
    * from `external-agent/system_prompt.md`) to this turn's prompt. Set
    * by the service layer for the FIRST user turn of a freshly-created
    * session and never again (the agent keeps it in context); see
-   * `AcpSessionEntry.systemPreambleSent`. Ignored for the slash-command
-   * short-circuit, which forwards verbatim.
+   * `AcpSessionEntry.systemPreambleSent`. Ignored for slash-command
+   * turns, where the command must lead verbatim.
    */
   includeSystem?: boolean;
   logger: FastifyBaseLogger;
@@ -105,10 +118,18 @@ export interface PreparePromptResult {
    * Whether {@link serializePrompt} actually prepended the system
    * preamble to this payload. The service layer flips
    * `AcpSessionEntry.systemPreambleSent` to `true` only when this is
-   * `true` and the turn succeeds — so a slash-command short-circuit
+   * `true` and the turn succeeds — so a slash-command turn
    * (always `false`) or a failed turn re-sends the preamble next time.
    */
   includedSystem: boolean;
+  /**
+   * Base64 vision blocks for off-canvas image uploads, resolved to
+   * pixels and sent as ACP `image` content blocks alongside the text
+   * payload (same as the built-in agent inlines them). Empty when the
+   * turn carried no inlineable image. Not persisted on the structured
+   * prompt to keep history lean — re-resolved per turn.
+   */
+  images: AcpImageBlock[];
 }
 
 /**
@@ -116,10 +137,11 @@ export interface PreparePromptResult {
  * user message + node selection. Synchronous and free of network/LLM
  * I/O (it only reads the on-disk prompt template).
  */
-export function prepareExternalAgentPrompt(
+export async function prepareExternalAgentPrompt(
   input: PreparePromptInput,
-): PreparePromptResult {
+): Promise<PreparePromptResult> {
   const { envelope, agentAlias, includeSystem, logger } = input;
+  const canvasId = input.canvasId ?? null;
   // Verbatim user words — the ACP `task`. Sourced from the envelope so
   // it matches what the built-in path renders. The built-in path may
   // append an LLM-only sketch-raster hint that references built-in-only
@@ -127,26 +149,23 @@ export function prepareExternalAgentPrompt(
   // intentionally absent here, as external agents fetch node content via
   // reachback instead.
   const rawText = envelope.user.text;
-  // ── Slash-command short-circuit ────────────────────────────────────
+  // ── Slash-command detection ────────────────────────────────────────
   //
-  // ACP agents recognise slash commands (`/<name> <args>`) natively
-  // inside `session/prompt` text. Wrapping them in our `<selected_nodes>`
-  // / preamble scaffolding could corrupt that wire format, so
-  // when the raw user input starts with a slash command we forward it
-  // verbatim with no extra sections (and no system preamble — it stays
-  // unsent so the next real turn delivers it).
-  if (SLASH_COMMAND_RE.test(rawText.trim())) {
-    const trimmed = rawText.trim();
+  // ACP agents recognise slash commands (`/<name> <args>`) natively, but
+  // ONLY when the command leads the prompt text. So we never wrap a slash
+  // command in our scaffolding *before* it: the command stays verbatim on
+  // the first line and any supplementary context (selected nodes,
+  // neighbourhood, attachments) is appended AFTER it. We also skip the
+  // one-shot system preamble here so it isn't pushed in front of the
+  // command — it stays unsent and the next real turn delivers it.
+  const isSlashCommand = SLASH_COMMAND_RE.test(rawText.trim());
+  if (isSlashCommand) {
     logger.debug(
-      { agentAlias, command: trimmed.split(/\s+/)[0] },
-      '[acp/preprocessor] slash command detected — forwarding verbatim',
+      { agentAlias, command: rawText.trim().split(/\s+/)[0] },
+      '[acp/preprocessor] slash command detected — leading verbatim, context appended',
     );
-    return {
-      prompt: { task: trimmed, selectedNodes: [] },
-      serialized: trimmed,
-      includedSystem: false,
-    };
   }
+  const effectiveIncludeSystem = isSlashCommand ? false : !!includeSystem;
 
   // Already-derived selection refs (frame children included) and
   // neighbourhood — read straight from the envelope rather than
@@ -158,7 +177,7 @@ export function prepareExternalAgentPrompt(
   const selectedRefs = envelope.focus.selection.refs;
   const neighbourhood = envelope.preamble.neighbourhood
     ? serializeNodeNeighbourhood(envelope.preamble.neighbourhood, {
-        includeFile: false,
+        includeFileName: false,
       })
     : undefined;
   // Off-canvas uploads the user attached to this turn. They are NOT on
@@ -167,6 +186,11 @@ export function prepareExternalAgentPrompt(
   // image / snapshot attachments are deliberately excluded — those are
   // canvas nodes the agent fetches through reachback.)
   const attachments = buildAcpAttachments(envelope.user.attachments);
+  // Inlineable upload images resolved to base64 vision blocks — sent as
+  // ACP `image` content blocks beside the text, exactly as the built-in
+  // agent inlines them. Selection / snapshot images are excluded: those
+  // are canvas nodes the agent fetches by id via reachback.
+  const images = await buildAcpImageBlocks(envelope.user.attachments, canvasId);
 
   const prompt: ExternalAgentPrompt = {
     task: rawText.trim(),
@@ -190,7 +214,9 @@ export function prepareExternalAgentPrompt(
     // On the first turn of a fresh session we also carry the rendered
     // system preamble so the UI can show the complete prompt the agent
     // saw. The serialized wire text below prepends the same block.
-    ...(includeSystem ? { systemPreamble: renderSystemPreamble() } : {}),
+    ...(effectiveIncludeSystem
+      ? { systemPreamble: renderSystemPreamble() }
+      : {}),
   };
 
   logger.debug(
@@ -204,8 +230,12 @@ export function prepareExternalAgentPrompt(
 
   return {
     prompt,
-    serialized: serializePrompt(prompt, { includeSystem: !!includeSystem }),
-    includedSystem: !!includeSystem,
+    serialized: serializePrompt(prompt, {
+      includeSystem: effectiveIncludeSystem,
+      leadWithTask: isSlashCommand,
+    }),
+    includedSystem: effectiveIncludeSystem,
+    images,
   };
 }
 
@@ -232,10 +262,17 @@ export function prepareExternalAgentPrompt(
  * itself is pushed to every agentlet-backed agent unconditionally (see
  * `server-mount.ts` `pushReachbackTools`); the preamble just documents
  * how to call it, once.
+ *
+ * When `opts.leadWithTask` is set (slash-command turns) the user's task
+ * is placed FIRST and context sections follow — ACP recognises slash
+ * commands only when they lead the text, so the command stays verbatim
+ * on line one while selected nodes / neighbourhood / attachments tag
+ * along as supplementary context. The system preamble is never prepended
+ * in this mode.
  */
 export function serializePrompt(
   prompt: ExternalAgentPrompt,
-  opts: { includeSystem?: boolean } = {},
+  opts: { includeSystem?: boolean; leadWithTask?: boolean } = {},
 ): string {
   const sections: string[] = [];
 
@@ -250,7 +287,7 @@ export function serializePrompt(
         label: node.label,
         preview: node.preview,
       })),
-      { includeFile: false },
+      { includeFileName: false },
     );
     sections.push(
       [
@@ -303,12 +340,19 @@ export function serializePrompt(
   // The user's own words come LAST, mirroring the built-in layout. With
   // no context sections, send the bare task — symmetric with the
   // built-in plain-text fast path (no XML scaffolding for the common
-  // case).
+  // case). Slash-command turns flip this: the command MUST lead so ACP
+  // still recognises it, so the task goes first and context follows.
   const task = prompt.task.trim();
-  const userBlock =
-    sections.length > 0
-      ? [...sections, `<user_request>\n${task}\n</user_request>`].join('\n')
-      : task;
+  let userBlock: string;
+  if (sections.length === 0) {
+    userBlock = task;
+  } else if (opts.leadWithTask) {
+    userBlock = [task, ...sections].join('\n');
+  } else {
+    userBlock = [...sections, `<user_request>\n${task}\n</user_request>`].join(
+      '\n',
+    );
+  }
 
   if (!opts.includeSystem) return userBlock;
 
@@ -364,10 +408,33 @@ function buildAcpAttachments(
       out.push({
         ...base,
         content:
-          '(image attachment — not visible to this agent; ask the user to describe it, or place it on the canvas to read via read-node)',
+          '(image attachment sent as vision pixels when this agent supports images; otherwise not visible — ask the user to describe it, or place it on the canvas to read via read-node)',
       });
     } else if (att.url) {
       out.push({ ...base, content: `(no inline content; source: ${att.url})` });
+    }
+  }
+  return out;
+}
+
+/**
+ * Resolve the turn's off-canvas image uploads to base64 vision blocks
+ * for the ACP wire, mirroring the built-in agent's inlining. An image
+ * that resolves within the inline size cap rides as an {@link AcpImageBlock};
+ * too-large / unresolvable images are skipped (the agent still sees the
+ * locator note from {@link buildAcpAttachments}). Whether the bytes
+ * actually reach the model depends on the agent's image capability.
+ */
+async function buildAcpImageBlocks(
+  atts: ChatAttachment[],
+  canvasId: string | null,
+): Promise<AcpImageBlock[]> {
+  const out: AcpImageBlock[] = [];
+  for (const att of atts) {
+    if (att.type !== 'image' || !att.url) continue;
+    const resolved = await resolveImageUrl(att.url, canvasId);
+    if (resolved.kind === 'inline') {
+      out.push({ mimeType: resolved.mimeType, data: resolved.data });
     }
   }
   return out;
