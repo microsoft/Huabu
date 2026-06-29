@@ -5,7 +5,7 @@
  * the history-reload path depend on:
  *   - one turn collapses to a SINGLE user message (was up to four);
  *   - context sections are XML-tagged and ordered
- *     (`<selected_nodes>` → `<canvas_neighbourhood>` → `<invoked_skills>`);
+ *     (`<invoked_skills>` → `<selected_nodes>` → `<canvas_neighbourhood>`);
  *   - the user's own words always come LAST, wrapped in `<user_request>`;
  *   - the plain-text fast path skips the XML scaffolding entirely;
  *   - `rebuildContextMessages` re-derives the user message from the
@@ -41,7 +41,6 @@ function makeEnvelope(over: {
   snapshotAttachments?: ChatAttachment[];
 }): ChatEnvelope {
   return {
-    preamble: over.neighbourhood ? { neighbourhood: over.neighbourhood } : {},
     user: { text: over.text ?? '', attachments: over.attachments ?? [] },
     skills: {
       invokedIds: (over.resolvedSkills ?? []).map((s) => s.id),
@@ -54,6 +53,9 @@ function makeEnvelope(over: {
         imageAttachments: over.imageAttachments ?? [],
         snapshotAttachments: over.snapshotAttachments ?? [],
       },
+      ...(over.neighbourhood
+        ? { anchor: { nodeId: 'anchor', neighbourhood: over.neighbourhood } }
+        : {}),
     },
   };
 }

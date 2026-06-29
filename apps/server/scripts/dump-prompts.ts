@@ -49,7 +49,6 @@ function envelope(over: {
   resolvedSkills?: ResolvedSkill[];
 }): ChatEnvelope {
   return {
-    preamble: over.neighbourhood ? { neighbourhood: over.neighbourhood } : {},
     user: { text: over.text ?? '', attachments: over.attachments ?? [] },
     skills: {
       invokedIds: (over.resolvedSkills ?? []).map((s) => s.id),
@@ -62,6 +61,9 @@ function envelope(over: {
         imageAttachments: [],
         snapshotAttachments: [],
       },
+      ...(over.neighbourhood
+        ? { anchor: { nodeId: 'anchor', neighbourhood: over.neighbourhood } }
+        : {}),
     },
   };
 }

@@ -4,7 +4,7 @@
  *
  * ### Why a new store?
  *
- * The legacy {@link import('./chat-store.js')} persists a pi-ai
+ * The legacy chat store persisted a pi-ai
  * `Context` (a flat `messages` array) directly, with the user's
  * selection / skills / attachments smuggled into the message string as
  * `[SYSTEM …]` tags and recovered on reload by reverse-parsing them.
@@ -33,12 +33,12 @@
  * record keyed by stable ids — no `.parts.json` sidecar, no
  * timestamp/position bridging.
  *
- * ### No migration (yet)
+ * ### Migration
  *
  * Records live on distinct `.turns.jsonl` / `.active.json` paths.
- * Legacy `.json` pi-ai `Context` files are simply ignored: a thread
- * with no JSONL log reads as empty and starts fresh. A migration
- * adapter can be layered on later once the new structure is proven.
+ * Legacy `.json` pi-ai `Context` files are converted to `.turns.jsonl`
+ * once at startup by `migrateLegacyChatThreads` (idempotent; renames the
+ * old `.json` to `.json.bak`). A thread with no JSONL log reads as empty.
  *
  * ### File layout
  *

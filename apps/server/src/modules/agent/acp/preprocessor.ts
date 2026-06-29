@@ -110,7 +110,7 @@ export interface PreparePromptResult {
    */
   serialized: string;
   /**
-   * Whether the system preamble was prepended to this payload. to this payload. The service layer flips
+   * Whether the system preamble was prepended to this payload. The service layer flips
    * `AcpSessionEntry.systemPreambleSent` to `true` only when this is
    * `true` and the turn succeeds — so a slash-command turn
    * (always `false`) or a failed turn re-sends the preamble next time.
@@ -128,8 +128,9 @@ export interface PreparePromptResult {
 
 /**
  * Build the {@link ExternalAgentPrompt} deterministically from the raw
- * user message + node selection. Synchronous and free of network/LLM
- * I/O (it only reads the on-disk prompt template).
+ * user message + node selection. Does no network/LLM I/O; it only reads
+ * the on-disk prompt template and resolves selection artifacts to vision
+ * bytes via the shared `renderTurn` (hence async).
  */
 export async function prepareExternalAgentPrompt(
   input: PreparePromptInput,
@@ -137,11 +138,10 @@ export async function prepareExternalAgentPrompt(
   const { envelope, agentAlias, includeSystem, logger } = input;
   const canvasId = input.canvasId ?? null;
   // Verbatim user words — the ACP `task`. Sourced from the envelope so
-  // it matches what the built-in path renders. The built-in path may
-  // append an LLM-only sketch-raster hint that references built-in-only
-  // tools (`snapshot_nodes` / `generate_image`); that hint is
-  // intentionally absent here, as external agents fetch node content via
-  // reachback instead.
+  // it matches what the built-in path renders. When the selection was
+  // pre-snapshotted, `renderTurn` appends a sketch-raster reuse hint
+  // worded for THIS backend (the reachback `snapshot` command, not the
+  // built-in `snapshot_nodes` / `generate_image` tools).
   const rawText = envelope.user.text;
   // ── Slash-command detection ────────────────────────────────────────
   //

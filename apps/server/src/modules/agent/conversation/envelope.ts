@@ -9,14 +9,12 @@
  * the serializers (`serializeChatEnvelopeToPiAi`, and later intent /
  * ACP variants) are pure functions over the result.
  *
- * Field grouping mirrors the four orthogonal concerns the design calls
+ * Field grouping mirrors the orthogonal concerns the design calls
  * out:
- *   - `preamble`   — background context unrelated to this turn's focus
- *     (cross-canvas memory, neighbourhood disambiguation).
  *   - `user`       — what the user directly typed / uploaded.
  *   - `skills`     — capabilities the user invoked this turn.
- *   - `focus`      — where the user pointed on the canvas, plus anything
- *     derived from that selection (composite snapshots).
+ *   - `focus`      — where the user pointed on the canvas: the selection
+ *     (+ derived snapshots) and the anchor node (+ its neighbourhood).
  */
 
 import { getSkill } from '../../../prompt/index.js';
@@ -40,16 +38,6 @@ export interface ResolvedSkill {
 
 /** The structured context for one chat turn. */
 export interface ChatEnvelope {
-  /** Background context unrelated to this turn's canvas focus. */
-  preamble: {
-    /**
-     * Structured neighbourhood for an anchored request, if any. Stored
-     * as the algorithm's output (not pre-rendered text) so each backend
-     * can serialize it with its own `includeFileName` via
-     * {@link serializeNodeNeighbourhood}.
-     */
-    neighbourhood?: NodeNeighbourhoodContext;
-  };
   /** What the user directly contributed this turn. */
   user: {
     text: string;
@@ -82,6 +70,17 @@ export interface ChatEnvelope {
       imageAttachments: ChatAttachment[];
       /** Composite PNG snapshots derived from selected sketch/image nodes. */
       snapshotAttachments: ChatAttachment[];
+    };
+    /**
+     * The node the request was anchored at (e.g. a question node), plus
+     * its surrounding neighbourhood. Present only for anchored turns.
+     * The anchor IS the user's focus, so its identity is named in the
+     * prompt; the neighbourhood disambiguates "this" / "above" refs.
+     */
+    anchor?: {
+      nodeId: string;
+      label?: string;
+      neighbourhood?: NodeNeighbourhoodContext;
     };
   };
 }
@@ -345,14 +344,30 @@ export async function buildChatEnvelope(
     logger,
   } = params;
 
-  // Preamble: node neighbourhood for anchored requests. (Workspace
-  // memory now rides in the agent's system prompt, not the envelope.)
-  // Stored structured; each backend serializes it with its own
-  // `includeFileName`.
-  const neighbourhood =
-    anchorNodeId && canvasId
-      ? (getNodeNeighbourhood(canvasId, anchorNodeId) ?? undefined)
-      : undefined;
+  // Focus: anchor neighbourhood for anchored requests (Workspace memory
+  // now rides in the agent's system prompt). Stored structured; each
+  // backend serializes it with its own `includeFileName`. The anchor's
+  // own label is read from the store so the prompt can name it.
+  let anchor: ChatEnvelope['focus']['anchor'];
+  if (anchorNodeId && canvasId) {
+    const neighbourhood =
+      getNodeNeighbourhood(canvasId, anchorNodeId) ?? undefined;
+    let label: string | undefined;
+    try {
+      const meta = getCanvasStore(canvasId).readNode(anchorNodeId) as Record<
+        string,
+        unknown
+      > | null;
+      if (typeof meta?.label === 'string') label = meta.label;
+    } catch {
+      /* store unavailable — anchor still useful by id */
+    }
+    anchor = {
+      nodeId: anchorNodeId,
+      ...(label ? { label } : {}),
+      ...(neighbourhood ? { neighbourhood } : {}),
+    };
+  }
 
   // Focus: selection refs + derived snapshot artifacts.
   const selectionImageAttachments = selectedNodes
@@ -380,9 +395,6 @@ export async function buildChatEnvelope(
         );
 
   return {
-    preamble: {
-      ...(neighbourhood ? { neighbourhood } : {}),
-    },
     user: {
       text: content,
       attachments: attachments ?? [],
@@ -400,6 +412,7 @@ export async function buildChatEnvelope(
         imageAttachments: dedupedImageAttachments,
         snapshotAttachments,
       },
+      ...(anchor ? { anchor } : {}),
     },
   };
 }

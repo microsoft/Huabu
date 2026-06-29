@@ -46,6 +46,17 @@ export function escapeXmlAttr(s: string): string {
     .trim();
 }
 
+/**
+ * Escape a string for safe inclusion as XML element *body* text. Unlike
+ * {@link escapeXmlAttr} this preserves newlines, so a multi-line excerpt
+ * inlined between `<attachment>…</attachment>` keeps its formatting while
+ * stray `&`/`<`/`>` (e.g. a literal `</attachment>` in the content) can no
+ * longer break out of or inject into the surrounding tag structure.
+ */
+export function escapeXmlText(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 /** Minimum shape {@link renderAgentNodeList} needs to render one node. */
 export interface RenderableNode {
   id: string;

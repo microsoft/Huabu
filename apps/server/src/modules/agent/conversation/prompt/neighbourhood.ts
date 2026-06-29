@@ -26,6 +26,7 @@
  * be a dead reference).
  */
 
+import { escapeXmlAttr } from './node-element.js';
 import { serializeNodeNeighbourhood } from '../../../canvas/node-neighbourhood.js';
 
 import type { RenderProfile } from './profile.js';
@@ -42,19 +43,33 @@ const READ_NODE_INTRO =
  * follow the backend {@link RenderProfile}.
  */
 export function renderNeighbourhoodSection(
-  ctx: NodeNeighbourhoodContext | undefined,
+  anchor:
+    | {
+        nodeId: string;
+        label?: string;
+        neighbourhood?: NodeNeighbourhoodContext;
+      }
+    | undefined,
   profile: RenderProfile,
 ): string | undefined {
-  if (!ctx) return undefined;
-  const body = serializeNodeNeighbourhood(ctx, {
-    includeFileName: profile.includeFileName,
-  });
+  if (!anchor) return undefined;
+  const body = anchor.neighbourhood
+    ? serializeNodeNeighbourhood(anchor.neighbourhood, {
+        includeFileName: profile.includeFileName,
+      })
+    : '';
   if (!body) return undefined;
-  const intro =
-    profile.nodeReadVerb === 'read-node' ? READ_NODE_INTRO : READ_INTRO;
+  const intro = profile.toolset === 'reachback' ? READ_NODE_INTRO : READ_INTRO;
+  const anchorAttrs = [
+    `id="${escapeXmlAttr(anchor.nodeId)}"`,
+    anchor.label ? `label="${escapeXmlAttr(anchor.label)}"` : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
   return [
     '<canvas_neighbourhood>',
     intro,
+    `Anchored at <node ${anchorAttrs} />.`,
     body,
     '</canvas_neighbourhood>',
   ].join('\n');

@@ -8,14 +8,19 @@
  * The differences are intentional and tied to how each backend reads
  * node bodies: the built-in agent reads by pre-computed `file=` path
  * (`read()` / `inspect_nodes()`), the external agent reads by id
- * (`read-node <id>`). The sketch-raster hint references built-in-only
- * tools, so it rides only when `nodeReadVerb === 'read'`.
+ * (`read-node <id>`). The sketch-raster reuse hint is worded per
+ * `toolset` (built-in `snapshot_nodes` vs the reachback `snapshot`).
  */
 
 /** Per-backend rendering switches. */
 export interface RenderProfile {
-  /** How the agent fetches a node body — picks the intro tool verb. */
-  nodeReadVerb: 'read' | 'read-node';
+  /**
+   * Which tool surface the agent has — picks the read verb in section
+   * intros and tool-specific wording. `internal` reads by `file=` path
+   * (`read()` / `inspect_nodes()`); `reachback` reads by id
+   * (`read-node <id>`).
+   */
+  toolset: 'internal' | 'reachback';
   /** Emit `file=` on `<node>` (built-in reads by path; ACP reads by id). */
   includeFileName: boolean;
   /** Inline selection pixels as `<selected_nodes_visuals>` (+ sketch hint). */
@@ -26,7 +31,7 @@ export interface RenderProfile {
 
 /** Built-in agent: read-by-path, selection pixels + sketch hint, task last. */
 export const INTERNAL_PROFILE: RenderProfile = {
-  nodeReadVerb: 'read',
+  toolset: 'internal',
   includeFileName: true,
   includeSelectionVisuals: true,
   leadWithTask: false,
@@ -34,7 +39,7 @@ export const INTERNAL_PROFILE: RenderProfile = {
 
 /** External/ACP agent: read-by-id, selection pixels, task last. */
 export const ACP_PROFILE: RenderProfile = {
-  nodeReadVerb: 'read-node',
+  toolset: 'reachback',
   includeFileName: true,
   includeSelectionVisuals: true,
   leadWithTask: false,

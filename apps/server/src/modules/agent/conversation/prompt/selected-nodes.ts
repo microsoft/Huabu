@@ -36,8 +36,7 @@ export function renderSelectedNodesSection(
   profile: RenderProfile,
 ): string | undefined {
   if (refs.length === 0) return undefined;
-  const intro =
-    profile.nodeReadVerb === 'read-node' ? READ_NODE_INTRO : READ_INTRO;
+  const intro = profile.toolset === 'reachback' ? READ_NODE_INTRO : READ_INTRO;
   return [
     '<selected_nodes>',
     intro,

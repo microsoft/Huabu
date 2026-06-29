@@ -41,7 +41,6 @@ const threadId = 'tr-test';
 
 function sampleEnvelope(text = 'hello'): ChatEnvelope {
   return {
-    preamble: {},
     user: { text, attachments: [] },
     skills: { invokedIds: [], resolved: [] },
     focus: {

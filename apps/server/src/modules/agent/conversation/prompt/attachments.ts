@@ -32,7 +32,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { resolveImageUrl, MAX_INLINE_IMAGE_BYTES } from './image-inlining.js';
-import { escapeXmlAttr } from './node-element.js';
+import { escapeXmlAttr, escapeXmlText } from './node-element.js';
 import { ARTIFACT_URL_REGEX } from '../../../artifact/utils.js';
 import { getCanvasStore } from '../../../storage/index.js';
 
@@ -125,7 +125,7 @@ export async function buildAttachmentParts(
         if (att.content && att.content.trim().length > 0) {
           parts.push({
             type: 'text',
-            text: `<attachment type="text" name="${escapeXmlAttr(label)}"${originAttr}>\n${att.content}\n</attachment>`,
+            text: `<attachment type="text" name="${escapeXmlAttr(label)}"${originAttr}>\n${escapeXmlText(att.content)}\n</attachment>`,
           });
         }
         break;
@@ -135,7 +135,7 @@ export async function buildAttachmentParts(
         if (att.content && att.content.trim().length > 0) {
           parts.push({
             type: 'text',
-            text: `<attachment type="pdf" name="${escapeXmlAttr(label)}"${originAttr}>\n${att.content}\n</attachment>`,
+            text: `<attachment type="pdf" name="${escapeXmlAttr(label)}"${originAttr}>\n${escapeXmlText(att.content)}\n</attachment>`,
           });
         } else {
           parts.push({
@@ -151,7 +151,7 @@ export async function buildAttachmentParts(
         if (att.content && att.content.trim().length > 0) {
           parts.push({
             type: 'text',
-            text: `<attachment type="text"${originAttr}>\n${att.content}\n</attachment>`,
+            text: `<attachment type="text"${originAttr}>\n${escapeXmlText(att.content)}\n</attachment>`,
           });
         }
         break;
@@ -162,7 +162,7 @@ export async function buildAttachmentParts(
         if (att.content && att.content.trim().length > 0) {
           parts.push({
             type: 'text',
-            text: `<attachment type="web" name="${escapeXmlAttr(label)}"${att.url ? ` url="${escapeXmlAttr(att.url)}"` : ''}>\n${att.content}\n</attachment>`,
+            text: `<attachment type="web" name="${escapeXmlAttr(label)}"${att.url ? ` url="${escapeXmlAttr(att.url)}"` : ''}>\n${escapeXmlText(att.content)}\n</attachment>`,
           });
         } else if (att.url) {
           parts.push({
@@ -179,7 +179,7 @@ export async function buildAttachmentParts(
         if (att.content && att.content.trim().length > 0) {
           parts.push({
             type: 'text',
-            text: `<attachment type="file" name="${escapeXmlAttr(label)}"${originAttr}>\n${att.content}\n</attachment>`,
+            text: `<attachment type="file" name="${escapeXmlAttr(label)}"${originAttr}>\n${escapeXmlText(att.content)}\n</attachment>`,
           });
         } else if (att.url) {
           let fileContent: string | null = null;
@@ -224,7 +224,7 @@ export async function buildAttachmentParts(
           if (fileContent) {
             parts.push({
               type: 'text',
-              text: `<attachment type="file" name="${escapeXmlAttr(label)}">\n${fileContent}\n</attachment>`,
+              text: `<attachment type="file" name="${escapeXmlAttr(label)}">\n${escapeXmlText(fileContent)}\n</attachment>`,
             });
           } else {
             parts.push({

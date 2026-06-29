@@ -176,10 +176,9 @@ const agentRoutes: FastifyPluginAsync = async (
 
     const turns = loadTurns(threadId, canvasId);
     if (turns.length === 0) {
-      // No history for this threadId — return empty. Expected for newly
-      // created threads (e.g. after "New Chat") that haven't sent a
-      // message yet, and for legacy threads whose `.json` Context is no
-      // longer read (structured-persistence cutover).
+      // No turn log → empty. Legacy `.json` threads are converted to
+      // `.turns.jsonl` at startup (migrateLegacyChatThreads), so a
+      // missing log means a genuinely empty/new thread.
       return reply.send({ threadId, messages: [] });
     }
 

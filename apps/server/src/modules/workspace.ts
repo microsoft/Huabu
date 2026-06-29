@@ -41,6 +41,7 @@ import { resetExternalNoteWatcher } from './canvas/external-watcher.js';
 // been migrated to the canvas-centric layout.
 import { refreshCanvasDirIndex } from './storage/canvas-dirs.js';
 import { migrateBareArtifactKeys } from './storage/migrate-artifact-keys.js';
+import { migrateLegacyChatThreads } from './storage/migrate-chat-threads.js';
 import { migrateLabeledNames } from './storage/migrate-labels.js';
 import { migrateLegacyMemory } from './storage/migrate-memory.js';
 import { migrateQuestionContent } from './storage/migrate-question-content.js';
@@ -109,6 +110,9 @@ export function initWorkspaceFromEnv(): void {
   // One-shot flatten of question `data.input.content` -> `data.content`
   // and sidecar backfill (sentinel-gated).
   migrateQuestionContent(_workspacePath);
+  // Convert legacy pi-ai `Context` chat threads to structured turns
+  // (`.turns.jsonl`); renames old `.json` to `.json.bak`. Idempotent.
+  migrateLegacyChatThreads(_workspacePath);
   void resetExternalNoteWatcher();
 }
 
@@ -195,6 +199,9 @@ export function setWorkspacePath(newPath: string): void {
   // One-shot flatten of question `data.input.content` -> `data.content`
   // and sidecar backfill (sentinel-gated).
   migrateQuestionContent(_workspacePath);
+  // Convert legacy pi-ai `Context` chat threads to structured turns
+  // (`.turns.jsonl`); renames old `.json` to `.json.bak`. Idempotent.
+  migrateLegacyChatThreads(_workspacePath);
   void resetExternalNoteWatcher();
 }
 

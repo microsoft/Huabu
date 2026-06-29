@@ -62,7 +62,7 @@ export async function renderTurn(
     profile,
   );
   const neighbourhoodSection = renderNeighbourhoodSection(
-    env.preamble.neighbourhood,
+    env.focus.anchor,
     profile,
   );
   const hasContext = Boolean(
@@ -76,9 +76,12 @@ export async function renderTurn(
     uploads.length > 0
       ? await buildAttachmentParts(uploads, canvasId ?? null)
       : [];
+  // Both backends raster the selection, so both get the reuse hint when
+  // pre-snapshotted artifacts are present; the wording (built-in tools vs
+  // reachback `snapshot`) is chosen per profile inside the renderer.
   const hint =
     profile.includeSelectionVisuals && selectionParts.length > 0
-      ? renderSketchRasterHint(selection)
+      ? renderSketchRasterHint(selection, profile)
       : undefined;
   const userText = env.user.text;
 
@@ -104,7 +107,7 @@ export async function renderTurn(
   }
   if (selectionParts.length > 0) {
     const followUp =
-      profile.nodeReadVerb === 'read-node'
+      profile.toolset === 'reachback'
         ? 'read-node <id> for more'
         : 'read() / inspect_nodes() for more';
     parts.push({

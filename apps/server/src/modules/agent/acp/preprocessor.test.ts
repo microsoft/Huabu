@@ -40,7 +40,6 @@ function makeEnvelope(opts: {
   attachments?: ChatAttachment[];
 }): ChatEnvelope {
   return {
-    preamble: opts.neighbourhood ? { neighbourhood: opts.neighbourhood } : {},
     user: { text: opts.text, attachments: opts.attachments ?? [] },
     skills: { invokedIds: [], resolved: [] },
     focus: {
@@ -52,6 +51,9 @@ function makeEnvelope(opts: {
         imageAttachments: [],
         snapshotAttachments: [],
       },
+      ...(opts.neighbourhood
+        ? { anchor: { nodeId: 'anchor', neighbourhood: opts.neighbourhood } }
+        : {}),
     },
   };
 }
@@ -90,10 +92,12 @@ describe('serializePrompt', () => {
     expect(serialized).toContain('<selected_nodes>');
     expect(serialized).toContain('</selected_nodes>');
     expect(serialized).toContain(
-      '<node id="node-a" type="note" label="Intro" />',
+      '<node id="node-a" type="note" label="Intro" file="nodes/Intro.md" />',
     );
-    // Label-less node renders with just id + type.
-    expect(serialized).toContain('<node id="node-b" type="image" />');
+    // Label-less node renders with id + type + file.
+    expect(serialized).toContain(
+      '<node id="node-b" type="image" file="nodes/node-b.md" />',
+    );
     // The user's words come last, wrapped in <user_request>.
     expect(serialized).toContain(
       '<user_request>\nCompare these notes.\n</user_request>',
@@ -125,7 +129,7 @@ describe('serializePrompt', () => {
       logger,
     });
     expect(serialized).toContain(
-      '<node id="n1" type="note" label="a &quot; &lt;b&gt;" />',
+      '<node id="n1" type="note" label="a &quot; &lt;b&gt;" file="nodes/a _ _b_.md" />',
     );
   });
   it('wraps off-canvas attachments in <attachments> before the user request', async () => {
@@ -221,7 +225,7 @@ describe('prepareExternalAgentPrompt', () => {
 
     expect(result.serialized).toContain('do something');
     expect(result.serialized).toContain(
-      '<node id="child-1" type="note" label="Child" />',
+      '<node id="child-1" type="note" label="Child" file="nodes/Child.md" />',
     );
     expect(result.includedSystem).toBe(false);
   });
@@ -284,9 +288,9 @@ describe('prepareExternalAgentPrompt', () => {
     expect(result.serialized).toContain(
       '<group direction="to the left" arrangement="2 nodes">',
     );
-    // `file=` is omitted for the external agent (read-by-id).
+    // ACP now emits `file=` too (read-node by id, filename for display).
     expect(result.serialized).toContain(
-      '<node id="sketch-a" type="sketch" label="Sketch A" />',
+      '<node id="sketch-a" type="sketch" label="Sketch A" file="nodes/Sketch A.md" />',
     );
     // The user's request comes LAST; the neighbourhood precedes it.
     expect(result.serialized.indexOf('<canvas_neighbourhood>')).toBeLessThan(
