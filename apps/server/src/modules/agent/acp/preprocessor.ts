@@ -41,19 +41,12 @@
  */
 
 import { renderPromptFile } from '../../../prompt/index.js';
-import { serializeNodeNeighbourhood } from '../../canvas/node-neighbourhood.js';
-import { resolveImageUrl } from '../context/render/image-inlining.js';
-import { renderAgentNodeList } from '../context/render/node-element.js';
+import { ACP_PROFILE, ACP_SLASH_PROFILE } from '../context/render/profile.js';
+import { renderTurn } from '../context/render-turn.js';
 
 import type { ChatEnvelope } from '../context/envelope.js';
-import type { ChatAttachment, ExternalAgentPrompt } from '@sediment/shared';
+import type { ContentPart } from '../context/render/attachments.js';
 import type { FastifyBaseLogger } from 'fastify';
-
-/** A base64 vision block sent alongside the text payload over ACP. */
-export interface AcpImageBlock {
-  mimeType: string;
-  data: string;
-}
 
 // ─── Constants ────────────────────────────────────────────────────────────
 
@@ -106,30 +99,28 @@ export interface PreparePromptInput {
 }
 
 export interface PreparePromptResult {
-  /** Structured prompt the UI renders and the history persists. */
-  prompt: ExternalAgentPrompt;
   /**
    * The plain-text payload Sediment actually hands to ACP
-   * `session/prompt`. Derived from `prompt` via {@link serializePrompt}
-   * so server, log, and external agent all see the same wording.
+   * `session/prompt`. Built by joining the text parts of
+   * {@link renderTurn} so server, log, and external agent all see the
+   * same wording.
    */
   serialized: string;
   /**
-   * Whether {@link serializePrompt} actually prepended the system
-   * preamble to this payload. The service layer flips
+   * Whether the system preamble was prepended to this payload. to this payload. The service layer flips
    * `AcpSessionEntry.systemPreambleSent` to `true` only when this is
    * `true` and the turn succeeds — so a slash-command turn
    * (always `false`) or a failed turn re-sends the preamble next time.
    */
   includedSystem: boolean;
   /**
-   * Base64 vision blocks for off-canvas image uploads, resolved to
-   * pixels and sent as ACP `image` content blocks alongside the text
-   * payload (same as the built-in agent inlines them). Empty when the
-   * turn carried no inlineable image. Not persisted on the structured
-   * prompt to keep history lean — re-resolved per turn.
+   * The generic per-turn content blocks (text + base64 image parts) sent
+   * over ACP `session/prompt`. Mapped 1:1 to ACP content blocks by the
+   * client — the same `renderTurn` output the built-in agent uses, plus
+   * the one-shot preamble as a leading text block on the first turn. Not
+   * persisted (images would bloat history) — re-resolved per turn.
    */
-  images: AcpImageBlock[];
+  blocks: ContentPart[];
 }
 
 /**
@@ -167,206 +158,51 @@ export async function prepareExternalAgentPrompt(
   }
   const effectiveIncludeSystem = isSlashCommand ? false : !!includeSystem;
 
-  // Already-derived selection refs (frame children included) and
-  // neighbourhood — read straight from the envelope rather than
-  // re-deriving from the raw wire selection, so ACP and the built-in
-  // agent observe the identical set by construction. The neighbourhood
-  // is serialized WITHOUT `file=` (the external agent reads by id via
-  // `read-node`, so a virtual path would be a dead reference) — the same
-  // structured context the built-in agent renders with `file=`.
-  const selectedRefs = envelope.focus.selection.refs;
-  const neighbourhood = envelope.preamble.neighbourhood
-    ? serializeNodeNeighbourhood(envelope.preamble.neighbourhood, {
-        includeFileName: false,
-      })
-    : undefined;
-  // Off-canvas uploads the user attached to this turn. They are NOT on
-  // the canvas, so the external agent cannot reach them via `read-node`;
-  // their textual content is inlined into the prompt instead. (Selection
-  // image / snapshot attachments are deliberately excluded — those are
-  // canvas nodes the agent fetches through reachback.)
-  const attachments = buildAcpAttachments(envelope.user.attachments);
-  // Inlineable upload images resolved to base64 vision blocks — sent as
-  // ACP `image` content blocks beside the text, exactly as the built-in
-  // agent inlines them. Selection / snapshot images are excluded: those
-  // are canvas nodes the agent fetches by id via reachback.
-  const images = await buildAcpImageBlocks(envelope.user.attachments, canvasId);
+  // Wire body: the SAME renderTurn the built-in agent uses, with the ACP
+  // profile (read-node verb, no `file=`, selection visuals on, slash
+  // leads). Text parts join to the serialized payload; image parts ride
+  // as base64 vision blocks. Both backends now share one composer.
+  const parts = await renderTurn(
+    envelope,
+    isSlashCommand ? ACP_SLASH_PROFILE : ACP_PROFILE,
+    { canvasId },
+  );
+  // First turn of a fresh session: lead with the persona preamble as a
+  // text block. The serialized mirror (text only) is for dump/log.
+  const blocks: ContentPart[] = effectiveIncludeSystem
+    ? [{ type: 'text', text: renderSystemPreamble() }, ...parts]
+    : parts;
+  const body = parts
+    .filter(
+      (p): p is Extract<ContentPart, { type: 'text' }> => p.type === 'text',
+    )
+    .map((p) => p.text)
+    .join('\n');
+  const serialized = effectiveIncludeSystem
+    ? `${renderSystemPreamble()}\n\n${body}`
+    : body;
 
-  const prompt: ExternalAgentPrompt = {
-    task: rawText.trim(),
-    selectedNodes: selectedRefs.map((ref) => ({
-      nodeId: ref.id,
-      type: ref.type,
-      ...(ref.label ? { label: ref.label } : {}),
-      // `preview` rides along (same server-side ladder as the built-in
-      // agent); `filename` is intentionally NOT forwarded — the external
-      // agent reads by id via `read-node`, so the virtual path would be a
-      // dead reference.
-      ...(ref.preview ? { preview: ref.preview } : {}),
-    })),
-    // Canvas neighbourhood (spatial context around an anchor node) when
-    // the turn carried one — same source as the built-in agent's
-    // node-neighbourhood preamble, so both backends agree.
-    ...(neighbourhood ? { neighbourhood } : {}),
-    // Off-canvas attachment text (uploads / web captures) that the agent
-    // cannot otherwise see, since it has no canvas access for them.
-    ...(attachments.length > 0 ? { attachments } : {}),
-    // On the first turn of a fresh session we also carry the rendered
-    // system preamble so the UI can show the complete prompt the agent
-    // saw. The serialized wire text below prepends the same block.
-    ...(effectiveIncludeSystem
-      ? { systemPreamble: renderSystemPreamble() }
-      : {}),
-  };
-
+  // Display model for the prepared-prompt card — projected from the SAME
+  // envelope as the built-in agent's user-message chips, plus the ACP
+  // preamble on the first turn. The card and bubble cannot drift.
   logger.debug(
-    {
-      agentAlias,
-      taskLength: prompt.task.length,
-      selectedNodesCount: prompt.selectedNodes.length,
-    },
+    { agentAlias, taskLength: rawText.trim().length },
     '[acp/preprocessor] prepared prompt',
   );
 
   return {
-    prompt,
-    serialized: serializePrompt(prompt, {
-      includeSystem: effectiveIncludeSystem,
-      leadWithTask: isSlashCommand,
-    }),
+    serialized,
     includedSystem: effectiveIncludeSystem,
-    images,
+    blocks,
   };
 }
 
 /**
- * Convert an {@link ExternalAgentPrompt} into the plain-text payload
- * sent over ACP `session/prompt`.
- *
- * The per-turn body is built inline as XML — the SAME tag vocabulary
- * (`<selected_nodes>`, `<canvas_neighbourhood>`, `<attachments>`,
- * `<user_request>`) the built-in agent emits (`buildContextSections` in
- * `context/render-turn.ts`), with the user's words LAST — so a reader
- * (human or model) sees one structure across both backends. A bare task
- * (no context sections) is sent unwrapped, mirroring the built-in
- * plain-text fast path. The inner guidance legitimately differs:
- * external agents read / write nodes through the Huabu Reachback Tool
- * (`read-node` / `write-node`) rather than the built-in `read()` over a
- * pre-computed `filename`. Off-canvas uploads, which the agent cannot
- * reach via `read-node`, are inlined under `<attachments>`.
- *
- * When `opts.includeSystem` is set, the one-shot system preamble
- * (persona + `## Canvas Tools (Reachback)` docs, from
- * {@link SYSTEM_TEMPLATE}) is rendered and prepended — used only for the
- * first user turn of a freshly-created session. The Huabu Reachback Tool
- * itself is pushed to every agentlet-backed agent unconditionally (see
- * `server-mount.ts` `pushReachbackTools`); the preamble just documents
- * how to call it, once.
- *
- * When `opts.leadWithTask` is set (slash-command turns) the user's task
- * is placed FIRST and context sections follow — ACP recognises slash
- * commands only when they lead the text, so the command stays verbatim
- * on line one while selected nodes / neighbourhood / attachments tag
- * along as supplementary context. The system preamble is never prepended
- * in this mode.
- */
-export function serializePrompt(
-  prompt: ExternalAgentPrompt,
-  opts: { includeSystem?: boolean; leadWithTask?: boolean } = {},
-): string {
-  const sections: string[] = [];
-
-  if (prompt.selectedNodes.length > 0) {
-    // Rendered through the SAME `renderAgentNodeList` the built-in agent
-    // uses, so the two backends present one `<node>` shape. `file` is
-    // omitted here: the external agent reads by id (`read-node <id>`).
-    const nodeList = renderAgentNodeList(
-      prompt.selectedNodes.map((node) => ({
-        id: node.nodeId,
-        type: node.type,
-        label: node.label,
-        preview: node.preview,
-      })),
-      { includeFileName: false },
-    );
-    sections.push(
-      [
-        '<selected_nodes>',
-        'The user selected the canvas nodes below. Each <node> is metadata only: read any you need with the Huabu Reachback Tool (`read-node <node-id>`); update them with `write-node --id <node-id>`. `preview` is a short scan hint, not the full content.',
-        nodeList,
-        '</selected_nodes>',
-      ].join('\n'),
-    );
-  }
-
-  if (prompt.neighbourhood) {
-    sections.push(
-      [
-        '<canvas_neighbourhood>',
-        'The request was anchored at a specific node on the canvas. Use this neighbourhood to disambiguate references like "this" or "the one above", and to choose sensible positions when creating nodes nearby. Each <node> is addressable just like a selected one — read any with `read-node <node-id>`.',
-        prompt.neighbourhood,
-        '</canvas_neighbourhood>',
-      ].join('\n'),
-    );
-  }
-
-  if (prompt.attachments && prompt.attachments.length > 0) {
-    // Each attachment is wrapped in its own `<attachment>` tag (mirroring
-    // the built-in agent's `<attachment>` items) so multiple bodies stay
-    // unambiguously separated; the whole group is bounded by
-    // `<attachments>`.
-    const items = prompt.attachments
-      .map((att) => {
-        const attrs = [
-          `type="${escapeAttr(att.type)}"`,
-          att.label ? `name="${escapeAttr(att.label)}"` : '',
-          att.url ? `url="${escapeAttr(att.url)}"` : '',
-        ]
-          .filter(Boolean)
-          .join(' ');
-        return `<attachment ${attrs}>\n${att.content}\n</attachment>`;
-      })
-      .join('\n');
-    sections.push(
-      [
-        '<attachments>',
-        'The user attached the content below directly. It is NOT on the canvas, so you cannot fetch it with `read-node` — use it as given.',
-        items,
-        '</attachments>',
-      ].join('\n'),
-    );
-  }
-
-  // The user's own words come LAST, mirroring the built-in layout. With
-  // no context sections, send the bare task — symmetric with the
-  // built-in plain-text fast path (no XML scaffolding for the common
-  // case). Slash-command turns flip this: the command MUST lead so ACP
-  // still recognises it, so the task goes first and context follows.
-  const task = prompt.task.trim();
-  let userBlock: string;
-  if (sections.length === 0) {
-    userBlock = task;
-  } else if (opts.leadWithTask) {
-    userBlock = [task, ...sections].join('\n');
-  } else {
-    userBlock = [...sections, `<user_request>\n${task}\n</user_request>`].join(
-      '\n',
-    );
-  }
-
-  if (!opts.includeSystem) return userBlock;
-
-  const systemBlock = renderSystemPreamble();
-  return `${systemBlock}\n\n${userBlock}`;
-}
-
-/**
  * Render the one-shot system preamble (persona + `## Canvas Tools
- * (Reachback)` docs) from {@link SYSTEM_TEMPLATE}. Shared by
- * {@link serializePrompt} (which prepends it to the wire text) and
- * {@link prepareExternalAgentPrompt} (which attaches it to the structured
- * prompt so the UI can show the complete prompt). Static — no template
- * variables.
+ * (Reachback)` docs) from {@link SYSTEM_TEMPLATE}. Prepended to the
+ * serialized wire text (and attached to the structured prompt so the UI
+ * can show the complete prompt) only on the first turn of a fresh
+ * session. Static — no template variables.
  */
 export function renderSystemPreamble(): string {
   return renderPromptFile(SYSTEM_TEMPLATE, {});
@@ -379,74 +215,4 @@ export function renderSystemPreamble(): string {
  */
 export function serializeRawPrompt(rawText: string): string {
   return rawText;
-}
-
-// ─── Internals ────────────────────────────────────────────────────────────
-/**
- * Project the turn's off-canvas uploads into the structured prompt's
- * `attachments`. Text-bearing attachments forward their content
- * verbatim; an image upload — which cannot travel over the text-only
- * ACP wire — is reduced to a short locator note so the agent at least
- * knows it exists. Content-less, URL-only attachments forward their
- * source URL. Empty attachments (no content, no url) are dropped.
- */
-function buildAcpAttachments(
-  atts: ChatAttachment[],
-): NonNullable<ExternalAgentPrompt['attachments']> {
-  const out: NonNullable<ExternalAgentPrompt['attachments']> = [];
-  for (const att of atts) {
-    const label = att.label ?? att.filename;
-    const base = {
-      type: att.type,
-      ...(label ? { label } : {}),
-      ...(att.url ? { url: att.url } : {}),
-    };
-    const text = att.content?.trim();
-    if (text) {
-      out.push({ ...base, content: text });
-    } else if (att.type === 'image') {
-      out.push({
-        ...base,
-        content:
-          '(image attachment sent as vision pixels when this agent supports images; otherwise not visible — ask the user to describe it, or place it on the canvas to read via read-node)',
-      });
-    } else if (att.url) {
-      out.push({ ...base, content: `(no inline content; source: ${att.url})` });
-    }
-  }
-  return out;
-}
-
-/**
- * Resolve the turn's off-canvas image uploads to base64 vision blocks
- * for the ACP wire, mirroring the built-in agent's inlining. An image
- * that resolves within the inline size cap rides as an {@link AcpImageBlock};
- * too-large / unresolvable images are skipped (the agent still sees the
- * locator note from {@link buildAcpAttachments}). Whether the bytes
- * actually reach the model depends on the agent's image capability.
- */
-async function buildAcpImageBlocks(
-  atts: ChatAttachment[],
-  canvasId: string | null,
-): Promise<AcpImageBlock[]> {
-  const out: AcpImageBlock[] = [];
-  for (const att of atts) {
-    if (att.type !== 'image' || !att.url) continue;
-    const resolved = await resolveImageUrl(att.url, canvasId);
-    if (resolved.kind === 'inline') {
-      out.push({ mimeType: resolved.mimeType, data: resolved.data });
-    }
-  }
-  return out;
-}
-
-/** Escape a string for safe inclusion in an XML attribute value. */
-function escapeAttr(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/\r?\n/g, ' ')
-    .trim();
 }

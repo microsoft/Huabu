@@ -94,16 +94,6 @@ export function useChatHistory(
               };
             }
 
-            if (m.role === 'prepared-prompt') {
-              return {
-                id,
-                role: 'prepared-prompt' as const,
-                prompt: m.prompt,
-                agentAlias: m.agentAlias,
-                ...(m.error ? { error: m.error } : {}),
-              };
-            }
-
             if (m.role === 'assistant') {
               // Wire shape mirrors the runtime AssistantSegment union
               // (see chatTypes.ts) — the server already produces the

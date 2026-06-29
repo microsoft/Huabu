@@ -122,12 +122,16 @@ export async function renderTurn(
     parts.push(...uploadParts);
     parts.push({ type: 'text', text: '</attachments>' });
   }
-  const taskBlock = {
-    type: 'text' as const,
-    text: `<user_request>\n${userText}\n</user_request>`,
-  };
-  if (profile.leadWithTask) parts.unshift(taskBlock);
-  else parts.push(taskBlock);
+  // Slash-command turns lead with the BARE task (no <user_request>
+  // wrapper) so ACP still recognises `/cmd`; everyone else wraps + trails.
+  if (profile.leadWithTask) {
+    parts.unshift({ type: 'text', text: userText });
+  } else {
+    parts.push({
+      type: 'text',
+      text: `<user_request>\n${userText}\n</user_request>`,
+    });
+  }
   return parts;
 }
 

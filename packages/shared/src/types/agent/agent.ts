@@ -16,7 +16,6 @@ import type {
   AcpToolCallStatus,
   AcpToolKind,
 } from './acp-tool.js';
-import type { CanvasNodeType } from '../canvas/node.js';
 
 // ==================== Agent Modes ====================
 
@@ -136,104 +135,6 @@ export interface AgentErrorEventData {
 /** `event: end` — sentinel terminator (always last). */
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface AgentEndEventData {}
-
-/**
- * Structured prompt handed to an external (ACP) agent.
- *
- * Built **deterministically** from the raw user message + the canvas
- * selection — no preprocessing LLM is involved. `task` is the user's
- * message forwarded verbatim. `selectedNodes` is a metadata-only table
- * of the nodes the user had selected; the external agent fetches their
- * content on demand through the Huabu Reachback Tool (`read-node <id>`)
- * rather than receiving inlined bodies or file attachments.
- */
-export interface ExternalAgentPrompt {
-  /** The user's raw message, forwarded verbatim. */
-  task: string;
-  /**
-   * Metadata for the nodes the user had selected. Content is NOT
-   * inlined — the agent reads it on demand via `read-node <nodeId>`.
-   */
-  selectedNodes: Array<{
-    /** Canvas node ID — pass straight to `read-node` / `write-node --id`. */
-    nodeId: string;
-    /** Node type (e.g. `note`, `image`). */
-    type: CanvasNodeType;
-    /** Display label, when the node has one. */
-    label?: string;
-    /**
-     * Pre-resolved `nodes/<safeLabel>.md` path. Carried for parity with
-     * the built-in agent; omitted on the external/ACP wire, which reads
-     * by id (`read-node`) and would mis-handle the virtual path.
-     */
-    filename?: string;
-    /**
-     * Short preview line (frontmatter `summary` > content[:120] > src),
-     * picked server-side so the agent can scan the selection without a
-     * `read` per node. Absent when nothing meaningful is available.
-     */
-    preview?: string;
-  }>;
-  /**
-   * The one-shot system preamble (persona + `## Canvas Tools (Reachback)`
-   * docs) prepended to this turn's wire payload. Present only on the
-   * first turn of a freshly-created session — omitted thereafter, since
-   * the agent keeps it in context (see `AcpSessionEntry.systemPreambleSent`).
-   * Carried here so the UI can render the *complete* prompt the agent saw.
-   */
-  systemPreamble?: string;
-  /**
-   * Canvas neighbourhood markdown for an anchored request — the spatial
-   * map of nodes around the anchor (directions, clusters, connections,
-   * and short previews). Mirrors the built-in agent's node-neighbourhood
-   * preamble so both backends see the same surrounding-node context.
-   * Absent for non-anchored turns.
-   */
-  neighbourhood?: string;
-  /**
-   * Off-canvas attachments the user added directly to this turn (text
-   * excerpts, web captures, uploaded files). Unlike {@link selectedNodes},
-   * these are NOT on the canvas, so the external agent cannot fetch them
-   * via `read-node` — their textual content is therefore inlined into
-   * the prompt here. Image attachments additionally ride as base64 ACP
-   * `image` content blocks (resolved separately), with a short locator
-   * note kept here for agents that don't accept images. Absent when the
-   * turn carried no attachments.
-   */
-  attachments?: Array<{
-    /** Attachment kind (`text`, `web`, `pdf`, `file`, `image`). */
-    type: string;
-    /** Display label / filename, when known. */
-    label?: string;
-    /** Source URL, when the attachment came from one. */
-    url?: string;
-    /**
-     * Inlined textual content, or a short locator note for image /
-     * binary attachments that cannot be transmitted as text.
-     */
-    content: string;
-  }>;
-}
-
-/**
- * `event: prepared_prompt` — emitted once per external-agent turn,
- * before the first `text_delta`, carrying the {@link ExternalAgentPrompt}
- * Huabu deterministically built from the user's raw message + canvas
- * selection. Internal-agent turns never emit this.
- *
- * On the (effectively impossible) build failure the server still emits
- * this event with `prompt: null` + an `error` description so the UI can
- * replace its pending placeholder with a concrete failure note (and
- * Huabu falls back to forwarding the raw user message).
- */
-export interface AgentPreparedPromptEventData {
-  /** Structured prompt Huabu built, or `null` on failure. */
-  prompt: ExternalAgentPrompt | null;
-  /** Short alias of the bound external agent (e.g. `'claude'`). */
-  agentAlias: string;
-  /** Reason the preprocessor failed; only set when `prompt === null`. */
-  error?: string;
-}
 
 /**
  * `event: permission_request` — an external (ACP) agent asked the
@@ -356,7 +257,6 @@ export type AgentStreamEvent =
   | { type: 'tool_call'; data: AgentToolCallEventData }
   | { type: 'tool_call_update'; data: AgentToolCallUpdateEventData }
   | { type: 'plan'; data: AgentPlanEventData }
-  | { type: 'prepared_prompt'; data: AgentPreparedPromptEventData }
   | { type: 'permission_request'; data: AgentPermissionRequestEventData }
   | { type: 'config_options_update'; data: AgentConfigOptionsUpdateEventData }
   | { type: 'session_mode_update'; data: AgentSessionModeUpdateEventData }
@@ -379,7 +279,6 @@ export const AGENT_SSE_EVENTS = {
   ToolCall: 'tool_call',
   ToolCallUpdate: 'tool_call_update',
   Plan: 'plan',
-  PreparedPrompt: 'prepared_prompt',
   PermissionRequest: 'permission_request',
   ConfigOptionsUpdate: 'config_options_update',
   SessionModeUpdate: 'session_mode_update',

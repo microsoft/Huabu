@@ -11,16 +11,12 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { prepareExternalAgentPrompt, serializePrompt } from './preprocessor.js';
+import { prepareExternalAgentPrompt } from './preprocessor.js';
 import { buildAgentNodePreview, buildAgentNodeRef } from '../node-ref.js';
 
 import type { NodeNeighbourhoodContext } from '../../canvas/node-neighbourhood.js';
 import type { ChatEnvelope } from '../context/envelope.js';
-import type {
-  CanvasNodeType,
-  ChatAttachment,
-  ExternalAgentPrompt,
-} from '@sediment/shared';
+import type { CanvasNodeType, ChatAttachment } from '@sediment/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
 /** Minimal logger stub — only `debug` is exercised. */
@@ -61,109 +57,134 @@ function makeEnvelope(opts: {
 }
 
 describe('serializePrompt', () => {
-  it('emits the verbatim task and no selected-nodes section when nothing is selected', () => {
-    const prompt: ExternalAgentPrompt = {
-      task: 'Explain the difference between async iterators and generators.',
-      selectedNodes: [],
-    };
-
-    const out = serializePrompt(prompt);
+  it('emits the verbatim task and no selected-nodes section when nothing is selected', async () => {
+    const { serialized } = await prepareExternalAgentPrompt({
+      envelope: makeEnvelope({
+        text: 'Explain the difference between async iterators and generators.',
+      }),
+      agentAlias: 'claude',
+      logger,
+    });
 
     // No context sections → bare task, no XML scaffolding (mirrors the
     // built-in plain-text fast path).
-    expect(out).toBe(
+    expect(serialized).toBe(
       'Explain the difference between async iterators and generators.',
     );
-    expect(out).not.toContain('<selected_nodes>');
+    expect(serialized).not.toContain('<selected_nodes>');
   });
 
-  it('wraps a selected-nodes list in <selected_nodes> when nodes are present', () => {
-    const prompt: ExternalAgentPrompt = {
-      task: 'Compare these notes.',
-      selectedNodes: [
-        { nodeId: 'node-a', type: 'note', label: 'Intro' },
-        { nodeId: 'node-b', type: 'image' },
-      ],
-    };
+  it('wraps a selected-nodes list in <selected_nodes> when nodes are present', async () => {
+    const { serialized } = await prepareExternalAgentPrompt({
+      envelope: makeEnvelope({
+        text: 'Compare these notes.',
+        selection: [
+          { id: 'node-a', type: 'note', label: 'Intro' },
+          { id: 'node-b', type: 'image' },
+        ],
+      }),
+      agentAlias: 'claude',
+      logger,
+    });
 
-    const out = serializePrompt(prompt);
-
-    expect(out).toContain('<selected_nodes>');
-    expect(out).toContain('</selected_nodes>');
-    expect(out).toContain('<node id="node-a" type="note" label="Intro" />');
+    expect(serialized).toContain('<selected_nodes>');
+    expect(serialized).toContain('</selected_nodes>');
+    expect(serialized).toContain(
+      '<node id="node-a" type="note" label="Intro" />',
+    );
     // Label-less node renders with just id + type.
-    expect(out).toContain('<node id="node-b" type="image" />');
+    expect(serialized).toContain('<node id="node-b" type="image" />');
     // The user's words come last, wrapped in <user_request>.
-    expect(out).toContain(
+    expect(serialized).toContain(
       '<user_request>\nCompare these notes.\n</user_request>',
     );
-    expect(out.indexOf('<selected_nodes>')).toBeLessThan(
-      out.indexOf('<user_request>'),
+    expect(serialized.indexOf('<selected_nodes>')).toBeLessThan(
+      serialized.indexOf('<user_request>'),
     );
   });
 
-  it('mentions read-node in the selected-nodes intro', () => {
-    const prompt: ExternalAgentPrompt = {
-      task: 'task',
-      selectedNodes: [{ nodeId: 'n1', type: 'note' }],
-    };
-
-    expect(serializePrompt(prompt)).toContain('read-node <node-id>');
+  it('mentions read-node in the selected-nodes intro', async () => {
+    const { serialized } = await prepareExternalAgentPrompt({
+      envelope: makeEnvelope({
+        text: 'task',
+        selection: [{ id: 'n1', type: 'note' }],
+      }),
+      agentAlias: 'claude',
+      logger,
+    });
+    expect(serialized).toContain('read-node <node-id>');
   });
 
-  it('escapes XML-special characters in labels so the attribute cannot break', () => {
-    const prompt: ExternalAgentPrompt = {
-      task: 'task',
-      selectedNodes: [{ nodeId: 'n1', type: 'note', label: 'a " <b>' }],
-    };
-
-    expect(serializePrompt(prompt)).toContain(
+  it('escapes XML-special characters in labels so the attribute cannot break', async () => {
+    const { serialized } = await prepareExternalAgentPrompt({
+      envelope: makeEnvelope({
+        text: 'task',
+        selection: [{ id: 'n1', type: 'note', label: 'a " <b>' }],
+      }),
+      agentAlias: 'claude',
+      logger,
+    });
+    expect(serialized).toContain(
       '<node id="n1" type="note" label="a &quot; &lt;b&gt;" />',
     );
   });
-  it('wraps off-canvas attachments in <attachments> before the user request', () => {
-    const prompt: ExternalAgentPrompt = {
-      task: 'summarize the attached note',
-      selectedNodes: [],
-      attachments: [
-        { type: 'text', label: 'excerpt', content: 'the quick brown fox' },
-        {
-          type: 'web',
-          label: 'FX outlook',
-          url: 'https://example.com/fx',
-          content: 'continued volatility into Q4',
-        },
-      ],
-    };
+  it('wraps off-canvas attachments in <attachments> before the user request', async () => {
+    const { serialized } = await prepareExternalAgentPrompt({
+      envelope: makeEnvelope({
+        text: 'summarize the attached note',
+        attachments: [
+          {
+            type: 'text',
+            source: 'upload',
+            label: 'excerpt',
+            content: 'the quick brown fox',
+          },
+          {
+            type: 'web',
+            source: 'upload',
+            label: 'FX outlook',
+            url: 'https://example.com/fx',
+            content: 'continued volatility into Q4',
+          },
+        ],
+      }),
+      agentAlias: 'claude',
+      logger,
+    });
 
-    const out = serializePrompt(prompt);
-
-    expect(out).toContain('<attachments>');
-    expect(out).toContain('</attachments>');
-    expect(out).toContain('<attachment type="text" name="excerpt">');
-    expect(out).toContain('the quick brown fox');
-    expect(out).toContain(
+    expect(serialized).toContain('<attachments>');
+    expect(serialized).toContain('</attachments>');
+    expect(serialized).toContain('<attachment type="text">');
+    expect(serialized).toContain('the quick brown fox');
+    expect(serialized).toContain(
       '<attachment type="web" name="FX outlook" url="https://example.com/fx">',
     );
     // The user's words still come last.
-    expect(out.indexOf('<attachments>')).toBeLessThan(
-      out.indexOf('<user_request>'),
+    expect(serialized.indexOf('<attachments>')).toBeLessThan(
+      serialized.indexOf('<user_request>'),
     );
   });
-  it('omits the system preamble by default and prepends it when includeSystem is set', () => {
-    const prompt: ExternalAgentPrompt = {
-      task: 'ZZ_UNIQUE_TASK_BODY',
-      selectedNodes: [],
-    };
-
-    const withoutSystem = serializePrompt(prompt);
+  it('omits the system preamble by default and prepends it when includeSystem is set', async () => {
+    const withoutSystem = (
+      await prepareExternalAgentPrompt({
+        envelope: makeEnvelope({ text: 'ZZ_UNIQUE_TASK_BODY' }),
+        agentAlias: 'claude',
+        logger,
+      })
+    ).serialized;
     expect(withoutSystem).not.toContain('## Canvas Tools (Reachback)');
     expect(withoutSystem).not.toContain('Huabu');
 
-    const withSystem = serializePrompt(prompt, { includeSystem: true });
+    const withSystem = (
+      await prepareExternalAgentPrompt({
+        envelope: makeEnvelope({ text: 'ZZ_UNIQUE_TASK_BODY' }),
+        agentAlias: 'claude',
+        includeSystem: true,
+        logger,
+      })
+    ).serialized;
     expect(withSystem).toContain('## Canvas Tools (Reachback)');
     expect(withSystem).toContain('Huabu');
-    // The preamble precedes the per-turn request body.
     expect(withSystem.indexOf('## Canvas Tools (Reachback)')).toBeLessThan(
       withSystem.indexOf('ZZ_UNIQUE_TASK_BODY'),
     );
@@ -179,10 +200,6 @@ describe('prepareExternalAgentPrompt', () => {
       logger,
     });
 
-    expect(result.prompt).toEqual({
-      task: '/compact please',
-      selectedNodes: [],
-    });
     expect(result.serialized).toBe('/compact please');
     // Even when asked to include it, a slash short-circuit must not —
     // so the flag stays unsent for the next real turn.
@@ -202,11 +219,7 @@ describe('prepareExternalAgentPrompt', () => {
       logger,
     });
 
-    expect(result.prompt.task).toBe('do something');
-    expect(result.prompt.selectedNodes).toEqual([
-      { nodeId: 'frame-1', type: 'frame', label: 'Group' },
-      { nodeId: 'child-1', type: 'note', label: 'Child' },
-    ]);
+    expect(result.serialized).toContain('do something');
     expect(result.serialized).toContain(
       '<node id="child-1" type="note" label="Child" />',
     );
@@ -224,14 +237,9 @@ describe('prepareExternalAgentPrompt', () => {
     expect(result.includedSystem).toBe(true);
     expect(result.serialized).toContain('## Canvas Tools (Reachback)');
     expect(result.serialized).toContain('first message');
-    // The structured prompt also carries the rendered preamble so the
-    // UI can show the complete prompt the agent saw.
-    expect(result.prompt.systemPreamble).toContain(
-      '## Canvas Tools (Reachback)',
-    );
   });
 
-  it('omits systemPreamble from the structured prompt when includeSystem is unset', async () => {
+  it('does not prepend the preamble when includeSystem is unset', async () => {
     const result = await prepareExternalAgentPrompt({
       envelope: makeEnvelope({ text: 'later message' }),
       agentAlias: 'claude',
@@ -239,7 +247,7 @@ describe('prepareExternalAgentPrompt', () => {
     });
 
     expect(result.includedSystem).toBe(false);
-    expect(result.prompt.systemPreamble).toBeUndefined();
+    expect(result.serialized).not.toContain('## Canvas Tools (Reachback)');
   });
 
   it('renders a canvas-neighbourhood section when the envelope carries one', async () => {
@@ -293,7 +301,6 @@ describe('prepareExternalAgentPrompt', () => {
       logger,
     });
 
-    expect(result.prompt.neighbourhood).toBeUndefined();
     expect(result.serialized).not.toContain('<canvas_neighbourhood>');
   });
 
@@ -323,10 +330,6 @@ describe('prepareExternalAgentPrompt', () => {
       logger,
     });
 
-    expect(result.prompt.task).toBe('/compact now');
-    expect(result.prompt.neighbourhood).toBeDefined();
-    // The command must lead so ACP still recognises it; the
-    // neighbourhood is appended afterwards as supplementary context.
     expect(result.serialized.startsWith('/compact now')).toBe(true);
     expect(result.serialized).toContain('<canvas_neighbourhood>');
     // No system preamble for slash turns, even when asked.
@@ -351,20 +354,13 @@ describe('prepareExternalAgentPrompt', () => {
       logger,
     });
 
-    expect(result.prompt.attachments).toEqual([
-      {
-        type: 'text',
-        label: 'excerpt',
-        content: 'Q3 exposure rose 12% on fx volatility.',
-      },
-    ]);
     expect(result.serialized).toContain('<attachments>');
     expect(result.serialized).toContain(
       'Q3 exposure rose 12% on fx volatility.',
     );
   });
 
-  it('reduces a content-less image upload to a locator note', async () => {
+  it('drops a content-less image upload from the wire (no resolvable bytes)', async () => {
     const result = await prepareExternalAgentPrompt({
       envelope: makeEnvelope({
         text: 'look at this',
@@ -381,11 +377,7 @@ describe('prepareExternalAgentPrompt', () => {
       logger,
     });
 
-    expect(result.prompt.attachments).toHaveLength(1);
-    expect(result.prompt.attachments?.[0].content).toContain(
-      'sent as vision pixels',
-    );
     // No resolvable bytes for a blob: url, so no wire image block.
-    expect(result.images).toEqual([]);
+    expect(result.blocks.some((b) => b.type === 'image')).toBe(false);
   });
 });

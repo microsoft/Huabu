@@ -11,7 +11,6 @@
 import type {
   AssistantPart,
   ChatAttachment,
-  ExternalAgentPrompt,
   IntentCandidate,
 } from '@sediment/shared';
 
@@ -84,19 +83,4 @@ export type ChatMessage =
       selectedIntent: string;
       /** Custom intent text typed by user. */
       customIntent?: string;
-    }
-  | {
-      id: string;
-      role: 'prepared-prompt';
-      /**
-       * Structured prompt Huabu deterministically built for the external
-       * agent. `null` while the agent's connection is still being
-       * established (pending state) or when the turn failed before a
-       * prompt was delivered (in which case `error` is set).
-       */
-      prompt: ExternalAgentPrompt | null;
-      /** Short alias of the bound external agent (`'claude'`, etc.). */
-      agentAlias: string;
-      /** Failure detail; presence flips the card to its failed state. */
-      error?: string;
     };

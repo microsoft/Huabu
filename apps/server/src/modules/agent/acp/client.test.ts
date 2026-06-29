@@ -164,8 +164,10 @@ describe('AcpAgentClient — orphan session/update replay', () => {
     // Open a prompt so the turn handler is installed. We don't await
     // the prompt's completion — we just need the handler registered.
     const turnUpdates: AcpSessionUpdate[] = [];
-    const promptPromise = client.prompt(sessionId, 'hello', (u) =>
-      turnUpdates.push(u),
+    const promptPromise = client.prompt(
+      sessionId,
+      [{ type: 'text', text: 'hello' }],
+      (u) => turnUpdates.push(u),
     );
 
     // Let the SDK write the session/prompt request out via the
@@ -360,7 +362,7 @@ describe('AcpAgentClient — permission handshake', () => {
       | undefined;
     const promptPromise = client.prompt(
       sessionId,
-      'hi',
+      [{ type: 'text', text: 'hi' }],
       () => {},
       undefined,
       (req) => {
@@ -422,7 +424,7 @@ describe('AcpAgentClient — permission handshake', () => {
     let requestId = '';
     const promptPromise = client.prompt(
       sessionId,
-      'hi',
+      [{ type: 'text', text: 'hi' }],
       () => {},
       undefined,
       (req) => {

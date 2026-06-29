@@ -49,6 +49,7 @@ import type {
   AcpSessionPersistedMeta,
 } from './session-store.js';
 import type { ChatEnvelope } from '../context/envelope.js';
+import type { ContentPart } from '../context/render/attachments.js';
 import type { AcpTurnOverlay } from '../store/chat-thread-store.js';
 import type { AssistantMessage, Context } from '@earendil-works/pi-ai';
 import type {
@@ -58,11 +59,7 @@ import type {
   AcpSessionMode,
   AcpSessionUpdate,
 } from '@sediment/shared';
-import type {
-  AgentStreamEvent,
-  AvailableCommand,
-  ExternalAgentPrompt,
-} from '@sediment/shared';
+import type { AgentStreamEvent, AvailableCommand } from '@sediment/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
 /** ACP stop reasons we know about; mapped onto pi-ai `stopReason`. */
@@ -1115,12 +1112,8 @@ export async function* runAcpAgent(
     logger,
   });
 
-  // 3. Preprocess the user message into a structured ExternalAgentPrompt
-  //    BEFORE opening the queue, so the UI sees `prepared_prompt` strictly
-  //    before any `text_delta`. On failure we fall back to the raw text
-  //    and emit a `prepared_prompt` event with `prompt: null + error` so
-  //    the UI can surface the failure (and we still serve the user).
-  let preparedPrompt: ExternalAgentPrompt | null = null;
+  // 3. Preprocess the user message into the ACP wire blocks BEFORE
+  //    opening the queue. On failure we fall back to the raw text.
   let preparedError: string | undefined;
   let promptPayload = rawText;
   // Whether this turn's payload actually carried the one-shot system
@@ -1128,7 +1121,7 @@ export async function* runAcpAgent(
   // below — so a failed turn (or a slash-command short-circuit, which
   // never includes it) re-sends the preamble on the next real turn.
   let includedSystem = false;
-  let promptImages: Array<{ mimeType: string; data: string }> = [];
+  let promptBlocks: ContentPart[] = [{ type: 'text', text: rawText }];
   try {
     const result = await prepareExternalAgentPrompt({
       envelope: opts.envelope,
@@ -1137,10 +1130,9 @@ export async function* runAcpAgent(
       includeSystem: !entry.systemPreambleSent,
       logger,
     });
-    preparedPrompt = result.prompt;
     promptPayload = result.serialized;
     includedSystem = result.includedSystem;
-    promptImages = result.images;
+    promptBlocks = result.blocks;
   } catch (err) {
     preparedError = err instanceof Error ? err.message : String(err);
     logger.warn(
@@ -1148,6 +1140,7 @@ export async function* runAcpAgent(
       '[acp] preprocessor failed — falling back to raw user text',
     );
     promptPayload = serializeRawPrompt(rawText);
+    promptBlocks = [{ type: 'text', text: promptPayload }];
   }
 
   // Optional developer aid: dump the exact text payload handed to ACP
@@ -1168,28 +1161,6 @@ export async function* runAcpAgent(
       logger: opts.debugPrompt.logger,
     });
   }
-
-  // Persist a sidecar marker on the user's history slot so chat
-  // history can rehydrate the PreparedPromptCard. Mirrors the
-  // `[SYSTEM Error]` / `[SYSTEM Interrupted]` pattern used elsewhere.
-  context.messages.push({
-    role: 'user',
-    content: `[SYSTEM PreparedPrompt] ${JSON.stringify({
-      agentAlias: binding.alias,
-      prompt: preparedPrompt,
-      error: preparedError,
-    })}`,
-    timestamp: Date.now(),
-  });
-
-  yield {
-    type: 'prepared_prompt',
-    data: {
-      agentAlias: binding.alias,
-      prompt: preparedPrompt,
-      error: preparedError,
-    },
-  };
 
   // 4. Bridge the per-update callback into an async iterable via a queue.
   const queue: AgentStreamEvent[] = [];
@@ -1265,7 +1236,7 @@ export async function* runAcpAgent(
   void entry.client
     .prompt(
       entry.sessionId,
-      promptPayload,
+      promptBlocks,
       (update) => {
         const evt = acpUpdateToStreamEvent(update, logger);
         if (!evt) {
@@ -1353,7 +1324,6 @@ export async function* runAcpAgent(
         queue.push({ type: 'permission_request', data: req });
         wake();
       },
-      promptImages,
     )
     .then((result) => {
       stopReason = result.stopReason;

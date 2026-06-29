@@ -37,6 +37,7 @@ import {
 import { FsCapabilityError, handleFsReadTextFile } from './capabilities/fs.js';
 import { getLogger } from '../../../utils/logger.js';
 
+import type { ContentPart } from '../context/render/attachments.js';
 import type { AgentConnection, AcpMessage } from '@agentlet/protocol';
 import type {
   AcpSessionUpdate,
@@ -51,6 +52,11 @@ const ACP_PROTOCOL_VERSION = 1;
 const JSON_RPC_METHOD_NOT_FOUND = -32601;
 const JSON_RPC_INVALID_PARAMS = -32602;
 const JSON_RPC_INTERNAL_ERROR = -32603;
+
+/** Exhaustiveness guard: a never-reached default must take `never`. */
+function assertNever(x: never): never {
+  throw new Error(`Unhandled content part: ${JSON.stringify(x)}`);
+}
 
 /** ACP `PermissionOption` (subset) — `optionId` is echoed back in the response. */
 interface PermissionOption {
@@ -453,17 +459,16 @@ export class AcpAgentClient {
    * and suspended until {@link resolvePermission} answers (or a timeout /
    * abort cancels them). Without it, permission requests auto-allow.
    *
-   * `images` are appended after the text as ACP `image` content blocks
-   * (base64 vision bytes); whether the agent consumes them depends on its
-   * advertised image capability.
+   * `blocks` is the generic per-turn content (text + base64 image parts,
+   * extensible to audio/resource) mapped 1:1 onto ACP content blocks;
+   * whether the agent consumes images depends on its advertised capability.
    */
   async prompt(
     sessionId: string,
-    text: string,
+    blocks: ContentPart[],
     onUpdate: SessionUpdateHandler,
     signal?: AbortSignal,
     onPermissionRequest?: PermissionNotifier,
-    images?: Array<{ mimeType: string; data: string }>,
   ): Promise<AcpPromptResult> {
     if (this._closed) throw new Error('AcpAgentClient is closed');
     if (this.updateHandlers.has(sessionId)) {
@@ -490,14 +495,23 @@ export class AcpAgentClient {
     try {
       const result = await this.sdk.prompt({
         sessionId,
-        prompt: [
-          { type: 'text', text },
-          ...(images ?? []).map((img) => ({
-            type: 'image' as const,
-            data: img.data,
-            mimeType: img.mimeType,
-          })),
-        ],
+        // Map our content parts onto ACP content blocks. Explicit per-type
+        // so a new `ContentPart` variant (audio / resource) breaks here
+        // until it gets its own block, rather than silently collapsing.
+        prompt: blocks.map((b) => {
+          switch (b.type) {
+            case 'image':
+              return {
+                type: 'image' as const,
+                data: b.data,
+                mimeType: b.mimeType,
+              };
+            case 'text':
+              return { type: 'text' as const, text: b.text };
+            default:
+              return assertNever(b);
+          }
+        }),
       });
       return result as AcpPromptResult;
     } finally {

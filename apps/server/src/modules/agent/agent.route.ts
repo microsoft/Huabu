@@ -51,7 +51,6 @@ import type {
   ChatHistoryItem,
   ChatHistoryResponse,
   ContextTokensResponse,
-  ExternalAgentPrompt,
   ForkThreadBody,
   ForkThreadResponse,
   ImageGenerationData,
@@ -419,8 +418,9 @@ function buildHistoryFromTurns(
 
     for (const msg of turn.transcript) {
       if (msg.role === 'user') {
-        // Only `[SYSTEM …]` status / prepared-prompt rows appear in a
-        // transcript — the real user message is the envelope above.
+        // Only `[SYSTEM …]` status rows appear in a transcript — the
+        // real user message is the envelope above. Legacy
+        // `[SYSTEM PreparedPrompt]` rows (now retired) are ignored.
         const content = extractUserText(msg).trim();
         if (content.startsWith('[SYSTEM Interrupted]')) {
           pendingStatus = { role: 'status', status: 'interrupted' };
@@ -429,27 +429,6 @@ function buildHistoryFromTurns(
         if (content.startsWith('[SYSTEM Error]')) {
           const detail = content.slice('[SYSTEM Error] '.length);
           pendingStatus = { role: 'status', status: 'error', detail };
-          continue;
-        }
-        if (content.startsWith('[SYSTEM PreparedPrompt]')) {
-          flushStatus();
-          const payload = content.slice('[SYSTEM PreparedPrompt] '.length);
-          try {
-            const parsed = JSON.parse(payload) as {
-              agentAlias: string;
-              prompt: ExternalAgentPrompt | null;
-              error?: string;
-            };
-            messages.push({
-              role: 'prepared-prompt',
-              agentAlias: parsed.agentAlias,
-              prompt: parsed.prompt,
-              ...(parsed.error ? { error: parsed.error } : {}),
-            });
-            currentAssistant = null;
-          } catch {
-            // Malformed — drop silently rather than break history.
-          }
           continue;
         }
         // Any other unexpected user-role row in a transcript is ignored.

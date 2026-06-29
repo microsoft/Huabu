@@ -39,3 +39,9 @@ export const ACP_PROFILE: RenderProfile = {
   includeSelectionVisuals: true,
   leadWithTask: false,
 };
+
+/** ACP slash-command turn: command must lead so the agent recognises it. */
+export const ACP_SLASH_PROFILE: RenderProfile = {
+  ...ACP_PROFILE,
+  leadWithTask: true,
+};
