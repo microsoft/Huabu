@@ -35,7 +35,7 @@ export const INTERNAL_PROFILE: RenderProfile = {
 /** External/ACP agent: read-by-id, selection pixels, task last. */
 export const ACP_PROFILE: RenderProfile = {
   nodeReadVerb: 'read-node',
-  includeFileName: false,
+  includeFileName: true,
   includeSelectionVisuals: true,
   leadWithTask: false,
 };
