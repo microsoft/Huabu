@@ -15,6 +15,7 @@ const toc: TocEntry[] = [
   { id: 'creating-notes', label: 'Creating Notes' },
   { id: 'editing', label: 'Editing' },
   { id: 'sizing', label: 'Sizing' },
+  { id: 'dropping-blocks-in', label: 'Dropping blocks in' },
   { id: 'toolbar', label: 'Toolbar' },
 ];
 
@@ -66,6 +67,16 @@ export default function NoteNode() {
         content. Drag the bottom-right resize handle to set a fixed width and
         height; toggle back to auto from the toolbar. Auto-height Notes inside a
         column or row Frame trigger reflow whenever the text changes.
+      </P>
+
+      <H2>Dropping blocks in</H2>
+      <P>
+        Drop a Note block onto another Note to merge them. On the tile it
+        appends to the end; in the expanded panel it inserts after the cursor
+        block. The target shows a blue ring while you hover. Default is move —
+        hold the copy modifier (<Kbd>Option</Kbd> on macOS, <Kbd>Ctrl</Kbd>
+        elsewhere) to keep the source. A locked Note can&apos;t receive blocks,
+        so the drop spawns a new node instead.
       </P>
 
       <H2>Toolbar</H2>

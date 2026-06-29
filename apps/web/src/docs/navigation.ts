@@ -159,6 +159,11 @@ const groupsRaw: RawGroup[] = [
         load: () => import('./sections/nodes/Pdf'),
       },
       {
+        to: '/docs/nodes/office',
+        label: 'Office Node',
+        load: () => import('./sections/nodes/Office'),
+      },
+      {
         to: '/docs/nodes/video',
         label: 'Video Node',
         load: () => import('./sections/nodes/Video'),
