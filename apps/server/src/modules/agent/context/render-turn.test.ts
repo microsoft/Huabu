@@ -14,7 +14,10 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { renderEnvelopeMessages, rebuildContextMessages } from './chat-turn.js';
+import {
+  renderEnvelopeMessages,
+  rebuildContextMessages,
+} from './render-turn.js';
 import { buildAgentNodePreview } from '../node-ref.js';
 
 import type { ChatEnvelope, ResolvedSkill } from './envelope.js';

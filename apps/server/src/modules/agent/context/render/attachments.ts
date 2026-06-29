@@ -4,7 +4,7 @@
  * Turns a turn's attachments (off-canvas uploads + node excerpts) into
  * the pi-ai content parts that sit inside the `<attachments>` block. The
  * user's own words are composed separately by the orchestrator
- * (`chat-turn.ts`) so they land last, after every context section.
+ * (`render-turn.ts`) so they land last, after every context section.
  *
  * Output shape (one `<attachment>` element per item; image attachments
  * additionally contribute a base64 vision part):

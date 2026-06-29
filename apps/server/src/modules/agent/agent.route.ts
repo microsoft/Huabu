@@ -22,8 +22,8 @@ import { loadAgent } from '../../prompt/index.js';
 import { runAcpAgent } from '../agent/acp/service.js';
 import { runAgent } from '../agent/agent.service.js';
 import { projectUserVisibleAttachments } from '../agent/context/attachment-chips.js';
-import { rebuildContextMessages } from '../agent/context/chat-turn.js';
 import { buildChatEnvelope } from '../agent/context/envelope.js';
+import { rebuildContextMessages } from '../agent/context/render-turn.js';
 import { getLLMModel } from '../agent/llm.js';
 import { readWorkspaceMemory } from '../agent/memory/index.js';
 import {

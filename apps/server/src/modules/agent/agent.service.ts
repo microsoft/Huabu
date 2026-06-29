@@ -15,8 +15,8 @@
 
 import { Agent, convertToLlm } from '@earendil-works/pi-agent-core';
 
-import { renderEnvelopeMessages } from './context/chat-turn.js';
 import { dumpAssembledPrompt } from './context/debug-prompt.js';
+import { renderEnvelopeMessages } from './context/render-turn.js';
 import { ensureApiKey, getLLMModel } from './llm.js';
 import { buildToolsForScope, type ToolScope } from './tools/index.js';
 

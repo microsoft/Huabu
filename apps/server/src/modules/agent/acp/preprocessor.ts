@@ -26,7 +26,7 @@
  * The per-turn wire text is built **inline as XML** (`<selected_nodes>`,
  * `<canvas_neighbourhood>`, `<attachments>`, `<user_request>`) — the same
  * tag vocabulary the built-in agent emits (`buildContextSections` in
- * `context/chat-turn.ts`), so both backends present one structure. On
+ * `context/render-turn.ts`), so both backends present one structure. On
  * the first turn of a freshly-created session the one-shot persona +
  * `## Canvas Tools (Reachback)` preamble (`system_prompt.md`, rendered
  * via {@link renderPromptFile}) is prepended in front of it. The
@@ -216,7 +216,7 @@ export function prepareExternalAgentPrompt(
  * The per-turn body is built inline as XML — the SAME tag vocabulary
  * (`<selected_nodes>`, `<canvas_neighbourhood>`, `<attachments>`,
  * `<user_request>`) the built-in agent emits (`buildContextSections` in
- * `context/chat-turn.ts`), with the user's words LAST — so a reader
+ * `context/render-turn.ts`), with the user's words LAST — so a reader
  * (human or model) sees one structure across both backends. A bare task
  * (no context sections) is sent unwrapped, mirroring the built-in
  * plain-text fast path. The inner guidance legitimately differs:

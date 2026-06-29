@@ -20,7 +20,7 @@
  */
 
 import { prepareExternalAgentPrompt } from '../src/modules/agent/acp/preprocessor.js';
-import { renderEnvelopeMessages } from '../src/modules/agent/context/chat-turn.js';
+import { renderEnvelopeMessages } from '../src/modules/agent/context/render-turn.js';
 import { buildAgentNodePreview } from '../src/modules/agent/node-ref.js';
 
 import type {

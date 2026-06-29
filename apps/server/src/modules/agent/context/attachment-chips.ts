@@ -7,7 +7,7 @@
  * the prompt text / vision parts the MODEL sees. This file is the
  * USER-facing / persistence side: pure `ChatAttachment` domain logic,
  * independent of pi-ai and of the `[SYSTEM …]` render encoding. It is
- * shared by the chat-turn renderer (to derive the LLM sketch-raster
+ * shared by the turn renderer (to derive the LLM sketch-raster
  * hint) and by the history builder (to rebuild a reloaded user
  * message's attachment chips), so both agree on the visible subset.
  */
