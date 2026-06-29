@@ -1228,7 +1228,7 @@ export async function* runAcpAgent(
       sessionId: entry.sessionId,
       profileId: binding.profileId,
       promptLength: promptPayload.length,
-      preprocessed: preparedPrompt !== null,
+      preprocessed: !preparedError,
     },
     '[acp] session/prompt dispatch',
   );
