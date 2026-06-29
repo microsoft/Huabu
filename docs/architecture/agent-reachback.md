@@ -7,8 +7,8 @@
 > The host-agnostic **transport and protocol** (how the tool script is
 > distributed to spawned agents and what environment it runs in) lives in the
 > agentlet layer. See the
-> [**Agent Reachback Interface**](../external/agentlet/spec/agent-reachback.md)
-> and [`protocol.md` §9 — Resource Distribution](../external/agentlet/spec/protocol.md#resource-distribution).
+> [**Agent Reachback Interface**](../../external/agentlet/spec/agent-reachback.md)
+> and [`protocol.md` §9 — Resource Distribution](../../external/agentlet/spec/protocol.md#resource-distribution).
 > This document covers only the **Huabu-specific** tool and server API.
 
 ## Overview
@@ -103,7 +103,7 @@ flowchart TD
 
 HRT relies on the standard Reachback environment injected by the agentlet daemon
 (`AGENTLET_REACHBACK_DIR`, `AGENTLET_SERVER`, `AGENTLET_TOKEN`) — see the
-[Agent Reachback Interface §2](../external/agentlet/spec/agent-reachback.md#2-environment-provisioning).
+[Agent Reachback Interface §2](../../external/agentlet/spec/agent-reachback.md#2-environment-provisioning).
 Huabu adds two host-specific variables via `sessionSpec.env` at spawn time:
 
 | Variable          | Description                                                                                                                                                     |
@@ -241,7 +241,7 @@ node ${AGENTLET_REACHBACK_DIR}/huabu-reachback-tool.mjs ask-agent --no-save-sess
 ## Sync/Async Behavior & Timeout Resistance
 
 HRT follows the interface's recommended transport model (see
-[Agent Reachback Interface §4](../external/agentlet/spec/agent-reachback.md#4-transport-model-cli-first)):
+[Agent Reachback Interface §4](../../external/agentlet/spec/agent-reachback.md#4-transport-model-cli-first)):
 all commands are **blocking** — they run until the operation completes, then
 print the result and exit, like `curl`.
 
@@ -384,8 +384,8 @@ Design notes:
 
 > The agentlet-side pieces (env registry, `server/sendResource` distribution,
 > `sessionSpec.env` forwarding) are defined by the
-> [Agent Reachback Interface](../external/agentlet/spec/agent-reachback.md) and
-> [`protocol.md` §9](../external/agentlet/spec/protocol.md#resource-distribution).
+> [Agent Reachback Interface](../../external/agentlet/spec/agent-reachback.md) and
+> [`protocol.md` §9](../../external/agentlet/spec/protocol.md#resource-distribution).
 > The items below are Huabu's responsibilities.
 
 ### Component: Huabu Reachback Tool (HRT)

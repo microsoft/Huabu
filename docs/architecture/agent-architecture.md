@@ -9,13 +9,13 @@
 
 服务端 agent 循环跑在 `@earendil-works/pi-agent-core` 的 `Agent` 类上。三条调用入口共用同一套工具 / skill 体系，但触发方式不同：
 
-| 入口                   | 模式                             | 入口文件                                                                                                                                                                      |
-| ---------------------- | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Chat                   | `ask` / `operate`（`AgentMode`） | [agent.route.ts](../apps/server/src/modules/agent/agent.route.ts) → [agent.service.ts](../apps/server/src/modules/agent/agent.service.ts) `runAgent()`                        |
-| Sketch 识别            | `sketch`                         | [intent.route.ts](../apps/server/src/modules/agent/intent.route.ts) → [sketch.service.ts](../apps/server/src/modules/agent/sketch.service.ts)（`runAgent` 多轮 tool-calling） |
-| Prompt 节点 / Question | 复用 chat                        | 走 chat 入口                                                                                                                                                                  |
+| 入口                   | 模式                             | 入口文件                                                                                                                                                                            |
+| ---------------------- | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Chat                   | `ask` / `operate`（`AgentMode`） | [agent.route.ts](../../apps/server/src/modules/agent/agent.route.ts) → [agent.service.ts](../../apps/server/src/modules/agent/agent.service.ts) `runAgent()`                        |
+| Sketch 识别            | `sketch`                         | [intent.route.ts](../../apps/server/src/modules/agent/intent.route.ts) → [sketch.service.ts](../../apps/server/src/modules/agent/sketch.service.ts)（`runAgent` 多轮 tool-calling） |
+| Prompt 节点 / Question | 复用 chat                        | 走 chat 入口                                                                                                                                                                        |
 
-**SSE 协议**：服务端只发 [`AgentStreamEvent`](../packages/shared/src/types/agent/agent.ts) 自定义事件（`meta` / `text_delta` / `thinking_delta` / `tool_call` / `tool_call_update` / `plan` / `prepared_prompt` / `done` / `error` / `end`）；pi-agent-core 的内部事件被 `runAgent` 映射后转出，前端 [useAgentStream.ts](../apps/web/src/hooks/useAgentStream.ts) 不感知 pi-agent-core。内部 pi-ai 工具调用与外部 ACP 代理共用同一套 `tool_call` / `tool_call_update` 信封：内部回合在 `tool_call` 上携带 `internalToolName` 以驱动前端 render variant 派发并触发本地副作用（如 `canvas_commands` 执行），外部 ACP 回合不带该字段、统一渲染为 `generic` variant。
+**SSE 协议**：服务端只发 [`AgentStreamEvent`](../../packages/shared/src/types/agent/agent.ts) 自定义事件（`meta` / `text_delta` / `thinking_delta` / `tool_call` / `tool_call_update` / `plan` / `prepared_prompt` / `done` / `error` / `end`）；pi-agent-core 的内部事件被 `runAgent` 映射后转出，前端 [useAgentStream.ts](../../apps/web/src/hooks/useAgentStream.ts) 不感知 pi-agent-core。内部 pi-ai 工具调用与外部 ACP 代理共用同一套 `tool_call` / `tool_call_update` 信封：内部回合在 `tool_call` 上携带 `internalToolName` 以驱动前端 render variant 派发并触发本地副作用（如 `canvas_commands` 执行），外部 ACP 回合不带该字段、统一渲染为 `generic` variant。
 
 **关键运行时特性**：
 
@@ -60,11 +60,11 @@ apps/server/src/modules/agent/tools/
 | `canvas_commands`    | 写        | 单工具承包 14 个命令；handler 不直接落盘，注入 `origin / provenance / labelSource` 后由 SSE → 前端 `useAgentStream` 走 `executeCanvasCommands` 生效。                                     |
 | `web_search`         | 其他      | Tavily。                                                                                                                                                                                  |
 
-**模式划分**（[definitions.ts](../apps/server/src/modules/agent/tools/definitions.ts) 末尾）：
+**模式划分**（[definitions.ts](../../apps/server/src/modules/agent/tools/definitions.ts) 末尾）：
 
 - `askTools`：所有读 + `web_search`，**无** `canvas_commands`。
 - `operateTools`：在 ask 之上加 `canvas_commands`。
-- `sketch`：read + inspect_nodes + inspect_edges + canvas_commands（在 [agents/sketch/AGENT.md](../apps/server/src/prompt/agents/sketch/AGENT.md) 声明）。
+- `sketch`：read + inspect_nodes + inspect_edges + canvas_commands（在 [agents/sketch/AGENT.md](../../apps/server/src/prompt/agents/sketch/AGENT.md) 声明）。
 
 ### 2.3 设计原则
 
@@ -77,7 +77,7 @@ apps/server/src/modules/agent/tools/
 
 CREATE_NODES, CREATE_QUESTION, DELETE_NODES, MERGE_NODE_DATA, SET_NODE_PARENT, DISSOLVE_FRAME, SET_NODE_GEOMETRY, REORDER_NODES, CONNECT_NODES, DISCONNECT_EDGES, SET_EDGE_STYLE, ALIGN_NODES, DISTRIBUTE_NODES。
 
-Schema 在 [schemas/command.ts](../apps/server/src/modules/agent/tools/schemas/command.ts)，是 [`CanvasCommand`](../packages/shared/src/types/canvas/command.ts) 的 agent 子集（排除 UI-only 的 `SET_NODE_LOCKED / SET_NODE_SELECTION / CHANGE_NODE_TYPE`）。详见 [canvas-command-architecture.md](./canvas-command-architecture.md)。
+Schema 在 [schemas/command.ts](../../apps/server/src/modules/agent/tools/schemas/command.ts)，是 [`CanvasCommand`](../../packages/shared/src/types/canvas/command.ts) 的 agent 子集（排除 UI-only 的 `SET_NODE_LOCKED / SET_NODE_SELECTION / CHANGE_NODE_TYPE`）。详见 [canvas-command-architecture.md](./canvas-command-architecture.md)。
 
 ---
 
@@ -109,7 +109,7 @@ Per-canvas 覆盖：`<workspace>/<canvasId>/skills/<id>/SKILL.md`（含 `referen
 
 ### 3.3 Skill 内容约束
 
-- SKILL.md 写**语义和 idiom**；schema / 字段名以 [schemas/](../apps/server/src/modules/agent/tools/schemas/) 为唯一来源，skill 不内联 TypeBox。
+- SKILL.md 写**语义和 idiom**；schema / 字段名以 [schemas/](../../apps/server/src/modules/agent/tools/schemas/) 为唯一来源，skill 不内联 TypeBox。
 - 跨 surface 复用的canvas 读取与操作知识放 `canvas`；pipeline 专属（如 sketch 手势 → 命令映射）独立 skill 并 `appliesTo` 收紧。
 - 长内容下沉到 `references/`，从 SKILL.md 用 `read("skills/<id>/references/<file>.md")` 显式链接。
 
@@ -129,7 +129,7 @@ Per-canvas 覆盖：`<workspace>/<canvasId>/skills/<id>/SKILL.md`（含 `referen
 
 - 触发条件：LLM 出现"截图里看到的 X 节点 vs 工具返回的 nodeId 对不上"trace；或给 prompt 节点加截图通道时。
 - 范围：
-  - 审计 [apps/web/src/handler/canvasCommand/utils/screenshot.ts](../apps/web/src/handler/canvasCommand/utils/screenshot.ts) 的 nodeId 角标化；
+  - 审计 [apps/web/src/handler/canvasCommand/utils/screenshot.ts](../../apps/web/src/handler/canvasCommand/utils/screenshot.ts) 的 nodeId 角标化；
   - `inspect_nodes({inRect})` 输出加 `viewportRelative?: {x,y,w,h}`；
   - 评估给 chat agent 加 opt-in 的 `take_viewport_snapshot`（目前只有 intent 端用截图）。
 
@@ -142,7 +142,7 @@ Per-canvas 覆盖：`<workspace>/<canvasId>/skills/<id>/SKILL.md`（含 `referen
 
 ### 4.4 旁路（不在本文档主线，仅指引）
 
-- External agent permission policy 占位 `approveAll` —— [external_agent_design.md](./external_agent_design.md#L430)。
+- External agent permission policy 占位 `approveAll` —— [huabu-acp-client-plan.md](../proposals/huabu-acp-client-plan.md)。
 
 ---
 
@@ -167,5 +167,5 @@ Per-canvas 覆盖：`<workspace>/<canvasId>/skills/<id>/SKILL.md`（含 `referen
 
 - [canvas-command-architecture.md](./canvas-command-architecture.md) — `CanvasUiIntent / CanvasCommand / CanvasExecution` 三层模型。
 - [agent-context.md](./agent-context.md) — 注入 system prompt 的上下文构造。
-- [sketch-intent-pipeline.md](./sketch-intent-pipeline.md) — Sketch 识别完整链路。
-- [external_agent_design.md](./external_agent_design.md) — 外部 agent 适配设计。
+- [sketch-node.md](./sketch-node.md) — Sketch 节点与识别管线的完整链路。
+- [huabu-acp-client-plan.md](../proposals/huabu-acp-client-plan.md) — 外部 agent 适配设计。

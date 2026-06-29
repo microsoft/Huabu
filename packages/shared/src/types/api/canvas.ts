@@ -2,7 +2,7 @@
  * Canvas API Types
  * REST API request/response types for canvas operations.
  *
- * Per docs/api-design.md: schemas are the single source of truth, types
+ * Per docs/architecture/api-design.md: schemas are the single source of truth, types
  * derived via `z.infer`.
  */
 
@@ -254,7 +254,7 @@ export interface CreateCanvasResponse {
 // so clients can apply the diff locally without re-executing the
 // engine themselves.
 //
-// See `docs/headless-executor-plan.md` §M2 and the implementation at
+// See `docs/proposals/headless-executor-plan.md` §M2 and the implementation at
 // `apps/server/src/modules/canvas/canvas-executor.ts`.
 
 /**

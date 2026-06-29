@@ -2,7 +2,7 @@
  * LLM Provider & Model Configuration Types
  *
  * Shared types & schemas for dynamic provider/model switching between
- * web and server. Per docs/api-design.md: schemas are the single source
+ * web and server. Per docs/architecture/api-design.md: schemas are the single source
  * of truth, types derived via `z.infer`.
  */
 

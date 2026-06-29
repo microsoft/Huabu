@@ -2,7 +2,7 @@
  * Canvas Events API
  *
  * Wire types for batch upload / read of `<canvasId>/.history/events.jsonl`.
- * Per docs/api-design.md the schemas are the single source of truth and
+ * Per docs/architecture/api-design.md the schemas are the single source of truth and
  * the TS types are derived via `z.infer`. The web bundle imports these
  * as `import type` only so zod stays out of the production browser code.
  */

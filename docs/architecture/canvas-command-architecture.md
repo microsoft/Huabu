@@ -4,7 +4,7 @@
 
 Canvas mutations use a three-layer model:
 
-1. **`CanvasUiIntent`** — web-only user interaction semantics (`apps/web/src/canvas/uiIntent.ts`)
+1. **`CanvasUiIntent`** — web-only user interaction semantics (`apps/web/src/handler/canvasCommand/uiIntent.ts`)
 2. **`CanvasCommand`** — shared executable JSON command schema (`packages/shared/src/types/canvas/command.ts`)
 3. **`CanvasExecution`** — batch/transaction boundary for validation, undo, action trace, and side effects (`packages/shared/src/types/canvas/execution.ts`)
 
@@ -38,7 +38,7 @@ Resolvers must not:
 
 ### Implementation
 
-Types and resolvers: `apps/web/src/canvas/uiIntent.ts` + `apps/web/src/canvas/resolvers/`.
+Types and resolvers: `apps/web/src/handler/canvasCommand/uiIntent.ts` + `apps/web/src/handler/canvasCommand/resolvers/`.
 
 22 intent types: 8 composite gestures (need selection/clipboard/drag/viewport resolution) + 14 direct-mapping intents (thin wrappers to `CanvasCommand`). See `uiIntent.ts` for the full union.
 
@@ -74,19 +74,19 @@ Every `CanvasCommand`:
 
 ### Command Catalog
 
-See `packages/shared/src/types/canvas/command.ts` for the full discriminated union (currently 16 command types). Summary (non-exhaustive):
+See `packages/shared/src/types/canvas/command.ts` for the full discriminated union (17 command types). Summary:
 
-| Category         | Commands                            |
-| ---------------- | ----------------------------------- |
-| Node lifecycle   | `CREATE_NODES`, `DELETE_NODES`      |
-| Node editing     | `MERGE_NODE_DATA`                   |
-| Structure        | `SET_NODE_PARENT`, `DISSOLVE_FRAME` |
-| Geometry         | `SET_NODE_GEOMETRY`                 |
-| Selection / view | `SET_NODE_SELECTION`                |
-| Ordering         | `REORDER_NODES`                     |
-| Locking          | `SET_NODE_LOCKED`                   |
-| Edge graph       | `CONNECT_NODES`, `DISCONNECT_EDGES` |
-| Algorithms       | `ALIGN_NODES`, `DISTRIBUTE_NODES`   |
+| Category         | Commands                                                |
+| ---------------- | ------------------------------------------------------- |
+| Node lifecycle   | `CREATE_NODES`, `DELETE_NODES`, `CREATE_QUESTION`       |
+| Node editing     | `MERGE_NODE_DATA`, `CHANGE_NODE_TYPE`                   |
+| Structure        | `SET_NODE_PARENT`, `DISSOLVE_FRAME`, `SET_FRAME_LAYOUT` |
+| Geometry         | `SET_NODE_GEOMETRY`                                     |
+| Selection / view | `SET_NODE_SELECTION`                                    |
+| Ordering         | `REORDER_NODES`                                         |
+| Locking          | `SET_NODE_LOCKED`                                       |
+| Edge graph       | `CONNECT_NODES`, `DISCONNECT_EDGES`, `SET_EDGE_STYLE`   |
+| Algorithms       | `ALIGN_NODES`, `DISTRIBUTE_NODES`                       |
 
 ### Explicit IDs
 
@@ -115,10 +115,14 @@ Node ids use `node-<uuid>`, edge ids use `edge-<uuid>`. Callers that need to ref
 
 ### Implementation
 
-- `apps/web/src/canvas/executor.ts` — `executeCanvasCommands(execution, state) -> ExecutorOutput`
-- `apps/web/src/canvas/runtime.ts` — `CanvasReadState`, `CanvasWriteResult`
-- `apps/web/src/canvas/postEffects.ts` — `runPostEffects()`: edge reroute, preprocessing trigger, delete tracking, CSS transition cleanup
-- `apps/web/src/canvas/commands/` — one handler file per command type (15 files) + `index.ts` (registry `HANDLERS` + `COMMAND_META`) + `types.ts`
+The engine is shared, in `packages/shared/src/canvas-engine/`:
+
+- `executor.ts` — `executeCanvasCommands(execution, state) -> ExecutorOutput`
+- `commands/` — one handler per command type (17) + `index.ts` (`HANDLERS` registry + `COMMAND_META`) + `types.ts`
+- `postEffects.ts` — pure post-commit effects (edge reroute)
+- `interfaces.ts` — `CanvasReadState`, `CanvasWriteResult`; `delta.ts` / `diff.ts` — self-inverting delta types
+
+Web-only pieces stay in `apps/web/src/handler/canvasCommand/`: `uiIntent.ts`, `resolvers/`, `preprocess.ts`, `postEffects.web.ts` (transition cleanup, deferred frame-fit, history snapshot, preprocessing trigger).
 
 ### Store Integration
 
@@ -155,19 +159,13 @@ The LLM emits `CanvasCommand` JSON directly from the tool-call layer; no server 
 
 ### Server Executor
 
-`apps/server/src/modules/agent/tools/executor.ts` handles `canvas_commands` via `executeCanvasCommands()`:
+`apps/server/src/modules/agent/tools/handlers/canvas-write.ts` handles `canvas_commands`: it injects `NodeOrigin` into `CREATE_NODES` then calls `executeOnServer()` ([canvas-executor.ts](../../apps/server/src/modules/canvas/canvas-executor.ts)) — the **command batch executes on the server** through the shared engine, persists `canvas.json` + node `.md` sidecars, appends one `delta-log.jsonl` row, and returns the structural deltas + per-command results. The LLM gets real success/error feedback. (`sketch-recognized` origin is the exception: it still returns commands to the client for the Accept/Revert overlay.)
 
-1. Injects `NodeOrigin` (`ai-research` or `ai-operate`) into `CREATE_NODES` commands based on agent mode.
-2. Returns the validated command batch as a JSON tool result — **does not apply commands or mutate canvas state**.
-3. The tool result is streamed to the web client as an SSE `tool_result` event.
+Same engine runs both sides; the only authority is the server. `POST /api/canvas/:canvasId/execute` is the shared entry, guarded by a per-canvas mutex (headless executor, M2).
 
-### Web-Side Execution
+### Web-Side Apply
 
-`ChatPanel` intercepts `tool_result` events for `canvas_commands`, parses the commands, and calls `canvasStore.executeCommands(commands, 'agent')`:
-
-1. `executeCommands()` wraps the commands in `CanvasExecution { source: 'agent' }`.
-2. The shared `executeCanvasCommands()` executor (`apps/web/src/canvas/executor.ts`) processes them through the same handler registry and post-effects pipeline as UI commands.
-3. Agent-originated commands skip the `beginGesture()` snapshot guard (no UI gesture involved).
+The web client receives the server's deltas (via tool-result + SSE broadcast) and applies them with `applyDeltas` — no local re-execution. Version-gated (`localVersion >= toVersion` skips). UI gestures still run the engine locally for optimistic feedback then POST to `/execute`; agent-originated batches are pure apply.
 
 ### IntentAction Convergence
 

@@ -2,14 +2,14 @@
 
 > Status: Plan (not yet executed)
 > Last updated: 2026-05-09
-> Related: [agent-context.md](./agent-context.md) · [canvas-storage-refactor.md](./canvas-storage-refactor.md)
+> Related: [agent-context.md](../architecture/agent-context.md) · [canvas-storage.md](../architecture/canvas-storage.md)
 
 ## 0. 目标与非目标
 
 **目标**
 
 - 把目前只存在内存里、容量 10、无时间戳的 `actionHistory`(见
-  [apps/web/src/store/canvasStore.ts](../apps/web/src/store/canvasStore.ts))
+  [apps/web/src/store/canvasStore.ts](../../apps/web/src/store/canvasStore.ts))
   持久化到 `<canvasId>/.history/events.jsonl`。
 - 给 agent 一份**长期、可查询**的用户行为轨迹,用于推断意图。
 - 在喂给 LLM 的那一刻把 JSONL 渲染成 Markdown 表格,最大化模型可读性。
@@ -40,7 +40,7 @@
 
 ### 2.1 新增 IO 原语
 
-[apps/server/src/modules/storage/io.ts](../apps/server/src/modules/storage/io.ts) 增加:
+[apps/server/src/modules/storage/io.ts](../../apps/server/src/modules/storage/io.ts) 增加:
 
 ```ts
 /** Append a single JSON object as one line. Atomic per-line on POSIX. */
@@ -75,7 +75,7 @@ export function readJsonLines<T>(filePath: string, limit?: number): T[] {
 
 ### 2.2 路径切换
 
-[apps/server/src/modules/storage/paths.ts](../apps/server/src/modules/storage/paths.ts):
+[apps/server/src/modules/storage/paths.ts](../../apps/server/src/modules/storage/paths.ts):
 
 ```ts
 // before:  events.json
@@ -87,7 +87,7 @@ export function eventsPath(canvasId: string): string {
 
 ### 2.3 `CanvasStore` API 升级
 
-[apps/server/src/modules/storage/canvas-store.ts](../apps/server/src/modules/storage/canvas-store.ts):
+[apps/server/src/modules/storage/canvas-store.ts](../../apps/server/src/modules/storage/canvas-store.ts):
 
 ```ts
 appendEvent(payload: RecentAction): void {
@@ -128,7 +128,7 @@ export interface CanvasEventRecord {
 
 ### 4.1 服务端路由
 
-[apps/server/src/modules/canvas/canvas.route.ts](../apps/server/src/modules/canvas/canvas.route.ts) 新增:
+[apps/server/src/modules/canvas/canvas.route.ts](../../apps/server/src/modules/canvas/canvas.route.ts) 新增:
 
 ```
 POST /api/canvas/:canvasId/events    body: { events: CanvasEventRecord[] }
@@ -163,7 +163,7 @@ canvasEvents: (id: string) => `/canvas/${enc(id)}/events`,
 
 ### 4.3 store 触发点
 
-[apps/web/src/store/canvasStore.ts](../apps/web/src/store/canvasStore.ts) 新增 outgoing 缓冲:
+[apps/web/src/store/canvasStore.ts](../../apps/web/src/store/canvasStore.ts) 新增 outgoing 缓冲:
 
 ```ts
 const eventBuffer = new Map<string, CanvasEventRecord[]>(); // canvasId -> events
@@ -225,7 +225,7 @@ export function formatRecentActionsAsMarkdown(
 
 ### 5.2 拼进 system message
 
-[apps/server/src/modules/agent/agent.route.ts](../apps/server/src/modules/agent/agent.route.ts) 接到请求后:
+[apps/server/src/modules/agent/agent.route.ts](../../apps/server/src/modules/agent/agent.route.ts) 接到请求后:
 
 ```ts
 const events = getCanvasStore(canvasId).readEvents(40); // long window
@@ -259,7 +259,7 @@ PR 3 期间**双轨保留**:
 
 ### 6.1 工具定义
 
-[apps/server/src/modules/agent/tools/definitions.ts](../apps/server/src/modules/agent/tools/definitions.ts) 加:
+[apps/server/src/modules/agent/tools/definitions.ts](../../apps/server/src/modules/agent/tools/definitions.ts) 加:
 
 ```ts
 export const getCanvasActionsParamsSchema = Type.Object({
@@ -292,7 +292,7 @@ export const getCanvasActionsTool: ToolDefinition = {
 
 ### 6.2 Handler
 
-[apps/server/src/modules/agent/tools/handlers/canvas-read.ts](../apps/server/src/modules/agent/tools/handlers/canvas-read.ts) 加:
+[apps/server/src/modules/agent/tools/handlers/canvas-read.ts](../../apps/server/src/modules/agent/tools/handlers/canvas-read.ts) 加:
 
 ```ts
 export async function handleGetCanvasActions(
@@ -363,17 +363,17 @@ export async function handleGetCanvasActions(
 
 ## 11. 涉及文件速查
 
-| 模块                   | 文件                                                                                                                          |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| 存储 IO                | [apps/server/src/modules/storage/io.ts](../apps/server/src/modules/storage/io.ts)                                             |
-| 路径                   | [apps/server/src/modules/storage/paths.ts](../apps/server/src/modules/storage/paths.ts)                                       |
-| CanvasStore            | [apps/server/src/modules/storage/canvas-store.ts](../apps/server/src/modules/storage/canvas-store.ts)                         |
-| 迁移                   | [apps/server/src/modules/storage/migrate.ts](../apps/server/src/modules/storage/migrate.ts)                                   |
-| Canvas 路由            | [apps/server/src/modules/canvas/canvas.route.ts](../apps/server/src/modules/canvas/canvas.route.ts)                           |
-| Agent 上下文           | [apps/server/src/modules/agent/agent.route.ts](../apps/server/src/modules/agent/agent.route.ts)                               |
-| 工具定义               | [apps/server/src/modules/agent/tools/definitions.ts](../apps/server/src/modules/agent/tools/definitions.ts)                   |
-| 工具 handler           | [apps/server/src/modules/agent/tools/handlers/canvas-read.ts](../apps/server/src/modules/agent/tools/handlers/canvas-read.ts) |
-| 前端 store             | [apps/web/src/store/canvasStore.ts](../apps/web/src/store/canvasStore.ts)                                                     |
-| 前端 API               | apps/web/src/api/canvasEvents.ts (新增)                                                                                       |
-| Shared schema          | packages/shared/src/types/agent/events.ts (新增)                                                                              |
-| 既有 RecentAction 类型 | [packages/shared/src/types/agent/context.ts](../packages/shared/src/types/agent/context.ts)                                   |
+| 模块                   | 文件                                                                                                                             |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| 存储 IO                | [apps/server/src/modules/storage/io.ts](../../apps/server/src/modules/storage/io.ts)                                             |
+| 路径                   | [apps/server/src/modules/storage/paths.ts](../../apps/server/src/modules/storage/paths.ts)                                       |
+| CanvasStore            | [apps/server/src/modules/storage/canvas-store.ts](../../apps/server/src/modules/storage/canvas-store.ts)                         |
+| 迁移                   | [apps/server/src/modules/storage/migrate.ts](../../apps/server/src/modules/storage/migrate.ts)                                   |
+| Canvas 路由            | [apps/server/src/modules/canvas/canvas.route.ts](../../apps/server/src/modules/canvas/canvas.route.ts)                           |
+| Agent 上下文           | [apps/server/src/modules/agent/agent.route.ts](../../apps/server/src/modules/agent/agent.route.ts)                               |
+| 工具定义               | [apps/server/src/modules/agent/tools/definitions.ts](../../apps/server/src/modules/agent/tools/definitions.ts)                   |
+| 工具 handler           | [apps/server/src/modules/agent/tools/handlers/canvas-read.ts](../../apps/server/src/modules/agent/tools/handlers/canvas-read.ts) |
+| 前端 store             | [apps/web/src/store/canvasStore.ts](../../apps/web/src/store/canvasStore.ts)                                                     |
+| 前端 API               | apps/web/src/api/canvasEvents.ts (新增)                                                                                          |
+| Shared schema          | packages/shared/src/types/agent/events.ts (新增)                                                                                 |
+| 既有 RecentAction 类型 | [packages/shared/src/types/agent/context.ts](../../packages/shared/src/types/agent/context.ts)                                   |

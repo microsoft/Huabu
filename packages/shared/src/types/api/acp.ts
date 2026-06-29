@@ -10,7 +10,7 @@
  * pair it manually — it is invisible infrastructure surfaced only when
  * something has gone wrong (see `AcpAgentletStatus.lastError`).
  *
- * Per docs/api-design.md, zod schemas defined here are server-side
+ * Per docs/architecture/api-design.md, zod schemas defined here are server-side
  * truth; the web bundle imports the inferred TS types only
  * (`import type { ... } from '@sediment/shared'`) to keep zod out of
  * the production browser bundle.
@@ -535,7 +535,7 @@ export interface AcpPermissionDecisionResponse {
 
 // ─── Zod schemas (server-side only) ────────────────────────────────────
 //
-// Defined here per docs/api-design.md so every public HTTP boundary
+// Defined here per docs/architecture/api-design.md so every public HTTP boundary
 // gets field-level validation via `safeParse`. The web bundle imports
 // the TS types only.
 

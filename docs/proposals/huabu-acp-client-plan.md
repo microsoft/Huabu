@@ -311,11 +311,11 @@ v1 用 Layer 2 (preprocessor) + Layer 1 (fs/read) 组合；Layer 3 (MCP) 是 Pha
 
 ## Appendix — 实现参考
 
-| 你要做的事                  | 参考                                                                                                                                        |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| ACP 客户端状态机            | [`agentlet/packages/ui/src/stores/session.ts`](../../../agentlet/packages/ui/src/stores/session.ts) — 直接抄逻辑                            |
-| AgentletServer embed        | [`agentlet/packages/server/src/server.ts`](../../../agentlet/packages/server/src/server.ts) — `handleUpgrade`                               |
-| Sediment SSE 事件类型       | [`packages/shared/src/types/agent/agent.ts`](../packages/shared/src/types/agent/agent.ts) `AgentStreamEvent`                                |
-| Sediment 沙箱               | [`apps/server/src/modules/agent/tools/handlers/fs-sandbox.ts`](../apps/server/src/modules/agent/tools/handlers/fs-sandbox.ts) `safeResolve` |
-| Sediment 现有 agent service | [`apps/server/src/modules/agent/agent.service.ts`](../apps/server/src/modules/agent/agent.service.ts) `runAgent`                            |
-| ACP 官方 spec               | https://agentclientprotocol.com                                                                                                             |
+| 你要做的事                  | 参考                                                                                                                                           |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| ACP 客户端状态机            | [`agentlet/packages/ui/src/stores/session.ts`](../../../agentlet/packages/ui/src/stores/session.ts) — 直接抄逻辑                               |
+| AgentletServer embed        | [`agentlet/packages/server/src/server.ts`](../../../agentlet/packages/server/src/server.ts) — `handleUpgrade`                                  |
+| Sediment SSE 事件类型       | [`packages/shared/src/types/agent/agent.ts`](../../packages/shared/src/types/agent/agent.ts) `AgentStreamEvent`                                |
+| Sediment 沙箱               | [`apps/server/src/modules/agent/tools/handlers/fs-sandbox.ts`](../../apps/server/src/modules/agent/tools/handlers/fs-sandbox.ts) `safeResolve` |
+| Sediment 现有 agent service | [`apps/server/src/modules/agent/agent.service.ts`](../../apps/server/src/modules/agent/agent.service.ts) `runAgent`                            |
+| ACP 官方 spec               | https://agentclientprotocol.com                                                                                                                |

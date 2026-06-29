@@ -15,7 +15,7 @@
  *
  * Wire contracts (`EnsureAcpSessionRequest` / `EnsureAcpSessionResponse`
  * / `AcpThreadCommandsResponse`) live in `@sediment/shared`; this route
- * validates every body with `safeParse` per docs/api-design.md.
+ * validates every body with `safeParse` per docs/architecture/api-design.md.
  *
  * Auth: relies on the global Basic-Auth gate (app.ts). No additional
  * per-route check — the agentlet bridge itself is gated by
