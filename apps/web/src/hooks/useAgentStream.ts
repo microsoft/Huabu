@@ -411,13 +411,6 @@ interface StreamEventContext {
    */
   threadId: string;
   assistantId: string;
-  /**
-   * ID of the pending PreparedPromptCard message inserted by
-   * `startStream` for external-agent turns. When the server emits its
-   * `prepared_prompt` event we update this message in place; when
-   * absent (reconnect path) we append a fresh one.
-   */
-  preparedPromptId?: string;
 }
 
 /**
@@ -487,6 +480,7 @@ function mergeToolPart(
     variant?: AssistantToolVariant;
     toolName?: string;
     title?: string;
+    command?: string;
     toolKind?: AssistantToolPart['toolKind'];
     status?: AssistantToolPart['status'];
     locations?: AssistantToolPart['locations'];
@@ -501,6 +495,7 @@ function mergeToolPart(
 
   // Shared ToolPartBase fields — identical assembly for every variant.
   const title = patch.title ?? existing?.title ?? toolCallId;
+  const command = patch.command ?? existing?.command;
   const toolKind = patch.toolKind ?? existing?.toolKind;
   const status = patch.status ?? existing?.status;
   // Locations/content are append-only per ACP §session/update spec.
@@ -519,6 +514,7 @@ function mergeToolPart(
     kind: 'tool' as const,
     toolCallId,
     title,
+    ...(command !== undefined ? { command } : {}),
     ...(toolKind !== undefined ? { toolKind } : {}),
     ...(status !== undefined ? { status } : {}),
     ...(mergedLocations.length > 0 ? { locations: mergedLocations } : {}),
@@ -824,6 +820,7 @@ export function handleStreamEvent(
             // the wire shape carries only ACP-spec fields.
             variant: 'generic',
             title: data.title,
+            command: data.command,
             toolKind: data.toolKind,
             status: data.status,
             locations: data.locations,
@@ -912,36 +909,6 @@ export function handleStreamEvent(
         ],
       };
     });
-  } else if (event.type === 'prepared_prompt') {
-    // External-agent only: the server's preprocessor finished. If
-    // startStream already inserted a pending placeholder we update it
-    // in place; otherwise (reconnect path) we append a fresh one.
-    const pendingId = ctx.preparedPromptId;
-    const existing = pendingId
-      ? ownerMessages.find((m) => m.id === pendingId)
-      : undefined;
-    if (existing) {
-      updateMessage(ctx.threadId, pendingId!, (m) =>
-        m.role === 'prepared-prompt'
-          ? {
-              ...m,
-              prompt: event.data.prompt,
-              agentAlias: event.data.agentAlias,
-              ...(event.data.error
-                ? { error: event.data.error }
-                : { error: undefined }),
-            }
-          : m,
-      );
-    } else {
-      addMessage(ctx.threadId, {
-        id: createId('preparedPrompt'),
-        role: 'prepared-prompt',
-        prompt: event.data.prompt,
-        agentAlias: event.data.agentAlias,
-        ...(event.data.error ? { error: event.data.error } : {}),
-      });
-    }
   } else if (
     event.type === 'session_mode_update' ||
     event.type === 'config_options_update' ||
@@ -1208,24 +1175,6 @@ export function useAgentStream(): UseAgentStreamReturn {
       // picked for this thread.
       const agentBinding = useChatStore.getState().agentBinding;
 
-      // External-binding only: insert a pending "Preparing prompt …"
-      // card immediately so the user sees something the moment they
-      // hit send. The server's `prepared_prompt` event will populate
-      // this same message in place. If preprocessing fails server-side
-      // we get a `prepared_prompt` with `error` set — still the same
-      // slot, no flash. We capture its ID into the StreamEventContext
-      // so `handleStreamEvent` knows which message to update.
-      let preparedPromptId: string | undefined;
-      if (agentBinding?.kind === 'external') {
-        preparedPromptId = createId('preparedPrompt');
-        addMessage(threadId, {
-          id: preparedPromptId,
-          role: 'prepared-prompt',
-          prompt: null,
-          agentAlias: agentBinding.alias,
-        });
-      }
-
       // Build the canvas context, dropping the anchored question node
       // from `selectedNodes` for the same reason as `selectedNodeIds`
       // above — it is the conversation anchor, not a separate source.
@@ -1250,7 +1199,6 @@ export function useAgentStream(): UseAgentStreamReturn {
               handleStreamEvent(event, {
                 threadId,
                 assistantId,
-                preparedPromptId,
               });
             },
             onError: (err) => {
@@ -1268,20 +1216,6 @@ export function useAgentStream(): UseAgentStreamReturn {
               }
               setThreadLoading(threadId, false);
               releaseAbort();
-              // If the turn failed before the server emitted its
-              // `prepared_prompt` (e.g. the agent never connected), the
-              // pending "Connecting to <agent>…" card would otherwise
-              // spin forever. Resolve it to the failed state so the
-              // spinner stops; the detailed reason shows in the status
-              // row appended below. Guard on still-pending so a card the
-              // server already populated isn't clobbered.
-              if (preparedPromptId) {
-                updateMessage(threadId, preparedPromptId, (m) =>
-                  m.role === 'prepared-prompt' && m.prompt === null && !m.error
-                    ? { ...m, error: err.message }
-                    : m,
-                );
-              }
               addMessage(threadId, {
                 id: createId('status'),
                 role: 'status',

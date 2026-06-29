@@ -165,6 +165,15 @@ export function buildAgentNodeRef(input: NodeRefInput): AgentNodeRef {
  * frontmatter `summary` > `content[:120]` > `src`. Returns `undefined`
  * when nothing meaningful is available.
  *
+ * The result is always flattened to a single line: node bodies are
+ * markdown (headings, list items, blank lines), and a multi-line
+ * preview would break any single-line container it is dropped into —
+ * most visibly the node-neighbourhood list (`- "label" [type] —
+ * <preview>`), where an embedded newline spawns spurious list items /
+ * headings. Whitespace runs (including newlines) collapse to one space
+ * BEFORE truncation so the 120-char budget is spent on content, not
+ * layout.
+ *
  * Exported separately from {@link buildAgentNodePreview} so callers
  * that need the bare string (without an enclosing ref) can reuse the
  * exact ladder.
@@ -173,15 +182,20 @@ export function extractAgentNodePreview(
   input: NodePreviewInput,
 ): string | undefined {
   if (typeof input.summary === 'string' && input.summary.trim()) {
-    return input.summary.trim();
+    return flattenPreview(input.summary);
   }
   if (typeof input.content === 'string' && input.content.trim()) {
-    return input.content.slice(0, NODE_PREVIEW_MAX_LENGTH);
+    return flattenPreview(input.content);
   }
   if (typeof input.src === 'string' && input.src.trim()) {
-    return input.src;
+    return input.src.trim();
   }
   return undefined;
+}
+
+/** Collapse whitespace to single spaces, then truncate to the cap. */
+function flattenPreview(raw: string): string {
+  return raw.replace(/\s+/g, ' ').trim().slice(0, NODE_PREVIEW_MAX_LENGTH);
 }
 
 /** Build the L1 ref + preview. */

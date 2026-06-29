@@ -58,9 +58,8 @@ ask / operate 两个 chat agent 都拿到三个 memory write 工具。**只在�
 
 **注入策略**：
 
-- **首轮**：route 在第一条 message 前推一条 `[SYSTEM Workspace memory ...]`，把 `.huabu.md` 内容塞给 agent（保证 cross-canvas 偏好对首句生效）。见 [agent.route.ts](../apps/server/src/modules/agent/agent.route.ts) 的 isFirstTurn 块。
-- **后续轮**：不再主动注入。Skill catalogue 和 memory 入口在 system prompt 的"Available skills / memory"段里被列出来，agent 自己判断要不要 `read()`。
-- `[SYSTEM` 开头的 user message 在 chat 历史渲染时被自动剔除，前端无感。
+- **每轮**：route 把 `.huabu.md` 内容作为 `<workspace_memory>` 标签块拼到内置 agent 的 system prompt 末尾（保证 cross-canvas 偏好在每一轮稳定生效，且对 prompt cache 友好）。见 [agent.route.ts](../apps/server/src/modules/agent/agent.route.ts) 组装 `systemPrompt` 处。仅内置 pi-agent 路径；外部 / ACP 路径有自己的 preamble，不读 workspace memory。
+- **Skill / memory 入口**：在 system prompt 的"Available skills / memory"段里被列出来，agent 自己判断要不要 `read()`。
 
 Canvas memory **永远是 pull-only** — 体积偏大、情境性强，由 agent 决定是否拉。
 

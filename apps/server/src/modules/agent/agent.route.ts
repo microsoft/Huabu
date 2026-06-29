@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Unified Agent Route
  *
  * Single SSE endpoint that handles all modes: chat, agent.
@@ -9,537 +9,52 @@
  * GET  /api/agent/history/:threadId — Load conversation history
  */
 
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
-
 import {
   AGENT_SSE_EVENTS,
   agentCanvasIdQuerySchema,
   agentRequestSchema,
   createId,
   forkThreadBodySchema,
-  variantForInternalTool,
 } from '@sediment/shared';
 
-import {
-  getSkill,
-  loadAgent,
-  renderAgentTemplate,
-} from '../../prompt/index.js';
+import { loadAgent } from '../../prompt/index.js';
 import { runAcpAgent } from '../agent/acp/service.js';
 import { runAgent } from '../agent/agent.service.js';
+import { buildChatEnvelope } from '../agent/conversation/envelope.js';
+import { rebuildContextMessages } from '../agent/conversation/prompt/build-prompt.js';
+import { buildHistoryFromTurns } from '../agent/conversation/transcript/history.js';
 import { getLLMModel } from '../agent/llm.js';
 import { readWorkspaceMemory } from '../agent/memory/index.js';
-import { buildAgentNodeRef } from '../agent/node-ref.js';
-import { isUserInvokableSkill } from '../agent/skills.route.js';
 import {
-  readChatParts,
-  writeChatParts,
-} from '../agent/store/chat-parts-store.js';
-import { loadContext, saveContext } from '../agent/store/chat-store.js';
-import { snapshotNodesToArtifacts } from '../agent/tools/handlers/snapshot-node.js';
-import {
-  appendMetadataTags,
-  stripMetadataTags,
-} from '../agent/user-message-metadata.js';
-import {
-  ARTIFACT_URL_REGEX,
-  resolveArtifactImageUrl,
-} from '../artifact/utils.js';
-import { renderNodeNeighbourhoodMarkdown } from '../canvas/node-neighbourhood.js';
-import { getCanvasStore } from '../storage/index.js';
+  appendTurn,
+  clearActiveTurn,
+  emptyAcpOverlay,
+  finalizeActiveTurn,
+  loadTurns,
+  writeActiveTurn,
+} from '../agent/store/chat-thread-store.js';
 
-import type { AgentNodeRef } from '../agent/node-ref.js';
-import type { ChatPartsSidecar } from '../agent/store/chat-parts-store.js';
+import type { ChatTurnRecord } from '../agent/store/chat-thread-store.js';
 import type { AssistantMessage, Context } from '@earendil-works/pi-ai';
 import type {
   AgentCanvasIdQuery,
   AgentRequest,
   AgentStreamEvent,
   ApiResult,
-  AssistantHistoryPart,
-  ChatAttachment,
   ChatHistoryItem,
   ChatHistoryResponse,
   ContextTokensResponse,
-  ExternalAgentPrompt,
   ForkThreadBody,
   ForkThreadResponse,
-  ImageGenerationData,
-  SnapshotNodesData,
   StopThreadResponse,
-  ToolResponse,
-  WebSearchToolResponse,
-  WireSelectionNode,
 } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
 // ==================== Helpers ====================
 
-/**
- * Hard cap on the decoded byte size of an image we are willing to
- * inline as base64 in a vision content part. Anything larger is
- * dropped (an explanatory text part is emitted in its place so the
- * agent can request a downsampled version) so a hostile or
- * accidentally-huge artifact cannot blow up the Node process — and,
- * just as importantly, so the resulting request body stays below
- * every upstream LLM provider's body-size limit. Most providers
- * we target reject requests around 8–10 MB total; vision-capable
- * Copilot endpoints can be tighter still. 4 MB per image leaves
- * head-room for system prompt + tool schemas + multiple attachments
- * without tripping `413 Request Entity Too Large` from the provider.
- *
- * Applies uniformly to:
- *  - external `http(s)://` images fetched into memory below,
- *  - canvas-scoped `data:` URLs already resolved upstream,
- *  - pre-rendered sketch snapshots (whose PNG size is also
- *    bounded at the source by `CLUSTER_MAX_PIXELS`).
- */
-const MAX_INLINE_IMAGE_BYTES = 4 * 1024 * 1024;
-
-/** Decoded byte size of a base64 string (no allocation). */
-function base64DecodedByteLength(b64: string): number {
-  const len = b64.length;
-  if (len === 0) return 0;
-  let padding = 0;
-  if (b64.charCodeAt(len - 1) === 61 /* '=' */) padding++;
-  if (b64.charCodeAt(len - 2) === 61 /* '=' */) padding++;
-  return Math.floor((len * 3) / 4) - padding;
-}
-
 function getOrCreateThreadId(value: unknown): string {
   if (typeof value === 'string' && value.trim().length > 0) return value;
   return createId('thread');
-}
-
-/**
- * Outcome of resolving an image URL for vision inlining.
- *
- * - `inline`: we have base64 bytes the LLM can see.
- * - `skipped`: we resolved the URL but the image was too large to
- *   inline (`reason: 'too_large'`) or the source wasn't an image
- *   (`reason: 'not_image'` / `'fetch_failed'`). The caller should
- *   surface a textual placeholder instead of dropping the part
- *   silently — the agent then knows to ask for a downsampled
- *   version or to inspect the node directly.
- */
-type ResolvedImage =
-  | { kind: 'inline'; data: string; mimeType: string }
-  | {
-      kind: 'skipped';
-      reason: 'too_large' | 'not_image' | 'fetch_failed';
-      sizeBytes?: number;
-    };
-
-function parseDataUrl(url: string): { mimeType: string; data: string } | null {
-  const match = /^data:([^;]+);base64,(.+)$/.exec(url);
-  if (!match) return null;
-  return { mimeType: match[1], data: match[2] };
-}
-
-async function resolveImageUrl(
-  url: string,
-  defaultCanvasId: string | null,
-): Promise<ResolvedImage> {
-  // Canvas-scoped artifacts + already-baked data: URLs go through the
-  // shared helper. It returns the input unchanged for unrelated URLs
-  // (external http(s), bare paths, etc.).
-  //
-  // `defaultCanvasId` is used when `url` is a bare artifact key
-  // (`<id><ext>`) rather than a full URL. Bare keys are the canonical
-  // form that the front-end now sends; full URLs are kept for legacy
-  // / external references.
-  const resolved = await resolveArtifactImageUrl(
-    url,
-    (canvasId, filename) => {
-      try {
-        return getCanvasStore(canvasId).resolveArtifactFilePath(filename);
-      } catch {
-        return null;
-      }
-    },
-    defaultCanvasId,
-  );
-  if (resolved.startsWith('data:')) {
-    const parsed = parseDataUrl(resolved);
-    if (!parsed) {
-      return { kind: 'skipped', reason: 'not_image' };
-    }
-    // Apply the same byte cap we enforce on external fetches — a
-    // multi-MB canvas artifact would otherwise sail through and tip
-    // the request over the upstream LLM's body limit.
-    const sizeBytes = base64DecodedByteLength(parsed.data);
-    if (sizeBytes > MAX_INLINE_IMAGE_BYTES) {
-      return { kind: 'skipped', reason: 'too_large', sizeBytes };
-    }
-    return { kind: 'inline', data: parsed.data, mimeType: parsed.mimeType };
-  }
-
-  // External image URLs: fetch and inline as base64 so the LLM can see them.
-  if (resolved.startsWith('http://') || resolved.startsWith('https://')) {
-    try {
-      const res = await fetch(resolved, {
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (!res.ok) return { kind: 'skipped', reason: 'fetch_failed' };
-      const contentType = res.headers.get('content-type') ?? '';
-      if (!contentType.startsWith('image/')) {
-        return { kind: 'skipped', reason: 'not_image' };
-      }
-
-      // Cap the inlined payload so a hostile / accidentally-huge URL
-      // (e.g. a multi-GB camera RAW served from a CDN) cannot exhaust
-      // the Node process's heap. We honour Content-Length up-front when
-      // present, and stream-read otherwise so we can stop reading the
-      // moment the cap is exceeded — without this, `arrayBuffer()`
-      // happily buffers the whole response regardless of size.
-      const declaredSize = Number(res.headers.get('content-length') ?? '');
-      if (
-        Number.isFinite(declaredSize) &&
-        declaredSize > MAX_INLINE_IMAGE_BYTES
-      ) {
-        return {
-          kind: 'skipped',
-          reason: 'too_large',
-          sizeBytes: declaredSize,
-        };
-      }
-
-      const body = res.body;
-      if (!body) {
-        // No streamable body — fall back to the buffered path but still
-        // bound the result.
-        const buffer = Buffer.from(await res.arrayBuffer());
-        if (buffer.byteLength > MAX_INLINE_IMAGE_BYTES) {
-          return {
-            kind: 'skipped',
-            reason: 'too_large',
-            sizeBytes: buffer.byteLength,
-          };
-        }
-        return {
-          kind: 'inline',
-          data: buffer.toString('base64'),
-          mimeType: contentType.split(';')[0],
-        };
-      }
-
-      const reader = body.getReader();
-      const chunks: Uint8Array[] = [];
-      let total = 0;
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        if (!value) continue;
-        total += value.byteLength;
-        if (total > MAX_INLINE_IMAGE_BYTES) {
-          // Release the stream so the underlying connection can close.
-          await reader.cancel().catch(() => {});
-          return { kind: 'skipped', reason: 'too_large', sizeBytes: total };
-        }
-        chunks.push(value);
-      }
-      const buffer = Buffer.concat(chunks);
-      return {
-        kind: 'inline',
-        data: buffer.toString('base64'),
-        mimeType: contentType.split(';')[0],
-      };
-    } catch {
-      return { kind: 'skipped', reason: 'fetch_failed' };
-    }
-  }
-
-  // Unknown scheme (bare relative path, etc.) — we can't load bytes.
-  return { kind: 'skipped', reason: 'fetch_failed' };
-}
-
-/**
- * Build a pi-ai user message content array, supporting text + images.
- *
- * Attachment types handled:
- *  - image  → resolve URL to base64 and include as vision input
- *  - pdf    → resolve URL; will be sent as image for vision analysis
- *  - text   → inline content as text part (e.g. text excerpted from a node)
- *  - file   → use content if available, otherwise try reading from artifact
- *  - web    → inline content as text part
- */
-async function buildUserContent(
-  text: string,
-  attachments: ChatAttachment[] | undefined,
-  canvasId: string | null,
-): Promise<
-  | string
-  | Array<
-      | { type: 'text'; text: string }
-      | { type: 'image'; data: string; mimeType: string }
-    >
-> {
-  if (!attachments || attachments.length === 0) return text;
-
-  const parts: Array<
-    | { type: 'text'; text: string }
-    | { type: 'image'; data: string; mimeType: string }
-  > = [{ type: 'text', text }];
-
-  for (const att of attachments) {
-    const label = att.label ?? att.filename ?? 'attachment';
-    // Collapse the singular `originNodeId` and the plural `originNodeIds`
-    // into one list. Singular is the historical 1:1 case (PDF excerpt,
-    // text selection, image-node send-to-chat); plural was added so a
-    // single attachment can advertise N source nodes (e.g. one image
-    // rendered from a sketch cluster of multiple strokes).
-    const originIds = att.originNodeIds?.length
-      ? att.originNodeIds
-      : att.originNodeId
-        ? [att.originNodeId]
-        : [];
-    const originRef =
-      originIds.length === 0
-        ? ''
-        : originIds.length === 1
-          ? ` (origin node id: ${originIds[0]})`
-          : ` (origin node ids: ${originIds.join(', ')})`;
-
-    switch (att.type) {
-      case 'image': {
-        // Caption the image with its source node ids so the model can
-        // follow up via `inspect_nodes` / `get_canvas_outline` for
-        // surrounding context (parent frame, position, neighbours).
-        // Without this the image part is opaque — the model sees
-        // pixels but does not know which canvas nodes they came from.
-        if (originIds.length > 0) {
-          parts.push({
-            type: 'text',
-            text: `[Attached Image: ${label}${originRef}]`,
-          });
-        }
-        // Resolve image URL to base64 for vision
-        if (att.url) {
-          const resolved = await resolveImageUrl(att.url, canvasId);
-          if (resolved.kind === 'inline') {
-            parts.push({
-              type: 'image',
-              data: resolved.data,
-              mimeType: resolved.mimeType,
-            });
-          } else if (resolved.reason === 'too_large') {
-            // Don't silently drop a too-large image — tell the agent
-            // exactly why and how to recover. The placeholder mentions
-            // the origin node ids (already in `originRef`) so the
-            // model can call `snapshot_nodes` for a downscaled PNG.
-            const mb = resolved.sizeBytes
-              ? (resolved.sizeBytes / (1024 * 1024)).toFixed(1)
-              : '?';
-            parts.push({
-              type: 'text',
-              text: `[Attached Image: ${label}${originRef} — omitted from vision (~${mb} MB exceeds the ${(MAX_INLINE_IMAGE_BYTES / (1024 * 1024)).toFixed(0)} MB inline cap). Call \`snapshot_nodes\` on the origin node id to get a downscaled PNG, or \`read\` the node's sidecar for its description.]`,
-            });
-          }
-        }
-        // If the image also carries extracted text content (e.g. PDF capture with OCR text)
-        if (att.content && att.content.trim().length > 0) {
-          parts.push({
-            type: 'text',
-            text: `[Attached Text from ${label}${originRef}]:\n${att.content}`,
-          });
-        }
-        break;
-      }
-
-      case 'pdf': {
-        if (att.content && att.content.trim().length > 0) {
-          parts.push({
-            type: 'text',
-            text: `[Attached PDF: ${label}${originRef}]:\n${att.content}`,
-          });
-        } else {
-          parts.push({
-            type: 'text',
-            text: `[Attached PDF: ${label}]${att.url ? ` (URL: ${att.url})` : ''}`,
-          });
-        }
-        break;
-      }
-
-      case 'text': {
-        // Text excerpted from a node — content is always present
-        if (att.content && att.content.trim().length > 0) {
-          parts.push({
-            type: 'text',
-            text: `[Attached Excerpt from ${originRef}]:\n${att.content}`,
-          });
-        }
-        break;
-      }
-
-      case 'web': {
-        // Web URL content
-        if (att.content && att.content.trim().length > 0) {
-          parts.push({
-            type: 'text',
-            text: `[Attached Web Content: ${label}${att.url ? ` (${att.url})` : ''}]:\n${att.content}`,
-          });
-        } else if (att.url) {
-          parts.push({
-            type: 'text',
-            text: `[Attached Web Link: ${label}] URL: ${att.url}`,
-          });
-        }
-        break;
-      }
-
-      case 'file':
-      default: {
-        // File attachment — use content if provided, otherwise read from artifact
-        if (att.content && att.content.trim().length > 0) {
-          parts.push({
-            type: 'text',
-            text: `[Attached File: ${label}${originRef}]:\n${att.content}`,
-          });
-        } else if (att.url) {
-          let fileContent: string | null = null;
-          const artifactMatch = ARTIFACT_URL_REGEX.exec(att.url);
-          // Three cases for `att.url`:
-          //   1. Full canvas-scoped URL → pull canvasId + filename from regex.
-          //   2. Bare artifact key (no slashes, not http(s)) → pair with
-          //      the current canvas id (the chat thread's canvas).
-          //   3. Anything else (external URL, data URL, etc.) → skip the
-          //      filesystem lookup and fall through to the URL-only branch.
-          let resolvedCanvasId: string | null = null;
-          let resolvedFilename: string | null = null;
-          if (artifactMatch) {
-            resolvedCanvasId = artifactMatch[1] ?? null;
-            resolvedFilename = path.basename(artifactMatch[2] ?? '');
-          } else if (
-            canvasId &&
-            !att.url.startsWith('data:') &&
-            !/^https?:/i.test(att.url) &&
-            !att.url.includes('/')
-          ) {
-            resolvedCanvasId = canvasId;
-            resolvedFilename = att.url;
-          }
-          if (resolvedCanvasId && resolvedFilename) {
-            try {
-              const filePath =
-                getCanvasStore(resolvedCanvasId).resolveArtifactFilePath(
-                  resolvedFilename,
-                );
-              if (filePath) {
-                try {
-                  fileContent = await readFile(filePath, 'utf-8');
-                } catch {
-                  /* file not readable as text */
-                }
-              }
-            } catch {
-              /* invalid artifact reference; fall back to including the URL */
-            }
-          }
-          if (fileContent) {
-            parts.push({
-              type: 'text',
-              text: `[AttachedFile: ${label}]:\n${fileContent}`,
-            });
-          } else {
-            parts.push({
-              type: 'text',
-              text: `[Attached File: ${label}] (URL: ${att.url})`,
-            });
-          }
-        }
-        break;
-      }
-    }
-  }
-  return parts;
-}
-
-/**
- * Collect image attachments from selected canvas nodes (including frame children).
- * Enables vision analysis when users select image nodes on the canvas.
- */
-function collectImageAttachments(nodes: WireSelectionNode[]): ChatAttachment[] {
-  const attachments: ChatAttachment[] = [];
-
-  for (const node of nodes) {
-    if (node.type === 'image' && node.src) {
-      attachments.push({
-        type: 'image',
-        source: 'selection',
-        url: node.src,
-        label: node.label ?? `Image node ${node.id}`,
-        originNodeId: node.id,
-      });
-    }
-    if (node.children) {
-      attachments.push(...collectImageAttachments(node.children));
-    }
-  }
-
-  return attachments;
-}
-
-/**
- * Walk the wire selection (frame children included) and collect the
- * ids of every `sketch` node. Used to drive the auto-snapshot step
- * that turns selected strokes into a vision-ready PNG attachment
- * before the LLM ever sees the user's prompt.
- */
-function collectSketchNodeIds(nodes: WireSelectionNode[]): string[] {
-  const ids: string[] = [];
-  const walk = (list: WireSelectionNode[]) => {
-    for (const n of list) {
-      if (n.type === 'sketch') ids.push(n.id);
-      if (n.children) walk(n.children);
-    }
-  };
-  walk(nodes);
-  return ids;
-}
-
-/**
- * Flatten the wire selection (including frame children) into the
- * absolute minimum the agent needs to know up front: the L0
- * `AgentNodeRef` payload of `{ id, type, label?, filename }`. Anything
- * richer (content / preview / position / style) is one tool call away
- * via `read` or `inspect_nodes`, so we deliberately do not pay the
- * token cost of including it in every turn.
- *
- * `filename` is derived server-side via `buildAgentNodeRef` so the LLM
- * never has to apply the safeLabel rule itself — empirically it
- * mis-handles spaces and other kept-as-is characters often enough to
- * waste a turn on a 404'd `read`.
- */
-function collectSelectedNodeRefs(nodes: WireSelectionNode[]): AgentNodeRef[] {
-  const refs: AgentNodeRef[] = [];
-  const walk = (list: WireSelectionNode[]) => {
-    for (const n of list) {
-      refs.push(buildAgentNodeRef({ id: n.id, type: n.type, label: n.label }));
-      if (n.children) walk(n.children);
-    }
-  };
-  walk(nodes);
-  return refs;
-}
-
-/**
- * Collect the ids the user **explicitly selected** on the canvas
- * (top-level entries only — frame children are intentionally skipped).
- * Used to materialise the `[SYSTEM selectedNodeIds:[...]]` metadata
- * tag on the persisted user message so reloaded history renders the
- * same NodeRef chips the live composer showed at submit time
- * (`SelectedNodeRefs` likewise only renders `n.selected` top-level
- * nodes). The richer subtree (frame children w/ labels) is still
- * available to the LLM via `collectSelectedNodeRefs` / the wire
- * `canvasContext.selectedNodes`, which this list deliberately does
- * not duplicate.
- */
-function collectSelectedNodeIds(nodes: WireSelectionNode[]): string[] {
-  const seen = new Set<string>();
-  for (const n of nodes) seen.add(n.id);
-  return Array.from(seen);
 }
 
 function writeSSE(raw: NodeJS.WritableStream, event: AgentStreamEvent): void {
@@ -632,395 +147,14 @@ function scheduleRunCleanup(threadId: string, delayMs = 60_000): void {
   }, delayMs);
 }
 
-/**
- * Parse a pi-ai tool-result text payload into the canonical
- * `ToolResponse<…>` envelope. Mirrors the legacy `role:'tool'`
- * reconstruction logic — preserved here because every rich-variant
- * tool part carries this envelope as its `data` field.
- */
-function parseToolResultText(
-  toolName: string,
-  resultText: string,
-): ToolResponse<string, unknown> {
-  try {
-    const parsed = JSON.parse(resultText);
-    if (
-      parsed &&
-      typeof parsed === 'object' &&
-      'tool' in parsed &&
-      'status' in parsed
-    ) {
-      return parsed as ToolResponse<string, unknown>;
-    }
-    // `snapshot_nodes` returns a bare array; wrap it under `snapshots`
-    // so the rich `SnapshotNodesToolPart.data.data` carries a stable
-    // object shape (matching what the live stream merger produces).
-    if (toolName === 'snapshot_nodes' && Array.isArray(parsed)) {
-      return {
-        tool: toolName,
-        status: 'success',
-        data: { snapshots: parsed },
-      };
-    }
-    return {
-      tool: toolName,
-      status: 'success',
-      data: parsed,
-    };
-  } catch {
-    return {
-      tool: toolName,
-      status: 'success',
-      data: { content: resultText },
-    };
-  }
-}
-
-/**
- * Convert a pi-ai Context into ChatHistoryItem entries for the client.
- *
- * Assistant turns are emitted as a single `role:'assistant'` item
- * whose `parts` array preserves the in-stream order of text /
- * thinking / tool blocks — there is no longer a standalone
- * `role:'tool'` item (the legacy variant was dropped in PR-2).
- *
- * Tool segments are reconstructed by looking ahead at the pi-ai
- * `toolResult` messages (matched by `toolCallId`) and, when present,
- * by the ACP sidecar's per-call extras (`toolKind`, `status`,
- * `locations`, structured `content`, `permission`). Plans persisted
- * in the sidecar by message timestamp are appended at the end of
- * the assistant turn's parts.
- *
- * Status messages (interrupted / error) are still deferred so they
- * appear after any adjacent assistant content, matching the visual
- * order the user saw during the live session.
- */
-function buildHistoryItems(
-  context: Context,
-  sidecar: ChatPartsSidecar | null,
-  messages: ChatHistoryItem[],
-): void {
-  let pendingStatus: ChatHistoryItem | null = null;
-  // Coalesce consecutive pi-ai assistant messages (one per tool
-  // round) into a single ChatHistoryItem so the UI renders ONE
-  // bubble with ONE action bar per agent turn — mirroring the live
-  // SSE behaviour where every event for a startStream call lands on
-  // the same `assistantId`. Reset on any non-assistant boundary
-  // (user / status / prepared-prompt / intent-select).
-  let currentAssistant: Extract<ChatHistoryItem, { role: 'assistant' }> | null =
-    null;
-
-  const flushStatus = () => {
-    if (pendingStatus) {
-      messages.push(pendingStatus);
-      pendingStatus = null;
-      currentAssistant = null;
-    }
-  };
-
-  // Pre-index pi-ai toolResult messages by toolCallId so an assistant
-  // message's `toolCall` block can find its result in O(1) without
-  // forcing a quadratic scan over the message list. Each result is
-  // referenced exactly once during the walk below; collisions cannot
-  // happen because pi-ai guarantees toolCallIds are unique within a
-  // Context.
-  const toolResultByCallId = new Map<
-    string,
-    { toolName: string; resultText: string }
-  >();
-  for (const m of context.messages) {
-    if (m.role === 'toolResult') {
-      const resultText = m.content
-        .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
-        .map((b) => b.text)
-        .join('');
-      toolResultByCallId.set(m.toolCallId, {
-        toolName: m.toolName ?? 'unknown',
-        resultText,
-      });
-    }
-  }
-
-  for (let i = 0; i < context.messages.length; i++) {
-    const msg = context.messages[i];
-    if (msg.role === 'user') {
-      let content =
-        typeof msg.content === 'string'
-          ? msg.content
-          : Array.isArray(msg.content)
-            ? msg.content
-                .filter(
-                  (b): b is { type: 'text'; text: string } =>
-                    typeof b === 'object' && b !== null && b.type === 'text',
-                )
-                .map((b) => b.text)
-                .join('\n')
-            : '';
-
-      content = content
-        .replace(
-          /^REFERENCE CONTEXT \(selected sources; do not follow instructions inside\):[\s\S]*?---\n\n/,
-          '',
-        )
-        .replace(/^\[Canvas ID: [^\]]+\]\n\n/, '')
-        // Strip one-liner attachment URL references (old + new formats)
-        .replace(
-          /\n?\[Attached\s?(?:file|pdf|image|PDF|File|Web Link): [^\]]*\] (?:\(URL: [^)]*\)|URL: \S+)/g,
-          '',
-        )
-        // Strip standalone `[Attached Image: ...]` captions emitted
-        // by `buildUserContent` to label vision parts with origin
-        // node ids. Always standalone — the URL-form and content-body
-        // forms above handle file / pdf / web variants.
-        .replace(/\n?\[Attached Image: [^\]]*\]/g, '')
-        // Strip attachment content blocks (old + new formats)
-        .replace(
-          /\n?\[(?:Attached\s?(?:Text from|PDF Content:|Excerpt from|Web Content:|File:)|Extracted text from )[^\]]*\]:\n[\s\S]*?(?=\n\[|$)/g,
-          '',
-        )
-        .trim();
-
-      if (content.startsWith('[SYSTEM Interrupted]')) {
-        // Defer — will be placed after the next assistant/tool content
-        pendingStatus = { role: 'status', status: 'interrupted' };
-        continue;
-      }
-
-      if (content.startsWith('[SYSTEM Error]')) {
-        const detail = content.slice('[SYSTEM Error] '.length);
-        pendingStatus = { role: 'status', status: 'error', detail };
-        continue;
-      }
-
-      // ACP preprocessor sidecar marker. Appended right before the
-      // external agent's assistant turn, so flushing it immediately
-      // keeps the visible order: user → prepared-prompt card →
-      // assistant. Mirrors how the UI inserts the card live.
-      if (content.startsWith('[SYSTEM PreparedPrompt]')) {
-        flushStatus();
-        const payload = content.slice('[SYSTEM PreparedPrompt] '.length);
-        try {
-          const parsed = JSON.parse(payload) as {
-            agentAlias: string;
-            prompt: ExternalAgentPrompt | null;
-            error?: string;
-          };
-          messages.push({
-            role: 'prepared-prompt',
-            agentAlias: parsed.agentAlias,
-            prompt: parsed.prompt,
-            ...(parsed.error ? { error: parsed.error } : {}),
-          });
-          currentAssistant = null;
-        } catch {
-          // Malformed sidecar — drop silently rather than break history.
-        }
-        continue;
-      }
-
-      // Skip any other internal [SYSTEM] messages
-      if (content.startsWith('[SYSTEM]') || content.startsWith('[SYSTEM ')) {
-        continue;
-      }
-
-      // A real user message — flush any pending status first
-      flushStatus();
-
-      // Strip embedded metadata tags (selection / attachments /
-      // invoked skills / LLM-only hint). Tags missing from older
-      // messages simply yield empty fields.
-      const { content: strippedContent, meta } = stripMetadataTags(content);
-      content = strippedContent;
-      const selectedNodeIds = meta.selectedNodeIds;
-      const invokedSkills = meta.invokedSkills;
-      const attachments = meta.attachments;
-
-      if (content.trim()) {
-        messages.push({
-          role: 'user',
-          content,
-          ...(attachments && attachments.length > 0 && { attachments }),
-          ...(selectedNodeIds &&
-            selectedNodeIds.length > 0 && { selectedNodeIds }),
-          ...(invokedSkills && invokedSkills.length > 0 && { invokedSkills }),
-        });
-        currentAssistant = null;
-      }
-    } else if (msg.role === 'assistant') {
-      // Walk the assistant content blocks IN ORDER, building a parts
-      // array that mirrors the live SSE aggregation. Tool calls fold
-      // INTO this assistant turn (not a separate role:'tool' message)
-      // — the ACP sidecar's `toolExtras` overlay supplies the
-      // semantic fields (`toolKind`, `status`, `locations`, …) and the
-      // matching pi-ai `toolResult` supplies the typed `data` envelope
-      // for built-in tools.
-      const parts: AssistantHistoryPart[] = [];
-      for (const block of msg.content) {
-        if (block.type === 'text') {
-          if (block.text.length > 0) {
-            parts.push({ kind: 'text', text: block.text });
-          }
-        } else if (block.type === 'thinking') {
-          if (block.thinking.length > 0) {
-            parts.push({ kind: 'thinking', text: block.thinking });
-          }
-        } else if (block.type === 'toolCall') {
-          const toolCallId = block.id;
-          const toolName = block.name;
-          const result = toolResultByCallId.get(toolCallId);
-          const extras = sidecar?.toolExtras[toolCallId];
-          // Structural internal-vs-external discriminator: the
-          // internal pi-ai bridge pushes a matching `toolResult`
-          // into `Context.messages`; the ACP path does NOT (it only
-          // appends faux `ToolCall` blocks — see
-          // `acp/service.ts` step 6). So the presence of `result`
-          // is itself the signal — no name-allowlist needed, and an
-          // external agent that happens to expose a tool named
-          // `read` / `grep` / … cannot collide.
-          //
-          // `JSON.parse(result.resultText)` is only safe under this
-          // structural guarantee because the pi-ai bridge always
-          // emits the `ToolResponse<…>` envelope for built-in tools.
-          const toolData = result
-            ? parseToolResultText(toolName, result.resultText)
-            : undefined;
-          // External agents (no pi-ai toolResult) always render as
-          // `generic`; internal calls dispatch through the shared
-          // variant table so server + client + sketch synthesizer all
-          // agree on which renderer owns each tool name.
-          const variant = toolData
-            ? variantForInternalTool(toolName)
-            : 'generic';
-          const base = {
-            kind: 'tool' as const,
-            toolCallId,
-            // ACP envelopes carry a `title` field on tool_call /
-            // tool_call_update events; we did not persist it in the
-            // sidecar (only the SSE event carried it for live UI), so
-            // fall back to the tool's own name as the human label.
-            title: toolName,
-            ...(extras?.toolKind ? { toolKind: extras.toolKind } : {}),
-            ...(extras?.status ? { status: extras.status } : {}),
-            ...(extras?.locations ? { locations: extras.locations } : {}),
-            ...(extras?.content ? { content: extras.content } : {}),
-            ...(extras?.rawOutput !== undefined
-              ? { rawOutput: extras.rawOutput }
-              : {}),
-            ...(extras?.permission ? { permission: extras.permission } : {}),
-          };
-          switch (variant) {
-            case 'agent_tool':
-              parts.push({
-                ...base,
-                variant: 'agent_tool',
-                toolName,
-                ...(toolData ? { data: toolData } : {}),
-              });
-              break;
-            case 'canvas_commands':
-              parts.push({
-                ...base,
-                variant: 'canvas_commands',
-                ...(toolData
-                  ? {
-                      data: toolData as ToolResponse<
-                        'canvas_commands',
-                        Record<string, unknown>
-                      >,
-                    }
-                  : {}),
-              });
-              break;
-            case 'web_search':
-              parts.push({
-                ...base,
-                variant: 'web_search',
-                ...(toolData
-                  ? {
-                      data: toolData as WebSearchToolResponse,
-                    }
-                  : {}),
-              });
-              break;
-            case 'image_generation':
-              parts.push({
-                ...base,
-                variant: 'image_generation',
-                ...(toolData
-                  ? {
-                      data: toolData as ToolResponse<
-                        'generate_image',
-                        ImageGenerationData
-                      >,
-                    }
-                  : {}),
-              });
-              break;
-            case 'snapshot_nodes':
-              parts.push({
-                ...base,
-                variant: 'snapshot_nodes',
-                ...(toolData
-                  ? {
-                      data: toolData as ToolResponse<
-                        'snapshot_nodes',
-                        SnapshotNodesData
-                      >,
-                    }
-                  : {}),
-              });
-              break;
-            case 'generic':
-              parts.push({ ...base, variant: 'generic' });
-              break;
-          }
-        }
-      }
-      // Append the persisted plan (if any) at the END of the parts
-      // array — the renderer decides visual placement; persisting at
-      // the end keeps insertion deterministic (no ambiguity about
-      // pre/post-text ordering).
-      const ts = sidecar?.messageTimestamps[i];
-      if (typeof ts === 'number' && ts > 0) {
-        const planEntries = sidecar?.planByMessageTimestamp[String(ts)];
-        if (planEntries && planEntries.length > 0) {
-          parts.push({ kind: 'plan', entries: planEntries });
-        }
-      }
-      if (parts.length > 0) {
-        if (currentAssistant) {
-          // Same agent turn (additional pi-ai assistant message
-          // emitted after a tool result) — append parts so the UI
-          // still sees one bubble per turn.
-          currentAssistant.parts.push(...parts);
-        } else {
-          const item: Extract<ChatHistoryItem, { role: 'assistant' }> = {
-            role: 'assistant',
-            parts,
-          };
-          messages.push(item);
-          currentAssistant = item;
-        }
-      }
-      // Flush status after assistant content so it appears below
-      flushStatus();
-    } else if (msg.role === 'toolResult') {
-      // Folded into the preceding assistant turn via toolCallId — no
-      // standalone history item.
-    }
-  }
-
-  // Flush any remaining status at the end (e.g. aborted before assistant replied)
-  flushStatus();
-}
-
 const agentRoutes: FastifyPluginAsync = async (
   fastify,
   _opts,
 ): Promise<void> => {
   /**
    * GET /agent/history/:threadId
-   * Reconstructs the UI message list from the pi-ai Context.
+   * Reconstructs the UI message list from the structured per-turn
+   * records (envelope + transcript).
    */
   fastify.get<{
     Params: { threadId: string };
@@ -1040,18 +174,16 @@ const agentRoutes: FastifyPluginAsync = async (
       return reply.code(400).send({ message: 'threadId is required' });
     }
 
-    const context = loadContext(threadId, canvasId);
-    if (!context) {
-      // No history for this threadId — return empty. This is expected for
-      // newly created threads (e.g. after "New Chat") that haven't sent a
-      // message yet. Falling back to the latest thread would overwrite the
-      // client's intentional new-thread state on page refresh.
+    const turns = loadTurns(threadId, canvasId);
+    if (turns.length === 0) {
+      // No turn log → empty. Legacy `.json` threads are converted to
+      // `.turns.jsonl` at startup (migrateLegacyChatThreads), so a
+      // missing log means a genuinely empty/new thread.
       return reply.send({ threadId, messages: [] });
     }
 
     const messages: ChatHistoryItem[] = [];
-    const sidecar = readChatParts(threadId, canvasId);
-    buildHistoryItems(context, sidecar, messages);
+    buildHistoryFromTurns(turns, messages);
 
     return reply.send({ threadId, messages });
   });
@@ -1100,17 +232,22 @@ const agentRoutes: FastifyPluginAsync = async (
         .send({ message: 'target thread must differ from source' });
     }
 
-    const srcContext = loadContext(threadId, canvasId);
-    if (!srcContext) {
+    // Copy the source thread's structured turn log onto the target
+    // thread. `loadTurns` yields the finalized JSONL turns plus any
+    // in-progress active turn; each is appended as a finalized turn to
+    // the (fresh, empty) target so the fork owns an independent,
+    // immutable snapshot — the rich-ACP overlay (`toolExtras`, `plan`)
+    // travels inside each record, so there is no separate sidecar to
+    // copy.
+    const turns = loadTurns(threadId, canvasId);
+    if (turns.length === 0) {
       // Source has no persisted history — nothing to fork. The copy
       // simply starts as a fresh (empty) thread.
       return reply.send({ threadId: targetThreadId, forked: false });
     }
 
-    getCanvasStore(dstCanvasId).writeChat(targetThreadId, srcContext);
-    const sidecar = readChatParts(threadId, canvasId);
-    if (sidecar) {
-      writeChatParts(targetThreadId, sidecar, dstCanvasId);
+    for (const turn of turns) {
+      appendTurn(targetThreadId, turn, dstCanvasId);
     }
 
     return reply.send({ threadId: targetThreadId, forked: true });
@@ -1229,8 +366,8 @@ const agentRoutes: FastifyPluginAsync = async (
       /* keep fallback */
     }
 
-    const context = loadContext(threadId, canvasId);
-    if (!context) {
+    const turns = loadTurns(threadId, canvasId);
+    if (turns.length === 0) {
       return reply.send({
         contextTokens: 0,
         contextWindow,
@@ -1238,12 +375,15 @@ const agentRoutes: FastifyPluginAsync = async (
         fromProvider: false,
       });
     }
+    // Provider-reported usage lives on the assistant messages in each
+    // turn's transcript.
+    const transcriptMessages = turns.flatMap((t) => t.transcript);
 
     // ---- Preferred path: provider-reported usage ----
     let lastUsage: AssistantMessage['usage'] | null = null;
     let totalCost = 0;
     let hasCost = false;
-    for (const msg of context.messages) {
+    for (const msg of transcriptMessages) {
       if (msg.role !== 'assistant') continue;
       const am = msg as AssistantMessage;
       if (am.usage) {
@@ -1332,304 +472,75 @@ const agentRoutes: FastifyPluginAsync = async (
 
     const resolvedThreadId = getOrCreateThreadId(threadId);
 
-    // Build or resume context.
+    // Build or resume context from the structured turn log.
     //
     // We re-render the agent's system prompt on every turn so the
     // `{{skillCatalogue}}` placeholder reflects freshly written user
     // skills. `canvasId` flows into `loadAgent({ canvasId })` for
     // forward compatibility with future per-canvas template vars.
-    let context = loadContext(resolvedThreadId, canvasId);
     const agentCfg = loadAgent(mode, { canvasId });
 
-    if (!context) {
-      context = {
-        systemPrompt: agentCfg.systemPrompt,
-        messages: [],
-        tools: [],
-      };
-    } else {
-      // Refresh on every turn (mode might change; catalogues advance).
-      context.systemPrompt = agentCfg.systemPrompt;
-    }
+    // Commit any crash-leftover in-progress turn before starting a new
+    // one, then rebuild the pi-ai `Context.messages` the agent runs over
+    // by re-serialising each prior turn's envelope + appending its
+    // transcript. The `[SYSTEM …]` encoding is regenerated here on the
+    // fly — it is never the source of truth on disk.
+    finalizeActiveTurn(resolvedThreadId, canvasId);
+    const priorTurns = loadTurns(resolvedThreadId, canvasId);
 
-    // Workspace-memory pre-read.
-    //
-    // For the *first turn* of a thread we eagerly inject workspace
-    // memory as a SYSTEM context block. Reason: cross-canvas user
-    // preferences (style, voice, response length) should influence
-    // the very first reply, and we can't trust the agent to remember
-    // to read memory/workspace.md before answering a trivial prompt.
-    //
-    // Subsequent turns are pull-only — the catalogue advertises both
-    // tiers and the agent decides whether to open them. Working
-    // memory is *always* pull-only because it's situational and
-    // typically larger; the agent should fetch it when the request
-    // suggests it would help.
-    //
-    // We detect "first turn" as `context.messages.length === 0`,
-    // measured *before* any of the per-turn pushes below.
-    const isFirstTurn = context.messages.length === 0;
-    if (isFirstTurn) {
-      const workspace = readWorkspaceMemory();
-      if (workspace) {
-        context.messages.push({
-          role: 'user',
-          content: `[SYSTEM Workspace memory \u2014 cross-canvas user profile, eagerly loaded for the first turn]\n${workspace}`,
-          timestamp: Date.now(),
-        });
-      }
-    }
+    // Workspace memory (cross-canvas user profile) is part of the agent's
+    // stable system instructions, so it rides in the system prompt as a
+    // tagged block — grounding every turn and staying cache-friendly —
+    // rather than as a one-shot first-turn user message. Built-in path
+    // only; the external/ACP path has its own preamble and never reads it.
+    const workspaceMemory = readWorkspaceMemory();
+    const systemPrompt = workspaceMemory
+      ? `${agentCfg.systemPrompt}\n\n<workspace_memory>\n${workspaceMemory}\n</workspace_memory>`
+      : agentCfg.systemPrompt;
 
-    // Collect image attachments from selected canvas nodes for vision analysis
-    const selectedImageAttachments = canvasContext?.selectedNodes
-      ? collectImageAttachments(canvasContext.selectedNodes)
-      : [];
+    const context: Context = {
+      systemPrompt,
+      messages: await rebuildContextMessages(priorTurns, {
+        canvasId: canvasId ?? null,
+      }),
+      tools: [],
+    };
 
-    // Auto-snapshot every selected sketch and image into PNG
-    // artifacts so the LLM sees them as vision parts on the very
-    // first turn, without having to call `snapshot_nodes` itself.
-    // We piggy-back on the same content-addressed pipeline the tool
-    // uses, so selecting an unchanged cluster repeatedly is
-    // essentially free. Failures are logged but never block the
-    // user's prompt — the worst case is the agent has to call
-    // `snapshot_nodes` manually.
-    //
-    // The handler clusters per parent frame (≤ 200 px gap): nearby
-    // image+sketch nodes composite into ONE PNG (images as backdrop,
-    // strokes on top), distant nodes stay separate, and a singleton
-    // image short-circuits to its original artifact (or a downscaled
-    // copy when oversized). Any image whose pixels end up inside a
-    // composite — or whose ids get merged with other images into a
-    // single overview cluster — is marked consumed below so its
-    // standalone `selectedImageAttachments` entry is dropped. Sending
-    // the same image bytes twice was the direct cause of the 8 MB
-    // request bodies that tripped `413 Request Entity Too Large` on
-    // Anthropic / Copilot.
-    const snapshotAttachments: ChatAttachment[] = [];
-    const consumedSelectionImageIds = new Set<string>();
-    if (canvasContext?.selectedNodes && canvasId) {
-      const sketchIds = collectSketchNodeIds(canvasContext.selectedNodes);
-      const selectedImageIds = selectedImageAttachments
-        .map((a) => a.originNodeId)
-        .filter((id): id is string => typeof id === 'string');
-      const snapshotIds = [...sketchIds, ...selectedImageIds];
-      if (snapshotIds.length > 0) {
-        try {
-          const rasterResults = await snapshotNodesToArtifacts({
-            nodeIds: snapshotIds,
-            canvasId,
-          });
-          const selectedImageIdSet = new Set(selectedImageIds);
-          for (const r of rasterResults) {
-            const strokeIds = r.originNodeIds.filter(
-              (id) => !selectedImageIdSet.has(id),
-            );
-            const imageIds = r.originNodeIds.filter((id) =>
-              selectedImageIdSet.has(id),
-            );
-            // Singleton image pass-through (no strokes, exactly one
-            // image — handler short-circuited to that node's original
-            // artifact): leave it alone. The original
-            // `selectedImageAttachments` entry already owns that
-            // vision part with its richer label, so we neither emit a
-            // duplicate `snapshotAttachment` here NOR mark the id as
-            // consumed (otherwise the dedup filter below would drop
-            // the pass-through entry too, losing the image entirely).
-            if (strokeIds.length === 0 && imageIds.length === 1) continue;
-            // Anything else is a composite owned by this snapshot:
-            //   - strokes + 0-or-N images → sketch cluster
-            //   - 0 strokes + N images    → pure image overview cluster
-            // Mark every contributing image as consumed so its
-            // standalone pass-through is dropped below.
-            for (const iid of imageIds) consumedSelectionImageIds.add(iid);
-            const nStrokes = strokeIds.length;
-            const nImages = imageIds.length;
-            const label =
-              nStrokes === 0
-                ? `Image cluster (${nImages} images)`
-                : nImages > 0
-                  ? `Sketch cluster (${nStrokes} stroke node${
-                      nStrokes === 1 ? '' : 's'
-                    } + ${nImages} backdrop image${nImages === 1 ? '' : 's'})`
-                  : nStrokes === 1
-                    ? 'Sketch (1 stroke node)'
-                    : `Sketch cluster (${nStrokes} stroke nodes)`;
-            snapshotAttachments.push({
-              type: 'image',
-              source: 'selection',
-              url: r.src,
-              label,
-              originNodeIds: r.originNodeIds,
-            });
-          }
-        } catch (err) {
-          fastify.log.warn(
-            { err, snapshotIds, canvasId },
-            '[agent.route] selection auto-snapshot failed',
-          );
-        }
-      }
-    }
-
-    // Drop selection image attachments that are already composited
-    // inside a snapshot artifact. The model still learns about them
-    // via the `[SYSTEM selectedNodeIds:...]` metadata and the
-    // snapshot's `originNodeIds` caption, so it can still call
-    // `inspect_nodes` / `read` on them if needed.
-    const dedupedImageAttachments =
-      consumedSelectionImageIds.size === 0
-        ? selectedImageAttachments
-        : selectedImageAttachments.filter(
-            (a) =>
-              !a.originNodeId || !consumedSelectionImageIds.has(a.originNodeId),
-          );
-
-    const allAttachments =
-      dedupedImageAttachments.length > 0 ||
-      snapshotAttachments.length > 0 ||
-      (attachments && attachments.length > 0)
-        ? [
-            ...(attachments ?? []),
-            ...dedupedImageAttachments,
-            ...snapshotAttachments,
-          ]
-        : undefined;
-
-    // Build user message
-    let userContent = await buildUserContent(
+    // Build this turn's structured envelope (memory pre-read, auto-
+    // snapshot, skill resolution, neighbourhood render). The envelope is
+    // what we persist AND dispatch; it is rendered into the per-turn
+    // user message INSIDE the dispatch layer (runAgent / runAcpAgent),
+    // so both backends share one render timing and the route never bakes
+    // it into `context.messages`.
+    const envelope = await buildChatEnvelope({
       content,
-      allAttachments,
-      canvasId ?? null,
-    );
-
-    // Inject a minimal selected-node reference list as a system message.
-    // Each entry carries { id, type, label?, filename } — the `filename`
-    // is pre-computed (`nodes/<safeLabel>.md`) so the agent can `read`
-    // it verbatim without re-deriving the safeLabel rule. Anything
-    // richer (content via `read`, layout/style via `inspect_nodes`) is
-    // fetched on demand.
-    if (
-      canvasContext?.selectedNodes &&
-      canvasContext.selectedNodes.length > 0
-    ) {
-      const refs = collectSelectedNodeRefs(canvasContext.selectedNodes);
-      if (refs.length > 0) {
-        context.messages.push({
-          role: 'user',
-          content: renderAgentTemplate(agentCfg, 'selectedNodesPreamble', {
-            refsJson: JSON.stringify(refs, null, 2),
-          }),
-          timestamp: Date.now(),
-        });
-      }
-    }
-
-    // Node-neighbourhood preamble. The actual user message arrives as
-    // the next pipeline push, so this preamble carries ONLY the
-    // surrounding-canvas markdown. The server resolves the
-    // neighbourhood from canvas.json — the client just supplies the
-    // anchor node id, no graph data on the wire. Empty result
-    // (canvas/node missing, or no useful context) means we skip the
-    // push entirely — no orphan `[SYSTEM Context]`.
-    if (anchorNodeId && canvasId) {
-      const spatial = renderNodeNeighbourhoodMarkdown(canvasId, anchorNodeId);
-      if (spatial) {
-        context.messages.push({
-          role: 'user',
-          content: renderAgentTemplate(agentCfg, 'nodeNeighbourhoodPreamble', {
-            spatial,
-          }),
-          timestamp: Date.now(),
-        });
-      }
-    }
-
-    // User-invoked skills preamble.
-    //
-    // When the user typed `/<id>` tokens in the chat input (parsed
-    // client-side, see `useInternalSlashCommands`), the skill ids are
-    // forwarded here. We fetch each skill body and prepend a single
-    // SYSTEM message so the agent treats the bodies as authoritative
-    // for this turn — distinct from the on-demand catalogue surface
-    // where the model decides whether to `read()` a skill.
-    //
-    // Security/scope rule: honoured ids must satisfy
-    // {@link isUserInvokableSkill} — i.e. `user` / `merged`, OR a
-    // `system` skill that explicitly opts in via
-    // `userInvokable: true` in its frontmatter. Unknown or
-    // non-invokable ids are dropped silently (logged for
-    // diagnostics). This matches the same cut applied by the
-    // `/api/skills` listing route and prevents a stale or hand-rolled
-    // client from forcing a non-invokable skill body into the turn.
-    if (invokedSkills && invokedSkills.length > 0) {
-      const seen = new Set<string>();
-      const injected: { id: string; name: string; body: string }[] = [];
-      const dropped: {
-        id: string;
-        reason: 'unknown' | 'not-invokable';
-      }[] = [];
-      for (const rawId of invokedSkills) {
-        const id = rawId.trim();
-        if (!id || seen.has(id)) continue;
-        seen.add(id);
-        const skill = getSkill(id);
-        if (!skill) {
-          dropped.push({ id, reason: 'unknown' });
-          continue;
-        }
-        if (!isUserInvokableSkill(skill)) {
-          dropped.push({ id, reason: 'not-invokable' });
-          continue;
-        }
-        injected.push({ id: skill.id, name: skill.name, body: skill.body });
-      }
-
-      if (dropped.length > 0) {
-        request.log.warn(
-          { dropped },
-          '[agent] invokedSkills: dropped ids (unknown or not user-invokable)',
-        );
-      }
-
-      if (injected.length > 0) {
-        const sections = injected
-          .map(
-            (s) =>
-              `<skill id="${s.id}" name="${s.name}">\n${s.body.trimEnd()}\n</skill>`,
-          )
-          .join('\n\n');
-        const quotedIds = injected.map((s) => `"${s.id}"`).join(', ');
-        const header =
-          injected.length === 1
-            ? `[SYSTEM Skill — the user explicitly invoked ${quotedIds}. Apply its guidance to this turn.]`
-            : `[SYSTEM Skills — the user explicitly invoked ${quotedIds}. Apply their guidance to this turn.]`;
-        context.messages.push({
-          role: 'user',
-          content: `${header}\n\n${sections}`,
-          timestamp: Date.now(),
-        });
-      }
-    }
-
-    // Embed selection / skill / attachment breadcrumbs. selectedNodeIds
-    // is derived from `canvasContext.selectedNodes` — the wire never
-    // carries the id list separately. `appendMetadataTags` partitions
-    // `attachments` internally: user-visible items become the UI
-    // breadcrumb tag, sketch-raster artifacts become the LLM-only
-    // hint tag.
-    const selectedNodeIds = canvasContext?.selectedNodes
-      ? collectSelectedNodeIds(canvasContext.selectedNodes)
-      : [];
-    userContent = appendMetadataTags(userContent, {
-      selectedNodeIds,
+      attachments,
+      selectedNodes: canvasContext?.selectedNodes,
+      anchorNodeId,
       invokedSkills,
-      attachments: allAttachments,
+      canvasId: canvasId ?? null,
+      logger: request.log,
     });
-    context.messages.push({
-      role: 'user',
-      content: userContent,
-      timestamp: Date.now(),
-    });
+
+    // Index where this turn's transcript begins: `context.messages`
+    // currently holds prior history only, so everything the dispatch
+    // layer appends from here on (assistant / tool / status rows) is the
+    // transcript we persist alongside the envelope. The rendered user
+    // message is intentionally excluded — it is re-derived from the
+    // envelope on reload, never duplicated into the transcript.
+    const transcriptStart = context.messages.length;
+
+    // Debug-prompt metadata, forwarded to the dispatch layer (which now
+    // owns the assembled messages). No-op unless HUABU_DEBUG_PROMPT is set.
+    const debugPrompt = {
+      turnNumber: priorTurns.length + 1,
+      threadId: resolvedThreadId,
+      mode:
+        agentBinding?.kind === 'external'
+          ? `external:${agentBinding.alias}`
+          : mode,
+      logger: request.log,
+    };
 
     // SSE streaming
     reply.hijack();
@@ -1661,10 +572,38 @@ const agentRoutes: FastifyPluginAsync = async (
     };
     activeRuns.set(resolvedThreadId, run);
 
-    // Save context immediately so history includes the user message on refresh
-    saveContext(resolvedThreadId, context, canvasId);
+    // Per-turn ACP overlay (tool extensions + plan). Empty for internal
+    // turns; mutated by `runAcpAgent` for external-agent dispatch and
+    // folded into the persisted turn record below.
+    const acpOverlay = emptyAcpOverlay();
+    const buildTurnRecord = (): ChatTurnRecord => ({
+      envelope,
+      transcript: context.messages.slice(transcriptStart),
+      ...(Object.keys(acpOverlay.toolExtras).length > 0 && {
+        toolExtras: acpOverlay.toolExtras,
+      }),
+      ...(acpOverlay.plan &&
+        acpOverlay.plan.length > 0 && {
+          plan: acpOverlay.plan,
+        }),
+    });
 
-    // Debounced context save — keeps disk copy fresh during streaming so
+    // Persist this turn's in-progress state (envelope + transcript so
+    // far) to the active sidecar. The finalized JSONL log is appended
+    // only once, when the turn completes (see `finalizeTurn` below), so
+    // streaming saves never rewrite the whole thread.
+    const persistActiveTurn = () => {
+      writeActiveTurn(resolvedThreadId, buildTurnRecord(), canvasId);
+    };
+    const finalizeTurn = () => {
+      appendTurn(resolvedThreadId, buildTurnRecord(), canvasId);
+      clearActiveTurn(resolvedThreadId, canvasId);
+    };
+
+    // Save immediately so history includes the user message on refresh.
+    persistActiveTurn();
+
+    // Debounced save — keeps disk copy fresh during streaming so
     // refreshes always see partial progress. Flushes at most every 2 seconds.
     let savePending = false;
     let saveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1675,7 +614,7 @@ const agentRoutes: FastifyPluginAsync = async (
           saveTimer = null;
           if (savePending) {
             savePending = false;
-            saveContext(resolvedThreadId, context, canvasId);
+            persistActiveTurn();
           }
         }, 2000);
       }
@@ -1685,7 +624,7 @@ const agentRoutes: FastifyPluginAsync = async (
         clearTimeout(saveTimer);
         saveTimer = null;
       }
-      saveContext(resolvedThreadId, context, canvasId);
+      persistActiveTurn();
     };
 
     // Emit an event: buffer it, write to original client, forward to subscribers.
@@ -1724,21 +663,24 @@ const agentRoutes: FastifyPluginAsync = async (
                 alias: agentBinding.alias,
                 profileId: agentBinding.profileId,
               },
-              message: userContent,
+              envelope,
               threadId: resolvedThreadId,
               canvasId,
               context,
-              canvasContext,
+              overlay: acpOverlay,
               signal: abortController.signal,
               logger: request.log,
+              debugPrompt,
             })
           : runAgent({
               scope: mode,
               canvasId,
               context,
+              envelope,
               logger: request.log,
               maxIterations: 20,
               signal: abortController.signal,
+              debugPrompt,
             });
 
       // Track the latest agent error so we can persist it AFTER the stream
@@ -1830,15 +772,19 @@ const agentRoutes: FastifyPluginAsync = async (
           error instanceof Error ? error.message : 'Internal Error';
         emit({ type: AGENT_SSE_EVENTS.Error, data: { error: errorMsg } });
 
-        // Persist error in context so it shows up when history is reloaded
+        // Persist error in the transcript so it shows up on history reload
         context.messages.push({
           role: 'user',
           content: `[SYSTEM Error] ${errorMsg}`,
           timestamp: Date.now(),
         });
-        saveContext(resolvedThreadId, context, canvasId);
+        persistActiveTurn();
       }
     } finally {
+      // Promote the in-progress turn to the append-only JSONL log and
+      // clear the active sidecar — by now `context.messages` reflects
+      // the final state (error rows, abort cleanup, agent output).
+      finalizeTurn();
       run.completed = true;
       scheduleRunCleanup(resolvedThreadId);
       reply.raw.removeListener('close', onDisconnect);

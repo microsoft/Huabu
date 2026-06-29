@@ -1,4 +1,3 @@
-import type { ExternalAgentPrompt } from './agent.js';
 import type { AssistantHistoryPart } from './assistant-parts.js';
 import type { IntentCandidate } from './intent.js';
 
@@ -73,20 +72,6 @@ export type ChatHistoryItem =
       role: 'intent-select';
       candidates: IntentCandidate[];
       selectedIntent: string;
-    }
-  | {
-      /**
-       * Structured rewrite of an external-agent user message produced
-       * by the ACP preprocessor. Persisted so refreshes can show the
-       * same "Prepared for <alias>" card the user saw live.
-       */
-      role: 'prepared-prompt';
-      /** Structured prompt; `null` when the preprocessor failed. */
-      prompt: ExternalAgentPrompt | null;
-      /** Short alias of the bound external agent. */
-      agentAlias: string;
-      /** Reason the preprocessor failed; only set when `prompt === null`. */
-      error?: string;
     };
 
 /** Response from GET /api/chat/history/:threadId */

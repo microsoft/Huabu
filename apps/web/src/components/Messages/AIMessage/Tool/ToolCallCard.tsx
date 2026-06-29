@@ -21,9 +21,14 @@
 import { X as XIcon } from 'lucide-react';
 
 import { ToolKindIcon } from './ToolKindIcon';
+import { CommandBlock } from '../../../Common/CommandBlock';
 import { AssistantDisclosure } from '../../AssistantDisclosure';
 
-import type { AcpContentBlock, GenericToolPart } from '@sediment/shared';
+import type {
+  AcpContentBlock,
+  AcpToolCallContent,
+  GenericToolPart,
+} from '@sediment/shared';
 
 interface ToolCallCardProps {
   part: GenericToolPart;
@@ -84,17 +89,36 @@ function renderContentBlock(
   }
 }
 
+function blockText(wrap: AcpToolCallContent): string | undefined {
+  if (wrap.type === 'content' && wrap.content.type === 'text')
+    return wrap.content.text;
+  return undefined;
+}
+
 export function ToolCallCard({ part }: ToolCallCardProps) {
   const hasContent = (part.content?.length ?? 0) > 0;
   const hasLocations = (part.locations?.length ?? 0) > 0;
-  const isExpandable = hasContent || hasLocations;
+  const hasCommand = !!part.command;
+  const isExpandable = hasContent || hasLocations || hasCommand;
 
   // Render content blocks. ACP's ToolCallContent union has three
   // top-level variants; we narrow then forward inner content blocks
-  // to the per-block renderer.
+  // to the per-block renderer. Agents re-send the full terminal output
+  // on every `tool_call_update`, and the overlay APPENDS each cumulative
+  // frame, so text stacks 4-5x. Terminal output is cumulative — the
+  // LAST text frame is the complete one, so collapse all text frames to
+  // that single final frame; non-text blocks (diff/image/resource)
+  // render individually.
   const renderedContent: React.ReactNode[] = [];
+  let outputText: string | undefined;
   if (hasContent) {
-    part.content!.forEach((wrap, i) => {
+    (part.content ?? []).forEach((wrap, i) => {
+      const t = blockText(wrap);
+      if (t !== undefined) {
+        // Latest cumulative frame wins; trim trailing blank lines.
+        outputText = t.trimEnd();
+        return;
+      }
       if (wrap.type === 'content') {
         renderedContent.push(renderContentBlock(wrap.content, i));
       } else if (wrap.type === 'diff') {
@@ -128,9 +152,18 @@ export function ToolCallCard({ part }: ToolCallCardProps) {
 
   const body = isExpandable ? (
     <>
+      {part.command ? (
+        <CommandBlock text={part.command} output={outputText} />
+      ) : (
+        outputText && (
+          <pre className="text-fg-muted overflow-x-auto rounded-sm px-2 py-1 text-xs whitespace-pre-wrap">
+            {outputText}
+          </pre>
+        )
+      )}
       {hasLocations && (
         <ul className="text-fg-subtle text-xs">
-          {part.locations!.map((loc, i) => (
+          {(part.locations ?? []).map((loc, i) => (
             <li key={`loc-${i}`} className="truncate">
               {loc.path}
               {loc.line ? `:${loc.line}` : ''}

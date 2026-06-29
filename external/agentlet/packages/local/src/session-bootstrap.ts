@@ -21,6 +21,13 @@ const SESSION_NEW_NOTIFICATION_GRACE_MS = 300
 const INITIALIZE_NOTIFICATION_GRACE_MS = 0
 
 /**
+ * Default per-request timeout (ms) for bootstrap calls. Generous to tolerate
+ * slow agent cold starts (e.g. Copilot taking tens of seconds to answer
+ * `initialize` on first launch).
+ */
+const DEFAULT_BOOTSTRAP_TIMEOUT_MS = 90_000
+
+/**
  * Result of a successful ACP session bootstrap (initialize + session/new or session/load/resume).
  * Stored as the "agent session profile" and reported to the server.
  */
@@ -76,7 +83,7 @@ export async function bootstrapSession(
   options: BootstrapOptions,
   logger: Logger,
 ): Promise<SessionProfile> {
-  const timeout = options.timeout ?? 30_000
+  const timeout = options.timeout ?? DEFAULT_BOOTSTRAP_TIMEOUT_MS
 
   // 1. Send initialize. Routed through the collector helper so any unexpected
   // notification that arrives during initialize is captured (and replayed by

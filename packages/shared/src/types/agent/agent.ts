@@ -16,7 +16,6 @@ import type {
   AcpToolCallStatus,
   AcpToolKind,
 } from './acp-tool.js';
-import type { CanvasNodeType } from '../canvas/node.js';
 
 // ==================== Agent Modes ====================
 
@@ -62,6 +61,12 @@ export interface AgentToolCallEventData {
   toolCallId: string;
   /** Human-readable title from the agent (e.g. `Read app.ts`). */
   title: string;
+  /**
+   * Shell command behind the title, derived server-side from `rawInput`.
+   * Present only for command-style tools; lets the UI show WHICH command
+   * ran without recomputing client-side.
+   */
+  command?: string;
   /** ACP semantic kind; undefined when the agent does not classify. */
   toolKind?: AcpToolKind;
   /** Initial lifecycle status, usually `pending`. */
@@ -136,61 +141,6 @@ export interface AgentErrorEventData {
 /** `event: end` — sentinel terminator (always last). */
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface AgentEndEventData {}
-
-/**
- * Structured prompt handed to an external (ACP) agent.
- *
- * Built **deterministically** from the raw user message + the canvas
- * selection — no preprocessing LLM is involved. `task` is the user's
- * message forwarded verbatim. `selectedNodes` is a metadata-only table
- * of the nodes the user had selected; the external agent fetches their
- * content on demand through the Huabu Reachback Tool (`read-node <id>`)
- * rather than receiving inlined bodies or file attachments.
- */
-export interface ExternalAgentPrompt {
-  /** The user's raw message, forwarded verbatim. */
-  task: string;
-  /**
-   * Metadata for the nodes the user had selected. Content is NOT
-   * inlined — the agent reads it on demand via `read-node <nodeId>`.
-   */
-  selectedNodes: Array<{
-    /** Canvas node ID — pass straight to `read-node` / `write-node --id`. */
-    nodeId: string;
-    /** Node type (e.g. `note`, `image`). */
-    type: CanvasNodeType;
-    /** Display label, when the node has one. */
-    label?: string;
-  }>;
-  /**
-   * The one-shot system preamble (persona + `## Canvas Tools (Reachback)`
-   * docs) prepended to this turn's wire payload. Present only on the
-   * first turn of a freshly-created session — omitted thereafter, since
-   * the agent keeps it in context (see `AcpSessionEntry.systemPreambleSent`).
-   * Carried here so the UI can render the *complete* prompt the agent saw.
-   */
-  systemPreamble?: string;
-}
-
-/**
- * `event: prepared_prompt` — emitted once per external-agent turn,
- * before the first `text_delta`, carrying the {@link ExternalAgentPrompt}
- * Huabu deterministically built from the user's raw message + canvas
- * selection. Internal-agent turns never emit this.
- *
- * On the (effectively impossible) build failure the server still emits
- * this event with `prompt: null` + an `error` description so the UI can
- * replace its pending placeholder with a concrete failure note (and
- * Huabu falls back to forwarding the raw user message).
- */
-export interface AgentPreparedPromptEventData {
-  /** Structured prompt Huabu built, or `null` on failure. */
-  prompt: ExternalAgentPrompt | null;
-  /** Short alias of the bound external agent (e.g. `'claude'`). */
-  agentAlias: string;
-  /** Reason the preprocessor failed; only set when `prompt === null`. */
-  error?: string;
-}
 
 /**
  * `event: permission_request` — an external (ACP) agent asked the
@@ -313,7 +263,6 @@ export type AgentStreamEvent =
   | { type: 'tool_call'; data: AgentToolCallEventData }
   | { type: 'tool_call_update'; data: AgentToolCallUpdateEventData }
   | { type: 'plan'; data: AgentPlanEventData }
-  | { type: 'prepared_prompt'; data: AgentPreparedPromptEventData }
   | { type: 'permission_request'; data: AgentPermissionRequestEventData }
   | { type: 'config_options_update'; data: AgentConfigOptionsUpdateEventData }
   | { type: 'session_mode_update'; data: AgentSessionModeUpdateEventData }
@@ -336,7 +285,6 @@ export const AGENT_SSE_EVENTS = {
   ToolCall: 'tool_call',
   ToolCallUpdate: 'tool_call_update',
   Plan: 'plan',
-  PreparedPrompt: 'prepared_prompt',
   PermissionRequest: 'permission_request',
   ConfigOptionsUpdate: 'config_options_update',
   SessionModeUpdate: 'session_mode_update',

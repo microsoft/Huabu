@@ -40,21 +40,17 @@ import {
 } from './session-store.js';
 import { ensureAgentForThread } from './spawn-orchestrator.js';
 import { acpUpdateToStreamEvent, mergeThinkingChunk } from './translator.js';
-import {
-  emptySidecar,
-  readChatParts,
-  recordMessageTimestamp,
-  setPlanForMessage,
-  upsertToolExt,
-  writeChatParts,
-} from '../store/chat-parts-store.js';
+import { dumpAssembledPrompt } from '../conversation/prompt/debug-prompt.js';
+import { applyToolExt } from '../store/chat-thread-store.js';
 
 import type { AcpSessionEntry } from './session-registry.js';
 import type {
   AcpBindingRecipe,
   AcpSessionPersistedMeta,
 } from './session-store.js';
-import type { ChatPartsSidecar } from '../store/chat-parts-store.js';
+import type { ChatEnvelope } from '../conversation/envelope.js';
+import type { ContentPart } from '../conversation/prompt/attachments.js';
+import type { AcpTurnOverlay } from '../store/chat-thread-store.js';
 import type { AssistantMessage, Context } from '@earendil-works/pi-ai';
 import type {
   AcpPlanEntry,
@@ -63,12 +59,7 @@ import type {
   AcpSessionMode,
   AcpSessionUpdate,
 } from '@sediment/shared';
-import type {
-  AgentChatContext,
-  AgentStreamEvent,
-  AvailableCommand,
-  ExternalAgentPrompt,
-} from '@sediment/shared';
+import type { AgentStreamEvent, AvailableCommand } from '@sediment/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
 /** ACP stop reasons we know about; mapped onto pi-ai `stopReason`. */
@@ -82,26 +73,6 @@ function mapStopReason(
   return 'stop';
 }
 
-/** Extract the plain-text payload Sediment will hand to `session/prompt`. */
-function extractText(
-  content: string | ReadonlyArray<{ type: string; text?: string }> | unknown,
-): string {
-  if (typeof content === 'string') return content;
-  if (Array.isArray(content)) {
-    return content
-      .filter(
-        (b): b is { type: 'text'; text: string } =>
-          !!b &&
-          typeof b === 'object' &&
-          (b as { type?: unknown }).type === 'text' &&
-          typeof (b as { text?: unknown }).text === 'string',
-      )
-      .map((b) => b.text)
-      .join('\n');
-  }
-  return '';
-}
-
 export interface RunAcpAgentOptions {
   /**
    * External binding for the active thread. `profileId` references a
@@ -111,8 +82,13 @@ export interface RunAcpAgentOptions {
    * `prepared_prompt` events.
    */
   binding: { alias: string; profileId: string };
-  /** Plain-text or content-block message to send (we extract text below). */
-  message: string | ReadonlyArray<{ type: string; text?: string }>;
+  /**
+   * This turn's structured envelope — the single source of truth shared
+   * with the built-in path. The preprocessor reads the user's text,
+   * selection, and neighbourhood from it, so the external prompt cannot
+   * drift from what the built-in serializer renders.
+   */
+  envelope: ChatEnvelope;
   /** Sediment thread id \u2014 used as the registry key. */
   threadId: string;
   /**
@@ -131,6 +107,13 @@ export interface RunAcpAgentOptions {
   /** pi-ai context; we mutate `context.messages` to append the assistant reply. */
   context: Context;
   /**
+   * Mutable per-turn ACP overlay. We accumulate tool extensions
+   * (keyed by `toolCallId`) and the turn's plan here; the route folds
+   * it into the persisted turn record. Replaces the old `.parts.json`
+   * sidecar — no timestamps, no position arrays.
+   */
+  overlay: AcpTurnOverlay;
+  /**
    * `cwd` passed to `session/new` on first prompt for this thread.
    * Ignored for subsequent prompts (the session is already open).
    *
@@ -143,16 +126,21 @@ export interface RunAcpAgentOptions {
    * stranded at the filesystem root).
    */
   cwd?: string;
-  /**
-   * Optional canvas context (selected nodes, etc.) used by the
-   * preprocessor to build a focused prompt for the external agent.
-   * When omitted, the preprocessor still runs but with no
-   * canvas-aware fileRefs hints.
-   */
-  canvasContext?: AgentChatContext;
   /** Cancellation signal \u2014 wired through to `session/cancel`. */
   signal?: AbortSignal;
   logger: FastifyBaseLogger;
+  /**
+   * Optional developer aid: when present (and `HUABU_DEBUG_PROMPT` is
+   * set), dump the serialized text payload handed to ACP. Mirrors the
+   * built-in path's {@link AgentRunOptions.debugPrompt} so both
+   * backends surface a comparable prompt log.
+   */
+  debugPrompt?: {
+    turnNumber: number;
+    threadId: string;
+    mode: string;
+    logger: FastifyBaseLogger;
+  };
 }
 
 // ─── Session lifecycle helper ─────────────────────────────────────────────
@@ -1103,9 +1091,12 @@ function readNullableString(v: unknown): string | null | undefined {
 export async function* runAcpAgent(
   opts: RunAcpAgentOptions,
 ): AsyncGenerator<AgentStreamEvent> {
-  const { binding, threadId, context, canvasContext, signal, logger } = opts;
+  const { binding, threadId, context, signal, logger, overlay } = opts;
   const canvasId = opts.canvasId ?? '';
-  const rawText = extractText(opts.message);
+  // Verbatim user text for the fallback payload + slash detection. The
+  // preprocessor derives the same value from the envelope; we keep a
+  // local copy only for the raw-text fallback below.
+  const rawText = opts.envelope.user.text;
 
   // 1-2. Ensure (open or reuse) the per-thread ACP session. The helper
   //      handles connection lookup, stale-entry eviction, initialize +
@@ -1122,12 +1113,8 @@ export async function* runAcpAgent(
     logger,
   });
 
-  // 3. Preprocess the user message into a structured ExternalAgentPrompt
-  //    BEFORE opening the queue, so the UI sees `prepared_prompt` strictly
-  //    before any `text_delta`. On failure we fall back to the raw text
-  //    and emit a `prepared_prompt` event with `prompt: null + error` so
-  //    the UI can surface the failure (and we still serve the user).
-  let preparedPrompt: ExternalAgentPrompt | null = null;
+  // 3. Preprocess the user message into the ACP wire blocks BEFORE
+  //    opening the queue. On failure we fall back to the raw text.
   let preparedError: string | undefined;
   let promptPayload = rawText;
   // Whether this turn's payload actually carried the one-shot system
@@ -1135,17 +1122,18 @@ export async function* runAcpAgent(
   // below — so a failed turn (or a slash-command short-circuit, which
   // never includes it) re-sends the preamble on the next real turn.
   let includedSystem = false;
+  let promptBlocks: ContentPart[] = [{ type: 'text', text: rawText }];
   try {
-    const result = prepareExternalAgentPrompt({
-      rawText,
+    const result = await prepareExternalAgentPrompt({
+      envelope: opts.envelope,
       agentAlias: binding.alias,
-      canvasContext,
+      canvasId: canvasId || null,
       includeSystem: !entry.systemPreambleSent,
       logger,
     });
-    preparedPrompt = result.prompt;
     promptPayload = result.serialized;
     includedSystem = result.includedSystem;
+    promptBlocks = result.blocks;
   } catch (err) {
     preparedError = err instanceof Error ? err.message : String(err);
     logger.warn(
@@ -1153,29 +1141,27 @@ export async function* runAcpAgent(
       '[acp] preprocessor failed — falling back to raw user text',
     );
     promptPayload = serializeRawPrompt(rawText);
+    promptBlocks = [{ type: 'text', text: promptPayload }];
   }
 
-  // Persist a sidecar marker on the user's history slot so chat
-  // history can rehydrate the PreparedPromptCard. Mirrors the
-  // `[SYSTEM Error]` / `[SYSTEM Interrupted]` pattern used elsewhere.
-  context.messages.push({
-    role: 'user',
-    content: `[SYSTEM PreparedPrompt] ${JSON.stringify({
-      agentAlias: binding.alias,
-      prompt: preparedPrompt,
-      error: preparedError,
-    })}`,
-    timestamp: Date.now(),
-  });
-
-  yield {
-    type: 'prepared_prompt',
-    data: {
-      agentAlias: binding.alias,
-      prompt: preparedPrompt,
-      error: preparedError,
-    },
-  };
+  // Optional developer aid: dump the exact text payload handed to ACP
+  // `session/prompt` (the deterministic serialized prompt, NOT pi-ai
+  // messages — the external agent keeps its own session history). No-op
+  // unless HUABU_DEBUG_PROMPT is set.
+  if (opts.debugPrompt) {
+    dumpAssembledPrompt({
+      systemPrompt: '',
+      messages: [
+        { role: 'user', content: promptPayload, timestamp: Date.now() },
+      ],
+      newMessageCount: 1,
+      turnNumber: opts.debugPrompt.turnNumber,
+      threadId: opts.debugPrompt.threadId,
+      canvasId: canvasId || null,
+      mode: opts.debugPrompt.mode,
+      logger: opts.debugPrompt.logger,
+    });
+  }
 
   // 4. Bridge the per-update callback into an async iterable via a queue.
   const queue: AgentStreamEvent[] = [];
@@ -1223,29 +1209,11 @@ export async function* runAcpAgent(
     string,
     Extract<AssistantContentBlock, { type: 'toolCall' }>
   >();
-  let sidecar: ChatPartsSidecar =
-    readChatParts(threadId, canvasId) ?? emptySidecar();
-  const assistantIndex = context.messages.length;
-  let sidecarDirty = false;
+  // ACP overlay (tool extensions + plan) accumulates into the
+  // route-owned `overlay`, which is persisted into the turn record.
+  // Plan entries are staged until the turn ends (full-replacement
+  // wire semantics: latest plan wins).
   let pendingPlan: AcpPlanEntry[] | null = null;
-  const persistSidecar = () => {
-    if (!sidecarDirty || !canvasId) return;
-    try {
-      writeChatParts(threadId, sidecar, canvasId);
-      sidecarDirty = false;
-    } catch (err) {
-      // Sidecar failures must NEVER abort the turn — chat history is
-      // still functional from the pi-ai file alone. Log + continue.
-      logger.warn(
-        {
-          threadId,
-          canvasId,
-          err: err instanceof Error ? err.message : String(err),
-        },
-        '[acp] failed to write chat-parts sidecar',
-      );
-    }
-  };
 
   const wake = () => {
     if (resolveWaiter) {
@@ -1261,7 +1229,7 @@ export async function* runAcpAgent(
       sessionId: entry.sessionId,
       profileId: binding.profileId,
       promptLength: promptPayload.length,
-      preprocessed: preparedPrompt !== null,
+      preprocessed: !preparedError,
     },
     '[acp] session/prompt dispatch',
   );
@@ -1269,7 +1237,7 @@ export async function* runAcpAgent(
   void entry.client
     .prompt(
       entry.sessionId,
-      promptPayload,
+      promptBlocks,
       (update) => {
         const evt = acpUpdateToStreamEvent(update, logger);
         if (!evt) {
@@ -1303,14 +1271,13 @@ export async function* runAcpAgent(
             });
           }
         } else if (evt.type === 'tool_call') {
-          sidecar = upsertToolExt(sidecar, evt.data.toolCallId, {
+          applyToolExt(overlay, evt.data.toolCallId, {
             toolKind: evt.data.toolKind,
             status: evt.data.status,
             locations: evt.data.locations,
             content: evt.data.content,
             rawOutput: undefined,
           });
-          sidecarDirty = true;
           // `rawInput` may be any JSON shape; pi-ai's `ToolCall.arguments`
           // requires a plain object, so narrow defensively.
           const rawInput = evt.data.rawInput;
@@ -1329,13 +1296,12 @@ export async function* runAcpAgent(
           contentBlocks.push(block);
           toolCallByCallId.set(evt.data.toolCallId, block);
         } else if (evt.type === 'tool_call_update') {
-          sidecar = upsertToolExt(sidecar, evt.data.toolCallId, {
+          applyToolExt(overlay, evt.data.toolCallId, {
             status: evt.data.status,
             locations: evt.data.locations,
             content: evt.data.content,
             rawOutput: evt.data.rawOutput,
           });
-          sidecarDirty = true;
           // ACP allows refining the title mid-flight (e.g. "Reading"
           // → "Reading app.ts"); mirror onto the persisted block.
           if (evt.data.title) {
@@ -1432,20 +1398,14 @@ export async function* runAcpAgent(
           timestamp,
         }),
       );
-      // Stamp arrival time AFTER the push so the sidecar's
-      // `messageTimestamps` stays index-aligned with `Context.messages`.
-      // First-write-wins guards against retry overwrites.
-      sidecar = recordMessageTimestamp(sidecar, assistantIndex, timestamp);
-      sidecarDirty = true;
-      if (pendingPlan) {
-        sidecar = setPlanForMessage(sidecar, timestamp, pendingPlan);
-        pendingPlan = null;
-      }
     }
-    // 6b. Persist the rich-ACP sidecar regardless of error/abort —
-    //     partial tool calls captured before the failure still
-    //     survive a refresh.
-    persistSidecar();
+    // 6b. Commit the turn's plan (full-replacement; latest wins) into
+    //     the route-owned overlay so it persists in the turn record.
+    //     Tool extensions were already accumulated as events arrived.
+    if (pendingPlan) {
+      overlay.plan = pendingPlan;
+      pendingPlan = null;
+    }
   }
 
   // 7. Yield terminal event \u2014 error wins over done.

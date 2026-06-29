@@ -3,7 +3,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { AIMessage } from './AIMessage';
 import { IntentSelectMessage } from './IntentSelectMessage';
-import { PreparedPromptMessage } from './PreparedPromptMessage';
 import { StatusMessage } from './StatusMessage';
 import { UserMessage } from './UserMessage';
 import { Button } from '../Common/Button';
@@ -160,19 +159,6 @@ export const MessageList = ({
                   status={msg.status}
                   detail={msg.detail}
                   onRetry={onRetry}
-                />,
-              );
-              i++;
-              continue;
-            }
-
-            if (msg.role === 'prepared-prompt') {
-              elements.push(
-                <PreparedPromptMessage
-                  key={msg.id}
-                  prompt={msg.prompt}
-                  agentAlias={msg.agentAlias}
-                  error={msg.error}
                 />,
               );
               i++;

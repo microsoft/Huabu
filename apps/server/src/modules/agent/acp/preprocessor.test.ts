@@ -11,9 +11,12 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { prepareExternalAgentPrompt, serializePrompt } from './preprocessor.js';
+import { prepareExternalAgentPrompt } from './preprocessor.js';
+import { buildAgentNodePreview, buildAgentNodeRef } from '../node-ref.js';
 
-import type { ExternalAgentPrompt, WireSelectionNode } from '@sediment/shared';
+import type { NodeNeighbourhoodContext } from '../../canvas/node-neighbourhood.js';
+import type { ChatEnvelope } from '../conversation/envelope.js';
+import type { CanvasNodeType, ChatAttachment } from '@sediment/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
 /** Minimal logger stub — only `debug` is exercised. */
@@ -24,123 +27,212 @@ const logger = {
   error: vi.fn(),
 } as unknown as FastifyBaseLogger;
 
+/**
+ * Build a minimal {@link ChatEnvelope} for preprocessor tests. Only the
+ * fields the ACP serializer reads (`user.text`, `focus.selection.refs`,
+ * `preamble.neighbourhood`) carry meaningful values; the rest are
+ * inert defaults so the envelope type-checks.
+ */
+function makeEnvelope(opts: {
+  text: string;
+  selection?: { id: string; type: CanvasNodeType; label?: string }[];
+  neighbourhood?: NodeNeighbourhoodContext;
+  attachments?: ChatAttachment[];
+}): ChatEnvelope {
+  return {
+    user: { text: opts.text, attachments: opts.attachments ?? [] },
+    skills: { invokedIds: [], resolved: [] },
+    focus: {
+      selection: {
+        refs: (opts.selection ?? []).map((n) =>
+          buildAgentNodeRef({ id: n.id, type: n.type, label: n.label }),
+        ),
+        selectedIds: (opts.selection ?? []).map((n) => n.id),
+        imageAttachments: [],
+        snapshotAttachments: [],
+      },
+      ...(opts.neighbourhood
+        ? { anchor: { nodeId: 'anchor', neighbourhood: opts.neighbourhood } }
+        : {}),
+    },
+  };
+}
+
 describe('serializePrompt', () => {
-  it('emits the verbatim task and no Selected Nodes section when nothing is selected', () => {
-    const prompt: ExternalAgentPrompt = {
-      task: 'Explain the difference between async iterators and generators.',
-      selectedNodes: [],
-    };
+  it('emits the verbatim task and no selected-nodes section when nothing is selected', async () => {
+    const { serialized } = await prepareExternalAgentPrompt({
+      envelope: makeEnvelope({
+        text: 'Explain the difference between async iterators and generators.',
+      }),
+      agentAlias: 'claude',
+      logger,
+    });
 
-    const out = serializePrompt(prompt);
-
-    expect(out).toContain(
+    // No context sections → bare task, no XML scaffolding (mirrors the
+    // built-in plain-text fast path).
+    expect(serialized).toBe(
       'Explain the difference between async iterators and generators.',
     );
-    expect(out).not.toContain('## Selected Nodes');
+    expect(serialized).not.toContain('<selected_nodes>');
   });
 
-  it('renders a Selected Nodes table when nodes are present', () => {
-    const prompt: ExternalAgentPrompt = {
-      task: 'Compare these notes.',
-      selectedNodes: [
-        { nodeId: 'node-a', type: 'note', label: 'Intro' },
-        { nodeId: 'node-b', type: 'image' },
-      ],
-    };
+  it('wraps a selected-nodes list in <selected_nodes> when nodes are present', async () => {
+    const { serialized } = await prepareExternalAgentPrompt({
+      envelope: makeEnvelope({
+        text: 'Compare these notes.',
+        selection: [
+          { id: 'node-a', type: 'note', label: 'Intro' },
+          { id: 'node-b', type: 'image' },
+        ],
+      }),
+      agentAlias: 'claude',
+      logger,
+    });
 
-    const out = serializePrompt(prompt);
-
-    expect(out).toContain('Compare these notes.');
-    expect(out).toContain('## Selected Nodes');
-    expect(out).toContain('| Node ID | Type | Label |');
-    expect(out).toContain('| `node-a` | note | Intro |');
-    // Label-less node renders an em-dash placeholder.
-    expect(out).toContain('| `node-b` | image | — |');
+    expect(serialized).toContain('<selected_nodes>');
+    expect(serialized).toContain('</selected_nodes>');
+    expect(serialized).toContain(
+      '<node id="node-a" type="note" label="Intro" file="nodes/Intro.md" />',
+    );
+    // Label-less node renders with id + type + file.
+    expect(serialized).toContain(
+      '<node id="node-b" type="image" file="nodes/node-b.md" />',
+    );
+    // The user's words come last, wrapped in <user_request>.
+    expect(serialized).toContain(
+      '<user_request>\nCompare these notes.\n</user_request>',
+    );
+    expect(serialized.indexOf('<selected_nodes>')).toBeLessThan(
+      serialized.indexOf('<user_request>'),
+    );
   });
 
-  it('mentions read-node in the Selected Nodes intro', () => {
-    const prompt: ExternalAgentPrompt = {
-      task: 'task',
-      selectedNodes: [{ nodeId: 'n1', type: 'note' }],
-    };
-
-    expect(serializePrompt(prompt)).toContain('read-node <node-id>');
+  it('mentions read-node in the selected-nodes intro', async () => {
+    const { serialized } = await prepareExternalAgentPrompt({
+      envelope: makeEnvelope({
+        text: 'task',
+        selection: [{ id: 'n1', type: 'note' }],
+      }),
+      agentAlias: 'claude',
+      logger,
+    });
+    expect(serialized).toContain('read-node <node-id>');
   });
 
-  it('escapes pipe characters in labels so the table cannot break', () => {
-    const prompt: ExternalAgentPrompt = {
-      task: 'task',
-      selectedNodes: [{ nodeId: 'n1', type: 'note', label: 'a | b' }],
-    };
-
-    expect(serializePrompt(prompt)).toContain('| `n1` | note | a \\| b |');
+  it('escapes XML-special characters in labels so the attribute cannot break', async () => {
+    const { serialized } = await prepareExternalAgentPrompt({
+      envelope: makeEnvelope({
+        text: 'task',
+        selection: [{ id: 'n1', type: 'note', label: 'a " <b>' }],
+      }),
+      agentAlias: 'claude',
+      logger,
+    });
+    expect(serialized).toContain(
+      '<node id="n1" type="note" label="a &quot; &lt;b&gt;" file="nodes/a _ _b_.md" />',
+    );
   });
+  it('wraps off-canvas attachments in <attachments> before the user request', async () => {
+    const { serialized } = await prepareExternalAgentPrompt({
+      envelope: makeEnvelope({
+        text: 'summarize the attached note',
+        attachments: [
+          {
+            type: 'text',
+            source: 'upload',
+            label: 'excerpt',
+            content: 'the quick brown fox',
+          },
+          {
+            type: 'web',
+            source: 'upload',
+            label: 'FX outlook',
+            url: 'https://example.com/fx',
+            content: 'continued volatility into Q4',
+          },
+        ],
+      }),
+      agentAlias: 'claude',
+      logger,
+    });
 
-  it('omits the system preamble by default and prepends it when includeSystem is set', () => {
-    const prompt: ExternalAgentPrompt = { task: 'task', selectedNodes: [] };
-
-    const withoutSystem = serializePrompt(prompt);
+    expect(serialized).toContain('<attachments>');
+    expect(serialized).toContain('</attachments>');
+    expect(serialized).toContain('<attachment type="text">');
+    expect(serialized).toContain('the quick brown fox');
+    expect(serialized).toContain(
+      '<attachment type="web" name="FX outlook" url="https://example.com/fx">',
+    );
+    // The user's words still come last.
+    expect(serialized.indexOf('<attachments>')).toBeLessThan(
+      serialized.indexOf('<user_request>'),
+    );
+  });
+  it('omits the system preamble by default and prepends it when includeSystem is set', async () => {
+    const withoutSystem = (
+      await prepareExternalAgentPrompt({
+        envelope: makeEnvelope({ text: 'ZZ_UNIQUE_TASK_BODY' }),
+        agentAlias: 'claude',
+        logger,
+      })
+    ).serialized;
     expect(withoutSystem).not.toContain('## Canvas Tools (Reachback)');
     expect(withoutSystem).not.toContain('Huabu');
 
-    const withSystem = serializePrompt(prompt, { includeSystem: true });
+    const withSystem = (
+      await prepareExternalAgentPrompt({
+        envelope: makeEnvelope({ text: 'ZZ_UNIQUE_TASK_BODY' }),
+        agentAlias: 'claude',
+        includeSystem: true,
+        logger,
+      })
+    ).serialized;
     expect(withSystem).toContain('## Canvas Tools (Reachback)');
     expect(withSystem).toContain('Huabu');
-    // The preamble precedes the per-turn request body.
     expect(withSystem.indexOf('## Canvas Tools (Reachback)')).toBeLessThan(
-      withSystem.indexOf('## Request'),
+      withSystem.indexOf('ZZ_UNIQUE_TASK_BODY'),
     );
   });
 });
 
 describe('prepareExternalAgentPrompt', () => {
-  it('forwards slash commands verbatim and never includes the system preamble', () => {
-    const result = prepareExternalAgentPrompt({
-      rawText: '/compact please',
+  it('forwards slash commands verbatim and never includes the system preamble', async () => {
+    const result = await prepareExternalAgentPrompt({
+      envelope: makeEnvelope({ text: '/compact please' }),
       agentAlias: 'claude',
       includeSystem: true,
       logger,
     });
 
-    expect(result.prompt).toEqual({
-      task: '/compact please',
-      selectedNodes: [],
-    });
     expect(result.serialized).toBe('/compact please');
     // Even when asked to include it, a slash short-circuit must not —
     // so the flag stays unsent for the next real turn.
     expect(result.includedSystem).toBe(false);
   });
 
-  it('builds selectedNodes from the (flattened) selection', () => {
-    const selectedNodes: WireSelectionNode[] = [
-      {
-        id: 'frame-1',
-        type: 'frame',
-        label: 'Group',
-        children: [{ id: 'child-1', type: 'note', label: 'Child' }],
-      },
-    ];
-
-    const result = prepareExternalAgentPrompt({
-      rawText: 'do something',
+  it('builds selectedNodes from the envelope selection refs', async () => {
+    const result = await prepareExternalAgentPrompt({
+      envelope: makeEnvelope({
+        text: 'do something',
+        selection: [
+          { id: 'frame-1', type: 'frame', label: 'Group' },
+          { id: 'child-1', type: 'note', label: 'Child' },
+        ],
+      }),
       agentAlias: 'claude',
-      canvasContext: { selectedNodes },
       logger,
     });
 
-    expect(result.prompt.task).toBe('do something');
-    expect(result.prompt.selectedNodes).toEqual([
-      { nodeId: 'frame-1', type: 'frame', label: 'Group' },
-      { nodeId: 'child-1', type: 'note', label: 'Child' },
-    ]);
-    expect(result.serialized).toContain('| `child-1` | note | Child |');
+    expect(result.serialized).toContain('do something');
+    expect(result.serialized).toContain(
+      '<node id="child-1" type="note" label="Child" file="nodes/Child.md" />',
+    );
     expect(result.includedSystem).toBe(false);
   });
 
-  it('includes the system preamble on the first turn when includeSystem is set', () => {
-    const result = prepareExternalAgentPrompt({
-      rawText: 'first message',
+  it('includes the system preamble on the first turn when includeSystem is set', async () => {
+    const result = await prepareExternalAgentPrompt({
+      envelope: makeEnvelope({ text: 'first message' }),
       agentAlias: 'claude',
       includeSystem: true,
       logger,
@@ -149,21 +241,147 @@ describe('prepareExternalAgentPrompt', () => {
     expect(result.includedSystem).toBe(true);
     expect(result.serialized).toContain('## Canvas Tools (Reachback)');
     expect(result.serialized).toContain('first message');
-    // The structured prompt also carries the rendered preamble so the
-    // UI can show the complete prompt the agent saw.
-    expect(result.prompt.systemPreamble).toContain(
-      '## Canvas Tools (Reachback)',
-    );
   });
 
-  it('omits systemPreamble from the structured prompt when includeSystem is unset', () => {
-    const result = prepareExternalAgentPrompt({
-      rawText: 'later message',
+  it('does not prepend the preamble when includeSystem is unset', async () => {
+    const result = await prepareExternalAgentPrompt({
+      envelope: makeEnvelope({ text: 'later message' }),
       agentAlias: 'claude',
       logger,
     });
 
     expect(result.includedSystem).toBe(false);
-    expect(result.prompt.systemPreamble).toBeUndefined();
+    expect(result.serialized).not.toContain('## Canvas Tools (Reachback)');
+  });
+
+  it('renders a canvas-neighbourhood section when the envelope carries one', async () => {
+    const neighbourhood: NodeNeighbourhoodContext = {
+      layers: [
+        {
+          groups: [
+            {
+              dx: -200,
+              dy: 0,
+              arrangement: '2 nodes',
+              _minEdgeDist: 40,
+              nodes: [
+                buildAgentNodePreview({
+                  id: 'sketch-a',
+                  type: 'sketch',
+                  label: 'Sketch A',
+                }),
+              ],
+            },
+          ],
+        },
+      ],
+      relevantEdges: [],
+    };
+
+    const result = await prepareExternalAgentPrompt({
+      envelope: makeEnvelope({ text: 'generate an image', neighbourhood }),
+      agentAlias: 'claude',
+      logger,
+    });
+
+    expect(result.serialized).toContain('<canvas_neighbourhood>');
+    expect(result.serialized).toContain(
+      '<group direction="to the left" arrangement="2 nodes">',
+    );
+    // ACP now emits `file=` too (read-node by id, filename for display).
+    expect(result.serialized).toContain(
+      '<node id="sketch-a" type="sketch" label="Sketch A" file="nodes/Sketch A.md" />',
+    );
+    // The user's request comes LAST; the neighbourhood precedes it.
+    expect(result.serialized.indexOf('<canvas_neighbourhood>')).toBeLessThan(
+      result.serialized.indexOf('generate an image'),
+    );
+  });
+
+  it('omits the canvas-neighbourhood section when the envelope has none', async () => {
+    const result = await prepareExternalAgentPrompt({
+      envelope: makeEnvelope({ text: 'plain request' }),
+      agentAlias: 'claude',
+      logger,
+    });
+
+    expect(result.serialized).not.toContain('<canvas_neighbourhood>');
+  });
+
+  it('appends neighbourhood context after the slash command, never the preamble', async () => {
+    const result = await prepareExternalAgentPrompt({
+      envelope: makeEnvelope({
+        text: '/compact now',
+        neighbourhood: {
+          layers: [
+            {
+              groups: [
+                {
+                  dx: 0,
+                  dy: -100,
+                  arrangement: 'single node',
+                  _minEdgeDist: 5,
+                  nodes: [buildAgentNodePreview({ id: 'x', type: 'note' })],
+                },
+              ],
+            },
+          ],
+          relevantEdges: [],
+        },
+      }),
+      agentAlias: 'claude',
+      includeSystem: true,
+      logger,
+    });
+
+    expect(result.serialized.startsWith('/compact now')).toBe(true);
+    expect(result.serialized).toContain('<canvas_neighbourhood>');
+    // No system preamble for slash turns, even when asked.
+    expect(result.serialized).not.toContain('## Canvas Tools (Reachback)');
+    expect(result.includedSystem).toBe(false);
+  });
+
+  it('forwards off-canvas text uploads into the prompt attachments', async () => {
+    const result = await prepareExternalAgentPrompt({
+      envelope: makeEnvelope({
+        text: 'use the attached excerpt',
+        attachments: [
+          {
+            type: 'text',
+            source: 'upload',
+            label: 'excerpt',
+            content: 'Q3 exposure rose 12% on fx volatility.',
+          },
+        ],
+      }),
+      agentAlias: 'claude',
+      logger,
+    });
+
+    expect(result.serialized).toContain('<attachments>');
+    expect(result.serialized).toContain(
+      'Q3 exposure rose 12% on fx volatility.',
+    );
+  });
+
+  it('drops a content-less image upload from the wire (no resolvable bytes)', async () => {
+    const result = await prepareExternalAgentPrompt({
+      envelope: makeEnvelope({
+        text: 'look at this',
+        attachments: [
+          {
+            type: 'image',
+            source: 'upload',
+            label: 'diagram.png',
+            url: 'blob:abc',
+          },
+        ],
+      }),
+      agentAlias: 'claude',
+      logger,
+    });
+
+    // No resolvable bytes for a blob: url, so no wire image block.
+    expect(result.blocks.some((b) => b.type === 'image')).toBe(false);
   });
 });

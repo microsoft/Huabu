@@ -158,16 +158,44 @@ export function chatPath(canvasId: string, threadId: string): string {
 }
 
 /**
- * Sidecar JSON paired with `chatPath` — holds rich-ACP overlay parts
- * (plan entries, tool-call extension fields, permission outcomes)
- * that don't fit inside the pi-ai `Context` shape. See
- * `chat-parts-store.ts` for the schema. Optional: a thread without
- * ACP enrichment simply has no `.parts.json` file.
+ * Structured thread record paired with a thread — the source of truth
+ * for chat history in the envelope-persistence model. An append-only
+ * JSONL log of finalized turns, each carrying the user's structured
+ * {@link ChatEnvelope} plus the assistant/tool transcript it produced.
+ * Kept on a distinct `.turns.jsonl` path so legacy `.json` pi-ai
+ * `Context` files are simply ignored (no migration). See
+ * `chat-thread-store.ts` for the schema.
  */
-export function chatPartsPath(canvasId: string, threadId: string): string {
+export function chatTurnsPath(canvasId: string, threadId: string): string {
   return path.join(
     chatDir(canvasId),
-    `${sanitizeId(threadId, 'threadId')}.parts.json`,
+    `${sanitizeId(threadId, 'threadId')}.turns.jsonl`,
+  );
+}
+
+/**
+ * The single in-progress turn for a thread, rewritten on each debounced
+ * save during streaming so a mid-generation reload still shows partial
+ * progress. Promoted to a `.turns.jsonl` line (and deleted) when the
+ * turn finalizes. See `chat-thread-store.ts`.
+ */
+export function chatActiveTurnPath(canvasId: string, threadId: string): string {
+  return path.join(
+    chatDir(canvasId),
+    `${sanitizeId(threadId, 'threadId')}.active.json`,
+  );
+}
+
+/**
+ * Human-readable debug dump of the assembled prompt sent to the agent,
+ * one block per turn with strong turn separators. Append-only, written
+ * only when the `HUABU_DEBUG_PROMPT` env flag is set. Never read by the
+ * app — purely a developer post-mortem aid. See `conversation/prompt/debug-prompt.ts`.
+ */
+export function chatPromptLogPath(canvasId: string, threadId: string): string {
+  return path.join(
+    chatDir(canvasId),
+    `${sanitizeId(threadId, 'threadId')}.prompt.log`,
   );
 }
 
