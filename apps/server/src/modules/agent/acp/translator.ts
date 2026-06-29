@@ -46,7 +46,7 @@
  * (test-only).
  */
 
-import { ZAcpSessionUpdate } from '@sediment/shared';
+import { ZAcpSessionUpdate, commandFromRawInput } from '@sediment/shared';
 
 import type {
   AcpSessionConfigOption,
@@ -181,6 +181,7 @@ export function acpUpdateToStreamEvent(
     }
     case 'tool_call': {
       if (u.kind === undefined) counters.toolCallMissingKind += 1;
+      const command = commandFromRawInput(u.rawInput);
       const data: AgentToolCallEventData = {
         toolCallId: u.toolCallId,
         title: u.title,
@@ -189,6 +190,7 @@ export function acpUpdateToStreamEvent(
         locations: u.locations,
         content: u.content,
         rawInput: u.rawInput,
+        ...(command ? { command } : {}),
         // External-agent turns are always emitted as the `generic`
         // tool-part variant downstream \u2014 there is no internal-tool
         // metadata to attach here.

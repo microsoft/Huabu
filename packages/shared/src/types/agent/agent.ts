@@ -61,6 +61,12 @@ export interface AgentToolCallEventData {
   toolCallId: string;
   /** Human-readable title from the agent (e.g. `Read app.ts`). */
   title: string;
+  /**
+   * Shell command behind the title, derived server-side from `rawInput`.
+   * Present only for command-style tools; lets the UI show WHICH command
+   * ran without recomputing client-side.
+   */
+  command?: string;
   /** ACP semantic kind; undefined when the agent does not classify. */
   toolKind?: AcpToolKind;
   /** Initial lifecycle status, usually `pending`. */

@@ -177,6 +177,12 @@ interface ToolPartBase {
   toolCallId: string;
   /** Human-readable title from the agent (e.g. `Read app.ts`). */
   title: string;
+  /**
+   * Shell command (or other primary input) that produced this call,
+   * derived from ACP `rawInput`. Surfaced so users can see WHICH
+   * command ran behind a friendly title. Undefined when not a command.
+   */
+  command?: string;
   /** ACP semantic kind (`read`, `edit`, `search`, …); undefined for legacy. */
   toolKind?: AcpToolKind;
   /** Lifecycle status; defaults to `pending` until first update. */
@@ -351,6 +357,25 @@ const VARIANT_BY_INTERNAL_TOOL: Record<string, AssistantToolVariant> = {
  */
 export function variantForInternalTool(toolName: string): AssistantToolVariant {
   return VARIANT_BY_INTERNAL_TOOL[toolName] ?? 'generic';
+}
+
+/**
+ * Derive a human-readable command string from a tool call's ACP
+ * `rawInput`. Shell/terminal tools carry `{ command }` (string or argv
+ * array); other tools have no command. Returns undefined when no usable
+ * command is present so renderers can stay title-only. Server-only
+ * derivation: the translator stamps live `tool_call` events and the
+ * history builder reads persisted `arguments`, so the web never recomputes.
+ */
+export function commandFromRawInput(rawInput: unknown): string | undefined {
+  if (!rawInput || typeof rawInput !== 'object') return undefined;
+  const cmd = (rawInput as Record<string, unknown>).command;
+  if (typeof cmd === 'string' && cmd.trim().length > 0) return cmd.trim();
+  if (Array.isArray(cmd) && cmd.every((c) => typeof c === 'string')) {
+    const joined = cmd.join(' ').trim();
+    return joined.length > 0 ? joined : undefined;
+  }
+  return undefined;
 }
 
 // ─── AssistantHistoryPart (wire / persistence shape) ──────────────────

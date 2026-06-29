@@ -480,6 +480,7 @@ function mergeToolPart(
     variant?: AssistantToolVariant;
     toolName?: string;
     title?: string;
+    command?: string;
     toolKind?: AssistantToolPart['toolKind'];
     status?: AssistantToolPart['status'];
     locations?: AssistantToolPart['locations'];
@@ -494,6 +495,7 @@ function mergeToolPart(
 
   // Shared ToolPartBase fields — identical assembly for every variant.
   const title = patch.title ?? existing?.title ?? toolCallId;
+  const command = patch.command ?? existing?.command;
   const toolKind = patch.toolKind ?? existing?.toolKind;
   const status = patch.status ?? existing?.status;
   // Locations/content are append-only per ACP §session/update spec.
@@ -512,6 +514,7 @@ function mergeToolPart(
     kind: 'tool' as const,
     toolCallId,
     title,
+    ...(command !== undefined ? { command } : {}),
     ...(toolKind !== undefined ? { toolKind } : {}),
     ...(status !== undefined ? { status } : {}),
     ...(mergedLocations.length > 0 ? { locations: mergedLocations } : {}),
@@ -817,6 +820,7 @@ export function handleStreamEvent(
             // the wire shape carries only ACP-spec fields.
             variant: 'generic',
             title: data.title,
+            command: data.command,
             toolKind: data.toolKind,
             status: data.status,
             locations: data.locations,

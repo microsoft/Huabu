@@ -13,6 +13,7 @@ import {
   AGENT_SSE_EVENTS,
   agentCanvasIdQuerySchema,
   agentRequestSchema,
+  commandFromRawInput,
   createId,
   forkThreadBodySchema,
   variantForInternalTool,
@@ -272,10 +273,12 @@ function buildAssistantParts(
         ? parseToolResultText(toolName, result.resultText)
         : undefined;
       const variant = toolData ? variantForInternalTool(toolName) : 'generic';
+      const command = commandFromRawInput(block.arguments);
       const base = {
         kind: 'tool' as const,
         toolCallId,
         title: toolName,
+        ...(command ? { command } : {}),
         ...(extras?.toolKind ? { toolKind: extras.toolKind } : {}),
         ...(extras?.status ? { status: extras.status } : {}),
         ...(extras?.locations ? { locations: extras.locations } : {}),

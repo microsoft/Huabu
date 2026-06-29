@@ -23,6 +23,7 @@ import { useState } from 'react';
 import { respondAcpPermission } from '../../../api/acp';
 import { useChatStore } from '../../../store/chatStore';
 import { Button } from '../../Common/Button';
+import { CommandBlock } from '../../Common/CommandBlock';
 
 import type { AssistantSegment } from '../../../store/chatTypes';
 import type {
@@ -209,11 +210,7 @@ export function PermissionCard({
           <ShieldQuestion size={14} className="text-info shrink-0" />
           <span className="text-fg-default text-sm font-medium">{title}</span>
         </div>
-        {preview && (
-          <pre className="border-edge-default text-fg-default bg-bg-default mx-3 mb-2 overflow-x-auto rounded border px-2 py-1.5 font-mono text-xs whitespace-pre-wrap">
-            {preview}
-          </pre>
-        )}
+        {preview && <CommandBlock text={preview} className="mx-3 mb-2" />}
         {locations.length > 0 && (
           <div className="text-fg-muted mx-3 mb-2 flex flex-wrap gap-1 text-xs">
             {locations.map((p) => (
