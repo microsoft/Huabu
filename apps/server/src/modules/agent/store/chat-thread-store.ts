@@ -62,7 +62,7 @@ import {
   chatTurnsPath,
 } from '../../storage/paths.js';
 
-import type { ChatEnvelope } from '../context/envelope.js';
+import type { ChatEnvelope } from '../conversation/envelope.js';
 import type { Context } from '@earendil-works/pi-ai';
 import type {
   AcpPlanEntry,

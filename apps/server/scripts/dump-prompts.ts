@@ -20,13 +20,13 @@
  */
 
 import { prepareExternalAgentPrompt } from '../src/modules/agent/acp/preprocessor.js';
-import { renderEnvelopeMessages } from '../src/modules/agent/context/render-turn.js';
+import { renderEnvelopeMessages } from '../src/modules/agent/conversation/prompt/build-prompt.js';
 import { buildAgentNodePreview } from '../src/modules/agent/node-ref.js';
 
 import type {
   ChatEnvelope,
   ResolvedSkill,
-} from '../src/modules/agent/context/envelope.js';
+} from '../src/modules/agent/conversation/envelope.js';
 import type { AgentNodeRef } from '../src/modules/agent/node-ref.js';
 import type { NodeNeighbourhoodContext } from '../src/modules/canvas/node-neighbourhood.js';
 import type { ChatAttachment } from '@sediment/shared';

@@ -6,34 +6,37 @@
  * file owns only the COMPOSITION: how the context sections, the
  * attachment block, and the user's own words are ordered and stitched
  * into the final message. The shape of each individual piece lives in
- * its own renderer under `./render/`, so the prompt is easy to read off
- * the file tree:
+ * its own renderer alongside this file, so the prompt is easy to read
+ * off the file tree:
  *
- *   render/node-element.ts   — the `<node>` element (shared primitive)
- *   render/selected-nodes.ts — `<selected_nodes>`       block
- *   render/neighbourhood.ts  — `<canvas_neighbourhood>` block (anchor)
- *   render/invoked-skills.ts — `<invoked_skills>`       block
- *   render/attachments.ts    — `<attachment>` parts (+ vision images)
- *   render/sketch-hint.ts    — sketch-raster reuse hint (selection)
- *   render/image-inlining.ts — image URL → base64 vision bytes
- *   render/profile.ts        — per-backend switches (built-in / ACP)
+ *   node-element.ts   — the `<node>` element (shared primitive)
+ *   selected-nodes.ts — `<selected_nodes>`       block
+ *   neighbourhood.ts  — `<canvas_neighbourhood>` block (anchor)
+ *   invoked-skills.ts — `<invoked_skills>`       block
+ *   attachments.ts    — `<attachment>` parts (+ vision images)
+ *   sketch-hint.ts    — sketch-raster reuse hint (selection)
+ *   image-inlining.ts — image URL → base64 vision bytes
+ *   profile.ts        — per-backend switches (built-in / ACP)
  *
  * `renderTurn(env, profile)` builds the shared `ContentPart[]`; both
  * backends call it and differ only by their {@link RenderProfile}.
  * `renderEnvelopeMessages` wraps it for the built-in pi-ai path.
  */
 
-import { buildAttachmentParts } from './render/attachments.js';
-import { renderInvokedSkillsSection } from './render/invoked-skills.js';
-import { renderNeighbourhoodSection } from './render/neighbourhood.js';
-import { INTERNAL_PROFILE } from './render/profile.js';
-import { renderSelectedNodesSection } from './render/selected-nodes.js';
-import { renderSketchRasterHint } from './render/sketch-hint.js';
+import { buildAttachmentParts } from './attachments.js';
+import { renderInvokedSkillsSection } from './invoked-skills.js';
+import { renderNeighbourhoodSection } from './neighbourhood.js';
+import { INTERNAL_PROFILE } from './profile.js';
+import { renderSelectedNodesSection } from './selected-nodes.js';
+import { renderSketchRasterHint } from './sketch-hint.js';
 
-import type { ChatEnvelope } from './envelope.js';
-import type { ContentPart, UserContent } from './render/attachments.js';
-import type { RenderProfile } from './render/profile.js';
-import type { ChatTurnRecord, PiMessage } from '../store/chat-thread-store.js';
+import type { ChatEnvelope } from '../envelope.js';
+import type { ContentPart, UserContent } from './attachments.js';
+import type { RenderProfile } from './profile.js';
+import type {
+  ChatTurnRecord,
+  PiMessage,
+} from '../../store/chat-thread-store.js';
 
 /**
  * Render a {@link ChatEnvelope} into a flat `ContentPart[]` (text +

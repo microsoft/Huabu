@@ -32,7 +32,7 @@
  *
  * Kept out of `node-ref.ts` (which owns the pure data ladder) so the
  * prompt-text concern lives next to the other section renderers under
- * `context/render/`.
+ * `prompt/`.
  */
 
 /** Escape a string for safe inclusion in an XML attribute value. */

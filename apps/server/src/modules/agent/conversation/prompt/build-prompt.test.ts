@@ -17,13 +17,16 @@ import { describe, expect, it } from 'vitest';
 import {
   renderEnvelopeMessages,
   rebuildContextMessages,
-} from './render-turn.js';
-import { buildAgentNodePreview } from '../node-ref.js';
+} from './build-prompt.js';
+import { buildAgentNodePreview } from '../../node-ref.js';
 
-import type { ChatEnvelope, ResolvedSkill } from './envelope.js';
-import type { NodeNeighbourhoodContext } from '../../canvas/node-neighbourhood.js';
-import type { AgentNodeRef } from '../node-ref.js';
-import type { ChatTurnRecord, PiMessage } from '../store/chat-thread-store.js';
+import type { NodeNeighbourhoodContext } from '../../../canvas/node-neighbourhood.js';
+import type { AgentNodeRef } from '../../node-ref.js';
+import type {
+  ChatTurnRecord,
+  PiMessage,
+} from '../../store/chat-thread-store.js';
+import type { ChatEnvelope, ResolvedSkill } from '../envelope.js';
 import type { ChatAttachment } from '@sediment/shared';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────

@@ -67,7 +67,7 @@ vi.mock('./tools/index.js', () => ({
 }));
 
 // Deterministic per-turn render: one user message, no canvas / I/O.
-vi.mock('./context/render-turn.js', () => ({
+vi.mock('./conversation/prompt/build-prompt.js', () => ({
   renderEnvelopeMessages: vi.fn(async () => ({
     messages: [{ role: 'user', content: 'TURN_USER_MESSAGE', timestamp: 1 }],
   })),
@@ -75,7 +75,7 @@ vi.mock('./context/render-turn.js', () => ({
 
 import { runAgent } from './agent.service.js';
 
-import type { ChatEnvelope } from './context/envelope.js';
+import type { ChatEnvelope } from './conversation/envelope.js';
 import type { Context } from '@earendil-works/pi-ai';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

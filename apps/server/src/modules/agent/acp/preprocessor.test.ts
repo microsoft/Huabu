@@ -15,7 +15,7 @@ import { prepareExternalAgentPrompt } from './preprocessor.js';
 import { buildAgentNodePreview, buildAgentNodeRef } from '../node-ref.js';
 
 import type { NodeNeighbourhoodContext } from '../../canvas/node-neighbourhood.js';
-import type { ChatEnvelope } from '../context/envelope.js';
+import type { ChatEnvelope } from '../conversation/envelope.js';
 import type { CanvasNodeType, ChatAttachment } from '@sediment/shared';
 import type { FastifyBaseLogger } from 'fastify';
 

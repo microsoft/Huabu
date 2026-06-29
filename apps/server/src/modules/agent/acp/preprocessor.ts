@@ -26,7 +26,7 @@
  * The per-turn wire text is built **inline as XML** (`<selected_nodes>`,
  * `<canvas_neighbourhood>`, `<attachments>`, `<user_request>`) — the same
  * tag vocabulary the built-in agent emits (`buildContextSections` in
- * `context/render-turn.ts`), so both backends present one structure. On
+ * `prompt/build-prompt.ts`), so both backends present one structure. On
  * the first turn of a freshly-created session the one-shot persona +
  * `## Canvas Tools (Reachback)` preamble (`system_prompt.md`, rendered
  * via {@link renderPromptFile}) is prepended in front of it. The
@@ -41,11 +41,14 @@
  */
 
 import { renderPromptFile } from '../../../prompt/index.js';
-import { ACP_PROFILE, ACP_SLASH_PROFILE } from '../context/render/profile.js';
-import { renderTurn } from '../context/render-turn.js';
+import { renderTurn } from '../conversation/prompt/build-prompt.js';
+import {
+  ACP_PROFILE,
+  ACP_SLASH_PROFILE,
+} from '../conversation/prompt/profile.js';
 
-import type { ChatEnvelope } from '../context/envelope.js';
-import type { ContentPart } from '../context/render/attachments.js';
+import type { ChatEnvelope } from '../conversation/envelope.js';
+import type { ContentPart } from '../conversation/prompt/attachments.js';
 import type { FastifyBaseLogger } from 'fastify';
 
 // ─── Constants ────────────────────────────────────────────────────────────

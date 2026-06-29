@@ -2,7 +2,7 @@
  * Attachment → content-part renderer.
  *
  * Turns a turn's attachments (off-canvas uploads + node excerpts) into
- * the pi-ai content parts. The orchestrator (`render-turn.ts`) calls
+ * the pi-ai content parts. The orchestrator (`build-prompt.ts`) calls
  * this once per provenance group and wraps each result in its own block
  * (`<selected_nodes_visuals>` for selection, `<attachments>` for
  * uploads). The user's own words are composed separately so they land

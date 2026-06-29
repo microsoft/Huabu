@@ -13,10 +13,10 @@
 
 import { appendFileSync } from 'node:fs';
 
-import { mkdirp } from '../../storage/io.js';
-import { chatDir, chatPromptLogPath } from '../../storage/paths.js';
+import { mkdirp } from '../../../storage/io.js';
+import { chatDir, chatPromptLogPath } from '../../../storage/paths.js';
 
-import type { PiMessage } from '../store/chat-thread-store.js';
+import type { PiMessage } from '../../store/chat-thread-store.js';
 import type { FastifyBaseLogger } from 'fastify';
 
 /** Truthy check for the debug flag (`1` / `true`, case-insensitive). */

@@ -8,7 +8,7 @@
  * content via reachback, never these tools.
  */
 
-import { isSketchRasterAttachment } from '../attachment-chips.js';
+import { isSketchRasterAttachment } from '../transcript/attachment-chips.js';
 
 import type { ChatAttachment } from '@sediment/shared';
 

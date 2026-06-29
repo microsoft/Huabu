@@ -40,7 +40,7 @@ import {
 } from './session-store.js';
 import { ensureAgentForThread } from './spawn-orchestrator.js';
 import { acpUpdateToStreamEvent, mergeThinkingChunk } from './translator.js';
-import { dumpAssembledPrompt } from '../context/debug-prompt.js';
+import { dumpAssembledPrompt } from '../conversation/prompt/debug-prompt.js';
 import { applyToolExt } from '../store/chat-thread-store.js';
 
 import type { AcpSessionEntry } from './session-registry.js';
@@ -48,8 +48,8 @@ import type {
   AcpBindingRecipe,
   AcpSessionPersistedMeta,
 } from './session-store.js';
-import type { ChatEnvelope } from '../context/envelope.js';
-import type { ContentPart } from '../context/render/attachments.js';
+import type { ChatEnvelope } from '../conversation/envelope.js';
+import type { ContentPart } from '../conversation/prompt/attachments.js';
 import type { AcpTurnOverlay } from '../store/chat-thread-store.js';
 import type { AssistantMessage, Context } from '@earendil-works/pi-ai';
 import type {

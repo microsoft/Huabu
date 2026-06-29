@@ -40,7 +40,7 @@ import { buildSpatialBundle } from './canvas-spatial.js';
 import {
   escapeXmlAttr,
   renderAgentNodeList,
-} from '../agent/context/render/node-element.js';
+} from '../agent/conversation/prompt/node-element.js';
 import {
   buildAgentNodePreview,
   extractAgentNodePreview,

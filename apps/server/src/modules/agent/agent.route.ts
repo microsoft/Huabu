@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Unified Agent Route
  *
  * Single SSE endpoint that handles all modes: chat, agent.
@@ -13,18 +13,16 @@ import {
   AGENT_SSE_EVENTS,
   agentCanvasIdQuerySchema,
   agentRequestSchema,
-  commandFromRawInput,
   createId,
   forkThreadBodySchema,
-  variantForInternalTool,
 } from '@sediment/shared';
 
 import { loadAgent } from '../../prompt/index.js';
 import { runAcpAgent } from '../agent/acp/service.js';
 import { runAgent } from '../agent/agent.service.js';
-import { projectUserVisibleAttachments } from '../agent/context/attachment-chips.js';
-import { buildChatEnvelope } from '../agent/context/envelope.js';
-import { rebuildContextMessages } from '../agent/context/render-turn.js';
+import { buildChatEnvelope } from '../agent/conversation/envelope.js';
+import { rebuildContextMessages } from '../agent/conversation/prompt/build-prompt.js';
+import { buildHistoryFromTurns } from '../agent/conversation/transcript/history.js';
 import { getLLMModel } from '../agent/llm.js';
 import { readWorkspaceMemory } from '../agent/memory/index.js';
 import {
@@ -36,29 +34,19 @@ import {
   writeActiveTurn,
 } from '../agent/store/chat-thread-store.js';
 
-import type {
-  ChatTurnRecord,
-  PiMessage,
-  ToolAcpExtension,
-} from '../agent/store/chat-thread-store.js';
+import type { ChatTurnRecord } from '../agent/store/chat-thread-store.js';
 import type { AssistantMessage, Context } from '@earendil-works/pi-ai';
 import type {
   AgentCanvasIdQuery,
   AgentRequest,
   AgentStreamEvent,
   ApiResult,
-  AssistantHistoryPart,
-  ChatAttachment,
   ChatHistoryItem,
   ChatHistoryResponse,
   ContextTokensResponse,
   ForkThreadBody,
   ForkThreadResponse,
-  ImageGenerationData,
-  SnapshotNodesData,
   StopThreadResponse,
-  ToolResponse,
-  WebSearchToolResponse,
 } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
@@ -157,311 +145,6 @@ function scheduleRunCleanup(threadId: string, delayMs = 60_000): void {
     const run = activeRuns.get(threadId);
     if (run?.completed) activeRuns.delete(threadId);
   }, delayMs);
-}
-
-/**
- * Parse a pi-ai tool-result text payload into the canonical
- * `ToolResponse<…>` envelope. Mirrors the legacy `role:'tool'`
- * reconstruction logic — preserved here because every rich-variant
- * tool part carries this envelope as its `data` field.
- */
-function parseToolResultText(
-  toolName: string,
-  resultText: string,
-): ToolResponse<string, unknown> {
-  try {
-    const parsed = JSON.parse(resultText);
-    if (
-      parsed &&
-      typeof parsed === 'object' &&
-      'tool' in parsed &&
-      'status' in parsed
-    ) {
-      return parsed as ToolResponse<string, unknown>;
-    }
-    // `snapshot_nodes` returns a bare array; wrap it under `snapshots`
-    // so the rich `SnapshotNodesToolPart.data.data` carries a stable
-    // object shape (matching what the live stream merger produces).
-    if (toolName === 'snapshot_nodes' && Array.isArray(parsed)) {
-      return {
-        tool: toolName,
-        status: 'success',
-        data: { snapshots: parsed },
-      };
-    }
-    return {
-      tool: toolName,
-      status: 'success',
-      data: parsed,
-    };
-  } catch {
-    return {
-      tool: toolName,
-      status: 'success',
-      data: { content: resultText },
-    };
-  }
-}
-
-/**
- * Index the `toolResult` messages in a message list by `toolCallId`,
- * so an assistant `toolCall` block can find its result in O(1).
- */
-function indexToolResults(
-  msgs: readonly PiMessage[],
-): Map<string, { toolName: string; resultText: string }> {
-  const map = new Map<string, { toolName: string; resultText: string }>();
-  for (const m of msgs) {
-    if (m.role === 'toolResult') {
-      const resultText = m.content
-        .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
-        .map((b) => b.text)
-        .join('');
-      map.set(m.toolCallId, { toolName: m.toolName ?? 'unknown', resultText });
-    }
-  }
-  return map;
-}
-
-/** Extract the text of a (possibly multipart) user message. */
-function extractUserText(msg: Extract<PiMessage, { role: 'user' }>): string {
-  return typeof msg.content === 'string'
-    ? msg.content
-    : Array.isArray(msg.content)
-      ? msg.content
-          .filter(
-            (b): b is { type: 'text'; text: string } =>
-              typeof b === 'object' && b !== null && b.type === 'text',
-          )
-          .map((b) => b.text)
-          .join('\n')
-      : '';
-}
-
-/**
- * Build the ordered `AssistantHistoryPart[]` for one pi-ai assistant
- * message: text / thinking blocks plus tool segments folded in by
- * `toolCallId`. The ACP overlay (`toolExtras`) supplies the semantic
- * fields; the matching pi-ai `toolResult` (when present) supplies the
- * typed `data` envelope for built-in tools. Plans are NOT appended
- * here — the caller owns plan placement (turn-level).
- */
-function buildAssistantParts(
-  msg: AssistantMessage,
-  toolResultByCallId: Map<string, { toolName: string; resultText: string }>,
-  toolExtras: Record<string, ToolAcpExtension> | undefined,
-): AssistantHistoryPart[] {
-  const parts: AssistantHistoryPart[] = [];
-  for (const block of msg.content) {
-    if (block.type === 'text') {
-      if (block.text.length > 0) {
-        parts.push({ kind: 'text', text: block.text });
-      }
-    } else if (block.type === 'thinking') {
-      if (block.thinking.length > 0) {
-        parts.push({ kind: 'thinking', text: block.thinking });
-      }
-    } else if (block.type === 'toolCall') {
-      const toolCallId = block.id;
-      const toolName = block.name;
-      const result = toolResultByCallId.get(toolCallId);
-      const extras = toolExtras?.[toolCallId];
-      // Structural internal-vs-external discriminator: the internal
-      // pi-ai bridge pushes a matching `toolResult`; the ACP path does
-      // not. So the presence of `result` is itself the signal.
-      const toolData = result
-        ? parseToolResultText(toolName, result.resultText)
-        : undefined;
-      const variant = toolData ? variantForInternalTool(toolName) : 'generic';
-      const command = commandFromRawInput(block.arguments);
-      const base = {
-        kind: 'tool' as const,
-        toolCallId,
-        title: toolName,
-        ...(command ? { command } : {}),
-        ...(extras?.toolKind ? { toolKind: extras.toolKind } : {}),
-        ...(extras?.status ? { status: extras.status } : {}),
-        ...(extras?.locations ? { locations: extras.locations } : {}),
-        ...(extras?.content ? { content: extras.content } : {}),
-        ...(extras?.rawOutput !== undefined
-          ? { rawOutput: extras.rawOutput }
-          : {}),
-        ...(extras?.permission ? { permission: extras.permission } : {}),
-      };
-      switch (variant) {
-        case 'agent_tool':
-          parts.push({
-            ...base,
-            variant: 'agent_tool',
-            toolName,
-            ...(toolData ? { data: toolData } : {}),
-          });
-          break;
-        case 'canvas_commands':
-          parts.push({
-            ...base,
-            variant: 'canvas_commands',
-            ...(toolData
-              ? {
-                  data: toolData as ToolResponse<
-                    'canvas_commands',
-                    Record<string, unknown>
-                  >,
-                }
-              : {}),
-          });
-          break;
-        case 'web_search':
-          parts.push({
-            ...base,
-            variant: 'web_search',
-            ...(toolData ? { data: toolData as WebSearchToolResponse } : {}),
-          });
-          break;
-        case 'image_generation':
-          parts.push({
-            ...base,
-            variant: 'image_generation',
-            ...(toolData
-              ? {
-                  data: toolData as ToolResponse<
-                    'generate_image',
-                    ImageGenerationData
-                  >,
-                }
-              : {}),
-          });
-          break;
-        case 'snapshot_nodes':
-          parts.push({
-            ...base,
-            variant: 'snapshot_nodes',
-            ...(toolData
-              ? {
-                  data: toolData as ToolResponse<
-                    'snapshot_nodes',
-                    SnapshotNodesData
-                  >,
-                }
-              : {}),
-          });
-          break;
-        case 'generic':
-          parts.push({ ...base, variant: 'generic' });
-          break;
-      }
-    }
-  }
-  return parts;
-}
-
-/**
- * Convert the structured per-turn records into `ChatHistoryItem`
- * entries for the client.
- *
- * Each turn emits a user item directly from its {@link ChatEnvelope}
- * (no `[SYSTEM …]` tag stripping — selection / skills / attachments
- * are already structured fields) followed by the assistant/tool/status
- * items reconstructed from the turn's transcript. Message ORDER comes
- * from the transcript array; the ACP overlay (`turn.toolExtras` /
- * `turn.plan`) joins by stable `toolCallId` and is turn-level — no
- * timestamps, no position arrays, no separate sidecar.
- */
-function buildHistoryFromTurns(
-  turns: readonly ChatTurnRecord[],
-  messages: ChatHistoryItem[],
-): void {
-  for (const turn of turns) {
-    const envelope = turn.envelope;
-
-    // 1. User item, straight from the structured envelope.
-    const allAttachments = [
-      ...envelope.user.attachments,
-      ...envelope.focus.selection.imageAttachments,
-      ...envelope.focus.selection.snapshotAttachments,
-    ];
-    const attachments = projectUserVisibleAttachments(
-      allAttachments,
-      envelope.focus.selection.selectedIds,
-    );
-    const selectedNodeIds = envelope.focus.selection.selectedIds;
-    const invokedSkills = envelope.skills.invokedIds;
-    if (
-      envelope.user.text.trim() ||
-      attachments.length > 0 ||
-      selectedNodeIds.length > 0
-    ) {
-      messages.push({
-        role: 'user',
-        content: envelope.user.text,
-        ...(attachments.length > 0 && {
-          attachments: attachments as ChatAttachment[],
-        }),
-        ...(selectedNodeIds.length > 0 && { selectedNodeIds }),
-        ...(invokedSkills.length > 0 && { invokedSkills }),
-      });
-    }
-
-    // 2. Transcript: assistant / tool / status items.
-    let pendingStatus: ChatHistoryItem | null = null;
-    let currentAssistant: Extract<
-      ChatHistoryItem,
-      { role: 'assistant' }
-    > | null = null;
-    const flushStatus = () => {
-      if (pendingStatus) {
-        messages.push(pendingStatus);
-        pendingStatus = null;
-        currentAssistant = null;
-      }
-    };
-
-    const toolResultByCallId = indexToolResults(turn.transcript);
-    const toolExtras = turn.toolExtras;
-
-    for (const msg of turn.transcript) {
-      if (msg.role === 'user') {
-        // Only `[SYSTEM …]` status rows appear in a transcript — the
-        // real user message is the envelope above. Legacy
-        // `[SYSTEM PreparedPrompt]` rows (now retired) are ignored.
-        const content = extractUserText(msg).trim();
-        if (content.startsWith('[SYSTEM Interrupted]')) {
-          pendingStatus = { role: 'status', status: 'interrupted' };
-          continue;
-        }
-        if (content.startsWith('[SYSTEM Error]')) {
-          const detail = content.slice('[SYSTEM Error] '.length);
-          pendingStatus = { role: 'status', status: 'error', detail };
-          continue;
-        }
-        // Any other unexpected user-role row in a transcript is ignored.
-        continue;
-      } else if (msg.role === 'assistant') {
-        const parts = buildAssistantParts(msg, toolResultByCallId, toolExtras);
-        if (parts.length > 0) {
-          if (currentAssistant) {
-            currentAssistant.parts.push(...parts);
-          } else {
-            const item: Extract<ChatHistoryItem, { role: 'assistant' }> = {
-              role: 'assistant',
-              parts,
-            };
-            messages.push(item);
-            currentAssistant = item;
-          }
-        }
-        flushStatus();
-      }
-      // toolResult: folded into the assistant turn via toolCallId.
-    }
-
-    // Turn-level plan (folded ACP overlay): appended once at the end.
-    if (turn.plan && turn.plan.length > 0 && currentAssistant) {
-      currentAssistant.parts.push({ kind: 'plan', entries: turn.plan });
-    }
-
-    flushStatus();
-  }
 }
 
 const agentRoutes: FastifyPluginAsync = async (

@@ -37,7 +37,7 @@ import {
 import { FsCapabilityError, handleFsReadTextFile } from './capabilities/fs.js';
 import { getLogger } from '../../../utils/logger.js';
 
-import type { ContentPart } from '../context/render/attachments.js';
+import type { ContentPart } from '../conversation/prompt/attachments.js';
 import type { AgentConnection, AcpMessage } from '@agentlet/protocol';
 import type {
   AcpSessionUpdate,

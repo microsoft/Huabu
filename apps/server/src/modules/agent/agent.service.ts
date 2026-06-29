@@ -15,12 +15,12 @@
 
 import { Agent, convertToLlm } from '@earendil-works/pi-agent-core';
 
-import { dumpAssembledPrompt } from './context/debug-prompt.js';
-import { renderEnvelopeMessages } from './context/render-turn.js';
+import { renderEnvelopeMessages } from './conversation/prompt/build-prompt.js';
+import { dumpAssembledPrompt } from './conversation/prompt/debug-prompt.js';
 import { ensureApiKey, getLLMModel } from './llm.js';
 import { buildToolsForScope, type ToolScope } from './tools/index.js';
 
-import type { ChatEnvelope } from './context/envelope.js';
+import type { ChatEnvelope } from './conversation/envelope.js';
 import type {
   AgentEvent,
   AgentToolResult,

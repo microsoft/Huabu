@@ -33,7 +33,7 @@ import {
 import { chatActiveTurnPath, chatTurnsPath } from '../../storage/paths.js';
 import { setWorkspacePath } from '../../workspace.js';
 
-import type { ChatEnvelope } from '../context/envelope.js';
+import type { ChatEnvelope } from '../conversation/envelope.js';
 
 let tmp: string;
 const canvasId = 'cv-test';
