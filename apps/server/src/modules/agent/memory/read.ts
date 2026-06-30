@@ -3,7 +3,7 @@
  *
  * Read-side companions to the writers in `./writers.ts`. The chat /
  * operate route uses these to assemble the memory preamble that
- * fronts every agent turn (see PR-E in `docs/architecture/memory-module.md`).
+ * fronts every agent turn (see PR-E in `docs/architecture/agent-memory.md`).
  *
  * The functions are intentionally trivial — they exist so route code
  * can be free of `fs` imports + path knowledge, not because they hide

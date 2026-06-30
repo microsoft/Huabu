@@ -49,7 +49,8 @@ docs/
 | [api-design.md](./architecture/api-design.md)                                   | **Authoritative** rules for every HTTP / SSE endpoint, zod-first wire contracts.                                   |
 | [canvas-command-architecture.md](./architecture/canvas-command-architecture.md) | `CanvasUiIntent` / `CanvasCommand` / `CanvasExecution` three-layer model.                                          |
 | [canvas-storage.md](./architecture/canvas-storage.md)                           | On-disk layout of a canvas (`canvas.json`, `nodes/`, `.artifacts/`, `memory/`).                                    |
-| [memory-module.md](./architecture/memory-module.md)                             | Three-layer memory (workspace / canvas / skill); **Shipped**.                                                      |
+| [canvas-action-log.md](./architecture/canvas-action-log.md)                     | Persistent `events.jsonl` user-action trail; consumed by the memory curator.                                       |
+| [agent-memory.md](./architecture/agent-memory.md)                               | Three-layer memory (workspace / canvas / skill); **Shipped**.                                                      |
 | [question-node.md](./architecture/question-node.md)                             | Question node: a content node that anchors a chat thread, runs the agent with its spatial neighbourhood.           |
 | [node-preprocessing.md](./architecture/node-preprocessing.md)                   | Unified 6-stage preprocessing pipeline; per-node profiles decide extract / enrich / persist.                       |
 | [sketch-node.md](./architecture/sketch-node.md)                                 | Sketch nodes: data model, explicit-trigger lifecycle, and the cluster → context → vision-LLM recognition pipeline. |
@@ -64,11 +65,9 @@ docs/
 | Doc                                                                            | Status                                          | Summary                                                                                                                   |
 | ------------------------------------------------------------------------------ | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | [acp-eventstore-refactor-plan.md](./proposals/acp-eventstore-refactor-plan.md) | Plan                                            | Collapse the duplicated ACP init/session layers so daemon EventStore sees the same `sessionId` as Huabu's prompt traffic. |
-| [action-log.md](./proposals/action-log.md)                                     | Plan, not yet executed                          | Persist the in-memory `actionHistory` to `<canvasId>/.history/events.jsonl` for long-term intent inference.               |
 | [agentlet-upgrade-plan.md](./proposals/agentlet-upgrade-plan.md)               | Planning                                        | Upgrade Sediment's embedded agentlet to the new `agentlet/hello` + `agent/hello` split protocol.                          |
 | [content-before-ai-design.md](./proposals/content-before-ai-design.md)         | Unknown — needs owner review                    | Block-level provenance (AI vs user authorship) + inline word-level diff bars per block.                                   |
 | [headless-executor-plan.md](./proposals/headless-executor-plan.md)             | Partly shipped (M2 referenced from `canvas.ts`) | Server-side headless canvas executor + structure/content sync split.                                                      |
-| [huabu-acp-client-plan.md](./proposals/huabu-acp-client-plan.md)               | Phase 2 shipped · Phase 3 capabilities next     | Huabu as ACP client via agentlet, connecting to Claude Code / Copilot CLI / Gemini CLI.                                   |
 | [huabu-cli-design.md](./proposals/huabu-cli-design.md)                         | Draft                                           | `huabu` CLI + MCP server so any agent can read/write canvases without a custom adapter.                                   |
 
 When you ship one of these, edit it to add `Status: Shipped` + the merge
