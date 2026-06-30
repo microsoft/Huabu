@@ -103,6 +103,7 @@ export const MessageList = ({
       <div
         ref={containerRef}
         onScroll={handleScroll}
+        data-chat-thread-root
         className="flex-1 space-y-1 overflow-x-visible overflow-y-auto px-3"
       >
         {(() => {
