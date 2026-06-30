@@ -3,7 +3,7 @@
  *
  * Wire types for the per-canvas artifact endpoints mounted under
  * `/api/canvas/:canvasId/artifact`. Schemas are the single source of
- * truth (`docs/api-design.md`); types are derived via `z.infer`.
+ * truth (`docs/architecture/api-design.md`); types are derived via `z.infer`.
  *
  * Pure runtime helpers (URL parsing / building) live in
  * `utils/artifact-url.ts` so the web bundle can import them without

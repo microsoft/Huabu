@@ -24,7 +24,7 @@ HTTP API 仍为 web app 服务，但其它消费者（agent / 脚本 / 第三方
 
 CLI 解决三个真问题：
 
-1. **让其它 agent 能操作 Huabu**，对应 [external_agent_design.md](./external_agent_design.md) 的镜像方向；
+1. **让其它 agent 能操作 Huabu**，对应 [agent-reachback.md](../architecture/agent-reachback.md) 的镜像方向；
 2. **把 ripgrep 等可选系统依赖收进 CLI bundle**，对用户透明；
 3. **给"脚本化操作画布"提供干净入口**（导出、批量处理、自动化）。
 
@@ -428,7 +428,7 @@ CLI bundle 里**带上** `@vscode/ripgrep`：
 }
 ```
 
-server 仍然支持 Node fallback（[fs-search.ts](../apps/server/src/modules/agent/tools/handlers/fs-search.ts)），但 CLI 进程跑 `huabu serve` 时，**通过 env 把 rg 路径传给 server**：
+server 仍然支持 Node fallback（[fs-search.ts](../../apps/server/src/modules/agent/tools/handlers/fs-search.ts)），但 CLI 进程跑 `huabu serve` 时，**通过 env 把 rg 路径传给 server**：
 
 ```ts
 // CLI 启动 server 前
@@ -436,7 +436,7 @@ const rgPath = require('@vscode/ripgrep').rgPath;
 spawn(serverEntry, [...], { env: { ...env, SEDIMENT_RG_BIN: rgPath } });
 ```
 
-server 端 [fs-search.ts](../apps/server/src/modules/agent/tools/handlers/fs-search.ts) 改造：
+server 端 [fs-search.ts](../../apps/server/src/modules/agent/tools/handlers/fs-search.ts) 改造：
 
 ```ts
 const rgBin = process.env.SEDIMENT_RG_BIN ?? detectSystemRipgrep();
@@ -476,9 +476,9 @@ v1 范围内可以**不签**（用户从 npm 装的 CLI 不触发 Gatekeeper）�
 
 ---
 
-## 9. 跟 external_agent_design 的关系
+## 9. 跟外部 agent 集成的关系
 
-[external_agent_design.md](./external_agent_design.md) 描述的方向是：
+[agent-reachback.md](../architecture/agent-reachback.md) 描述的方向是：
 
 ```
 用户在 Huabu 里 @copilot → Huabu 调用 Claude/Copilot CLI → 它们处理用户的代码仓库
@@ -665,8 +665,8 @@ Bun build --compile 把 native binary 打进去，跨平台 matrix 验证麻烦�
 
 ## Appendix B：与现有文档的关系
 
-- [agent-architecture.md](./agent-architecture.md)：agent loop + 9 tool 的实现，本设计**不改这部分**。CLI 调 server，server 内部 agent 仍然用 tool。
-- [external_agent_design.md](./external_agent_design.md)：Huabu 调外部 agent；本设计是镜像方向（外部 agent 调 Huabu），互不冲突。
-- [api-design.md](./api-design.md)：HTTP API 规范；CLI 是 HTTP API 的另一个消费者，本设计 follow 同样的 zod schema 规则但加一层 CLI-specific contract。
-- [canvas-storage.md](./canvas-storage.md)：磁盘格式；CLI 不读磁盘，所以这部分对 CLI 透明。
-- [setup.md](./setup.md)：现有 monorepo 结构；CLI 加入为 `apps/cli/`。
+- [agent-architecture.md](../architecture/agent-architecture.md)：agent loop + 9 tool 的实现，本设计**不改这部分**。CLI 调 server，server 内部 agent 仍然用 tool。
+- [agent-reachback.md](../architecture/agent-reachback.md)：Huabu 调外部 agent；本设计是镜像方向（外部 agent 调 Huabu），互不冲突。
+- [api-design.md](../architecture/api-design.md)：HTTP API 规范；CLI 是 HTTP API 的另一个消费者，本设计 follow 同样的 zod schema 规则但加一层 CLI-specific contract。
+- [canvas-storage.md](../architecture/canvas-storage.md)：磁盘格式；CLI 不读磁盘，所以这部分对 CLI 透明。
+- setup.md：现有 monorepo 结构；CLI 加入为 `apps/cli/`。

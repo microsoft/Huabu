@@ -133,18 +133,6 @@ appears in the chat panel and can read and modify files under that folder.
 
 ---
 
-## Documentation
-
-- [User Guide](./docs/user-guide/README.md) — how to use the product
-- [Changelog](./docs/user-guide/CHANGELOG.md) — user-facing changes
-- Design notes in [docs/](./docs):
-  - [Canvas command architecture](./docs/canvas-command-architecture.md)
-  - [Node preprocessing design](./docs/node_preprocessing_design.md)
-  - [Content-before-AI design](./docs/content-before-ai-design.md)
-  - [Prompt node design](./docs/prompt-node-design.md)
-
----
-
 ## License
 
 See [LICENSE](./LICENSE).

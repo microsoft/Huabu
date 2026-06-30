@@ -223,7 +223,7 @@ export async function* runAgent(
     // common win is the LLM emitting N parallel `read` / `inspect_nodes`
     // / `web_search` calls — total latency drops from sum to max.
     //
-    // Audit notes (see docs/agent-architecture.md"):
+    // Audit notes (see docs/architecture/agent-architecture.md"):
     //   - Read-only tools (`read`, `grep`, `find`, `ls`,
     //     `get_canvas_outline`, `inspect_nodes`, `inspect_edges`,
     //     `web_search`) are trivially safe.

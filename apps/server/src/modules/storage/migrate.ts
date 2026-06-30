@@ -1,6 +1,6 @@
 /**
  * One-shot migration from the legacy workspace layout to the
- * canvas-centric layout described in `docs/canvas-storage-refactor.md`.
+ * canvas-centric layout described in `docs/architecture/canvas-storage.md`.
  *
  * Legacy layout (per-workspace):
  *   <ws>/canvas/<id>.json

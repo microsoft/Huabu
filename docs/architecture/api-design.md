@@ -24,13 +24,13 @@ and `apps/web`. Deviations require updating this file in the same PR.
 
 ## Layout
 
-```
-packages/shared/src/types/api/<feature>.ts   ← schema + inferred types + response types
-apps/server/src/modules/<feature>/<feature>.route.ts
-apps/web/src/api/<feature>.ts                ← uses apiFetch + routes
-apps/web/src/api/_routes.ts                  ← URL builders (encodeURIComponent inside)
-apps/web/src/api/_client.ts                  ← apiFetch / ApiError
-```
+| File                                                   | Role                                       |
+| ------------------------------------------------------ | ------------------------------------------ |
+| `packages/shared/src/types/api/<feature>.ts`           | schema + inferred types + response types   |
+| `apps/server/src/modules/<feature>/<feature>.route.ts` | route handler                              |
+| `apps/web/src/api/<feature>.ts`                        | client helper (uses `apiFetch` + routes)   |
+| `apps/web/src/api/_routes.ts`                          | URL builders (`encodeURIComponent` inside) |
+| `apps/web/src/api/_client.ts`                          | `apiFetch` / `ApiError`                    |
 
 ## End-to-end template
 

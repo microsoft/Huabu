@@ -6,7 +6,7 @@
  * excluded from the menu — they remain in the agent's `{{skillCatalogue}}`
  * but are not user-invokable via `/`).
  *
- * Per docs/api-design.md the schema lives here and is the single source
+ * Per docs/architecture/api-design.md the schema lives here and is the single source
  * of truth; the server validates with it, the web bundle imports the
  * derived type via `import type` only.
  */

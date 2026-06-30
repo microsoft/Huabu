@@ -26,7 +26,7 @@
  * Future cleanup
  * --------------
  * This whole module is a stopgap. Once the server-side action-log /
- * memory pipeline (see `docs/action-log.md`) lands, the recogniser
+ * memory pipeline (see `docs/architecture/canvas-action-log.md`) lands, the recogniser
  * will pull "recent actions" from the persisted JSONL on demand
  * instead of trusting whatever short window the client happens to
  * be holding. At that point:

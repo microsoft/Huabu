@@ -1,6 +1,6 @@
 /**
  * Canvas read-only tool handlers.
- * Design doc: docs/agent-architecture.md
+ * Design doc: docs/architecture/agent-architecture.md
  *
  * Split with the filesystem `read` tool: these handlers expose what
  * lives in `canvas.json` (position, size, parentId, visual style on

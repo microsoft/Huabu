@@ -3,7 +3,7 @@
  *
  * Validation contracts for the unified `/api/agent` endpoint and its
  * sibling routes (chat history, context tokens, intent recognition,
- * sketch, intent episode logging). Per docs/api-design.md: schemas
+ * sketch, intent episode logging). Per docs/architecture/api-design.md: schemas
  * are the single source of truth, types derived via `z.infer`.
  *
  * Wire-only node payloads (`WireNodeRef` / `WireSelectionNode` /

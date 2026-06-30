@@ -7,7 +7,7 @@
 > For the wire-level control message that carries the distribution, see
 > [`protocol.md` §9 — Resource Distribution](protocol.md#resource-distribution).
 > For a concrete host implementation, see Huabu's
-> [`docs/agent-reachback.md`](../../../docs/agent-reachback.md).
+> [`docs/architecture/agent-reachback.md`](../../../docs/architecture/agent-reachback.md).
 
 ## 1. Concept
 
@@ -186,4 +186,4 @@ itself.
 | Wire contract & timing | [`protocol.md` §9 — Resource Distribution](protocol.md#resource-distribution) |
 | Env registry & spawn env | [`packages/local/src/agentlet.ts`](../packages/local/src/agentlet.ts) (`envRegistry`, `resolveDestination`, `handleSendResource`) |
 | Host integration (connection callbacks) | [`host.md`](host.md) |
-| Concrete host implementation | [Huabu — `docs/agent-reachback.md`](../../../docs/agent-reachback.md) |
+| Concrete host implementation | [Huabu — `docs/architecture/agent-reachback.md`](../../../docs/architecture/agent-reachback.md) |

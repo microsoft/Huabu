@@ -6,7 +6,7 @@
  * profiles, full result, diagnostics) lives server-side in
  * `apps/server/src/modules/preprocessing/types.ts`.
  *
- * Per docs/api-design.md: schema is the single source of truth, types are
+ * Per docs/architecture/api-design.md: schema is the single source of truth, types are
  * derived via `z.infer`.
  */
 

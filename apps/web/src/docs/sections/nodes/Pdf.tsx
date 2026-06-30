@@ -51,6 +51,11 @@ export default function PdfNode() {
           Drag a rectangular region — it lands as an Image node (a screenshot of
           that region).
         </li>
+        <li>
+          <strong>Send to chat</strong> — a text selection or region screenshot
+          can be attached to the chat panel as a pending attachment for your
+          next message.
+        </li>
       </ul>
       <Callout tone="tip">
         Either way the new node lives next to the PDF on the canvas so you can

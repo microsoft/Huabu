@@ -25,10 +25,10 @@ export default function NodesOverview() {
   return (
     <PageLayout
       title="Node Types"
-      description="Huabu ships nine node types. The four media types and Note / Text are pure content. Frame is structure. Sketch and Question are interactive. Each type has its own page — this hub points to them and covers the behaviours every node shares."
+      description="Huabu ships ten node types. Note / Text and the media types (Image / PDF / Office / Video / Web) are pure content. Frame is structure. Sketch and Question are interactive. Each type has its own page — this hub points to them and covers the behaviours every node shares."
       toc={toc}
     >
-      <H2>The nine node types</H2>
+      <H2>The ten node types</H2>
       <CardGrid>
         <NavCard
           to="/docs/nodes/note"
@@ -57,6 +57,13 @@ export default function NodesOverview() {
           eyebrow="Media"
           title="PDF"
           description="Full document with thumbnails, screenshots, text selection."
+        />
+        <NavCard
+          to="/docs/nodes/office"
+          icon={NODE_ICON.office}
+          eyebrow="Media"
+          title="Office"
+          description="View-only Word / Excel / PowerPoint, text extracted for AI."
         />
         <NavCard
           to="/docs/nodes/video"

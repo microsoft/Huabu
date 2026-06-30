@@ -3,7 +3,7 @@
  *
  * The workspace endpoints describe the server's storage mode and let the
  * client (in free mode) point the server at an absolute path. Per
- * docs/api-design.md: schemas are the single source of truth, types
+ * docs/architecture/api-design.md: schemas are the single source of truth, types
  * derived via `z.infer`.
  *
  * Errors use the shared {@link ApiErrorBody} envelope with HTTP status

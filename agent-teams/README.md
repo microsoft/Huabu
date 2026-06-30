@@ -176,5 +176,5 @@ inventing a bespoke plugin API for every service.
   — source of truth for the generic Agent Team packaging/runtime model.
 - [`external/agentlet/README.md`](../external/agentlet/README.md) — the agentlet
   CLI (`agentlet daemon …` / `agentlet agent-team …`).
-- [`docs/agent-teams-as-extensions.md`](../docs/agent-teams-as-extensions.md) —
+- [`docs/architecture/agent-teams-as-extensions.md`](../docs/architecture/agent-teams-as-extensions.md) —
   Huabu product/vision for managed Agent Teams as extensions/plugins.

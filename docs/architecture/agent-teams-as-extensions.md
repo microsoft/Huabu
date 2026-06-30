@@ -4,8 +4,8 @@
 
 This document is the **Huabu product/vision layer** for Agent Teams. The
 generic packaging/runtime model lives in
-[`external/agentlet/spec/agent-team.md`](../external/agentlet/spec/agent-team.md).
-Huabu's bundled teams live under [`agent-teams/`](../agent-teams/).
+[`external/agentlet/spec/agent-team.md`](../../external/agentlet/spec/agent-team.md).
+Huabu's bundled teams live under [`agent-teams/`](../../agent-teams/).
 
 ---
 
@@ -200,4 +200,4 @@ This is why "agent as the universal interface" is not just a nice idea for Huabu
 
 ---
 
-_This document is a living vision. Concrete examples live in [`agent-teams/`](../agent-teams/) as working implementations. The beauty of the agent-as-plugin model is that we don't need to anticipate every use case — we just need to make the read/write interface rich enough, and agents will fill the gaps._
+_This document is a living vision. Concrete examples live in [`agent-teams/`](../../agent-teams/) as working implementations. The beauty of the agent-as-plugin model is that we don't need to anticipate every use case — we just need to make the read/write interface rich enough, and agents will fill the gaps._

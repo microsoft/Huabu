@@ -19,7 +19,7 @@
 - 守护进程通过 `resolveAgentTeam({ agentDir, harness })` 把「目录 + harness」解析成 `{ command, cwd, env }`，并把工作区 `node_modules/.bin` 前置到 agent 的 `PATH`，这样 `cli-tools` 里本地安装的命令才能被 agent 找到。
 - `agentlet` CLI 重构为显式子命令：`agentlet daemon …`（原顶层守护模式）与 `agentlet agent-team …`；`bin/agentlet`（轻量全局命令）与 `bin/start-agentlet-daemon`（守护启动便捷脚本）拆分。
 - 注意 `pnpm install` 不会重新构建 agentlet，需 `pnpm run build:agentlet`。
-- 文档：[agent-teams/README.md](../../agent-teams/README.md)（快速上手 + how-to + 示例表）、[docs/agent-teams-as-extensions.md](../agent-teams-as-extensions.md)（产品/愿景）、[external/agentlet/spec/agent-team.md](../../external/agentlet/spec/agent-team.md)（打包/运行时规范）。
+- 文档：[agent-teams/README.md](../../agent-teams/README.md)（快速上手 + how-to + 示例表）、[docs/architecture/agent-teams-as-extensions.md](../architecture/agent-teams-as-extensions.md)（产品/愿景）、[external/agentlet/spec/agent-team.md](../../external/agentlet/spec/agent-team.md)（打包/运行时规范）。
 
 ## 2026-06-26 · Note 作为拖拽落点：精确插入 + 末尾追加 + 跨 Note 原子移动
 
@@ -2394,7 +2394,7 @@ Overlay 描绘的内容**保持上一条的设定不变** —— 还是用 `comp
 
 - 用户感知上行为不变：note/text 编辑仍会自动同步到知识库，image/frame 仍会自动生成语义标签。
 - 内部触发函数从 `ingestNodeIfNeeded` + `resolveLabelIfNeeded` 合并为 `preprocessNodeIfNeeded`。
-- 详细设计文档见 `docs/node_preprocessing_design.md`，重构记录见 `docs/refactor_node-preprocessing-workflow.md`。
+- 详细设计文档见 `docs/architecture/node-preprocessing.md`。
 
 ---
 
