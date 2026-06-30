@@ -95,6 +95,40 @@ function snapshotsEqual(a: CanvasSnapshot, b: CanvasSnapshot): boolean {
   return true;
 }
 
+/**
+ * Question nodes own a conversational `data` payload (`content`,
+ * `threadId`, `status`, `viewed`, `agentBinding`, `agentMode`,
+ * `errorMessage`, `responseSummary`, plus the `label` derived from
+ * `content`). That payload is entirely system-driven — authored on
+ * send and mutated by the agent runner via `patchNodeSilent` — never a
+ * deliberate canvas edit. Undo/redo therefore restores a question
+ * node's geometry (position / size / parent, all top-level props) but
+ * must NOT rewind its `data` to a stale snapshot value: undoing a move
+ * should not wipe the thread binding or answer the node already holds.
+ *
+ * So for every question node that still exists in the live canvas we
+ * keep its current `data` and take only the structural props from the
+ * restored snapshot. Question nodes absent from the live canvas (undo
+ * is resurrecting a deleted node) fall back to the snapshot's `data` —
+ * the only source available, and the correct pre-deletion value.
+ *
+ * Direction-neutral: both undo and redo pop a target snapshot and own
+ * the live `currentNodes`, so the same merge applies to either.
+ */
+function preserveLiveQuestionData(
+  restoredNodes: Node[],
+  currentNodes: Node[],
+): Node[] {
+  const liveById = new Map(currentNodes.map((n) => [n.id, n]));
+  return restoredNodes.map((node) => {
+    if (node.type !== 'question') return node;
+    const live = liveById.get(node.id);
+    // Resurrection (no live node) → snapshot data is the correct source.
+    if (!live) return node;
+    return { ...node, data: live.data };
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Canvas History Manager
 // ---------------------------------------------------------------------------
@@ -180,7 +214,10 @@ class CanvasHistoryManager {
     if (!snapshot) return null;
 
     this.redoStack.push(createSnapshot(currentNodes, currentEdges));
-    return snapshot;
+    return {
+      ...snapshot,
+      nodes: preserveLiveQuestionData(snapshot.nodes, currentNodes),
+    };
   }
 
   /**
@@ -193,7 +230,10 @@ class CanvasHistoryManager {
     if (!snapshot) return null;
 
     this.undoStack.push(createSnapshot(currentNodes, currentEdges));
-    return snapshot;
+    return {
+      ...snapshot,
+      nodes: preserveLiveQuestionData(snapshot.nodes, currentNodes),
+    };
   }
 
   /** Clear all history (e.g. after loading a new canvas). */
