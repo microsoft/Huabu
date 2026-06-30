@@ -78,6 +78,14 @@ text node — `read("nodes/<file>.md")` returns the body, and `get_canvas_outlin
 lists it as `type: 'question'`. No trigger needed; it is just canvas content that
 also happens to own a thread.
 
+The sidecar body holds only the **first** user prompt, so canvas search (Cmd+F)
+also has a dedicated **`conversation`** tier
+([canvas-search.ts](../../apps/server/src/modules/canvas/canvas-search.ts)): it
+follows the node's `threadId` into `<threadId>.turns.jsonl` and matches every
+user message + assistant reply across all turns, deliberately skipping tool
+calls / results. Only question nodes carry a `threadId`, so threads not anchored
+to a node are out of search scope.
+
 ---
 
 ## 5. As a chat anchor — compose & run

@@ -39,6 +39,9 @@ import {
   type SearchField,
 } from '@sediment/shared';
 
+import { loadTurns } from '../agent/store/chat-thread-store.js';
+
+import type { ChatTurnRecord } from '../agent/store/chat-thread-store.js';
 import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
 
 /** Window of characters shown around each match in `snippet`. */
@@ -65,6 +68,12 @@ const SNIPPET_RADIUS = 60;
 export interface SearchableNode {
   id: string;
   type: string;
+  /**
+   * Chat thread this node owns, if any. Only question nodes set
+   * `data.threadId`; drives the `conversation` search tier. Undefined
+   * for every other node type.
+   */
+  threadId?: string;
 }
 
 /**
@@ -86,6 +95,7 @@ const ALL_FIELDS: readonly SearchField[] = [
   'summary',
   'keywords',
   'content',
+  'conversation',
 ];
 
 // ─── Internals ──────────────────────────────────────────────────────────────
@@ -190,6 +200,72 @@ function scanNodeContent(
       tryEmit,
     });
   }
+}
+
+/**
+ * Flatten one chat thread into a single searchable haystack: every
+ * user message (`envelope.user.text`) followed by every assistant
+ * *text* block, turn by turn. Tool calls / tool results, thinking
+ * blocks, and the ACP `plan` overlay are intentionally dropped — the
+ * `conversation` tier searches what the human and the model *said*,
+ * not the tool plumbing in between.
+ *
+ * Segments are joined with `\n\n` so a match never silently bridges a
+ * user message and an unrelated reply, while `buildSnippet`'s
+ * whitespace collapse still renders them on one row.
+ */
+function buildThreadHaystack(turns: readonly ChatTurnRecord[]): string {
+  const segments: string[] = [];
+  for (const turn of turns) {
+    const userText = turn.envelope?.user?.text;
+    if (typeof userText === 'string' && userText.length > 0) {
+      segments.push(userText);
+    }
+    for (const msg of turn.transcript) {
+      // Only assistant messages contribute model speech; in-transcript
+      // `user` rows are `[SYSTEM …]` status markers and `tool` rows are
+      // results — both excluded.
+      if (!msg || msg.role !== 'assistant') continue;
+      const blocks = (msg as { content?: unknown }).content;
+      if (!Array.isArray(blocks)) continue;
+      for (const block of blocks) {
+        if (!block || typeof block !== 'object') continue;
+        // Keep plain assistant prose; drop `toolCall` / `thinking`.
+        if ((block as { type?: unknown }).type !== 'text') continue;
+        const text = (block as { text?: unknown }).text;
+        if (typeof text === 'string' && text.length > 0) segments.push(text);
+      }
+    }
+  }
+  return segments.join('\n\n');
+}
+
+/**
+ * Emit all conversation matches for one threaded node. Reads the node's
+ * chat thread synchronously (one `<threadId>.turns.jsonl` read), so the
+ * caller must gate this on `fields.has('conversation')` and the global
+ * limit before invoking. No-op when the node owns no thread or the
+ * thread is empty.
+ */
+function scanNodeConversation(
+  node: SearchableNode,
+  canvasId: string,
+  label: string | null,
+  needleLower: string,
+  needleLen: number,
+  tryEmit: (match: CanvasSearchMatch) => boolean,
+): void {
+  if (!node.threadId) return;
+  const turns = loadTurns(node.threadId, canvasId);
+  if (turns.length === 0) return;
+  const haystack = buildThreadHaystack(turns);
+  if (haystack.length === 0) return;
+  emitFieldHits('conversation', haystack, needleLower, needleLen, {
+    nodeId: node.id,
+    nodeType: node.type,
+    label,
+    tryEmit,
+  });
 }
 
 /**
@@ -398,7 +474,21 @@ export function extractSearchableNodes(state: unknown): SearchableNode[] {
     const id = (raw as { id?: unknown }).id;
     const type = (raw as { type?: unknown }).type;
     if (typeof id !== 'string' || !id) continue;
-    out.push({ id, type: typeof type === 'string' ? type : '' });
+    // `data.threadId` is only ever set on question nodes; carry it so
+    // the conversation tier can locate the owning chat thread.
+    let threadId: string | undefined;
+    const data = (raw as { data?: unknown }).data;
+    if (data && typeof data === 'object') {
+      const rawThreadId = (data as { threadId?: unknown }).threadId;
+      if (typeof rawThreadId === 'string' && rawThreadId) {
+        threadId = rawThreadId;
+      }
+    }
+    out.push({
+      id,
+      type: typeof type === 'string' ? type : '',
+      ...(threadId ? { threadId } : {}),
+    });
   }
   return out;
 }
@@ -475,7 +565,7 @@ export async function searchCanvas(
   let truncated = false;
 
   const tryEmitMatch = (
-    tier: 'meta' | 'content',
+    tier: 'meta' | 'content' | 'conversation',
     match: CanvasSearchMatch,
   ): boolean => {
     if (totalEmitted >= limit) {
@@ -562,6 +652,40 @@ export async function searchCanvas(
       scanned += 1;
       if (scanned % 25 === 0 && scanned < total) {
         emit({ type: 'progress', phase: 'content', scanned, total });
+      }
+    }
+  }
+
+  // ── Tier 3: conversation scan over question-node chat threads.
+  //
+  // Heaviest tier: one synchronous `<threadId>.turns.jsonl` read per
+  // threaded candidate. Gated on the `conversation` field and skipped
+  // entirely for single-node (`nodeId`) preview searches, which ask
+  // about a node's own body, not its chat history. Only question nodes
+  // carry a `threadId`; threads not anchored to a node are out of scope.
+  if (fields.has('conversation') && !request.nodeId && totalEmitted < limit) {
+    const threaded = candidates.filter((n) => n.threadId);
+    const total = threaded.length;
+    let scanned = 0;
+    for (const node of threaded) {
+      if (signal?.aborted) return;
+      if (totalEmitted >= limit) {
+        truncated = true;
+        break;
+      }
+      const content = contentByNodeId.get(node.id);
+      const label = content?.label ?? null;
+      scanNodeConversation(
+        node,
+        store.canvasId,
+        label,
+        needleLower,
+        needleLen,
+        (m) => tryEmitMatch('conversation', m),
+      );
+      scanned += 1;
+      if (scanned % 25 === 0 && scanned < total) {
+        emit({ type: 'progress', phase: 'conversation', scanned, total });
       }
     }
   }

@@ -309,6 +309,9 @@ export const CanvasSearchResults = (): JSX.Element => {
     // Edge label matches have no in-preview body to scroll — the label
     // is already painted right on the edge by the highlight layer.
     if (v.row.match.kind === 'edge') return;
+    // Conversation matches live in the node's chat thread, not its
+    // preview body, so there is nothing to seek to inside the preview.
+    if (v.row.match.field === 'conversation') return;
     const nth = v.row.match.occurrenceIndex;
     const cancel = scheduleScrollToMatch(
       () => document.querySelector<HTMLElement>('[data-search-scope="node"]'),

@@ -29,16 +29,24 @@ import { z } from 'zod';
  * Which fields of a node a match was found in. Tiered by scan cost so
  * the server can stream the cheap tier first.
  *
- *  - `label`     — node.data.label (always present, tiny)
- *  - `summary`   — sidecar frontmatter `summary:` (one-line AI summary)
- *  - `keywords`  — sidecar frontmatter `keywords:` (string[])
- *  - `content`   — sidecar markdown body (the heavy one)
+ *  - `label`        — node.data.label (always present, tiny)
+ *  - `summary`      — sidecar frontmatter `summary:` (one-line AI summary)
+ *  - `keywords`     — sidecar frontmatter `keywords:` (string[])
+ *  - `content`      — sidecar markdown body (the heavy one)
+ *  - `conversation` — the chat thread a question node owns: every user
+ *                     message + assistant reply across all turns,
+ *                     read from `<threadId>.turns.jsonl`. Tool calls /
+ *                     results are intentionally excluded. Heaviest tier
+ *                     (one JSONL read per threaded node); only question
+ *                     nodes carry a `threadId`, so free-floating threads
+ *                     not anchored to a node are out of scope.
  */
 export const searchFieldSchema = z.enum([
   'label',
   'summary',
   'keywords',
   'content',
+  'conversation',
 ]);
 export type SearchField = z.infer<typeof searchFieldSchema>;
 
@@ -147,9 +155,10 @@ export type CanvasSearchEvent =
       type: 'match';
       /**
        * Tier this match was produced in. Lets the client visually
-       * separate the fast metadata hits from the body content hits.
+       * separate the fast metadata hits from the body content hits and
+       * the chat-thread (`conversation`) hits.
        */
-      tier: 'meta' | 'content';
+      tier: 'meta' | 'content' | 'conversation';
       match: CanvasSearchMatch;
     }
   | {
@@ -157,10 +166,11 @@ export type CanvasSearchEvent =
       /**
        * Coarse scan progress for the long content tier. `phase` lets
        * the client switch from "Searching titles…" to "Searching
-       * contents…" between tiers. `scanned` / `total` are node counts
-       * for the content phase, suitable for a determinate progress bar.
+       * contents…" to "Searching conversations…" between tiers.
+       * `scanned` / `total` are node counts for the content /
+       * conversation phases, suitable for a determinate progress bar.
        */
-      phase: 'meta-done' | 'content';
+      phase: 'meta-done' | 'content' | 'conversation';
       scanned?: number;
       total?: number;
     }

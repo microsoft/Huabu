@@ -9,7 +9,7 @@
  * off disk, but the scanner takes a callback so the two are wire-compatible.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   extractSearchableNodes,
@@ -19,11 +19,24 @@ import {
   type SearchableNode,
 } from './canvas-search.js';
 
+import type { ChatTurnRecord } from '../agent/store/chat-thread-store.js';
 import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
 import type { CanvasSearchEvent, CanvasSearchRequest } from '@sediment/shared';
 
-function mkNode(id: string, type: string): SearchableNode {
-  return { id, type };
+/**
+ * In-memory chat-thread registry backing the mocked `loadTurns`. Keyed
+ * by `threadId`; the conversation tier reads it instead of disk so the
+ * scanner can be exercised without writing `.turns.jsonl` fixtures.
+ */
+const turnsByThread = vi.hoisted(() => new Map<string, ChatTurnRecord[]>());
+
+vi.mock('../agent/store/chat-thread-store.js', () => ({
+  loadTurns: (threadId: string): ChatTurnRecord[] =>
+    turnsByThread.get(threadId) ?? [],
+}));
+
+function mkNode(id: string, type: string, threadId?: string): SearchableNode {
+  return { id, type, ...(threadId ? { threadId } : {}) };
 }
 
 function mkContent(
@@ -60,7 +73,11 @@ function makeFakeStore(opts: {
   contents: readonly NodeContent[];
   edges?: readonly SearchableEdge[];
 }): CanvasStore {
-  const stateNodes = opts.nodes.map((n) => ({ id: n.id, type: n.type }));
+  const stateNodes = opts.nodes.map((n) => ({
+    id: n.id,
+    type: n.type,
+    ...(n.threadId ? { data: { threadId: n.threadId } } : {}),
+  }));
   const stateEdges = (opts.edges ?? []).map((e) => ({
     id: e.id,
     source: e.sourceNodeId,
@@ -69,6 +86,7 @@ function makeFakeStore(opts: {
       e.label !== null ? { edgeStyle: { label: e.label } } : { edgeStyle: {} },
   }));
   const fake = {
+    canvasId: 'test-canvas',
     read: () => ({ state: { nodes: stateNodes, edges: stateEdges } }),
     streamAllNodes: async (
       onNode: (id: string, content: NodeContent) => void,
@@ -525,5 +543,131 @@ describe('searchCanvas — edge labels', () => {
     expect(edgeMatches).toHaveLength(1);
     if (edgeMatches[0].type !== 'match') throw new Error('unreachable');
     expect(edgeMatches[0].match.nodeId).toBe('e1');
+  });
+});
+
+describe('searchCanvas — conversation tier', () => {
+  /** Build a turn with one user message + one assistant text reply. */
+  function mkTurn(userText: string, assistantText: string): ChatTurnRecord {
+    return {
+      envelope: {
+        user: { text: userText, attachments: [] },
+        skills: { invokedIds: [], resolved: [] },
+        focus: {
+          selection: {
+            refs: [],
+            selectedIds: [],
+            imageAttachments: [],
+            snapshotAttachments: [],
+          },
+        },
+      },
+      transcript: [
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: assistantText }],
+        },
+      ],
+    } as unknown as ChatTurnRecord;
+  }
+
+  it('matches user messages and assistant replies in a thread', async () => {
+    turnsByThread.clear();
+    turnsByThread.set('t1', [
+      mkTurn(
+        'how do I deploy the server',
+        'you can deploy with docker compose',
+      ),
+    ]);
+
+    const events = await collect(
+      [mkNode('q1', 'question', 't1')],
+      [mkContent('q1', 'question', { label: 'Q', content: 'how do I deploy' })],
+      { query: 'docker', fields: ['conversation'] },
+    );
+
+    const matches = events.filter((e) => e.type === 'match');
+    expect(matches).toHaveLength(1);
+    if (matches[0].type !== 'match') throw new Error('unreachable');
+    expect(matches[0].tier).toBe('conversation');
+    expect(matches[0].match.field).toBe('conversation');
+    expect(matches[0].match.nodeId).toBe('q1');
+  });
+
+  it('excludes tool-call blocks from conversation matches', async () => {
+    turnsByThread.clear();
+    turnsByThread.set('t1', [
+      {
+        envelope: {
+          user: { text: 'run the build', attachments: [] },
+          skills: { invokedIds: [], resolved: [] },
+          focus: {
+            selection: {
+              refs: [],
+              selectedIds: [],
+              imageAttachments: [],
+              snapshotAttachments: [],
+            },
+          },
+        },
+        transcript: [
+          {
+            role: 'assistant',
+            content: [
+              { type: 'text', text: 'building now' },
+              {
+                type: 'toolCall',
+                id: 'tc1',
+                name: 'run_build',
+                arguments: { secret: 'SECRETTOKEN' },
+              },
+            ],
+          },
+          {
+            role: 'tool',
+            toolCallId: 'tc1',
+            content: 'SECRETTOKEN build output',
+          },
+        ],
+      } as unknown as ChatTurnRecord,
+    ]);
+
+    const hitText = await collect(
+      [mkNode('q1', 'question', 't1')],
+      [mkContent('q1', 'question', { content: '' })],
+      { query: 'building', fields: ['conversation'] },
+    );
+    expect(hitText.filter((e) => e.type === 'match')).toHaveLength(1);
+
+    const hitTool = await collect(
+      [mkNode('q1', 'question', 't1')],
+      [mkContent('q1', 'question', { content: '' })],
+      { query: 'SECRETTOKEN', fields: ['conversation'] },
+    );
+    expect(hitTool.filter((e) => e.type === 'match')).toHaveLength(0);
+  });
+
+  it('skips the conversation tier for single-node (nodeId) searches', async () => {
+    turnsByThread.clear();
+    turnsByThread.set('t1', [mkTurn('hello there', 'general kenobi')]);
+
+    const events = await collect(
+      [mkNode('q1', 'question', 't1')],
+      [mkContent('q1', 'question', { content: '' })],
+      { query: 'kenobi', nodeId: 'q1' },
+    );
+    expect(events.filter((e) => e.type === 'match')).toHaveLength(0);
+  });
+
+  it('does not scan threads when the conversation field is not requested', async () => {
+    turnsByThread.clear();
+    turnsByThread.set('t1', [mkTurn('hello there', 'general kenobi')]);
+
+    const events = await collect(
+      [mkNode('q1', 'question', 't1')],
+      [mkContent('q1', 'question', { content: '' })],
+      { query: 'kenobi', fields: ['content'] },
+    );
+    expect(events.filter((e) => e.type === 'match')).toHaveLength(0);
   });
 });

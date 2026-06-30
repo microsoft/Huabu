@@ -2,6 +2,21 @@
 
 每次重要功能变更都会记录在此文件中，按时间倒序排列。
 
+## 2026-06-30 · 画布搜索新增「对话」层：搜得到 Question 节点的完整聊天历史
+
+**What Changed**
+
+画布搜索（Cmd+F）原本只扫节点 sidecar——对 Question 节点而言，sidecar 里只有**第一条用户问题**，后续的多轮提问和 AI 回复都搜不到。现在新增第三个搜索层 **conversation**：
+
+1. **覆盖整段对话历史**——顺着 Question 节点的 `threadId` 读取它拥有的聊天线程（`<threadId>.turns.jsonl`），把**每一轮的用户消息 + AI 回复文本**都纳入匹配范围。
+2. **刻意排除工具调用过程**——assistant 的 `toolCall` 块、`tool` 结果、以及 ACP 的 `plan` overlay 都不参与匹配；搜索只命中人和模型**说过的话**，不会被工具参数 / 输出里的噪音污染。
+3. **结果归属到节点**——命中以 `field: 'conversation'` 标在拥有该线程的 Question 节点上，复用现有的「跳到节点」交互（不会再误触发预览内滚动定位的提示）。
+
+**Notes**
+
+- 只有 Question 节点带 `threadId`，所以**未绑定到任何节点的游离聊天线程暂不在搜索范围内**（按方向 A 实现）。
+- conversation 层是最重的一层：每个带线程的节点要同步读一次 `.turns.jsonl`。它被门控在 `fields` 含 `conversation` 且非单节点（`nodeId`）预览搜索时才运行，沿用搜索「不做应用层缓存、交给 OS 页缓存」的既定取向。
+
 ## 2026-06-28 · Agent Teams：把外部 agent 打包成 Huabu「插件」
 
 **What Changed**

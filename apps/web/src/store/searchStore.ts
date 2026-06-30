@@ -37,7 +37,7 @@ export type SearchScope =
 export interface SearchResultRow {
   /** Stable key (`${nodeId}:${field}:${occurrenceIndex}:${tier}`) for React lists. */
   key: string;
-  tier: 'meta' | 'content';
+  tier: 'meta' | 'content' | 'conversation';
   match: CanvasSearchMatch;
 }
 
