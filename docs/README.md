@@ -19,6 +19,7 @@ docs/
 
 **Rules**
 
+0. Three principles: docs **describe the current system**, are **updated in the same change as the code**, and are **written for agents to read** (concise, greppable, with clickable links).
 1. `architecture/*.md` describes the **current** system. No "we plan to" prose.
    When a proposal ships, fold the lasting design into the matching
    `architecture/*.md` and move (or delete) the original proposal.
@@ -54,6 +55,7 @@ docs/
 | [question-node.md](./architecture/question-node.md)                             | Question node: a content node that anchors a chat thread, runs the agent with its spatial neighbourhood.           |
 | [node-preprocessing.md](./architecture/node-preprocessing.md)                   | Unified 6-stage preprocessing pipeline; per-node profiles decide extract / enrich / persist.                       |
 | [sketch-node.md](./architecture/sketch-node.md)                                 | Sketch nodes: data model, explicit-trigger lifecycle, and the cluster → context → vision-LLM recognition pipeline. |
+| [web-architecture.md](./architecture/web-architecture.md)                       | Frontend (`apps/web/src/`) layout, dependency rules, and conventions.                                              |
 
 ---
 

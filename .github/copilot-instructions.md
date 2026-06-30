@@ -1,5 +1,6 @@
 # GitHub Copilot Instructions
 
+- **Docs-First Workflow**: `docs/architecture/` is the source of truth for how each subsystem works. **Before implementing a feature or refactor, read the relevant `docs/architecture/*.md`** (start from `docs/README.md`) to understand the current design, then act. **After changing architecture, behaviour, or a documented contract, update the matching doc in the same change** — fold shipped plans into `docs/architecture/`, keep in-flight designs under `docs/proposals/` with a `Status:` header, and never leave a doc describing code that no longer exists.
 - **Code Comments**: Always use English for all code comments and documentation, regardless of the user's language.
 - **Documentation**: Ensure all generated documentation strings (JSDoc, TSDoc, etc.) are in English.
 - **Reuse Common Components**: Before creating new UI elements, first check `apps/web/src/components/Common` for existing reusable components. If a suitable component already exists, use or extend it rather than building from scratch. This avoids duplication and ensures visual consistency across the application.
