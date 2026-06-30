@@ -24,6 +24,8 @@
 
 import { z } from 'zod';
 
+import type { CanvasChangeRecord } from '../../canvas-engine/change.js';
+
 export const canvasSyncPendingEffectsSchema = z.object({
   /** Final post-execution snapshots of nodes that were created or edited. */
   mutatedNodes: z.array(z.unknown()),
@@ -45,8 +47,33 @@ export const canvasSyncEventSchema = z.discriminatedUnion('type', [
       /** Structural deltas between prestate and poststate, in apply order. */
       deltas: z.array(z.unknown()),
       pendingEffects: canvasSyncPendingEffectsSchema,
+      /**
+       * ACP chat thread that initiated this batch, when known. Lets the
+       * client attach `changes` to the right conversation's review card.
+       */
+      threadId: z.string().optional(),
+      /**
+       * Per-change review records (`CanvasChangeRecord[]`), present only
+       * for thread-attributed (ACP) batches. Carried as `unknown` on the
+       * wire — the canvas-engine `CanvasChangeRecord` type lives outside
+       * the API layer; the client casts.
+       */
+      changes: z.array(z.unknown()).optional(),
     }),
   }),
 ]);
 
 export type CanvasSyncEvent = z.infer<typeof canvasSyncEventSchema>;
+
+/** Response for `GET /api/canvas/:canvasId/threads/:threadId/changes`. */
+export interface GetThreadChangesResponse {
+  changes: CanvasChangeRecord[];
+}
+
+/**
+ * Response for `DELETE /api/canvas/:canvasId/threads/:threadId/changes/:changeId`
+ * (accept / discard a single review record).
+ */
+export interface DeleteThreadChangeResponse {
+  removed: boolean;
+}

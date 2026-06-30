@@ -268,6 +268,12 @@ export const executeOriginatorSchema = z.object({
   tabId: z.string().optional(),
   /** Authenticated user id when known. */
   userId: z.string().optional(),
+  /**
+   * ACP chat thread that initiated this batch (set by the reachback
+   * tool). Lets the broadcast attribute the change to the right
+   * conversation's review card.
+   */
+  threadId: z.string().optional(),
 });
 export type ExecuteOriginator = z.infer<typeof executeOriginatorSchema>;
 

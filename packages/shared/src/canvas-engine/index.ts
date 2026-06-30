@@ -37,6 +37,15 @@ export {
 export { type Delta, applyDeltas, invertDelta } from './delta.js';
 export { diffCanvasState } from './diff.js';
 
+// ── Change records (delta-derived revert summary) ─────────────────────────
+export {
+  type CanvasChangeRecord,
+  type CanvasChangeKind,
+  extractCanvasChanges,
+  fingerprintNode,
+  invertDeltas,
+} from './change.js';
+
 // ── Command registry (handler / meta maps) ────────────────────────────────
 export {
   HANDLERS,

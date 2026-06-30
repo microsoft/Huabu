@@ -13,6 +13,7 @@ import { useAcpProfiles } from '@/hooks/useAcpProfiles';
 import { useAcpSessionMeta } from '@/hooks/useAcpSessionMeta';
 import { useAcpSlashCommands } from '@/hooks/useAcpSlashCommands';
 import { useInternalSlashCommands } from '@/hooks/useInternalSlashCommands';
+import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
 import {
   selectCurrentHistoryLoaded,
@@ -23,6 +24,7 @@ import { useIntentStore } from '@/store/intentStore';
 import { useLLMStore } from '@/store/llmStore';
 import { usePanelStore } from '@/store/panelStore';
 
+import { AcpChangeCard } from './AcpChangeCard';
 import {
   AcpConnectionBadge,
   type AcpConnectionStatus,
@@ -167,6 +169,15 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     canvasId,
     setAgentBinding,
   ]);
+
+  // Load the persisted change-review records when an ACP thread opens so
+  // the change card survives reload / a canvas that was previously closed.
+  const loadThreadChanges = useAcpThreadChangesStore((s) => s.load);
+  useEffect(() => {
+    if (agentBinding.kind !== 'external') return;
+    if (!canvasId || !threadId) return;
+    void loadThreadChanges(canvasId, threadId);
+  }, [agentBinding.kind, canvasId, threadId, loadThreadChanges]);
 
   // Gate the ACP per-thread hooks on the binding being external. We
   // intentionally do NOT also gate on the profile still existing in
@@ -720,6 +731,9 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         {/* Input is hidden in sketch inspector mode — it's a read-only view. */}
         {!viewingSketchCluster && (
           <div className="px-3 pb-2">
+            {agentBinding.kind === 'external' && canvasId && threadId ? (
+              <AcpChangeCard canvasId={canvasId} threadId={threadId} />
+            ) : null}
             <ChatInput
               value={input}
               onChange={setInput}

@@ -42,6 +42,7 @@ import {
   artifactsDir,
   canvasJsonPath,
   canvasRoot,
+  changesPath,
   chatDir,
   chatPath,
   deltaLogPath,
@@ -59,6 +60,7 @@ import type {
   IntentEpisode,
   RecentAction,
 } from '@sediment/shared';
+import type { CanvasChangeRecord } from '@sediment/shared/canvas-engine';
 
 const log = getLogger('canvas-store');
 
@@ -1026,9 +1028,15 @@ export class CanvasStore {
     if (!existsSync(dir)) return null;
     let latest: { file: string; mtime: number } | null = null;
     for (const file of readdirSync(dir)) {
-      // Skip the rich-ACP sidecar (`<threadId>.parts.json`); it
-      // pairs with a real pi-ai file and isn't a thread of its own.
-      if (!file.endsWith('.json') || file.endsWith('.parts.json')) continue;
+      // Skip non-thread sidecars (`<threadId>.parts.json` rich-ACP
+      // overlay and `<threadId>.changes.json` change-review list); they
+      // pair with a real thread file and aren't threads of their own.
+      if (
+        !file.endsWith('.json') ||
+        file.endsWith('.parts.json') ||
+        file.endsWith('.changes.json')
+      )
+        continue;
       try {
         const st = statSync(path.join(dir, file));
         if (!latest || st.mtimeMs > latest.mtime) {
@@ -1049,8 +1057,48 @@ export class CanvasStore {
     const dir = chatDir(this.canvasId);
     if (!existsSync(dir)) return [];
     return readdirSync(dir)
-      .filter((f) => f.endsWith('.json') && !f.endsWith('.parts.json'))
+      .filter(
+        (f) =>
+          f.endsWith('.json') &&
+          !f.endsWith('.parts.json') &&
+          !f.endsWith('.changes.json'),
+      )
       .map((f) => f.replace(/\.json$/, ''));
+  }
+
+  // ── Change-review records (ACP change card sidecar) ────────────────────────
+
+  /** Read the pending change-review records for a thread (newest last). */
+  readChanges(threadId: string): CanvasChangeRecord[] {
+    return (
+      readJson<CanvasChangeRecord[]>(changesPath(this.canvasId, threadId)) ?? []
+    );
+  }
+
+  /** Overwrite the change-review records for a thread. */
+  writeChanges(threadId: string, records: CanvasChangeRecord[]): void {
+    mkdirp(chatDir(this.canvasId));
+    atomicWriteJson(changesPath(this.canvasId, threadId), records);
+  }
+
+  /** Append records to a thread's pending change list. */
+  appendChanges(threadId: string, records: CanvasChangeRecord[]): void {
+    if (records.length === 0) return;
+    const existing = this.readChanges(threadId);
+    this.writeChanges(threadId, [...existing, ...records]);
+  }
+
+  /**
+   * Remove one record by id (on accept / revert). Returns the removed
+   * record, or null when the id was not present.
+   */
+  removeChange(threadId: string, changeId: string): CanvasChangeRecord | null {
+    const existing = this.readChanges(threadId);
+    const idx = existing.findIndex((r) => r.id === changeId);
+    if (idx < 0) return null;
+    const [removed] = existing.splice(idx, 1);
+    this.writeChanges(threadId, existing);
+    return removed ?? null;
   }
 
   // ── Intent ───────────────────────────────────────────────────────────────

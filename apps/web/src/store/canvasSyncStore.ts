@@ -2,10 +2,11 @@ import { create } from 'zustand';
 
 import { readTypedSSEStream } from '@/api/_sse';
 import { canvasSyncStreamUrl } from '@/api/canvasSync';
+import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
 
 import type { CanvasSyncEvent } from '@sediment/shared';
-import type { Delta } from '@sediment/shared/canvas-engine';
+import type { CanvasChangeRecord, Delta } from '@sediment/shared/canvas-engine';
 import type { Node } from '@xyflow/react';
 
 /**
@@ -85,6 +86,17 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
               void canvasStore.loadCanvas(canvasId);
             }
             // else: stale/older update — ignore.
+
+            // Attribute change-review records to the originating ACP
+            // conversation's card.
+            if (event.data.threadId && Array.isArray(event.data.changes)) {
+              useAcpThreadChangesStore
+                .getState()
+                .appendFromBroadcast(
+                  event.data.threadId,
+                  event.data.changes as CanvasChangeRecord[],
+                );
+            }
           },
           signal,
         );
