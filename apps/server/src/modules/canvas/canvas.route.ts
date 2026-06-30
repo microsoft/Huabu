@@ -22,6 +22,7 @@ import {
 
 import { CanvasNotFoundError, executeOnServer } from './canvas-executor.js';
 import { searchCanvas } from './canvas-search.js';
+import { publishCanvasUpdate } from './canvas-sync.js';
 import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
 import { getPreprocessDispatcher } from '../preprocessing/index.js';
 import { stripOfficeparserPreamble } from '../preprocessing/loaders/office-strip.js';
@@ -1133,6 +1134,27 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         },
         ...(runId ? { runId } : {}),
       };
+
+      // Broadcast to live frontends so out-of-band writers (e.g. an ACP
+      // agent via the reachback `/execute` route) auto-refresh the canvas.
+      // No-op batches (`toVersion === fromVersion`) are skipped.
+      if (out.toVersion > out.fromVersion) {
+        publishCanvasUpdate(canvasId, {
+          type: 'update',
+          data: {
+            fromVersion: out.fromVersion,
+            toVersion: out.toVersion,
+            deltas: out.deltas,
+            pendingEffects: {
+              mutatedNodes: out.pendingEffects.mutatedNodes,
+              deletedNodeIds: out.pendingEffects.deletedNodeIds,
+              contentEditedNodeIds: out.pendingEffects.contentEditedNodeIds,
+              deferredFitFrameIds: out.pendingEffects.deferredFitFrameIds,
+            },
+          },
+        });
+      }
+
       return reply.send(response);
     } catch (err) {
       if (err instanceof CanvasNotFoundError) {

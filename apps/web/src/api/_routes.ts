@@ -51,6 +51,8 @@ export const routes = {
     `/canvas/${enc(canvasId)}/external/stream`,
   canvasExternalImport: (canvasId: string) =>
     `/canvas/${enc(canvasId)}/external/import`,
+  canvasSyncStream: (canvasId: string) =>
+    `/canvas/${enc(canvasId)}/sync/stream`,
 
   // ── Web (preview / reader / page) ────────────────────────────────
   webPreview: (canvasId: string, nodeId: string) =>

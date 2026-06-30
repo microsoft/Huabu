@@ -26,6 +26,7 @@ import skillsRoutes from './modules/agent/skills.route.js';
 import artifactRoute from './modules/artifact/artifact.route.js';
 import canvasRoutes from './modules/canvas/canvas.route.js';
 import externalNoteRoutes from './modules/canvas/external.route.js';
+import syncRoutes from './modules/canvas/sync.route.js';
 import {
   hostGuardPlugin,
   originGuardPlugin,
@@ -206,6 +207,7 @@ app.addHook('preHandler', async (request, reply) => {
 app.register(agentRoutes, { prefix: '/api/agent' });
 app.register(canvasRoutes, { prefix: '/api/canvas' });
 app.register(externalNoteRoutes, { prefix: '/api/canvas' });
+app.register(syncRoutes, { prefix: '/api/canvas' });
 app.register(webRoutes, { prefix: '/api/web' });
 app.register(artifactRoute, { prefix: '/api/canvas' });
 

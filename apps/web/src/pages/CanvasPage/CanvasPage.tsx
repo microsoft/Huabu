@@ -15,6 +15,7 @@ import { useGlobalSearchHotkey } from '../../hooks/useGlobalSearchHotkey';
 import useStore, {
   dismissVersionConflictToast,
 } from '../../store/canvasStore.ts';
+import { useCanvasSyncStore } from '../../store/canvasSyncStore.ts';
 
 /**
  * Page component for a single canvas.
@@ -39,6 +40,18 @@ export default function CanvasPage() {
   // left layer panel (or, when focus is inside the expanded
   // preview, the in-preview find bar).
   useGlobalSearchHotkey();
+
+  // Real-time sync: subscribe to server-pushed canvas mutations (e.g. an
+  // ACP agent writing via the reachback `/execute` route) for the loaded
+  // canvas so the frontend auto-refreshes. Keyed on the store's canvasId
+  // so we (re)connect once a canvas is actually loaded / switched.
+  const connectSync = useCanvasSyncStore((s) => s.connect);
+  const disconnectSync = useCanvasSyncStore((s) => s.disconnect);
+  useEffect(() => {
+    if (!storeCanvasId) return;
+    connectSync(storeCanvasId);
+    return () => disconnectSync();
+  }, [storeCanvasId, connectSync, disconnectSync]);
 
   useEffect(() => {
     if (!canvasId) {
