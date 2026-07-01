@@ -26,6 +26,7 @@ import skillsRoutes from './modules/agent/skills.route.js';
 import artifactRoute from './modules/artifact/artifact.route.js';
 import canvasRoutes from './modules/canvas/canvas.route.js';
 import externalNoteRoutes from './modules/canvas/external.route.js';
+import rfsRoutes from './modules/remote_fs/rfs.route.js';
 import {
   hostGuardPlugin,
   originGuardPlugin,
@@ -165,9 +166,14 @@ if (basicAuthUser && basicAuthPass) {
   // No Basic Auth configured — still gate Bearer-only reachback routes
   app.addHook('onRequest', async (request, reply) => {
     if (request.method === 'OPTIONS') return;
-    // Without Basic Auth, all routes are open EXCEPT /api/reachback/*
-    // which always requires a valid Bearer token.
-    if (!request.url.startsWith('/api/reachback/')) return;
+    // Without Basic Auth, all routes are open EXCEPT the Bearer-only
+    // reachback / RFS routes, which always require a valid Bearer token.
+    if (
+      !request.url.startsWith('/api/reachback/') &&
+      !request.url.startsWith('/api/rfs/')
+    ) {
+      return;
+    }
     const authHeader = request.headers.authorization || '';
     if (authHeader.startsWith('Bearer ')) {
       const daemonToken = getDaemonAuth().getToken();
@@ -214,6 +220,7 @@ app.register(llmRoutes, { prefix: '/api/llm' });
 app.register(skillsRoutes, { prefix: '/api/skills' });
 app.register(workspaceRoutes, { prefix: '/api/workspace' });
 app.register(reachbackRoutes, { prefix: '/api/reachback' });
+app.register(rfsRoutes, { prefix: '/api/rfs' });
 
 // ── External agent (ACP) bridge ───────────────────────────────────────
 // Mount @agentlet/server in daemon mode: an embedded supervisor
