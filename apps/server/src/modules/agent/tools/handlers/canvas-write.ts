@@ -215,9 +215,13 @@ export async function handleCanvasCommands(
       runId,
       fromVersion: result.fromVersion,
       toVersion: result.toVersion,
+      // Signals the web that this batch was broadcast: the initiating
+      // tab must NOT apply these deltas from the tool result — the canvas
+      // sync stream delivers them instead. Revert is owned by the
+      // broadcast-fed change card.
+      ...(opts?.broadcast ? { broadcast: true } : {}),
       // Carry the executor's annotated commands (ids assigned) so the
-      // web's revert UX can snapshot prestate per command before
-      // applying the deltas.
+      // web can render the per-message command list.
       commands: result.commands,
       deltas: result.deltas,
       results: result.results,

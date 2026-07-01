@@ -155,13 +155,39 @@ export function CanvasCommandCard({
     // Single non-revertible change → simple inline row (matches read-node single style)
     if (displayChanges.length === 1 && !anyRevertible) {
       const change = displayChanges[0];
+      // Render clickable node chips (source → target for edges, single chip
+      // for node changes) instead of a bare label. `snapshotLabel` is
+      // undefined for reconstructed changes, so NodeRef resolves the live
+      // label (or shows a struck-through "deleted" chip when the node is gone).
+      const content =
+        change.sourceNodeId && change.targetNodeId ? (
+          <>
+            {change.label.split(':')[0] || 'Connected'}{' '}
+            <NodeRef
+              nodeId={change.sourceNodeId}
+              snapshotLabel={change.sourceNodeLabel}
+            />{' '}
+            →{' '}
+            <NodeRef
+              nodeId={change.targetNodeId}
+              snapshotLabel={change.targetNodeLabel}
+            />
+          </>
+        ) : change.nodeId ? (
+          <>
+            {change.label.split(':')[0]}:{' '}
+            <NodeRef nodeId={change.nodeId} snapshotLabel={change.nodeLabel} />
+          </>
+        ) : (
+          change.label
+        );
       return (
         <div className="flex justify-start">
           <div className="w-full">
             <div className="text-fg-muted hover:bg-hover flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors">
               {statusIcon}
               <Command size={12} className="text-fg-muted/60 flex-shrink-0" />
-              <span className="flex-1 truncate">{change.label}</span>
+              <span className="flex-1 truncate">{content}</span>
             </div>
           </div>
         </div>

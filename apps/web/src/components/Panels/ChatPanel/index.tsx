@@ -170,14 +170,15 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     setAgentBinding,
   ]);
 
-  // Load the persisted change-review records when an ACP thread opens so
-  // the change card survives reload / a canvas that was previously closed.
+  // Load the persisted change-review records when a thread opens so the
+  // change card survives reload / a canvas that was previously closed.
+  // Applies to both ACP threads and the built-in chat agent (C2), which
+  // now also broadcasts its changes to the per-thread card.
   const loadThreadChanges = useAcpThreadChangesStore((s) => s.load);
   useEffect(() => {
-    if (agentBinding.kind !== 'external') return;
     if (!canvasId || !threadId) return;
     void loadThreadChanges(canvasId, threadId);
-  }, [agentBinding.kind, canvasId, threadId, loadThreadChanges]);
+  }, [canvasId, threadId, loadThreadChanges]);
 
   // Gate the ACP per-thread hooks on the binding being external. We
   // intentionally do NOT also gate on the profile still existing in
@@ -731,7 +732,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         {/* Input is hidden in sketch inspector mode — it's a read-only view. */}
         {!viewingSketchCluster && (
           <div className="px-3 pb-2">
-            {agentBinding.kind === 'external' && canvasId && threadId ? (
+            {canvasId && threadId ? (
               <AcpChangeCard canvasId={canvasId} threadId={threadId} />
             ) : null}
             <ChatInput

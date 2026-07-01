@@ -315,6 +315,7 @@ export function applyCanvasCommandsFromToolResult(
       commands?: unknown;
       deltas?: unknown;
       toVersion?: unknown;
+      broadcast?: unknown;
       pendingEffects?: {
         mutatedNodes?: unknown;
         deletedNodeIds?: unknown;
@@ -334,10 +335,22 @@ export function applyCanvasCommandsFromToolResult(
       Array.isArray(parsed.deltas) && typeof parsed.toVersion === 'number';
 
     if (hasServerExecution) {
-      // Pre-assigned ids already in `commands` (the executor stamped
-      // them); we only need to snapshot prestate for the revert UX
-      // and then replay the structural diff.
       const typedCommands = commands as CanvasCommand[];
+
+      // When the server broadcast this write (interactive chat agent),
+      // canvas state arrives via the sync stream — applying it here too
+      // would double-apply on the initiating tab. Revert is owned by the
+      // broadcast-fed `AcpChangeCard`, so we also skip the client-side
+      // change extraction and return empty `changes`; the per-message
+      // card falls back to a display-only reconstruction.
+      if (parsed.broadcast === true) {
+        animateAgentBatch(typedCommands);
+        return { commands: typedCommands, changes: [] };
+      }
+
+      // Non-broadcast callers (question node / sketch carve-out) still
+      // apply the server-authored deltas locally from the tool result
+      // and drive the per-message revert card from a client snapshot.
       const changes = snapshotAndExtractChanges(typedCommands);
 
       const pe = parsed.pendingEffects;

@@ -52,8 +52,12 @@ export function NodeRef({
 
   const nodeData = node?.data as Record<string, unknown> | undefined;
 
-  // When snapshotLabel is provided, the ref is always valid (snapshot-based)
-  const isDisabled = !snapshotLabel && !!resolvedNodeId && !node && !attachment;
+  // Disabled (struck-through "Node deleted" chip) whenever the referenced
+  // node no longer exists on the canvas. `snapshotLabel` only freezes the
+  // *label text* for history rows — it does NOT keep a dead ref clickable,
+  // so a deleted node still reads as deleted even with a frozen label.
+  // Attachment refs are always valid.
+  const isDisabled = !!resolvedNodeId && !node && !attachment;
 
   // Label priority: snapshotLabel (frozen) > live store > fallback > truncated ID
   const label = snapshotLabel

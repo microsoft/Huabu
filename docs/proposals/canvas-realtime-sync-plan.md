@@ -1,68 +1,227 @@
-# Canvas Real-time Sync (M3 Cross-tab Broadcast) — Design Notes
+# Canvas Collaboration Sync — Upgrade Roadmap (Multi-Agent → Multi-User)
 
-> Working document capturing the decisions made (and still open) for syncing
-> out-of-band canvas mutations (ACP agent / other tabs) to live frontends.
-> This is the "M3 cross-tab broadcast" repeatedly referenced in
-> `canvas-executor.ts` comments.
+Status: In-Progress — P0 shipped; P1 is the next milestone.
+Last updated: 2026-07-01
 
-## 1. Problem Statement
+> **End goal:** one canvas edited concurrently by **many agents and many
+> humans**, converging without lost edits or forced reloads. We get there in
+> two waves — **multi-agent first** (several agents + several tabs on one
+> desktop), **multi-user second** (multiple people, presence, identity,
+> cloud). This doc is the single roadmap: what already ships, what's next, in
+> priority order, with the uplift each step buys. Milestone/PR mechanics and
+> the engine-extraction history live in the sibling
+> [headless-executor-plan.md](./headless-executor-plan.md) (Phase A/B, M1–M4);
+> the original M3 broadcast decisions are preserved verbatim in Appendix A.
 
-The built-in agent's canvas writes auto-refresh the frontend, but the ACP
-agent's writes do not. Root cause:
+## 0. End state & the two-wave strategy
 
-- **Built-in agent**: `canvas_commands` runs server-side, but its result
-  (`deltas` / `toVersion` / `pendingEffects`) is streamed back **inside the
-  same agent SSE stream** the frontend is already listening to. The web client
-  applies it locally via `applyDeltasFromAgent` → instant refresh. The
-  initiating tab is both the sender and the receiver of that stream.
-- **ACP agent**: this is ALSO a **user-initiated, interactive** session — the
-  user chats with the ACP agent in the frontend (`/api/acp/threads/:threadId`)
-  and the chat panel renders its tool cards. The difference is purely the
-  **transport of the canvas mutation**: the external agent process writes via a
-  **separate, out-of-band HTTP** `POST /api/canvas/:canvasId/execute` issued by
-  the spawned reachback CLI (`originator: { source: 'agent' }`, currently with
-  **no threadId correlation**). The response (`pendingEffects`) returns to that
-  CLI process, **not** the browser. There is **no server→frontend broadcast
-  channel**, so the live frontend's canvas store never receives the delta — even
-  though a tool card for the write does show in the ACP chat. (ACP's `/execute`
-  is issued by the daemon process, not the user's tab, so the user's tab has no
-  "self echo" to filter — it legitimately needs the broadcast.)
-- The `external-watcher` does not cover this: it only emits `.md` files whose
-  `noteId` is **not** already on the canvas; ACP-written nodes are already in
-  `canvas.json`, so `buildItem` returns `null`.
+The target is a **hybrid**, matching the Figma / tldraw / Linear consensus —
+**no single CRDT for everything**, because structure and content have
+different conflict semantics:
 
-`canvas-executor.ts` comments confirm the intended fix is the unshipped
-"M3 cross-tab broadcast".
+| Concern                                               | Model                                                                                                  | Why                                                                                                |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
+| **Structure** (nodes, edges, geometry, frame nesting) | Server-authoritative **op-log** (delta event-sourcing), evolving to field-level deltas + server rebase | Hard invariants (label uniqueness, frame nesting, edge integrity) are easiest to enforce centrally |
+| **Content** (per-node markdown body)                  | **Yjs CRDT** per node over WebSocket, `.md` canonical                                                  | Character-level merge; last-writer-wins loses keystrokes                                           |
+| **Presence** (cursors, selection, "who's here")       | Ephemeral awareness over the same WebSocket                                                            | Not persisted; per-session                                                                         |
+| **Identity / permissions**                            | Auth layer + `userId` on every `originator`                                                            | Multi-user prerequisite                                                                            |
 
-## 2. Chosen Approach — Server-side Broadcast Channel (Plan A / M3)
+Two waves:
 
-Reuse the existing publish/subscribe pattern from `external-watcher.ts` +
-`external.route.ts`, and reuse the **already-existing** client applier
-`applyDeltasFromAgent`. The missing piece is only the server→client broadcast
-hop.
+- **Wave 1 — Multi-agent (P1–P2).** N agents (built-in + ACP + headless) and
+  N tabs on the _same_ desktop server converge safely. No identity needed.
+- **Wave 2 — Multi-user (P3–P6).** Structural co-edit without conflicts, text
+  co-editing, presence, identity, and multi-device / cloud infra.
 
-Unified data flow (single fan-out point at `executeOnServer`):
+## 1. Current state (P0 — shipped foundation)
+
+The delta-based event-sourcing substrate **and** the out-of-band broadcast are
+in place. What ships today:
+
+| Capability                                                                                | Status | Where                                                                                                                                                                  |
+| ----------------------------------------------------------------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Shared engine + coarse deltas (`INSERT`/`DELETE`/`REPLACE_NODE`), fail-open `applyDeltas` | ✅     | [canvas-engine](../../packages/shared/src/canvas-engine)                                                                                                               |
+| Server-side executor + per-canvas mutex + monotonic `version`                             | ✅     | [canvas-executor.ts](../../apps/server/src/modules/canvas/canvas-executor.ts)                                                                                          |
+| Persistent delta log (`.history/delta-log.jsonl`)                                         | ✅     | [canvas-store.ts](../../apps/server/src/modules/storage/canvas-store.ts)                                                                                               |
+| `POST /:id/execute` headless write path                                                   | ✅     | [canvas.route.ts](../../apps/server/src/modules/canvas/canvas.route.ts)                                                                                                |
+| In-memory pub/sub + `GET /:id/sync/stream` SSE                                            | ✅     | [canvas-sync.ts](../../apps/server/src/modules/canvas/canvas-sync.ts), [sync.route.ts](../../apps/server/src/modules/canvas/sync.route.ts)                             |
+| Web sync subscriber → `applyDeltasFromAgent`                                              | ✅     | [canvasSyncStore.ts](../../apps/web/src/store/canvasSyncStore.ts)                                                                                                      |
+| **ACP / headless writes broadcast to all tabs**                                           | ✅     | reachback `broadcastCanvasWrites`, `/execute` `broadcast: true`                                                                                                        |
+| ACP chat-card correlation (`threadId` + `changes` + per-card revert)                      | ✅     | [acpThreadChangesStore.ts](../../apps/web/src/store/acpThreadChangesStore.ts), revert route in [canvas.route.ts](../../apps/server/src/modules/canvas/canvas.route.ts) |
+| Snapshot-on-connect version reconcile (gap → `loadCanvas`)                                | ✅     | [canvasSyncStore.ts](../../apps/web/src/store/canvasSyncStore.ts)                                                                                                      |
+
+**Known gaps carried into P0** (= the P1 backlog): no `clientId` echo filter;
+the built-in chat agent does **not** broadcast to other tabs; broadcast
+receivers still trigger preprocessing; no `dirtyNodeIds` protection; version
+gaps do a full `loadCanvas` instead of pulling the delta log; user hand-edits
+don't propagate to other tabs at all.
+
+## 2. Roadmap (priority order)
+
+Legend: ✅ shipped · 🟡 partial · ⬜ todo.
+
+### P1 — Multi-agent correctness ← do first (Wave 1)
+
+Makes "several agents + several tabs on one desktop" actually safe. Every item
+is a small, independently shippable fix on top of P0.
+
+- 🟡 **C2 — built-in agent broadcast-only (unifies with ACP).** _Core landed
+  (pending runtime validation)._ The built-in chat agent now delivers its
+  canvas mutations _only_ via the sync broadcast, like ACP — the chat SSE tool
+  result no longer applies state, so the initiating tab is a plain receiver
+  (**no self-echo, no `clientId`**; C5 moves to P2). Shipped: `runAgent` gets
+  `broadcastCanvasWrites` + chat `threadId`
+  ([agent.route.ts](../../apps/server/src/modules/agent/agent.route.ts)); the
+  tool result carries a `broadcast` flag
+  ([canvas-write.ts](../../apps/server/src/modules/agent/tools/handlers/canvas-write.ts));
+  `applyCanvasCommandsFromToolResult` skips the local apply + client change
+  extraction on broadcast batches
+  ([useAgentStream.ts](../../apps/web/src/hooks/useAgentStream.ts)); the
+  per-thread `AcpChangeCard` (fed by the broadcast `changes`) now renders +
+  loads for internal bindings too and owns revert
+  ([ChatPanel/index.tsx](../../apps/web/src/components/Panels/ChatPanel/index.tsx)).
+  The per-message `CanvasCommandCard` degrades to display-only. AI badge
+  (`NodeOrigin`) and AI-edit flag survive. **To verify at runtime:** chat agent
+  write reflects in a second tab; revert via the above-input card; question-node
+  / sketch agents still apply + revert as before (they don't broadcast).
+- 🟡 **C4 / O2 — preprocessing cost deduped (full ownership deferred to P2).**
+  Duplicate **work** is fixed:
+  [PreprocessDispatcher](../../apps/server/src/modules/preprocessing/dispatcher.ts)
+  coalesces concurrent identical requests
+  ([coalesce.ts](../../apps/server/src/modules/preprocessing/coalesce.ts)), so N
+  tabs replaying one broadcast delta run the pipeline (extract + LLM enrich)
+  **once**, not N times. This removed the actual harm (N× LLM / embedding
+  cost). The remaining _ownership_ cleanup — receivers not _triggering_ at all
+  (`applyDeltasFromAgent` still calls `triggerPreprocessing`, now cheap) plus a
+  server-side trigger + enriched writeback broadcast — is **moved to P2**: it
+  shares the "server produces a delta → broadcast" mechanism with Plan A and is
+  no longer cost-urgent, so it is not worth its medium risk on its own.
+- ⬜ **C3 — `dirtyNodeIds` protection.** Skip incoming `REPLACE`/`DELETE` on
+  nodes with un-persisted local edits so an agent write never clobbers what a
+  human is mid-typing.
+- ⬜ **Log backfill.** Wire `GET /:id/log?since=v` into the sync store so a
+  version gap heals incrementally instead of a full `loadCanvas` flicker.
+
+**Uplift:** any mix of built-in + ACP + headless agents writing concurrently
+converges on _every_ open tab — no double-apply, no duplicate embeddings, no
+lost local edits, no full-canvas reload. This is "multi-agent done."
+
+### P2 — Multi-window user-edit sync (Plan A) ← Wave 1 finish
+
+- ⬜ **Plan A (C6).** On the autosave PUT, the server diffs old→new and
+  broadcasts the resulting deltas to _other_ `clientId`s. Minimal client
+  change; ~1s debounce latency; reuses the existing 409 safety net.
+- ⬜ **C5 — per-client echo filter.** Deferred from P1: only _now_ needed,
+  because with user edits broadcasting (Plan A) a tab must skip its **own** PUT
+  echo. Each tab mints a `clientId`, carried on `/execute` + PUT `originator`;
+  the broadcast carries `originatorClientId`; the receiver skips its own. (The
+  built-in agent no longer needs this once C2 makes it a pure receiver.)
+- ⬜ **O2 — server-owned preprocessing + writeback broadcast.** Moved here from
+  P1 (cost already deduped by coalescing). Make broadcast receivers skip
+  `triggerPreprocessing` (`applyDeltasFromAgent` gains a `preprocess` toggle;
+  [canvasSyncStore.ts](../../apps/web/src/store/canvasSyncStore.ts) passes
+  `false`, the built-in-agent path keeps `true`); run preprocessing once
+  server-side for broadcast `/execute` writes; broadcast the enriched writeback
+  (label / summary / keywords) as a `MERGE_NODE_DATA` delta, guarded against
+  re-triggering itself. Reuses the same PUT→diff→broadcast path as Plan A.
+  ~5 files, medium risk (loop guard, server-side snapshot fidelity, async
+  writeback timing).
+- ⬜ **Reversibility category (c) (C7 phase 1).** Checkpoint "restore to the
+  version before this run" (the delta log already supports it) + AI-change
+  badges via `NodeOrigin`; a transient undoable toast for truly-remote
+  changes. Keep remote changes OUT of this tab's global undo stack.
+- ⬜ **Broadcast the change-card _list state_ across tabs.** Today only the
+  canvas deltas broadcast; the per-thread change records (`acpThreadChangesStore`)
+  do **not** re-sync when another tab Accepts/Reverts. So tab B's above-input
+  card can go stale (still lists a change tab A already kept/reverted). Fix:
+  when a change is accepted (`DELETE …/changes/:id`) or reverted, also broadcast
+  the thread's updated coalesced list (reuse the `update` event's `threadId` +
+  `changes`) so every tab's `replaceFromBroadcast` converges. Low-medium risk,
+  additive.
+
+**Uplift:** two windows/tabs on the same device editing one canvas see each
+other's edits within ~1s; remote changes are reviewable (badge / checkpoint)
+instead of triggering a forced reload.
+
+### P3 — Unified write path + field-level deltas + rebase ← Wave 2 foundation
+
+The structural-conflict engine for real multi-user. Aligns with the headless
+plan's Phase B (M3.5–3.9).
+
+- ⬜ **Plan B (C6 / D8).** Route user edits through `/execute`: optimistic local
+  apply + async post + reconcile on broadcast + rollback on failure. One write
+  path, server as source of truth, immediate propagation (no 1s debounce).
+- ⬜ **Field-level deltas (D5, deferred M1 task 1.7).** Replace coarse
+  `REPLACE_NODE` with `SET_GEOMETRY` / `SET_DATA(key)` / `SET_NODE_PARENT` so
+  two clients editing _different fields_ of one node don't clobber.
+- ⬜ **Server rebase.** Re-expand a command against current head; `clientId` +
+  `optimisticTag` reconcile predicted vs authoritative deltas.
+- ⬜ **Retire PUT + 409 (M3.7 / 3.8).** Full re-saves become a `RESET_CANVAS`
+  `/execute`; the "modified elsewhere" conflict toast disappears.
+
+**Uplift:** two users editing the same node's different fields merge cleanly;
+the 409 conflict wall is gone; concurrent structural editing becomes safe.
+
+### P4 — Content co-editing (Yjs) ← Wave 2 (text)
+
+- ⬜ **Yjs per node over WebSocket (D3 / headless M4).** `.md` canonical, Y.Doc
+  a transient mirror seeded on open and flushed debounced. Orthogonal to the
+  structure channel (P1–P3); can proceed in parallel once the WS transport
+  from P5 exists.
+
+**Uplift:** two people typing in the same note body merge at character level
+instead of last-writer-wins.
+
+### P5 — Presence + identity + permissions ← Wave 2 (the "multi-user" gate)
+
+- ⬜ **WebSocket transport consolidation.** Replace SSE + PUT for the sync /
+  presence channel with a single bidirectional connection (one-way agent
+  streams can stay on SSE). Prerequisite for low-latency co-edit + awareness.
+- ⬜ **Awareness.** Live cursors, selections, "who's on this canvas."
+- ⬜ **Identity / auth / per-canvas permissions.** Currently zero — the real
+  gate for multi-user, and larger than the sync algorithm itself.
+- ⬜ **Attribute everything to `userId`.** Extend `originator`; deltas,
+  change-cards, undo, and badges all become per-person.
+
+**Uplift:** real multi-user — see collaborators live, changes attributed to
+people, access controlled.
+
+### P6 — Multi-device / cloud infra ← Wave 2 (scale-out)
+
+- ⬜ **Broker-backed pub/sub.** Replace the in-memory `listenersByCanvas` Map
+  with Redis / NATS so multiple server replicas fan out to each other. (The
+  Map is fine for one process / one desktop; "single process" — not "single
+  client" — is its true ceiling.)
+- ⬜ **Shared server + shared storage topology.** Today each desktop forks its
+  own `127.0.0.1` server against local files, so two devices are two
+  independent servers + two `canvas.json`s. Multi-device needs a shared
+  authority (or a sync-of-syncs).
+- ⬜ **`delta_log` → SQLite (D6).** Migrate the JSONL log to the table schema
+  for indexed server-side `since=v` backfill at scale.
+
+**Uplift:** multi-device and horizontally-scaled cloud deployments converge.
+
+## 3. Dependency map
 
 ```
-User edit (optimistic local)  ─┐
-Built-in agent /execute        ├─► executeOnServer ─► publishCanvasUpdate ─► SSE ─► all subscribed tabs
-ACP /execute                  ─┘                                                   (skip own echo via clientId)
+P0 (shipped)
+ └─► P1 multi-agent correctness ──► P2 user-edit sync (Plan A)      ◄ Wave 1 done
+       │  (C2 makes built-in agent a pure receiver — no clientId)
+       └─► P3 unified path + field deltas + rebase
+             ├─► P4 Yjs content (parallelizable; needs WS from P5)
+             └─► P5 presence + identity ──► P6 cloud / multi-replica ◄ Wave 2 done
 ```
 
-### Why this fits
-
-- `executeOnServer` already produces `deltas`, `fromVersion`, `toVersion`,
-  `pendingEffects`, and `originator`, and already appends a delta-log entry
-  with a monotonic version. Broadcast just emits these.
-- The web client already has `applyDeltasFromAgent(deltas, toVersion,
-pendingEffects)` which replays an id-keyed structural diff, reconciles the
-  local `version`, and is "fail open" (tolerates REPLACE/DELETE against missing
-  targets).
-- Bonus: cross-tab / multi-window (Electron) sync comes for free.
+Critical path to **multi-agent**: P1. Critical path to **multi-user**:
+P3 → P5 (+ P4 for text). P6 only when leaving the single-process desktop.
 
 ---
 
-## 3. Confirmed Decisions
+## Appendix A — Decision rationale (C1–C7, preserved)
+
+> Preserved verbatim from the original M3 broadcast design. These decisions
+> still govern the mechanisms above — P1–P2 are largely the implementation of
+> C3–C7.
 
 ### C1 — Plan A (server-side SSE broadcast) is the chosen mechanism
 
@@ -188,7 +347,7 @@ interactive agent**.
 
 ---
 
-## 4. Open / To-Confirm Decisions
+## Appendix B — Open questions (still open)
 
 ### O1 — Reversibility UX, split by category (a/b/c)
 
@@ -200,9 +359,12 @@ whether (b) also joins this tab's global undo or only the chat-card revert.
 
 ### O2 — Server-side preprocessing for headless `/execute`
 
-Confirmed in principle (C4: ACP originator = server runs preprocessing). To
-confirm: implement server-side preprocessing for `/execute` writes now, and the
-exact "already-preprocessed" writeback tag/marker.
+Confirmed in principle (C4: ACP originator = server runs preprocessing).
+**Status:** the cost half shipped (dispatcher coalescing — see P1); the
+ownership half (receivers skip + server trigger + enriched writeback
+broadcast) is **scheduled under P2**, bundled with Plan A because it reuses the
+same server-diff → broadcast path. Still to confirm: the exact
+"already-preprocessed" writeback tag/marker used to break the re-trigger loop.
 
 ### O3 — Plan A vs Plan B sequencing
 
@@ -225,7 +387,7 @@ user edits, defer to checkpoints (C7 item 3) instead.
 
 ---
 
-## 5. Implementation Outline (when greenlit)
+## Appendix C — Original M3 implementation outline (maps to P0 / P1)
 
 1. **Shared types** (`packages/shared/src/types/api/canvas-sync.ts`): zod schema
    - `z.infer` for the broadcast event (`snapshot` baseline + `update`
