@@ -92,7 +92,7 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
             if (event.data.threadId && Array.isArray(event.data.changes)) {
               useAcpThreadChangesStore
                 .getState()
-                .appendFromBroadcast(
+                .replaceFromBroadcast(
                   event.data.threadId,
                   event.data.changes as CanvasChangeRecord[],
                 );

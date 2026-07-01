@@ -499,9 +499,14 @@ export async function executeOnServer(
     // (which applies its own deltas via the chat tool result) does not
     // double-apply. No-op fast path above already returned for empty diffs.
     if (input.broadcast) {
+      // When attributed to a thread, fold this batch's records into the
+      // thread's coalesced change list (one net record per entity) and
+      // broadcast that full list so live cards replace their state with
+      // it — matching what GET /changes returns.
+      let broadcastChanges = changes;
       if (originator.threadId && changes && changes.length > 0) {
         try {
-          store.appendChanges(originator.threadId, changes);
+          broadcastChanges = store.appendChanges(originator.threadId, changes);
         } catch {
           /* sidecar persistence is best-effort — never fail the write */
         }
@@ -519,7 +524,7 @@ export async function executeOnServer(
             deferredFitFrameIds: pendingEffects.deferredFitFrameIds,
           },
           ...(originator.threadId ? { threadId: originator.threadId } : {}),
-          ...(changes ? { changes } : {}),
+          ...(broadcastChanges ? { changes: broadcastChanges } : {}),
         },
       });
     }

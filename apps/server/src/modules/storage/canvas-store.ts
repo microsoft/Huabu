@@ -14,6 +14,8 @@ import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
+import { coalesceChanges } from '@sediment/shared/canvas-engine';
+
 import {
   patchCanvasDirTitle,
   refreshCanvasDirIndex,
@@ -1068,10 +1070,17 @@ export class CanvasStore {
 
   // ── Change-review records (ACP change card sidecar) ────────────────────────
 
-  /** Read the pending change-review records for a thread (newest last). */
+  /**
+   * Read the pending change-review records for a thread, coalesced so each
+   * canvas entity is a single net record (newest state last). Coalescing
+   * on read keeps every consumer — GET, revert, accept, and the next
+   * append — consistent, and transparently upgrades any legacy
+   * un-coalesced sidecar.
+   */
   readChanges(threadId: string): CanvasChangeRecord[] {
-    return (
-      readJson<CanvasChangeRecord[]>(changesPath(this.canvasId, threadId)) ?? []
+    return coalesceChanges(
+      readJson<CanvasChangeRecord[]>(changesPath(this.canvasId, threadId)) ??
+        [],
     );
   }
 
@@ -1081,11 +1090,20 @@ export class CanvasStore {
     atomicWriteJson(changesPath(this.canvasId, threadId), records);
   }
 
-  /** Append records to a thread's pending change list. */
-  appendChanges(threadId: string, records: CanvasChangeRecord[]): void {
-    if (records.length === 0) return;
+  /**
+   * Merge records into a thread's pending change list, coalescing every
+   * change targeting the same entity into a single net record (see
+   * {@link coalesceChanges}). Returns the resulting coalesced list so the
+   * caller can broadcast it verbatim.
+   */
+  appendChanges(
+    threadId: string,
+    records: CanvasChangeRecord[],
+  ): CanvasChangeRecord[] {
     const existing = this.readChanges(threadId);
-    this.writeChanges(threadId, [...existing, ...records]);
+    const merged = coalesceChanges([...existing, ...records]);
+    this.writeChanges(threadId, merged);
+    return merged;
   }
 
   /**

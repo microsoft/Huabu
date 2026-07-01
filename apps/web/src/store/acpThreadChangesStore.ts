@@ -10,15 +10,81 @@ import {
 import useCanvasStore from '@/store/canvasStore';
 
 import type { CanvasChangeRecord } from '@sediment/shared/canvas-engine';
+import type { Node, Edge } from '@xyflow/react';
+
+/**
+ * Pure revertability check for a single change against a canvas snapshot.
+ *
+ * Decided entirely by the change's inverse delta vs the CURRENT nodes /
+ * edges — no "content vs system field" classification:
+ *   • structural changes (create/delete/connect/disconnect/edge-update)
+ *     are existence-based: the revert is meaningful only while its target
+ *     is still in the state the agent left it.
+ *   • an update compares ONLY the fields the agent actually changed
+ *     (`fingerprintKeys`); fields the agent didn't touch can't conflict
+ *     with reverting the agent's edit.
+ *
+ * Exported (not just the store method) so React components can call it
+ * with reactively-subscribed `nodes` / `edges` and re-render when the
+ * canvas changes — the store method reads a snapshot imperatively and
+ * would not by itself trigger a re-render.
+ */
+export function isChangeStale(
+  record: CanvasChangeRecord,
+  nodes: readonly Node[],
+  edges: readonly Edge[],
+): boolean {
+  const rd = record.revertDeltas[0];
+  if (!rd) return false;
+  const hasNode = (id: string) => nodes.some((n) => n.id === id);
+  const hasEdge = (id: string) => edges.some((e) => e.id === id);
+  switch (rd.type) {
+    // Revert of CREATE deletes the node → stale once it's gone, OR once
+    // its authored body (content / src) has been edited since (deleting
+    // it would then wipe the user's newer edit).
+    case 'DELETE_NODE': {
+      const cur = nodes.find((n) => n.id === rd.node.id);
+      if (!cur) return true;
+      const keys = record.fingerprintKeys ?? [];
+      if (keys.length === 0) return false;
+      return fingerprintNodeFields(cur, keys) !== record.appliedFingerprint;
+    }
+    // Revert of DELETE reinserts the node → only meaningful while absent.
+    case 'INSERT_NODE':
+      return hasNode(rd.node.id);
+    // Revert of an UPDATE restores the pre-agent node. `rd.prev` is the
+    // agent's applied state; stale iff the node is gone OR one of the
+    // fields this edit changed was modified again since.
+    case 'REPLACE_NODE': {
+      const cur = nodes.find((n) => n.id === rd.prev.id);
+      if (!cur) return true;
+      const keys = record.fingerprintKeys ?? [];
+      if (keys.length === 0) return false;
+      return fingerprintNodeFields(cur, keys) !== record.appliedFingerprint;
+    }
+    // Revert of CONNECT deletes the edge → only meaningful while it exists.
+    case 'DELETE_EDGE':
+      return !hasEdge(rd.edge.id);
+    // Revert of DISCONNECT reinserts the edge → only meaningful while absent.
+    case 'INSERT_EDGE':
+      return hasEdge(rd.edge.id);
+    // Revert of an edge-update restores the prior edge → needs it present.
+    case 'REPLACE_EDGE':
+      return !hasEdge(rd.prev.id);
+    default:
+      return false;
+  }
+}
 
 /**
  * Per-conversation (ACP thread) change-review records — the "what the
  * agent changed" card shown above the chat input.
  *
  * Records arrive two ways:
- *  - on thread open: `load()` fetches the persisted sidecar.
- *  - live: `appendFromBroadcast()` is called by `canvasSyncStore` when a
- *    thread-attributed `update` event arrives.
+ *  - on thread open: `load()` fetches the persisted (coalesced) sidecar.
+ *  - live: `replaceFromBroadcast()` is called by `canvasSyncStore` when a
+ *    thread-attributed `update` event arrives — the server broadcasts the
+ *    thread's FULL coalesced list, so this replaces the local list.
  *
  * Accept removes a record (server + local). Revert applies the inverse
  * deltas server-side (which broadcasts the canvas change back), then
@@ -29,8 +95,8 @@ interface AcpThreadChangesState {
   byThread: Record<string, CanvasChangeRecord[]>;
   /** Fetch persisted records for a thread (replaces local list). */
   load: (canvasId: string, threadId: string) => Promise<void>;
-  /** Append live records pushed via the sync broadcast. */
-  appendFromBroadcast: (
+  /** Replace a thread's list with the coalesced set pushed via broadcast. */
+  replaceFromBroadcast: (
     threadId: string,
     records: CanvasChangeRecord[],
   ) => void;
@@ -77,16 +143,11 @@ export const useAcpThreadChangesStore = create<AcpThreadChangesState>(
       }
     },
 
-    appendFromBroadcast: (threadId, records) => {
-      if (records.length === 0) return;
-      set((s) => {
-        const existing = s.byThread[threadId] ?? [];
-        // Dedupe by id in case a record arrives twice.
-        const seen = new Set(existing.map((r) => r.id));
-        const merged = [...existing];
-        for (const r of records) if (!seen.has(r.id)) merged.push(r);
-        return { byThread: { ...s.byThread, [threadId]: merged } };
-      });
+    replaceFromBroadcast: (threadId, records) => {
+      // The broadcast carries the thread's full coalesced list (one net
+      // record per entity), so replace rather than append — this also
+      // drops rows whose net effect became nothing (e.g. create+delete).
+      set((s) => ({ byThread: { ...s.byThread, [threadId]: records } }));
     },
 
     accept: async (canvasId, threadId, changeId) => {
@@ -150,49 +211,8 @@ export const useAcpThreadChangesStore = create<AcpThreadChangesState>(
     },
 
     isStale: (record) => {
-      // Revertability is decided entirely by the change's inverse delta
-      // against the CURRENT canvas — no "content vs system field"
-      // classification needed:
-      //   • structural changes (create/delete/connect/disconnect) →
-      //     purely existence-based: the revert is meaningful only while
-      //     its target is still in the state the agent left it.
-      //   • an update → compare ONLY the fields the agent actually
-      //     changed (`fingerprintKeys`); anything the agent didn't touch
-      //     can't conflict with reverting the agent's edit.
-      const rd = record.revertDeltas[0];
-      if (!rd) return false;
       const { nodes, edges } = useCanvasStore.getState();
-      const hasNode = (id: string) => nodes.some((n) => n.id === id);
-      const hasEdge = (id: string) => edges.some((e) => e.id === id);
-      switch (rd.type) {
-        // Revert of CREATE deletes the node → only meaningful while it exists.
-        case 'DELETE_NODE':
-          return !hasNode(rd.node.id);
-        // Revert of DELETE reinserts the node → only meaningful while absent.
-        case 'INSERT_NODE':
-          return hasNode(rd.node.id);
-        // Revert of an UPDATE restores the pre-agent node. `rd.prev` is the
-        // agent's applied state; stale iff the node is gone OR one of the
-        // fields this edit changed was modified again since.
-        case 'REPLACE_NODE': {
-          const cur = nodes.find((n) => n.id === rd.prev.id);
-          if (!cur) return true;
-          const keys = record.fingerprintKeys ?? [];
-          if (keys.length === 0) return false;
-          return fingerprintNodeFields(cur, keys) !== record.appliedFingerprint;
-        }
-        // Revert of CONNECT deletes the edge → only meaningful while it exists.
-        case 'DELETE_EDGE':
-          return !hasEdge(rd.edge.id);
-        // Revert of DISCONNECT reinserts the edge → only meaningful while absent.
-        case 'INSERT_EDGE':
-          return hasEdge(rd.edge.id);
-        // Revert of an edge-update restores the prior edge → needs it present.
-        case 'REPLACE_EDGE':
-          return !hasEdge(rd.prev.id);
-        default:
-          return false;
-      }
+      return isChangeStale(record, nodes, edges);
     },
   }),
 );

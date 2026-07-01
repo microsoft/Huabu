@@ -48,6 +48,7 @@ export {
   type CanvasChangeRecord,
   type CanvasChangeKind,
   extractCanvasChanges,
+  coalesceChanges,
   fingerprintNodeFields,
   invertDeltas,
 } from './change.js';

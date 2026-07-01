@@ -13,7 +13,10 @@ import { useCallback, useRef, useState } from 'react';
 
 import { applyDeltas } from '@sediment/shared/canvas-engine';
 
-import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
+import {
+  useAcpThreadChangesStore,
+  isChangeStale,
+} from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
 
 import { Button } from '../../Common/Button';
@@ -39,7 +42,10 @@ export function AcpChangeCard({ canvasId, threadId }: AcpChangeCardProps) {
   const acceptAll = useAcpThreadChangesStore((s) => s.acceptAll);
   const revert = useAcpThreadChangesStore((s) => s.revert);
   const revertAll = useAcpThreadChangesStore((s) => s.revertAll);
-  const isStale = useAcpThreadChangesStore((s) => s.isStale);
+  // Subscribe to the live canvas so staleness recomputes (and rows
+  // re-disable) the moment a target node / edge is added or removed.
+  const nodes = useCanvasStore((s) => s.nodes);
+  const edges = useCanvasStore((s) => s.edges);
 
   const [collapsed, setCollapsed] = useState(false);
 
@@ -75,12 +81,19 @@ export function AcpChangeCard({ canvasId, threadId }: AcpChangeCardProps) {
 
   if (records.length === 0) return null;
 
+  // Only non-stale changes can be previewed / reverted. When every change
+  // is stale (its target was deleted or changed since), the "all" actions
+  // have nothing to act on and are disabled.
+  const revertable = records.filter((r) => !isChangeStale(r, nodes, edges));
+  const hasRevertable = revertable.length > 0;
+
   // Combined inverse deltas for "preview all" — reverse record order so
-  // dependent changes are undone before their prerequisites.
+  // dependent changes are undone before their prerequisites. Stale
+  // records are skipped (their inverse would target a missing entity).
   const previewAll = () => {
     const deltas: Delta[] = [];
-    for (let i = records.length - 1; i >= 0; i--) {
-      deltas.push(...records[i].revertDeltas);
+    for (let i = revertable.length - 1; i >= 0; i--) {
+      deltas.push(...revertable[i].revertDeltas);
     }
     startPreviewDeltas(deltas);
   };
@@ -108,7 +121,12 @@ export function AcpChangeCard({ canvasId, threadId }: AcpChangeCardProps) {
           variant="ghost"
           size="sm"
           iconOnly
-          title="Hold to preview the state before all changes"
+          disabled={!hasRevertable}
+          title={
+            hasRevertable
+              ? 'Hold to preview the state before all changes'
+              : 'Preview unavailable — no revertable changes'
+          }
           className="h-5 w-5 rounded-sm"
         >
           <Eye size={12} />
@@ -125,6 +143,8 @@ export function AcpChangeCard({ canvasId, threadId }: AcpChangeCardProps) {
           onClick={() => void revertAll(canvasId, threadId)}
           variant="outline"
           size="sm"
+          disabled={!hasRevertable}
+          title={hasRevertable ? undefined : 'No revertable changes remain'}
           className="h-5 rounded-sm"
         >
           Revert all
@@ -136,7 +156,7 @@ export function AcpChangeCard({ canvasId, threadId }: AcpChangeCardProps) {
             <ChangeRow
               key={rec.id}
               record={rec}
-              stale={isStale(rec)}
+              stale={isChangeStale(rec, nodes, edges)}
               onPreviewStart={() => startPreview(rec)}
               onPreviewEnd={endPreview}
               onKeep={() => void accept(canvasId, threadId, rec.id)}
@@ -211,7 +231,12 @@ function ChangeRow({
           variant="ghost"
           size="sm"
           iconOnly
-          title="Hold to preview the state before this change"
+          disabled={stale}
+          title={
+            stale
+              ? 'Preview unavailable — the target was deleted or changed since this edit'
+              : 'Hold to preview the state before this change'
+          }
           className="h-5 w-5 rounded-sm"
         >
           <Eye size={12} />
@@ -234,7 +259,7 @@ function ChangeRow({
           disabled={stale}
           title={
             stale
-              ? 'This node was modified since — revert disabled to avoid overwriting newer changes'
+              ? 'Revert unavailable — the target was deleted or changed since this edit'
               : 'Revert this change'
           }
           className="h-5 w-5 rounded-sm"

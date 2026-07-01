@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 
 import {
   applyDeltas,
+  coalesceChanges,
   extractCanvasChanges,
   fingerprintNodeFields,
   invertDeltas,
@@ -78,7 +79,7 @@ describe('fingerprintNodeFields', () => {
 });
 
 describe('staleness scoping (per-change fingerprintKeys)', () => {
-  it('CREATE carries no fingerprint (revertability is existence-based)', () => {
+  it('CREATE fingerprints the body; ignores a later label/summary rewrite, catches a body edit', () => {
     const created = note('n', {
       content: 'hello world',
       label: 'hello world 1',
@@ -86,8 +87,26 @@ describe('staleness scoping (per-change fingerprintKeys)', () => {
     const [rec] = extractCanvasChanges([
       { type: 'INSERT_NODE', node: created },
     ]);
-    expect(rec.appliedFingerprint).toBeUndefined();
-    expect(rec.fingerprintKeys).toBeUndefined();
+    expect(rec.fingerprintKeys).toEqual(['content']);
+
+    // Preprocessing stamps summary/keywords and regenerates the label → fresh.
+    const afterPreprocess = note('n', {
+      content: 'hello world',
+      label: 'A friendly greeting',
+      summary: 'greeting',
+      keywords: ['hello'],
+      labelSource: 'auto',
+      measuredHeight: 1305,
+    });
+    expect(fingerprintNodeFields(afterPreprocess, rec.fingerprintKeys!)).toBe(
+      rec.appliedFingerprint,
+    );
+
+    // The user edits the note body → stale (delete-revert would wipe it).
+    const bodyEdited = note('n', { content: 'hello world, edited' });
+    expect(fingerprintNodeFields(bodyEdited, rec.fingerprintKeys!)).not.toBe(
+      rec.appliedFingerprint,
+    );
   });
 
   it('UPDATE(content) ignores a later label rewrite but catches a content re-edit', () => {
@@ -132,9 +151,9 @@ describe('extractCanvasChanges', () => {
     expect(rec.label).toBe('Created: Market analysis');
     expect(rec.nodeId).toBe('node-a');
     expect(rec.revertDeltas).toEqual([{ type: 'DELETE_NODE', node: n }]);
-    // CREATE is existence-based — no content fingerprint.
-    expect(rec.fingerprintKeys).toBeUndefined();
-    expect(rec.appliedFingerprint).toBeUndefined();
+    // CREATE fingerprints the authored body (content).
+    expect(rec.fingerprintKeys).toEqual(['content']);
+    expect(rec.appliedFingerprint).toBe(fingerprintNodeFields(n, ['content']));
   });
 
   it('REPLACE_NODE → update record, revert restores prev (with content)', () => {
@@ -212,5 +231,80 @@ describe('extractCanvasChanges', () => {
     expect((reverted.nodes[0].data as { content?: string }).content).toBe(
       'OLD',
     );
+  });
+});
+
+describe('coalesceChanges', () => {
+  const recs = (...deltas: Delta[]) =>
+    deltas.flatMap((d) => extractCanvasChanges([d]));
+
+  it('create → update(s) collapses to one create with the latest body', () => {
+    const a1 = note('A', { content: 'v1' });
+    const a2 = note('A', { content: 'v2' });
+    const merged = coalesceChanges([
+      ...recs({ type: 'INSERT_NODE', node: a1 }),
+      ...recs({ type: 'REPLACE_NODE', prev: a1, next: a2 }),
+    ]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].kind).toBe('create');
+    expect(merged[0].revertDeltas).toEqual([{ type: 'DELETE_NODE', node: a2 }]);
+  });
+
+  it('update → update collapses; revert restores the pre-first state', () => {
+    const a1 = note('A', { content: 'v1' });
+    const a2 = note('A', { content: 'v2' });
+    const a3 = note('A', { content: 'v3' });
+    const first = recs({ type: 'REPLACE_NODE', prev: a1, next: a2 });
+    const merged = coalesceChanges([
+      ...first,
+      ...recs({ type: 'REPLACE_NODE', prev: a2, next: a3 }),
+    ]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].kind).toBe('update');
+    expect(merged[0].revertDeltas).toEqual([
+      { type: 'REPLACE_NODE', prev: a3, next: a1 },
+    ]);
+    // Stable id — keeps the first constituent's id.
+    expect(merged[0].id).toBe(first[0].id);
+  });
+
+  it('create → delete cancels out to nothing', () => {
+    const a = note('A', { content: 'v1' });
+    const merged = coalesceChanges([
+      ...recs({ type: 'INSERT_NODE', node: a }),
+      ...recs({ type: 'DELETE_NODE', node: a }),
+    ]);
+    expect(merged).toEqual([]);
+  });
+
+  it('update → delete collapses to a delete restoring the original', () => {
+    const a1 = note('A', { content: 'v1' });
+    const a2 = note('A', { content: 'v2' });
+    const merged = coalesceChanges([
+      ...recs({ type: 'REPLACE_NODE', prev: a1, next: a2 }),
+      ...recs({ type: 'DELETE_NODE', node: a2 }),
+    ]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].kind).toBe('delete');
+    expect(merged[0].revertDeltas).toEqual([{ type: 'INSERT_NODE', node: a1 }]);
+  });
+
+  it('keeps distinct entities as separate rows in first-seen order', () => {
+    const a = note('A', { content: 'a' });
+    const b = note('B', { content: 'b' });
+    const merged = coalesceChanges([
+      ...recs({ type: 'INSERT_NODE', node: a }),
+      ...recs({ type: 'INSERT_NODE', node: b }),
+    ]);
+    expect(merged.map((r) => r.nodeId)).toEqual(['A', 'B']);
+  });
+
+  it('is idempotent (coalescing an already-coalesced list is a no-op)', () => {
+    const a1 = note('A', { content: 'v1' });
+    const a2 = note('A', { content: 'v2' });
+    const once = coalesceChanges([
+      ...recs({ type: 'REPLACE_NODE', prev: a1, next: a2 }),
+    ]);
+    expect(coalesceChanges(once)).toEqual(once);
   });
 });

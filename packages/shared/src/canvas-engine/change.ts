@@ -15,7 +15,7 @@
 import { invertDelta, type Delta } from './delta.js';
 import { createId } from '../utils/id.js';
 
-import type { CanvasNode } from './interfaces.js';
+import type { CanvasNode, CanvasEdge } from './interfaces.js';
 
 /** Coarse classification of a change, for icon / wording on the card. */
 export type CanvasChangeKind =
@@ -103,6 +103,22 @@ function changedKeys(
   return out;
 }
 
+/**
+ * The authored *body* payload keys. A CREATE has no `prev` to diff, so it
+ * can't derive its changed keys the way an UPDATE does — instead it
+ * fingerprints only the body here, which is what a revert (deleting the
+ * node) would actually destroy. Cosmetic (`style`) and auto-derived
+ * (`label` / `summary` / `keywords`, stamped by preprocessing AFTER
+ * creation) fields are deliberately excluded so they never flip a fresh
+ * create to "stale"; a genuine edit to the body still does.
+ */
+const PRIMARY_CONTENT_KEYS = ['content', 'src'];
+
+/** Body keys present on a node's `data`, for CREATE fingerprinting. */
+function primaryKeysOf(data: Record<string, unknown>): string[] {
+  return PRIMARY_CONTENT_KEYS.filter((k) => k in data);
+}
+
 /** djb2 hash over a canonical (sorted-key) projection of `data`. */
 function hashDataFields(
   data: Record<string, unknown>,
@@ -186,11 +202,11 @@ export function extractCanvasChanges(
   for (const d of deltas) {
     switch (d.type) {
       case 'INSERT_NODE': {
-        // CREATE: revertability is purely existence-based — the revert
-        // (DELETE_NODE) is meaningful iff the node still exists. No
-        // fingerprint: a create carries no "prev" to diff against, and
-        // whatever the user does to the node afterwards, the card just
-        // reverts to "delete it" (blocked once it's already gone).
+        // CREATE: revertable while the node exists AND its authored body
+        // (content / src) is unchanged — editing the created note's body
+        // must block the delete-revert so it can't wipe the user's work.
+        // label / summary / style are excluded (auto or cosmetic).
+        const keys = primaryKeysOf(nodeData(d.node));
         records.push({
           id: createId('change'),
           kind: 'create',
@@ -199,6 +215,8 @@ export function extractCanvasChanges(
           nodeType: (d.node.type ?? 'note') as string,
           nodeLabel: labelOf(d.node),
           revertDeltas: [invertDelta(d)],
+          fingerprintKeys: keys,
+          appliedFingerprint: fingerprintNodeFields(d.node, keys),
         });
         break;
       }
@@ -281,4 +299,158 @@ export function extractCanvasChanges(
   }
 
   return records;
+}
+
+// ── Coalescing (net effect per entity) ─────────────────────────────────────
+//
+// Multiple agent batches editing the SAME node/edge produce one change
+// record each, so the card would show many "Updated: X" rows. Coalescing
+// folds every record targeting the same entity into a single NET change:
+// the revert restores the state from BEFORE the first edit, and a
+// create+delete (or an edit that nets to nothing) drops out entirely.
+
+/** The forward change (before → after) a record's inverse delta implies. */
+function forwardOf(rec: CanvasChangeRecord): {
+  key: string;
+  kind: 'node' | 'edge';
+  before: CanvasNode | CanvasEdge | null;
+  after: CanvasNode | CanvasEdge | null;
+} | null {
+  const rd = rec.revertDeltas[0];
+  if (!rd) return null;
+  switch (rd.type) {
+    case 'DELETE_NODE': // forward was INSERT: absent → node
+      return {
+        key: `node:${rd.node.id}`,
+        kind: 'node',
+        before: null,
+        after: rd.node,
+      };
+    case 'INSERT_NODE': // forward was DELETE: node → absent
+      return {
+        key: `node:${rd.node.id}`,
+        kind: 'node',
+        before: rd.node,
+        after: null,
+      };
+    case 'REPLACE_NODE': // forward REPLACE: before=rd.next, after=rd.prev
+      return {
+        key: `node:${rd.prev.id}`,
+        kind: 'node',
+        before: rd.next,
+        after: rd.prev,
+      };
+    case 'DELETE_EDGE':
+      return {
+        key: `edge:${rd.edge.id}`,
+        kind: 'edge',
+        before: null,
+        after: rd.edge,
+      };
+    case 'INSERT_EDGE':
+      return {
+        key: `edge:${rd.edge.id}`,
+        kind: 'edge',
+        before: rd.edge,
+        after: null,
+      };
+    case 'REPLACE_EDGE':
+      return {
+        key: `edge:${rd.prev.id}`,
+        kind: 'edge',
+        before: rd.next,
+        after: rd.prev,
+      };
+    default:
+      return null;
+  }
+}
+
+function netNodeDelta(
+  before: CanvasNode | null,
+  after: CanvasNode | null,
+): Delta | null {
+  if (!before && !after) return null;
+  if (!before && after) return { type: 'INSERT_NODE', node: after };
+  if (before && !after) return { type: 'DELETE_NODE', node: before };
+  if (JSON.stringify(before) === JSON.stringify(after)) return null;
+  return {
+    type: 'REPLACE_NODE',
+    prev: before as CanvasNode,
+    next: after as CanvasNode,
+  };
+}
+
+function netEdgeDelta(
+  before: CanvasEdge | null,
+  after: CanvasEdge | null,
+): Delta | null {
+  if (!before && !after) return null;
+  if (!before && after) return { type: 'INSERT_EDGE', edge: after };
+  if (before && !after) return { type: 'DELETE_EDGE', edge: before };
+  if (JSON.stringify(before) === JSON.stringify(after)) return null;
+  return {
+    type: 'REPLACE_EDGE',
+    prev: before as CanvasEdge,
+    next: after as CanvasEdge,
+  };
+}
+
+/**
+ * Fold a list of change records so each canvas entity (node / edge) is
+ * represented by at most one NET record. Order follows first appearance;
+ * the merged record keeps the FIRST constituent's `id` (stable across
+ * re-coalescing) and drops entities whose net effect is nothing.
+ */
+export function coalesceChanges(
+  records: readonly CanvasChangeRecord[],
+): CanvasChangeRecord[] {
+  const groups = new Map<string, CanvasChangeRecord[]>();
+  const order: string[] = [];
+  const labelById = new Map<string, string>();
+  for (const r of records) {
+    if (r.nodeId && r.nodeLabel) labelById.set(r.nodeId, r.nodeLabel);
+    if (r.sourceNodeId && r.sourceNodeLabel)
+      labelById.set(r.sourceNodeId, r.sourceNodeLabel);
+    if (r.targetNodeId && r.targetNodeLabel)
+      labelById.set(r.targetNodeId, r.targetNodeLabel);
+    const f = forwardOf(r);
+    if (!f) continue;
+    if (!groups.has(f.key)) {
+      groups.set(f.key, []);
+      order.push(f.key);
+    }
+    groups.get(f.key)!.push(r);
+  }
+
+  const netDeltas: Delta[] = [];
+  const idByKey = new Map<string, string>();
+  for (const key of order) {
+    const grp = groups.get(key)!;
+    const first = forwardOf(grp[0])!;
+    const last = forwardOf(grp[grp.length - 1])!;
+    const net =
+      first.kind === 'node'
+        ? netNodeDelta(
+            first.before as CanvasNode | null,
+            last.after as CanvasNode | null,
+          )
+        : netEdgeDelta(
+            first.before as CanvasEdge | null,
+            last.after as CanvasEdge | null,
+          );
+    if (net) {
+      netDeltas.push(net);
+      idByKey.set(key, grp[0].id);
+    }
+  }
+
+  // Rebuild records from the net deltas, then restore the stable id.
+  return extractCanvasChanges(netDeltas, { nodeLabelById: labelById }).map(
+    (rec) => {
+      const f = forwardOf(rec);
+      const id = f ? idByKey.get(f.key) : undefined;
+      return id ? { ...rec, id } : rec;
+    },
+  );
 }
