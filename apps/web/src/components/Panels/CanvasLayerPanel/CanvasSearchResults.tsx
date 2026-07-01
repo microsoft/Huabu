@@ -38,6 +38,8 @@ import { getNodeIcon } from '../../../config/nodeIcons';
 import { scheduleScrollToMatch } from '../../../hooks/searchDom';
 import { useTextHighlight } from '../../../hooks/useTextHighlight';
 import useCanvasStore from '../../../store/canvasStore';
+import { useChatStore } from '../../../store/chatStore';
+import { usePanelStore } from '../../../store/panelStore';
 import { usePreviewStore } from '../../../store/previewStore';
 import {
   useSearchStore,
@@ -46,6 +48,8 @@ import {
 import { cn } from '../../Common/cn';
 import { toast } from '../../Common/Toast';
 import { NodePreviews } from '../../Nodes/previews';
+
+import type { AgentBinding } from '@sediment/shared';
 
 const ROW_HEIGHT = 52;
 
@@ -83,12 +87,22 @@ export const CanvasSearchResults = (): JSX.Element => {
   // mounts / unmounts so we can re-query the DOM for the panel root.
   const previewType = usePreviewStore((s) => s.previewType);
 
+  // Conversation-tier results open the owning question node's chat
+  // thread in the right panel (instead of an expanded preview), then
+  // highlight + scroll to the matched message there. `viewingQuestionThread`
+  // gives us a render tick when the thread mounts / swaps so we can
+  // re-query the chat DOM for the highlight + scroll roots.
+  const openQuestionThread = useChatStore((s) => s.openQuestionThread);
+  const viewingQuestionThread = useChatStore((s) => s.viewingQuestionThread);
+  const requestOpenRightPanel = usePanelStore((s) => s.requestOpenRightPanel);
+
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [activeIdx, setActiveIdx] = useState(0);
   const [canvasRoot, setCanvasRoot] = useState<HTMLElement | null>(null);
   const [previewPanelEl, setPreviewPanelEl] = useState<HTMLElement | null>(
     null,
   );
+  const [chatThreadEl, setChatThreadEl] = useState<HTMLElement | null>(null);
 
   // Resolve the canvas highlight root once on mount and whenever the
   // search scope flips back on (e.g. after `close()` + new query).
@@ -115,13 +129,30 @@ export const CanvasSearchResults = (): JSX.Element => {
     );
   }, [expandedNodeId, previewType]);
 
+  // Resolve the chat-thread scroll root whenever a question node's
+  // conversation is open. Only resolved while `viewingQuestionThread`
+  // is set so we never paint search highlights over the unrelated
+  // canvas chat; cleared otherwise. Re-runs on `activeIdx` so the
+  // element is re-read after the thread swaps to a different node.
+  useEffect(() => {
+    if (!viewingQuestionThread) {
+      setChatThreadEl(null);
+      return;
+    }
+    setChatThreadEl(
+      document.querySelector<HTMLElement>('[data-chat-thread-root]') ?? null,
+    );
+  }, [viewingQuestionThread, activeIdx]);
+
   // Paint the same `::highlight(sediment-search)` ranges over node
   // labels and Milkdown bodies that are visible on the canvas *and*,
-  // when an expanded preview is open, over its body. The hook's
-  // MutationObserver picks up nodes that mount lazily (e.g. a note's
-  // editor surface, pdf.js text-layer spans).
+  // when an expanded preview is open, over its body, *and* — for
+  // conversation matches — over the open question-node chat thread.
+  // The hook's MutationObserver picks up nodes that mount lazily (e.g.
+  // a note's editor surface, pdf.js text-layer spans, chat messages
+  // hydrated from history).
   useTextHighlight({
-    container: [canvasRoot, previewPanelEl],
+    container: [canvasRoot, previewPanelEl, chatThreadEl],
     query,
     maxRanges: 800,
   });
@@ -239,6 +270,34 @@ export const CanvasSearchResults = (): JSX.Element => {
     [focusNodeOnCanvas, rfInstance],
   );
 
+  /**
+   * Open the owning question node's chat thread in the right panel so
+   * a `conversation`-tier match can be highlighted + scrolled to in
+   * the thread. Reads `threadId` / `agentBinding` straight off the
+   * live node (the search payload only carries ids), so this no-ops
+   * gracefully when the node has no thread (e.g. it was deleted
+   * mid-search). Returns whether a thread was actually opened.
+   */
+  const openConversationForNode = useCallback(
+    (nodeId: string): boolean => {
+      const { nodes, canvasId } = useCanvasStore.getState();
+      const node = nodes.find((n) => n.id === nodeId);
+      const data = node?.data as
+        | { threadId?: string; agentBinding?: AgentBinding }
+        | undefined;
+      if (!data?.threadId) return false;
+      openQuestionThread(
+        nodeId,
+        data.threadId,
+        data.agentBinding,
+        canvasId || undefined,
+      );
+      requestOpenRightPanel();
+      return true;
+    },
+    [openQuestionThread, requestOpenRightPanel],
+  );
+
   const jumpToResult = useCallback(
     (row: SearchResultRow) => {
       const { nodeId, nodeType } = row.match;
@@ -263,6 +322,15 @@ export const CanvasSearchResults = (): JSX.Element => {
         return;
       }
       focusNodeOnCanvas(nodeId);
+      // Conversation matches live in the question node's chat thread.
+      // Open that thread in the right panel (instead of an expanded
+      // preview); the dedicated effect below highlights + scrolls to
+      // the matched message inside it.
+      if (row.match.field === 'conversation') {
+        closeExpanded();
+        openConversationForNode(nodeId);
+        return;
+      }
       // Only auto-expand when the node type renders real preview
       // content. Types without a `NodePreviews` entry (frame, group,
       // prompt, plain text, …) would otherwise pop up the "Preview
@@ -278,7 +346,13 @@ export const CanvasSearchResults = (): JSX.Element => {
         closeExpanded();
       }
     },
-    [focusNodeOnCanvas, focusGroupOnCanvas, openExpanded, closeExpanded],
+    [
+      focusNodeOnCanvas,
+      focusGroupOnCanvas,
+      openExpanded,
+      closeExpanded,
+      openConversationForNode,
+    ],
   );
 
   // Live-follow the active visible row on the canvas. Both header and
@@ -291,14 +365,28 @@ export const CanvasSearchResults = (): JSX.Element => {
     const v = visibleRows[activeIdx];
     if (!v) return;
     focusGroupOnCanvas(v.group);
+    // A conversation match follows into the question node's chat
+    // thread rather than an expanded preview.
+    const isConversationRow =
+      v.kind === 'match' && v.row.match.field === 'conversation';
     if (v.group.edgeEndpoints) {
       closeExpanded();
+    } else if (isConversationRow) {
+      closeExpanded();
+      openConversationForNode(v.group.nodeId);
     } else if (hasNodePreview(v.group.nodeType)) {
       openExpanded(v.group.nodeId);
     } else {
       closeExpanded();
     }
-  }, [visibleRows, activeIdx, focusGroupOnCanvas, openExpanded, closeExpanded]);
+  }, [
+    visibleRows,
+    activeIdx,
+    focusGroupOnCanvas,
+    openExpanded,
+    closeExpanded,
+    openConversationForNode,
+  ]);
 
   // Scroll-into-view follow-up for **match rows only** — when an
   // expanded preview is (or will be) open for the active row's node,
@@ -310,7 +398,8 @@ export const CanvasSearchResults = (): JSX.Element => {
     // is already painted right on the edge by the highlight layer.
     if (v.row.match.kind === 'edge') return;
     // Conversation matches live in the node's chat thread, not its
-    // preview body, so there is nothing to seek to inside the preview.
+    // preview body, so there is nothing to seek to inside the preview
+    // (handled by the dedicated chat-thread effect below).
     if (v.row.match.field === 'conversation') return;
     const nth = v.row.match.occurrenceIndex;
     const cancel = scheduleScrollToMatch(
@@ -321,6 +410,32 @@ export const CanvasSearchResults = (): JSX.Element => {
         onTimeout: () =>
           toast(
             'Match not visible in preview — scroll manually or press Cmd+F inside it for an in-preview search.',
+            { tone: 'info', duration: 4000 },
+          ),
+      },
+    );
+    return cancel;
+  }, [visibleRows, activeIdx, query]);
+
+  // Scroll-into-view follow-up for **conversation match rows** — seek
+  // to the matched message inside the open question-node chat thread.
+  // The thread mounts asynchronously (history is hydrated over the
+  // network after `openConversationForNode` switches the panel), so
+  // `scheduleScrollToMatch` retries on every chat subtree mutation
+  // until the n-th occurrence lands or the watchdog elapses.
+  useEffect(() => {
+    const v = visibleRows[activeIdx];
+    if (!v || v.kind !== 'match' || !query) return;
+    if (v.row.match.field !== 'conversation') return;
+    const nth = v.row.match.occurrenceIndex;
+    const cancel = scheduleScrollToMatch(
+      () => document.querySelector<HTMLElement>('[data-chat-thread-root]'),
+      query,
+      nth,
+      {
+        onTimeout: () =>
+          toast(
+            'Match not visible in the conversation — scroll manually to find it.',
             { tone: 'info', duration: 4000 },
           ),
       },
@@ -603,6 +718,18 @@ const NodeMatchItem = ({
   </button>
 );
 
+/**
+ * Max characters of leading context shown before the highlighted
+ * match. The server centres each match in a ~120-char window, but the
+ * row truncates to a single line (`truncate` → `overflow: hidden`), so
+ * a match buried 60 chars deep would be clipped off the right edge and
+ * the user would never see the highlight (a real problem for long
+ * conversation snippets and matches inside markdown tables, where the
+ * hit is always deep in the body). Trimming the leading run keeps the
+ * `<mark>` near the start of the row where it stays visible.
+ */
+const SNIPPET_LEAD_CHARS = 12;
+
 const SnippetLine = ({
   text,
   matchStart,
@@ -612,13 +739,23 @@ const SnippetLine = ({
   matchStart: number;
   matchLength: number;
 }): JSX.Element => {
-  const before = text.slice(0, matchStart);
+  let before = text.slice(0, matchStart);
   const hit = text.slice(matchStart, matchStart + matchLength);
   const after = text.slice(matchStart + matchLength);
+  // Keep the highlighted match in view: drop excess leading context so
+  // the `<mark>` isn't pushed past the row's single-line clip. The
+  // server may already have prefixed an ellipsis; collapse both into a
+  // single leading ellipsis.
+  if (before.length > SNIPPET_LEAD_CHARS) {
+    before = '…' + before.slice(before.length - SNIPPET_LEAD_CHARS);
+  }
   return (
     <div className="text-fg-default truncate text-xs">
       <span className="text-fg-muted">{before}</span>
-      <mark className="bg-warning-bg text-fg-default">{hit}</mark>
+      {/* Match the canvas / chat highlight paint (`::highlight(sediment-search)`
+          uses `--pdf-highlight-bg`) so the in-list `<mark>` reads as the
+          same yellow rather than the lighter `--warning-bg` cream. */}
+      <mark className="text-fg-default bg-(--pdf-highlight-bg)">{hit}</mark>
       <span className="text-fg-muted">{after}</span>
     </div>
   );

@@ -86,6 +86,14 @@ user message + assistant reply across all turns, deliberately skipping tool
 calls / results. Only question nodes carry a `threadId`, so threads not anchored
 to a node are out of search scope.
 
+Activating a `conversation` result row
+([CanvasSearchResults.tsx](../../apps/web/src/components/Panels/CanvasLayerPanel/CanvasSearchResults.tsx))
+focuses the node on the canvas **and** opens its thread in the chat panel
+(`openQuestionThread` + `requestOpenRightPanel`), then highlights the query and
+scrolls the matched message into view inside the thread — the chat scroller is
+tagged `data-chat-thread-root` so the shared highlight / `scheduleScrollToMatch`
+helpers can target it, mirroring how preview-body matches are handled.
+
 ---
 
 ## 5. As a chat anchor — compose & run
