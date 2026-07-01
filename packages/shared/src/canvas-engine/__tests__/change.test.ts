@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 import {
   applyDeltas,
   extractCanvasChanges,
-  fingerprintNode,
+  fingerprintNodeFields,
   invertDeltas,
   type Delta,
 } from '../index.js';
@@ -50,30 +50,76 @@ describe('invertDeltas', () => {
   });
 });
 
-describe('fingerprintNode', () => {
-  it('is stable for equal content and differs for different content', () => {
-    expect(fingerprintNode(note('n', { content: 'A' }))).toBe(
-      fingerprintNode(note('n', { content: 'A' })),
-    );
-    expect(fingerprintNode(note('n', { content: 'A' }))).not.toBe(
-      fingerprintNode(note('n', { content: 'B' })),
+describe('fingerprintNodeFields', () => {
+  it('is stable for equal values and differs for different values', () => {
+    expect(
+      fingerprintNodeFields(note('n', { content: 'A' }), ['content']),
+    ).toBe(fingerprintNodeFields(note('n', { content: 'A' }), ['content']));
+    expect(
+      fingerprintNodeFields(note('n', { content: 'A' }), ['content']),
+    ).not.toBe(fingerprintNodeFields(note('n', { content: 'B' }), ['content']));
+  });
+
+  it('only hashes the requested keys — other fields are ignored', () => {
+    const a = note('n', { content: 'A', label: 'X', summary: 's1' });
+    const b = note('n', { content: 'A', label: 'Y', summary: 's2' });
+    // Same `content`, different everything else → equal over ['content'].
+    expect(fingerprintNodeFields(a, ['content'])).toBe(
+      fingerprintNodeFields(b, ['content']),
     );
   });
 
-  it('is order-independent over data keys', () => {
-    const x = {
-      id: 'n',
-      type: 'note',
-      position: { x: 0, y: 0 },
-      data: { a: 1, b: 2 },
-    } as CanvasNode;
-    const y = {
-      id: 'n',
-      type: 'note',
-      position: { x: 0, y: 0 },
-      data: { b: 2, a: 1 },
-    } as CanvasNode;
-    expect(fingerprintNode(x)).toBe(fingerprintNode(y));
+  it('is order-independent over the key set', () => {
+    const n = note('n', { a: 1, b: 2 });
+    expect(fingerprintNodeFields(n, ['a', 'b'])).toBe(
+      fingerprintNodeFields(n, ['b', 'a']),
+    );
+  });
+});
+
+describe('staleness scoping (per-change fingerprintKeys)', () => {
+  it('CREATE carries no fingerprint (revertability is existence-based)', () => {
+    const created = note('n', {
+      content: 'hello world',
+      label: 'hello world 1',
+    });
+    const [rec] = extractCanvasChanges([
+      { type: 'INSERT_NODE', node: created },
+    ]);
+    expect(rec.appliedFingerprint).toBeUndefined();
+    expect(rec.fingerprintKeys).toBeUndefined();
+  });
+
+  it('UPDATE(content) ignores a later label rewrite but catches a content re-edit', () => {
+    const prev = note('n', { content: 'old', label: 'L' });
+    const next = note('n', { content: 'new', label: 'L' });
+    const [rec] = extractCanvasChanges([{ type: 'REPLACE_NODE', prev, next }]);
+    expect(rec.fingerprintKeys).toEqual(['content']);
+
+    // Preprocessing regenerates the label → still fresh.
+    const labelOnly = note('n', { content: 'new', label: 'L2', summary: 's' });
+    expect(fingerprintNodeFields(labelOnly, rec.fingerprintKeys!)).toBe(
+      rec.appliedFingerprint,
+    );
+
+    // A human re-edits the content → stale (revert would clobber it).
+    const contentEdited = note('n', { content: 'newer', label: 'L' });
+    expect(fingerprintNodeFields(contentEdited, rec.fingerprintKeys!)).not.toBe(
+      rec.appliedFingerprint,
+    );
+  });
+
+  it('UPDATE(rename) scopes to label so an agent rename is protected', () => {
+    const prev = note('n', { content: 'c', label: 'Old name' });
+    const next = note('n', { content: 'c', label: 'New name' });
+    const [rec] = extractCanvasChanges([{ type: 'REPLACE_NODE', prev, next }]);
+    expect(rec.fingerprintKeys).toEqual(['label']);
+
+    // Someone renames again → stale (revert would clobber the newer name).
+    const renamedAgain = note('n', { content: 'c', label: 'Newest name' });
+    expect(fingerprintNodeFields(renamedAgain, rec.fingerprintKeys!)).not.toBe(
+      rec.appliedFingerprint,
+    );
   });
 });
 
@@ -86,7 +132,9 @@ describe('extractCanvasChanges', () => {
     expect(rec.label).toBe('Created: Market analysis');
     expect(rec.nodeId).toBe('node-a');
     expect(rec.revertDeltas).toEqual([{ type: 'DELETE_NODE', node: n }]);
-    expect(rec.appliedFingerprint).toBe(fingerprintNode(n));
+    // CREATE is existence-based — no content fingerprint.
+    expect(rec.fingerprintKeys).toBeUndefined();
+    expect(rec.appliedFingerprint).toBeUndefined();
   });
 
   it('REPLACE_NODE → update record, revert restores prev (with content)', () => {
@@ -99,8 +147,11 @@ describe('extractCanvasChanges', () => {
     expect(rec.revertDeltas).toEqual([
       { type: 'REPLACE_NODE', prev: next, next: prev },
     ]);
-    // Fingerprint reflects the POST-apply (next) state.
-    expect(rec.appliedFingerprint).toBe(fingerprintNode(next));
+    // UPDATE fingerprints only the fields that actually changed (content).
+    expect(rec.fingerprintKeys).toEqual(['content']);
+    expect(rec.appliedFingerprint).toBe(
+      fingerprintNodeFields(next, ['content']),
+    );
   });
 
   it('DELETE_NODE → delete record, revert reinserts the node', () => {

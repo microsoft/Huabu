@@ -45,20 +45,22 @@ export interface CanvasChangeRecord {
    */
   revertDeltas: Delta[];
   /**
-   * Fingerprint of the node's post-apply state over {@link fingerprintKeys}
-   * only. Used for staleness detection: before reverting, the client
-   * recomputes the fingerprint of the node's current `data` over the SAME
-   * keys; a mismatch means one of the fields THIS change actually touched
-   * was modified afterwards (human / another agent) and the revert is
-   * blocked so it never clobbers a newer edit.
+   * UPDATE changes only. Fingerprint of the node's post-apply `data` over
+   * {@link fingerprintKeys}. Staleness: before reverting, the client
+   * recomputes the current node's fingerprint over the SAME keys; a
+   * mismatch means a field THIS edit changed was modified again afterwards
+   * (human / another agent), so the revert is blocked to avoid clobbering
+   * it. CREATE / DELETE / edge changes carry no fingerprint — their
+   * revertability is purely existence-based (see the change card's
+   * staleness check), so they omit this.
    */
   appliedFingerprint?: string;
   /**
-   * The `data` keys this change is scoped to for staleness — the fields it
-   * actually wrote. Staleness compares only these, so unrelated
-   * system-driven mutations (e.g. preprocessing regenerating `label` /
-   * `summary` after an agent `content` edit) never falsely block revert.
-   * Absent for edge changes (no node fingerprint).
+   * UPDATE changes only. The `data` keys this edit actually changed
+   * (raw prev→next diff). Staleness compares only these, so unrelated
+   * later mutations (preprocessing regenerating `label` / `summary`, a
+   * re-measure, …) never falsely block revert. Absent for CREATE /
+   * DELETE / edge changes.
    */
   fingerprintKeys?: string[];
 }
@@ -78,32 +80,57 @@ function labelOf(node: CanvasNode | undefined): string {
 }
 
 /**
- * `data` fields that are runtime measurements / render bookkeeping, not
- * authored content. Excluded from the fingerprint and the "meaningful
- * change" check so a re-measure never looks like an agent edit.
- */
-const RUNTIME_DATA_KEYS = new Set(['measuredHeight']);
-
-/**
- * Stable, order-independent fingerprint of a node's mutable content.
+ * The `data` keys whose value actually changed between two payloads.
  *
- * Hashes the `data` payload (minus runtime bookkeeping) via djb2 over
- * canonically-keyed JSON. Opaque and deterministic — the same algorithm
- * MUST run on both the producer (server, stamping `appliedFingerprint`)
- * and the consumer (web, computing the current fingerprint to compare),
- * so it lives here.
+ * This is the whole story for UPDATE staleness: the delta's `prev`/`next`
+ * come from `diffCanvasState(prestate, engine(prestate))`, so a key
+ * appears here IFF the engine (i.e. the agent's command) changed it.
+ * Fields the agent did not touch (a later preprocessing `summary` /
+ * regenerated `label`, a re-measured height, …) are simply absent — no
+ * allow/deny classification of "content vs system" is needed: if the
+ * agent didn't change it, changing it afterwards can never conflict with
+ * reverting the agent's edit.
  */
-export function fingerprintNode(node: CanvasNode | undefined): string {
-  const data = nodeData(node);
-  const keys = Object.keys(data)
-    .filter((k) => !RUNTIME_DATA_KEYS.has(k))
-    .sort();
-  const json = JSON.stringify(data, keys);
+function changedKeys(
+  prev: Record<string, unknown>,
+  next: Record<string, unknown>,
+): string[] {
+  const keys = new Set([...Object.keys(prev), ...Object.keys(next)]);
+  const out: string[] = [];
+  for (const k of keys) {
+    if (JSON.stringify(prev[k]) !== JSON.stringify(next[k])) out.push(k);
+  }
+  return out;
+}
+
+/** djb2 hash over a canonical (sorted-key) projection of `data`. */
+function hashDataFields(
+  data: Record<string, unknown>,
+  keys: readonly string[],
+): string {
+  const picked: Record<string, unknown> = {};
+  for (const k of [...keys].sort()) {
+    if (k in data) picked[k] = data[k];
+  }
+  const json = JSON.stringify(picked);
   let h = 5381;
   for (let i = 0; i < json.length; i++) {
     h = ((h << 5) + h + json.charCodeAt(i)) | 0;
   }
   return (h >>> 0).toString(36);
+}
+
+/**
+ * Fingerprint a node's `data` over an explicit key set. Deterministic and
+ * host-agnostic: the producer (server, stamping `appliedFingerprint`) and
+ * the consumer (web, recomputing to compare) MUST run the same algorithm
+ * over the same {@link CanvasChangeRecord.fingerprintKeys}.
+ */
+export function fingerprintNodeFields(
+  node: CanvasNode | undefined,
+  keys: readonly string[],
+): string {
+  return hashDataFields(nodeData(node), keys);
 }
 
 /**
@@ -158,7 +185,12 @@ export function extractCanvasChanges(
 
   for (const d of deltas) {
     switch (d.type) {
-      case 'INSERT_NODE':
+      case 'INSERT_NODE': {
+        // CREATE: revertability is purely existence-based — the revert
+        // (DELETE_NODE) is meaningful iff the node still exists. No
+        // fingerprint: a create carries no "prev" to diff against, and
+        // whatever the user does to the node afterwards, the card just
+        // reverts to "delete it" (blocked once it's already gone).
         records.push({
           id: createId('change'),
           kind: 'create',
@@ -167,11 +199,16 @@ export function extractCanvasChanges(
           nodeType: (d.node.type ?? 'note') as string,
           nodeLabel: labelOf(d.node),
           revertDeltas: [invertDelta(d)],
-          appliedFingerprint: fingerprintNode(d.node),
         });
         break;
+      }
 
-      case 'REPLACE_NODE':
+      case 'REPLACE_NODE': {
+        // UPDATE: scope staleness to exactly the fields this edit changed
+        // (raw prev→next diff). Fields the agent didn't touch are absent,
+        // so later system rewrites of them (preprocessing regenerating
+        // `label` / `summary`, a re-measure, …) can never flip it.
+        const keys = changedKeys(nodeData(d.prev), nodeData(d.next));
         records.push({
           id: createId('change'),
           kind: 'update',
@@ -180,11 +217,16 @@ export function extractCanvasChanges(
           nodeType: (d.next.type ?? 'note') as string,
           nodeLabel: labelOf(d.next),
           revertDeltas: [invertDelta(d)],
-          appliedFingerprint: fingerprintNode(d.next),
+          fingerprintKeys: keys,
+          appliedFingerprint: fingerprintNodeFields(d.next, keys),
         });
         break;
+      }
 
-      case 'DELETE_NODE':
+      case 'DELETE_NODE': {
+        // DELETE: existence-based — the revert (INSERT_NODE) is
+        // meaningful iff the node is still absent (blocked once it's
+        // back).
         records.push({
           id: createId('change'),
           kind: 'delete',
@@ -193,9 +235,9 @@ export function extractCanvasChanges(
           nodeType: (d.node.type ?? 'note') as string,
           nodeLabel: labelOf(d.node),
           revertDeltas: [invertDelta(d)],
-          appliedFingerprint: fingerprintNode(d.node),
         });
         break;
+      }
 
       case 'INSERT_EDGE':
         records.push({
