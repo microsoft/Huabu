@@ -215,11 +215,16 @@ export async function ensureAgentForThread(
     );
   }
 
-  // HUABU_CANVAS_ID is a host-app variable that the daemon doesn't know.
+  // HUABU_RFS_URL is the canvas-scoped Remote File System base the agent
+  // reaches back through (download / upload / agent / skill). It bakes the
+  // canvasId into the path so the agent needs no separate canvas variable.
   // AGENTLET_SERVER and AGENTLET_TOKEN are injected by the daemon itself.
   const reachbackEnv: Record<string, string> = {};
   if (canvasId) {
-    reachbackEnv.HUABU_CANVAS_ID = canvasId;
+    const port = getDaemonSupervisor().getServerPort();
+    if (port > 0) {
+      reachbackEnv.HUABU_RFS_URL = `http://127.0.0.1:${port}/api/rfs/${canvasId}`;
+    }
   }
 
   let sessionId: string;

@@ -24,7 +24,7 @@ import type { AgentNodePreview } from '../../node-ref.js';
 const READ_INTRO =
   'Nodes the user selected. Each <node> is metadata only: pass `file` straight to read() for the full body, or use `id` with inspect_nodes() for layout / style / spatial relations. `preview` is a short scan hint, not the full content.';
 const READ_NODE_INTRO =
-  'The user selected the canvas nodes below. Each <node> is metadata only: read any you need with the Huabu Reachback Tool (`read-node <node-id>`); update them with `write-node --id <node-id>`. `preview` is a short scan hint, not the full content.';
+  'The user selected the canvas nodes below. Each <node> is metadata only: download any you need at `GET ${HUABU_RFS_URL}/download/<file>` (use the node\'s `file` path). To create, edit, move, or link nodes, ask the canvas agent. `preview` is a short scan hint, not the full content.';
 
 /**
  * Render the `<selected_nodes>` block, or `undefined` when the turn has
