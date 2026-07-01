@@ -55,6 +55,14 @@ export interface ToolBuildContext {
    * this field.
    */
   origin?: NodeOrigin;
+  /**
+   * When set, `canvas_commands` broadcasts its deltas to live frontends
+   * (and persists a change card with {@link threadId}). Set for the
+   * ask-agent path; left off for the built-in chat agent.
+   */
+  broadcast?: boolean;
+  /** ACP conversation thread to attribute canvas changes to. */
+  threadId?: string;
 }
 
 /**
@@ -102,6 +110,8 @@ function toAgentTool(def: ToolDefinition, ctx: ToolBuildContext): AgentTool {
         {
           canvasId: ctx.canvasId,
           origin: ctx.origin,
+          broadcast: ctx.broadcast,
+          threadId: ctx.threadId,
         },
       );
       // Handlers may return either a plain string (the common text

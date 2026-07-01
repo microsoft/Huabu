@@ -1127,6 +1127,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         // Derive review records only for thread-attributed (ACP) batches —
         // they feed that conversation's change card. Other callers skip it.
         computeChanges: !!originator.threadId,
+        // Out-of-band writer: broadcast + persist happen inside
+        // executeOnServer (no in-tab agent stream applies these deltas).
+        broadcast: true,
       });
       const response: PostCanvasExecuteResponse = {
         canvasId: out.canvasId,
@@ -1143,44 +1146,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         },
         ...(runId ? { runId } : {}),
       };
-
-      // Broadcast to live frontends so out-of-band writers (e.g. an ACP
-      // agent via the reachback `/execute` route) auto-refresh the canvas.
-      // No-op batches (`toVersion === fromVersion`) are skipped.
-      if (out.toVersion > out.fromVersion) {
-        // Persist the review records to the thread's sidecar so the change
-        // card survives reload / a closed canvas.
-        if (originator.threadId && out.changes && out.changes.length > 0) {
-          try {
-            getCanvasStore(canvasId).appendChanges(
-              originator.threadId,
-              out.changes,
-            );
-          } catch (err) {
-            request.log.warn(
-              { canvasId, threadId: originator.threadId, err },
-              'Failed to persist change records',
-            );
-          }
-        }
-
-        publishCanvasUpdate(canvasId, {
-          type: 'update',
-          data: {
-            fromVersion: out.fromVersion,
-            toVersion: out.toVersion,
-            deltas: out.deltas,
-            pendingEffects: {
-              mutatedNodes: out.pendingEffects.mutatedNodes,
-              deletedNodeIds: out.pendingEffects.deletedNodeIds,
-              contentEditedNodeIds: out.pendingEffects.contentEditedNodeIds,
-              deferredFitFrameIds: out.pendingEffects.deferredFitFrameIds,
-            },
-            ...(originator.threadId ? { threadId: originator.threadId } : {}),
-            ...(out.changes ? { changes: out.changes } : {}),
-          },
-        });
-      }
 
       return reply.send(response);
     } catch (err) {

@@ -64,6 +64,17 @@ export interface AgentRunOptions {
    */
   origin?: NodeOrigin;
   /**
+   * When true, `canvas_commands` broadcasts its deltas to live frontends
+   * (and persists a change card when {@link canvasThreadId} is set).
+   * Set by the ask-agent path — its SSE goes to the reachback CLI, not a
+   * browser tab, so nobody would otherwise apply the deltas. Left off
+   * for the built-in chat route (the tab applies its own tool-result
+   * deltas; broadcasting would double-apply).
+   */
+  broadcastCanvasWrites?: boolean;
+  /** ACP conversation thread that canvas changes are attributed to. */
+  threadId?: string;
+  /**
    * pi-ai Context for this thread: `systemPrompt` + the PRIOR
    * conversation history (rebuilt from earlier turns). It does NOT
    * include this turn's user message — that lives in {@link envelope}
@@ -146,9 +157,16 @@ export async function* runAgent(
     signal,
     maxIterations = 20,
     debugPrompt,
+    broadcastCanvasWrites,
+    threadId,
   } = options;
 
-  const tools = buildToolsForScope(scope, { canvasId, origin });
+  const tools = buildToolsForScope(scope, {
+    canvasId,
+    origin,
+    ...(broadcastCanvasWrites ? { broadcast: true } : {}),
+    ...(threadId ? { threadId } : {}),
+  });
 
   // Render THIS turn's envelope into its single user message, then run
   // the agent over [prior history + this turn] held in a LOCAL array.

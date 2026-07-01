@@ -124,6 +124,7 @@ describe('extractCanvasChanges', () => {
     void a;
 
     expect(rec.kind).toBe('connect');
+    expect(rec.label).toBe('Connected: A → B');
     expect(rec.sourceNodeId).toBe('node-a');
     expect(rec.targetNodeId).toBe('node-b');
     expect(rec.sourceNodeLabel).toBe('A');

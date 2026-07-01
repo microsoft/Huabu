@@ -45,13 +45,22 @@ export interface CanvasChangeRecord {
    */
   revertDeltas: Delta[];
   /**
-   * Fingerprint of the node's post-apply state (node changes only).
-   * Used for staleness detection: before reverting, the client compares
-   * the node's current fingerprint against this; a mismatch means the
-   * node was modified afterwards (human / another agent) and the revert
-   * is blocked so it never clobbers a newer change.
+   * Fingerprint of the node's post-apply state over {@link fingerprintKeys}
+   * only. Used for staleness detection: before reverting, the client
+   * recomputes the fingerprint of the node's current `data` over the SAME
+   * keys; a mismatch means one of the fields THIS change actually touched
+   * was modified afterwards (human / another agent) and the revert is
+   * blocked so it never clobbers a newer edit.
    */
   appliedFingerprint?: string;
+  /**
+   * The `data` keys this change is scoped to for staleness — the fields it
+   * actually wrote. Staleness compares only these, so unrelated
+   * system-driven mutations (e.g. preprocessing regenerating `label` /
+   * `summary` after an agent `content` edit) never falsely block revert.
+   * Absent for edge changes (no node fingerprint).
+   */
+  fingerprintKeys?: string[];
 }
 
 function nodeData(node: CanvasNode | undefined): Record<string, unknown> {
@@ -69,16 +78,27 @@ function labelOf(node: CanvasNode | undefined): string {
 }
 
 /**
+ * `data` fields that are runtime measurements / render bookkeeping, not
+ * authored content. Excluded from the fingerprint and the "meaningful
+ * change" check so a re-measure never looks like an agent edit.
+ */
+const RUNTIME_DATA_KEYS = new Set(['measuredHeight']);
+
+/**
  * Stable, order-independent fingerprint of a node's mutable content.
  *
- * Hashes the `data` payload via djb2 over canonically-keyed JSON. Opaque
- * and deterministic — the same algorithm MUST run on both the producer
- * (server, stamping `appliedFingerprint`) and the consumer (web,
- * computing the current fingerprint to compare), so it lives here.
+ * Hashes the `data` payload (minus runtime bookkeeping) via djb2 over
+ * canonically-keyed JSON. Opaque and deterministic — the same algorithm
+ * MUST run on both the producer (server, stamping `appliedFingerprint`)
+ * and the consumer (web, computing the current fingerprint to compare),
+ * so it lives here.
  */
 export function fingerprintNode(node: CanvasNode | undefined): string {
   const data = nodeData(node);
-  const json = JSON.stringify(data, Object.keys(data).sort());
+  const keys = Object.keys(data)
+    .filter((k) => !RUNTIME_DATA_KEYS.has(k))
+    .sort();
+  const json = JSON.stringify(data, keys);
   let h = 5381;
   for (let i = 0; i < json.length; i++) {
     h = ((h << 5) + h + json.charCodeAt(i)) | 0;
@@ -128,6 +148,12 @@ export function extractCanvasChanges(
 
   const endpointLabel = (id: string): string | undefined => labelById.get(id);
 
+  // Display label for an edge endpoint, mirroring node labels: prefer the
+  // harvested/looked-up label, fall back to the raw id, and truncate the
+  // same way so the baked-in `label` reads consistently with node rows.
+  const endpointDisplay = (id: string): string =>
+    truncate(endpointLabel(id) || id, 24);
+
   const records: CanvasChangeRecord[] = [];
 
   for (const d of deltas) {
@@ -175,7 +201,7 @@ export function extractCanvasChanges(
         records.push({
           id: createId('change'),
           kind: 'connect',
-          label: 'Connected',
+          label: `Connected: ${endpointDisplay(d.edge.source)} → ${endpointDisplay(d.edge.target)}`,
           sourceNodeId: d.edge.source,
           targetNodeId: d.edge.target,
           sourceNodeLabel: endpointLabel(d.edge.source),
@@ -188,7 +214,7 @@ export function extractCanvasChanges(
         records.push({
           id: createId('change'),
           kind: 'disconnect',
-          label: 'Disconnected',
+          label: `Disconnected: ${endpointDisplay(d.edge.source)} → ${endpointDisplay(d.edge.target)}`,
           sourceNodeId: d.edge.source,
           targetNodeId: d.edge.target,
           sourceNodeLabel: endpointLabel(d.edge.source),
@@ -201,7 +227,7 @@ export function extractCanvasChanges(
         records.push({
           id: createId('change'),
           kind: 'edge-update',
-          label: 'Edge updated',
+          label: `Edge updated: ${endpointDisplay(d.next.source)} → ${endpointDisplay(d.next.target)}`,
           sourceNodeId: d.next.source,
           targetNodeId: d.next.target,
           sourceNodeLabel: endpointLabel(d.next.source),

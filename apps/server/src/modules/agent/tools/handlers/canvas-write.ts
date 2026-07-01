@@ -64,6 +64,7 @@ const DEFAULT_ORIGIN: NodeOrigin = { type: 'ai-operate' };
 export async function handleCanvasCommands(
   args: CanvasCommandsArgs,
   origin: NodeOrigin = DEFAULT_ORIGIN,
+  opts?: { broadcast?: boolean; threadId?: string },
 ): Promise<string> {
   log.info(
     {
@@ -196,8 +197,16 @@ export async function handleCanvasCommands(
     const result = await executeOnServer({
       canvasId: args.canvasId,
       commands: annotated as unknown as CanvasCommand[],
-      originator: { source: 'agent' },
+      originator: {
+        source: 'agent',
+        ...(opts?.threadId ? { threadId: opts.threadId } : {}),
+      },
       runId,
+      // Out-of-band writers (ask-agent) broadcast + persist the change
+      // card; the built-in chat agent leaves these off (its tab applies
+      // the deltas from the tool result).
+      ...(opts?.broadcast ? { broadcast: true } : {}),
+      ...(opts?.threadId ? { computeChanges: true } : {}),
     });
 
     return JSON.stringify({

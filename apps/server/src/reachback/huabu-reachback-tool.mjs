@@ -183,7 +183,11 @@ async function callAskAgent(prompt, canvasId, opts = {}) {
       'Content-Type': 'application/json',
       Accept: 'text/event-stream',
     },
-    body: JSON.stringify({ prompt, canvasId }),
+    body: JSON.stringify({
+      prompt,
+      canvasId,
+      ...(THREAD_ID ? { hostThreadId: THREAD_ID } : {}),
+    }),
   });
 
   if (!res.ok) {

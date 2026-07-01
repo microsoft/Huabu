@@ -35,7 +35,13 @@ export {
 
 // ── Deltas (server → client wire diff) ────────────────────────────────────
 export { type Delta, applyDeltas, invertDelta } from './delta.js';
-export { diffCanvasState } from './diff.js';
+export {
+  diffCanvasState,
+  TRANSIENT_NODE_FIELDS,
+  TRANSIENT_EDGE_FIELDS,
+  stripTransientNodeFields,
+  stripTransientEdgeFields,
+} from './diff.js';
 
 // ── Change records (delta-derived revert summary) ─────────────────────────
 export {

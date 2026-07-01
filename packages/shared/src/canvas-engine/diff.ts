@@ -26,6 +26,41 @@ import type { Delta } from './delta.js';
 import type { CanvasEdge, CanvasNode } from './interfaces.js';
 
 /**
+ * Top-level React Flow runtime fields — selection / drag / measurement
+ * bookkeeping the renderer writes onto every node or edge. They are NOT
+ * authored content and MUST be ignored when deciding whether a node or
+ * edge actually changed: otherwise a pure selection flip (e.g. creating
+ * a node auto-selects it and deselects the user's node) would diff into
+ * a spurious REPLACE and surface as a phantom "Updated" change.
+ *
+ * This is the single canonical list, reused by the web undo snapshotter
+ * (`createSnapshot`) so both layers strip exactly the same fields.
+ */
+export const TRANSIENT_NODE_FIELDS = [
+  'selected',
+  'dragging',
+  'measured',
+  'resizing',
+] as const;
+
+/** React Flow runtime fields on edges (selection only). */
+export const TRANSIENT_EDGE_FIELDS = ['selected'] as const;
+
+/** Return a shallow copy of `node` with runtime UI fields removed. */
+export function stripTransientNodeFields<T extends object>(node: T): T {
+  const out = { ...node } as Record<string, unknown>;
+  for (const k of TRANSIENT_NODE_FIELDS) delete out[k];
+  return out as T;
+}
+
+/** Return a shallow copy of `edge` with runtime UI fields removed. */
+export function stripTransientEdgeFields<T extends object>(edge: T): T {
+  const out = { ...edge } as Record<string, unknown>;
+  for (const k of TRANSIENT_EDGE_FIELDS) delete out[k];
+  return out as T;
+}
+
+/**
  * Compute the coarse delta list that transforms `prev` into `next`.
  *
  * Output ordering: deletes first, then inserts, then replaces. This
@@ -105,7 +140,12 @@ function nodesEqual(a: CanvasNode, b: CanvasNode): boolean {
   if (a.parentId !== b.parentId) return false;
   if (a.position?.x !== b.position?.x) return false;
   if (a.position?.y !== b.position?.y) return false;
-  return safeStringify(a) === safeStringify(b);
+  // Ignore React Flow runtime UI fields (selected / dragging / measured /
+  // resizing) so a pure selection flip never diffs into a REPLACE.
+  return (
+    safeStringify(stripTransientNodeFields(a)) ===
+    safeStringify(stripTransientNodeFields(b))
+  );
 }
 
 function edgesEqual(a: CanvasEdge, b: CanvasEdge): boolean {
@@ -114,7 +154,10 @@ function edgesEqual(a: CanvasEdge, b: CanvasEdge): boolean {
   if (a.target !== b.target) return false;
   if (a.sourceHandle !== b.sourceHandle) return false;
   if (a.targetHandle !== b.targetHandle) return false;
-  return safeStringify(a) === safeStringify(b);
+  return (
+    safeStringify(stripTransientEdgeFields(a)) ===
+    safeStringify(stripTransientEdgeFields(b))
+  );
 }
 
 function safeStringify(v: unknown): string {

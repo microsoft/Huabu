@@ -1168,6 +1168,16 @@ const useCanvasStore = create<RFState>()(
       const hasCallerSnapshot = commands.some(
         (c) => COMMAND_META[c.type].snapshot === 'caller',
       );
+      // Whether this gesture already took its pre-mutation undo snapshot
+      // via `beginGesture` (captured BEFORE the consume below clears the
+      // flag). A single user gesture must map to a single undo entry, so
+      // once `beginGesture` has snapshotted we must NOT let this batch's
+      // `auto`-snapshot commands push a second, redundant snapshot. A drag
+      // stop, for example, may emit a mix of `SET_NODE_GEOMETRY` (caller)
+      // plus `SET_NODE_PARENT` / grid-reorder / relayout (`auto`) commands
+      // — all one gesture, one undo entry (the `beginGesture` snapshot).
+      const gestureAlreadySnapshotted =
+        resolvedSource !== 'agent' && canvasHistoryManager.gestureSnapshotTaken;
       if (hasCallerSnapshot && resolvedSource !== 'agent') {
         if (!canvasHistoryManager.gestureSnapshotTaken) {
           console.warn(
@@ -1178,8 +1188,9 @@ const useCanvasStore = create<RFState>()(
         canvasHistoryManager.consumeGestureSnapshot();
       }
 
-      // Take undo snapshot if needed (before committing new state).
-      if (writeResult.snapshotNeeded) {
+      // Take undo snapshot if needed (before committing new state), unless
+      // the gesture already snapshotted itself via beginGesture (see above).
+      if (writeResult.snapshotNeeded && !gestureAlreadySnapshotted) {
         canvasHistoryManager.takeSnapshot(state.nodes, state.edges);
       }
 
@@ -2216,7 +2227,21 @@ const useCanvasStore = create<RFState>()(
           if (!live) return false;
           return live.position.x !== start.x || live.position.y !== start.y;
         });
-        if (moved) structureScheduler.schedule();
+        if (moved) {
+          structureScheduler.schedule();
+          // A real move: the pre-drag snapshot beginGesture took is a
+          // legitimate undo entry — keep it (executeCommands already
+          // consumed it for frame-transition moves; this is idempotent
+          // for the free-move path that emits no command).
+          canvasHistoryManager.consumeGestureSnapshot();
+        } else {
+          // Zero-distance "drag" (a click that merely selects a node
+          // still fires onNodeDragStart → beginGesture). Nothing was
+          // mutated, so discard the optimistic snapshot; otherwise it
+          // captures the result of a prior un-snapshotted free move and
+          // becomes a phantom empty undo step.
+          canvasHistoryManager.rollbackGestureSnapshot();
+        }
       }
     },
 
@@ -2648,8 +2673,8 @@ const useCanvasStore = create<RFState>()(
     beginGesture: (commandType) => {
       if (COMMAND_META[commandType].snapshot === 'caller') {
         const { nodes, edges } = get();
-        canvasHistoryManager.takeSnapshot(nodes, edges);
-        canvasHistoryManager.markGestureSnapshot();
+        const pushed = canvasHistoryManager.takeSnapshot(nodes, edges);
+        canvasHistoryManager.markGestureSnapshot(pushed);
       }
     },
 
