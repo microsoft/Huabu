@@ -85,10 +85,7 @@ export function AcpChangeCard({ canvasId, threadId }: AcpChangeCardProps) {
     startPreviewDeltas(deltas);
   };
 
-  const title =
-    records.length === 1
-      ? 'Agent made 1 change'
-      : `Agent made ${records.length} changes`;
+  const title = records.length === 1 ? '1 change' : `${records.length} changes`;
 
   return (
     <div className="border-edge-default bg-surface mb-2 rounded-md border text-xs">
@@ -172,9 +169,13 @@ function ChangeRow({
   return (
     <li className="hover:bg-hover flex items-center gap-1.5 px-2 py-1">
       <div className="flex min-w-0 flex-1 items-center gap-1">
-        <span className="text-fg-muted truncate">{record.label}</span>
         {isEdge ? (
+          // Edge change: verb (e.g. "Connected") + source → target chips.
+          // `label` is now a full "Verb: source → target" string, so we
+          // take the verb prefix the same way as node rows and let the
+          // clickable chips carry the endpoints.
           <span className="inline-flex min-w-0 items-center gap-1">
+            <span className="text-fg-muted">{record.label.split(':')[0]}:</span>
             <NodeRef
               nodeId={record.sourceNodeId}
               snapshotLabel={record.sourceNodeLabel}
@@ -188,14 +189,19 @@ function ChangeRow({
             />
           </span>
         ) : record.nodeId ? (
-          <span className="inline-flex min-w-0 align-middle">
+          // Node change: show the verb prefix (e.g. "Created:") + a single
+          // clickable chip — the node name lives in the chip, not the text.
+          <span className="inline-flex min-w-0 items-center gap-1">
+            <span className="text-fg-muted">{record.label.split(':')[0]}:</span>
             <NodeRef
               nodeId={record.nodeId}
               snapshotLabel={record.nodeLabel}
               fallbackLabel={record.nodeLabel}
             />
           </span>
-        ) : null}
+        ) : (
+          <span className="text-fg-muted truncate">{record.label}</span>
+        )}
       </div>
       <div className="flex shrink-0 items-center gap-1">
         <Button
