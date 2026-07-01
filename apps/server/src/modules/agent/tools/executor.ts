@@ -71,14 +71,6 @@ import type { NodeOrigin } from '@sediment/shared';
 export interface ExecuteContext {
   canvasId?: string;
   origin?: NodeOrigin;
-  /**
-   * When set, `canvas_commands` broadcasts its deltas to live frontends
-   * and (with {@link threadId}) persists review records. Used by the
-   * ask-agent path, whose SSE goes to the reachback CLI — not a browser
-   * tab — so nobody would otherwise apply the deltas. Left unset for the
-   * built-in chat agent (the initiating tab applies its own deltas).
-   */
-  broadcast?: boolean;
   /** ACP conversation thread to attribute canvas changes to (change card). */
   threadId?: string;
 }
@@ -146,7 +138,7 @@ export async function executeTool(
       return handleCanvasCommands(
         withCanvasId<CanvasCommandsArgs>(args, 'canvas_commands'),
         context?.origin,
-        { broadcast: context?.broadcast, threadId: context?.threadId },
+        { threadId: context?.threadId },
       );
 
     case 'fs_write':

@@ -63,15 +63,6 @@ export interface AgentRunOptions {
    * not mis-tagged as AI-initiated.
    */
   origin?: NodeOrigin;
-  /**
-   * When true, `canvas_commands` broadcasts its deltas to live frontends
-   * (and persists a change card when {@link canvasThreadId} is set).
-   * Set by the ask-agent path — its SSE goes to the reachback CLI, not a
-   * browser tab, so nobody would otherwise apply the deltas. Left off
-   * for the built-in chat route (the tab applies its own tool-result
-   * deltas; broadcasting would double-apply).
-   */
-  broadcastCanvasWrites?: boolean;
   /** ACP conversation thread that canvas changes are attributed to. */
   threadId?: string;
   /**
@@ -157,14 +148,12 @@ export async function* runAgent(
     signal,
     maxIterations = 20,
     debugPrompt,
-    broadcastCanvasWrites,
     threadId,
   } = options;
 
   const tools = buildToolsForScope(scope, {
     canvasId,
     origin,
-    ...(broadcastCanvasWrites ? { broadcast: true } : {}),
     ...(threadId ? { threadId } : {}),
   });
 

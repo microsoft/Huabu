@@ -24,13 +24,13 @@ import { useIntentStore } from '@/store/intentStore';
 import { useLLMStore } from '@/store/llmStore';
 import { usePanelStore } from '@/store/panelStore';
 
-import { AcpChangeCard } from './AcpChangeCard';
 import {
   AcpConnectionBadge,
   type AcpConnectionStatus,
 } from './AcpConnectionBadge';
 import { AcpSessionSelectors } from './AcpSessionSelectors';
 import { AgentSelector, type AgentChoice } from './AgentSelector';
+import { ChangeReviewCard } from './ChangeReviewCard';
 import { ChatInput } from './ChatInput';
 import { NewChatMenu, type NewChatChoice } from './NewChatMenu';
 import { parseSlashInvocations } from './parseSlashInvocations';
@@ -733,7 +733,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         {!viewingSketchCluster && (
           <div className="px-3 pb-2">
             {canvasId && threadId ? (
-              <AcpChangeCard canvasId={canvasId} threadId={threadId} />
+              <ChangeReviewCard canvasId={canvasId} threadId={threadId} />
             ) : null}
             <ChatInput
               value={input}

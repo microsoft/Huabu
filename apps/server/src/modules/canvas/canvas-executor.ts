@@ -265,16 +265,6 @@ export interface ExecuteOnServerInput {
    * (ACP agents) opts in so the built-in agent path pays no cost.
    */
   computeChanges?: boolean;
-  /**
-   * When true, broadcast the resulting delta to live frontends via
-   * `publishCanvasUpdate` (and persist any computed `changes` to the
-   * originating thread's sidecar). Set for out-of-band writers whose
-   * mutations are NOT applied by an in-tab agent SSE stream (ACP
-   * `/execute`, ask-agent). The built-in chat agent leaves this off
-   * because the initiating tab applies its own deltas from the chat
-   * tool result — broadcasting would double-apply.
-   */
-  broadcast?: boolean;
 }
 
 export interface ExecuteOnServerOutput {
@@ -494,40 +484,39 @@ export async function executeOnServer(
       changes = extractCanvasChanges(deltas, { nodeLabelById: labelById });
     }
 
-    // Broadcast to live frontends and persist review records to the
-    // originating thread's sidecar. Gated so the built-in chat agent
-    // (which applies its own deltas via the chat tool result) does not
-    // double-apply. No-op fast path above already returned for empty diffs.
-    if (input.broadcast) {
-      // When attributed to a thread, fold this batch's records into the
-      // thread's coalesced change list (one net record per entity) and
-      // broadcast that full list so live cards replace their state with
-      // it — matching what GET /changes returns.
-      let broadcastChanges = changes;
-      if (originator.threadId && changes && changes.length > 0) {
-        try {
-          broadcastChanges = store.appendChanges(originator.threadId, changes);
-        } catch {
-          /* sidecar persistence is best-effort — never fail the write */
-        }
+    // Broadcast the delta to live frontends and persist review records to
+    // the originating thread's sidecar. Every accepted write broadcasts —
+    // the initiating tab applies it from the sync stream, not the tool
+    // result. No-op fast path above already returned for empty diffs.
+    //
+    // When attributed to a thread, fold this batch's records into the
+    // thread's coalesced change list (one net record per entity) and
+    // broadcast that full list so live cards replace their state with it —
+    // matching what GET /changes returns.
+    let broadcastChanges = changes;
+    if (originator.threadId && changes && changes.length > 0) {
+      try {
+        broadcastChanges = store.appendChanges(originator.threadId, changes);
+      } catch {
+        /* sidecar persistence is best-effort — never fail the write */
       }
-      publishCanvasUpdate(canvasId, {
-        type: 'update',
-        data: {
-          fromVersion,
-          toVersion,
-          deltas,
-          pendingEffects: {
-            mutatedNodes: pendingEffects.mutatedNodes,
-            deletedNodeIds: pendingEffects.deletedNodeIds,
-            contentEditedNodeIds: pendingEffects.contentEditedNodeIds,
-            deferredFitFrameIds: pendingEffects.deferredFitFrameIds,
-          },
-          ...(originator.threadId ? { threadId: originator.threadId } : {}),
-          ...(broadcastChanges ? { changes: broadcastChanges } : {}),
-        },
-      });
     }
+    publishCanvasUpdate(canvasId, {
+      type: 'update',
+      data: {
+        fromVersion,
+        toVersion,
+        deltas,
+        pendingEffects: {
+          mutatedNodes: pendingEffects.mutatedNodes,
+          deletedNodeIds: pendingEffects.deletedNodeIds,
+          contentEditedNodeIds: pendingEffects.contentEditedNodeIds,
+          deferredFitFrameIds: pendingEffects.deferredFitFrameIds,
+        },
+        ...(originator.threadId ? { threadId: originator.threadId } : {}),
+        ...(broadcastChanges ? { changes: broadcastChanges } : {}),
+      },
+    });
 
     return {
       canvasId,

@@ -126,10 +126,9 @@ const reachbackRoutes: FastifyPluginAsync = async (app) => {
           logger: { info: (m) => request.log.info(m) },
           signal: abortController.signal,
           maxIterations: 10,
-          // The built-in agent's SSE goes to the reachback CLI, not a
-          // browser tab — so its canvas writes must broadcast to reach
-          // live frontends, attributed to the host ACP conversation.
-          broadcastCanvasWrites: true,
+          // Attribute canvas writes to the host ACP conversation so its
+          // change card owns them. (All canvas writes broadcast to live
+          // frontends unconditionally.)
           ...(hostThreadId ? { threadId: hostThreadId } : {}),
         });
 

@@ -1127,9 +1127,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         // Derive review records only for thread-attributed (ACP) batches —
         // they feed that conversation's change card. Other callers skip it.
         computeChanges: !!originator.threadId,
-        // Out-of-band writer: broadcast + persist happen inside
-        // executeOnServer (no in-tab agent stream applies these deltas).
-        broadcast: true,
       });
       const response: PostCanvasExecuteResponse = {
         canvasId: out.canvasId,

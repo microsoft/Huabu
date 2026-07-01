@@ -64,7 +64,7 @@ const DEFAULT_ORIGIN: NodeOrigin = { type: 'ai-operate' };
 export async function handleCanvasCommands(
   args: CanvasCommandsArgs,
   origin: NodeOrigin = DEFAULT_ORIGIN,
-  opts?: { broadcast?: boolean; threadId?: string },
+  opts?: { threadId?: string },
 ): Promise<string> {
   log.info(
     {
@@ -202,10 +202,6 @@ export async function handleCanvasCommands(
         ...(opts?.threadId ? { threadId: opts.threadId } : {}),
       },
       runId,
-      // Out-of-band writers (ask-agent) broadcast + persist the change
-      // card; the built-in chat agent leaves these off (its tab applies
-      // the deltas from the tool result).
-      ...(opts?.broadcast ? { broadcast: true } : {}),
       ...(opts?.threadId ? { computeChanges: true } : {}),
     });
 
@@ -215,11 +211,6 @@ export async function handleCanvasCommands(
       runId,
       fromVersion: result.fromVersion,
       toVersion: result.toVersion,
-      // Signals the web that this batch was broadcast: the initiating
-      // tab must NOT apply these deltas from the tool result — the canvas
-      // sync stream delivers them instead. Revert is owned by the
-      // broadcast-fed change card.
-      ...(opts?.broadcast ? { broadcast: true } : {}),
       // Carry the executor's annotated commands (ids assigned) so the
       // web can render the per-message command list.
       commands: result.commands,

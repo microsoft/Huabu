@@ -1,6 +1,7 @@
 /**
- * AcpChangeCard — the "what the agent changed" review card shown above
- * the chat input for an ACP conversation.
+ * ChangeReviewCard — the "what the agent changed" review card shown
+ * above the chat input for a conversation thread (built-in chat, question
+ * node, or ACP).
  *
  * Lists the canvas changes attributed to this thread (one row per
  * change) with per-item Keep / Revert, plus Keep all / Revert all.
@@ -25,7 +26,7 @@ import { NodeRef } from '../../Common/NodeRef';
 import type { CanvasChangeRecord, Delta } from '@sediment/shared/canvas-engine';
 import type { Node, Edge } from '@xyflow/react';
 
-interface AcpChangeCardProps {
+interface ChangeReviewCardProps {
   canvasId: string;
   threadId: string;
 }
@@ -34,7 +35,10 @@ const EMPTY: CanvasChangeRecord[] = [];
 
 const EDGE_KINDS = new Set(['connect', 'disconnect', 'edge-update']);
 
-export function AcpChangeCard({ canvasId, threadId }: AcpChangeCardProps) {
+export function ChangeReviewCard({
+  canvasId,
+  threadId,
+}: ChangeReviewCardProps) {
   const records = useAcpThreadChangesStore(
     (s) => s.byThread[threadId] ?? EMPTY,
   );

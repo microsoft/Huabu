@@ -46,15 +46,15 @@ in place. What ships today:
 | `POST /:id/execute` headless write path                                                   | ✅     | [canvas.route.ts](../../apps/server/src/modules/canvas/canvas.route.ts)                                                                                                |
 | In-memory pub/sub + `GET /:id/sync/stream` SSE                                            | ✅     | [canvas-sync.ts](../../apps/server/src/modules/canvas/canvas-sync.ts), [sync.route.ts](../../apps/server/src/modules/canvas/sync.route.ts)                             |
 | Web sync subscriber → `applyDeltasFromAgent`                                              | ✅     | [canvasSyncStore.ts](../../apps/web/src/store/canvasSyncStore.ts)                                                                                                      |
-| **ACP / headless writes broadcast to all tabs**                                           | ✅     | reachback `broadcastCanvasWrites`, `/execute` `broadcast: true`                                                                                                        |
+| **All agent writes broadcast to every tab** (unconditional)                               | ✅     | `executeOnServer` always publishes ([canvas-executor.ts](../../apps/server/src/modules/canvas/canvas-executor.ts))                                                     |
 | ACP chat-card correlation (`threadId` + `changes` + per-card revert)                      | ✅     | [acpThreadChangesStore.ts](../../apps/web/src/store/acpThreadChangesStore.ts), revert route in [canvas.route.ts](../../apps/server/src/modules/canvas/canvas.route.ts) |
 | Snapshot-on-connect version reconcile (gap → `loadCanvas`)                                | ✅     | [canvasSyncStore.ts](../../apps/web/src/store/canvasSyncStore.ts)                                                                                                      |
 
-**Known gaps carried into P0** (= the P1 backlog): no `clientId` echo filter;
-the built-in chat agent does **not** broadcast to other tabs; broadcast
-receivers still trigger preprocessing; no `dirtyNodeIds` protection; version
-gaps do a full `loadCanvas` instead of pulling the delta log; user hand-edits
-don't propagate to other tabs at all.
+**Known gaps carried into P0** (= the P1 backlog): no `clientId` echo filter
+(needed only once user hand-edits broadcast — P2); broadcast receivers still
+trigger preprocessing (cost deduped server-side); no `dirtyNodeIds` protection;
+version gaps do a full `loadCanvas` instead of pulling the delta log; user
+hand-edits don't propagate to other tabs at all.
 
 ## 2. Roadmap (priority order)
 
@@ -65,25 +65,25 @@ Legend: ✅ shipped · 🟡 partial · ⬜ todo.
 Makes "several agents + several tabs on one desktop" actually safe. Every item
 is a small, independently shippable fix on top of P0.
 
-- 🟡 **C2 — built-in agent broadcast-only (unifies with ACP).** _Core landed
-  (pending runtime validation)._ The built-in chat agent now delivers its
-  canvas mutations _only_ via the sync broadcast, like ACP — the chat SSE tool
-  result no longer applies state, so the initiating tab is a plain receiver
-  (**no self-echo, no `clientId`**; C5 moves to P2). Shipped: `runAgent` gets
-  `broadcastCanvasWrites` + chat `threadId`
-  ([agent.route.ts](../../apps/server/src/modules/agent/agent.route.ts)); the
-  tool result carries a `broadcast` flag
-  ([canvas-write.ts](../../apps/server/src/modules/agent/tools/handlers/canvas-write.ts));
-  `applyCanvasCommandsFromToolResult` skips the local apply + client change
-  extraction on broadcast batches
-  ([useAgentStream.ts](../../apps/web/src/hooks/useAgentStream.ts)); the
-  per-thread `AcpChangeCard` (fed by the broadcast `changes`) now renders +
-  loads for internal bindings too and owns revert
-  ([ChatPanel/index.tsx](../../apps/web/src/components/Panels/ChatPanel/index.tsx)).
-  The per-message `CanvasCommandCard` degrades to display-only. AI badge
-  (`NodeOrigin`) and AI-edit flag survive. **To verify at runtime:** chat agent
-  write reflects in a second tab; revert via the above-input card; question-node
-  / sketch agents still apply + revert as before (they don't broadcast).
+- ✅ **C2 — all built-in agents broadcast-only (unified with ACP).** _Shipped +
+  verified._ The built-in chat **and question-node** agents deliver canvas
+  mutations _only_ via the sync broadcast, like ACP — the chat SSE tool result
+  no longer applies state, so the initiating tab is a plain receiver (**no
+  self-echo, no `clientId`**; C5 moved to P2). Broadcasting is now
+  **unconditional** in `executeOnServer` — the per-caller `broadcastCanvasWrites`
+  / `broadcast` flag chain was removed
+  ([canvas-executor.ts](../../apps/server/src/modules/canvas/canvas-executor.ts),
+  [agent.service.ts](../../apps/server/src/modules/agent/agent.service.ts),
+  [canvas-write.ts](../../apps/server/src/modules/agent/tools/handlers/canvas-write.ts)).
+  `animateCanvasCommandsFromToolResult` no longer applies state or extracts
+  client-side changes — it just surfaces the command list + animation
+  ([useAgentStream.ts](../../apps/web/src/hooks/useAgentStream.ts)). Revert is
+  owned by the per-thread `ChangeReviewCard` (renamed from `AcpChangeCard`, now
+  renders for internal bindings too) fed by the broadcast `changes`
+  ([ChangeReviewCard.tsx](../../apps/web/src/components/Panels/ChatPanel/ChangeReviewCard.tsx)).
+  The per-message `CanvasCommandCard` is now display-only; its dead revert path
+  was deleted. Exception: **sketch** keeps its client-side Accept/Revert overlay
+  (separate `sketch-recognized` carve-out) — deliberately not broadcast-only.
 - 🟡 **C4 / O2 — preprocessing cost deduped (full ownership deferred to P2).**
   Duplicate **work** is fixed:
   [PreprocessDispatcher](../../apps/server/src/modules/preprocessing/dispatcher.ts)
@@ -99,12 +99,13 @@ is a small, independently shippable fix on top of P0.
 - ⬜ **C3 — `dirtyNodeIds` protection.** Skip incoming `REPLACE`/`DELETE` on
   nodes with un-persisted local edits so an agent write never clobbers what a
   human is mid-typing.
-- ⬜ **Log backfill.** Wire `GET /:id/log?since=v` into the sync store so a
-  version gap heals incrementally instead of a full `loadCanvas` flicker.
 
 **Uplift:** any mix of built-in + ACP + headless agents writing concurrently
 converges on _every_ open tab — no double-apply, no duplicate embeddings, no
-lost local edits, no full-canvas reload. This is "multi-agent done."
+lost local edits. The happy path (in-order broadcasts) already applies
+incrementally; only the rare version-gap case still falls back to a full
+`loadCanvas` (the incremental gap-heal is deferred to P2). This is
+"multi-agent done."
 
 ### P2 — Multi-window user-edit sync (Plan A) ← Wave 1 finish
 
@@ -126,6 +127,10 @@ lost local edits, no full-canvas reload. This is "multi-agent done."
   re-triggering itself. Reuses the same PUT→diff→broadcast path as Plan A.
   ~5 files, medium risk (loop guard, server-side snapshot fidelity, async
   writeback timing).
+- ⬜ **Log backfill.** Wire `GET /:id/log?since=v` into the sync store so a
+  version gap heals incrementally instead of a full `loadCanvas` flicker. Pure
+  optimization of the existing gap fallback (not needed for correctness); more
+  valuable here because Plan A's user-edit broadcasts raise gap frequency.
 - ⬜ **Reversibility category (c) (C7 phase 1).** Checkpoint "restore to the
   version before this run" (the delta log already supports it) + AI-change
   badges via `NodeOrigin`; a transient undoable toast for truly-remote
