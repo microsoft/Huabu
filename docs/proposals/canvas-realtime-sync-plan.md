@@ -96,9 +96,21 @@ is a small, independently shippable fix on top of P0.
   server-side trigger + enriched writeback broadcast — is **moved to P2**: it
   shares the "server produces a delta → broadcast" mechanism with Plan A and is
   no longer cost-urgent, so it is not worth its medium risk on its own.
-- ⬜ **C3 — `dirtyNodeIds` protection.** Skip incoming `REPLACE`/`DELETE` on
-  nodes with un-persisted local edits so an agent write never clobbers what a
-  human is mid-typing.
+- ✅ **C3 — `dirtyNodeIds` protection + conflict surfacing.** _Shipped._
+  `applyDeltasFromAgent` skips incoming `REPLACE`/`DELETE` deltas targeting a
+  node with un-persisted local **content** edits (pending debounced save or
+  in-flight PUT, exposed via `nodeContentQueue.pendingNodeIds()`), so an agent
+  write never clobbers what a human is mid-typing — `INSERT` always applies.
+  Resolution is deterministic **local-first**: the skipped node keeps the
+  human's value and post-effects (preprocessing / fit) skip it too; `version`
+  still advances to `toVersion` so the next autosave doesn't 409. The skipped
+  ids flow back through `canvasSyncStore` into `acpThreadChangesStore`
+  (`conflictedByThread`); the `ChangeReviewCard` renders those rows as
+  **conflicts** ("· skipped", warning icon, revert disabled) and the question
+  node's **done** badge grows a warning `ConflictBadge` count — surfacing the
+  conflict per node/thread instead of a global toast. **Scope:** content only;
+  same-node **structure** conflicts (geometry/parent) stay coarse — no per-node
+  structure-dirty tracking yet, rebased away by P3's field-level deltas.
 
 **Uplift:** any mix of built-in + ACP + headless agents writing concurrently
 converges on _every_ open tab — no double-apply, no duplicate embeddings, no

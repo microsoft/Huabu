@@ -2,10 +2,14 @@ import { create } from 'zustand';
 
 import { readTypedSSEStream } from '@/api/_sse';
 import { canvasSyncStreamUrl } from '@/api/canvasSync';
+import { dismissToast, toast } from '@/components/Common/Toast';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
+import { useChatStore } from '@/store/chatStore';
+import { usePanelStore } from '@/store/panelStore';
 
 import type { CanvasSyncEvent } from '@sediment/shared';
+import type { AgentBinding } from '@sediment/shared';
 import type { CanvasChangeRecord, Delta } from '@sediment/shared/canvas-engine';
 import type { Node } from '@xyflow/react';
 
@@ -43,6 +47,70 @@ type SyncPendingEffects = {
   deferredFitFrameIds: string[];
 };
 
+// Single active "agent edit skipped" toast. The conflict is transient
+// (local-first already kept the user's edit) but we surface it *now*,
+// while the user is still editing, so they can decide whether to re-run
+// the agent. Persistent (no auto-fade) + dismissible so a moment of
+// inattention doesn't lose the notice; a module-scoped id keeps at most
+// one on screen even when an agent writes repeatedly during an edit.
+let conflictToastId: string | null = null;
+
+/**
+ * Open the conversation that authored the skipped write. When a question
+ * node owns the thread, enter its replay; otherwise just reveal the chat
+ * panel (the built-in / ACP canvas thread's change card renders there).
+ */
+function openConflictThread(threadId: string, canvasId: string): void {
+  usePanelStore.getState().requestOpenRightPanel();
+  const questionNode = useCanvasStore
+    .getState()
+    .nodes.find(
+      (n) =>
+        (n.data as { threadId?: unknown } | undefined)?.threadId === threadId,
+    );
+  if (questionNode) {
+    const binding = (questionNode.data as { agentBinding?: AgentBinding })
+      .agentBinding;
+    useChatStore
+      .getState()
+      .openQuestionThread(questionNode.id, threadId, binding, canvasId);
+  }
+}
+
+function notifySkippedAgentWrites(
+  skippedNodeIds: readonly string[],
+  threadId: string | undefined,
+  canvasId: string,
+): void {
+  if (skippedNodeIds.length === 0) return;
+  const nodes = useCanvasStore.getState().nodes;
+  const labelOf = (id: string): string => {
+    const data = nodes.find((n) => n.id === id)?.data as
+      | { label?: unknown }
+      | undefined;
+    const label = data?.label;
+    return typeof label === 'string' && label.trim() ? label : 'a note';
+  };
+  const names = skippedNodeIds.map(labelOf);
+  const message =
+    names.length === 1
+      ? `The agent's change to “${names[0]}” was skipped because you were editing it — your version was kept.`
+      : `The agent's changes to ${names.length} nodes were skipped because you were editing them — your versions were kept.`;
+  if (conflictToastId) dismissToast(conflictToastId);
+  conflictToastId = toast(message, {
+    tone: 'warning',
+    duration: 0,
+    ...(threadId
+      ? {
+          action: {
+            label: 'Open conversation',
+            onClick: () => openConflictThread(threadId, canvasId),
+          },
+        }
+      : {}),
+  });
+}
+
 export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
   canvasId: null,
 
@@ -75,8 +143,9 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
             // event.type === 'update'
             const { fromVersion, toVersion, deltas, pendingEffects } =
               event.data;
+            let skippedNodeIds: string[] = [];
             if (fromVersion === canvasStore.version) {
-              canvasStore.applyDeltasFromAgent(
+              skippedNodeIds = canvasStore.applyDeltasFromAgent(
                 deltas as Delta[],
                 toVersion,
                 pendingEffects as SyncPendingEffects,
@@ -87,14 +156,27 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
             }
             // else: stale/older update — ignore.
 
+            // Draw the user's attention *at the moment* an agent write was
+            // dropped because they were editing that node — a passive card
+            // badge alone is easy to miss mid-edit.
+            notifySkippedAgentWrites(
+              skippedNodeIds,
+              event.data.threadId,
+              canvasId,
+            );
+
             // Attribute change-review records to the originating ACP
-            // conversation's card.
+            // conversation's card. `skippedNodeIds` marks the rows whose
+            // agent write was blocked by a local edit, so the card
+            // can flag them as conflicts instead of silently listing them
+            // as applied.
             if (event.data.threadId && Array.isArray(event.data.changes)) {
               useAcpThreadChangesStore
                 .getState()
                 .replaceFromBroadcast(
                   event.data.threadId,
                   event.data.changes as CanvasChangeRecord[],
+                  skippedNodeIds,
                 );
             }
           },
@@ -109,6 +191,12 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
   disconnect: () => {
     abortController?.abort();
     abortController = null;
+    // Clear any lingering conflict toast — it's bound to the canvas we're
+    // leaving and shouldn't bleed onto the next one.
+    if (conflictToastId) {
+      dismissToast(conflictToastId);
+      conflictToastId = null;
+    }
     set({ canvasId: null });
   },
 }));

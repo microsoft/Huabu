@@ -93,12 +93,20 @@ export function isChangeStale(
 
 interface AcpThreadChangesState {
   byThread: Record<string, CanvasChangeRecord[]>;
+  /**
+   * Node ids per thread whose incoming agent write was SKIPPED because
+   * the user was mid-editing them. The matching
+   * change row is rendered as a conflict ("skipped — you were editing")
+   * instead of a normal applied change.
+   */
+  conflictedByThread: Record<string, string[]>;
   /** Fetch persisted records for a thread (replaces local list). */
   load: (canvasId: string, threadId: string) => Promise<void>;
   /** Replace a thread's list with the coalesced set pushed via broadcast. */
   replaceFromBroadcast: (
     threadId: string,
     records: CanvasChangeRecord[],
+    skippedNodeIds?: string[],
   ) => void;
   /** Accept (keep) — discard the review record without touching the canvas. */
   accept: (
@@ -133,21 +141,56 @@ function removeFrom(
 export const useAcpThreadChangesStore = create<AcpThreadChangesState>(
   (set, get) => ({
     byThread: {},
+    conflictedByThread: {},
 
     load: async (canvasId, threadId) => {
       try {
         const records = await getThreadChanges(canvasId, threadId);
-        set((s) => ({ byThread: { ...s.byThread, [threadId]: records } }));
+        set((s) => {
+          // Preserve in-session conflict flags across a reload so opening
+          // the conversation (which triggers this load) still shows the
+          // "skipped" annotation. Prune only ids no longer represented in
+          // the freshly-loaded records. A real page refresh starts with an
+          // empty store, so nothing is preserved then — the conflict
+          // notice is intentionally session-scoped.
+          const recordNodeIds = new Set(
+            records.map((r) => r.nodeId).filter((id): id is string => !!id),
+          );
+          const conflicted = (s.conflictedByThread[threadId] ?? []).filter(
+            (id) => recordNodeIds.has(id),
+          );
+          return {
+            byThread: { ...s.byThread, [threadId]: records },
+            conflictedByThread: {
+              ...s.conflictedByThread,
+              [threadId]: conflicted,
+            },
+          };
+        });
       } catch (err) {
         console.error('[acpThreadChanges] load failed', err);
       }
     },
 
-    replaceFromBroadcast: (threadId, records) => {
+    replaceFromBroadcast: (threadId, records, skippedNodeIds = []) => {
       // The broadcast carries the thread's full coalesced list (one net
       // record per entity), so replace rather than append — this also
       // drops rows whose net effect became nothing (e.g. create+delete).
-      set((s) => ({ byThread: { ...s.byThread, [threadId]: records } }));
+      // Only keep conflict flags for nodes actually represented in this
+      // batch's records so a stale id can't linger.
+      const recordNodeIds = new Set(
+        records.map((r) => r.nodeId).filter((id): id is string => !!id),
+      );
+      const conflicted = Array.from(
+        new Set(skippedNodeIds.filter((id) => recordNodeIds.has(id))),
+      );
+      set((s) => ({
+        byThread: { ...s.byThread, [threadId]: records },
+        conflictedByThread: {
+          ...s.conflictedByThread,
+          [threadId]: conflicted,
+        },
+      }));
     },
 
     accept: async (canvasId, threadId, changeId) => {

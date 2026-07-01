@@ -1,12 +1,14 @@
 import { clsx } from 'clsx';
-import { MessageSquare } from 'lucide-react';
+import { AlertTriangle, MessageSquare } from 'lucide-react';
 import { memo, useCallback, useMemo, useRef } from 'react';
 
 import { createId } from '@sediment/shared';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
 import { StatusBadge } from '@/components/Common/StatusBadge.tsx';
+import { Tooltip } from '@/components/Common/Tooltip.tsx';
 import { useTextNodeSurface } from '@/hooks/useTextNodeSurface';
+import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore.ts';
 import useCanvasStore from '@/store/canvasStore.ts';
 import { useChatStore } from '@/store/chatStore.ts';
 import { usePanelStore } from '@/store/panelStore.ts';
@@ -67,6 +69,22 @@ export const QuestionNode = memo(
 
     const status = data.status ?? 'idle';
     const viewed = data.viewed ?? false;
+
+    // Count of this thread's agent changes that were SKIPPED because the
+    // user was mid-editing the target node. Drives
+    // a warning chip on the "done" badge so a partially-applied run is not
+    // silently reported as fully done. Reactive: recomputes as records or
+    // conflict flags change, but only re-renders on a count change.
+    const conflictCount = useAcpThreadChangesStore((s) => {
+      const threadId = data.threadId;
+      if (!threadId) return 0;
+      const conflicted = s.conflictedByThread[threadId];
+      if (!conflicted || conflicted.length === 0) return 0;
+      const recs = s.byThread[threadId];
+      if (!recs) return 0;
+      const ids = new Set(conflicted);
+      return recs.filter((r) => r.nodeId && ids.has(r.nodeId)).length;
+    });
 
     // True while this node is a freshly-pasted copy whose conversation
     // history is still being forked server-side. Until that settles the
@@ -242,6 +260,11 @@ export const QuestionNode = memo(
                     : 'Open conversation'
                   : undefined
               }
+              trailing={
+                status === 'done' && conflictCount > 0 ? (
+                  <ConflictBadge count={conflictCount} />
+                ) : undefined
+              }
             />
           )}
         </TextNodeBody>
@@ -249,3 +272,29 @@ export const QuestionNode = memo(
     );
   },
 );
+
+/**
+ * Small warning chip rendered next to a question node's "Done" badge when
+ * one or more of the run's canvas writes were skipped because the user
+ * was mid-editing the target node. Signals a
+ * partially-applied run without a global toast; clicking the badge itself
+ * opens the conversation where the skipped rows are listed.
+ */
+function ConflictBadge({ count }: { count: number }) {
+  return (
+    <Tooltip
+      content={`${count} agent ${count === 1 ? 'change was' : 'changes were'} skipped because you were editing.`}
+    >
+      <span
+        className="pointer-events-auto inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs font-semibold shadow-sm"
+        style={{
+          backgroundColor: 'color-mix(in srgb, var(--warning) 10%, white 20%)',
+          color: 'var(--warning)',
+        }}
+      >
+        <AlertTriangle size={12} />
+        {count}
+      </span>
+    </Tooltip>
+  );
+}

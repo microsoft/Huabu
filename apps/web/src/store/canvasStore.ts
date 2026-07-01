@@ -677,6 +677,11 @@ type RFState = {
    *
    * Skips autosave (uses `_setStateNoAutosave`) because the server is
    * already authoritative for this batch.
+   *
+   * Returns the ids of nodes whose incoming REPLACE/DELETE delta was
+   * SKIPPED because the user is mid-editing them (un-persisted local
+   * content edits). Callers surface these as a
+   * conflict on the originating thread's change card.
    */
   applyDeltasFromAgent: (
     deltas: Delta[],
@@ -687,7 +692,7 @@ type RFState = {
       contentEditedNodeIds: string[];
       deferredFitFrameIds: string[];
     },
-  ) => void;
+  ) => string[];
   /** @internal Resolve a web-only UiIntent and execute the resulting commands. */
   dispatchUiIntent: (intent: CanvasUiIntent) => void;
   /**
@@ -1231,14 +1236,36 @@ const useCanvasStore = create<RFState>()(
      *      cross the undo boundary in the existing UX.
      */
     applyDeltasFromAgent: (deltas, toVersion, pendingEffects) => {
-      if (deltas.length === 0) {
-        // No-op batch: reconcile the version so a subsequent local
-        // edit's autosave doesn't 409 against our stale view of
-        // server state.
+      // Never let an incoming agent write clobber a
+      // node the user is mid-editing. Skip REPLACE/DELETE deltas that
+      // target a node with un-persisted local content edits (INSERT is a
+      // fresh id, never a collision). Report the skipped ids so the UI
+      // can flag the conflict on the originating thread's change card.
+      const dirty = new Set(nodeContentQueue.pendingNodeIds());
+      const skippedNodeIds: string[] = [];
+      const safeDeltas =
+        dirty.size === 0
+          ? deltas
+          : deltas.filter((d) => {
+              if (d.type === 'REPLACE_NODE' && dirty.has(d.next.id)) {
+                skippedNodeIds.push(d.next.id);
+                return false;
+              }
+              if (d.type === 'DELETE_NODE' && dirty.has(d.node.id)) {
+                skippedNodeIds.push(d.node.id);
+                return false;
+              }
+              return true;
+            });
+
+      if (safeDeltas.length === 0) {
+        // Nothing to apply locally (empty batch, or every row protected).
+        // Still reconcile the version so the next local edit's autosave
+        // doesn't 409 against our stale view of server state.
         if (get().version !== toVersion) {
           get()._setStateNoAutosave({ version: toVersion });
         }
-        return;
+        return skippedNodeIds;
       }
 
       const prevNodes = get().nodes;
@@ -1255,7 +1282,7 @@ const useCanvasStore = create<RFState>()(
       // scenarios fails open.
       const applied = applyDeltas(
         { nodes: prevNodes as NestableNode[], edges: prevEdges },
-        deltas,
+        safeDeltas,
       );
 
       // No host-agnostic post-effects here — the server already ran
@@ -1268,11 +1295,26 @@ const useCanvasStore = create<RFState>()(
         version: toVersion,
       });
 
+      // Post-effects must not run for nodes whose delta we skipped — they
+      // were not actually mutated locally, so preprocessing / fit them is
+      // wrong.
+      const skipped = new Set(skippedNodeIds);
       runWebPostEffects({
         effects: {
-          mutatedNodes: pendingEffects.mutatedNodes,
-          deletedNodeIds: pendingEffects.deletedNodeIds,
-          contentEditedNodeIds: pendingEffects.contentEditedNodeIds,
+          mutatedNodes:
+            skipped.size === 0
+              ? pendingEffects.mutatedNodes
+              : pendingEffects.mutatedNodes.filter((n) => !skipped.has(n.id)),
+          deletedNodeIds:
+            skipped.size === 0
+              ? pendingEffects.deletedNodeIds
+              : pendingEffects.deletedNodeIds.filter((id) => !skipped.has(id)),
+          contentEditedNodeIds:
+            skipped.size === 0
+              ? pendingEffects.contentEditedNodeIds
+              : pendingEffects.contentEditedNodeIds.filter(
+                  (id) => !skipped.has(id),
+                ),
           deferredFitFrameIds: pendingEffects.deferredFitFrameIds,
         },
         source: 'agent',
@@ -1281,6 +1323,8 @@ const useCanvasStore = create<RFState>()(
         setNodes: (nodes) => get()._setStateNoAutosave({ nodes }),
         triggerPreprocessing: preprocessQueue.schedule,
       });
+
+      return skippedNodeIds;
     },
 
     /** Resolve a web-only UiIntent and execute the resulting commands. */

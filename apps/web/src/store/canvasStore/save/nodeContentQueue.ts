@@ -118,6 +118,13 @@ export type NodeContentQueue = {
    * second duplicate created later in the same session.
    */
   clearDuplicateGuard(nodeId: string): void;
+
+  /**
+   * Node ids with un-persisted content edits — pending debounced saves
+   * plus in-flight PUTs. Used by the sync applier to protect a node the
+   * user is mid-editing from an incoming agent write.
+   */
+  pendingNodeIds(): string[];
 };
 
 /**
@@ -537,6 +544,14 @@ export function createNodeContentQueue(opts: {
 
     clearDuplicateGuard(nodeId) {
       duplicateToasted.delete(nodeId);
+    },
+
+    pendingNodeIds() {
+      // Debounced-but-not-yet-fired saves plus in-flight PUTs: both mean
+      // the node holds a local edit the server hasn't acknowledged.
+      return Array.from(
+        new Set([...debouncer.pendingKeys(), ...inflight.keys()]),
+      );
     },
   };
 }

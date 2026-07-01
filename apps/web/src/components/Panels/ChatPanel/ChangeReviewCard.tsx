@@ -9,7 +9,7 @@
  * agent's change, so it never clobbers a newer human / agent edit.
  */
 
-import { Check, ChevronRight, Eye, Undo2 } from 'lucide-react';
+import { AlertTriangle, Check, ChevronRight, Eye, Undo2 } from 'lucide-react';
 import { useCallback, useRef, useState } from 'react';
 
 import { applyDeltas } from '@sediment/shared/canvas-engine';
@@ -22,6 +22,7 @@ import useCanvasStore from '@/store/canvasStore';
 
 import { Button } from '../../Common/Button';
 import { NodeRef } from '../../Common/NodeRef';
+import { Tooltip } from '../../Common/Tooltip';
 
 import type { CanvasChangeRecord, Delta } from '@sediment/shared/canvas-engine';
 import type { Node, Edge } from '@xyflow/react';
@@ -32,6 +33,7 @@ interface ChangeReviewCardProps {
 }
 
 const EMPTY: CanvasChangeRecord[] = [];
+const EMPTY_IDS: string[] = [];
 
 const EDGE_KINDS = new Set(['connect', 'disconnect', 'edge-update']);
 
@@ -41,6 +43,9 @@ export function ChangeReviewCard({
 }: ChangeReviewCardProps) {
   const records = useAcpThreadChangesStore(
     (s) => s.byThread[threadId] ?? EMPTY,
+  );
+  const conflictedNodeIds = useAcpThreadChangesStore(
+    (s) => s.conflictedByThread[threadId] ?? EMPTY_IDS,
   );
   const accept = useAcpThreadChangesStore((s) => s.accept);
   const acceptAll = useAcpThreadChangesStore((s) => s.acceptAll);
@@ -161,6 +166,9 @@ export function ChangeReviewCard({
               key={rec.id}
               record={rec}
               stale={isChangeStale(rec, nodes, edges)}
+              conflicted={
+                !!rec.nodeId && conflictedNodeIds.includes(rec.nodeId)
+              }
               onPreviewStart={() => startPreview(rec)}
               onPreviewEnd={endPreview}
               onKeep={() => void accept(canvasId, threadId, rec.id)}
@@ -176,6 +184,7 @@ export function ChangeReviewCard({
 function ChangeRow({
   record,
   stale,
+  conflicted,
   onPreviewStart,
   onPreviewEnd,
   onKeep,
@@ -183,6 +192,7 @@ function ChangeRow({
 }: {
   record: CanvasChangeRecord;
   stale: boolean;
+  conflicted: boolean;
   onPreviewStart: () => void;
   onPreviewEnd: () => void;
   onKeep: () => void;
@@ -193,6 +203,13 @@ function ChangeRow({
   return (
     <li className="hover:bg-hover flex items-center gap-1.5 px-2 py-1">
       <div className="flex min-w-0 flex-1 items-center gap-1">
+        {conflicted && (
+          <AlertTriangle
+            size={12}
+            className="text-warning shrink-0"
+            aria-label="Skipped due to a conflict with your edit"
+          />
+        )}
         {isEdge ? (
           // Edge change: verb (e.g. "Connected") + source → target chips.
           // `label` is now a full "Verb: source → target" string, so we
@@ -226,6 +243,13 @@ function ChangeRow({
         ) : (
           <span className="text-fg-muted truncate">{record.label}</span>
         )}
+        {conflicted && (
+          <Tooltip content="The agent tried to change this node, but you were editing it at the same time — your local edit was kept and the agent's change was skipped.">
+            <span className="text-warning shrink-0 cursor-help whitespace-nowrap">
+              · skipped
+            </span>
+          </Tooltip>
+        )}
       </div>
       <div className="flex shrink-0 items-center gap-1">
         <Button
@@ -237,9 +261,11 @@ function ChangeRow({
           iconOnly
           disabled={stale}
           title={
-            stale
-              ? 'Preview unavailable — the target was deleted or changed since this edit'
-              : 'Hold to preview the state before this change'
+            conflicted
+              ? 'Preview unavailable — this change was skipped because you were editing this node'
+              : stale
+                ? 'Preview unavailable — the target was deleted or changed since this edit'
+                : 'Hold to preview the state before this change'
           }
           className="h-5 w-5 rounded-sm"
         >
@@ -250,7 +276,9 @@ function ChangeRow({
           variant="ghost"
           size="sm"
           iconOnly
-          title="Keep this change"
+          title={
+            conflicted ? 'Dismiss this skipped change' : 'Keep this change'
+          }
           className="h-5 w-5 rounded-sm"
         >
           <Check size={12} />
@@ -262,9 +290,11 @@ function ChangeRow({
           iconOnly
           disabled={stale}
           title={
-            stale
-              ? 'Revert unavailable — the target was deleted or changed since this edit'
-              : 'Revert this change'
+            conflicted
+              ? 'Nothing to revert — this change was skipped (your edit was kept)'
+              : stale
+                ? 'Revert unavailable — the target was deleted or changed since this edit'
+                : 'Revert this change'
           }
           className="h-5 w-5 rounded-sm"
         >
