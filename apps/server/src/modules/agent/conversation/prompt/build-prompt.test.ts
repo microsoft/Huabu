@@ -254,6 +254,48 @@ describe('rebuildContextMessages', () => {
     expect(out[1].role).toBe('assistant');
   });
 
+  it('omits the neighbourhood from rebuilt history (it only rides the live turn)', async () => {
+    const neighbourhood: NodeNeighbourhoodContext = {
+      layers: [
+        {
+          groups: [
+            {
+              dx: 0,
+              dy: -100,
+              arrangement: 'single node',
+              _minEdgeDist: 10,
+              nodes: [
+                buildAgentNodePreview({
+                  id: 'near-1',
+                  type: 'note',
+                  label: 'Above',
+                }),
+              ],
+            },
+          ],
+        },
+      ],
+      relevantEdges: [],
+    };
+    const envelope = makeEnvelope({ text: 'summarize', neighbourhood });
+
+    // The live turn (built-in dispatch) keeps a fresh neighbourhood…
+    const live = await renderEnvelopeMessages(envelope, NO_CANVAS);
+    expect(textOf(live.messages[0].content)).toContain(
+      '<canvas_neighbourhood>',
+    );
+
+    // …but once the same turn is replayed as history, it is stripped so
+    // the message prefix stays byte-stable / cache-friendly.
+    const out = await rebuildContextMessages(
+      [{ envelope, transcript: [] }],
+      NO_CANVAS,
+    );
+    expect(textOf(out[0].content)).not.toContain('<canvas_neighbourhood>');
+    // The user's own words survive the rebuild.
+    expect(textOf(out[0].content)).toContain('summarize');
+  });
+
   it('skips empty turns but still appends their transcript', async () => {
     const toolRow: PiMessage = {
       role: 'assistant',
