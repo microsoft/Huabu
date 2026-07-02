@@ -31,10 +31,13 @@
 import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 
+import { nodeRevisionOf } from '@sediment/shared/canvas-engine';
+
 import { normalizeRel, safeResolve } from './fs-sandbox.js';
 import { readSkillFile, resolveSkillPath } from '../../../../prompt/index.js';
 import { IMAGE_MIME_MAP } from '../../../../utils/mime.js';
 import { parseFrontmatter } from '../../../storage/frontmatter.js';
+import { getCanvasStore } from '../../../storage/index.js';
 import { readCanvasMemory, readWorkspaceMemory } from '../../memory/index.js';
 
 import type { readParamsSchema } from '../definitions.js';
@@ -63,10 +66,49 @@ const DEFAULT_MAX_BYTES = 50 * 1024;
  */
 const MAX_READ_FILE_BYTES = 10 * 1024 * 1024;
 
-// ─── Implementation ─────────────────────────────────────────────────────────
+/** Canvas-relative path of a node markdown sidecar. */
+const NODE_FILE_RE = /^nodes\/[^/]+\.md$/;
+
+/**
+ * When the agent reads a node's markdown, record its current
+ * authored-content rev into the run's read-set (keyed by node id from
+ * frontmatter). `canvas_commands` later auto-injects this as `expectRev`
+ * so a subsequent content write carries the rev the agent actually saw.
+ * Computed via the SAME `readNode` + `nodeRevisionOf` path the executor's
+ * CAS uses, so the tokens are guaranteed to match. Best-effort — any
+ * failure just leaves the node out of the read-set (a later write then
+ * needs the context seed or is rejected as never-read).
+ */
+function recordNodeRev(
+  rel: string,
+  canvasId: string,
+  fileText: string,
+  readSet: Map<string, string>,
+): void {
+  if (!NODE_FILE_RE.test(rel)) return;
+  const rawId = parseFrontmatter(fileText).meta?.['id'];
+  const nodeId = typeof rawId === 'string' && rawId ? rawId : undefined;
+  if (!nodeId) return;
+  try {
+    const nc = getCanvasStore(canvasId).readNode(nodeId);
+    if (!nc) return;
+    readSet.set(
+      nodeId,
+      nodeRevisionOf({
+        content: nc.content,
+        src: typeof nc.src === 'string' ? nc.src : undefined,
+      }),
+    );
+  } catch {
+    /* best-effort: skip on any read/parse failure */
+  }
+}
+
+// ─── Implementation ───────────────────────────────────────────────
 
 export async function handleRead(
   args: ReadArgs,
+  readSet?: Map<string, string>,
 ): Promise<string | AgentToolResult<undefined>> {
   const { path: requested, offset, limit } = args;
 
@@ -209,7 +251,9 @@ export async function handleRead(
     );
   }
 
-  return renderTextResponse(rel, buf.toString('utf8'), offset, limit);
+  const text = buf.toString('utf8');
+  if (readSet) recordNodeRev(rel, args.canvasId, text, readSet);
+  return renderTextResponse(rel, text, offset, limit);
 }
 
 /**

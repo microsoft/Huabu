@@ -136,4 +136,5 @@ export type {
   CanvasExecution,
   CanvasCommandFailureReason,
   CanvasCommandResult,
+  ExecuteConflict,
 } from './execution.js';

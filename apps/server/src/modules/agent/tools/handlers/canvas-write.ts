@@ -64,7 +64,7 @@ const DEFAULT_ORIGIN: NodeOrigin = { type: 'ai-operate' };
 export async function handleCanvasCommands(
   args: CanvasCommandsArgs,
   origin: NodeOrigin = DEFAULT_ORIGIN,
-  opts?: { threadId?: string },
+  opts?: { threadId?: string; readSet?: Map<string, string> },
 ): Promise<string> {
   log.info(
     {
@@ -103,13 +103,30 @@ export async function handleCanvasCommands(
           const patch =
             (entry.patch as Record<string, unknown> | undefined) ?? {};
           const hasLabel = typeof patch.label === 'string';
-          if (hasLabel) {
-            return {
-              ...entry,
-              patch: { ...patch, labelSource: 'agent' as const },
-            };
-          }
-          return entry;
+          // Auto-inject the compare-and-swap token for content rewrites:
+          // the rev the agent last saw for this node (from the run's
+          // read-set — seeded from context, updated by `read`). Only for
+          // content/src writes (the executor's CAS scope) and only when the
+          // agent didn't already supply one. Absent when the node was never
+          // read this run → the executor rejects it as a blind write.
+          const nodeId =
+            typeof entry.nodeId === 'string' ? entry.nodeId : undefined;
+          const rewritesContent = 'content' in patch || 'src' in patch;
+          const injectedRev =
+            rewritesContent &&
+            entry.expectRev === undefined &&
+            nodeId !== undefined
+              ? opts?.readSet?.get(nodeId)
+              : undefined;
+          const nextPatch = hasLabel
+            ? { ...patch, labelSource: 'agent' as const }
+            : patch;
+          if (nextPatch === patch && injectedRev === undefined) return entry;
+          return {
+            ...entry,
+            patch: nextPatch,
+            ...(injectedRev !== undefined ? { expectRev: injectedRev } : {}),
+          };
         }),
       };
     }
@@ -216,6 +233,9 @@ export async function handleCanvasCommands(
       commands: result.commands,
       deltas: result.deltas,
       results: result.results,
+      ...(result.conflicts && result.conflicts.length > 0
+        ? { conflicts: result.conflicts }
+        : {}),
       pendingEffects: {
         mutatedNodes: result.pendingEffects.mutatedNodes,
         deletedNodeIds: result.pendingEffects.deletedNodeIds,

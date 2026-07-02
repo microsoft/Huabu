@@ -1,6 +1,6 @@
 # Agent Node Freshness & Write-Safety (Stateless Rev + CAS)
 
-Status: In-Progress — Phase 1 (read) implemented; Phase 2 (write CAS) not started.
+Status: In-Progress — Phase 1 (read) + Phase 2 (write CAS) implemented.
 Last updated: 2026-07-02
 
 > **Context — Reachback v2 (RFS + ask-agent).** External ACP agents no longer
@@ -184,8 +184,17 @@ model; layering rev CAS on top of them would fight that plan.
 { type: 'MERGE_NODE_DATA', patches: [{ nodeId, patch: { content }, expectRev?: string }] }
 ```
 
-The internal agent populates `expectRev` from the rev it read (the ETag it
-downloaded, or the `rev` in the ref / neighbourhood it acted on).
+The internal agent does **not** hand-carry `expectRev`. The server keeps a
+**session-scoped read-set** (`nodeId → rev`, one `Map` per conversation
+`threadId`, in-memory, LRU-bounded, lost on restart): populated **only** by the
+`read` tool when the agent reads a node's full `.md` body (re-reads overwrite
+with the fresh rev). It is deliberately **not** seeded from context previews —
+a node ref carries only a ~120-char preview, not the body, so knowing its rev is
+no basis for rewriting content. The `canvas_commands` tool auto-injects
+`expectRev` on each content patch from that read-set. So "no entry" ⇒ "the
+agent never read this node this session" ⇒ no `expectRev` ⇒ the executor rejects
+it — true read-before-write, exactly Claude Code's session-scoped model, with no
+persistent state and no token bookkeeping in the prompt.
 
 ### 3b. Stateless CAS in the executor
 
@@ -332,17 +341,15 @@ into the one writer.
    implementation note: `canvas.json` strips `data.content`, so the rev is
    computed over the **hydrated** on-disk body (`store.readNode().content`) at
    every site (RFS lookup, ref builders, and — in Phase 2 — the executor).
-2. **Phase 2 (write):** `expectRev` CAS on content `MERGE_NODE_DATA` (agent
-   writes require it; trusted programmatic writes are unconditional by
-   originator) + the executor conflict payload + the built-in / `ask-agent`
-   reconcile loop. Start with default-on CAS behind a flag, then make it the
-   default once the reconcile loop is validated in evals.
-
-The read/CAS feature is intentionally **invisible to users** — rev / ETag are
-agent-facing, and conflicts are absorbed by the server-side reconcile loop — so
-no new UI is planned. Follow-up hardening after Phase 2 ships (conflict-rate
-telemetry, tuning the `nodeRevision` excluded-key set against real churn) is
-pure backend observability, tracked separately if it proves necessary.
+2. **Phase 2 (write) — ✅ SHIPPED:** `expectRev` CAS on content
+   `MERGE_NODE_DATA` in the executor (agent writes require it; `ui` / `system`
+   originators are unconditional). `expectRev` is **auto-injected** from a
+   **session-scoped read-set** (per `threadId`, in-memory, populated only by the
+   `read` tool — never from context previews, since a preview is no basis for a
+   content rewrite), so the model carries no token and "read-before-write" means
+   it actually read the full body this session. Conflicts return `currentContent`
+   - `currentRev`; the agent reconciles and retries within its loop. Both the
+     built-in chat agent and `ask-agent` share the single executor + read-set path.
 
 ## 8. Edge cases
 

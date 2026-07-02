@@ -32,6 +32,7 @@ import {
   type CanvasCommandFailureReason,
   type CanvasEdgeId,
   type CanvasNodeId,
+  type ExecuteConflict,
   type ExecuteOriginator,
 } from '@sediment/shared';
 import {
@@ -40,6 +41,7 @@ import {
   diffCanvasState,
   executeCanvasCommands,
   extractCanvasChanges,
+  nodeRevision,
   type CanvasChangeRecord,
   type CanvasEdge,
   type CanvasNode,
@@ -173,6 +175,50 @@ function hydrateNodes(
   });
 }
 
+/**
+ * Compare-and-swap pre-flight for agent content writes. For each
+ * `MERGE_NODE_DATA` patch that rewrites authored content (`content` /
+ * `src`), compare the writer's `expectRev` against the hydrated node's
+ * current {@link nodeRevision}. A missing `expectRev` (the agent never
+ * read the node this run) or a mismatch (edited since) is a conflict.
+ * Patches touching only non-content fields (label / summary / style)
+ * are not guarded — they fall outside the revision's key set.
+ */
+function collectMergeConflicts(
+  commands: readonly CanvasCommand[],
+  prestateNodes: readonly CanvasNode[],
+): ExecuteConflict[] {
+  const byId = new Map(prestateNodes.map((n) => [n.id, n]));
+  const conflicts: ExecuteConflict[] = [];
+  for (const cmd of commands) {
+    if (cmd.type !== 'MERGE_NODE_DATA') continue;
+    for (const entry of cmd.patches) {
+      const patch = entry.patch ?? {};
+      const rewritesContent = 'content' in patch || 'src' in patch;
+      if (!rewritesContent) continue;
+      const node = byId.get(entry.nodeId);
+      if (!node) continue; // missing node → engine emits 'not-found'
+      const currentRev = nodeRevision(node);
+      const rawContent = (node.data as Record<string, unknown> | undefined)?.[
+        'content'
+      ];
+      const currentContent =
+        typeof rawContent === 'string' ? rawContent : undefined;
+      if (entry.expectRev === undefined || entry.expectRev !== currentRev) {
+        conflicts.push({
+          nodeId: entry.nodeId,
+          ...(entry.expectRev !== undefined
+            ? { expectedRev: entry.expectRev }
+            : {}),
+          currentRev,
+          ...(currentContent !== undefined ? { currentContent } : {}),
+        });
+      }
+    }
+  }
+  return conflicts;
+}
+
 function buildNodeContent(node: CanvasNode): NodeContent | null {
   const nodeId = typeof node.id === 'string' ? node.id : '';
   if (!nodeId) return null;
@@ -297,6 +343,13 @@ export interface ExecuteOnServerOutput {
    * fingerprint). Only populated when `computeChanges` was requested.
    */
   changes?: CanvasChangeRecord[];
+  /**
+   * Compare-and-swap rejections. Non-empty only when an agent
+   * `MERGE_NODE_DATA` content write targeted a stale (or never-read)
+   * node; the whole batch is then a no-op (nothing applied) and the
+   * caller reconciles from `currentContent` / `currentRev`.
+   */
+  conflicts?: ExecuteConflict[];
 }
 
 export class CanvasNotFoundError extends Error {
@@ -339,6 +392,39 @@ export async function executeOnServer(
       canvas.state.nodes as CanvasNode[],
     );
     const prestateEdges = (canvas.state.edges ?? []) as CanvasEdge[];
+
+    // Compare-and-swap pre-flight (agent writes only). A stale or
+    // never-read content rewrite mutates NOTHING — the whole batch is a
+    // no-op and the agent reconciles from the echoed `currentContent`.
+    // ui / system writes are trusted and skip the guard.
+    if (originator.source === 'agent') {
+      const conflicts = collectMergeConflicts(commands, prestateNodes);
+      if (conflicts.length > 0) {
+        const conflictIds = new Set(conflicts.map((c) => c.nodeId));
+        return {
+          canvasId,
+          fromVersion,
+          toVersion: fromVersion,
+          deltas: [],
+          results: commands.map((command) => ({
+            command,
+            applied: false,
+            ...(command.type === 'MERGE_NODE_DATA' &&
+            command.patches.some((p) => conflictIds.has(p.nodeId))
+              ? { reason: 'conflict' as const }
+              : {}),
+          })),
+          commands,
+          pendingEffects: {
+            mutatedNodes: [],
+            deletedNodeIds: [],
+            contentEditedNodeIds: [],
+            deferredFitFrameIds: [],
+          },
+          conflicts,
+        };
+      }
+    }
 
     const { writeResult, commandResults, pendingEffects } =
       executeCanvasCommands(
