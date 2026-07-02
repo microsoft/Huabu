@@ -172,11 +172,16 @@ export function ProvenanceOverlay({
       let right: number;
       let width: number;
       if (anchorKey === null) {
-        const firstBlock = container.querySelector(
-          '.ProseMirror > *',
-        ) as HTMLElement | null;
-        if (firstBlock) {
-          const r = firstBlock.getBoundingClientRect();
+        // Deleted FIRST block → anchor at doc head, above the current
+        // first block. Resolve that block through the same snapshot the
+        // other branches use (`snap.getDOM`) rather than a raw
+        // `.ProseMirror > *` query: the first DOM child can be a
+        // ProseMirror widget / decoration (narrow, zero-width), which
+        // would collapse the marker and popover to the left gutter.
+        const firstKey = snap.keys[0];
+        const dom = firstKey ? snap.getDOM(firstKey) : null;
+        if (dom) {
+          const r = dom.getBoundingClientRect();
           top = r.top - cRect.top + container.scrollTop - 8;
           right = r.right - cRect.left + container.scrollLeft;
           width = r.width;
@@ -200,8 +205,27 @@ export function ProvenanceOverlay({
 
   useEffect(() => {
     recomputeRef.current();
+
+    // Provenance now arrives together with the content it describes (the
+    // server stamps `data.provenance` and broadcasts it with the delta).
+    // When an AI edit swaps the whole doc, the synchronous recompute
+    // above can measure an anchor block before ProseMirror has finished
+    // laying out the new content, so a tombstone flashes at the wrong
+    // spot before self-correcting. Re-measure across the next two frames
+    // once the editor DOM has settled.
+    let settleRaf = window.requestAnimationFrame(() => {
+      settleRaf = window.requestAnimationFrame(() => {
+        settleRaf = 0;
+        recomputeRef.current();
+      });
+    });
+
     const container = containerRef.current;
-    if (!container || !editor) return;
+    if (!container || !editor) {
+      return () => {
+        if (settleRaf !== 0) window.cancelAnimationFrame(settleRaf);
+      };
+    }
 
     // rAF-throttle: characterData mutations fire on every keystroke,
     // so coalesce bursts into one recompute per frame.
@@ -220,12 +244,28 @@ export function ProvenanceOverlay({
       subtree: true,
       characterData: true,
     });
+
+    // A full-doc swap (AI edit) can reflow the editor over several
+    // frames — the new first block may momentarily render narrower than
+    // its final full width, which throws off the right-gutter anchor of
+    // a doc-head tombstone. A MutationObserver only fires on DOM edits,
+    // not on layout/size settling, so also watch the ProseMirror element
+    // for resize and re-measure when its box changes.
+    const pmEl = container.querySelector('.ProseMirror');
+    const ro =
+      pmEl && typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver(schedule)
+        : null;
+    if (pmEl && ro) ro.observe(pmEl);
+
     container.addEventListener('scroll', schedule);
     window.addEventListener('resize', schedule);
 
     return () => {
+      if (settleRaf !== 0) window.cancelAnimationFrame(settleRaf);
       if (raf !== 0) window.cancelAnimationFrame(raf);
       mo.disconnect();
+      ro?.disconnect();
       container.removeEventListener('scroll', schedule);
       window.removeEventListener('resize', schedule);
     };

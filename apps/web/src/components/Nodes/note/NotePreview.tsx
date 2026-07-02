@@ -19,7 +19,7 @@
  * during iteration).
  */
 
-import { Code2, FileText } from 'lucide-react';
+import { Code2, FileText, Sparkles } from 'lucide-react';
 import {
   lazy,
   Suspense,
@@ -542,6 +542,9 @@ export const NotePreview = ({
 
   const totalPending =
     provenance.blocks.length + provenance.deletedBlocks.length;
+  // Compact single-line summary — collapse edited + deleted into one
+  // count (e.g. "2 changes") to keep the chip narrow.
+  const summaryLabel = `${totalPending} change${totalPending === 1 ? '' : 's'}`;
   const showProvenanceChip =
     PROVENANCE_ENABLED &&
     !readOnly &&
@@ -638,18 +641,15 @@ export const NotePreview = ({
       </div>
       {showProvenanceChip ? (
         <div
-          className="border-edge-default bg-surface absolute bottom-3 left-1/2 z-20 flex w-fit -translate-x-1/2 items-center gap-2 rounded-full border px-3 py-1 shadow-lg"
+          className="bg-surface absolute bottom-3 left-1/2 z-20 flex w-fit -translate-x-1/2 items-center gap-1.5 rounded-md py-1 pr-1 pl-2.5 whitespace-nowrap shadow-[0_0_14px_rgba(0,0,0,0.12)]"
           role="status"
           aria-label={`AI made ${totalPending} pending edit${totalPending === 1 ? '' : 's'} on this note`}
         >
-          <span className="text-fg-muted text-xs">
-            {`AI edited ${provenance.blocks.length} block${provenance.blocks.length === 1 ? '' : 's'}`}
-            {provenance.deletedBlocks.length > 0
-              ? ` · deleted ${provenance.deletedBlocks.length}`
-              : ''}
-          </span>
+          <Sparkles className="text-ai size-3.5 shrink-0" />
+          <span className="text-fg-muted text-xs">{summaryLabel}</span>
+          <span aria-hidden className="bg-edge-default mx-0.5 h-4 w-px" />
           <Button
-            variant="outline"
+            variant="ghost"
             tone="neutral"
             size="sm"
             onClick={handleRejectAll}
