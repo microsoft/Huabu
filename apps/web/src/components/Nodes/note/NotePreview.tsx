@@ -5,19 +5,21 @@
  * preview surface so the rest of the canvas / agent stack treats notes
  * uniformly.
  *
- * Block provenance: when the AI updates `data.content` externally,
- * MilkdownEditor surfaces before/after fingerprint snapshots via
- * `onExternalUpdate`. We diff and `stampAiEdit` once at stream-end
- * (Approach B) — per-chunk stamping is intentionally not supported.
- * User edits clear markers organically via `shiftProvenance`. Accept
- * / Reject / Restore / Dismiss UI is rendered by `<ProvenanceOverlay>`.
+ * Block provenance: AI edits are stamped authoritatively by the server
+ * (the shared canvas engine computes `data.provenance` at the mutation
+ * source and broadcasts it with the content delta), so this component
+ * simply renders `data.provenance`. When the editor re-serializes the
+ * doc, `onExternalUpdate` lets us realign existing markers to the live
+ * block keys via `shiftProvenance`; user edits clear markers the same
+ * way. Accept / Reject / Restore / Dismiss UI is rendered by
+ * `<ProvenanceOverlay>`.
  *
  * Set `VITE_PROVENANCE=off` in `.env` to disable Phase 4 entirely
  * (decoration-less, overlay-less editor — useful for bisecting bugs
  * during iteration).
  */
 
-import { Code2, FileText } from 'lucide-react';
+import { Code2, FileText, Sparkles } from 'lucide-react';
 import {
   lazy,
   Suspense,
@@ -33,14 +35,12 @@ import { Button } from '@/components/Common/Button';
 import { MilkdownEditor } from '@/components/Milkdown';
 import { usePreviewHeaderSlot } from '@/components/Nodes/PreviewHeaderSlot';
 import useCanvasStore from '@/store/canvasStore';
-import { consumeAiContentEdit } from '@/utils/aiEditFlags';
 import {
   coerceProvenance,
   dismissDeletedBlock,
   dropBlockEntry,
   emptyProvenance,
   shiftProvenance,
-  stampAiEdit,
 } from '@/utils/blockProvenance';
 import {
   canReadSedimentPayload,
@@ -166,11 +166,7 @@ export const NotePreview = ({
   const handleExternalUpdate = useCallback<
     NonNullable<React.ComponentProps<typeof MilkdownEditor>['onExternalUpdate']>
   >(
-    ({ oldKeys, newKeys, oldMarkdownByKey, newMarkdownByKey }) => {
-      // Consume the per-node attribution flag unconditionally so it
-      // does not leak across updates (e.g. when provenance is
-      // disabled or when the keys-equal early-out short-circuits).
-      const aiAuthored = id ? consumeAiContentEdit(id) : false;
+    ({ oldKeys, newKeys }) => {
       if (!PROVENANCE_ENABLED) return;
       // Pure key-equal => nothing to do (e.g. content normalized
       // round-trip with no actual block change).
@@ -180,33 +176,23 @@ export const NotePreview = ({
       ) {
         return;
       }
-      if (!aiAuthored) {
-        // External update from a non-AI source — typically another
-        // panel rendering the same node and echoing the user's edit
-        // through the data prop. Realign existing markers against the
-        // new doc shape so they stay attached to live blocks, but do
-        // NOT stamp new AI markers.
-        const shifted = shiftProvenance(provenanceRef.current, newKeys);
-        if (
-          shifted.blocks.length !== provenanceRef.current.blocks.length ||
-          shifted.deletedBlocks.length !==
-            provenanceRef.current.deletedBlocks.length
-        ) {
-          provenanceRef.current = shifted;
-          writePatch({ provenance: shifted });
-        }
-        return;
+      // Provenance for AI edits is authored by the server and arrives via
+      // `data.provenance`; the client never stamps here. This handler only
+      // realigns existing markers to the live block keys so they stay
+      // attached when the doc shape shifts (e.g. another panel echoing the
+      // user's edit on the same node, or a server delta the editor
+      // re-serialized slightly differently).
+      const shifted = shiftProvenance(provenanceRef.current, newKeys);
+      if (
+        shifted.blocks.length !== provenanceRef.current.blocks.length ||
+        shifted.deletedBlocks.length !==
+          provenanceRef.current.deletedBlocks.length
+      ) {
+        provenanceRef.current = shifted;
+        writePatch({ provenance: shifted });
       }
-      const next = stampAiEdit(provenanceRef.current, {
-        oldKeys,
-        newKeys,
-        oldMarkdownByKey,
-        newMarkdownByKey,
-      });
-      provenanceRef.current = next;
-      writePatch({ provenance: next });
     },
-    [id, writePatch],
+    [writePatch],
   );
 
   // Build the decoration spec from current provenance. Memoized so
@@ -556,6 +542,9 @@ export const NotePreview = ({
 
   const totalPending =
     provenance.blocks.length + provenance.deletedBlocks.length;
+  // Compact single-line summary — collapse edited + deleted into one
+  // count (e.g. "2 changes") to keep the chip narrow.
+  const summaryLabel = `${totalPending} change${totalPending === 1 ? '' : 's'}`;
   const showProvenanceChip =
     PROVENANCE_ENABLED &&
     !readOnly &&
@@ -652,18 +641,15 @@ export const NotePreview = ({
       </div>
       {showProvenanceChip ? (
         <div
-          className="border-edge-default bg-surface absolute bottom-3 left-1/2 z-20 flex w-fit -translate-x-1/2 items-center gap-2 rounded-full border px-3 py-1 shadow-lg"
+          className="bg-surface absolute bottom-3 left-1/2 z-20 flex w-fit -translate-x-1/2 items-center gap-1.5 rounded-md py-1 pr-1 pl-2.5 whitespace-nowrap shadow-[0_0_14px_rgba(0,0,0,0.12)]"
           role="status"
           aria-label={`AI made ${totalPending} pending edit${totalPending === 1 ? '' : 's'} on this note`}
         >
-          <span className="text-fg-muted text-xs">
-            {`AI edited ${provenance.blocks.length} block${provenance.blocks.length === 1 ? '' : 's'}`}
-            {provenance.deletedBlocks.length > 0
-              ? ` · deleted ${provenance.deletedBlocks.length}`
-              : ''}
-          </span>
+          <Sparkles className="text-ai size-3.5 shrink-0" />
+          <span className="text-fg-muted text-xs">{summaryLabel}</span>
+          <span aria-hidden className="bg-edge-default mx-0.5 h-4 w-px" />
           <Button
-            variant="outline"
+            variant="ghost"
             tone="neutral"
             size="sm"
             onClick={handleRejectAll}

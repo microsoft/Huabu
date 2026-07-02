@@ -7,14 +7,13 @@
  *
  *  1. Debounced HTTP preprocessing fetch.
  *  2. Delete tracking for the local history manager.
- *  3. AI-content-edit flag for the editor (gated by `source === 'agent'`).
- *  4. Deferred `fitFrames` after the DOM has reflowed.
+ *  3. Deferred `fitFrames` after the DOM has reflowed.
  *
  * Pure host-agnostic cleanups (edge reroute) live in the shared
  * `applySharedPostEffects` and run BEFORE the state commit so they
  * fold into a single `set({ nodes, edges })`.
  *
- * Most dependencies (`canvasHistoryManager`, `markAiContentEdit`) are
+ * Most dependencies (`canvasHistoryManager`) are
  * imported directly because they are module-level singletons.
  * `triggerPreprocessing` is the one exception — it is a closure over
  * the canvas store's internal state and timers, so it is passed in as
@@ -29,21 +28,11 @@ import {
 } from '@sediment/shared/canvas-engine';
 
 import { canvasHistoryManager } from '@/store/canvasHistoryManager';
-import { markAiContentEdit } from '@/utils/aiEditFlags';
 
-import type { CanvasExecutionSource } from '@sediment/shared';
 import type { Node } from '@xyflow/react';
-
-/**
- * Source of the executed batch. Re-exports `CanvasExecutionSource`
- * under a local alias so callers don't have to import two type names.
- * Only `'agent'` batches mark content rewrites as AI-authored.
- */
-export type CanvasBatchSource = CanvasExecutionSource;
 
 export interface RunWebPostEffectsInput {
   effects: PendingEffects;
-  source: CanvasBatchSource;
   canvasId: string;
   /** Read latest committed nodes from the store. */
   getNodes: () => Node[];
@@ -63,18 +52,10 @@ export interface RunWebPostEffectsInput {
  * Order matters and matches the previous `runPostEffects`:
  *  1. preprocessing trigger (synchronous fan-out into debounced fetch)
  *  2. delete tracking
- *  3. AI flag marking (agent batches only)
- *  4. deferred frame fit (double-rAF)
+ *  3. deferred frame fit (double-rAF)
  */
 export function runWebPostEffects(input: RunWebPostEffectsInput): void {
-  const {
-    effects,
-    source,
-    canvasId,
-    getNodes,
-    setNodes,
-    triggerPreprocessing,
-  } = input;
+  const { effects, canvasId, getNodes, setNodes, triggerPreprocessing } = input;
 
   // 1. Trigger preprocessing for created / mutated nodes. The server
   // decides per node profile whether any actual work runs.
@@ -87,16 +68,7 @@ export function runWebPostEffects(input: RunWebPostEffectsInput): void {
     canvasHistoryManager.trackDelete(canvasId, nodeId);
   }
 
-  // 3. Flag AI-authored content rewrites. The engine reports content
-  // edits agnostically; only agent-initiated batches translate into
-  // the editor's "AI rewrite" decoration.
-  if (source === 'agent' && effects.contentEditedNodeIds.length > 0) {
-    for (const nodeId of effects.contentEditedNodeIds) {
-      markAiContentEdit(nodeId);
-    }
-  }
-
-  // 4. Refit frames whose children need a render cycle to settle their
+  // 3. Refit frames whose children need a render cycle to settle their
   // size (e.g. notes whose pinned height was just cleared). Deferred
   // via double-rAF so the inline editor can reflow and ReactFlow's
   // ResizeObserver can update `measured.height` first.

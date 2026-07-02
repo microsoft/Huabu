@@ -1220,7 +1220,6 @@ const useCanvasStore = create<RFState>()(
       // tracking, AI flag, transition cleanup, deferred frame fit).
       runWebPostEffects({
         effects: pendingEffects,
-        source: resolvedSource,
         canvasId: state.canvasId,
         getNodes: () => get().nodes,
         setNodes: (nodes) => set({ nodes }),
@@ -1323,7 +1322,6 @@ const useCanvasStore = create<RFState>()(
                 ),
           deferredFitFrameIds: pendingEffects.deferredFitFrameIds,
         },
-        source: 'agent',
         canvasId,
         getNodes: () => get().nodes,
         setNodes: (nodes) => get()._setStateNoAutosave({ nodes }),

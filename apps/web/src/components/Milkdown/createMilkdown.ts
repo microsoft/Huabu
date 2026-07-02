@@ -25,6 +25,8 @@ import { NodeSelection, Plugin, PluginKey } from '@milkdown/prose/state';
 import { Decoration, DecorationSet } from '@milkdown/prose/view';
 import { $prose, replaceAll } from '@milkdown/utils';
 
+import { fingerprintMarkdownKeys } from '@sediment/shared/canvas-engine';
+
 import { fingerprintBlocks, type BlockSnapshot } from '@/utils/blockProvenance';
 
 import { normalizeMathDelimiters } from './markdownUtils';
@@ -53,6 +55,34 @@ import 'katex/dist/katex.min.css';
 // Loaded LAST so plain selectors win the cascade over Crepe's defaults
 // without needing `!important`. Do not import this file anywhere else.
 import './milkdown-overrides.css';
+
+/**
+ * Compute the block-provenance keys for a live ProseMirror doc.
+ *
+ * Keys are derived from the shared mdast fingerprint of the serialized
+ * markdown so they match the keys the server stamps onto
+ * `data.provenance`. The mdast segmentation aligns 1:1 with the
+ * ProseMirror top-level blocks for all supported note content (guarded
+ * by the block-key parity test); the returned array is therefore
+ * index-aligned with `doc.child(i)`.
+ *
+ * If a rare doc segments differently (mdast block count != PM child
+ * count), we fall back to the legacy per-block ProseMirror fingerprint
+ * so the editor's own block mechanics (drag / replace / delete) never
+ * break — provenance decorations simply won't attach for that doc.
+ */
+function blockKeysForDoc(
+  doc: ProseNode,
+  serialize: (node: ProseNode) => string,
+): string[] {
+  const mdastKeys = fingerprintMarkdownKeys(serialize(doc));
+  if (mdastKeys.length === doc.childCount) return mdastKeys;
+  const snaps: BlockSnapshot[] = [];
+  doc.forEach((node) => {
+    snaps.push(node.toJSON() as BlockSnapshot);
+  });
+  return fingerprintBlocks(snaps);
+}
 
 export interface MilkdownFactoryOptions {
   /** Element the editor view will be mounted into. */
@@ -904,13 +934,10 @@ export async function createMilkdown(
   function buildDecorationSet(
     doc: ProseNode,
     specs: ReadonlyArray<{ key: string; className: string }>,
+    serialize: (node: ProseNode) => string,
   ): DecorationSet {
     if (specs.length === 0) return DecorationSet.empty;
-    const snaps: BlockSnapshot[] = [];
-    doc.forEach((node) => {
-      snaps.push(node.toJSON() as BlockSnapshot);
-    });
-    const keys = fingerprintBlocks(snaps);
+    const keys = blockKeysForDoc(doc, serialize);
     const byKey = new Map(specs.map((s) => [s.key, s.className]));
     const decorations: Decoration[] = [];
     let pos = 0;
@@ -934,7 +961,7 @@ export async function createMilkdown(
 
   crepe.editor.use(
     $prose(
-      () =>
+      (ctx) =>
         new Plugin<DecorationPluginState>({
           key: decorationPluginKey,
           state: {
@@ -949,13 +976,23 @@ export async function createMilkdown(
               const meta = tr.getMeta(META_KEY) as
                 | ReadonlyArray<{ key: string; className: string }>
                 | undefined;
+              // The serializer is only needed when there ARE specs to
+              // place (meta set, or a doc change with live specs); an
+              // empty spec list short-circuits inside `buildDecorationSet`
+              // before touching it. It is always registered by the time a
+              // decoration transaction runs.
+              const serialize = (node: ProseNode): string =>
+                ctx.get(serializerCtx)(node);
               if (meta !== undefined) {
-                return { specs: meta, set: buildDecorationSet(tr.doc, meta) };
+                return {
+                  specs: meta,
+                  set: buildDecorationSet(tr.doc, meta, serialize),
+                };
               }
               if (tr.docChanged) {
                 return {
                   specs: value.specs,
-                  set: buildDecorationSet(tr.doc, value.specs),
+                  set: buildDecorationSet(tr.doc, value.specs, serialize),
                 };
               }
               return {
@@ -1162,7 +1199,7 @@ export async function createMilkdown(
       crepe.editor.action((ctx) => {
         const view = ctx.get(editorViewCtx);
         const parser = ctx.get(parserCtx);
-        const snap = buildSnapshotFromView(view);
+        const snap = buildSnapshotFromView(view, ctx.get(serializerCtx));
         const idx = snap.keys.indexOf(key);
         if (idx === -1) return;
         const from = snap.posByIndex[idx];
@@ -1181,7 +1218,7 @@ export async function createMilkdown(
       let ok = false;
       crepe.editor.action((ctx) => {
         const view = ctx.get(editorViewCtx);
-        const snap = buildSnapshotFromView(view);
+        const snap = buildSnapshotFromView(view, ctx.get(serializerCtx));
         const idx = snap.keys.indexOf(key);
         if (idx === -1) return;
         const from = snap.posByIndex[idx];
@@ -1203,7 +1240,7 @@ export async function createMilkdown(
 
         let pos = 0;
         if (anchorKey !== null) {
-          const snap = buildSnapshotFromView(view);
+          const snap = buildSnapshotFromView(view, ctx.get(serializerCtx));
           const idx = snap.keys.indexOf(anchorKey);
           if (idx === -1) return;
           // pos = end of block `idx` = start of block `idx+1`.
@@ -1226,7 +1263,7 @@ export async function createMilkdown(
         // editor surface entirely.
         const coords = view.posAtCoords({ left: x, top: y });
         if (!coords) return;
-        const snap = buildSnapshotFromView(view);
+        const snap = buildSnapshotFromView(view, ctx.get(serializerCtx));
         if (snap.keys.length === 0) {
           result = null; // empty doc — anchor on head
           return;
@@ -1354,19 +1391,20 @@ export async function createMilkdown(
    * helper. Returns the structural data without serializer/DOM —
    * those are layered on by `buildBlockSnapshot` for public callers.
    */
-  function buildSnapshotFromView(view: EditorView): {
+  function buildSnapshotFromView(
+    view: EditorView,
+    serialize: (node: ProseNode) => string,
+  ): {
     keys: string[];
     posByIndex: number[];
   } {
-    const snaps: BlockSnapshot[] = [];
     const posByIndex: number[] = [];
     let pos = 0;
     view.state.doc.forEach((node) => {
       posByIndex.push(pos);
-      snaps.push(node.toJSON() as BlockSnapshot);
       pos += node.nodeSize;
     });
-    return { keys: fingerprintBlocks(snaps), posByIndex };
+    return { keys: blockKeysForDoc(view.state.doc, serialize), posByIndex };
   }
 
   /**
@@ -1382,7 +1420,7 @@ export async function createMilkdown(
     crepe.editor.action((ctx) => {
       view = ctx.get(editorViewCtx);
       serializer = ctx.get(serializerCtx);
-      const snap = buildSnapshotFromView(view);
+      const snap = buildSnapshotFromView(view, serializer);
       keys = snap.keys;
       posByIndex = snap.posByIndex;
     });

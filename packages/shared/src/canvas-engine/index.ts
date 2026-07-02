@@ -146,3 +146,26 @@ export {
   getSmartHandles,
   rerouteAllEdges,
 } from './utils/edge.js';
+
+// ── Note block provenance (host-agnostic fingerprint) ─────────────────────
+export {
+  fingerprintMarkdownBlocks,
+  fingerprintMarkdownKeys,
+  fingerprintMdastBlock,
+  type FingerprintedBlock,
+} from './provenance/blockFingerprint.js';
+export {
+  emptyProvenance,
+  isMarkdownProvenance,
+  coerceProvenance,
+  diffBlocks,
+  stampAiEdit,
+  computeAiNoteProvenance,
+  shiftProvenance,
+  dropBlockEntry,
+  dismissDeletedBlock,
+  acceptAll,
+  findBlockEntry,
+  findTombstonesAfter,
+  type StampInput,
+} from './provenance/noteProvenance.js';
