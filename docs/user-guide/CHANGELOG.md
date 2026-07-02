@@ -2,6 +2,25 @@
 
 每次重要功能变更都会记录在此文件中，按时间倒序排列。
 
+## 2026-07-02 · Agent Reachback 改用 RFS：外部 agent 用 `curl` 直连画布
+
+**What Changed**
+
+外部 agent 接入画布的方式从 v1 的「节点 CRUD 工具」换成 **RFS（Remote File System，远程文件系统）**——一套 `curl` 原生、无需任何定制工具 / SDK / CLI 的 HTTP 接口。它把画布能力收敛成两个原语：**按路径下载/上传文件**，以及 **ask-agent**（把建节点、移动、连线、布局、发现等所有画布语义操作交给画布自己的内部 agent 处理）。所有接口挂在 `/api/rfs/:canvasId/*` 下，沿用同一个 Bearer 鉴权钩子，共四个端点：
+
+1. **`GET download/<path>`**——把画布下任意文件当原始字节流下载；对节点文件，节点元数据（id / type / label / src / locked）与相邻边都以 ASCII 安全的 `X-Huabu-*` 响应头随行返回。label 用 percent-encode（`X-Huabu-Node-Label`）保证任意 Unicode 上线安全，相邻边是紧凑 JSON 串（`X-Huabu-Node-Edges`，`{"parents":[…],"children":[…]}`）。刻意**不做** `Accept: application/json` 模式，避免把文件内容灌进 agent 上下文——下载一律用 `-o` 落盘。
+2. **`POST` / `DELETE upload/<file>`**——在共享暂存区（`.upload/`）落盘 / 删除文件；重名以 409 拒绝（不覆盖），由 agent 自行改名。
+3. **`POST agent`**——与画布内部 agent 对话，响应恒为 `text/event-stream`：用注释心跳保活长回合，默认只回最终纯文本答案（一行 `sed` 即可还原）。
+4. **`GET skill`**——拉取完整的画布访问指南，让 agent 自举；所有 4xx/5xx 错误都会把一条可直接运行的 `curl .../skill` 恢复命令折进 message。
+
+**Notes**
+
+- 守护进程改为注入 `HUABU_RFS_URL`（按画布的基址，无尾斜杠）替代原 `HUABU_CANVAS_ID`，端口取自新增的 `DaemonSupervisor.getServerPort()`。
+- 外部 agent 的 system prompt 精简为「人设 + `GET ${HUABU_RFS_URL}/skill` 自举」；reachback 档案的取词从 `read-node` / `write-node` 改为 RFS 的按路径下载。
+- artifact 只以 key 文件名寻址（如 `artifact_ab12cd.png`），从节点的 `X-Huabu-Src` 头取 key 后经 `download/artifacts/<key>` 获取，`.artifacts/` 等磁盘细节对外隐藏。
+- 本次**未**移除 v1 reachback 通路（工具、`/api/reachback` 节点 CRUD + 快照路由、`AGENTLET_REACHBACK_DIR` 推送机制），留待 RFS 流程用真实外部 agent 验证后再清理。
+- 文件：wire 契约 [packages/shared/src/types/api/rfs.ts](../../packages/shared/src/types/api/rfs.ts)；服务端模块 [apps/server/src/modules/remote_fs/](../../apps/server/src/modules/remote_fs/)（`rfs.route.ts` / `node-meta.ts` / `mime.ts` / `skill.ts`）；随附指南 [access-huabu.md](../../apps/server/src/prompt/external-agent/access-huabu.md)；设计稿 [docs/proposals/agent-reachback-rfs.md](../proposals/agent-reachback-rfs.md)。
+
 ## 2026-06-30 · 画布搜索新增「对话」层：搜得到 Question 节点的完整聊天历史
 
 **What Changed**
