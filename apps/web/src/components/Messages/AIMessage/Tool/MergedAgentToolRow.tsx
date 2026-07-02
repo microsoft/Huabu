@@ -34,6 +34,58 @@ function partFailed(part: AgentToolPart): boolean {
   return false;
 }
 
+/**
+ * Human-readable error text for a FAILED agent-tool part, or `null` when
+ * the call succeeded. Generic across tools — reads the message from
+ * whichever history shape carries it: the error ToolResponse `error`
+ * field (new), or `data.content` (older shape that projected a thrown
+ * handler as a `success` envelope with the message in the body).
+ */
+function partErrorText(part: AgentToolPart): string | null {
+  if (!partFailed(part)) return null;
+  const data = part.data as { error?: unknown; data?: unknown } | undefined;
+  if (typeof data?.error === 'string' && data.error) return data.error;
+  const payload = (data?.data ?? {}) as Record<string, unknown>;
+  if (typeof payload.content === 'string' && payload.content)
+    return payload.content;
+  if (typeof payload.path === 'string' && payload.path)
+    return `Failed: ${payload.path}`;
+  return 'Failed';
+}
+
+/**
+ * One-line summary of a SUCCESSFUL agent-tool call, used as the per-call
+ * detail row when a merged row (grep / find / ls / get_canvas_outline /
+ * …) is expanded. `read` and `inspect_nodes` have their own richer
+ * per-item renderers and don't go through here.
+ */
+function callSummary(part: AgentToolPart): string {
+  const payload = ((part.data as { data?: unknown } | undefined)?.data ??
+    {}) as Record<string, unknown>;
+  const num = (v: unknown) => (typeof v === 'number' ? v : 0);
+  const str = (v: unknown) => (typeof v === 'string' ? v : '');
+  switch (part.toolName) {
+    case 'grep': {
+      const c = num(payload.count);
+      return `${c} ${c === 1 ? 'match' : 'matches'}`;
+    }
+    case 'find': {
+      const c = num(payload.count);
+      return `${c} ${c === 1 ? 'file' : 'files'}`;
+    }
+    case 'ls': {
+      const p = str(payload.path);
+      const c = num(payload.count);
+      const entryLabel = `${c} ${c === 1 ? 'entry' : 'entries'}`;
+      return p ? `${p} — ${entryLabel}` : entryLabel;
+    }
+    case 'get_canvas_outline':
+      return 'canvas outline';
+    default:
+      return part.toolName;
+  }
+}
+
 export function MergedAgentToolRow({
   tool,
   entries,
@@ -54,7 +106,7 @@ export function MergedAgentToolRow({
   // ("Path not found: <path>") survives — so we fall back to that. A failed
   // read never gets a NodeRef (the path simply doesn't resolve to a node).
   const readEntries = useMemo(() => {
-    if (tool !== 'read' || count === 1)
+    if (tool !== 'read')
       return [] as Array<{
         path: string;
         text: string;
@@ -78,22 +130,42 @@ export function MergedAgentToolRow({
         // `status:'success'` with the error text in `data.content` and no
         // path; treat that as a failure too.)
         const ok = tr?.status === 'success' && !!path;
-        // Failure text, from whichever shape carries it:
-        //  - new: `error` on the error ToolResponse (e.g. "Path not found: …")
-        //  - old: `data.content` holding the raw error message
-        const errorField =
-          typeof (tr as { error?: unknown } | undefined)?.error === 'string'
-            ? ((tr as { error?: string }).error ?? '')
-            : '';
-        const contentText =
-          !ok && typeof payload.content === 'string'
-            ? (payload.content as string)
-            : '';
-        const text = ok ? path : path || errorField || contentText;
+        // Failure text via the shared helper (handles both history shapes),
+        // prefixed with the attempted path when we still have it.
+        const err = partErrorText(e.part) ?? '';
+        const text = ok ? path : path || err;
         return { path, text, ok, nodeId: ok ? nodeId : undefined };
       })
       .filter((x) => x.text || x.nodeId);
-  }, [tool, entries, count]);
+  }, [tool, entries]);
+
+  // Generic per-call failures across ANY merged tool (e.g. an
+  // `inspect_nodes` call that threw). Rendered as ✗ rows in the expanded
+  // view so a failed call is never silently dropped just because it
+  // produced no success payload.
+  const failedEntries = useMemo(
+    () =>
+      entries
+        .map((e) => partErrorText(e.part))
+        .filter((t): t is string => t !== null),
+    [entries],
+  );
+
+  // Generic per-CALL detail rows for every tool that isn't `read` or
+  // `inspect_nodes` (those have their own richer per-item renderers). One
+  // row per call: a short success summary or the failure message, so any
+  // merged row can expand to show its individual calls.
+  const callEntries = useMemo(() => {
+    if (tool === 'read' || tool === 'inspect_nodes')
+      return [] as Array<{ ok: boolean; text: string }>;
+    return entries.map((e) => {
+      const ok = !partFailed(e.part);
+      const text = ok
+        ? callSummary(e.part)
+        : (partErrorText(e.part) ?? 'Failed');
+      return { ok, text };
+    });
+  }, [tool, entries]);
 
   // Build merged title and content
   const { title, nodeRefs } = useMemo(() => {
@@ -269,8 +341,51 @@ export function MergedAgentToolRow({
     );
   }
 
-  // No expandable content → simple row
-  if ((nodeRefs.length === 0 && readEntries.length === 0) || count === 1) {
+  // Single read → inline "Read <NodeRef | path>" so a lone read is just as
+  // addressable as a merged one (node reads become a clickable NodeRef).
+  if (count === 1 && tool === 'read' && readEntries[0]) {
+    const entry = readEntries[0];
+    return (
+      <div className="flex justify-start">
+        <div className="w-full">
+          <div className="text-fg-muted hover:bg-hover flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors">
+            {statusIcon}
+            {iconPart && (
+              <ToolKindIcon part={iconPart} className="text-fg-muted/60" />
+            )}
+            <span className="flex-1 truncate">
+              Read{' '}
+              {entry.ok && entry.nodeId ? (
+                <NodeRef
+                  nodeId={entry.nodeId}
+                  fallbackLabel={entry.path || undefined}
+                />
+              ) : (
+                <span
+                  className={entry.ok ? '' : 'text-danger/80'}
+                  title={entry.text}
+                >
+                  {entry.text || '?'}
+                </span>
+              )}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // No expandable content → simple row. Expandability is driven by the
+  // number of DETAIL ROWS to show, not the number of calls: a single
+  // `inspect_nodes` call can match many nodes (count===1 yet 12 rows), and
+  // must still expand. `read` uses its own per-file outcome list.
+  const detailCount =
+    tool === 'read'
+      ? readEntries.length
+      : tool === 'inspect_nodes'
+        ? nodeRefs.length + failedEntries.length
+        : callEntries.length;
+  if (detailCount <= 1) {
     return (
       <div className="flex justify-start">
         <div className="w-full">
@@ -309,15 +424,58 @@ export function MergedAgentToolRow({
         </div>
         {isExpanded && (
           <div className="border-edge-default/40 ml-4 flex flex-col gap-1 border-l py-1 pl-3">
-            {tool === 'inspect_nodes'
-              ? // inspect_nodes flattens nodes across calls into nodeRefs;
-                // render each matched node as its own row.
-                nodeRefs.map((ref, i) =>
+            {tool === 'read' ? (
+              // read merges N calls; list each file with its outcome —
+              // a successful node read renders a clickable NodeRef, a
+              // failed one shows the attempted path with an error mark.
+              readEntries.map((entry, i) => (
+                <div
+                  key={`${entry.text}-${i}`}
+                  className="text-fg-muted flex items-center gap-1.5 text-xs"
+                >
+                  {entry.ok ? (
+                    <Check size={11} className="text-fg-muted/60 shrink-0" />
+                  ) : (
+                    <XIcon size={11} className="text-danger shrink-0" />
+                  )}
+                  {entry.ok && entry.nodeId ? (
+                    <NodeRef
+                      nodeId={entry.nodeId}
+                      fallbackLabel={entry.path || undefined}
+                    />
+                  ) : (
+                    <span
+                      className={`truncate ${entry.ok ? '' : 'text-danger/80'}`}
+                      title={entry.text}
+                    >
+                      {entry.text || '?'}
+                    </span>
+                  )}
+                </div>
+              ))
+            ) : tool === 'inspect_nodes' ? (
+              <>
+                {/* Failed inspect calls first, as ✗ rows. */}
+                {failedEntries.map((msg, i) => (
+                  <div
+                    key={`fail-${i}`}
+                    className="text-fg-muted flex items-center gap-1.5 text-xs"
+                  >
+                    <XIcon size={11} className="text-danger shrink-0" />
+                    <span className="text-danger/80 truncate" title={msg}>
+                      {msg}
+                    </span>
+                  </div>
+                ))}
+                {/* inspect_nodes flattens matched nodes across calls into
+                    nodeRefs; render each as its own ✓ row. */}
+                {nodeRefs.map((ref, i) =>
                   ref.nodeId ? (
                     <div
                       key={`${ref.nodeId}-${i}`}
                       className="text-fg-muted flex items-center gap-1.5 text-xs"
                     >
+                      <Check size={11} className="text-fg-muted/60 shrink-0" />
                       <span className="truncate">
                         <NodeRef
                           nodeId={ref.nodeId}
@@ -333,40 +491,30 @@ export function MergedAgentToolRow({
                       <span className="truncate">{ref.label ?? '?'}</span>
                     </div>
                   ),
-                )
-              : tool === 'read'
-                ? // read merges N calls; list each file with its outcome —
-                  // a successful node read renders a clickable NodeRef, a
-                  // failed one shows the attempted path with an error mark.
-                  readEntries.map((entry, i) => (
-                    <div
-                      key={`${entry.text}-${i}`}
-                      className="text-fg-muted flex items-center gap-1.5 text-xs"
-                    >
-                      {entry.ok ? (
-                        <Check
-                          size={11}
-                          className="text-fg-muted/60 shrink-0"
-                        />
-                      ) : (
-                        <XIcon size={11} className="text-danger shrink-0" />
-                      )}
-                      {entry.ok && entry.nodeId ? (
-                        <NodeRef
-                          nodeId={entry.nodeId}
-                          fallbackLabel={entry.path || undefined}
-                        />
-                      ) : (
-                        <span
-                          className={`truncate ${entry.ok ? '' : 'text-danger/80'}`}
-                          title={entry.text}
-                        >
-                          {entry.text || '?'}
-                        </span>
-                      )}
-                    </div>
-                  ))
-                : null}
+                )}
+              </>
+            ) : (
+              // Generic: one row per CALL — a short success summary or the
+              // failure message — so every merged tool row can expand.
+              callEntries.map((entry, i) => (
+                <div
+                  key={`call-${i}`}
+                  className="text-fg-muted flex items-center gap-1.5 text-xs"
+                >
+                  {entry.ok ? (
+                    <Check size={11} className="text-fg-muted/60 shrink-0" />
+                  ) : (
+                    <XIcon size={11} className="text-danger shrink-0" />
+                  )}
+                  <span
+                    className={`truncate ${entry.ok ? '' : 'text-danger/80'}`}
+                    title={entry.text}
+                  >
+                    {entry.text || '?'}
+                  </span>
+                </div>
+              ))
+            )}
           </div>
         )}
       </div>
