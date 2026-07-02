@@ -82,13 +82,6 @@ export interface RunAcpAgentOptions {
    * `prepared_prompt` events.
    */
   binding: { alias: string; profileId: string };
-  /**
-   * This turn's structured envelope — the single source of truth shared
-   * with the built-in path. The preprocessor reads the user's text,
-   * selection, and neighbourhood from it, so the external prompt cannot
-   * drift from what the built-in serializer renders.
-   */
-  envelope: ChatEnvelope;
   /** Sediment thread id \u2014 used as the registry key. */
   threadId: string;
   /**
@@ -104,6 +97,13 @@ export interface RunAcpAgentOptions {
    * any fs/* request from a session opened without a canvasId.
    */
   canvasId?: string;
+  /**
+   * This turn's structured envelope — the single source of truth shared
+   * with the built-in path. The preprocessor reads the user's text,
+   * selection, and neighbourhood from it, so the external prompt cannot
+   * drift from what the built-in serializer renders.
+   */
+  envelope: ChatEnvelope;
   /** pi-ai context; we mutate `context.messages` to append the assistant reply. */
   context: Context;
   /**
@@ -1091,7 +1091,7 @@ function readNullableString(v: unknown): string | null | undefined {
 export async function* runAcpAgent(
   opts: RunAcpAgentOptions,
 ): AsyncGenerator<AgentStreamEvent> {
-  const { binding, threadId, context, signal, logger, overlay } = opts;
+  const { binding, threadId, context, overlay, signal, logger } = opts;
   const canvasId = opts.canvasId ?? '';
   // Verbatim user text for the fallback payload + slash detection. The
   // preprocessor derives the same value from the envelope; we keep a

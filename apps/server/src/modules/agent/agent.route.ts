@@ -663,9 +663,9 @@ const agentRoutes: FastifyPluginAsync = async (
                 alias: agentBinding.alias,
                 profileId: agentBinding.profileId,
               },
-              envelope,
               threadId: resolvedThreadId,
               canvasId,
+              envelope,
               context,
               overlay: acpOverlay,
               signal: abortController.signal,
@@ -674,19 +674,19 @@ const agentRoutes: FastifyPluginAsync = async (
             })
           : runAgent({
               scope: mode,
-              canvasId,
-              context,
-              envelope,
-              logger: request.log,
-              maxIterations: 20,
-              signal: abortController.signal,
-              debugPrompt,
               // The built-in chat agent's canvas writes are delivered to
               // the frontend ONLY via the sync broadcast (like ACP), not
               // applied from the chat tool result. Attributing them to the
               // chat `threadId` feeds the per-thread change card
               // (ChangeReviewCard) that owns revert for this agent.
               threadId: resolvedThreadId,
+              canvasId,
+              envelope,
+              context,
+              maxIterations: 20,
+              signal: abortController.signal,
+              logger: request.log,
+              debugPrompt,
             });
 
       // Track the latest agent error so we can persist it AFTER the stream

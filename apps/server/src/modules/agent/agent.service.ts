@@ -53,27 +53,28 @@ export interface AgentRunOptions {
    * tool wiring.
    */
   scope: ToolScope;
+  /**
+   * Conversation thread id. System-wide this is the same concept as the
+   * ACP path's `threadId` — the stable identity a conversation resumes
+   * from — but the two backends resume through different media, so its
+   * role *inside this function* differs:
+   *
+   *  - ACP: `threadId` keys a live session registry; resume means
+   *    re-prompting the still-running external agent process, whose
+   *    memory Sediment cannot otherwise reach. Stateful, in the dispatch
+   *    layer.
+   *  - Built-in: the conversation has no live process — its memory is
+   *    externalized to the on-disk turn log. The route already resumed
+   *    it (`loadTurns` + `rebuildContextMessages`) into {@link context}
+   *    BEFORE calling `runAgent`. So by the time we get here `threadId`
+   *    no longer drives resume; it is only a provenance tag for canvas
+   *    writes (feeds the per-thread change card / revert). Omitting it
+   *    leaves the dialogue intact — `context` already holds it — and
+   *    only detaches canvas writes from their owning thread.
+   */
+  threadId?: string;
   /** Current canvas ID available as implicit context for canvas-aware tools. */
   canvasId?: string;
-  /**
-   * `NodeOrigin` stamp forwarded to `canvas_commands` (and ignored by
-   * other tools). Defaults inside the handler to `{ type: 'ai-operate' }`;
-   * the sketch pipeline overrides to
-   * `{ type: 'sketch-recognized' }` so user-authored gestures are
-   * not mis-tagged as AI-initiated.
-   */
-  origin?: NodeOrigin;
-  /** ACP conversation thread that canvas changes are attributed to. */
-  threadId?: string;
-  /**
-   * pi-ai Context for this thread: `systemPrompt` + the PRIOR
-   * conversation history (rebuilt from earlier turns). It does NOT
-   * include this turn's user message — that lives in {@link envelope}
-   * and is rendered internally so the two backends share one timing.
-   * Mutated in place: after the run, `messages` holds prior history +
-   * this turn's assistant/tool output (the transcript the route slices).
-   */
-  context: Context;
   /**
    * This turn's structured input. When provided (the chat route), it is
    * rendered into the per-turn user message internally — symmetric with
@@ -88,16 +89,33 @@ export interface AgentRunOptions {
    * (the legacy behaviour).
    */
   envelope?: ChatEnvelope;
-  /** Structured logger for request-scoped diagnostics */
-  logger?: AgentLogger;
-  /** Abort signal for cancellation */
-  signal?: AbortSignal;
+  /**
+   * pi-ai Context for this thread: `systemPrompt` + the PRIOR
+   * conversation history (rebuilt from earlier turns). It does NOT
+   * include this turn's user message — that lives in {@link envelope}
+   * and is rendered internally so the two backends share one timing.
+   * Mutated in place: after the run, `messages` holds prior history +
+   * this turn's assistant/tool output (the transcript the route slices).
+   */
+  context: Context;
+  /**
+   * `NodeOrigin` stamp forwarded to `canvas_commands` (and ignored by
+   * other tools). Defaults inside the handler to `{ type: 'ai-operate' }`;
+   * the sketch pipeline overrides to
+   * `{ type: 'sketch-recognized' }` so user-authored gestures are
+   * not mis-tagged as AI-initiated.
+   */
+  origin?: NodeOrigin;
   /**
    * Soft cap on agent turns (LLM call + tool batch). When reached, the
    * agent loop is aborted internally and a cap-out error is emitted.
    * Mirrors the previous self-rolled `maxIterations`.
    */
   maxIterations?: number;
+  /** Abort signal for cancellation */
+  signal?: AbortSignal;
+  /** Structured logger for request-scoped diagnostics */
+  logger?: AgentLogger;
   /**
    * Optional developer aid: when present (and `HUABU_DEBUG_PROMPT` is
    * set), dump the fully-assembled prompt for this turn. Lives here
@@ -140,15 +158,15 @@ export async function* runAgent(
 ): AsyncGenerator<StreamEvent, void, unknown> {
   const {
     scope,
-    canvasId,
-    origin,
-    context,
-    envelope,
-    logger,
-    signal,
-    maxIterations = 20,
-    debugPrompt,
     threadId,
+    canvasId,
+    envelope,
+    context,
+    origin,
+    maxIterations = 20,
+    signal,
+    logger,
+    debugPrompt,
   } = options;
 
   const tools = buildToolsForScope(scope, {
