@@ -57,7 +57,7 @@ type ToolState = {
 
 const DEFAULT_SKETCH_DRAFT: SketchDraft = {
   strokeColor: 'black',
-  strokeSize: 4,
+  strokeSize: 8,
   eraserSize: SKETCH_ERASER_RADIUS_SCREEN_PX,
   mode: 'draw',
 };
