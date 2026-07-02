@@ -18,6 +18,8 @@ There are two ways to work:
 
 Fetch any file under the canvas by its path. Node content lives at `nodes/<label>.md`; you are handed the exact `file` path for each selected node — pass it straight through (URL-encode spaces / unicode).
 
+**Always download to a file with `-o` and then read it as needed** — don't let response bodies stream straight into your context. Node/artifact contents can be large, and dumping them to stdout wastes your context window; save to disk, then open only the parts you need.
+
 For a node file, the response carries a small metadata subset in headers: `X-Huabu-Node-Id`, `X-Huabu-Node-Type`, `X-Huabu-Src`, `X-Huabu-Locked`. To save the body **and** see those headers in one command, dump headers with `-D` while writing the body with `-o`:
 
 ```bash
