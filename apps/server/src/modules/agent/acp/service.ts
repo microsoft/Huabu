@@ -51,7 +51,7 @@ import type {
 import type { ChatEnvelope } from '../conversation/envelope.js';
 import type { ContentPart } from '../conversation/prompt/attachments.js';
 import type { AcpTurnOverlay } from '../store/chat-thread-store.js';
-import type { AssistantMessage, Context } from '@earendil-works/pi-ai';
+import type { AssistantMessage, Message } from '@earendil-works/pi-ai';
 import type {
   AcpPlanEntry,
   AcpModelInfo,
@@ -104,8 +104,6 @@ export interface RunAcpAgentOptions {
    * drift from what the built-in serializer renders.
    */
   envelope: ChatEnvelope;
-  /** pi-ai context; we mutate `context.messages` to append the assistant reply. */
-  context: Context;
   /**
    * Mutable per-turn ACP overlay. We accumulate tool extensions
    * (keyed by `toolCallId`) and the turn's plan here; the route folds
@@ -1090,8 +1088,8 @@ function readNullableString(v: unknown): string | null | undefined {
  */
 export async function* runAcpAgent(
   opts: RunAcpAgentOptions,
-): AsyncGenerator<AgentStreamEvent> {
-  const { binding, threadId, context, overlay, signal, logger } = opts;
+): AsyncGenerator<AgentStreamEvent, Message[]> {
+  const { binding, threadId, overlay, signal, logger } = opts;
   const canvasId = opts.canvasId ?? '';
   // Verbatim user text for the fallback payload + slash detection. The
   // preprocessor derives the same value from the envelope; we keep a
@@ -1203,6 +1201,11 @@ export async function* runAcpAgent(
         arguments: Record<string, unknown>;
       };
   const contentBlocks: AssistantContentBlock[] = [];
+  // THIS turn's assembled assistant message(s). RETURNED to the route as
+  // the generator's value (see the two `return outMessages` at the tail),
+  // instead of being pushed into a caller-owned out-param array. Filled in
+  // the `finally` below so a partial reply survives abort/error.
+  const outMessages: Message[] = [];
   // Per-toolCallId reference into `contentBlocks` so a later
   // `tool_call_update` can refine the title in place.
   const toolCallByCallId = new Map<
@@ -1392,7 +1395,7 @@ export async function* runAcpAgent(
     if (contentBlocks.length > 0) {
       const aborted = signal?.aborted ?? false;
       const timestamp = Date.now();
-      context.messages.push(
+      outMessages.push(
         fauxAssistantMessage(contentBlocks, {
           stopReason: mapStopReason(stopReason, aborted),
           timestamp,
@@ -1417,7 +1420,7 @@ export async function* runAcpAgent(
       '[acp] session/prompt failed',
     );
     yield { type: 'error', data: { error: msg } };
-    return;
+    return outMessages;
   }
 
   yield {
@@ -1427,4 +1430,5 @@ export async function* runAcpAgent(
       meta: { stopReason },
     },
   };
+  return outMessages;
 }

@@ -90,12 +90,11 @@ export interface AgentRunOptions {
    */
   envelope?: ChatEnvelope;
   /**
-   * pi-ai Context for this thread: `systemPrompt` + the PRIOR
-   * conversation history (rebuilt from earlier turns). It does NOT
-   * include this turn's user message — that lives in {@link envelope}
-   * and is rendered internally so the two backends share one timing.
-   * Mutated in place: after the run, `messages` holds prior history +
-   * this turn's assistant/tool output (the transcript the route slices).
+   * pi-ai Context for this run: `systemPrompt` + the prior messages the
+   * agent runs over (rebuilt history for the chat route; a caller-built
+   * message list for envelope-less callers). Treated as read-only INPUT —
+   * the run's output is delivered ONLY via the generator's return value,
+   * never by mutating `messages`.
    */
   context: Context;
   /**
@@ -149,13 +148,13 @@ function joinText(content: ReadonlyArray<{ type: string }>): string {
  * 1. Constructs a pi-agent-core `Agent` over `context.messages`
  * 2. Calls `agent.continue()` (the user message is already on context)
  * 3. Bridges agent events into our `AgentStreamEvent` discriminated union
- * 4. After `agent_end`, syncs `agent.state.messages` back into
- *    `context.messages` so the route's existing `saveContext` /
- *    `cleanUpAbortedContext` keep working.
+ * 4. After `agent_end`, returns THIS run's output delta (the messages the
+ *    agent appended) as the generator's return value. `context.messages`
+ *    is treated as read-only input and never written back.
  */
 export async function* runAgent(
   options: AgentRunOptions,
-): AsyncGenerator<StreamEvent, void, unknown> {
+): AsyncGenerator<StreamEvent, Message[], unknown> {
   const {
     scope,
     threadId,
@@ -175,19 +174,15 @@ export async function* runAgent(
     ...(threadId ? { threadId } : {}),
   });
 
-  // Render THIS turn's envelope into its single user message, then run
-  // the agent over [prior history + this turn] held in a LOCAL array.
-  // `context.messages` keeps only prior history during the run; the
-  // `finally` below appends just the output delta. The current user
-  // message therefore never enters `context.messages` (and so never the
-  // persisted transcript) — it lives in the envelope and is re-derived
-  // on reload, exactly mirroring the external/ACP path's split between
-  // session history and the per-turn prompt.
+  // Render THIS turn's envelope into its user message and run the agent
+  // over [prior history + this turn] in a LOCAL array, leaving
+  // `context.messages` untouched. Output leaves via this generator's
+  // RETURN value; the rendered user message is excluded from that delta
+  // (re-derived from the envelope on reload).
   //
-  // Envelope-less callers (memory analyzer, sketch, reachback) assemble
-  // `context.messages` themselves; for them `turnMessages` is empty and
-  // the run proceeds over `context.messages` directly, with the legacy
-  // full-transcript sync in the `finally`.
+  // Envelope-less callers (memory / sketch / reachback) build
+  // `context.messages` themselves and read the event stream; for them
+  // `turnMessages` is empty and the run proceeds over it directly.
   const turnMessages = envelope
     ? (await renderEnvelopeMessages(envelope, { canvasId: canvasId ?? null }))
         .messages
@@ -196,6 +191,8 @@ export async function* runAgent(
   const runMessages = envelope
     ? [...context.messages, ...turnMessages]
     : context.messages;
+  // This run's output delta — the single value we return (see the tail).
+  let outputDelta: Message[] = [];
 
   // Optional developer aid: dump the fully-assembled prompt (system +
   // prior history + this turn). No-op unless HUABU_DEBUG_PROMPT is set.
@@ -217,7 +214,7 @@ export async function* runAgent(
   // (only the lower-level `runAgentLoop` does), so we count `turn_end`
   // events and call `agent.abort()` after the cap. This calls the
   // *agent's* internal AbortController, not the route's — so the route's
-  // `cleanUpAbortedContext` does not fire, and we trim the trailing
+  // `cleanUpAbortedMessages` does not fire, and we trim the trailing
   // aborted-empty assistant message that the loop appends as a side
   // effect (see the `agent_end` branch below).
   let turnCount = 0;
@@ -228,13 +225,10 @@ export async function* runAgent(
       systemPrompt: context.systemPrompt,
       model: getLLMModel(),
       tools,
-      // The Agent setter copies the top-level array; element references
-      // stay identical, so route-side mutations on individual messages
-      // continue to work — but the array identity differs after
-      // construction, which is why we re-sync below in the `finally`.
-      // We pass the LOCAL `runMessages` (prior history + this turn) so
-      // `context.messages` is left untouched (prior history only) until
-      // the `finally` appends the output delta.
+      // The Agent setter copies the top-level array, so it owns its own
+      // transcript and `context.messages` is never written back to. We
+      // pass the LOCAL `runMessages` (prior history + this turn) purely as
+      // read-only input; the result travels out via the return value.
       messages: runMessages,
     },
     convertToLlm: (msgs) => msgs as Message[],
@@ -444,7 +438,7 @@ export async function* runAgent(
           } else if (cappedOut) {
             // Soft turn cap hit. Surface the last useful assistant text
             // (if any) followed by an error event explaining why we
-            // stopped. The route's `cleanUpAbortedContext` does NOT fire
+            // stopped. The route's `cleanUpAbortedMessages` does NOT fire
             // here because the *route's* AbortController was never
             // tripped — only the agent's internal one was.
             if (finalText) {
@@ -468,7 +462,7 @@ export async function* runAgent(
             };
           } else if (stopReason === 'aborted') {
             // Real user-initiated abort: route handles UX
-            // (cleanUpAbortedContext + status row). Nothing to emit.
+            // (cleanUpAbortedMessages + status row). Nothing to emit.
           } else {
             yield {
               type: 'done',
@@ -502,37 +496,19 @@ export async function* runAgent(
     await runPromise;
     await agent.waitForIdle();
 
-    // Sync the agent's final transcript back into `context.messages`. The
-    // route layer (saveContext / cleanUpAbortedContext) reads `context`
-    // directly, so we mutate the array in place to preserve identity.
+    // This run's output delta = everything the agent appended after the
+    // input prefix. RETURN it as the single output channel — we never
+    // write back into `context.messages` (callers read this value or the
+    // event stream, so mutating the input would be a redundant path).
     //
-    // `agent.state.messages` is `AgentMessage[]`, a superset of
-    // `Message[]` that includes the harness-only roles (`custom`,
-    // `bashExecution`, `branchSummary`, `compactionSummary`). Those
-    // roles are not part of the LLM wire protocol and must not appear
-    // in `context.messages`. `convertToLlm` is the official downcast
-    // from pi-agent-core: it drops / flattens harness roles into the
-    // user / assistant / toolResult triple `Message` expects.
-    //
-    // We append ONLY the output delta — everything after the input
-    // prefix (`priorLen` prior-history messages + `turnMessages.length`
-    // rendered user messages for this turn). The prefix is plain
-    // user/assistant/toolResult rows with no harness roles, so it
-    // survives `convertToLlm` 1:1 and the slice index stays valid. This
-    // keeps the current turn's user message OUT of `context.messages`
-    // (and thus the persisted transcript): it is re-derived from the
-    // envelope on reload, so persisting it here would duplicate it.
-    //
-    // Envelope-less callers never rendered a turn message, so there is
-    // no prefix to preserve — they keep the legacy full replace.
+    // `convertToLlm` downcasts `agent.state.messages` (a superset with
+    // harness-only roles like `custom` / `bashExecution` / `branchSummary`
+    // / `compactionSummary`) into wire `Message`s. The input prefix
+    // (`priorLen` history + `turnMessages.length` rendered rows) has no
+    // harness roles, so it survives 1:1 and the slice index stays valid.
     const converted = convertToLlm(agent.state.messages);
-    if (envelope) {
-      const outputDelta = converted.slice(priorLen + turnMessages.length);
-      context.messages.length = priorLen;
-      context.messages.push(...outputDelta);
-    } else {
-      context.messages.length = 0;
-      context.messages.push(...converted);
-    }
+    outputDelta = converted.slice(priorLen + turnMessages.length);
   }
+
+  return outputDelta;
 }

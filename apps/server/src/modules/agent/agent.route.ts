@@ -35,7 +35,7 @@ import {
 } from '../agent/store/chat-thread-store.js';
 
 import type { ChatTurnRecord } from '../agent/store/chat-thread-store.js';
-import type { AssistantMessage, Context } from '@earendil-works/pi-ai';
+import type { AssistantMessage, Context, Message } from '@earendil-works/pi-ai';
 import type {
   AgentCanvasIdQuery,
   AgentRequest,
@@ -62,11 +62,11 @@ function writeSSE(raw: NodeJS.WritableStream, event: AgentStreamEvent): void {
 }
 
 /**
- * Clean up context after an abort.
+ * Repair this turn's output messages after an abort.
  *
- * Keeps all completed messages (user prompt, partial assistant text,
- * finished tool calls and results) — these are visible to the user and
- * may have already affected the canvas.
+ * Keeps all completed messages (partial assistant text, finished tool
+ * calls and results) — these are visible to the user and may have already
+ * affected the canvas.
  *
  * Only repairs the broken tail:
  * 1. If the last assistant message requested tool calls that never got
@@ -74,9 +74,7 @@ function writeSSE(raw: NodeJS.WritableStream, event: AgentStreamEvent): void {
  *    see an invalid conversation state.
  * 2. Append an interruption notice telling the LLM not to resume.
  */
-function cleanUpAbortedContext(context: Context): void {
-  const msgs = context.messages;
-
+function cleanUpAbortedMessages(msgs: Message[]): void {
   // Collect IDs of all toolResults we have
   const completedCallIds = new Set<string>();
   for (const m of msgs) {
@@ -118,6 +116,50 @@ function cleanUpAbortedContext(context: Context): void {
       'Wait for the next user message and treat it as a new request.',
     timestamp: Date.now(),
   });
+}
+
+/**
+ * Rebuild the pi-ai {@link Context} a BUILT-IN agent turn runs over from
+ * the thread's prior turns. Built-in only: `runAgent` is stateless per
+ * turn, so this `systemPrompt` + rebuilt `messages` IS its memory. The
+ * ACP path keeps memory in its live session (`ensureAcpSession`) and gets
+ * no Context.
+ *
+ * Takes `priorTurns` (already loaded by the caller for the debug turn
+ * count) to avoid a second `loadTurns`.
+ */
+async function resumeThreadContext(params: {
+  priorTurns: ReturnType<typeof loadTurns>;
+  canvasId: string | undefined;
+  mode: Parameters<typeof loadAgent>[0];
+}): Promise<Context> {
+  const { priorTurns, canvasId, mode } = params;
+
+  // We re-render the agent's system prompt on every turn so the
+  // `{{skillCatalogue}}` placeholder reflects freshly written user
+  // skills. `canvasId` flows into `loadAgent({ canvasId })` for
+  // forward compatibility with future per-canvas template vars.
+  const agentCfg = loadAgent(mode, { canvasId });
+
+  // Workspace memory (cross-canvas user profile) is part of the agent's
+  // stable system instructions, so it rides in the system prompt as a
+  // tagged block — grounding every turn and staying cache-friendly —
+  // rather than as a one-shot first-turn user message.
+  const workspaceMemory = readWorkspaceMemory();
+  const systemPrompt = workspaceMemory
+    ? `${agentCfg.systemPrompt}\n\n<workspace_memory>\n${workspaceMemory}\n</workspace_memory>`
+    : agentCfg.systemPrompt;
+
+  // Rebuild `Context.messages` by re-serialising each prior turn's
+  // envelope + appending its transcript. The `[SYSTEM …]` encoding is
+  // regenerated here on the fly — it is never the source of truth on disk.
+  return {
+    systemPrompt,
+    messages: await rebuildContextMessages(priorTurns, {
+      canvasId: canvasId ?? null,
+    }),
+    tools: [],
+  };
 }
 
 // ==================== Route ====================
@@ -472,46 +514,19 @@ const agentRoutes: FastifyPluginAsync = async (
 
     const resolvedThreadId = getOrCreateThreadId(threadId);
 
-    // Build or resume context from the structured turn log.
-    //
-    // We re-render the agent's system prompt on every turn so the
-    // `{{skillCatalogue}}` placeholder reflects freshly written user
-    // skills. `canvasId` flows into `loadAgent({ canvasId })` for
-    // forward compatibility with future per-canvas template vars.
-    const agentCfg = loadAgent(mode, { canvasId });
-
-    // Commit any crash-leftover in-progress turn before starting a new
-    // one, then rebuild the pi-ai `Context.messages` the agent runs over
-    // by re-serialising each prior turn's envelope + appending its
-    // transcript. The `[SYSTEM …]` encoding is regenerated here on the
-    // fly — it is never the source of truth on disk.
+    // Commit any crash-leftover in-progress turn, then load the prior
+    // turns. Both backends need this: `priorTurns.length` drives the debug
+    // turn number, and finalize repairs a crashed active turn regardless
+    // of binding.
     finalizeActiveTurn(resolvedThreadId, canvasId);
     const priorTurns = loadTurns(resolvedThreadId, canvasId);
 
-    // Workspace memory (cross-canvas user profile) is part of the agent's
-    // stable system instructions, so it rides in the system prompt as a
-    // tagged block — grounding every turn and staying cache-friendly —
-    // rather than as a one-shot first-turn user message. Built-in path
-    // only; the external/ACP path has its own preamble and never reads it.
-    const workspaceMemory = readWorkspaceMemory();
-    const systemPrompt = workspaceMemory
-      ? `${agentCfg.systemPrompt}\n\n<workspace_memory>\n${workspaceMemory}\n</workspace_memory>`
-      : agentCfg.systemPrompt;
-
-    const context: Context = {
-      systemPrompt,
-      messages: await rebuildContextMessages(priorTurns, {
-        canvasId: canvasId ?? null,
-      }),
-      tools: [],
-    };
-
     // Build this turn's structured envelope (memory pre-read, auto-
     // snapshot, skill resolution, neighbourhood render). The envelope is
-    // what we persist AND dispatch; it is rendered into the per-turn
-    // user message INSIDE the dispatch layer (runAgent / runAcpAgent),
-    // so both backends share one render timing and the route never bakes
-    // it into `context.messages`.
+    // what we persist AND dispatch; it is rendered into the per-turn user
+    // message INSIDE the dispatch layer (runAgent / runAcpAgent), so both
+    // backends share one render timing and it never enters the persisted
+    // transcript (it is re-derived from the envelope on reload).
     const envelope = await buildChatEnvelope({
       content,
       attachments,
@@ -522,16 +537,8 @@ const agentRoutes: FastifyPluginAsync = async (
       logger: request.log,
     });
 
-    // Index where this turn's transcript begins: `context.messages`
-    // currently holds prior history only, so everything the dispatch
-    // layer appends from here on (assistant / tool / status rows) is the
-    // transcript we persist alongside the envelope. The rendered user
-    // message is intentionally excluded — it is re-derived from the
-    // envelope on reload, never duplicated into the transcript.
-    const transcriptStart = context.messages.length;
-
-    // Debug-prompt metadata, forwarded to the dispatch layer (which now
-    // owns the assembled messages). No-op unless HUABU_DEBUG_PROMPT is set.
+    // Debug-prompt metadata forwarded to the dispatch layer (it assembles
+    // the final prompt). No-op unless HUABU_DEBUG_PROMPT is set.
     const debugPrompt = {
       turnNumber: priorTurns.length + 1,
       threadId: resolvedThreadId,
@@ -572,13 +579,15 @@ const agentRoutes: FastifyPluginAsync = async (
     };
     activeRuns.set(resolvedThreadId, run);
 
-    // Per-turn ACP overlay (tool extensions + plan). Empty for internal
-    // turns; mutated by `runAcpAgent` for external-agent dispatch and
-    // folded into the persisted turn record below.
+    // Per-turn state consumed by `buildTurnRecord` below. `turnMessages`:
+    // this turn's output transcript, delivered by BOTH backends as the
+    // dispatch generator's RETURN value (collected when the stream drains).
+    // `acpOverlay`: tool extensions + plan, mutated by `runAcpAgent` only.
+    const turnMessages: Message[] = [];
     const acpOverlay = emptyAcpOverlay();
     const buildTurnRecord = (): ChatTurnRecord => ({
       envelope,
-      transcript: context.messages.slice(transcriptStart),
+      transcript: [...turnMessages],
       ...(Object.keys(acpOverlay.toolExtras).length > 0 && {
         toolExtras: acpOverlay.toolExtras,
       }),
@@ -655,118 +664,106 @@ const agentRoutes: FastifyPluginAsync = async (
       // Route dispatch: external bindings go to `runAcpAgent`, everything
       // else (including missing/`internal` bindings) goes to the built-in
       // pi-agent-core loop. Both paths yield the same `AgentStreamEvent`
-      // shape so the for-await loop below is binding-agnostic.
-      const stream: AsyncIterable<AgentStreamEvent> =
-        agentBinding?.kind === 'external'
-          ? runAcpAgent({
-              binding: {
-                alias: agentBinding.alias,
-                profileId: agentBinding.profileId,
-              },
-              threadId: resolvedThreadId,
-              canvasId,
-              envelope,
-              context,
-              overlay: acpOverlay,
-              signal: abortController.signal,
-              logger: request.log,
-              debugPrompt,
-            })
-          : runAgent({
-              scope: mode,
-              // The built-in chat agent's canvas writes are delivered to
-              // the frontend ONLY via the sync broadcast (like ACP), not
-              // applied from the chat tool result. Attributing them to the
-              // chat `threadId` feeds the per-thread change card
-              // (ChangeReviewCard) that owns revert for this agent.
-              threadId: resolvedThreadId,
-              canvasId,
-              envelope,
-              context,
-              maxIterations: 20,
-              signal: abortController.signal,
-              logger: request.log,
-              debugPrompt,
-            });
+      // shape so the consume loop below is binding-agnostic.
+      let stream: AsyncGenerator<AgentStreamEvent, Message[]>;
+      if (agentBinding?.kind === 'external') {
+        stream = runAcpAgent({
+          binding: {
+            alias: agentBinding.alias,
+            profileId: agentBinding.profileId,
+          },
+          threadId: resolvedThreadId,
+          canvasId,
+          envelope,
+          overlay: acpOverlay,
+          signal: abortController.signal,
+          logger: request.log,
+          debugPrompt,
+        });
+      } else {
+        // Built-in path: rebuild the Context this turn runs over
+        // (systemPrompt + history) — the agent's entire memory. Only this
+        // branch needs it, so we build it here rather than up front; the
+        // ACP branch never touches a Context.
+        const context = await resumeThreadContext({
+          priorTurns,
+          canvasId,
+          mode,
+        });
+        stream = runAgent({
+          scope: mode,
+          // The built-in chat agent's canvas writes are delivered to the
+          // frontend ONLY via the sync broadcast (like ACP), not applied
+          // from the chat tool result. Attributing them to the chat
+          // `threadId` feeds the per-thread change card (ChangeReviewCard)
+          // that owns revert for this agent.
+          threadId: resolvedThreadId,
+          canvasId,
+          envelope,
+          context,
+          maxIterations: 20,
+          signal: abortController.signal,
+          logger: request.log,
+          debugPrompt,
+        });
+      }
 
-      // Track the latest agent error so we can persist it AFTER the stream
-      // exits. We can't push into `context.messages` mid-loop because the
-      // pi-agent-core wrapper in `runAgent()` performs a final
-      // `context.messages = [...agent.state.messages]` sync in its `finally`
-      // block — which would wipe anything we pushed inside the loop.
-      // Persisting after the loop ensures `buildHistoryItems()` can
-      // reconstruct the error status row on history reload.
+      // Track the latest agent error; persisted into `turnMessages` after
+      // the stream drains (below).
       let lastErrorDetail: string | null = null;
 
-      for await (const event of stream) {
-        if (abortController.signal.aborted) break;
-        emit(event);
+      // Manual iteration (not `for await`) so we can read the generator's
+      // RETURN value on `done` — how both backends deliver this turn's
+      // transcript. On abort we do NOT `break` (that calls
+      // `iterator.return()` and drops the return value); we stop forwarding
+      // to the client but keep draining so the dispatch settles and returns.
+      const iterator = stream[Symbol.asyncIterator]();
+      while (true) {
+        const { value, done } = await iterator.next();
+        if (done) {
+          if (value) turnMessages.push(...value);
+          break;
+        }
+        if (abortController.signal.aborted) continue;
+        emit(value);
 
-        // Capture the latest error; we persist it post-loop (see comment above).
-        if (event.type === AGENT_SSE_EVENTS.Error && event.data.error) {
-          lastErrorDetail = event.data.error;
+        // Capture the latest error; we persist it post-loop.
+        if (value.type === AGENT_SSE_EVENTS.Error && value.data.error) {
+          lastErrorDetail = value.data.error;
         }
 
-        // Periodically save context so partial progress survives refreshes
+        // Periodically save so partial progress survives refreshes.
         debouncedSave();
       }
 
-      // Persist the agent error AFTER the for-await exits — by which point
-      // runAgent's `finally` has already synced agent.state.messages back
-      // into `context.messages`, so our push survives the final flushSave.
+      // The stream has fully drained; `turnMessages` now holds this turn's
+      // output (collected from the generator return value above).
+
+      // Persist any agent error into the transcript so it survives reload.
       if (lastErrorDetail) {
-        context.messages.push({
+        turnMessages.push({
           role: 'user',
           content: `[SYSTEM Error] ${lastErrorDetail}`,
           timestamp: Date.now(),
         });
       }
 
-      // On explicit abort (user clicked stop), clean up context.
-      // Partial assistant text streamed before abort is already preserved
-      // by pi-agent-core: its agent-loop finalizes the in-flight message
-      // via `response.result()` (with `stopReason: 'aborted'`) and pushes
-      // it to `state.messages`, which `runAgent`'s finally syncs back
-      // into `context.messages`. No re-injection needed here.
+      // Explicit abort (user clicked stop): repair the transcript. Partial
+      // assistant text is already preserved — pi-agent-core finalizes the
+      // in-flight message (`stopReason: 'aborted'`) and `runAgent` returns
+      // it in the delta collected above.
       if (abortController.signal.aborted) {
+        const before = turnMessages.length;
+        cleanUpAbortedMessages(turnMessages);
         request.log.info(
-          '[agent] Abort detected — cleaning up context (%d messages before cleanup)',
-          context.messages.length,
-        );
-        cleanUpAbortedContext(context);
-        request.log.info(
-          '[agent] Context cleaned up (%d messages after cleanup)',
-          context.messages.length,
+          '[agent] Abort — transcript cleaned up (%d → %d messages)',
+          before,
+          turnMessages.length,
         );
       }
 
       // Final save — flush any pending debounce and persist the complete context
       flushSave();
-
-      // Log final context state for debugging
-      const lastMsgs = context.messages.slice(-3).map((m) => ({
-        role: m.role,
-        ...(m.role === 'user'
-          ? {
-              content:
-                typeof m.content === 'string'
-                  ? m.content.slice(0, 100)
-                  : '[multipart]',
-            }
-          : {}),
-        ...(m.role === 'assistant'
-          ? {
-              stopReason: (m as AssistantMessage).stopReason,
-              contentTypes: (m as AssistantMessage).content.map((b) => b.type),
-            }
-          : {}),
-        ...(m.role === 'toolResult' ? { toolName: m.toolName } : {}),
-      }));
-      request.log.info(
-        { totalMessages: context.messages.length, lastMessages: lastMsgs },
-        '[agent] Context saved for thread %s',
-        resolvedThreadId,
-      );
 
       if (!abortController.signal.aborted) {
         emit({ type: AGENT_SSE_EVENTS.End, data: {} });
@@ -778,8 +775,10 @@ const agentRoutes: FastifyPluginAsync = async (
           error instanceof Error ? error.message : 'Internal Error';
         emit({ type: AGENT_SSE_EVENTS.Error, data: { error: errorMsg } });
 
-        // Persist error in the transcript so it shows up on history reload
-        context.messages.push({
+        // Persist the error into the transcript so it shows up on reload.
+        // (Any output the dispatch produced before throwing is lost with
+        // the generator's return value — an error path, so acceptable.)
+        turnMessages.push({
           role: 'user',
           content: `[SYSTEM Error] ${errorMsg}`,
           timestamp: Date.now(),
@@ -788,8 +787,8 @@ const agentRoutes: FastifyPluginAsync = async (
       }
     } finally {
       // Promote the in-progress turn to the append-only JSONL log and
-      // clear the active sidecar — by now `context.messages` reflects
-      // the final state (error rows, abort cleanup, agent output).
+      // clear the active sidecar — by now `turnMessages` holds the final
+      // state (agent output + any error / abort-cleanup rows).
       finalizeTurn();
       run.completed = true;
       scheduleRunCleanup(resolvedThreadId);
