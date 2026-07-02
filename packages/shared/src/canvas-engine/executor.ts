@@ -34,6 +34,10 @@ import { applyStructuredFrameRelayout } from './autoLayout/gridLayout.js';
 import { HANDLERS, COMMAND_META } from './commands/index.js';
 import { fitFrames, type NestableNode } from './frame/index.js';
 import { getFrameSizing } from './frame/sizing.js';
+import {
+  coerceProvenance,
+  computeAiNoteProvenance,
+} from './provenance/noteProvenance.js';
 
 import type {
   CanvasReadState,
@@ -233,6 +237,64 @@ export function executeCanvasCommands(
     currentNodes = structured.nodes;
     if (fitTargets.size > 0) {
       currentNodes = fitFrames(currentNodes as NestableNode[], fitTargets);
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Note block provenance (agent batches only).
+  //
+  // `MERGE_NODE_DATA` reports which notes had their `content` rewritten
+  // (`contentEditedNodeIds`). For AI-authored batches we compute
+  // block-level provenance HERE — at the authoritative mutation point —
+  // by diffing each note's pre-edit content against its new content.
+  // The result is written onto `data.provenance` so it rides the node's
+  // REPLACE_NODE delta into the broadcast; every client then renders
+  // identical attribution without re-deriving anything in the editor
+  // (and unexpanded notes get provenance too, since it no longer
+  // depends on a live Milkdown instance).
+  //
+  // User-sourced batches are skipped: the editor shifts provenance
+  // locally against the live doc on each keystroke.
+  // ------------------------------------------------------------------
+  if (
+    anyApplied &&
+    execution.source === 'agent' &&
+    pendingEffects.contentEditedNodeIds.length > 0
+  ) {
+    const prevById = new Map(state.nodes.map((n) => [n.id, n]));
+    const editedIds = new Set(pendingEffects.contentEditedNodeIds);
+    const provByNodeId = new Map<string, ReturnType<typeof coerceProvenance>>();
+    currentNodes = currentNodes.map((node) => {
+      if (node.type !== 'note' || !editedIds.has(node.id)) return node;
+      const data = (node.data ?? {}) as Record<string, unknown>;
+      const newContent = typeof data.content === 'string' ? data.content : '';
+      const prevData = (prevById.get(node.id)?.data ?? {}) as Record<
+        string,
+        unknown
+      >;
+      const oldContent =
+        typeof prevData.content === 'string' ? prevData.content : '';
+      const provenance = computeAiNoteProvenance(
+        coerceProvenance(prevData.provenance),
+        oldContent,
+        newContent,
+      );
+      provByNodeId.set(node.id, provenance);
+      return { ...node, data: { ...data, provenance } };
+    });
+
+    // Reflect the computed provenance onto the mutated-node manifest so
+    // the server's sidecar write (`buildNodeContent`) persists it — the
+    // manifest, not `currentNodes`, is what the host writes to disk.
+    if (provByNodeId.size > 0) {
+      pendingEffects.mutatedNodes = pendingEffects.mutatedNodes.map((n) => {
+        const provenance = provByNodeId.get(n.id);
+        if (!provenance) return n;
+        return {
+          ...n,
+          data: { ...(n.data ?? {}), provenance },
+        };
+      });
     }
   }
 
