@@ -27,7 +27,6 @@
 
 import {
   AlertTriangle,
-  Folder,
   Info,
   Pencil,
   Plus,
@@ -49,10 +48,10 @@ import {
   restartAcpAgentlet,
   updateAcpProfile,
 } from '@/api/acp';
-import { pickFolder } from '@/api/workspace';
 import { Button } from '@/components/Common/Button';
 import { Input } from '@/components/Common/Input';
 import { Modal } from '@/components/Common/Modal';
+import { PathInput } from '@/components/Common/PathInput';
 import { Select } from '@/components/Common/Select';
 import { SettingRow } from '@/components/Common/SettingRow';
 import { SettingSection } from '@/components/Common/SettingSection';
@@ -61,7 +60,6 @@ import { TabGroup } from '@/components/Common/TabGroup';
 import { toast } from '@/components/Common/Toast';
 import { Tooltip } from '@/components/Common/Tooltip';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
-import { useFolderPickerSupported } from '@/store/workspaceStore';
 
 import type {
   AcpAgentCliInfo,
@@ -579,60 +577,14 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
     [detectedClis, handleCliChange],
   );
 
-  /**
-   * Show the native folder-picker button only when the server reports
-   * a GUI is available — same capability flag used by the workspace
-   * setup flow. On headless / remote servers we silently degrade to
-   * just the text input, which still works for typing a remote path.
-   */
-  const folderPickerSupported = useFolderPickerSupported();
-  const [picking, setPicking] = useState(false);
-
-  const handlePickCwd = useCallback(async () => {
-    setPicking(true);
-    try {
-      const result = await pickFolder();
-      if (result.ok) {
-        setForm((p) => ({ ...p, cwd: result.path }));
-      } else if (result.reason === 'no-picker') {
-        toast('No folder picker available on this server', {
-          tone: 'warning',
-        });
-      }
-    } catch (err) {
-      toast(
-        err instanceof Error ? err.message : 'Failed to open folder picker',
-        {
-          tone: 'danger',
-        },
-      );
-    } finally {
-      setPicking(false);
-    }
-  }, []);
-
-  const handlePickAgentDir = useCallback(async () => {
-    setPicking(true);
-    try {
-      const result = await pickFolder();
-      if (result.ok) {
-        setForm((p) => ({ ...p, agentDir: result.path }));
-      } else if (result.reason === 'no-picker') {
-        toast('No folder picker available on this server', {
-          tone: 'warning',
-        });
-      }
-    } catch (err) {
-      toast(
-        err instanceof Error ? err.message : 'Failed to open folder picker',
-        {
-          tone: 'danger',
-        },
-      );
-    } finally {
-      setPicking(false);
-    }
-  }, []);
+  const setCwd = useCallback(
+    (cwd: string) => setForm((p) => ({ ...p, cwd })),
+    [],
+  );
+  const setAgentDir = useCallback(
+    (agentDir: string) => setForm((p) => ({ ...p, agentDir })),
+    [],
+  );
 
   return (
     <Modal
@@ -685,30 +637,15 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
                   <FieldLabel hint="Absolute path to the agent-team directory containing agentlet.yaml.">
                     Agent directory
                   </FieldLabel>
-                  <div className="flex items-stretch gap-1.5">
-                    <Input
-                      value={form.agentDir}
-                      onChange={(e) =>
-                        setForm((p) => ({ ...p, agentDir: e.target.value }))
-                      }
-                      placeholder="/path/to/agent-teams/my-agent"
-                      wrapperClassName="flex-1"
-                      className="border-edge-default bg-surface w-full rounded border px-2 py-1 font-mono text-xs"
-                    />
-                    {folderPickerSupported && (
-                      <Button
-                        variant="outline"
-                        tone="neutral"
-                        size="sm"
-                        iconOnly
-                        title="Pick a folder"
-                        onClick={() => void handlePickAgentDir()}
-                        disabled={picking}
-                      >
-                        <Folder size={14} />
-                      </Button>
-                    )}
-                  </div>
+                  <PathInput
+                    value={form.agentDir}
+                    onChange={setAgentDir}
+                    placeholder="/path/to/agent-teams/my-agent"
+                    size="sm"
+                    mono
+                    pickTitle="Pick a folder"
+                    inputClassName="rounded"
+                  />
                 </label>
                 <label className="flex flex-col gap-1 text-xs">
                   <FieldLabel hint="Optional harness override. Leave blank to use the manifest default.">
@@ -752,30 +689,15 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
                     <FieldLabel hint="Absolute path to the agent-team directory containing agentlet.yaml. The daemon resolves the manifest to determine the launch command and working directory.">
                       Agent directory
                     </FieldLabel>
-                    <div className="flex items-stretch gap-1.5">
-                      <Input
-                        value={form.agentDir}
-                        onChange={(e) =>
-                          setForm((p) => ({ ...p, agentDir: e.target.value }))
-                        }
-                        placeholder="/path/to/agent-teams/my-agent"
-                        wrapperClassName="flex-1"
-                        className="border-edge-default bg-surface w-full rounded border px-2 py-1 font-mono text-xs"
-                      />
-                      {folderPickerSupported && (
-                        <Button
-                          variant="outline"
-                          tone="neutral"
-                          size="sm"
-                          iconOnly
-                          title="Pick a folder"
-                          onClick={() => void handlePickAgentDir()}
-                          disabled={picking}
-                        >
-                          <Folder size={14} />
-                        </Button>
-                      )}
-                    </div>
+                    <PathInput
+                      value={form.agentDir}
+                      onChange={setAgentDir}
+                      placeholder="/path/to/agent-teams/my-agent"
+                      size="sm"
+                      mono
+                      pickTitle="Pick a folder"
+                      inputClassName="rounded"
+                    />
                   </label>
                   <label className="flex flex-col gap-1 text-xs">
                     <FieldLabel hint="Optional harness override (e.g. 'claude', 'copilot'). Leave blank to use the first harness declared in the manifest.">
@@ -853,30 +775,15 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
               <FieldLabel hint="The agent is spawned with this as its working directory and treats it as the project root for file edits and tool calls.">
                 Working directory
               </FieldLabel>
-              <div className="flex items-stretch gap-1.5">
-                <Input
-                  value={form.cwd}
-                  onChange={(e) =>
-                    setForm((p) => ({ ...p, cwd: e.target.value }))
-                  }
-                  placeholder="/Users/me/project-x"
-                  wrapperClassName="flex-1"
-                  className="border-edge-default bg-surface w-full rounded border px-2 py-1 font-mono text-xs"
-                />
-                {folderPickerSupported && (
-                  <Button
-                    variant="outline"
-                    tone="neutral"
-                    size="sm"
-                    iconOnly
-                    title="Pick a folder"
-                    onClick={() => void handlePickCwd()}
-                    disabled={picking}
-                  >
-                    <Folder size={14} />
-                  </Button>
-                )}
-              </div>
+              <PathInput
+                value={form.cwd}
+                onChange={setCwd}
+                placeholder="/Users/me/project-x"
+                size="sm"
+                mono
+                pickTitle="Pick a folder"
+                inputClassName="rounded"
+              />
             </label>
           </div>
         )}
