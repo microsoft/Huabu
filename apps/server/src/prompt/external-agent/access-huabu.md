@@ -20,21 +20,13 @@ Fetch any file under the canvas by its path. Node content lives at `nodes/<label
 
 **Always download to a file with `-o` and then read it as needed** — don't let response bodies stream straight into your context. Node/artifact contents can be large, and dumping them to stdout wastes your context window; save to disk, then open only the parts you need.
 
-For a node file, the response carries a small metadata subset in headers: `X-Huabu-Node-Id`, `X-Huabu-Node-Type`, `X-Huabu-Src`, `X-Huabu-Locked`. To save the body **and** see those headers in one command, dump headers with `-D` while writing the body with `-o`:
+For a node file, the response carries the node's metadata in headers: `X-Huabu-Node-Id`, `X-Huabu-Node-Type`, `X-Huabu-Node-Label` (percent-encoded UTF-8 — URL-decode it), `X-Huabu-Src`, `X-Huabu-Locked`, and `X-Huabu-Node-Edges` (a JSON string `{"parents":[...],"children":[...]}` of neighbour node ids). To save the body **and** see those headers in one command, dump headers with `-D` while writing the body with `-o`:
 
 ```bash
 AUTH="Authorization: Bearer $AGENTLET_TOKEN"
 curl -fsS -H "$AUTH" -D - -o note.md "$HUABU_RFS_URL/download/nodes/My%20note.md"
 # headers → stdout, body → note.md. Use -D /dev/stderr to keep stdout clean,
 # or add | grep -i '^x-huabu' to see only the metadata.
-```
-
-Ask for JSON to get metadata + content + edges in one shot:
-
-```bash
-curl -fsS -H "$AUTH" -H "Accept: application/json" \
-  "$HUABU_RFS_URL/download/nodes/My%20note.md"
-# → { "meta": {id,type,label,src?,locked?}, "content": "...", "edges": [...] }
 ```
 
 Artifacts (images, rendered PNGs, uploaded files) live under `artifacts/`:

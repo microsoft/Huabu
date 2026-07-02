@@ -14,16 +14,16 @@
  *
  * 2. **Node metadata.** When a download targets a `nodes/<label>.md` file, we
  *    surface a small allow-list of the node's attributes (id/type/label/src/
- *    locked) plus its incident edges, sourced from `canvas.json` state (not
- *    frontmatter). Used for the `X-Huabu-*` response headers and the JSON
- *    {@link RfsNodeView}.
+ *    locked) plus its incident edges (grouped into parents/children), sourced
+ *    from `canvas.json` state (not frontmatter). All of it is serialised into
+ *    the `X-Huabu-*` response headers (label percent-encoded, edges as JSON).
  */
 
 import path from 'node:path';
 
 import {
   RFS_HEADERS,
-  type RfsEdge,
+  type RfsNodeEdges,
   type RfsNodeMeta,
 } from '@sediment/shared';
 
@@ -83,10 +83,10 @@ export function resolveReadable(
   return { absPath, physicalRel };
 }
 
-/** A node's metadata plus its incident edges, for the JSON view / headers. */
+/** A node's metadata plus its incident edges (grouped by direction). */
 export interface RfsNodeLookup {
   meta: RfsNodeMeta;
-  edges: RfsEdge[];
+  edges: RfsNodeEdges;
 }
 
 /** Canvas-relative regex for a node markdown file. */
@@ -129,23 +129,34 @@ export function lookupNodeByPath(
   if (typeof data.src === 'string') meta.src = data.src;
   if (typeof data.locked === 'boolean') meta.locked = data.locked;
 
-  const edges = ((canvas.state.edges ?? []) as CanvasEdge[])
-    .filter((e) => e.source === match.id || e.target === match.id)
-    .map<RfsEdge>((e) => ({ id: e.id, source: e.source, target: e.target }));
+  const edgeList = (canvas.state.edges ?? []) as CanvasEdge[];
+  const edges: RfsNodeEdges = {
+    parents: edgeList
+      .filter((e) => e.target === match.id)
+      .map((e) => e.source),
+    children: edgeList
+      .filter((e) => e.source === match.id)
+      .map((e) => e.target),
+  };
 
   return { meta, edges };
 }
 
 /**
- * Serialise the ASCII-safe metadata subset into `X-Huabu-*` response headers.
- * `label` is deliberately omitted (Unicode-unsafe for HTTP headers) — it is
- * available via the JSON {@link RfsNodeView} instead.
+ * Serialise the node metadata into `X-Huabu-*` response headers. The `label`
+ * is percent-encoded (Unicode-safe on the wire; the caller URL-decodes it) and
+ * the incident edges are a compact JSON string (`{"parents":…,"children":…}`).
  */
-export function rfsMetaHeaders(meta: RfsNodeMeta): Record<string, string> {
+export function rfsMetaHeaders(lookup: RfsNodeLookup): Record<string, string> {
+  const { meta, edges } = lookup;
   const headers: Record<string, string> = {
     [RFS_HEADERS.nodeId]: meta.id,
     [RFS_HEADERS.nodeType]: meta.type,
+    [RFS_HEADERS.edges]: JSON.stringify(edges),
   };
+  if (meta.label !== undefined) {
+    headers[RFS_HEADERS.nodeLabel] = encodeURIComponent(meta.label);
+  }
   if (meta.src !== undefined) headers[RFS_HEADERS.src] = meta.src;
   if (meta.locked !== undefined) {
     headers[RFS_HEADERS.locked] = String(meta.locked);

@@ -6,8 +6,8 @@
  * `/api/rfs/:canvasId`:
  *
  * - `GET  download/<path>` — fetch a node/artifact/upload file as raw bytes.
- *   Node metadata rides along in `X-Huabu-*` response headers (ASCII-safe
- *   subset). `Accept: application/json` instead returns a {@link RfsNodeView}.
+ *   All node metadata (including the label and incident edges) rides along in
+ *   ASCII-safe `X-Huabu-*` response headers (see {@link RFS_HEADERS}).
  * - `POST/DELETE upload/<file>` — stage/remove a file in the shared upload area
  *   so the internal agent can consume it (see {@link RfsUploadResponse}).
  * - `POST agent` — talk to the canvas-internal agent for all graph-semantic
@@ -26,18 +26,19 @@
  */
 
 import { z } from 'zod';
+
 import { CANVAS_NODE_TYPES } from '../canvas/node.js';
 
 // ==================== Metadata allow-list ====================
 
 /**
- * The minimal, stable subset of node attributes exposed to external agents.
+ * The metadata subset exposed to external agents on a node download.
  *
- * Split by transport:
- * - `id`, `type`, `src`, `locked` are **ASCII-safe** and mirrored into the
- *   `X-Huabu-*` response headers on a byte download (see {@link RFS_HEADERS}).
- * - `label` may contain arbitrary Unicode, so it is carried **only** in the
- *   JSON {@link RfsNodeView} — never in a header.
+ * Every field is carried in an ASCII-safe `X-Huabu-*` response header (see
+ * {@link RFS_HEADERS}). `id`, `type`, `src`, `locked` are ASCII in practice;
+ * `label` may contain arbitrary Unicode, so it is **percent-encoded** (UTF-8,
+ * like `encodeURIComponent`) before going on the wire and must be URL-decoded
+ * by the caller.
  *
  * This is intentionally a small allow-list, not the full `BaseNodeData`: server
  * hints (`contentMissing`, `duplicateFiles`, …), layout, and styling are
@@ -48,7 +49,7 @@ export const rfsNodeMetaSchema = z.object({
   id: z.string(),
   /** Node kind — one of {@link CANVAS_NODE_TYPES}. */
   type: z.enum(CANVAS_NODE_TYPES),
-  /** Display label (Unicode; JSON view only, never a header). */
+  /** Display label (Unicode; percent-encoded in the header). */
   label: z.string().optional(),
   /**
    * Artifact/URL reference for media nodes (image/pdf/video/…). The storage
@@ -62,54 +63,42 @@ export const rfsNodeMetaSchema = z.object({
 export type RfsNodeMeta = z.infer<typeof rfsNodeMetaSchema>;
 
 /**
- * A single graph edge incident to a node, in the JSON {@link RfsNodeView}.
- * Lets an agent reason about local structure without a separate call.
+ * Incident edges of a node, grouped by direction, serialised as a JSON string
+ * in the `X-Huabu-Node-Edges` header. Node ids are ASCII, so the compact JSON
+ * (`{"parents":[…],"children":[…]}`) is header-safe. `parents` are the sources
+ * of edges pointing **at** this node; `children` are the targets of edges this
+ * node points **to**.
  */
-export const rfsEdgeSchema = z.object({
-  /** Edge id. */
-  id: z.string(),
-  /** Source node id. */
-  source: z.string(),
-  /** Target node id. */
-  target: z.string(),
-});
-
-export type RfsEdge = z.infer<typeof rfsEdgeSchema>;
-
-/**
- * JSON representation of a node file, returned by `GET download/<path>` when
- * the caller sends `Accept: application/json`. Bundles the full (Unicode-safe)
- * metadata, the file body as text, and incident edges so an agent can inspect a
- * node in one round-trip.
- */
-export const rfsNodeViewSchema = z.object({
-  /** Full metadata allow-list (includes `label`). */
-  meta: rfsNodeMetaSchema,
-  /** The file body as UTF-8 text (frontmatter included, verbatim). */
-  content: z.string(),
-  /** Edges touching this node (either direction). */
-  edges: z.array(rfsEdgeSchema),
-});
-
-export type RfsNodeView = z.infer<typeof rfsNodeViewSchema>;
+export interface RfsNodeEdges {
+  /** Ids of nodes with an edge whose target is this node. */
+  parents: string[];
+  /** Ids of nodes with an edge whose source is this node. */
+  children: string[];
+}
 
 // ==================== Response headers ====================
 
 /**
- * Canonical `X-Huabu-*` response header names carrying the ASCII-safe metadata
- * subset on a raw byte download. Centralised so server and any client helper
- * agree on the exact casing. `label` is deliberately absent (Unicode-unsafe for
- * HTTP headers) — read it from the JSON view instead.
+ * Canonical `X-Huabu-*` response header names carrying the node metadata on a
+ * raw byte download. Centralised so server and any client helper agree on the
+ * exact casing.
+ *
+ * `nodeLabel` is **percent-encoded** UTF-8 (URL-decode it); `edges` is a JSON
+ * string (see {@link RfsNodeEdges}). The rest are plain ASCII strings.
  */
 export const RFS_HEADERS = {
   /** `X-Huabu-Node-Id` — the node id. */
   nodeId: 'X-Huabu-Node-Id',
   /** `X-Huabu-Node-Type` — one of {@link CANVAS_NODE_TYPES}. */
   nodeType: 'X-Huabu-Node-Type',
+  /** `X-Huabu-Node-Label` — display label, percent-encoded UTF-8. */
+  nodeLabel: 'X-Huabu-Node-Label',
   /** `X-Huabu-Src` — artifact/URL ref for media nodes, when present. */
   src: 'X-Huabu-Src',
   /** `X-Huabu-Locked` — `'true'`/`'false'` when the node is locked. */
   locked: 'X-Huabu-Locked',
+  /** `X-Huabu-Node-Edges` — `{"parents":[…],"children":[…]}` JSON string. */
+  edges: 'X-Huabu-Node-Edges',
 } as const;
 
 // ==================== Upload ====================

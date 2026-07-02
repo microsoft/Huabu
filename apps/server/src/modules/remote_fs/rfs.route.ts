@@ -6,8 +6,8 @@
  * global auth hook in `app.ts`:
  *
  * - `GET    download/<path>` — fetch a canvas file as raw bytes. Node files
- *   also carry an ASCII-safe metadata subset in `X-Huabu-*` headers; with
- *   `Accept: application/json` a node file returns an {@link RfsNodeView}.
+ *   also carry their metadata (id/type/label/src/locked + parent/child edges)
+ *   in ASCII-safe `X-Huabu-*` response headers.
  * - `POST   upload/<file>`   — stage bytes into the shared `.upload/` scratch
  *   dir (rejects on collision — the agent self-suffixes).
  * - `DELETE upload/<file>`   — remove a staged payload.
@@ -21,7 +21,7 @@
  */
 
 import { createReadStream, existsSync, statSync } from 'node:fs';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import {
@@ -30,7 +30,6 @@ import {
   RFS_HEARTBEAT_MIN_SEC,
   createId,
   rfsAgentRequestSchema,
-  type RfsNodeView,
   type RfsUploadResponse,
 } from '@sediment/shared';
 
@@ -149,20 +148,8 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
 
       const lookup = lookupNodeByPath(canvasId, physicalRel);
 
-      // JSON view: node metadata + content + edges, for a node file.
-      const accept = request.headers.accept ?? '';
-      if (accept.includes('application/json') && lookup) {
-        const content = await readFile(absPath, 'utf8');
-        const view: RfsNodeView = {
-          meta: lookup.meta,
-          content,
-          edges: lookup.edges,
-        };
-        return reply.send(view);
-      }
-
       // Raw bytes (+ X-Huabu-* headers for node files).
-      if (lookup) reply.headers(rfsMetaHeaders(lookup.meta));
+      if (lookup) reply.headers(rfsMetaHeaders(lookup));
       return reply
         .header('Content-Type', mimeForPath(absPath))
         .send(createReadStream(absPath));
