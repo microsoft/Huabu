@@ -18,16 +18,10 @@ There are two ways to work:
 
 Fetch any file under the canvas by its path. Node content lives at `nodes/<label>.md`; you are handed the exact `file` path for each selected node — pass it straight through (URL-encode spaces / unicode).
 
+For a node file, the response carries a small metadata subset in headers: `X-Huabu-Node-Id`, `X-Huabu-Node-Type`, `X-Huabu-Src`, `X-Huabu-Locked`. To save the body **and** see those headers in one command, dump headers with `-D` while writing the body with `-o`:
+
 ```bash
 AUTH="Authorization: Bearer $AGENTLET_TOKEN"
-curl -fsS -H "$AUTH" "$HUABU_RFS_URL/download/nodes/My%20note.md"
-```
-
-For a node file, the response carries a small metadata subset in headers: `X-Huabu-Node-Id`, `X-Huabu-Node-Type`, `X-Huabu-Src`, `X-Huabu-Locked`.
-
-To save the body **and** see those headers in one command, dump headers with `-D` while writing the body with `-o`:
-
-```bash
 curl -fsS -H "$AUTH" -D - -o note.md "$HUABU_RFS_URL/download/nodes/My%20note.md"
 # headers → stdout, body → note.md. Use -D /dev/stderr to keep stdout clean,
 # or add | grep -i '^x-huabu' to see only the metadata.
