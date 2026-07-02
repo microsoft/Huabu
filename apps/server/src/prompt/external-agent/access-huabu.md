@@ -29,10 +29,10 @@ curl -fsS -H "$AUTH" -D - -o note.md "$HUABU_RFS_URL/download/nodes/My%20note.md
 # or add | grep -i '^x-huabu' to see only the metadata.
 ```
 
-Artifacts (images, rendered PNGs, uploaded files) live under `artifacts/`:
+Artifacts (images, rendered PNGs, and other binary blobs referenced by media nodes) live under `artifacts/`. These are addressed by an opaque key filename (e.g. `artifact_ab12cd.png`), not a human path — you get the key from a node's `X-Huabu-Src` header, then fetch it:
 
 ```bash
-curl -fsS -H "$AUTH" "$HUABU_RFS_URL/download/artifacts/<key>.png" -o out.png
+curl -fsS -H "$AUTH" "$HUABU_RFS_URL/download/artifacts/artifact_ab12cd.png" -o out.png
 ```
 
 There is **no directory listing** — to discover which files matter, ask the agent (below).
