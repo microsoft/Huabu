@@ -41,14 +41,14 @@ import {
   escapeXmlAttr,
   renderAgentNodeList,
 } from '../agent/conversation/prompt/node-element.js';
-import {
-  buildAgentNodePreview,
-  extractAgentNodePreview,
-} from '../agent/node-ref.js';
+import { buildAgentNodePreview } from '../agent/node-ref.js';
 import { getCanvasStore } from '../storage/index.js';
 
 import type { AgentNodePreview } from '../agent/node-ref.js';
 import type { CanvasNodeType, SpatialNode } from '@sediment/shared';
+
+/** Per-node authored fields the ref builder needs (preview + rev). */
+type NodeContentFields = { summary?: string; content?: string; src?: string };
 
 // ─── Public entry point ─────────────────────────────────────────────────────
 
@@ -82,53 +82,44 @@ export function getNodeNeighbourhood(
   if (!target) return null;
 
   const store = getCanvasStore(canvasId);
-  const cache = new Map<string, string | undefined>();
-  const getPreview = (nodeId: string): string | undefined => {
-    if (cache.has(nodeId)) return cache.get(nodeId);
+  const cache = new Map<string, NodeContentFields>();
+  // Per-node authored fields, read once and memoized. `buildAgentNodePreview`
+  // turns these into the preview line AND the `rev` token, so the two stay in
+  // lock-step with the RFS `ETag` (same on-disk body, same `nodeRevision`).
+  const getContent = (nodeId: string): NodeContentFields => {
+    const cached = cache.get(nodeId);
+    if (cached) return cached;
 
     const raw = bundle.rawById.get(nodeId);
-    const data = raw?.data;
+    const data = raw?.data as Record<string, unknown> | undefined;
     // Always consult the on-disk frontmatter: note-style nodes keep
     // their body there, and the cost is amortised by the per-call
     // cache above. `readNode` returns `null` for nodes without a
     // sidecar (e.g. transient image/web nodes) — that's fine, we just
     // fall through to inline `data.content` / `data.src`.
-    const meta = store.readNode(nodeId);
-    const metaRecord = meta as Record<string, unknown> | null;
-    const dataRecord = data as Record<string, unknown> | undefined;
+    const meta = store.readNode(nodeId) as Record<string, unknown> | null;
 
-    // Single shared ladder: summary > content[:120] > src. `content`
-    // prefers the on-disk body (canonical for note nodes); inline
-    // `data.content` covers text-on-canvas nodes whose body never
-    // touches disk.
-    const preview = extractAgentNodePreview({
-      id: nodeId,
-      type: (raw?.type ?? 'note') as CanvasNodeType,
-      summary:
-        typeof metaRecord?.summary === 'string'
-          ? (metaRecord.summary as string)
-          : undefined,
+    // Canonical body: prefer the on-disk `.md` body (note nodes), fall
+    // back to inline `data.content` (text-on-canvas nodes).
+    const fields: NodeContentFields = {
+      summary: typeof meta?.summary === 'string' ? meta.summary : undefined,
       content:
         typeof meta?.content === 'string' && meta.content
-          ? meta.content
+          ? (meta.content as string)
           : typeof data?.content === 'string'
-            ? data.content
+            ? (data.content as string)
             : undefined,
-      src:
-        typeof dataRecord?.src === 'string'
-          ? (dataRecord.src as string)
-          : undefined,
-    });
-
-    cache.set(nodeId, preview);
-    return preview;
+      src: typeof data?.src === 'string' ? (data.src as string) : undefined,
+    };
+    cache.set(nodeId, fields);
+    return fields;
   };
 
   return buildNodeNeighbourhoodContext(
     target,
     bundle.spatialNodes,
     bundle.edges,
-    getPreview,
+    getContent,
   );
 }
 
@@ -220,7 +211,7 @@ export function buildNodeNeighbourhoodContext(
   anchorNode: SpatialNode,
   allNodes: SpatialNode[],
   edges: ReadonlyArray<{ source: string; target: string }>,
-  getPreview?: (nodeId: string) => string | undefined,
+  getContent?: (nodeId: string) => NodeContentFields,
   opts?: { maxDistance?: number },
 ): NodeNeighbourhoodContext {
   const nodeById = new Map(allNodes.map((n) => [n.id, n]));
@@ -250,7 +241,7 @@ export function buildNodeNeighbourhoodContext(
         currentRef,
         siblings,
         nodeById,
-        getPreview,
+        getContent,
       ).filter((g) => g._minEdgeDist <= maxDistance);
       layers.push({
         frameId: frame.id,
@@ -342,7 +333,7 @@ export function buildNodeNeighbourhoodContext(
         currentRef,
         looseNodes,
         nodeById,
-        getPreview,
+        getContent,
       );
       outerGroups.push(...looseGroups);
 
@@ -389,7 +380,7 @@ function buildGroupsFromNodes(
   ref: SpatialNode,
   nodes: SpatialNode[],
   nodeById: Map<string, SpatialNode>,
-  getPreview?: (nodeId: string) => string | undefined,
+  getContent?: (nodeId: string) => NodeContentFields,
 ): SpatialGroup[] {
   if (nodes.length === 0) return [];
 
@@ -422,16 +413,14 @@ function buildGroupsFromNodes(
         dy: offset.dy,
         _minEdgeDist: edgeDist,
         arrangement,
-        nodes: ordered.map((n) => {
-          const preview = getPreview?.(n.id);
-          const ref = buildAgentNodePreview({
+        nodes: ordered.map((n) =>
+          buildAgentNodePreview({
             id: n.id,
             type: (n.type ?? 'note') as CanvasNodeType,
             label: n.label,
-          });
-          if (preview) ref.preview = preview;
-          return ref;
-        }),
+            ...getContent?.(n.id),
+          }),
+        ),
       };
 
       // Only set frame fields when a parent frame exists.

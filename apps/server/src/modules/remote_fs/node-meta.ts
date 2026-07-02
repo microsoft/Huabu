@@ -26,6 +26,7 @@ import {
   type RfsNodeEdges,
   type RfsNodeMeta,
 } from '@sediment/shared';
+import { nodeRevisionOf } from '@sediment/shared/canvas-engine';
 
 import {
   ALWAYS_SKIP,
@@ -131,6 +132,19 @@ export function lookupNodeByPath(
   if (data.label) meta.label = data.label;
   if (typeof data.src === 'string') meta.src = data.src;
   if (typeof data.locked === 'boolean') meta.locked = data.locked;
+  // Revision hashes the node's *canonical* authored content. `canvas.json`
+  // strips `data.content` (bodies live in `nodes/<label>.md`), so read the
+  // on-disk body first — otherwise every note would hash an empty content and
+  // share one constant, never-changing ETag. Media nodes carry their ref in
+  // `data.src`, so a missing sidecar is fine.
+  const body = getCanvasStore(canvasId).readNode(match.id)?.content;
+  const content =
+    typeof body === 'string'
+      ? body
+      : typeof (data as { content?: unknown }).content === 'string'
+        ? ((data as { content?: string }).content as string)
+        : undefined;
+  meta.rev = nodeRevisionOf({ content, src: data.src });
 
   const edgeList = (canvas.state.edges ?? []) as CanvasEdge[];
   const edges: RfsNodeEdges = {

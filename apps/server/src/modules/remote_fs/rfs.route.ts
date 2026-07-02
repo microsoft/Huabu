@@ -63,6 +63,27 @@ function rfsError(reason: string): { message: string } {
   };
 }
 
+/**
+ * Whether a request's `If-None-Match` matches the current `etag`, i.e. the
+ * conditional GET should short-circuit to `304 Not Modified`. Accepts `*`
+ * (match anything) or a comma-separated list of quoted ETags; a leading `W/`
+ * weak-validator prefix is stripped before comparison. Node revisions are
+ * strong, exact tokens, so a plain equality over the unwrapped value suffices.
+ */
+function ifNoneMatchSatisfied(
+  header: string | string[] | undefined,
+  etag: string,
+): boolean {
+  if (!header) return false;
+  const raw = Array.isArray(header) ? header.join(',') : header;
+  const unwrap = (s: string): string => s.trim().replace(/^W\//, '');
+  const target = unwrap(etag);
+  return raw
+    .split(',')
+    .map(unwrap)
+    .some((candidate) => candidate === '*' || candidate === target);
+}
+
 // ── SSE helpers ──
 
 const SSE_HEADERS = {
@@ -145,6 +166,19 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
       }
 
       const lookup = lookupNodeByPath(canvasId, physicalRel);
+
+      // Node files carry a revision ETag (hash of authored content) so an
+      // agent can conditional-GET: an unchanged node returns `304` and the
+      // agent reuses its cached copy instead of re-reading. Non-node files
+      // (artifacts, canvas.json, uploads) have no node revision and are served
+      // unconditionally.
+      if (lookup?.meta.rev) {
+        const etag = `"${lookup.meta.rev}"`;
+        reply.header('ETag', etag);
+        if (ifNoneMatchSatisfied(request.headers['if-none-match'], etag)) {
+          return reply.code(304).send();
+        }
+      }
 
       // Raw bytes (+ X-Huabu-* headers for node files).
       if (lookup) reply.headers(rfsMetaHeaders(lookup));

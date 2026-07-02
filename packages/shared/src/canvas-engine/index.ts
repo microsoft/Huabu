@@ -50,6 +50,8 @@ export {
   extractCanvasChanges,
   coalesceChanges,
   fingerprintNodeFields,
+  nodeRevision,
+  nodeRevisionOf,
   invertDeltas,
 } from './change.js';
 

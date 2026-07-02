@@ -66,6 +66,12 @@ export interface RenderableNode {
   filename?: string;
   /** Short preview line; emitted as the `preview` attribute when present. */
   preview?: string;
+  /**
+   * Revision token over authored content; emitted as the `rev` attribute so
+   * the model can compare it against the rev it read earlier (RFS `ETag` /
+   * a prior turn) and re-read only when it differs.
+   */
+  rev?: string;
 }
 
 /**
@@ -95,6 +101,7 @@ export function renderAgentNodeList(
         includeFileName && n.filename
           ? `file="${escapeXmlAttr(n.filename)}"`
           : '',
+        n.rev ? `rev="${escapeXmlAttr(n.rev)}"` : '',
         preview ? `preview="${escapeXmlAttr(preview)}"` : '',
       ]
         .filter(Boolean)

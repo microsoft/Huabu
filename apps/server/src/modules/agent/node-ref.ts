@@ -28,6 +28,8 @@
  * forward them here.
  */
 
+import { nodeRevisionOf } from '@sediment/shared/canvas-engine';
+
 import { toSafeFilename } from '../storage/naming.js';
 
 import type { CanvasNodeType, WireNodeRef } from '@sediment/shared';
@@ -66,6 +68,13 @@ export interface AgentNodeRef extends WireNodeRef {
 export interface AgentNodePreview extends AgentNodeRef {
   /** Best-available short text representation; ≤ ~120 chars. */
   preview?: string;
+  /**
+   * Revision token over the node's authored content (`content` / `src`),
+   * matching the `ETag` an RFS download returns. Lets the model compare "the
+   * rev I read earlier" against "the rev shown this turn" and re-read only when
+   * they differ. Absent for nodes with no authored body (e.g. frames).
+   */
+  rev?: string;
 }
 
 /**
@@ -198,14 +207,34 @@ function flattenPreview(raw: string): string {
   return raw.replace(/\s+/g, ' ').trim().slice(0, NODE_PREVIEW_MAX_LENGTH);
 }
 
+/**
+ * Revision token for a preview input, over its authored content
+ * (`content` / `src`) — the SAME `nodeRevision` the RFS `ETag` uses.
+ * Returns `undefined` when the input carries no body/src to hash (e.g. a
+ * frame, or a ref built from metadata only), so the caller omits `rev`.
+ *
+ * `content` must be the canonical body (on-disk `nodes/<label>.md` for note
+ * nodes, inline `data.content` for text-on-canvas nodes) — the same value the
+ * ladder above consumes — so the `rev` here matches the `ETag` a download of
+ * the same node would return.
+ */
+function revisionOfPreviewInput(input: NodePreviewInput): string | undefined {
+  if (typeof input.content !== 'string' && typeof input.src !== 'string') {
+    return undefined;
+  }
+  return nodeRevisionOf({ content: input.content, src: input.src });
+}
+
 /** Build the L1 ref + preview. */
 export function buildAgentNodePreview(
   input: NodePreviewInput,
 ): AgentNodePreview {
-  const base = buildAgentNodeRef(input);
+  const out: AgentNodePreview = buildAgentNodeRef(input);
   const preview = extractAgentNodePreview(input);
-  if (preview) return { ...base, preview };
-  return base;
+  if (preview) out.preview = preview;
+  const rev = revisionOfPreviewInput(input);
+  if (rev) out.rev = rev;
+  return out;
 }
 
 /**

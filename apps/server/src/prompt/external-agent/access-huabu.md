@@ -33,6 +33,16 @@ You're supposed to **never** guess node paths -- the file path is supposed to be
 
 There is **no directory listing** — to discover which files matter, ask the agent (below).
 
+### Skip re-downloading unchanged nodes — `ETag`
+
+Each node download returns an `ETag` (its content revision; also shown as `rev="…"` beside each node in your context). Remember it and send it back as `If-None-Match` next time: unchanged → `304 Not Modified` (empty body — reuse your copy); changed → `200` with a new `ETag`.
+
+```bash
+curl -fsS -H "$AUTH" -H 'If-None-Match: "3d7e"' -D - -o note.md \
+  "$HUABU_RFS_URL/download/nodes/My%20note.md"
+# 304 → still current, skip re-reading;  200 → changed, re-read.
+```
+
 ## 2. Upload a file — `POST upload/<file>`
 
 Stage a payload the internal agent can consume (e.g. content for a new node). Uploads go to a shared scratch area — pick a **descriptive, unique** name. Re-using an existing name is rejected (409); choose another.
