@@ -2,6 +2,14 @@
  * Types for the Agent Team runtime.
  */
 
+/** A single file/directory copy declaration (`require.copies` entry). */
+export interface CopyEntry {
+  /** Source path relative to the package root (where agentlet.yaml lives). */
+  from: string;
+  /** Destination path relative to the workspace directory. */
+  to: string;
+}
+
 /** Parsed agentlet.yaml manifest. */
 export interface AgentTeamManifest {
   schema: string;
@@ -16,6 +24,11 @@ export interface AgentTeamManifest {
     prompts?: string[];
     /** Skill paths to install via `npx skills add`. */
     skills?: string[];
+    /**
+     * Plain file/directory copies from the package root into each
+     * workspace, e.g. helper scripts the agent invokes at runtime.
+     */
+    copies?: CopyEntry[];
   };
   /** Path to a custom setup script (relative to package root), dynamically imported after the declarative pipeline. */
   onInstall?: string;
