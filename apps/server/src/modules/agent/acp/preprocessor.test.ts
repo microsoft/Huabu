@@ -107,7 +107,7 @@ describe('serializePrompt', () => {
     );
   });
 
-  it('mentions read-node in the selected-nodes intro', async () => {
+  it('mentions RFS download in the selected-nodes intro', async () => {
     const { serialized } = await prepareExternalAgentPrompt({
       envelope: makeEnvelope({
         text: 'task',
@@ -116,7 +116,7 @@ describe('serializePrompt', () => {
       agentAlias: 'claude',
       logger,
     });
-    expect(serialized).toContain('read-node <node-id>');
+    expect(serialized).toContain('${HUABU_RFS_URL}/download/');
   });
 
   it('escapes XML-special characters in labels so the attribute cannot break', async () => {
@@ -176,7 +176,7 @@ describe('serializePrompt', () => {
         logger,
       })
     ).serialized;
-    expect(withoutSystem).not.toContain('## Canvas Tools (Reachback)');
+    expect(withoutSystem).not.toContain('## Working with this canvas');
     expect(withoutSystem).not.toContain('Huabu');
 
     const withSystem = (
@@ -187,9 +187,9 @@ describe('serializePrompt', () => {
         logger,
       })
     ).serialized;
-    expect(withSystem).toContain('## Canvas Tools (Reachback)');
+    expect(withSystem).toContain('## Working with this canvas');
     expect(withSystem).toContain('Huabu');
-    expect(withSystem.indexOf('## Canvas Tools (Reachback)')).toBeLessThan(
+    expect(withSystem.indexOf('## Working with this canvas')).toBeLessThan(
       withSystem.indexOf('ZZ_UNIQUE_TASK_BODY'),
     );
   });
@@ -239,7 +239,7 @@ describe('prepareExternalAgentPrompt', () => {
     });
 
     expect(result.includedSystem).toBe(true);
-    expect(result.serialized).toContain('## Canvas Tools (Reachback)');
+    expect(result.serialized).toContain('## Working with this canvas');
     expect(result.serialized).toContain('first message');
   });
 
@@ -251,7 +251,7 @@ describe('prepareExternalAgentPrompt', () => {
     });
 
     expect(result.includedSystem).toBe(false);
-    expect(result.serialized).not.toContain('## Canvas Tools (Reachback)');
+    expect(result.serialized).not.toContain('## Working with this canvas');
   });
 
   it('renders a canvas-neighbourhood section when the envelope carries one', async () => {
@@ -288,7 +288,7 @@ describe('prepareExternalAgentPrompt', () => {
     expect(result.serialized).toContain(
       '<group direction="to the left" arrangement="2 nodes">',
     );
-    // ACP now emits `file=` too (read-node by id, filename for display).
+    // ACP now emits `file=` too (RFS downloads by file path).
     expect(result.serialized).toContain(
       '<node id="sketch-a" type="sketch" label="Sketch A" file="nodes/Sketch A.md" />',
     );
@@ -337,7 +337,7 @@ describe('prepareExternalAgentPrompt', () => {
     expect(result.serialized.startsWith('/compact now')).toBe(true);
     expect(result.serialized).toContain('<canvas_neighbourhood>');
     // No system preamble for slash turns, even when asked.
-    expect(result.serialized).not.toContain('## Canvas Tools (Reachback)');
+    expect(result.serialized).not.toContain('## Working with this canvas');
     expect(result.includedSystem).toBe(false);
   });
 

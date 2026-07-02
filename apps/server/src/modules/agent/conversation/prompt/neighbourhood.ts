@@ -35,7 +35,7 @@ import type { NodeNeighbourhoodContext } from '../../../canvas/node-neighbourhoo
 const READ_INTRO =
   'The user\'s request was anchored at a node on the canvas. Use this neighbourhood to disambiguate references like "this", "the one above", or implicit pronouns. Each <node> is addressable just like a selected one — pass `file` to read() for the full body.';
 const READ_NODE_INTRO =
-  'The user\'s request was anchored at a node on the canvas. Use this neighbourhood to disambiguate references like "this", "the one above", or implicit pronouns. Each <node> is addressable just like a selected one — read any with `read-node <node-id>`.';
+  'The user\'s request was anchored at a node on the canvas. Use this neighbourhood to disambiguate references like "this", "the one above", or implicit pronouns. Each <node> is addressable just like a selected one — download any at `GET ${HUABU_RFS_URL}/download/<file>`.';
 
 /**
  * Render the `<canvas_neighbourhood>` block, or `undefined` when the

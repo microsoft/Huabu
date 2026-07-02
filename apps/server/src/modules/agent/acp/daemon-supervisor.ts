@@ -318,6 +318,15 @@ class DaemonSupervisor {
   }
 
   /**
+   * The TCP port the host HTTP server bound to, or `0` before the
+   * `onListen` hook has fired. Used by the spawn orchestrator to build
+   * the `HUABU_RFS_URL` reachback base injected into agent sessions.
+   */
+  getServerPort(): number {
+    return this.serverPort;
+  }
+
+  /**
    * Force an immediate restart attempt, resetting backoff state.
    * Returns the post-restart status snapshot.
    *

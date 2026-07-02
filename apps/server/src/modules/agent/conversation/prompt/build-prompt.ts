@@ -108,7 +108,7 @@ export async function renderTurn(
   if (selectionParts.length > 0) {
     const followUp =
       profile.toolset === 'reachback'
-        ? 'read-node <id> for more'
+        ? 'download its `file` for more'
         : 'read() / inspect_nodes() for more';
     parts.push({
       type: 'text',
