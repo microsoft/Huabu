@@ -1,3 +1,9 @@
+import {
+  stripTransientNodeFields,
+  stripTransientEdgeFields,
+  TRANSIENT_NODE_FIELDS,
+} from '@sediment/shared/canvas-engine';
+
 import { ApiError, deleteNode } from '../api';
 import { toast } from '../components/Common/Toast';
 
@@ -11,8 +17,8 @@ const MAX_HISTORY = 50;
 // ---------------------------------------------------------------------------
 
 /** Snapshot of the canvas for undo / redo.
- *  Contains nodes and edges with ReactFlow internals
- *  (`selected`, `dragging`, `measured`, `internals`) stripped out. */
+ *  Contains nodes and edges with ReactFlow runtime fields
+ *  (`selected`, `dragging`, `measured`, `resizing`) stripped out. */
 export type CanvasSnapshot = {
   nodes: Node[];
   edges: Edge[];
@@ -67,14 +73,13 @@ function describeDeleteFailure(error: unknown): string {
 // ---------------------------------------------------------------------------
 
 /** Strip ReactFlow transient internals (selected, dragging, measured,
- *  internals) while preserving all other props (draggable, zIndex, extent,
- *  etc.) that are actively managed by the app. */
+ *  resizing) while preserving all other props (draggable, zIndex, extent,
+ *  etc.) that are actively managed by the app. Uses the shared canonical
+ *  field list so undo dedup and the server-side diff strip identically. */
 export function createSnapshot(nodes: Node[], edges: Edge[]): CanvasSnapshot {
   return {
-    nodes: nodes.map(
-      ({ selected: _, dragging: _d, measured: _m, ...rest }) => rest,
-    ),
-    edges: edges.map(({ selected: _, ...rest }) => rest),
+    nodes: nodes.map((n) => stripTransientNodeFields(n)),
+    edges: edges.map((e) => stripTransientEdgeFields(e)),
   };
 }
 
@@ -93,6 +98,65 @@ function snapshotsEqual(a: CanvasSnapshot, b: CanvasSnapshot): boolean {
     if (JSON.stringify(a.edges[i]) !== JSON.stringify(b.edges[i])) return false;
   }
   return true;
+}
+
+/**
+ * Question nodes own a conversational `data` payload (`content`,
+ * `threadId`, `status`, `viewed`, `agentBinding`, `agentMode`,
+ * `errorMessage`, `responseSummary`, plus the `label` derived from
+ * `content`). That payload is entirely system-driven — authored on
+ * send and mutated by the agent runner via `patchNodeSilent` — never a
+ * deliberate canvas edit. Undo/redo therefore restores a question
+ * node's geometry (position / size / parent, all top-level props) but
+ * must NOT rewind its `data` to a stale snapshot value: undoing a move
+ * should not wipe the thread binding or answer the node already holds.
+ *
+ * So for every question node that still exists in the live canvas we
+ * keep its current `data` and take only the structural props from the
+ * restored snapshot. Question nodes absent from the live canvas (undo
+ * is resurrecting a deleted node) fall back to the snapshot's `data` —
+ * the only source available, and the correct pre-deletion value.
+ *
+ * Direction-neutral: both undo and redo pop a target snapshot and own
+ * the live `currentNodes`, so the same merge applies to either.
+ */
+function preserveLiveQuestionData(
+  restoredNodes: Node[],
+  currentNodes: Node[],
+): Node[] {
+  const liveById = new Map(currentNodes.map((n) => [n.id, n]));
+  return restoredNodes.map((node) => {
+    if (node.type !== 'question') return node;
+    const live = liveById.get(node.id);
+    // Resurrection (no live node) → snapshot data is the correct source.
+    if (!live) return node;
+    return { ...node, data: live.data };
+  });
+}
+
+/**
+ * Snapshots strip React Flow runtime fields (selection / drag / measure),
+ * so a restored node carries none of them. Restoring it verbatim would
+ * therefore clear the user's current selection on every undo/redo. Re-
+ * apply the live transient fields for each node that still exists so an
+ * undo of a content/geometry change leaves selection untouched.
+ *
+ * Direction-neutral: both undo and redo own the live `currentNodes`.
+ */
+function preserveLiveTransient(
+  restoredNodes: Node[],
+  currentNodes: Node[],
+): Node[] {
+  const liveById = new Map(currentNodes.map((n) => [n.id, n]));
+  return restoredNodes.map((node) => {
+    const live = liveById.get(node.id) as Record<string, unknown> | undefined;
+    if (!live) return node;
+    const merged = { ...node } as Record<string, unknown>;
+    for (const k of TRANSIENT_NODE_FIELDS) {
+      if (k in live) merged[k] = live[k];
+    }
+    return merged as Node;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -125,6 +189,11 @@ class CanvasHistoryManager {
    *  that `snapshot: 'caller'` commands are properly paired. */
   private _gestureSnapshotTaken = false;
 
+  /** Whether the pending gesture's `takeSnapshot` actually pushed a new
+   *  entry (vs. being deduped). Drives `rollbackGestureSnapshot` so we
+   *  only pop a snapshot this gesture created. */
+  private _gestureSnapshotPushed = false;
+
   get gestureSnapshotTaken(): boolean {
     return this._gestureSnapshotTaken;
   }
@@ -132,11 +201,36 @@ class CanvasHistoryManager {
   /** Mark that a gesture snapshot was consumed by the executor. */
   consumeGestureSnapshot(): void {
     this._gestureSnapshotTaken = false;
+    this._gestureSnapshotPushed = false;
   }
 
-  /** Mark that a caller-managed snapshot was taken for the upcoming command. */
-  markGestureSnapshot(): void {
+  /** Mark that a caller-managed snapshot was taken for the upcoming command.
+   *  `pushed` records whether `takeSnapshot` actually added a stack entry
+   *  (vs. dedup), so a later `rollbackGestureSnapshot` can pop exactly the
+   *  entry this gesture created. Omit `pushed` to merely re-arm the "taken"
+   *  flag (e.g. resize preview ticks) without disturbing the recorded push
+   *  state. */
+  markGestureSnapshot(pushed?: boolean): void {
     this._gestureSnapshotTaken = true;
+    if (pushed !== undefined) this._gestureSnapshotPushed = pushed;
+  }
+
+  /**
+   * Discard the snapshot the current gesture optimistically took when the
+   * gesture turns out to have mutated nothing (e.g. a click that merely
+   * selects a node still fires `onNodeDragStart` → `beginGesture`). Without
+   * this, that snapshot captures the *result* of a prior un-snapshotted
+   * free-node move and becomes a phantom "empty" undo step.
+   *
+   * No-op unless a snapshot is still pending (not consumed by a real
+   * command) AND it actually pushed a stack entry.
+   */
+  rollbackGestureSnapshot(): void {
+    if (this._gestureSnapshotTaken && this._gestureSnapshotPushed) {
+      this.undoStack.pop();
+    }
+    this._gestureSnapshotTaken = false;
+    this._gestureSnapshotPushed = false;
   }
 
   // ---------- Public getters ----------
@@ -157,15 +251,18 @@ class CanvasHistoryManager {
    * pushed snapshot — this prevents selection-only changes (which replace
    * the nodes array reference but leave positions/data untouched) from
    * filling the stack with duplicate entries.
+   *
+   * @returns `true` if a new snapshot was pushed, `false` if deduped.
    */
-  takeSnapshot(nodes: Node[], edges: Edge[]): void {
+  takeSnapshot(nodes: Node[], edges: Edge[]): boolean {
     const candidate = createSnapshot(nodes, edges);
     const top = this.undoStack[this.undoStack.length - 1];
-    if (top && snapshotsEqual(top, candidate)) return;
+    if (top && snapshotsEqual(top, candidate)) return false;
 
     this.undoStack.push(candidate);
     if (this.undoStack.length > MAX_HISTORY) this.undoStack.shift();
     this.redoStack.length = 0;
+    return true;
   }
 
   // ---------- Undo / Redo ----------
@@ -180,7 +277,13 @@ class CanvasHistoryManager {
     if (!snapshot) return null;
 
     this.redoStack.push(createSnapshot(currentNodes, currentEdges));
-    return snapshot;
+    return {
+      ...snapshot,
+      nodes: preserveLiveTransient(
+        preserveLiveQuestionData(snapshot.nodes, currentNodes),
+        currentNodes,
+      ),
+    };
   }
 
   /**
@@ -193,7 +296,13 @@ class CanvasHistoryManager {
     if (!snapshot) return null;
 
     this.undoStack.push(createSnapshot(currentNodes, currentEdges));
-    return snapshot;
+    return {
+      ...snapshot,
+      nodes: preserveLiveTransient(
+        preserveLiveQuestionData(snapshot.nodes, currentNodes),
+        currentNodes,
+      ),
+    };
   }
 
   /** Clear all history (e.g. after loading a new canvas). */

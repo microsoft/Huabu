@@ -13,6 +13,7 @@ import { useAcpProfiles } from '@/hooks/useAcpProfiles';
 import { useAcpSessionMeta } from '@/hooks/useAcpSessionMeta';
 import { useAcpSlashCommands } from '@/hooks/useAcpSlashCommands';
 import { useInternalSlashCommands } from '@/hooks/useInternalSlashCommands';
+import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
 import {
   selectCurrentHistoryLoaded,
@@ -29,6 +30,7 @@ import {
 } from './AcpConnectionBadge';
 import { AcpSessionSelectors } from './AcpSessionSelectors';
 import { AgentSelector, type AgentChoice } from './AgentSelector';
+import { ChangeReviewCard } from './ChangeReviewCard';
 import { ChatInput } from './ChatInput';
 import { NewChatMenu, type NewChatChoice } from './NewChatMenu';
 import { parseSlashInvocations } from './parseSlashInvocations';
@@ -167,6 +169,16 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     canvasId,
     setAgentBinding,
   ]);
+
+  // Load the persisted change-review records when a thread opens so the
+  // change card survives reload / a canvas that was previously closed.
+  // Applies to both ACP threads and the built-in chat agent (C2), which
+  // now also broadcasts its changes to the per-thread card.
+  const loadThreadChanges = useAcpThreadChangesStore((s) => s.load);
+  useEffect(() => {
+    if (!canvasId || !threadId) return;
+    void loadThreadChanges(canvasId, threadId);
+  }, [canvasId, threadId, loadThreadChanges]);
 
   // Gate the ACP per-thread hooks on the binding being external. We
   // intentionally do NOT also gate on the profile still existing in
@@ -720,6 +732,9 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         {/* Input is hidden in sketch inspector mode — it's a read-only view. */}
         {!viewingSketchCluster && (
           <div className="px-3 pb-2">
+            {canvasId && threadId ? (
+              <ChangeReviewCard canvasId={canvasId} threadId={threadId} />
+            ) : null}
             <ChatInput
               value={input}
               onChange={setInput}

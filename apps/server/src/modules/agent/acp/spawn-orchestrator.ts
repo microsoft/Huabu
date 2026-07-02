@@ -226,6 +226,9 @@ export async function ensureAgentForThread(
       reachbackEnv.HUABU_RFS_URL = `http://127.0.0.1:${port}/api/rfs/${canvasId}`;
     }
   }
+  // The ACP thread this agent serves — forwarded so reachback `/execute`
+  // calls can be attributed to this conversation's change-review card.
+  reachbackEnv.HUABU_THREAD_ID = threadId;
 
   let sessionId: string;
   let pid: number;

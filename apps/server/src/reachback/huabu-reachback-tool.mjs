@@ -31,7 +31,18 @@ import path from 'node:path';
 
 const TOKEN = process.env.AGENTLET_TOKEN;
 const CANVAS_ID = process.env.HUABU_CANVAS_ID;
+const THREAD_ID = process.env.HUABU_THREAD_ID;
 
+/**
+ * Build the `originator` for `/execute` calls. Carries the ACP thread id
+ * (when injected by the daemon) so the server can attribute the change
+ * to this conversation's review card.
+ */
+function agentOriginator() {
+  return THREAD_ID
+    ? { source: 'agent', threadId: THREAD_ID }
+    : { source: 'agent' };
+}
 /**
  * Derive the HTTP base URL from AGENTLET_SERVER (WS URL injected by
  * the daemon), or use HUABU_SERVER as explicit override.
@@ -173,7 +184,11 @@ async function callAskAgent(prompt, canvasId, opts = {}) {
       'Content-Type': 'application/json',
       Accept: 'text/event-stream',
     },
-    body: JSON.stringify({ prompt, canvasId }),
+    body: JSON.stringify({
+      prompt,
+      canvasId,
+      ...(THREAD_ID ? { hostThreadId: THREAD_ID } : {}),
+    }),
   });
 
   if (!res.ok) {
@@ -419,7 +434,7 @@ Examples:
 
   const res = await request('POST', `/api/canvas/${canvasId}/execute`, {
     commands,
-    originator: { source: 'agent' },
+    originator: agentOriginator(),
   });
   const result = await res.json();
 
@@ -452,7 +467,7 @@ Examples:
   if (linkCommands.length > 0) {
     await request('POST', `/api/canvas/${canvasId}/execute`, {
       commands: linkCommands,
-      originator: { source: 'agent' },
+      originator: agentOriginator(),
     });
   }
 

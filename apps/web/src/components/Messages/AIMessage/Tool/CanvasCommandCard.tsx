@@ -1,143 +1,41 @@
 /**
- * CanvasCommandCard — renderer for the `canvas_commands` internal
- * tool. Displays the list of canvas mutations the agent performed,
- * with per-change revert / keep / preview controls (when revertible).
+ * CanvasCommandCard — display-only renderer for the `canvas_commands`
+ * internal tool. Lists the canvas mutations the agent performed. Revert
+ * is owned by the broadcast-fed ChangeReviewCard (above the chat input),
+ * so this card carries no per-change actions.
  */
 
-import { Blend, Check, ChevronRight, Command, Undo2 } from 'lucide-react';
-import { useCallback, useMemo, useState } from 'react';
-
-import useCanvasStore from '@/store/canvasStore';
-import { useChatStore } from '@/store/chatStore';
+import { Check, ChevronRight, Command } from 'lucide-react';
+import { useMemo, useState } from 'react';
 
 import {
   partIsExecuting,
   reconstructChangesFromCommands,
   type ToolPart,
 } from './helpers';
-import { useCanvasChangePreview } from '../../../../hooks/useCanvasChanges';
-import { Button } from '../../../Common/Button';
 import { NodeRef } from '../../../Common/NodeRef';
 import { Spinner } from '../../../Common/Spinner';
 
-import type { CanvasChange } from '../../../../hooks/useCanvasChanges';
-import type { CanvasCommand, CanvasCommandsToolPart } from '@sediment/shared';
+import type { CanvasCommandsToolPart } from '@sediment/shared';
 
-export function CanvasCommandCard({
-  messageId,
-  part,
-}: ToolPart<CanvasCommandsToolPart>) {
+export function CanvasCommandCard({ part }: ToolPart<CanvasCommandsToolPart>) {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const toolResponse = part.data ?? null;
   const isExecuting = partIsExecuting(part);
-  const toolCallId = part.toolCallId;
 
-  const data =
-    toolResponse?.status === 'success'
-      ? ((toolResponse.data ?? {}) as Record<string, unknown>)
-      : ({} as Record<string, unknown>);
-
-  const canvasChanges = (data.canvasChanges ?? []) as CanvasChange[];
-  const commands = (data.commands ?? []) as Array<Record<string, unknown>>;
-
-  // Use live canvasChanges if available; otherwise reconstruct from commands
+  // Reconstruct display rows from the command list. Canvas state (and
+  // revert) is owned by the sync broadcast + ChangeReviewCard, so these
+  // rows are display-only (never revertible).
   const displayChanges = useMemo(() => {
-    if (canvasChanges.length > 0) return canvasChanges;
-    if (commands.length > 0) return reconstructChangesFromCommands(commands);
-    return [];
-  }, [canvasChanges, commands]);
+    const data =
+      toolResponse?.status === 'success'
+        ? ((toolResponse.data ?? {}) as Record<string, unknown>)
+        : {};
+    const commands = (data.commands ?? []) as Array<Record<string, unknown>>;
+    return commands.length > 0 ? reconstructChangesFromCommands(commands) : [];
+  }, [toolResponse]);
 
   const hasChanges = displayChanges.length > 0;
-  const anyRevertible = displayChanges.some((c) => c.revertible);
-
-  const upsertAssistantToolPart = useChatStore(
-    (s) => s.upsertAssistantToolPart,
-  );
-  // The card mounts inside a single chat thread; whichever thread the
-  // user is currently viewing owns this card. Reading `threadId` from
-  // the store at render time keeps the write keyed to the right slice
-  // of `messagesByThread`.
-  const threadId = useChatStore((s) => s.threadId);
-
-  const {
-    isNodeMissing,
-    isNodePreviewing,
-    handlePreviewDown,
-    handlePreviewAllDown,
-    handlePreviewUp,
-  } = useCanvasChangePreview(canvasChanges);
-
-  /**
-   * Update the `canvasChanges` array nested inside this part's
-   * typed `data` envelope. The renderers all read off
-   * `canvasChanges`, so removing / clearing is just a filtered
-   * rewrite of that array.
-   */
-  const writeChanges = useCallback(
-    (mapper: (changes: CanvasChange[]) => CanvasChange[]) => {
-      upsertAssistantToolPart(threadId, messageId, toolCallId, (existing) => {
-        if (!existing) return part;
-        if (existing.variant !== 'canvas_commands') return existing;
-        const td = existing.data;
-        if (!td || td.status !== 'success') return existing;
-        const d = (td.data ?? {}) as Record<string, unknown>;
-        const changes = (d.canvasChanges ?? []) as CanvasChange[];
-        return {
-          ...existing,
-          data: {
-            ...td,
-            data: {
-              ...d,
-              canvasChanges: mapper(changes),
-            },
-          },
-        };
-      });
-    },
-    [threadId, messageId, toolCallId, upsertAssistantToolPart, part],
-  );
-
-  const removeChange = useCallback(
-    (changeId: string) => {
-      writeChanges((changes) => changes.filter((c) => c.id !== changeId));
-    },
-    [writeChanges],
-  );
-
-  const clearAllChanges = useCallback(() => {
-    writeChanges(() => []);
-  }, [writeChanges]);
-
-  const revertChange = useCallback(
-    (changeId: string) => {
-      const change = canvasChanges.find((c) => c.id === changeId);
-      if (change?.revertible) {
-        const cmds: CanvasCommand[] = [];
-        if (change.revertCommands) cmds.push(...change.revertCommands);
-        else if (change.revertCommand) cmds.push(change.revertCommand);
-        if (cmds.length > 0) {
-          useCanvasStore.getState().executeCommands(cmds, 'ui');
-        }
-      }
-      removeChange(changeId);
-    },
-    [canvasChanges, removeChange],
-  );
-
-  const revertAllChanges = useCallback(() => {
-    const reversed = [...canvasChanges].reverse();
-    const revertCmds: CanvasCommand[] = [];
-    for (const change of reversed) {
-      if (change.revertible) {
-        if (change.revertCommands) revertCmds.push(...change.revertCommands);
-        else if (change.revertCommand) revertCmds.push(change.revertCommand);
-      }
-    }
-    if (revertCmds.length > 0) {
-      useCanvasStore.getState().executeCommands(revertCmds, 'ui');
-    }
-    clearAllChanges();
-  }, [canvasChanges, clearAllChanges]);
 
   const statusIcon = isExecuting ? (
     <Spinner size="xs" className="text-info" />
@@ -152,16 +50,42 @@ export function CanvasCommandCard({
         ? 'Canvas 1 change'
         : `Canvas ${displayChanges.length} changes`;
 
-    // Single non-revertible change → simple inline row (matches read-node single style)
-    if (displayChanges.length === 1 && !anyRevertible) {
+    // Single change → simple inline row (matches read-node single style)
+    if (displayChanges.length === 1) {
       const change = displayChanges[0];
+      // Render clickable node chips (source → target for edges, single chip
+      // for node changes) instead of a bare label. `snapshotLabel` is
+      // undefined for reconstructed changes, so NodeRef resolves the live
+      // label (or shows a struck-through "deleted" chip when the node is gone).
+      const content =
+        change.sourceNodeId && change.targetNodeId ? (
+          <>
+            {change.label.split(':')[0] || 'Connected'}{' '}
+            <NodeRef
+              nodeId={change.sourceNodeId}
+              snapshotLabel={change.sourceNodeLabel}
+            />{' '}
+            →{' '}
+            <NodeRef
+              nodeId={change.targetNodeId}
+              snapshotLabel={change.targetNodeLabel}
+            />
+          </>
+        ) : change.nodeId ? (
+          <>
+            {change.label.split(':')[0]}:{' '}
+            <NodeRef nodeId={change.nodeId} snapshotLabel={change.nodeLabel} />
+          </>
+        ) : (
+          change.label
+        );
       return (
         <div className="flex justify-start">
           <div className="w-full">
             <div className="text-fg-muted hover:bg-hover flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors">
               {statusIcon}
               <Command size={12} className="text-fg-muted/60 flex-shrink-0" />
-              <span className="flex-1 truncate">{change.label}</span>
+              <span className="flex-1 truncate">{content}</span>
             </div>
           </div>
         </div>
@@ -186,47 +110,12 @@ export function CanvasCommandCard({
                 className={`text-fg-muted/50 flex-shrink-0 transition-transform ${!isCollapsed ? 'rotate-90' : ''}`}
               />
             </button>
-            {anyRevertible && (
-              <div className="flex flex-shrink-0 items-center gap-1">
-                <Button
-                  onClick={clearAllChanges}
-                  variant="outline"
-                  size="sm"
-                  className="h-5 rounded-sm"
-                >
-                  Keep all
-                </Button>
-                <Button
-                  onClick={revertAllChanges}
-                  variant="outline"
-                  size="sm"
-                  className="h-5 rounded-sm"
-                >
-                  Revert all
-                </Button>
-                <Button
-                  variant="ghost"
-                  iconOnly
-                  size="sm"
-                  onPointerDown={handlePreviewAllDown}
-                  onPointerUp={handlePreviewUp}
-                  onPointerLeave={handlePreviewUp}
-                >
-                  <Blend />
-                </Button>
-              </div>
-            )}
           </div>
 
           {/* Change rows */}
           {!isCollapsed && (
             <div className="border-edge-default/40 ml-4 flex max-h-[24vh] flex-col gap-1 overflow-y-auto border-l py-1 pl-3">
               {displayChanges.map((change) => {
-                const allMissing =
-                  (change.nodeId && isNodeMissing(change.nodeId)) ||
-                  (change.sourceNodeId && isNodeMissing(change.sourceNodeId)) ||
-                  (change.targetNodeId && isNodeMissing(change.targetNodeId));
-
                 const renderLabel = () => {
                   if (change.sourceNodeId && change.targetNodeId) {
                     const verb = change.label.split(':')[0] || 'Connected';
@@ -236,13 +125,11 @@ export function CanvasCommandCard({
                         <NodeRef
                           nodeId={change.sourceNodeId}
                           snapshotLabel={change.sourceNodeLabel}
-                          previewing={isNodePreviewing(change.sourceNodeId)}
                         />{' '}
                         →{' '}
                         <NodeRef
                           nodeId={change.targetNodeId}
                           snapshotLabel={change.targetNodeLabel}
-                          previewing={isNodePreviewing(change.targetNodeId)}
                         />
                       </>
                     );
@@ -255,7 +142,6 @@ export function CanvasCommandCard({
                         <NodeRef
                           nodeId={change.nodeId}
                           snapshotLabel={change.nodeLabel}
-                          previewing={isNodePreviewing(change.nodeId)}
                         />
                       </>
                     );
@@ -271,41 +157,6 @@ export function CanvasCommandCard({
                     <span className="min-w-0 flex-1 truncate">
                       {renderLabel()}
                     </span>
-                    {change.revertible && (
-                      <div className="flex flex-shrink-0 items-center gap-0.5">
-                        <Button
-                          variant="ghost"
-                          iconOnly
-                          size="sm"
-                          onClick={() => removeChange(change.id)}
-                          title="Keep this change"
-                        >
-                          <Check />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          iconOnly
-                          size="sm"
-                          onClick={() => revertChange(change.id)}
-                          disabled={!change.revertible || !!allMissing}
-                          title="Revert this change"
-                        >
-                          <Undo2 />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          iconOnly
-                          size="sm"
-                          onPointerDown={() => handlePreviewDown(change)}
-                          onPointerUp={handlePreviewUp}
-                          onPointerLeave={handlePreviewUp}
-                          disabled={!change.revertible}
-                          title="Hold to preview before"
-                        >
-                          <Blend />
-                        </Button>
-                      </div>
-                    )}
                   </div>
                 );
               })}

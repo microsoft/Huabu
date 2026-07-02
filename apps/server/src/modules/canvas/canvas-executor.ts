@@ -36,13 +36,17 @@ import {
 } from '@sediment/shared';
 import {
   applySharedPostEffectsFromWriteResult,
+  applyDeltas,
   diffCanvasState,
   executeCanvasCommands,
+  extractCanvasChanges,
+  type CanvasChangeRecord,
   type CanvasEdge,
   type CanvasNode,
   type Delta,
 } from '@sediment/shared/canvas-engine';
 
+import { publishCanvasUpdate } from './canvas-sync.js';
 import {
   getCanvasStore,
   type CanvasFile,
@@ -254,6 +258,13 @@ export interface ExecuteOnServerInput {
   commands: readonly CanvasCommand[];
   originator: ExecuteOriginator;
   runId?: string;
+  /**
+   * When true, derive {@link CanvasChangeRecord}s from the batch deltas
+   * (label + inverse deltas + staleness fingerprint) and return them in
+   * `changes`. Off by default — only the out-of-band `/execute` route
+   * (ACP agents) opts in so the built-in agent path pays no cost.
+   */
+  computeChanges?: boolean;
 }
 
 export interface ExecuteOnServerOutput {
@@ -281,6 +292,11 @@ export interface ExecuteOnServerOutput {
     contentEditedNodeIds: string[];
     deferredFitFrameIds: string[];
   };
+  /**
+   * Per-change review records (label + inverse deltas + staleness
+   * fingerprint). Only populated when `computeChanges` was requested.
+   */
+  changes?: CanvasChangeRecord[];
 }
 
 export class CanvasNotFoundError extends Error {
@@ -454,6 +470,54 @@ export async function executeOnServer(
     };
     store.appendDeltaLogEntry(logEntry);
 
+    // Derive review records (ACP change cards) only when asked. Edge
+    // endpoint labels are resolved against the post-state nodes.
+    let changes: CanvasChangeRecord[] | undefined;
+    if (input.computeChanges) {
+      const labelById = new Map<string, string>();
+      for (const node of finalNodes) {
+        const lbl = (node.data as Record<string, unknown> | undefined)?.[
+          'label'
+        ];
+        if (typeof lbl === 'string' && lbl) labelById.set(node.id, lbl);
+      }
+      changes = extractCanvasChanges(deltas, { nodeLabelById: labelById });
+    }
+
+    // Broadcast the delta to live frontends and persist review records to
+    // the originating thread's sidecar. Every accepted write broadcasts —
+    // the initiating tab applies it from the sync stream, not the tool
+    // result. No-op fast path above already returned for empty diffs.
+    //
+    // When attributed to a thread, fold this batch's records into the
+    // thread's coalesced change list (one net record per entity) and
+    // broadcast that full list so live cards replace their state with it —
+    // matching what GET /changes returns.
+    let broadcastChanges = changes;
+    if (originator.threadId && changes && changes.length > 0) {
+      try {
+        broadcastChanges = store.appendChanges(originator.threadId, changes);
+      } catch {
+        /* sidecar persistence is best-effort — never fail the write */
+      }
+    }
+    publishCanvasUpdate(canvasId, {
+      type: 'update',
+      data: {
+        fromVersion,
+        toVersion,
+        deltas,
+        pendingEffects: {
+          mutatedNodes: pendingEffects.mutatedNodes,
+          deletedNodeIds: pendingEffects.deletedNodeIds,
+          contentEditedNodeIds: pendingEffects.contentEditedNodeIds,
+          deferredFitFrameIds: pendingEffects.deferredFitFrameIds,
+        },
+        ...(originator.threadId ? { threadId: originator.threadId } : {}),
+        ...(broadcastChanges ? { changes: broadcastChanges } : {}),
+      },
+    });
+
     return {
       canvasId,
       fromVersion,
@@ -466,6 +530,134 @@ export async function executeOnServer(
         deletedNodeIds: pendingEffects.deletedNodeIds,
         contentEditedNodeIds: pendingEffects.contentEditedNodeIds,
         deferredFitFrameIds: pendingEffects.deferredFitFrameIds,
+      },
+      ...(changes ? { changes } : {}),
+    };
+  });
+}
+
+/**
+ * Apply a list of {@link Delta}s directly against the canvas's
+ * authoritative state — used to revert a change card's `revertDeltas`.
+ *
+ * Mirrors {@link executeOnServer}'s persistence (hydrate → apply →
+ * persist `.md` + canvas.json → append delta-log → bump version) but
+ * starts from deltas rather than commands, so revert needs no fragile
+ * delta→command round-trip. Returns the structural deltas + pending
+ * effects so the caller can broadcast them. No-op (empty diff) leaves
+ * the version untouched.
+ */
+export async function applyDeltasOnServer(input: {
+  canvasId: string;
+  deltas: readonly Delta[];
+  originator: ExecuteOriginator;
+  runId?: string;
+}): Promise<{
+  canvasId: string;
+  fromVersion: number;
+  toVersion: number;
+  deltas: Delta[];
+  pendingEffects: {
+    mutatedNodes: CanvasNode[];
+    deletedNodeIds: string[];
+    contentEditedNodeIds: string[];
+    deferredFitFrameIds: string[];
+  };
+}> {
+  const { canvasId, originator, runId } = input;
+
+  return await withCanvasMutex(canvasId, async () => {
+    const store = getCanvasStore(canvasId);
+    const canvas = store.read();
+    if (!canvas) throw new CanvasNotFoundError(canvasId);
+
+    const fromVersion = canvas.version;
+    const prestateNodes = hydrateNodes(
+      store,
+      canvas.state.nodes as CanvasNode[],
+    );
+    const prestateEdges = (canvas.state.edges ?? []) as CanvasEdge[];
+
+    const final = applyDeltas(
+      { nodes: prestateNodes, edges: prestateEdges },
+      input.deltas,
+    );
+    const finalNodes = final.nodes;
+    const finalEdges = final.edges;
+
+    // Recompute the authoritative diff so the log row and broadcast
+    // reflect exactly what landed (tolerates already-applied / missing
+    // targets in the input deltas).
+    const deltas = diffCanvasState(
+      { nodes: prestateNodes, edges: prestateEdges },
+      { nodes: finalNodes, edges: finalEdges },
+    );
+
+    const mutatedNodes: CanvasNode[] = [];
+    const deletedNodeIds: string[] = [];
+    const contentEditedNodeIds: string[] = [];
+
+    if (deltas.length === 0) {
+      return {
+        canvasId,
+        fromVersion,
+        toVersion: fromVersion,
+        deltas,
+        pendingEffects: {
+          mutatedNodes,
+          deletedNodeIds,
+          contentEditedNodeIds,
+          deferredFitFrameIds: [],
+        },
+      };
+    }
+
+    const toVersion = fromVersion + 1;
+
+    for (const d of deltas) {
+      if (d.type === 'INSERT_NODE' || d.type === 'REPLACE_NODE') {
+        const node = d.type === 'INSERT_NODE' ? d.node : d.next;
+        mutatedNodes.push(node);
+        if (d.type === 'REPLACE_NODE') contentEditedNodeIds.push(node.id);
+        const content = buildNodeContent(node);
+        if (content) {
+          store.writeNode(content.nodeId, content, {
+            strictRename: content['labelSource'] === 'user',
+          });
+        }
+      } else if (d.type === 'DELETE_NODE') {
+        deletedNodeIds.push(d.node.id);
+        store.deleteNode(d.node.id);
+      }
+    }
+
+    const slimNodes = stripNodesForCanvas(finalNodes);
+    store.write({
+      ...canvas,
+      version: toVersion,
+      state: { ...canvas.state, nodes: slimNodes, edges: finalEdges },
+      updatedAt: Date.now(),
+    });
+
+    store.appendDeltaLogEntry({
+      version: toVersion,
+      ts: Date.now(),
+      ...(runId ? { runId } : {}),
+      commands: [],
+      deltas: deltas as unknown[],
+      originator,
+    });
+
+    return {
+      canvasId,
+      fromVersion,
+      toVersion,
+      deltas,
+      pendingEffects: {
+        mutatedNodes,
+        deletedNodeIds,
+        contentEditedNodeIds,
+        deferredFitFrameIds: [],
       },
     };
   });

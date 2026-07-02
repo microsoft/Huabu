@@ -30,6 +30,13 @@ Focus on being helpful and precise. Return factual results from the canvas — d
 interface AskAgentBody {
   prompt: string;
   canvasId: string;
+  /**
+   * The ACP conversation thread that invoked this built-in agent (from
+   * the reachback `HUABU_THREAD_ID` env). Canvas changes the built-in
+   * agent makes are broadcast to live frontends and attributed to this
+   * thread's change card. Absent for callers with no host thread.
+   */
+  hostThreadId?: string;
 }
 
 interface SnapshotQuery {
@@ -71,12 +78,13 @@ const reachbackRoutes: FastifyPluginAsync = async (app) => {
           properties: {
             prompt: { type: 'string', minLength: 1 },
             canvasId: { type: 'string', minLength: 1 },
+            hostThreadId: { type: 'string' },
           },
         },
       },
     },
     async (request, reply) => {
-      const { prompt, canvasId } = request.body;
+      const { prompt, canvasId, hostThreadId } = request.body;
       const threadId = createId('reachback');
 
       // Build a minimal context with the user's prompt
@@ -118,6 +126,10 @@ const reachbackRoutes: FastifyPluginAsync = async (app) => {
           logger: { info: (m) => request.log.info(m) },
           signal: abortController.signal,
           maxIterations: 10,
+          // Attribute canvas writes to the host ACP conversation so its
+          // change card owns them. (All canvas writes broadcast to live
+          // frontends unconditionally.)
+          ...(hostThreadId ? { threadId: hostThreadId } : {}),
         });
 
         for await (const event of stream) {

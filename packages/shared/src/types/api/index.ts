@@ -9,6 +9,7 @@ export * from './common.js';
 export * from './canvas.js';
 export * from './canvas-events.js';
 export * from './canvas-external.js';
+export * from './canvas-sync.js';
 export * from './canvas-search.js';
 export * from './workspace.js';
 export * from './web.js';

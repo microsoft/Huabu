@@ -64,6 +64,7 @@ const DEFAULT_ORIGIN: NodeOrigin = { type: 'ai-operate' };
 export async function handleCanvasCommands(
   args: CanvasCommandsArgs,
   origin: NodeOrigin = DEFAULT_ORIGIN,
+  opts?: { threadId?: string },
 ): Promise<string> {
   log.info(
     {
@@ -196,8 +197,12 @@ export async function handleCanvasCommands(
     const result = await executeOnServer({
       canvasId: args.canvasId,
       commands: annotated as unknown as CanvasCommand[],
-      originator: { source: 'agent' },
+      originator: {
+        source: 'agent',
+        ...(opts?.threadId ? { threadId: opts.threadId } : {}),
+      },
       runId,
+      ...(opts?.threadId ? { computeChanges: true } : {}),
     });
 
     return JSON.stringify({
@@ -207,8 +212,7 @@ export async function handleCanvasCommands(
       fromVersion: result.fromVersion,
       toVersion: result.toVersion,
       // Carry the executor's annotated commands (ids assigned) so the
-      // web's revert UX can snapshot prestate per command before
-      // applying the deltas.
+      // web can render the per-message command list.
       commands: result.commands,
       deltas: result.deltas,
       results: result.results,
