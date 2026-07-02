@@ -119,7 +119,6 @@ describe('stampAiEdit', () => {
       oldKeys: ['A'],
       newKeys: ['A', 'X'],
       oldMarkdownByKey: new Map(),
-      newMarkdownByKey: new Map([['X', 'inserted']]),
       at: T0,
     });
     expect(prov.blocks).toEqual([
@@ -133,7 +132,6 @@ describe('stampAiEdit', () => {
       oldKeys: ['A', 'B', 'C'],
       newKeys: ['A', 'C'],
       oldMarkdownByKey: new Map([['B', 'old text']]),
-      newMarkdownByKey: new Map(),
       at: T0,
     });
     expect(prov.blocks).toEqual([]);
@@ -147,14 +145,12 @@ describe('stampAiEdit', () => {
       oldKeys: ['A'],
       newKeys: ['A', 'X'],
       oldMarkdownByKey: new Map(),
-      newMarkdownByKey: new Map([['X', 'first ai add']]),
       at: '2025-01-01T00:00:00.000Z',
     });
     const after = stampAiEdit(before, {
       oldKeys: ['A', 'X'],
       newKeys: ['A', 'X', 'Y'],
       oldMarkdownByKey: new Map(),
-      newMarkdownByKey: new Map(),
       at: '2025-01-02T00:00:00.000Z',
     });
     // X kept with its ORIGINAL `at`
@@ -168,7 +164,6 @@ describe('stampAiEdit', () => {
       oldKeys: ['A', 'B', 'C'],
       newKeys: ['A', 'C'],
       oldMarkdownByKey: new Map([['B', 'b']]),
-      newMarkdownByKey: new Map(),
       at: T0,
     });
     expect(seed.deletedBlocks).toHaveLength(1);
@@ -177,7 +172,6 @@ describe('stampAiEdit', () => {
       oldKeys: ['A', 'C'],
       newKeys: ['C'],
       oldMarkdownByKey: new Map([['A', 'a']]),
-      newMarkdownByKey: new Map(),
       at: T0,
     });
     // The B-tombstone is dropped because its anchor 'A' no longer exists.
@@ -197,7 +191,6 @@ describe('stampAiEdit', () => {
       oldKeys: ['A', 'B', 'C'],
       newKeys: ['A', 'B-prime', 'C'],
       oldMarkdownByKey: new Map([['B', 'old B']]),
-      newMarkdownByKey: new Map([['B-prime', 'new B']]),
       at: T0,
     });
     // No tombstone — the remove was paired up.
@@ -217,7 +210,6 @@ describe('stampAiEdit', () => {
         ['B', 'old B'],
         ['C', 'old C'],
       ]),
-      newMarkdownByKey: new Map(),
       at: T0,
     });
     expect(prov.blocks).toEqual([
@@ -235,7 +227,6 @@ describe('stampAiEdit', () => {
       oldKeys: ['A', 'B', 'D'],
       newKeys: ['A', 'B-prime', 'B-extra', 'D'],
       oldMarkdownByKey: new Map([['B', 'old B']]),
-      newMarkdownByKey: new Map(),
       at: T0,
     });
     expect(prov.blocks).toEqual([
@@ -252,7 +243,6 @@ describe('stampAiEdit', () => {
       oldKeys: ['A', 'B', 'C'],
       newKeys: ['A', 'C', 'X'],
       oldMarkdownByKey: new Map([['B', 'old B']]),
-      newMarkdownByKey: new Map(),
       at: T0,
     });
     expect(prov.blocks).toEqual([
@@ -270,7 +260,6 @@ describe('shiftProvenance', () => {
       oldKeys: ['A'],
       newKeys: ['A', 'X'],
       oldMarkdownByKey: new Map(),
-      newMarkdownByKey: new Map(),
     });
     const shifted = shiftProvenance(prov, ['A', 'X-EDITED']);
     expect(shifted.blocks).toEqual([]);
@@ -281,7 +270,6 @@ describe('shiftProvenance', () => {
       oldKeys: ['A', 'B'],
       newKeys: ['A'],
       oldMarkdownByKey: new Map([['B', 'gone']]),
-      newMarkdownByKey: new Map(),
     });
     const shifted = shiftProvenance(prov, ['A-EDITED']);
     expect(shifted.deletedBlocks).toEqual([]);
@@ -292,7 +280,6 @@ describe('shiftProvenance', () => {
       oldKeys: ['A'],
       newKeys: [],
       oldMarkdownByKey: new Map([['A', 'gone']]),
-      newMarkdownByKey: new Map(),
     });
     const shifted = shiftProvenance(prov, ['Z']);
     expect(shifted.deletedBlocks).toHaveLength(1);
@@ -305,7 +292,6 @@ describe('accept / dismiss helpers', () => {
     oldKeys: ['A'],
     newKeys: ['A', 'X', 'Y'],
     oldMarkdownByKey: new Map(),
-    newMarkdownByKey: new Map(),
   });
 
   it('dropBlockEntry removes a single entry', () => {
@@ -318,7 +304,6 @@ describe('accept / dismiss helpers', () => {
       oldKeys: ['A', 'B'],
       newKeys: ['A'],
       oldMarkdownByKey: new Map([['B', 'b']]),
-      newMarkdownByKey: new Map(),
     });
     const next = dismissDeletedBlock(withTomb, 'B');
     expect(next.deletedBlocks).toEqual([]);
@@ -350,7 +335,6 @@ describe('lookup helpers', () => {
     oldKeys: ['A', 'B', 'C'],
     newKeys: ['A', 'C', 'X'],
     oldMarkdownByKey: new Map([['B', 'b']]),
-    newMarkdownByKey: new Map(),
   });
 
   it('findBlockEntry finds by key', () => {

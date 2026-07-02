@@ -113,8 +113,6 @@ export interface StampInput {
   newKeys: string[];
   /** Markdown for each old key (must contain entries for removed keys). */
   oldMarkdownByKey: Map<string, string>;
-  /** Markdown for each new key (must contain entries for added keys). */
-  newMarkdownByKey: Map<string, string>;
   /** ISO timestamp for the stamp (defaults to now). */
   at?: string;
 }
@@ -305,7 +303,6 @@ export function computeAiNoteProvenance(
     oldKeys: oldBlocks.map((b) => b.key),
     newKeys: newBlocks.map((b) => b.key),
     oldMarkdownByKey: new Map(oldBlocks.map((b) => [b.key, b.markdown])),
-    newMarkdownByKey: new Map(newBlocks.map((b) => [b.key, b.markdown])),
     ...(at ? { at } : {}),
   });
 }
