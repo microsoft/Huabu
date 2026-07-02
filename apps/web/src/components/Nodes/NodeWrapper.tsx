@@ -420,12 +420,13 @@ export const NodeWrapper = memo(
             },
             startLocalPos: { x: params.x, y: params.y },
             parentOffset,
+            lockAspect: keepAspectRatio,
           },
         });
 
         onResizeStart?.();
       },
-      [id, onNodeResizeStart, onResizeStart],
+      [id, onNodeResizeStart, onResizeStart, keepAspectRatio],
     );
 
     const handleResizeEnd = useCallback(

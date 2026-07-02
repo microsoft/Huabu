@@ -93,6 +93,16 @@ export type ResizeContext = {
   startRect: Rect;
   startLocalPos: XYPosition;
   parentOffset: XYPosition;
+  /**
+   * When `true`, the node's width/height ratio is locked (media
+   * nodes rendered with `keepAspectRatio` — image/video). Smart-snap
+   * would otherwise nudge a single edge and break the ratio, which
+   * shows up as letterboxing (empty bars) for `object-contain`
+   * content and drifts the screen-space selection outline off the
+   * node box. `applyResizeProposal` skips snapping entirely for these
+   * nodes so the committed size stays exactly proportional.
+   */
+  lockAspect?: boolean;
 };
 
 /**
@@ -874,6 +884,25 @@ export function applyResizeProposal(
 ): { x: number; y: number; width: number; height: number } {
   const ctx = _resizeContext;
   if (_kind !== 'resize' || !ctx) return rawLocal;
+
+  // Aspect-locked media (image / video) must never be distorted. xyflow's
+  // `keepAspectRatio` already handed us proportional width/height this
+  // tick; running the per-axis snap below would nudge a single edge and
+  // break the ratio — which shows up as letterboxing (empty bars) for
+  // `object-contain` content and makes the screen-space selection outline
+  // drift off the node box. Edge-snapping is also pointless here: honouring
+  // the ratio would move the perpendicular edge back off the alignment
+  // line, so the "snap" wouldn't actually align anything. Skip snap
+  // entirely, clear any stale guides, and pass the proportional rect
+  // through unchanged so the node box, image, and outline stay in lockstep.
+  if (ctx.lockAspect) {
+    useGesturePreviewStore.getState().clearSnapGuides();
+    _lastResizeSnapped = {
+      local: { x: rawLocal.x, y: rawLocal.y },
+      size: { width: rawLocal.width, height: rawLocal.height },
+    };
+    return rawLocal;
+  }
 
   const absX = ctx.parentOffset.x + rawLocal.x;
   const absY = ctx.parentOffset.y + rawLocal.y;
