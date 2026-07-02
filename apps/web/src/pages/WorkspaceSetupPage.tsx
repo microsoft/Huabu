@@ -2,9 +2,8 @@ import { FolderOpen, X } from 'lucide-react';
 import { useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 
-import { pickFolder } from '../api/workspace';
 import { Button } from '../components/Common/Button';
-import { Spinner } from '../components/Common/Spinner';
+import { PathInput } from '../components/Common/PathInput';
 import { APP_NAME } from '../config/app';
 import { useWorkspaceStore } from '../store/workspaceStore';
 
@@ -14,14 +13,15 @@ import { useWorkspaceStore } from '../store/workspaceStore';
  * Only meaningful in free mode. In managed mode the workspace is locked
  * at the server, so we redirect home (no UI to render).
  *
- * Renders one of two free-mode variants based on server capabilities:
- *   - native picker available → folder picker button + recents
- *   - headless server (no GUI) → manual absolute-path input + recents
+ * The free-mode UI always exposes a manual absolute-path input so a
+ * remote/headless server still works. When the server reports a native
+ * picker is available (`capabilities.nativePicker`) an extra folder
+ * button sits beside the input — the same input-plus-picker layout used
+ * by the external-agent settings form.
  */
 export default function WorkspaceSetupPage() {
   const navigate = useNavigate();
   const mode = useWorkspaceStore((s) => s.mode);
-  const capabilities = useWorkspaceStore((s) => s.capabilities);
   const isSyncing = useWorkspaceStore((s) => s.isSyncing);
   const recentWorkspaces = useWorkspaceStore((s) => s.recentWorkspaces);
   const removeRecentWorkspace = useWorkspaceStore(
@@ -54,10 +54,6 @@ export default function WorkspaceSetupPage() {
         </div>
 
         <FreeSetup
-          // While the first GET /workspace is in flight `capabilities` is null;
-          // assume native picker is available so the UI doesn't flash a
-          // less-capable variant unnecessarily.
-          nativePicker={capabilities?.nativePicker ?? true}
           isSyncing={isSyncing}
           recentWorkspaces={recentWorkspaces}
           removeRecentWorkspace={removeRecentWorkspace}
@@ -78,7 +74,6 @@ export default function WorkspaceSetupPage() {
 // ──────────────────────────────────────────────────────────────────────
 
 interface FreeSetupProps {
-  nativePicker: boolean;
   isSyncing: boolean;
   recentWorkspaces: string[];
   removeRecentWorkspace: (path: string) => void;
@@ -87,43 +82,20 @@ interface FreeSetupProps {
 }
 
 function FreeSetup({
-  nativePicker,
   isSyncing,
   recentWorkspaces,
   removeRecentWorkspace,
   selectWorkspace,
   onActivated,
 }: FreeSetupProps) {
-  const [isPicking, setIsPicking] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showInput, setShowInput] = useState(!nativePicker);
   const [pathInput, setPathInput] = useState('');
 
-  const isLoading = isPicking || isSyncing;
+  const isLoading = isSyncing;
 
-  const handlePickFolder = async () => {
-    setIsPicking(true);
-    setError(null);
-    try {
-      const result = await pickFolder();
-      if (!result.ok) {
-        if (result.reason === 'no-picker') {
-          // Server has no GUI — fall back to manual input.
-          setShowInput(true);
-        }
-        setIsPicking(false);
-        return;
-      }
-      await selectWorkspace(result.path);
-      onActivated();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to pick folder');
-      setIsPicking(false);
-    }
-  };
-
-  const handleSubmitPath = async () => {
-    const p = pathInput.trim();
+  /** Activate a path (typed, picked or recent) and navigate on success. */
+  const activate = async (path: string) => {
+    const p = path.trim();
     if (!p) return;
     setError(null);
     try {
@@ -134,78 +106,32 @@ function FreeSetup({
     }
   };
 
-  const handleSelectRecent = async (path: string) => {
-    setError(null);
-    try {
-      await selectWorkspace(path);
-      onActivated();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to open workspace');
-    }
+  const handleSubmitPath = async () => {
+    void activate(pathInput);
+  };
+
+  const handleSelectRecent = (path: string) => {
+    void activate(path);
   };
 
   return (
     <>
-      {/* Folder picker (when supported) */}
-      {nativePicker && !showInput && (
-        <Button
-          variant="outline"
-          tone="neutral"
-          onClick={() => void handlePickFolder()}
-          disabled={isLoading}
-          className="w-full justify-center rounded-lg py-2.5"
-        >
-          {isPicking ? (
-            <Spinner size="sm" className="text-fg-subtle" />
-          ) : (
-            <FolderOpen size={18} className="text-fg-subtle" />
-          )}
-          <span className="text-fg-default text-sm font-medium">
-            {isPicking ? 'Waiting for selection…' : 'Select Folder'}
-          </span>
-        </Button>
-      )}
-
-      {/* Manual path input (headless server fallback) */}
-      {showInput && (
-        <div>
-          <label className="text-fg-subtle mb-1.5 block text-xs font-medium">
-            Absolute path
-          </label>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={pathInput}
-              onChange={(e) => setPathInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void handleSubmitPath();
-              }}
-              placeholder="/var/lib/sediment/workspace"
-              disabled={isLoading}
-              className="border-edge-default bg-surface text-fg-default placeholder:text-fg-subtle focus:border-edge-strong min-w-0 flex-1 rounded border px-2.5 py-1.5 text-sm focus:outline-none"
-            />
-            <Button
-              variant="solid"
-              tone="info"
-              onClick={() => void handleSubmitPath()}
-              disabled={isLoading || !pathInput.trim()}
-            >
-              Open
-            </Button>
-          </div>
-          {nativePicker && (
-            <Button
-              variant="ghost"
-              tone="neutral"
-              size="sm"
-              onClick={() => setShowInput(false)}
-              className="mt-2 px-0 underline"
-            >
-              ← back to folder picker
-            </Button>
-          )}
-        </div>
-      )}
+      {/* Path input + optional native folder picker */}
+      <label className="text-fg-subtle mb-1.5 block text-xs font-medium">
+        Workspace folder
+      </label>
+      <PathInput
+        value={pathInput}
+        onChange={setPathInput}
+        onPicked={(path) => void activate(path)}
+        onError={setError}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') void handleSubmitPath();
+        }}
+        placeholder="Type an absolute path, then press Enter"
+        disabled={isLoading}
+        className="gap-2"
+      />
 
       {/* Recent workspaces */}
       {recentWorkspaces.length > 0 && (

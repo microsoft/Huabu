@@ -70,14 +70,26 @@ async function pickFolderNative(): Promise<string | null> {
     return runAndTrim('osascript', ['-e', script]);
   }
   if (process.platform === 'win32') {
-    // PowerShell FolderBrowserDialog
+    // PowerShell FolderBrowserDialog. FolderBrowserDialog has no TopMost
+    // property, so without an owner window it opens *behind* the active
+    // window (e.g. the browser) and looks like nothing happened. We give
+    // it a hidden, always-on-top owner form so the dialog surfaces to the
+    // foreground.
     const ps = [
       'Add-Type -AssemblyName System.Windows.Forms;',
+      '$owner = New-Object System.Windows.Forms.Form;',
+      '$owner.TopMost = $true;',
+      '$owner.ShowInTaskbar = $false;',
+      '$owner.Opacity = 0;',
+      '$owner.Show();',
+      '$owner.Activate();',
       '$f = New-Object System.Windows.Forms.FolderBrowserDialog;',
       '$f.Description = "Select Sediment workspace folder";',
-      'if ($f.ShowDialog() -eq "OK") { Write-Output $f.SelectedPath }',
+      '$result = $f.ShowDialog($owner);',
+      '$owner.Dispose();',
+      'if ($result -eq "OK") { Write-Output $f.SelectedPath }',
     ].join(' ');
-    return runAndTrim('powershell', ['-NoProfile', '-Command', ps]);
+    return runAndTrim('powershell', ['-NoProfile', '-STA', '-Command', ps]);
   }
   // Linux: try zenity then kdialog
   const zenity = await runAndTrim('zenity', [
