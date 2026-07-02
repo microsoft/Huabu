@@ -1,15 +1,17 @@
 /**
- * Transcript-sync tests for {@link runAgent} (方案B symmetric dispatch).
+ * Output-delta tests for {@link runAgent} (single-channel dispatch).
  *
- * `runAgent` now renders THIS turn's envelope into its user message
+ * `runAgent` renders THIS turn's envelope into its user message
  * internally and runs the agent over `[prior history + this turn]` held
- * in a LOCAL array. The invariant under test: after a run,
- * `context.messages` holds `prior history + this turn's output delta` —
- * the rendered user message is kept OUT (it is re-derived from the
- * envelope on reload, so persisting it would duplicate it).
+ * in a LOCAL array. The invariant under test: the run delivers its output
+ * ONLY via the generator's RETURN value (the messages the agent
+ * appended); `context.messages` is read-only INPUT and is never mutated.
+ * The rendered user message is kept OUT of the returned delta (it is
+ * re-derived from the envelope on reload).
  *
- * The envelope-less legacy path (memory analyzer / sketch / reachback)
- * keeps the old full-transcript replace.
+ * The envelope-less callers (memory analyzer / sketch / reachback) run
+ * over `context.messages` as-is and likewise receive the delta via the
+ * return value.
  *
  * pi-agent-core's `Agent` is mocked to a deterministic fake that appends
  * a configurable output tail and emits a single `agent_end`.
@@ -76,14 +78,18 @@ vi.mock('./conversation/prompt/build-prompt.js', () => ({
 import { runAgent } from './agent.service.js';
 
 import type { ChatEnvelope } from './conversation/envelope.js';
-import type { Context } from '@earendil-works/pi-ai';
+import type { Context, Message } from '@earendil-works/pi-ai';
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── Helpers ────────────────────────────────────────────────────────
 
-/** Drain the generator to completion (we only assert post-run state). */
-async function drain(gen: AsyncGenerator<unknown>): Promise<void> {
-  for await (const _ of gen) {
-    /* discard events */
+/** Drain the generator, returning its RETURN value (the output delta). */
+async function drain(
+  gen: AsyncGenerator<unknown, unknown, unknown>,
+): Promise<Message[]> {
+  const it = gen[Symbol.asyncIterator]();
+  while (true) {
+    const { value, done } = await it.next();
+    if (done) return (value ?? []) as Message[];
   }
 }
 
@@ -111,8 +117,8 @@ beforeEach(() => {
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
-describe('runAgent transcript sync', () => {
-  it('with an envelope: appends only the output delta, excluding the rendered user message', async () => {
+describe('runAgent output delta', () => {
+  it('with an envelope: returns only the output delta, excluding the rendered user message', async () => {
     const prior = [
       { role: 'user', content: 'earlier question', timestamp: 0 },
       {
@@ -123,7 +129,7 @@ describe('runAgent transcript sync', () => {
     ];
     const context = priorContext([...prior]);
 
-    await drain(
+    const output = await drain(
       runAgent({
         scope: 'ask',
         context,
@@ -131,21 +137,21 @@ describe('runAgent transcript sync', () => {
       }),
     );
 
-    // prior history (2) + assistant output (1) = 3; the rendered
-    // 'TURN_USER_MESSAGE' is NOT persisted into context.messages.
-    expect(context.messages).toHaveLength(3);
-    expect(context.messages[0]).toMatchObject({ content: 'earlier question' });
-    expect(context.messages[2]).toMatchObject({ role: 'assistant' });
-    const serialized = JSON.stringify(context.messages);
-    expect(serialized).not.toContain('TURN_USER_MESSAGE');
+    // `context.messages` is read-only input — unchanged (prior history only).
+    expect(context.messages).toHaveLength(2);
+    // The return value is ONLY the output delta (assistant reply); the
+    // rendered 'TURN_USER_MESSAGE' is excluded.
+    expect(output).toHaveLength(1);
+    expect(output[0]).toMatchObject({ role: 'assistant' });
+    expect(JSON.stringify(output)).not.toContain('TURN_USER_MESSAGE');
   });
 
-  it('with no envelope (legacy callers): full-transcript replace keeps the user message', async () => {
+  it('with no envelope (legacy callers): returns the appended output, leaving context untouched', async () => {
     const context = priorContext([
       { role: 'user', content: 'analyze this', timestamp: 0 },
     ]);
 
-    await drain(
+    const output = await drain(
       runAgent({
         scope: 'ask',
         context,
@@ -153,10 +159,11 @@ describe('runAgent transcript sync', () => {
       }),
     );
 
-    // The legacy path syncs the full final transcript: original user
-    // message + appended assistant output.
-    expect(context.messages).toHaveLength(2);
+    // Input context is untouched (the caller-built message stays as-is).
+    expect(context.messages).toHaveLength(1);
     expect(context.messages[0]).toMatchObject({ content: 'analyze this' });
-    expect(context.messages[1]).toMatchObject({ role: 'assistant' });
+    // Output delta = the appended assistant reply.
+    expect(output).toHaveLength(1);
+    expect(output[0]).toMatchObject({ role: 'assistant' });
   });
 });

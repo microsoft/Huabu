@@ -49,9 +49,9 @@ import type {
 export async function renderTurn(
   env: ChatEnvelope,
   profile: RenderProfile,
-  opts: { canvasId: string | null },
+  opts: { canvasId: string | null; includeNeighbourhood?: boolean },
 ): Promise<ContentPart[]> {
-  const { canvasId } = opts;
+  const { canvasId, includeNeighbourhood = true } = opts;
   const { imageAttachments, snapshotAttachments } = env.focus.selection;
   const uploads = env.user.attachments;
   const selection = [...imageAttachments, ...snapshotAttachments];
@@ -61,10 +61,17 @@ export async function renderTurn(
     env.focus.selection.refs,
     profile,
   );
-  const neighbourhoodSection = renderNeighbourhoodSection(
-    env.focus.anchor,
-    profile,
-  );
+  // The neighbourhood is a volatile "current canvas state" block, so it
+  // rides ONLY the live turn (the tail of the assembled prompt) and is
+  // omitted from rebuilt history. Keeping committed turns free of it
+  // leaves the message prefix byte-stable and append-only, which is what
+  // the provider's prompt/KV cache needs to keep hitting; a fresh copy
+  // is re-injected on the current turn instead of N stale snapshots
+  // piling up. `rebuildContextMessages` passes `false`; the live
+  // built-in / ACP turn keeps the default `true`.
+  const neighbourhoodSection = includeNeighbourhood
+    ? renderNeighbourhoodSection(env.focus.anchor, profile)
+    : undefined;
   const hasContext = Boolean(
     skillsSection || selectedNodesSection || neighbourhoodSection,
   );
@@ -148,7 +155,7 @@ export async function renderTurn(
  */
 export async function renderEnvelopeMessages(
   env: ChatEnvelope,
-  opts: { canvasId: string | null },
+  opts: { canvasId: string | null; includeNeighbourhood?: boolean },
 ): Promise<{ messages: PiMessage[] }> {
   const parts = await renderTurn(env, INTERNAL_PROFILE, opts);
   if (parts.length === 0) return { messages: [] };
@@ -174,7 +181,16 @@ export async function rebuildContextMessages(
 ): Promise<PiMessage[]> {
   const out: PiMessage[] = [];
   for (const turn of turns) {
-    const { messages } = await renderEnvelopeMessages(turn.envelope, opts);
+    // History turns render WITHOUT their neighbourhood: it was a
+    // point-in-time snapshot only relevant while that turn was live.
+    // Re-emitting a stale copy per historical turn would bloat the
+    // context and, because it is baked into a committed message, would
+    // never be reusable by the provider's prefix cache. The live turn
+    // re-injects a fresh neighbourhood as the prompt tail instead.
+    const { messages } = await renderEnvelopeMessages(turn.envelope, {
+      ...opts,
+      includeNeighbourhood: false,
+    });
     out.push(...messages, ...turn.transcript);
   }
   return out;
