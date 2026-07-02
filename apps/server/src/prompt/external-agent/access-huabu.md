@@ -25,6 +25,14 @@ curl -fsS -H "$AUTH" "$HUABU_RFS_URL/download/nodes/My%20note.md"
 
 For a node file, the response carries a small metadata subset in headers: `X-Huabu-Node-Id`, `X-Huabu-Node-Type`, `X-Huabu-Src`, `X-Huabu-Locked`.
 
+To save the body **and** see those headers in one command, dump headers with `-D` while writing the body with `-o`:
+
+```bash
+curl -fsS -H "$AUTH" -D - -o note.md "$HUABU_RFS_URL/download/nodes/My%20note.md"
+# headers → stdout, body → note.md. Use -D /dev/stderr to keep stdout clean,
+# or add | grep -i '^x-huabu' to see only the metadata.
+```
+
 Ask for JSON to get metadata + content + edges in one shot:
 
 ```bash
