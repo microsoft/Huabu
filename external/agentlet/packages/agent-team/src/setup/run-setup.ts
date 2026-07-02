@@ -20,9 +20,10 @@ import {
   getPromptTarget,
 } from './harness.js';
 import { readManifest } from './manifest.js';
-import type { AgentTeamManifest, CallbackContext, SetupCallbacks, SetupLogger } from './types.js';
+import type { AgentTeamManifest, CallbackContext, CopyEntry, SetupCallbacks, SetupLogger } from './types.js';
 import {
   createWorkspace,
+  copyEntryToWorkspace,
   distributePrompt,
   isWorkspaceReady,
   resolveWorkspaceDir,
@@ -97,6 +98,10 @@ function getRequiredSkills(manifest: AgentTeamManifest): string[] {
 
 function getRequiredPrompts(manifest: AgentTeamManifest): string[] {
   return manifest.require?.prompts ?? [];
+}
+
+function getRequiredCopies(manifest: AgentTeamManifest): CopyEntry[] {
+  return manifest.require?.copies ?? [];
 }
 
 /** Install CLI tools declared in manifest.require['cli-tools'] via npm. */
@@ -190,6 +195,22 @@ function placeSystemPrompt(
   }
 }
 
+/** Copy declared `require.copies` entries from the package into the workspace. */
+function distributeCopies(
+  manifest: AgentTeamManifest,
+  packageDir: string,
+  workspaceDir: string,
+  log: SetupLogger,
+): void {
+  const copies = getRequiredCopies(manifest);
+  if (copies.length === 0) return;
+
+  for (const { from, to } of copies) {
+    copyEntryToWorkspace(packageDir, workspaceDir, from, to);
+    log.success(`Copied ${from} → ${to}`);
+  }
+}
+
 /**
  * Load and invoke the custom onInstall script declared in the manifest.
  * The script must export a default async function.
@@ -246,10 +267,11 @@ async function runUnpack(
       );
     }
 
-    // Declarative pipeline: tools → skills → prompt
+    // Declarative pipeline: tools → skills → prompt → copies
     installTools(manifest, workspaceDir, log);
     installSkills(manifest, harness, workspaceDir, packageDir, log);
     placeSystemPrompt(manifest, packageDir, workspaceDir, harness, log);
+    distributeCopies(manifest, packageDir, workspaceDir, log);
 
     const ctx: CallbackContext = { packageDir, manifest, harness, workspaceDir, log };
 
@@ -341,6 +363,13 @@ async function runDoctor(
   }
   if (getRequiredPrompts(manifest).length) {
     log.info(`Prompts:      ${getRequiredPrompts(manifest).join(', ')}`);
+  }
+  if (getRequiredCopies(manifest).length) {
+    log.info(
+      `Copies:       ${getRequiredCopies(manifest)
+        .map(({ from, to }) => `${from} → ${to}`)
+        .join(', ')}`,
+    );
   }
   if (manifest.onInstall) log.info(`Custom setup: ${manifest.onInstall}`);
   console.log();

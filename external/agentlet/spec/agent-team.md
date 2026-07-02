@@ -36,6 +36,7 @@ user runs `agentlet agent-team setup --harness <name>` (from inside the folder)
         ├─ installs tools (npm packages)
         ├─ installs skills (npx skills add)
         ├─ places system prompt at harness-specific location
+        ├─ copies require.copies entries into the workspace
         └─ runs onInstall script (if declared)
         ↓
 host app sends { agent_dir, harness } to agentlet daemon
@@ -106,6 +107,9 @@ require:
     - system_prompt.md
   skills:
     - ./skills/huabu-read
+  copies:
+    - from: deepv.mjs
+      to: deepv.mjs
 ```
 
 ### 4.2 Fields
@@ -116,7 +120,7 @@ require:
 | `name` | `string` | yes | Stable package name. |
 | `description` | `string` | yes | Human-readable summary. |
 | `command` | `Record<string, string>` | yes | Command used to launch the agent process over ACP stdio. The keys implicitly define the supported harnesses. |
-| `require` | `{ cli-tools?: string[]; prompts?: string[]; skills?: string[] }` | no | Declarative setup requirements: npm CLI tools, prompt files, and skills to materialize in each workspace. |
+| `require` | `{ cli-tools?: string[]; prompts?: string[]; skills?: string[]; copies?: { from: string; to: string }[] }` | no | Declarative setup requirements: npm CLI tools, prompt files, skills, and plain file/directory copies to materialize in each workspace. |
 | `onInstall` | `string` | no | Path to a custom setup script (relative to package root). Dynamically imported after the declarative pipeline. Must export a default async function. |
 
 ### 4.3 `command`
@@ -141,18 +145,27 @@ The `@agentlet/agent-team` CLI processes these manifest fields in order:
 3. **`require.prompts`** — places the first prompt file at the harness-specific
    location (e.g., `CLAUDE.md` for Claude, `.github/copilot-instructions.md`
    for Copilot)
-4. **`onInstall`** — if declared, dynamically imports and runs the script
+4. **`require.copies`** — copies each `{ from, to }` entry into the workspace.
+   `from` may live anywhere on disk: relative paths resolve against the package
+   root (where `agentlet.yaml` lives), while absolute paths and a leading `~`
+   are honored (e.g. seeding a workspace from a file in the user's home
+   directory). `to` resolves relative to the workspace directory and is
+   constrained to stay inside it (no `..` traversal) so setup never writes
+   outside the workspace it owns. Files and directories are copied recursively
+   and overwritten on re-setup. Use this for runtime helpers the agent invokes
+   (e.g. a driver `.mjs`) without needing a custom `onInstall` script.
+5. **`onInstall`** — if declared, dynamically imports and runs the script
    after the above steps complete
 
 Unknown harness keys are allowed in `command`, but they are treated as
-best-effort during setup: the CLI still installs `require.cli-tools` and runs
-`onInstall`, but skips skills installation and prompt placement because those
-need harness-specific registry entries.
+best-effort during setup: the CLI still installs `require.cli-tools`, copies
+`require.copies`, and runs `onInstall`, but skips skills installation and
+prompt placement because those need harness-specific registry entries.
 
-Most agent teams need only `require.cli-tools`, `require.skills`, and
-`require.prompts`. The `onInstall` script is for truly custom logic beyond what
-the declarative fields cover (generating config files, fetching external data,
-etc.).
+Most agent teams need only `require.cli-tools`, `require.skills`,
+`require.prompts`, and `require.copies`. The `onInstall` script is for truly
+custom logic beyond what the declarative fields cover (generating config files,
+fetching external data, etc.).
 
 ### 4.5 `onInstall` Script Contract
 
@@ -343,5 +356,5 @@ internally. The host only needs to know:
 - **callback API**: `(harness, workspaceDir, ctx)` where `ctx = { packageDir, manifest, harness, workspaceDir, log }`
 - **package name**: `@agentlet/agent-team`
 - **setup entry point**: `@agentlet/agent-team` CLI is the primary entry point; per-package `agent-setup.mjs` is optional
-- **declarative setup**: `require.cli-tools`, `require.skills`, `require.prompts` in manifest; `onInstall` for custom logic
+- **declarative setup**: `require.cli-tools`, `require.skills`, `require.prompts`, `require.copies` in manifest; `onInstall` for custom logic
 - **SessionSpec variant**: nested `agentTeam?: { agentDir, harness? }` field on existing `SessionSpec`

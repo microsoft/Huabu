@@ -94,6 +94,27 @@ function validateManifest(
           errors.push(`\`require.${field}\` must be an array of strings`);
         }
       }
+
+      const copies = requireDoc.copies;
+      if (copies !== undefined) {
+        if (!Array.isArray(copies)) {
+          errors.push('`require.copies` must be an array of { from, to } objects');
+        } else {
+          copies.forEach((entry: unknown, i) => {
+            if (
+              typeof entry !== 'object' ||
+              entry === null ||
+              Array.isArray(entry) ||
+              typeof (entry as Record<string, unknown>).from !== 'string' ||
+              typeof (entry as Record<string, unknown>).to !== 'string'
+            ) {
+              errors.push(
+                `\`require.copies[${i}]\` must be an object with string \`from\` and \`to\` fields`,
+              );
+            }
+          });
+        }
+      }
     }
   }
 

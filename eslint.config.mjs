@@ -24,6 +24,9 @@ export default typescriptEslint.config(
       '**/*.min.*',
       // Vendored upstream code — lint with its own rules in the agentlet repo.
       'external/**',
+      // Agent Team packages are self-contained plugins with their own
+      // scripts/prompts; not part of the app's lint surface.
+      'agent-teams/**',
     ],
   },
   js.configs.recommended,
@@ -147,24 +150,17 @@ export default typescriptEslint.config(
     // calls bypass level filtering, structured fields, redaction, and
     // the on-disk log file — so they're banned across the server.
     //
-    // Two narrow exceptions, configured below:
+    // One narrow exception, configured below:
     //   • apps/server/src/utils/logger.ts — the logger module itself
     //     may need to fall back to console during its own
     //     initialization failure paths.
-    //   • apps/server/src/reachback/huabu-reachback-tool.mjs — a
-    //     standalone CLI tool spawned as a child process by ACP. Its
-    //     stdout is the protocol channel, so it writes diagnostics to
-    //     process.stderr directly; console usage here is intentional.
     files: ['apps/server/src/**/*.{ts,tsx,js,mjs,cjs}'],
     rules: {
       'no-console': 'error',
     },
   },
   {
-    files: [
-      'apps/server/src/utils/logger.ts',
-      'apps/server/src/reachback/huabu-reachback-tool.mjs',
-    ],
+    files: ['apps/server/src/utils/logger.ts'],
     rules: {
       'no-console': 'off',
     },

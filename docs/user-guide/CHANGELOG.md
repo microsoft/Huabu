@@ -2,7 +2,7 @@
 
 每次重要功能变更都会记录在此文件中，按时间倒序排列。
 
-## 2026-07-02 · Agent Reachback 改用 RFS：外部 agent 用 `curl` 直连画布
+## 2026-07-02 · Agent Reachback 改用 RFS:外部 agent 用 `curl` 直连画布
 
 **What Changed**
 
@@ -18,7 +18,7 @@
 - 守护进程改为注入 `HUABU_RFS_URL`（按画布的基址，无尾斜杠）替代原 `HUABU_CANVAS_ID`，端口取自新增的 `DaemonSupervisor.getServerPort()`。
 - 外部 agent 的 system prompt 精简为「人设 + `GET ${HUABU_RFS_URL}/skill` 自举」；reachback 档案的取词从 `read-node` / `write-node` 改为 RFS 的按路径下载。
 - artifact 只以 key 文件名寻址（如 `artifact_ab12cd.png`），从节点的 `X-Huabu-Src` 头取 key 后经 `download/artifacts/<key>` 获取，`.artifacts/` 等磁盘细节对外隐藏。
-- 本次**未**移除 v1 reachback 通路（工具、`/api/reachback` 节点 CRUD + 快照路由、`AGENTLET_REACHBACK_DIR` 推送机制），留待 RFS 流程用真实外部 agent 验证后再清理。
+- v1 reachback 通路（HRT 工具、`/api/reachback` 节点 CRUD + 快照路由、`AGENTLET_REACHBACK_DIR` 推送机制）已随本次一并移除；`app.ts` 的 Bearer 放行分支收敛为只保护 `/api/rfs/`。`toolset: 'reachback'` 枚举名保留（「reachback」仍是该反向触达能力的统称，RFS 即 Reachback v2），架构文档 [agent-reachback.md](../architecture/agent-reachback.md) 顶部已加「已移除」横幅、正文仅作历史保留。
 - 文件：wire 契约 [packages/shared/src/types/api/rfs.ts](../../packages/shared/src/types/api/rfs.ts)；服务端模块 [apps/server/src/modules/remote_fs/](../../apps/server/src/modules/remote_fs/)（`rfs.route.ts` / `node-meta.ts` / `mime.ts` / `skill.ts`）；随附指南 [access-huabu.md](../../apps/server/src/prompt/external-agent/access-huabu.md)；设计稿 [docs/proposals/agent-reachback-rfs.md](../proposals/agent-reachback-rfs.md)。
 
 ## 2026-06-30 · 画布搜索新增「对话」层：搜得到 Question 节点的完整聊天历史

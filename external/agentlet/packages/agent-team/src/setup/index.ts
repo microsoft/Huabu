@@ -19,9 +19,11 @@ export {
   isWorkspaceReady,
   distributePrompt,
   copyToWorkspace,
+  copyEntryToWorkspace,
 } from './workspace.js';
 export type {
   AgentTeamManifest,
+  CopyEntry,
   HarnessName,
   HarnessPromptTarget,
   CallbackContext,

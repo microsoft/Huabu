@@ -1,6 +1,4 @@
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { AgentletServer } from '@agentlet/server';
 
@@ -9,17 +7,6 @@ import { getDataDir } from '../../../data-dir.js';
 
 import type { AgentletServerOptions } from '@agentlet/protocol';
 import type { FastifyInstance } from 'fastify';
-
-// Resolve HRT script path relative to this module
-const __dirname = fileURLToPath(new URL('.', import.meta.url));
-const HRT_SCRIPT_PATH = join(
-  __dirname,
-  '..',
-  '..',
-  '..',
-  'reachback',
-  'huabu-reachback-tool.mjs',
-);
 
 /**
  * Path prefix on Sediment's HTTP server where agentlet processes connect
@@ -80,21 +67,12 @@ export function mountAgentletServer(
         { sessionId: agent.sessionId, role: agent.role },
         '[acp] agent connected',
       );
-      // Push reachback tools to newly-connected agentlet daemons
-      if (agent.role === 'agentlet') {
-        pushReachbackTools(agent.sessionId);
-      }
     },
     onReconnection: (agent) => {
       app.log.info(
         { sessionId: agent.sessionId, role: agent.role },
         '[acp] agent reconnected',
       );
-      // Re-push reachback tools on resume — the daemon's cache dir may have
-      // been cleared while it was suspended.
-      if (agent.role === 'agentlet') {
-        pushReachbackTools(agent.sessionId);
-      }
     },
     onDisconnection: (agent, reason) => {
       app.log.info(
@@ -103,22 +81,6 @@ export function mountAgentletServer(
       );
     },
   });
-
-  // Push the HRT script to an agentlet daemon over its control channel.
-  // Called on both initial connect and resume (the daemon's cache dir may
-  // have been cleared while suspended).
-  function pushReachbackTools(agentletSessionId: string): void {
-    try {
-      const content = readFileSync(HRT_SCRIPT_PATH, 'utf8');
-      server.sendResource(agentletSessionId, {
-        destination: '${AGENTLET_REACHBACK_DIR}/huabu-reachback-tool.mjs',
-        content,
-      });
-      app.log.info('[acp] reachback tools pushed to agentlet');
-    } catch (err) {
-      app.log.warn({ err }, '[acp] failed to push reachback tools');
-    }
-  }
 
   // Attach the WS upgrade listener once the underlying HTTP server is bound.
   // Fastify exposes `app.server` after `listen()`, which is what `onReady` waits for.
