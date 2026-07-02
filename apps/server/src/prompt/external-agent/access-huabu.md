@@ -29,7 +29,7 @@ curl -fsS -H "$AUTH" -D - -o note.md "$HUABU_RFS_URL/download/nodes/My%20note.md
 # or add | grep -i '^x-huabu' to see only the metadata.
 ```
 
-You're supposed to **never** guess node paths -- the file path is supposed to be provided in the user instructions and the context. In some legacy cases, you may see some artifacts only with a filename like `src: artifact_ab12cd.png` (no directory). In that case, the file is in the `.artifacts/` directory, and you can fetch it with `GET download/artifacts/artifact_ab12cd.png`. Except for that, you should **never** assume any directory structure or naming convention. IF you need to discover which files matter, ask the agent (see below -- *Talk to the canvas agent*).
+You're supposed to **never** guess node paths -- the file path is supposed to be provided in the user instructions and the context. In some legacy cases, you may see some artifacts only with a filename like `src: artifact_ab12cd.png` (no directory). In that case, you can fetch it with `GET download/artifacts/artifact_ab12cd.png`. Except for that, you should **never** assume any directory structure or naming convention. IF you need to discover which files matter, ask the agent (see below -- *Talk to the canvas agent*).
 
 There is **no directory listing** — to discover which files matter, ask the agent (below).
 
