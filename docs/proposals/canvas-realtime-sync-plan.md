@@ -1,7 +1,11 @@
 # Canvas Collaboration Sync — Upgrade Roadmap (Multi-Agent → Multi-User)
 
-Status: In-Progress — P0 shipped; P1 is the next milestone.
-Last updated: 2026-07-01
+Status: In-Progress — P0 + P1 shipped; P2 is the next milestone.
+Last updated: 2026-07-02
+
+> **Shipped foundation (P0 + P1)** is documented in
+> [../architecture/canvas-realtime-sync.md](../architecture/canvas-realtime-sync.md).
+> This proposal now tracks only what remains (P2 onward).
 
 > **End goal:** one canvas edited concurrently by **many agents and many
 > humans**, converging without lost edits or forced reloads. We get there in
@@ -33,7 +37,15 @@ Two waves:
 - **Wave 2 — Multi-user (P3–P6).** Structural co-edit without conflicts, text
   co-editing, presence, identity, and multi-device / cloud infra.
 
-## 1. Current state (P0 — shipped foundation)
+## 1. Shipped foundation (P0 + P1)
+
+The delta-based event-sourcing substrate, the out-of-band SSE broadcast, the
+dirty-node conflict model, and the per-thread change-review card are **shipped**
+and documented in
+[../architecture/canvas-realtime-sync.md](../architecture/canvas-realtime-sync.md).
+
+<details>
+<summary>P0/P1 capability map (historical)</summary>
 
 The delta-based event-sourcing substrate **and** the out-of-band broadcast are
 in place. What ships today:
@@ -50,17 +62,28 @@ in place. What ships today:
 | ACP chat-card correlation (`threadId` + `changes` + per-card revert)                      | ✅     | [acpThreadChangesStore.ts](../../apps/web/src/store/acpThreadChangesStore.ts), revert route in [canvas.route.ts](../../apps/server/src/modules/canvas/canvas.route.ts) |
 | Snapshot-on-connect version reconcile (gap → `loadCanvas`)                                | ✅     | [canvasSyncStore.ts](../../apps/web/src/store/canvasSyncStore.ts)                                                                                                      |
 
-**Known gaps carried into P0** (= the P1 backlog): no `clientId` echo filter
-(needed only once user hand-edits broadcast — P2); broadcast receivers still
-trigger preprocessing (cost deduped server-side); no `dirtyNodeIds` protection;
-version gaps do a full `loadCanvas` instead of pulling the delta log; user
-hand-edits don't propagate to other tabs at all.
+</details>
+
+**Gaps remaining after P1** (= the P2 backlog): no `clientId` echo filter
+(needed only once user hand-edits broadcast); broadcast receivers still _trigger_
+preprocessing (cost already deduped server-side, ownership cleanup pending);
+version gaps do a full `loadCanvas` (incremental delta-log backfill pending) —
+now skipped while the tab has un-persisted local edits; user hand-edits don't
+propagate to other tabs at all.
 
 ## 2. Roadmap (priority order)
 
 Legend: ✅ shipped · 🟡 partial · ⬜ todo.
 
-### P1 — Multi-agent correctness ← do first (Wave 1)
+### P1 — Multi-agent correctness — ✅ SHIPPED
+
+Folded into
+[../architecture/canvas-realtime-sync.md](../architecture/canvas-realtime-sync.md).
+The one deferred remainder (O2 preprocessing _ownership_) is tracked under P2
+below. Original rationale kept for history:
+
+<details>
+<summary>P1 detail (shipped)</summary>
 
 Makes "several agents + several tabs on one desktop" actually safe. Every item
 is a small, independently shippable fix on top of P0.
@@ -119,6 +142,8 @@ incrementally; only the rare version-gap case still falls back to a full
 `loadCanvas` (the incremental gap-heal is deferred to P2). This is
 "multi-agent done."
 
+</details>
+
 ### P2 — Multi-window user-edit sync (Plan A) ← Wave 1 finish
 
 - ⬜ **Plan A (C6).** On the autosave PUT, the server diffs old→new and
@@ -155,6 +180,19 @@ incrementally; only the rare version-gap case still falls back to a full
   the thread's updated coalesced list (reuse the `update` event's `threadId` +
   `changes`) so every tab's `replaceFromBroadcast` converges. Low-medium risk,
   additive.
+- ⬜ **SSE reliability (heartbeat + client auto-reconnect).** The sync stream
+  has no periodic keep-alive and `canvasSyncStore` (a `fetch` + typed-SSE reader,
+  not native `EventSource`) does not reconnect on drop, so a broken stream stays
+  broken until a canvas switch / reload. Add a server-side `: ping` interval
+  (cleared on close) to both SSE routes, and a client exponential-backoff
+  reconnect that re-runs the snapshot-on-connect reconcile to heal the gap.
+  Low risk; matches the current `external.route.ts` gap too.
+- ⬜ **Revert-route atomicity.** The `…/changes/:changeId/revert` handler reads
+  the record and removes it outside the per-canvas mutex (only
+  `applyDeltasOnServer` is inside), so two concurrent reverts of the same change
+  could double-apply. Wrap read → apply → remove in `withCanvasMutex`, or make
+  removal a compare-and-remove that skips apply when the record is already gone.
+  Negligible on single-user desktop; superseded by P3's unified write path.
 
 **Uplift:** two windows/tabs on the same device editing one canvas see each
 other's edits within ~1s; remote changes are reviewable (badge / checkpoint)
