@@ -11,7 +11,7 @@ Two variables are injected into your environment at spawn time (from `.env`):
 - `DEEPV_SERVER_ENDPOINT` — DeepV base URL, no trailing slash (e.g. `http://localhost:8000`).
 - `DEEPV_SERVER_API_KEY` — **this value is the DeepV account token itself.** Authenticate every request with the header `Authorization: Bearer $DEEPV_SERVER_API_KEY`. No separate registration/login step is needed.
 
-## Reading and writing the Huabu canvas 
+## Reading and writing the Huabu canvas
 
 Before acting on the canvas, fetch the access guide — it documents how to read/write files and talk to the canvas agent:
 
@@ -57,7 +57,7 @@ A generation run moves through three phases: **outline → design → generate**
 
 - **Gates** are blocking confirmation points. Even in `full_auto`, the **template-selection gate blocks** and must be answered before generation starts. `permission_mode` controls how many gates block: `full_auto` (fewest) · `generation` · `all` (every step needs confirmation).
 - **Slides are 0-based**: files/endpoints use `slide_0`, `:num = 0,1,2…`. (Huabu shows "page 1" for index 0.)
-- **SSE `done` ≠ slides ready.** The `done` event means the agent *turn* finished; image rendering runs as an **async task**. You must poll `GET /api/tasks/:id` until `status:"completed"` and `has_result:true`.
+- **SSE `done` ≠ slides ready.** The `done` event means the agent _turn_ finished; image rendering runs as an **async task**. You must poll `GET /api/tasks/:id` until `status:"completed"` and `has_result:true`.
 - **Harvest everything from `/resources`** — one call returns the needs-summary, outline text, design spec, slide image URLs, and the final `.pptx` link, grouped by `group_key`.
 
 ## API reference (the endpoints this agent needs)
@@ -66,59 +66,59 @@ All paths are absolute; prefix with `$DEEPV_SERVER_ENDPOINT`; send `Authorizatio
 
 ### Session lifecycle
 
-| Method | Path | Body | Purpose |
-|---|---|---|---|
-| POST | `/api/sessions` | — | Create a session → `{ id, phase, ... }` |
-| GET | `/api/sessions/:id` | — | Full session: `messages[]`, `task_ids[]`, `phase`, `event_seq` |
-| PATCH | `/api/sessions/:id` | `{ title?, web_search_enabled?, permission_mode? }` | Set mode / web search / title |
-| DELETE | `/api/sessions/:id` | — | Delete the session |
+| Method | Path                | Body                                                | Purpose                                                        |
+| ------ | ------------------- | --------------------------------------------------- | -------------------------------------------------------------- |
+| POST   | `/api/sessions`     | —                                                   | Create a session → `{ id, phase, ... }`                        |
+| GET    | `/api/sessions/:id` | —                                                   | Full session: `messages[]`, `task_ids[]`, `phase`, `event_seq` |
+| PATCH  | `/api/sessions/:id` | `{ title?, web_search_enabled?, permission_mode? }` | Set mode / web search / title                                  |
+| DELETE | `/api/sessions/:id` | —                                                   | Delete the session                                             |
 
 ### Running and steering
 
-| Method | Path | Body | Purpose |
-|---|---|---|---|
-| POST | `/api/sessions/:id/messages` | `{ content, permission_mode?, web_search?, references?, is_question_answer? }` | Send intent or a follow-up instruction. Reply streams via SSE, **not** in the response. Set `is_question_answer:true` to **answer a question DeepV asked** (there is no separate answer endpoint). |
-| POST | `/api/sessions/:id/stop` | — | Interrupt the current turn |
-| GET | `/api/sessions/:id/stream` | `?since=<seq>` | **SSE** event stream (see below) |
+| Method | Path                         | Body                                                                           | Purpose                                                                                                                                                                                            |
+| ------ | ---------------------------- | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/api/sessions/:id/messages` | `{ content, permission_mode?, web_search?, references?, is_question_answer? }` | Send intent or a follow-up instruction. Reply streams via SSE, **not** in the response. Set `is_question_answer:true` to **answer a question DeepV asked** (there is no separate answer endpoint). |
+| POST   | `/api/sessions/:id/stop`     | —                                                                              | Interrupt the current turn                                                                                                                                                                         |
+| GET    | `/api/sessions/:id/stream`   | `?since=<seq>`                                                                 | **SSE** event stream (see below)                                                                                                                                                                   |
 
 **SSE stream** (`text/event-stream`): first frame `event: hello` (snapshot: open gates, running task, agent status), then `event: replay_complete`, then live events. Event types you care about: `spec` / `spec_content` (the outline), `phase_pill` / `workflow` (phase progress), `gate_opened` / `gate_decided` / `gate_consumed`, `task_started` (carries `task_id`), `task_progress`, `done`. Reconnect/resume with `?since=<seq>` or the `Last-Event-ID` header.
 
 ### Gates (resolve a blocking confirmation)
 
-| Method | Path | Body | Notes |
-|---|---|---|---|
-| POST | `/api/sessions/:id/confirm-template-selection` | `{ template_id? }` | Pick a design template; **omit / `null` = skip** (no template). Blocks even in `full_auto`. |
-| POST | `/api/sessions/:id/confirm-generation` | `{ confirmed, feedback?, selected_indices? }` | Approve/reject starting generation; can select a subset of pages. |
-| POST | `/api/sessions/:id/confirm-spec-update` | `{ confirmed, edited_content?, feedback? }` | Approve/reject an outline change (blocks only in `all`). |
-| POST | `/api/sessions/:id/confirm-batch-edit` | `{ confirmed, feedback? }` | Approve/reject a batch-edit plan. |
+| Method | Path                                           | Body                                          | Notes                                                                                       |
+| ------ | ---------------------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| POST   | `/api/sessions/:id/confirm-template-selection` | `{ template_id? }`                            | Pick a design template; **omit / `null` = skip** (no template). Blocks even in `full_auto`. |
+| POST   | `/api/sessions/:id/confirm-generation`         | `{ confirmed, feedback?, selected_indices? }` | Approve/reject starting generation; can select a subset of pages.                           |
+| POST   | `/api/sessions/:id/confirm-spec-update`        | `{ confirmed, edited_content?, feedback? }`   | Approve/reject an outline change (blocks only in `all`).                                    |
+| POST   | `/api/sessions/:id/confirm-batch-edit`         | `{ confirmed, feedback? }`                    | Approve/reject a batch-edit plan.                                                           |
 
 An expired gate returns `409 { status: "invalidated" }` — safe to ignore.
 
 ### Generation task (async image rendering)
 
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/api/tasks/:id` | Poll status → `{ status, has_result, progress:{current_slide,total_slides} }`. Done when `status:"completed"` and `has_result:true`. |
-| GET | `/api/tasks/:id/result` | Download the finished `.pptx` (404 until ready) |
-| POST | `/api/tasks/:id/cancel` | Cancel |
-| POST | `/api/sessions/:id/resume-generation` | Resume a partial run; returns a `task_id` or the list of missing slides |
+| Method | Path                                  | Purpose                                                                                                                              |
+| ------ | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| GET    | `/api/tasks/:id`                      | Poll status → `{ status, has_result, progress:{current_slide,total_slides} }`. Done when `status:"completed"` and `has_result:true`. |
+| GET    | `/api/tasks/:id/result`               | Download the finished `.pptx` (404 until ready)                                                                                      |
+| POST   | `/api/tasks/:id/cancel`               | Cancel                                                                                                                               |
+| POST   | `/api/sessions/:id/resume-generation` | Resume a partial run; returns a `task_id` or the list of missing slides                                                              |
 
 ### Resources and artifacts (harvest here)
 
-| Method | Path | Returns |
-|---|---|---|
-| GET | `/api/sessions/:id/resources` | `{ groups:[{ group_key, items:[{ type, name, content?, url? }] }] }`. Keys: `resource.outline` (text), `resource.designSpec`, `resource.slides` (image `url`s), `resource.final` (`.pptx` `url`). |
-| GET | `/api/sessions/:id/slides/:name` | Slide PNG bytes (e.g. `slide_0.png`) |
-| GET | `/api/sessions/:id/missing-slides` | `{ slides:[{ index, title }] }` — pages not yet rendered |
+| Method | Path                               | Returns                                                                                                                                                                                           |
+| ------ | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/sessions/:id/resources`      | `{ groups:[{ group_key, items:[{ type, name, content?, url? }] }] }`. Keys: `resource.outline` (text), `resource.designSpec`, `resource.slides` (image `url`s), `resource.final` (`.pptx` `url`). |
+| GET    | `/api/sessions/:id/slides/:name`   | Slide PNG bytes (e.g. `slide_0.png`)                                                                                                                                                              |
+| GET    | `/api/sessions/:id/missing-slides` | `{ slides:[{ index, title }] }` — pages not yet rendered                                                                                                                                          |
 
 ### Single-slide editing (iteration on one page; `:num` is 0-based)
 
-| Method | Path | Body | Purpose |
-|---|---|---|---|
-| POST | `/api/sessions/:id/slides/:num/regenerate` | `{ count? }` | Regenerate a page (K candidate variants) |
-| POST | `/api/sessions/:id/slides/:num/edit` | `{ mask, intent, baseVersion?, aiRefine? }` | Mask-based local re-paint (`mask` = base64 PNG) |
-| GET | `/api/sessions/:id/slides/:num/edits` | — | Edit history for the page |
-| POST | `/api/sessions/:id/slides/:num/adopt` | `{ version }` | Adopt a specific edited version |
+| Method | Path                                       | Body                                        | Purpose                                         |
+| ------ | ------------------------------------------ | ------------------------------------------- | ----------------------------------------------- |
+| POST   | `/api/sessions/:id/slides/:num/regenerate` | `{ count? }`                                | Regenerate a page (K candidate variants)        |
+| POST   | `/api/sessions/:id/slides/:num/edit`       | `{ mask, intent, baseVersion?, aiRefine? }` | Mask-based local re-paint (`mask` = base64 PNG) |
+| GET    | `/api/sessions/:id/slides/:num/edits`      | —                                           | Edit history for the page                       |
+| POST   | `/api/sessions/:id/slides/:num/adopt`      | `{ version }`                               | Adopt a specific edited version                 |
 
 ## Recipes (native API)
 

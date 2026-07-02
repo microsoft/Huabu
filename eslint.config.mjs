@@ -24,6 +24,9 @@ export default typescriptEslint.config(
       '**/*.min.*',
       // Vendored upstream code — lint with its own rules in the agentlet repo.
       'external/**',
+      // Agent Team packages are self-contained plugins with their own
+      // scripts/prompts; not part of the app's lint surface.
+      'agent-teams/**',
     ],
   },
   js.configs.recommended,

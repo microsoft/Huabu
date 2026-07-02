@@ -9,6 +9,7 @@
 > with **no client tool** shipped into the agent.
 >
 > Current sources of truth:
+>
 > - Server: [`apps/server/src/modules/remote_fs/`](../../apps/server/src/modules/remote_fs/) (`rfs.route.ts`).
 > - Agent-facing guide: [`access-huabu.md`](../../apps/server/src/prompt/external-agent/access-huabu.md).
 > - Wire contract: [`packages/shared/src/types/api/rfs.ts`](../../packages/shared/src/types/api/rfs.ts).
