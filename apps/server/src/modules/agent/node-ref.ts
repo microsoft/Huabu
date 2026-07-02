@@ -55,18 +55,24 @@ export interface AgentNodeRef extends WireNodeRef {
 }
 
 /**
- * L1 — adds a representative one-liner.
+ * L1 — adds representative short text.
  *
- * `preview` is the best-available short text picked server-side by
- * the ladder: frontmatter `summary` > `content[:120]` > `data.src`.
- * Treat it as opaque "context"; consumers should not parse it.
+ * Two INDEPENDENT one-liners, so the model can tell a curated abstract
+ * from a raw peek:
+ *   - `summary` — the frontmatter `summary` (an authored / generated
+ *     abstract of the node), when present.
+ *   - `preview` — a raw excerpt of the body (`content[:120]`), when present.
+ * A node may carry either, both, or neither. Treat each as opaque
+ * "context"; consumers should not parse them.
  *
  * Used by:
  *  - node-neighbourhood inner nodes
  *  - canvas outline (when the caller opts in to previews)
  */
 export interface AgentNodePreview extends AgentNodeRef {
-  /** Best-available short text representation; ≤ ~120 chars. */
+  /** Frontmatter `summary` (authored abstract); ≤ ~120 chars. */
+  summary?: string;
+  /** Raw body excerpt (`content[:120]`); ≤ ~120 chars. */
   preview?: string;
   /**
    * Revision token over the node's authored content (`content` / `src`),
@@ -170,34 +176,26 @@ export function buildAgentNodeRef(input: NodeRefInput): AgentNodeRef {
 }
 
 /**
- * Pick the best-available preview string for a node, by ladder:
- * frontmatter `summary` > `content[:120]` > `src`. Returns `undefined`
- * when nothing meaningful is available.
+ * The raw body excerpt for a node's `preview` field: `content[:120]`,
+ * flattened to a single line. Returns `undefined` when there is no body.
+ * `summary` is NOT consulted here (it is its own {@link AgentNodePreview}
+ * field), and `src` is deliberately not a fallback (a bare URL is not a
+ * content preview; media nodes are read via snapshot / their `src` field).
  *
  * The result is always flattened to a single line: node bodies are
  * markdown (headings, list items, blank lines), and a multi-line
- * preview would break any single-line container it is dropped into —
- * most visibly the node-neighbourhood list (`- "label" [type] —
- * <preview>`), where an embedded newline spawns spurious list items /
- * headings. Whitespace runs (including newlines) collapse to one space
- * BEFORE truncation so the 120-char budget is spent on content, not
- * layout.
+ * preview would break any single-line container it is dropped into.
+ * Whitespace runs (including newlines) collapse to one space BEFORE
+ * truncation so the 120-char budget is spent on content, not layout.
  *
- * Exported separately from {@link buildAgentNodePreview} so callers
- * that need the bare string (without an enclosing ref) can reuse the
- * exact ladder.
+ * Exported separately from {@link buildAgentNodePreview} so callers that
+ * need the bare excerpt (without an enclosing ref) can reuse it.
  */
 export function extractAgentNodePreview(
   input: NodePreviewInput,
 ): string | undefined {
-  if (typeof input.summary === 'string' && input.summary.trim()) {
-    return flattenPreview(input.summary);
-  }
   if (typeof input.content === 'string' && input.content.trim()) {
     return flattenPreview(input.content);
-  }
-  if (typeof input.src === 'string' && input.src.trim()) {
-    return input.src.trim();
   }
   return undefined;
 }
@@ -230,6 +228,9 @@ export function buildAgentNodePreview(
   input: NodePreviewInput,
 ): AgentNodePreview {
   const out: AgentNodePreview = buildAgentNodeRef(input);
+  if (typeof input.summary === 'string' && input.summary.trim()) {
+    out.summary = flattenPreview(input.summary);
+  }
   const preview = extractAgentNodePreview(input);
   if (preview) out.preview = preview;
   const rev = revisionOfPreviewInput(input);

@@ -49,7 +49,7 @@ import {
   type CanvasNode,
 } from '@sediment/shared/canvas-engine';
 
-import { buildAgentNodeOutline } from '../agent/node-ref.js';
+import { describeNode, nodeLabel } from './node-prompt.js';
 import { getCanvasStore } from '../storage/index.js';
 
 import type { AgentNodeOutline } from '../agent/node-ref.js';
@@ -165,10 +165,6 @@ export function buildSpatialBundle(canvas: CanvasFile): SpatialBundle {
 
 // ─── Helpers shared by outline + inspect ────────────────────────────────────
 
-function readLabel(raw: CanvasNode | undefined): string | null {
-  return raw && typeof raw.data?.label === 'string' ? raw.data.label : null;
-}
-
 function readVisualStyle(
   raw: CanvasNode | undefined,
 ): Record<string, unknown> | undefined {
@@ -176,24 +172,6 @@ function readVisualStyle(
   return s && typeof s === 'object'
     ? (s as Record<string, unknown>)
     : undefined;
-}
-
-function readPreview(
-  canvasId: string,
-  nodeId: string,
-  raw: CanvasNode | undefined,
-): string | undefined {
-  const meta = getCanvasStore(canvasId).readNode(nodeId);
-  if (meta) {
-    const summary = (meta as Record<string, unknown>).summary;
-    if (typeof summary === 'string' && summary.trim()) return summary.trim();
-    if (typeof meta.content === 'string' && meta.content.trim()) {
-      return meta.content.slice(0, 120);
-    }
-  }
-  const inline = raw?.data?.content;
-  if (typeof inline === 'string' && inline.trim()) return inline.slice(0, 120);
-  return undefined;
 }
 
 // ─── Public: get_canvas_outline ─────────────────────────────────────────────
@@ -274,56 +252,53 @@ export function buildCanvasOutline(
     bbox = { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
   }
 
+  // Resolve display labels from the sidecar (canvas.json never carries
+  // them), memoized so a frame referenced as many nodes' parent is read once.
+  const labelMemo = new Map<string, string | undefined>();
+  const memoLabel = (id: string): string | undefined => {
+    if (labelMemo.has(id)) return labelMemo.get(id);
+    const l = nodeLabel(store, id);
+    labelMemo.set(id, l);
+    return l;
+  };
+
   const nodes: CanvasOutlineNode[] = bundle.spatialNodes.map((s) => {
     const raw = bundle.rawById.get(s.id);
-    const label = readLabel(raw) ?? undefined;
-    const parentRaw = s.parentId ? bundle.rawById.get(s.parentId) : undefined;
-    const parentLabel = parentRaw
-      ? (readLabel(parentRaw) ?? undefined)
-      : undefined;
-    const out: CanvasOutlineNode = buildAgentNodeOutline({
-      id: s.id,
-      type: (s.type ?? raw?.type ?? 'note') as CanvasNodeType,
-      label,
-      content:
-        typeof raw?.data?.content === 'string' ? raw.data.content : undefined,
-      // src lives on `data.src` for image/pdf/video/web nodes.
-      src:
-        typeof (raw?.data as Record<string, unknown> | undefined)?.src ===
-        'string'
-          ? ((raw?.data as Record<string, unknown>).src as string)
-          : undefined,
-      position: { x: s.rect.x, y: s.rect.y },
-      size: { width: s.rect.width, height: s.rect.height },
-      ...(s.parentId
-        ? {
-            parentFrame: {
-              id: s.parentId,
-              ...(parentLabel ? { label: parentLabel } : {}),
-            },
-          }
-        : {}),
-    });
-    if (opts.includeStyle) {
-      const style = readVisualStyle(raw);
-      if (style) out.style = style;
-    }
-    // The shared builder already attaches `preview` from
-    // `summary > content[:120] > src`; if the caller did not opt in to
-    // previews, strip it back out so the outline payload stays lean.
+    const rawData = raw?.data as Record<string, unknown> | undefined;
+    const parentLabel = s.parentId ? memoLabel(s.parentId) : undefined;
+    const style = opts.includeStyle ? readVisualStyle(raw) : undefined;
+    const out: CanvasOutlineNode = describeNode(
+      store,
+      {
+        id: s.id,
+        type: (s.type ?? raw?.type ?? 'note') as CanvasNodeType,
+        ...(typeof rawData?.['content'] === 'string'
+          ? { content: rawData['content'] as string }
+          : {}),
+        ...(typeof rawData?.['src'] === 'string'
+          ? { src: rawData['src'] as string }
+          : {}),
+        position: { x: s.rect.x, y: s.rect.y },
+        size: { width: s.rect.width, height: s.rect.height },
+        ...(s.parentId
+          ? {
+              parentFrame: {
+                id: s.parentId,
+                ...(parentLabel ? { label: parentLabel } : {}),
+              },
+            }
+          : {}),
+        ...(style ? { style } : {}),
+      },
+      'outline',
+    );
+    // The shared builder attaches `summary` (authored abstract) and
+    // `preview` (raw body excerpt) from the sidecar; both are text scan
+    // hints, so strip them when the caller did not opt in to previews and
+    // the outline payload should stay lean (geometry + topology only).
     if (!opts.includePreviews) {
+      delete out.summary;
       delete out.preview;
-    } else {
-      // When previews are explicitly requested, prefer the full-fidelity
-      // path that consults the on-disk `summary` frontmatter via
-      // `readPreview` — it knows about `nodes/<id>.md` summaries that
-      // are not visible to the in-memory `data.content` field.
-      const richer = readPreview(canvasId, s.id, raw);
-      if (richer) {
-        out.preview = richer;
-      } else {
-        delete out.preview;
-      }
     }
     return out;
   });
@@ -446,6 +421,16 @@ export function inspectNodes(
 
   const bundle = buildSpatialBundle(canvas);
 
+  // Display labels come from the sidecar (canvas.json never carries them);
+  // memoize so the `labelPattern` filter and the result map read each once.
+  const labelMemo = new Map<string, string | undefined>();
+  const memoLabel = (id: string): string | undefined => {
+    if (labelMemo.has(id)) return labelMemo.get(id);
+    const l = nodeLabel(store, id);
+    labelMemo.set(id, l);
+    return l;
+  };
+
   // Per-node derived fields accumulated during filter passes.
   const derived = new Map<string, Partial<InspectNodeResult>>();
   const setDerived = (id: string, patch: Partial<InspectNodeResult>) => {
@@ -505,7 +490,8 @@ export function inspectNodes(
     }
     const hits: string[] = [];
     for (const s of bundle.spatialNodes) {
-      if (s.label && re.test(s.label)) hits.push(s.id);
+      const label = memoLabel(s.id);
+      if (label && re.test(label)) hits.push(s.id);
     }
     intersect(hits);
   }
@@ -687,28 +673,36 @@ export function inspectNodes(
 
   const nodes: InspectNodeResult[] = resultNodes.map((s) => {
     const raw = bundle.rawById.get(s.id);
-    const label = readLabel(raw) ?? undefined;
-    const parentRaw = s.parentId ? bundle.rawById.get(s.parentId) : undefined;
-    const parentLabel = parentRaw
-      ? (readLabel(parentRaw) ?? undefined)
-      : undefined;
-    const base = buildAgentNodeOutline({
-      id: s.id,
-      type: (s.type ?? raw?.type ?? 'note') as CanvasNodeType,
-      label,
-      position: { x: s.rect.x, y: s.rect.y },
-      size: { width: s.rect.width, height: s.rect.height },
-      ...(s.parentId
-        ? {
-            parentFrame: {
-              id: s.parentId,
-              ...(parentLabel ? { label: parentLabel } : {}),
-            },
-          }
-        : {}),
-    });
-    // Inspect deliberately omits `preview`; agents that need text use
-    // `get_canvas_outline({ includePreviews: true })` or `read`.
+    const rawData = raw?.data as Record<string, unknown> | undefined;
+    const parentLabel = s.parentId ? memoLabel(s.parentId) : undefined;
+    const base = describeNode(
+      store,
+      {
+        id: s.id,
+        type: (s.type ?? raw?.type ?? 'note') as CanvasNodeType,
+        ...(typeof rawData?.['content'] === 'string'
+          ? { content: rawData['content'] as string }
+          : {}),
+        ...(typeof rawData?.['src'] === 'string'
+          ? { src: rawData['src'] as string }
+          : {}),
+        position: { x: s.rect.x, y: s.rect.y },
+        size: { width: s.rect.width, height: s.rect.height },
+        ...(s.parentId
+          ? {
+              parentFrame: {
+                id: s.parentId,
+                ...(parentLabel ? { label: parentLabel } : {}),
+              },
+            }
+          : {}),
+      },
+      'outline',
+    );
+    // Inspect deliberately omits text hints (`summary` / `preview`); agents
+    // that need text use `get_canvas_outline({ includePreviews: true })` or
+    // `read`.
+    delete base.summary;
     delete base.preview;
     const result: InspectNodeResult = base;
     const style = readVisualStyle(raw);

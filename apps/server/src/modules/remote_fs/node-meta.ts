@@ -14,9 +14,11 @@
  *
  * 2. **Node metadata.** When a download targets a `nodes/<label>.md` file, we
  *    surface a small allow-list of the node's attributes (id/type/label/src/
- *    locked) plus its incident edges (grouped into parents/children), sourced
- *    from `canvas.json` state (not frontmatter). All of it is serialised into
- *    the `X-Huabu-*` response headers (label percent-encoded, edges as JSON).
+ *    locked) plus its incident edges (grouped into parents/children). The
+ *    file → node mapping and `label` / `rev` come from the on-disk sidecar
+ *    (the canonical source); type / src / locked / edges come from
+ *    `canvas.json` state. All of it is serialised into the `X-Huabu-*`
+ *    response headers (label percent-encoded, edges as JSON).
  */
 
 import path from 'node:path';
@@ -33,7 +35,6 @@ import {
   safeResolve,
 } from '../agent/tools/handlers/fs-sandbox.js';
 import { getCanvasStore } from '../storage/index.js';
-import { toSafeFilename } from '../storage/naming.js';
 
 import type { CanvasNodeType } from '@sediment/shared';
 import type { CanvasNode, CanvasEdge } from '@sediment/shared/canvas-engine';
@@ -102,7 +103,11 @@ const NODE_FILE_RE = /^nodes\/[^/]+\.md$/;
  * the path is not a node file or no node currently claims it — callers then
  * serve the bytes without `X-Huabu-*` headers.
  *
- * Filenames mirror `buildAgentNodeRef`: `nodes/${toSafeFilename(label, id)}.md`.
+ * The file → node mapping goes through the store's frontmatter-`id` index
+ * ({@link CanvasStore.nodeIdForFilename}), NOT a re-derived
+ * `toSafeFilename(label)` — `canvas.json` never carries `data.label`, so the
+ * derived path would collapse to `nodes/<id>.md` and never match a real
+ * label-named file. `label` / `rev` are then sourced from the sidecar.
  */
 export function lookupNodeByPath(
   canvasId: string,
@@ -110,18 +115,20 @@ export function lookupNodeByPath(
 ): RfsNodeLookup | null {
   if (!NODE_FILE_RE.test(physicalRel)) return null;
 
-  const canvas = getCanvasStore(canvasId).read();
+  const store = getCanvasStore(canvasId);
+  const canvas = store.read();
   if (!canvas) return null;
 
+  const filename = physicalRel.slice('nodes/'.length);
+  const nodeId = store.nodeIdForFilename(filename);
+  if (!nodeId) return null;
+
   const nodes = (canvas.state.nodes ?? []) as CanvasNode[];
-  const match = nodes.find((n) => {
-    const data = (n.data ?? {}) as { label?: string };
-    return `nodes/${toSafeFilename(data.label, n.id)}.md` === physicalRel;
-  });
+  const match = nodes.find((n) => n.id === nodeId);
   if (!match) return null;
 
+  const sidecar = store.readNode(nodeId);
   const data = (match.data ?? {}) as {
-    label?: string;
     locked?: boolean;
     src?: string;
   };
@@ -129,22 +136,22 @@ export function lookupNodeByPath(
     id: match.id,
     type: (match.type ?? 'note') as CanvasNodeType,
   };
-  if (data.label) meta.label = data.label;
-  if (typeof data.src === 'string') meta.src = data.src;
-  if (typeof data.locked === 'boolean') meta.locked = data.locked;
-  // Revision hashes the node's *canonical* authored content. `canvas.json`
-  // strips `data.content` (bodies live in `nodes/<label>.md`), so read the
-  // on-disk body first — otherwise every note would hash an empty content and
-  // share one constant, never-changing ETag. Media nodes carry their ref in
-  // `data.src`, so a missing sidecar is fine.
-  const body = getCanvasStore(canvasId).readNode(match.id)?.content;
-  const content =
-    typeof body === 'string'
-      ? body
-      : typeof (data as { content?: unknown }).content === 'string'
-        ? ((data as { content?: string }).content as string)
+  // Label lives in the sidecar frontmatter (canvas.json never carries it).
+  if (sidecar?.label) meta.label = sidecar.label;
+  const src =
+    typeof sidecar?.src === 'string'
+      ? sidecar.src
+      : typeof data.src === 'string'
+        ? data.src
         : undefined;
-  meta.rev = nodeRevisionOf({ content, src: data.src });
+  if (src) meta.src = src;
+  if (typeof data.locked === 'boolean') meta.locked = data.locked;
+  // Revision hashes the node's *canonical* authored content — the on-disk
+  // body (`canvas.json` strips `data.content`). Media nodes carry only a
+  // `src`, so a missing body is fine.
+  const content =
+    typeof sidecar?.content === 'string' ? sidecar.content : undefined;
+  meta.rev = nodeRevisionOf({ content, src });
 
   const edgeList = (canvas.state.edges ?? []) as CanvasEdge[];
   const edges: RfsNodeEdges = {

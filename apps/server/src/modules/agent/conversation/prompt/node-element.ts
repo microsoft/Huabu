@@ -13,22 +13,25 @@
  *
  * Output shape (one self-closing element per node):
  *
- *   <node id="n-123" type="note" label="Risks" file="nodes/risks.md" preview="supply chain, fx" />
- *   <node id="n-456" type="image" preview="https://…/a.png" />
+ *   <node id="n-123" type="note" label="Risks" file="nodes/risks.md" rev="3d7e" summary="FX + supply-chain exposure" preview="Our top risks this quarter are…" />
+ *   <node id="n-456" type="image" file="nodes/diagram.md" />
  *
  * Each element is metadata only:
  *   - `id`      — always; the addressable handle.
  *   - `type`    — always; the canvas node type.
  *   - `label`   — when the node has one.
- *   - `file`    — only when `includeFileName` (the built-in agent reads by
- *                 the pre-computed `nodes/<file>.md` path; the external
- *                 agent reads by id, where that path would be a dead
- *                 reference).
- *   - `preview` — a short scan hint when available; deliberately a NAMED
- *                 ATTRIBUTE, not the element body, so the model cannot
- *                 mistake the ~120-char excerpt for the node's full
- *                 content. Callers still tell it to `read` / download
- *                 the file for the complete body in the surrounding intro.
+ *   - `file`    — the pre-computed `nodes/<file>.md` path, when the node has
+ *                 one. Both backends address a node by this path (the
+ *                 built-in agent `read()`s it; the external agent downloads
+ *                 it over the RFS).
+ *   - `rev`     — content revision token, when the node has a body / src.
+ *   - `summary` — the authored abstract (frontmatter `summary`), when present.
+ *   - `preview` — a raw body excerpt (`content[:120]`), when present. `summary`
+ *                 and `preview` are INDEPENDENT named attributes (a curated
+ *                 abstract vs a raw peek); either / both / neither may appear.
+ *                 Deliberately named attributes, not the element body, so the
+ *                 model cannot mistake them for the node's full content —
+ *                 callers tell it to `read` for the complete body.
  *
  * Kept out of `node-ref.ts` (which owns the pure data ladder) so the
  * prompt-text concern lives next to the other section renderers under
@@ -57,14 +60,16 @@ export function escapeXmlText(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-/** Minimum shape {@link renderAgentNodeList} needs to render one node. */
+/** Minimum shape {@link renderNodes} needs to render one node. */
 export interface RenderableNode {
   id: string;
   type: string;
   label?: string;
-  /** Pre-computed `nodes/<safeLabel>.md`; only emitted when `includeFileName`. */
+  /** Pre-computed `nodes/<safeLabel>.md`; emitted as `file=` when present. */
   filename?: string;
-  /** Short preview line; emitted as the `preview` attribute when present. */
+  /** Authored abstract (frontmatter `summary`); emitted as `summary=`. */
+  summary?: string;
+  /** Raw body excerpt; emitted as the `preview` attribute when present. */
   preview?: string;
   /**
    * Revision token over authored content; emitted as the `rev` attribute so
@@ -86,22 +91,18 @@ export interface RenderableNode {
  *   - the element shape matches the sibling `<skill>` / `<attachment>`
  *     conventions, so the whole prompt reads uniformly.
  */
-export function renderAgentNodeList(
-  nodes: readonly RenderableNode[],
-  opts: { includeFileName?: boolean } = {},
-): string {
-  const includeFileName = opts.includeFileName ?? true;
+export function renderNodes(nodes: readonly RenderableNode[]): string {
   return nodes
     .map((n) => {
+      const summary = n.summary?.trim();
       const preview = n.preview?.trim();
       const attrs = [
         `id="${escapeXmlAttr(n.id)}"`,
         `type="${escapeXmlAttr(n.type)}"`,
         n.label ? `label="${escapeXmlAttr(n.label)}"` : '',
-        includeFileName && n.filename
-          ? `file="${escapeXmlAttr(n.filename)}"`
-          : '',
+        n.filename ? `file="${escapeXmlAttr(n.filename)}"` : '',
         n.rev ? `rev="${escapeXmlAttr(n.rev)}"` : '',
+        summary ? `summary="${escapeXmlAttr(summary)}"` : '',
         preview ? `preview="${escapeXmlAttr(preview)}"` : '',
       ]
         .filter(Boolean)
