@@ -237,11 +237,23 @@ further: **there is no agent-facing bypass.**
 
 ### 3d. Conflict → reconcile loop
 
-The executor returns a structured conflict; the **caller that owns the LLM loop**
-turns it into a tool-result the model can act on:
+The executor returns a structured conflict tagged with a **`reason`** so the
+model can tell the two rejection classes apart (a `not-read` conflict looks
+identical to a `stale` one if only `currentRev` is echoed — the model then
+misreads it as a transient glitch and blindly re-issues the same command,
+burning a round-trip). The **caller that owns the LLM loop** turns it into a
+tool-result the model can act on, and the `canvas_commands` result also carries
+a plain-language `conflictHint`:
+
+- **`reason: 'not-read'`** — the writer never read the node this run, so no
+  `expectRev` was injected. The model **must `read`** the node (which populates
+  the read-set) before writing; it **cannot** hand-carry `expectRev` to bypass
+  this, and retrying the identical command is rejected the same way.
+- **`reason: 'stale'`** — the writer read an earlier rev that has since changed;
+  re-read (or reconcile against the echoed `currentContent`) and re-issue.
 
 ```
-MERGE_NODE_DATA{expectRev: 9f0c}   →  CONFLICT (currentRev 3d7e, + currentContent)
+MERGE_NODE_DATA{expectRev: 9f0c}   →  CONFLICT reason=stale (currentRev 3d7e, + currentContent)
    ↓  re-read echoed currentContent → merge own edit
 MERGE_NODE_DATA{expectRev: 3d7e}   →  OK
 ```

@@ -15,6 +15,25 @@ import { Spinner } from '../../../Common/Spinner';
 
 import type { AgentToolPart } from '@sediment/shared';
 
+/**
+ * Whether a single agent-tool part represents a FAILED call. Checks, in
+ * order: the ACP lifecycle status, the ToolResponse `status`, and — for
+ * `read` — the path invariant (a genuine read always returns a `path`, so
+ * a `success`-status read with no path is a failure projected onto an
+ * older history shape where the error text lives in `data.content`).
+ */
+function partFailed(part: AgentToolPart): boolean {
+  if (part.status === 'failed') return true;
+  const data = part.data;
+  if (!data) return false;
+  if (data.status === 'error') return true;
+  if (part.toolName === 'read' && data.status === 'success') {
+    const payload = (data.data ?? {}) as Record<string, unknown>;
+    if (typeof payload.path !== 'string') return true;
+  }
+  return false;
+}
+
 export function MergedAgentToolRow({
   tool,
   entries,
@@ -26,7 +45,55 @@ export function MergedAgentToolRow({
   const count = entries.length;
 
   const isExecuting = entries.some((e) => partIsExecuting(e.part));
-  const isError = entries.some((e) => e.part.status === 'failed');
+  const isError = entries.some((e) => partFailed(e.part));
+
+  // For a merged `read` row (N>1 files), collect each call's outcome.
+  // Success: the node's `frontmatter.id/label` (from `data.data`) drives a
+  // clickable NodeRef. Failure: the requested path lives in `data.data.path`
+  // on a live stream, but on a reloaded thread only the error message
+  // ("Path not found: <path>") survives — so we fall back to that. A failed
+  // read never gets a NodeRef (the path simply doesn't resolve to a node).
+  const readEntries = useMemo(() => {
+    if (tool !== 'read' || count === 1)
+      return [] as Array<{
+        path: string;
+        text: string;
+        ok: boolean;
+        nodeId?: string;
+      }>;
+    return entries
+      .map((e) => {
+        const tr = e.part.data;
+        const payload =
+          ((tr as { data?: unknown } | undefined)?.data as
+            | Record<string, unknown>
+            | undefined) ?? {};
+        const path = typeof payload.path === 'string' ? payload.path : '';
+        const fm = (payload.frontmatter ?? {}) as Record<string, unknown>;
+        const nodeId =
+          typeof fm.id === 'string' ? (fm.id as string) : undefined;
+        // A read that actually succeeded ALWAYS returns a `path`. Use that
+        // as the source of truth for success — it survives every history
+        // shape. (A failed read on an older server is projected as
+        // `status:'success'` with the error text in `data.content` and no
+        // path; treat that as a failure too.)
+        const ok = tr?.status === 'success' && !!path;
+        // Failure text, from whichever shape carries it:
+        //  - new: `error` on the error ToolResponse (e.g. "Path not found: …")
+        //  - old: `data.content` holding the raw error message
+        const errorField =
+          typeof (tr as { error?: unknown } | undefined)?.error === 'string'
+            ? ((tr as { error?: string }).error ?? '')
+            : '';
+        const contentText =
+          !ok && typeof payload.content === 'string'
+            ? (payload.content as string)
+            : '';
+        const text = ok ? path : path || errorField || contentText;
+        return { path, text, ok, nodeId: ok ? nodeId : undefined };
+      })
+      .filter((x) => x.text || x.nodeId);
+  }, [tool, entries, count]);
 
   // Build merged title and content
   const { title, nodeRefs } = useMemo(() => {
@@ -68,10 +135,13 @@ export function MergedAgentToolRow({
 
     if (tool === 'read') {
       const tr = entries[0]?.part.data;
+      // `path` rides on `data.data` for both success and failure (seeded
+      // from the provisional call args), so a single failed read still
+      // shows which file it tried.
       const first =
-        tr?.status === 'success'
-          ? ((tr.data ?? {}) as Record<string, unknown>)
-          : {};
+        ((tr as { data?: unknown } | undefined)?.data as
+          | Record<string, unknown>
+          | undefined) ?? {};
       const firstPath = (first.path as string) || '';
       return {
         title:
@@ -200,7 +270,7 @@ export function MergedAgentToolRow({
   }
 
   // No expandable content → simple row
-  if (nodeRefs.length === 0 || count === 1) {
+  if ((nodeRefs.length === 0 && readEntries.length === 0) || count === 1) {
     return (
       <div className="flex justify-start">
         <div className="w-full">
@@ -264,7 +334,39 @@ export function MergedAgentToolRow({
                     </div>
                   ),
                 )
-              : null}
+              : tool === 'read'
+                ? // read merges N calls; list each file with its outcome —
+                  // a successful node read renders a clickable NodeRef, a
+                  // failed one shows the attempted path with an error mark.
+                  readEntries.map((entry, i) => (
+                    <div
+                      key={`${entry.text}-${i}`}
+                      className="text-fg-muted flex items-center gap-1.5 text-xs"
+                    >
+                      {entry.ok ? (
+                        <Check
+                          size={11}
+                          className="text-fg-muted/60 shrink-0"
+                        />
+                      ) : (
+                        <XIcon size={11} className="text-danger shrink-0" />
+                      )}
+                      {entry.ok && entry.nodeId ? (
+                        <NodeRef
+                          nodeId={entry.nodeId}
+                          fallbackLabel={entry.path || undefined}
+                        />
+                      ) : (
+                        <span
+                          className={`truncate ${entry.ok ? '' : 'text-danger/80'}`}
+                          title={entry.text}
+                        >
+                          {entry.text || '?'}
+                        </span>
+                      )}
+                    </div>
+                  ))
+                : null}
           </div>
         )}
       </div>

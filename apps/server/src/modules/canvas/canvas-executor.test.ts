@@ -109,6 +109,7 @@ describe('executeOnServer — MERGE_NODE_DATA CAS', () => {
     expect(out.conflicts).toHaveLength(1);
     expect(out.conflicts?.[0]).toMatchObject({
       nodeId: 'n1',
+      reason: 'stale',
       expectedRev: 'staleRev',
       currentContent: 'hello',
     });
@@ -127,6 +128,7 @@ describe('executeOnServer — MERGE_NODE_DATA CAS', () => {
     });
 
     expect(out.conflicts).toHaveLength(1);
+    expect(out.conflicts?.[0]?.reason).toBe('not-read');
     expect(out.conflicts?.[0]?.expectedRev).toBeUndefined();
     expect(bodyOf('c1', 'n1')).toBe('hello');
   });

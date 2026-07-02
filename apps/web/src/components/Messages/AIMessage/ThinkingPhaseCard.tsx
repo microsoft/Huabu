@@ -78,18 +78,24 @@ export function ThinkingPhaseCard({
   // and the native tooltip exposes the full line on hover when
   // truncated. The disclosure stays expandable because the tool
   // groups still live in the body.
+  //
+  // Exception: a long single-line paragraph is visually truncated in
+  // the one-line title, so its full text would otherwise only be
+  // reachable via the hover tooltip. Surface it in the expandable body
+  // too so the whole reasoning stays readable.
   const isMultiLine = text.trim() !== preview;
+  const showBodyText = isMultiLine || preview.length > 80;
 
   return (
     <AssistantDisclosure
       icon={icon}
       title={showSpinner && !preview ? 'Thinking…' : preview}
-      titleTooltip={isMultiLine ? undefined : preview}
+      titleTooltip={showBodyText ? undefined : preview}
       defaultCollapsed={closed}
       collapseSignal={closed}
       bodyClassName="border-edge-default/40 ml-2 flex flex-col gap-1 border-l pl-3"
     >
-      {isMultiLine && (
+      {showBodyText && (
         <div className="text-fg-muted/70 mb-1 px-1 text-xs wrap-break-word whitespace-pre-wrap italic">
           {text}
         </div>

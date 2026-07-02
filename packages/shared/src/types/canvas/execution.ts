@@ -40,6 +40,14 @@ export interface CanvasCommandResult {
  */
 export interface ExecuteConflict {
   nodeId: string;
+  /**
+   * Why the write was rejected. `not-read`: the writer never read this node
+   * in the current conversation (no `expectRev` at all) — it MUST `read` the
+   * node before writing its content; retrying the same command without a read
+   * is rejected identically. `stale`: the writer read an earlier revision that
+   * has since changed — re-read, reconcile, and re-issue.
+   */
+  reason: 'not-read' | 'stale';
   /** Rev the writer expected; absent when it never read the node this run. */
   expectedRev?: string;
   /** The node's actual current authored-content revision. */

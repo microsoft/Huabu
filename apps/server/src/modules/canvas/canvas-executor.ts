@@ -207,6 +207,7 @@ function collectMergeConflicts(
       if (entry.expectRev === undefined || entry.expectRev !== currentRev) {
         conflicts.push({
           nodeId: entry.nodeId,
+          reason: entry.expectRev === undefined ? 'not-read' : 'stale',
           ...(entry.expectRev !== undefined
             ? { expectedRev: entry.expectRev }
             : {}),

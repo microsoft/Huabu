@@ -29,9 +29,35 @@ import {
   executeOnServer,
 } from '../../../canvas/canvas-executor.js';
 
-import type { CanvasCommand, NodeOrigin } from '@sediment/shared';
+import type {
+  CanvasCommand,
+  ExecuteConflict,
+  NodeOrigin,
+} from '@sediment/shared';
 
 const log = getLogger('tool.canvas-commands');
+
+/**
+ * Build a concise, model-facing instruction for a rejected content write.
+ * The model cannot hand-carry `expectRev` (it is injected only from the
+ * run's read-set, populated by `read`), so a `not-read` conflict is only
+ * cleared by actually reading the node — NOT by retrying the same command.
+ * Spelling that out here stops the blind identical-retry loop.
+ */
+function buildConflictHint(conflicts: readonly ExecuteConflict[]): string {
+  const parts: string[] = [];
+  if (conflicts.some((c) => c.reason === 'not-read')) {
+    parts.push(
+      'Read before write: `read` the conflicted node(s) first, then re-issue. Retrying as-is fails again.',
+    );
+  }
+  if (conflicts.some((c) => c.reason === 'stale')) {
+    parts.push(
+      'Node(s) changed since your last read — re-`read`, then re-issue.',
+    );
+  }
+  return parts.join(' ');
+}
 
 /**
  * Args type for `handleCanvasCommands`. Intentionally kept loose
@@ -234,7 +260,10 @@ export async function handleCanvasCommands(
       deltas: result.deltas,
       results: result.results,
       ...(result.conflicts && result.conflicts.length > 0
-        ? { conflicts: result.conflicts }
+        ? {
+            conflicts: result.conflicts,
+            conflictHint: buildConflictHint(result.conflicts),
+          }
         : {}),
       pendingEffects: {
         mutatedNodes: result.pendingEffects.mutatedNodes,
