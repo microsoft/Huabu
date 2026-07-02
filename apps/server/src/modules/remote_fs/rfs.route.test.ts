@@ -131,9 +131,7 @@ describe('GET /api/rfs/:canvasId/download', () => {
         url: '/rfs/c1/download/nodes/missing.md',
       });
       expect(res.statusCode).toBe(404);
-      expect(res.json<{ message: string }>().message).toMatch(
-        /curl .*\/skill/,
-      );
+      expect(res.json<{ message: string }>().message).toMatch(/curl .*\/skill/);
     } finally {
       await app.close();
     }

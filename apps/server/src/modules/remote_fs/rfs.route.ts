@@ -141,9 +141,7 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
       }
 
       if (!existsSync(absPath) || !statSync(absPath).isFile()) {
-        return reply
-          .code(404)
-          .send(rfsError(`No file at "${requestRel}".`));
+        return reply.code(404).send(rfsError(`No file at "${requestRel}".`));
       }
 
       const lookup = lookupNodeByPath(canvasId, physicalRel);
@@ -270,9 +268,7 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
         }
         const parsed = rfsAgentRequestSchema.safeParse(json);
         if (!parsed.success) {
-          return reply
-            .code(400)
-            .send(rfsError('Invalid agent request body.'));
+          return reply.code(400).send(rfsError('Invalid agent request body.'));
         }
         prompt = parsed.data.prompt;
         if (parsed.data.doneTextOnly !== undefined) {

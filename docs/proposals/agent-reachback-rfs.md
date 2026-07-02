@@ -23,11 +23,11 @@ External agents interact with Huabu through plain-`curl` endpoints (no
 client tool) under `$HUABU_RFS_URL` — three core operations grouped into two
 surfaces, plus a `skill` bootstrap endpoint:
 
-| Surface        | Endpoint(s)          | Plane    | What it does                                                                 |
-| -------------- | -------------------- | -------- | --------------------------------------------------------------------------- |
-| **RFS**        | `download` / `upload`| Data     | Move bytes by **path** (download) / filename (upload). **No canvas semantics.** |
-| **`ask-agent`**| `agent`              | Control  | All node manipulation, linking, layout, spatial/semantic queries.           |
-| **skill**      | `skill`              | Bootstrap| `GET`s the canvas-access guide (per-canvas override → default); pulled on demand (§6c). |
+| Surface         | Endpoint(s)           | Plane     | What it does                                                                            |
+| --------------- | --------------------- | --------- | --------------------------------------------------------------------------------------- |
+| **RFS**         | `download` / `upload` | Data      | Move bytes by **path** (download) / filename (upload). **No canvas semantics.**         |
+| **`ask-agent`** | `agent`               | Control   | All node manipulation, linking, layout, spatial/semantic queries.                       |
+| **skill**       | `skill`               | Bootstrap | `GET`s the canvas-access guide (per-canvas override → default); pulled on demand (§6c). |
 
 The canvas is projected as a filesystem that is **read-only everywhere except
 `/upload/`**. Uploads land in `/upload/` as inert files; they do **not** become
@@ -81,7 +81,7 @@ until an `ask-agent` call materializes it. Consequences:
 
 Trade-off accepted: every structural write costs one `ask-agent` round-trip
 (LLM latency + cost). We judge this acceptable because structural writes are the
-low-frequency tail; high-frequency work is *reading* context, which stays a
+low-frequency tail; high-frequency work is _reading_ context, which stays a
 deterministic RFS download.
 
 ## 3. RFS layout & addressing
@@ -103,10 +103,13 @@ Read-only everywhere except `/upload/`.
   carries a precomputed path:
 
   ```json
-  { "id":"node-cbf9…", "type":"image",
-    "filename":"nodes/Brainstorming whiteboard diagram.md",
-    "label":"Brainstorming whiteboard diagram",
-    "preview":"artifact-9730…-…jpg" }
+  {
+    "id": "node-cbf9…",
+    "type": "image",
+    "filename": "nodes/Brainstorming whiteboard diagram.md",
+    "label": "Brainstorming whiteboard diagram",
+    "preview": "artifact-9730…-…jpg"
+  }
   ```
 
   The agent downloads `filename` directly (`GET $RFS/download/nodes/Brainstorming%20whiteboard%20diagram.md`).
@@ -115,15 +118,16 @@ Read-only everywhere except `/upload/`.
   [`apps/server/src/modules/agent/node-ref.ts`](../../apps/server/src/modules/agent/node-ref.ts).
   The `id` is used **only** to identify a node in an `ask-agent` request, never
   for download addressing.
+
 - **Filenames are real, human-readable, label-based paths and may contain spaces
   / unicode** → the agent must URL-encode them in the curl path. Frames /
   hierarchy / spatial layout are **not** modelled in the FS — they are
   `ask-agent`'s concern.
 - **Binary / image nodes**: `filename` (`.md`) holds the node's content +
-  metadata; the *viewable bytes* are the ref's `preview` artifact
+  metadata; the _viewable bytes_ are the ref's `preview` artifact
   (`artifact-…jpg`), downloaded at `GET $RFS/download/artifacts/<preview>`.
 - **Discovery beyond the selection**: handled by **`ask-agent`**, not a directory
-  listing. Finding *which* files matter is a canvas-semantic judgment (relevance,
+  listing. Finding _which_ files matter is a canvas-semantic judgment (relevance,
   neighbourhood, layout), so the agent asks `POST $RFS/agent` ("which node files
   relate to X?") and gets back concrete `filename` paths to `download`. The RFS
   download surface is deliberately path-only: no listing/enumeration.
@@ -156,12 +160,12 @@ endpoint, §6c). There is **no `.mjs`
 reachback tool**; these endpoints fully replace it (see §6a for the feasibility
 mapping). Each operation is a single `curl`:
 
-| Operation             | Region     | HTTP                                    | Notes                                             |
-| --------------------- | ---------- | --------------------------------------- | ------------------------------------------------- |
-| download content      | read-only  | `GET $RFS/download/<path>`               | `<path>` = the ref's `filename` (path-only, no id, no listing). Bytes in body; metadata in `X-Huabu-*` headers. |
-| upload payload        | `/upload/` | `POST $RFS/upload/<filename>`            | Body = bytes → stored at `upload/<filename>`. Optional metadata headers (e.g. `Author`). |
-| remove payload        | `/upload/` | `DELETE $RFS/upload/<filename>`          | Clean up shared scratch.                          |
-| ask agent             | via agent  | `POST $RFS/agent`                        | Prompt in body; streams the answer (§5, §6).      |
+| Operation        | Region     | HTTP                            | Notes                                                                                                           |
+| ---------------- | ---------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| download content | read-only  | `GET $RFS/download/<path>`      | `<path>` = the ref's `filename` (path-only, no id, no listing). Bytes in body; metadata in `X-Huabu-*` headers. |
+| upload payload   | `/upload/` | `POST $RFS/upload/<filename>`   | Body = bytes → stored at `upload/<filename>`. Optional metadata headers (e.g. `Author`).                        |
+| remove payload   | `/upload/` | `DELETE $RFS/upload/<filename>` | Clean up shared scratch.                                                                                        |
+| ask agent        | via agent  | `POST $RFS/agent`               | Prompt in body; streams the answer (§5, §6).                                                                    |
 
 The upload endpoint carries any provenance hints in **headers** and the payload
 bytes in the body; the filename is in the URL. `/upload/` is a **single shared**
@@ -172,7 +176,7 @@ once consumed.
 ### Snapshots are a two-step: `agent` renders → `download`
 
 Rendering is **never** a `download` modifier — `download` only fetches bytes that
-already exist. All rasterization (both single-node and *nearby* sketch+image
+already exist. All rasterization (both single-node and _nearby_ sketch+image
 clusters, an inherently spatial many→one operation) goes through `ask-agent`:
 
 1. `POST agent` — "render \<these nodes\> as PNG(s)"; the internal agent runs the
@@ -209,13 +213,13 @@ the canvas dir, its existing file/canvas tools reach it natively (a dedicated
 **Streaming — one transport: SSE (`text/event-stream`) always.** `POST $RFS/agent`
 always responds `Content-Type: text/event-stream`, so a plain `curl -N` keeps the
 connection (and the agentlet harness) alive and is timeout-resistant. There is **no
-separate `text/plain` mode** — instead, the SSE *envelope* carries **plain text
-inside `data:` frames**, which keeps the wire heartbeat-safe *and* the clean
+separate `text/plain` mode** — instead, the SSE _envelope_ carries **plain text
+inside `data:` frames**, which keeps the wire heartbeat-safe _and_ the clean
 extraction parser-free.
 
 Mental model — the media type describes the **envelope (framing)**, not the frame
 contents. The bytes follow SSE grammar (`data:` frames, `\n\n` separators, `:`
-comment heartbeats, `event:` names); the *content* of each `data:` frame is plain
+comment heartbeats, `event:` names); the _content_ of each `data:` frame is plain
 answer text (not JSON). Those two are orthogonal.
 
 ```
@@ -235,7 +239,7 @@ data: {"threadId":"…"}
   # PowerShell → ... | Select-String '^data: '
   ```
 - **Full steps** (advanced): read the whole SSE stream (`event: step` / tool frames
-  + `done` + `error`) with a real client/parser.
+  - `done` + `error`) with a real client/parser.
 
 **Heartbeats are timer-driven**, not event-driven: the server emits `: ping\n\n`
 every `heartbeatSec` seconds regardless of agent activity, because a single long
@@ -248,17 +252,17 @@ no` (already set on the v1 reachback route) ensures the frames flush immediately
 // raw text/plain body → the prompt, all options default
 // — or — application/json:
 {
-  "prompt": "…",          // required
-  "doneTextOnly": true,   // default true → emit ONLY final answer text as data: frames
-                          //   (+ heartbeats/done/error). Set false to also get
-                          //   event: step / tool frames — then use a real parser,
-                          //   since the sed one-liner would mix step text into the answer.
-  "heartbeatSec": 10      // optional; server default ~15, clamped to [5,30]
+  "prompt": "…", // required
+  "doneTextOnly": true, // default true → emit ONLY final answer text as data: frames
+  //   (+ heartbeats/done/error). Set false to also get
+  //   event: step / tool frames — then use a real parser,
+  //   since the sed one-liner would mix step text into the answer.
+  "heartbeatSec": 10, // optional; server default ~15, clamped to [5,30]
 }
 ```
 
-Note: `Content-Type` on the *request* selects prompt-only (`text/plain`) vs
-options (`application/json`); the *response* is always `text/event-stream`. The
+Note: `Content-Type` on the _request_ selects prompt-only (`text/plain`) vs
+options (`application/json`); the _response_ is always `text/event-stream`. The
 old `Accept: text/plain` vs `text/event-stream` switch is gone — verbosity is now
 the `doneTextOnly` body option.
 
@@ -277,21 +281,21 @@ Authorization: Bearer ${AGENTLET_TOKEN}                 # daemon-managed (see be
 
 **Env-injection change.** Today Huabu passes only `HUABU_CANVAS_ID` as its
 per-spawn app var (`spawn-orchestrator.ts` `reachbackEnv`), while `AGENTLET_SERVER`
-+ the reachback-dir registry are injected daemon-side and `AGENTLET_TOKEN` is
-inherited through the daemon fork (daemon-owned — not the RFS endpoints' concern).
-This proposal **replaces `HUABU_CANVAS_ID` with `HUABU_RFS_URL`**: the canvas id is
-baked into the base URL, so a separate id var is redundant. Agents that still want
-the bare id parse it from the URL's last segment. (`AGENTLET_TOKEN` auth stays a
-daemon contract — see §7; the endpoints just require a valid bearer.)
 
+- the reachback-dir registry are injected daemon-side and `AGENTLET_TOKEN` is
+  inherited through the daemon fork (daemon-owned — not the RFS endpoints' concern).
+  This proposal **replaces `HUABU_CANVAS_ID` with `HUABU_RFS_URL`**: the canvas id is
+  baked into the base URL, so a separate id var is redundant. Agents that still want
+  the bare id parse it from the URL's last segment. (`AGENTLET_TOKEN` auth stays a
+  daemon contract — see §7; the endpoints just require a valid bearer.)
 
-| Method + path                          | Op        | Notes                                                        |
-| -------------------------------------- | --------- | ------------------------------------------------------------ |
-| `GET  $RFS/download/<path>`             | download  | `<path>` = ref `filename` (path-only, url-encoded; no listing). Body = content bytes; metadata in `X-Huabu-*` headers. |
-| `HEAD $RFS/download/<path>`             | stat      | Metadata headers only, no body (cheap probe).                |
-| `POST $RFS/upload/<filename>`           | upload    | Body = bytes → stored at `upload/<filename>` (single shared folder). Optional provenance headers (`Author`, …). |
-| `DELETE $RFS/upload/<filename>`         | rm        | Remove a payload from the shared `/upload/` folder.          |
-| `POST $RFS/agent`                       | ask-agent | Prompt in body (`text/plain` = prompt only, or JSON for options). **Response is always `text/event-stream`** (§5). **Sole** canvas mutator **and** the discovery path ("which files matter?"). |
+| Method + path                   | Op        | Notes                                                                                                                                                                                          |
+| ------------------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET  $RFS/download/<path>`     | download  | `<path>` = ref `filename` (path-only, url-encoded; no listing). Body = content bytes; metadata in `X-Huabu-*` headers.                                                                         |
+| `HEAD $RFS/download/<path>`     | stat      | Metadata headers only, no body (cheap probe).                                                                                                                                                  |
+| `POST $RFS/upload/<filename>`   | upload    | Body = bytes → stored at `upload/<filename>` (single shared folder). Optional provenance headers (`Author`, …).                                                                                |
+| `DELETE $RFS/upload/<filename>` | rm        | Remove a payload from the shared `/upload/` folder.                                                                                                                                            |
+| `POST $RFS/agent`               | ask-agent | Prompt in body (`text/plain` = prompt only, or JSON for options). **Response is always `text/event-stream`** (§5). **Sole** canvas mutator **and** the discovery path ("which files matter?"). |
 
 ```bash
 AUTH="Authorization: Bearer $AGENTLET_TOKEN"
@@ -306,28 +310,28 @@ curl -N  -H "$AUTH" --data-binary @prompt.md "$HUABU_RFS_URL/agent" \
 
 Every capability of the old reachback tool maps onto plain curl:
 
-| Old tool capability            | curl realization                                                              |
-| ------------------------------ | ----------------------------------------------------------------------------- |
-| `read-node`                    | `GET download/<path>` (metadata in `X-Huabu-*` headers)                       |
-| `write-node` (+link/notify)    | `POST upload/<file>` → `POST agent` materializes (single-writer)              |
-| `snapshot` (single / cluster)  | two-step: `POST agent` renders to `.artifacts/` → `GET download/artifacts/<key>.png` |
-| `ask-agent` (+`--show-steps`)  | `POST agent` → SSE; `doneTextOnly:true` (default) for clean answer, `false` for step frames |
-| `--save-session`               | shell redirect `curl … > session.jsonl`                                       |
-| discovery                      | `POST agent` ("which node files relate to X?") → returns paths                |
-| auth                           | `-H "Authorization: Bearer $AGENTLET_TOKEN"` (see mitigation below)           |
-| error → exit code + message    | `curl -fsS --fail-with-body` (non-zero on HTTP error; `{message}` embeds a runnable `/skill` fetch on 4xx/5xx) |
-| prompt-from-file (`@file`)     | `curl --data-binary @prompt.md -H "Content-Type: text/plain" $RFS/agent`      |
+| Old tool capability           | curl realization                                                                                               |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `read-node`                   | `GET download/<path>` (metadata in `X-Huabu-*` headers)                                                        |
+| `write-node` (+link/notify)   | `POST upload/<file>` → `POST agent` materializes (single-writer)                                               |
+| `snapshot` (single / cluster) | two-step: `POST agent` renders to `.artifacts/` → `GET download/artifacts/<key>.png`                           |
+| `ask-agent` (+`--show-steps`) | `POST agent` → SSE; `doneTextOnly:true` (default) for clean answer, `false` for step frames                    |
+| `--save-session`              | shell redirect `curl … > session.jsonl`                                                                        |
+| discovery                     | `POST agent` ("which node files relate to X?") → returns paths                                                 |
+| auth                          | `-H "Authorization: Bearer $AGENTLET_TOKEN"` (see mitigation below)                                            |
+| error → exit code + message   | `curl -fsS --fail-with-body` (non-zero on HTTP error; `{message}` embeds a runnable `/skill` fetch on 4xx/5xx) |
+| prompt-from-file (`@file`)    | `curl --data-binary @prompt.md -H "Content-Type: text/plain" $RFS/agent`                                       |
 
 **What "no tool" moves, not removes.** The interface contract shifts from a
 shipped script into: (1) agentlet-injected env (`AGENTLET_TOKEN`,
 `HUABU_RFS_URL`), (2) a **skill doc** the agent pulls on demand via
 `GET $RFS/skill` (§6c), and (3) a **persona-only system-prompt preamble** whose
 only mechanical content is a bootstrap line pointing at that endpoint. This
-*removes* the script build/versioning/distribution burden (the v1 "script
+_removes_ the script build/versioning/distribution burden (the v1 "script
 versioning" open issue).
 
 **Auth is a per-request `Authorization: Bearer $AGENTLET_TOKEN` header**, added by
-the agent on every call — *not* a curl-specific `-K` config file. Rationale:
+the agent on every call — _not_ a curl-specific `-K` config file. Rationale:
 portability. A header works identically across `curl -H`, `wget --header`,
 PowerShell `Invoke-WebRequest -Headers`, `python requests`, and Node `fetch`,
 whereas `curl -K <rc>` is curl-only and re-introduces the cross-platform coupling
@@ -343,7 +347,7 @@ as the `node` the old `.mjs` tool needed.
 ### 6b. Cross-platform
 
 The **contract is plain HTTP + Bearer**, which is universal — `curl` is only the
-convenient client, so this works on Linux / macOS / Windows and is *broader* than
+convenient client, so this works on Linux / macOS / Windows and is _broader_ than
 the node-only `.mjs` it replaces (an LLM agent can fall back to `curl.exe`,
 `Invoke-RestMethod`, `python requests`, Node `fetch`, `wget`). Two platform
 gotchas to design around:
@@ -352,11 +356,11 @@ gotchas to design around:
   `-H` fails). Use `curl.exe` explicitly, or bash (git-bash/WSL), or
   `Invoke-RestMethod`. (Windows 10 1803+ ships `curl.exe`.)
 - **Shell syntax isn't portable** — env interpolation (`$VAR` / `%VAR%` /
-  `$env:VAR`), quoting, and line continuation differ. So a *verbatim* curl string
+  `$env:VAR`), quoting, and line continuation differ. So a _verbatim_ curl string
   is not universal even where curl exists.
 
 Mitigation: the **skill doc** (§6c) describes the **endpoints** (method · path ·
-headers · body) with a curl *example*, not a "run this exact string" script, so
+headers · body) with a curl _example_, not a "run this exact string" script, so
 the agent adapts per platform. One caveat — the streaming **`agent`** endpoint
 needs a streaming-capable client (`curl.exe -N` or equivalent); avoid
 `Invoke-RestMethod`, which buffers the whole response and defeats the keepalive /
@@ -369,16 +373,16 @@ The API mechanics do **not** live in the system prompt. The one-shot preamble is
 
 > To work with this Huabu canvas, first fetch the access guide:
 > `GET ${HUABU_RFS_URL}/skill` (add header `Authorization: Bearer
-> ${AGENTLET_TOKEN}`). It documents how to read/write files and talk to the
+${AGENTLET_TOKEN}`). It documents how to read/write files and talk to the
 > canvas agent.
 
 The agent pulls the full guide on demand from a new read endpoint:
 
-| Method + path            | Op    | Notes                                                            |
-| ------------------------ | ----- | --------------------------------------------------------------- |
-| `GET $RFS/skill`         | skill | Returns the canvas-access guide as `text/markdown`. Bearer-gated. |
+| Method + path    | Op    | Notes                                                             |
+| ---------------- | ----- | ----------------------------------------------------------------- |
+| `GET $RFS/skill` | skill | Returns the canvas-access guide as `text/markdown`. Bearer-gated. |
 
-**Server-side resolver** (single source, two-way DRY is *not* needed here because
+**Server-side resolver** (single source, two-way DRY is _not_ needed here because
 there is no push copy): `resolveCanvasSkill(canvasId)` returns the **per-canvas
 `skill.md`** at the canvas root if present, else the **bundled default**
 `prompt/external-agent/access-huabu.md`. This gives per-canvas customization as a
@@ -406,13 +410,15 @@ than a non-standard extra field, every `/api/rfs/*` error keeps the repo-standar
 command into the message text**, e.g.:
 
 ```json
-{ "message": "No node file at 'nodes/foo.md'. To see how to use this canvas, run: curl -sH \"Authorization: Bearer $AGENTLET_TOKEN\" \"$HUABU_RFS_URL/skill\"" }
+{
+  "message": "No node file at 'nodes/foo.md'. To see how to use this canvas, run: curl -sH \"Authorization: Bearer $AGENTLET_TOKEN\" \"$HUABU_RFS_URL/skill\""
+}
 ```
 
 This closes the only real weakness of pull-over-push: an agent that skips the
 bootstrap line — or mis-forms a `download` path, a bad `upload`, a malformed
-`agent` body — is handed a *copy-pasteable* command that fetches the full guide,
-on its *first* fumble, instead of flailing. It turns `/skill` from a doc the agent
+`agent` body — is handed a _copy-pasteable_ command that fetches the full guide,
+on its _first_ fumble, instead of flailing. It turns `/skill` from a doc the agent
 must remember into a safety net the failure path advertises with a runnable spec,
 for ~5 lines of code. (Keep the recovery command out of `2xx` bodies — it's only
 useful on `4xx`/`5xx`. The error shape stays plain `{ message }`; no schema
@@ -424,7 +430,7 @@ extension.)
 separate:**
 
 - **Content** = the file bytes, returned **as-is**. For `note` / `text` this is
-  the stored markdown body (any frontmatter in it is *part of the content*, not
+  the stored markdown body (any frontmatter in it is _part of the content_, not
   parsed as metadata); for `web` / `pdf` / `image` / … it is the artifact bytes
   referenced by the node's `src`.
 - **Metadata** = the authoritative **node record in `canvas.json` state**
@@ -455,8 +461,8 @@ Two representations, chosen by content negotiation:
    ```
 
 **Edges appear only in the JSON view** (`Accept: application/json`), never in
-`X-Huabu-*` headers: an edge is a relationship *between* files, not an attribute
-*of* one file, so it belongs to the graph view and is mutated only via
+`X-Huabu-*` headers: an edge is a relationship _between_ files, not an attribute
+_of_ one file, so it belongs to the graph view and is mutated only via
 `ask-agent`.
 
 ### Auth & safety
@@ -501,7 +507,7 @@ Resolved for phase 1 (kept here as decisions + their guardrails):
 - **Internal-agent tool scope → full `operate`.** The internal agent (sole writer)
   runs with the **full canvas toolbelt**, not a forked restricted `reachback` set.
   Rationale: agents are trusted first-party, and a second parallel tool registry is
-  cost without payoff at this stage. Content safety lives *inside* the internal
+  cost without payoff at this stage. Content safety lives _inside_ the internal
   agent (its own guard/"sage" logic — e.g. refuse/soft-delete destructive asks),
   not in a truncated tool list. Reachback-originated turns should still be tagged in
   the event log for audit. A hard `reachback` scope is revisited only when opening
@@ -519,7 +525,7 @@ Deferred (default chosen, revisit only if needed):
   (`getDaemonAuth().getToken()`). The agent has that token in its env (inherited
   through the daemon fork). Because the token is per-daemon — not per-canvas — and
   `canvasId` sits in the URL, nothing inherently stops a token from reaching
-  *another* canvas by editing the URL. Tolerable in phase 1 (trusted first-party
+  _another_ canvas by editing the URL. Tolerable in phase 1 (trusted first-party
   agents); **must** be closed before third-party / untrusted agents: bind each token
   to its allowed canvas set (or mint a canvas-scoped token at spawn). (This is an
   agentlet/daemon-side change, not an RFS-endpoint change.)

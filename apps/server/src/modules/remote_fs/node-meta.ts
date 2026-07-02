@@ -27,7 +27,10 @@ import {
   type RfsNodeMeta,
 } from '@sediment/shared';
 
-import { ALWAYS_SKIP, safeResolve } from '../agent/tools/handlers/fs-sandbox.js';
+import {
+  ALWAYS_SKIP,
+  safeResolve,
+} from '../agent/tools/handlers/fs-sandbox.js';
 import { getCanvasStore } from '../storage/index.js';
 import { toSafeFilename } from '../storage/naming.js';
 
@@ -131,9 +134,7 @@ export function lookupNodeByPath(
 
   const edgeList = (canvas.state.edges ?? []) as CanvasEdge[];
   const edges: RfsNodeEdges = {
-    parents: edgeList
-      .filter((e) => e.target === match.id)
-      .map((e) => e.source),
+    parents: edgeList.filter((e) => e.target === match.id).map((e) => e.source),
     children: edgeList
       .filter((e) => e.source === match.id)
       .map((e) => e.target),

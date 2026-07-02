@@ -33,8 +33,7 @@ const MIME_BY_EXT: Readonly<Record<string, string>> = {
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   '.pptx':
     'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  '.xlsx':
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 };
 
 /** Content-Type for a filename, defaulting to `application/octet-stream`. */
