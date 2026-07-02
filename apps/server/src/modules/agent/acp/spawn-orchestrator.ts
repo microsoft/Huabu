@@ -221,6 +221,9 @@ export async function ensureAgentForThread(
   if (canvasId) {
     reachbackEnv.HUABU_CANVAS_ID = canvasId;
   }
+  // The ACP thread this agent serves — forwarded so reachback `/execute`
+  // calls can be attributed to this conversation's change-review card.
+  reachbackEnv.HUABU_THREAD_ID = threadId;
 
   let sessionId: string;
   let pid: number;

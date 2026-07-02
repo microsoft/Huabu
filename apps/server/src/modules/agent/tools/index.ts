@@ -55,6 +55,8 @@ export interface ToolBuildContext {
    * this field.
    */
   origin?: NodeOrigin;
+  /** ACP conversation thread to attribute canvas changes to. */
+  threadId?: string;
 }
 
 /**
@@ -102,6 +104,7 @@ function toAgentTool(def: ToolDefinition, ctx: ToolBuildContext): AgentTool {
         {
           canvasId: ctx.canvasId,
           origin: ctx.origin,
+          threadId: ctx.threadId,
         },
       );
       // Handlers may return either a plain string (the common text

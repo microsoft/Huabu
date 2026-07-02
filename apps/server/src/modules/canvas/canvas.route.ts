@@ -20,8 +20,13 @@ import {
   canvasSearchRequestSchema,
 } from '@sediment/shared';
 
-import { CanvasNotFoundError, executeOnServer } from './canvas-executor.js';
+import {
+  CanvasNotFoundError,
+  applyDeltasOnServer,
+  executeOnServer,
+} from './canvas-executor.js';
 import { searchCanvas } from './canvas-search.js';
+import { publishCanvasUpdate } from './canvas-sync.js';
 import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
 import { getPreprocessDispatcher } from '../preprocessing/index.js';
 import { stripOfficeparserPreamble } from '../preprocessing/loaders/office-strip.js';
@@ -51,11 +56,13 @@ import type {
   CreateCanvasResponse,
   DeleteCanvasResponse,
   DeleteNodeResponse,
+  DeleteThreadChangeResponse,
   ExportCanvasQuery,
   GetCanvasEventsQuery,
   GetCanvasEventsResponse,
   GetCanvasResponse,
   GetNodeContentResponse,
+  GetThreadChangesResponse,
   ImportCanvasResponse,
   ListCanvasesResponse,
   PostCanvasEventsRequest,
@@ -1117,6 +1124,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         commands: commands as CanvasCommand[],
         originator,
         ...(runId ? { runId } : {}),
+        // Derive review records only for thread-attributed (ACP) batches —
+        // they feed that conversation's change card. Other callers skip it.
+        computeChanges: !!originator.threadId,
       });
       const response: PostCanvasExecuteResponse = {
         canvasId: out.canvasId,
@@ -1133,6 +1143,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         },
         ...(runId ? { runId } : {}),
       };
+
       return reply.send(response);
     } catch (err) {
       if (err instanceof CanvasNotFoundError) {
@@ -1144,6 +1155,91 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       });
     }
   });
+
+  // --- Change-review records (ACP change card) --------------------------
+  //
+  // `GET /:canvasId/threads/:threadId/changes` returns the pending review
+  // records for a conversation; `DELETE …/changes/:changeId` removes one
+  // (accept or post-revert). Revert of canvas content itself happens on
+  // the client via the inverse deltas carried in each record.
+
+  fastify.get<{
+    Params: { canvasId: string; threadId: string };
+    Reply: ApiResult<GetThreadChangesResponse>;
+  }>('/:canvasId/threads/:threadId/changes', async function (request, reply) {
+    const { canvasId, threadId } = request.params;
+    const store = getCanvasStore(canvasId);
+    if (!store.read()) {
+      return reply.code(404).send({ message: 'Canvas not found' });
+    }
+    return reply.send({ changes: store.readChanges(threadId) });
+  });
+
+  fastify.delete<{
+    Params: { canvasId: string; threadId: string; changeId: string };
+    Reply: ApiResult<DeleteThreadChangeResponse>;
+  }>(
+    '/:canvasId/threads/:threadId/changes/:changeId',
+    async function (request, reply) {
+      const { canvasId, threadId, changeId } = request.params;
+      const store = getCanvasStore(canvasId);
+      if (!store.read()) {
+        return reply.code(404).send({ message: 'Canvas not found' });
+      }
+      const removed = store.removeChange(threadId, changeId);
+      return reply.send({ removed: !!removed });
+    },
+  );
+
+  // Revert one change: apply its inverse deltas server-side (persists +
+  // broadcasts to all live tabs), then drop the record.
+  fastify.post<{
+    Params: { canvasId: string; threadId: string; changeId: string };
+    Reply: ApiResult<DeleteThreadChangeResponse>;
+  }>(
+    '/:canvasId/threads/:threadId/changes/:changeId/revert',
+    async function (request, reply) {
+      const { canvasId, threadId, changeId } = request.params;
+      const store = getCanvasStore(canvasId);
+      if (!store.read()) {
+        return reply.code(404).send({ message: 'Canvas not found' });
+      }
+      const records = store.readChanges(threadId);
+      const record = records.find((r) => r.id === changeId);
+      if (!record) {
+        return reply.send({ removed: false });
+      }
+      try {
+        const out = await applyDeltasOnServer({
+          canvasId,
+          deltas: record.revertDeltas,
+          originator: { source: 'ui' },
+        });
+        if (out.toVersion > out.fromVersion) {
+          publishCanvasUpdate(canvasId, {
+            type: 'update',
+            data: {
+              fromVersion: out.fromVersion,
+              toVersion: out.toVersion,
+              deltas: out.deltas,
+              pendingEffects: out.pendingEffects,
+            },
+          });
+        }
+      } catch (err) {
+        if (err instanceof CanvasNotFoundError) {
+          return reply.code(404).send({ message: 'Canvas not found' });
+        }
+        request.log.error(
+          { canvasId, changeId, err },
+          'Failed to revert change',
+        );
+        return reply.code(500).send({ message: 'Failed to revert change' });
+      }
+      store.removeChange(threadId, changeId);
+      return reply.send({ removed: true });
+    },
+  );
 
   // --- Canvas events: append-only behavioural log -----------------------
   //

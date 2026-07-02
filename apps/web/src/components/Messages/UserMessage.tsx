@@ -31,7 +31,7 @@ export const UserMessage = ({
     <div className="my-3 flex flex-col items-end">
       <div className="mt-2 flex max-w-[80%] flex-col items-end gap-1">
         <div className="bg-bg-default text-fg-default overflow-hidden rounded-md border border-none px-4 py-2 text-sm">
-          <div className="leading-relaxed break-all whitespace-pre-wrap">
+          <div className="leading-relaxed break-words whitespace-pre-wrap">
             {hasSkills &&
               invokedSkills.map((id) => (
                 <span

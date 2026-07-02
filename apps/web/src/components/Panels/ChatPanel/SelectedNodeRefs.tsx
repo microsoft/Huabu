@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 
 import { Tooltip } from '@/components/Common/Tooltip';
 import useCanvasStore from '@/store/canvasStore';
+import { useChatStore } from '@/store/chatStore';
 
 /**
  * Compact indicator showing how many canvas nodes are currently selected.
@@ -11,8 +12,17 @@ import useCanvasStore from '@/store/canvasStore';
  */
 export const SourceCount = () => {
   const nodes = useCanvasStore((s) => s.nodes);
+  // The question node whose conversation is currently open. That node is
+  // the subject of this very thread, so selecting it should not add it as
+  // a context source — exclude it from both the count and the tooltip.
+  const viewingQuestionNodeId = useChatStore(
+    (s) => s.viewingQuestionThread?.nodeId,
+  );
 
-  const selectedNodes = useMemo(() => nodes.filter((n) => n.selected), [nodes]);
+  const selectedNodes = useMemo(
+    () => nodes.filter((n) => n.selected && n.id !== viewingQuestionNodeId),
+    [nodes, viewingQuestionNodeId],
+  );
 
   const count = selectedNodes.length;
 

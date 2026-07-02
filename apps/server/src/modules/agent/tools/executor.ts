@@ -71,6 +71,8 @@ import type { NodeOrigin } from '@sediment/shared';
 export interface ExecuteContext {
   canvasId?: string;
   origin?: NodeOrigin;
+  /** ACP conversation thread to attribute canvas changes to (change card). */
+  threadId?: string;
 }
 
 /**
@@ -136,6 +138,7 @@ export async function executeTool(
       return handleCanvasCommands(
         withCanvasId<CanvasCommandsArgs>(args, 'canvas_commands'),
         context?.origin,
+        { threadId: context?.threadId },
       );
 
     case 'fs_write':

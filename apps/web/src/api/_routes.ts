@@ -51,6 +51,18 @@ export const routes = {
     `/canvas/${enc(canvasId)}/external/stream`,
   canvasExternalImport: (canvasId: string) =>
     `/canvas/${enc(canvasId)}/external/import`,
+  canvasSyncStream: (canvasId: string) =>
+    `/canvas/${enc(canvasId)}/sync/stream`,
+  canvasThreadChanges: (canvasId: string, threadId: string) =>
+    `/canvas/${enc(canvasId)}/threads/${enc(threadId)}/changes`,
+  canvasThreadChange: (canvasId: string, threadId: string, changeId: string) =>
+    `/canvas/${enc(canvasId)}/threads/${enc(threadId)}/changes/${enc(changeId)}`,
+  canvasThreadChangeRevert: (
+    canvasId: string,
+    threadId: string,
+    changeId: string,
+  ) =>
+    `/canvas/${enc(canvasId)}/threads/${enc(threadId)}/changes/${enc(changeId)}/revert`,
 
   // ── Web (preview / reader / page) ────────────────────────────────
   webPreview: (canvasId: string, nodeId: string) =>

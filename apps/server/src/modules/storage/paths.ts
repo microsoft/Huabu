@@ -158,6 +158,18 @@ export function chatPath(canvasId: string, threadId: string): string {
 }
 
 /**
+ * Pending change-review records for an ACP thread (the "what the agent
+ * changed" card). A mutable sidecar — entries are removed on accept /
+ * revert — so it lives apart from the append-only `.turns.jsonl` log.
+ */
+export function changesPath(canvasId: string, threadId: string): string {
+  return path.join(
+    chatDir(canvasId),
+    `${sanitizeId(threadId, 'threadId')}.changes.json`,
+  );
+}
+
+/**
  * Structured thread record paired with a thread — the source of truth
  * for chat history in the envelope-persistence model. An append-only
  * JSONL log of finalized turns, each carrying the user's structured

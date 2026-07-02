@@ -5,9 +5,6 @@ import {
   variantForInternalTool,
   type AssistantToolPart,
   type AssistantToolVariant,
-  type CanvasCommand,
-  type CanvasEdgeId,
-  type CanvasNodeId,
   type ImageGenerationData,
   type SnapshotNodesData,
   type ToolResponse,
@@ -18,16 +15,12 @@ import { agentApi } from '@/api/agent';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 
-import { snapshotAndExtractChanges } from './useCanvasChanges';
-
 import type { AssistantSegment } from '../store/chatTypes';
 import type {
   AgentMode,
   AgentStreamEvent,
   IntentCandidate,
 } from '@sediment/shared';
-import type { Delta } from '@sediment/shared/canvas-engine';
-import type { Node } from '@xyflow/react';
 
 // ==================== Pure Utility Functions ====================
 
@@ -80,13 +73,6 @@ function parseToolResponse(
   }
 }
 
-/** Extract CanvasChange entries from a canvas_commands batch. */
-export function extractCanvasChangesFromCommands(commands: CanvasCommand[]) {
-  // Delegate to snapshotAndExtractChanges which reads current canvas state
-  // NOTE: This must be called BEFORE commands are executed.
-  return snapshotAndExtractChanges(commands);
-}
-
 /**
  * Normalize an internal tool's success payload before it gets
  * shallow-merged with the call args on `data.data`.
@@ -108,296 +94,6 @@ function normalizeInternalToolResultData(
     return data as Record<string, unknown>;
   }
   return {};
-}
-
-// ==================== Constants ====================
-
-/** Duration of each element's opacity transition (ms). */
-const ENTER_ANIM_DURATION = 300;
-
-/** Stagger delay between consecutive elements in the reveal queue (ms). */
-const ENTER_ANIM_STAGGER = 200;
-
-// ==================== Animation State ====================
-// Singleton module state — only valid because useAgentStream is mounted once
-// (in ChatPanel). Do NOT import this hook from additional components.
-
-/** Pending timeouts for the current animation so they can be cancelled. */
-let animTimers: ReturnType<typeof setTimeout>[] = [];
-/** IDs of nodes currently being animated (may have opacity: 0). */
-let animNodeIds = new Set<string>();
-/** IDs of edges currently being animated (may have opacity: 0). */
-let animEdgeIds = new Set<string>();
-
-/**
- * Cancel any in-progress entrance animation and immediately reveal all
- * elements.  Safe to call at any time — no-op when nothing is animating.
- *
- * Exported so external code (e.g. canvas-change preview) can clear the
- * animation before snapshotting state.
- */
-export function cancelAgentAnimation(): void {
-  for (const t of animTimers) clearTimeout(t);
-  animTimers = [];
-
-  if (animNodeIds.size === 0 && animEdgeIds.size === 0) return;
-
-  const nIds = animNodeIds;
-  const eIds = animEdgeIds;
-  animNodeIds = new Set();
-  animEdgeIds = new Set();
-
-  // Animation cleanup is a transient visual write — use the no-autosave
-  // setter so resetting opacity/transition does not schedule an empty
-  // structure PUT or reset the autosave debounce.
-  useCanvasStore.getState()._setStateNoAutosave((state) => ({
-    nodes: state.nodes.map((n) => {
-      if (!nIds.has(n.id)) return n;
-      const {
-        opacity: _nOp,
-        transition: _nTr,
-        ...rest
-      } = (n.style ?? {}) as Record<string, unknown>;
-      return { ...n, style: { ...rest, opacity: 1 } };
-    }),
-    edges: state.edges.map((e) => {
-      if (!eIds.has(e.id)) return e;
-      const {
-        opacity: _op,
-        transition: _tr,
-        ...rest
-      } = (e.style ?? {}) as Record<string, unknown>;
-      return { ...e, style: { ...rest, opacity: 1 } };
-    }),
-  }));
-}
-
-// ==================== Side-effectful Helpers ====================
-
-/**
- * Build a reveal queue from commands in execution order, then reveal
- * each element one by one with a staggered delay.
- *
- * Queue items are interleaved following command order:
- *   CREATE_NODES → each node is one queue slot
- *   CONNECT_NODES → each edge is one queue slot
- *   Other command types → skipped (they don't create visible elements)
- */
-function animateAgentBatch(commands: CanvasCommand[]): void {
-  // Build ordered reveal queue: { type: 'node' | 'edge', id }
-  const queue: { kind: 'node' | 'edge'; id: string }[] = [];
-  for (const cmd of commands) {
-    if (cmd.type === 'CREATE_NODES') {
-      for (const n of cmd.nodes) {
-        if (n.id) queue.push({ kind: 'node', id: n.id as string });
-      }
-    } else if (cmd.type === 'CONNECT_NODES') {
-      for (const e of cmd.edges) {
-        if (e.id) queue.push({ kind: 'edge', id: e.id as string });
-      }
-    }
-  }
-  if (queue.length === 0) return;
-
-  // Cancel any previous animation that may still be running.
-  cancelAgentAnimation();
-
-  const newNodeIds = new Set(
-    queue.filter((q) => q.kind === 'node').map((q) => q.id),
-  );
-  const newEdgeIds = new Set(
-    queue.filter((q) => q.kind === 'edge').map((q) => q.id),
-  );
-
-  animNodeIds = new Set(newNodeIds);
-  animEdgeIds = new Set(newEdgeIds);
-
-  const transition = `opacity ${ENTER_ANIM_DURATION}ms ease-out`;
-
-  // Step 1: Hide everything that's in the queue. Transient visual
-  // write — bypass autosave (the engine commands that CREATED these
-  // nodes already scheduled a structure PUT; the opacity ramp must not
-  // pile on additional ones nor reset that debounce).
-  useCanvasStore.getState()._setStateNoAutosave((state) => ({
-    nodes: state.nodes.map((n) => {
-      if (!newNodeIds.has(n.id)) return n;
-      return { ...n, style: { ...n.style, opacity: 0, transition } };
-    }),
-    edges: state.edges.map((e) => {
-      if (!newEdgeIds.has(e.id)) return e;
-      return { ...e, style: { ...e.style, opacity: 0, transition } };
-    }),
-  }));
-
-  // Step 2: Reveal each queue item in order.
-  for (const [idx, item] of queue.entries()) {
-    const timer = setTimeout(() => {
-      if (item.kind === 'node') {
-        animNodeIds.delete(item.id);
-        useCanvasStore.getState()._setStateNoAutosave((state) => ({
-          nodes: state.nodes.map((n) =>
-            n.id === item.id ? { ...n, style: { ...n.style, opacity: 1 } } : n,
-          ),
-        }));
-      } else {
-        animEdgeIds.delete(item.id);
-        useCanvasStore.getState()._setStateNoAutosave((state) => ({
-          edges: state.edges.map((e) =>
-            e.id === item.id ? { ...e, style: { ...e.style, opacity: 1 } } : e,
-          ),
-        }));
-      }
-    }, idx * ENTER_ANIM_STAGGER);
-    animTimers.push(timer);
-  }
-
-  // Step 3: Clean up transition styles after everything is visible.
-  const totalMs = queue.length * ENTER_ANIM_STAGGER + ENTER_ANIM_DURATION;
-  const cleanupTimer = setTimeout(() => {
-    animTimers = [];
-    animNodeIds = new Set();
-    animEdgeIds = new Set();
-    useCanvasStore.getState()._setStateNoAutosave((state) => ({
-      nodes: state.nodes.map((n) => {
-        if (!newNodeIds.has(n.id)) return n;
-        const { transition: _, ...rest } = (n.style ?? {}) as Record<
-          string,
-          unknown
-        >;
-        return { ...n, style: rest };
-      }),
-      edges: state.edges.map((e) => {
-        if (!newEdgeIds.has(e.id)) return e;
-        const { transition: _, ...rest } = (e.style ?? {}) as Record<
-          string,
-          unknown
-        >;
-        return { ...e, style: rest };
-      }),
-    }));
-  }, totalMs);
-  animTimers.push(cleanupTimer);
-}
-
-/**
- * Parse a canvas_commands tool result, snapshot prestate for revert,
- * apply the server-authored deltas, and return the executor's
- * annotated commands plus change entries.
- *
- * After M2 (headless executor) the server's `canvas_commands` handler
- * returns an enriched envelope:
- *   `{ source, canvasId, commands, runId, fromVersion, toVersion,
- *      deltas, results, pendingEffects }`
- * where `commands` are the annotated commands the executor actually
- * ran (ids assigned), `deltas` is the structural diff we apply
- * locally via `applyDeltasFromAgent`, and `pendingEffects` carries
- * the web-only drain manifest (preprocessing dispatch, delete
- * tracking, AI-edit flag, deferred frame fit).
- *
- * Legacy fallback: when the envelope lacks `deltas` (e.g. the sketch
- * carve-out that still returns `{ source, canvasId, commands }`) we
- * fall back to local engine execution. This keeps the sketch pipeline
- * working without touching its API surface — M3 will collapse the two
- * paths once cross-tab broadcast lands.
- *
- * Returns the same `{ commands, changes }` shape as before so the
- * downstream tool-card wiring stays untouched.
- */
-export function applyCanvasCommandsFromToolResult(
-  toolResult: string | undefined,
-): {
-  commands: CanvasCommand[];
-  changes: ReturnType<typeof snapshotAndExtractChanges>;
-} | null {
-  try {
-    const parsed = JSON.parse(toolResult ?? '{}') as {
-      status?: string;
-      commands?: unknown;
-      deltas?: unknown;
-      toVersion?: unknown;
-      pendingEffects?: {
-        mutatedNodes?: unknown;
-        deletedNodeIds?: unknown;
-        contentEditedNodeIds?: unknown;
-        deferredFitFrameIds?: unknown;
-      };
-    };
-
-    // Error envelopes produced by the SSE bridge — nothing to apply.
-    if (parsed.status === 'error') return null;
-
-    const commands = parsed.commands;
-    if (!Array.isArray(commands) || commands.length === 0) return null;
-
-    // Server-authored path (M2): deltas + version are present.
-    const hasServerExecution =
-      Array.isArray(parsed.deltas) && typeof parsed.toVersion === 'number';
-
-    if (hasServerExecution) {
-      // Pre-assigned ids already in `commands` (the executor stamped
-      // them); we only need to snapshot prestate for the revert UX
-      // and then replay the structural diff.
-      const typedCommands = commands as CanvasCommand[];
-      const changes = snapshotAndExtractChanges(typedCommands);
-
-      const pe = parsed.pendingEffects;
-      useCanvasStore
-        .getState()
-        .applyDeltasFromAgent(
-          parsed.deltas as Delta[],
-          parsed.toVersion as number,
-          {
-            mutatedNodes: Array.isArray(pe?.mutatedNodes)
-              ? (pe.mutatedNodes as Node[])
-              : [],
-            deletedNodeIds: Array.isArray(pe?.deletedNodeIds)
-              ? (pe.deletedNodeIds as string[])
-              : [],
-            contentEditedNodeIds: Array.isArray(pe?.contentEditedNodeIds)
-              ? (pe.contentEditedNodeIds as string[])
-              : [],
-            deferredFitFrameIds: Array.isArray(pe?.deferredFitFrameIds)
-              ? (pe.deferredFitFrameIds as string[])
-              : [],
-          },
-        );
-
-      animateAgentBatch(typedCommands);
-      return { commands: typedCommands, changes };
-    }
-
-    // Legacy / sketch carve-out path: execute locally via the engine.
-    for (const cmd of commands as CanvasCommand[]) {
-      if (cmd.type === 'CREATE_NODES') {
-        for (const node of cmd.nodes) {
-          if (!node.id) {
-            node.id = createId('node') as CanvasNodeId;
-          }
-        }
-      } else if (cmd.type === 'CONNECT_NODES') {
-        for (const edge of cmd.edges) {
-          if (!edge.id) {
-            edge.id = createId('edge') as CanvasEdgeId;
-          }
-        }
-      }
-    }
-
-    const typedCommands = commands as CanvasCommand[];
-    const changes = snapshotAndExtractChanges(typedCommands);
-
-    useCanvasStore.getState().executeCommands(typedCommands, 'agent');
-
-    animateAgentBatch(typedCommands);
-
-    return { commands: typedCommands, changes };
-  } catch (err) {
-    console.error(
-      '[useAgentStream] Failed to parse canvas_commands result:',
-      err,
-    );
-  }
-  return null;
 }
 
 // ==================== SSE Event Handler ====================
@@ -635,9 +331,9 @@ function applyInternalToolStart(
 /**
  * Fold an internal pi-ai tool *result* into the owning assistant
  * message: parse the `ToolResponse` envelope, merge it over the
- * provisional args recorded by {@link applyInternalToolStart}, mark
- * the part completed, and — for `canvas_commands` — execute the
- * commands locally and attach the live `canvasChanges`.
+ * provisional args recorded by {@link applyInternalToolStart}, and
+ * mark the part completed. Canvas state (for `canvas_commands`) is
+ * applied separately via the sync broadcast, not here.
  *
  * Driven by the ACP-shaped `tool_call_update` event for an internal
  * tool. `rawText` is the JSON-stringified tool result payload.
@@ -696,51 +392,6 @@ function applyInternalToolResult(
         data: mergedResponse,
       }),
   );
-
-  // Execute canvas_commands locally.
-  if (toolName === 'canvas_commands') {
-    const result = applyCanvasCommandsFromToolResult(rawText);
-    if (result) {
-      // Attach the live canvasChanges array to the canvas_commands
-      // tool part's typed `data` envelope (this is the canonical
-      // home that `CanvasCommandCard` reads from).
-      if (result.changes.length > 0) {
-        upsertAssistantToolPart(
-          ctx.threadId,
-          ctx.assistantId,
-          toolCallId,
-          (existing) => {
-            if (!existing) {
-              // Should never happen — we just inserted above. Bail
-              // safely by returning a minimal part.
-              return mergeToolPart(existing, toolCallId, {
-                variant: 'canvas_commands',
-                data: mergedResponse,
-              });
-            }
-            if (existing.variant !== 'canvas_commands') return existing;
-            const existingData = existing.data;
-            const priorData =
-              existingData?.status === 'success'
-                ? ((existingData.data as Record<string, unknown> | undefined) ??
-                  {})
-                : {};
-            return {
-              ...existing,
-              data: {
-                tool: 'canvas_commands',
-                status: 'success',
-                data: {
-                  ...priorData,
-                  canvasChanges: result.changes,
-                },
-              },
-            };
-          },
-        );
-      }
-    }
-  }
 }
 
 /**

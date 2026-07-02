@@ -677,6 +677,11 @@ type RFState = {
    *
    * Skips autosave (uses `_setStateNoAutosave`) because the server is
    * already authoritative for this batch.
+   *
+   * Returns the ids of nodes whose incoming REPLACE/DELETE delta was
+   * SKIPPED because the user is mid-editing them (un-persisted local
+   * content edits). Callers surface these as a
+   * conflict on the originating thread's change card.
    */
   applyDeltasFromAgent: (
     deltas: Delta[],
@@ -687,7 +692,13 @@ type RFState = {
       contentEditedNodeIds: string[];
       deferredFitFrameIds: string[];
     },
-  ) => void;
+  ) => string[];
+  /**
+   * Ids of nodes with un-persisted local content edits (pending debounced
+   * save or in-flight PUT). Exposed so the sync store can avoid a blind
+   * `loadCanvas` on a version gap that would clobber a mid-edit (C3).
+   */
+  pendingContentNodeIds: () => string[];
   /** @internal Resolve a web-only UiIntent and execute the resulting commands. */
   dispatchUiIntent: (intent: CanvasUiIntent) => void;
   /**
@@ -1168,6 +1179,16 @@ const useCanvasStore = create<RFState>()(
       const hasCallerSnapshot = commands.some(
         (c) => COMMAND_META[c.type].snapshot === 'caller',
       );
+      // Whether this gesture already took its pre-mutation undo snapshot
+      // via `beginGesture` (captured BEFORE the consume below clears the
+      // flag). A single user gesture must map to a single undo entry, so
+      // once `beginGesture` has snapshotted we must NOT let this batch's
+      // `auto`-snapshot commands push a second, redundant snapshot. A drag
+      // stop, for example, may emit a mix of `SET_NODE_GEOMETRY` (caller)
+      // plus `SET_NODE_PARENT` / grid-reorder / relayout (`auto`) commands
+      // — all one gesture, one undo entry (the `beginGesture` snapshot).
+      const gestureAlreadySnapshotted =
+        resolvedSource !== 'agent' && canvasHistoryManager.gestureSnapshotTaken;
       if (hasCallerSnapshot && resolvedSource !== 'agent') {
         if (!canvasHistoryManager.gestureSnapshotTaken) {
           console.warn(
@@ -1178,8 +1199,9 @@ const useCanvasStore = create<RFState>()(
         canvasHistoryManager.consumeGestureSnapshot();
       }
 
-      // Take undo snapshot if needed (before committing new state).
-      if (writeResult.snapshotNeeded) {
+      // Take undo snapshot if needed (before committing new state), unless
+      // the gesture already snapshotted itself via beginGesture (see above).
+      if (writeResult.snapshotNeeded && !gestureAlreadySnapshotted) {
         canvasHistoryManager.takeSnapshot(state.nodes, state.edges);
       }
 
@@ -1220,14 +1242,36 @@ const useCanvasStore = create<RFState>()(
      *      cross the undo boundary in the existing UX.
      */
     applyDeltasFromAgent: (deltas, toVersion, pendingEffects) => {
-      if (deltas.length === 0) {
-        // No-op batch: reconcile the version so a subsequent local
-        // edit's autosave doesn't 409 against our stale view of
-        // server state.
+      // Never let an incoming agent write clobber a
+      // node the user is mid-editing. Skip REPLACE/DELETE deltas that
+      // target a node with un-persisted local content edits (INSERT is a
+      // fresh id, never a collision). Report the skipped ids so the UI
+      // can flag the conflict on the originating thread's change card.
+      const dirty = new Set(nodeContentQueue.pendingNodeIds());
+      const skippedNodeIds: string[] = [];
+      const safeDeltas =
+        dirty.size === 0
+          ? deltas
+          : deltas.filter((d) => {
+              if (d.type === 'REPLACE_NODE' && dirty.has(d.next.id)) {
+                skippedNodeIds.push(d.next.id);
+                return false;
+              }
+              if (d.type === 'DELETE_NODE' && dirty.has(d.node.id)) {
+                skippedNodeIds.push(d.node.id);
+                return false;
+              }
+              return true;
+            });
+
+      if (safeDeltas.length === 0) {
+        // Nothing to apply locally (empty batch, or every row protected).
+        // Still reconcile the version so the next local edit's autosave
+        // doesn't 409 against our stale view of server state.
         if (get().version !== toVersion) {
           get()._setStateNoAutosave({ version: toVersion });
         }
-        return;
+        return skippedNodeIds;
       }
 
       const prevNodes = get().nodes;
@@ -1244,7 +1288,7 @@ const useCanvasStore = create<RFState>()(
       // scenarios fails open.
       const applied = applyDeltas(
         { nodes: prevNodes as NestableNode[], edges: prevEdges },
-        deltas,
+        safeDeltas,
       );
 
       // No host-agnostic post-effects here — the server already ran
@@ -1257,11 +1301,26 @@ const useCanvasStore = create<RFState>()(
         version: toVersion,
       });
 
+      // Post-effects must not run for nodes whose delta we skipped — they
+      // were not actually mutated locally, so preprocessing / fit them is
+      // wrong.
+      const skipped = new Set(skippedNodeIds);
       runWebPostEffects({
         effects: {
-          mutatedNodes: pendingEffects.mutatedNodes,
-          deletedNodeIds: pendingEffects.deletedNodeIds,
-          contentEditedNodeIds: pendingEffects.contentEditedNodeIds,
+          mutatedNodes:
+            skipped.size === 0
+              ? pendingEffects.mutatedNodes
+              : pendingEffects.mutatedNodes.filter((n) => !skipped.has(n.id)),
+          deletedNodeIds:
+            skipped.size === 0
+              ? pendingEffects.deletedNodeIds
+              : pendingEffects.deletedNodeIds.filter((id) => !skipped.has(id)),
+          contentEditedNodeIds:
+            skipped.size === 0
+              ? pendingEffects.contentEditedNodeIds
+              : pendingEffects.contentEditedNodeIds.filter(
+                  (id) => !skipped.has(id),
+                ),
           deferredFitFrameIds: pendingEffects.deferredFitFrameIds,
         },
         source: 'agent',
@@ -1270,7 +1329,11 @@ const useCanvasStore = create<RFState>()(
         setNodes: (nodes) => get()._setStateNoAutosave({ nodes }),
         triggerPreprocessing: preprocessQueue.schedule,
       });
+
+      return skippedNodeIds;
     },
+
+    pendingContentNodeIds: () => nodeContentQueue.pendingNodeIds(),
 
     /** Resolve a web-only UiIntent and execute the resulting commands. */
     dispatchUiIntent: (intent) => {
@@ -2216,7 +2279,21 @@ const useCanvasStore = create<RFState>()(
           if (!live) return false;
           return live.position.x !== start.x || live.position.y !== start.y;
         });
-        if (moved) structureScheduler.schedule();
+        if (moved) {
+          structureScheduler.schedule();
+          // A real move: the pre-drag snapshot beginGesture took is a
+          // legitimate undo entry — keep it (executeCommands already
+          // consumed it for frame-transition moves; this is idempotent
+          // for the free-move path that emits no command).
+          canvasHistoryManager.consumeGestureSnapshot();
+        } else {
+          // Zero-distance "drag" (a click that merely selects a node
+          // still fires onNodeDragStart → beginGesture). Nothing was
+          // mutated, so discard the optimistic snapshot; otherwise it
+          // captures the result of a prior un-snapshotted free move and
+          // becomes a phantom empty undo step.
+          canvasHistoryManager.rollbackGestureSnapshot();
+        }
       }
     },
 
@@ -2648,8 +2725,8 @@ const useCanvasStore = create<RFState>()(
     beginGesture: (commandType) => {
       if (COMMAND_META[commandType].snapshot === 'caller') {
         const { nodes, edges } = get();
-        canvasHistoryManager.takeSnapshot(nodes, edges);
-        canvasHistoryManager.markGestureSnapshot();
+        const pushed = canvasHistoryManager.takeSnapshot(nodes, edges);
+        canvasHistoryManager.markGestureSnapshot(pushed);
       }
     },
 

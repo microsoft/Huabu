@@ -63,6 +63,8 @@ export interface AgentRunOptions {
    * not mis-tagged as AI-initiated.
    */
   origin?: NodeOrigin;
+  /** ACP conversation thread that canvas changes are attributed to. */
+  threadId?: string;
   /**
    * pi-ai Context for this thread: `systemPrompt` + the PRIOR
    * conversation history (rebuilt from earlier turns). It does NOT
@@ -146,9 +148,14 @@ export async function* runAgent(
     signal,
     maxIterations = 20,
     debugPrompt,
+    threadId,
   } = options;
 
-  const tools = buildToolsForScope(scope, { canvasId, origin });
+  const tools = buildToolsForScope(scope, {
+    canvasId,
+    origin,
+    ...(threadId ? { threadId } : {}),
+  });
 
   // Render THIS turn's envelope into its single user message, then run
   // the agent over [prior history + this turn] held in a LOCAL array.
