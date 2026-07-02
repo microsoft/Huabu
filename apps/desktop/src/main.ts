@@ -1063,3 +1063,19 @@ app.on('before-quit', (event) => {
     }
   }, 3000);
 });
+
+// Terminal-launched dev runs (`pnpm start:desktop`) deliver SIGINT on
+// Ctrl+C / SIGTERM when the parent orchestrator tears down. Electron
+// does not reliably translate these into the graceful quit lifecycle,
+// so without an explicit bridge the main process can die abruptly —
+// skipping `before-quit` and leaking the forked server (and the
+// agentlet daemon it forks in turn). Routing both signals through
+// `app.quit()` guarantees the `before-quit` handler above runs and
+// reaps the server subtree. `once` so a second Ctrl+C (if the graceful
+// path stalls) falls through to Node's default hard-terminate.
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.once(signal, () => {
+    console.log(`[desktop] received ${signal}; quitting`);
+    app.quit();
+  });
+}
