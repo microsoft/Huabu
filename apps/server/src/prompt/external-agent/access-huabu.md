@@ -29,11 +29,7 @@ curl -fsS -H "$AUTH" -D - -o note.md "$HUABU_RFS_URL/download/nodes/My%20note.md
 # or add | grep -i '^x-huabu' to see only the metadata.
 ```
 
-Artifacts (images, rendered PNGs, and other binary blobs referenced by media nodes) live under `artifacts/`. These are addressed by an opaque key filename (e.g. `artifact_ab12cd.png`), not a human path — you get the key from a node's `X-Huabu-Src` header, then fetch it:
-
-```bash
-curl -fsS -H "$AUTH" "$HUABU_RFS_URL/download/artifacts/artifact_ab12cd.png" -o out.png
-```
+You're supposed to **never** guess node paths -- the file path is supposed to be provided in the user instructions and the context. In some legacy cases, you may see some artifacts only with a filename like `src: artifact_ab12cd.png` (no directory). In that case, the file is in the `.artifacts/` directory, and you can fetch it with `GET download/artifacts/artifact_ab12cd.png`. Except for that, you should **never** assume any directory structure or naming convention. IF you need to discover which files matter, ask the agent (see below -- *Talk to the canvas agent*).
 
 There is **no directory listing** — to discover which files matter, ask the agent (below).
 
