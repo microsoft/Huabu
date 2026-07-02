@@ -26,8 +26,8 @@ import skillsRoutes from './modules/agent/skills.route.js';
 import artifactRoute from './modules/artifact/artifact.route.js';
 import canvasRoutes from './modules/canvas/canvas.route.js';
 import externalNoteRoutes from './modules/canvas/external.route.js';
-import rfsRoutes from './modules/remote_fs/rfs.route.js';
 import syncRoutes from './modules/canvas/sync.route.js';
+import rfsRoutes from './modules/remote_fs/rfs.route.js';
 import {
   hostGuardPlugin,
   originGuardPlugin,
