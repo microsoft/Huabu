@@ -285,13 +285,7 @@ function ConflictBadge({ count }: { count: number }) {
     <Tooltip
       content={`${count} agent ${count === 1 ? 'change was' : 'changes were'} skipped because you were editing.`}
     >
-      <span
-        className="pointer-events-auto inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs font-semibold shadow-sm"
-        style={{
-          backgroundColor: 'color-mix(in srgb, var(--warning) 10%, white 20%)',
-          color: 'var(--warning)',
-        }}
-      >
+      <span className="bg-warning-bg text-warning pointer-events-auto inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs font-semibold shadow-sm">
         <AlertTriangle size={12} />
         {count}
       </span>

@@ -151,8 +151,13 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
                 pendingEffects as SyncPendingEffects,
               );
             } else if (toVersion > canvasStore.version) {
-              // Gap (missed an earlier update) → full catch-up.
-              void canvasStore.loadCanvas(canvasId);
+              // Gap (missed an earlier update). A blind `loadCanvas` would
+              // clobber un-persisted local edits, so skip it while the user
+              // is mid-editing and let autosave's 409 path arbitrate (C3).
+              // Incremental gap-heal (delta-log backfill) is deferred to P2.
+              if (canvasStore.pendingContentNodeIds().length === 0) {
+                void canvasStore.loadCanvas(canvasId);
+              }
             }
             // else: stale/older update — ignore.
 

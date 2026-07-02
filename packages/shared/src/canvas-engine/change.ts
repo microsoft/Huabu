@@ -416,19 +416,23 @@ export function coalesceChanges(
       labelById.set(r.targetNodeId, r.targetNodeLabel);
     const f = forwardOf(r);
     if (!f) continue;
-    if (!groups.has(f.key)) {
-      groups.set(f.key, []);
+    let group = groups.get(f.key);
+    if (!group) {
+      group = [];
+      groups.set(f.key, group);
       order.push(f.key);
     }
-    groups.get(f.key)!.push(r);
+    group.push(r);
   }
 
   const netDeltas: Delta[] = [];
   const idByKey = new Map<string, string>();
   for (const key of order) {
-    const grp = groups.get(key)!;
-    const first = forwardOf(grp[0])!;
-    const last = forwardOf(grp[grp.length - 1])!;
+    const grp = groups.get(key);
+    if (!grp || grp.length === 0) continue;
+    const first = forwardOf(grp[0]);
+    const last = forwardOf(grp[grp.length - 1]);
+    if (!first || !last) continue;
     const net =
       first.kind === 'node'
         ? netNodeDelta(

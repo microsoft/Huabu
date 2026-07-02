@@ -693,6 +693,12 @@ type RFState = {
       deferredFitFrameIds: string[];
     },
   ) => string[];
+  /**
+   * Ids of nodes with un-persisted local content edits (pending debounced
+   * save or in-flight PUT). Exposed so the sync store can avoid a blind
+   * `loadCanvas` on a version gap that would clobber a mid-edit (C3).
+   */
+  pendingContentNodeIds: () => string[];
   /** @internal Resolve a web-only UiIntent and execute the resulting commands. */
   dispatchUiIntent: (intent: CanvasUiIntent) => void;
   /**
@@ -1326,6 +1332,8 @@ const useCanvasStore = create<RFState>()(
 
       return skippedNodeIds;
     },
+
+    pendingContentNodeIds: () => nodeContentQueue.pendingNodeIds(),
 
     /** Resolve a web-only UiIntent and execute the resulting commands. */
     dispatchUiIntent: (intent) => {

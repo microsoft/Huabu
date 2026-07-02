@@ -3,17 +3,17 @@
  *
  * A minimal in-memory pub/sub keyed by `canvasId`, mirroring the
  * pattern in `external-watcher.ts`. `publishCanvasUpdate` is called from
- * the `POST /:canvasId/execute` route after a batch is persisted; every
- * live SSE subscriber (`GET /:canvasId/sync/stream`) receives the event
- * and replays the deltas locally.
+ * `executeOnServer` after every persisted batch (and from the revert
+ * route); every live SSE subscriber (`GET /:canvasId/sync/stream`)
+ * receives the event and replays the deltas locally.
  *
- * Only the out-of-band HTTP `/execute` route publishes here. The
- * built-in agent mutates the canvas in-process via `executeOnServer`
- * directly (not through the HTTP route) and applies its own deltas
- * through the agent SSE tool result, so it deliberately does NOT
- * broadcast — otherwise the initiating tab would receive its own change
- * back over the sync stream and apply it twice (there is no per-client
- * echo filtering).
+ * ALL canvas writes broadcast — the out-of-band HTTP `/execute` route
+ * (ACP / headless) AND the built-in / question-node agents that mutate
+ * in-process via `executeOnServer` (C2). The chat SSE tool result no
+ * longer applies canvas state, so the initiating tab is a plain receiver
+ * that applies its own change once, from this broadcast. There is no
+ * per-client echo filtering yet (`clientId` is deferred to P2, needed
+ * only once user hand-edits also broadcast).
  */
 
 import type { CanvasSyncEvent } from '@sediment/shared';

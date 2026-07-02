@@ -30,7 +30,8 @@ import path from 'node:path';
 // ── Environment ──────────────────────────────────────────────────────
 
 const TOKEN = process.env.AGENTLET_TOKEN;
-const CANVAS_ID = process.env.HUABU_CANVAS_ID;const THREAD_ID = process.env.HUABU_THREAD_ID;
+const CANVAS_ID = process.env.HUABU_CANVAS_ID;
+const THREAD_ID = process.env.HUABU_THREAD_ID;
 
 /**
  * Build the `originator` for `/execute` calls. Carries the ACP thread id
