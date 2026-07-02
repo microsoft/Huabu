@@ -40,7 +40,6 @@ import {
 } from './modules/workspace.js';
 import workspaceRoutes from './modules/workspace.route.js';
 import { preloadSkills } from './prompt/index.js';
-import reachbackRoutes from './reachback/reachback.route.js';
 import { logger } from './utils/logger.js';
 
 // Lock the workspace at startup if HUABU_WORKSPACE is set (managed mode).
@@ -131,9 +130,9 @@ app.register(multipart, {
 //    HUABU_BASIC_AUTH_PASS are set, requests with matching Basic creds
 //    are accepted.
 //
-// 2. Bearer token (reachback/HRT): requests with
+// 2. Bearer token (RFS): requests with
 //    `Authorization: Bearer <AGENTLET_TOKEN>` are accepted. This allows
-//    the Huabu Reachback Tool to call canvas/agent APIs without knowing
+//    external agents to call the RFS / canvas-agent APIs without knowing
 //    the Basic Auth credentials.
 //
 // CORS preflight (OPTIONS) always passes through unauthenticated.
@@ -151,7 +150,7 @@ if (basicAuthUser && basicAuthPass) {
     // Basic Auth (browser / Vite proxy)
     if (authHeader === expectedBasic) return;
 
-    // Bearer token (agentlet reachback)
+    // Bearer token (agentlet RFS)
     if (authHeader.startsWith('Bearer ')) {
       const daemonToken = getDaemonAuth().getToken();
       if (daemonToken && authHeader.slice(7) === daemonToken) return;
@@ -164,15 +163,12 @@ if (basicAuthUser && basicAuthPass) {
   });
   app.log.info('HTTP Auth enabled (Basic + Bearer)');
 } else {
-  // No Basic Auth configured — still gate Bearer-only reachback routes
+  // No Basic Auth configured — still gate Bearer-only RFS routes
   app.addHook('onRequest', async (request, reply) => {
     if (request.method === 'OPTIONS') return;
     // Without Basic Auth, all routes are open EXCEPT the Bearer-only
-    // reachback / RFS routes, which always require a valid Bearer token.
-    if (
-      !request.url.startsWith('/api/reachback/') &&
-      !request.url.startsWith('/api/rfs/')
-    ) {
+    // RFS routes, which always require a valid Bearer token.
+    if (!request.url.startsWith('/api/rfs/')) {
       return;
     }
     const authHeader = request.headers.authorization || '';
@@ -221,7 +217,6 @@ app.register(intentRoutes, { prefix: '/api/intent' });
 app.register(llmRoutes, { prefix: '/api/llm' });
 app.register(skillsRoutes, { prefix: '/api/skills' });
 app.register(workspaceRoutes, { prefix: '/api/workspace' });
-app.register(reachbackRoutes, { prefix: '/api/reachback' });
 app.register(rfsRoutes, { prefix: '/api/rfs' });
 
 // ── External agent (ACP) bridge ───────────────────────────────────────

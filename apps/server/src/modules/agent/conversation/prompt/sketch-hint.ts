@@ -3,11 +3,11 @@
  *
  * One-line directive that rides in the `<selected_nodes_visuals>` intro:
  * when the turn already carries pre-snapshotted sketch artifacts, point
- * the agent at those urls so it does not redundantly re-snapshot the
- * same node ids. Both backends raster, so both get the hint — only the
- * tool vocabulary differs: the built-in agent uses `snapshot_nodes` /
- * `generate_image`, the external agent uses the reachback `snapshot`
- * command. Worded per the backend {@link RenderProfile}.
+ * the agent at those urls so it does not redundantly ask for the same
+ * node ids to be rendered again. Both backends raster, so both get the
+ * hint — only the tool vocabulary differs: the built-in agent uses
+ * `snapshot_nodes` / `generate_image`, the external agent asks the
+ * canvas agent to render. Worded per the backend {@link RenderProfile}.
  */
 
 import { isSketchRasterAttachment } from '../transcript/attachment-chips.js';
@@ -36,6 +36,6 @@ export function renderSketchRasterHint(
     })
     .join('; ');
   return profile.toolset === 'reachback'
-    ? `pre-snapshotted sketch artifacts are ready — reuse these urls directly without re-running the reachback \`snapshot\` command for the same node ids: ${items}`
+    ? `pre-snapshotted sketch artifacts are ready — reuse these urls directly instead of asking the canvas agent to render the same node ids again: ${items}`
     : `pre-snapshotted sketch artifacts are ready for generate_image.referenceArtifactSrcs — pass these urls directly without re-calling snapshot_nodes for the same node ids: ${items}`;
 }

@@ -38,9 +38,11 @@ node deepv.mjs "<intent>" ./out
 Typical end-to-end run:
 
 ```bash
-INTENT="$(cat "$(node "$AGENTLET_REACHBACK_DIR/huabu-reachback-tool.mjs" read-node <src-node-id>)")"
+# 1. read the selected source node's content from the canvas RFS (see the /skill guide)
+# 2. run the one-shot pipeline on that intent:
 node deepv.mjs "$INTENT" ./out            # reads the JSON summary from stdout
-# then write outline.md (note), each slide_*.png (image), deck.pptx back to the canvas, --link-to <src-node-id>
+# 3. upload ./out/outline.md, each ./out/slide_*.png, and ./out/deck.pptx back to the
+#    canvas via RFS, then ask the canvas agent to create + link nodes to the source node
 ```
 
 Use one-shot when the request maps cleanly to "generate a deck from this intent."
@@ -157,10 +159,10 @@ curl -s -X POST -H "$AUTH" -H 'Content-Type: application/json' "$API/api/session
 
 ## Writing results back to Huabu
 
-After harvesting, write nodes back with HRT, each `--link-to` the source node:
+After harvesting, push each artifact to the canvas over RFS (upload the file, then ask the canvas agent to create a node from it and link it to the source node — see the `/skill` guide):
 
-- **Outline** → `write-node --type note --link-to <src> outline.md`
-- **Each slide** → `write-node --type image --link-to <src> slide_0.png` (repeat per page, in order)
-- **Final PPTX** → write a `note` node with the deck's download reference (`GET /api/tasks/:id/result`) linked to the source, so the user can retrieve the editable file.
+- **Outline** → upload `outline.md`, create a `note` node linked to the source.
+- **Each slide** → upload `slide_0.png … slide_N.png`, create an `image` node per page, in order, each linked to the source.
+- **Final PPTX** → upload `deck.pptx` (or reference `GET /api/tasks/:id/result`) and create a node linked to the source so the user can retrieve the editable file.
 
 Keep the user informed of progress, and prefer reusing an existing DeepV session for follow-up requests so iterative edits stay in context.

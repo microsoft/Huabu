@@ -1,4 +1,23 @@
-# Huabu Reachback Tool (HRT)
+# Huabu Reachback Tool (HRT) — REMOVED (superseded by RFS)
+
+> **⚠️ Historical.** The HRT `.mjs` shortcut tool described below — the
+> `read-node` / `write-node` / `snapshot` node-CRUD verbs, the
+> `/api/reachback/*` routes, and the `AGENTLET_REACHBACK_DIR` push
+> mechanism — **has been removed** from Sediment. External agents now reach
+> back into the canvas through the **Remote File System (RFS)**: plain-`curl`
+> `download` / `upload` / `agent` / `skill` endpoints under `$HUABU_RFS_URL`,
+> with **no client tool** shipped into the agent.
+>
+> Current sources of truth:
+> - Server: [`apps/server/src/modules/remote_fs/`](../../apps/server/src/modules/remote_fs/) (`rfs.route.ts`).
+> - Agent-facing guide: [`access-huabu.md`](../../apps/server/src/prompt/external-agent/access-huabu.md).
+> - Wire contract: [`packages/shared/src/types/api/rfs.ts`](../../packages/shared/src/types/api/rfs.ts).
+> - Design: [`../proposals/agent-reachback-rfs.md`](../proposals/agent-reachback-rfs.md) (Reachback v2).
+>
+> Only the agentlet transport layer
+> ([Agent Reachback Interface](../../external/agentlet/spec/agent-reachback.md))
+> is unchanged. The rest of this document is kept for history only and does
+> **not** describe code that currently exists.
 
 > Huabu's concrete implementation of **Agent Reachback** — the tool external
 > agents use to read from and write to the Huabu canvas out-of-band from the

@@ -27,8 +27,8 @@
  *   - `preview` — a short scan hint when available; deliberately a NAMED
  *                 ATTRIBUTE, not the element body, so the model cannot
  *                 mistake the ~120-char excerpt for the node's full
- *                 content. Callers still tell it to `read` / `read-node`
- *                 for the complete body in the surrounding intro.
+ *                 content. Callers still tell it to `read` / download
+ *                 the file for the complete body in the surrounding intro.
  *
  * Kept out of `node-ref.ts` (which owns the pure data ladder) so the
  * prompt-text concern lives next to the other section renderers under

@@ -78,7 +78,7 @@ export async function renderTurn(
       : [];
   // Both backends raster the selection, so both get the reuse hint when
   // pre-snapshotted artifacts are present; the wording (built-in tools vs
-  // reachback `snapshot`) is chosen per profile inside the renderer.
+  // asking the canvas agent) is chosen per profile inside the renderer.
   const hint =
     profile.includeSelectionVisuals && selectionParts.length > 0
       ? renderSketchRasterHint(selection, profile)

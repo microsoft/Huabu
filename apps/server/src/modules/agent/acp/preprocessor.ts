@@ -10,17 +10,17 @@
  *   - `selectedNodes` is a metadata-only table (node ID + type +
  *     label) of whatever the user had selected. Content is **not**
  *     inlined and files are **not** attached — the external agent
- *     pulls node bodies on demand through the Huabu Reachback Tool
- *     (`read-node <node-id>`), documented in the serialized prompt's
- *     `## Canvas Tools (Reachback)` section.
+ *     pulls node bodies on demand over the RFS
+ *     (`GET ${HUABU_RFS_URL}/download/<file>`), documented in the
+ *     canvas-access guide it fetches from `${HUABU_RFS_URL}/skill`.
  *
  * Why deterministic instead of a preprocessor sub-agent:
  *   - An earlier design ran a dedicated `acp-preprocessor` LLM that
  *     explored the canvas (read-only tools) and synthesised a briefing.
  *     That paid an extra model round-trip on every turn, added latency,
  *     was non-deterministic, and could fail to emit valid JSON. Since
- *     the reachback tool already lets the external agent fetch node
- *     content by ID, all we need to hand it deterministically is the
+ *     the RFS already lets the external agent fetch node
+ *     content by path, all we need to hand it deterministically is the
  *     user's words + the IDs of what they selected.
  *
  * The per-turn wire text is built **inline as XML** (`<selected_nodes>`,
@@ -28,7 +28,7 @@
  * tag vocabulary the built-in agent emits (`buildContextSections` in
  * `prompt/build-prompt.ts`), so both backends present one structure. On
  * the first turn of a freshly-created session the one-shot persona +
- * `## Canvas Tools (Reachback)` preamble (`system_prompt.md`, rendered
+ * canvas-access preamble (`system_prompt.md`, rendered
  * via {@link renderPromptFile}) is prepended in front of it. The
  * per-node table rows are assembled here in TS and wrapped in the
  * `<selected_nodes>` tag.
@@ -140,7 +140,7 @@ export async function prepareExternalAgentPrompt(
   // Verbatim user words — the ACP `task`. Sourced from the envelope so
   // it matches what the built-in path renders. When the selection was
   // pre-snapshotted, `renderTurn` appends a sketch-raster reuse hint
-  // worded for THIS backend (the reachback `snapshot` command, not the
+  // worded for THIS backend (ask the canvas agent to render, not the
   // built-in `snapshot_nodes` / `generate_image` tools).
   const rawText = envelope.user.text;
   // ── Slash-command detection ────────────────────────────────────────
@@ -162,7 +162,7 @@ export async function prepareExternalAgentPrompt(
   const effectiveIncludeSystem = isSlashCommand ? false : !!includeSystem;
 
   // Wire body: the SAME renderTurn the built-in agent uses, with the ACP
-  // profile (read-node verb, no `file=`, selection visuals on, slash
+  // profile (RFS download verb, `file=` on, selection visuals on, slash
   // leads). Text parts join to the serialized payload; image parts ride
   // as base64 vision blocks. Both backends now share one composer.
   const parts = await renderTurn(

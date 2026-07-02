@@ -495,9 +495,9 @@ function minEdgeDistFromCluster(
  *
  * `opts.includeFileName` is threaded straight to {@link renderAgentNodeList}:
  * the built-in agent reads by the pre-computed `nodes/<file>.md` path
- * (`includeFileName: true`), while the external/ACP agent reads by id
- * (`read-node <id>`, `includeFileName: false`) where a virtual file path
- * would be a dead reference. The two backends therefore serialize the
+ * (`includeFileName: true`), while the external/ACP agent downloads by
+ * that same path over the RFS (`GET ${HUABU_RFS_URL}/download/<file>`).
+ * The two backends therefore serialize the
  * SAME structured context differently, mirroring `<selected_nodes>`.
  *
  * Kept separate from {@link getNodeNeighbourhood} so it can be
