@@ -5,12 +5,14 @@
  * preview surface so the rest of the canvas / agent stack treats notes
  * uniformly.
  *
- * Block provenance: when the AI updates `data.content` externally,
- * MilkdownEditor surfaces before/after fingerprint snapshots via
- * `onExternalUpdate`. We diff and `stampAiEdit` once at stream-end
- * (Approach B) — per-chunk stamping is intentionally not supported.
- * User edits clear markers organically via `shiftProvenance`. Accept
- * / Reject / Restore / Dismiss UI is rendered by `<ProvenanceOverlay>`.
+ * Block provenance: AI edits are stamped authoritatively by the server
+ * (the shared canvas engine computes `data.provenance` at the mutation
+ * source and broadcasts it with the content delta), so this component
+ * simply renders `data.provenance`. When the editor re-serializes the
+ * doc, `onExternalUpdate` lets us realign existing markers to the live
+ * block keys via `shiftProvenance`; user edits clear markers the same
+ * way. Accept / Reject / Restore / Dismiss UI is rendered by
+ * `<ProvenanceOverlay>`.
  *
  * Set `VITE_PROVENANCE=off` in `.env` to disable Phase 4 entirely
  * (decoration-less, overlay-less editor — useful for bisecting bugs
@@ -33,14 +35,12 @@ import { Button } from '@/components/Common/Button';
 import { MilkdownEditor } from '@/components/Milkdown';
 import { usePreviewHeaderSlot } from '@/components/Nodes/PreviewHeaderSlot';
 import useCanvasStore from '@/store/canvasStore';
-import { consumeAiContentEdit } from '@/utils/aiEditFlags';
 import {
   coerceProvenance,
   dismissDeletedBlock,
   dropBlockEntry,
   emptyProvenance,
   shiftProvenance,
-  stampAiEdit,
 } from '@/utils/blockProvenance';
 import {
   canReadSedimentPayload,
@@ -166,11 +166,7 @@ export const NotePreview = ({
   const handleExternalUpdate = useCallback<
     NonNullable<React.ComponentProps<typeof MilkdownEditor>['onExternalUpdate']>
   >(
-    ({ oldKeys, newKeys, oldMarkdownByKey, newMarkdownByKey }) => {
-      // Consume the per-node attribution flag unconditionally so it
-      // does not leak across updates (e.g. when provenance is
-      // disabled or when the keys-equal early-out short-circuits).
-      const aiAuthored = id ? consumeAiContentEdit(id) : false;
+    ({ oldKeys, newKeys }) => {
       if (!PROVENANCE_ENABLED) return;
       // Pure key-equal => nothing to do (e.g. content normalized
       // round-trip with no actual block change).
@@ -180,33 +176,23 @@ export const NotePreview = ({
       ) {
         return;
       }
-      if (!aiAuthored) {
-        // External update from a non-AI source — typically another
-        // panel rendering the same node and echoing the user's edit
-        // through the data prop. Realign existing markers against the
-        // new doc shape so they stay attached to live blocks, but do
-        // NOT stamp new AI markers.
-        const shifted = shiftProvenance(provenanceRef.current, newKeys);
-        if (
-          shifted.blocks.length !== provenanceRef.current.blocks.length ||
-          shifted.deletedBlocks.length !==
-            provenanceRef.current.deletedBlocks.length
-        ) {
-          provenanceRef.current = shifted;
-          writePatch({ provenance: shifted });
-        }
-        return;
+      // Provenance for AI edits is authored by the server and arrives via
+      // `data.provenance`; the client never stamps here. This handler only
+      // realigns existing markers to the live block keys so they stay
+      // attached when the doc shape shifts (e.g. another panel echoing the
+      // user's edit on the same node, or a server delta the editor
+      // re-serialized slightly differently).
+      const shifted = shiftProvenance(provenanceRef.current, newKeys);
+      if (
+        shifted.blocks.length !== provenanceRef.current.blocks.length ||
+        shifted.deletedBlocks.length !==
+          provenanceRef.current.deletedBlocks.length
+      ) {
+        provenanceRef.current = shifted;
+        writePatch({ provenance: shifted });
       }
-      const next = stampAiEdit(provenanceRef.current, {
-        oldKeys,
-        newKeys,
-        oldMarkdownByKey,
-        newMarkdownByKey,
-      });
-      provenanceRef.current = next;
-      writePatch({ provenance: next });
     },
-    [id, writePatch],
+    [writePatch],
   );
 
   // Build the decoration spec from current provenance. Memoized so

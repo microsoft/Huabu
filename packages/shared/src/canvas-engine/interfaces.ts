@@ -57,9 +57,9 @@ export interface CanvasWriteResult {
  * **Pure data — never callbacks.** The engine never invokes host APIs;
  * it merely *describes* what happened. Each host (web / server) drains
  * the manifest after committing the write result and decides how to
- * react. This decouples the engine from web-only verbs (`triggerPreprocessing`,
- * `markAiContentEdit`, etc.) so the same executor runs unchanged in a
- * headless / server context (M2).
+ * react. This decouples the engine from web-only verbs
+ * (`triggerPreprocessing`, deferred frame fit, etc.) so the same
+ * executor runs unchanged in a headless / server context.
  *
  * Hosts are free to ignore fields that don't apply to them — e.g. a
  * server has no DOM, so `deferredFitFrameIds` is a no-op there. See
@@ -91,9 +91,10 @@ export interface PendingEffects {
    * Node IDs whose `content` field was rewritten by `MERGE_NODE_DATA`.
    *
    * Engine-neutral fact: "the content of these notes was just replaced".
-   * Web hosts use this — gated by the batch source — to flag AI-authored
-   * rewrites for the editor (`markAiContentEdit`). Other hosts (server,
-   * non-agent web batches) ignore the field.
+   * The executor itself consumes this for agent batches to compute
+   * block-level `data.provenance` (see `computeAiNoteProvenance`); hosts
+   * also forward it to preprocessing. Non-agent batches leave
+   * provenance untouched.
    */
   contentEditedNodeIds: string[];
 
