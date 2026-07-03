@@ -19,10 +19,16 @@ import { chatDir, chatPromptLogPath } from '../../../storage/paths.js';
 import type { PiMessage } from '../../store/chat-thread-store.js';
 import type { FastifyBaseLogger } from 'fastify';
 
-/** Truthy check for the debug flag (`1` / `true`, case-insensitive). */
+/**
+ * Truthy check for the debug flag.
+ *
+ * Defaults to **on** when `HUABU_DEBUG_PROMPT` is unset, to make prompt
+ * debugging convenient during development. Set it explicitly to a falsey
+ * value (`0` / `false` / `no` / `off`, or an empty string) to disable.
+ */
 export function isPromptDebugEnabled(): boolean {
   const v = process.env.HUABU_DEBUG_PROMPT;
-  if (!v) return false;
+  if (v === undefined) return true;
   const s = v.trim().toLowerCase();
   return s === '1' || s === 'true' || s === 'yes' || s === 'on';
 }

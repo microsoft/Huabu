@@ -74,6 +74,19 @@ export interface NodePreprocessProfile {
   capabilities: Capability[];
   /** Node data fields that, when changed, should trigger preprocessing. */
   watchFields: string[];
+  /**
+   * Per-capability re-run triggers. A capability listed here is kept in an
+   * incremental plan only when one of its trigger fields actually changed;
+   * capabilities absent from this map fall back to the profile-wide
+   * `watchFields` rule (any dirty field → included). Enrich (LLM) capabilities
+   * live here so that e.g. renaming a pdf (title / labelSource dirty) does not
+   * re-summarise the whole document — only a real `src` change does. On the
+   * first run (no `previousSnapshot`) every watched field counts as changed.
+   *
+   * Trigger fields must be a subset of {@link watchFields}, otherwise an
+   * incremental pass would never observe them as dirty.
+   */
+  capabilityTriggers?: Partial<Record<Capability, string[]>>;
 }
 
 // ---------------------------------------------------------------------------

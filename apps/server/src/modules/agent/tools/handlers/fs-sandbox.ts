@@ -52,6 +52,39 @@ export const ALWAYS_SKIP: ReadonlySet<string> = new Set([
   'node_modules',
 ]);
 
+// ─── Virtual read-region prefixes ───────────────────────────────────────────
+
+/**
+ * Clean virtual prefixes and the hidden on-disk `.`-dir they map onto.
+ *
+ * The canvas layout stores uploads and artifacts under hidden dirs
+ * (`.upload/`, `.artifacts/`), but both the external RFS surface and
+ * agent-authored references (canvas prompts, node `src`) speak the clean
+ * form (`upload/`, `artifacts/`). Resolving both through one map keeps a
+ * single path vocabulary across the RFS, the built-in agent's fs-tools, and
+ * the node-src import hook.
+ */
+const VIRTUAL_PREFIX: ReadonlyArray<readonly [string, string]> = [
+  ['artifacts/', '.artifacts/'],
+  ['upload/', '.upload/'],
+];
+
+/**
+ * Rewrite a request path's virtual prefix (`artifacts/`, `upload/`) to its
+ * hidden on-disk counterpart. Idempotent: an already-physical `.upload/…`
+ * path, `nodes/…`, `canvas.json`, etc. pass through unchanged.
+ */
+export function toPhysicalRel(requestRel: string): string {
+  const norm = requestRel.replace(/^\/+/, '');
+  for (const [virtual, physical] of VIRTUAL_PREFIX) {
+    // Prefixed form: `upload/foo` → `.upload/foo`.
+    if (norm.startsWith(virtual)) return physical + norm.slice(virtual.length);
+    // Bare directory name (no trailing slash): `upload` → `.upload`.
+    if (norm === virtual.slice(0, -1)) return physical.slice(0, -1);
+  }
+  return norm;
+}
+
 // ─── Path defaulting ────────────────────────────────────────────────────────
 
 /**
@@ -89,7 +122,9 @@ export function safeResolve(canvasId: string, rel: string): string {
     throw new Error(`Invalid canvasId: ${canvasId}`);
   }
   const root = canvasRoot(canvasId);
-  const target = path.resolve(root, rel);
+  // Accept the clean virtual prefixes (`upload/`, `artifacts/`) as aliases
+  // for their hidden on-disk dirs so agents can reference either form.
+  const target = path.resolve(root, toPhysicalRel(rel));
   if (target !== root && !target.startsWith(root + path.sep)) {
     throw new Error(
       `Path "${rel}" escapes the canvas root and is not allowed.`,

@@ -7,6 +7,7 @@
  */
 
 import { coalesceInFlight } from './coalesce.js';
+import { isLabelProtected } from './label-policy.js';
 import { runPipeline, type PipelineDeps } from './pipeline.js';
 import { getProfile } from './profiles.js';
 import { ProviderManager } from './provider-manager.js';
@@ -22,12 +23,20 @@ import type { PreprocessNodeRequest } from '@sediment/shared';
 /**
  * Build the execution plan: which capabilities need to run given the request.
  *
- * If `force` is set, all profile capabilities are included.
- * Otherwise, only capabilities whose watched fields changed are included,
- * plus structural capabilities (resolve_input, compute_fingerprint, build_patch)
- * which always run.
+ * - `force` (repair / manual) runs the full profile, bypassing all gating.
+ * - Otherwise the profile's capabilities are filtered by two rules:
+ *     1. **Per-capability triggers** (`profile.capabilityTriggers`): a listed
+ *        capability is kept only when one of its trigger fields is dirty. On
+ *        the first run (no `previousSnapshot`) every watched field counts as
+ *        dirty, so first-run enrichment still happens.
+ *     2. **Label protection**: `generate_label` never runs when the node's
+ *        label is already user/agent-owned — the generated value would be
+ *        discarded by the Project stage anyway (see {@link isLabelProtected}).
+ *
+ * Structural capabilities (`resolve_input`, `compute_fingerprint`,
+ * `build_patch`) carry no triggers and therefore always run.
  */
-function buildPlan(
+export function buildPlan(
   profile: NodePreprocessProfile,
   request: PreprocessNodeRequest,
 ): Capability[] {
@@ -38,26 +47,45 @@ function buildPlan(
     'build_patch',
   ];
 
-  if (request.options?.force || !request.previousSnapshot) {
-    // Full run: include all profile capabilities
+  // Repair / manual triggers force a full run, overriding all gating.
+  if (request.options?.force) {
     return profile.capabilities;
   }
 
-  // Determine which watched fields changed
-  const dirtyFields = profile.watchFields.filter((field) => {
-    const prev = request.previousSnapshot?.[field];
-    const curr = request.snapshot[field];
-    return prev !== curr;
-  });
+  const isFirstRun = !request.previousSnapshot;
 
-  if (dirtyFields.length === 0) {
+  // On the first run every watched field is effectively "new"; otherwise
+  // compare against the previous snapshot.
+  const dirtyFields = isFirstRun
+    ? [...profile.watchFields]
+    : profile.watchFields.filter(
+        (field) =>
+          request.previousSnapshot?.[field] !== request.snapshot[field],
+      );
+
+  if (!isFirstRun && dirtyFields.length === 0) {
     // Nothing changed — still run structural caps for fingerprint check
     return structural.filter((c) => profile.capabilities.includes(c));
   }
 
-  // Include all profile capabilities — dirty fields indicate work is needed.
-  // Future optimization: map specific dirty fields to specific capabilities.
-  return profile.capabilities;
+  const labelProtected = isLabelProtected(
+    request.snapshot.labelSource,
+    request.snapshot.title,
+  );
+
+  return profile.capabilities.filter((cap) => {
+    // Never (re)generate a label the user or an agent already owns.
+    if (cap === 'generate_label' && labelProtected) {
+      return false;
+    }
+    // Trigger-gated capabilities run only when one of their fields is dirty.
+    const triggers = profile.capabilityTriggers?.[cap];
+    if (triggers && triggers.length > 0) {
+      return triggers.some((field) => dirtyFields.includes(field));
+    }
+    // Untriggered capabilities run whenever the plan is non-empty.
+    return true;
+  });
 }
 
 /** Small stable string hash (djb2) — collisions only cost a missed

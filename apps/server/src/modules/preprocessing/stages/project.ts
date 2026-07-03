@@ -6,6 +6,7 @@
  */
 
 import { normalizeForCompare } from '../../storage/naming.js';
+import { isLabelProtected } from '../label-policy.js';
 
 import type {
   Capability,
@@ -27,7 +28,7 @@ export function project(
   const patch: Record<string, unknown> = {};
 
   // Apply suggested label from enrich or extract stage, but only when the
-  // user has not manually set the label.
+  // label is not already user/agent-owned.
   //
   // Prefer the post-dedup label from the Persist stage when available:
   // `writeNode` returns the actually-on-disk label (e.g. "Huabu (3)" when
@@ -37,10 +38,7 @@ export function project(
   // the deduped form once the next content-save round-trips. For nodes
   // that skip Persist (image, frame, …) fall back to the raw extracted /
   // enriched label.
-  const snapshotLabelSource = request.snapshot.labelSource as
-    | string
-    | undefined;
-  if (snapshotLabelSource !== 'user' && snapshotLabelSource !== 'agent') {
+  if (!isLabelProtected(request.snapshot.labelSource, request.snapshot.title)) {
     const rawAutoLabel = ctx.extracted?.title ?? ctx.enriched?.suggestedLabel;
     const autoLabel = ctx.persisted?.persistedLabel ?? rawAutoLabel;
     if (autoLabel) {

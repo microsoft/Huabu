@@ -41,7 +41,8 @@ import {
 } from './node-meta.js';
 import { resolveCanvasSkill } from './skill.js';
 import { loadAgent } from '../../prompt/index.js';
-import { runAgent } from '../agent/agent.service.js';
+import { runAgent, type StreamEvent } from '../agent/agent.service.js';
+import { isPromptDebugEnabled } from '../agent/conversation/prompt/debug-prompt.js';
 import { safeResolve } from '../agent/tools/handlers/fs-sandbox.js';
 
 import type { Context, UserMessage } from '@earendil-works/pi-ai';
@@ -107,6 +108,54 @@ function writeDataText(raw: NodeJS.WritableStream, text: string): void {
 function clampHeartbeatSec(sec: number | undefined): number {
   if (sec === undefined) return RFS_HEARTBEAT_DEFAULT_SEC;
   return Math.min(RFS_HEARTBEAT_MAX_SEC, Math.max(RFS_HEARTBEAT_MIN_SEC, sec));
+}
+
+// ── Reachback ask-agent debug logging (gated by HUABU_DEBUG_PROMPT) ──
+
+/** Truncate a value to keep a single debug log line readable. */
+function truncForLog(text: string, max = 500): string {
+  return text.length <= max
+    ? text
+    : `${text.slice(0, max)}… [+${text.length - max} chars]`;
+}
+
+/**
+ * Trace one reachback agent event to `server.log`. Covers the pieces useful
+ * for post-mortem — which tool ran with what args, its success/failure and
+ * result, and the final answer / error — while skipping the high-frequency
+ * per-token `text_delta` / `thinking_delta` events. No-op unless the caller
+ * has already checked {@link isPromptDebugEnabled}.
+ */
+function logReachbackEvent(
+  request: FastifyRequest,
+  threadId: string,
+  event: StreamEvent,
+): void {
+  const tag = `[reachback ${threadId}]`;
+  switch (event.type) {
+    case 'tool_call':
+      request.log.info(
+        `${tag} → tool ${event.data.internalToolName} ${truncForLog(
+          JSON.stringify(event.data.rawInput ?? {}),
+        )}`,
+      );
+      break;
+    case 'tool_call_update':
+      request.log.info(
+        `${tag} ← tool ${event.data.status} ${truncForLog(
+          String(event.data.rawOutput ?? ''),
+        )}`,
+      );
+      break;
+    case 'done':
+      request.log.info(`${tag} done: ${truncForLog(event.data.message)}`);
+      break;
+    case 'error':
+      request.log.warn(`${tag} error: ${truncForLog(event.data.error)}`);
+      break;
+    default:
+      break;
+  }
 }
 
 // ── Route plugin ──
@@ -345,6 +394,19 @@ async function streamAgent(
 ): Promise<void> {
   const { canvasId, prompt, doneTextOnly, heartbeatSec } = input;
   const threadId = createId('reachback');
+  const debug = isPromptDebugEnabled();
+  const startedAt = Date.now();
+  let toolCalls = 0;
+  let outcome: 'ok' | 'error' | 'aborted' | 'incomplete' = 'incomplete';
+  if (debug) {
+    // BEGIN banner. Grep `ask-huabu` to list every round's boundaries, or
+    // grep the `reachback-…` threadId (shown here) to pull one whole round.
+    request.log.info(
+      `[reachback ${threadId}] ┏━ ask-huabu BEGIN · canvas=${canvasId} · prompt: ${truncForLog(
+        prompt,
+      )}`,
+    );
+  }
 
   const userMessage: UserMessage = {
     role: 'user',
@@ -385,6 +447,10 @@ async function streamAgent(
     });
 
     for await (const event of stream) {
+      if (event.type === 'tool_call') toolCalls += 1;
+      else if (event.type === 'done') outcome = 'ok';
+      else if (event.type === 'error') outcome = 'error';
+      if (debug) logReachbackEvent(request, threadId, event);
       if (doneTextOnly) {
         // Clean mode: only the final answer text reaches the wire, as
         // `data:` frames a `sed` one-liner can extract.
@@ -398,12 +464,24 @@ async function streamAgent(
     // threadId as a comment so it never pollutes the plain-text answer.
     raw.write(`: threadId ${threadId}\n\n`);
   } catch (err: unknown) {
+    outcome = 'error';
     const message = err instanceof Error ? err.message : 'Internal agent error';
     raw.write(`event: error\ndata: ${JSON.stringify({ message })}\n\n`);
   } finally {
     clearInterval(heartbeat);
     request.raw.socket?.removeListener('close', onClose);
     raw.end();
+    if (debug) {
+      if (outcome === 'incomplete' && abortController.signal.aborted) {
+        outcome = 'aborted';
+      }
+      const secs = ((Date.now() - startedAt) / 1000).toFixed(1);
+      // END banner mirrors BEGIN: same `ask-huabu` token + threadId, plus
+      // outcome / elapsed / tool count for quick scanning.
+      request.log.info(
+        `[reachback ${threadId}] ┗━ ask-huabu END · ${outcome} · ${secs}s · ${toolCalls} tools · canvas=${canvasId}`,
+      );
+    }
   }
 }
 

@@ -24,6 +24,8 @@ Everything you need to mutate a canvas. **Load this before issuing your first `c
 
 > **Rewriting `content`/`src`? Read the node first.** Content rewrites are auto-guarded: if you haven't `read` the node's full body in this conversation, or it changed since you last read it, the batch is rejected and the result carries `conflicts` (with `currentContent`). Merge your change into that and re-issue. Label / style patches and new nodes are unguarded.
 
+> **Media node `src`.** For `image` / `video` / `audio` / `pdf` / `office`, set `data.src` to a staged upload path (`upload/<name>`), a bare artifact key a tool handed you (`artifact-…` / `gen-…`), or an `https://…` URL — the server relocates / downloads the bytes into the artifact store and persists a bare key. You do **not** need to convert an upload into a key yourself.
+
 **Container / hierarchy**
 
 - **SET_NODE_PARENT** — move nodes into a frame, or out of a frame (`parentId: null`).

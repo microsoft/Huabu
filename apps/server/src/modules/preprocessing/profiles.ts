@@ -53,6 +53,11 @@ export const profiles: Record<CanvasNodeType, NodePreprocessProfile> = {
       'build_patch',
     ],
     watchFields: ['src', 'title', 'labelSource'],
+    capabilityTriggers: {
+      generate_label: ['src'],
+      generate_summary: ['src'],
+      generate_keywords: ['src'],
+    },
   },
   pdf: {
     nodeType: 'pdf',
@@ -70,6 +75,11 @@ export const profiles: Record<CanvasNodeType, NodePreprocessProfile> = {
       'build_patch',
     ],
     watchFields: ['src', 'title', 'labelSource'],
+    capabilityTriggers: {
+      generate_label: ['src'],
+      generate_summary: ['src'],
+      generate_keywords: ['src'],
+    },
   },
   office: {
     nodeType: 'office',
@@ -87,6 +97,11 @@ export const profiles: Record<CanvasNodeType, NodePreprocessProfile> = {
       'build_patch',
     ],
     watchFields: ['src', 'title', 'labelSource', 'format'],
+    capabilityTriggers: {
+      generate_label: ['src'],
+      generate_summary: ['src'],
+      generate_keywords: ['src'],
+    },
   },
   image: {
     nodeType: 'image',
@@ -99,6 +114,9 @@ export const profiles: Record<CanvasNodeType, NodePreprocessProfile> = {
       'build_patch',
     ],
     watchFields: ['src', 'labelSource'],
+    capabilityTriggers: {
+      generate_label: ['src'],
+    },
   },
   video: {
     nodeType: 'video',
@@ -125,6 +143,9 @@ export const profiles: Record<CanvasNodeType, NodePreprocessProfile> = {
       'build_patch',
     ],
     watchFields: ['childLabels', 'labelSource'],
+    capabilityTriggers: {
+      generate_label: ['childLabels'],
+    },
   },
   sketch: {
     nodeType: 'sketch',
@@ -140,6 +161,9 @@ export const profiles: Record<CanvasNodeType, NodePreprocessProfile> = {
       'build_patch',
     ],
     watchFields: ['content'],
+    capabilityTriggers: {
+      generate_label: ['content'],
+    },
   },
 };
 
