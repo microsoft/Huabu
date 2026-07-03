@@ -33,8 +33,10 @@ import {
 } from '@sediment/shared';
 
 import { getLogger } from '../../utils/logger.js';
-import { safeResolve } from '../agent/tools/handlers/fs-sandbox.js';
-import { toPhysicalRel } from '../remote_fs/node-meta.js';
+import {
+  safeResolve,
+  toPhysicalRel,
+} from '../agent/tools/handlers/fs-sandbox.js';
 
 import type { CanvasStore } from '../storage/index.js';
 

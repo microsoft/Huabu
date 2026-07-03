@@ -33,30 +33,12 @@ import { nodeRevisionOf } from '@sediment/shared/canvas-engine';
 import {
   ALWAYS_SKIP,
   safeResolve,
+  toPhysicalRel,
 } from '../agent/tools/handlers/fs-sandbox.js';
 import { getCanvasStore } from '../storage/index.js';
 
 import type { CanvasNodeType } from '@sediment/shared';
 import type { CanvasNode, CanvasEdge } from '@sediment/shared/canvas-engine';
-
-/** Virtual read-region prefixes and the on-disk `.`-dir they map onto. */
-const VIRTUAL_PREFIX: ReadonlyArray<readonly [string, string]> = [
-  ['artifacts/', '.artifacts/'],
-  ['upload/', '.upload/'],
-];
-
-/**
- * Rewrite a request path's virtual prefix (`artifacts/`, `upload/`) to its
- * hidden on-disk counterpart. Any other path (e.g. `nodes/…`, `canvas.json`,
- * or an explicit `.artifacts/…`) passes through unchanged.
- */
-export function toPhysicalRel(requestRel: string): string {
-  const norm = requestRel.replace(/^\/+/, '');
-  for (const [virtual, physical] of VIRTUAL_PREFIX) {
-    if (norm.startsWith(virtual)) return physical + norm.slice(virtual.length);
-  }
-  return norm;
-}
 
 /** First path segment (used to gate private dirs). */
 function firstSegment(rel: string): string {
