@@ -317,7 +317,10 @@ Steps 1–2 are this proposal's concrete deliverables; 3–6 are follow-ups that
 ## 8. Open questions
 
 - Does `intent` ranking belong to L1 (sense-making) or stay in the agent module for proximity to context assembly? (§7 step 3.)
-- **Is the SDK driver permanently stateless-Job-only?** [§3.4](#34-control-plane-vs-data-plane-and-where-session-state-lives) binds rich `Session` control to ACP and leaves the SDK driver serving only Jobs. Should that be a hard rule, or do we leave a door for a built-in to gain in-process state (becoming an ACP-like driver) when it needs slash/modes — and how do we weigh ACP's "no per-turn context rebuild" against the SDK's log-replay cost?
+- **Built-in (SDK) agents: keep as-is, or migrate onto ACP?** [§3.4](#34-control-plane-vs-data-plane-and-where-session-state-lives) binds rich `Session` control to ACP and leaves the SDK driver serving only Jobs. Two options, deferred:
+  1. **Keep the status quo** — built-ins stay on the in-process SDK driver (stateless Jobs over the turn log), forgoing the rich control plane.
+  2. **Move built-ins onto ACP** — run them through the ACP driver too, so a single driver backs both Jobs and Sessions and built-ins can gain in-process state / slash / modes.
+  The trade-off to weigh: ACP's "no per-turn context rebuild" vs the SDK's simpler log-replay model, and whether one driver is worth the migration.
 - **One shared `Job` control surface?** A Job's control plane is submit + cancel on both drivers ([§3.2](#32-workload-kinds-job-vs-session)). Should the ARI define that minimal surface once so an SDK Job and an ACP Job are interchangeable at the seam?
 - Should built-in agents (`ask`/`operate`/`sketch`) be reframed as L3 "tasks" that happen to run in-process, or kept as an L2 concern? This doc places their *prompts* in L3 and their *execution path* in L2 — is that split worth the conceptual overhead? (Note: the `Job`/`Session` split from [§3.2](#32-workload-kinds-job-vs-session) is orthogonal to this — a built-in agent can be either kind.)
 - Do the `spawn`/`stop`/`suspend` control verbs stay in [`@agentlet/protocol`](../../external/agentlet/packages/protocol), or become a distinct Agentnetes↔agentlet ARI contract once the control plane is extracted? ([§6.1](#61-re-splitting-agentletserver-transport-vs-control-plane).)
