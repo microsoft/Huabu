@@ -56,7 +56,7 @@ export function ChangeReviewCard({
   const nodes = useCanvasStore((s) => s.nodes);
   const edges = useCanvasStore((s) => s.edges);
 
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
 
   // Press-and-hold preview: temporarily apply a record's inverse deltas
   // (the "before" state) without autosave; restore the snapshot on
@@ -110,8 +110,8 @@ export function ChangeReviewCard({
   const title = records.length === 1 ? '1 change' : `${records.length} changes`;
 
   return (
-    <div className="border-edge-default bg-surface mb-2 rounded-md border text-xs">
-      <div className="border-edge-default flex items-center gap-1.5 border-b px-2 py-1">
+    <div className="border-edge-default bg-surface -mb-px rounded-t-2xl border border-b-0 text-xs">
+      <div className="flex items-center gap-1.5 px-3 py-1.5">
         <button
           type="button"
           onClick={() => setCollapsed((c) => !c)}
@@ -160,7 +160,7 @@ export function ChangeReviewCard({
         </Button>
       </div>
       {!collapsed && (
-        <ul className="max-h-48 overflow-y-auto py-0.5">
+        <ul className="border-edge-default max-h-48 overflow-y-auto border-t py-0.5">
           {records.map((rec) => (
             <ChangeRow
               key={rec.id}
@@ -201,7 +201,7 @@ function ChangeRow({
   const isEdge = EDGE_KINDS.has(record.kind);
 
   return (
-    <li className="hover:bg-hover flex items-center gap-1.5 px-2 py-1">
+    <li className="group hover:bg-hover flex items-center gap-1.5 px-2 py-1">
       <div className="flex min-w-0 flex-1 items-center gap-1">
         {conflicted && (
           <AlertTriangle
@@ -251,7 +251,7 @@ function ChangeRow({
           </Tooltip>
         )}
       </div>
-      <div className="flex shrink-0 items-center gap-1">
+      <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
         <Button
           onPointerDown={onPreviewStart}
           onPointerUp={onPreviewEnd}

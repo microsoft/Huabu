@@ -1,5 +1,4 @@
 ---
-id: update-skill
 name: Update a user skill
 description: 'Find an existing user skill and apply the requested change to its SKILL.md.'
 appliesTo:
@@ -57,7 +56,7 @@ For a structural rewrite:
 {
   "path": "skills/<id>/SKILL.md",
   "mode": "overwrite",
-  "body": "---\nid: <id>\nname: \"…\"\ndescription: \"…\"\nappliesTo: [\"ask\", \"operate\"]\n---\n\n# …\n\n## When to use\n\n…\n"
+  "body": "---\nname: \"…\"\ndescription: \"…\"\nappliesTo: [\"ask\", \"operate\"]\n---\n\n# …\n\n## When to use\n\n…\n"
 }
 ```
 

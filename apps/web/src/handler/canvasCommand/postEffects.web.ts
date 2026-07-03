@@ -28,6 +28,7 @@ import {
 } from '@sediment/shared/canvas-engine';
 
 import { canvasHistoryManager } from '@/store/canvasHistoryManager';
+import { useChatStore } from '@/store/chatStore';
 
 import type { Node } from '@xyflow/react';
 
@@ -66,6 +67,15 @@ export function runWebPostEffects(input: RunWebPostEffectsInput): void {
   // 2. Track server-side deletes for local history.
   for (const nodeId of effects.deletedNodeIds) {
     canvasHistoryManager.trackDelete(canvasId, nodeId);
+  }
+
+  // 2b. If a deleted node was a question node whose conversation is
+  // currently open in the chat panel, roll that view back to the plain
+  // canvas chat so the user isn't stranded on an orphaned thread.
+  if (effects.deletedNodeIds.length > 0) {
+    useChatStore
+      .getState()
+      .handleQuestionNodesDeleted(canvasId, effects.deletedNodeIds);
   }
 
   // 3. Refit frames whose children need a render cycle to settle their

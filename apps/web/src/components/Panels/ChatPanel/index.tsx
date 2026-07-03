@@ -180,6 +180,12 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     void loadThreadChanges(canvasId, threadId);
   }, [canvasId, threadId, loadThreadChanges]);
 
+  // Whether the per-thread change card is currently showing, so the
+  // chat input can merge with it into one connected box.
+  const hasThreadChanges = useAcpThreadChangesStore((s) =>
+    threadId ? (s.byThread[threadId]?.length ?? 0) > 0 : false,
+  );
+
   // Gate the ACP per-thread hooks on the binding being external. We
   // intentionally do NOT also gate on the profile still existing in
   // the profile list: post-snapshot-refactor each thread carries its
@@ -742,6 +748,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
               onStop={stopStream}
               isStreaming={isLoading}
               mode={mode}
+              connectedTop={hasThreadChanges}
               slashCommands={slashCommands}
               slashLoading={slashLoading}
               onSlashMenuIntent={refreshSlashCommands}

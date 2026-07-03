@@ -127,6 +127,11 @@
   font-size: 0.875rem;
   line-height: 1.5;
   padding: 0.125rem 0; /* 2px y, replaces Crepe's 4px */
+  /* Keep normal words intact but let unbreakable strings (long URLs)
+     wrap without stretching the card to their full width. `anywhere`
+     (vs `break-word`) also shrinks the intrinsic min-content size so a
+     long link never forces the message card wider. */
+  overflow-wrap: anywhere;
 }
 
 /* Headings inherit our app font + scale proportionally to the 14px

@@ -1,5 +1,4 @@
 ---
-id: canvas
 name: canvas
 description: Canvas mental model, tool boundaries, and command reference. The single entry point for any agent operating on a Huabu canvas.
 appliesTo: [ask, operate, sketch, external]
@@ -8,7 +7,7 @@ version: 1
 
 # Canvas
 
-The canonical reference for working with a Huabu canvas. This file covers the **read** side: the on-disk layout and the tools that turn it into structured data. Mutation is gated behind a separate tool (`canvas_commands`) and a separate reference file — see [Mutating a canvas](#mutating-a-canvas) below.
+The canonical reference for working with a Huabu canvas. This file covers the **read** side: the on-disk layout and the tools that turn it into structured data. Mutation is gated behind a separate tool (`canvas_commands`) and a separate reference file — see the **Mutating a canvas** section below.
 
 > **Schemas are the source of truth.** This skill explains _semantics_ and _idioms_. Field names, types, and required parameters live on the corresponding tool / command schema. When in doubt about a field, trust the schema.
 

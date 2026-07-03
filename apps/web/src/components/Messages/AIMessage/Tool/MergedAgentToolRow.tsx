@@ -16,6 +16,15 @@ import { Spinner } from '../../../Common/Spinner';
 import type { AgentToolPart } from '@sediment/shared';
 
 /**
+ * Canvas-relative path of a node markdown sidecar (`nodes/<safeLabel>.md`).
+ * Only these files carry a `frontmatter.id` that is a real canvas node id —
+ * skill / memory / reference files also have an `id:` frontmatter (e.g. a
+ * SKILL.md's skill id), so keying a `NodeRef` off `frontmatter.id` alone
+ * would mis-render those as (dead) node chips. Gate the ref on the path.
+ */
+const NODE_FILE_RE = /^nodes\/[^/]+\.md$/;
+
+/**
  * Whether a single agent-tool part represents a FAILED call. Checks, in
  * order: the ACP lifecycle status, the ToolResponse `status`, and — for
  * `read` — the path invariant (a genuine read always returns a `path`, so
@@ -67,11 +76,15 @@ function callSummary(part: AgentToolPart): string {
   switch (part.toolName) {
     case 'grep': {
       const c = num(payload.count);
-      return `${c} ${c === 1 ? 'match' : 'matches'}`;
+      const pat = str(payload.pattern);
+      const matchLabel = `${c} ${c === 1 ? 'match' : 'matches'}`;
+      return pat ? `${pat} — ${matchLabel}` : matchLabel;
     }
     case 'find': {
       const c = num(payload.count);
-      return `${c} ${c === 1 ? 'file' : 'files'}`;
+      const pat = str(payload.pattern);
+      const fileLabel = `${c} ${c === 1 ? 'file' : 'files'}`;
+      return pat ? `${pat} — ${fileLabel}` : fileLabel;
     }
     case 'ls': {
       const p = str(payload.path);
@@ -122,8 +135,14 @@ export function MergedAgentToolRow({
             | undefined) ?? {};
         const path = typeof payload.path === 'string' ? payload.path : '';
         const fm = (payload.frontmatter ?? {}) as Record<string, unknown>;
+        // Only node sidecars (`nodes/*.md`) carry a real canvas node id in
+        // their frontmatter; skill / memory / reference files also have an
+        // `id:` field, so gate the NodeRef on the path to avoid rendering
+        // those as dead node chips.
         const nodeId =
-          typeof fm.id === 'string' ? (fm.id as string) : undefined;
+          NODE_FILE_RE.test(path) && typeof fm.id === 'string'
+            ? (fm.id as string)
+            : undefined;
         // A read that actually succeeded ALWAYS returns a `path`. Use that
         // as the source of truth for success — it survives every history
         // shape. (A failed read on an older server is projected as
@@ -227,8 +246,11 @@ export function MergedAgentToolRow({
     }
 
     if (tool === 'grep') {
-      // grep returns `{ matches, count, limitReached }`. Sum match counts
-      // across calls for a self-describing title.
+      // grep returns `{ matches, count, truncated }`; the searched
+      // `pattern` rides on `data.data` (folded in from the call's input
+      // args, not echoed by the tool). Surface it so a 0-match row still
+      // tells the user WHAT was searched (older history without the arg
+      // merge → fall back to the bare count).
       const totalMatches = entries.reduce((sum, e) => {
         const tr = e.part.data;
         const d =
@@ -237,18 +259,29 @@ export function MergedAgentToolRow({
             : {};
         return sum + (typeof d.count === 'number' ? d.count : 0);
       }, 0);
+      const firstData =
+        entries[0]?.part.data?.status === 'success'
+          ? ((entries[0].part.data.data ?? {}) as Record<string, unknown>)
+          : {};
+      const pattern =
+        typeof firstData.pattern === 'string' ? firstData.pattern : '';
       const matchLabel = totalMatches === 1 ? 'match' : 'matches';
+      const query = pattern ? ` ${truncate(pattern, 40)}` : '';
       return {
         title:
           count === 1
-            ? `Grep — ${totalMatches} ${matchLabel}`
+            ? `Grep${query} — ${totalMatches} ${matchLabel}`
             : `Grep (×${count}) — ${totalMatches} ${matchLabel}`,
         nodeRefs: emptyRefs,
       };
     }
 
     if (tool === 'find') {
-      // find returns `{ paths, count, limitReached }`.
+      // find returns `{ paths, count, truncated }`; the searched `pattern`
+      // rides on `data.data` (folded in from the call's input args, not
+      // echoed by the tool). Echo the glob in the title so a 0-result row
+      // still tells the user WHAT was searched (older history without the
+      // arg merge → fall back to the bare count).
       const totalPaths = entries.reduce((sum, e) => {
         const tr = e.part.data;
         const d =
@@ -257,11 +290,18 @@ export function MergedAgentToolRow({
             : {};
         return sum + (typeof d.count === 'number' ? d.count : 0);
       }, 0);
+      const firstData =
+        entries[0]?.part.data?.status === 'success'
+          ? ((entries[0].part.data.data ?? {}) as Record<string, unknown>)
+          : {};
+      const pattern =
+        typeof firstData.pattern === 'string' ? firstData.pattern : '';
       const fileLabel = totalPaths === 1 ? 'file' : 'files';
+      const query = pattern ? ` ${truncate(pattern, 40)}` : '';
       return {
         title:
           count === 1
-            ? `Find — ${totalPaths} ${fileLabel}`
+            ? `Find${query} — ${totalPaths} ${fileLabel}`
             : `Find (×${count}) — ${totalPaths} ${fileLabel}`,
         nodeRefs: emptyRefs,
       };

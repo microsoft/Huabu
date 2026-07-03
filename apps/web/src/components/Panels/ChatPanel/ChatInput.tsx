@@ -82,6 +82,12 @@ interface ChatInputProps {
   contextUsageOverride?: ContextUsageOverride | undefined;
   disabled?: boolean;
   placeholder?: string;
+  /**
+   * When true, the change-review card is attached directly above the
+   * input, so the input flattens its top corners to merge into one
+   * connected box.
+   */
+  connectedTop?: boolean;
 }
 
 export const ChatInput = ({
@@ -99,6 +105,7 @@ export const ChatInput = ({
   contextUsageOverride,
   disabled = false,
   placeholder = 'Asking anything here...',
+  connectedTop = false,
 }: ChatInputProps) => {
   const isSubmitDisabled = disabled || !value.trim();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -367,7 +374,7 @@ export const ChatInput = ({
     >
       <form onSubmit={handleSubmit} className="w-full">
         <div
-          className={`rounded-2xl border p-3 transition-colors ${isDragOver ? 'border-edge-default bg-info-bg' : 'border-edge-default bg-surface'}`}
+          className={`border p-3 transition-colors ${connectedTop ? 'rounded-t-none rounded-b-2xl' : 'rounded-2xl'} ${isDragOver ? 'border-edge-default bg-info-bg' : 'border-edge-default bg-surface'}`}
         >
           {/* ── Pending attachment thumbnails ── */}
           {(pendingAttachments.length > 0 || selectionAttachment) && (

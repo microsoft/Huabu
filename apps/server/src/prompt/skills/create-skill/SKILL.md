@@ -1,5 +1,4 @@
 ---
-id: create-skill
 name: Create a user skill
 description: 'Create a new user skill at setting/skills/<id>/SKILL.md.'
 appliesTo:
@@ -26,11 +25,10 @@ You were called because the user typed `/create-skill <instructions>` in the cha
 
 ## Compose the file
 
-Submit the **entire** file via `fs_write`, including the YAML frontmatter fence. Frontmatter fields:
+Submit the **entire** file via `fs_write`, including the YAML frontmatter fence. The skill id comes from the `<id>` directory segment in the path — it is **not** a frontmatter key. Frontmatter fields:
 
 | field         | value                                                                                               |
 | ------------- | --------------------------------------------------------------------------------------------------- |
-| `id`          | the id you picked (must equal the directory name)                                                   |
 | `name`        | human-readable label (Title Case is fine)                                                           |
 | `description` | one-sentence catalogue blurb — what the skill does, not when (the body covers when)                 |
 | `appliesTo`   | array; default to `["ask", "operate"]` unless the brief obviously narrows the surface (e.g. sketch) |
@@ -63,7 +61,7 @@ Use `fs_write` exactly once:
   "path": "skills/<id>/SKILL.md",
   "mode": "overwrite",
   "rationale": "<≥ 20 chars explaining why no existing skill fits>",
-  "body": "---\nid: <id>\nname: \"…\"\ndescription: \"…\"\nappliesTo: [\"ask\", \"operate\"]\n---\n\n# …\n\n## When to use\n\n…\n"
+  "body": "---\nname: \"…\"\ndescription: \"…\"\nappliesTo: [\"ask\", \"operate\"]\n---\n\n# …\n\n## When to use\n\n…\n"
 }
 ```
 
