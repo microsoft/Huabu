@@ -49,6 +49,7 @@ import {
 } from '@sediment/shared/canvas-engine';
 
 import { publishCanvasUpdate } from './canvas-sync.js';
+import { importForeignNodeSources } from './import-node-src.js';
 import {
   getCanvasStore,
   type CanvasFile,
@@ -382,7 +383,24 @@ export async function executeOnServer(
   input: ExecuteOnServerInput,
 ): Promise<ExecuteOnServerOutput> {
   const { canvasId, originator, runId } = input;
-  const commands = preAssignIds(input.commands);
+  let commands = preAssignIds(input.commands);
+
+  // Normalize agent-authored `data.src` values into artifact keys BEFORE the
+  // per-canvas mutex: an ACP agent may point a node at an RFS upload
+  // (`upload/foo.png`) or an online URL, neither of which the web can render.
+  // `importForeignNodeSources` copies / downloads the bytes into `.artifacts/`
+  // and rewrites `src` to the bare key. It only reads scratch bytes and writes
+  // fresh artifact files (unique ids, no canvas.json contention), so keeping it
+  // outside the mutex means a slow online download never stalls concurrent
+  // writes to the same canvas. Idempotent for values that are already artifact
+  // keys / `/api/` URLs / `data:` URIs.
+  if (originator.source === 'agent') {
+    commands = await importForeignNodeSources(
+      getCanvasStore(canvasId),
+      canvasId,
+      commands,
+    );
+  }
 
   return await withCanvasMutex(canvasId, async () => {
     const store = getCanvasStore(canvasId);
