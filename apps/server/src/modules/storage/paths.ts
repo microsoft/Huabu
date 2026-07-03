@@ -14,8 +14,8 @@
  *       canvas.md                   canvas memory body
  *       state.json                  memory worker bookkeeping
  *     .history/
- *       chat/<threadId>.json        pi-ai Context (messages, append-only)
- *       chat/<threadId>.parts.json  rich-ACP sidecar overlay (optional)
+ *       chat/<threadId>.turns.jsonl finalized turns (append-only)
+ *       chat/<threadId>.active.json in-progress turn (partial)
  *       intent.json
  *       events.jsonl
  *       acp-sessions.json           per-thread ACP sessionId map (optional)

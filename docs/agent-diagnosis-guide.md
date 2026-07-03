@@ -28,8 +28,8 @@ canvas folder inside the active workspace.
 `<canvas>/.history/chat/`:
 
 - `<threadId>.turns.jsonl` — one line per finalized turn: the messages and tool
-  calls exactly as the agent ran them.
-- `<threadId>.parts.json` — rich sidecar overlay, present for **ACP** threads.
+  calls exactly as the agent ran them. For ACP threads the rich agent parts are
+  folded into the turn record here (the old `.parts.json` sidecar is gone).
 - `<threadId>.active.json` — the single in-progress turn (partial), if any.
 
 **2. The assembled prompt — built-in agents only.**
