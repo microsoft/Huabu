@@ -265,6 +265,21 @@ export interface ChatState {
     nodeIds: ReadonlySet<string>,
   ) => void;
 
+  /**
+   * React to question nodes deleted in the current canvas. When the
+   * chat panel is actively showing one of the deleted nodes' threads
+   * (replay OR compose), roll back to the plain canvas chat so the user
+   * isn't stranded on an orphaned conversation whose anchor node is
+   * gone. Also drops a persisted replay pointer for a deleted node even
+   * when it isn't the one on screen. Called from the delete post-effect
+   * so the cleanup happens immediately, not only on the next
+   * `loadCanvas`.
+   */
+  handleQuestionNodesDeleted: (
+    canvasId: string,
+    deletedNodeIds: readonly string[],
+  ) => void;
+
   /** Mark / unmark a thread as having an active streaming run. */
   setThreadLoading: (threadId: string, loading: boolean) => void;
 
@@ -723,6 +738,33 @@ export const useChatStore = create<ChatState>()(
         const next = { ...questionReplayByCanvas };
         delete next[canvasId];
         set({ questionReplayByCanvas: next });
+      },
+
+      handleQuestionNodesDeleted: (canvasId, deletedNodeIds) => {
+        if (deletedNodeIds.length === 0) return;
+        const { viewingQuestionThread, questionReplayByCanvas } = get();
+        const deleted = new Set(deletedNodeIds);
+
+        // The node backing the on-screen question thread was deleted —
+        // return to the canvas chat. `closeQuestionThread` also drops
+        // the persisted replay pointer for this canvas, so we're done.
+        if (
+          viewingQuestionThread &&
+          deleted.has(viewingQuestionThread.nodeId)
+        ) {
+          get().closeQuestionThread(canvasId);
+          return;
+        }
+
+        // Not on screen, but a persisted replay pointer for this canvas
+        // may now dangle at a deleted node — drop it so a later revisit
+        // doesn't restore a foreign thread.
+        const replay = questionReplayByCanvas[canvasId];
+        if (replay && deleted.has(replay.nodeId)) {
+          const next = { ...questionReplayByCanvas };
+          delete next[canvasId];
+          set({ questionReplayByCanvas: next });
+        }
       },
 
       setThreadLoading: (threadId, loading) =>
