@@ -128,6 +128,57 @@ Both are **built-in, first-class kinds owned by Agentnetes** — not host-define
 
 > Today Huabu implicitly runs both kinds through one "session" path: `appId = threadId`, one `QuestionNode` = one thread = one session. Naming `Job` splits out the many agent-teams whose semantics are really "do a task, finish" from the truly conversational ones — without changing the transport or definition dimensions.
 
+### 3.3 What is "an agent"? Runtime drivers vs the agent definition
+
+There appear to be *three kinds of agent* in the code today, but they are not three kinds of agent — they are three points on **two orthogonal axes**, and conflating them is the trap:
+
+| Implementation today          | Runtime contract (what the core speaks) | Locality (where it runs)      | Code path                                                                     |
+| ----------------------------- | --------------------------------------- | ----------------------------- | ----------------------------------------------------------------------------- |
+| SDK-wrapped (built-in Hubble) | native SDK (pi-agent-core, in-process)  | in-process                    | [`runAgent`](../../apps/server/src/modules/agent/agent.service.ts)            |
+| Local ACP CLI                 | ACP (JSON-RPC over stdio)               | local process                 | `runAcpAgent` → agentlet daemon on localhost                                  |
+| Bridged remote ACP            | ACP (JSON-RPC over stdio)               | remote process + WSS bridge   | `runAcpAgent` → remote agentlet daemon                                        |
+
+Two consequences fall out of this table:
+
+1. **Locality is not Agentnetes' concern — it is agentlet's whole reason to exist.** "Local ACP" collapses into "remote ACP" in the code precisely because *local* is just "the agentlet daemon runs on localhost". Whether the agent sits in-process, next door, or on another continent is a placement decision owned entirely below the ARI line (agentlet = kubelet, which abstracts node placement + NAT traversal). Agentnetes must not model local-vs-remote at all.
+2. **What remains for Agentnetes is a single axis — the runtime contract — with (today) two drivers:** an in-process **SDK driver** (`runAgent`) and an **agentlet ACP driver**. These are ARI drivers, exactly as containerd / CRI-O are CRI runtimes; the driver is invisible to whoever *defines* the agent.
+
+So the vocabulary the rest of this doc should use:
+
+- **An agent = a definition** (prompt + tools/skills + which runtime it binds to) — the analogue of a container **image / PodSpec**. This is what a user @-mentions.
+- **A runtime driver** = how that definition is executed (SDK in-process vs ACP via agentlet) — the analogue of the **container runtime behind CRI**. Not user-visible.
+- **A workload kind** ([§3.2](#32-workload-kinds-job-vs-session)) = completion semantics (`Job` / `Session`) — orthogonal to both.
+- **Locality** = agentlet's placement problem — below the ARI, invisible to the control plane.
+
+The composability goal of [§3](#3-layer-2--agentnetes-agent-as-a-local-service--protocol-driven) restated: **definition × runtime-driver × workload-kind × locality compose freely.** Today's three "kinds" are three welded vertical slices through these axes; the work is to unweld them.
+
+### 3.4 Control plane vs data plane (and where session state lives)
+
+The ARI carries two message classes, and they behave *very* differently across the two drivers — this asymmetry, not the transport, is the real design question.
+
+**Data plane** — *prompt in → message chunks out.* Already converged on one vocabulary, `AgentStreamEvent`:
+
+| Driver | Input             | Output                | How it reaches `AgentStreamEvent`                                                                                             |
+| ------ | ----------------- | --------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| ACP    | `session/prompt`  | `session/update` stream | translated by [`translator.ts`](../../apps/server/src/modules/agent/acp/translator.ts) (`agent_message_chunk` / `agent_thought_chunk` / `tool_call` / `plan` / `usage_update` → `AgentStreamEvent`) |
+| SDK    | `ChatEnvelope`    | `runAgent` yields directly | produced **natively** as `AgentStreamEvent`, no translation                                                             |
+
+The data plane is therefore *already unified* — ACP goes through a translator, the SDK is native, but both speak `AgentStreamEvent` outward. Neither extraction option changes it much.
+
+**Control plane** — *session lifecycle + capabilities.* Here the two drivers are radically asymmetric:
+
+- **ACP has a rich, stateful control surface** addressed to a **live process**: `initialize` (advertising `agentCapabilities`, e.g. [`loadSession`](../../apps/server/src/modules/agent/acp/client.ts)), `session/new`, `session/load` (resume, gated by the `loadSession` capability), `session/cancel`, plus out-of-turn pushes like `available_commands_update` (the **slash-command** catalogue), `config_option_update`, `current_mode_update`.
+- **The SDK path has essentially no control plane.** As the `threadId` contract in [`agent.service.ts`](../../apps/server/src/modules/agent/agent.service.ts) documents: the built-in path has *no live process*; its memory is externalized to the on-disk turn log, and the route rebuilds context (`loadTurns` + `rebuildContextMessages`) **before** calling `runAgent`. By then `threadId` no longer drives resume — it is only a provenance tag. There is no `session/new`, no `session/load`, no slash-command catalogue (built-ins do not advertise `availableCommands`).
+
+The deeper axis under the control plane is **where session state lives**:
+
+| Driver | State ownership                     | "Resume" means                     | Role of persistence/replay ([§3](#3-layer-2--agentnetes-agent-as-a-local-service--protocol-driven)) |
+| ------ | ----------------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| ACP    | **in the process** (stateful)       | re-prompt a still-live session; idle-suspend/resume | a **mirror** of process state                                                       |
+| SDK    | **in the external log** (stateless) | replay the turn log into a fresh context | **is** the state itself                                                                         |
+
+The insight: **ACP's control verbs only mean something when state lives in the process.** The two drivers are really two *state-ownership* models. This reframes the extraction choice as a control-plane question, not a transport one — do we (A) unify on one ARI control vocabulary, letting the SDK driver *emulate* the ACP verbs against the turn log (`session/load` → replay, `session/cancel` → abort, slash commands → empty/host-defined, `loadSession` capability → true), or (B) let Agentnetes carry two control models side by side? That decision, plus whether slash commands are a universal control-plane member or a per-agent capability, is deferred to [§8](#8-open-questions).
+
 **What lives here** (grouped by the four dimensions)
 
 | Dimension                | Subsystem                                                                                             | Doc                                                                        |
@@ -254,6 +305,9 @@ Steps 1–2 are this proposal's concrete deliverables; 3–6 are follow-ups that
 ## 8. Open questions
 
 - Does `intent` ranking belong to L1 (sense-making) or stay in the agent module for proximity to context assembly? (§7 step 3.)
+- **ARI control vocabulary (A vs B).** Do we unify on one control surface — the SDK driver *emulating* the ACP verbs against the turn log (`session/load` → replay, `session/cancel` → abort, slash → empty) — or let Agentnetes carry two control models side by side? ([§3.4](#34-control-plane-vs-data-plane-and-where-session-state-lives).)
+- **State-ownership contract.** Does the ARI mandate a single model (e.g. state always in an external log, the process is a cache) or negotiate it via a capability, the way ACP already advertises `loadSession`? ([§3.4](#34-control-plane-vs-data-plane-and-where-session-state-lives).)
+- **Slash commands: control-plane member or per-agent capability?** Today only ACP agents advertise `availableCommands`; built-ins have none. Is that a universal ARI concern or an opt-in agent capability? ([§3.4](#34-control-plane-vs-data-plane-and-where-session-state-lives).)
 - Should built-in agents (`ask`/`operate`/`sketch`) be reframed as L3 "tasks" that happen to run in-process, or kept as an L2 concern? This doc places their *prompts* in L3 and their *execution path* in L2 — is that split worth the conceptual overhead? (Note: the `Job`/`Session` split from [§3.2](#32-workload-kinds-job-vs-session) is orthogonal to this — a built-in agent can be either kind.)
 - Do the `spawn`/`stop`/`suspend` control verbs stay in [`@agentlet/protocol`](../../external/agentlet/packages/protocol), or become a distinct Agentnetes↔agentlet ARI contract once the control plane is extracted? ([§6.1](#61-re-splitting-agentletserver-transport-vs-control-plane).)
 - What is the minimum viable "second project" that would validate the Agentnetes extraction, and does it exist yet?
