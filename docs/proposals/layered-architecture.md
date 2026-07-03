@@ -269,7 +269,7 @@ L2 ◀──▶ RFS (curl) ────────────────  L3 
 The strategic payoff is that **L2 minus the RFS canvas-shape is Agenetes: a general-purpose agent control plane** that other projects could adopt. Two extractions are in play, one done and one pending:
 
 - **agentlet** (done) — the per-node relay is already a git subtree pushed to its own upstream ([`external/agentlet`](../../external/agentlet)). It is the transport / kubelet: spawn a runtime, bridge ACP over WSS, traverse NAT. Zero AI logic, zero application knowledge.
-- **Agenetes** (pending) — the control plane that today lives inside [`apps/server/src/modules/agent/acp`](../../apps/server/src/modules/agent/acp). This proposal names it as the next extraction candidate.
+- **Agenetes** (scaffolded, extraction pending) — the control plane that today lives inside [`apps/server/src/modules/agent/acp`](../../apps/server/src/modules/agent/acp). Its destination repo already exists and is wired in as a subtree at [`external/agenetes`](../../external/agenetes) (upstream `git@github.com:hai-team/agenetes.git`); it currently holds only placeholder files. The control-plane code is migrated in incrementally per [§7](#7-refactor--sequencing) steps 4–5.
 
 | Extractable capability | Today's location                                        | Canvas-coupling                                        |
 | ---------------------- | ------------------------------------------------------- | ------------------------------------------------------ |
@@ -297,7 +297,19 @@ The dividing principle mirrors kubelet vs scheduler: **agentlet *executes* a spa
 
 The clean extraction boundary is therefore: **agentlet (transport) + Agenetes (definition/lifecycle/communication/persistence) are project-agnostic**; only the RFS *resource shape* (what "a node" is) is Huabu-specific. A reuse plan would keep the transport + lifecycle generic and let each host define its own reachback resource schema behind the same RFS verbs (`download`/`upload`/`agent`/`skill`).
 
-> agentlet is already a git subtree pushed to its own upstream ([`external/agentlet`](../../external/agentlet)), so the transport layer is *literally* an independent package today. This proposal formalises Agenetes as the next extraction candidate.
+> Both subtrees are already wired in: agentlet at [`external/agentlet`](../../external/agentlet) (transport, live today) and Agenetes at [`external/agenetes`](../../external/agenetes) (control plane, scaffolded and awaiting migration). Each is pushed to its own upstream, so the extraction is a matter of *moving code into an existing package boundary*, not standing a new one up.
+
+### 6.2 Subtree maintenance
+
+Both `external/agentlet` and `external/agenetes` are git subtrees with their own upstreams; changes under those paths must be **committed separately** from Huabu-only changes so they stay clean for upstream push. Remotes: `agentlet-upstream` and `agenetes-upstream`.
+
+```bash
+# push local subtree changes up to the standalone repo
+git subtree push --prefix=external/agenetes agenetes-upstream main
+
+# pull upstream changes back down (squashed)
+git subtree pull --prefix=external/agenetes agenetes-upstream main --squash
+```
 
 ---
 
@@ -308,8 +320,8 @@ No big-bang. Ordered, low-risk steps that each stand alone:
 1. **Adopt the vocabulary.** Land this doc; reference L1/L2/L3 in PR descriptions and new module headers. (This PR.)
 2. **Assert the seams in code.** Add lint/dependency checks (extend the existing web-layer dependency rules) so L1 code cannot import L2 internals and L3 manifests cannot import server code. Fail CI on upward imports.
 3. **Relocate `intent` conceptually.** Decide whether intent ranking stays under `modules/agent` or moves to an L1-owned `modules/sensemaking`; it is an L1 concern with no agent loop.
-4. **Name the Agenetes dimension boundaries.** Group the definition/lifecycle/communication/persistence stores under a single `modules/agent/agenetes` (or a `packages/agenetes`) folder — with the four dimensions as sub-modules, workload kinds ([§3.2](#32-workload-kinds-job-vs-session)) as first-class types, and transport as a pluggable ARI ([§3.1](#31-the-transport-axis-why-it-is-separate)) — so the composability and the extraction seam from [§6](#6-extraction-what-becomes-reusable) are visible in the tree, not just in prose.
-5. **Re-split `@agentlet/server`.** Move the control-plane half (session/event stores, lifecycle types, session REST) into Agenetes and leave `@agentlet/server` as pure transport, per the table in [§6.1](#61-re-splitting-agentletserver-transport-vs-control-plane). Touches the `external/agentlet` subtree — commit separately for clean upstream push.
+4. **Name the Agenetes dimension boundaries.** Group the definition/lifecycle/communication/persistence stores under the Agenetes package — destination already scaffolded at [`external/agenetes`](../../external/agenetes) (or, transitionally, a `modules/agent/agenetes` folder) — with the four dimensions as sub-modules, workload kinds ([§3.2](#32-workload-kinds-job-vs-session)) as first-class types, and transport as a pluggable ARI ([§3.1](#31-the-transport-axis-why-it-is-separate)) — so the composability and the extraction seam from [§6](#6-extraction-what-becomes-reusable) are visible in the tree, not just in prose.
+5. **Re-split `@agentlet/server`.** Move the control-plane half (session/event stores, lifecycle types, session REST) into Agenetes and leave `@agentlet/server` as pure transport, per the table in [§6.1](#61-re-splitting-agentletserver-transport-vs-control-plane). Touches the `external/agentlet` and `external/agenetes` subtrees — commit each separately for clean upstream push ([§6.2](#62-subtree-maintenance)).
 6. **Generalise RFS resource shape.** Introduce a host-defined resource schema behind the RFS verbs so a second project can plug a non-canvas resource in. (Depends on step 4; only pursue when a real second consumer appears.)
 
 Steps 1–2 are this proposal's concrete deliverables; 3–6 are follow-ups that each merit their own review before starting.
