@@ -181,14 +181,37 @@ function buildAssistantParts(
         ...(extras?.permission ? { permission: extras.permission } : {}),
       };
       switch (variant) {
-        case 'agent_tool':
+        case 'agent_tool': {
+          // Fold the call's input args UNDER the result payload (result
+          // wins), mirroring the live stream (`applyInternalToolResult`).
+          // This surfaces query params the result doesn't echo — e.g. a
+          // `find` / `grep` `pattern` — so the UI can show WHAT was
+          // searched, WITHOUT the tool echoing its own input back into
+          // the model-visible result.
+          const args =
+            block.arguments && typeof block.arguments === 'object'
+              ? (block.arguments as Record<string, unknown>)
+              : undefined;
+          const data =
+            toolData && toolData.status === 'success' && args
+              ? {
+                  ...toolData,
+                  data: {
+                    ...args,
+                    ...((toolData.data as
+                      | Record<string, unknown>
+                      | undefined) ?? {}),
+                  },
+                }
+              : toolData;
           parts.push({
             ...base,
             variant: 'agent_tool',
             toolName,
-            ...(toolData ? { data: toolData } : {}),
+            ...(data ? { data } : {}),
           });
           break;
+        }
         case 'canvas_commands':
           parts.push({
             ...base,
