@@ -72,6 +72,16 @@ export type CanvasNodeCreateInput = {
 export type CanvasNodeDataMergePatch = {
   nodeId: CanvasNodeId;
   patch: Record<string, unknown>;
+  /**
+   * Optimistic-concurrency token: the node's authored-content revision
+   * ({@link nodeRevision}) the writer last saw. Sibling of `patch` (never
+   * merged into node data). The server compares it against the node's
+   * current rev before applying a content rewrite and rejects on mismatch
+   * (a human / another turn edited it since). Auto-injected server-side for
+   * agent writes from the run's read-set; absent for ui / system writes,
+   * which are unconditional.
+   */
+  expectRev?: string;
 };
 
 export interface CanvasNodeParentUpdate {

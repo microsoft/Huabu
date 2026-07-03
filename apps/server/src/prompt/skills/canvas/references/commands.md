@@ -22,6 +22,8 @@ Everything you need to mutate a canvas. **Load this before issuing your first `c
 - **DISCONNECT_EDGES** — remove edges by id or by source/target pair.
 - **SET_EDGE_STYLE** — patch visual style on existing edges.
 
+> **Rewriting `content`/`src`? Read the node first.** Content rewrites are auto-guarded: if you haven't `read` the node's full body in this conversation, or it changed since you last read it, the batch is rejected and the result carries `conflicts` (with `currentContent`). Merge your change into that and re-issue. Label / style patches and new nodes are unguarded.
+
 **Container / hierarchy**
 
 - **SET_NODE_PARENT** — move nodes into a frame, or out of a frame (`parentId: null`).

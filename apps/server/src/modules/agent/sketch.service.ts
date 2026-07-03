@@ -15,10 +15,12 @@
  */
 
 import { runAgent } from './agent.service.js';
-import { buildAgentNodeRef } from './node-ref.js';
 import { loadAgent, renderAgentTemplate } from '../../prompt/index.js';
 import { getLogger } from '../../utils/logger.js';
+import { describeNode } from '../canvas/node-prompt.js';
+import { getCanvasStore } from '../storage/index.js';
 
+import type { CanvasStore } from '../storage/canvas-store.js';
 import type { Context } from '@earendil-works/pi-ai';
 import type {
   SketchClusterContext,
@@ -40,12 +42,16 @@ type ContentPart =
 /**
  * Render the cluster payload as a short text block for the user message.
  *
- * Each wire ref is enriched server-side via {@link buildAgentNodeRef}
- * to derive the `nodes/<safeLabel>.md` path the model can pass
- * straight to `read`. Edges stay as bare ids — they have no label,
- * and the model uses `inspect_edges` for direction / style.
+ * Each wire ref is assembled via the shared {@link describeNode} (`'preview'`
+ * level) so it carries the sidecar-sourced `label`, the `nodes/<safeLabel>.md`
+ * path the model can `read`, AND a `rev` freshness token — the same shape
+ * every other node-context path emits. Edges stay as bare ids — they have no
+ * label, and the model uses `inspect_edges` for direction / style.
  */
-function serializeClusterContext(ctx: SketchClusterContext): string {
+function serializeClusterContext(
+  ctx: SketchClusterContext,
+  store: CanvasStore | null,
+): string {
   const lines: string[] = [];
   lines.push(
     `Sketch bbox: (${ctx.bbox.x}, ${ctx.bbox.y}) ${ctx.bbox.width}x${ctx.bbox.height}px`,
@@ -53,9 +59,14 @@ function serializeClusterContext(ctx: SketchClusterContext): string {
   lines.push(`Stroke count: ${ctx.strokeCount}`);
 
   const renderRef = (r: WireNodeRef): string => {
-    const ref = buildAgentNodeRef(r);
-    const labelPart = ref.label ? ` "${ref.label}"` : '';
-    return `  - ${ref.id}${labelPart} (${ref.type}) → ${ref.filename}`;
+    const node = describeNode(
+      store,
+      { id: r.id, type: r.type, ...(r.label ? { label: r.label } : {}) },
+      'preview',
+    );
+    const labelPart = node.label ? ` "${node.label}"` : '';
+    const revPart = node.rev ? ` rev=${node.rev}` : '';
+    return `  - ${node.id}${labelPart} (${node.type})${revPart} → ${node.filename}`;
   };
 
   if (ctx.enclosedNodes.length > 0) {
@@ -113,7 +124,10 @@ export async function recognizeSketchCommands(
     ? screenshot.replace(/^data:[^;]+;base64,/, '')
     : screenshot;
 
-  const contextText = serializeClusterContext(clusterContext);
+  const contextText = serializeClusterContext(
+    clusterContext,
+    canvasId ? getCanvasStore(canvasId) : null,
+  );
 
   const userContent: ContentPart[] = [
     { type: 'image', data: base64, mimeType: 'image/png' },

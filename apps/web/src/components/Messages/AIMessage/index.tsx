@@ -5,7 +5,6 @@ import { MilkdownMessageCard } from './MilkdownMessageCard';
 import { PermissionCard } from './PermissionCard';
 import { PlanCard } from './PlanCard';
 import { ThinkingCard } from './ThinkingCard';
-import { ThinkingPhaseCard } from './ThinkingPhaseCard';
 import { CanvasCommandCard } from './Tool/CanvasCommandCard';
 import { ImageGenerationCard } from './Tool/ImageGenerationCard';
 import { MergedAgentToolRow } from './Tool/MergedAgentToolRow';
@@ -139,8 +138,8 @@ export const AIMessage = ({
         {phases.map((entry, eIdx) => {
           if (entry.kind === 'phase') {
             // A phase with zero tool groups is just a bare thinking
-            // segment — render via the legacy ThinkingCard so we
-            // don't show an empty "expand to see tools" affordance.
+            // segment — render without children so there's no empty
+            // "expand to see tools" affordance.
             if (entry.toolGroups.length === 0) {
               const segStreaming =
                 isStreaming && segments.indexOf(entry.thinking) === lastIdx;
@@ -153,7 +152,7 @@ export const AIMessage = ({
               );
             }
             return (
-              <ThinkingPhaseCard
+              <ThinkingCard
                 key={`p${eIdx}`}
                 text={entry.thinking.text}
                 closed={entry.closed}
@@ -162,7 +161,7 @@ export const AIMessage = ({
                 {entry.toolGroups.map((g, gIdx) =>
                   renderToolGroup(g, messageId, `p${eIdx}-g${gIdx}`),
                 )}
-              </ThinkingPhaseCard>
+              </ThinkingCard>
             );
           }
 

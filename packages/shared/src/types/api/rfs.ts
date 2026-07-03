@@ -58,6 +58,13 @@ export const rfsNodeMetaSchema = z.object({
   src: z.string().optional(),
   /** Whether the node is locked against move/resize/auto-layout. */
   locked: z.boolean().optional(),
+  /**
+   * Revision token over the node's authored content (`content` / `src`); the
+   * same value carried as the download's `ETag`. Lets an agent skip re-reading
+   * an unchanged node (compare to the `rev` it last saw) and conditional-GET
+   * with `If-None-Match`. Absent only for a node with no authored body.
+   */
+  rev: z.string().optional(),
 });
 
 export type RfsNodeMeta = z.infer<typeof rfsNodeMetaSchema>;

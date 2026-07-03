@@ -73,6 +73,12 @@ export interface ExecuteContext {
   origin?: NodeOrigin;
   /** ACP conversation thread to attribute canvas changes to (change card). */
   threadId?: string;
+  /**
+   * Run-scoped `nodeId → rev` read-set. `read` records the rev of each
+   * node it reads; `canvas_commands` reads it to auto-inject `expectRev`
+   * on content writes. One Map per `runAgent`; never persisted.
+   */
+  readSet?: Map<string, string>;
 }
 
 /**
@@ -132,13 +138,13 @@ export async function executeTool(
       return handleLs(withCanvasId<LsArgs>(args, 'ls'));
 
     case 'read':
-      return handleRead(withCanvasId<ReadArgs>(args, 'read'));
+      return handleRead(withCanvasId<ReadArgs>(args, 'read'), context?.readSet);
 
     case 'canvas_commands':
       return handleCanvasCommands(
         withCanvasId<CanvasCommandsArgs>(args, 'canvas_commands'),
         context?.origin,
-        { threadId: context?.threadId },
+        { threadId: context?.threadId, readSet: context?.readSet },
       );
 
     case 'fs_write':

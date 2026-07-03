@@ -19,8 +19,8 @@
 
 import { getSkill } from '../../../prompt/index.js';
 import { getNodeNeighbourhood } from '../../canvas/node-neighbourhood.js';
+import { describeNode } from '../../canvas/node-prompt.js';
 import { getCanvasStore } from '../../storage/index.js';
-import { buildAgentNodePreview } from '../node-ref.js';
 import { isUserInvokableSkill } from '../skills.route.js';
 import { snapshotNodesToArtifacts } from '../tools/handlers/snapshot-node.js';
 
@@ -165,30 +165,24 @@ function collectSelectedNodeRefs(
       store = null;
     }
   }
-  const readPreviewInputs = (n: WireSelectionNode) => {
-    const meta = store?.readNode(n.id) as Record<string, unknown> | null;
-    return {
-      summary: typeof meta?.summary === 'string' ? meta.summary : undefined,
-      content:
-        typeof meta?.content === 'string' && meta.content
-          ? meta.content
-          : undefined,
-      src: n.src,
-    };
-  };
   const refs: AgentNodePreview[] = [];
   const walk = (list: WireSelectionNode[]) => {
     for (const n of list) {
-      const { summary, content, src } = readPreviewInputs(n);
+      // Route through the shared assembler: the node carries whatever the
+      // client wire already knows (label / src); anything missing (note
+      // body / summary) is filled from the sidecar. One place owns
+      // label + file + preview + rev for every server-side node context.
       refs.push(
-        buildAgentNodePreview({
-          id: n.id,
-          type: n.type,
-          label: n.label,
-          summary,
-          content,
-          src,
-        }),
+        describeNode(
+          store,
+          {
+            id: n.id,
+            type: n.type,
+            ...(n.label !== undefined ? { label: n.label } : {}),
+            ...(n.src !== undefined ? { src: n.src } : {}),
+          },
+          'preview',
+        ),
       );
       if (n.children) walk(n.children);
     }
@@ -345,9 +339,10 @@ export async function buildChatEnvelope(
   } = params;
 
   // Focus: anchor neighbourhood for anchored requests (Workspace memory
-  // now rides in the agent's system prompt). Stored structured; each
-  // backend serializes it with its own `includeFileName`. The anchor's
-  // own label is read from the store so the prompt can name it.
+  // now rides in the agent's system prompt). Stored structured; both
+  // backends serialize it the same way (a node is addressed by its `file=`
+  // path). The anchor's own label is read from the store so the prompt can
+  // name it.
   let anchor: ChatEnvelope['focus']['anchor'];
   if (anchorNodeId && canvasId) {
     const neighbourhood =

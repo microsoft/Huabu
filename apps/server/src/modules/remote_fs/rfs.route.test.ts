@@ -17,6 +17,8 @@ import fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import rfsRoutes from './rfs.route.js';
+import { getCanvasStore } from '../storage/index.js';
+import { toSafeFilename } from '../storage/naming.js';
 import { setWorkspacePath } from '../workspace.js';
 
 let tmp: string;
@@ -26,6 +28,33 @@ async function buildApp() {
   await app.register(rfsRoutes, { prefix: '/rfs' });
   await app.ready();
   return app;
+}
+
+/**
+ * Seed a note node (canvas.json entry + `nodes/<safeLabel>.md` body) and
+ * return its download path. Re-calling with the same id/label overwrites the
+ * body (canvas.json strips content, so the body only lives in the sidecar).
+ */
+function seedNote(
+  canvasId: string,
+  id: string,
+  label: string,
+  content: string,
+): string {
+  const store = getCanvasStore(canvasId);
+  store.write({
+    canvasId,
+    title: null,
+    version: 1,
+    state: {
+      nodes: [{ id, type: 'note', position: { x: 0, y: 0 }, data: { label } }],
+      edges: [],
+    },
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  });
+  store.writeNode(id, { nodeId: id, type: 'note', label, content });
+  return `nodes/${toSafeFilename(label, id)}.md`;
 }
 
 beforeEach(() => {
@@ -145,6 +174,58 @@ describe('GET /api/rfs/:canvasId/download', () => {
         url: '/rfs/c1/download/.memory/state.json',
       });
       expect(res.statusCode).toBe(400);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('node download revision (ETag / conditional GET)', () => {
+  it('serves an ETag and 304s a matching If-None-Match', async () => {
+    const app = await buildApp();
+    try {
+      const file = seedNote('c1', 'node-1', 'Alpha', 'hello body');
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/rfs/c1/download/${file}`,
+      });
+      expect(res.statusCode).toBe(200);
+      const etag = res.headers['etag'] as string;
+      expect(etag).toMatch(/^".+"$/);
+
+      // Same content → 304, empty body.
+      const notModified = await app.inject({
+        method: 'GET',
+        url: `/rfs/c1/download/${file}`,
+        headers: { 'if-none-match': etag },
+      });
+      expect(notModified.statusCode).toBe(304);
+      expect(notModified.body).toBe('');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('changes the ETag when the authored body changes', async () => {
+    const app = await buildApp();
+    try {
+      const file = seedNote('c1', 'node-1', 'Alpha', 'first body');
+      const first = await app.inject({
+        method: 'GET',
+        url: `/rfs/c1/download/${file}`,
+      });
+      const etag1 = first.headers['etag'] as string;
+
+      seedNote('c1', 'node-1', 'Alpha', 'second body');
+      const second = await app.inject({
+        method: 'GET',
+        url: `/rfs/c1/download/${file}`,
+        headers: { 'if-none-match': etag1 },
+      });
+      // Body changed → the stale If-None-Match no longer matches → 200.
+      expect(second.statusCode).toBe(200);
+      expect(second.headers['etag']).not.toBe(etag1);
     } finally {
       await app.close();
     }
