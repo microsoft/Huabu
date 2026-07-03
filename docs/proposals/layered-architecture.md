@@ -1,6 +1,6 @@
 # Huabu Layered Architecture — Strategic Map
 
-> A three-layer reference model for the Sediment / Huabu project: a **Human-AI Interface (HAI)** layer, an **Agent-as-a-Local-Service (AaaS)** layer, and a **Task Automation** layer. The goal is to name the seams that already exist in the code, tighten the contracts between them, and mark which parts of the middle layer can be extracted to serve other projects.
+> A three-layer reference model for the Sediment / Huabu project: a **Human-AI Interface (HAI)** layer, an **Agent-as-a-Local-Service (AaaS)** layer, and a **Task Automation** layer. The goal is to name the seams that already exist in the code, tighten the contracts between them, and mark which parts of the middle layer can be extracted to serve other projects. The middle layer has a name — **Agentnetes** — the agent control plane that will be extracted as a standalone repo, just as `agentlet` already was (see [§3](#3-layer-2--agentnetes-agent-as-a-local-service--protocol-driven) and [§6](#6-extraction-what-becomes-reusable)).
 >
 > Status: **Draft**, awaiting review · Last updated 2026-07-03 · Tracks [#265](https://github.com/hai-team/Sediment/issues/265)
 
@@ -19,7 +19,7 @@ Huabu today is one monorepo with several well-factored subsystems, but the "whic
                 │ canvas state + intent      │ AaaS client contract
                 │ (SSE events, wire types)   │ (HTTP/SSE, zod-first)
 ┌───────────────┴───────────────────────────▼───────────────────┐
-│  L2 · Agent-as-a-Local-Service (AaaS)   — Protocol-driven      │
+│  L2 · Agentnetes — Agent-as-a-Local-Service — Protocol-driven   │
 │  Define (template) → @-mention → session → stream of messages  │
 │  Definition · Lifecycle · Communication · Persistence/Replay   │
 └───────────────▲───────────────────────────┬───────────────────┘
@@ -35,7 +35,7 @@ Huabu today is one monorepo with several well-factored subsystems, but the "whic
 The three drivers are the mental model for *who owns a change*:
 
 - **L1 is interaction-driven** — its work items are killer scenarios, epic stories, and user-interaction studies. It owns the skills and tools that make the canvas legible: pretty auto-layout, semantic zoom, selection resolution, intent understanding.
-- **L2 is protocol-driven** — its job is a guarantee, not a feature: *once an agent is defined (e.g. via an agent template), then when it is @-mentioned a session exists to receive user queries and return a stream of agent messages.* It cares about the contract, not what the agent does.
+- **L2 is protocol-driven** — its job is a guarantee, not a feature: *once an agent is defined (e.g. via an agent template), then when it is @-mentioned a session exists to receive user queries and return a stream of agent messages.* It cares about the contract, not what the agent does. This is the layer we name **Agentnetes** — an agent *control plane* (`agentlet` : kubelet :: Agentnetes : Kubernetes).
 - **L3 is task-driven** — its work items are concrete jobs (slides making, auto research, publishing). It optimizes prompt / skills / tools to push per-task performance, without touching the protocol or the UI.
 
 The dependency rule is one-directional: **L1 → L2 → L3 knowledge flows down as contracts; results flow back up as data.** L3 agents never import L1/L2 code; they only speak the wire protocols (ACP prompt flow + RFS reachback). L1 never reaches directly into L3; it always goes through the L2 service boundary.
@@ -84,16 +84,18 @@ Mixing these makes ownership fuzzy, slows parallel work, and blocks the stated g
 
 ---
 
-## 3. Layer 2 — Agent-as-a-Local-Service (AaaS) · Protocol-driven
+## 3. Layer 2 — Agentnetes (Agent-as-a-Local-Service) · Protocol-driven
 
 **Driver.** Protocol. This layer succeeds or fails on a single guarantee, not on any feature: **once an agent is defined (e.g. via an agent template), then when it is @-mentioned a session exists to receive user queries and return a stream of agent messages.** It is deliberately incurious about *what* the agent does or *how* the canvas looks — it owns the contract in between.
 
+**Name.** We call this layer **Agentnetes** — an agent *control plane*, coined off `agentlet` the way Kubernetes is coined off kubelet (`agentlet` : kubelet :: **Agentnetes** : Kubernetes). `agentlet` is the per-node relay that spawns and babysits *one* runtime; Agentnetes is the layer above it that schedules a session onto an agentlet, tracks its lifecycle, routes its stream, and persists its log. Today this control plane physically lives inside [`apps/server/src/modules/agent/acp`](../../apps/server/src/modules/agent/acp) — Agentnetes embedded in the Huabu server. This proposal names it so it can later be extracted as a standalone repo ([§6](#6-extraction-what-becomes-reusable)).
+
 **Responsibility.** The reusable runtime that turns "an agent" into a managed local service. It decomposes into **four orthogonal dimensions** that must be kept decoupled so they compose freely — the design goal of this layer is that any point in one dimension works with any point in the others:
 
-1. **Definition · Registry · Discover** — *what agents exist.* An agent template is a pure definition (e.g. `{ agentletId, cmd, cwd }` or a built-in profile); adding one registers it but creates no session. This dimension owns the registry, agent profiles, and agent-team manifests, and answers "what can I @-mention?".
-2. **Lifecycle** — *the session state machine.* `spawn` (lazily, on first @-mention) → `resume` (from idle-suspend) → `close` (explicit or idle-timeout). One thread = one session (appId = threadId). This dimension owns nothing about *how bytes move* or *what the agent is* — only the session's existence and state.
-3. **Communication (transport-pluggable)** — *how queries in / messages out move.* User query in (`ChatEnvelope`) → stream of agent messages out (`AgentStreamEvent`), over a **pluggable transport**. Transport is a separate axis from lifecycle and definition; the same `spawn`→`stream`→`close` shape must work across every transport (see the matrix below).
-4. **Persistence · Replay · Subscribe** — *the durable message log.* Every turn is appended to a per-thread log so the conversation survives restarts and session idle-out. Consumers can **replay** history (e.g. "return the last 50 messages of this thread" on reload) and **subscribe** to the live tail (a late-joining client, or a second viewer, catches up then streams). This is orthogonal to transport: the log is the same whether the agent ran in-process or over a remote bridge.
+1. **Definition · Registry · Discover** — *what agents exist.* An agent template is a pure definition (e.g. `{ agentletId, cmd, cwd }` or a built-in profile); adding one registers it but creates no session. This dimension owns the registry, agent profiles, and agent-team manifests, and answers "what can I @-mention?". *(k8s: the API server + declarative specs.)*
+2. **Lifecycle** — *the workload state machine.* `spawn` (lazily, on first @-mention) → `resume` (from idle-suspend) → `close` (explicit, idle-timeout, or task completion). This dimension owns nothing about *how bytes move* or *what the agent is* — only a workload's existence and state. Agentnetes has **two built-in workload kinds** with different completion semantics (see [§3.2](#32-workload-kinds-job-vs-session)): a **`Session`** (long-lived conversation) and a **`Job`** (run one prompt to completion, then close). *(k8s: the scheduler + controller reconcile loop; Deployment vs Job.)*
+3. **Communication (transport-pluggable)** — *how queries in / messages out move.* User query in (`ChatEnvelope`) → stream of agent messages out (`AgentStreamEvent`), over a **pluggable transport**. Transport is a separate axis from lifecycle and definition; the same `spawn`→`stream`→`close` shape must work across every transport (see the matrix below). *(k8s: the CRI — the runtime interface behind which any runtime plugs in.)*
+4. **Persistence · Replay · Subscribe** — *the durable message log.* Every turn is appended to a per-thread log so the conversation survives restarts and session idle-out. Consumers can **replay** history (e.g. "return the last 50 messages of this thread" on reload) and **subscribe** to the live tail (a late-joining client, or a second viewer, catches up then streams). This is orthogonal to transport: the log is the same whether the agent ran in-process or over a remote bridge. *(k8s: etcd + the watch API.)*
 
 Reaching the canvas out-of-band (**RFS** reachback) is a facet of communication: a second channel, parallel to the prompt flow, that a spawned agent uses to read/write canvas state via plain HTTP (no client SDK shipped into the agent).
 
@@ -107,7 +109,24 @@ The trap this layer must avoid is letting a transport choice leak into the lifec
 | **Local ACP CLI**    | Separate local process      | agentlet spawns a CLI harness, ACP stdio   | [`runAcpAgent`](../../apps/server/src/modules/agent/acp/service.ts) + local agentlet |
 | **Bridged remote ACP** | Remote machine            | agentlet daemon (WSS bridge), ACP over net | [acp/](../../apps/server/src/modules/agent/acp) + remote agentlet daemon |
 
-Because lifecycle and communication are defined once as transport-agnostic contracts, adding a future transport (e.g. HTTP/SSE agent, MCP server) is a new row here — not a change to the other two dimensions. **This orthogonality is the whole point of the middle layer**: definition × lifecycle × transport × persistence compose, rather than each new agent kind forking the runtime.
+Because lifecycle and communication are defined once as transport-agnostic contracts, adding a future transport (e.g. HTTP/SSE agent, MCP server) is a new row here — not a change to the other two dimensions. **This orthogonality is the whole point of the middle layer**: definition × lifecycle × transport × persistence compose, rather than each new agent kind forking the runtime. This uniform transport contract is Agentnetes' **Agent Runtime Interface (ARI)** — the direct analogue of the CRI: adding a runtime is a new row, not a fork of the control plane. The in-process `runAgent` is then legible as "a runtime that needs no agentlet" — the *static-pod* case.
+
+### 3.2 Workload kinds (Job vs Session)
+
+Lifecycle is *how* Agentnetes reconciles a workload toward its desired state; **the reconcile strategy (declarative desired-state vs imperative spawn) is an internal implementation detail and is deliberately not exposed.** What callers *do* choose is the **workload kind**, which differs only in **completion semantics** — exactly the distinction Kubernetes draws between a long-lived `Deployment`/Service and a run-to-completion `Job`:
+
+| Kind          | Desired state                                              | Completion              | k8s analogue      | Huabu example                                                    |
+| ------------- | ---------------------------------------------------------- | ----------------------- | ----------------- | ---------------------------------------------------------------- |
+| **`Session`** | "while the thread is live, a conversational session exists" | never (idle-suspend/resume) | Deployment / Service | A canvas `QuestionNode`'s ongoing multi-turn conversation        |
+| **`Job`**     | "run this prompt once, stream the result, then close"      | terminal (Complete / Failed) | Job / CronJob     | `deepv-slides-maker`, `hackmd-publisher`, `paper-reviewer` runs  |
+
+Both are **built-in, first-class kinds owned by Agentnetes** — not host-defined — because completion semantics *are* the control plane's core responsibility. A host (Huabu) only fills in a workload spec (which agent, what prompt, what reachback resource); it never defines a kind's reconcile logic. The payoff of naming them explicitly:
+
+- **Deterministic teardown** — a `Job` closes and archives its log on reaching a terminal state, instead of relying on idle-timeout heuristics to guess it's done.
+- **Retry / restart semantics** — a `Job` can carry `backoffLimit` / `restartPolicy`; a `Session` is simply "resume on next message after idle-suspend".
+- **UI legibility** — L1 can tell a one-shot production node from a persistent conversation and render/interact accordingly.
+
+> Today Huabu implicitly runs both kinds through one "session" path: `appId = threadId`, one `QuestionNode` = one thread = one session. Naming `Job` splits out the many agent-teams whose semantics are really "do a task, finish" from the truly conversational ones — without changing the transport or definition dimensions.
 
 **What lives here** (grouped by the four dimensions)
 
@@ -128,7 +147,7 @@ Because lifecycle and communication are defined once as transport-agnostic contr
 
 - **Upward to L1** — the pair `ChatEnvelope` (in) / `AgentStreamEvent` (out). L1 sends an envelope and renders a stream of ~14 event types; it has *zero* awareness of pi-agent-core or ACP internals ([useAgentStream.ts](../../apps/web/src/hooks/useAgentStream.ts)). Internal and external agents share the same envelope, so L1 cannot tell them apart.
 - **Downward to L3** — two protocols: the **ACP prompt→response** flow (spawn + message passing) and the **RFS** endpoints (`download` / `upload` / `agent` / `skill` under `$HUABU_RFS_URL`) for out-of-band canvas access. No Huabu client code is shipped into the agent; a plain `curl` is enough.
-- **Session model** — appId = threadId; one QuestionNode = one thread = one session; sessions are created lazily on first message and idle-suspend via the agentlet daemon. Huabu's canvas layer must not manage session lifecycle.
+- **Session model** — appId = threadId; one QuestionNode = one thread = one workload; workloads are created lazily on first message. A `Session` idle-suspends and resumes via the agentlet daemon; a `Job` closes on terminal state (see [§3.2](#32-workload-kinds-job-vs-session)). Huabu's canvas layer must not manage workload lifecycle.
 
 ---
 
@@ -157,6 +176,7 @@ Because lifecycle and communication are defined once as transport-agnostic contr
 The layers are only real if these seams are stable. Each is already a zod-first / typed contract per [api-design.md](../architecture/api-design.md):
 
 ```
+L1 ── WorkloadSpec (kind + agent + prompt) ─▶ L2   (Job or Session; §3.2)
 L1 ── ChatEnvelope ───────────────▶ L2      (prompt in; internal & external identical)
 L1 ◀── AgentStreamEvent ──────────── L2      (~14 SSE event types; no runtime leak)
 L1 ◀── CanvasCommand / Execution ─── L2      (the only way an agent mutates the canvas)
@@ -167,6 +187,7 @@ L2 ◀──▶ RFS (curl) ────────────────  L3 
 
 | Seam    | Contract                       | Source of truth                                                                                       | Rule                                                                          |
 | ------- | ------------------------------ | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| L1 ↔ L2 | Workload spec (`kind`)         | [packages/shared/src/types/agent](../../packages/shared/src/types/agent) *(proposed)*                 | `Job` vs `Session` is an Agentnetes-owned built-in; host fills the spec only.  |
 | L1 ↔ L2 | `ChatEnvelope`                 | [packages/shared/src/types/agent](../../packages/shared/src/types/agent)                              | Single envelope for internal + external; user text rebuilt from it on reload. |
 | L1 ↔ L2 | `AgentStreamEvent`             | [packages/shared/src/types/agent/agent.ts](../../packages/shared/src/types/agent/agent.ts)            | L1 renders only these; never pi-agent-core / ACP shapes.                      |
 | L1 ↔ L2 | `CanvasCommand` / `Execution`  | [packages/shared/src/types/canvas](../../packages/shared/src/types/canvas)                            | The 14-command agent subset; validated + traced server-side.                  |
@@ -180,20 +201,38 @@ L2 ◀──▶ RFS (curl) ────────────────  L3 
 
 ## 6. Extraction — what becomes reusable
 
-The strategic payoff is that **L2 minus the RFS canvas-shape is a general-purpose "Agent as a Local Service" runtime** that other projects could adopt:
+The strategic payoff is that **L2 minus the RFS canvas-shape is Agentnetes: a general-purpose agent control plane** that other projects could adopt. Two extractions are in play, one done and one pending:
+
+- **agentlet** (done) — the per-node relay is already a git subtree pushed to its own upstream ([`external/agentlet`](../../external/agentlet)). It is the transport / kubelet: spawn a runtime, bridge ACP over WSS, traverse NAT. Zero AI logic, zero application knowledge.
+- **Agentnetes** (pending) — the control plane that today lives inside [`apps/server/src/modules/agent/acp`](../../apps/server/src/modules/agent/acp). This proposal names it as the next extraction candidate.
 
 | Extractable capability | Today's location                                        | Canvas-coupling                                        |
 | ---------------------- | ------------------------------------------------------- | ------------------------------------------------------ |
 | Agent loop + tools/skills scoping     | `agent.service.ts`, `agent/tools`             | Low — tools are per-agent frontmatter, not hardcoded.  |
 | Definition/Discover (profiles + manifests) | `acp/profile-store.ts`, `agentlet` agent-team | None — pure config/registry.                     |
-| Lifecycle (spawn / resume / close)    | `acp/spawn-orchestrator.ts`, agentlet daemon  | None — session-per-thread is a generic key.            |
+| Lifecycle (spawn / resume / close + workload kinds) | `acp/spawn-orchestrator.ts`, agentlet daemon  | None — session-per-thread is a generic key.  |
 | Communication (transports + store)    | `acp/*`, `runAgent`                           | Low — envelope/stream are typed and generic.           |
 | Persistence/Replay/Subscribe          | `agent/store`, `acp/session-store.ts`         | Low — a per-thread append log of typed messages.       |
 | Reachback (RFS)                       | `modules/remote_fs`                           | **High** — the payload is canvas nodes/edges.          |
 
-The clean extraction boundary is therefore: **agentlet + the transports + the definition/lifecycle/communication/persistence stores are project-agnostic**; only the RFS *resource shape* (what "a node" is) is Huabu-specific. A reuse plan would keep the transport + lifecycle generic and let each host define its own reachback resource schema behind the same RFS verbs (`download`/`upload`/`agent`/`skill`).
+### 6.1 Re-splitting `@agentlet/server` (transport vs control plane)
 
-> agentlet is already a git subtree pushed to its own upstream ([`external/agentlet`](../../external/agentlet)), so the transport layer is *literally* an independent package today. This proposal formalises the rest of L2 as the next extraction candidate.
+The extraction is not only "pull the ACP module out of Huabu" — it also re-draws the line *inside* the existing agentlet packages. Today [`@agentlet/server`](../../external/agentlet/packages/server) is doing double duty: it is both a **transport relay** (its stated charter — "a thin relay, zero AI logic, server-agnostic") and, accidentally, a **mini control plane** (session records, an event log, lifecycle events, a session REST management surface). Agentnetes should **absorb** the control-plane half and **hand the transport half back** to agentlet, so each package matches its charter:
+
+| `@agentlet/server` module | Lands in | Why |
+| ------------------------- | -------- | --- |
+| `host-ws.ts` · `agent-ws.ts` · `connection.ts` | **agentlet** (transport) | Pure WS relay, NAT traversal, raw-ACP fan-out — the CRI/kubelet job. |
+| `token-store.ts` · daemon auth | **agentlet** (transport auth) | Connection-level auth, bound to the transport. |
+| `data-store.ts` (`SessionStore`, `SessionRecord`) | **Agentnetes** (state) | A workload is a control-plane resource — the etcd object. |
+| `event-store.ts` (`IEventStorage`, replay) | **Agentnetes** (persistence) | This *is* the §3 Persistence/Replay/Subscribe dimension. |
+| `SessionSpec` · `SpawnParams` · `StopParams` · `LifecycleEvent` | **Agentnetes** (lifecycle) | Desired state + state machine = scheduler/controller. |
+| `rest-api.ts` (session management) | **Agentnetes** (API server) | The declarative management surface belongs in the control plane. |
+
+The dividing principle mirrors kubelet vs scheduler: **agentlet *executes* a spawn but never *decides* one** — when to spawn, how long before idle-suspend, whether to resume or retry (and per which workload kind) are Agentnetes' reconcile decisions. A useful open question ([§8](#8-open-questions)) is whether the `spawn/stop/suspend` control verbs stay in `@agentlet/protocol` or become a distinct Agentnetes↔agentlet ARI contract.
+
+The clean extraction boundary is therefore: **agentlet (transport) + Agentnetes (definition/lifecycle/communication/persistence) are project-agnostic**; only the RFS *resource shape* (what "a node" is) is Huabu-specific. A reuse plan would keep the transport + lifecycle generic and let each host define its own reachback resource schema behind the same RFS verbs (`download`/`upload`/`agent`/`skill`).
+
+> agentlet is already a git subtree pushed to its own upstream ([`external/agentlet`](../../external/agentlet)), so the transport layer is *literally* an independent package today. This proposal formalises Agentnetes as the next extraction candidate.
 
 ---
 
@@ -204,18 +243,20 @@ No big-bang. Ordered, low-risk steps that each stand alone:
 1. **Adopt the vocabulary.** Land this doc; reference L1/L2/L3 in PR descriptions and new module headers. (This PR.)
 2. **Assert the seams in code.** Add lint/dependency checks (extend the existing web-layer dependency rules) so L1 code cannot import L2 internals and L3 manifests cannot import server code. Fail CI on upward imports.
 3. **Relocate `intent` conceptually.** Decide whether intent ranking stays under `modules/agent` or moves to an L1-owned `modules/sensemaking`; it is an L1 concern with no agent loop.
-4. **Name the AaaS dimension boundaries.** Group the definition/lifecycle/communication/persistence stores under a single `modules/agent/service` (or a `packages/agent-service`) folder — with the four dimensions as sub-modules and transport as a pluggable interface — so the composability from [§3.1](#31-the-transport-axis-why-it-is-separate) and the extraction seam from [§6](#6-extraction-what-becomes-reusable) are visible in the tree, not just in prose.
-5. **Generalise RFS resource shape.** Introduce a host-defined resource schema behind the RFS verbs so a second project can plug a non-canvas resource in. (Depends on step 4; only pursue when a real second consumer appears.)
+4. **Name the Agentnetes dimension boundaries.** Group the definition/lifecycle/communication/persistence stores under a single `modules/agent/agentnetes` (or a `packages/agentnetes`) folder — with the four dimensions as sub-modules, workload kinds ([§3.2](#32-workload-kinds-job-vs-session)) as first-class types, and transport as a pluggable ARI ([§3.1](#31-the-transport-axis-why-it-is-separate)) — so the composability and the extraction seam from [§6](#6-extraction-what-becomes-reusable) are visible in the tree, not just in prose.
+5. **Re-split `@agentlet/server`.** Move the control-plane half (session/event stores, lifecycle types, session REST) into Agentnetes and leave `@agentlet/server` as pure transport, per the table in [§6.1](#61-re-splitting-agentletserver-transport-vs-control-plane). Touches the `external/agentlet` subtree — commit separately for clean upstream push.
+6. **Generalise RFS resource shape.** Introduce a host-defined resource schema behind the RFS verbs so a second project can plug a non-canvas resource in. (Depends on step 4; only pursue when a real second consumer appears.)
 
-Steps 1–2 are this proposal's concrete deliverables; 3–5 are follow-ups that each merit their own review before starting.
+Steps 1–2 are this proposal's concrete deliverables; 3–6 are follow-ups that each merit their own review before starting.
 
 ---
 
 ## 8. Open questions
 
 - Does `intent` ranking belong to L1 (sense-making) or stay in the agent module for proximity to context assembly? (§7 step 3.)
-- Should built-in agents (`ask`/`operate`/`sketch`) be reframed as L3 "tasks" that happen to run in-process, or kept as an L2 concern? This doc places their *prompts* in L3 and their *execution path* in L2 — is that split worth the conceptual overhead?
-- What is the minimum viable "second project" that would validate the L2 extraction, and does it exist yet?
+- Should built-in agents (`ask`/`operate`/`sketch`) be reframed as L3 "tasks" that happen to run in-process, or kept as an L2 concern? This doc places their *prompts* in L3 and their *execution path* in L2 — is that split worth the conceptual overhead? (Note: the `Job`/`Session` split from [§3.2](#32-workload-kinds-job-vs-session) is orthogonal to this — a built-in agent can be either kind.)
+- Do the `spawn`/`stop`/`suspend` control verbs stay in [`@agentlet/protocol`](../../external/agentlet/packages/protocol), or become a distinct Agentnetes↔agentlet ARI contract once the control plane is extracted? ([§6.1](#61-re-splitting-agentletserver-transport-vs-control-plane).)
+- What is the minimum viable "second project" that would validate the Agentnetes extraction, and does it exist yet?
 - Does real-time multi-user co-editing ([canvas-realtime-sync-plan.md](./canvas-realtime-sync-plan.md)) stay purely L1, or does it need an L2 notion of "presence" once agents and humans co-edit?
 
 ---
