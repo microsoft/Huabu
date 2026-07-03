@@ -395,9 +395,14 @@ async function streamAgent(
   const { canvasId, prompt, doneTextOnly, heartbeatSec } = input;
   const threadId = createId('reachback');
   const debug = isPromptDebugEnabled();
+  const startedAt = Date.now();
+  let toolCalls = 0;
+  let outcome: 'ok' | 'error' | 'aborted' | 'incomplete' = 'incomplete';
   if (debug) {
+    // BEGIN banner. Grep `ask-huabu` to list every round's boundaries, or
+    // grep the `reachback-…` threadId (shown here) to pull one whole round.
     request.log.info(
-      `[reachback ${threadId}] canvas=${canvasId} received prompt: ${truncForLog(
+      `[reachback ${threadId}] ┏━ ask-huabu BEGIN · canvas=${canvasId} · prompt: ${truncForLog(
         prompt,
       )}`,
     );
@@ -442,6 +447,9 @@ async function streamAgent(
     });
 
     for await (const event of stream) {
+      if (event.type === 'tool_call') toolCalls += 1;
+      else if (event.type === 'done') outcome = 'ok';
+      else if (event.type === 'error') outcome = 'error';
       if (debug) logReachbackEvent(request, threadId, event);
       if (doneTextOnly) {
         // Clean mode: only the final answer text reaches the wire, as
@@ -456,12 +464,24 @@ async function streamAgent(
     // threadId as a comment so it never pollutes the plain-text answer.
     raw.write(`: threadId ${threadId}\n\n`);
   } catch (err: unknown) {
+    outcome = 'error';
     const message = err instanceof Error ? err.message : 'Internal agent error';
     raw.write(`event: error\ndata: ${JSON.stringify({ message })}\n\n`);
   } finally {
     clearInterval(heartbeat);
     request.raw.socket?.removeListener('close', onClose);
     raw.end();
+    if (debug) {
+      if (outcome === 'incomplete' && abortController.signal.aborted) {
+        outcome = 'aborted';
+      }
+      const secs = ((Date.now() - startedAt) / 1000).toFixed(1);
+      // END banner mirrors BEGIN: same `ask-huabu` token + threadId, plus
+      // outcome / elapsed / tool count for quick scanning.
+      request.log.info(
+        `[reachback ${threadId}] ┗━ ask-huabu END · ${outcome} · ${secs}s · ${toolCalls} tools · canvas=${canvasId}`,
+      );
+    }
   }
 }
 
