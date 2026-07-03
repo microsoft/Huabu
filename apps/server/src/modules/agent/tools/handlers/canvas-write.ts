@@ -129,15 +129,17 @@ export async function handleCanvasCommands(
           const patch =
             (entry.patch as Record<string, unknown> | undefined) ?? {};
           const hasLabel = typeof patch.label === 'string';
-          // Auto-inject the compare-and-swap token for content rewrites:
-          // the rev the agent last saw for this node (from the run's
-          // read-set — seeded from context, updated by `read`). Only for
-          // content/src writes (the executor's CAS scope) and only when the
-          // agent didn't already supply one. Absent when the node was never
-          // read this run → the executor rejects it as a blind write.
+          // Auto-inject the compare-and-swap token for body rewrites: the
+          // rev the agent last saw for this node (from the run's read-set —
+          // seeded from context, updated by `read`). Only for `content`
+          // writes (the executor's CAS scope) and only when the agent didn't
+          // already supply one. Absent when the node was never read this run
+          // → the executor rejects it as a blind write. `src` is NOT guarded
+          // (a short pointer, never reached via a sidecar read), so it is
+          // never injected here.
           const nodeId =
             typeof entry.nodeId === 'string' ? entry.nodeId : undefined;
-          const rewritesContent = 'content' in patch || 'src' in patch;
+          const rewritesContent = 'content' in patch;
           const injectedRev =
             rewritesContent &&
             entry.expectRev === undefined &&

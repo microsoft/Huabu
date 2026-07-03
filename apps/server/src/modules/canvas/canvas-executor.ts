@@ -177,12 +177,18 @@ function hydrateNodes(
 
 /**
  * Compare-and-swap pre-flight for agent content writes. For each
- * `MERGE_NODE_DATA` patch that rewrites authored content (`content` /
- * `src`), compare the writer's `expectRev` against the hydrated node's
- * current {@link nodeRevision}. A missing `expectRev` (the agent never
- * read the node this run) or a mismatch (edited since) is a conflict.
- * Patches touching only non-content fields (label / summary / style)
- * are not guarded — they fall outside the revision's key set.
+ * `MERGE_NODE_DATA` patch that rewrites the authored body (`content`),
+ * compare the writer's `expectRev` against the hydrated node's current
+ * {@link nodeRevision}. A missing `expectRev` (the agent never read the
+ * node this run) or a mismatch (edited since) is a conflict.
+ *
+ * Only `content` is guarded — NOT `src`. `src` is a short pointer (an
+ * external URL / `artifacts/<file>` handle), not a mergeable body, and a
+ * media node's `src` is never reached via a `nodes/<label>.md` read (the
+ * agent reads the artifact the `src` points at, not the sidecar), so the
+ * read-set never holds its rev — guarding it would reject every legit
+ * `src` rewrite as `not-read`. Patches touching only non-body fields
+ * (`src` / label / summary / style) are unconditional, like ui writes.
  */
 function collectMergeConflicts(
   commands: readonly CanvasCommand[],
@@ -194,7 +200,7 @@ function collectMergeConflicts(
     if (cmd.type !== 'MERGE_NODE_DATA') continue;
     for (const entry of cmd.patches) {
       const patch = entry.patch ?? {};
-      const rewritesContent = 'content' in patch || 'src' in patch;
+      const rewritesContent = 'content' in patch;
       if (!rewritesContent) continue;
       const node = byId.get(entry.nodeId);
       if (!node) continue; // missing node → engine emits 'not-found'

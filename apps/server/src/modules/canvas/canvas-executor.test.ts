@@ -163,4 +163,52 @@ describe('executeOnServer — MERGE_NODE_DATA CAS', () => {
     expect(out.conflicts ?? []).toHaveLength(0);
     expect(bodyOf('c1', 'n1')).toBe('hello');
   });
+
+  it('does not guard a src-only agent write (media pointer, never read)', async () => {
+    // A media node's `src` is a short pointer reached via the artifact it
+    // points at, never via a `nodes/<label>.md` read — so the read-set never
+    // holds its rev. Guarding it would reject every legit `src` rewrite as
+    // `not-read`; `src` writes are therefore unconditional, like ui writes.
+    const store = getCanvasStore('c1');
+    store.write({
+      canvasId: 'c1',
+      title: null,
+      version: 1,
+      state: {
+        nodes: [
+          {
+            id: 'm1',
+            type: 'image',
+            position: { x: 0, y: 0 },
+            data: { label: 'Pic', src: 'artifacts/old.png' },
+          },
+        ],
+        edges: [],
+      },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    store.writeNode('m1', {
+      nodeId: 'm1',
+      type: 'image',
+      label: 'Pic',
+      src: 'artifacts/old.png',
+      content: '',
+    });
+
+    const out = await executeOnServer({
+      canvasId: 'c1',
+      commands: [
+        {
+          type: 'MERGE_NODE_DATA',
+          patches: [{ nodeId: 'm1', patch: { src: 'artifacts/new.png' } }],
+        } as unknown as CanvasCommand,
+      ],
+      originator: AGENT,
+    });
+
+    expect(out.conflicts ?? []).toHaveLength(0);
+    expect(out.toVersion).toBe(out.fromVersion + 1);
+    expect(getCanvasStore('c1').readNode('m1')?.src).toBe('artifacts/new.png');
+  });
 });
