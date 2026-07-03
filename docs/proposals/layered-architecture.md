@@ -126,6 +126,11 @@ Both are **built-in, first-class kinds owned by Agentnetes** — not host-define
 - **Retry / restart semantics** — a `Job` can carry `backoffLimit` / `restartPolicy`; a `Session` is simply "resume on next message after idle-suspend".
 - **UI legibility** — L1 can tell a one-shot production node from a persistent conversation and render/interact accordingly.
 
+**Kind × driver — a realizability constraint.** The kinds do not compose freely with every runtime driver ([§3.3](#33-what-is-an-agent-runtime-drivers-vs-the-agent-definition)); a `Session`'s rich control plane can only be satisfied by a stateful runtime:
+
+- **`Job` → SDK *or* ACP.** A Job's control plane is near-empty (submit + cancel), which every driver already has. The stateless SDK driver and a spawn-then-close ACP session both realize it. (Most agent-teams today — `deepv-slides-maker`, `paper-reviewer` — are ACP Jobs.)
+- **`Session` → ACP only.** A live conversation with in-process state, slash commands, and mode/config switching requires a stateful process, which is the ACP driver. The SDK driver is stateless and cannot hold one (see [§3.4](#34-control-plane-vs-data-plane-and-where-session-state-lives)).
+
 > Today Huabu implicitly runs both kinds through one "session" path: `appId = threadId`, one `QuestionNode` = one thread = one session. Naming `Job` splits out the many agent-teams whose semantics are really "do a task, finish" from the truly conversational ones — without changing the transport or definition dimensions.
 
 ### 3.3 What is "an agent"? Runtime drivers vs the agent definition
@@ -177,7 +182,14 @@ The deeper axis under the control plane is **where session state lives**:
 | ACP    | **in the process** (stateful)       | re-prompt a still-live session; idle-suspend/resume | a **mirror** of process state                                                       |
 | SDK    | **in the external log** (stateless) | replay the turn log into a fresh context | **is** the state itself                                                                         |
 
-The insight: **ACP's control verbs only mean something when state lives in the process.** The two drivers are really two *state-ownership* models. This reframes the extraction choice as a control-plane question, not a transport one — do we (A) unify on one ARI control vocabulary, letting the SDK driver *emulate* the ACP verbs against the turn log (`session/load` → replay, `session/cancel` → abort, slash commands → empty/host-defined, `loadSession` capability → true), or (B) let Agentnetes carry two control models side by side? That decision, plus whether slash commands are a universal control-plane member or a per-agent capability, is deferred to [§8](#8-open-questions).
+The insight: **ACP's control verbs only mean something when state lives in the process.** The two drivers are really two *state-ownership* models. This reframes the extraction choice as a control-plane question, not a transport one — and, combined with the workload kinds ([§3.2](#32-workload-kinds-job-vs-session)), it resolves cleanly by **binding the control plane to the workload kind** rather than unifying two control vocabularies:
+
+- **`Job`** has a near-empty control plane (submit + cancel) that both drivers already share — so a Job runs on **SDK or ACP**, and nothing needs unifying.
+- **`Session`** carries the full control plane (resume, slash commands, modes) — which only a stateful process provides — so a Session is **ACP-only**.
+
+The rich ARI control vocabulary therefore exists **exactly once**, on the ACP driver, for the Session kind. The stateless SDK driver serves only Jobs, so it never needs to *emulate* ACP control verbs (avoiding the bridge that a "unify on ACP" approach would require), and Agentnetes never carries two rival control models. A built-in multi-turn conversation is, under this model, just **N sequential Jobs over the append-only turn log** — which is exactly what [`agent.service.ts`](../../apps/server/src/modules/agent/agent.service.ts) does today, so nothing changes behaviourally.
+
+> The one consequence: a built-in (SDK) agent cannot hold a rich `Session`. If a built-in ever needs slash commands or in-process modes it must acquire in-process state — i.e. become an ACP driver. Whether to keep the SDK driver permanently stateless-Job-only, or leave that door open (and how to weigh ACP's "no context rebuild per turn" against the SDK's log-replay cost), is left to [§8](#8-open-questions).
 
 **What lives here** (grouped by the four dimensions)
 
@@ -305,9 +317,8 @@ Steps 1–2 are this proposal's concrete deliverables; 3–6 are follow-ups that
 ## 8. Open questions
 
 - Does `intent` ranking belong to L1 (sense-making) or stay in the agent module for proximity to context assembly? (§7 step 3.)
-- **ARI control vocabulary (A vs B).** Do we unify on one control surface — the SDK driver *emulating* the ACP verbs against the turn log (`session/load` → replay, `session/cancel` → abort, slash → empty) — or let Agentnetes carry two control models side by side? ([§3.4](#34-control-plane-vs-data-plane-and-where-session-state-lives).)
-- **State-ownership contract.** Does the ARI mandate a single model (e.g. state always in an external log, the process is a cache) or negotiate it via a capability, the way ACP already advertises `loadSession`? ([§3.4](#34-control-plane-vs-data-plane-and-where-session-state-lives).)
-- **Slash commands: control-plane member or per-agent capability?** Today only ACP agents advertise `availableCommands`; built-ins have none. Is that a universal ARI concern or an opt-in agent capability? ([§3.4](#34-control-plane-vs-data-plane-and-where-session-state-lives).)
+- **Is the SDK driver permanently stateless-Job-only?** [§3.4](#34-control-plane-vs-data-plane-and-where-session-state-lives) binds rich `Session` control to ACP and leaves the SDK driver serving only Jobs. Should that be a hard rule, or do we leave a door for a built-in to gain in-process state (becoming an ACP-like driver) when it needs slash/modes — and how do we weigh ACP's "no per-turn context rebuild" against the SDK's log-replay cost?
+- **One shared `Job` control surface?** A Job's control plane is submit + cancel on both drivers ([§3.2](#32-workload-kinds-job-vs-session)). Should the ARI define that minimal surface once so an SDK Job and an ACP Job are interchangeable at the seam?
 - Should built-in agents (`ask`/`operate`/`sketch`) be reframed as L3 "tasks" that happen to run in-process, or kept as an L2 concern? This doc places their *prompts* in L3 and their *execution path* in L2 — is that split worth the conceptual overhead? (Note: the `Job`/`Session` split from [§3.2](#32-workload-kinds-job-vs-session) is orthogonal to this — a built-in agent can be either kind.)
 - Do the `spawn`/`stop`/`suspend` control verbs stay in [`@agentlet/protocol`](../../external/agentlet/packages/protocol), or become a distinct Agentnetes↔agentlet ARI contract once the control plane is extracted? ([§6.1](#61-re-splitting-agentletserver-transport-vs-control-plane).)
 - What is the minimum viable "second project" that would validate the Agentnetes extraction, and does it exist yet?
