@@ -41,7 +41,8 @@ import {
 } from './node-meta.js';
 import { resolveCanvasSkill } from './skill.js';
 import { loadAgent } from '../../prompt/index.js';
-import { runAgent } from '../agent/agent.service.js';
+import { runAgent, type StreamEvent } from '../agent/agent.service.js';
+import { isPromptDebugEnabled } from '../agent/conversation/prompt/debug-prompt.js';
 import { safeResolve } from '../agent/tools/handlers/fs-sandbox.js';
 
 import type { Context, UserMessage } from '@earendil-works/pi-ai';
@@ -107,6 +108,54 @@ function writeDataText(raw: NodeJS.WritableStream, text: string): void {
 function clampHeartbeatSec(sec: number | undefined): number {
   if (sec === undefined) return RFS_HEARTBEAT_DEFAULT_SEC;
   return Math.min(RFS_HEARTBEAT_MAX_SEC, Math.max(RFS_HEARTBEAT_MIN_SEC, sec));
+}
+
+// ── Reachback ask-agent debug logging (gated by HUABU_DEBUG_PROMPT) ──
+
+/** Truncate a value to keep a single debug log line readable. */
+function truncForLog(text: string, max = 500): string {
+  return text.length <= max
+    ? text
+    : `${text.slice(0, max)}… [+${text.length - max} chars]`;
+}
+
+/**
+ * Trace one reachback agent event to `server.log`. Covers the pieces useful
+ * for post-mortem — which tool ran with what args, its success/failure and
+ * result, and the final answer / error — while skipping the high-frequency
+ * per-token `text_delta` / `thinking_delta` events. No-op unless the caller
+ * has already checked {@link isPromptDebugEnabled}.
+ */
+function logReachbackEvent(
+  request: FastifyRequest,
+  threadId: string,
+  event: StreamEvent,
+): void {
+  const tag = `[reachback ${threadId}]`;
+  switch (event.type) {
+    case 'tool_call':
+      request.log.info(
+        `${tag} → tool ${event.data.internalToolName} ${truncForLog(
+          JSON.stringify(event.data.rawInput ?? {}),
+        )}`,
+      );
+      break;
+    case 'tool_call_update':
+      request.log.info(
+        `${tag} ← tool ${event.data.status} ${truncForLog(
+          String(event.data.rawOutput ?? ''),
+        )}`,
+      );
+      break;
+    case 'done':
+      request.log.info(`${tag} done: ${truncForLog(event.data.message)}`);
+      break;
+    case 'error':
+      request.log.warn(`${tag} error: ${truncForLog(event.data.error)}`);
+      break;
+    default:
+      break;
+  }
 }
 
 // ── Route plugin ──
@@ -345,6 +394,14 @@ async function streamAgent(
 ): Promise<void> {
   const { canvasId, prompt, doneTextOnly, heartbeatSec } = input;
   const threadId = createId('reachback');
+  const debug = isPromptDebugEnabled();
+  if (debug) {
+    request.log.info(
+      `[reachback ${threadId}] canvas=${canvasId} received prompt: ${truncForLog(
+        prompt,
+      )}`,
+    );
+  }
 
   const userMessage: UserMessage = {
     role: 'user',
@@ -385,6 +442,7 @@ async function streamAgent(
     });
 
     for await (const event of stream) {
+      if (debug) logReachbackEvent(request, threadId, event);
       if (doneTextOnly) {
         // Clean mode: only the final answer text reaches the wire, as
         // `data:` frames a `sed` one-liner can extract.
