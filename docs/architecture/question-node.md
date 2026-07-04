@@ -100,7 +100,9 @@ helpers can target it, mirroring how preview-body matches are handled.
 
 ### 5.1 Trigger
 
-Double-click the node → `openInCompose()` ([QuestionNode.tsx](../../apps/web/src/components/Nodes/question/QuestionNode.tsx)):
+Double-click the node → `openInCompose()` ([QuestionNode.tsx](../../apps/web/src/components/Nodes/question/QuestionNode.tsx)).
+Creating a question through the toolbar placement flow or the connected-node
+picker also mints the thread and opens compose immediately:
 
 - mints a `threadId` if missing, opens the chat panel in **compose mode**
 - inherits the canvas's last-used agent binding; user can switch agent

@@ -24,6 +24,8 @@ import { Button } from '@/components/Common/Button.tsx';
 import { cn } from '@/components/Common/cn.ts';
 import { NODE_ICON } from '@/config/nodeIcons.ts';
 import useCanvasStore from '@/store/canvasStore.ts';
+import { useChatStore } from '@/store/chatStore.ts';
+import { usePanelStore } from '@/store/panelStore.ts';
 
 /** Connection handle definitions – source + target on each side. */
 const HANDLE_DEFS = [
@@ -111,7 +113,16 @@ export function useCreateConnectedNode(id: string) {
       }
 
       const newId = createId('node');
-      const data = { content: '', origin: { type: 'user-created' as const } };
+      const threadId = kind === 'question' ? createId('thread') : null;
+      const data =
+        kind === 'question'
+          ? {
+              content: '',
+              status: 'idle' as const,
+              threadId,
+              origin: { type: 'user-created' as const },
+            }
+          : { content: '', origin: { type: 'user-created' as const } };
       addNode({
         id: newId,
         nodeType: kind,
@@ -124,6 +135,13 @@ export function useCreateConnectedNode(id: string) {
         target: newId,
         style: { direction: 'forward' } satisfies EdgeStyle,
       });
+      if (kind === 'question' && threadId) {
+        useChatStore
+          .getState()
+          .openQuestionCompose(newId, threadId, state.canvasId || undefined);
+        usePanelStore.getState().requestOpenRightPanel();
+        usePanelStore.getState().requestFocusChatInput();
+      }
     },
     [id, addNode, dispatchUiIntent],
   );
