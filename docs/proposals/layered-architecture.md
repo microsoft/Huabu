@@ -214,6 +214,124 @@ The rich ARI control vocabulary therefore exists **exactly once**, on the ACP dr
 - **Downward to L3** — two protocols: the **ACP prompt→response** flow (spawn + message passing) and the **RFS** endpoints (`download` / `upload` / `agent` / `skill` under `$HUABU_RFS_URL`) for out-of-band canvas access. No Huabu client code is shipped into the agent; a plain `curl` is enough.
 - **Session model** — appId = threadId; one QuestionNode = one thread = one workload; workloads are created lazily on first message. A `Session` idle-suspends and resumes via the agentlet daemon; a `Job` closes on terminal state (see [§3.2](#32-workload-kinds-job-vs-session)). Huabu's canvas layer must not manage workload lifecycle.
 
+### 3.5 The agent definition: content vs mechanism, and how tools bind
+
+[§3.3](#33-what-is-an-agent-runtime-drivers-vs-the-agent-definition) named the *definition* (prompt + skills + tools) as the image/PodSpec analogue. A closer look shows the definition is **not one thing** — it splits along two independent lines that decide *who authors it* and *how it reaches the runtime*. This subsection records the current (as-is) mechanics; the design choices they raise are deferred to [§8](#8-open-questions).
+
+**Content vs mechanism.** The prose of a system prompt and the body of a skill are **product content** — [`ask/AGENT.md`](../../apps/server/src/prompt/agents/ask/AGENT.md) opens with *"a research assistant embedded in a canvas application called Sediment… typed nodes… frames… edges"*, and the system skills are `canvas` / `sketch-gestures` — none of it is generic agent-runtime vocabulary. The **loader** ([`prompt/agents/loader.ts`](../../apps/server/src/prompt/agents/loader.ts), [`prompt/skills/loader.ts`](../../apps/server/src/prompt/skills/loader.ts)) — frontmatter parsing, `{{skillCatalogue}}` / `{{include:}}` rendering, system+user merge, mtime/TTL caching — is generic **mechanism**. So:
+
+- **Content is authored by L1** (the product). User skills already live *outside* the server, under `<workspace>/setting/skills/<id>/SKILL.md` — proof the content is data, not runtime code. System skills being compiled into `apps/server` is a monorepo co-location accident, not a layering intent.
+- **Mechanism is owned by L2** (Agenetes): load, render, mount.
+
+**Definition resolution ≈ CRI "image pull".** The clean shape is: a `WorkloadSpec` carries a **reference** to a definition bundle; a **resolver** turns the reference into bytes and mounts it; the **source is pluggable**. The external path already works this way — [`agentlet.yaml`](../../agent-teams) declares `require: (cli-tools / skills / prompts)` and agentlet mounts them at spawn. This distinguishes two registries that Kubernetes keeps separate and that must not be conflated:
+
+| Registry sense       | Stores                                | Agenetes needs it? | Today                                                       |
+| -------------------- | ------------------------------------- | ------------------ | ---------------------------------------------------------- |
+| **etcd** (metadata)  | *which* definitions exist + reference | **Yes**            | [`acp/profile-store.ts`](../../apps/server/src/modules/agent/acp/profile-store.ts) is exactly this for external profiles |
+| **Docker Hub** (blob distribution) | the definition **bytes**, shared/versioned across clusters | **No — YAGNI** | bytes ride with the app bundle (system) or the workspace (user); a resolver reads them locally |
+
+A blob-hosting service only becomes real when skill packs must be shared across workspaces/teams (a marketplace) — and even then it is an *external, pluggable source behind the resolver*, not Agenetes core.
+
+**Tools are a different species — capability, not file.** A prompt/skill is inert **data** you mount; a tool is executable **code** that must run inside the harness. So a tool is never "hosted" as a byte artifact: the definition declares tool **names** (a capability request), and the harness must already have a matching **implementation** registered — the CRI/device-plugin model (a Pod requests `nvidia.com/gpu` by name; the node must actually carry the driver, or admission fails). This gives a binding spectrum, and **the two drivers sit at opposite ends today, neither using MCP**:
+
+| Driver                 | Harness locality        | Tool ABI                                                     | How canvas capability enters                                              | Wire? |
+| ---------------------- | ----------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------ | ----- |
+| **built-in (SDK)**     | in-process (`apps/server`) | pi-agent-core native `AgentTool { name, description, parameters, execute }` | `execute` closure → [`executeTool`](../../apps/server/src/modules/agent/tools/executor.ts) dispatch → handler **directly `import`s** [`canvas-executor.ts`](../../apps/server/src/modules/canvas/canvas-executor.ts) `executeOnServer` | **none** — same process, direct call |
+| **external (ACP)**     | separate / remote process | the CLI's own tools                                          | **RFS** out-of-band HTTP (`$HUABU_RFS_URL`), injected at spawn ([`spawn-orchestrator.ts`](../../apps/server/src/modules/agent/acp/spawn-orchestrator.ts)) | out-of-band HTTP |
+
+The built-in path needs **no MCP** precisely because there is no process boundary: [`tools/index.ts`](../../apps/server/src/modules/agent/tools/index.ts) `buildAgentToolsByNames` resolves the `AGENT.md` `tools:` names against `TOOL_REGISTRY` and wraps each into a pi-agent-core `AgentTool` whose `execute` closure `import`s the canvas domain logic directly. MCP / RFS exist only to cross a boundary the in-process driver does not have. The consequence: the built-in **harness, tool implementations, and canvas-executor are fused into one deployable** — a generic Agenetes harness could not `import canvas-executor`, so extracting the control plane forces a choice (keep the built-in harness as an L1-fused, in-process deployable, or move its tools out-of-band via RFS/MCP). That choice is [§8](#8-open-questions).
+
+Net: pi-agent-core's `AgentTool` *is* the L2-owned tool ABI; the handlers + `executeOnServer` are the L1-owned implementation; Agenetes core owns only the ABI, the name registry, and an **admission check** (requested tools ⊆ what the target harness advertises).
+
+### 3.6 The L1↔L2 binding: an in-process ARI handle modelled on the ACP client role
+
+[§3.5](#35-the-agent-definition-content-vs-mechanism-and-how-tools-bind) settled *what* crosses the seam (a definition reference + tool capabilities). This subsection settles *how* L1 calls L2 — in-process vs API — a question that recurs self-similarly with the tool-binding spectrum: the same "rich in-process object vs serializable wire" tension.
+
+**The binding is an in-process handle produced by a factory the driver registers with L2.** L1 does *not* pre-build a running agent and hand it over — that would strip L2 of lifecycle ownership (no lazy spawn, no restart, no idle-suspend). Instead a driver is **registered once** (receiving the host capabilities it needs, e.g. the canvas port — see below); L2 then **invokes its factory per workload** (lazily, on first message / on restart), passing a serializable `WorkloadSpec`, and holds the resulting handle:
+
+```ts
+// (1) Registration — once. Rich, in-process, below the seam. May receive
+//     host capability ports (canvas, logger) by injection.
+interface AgentDriver {
+  readonly id: string;                            // 'builtin' | 'acp' | …
+  create(spec: WorkloadSpec): Promise<AgentHandle>; // (2) invoked per workload by L2
+}
+agenetes.register(driver, { canvas: canvasPort /* in-process, DI */ });
+
+// (2) WorkloadSpec — serializable per-invocation customization (crosses the seam).
+interface WorkloadSpec {
+  kind: 'Job' | 'Session';
+  agentRef: string;         // which definition (built-in mode id / external profileId)
+  toolNames: string[];      // which tools to enable (selection, not impl — §3.5)
+  canvasId?: string; origin?: NodeOrigin; /* … all data, no closures */
+}
+
+// (3) Handle — in-process binding; I/O is serializable messages.
+interface AgentHandle {
+  submit(input: ChatEnvelope): void;              // data plane in
+  events(): AsyncIterable<AgentStreamEvent>;       // data plane out
+  control(msg: ControlMsg): Promise<ControlAck>;   // control plane (capability-gated)
+  readonly capabilities: AgentCapabilities;        // Job subset vs Session full
+}
+```
+
+**The handle is modelled on the ACP *client* role — not an HTTP client.** [`AcpAgentClient`](../../apps/server/src/modules/agent/acp/client.ts) shows why the distinction matters — it wires agent→host reverse handlers (`fs/read_text_file`, `session/request_permission`):
+
+| Property      | HTTP client        | ACP client (`AcpAgentClient`)                                                     | Consequence for the handle                     |
+| ------------- | ------------------ | --------------------------------------------------------------------------------- | ---------------------------------------------- |
+| State         | stateless req/resp | stateful session (`initialize → newSession/loadSession → prompt* → cancel`)        | matches the `Session` kind ([§3.2](#32-workload-kinds-job-vs-session)) |
+| Direction     | one-way            | **bidirectional peer** — agent calls back (`fs/read_text_file`, `request_permission`) | the reverse channel (today's RFS) folds *into* the protocol |
+| Capability    | none               | negotiated at `initialize` (`fs`, `loadSession`)                                  | Job-vs-Session gating ([§3.4](#34-control-plane-vs-data-plane-and-where-session-state-lives)) is built in |
+| Serialization | ad-hoc             | **serializable by construction** (JSON-RPC over stdio)                            | the "messages, not closures" rule holds automatically |
+
+**Decision — B: Agenetes owns its contract, modelled on a *subset* of the ACP client role; ACP is one downward driver, not the upward contract.** ACP's control semantics are a superset of what Huabu needs, so Agenetes defines the minimal control vocabulary it actually uses and maps ACP down onto it (rather than inheriting ACP's editor-oriented assumptions and evolution). This is already the *de-facto* stance for the **data plane**: [`translator.ts`](../../apps/server/src/modules/agent/acp/translator.ts) converts ACP `session/update` into `AgentStreamEvent`, so L1 never sees raw ACP. The leak to close is the **control plane** — the `/acp/*` routes (`mode` / `model` / `commands` / `permission`) currently expose ACP concepts straight to the web client; under B they become Huabu-owned control messages with ACP as one implementation behind them.
+
+**Three constraints keep the in-process handle from welding the layers — so it stays "in-process first, remote-ready":**
+
+1. **L2 owns the factory and its invocation** — lifecycle stays a control-plane concern.
+2. **The handle's I/O is serializable messages, never method calls carrying live objects / closures** — a closure crossing the seam (e.g. a tool `execute` that `import`s `canvas-executor`, [§3.5](#35-the-agent-definition-content-vs-mechanism-and-how-tools-bind)) is the welding smell. Control ops are messages (`control({ type: 'set_mode', … })`), not rich method calls.
+3. **Large payloads go out-of-band** (RFS already fetches node bodies rather than inlining them), keeping events small and any wire binding cheap.
+
+Under these, "in-process" is a *transport optimisation of a serializable contract*, exactly like CRI: the one handle interface gets a direct in-memory binding (built-in fast path, zero serialization) **or** a remote binding (JSON-RPC over stdio via agentlet, or HTTP/SSE) without L1 changing. The two drivers then satisfy the same interface at different capability levels:
+
+- **built-in (SDK) driver** — satisfies the **Job subset** (`submit` + `cancel` + event stream); advertises no `loadSession` / modes. Consistent with [§3.4](#34-control-plane-vs-data-plane-and-where-session-state-lives) (SDK serves only Jobs).
+- **ACP driver** — satisfies the **full, capability-gated** surface (resume, modes, slash), for `Session`s.
+
+**The factory has three layers — and this is what keeps "in-process, extracted, *and* fast" simultaneously possible.** The three inputs/outputs of a driver separate cleanly by *who authors them* and *whether they cross the seam*:
+
+| Layer | What | When | Non-serializable OK? | Crosses seam? |
+| ----- | ---- | ---- | -------------------- | ------------- |
+| **(1) Registration** | driver construction code + injected **host capability ports** (canvas, logger) | once | ✅ closures / live objects / in-process `import` all fine here | **no** — lives below the seam |
+| **(2) `WorkloadSpec`** | tool **selection** (names) + params (`canvasId`, `origin`, `mode`, `agentRef`, `kind`) | per `create` | ❌ must be serializable | **yes** — the customization channel |
+| **(3) Handle** | in-process binding; message I/O | per workload | (object is in-process) | I/O crosses; messages serializable |
+
+This yields the operating rule **"data customizes, code extends"**: a serializable spec *parameterises pre-registered capabilities* (pick this agent, this cwd, enable these tool names), but injecting *new behaviour* (a tool impl not in the registry, a new harness) is a **registration act** (code), not a spec. It is also exactly the [§3.5](#35-the-agent-definition-content-vs-mechanism-and-how-tools-bind) admission model — the spec *requests* tools by name; the registered driver must *carry* them.
+
+**Tools bind into the factory the same way** ([§3.5](#35-the-agent-definition-content-vs-mechanism-and-how-tools-bind) as-is → this model): tool **implementations** (schema + dispatch + the `AgentTool` wrapper — today `definitions.ts` + `handlers/`) live **inside the driver (layer 1)**; **which tools are enabled** comes from `spec.toolNames` (layer 2); the tool's `execute` closure is built *locally* from spec data and never crosses the seam. The one subtlety is the host capability a tool needs — canvas mutation. Today [`canvas-write.ts`](../../apps/server/src/modules/agent/tools/handlers/canvas-write.ts) hard-`import`s [`executeOnServer`](../../apps/server/src/modules/canvas/canvas-executor.ts); the extraction-clean form **inverts that into an injected `canvasPort` (layer 1)**. This is the same reverse capability the ACP driver reaches over RFS — one port interface, two bindings:
+
+| Driver | How the canvas port is bound | Serialization cost |
+| ------ | ---------------------------- | ------------------ |
+| built-in | **in-process injection** (direct call) | **none** — performance preserved |
+| ACP | over the wire (RFS / ACP `fs`) | pays serialization |
+
+So decoupling the built-in driver from `canvas-executor` **does not require RFS-ifying its tools**: dependency-inverting the hard `import` into an injected in-process port removes the *compile-time* coupling while keeping the *call* in-process (zero serialization). The hard limit is physics — in-process performance survives extraction only while the driver and the canvas impl share **one process**; crossing a process boundary is what forces RFS. This gives three extraction options for the built-in driver, deferred to [§8](#8-open-questions):
+
+| Option | Module-decoupled? | In-process perf? | Remotable? |
+| ------ | ----------------- | ---------------- | ---------- |
+| (a) status quo — hard `import`, fused | ❌ | ✅ | ❌ |
+| (b) RFS-ify the tools | ✅ | ⚠️ pays serialization | ✅ |
+| **(c) dependency-inject an in-process canvas port** | ✅ | ✅ **kept** | ⚠️ only by swapping the port for a remote adapter |
+
+Option **(c)** is the sweet spot for "extract Agenetes as a co-deployed library while keeping the built-in fast."
+
+### 3.7 Walkthroughs — the model against today's code
+
+Two dry runs confirm the [§3.6](#36-the-l1l2-binding-an-in-process-ari-handle-modelled-on-the-acp-client-role) model reconciles with the existing flow; every gap is a control-plane relocation, not a design conflict.
+
+**A. External ACP — a continuous `Session`.** `POST /agent` (external binding) → `runAcpAgent` → [`ensureAcpSession`](../../apps/server/src/modules/agent/acp/service.ts) (recipe resolve → `ensureAgentForThread` lazy-spawns the CLI keyed on `threadId` → `client.initialize()` capability handshake → `client.newSession`) → `client.prompt(sessionId, blocks, onUpdate)` → [`translator.ts`](../../apps/server/src/modules/agent/acp/translator.ts) `session/update → AgentStreamEvent`. Maps as: `ensureAcpSession` ≈ **`create` (lazy get-or-create, handle cached in `acpSessionRegistry`)**; `client.prompt` ≈ **`submit`**; translator stream ≈ **`events()`**; `initialize` ≈ **`capabilities`**; resume-after-idle (persisted `sessionId` → daemon `loadSession`) ≈ **`control({resume})`**, capability-gated — the Session-only rich control. The data plane already *is* decision B. Frictions (all control-plane): no single `WorkloadSpec` (assembled from `agentBinding` + profile); control ops are side-band ACP-shaped REST routes (`/threads/:t/{mode,model,commands,permission}`) rather than one `control()` channel; out-of-turn pushes (`available_commands_update`) are REST-polled, not stream-delivered.
+
+**B. Built-in SDK — a `Job` (the harder tool-binding case).** `POST /agent` (internal) → route's `resumeThreadContext` (`loadAgent(mode)` renders the system prompt + `readWorkspaceMemory`; `loadTurns` + `rebuildContextMessages` rebuild state from the on-disk log) → `runAgent(options)` → `buildToolsForScope` → `buildAgentToolsByNames(cfg.toolNames, ctx)` → `new Agent({ tools, messages, … })` → one-shot generator yields `AgentStreamEvent` natively (no translator). Maps as: the rich construction (`loadAgent` + tool `execute` closures + `canvas-executor` call) = **registered driver (layer 1)**; `cfg.toolNames` + `ctx` = **`WorkloadSpec` (layer 2)**; `runAgent` fuses **`create`+`submit`+`events`** into one call — an *ephemeral* handle, no cross-turn retention, no `control` beyond cancel = **the Job subset**; a multi-turn built-in chat is thus **N sequential Jobs over the turn log** (exactly [§3.4](#34-control-plane-vs-data-plane-and-where-session-state-lives), zero behaviour change). Built-in-specific frictions (pure relocation): definition resolution + state rebuild happen in the *route* (should move *into* the driver's `create`, so the spec is fully serializable and both drivers are symmetric); the tool's `canvas-executor` `import` is the exact line to invert into an injected port (option (c) above).
+
 ---
 
 ## 4. Layer 3 — Task Automation · Task-driven
@@ -331,11 +449,14 @@ Steps 1–2 are this proposal's concrete deliverables; 3–6 are follow-ups that
 ## 8. Open questions
 
 - Does `intent` ranking belong to L1 (sense-making) or stay in the agent module for proximity to context assembly? (§7 step 3.)
-- **Built-in (SDK) agents: keep as-is, or migrate onto ACP?** [§3.4](#34-control-plane-vs-data-plane-and-where-session-state-lives) binds rich `Session` control to ACP and leaves the SDK driver serving only Jobs. Two options, deferred:
-  1. **Keep the status quo** — built-ins stay on the in-process SDK driver (stateless Jobs over the turn log), forgoing the rich control plane.
-  2. **Move built-ins onto ACP** — run them through the ACP driver too, so a single driver backs both Jobs and Sessions and built-ins can gain in-process state / slash / modes.
-  The trade-off to weigh: ACP's "no per-turn context rebuild" vs the SDK's simpler log-replay model, and whether one driver is worth the migration.
-- **One shared `Job` control surface?** A Job's control plane is submit + cancel on both drivers ([§3.2](#32-workload-kinds-job-vs-session)). Should the ARI define that minimal surface once so an SDK Job and an ACP Job are interchangeable at the seam?
+- **Extracting the built-in (SDK) driver: which decoupling, and does it migrate onto ACP?** [§3.4](#34-control-plane-vs-data-plane-and-where-session-state-lives) leaves the SDK driver serving only `Job`s. [§3.6](#36-the-l1l2-binding-an-in-process-ari-handle-modelled-on-the-acp-client-role) reframes the extraction crux from a binary into **three options** for the built-in tools' in-process `import` of `canvas-executor`:
+  1. **(a) status quo** — hard `import`, harness fused with L1: fast, but not module-decoupled or extractable.
+  2. **(b) RFS-ify the tools** — canvas access goes out-of-band: fully decoupled and remotable, but pays per-call serialization.
+  3. **(c) dependency-inject an in-process canvas port** — removes the compile-time coupling while keeping the call in-process: module-decoupled *and* fast, but remotable only by later swapping the port for a remote adapter.
+  Option (c) suits "extract as a co-deployed library, keep built-in fast"; (b) is required only if the built-in must run in its own process. Orthogonally, whether built-ins should also gain a *rich Session* (in-process state / slash / modes) still means moving them onto the ACP driver — weigh ACP's "no per-turn context rebuild" against the SDK's simpler log-replay.
+- **One shared `Job` control surface?** A Job's control plane is submit + cancel on both drivers ([§3.2](#32-workload-kinds-job-vs-session)). *Resolved by [§3.6](#36-the-l1l2-binding-an-in-process-ari-handle-modelled-on-the-acp-client-role) (decision B):* Agenetes defines its own minimal control vocabulary (a subset of the ACP client role), so an SDK Job and an ACP Job satisfy the same seam interface, gated by capabilities. What remains open is the concrete `ControlMsg` / `AgentCapabilities` shape and how much of ACP's control surface the subset admits.
+- **Control-plane relocation (from the [§3.7](#37-walkthroughs--the-model-against-todays-code) dry runs).** The seam works today but leaks: (1) there is no single serializable `WorkloadSpec` — it is assembled from `agentBinding` + a server-side profile lookup; (2) control ops are side-band, ACP-shaped REST routes (`/acp/threads/:t/{mode,model,commands,permission}`) exposed straight to L1, rather than one Huabu-owned `control()` channel; (3) out-of-turn pushes (`available_commands_update`) are REST-polled instead of stream-delivered; (4) for the built-in driver, definition resolution + state rebuild happen in the *route*, not inside `create(spec)`. Folding these into the [§3.6](#36-the-l1l2-binding-an-in-process-ari-handle-modelled-on-the-acp-client-role) handle model is a [§7](#7-refactor--sequencing) refactor, largely behaviour-preserving.
+- **One shared `Job` control surface?** A Job's control plane is submit + cancel on both drivers ([§3.2](#32-workload-kinds-job-vs-session)). *Resolved by [§3.6](#36-the-l1l2-binding-an-in-process-ari-handle-modelled-on-the-acp-client-role) (decision B):* Agenetes defines its own minimal control vocabulary (a subset of the ACP client role), so an SDK Job and an ACP Job satisfy the same seam interface, gated by capabilities. What remains open is the concrete `ControlMsg` / `AgentCapabilities` shape and how much of ACP's control surface the subset admits.
 - Should built-in agents (`ask`/`operate`/`sketch`) be reframed as L3 "tasks" that happen to run in-process, or kept as an L2 concern? This doc places their *prompts* in L3 and their *execution path* in L2 — is that split worth the conceptual overhead? (Note: the `Job`/`Session` split from [§3.2](#32-workload-kinds-job-vs-session) is orthogonal to this — a built-in agent can be either kind.)
 - Do the `spawn`/`stop`/`suspend` control verbs stay in [`@agentlet/protocol`](../../external/agentlet/packages/protocol), or become a distinct Agenetes↔agentlet ARI contract once the control plane is extracted? ([§6.1](#61-re-splitting-agentletserver-transport-vs-control-plane).)
 - What is the minimum viable "second project" that would validate the Agenetes extraction, and does it exist yet?
