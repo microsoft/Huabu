@@ -23,7 +23,10 @@ export default typescriptEslint.config(
       '**/.vite/**',
       '**/*.min.*',
       // Vendored upstream code — lint with its own rules in the agentlet repo.
-      'external/**',
+      // NOTE: external/agenetes is authored by us and IS linted with the
+      // repo's rules (see the TS project list + Node env block below); only
+      // the vendored agentlet subtree is ignored here.
+      'external/agentlet/**',
       // Agent Team packages are self-contained plugins with their own
       // scripts/prompts; not part of the app's lint surface.
       'agent-teams/**',
@@ -46,6 +49,7 @@ export default typescriptEslint.config(
           './apps/web/tsconfig.json',
           './apps/web/tsconfig.node.json',
           './packages/shared/tsconfig.json',
+          './external/agenetes/packages/protocol/tsconfig.json',
         ],
         tsconfigRootDir: __dirname,
       },
@@ -59,6 +63,7 @@ export default typescriptEslint.config(
             './apps/desktop/tsconfig.json',
             './apps/web/tsconfig.json',
             './packages/shared/tsconfig.json',
+            './external/agenetes/packages/protocol/tsconfig.json',
           ],
         },
       },
@@ -161,6 +166,7 @@ export default typescriptEslint.config(
       'apps/desktop/src/**/*.{ts,tsx}',
       'apps/desktop/scripts/**/*.{js,mjs,cjs}',
       'packages/shared/src/**/*.{ts,tsx}',
+      'external/agenetes/packages/*/src/**/*.{ts,tsx}',
       'vite.config.ts',
       '*.config.js',
       '*.config.mjs',

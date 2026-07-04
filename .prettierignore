@@ -5,5 +5,7 @@ node_modules
 .pnpm-store
 pnpm-lock.yaml
 
-# Vendored upstream code (see external/agentlet/README.md)
-external/
+# Vendored upstream code (see external/agentlet/README.md).
+# NOTE: external/agenetes is authored by us and IS formatted (only
+# agentlet is vendored), so it is intentionally not ignored here.
+external/agentlet/
