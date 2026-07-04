@@ -1,6 +1,6 @@
 # Huabu Layered Architecture — Strategic Map
 
-> A three-layer reference model for the Sediment / Huabu project: a **Human-AI Interface (HAI)** layer, an **Agent-as-a-Local-Service (AaaS)** layer, and a **Task Automation** layer. The goal is to name the seams that already exist in the code, tighten the contracts between them, and mark which parts of the middle layer can be extracted to serve other projects. The middle layer has a name — **Agenetes** — the agent control plane that will be extracted as a standalone repo, just as `agentlet` already was (see [§3](#3-layer-2--agenetes-agent-as-a-local-service--protocol-driven) and [§6](#6-extraction-what-becomes-reusable)).
+> A three-layer reference model for the Sediment / Huabu project: a **Human-AI Interface (HAI)** layer, an **Agent-as-a-Local-Service (AaaS)** layer, and a **Task Automation** layer. The goal is to name the seams that already exist in the code, tighten the contracts between them, and mark which parts of the middle layer can be extracted to serve other projects. The middle layer has a name — **Agenetes** — the agent control plane that will be extracted as a standalone repo, just as `agentlet` already was (see [§3](#3-layer-2--agenetes-agent-as-a-local-service--protocol-driven) and [§6](#6-extraction--what-becomes-reusable)).
 >
 > Status: **Draft**, awaiting review · Last updated 2026-07-03 · Tracks [#265](https://github.com/hai-team/Sediment/issues/265)
 
@@ -56,7 +56,7 @@ Mixing these makes ownership fuzzy, slows parallel work, and blocks the stated g
 
 - Not a rewrite. Almost every box below already exists; this is a naming + boundary-tightening exercise.
 - Not a new extension protocol. The agent-as-plugin model ([agent-teams-as-extensions.md](../architecture/agent-teams-as-extensions.md)) stays; this proposal locates it as the L2↔L3 seam.
-- Not an API spec. Concrete wire contracts remain governed by [api-design.md](../architecture/api-design.md); a follow-up may deep-dive the AaaS interface (see [§6](#6-extraction-what-becomes-reusable)).
+- Not an API spec. Concrete wire contracts remain governed by [api-design.md](../architecture/api-design.md); a follow-up may deep-dive the AaaS interface (see [§6](#6-extraction--what-becomes-reusable)).
 
 ---
 
@@ -88,14 +88,14 @@ Mixing these makes ownership fuzzy, slows parallel work, and blocks the stated g
 
 **Driver.** Protocol. This layer succeeds or fails on a single guarantee, not on any feature: **once an agent is defined (e.g. via an agent template), then when it is @-mentioned a session exists to receive user queries and return a stream of agent messages.** It is deliberately incurious about *what* the agent does or *how* the canvas looks — it owns the contract in between.
 
-**Name.** We call this layer **Agenetes** (/ˌædʒəˈniːtiːz/ — "aj-uh-NEE-teez") — an agent *control plane*, coined off `agentlet` the way Kubernetes is coined off kubelet (`agentlet` : kubelet :: **Agenetes** : Kubernetes). `agentlet` is the per-node relay that spawns and babysits *one* runtime; Agenetes is the layer above it that schedules a session onto an agentlet, tracks its lifecycle, routes its stream, and persists its log. Today this control plane physically lives inside [`apps/server/src/modules/agent/acp`](../../apps/server/src/modules/agent/acp) — Agenetes embedded in the Huabu server. This proposal names it so it can later be extracted as a standalone repo ([§6](#6-extraction-what-becomes-reusable)).
+**Name.** We call this layer **Agenetes** (/ˌædʒəˈniːtiːz/ — "aj-uh-NEE-teez") — an agent *control plane*, coined off `agentlet` the way Kubernetes is coined off kubelet (`agentlet` : kubelet :: **Agenetes** : Kubernetes). `agentlet` is the per-node relay that spawns and babysits *one* runtime; Agenetes is the layer above it that **dispatches** a session to its agentlet, tracks its lifecycle, routes its stream, and persists its log. Today this control plane physically lives inside [`apps/server/src/modules/agent/acp`](../../apps/server/src/modules/agent/acp) — Agenetes embedded in the Huabu server. This proposal names it so it can later be extracted as a standalone repo ([§6](#6-extraction--what-becomes-reusable)).
 
 > **Etymology — why *Agenetes*, not *Agentnetes*.** Kubernetes is Ancient Greek κυβερνήτης (*kubernḗtēs*), "helmsman / governor", from the verb κυβερνάω "to steer, to govern" plus the agent-noun suffix **-ήτης (*-ētēs*)**, "the one who —". (Same root → Latin *gubernare* → English *govern*, and → *cybernetics*.) The commonly-borrowed fragment "-netes" is a mis-cut: the ν belongs to the stem *kubern-*, not to the suffix. So we form the name on the true agentive suffix `-ētēs`, attached to the root **ag-** — which Greek ἄγω (*ágō*, "to lead, drive") and Latin *agō* (present participle *agēns/agentis* → English *agent*) genuinely **share**, both from PIE \*h₂eǵ- "to drive". **Agenetes** = *agen-* (the Latin agentive stem, keeping "agent" legible) + *-ētēs* (the Greek agentive suffix, exactly as in *kubernḗtēs*) — a properly-formed agent noun meaning roughly **"the one who drives / sets in motion"**, which is precisely a control plane's job. It also scans like its model: Ku-ber-NÉ-tēs ⟷ A-ge-NÉ-tēs (Kubernetes /ˌkuːbərˈnɛtiːz/ "koo-ber-NET-eez" ⟷ Agenetes /ˌædʒəˈniːtiːz/ "aj-uh-NEE-teez") — four syllables, stress on the penult, a soft *g* keeping "agent" audible. The alternative "Agentnetes" bolts the whole word *agent* onto the mis-cut "-netes", preserving a false morpheme and an un-Greek *-tn-* cluster.
 
 **Responsibility.** The reusable runtime that turns "an agent" into a managed local service. It decomposes into **four orthogonal dimensions** that must be kept decoupled so they compose freely — the design goal of this layer is that any point in one dimension works with any point in the others:
 
 1. **Definition · Registry · Discover** — *what agents exist.* An agent template is a pure definition (e.g. `{ agentletId, cmd, cwd }` or a built-in profile); adding one registers it but creates no session. This dimension owns the registry, agent profiles, and agent-team manifests, and answers "what can I @-mention?". *(k8s: the API server + declarative specs.)*
-2. **Lifecycle** — *the workload state machine.* `spawn` (lazily, on first @-mention) → `resume` (from idle-suspend) → `close` (explicit, idle-timeout, or task completion). This dimension owns nothing about *how bytes move* or *what the agent is* — only a workload's existence and state. Agenetes has **two built-in workload kinds** with different completion semantics (see [§3.2](#32-workload-kinds-job-vs-session)): a **`Session`** (long-lived conversation) and a **`Job`** (run one prompt to completion, then close). *(k8s: the scheduler + controller reconcile loop; Deployment vs Job.)*
+2. **Lifecycle** — *the workload state machine.* `spawn` (lazily, on first @-mention) → `resume` (from idle-suspend) → `close` (explicit, idle-timeout, or task completion). This dimension owns nothing about *how bytes move* or *what the agent is* — only a workload's existence and state. Agenetes has **two built-in workload kinds** with different completion semantics (see [§3.2](#32-workload-kinds-job-vs-session)): a **`Session`** (long-lived conversation) and a **`Job`** (run one prompt to completion, then close). *(k8s: the controller reconcile loop — Deployment vs Job; note Agenetes has no scheduler, see [§3.6.1](#361-dispatch-driver-affinity-discovery--and-why-l2-is-not-a-scheduler).)*
 3. **Communication (transport-pluggable)** — *how queries in / messages out move.* User query in (`ChatEnvelope`) → stream of agent messages out (`AgentStreamEvent`), over a **pluggable transport**. Transport is a separate axis from lifecycle and definition; the same `spawn`→`stream`→`close` shape must work across every transport (see the matrix below). *(k8s: the CRI — the runtime interface behind which any runtime plugs in.)*
 4. **Persistence · Replay · Subscribe** — *the durable message log.* Every turn is appended to a per-thread log so the conversation survives restarts and session idle-out. Consumers can **replay** history (e.g. "return the last 50 messages of this thread" on reload) and **subscribe** to the live tail (a late-joining client, or a second viewer, catches up then streams). This is orthogonal to transport: the log is the same whether the agent ran in-process or over a remote bridge. *(k8s: etcd + the watch API.)*
 
@@ -147,7 +147,7 @@ There appear to be *three kinds of agent* in the code today, but they are not th
 
 Two consequences fall out of this table:
 
-1. **Locality is not Agenetes' concern — it is agentlet's whole reason to exist.** "Local ACP" collapses into "remote ACP" in the code precisely because *local* is just "the agentlet daemon runs on localhost". Whether the agent sits in-process, next door, or on another continent is a placement decision owned entirely below the ARI line (agentlet = kubelet, which abstracts node placement + NAT traversal). Agenetes must not model local-vs-remote at all.
+1. **Locality is not Agenetes' concern — it is agentlet's whole reason to exist.** "Local ACP" collapses into "remote ACP" in the code precisely because *local* is just "the agentlet daemon runs on localhost". Whether the agent sits in-process, next door, or on another continent is a placement decision owned entirely below the ARI line (agentlet = kubelet, which abstracts node placement + NAT traversal). Agenetes must not model local-vs-remote at all. (This transport-locality is distinct from *resource affinity*: agentlet abstracts *how to reach* a daemon, but *which* daemon holds a session's state is pinned by the spec's binding and is not something L2 chooses or reschedules — see [§3.6.1](#361-dispatch-driver-affinity-discovery--and-why-l2-is-not-a-scheduler).)
 2. **What remains for Agenetes is a single axis — the runtime contract — with (today) two drivers:** an in-process **SDK driver** (`runAgent`) and an **agentlet ACP driver**. These are ARI drivers, exactly as containerd / CRI-O are CRI runtimes; the driver is invisible to whoever *defines* the agent.
 
 So the vocabulary the rest of this doc should use:
@@ -260,9 +260,9 @@ agenetes.register(driver, { canvas: canvasPort /* in-process, DI */ });
 
 // (2) WorkloadSpec — serializable per-invocation customization (crosses the seam).
 interface WorkloadSpec {
-  kind: 'Job' | 'Session';
-  agentRef: string;         // which definition (built-in mode id / external profileId)
-  toolNames: string[];      // which tools to enable (selection, not impl — §3.5)
+  kind: 'Job' | 'Session';  // completion semantics (§3.2) — NOT the driver selector
+  binding: AgentBinding;    // { kind:'internal', mode } | { kind:'external', alias, profileId } — the dispatch discriminant (§3.6.1)
+  toolNames?: string[];     // internal only: which tools to enable (selection, not impl — §3.5)
   canvasId?: string; origin?: NodeOrigin; /* … all data, no closures */
 }
 
@@ -324,6 +324,70 @@ So decoupling the built-in driver from `canvas-executor` **does not require RFS-
 
 Option **(c)** is the sweet spot for "extract Agenetes as a co-deployed library while keeping the built-in fast."
 
+### 3.6.1 Dispatch, driver affinity, discovery — and why L2 is not a scheduler
+
+[§3.6](#36-the-l1l2-binding-an-in-process-ari-handle-modelled-on-the-acp-client-role) established a serializable `WorkloadSpec` and a per-driver factory. This subsection pins down *how* a spec reaches the right driver — and, by working the Kubernetes analogy to its breaking point, records what Agenetes deliberately is **not**.
+
+**Dispatch is on a discriminated spec, never on a driver name.** L1 does not name a driver; it authors a spec whose **binding** discriminant (today `agentBinding.kind ∈ {internal, external}`, [acp.ts](../../packages/shared/src/types/api/acp.ts)) selects a driver *class*. The spec is therefore a tagged union — each variant carries only the fields its driver consumes, which is why their schemas legitimately differ:
+
+```ts
+type WorkloadSpec =
+  | { kind: 'Job' | 'Session'; binding: { kind: 'internal'; mode: AgentMode };
+      toolNames: string[]; /* built-in factory inputs (§3.5/§3.6) */ }
+  | { kind: 'Job' | 'Session'; binding: { kind: 'external'; alias: string; profileId: string };
+      session: AcpSessionSpec; /* no toolNames — the CLI owns its own tools */ };
+```
+
+There are **two independent discriminants**, and conflating them is a naming trap: the **workload kind** (`Job`/`Session` — completion semantics, [§3.2](#32-workload-kinds-job-vs-session)) and the **binding kind** (`internal`/`external` — driver selection). L2 resolves the *binding kind* against a driver registry — the generalisation of today's `binding.kind === 'external' ? runAcpAgent : runAgent` ([agent.route.ts](../../apps/server/src/modules/agent/agent.route.ts)):
+
+```ts
+driverRegistry.get(spec.binding.kind).create(spec)   // deterministic — no candidate set, no scoring
+```
+
+**Candidacy is advertised by the driver; the binding is decided by L2.** Only a driver knows what it implements, so at registration it *advertises* which binding kinds it serves and which capabilities (tools, control verbs) it carries — an input to routing, not routing itself:
+
+```ts
+agenetes.register({
+  id: 'acp',                                          // impl name (≠ the 'external' binding kind it serves)
+  serves: ['external'],
+  capabilities: { control: ['cancel','setMode','resume'], loadSession: true },
+  create(spec) { … },
+}, { canvas: canvasPort /* injected host capability port, §3.6 */ });
+```
+
+L2 stays the authority over the **binding** (which registered driver actually backs a kind) and the **admission** check (`spec.toolNames ⊆ driver.capabilities`, [§3.5](#35-the-agent-definition-content-vs-mechanism-and-how-tools-bind)). Note the alias in flight: L1 says `external` (contract vocabulary), the driver is `acp` (implementation name) — that indirection is exactly what makes the [§8](#8-open-questions) "move built-ins onto the ACP driver" migration a one-line re-wiring instead of an L1-wide edit.
+
+**Rejected alternative — let the spec carry a driver name.** Tempting, since it deletes the `binding.kind → driver` alias. But it couples L1's contract to L2's *implementation* identifiers: renaming/splitting/merging a driver (precisely the [§6.1](#61-re-splitting-agentletserver-transport-vs-control-plane) re-split and the [§8](#8-open-questions) built-in→ACP migration) would then break every spec, including **persisted** thread bindings. What the alias actually removes is only one hop — the registry lookup (`name → driver instance`, needed for the injected ports and the admission check) cannot be deleted regardless. So the saving is three lines; the cost is coupling the contract to churnable internals. The identifier L1 writes must live in the **contract** namespace (a small, closed, semantic enum), never in L2's implementation namespace — even where the two are 1:1 today.
+
+**Drivers are not fungible — they *are* their resource.** The K8s scheduler assumes interchangeable Nodes with state externalised to a PV; our drivers are the opposite — each is a stateful binding to a resource that cannot move:
+
+| Driver | Bound to | Why not interchangeable |
+| ------ | -------- | ----------------------- |
+| ACP | a specific agentlet daemon + that machine's filesystem (CWD) | the session's files live on that machine; the live session lives in that process |
+| built-in | this process + the tool impls / `canvasPort` injected at registration ([§3.6](#36-the-l1l2-binding-an-in-process-ari-handle-modelled-on-the-acp-client-role)) | the harness *is* those capabilities, not a generic worker running an image |
+
+So routing has **two dimensions with opposite mutability**: the **class** (`binding.kind → driver type`) is static wiring L2 owns and may re-point ([§8](#8-open-questions)); the **instance** (which daemon / which live session) is *pinned by the spec's resource reference* (`profileId`, a persisted `sessionId`) and is **not** relocatable. This is a control-plane fact distinct from transport-locality ([§3.3](#33-what-is-an-agent-runtime-drivers-vs-the-agent-definition)): agentlet abstracts *how to reach* a daemon, but *which* daemon holds the state is fixed. The failure semantics follow directly — if the bound resource is gone, the workload **cannot be rescheduled elsewhere**; it is rebuilt from durable state (the turn log / persisted session) or it fails. There is no K8s-style "pod drifts to another node". The right K8s reference points are therefore its *least*-fungible primitives — a local-PV Pod pinned by node-affinity, a StatefulSet's stable identity, a device-plugin node — not the default fungible Deployment.
+
+**Therefore L2 is not a scheduler.** A scheduler *chooses* a placement among candidates (scoring, bin-packing, preemption, rescheduling). Agenetes has no such choice: the binding kind selects the driver class deterministically, and the resource reference pins the instance. What remains is not scheduling but **execution**:
+
+| K8s control-plane role | Present in Agenetes? |
+| ---------------------- | -------------------- |
+| Scheduler (decide placement among candidates) | **No** — placement is declared in the spec, pinned by affinity |
+| Admission (gate: requested ⊆ advertised) | Yes — [§3.5](#35-the-agent-definition-content-vs-mechanism-and-how-tools-bind) |
+| kubelet / CRI (execute + reconcile a *given* workload) | Yes — `create` + pipe + lifecycle |
+| Service / DNS (resolve a name → a fixed endpoint) | Yes — deterministic `binding.kind → driver` |
+
+Agenetes is closer to a **service-mesh sidecar / reverse proxy**: resolve by declared identity, admit, and pipe. Cross-resource scheduling (fleet bin-packing, autoscaling across machines) is an explicit **non-goal** — were it ever needed it would be a *new* layer above Agenetes, not a widening of L2. (The daemon's lazy-spawn / idle-suspend / resume is lifecycle *reconcile* of one already-bound resource — a kubelet job — not placement selection.)
+
+**The registry has two faces.** Registration (above) is the *downward* face; the *upward* face is a **discovery API** — the read side of the Definition/Discover dimension ([§3](#3-layer-2--agenetes-agent-as-a-local-service--protocol-driven), whose nascent form is [`profile-store.ts`](../../apps/server/src/modules/agent/acp/profile-store.ts)). It projects the registry into a **mechanism-free catalogue** L1 can pick from:
+
+| Discovery exposes (contract layer) | Discovery hides (implementation layer) |
+| ---------------------------------- | -------------------------------------- |
+| bindable **offerings** — built-in agents (`ask`/`operate`/`sketch`), registered external profiles (alias + profileId) | driver class names (`acp`, `sdk`) |
+| each offering's **capabilities** (Job/Session, cancel? modes? slash?) for capability-aware UX | transport, process topology, which machine it binds to |
+
+L1 selects an *offering* (populating a picker, gating buttons by capability) and puts its **semantic reference** into `spec.binding`; L2 still resolves offering → driver internally. This is the same line the whole subsection draws: **L1 speaks semantic identity, L2 owns mechanism.** (K8s parallel: `kubectl api-resources` lists kinds + schemas; it never lists the kubelet or CRI runtime behind them.) A future "same agent, local-fast vs remote backend" choice is expressed as a semantic variant / placement *preference* in the catalogue — still never a driver name.
+
 ### 3.7 Walkthroughs — the model against today's code
 
 Two dry runs confirm the [§3.6](#36-the-l1l2-binding-an-in-process-ari-handle-modelled-on-the-acp-client-role) model reconciles with the existing flow; every gap is a control-plane relocation, not a design conflict.
@@ -359,7 +423,8 @@ Two dry runs confirm the [§3.6](#36-the-l1l2-binding-an-in-process-ari-handle-m
 The layers are only real if these seams are stable. Each is already a zod-first / typed contract per [api-design.md](../architecture/api-design.md):
 
 ```
-L1 ── WorkloadSpec (kind + agent + prompt) ─▶ L2   (Job or Session; §3.2)
+L1 ◀── Offering catalogue (agents/profiles + capabilities) ── L2   (discovery; mechanism-free, §3.6.1)
+L1 ── WorkloadSpec (kind + binding + prompt) ─▶ L2   (Job or Session; binding.kind selects the driver, §3.2/§3.6.1)
 L1 ── ChatEnvelope ───────────────▶ L2      (prompt in; internal & external identical)
 L1 ◀── AgentStreamEvent ──────────── L2      (~14 SSE event types; no runtime leak)
 L1 ◀── CanvasCommand / Execution ─── L2      (the only way an agent mutates the canvas)
@@ -370,7 +435,8 @@ L2 ◀──▶ RFS (curl) ────────────────  L3 
 
 | Seam    | Contract                       | Source of truth                                                                                       | Rule                                                                          |
 | ------- | ------------------------------ | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| L1 ↔ L2 | Workload spec (`kind`)         | [packages/shared/src/types/agent](../../packages/shared/src/types/agent) *(proposed)*                 | `Job` vs `Session` is an Agenetes-owned built-in; host fills the spec only.  |
+| L1 ↔ L2 | Offering catalogue (discovery) | [acp/profile-store.ts](../../apps/server/src/modules/agent/acp/profile-store.ts) *(nascent)*          | Exposes bindable offerings + capabilities; **never** driver names ([§3.6.1](#361-dispatch-driver-affinity-discovery--and-why-l2-is-not-a-scheduler)). |
+| L1 ↔ L2 | Workload spec (`kind` + `binding`) | [packages/shared/src/types/agent](../../packages/shared/src/types/agent) *(proposed)*             | `Job` vs `Session` is Agenetes-owned; `binding.kind` selects the driver; host fills the spec, never names a driver. |
 | L1 ↔ L2 | `ChatEnvelope`                 | [packages/shared/src/types/agent](../../packages/shared/src/types/agent)                              | Single envelope for internal + external; user text rebuilt from it on reload. |
 | L1 ↔ L2 | `AgentStreamEvent`             | [packages/shared/src/types/agent/agent.ts](../../packages/shared/src/types/agent/agent.ts)            | L1 renders only these; never pi-agent-core / ACP shapes.                      |
 | L1 ↔ L2 | `CanvasCommand` / `Execution`  | [packages/shared/src/types/canvas](../../packages/shared/src/types/canvas)                            | The 14-command agent subset; validated + traced server-side.                  |
@@ -408,10 +474,10 @@ The extraction is not only "pull the ACP module out of Huabu" — it also re-dra
 | `token-store.ts` · daemon auth | **agentlet** (transport auth) | Connection-level auth, bound to the transport. |
 | `data-store.ts` (`SessionStore`, `SessionRecord`) | **Agenetes** (state) | A workload is a control-plane resource — the etcd object. |
 | `event-store.ts` (`IEventStorage`, replay) | **Agenetes** (persistence) | This *is* the §3 Persistence/Replay/Subscribe dimension. |
-| `SessionSpec` · `SpawnParams` · `StopParams` · `LifecycleEvent` | **Agenetes** (lifecycle) | Desired state + state machine = scheduler/controller. |
+| `SessionSpec` · `SpawnParams` · `StopParams` · `LifecycleEvent` | **Agenetes** (lifecycle) | Desired state + state machine = the controller reconcile loop (not a placement scheduler — [§3.6.1](#361-dispatch-driver-affinity-discovery--and-why-l2-is-not-a-scheduler)). |
 | `rest-api.ts` (session management) | **Agenetes** (API server) | The declarative management surface belongs in the control plane. |
 
-The dividing principle mirrors kubelet vs scheduler: **agentlet *executes* a spawn but never *decides* one** — when to spawn, how long before idle-suspend, whether to resume or retry (and per which workload kind) are Agenetes' reconcile decisions. A useful open question ([§8](#8-open-questions)) is whether the `spawn/stop/suspend` control verbs stay in `@agentlet/protocol` or become a distinct Agenetes↔agentlet ARI contract.
+The dividing principle mirrors kubelet vs the control plane: **agentlet *executes* a spawn but never *decides its lifecycle*** — when to spawn, how long before idle-suspend, whether to resume or retry (and per which workload kind) are Agenetes' **reconcile** decisions (a controller loop over an already-bound resource, not a placement scheduler — [§3.6.1](#361-dispatch-driver-affinity-discovery--and-why-l2-is-not-a-scheduler)). A useful open question ([§8](#8-open-questions)) is whether the `spawn/stop/suspend` control verbs stay in `@agentlet/protocol` or become a distinct Agenetes↔agentlet ARI contract.
 
 The clean extraction boundary is therefore: **agentlet (transport) + Agenetes (definition/lifecycle/communication/persistence) are project-agnostic**; only the RFS *resource shape* (what "a node" is) is Huabu-specific. A reuse plan would keep the transport + lifecycle generic and let each host define its own reachback resource schema behind the same RFS verbs (`download`/`upload`/`agent`/`skill`).
 
@@ -438,7 +504,7 @@ No big-bang. Ordered, low-risk steps that each stand alone:
 1. **Adopt the vocabulary.** Land this doc; reference L1/L2/L3 in PR descriptions and new module headers. (This PR.)
 2. **Assert the seams in code.** Add lint/dependency checks (extend the existing web-layer dependency rules) so L1 code cannot import L2 internals and L3 manifests cannot import server code. Fail CI on upward imports.
 3. **Relocate `intent` conceptually.** Decide whether intent ranking stays under `modules/agent` or moves to an L1-owned `modules/sensemaking`; it is an L1 concern with no agent loop.
-4. **Name the Agenetes dimension boundaries.** Group the definition/lifecycle/communication/persistence stores under the Agenetes package — destination already scaffolded at [`external/agenetes`](../../external/agenetes) (or, transitionally, a `modules/agent/agenetes` folder) — with the four dimensions as sub-modules, workload kinds ([§3.2](#32-workload-kinds-job-vs-session)) as first-class types, and transport as a pluggable ARI ([§3.1](#31-the-transport-axis-why-it-is-separate)) — so the composability and the extraction seam from [§6](#6-extraction-what-becomes-reusable) are visible in the tree, not just in prose.
+4. **Name the Agenetes dimension boundaries.** Group the definition/lifecycle/communication/persistence stores under the Agenetes package — destination already scaffolded at [`external/agenetes`](../../external/agenetes) (or, transitionally, a `modules/agent/agenetes` folder) — with the four dimensions as sub-modules, workload kinds ([§3.2](#32-workload-kinds-job-vs-session)) as first-class types, and transport as a pluggable ARI ([§3.1](#31-the-transport-axis-why-it-is-separate)) — so the composability and the extraction seam from [§6](#6-extraction--what-becomes-reusable) are visible in the tree, not just in prose.
 5. **Re-split `@agentlet/server`.** Move the control-plane half (session/event stores, lifecycle types, session REST) into Agenetes and leave `@agentlet/server` as pure transport, per the table in [§6.1](#61-re-splitting-agentletserver-transport-vs-control-plane). Touches the `external/agentlet` and `external/agenetes` subtrees — commit each separately for clean upstream push ([§6.2](#62-subtree-maintenance)).
 6. **Generalise RFS resource shape.** Introduce a host-defined resource schema behind the RFS verbs so a second project can plug a non-canvas resource in. (Depends on step 4; only pursue when a real second consumer appears.)
 
@@ -456,7 +522,7 @@ Steps 1–2 are this proposal's concrete deliverables; 3–6 are follow-ups that
   Option (c) suits "extract as a co-deployed library, keep built-in fast"; (b) is required only if the built-in must run in its own process. Orthogonally, whether built-ins should also gain a *rich Session* (in-process state / slash / modes) still means moving them onto the ACP driver — weigh ACP's "no per-turn context rebuild" against the SDK's simpler log-replay.
 - **One shared `Job` control surface?** A Job's control plane is submit + cancel on both drivers ([§3.2](#32-workload-kinds-job-vs-session)). *Resolved by [§3.6](#36-the-l1l2-binding-an-in-process-ari-handle-modelled-on-the-acp-client-role) (decision B):* Agenetes defines its own minimal control vocabulary (a subset of the ACP client role), so an SDK Job and an ACP Job satisfy the same seam interface, gated by capabilities. What remains open is the concrete `ControlMsg` / `AgentCapabilities` shape and how much of ACP's control surface the subset admits.
 - **Control-plane relocation (from the [§3.7](#37-walkthroughs--the-model-against-todays-code) dry runs).** The seam works today but leaks: (1) there is no single serializable `WorkloadSpec` — it is assembled from `agentBinding` + a server-side profile lookup; (2) control ops are side-band, ACP-shaped REST routes (`/acp/threads/:t/{mode,model,commands,permission}`) exposed straight to L1, rather than one Huabu-owned `control()` channel; (3) out-of-turn pushes (`available_commands_update`) are REST-polled instead of stream-delivered; (4) for the built-in driver, definition resolution + state rebuild happen in the *route*, not inside `create(spec)`. Folding these into the [§3.6](#36-the-l1l2-binding-an-in-process-ari-handle-modelled-on-the-acp-client-role) handle model is a [§7](#7-refactor--sequencing) refactor, largely behaviour-preserving.
-- **One shared `Job` control surface?** A Job's control plane is submit + cancel on both drivers ([§3.2](#32-workload-kinds-job-vs-session)). *Resolved by [§3.6](#36-the-l1l2-binding-an-in-process-ari-handle-modelled-on-the-acp-client-role) (decision B):* Agenetes defines its own minimal control vocabulary (a subset of the ACP client role), so an SDK Job and an ACP Job satisfy the same seam interface, gated by capabilities. What remains open is the concrete `ControlMsg` / `AgentCapabilities` shape and how much of ACP's control surface the subset admits.
+- **How does L1 select an agent without naming a driver?** *Resolved by [§3.6.1](#361-dispatch-driver-affinity-discovery--and-why-l2-is-not-a-scheduler):* L1 authors a tagged-union `WorkloadSpec` whose `binding.kind` is a semantic, contract-owned discriminant; L2 resolves it against a driver registry (deterministic, no scheduling), gated by admission; a mechanism-free discovery catalogue exposes offerings + capabilities (never driver names). Drivers are non-fungible (pinned to a daemon/process by resource affinity), so L2 is a dispatcher + conduit, **not** a scheduler; cross-resource scheduling is a non-goal. Open sub-parts: the concrete registry/discovery API surface, and whether a `binding.kind` may ever fan out to more than one driver class.
 - Should built-in agents (`ask`/`operate`/`sketch`) be reframed as L3 "tasks" that happen to run in-process, or kept as an L2 concern? This doc places their *prompts* in L3 and their *execution path* in L2 — is that split worth the conceptual overhead? (Note: the `Job`/`Session` split from [§3.2](#32-workload-kinds-job-vs-session) is orthogonal to this — a built-in agent can be either kind.)
 - Do the `spawn`/`stop`/`suspend` control verbs stay in [`@agentlet/protocol`](../../external/agentlet/packages/protocol), or become a distinct Agenetes↔agentlet ARI contract once the control plane is extracted? ([§6.1](#61-re-splitting-agentletserver-transport-vs-control-plane).)
 - What is the minimum viable "second project" that would validate the Agenetes extraction, and does it exist yet?
