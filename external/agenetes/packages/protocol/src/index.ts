@@ -45,3 +45,18 @@ export type {
   BindingMemberSchema,
   WorkloadSpecSchema,
 } from './workload.js';
+
+// AgentRequest building blocks (§3.6.1): the polymorphic, driver-agnostic
+// per-turn request contract. render() is called inside a driver's submit();
+// serialize() feeds the durable log.
+export { defineRequest, composeRequest } from './request.js';
+export type {
+  AgentInput,
+  Renderable,
+  Serializable,
+  AgentRequest,
+  RequestVariantSchema,
+  RequestDefinition,
+  AnyRequestDefinition,
+  RequestSchema,
+} from './request.js';

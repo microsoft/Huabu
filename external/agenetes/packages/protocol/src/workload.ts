@@ -5,21 +5,21 @@
 // Shape (Option A): a flat tagged union keyed on a top-level, required
 // `kind` — the driver route. There are TWO orthogonal top-level
 // discriminants:
-//   - `kind`         — WHICH driver (route); also fixes the `spec` +
-//                      `request` TYPES. Public, required.
+//   - `kind`         — WHICH driver (route); also fixes the `spec` TYPE.
+//                      Public, required.
 //   - `workloadKind` — Job | Deployment (completion semantics). Only
 //                      decides whether `request` is required.
-// `request` is DRIVER-OWNED (there is no universal request shape): every
-// driver declares its own `spec` (create-time config) and `request`
-// (per-turn payload), and the same `request` schema also types that
-// driver's `submit()`.
+// The per-turn `request` is NOT owned by the driver: it is a separately
+// composed, polymorphic, driver-agnostic union (see ./request.ts) shared
+// across every `kind`. A driver contributes only its create-time `spec`.
 //
 // "Protocol gives the blocks, the host composes." This package ships
 // `defineBinding` (declare one driver's typed member) and
-// `composeWorkloadSpec` (fold the host's registered drivers into one
-// closed `discriminatedUnion('kind', …)`); it deliberately does NOT
-// hard-code any concrete `kind` (e.g. Sediment's `internal`/`external`) —
-// those are host registrations that live in the host, never upstream.
+// `composeWorkloadSpec` (fold the host's registered drivers + the shared
+// request union into one closed `discriminatedUnion('kind', …)`); it
+// deliberately does NOT hard-code any concrete `kind` (e.g. Sediment's
+// `internal`/`external`) — those are host registrations that live in the
+// host, never upstream.
 
 import { z } from 'zod';
 
@@ -37,38 +37,34 @@ export type WorkloadKind = z.infer<typeof workloadKindSchema>;
 
 /**
  * The typed member schema a single driver contributes to the
- * `WorkloadSpec` union: `{ kind, workloadKind, threadId, spec, request? }`.
- * `request` is always `.optional()` at the schema level; the
- * `workloadKind === 'Job' ⇒ request required` invariant is enforced once,
- * at the union level, by {@link composeWorkloadSpec}.
+ * `WorkloadSpec` union before the shared `request` field is injected:
+ * `{ kind, workloadKind, threadId, spec }`. {@link composeWorkloadSpec}
+ * extends each member with `request` and enforces the
+ * `workloadKind === 'Job' ⇒ request required` invariant once, at the
+ * union level.
  */
 export type BindingMemberSchema<
   Kind extends string,
   Spec extends z.ZodTypeAny,
-  Request extends z.ZodTypeAny,
 > = z.ZodObject<{
   kind: z.ZodLiteral<Kind>;
   workloadKind: typeof workloadKindSchema;
   threadId: typeof threadIdSchema;
   spec: Spec;
-  request: z.ZodOptional<Request>;
 }>;
 
 /**
- * A driver's binding definition: its route `kind` plus the schemas for
- * its create-time `spec` and per-turn `request`, and the derived
- * `WorkloadSpec` union member. The `request` schema here is the single
- * source reused by that driver's `submit(request)` signature.
+ * A driver's binding definition: its route `kind`, the schema for its
+ * create-time `spec`, and the derived (request-less) `WorkloadSpec` union
+ * member.
  */
 export interface BindingDefinition<
   Kind extends string = string,
   Spec extends z.ZodTypeAny = z.ZodTypeAny,
-  Request extends z.ZodTypeAny = z.ZodTypeAny,
 > {
   readonly kind: Kind;
   readonly spec: Spec;
-  readonly request: Request;
-  readonly member: BindingMemberSchema<Kind, Spec, Request>;
+  readonly member: BindingMemberSchema<Kind, Spec>;
 }
 
 /** A binding definition with its type parameters erased. */
@@ -77,51 +73,47 @@ export type AnyBindingDefinition = BindingDefinition;
 /**
  * Declare one driver's contribution to the `WorkloadSpec` union. The host
  * calls this once per registered driver (e.g. `defineBinding({ kind:
- * 'internal', spec: builtinAgentSpec, request: chatEnvelope })`) and
- * reuses `.request` for that driver's `submit()` signature.
+ * 'internal', spec: builtinAgentSpec })`). The per-turn `request` is NOT
+ * declared here — it is the shared union passed to
+ * {@link composeWorkloadSpec}.
  */
 export function defineBinding<
   Kind extends string,
   Spec extends z.ZodTypeAny,
-  Request extends z.ZodTypeAny,
->(config: {
-  kind: Kind;
-  spec: Spec;
-  request: Request;
-}): BindingDefinition<Kind, Spec, Request> {
+>(config: { kind: Kind; spec: Spec }): BindingDefinition<Kind, Spec> {
   const member = z.object({
     kind: z.literal(config.kind),
     workloadKind: workloadKindSchema,
     threadId: threadIdSchema,
     spec: config.spec,
-    request: config.request.optional(),
-  }) as BindingMemberSchema<Kind, Spec, Request>;
+  }) as BindingMemberSchema<Kind, Spec>;
 
   return {
     kind: config.kind,
     spec: config.spec,
-    request: config.request,
     member,
   };
 }
 
 /**
- * Fold the host's registered driver bindings into a single closed
- * `WorkloadSpec` schema: a `discriminatedUnion('kind', …)` over their
- * members, plus the union-level invariant that a `Job` must carry a
- * `request`. Validation at the trust boundary is therefore a single typed
- * `safeParse` pass — no `z.unknown()` two-phase is needed on this seam.
+ * Fold the host's registered driver bindings and the shared `request`
+ * union into a single closed `WorkloadSpec` schema: a
+ * `discriminatedUnion('kind', …)` over the members (each extended with the
+ * shared, always-`.optional()` `request`), plus the union-level invariant
+ * that a `Job` must carry a `request`. Validation at the trust boundary is
+ * therefore a single typed `safeParse` pass — no `z.unknown()` two-phase is
+ * needed on this seam.
  */
 export function composeWorkloadSpec<
   const Bindings extends readonly [
     AnyBindingDefinition,
     ...AnyBindingDefinition[],
   ],
->(bindings: Bindings) {
-  const members = bindings.map((binding) => binding.member) as unknown as [
-    Bindings[number]['member'],
-    ...Bindings[number]['member'][],
-  ];
+  Request extends z.ZodTypeAny,
+>(config: { bindings: Bindings; request: Request }) {
+  const members = config.bindings.map((binding) =>
+    binding.member.extend({ request: config.request.optional() }),
+  ) as unknown as [z.ZodObject, z.ZodObject, ...z.ZodObject[]];
 
   return z.discriminatedUnion('kind', members).superRefine((value, ctx) => {
     if (value.workloadKind === 'Job' && value.request === undefined) {
@@ -141,4 +133,5 @@ export function composeWorkloadSpec<
  */
 export type WorkloadSpecSchema<
   Bindings extends readonly [AnyBindingDefinition, ...AnyBindingDefinition[]],
-> = ReturnType<typeof composeWorkloadSpec<Bindings>>;
+  Request extends z.ZodTypeAny,
+> = ReturnType<typeof composeWorkloadSpec<Bindings, Request>>;
