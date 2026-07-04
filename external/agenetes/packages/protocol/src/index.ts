@@ -82,3 +82,26 @@ export {
   endEventDataSchema,
 } from './stream-event.js';
 export type { AgentStreamEvent, AgentStreamEventType } from './stream-event.js';
+
+// ControlMsg + AgentCapabilities (§3.6.2): the host->agent control plane.
+// A closed { type, data } vocabulary symmetric with AgentStreamEvent on the
+// duplex channel; AgentCapabilities is the serializable descriptor that
+// gates which control ops an agent honours.
+export {
+  CONTROL_MSGS,
+  controlMsgTypeSchema,
+  controlMsgSchema,
+  cancelControlDataSchema,
+  setModeControlDataSchema,
+  setModelControlDataSchema,
+  setConfigOptionControlDataSchema,
+  answerPermissionControlDataSchema,
+  controlAckSchema,
+  agentCapabilitiesSchema,
+} from './control.js';
+export type {
+  ControlMsgType,
+  ControlMsg,
+  ControlAck,
+  AgentCapabilities,
+} from './control.js';
