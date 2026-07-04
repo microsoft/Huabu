@@ -261,9 +261,8 @@ agenetes.register(driver, { canvas: canvasPort /* in-process, DI */ });
 // (2) WorkloadSpec — serializable per-invocation customization (crosses the seam).
 interface WorkloadSpec {
   kind: 'Job' | 'Session';  // completion semantics (§3.2) — NOT the driver selector
-  binding: AgentBinding;    // { kind:'internal', mode } | { kind:'external', alias, profileId } — the dispatch discriminant (§3.6.1)
-  toolNames?: string[];     // internal only: which tools to enable (selection, not impl — §3.5)
-  canvasId?: string; origin?: NodeOrigin; /* … all data, no closures */
+  binding: BindingSpec;     // dispatch discriminant + the driver-owned sub-spec (tools/session live here — §3.6.1)
+  caller: CallerRef;        // who / where invoked from: threadId, canvasId, origin, userId — all data, no closures
 }
 
 // (3) Handle — in-process binding; I/O is serializable messages.
@@ -302,12 +301,12 @@ Under these, "in-process" is a *transport optimisation of a serializable contrac
 | Layer | What | When | Non-serializable OK? | Crosses seam? |
 | ----- | ---- | ---- | -------------------- | ------------- |
 | **(1) Registration** | driver construction code + injected **host capability ports** (canvas, logger) | once | ✅ closures / live objects / in-process `import` all fine here | **no** — lives below the seam |
-| **(2) `WorkloadSpec`** | tool **selection** (names) + params (`canvasId`, `origin`, `mode`, `agentRef`, `kind`) | per `create` | ❌ must be serializable | **yes** — the customization channel |
+| **(2) `WorkloadSpec`** | workload `kind` + `caller` + a `binding` carrying the driver-owned sub-spec (tool selection, `mode` / `session`) | per `create` | ❌ must be serializable | **yes** — the customization channel |
 | **(3) Handle** | in-process binding; message I/O | per workload | (object is in-process) | I/O crosses; messages serializable |
 
 This yields the operating rule **"data customizes, code extends"**: a serializable spec *parameterises pre-registered capabilities* (pick this agent, this cwd, enable these tool names), but injecting *new behaviour* (a tool impl not in the registry, a new harness) is a **registration act** (code), not a spec. It is also exactly the [§3.5](#35-the-agent-definition-content-vs-mechanism-and-how-tools-bind) admission model — the spec *requests* tools by name; the registered driver must *carry* them.
 
-**Tools bind into the factory the same way** ([§3.5](#35-the-agent-definition-content-vs-mechanism-and-how-tools-bind) as-is → this model): tool **implementations** (schema + dispatch + the `AgentTool` wrapper — today `definitions.ts` + `handlers/`) live **inside the driver (layer 1)**; **which tools are enabled** comes from `spec.toolNames` (layer 2); the tool's `execute` closure is built *locally* from spec data and never crosses the seam. The one subtlety is the host capability a tool needs — canvas mutation. Today [`canvas-write.ts`](../../apps/server/src/modules/agent/tools/handlers/canvas-write.ts) hard-`import`s [`executeOnServer`](../../apps/server/src/modules/canvas/canvas-executor.ts); the extraction-clean form **inverts that into an injected `canvasPort` (layer 1)**. This is the same reverse capability the ACP driver reaches over RFS — one port interface, two bindings:
+**Tools bind into the factory the same way** ([§3.5](#35-the-agent-definition-content-vs-mechanism-and-how-tools-bind) as-is → this model): tool **implementations** (schema + dispatch + the `AgentTool` wrapper — today `definitions.ts` + `handlers/`) live **inside the driver (layer 1)**; **which tools are enabled** comes from the tool names in the binding's driver sub-spec (`BuiltinAgentSpec.tools`, layer 2 — [§3.6.1](#361-dispatch-driver-affinity-discovery--and-why-l2-is-not-a-scheduler)); the tool's `execute` closure is built *locally* from spec data and never crosses the seam. The one subtlety is the host capability a tool needs — canvas mutation. Today [`canvas-write.ts`](../../apps/server/src/modules/agent/tools/handlers/canvas-write.ts) hard-`import`s [`executeOnServer`](../../apps/server/src/modules/canvas/canvas-executor.ts); the extraction-clean form **inverts that into an injected `canvasPort` (layer 1)**. This is the same reverse capability the ACP driver reaches over RFS — one port interface, two bindings:
 
 | Driver | How the canvas port is bound | Serialization cost |
 | ------ | ---------------------------- | ------------------ |
@@ -331,14 +330,16 @@ Option **(c)** is the sweet spot for "extract Agenetes as a co-deployed library 
 **Dispatch is on a discriminated spec, never on a driver name.** L1 does not name a driver; it authors a spec whose **binding** discriminant (today `agentBinding.kind ∈ {internal, external}`, [acp.ts](../../packages/shared/src/types/api/acp.ts)) selects a driver *class*. The spec is therefore a tagged union — each variant carries only the fields its driver consumes, which is why their schemas legitimately differ:
 
 ```ts
-type WorkloadSpec =
-  | { kind: 'Job' | 'Session'; binding: { kind: 'internal'; mode: AgentMode };
-      toolNames: string[]; /* built-in factory inputs (§3.5/§3.6) */ }
-  | { kind: 'Job' | 'Session'; binding: { kind: 'external'; alias: string; profileId: string };
-      session: AcpSessionSpec; /* no toolNames — the CLI owns its own tools */ };
+interface WorkloadSpec {
+  kind: 'Job' | 'Session';                    // completion semantics (§3.2)
+  caller: CallerRef;                          // threadId / canvasId / origin — who & where invoked from
+  binding:                                    // dispatch discriminant + a driver-owned sub-spec
+    | { kind: 'internal'; agentId: AgentMode; spec: BuiltinAgentSpec }               // spec.tools, spec.model — the built-in agent spec
+    | { kind: 'external'; alias: string; profileId: string; spec: AcpSessionSpec };  // the ACP session spec
+}
 ```
 
-There are **two independent discriminants**, and conflating them is a naming trap: the **workload kind** (`Job`/`Session` — completion semantics, [§3.2](#32-workload-kinds-job-vs-session)) and the **binding kind** (`internal`/`external` — driver selection). L2 resolves the *binding kind* against a driver registry — the generalisation of today's `binding.kind === 'external' ? runAcpAgent : runAgent` ([agent.route.ts](../../apps/server/src/modules/agent/agent.route.ts)):
+There are **two independent discriminants**, and conflating them is a naming trap: the **workload kind** (`Job`/`Session` — completion semantics, [§3.2](#32-workload-kinds-job-vs-session)) and the **binding kind** (`internal`/`external` — driver selection). The per-driver payload is nested under the binding as a sub-spec (`BuiltinAgentSpec` / `AcpSessionSpec`) whose schema the driver owns and `safeParse`-validates — so tool selection lives *inside* the built-in binding, never hoisted to the top level. L2 resolves the *binding kind* against a driver registry — the generalisation of today's `binding.kind === 'external' ? runAcpAgent : runAgent` ([agent.route.ts](../../apps/server/src/modules/agent/agent.route.ts)):
 
 ```ts
 driverRegistry.get(spec.binding.kind).create(spec)   // deterministic — no candidate set, no scoring
@@ -355,7 +356,7 @@ agenetes.register({
 }, { canvas: canvasPort /* injected host capability port, §3.6 */ });
 ```
 
-L2 stays the authority over the **binding** (which registered driver actually backs a kind) and the **admission** check (`spec.toolNames ⊆ driver.capabilities`, [§3.5](#35-the-agent-definition-content-vs-mechanism-and-how-tools-bind)). Note the alias in flight: L1 says `external` (contract vocabulary), the driver is `acp` (implementation name) — that indirection is exactly what makes the [§8](#8-open-questions) "move built-ins onto the ACP driver" migration a one-line re-wiring instead of an L1-wide edit.
+L2 stays the authority over the **binding** (which registered driver actually backs a kind) and the **admission** check (the tool names in the binding sub-spec ⊆ what the driver advertises, [§3.5](#35-the-agent-definition-content-vs-mechanism-and-how-tools-bind)). Note the alias in flight: L1 says `external` (contract vocabulary), the driver is `acp` (implementation name) — that indirection is exactly what makes the [§8](#8-open-questions) "move built-ins onto the ACP driver" migration a one-line re-wiring instead of an L1-wide edit.
 
 **Rejected alternative — let the spec carry a driver name.** Tempting, since it deletes the `binding.kind → driver` alias. But it couples L1's contract to L2's *implementation* identifiers: renaming/splitting/merging a driver (precisely the [§6.1](#61-re-splitting-agentletserver-transport-vs-control-plane) re-split and the [§8](#8-open-questions) built-in→ACP migration) would then break every spec, including **persisted** thread bindings. What the alias actually removes is only one hop — the registry lookup (`name → driver instance`, needed for the injected ports and the admission check) cannot be deleted regardless. So the saving is three lines; the cost is coupling the contract to churnable internals. The identifier L1 writes must live in the **contract** namespace (a small, closed, semantic enum), never in L2's implementation namespace — even where the two are 1:1 today.
 
@@ -394,7 +395,7 @@ Two dry runs confirm the [§3.6](#36-the-l1l2-binding-an-in-process-ari-handle-m
 
 **A. External ACP — a continuous `Session`.** `POST /agent` (external binding) → `runAcpAgent` → [`ensureAcpSession`](../../apps/server/src/modules/agent/acp/service.ts) (recipe resolve → `ensureAgentForThread` lazy-spawns the CLI keyed on `threadId` → `client.initialize()` capability handshake → `client.newSession`) → `client.prompt(sessionId, blocks, onUpdate)` → [`translator.ts`](../../apps/server/src/modules/agent/acp/translator.ts) `session/update → AgentStreamEvent`. Maps as: `ensureAcpSession` ≈ **`create` (lazy get-or-create, handle cached in `acpSessionRegistry`)**; `client.prompt` ≈ **`submit`**; translator stream ≈ **`events()`**; `initialize` ≈ **`capabilities`**; resume-after-idle (persisted `sessionId` → daemon `loadSession`) ≈ **`control({resume})`**, capability-gated — the Session-only rich control. The data plane already *is* decision B. Frictions (all control-plane): no single `WorkloadSpec` (assembled from `agentBinding` + profile); control ops are side-band ACP-shaped REST routes (`/threads/:t/{mode,model,commands,permission}`) rather than one `control()` channel; out-of-turn pushes (`available_commands_update`) are REST-polled, not stream-delivered.
 
-**B. Built-in SDK — a `Job` (the harder tool-binding case).** `POST /agent` (internal) → route's `resumeThreadContext` (`loadAgent(mode)` renders the system prompt + `readWorkspaceMemory`; `loadTurns` + `rebuildContextMessages` rebuild state from the on-disk log) → `runAgent(options)` → `buildToolsForScope` → `buildAgentToolsByNames(cfg.toolNames, ctx)` → `new Agent({ tools, messages, … })` → one-shot generator yields `AgentStreamEvent` natively (no translator). Maps as: the rich construction (`loadAgent` + tool `execute` closures + `canvas-executor` call) = **registered driver (layer 1)**; `cfg.toolNames` + `ctx` = **`WorkloadSpec` (layer 2)**; `runAgent` fuses **`create`+`submit`+`events`** into one call — an *ephemeral* handle, no cross-turn retention, no `control` beyond cancel = **the Job subset**; a multi-turn built-in chat is thus **N sequential Jobs over the turn log** (exactly [§3.4](#34-control-plane-vs-data-plane-and-where-session-state-lives), zero behaviour change). Built-in-specific frictions (pure relocation): definition resolution + state rebuild happen in the *route* (should move *into* the driver's `create`, so the spec is fully serializable and both drivers are symmetric); the tool's `canvas-executor` `import` is the exact line to invert into an injected port (option (c) above).
+**B. Built-in SDK — a `Job` (the harder tool-binding case).** `POST /agent` (internal) → route's `resumeThreadContext` (`loadAgent(mode)` renders the system prompt + `readWorkspaceMemory`; `loadTurns` + `rebuildContextMessages` rebuild state from the on-disk log) → `runAgent(options)` → `buildToolsForScope` → `buildAgentToolsByNames(cfg.toolNames, ctx)` → `new Agent({ tools, messages, … })` → one-shot generator yields `AgentStreamEvent` natively (no translator). Maps as: the rich construction (`loadAgent` + tool `execute` closures + `canvas-executor` call) = **registered driver (layer 1)**; `cfg.toolNames` + `ctx` = the internal **binding sub-spec** (`BuiltinAgentSpec`) + `caller` (layer 2); `runAgent` fuses **`create`+`submit`+`events`** into one call — an *ephemeral* handle, no cross-turn retention, no `control` beyond cancel = **the Job subset**; a multi-turn built-in chat is thus **N sequential Jobs over the turn log** (exactly [§3.4](#34-control-plane-vs-data-plane-and-where-session-state-lives), zero behaviour change). Built-in-specific frictions (pure relocation): definition resolution + state rebuild happen in the *route* (should move *into* the driver's `create`, so the spec is fully serializable and both drivers are symmetric); the tool's `canvas-executor` `import` is the exact line to invert into an injected port (option (c) above).
 
 ---
 
