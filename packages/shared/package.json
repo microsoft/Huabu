@@ -37,6 +37,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@agenetes/protocol": "workspace:*",
     "vitest": "^4.0.18"
   }
 }
