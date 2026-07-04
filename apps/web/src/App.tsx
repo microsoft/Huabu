@@ -8,7 +8,7 @@ import {
   useBlocker,
 } from 'react-router-dom';
 
-import { LoadingState } from './components/Common/LoadingState';
+import { Loading } from './components/Common/Loading';
 import { ToastContainer } from './components/Common/Toast';
 import { WindowChrome } from './components/Panels/WindowChrome';
 import DocsPage from './docs/DocsPage';
@@ -28,7 +28,12 @@ import { useWorkspaceStore } from './store/workspaceStore';
 function LoadingScreen() {
   return (
     <div className="bg-bg-default h-full">
-      <LoadingState message="Loading workspace…" fullScreen />
+      <Loading
+        variant="brand"
+        layout="fullscreen"
+        size="md"
+        message="Loading workspace…"
+      />
     </div>
   );
 }
@@ -118,11 +123,19 @@ function RootLayout() {
         <Outlet />
       </div>
       {/* Full-screen overlay shown while pending saves drain before a
-          blocked route change proceeds. `LoadingState fullScreen`
-          already provides a backdrop + spinner. Rendered as a sibling
+          blocked route change proceeds. `Loading layout="fullscreen"`
+          already provides the centered loading state. Rendered as a sibling
           of the page area so it stacks on top of whatever route is
           currently mounted. */}
-      {isDraining && <LoadingState message="Saving canvas…" fullScreen />}
+      {isDraining && (
+        <Loading
+          variant="spinner"
+          layout="fullscreen"
+          size="md"
+          message="Saving canvas…"
+          indicatorClassName="text-fg-subtle"
+        />
+      )}
     </div>
   );
 }

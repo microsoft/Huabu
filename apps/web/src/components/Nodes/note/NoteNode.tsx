@@ -4,7 +4,7 @@ import { ChevronsDown, Fullscreen } from 'lucide-react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
-import { SkeletonLines } from '@/components/Common/SkeletonLines';
+import { Loading } from '@/components/Common/Loading';
 import { MilkdownPreview } from '@/components/Milkdown';
 import { useNodeLOD } from '@/hooks/useNodeLOD';
 import { useNodeScale } from '@/hooks/useNodeScale';
@@ -470,8 +470,8 @@ export const NoteNode = memo(
                     />
                   ) : (
                     // Lightweight placeholder while the editor mount is
-                    // deferred. Reuses the same `SkeletonLines` shimmer the
-                    // PDF node shows while loading.
+                    // deferred. Reuses the same skeleton shimmer the PDF
+                    // node shows while loading.
                     //
                     // Centering target differs by height mode: in fixed
                     // mode the host already constrains to the node's visible
@@ -500,7 +500,11 @@ export const NoteNode = memo(
                           hidden behind the SemanticPlaceholder, so an
                           animated placeholder would just be wasted work. */}
                       {!isMinimalLOD && (
-                        <SkeletonLines className="w-full max-w-xs" />
+                        <Loading
+                          variant="skeleton"
+                          layout="bare"
+                          className="w-full max-w-xs"
+                        />
                       )}
                     </div>
                   )}

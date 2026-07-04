@@ -1526,7 +1526,7 @@ const useCanvasStore = create<RFState>()(
       if (canvasId === currentId) return;
 
       // Flip into the loading state *before* awaiting anything so the
-      // shell shows `LoadingState` on the very next render instead of
+      // shell shows the loading state on the very next render instead of
       // briefly painting the previous canvas while the structure save
       // flush resolves. `loadCanvas` below will set `isLoading: true`
       // again (idempotent) once it starts the actual fetch.

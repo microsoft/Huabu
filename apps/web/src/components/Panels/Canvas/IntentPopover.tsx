@@ -10,7 +10,7 @@ import { createPortal } from 'react-dom';
 
 import { Button } from '@/components/Common/Button';
 import { EmptyState } from '@/components/Common/EmptyState';
-import { Spinner } from '@/components/Common/Spinner';
+import { Loading } from '@/components/Common/Loading';
 import { useIntentStore } from '@/store/intentStore';
 
 // ---------------------------------------------------------------------------
@@ -97,7 +97,7 @@ const IntentSelectStep: React.FC<{ anchorY: number }> = ({ anchorY }) => {
           })}
           {isStreaming && (
             <li className="text-fg-subtle flex items-center gap-1.5 px-4 py-1.5 text-xs">
-              <Spinner size="xs" />
+              <Loading layout="inline" size="xs" />
               <span>Thinking…</span>
             </li>
           )}
@@ -288,7 +288,7 @@ export const IntentPopover: React.FC = () => {
 
       {isLoading ? (
         <div className="text-fg-subtle flex items-center gap-2 px-3 py-4 text-sm">
-          <Spinner size="sm" />
+          <Loading layout="inline" size="sm" />
           <span>Analyzing context…</span>
         </div>
       ) : (

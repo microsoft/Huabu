@@ -14,8 +14,8 @@ import { Camera, X as XIcon } from 'lucide-react';
 import { partIsExecuting } from './helpers';
 import { resolveArtifactUrl } from '../../../../api/artifact';
 import useCanvasStore from '../../../../store/canvasStore';
+import { Loading } from '../../../Common/Loading';
 import { NodeRef } from '../../../Common/NodeRef';
-import { Spinner } from '../../../Common/Spinner';
 import { AssistantDisclosure } from '../../AssistantDisclosure';
 
 import type { SnapshotEntry, SnapshotNodesToolPart } from '@sediment/shared';
@@ -77,7 +77,7 @@ export function SnapshotNodesCard({ part }: SnapshotNodesCardProps) {
 
   // ── Icon ───────────────────────────────────────────────────────────
   const icon = executing ? (
-    <Spinner size="xs" className="text-info" />
+    <Loading layout="inline" size="xs" className="text-info" />
   ) : failed ? (
     <XIcon size={12} className="text-danger" />
   ) : (
