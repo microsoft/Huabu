@@ -3,6 +3,7 @@ import { createId, type CanvasCommand } from '../../index.js';
 import { normalizeTreeOrder, type NestableNode } from '../frame/index.js';
 import { deduplicateLabel, generateNextLabel } from '../utils/labels.js';
 import { getNodeDefaultSize } from '../utils/nodeSizes.js';
+import { selectOnly } from '../utils/selection.js';
 
 import type { Node } from '@xyflow/react';
 
@@ -136,15 +137,22 @@ const createNodes: CommandDefinition<Cmd> = {
     // ---------------------------------------------------------------
     // 4. Normalize tree order.
     //
-    // Newly-created nodes are intentionally NOT auto-selected: doing so
-    // would clobber the user's existing selection, dismiss open toolbars
-    // and scroll the canvas around. Any pre-existing selection is
-    // preserved verbatim.
+    // User-created ordinary nodes become the active selection. Agent/system
+    // creates, and question nodes, preserve the previous selection because
+    // they should not steal focus from the user's current canvas context.
     // ---------------------------------------------------------------
-    const finalNodes = normalizeTreeOrder([
+    const orderedNodes = normalizeTreeOrder([
       ...state.nodes,
       ...newNodes,
     ] as NestableNode[]);
+    const selectableCreatedNodeIds =
+      state.source === 'ui'
+        ? newNodes.filter((n) => n.type !== 'question').map((n) => n.id)
+        : [];
+    const finalNodes =
+      selectableCreatedNodeIds.length > 0
+        ? selectOnly(orderedNodes, selectableCreatedNodeIds)
+        : orderedNodes;
 
     // ---------------------------------------------------------------
     // 5. Position is honoured verbatim — every caller (UI gestures and
