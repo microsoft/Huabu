@@ -109,6 +109,14 @@ Double-click the node → `openInCompose()` ([QuestionNode.tsx](../../apps/web/s
 Toolbar (single action): **Ask** when idle, **View / Watch conversation** once a
 thread exists.
 
+While the chat panel is expanded and viewing or composing a question node
+thread, the canvas renders four glowing corners outside that node
+([QuestionNode.tsx](../../apps/web/src/components/Nodes/question/QuestionNode.tsx)).
+This is an informational "active chat anchor" affordance only: it does not set
+React Flow selection, does not show editing toolbars, does not cover the
+question status badge, and does not affect which selected nodes are sent as
+additional chat context.
+
 ### 5.2 Dispatch
 
 All questions run through `/api/agent` ([agent.ts](../../apps/web/src/api/agent.ts) → [intent](../../apps/server/src/modules/canvas/node-neighbourhood.ts)). On first send `useAgentStream` ([useAgentStream.ts](../../apps/web/src/hooks/useAgentStream.ts)) locks `agentBinding` + `agentMode` onto the node:
