@@ -22,8 +22,6 @@ export interface RenderProfile {
    * `file=` path over the RFS (`GET ${HUABU_RFS_URL}/download/<file>`).
    */
   toolset: 'internal' | 'reachback';
-  /** Emit `file=` on `<node>` (both backends address a node by its path). */
-  includeFileName: boolean;
   /** Inline selection pixels as `<selected_nodes_visuals>` (+ sketch hint). */
   includeSelectionVisuals: boolean;
   /** Put the user task FIRST (slash-command turns) instead of last. */
@@ -33,15 +31,13 @@ export interface RenderProfile {
 /** Built-in agent: read-by-path, selection pixels + sketch hint, task last. */
 export const INTERNAL_PROFILE: RenderProfile = {
   toolset: 'internal',
-  includeFileName: true,
   includeSelectionVisuals: true,
   leadWithTask: false,
 };
 
-/** External/ACP agent: read-by-id, selection pixels, task last. */
+/** External/ACP agent: read-by-path (over RFS), selection pixels, task last. */
 export const ACP_PROFILE: RenderProfile = {
   toolset: 'reachback',
-  includeFileName: true,
   includeSelectionVisuals: true,
   leadWithTask: false,
 };

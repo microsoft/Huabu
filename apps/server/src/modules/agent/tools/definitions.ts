@@ -106,7 +106,7 @@ export const getCanvasOutlineParamsSchema = Type.Object({
   includePreviews: Type.Optional(
     Type.Boolean({
       description:
-        'Attach a short text preview (summary / keywords / first 120 chars) to every node. Default: false. Skip unless you need a quick overview of contents — for full text use read on "nodes/*.md".',
+        'Attach text scan hints to every node: `summary` (authored abstract, when present) and `preview` (first ~120 chars of the body). Default: false. Skip unless you need a quick overview of contents — for full text use read on "nodes/*.md".',
     }),
   ),
   includeStyle: Type.Optional(

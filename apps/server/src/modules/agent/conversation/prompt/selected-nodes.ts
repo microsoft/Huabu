@@ -10,21 +10,20 @@
  *   <node id="n-2" type="image" preview="…" />
  *   </selected_nodes>
  *
- * `includeFileName: true` — the built-in agent reads a node's full body by
- * the pre-computed `nodes/<file>.md` path. (The external/ACP backend
- * renders its own `<selected_nodes>` block without `file=` in
- * `acp/preprocessor.ts`, since it reads by id.)
+ * Every node carries its pre-computed `file=` path; both backends address
+ * a node by it (the built-in agent `read()`s it, the external/ACP agent
+ * downloads it over the RFS).
  */
 
-import { renderAgentNodeList } from './node-element.js';
+import { renderNodes } from './node-element.js';
 
 import type { RenderProfile } from './profile.js';
 import type { AgentNodePreview } from '../../node-ref.js';
 
 const READ_INTRO =
-  'Nodes the user selected. Each <node> is metadata only: pass `file` straight to read() for the full body, or use `id` with inspect_nodes() for layout / style / spatial relations. `preview` is a short scan hint, not the full content.';
+  'Nodes the user selected. Each <node> is metadata only: pass `file` straight to read() for the full body, or use `id` with inspect_nodes() for layout / style / spatial relations. `summary` / `preview` are short scan hints, not the full content.';
 const READ_NODE_INTRO =
-  "The user selected the canvas nodes below. Each <node> is metadata only: download any you need at `GET ${HUABU_RFS_URL}/download/<file>` (use the node's `file` path). To create, edit, move, or link nodes, ask the canvas agent. `preview` is a short scan hint, not the full content.";
+  "The user selected the canvas nodes below. Each <node> is metadata only: download any you need at `GET ${HUABU_RFS_URL}/download/<file>` (use the node's `file` path). To create, edit, move, or link nodes, ask the canvas agent. `summary` / `preview` are short scan hints, not the full content.";
 
 /**
  * Render the `<selected_nodes>` block, or `undefined` when the turn has
@@ -40,7 +39,7 @@ export function renderSelectedNodesSection(
   return [
     '<selected_nodes>',
     intro,
-    renderAgentNodeList(refs, { includeFileName: profile.includeFileName }),
+    renderNodes(refs),
     '</selected_nodes>',
   ].join('\n');
 }

@@ -5,6 +5,7 @@ import {
   coalesceChanges,
   extractCanvasChanges,
   fingerprintNodeFields,
+  nodeRevision,
   invertDeltas,
   type Delta,
 } from '../index.js';
@@ -75,6 +76,35 @@ describe('fingerprintNodeFields', () => {
     expect(fingerprintNodeFields(n, ['a', 'b'])).toBe(
       fingerprintNodeFields(n, ['b', 'a']),
     );
+  });
+});
+
+describe('nodeRevision', () => {
+  it('is stable for equal authored content', () => {
+    expect(nodeRevision(note('n', { content: 'A' }))).toBe(
+      nodeRevision(note('n', { content: 'A' })),
+    );
+  });
+
+  it('moves when the body (`content`) or media ref (`src`) changes', () => {
+    expect(nodeRevision(note('n', { content: 'A' }))).not.toBe(
+      nodeRevision(note('n', { content: 'B' })),
+    );
+    expect(nodeRevision(note('n', { src: 'artifact-1.png' }))).not.toBe(
+      nodeRevision(note('n', { src: 'artifact-2.png' })),
+    );
+  });
+
+  it('ignores auto-derived / cosmetic fields (label, summary, keywords, style)', () => {
+    const a = note('n', { content: 'A', label: 'X', summary: 's1' });
+    const b = note('n', {
+      content: 'A',
+      label: 'Y',
+      summary: 's2',
+      keywords: ['k'],
+      style: { color: 'red' },
+    });
+    expect(nodeRevision(a)).toBe(nodeRevision(b));
   });
 });
 

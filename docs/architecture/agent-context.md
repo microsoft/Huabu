@@ -78,11 +78,50 @@ The envelope splits "where the user pointed this turn" into orthogonal parts ([e
 
 Key differences: **selection / anchor point at existing canvas nodes** (enriched with a `preview` via node-ref; content via tools); **attachment is a one-off off-canvas asset** (content inlined directly). Anchor is "a single focus point + neighbourhood"; selection is "a set of node metadata".
 
-For both selection and anchor, the server enriches each node ref via [node-ref.ts](../../apps/server/src/modules/agent/node-ref.ts) with `filename` (`nodes/<safeLabel>.md`) + `preview` (ladder `summary > content[:120] > src`), plus the parent label for frames. **No content / geometry sent** — content via `read("nodes/<id>.md")`, layout/style via `inspect_nodes`.
+For both selection and anchor, the server enriches each node into an agent-facing object via the shared `describeNode` assembler (see §5) — `file` (`nodes/<safeLabel>.md`) + `preview` (ladder `summary > content[:120] > src`) + `rev`, plus the parent label for frames. **No content / geometry sent** — content via `read("nodes/<id>.md")`, layout/style via `inspect_nodes`.
 
 ---
 
-## 5. Tools (fetch the rest on demand)
+## 5. How a node becomes context (`describeNode` / `renderNodes`)
+
+Every node that reaches the model — a selected node, a neighbour, an outline/inspect row — is assembled by **one** function and (for prompt text) rendered by **one** translator. This is the single place the node's `label / file / preview / rev` shape is decided, so the call sites cannot drift.
+
+Code: [node-prompt.ts](../../apps/server/src/modules/canvas/node-prompt.ts) (assemble) + [node-element.ts](../../apps/server/src/modules/agent/conversation/prompt/node-element.ts) (`renderNodes`).
+
+### 5.1 `describeNode(store, input, level)` — node → data object
+
+ONE rule: **the node carries whatever authored info the caller already has; anything missing (label / body / summary / src) is filled from the node's on-disk `.md` sidecar** — the canonical source. `canvas.json` never persists `data.label` and strips note bodies, so a caller holding only the raw canvas node hands in almost nothing and the sidecar supplies the rest (the caller's own value wins when present — e.g. the client wire `label` on a selection).
+
+`level` is what the caller claims it needs:
+
+| level       | shape              | fields                                       |
+| ----------- | ------------------ | -------------------------------------------- |
+| `'preview'` | `AgentNodePreview` | id, type, label, **file**, preview, **rev**  |
+| `'outline'` | `AgentNodeOutline` | preview + position, size, parentFrame, style |
+
+Both agent-facing levels **always carry `rev`** (the freshness / CAS token — see [agent-node-freshness-cas-plan](../proposals/agent-node-freshness-cas-plan.md)). The rev-less L0 `ref` is **deliberately not** an agent-facing shape: a node without `rev` can't participate in re-read / write-guard, so it stays internal to the pure ref builder. Parent-frame labels (a bare string, not a node) use `nodeLabel(store, id)`.
+
+`file` is `nodes/<safeLabel>.md`, derived from the (sidecar) label — the same path the RFS serves and whose `ETag` equals `rev`. Sourcing the label from the sidecar is what keeps that path real; reading it from `canvas.json` (always empty) would collapse it to a dead `nodes/<id>.md`.
+
+### 5.2 `renderNodes(nodes)` — data object → `<node/>` XML
+
+The single translator from data objects to the `<node id=… type=… label=… file=… rev=… preview=… />` elements the prompt shows. `file=` is always emitted — both backends address a node by its path (built-in `read()`s it; external/ACP downloads it over the RFS). Used by `<selected_nodes>` and `<canvas_neighbourhood>`.
+
+**JSON tool results skip rendering:** `get_canvas_outline` / `inspect_nodes` return the `describeNode(…, 'outline')` objects directly as JSON; only the two XML prompt blocks go through `renderNodes`.
+
+### 5.3 Where each caller plugs in
+
+| Caller                                 | Assemble                                               | Render        | Medium |
+| -------------------------------------- | ------------------------------------------------------ | ------------- | ------ |
+| selection `<selected_nodes>`           | `describeNode(store, wireNode, 'preview')`             | `renderNodes` | XML    |
+| neighbourhood `<canvas_neighbourhood>` | `describeNode(store, spatialNode, 'preview')` per node | `renderNodes` | XML    |
+| `get_canvas_outline` / `inspect_nodes` | `describeNode(store, spatialNode, 'outline')`          | — (direct)    | JSON   |
+
+The envelope stores the **data objects** (not pre-rendered strings): the same node is rendered per-backend, so rendering is deferred to `renderNodes` at serialization time.
+
+---
+
+## 6. Tools (fetch the rest on demand)
 
 [tools/definitions.ts](../../apps/server/src/modules/agent/tools/definitions.ts), assigned by each agent's `tools` frontmatter:
 
@@ -102,7 +141,7 @@ Skills are not tools (injection in §3.2). Spatial geometry primitives are in [c
 
 ---
 
-## 6. Intent path
+## 7. Intent path
 
 Single LLM call, full `IntentContext` shipped ([intent.route.ts](../../apps/server/src/modules/agent/intent.route.ts) → [intent.service.ts](../../apps/server/src/modules/agent/intent.service.ts)): all node skeletons + edge pairs + `recentActions` (~10-item ring buffer, no timestamps) + an optional annotated screenshot + selection. Workspace memory is truncated to ~2000 chars. No tool loop.
 
@@ -110,18 +149,18 @@ Single LLM call, full `IntentContext` shipped ([intent.route.ts](../../apps/serv
 
 ---
 
-## 7. Code entry points
+## 8. Code entry points
 
-| Concern                 | File                                                                                                                                                                                                               |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Context types           | [agent/context.ts](../../packages/shared/src/types/agent/context.ts)                                                                                                                                               |
-| Web assembly            | [canvasStore.ts](../../apps/web/src/store/canvasStore.ts)                                                                                                                                                          |
-| Chat route              | [agent.route.ts](../../apps/server/src/modules/agent/agent.route.ts)                                                                                                                                               |
-| Turn envelope           | [conversation/envelope.ts](../../apps/server/src/modules/agent/conversation/envelope.ts)                                                                                                                           |
-| History rebuild         | [conversation/transcript/history.ts](../../apps/server/src/modules/agent/conversation/transcript/history.ts)                                                                                                       |
-| Selected-node refs      | [node-ref.ts](../../apps/server/src/modules/agent/node-ref.ts)                                                                                                                                                     |
-| Tool defs / executor    | [tools/definitions.ts](../../apps/server/src/modules/agent/tools/definitions.ts) · [tools/executor.ts](../../apps/server/src/modules/agent/tools/executor.ts)                                                      |
-| Intent                  | [intent.route.ts](../../apps/server/src/modules/agent/intent.route.ts) · [intent.service.ts](../../apps/server/src/modules/agent/intent.service.ts)                                                                |
-| System prompts          | [prompt/agents/](../../apps/server/src/prompt/agents) (ask / operate / sketch / intent / memory each an AGENT.md, loaded by loader.ts)                                                                             |
-| Skill injection         | [skills/catalogue.ts](../../apps/server/src/prompt/skills/catalogue.ts) (catalogue) · [conversation/prompt/invoked-skills.ts](../../apps/server/src/modules/agent/conversation/prompt/invoked-skills.ts) (invoked) |
-| Spatial / neighbourhood | [canvas-spatial.ts](../../apps/server/src/modules/canvas/canvas-spatial.ts) · [node-neighbourhood.ts](../../apps/server/src/modules/canvas/node-neighbourhood.ts)                                                  |
+| Concern                 | File                                                                                                                                                                                                                                                                                                                   |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Context types           | [agent/context.ts](../../packages/shared/src/types/agent/context.ts)                                                                                                                                                                                                                                                   |
+| Web assembly            | [canvasStore.ts](../../apps/web/src/store/canvasStore.ts)                                                                                                                                                                                                                                                              |
+| Chat route              | [agent.route.ts](../../apps/server/src/modules/agent/agent.route.ts)                                                                                                                                                                                                                                                   |
+| Turn envelope           | [conversation/envelope.ts](../../apps/server/src/modules/agent/conversation/envelope.ts)                                                                                                                                                                                                                               |
+| History rebuild         | [conversation/transcript/history.ts](../../apps/server/src/modules/agent/conversation/transcript/history.ts)                                                                                                                                                                                                           |
+| Node → context assembly | [node-prompt.ts](../../apps/server/src/modules/canvas/node-prompt.ts) (`describeNode` / `nodeLabel`) · [node-ref.ts](../../apps/server/src/modules/agent/node-ref.ts) (pure ref/preview/outline builders) · [node-element.ts](../../apps/server/src/modules/agent/conversation/prompt/node-element.ts) (`renderNodes`) |
+| Tool defs / executor    | [tools/definitions.ts](../../apps/server/src/modules/agent/tools/definitions.ts) · [tools/executor.ts](../../apps/server/src/modules/agent/tools/executor.ts)                                                                                                                                                          |
+| Intent                  | [intent.route.ts](../../apps/server/src/modules/agent/intent.route.ts) · [intent.service.ts](../../apps/server/src/modules/agent/intent.service.ts)                                                                                                                                                                    |
+| System prompts          | [prompt/agents/](../../apps/server/src/prompt/agents) (ask / operate / sketch / intent / memory each an AGENT.md, loaded by loader.ts)                                                                                                                                                                                 |
+| Skill injection         | [skills/catalogue.ts](../../apps/server/src/prompt/skills/catalogue.ts) (catalogue) · [conversation/prompt/invoked-skills.ts](../../apps/server/src/modules/agent/conversation/prompt/invoked-skills.ts) (invoked)                                                                                                     |
+| Spatial / neighbourhood | [canvas-spatial.ts](../../apps/server/src/modules/canvas/canvas-spatial.ts) · [node-neighbourhood.ts](../../apps/server/src/modules/canvas/node-neighbourhood.ts)                                                                                                                                                      |

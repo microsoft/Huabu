@@ -150,6 +150,50 @@ export function fingerprintNodeFields(
 }
 
 /**
+ * A node's **revision token**: a deterministic djb2 hash over its authored
+ * content ({@link PRIMARY_CONTENT_KEYS} — `content` / `src`). Surfaced to
+ * agents as an `ETag` on RFS downloads and as `rev` in per-turn refs /
+ * neighbourhood, and (later) checked on the executor's content writes
+ * (compare-and-swap).
+ *
+ * Stateless and host-agnostic: recomputed from the node on demand, yielding
+ * the identical string on server (producer) and web / agent (consumer).
+ * Cosmetic (`style`), geometry, and auto-derived (`label` / `summary` /
+ * `keywords`) fields are excluded — the same discipline as CREATE
+ * fingerprinting — so a re-measure or a preprocessing regen never moves the
+ * revision and forces a needless re-read.
+ *
+ * IMPORTANT: `data.content` must be **hydrated** (the canonical on-disk
+ * `nodes/<label>.md` body). `canvas.json` deliberately strips `content` from
+ * node data (`stripNodesForCanvas`), so hashing a node straight off
+ * `getCanvasStore().read()` state would see an empty body and yield a constant
+ * rev. Callers hydrate via `store.readNode(id).content` first (the RFS lookup,
+ * the neighbourhood builder, and the executor's `hydrateNodes` all do), so the
+ * three sites agree.
+ */
+export function nodeRevision(node: CanvasNode | undefined): string {
+  return hashDataFields(nodeData(node), PRIMARY_CONTENT_KEYS);
+}
+
+/**
+ * {@link nodeRevision} for callers that hold the authored fields loosely
+ * rather than a whole {@link CanvasNode} — e.g. a ref builder that already
+ * extracted `content` / `src`, or the RFS lookup that hydrated the on-disk
+ * body. Only defined fields are hashed, so the result matches
+ * `nodeRevision(node)` for the equivalent node. Single source of truth for
+ * "which fields define a node's revision".
+ */
+export function nodeRevisionOf(fields: {
+  content?: string;
+  src?: string;
+}): string {
+  const data: Record<string, unknown> = {};
+  if (typeof fields.content === 'string') data.content = fields.content;
+  if (typeof fields.src === 'string') data.src = fields.src;
+  return hashDataFields(data, PRIMARY_CONTENT_KEYS);
+}
+
+/**
  * Invert a delta batch. To undo a sequence applied in order, invert each
  * delta and apply them in reverse order.
  */

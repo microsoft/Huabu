@@ -3,7 +3,6 @@ import { createId, type CanvasCommand } from '../../index.js';
 import { normalizeTreeOrder, type NestableNode } from '../frame/index.js';
 import { deduplicateLabel, generateNextLabel } from '../utils/labels.js';
 import { getNodeDefaultSize } from '../utils/nodeSizes.js';
-import { selectOnly } from '../utils/selection.js';
 
 import type { Node } from '@xyflow/react';
 
@@ -135,26 +134,17 @@ const createNodes: CommandDefinition<Cmd> = {
     }
 
     // ---------------------------------------------------------------
-    // 4. Normalize tree order and select new nodes.
+    // 4. Normalize tree order.
     //
-    // Sketch nodes are intentionally excluded from
-    // auto-selection: drawing many strokes in a row should not keep
-    // hijacking the selection (which would dismiss other toolbars and
-    // scroll the canvas around). When the entire batch is sketches we
-    // skip `selectOnly` entirely so any pre-existing selection is
-    // preserved.
+    // Newly-created nodes are intentionally NOT auto-selected: doing so
+    // would clobber the user's existing selection, dismiss open toolbars
+    // and scroll the canvas around. Any pre-existing selection is
+    // preserved verbatim.
     // ---------------------------------------------------------------
-    const orderedNodes = normalizeTreeOrder([
+    const finalNodes = normalizeTreeOrder([
       ...state.nodes,
       ...newNodes,
     ] as NestableNode[]);
-    const newSelectedIds = newNodes
-      .filter((n) => n.type !== 'sketch')
-      .map((n) => n.id);
-    const finalNodes =
-      newSelectedIds.length > 0
-        ? selectOnly(orderedNodes, newSelectedIds)
-        : orderedNodes;
 
     // ---------------------------------------------------------------
     // 5. Position is honoured verbatim — every caller (UI gestures and

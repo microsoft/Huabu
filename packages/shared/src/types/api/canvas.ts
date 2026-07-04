@@ -56,7 +56,12 @@ export const putNodeContentBodySchema = z.object({
    * server (409 on collision); `'agent'` / `'auto'` use lazy dedupe.
    */
   labelSource: z.enum(['user', 'auto', 'agent']).optional(),
-  /** External URL or `artifacts/<file>` reference (source-backed nodes only). */
+  /**
+   * Media source for source-backed nodes. Accepts a staged upload path
+   * (`upload/<name>`), a bare artifact key (`artifact-…` / `gen-…`), or an
+   * `https://…` URL; the server relocates / downloads it into the artifact
+   * store and persists a bare key.
+   */
   src: z.string().optional(),
   /** AI-derived one-line summary persisted to frontmatter. */
   summary: z.string().optional(),

@@ -19,13 +19,15 @@
  * than overridden. See {@link mergeSkill}.
  *
  * Frontmatter must include:
- *   - id          string, must match the directory name
  *   - name        human-readable label
  *   - description short catalogue blurb
  *   - appliesTo   array of agent surfaces (ask | operate | sketch | external)
  * Optional:
  *   - triggers    string[] (catalogue ranking hints, unused in phase 1)
  *   - version     number
+ *
+ * The skill `id` is derived from the directory name — it is **not** a
+ * frontmatter key. A stray `id:` in frontmatter is ignored.
  *
  * System-skill validation failures throw at load time so a malformed
  * shipped skill cannot ship silently. User-skill validation failures
@@ -140,12 +142,7 @@ export const SYSTEM_SKILLS_DIR = existsSync(BUNDLED_SKILLS_DIR)
 
 // ─── Validation ─────────────────────────────────────────────────────────────
 
-const REQUIRED_FRONTMATTER_KEYS = [
-  'id',
-  'name',
-  'description',
-  'appliesTo',
-] as const;
+const REQUIRED_FRONTMATTER_KEYS = ['name', 'description', 'appliesTo'] as const;
 
 const VALID_SCOPES: ReadonlySet<SkillScope> = new Set<SkillScope>([
   'ask',
@@ -168,12 +165,10 @@ function validateFrontmatter(
     }
   }
 
-  const id = String(raw.id);
-  if (id !== expectedId) {
-    throw new Error(
-      `[skill-loader] ${sourcePath}: frontmatter id "${id}" does not match directory name "${expectedId}"`,
-    );
-  }
+  // The directory name is the single source of truth for the id. Any
+  // `id:` in frontmatter is ignored (it used to be required and had to
+  // match the directory name — now it is simply redundant).
+  const id = expectedId;
 
   const appliesToRaw = Array.isArray(raw.appliesTo) ? raw.appliesTo : null;
   if (!appliesToRaw || appliesToRaw.length === 0) {

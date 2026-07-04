@@ -35,11 +35,22 @@ import type {
  * `ToolResponse<…>` envelope. Mirrors the legacy `role:'tool'`
  * reconstruction logic — preserved here because every rich-variant
  * tool part carries this envelope as its `data` field.
+ *
+ * `isError` is the pi-agent-core flag set when the tool handler threw
+ * (e.g. `read` on a missing path). Such results carry a plain message,
+ * not a JSON envelope, so we map them to a `status: 'error'` response
+ * with the message preserved — otherwise the `catch` below would
+ * mislabel a failed call as a successful one with the error text buried
+ * in `data.content`, and the UI could not tell success from failure.
  */
 function parseToolResultText(
   toolName: string,
   resultText: string,
+  isError = false,
 ): ToolResponse<string, unknown> {
+  if (isError) {
+    return { tool: toolName, status: 'error', error: resultText };
+  }
   try {
     const parsed = JSON.parse(resultText);
     if (
@@ -80,15 +91,22 @@ function parseToolResultText(
  */
 function indexToolResults(
   msgs: readonly PiMessage[],
-): Map<string, { toolName: string; resultText: string }> {
-  const map = new Map<string, { toolName: string; resultText: string }>();
+): Map<string, { toolName: string; resultText: string; isError: boolean }> {
+  const map = new Map<
+    string,
+    { toolName: string; resultText: string; isError: boolean }
+  >();
   for (const m of msgs) {
     if (m.role === 'toolResult') {
       const resultText = m.content
         .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
         .map((b) => b.text)
         .join('');
-      map.set(m.toolCallId, { toolName: m.toolName ?? 'unknown', resultText });
+      map.set(m.toolCallId, {
+        toolName: m.toolName ?? 'unknown',
+        resultText,
+        isError: m.isError === true,
+      });
     }
   }
   return map;
@@ -119,7 +137,10 @@ function extractUserText(msg: Extract<PiMessage, { role: 'user' }>): string {
  */
 function buildAssistantParts(
   msg: AssistantMessage,
-  toolResultByCallId: Map<string, { toolName: string; resultText: string }>,
+  toolResultByCallId: Map<
+    string,
+    { toolName: string; resultText: string; isError: boolean }
+  >,
   toolExtras: Record<string, ToolAcpExtension> | undefined,
 ): AssistantHistoryPart[] {
   const parts: AssistantHistoryPart[] = [];
@@ -160,14 +181,37 @@ function buildAssistantParts(
         ...(extras?.permission ? { permission: extras.permission } : {}),
       };
       switch (variant) {
-        case 'agent_tool':
+        case 'agent_tool': {
+          // Fold the call's input args UNDER the result payload (result
+          // wins), mirroring the live stream (`applyInternalToolResult`).
+          // This surfaces query params the result doesn't echo — e.g. a
+          // `find` / `grep` `pattern` — so the UI can show WHAT was
+          // searched, WITHOUT the tool echoing its own input back into
+          // the model-visible result.
+          const args =
+            block.arguments && typeof block.arguments === 'object'
+              ? (block.arguments as Record<string, unknown>)
+              : undefined;
+          const data =
+            toolData && toolData.status === 'success' && args
+              ? {
+                  ...toolData,
+                  data: {
+                    ...args,
+                    ...((toolData.data as
+                      | Record<string, unknown>
+                      | undefined) ?? {}),
+                  },
+                }
+              : toolData;
           parts.push({
             ...base,
             variant: 'agent_tool',
             toolName,
-            ...(toolData ? { data: toolData } : {}),
+            ...(data ? { data } : {}),
           });
           break;
+        }
         case 'canvas_commands':
           parts.push({
             ...base,

@@ -13,11 +13,11 @@
  *      loads the canvas, normalises geometry via the shared
  *      `buildSpatialBundle`, owns the preview-extraction policy
  *      (label > content[:120] > src), and feeds the algorithm.
- *   3. Renderer — `serializeNodeNeighbourhood(ctx, { includeFileName })`
+ *   3. Renderer — `serializeNodeNeighbourhood(ctx)`
  *      serialises the structured context into the XML block that sits
- *      inside `<canvas_neighbourhood>`. Each backend calls it with its
- *      own `includeFileName` (built-in reads by path, ACP by id), so the two
- *      stay in lock-step the same way `<selected_nodes>` does.
+ *      inside `<canvas_neighbourhood>`. Both backends address a node by
+ *      its `file=` path, so the two stay in lock-step the same way
+ *      `<selected_nodes>` does.
  *
  * Originally driven by question nodes (`useQuestionRunner` ships the
  * question node id as the anchor), but anchor-type agnostic.
@@ -37,14 +37,12 @@ import {
 } from '@sediment/shared';
 
 import { buildSpatialBundle } from './canvas-spatial.js';
+import { describeNode } from './node-prompt.js';
 import {
   escapeXmlAttr,
-  renderAgentNodeList,
+  renderNodes,
 } from '../agent/conversation/prompt/node-element.js';
-import {
-  buildAgentNodePreview,
-  extractAgentNodePreview,
-} from '../agent/node-ref.js';
+import { buildAgentNodePreview } from '../agent/node-ref.js';
 import { getCanvasStore } from '../storage/index.js';
 
 import type { AgentNodePreview } from '../agent/node-ref.js';
@@ -82,45 +80,21 @@ export function getNodeNeighbourhood(
   if (!target) return null;
 
   const store = getCanvasStore(canvasId);
-  const cache = new Map<string, string | undefined>();
-  const getPreview = (nodeId: string): string | undefined => {
-    if (cache.has(nodeId)) return cache.get(nodeId);
-
-    const raw = bundle.rawById.get(nodeId);
-    const data = raw?.data;
-    // Always consult the on-disk frontmatter: note-style nodes keep
-    // their body there, and the cost is amortised by the per-call
-    // cache above. `readNode` returns `null` for nodes without a
-    // sidecar (e.g. transient image/web nodes) — that's fine, we just
-    // fall through to inline `data.content` / `data.src`.
-    const meta = store.readNode(nodeId);
-    const metaRecord = meta as Record<string, unknown> | null;
-    const dataRecord = data as Record<string, unknown> | undefined;
-
-    // Single shared ladder: summary > content[:120] > src. `content`
-    // prefers the on-disk body (canonical for note nodes); inline
-    // `data.content` covers text-on-canvas nodes whose body never
-    // touches disk.
-    const preview = extractAgentNodePreview({
-      id: nodeId,
-      type: (raw?.type ?? 'note') as CanvasNodeType,
-      summary:
-        typeof metaRecord?.summary === 'string'
-          ? (metaRecord.summary as string)
-          : undefined,
-      content:
-        typeof meta?.content === 'string' && meta.content
-          ? meta.content
-          : typeof data?.content === 'string'
-            ? data.content
-            : undefined,
-      src:
-        typeof dataRecord?.src === 'string'
-          ? (dataRecord.src as string)
-          : undefined,
-    });
-
-    cache.set(nodeId, preview);
+  const cache = new Map<string, AgentNodePreview>();
+  // One assembler for every neighbour: the node carries whatever the spatial
+  // bundle knows (id / type; its `data.label` is always empty), and
+  // `describeNode` fills label + body from the sidecar, then derives the
+  // `file=` path, preview line, and `rev` token (in lock-step with the RFS
+  // `ETag`). Memoized so a node referenced twice is read once.
+  const describe = (n: SpatialNode): AgentNodePreview => {
+    const hit = cache.get(n.id);
+    if (hit) return hit;
+    const preview = describeNode(
+      store,
+      { id: n.id, type: n.type, ...(n.label ? { label: n.label } : {}) },
+      'preview',
+    );
+    cache.set(n.id, preview);
     return preview;
   };
 
@@ -128,7 +102,7 @@ export function getNodeNeighbourhood(
     target,
     bundle.spatialNodes,
     bundle.edges,
-    getPreview,
+    describe,
   );
 }
 
@@ -220,7 +194,7 @@ export function buildNodeNeighbourhoodContext(
   anchorNode: SpatialNode,
   allNodes: SpatialNode[],
   edges: ReadonlyArray<{ source: string; target: string }>,
-  getPreview?: (nodeId: string) => string | undefined,
+  describe?: (node: SpatialNode) => AgentNodePreview,
   opts?: { maxDistance?: number },
 ): NodeNeighbourhoodContext {
   const nodeById = new Map(allNodes.map((n) => [n.id, n]));
@@ -250,7 +224,7 @@ export function buildNodeNeighbourhoodContext(
         currentRef,
         siblings,
         nodeById,
-        getPreview,
+        describe,
       ).filter((g) => g._minEdgeDist <= maxDistance);
       layers.push({
         frameId: frame.id,
@@ -328,11 +302,12 @@ export function buildNodeNeighbourhoodContext(
           frameId: f.id,
           frameLabel: f.label,
           nodes: [
-            buildAgentNodePreview({
-              id: f.id,
-              type: 'frame' as CanvasNodeType,
-              label: f.label,
-            }),
+            describe?.(f) ??
+              buildAgentNodePreview({
+                id: f.id,
+                type: 'frame' as CanvasNodeType,
+                ...(f.label ? { label: f.label } : {}),
+              }),
           ],
         });
       }
@@ -342,7 +317,7 @@ export function buildNodeNeighbourhoodContext(
         currentRef,
         looseNodes,
         nodeById,
-        getPreview,
+        describe,
       );
       outerGroups.push(...looseGroups);
 
@@ -389,7 +364,7 @@ function buildGroupsFromNodes(
   ref: SpatialNode,
   nodes: SpatialNode[],
   nodeById: Map<string, SpatialNode>,
-  getPreview?: (nodeId: string) => string | undefined,
+  describe?: (node: SpatialNode) => AgentNodePreview,
 ): SpatialGroup[] {
   if (nodes.length === 0) return [];
 
@@ -422,16 +397,15 @@ function buildGroupsFromNodes(
         dy: offset.dy,
         _minEdgeDist: edgeDist,
         arrangement,
-        nodes: ordered.map((n) => {
-          const preview = getPreview?.(n.id);
-          const ref = buildAgentNodePreview({
-            id: n.id,
-            type: (n.type ?? 'note') as CanvasNodeType,
-            label: n.label,
-          });
-          if (preview) ref.preview = preview;
-          return ref;
-        }),
+        nodes: ordered.map(
+          (n) =>
+            describe?.(n) ??
+            buildAgentNodePreview({
+              id: n.id,
+              type: (n.type ?? 'note') as CanvasNodeType,
+              ...(n.label ? { label: n.label } : {}),
+            }),
+        ),
       };
 
       // Only set frame fields when a parent frame exists.
@@ -487,26 +461,21 @@ function minEdgeDistFromCluster(
  * sits inside `<canvas_neighbourhood>`. Each spatial group becomes a
  * `<group>` element carrying its `direction` / `arrangement` / `frame`
  * as attributes and wrapping the same `<node>` elements
- * {@link renderAgentNodeList} emits for `<selected_nodes>` — so a
- * neighbourhood node is addressable (id + optional `file` + `preview`)
+ * {@link renderNodes} emits for `<selected_nodes>` — so a
+ * neighbourhood node is addressable (id + `file` + `preview`)
  * exactly like a selected one, instead of an un-actionable bullet line.
  * Cross-group edges are listed under `<connections>` as `<edge>`
  * elements (both endpoints carry the node id plus a `*-label` hint).
  *
- * `opts.includeFileName` is threaded straight to {@link renderAgentNodeList}:
- * the built-in agent reads by the pre-computed `nodes/<file>.md` path
- * (`includeFileName: true`), while the external/ACP agent downloads by
- * that same path over the RFS (`GET ${HUABU_RFS_URL}/download/<file>`).
- * The two backends therefore serialize the
- * SAME structured context differently, mirroring `<selected_nodes>`.
+ * Both backends address a node by its `file=` path (the built-in agent
+ * `read()`s it; the external/ACP agent downloads it over the RFS), so the
+ * two serialize the SAME structured context identically.
  *
  * Kept separate from {@link getNodeNeighbourhood} so it can be
- * unit-tested without touching the canvas store, and so each backend can
- * pick its own `includeFileName`.
+ * unit-tested without touching the canvas store.
  */
 export function serializeNodeNeighbourhood(
   ctx: NodeNeighbourhoodContext,
-  opts: { includeFileName?: boolean } = {},
 ): string {
   const blocks: string[] = [];
 
@@ -533,13 +502,7 @@ export function serializeNodeNeighbourhood(
         .filter(Boolean)
         .join(' ');
       blocks.push(
-        [
-          `<group ${attrs}>`,
-          renderAgentNodeList(g.nodes, {
-            includeFileName: opts.includeFileName,
-          }),
-          '</group>',
-        ].join('\n'),
+        [`<group ${attrs}>`, renderNodes(g.nodes), '</group>'].join('\n'),
       );
     }
   }

@@ -57,6 +57,14 @@ export interface ToolBuildContext {
   origin?: NodeOrigin;
   /** ACP conversation thread to attribute canvas changes to. */
   threadId?: string;
+  /**
+   * Run-scoped read-set: `nodeId → authored-content rev` the agent has
+   * seen this run (seeded from the turn's node refs, updated by `read`).
+   * `canvas_commands` auto-injects `expectRev` from it so content writes
+   * carry the rev the agent last saw, and the executor's CAS can reject a
+   * stale (or never-read) overwrite. Ephemeral — one Map per `runAgent`.
+   */
+  readSet?: Map<string, string>;
 }
 
 /**
@@ -105,6 +113,7 @@ function toAgentTool(def: ToolDefinition, ctx: ToolBuildContext): AgentTool {
           canvasId: ctx.canvasId,
           origin: ctx.origin,
           threadId: ctx.threadId,
+          readSet: ctx.readSet,
         },
       );
       // Handlers may return either a plain string (the common text

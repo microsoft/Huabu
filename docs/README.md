@@ -5,6 +5,9 @@ For what the product is and how to run it, see the [root README](../README.md).
 For agent and contributor rules, see
 [`.github/copilot-instructions.md`](../.github/copilot-instructions.md).
 
+For **diagnosing slow or misbehaving agents** (built-in Huabu agents or external
+ACP agents), see [agent-diagnosis-guide.md](./agent-diagnosis-guide.md).
+
 ---
 
 ## How this folder is organized

@@ -42,6 +42,7 @@ import {
   makeNodeLookup,
   normalizeRel,
   safeResolve,
+  toPhysicalRel,
   walk,
 } from './fs-sandbox.js';
 
@@ -153,8 +154,14 @@ export async function handleGrep(args: GrepArgs): Promise<string> {
   //
   // Also: a glob without `/` is treated as "match at any depth" so
   // `*.md` finds `nodes/sub/foo.md`. Same convention as `find`.
+  //
+  // A clean virtual prefix (`upload/`, `artifacts/`) is normalized to its
+  // hidden on-disk form first so it matches the physical relPaths walk emits.
+  const physGlob = glob ? toPhysicalRel(glob) : glob;
   const effectiveGlob =
-    glob && !glob.includes('/') && !glob.startsWith('**') ? `**/${glob}` : glob;
+    physGlob && !physGlob.includes('/') && !physGlob.startsWith('**')
+      ? `**/${physGlob}`
+      : physGlob;
   const globRe = effectiveGlob ? globToRegExp(effectiveGlob) : null;
   const effectiveLimit = Math.max(1, limit ?? DEFAULT_GREP_LIMIT);
   const ctxN = Math.max(0, ctxLines ?? 0);
@@ -264,8 +271,13 @@ export async function handleFind(args: FindArgs): Promise<string> {
   }
 
   // Mirror pi/fd: a pattern without "/" matches any depth. With "/" it
-  // anchors to the relative path under the search root.
-  const effectivePattern = pattern.includes('/') ? pattern : `**/${pattern}`;
+  // anchors to the relative path under the search root. A clean virtual
+  // prefix (`upload/`, `artifacts/`) is normalized to its hidden on-disk
+  // form first so it matches the physical relPaths walk emits.
+  const physPattern = toPhysicalRel(pattern);
+  const effectivePattern = physPattern.includes('/')
+    ? physPattern
+    : `**/${physPattern}`;
   let regex: RegExp;
   try {
     regex = globToRegExp(effectivePattern);

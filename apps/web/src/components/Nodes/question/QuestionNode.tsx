@@ -31,6 +31,21 @@ export type QuestionNodeType = Node<CanvasQuestionNodeData, 'question'>;
 const STICKY_BG = 'var(--question-bg)';
 
 /**
+ * Max characters of the first message shown on the node while the
+ * generated `label` is still pending. Bounds the auto-sized footprint
+ * so a very long first message doesn't blow the node up (and so the
+ * later swap to the shorter label barely changes size).
+ */
+const PREVIEW_MAX_CHARS = 80;
+
+/** Trim the first-message fallback to a short, single-block preview. */
+function truncatePreview(text: string): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= PREVIEW_MAX_CHARS) return trimmed;
+  return `${trimmed.slice(0, PREVIEW_MAX_CHARS).trimEnd()}…`;
+}
+
+/**
  * Question node — a canvas anchor for a chat thread.
  *
  * It no longer hosts an inline editor or an auto-run countdown. Instead:
@@ -49,6 +64,16 @@ export const QuestionNode = memo(
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
     const inputContent = typeof data.content === 'string' ? data.content : '';
+    const label = typeof data.label === 'string' ? data.label.trim() : '';
+
+    // On-canvas anchor text. Prefer the generated `label` (a concise
+    // title) once preprocessing produced one; fall back to a truncated
+    // preview of the first message while the label is still pending
+    // (compose / mid-generation). Truncating the fallback keeps the
+    // auto-sized footprint bounded, so the eventual swap to the (usually
+    // shorter) label is at most a small, `transition-all`-animated size
+    // change rather than a large jump from a very long first message.
+    const displayText = label || truncatePreview(inputContent);
 
     // ------------------------------------------------------------------
     // Shared surface (auto-size + read-only body prop bundles).
@@ -60,7 +85,7 @@ export const QuestionNode = memo(
       nodeId: id,
       width,
       isEditing: false,
-      content: inputContent,
+      content: displayText,
       baseFontSize: 16,
       padding: NODE_PADDING,
       fontOpts,

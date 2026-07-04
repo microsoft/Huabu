@@ -29,9 +29,35 @@ import {
   executeOnServer,
 } from '../../../canvas/canvas-executor.js';
 
-import type { CanvasCommand, NodeOrigin } from '@sediment/shared';
+import type {
+  CanvasCommand,
+  ExecuteConflict,
+  NodeOrigin,
+} from '@sediment/shared';
 
 const log = getLogger('tool.canvas-commands');
+
+/**
+ * Build a concise, model-facing instruction for a rejected content write.
+ * The model cannot hand-carry `expectRev` (it is injected only from the
+ * run's read-set, populated by `read`), so a `not-read` conflict is only
+ * cleared by actually reading the node — NOT by retrying the same command.
+ * Spelling that out here stops the blind identical-retry loop.
+ */
+function buildConflictHint(conflicts: readonly ExecuteConflict[]): string {
+  const parts: string[] = [];
+  if (conflicts.some((c) => c.reason === 'not-read')) {
+    parts.push(
+      'Read before write: `read` the conflicted node(s) first, then re-issue. Retrying as-is fails again.',
+    );
+  }
+  if (conflicts.some((c) => c.reason === 'stale')) {
+    parts.push(
+      'Node(s) changed since your last read — re-`read`, then re-issue.',
+    );
+  }
+  return parts.join(' ');
+}
 
 /**
  * Args type for `handleCanvasCommands`. Intentionally kept loose
@@ -64,7 +90,7 @@ const DEFAULT_ORIGIN: NodeOrigin = { type: 'ai-operate' };
 export async function handleCanvasCommands(
   args: CanvasCommandsArgs,
   origin: NodeOrigin = DEFAULT_ORIGIN,
-  opts?: { threadId?: string },
+  opts?: { threadId?: string; readSet?: Map<string, string> },
 ): Promise<string> {
   log.info(
     {
@@ -103,13 +129,32 @@ export async function handleCanvasCommands(
           const patch =
             (entry.patch as Record<string, unknown> | undefined) ?? {};
           const hasLabel = typeof patch.label === 'string';
-          if (hasLabel) {
-            return {
-              ...entry,
-              patch: { ...patch, labelSource: 'agent' as const },
-            };
-          }
-          return entry;
+          // Auto-inject the compare-and-swap token for body rewrites: the
+          // rev the agent last saw for this node (from the run's read-set —
+          // seeded from context, updated by `read`). Only for `content`
+          // writes (the executor's CAS scope) and only when the agent didn't
+          // already supply one. Absent when the node was never read this run
+          // → the executor rejects it as a blind write. `src` is NOT guarded
+          // (a short pointer, never reached via a sidecar read), so it is
+          // never injected here.
+          const nodeId =
+            typeof entry.nodeId === 'string' ? entry.nodeId : undefined;
+          const rewritesContent = 'content' in patch;
+          const injectedRev =
+            rewritesContent &&
+            entry.expectRev === undefined &&
+            nodeId !== undefined
+              ? opts?.readSet?.get(nodeId)
+              : undefined;
+          const nextPatch = hasLabel
+            ? { ...patch, labelSource: 'agent' as const }
+            : patch;
+          if (nextPatch === patch && injectedRev === undefined) return entry;
+          return {
+            ...entry,
+            patch: nextPatch,
+            ...(injectedRev !== undefined ? { expectRev: injectedRev } : {}),
+          };
         }),
       };
     }
@@ -216,6 +261,12 @@ export async function handleCanvasCommands(
       commands: result.commands,
       deltas: result.deltas,
       results: result.results,
+      ...(result.conflicts && result.conflicts.length > 0
+        ? {
+            conflicts: result.conflicts,
+            conflictHint: buildConflictHint(result.conflicts),
+          }
+        : {}),
       pendingEffects: {
         mutatedNodes: result.pendingEffects.mutatedNodes,
         deletedNodeIds: result.pendingEffects.deletedNodeIds,

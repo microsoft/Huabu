@@ -577,6 +577,17 @@ export class CanvasStore {
     return entry?.filename ?? `${sanitizeId(nodeId, 'nodeId')}.md`;
   }
 
+  /**
+   * Reverse of {@link nodeFilenameOf}: resolve a sidecar `filename`
+   * (basename, e.g. `My note.md`) back to the node id that currently owns
+   * it, or `null` when no sidecar claims that name. Backed by the same
+   * frontmatter-`id` index, so it is correct even when the filename does
+   * not match `toSafeFilename(label)` (dedupe suffixes, external renames).
+   */
+  nodeIdForFilename(filename: string): string | null {
+    return this.nodeIndex().findByName(filename)?.id ?? null;
+  }
+
   readNode(nodeId: string): NodeContent | null {
     const filename = this.nodeFilenameOf(nodeId);
     const fullPath = nodeFilePath(this.canvasId, filename);

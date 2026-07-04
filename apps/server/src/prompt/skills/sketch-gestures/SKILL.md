@@ -1,5 +1,4 @@
 ---
-id: sketch-gestures
 name: sketch-gestures
 description: Map freehand canvas sketch gestures (lines, loops, scribbles, "?" / "!" marks) to the canvas_commands invocations that realise them. Pipeline-only — not loaded by chat / operate / external agents.
 appliesTo: [sketch]
