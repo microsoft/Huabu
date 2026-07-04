@@ -283,7 +283,7 @@ agenetes.register(driver, { canvas: canvasPort /* in-process, DI */ });
 
 // (2) WorkloadSpec — serializable per-invocation customization (crosses the seam).
 interface WorkloadSpec {
-  kind: 'Job' | 'Deployment';  // completion semantics (§3.2) — NOT the driver selector
+  workloadKind: 'Job' | 'Deployment';  // completion semantics (§3.2) — NOT the driver selector; named to never collide with binding.kind
   binding: BindingSpec;     // dispatch discriminant + the driver-owned sub-spec (tools/session live here — §3.6.1)
   threadId: string;         // the slot / addressing key — L2 routes + persists on this alone (§3.6.1); L1 mints it, L2 treats it opaque
 }
@@ -324,7 +324,7 @@ Under these, "in-process" is a *transport optimisation of a serializable contrac
 | Layer | What | When | Non-serializable OK? | Crosses seam? |
 | ----- | ---- | ---- | -------------------- | ------------- |
 | **(1) Registration** | driver construction code + injected **host capability ports** (canvas, logger) | once | ✅ closures / live objects / in-process `import` all fine here | **no** — lives below the seam |
-| **(2) `WorkloadSpec`** | workload `kind` + `threadId` (the slot) + a `binding` carrying the driver-owned sub-spec (tool selection, `mode` / `session`) | per `create` | ❌ must be serializable | **yes** — the customization channel |
+| **(2) `WorkloadSpec`** | `workloadKind` + `threadId` (the slot) + a `binding` carrying the driver-owned sub-spec (tool selection, `mode` / `session`) | per `create` | ❌ must be serializable | **yes** — the customization channel |
 | **(3) Handle** | in-process binding; message I/O | per workload | (object is in-process) | I/O crosses; messages serializable |
 
 This yields the operating rule **"data customizes, code extends"**: a serializable spec *parameterises pre-registered capabilities* (pick this agent, this cwd, enable these tool names), but injecting *new behaviour* (a tool impl not in the registry, a new harness) is a **registration act** (code), not a spec. It is also exactly the [§3.5](#35-the-agent-definition-content-vs-mechanism-and-how-tools-bind) admission model — the spec *requests* tools by name; the registered driver must *carry* them.
@@ -354,7 +354,7 @@ Option **(c)** is the sweet spot for "extract Agenetes as a co-deployed library 
 
 ```ts
 interface WorkloadSpec {
-  kind: 'Job' | 'Deployment';                    // completion semantics (§3.2)
+  workloadKind: 'Job' | 'Deployment';           // completion semantics (§3.2)
   threadId: string;                           // the slot / addressing key — the only generic id L2 interprets
   binding:                                    // dispatch discriminant + a driver-owned sub-spec
     | { kind: 'internal'; agentId: AgentMode; spec: BuiltinAgentSpec }               // spec.tools, spec.model — the built-in agent spec
@@ -362,7 +362,7 @@ interface WorkloadSpec {
 }
 ```
 
-There are **two independent discriminants**, and conflating them is a naming trap: the **workload kind** (`Job`/`Deployment` — completion semantics, [§3.2](#32-workload-kinds-job-vs-deployment)) and the **binding kind** (`internal`/`external` — driver selection). The per-driver payload is nested under the binding as a sub-spec (`BuiltinAgentSpec` / `AcpSessionSpec`) whose schema the driver owns and `safeParse`-validates — so tool selection lives *inside* the built-in binding, never hoisted to the top level.
+There are **two independent discriminants**, and conflating them is a naming trap: the **workload kind** (the top-level `workloadKind: Job/Deployment` — completion semantics, [§3.2](#32-workload-kinds-job-vs-deployment)) and the **binding kind** (the nested `binding.kind: internal/external` — driver selection). The top-level field is deliberately named `workloadKind`, **not** `kind`, so it never collides with the already-shipped, persisted `binding.kind` ([acp.ts](../../packages/shared/src/types/api/acp.ts) `agentBindingSchema`) — which keeps its name unchanged. The per-driver payload is nested under the binding as a sub-spec (`BuiltinAgentSpec` / `AcpSessionSpec`) whose schema the driver owns and `safeParse`-validates — so tool selection lives *inside* the built-in binding, never hoisted to the top level.
 
 **`threadId` is the only caller-side identity L2 needs — it is a *slot*, not a description of who called.** L2 routes on it, caches the handle on it, and keys the durable log on it; it never interprets its structure (today L1 mints it via `createId('thread')` and stores it on a canvas `QuestionNode` — an L1 object). Everything the slot *represents* (which canvas, which node, which user) is **held by L1, indexed by `threadId`**, and never enters the L2 contract. This is already how the code behaves: the ACP session key ([`spawn-orchestrator.ts`](../../apps/server/src/modules/agent/acp/spawn-orchestrator.ts) `threadKey(_canvasId, threadId)`) deliberately **ignores `canvasId`**, and host-specific reachback context rides to the (possibly remote) agent as *injected spawn config* — `HUABU_RFS_URL = …/api/rfs/${canvasId}` — not as an L2 addressing field. So when a driver or a remote agent needs the slot's meaning, the **host** injects or resolves it through its own ports ([§3.6](#36-the-l1l2-binding-an-in-process-ari-handle-modelled-on-the-acp-client-role) layer 1); L2 core stays free of canvas/node concepts, exactly the extraction boundary [§6.1](#61-re-splitting-agentletserver-transport-vs-control-plane) draws for the RFS resource shape.
 
@@ -516,7 +516,7 @@ The layers are only real if these seams are stable. Each is already a zod-first 
 
 ```
 L1 ◀── Offering catalogue (agents/profiles + capabilities) ── L2   (discovery; mechanism-free, §3.6.1)
-L1 ── WorkloadSpec (kind + binding + prompt) ─▶ L2   (Job or Deployment; binding.kind selects the driver, §3.2/§3.6.1)
+L1 ── WorkloadSpec (workloadKind + binding + prompt) ─▶ L2   (Job or Deployment; binding.kind selects the driver, §3.2/§3.6.1)
 L1 ── ChatEnvelope ───────────────▶ L2      (prompt in; internal & external identical)
 L1 ◀── AgentStreamEvent ──────────── L2      (~14 SSE event types; no runtime leak)
 L1 ◀──▶ Control channel ──────────── L2      (host↔agent methods + notifications, capability-gated; in-process duplex, browser hop = SSE↓ + POST↑ bridge, §3.6.2)
@@ -529,7 +529,7 @@ L2 ◀──▶ RFS (curl) ────────────────  L3 
 | Seam    | Contract                       | Source of truth                                                                                       | Rule                                                                          |
 | ------- | ------------------------------ | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
 | L1 ↔ L2 | Offering catalogue (discovery) | [acp/profile-store.ts](../../apps/server/src/modules/agent/acp/profile-store.ts) *(nascent)*          | Exposes bindable offerings + capabilities; **never** driver names ([§3.6.1](#361-dispatch-driver-affinity-discovery--and-why-l2-is-not-a-scheduler)). |
-| L1 ↔ L2 | Workload spec (`kind` + `binding`) | [packages/shared/src/types/agent](../../packages/shared/src/types/agent) *(proposed)*             | `Job` vs `Deployment` is Agenetes-owned; `binding.kind` selects the driver; host fills the spec, never names a driver. |
+| L1 ↔ L2 | Workload spec (`workloadKind` + `binding`) | [packages/shared/src/types/agent](../../packages/shared/src/types/agent) *(proposed)*             | `Job` vs `Deployment` is Agenetes-owned; `binding.kind` selects the driver; host fills the spec, never names a driver. |
 | L1 ↔ L2 | `ChatEnvelope`                 | [packages/shared/src/types/agent](../../packages/shared/src/types/agent)                              | Single envelope for internal + external; user text rebuilt from it on reload. |
 | L1 ↔ L2 | `AgentStreamEvent`             | [packages/shared/src/types/agent/agent.ts](../../packages/shared/src/types/agent/agent.ts)            | L1 renders only these; never pi-agent-core / ACP shapes.                      |
 | L1 ↔ L2 | Control channel + `AgentCapabilities` | [acp/client.ts](../../apps/server/src/modules/agent/acp/client.ts) · [acp/threads.route.ts](../../apps/server/src/modules/agent/acp/threads.route.ts) *(to unify)* | ACP-client-role subset; in-process **duplex**, no sidecar; capability-gated; reverse permission = injected port; SSE+POST is the browser-wire bridge ([§3.6.2](#362-the-upward-interface--agenthandle-the-duplex-control-channel-and-capability-negotiation)). |
@@ -603,7 +603,7 @@ No big-bang. The refactor is a chain of **milestones**, each a standalone, revie
 
 **M1 — Freeze the L1↔L2 contracts.** *(The interface freeze — the forcing function of [§8](#8-open-questions), and the prerequisite for everything below.)*
 - *Goal:* pin the seam as versioned, serializable types so a second L2 implementation could satisfy it unchanged.
-- *Deliverables:* zod schema + `z.infer` types in `packages/shared` for `WorkloadSpec` (kind + binding tagged-union + prompt), `ChatEnvelope`, `AgentStreamEvent` (consolidate the ~14 existing types), the **field-level `ControlMsg`** vocabulary (up/down, capability-gated — resolves that [§8](#8-open-questions) detail), the composable `AgentCapabilities` descriptor + its **granularity list**, and the discovery/offering catalogue shape; pin the **two-level identity contract** ([§8](#8-open-questions)): `threadId` = L1-minted caller/slot key (the only wire-addressed id), `sessionId` = L2-internal execution instance surfaced only via capability-gated query/resume, with resume as a `loadSession`-gated `Deployment` capability.
+- *Deliverables:* zod schema + `z.infer` types in `packages/shared` for `WorkloadSpec` (`workloadKind` + binding tagged-union + prompt), `ChatEnvelope`, `AgentStreamEvent` (consolidate the ~14 existing types), the **field-level `ControlMsg`** vocabulary (up/down, capability-gated — resolves that [§8](#8-open-questions) detail), the composable `AgentCapabilities` descriptor + its **granularity list**, and the discovery/offering catalogue shape; pin the **two-level identity contract** ([§8](#8-open-questions)): `threadId` = L1-minted caller/slot key (the only wire-addressed id), `sessionId` = L2-internal execution instance surfaced only via capability-gated query/resume, with resume as a `loadSession`-gated `Deployment` capability.
 - *Depends on:* M0.
 - *Acceptance:* both drivers' current behaviour is expressible in the frozen types; the server `safeParse`-validates every input; the web bundle imports them as `import type` only (stays zod-free), per [api-design.md](../architecture/api-design.md).
 
