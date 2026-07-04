@@ -145,6 +145,8 @@ Both are **built-in, first-class kinds owned by Agenetes** — not host-defined 
 - **Retry / restart semantics** — a `Job` can carry `backoffLimit` / `restartPolicy`; a `Session` is simply "resume on next message after idle-suspend".
 - **UI legibility** — L1 can tell a one-shot production node from a persistent conversation and render/interact accordingly.
 
+**The initiator is not necessarily a human.** A workload — a `Job` especially — may be initiated by a person (@-mentioning a node), but equally by a **program, a workflow step, or another agent**. This is exactly why the `Job` kind exists: "run once, return a result, close" is the natural shape for programmatic and agent-to-agent invocation. So "who triggers it" is *not* a layer discriminant — an ambient, program-initiated workload (e.g. L1's own intent ranking, [§8](#8-open-questions)) is no less a legitimate workload than a user-initiated chat; layer ownership follows *what it is for*, not *who called it*.
+
 **Kind × driver — a realizability constraint.** The kinds do not compose freely with every runtime driver ([§3.3](#33-what-is-an-agent-runtime-drivers-vs-the-agent-definition)); a `Session`'s rich control plane can only be satisfied by a stateful runtime:
 
 - **`Job` → SDK *or* ACP.** A Job's control plane is near-empty (submit + cancel), which every driver already has. The stateless SDK driver and a spawn-then-close ACP session both realize it. (Most agent-teams today — `deepv-slides-maker`, `paper-reviewer` — are ACP Jobs.)
@@ -602,7 +604,7 @@ Steps 1–2 are this proposal's concrete deliverables; 3–6 are follow-ups that
 
 ## 8. Open questions
 
-- Does `intent` ranking belong to L1 (sense-making) or stay in the agent module for proximity to context assembly? (§7 step 3.)
+- **`intent` ranking placement — settled: L1, cosmetic.** Intent ranking is an L1 sense-making function (it decides *which* context and *what* the user likely means — a semantic decision L1 owns; L2 at most does rule-based transforms of already-selected context via a handle callback). It is *physically* under `modules/agent` today only for proximity to the shared context-assembly code, but context assembly is itself L1. There is **no blocking issue** either way: intent can even be modelled as a program-initiated zero-tool `Job` ([§3.2](#32-workload-kinds-job-vs-session) — the initiator need not be human) and nothing breaks. So this is a low-risk, optional file relocation at refactor time ([§7](#7-refactor--sequencing) step 3), not an open design question.
 - **Extracting the built-in (SDK) driver: which decoupling, and does it migrate onto ACP?** [§3.4](#34-control-plane-vs-data-plane-and-where-session-state-lives) leaves the SDK driver serving only `Job`s. [§3.6](#36-the-l1l2-binding-an-in-process-ari-handle-modelled-on-the-acp-client-role) reframes the extraction crux from a binary into **three options** for the built-in tools' in-process `import` of `canvas-executor`:
   1. **(a) status quo** — hard `import`, harness fused with L1: fast, but not module-decoupled or extractable.
   2. **(b) RFS-ify the tools** — canvas access goes out-of-band: fully decoupled and remotable, but pays per-call serialization.
