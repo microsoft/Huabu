@@ -356,6 +356,9 @@ importers:
 
   external/agenetes/packages/protocol:
     dependencies:
+      '@agentclientprotocol/sdk':
+        specifier: ^0.22.1
+        version: 0.22.1(zod@4.4.3)
       zod:
         specifier: ^4.3.6
         version: 4.4.3
