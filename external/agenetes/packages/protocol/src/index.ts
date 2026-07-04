@@ -58,3 +58,27 @@ export type {
   AnyRequestDefinition,
   ComposedRequest,
 } from './request.js';
+
+// AgentStreamEvent (§3.6 / §5): the driver-agnostic L2->L1 event stream.
+// The thin `{ type, data }` envelope is owned here; ACP-shaped payloads
+// reference the ACP SDK's zod. Host-specific fields (meta.mode,
+// tool_call.internalToolName) are host extensions, not upstream.
+export {
+  AGENT_STREAM_EVENTS,
+  agentStreamEventSchema,
+  metaEventDataSchema,
+  textDeltaEventDataSchema,
+  thinkingDeltaEventDataSchema,
+  toolCallEventDataSchema,
+  toolCallUpdateEventDataSchema,
+  planEventDataSchema,
+  permissionRequestEventDataSchema,
+  configOptionsUpdateEventDataSchema,
+  sessionModeUpdateEventDataSchema,
+  sessionInfoUpdateEventDataSchema,
+  sessionUsageUpdateEventDataSchema,
+  doneEventDataSchema,
+  errorEventDataSchema,
+  endEventDataSchema,
+} from './stream-event.js';
+export type { AgentStreamEvent, AgentStreamEventType } from './stream-event.js';
