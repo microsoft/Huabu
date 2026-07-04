@@ -26,3 +26,22 @@
  * breaking change to the wire schemas exported from this package.
  */
 export const AGENETES_PROTOCOL_VERSION = '0.1.0';
+
+// Two-level identity contract (§8).
+export { threadIdSchema, sessionIdSchema } from './identity.js';
+export type { ThreadId, SessionId } from './identity.js';
+
+// WorkloadSpec building blocks (§3.6.1): the protocol ships the blocks,
+// the host composes the closed union.
+export {
+  workloadKindSchema,
+  defineBinding,
+  composeWorkloadSpec,
+} from './workload.js';
+export type {
+  WorkloadKind,
+  BindingDefinition,
+  AnyBindingDefinition,
+  BindingMemberSchema,
+  WorkloadSpecSchema,
+} from './workload.js';
