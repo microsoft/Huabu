@@ -113,6 +113,22 @@ The trap this layer must avoid is letting a transport choice leak into the lifec
 
 Because lifecycle and communication are defined once as transport-agnostic contracts, adding a future transport (e.g. HTTP/SSE agent, MCP server) is a new row here — not a change to the other two dimensions. **This orthogonality is the whole point of the middle layer**: definition × lifecycle × transport × persistence compose, rather than each new agent kind forking the runtime. This uniform transport contract is Agenetes' **Agent Runtime Interface (ARI)** — the direct analogue of the CRI: adding a runtime is a new row, not a fork of the control plane. The in-process `runAgent` is then legible as "a runtime that needs no agentlet" — the *static-pod* case.
 
+**The path is always UI → Huabu Server → Agenetes; Agenetes never talks to the browser directly.** Agenetes is mounted *in-process* by the Huabu Server (imported / instanced), so the L1↔L2 seam splits into two hops with opposite duplex-ness:
+
+```
+Browser (L1 UI)
+   │  HTTP + SSE + POST       ← half-duplex (SSE is server→browser only)
+   ▼
+Huabu Server  (L1 glue: routes / SSE bridge / auth)
+   │  in-process ARI          ← full-duplex (calls / callbacks / async-iter)
+   ▼
+Agenetes (L2, mounted in-process)
+   ├─ built-in driver → in-process harness
+   └─ ACP driver → agentlet daemon (ACP over WS) → CLI agents
+```
+
+The half-duplex artefact is confined to the browser hop and bridged *inside the Server*; Agenetes only ever speaks the duplex ARI. The reverse permission call is the tell: it is **one duplex method** at Server↔Agenetes (`requestPermission(params): Promise<decision>`, [`client.ts`](../../apps/server/src/modules/agent/acp/client.ts)), but crossing the half-duplex browser wire it is *split into two correlated halves* — a `permission_request` SSE event down ([useAgentStream.ts](../../apps/web/src/hooks/useAgentStream.ts)) and a separate `POST …/permission` up ([threads.route.ts](../../apps/server/src/modules/agent/acp/threads.route.ts)), rejoined by `requestId`. This is precisely a transport-axis concern — the same method, expressed differently per transport — and keeping the path is what makes extracting L2 nearly behaviour-preserving ([§6](#6-extraction--what-becomes-reusable)): transport stays in the Server, Agenetes stays transport-free.
+
 ### 3.2 Workload kinds (Job vs Session)
 
 Lifecycle is *how* Agenetes reconciles a workload toward its desired state; **the reconcile strategy (declarative desired-state vs imperative spawn) is an internal implementation detail and is deliberately not exposed.** What callers *do* choose is the **workload kind**, which differs only in **completion semantics** — exactly the distinction Kubernetes draws between a long-lived `Deployment`/Service and a run-to-completion `Job`:
@@ -189,7 +205,7 @@ The insight: **ACP's control verbs only mean something when state lives in the p
 - **`Job`** has a near-empty control plane (submit + cancel) that both drivers already share — so a Job runs on **SDK or ACP**, and nothing needs unifying.
 - **`Session`** carries the full control plane (resume, slash commands, modes) — which only a stateful process provides — so a Session is **ACP-only**.
 
-The rich ARI control vocabulary therefore exists **exactly once**, on the ACP driver, for the Session kind. The stateless SDK driver serves only Jobs, so it never needs to *emulate* ACP control verbs (avoiding the bridge that a "unify on ACP" approach would require), and Agenetes never carries two rival control models. A built-in multi-turn conversation is, under this model, just **N sequential Jobs over the append-only turn log** — which is exactly what [`agent.service.ts`](../../apps/server/src/modules/agent/agent.service.ts) does today, so nothing changes behaviourally.
+The rich ARI control vocabulary therefore exists **exactly once**, on the ACP driver, for the Session kind. The stateless SDK driver serves only Jobs, so it never needs to *emulate* ACP control verbs (avoiding the bridge that a "unify on ACP" approach would require), and Agenetes never carries two rival control models. A built-in multi-turn conversation is, under this model, just **N sequential Jobs over the append-only turn log** — which is exactly what [`agent.service.ts`](../../apps/server/src/modules/agent/agent.service.ts) does today, so nothing changes behaviourally. The concrete message vocabulary of this control plane, and why it is one in-process **duplex** channel (not a side-band), are pinned down in [§3.6.2](#362-the-upward-interface--agenthandle-the-duplex-control-channel-and-capability-negotiation); the split here between *content* updates (data plane) and *affordance* updates (control plane) is the same one that subsection draws.
 
 > The one consequence: a built-in (SDK) agent cannot hold a rich `Session`. If a built-in ever needs slash commands or in-process modes it must acquire in-process state — i.e. become an ACP driver. Whether to keep the SDK driver permanently stateless-Job-only, or leave that door open (and how to weigh ACP's "no context rebuild per turn" against the SDK's log-replay cost), is left to [§8](#8-open-questions).
 
@@ -393,6 +409,71 @@ Agenetes is closer to a **service-mesh sidecar / reverse proxy**: resolve by dec
 
 L1 selects an *offering* (populating a picker, gating buttons by capability) and puts its **semantic reference** into `spec.binding`; L2 still resolves offering → driver internally. This is the same line the whole subsection draws: **L1 speaks semantic identity, L2 owns mechanism.** (K8s parallel: `kubectl api-resources` lists kinds + schemas; it never lists the kubelet or CRI runtime behind them.) A future "same agent, local-fast vs remote backend" choice is expressed as a semantic variant / placement *preference* in the catalogue — still never a driver name.
 
+### 3.6.2 The upward interface — `AgentHandle`, the duplex control channel, and capability negotiation
+
+[§3.6](#36-the-l1l2-binding-an-in-process-ari-handle-modelled-on-the-acp-client-role) sketched the handle; this subsection pins down its control surface — why it needs no side-band channel, what its message vocabulary is, and how one interface serves drivers of very different richness.
+
+**The control channel is an in-process duplex — there is no sidecar.** Because the L1↔L2 seam lives *inside* the Huabu Server process ([§3.1](#31-the-transport-axis-why-it-is-separate)), the handle is a genuine bidirectional peer, exactly like the ACP client role over its stdio duplex: host→agent calls and agent→host calls share one logical channel, correlated the way JSON-RPC correlates by `id`. The reverse permission request is therefore a **method the host implements**, not a second channel — an injected port `onPermissionRequest(req): Promise<decision>` that L2 awaits ([`AcpAgentClient`](../../apps/server/src/modules/agent/acp/client.ts) already does this with its per-turn notifier + `resolvePermission`). The browser's SSE-event-down / POST-up split ([§3.1](#31-the-transport-axis-why-it-is-separate)) is *not* part of this contract; it is the Server bridging the duplex onto a half-duplex wire, and it is replaceable by a WebSocket without touching L2. So the "pure-SSE can't answer a reverse RPC" worry is a browser-wire fact, never an L1↔L2 one.
+
+**The vocabulary is a subset of the ACP client role, in two directions.** Refining the handle's `control(msg)` / `events()` into concrete messages — request/response **methods** (need a reply) vs one-way **notifications**:
+
+| Direction | Message | Kind | Capability gate | Consumed by |
+| --------- | ------- | ---- | --------------- | ----------- |
+| host → agent | `setMode(id)` | method | `modes` advertised | agent / harness |
+| host → agent | `setModel(id)` | method | `models` advertised | agent / harness |
+| host → agent | `setConfigOption(k,v)` | method | `configOptions` advertised | agent / harness |
+| host → agent | `cancel()` | notification | universal | **L2 + agent** (L2 aborts the turn / clears pending permissions) |
+| agent → host | `requestPermission(req)` | method (injected port) | agent issues permission requests | **host** (bridges to UI) |
+| agent → host | `availableCommandsUpdate` | notification | `slashCommands` | L1 (toolbar) |
+| agent → host | `currentModeUpdate` | notification | `modes` | L1 (toolbar) |
+
+**Slash commands follow ACP exactly: discover via control, invoke via the data plane.** The agent advertises its command catalogue as an upward `availableCommandsUpdate` notification; a command is *run* by putting its text (`/web …`) into an ordinary prompt on the **data plane** — there is no `runCommand` control message (ACP spec: *"Commands are run as part of regular prompt requests where the Client includes the command text in the prompt."*). This draws the general line: **content updates (message / tool / plan / thought) are the data plane; affordance/meta updates (commands, mode, permission) are the control plane** — logically distinct, though both may ride one physical SSE stream.
+
+**`AgentHandle` is an anti-corruption wrapper over the ACP client *role* — not a re-export of the ACP SDK.** Modelling the interface on the ACP client role (Decision B, [§3.6](#36-the-l1l2-binding-an-in-process-ari-handle-modelled-on-the-acp-client-role)) gives a complete, well-worn vocabulary; *wrapping* rather than exposing it means (a) we surface only what Huabu needs and can adapt names, (b) replacing ACP later never reaches L1, and (c) the external driver reuses the SDK's implementation (permission wire, `id`-correlation, schema validation) for free. This is already the de-facto shape: [`runAcpAgent`](../../apps/server/src/modules/agent/acp/service.ts) wraps [`AcpAgentClient`](../../apps/server/src/modules/agent/acp/client.ts) (which wraps the ACP SDK) yet yields only the generic `AgentStreamEvent`, and [`runAgent`](../../apps/server/src/modules/agent/agent.service.ts) (built-in) yields the *same* shape — [agent.route.ts](../../apps/server/src/modules/agent/agent.route.ts) consumes both binding-agnostically. The wrapping happens at the **driver** level, so the interface stays driver-agnostic:
+
+| Layer | Role |
+| ----- | ---- |
+| `AgentHandle` | our own driver-agnostic interface — the contract; benefit (b) hinges on it being *ours* |
+| `AcpAgentHandle` | thin wrapper over the ACP SDK client — external driver; the "reuse SDK" benefit (c) lands here |
+| `BuiltinAgentHandle` | wrapper over the in-process harness — built-in driver |
+
+So "gain ACP's features by wrapping the SDK" applies *only* to the external driver: the built-in driver has no SDK client to wrap and must **not** be forced through an in-process ACP loopback merely to acquire a capability it does not need. Whether built-ins should ever run on ACP anyway is the separate [§8](#8-open-questions) trade-off.
+
+**Capabilities are composable, not all-or-nothing.** Rather than one fat interface every driver must fully implement, the handle is a small core plus *segregated* facets a driver opts into (interface-segregation), so a `Job` handle carries no `NotImplemented` stubs:
+
+```ts
+interface AgentHandle {                 // core — every driver implements this
+  submit(input: ChatEnvelope): void;
+  events(): AsyncIterable<AgentStreamEvent>;
+  close(): void;
+  readonly capabilities: AgentCapabilities;   // runtime descriptor (below)
+}
+interface Cancellable     { cancel(): Promise<void>; }
+interface ModeSwitchable  { setMode(id: string): Promise<void>; }
+interface ModelSelectable { setModel(id: string): Promise<void>; }
+// Behavioural capabilities add NO method: reverse permission is the injected
+// onPermissionRequest port; slash is availableCommandsUpdate on events().
+```
+
+Callers narrow by capability (`if (isModeSwitchable(h)) h.setMode(id)`). This aligns the surface with the workload kind ([§3.2](#32-workload-kinds-job-vs-session)): **Job** = core (+ `Cancellable`); **Session** = core + modes + models + slash + permission. The ACP SDK client is the current *superset* implementation; a future richer runtime contributes new facets and the superset is simply their **union**.
+
+**Two artefacts carry a capability, kept in sync deliberately.** (1) compile-time *facet interfaces* (above) give in-process type-narrowing; (2) a serializable **`AgentCapabilities` descriptor** is the single source the **discovery catalogue** ([§3.6.1](#361-dispatch-driver-affinity-discovery--and-why-l2-is-not-a-scheduler)), the **UI affordances** (which toolbar controls to show), and the **admission gate** all read — structural typing cannot cross the wire or drive a toolbar. As in ACP's own `initialize`, capabilities are negotiated in **two phases mapped onto the [§3.6.1](#361-dispatch-driver-affinity-discovery--and-why-l2-is-not-a-scheduler) candidacy/binding split**: a driver *class* advertises its candidate capabilities at `register` (static — feeds discovery); a *handle* reports the actually-negotiated set after create/initialize (dynamic — e.g. an ACP agent that advertised no modes). This retires today's ad-hoc probing ([`profile-schema-cache`](../../apps/server/src/modules/agent/acp/profile-schema-cache.ts) / `cached-meta`).
+
+**The capability set is open — extending it is a fixed recipe (open/closed).** `AgentCapabilities` is an open structured object; adding one touches no existing driver:
+
+1. add a field to `AgentCapabilities` (a *method* capability also adds a facet interface; a *behavioural* one adds only the field);
+2. define a conservative default for when the field is absent (old drivers → safe degrade);
+3. each driver reports its value at negotiation;
+4. discovery / UI / admission read that one field.
+
+*Example — "can the user type mid-turn?"* Whether an agent accepts input while still thinking/streaming is a **behavioural** capability (no new method — `submit` is unchanged) that decides whether L1 blocks its input box. It is richer than a boolean, and it *exceeds* the ACP baseline (ACP is strictly turn-based — a second `session/prompt` mid-turn is not in the base model), so it is exactly the kind of capability the union grows beyond ACP:
+
+```ts
+turnInput?: 'blocking' | 'queue' | 'concurrent';   // absent ⇒ 'blocking' (most conservative)
+```
+
+Most ACP CLI agents report `blocking`; a built-in or richer agent may offer `queue` / `concurrent`. L1 reads it to enable/disable the input box; L2 may use it as light admission (reject a `submit` mid-turn when `blocking`). That the descriptor is *ours* — not ACP's — is what lets it hold capabilities ACP never had, reaffirming Decision B's replaceability.
+
 ### 3.7 Walkthroughs — the model against today's code
 
 Two dry runs confirm the [§3.6](#36-the-l1l2-binding-an-in-process-ari-handle-modelled-on-the-acp-client-role) model reconciles with the existing flow; every gap is a control-plane relocation, not a design conflict.
@@ -432,6 +513,7 @@ L1 ◀── Offering catalogue (agents/profiles + capabilities) ── L2   (di
 L1 ── WorkloadSpec (kind + binding + prompt) ─▶ L2   (Job or Session; binding.kind selects the driver, §3.2/§3.6.1)
 L1 ── ChatEnvelope ───────────────▶ L2      (prompt in; internal & external identical)
 L1 ◀── AgentStreamEvent ──────────── L2      (~14 SSE event types; no runtime leak)
+L1 ◀──▶ Control channel ──────────── L2      (host↔agent methods + notifications, capability-gated; in-process duplex, browser hop = SSE↓ + POST↑ bridge, §3.6.2)
 L1 ◀── CanvasCommand / Execution ─── L2      (the only way an agent mutates the canvas)
 L2 ── ACP spawn + prompt ─────────▶ L3      (session per thread; lazy + idle-suspend)
 L2 ◀── ACP updates ───────────────── L3      (translated to AgentStreamEvent)
@@ -444,6 +526,7 @@ L2 ◀──▶ RFS (curl) ────────────────  L3 
 | L1 ↔ L2 | Workload spec (`kind` + `binding`) | [packages/shared/src/types/agent](../../packages/shared/src/types/agent) *(proposed)*             | `Job` vs `Session` is Agenetes-owned; `binding.kind` selects the driver; host fills the spec, never names a driver. |
 | L1 ↔ L2 | `ChatEnvelope`                 | [packages/shared/src/types/agent](../../packages/shared/src/types/agent)                              | Single envelope for internal + external; user text rebuilt from it on reload. |
 | L1 ↔ L2 | `AgentStreamEvent`             | [packages/shared/src/types/agent/agent.ts](../../packages/shared/src/types/agent/agent.ts)            | L1 renders only these; never pi-agent-core / ACP shapes.                      |
+| L1 ↔ L2 | Control channel + `AgentCapabilities` | [acp/client.ts](../../apps/server/src/modules/agent/acp/client.ts) · [acp/threads.route.ts](../../apps/server/src/modules/agent/acp/threads.route.ts) *(to unify)* | ACP-client-role subset; in-process **duplex**, no sidecar; capability-gated; reverse permission = injected port; SSE+POST is the browser-wire bridge ([§3.6.2](#362-the-upward-interface--agenthandle-the-duplex-control-channel-and-capability-negotiation)). |
 | L1 ↔ L2 | `CanvasCommand` / `Execution`  | [packages/shared/src/types/canvas](../../packages/shared/src/types/canvas)                            | The 14-command agent subset; validated + traced server-side.                  |
 | L2 ↔ L3 | ACP (agentlet)                 | [external/agentlet/spec/protocol.md](../../external/agentlet/spec/protocol.md)                         | One ACP session per Sediment thread.                                          |
 | L2 ↔ L3 | RFS endpoints                  | [packages/shared/src/types/api/rfs.ts](../../packages/shared/src/types/api/rfs.ts)                    | Plain HTTP; no client tool shipped into the agent.                            |
@@ -525,8 +608,8 @@ Steps 1–2 are this proposal's concrete deliverables; 3–6 are follow-ups that
   2. **(b) RFS-ify the tools** — canvas access goes out-of-band: fully decoupled and remotable, but pays per-call serialization.
   3. **(c) dependency-inject an in-process canvas port** — removes the compile-time coupling while keeping the call in-process: module-decoupled *and* fast, but remotable only by later swapping the port for a remote adapter.
   Option (c) suits "extract as a co-deployed library, keep built-in fast"; (b) is required only if the built-in must run in its own process. Orthogonally, whether built-ins should also gain a *rich Session* (in-process state / slash / modes) still means moving them onto the ACP driver — weigh ACP's "no per-turn context rebuild" against the SDK's simpler log-replay.
-- **One shared `Job` control surface?** A Job's control plane is submit + cancel on both drivers ([§3.2](#32-workload-kinds-job-vs-session)). *Resolved by [§3.6](#36-the-l1l2-binding-an-in-process-ari-handle-modelled-on-the-acp-client-role) (decision B):* Agenetes defines its own minimal control vocabulary (a subset of the ACP client role), so an SDK Job and an ACP Job satisfy the same seam interface, gated by capabilities. What remains open is the concrete `ControlMsg` / `AgentCapabilities` shape and how much of ACP's control surface the subset admits.
-- **Control-plane relocation (from the [§3.7](#37-walkthroughs--the-model-against-todays-code) dry runs).** The seam works today but leaks: (1) there is no single serializable `WorkloadSpec` — it is assembled from `agentBinding` + a server-side profile lookup; (2) control ops are side-band, ACP-shaped REST routes (`/acp/threads/:t/{mode,model,commands,permission}`) exposed straight to L1, rather than one Huabu-owned `control()` channel; (3) out-of-turn pushes (`available_commands_update`) are REST-polled instead of stream-delivered; (4) for the built-in driver, definition resolution + state rebuild happen in the *route*, not inside `create(spec)`. Folding these into the [§3.6](#36-the-l1l2-binding-an-in-process-ari-handle-modelled-on-the-acp-client-role) handle model is a [§7](#7-refactor--sequencing) refactor, largely behaviour-preserving.
+- **One shared `Job` control surface?** A Job's control plane is submit + cancel on both drivers ([§3.2](#32-workload-kinds-job-vs-session)). *Resolved by [§3.6](#36-the-l1l2-binding-an-in-process-ari-handle-modelled-on-the-acp-client-role) (decision B) and [§3.6.2](#362-the-upward-interface--agenthandle-the-duplex-control-channel-and-capability-negotiation):* Agenetes defines its own minimal control vocabulary (an ACP-client-role subset) over one in-process **duplex** channel — so the reverse permission request is a host-implemented method (injected port), not a side-band, and the "pure-SSE can't answer a reverse RPC" gap exists only on the browser wire (already bridged by SSE-event + POST, upgradeable to WebSocket without touching L2). `AgentCapabilities` is likewise settled in shape: a composable, open descriptor negotiated in two phases (candidacy at register / actual at create). What remains open is only the **field-level `ControlMsg` schema** and the **final capability-granularity list** (e.g. is `configOptions` one capability or several).
+- **Control-plane relocation (from the [§3.7](#37-walkthroughs--the-model-against-todays-code) dry runs).** The seam works today but leaks: (1) there is no single serializable `WorkloadSpec` — it is assembled from `agentBinding` + a server-side profile lookup; (2) control ops are side-band, ACP-shaped REST routes (`/acp/threads/:t/{mode,model,commands,permission}`) exposed straight to L1, rather than one Huabu-owned `control()` channel; (3) out-of-turn pushes (`available_commands_update`) are REST-polled instead of stream-delivered; (4) for the built-in driver, definition resolution + state rebuild happen in the *route*, not inside `create(spec)`. Folding these into the [§3.6](#36-the-l1l2-binding-an-in-process-ari-handle-modelled-on-the-acp-client-role) handle model is a [§7](#7-refactor--sequencing) refactor, largely behaviour-preserving. The *target* shape is now settled — one in-process duplex `control()` channel with the [§3.6.2](#362-the-upward-interface--agenthandle-the-duplex-control-channel-and-capability-negotiation) vocabulary; these four are the remaining mechanical relocations onto it.
 - **Residual `canvasId` coupling in the turn log.** [§3.6.1](#361-dispatch-driver-affinity-discovery--and-why-l2-is-not-a-scheduler) settles that `threadId` alone is the slot key — and the ACP session key (`threadKey`) already ignores `canvasId` — but the built-in turn log is still loaded as `loadTurns(threadId, canvasId)`. Dropping the `canvasId` argument (relying on `threadId`'s global uniqueness) would align persistence with the addressing model and remove a canvas leak from L2's store. Also open: whether `threadId` stays L1-minted (client-supplied, idempotency-key style — today) or gains an L2-minted `uid` alongside it (the K8s `metadata.name` vs `uid` split).
 - **How does L1 select an agent without naming a driver?** *Resolved by [§3.6.1](#361-dispatch-driver-affinity-discovery--and-why-l2-is-not-a-scheduler):* L1 authors a tagged-union `WorkloadSpec` whose `binding.kind` is a semantic, contract-owned discriminant; L2 resolves it against a driver registry (deterministic, no scheduling), gated by admission; a mechanism-free discovery catalogue exposes offerings + capabilities (never driver names). Drivers are non-fungible (pinned to a daemon/process by resource affinity), so L2 is a dispatcher + conduit, **not** a scheduler; cross-resource scheduling is a non-goal. Open sub-parts: the concrete registry/discovery API surface, and whether a `binding.kind` may ever fan out to more than one driver class.
 - Should built-in agents (`ask`/`operate`/`sketch`) be reframed as L3 "tasks" that happen to run in-process, or kept as an L2 concern? This doc places their *prompts* in L3 and their *execution path* in L2 — is that split worth the conceptual overhead? (Note: the `Job`/`Session` split from [§3.2](#32-workload-kinds-job-vs-session) is orthogonal to this — a built-in agent can be either kind.)
