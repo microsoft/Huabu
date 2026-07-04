@@ -4,31 +4,32 @@
 // A request is INDEPENDENT of the driver route (`kind`): the same driver's
 // `submit()` may receive heterogeneous requests (e.g. a canvas selection vs
 // a dictionary to render as a markdown table), each with completely
-// different rendering. So the polymorphism lives on the REQUEST, not on the
-// driver. Every request variant only has to satisfy the Agenetes request
-// contract below:
+// different rendering. So the polymorphism lives on the REQUEST VARIANT,
+// not on the driver. Every variant only has to carry:
 //
-//   - `content`     — the payload data member (shape is variant-specific).
-//   - `render()`    — turn this request into the uniform `AgentInput` fed
-//                     to L3. This is where all the per-variant complexity
-//                     (selection rendering, dict -> markdown, …) lives.
-//   - `serialize()` — the raw, JSON-serializable record for durable logs.
+//   - `type`    — the string-literal discriminant (tells variants apart).
+//   - `content` — the payload data member (shape is variant-specific).
 //
-// `render()` is invoked INSIDE a driver's `submit()`, at the last moment —
-// the driver receives the raw request object, logs `serialize()` (the raw
-// request is the source of truth for replay/debug, NOT the rendered
-// result), then calls `render()` to obtain the input for L3.
+// The request itself is plain, JSON-serializable data — persisting the raw
+// request to the durable log is just `JSON.stringify(request)`, and the raw
+// request (not any rendered result) is the source of truth for replay.
 //
-// "Protocol gives the blocks, the host composes." This package ships the
-// `Renderable`/`Serializable` contracts, `defineRequest` (declare one
-// request variant), and `composeRequest` (fold the host's registered
-// variants into one closed, method-bearing union). Concrete variants (e.g.
-// Sediment's `huabu.selection`) are host registrations, never upstream.
+// Rendering — turning a request into the uniform `AgentInput` fed to L3 —
+// is a SEPARATE, driver-agnostic concern. Each variant declares its own
+// `render`; `composeRequest` folds the registered variants into one wire
+// `schema` plus a single type-dispatching `render` function. A driver's
+// `submit(request, render)` receives that composed renderer explicitly and
+// invokes it at the last moment — the driver never owns rendering.
+//
+// "Protocol gives the blocks, the host composes." This package ships
+// `defineRequest` / `composeRequest`; concrete variants (e.g. Sediment's
+// `huabu.selection`) and their `render` implementations are host
+// registrations, never upstream.
 
 import { z } from 'zod';
 
 /**
- * The uniform, driver-agnostic input every `render()` produces and every
+ * The uniform, driver-agnostic input every `render` produces and every
  * driver's `submit()` ultimately feeds to L3. Kept minimal for M1 — this
  * is the L2<->L3 (ACP) seam and will grow (parts / attachments / …) when
  * the drivers are wired.
@@ -36,30 +37,6 @@ import { z } from 'zod';
 export interface AgentInput {
   readonly message: string;
 }
-
-/**
- * Renders itself into the uniform {@link AgentInput}. Implemented per
- * request variant; called inside a driver's `submit()`.
- */
-export interface Renderable {
-  render(): AgentInput;
-}
-
-/**
- * Produces the raw, JSON-serializable record persisted to the durable log.
- * The raw request — not the rendered result — is the source of truth.
- */
-export interface Serializable {
-  serialize(): Record<string, unknown>;
-}
-
-/**
- * The method-bearing request object produced by {@link composeRequest}
- * after a successful parse: the validated wire data plus the
- * {@link Renderable} / {@link Serializable} behaviour attached by the
- * matching variant.
- */
-export type AgentRequest<Data = unknown> = Data & Renderable & Serializable;
 
 /**
  * A request variant's object schema. It MUST carry the string-literal
@@ -75,9 +52,16 @@ export type RequestVariantSchema<Type extends string> = z.ZodObject<
 >;
 
 /**
- * One request variant: its wire-data `schema` plus the `render` /
- * `serialize` behaviour that travels with it. `serialize` defaults to
- * returning the validated data as-is (it is already a plain record).
+ * A type-dispatching renderer over a composed request schema: maps any
+ * validated request to the uniform {@link AgentInput}.
+ */
+export type Renderer<Schema extends z.ZodTypeAny> = (
+  request: z.infer<Schema>,
+) => AgentInput;
+
+/**
+ * One request variant: its wire-data `schema` plus the `render` behaviour
+ * that belongs to it. `render` is typed against this variant's own data.
  */
 export interface RequestDefinition<
   Type extends string = string,
@@ -86,7 +70,6 @@ export interface RequestDefinition<
   readonly type: Type;
   readonly schema: Schema;
   readonly render: (data: z.infer<Schema>) => AgentInput;
-  readonly serialize?: (data: z.infer<Schema>) => Record<string, unknown>;
 }
 
 /** A request definition with its type parameters erased. */
@@ -104,21 +87,17 @@ export function defineRequest<
   type: Type;
   schema: Schema;
   render: (data: z.infer<Schema>) => AgentInput;
-  serialize?: (data: z.infer<Schema>) => Record<string, unknown>;
 }): RequestDefinition<Type, Schema> {
   return config;
 }
 
 /**
- * Fold the host's registered request variants into one closed request
- * schema: a `discriminatedUnion('type', …)` over their wire schemas, then a
- * single union-level `.transform` that attaches the matching variant's
- * `render` / `serialize`. A successful `safeParse` therefore yields a
- * method-bearing {@link AgentRequest}.
- *
- * Order matters: `discriminatedUnion` requires plain object members, so the
- * discriminant must be resolved BEFORE the transform (a transformed schema
- * can no longer participate in a discriminated union).
+ * Fold the host's registered request variants into a closed request
+ * contract: a `discriminatedUnion('type', …)` `schema` for wire validation
+ * (yielding plain data) and a single `render` function that dispatches on
+ * `type` to the matching variant's renderer. The composed `render` is what
+ * a driver's `submit(request, render)` receives — one renderer shared
+ * across every driver.
  */
 export function composeRequest<
   const Variants extends readonly [
@@ -135,26 +114,28 @@ export function composeRequest<
     ...Variants[number]['schema'][],
   ];
 
-  return z.discriminatedUnion('type', schemas).transform((data) => {
-    const variant = byType.get(data.type);
+  const schema = z.discriminatedUnion('type', schemas);
+
+  const render: Renderer<typeof schema> = (request) => {
+    const variant = byType.get(request.type);
     if (variant === undefined) {
-      // Unreachable: discriminatedUnion already rejected unknown `type`.
-      throw new Error(`No request variant registered for type "${data.type}".`);
+      // Unreachable: `schema` already rejected unknown `type`.
+      throw new Error(
+        `No request variant registered for type "${request.type}".`,
+      );
     }
-    const serialize = variant.serialize ?? ((value) => value);
-    return {
-      ...data,
-      render: () => variant.render(data),
-      serialize: () => serialize(data) as Record<string, unknown>,
-    } as AgentRequest<z.infer<Variants[number]['schema']>>;
-  });
+    return variant.render(request);
+  };
+
+  return { schema, render };
 }
 
 /**
- * The composed, host-specific request schema type produced by
- * {@link composeRequest} — use `z.infer<RequestSchema<…>>` to derive the
- * method-bearing union type in the host.
+ * The composed request contract produced by {@link composeRequest} — the
+ * wire `schema` plus its type-dispatching `render`. Use
+ * `z.infer<ComposedRequest<…>['schema']>` to derive the request union type
+ * in the host.
  */
-export type RequestSchema<
+export type ComposedRequest<
   Variants extends readonly [AnyRequestDefinition, ...AnyRequestDefinition[]],
 > = ReturnType<typeof composeRequest<Variants>>;

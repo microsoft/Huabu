@@ -47,16 +47,14 @@ export type {
 } from './workload.js';
 
 // AgentRequest building blocks (§3.6.1): the polymorphic, driver-agnostic
-// per-turn request contract. render() is called inside a driver's submit();
-// serialize() feeds the durable log.
+// per-turn request. The request is plain data; rendering to AgentInput is a
+// separate concern a driver's submit(request, render) receives explicitly.
 export { defineRequest, composeRequest } from './request.js';
 export type {
   AgentInput,
-  Renderable,
-  Serializable,
-  AgentRequest,
+  Renderer,
   RequestVariantSchema,
   RequestDefinition,
   AnyRequestDefinition,
-  RequestSchema,
+  ComposedRequest,
 } from './request.js';
