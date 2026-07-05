@@ -58,3 +58,21 @@ export type {
 
 export { acpSessionRegistry } from './session-registry.js';
 export type { AcpSessionEntry } from './session-registry.js';
+
+export {
+  mergeToolExtension,
+  emptyAcpOverlay,
+  applyToolExt,
+} from './overlay.js';
+export type {
+  ToolAcpExtension,
+  ToolPermissionState,
+  AcpTurnOverlay,
+} from './overlay.js';
+
+export { AcpAgentHandle, ACP_CAPABILITIES } from './handle.js';
+export type {
+  InStreamEvent,
+  PreparedAcpPrompt,
+  AcpTurnCtx,
+} from './handle.js';
