@@ -16,9 +16,9 @@ import { projectUserVisibleAttachments } from './attachment-chips.js';
 import type {
   ChatTurnRecord,
   PiMessage,
-  ToolAcpExtension,
 } from '../../store/chat-thread-store.js';
 import type { ChatEnvelope } from '../envelope.js';
+import type { ToolAcpExtension } from '@agenetes/acp-driver';
 import type { AssistantMessage } from '@earendil-works/pi-ai';
 import type {
   AssistantHistoryPart,

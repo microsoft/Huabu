@@ -22,7 +22,8 @@ import {
   AcpAgentHandle,
   type AcpTurnCtx,
   type PreparedAcpPrompt,
-} from './acp-handle.js';
+} from '@agenetes/acp-driver';
+
 import {
   BUILTIN_CAPABILITIES,
   BuiltinAgentHandle,
@@ -99,7 +100,7 @@ export const builtinAgentDriver: BuiltinAgentDriver = {
 export const acpAgentDriver: AcpAgentDriver = {
   kind: ACP_DRIVER_KIND,
   capabilities: ACP_CAPABILITIES,
-  create: ({ threadId }) => new AcpAgentHandle(threadId),
+  create: ({ threadId }) => new AcpAgentHandle<AgentRequest>(threadId),
 };
 
 /**

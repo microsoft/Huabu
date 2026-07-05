@@ -4,10 +4,11 @@
  * The generic contracts (the `AgentHandle` execution seam + the driver
  * register/injection seam) now live in the host-agnostic
  * `@agenetes/runtime` package; `./handle.js` binds them to the host's
- * concrete request/transcript types and re-exports them. The two concrete
- * driver implementations still live here and are injected into the runtime
- * by `./drivers.js` (object injection) until M4/M5 let the standard (ACP)
- * driver move into the subtree.
+ * concrete request/transcript types and re-exports them. The standard ACP
+ * driver (`AcpAgentHandle`) now lives in the `@agenetes/acp-driver`
+ * subtree package and is re-exported here; the canvas-coupled built-in
+ * driver stays host-owned. Both are injected into the runtime by
+ * `./drivers.js` (object injection).
  */
 
 export type {
@@ -30,7 +31,7 @@ export {
   ACP_CAPABILITIES,
   type PreparedAcpPrompt,
   type AcpTurnCtx,
-} from './acp-handle.js';
+} from '@agenetes/acp-driver';
 export {
   agentRuntime,
   acquireAcpHandle,

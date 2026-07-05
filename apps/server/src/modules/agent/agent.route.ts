@@ -9,6 +9,8 @@
  * GET  /api/agent/history/:threadId — Load conversation history
  */
 
+import { emptyAcpOverlay } from '@agenetes/acp-driver';
+
 import {
   AGENT_SSE_EVENTS,
   agentCanvasIdQuerySchema,
@@ -28,7 +30,6 @@ import { readWorkspaceMemory } from '../agent/memory/index.js';
 import {
   appendTurn,
   clearActiveTurn,
-  emptyAcpOverlay,
   finalizeActiveTurn,
   loadTurns,
   writeActiveTurn,
