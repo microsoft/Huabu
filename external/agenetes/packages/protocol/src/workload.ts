@@ -24,6 +24,7 @@
 import { z } from 'zod';
 
 import { threadIdSchema } from './identity.js';
+import { namespaceSchema } from './namespace.js';
 
 /**
  * Completion semantics of a workload — the lifecycle axis, owned by the
@@ -38,10 +39,10 @@ export type WorkloadKind = z.infer<typeof workloadKindSchema>;
 /**
  * The typed member schema a single driver contributes to the
  * `WorkloadSpec` union before the shared `request` field is injected:
- * `{ kind, workloadKind, threadId, spec }`. {@link composeWorkloadSpec}
- * extends each member with `request` and enforces the
- * `workloadKind === 'Job' ⇒ request required` invariant once, at the
- * union level.
+ * `{ kind, workloadKind, namespace, threadId, spec }`.
+ * {@link composeWorkloadSpec} extends each member with `request` and
+ * enforces the `workloadKind === 'Job' ⇒ request required` invariant once,
+ * at the union level.
  */
 export type BindingMemberSchema<
   Kind extends string,
@@ -49,6 +50,7 @@ export type BindingMemberSchema<
 > = z.ZodObject<{
   kind: z.ZodLiteral<Kind>;
   workloadKind: typeof workloadKindSchema;
+  namespace: typeof namespaceSchema;
   threadId: typeof threadIdSchema;
   spec: Spec;
 }>;
@@ -84,6 +86,7 @@ export function defineBinding<
   const member = z.object({
     kind: z.literal(config.kind),
     workloadKind: workloadKindSchema,
+    namespace: namespaceSchema,
     threadId: threadIdSchema,
     spec: config.spec,
   }) as BindingMemberSchema<Kind, Spec>;

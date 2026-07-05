@@ -31,6 +31,11 @@ export const AGENETES_PROTOCOL_VERSION = '0.1.0';
 export { threadIdSchema, sessionIdSchema } from './identity.js';
 export type { ThreadId, SessionId } from './identity.js';
 
+// Namespace (§7 M5.0 / §8): the storage/metadata isolation scope above
+// threadId. Pure data L2 persists under but never interprets.
+export { namespaceSchema } from './namespace.js';
+export type { Namespace } from './namespace.js';
+
 // WorkloadSpec building blocks (§3.6.1): the protocol ships the blocks,
 // the host composes the closed union.
 export {
