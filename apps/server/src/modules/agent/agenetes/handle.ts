@@ -1,109 +1,71 @@
 /**
- * `AgentHandle` — the in-process L1↔L2 execution seam (§3.6.2).
+ * Host binding of the `@agenetes/runtime` execution seam.
  *
- * This is the M2 *execution* seam only: the latent common interface that
- * both agent backends already satisfy, made explicit without changing
- * behaviour. It is deliberately NOT the full §3.6 factory model
- * (`driver.create(spec)` + registry): the backing runtime instance (a
- * pi-agent-core `Agent` for the built-in path, an ACP session `entry` for
- * the external path) is constructed by the route and injected into the
- * concrete handle's constructor. Moving that loading into a `create(spec)`
- * factory (control-plane leak #4) needs the host resources it touches to be
- * injectable, which is the M4 (canvas DI) / M5 (package boundary) work — so
- * it is explicitly deferred.
+ * The generic `AgentHandle` / `RenderFn` contracts and the driver
+ * register/injection seam now live in the host-agnostic
+ * [`@agenetes/runtime`](../../../../../../external/agenetes/packages/runtime)
+ * package (L2). This module binds them to the host's concrete types — the
+ * per-turn request is the canvas {@link ChatEnvelope}; the transcript delta
+ * a turn returns is pi-ai `Message[]` — so the rest of `apps/server` keeps
+ * a single, stable import surface while the contracts themselves stay in
+ * the subtree.
  *
- * A handle models the ACP *client role* (stateful, bidirectional,
- * capability-negotiated), not an HTTP client. Its four facets:
- *
- *   - `submit(request, render)` — the data-plane IN. The request is plain,
- *     replayable data (M2: the host {@link ChatEnvelope}; M3 swaps it for
- *     the driver-agnostic `@agenetes/protocol` request union). `render` is
- *     supplied explicitly per turn and invoked at the last moment — the
- *     handle never owns rendering. Its output shape is backend-specific
- *     (pi-ai `Message[]` for the built-in path; ACP prompt blocks for the
- *     external path), captured by the {@link TRendered} type parameter.
- *   - `events()` — the data-plane OUT: the per-turn `AgentStreamEvent`
- *     stream, returning this turn's transcript delta as the generator's
- *     return value (identical to today's `runAgent` / `runAcpAgent`).
- *   - `control(msg)` — the control plane: host→agent operations over the
- *     `@agenetes/protocol` `ControlMsg` vocabulary, gated by
- *     {@link AgentHandle.capabilities}.
- *   - `capabilities` — the advertised capability descriptor (a built-in Job
- *     advertises only `cancel`; an ACP Deployment advertises the full set).
- *
- * See docs/proposals/layered-architecture.md §3.6 / §7 (M2).
+ * The two concrete handles (`BuiltinAgentHandle`, `AcpAgentHandle`) still
+ * live in the host and are injected into the runtime as driver objects
+ * (see `./drivers.ts`): standard drivers (ACP) are destined to move into
+ * the subtree once M4/M5 make their host couplings injectable; the
+ * canvas-coupled built-in driver stays host-owned and injected. See
+ * docs/proposals/layered-architecture.md §3.6 / §7.
  */
 
 import type { ChatEnvelope } from '../conversation/envelope.js';
 import type {
-  AgentCapabilities,
-  ControlAck,
-  ControlMsg,
-} from '@agenetes/protocol';
+  AgentHandle as RuntimeAgentHandle,
+  RenderFn as RuntimeRenderFn,
+} from '@agenetes/runtime';
 import type { Message } from '@earendil-works/pi-ai';
 import type { AgentStreamEvent } from '@sediment/shared';
 
+export type {
+  AgentDriver,
+  AgentDriverInfo,
+  AgentRuntime,
+} from '@agenetes/runtime';
+export { createAgentRuntime } from '@agenetes/runtime';
+
 /**
- * The per-turn request a handle accepts. M2 uses the host
- * {@link ChatEnvelope} as a placeholder; M3 replaces it with the
- * driver-agnostic `@agenetes/protocol` request union (the `submit`
- * signature stays the same — only the request's provenance changes).
+ * The per-turn request a host handle accepts — the canvas
+ * {@link ChatEnvelope}. Bound here (not in the subtree) so `@agenetes/runtime`
+ * stays host-agnostic; a future driver-agnostic `@agenetes/protocol`
+ * request union would replace this alias without touching the seam.
  */
 export type AgentRequest = ChatEnvelope;
 
 /**
- * Turns a (non-null) {@link AgentRequest} into the backend-native payload a
- * handle feeds its runtime. Supplied explicitly to
- * {@link AgentHandle.submit} — render belongs to the caller, not the
- * handle. It is only ever invoked for a non-null request, so it never has
- * to model the "no new input" case (see {@link AgentHandle.submit}). M2
- * renders default to pass-through (the existing `renderEnvelopeMessages` /
- * `prepareExternalAgentPrompt`).
+ * Host-bound render fn: the request is always the host {@link AgentRequest}.
+ * `TRendered` is the backend-native render output (pi-ai `Message[]` for the
+ * built-in path, ACP prompt blocks for the external path).
  */
-export type RenderFn<TRendered> = (
-  request: AgentRequest,
-) => TRendered | Promise<TRendered>;
+export type RenderFn<TRendered> = RuntimeRenderFn<AgentRequest, TRendered>;
 
 /**
- * The in-process handle to one live agent workload. `TRendered` is the
- * backend-native render output (pi-ai `Message[]` for the built-in path,
- * ACP prompt blocks for the external path). After `submit`, callers use
- * the uniform `events()` / `control()` / `capabilities` facets, which are
- * `TRendered`-agnostic.
+ * The events a host handle actually emits: every host `AgentStreamEvent`
+ * frame except the transport-synthesized `meta` / `end` (those are added by
+ * the route around a turn, not by a handle). This is the host-extended
+ * event union the subtree `AgentHandle` is bound to via its `TEvent`
+ * parameter — it stays protocol-assignable, so the wire contract holds.
  */
-export interface AgentHandle<TRendered = unknown> {
-  /**
-   * Start this turn. When `request` is non-null, renders it via `render`
-   * at the last moment and feeds the result to the backing runtime
-   * (built-in: `agent.prompt`; external: `client.prompt`).
-   *
-   * `request` MAY be `null`, meaning "no new input this turn". The
-   * interface fixes only that null is *accepted*; its meaning is entirely
-   * driver-defined and carries NO protocol-level contract. A driver is
-   * free to treat it as "resume the pre-loaded transcript" (the built-in
-   * path calls `agent.continue()`), or to reject it (a driver that always
-   * needs fresh input may emit an `error` event or no-op). When `request`
-   * is null, `render` is never invoked.
-   *
-   * Non-blocking — the emitted events are consumed via
-   * {@link AgentHandle.events}.
-   */
-  submit(request: AgentRequest | null, render: RenderFn<TRendered>): void;
+export type InStreamEvent = Exclude<AgentStreamEvent, { type: 'meta' | 'end' }>;
 
-  /**
-   * The per-turn event stream. Yields `AgentStreamEvent`s as the agent
-   * produces them and returns this turn's transcript delta (the messages
-   * to persist) as the generator's return value.
-   */
-  events(): AsyncGenerator<AgentStreamEvent, Message[]>;
-
-  /**
-   * Send a host→agent control operation. Resolves to a `ControlAck`;
-   * unsupported operations (not in `capabilities.control`) resolve to
-   * `{ ok: false, code: 'unsupported' }` rather than throwing.
-   */
-  control(msg: ControlMsg): Promise<ControlAck>;
-
-  /** The capability descriptor this handle advertises. */
-  readonly capabilities: AgentCapabilities;
-}
+/**
+ * Host-bound handle: request = {@link AgentRequest}, transcript result =
+ * pi-ai `Message[]`, events = host {@link InStreamEvent}. `TRendered` stays
+ * open per backend. Facets (`submit` / `events` / `control` /
+ * `capabilities`) are defined by the subtree {@link RuntimeAgentHandle}.
+ */
+export type AgentHandle<TRendered = unknown> = RuntimeAgentHandle<
+  AgentRequest,
+  TRendered,
+  Message[],
+  InStreamEvent
+>;

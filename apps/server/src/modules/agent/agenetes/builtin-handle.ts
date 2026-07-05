@@ -54,6 +54,16 @@ type InStreamEvent = Exclude<AgentStreamEvent, { type: 'meta' | 'end' }>;
 /** The built-in path's render output: this turn's pi-ai messages. */
 export type BuiltinRendered = Message[];
 
+/**
+ * The capability descriptor every {@link BuiltinAgentHandle} advertises —
+ * a Job that supports only `cancel`. Hoisted so the built-in driver
+ * (`./drivers.ts`) can advertise it before a handle instance exists.
+ */
+export const BUILTIN_CAPABILITIES: AgentCapabilities = {
+  control: ['cancel'],
+  turnInput: 'blocking',
+};
+
 /** Minimal structured logger the handle emits request-scoped diagnostics to. */
 interface HandleLogger {
   info: (message: string) => void;
@@ -98,10 +108,7 @@ export class BuiltinAgentHandle implements AgentHandle<BuiltinRendered> {
    * blocking (the ACP baseline). It has no session-load or slash-command
    * surface.
    */
-  readonly capabilities: AgentCapabilities = {
-    control: ['cancel'],
-    turnInput: 'blocking',
-  };
+  readonly capabilities: AgentCapabilities = BUILTIN_CAPABILITIES;
 
   /**
    * The transcript length at construction. This turn's output delta is

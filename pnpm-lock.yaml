@@ -87,6 +87,9 @@ importers:
       '@agenetes/protocol':
         specifier: workspace:*
         version: link:../../external/agenetes/packages/protocol
+      '@agenetes/runtime':
+        specifier: workspace:*
+        version: link:../../external/agenetes/packages/runtime
       '@agentclientprotocol/sdk':
         specifier: ^0.22.1
         version: 0.22.1(zod@4.4.3)
@@ -365,6 +368,16 @@ importers:
       zod:
         specifier: ^4.3.6
         version: 4.4.3
+    devDependencies:
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+
+  external/agenetes/packages/runtime:
+    dependencies:
+      '@agenetes/protocol':
+        specifier: workspace:*
+        version: link:../protocol
     devDependencies:
       typescript:
         specifier: ^5.9.0

@@ -15,10 +15,8 @@
 
 import { Agent } from '@earendil-works/pi-agent-core';
 
-import {
-  BuiltinAgentHandle,
-  type BuiltinRendered,
-} from './agenetes/builtin-handle.js';
+import { getBuiltinDriver } from './agenetes/drivers.js';
+import { type BuiltinRendered } from './agenetes/builtin-handle.js';
 import { type RenderFn } from './agenetes/handle.js';
 import { renderEnvelopeMessages } from './conversation/prompt/build-prompt.js';
 import { dumpAssembledPrompt } from './conversation/prompt/debug-prompt.js';
@@ -261,11 +259,14 @@ export async function* runAgent(
       }
     : undefined;
 
-  const handle = new BuiltinAgentHandle(agent, {
-    maxIterations,
-    signal,
-    logger,
-    onRendered,
+  const handle = getBuiltinDriver().create({
+    agent,
+    options: {
+      maxIterations,
+      signal,
+      logger,
+      onRendered,
+    },
   });
   // `null` request when there is no envelope → the built-in driver resumes
   // the pre-loaded transcript (`agent.continue()`).

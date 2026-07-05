@@ -32,7 +32,12 @@ import {
 } from '../acp/translator.js';
 import { applyToolExt } from '../store/chat-thread-store.js';
 
-import type { AgentHandle, AgentRequest, RenderFn } from './handle.js';
+import type {
+  AgentHandle,
+  AgentRequest,
+  InStreamEvent,
+  RenderFn,
+} from './handle.js';
 import type { AcpSessionEntry } from '../acp/session-registry.js';
 import type { ContentPart } from '../conversation/prompt/attachments.js';
 import type { AcpTurnOverlay } from '../store/chat-thread-store.js';
@@ -42,8 +47,7 @@ import type {
   ControlMsg,
 } from '@agenetes/protocol';
 import type { AssistantMessage, Message } from '@earendil-works/pi-ai';
-import type { AcpPlanEntry } from '@sediment/shared';
-import type { AgentStreamEvent } from '@sediment/shared';
+import type { AcpPlanEntry, AgentStreamEvent } from '@sediment/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
 /**
@@ -96,6 +100,18 @@ const ACP_CONTROL_OPS: AgentCapabilities['control'] = [
   'answer_permission',
 ];
 
+/**
+ * The capability descriptor every {@link AcpAgentHandle} advertises — a
+ * Deployment with the full control set and session-load. Hoisted so the
+ * ACP driver (`./drivers.ts`) can advertise it before a handle instance
+ * exists.
+ */
+export const ACP_CAPABILITIES: AgentCapabilities = {
+  control: ACP_CONTROL_OPS,
+  loadSession: true,
+  turnInput: 'blocking',
+};
+
 /** ACP stop reasons we know about; mapped onto pi-ai `stopReason`. */
 function mapStopReason(
   reason: string | undefined,
@@ -118,11 +134,7 @@ export class AcpAgentHandle implements AgentHandle<PreparedAcpPrompt> {
    * session (`session/load`). It accepts turn input blocking (the ACP
    * baseline: `session/prompt` always elicits a model turn).
    */
-  readonly capabilities: AgentCapabilities = {
-    control: ACP_CONTROL_OPS,
-    loadSession: true,
-    turnInput: 'blocking',
-  };
+  readonly capabilities: AgentCapabilities = ACP_CAPABILITIES;
 
   private pending?: {
     request: AgentRequest | null;
@@ -141,7 +153,7 @@ export class AcpAgentHandle implements AgentHandle<PreparedAcpPrompt> {
     this.pending = { request, render };
   }
 
-  async *events(): AsyncGenerator<AgentStreamEvent, Message[]> {
+  async *events(): AsyncGenerator<InStreamEvent, Message[]> {
     const pending = this.pending;
     if (!pending) {
       throw new Error('AcpAgentHandle.events() called before submit()');
@@ -338,7 +350,11 @@ export class AcpAgentHandle implements AgentHandle<PreparedAcpPrompt> {
       // Drain the queue as updates arrive.
       while (true) {
         while (queue.length > 0) {
-          yield queue.shift()!;
+          const evt = queue.shift();
+          // The translator's return type is the full `AgentStreamEvent`
+          // union, but `meta`/`end` are transport-synthesized by the route,
+          // never emitted here — narrow to the in-stream union we advertise.
+          if (evt && evt.type !== 'meta' && evt.type !== 'end') yield evt;
         }
         if (done) break;
         await new Promise<void>((resolve) => {
