@@ -35,10 +35,10 @@ import type {
 
 /**
  * Turns a (non-null) request into the backend-native payload a handle
- * feeds its runtime. Supplied explicitly to {@link AgentHandle.submit} —
+ * feeds its runtime. Supplied explicitly to {@link AgentHandle.run} —
  * render belongs to the caller, not the handle. It is only ever invoked
  * for a non-null request, so it never has to model the "no new input"
- * case (see {@link AgentHandle.submit}).
+ * case (see {@link AgentHandle.run}).
  *
  * `TRequest` is the host request shape (the L1↔L2 request contract, kept
  * as a type parameter so this package stays host-agnostic). `TRendered`
@@ -52,35 +52,55 @@ export type RenderFn<TRequest, TRendered> = (
 /**
  * The in-process handle to one live agent workload — the ACP *client
  * role* (stateful, bidirectional, capability-negotiated), not an HTTP
- * client. Its four facets:
+ * client.
  *
- *   - `submit(request, render)` — the data-plane IN. The request is
- *     plain, replayable data; `render` is supplied explicitly per turn
- *     and invoked at the last moment — the handle never owns rendering.
- *   - `events()` — the data-plane OUT: the per-turn `AgentStreamEvent`
- *     stream, returning this turn's transcript delta ({@link TResult}) as
- *     the generator's return value.
+ * Lifecycle (§3.2 / M2.6): a handle is either a **Job** (its life *is*
+ * one run — `run()` once, then terminal, essentially a function call) or
+ * a **Deployment** (a long-lived session that hosts *many* runs plus
+ * cross-turn `control`, notifications, liveness, and explicit `close`).
+ * A single **run/turn** is the unit both share; `run()` is that unit.
+ * A Deployment is the base run-producer + a session layer; a Job is the
+ * degenerate one-shot. L2 (`AgentRuntime`) holds Deployment handles live
+ * across turns keyed by `threadId`; a Job never enters that registry.
+ *
+ * Its facets:
+ *
+ *   - `run(request, render, ctx)` — the data plane for one turn. Merges
+ *     "submit this turn's input" with "stream this turn's output": renders
+ *     the (non-null) request at the last moment (render belongs to the
+ *     caller, not the handle), feeds it to the backing runtime, and yields
+ *     the per-turn `AgentStreamEvent`s — returning this turn's transcript
+ *     delta ({@link TResult}) as the generator's return value. `ctx` is the
+ *     host-supplied per-turn context (see {@link TTurnCtx}). Called once
+ *     for a Job; once per turn on a long-lived Deployment.
  *   - `control(msg)` — the control plane: host→agent operations over the
  *     `@agenetes/protocol` `ControlMsg` vocabulary, gated by
- *     {@link AgentHandle.capabilities}.
+ *     {@link AgentHandle.capabilities}. Usable out-of-turn on a Deployment.
+ *   - `close()` — release this workload (teardown the session / drop the
+ *     backing connection). A Job's `close` is a no-op (its run already
+ *     ended it); a Deployment tears down its long-lived session.
  *   - `capabilities` — the advertised capability descriptor.
  *
  * The type parameters keep the framework host-agnostic: `TRequest` is the
- * host request shape, `TRendered` the backend-native render output, and
+ * host request shape, `TRendered` the backend-native render output,
  * `TResult` the transcript-delta the generator returns (the host binds it
- * to e.g. pi-ai `Message[]`). After `submit`, callers use the uniform
- * `events()` / `control()` / `capabilities` facets, all `TRendered`-agnostic.
+ * to e.g. pi-ai `Message[]`), `TEvent` the (protocol-assignable) event
+ * union it yields, and `TTurnCtx` the host's per-turn context bundle.
  */
 export interface AgentHandle<
   TRequest = unknown,
   TRendered = unknown,
   TResult = unknown,
   TEvent extends AgentStreamEvent = AgentStreamEvent,
+  TTurnCtx = unknown,
 > {
   /**
-   * Start this turn. When `request` is non-null, renders it via `render`
-   * at the last moment and feeds the result to the backing runtime
-   * (built-in: `agent.prompt`; external: `client.prompt`).
+   * Run one turn: render + submit this turn's input, then stream its
+   * output. When `request` is non-null it is rendered via `render` at the
+   * last moment and fed to the backing runtime (built-in: `agent.prompt`;
+   * external: `client.prompt`); the generator then yields the turn's
+   * `AgentStreamEvent`s and returns the turn's transcript delta (the
+   * messages to persist) as its return value.
    *
    * `request` MAY be `null`, meaning "no new input this turn". The
    * interface fixes only that null is *accepted*; its meaning is entirely
@@ -90,15 +110,11 @@ export interface AgentHandle<
    * needs fresh input may emit an `error` event or no-op). When `request`
    * is null, `render` is never invoked.
    *
-   * Non-blocking — the emitted events are consumed via
-   * {@link AgentHandle.events}.
-   */
-  submit(request: TRequest | null, render: RenderFn<TRequest, TRendered>): void;
-
-  /**
-   * The per-turn event stream. Yields `AgentStreamEvent`s as the agent
-   * produces them and returns this turn's transcript delta (the messages
-   * to persist) as the generator's return value.
+   * `ctx` carries the host's per-turn context (the mutable overlay, the
+   * turn's abort signal, the request-scoped logger, per-turn hooks, and —
+   * for a Deployment whose backing object is re-resolved each turn — the
+   * live backing object). It is a host-bound opaque bundle so the exact
+   * turn-vs-driver split can be refined without touching this seam.
    *
    * The yield type is a `TEvent` generic (defaulting to the wire-level
    * `@agenetes/protocol` `AgentStreamEvent`) so the host can bind it to a
@@ -106,14 +122,27 @@ export interface AgentHandle<
    * excluding transport-synthesized frames like `meta`/`end`. `TEvent` is
    * constrained to remain protocol-assignable, keeping the wire contract.
    */
-  events(): AsyncGenerator<TEvent, TResult>;
+  run(
+    request: TRequest | null,
+    render: RenderFn<TRequest, TRendered>,
+    ctx: TTurnCtx,
+  ): AsyncGenerator<TEvent, TResult>;
 
   /**
    * Send a host→agent control operation. Resolves to a `ControlAck`;
    * unsupported operations (not in `capabilities.control`) resolve to
-   * `{ ok: false, code: 'unsupported' }` rather than throwing.
+   * `{ ok: false, code: 'unsupported' }` rather than throwing. On a
+   * long-lived Deployment this is usable out-of-turn (between runs); an
+   * op that has no live session to act on resolves to a failure ack.
    */
   control(msg: ControlMsg): Promise<ControlAck>;
+
+  /**
+   * Release this workload. For a long-lived Deployment this tears down
+   * the session (drops the backing connection); for a one-shot Job it is
+   * a no-op (the single `run` already ended its life). Idempotent.
+   */
+  close(): void;
 
   /** The capability descriptor this handle advertises. */
   readonly capabilities: AgentCapabilities;
