@@ -27,6 +27,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.22.1",
+    "@agenetes/protocol": "workspace:*",
     "@xyflow/react": "^12.10.0",
     "mdast-util-from-markdown": "^2.0.3",
     "mdast-util-gfm": "^3.1.0",
@@ -37,7 +38,6 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@agenetes/protocol": "workspace:*",
     "vitest": "^4.0.18"
   }
 }
