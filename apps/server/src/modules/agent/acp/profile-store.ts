@@ -4,7 +4,7 @@
  * Profiles are long-lived spawn recipes (cli + cwd + flags) persisted
  * to `data/agent-profiles.json`. Each one names a way to launch one
  * external agent process on demand via the embedded daemon (see
- * `./daemon-supervisor.ts`).
+ * `@agenetes/agentlet-host`).
  *
  * Why a tiny dedicated file instead of the existing `external-agents.
  * json`: the legacy file stored alias-only canvas bindings (see

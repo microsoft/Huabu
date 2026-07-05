@@ -16,6 +16,7 @@
  * the production browser bundle.
  */
 
+import { agentletStatusSchema } from '@agenetes/protocol';
 import { z } from 'zod';
 
 import {
@@ -30,6 +31,7 @@ import type {
   AcpSessionConfigOption,
   AcpSessionMode,
 } from '../agent/acp-tool.js';
+import type { AgentletStatus } from '@agenetes/protocol';
 
 // ─── Agent profiles (user-configured spawn recipes) ────────────────────
 //
@@ -80,29 +82,15 @@ export interface AcpAgentProfile {
 // only so the UI can render a single troubleshooting affordance when
 // the supervisor gives up; on the happy path the user never sees it.
 
-/** Status of the single agentlet known to this Sediment instance. */
-export interface AcpAgentletStatus {
-  /** True when an agentlet is currently connected to the server. */
-  online: boolean;
-  /** Opaque agentlet id when online. */
-  agentletId?: string;
-  /** Hostname reported via agentlet/hello. */
-  hostname?: string;
-  /** Platform string (e.g. `'darwin'`, `'win32'`). */
-  platform?: string;
-  /** ISO timestamp of the most recent successful agentlet connection. */
-  connectedAt?: string;
-  /**
-   * Most recent supervisor error message when the agentlet is offline.
-   * Empty / undefined on the happy path.
-   */
-  lastError?: string;
-  /**
-   * Epoch ms of the next scheduled restart attempt while in backoff.
-   * Undefined when not in backoff (either online or supervisor gave up).
-   */
-  nextRestartAt?: number;
-}
+/**
+ * Status of the single agentlet known to this Sediment instance.
+ *
+ * Canonically defined as `AgentletStatus` in `@agenetes/protocol`
+ * (the L2 control-plane wire contract); re-exported here under the
+ * historical Sediment name so existing L1 / browser consumers are
+ * unaffected. Browser-safe (the definition is zod-only in protocol).
+ */
+export type AcpAgentletStatus = AgentletStatus;
 
 /** @deprecated Use {@link AcpAgentletStatus} instead. */
 export type AcpDaemonStatus = AcpAgentletStatus;
@@ -691,16 +679,8 @@ export const acpAgentProfileSchema = z.object({
   updatedAt: z.number().int().nonnegative(),
 }) satisfies z.ZodType<AcpAgentProfile>;
 
-/** Schema mirror of {@link AcpAgentletStatus}. */
-export const acpAgentletStatusSchema = z.object({
-  online: z.boolean(),
-  agentletId: z.string().min(1).optional(),
-  hostname: z.string().min(1).optional(),
-  platform: z.string().min(1).optional(),
-  connectedAt: z.string().min(1).optional(),
-  lastError: z.string().optional(),
-  nextRestartAt: z.number().int().nonnegative().optional(),
-}) satisfies z.ZodType<AcpAgentletStatus>;
+/** Schema mirror of {@link AcpAgentletStatus}; re-exported from `@agenetes/protocol`. */
+export const acpAgentletStatusSchema = agentletStatusSchema;
 
 /** @deprecated Use {@link acpAgentletStatusSchema} instead. */
 export const acpDaemonStatusSchema = acpAgentletStatusSchema;

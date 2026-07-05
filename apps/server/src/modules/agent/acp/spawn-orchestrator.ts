@@ -33,9 +33,13 @@
  * resume them when the user revisits the thread.
  */
 
-import { getDaemonSupervisor } from './daemon-supervisor.js';
+import {
+  getDaemonSupervisor,
+  getAgentletServer,
+} from '@agenetes/agentlet-host';
+
 import { AcpServiceError } from './errors.js';
-import { getAgentletServer } from './server-mount.js';
+import { getHostServerPort } from '../../../host-port.js';
 
 import type { AcpBindingRecipe } from './session-store.js';
 
@@ -221,7 +225,7 @@ export async function ensureAgentForThread(
   // AGENTLET_SERVER and AGENTLET_TOKEN are injected by the daemon itself.
   const reachbackEnv: Record<string, string> = {};
   if (canvasId) {
-    const port = getDaemonSupervisor().getServerPort();
+    const port = getHostServerPort();
     if (port > 0) {
       reachbackEnv.HUABU_RFS_URL = `http://127.0.0.1:${port}/api/rfs/${canvasId}`;
     }

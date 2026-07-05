@@ -19,6 +19,7 @@
     "eval:diff": "tsx evals/cli.ts diff"
   },
   "dependencies": {
+    "@agenetes/agentlet-host": "workspace:*",
     "@agenetes/protocol": "workspace:*",
     "@agenetes/runtime": "workspace:*",
     "@agentclientprotocol/sdk": "^0.22.1",

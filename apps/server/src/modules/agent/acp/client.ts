@@ -230,7 +230,7 @@ type SessionUpdateInterceptor = (msg: AcpMessage) => boolean;
  * `Stream` shape. `close()` closes the readable, which makes the SDK
  * abort its connection and reject pending outgoing requests. Does NOT
  * call `conn.disconnect()` — connection lifecycle is owned by
- * `server-mount.ts`.
+ * the `@agenetes/agentlet-host` transport host.
  *
  * `interceptSessionUpdate` is invoked on every inbound message *before*
  * it reaches the SDK; returning `true` swallows the message (see

@@ -84,6 +84,9 @@ importers:
 
   apps/server:
     dependencies:
+      '@agenetes/agentlet-host':
+        specifier: workspace:*
+        version: link:../../external/agenetes/packages/agentlet-host
       '@agenetes/protocol':
         specifier: workspace:*
         version: link:../../external/agenetes/packages/protocol
@@ -359,6 +362,25 @@ importers:
       vitest:
         specifier: ^4.0.18
         version: 4.1.8(@types/node@22.19.21)(happy-dom@15.11.7)(vite@6.4.3(@types/node@22.19.21)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.22.4)(yaml@2.9.0))
+
+  external/agenetes/packages/agentlet-host:
+    dependencies:
+      '@agenetes/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@agentlet/protocol':
+        specifier: workspace:*
+        version: link:../../../agentlet/packages/protocol
+      '@agentlet/server':
+        specifier: workspace:*
+        version: link:../../../agentlet/packages/server
+    devDependencies:
+      fastify:
+        specifier: ^5.2.0
+        version: 5.8.5
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
 
   external/agenetes/packages/protocol:
     dependencies:

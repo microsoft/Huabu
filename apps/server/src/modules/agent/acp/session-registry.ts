@@ -16,7 +16,7 @@
  *   - We do NOT (yet) react to agent disconnect events; the next prompt
  *     after a disconnect will fail the connection-status check in
  *     service.ts and surface as an SSE `error`. Future work can hook the
- *     agentlet `onDisconnection` callback in `server-mount.ts` to evict
+ *     agentlet `onDisconnection` callback in `@agenetes/agentlet-host` to evict
  *     all sessions for that agentId proactively.
  *
  * In-memory only; no persistence across server restarts. A companion

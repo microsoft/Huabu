@@ -17,6 +17,8 @@
  * translator and will be added incrementally.
  */
 
+import { getAgentletServer } from '@agenetes/agentlet-host';
+
 import { AcpAgentClient, type AcpInitializeResult } from './client.js';
 import { AcpServiceError } from './errors.js';
 import {
@@ -24,7 +26,6 @@ import {
   serializeRawPrompt,
 } from './preprocessor.js';
 import { getProfile } from './profile-store.js';
-import { getAgentletServer } from './server-mount.js';
 import { acpSessionRegistry } from './session-registry.js';
 import {
   deleteAcpSessionRecord,
@@ -146,9 +147,7 @@ export interface AcpProfileCachePort {
    * when none is cached. Used to paint the `/` menu on a fresh session
    * before the agent's authoritative `available_commands_update` arrives.
    */
-  readCommands(
-    profileId: string,
-  ): {
+  readCommands(profileId: string): {
     availableCommands: AvailableCommand[];
     commandsUpdatedAt: number;
   } | null;

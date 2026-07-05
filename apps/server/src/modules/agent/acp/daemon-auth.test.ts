@@ -16,9 +16,11 @@
  * harness and is covered by the manual smoke tests instead.
  */
 
+import {
+  _resetDaemonAuthForTests,
+  getDaemonAuth,
+} from '@agenetes/agentlet-host';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-
-import { _resetDaemonAuthForTests, getDaemonAuth } from './daemon-auth.js';
 
 import type { AgentHelloParams, AgentletHelloParams } from '@agentlet/protocol';
 

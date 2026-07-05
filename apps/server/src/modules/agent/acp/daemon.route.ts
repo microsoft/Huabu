@@ -11,7 +11,8 @@
  * to a remote browser would be a trivial DoS.
  */
 
-import { getDaemonSupervisor } from './daemon-supervisor.js';
+import { getDaemonSupervisor } from '@agenetes/agentlet-host';
+
 import { isLoopbackRequest } from '../../security/peer.js';
 
 import type {
