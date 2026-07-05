@@ -52,10 +52,12 @@ import type { AgentStreamEvent } from '@sediment/shared';
 export type AgentRequest = ChatEnvelope;
 
 /**
- * Turns an {@link AgentRequest} into the backend-native payload a handle
- * feeds its runtime. Supplied explicitly to {@link AgentHandle.submit} —
- * render belongs to the caller, not the handle. M2 renders default to
- * pass-through (the existing `renderEnvelopeMessages` /
+ * Turns a (non-null) {@link AgentRequest} into the backend-native payload a
+ * handle feeds its runtime. Supplied explicitly to
+ * {@link AgentHandle.submit} — render belongs to the caller, not the
+ * handle. It is only ever invoked for a non-null request, so it never has
+ * to model the "no new input" case (see {@link AgentHandle.submit}). M2
+ * renders default to pass-through (the existing `renderEnvelopeMessages` /
  * `prepareExternalAgentPrompt`).
  */
 export type RenderFn<TRendered> = (
@@ -71,12 +73,22 @@ export type RenderFn<TRendered> = (
  */
 export interface AgentHandle<TRendered = unknown> {
   /**
-   * Start this turn. Renders `request` via `render` at the last moment and
-   * feeds the result to the backing runtime (built-in: `agent.prompt`;
-   * external: `client.prompt`). Non-blocking — the emitted events are
-   * consumed via {@link AgentHandle.events}.
+   * Start this turn. When `request` is non-null, renders it via `render`
+   * at the last moment and feeds the result to the backing runtime
+   * (built-in: `agent.prompt`; external: `client.prompt`).
+   *
+   * `request` MAY be `null`, meaning "no new input this turn". The
+   * interface fixes only that null is *accepted*; its meaning is entirely
+   * driver-defined and carries NO protocol-level contract. A driver is
+   * free to treat it as "resume the pre-loaded transcript" (the built-in
+   * path calls `agent.continue()`), or to reject it (a driver that always
+   * needs fresh input may emit an `error` event or no-op). When `request`
+   * is null, `render` is never invoked.
+   *
+   * Non-blocking — the emitted events are consumed via
+   * {@link AgentHandle.events}.
    */
-  submit(request: AgentRequest, render: RenderFn<TRendered>): void;
+  submit(request: AgentRequest | null, render: RenderFn<TRendered>): void;
 
   /**
    * The per-turn event stream. Yields `AgentStreamEvent`s as the agent

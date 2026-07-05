@@ -7,3 +7,8 @@
  */
 
 export type { AgentHandle, AgentRequest, RenderFn } from './handle.js';
+export {
+  BuiltinAgentHandle,
+  type BuiltinRendered,
+  type BuiltinAgentHandleOptions,
+} from './builtin-handle.js';
