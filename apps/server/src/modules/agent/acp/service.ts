@@ -17,8 +17,6 @@
  * translator and will be added incrementally.
  */
 
-import { fauxAssistantMessage } from '@earendil-works/pi-ai';
-
 import { AcpAgentClient, type AcpInitializeResult } from './client.js';
 import { AcpServiceError } from './errors.js';
 import {
@@ -39,9 +37,12 @@ import {
   writeAcpSessionRecord,
 } from './session-store.js';
 import { ensureAgentForThread } from './spawn-orchestrator.js';
-import { acpUpdateToStreamEvent, mergeThinkingChunk } from './translator.js';
+import {
+  AcpAgentHandle,
+  type PreparedAcpPrompt,
+} from '../agenetes/acp-handle.js';
+import { type RenderFn } from '../agenetes/handle.js';
 import { dumpAssembledPrompt } from '../conversation/prompt/debug-prompt.js';
-import { applyToolExt } from '../store/chat-thread-store.js';
 
 import type { AcpSessionEntry } from './session-registry.js';
 import type {
@@ -49,11 +50,9 @@ import type {
   AcpSessionPersistedMeta,
 } from './session-store.js';
 import type { ChatEnvelope } from '../conversation/envelope.js';
-import type { ContentPart } from '../conversation/prompt/attachments.js';
 import type { AcpTurnOverlay } from '../store/chat-thread-store.js';
-import type { AssistantMessage, Message } from '@earendil-works/pi-ai';
+import type { Message } from '@earendil-works/pi-ai';
 import type {
-  AcpPlanEntry,
   AcpModelInfo,
   AcpSessionConfigOption,
   AcpSessionMode,
@@ -61,17 +60,6 @@ import type {
 } from '@sediment/shared';
 import type { AgentStreamEvent, AvailableCommand } from '@sediment/shared';
 import type { FastifyBaseLogger } from 'fastify';
-
-/** ACP stop reasons we know about; mapped onto pi-ai `stopReason`. */
-function mapStopReason(
-  reason: string | undefined,
-  aborted: boolean,
-): AssistantMessage['stopReason'] {
-  if (aborted || reason === 'cancelled') return 'aborted';
-  if (reason === 'max_tokens') return 'length';
-  // Default to 'stop' for end_turn, max_turn_requests, refusal, anything else.
-  return 'stop';
-}
 
 export interface RunAcpAgentOptions {
   /**
@@ -1091,18 +1079,14 @@ export async function* runAcpAgent(
 ): AsyncGenerator<AgentStreamEvent, Message[]> {
   const { binding, threadId, overlay, signal, logger } = opts;
   const canvasId = opts.canvasId ?? '';
-  // Verbatim user text for the fallback payload + slash detection. The
-  // preprocessor derives the same value from the envelope; we keep a
-  // local copy only for the raw-text fallback below.
+  // Verbatim user text for the raw-text fallback + slash detection.
   const rawText = opts.envelope.user.text;
 
   // 1-2. Ensure (open or reuse) the per-thread ACP session. The helper
   //      handles connection lookup, stale-entry eviction, initialize +
   //      session/new, and registers the `available_commands_update`
-  //      listener so slash-command pushes outside a turn don't get
-  //      silently dropped. We deliberately do NOT pass `cwd` here so
-  //      `ensureAcpSession` derives it from the bound profile; passing
-  //      `'/'` would override the user's configured working directory.
+  //      listener. We deliberately do NOT pass `cwd` here so
+  //      `ensureAcpSession` derives it from the bound profile.
   const entry = await ensureAcpSession({
     threadId,
     binding,
@@ -1111,324 +1095,74 @@ export async function* runAcpAgent(
     logger,
   });
 
-  // 3. Preprocess the user message into the ACP wire blocks BEFORE
-  //    opening the queue. On failure we fall back to the raw text.
-  let preparedError: string | undefined;
-  let promptPayload = rawText;
-  // Whether this turn's payload actually carried the one-shot system
-  // preamble. Drives the post-success flip of `entry.systemPreambleSent`
-  // below — so a failed turn (or a slash-command short-circuit, which
-  // never includes it) re-sends the preamble on the next real turn.
-  let includedSystem = false;
-  let promptBlocks: ContentPart[] = [{ type: 'text', text: rawText }];
-  try {
-    const result = await prepareExternalAgentPrompt({
-      envelope: opts.envelope,
-      agentAlias: binding.alias,
-      canvasId: canvasId || null,
-      includeSystem: !entry.systemPreambleSent,
-      logger,
-    });
-    promptPayload = result.serialized;
-    includedSystem = result.includedSystem;
-    promptBlocks = result.blocks;
-  } catch (err) {
-    preparedError = err instanceof Error ? err.message : String(err);
-    logger.warn(
-      { threadId, agentAlias: binding.alias, err: preparedError },
-      '[acp] preprocessor failed — falling back to raw user text',
-    );
-    promptPayload = serializeRawPrompt(rawText);
-    promptBlocks = [{ type: 'text', text: promptPayload }];
-  }
+  // 3. The render closure: envelope -> ACP wire blocks. Owns the
+  //    preprocessor + raw-text fallback so the driver always receives
+  //    valid blocks. `includeSystem` reads the entry's one-shot preamble
+  //    flag at render time; the handle flips it on prompt success.
+  const render: RenderFn<PreparedAcpPrompt> = async (
+    request,
+  ): Promise<PreparedAcpPrompt> => {
+    try {
+      const result = await prepareExternalAgentPrompt({
+        envelope: request,
+        agentAlias: binding.alias,
+        canvasId: canvasId || null,
+        includeSystem: !entry.systemPreambleSent,
+        logger,
+      });
+      return {
+        serialized: result.serialized,
+        includedSystem: result.includedSystem,
+        blocks: result.blocks,
+      };
+    } catch (err) {
+      const preparedError = err instanceof Error ? err.message : String(err);
+      logger.warn(
+        { threadId, agentAlias: binding.alias, err: preparedError },
+        '[acp] preprocessor failed — falling back to raw user text',
+      );
+      const serialized = serializeRawPrompt(rawText);
+      return {
+        serialized,
+        includedSystem: false,
+        blocks: [{ type: 'text', text: serialized }],
+        preparedError,
+      };
+    }
+  };
 
   // Optional developer aid: dump the exact text payload handed to ACP
-  // `session/prompt` (the deterministic serialized prompt, NOT pi-ai
-  // messages — the external agent keeps its own session history). No-op
-  // unless HUABU_DEBUG_PROMPT is set.
-  if (opts.debugPrompt) {
-    dumpAssembledPrompt({
-      systemPrompt: '',
-      messages: [
-        { role: 'user', content: promptPayload, timestamp: Date.now() },
-      ],
-      newMessageCount: 1,
-      turnNumber: opts.debugPrompt.turnNumber,
-      threadId: opts.debugPrompt.threadId,
-      canvasId: canvasId || null,
-      mode: opts.debugPrompt.mode,
-      logger: opts.debugPrompt.logger,
-    });
-  }
-
-  // 4. Bridge the per-update callback into an async iterable via a queue.
-  const queue: AgentStreamEvent[] = [];
-  let resolveWaiter: (() => void) | null = null;
-  let assembledText = '';
-  let promptError: unknown = null;
-  let stopReason: string | undefined;
-  let done = false;
-
-  // 4a. Turn bookkeeping.
-  //
-  //   `contentBlocks` accumulates text / thinking / tool-call blocks
-  //   in WIRE ORDER. Text and thinking deltas coalesce into the
-  //   trailing same-kind block; tool calls push a fresh block. This
-  //   list is what we hand to `fauxAssistantMessage` in the `finally`
-  //   below, so the persisted message mirrors what the user saw live
-  //   (refresh preserves interleaving + thinking blocks + tool-call
-  //   order, and gives the sidecar's `toolExtras` content-block ids
-  //   to join against).
-  //
-  //   `sidecar` holds ACP-specific enrichment (toolKind / status /
-  //   plan entries / …) that doesn't fit pi-ai's content shape;
-  //   keyed by stable ids — `toolExtras[toolCallId]` and
-  //   `planByMessageTimestamp[String(timestamp)]`. The assistant
-  //   timestamp is only known after the `finally` push, so plan
-  //   entries are staged in `pendingPlan` and committed there; a
-  //   turn aborted before any output drops the staged plan.
-  //
-  //   `assistantIndex` lets `recordMessageTimestamp` keep the
-  //   sidecar's `messageTimestamps` array index-aligned with
-  //   `Context.messages`.
-  type AssistantContentBlock =
-    | { type: 'text'; text: string }
-    | { type: 'thinking'; thinking: string }
-    | {
-        type: 'toolCall';
-        id: string;
-        name: string;
-        arguments: Record<string, unknown>;
-      };
-  const contentBlocks: AssistantContentBlock[] = [];
-  // THIS turn's assembled assistant message(s). RETURNED to the route as
-  // the generator's value (see the two `return outMessages` at the tail),
-  // instead of being pushed into a caller-owned out-param array. Filled in
-  // the `finally` below so a partial reply survives abort/error.
-  const outMessages: Message[] = [];
-  // Per-toolCallId reference into `contentBlocks` so a later
-  // `tool_call_update` can refine the title in place.
-  const toolCallByCallId = new Map<
-    string,
-    Extract<AssistantContentBlock, { type: 'toolCall' }>
-  >();
-  // ACP overlay (tool extensions + plan) accumulates into the
-  // route-owned `overlay`, which is persisted into the turn record.
-  // Plan entries are staged until the turn ends (full-replacement
-  // wire semantics: latest plan wins).
-  let pendingPlan: AcpPlanEntry[] | null = null;
-
-  const wake = () => {
-    if (resolveWaiter) {
-      const fn = resolveWaiter;
-      resolveWaiter = null;
-      fn();
-    }
-  };
-
-  logger.info(
-    {
-      threadId,
-      sessionId: entry.sessionId,
-      profileId: binding.profileId,
-      promptLength: promptPayload.length,
-      preprocessed: !preparedError,
-    },
-    '[acp] session/prompt dispatch',
-  );
-
-  void entry.client
-    .prompt(
-      entry.sessionId,
-      promptBlocks,
-      (update) => {
-        const evt = acpUpdateToStreamEvent(update, logger);
-        if (!evt) {
-          // TEMP (PR-G debug): info-level so untranslated tool_call /
-          // tool_call_update / plan / etc. show up in dev logs and we
-          // can see what an external agent is actually doing during a
-          // tool-only turn. Lower to `debug` once the translator + UI
-          // surface those events as first-class.
-          logger.info(
-            { sessionUpdate: update.sessionUpdate, raw: update },
-            '[acp] untranslated session/update \u2014 dropped',
-          );
-          return;
-        }
-        if (evt.type === 'text_delta') {
-          assembledText += evt.data.content;
-          const last = contentBlocks[contentBlocks.length - 1];
-          if (last?.type === 'text') {
-            last.text += evt.data.content;
-          } else {
-            contentBlocks.push({ type: 'text', text: evt.data.content });
-          }
-        } else if (evt.type === 'thinking_delta') {
-          const last = contentBlocks[contentBlocks.length - 1];
-          if (last?.type === 'thinking') {
-            last.thinking = mergeThinkingChunk(last.thinking, evt.data.content);
-          } else {
-            contentBlocks.push({
-              type: 'thinking',
-              thinking: evt.data.content,
-            });
-          }
-        } else if (evt.type === 'tool_call') {
-          applyToolExt(overlay, evt.data.toolCallId, {
-            toolKind: evt.data.toolKind,
-            status: evt.data.status,
-            locations: evt.data.locations,
-            content: evt.data.content,
-            rawOutput: undefined,
-          });
-          // `rawInput` may be any JSON shape; pi-ai's `ToolCall.arguments`
-          // requires a plain object, so narrow defensively.
-          const rawInput = evt.data.rawInput;
-          const args: Record<string, unknown> =
-            rawInput !== null &&
-            typeof rawInput === 'object' &&
-            !Array.isArray(rawInput)
-              ? (rawInput as Record<string, unknown>)
-              : {};
-          const block: Extract<AssistantContentBlock, { type: 'toolCall' }> = {
-            type: 'toolCall',
-            id: evt.data.toolCallId,
-            name: evt.data.title || evt.data.toolKind || 'tool',
-            arguments: args,
-          };
-          contentBlocks.push(block);
-          toolCallByCallId.set(evt.data.toolCallId, block);
-        } else if (evt.type === 'tool_call_update') {
-          applyToolExt(overlay, evt.data.toolCallId, {
-            status: evt.data.status,
-            locations: evt.data.locations,
-            content: evt.data.content,
-            rawOutput: evt.data.rawOutput,
-          });
-          // ACP allows refining the title mid-flight (e.g. "Reading"
-          // → "Reading app.ts"); mirror onto the persisted block.
-          if (evt.data.title) {
-            const tc = toolCallByCallId.get(evt.data.toolCallId);
-            if (tc) tc.name = evt.data.title;
-          }
-        } else if (evt.type === 'plan') {
-          // Full-replacement wire semantics: latest plan wins.
-          // Staged until the assistant timestamp is known (finally).
-          pendingPlan = evt.data.entries;
-        }
-        queue.push(evt);
-        wake();
-      },
-      signal,
-      // Surface agent permission requests as a transient SSE event.
-      // The client owns the suspended promise + resolution; we only
-      // push the request onto the drain queue. Not persisted to the
-      // sidecar — permission prompts are live-only interactions.
-      (req) => {
-        queue.push({ type: 'permission_request', data: req });
-        wake();
-      },
-    )
-    .then((result) => {
-      stopReason = result.stopReason;
-      // First-prompt promotion: now that the agent has actually
-      // processed a user turn, its session is genuinely recoverable
-      // (Copilot CLI in particular doesn't persist an empty session
-      // across process lifetimes). Lock the sessionId into the disk
-      // record so a future server restart can `session/load` it.
-      promoteEntryToPersisted(entry, logger);
-      // Mark the one-shot system preamble delivered, but only if this
-      // turn actually carried it — a failed turn or slash-command
-      // short-circuit leaves the flag untouched so the next real turn
-      // re-sends it.
-      if (includedSystem) entry.systemPreambleSent = true;
-    })
-    .catch((err: unknown) => {
-      promptError = err;
-    })
-    .finally(() => {
-      done = true;
-      wake();
-    });
-
-  try {
-    // 5. Drain the queue as updates arrive.
-    while (true) {
-      while (queue.length > 0) {
-        yield queue.shift()!;
+  // `session/prompt` (the serialized prompt, NOT pi-ai messages — the
+  // external agent keeps its own session history). No-op unless
+  // HUABU_DEBUG_PROMPT is set. Lives in the composition layer so the ACP
+  // driver need not import the host's prompt-debug util.
+  const debugPrompt = opts.debugPrompt;
+  const onPrepared = debugPrompt
+    ? (serialized: string) => {
+        dumpAssembledPrompt({
+          systemPrompt: '',
+          messages: [
+            { role: 'user', content: serialized, timestamp: Date.now() },
+          ],
+          newMessageCount: 1,
+          turnNumber: debugPrompt.turnNumber,
+          threadId: debugPrompt.threadId,
+          canvasId: canvasId || null,
+          mode: debugPrompt.mode,
+          logger: debugPrompt.logger,
+        });
       }
-      if (done) break;
-      await new Promise<void>((resolve) => {
-        resolveWaiter = resolve;
-      });
-    }
+    : undefined;
 
-    // 5b. Visibility fallback for "empty" turns.
-    //
-    // External agents can legitimately finish a turn with zero
-    // `agent_message_chunk` text — e.g. Copilot CLI runs a chain of
-    // Read/Glob/Bash tool calls and then stops with `end_turn`
-    // without emitting prose. The translator only forwards text and
-    // thought chunks today, so such turns yield ZERO `text_delta`s
-    // and the UI shows nothing for the assistant slot — looks like
-    // the server hung.
-    //
-    // Synthesize a single explanatory `text_delta` whenever the
-    // agent produced no text AND we're not about to surface an error
-    // or an abort. The synthetic body names the `stopReason` so the
-    // user can tell what actually happened, and we treat it as real
-    // `assembledText` so it persists in chat history.
-    const aborted = signal?.aborted ?? false;
-    if (assembledText.length === 0 && !promptError && !aborted) {
-      const reason = stopReason ?? 'unknown';
-      const synthetic = `_(agent returned no text — stopReason: ${reason}. Usually a tool-only turn or a refusal without prose. Extend the ACP translator if you need tool-call rendering.)_`;
-      assembledText = synthetic;
-      // Push as a trailing text block so the synthetic also survives
-      // refresh alongside any tool calls emitted earlier in the turn.
-      contentBlocks.push({ type: 'text', text: synthetic });
-      yield { type: 'text_delta', data: { content: synthetic } };
-    }
-  } finally {
-    // 6. Persist assistant output. Mirrors `runAgent`'s `finally` so
-    //    partial replies survive abort/error. `contentBlocks` is
-    //    already in wire order, so we hand it straight to pi-ai.
-    if (contentBlocks.length > 0) {
-      const aborted = signal?.aborted ?? false;
-      const timestamp = Date.now();
-      outMessages.push(
-        fauxAssistantMessage(contentBlocks, {
-          stopReason: mapStopReason(stopReason, aborted),
-          timestamp,
-        }),
-      );
-    }
-    // 6b. Commit the turn's plan (full-replacement; latest wins) into
-    //     the route-owned overlay so it persists in the turn record.
-    //     Tool extensions were already accumulated as events arrived.
-    if (pendingPlan) {
-      overlay.plan = pendingPlan;
-      pendingPlan = null;
-    }
-  }
-
-  // 7. Yield terminal event \u2014 error wins over done.
-  if (promptError) {
-    const msg =
-      promptError instanceof Error ? promptError.message : String(promptError);
-    logger.warn(
-      { threadId, sessionId: entry.sessionId, err: msg },
-      '[acp] session/prompt failed',
-    );
-    yield { type: 'error', data: { error: msg } };
-    return outMessages;
-  }
-
-  yield {
-    type: 'done',
-    data: {
-      message: assembledText,
-      meta: { stopReason },
-    },
-  };
-  return outMessages;
+  const handle = new AcpAgentHandle(entry, {
+    overlay,
+    signal,
+    logger,
+    // First-prompt promotion is a registry/persistence side effect, kept
+    // out of the driver and injected here (see AcpAgentHandleOptions).
+    onPromptSettled: () => promoteEntryToPersisted(entry, logger),
+    onPrepared,
+  });
+  handle.submit(opts.envelope, render);
+  return yield* handle.events();
 }

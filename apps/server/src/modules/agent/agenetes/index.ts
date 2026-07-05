@@ -12,3 +12,8 @@ export {
   type BuiltinRendered,
   type BuiltinAgentHandleOptions,
 } from './builtin-handle.js';
+export {
+  AcpAgentHandle,
+  type PreparedAcpPrompt,
+  type AcpAgentHandleOptions,
+} from './acp-handle.js';
