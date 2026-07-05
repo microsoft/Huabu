@@ -181,6 +181,17 @@ export interface EnsureAcpSessionOptions {
    * fallback chain).
    */
   cwd?: string;
+  /**
+   * Pre-resolved spawn recipe for a first-time thread (no persisted
+   * `bindingRecipe` yet). The host composition layer resolves this from
+   * its profile store *before* calling in, so the session-lifecycle code
+   * never reaches back into an L1 module (`profile-store`). For a
+   * returning thread the persisted `bindingRecipe` snapshot wins and this
+   * is ignored; when both are absent the binding is unbound and the call
+   * throws. Carrying the recipe on the options (rather than looking it up
+   * here) is what makes the create-time spec fully serializable.
+   */
+  recipe?: AcpBindingRecipe | null;
   logger: FastifyBaseLogger;
 }
 
@@ -517,24 +528,16 @@ async function ensureAcpSessionInner(
   //   1. Trust the persisted `bindingRecipe` snapshot (returning thread —
   //      profile mutations / deletions after thread creation must NOT
   //      reach the running agent).
-  //   2. Fall back to the live profile lookup (first-time thread, or
-  //      legacy v2 record without a recipe). We then snapshot the
-  //      profile onto the record below so subsequent calls hit (1).
+  //   2. Fall back to the host-resolved recipe passed on the options
+  //      (first-time thread, or legacy v2 record without a recipe). The
+  //      host resolves this from its profile store before calling in; we
+  //      then snapshot it onto the record below so subsequent calls hit
+  //      (1). This keeps the session-lifecycle code free of any L1
+  //      profile-store dependency.
   //   3. If neither is available, the binding is unbound — fail with a
   //      clear, user-actionable error.
-  let recipe: AcpBindingRecipe | null = persisted?.bindingRecipe ?? null;
-  if (!recipe) {
-    const profile = getProfile(binding.profileId);
-    if (profile) {
-      recipe = {
-        command: profile.command,
-        cwd: profile.cwd,
-        autoRestart: profile.autoRestart,
-        alias: profile.displayName,
-        ...(profile.agentTeam && { agentTeam: profile.agentTeam }),
-      };
-    }
-  }
+  const recipe: AcpBindingRecipe | null =
+    persisted?.bindingRecipe ?? opts.recipe ?? null;
   if (!recipe) {
     throw new AcpServiceError(
       'profile_missing',
@@ -1079,6 +1082,30 @@ function readNullableString(v: unknown): string | null | undefined {
  * events. The route handler is responsible for the surrounding `meta` /
  * `end` frames and for context persistence beyond what we append here.
  */
+/**
+ * Resolve the host's spawn recipe for a profile id, snapshotting the
+ * subset of the profile that determines spawn behaviour. Returns `null`
+ * when the profile no longer exists (deleted in Settings) — the
+ * session-lifecycle code then falls back to any persisted
+ * `bindingRecipe`, or throws if the thread was never bound. This is the
+ * one place the ACP path reaches into the L1 profile store; keeping it in
+ * the host composition layer lets the session-lifecycle helper stay
+ * profile-store-free and its create-time spec fully serializable.
+ */
+export function resolveBindingRecipe(
+  profileId: string,
+): AcpBindingRecipe | null {
+  const profile = getProfile(profileId);
+  if (!profile) return null;
+  return {
+    command: profile.command,
+    cwd: profile.cwd,
+    autoRestart: profile.autoRestart,
+    alias: profile.displayName,
+    ...(profile.agentTeam && { agentTeam: profile.agentTeam }),
+  };
+}
+
 export async function* runAcpAgent(
   opts: RunAcpAgentOptions,
 ): AsyncGenerator<AgentStreamEvent, Message[]> {
@@ -1097,6 +1124,7 @@ export async function* runAcpAgent(
     binding,
     canvasId,
     ...(opts.cwd !== undefined && { cwd: opts.cwd }),
+    recipe: resolveBindingRecipe(binding.profileId),
     logger,
   });
 

@@ -363,6 +363,28 @@ importers:
         specifier: ^4.0.18
         version: 4.1.8(@types/node@22.19.21)(happy-dom@15.11.7)(vite@6.4.3(@types/node@22.19.21)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.22.4)(yaml@2.9.0))
 
+  external/agenetes/packages/acp-driver:
+    dependencies:
+      '@agenetes/agentlet-host':
+        specifier: workspace:*
+        version: link:../agentlet-host
+      '@agenetes/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@agenetes/runtime':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentclientprotocol/sdk':
+        specifier: ^0.22.1
+        version: 0.22.1(zod@4.4.3)
+      '@earendil-works/pi-ai':
+        specifier: ^0.75.5
+        version: 0.75.5(ws@8.21.0)(zod@4.4.3)
+    devDependencies:
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+
   external/agenetes/packages/agentlet-host:
     dependencies:
       '@agenetes/protocol':

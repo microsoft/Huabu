@@ -35,7 +35,7 @@ import {
   getProfileSchemaCache,
   type AcpProfileSchemaCacheEntry,
 } from './profile-schema-cache.js';
-import { ensureAcpSession } from './service.js';
+import { ensureAcpSession, resolveBindingRecipe } from './service.js';
 import { acpSessionRegistry } from './session-registry.js';
 import { readAcpSessionRecord } from './session-store.js';
 import { acquireAcpHandle } from '../agenetes/index.js';
@@ -101,6 +101,7 @@ async function resolveSetRpcEntry(
       binding: { alias: ctx.profileId, profileId: ctx.profileId },
       canvasId: ctx.canvasId,
       cwd: ctx.cwd,
+      recipe: resolveBindingRecipe(ctx.profileId),
       logger,
     });
     return { ok: true, entry };
@@ -235,6 +236,7 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
         },
         canvasId: parsed.data.canvasId,
         cwd: parsed.data.cwd,
+        recipe: resolveBindingRecipe(parsed.data.profileId),
         logger: request.log,
       });
       return {
