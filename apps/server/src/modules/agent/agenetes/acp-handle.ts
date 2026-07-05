@@ -50,7 +50,7 @@ import type {
   RenderFn,
 } from './handle.js';
 import type { AcpSessionEntry } from '../acp/session-registry.js';
-import type { ContentPart } from '../conversation/prompt/attachments.js';
+import type { AcpContentBlock } from '@sediment/shared';
 import type { AcpTurnOverlay } from '../store/chat-thread-store.js';
 import type {
   AgentCapabilities,
@@ -64,15 +64,16 @@ import type { FastifyBaseLogger } from 'fastify';
 
 /**
  * The external path's render output: the deterministic ACP prompt payload
- * derived from this turn's envelope. `blocks` is what goes on the wire;
- * `serialized` is the text form (debug logs); `includedSystem` drives the
- * one-shot system-preamble flip on success; `preparedError` records a
- * preprocessor fall-back for the dispatch log.
+ * derived from this turn's envelope. `blocks` is what goes on the wire
+ * (already ACP content blocks — the render closure maps host content
+ * parts onto them); `serialized` is the text form (debug logs);
+ * `includedSystem` drives the one-shot system-preamble flip on success;
+ * `preparedError` records a preprocessor fall-back for the dispatch log.
  */
 export interface PreparedAcpPrompt {
   serialized: string;
   includedSystem: boolean;
-  blocks: ContentPart[];
+  blocks: AcpContentBlock[];
   preparedError?: string;
 }
 

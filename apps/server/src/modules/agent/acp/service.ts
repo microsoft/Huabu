@@ -19,7 +19,7 @@
 
 import { getAgentletServer } from '@agenetes/agentlet-host';
 
-import { AcpAgentClient, type AcpInitializeResult } from './client.js';
+import { AcpAgentClient, type AcpInitializeResult } from '@agenetes/acp-driver';
 import { AcpServiceError } from './errors.js';
 import {
   prepareExternalAgentPrompt,
@@ -45,9 +45,11 @@ import type {
   AcpSessionPersistedMeta,
 } from './session-store.js';
 import type { ChatEnvelope } from '../conversation/envelope.js';
+import type { ContentPart } from '../conversation/prompt/attachments.js';
 import type { AcpTurnOverlay } from '../store/chat-thread-store.js';
 import type { Message } from '@earendil-works/pi-ai';
 import type {
+  AcpContentBlock,
   AcpModelInfo,
   AcpSessionConfigOption,
   AcpSessionMode,
@@ -1106,6 +1108,30 @@ export function resolveBindingRecipe(
   };
 }
 
+/**
+ * Map the host's generic per-turn content parts onto ACP content blocks.
+ * This is the L1 responsibility that used to live inside the ACP client:
+ * the driver now speaks pure ACP, so the render closure produces
+ * driver-native blocks. Explicit per-type so a new `ContentPart` variant
+ * (audio / resource) breaks here until it gets its own block.
+ */
+function contentPartsToAcpBlocks(parts: ContentPart[]): AcpContentBlock[] {
+  return parts.map((b): AcpContentBlock => {
+    switch (b.type) {
+      case 'image':
+        return { type: 'image', data: b.data, mimeType: b.mimeType };
+      case 'text':
+        return { type: 'text', text: b.text };
+      default: {
+        const _exhaustive: never = b;
+        throw new Error(
+          `Unhandled content part: ${JSON.stringify(_exhaustive)}`,
+        );
+      }
+    }
+  });
+}
+
 export async function* runAcpAgent(
   opts: RunAcpAgentOptions,
 ): AsyncGenerator<AgentStreamEvent, Message[]> {
@@ -1146,7 +1172,7 @@ export async function* runAcpAgent(
       return {
         serialized: result.serialized,
         includedSystem: result.includedSystem,
-        blocks: result.blocks,
+        blocks: contentPartsToAcpBlocks(result.blocks),
       };
     } catch (err) {
       const preparedError = err instanceof Error ? err.message : String(err);

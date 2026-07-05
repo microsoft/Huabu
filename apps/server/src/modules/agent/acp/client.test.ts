@@ -22,7 +22,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { AcpAgentClient, agentSupportsLoadSession } from './client.js';
+import { AcpAgentClient, agentSupportsLoadSession } from '@agenetes/acp-driver';
 
 import type { AgentConnection, AcpMessage } from '@agentlet/protocol';
 import type { AcpSessionUpdate } from '@sediment/shared';

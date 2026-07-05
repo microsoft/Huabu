@@ -30,7 +30,7 @@
  * what the user sees.
  */
 
-import type { AcpAgentClient } from './client.js';
+import type { AcpAgentClient } from '@agenetes/acp-driver';
 import type { AcpBindingRecipe } from './session-store.js';
 import type {
   AcpCost,
