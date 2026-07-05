@@ -34,13 +34,14 @@
  * See docs/proposals/layered-architecture.md §3.6 / §7 (M2 / M2.6).
  */
 
-import { fauxAssistantMessage } from '@earendil-works/pi-ai';
 
-import { acpSessionRegistry } from '../acp/session-registry.js';
+import { acpSessionRegistry } from '@agenetes/acp-driver';
 import {
   acpUpdateToStreamEvent,
   mergeThinkingChunk,
 } from '@agenetes/acp-driver';
+import { fauxAssistantMessage } from '@earendil-works/pi-ai';
+
 import { applyToolExt } from '../store/chat-thread-store.js';
 
 import type {
@@ -49,9 +50,8 @@ import type {
   InStreamEvent,
   RenderFn,
 } from './handle.js';
-import type { AcpSessionEntry } from '../acp/session-registry.js';
-import type { AcpContentBlock } from '@sediment/shared';
 import type { AcpTurnOverlay } from '../store/chat-thread-store.js';
+import type { AcpSessionEntry } from '@agenetes/acp-driver';
 import type {
   AgentCapabilities,
   AgentStreamEvent,
@@ -59,6 +59,7 @@ import type {
   ControlMsg,
 } from '@agenetes/protocol';
 import type { AssistantMessage, Message } from '@earendil-works/pi-ai';
+import type { AcpContentBlock } from '@sediment/shared';
 import type { AcpPlanEntry } from '@sediment/shared';
 import type { FastifyBaseLogger } from 'fastify';
 

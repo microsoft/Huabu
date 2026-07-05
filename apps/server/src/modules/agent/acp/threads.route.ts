@@ -23,6 +23,7 @@
  */
 
 import { readAcpSessionRecord } from '@agenetes/acp-driver';
+import { acpSessionRegistry } from '@agenetes/acp-driver';
 
 import {
   acpPermissionDecisionSchema,
@@ -38,11 +39,10 @@ import {
   type AcpProfileSchemaCacheEntry,
 } from './profile-schema-cache.js';
 import { ensureAcpSession, resolveBindingRecipe } from './service.js';
-import { acpSessionRegistry } from './session-registry.js';
 import { canvasAcpNamespace } from '../../storage/paths.js';
 import { acquireAcpHandle } from '../agenetes/index.js';
 
-import type { AcpSessionEntry } from './session-registry.js';
+import type { AcpSessionEntry } from '@agenetes/acp-driver';
 import type { AcpSessionPersistedMeta } from '@agenetes/acp-driver';
 import type {
   AcpPermissionDecisionResponse,

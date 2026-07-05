@@ -67,7 +67,7 @@ import path from 'node:path';
 import { getDataDir } from '../../../data-dir.js';
 import { atomicWriteJson, readJson } from '../../storage/io.js';
 
-import type { AcpSessionEntry } from './session-registry.js';
+import type { AcpSessionEntry } from '@agenetes/acp-driver';
 import type {
   AcpModelInfo,
   AcpSessionConfigOption,
