@@ -22,7 +22,7 @@ import {
   mergeThinkingChunk,
   resetTranslatorCounters,
   type TranslatorLogger,
-} from './translator.js';
+} from '@agenetes/acp-driver';
 
 const silentLogger: TranslatorLogger = {
   info: () => undefined,

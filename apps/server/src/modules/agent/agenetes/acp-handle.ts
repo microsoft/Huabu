@@ -40,7 +40,7 @@ import { acpSessionRegistry } from '../acp/session-registry.js';
 import {
   acpUpdateToStreamEvent,
   mergeThinkingChunk,
-} from '../acp/translator.js';
+} from '@agenetes/acp-driver';
 import { applyToolExt } from '../store/chat-thread-store.js';
 
 import type {
@@ -54,11 +54,12 @@ import type { ContentPart } from '../conversation/prompt/attachments.js';
 import type { AcpTurnOverlay } from '../store/chat-thread-store.js';
 import type {
   AgentCapabilities,
+  AgentStreamEvent,
   ControlAck,
   ControlMsg,
 } from '@agenetes/protocol';
 import type { AssistantMessage, Message } from '@earendil-works/pi-ai';
-import type { AcpPlanEntry, AgentStreamEvent } from '@sediment/shared';
+import type { AcpPlanEntry } from '@sediment/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
 /**

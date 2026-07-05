@@ -27,8 +27,8 @@ export {
   acpUpdateToStreamEvent,
   getTranslatorCounters,
   resetTranslatorCounters,
-} from './translator.js';
-export type { TranslatorLogger } from './translator.js';
+} from '@agenetes/acp-driver';
+export type { TranslatorLogger } from '@agenetes/acp-driver';
 
 export { getDaemonAuth } from '@agenetes/agentlet-host';
 export { getDaemonSupervisor, getDaemonStatus } from '@agenetes/agentlet-host';

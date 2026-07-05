@@ -84,6 +84,9 @@ importers:
 
   apps/server:
     dependencies:
+      '@agenetes/acp-driver':
+        specifier: workspace:*
+        version: link:../../external/agenetes/packages/acp-driver
       '@agenetes/agentlet-host':
         specifier: workspace:*
         version: link:../../external/agenetes/packages/agentlet-host
