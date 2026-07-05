@@ -1,0 +1,34 @@
+{
+  "name": "@agenetes/agentlet-host",
+  "version": "0.1.0",
+  "description": "L2 transport host: embeds @agentlet/server into a Fastify app and supervises the forked agentlet daemon. Wraps @agentlet/server whole (the §6.1 internal transport/control re-split is deferred). All host layout knowledge (connection token, data dir, daemon entry path) is injected via mountAgenetes().",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@agenetes/protocol": "workspace:*",
+    "@agentlet/protocol": "workspace:*",
+    "@agentlet/server": "workspace:*"
+  },
+  "peerDependencies": {
+    "fastify": "^5.2.0"
+  },
+  "devDependencies": {
+    "fastify": "^5.2.0",
+    "typescript": "^5.9.0"
+  }
+}

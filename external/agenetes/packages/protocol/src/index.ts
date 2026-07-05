@@ -105,3 +105,10 @@ export type {
   ControlAck,
   AgentCapabilities,
 } from './control.js';
+
+// Agentlet daemon status (M4): the wire snapshot the L2 control plane
+// surfaces about the single embedded agentlet it supervises. Browser-safe
+// (zod-only) so L1's UI can consume it transitively through
+// @sediment/shared without depending on the fastify-bound host package.
+export { agentletStatusSchema } from './agentlet-status.js';
+export type { AgentletStatus } from './agentlet-status.js';
