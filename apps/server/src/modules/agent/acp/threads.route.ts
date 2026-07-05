@@ -25,6 +25,7 @@
 import { readAcpSessionRecord } from '@agenetes/acp-driver';
 import { acpSessionRegistry } from '@agenetes/acp-driver';
 import { AcpServiceError } from '@agenetes/acp-driver';
+import { ensureAcpSession } from '@agenetes/acp-driver';
 
 import {
   acpPermissionDecisionSchema,
@@ -38,7 +39,8 @@ import {
   getProfileSchemaCache,
   type AcpProfileSchemaCacheEntry,
 } from './profile-schema-cache.js';
-import { ensureAcpSession, resolveBindingRecipe } from './service.js';
+import { buildReachbackEnv } from './reachback-env.js';
+import { resolveBindingRecipe } from './service.js';
 import { canvasAcpNamespace } from '../../storage/paths.js';
 import { acquireAcpHandle } from '../agenetes/index.js';
 
@@ -102,6 +104,8 @@ async function resolveSetRpcEntry(
       threadId,
       binding: { alias: ctx.profileId, profileId: ctx.profileId },
       canvasId: ctx.canvasId,
+      namespace: canvasAcpNamespace(ctx.canvasId ?? ''),
+      env: buildReachbackEnv(threadId, ctx.canvasId ?? ''),
       cwd: ctx.cwd,
       recipe: resolveBindingRecipe(ctx.profileId),
       logger,
@@ -237,6 +241,8 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
           profileId: parsed.data.profileId,
         },
         canvasId: parsed.data.canvasId,
+        namespace: canvasAcpNamespace(parsed.data.canvasId ?? ''),
+        env: buildReachbackEnv(threadId, parsed.data.canvasId ?? ''),
         cwd: parsed.data.cwd,
         recipe: resolveBindingRecipe(parsed.data.profileId),
         logger: request.log,

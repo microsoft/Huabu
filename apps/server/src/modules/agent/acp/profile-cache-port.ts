@@ -12,11 +12,12 @@
  * cache. See docs/proposals/layered-architecture.md §7 (M3).
  */
 
+import { setAcpProfileCachePort } from '@agenetes/acp-driver';
+
 import {
   getProfileSchemaCache,
   mirrorAcpEntryToProfileCache,
 } from './profile-schema-cache.js';
-import { setAcpProfileCachePort } from './service.js';
 
 /** Install the L1 profile-schema-cache port into the ACP composition shell. */
 export function installAcpProfileCachePort(): void {
