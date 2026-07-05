@@ -9,8 +9,9 @@
  *   - `terminal/*`                 → reject -32601 (never implemented)
  *   - `session/request_permission` → auto-allow (local-agent threat model)
  *
- * Bound to one Sediment canvas (`opts.canvasId`); rebinding to another
- * canvas requires rebuilding the client (enforced by session-registry).
+ * Bound to one opaque namespace scope (`opts.scopeName`, the L2
+ * `namespace.name`); rebinding to another scope requires rebuilding the
+ * client (enforced by session-registry).
  * The SDK owns request id correlation, schema validation, and handler
  * dispatch; we add a thin layer for long-lived per-session listeners
  * and orphan-update replay (see {@link AcpAgentClient.orphanUpdates}).
@@ -144,11 +145,12 @@ export interface AcpPromptResult {
 
 export interface AcpAgentClientOptions {
   /**
-   * Canvas this client is bound to; scopes fs sandbox + permission checks.
-   * Optional because `agentRequestSchema.canvasId` is optional — the fs
-   * sandbox rejects all fs/* calls when this is empty.
+   * The opaque namespace scope this client is bound to (the L2
+   * `namespace.name`); scopes fs sandbox + permission checks. Optional
+   * because the workload's namespace name may be empty ("no canvas") — the
+   * fs sandbox rejects all fs/* calls when this is empty.
    */
-  canvasId?: string;
+  scopeName?: string;
   /** Optional logger; defaults to a no-op. */
   logger?: {
     debug: (obj: unknown, msg?: string) => void;
@@ -158,7 +160,7 @@ export interface AcpAgentClientOptions {
   };
   /**
    * Optional host port servicing an agent's `fs/read_text_file` request,
-   * scoped to `canvasId`. This is a canvas-storage-coupled (L1) concern,
+   * scoped to `scopeName`. This is a canvas-storage-coupled (L1) concern,
    * so the driver never implements it — the host injects it. When absent
    * the client rejects fs/read (method-not-found), which is the current
    * behaviour: the real host does NOT wire this today (external agents use
@@ -167,7 +169,7 @@ export interface AcpAgentClientOptions {
    * `code` is surfaced verbatim as the JSON-RPC error code.
    */
   fsReadTextFile?: (
-    canvasId: string,
+    scopeName: string,
     params: ReadTextFileRequest,
   ) => ReadTextFileResponse;
 }
@@ -348,8 +350,8 @@ export class AcpAgentClient {
   private static readonly MAX_ORPHAN_UPDATES_PER_SESSION = 32;
   private _closed = false;
   private readonly logger: NonNullable<AcpAgentClientOptions['logger']>;
-  /** Canvas scope for sandbox + permission checks. See AcpAgentClientOptions.canvasId. Empty string = “no canvas” (fs/* will be rejected). */
-  readonly canvasId: string;
+  /** Namespace scope for sandbox + permission checks (= `namespace.name`). See AcpAgentClientOptions.scopeName. Empty string = "no scope" (fs/* will be rejected). */
+  readonly scopeName: string;
   /** Injected host port for `fs/read_text_file`; see {@link AcpAgentClientOptions.fsReadTextFile}. */
   private readonly fsReadTextFile?: AcpAgentClientOptions['fsReadTextFile'];
   /**
@@ -362,7 +364,7 @@ export class AcpAgentClient {
   private _initializeResult: AcpInitializeResult | null = null;
 
   constructor(connection: AgentConnection, opts: AcpAgentClientOptions) {
-    this.canvasId = opts.canvasId ?? '';
+    this.scopeName = opts.scopeName ?? '';
     this.fsReadTextFile = opts.fsReadTextFile;
     // The ACP SDK's logger contract `(obj, msg) => void` aligns exactly
     // with pino's child logger surface, so callers can hand it a tagged
@@ -752,7 +754,7 @@ export class AcpAgentClient {
         // Advertised as unsupported, but reject loudly if called anyway
         // so operators see what was attempted.
         this.logger.warn(
-          { canvasId: this.canvasId },
+          { scopeName: this.scopeName },
           'agent attempted fs/write_text_file — read-only',
         );
         throw new RequestError(
@@ -894,7 +896,7 @@ export class AcpAgentClient {
     // Info-level so we can see whether external agents actually exercise
     // ACP fs vs. their own native tools. Demote once integration is stable.
     this.logger.info(
-      { method: 'fs/read_text_file', canvasId: this.canvasId },
+      { method: 'fs/read_text_file', scopeName: this.scopeName },
       '[acp] incoming agent request',
     );
     // The fs sandbox is a canvas-storage (L1) concern injected by the
@@ -903,7 +905,7 @@ export class AcpAgentClient {
     // exactly as an agent hitting fs/read with no canvas scope would see.
     if (!this.fsReadTextFile) {
       this.logger.warn(
-        { canvasId: this.canvasId },
+        { scopeName: this.scopeName },
         'fs/read_text_file requested but no host fs port is wired — rejecting',
       );
       throw new RequestError(
@@ -912,7 +914,7 @@ export class AcpAgentClient {
       );
     }
     try {
-      return this.fsReadTextFile(this.canvasId, params);
+      return this.fsReadTextFile(this.scopeName, params);
     } catch (e) {
       // A port may throw an error carrying a numeric JSON-RPC `code`
       // (e.g. the host's FsCapabilityError) — surface it verbatim.
@@ -920,13 +922,13 @@ export class AcpAgentClient {
       const message = e instanceof Error ? e.message : String(e);
       if (typeof code === 'number') {
         this.logger.warn(
-          { canvasId: this.canvasId, code, message },
+          { scopeName: this.scopeName, code, message },
           'fs/read_text_file refused',
         );
         throw new RequestError(code, message);
       }
       this.logger.error(
-        { canvasId: this.canvasId, err: message },
+        { scopeName: this.scopeName, err: message },
         'fs/read_text_file failed with unexpected error',
       );
       throw new RequestError(
@@ -953,13 +955,13 @@ export class AcpAgentClient {
     params: RequestPermissionRequest,
   ): Promise<RequestPermissionResponse> {
     this.logger.info(
-      { method: 'session/request_permission', canvasId: this.canvasId },
+      { method: 'session/request_permission', scopeName: this.scopeName },
       '[acp] incoming agent request',
     );
     const options = (params.options ?? []) as PermissionOption[];
     if (options.length === 0) {
       this.logger.warn(
-        { canvasId: this.canvasId },
+        { scopeName: this.scopeName },
         'session/request_permission: empty options[]',
       );
       throw new RequestError(
@@ -975,7 +977,7 @@ export class AcpAgentClient {
       const choice = pickPermissionOption(options);
       this.logger.info(
         {
-          canvasId: this.canvasId,
+          scopeName: this.scopeName,
           toolCallId: (toolCall as { toolCallId?: unknown }).toolCallId,
           toolTitle: (toolCall as { title?: unknown }).title,
           toolKind: (toolCall as { kind?: unknown }).kind,
@@ -994,7 +996,7 @@ export class AcpAgentClient {
       const timer = setTimeout(() => {
         if (this.pendingPermissions.delete(requestId)) {
           this.logger.warn(
-            { requestId, canvasId: this.canvasId },
+            { requestId, scopeName: this.scopeName },
             'session/request_permission timed out — cancelling',
           );
           resolve({ cancelled: true });
@@ -1041,7 +1043,7 @@ export class AcpAgentClient {
 
     if (decision.cancelled) {
       this.logger.info(
-        { requestId, canvasId: this.canvasId },
+        { requestId, scopeName: this.scopeName },
         '[acp] session/request_permission cancelled',
       );
       return { outcome: { outcome: 'cancelled' } };
@@ -1049,7 +1051,7 @@ export class AcpAgentClient {
     this.logger.info(
       {
         requestId,
-        canvasId: this.canvasId,
+        scopeName: this.scopeName,
         optionId: decision.optionId,
       },
       '[acp] session/request_permission resolved by user',
@@ -1062,7 +1064,7 @@ export class AcpAgentClient {
   /** Helper: log + throw method_not_found for an unsupported terminal/* call. */
   private rejectTerminal(method: string): never {
     this.logger.warn(
-      { method, canvasId: this.canvasId },
+      { method, scopeName: this.scopeName },
       'agent called unsupported terminal/* method',
     );
     throw new RequestError(

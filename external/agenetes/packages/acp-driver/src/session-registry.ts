@@ -59,20 +59,16 @@ export interface AcpSessionEntry {
    */
   profileId: string;
   /**
-   * Sediment canvasId this session is bound to. A thread is normally
-   * pinned to one canvas for its lifetime, but if it ever rebinds to a
-   * different canvas we treat it like a binding change and reset the
-   * session \u2014 otherwise fs sandbox / permission scope would leak
-   * across canvases. Optional because `agentRequestSchema.canvasId`
-   * is optional; an empty string means “no canvas” and the fs sandbox
-   * (once implemented) will reject any fs/* call in that state.
-   */
-  canvasId: string;
-  /**
    * Storage / metadata scope for this session (§7 M5.0) — the `Namespace`
-   * (`{ name, storagePath? }`) the session store persists under. L1 maps
-   * its canvasId onto this; the driver treats it opaquely and resolves all
-   * on-disk paths from it, so no host path helper is reached.
+   * (`{ name, storagePath? }`) the session store persists under, and the
+   * opaque scope key for the fs sandbox / permission checks. A thread is
+   * normally pinned to one scope for its lifetime, but if it ever rebinds
+   * to a different `namespace.name` we treat it like a binding change and
+   * reset the session \u2014 otherwise fs sandbox / permission scope would
+   * leak across scopes. L1 maps its canvasId onto this; the driver treats
+   * it opaquely and resolves all on-disk paths from it, so no host path
+   * helper is reached. An empty `name` means "no scope" and the fs sandbox
+   * rejects any fs/* call in that state.
    */
   namespace: Namespace;
   /** `cwd` passed to `session/new`. Mostly for diagnostics. */

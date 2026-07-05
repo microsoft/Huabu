@@ -110,11 +110,6 @@ export interface EnsureAcpSessionOptions {
   /** External binding for the thread (see {@link RunAcpAgentOptions.binding}). */
   binding: { alias: string; profileId: string };
   /**
-   * Sediment canvasId scoping the sandbox. Empty string = no canvas
-   * (fs/* will be rejected). Mirrors {@link RunAcpAgentOptions.canvasId}.
-   */
-  canvasId?: string;
-  /**
    * `cwd` for `session/new`. When omitted, resolved from the bound
    * profile's `cwd` (see {@link RunAcpAgentOptions.cwd} for the full
    * fallback chain).
@@ -150,7 +145,7 @@ export interface EnsureAcpSessionOptions {
 /**
  * Per-key map of in-flight `ensureAcpSession` work, used to coalesce
  * concurrent callers so we never run `initialize() + session/new`
- * twice for the same `{threadId, profileId, canvasId}` triple.
+ * twice for the same `{threadId, profileId, scopeName}` triple.
  *
  * Why this matters: the ChatPanel mount fires
  * `POST /api/acp/threads/:id/session` to warm the slash-command cache,
@@ -161,7 +156,7 @@ export interface EnsureAcpSessionOptions {
  * `shutdown()`s the first client — which silently invalidates the
  * first request's listener registration and wastes one round-trip.
  *
- * Keying by all three staleness inputs means: different profile / canvas
+ * Keying by all three staleness inputs means: different profile / scope
  * / thread → independent slots, so a binding switch is never blocked
  * waiting on a stale promise.
  */
@@ -170,13 +165,13 @@ const inflightEnsureSessions = new Map<string, Promise<AcpSessionEntry>>();
 function ensureSessionKey(
   threadId: string,
   profileId: string,
-  canvasId: string,
+  scopeName: string,
 ): string {
-  return `${threadId}|${profileId}|${canvasId}`;
+  return `${threadId}|${profileId}|${scopeName}`;
 }
 
 /**
- * Per-`(canvasId, threadId)` debounce slots for meta persistence. Meta
+ * Per-`(scopeName, threadId)` debounce slots for meta persistence. Meta
  * updates can arrive in bursts (e.g. an `available_commands_update`
  * immediately followed by a `config_option_update` on session warm-up,
  * or a flurry of `usage_update`s during a long turn), and persisting
@@ -185,15 +180,15 @@ function ensureSessionKey(
  * by deferring the flush by {@link META_PERSIST_DEBOUNCE_MS}.
  *
  * Cancellation: callers MUST invoke `cancelPersistEntryMeta` whenever
- * the record is being deleted (binding switch, canvas switch, load
+ * the record is being deleted (binding switch, scope switch, load
  * failure) — otherwise a queued timer could re-create the file
  * milliseconds after a deliberate `deleteAcpSessionRecord` call.
  */
 const META_PERSIST_DEBOUNCE_MS = 250;
 const pendingMetaPersists = new Map<string, NodeJS.Timeout>();
 
-function metaPersistKey(canvasId: string, threadId: string): string {
-  return `${canvasId}|${threadId}`;
+function metaPersistKey(scopeName: string, threadId: string): string {
+  return `${scopeName}|${threadId}`;
 }
 
 function snapshotEntryMeta(entry: AcpSessionEntry): AcpSessionPersistedMeta {
@@ -321,17 +316,17 @@ function seedEntryFromNewSessionResult(
  * throws (failures are logged and swallowed; we never want a
  * persistence hiccup to kill an SSE stream).
  *
- * No-op when the entry has no `canvasId` (anonymous-canvas threads
- * are not persisted at all — see `writeAcpSessionRecord`).
+ * No-op when the entry has an empty scope (`namespace.name` — anonymous
+ * threads are not persisted at all — see `writeAcpSessionRecord`).
  */
 function schedulePersistEntryMeta(
   entry: AcpSessionEntry,
   logger: AcpSessionLogger,
 ): void {
-  if (!entry.canvasId) return;
+  if (!entry.namespace.name) return;
   const threadId = findThreadIdForEntry(entry);
   if (!threadId) return;
-  const key = metaPersistKey(entry.canvasId, threadId);
+  const key = metaPersistKey(entry.namespace.name, threadId);
   const prior = pendingMetaPersists.get(key);
   if (prior) clearTimeout(prior);
   const timer = setTimeout(() => {
@@ -346,7 +341,7 @@ function schedulePersistEntryMeta(
       logger.warn(
         {
           threadId,
-          canvasId: entry.canvasId,
+          scopeName: entry.namespace.name,
           err: err instanceof Error ? err.message : String(err),
         },
         '[acp] failed to persist session meta snapshot (will retry on next update)',
@@ -358,9 +353,9 @@ function schedulePersistEntryMeta(
   pendingMetaPersists.set(key, timer);
 }
 
-function cancelPersistEntryMeta(canvasId: string, threadId: string): void {
-  if (!canvasId) return;
-  const key = metaPersistKey(canvasId, threadId);
+function cancelPersistEntryMeta(scopeName: string, threadId: string): void {
+  if (!scopeName) return;
+  const key = metaPersistKey(scopeName, threadId);
   const prior = pendingMetaPersists.get(key);
   if (prior) {
     clearTimeout(prior);
@@ -373,7 +368,7 @@ function cancelPersistEntryMeta(canvasId: string, threadId: string): void {
  * record. Called after the FIRST successful `session/prompt` on a
  * thread — see {@link AcpSessionEntry.persistedToDisk} for the full
  * rationale. No-op when the entry is already persisted, when it has
- * no `canvasId` (anonymous-canvas threads aren't persisted at all),
+ * an empty scope (`namespace.name` — anonymous threads aren't persisted),
  * or when the reverse lookup fails (entry already removed).
  *
  * Failures are logged and swallowed: missing the promotion just
@@ -385,7 +380,7 @@ export function promoteEntryToPersisted(
   logger: AcpSessionLogger,
 ): void {
   if (entry.persistedToDisk) return;
-  if (!entry.canvasId) return;
+  if (!entry.namespace.name) return;
   const threadId = findThreadIdForEntry(entry);
   if (!threadId) return;
   try {
@@ -401,7 +396,7 @@ export function promoteEntryToPersisted(
     logger.warn(
       {
         threadId,
-        canvasId: entry.canvasId,
+        scopeName: entry.namespace.name,
         err: err instanceof Error ? err.message : String(err),
       },
       '[acp] failed to persist session record on first-prompt promotion (recovery after restart will fall back)',
@@ -413,7 +408,7 @@ export function promoteEntryToPersisted(
  * Reverse-lookup the threadId for a registry entry. The registry maps
  * threadId → entry but the entry itself doesn't carry the threadId
  * (it would be redundant in normal flow). We need it here because the
- * persistence layer is keyed by `(canvasId, threadId)`.
+ * persistence layer is keyed by `(scopeName, threadId)`.
  *
  * Linear scan over O(threads-on-this-server) — acceptable: a single
  * Sediment server typically holds a handful of live ACP sessions, and
@@ -429,11 +424,11 @@ function findThreadIdForEntry(entry: AcpSessionEntry): string | null {
 /**
  * Get-or-create the per-thread ACP session, installing the long-lived
  * `available_commands_update` listener on first creation. Idempotent for
- * a given `{threadId, profileId, canvasId}` triple — repeated calls
+ * a given `{threadId, profileId, scopeName}` triple — repeated calls
  * return the same {@link AcpSessionEntry} without re-issuing `session/new`.
  *
  * Concurrency: thread-safe across overlapping awaits. Multiple calls
- * for the same `{threadId, profileId, canvasId}` key share the
+ * for the same `{threadId, profileId, scopeName}` key share the
  * same in-flight promise so only one `initialize() + session/new`
  * pair is ever issued for a given coalescing window.
  *
@@ -453,7 +448,7 @@ export async function ensureAcpSession(
   const key = ensureSessionKey(
     opts.threadId,
     opts.binding.profileId,
-    opts.canvasId ?? '',
+    opts.namespace.name,
   );
   const existing = inflightEnsureSessions.get(key);
   if (existing) return existing;
@@ -477,8 +472,8 @@ async function ensureAcpSessionInner(
   opts: EnsureAcpSessionOptions,
 ): Promise<AcpSessionEntry> {
   const { threadId, binding, logger } = opts;
-  const canvasId = opts.canvasId ?? '';
   const namespace = opts.namespace;
+  const scopeName = namespace.name;
   const persisted = readAcpSessionRecord(
     namespace,
     threadId,
@@ -541,20 +536,20 @@ async function ensureAcpSessionInner(
   }
 
   let entry = acpSessionRegistry.get(threadId);
-  if (entry && entry.canvasId !== canvasId) {
+  if (entry && entry.namespace.name !== scopeName) {
     logger.info(
       {
         threadId,
-        oldCanvasId: entry.canvasId,
-        newCanvasId: canvasId,
+        oldScopeName: entry.namespace.name,
+        newScopeName: scopeName,
       },
-      '[acp] thread canvas changed \u2014 discarding stale session (sandbox scope mismatch)',
+      '[acp] thread scope changed \u2014 discarding stale session (sandbox scope mismatch)',
     );
-    cancelPersistEntryMeta(entry.canvasId, threadId);
+    cancelPersistEntryMeta(entry.namespace.name, threadId);
     acpSessionRegistry.remove(threadId);
-    // Persisted record is canvas-scoped (see session-store path layout),
-    // so the wrong-canvas case is already handled implicitly. We still
-    // proactively drop the OLD canvas's record to keep the store tidy.
+    // Persisted record is scope-namespaced (see session-store path layout),
+    // so the wrong-scope case is already handled implicitly. We still
+    // proactively drop the OLD scope's record to keep the store tidy.
     deleteAcpSessionRecord(entry.namespace, threadId);
     entry = undefined;
   }
@@ -563,7 +558,7 @@ async function ensureAcpSessionInner(
       { threadId },
       '[acp] stored session client was closed \u2014 reopening',
     );
-    cancelPersistEntryMeta(entry.canvasId, threadId);
+    cancelPersistEntryMeta(entry.namespace.name, threadId);
     acpSessionRegistry.remove(threadId);
     entry = undefined;
   }
@@ -584,7 +579,7 @@ async function ensureAcpSessionInner(
   // second session/new created a different sessionId from the one the
   // WS relay + EventStore are keyed on.
 
-  const client = new AcpAgentClient(conn, { canvasId, logger });
+  const client = new AcpAgentClient(conn, { scopeName, logger });
 
   // Seed initializeResult from the DataStore (persisted by the server
   // on agent/hello). The record contains the agent's capabilities from
@@ -617,7 +612,6 @@ async function ensureAcpSessionInner(
     client,
     sessionId,
     profileId: binding.profileId,
-    canvasId,
     namespace,
     cwd,
     createdAt: Date.now(),
@@ -742,7 +736,7 @@ async function ensureAcpSessionInner(
       logger.warn(
         {
           threadId,
-          canvasId,
+          scopeName,
           err: err instanceof Error ? err.message : String(err),
         },
         '[acp] failed to refresh persisted session record (recovery after restart will fall back)',
