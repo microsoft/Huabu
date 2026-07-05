@@ -55,3 +55,6 @@ export type {
   AcpSessionPersistedMeta,
   AcpSessionRecord,
 } from './session-store.js';
+
+export { acpSessionRegistry } from './session-registry.js';
+export type { AcpSessionEntry } from './session-registry.js';

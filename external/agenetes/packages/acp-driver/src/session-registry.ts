@@ -30,15 +30,15 @@
  * what the user sees.
  */
 
-import type { AcpAgentClient } from '@agenetes/acp-driver';
-import type { AcpBindingRecipe } from '@agenetes/acp-driver';
+import type { AcpAgentClient } from './client.js';
+import type { AcpBindingRecipe } from './session-store.js';
 import type {
-  AcpCost,
-  AcpModelInfo,
-  AcpSessionConfigOption,
-  AcpSessionMode,
+  Cost as AcpCost,
+  ModelInfo as AcpModelInfo,
+  SessionConfigOption as AcpSessionConfigOption,
+  SessionMode as AcpSessionMode,
   AvailableCommand,
-} from '@sediment/shared';
+} from '@agentclientprotocol/sdk';
 
 /** A single live ACP session owned by one Sediment thread. */
 export interface AcpSessionEntry {
