@@ -24,6 +24,7 @@
 
 import { readAcpSessionRecord } from '@agenetes/acp-driver';
 import { acpSessionRegistry } from '@agenetes/acp-driver';
+import { AcpServiceError } from '@agenetes/acp-driver';
 
 import {
   acpPermissionDecisionSchema,
@@ -33,7 +34,6 @@ import {
   setAcpSessionModelRequestSchema,
 } from '@sediment/shared';
 
-import { AcpServiceError } from './errors.js';
 import {
   getProfileSchemaCache,
   type AcpProfileSchemaCacheEntry,

@@ -25,15 +25,16 @@ import {
   writeAcpSessionRecord,
 } from '@agenetes/acp-driver';
 import { acpSessionRegistry } from '@agenetes/acp-driver';
+import { AcpServiceError } from '@agenetes/acp-driver';
+import { ensureAgentForThread } from '@agenetes/acp-driver';
 import { getAgentletServer } from '@agenetes/agentlet-host';
 
-import { AcpServiceError } from './errors.js';
 import {
   prepareExternalAgentPrompt,
   serializeRawPrompt,
 } from './preprocessor.js';
 import { getProfile } from './profile-store.js';
-import { ensureAgentForThread } from './spawn-orchestrator.js';
+import { buildReachbackEnv } from './reachback-env.js';
 import { canvasAcpNamespace } from '../../storage/paths.js';
 import { acquireAcpHandle } from '../agenetes/drivers.js';
 import { type RenderFn } from '../agenetes/handle.js';
@@ -574,7 +575,7 @@ async function ensureAcpSessionInner(
     threadId,
     recipe,
     persisted?.sessionId,
-    canvasId,
+    buildReachbackEnv(threadId, canvasId),
   );
   const conn = server.getConnection(agentSessionId);
   if (!conn || conn.status !== 'connected') {

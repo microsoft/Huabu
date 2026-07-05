@@ -38,4 +38,4 @@ export {
   ensureAgentForThread,
   releaseThread,
   threadKey,
-} from './spawn-orchestrator.js';
+} from '@agenetes/acp-driver';
