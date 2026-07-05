@@ -31,7 +31,7 @@
  */
 
 import type { AcpAgentClient } from '@agenetes/acp-driver';
-import type { AcpBindingRecipe } from './session-store.js';
+import type { AcpBindingRecipe } from '@agenetes/acp-driver';
 import type {
   AcpCost,
   AcpModelInfo,

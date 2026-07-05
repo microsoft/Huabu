@@ -18,6 +18,12 @@
  */
 
 import { AcpAgentClient, type AcpInitializeResult } from '@agenetes/acp-driver';
+import {
+  deleteAcpSessionRecord,
+  readAcpSessionRecord,
+  writeAcpSessionMeta,
+  writeAcpSessionRecord,
+} from '@agenetes/acp-driver';
 import { getAgentletServer } from '@agenetes/agentlet-host';
 
 import { AcpServiceError } from './errors.js';
@@ -27,12 +33,6 @@ import {
 } from './preprocessor.js';
 import { getProfile } from './profile-store.js';
 import { acpSessionRegistry } from './session-registry.js';
-import {
-  deleteAcpSessionRecord,
-  readAcpSessionRecord,
-  writeAcpSessionMeta,
-  writeAcpSessionRecord,
-} from './session-store.js';
 import { ensureAgentForThread } from './spawn-orchestrator.js';
 import { canvasAcpNamespace } from '../../storage/paths.js';
 import { type PreparedAcpPrompt } from '../agenetes/acp-handle.js';
@@ -41,13 +41,13 @@ import { type RenderFn } from '../agenetes/handle.js';
 import { dumpAssembledPrompt } from '../conversation/prompt/debug-prompt.js';
 
 import type { AcpSessionEntry } from './session-registry.js';
-import type {
-  AcpBindingRecipe,
-  AcpSessionPersistedMeta,
-} from './session-store.js';
 import type { ChatEnvelope } from '../conversation/envelope.js';
 import type { ContentPart } from '../conversation/prompt/attachments.js';
 import type { AcpTurnOverlay } from '../store/chat-thread-store.js';
+import type {
+  AcpBindingRecipe,
+  AcpSessionPersistedMeta,
+} from '@agenetes/acp-driver';
 import type { Message } from '@earendil-works/pi-ai';
 import type {
   AcpContentBlock,

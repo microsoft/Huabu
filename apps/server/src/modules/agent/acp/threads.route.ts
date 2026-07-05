@@ -22,6 +22,8 @@
  * `token-store.ts`.
  */
 
+import { readAcpSessionRecord } from '@agenetes/acp-driver';
+
 import {
   acpPermissionDecisionSchema,
   ensureAcpSessionRequestSchema,
@@ -37,12 +39,11 @@ import {
 } from './profile-schema-cache.js';
 import { ensureAcpSession, resolveBindingRecipe } from './service.js';
 import { acpSessionRegistry } from './session-registry.js';
-import { readAcpSessionRecord } from './session-store.js';
 import { canvasAcpNamespace } from '../../storage/paths.js';
 import { acquireAcpHandle } from '../agenetes/index.js';
 
 import type { AcpSessionEntry } from './session-registry.js';
-import type { AcpSessionPersistedMeta } from './session-store.js';
+import type { AcpSessionPersistedMeta } from '@agenetes/acp-driver';
 import type {
   AcpPermissionDecisionResponse,
   AcpSessionMetaSnapshot,

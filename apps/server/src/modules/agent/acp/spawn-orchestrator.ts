@@ -41,7 +41,7 @@ import {
 import { AcpServiceError } from './errors.js';
 import { getHostServerPort } from '../../../host-port.js';
 
-import type { AcpBindingRecipe } from './session-store.js';
+import type { AcpBindingRecipe } from '@agenetes/acp-driver';
 
 /**
  * Default idle timeout (seconds) before the agentlet daemon suspends
