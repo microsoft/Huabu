@@ -103,7 +103,6 @@ async function resolveSetRpcEntry(
     const entry = await ensureAcpSession({
       threadId,
       binding: { alias: ctx.profileId, profileId: ctx.profileId },
-      canvasId: ctx.canvasId,
       namespace: canvasAcpNamespace(ctx.canvasId ?? ''),
       env: buildReachbackEnv(threadId, ctx.canvasId ?? ''),
       cwd: ctx.cwd,
@@ -240,7 +239,6 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
           alias: parsed.data.profileId,
           profileId: parsed.data.profileId,
         },
-        canvasId: parsed.data.canvasId,
         namespace: canvasAcpNamespace(parsed.data.canvasId ?? ''),
         env: buildReachbackEnv(threadId, parsed.data.canvasId ?? ''),
         cwd: parsed.data.cwd,

@@ -179,7 +179,6 @@ export async function* runAcpAgent(
   const entry = await ensureAcpSession({
     threadId,
     binding,
-    canvasId,
     namespace: canvasAcpNamespace(canvasId),
     env: buildReachbackEnv(threadId, canvasId),
     ...(opts.cwd !== undefined && { cwd: opts.cwd }),
