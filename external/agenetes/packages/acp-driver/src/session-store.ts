@@ -61,16 +61,16 @@
 
 import path from 'node:path';
 
-import { atomicWriteJson, readJson, sanitizeId } from '../../storage/io.js';
+import { atomicWriteJson, readJson, sanitizeId } from './io.js';
 
 import type { Namespace } from '@agenetes/protocol';
 import type {
-  AcpCost,
-  AcpModelInfo,
-  AcpSessionConfigOption,
-  AcpSessionMode,
+  Cost as AcpCost,
+  ModelInfo as AcpModelInfo,
+  SessionConfigOption as AcpSessionConfigOption,
+  SessionMode as AcpSessionMode,
   AvailableCommand,
-} from '@sediment/shared';
+} from '@agentclientprotocol/sdk';
 
 /**
  * Bumped only on a breaking layout change.

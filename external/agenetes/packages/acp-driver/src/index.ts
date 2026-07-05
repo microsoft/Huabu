@@ -10,10 +10,11 @@
  * (`@agenetes/protocol` + `@agenetes/runtime`) and reaches its transport
  * (`@agenetes/agentlet-host`) as an intra-L2 dependency — no L1 hand-down.
  *
- * Host-specific concerns are injected by L1: a storage root path (where
- * the session store persists), the profile-schema cache port (M3), and
- * the per-turn canvas-coupled render closure. See
- * docs/proposals/layered-architecture.md §7 (M5).
+ * Host-specific concerns are injected by L1: the profile-schema cache
+ * port (M3) and the per-turn canvas-coupled render closure. Storage is
+ * scoped by the `Namespace` carried on the WorkloadSpec (§7 M5.0), so the
+ * session store persists under `namespace.storagePath` without an L1
+ * path hand-down. See docs/proposals/layered-architecture.md §7 (M5).
  *
  * NOTE: this is the M5 scaffold entry point. Modules are filled in as
  * each relocation sub-task lands.
@@ -42,3 +43,15 @@ export type {
   PermissionNotifier,
   PermissionDecision,
 } from './client.js';
+
+export {
+  readAcpSessionRecord,
+  writeAcpSessionRecord,
+  writeAcpSessionMeta,
+  deleteAcpSessionRecord,
+} from './session-store.js';
+export type {
+  AcpBindingRecipe,
+  AcpSessionPersistedMeta,
+  AcpSessionRecord,
+} from './session-store.js';
