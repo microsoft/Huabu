@@ -27,3 +27,18 @@ export {
 } from './translator.js';
 export type { TranslatorLogger } from './translator.js';
 export { commandFromRawInput } from './command-from-raw-input.js';
+
+export {
+  AcpAgentClient,
+  pickPermissionOption,
+  agentSupportsLoadSession,
+} from './client.js';
+export type {
+  AcpAgentClientOptions,
+  AcpInitializeResult,
+  AcpNewSessionResult,
+  AcpLoadSessionResult,
+  AcpPromptResult,
+  PermissionNotifier,
+  PermissionDecision,
+} from './client.js';

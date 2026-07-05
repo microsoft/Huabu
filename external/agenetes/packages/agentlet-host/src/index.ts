@@ -42,6 +42,11 @@ export {
 export type { AttachOptions } from './daemon-supervisor.js';
 export type { MountAcpOptions } from './server-mount.js';
 export type { AgentletStatus } from '@agenetes/protocol';
+// Transport wire types re-surfaced from the underlying agentlet protocol,
+// so the ACP driver can type its client against the transport facade
+// without importing @agentlet/protocol directly (agentlet stays hidden
+// behind this L2 transport package).
+export type { AgentConnection, AcpMessage } from '@agentlet/protocol';
 
 /** Host-injected configuration for {@link mountAgenetes}. */
 export interface MountAgenetesOptions {
