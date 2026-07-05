@@ -37,8 +37,8 @@ import {
   writeAcpSessionRecord,
 } from './session-store.js';
 import { ensureAgentForThread } from './spawn-orchestrator.js';
-import { getAcpDriver } from '../agenetes/drivers.js';
 import { type PreparedAcpPrompt } from '../agenetes/acp-handle.js';
+import { acquireAcpHandle } from '../agenetes/drivers.js';
 import { type RenderFn } from '../agenetes/handle.js';
 import { dumpAssembledPrompt } from '../conversation/prompt/debug-prompt.js';
 
@@ -1152,18 +1152,15 @@ export async function* runAcpAgent(
       }
     : undefined;
 
-  const handle = getAcpDriver().create({
+  const handle = acquireAcpHandle(threadId);
+  return yield* handle.run(opts.envelope, render, {
     entry,
-    options: {
-      overlay,
-      signal,
-      logger,
-      // First-prompt promotion is a registry/persistence side effect, kept
-      // out of the driver and injected here (see AcpAgentHandleOptions).
-      onPromptSettled: () => promoteEntryToPersisted(entry, logger),
-      onPrepared,
-    },
+    overlay,
+    signal,
+    logger,
+    // First-prompt promotion is a registry/persistence side effect, kept
+    // out of the driver and injected here (see AcpTurnCtx).
+    onPromptSettled: () => promoteEntryToPersisted(entry, logger),
+    onPrepared,
   });
-  handle.submit(opts.envelope, render);
-  return yield* handle.events();
 }

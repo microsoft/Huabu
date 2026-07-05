@@ -8,24 +8,35 @@
  * that becomes the persisted assistant message, and the terminal
  * done/error frame. `runAcpAgent` (acp/service.ts) is now a thin
  * composition shell that opens/reuses the session, builds the render
- * closure, wraps the session entry in this handle, and drains `events()`.
+ * closure, and drives one `run(...)` against the long-lived handle.
  *
- * The ACP client/session is fully encapsulated behind the injected
- * {@link AcpSessionEntry}: the composition layer (which owns
- * `ensureAcpSession` + the preprocessor) constructs the entry and injects
- * the ready OBJECT, so this class needs no session-open imports. Two
- * session-lifecycle side effects that reach back into the composition
- * layer's registry/persistence — promoting the entry to a durable record
- * on first success — are injected as the {@link AcpAgentHandleOptions}
- * callbacks rather than imported (which would circularly depend on the
- * shell). Moving session construction behind a `create(spec)` factory is
- * deferred to M4/M5.
+ * Lifecycle (§3.2 / M2.6): the ACP path is a **Deployment** — a
+ * long-lived, stateful session that hosts *many* turns, carries
+ * cross-turn `control`, and has a liveness dimension a Job never has. So
+ * the handle itself is long-lived: `AgentRuntime` holds it across turns
+ * keyed by `threadId`, and it is addressable out-of-turn for `control()`
+ * / `close()`. Its backing {@link AcpSessionEntry} is re-resolved *per
+ * turn* (the shell's `ensureAcpSession` get-or-create) and handed in on
+ * the {@link AcpTurnCtx} — so the handle never captures a stale entry.
+ * Out-of-turn (`control` / `close`) it resolves the live entry from the
+ * host `acpSessionRegistry` by `threadId` (a precondition failure when no
+ * session is live — we do not lazily spawn one just to, e.g., set a mode).
  *
- * See docs/proposals/layered-architecture.md §3.6 / §7 (M2).
+ * The heavy session-open logic (`ensureAcpSession`'s ~11 host imports)
+ * stays in the composition shell; this class only touches the ready entry
+ * (via the turn ctx) and the registry lookup. Two session-lifecycle side
+ * effects that reach back into the composition layer's persistence —
+ * promoting the entry to a durable record on first success — are injected
+ * as {@link AcpTurnCtx} callbacks rather than imported (which would
+ * circularly depend on the shell). Moving session construction behind a
+ * clean `create(spec)` factory is deferred to M4/M5.
+ *
+ * See docs/proposals/layered-architecture.md §3.6 / §7 (M2 / M2.6).
  */
 
 import { fauxAssistantMessage } from '@earendil-works/pi-ai';
 
+import { acpSessionRegistry } from '../acp/session-registry.js';
 import {
   acpUpdateToStreamEvent,
   mergeThinkingChunk,
@@ -64,8 +75,14 @@ export interface PreparedAcpPrompt {
   preparedError?: string;
 }
 
-/** Construction-time options for an {@link AcpAgentHandle}. */
-export interface AcpAgentHandleOptions {
+/** The per-turn context an {@link AcpAgentHandle.run} accepts. */
+export interface AcpTurnCtx {
+  /**
+   * The live ACP session for THIS turn, re-resolved by the composition
+   * shell (`ensureAcpSession` get-or-create) and handed in per turn so the
+   * long-lived handle never captures a stale entry.
+   */
+  entry: AcpSessionEntry;
   /**
    * Mutable per-turn ACP overlay (tool extensions keyed by `toolCallId`
    * + the turn's plan). Route-owned; mutated in place as events arrive
@@ -124,11 +141,15 @@ function mapStopReason(
 }
 
 /**
- * The ACP-backed {@link AgentHandle}. Wraps a route-supplied live
- * {@link AcpSessionEntry} (the client + open sessionId) and drives one
- * prompt turn against it.
+ * The ACP-backed {@link AgentHandle} — a long-lived Deployment. Holds only
+ * its `threadId`; the live {@link AcpSessionEntry} for a turn arrives on
+ * the {@link AcpTurnCtx} ({@link run}), and out-of-turn ops resolve the
+ * live session from `acpSessionRegistry` by `threadId`.
  */
-export class AcpAgentHandle implements AgentHandle<PreparedAcpPrompt> {
+export class AcpAgentHandle implements AgentHandle<
+  PreparedAcpPrompt,
+  AcpTurnCtx
+> {
   /**
    * A Deployment advertises the full control set and can resume a prior
    * session (`session/load`). It accepts turn input blocking (the ACP
@@ -136,36 +157,20 @@ export class AcpAgentHandle implements AgentHandle<PreparedAcpPrompt> {
    */
   readonly capabilities: AgentCapabilities = ACP_CAPABILITIES;
 
-  private pending?: {
-    request: AgentRequest | null;
-    render: RenderFn<PreparedAcpPrompt>;
-  };
+  constructor(private readonly threadId: string) {}
 
-  constructor(
-    private readonly entry: AcpSessionEntry,
-    private readonly options: AcpAgentHandleOptions,
-  ) {}
-
-  submit(
+  async *run(
     request: AgentRequest | null,
     render: RenderFn<PreparedAcpPrompt>,
-  ): void {
-    this.pending = { request, render };
-  }
-
-  async *events(): AsyncGenerator<InStreamEvent, Message[]> {
-    const pending = this.pending;
-    if (!pending) {
-      throw new Error('AcpAgentHandle.events() called before submit()');
-    }
-    const { entry, options } = this;
-    const { overlay, signal, logger, onPromptSettled, onPrepared } = options;
+    ctx: AcpTurnCtx,
+  ): AsyncGenerator<InStreamEvent, Message[]> {
+    const { entry, overlay, signal, logger, onPromptSettled, onPrepared } = ctx;
 
     // ACP always needs fresh input — a `session/prompt` with nothing to
     // say is meaningless. A null request (no new input / resume-only) is
     // rejected by this driver (the interface allows null; its meaning is
-    // driver-defined — see AgentHandle.submit).
-    if (pending.request === null) {
+    // driver-defined — see AgentHandle.run).
+    if (request === null) {
       yield {
         type: 'error',
         data: {
@@ -179,7 +184,7 @@ export class AcpAgentHandle implements AgentHandle<PreparedAcpPrompt> {
     // Render THIS turn's envelope into ACP wire blocks (the composition
     // layer's render closure owns the preprocessor + raw-text fallback, so
     // `blocks` is always valid here).
-    const prepared = await pending.render(pending.request);
+    const prepared = await render(request);
     onPrepared?.(prepared.serialized);
 
     // Bridge the per-update callback into an async iterable via a queue.
@@ -430,7 +435,18 @@ export class AcpAgentHandle implements AgentHandle<PreparedAcpPrompt> {
         code: 'unsupported',
       };
     }
-    const { client, sessionId } = this.entry;
+    // Resolve the live session out-of-turn. A control op with no live
+    // session to act on is a precondition failure — we do NOT lazily spawn
+    // one just to, e.g., set a mode (§3.6.2 / M2.6).
+    const entry = acpSessionRegistry.get(this.threadId);
+    if (!entry) {
+      return {
+        ok: false,
+        error: `no active ACP session for thread ${this.threadId}`,
+        code: 'not_found',
+      };
+    }
+    const { client, sessionId } = entry;
     try {
       switch (msg.type) {
         case 'cancel':
@@ -475,5 +491,14 @@ export class AcpAgentHandle implements AgentHandle<PreparedAcpPrompt> {
         error: err instanceof Error ? err.message : String(err),
       };
     }
+  }
+
+  /**
+   * Tear down the long-lived session: drop the live ACP entry for this
+   * `threadId` (which `shutdown()`s the client) and evict it from the
+   * registry. Idempotent — a no-op when no session is live.
+   */
+  close(): void {
+    acpSessionRegistry.remove(this.threadId);
   }
 }

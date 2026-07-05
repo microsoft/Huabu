@@ -23,22 +23,24 @@ export {
   BuiltinAgentHandle,
   BUILTIN_CAPABILITIES,
   type BuiltinRendered,
-  type BuiltinAgentHandleOptions,
+  type BuiltinTurnCtx,
 } from './builtin-handle.js';
 export {
   AcpAgentHandle,
   ACP_CAPABILITIES,
   type PreparedAcpPrompt,
-  type AcpAgentHandleOptions,
+  type AcpTurnCtx,
 } from './acp-handle.js';
 export {
   agentRuntime,
+  acquireAcpHandle,
   builtinAgentDriver,
   acpAgentDriver,
   getBuiltinDriver,
   getAcpDriver,
   BUILTIN_DRIVER_KIND,
   ACP_DRIVER_KIND,
+  type AcpHandle,
   type BuiltinDriverInput,
   type AcpDriverInput,
   type BuiltinAgentDriver,

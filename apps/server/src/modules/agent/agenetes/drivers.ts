@@ -20,24 +20,24 @@
 import {
   ACP_CAPABILITIES,
   AcpAgentHandle,
-  type AcpAgentHandleOptions,
+  type AcpTurnCtx,
   type PreparedAcpPrompt,
 } from './acp-handle.js';
 import {
   BUILTIN_CAPABILITIES,
   BuiltinAgentHandle,
-  type BuiltinAgentHandleOptions,
+  type BuiltinTurnCtx,
   type BuiltinRendered,
 } from './builtin-handle.js';
 import {
   createAgentRuntime,
   type AgentDriver,
+  type AgentHandle,
   type AgentRequest,
   type AgentRuntime,
   type InStreamEvent,
 } from './handle.js';
 
-import type { AcpSessionEntry } from '../acp/session-registry.js';
 import type { Agent } from '@earendil-works/pi-agent-core';
 import type { Message } from '@earendil-works/pi-ai';
 
@@ -46,20 +46,25 @@ export const BUILTIN_DRIVER_KIND = 'builtin';
 /** Dispatch key for the external ACP (agentlet) driver. */
 export const ACP_DRIVER_KIND = 'acp';
 
-/** The host-injected construction bundle for the built-in driver. */
+/**
+ * The host-injected construction bundle for the built-in driver. A Job's
+ * backing `Agent` is a fresh instance per invocation, so it is the whole
+ * construction input; per-turn context flows through `run(...)`'s
+ * {@link BuiltinTurnCtx}.
+ */
 export interface BuiltinDriverInput {
   /** The pi-agent-core runtime object, built over this turn's history. */
   agent: Agent;
-  /** Per-invocation options forwarded to {@link BuiltinAgentHandle}. */
-  options: BuiltinAgentHandleOptions;
 }
 
-/** The host-injected construction bundle for the ACP driver. */
+/**
+ * The host-injected construction bundle for the ACP driver. A Deployment
+ * handle is long-lived and holds only its `threadId`; the live session
+ * entry + per-turn context arrive on each `run(...)`'s {@link AcpTurnCtx}.
+ */
 export interface AcpDriverInput {
-  /** The open ACP session (client + sessionId), from `ensureAcpSession`. */
-  entry: AcpSessionEntry;
-  /** Per-invocation options forwarded to {@link AcpAgentHandle}. */
-  options: AcpAgentHandleOptions;
+  /** The L1-minted addressable id this Deployment is keyed by. */
+  threadId: string;
 }
 
 export type BuiltinAgentDriver = AgentDriver<
@@ -67,7 +72,8 @@ export type BuiltinAgentDriver = AgentDriver<
   AgentRequest,
   BuiltinRendered,
   Message[],
-  InStreamEvent
+  InStreamEvent,
+  BuiltinTurnCtx
 >;
 
 export type AcpAgentDriver = AgentDriver<
@@ -75,21 +81,25 @@ export type AcpAgentDriver = AgentDriver<
   AgentRequest,
   PreparedAcpPrompt,
   Message[],
-  InStreamEvent
+  InStreamEvent,
+  AcpTurnCtx
 >;
+
+/** The concrete long-lived ACP (Deployment) handle type. */
+export type AcpHandle = AgentHandle<PreparedAcpPrompt, AcpTurnCtx>;
 
 /** The in-process built-in driver (a Job: cancel-only control). */
 export const builtinAgentDriver: BuiltinAgentDriver = {
   kind: BUILTIN_DRIVER_KIND,
   capabilities: BUILTIN_CAPABILITIES,
-  create: ({ agent, options }) => new BuiltinAgentHandle(agent, options),
+  create: ({ agent }) => new BuiltinAgentHandle(agent),
 };
 
 /** The external ACP driver (a Deployment: full control + session-load). */
 export const acpAgentDriver: AcpAgentDriver = {
   kind: ACP_DRIVER_KIND,
   capabilities: ACP_CAPABILITIES,
-  create: ({ entry, options }) => new AcpAgentHandle(entry, options),
+  create: ({ threadId }) => new AcpAgentHandle(threadId),
 };
 
 /**
@@ -111,7 +121,8 @@ export function getBuiltinDriver(): BuiltinAgentDriver {
     AgentRequest,
     BuiltinRendered,
     Message[],
-    InStreamEvent
+    InStreamEvent,
+    BuiltinTurnCtx
   >(BUILTIN_DRIVER_KIND);
   if (!driver) {
     throw new Error(
@@ -128,10 +139,30 @@ export function getAcpDriver(): AcpAgentDriver {
     AgentRequest,
     PreparedAcpPrompt,
     Message[],
-    InStreamEvent
+    InStreamEvent,
+    AcpTurnCtx
   >(ACP_DRIVER_KIND);
   if (!driver) {
     throw new Error(`no agent driver registered for kind '${ACP_DRIVER_KIND}'`);
   }
   return driver;
+}
+
+/**
+ * Get-or-create the long-lived ACP (Deployment) handle for `threadId`.
+ * The handle is held live in the runtime across turns (keyed by
+ * `threadId`), so `control()` / `close()` are addressable out-of-turn.
+ * The construction `factory` is object-injection (the clean
+ * `create(threadId, spec)` factory lands with M4/M5); it captures nothing
+ * per-turn (the live session entry flows through each `run(...)`), so
+ * reuse-ignores-spec holds trivially.
+ */
+export function acquireAcpHandle(threadId: string): AcpHandle {
+  return agentRuntime.create<
+    AgentRequest,
+    PreparedAcpPrompt,
+    Message[],
+    InStreamEvent,
+    AcpTurnCtx
+  >(threadId, () => getAcpDriver().create({ threadId }));
 }

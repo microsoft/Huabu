@@ -6,11 +6,11 @@
  * the single-subscribe event pump, the pi-agent-core `AgentEvent` ->
  * `AgentStreamEvent` translation, the soft turn cap, and the output-delta
  * slice. `runAgent` (agent.service.ts) is now a thin composition shell
- * that builds the backing `Agent`, wraps it in this handle, and drains
- * `events()`.
+ * that builds the backing `Agent`, wraps it in this handle, and drives
+ * one `run(...)`.
  *
  * The pi-SDK is fully encapsulated here — `prompt` vs `continue` is an
- * internal decision (see {@link BuiltinAgentHandle.submit}), never exposed
+ * internal decision (see {@link BuiltinAgentHandle.run}), never exposed
  * on the {@link AgentHandle} interface. The backing `Agent` is INJECTED
  * (constructed by the composition layer, which owns the host singletons
  * `getLLMModel` / `ensureApiKey` / `buildToolsForScope`) rather than built
@@ -18,7 +18,15 @@
  * `new Agent(...)` construction behind a `create(spec)` factory is deferred
  * to M4/M5.
  *
- * See docs/proposals/layered-architecture.md §3.6 / §7 (M2).
+ * Lifecycle (§3.2 / M2.6): the built-in path is a **Job** — its handle's
+ * life *is* its single `run`. The backing `Agent` is bound once at
+ * construction (a fresh instance per invocation) rather than re-resolved
+ * per turn, so it lives in the constructor; a Deployment (the ACP path),
+ * by contrast, re-resolves its backing session each turn via the run ctx.
+ * A Job never enters the `AgentRuntime` live-handle registry, and
+ * `close()` is a no-op (the run already ended it).
+ *
+ * See docs/proposals/layered-architecture.md §3.6 / §7 (M2 / M2.6).
  */
 
 import { convertToLlm } from '@earendil-works/pi-agent-core';
@@ -69,8 +77,8 @@ interface HandleLogger {
   info: (message: string) => void;
 }
 
-/** Construction-time options for a {@link BuiltinAgentHandle}. */
-export interface BuiltinAgentHandleOptions {
+/** The per-turn context a {@link BuiltinAgentHandle.run} accepts. */
+export interface BuiltinTurnCtx {
   /**
    * Soft cap on agent turns (LLM call + tool batch). When reached, the
    * agent loop is aborted internally and a cap-out error is emitted.
@@ -102,7 +110,10 @@ function joinText(content: ReadonlyArray<{ type: string }>): string {
  * {@link Agent} (constructed over the prior transcript) and drives one
  * turn against it.
  */
-export class BuiltinAgentHandle implements AgentHandle<BuiltinRendered> {
+export class BuiltinAgentHandle implements AgentHandle<
+  BuiltinRendered,
+  BuiltinTurnCtx
+> {
   /**
    * A built-in Job advertises only `cancel`; it accepts turn input
    * blocking (the ACP baseline). It has no session-load or slash-command
@@ -117,48 +128,29 @@ export class BuiltinAgentHandle implements AgentHandle<BuiltinRendered> {
    */
   private readonly priorLen: number;
 
-  /** The pending turn recorded by {@link submit}, consumed by {@link events}. */
-  private pending?: {
-    request: AgentRequest | null;
-    render: RenderFn<BuiltinRendered>;
-  };
-
-  constructor(
-    private readonly agent: Agent,
-    private readonly options: BuiltinAgentHandleOptions = {},
-  ) {
+  constructor(private readonly agent: Agent) {
     this.priorLen = agent.state.messages.length;
   }
 
   /**
-   * Record this turn. Non-blocking: the render + kickoff happen when
-   * {@link events} is iterated, so the subscribe is always wired before the
-   * run starts.
-   *
-   * `prompt` vs `continue` is decided internally from the rendered output:
-   * a non-null request renders to this turn's messages and starts a new
-   * prompt; a null request (no new input) resumes the pre-loaded transcript
-   * via `continue()`.
+   * Run this Job's single turn. `prompt` vs `continue` is decided
+   * internally from the rendered output: a non-null request renders to
+   * this turn's messages and starts a new prompt; a null request (no new
+   * input) resumes the pre-loaded transcript via `continue()`. The render
+   * + kickoff happen once iteration begins, so the subscribe is always
+   * wired before the run starts.
    */
-  submit(
+  async *run(
     request: AgentRequest | null,
     render: RenderFn<BuiltinRendered>,
-  ): void {
-    this.pending = { request, render };
-  }
-
-  async *events(): AsyncGenerator<InStreamEvent, Message[]> {
-    const pending = this.pending;
-    if (!pending) {
-      throw new Error('BuiltinAgentHandle.events() called before submit()');
-    }
+    ctx: BuiltinTurnCtx,
+  ): AsyncGenerator<InStreamEvent, Message[]> {
     const { agent, priorLen } = this;
-    const { maxIterations = 20, signal, logger, onRendered } = this.options;
+    const { maxIterations = 20, signal, logger, onRendered } = ctx;
 
     // Render THIS turn at the last moment. A null request means "no new
     // input" — resume the pre-loaded transcript with `continue()`.
-    const turnMessages =
-      pending.request === null ? [] : await pending.render(pending.request);
+    const turnMessages = request === null ? [] : await render(request);
     onRendered?.(turnMessages);
 
     // This run's output delta — the single value we return (see the tail).
@@ -447,4 +439,10 @@ export class BuiltinAgentHandle implements AgentHandle<BuiltinRendered> {
       code: 'unsupported',
     };
   }
+
+  /**
+   * A Job's `close` is a no-op: its single {@link run} already ended its
+   * life, and it never enters the `AgentRuntime` live-handle registry.
+   */
+  close(): void {}
 }

@@ -59,13 +59,19 @@ export type InStreamEvent = Exclude<AgentStreamEvent, { type: 'meta' | 'end' }>;
 
 /**
  * Host-bound handle: request = {@link AgentRequest}, transcript result =
- * pi-ai `Message[]`, events = host {@link InStreamEvent}. `TRendered` stays
- * open per backend. Facets (`submit` / `events` / `control` /
- * `capabilities`) are defined by the subtree {@link RuntimeAgentHandle}.
+ * pi-ai `Message[]`, events = host {@link InStreamEvent}. `TRendered` (the
+ * backend-native render output) and `TTurnCtx` (the per-turn context each
+ * driver's `run` accepts) stay open per backend. Facets (`run` /
+ * `control` / `close` / `capabilities`) are defined by the subtree
+ * {@link RuntimeAgentHandle}.
  */
-export type AgentHandle<TRendered = unknown> = RuntimeAgentHandle<
+export type AgentHandle<
+  TRendered = unknown,
+  TTurnCtx = unknown,
+> = RuntimeAgentHandle<
   AgentRequest,
   TRendered,
   Message[],
-  InStreamEvent
+  InStreamEvent,
+  TTurnCtx
 >;
