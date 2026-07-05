@@ -38,6 +38,7 @@ import {
 import { ensureAcpSession } from './service.js';
 import { acpSessionRegistry } from './session-registry.js';
 import { readAcpSessionRecord } from './session-store.js';
+import { acquireAcpHandle } from '../agenetes/index.js';
 
 import type { AcpSessionEntry } from './session-registry.js';
 import type { AcpSessionPersistedMeta } from './session-store.js';
@@ -379,11 +380,20 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const { requestId, optionId, cancelled } = parsed.data;
-    const resolved = entry.client.resolvePermission(
-      requestId,
-      cancelled || !optionId ? { cancelled: true } : { optionId },
-    );
-    return { resolved };
+    // Fold onto the long-lived handle's control plane (M3): the reverse
+    // permission is a duplex correlated by `requestId` — `answer_permission`
+    // control ⟂ `permission_request` event. The 404 above enforces the live
+    // session precondition (L1); `control()` resolves the same entry by
+    // threadId. `ok:false` here means no suspended request matched (already
+    // answered / timed out / session ended) — surfaced as `resolved:false`.
+    const ack = await acquireAcpHandle(threadId).control({
+      type: 'answer_permission',
+      data: {
+        requestId,
+        decision: cancelled || !optionId ? { cancelled: true } : { optionId },
+      },
+    });
+    return { resolved: ack.ok };
   });
 
   // ── Session-meta set-RPCs ─────────────────────────────────────────
@@ -432,21 +442,28 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
       return reply.status(resolved.status).send(resolved.body);
     }
     const entry = resolved.entry;
-    try {
-      await entry.client.setSessionMode(entry.sessionId, parsed.data.modeId);
-      // Optimistic local update so the next GET returns the new id
-      // even before the agent's confirmation notification lands.
-      entry.currentModeId = parsed.data.modeId;
-      entry.metaUpdatedAt = Date.now();
-      return { ok: true as const, modeId: parsed.data.modeId };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+    // Fold onto the long-lived handle's control plane (M3). L1 keeps the
+    // spawn orchestration (resolveSetRpcEntry get-or-create with spec) and
+    // the optimistic local cache update; the actual set-RPC goes through
+    // `handle.control()`, which resolves the same entry by threadId.
+    const ack = await acquireAcpHandle(threadId).control({
+      type: 'set_mode',
+      data: { modeId: parsed.data.modeId },
+    });
+    if (!ack.ok) {
       request.log.warn(
-        { threadId, modeId: parsed.data.modeId, err: message },
+        { threadId, modeId: parsed.data.modeId, err: ack.error },
         '[acp/threads] setSessionMode failed',
       );
-      return reply.status(502).send({ message, code: 'acp_set_mode_failed' });
+      return reply
+        .status(502)
+        .send({ message: ack.error, code: 'acp_set_mode_failed' });
     }
+    // Optimistic local update so the next GET returns the new id even
+    // before the agent's confirmation notification lands.
+    entry.currentModeId = parsed.data.modeId;
+    entry.metaUpdatedAt = Date.now();
+    return { ok: true as const, modeId: parsed.data.modeId };
   });
 
   app.post<{
@@ -478,19 +495,22 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
       return reply.status(resolved.status).send(resolved.body);
     }
     const entry = resolved.entry;
-    try {
-      await entry.client.setSessionModel(entry.sessionId, parsed.data.modelId);
-      entry.currentModelId = parsed.data.modelId;
-      entry.metaUpdatedAt = Date.now();
-      return { ok: true as const, modelId: parsed.data.modelId };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+    const ack = await acquireAcpHandle(threadId).control({
+      type: 'set_model',
+      data: { modelId: parsed.data.modelId },
+    });
+    if (!ack.ok) {
       request.log.warn(
-        { threadId, modelId: parsed.data.modelId, err: message },
+        { threadId, modelId: parsed.data.modelId, err: ack.error },
         '[acp/threads] setSessionModel failed',
       );
-      return reply.status(502).send({ message, code: 'acp_set_model_failed' });
+      return reply
+        .status(502)
+        .send({ message: ack.error, code: 'acp_set_model_failed' });
     }
+    entry.currentModelId = parsed.data.modelId;
+    entry.metaUpdatedAt = Date.now();
+    return { ok: true as const, modelId: parsed.data.modelId };
   });
 
   app.post<{
@@ -526,32 +546,32 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
       return reply.status(resolved.status).send(resolved.body);
     }
     const entry = resolved.entry;
-    try {
-      await entry.client.setSessionConfigOption(
-        entry.sessionId,
-        parsed.data.configOptionId,
-        parsed.data.value,
-      );
-      entry.metaUpdatedAt = Date.now();
-      return {
-        ok: true as const,
-        configOptionId: parsed.data.configOptionId,
+    const ack = await acquireAcpHandle(threadId).control({
+      type: 'set_config_option',
+      data: {
+        optionId: parsed.data.configOptionId,
         value: parsed.data.value,
-      };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      },
+    });
+    if (!ack.ok) {
       request.log.warn(
         {
           threadId,
           configOptionId: parsed.data.configOptionId,
-          err: message,
+          err: ack.error,
         },
         '[acp/threads] setSessionConfigOption failed',
       );
       return reply
         .status(502)
-        .send({ message, code: 'acp_set_config_option_failed' });
+        .send({ message: ack.error, code: 'acp_set_config_option_failed' });
     }
+    entry.metaUpdatedAt = Date.now();
+    return {
+      ok: true as const,
+      configOptionId: parsed.data.configOptionId,
+      value: parsed.data.value,
+    };
   });
 };
 
