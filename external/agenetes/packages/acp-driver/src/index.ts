@@ -76,3 +76,13 @@ export type {
   PreparedAcpPrompt,
   AcpTurnCtx,
 } from './handle.js';
+
+export { AcpServiceError } from './errors.js';
+export type { AcpEnsureErrorCode } from './errors.js';
+
+export {
+  ensureAgentForThread,
+  releaseThread,
+  threadKey,
+  _resetSpawnOrchestratorForTests,
+} from './spawn-orchestrator.js';
