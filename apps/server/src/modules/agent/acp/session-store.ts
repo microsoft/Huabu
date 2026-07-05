@@ -1,13 +1,20 @@
 /**
- * ACP session persistence — disk store for `(canvasId, threadId) →
+ * ACP session persistence — disk store for `(namespace, threadId) →
  * sessionId`. Enables transparent recovery after a server restart:
  * `ensureAcpSession` calls `session/load` (instead of `session/new`)
  * when a record exists, preserving the external agent's session
  * memory across process lifetimes.
  *
+ * The store is keyed by an Agenetes {@link Namespace} (L2's storage
+ * scope, §7 M5.0): it persists `<namespace.storagePath>/acp-sessions.json`
+ * and owns nothing about any host's directory layout. Sediment supplies
+ * the canvas-derived namespace (`{ name: canvasId, storagePath:
+ * historyDir(canvasId) }`), so the file is identical to the pre-M5.0
+ * `acpSessionsPath(canvasId)`.
+ *
  * ### Storage shape
  *
- *   <canvasId>/.history/acp-sessions.json
+ *   <namespace.storagePath>/acp-sessions.json
  *     {
  *       "schemaVersion": 3,
  *       "records": {
@@ -52,9 +59,11 @@
  * registry's persistence layer.
  */
 
-import { atomicWriteJson, readJson, sanitizeId } from '../../storage/io.js';
-import { acpSessionsPath } from '../../storage/paths.js';
+import path from 'node:path';
 
+import { atomicWriteJson, readJson, sanitizeId } from '../../storage/io.js';
+
+import type { Namespace } from '@agenetes/protocol';
 import type {
   AcpCost,
   AcpModelInfo,
@@ -310,14 +319,34 @@ function sanitizeMeta(raw: unknown): AcpSessionPersistedMeta | undefined {
 }
 
 /**
- * Load and validate the full store file for `canvasId`. Returns an
+ * Resolve the on-disk `acp-sessions.json` for a namespace (L2's
+ * storage scope, §7 M5.0). When `storagePath` is present the store
+ * persists directly under it; when absent it derives a default location
+ * from `name` under a process-local data root (dormant in Sediment, which
+ * always supplies an explicit `storagePath`). The store owns nothing about
+ * any host's directory layout — it only joins its own file name.
+ */
+function resolveAcpSessionsPath(namespace: Namespace): string {
+  const root =
+    namespace.storagePath ??
+    path.join(
+      process.cwd(),
+      '.agenetes',
+      'namespaces',
+      sanitizeId(namespace.name, 'namespace'),
+    );
+  return path.join(root, 'acp-sessions.json');
+}
+
+/**
+ * Load and validate the full store file for `namespace`. Returns an
  * empty (in-memory) file when the path is missing or corrupted —
  * NEVER throws; persistence is best-effort. Unknown record entries
  * (missing required fields) are silently dropped from the in-memory
  * view but left untouched on disk until the next write.
  */
-function readFile(canvasId: string): SessionStoreFile {
-  const raw = readJson<unknown>(acpSessionsPath(canvasId));
+function readFile(namespace: Namespace): SessionStoreFile {
+  const raw = readJson<unknown>(resolveAcpSessionsPath(namespace));
   if (!raw || typeof raw !== 'object') return emptyFile();
   const obj = raw as Record<string, unknown>;
   const records: Record<string, AcpSessionRecord> = {};
@@ -346,38 +375,38 @@ function readFile(canvasId: string): SessionStoreFile {
 }
 
 /**
- * Look up the persisted record for `(canvasId, threadId)`.
- * Returns null when `canvasId` is empty, the file is missing,
+ * Look up the persisted record for `(namespace, threadId)`.
+ * Returns null when the namespace has no `name`, the file is missing,
  * or the threadId has no entry.
  */
 export function readAcpSessionRecord(
-  canvasId: string,
+  namespace: Namespace,
   threadId: string,
 ): AcpSessionRecord | null {
-  if (!canvasId) return null;
+  if (!namespace.name) return null;
   try {
     sanitizeId(threadId, 'threadId');
   } catch {
     return null;
   }
-  const file = readFile(canvasId);
+  const file = readFile(namespace);
   return file.records[threadId] ?? null;
 }
 
 /**
- * Insert or replace the record for `(canvasId, threadId)`. No-op
- * when `canvasId` is empty (mirrors {@link readAcpSessionRecord}).
+ * Insert or replace the record for `(namespace, threadId)`. No-op
+ * when the namespace has no `name` (mirrors {@link readAcpSessionRecord}).
  * Stamps `updatedAt` automatically. Pass `meta` to capture the
  * latest selector/usage snapshot alongside the sessionId.
  */
 export function writeAcpSessionRecord(
-  canvasId: string,
+  namespace: Namespace,
   threadId: string,
   record: Omit<AcpSessionRecord, 'updatedAt'>,
 ): void {
-  if (!canvasId) return;
+  if (!namespace.name) return;
   sanitizeId(threadId, 'threadId');
-  const file = readFile(canvasId);
+  const file = readFile(namespace);
   const next: AcpSessionRecord = {
     sessionId: record.sessionId,
     profileId: record.profileId,
@@ -387,30 +416,30 @@ export function writeAcpSessionRecord(
   if (record.meta) next.meta = record.meta;
   if (record.bindingRecipe) next.bindingRecipe = record.bindingRecipe;
   file.records[threadId] = next;
-  atomicWriteJson(acpSessionsPath(canvasId), file);
+  atomicWriteJson(resolveAcpSessionsPath(namespace), file);
 }
 
 /**
  * Update only the `meta` field for an existing record, leaving the
- * sessionId / profileId / cwd untouched. No-op when `canvasId`
- * is empty OR no record exists for `(canvasId, threadId)` — the meta
+ * sessionId / profileId / cwd untouched. No-op when the namespace has
+ * no `name` OR no record exists for `(namespace, threadId)` — the meta
  * is per-session state, so persisting it without the parent record
  * would leak across recreations.
  *
  * Passing `meta = null` clears the field. Stamps `updatedAt`.
  */
 export function writeAcpSessionMeta(
-  canvasId: string,
+  namespace: Namespace,
   threadId: string,
   meta: AcpSessionPersistedMeta | null,
 ): boolean {
-  if (!canvasId) return false;
+  if (!namespace.name) return false;
   try {
     sanitizeId(threadId, 'threadId');
   } catch {
     return false;
   }
-  const file = readFile(canvasId);
+  const file = readFile(namespace);
   const existing = file.records[threadId];
   if (!existing) return false;
   const next: AcpSessionRecord = {
@@ -422,29 +451,29 @@ export function writeAcpSessionMeta(
   if (meta) next.meta = meta;
   if (existing.bindingRecipe) next.bindingRecipe = existing.bindingRecipe;
   file.records[threadId] = next;
-  atomicWriteJson(acpSessionsPath(canvasId), file);
+  atomicWriteJson(resolveAcpSessionsPath(namespace), file);
   return true;
 }
 
 /**
- * Remove the record for `(canvasId, threadId)`. Returns true when an
- * entry existed and was deleted. No-op when `canvasId` is empty or no
- * entry was present; the file is rewritten unconditionally when an
+ * Remove the record for `(namespace, threadId)`. Returns true when an
+ * entry existed and was deleted. No-op when the namespace has no `name`
+ * or no entry was present; the file is rewritten unconditionally when an
  * entry IS removed (to commit the deletion) and untouched otherwise.
  */
 export function deleteAcpSessionRecord(
-  canvasId: string,
+  namespace: Namespace,
   threadId: string,
 ): boolean {
-  if (!canvasId) return false;
+  if (!namespace.name) return false;
   try {
     sanitizeId(threadId, 'threadId');
   } catch {
     return false;
   }
-  const file = readFile(canvasId);
+  const file = readFile(namespace);
   if (!(threadId in file.records)) return false;
   delete file.records[threadId];
-  atomicWriteJson(acpSessionsPath(canvasId), file);
+  atomicWriteJson(resolveAcpSessionsPath(namespace), file);
   return true;
 }

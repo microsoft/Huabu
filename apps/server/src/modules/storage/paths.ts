@@ -27,9 +27,12 @@
 
 import path from 'node:path';
 
+
 import { canvasDirName } from './canvas-dirs.js';
 import { sanitizeId } from './io.js';
 import { getWorkspacePath } from '../workspace.js';
+
+import type { Namespace } from '@agenetes/protocol';
 
 export function canvasRoot(canvasId: string): string {
   const safeId = sanitizeId(canvasId, 'canvasId');
@@ -249,4 +252,20 @@ export function deltaLogPath(canvasId: string): string {
  */
 export function acpSessionsPath(canvasId: string): string {
   return path.join(historyDir(canvasId), 'acp-sessions.json');
+}
+
+/**
+ * The Agenetes {@link Namespace} (L2 storage/metadata scope) for a
+ * canvas's ACP session store. `canvasId` is Sediment's de-facto namespace
+ * key; `storagePath` is the canvas history dir, so the driver's store
+ * persists `<storagePath>/acp-sessions.json` — byte-for-byte the same file
+ * {@link acpSessionsPath} names today. Empty `canvasId` yields a name-less
+ * namespace the store treats as non-persistent (mirrors the previous
+ * empty-canvasId no-op). See docs/proposals/layered-architecture.md §7 M5.0.
+ */
+export function canvasAcpNamespace(canvasId: string): Namespace {
+  return {
+    name: canvasId,
+    storagePath: canvasId ? historyDir(canvasId) : undefined,
+  };
 }

@@ -38,6 +38,7 @@ import {
 import { ensureAcpSession, resolveBindingRecipe } from './service.js';
 import { acpSessionRegistry } from './session-registry.js';
 import { readAcpSessionRecord } from './session-store.js';
+import { canvasAcpNamespace } from '../../storage/paths.js';
 import { acquireAcpHandle } from '../agenetes/index.js';
 
 import type { AcpSessionEntry } from './session-registry.js';
@@ -332,7 +333,10 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
     const live = acpSessionRegistry.get(threadId);
     if (live) return { sessionMeta: snapshotSessionMeta(live) };
     if (canvasId) {
-      const persisted = readAcpSessionRecord(canvasId, threadId);
+      const persisted = readAcpSessionRecord(
+        canvasAcpNamespace(canvasId),
+        threadId,
+      );
       if (persisted?.meta) {
         return { sessionMeta: snapshotMetaFromPersisted(persisted.meta) };
       }

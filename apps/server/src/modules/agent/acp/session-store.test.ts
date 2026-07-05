@@ -24,16 +24,19 @@ import {
   writeAcpSessionMeta,
   writeAcpSessionRecord,
 } from './session-store.js';
-import { acpSessionsPath } from '../../storage/paths.js';
+import { acpSessionsPath, canvasAcpNamespace } from '../../storage/paths.js';
 import { setWorkspacePath } from '../../workspace.js';
 
 let tmp: string;
 const canvasId = 'cv-test';
 const threadId = 'tr-test';
+let namespace: ReturnType<typeof canvasAcpNamespace>;
+const emptyNamespace = canvasAcpNamespace('');
 
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), 'sediment-acp-sessions-'));
   setWorkspacePath(tmp);
+  namespace = canvasAcpNamespace(canvasId);
   // Pre-create the canvas dir AND its .history subdir so raw writeFileSync
   // calls in malformed-input tests don't ENOENT. The session-store API
   // itself goes through atomicWriteJson which mkdirp's automatically.
@@ -46,26 +49,26 @@ afterEach(() => {
 
 describe('readAcpSessionRecord', () => {
   it('returns null when canvasId is empty', () => {
-    expect(readAcpSessionRecord('', threadId)).toBeNull();
+    expect(readAcpSessionRecord(emptyNamespace, threadId)).toBeNull();
   });
 
   it('returns null when the file does not exist yet', () => {
-    expect(readAcpSessionRecord(canvasId, threadId)).toBeNull();
+    expect(readAcpSessionRecord(namespace, threadId)).toBeNull();
   });
 
   it('returns null when the threadId has no entry', () => {
-    writeAcpSessionRecord(canvasId, 'other-thread', {
+    writeAcpSessionRecord(namespace, 'other-thread', {
       sessionId: 'sess-1',
       profileId: 'agent-1',
       cwd: '/repo',
     });
-    expect(readAcpSessionRecord(canvasId, threadId)).toBeNull();
+    expect(readAcpSessionRecord(namespace, threadId)).toBeNull();
   });
 
   it('returns null on malformed JSON without throwing', () => {
     writeFileSync(acpSessionsPath(canvasId), '{this is not json');
-    expect(() => readAcpSessionRecord(canvasId, threadId)).not.toThrow();
-    expect(readAcpSessionRecord(canvasId, threadId)).toBeNull();
+    expect(() => readAcpSessionRecord(namespace, threadId)).not.toThrow();
+    expect(readAcpSessionRecord(namespace, threadId)).toBeNull();
   });
 
   it('returns null when the record exists but fails shape validation', () => {
@@ -78,20 +81,20 @@ describe('readAcpSessionRecord', () => {
         },
       }),
     );
-    expect(readAcpSessionRecord(canvasId, threadId)).toBeNull();
+    expect(readAcpSessionRecord(namespace, threadId)).toBeNull();
   });
 });
 
 describe('writeAcpSessionRecord', () => {
   it('persists a record and round-trips through read', () => {
     const before = Date.now();
-    writeAcpSessionRecord(canvasId, threadId, {
+    writeAcpSessionRecord(namespace, threadId, {
       sessionId: 'sess-1',
       profileId: 'agent-1',
       cwd: '/repo',
     });
     const after = Date.now();
-    const got = readAcpSessionRecord(canvasId, threadId);
+    const got = readAcpSessionRecord(namespace, threadId);
     expect(got).not.toBeNull();
     expect(got).toMatchObject({
       sessionId: 'sess-1',
@@ -103,17 +106,17 @@ describe('writeAcpSessionRecord', () => {
   });
 
   it('replaces a previous record for the same threadId', () => {
-    writeAcpSessionRecord(canvasId, threadId, {
+    writeAcpSessionRecord(namespace, threadId, {
       sessionId: 'sess-old',
       profileId: 'agent-1',
       cwd: '/old',
     });
-    writeAcpSessionRecord(canvasId, threadId, {
+    writeAcpSessionRecord(namespace, threadId, {
       sessionId: 'sess-new',
       profileId: 'agent-2',
       cwd: '/new',
     });
-    const got = readAcpSessionRecord(canvasId, threadId);
+    const got = readAcpSessionRecord(namespace, threadId);
     expect(got).toMatchObject({
       sessionId: 'sess-new',
       profileId: 'agent-2',
@@ -122,74 +125,74 @@ describe('writeAcpSessionRecord', () => {
   });
 
   it('leaves records for other threads untouched on rewrite', () => {
-    writeAcpSessionRecord(canvasId, 'thread-a', {
+    writeAcpSessionRecord(namespace, 'thread-a', {
       sessionId: 'sess-a',
       profileId: 'agent-1',
       cwd: '/a',
     });
-    writeAcpSessionRecord(canvasId, 'thread-b', {
+    writeAcpSessionRecord(namespace, 'thread-b', {
       sessionId: 'sess-b',
       profileId: 'agent-1',
       cwd: '/b',
     });
-    writeAcpSessionRecord(canvasId, 'thread-a', {
+    writeAcpSessionRecord(namespace, 'thread-a', {
       sessionId: 'sess-a2',
       profileId: 'agent-1',
       cwd: '/a2',
     });
-    expect(readAcpSessionRecord(canvasId, 'thread-a')?.sessionId).toBe(
+    expect(readAcpSessionRecord(namespace, 'thread-a')?.sessionId).toBe(
       'sess-a2',
     );
-    expect(readAcpSessionRecord(canvasId, 'thread-b')?.sessionId).toBe(
+    expect(readAcpSessionRecord(namespace, 'thread-b')?.sessionId).toBe(
       'sess-b',
     );
   });
 
   it('is a no-op when canvasId is empty', () => {
     expect(() =>
-      writeAcpSessionRecord('', threadId, {
+      writeAcpSessionRecord(emptyNamespace, threadId, {
         sessionId: 'sess-1',
         profileId: 'agent-1',
         cwd: '/repo',
       }),
     ).not.toThrow();
-    expect(readAcpSessionRecord('', threadId)).toBeNull();
+    expect(readAcpSessionRecord(emptyNamespace, threadId)).toBeNull();
   });
 });
 
 describe('deleteAcpSessionRecord', () => {
   it('returns false when the record does not exist', () => {
-    expect(deleteAcpSessionRecord(canvasId, threadId)).toBe(false);
+    expect(deleteAcpSessionRecord(namespace, threadId)).toBe(false);
   });
 
   it('returns false when canvasId is empty', () => {
-    expect(deleteAcpSessionRecord('', threadId)).toBe(false);
+    expect(deleteAcpSessionRecord(emptyNamespace, threadId)).toBe(false);
   });
 
   it('removes an existing record and returns true', () => {
-    writeAcpSessionRecord(canvasId, threadId, {
+    writeAcpSessionRecord(namespace, threadId, {
       sessionId: 'sess-1',
       profileId: 'agent-1',
       cwd: '/repo',
     });
-    expect(deleteAcpSessionRecord(canvasId, threadId)).toBe(true);
-    expect(readAcpSessionRecord(canvasId, threadId)).toBeNull();
+    expect(deleteAcpSessionRecord(namespace, threadId)).toBe(true);
+    expect(readAcpSessionRecord(namespace, threadId)).toBeNull();
   });
 
   it('leaves other thread entries intact on delete', () => {
-    writeAcpSessionRecord(canvasId, 'thread-a', {
+    writeAcpSessionRecord(namespace, 'thread-a', {
       sessionId: 'sess-a',
       profileId: 'agent-1',
       cwd: '/a',
     });
-    writeAcpSessionRecord(canvasId, 'thread-b', {
+    writeAcpSessionRecord(namespace, 'thread-b', {
       sessionId: 'sess-b',
       profileId: 'agent-1',
       cwd: '/b',
     });
-    expect(deleteAcpSessionRecord(canvasId, 'thread-a')).toBe(true);
-    expect(readAcpSessionRecord(canvasId, 'thread-a')).toBeNull();
-    expect(readAcpSessionRecord(canvasId, 'thread-b')?.sessionId).toBe(
+    expect(deleteAcpSessionRecord(namespace, 'thread-a')).toBe(true);
+    expect(readAcpSessionRecord(namespace, 'thread-a')).toBeNull();
+    expect(readAcpSessionRecord(namespace, 'thread-b')?.sessionId).toBe(
       'sess-b',
     );
   });
@@ -197,7 +200,7 @@ describe('deleteAcpSessionRecord', () => {
 
 describe('session meta persistence', () => {
   it('round-trips meta when included in writeAcpSessionRecord', () => {
-    writeAcpSessionRecord(canvasId, threadId, {
+    writeAcpSessionRecord(namespace, threadId, {
       sessionId: 'sess-1',
       profileId: 'agent-1',
       cwd: '/repo',
@@ -210,7 +213,7 @@ describe('session meta persistence', () => {
         usage: { used: 100, size: 8000, cost: null },
       },
     });
-    const got = readAcpSessionRecord(canvasId, threadId);
+    const got = readAcpSessionRecord(namespace, threadId);
     expect(got?.meta).toEqual({
       availableCommands: [
         { name: '/help', description: 'show help', input: null },
@@ -222,28 +225,28 @@ describe('session meta persistence', () => {
   });
 
   it('omits meta when not provided', () => {
-    writeAcpSessionRecord(canvasId, threadId, {
+    writeAcpSessionRecord(namespace, threadId, {
       sessionId: 'sess-1',
       profileId: 'agent-1',
       cwd: '/repo',
     });
-    const got = readAcpSessionRecord(canvasId, threadId);
+    const got = readAcpSessionRecord(namespace, threadId);
     expect(got).not.toBeNull();
     expect(got!.meta).toBeUndefined();
   });
 
   it('writeAcpSessionMeta updates only the meta field on an existing record', () => {
-    writeAcpSessionRecord(canvasId, threadId, {
+    writeAcpSessionRecord(namespace, threadId, {
       sessionId: 'sess-1',
       profileId: 'agent-1',
       cwd: '/repo',
     });
-    const ok = writeAcpSessionMeta(canvasId, threadId, {
+    const ok = writeAcpSessionMeta(namespace, threadId, {
       currentModeId: 'plan',
       usage: { used: 42, size: 1000, cost: { amount: 0.1, currency: 'USD' } },
     });
     expect(ok).toBe(true);
-    const got = readAcpSessionRecord(canvasId, threadId);
+    const got = readAcpSessionRecord(namespace, threadId);
     expect(got?.sessionId).toBe('sess-1');
     expect(got?.profileId).toBe('agent-1');
     expect(got?.cwd).toBe('/repo');
@@ -255,26 +258,26 @@ describe('session meta persistence', () => {
 
   it('writeAcpSessionMeta returns false when no record exists', () => {
     expect(
-      writeAcpSessionMeta(canvasId, threadId, { currentModeId: 'x' }),
+      writeAcpSessionMeta(namespace, threadId, { currentModeId: 'x' }),
     ).toBe(false);
-    expect(readAcpSessionRecord(canvasId, threadId)).toBeNull();
+    expect(readAcpSessionRecord(namespace, threadId)).toBeNull();
   });
 
   it('writeAcpSessionMeta is a no-op when canvasId is empty', () => {
-    expect(writeAcpSessionMeta('', threadId, { currentModeId: 'x' })).toBe(
+    expect(writeAcpSessionMeta(emptyNamespace, threadId, { currentModeId: 'x' })).toBe(
       false,
     );
   });
 
   it('writeAcpSessionMeta(null) clears the field', () => {
-    writeAcpSessionRecord(canvasId, threadId, {
+    writeAcpSessionRecord(namespace, threadId, {
       sessionId: 'sess-1',
       profileId: 'agent-1',
       cwd: '/repo',
       meta: { currentModeId: 'plan' },
     });
-    expect(writeAcpSessionMeta(canvasId, threadId, null)).toBe(true);
-    const got = readAcpSessionRecord(canvasId, threadId);
+    expect(writeAcpSessionMeta(namespace, threadId, null)).toBe(true);
+    const got = readAcpSessionRecord(namespace, threadId);
     expect(got).not.toBeNull();
     expect(got!.meta).toBeUndefined();
   });
@@ -298,7 +301,7 @@ describe('session meta persistence', () => {
         },
       }),
     );
-    const got = readAcpSessionRecord(canvasId, threadId);
+    const got = readAcpSessionRecord(namespace, threadId);
     expect(got?.sessionId).toBe('sess-1');
     expect(got?.meta).toBeUndefined();
   });
@@ -319,6 +322,6 @@ describe('session meta persistence', () => {
         },
       }),
     );
-    expect(readAcpSessionRecord(canvasId, threadId)).toBeNull();
+    expect(readAcpSessionRecord(namespace, threadId)).toBeNull();
   });
 });

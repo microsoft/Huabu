@@ -17,9 +17,9 @@
  * translator and will be added incrementally.
  */
 
+import { AcpAgentClient, type AcpInitializeResult } from '@agenetes/acp-driver';
 import { getAgentletServer } from '@agenetes/agentlet-host';
 
-import { AcpAgentClient, type AcpInitializeResult } from '@agenetes/acp-driver';
 import { AcpServiceError } from './errors.js';
 import {
   prepareExternalAgentPrompt,
@@ -34,6 +34,7 @@ import {
   writeAcpSessionRecord,
 } from './session-store.js';
 import { ensureAgentForThread } from './spawn-orchestrator.js';
+import { canvasAcpNamespace } from '../../storage/paths.js';
 import { type PreparedAcpPrompt } from '../agenetes/acp-handle.js';
 import { acquireAcpHandle } from '../agenetes/drivers.js';
 import { type RenderFn } from '../agenetes/handle.js';
@@ -387,7 +388,11 @@ function schedulePersistEntryMeta(
   const timer = setTimeout(() => {
     pendingMetaPersists.delete(key);
     try {
-      writeAcpSessionMeta(entry.canvasId, threadId, snapshotEntryMeta(entry));
+      writeAcpSessionMeta(
+        canvasAcpNamespace(entry.canvasId),
+        threadId,
+        snapshotEntryMeta(entry),
+      );
     } catch (err) {
       logger.warn(
         {
@@ -435,7 +440,7 @@ function promoteEntryToPersisted(
   const threadId = findThreadIdForEntry(entry);
   if (!threadId) return;
   try {
-    writeAcpSessionRecord(entry.canvasId, threadId, {
+    writeAcpSessionRecord(canvasAcpNamespace(entry.canvasId), threadId, {
       sessionId: entry.sessionId,
       profileId: entry.profileId,
       cwd: entry.cwd,
@@ -524,7 +529,10 @@ async function ensureAcpSessionInner(
 ): Promise<AcpSessionEntry> {
   const { threadId, binding, logger } = opts;
   const canvasId = opts.canvasId ?? '';
-  const persisted = readAcpSessionRecord(canvasId, threadId);
+  const persisted = readAcpSessionRecord(
+    canvasAcpNamespace(canvasId),
+    threadId,
+  );
 
   // Recipe-first resolution:
   //   1. Trust the persisted `bindingRecipe` snapshot (returning thread —
@@ -597,7 +605,7 @@ async function ensureAcpSessionInner(
     // Persisted record is canvas-scoped (see session-store path layout),
     // so the wrong-canvas case is already handled implicitly. We still
     // proactively drop the OLD canvas's record to keep the store tidy.
-    deleteAcpSessionRecord(entry.canvasId, threadId);
+    deleteAcpSessionRecord(canvasAcpNamespace(entry.canvasId), threadId);
     entry = undefined;
   }
   if (entry && entry.client.isClosed) {
@@ -772,7 +780,7 @@ async function ensureAcpSessionInner(
   // the `promoteEntryToPersisted` helper above.
   if (created.persistedToDisk) {
     try {
-      writeAcpSessionRecord(canvasId, threadId, {
+      writeAcpSessionRecord(canvasAcpNamespace(canvasId), threadId, {
         sessionId,
         profileId: binding.profileId,
         cwd,
