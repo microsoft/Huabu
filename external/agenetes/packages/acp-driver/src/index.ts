@@ -19,4 +19,11 @@
  * each relocation sub-task lands.
  */
 
-export {};
+export {
+  acpUpdateToStreamEvent,
+  mergeThinkingChunk,
+  getTranslatorCounters,
+  resetTranslatorCounters,
+} from './translator.js';
+export type { TranslatorLogger } from './translator.js';
+export { commandFromRawInput } from './command-from-raw-input.js';
