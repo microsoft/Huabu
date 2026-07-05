@@ -23,10 +23,6 @@ import {
   prepareExternalAgentPrompt,
   serializeRawPrompt,
 } from './preprocessor.js';
-import {
-  mergeProfileSchemaCache,
-  getProfileSchemaCache,
-} from './profile-schema-cache.js';
 import { getProfile } from './profile-store.js';
 import { getAgentletServer } from './server-mount.js';
 import { acpSessionRegistry } from './session-registry.js';
@@ -125,6 +121,48 @@ export interface RunAcpAgentOptions {
     mode: string;
     logger: FastifyBaseLogger;
   };
+}
+
+// ─── L1 profile-schema-cache port (dependency inversion, M3) ──────────────
+//
+// The per-profile schema cache (`profile-schema-cache.ts`) is an L1 UX
+// concern — its DATA originates in L2 (agent `session/update` pushes) but
+// the caching policy + cold-start seeding are L1's. This composition shell
+// (destined L2) therefore does NOT import the cache directly; L1 injects an
+// implementation of this port at bootstrap (see `profile-cache-port.ts`),
+// and this module only emits into / reads from the port. When no port is
+// installed (e.g. a unit test) every call is a silent no-op / cache miss.
+// See docs/proposals/layered-architecture.md §7 (M3).
+export interface AcpProfileCachePort {
+  /**
+   * Mirror a live session entry's schema + last-known state into the
+   * cross-thread, on-disk profile cache. Called after any out-of-turn meta
+   * update that changes a profile-shared field (mode / model / config /
+   * slash-command catalogue). L1 owns the projection + persistence.
+   */
+  mirror(entry: AcpSessionEntry): void;
+  /**
+   * Read the warm-start slash-command list cached for a profile, or `null`
+   * when none is cached. Used to paint the `/` menu on a fresh session
+   * before the agent's authoritative `available_commands_update` arrives.
+   */
+  readCommands(
+    profileId: string,
+  ): {
+    availableCommands: AvailableCommand[];
+    commandsUpdatedAt: number;
+  } | null;
+}
+
+let profileCachePort: AcpProfileCachePort | null = null;
+
+/**
+ * Install (or clear) the L1 profile-schema-cache port. Called once by the
+ * host composition root (`app.ts` via `installAcpProfileCachePort`); pass
+ * `null` in tests to reset. See {@link AcpProfileCachePort}.
+ */
+export function setAcpProfileCachePort(port: AcpProfileCachePort | null): void {
+  profileCachePort = port;
 }
 
 // ─── Session lifecycle helper ─────────────────────────────────────────────
@@ -300,8 +338,9 @@ function seedEntryFromNewSessionResult(
 
   entry.metaUpdatedAt = Date.now();
   // Propagate the schema to the per-profile cache so sibling threads of
-  // the same profile resolve `/cached-meta` without re-spawning.
-  mirrorEntryToProfileCache(entry);
+  // the same profile resolve `/cached-meta` without re-spawning. L1 owns
+  // the cache; we only emit into the injected port.
+  profileCachePort?.mirror(entry);
   logger.info(
     {
       sessionId: entry.sessionId,
@@ -705,13 +744,10 @@ async function ensureAcpSessionInner(
   // optimistic localStorage cache the web client maintains for the
   // same purpose.
   if (created.availableCommands.length === 0 && binding.profileId) {
-    const profileCache = getProfileSchemaCache(binding.profileId);
-    if (
-      profileCache?.availableCommands &&
-      profileCache.availableCommands.length > 0
-    ) {
-      created.availableCommands = profileCache.availableCommands;
-      created.commandsUpdatedAt = profileCache.commandsUpdatedAt ?? 0;
+    const warm = profileCachePort?.readCommands(binding.profileId);
+    if (warm) {
+      created.availableCommands = warm.availableCommands;
+      created.commandsUpdatedAt = warm.commandsUpdatedAt;
       logger.info(
         {
           threadId,
@@ -825,15 +861,15 @@ function handleSessionMetaUpdate(
   switch (update.sessionUpdate) {
     case 'available_commands_update':
       applyAvailableCommandsUpdate(entry, update, logger);
-      mirrorEntryToProfileCache(entry);
+      profileCachePort?.mirror(entry);
       return;
     case 'config_option_update':
       applyConfigOptionUpdate(entry, update, logger);
-      mirrorEntryToProfileCache(entry);
+      profileCachePort?.mirror(entry);
       return;
     case 'current_mode_update':
       applyCurrentModeUpdate(entry, update, logger);
-      mirrorEntryToProfileCache(entry);
+      profileCachePort?.mirror(entry);
       return;
     case 'session_info_update':
       applySessionInfoUpdate(entry, update, logger);
@@ -844,34 +880,6 @@ function handleSessionMetaUpdate(
     default:
       return;
   }
-}
-
-/**
- * Mirror the entry's schema + last-known state into the per-profile
- * cache. Called after any meta update that changes a field shared
- * across all threads of the profile (mode catalogue, model catalogue,
- * config options, slash commands). NOT called for per-session pushes
- * (`session_info_update`, `usage_update`).
- *
- * `availableCommands` is mirrored on an optimistic basis — the agent's
- * SSE `available_commands_update` replaces the cached list wholesale
- * on the next session, so any per-session drift self-corrects.
- *
- * The cache is what `/cached-meta` falls back to when a brand-new
- * thread has no per-thread disk record — see `threads.route.ts`.
- */
-function mirrorEntryToProfileCache(entry: AcpSessionEntry): void {
-  if (!entry.profileId) return;
-  mergeProfileSchemaCache(entry.profileId, {
-    availableModes: entry.availableModes,
-    currentModeId: entry.currentModeId,
-    availableModels: entry.availableModels,
-    currentModelId: entry.currentModelId,
-    configOptions: entry.configOptions,
-    availableCommands: entry.availableCommands,
-    commandsUpdatedAt: entry.commandsUpdatedAt,
-    metaUpdatedAt: entry.metaUpdatedAt,
-  });
 }
 
 function applyAvailableCommandsUpdate(

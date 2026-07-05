@@ -29,6 +29,7 @@ export type { TranslatorLogger } from './translator.js';
 
 export { getDaemonAuth } from './daemon-auth.js';
 export { getDaemonSupervisor, getDaemonStatus } from './daemon-supervisor.js';
+export { installAcpProfileCachePort } from './profile-cache-port.js';
 export {
   ensureAgentForThread,
   releaseThread,

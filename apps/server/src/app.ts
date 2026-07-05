@@ -16,6 +16,7 @@ import {
   acpProfilesRoutes,
   acpThreadsRoutes,
   getDaemonSupervisor,
+  installAcpProfileCachePort,
   mountAgentletServer,
 } from './modules/agent/acp/index.js';
 import agentRoutes from './modules/agent/agent.route.js';
@@ -246,6 +247,10 @@ try {
 }
 mountAgentletServer(app);
 getDaemonSupervisor().attach(app);
+// Inject the L1-owned profile-schema-cache port into the ACP composition
+// shell so out-of-turn meta pushes feed the cache without L2 importing it
+// (M3). See modules/agent/acp/profile-cache-port.ts.
+installAcpProfileCachePort();
 app.register(acpProfilesRoutes, { prefix: '/api/acp' });
 app.register(acpAgentletRoutes, { prefix: '/api/acp' });
 app.register(acpAgentCliRoutes, { prefix: '/api/acp' });

@@ -316,7 +316,7 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
    * tax. Real ensure-session still happens on `/` menu open, first
    * message send, or any set-RPC — all of which write the freshest
    * snapshot back to disk via `schedulePersistEntryMeta` AND mirror
-   * to the per-profile cache via `mirrorEntryToProfileCache`.
+   * to the per-profile cache via the injected `AcpProfileCachePort`.
    *
    * Always responds 200 — absence of cache is a normal state.
    */
