@@ -86,3 +86,13 @@ export {
   threadKey,
   _resetSpawnOrchestratorForTests,
 } from './spawn-orchestrator.js';
+
+export {
+  ensureAcpSession,
+  promoteEntryToPersisted,
+  setAcpProfileCachePort,
+} from './session.js';
+export type {
+  EnsureAcpSessionOptions,
+  AcpProfileCachePort,
+} from './session.js';

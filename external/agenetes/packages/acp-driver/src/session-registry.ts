@@ -32,6 +32,7 @@
 
 import type { AcpAgentClient } from './client.js';
 import type { AcpBindingRecipe } from './session-store.js';
+import type { Namespace } from '@agenetes/protocol';
 import type {
   Cost as AcpCost,
   ModelInfo as AcpModelInfo,
@@ -67,6 +68,13 @@ export interface AcpSessionEntry {
    * (once implemented) will reject any fs/* call in that state.
    */
   canvasId: string;
+  /**
+   * Storage / metadata scope for this session (§7 M5.0) — the `Namespace`
+   * (`{ name, storagePath? }`) the session store persists under. L1 maps
+   * its canvasId onto this; the driver treats it opaquely and resolves all
+   * on-disk paths from it, so no host path helper is reached.
+   */
+  namespace: Namespace;
   /** `cwd` passed to `session/new`. Mostly for diagnostics. */
   cwd: string;
   /** Epoch ms at which this session was first created. */
