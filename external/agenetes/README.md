@@ -304,6 +304,12 @@ The ACP handle **self-resolves its own live session per turn** (calling the in-p
 
 ACP handle **每轮自解析自己的活 session**（调用包内的 `ensureAcpSession`）并在内部持久化——因此 `ctx` 既不携带活 session、也不携带持久化回调：底层 session（I4.3）完全留在实例之下，宿主看不到。
 
+**I9.6 A query surface reads durable records, orthogonal to the runtime surface / 查询表面读取持久记录，与运行期表面正交.**
+
+Alongside the imperative *runtime surface* (I9.3, which owns *live* handles) the instance exposes a distinct **query surface** over the **durable records** Agenetes owns, addressed by `namespace` / `threadId` (I4). It is deliberately orthogonal: it operates on persisted state, **independent of whether a handle is live** — so a control write does not lazily spawn a session (I9.3 `get`), and a persisted-record read does not require one either. The confirmed instance today is the ACP session store, which persists `(namespace, threadId) → record` under `namespace.storagePath` (M5.0); enumerating a namespace's persisted threads is a native query over it. The surface stays host-agnostic like `run`'s `TResult`: it returns Agenetes-owned, driver-agnostic records, never a canvas-shaped projection — any host-shaped view (e.g. the chat transcript) is the host's own projection over what it reads.
+
+在命令式的*运行期表面*（I9.3，拥有*活* handle）之外，实例还暴露一个独立的**查询表面**，面向 Agenetes 所拥有的**持久记录**，按 `namespace` / `threadId`（I4）寻址。它刻意与运行期表面正交：它操作已持久化的状态，**与是否有活 handle 无关**——所以一次控制写不会惰性拉起 session（I9.3 的 `get`），一次持久记录读同样不需要活 session。今天已确认的实例是 ACP session store，它把 `(namespace, threadId) → 记录` 持久化在 `namespace.storagePath` 下（M5.0）；枚举某个 namespace 已持久化的 thread 就是它上面的一次原生查询。该表面像 `run` 的 `TResult` 一样保持宿主无关：它返回 Agenetes 拥有的、driver-agnostic 的记录，绝不返回 canvas 形状的投影——任何宿主形状的视图（例如聊天记录）都是宿主基于所读内容的自有投影。
+
 ### I10. The spec carries its own env; Agenetes never assembles host URLs / spec 自带 env；Agenetes 从不拼装宿主 URL
 
 Everything host-specific a workload needs at spawn — including any agent reachback env the host arranges (e.g. a host callback URL + thread id) — is **assembled in full by the host and carried on the `WorkloadSpec`** (as opaque `spec.env`). Agenetes passes `spec.env` straight through to the spawn call: it does not merge, add, or interpret any entry, and never composes a host URL or reads a host port. What the reachback env points at, and how the agent uses it, is entirely a host concern Agenetes never sees.
