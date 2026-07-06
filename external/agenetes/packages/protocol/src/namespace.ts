@@ -21,16 +21,22 @@ import { z } from 'zod';
  *
  * - `name` — the stable scope id, addressed by L2 and treated opaque (the
  *   K8s `metadata.name` of the namespace). L1 decides what it represents.
- * - `storagePath` — OPTIONAL absolute root where this scope's L2 state
- *   persists. When omitted, L2's store derives a default location from
+ * - `storage` — OPTIONAL description of where this scope's L2 state
+ *   persists. It is plain serializable data (it rides the `WorkloadSpec`,
+ *   so it carries no methods/closures): `storage.root` is the absolute
+ *   directory below which every L2 consumer derives its own sub-path (the
+ *   session store → `<root>/acp-sessions.json`, the thread table → its own
+ *   sub-path, …). When omitted, L2's store derives a default location from
  *   `name` under the runtime's default data root; a caller that does not
  *   care about layout supplies only a `name`.
  *
- * Extensible: future metadata-scope / quota fields land here.
+ * Extensible: `storage` may later grow typed per-purpose fields (or handles
+ * to persistence services), and future metadata-scope / quota fields land
+ * on the namespace itself.
  */
 export const namespaceSchema = z.object({
   name: z.string().min(1),
-  storagePath: z.string().optional(),
+  storage: z.object({ root: z.string() }).optional(),
 });
 
 export type Namespace = z.infer<typeof namespaceSchema>;

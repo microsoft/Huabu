@@ -13,7 +13,7 @@
  * Host-specific concerns are injected by L1: the profile-schema cache
  * port (M3) and the per-turn canvas-coupled render closure. Storage is
  * scoped by the `Namespace` carried on the WorkloadSpec (§7 M5.0), so the
- * session store persists under `namespace.storagePath` without an L1
+ * session store persists under `namespace.storage.root` without an L1
  * path hand-down. See docs/proposals/layered-architecture.md §7 (M5).
  *
  * NOTE: this is the M5 scaffold entry point. Modules are filled in as

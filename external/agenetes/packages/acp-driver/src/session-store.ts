@@ -6,15 +6,15 @@
  * memory across process lifetimes.
  *
  * The store is keyed by an Agenetes {@link Namespace} (L2's storage
- * scope, §7 M5.0): it persists `<namespace.storagePath>/acp-sessions.json`
+ * scope, §7 M5.0): it persists `<namespace.storage.root>/acp-sessions.json`
  * and owns nothing about any host's directory layout. Sediment supplies
- * the canvas-derived namespace (`{ name: canvasId, storagePath:
- * historyDir(canvasId) }`), so the file is identical to the pre-M5.0
+ * the canvas-derived namespace (`{ name: canvasId, storage: { root:
+ * historyDir(canvasId) } }`), so the file is identical to the pre-M5.0
  * `acpSessionsPath(canvasId)`.
  *
  * ### Storage shape
  *
- *   <namespace.storagePath>/acp-sessions.json
+ *   <namespace.storage.root>/acp-sessions.json
  *     {
  *       "schemaVersion": 3,
  *       "records": {
@@ -320,15 +320,15 @@ function sanitizeMeta(raw: unknown): AcpSessionPersistedMeta | undefined {
 
 /**
  * Resolve the on-disk `acp-sessions.json` for a namespace (L2's
- * storage scope, §7 M5.0). When `storagePath` is present the store
+ * storage scope, §7 M5.0). When `storage.root` is present the store
  * persists directly under it; when absent it derives a default location
  * from `name` under a process-local data root (dormant in Sediment, which
- * always supplies an explicit `storagePath`). The store owns nothing about
+ * always supplies an explicit `storage.root`). The store owns nothing about
  * any host's directory layout — it only joins its own file name.
  */
 function resolveAcpSessionsPath(namespace: Namespace): string {
   const root =
-    namespace.storagePath ??
+    namespace.storage?.root ??
     path.join(
       process.cwd(),
       '.agenetes',

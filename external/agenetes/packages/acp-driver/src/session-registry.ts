@@ -60,7 +60,7 @@ export interface AcpSessionEntry {
   profileId: string;
   /**
    * Storage / metadata scope for this session (§7 M5.0) — the `Namespace`
-   * (`{ name, storagePath? }`) the session store persists under, and the
+   * (`{ name, storage? }`) the session store persists under, and the
    * opaque scope key for the fs sandbox / permission checks. A thread is
    * normally pinned to one scope for its lifetime, but if it ever rebinds
    * to a different `namespace.name` we treat it like a binding change and

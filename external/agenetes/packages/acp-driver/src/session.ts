@@ -128,7 +128,7 @@ export interface EnsureAcpSessionOptions {
   recipe?: AcpBindingRecipe | null;
   /**
    * Storage / metadata scope for this session (§7 M5.0). L1 maps its
-   * canvasId → `{ name, storagePath }`; the driver's session store resolves
+   * canvasId → `{ name, storage }`; the driver's session store resolves
    * its on-disk location entirely from this, so the module never derives a
    * path from a host helper.
    */
