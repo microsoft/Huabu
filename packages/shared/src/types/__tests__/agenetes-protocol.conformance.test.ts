@@ -310,7 +310,7 @@ describe('WorkloadSpec + request conformance', () => {
     const spec = {
       kind: 'internal',
       workloadKind: 'Job',
-      namespace: { name: 'canvas_1', storagePath: '/data/history/canvas_1' },
+      namespace: { name: 'canvas_1', storage: { root: '/data/history/canvas_1' } },
       threadId: 'thr_1',
       spec: { agentId: 'ask', tools: ['read', 'canvas_commands'] },
       request: { type: 'text', content: 'summarise this canvas' },
@@ -333,7 +333,7 @@ describe('WorkloadSpec + request conformance', () => {
     const spec = {
       kind: 'external',
       workloadKind: 'Deployment',
-      namespace: { name: 'canvas_2', storagePath: '/data/history/canvas_2' },
+      namespace: { name: 'canvas_2', storage: { root: '/data/history/canvas_2' } },
       threadId: 'thr_2',
       spec: { profileId: 'copilot', alias: 'Copilot', cwd: '/repo' },
     };
@@ -366,13 +366,13 @@ describe('WorkloadSpec + request conformance', () => {
 
 // ── Namespace — the storage/metadata scope above threadId (§7 M5.0) ─────
 describe('Namespace conformance', () => {
-  it('accepts a name-only namespace (storagePath optional)', () => {
+  it('accepts a name-only namespace (storage optional)', () => {
     const parsed = namespaceSchema.safeParse({ name: 'canvas_1' });
     expect(parsed.success).toBe(true);
   });
 
-  it('accepts an explicit storagePath', () => {
-    const ns: Namespace = { name: 'canvas_1', storagePath: '/data/c1' };
+  it('accepts an explicit storage.root', () => {
+    const ns: Namespace = { name: 'canvas_1', storage: { root: '/data/c1' } };
     expect(namespaceSchema.safeParse(ns).success).toBe(true);
   });
 
