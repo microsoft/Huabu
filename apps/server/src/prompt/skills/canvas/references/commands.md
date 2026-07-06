@@ -26,6 +26,8 @@ Everything you need to mutate a canvas. **Load this before issuing your first `c
 
 > **Media node `src`.** For `image` / `video` / `audio` / `pdf` / `office`, set `data.src` to a staged upload path (`upload/<name>`), a bare artifact key a tool handed you (`artifact-…` / `gen-…`), or an `https://…` URL — the server relocates / downloads the bytes into the artifact store and persists a bare key. You do **not** need to convert an upload into a key yourself.
 
+> **Image node sizing (automatic aspect ratio).** For `image` nodes set only the width — via `size.width` in `CREATE_NODES`, a patched `src` in `MERGE_NODE_DATA`, or `size.width` in `SET_NODE_GEOMETRY`. The server always derives `height` from the real image ratio (any `height` you pass is ignored) and returns the final `width`/`height` in `results[].nodes`, so follow-up layout can use exact geometry.
+
 **Container / hierarchy**
 
 - **SET_NODE_PARENT** — move nodes into a frame, or out of a frame (`parentId: null`).
@@ -33,7 +35,7 @@ Everything you need to mutate a canvas. **Load this before issuing your first `c
 
 **Layout**
 
-- **SET_NODE_GEOMETRY** — set position and/or size on existing nodes.
+- **SET_NODE_GEOMETRY** — set position and/or size on existing nodes. For `image` nodes, only `width` is honored (`height` is recomputed from the image ratio).
 - **REORDER_NODES** — change z-order (`top` / `bottom` / `{before|after: id}`).
 - **ALIGN_NODES** — align selected nodes along an axis.
 - **DISTRIBUTE_NODES** — even spacing across ≥3 nodes.
