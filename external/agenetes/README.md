@@ -271,28 +271,34 @@ Alongside the imperative *runtime surface* (I9.3, which owns *live* handles) the
 
 在命令式的*运行期表面*（I9.3，拥有*活* handle）之外，实例还暴露一个独立的**查询表面**，面向 Agenetes 所拥有的**持久记录**，按 `namespace` / `threadId`（I4）寻址。它刻意与运行期表面正交：它操作已持久化的状态，**与是否有活 handle 无关**——所以一次控制写不会惰性拉起 session（I9.3 的 `get`），一次持久记录读同样不需要活 session。今天已确认的实例是 ACP session store，它把 `(namespace, threadId) → 记录` 持久化在 `namespace.storagePath` 下（M5.0）；枚举某个 namespace 已持久化的 thread 就是它上面的一次原生查询。该表面像 `run` 的 `TResult` 一样保持宿主无关：它返回 Agenetes 拥有的、driver-agnostic 的记录，绝不返回 canvas 形状的投影——任何宿主形状的视图（例如聊天记录）都是宿主基于所读内容的自有投影。
 
-**I9.5 The bootstrap surface fixes drivers as static wiring at mount / 引导期表面在 mount 时把 driver 定死为静态接线.**
+**I9.5 The bootstrap surface is a driver-factory dictionary; drivers are fixed as static wiring at mount / 引导期表面是一个 driver factory 字典；driver 在 mount 时定死为静态接线.**
 
-The instance is assembled by one call — `mountAgenetes(app, opts) → Agenetes` — that returns it:
+The instance holds a **driver factory dictionary** `dfs: Record<factoryName, DriverFactory>`, each factory of the form `(cfg?) => AgentDriver`. The standard factory (e.g. `acp`) is **pre-registered** by the instance; the host customises via two mechanisms — **(a)** append factories (`customDriverFactories`, where the business/canvas-coupled built-in enters, structurally identical to a pre-registered one), and **(b)** instantiate drivers as `(driverName, factoryName, factoryArgs)` entries (which factory builds which driver, with what args):
 
-实例由一次调用装配并返回——`mountAgenetes(app, opts) → Agenetes`：
+实例持有一个 **driver factory 字典** `dfs: Record<factoryName, DriverFactory>`，每个 factory 形如 `(cfg?) => AgentDriver`。标准 factory（如 `acp`）由实例**预置**；宿主用两条机制定制——**(a)** 追加 factory（`customDriverFactories`，业务/canvas 耦合的 built-in 从此进入，与预置项同构），**(b)** 以 `(driverName, factoryName, factoryArgs)` 条目实例化 driver（哪个 factory 用什么参数构造哪个 driver）：
 
 ```ts
-const instance: Agenetes = mountAgenetes(app, {
-  connectionToken, dataDir, daemonEntryPath, // transport wiring (M4)
-  logger,                                    // instance-level ambient
-  customDriverFactory: (ambient) => AgentDriver, // canvas-coupled built-in
-});
+const instance: Agenetes = mountAgenetes(app)
+  .addFactory('acp', acpDriverFactory)       // pre-registered by the instance
+  .addFactory('builtin', builtinDriverFactory) // (a) host-appended, canvas-coupled
+  // (b) instantiate: driverName === the I5 contract `kind`
+  .register('external', 'acp', { app, connectionToken, dataDir, daemonEntryPath, logger })
+  .register('internal', 'builtin', { logger })
+  .build();
 ```
 
-- The **standard ACP driver** is **pre-mounted** by the instance (not injected) — it materially lives *inside* the instance.
-  **标准 ACP driver** 由实例**预挂**（非注入）——它实质住在实例*内部*。
-- The **custom driver** (the canvas-coupled built-in) is injected as a **factory** `(ambient) => AgentDriver`.
-  **custom driver**（canvas 耦合的 built-in）以**工厂** `(ambient) => AgentDriver` 注入。
-- **`logger`** is an instance-level ambient: the instance forwards it into *every* driver's construction factory (standard + custom), so each `AgentHandle` closes over it. It is neither `spec` nor `ctx`; the log *call sites* are compiled into the driver — the ambient only decides where those lines go. It is orthogonal to the driver's own persistence (the session store resolves its on-disk scope from `spec.namespace`, not from any host path root).
-  **`logger`** 是实例级 ambient：实例把它转发进*每个* driver 的构造工厂（标准 + custom），于是每个 `AgentHandle` 都闭包住它。它既非 `spec` 也非 `ctx`；日志的*调用点*已编译进 driver——ambient 只决定这些日志行流向哪里。它与 driver 自身的持久化正交（session store 从 `spec.namespace` 解析磁盘作用域，而非任何宿主路径根）。
-- `register` runs only here (pre-mount + inject); `resolve` is internal to `create`; `has` / `kinds` are not surfaced.
-  `register` 只在此运行（预挂 + 注入）；`resolve` 是 `create` 内部所用；`has` / `kinds` 不对外暴露。
+- **`driverName` === the dispatch `kind` (I5).** It is the required, unique key in the *contract* namespace that `create(spec)` resolves on. This realises I5.1's `kind → driver` alias: `factoryName` is the *implementation* identity (`acp` / `sdk`), `driverName` the contract `kind` (`external`) — so a driver can be renamed, split, or merged without touching any spec.
+  **`driverName` === 分发键 `kind`（I5）.** 它是*契约*命名空间里必填、唯一的键，`create(spec)` 据此解析。这落地了 I5.1 的 `kind → driver` 别名：`factoryName` 是*实现*身份（`acp` / `sdk`），`driverName` 是契约 `kind`（`external`）——driver 可重命名/拆分/合并而不动任何 spec。
+- **`factoryArgs` carries that factory's construction dependencies** — both the *kind-private backing resources* (e.g. the ACP factory's `{ app, connectionToken, dataDir, daemonEntryPath }`, the agentlet *downward* transport that `@agenetes/agentlet-host` labels `TRANSPORT · ACP-private`; the built-in driver never touches it — unrelated to I7's *upward* L1↔Agenetes seam) and the *cross-cutting* `logger` (no longer a special top-level opt — just an ordinary factory arg passed through the same channel to whichever factory declares it).
+  **`factoryArgs` 承载该 factory 的构造依赖**——既有 *kind 私有 backing 资源*（如 ACP factory 的 `{ app, connectionToken, dataDir, daemonEntryPath }`，即 agentlet *向下* transport，`@agenetes/agentlet-host` 标注为 `TRANSPORT · ACP-private`；built-in driver 从不碰它——与 I7 那条*向上*的 L1↔Agenetes 接缝无关），也有*横切*的 `logger`（不再是顶层特殊 opt，只是普通 factory arg，经同一条通道传给声明支持它的 factory）。
+- All `factoryArgs` are **bootstrap-time DI** (below the seam): they may carry live objects / the logger, and are *not* bound by I8.4 ("messages, not closures" governs the per-workload / per-turn handle I/O seam, not mount-time wiring).
+  所有 `factoryArgs` 都是 **bootstrap 期 DI**（接缝之下）：允许携带 live 对象 / logger，*不*受 I8.4 约束（"传消息不传闭包"约束的是 per-workload / per-turn 的 handle I/O 接缝，而非 mount 期接线）。
+- **Type safety.** The heterogeneous per-factory `cfg` is *not* `unknown`: an accumulating builder threads a `factoryName → cfg` type map through its generics, so `(b)`'s `factoryArgs` is checked against the named factory with full inference (no hand-written registry interface) — fitting custom drivers arriving from L1's single composition root. Cross-package / third-party factory contribution can later layer an augmentable registry interface (declaration merging) on top.
+  **类型安全.** 各 factory 异构的 `cfg` *不*用 `unknown`：累积式 builder 用泛型串起 `factoryName → cfg` 类型映射，`(b)` 的 `factoryArgs` 被具名 factory 精确约束、全程推理（无需手写注册表接口）——契合 custom driver 来自 L1 单一 composition root。日后若需跨包/第三方贡献 factory，再叠加可增强注册表接口（declaration merging）。
+
+This invariant fixes only the **mechanism**. Implementation choices (whether the ACP transport is mounted inside its factory via `mountAgentletServer(app, …)` or mounted once by the instance and passed in as a server reference; whether the built-in's canvas couplings arrive via `(a)`'s closure or `(b)`'s `factoryArgs`) are settled at implementation time, not here.
+
+本不变量只钉**机制**。实现选择（ACP transport 是在 factory 内 `mountAgentletServer(app, …)` 挂载，还是实例挂一次再把 server 引用传入；built-in 的 canvas 耦合走 (a) 的闭包还是 (b) 的 `factoryArgs`）留待实作时定，不在此固化。
 
 **I9.6 The `spec` / `request` / `ctx` boundary / `spec`、`request`、`ctx` 边界.**
 
