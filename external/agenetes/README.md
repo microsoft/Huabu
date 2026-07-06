@@ -41,8 +41,8 @@ Every turn is appended to a per-thread log so a conversation survives restarts a
 
 ## Core invariants (the design consensus) / 核心不变量（设计共识）
 
-The numbered invariants below (I1–I9, with sub-clauses I*n*.*m*) are the design consensus, meant to be cited by reference id. Each is stated in English then Chinese; code blocks and tables are not duplicated.
-下列带编号的不变量（I1–I9，含子条款 I*n*.*m*）即设计共识，供按编号引用。每条先英文后中文；代码块与表格不做双语重复。
+The numbered invariants below (I1–I10, with sub-clauses I*n*.*m*) are the design consensus, meant to be cited by reference id. Each is stated in English then Chinese; code blocks and tables are not duplicated.
+下列带编号的不变量（I1–I10，含子条款 I*n*.*m*）即设计共识，供按编号引用。每条先英文后中文；代码块与表格不做双语重复。
 
 ### I1. Agenetes is not a scheduler — it is an executor / 不是调度器，而是执行器
 
@@ -181,17 +181,57 @@ The per-turn `request` is *not* owned by the driver: it is a separate, driver-ag
 The host mounts Agenetes *in-process*. The path is always `UI → host server → Agenetes`; Agenetes only ever speaks the full-duplex ARI (calls / callbacks / async-iter). Any half-duplex transport artefact (HTTP + SSE to a browser) is confined to the host's own UI hop and bridged *inside the host server* — it must never leak into, or contaminate the design of, the L1↔Agenetes interface. The reverse permission call is the tell: one duplex method at host↔Agenetes, split into two correlated halves only across the browser wire.
 宿主以*进程内*方式挂载 Agenetes。路径永远是 `UI → 宿主 server → Agenetes`；Agenetes 只说全双工的 ARI（调用 / 回调 / async-iter）。任何半双工的传输产物（到浏览器的 HTTP + SSE）都被限制在宿主自己的 UI 这一跳，并*在宿主 server 内部*桥接——它绝不能泄漏进、也不能污染 L1↔Agenetes 接口的设计。反向的权限调用就是明证：在宿主↔Agenetes 处是一个全双工方法，只有跨越浏览器线路时才被拆成两个相关联的半边。
 
-### I8. The host addresses one mounted instance; the core surface stays minimal / 宿主面对一个被挂载的实例；核心表面保持最小
+### I8. `AgentHandle` — the upward L1↔Agenetes binding / `AgentHandle`——面向上层的 L1↔Agenetes 绑定
 
-**I8.1 One mounted instance, like one cluster / 一个被挂载的实例，就像一个集群.**
+`AgentHandle` is the one object L1 holds per workload — the concrete shape of the in-process ARI (I7). A driver *produces* one (I2.4 `create`), but the handle, not the driver, is the upward contract: L1 drives a running workload only through it. Its I/O is serializable messages, so the same interface admits an in-memory binding (built-in fast path) or a remote binding (over agentlet) with no change upward.
+`AgentHandle` 是 L1 为每个工作负载持有的那个对象——即 I7 所说进程内 ARI 的具体形态。driver *生产*它（I2.4 的 `create`），但面向上层的契约是 handle 而非 driver：L1 只通过它驱动一个运行中的工作负载。它的 I/O 是可序列化消息，因此同一接口既可承载进程内绑定（built-in 快路径），也可承载远程绑定（经 agentlet），对上层无变化。
+
+```ts
+interface AgentHandle {                                    // core — every driver implements this
+  submit(request: AgentRequest, render: Renderer): void;   // data-plane in: plain request + host-composed renderer (I6)
+  events(): AsyncIterable<AgentStreamEvent>;               // data-plane out: driver-agnostic stream
+  control(msg: ControlMsg): Promise<ControlAck>;           // control-plane, capability-gated
+  close(): void;
+  readonly capabilities: AgentCapabilities;                // runtime descriptor
+}
+interface Cancellable     { cancel(): Promise<void>; }     // opt-in facets — a Job carries no
+interface ModeSwitchable  { setMode(id: string): Promise<void>; }   // NotImplemented stubs
+interface ModelSelectable { setModel(id: string): Promise<void>; }
+// Behavioural capabilities add NO method: reverse permission is an injected
+// onPermissionRequest port; slash commands arrive as availableCommandsUpdate on events().
+```
+
+**I8.1 It is an anti-corruption wrapper over the ACP *client role*, not a re-export of the ACP SDK / 它是对 ACP *客户端角色* 的防腐包装，而非 ACP SDK 的再导出.**
+The interface is modelled on the ACP client role (a complete, well-worn duplex vocabulary), but Agenetes owns it and surfaces only the subset it needs. ACP is *one downward driver*, never the upward contract: `AcpAgentHandle` wraps the ACP SDK, `BuiltinAgentHandle` wraps the in-process harness, and both satisfy the same `AgentHandle`. Replacing ACP later never reaches L1.
+该接口以 ACP 客户端角色为原型（一套完整、久经考验的全双工词汇），但由 Agenetes 拥有，只暴露它需要的子集。ACP 只是*一个向下的 driver*，绝非面向上层的契约：`AcpAgentHandle` 包装 ACP SDK，`BuiltinAgentHandle` 包装进程内 harness，二者满足同一个 `AgentHandle`。日后替换 ACP，绝不波及 L1。
+
+**I8.2 Data plane vs control plane are logically distinct / 数据面与控制面在逻辑上不同.**
+Content updates (message / tool / plan / thought) flow on the **data plane** (`submit` in, `events()` out); affordance/meta updates (slash commands, mode, permission) are the **control plane** (`control`), even when both ride one physical stream. Slash follows ACP exactly: discover via a control notification, *invoke* by putting the command text into an ordinary data-plane prompt — there is no `runCommand`.
+内容更新（message / tool / plan / thought）走**数据面**（`submit` 进、`events()` 出）；能力/元信息更新（斜杠命令、模式、权限）是**控制面**（`control`），即便二者共用同一条物理流。斜杠命令完全遵循 ACP：经控制面通知*发现*，通过把命令文本放进普通的数据面 prompt 来*执行*——没有 `runCommand`。
+
+**I8.3 It is an in-process duplex peer — no sidecar / 它是进程内全双工对等体——没有 sidecar.**
+Because the seam lives inside the host process, host→agent and agent→host calls share one logical channel (JSON-RPC-style `id` correlation). A reverse call (permission request) is a **method the host implements** — an injected `onPermissionRequest` port L2 awaits — not a second channel. The browser's SSE-down / POST-up split is the host bridging this duplex onto a half-duplex wire; it is *not* part of the L1↔Agenetes contract.
+因为接缝在宿主进程之内，host→agent 与 agent→host 的调用共用一条逻辑通道（类 JSON-RPC 的 `id` 关联）。反向调用（权限请求）是**宿主实现的一个方法**——一个 L2 去 await 的注入端口 `onPermissionRequest`——而非第二条通道。浏览器的 SSE 下行 / POST 上行拆分，是宿主把这条全双工桥接到半双工线路上；它*不*属于 L1↔Agenetes 契约。
+
+**I8.4 Messages, not closures — "data customizes, code extends" / 传消息，不传闭包——"数据做定制，代码做扩展".**
+Handle I/O is serializable messages, never method calls carrying live objects or closures across the seam (a closure crossing is the welding smell). A control op is a message (`control({ type: 'set_mode', … })`). Injecting *new behaviour* (a tool impl, a new harness) is a registration act (code, below the seam); a serializable spec only *parameterises* pre-registered capabilities.
+handle 的 I/O 是可序列化消息，绝不用携带活对象或闭包的方法调用跨越接缝（闭包跨越就是把两层焊死的坏味道）。控制操作是一条消息（`control({ type: 'set_mode', … })`）。注入*新行为*（一个工具实现、一个新 harness）是注册行为（代码，在接缝之下）；可序列化的 spec 只*参数化*已注册的能力。
+
+**I8.5 Capabilities are composable and negotiated, not all-or-nothing / 能力是可组合、经协商的，而非全有或全无.**
+The handle is a small core plus segregated opt-in facets (`Cancellable`, `ModeSwitchable`, …), aligned to the workload kind: a **Job** is core + `Cancellable`; a **Deployment** is the full set. Capabilities are negotiated in two phases mapped onto the candidacy/binding split (I2.3): a driver *class* advertises candidate capabilities at `register` (static — feeds discovery/UI/admission), a *handle* reports the actually-negotiated set after create/initialize (dynamic). The capability set is open (open/closed): adding one touches no existing driver.
+handle 是一个小内核加上分离的可选 facet（`Cancellable`、`ModeSwitchable`……），与工作负载种类对齐：**Job** = 内核 + `Cancellable`；**Deployment** = 完整集合。能力分两阶段协商，对应候选/绑定的划分（I2.3）：driver *类* 在 `register` 时声明候选能力（静态——喂给发现/UI/准入），*handle* 在 create/initialize 后报告实际协商到的集合（动态）。能力集合是开放的（开闭原则）：新增一项不触动任何现有 driver。
+
+### I9. The host addresses one mounted instance; the core surface stays minimal / 宿主面对一个被挂载的实例；核心表面保持最小
+
+**I9.1 One mounted instance, like one cluster / 一个被挂载的实例，就像一个集群.**
 The host talks to **one mounted Agenetes instance** — the way a user talks to *one* Kubernetes cluster / API server, never to a kubelet or a container runtime directly — not to scattered driver internals. The instance owns the runtime, pre-mounts the standard (ACP) driver, and accepts host-injected **custom** drivers (business-coupled, host-owned) plus transport wiring.
 宿主面对**一个被挂载的 Agenetes 实例**——就像用户面对*一个* Kubernetes 集群 / API server，绝不直接面对某个 kubelet 或容器运行时——而不是面对散落的 driver 内部件。该实例拥有 runtime、预挂载标准（ACP）driver，并接收宿主注入的 **custom** driver（与业务耦合、宿主拥有）以及传输接线。
 
-**I8.2 The core surface stays narrow; host-data / host-UX concerns stay in the host / 核心表面保持狭窄；依赖宿主数据/宿主 UX 的关注点留在宿主.**
+**I9.2 The core surface stays narrow; host-data / host-UX concerns stay in the host / 核心表面保持狭窄；依赖宿主数据/宿主 UX 的关注点留在宿主.**
 The core L2 surface stays deliberately narrow — session lookup / lifecycle (`get` / `close`), the duplex `control(threadId, msg)` channel, and a `notifications()` stream of metadata changes. Concerns that depend on host data or host UX stay **host responsibilities**, not core surface: get-or-create-with-spec (spawn orchestration), profile/schema caching, and cold-start UX (painting a toolbar before the agent's authoritative state arrives — a host cache fed by subscribing to `notifications()`).
 核心 L2 表面刻意保持狭窄——session 查找 / 生命周期（`get` / `close`）、全双工的 `control(threadId, msg)` 通道，以及一条元数据变化的 `notifications()` 流。凡依赖宿主数据或宿主 UX 的关注点，都留作**宿主职责**、不进核心表面：带 spec 的 get-or-create（spawn 编排）、profile/schema 缓存、以及冷启动 UX（在 agent 的权威状态到达前先画好工具栏——一个通过订阅 `notifications()` 喂养的宿主缓存）。
 
-### I9. The spec carries its own env; Agenetes never assembles host URLs / spec 自带 env；Agenetes 从不拼装宿主 URL
+### I10. The spec carries its own env; Agenetes never assembles host URLs / spec 自带 env；Agenetes 从不拼装宿主 URL
 
 Everything host-specific a workload needs at spawn — including any agent reachback env the host arranges (e.g. a host callback URL + thread id) — is **assembled in full by the host and carried on the `WorkloadSpec`** (as opaque `spec.env`). Agenetes passes `spec.env` straight through to the spawn call: it does not merge, add, or interpret any entry, and never composes a host URL or reads a host port. What the reachback env points at, and how the agent uses it, is entirely a host concern Agenetes never sees.
 一个工作负载在 spawn 时所需的一切宿主相关内容——包括宿主安排的任何 agent 回连 env（例如一个宿主回调 URL + thread id）——都由**宿主完整拼装好并搭载在 `WorkloadSpec` 上**（作为不透明的 `spec.env`）。Agenetes 把 `spec.env` 原样传给 spawn 调用：它不合并、不添加、不解释任何条目，也从不拼装宿主 URL 或读取宿主端口。回连 env 指向什么、agent 如何使用它，完全是宿主的关注点，Agenetes 从不接触。
