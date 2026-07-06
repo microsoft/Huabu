@@ -279,6 +279,7 @@ export const WebPreview = ({ id, data }: PreviewComponentProps) => {
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <base target="_blank" />
     <style>
+      html { color-scheme: light; }
       html, body { margin: 0; padding: 0; overflow: hidden; }
       body { padding: 16px; font-family: system-ui, -apple-system, sans-serif; line-height: 1.5; }
       img { max-width: 100%; height: auto; }
@@ -415,6 +416,7 @@ export const WebPreview = ({ id, data }: PreviewComponentProps) => {
                 referrerPolicy="no-referrer"
                 title="Live page"
                 className="bg-surface block h-full w-full border-0"
+                style={pageSnapshot ? { colorScheme: 'light' } : undefined}
                 onLoad={() => setIframeReady(true)}
               />
               {!iframeReady ? (
@@ -440,7 +442,10 @@ export const WebPreview = ({ id, data }: PreviewComponentProps) => {
           <div className="bg-surface h-full overflow-x-hidden overflow-y-auto p-1">
             <iframe
               className="nodrag w-full border-0"
-              style={{ height: readerHeight ? `${readerHeight}px` : '100%' }}
+              style={{
+                colorScheme: 'light',
+                height: readerHeight ? `${readerHeight}px` : '100%',
+              }}
               title="Reader View"
               sandbox="allow-popups allow-scripts"
               srcDoc={readerSrcDoc}

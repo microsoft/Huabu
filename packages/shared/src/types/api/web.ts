@@ -80,10 +80,11 @@ export interface WebPageResponse {
   kind: 'url' | 'html';
   embeddable?: boolean;
   /**
-   * `true` when `src` points at a captured `.mhtml` one-shot snapshot
-   * rather than a genuinely interactive artifact. A snapshot is a static
-   * archive of a page's already-rendered DOM, so the client must embed it
-   * with scripts DISABLED: re-running the original site's client bundle
+   * `true` when `src` points at a `.mhtml` archive (captured one-shot
+   * snapshot or direct artifact key) rather than a genuinely interactive
+   * artifact. A snapshot is a static archive of a page's already-rendered
+   * DOM, so the client must embed it with scripts DISABLED: re-running the
+   * original site's client bundle
    * (common on CSR SPAs) boots its router against the artifact URL, fails
    * to match a route, and wipes the baked-in DOM — leaving a blank frame
    * the moment the user scrolls or interacts. Scripts also can't reach
