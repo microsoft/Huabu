@@ -12,7 +12,7 @@ import { isElectron } from '../../../hooks/useElectron.ts';
 import { useNodeScale } from '../../../hooks/useNodeScale.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import { FloatingToolbar } from '../../Common/FloatingToolbar.tsx';
-import { LoadingState } from '../../Common/LoadingState.tsx';
+import { Loading } from '../../Common/Loading';
 import { getAccentTokens } from '../accentTokens.ts';
 import { NodeWrapper } from '../NodeWrapper.tsx';
 import { useDeferredHydration } from '../shared/nodeHydrationScheduler.ts';
@@ -355,7 +355,7 @@ export const WebNode = memo(
                   ) : null}
 
                   {previewLoading && !preview ? (
-                    <LoadingState overlay variant="skeleton" />
+                    <Loading layout="overlay" variant="skeleton" />
                   ) : null}
                 </div>
 
@@ -398,7 +398,11 @@ export const WebNode = memo(
 
           {/* Loading overlay while preprocessing is in-flight. */}
           {ingestion?.status === 'pending' && !preview ? (
-            <LoadingState overlay variant="skeleton" message="Processing..." />
+            <Loading
+              layout="overlay"
+              variant="skeleton"
+              message="Processing..."
+            />
           ) : null}
 
           {/* Subtle "no preview" hint when extraction failed but the node still mounts. */}

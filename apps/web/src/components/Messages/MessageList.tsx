@@ -6,7 +6,7 @@ import { IntentSelectMessage } from './IntentSelectMessage';
 import { StatusMessage } from './StatusMessage';
 import { UserMessage } from './UserMessage';
 import { Button } from '../Common/Button';
-import { SkeletonLines } from '../Common/SkeletonLines';
+import { Loading } from '../Common/Loading';
 import { ThinkingIndicator } from '../Common/ThinkingIndicator';
 
 import type { ChatMessage } from '../../store/chatTypes';
@@ -181,7 +181,7 @@ export const MessageList = ({
 
         {isHistoryLoading && messages.length === 0 && (
           <div className="px-3 py-2">
-            <SkeletonLines />
+            <Loading variant="skeleton" layout="bare" />
           </div>
         )}
 

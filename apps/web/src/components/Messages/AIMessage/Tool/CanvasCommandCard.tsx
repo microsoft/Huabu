@@ -13,8 +13,8 @@ import {
   reconstructChangesFromCommands,
   type ToolPart,
 } from './helpers';
+import { Loading } from '../../../Common/Loading';
 import { NodeRef } from '../../../Common/NodeRef';
-import { Spinner } from '../../../Common/Spinner';
 
 import type { CanvasCommandsToolPart } from '@sediment/shared';
 
@@ -38,7 +38,7 @@ export function CanvasCommandCard({ part }: ToolPart<CanvasCommandsToolPart>) {
   const hasChanges = displayChanges.length > 0;
 
   const statusIcon = isExecuting ? (
-    <Spinner size="xs" className="text-info" />
+    <Loading layout="inline" size="xs" className="text-info" />
   ) : (
     <Check size={12} className="text-fg-muted" />
   );

@@ -2,7 +2,7 @@ import { resolveAccent } from '@sediment/shared';
 
 import { getAccentTokens } from './accentTokens';
 import { getNodeIcon } from '../../config/nodeIcons.ts';
-import { SkeletonLines } from '../Common/SkeletonLines';
+import { Loading } from '../Common/Loading';
 
 import type { CSSProperties, ReactNode } from 'react';
 
@@ -63,7 +63,11 @@ export function PreviewCard({
     <div className="bg-surface relative flex h-full w-full flex-col overflow-hidden">
       {/* Full-card skeleton when loading */}
       {loading && !image ? (
-        <SkeletonLines className="h-full w-full justify-center" />
+        <Loading
+          variant="skeleton"
+          layout="bare"
+          className="h-full w-full justify-center"
+        />
       ) : (
         <>
           {/* Cover image */}

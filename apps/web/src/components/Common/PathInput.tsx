@@ -7,7 +7,7 @@ import { useFolderPickerSupported } from '@/store/workspaceStore';
 import { Button } from './Button';
 import { cn } from './cn';
 import { Input } from './Input';
-import { Spinner } from './Spinner';
+import { Loading } from './Loading';
 import { toast } from './Toast';
 
 import type { KeyboardEventHandler } from 'react';
@@ -127,7 +127,7 @@ export function PathInput({
           disabled={disabled || picking}
         >
           {picking ? (
-            <Spinner size="sm" className="text-fg-subtle" />
+            <Loading layout="inline" size="sm" className="text-fg-subtle" />
           ) : (
             <Folder size={iconSize} className="text-fg-subtle" />
           )}

@@ -18,7 +18,7 @@ import { ImagePlus, X as XIcon } from 'lucide-react';
 import { partIsExecuting, truncate } from './helpers';
 import { resolveArtifactUrl } from '../../../../api/artifact';
 import useCanvasStore from '../../../../store/canvasStore';
-import { Spinner } from '../../../Common/Spinner';
+import { Loading } from '../../../Common/Loading';
 import { AssistantDisclosure } from '../../AssistantDisclosure';
 
 import type { ImageGenerationToolPart } from '@sediment/shared';
@@ -88,7 +88,7 @@ export function ImageGenerationCard({ part }: ImageGenerationCardProps) {
 
   // ── Icon (leading) ─────────────────────────────────────────────────
   const icon = executing ? (
-    <Spinner size="xs" className="text-info" />
+    <Loading layout="inline" size="xs" className="text-info" />
   ) : failed ? (
     <XIcon size={12} className="text-danger" />
   ) : (
@@ -114,7 +114,7 @@ export function ImageGenerationCard({ part }: ImageGenerationCardProps) {
       {/* Preview */}
       {executing && !previewUrl ? (
         <div className="border-edge-default bg-bg-default flex h-32 w-48 items-center justify-center rounded-md border">
-          <Spinner size="sm" className="text-fg-muted" />
+          <Loading layout="inline" size="sm" className="text-fg-muted" />
         </div>
       ) : previewUrl ? (
         <a

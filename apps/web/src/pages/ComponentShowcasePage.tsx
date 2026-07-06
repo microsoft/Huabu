@@ -20,11 +20,10 @@ import {
 } from '../components/Common/DropdownMenu';
 import { EmptyState } from '../components/Common/EmptyState';
 import { Input } from '../components/Common/Input';
-import { LoadingState } from '../components/Common/LoadingState';
+import { Loading } from '../components/Common/Loading';
 import { Modal } from '../components/Common/Modal';
 import { Popover } from '../components/Common/Popover';
 import { Select } from '../components/Common/Select';
-import { Spinner } from '../components/Common/Spinner';
 import { SplitSelect } from '../components/Common/SplitSelect';
 import { TabGroup } from '../components/Common/TabGroup';
 import { toast } from '../components/Common/Toast';
@@ -715,63 +714,71 @@ export default function ComponentShowcasePage() {
             </SubSection>
           </Section>
 
-          {/* ────────────────────── Spinner ─────────────────────── */}
+          {/* ────────────────────── Loading ─────────────────────── */}
           <Section
-            title="Spinner"
-            description="Brand Lottie loading animation (four colored dots orbiting the central logo). Three sizes; colors are baked in, so text-color utilities have no effect."
+            title="Loading"
+            description="Single loading entry point. `variant` chooses spinner / skeleton / brand animation; `layout` chooses inline, block, overlay, or bare indicator placement."
           >
             <div className="space-y-4">
-              <SubSection label="Sizes">
+              <SubSection label="Spinner sizes">
                 <div className="flex items-center gap-6">
                   <div className="flex flex-col items-center gap-2">
-                    <Spinner size="xs" />
+                    <Loading layout="inline" variant="spinner" size="xs" />
                     <span className="text-fg-muted text-xs">xs (12px)</span>
                   </div>
                   <div className="flex flex-col items-center gap-2">
-                    <Spinner size="sm" />
+                    <Loading layout="inline" variant="spinner" size="sm" />
                     <span className="text-fg-muted text-xs">sm (16px)</span>
                   </div>
                   <div className="flex flex-col items-center gap-2">
-                    <Spinner size="md" />
+                    <Loading layout="inline" variant="spinner" size="md" />
                     <span className="text-fg-muted text-xs">md (18px)</span>
                   </div>
                 </div>
               </SubSection>
-              <SubSection label="Inline in buttons">
-                <Button variant="solid" disabled>
-                  <Spinner size="sm" />
-                  Saving…
-                </Button>
-                <Button variant="outline" disabled>
-                  <Spinner size="sm" />
-                  Loading…
-                </Button>
-              </SubSection>
-            </div>
-          </Section>
-
-          {/* ────────────────────── LoadingState ────────────────── */}
-          <Section
-            title="LoadingState"
-            description="Centered spinner + optional message. Supports overlay and fullScreen modes."
-          >
-            <div className="space-y-4">
-              <SubSection label="With message">
-                <div className="bg-bg-default relative h-32 w-full rounded-lg">
-                  <LoadingState message="Loading canvases…" />
+              <SubSection label="Inline: spinner and brand">
+                <div className="flex flex-wrap items-center gap-4">
+                  <Button variant="solid" disabled>
+                    <Loading layout="inline" variant="spinner" size="sm" />
+                    Saving…
+                  </Button>
+                  <Button variant="outline" disabled>
+                    <Loading layout="inline" variant="brand" size="sm" />
+                    Booting…
+                  </Button>
                 </div>
               </SubSection>
-              <SubSection label="Spinner only (no message)">
+              <SubSection label="Block: centered status message">
                 <div className="bg-bg-default relative h-32 w-full rounded-lg">
-                  <LoadingState />
+                  <Loading
+                    variant="spinner"
+                    layout="block"
+                    size="md"
+                    message="Loading canvases…"
+                    indicatorClassName="text-fg-subtle"
+                  />
                 </div>
               </SubSection>
-              <SubSection label="Overlay (absolute-positioned)">
+              <SubSection label="Overlay: content materialising">
                 <div className="relative h-32 w-full overflow-hidden rounded-lg">
                   <div className="text-fg-muted flex h-full items-center justify-center text-sm">
-                    Content behind overlay
+                    Preview content behind overlay
                   </div>
-                  <LoadingState overlay />
+                  <Loading
+                    variant="skeleton"
+                    layout="overlay"
+                    message="Processing…"
+                  />
+                </div>
+              </SubSection>
+              <SubSection label="Brand: full-area transition">
+                <div className="bg-bg-default relative h-40 w-full overflow-hidden rounded-lg">
+                  <Loading
+                    variant="brand"
+                    layout="block"
+                    size="md"
+                    message="Loading workspace…"
+                  />
                 </div>
               </SubSection>
             </div>

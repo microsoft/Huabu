@@ -5,7 +5,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { CenterArea } from '@/pages/CanvasPage/CenterArea.tsx';
 import { MainLayout } from '@/pages/CanvasPage/MainLayout.tsx';
 
-import { LoadingState } from '../../components/Common/LoadingState.tsx';
+import { Loading } from '../../components/Common/Loading';
 import { CanvasLayerPanel } from '../../components/Panels/CanvasLayerPanel';
 import { ChatPanel } from '../../components/Panels/ChatPanel';
 import { CanvasHeader } from '../../components/Panels/Header/CanvasHeader.tsx';
@@ -93,7 +93,14 @@ export default function CanvasPage() {
   // also avoids a half-rendered `MainLayout` of the previous canvas
   // flashing on click-through from the canvas list.
   if (isLoading || (canvasId && storeCanvasId !== canvasId)) {
-    return <LoadingState message="Loading canvas…" fullScreen />;
+    return (
+      <Loading
+        variant="brand"
+        layout="block"
+        size="md"
+        message="Loading canvas…"
+      />
+    );
   }
 
   if (canvasNotFound) {
