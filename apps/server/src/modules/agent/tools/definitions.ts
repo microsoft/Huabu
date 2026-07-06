@@ -325,6 +325,9 @@ export const canvasCommandsTool: ToolDefinition = {
 
 Supported command types: CREATE_NODES, CREATE_QUESTION, DELETE_NODES, MERGE_NODE_DATA, SET_NODE_PARENT, DISSOLVE_FRAME, SET_NODE_GEOMETRY, REORDER_NODES, CONNECT_NODES, DISCONNECT_EDGES, SET_EDGE_STYLE, ALIGN_NODES, DISTRIBUTE_NODES, SET_FRAME_LAYOUT. Field-level requirements (which fields each command takes) are described by this tool's parameter schema.
 
+**Image Nodes - Automatic Aspect Ratio Preservation:**
+For image nodes, set only \`width\` — via \`size.width\` in \`CREATE_NODES\`, an updated \`src\` in \`MERGE_NODE_DATA\`, or \`size.width\` in \`SET_NODE_GEOMETRY\`; the server always derives \`height\` from the image's actual ratio (any \`height\` you pass is ignored) and returns the final \`width\`/\`height\` in the tool result \`results[].nodes\`.
+
 ID conventions:
 - Node IDs: \`node-<uuid>\` (use crypto.randomUUID()).
 - Edge IDs: \`edge-<uuid>\`.
