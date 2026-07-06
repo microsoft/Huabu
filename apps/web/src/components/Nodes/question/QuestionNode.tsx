@@ -1,6 +1,5 @@
-import { useStore } from '@xyflow/react';
 import { clsx } from 'clsx';
-import { AlertTriangle, MessageSquare } from 'lucide-react';
+import { AlertTriangle, MapPin, MessageSquare } from 'lucide-react';
 import { memo, useCallback, useMemo, useRef } from 'react';
 
 import { createId } from '@sediment/shared';
@@ -247,7 +246,6 @@ export const QuestionNode = memo(
         )}
         {...surface.nodeWrapperProps}
       >
-        {showChatAnchor && !isRightPanelCollapsed && <ChatAnchorCorners />}
         <TextNodeBody
           ref={textareaRef}
           {...surface.bodyProps}
@@ -288,6 +286,7 @@ export const QuestionNode = memo(
             />
           )}
         </TextNodeBody>
+        {showChatAnchor && !isRightPanelCollapsed && <ChatAnchorOverlay />}
       </NodeWrapper>
     );
   },
@@ -313,81 +312,43 @@ function ConflictBadge({ count }: { count: number }) {
   );
 }
 
-function ChatAnchorCorners() {
-  const zoom = useStore((s) => s.transform[2]);
-  const { containerStyle, cornerStyle, corners } = useMemo(() => {
-    // Keep the marker mostly screen-space stable, but let it shrink at far
-    // zooms so it does not overpower tiny nodes in overview mode.
-    const inverseZoom = zoom > 0 ? Math.min(1 / zoom, 5) : 1;
-    const px = (value: number) => value * inverseZoom;
-
-    const cornerSize = px(14);
-    const cornerThickness = px(2);
-    const outset = px(12);
-    const radius = px(14);
-    const glowSoft = px(3);
-    const glowWide = px(7);
-    const gradientHotspot = px(8);
-    const gradientMidpoint = px(16);
-    const gradientEdge = px(34);
-    const shadowBlur = px(16);
-    const cornerStyle = {
-      position: 'absolute',
-      width: cornerSize,
-      height: cornerSize,
-      borderColor: 'color-mix(in srgb, var(--question-border) 78%, white 8%)',
-      filter: `drop-shadow(0 0 ${glowSoft}px color-mix(in srgb, var(--question-border) 95%, transparent)) drop-shadow(0 0 ${glowWide}px color-mix(in srgb, var(--question-border) 58%, transparent)) drop-shadow(0 0 ${px(14)}px color-mix(in srgb, var(--question-bg) 45%, transparent))`,
-    } as const;
-    const cornerGlow = `color-mix(in srgb, var(--question-border) 22%, transparent) 0 ${gradientHotspot}px, color-mix(in srgb, var(--question-border) 12%, transparent) ${gradientMidpoint}px, transparent ${gradientEdge}px`;
-    const corners = [
-      {
-        top: 0,
-        left: 0,
-        borderTopWidth: cornerThickness,
-        borderLeftWidth: cornerThickness,
-        borderTopLeftRadius: radius,
-      },
-      {
-        top: 0,
-        right: 0,
-        borderTopWidth: cornerThickness,
-        borderRightWidth: cornerThickness,
-        borderTopRightRadius: radius,
-      },
-      {
-        right: 0,
-        bottom: 0,
-        borderRightWidth: cornerThickness,
-        borderBottomWidth: cornerThickness,
-        borderBottomRightRadius: radius,
-      },
-      {
-        bottom: 0,
-        left: 0,
-        borderBottomWidth: cornerThickness,
-        borderLeftWidth: cornerThickness,
-        borderBottomLeftRadius: radius,
-      },
-    ] as const;
-    const containerStyle = {
-      inset: -outset,
-      borderRadius: radius,
-      background: `radial-gradient(circle at 0 0, ${cornerGlow}), radial-gradient(circle at 100% 0, ${cornerGlow}), radial-gradient(circle at 100% 100%, ${cornerGlow}), radial-gradient(circle at 0 100%, ${cornerGlow}), color-mix(in srgb, var(--question-border) 6%, transparent)`,
-      boxShadow: `0 0 ${shadowBlur}px color-mix(in srgb, var(--question-border) 18%, transparent)`,
-    } as const;
-
-    return { containerStyle, cornerStyle, corners };
-  }, [zoom]);
-
+function ChatAnchorOverlay() {
+  // A light "anchored" mask laid over the question node's content layer.
+  // Deliberately a content-layer overlay (not a floating corner badge and
+  // not a wraparound glow): it sits above the card body, so it never fights
+  // the sticky depth board's stacking and never competes with the run-status
+  // badge that floats above the node. A warm, low-alpha wash (not a grey
+  // scrim, which would read as "disabled") keeps the text readable while an
+  // anchor watermark makes the "this node anchors the open chat" state clear.
   return (
     <div
       aria-hidden="true"
-      className="pointer-events-none absolute z-0"
-      style={containerStyle}
+      className="pointer-events-none absolute inset-0 overflow-hidden rounded-lg"
+      style={{
+        // Size container so the watermark can scale with the node via
+        // `cqh` (height) / `cqi` (width) units below.
+        containerType: 'size',
+        background:
+          'color-mix(in srgb, var(--question-border) 9%, transparent)',
+        boxShadow:
+          'inset 0 0 0 1.5px color-mix(in srgb, var(--question-border) 55%, transparent), inset 0 0 12px color-mix(in srgb, var(--question-border) 20%, transparent)',
+      }}
     >
-      {corners.map((corner, index) => (
-        <div key={index} style={{ ...cornerStyle, ...corner }} />
-      ))}
+      <MapPin
+        strokeWidth={1.5}
+        className="absolute"
+        style={{
+          // Adaptive size: ~60% of the node's shorter side (min of height
+          // `cqh` / width `cqi`), clamped so it never gets tiny or
+          // overwhelms the card. Tune the two percentages to taste.
+          height: 'clamp(20px, min(60cqh, 34cqi), 88px)',
+          width: 'auto',
+          right: -2,
+          bottom: -2,
+          color: 'var(--question-border)',
+          opacity: 0.32,
+        }}
+      />
     </div>
   );
 }
