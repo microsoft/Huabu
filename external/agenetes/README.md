@@ -320,9 +320,11 @@ ACP handle **每轮自解析自己的活 session**（调用包内的 `ensureAcpS
 ### I10. Agenetes handles the spec by contract only — no upper-layer semantics / Agenetes 只按约定处理 spec——不做上层语义操作
 
 Agenetes acts on each `WorkloadSpec` field solely as the contract mechanically prescribes — dispatch on `kind` (I5), identity and lifecycle by `threadId` (I4), the store scope resolved from `namespace` (M5.0) — and treats everything else as opaque data passed through verbatim: it never adds host or business semantics, and never derives anything from a host helper.
+
 Agenetes 对 `WorkloadSpec` 的每个字段只按契约机械地处理——按 `kind` 分发（I5）、按 `threadId` 定身份与生命周期（I4）、存储作用域从 `namespace` 解析（M5.0）——其余一律当作不透明数据原样透传：它绝不注入宿主或业务语义，也绝不从宿主 helper 推导任何东西。
 
 The sharpest case is `env`: everything host-specific a workload needs at spawn — including any agent reachback env the host arranges (e.g. a host callback URL + thread id) — is assembled in full by the host and carried as opaque `spec.env`. Agenetes passes it straight through to the spawn call: it does not merge, add, or interpret any entry, and never composes a host URL or reads a host port. What the reachback env points at, and how the agent uses it, is entirely a host concern Agenetes never sees. Likewise the binding `recipe` is persisted and forwarded verbatim (an opaque spawn blob), and the on-disk store location is derived only from `spec.namespace`, never from a host path helper.
+
 最锋利的例子是 `env`：一个工作负载在 spawn 时所需的一切宿主相关内容——包括宿主安排的任何 agent 回连 env（例如宿主回调 URL + thread id）——都由宿主完整拼装好，作为不透明的 `spec.env` 搭载。Agenetes 把它原样传给 spawn 调用：不合并、不添加、不解释任何条目，也从不拼装宿主 URL 或读取宿主端口。回连 env 指向什么、agent 如何使用它，完全是宿主的关注点，Agenetes 从不接触。同理，binding `recipe` 被原样持久化与转发（一个不透明的 spawn blob），磁盘存储位置也仅由 `spec.namespace` 推出，绝不借助宿主路径 helper。
 
 ## Packages
