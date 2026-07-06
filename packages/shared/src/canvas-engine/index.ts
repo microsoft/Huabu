@@ -95,6 +95,7 @@ export {
 export { stripMarkdown } from './utils/markdown.js';
 export {
   getNodeDefaultSize,
+  isAlwaysAutoHeightNodeType,
   getNodeSize,
   getLayoutNodeSize,
 } from './utils/nodeSizes.js';

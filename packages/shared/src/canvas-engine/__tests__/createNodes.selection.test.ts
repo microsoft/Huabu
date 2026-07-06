@@ -26,6 +26,59 @@ function createNodes(
 }
 
 describe('CREATE_NODES selection', () => {
+  it('uses nominal note and question heights for placement without pinning creation height', () => {
+    const nodes = createNodes({
+      type: 'CREATE_NODES',
+      nodes: [
+        {
+          id: 'created-note' as never,
+          nodeType: 'note',
+          position: { x: 10, y: 10 },
+        },
+        {
+          id: 'created-question' as never,
+          nodeType: 'question',
+          position: { x: 20, y: 20 },
+        },
+      ],
+    });
+
+    expect(nodes.find((n) => n.id === 'created-note')?.style).toEqual({
+      width: 400,
+    });
+    expect(nodes.find((n) => n.id === 'created-question')?.style).toEqual({
+      width: 200,
+    });
+  });
+
+  it('preserves explicit note height but keeps explicit question height content-driven', () => {
+    const nodes = createNodes({
+      type: 'CREATE_NODES',
+      nodes: [
+        {
+          id: 'fixed-note' as never,
+          nodeType: 'note',
+          position: { x: 10, y: 10 },
+          size: { width: 300, height: 180 },
+        },
+        {
+          id: 'scaled-question' as never,
+          nodeType: 'question',
+          position: { x: 20, y: 20 },
+          size: { width: 260, height: 140 },
+        },
+      ],
+    });
+
+    expect(nodes.find((n) => n.id === 'fixed-note')?.style).toEqual({
+      width: 300,
+      height: 180,
+    });
+    expect(nodes.find((n) => n.id === 'scaled-question')?.style).toEqual({
+      width: 260,
+    });
+  });
+
   it('selects user-created non-question nodes and clears the old selection', () => {
     const nodes = createNodes({
       type: 'CREATE_NODES',

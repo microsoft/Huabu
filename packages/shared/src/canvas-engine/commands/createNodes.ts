@@ -2,7 +2,10 @@ import { noop, type CommandDefinition } from './types.js';
 import { createId, type CanvasCommand } from '../../index.js';
 import { normalizeTreeOrder, type NestableNode } from '../frame/index.js';
 import { deduplicateLabel, generateNextLabel } from '../utils/labels.js';
-import { getNodeDefaultSize } from '../utils/nodeSizes.js';
+import {
+  getNodeCreationStyle,
+  getNodeDefaultSize,
+} from '../utils/nodeSizes.js';
 import { selectOnly } from '../utils/selection.js';
 
 import type { Node } from '@xyflow/react';
@@ -81,7 +84,11 @@ const createNodes: CommandDefinition<Cmd> = {
       // 2. Build the final ReactFlow node from the resolved command
       //    input. Position defaults to (0,0) and is adjusted in step 5.
       // ---------------------------------------------------------------
-      const size = input.size ?? getNodeDefaultSize(nodeType);
+      const explicitSize = input.size;
+      const size = explicitSize ?? getNodeDefaultSize(nodeType);
+      const geometryStyle = getNodeCreationStyle(nodeType, size, {
+        heightIsExplicit: typeof explicitSize?.height === 'number',
+      });
 
       // Apply the per-type default accent, but only if the caller did
       // not explicitly set one (preserves clipboard paste / undo data).
@@ -106,14 +113,7 @@ const createNodes: CommandDefinition<Cmd> = {
           label,
           type: nodeType,
         },
-        ...(size
-          ? {
-              style:
-                typeof size.height === 'number'
-                  ? { width: size.width, height: size.height }
-                  : { width: size.width },
-            }
-          : {}),
+        style: geometryStyle,
       };
 
       // ---------------------------------------------------------------

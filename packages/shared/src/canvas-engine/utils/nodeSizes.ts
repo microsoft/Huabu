@@ -40,6 +40,14 @@ const DEFAULT_SIZES: Record<string, NodeSize> = {
   question: { width: 200, height: 80 },
 };
 
+const DEFAULT_AUTO_HEIGHT_NODE_TYPES = new Set(['text', 'note', 'question']);
+const ALWAYS_AUTO_HEIGHT_NODE_TYPES = new Set(['text', 'question']);
+
+/** True when top-level `style.height` should never be used as pinned geometry. */
+export function isAlwaysAutoHeightNodeType(nodeType: string): boolean {
+  return ALWAYS_AUTO_HEIGHT_NODE_TYPES.has(nodeType);
+}
+
 /**
  * Return the canonical default size hints for a node type.
  * These are used as layout fallbacks when creating nodes or calculating
@@ -52,6 +60,34 @@ const DEFAULT_SIZES: Record<string, NodeSize> = {
  */
 export function getNodeDefaultSize(nodeType: string): NodeSize {
   return DEFAULT_SIZES[nodeType] || { width: 300, height: 200 };
+}
+
+/**
+ * Return the top-level React Flow geometry style to write when creating a node.
+ *
+ * `getNodeDefaultSize` may include nominal heights for content-driven nodes so
+ * placement algorithms can centre and avoid-overlap before the node is mounted.
+ * Those nominal heights must not become fixed `style.height` on creation,
+ * because text/note/question nodes grow from their rendered content. An explicit
+ * caller-provided height is still preserved for note fixed-height restores and
+ * inherently fixed-size node types. Text/question resize gestures store their
+ * intended scale as `data.style.fontSize`, so their top-level height remains
+ * content-driven even when a caller also has an explicit geometry snapshot.
+ */
+export function getNodeCreationStyle(
+  nodeType: string,
+  size: NodeSize,
+  opts: { heightIsExplicit?: boolean } = {},
+): NodeSize {
+  const shouldWriteHeight =
+    typeof size.height === 'number' &&
+    (opts.heightIsExplicit
+      ? !isAlwaysAutoHeightNodeType(nodeType)
+      : !DEFAULT_AUTO_HEIGHT_NODE_TYPES.has(nodeType));
+
+  return shouldWriteHeight
+    ? { width: size.width, height: size.height }
+    : { width: size.width };
 }
 
 // ---------------------------------------------------------------------------

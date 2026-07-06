@@ -8,6 +8,7 @@ import {
 import {
   getSelectionBounds,
   getNodeSize,
+  isAlwaysAutoHeightNodeType,
 } from '@sediment/shared/canvas-engine';
 
 import { CanvasFloatingPopover } from '@/components/Common/CanvasFloatingPopover';
@@ -26,6 +27,11 @@ import type { CanvasNodeId } from '@sediment/shared';
 /** Sentinel token representing "no accent". */
 const ACCENT_NONE = ACCENT_NONE_TOKEN;
 
+interface GeometryToolbarItem {
+  nodeId: CanvasNodeId;
+  size: { width: number; height: number | undefined };
+}
+
 /**
  * A floating toolbar that appears horizontally centred above the
  * multi-selection bounding box when two or more nodes are selected.
@@ -36,6 +42,7 @@ export const MultiSelectToolbar = () => {
   const spreadSelectedNodes = useCanvasStore((s) => s.spreadSelectedNodes);
   const executeCommands = useCanvasStore((s) => s.executeCommands);
   const setNodeGeometry = useCanvasStore((s) => s.setNodeGeometry);
+  const patchNodeSilent = useCanvasStore((s) => s.patchNodeSilent);
   const setNoteHeightMode = useCanvasStore((s) => s.setNoteHeightMode);
   const beginGesture = useCanvasStore((s) => s.beginGesture);
   const deleteNodes = useCanvasStore((s) => s.deleteNodes);
@@ -71,6 +78,28 @@ export const MultiSelectToolbar = () => {
     );
     return allSame ? (first ?? ACCENT_NONE) : ACCENT_NONE;
   }, [selectedNodes]);
+
+  const textFlowSelection = useMemo(() => {
+    if (selectedNodes.length === 0) return null;
+    if (!selectedNodes.every((n) => isAlwaysAutoHeightNodeType(n.type ?? ''))) {
+      return null;
+    }
+    const first = selectedNodes[0].data?.style?.fontSize ?? 16;
+    const allSame = selectedNodes.every(
+      (n) => Math.round(n.data?.style?.fontSize ?? 16) === Math.round(first),
+    );
+    return { fontSize: allSame ? first : null };
+  }, [selectedNodes]);
+
+  const hasTextFlowSelection = useMemo(
+    () => selectedNodes.some((n) => isAlwaysAutoHeightNodeType(n.type ?? '')),
+    [selectedNodes],
+  );
+  const hasBoxSelection = useMemo(
+    () => selectedNodes.some((n) => !isAlwaysAutoHeightNodeType(n.type ?? '')),
+    [selectedNodes],
+  );
+  const hasMixedTextAndBoxSelection = hasTextFlowSelection && hasBoxSelection;
 
   // Always include the "Transparent" swatch so users can revert a node
   // back to the default (no-accent / neutral surface) state. Hiding it
@@ -167,7 +196,8 @@ export const MultiSelectToolbar = () => {
       {/* Size editor: set width / height of every selected node. */}
       <FloatingToolbar.SizePicker
         width={commonSize.width}
-        height={commonSize.height}
+        height={textFlowSelection ? null : commonSize.height}
+        showHeight={!textFlowSelection && !hasMixedTextAndBoxSelection}
         onApply={({ width, height }) => {
           if (selectedNodes.length === 0) return;
           if (width === undefined && height === undefined) return;
@@ -177,27 +207,31 @@ export const MultiSelectToolbar = () => {
           //  - preserves each node's pinned-vs-auto height state when the
           //    user didn't enter a height.
           const items = selectedNodes
-            .map((node) => {
-              const resolved = resolveGeometryEdit(node, { width, height });
+            .map((node): GeometryToolbarItem | null => {
+              const resolved = resolveGeometryEdit(node, {
+                width,
+                height,
+              });
               if (!resolved) return null;
               return {
                 nodeId: node.id as CanvasNodeId,
-                size: { width: resolved.width, height: resolved.height },
+                size: {
+                  width: resolved.width,
+                  height: resolved.height,
+                },
               };
             })
-            .filter(
-              (
-                item,
-              ): item is {
-                nodeId: CanvasNodeId;
-                size: { width: number; height: number | undefined };
-              } => item !== null,
-            );
+            .filter((item): item is GeometryToolbarItem => item !== null);
           if (items.length === 0) return;
           // SET_NODE_GEOMETRY uses snapshot:'caller' — open a gesture so
           // the resize folds into one undo entry and the store doesn't warn.
           beginGesture('SET_NODE_GEOMETRY');
-          setNodeGeometry(items);
+          setNodeGeometry(
+            items.map(({ nodeId, size }) => ({
+              nodeId,
+              size,
+            })),
+          );
         }}
         heightAuto={
           noteAutoState
@@ -211,6 +245,23 @@ export const MultiSelectToolbar = () => {
             : undefined
         }
       />
+
+      {textFlowSelection && (
+        <FloatingToolbar.NumberInput
+          label="Font"
+          ariaLabel="Font size"
+          value={textFlowSelection.fontSize}
+          min={8}
+          max={160}
+          onApply={(fontSize) => {
+            for (const node of selectedNodes) {
+              patchNodeSilent(node.id, {
+                style: { ...(node.data.style ?? {}), fontSize },
+              });
+            }
+          }}
+        />
+      )}
 
       {sketchIds && (
         <>
