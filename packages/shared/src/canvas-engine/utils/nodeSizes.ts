@@ -20,7 +20,11 @@ import type { Node } from '@xyflow/react';
 // ---------------------------------------------------------------------------
 const DEFAULT_SIZES: Record<string, NodeSize> = {
   text: { width: 200 },
-  note: { width: 400 },
+  // Note nodes auto-size by content height but have a minimum intrinsic
+  // height of ~50px (NOTE_AUTO_HEIGHT_MIN) plus borders/padding when empty.
+  // Use 56px as a nominal default for layout calculations (matches the
+  // minimum rendered height of an empty note at default zoom).
+  note: { width: 400, height: 56 },
   web: { width: 400, height: 400 },
   pdf: { width: 400, height: 400 },
   office: { width: 400, height: 400 },
@@ -31,14 +35,20 @@ const DEFAULT_SIZES: Record<string, NodeSize> = {
   frame: { width: 400, height: 300 },
   // Question nodes auto-size to content (height-driven by text), matching
   // the behaviour of text/note nodes. The width sets the wrap width when
-  // a question is created with content; empty questions shrink to one line.
-  question: { width: 200 },
+  // a question is created with content. Use 32px as a nominal default for
+  // layout calculations (fits one line of text + padding at default zoom).
+  question: { width: 200, height: 32 },
 };
 
 /**
  * Return the canonical default size hints for a node type.
- * Text and note nodes expose only a default width because their height is
- * content-driven at render time.
+ * These are used as layout fallbacks when creating nodes or calculating
+ * initial positions before the node has been rendered and measured.
+ *
+ * Most nodes return both width and height. Text and note nodes *return*
+ * both, but their *actual* rendered height is content-driven; the default
+ * height here serves only for layout positioning (e.g. when connecting
+ * new nodes). Once rendered, the measured height takes precedence.
  */
 export function getNodeDefaultSize(nodeType: string): NodeSize {
   return DEFAULT_SIZES[nodeType] || { width: 300, height: 200 };

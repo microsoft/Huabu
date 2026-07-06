@@ -18,6 +18,7 @@ import {
   createAbsolutePositionGetter,
   indexById,
   type NestableNode,
+  getNodeDefaultSize,
 } from '@sediment/shared/canvas-engine';
 
 import { Button } from '@/components/Common/Button.tsx';
@@ -50,12 +51,6 @@ const SIDE_ARROW_ICON: Record<Side, typeof ArrowUp> = {
 
 const SIDE_ARROW_OFFSET_PX = 32;
 
-const NEW_NODE_DEFAULTS: Record<'note' | 'question', { w: number; h: number }> =
-  {
-    note: { w: 400, h: 56 },
-    question: { w: 200, h: 78 },
-  };
-
 /** Flow-space gap between the source node and the newly-created node. */
 const NEW_NODE_GAP = 80;
 
@@ -80,7 +75,9 @@ export function useCreateConnectedNode(id: string) {
         (self.style?.height as number | undefined) ??
         self.measured?.height ??
         120;
-      const { w: newW, h: newH } = NEW_NODE_DEFAULTS[kind];
+      const defaultSize = getNodeDefaultSize(kind);
+      const newW = defaultSize.width || 200;
+      const newH = defaultSize.height || 100;
 
       let placementPoint: { x: number; y: number };
       switch (side) {
