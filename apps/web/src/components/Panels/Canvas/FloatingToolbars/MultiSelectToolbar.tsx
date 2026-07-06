@@ -42,7 +42,6 @@ export const MultiSelectToolbar = () => {
   const spreadSelectedNodes = useCanvasStore((s) => s.spreadSelectedNodes);
   const executeCommands = useCanvasStore((s) => s.executeCommands);
   const setNodeGeometry = useCanvasStore((s) => s.setNodeGeometry);
-  const patchNodeSilent = useCanvasStore((s) => s.patchNodeSilent);
   const setNoteHeightMode = useCanvasStore((s) => s.setNoteHeightMode);
   const beginGesture = useCanvasStore((s) => s.beginGesture);
   const deleteNodes = useCanvasStore((s) => s.deleteNodes);
@@ -254,11 +253,17 @@ export const MultiSelectToolbar = () => {
           min={8}
           max={160}
           onApply={(fontSize) => {
-            for (const node of selectedNodes) {
-              patchNodeSilent(node.id, {
-                style: { ...(node.data.style ?? {}), fontSize },
-              });
-            }
+            executeCommands([
+              {
+                type: 'MERGE_NODE_DATA',
+                patches: selectedNodes.map((node) => ({
+                  nodeId: node.id as CanvasNodeId,
+                  patch: {
+                    style: { ...(node.data.style ?? {}), fontSize },
+                  },
+                })),
+              },
+            ]);
           }}
         />
       )}

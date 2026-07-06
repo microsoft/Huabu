@@ -80,7 +80,6 @@ export const NodeFloatingToolbar = memo(
     const convertNodeType = useCanvasStore((s) => s.convertNodeType);
     const deleteNodes = useCanvasStore((s) => s.deleteNodes);
     const setNodeGeometry = useCanvasStore((s) => s.setNodeGeometry);
-    const patchNodeSilent = useCanvasStore((s) => s.patchNodeSilent);
     const setNoteHeightMode = useCanvasStore((s) => s.setNoteHeightMode);
     const expandedNodeId = useCanvasStore((s) => s.expandedNodeId);
     const ingestion = useCanvasStore((s) => s.ingestionByNodeId[id]);
@@ -324,7 +323,7 @@ export const NodeFloatingToolbar = memo(
             min={8}
             max={160}
             onApply={(fontSize) => {
-              patchNodeSilent(id, {
+              updateNodeData(id, {
                 style: { ...(data.style ?? {}), fontSize },
               });
             }}
