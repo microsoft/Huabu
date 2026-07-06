@@ -1,0 +1,31 @@
+{
+  "name": "@agenetes/agenetes",
+  "version": "0.1.0",
+  "description": "The mounted Agenetes instance (L2 control-plane core): the I9.5 driver-factory-dictionary builder, the I9.3 runtime surface (create/get/close over live AgentHandles) and the I9.4 query surface (durable thread records via a pluggable ThreadStore port). Host-agnostic — depends only on @agenetes/protocol + @agenetes/runtime.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "lint": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@agenetes/protocol": "workspace:*",
+    "@agenetes/runtime": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "vitest": "^4.0.18"
+  }
+}
