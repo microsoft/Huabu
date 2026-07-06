@@ -309,6 +309,9 @@ const webRoutes: FastifyPluginAsync = async (fastify) => {
         src: `/api/canvas/${encodeURIComponent(canvasId)}/artifact/${encodeURIComponent(mhtmlArtifact)}`,
         kind: 'html',
         embeddable: true,
+        // Static archive of an already-rendered page. The client must
+        // embed it with scripts off — see `WebPageResponse.snapshot`.
+        snapshot: true,
       };
       return reply.send(payload);
     }

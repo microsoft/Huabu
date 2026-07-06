@@ -79,4 +79,29 @@ export interface WebPageResponse {
   src: string;
   kind: 'url' | 'html';
   embeddable?: boolean;
+  /**
+   * `true` when `src` points at a captured `.mhtml` one-shot snapshot
+   * rather than a genuinely interactive artifact. A snapshot is a static
+   * archive of a page's already-rendered DOM, so the client must embed it
+   * with scripts DISABLED: re-running the original site's client bundle
+   * (common on CSR SPAs) boots its router against the artifact URL, fails
+   * to match a route, and wipes the baked-in DOM — leaving a blank frame
+   * the moment the user scrolls or interacts. Scripts also can't reach
+   * `localStorage` / `cookie` without `allow-same-origin` (which we never
+   * grant same-origin artifacts) and throw at boot. Omitted / `false` for
+   * user-uploaded HTML artifacts and `data:` URLs, which may legitimately
+   * need JS to render.
+   *
+   * KNOWN LIMITATION: because snapshots are embedded with scripts disabled,
+   * they are display-only. Static content renders (DOM + CSS + fonts +
+   * images), native `<a href>` navigation, in-page anchors, text selection
+   * and `target=_blank` popups still work, but every JS-driven interaction
+   * is inert: collapsible sections, tab switches, dropdowns, modals, search
+   * boxes, form submits, lazy-loaded / infinite-scroll content, theme
+   * toggles, etc. Full interactivity requires the live remote page
+   * (`kind: 'url'`), not the snapshot. Accepted trade-off: a snapshot is a
+   * point-in-time archive, and re-enabling its scripts blanks the frame
+   * (see above), so static rendering is the best achievable state here.
+   */
+  snapshot?: boolean;
 }
