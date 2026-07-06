@@ -254,7 +254,7 @@ The instance is a **handle factory/registry addressed by `threadId`** (I9.1) —
 
 ```ts
 // drive a turn
-for await (const event of instance.create(spec).run(request, ctx)) { … }
+for await (const event of instance.create(spec).run(request, render, ctx)) { … }
 // issue a control op (never spawns)
 await instance.get(threadId)?.control(msg);
 // open a session with no turn — create and discard the handle
@@ -300,17 +300,18 @@ This invariant fixes only the **mechanism**. Implementation choices (whether the
 
 本不变量只钉**机制**。实现选择（ACP transport 是在 factory 内 `mountAgentletServer(app, …)` 挂载，还是实例挂一次再把 server 引用传入；built-in 的 canvas 耦合走 (a) 的闭包还是 (b) 的 `factoryArgs`）留待实作时定，不在此固化。
 
-**I9.6 The `spec` / `request` / `ctx` boundary / `spec`、`request`、`ctx` 边界.**
+**I9.6 The `spec` / `request` / `render` / `ctx` boundary / `spec`、`request`、`render`、`ctx` 边界.**
 
-A turn's inputs split across three layers by lifetime and ownership:
+A turn's inputs split across four layers by lifetime and ownership — the handle's `run(request, render, ctx)` signature (I8) keeps `render` a separate positional parameter, *not* a `ctx` field, because rendering belongs to the caller, not the handle (I6):
 
-一次轮次的输入按生命周期与归属分为三层：
+一次轮次的输入按生命周期与归属分为四层——handle 的 `run(request, render, ctx)` 签名（I8）刻意让 `render` 作为独立的位置参数，*而非* `ctx` 的字段，因为渲染归调用方所有、不归 handle（I6）：
 
 | Layer | Lifetime | Carries |
 |---|---|---|
 | **`WorkloadSpec`** — *"which workload"* | baked by L1 at `create`; durable, serializable, opaque | `threadId` · `kind` · `binding {alias, profileId}` · `cwd` · `recipe` · `namespace {name, storagePath}` · `env` (the opaque reachback env, I10) |
-| **request** — *"this turn's input"* (driver-agnostic, I6) | per `run` | the `envelope`, passed to `handle.run(request, …)` |
-| **ctx** — *"this turn's L1 injections"* | per `run` | `{ render, overlay, signal, onPrepared? }` — `render` is the canvas-coupled `envelope → ACP blocks` closure (genuine L1 prompt semantics); `onPrepared` the L1 debug dump |
+| **request** — *"this turn's input"* (driver-agnostic, I6) | per `run` | the `envelope`, passed as `handle.run(request, …)`'s first arg |
+| **render** — *"how to render this turn's request"* (I6) | per `run` (separate positional arg) | the canvas-coupled `envelope → ACP blocks` closure (genuine L1 prompt semantics), invoked by the driver at the last moment for a non-null request |
+| **ctx** — *"this turn's L1 injections"* | per `run` | `{ overlay, signal, onPrepared? }` — `onPrepared` the L1 debug dump |
 
 The ACP handle **self-resolves its own live session per turn** (calling the in-package `ensureAcpSession`) and persists it internally — so the `ctx` carries neither the live session nor a persistence callback: the low-level session (I4.3) stays entirely below the instance, unseen by the host.
 
