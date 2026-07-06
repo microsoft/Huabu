@@ -18,8 +18,10 @@
  */
 
 import {
-  ACP_CAPABILITIES,
-  AcpAgentHandle,
+  acpDriverFactory,
+  ACP_DRIVER_KIND,
+  type AcpAgentDriver as AcpAgentDriverGeneric,
+  type AcpCreateSpec,
   type AcpTurnCtx,
   type PreparedAcpPrompt,
 } from '@agenetes/acp-driver';
@@ -44,8 +46,10 @@ import type { Message } from '@earendil-works/pi-ai';
 
 /** Dispatch key for the in-process pi-agent-core (built-in) driver. */
 export const BUILTIN_DRIVER_KIND = 'builtin';
-/** Dispatch key for the external ACP (agentlet) driver. */
-export const ACP_DRIVER_KIND = 'acp';
+
+// The external ACP driver's dispatch kind now lives with the driver in
+// `@agenetes/acp-driver`; re-exported for existing host importers.
+export { ACP_DRIVER_KIND };
 
 /**
  * The host-injected construction bundle for the built-in driver. A Job's
@@ -58,16 +62,6 @@ export interface BuiltinDriverInput {
   agent: Agent;
 }
 
-/**
- * The host-injected construction bundle for the ACP driver. A Deployment
- * handle is long-lived and holds only its `threadId`; the live session
- * entry + per-turn context arrive on each `run(...)`'s {@link AcpTurnCtx}.
- */
-export interface AcpDriverInput {
-  /** The L1-minted addressable id this Deployment is keyed by. */
-  threadId: string;
-}
-
 export type BuiltinAgentDriver = AgentDriver<
   BuiltinDriverInput,
   AgentRequest,
@@ -77,14 +71,8 @@ export type BuiltinAgentDriver = AgentDriver<
   BuiltinTurnCtx
 >;
 
-export type AcpAgentDriver = AgentDriver<
-  AcpDriverInput,
-  AgentRequest,
-  PreparedAcpPrompt,
-  Message[],
-  InStreamEvent,
-  AcpTurnCtx
->;
+/** The ACP driver bound to the host's concrete request shape. */
+export type AcpAgentDriver = AcpAgentDriverGeneric<AgentRequest>;
 
 /** The concrete long-lived ACP (Deployment) handle type. */
 export type AcpHandle = AgentHandle<PreparedAcpPrompt, AcpTurnCtx>;
@@ -96,21 +84,16 @@ export const builtinAgentDriver: BuiltinAgentDriver = {
   create: ({ agent }) => new BuiltinAgentHandle(agent),
 };
 
-/** The external ACP driver (a Deployment: full control + session-load). */
-export const acpAgentDriver: AcpAgentDriver = {
-  kind: ACP_DRIVER_KIND,
-  capabilities: ACP_CAPABILITIES,
-  create: ({ threadId }) => new AcpAgentHandle<AgentRequest>(threadId),
-};
-
 /**
  * The process-wide runtime with both drivers registered (injected by L1
  * at module load). Shells `resolve` their driver by kind and `create` a
- * handle from the backing object they built.
+ * handle from the backing object they built. The ACP driver is now
+ * produced by the `@agenetes/acp-driver` I9.5 factory (its natural home);
+ * the built-in driver stays a host-owned, canvas-coupled object.
  */
 export const agentRuntime: AgentRuntime = createAgentRuntime();
 agentRuntime.register(builtinAgentDriver);
-agentRuntime.register(acpAgentDriver);
+agentRuntime.register(acpDriverFactory<AgentRequest>());
 
 /**
  * Resolve the built-in driver, throwing if it was never registered (a
@@ -136,7 +119,7 @@ export function getBuiltinDriver(): BuiltinAgentDriver {
 /** Resolve the ACP driver, throwing if it was never registered. */
 export function getAcpDriver(): AcpAgentDriver {
   const driver = agentRuntime.resolve<
-    AcpDriverInput,
+    AcpCreateSpec,
     AgentRequest,
     PreparedAcpPrompt,
     Message[],
