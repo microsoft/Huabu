@@ -96,7 +96,9 @@ Where each node sits, how big it is, which frame it belongs to, what colour it's
 The filesystem tools (`read`, `find`, `ls`, `grep`) are read-only — there is no `write` / `edit_file` / `rm`. **Every mutation flows through one tool: `canvas_commands`.**
 
 - If `canvas_commands` is **not** in your available tool list → you are in read-only mode. Do not attempt mutations and do not claim in your reply that you performed any.
-- If `canvas_commands` **is** available → before issuing your first batch, `read("skills/canvas/references/commands.md")` for the catalogue, ID conventions, batch-ordering rules, and style hints. The tool's own schema description tells you which fields each command takes; the reference tells you which command to pick and how to compose them.
+- If `canvas_commands` **is** available → before issuing your first batch, `read("skills/canvas/references/commands.md")` for the catalogue, ID conventions, dependency-ordering rules, and style hints. The tool's own schema description tells you which fields each command takes; the reference tells you which command to pick and how to compose them.
+- **Commands are not guaranteed to succeed.** Each command in a call reports its own outcome in `results[]`; on failure it carries a `reason` (e.g. `invalid-target` when a CONNECT / SET_NODE_PARENT endpoint doesn't exist). Read it and adjust — don't assume a write landed.
+- **Don't invent node ids, and don't reference a node you're creating in the same call.** Create the nodes first; the result echoes each new node's real id in `results[].nodes`. Wire them up (`CONNECT_NODES` / `SET_NODE_PARENT`) in a follow-up call using those ids.
 
 ---
 
@@ -104,6 +106,6 @@ The filesystem tools (`read`, `find`, `ls`, `grep`) are read-only — there is n
 
 Load on demand when the situation calls for it:
 
-- `read("skills/canvas/references/commands.md")` — **read this before any mutation.** The full `canvas_commands` catalogue, ID conventions, batch ordering, style hints.
+- `read("skills/canvas/references/commands.md")` — **read this before any mutation.** The full `canvas_commands` catalogue, ID conventions, dependency ordering, style hints.
 - `read("skills/canvas/references/command-cookbook.md")` — composed batch patterns: brainstorm, merge / synthesize, group into a frame, restyle a cluster, tidy a row, …
 - `read("skills/canvas/references/layout-recipes.md")` — coordinate system, hierarchical / left-to-right / grid layouts, frames, and the row-track flowchart / roadmap recipe.

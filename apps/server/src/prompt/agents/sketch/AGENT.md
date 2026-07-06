@@ -64,4 +64,4 @@ Common patterns, not deterministic rules. Trust the screenshot.
 
 Only load these on demand — most sketches don't need them:
 
-- `read("skills/canvas/SKILL.md")` — canvas filesystem layout, tool decision matrix, and the full command catalogue with batch-ordering rules and style hints.
+- `read("skills/canvas/SKILL.md")` — canvas filesystem layout, tool decision matrix, and the full command catalogue with dependency-ordering rules and style hints.

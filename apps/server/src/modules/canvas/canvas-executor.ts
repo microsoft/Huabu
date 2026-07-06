@@ -537,9 +537,17 @@ export interface ExecuteOnServerOutput {
     command: CanvasCommand;
     applied: boolean;
     reason?: CanvasCommandFailureReason;
-    /** For CREATE_NODES commands, info about created nodes (dimensions, src). */
+    /**
+     * For CREATE_NODES commands, the server-assigned id of every created
+     * node (with its label) so the agent can reference them in a follow-up
+     * CONNECT_NODES / SET_NODE_PARENT call instead of inventing ids. Image
+     * nodes additionally carry their server-derived width/height/src for
+     * exact follow-up layout. Also emitted for MERGE_NODE_DATA writes that
+     * change an image src.
+     */
     nodes?: Array<{
       nodeId: string;
+      label?: string;
       width: number;
       height: number;
       src?: string;
@@ -719,26 +727,40 @@ export async function executeOnServer(
         ...(r.reason ? { reason: r.reason } : {}),
       };
 
-      // Echo final image dimensions for CREATE_NODES and MERGE_NODE_DATA(src).
-      if (r.applied) {
-        const imageNodeIds =
-          r.command.type === 'CREATE_NODES'
-            ? r.command.nodes
-                .filter((n) => n.nodeType === 'image')
-                .map((n) => n.id as string)
-            : r.command.type === 'MERGE_NODE_DATA'
-              ? r.command.patches
-                  .filter((p) => typeof p.patch?.['src'] === 'string')
-                  .map((p) => p.nodeId)
-              : [];
+      // Echo created node ids (+labels) so the agent can wire them up in a
+      // follow-up CONNECT_NODES / SET_NODE_PARENT call with the real,
+      // server-assigned ids instead of inventing ids that collide across
+      // runs. Image nodes also carry server-derived dimensions/src.
+      if (r.applied && r.command.type === 'CREATE_NODES') {
+        const nodes = r.command.nodes
+          .map((n) => {
+            const node = finalById.get(n.id as string);
+            if (!node) return null;
+            const style = (node.style ?? {}) as Record<string, unknown>;
+            const label = node.data?.label;
+            return {
+              nodeId: node.id as string,
+              ...(typeof label === 'string' ? { label } : {}),
+              width: typeof style.width === 'number' ? style.width : 0,
+              height: typeof style.height === 'number' ? style.height : 0,
+              ...(node.type === 'image' && typeof node.data?.src === 'string'
+                ? { src: node.data.src }
+                : {}),
+            };
+          })
+          .filter((n): n is NonNullable<typeof n> => n !== null);
 
-        const nodes = imageNodeIds
-          .map((nodeId) => {
-            const node = finalById.get(nodeId);
+        if (nodes.length > 0) result.nodes = nodes;
+      } else if (r.applied && r.command.type === 'MERGE_NODE_DATA') {
+        // Echo final image dimensions when a MERGE rewrote an image src.
+        const nodes = r.command.patches
+          .filter((p) => typeof p.patch?.['src'] === 'string')
+          .map((p) => {
+            const node = finalById.get(p.nodeId);
             if (node?.type !== 'image') return null;
             const style = (node.style ?? {}) as Record<string, unknown>;
             return {
-              nodeId,
+              nodeId: p.nodeId,
               width: typeof style.width === 'number' ? style.width : 0,
               height: typeof style.height === 'number' ? style.height : 0,
               src: (node.data?.src as string) || '',

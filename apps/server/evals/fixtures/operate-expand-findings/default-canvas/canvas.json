@@ -1,0 +1,34 @@
+{
+  "canvasId": "default-canvas",
+  "title": "Operate-Expand-Findings Eval",
+  "version": 1,
+  "state": {
+    "nodes": [
+      {
+        "id": "node-survey-src",
+        "type": "note",
+        "position": { "x": 0, "y": 0 },
+        "data": {
+          "type": "note",
+          "label": "Reservoir Sedimentation — Field Survey"
+        },
+        "style": { "width": 460, "height": 360 },
+        "measured": { "width": 460, "height": 360 }
+      },
+      {
+        "id": "node-context-legend",
+        "type": "note",
+        "position": { "x": 640, "y": 0 },
+        "data": {
+          "type": "note",
+          "label": "Basin Map Legend"
+        },
+        "style": { "width": 320, "height": 240 },
+        "measured": { "width": 320, "height": 240 }
+      }
+    ],
+    "edges": []
+  },
+  "createdAt": 1714000000000,
+  "updatedAt": 1714000000000
+}
