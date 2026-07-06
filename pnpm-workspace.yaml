@@ -9,6 +9,7 @@ packages:
   - external/agenetes/packages/runtime
   - external/agenetes/packages/agentlet-host
   - external/agenetes/packages/acp-driver
+  - external/agenetes/packages/agenetes
 
 ignoredBuiltDependencies:
   - electron-winstaller
