@@ -236,17 +236,11 @@ The host talks to **one mounted Agenetes instance** — the way a user talks to 
 The instance's surface stays deliberately narrow and identity-addressed: the host drives a workload through its **`AgentHandle`** (I8) — the one operational object it faces — obtained by `threadId` (I4.2), never touching the underlying `sessionId` (I4.3, the pod-level execution instance, an Agenetes-internal concept the host does not see); and whatever host→agent control the instance exposes ultimately delegates to that handle's `control(msg)` (I8.2, the shipped contract) — the closed vocabulary, capability gating, and `ControlAck` do not change by being reached through the instance. Equally deliberate is what the surface **excludes**: any convenience tied to the upper layer's own business flow or data is solved **by the upper layer itself**, never folded into Agenetes — the core does not care about, or model, that sugar.
 实例的表面刻意保持**狭窄**且**按身份寻址**——宿主透过工作负载的 **`AgentHandle`**（I8，它面对的那个操作对象）来驱动，按 `threadId`（I4.2）取得它，而绝不触碰底层的 `sessionId`（I4.3，pod 级执行实例，一个宿主看不到的 Agenetes 内部概念）；实例对外暴露的任何 host→agent 控制，最终都委托给该 handle 的 `control(msg)`（I8.2，已落地的契约）——封闭词汇、能力门控、`ControlAck` 不因经由实例而改变。同样刻意的是这个表面**排除**什么：任何与上层自身业务流程或数据相关的便利/语法糖，都**由上层自己解决**，绝不塞进 Agenetes——核心既不关心、也不建模那些语法糖。
 
-### I10. The spec carries its own env; Agenetes never assembles host URLs / spec 自带 env；Agenetes 从不拼装宿主 URL
+**I9.3 The runtime surface is exactly three methods / 运行期表面恰好三个方法.**
 
-Everything host-specific a workload needs at spawn — including any agent reachback env the host arranges (e.g. a host callback URL + thread id) — is **assembled in full by the host and carried on the `WorkloadSpec`** (as opaque `spec.env`). Agenetes passes `spec.env` straight through to the spawn call: it does not merge, add, or interpret any entry, and never composes a host URL or reads a host port. What the reachback env points at, and how the agent uses it, is entirely a host concern Agenetes never sees.
-一个工作负载在 spawn 时所需的一切宿主相关内容——包括宿主安排的任何 agent 回连 env（例如一个宿主回调 URL + thread id）——都由**宿主完整拼装好并搭载在 `WorkloadSpec` 上**（作为不透明的 `spec.env`）。Agenetes 把 `spec.env` 原样传给 spawn 调用：它不合并、不添加、不解释任何条目，也从不拼装宿主 URL 或读取宿主端口。回连 env 指向什么、agent 如何使用它，完全是宿主的关注点，Agenetes 从不接触。
+The instance is a **handle factory/registry addressed by `threadId`** (I9.1) — L1 obtains an `AgentHandle` and drives the workload *through that handle* (I8). The runtime surface is exactly three methods:
 
-## The top-level instance & API / 顶层实例与 API
-
-The **`Agenetes` instance** is what a host (L1) holds and talks to — the K8s model where a user talks to *one* cluster / API server, never to a kubelet or a container runtime directly. It is a **handle factory/registry addressed by `threadId`**, **not** a turn-driving god-object: L1 obtains an `AgentHandle` from the instance and then drives the workload *through that handle* (I8 / I9). The instance owns only identity-addressed lifecycle.
-**`Agenetes` 实例**是宿主（L1）持有并对话的对象——对应 K8s 模型：用户只与*一个*集群 / API server 对话，绝不直接对话 kubelet 或容器运行时。它是一个**按 `threadId` 寻址、发放 handle 的工厂/注册表**，**而非**一个驱动轮次的 god-object：L1 从实例取得一个 `AgentHandle`，随后*透过该 handle* 驱动工作负载（I8 / I9）。实例只拥有按身份寻址的生命周期。
-
-### Runtime surface — exactly three methods / 运行期表面——恰好三个方法
+实例是一个**按 `threadId` 寻址、发放 handle 的工厂/注册表**（I9.1）——L1 取得一个 `AgentHandle`，*透过该 handle* 驱动工作负载（I8）。运行期表面恰好三个方法：
 
 | Method | Contract |
 |---|---|
@@ -254,8 +248,9 @@ The **`Agenetes` instance** is what a host (L1) holds and talks to — the K8s m
 | `get(threadId) → AgentHandle \| undefined` | Pure lookup — **never spawns**. A missing handle is a precondition failure (e.g. a control write on a dead thread), not a lazy spawn. |
 | `close(threadId)` | Tear the handle down and evict it from the registry. |
 
-`run` / `control` / `capabilities` live on the **`AgentHandle`** (I8), not on the instance. So the host composes them:
-`run` / `control` / `capabilities` 在 **`AgentHandle`**（I8）上，不在实例上。宿主据此组合：
+`run` / `control` / `capabilities` live on the **`AgentHandle`** (I8), not on the instance, so the host composes them:
+
+`run` / `control` / `capabilities` 在 **`AgentHandle`**（I8）上，不在实例上，宿主据此组合：
 
 ```ts
 // drive a turn
@@ -267,12 +262,14 @@ instance.create(spec);
 ```
 
 `create` performs the `kind → driver` dispatch (`resolve(spec.kind).create(spec)`) internally. **Out of the instance:** `getMeta` / cached-meta (it mixes L1's profile-schema-cache — cold-start UX is host sugar, I9.2) and `notifications()` (the push stream that will feed L1's cache — a later concern).
+
 `create` 在内部完成 `kind → driver` 分发（`resolve(spec.kind).create(spec)`）。**不进实例：** `getMeta` / cached-meta（掺了 L1 的 profile-schema-cache——冷启动 UX 是宿主语法糖，I9.2）与 `notifications()`（喂 L1 缓存的推送流——留待日后）。
 
-### Bootstrap surface / 引导期表面
+**I9.4 The bootstrap surface fixes drivers as static wiring at mount / 引导期表面在 mount 时把 driver 定死为静态接线.**
 
-Drivers are static wiring fixed at mount. The instance is assembled by one call that returns it:
-Driver 是在 mount 时定死的静态接线。实例由一次调用装配并返回：
+The instance is assembled by one call — `mountAgenetes(app, opts) → Agenetes` — that returns it:
+
+实例由一次调用装配并返回——`mountAgenetes(app, opts) → Agenetes`：
 
 ```ts
 const instance: Agenetes = mountAgenetes(app, {
@@ -291,7 +288,11 @@ const instance: Agenetes = mountAgenetes(app, {
 - `register` runs only here (pre-mount + inject); `resolve` is internal to `create`; `has` / `kinds` are not surfaced.
   `register` 只在此运行（预挂 + 注入）；`resolve` 是 `create` 内部所用；`has` / `kinds` 不对外暴露。
 
-### The `spec` / `request` / `ctx` boundary / `spec`、`request`、`ctx` 边界
+**I9.5 The `spec` / `request` / `ctx` boundary / `spec`、`request`、`ctx` 边界.**
+
+A turn's inputs split across three layers by lifetime and ownership:
+
+一次轮次的输入按生命周期与归属分为三层：
 
 | Layer | Lifetime | Carries |
 |---|---|---|
@@ -300,7 +301,13 @@ const instance: Agenetes = mountAgenetes(app, {
 | **ctx** — *"this turn's L1 injections"* | per `run` | `{ render, overlay, signal, onPrepared? }` — `render` is the canvas-coupled `envelope → ACP blocks` closure (genuine L1 prompt semantics); `onPrepared` the L1 debug dump |
 
 The ACP handle **self-resolves its own live session per turn** (calling the in-package `ensureAcpSession`) and persists it internally — so the `ctx` carries neither the live session nor a persistence callback: the low-level session (I4.3) stays entirely below the instance, unseen by the host.
+
 ACP handle **每轮自解析自己的活 session**（调用包内的 `ensureAcpSession`）并在内部持久化——因此 `ctx` 既不携带活 session、也不携带持久化回调：底层 session（I4.3）完全留在实例之下，宿主看不到。
+
+### I10. The spec carries its own env; Agenetes never assembles host URLs / spec 自带 env；Agenetes 从不拼装宿主 URL
+
+Everything host-specific a workload needs at spawn — including any agent reachback env the host arranges (e.g. a host callback URL + thread id) — is **assembled in full by the host and carried on the `WorkloadSpec`** (as opaque `spec.env`). Agenetes passes `spec.env` straight through to the spawn call: it does not merge, add, or interpret any entry, and never composes a host URL or reads a host port. What the reachback env points at, and how the agent uses it, is entirely a host concern Agenetes never sees.
+一个工作负载在 spawn 时所需的一切宿主相关内容——包括宿主安排的任何 agent 回连 env（例如一个宿主回调 URL + thread id）——都由**宿主完整拼装好并搭载在 `WorkloadSpec` 上**（作为不透明的 `spec.env`）。Agenetes 把 `spec.env` 原样传给 spawn 调用：它不合并、不添加、不解释任何条目，也从不拼装宿主 URL 或读取宿主端口。回连 env 指向什么、agent 如何使用它，完全是宿主的关注点，Agenetes 从不接触。
 
 ## Packages
 
@@ -317,4 +324,4 @@ external/agenetes/packages/
 - **`@agenetes/runtime`** — the driver registry + live-handle lifecycle owner (the `AgentRuntime`): `register` / `resolve` a driver by kind, and `get` / `create` / `close` a long-lived handle by `threadId`. Depends only on `@agenetes/protocol`.
 - **`@agenetes/agentlet-host`** — the ACP transport host: mounts the agentlet WebSocket server and supervises the agentlet daemon. ACP-private (not shared base).
 - **`@agenetes/acp-driver`** — the standard ACP driver and all its ACP-specific session state/logic: the handle, the client, the `session/update → AgentStreamEvent` translator, the in-memory session registry, the session store (session-id persistence for `session/load` recovery), the `ensureAcpSession` orchestration, and the ACP session-meta handling.
-- **`@agenetes/agenetes`** — the top **assembly** package: elevates `mountAgenetes`, constructs the runtime, pre-mounts the standard ACP driver, accepts the injected custom driver factory + instance-level `logger` + transport wiring, and returns the `Agenetes` instance (`create` / `get` / `close`). The only package L1 imports at the composition root. *(See [The top-level instance & API](#the-top-level-instance--api--顶层实例与-api).)*
+- **`@agenetes/agenetes`** — the top **assembly** package: elevates `mountAgenetes`, constructs the runtime, pre-mounts the standard ACP driver, accepts the injected custom driver factory + instance-level `logger` + transport wiring, and returns the `Agenetes` instance (`create` / `get` / `close`). The only package L1 imports at the composition root. *(Surface defined in I9.3–I9.5.)*
