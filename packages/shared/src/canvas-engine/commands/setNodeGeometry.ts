@@ -1,5 +1,6 @@
 import { noop, type CommandDefinition } from './types.js';
 import { getFrameSizing } from '../frame/sizing.js';
+import { isAlwaysAutoHeightNodeType } from '../utils/nodeSizes.js';
 
 import type { CanvasCommand } from '../../index.js';
 
@@ -50,11 +51,13 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
         updated = { ...updated, position: update.position };
       }
       if (update.size) {
+        const forceAutoHeight = isAlwaysAutoHeightNodeType(updated.type ?? '');
         const nextStyle = {
           ...updated.style,
           width: update.size.width,
         };
-        const heightCleared = typeof update.size.height !== 'number';
+        const heightCleared =
+          forceAutoHeight || typeof update.size.height !== 'number';
         if (!heightCleared) {
           nextStyle.height = update.size.height;
         } else {

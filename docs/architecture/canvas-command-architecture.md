@@ -94,6 +94,14 @@ See `packages/shared/src/types/canvas/command.ts` for the full discriminated uni
 | Edge graph       | `CONNECT_NODES`, `DISCONNECT_EDGES`, `SET_EDGE_STYLE`   |
 | Algorithms       | `ALIGN_NODES`, `DISTRIBUTE_NODES`                       |
 
+Geometry commands preserve each node type's sizing model. `text` and
+`question` nodes are always content-height nodes: `CREATE_NODES`,
+`SET_NODE_GEOMETRY`, and `CHANGE_NODE_TYPE` preserve/write their top-level
+`style.width` but do not persist top-level `style.height`. Use
+`data.style.fontSize` to change their rendered scale. `note` nodes are
+different: they may either clear top-level `style.height` for auto height or pin
+it for fixed-height notes.
+
 ### Explicit IDs
 
 Node ids use `node-<uuid>`, edge ids use `edge-<uuid>`. Callers that need to reference a newly created node in a later command within the same batch provide the explicit id in `CREATE_NODES`.

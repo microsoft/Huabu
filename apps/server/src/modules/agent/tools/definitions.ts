@@ -328,6 +328,9 @@ Supported command types: CREATE_NODES, DELETE_NODES, MERGE_NODE_DATA, SET_NODE_P
 **Image Nodes - Automatic Aspect Ratio Preservation:**
 For image nodes, set only \`width\` — via \`size.width\` in \`CREATE_NODES\`, an updated \`src\` in \`MERGE_NODE_DATA\`, or \`size.width\` in \`SET_NODE_GEOMETRY\`; the server always derives \`height\` from the image's actual ratio (any \`height\` you pass is ignored) and returns the final \`width\`/\`height\` in the tool result \`results[].nodes\`.
 
+**Text / Question Nodes - Content-Driven Height:**
+For \`text\` and \`question\` nodes, set only \`size.width\` in \`CREATE_NODES\` / \`SET_NODE_GEOMETRY\`. Their height is content-driven and must not be pinned with \`size.height\`; to make the rendered text larger or smaller, set \`data.style.fontSize\` via \`CREATE_NODES\` or \`MERGE_NODE_DATA\`.
+
 ID conventions:
 - Node IDs: \`node-<uuid>\` (use crypto.randomUUID()).
 - Edge IDs: \`edge-<uuid>\`.

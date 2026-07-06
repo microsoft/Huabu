@@ -79,6 +79,94 @@ describe('CREATE_NODES selection', () => {
     });
   });
 
+  it('keeps SET_NODE_GEOMETRY height content-driven for text and question nodes', () => {
+    const output = executeCanvasCommands(
+      {
+        source: 'ui',
+        commands: [
+          {
+            type: 'SET_NODE_GEOMETRY',
+            items: [
+              {
+                nodeId: 'text-node' as never,
+                size: { width: 280, height: 140 },
+              },
+              {
+                nodeId: 'question-node' as never,
+                size: { width: 260, height: 120 },
+              },
+              {
+                nodeId: 'note-node' as never,
+                size: { width: 360, height: 180 },
+              },
+            ],
+          },
+        ],
+      },
+      {
+        nodes: [
+          {
+            ...node('text-node', 'text'),
+            style: { width: 200, height: 80 },
+          },
+          {
+            ...node('question-node', 'question'),
+            style: { width: 200, height: 80 },
+          },
+          node('note-node', 'note'),
+        ],
+        edges: [] as CanvasEdge[],
+        canvasId: 'c1',
+      },
+    );
+    const nodes = output.writeResult.nodes;
+
+    expect(nodes.find((n) => n.id === 'text-node')?.style).toEqual({
+      width: 280,
+    });
+    expect(nodes.find((n) => n.id === 'question-node')?.style).toEqual({
+      width: 260,
+    });
+    expect(nodes.find((n) => n.id === 'note-node')?.style).toEqual({
+      width: 360,
+      height: 180,
+    });
+  });
+
+  it('drops top-level height when converting a note into a text node', () => {
+    const output = executeCanvasCommands(
+      {
+        source: 'ui',
+        commands: [
+          {
+            type: 'CHANGE_NODE_TYPE',
+            nodeId: 'note-node' as never,
+            to: 'text',
+          },
+        ],
+      },
+      {
+        nodes: [
+          {
+            ...node('note-node', 'note'),
+            data: { type: 'note', label: 'note-node', content: '**Hello**' },
+            style: { width: 360, height: 180 },
+            measured: { width: 360, height: 180 },
+          },
+        ],
+        edges: [] as CanvasEdge[],
+        canvasId: 'c1',
+      },
+    );
+    const converted = output.writeResult.nodes.find(
+      (n) => n.id === 'note-node',
+    );
+
+    expect(converted?.type).toBe('text');
+    expect(converted?.style).toEqual({ width: 360 });
+    expect(converted?.data.content).toBe('Hello');
+  });
+
   it('selects user-created non-question nodes and clears the old selection', () => {
     const nodes = createNodes({
       type: 'CREATE_NODES',
