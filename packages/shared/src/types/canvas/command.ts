@@ -148,19 +148,6 @@ export type CanvasCommand =
       type: 'DISTRIBUTE_NODES';
       nodeIds: CanvasNodeId[];
     }
-  | {
-      type: 'CREATE_QUESTION';
-      id?: CanvasNodeId;
-      /** The question text content. */
-      content: string;
-      /**
-       * Top-left position. Required — the engine no longer ships a
-       * fallback layout, so every caller must commit to a slot.
-       */
-      position: Point;
-      size?: NodeSize;
-      parentId?: CanvasNodeId | null;
-    }
   | { type: 'SET_NODE_SELECTION'; nodeIds: CanvasNodeId[] }
   | { type: 'SET_NODE_LOCKED'; items: CanvasNodeLockUpdate[] }
   | {
@@ -249,7 +236,6 @@ export const AGENT_CANVAS_COMMAND_TYPES = [
   'SET_EDGE_STYLE',
   'ALIGN_NODES',
   'DISTRIBUTE_NODES',
-  'CREATE_QUESTION',
   'SET_FRAME_LAYOUT',
 ] as const satisfies readonly AgentCanvasCommandType[];
 

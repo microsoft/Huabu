@@ -108,11 +108,11 @@ Design principles:
 4. **Truncation contract**: read tools return `count + truncated`, and add
    `total` only when the full set is cheap to obtain.
 
-`canvas_commands` covers 14 commands
+`canvas_commands` covers 13 commands
 ([schemas/command.ts](../../apps/server/src/modules/agent/tools/schemas/command.ts)):
 CREATE_NODES, DELETE_NODES, MERGE_NODE_DATA, SET_NODE_PARENT, DISSOLVE_FRAME,
 SET_NODE_GEOMETRY, REORDER_NODES, CONNECT_NODES, DISCONNECT_EDGES,
-SET_EDGE_STYLE, ALIGN_NODES, DISTRIBUTE_NODES, CREATE_QUESTION,
+SET_EDGE_STYLE, ALIGN_NODES, DISTRIBUTE_NODES,
 SET_FRAME_LAYOUT — the agent subset of
 [`CanvasCommand`](../../packages/shared/src/types/canvas/command.ts) (excluding
 the UI-only `SET_NODE_LOCKED / SET_NODE_SELECTION / CHANGE_NODE_TYPE`). Commands

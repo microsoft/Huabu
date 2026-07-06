@@ -2,7 +2,7 @@ import { clsx } from 'clsx';
 import { AlertTriangle, MapPin, MessageSquare } from 'lucide-react';
 import { memo, useCallback, useMemo, useRef } from 'react';
 
-import { createId } from '@sediment/shared';
+import { createId, getQuestionNodeStatus } from '@sediment/shared';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
 import { StatusBadge } from '@/components/Common/StatusBadge.tsx';
@@ -93,7 +93,7 @@ export const QuestionNode = memo(
       placeholder: QUESTION_NODE_PLACEHOLDER,
     });
 
-    const status = data.status ?? 'idle';
+    const status = getQuestionNodeStatus(data);
     const viewed = data.viewed ?? false;
 
     // Count of this thread's agent changes that were SKIPPED because the

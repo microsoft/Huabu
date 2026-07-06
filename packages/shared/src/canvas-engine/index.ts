@@ -66,8 +66,8 @@ export {
 
 // ── Frame grid layout (column / row child packing) ───────────────────────
 // The engine no longer ships a fallback layout for free-form nodes — every
-// caller must commit to an explicit `position` in `CREATE_NODES` /
-// `CREATE_QUESTION`. The only structured layout that still lives here is
+// caller must commit to an explicit `position` in `CREATE_NODES`. The only
+// structured layout that still lives here is
 // the column / row child packing for `frame` nodes.
 export {
   applyColumnLayout,

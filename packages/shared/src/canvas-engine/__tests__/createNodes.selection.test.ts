@@ -49,21 +49,34 @@ describe('CREATE_NODES selection', () => {
   });
 
   it('does not select question nodes created through CREATE_NODES', () => {
-    const nodes = createNodes({
+    const command: CanvasCommand = {
       type: 'CREATE_NODES',
       nodes: [
         {
           id: 'created-question' as never,
           nodeType: 'question',
+          data: { content: 'What should we do next?' },
           position: { x: 10, y: 10 },
         },
       ],
-    });
+    };
+    const output = executeCanvasCommands(
+      { source: 'ui', commands: [command] },
+      {
+        nodes: [node('existing', 'note', true)],
+        edges: [] as CanvasEdge[],
+        canvasId: 'c1',
+      },
+    );
+    const nodes = output.writeResult.nodes;
 
     expect(nodes.find((n) => n.id === 'existing')?.selected).toBe(true);
     expect(nodes.find((n) => n.id === 'created-question')?.selected).toBe(
       undefined,
     );
+    expect(output.pendingEffects.mutatedNodes.map((n) => n.id)).toEqual([
+      'created-question',
+    ]);
   });
 
   it('preserves selection for agent-created nodes', () => {

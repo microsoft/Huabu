@@ -14,8 +14,7 @@ Everything you need to mutate a canvas. **Load this before issuing your first `c
 
 **Structural mutations (nodes & edges)**
 
-- **CREATE_NODES** — create one or more nodes. **`position` is required** on every entry and is honoured verbatim; the engine no longer ships a fallback layout.
-- **CREATE_QUESTION** — create a question node the user is expected to answer. Use this to surface follow-ups instead of asking in chat. `position` is required.
+- **CREATE_NODES** — create one or more nodes. **`position` is required** on every entry and is honoured verbatim; the engine no longer ships a fallback layout. Use `nodeType: "question"` to surface a follow-up question as a canvas node instead of asking in chat.
 - **DELETE_NODES** — remove nodes by id. Incident edges are removed automatically.
 - **MERGE_NODE_DATA** — shallow-merge a patch into `node.data` (label / content / style). `data.style.accent` is the single color knob that drives border + fill + text tint together; font fields apply only to text-bearing nodes.
 - **CONNECT_NODES** — create edges. Style fields (lineType, lineStyle, stroke, strokeWidth, direction) are optional and pulled from the edge schema.

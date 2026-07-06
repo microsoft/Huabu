@@ -80,11 +80,11 @@ Every `CanvasCommand`:
 
 ### Command Catalog
 
-See `packages/shared/src/types/canvas/command.ts` for the full discriminated union (17 command types). Summary:
+See `packages/shared/src/types/canvas/command.ts` for the full discriminated union. Summary:
 
 | Category         | Commands                                                |
 | ---------------- | ------------------------------------------------------- |
-| Node lifecycle   | `CREATE_NODES`, `DELETE_NODES`, `CREATE_QUESTION`       |
+| Node lifecycle   | `CREATE_NODES`, `DELETE_NODES`                          |
 | Node editing     | `MERGE_NODE_DATA`, `CHANGE_NODE_TYPE`                   |
 | Structure        | `SET_NODE_PARENT`, `DISSOLVE_FRAME`, `SET_FRAME_LAYOUT` |
 | Geometry         | `SET_NODE_GEOMETRY`                                     |

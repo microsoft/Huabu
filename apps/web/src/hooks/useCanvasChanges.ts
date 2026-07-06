@@ -122,14 +122,6 @@ export function snapshotAndExtractChanges(
       case 'CREATE_NODES':
         changes.push(...extractCreateNodes(cmd, labelMap));
         break;
-      case 'CREATE_QUESTION':
-        changes.push({
-          id: nextChangeId(),
-          tool: 'canvas_commands',
-          label: `Created question: ${truncate(cmd.content, 24)}`,
-          revertible: false,
-        });
-        break;
       case 'DELETE_NODES':
         changes.push(...extractDeleteNodes(cmd, nodes, edges, labelMap));
         break;
