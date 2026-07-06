@@ -77,6 +77,13 @@ export type {
   AcpTurnCtx,
 } from './handle.js';
 
+export { acpDriverFactory, ACP_DRIVER_KIND } from './driver.js';
+export type {
+  AcpAgentDriver,
+  AcpCreateSpec,
+  AcpDriverFactoryConfig,
+} from './driver.js';
+
 export { AcpServiceError } from './errors.js';
 export type { AcpEnsureErrorCode } from './errors.js';
 

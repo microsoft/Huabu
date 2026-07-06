@@ -17,7 +17,8 @@
   "scripts": {
     "build": "tsc",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@agenetes/agentlet-host": "workspace:*",
@@ -27,6 +28,7 @@
     "@earendil-works/pi-ai": "^0.75.5"
   },
   "devDependencies": {
-    "typescript": "^5.9.0"
+    "typescript": "^5.9.0",
+    "vitest": "^4.0.18"
   }
 }
