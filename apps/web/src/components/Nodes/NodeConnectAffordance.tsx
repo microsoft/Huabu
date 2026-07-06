@@ -19,6 +19,7 @@ import {
   indexById,
   type NestableNode,
   getNodeDefaultSize,
+  getNodeSize,
 } from '@sediment/shared/canvas-engine';
 
 import { Button } from '@/components/Common/Button.tsx';
@@ -54,6 +55,84 @@ const SIDE_ARROW_OFFSET_PX = 32;
 /** Flow-space gap between the source node and the newly-created node. */
 const NEW_NODE_GAP = 80;
 
+/**
+ * Spacing (flow px) inserted between stacked nodes when the ideal
+ * placement collides with an existing node and we have to nudge the new
+ * node along the perpendicular axis to avoid overlap.
+ */
+const NEW_NODE_AVOID_GAP = 24;
+
+/**
+ * Minimum overlap-avoidance budget (flow px): how far the avoidance pass
+ * may push a new node away from its ideal aligned position before giving
+ * up and accepting an overlap.
+ *
+ * This is only the floor. The effective budget scales with the source
+ * node's extent along the avoidance axis (see `useCreateConnectedNode`)
+ * so that a very large source - whose neighbours are spread across its
+ * full height/width - still gets a proportionally large search range
+ * instead of bailing out just past its own edge.
+ */
+const NEW_NODE_MIN_AVOID_DISTANCE = 800;
+
+interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Axis-aligned rectangle intersection test. */
+function rectsOverlap(a: Rect, b: Rect): boolean {
+  return (
+    a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
+  );
+}
+
+/**
+ * Nudge an ideal top-left placement along the axis perpendicular to the
+ * connection direction until the new node no longer overlaps any
+ * existing node.
+ *
+ * - Connections on the left/right sides avoid vertically (up/down);
+ *   top/bottom connections avoid horizontally (left/right) so the new
+ *   node stays on the intended side of its source.
+ * - Candidate offsets are tried nearest-first in an alternating order
+ *   (0, +step, -step, +2*step, -2*step, ...) so the node lands as close
+ *   to its aligned position as possible.
+ * - If no free slot is found within `maxDistance` the
+ *   ideal point is returned unchanged (overlap accepted on purpose).
+ */
+function avoidOverlap(
+  ideal: { x: number; y: number },
+  newSize: { w: number; h: number },
+  side: Side,
+  obstacles: readonly Rect[],
+  maxDistance: number,
+): { x: number; y: number } {
+  const vertical = side === 'left' || side === 'right';
+  const step = (vertical ? newSize.h : newSize.w) + NEW_NODE_AVOID_GAP;
+
+  const fits = (pt: { x: number; y: number }): boolean => {
+    const rect: Rect = { x: pt.x, y: pt.y, w: newSize.w, h: newSize.h };
+    return !obstacles.some((o) => rectsOverlap(rect, o));
+  };
+
+  if (fits(ideal)) return ideal;
+
+  const maxK = Math.floor(maxDistance / step);
+  for (let k = 1; k <= maxK; k++) {
+    for (const dir of [1, -1] as const) {
+      const off = dir * k * step;
+      const pt = vertical
+        ? { x: ideal.x, y: ideal.y + off }
+        : { x: ideal.x + off, y: ideal.y };
+      if (fits(pt)) return pt;
+    }
+  }
+  return ideal;
+}
+
 export function useCreateConnectedNode(id: string) {
   const addNode = useCanvasStore((state) => state.addNode);
   const dispatchUiIntent = useCanvasStore((state) => state.dispatchUiIntent);
@@ -64,7 +143,8 @@ export function useCreateConnectedNode(id: string) {
       const nodes = state.nodes as NestableNode[];
       const byId = indexById(nodes);
       const self = byId.get(id);
-      const srcAbs = createAbsolutePositionGetter(byId)(id);
+      const getAbs = createAbsolutePositionGetter(byId);
+      const srcAbs = getAbs(id);
       if (!self || !srcAbs) return;
 
       const srcW =
@@ -107,6 +187,40 @@ export function useCreateConnectedNode(id: string) {
           };
           break;
       }
+
+      // Collision-avoidance: keep the ideal aligned position when it is
+      // free, otherwise nudge perpendicular to the connection direction
+      // so repeated "add connected node" gestures don't stack on the same
+      // spot. Frames are ignored as obstacles (child nodes legitimately
+      // sit inside them).
+      const obstacles: Rect[] = [];
+      for (const n of nodes) {
+        if (n.type === 'frame') continue;
+        const abs = getAbs(n.id);
+        if (!abs) continue;
+        const { width, height } = getNodeSize(n);
+        const fallback = getNodeDefaultSize(n.type ?? '');
+        obstacles.push({
+          x: abs.x,
+          y: abs.y,
+          w: width > 0 ? width : fallback.width || 200,
+          h: height > 0 ? height : fallback.height || 100,
+        });
+      }
+      // Scale the avoidance budget with the source node's extent along
+      // the avoidance axis: left/right connections avoid vertically (so
+      // the source height matters), top/bottom avoid horizontally (source
+      // width). A large source needs a proportionally larger search range
+      // to clear neighbours spread across its full span.
+      const avoidAxisExtent = side === 'left' || side === 'right' ? srcH : srcW;
+      const maxAvoidDistance = NEW_NODE_MIN_AVOID_DISTANCE + avoidAxisExtent;
+      placementPoint = avoidOverlap(
+        placementPoint,
+        { w: newW, h: newH },
+        side,
+        obstacles,
+        maxAvoidDistance,
+      );
 
       if (kind === 'question') {
         const { nodeId } = createQuestionNodeAndCompose({
