@@ -21,6 +21,7 @@ import {
 } from '@/utils/node/nodeFontConfig';
 
 import { NodeWrapper } from '../NodeWrapper';
+import { enterQuestionCompose } from './questionCompose.ts';
 import { TextNodeBody } from '../shared/TextNodeBody';
 
 import type { CanvasQuestionNodeData } from '../types';
@@ -134,13 +135,11 @@ export const QuestionNode = memo(
       !!data.threadId && (hasRun || status === 'running') && !isForkPending;
 
     const openQuestionThread = useChatStore((s) => s.openQuestionThread);
-    const openQuestionCompose = useChatStore((s) => s.openQuestionCompose);
     const showChatAnchor = useChatStore(
       (s) => s.viewingQuestionThread?.nodeId === id,
     );
     const isRightPanelCollapsed = usePanelStore((s) => s.isRightCollapsed);
     const requestOpenRightPanel = usePanelStore((s) => s.requestOpenRightPanel);
-    const requestFocusChatInput = usePanelStore((s) => s.requestFocusChatInput);
     const canvasId = useCanvasStore((s) => s.canvasId);
 
     // ------------------------------------------------------------------
@@ -182,18 +181,8 @@ export const QuestionNode = memo(
         threadId = createId('thread');
         patchNodeSilent(id, { threadId });
       }
-      openQuestionCompose(id, threadId, canvasId || undefined);
-      requestOpenRightPanel();
-      requestFocusChatInput();
-    }, [
-      id,
-      data.threadId,
-      canvasId,
-      patchNodeSilent,
-      openQuestionCompose,
-      requestOpenRightPanel,
-      requestFocusChatInput,
-    ]);
+      enterQuestionCompose(id, threadId, canvasId);
+    }, [id, data.threadId, canvasId, patchNodeSilent]);
 
     // ------------------------------------------------------------------
     // Double-click:
@@ -326,70 +315,75 @@ function ConflictBadge({ count }: { count: number }) {
 
 function ChatAnchorCorners() {
   const zoom = useStore((s) => s.transform[2]);
-  // Keep the marker mostly screen-space stable, but let it shrink at far zooms
-  // so it does not overpower tiny nodes in overview mode.
-  const inverseZoom = zoom > 0 ? Math.min(1 / zoom, 5) : 1;
-  const px = (value: number) => value * inverseZoom;
+  const { containerStyle, cornerStyle, corners } = useMemo(() => {
+    // Keep the marker mostly screen-space stable, but let it shrink at far
+    // zooms so it does not overpower tiny nodes in overview mode.
+    const inverseZoom = zoom > 0 ? Math.min(1 / zoom, 5) : 1;
+    const px = (value: number) => value * inverseZoom;
 
-  const cornerSize = px(14);
-  const cornerThickness = px(2);
-  const outset = px(12);
-  const radius = px(14);
-  const glowSoft = px(3);
-  const glowWide = px(7);
-  const gradientHotspot = px(8);
-  const gradientMidpoint = px(16);
-  const gradientEdge = px(34);
-  const shadowBlur = px(16);
-  const cornerStyle = {
-    position: 'absolute',
-    width: cornerSize,
-    height: cornerSize,
-    borderColor: 'color-mix(in srgb, var(--question-border) 78%, white 8%)',
-    filter: `drop-shadow(0 0 ${glowSoft}px color-mix(in srgb, var(--question-border) 95%, transparent)) drop-shadow(0 0 ${glowWide}px color-mix(in srgb, var(--question-border) 58%, transparent)) drop-shadow(0 0 ${px(14)}px color-mix(in srgb, var(--question-bg) 45%, transparent))`,
-  } as const;
-  const cornerGlow = `color-mix(in srgb, var(--question-border) 22%, transparent) 0 ${gradientHotspot}px, color-mix(in srgb, var(--question-border) 12%, transparent) ${gradientMidpoint}px, transparent ${gradientEdge}px`;
-  const corners = [
-    {
-      top: 0,
-      left: 0,
-      borderTopWidth: cornerThickness,
-      borderLeftWidth: cornerThickness,
-      borderTopLeftRadius: radius,
-    },
-    {
-      top: 0,
-      right: 0,
-      borderTopWidth: cornerThickness,
-      borderRightWidth: cornerThickness,
-      borderTopRightRadius: radius,
-    },
-    {
-      right: 0,
-      bottom: 0,
-      borderRightWidth: cornerThickness,
-      borderBottomWidth: cornerThickness,
-      borderBottomRightRadius: radius,
-    },
-    {
-      bottom: 0,
-      left: 0,
-      borderBottomWidth: cornerThickness,
-      borderLeftWidth: cornerThickness,
-      borderBottomLeftRadius: radius,
-    },
-  ] as const;
+    const cornerSize = px(14);
+    const cornerThickness = px(2);
+    const outset = px(12);
+    const radius = px(14);
+    const glowSoft = px(3);
+    const glowWide = px(7);
+    const gradientHotspot = px(8);
+    const gradientMidpoint = px(16);
+    const gradientEdge = px(34);
+    const shadowBlur = px(16);
+    const cornerStyle = {
+      position: 'absolute',
+      width: cornerSize,
+      height: cornerSize,
+      borderColor: 'color-mix(in srgb, var(--question-border) 78%, white 8%)',
+      filter: `drop-shadow(0 0 ${glowSoft}px color-mix(in srgb, var(--question-border) 95%, transparent)) drop-shadow(0 0 ${glowWide}px color-mix(in srgb, var(--question-border) 58%, transparent)) drop-shadow(0 0 ${px(14)}px color-mix(in srgb, var(--question-bg) 45%, transparent))`,
+    } as const;
+    const cornerGlow = `color-mix(in srgb, var(--question-border) 22%, transparent) 0 ${gradientHotspot}px, color-mix(in srgb, var(--question-border) 12%, transparent) ${gradientMidpoint}px, transparent ${gradientEdge}px`;
+    const corners = [
+      {
+        top: 0,
+        left: 0,
+        borderTopWidth: cornerThickness,
+        borderLeftWidth: cornerThickness,
+        borderTopLeftRadius: radius,
+      },
+      {
+        top: 0,
+        right: 0,
+        borderTopWidth: cornerThickness,
+        borderRightWidth: cornerThickness,
+        borderTopRightRadius: radius,
+      },
+      {
+        right: 0,
+        bottom: 0,
+        borderRightWidth: cornerThickness,
+        borderBottomWidth: cornerThickness,
+        borderBottomRightRadius: radius,
+      },
+      {
+        bottom: 0,
+        left: 0,
+        borderBottomWidth: cornerThickness,
+        borderLeftWidth: cornerThickness,
+        borderBottomLeftRadius: radius,
+      },
+    ] as const;
+    const containerStyle = {
+      inset: -outset,
+      borderRadius: radius,
+      background: `radial-gradient(circle at 0 0, ${cornerGlow}), radial-gradient(circle at 100% 0, ${cornerGlow}), radial-gradient(circle at 100% 100%, ${cornerGlow}), radial-gradient(circle at 0 100%, ${cornerGlow}), color-mix(in srgb, var(--question-border) 6%, transparent)`,
+      boxShadow: `0 0 ${shadowBlur}px color-mix(in srgb, var(--question-border) 18%, transparent)`,
+    } as const;
+
+    return { containerStyle, cornerStyle, corners };
+  }, [zoom]);
 
   return (
     <div
       aria-hidden="true"
       className="pointer-events-none absolute z-0"
-      style={{
-        inset: -outset,
-        borderRadius: radius,
-        background: `radial-gradient(circle at 0 0, ${cornerGlow}), radial-gradient(circle at 100% 0, ${cornerGlow}), radial-gradient(circle at 100% 100%, ${cornerGlow}), radial-gradient(circle at 0 100%, ${cornerGlow}), color-mix(in srgb, var(--question-border) 6%, transparent)`,
-        boxShadow: `0 0 ${shadowBlur}px color-mix(in srgb, var(--question-border) 18%, transparent)`,
-      }}
+      style={containerStyle}
     >
       {corners.map((corner, index) => (
         <div key={index} style={{ ...cornerStyle, ...corner }} />

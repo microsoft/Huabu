@@ -22,10 +22,9 @@ import {
 
 import { Button } from '@/components/Common/Button.tsx';
 import { cn } from '@/components/Common/cn.ts';
+import { createQuestionNodeAndCompose } from '@/components/Nodes/question/questionCompose.ts';
 import { NODE_ICON } from '@/config/nodeIcons.ts';
 import useCanvasStore from '@/store/canvasStore.ts';
-import { useChatStore } from '@/store/chatStore.ts';
-import { usePanelStore } from '@/store/panelStore.ts';
 
 /** Connection handle definitions – source + target on each side. */
 const HANDLE_DEFS = [
@@ -112,22 +111,27 @@ export function useCreateConnectedNode(id: string) {
           break;
       }
 
+      if (kind === 'question') {
+        const { nodeId } = createQuestionNodeAndCompose({
+          addNode,
+          placementPoint,
+          canvasId: state.canvasId,
+        });
+        dispatchUiIntent({
+          type: 'CONNECT_EDGE',
+          source: id,
+          target: nodeId,
+          style: { direction: 'forward' } satisfies EdgeStyle,
+        });
+        return;
+      }
+
       const newId = createId('node');
-      const threadId = kind === 'question' ? createId('thread') : null;
-      const data =
-        kind === 'question'
-          ? {
-              content: '',
-              status: 'idle' as const,
-              threadId,
-              origin: { type: 'user-created' as const },
-            }
-          : { content: '', origin: { type: 'user-created' as const } };
       addNode({
         id: newId,
         nodeType: kind,
         placementPoint,
-        data,
+        data: { content: '', origin: { type: 'user-created' } },
       });
       dispatchUiIntent({
         type: 'CONNECT_EDGE',
@@ -135,13 +139,6 @@ export function useCreateConnectedNode(id: string) {
         target: newId,
         style: { direction: 'forward' } satisfies EdgeStyle,
       });
-      if (kind === 'question' && threadId) {
-        useChatStore
-          .getState()
-          .openQuestionCompose(newId, threadId, state.canvasId || undefined);
-        usePanelStore.getState().requestOpenRightPanel();
-        usePanelStore.getState().requestFocusChatInput();
-      }
     },
     [id, addNode, dispatchUiIntent],
   );
