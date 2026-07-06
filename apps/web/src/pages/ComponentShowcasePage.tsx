@@ -717,7 +717,7 @@ export default function ComponentShowcasePage() {
           {/* ────────────────────── Loading ─────────────────────── */}
           <Section
             title="Loading"
-            description="Single loading entry point. `variant` chooses spinner / skeleton / brand animation; `layout` chooses inline, block, overlay, fullscreen, or bare indicator placement."
+            description="Single loading entry point. `variant` chooses spinner / skeleton / brand animation; `layout` chooses inline, block, overlay, or bare indicator placement."
           >
             <div className="space-y-4">
               <SubSection label="Spinner sizes">
@@ -771,11 +771,11 @@ export default function ComponentShowcasePage() {
                   />
                 </div>
               </SubSection>
-              <SubSection label="Fullscreen: brand transition">
+              <SubSection label="Brand: full-area transition">
                 <div className="bg-bg-default relative h-40 w-full overflow-hidden rounded-lg">
                   <Loading
                     variant="brand"
-                    layout="fullscreen"
+                    layout="block"
                     size="md"
                     message="Loading workspace…"
                   />

@@ -30,7 +30,7 @@ function LoadingScreen() {
     <div className="bg-bg-default h-full">
       <Loading
         variant="brand"
-        layout="fullscreen"
+        layout="block"
         size="md"
         message="Loading workspace…"
       />
@@ -123,14 +123,14 @@ function RootLayout() {
         <Outlet />
       </div>
       {/* Full-screen overlay shown while pending saves drain before a
-          blocked route change proceeds. `Loading layout="fullscreen"`
+          blocked route change proceeds. `Loading layout="block"`
           already provides the centered loading state. Rendered as a sibling
           of the page area so it stacks on top of whatever route is
           currently mounted. */}
       {isDraining && (
         <Loading
           variant="spinner"
-          layout="fullscreen"
+          layout="block"
           size="md"
           message="Saving canvas…"
           indicatorClassName="text-fg-subtle"

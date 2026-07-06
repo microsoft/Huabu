@@ -6,7 +6,7 @@ import loadingAnimation from '@/assets/loading.json';
 import { cn } from './cn';
 
 type LoadingVariant = 'spinner' | 'skeleton' | 'brand';
-type LoadingLayout = 'inline' | 'block' | 'overlay' | 'fullscreen' | 'bare';
+type LoadingLayout = 'inline' | 'block' | 'overlay' | 'bare';
 type LoadingSize = 'xs' | 'sm' | 'md';
 
 interface LoadingProps {
@@ -41,6 +41,8 @@ function SpinnerLoadingIndicator({
   // promote the transform animation to the compositor during canvas jank.
   return (
     <span
+      role="status"
+      aria-label="Loading"
       className={cn(
         'inline-flex animate-spin will-change-transform',
         className,
@@ -116,12 +118,18 @@ export function Loading({
   ) : variant === 'brand' ? (
     <BrandLoadingIndicator
       size={size}
-      className={cn(layout === 'inline' && className, indicatorClassName)}
+      className={cn(
+        (layout === 'inline' || layout === 'bare') && className,
+        indicatorClassName,
+      )}
     />
   ) : (
     <SpinnerLoadingIndicator
       size={size}
-      className={cn(layout === 'inline' && className, indicatorClassName)}
+      className={cn(
+        (layout === 'inline' || layout === 'bare') && className,
+        indicatorClassName,
+      )}
     />
   );
 
@@ -134,7 +142,6 @@ export function Loading({
         layout === 'inline' ? 'inline-flex' : 'flex',
         isSkeleton ? 'flex-col gap-2' : 'gap-2',
         layout === 'overlay' && 'bg-surface absolute inset-0 z-10',
-        layout === 'fullscreen' && 'h-full w-full',
         layout === 'block' && 'h-full w-full',
         layout !== 'inline' && className,
       )}

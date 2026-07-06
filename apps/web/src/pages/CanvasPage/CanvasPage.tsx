@@ -96,7 +96,7 @@ export default function CanvasPage() {
     return (
       <Loading
         variant="brand"
-        layout="fullscreen"
+        layout="block"
         size="md"
         message="Loading canvas…"
       />
