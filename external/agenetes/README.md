@@ -176,38 +176,43 @@ The driver route (`kind`) and the workload kind (`Job` / `Deployment`) are indep
 The per-turn `request` is *not* owned by the driver: it is a separate, driver-agnostic union keyed on its own `type` (a canvas selection, a dictionary, …), the same shared union in every spec member. The axis of variation is the request *variant*, not the driver — the same driver's next turn may receive a completely different variant with completely different rendering. A request is plain, JSON-serializable data; the durable log persists it verbatim as the source of truth for replay. **Rendering** a request into the uniform input fed to the agent is a separate, host-owned concern: each variant declares its own `render`, the host composes them, and a driver invokes the injected renderer at the last moment — **the driver never owns rendering.**
 每轮的 `request` *不*归 driver 拥有：它是一个独立的、与 driver 无关的 union，以自己的 `type`（一次画布选择、一个字典……）为键，且在每个 spec 成员里都是同一个共享 union。变化的轴是 request 的*变体*，而非 driver——同一个 driver 的下一轮，可能收到一个渲染方式完全不同的变体。request 是普通、可 JSON 序列化的数据；持久日志原样保存它，作为回放的真相之源。把一个 request **渲染**成喂给 agent 的统一输入，是一个独立的、由宿主拥有的关注点：每个变体声明自己的 `render`，宿主把它们组合起来，driver 在最后一刻调用被注入的渲染器——**driver 从不拥有渲染。**
 
-### I7. L1 ↔ Agenetes is an in-process ARI; Agenetes never talks to the browser / L1 ↔ Agenetes 是进程内 ARI；Agenetes 从不直接对浏览器说话
+### I7. L1↔Agenetes is a full-duplex in-process seam; Agenetes never talks to the browser / L1↔Agenetes 是进程内全双工接缝；Agenetes 从不直接对浏览器说话
 
-The host mounts Agenetes *in-process*. The path is always `UI → host server → Agenetes`; Agenetes only ever speaks the full-duplex ARI (calls / callbacks / async-iter). Any half-duplex transport artefact (HTTP + SSE to a browser) is confined to the host's own UI hop and bridged *inside the host server* — it must never leak into, or contaminate the design of, the L1↔Agenetes interface. The reverse permission call is the tell: one duplex method at host↔Agenetes, split into two correlated halves only across the browser wire.
-宿主以*进程内*方式挂载 Agenetes。路径永远是 `UI → 宿主 server → Agenetes`；Agenetes 只说全双工的 ARI（调用 / 回调 / async-iter）。任何半双工的传输产物（到浏览器的 HTTP + SSE）都被限制在宿主自己的 UI 这一跳，并*在宿主 server 内部*桥接——它绝不能泄漏进、也不能污染 L1↔Agenetes 接口的设计。反向的权限调用就是明证：在宿主↔Agenetes 处是一个全双工方法，只有跨越浏览器线路时才被拆成两个相关联的半边。
+The host mounts Agenetes *in-process*. The path is always `UI → host server → Agenetes`; across that in-process seam Agenetes only ever speaks one **full-duplex channel** (calls / callbacks / async-iter). Any half-duplex transport artefact (HTTP + SSE to a browser) is confined to the host's own UI hop and bridged *inside the host server* — it must never leak into, or contaminate the design of, the L1↔Agenetes interface. The reverse permission call is the tell: one duplex method at host↔Agenetes, split into two correlated halves only across the browser wire.
+宿主以*进程内*方式挂载 Agenetes。路径永远是 `UI → 宿主 server → Agenetes`；在这条进程内接缝上，Agenetes 只说一条**全双工通道**（调用 / 回调 / async-iter）。任何半双工的传输产物（到浏览器的 HTTP + SSE）都被限制在宿主自己的 UI 这一跳，并*在宿主 server 内部*桥接——它绝不能泄漏进、也不能污染 L1↔Agenetes 接口的设计。反向的权限调用就是明证：在宿主↔Agenetes 处是一个全双工方法，只有跨越浏览器线路时才被拆成两个相关联的半边。
 
-### I8. `AgentHandle` — the upward L1↔Agenetes binding / `AgentHandle`——面向上层的 L1↔Agenetes 绑定
+### I8. `AgentHandle` — the ARI's per-workload handle, and the L1↔Agenetes binding / `AgentHandle`——ARI 的每工作负载 handle，也是 L1↔Agenetes 的绑定
 
-`AgentHandle` is the one object L1 holds per workload — the concrete shape of the in-process ARI (I7). A driver *produces* one (I2.4 `create`), but the handle, not the driver, is the upward contract: L1 drives a running workload only through it. Its I/O is serializable messages, so the same interface admits an in-memory binding (built-in fast path) or a remote binding (over agentlet) with no change upward.
-`AgentHandle` 是 L1 为每个工作负载持有的那个对象——即 I7 所说进程内 ARI 的具体形态。driver *生产*它（I2.4 的 `create`），但面向上层的契约是 handle 而非 driver：L1 只通过它驱动一个运行中的工作负载。它的 I/O 是可序列化消息，因此同一接口既可承载进程内绑定（built-in 快路径），也可承载远程绑定（经 agentlet），对上层无变化。
+The **ARI** (defined in D3) is Agenetes' single, transport-agnostic runtime *contract* — the CRI analogue. Two roles meet at it: a **driver** *implements* the ARI from below (it plugs in behind the contract, the way containerd / CRI-O sit behind CRI — I2), while L1 *drives a workload through* the ARI from above. `AgentHandle` is the ARI's **per-workload handle** — the one live object that realizes the contract for a single workload: a driver's `create` produces one (I2.4), and L1 holds exactly that object and drives the running workload only through it. So the handle is not a third interface — it *is* the ARI, instantiated per workload, faced from opposite sides by the driver (implements) and L1 (consumes). Because its I/O is serializable messages, the same handle interface admits a direct in-memory binding (built-in fast path, zero serialization) or a remote binding (over agentlet) with no change upward — in-process is a transport optimisation of one serializable contract, exactly like CRI.
+**ARI**（在 D3 中定义）是 Agenetes 唯一的、与传输无关的运行时*契约*——CRI 的对应物。有两个角色在它这里相遇：**driver** 从下方*实现* ARI（它插在契约之后，正如 containerd / CRI-O 位于 CRI 之后——见 I2），而 L1 从上方*透过* ARI *驱动*一个工作负载。`AgentHandle` 就是 ARI 的**每工作负载 handle**——为单个工作负载realize该契约的那个活对象：driver 的 `create` 生产一个（I2.4），L1 恰好持有那个对象，并只通过它驱动运行中的工作负载。所以 handle 不是第三个接口——它*就是* ARI 按工作负载实例化后的形态，由 driver（实现方）与 L1（消费方）从两侧相对而立。因为它的 I/O 是可序列化消息，同一 handle 接口既可承载进程内绑定（built-in 快路径，零序列化），也可承载远程绑定（经 agentlet），对上层无变化——进程内只是同一份可序列化契约的传输优化，与 CRI 完全一致。
 
 ```ts
 interface AgentHandle {                                    // core — every driver implements this
-  submit(request: AgentRequest, render: Renderer): void;   // data-plane in: plain request + host-composed renderer (I6)
-  events(): AsyncIterable<AgentStreamEvent>;               // data-plane out: driver-agnostic stream
-  control(msg: ControlMsg): Promise<ControlAck>;           // control-plane, capability-gated
-  close(): void;
+  // One run/turn: render + submit this turn's input, then stream its output.
+  // Merges the earlier separate submit + events() — a run *is* "submit, then stream".
+  run(
+    request: AgentRequest | null,                          // null = "no new input"; meaning is driver-defined
+    render: RenderFn,                                      // host-composed renderer (I6), invoked at the last moment
+    ctx: TurnCtx,                                          // per-turn overlay / abort signal / logger / live backing object
+  ): AsyncGenerator<AgentStreamEvent, Message[]>;          // yields the turn's events; returns its transcript delta
+  control(msg: ControlMsg): Promise<ControlAck>;           // control-plane, capability-gated; usable out-of-turn
+  close(): void;                                           // Deployment: teardown; Job: no-op
   readonly capabilities: AgentCapabilities;                // runtime descriptor
 }
 interface Cancellable     { cancel(): Promise<void>; }     // opt-in facets — a Job carries no
 interface ModeSwitchable  { setMode(id: string): Promise<void>; }   // NotImplemented stubs
 interface ModelSelectable { setModel(id: string): Promise<void>; }
 // Behavioural capabilities add NO method: reverse permission is an injected
-// onPermissionRequest port; slash commands arrive as availableCommandsUpdate on events().
+// onPermissionRequest port; slash commands arrive as availableCommandsUpdate in the run stream.
 ```
 
 **I8.1 It is an anti-corruption wrapper over the ACP *client role*, not a re-export of the ACP SDK / 它是对 ACP *客户端角色* 的防腐包装，而非 ACP SDK 的再导出.**
 The interface is modelled on the ACP client role (a complete, well-worn duplex vocabulary), but Agenetes owns it and surfaces only the subset it needs. ACP is *one downward driver*, never the upward contract: `AcpAgentHandle` wraps the ACP SDK, `BuiltinAgentHandle` wraps the in-process harness, and both satisfy the same `AgentHandle`. Replacing ACP later never reaches L1.
 该接口以 ACP 客户端角色为原型（一套完整、久经考验的全双工词汇），但由 Agenetes 拥有，只暴露它需要的子集。ACP 只是*一个向下的 driver*，绝非面向上层的契约：`AcpAgentHandle` 包装 ACP SDK，`BuiltinAgentHandle` 包装进程内 harness，二者满足同一个 `AgentHandle`。日后替换 ACP，绝不波及 L1。
 
-**I8.2 Data plane vs control plane are logically distinct / 数据面与控制面在逻辑上不同.**
-Content updates (message / tool / plan / thought) flow on the **data plane** (`submit` in, `events()` out); affordance/meta updates (slash commands, mode, permission) are the **control plane** (`control`), even when both ride one physical stream. Slash follows ACP exactly: discover via a control notification, *invoke* by putting the command text into an ordinary data-plane prompt — there is no `runCommand`.
-内容更新（message / tool / plan / thought）走**数据面**（`submit` 进、`events()` 出）；能力/元信息更新（斜杠命令、模式、权限）是**控制面**（`control`），即便二者共用同一条物理流。斜杠命令完全遵循 ACP：经控制面通知*发现*，通过把命令文本放进普通的数据面 prompt 来*执行*——没有 `runCommand`。
+**I8.2 One `run` is the shared unit; data plane vs control plane stay logically distinct / 一次 `run` 是共享的单元；数据面与控制面在逻辑上仍不同.**
+A single **run/turn** — `run(request, render, ctx)` — is the unit both workload kinds share, since a run *is* "submit this turn's input, then stream its output" (M2's separate `submit` + `events()` merged into one call). A **Job** *is* exactly one run then terminal (its handle's life == the run; `close()` a no-op); a **Deployment** *has-a* run-producer: a long-lived session hosting many runs plus `control` / notifications / liveness. On the data plane, content updates (message / tool / plan / thought) flow as the run's yielded `AgentStreamEvent`s; affordance/meta updates (slash commands, mode, permission) are the **control plane** (`control`), even when both ride one physical stream. Slash follows ACP exactly: discover via a control notification, *invoke* by putting the command text into an ordinary data-plane prompt — there is no `runCommand`.
+一次**run/轮次**——`run(request, render, ctx)`——是两种工作负载种类共享的单元，因为一次 run *就是*"提交本轮输入、再流式输出其结果"（M2 中分开的 `submit` + `events()` 已合并为一次调用）。**Job** *就是*恰好一次 run 然后终止（其 handle 的生命 == 那次 run；`close()` 为空操作）；**Deployment** *拥有*一个 run 生产者：一个长期存活、承载多次 run 的 session，外加 `control` / 通知 / 存活性。在数据面上，内容更新（message / tool / plan / thought）作为 run 产出的 `AgentStreamEvent` 流动；能力/元信息更新（斜杠命令、模式、权限）是**控制面**（`control`），即便二者共用同一条物理流。斜杠命令完全遵循 ACP：经控制面通知*发现*，通过把命令文本放进普通的数据面 prompt 来*执行*——没有 `runCommand`。
 
 **I8.3 It is an in-process duplex peer — no sidecar / 它是进程内全双工对等体——没有 sidecar.**
 Because the seam lives inside the host process, host→agent and agent→host calls share one logical channel (JSON-RPC-style `id` correlation). A reverse call (permission request) is a **method the host implements** — an injected `onPermissionRequest` port L2 awaits — not a second channel. The browser's SSE-down / POST-up split is the host bridging this duplex onto a half-duplex wire; it is *not* part of the L1↔Agenetes contract.
