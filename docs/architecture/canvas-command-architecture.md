@@ -14,6 +14,12 @@ Data flow:
 2. Agent response → `CanvasCommand[]` → `CanvasExecution` → executor
 3. Executor → validate, apply, trace, snapshot, effects
 
+`CanvasExecution.source` defaults to `ui`. Most command behavior is shared
+across sources; the notable selection exception is `CREATE_NODES`: UI-created
+non-`question` entries in that command become the active selection, while
+agent/system-created entries and `question` entries preserve the existing
+selection.
+
 ## Layer 1: CanvasUiIntent
 
 `CanvasUiIntent` is a web-only input model for user gestures. It resolves UI-specific ambiguity (selection, clipboard, drag context, viewport position, rectangle hit-testing) into explicit `CanvasCommand` operands.

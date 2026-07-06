@@ -100,7 +100,9 @@ helpers can target it, mirroring how preview-body matches are handled.
 
 ### 5.1 Trigger
 
-Double-click the node → `openInCompose()` ([QuestionNode.tsx](../../apps/web/src/components/Nodes/question/QuestionNode.tsx)):
+Double-click the node → `openInCompose()` ([QuestionNode.tsx](../../apps/web/src/components/Nodes/question/QuestionNode.tsx)).
+Creating a question through the toolbar placement flow or the connected-node
+picker also mints the thread and opens compose immediately:
 
 - mints a `threadId` if missing, opens the chat panel in **compose mode**
 - inherits the canvas's last-used agent binding; user can switch agent
@@ -108,6 +110,14 @@ Double-click the node → `openInCompose()` ([QuestionNode.tsx](../../apps/web/s
 
 Toolbar (single action): **Ask** when idle, **View / Watch conversation** once a
 thread exists.
+
+While the chat panel is expanded and viewing or composing a question node
+thread, the canvas renders four glowing corners outside that node
+([QuestionNode.tsx](../../apps/web/src/components/Nodes/question/QuestionNode.tsx)).
+This is an informational "active chat anchor" affordance only: it does not set
+React Flow selection, does not show editing toolbars, does not cover the
+question status badge, and does not affect which selected nodes are sent as
+additional chat context.
 
 ### 5.2 Dispatch
 

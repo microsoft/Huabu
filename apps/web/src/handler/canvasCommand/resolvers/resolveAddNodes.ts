@@ -53,16 +53,18 @@ function computeMediaSize(
  * "paste with no anchor" and "add with no anchor" flows.
  */
 const VIEWPORT_FALLBACK_STAGGER = 40;
+const NOTE_DEFAULT_HEIGHT = getNodeDefaultSize('note').height;
+const VIEWPORT_FALLBACK_HEIGHT =
+  typeof NOTE_DEFAULT_HEIGHT === 'number' ? NOTE_DEFAULT_HEIGHT : 100;
 
 /**
  * Anchor a new node so its bounding box is centred on the given flow
  * point, with a uniform per-index stagger so multiple nodes added in
  * the same batch don't perfectly overlap.
  *
- * Height-flexible types (text, note, question) have no canonical
- * default height — we fall back to a small visual estimate so the
- * centring still feels balanced; the actual rendered height takes
- * over once the node is measured.
+ * Some content-driven node types may not provide an explicit default
+ * height. In that case we use a shared viewport fallback height so
+ * centring still feels balanced until measured dimensions are available.
  */
 function viewportCenterAnchor(
   nodeType: CanvasNodeType,
@@ -75,7 +77,7 @@ function viewportCenterAnchor(
   const height =
     (typeof size?.height === 'number' ? size.height : undefined) ??
     (typeof defaults.height === 'number' ? defaults.height : undefined) ??
-    80;
+    VIEWPORT_FALLBACK_HEIGHT;
   const offset = staggerIndex * VIEWPORT_FALLBACK_STAGGER;
   return {
     x: center.x - width / 2 + offset,

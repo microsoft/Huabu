@@ -18,8 +18,6 @@ import React, {
 } from 'react';
 import '@xyflow/react/dist/style.css';
 
-import { createId } from '@sediment/shared';
-
 import { resolveArtifactUrl } from '@/api/artifact';
 import { AudioNode } from '@/components/Nodes/audio/AudioNode';
 import { ImageNode } from '@/components/Nodes/image/ImageNode';
@@ -57,9 +55,7 @@ import { SnapGuidesOverlay } from './SnapGuidesOverlay.tsx';
 import { StructuredDropOverlay } from './StructuredDropOverlay.tsx';
 import { GRID_SIZE, MAX_ZOOM, MIN_ZOOM } from '../../../config/canvas.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
-import { useChatStore } from '../../../store/chatStore.ts';
 import { useGesturePreviewStore } from '../../../store/gesturePreviewStore.ts';
-import { usePanelStore } from '../../../store/panelStore.ts';
 import { usePreviewStore } from '../../../store/previewStore.ts';
 import { useToolStore } from '../../../store/toolStore.ts';
 import {
@@ -69,6 +65,7 @@ import {
 } from '../../../utils/io/dragDrop.ts';
 import { looksLikeUrl } from '../../../utils/io/media.ts';
 import { FrameNode } from '../../Nodes/frame/FrameNode.tsx';
+import { createQuestionNodeAndCompose } from '../../Nodes/question/questionCompose.ts';
 import { QuestionNode } from '../../Nodes/question/QuestionNode.tsx';
 import { SketchNode } from '../../Nodes/sketch/SketchNode.tsx';
 import { SketchOverlay } from '../../Nodes/sketch/SketchOverlay.tsx';
@@ -77,7 +74,7 @@ import { VideoNode } from '../../Nodes/video/VideoNode.tsx';
 import { WebNode } from '../../Nodes/web/WebNode.tsx';
 
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
-import type { CanvasNodeId, CanvasViewport } from '@sediment/shared';
+import type { CanvasViewport } from '@sediment/shared';
 import type { FrameFitResult } from '@sediment/shared/canvas-engine';
 
 const nodeTypes = {
@@ -514,25 +511,12 @@ export const Canvas: React.FC<CanvasProps> = ({
         // the agent inline). Presetting `id` is supported by the
         // ADD_NODES resolver and already used by paste.
         if (pendingNodeType === 'question') {
-          const nodeId = createId('node') as CanvasNodeId;
-          const threadId = createId('thread');
-          addNode({
-            nodeType: 'question',
+          createQuestionNodeAndCompose({
+            addNode,
             placementPoint: position,
-            id: nodeId,
-            data: {
-              content: '',
-              status: 'idle',
-              threadId,
-              origin: { type: 'user-created' },
-            },
+            canvasId,
           });
           setPendingNodeType(null);
-          useChatStore
-            .getState()
-            .openQuestionCompose(nodeId, threadId, canvasId || undefined);
-          usePanelStore.getState().requestOpenRightPanel();
-          usePanelStore.getState().requestFocusChatInput();
           return;
         }
 

@@ -6,7 +6,11 @@
  * to avoid circular dependencies.
  */
 
-import type { CanvasCommand, CanvasCommandFailureReason } from '../../index.js';
+import type {
+  CanvasCommand,
+  CanvasCommandFailureReason,
+  CanvasExecutionSource,
+} from '../../index.js';
 import type { CanvasReadState } from '../interfaces.js';
 import type { Node, Edge } from '@xyflow/react';
 
@@ -65,9 +69,13 @@ export interface CommandHandlerResult {
   deferredFitFrameIds?: string[];
 }
 
+export interface CommandHandlerContext extends CanvasReadState {
+  source: CanvasExecutionSource;
+}
+
 export type CommandHandler<T extends CanvasCommand = CanvasCommand> = (
   cmd: T,
-  state: CanvasReadState,
+  state: CommandHandlerContext,
 ) => CommandHandlerResult;
 
 // ---------------------------------------------------------------------------

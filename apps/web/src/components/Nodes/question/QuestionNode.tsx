@@ -1,5 +1,5 @@
 import { clsx } from 'clsx';
-import { AlertTriangle, MessageSquare } from 'lucide-react';
+import { AlertTriangle, MapPin, MessageSquare } from 'lucide-react';
 import { memo, useCallback, useMemo, useRef } from 'react';
 
 import { createId } from '@sediment/shared';
@@ -20,6 +20,7 @@ import {
 } from '@/utils/node/nodeFontConfig';
 
 import { NodeWrapper } from '../NodeWrapper';
+import { enterQuestionCompose } from './questionCompose.ts';
 import { TextNodeBody } from '../shared/TextNodeBody';
 
 import type { CanvasQuestionNodeData } from '../types';
@@ -133,9 +134,11 @@ export const QuestionNode = memo(
       !!data.threadId && (hasRun || status === 'running') && !isForkPending;
 
     const openQuestionThread = useChatStore((s) => s.openQuestionThread);
-    const openQuestionCompose = useChatStore((s) => s.openQuestionCompose);
+    const showChatAnchor = useChatStore(
+      (s) => s.viewingQuestionThread?.nodeId === id,
+    );
+    const isRightPanelCollapsed = usePanelStore((s) => s.isRightCollapsed);
     const requestOpenRightPanel = usePanelStore((s) => s.requestOpenRightPanel);
-    const requestFocusChatInput = usePanelStore((s) => s.requestFocusChatInput);
     const canvasId = useCanvasStore((s) => s.canvasId);
 
     // ------------------------------------------------------------------
@@ -177,18 +180,8 @@ export const QuestionNode = memo(
         threadId = createId('thread');
         patchNodeSilent(id, { threadId });
       }
-      openQuestionCompose(id, threadId, canvasId || undefined);
-      requestOpenRightPanel();
-      requestFocusChatInput();
-    }, [
-      id,
-      data.threadId,
-      canvasId,
-      patchNodeSilent,
-      openQuestionCompose,
-      requestOpenRightPanel,
-      requestFocusChatInput,
-    ]);
+      enterQuestionCompose(id, threadId, canvasId);
+    }, [id, data.threadId, canvasId, patchNodeSilent]);
 
     // ------------------------------------------------------------------
     // Double-click:
@@ -293,6 +286,7 @@ export const QuestionNode = memo(
             />
           )}
         </TextNodeBody>
+        {showChatAnchor && !isRightPanelCollapsed && <ChatAnchorOverlay />}
       </NodeWrapper>
     );
   },
@@ -315,5 +309,46 @@ function ConflictBadge({ count }: { count: number }) {
         {count}
       </span>
     </Tooltip>
+  );
+}
+
+function ChatAnchorOverlay() {
+  // A light "anchored" mask laid over the question node's content layer.
+  // Deliberately a content-layer overlay (not a floating corner badge and
+  // not a wraparound glow): it sits above the card body, so it never fights
+  // the sticky depth board's stacking and never competes with the run-status
+  // badge that floats above the node. A warm, low-alpha wash (not a grey
+  // scrim, which would read as "disabled") keeps the text readable while an
+  // anchor watermark makes the "this node anchors the open chat" state clear.
+  return (
+    <div
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-0 overflow-hidden rounded-lg"
+      style={{
+        // Size container so the watermark can scale with the node via
+        // `cqh` (height) / `cqi` (width) units below.
+        containerType: 'size',
+        background:
+          'color-mix(in srgb, var(--question-border) 9%, transparent)',
+        boxShadow:
+          'inset 0 0 0 1.5px color-mix(in srgb, var(--question-border) 55%, transparent), inset 0 0 12px color-mix(in srgb, var(--question-border) 20%, transparent)',
+      }}
+    >
+      <MapPin
+        strokeWidth={1.5}
+        className="absolute"
+        style={{
+          // Adaptive size: ~60% of the node's shorter side (min of height
+          // `cqh` / width `cqi`), clamped so it never gets tiny or
+          // overwhelms the card. Tune the two percentages to taste.
+          height: 'clamp(20px, min(60cqh, 34cqi), 88px)',
+          width: 'auto',
+          right: -2,
+          bottom: -2,
+          color: 'var(--question-border)',
+          opacity: 0.32,
+        }}
+      />
+    </div>
   );
 }
