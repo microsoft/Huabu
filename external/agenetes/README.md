@@ -265,7 +265,13 @@ instance.create(spec);
 
 `create` 在内部完成 `kind → driver` 分发（`resolve(spec.kind).create(spec)`）。**不进实例：** `getMeta` / cached-meta（掺了 L1 的 profile-schema-cache——冷启动 UX 是宿主语法糖，I9.2）与 `notifications()`（喂 L1 缓存的推送流——留待日后）。
 
-**I9.4 The bootstrap surface fixes drivers as static wiring at mount / 引导期表面在 mount 时把 driver 定死为静态接线.**
+**I9.4 A query surface reads durable records, orthogonal to the runtime surface / 查询表面读取持久记录，与运行期表面正交.**
+
+Alongside the imperative *runtime surface* (I9.3, which owns *live* handles) the instance exposes a distinct **query surface** over the **durable records** Agenetes owns, addressed by `namespace` / `threadId` (I4). It is deliberately orthogonal: it operates on persisted state, **independent of whether a handle is live** — so a control write does not lazily spawn a session (I9.3 `get`), and a persisted-record read does not require one either. The confirmed instance today is the ACP session store, which persists `(namespace, threadId) → record` under `namespace.storagePath` (M5.0); enumerating a namespace's persisted threads is a native query over it. The surface stays host-agnostic like `run`'s `TResult`: it returns Agenetes-owned, driver-agnostic records, never a canvas-shaped projection — any host-shaped view (e.g. the chat transcript) is the host's own projection over what it reads.
+
+在命令式的*运行期表面*（I9.3，拥有*活* handle）之外，实例还暴露一个独立的**查询表面**，面向 Agenetes 所拥有的**持久记录**，按 `namespace` / `threadId`（I4）寻址。它刻意与运行期表面正交：它操作已持久化的状态，**与是否有活 handle 无关**——所以一次控制写不会惰性拉起 session（I9.3 的 `get`），一次持久记录读同样不需要活 session。今天已确认的实例是 ACP session store，它把 `(namespace, threadId) → 记录` 持久化在 `namespace.storagePath` 下（M5.0）；枚举某个 namespace 已持久化的 thread 就是它上面的一次原生查询。该表面像 `run` 的 `TResult` 一样保持宿主无关：它返回 Agenetes 拥有的、driver-agnostic 的记录，绝不返回 canvas 形状的投影——任何宿主形状的视图（例如聊天记录）都是宿主基于所读内容的自有投影。
+
+**I9.5 The bootstrap surface fixes drivers as static wiring at mount / 引导期表面在 mount 时把 driver 定死为静态接线.**
 
 The instance is assembled by one call — `mountAgenetes(app, opts) → Agenetes` — that returns it:
 
@@ -288,7 +294,7 @@ const instance: Agenetes = mountAgenetes(app, {
 - `register` runs only here (pre-mount + inject); `resolve` is internal to `create`; `has` / `kinds` are not surfaced.
   `register` 只在此运行（预挂 + 注入）；`resolve` 是 `create` 内部所用；`has` / `kinds` 不对外暴露。
 
-**I9.5 The `spec` / `request` / `ctx` boundary / `spec`、`request`、`ctx` 边界.**
+**I9.6 The `spec` / `request` / `ctx` boundary / `spec`、`request`、`ctx` 边界.**
 
 A turn's inputs split across three layers by lifetime and ownership:
 
@@ -303,12 +309,6 @@ A turn's inputs split across three layers by lifetime and ownership:
 The ACP handle **self-resolves its own live session per turn** (calling the in-package `ensureAcpSession`) and persists it internally — so the `ctx` carries neither the live session nor a persistence callback: the low-level session (I4.3) stays entirely below the instance, unseen by the host.
 
 ACP handle **每轮自解析自己的活 session**（调用包内的 `ensureAcpSession`）并在内部持久化——因此 `ctx` 既不携带活 session、也不携带持久化回调：底层 session（I4.3）完全留在实例之下，宿主看不到。
-
-**I9.6 A query surface reads durable records, orthogonal to the runtime surface / 查询表面读取持久记录，与运行期表面正交.**
-
-Alongside the imperative *runtime surface* (I9.3, which owns *live* handles) the instance exposes a distinct **query surface** over the **durable records** Agenetes owns, addressed by `namespace` / `threadId` (I4). It is deliberately orthogonal: it operates on persisted state, **independent of whether a handle is live** — so a control write does not lazily spawn a session (I9.3 `get`), and a persisted-record read does not require one either. The confirmed instance today is the ACP session store, which persists `(namespace, threadId) → record` under `namespace.storagePath` (M5.0); enumerating a namespace's persisted threads is a native query over it. The surface stays host-agnostic like `run`'s `TResult`: it returns Agenetes-owned, driver-agnostic records, never a canvas-shaped projection — any host-shaped view (e.g. the chat transcript) is the host's own projection over what it reads.
-
-在命令式的*运行期表面*（I9.3，拥有*活* handle）之外，实例还暴露一个独立的**查询表面**，面向 Agenetes 所拥有的**持久记录**，按 `namespace` / `threadId`（I4）寻址。它刻意与运行期表面正交：它操作已持久化的状态，**与是否有活 handle 无关**——所以一次控制写不会惰性拉起 session（I9.3 的 `get`），一次持久记录读同样不需要活 session。今天已确认的实例是 ACP session store，它把 `(namespace, threadId) → 记录` 持久化在 `namespace.storagePath` 下（M5.0）；枚举某个 namespace 已持久化的 thread 就是它上面的一次原生查询。该表面像 `run` 的 `TResult` 一样保持宿主无关：它返回 Agenetes 拥有的、driver-agnostic 的记录，绝不返回 canvas 形状的投影——任何宿主形状的视图（例如聊天记录）都是宿主基于所读内容的自有投影。
 
 ### I10. The spec carries its own env; Agenetes never assembles host URLs / spec 自带 env；Agenetes 从不拼装宿主 URL
 
@@ -330,4 +330,4 @@ external/agenetes/packages/
 - **`@agenetes/runtime`** — the driver registry + live-handle lifecycle owner (the `AgentRuntime`): `register` / `resolve` a driver by kind, and `get` / `create` / `close` a long-lived handle by `threadId`. Depends only on `@agenetes/protocol`.
 - **`@agenetes/agentlet-host`** — the ACP transport host: mounts the agentlet WebSocket server and supervises the agentlet daemon. ACP-private (not shared base).
 - **`@agenetes/acp-driver`** — the standard ACP driver and all its ACP-specific session state/logic: the handle, the client, the `session/update → AgentStreamEvent` translator, the in-memory session registry, the session store (session-id persistence for `session/load` recovery), the `ensureAcpSession` orchestration, and the ACP session-meta handling.
-- **`@agenetes/agenetes`** — the top **assembly** package: elevates `mountAgenetes`, constructs the runtime, pre-mounts the standard ACP driver, accepts the injected custom driver factory + instance-level `logger` + transport wiring, and returns the `Agenetes` instance (`create` / `get` / `close`). The only package L1 imports at the composition root. *(Surface defined in I9.3–I9.5.)*
+- **`@agenetes/agenetes`** — the top **assembly** package: elevates `mountAgenetes`, constructs the runtime, pre-mounts the standard ACP driver, accepts the injected custom driver factory + instance-level `logger` + transport wiring, and returns the `Agenetes` instance (`create` / `get` / `close`). The only package L1 imports at the composition root. *(Surface defined in I9.3–I9.6.)*
