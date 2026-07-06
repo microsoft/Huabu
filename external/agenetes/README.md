@@ -39,9 +39,6 @@ User query in → stream of agent messages out, over a pluggable transport. Tran
 Every turn is appended to a per-thread log so a conversation survives restarts and idle-out. Consumers can replay history and subscribe to the live tail. Orthogonal to transport. *(K8s: etcd + the watch API.)*
 每一轮都追加进 per-thread 的日志，使会话能挺过重启与 idle 挂起。消费者可回放历史，也可订阅实时尾流。与传输正交。*(对应 K8s：etcd + watch API。)*
 
-Reaching the host out-of-band (a canvas reachback resource, "RFS") is a facet of communication: a second channel, parallel to the prompt flow, that a spawned agent uses to read/write host state via plain HTTP (no client SDK shipped into the agent).
-以带外方式回连宿主（一种画布回连资源，"RFS"）是通信维度的一个侧面：一条与 prompt 流并行的第二通道，spawn 出来的 agent 通过普通 HTTP 读写宿主状态（不向 agent 内塞入任何客户端 SDK）。
-
 ## Core invariants (the design consensus) / 核心不变量（设计共识）
 
 The numbered invariants below (I1–I9, with sub-clauses I*n*.*m*) are the design consensus, meant to be cited by reference id. Each is stated in English then Chinese; code blocks and tables are not duplicated.
@@ -196,8 +193,8 @@ The core L2 surface stays deliberately narrow — session lookup / lifecycle (`g
 
 ### I9. The spec carries its own env; Agenetes never assembles host URLs / spec 自带 env；Agenetes 从不拼装宿主 URL
 
-Everything host-specific a workload needs at spawn — including the agent reachback env (e.g. a canvas RFS URL + thread id) — is **assembled in full by the host and carried on the `WorkloadSpec`** (as opaque `spec.env`). Agenetes passes `spec.env` straight through to the spawn call: it does not merge, add, or interpret any entry, and never composes a host URL or reads a host port. The reachback resource shape stays entirely a host concern.
-一个工作负载在 spawn 时所需的一切宿主相关内容——包括 agent 的回连 env（例如画布 RFS URL + thread id）——都由**宿主完整拼装好并搭载在 `WorkloadSpec` 上**（作为不透明的 `spec.env`）。Agenetes 把 `spec.env` 原样传给 spawn 调用：它不合并、不添加、不解释任何条目，也从不拼装宿主 URL 或读取宿主端口。回连资源的形状完全是宿主的关注点。
+Everything host-specific a workload needs at spawn — including any agent reachback env the host arranges (e.g. a host callback URL + thread id) — is **assembled in full by the host and carried on the `WorkloadSpec`** (as opaque `spec.env`). Agenetes passes `spec.env` straight through to the spawn call: it does not merge, add, or interpret any entry, and never composes a host URL or reads a host port. What the reachback env points at, and how the agent uses it, is entirely a host concern Agenetes never sees.
+一个工作负载在 spawn 时所需的一切宿主相关内容——包括宿主安排的任何 agent 回连 env（例如一个宿主回调 URL + thread id）——都由**宿主完整拼装好并搭载在 `WorkloadSpec` 上**（作为不透明的 `spec.env`）。Agenetes 把 `spec.env` 原样传给 spawn 调用：它不合并、不添加、不解释任何条目，也从不拼装宿主 URL 或读取宿主端口。回连 env 指向什么、agent 如何使用它，完全是宿主的关注点，Agenetes 从不接触。
 
 ## Packages
 
