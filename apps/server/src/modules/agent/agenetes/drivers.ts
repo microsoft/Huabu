@@ -77,26 +77,6 @@ export type { AcpCreateSpec };
 const ACP_FACTORY_NAME = 'acp';
 
 /**
- * The host-injected construction bundle for the built-in driver. A Job's
- * backing `Agent` is a fresh instance per invocation, so it is the whole
- * construction input; per-turn context flows through `run(...)`'s
- * {@link BuiltinTurnCtx}.
- */
-export interface BuiltinDriverInput {
-  /** The pi-agent-core runtime object, built over this turn's history. */
-  agent: Agent;
-}
-
-export type BuiltinAgentDriver = AgentDriver<
-  BuiltinDriverInput,
-  AgentRequest,
-  BuiltinRendered,
-  Message[],
-  InStreamEvent,
-  BuiltinTurnCtx
->;
-
-/**
  * The host `WorkloadSpec` the ACP driver is created from — the baked
  * {@link AcpCreateSpec} plus the dispatch `kind` the instance routes on
  * (I5) and the lifecycle `workloadType` (I3.2). An ACP session is a
@@ -213,16 +193,6 @@ export const builtinDriverFactory = (
 });
 
 /**
- * The in-process built-in driver (a Job: cancel-only control). Held as a
- * plain const — a Job never enters a live-handle table, so it needs no
- * runtime registry; the host constructs its handle directly per turn.
- */
-export const builtinAgentDriver: BuiltinAgentDriver = {
-  capabilities: BUILTIN_CAPABILITIES,
-  create: ({ agent }) => new BuiltinAgentHandle(agent),
-};
-
-/**
  * The mounted Agenetes instance (I9) — the single L2 object L1 faces. It
  * owns both drivers (registered via the I9.5 builder), the global
  * live-handle table (`create` / `get` / `close`), and the per-namespace
@@ -239,11 +209,3 @@ export const agenetes: Agenetes<AgenetesWorkloadSpec, AgenetesHandle> =
     .addFactory(BUILTIN_FACTORY_NAME, builtinDriverFactory)
     .register(INTERNAL_DRIVER_KIND, BUILTIN_FACTORY_NAME)
     .build<AgenetesWorkloadSpec, AgenetesHandle>();
-
-/**
- * Resolve the built-in Job driver. It is a plain const (not registry
- * dispatch), so this is a trivial accessor kept for a stable call site.
- */
-export function getBuiltinDriver(): BuiltinAgentDriver {
-  return builtinAgentDriver;
-}

@@ -34,8 +34,6 @@ export {
 } from '@agenetes/acp-driver';
 export {
   agenetes,
-  builtinAgentDriver,
-  getBuiltinDriver,
   builtinDriverFactory,
   BUILTIN_FACTORY_NAME,
   INTERNAL_DRIVER_KIND,
@@ -47,6 +45,4 @@ export {
   type BuiltinWorkloadSpec,
   type AgenetesWorkloadSpec,
   type AcpCreateSpec,
-  type BuiltinDriverInput,
-  type BuiltinAgentDriver,
 } from './drivers.js';

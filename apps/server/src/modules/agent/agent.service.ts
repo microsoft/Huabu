@@ -13,16 +13,18 @@
  *    themselves and pull the relevant `tool_result` payload.
  */
 
-import { Agent } from '@earendil-works/pi-agent-core';
-
 import { type BuiltinRendered } from './agenetes/builtin-handle.js';
-import { getBuiltinDriver } from './agenetes/drivers.js';
+import {
+  agenetes,
+  INTERNAL_DRIVER_KIND,
+  type BuiltinHandle,
+  type BuiltinWorkloadSpec,
+} from './agenetes/drivers.js';
 import { type RenderFn } from './agenetes/handle.js';
+import { canvasAcpNamespace } from '../storage/paths.js';
 import { renderEnvelopeMessages } from './conversation/prompt/build-prompt.js';
 import { dumpAssembledPrompt } from './conversation/prompt/debug-prompt.js';
-import { ensureApiKey, getLLMModel } from './llm.js';
-import { getSessionReadSet } from './session-read-set.js';
-import { buildToolsForScope, type ToolScope } from './tools/index.js';
+import { type ToolScope } from './tools/index.js';
 
 import type { ChatEnvelope } from './conversation/envelope.js';
 import type { Context, Message } from '@earendil-works/pi-ai';
@@ -130,12 +132,16 @@ export interface AgentRunOptions {
  * Run the built-in agent for one turn, streaming events as an async
  * generator.
  *
- * This is now a thin COMPOSITION shell over {@link BuiltinAgentHandle}: it
- * owns the pi-SDK construction + host singletons (`buildToolsForScope` /
- * `getLLMModel` / `ensureApiKey`), builds the backing `Agent` over the
- * prior transcript, then delegates the execution seam to the handle —
- * `submit` (render + `prompt`/`continue`) and `events()` (the bridge loop).
- * Behaviour is identical to the pre-M2 inline loop; only the seam moved.
+ * This is now a thin COMPOSITION shell over the mounted Agenetes instance:
+ * it owns the multi-turn assembly (baking the prior transcript into the
+ * Job spec's `messages`) and the per-turn render / prompt-debug closures,
+ * then hands a serializable {@link BuiltinWorkloadSpec} to
+ * `agenetes.create(spec)` and drives one `run(...)`. The pi-SDK
+ * construction + host singletons (`getLLMModel` / `ensureApiKey` /
+ * `buildToolsForScope` / `getSessionReadSet`) live inside the built-in
+ * driver factory (`agenetes/drivers.ts`), reached through the instance —
+ * L1 no longer holds a driver handle of its own. Behaviour is identical to
+ * the pre-instance path; only the dispatch seam moved.
  *
  * `context.messages` is treated as read-only input; this run's output
  * delta leaves solely via the generator's return value.
@@ -155,45 +161,6 @@ export async function* runAgent(
     logger,
     debugPrompt,
   } = options;
-
-  const tools = buildToolsForScope(scope, {
-    canvasId,
-    origin,
-    ...(threadId ? { threadId } : {}),
-    // Session-scoped read-set (per conversation thread): the revs of nodes
-    // the agent has actually READ this session. Populated only by `read`
-    // (full body), never from context previews. `canvas_commands` injects
-    // `expectRev` from it so the executor's CAS can reject a stale write.
-    readSet: getSessionReadSet(threadId),
-  });
-
-  // The composition layer owns the pi-SDK construction + host singletons
-  // (`getLLMModel` / `ensureApiKey`); the built-in driver receives a ready
-  // `Agent` OBJECT (not the impl), so it stays free of those imports. The
-  // agent is built over the PRIOR transcript (`context.messages`) only —
-  // this turn's rendered rows are appended by the handle's `submit`
-  // (`agent.prompt`), leaving `context.messages` read-only input whose
-  // output travels out solely via the generator's return value.
-  const agent = new Agent({
-    initialState: {
-      systemPrompt: context.systemPrompt,
-      model: getLLMModel(),
-      tools,
-      messages: context.messages,
-    },
-    convertToLlm: (msgs) => msgs as Message[],
-    // pi-agent-core invokes this before every LLM call, including across
-    // long-running tool batches — that's exactly when OAuth tokens (e.g.
-    // GitHub Copilot's short-lived bearer) may need refreshing. Reusing
-    // our existing resolver keeps env / persisted-config / OAuth flows
-    // working unchanged.
-    getApiKey: () => ensureApiKey(),
-    // Run independent tool calls in the same batch concurrently.
-    // `canvas_commands` opts OUT via `executionMode: 'sequential'` on its
-    // tool definition, so any batch containing a write falls back to serial
-    // (see docs/architecture/agent-architecture.md).
-    toolExecution: 'parallel',
-  });
 
   // This turn's render. An envelope renders to this turn's user message(s)
   // (the handle calls `agent.prompt`); an envelope-less caller (memory /
@@ -223,9 +190,35 @@ export async function* runAgent(
       }
     : undefined;
 
-  const handle = getBuiltinDriver().create({ agent });
-  // `null` request when there is no envelope → the built-in driver resumes
-  // the pre-loaded transcript (`agent.continue()`).
+  // Bake this turn's built-in WorkloadSpec (I9.6) — a serializable Job. L1
+  // owns the multi-turn assembly: the prior transcript rides `messages`,
+  // and the driver factory builds a fresh backing `Agent` from the spec.
+  //
+  // Envelope-less / stateless callers (memory / sketch / reachback) have no
+  // conversation thread. `threadId: ''` keeps the instance record key inert
+  // and makes the factory resolve an ephemeral read-set + leave canvas
+  // writes unattributed (every downstream consumer truthy-guards the thread
+  // id), reproducing the pre-instance behaviour where these callers omitted
+  // `threadId` entirely.
+  const spec: BuiltinWorkloadSpec = {
+    kind: INTERNAL_DRIVER_KIND,
+    workloadType: 'Job',
+    threadId: threadId ?? '',
+    namespace: canvasAcpNamespace(canvasId ?? ''),
+    systemPrompt: context.systemPrompt,
+    scope,
+    canvasId,
+    origin,
+    messages: context.messages,
+    maxIterations,
+  };
+
+  // `spec.kind` is `internal`, so the instance's union handle narrows to a
+  // `BuiltinHandle`. A Job is minted fresh each turn (never cached), so
+  // this always yields a new handle. `null` request when there is no
+  // envelope → the handle resumes the pre-loaded transcript
+  // (`agent.continue()`).
+  const handle = agenetes.create(spec) as BuiltinHandle;
   return yield* handle.run(envelope ?? null, render, {
     maxIterations,
     signal,
