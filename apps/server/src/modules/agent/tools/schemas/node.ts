@@ -90,9 +90,6 @@ export const NodeDataSchema = Type.Object(
 
 /** Single node entry passed to `CREATE_NODES`. */
 export const NodeCreateInputSchema = Type.Object({
-  id: Type.Optional(
-    Type.String({ description: 'Explicit node ID (node-<uuid>)' }),
-  ),
   nodeType: NodeTypeSchema,
   data: Type.Optional(NodeDataSchema),
   position: Type.Optional(

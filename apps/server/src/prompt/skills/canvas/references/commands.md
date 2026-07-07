@@ -39,7 +39,7 @@ Everything you need to mutate a canvas. **Load this before issuing your first `c
 
 ## 3. ID conventions
 
-- **Never invent or hand-write node ids.** Omit `id` on `CREATE_NODES`; the server assigns a unique `node-<uuid>` and echoes it (with the node's label) in `results[].nodes`. Reusing a hand-written id across turns collides with nodes you created earlier — that is a real bug, not a convenience.
+- **Omit `id` on `CREATE_NODES` — the server assigns node ids.** It mints a unique `node-<uuid>` and echoes it (with the node's label) in `results[].nodes`. Don't hand-write one: a reused placeholder collides across runs.
 - Edge ids are assigned the same way — omit `id` on `CONNECT_NODES`.
 - To reference a node you just created (connect it, reparent it), read its id from the create call's `results[].nodes` and use it in a **follow-up** call.
 

@@ -108,10 +108,16 @@ export async function handleCanvasCommands(
       return {
         ...cmd,
         nodes: nodes.map((node) => {
-          const data = (node.data as Record<string, unknown> | undefined) ?? {};
+          // Node ids are assigned by the server (executeOnServer →
+          // preAssignIds) and echoed back in `results[].nodes`. The agent
+          // schema no longer exposes an `id` field; strip any stray one so
+          // an invented placeholder can never collide across runs.
+          const rest = { ...node };
+          delete rest.id;
+          const data = (rest.data as Record<string, unknown> | undefined) ?? {};
           const hasLabel = typeof data.label === 'string';
           return {
-            ...node,
+            ...rest,
             data: {
               ...data,
               origin,
@@ -192,10 +198,14 @@ export async function handleCanvasCommands(
         return {
           ...cmd,
           edges: edges.map((edge) => {
+            // Edge ids are server-assigned too; strip any stray id (see the
+            // CREATE_NODES note above).
+            const rest = { ...edge };
+            delete rest.id;
             const stamped = stampStyle(
-              edge.style as Record<string, unknown> | undefined,
+              rest.style as Record<string, unknown> | undefined,
             );
-            return stamped === edge.style ? edge : { ...edge, style: stamped };
+            return stamped === rest.style ? rest : { ...rest, style: stamped };
           }),
         };
       }

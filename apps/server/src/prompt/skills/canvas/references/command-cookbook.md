@@ -81,5 +81,5 @@ Single `SET_NODE_PARENT { nodeId: "<child>", parentId: null }`. Keeps the node's
 
 - **Referencing a node you're creating in the same call.** A `CONNECT_NODES` / `SET_NODE_PARENT` can't see a node created earlier in the same call — its server id isn't known yet. Create first, then wire up in a follow-up call using the ids from `results[].nodes`.
 - **Splitting _independent_ commands needlessly.** If commands don't depend on each other's new ids (creating several unrelated nodes, restyling a cluster, aligning a row), keep them in one call — fewer re-renders. Only split when there's a real id dependency.
-- **Inventing node or edge ids.** Never hand-write ids. Omit `id` on `CREATE_NODES` / `CONNECT_NODES` and the server assigns unique ones; look up ids for existing nodes/edges via `inspect_nodes` / `inspect_edges`.
+- **Trying to name a node or edge you're creating.** Omit `id` on `CREATE_NODES` / `CONNECT_NODES` — the server assigns unique ids and returns them in `results[].nodes`. Look up ids for existing nodes/edges via `inspect_nodes` / `inspect_edges`.
 - **Restyling via `MERGE_NODE_DATA` with `data: { style: { accent: ... } }` plus other fields you did not mean to touch.** Merge is shallow on `data` — keep the patch minimal and explicit.

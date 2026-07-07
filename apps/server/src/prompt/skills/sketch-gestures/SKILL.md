@@ -37,7 +37,7 @@ These are common patterns, not deterministic rules. Trust the screenshot.
 
 ## Rules
 
-- **Never invent node or edge ids.** Only reference ids that appear in the cluster payload, plus ids you create in the same invocation.
+- **Only reference ids that already exist** — the ones in the cluster payload / nearby-edges list. Never fabricate ids. (Gestures that need to reference a node you create in the same invocation — e.g. circle-to-group's new frame — are temporarily unsupported pending the sketch server-apply migration.)
 - **Edge ids always start with `edge-`** and only come from the nearby edges list.
 - For any newly created node, use the **cluster bbox centre** as the position. Explicit positions are honoured verbatim by `CREATE_NODES`.
 - Keep `reasoning` under 20 words. It is shown to the user.

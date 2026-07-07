@@ -57,9 +57,6 @@ export const EdgeStyleSchema = Type.Object({
 
 /** Single edge entry passed to `CONNECT_NODES`. */
 export const EdgeCreateInputSchema = Type.Object({
-  id: Type.Optional(
-    Type.String({ description: 'Explicit edge ID (edge-<uuid>)' }),
-  ),
   source: Type.String({ description: 'Source node ID' }),
   target: Type.String({ description: 'Target node ID' }),
   style: Type.Optional(EdgeStyleSchema),
