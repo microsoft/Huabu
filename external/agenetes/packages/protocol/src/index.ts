@@ -111,6 +111,15 @@ export type {
   AgentCapabilities,
 } from './control.js';
 
+// AgentMetadata (§5 / M5.5): the driver-neutral *state* snapshot the
+// control plane acts on — the folded value of the agent's selectable /
+// usage surface. Companion of ControlMsg (mutates it) and the
+// AgentStreamEvent `*_update` frames (fold into it); persisted on
+// AgentPersistentState behind the ThreadStore port and consumed uniformly
+// by L1 (e.g. the profile-schema cache).
+export { agentMetadataSchema } from './agent-metadata.js';
+export type { AgentMetadata } from './agent-metadata.js';
+
 // Agentlet daemon status (M4): the wire snapshot the L2 control plane
 // surfaces about the single embedded agentlet it supervises. Browser-safe
 // (zod-only) so L1's UI can consume it transitively through
