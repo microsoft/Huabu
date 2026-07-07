@@ -758,26 +758,51 @@ No big-bang. The refactor is a chain of **milestones**, each a standalone, revie
 - *Acceptance:* a driver factory no longer declares `kind`; dispatch is decided only by `register(driverName, factoryName)`; the builder reads only `capabilities` + `create` off the factory output; `build:agenetes` + the acp-driver / agenetes suites + the full `apps/server` suite green; behaviour unchanged.
 
 **M5.1 — Register the built-in as a real `kind='internal'` instance driver (planned).**
-- *Status:* **Planned / deferred** — the design is settled and recorded here; implementation is not scheduled into M5 (blast-radius discipline: the built-in already works as a plain L1 const, so this is a clean-up flip taken on its own, not a prerequisite for M5.5/M6).
+- *Status:* **Planned / deferred** — the design is settled and recorded here; implementation is not scheduled into M5. **Not host-only** (correcting the earlier framing): it needs one **subtree** change first — the instance must learn the `Job` vs `Deployment` lifecycle axis — then the host wiring. Blast-radius discipline keeps it a self-contained flip taken on its own, not a prerequisite for M5.5/M6.
 
 - *Sub-task ledger (ordered — this is the execution sequence; ✅ done · ▶ current · ☐ todo). The prose bullets below give the rationale; this ledger is the authoritative order + status.*
-  1. ☐ **S1 — define the serializable `BuiltinWorkloadSpec`** (`{ kind: 'internal', threadId, systemPrompt, scope, canvasId, origin, messages, maxIterations }`) — a protocol-shaped spec projection; no live `Agent` / `Map` on it.
-  2. ☐ **S2 — author `builtinDriverFactory` in `apps/server`** (L1 artifact closing over `getLLMModel` / `ensureApiKey` / `buildToolsForScope` / `getSessionReadSet` directly — no `factoryArgs`); `create(spec)` builds `new Agent({…})` + resolves `readSet` via `getSessionReadSet(spec.threadId)` inside the closure, returns `BuiltinAgentHandle`. Depends on S1.
-  3. ☐ **S3 — rename `BUILTIN_DRIVER_KIND` `'builtin'` → the contract kind `'internal'`** and mount it via `.addFactory('builtin', builtinDriverFactory).register('internal', 'builtin')` (aligned with the wire `agentBindingSchema` `kind: 'internal'`). Depends on S2.
-  4. ☐ **S4 — flip `runAgent` (`agent.service.ts`) onto the instance** — bake the transcript into `spec.messages` and call `agenetes.create(spec).run(request, render, ctx)` instead of `getBuiltinDriver().create({ agent })`; drop the `create({ agent })` live-object entry point; L1 sheds `getBuiltinDriver` / `builtinAgentDriver`. Depends on S3.
-  5. ☐ **S5 — confirm the instance honours I9.3's Job-transient rule for `kind: 'internal'`** (mint fresh, never register, `get(threadId)` → `undefined`); add/extend an `instance.test.ts` case if not already covered. (If the instance does not yet special-case Job caching, this is the one step that may touch the `@agenetes/agenetes` subtree — commit separately per [§6.2](#62-subtree-maintenance).) Depends on S3.
-  6. ☐ **F1 — verify** (`build:agenetes` + `apps/server` typecheck + the full suite + lint, all green).
-  7. ☐ **F2 — commit** (any subtree change from S5 separate from the Sediment-side rewiring — [§6.2](#62-subtree-maintenance)) + push.
+  1. ☐ **I1 — teach the instance the `Job` vs `Deployment` lifecycle axis** (**subtree** `@agenetes/agenetes` `instance.ts`): `WorkloadSpecShape` gains `workloadKind: WorkloadKind`; `create()` branches on it — a **`Deployment`** keeps today's `runtime.create(threadId, () => driver.create(spec))` (get-or-create + cached + gettable), a **`Job`** calls `driver.create(spec)` **directly** (minted fresh each turn, never enters the live-handle table, so `get(threadId)` stays `undefined`). Extend `instance.test.ts` with a Job case (two `create`s yield **distinct** handles; `get` → `undefined`). This is the framework prerequisite — without it the built-in would be cached as a Deployment and its second turn would reuse a stale transcript. Commit as a subtree change ([§6.2](#62-subtree-maintenance)).
+  2. ☐ **S1 — host: serializable `BuiltinWorkloadSpec` + `builtinDriverFactory`** (`apps/server`). The spec is a protocol-shaped projection `{ kind: 'internal', workloadKind: 'Job', threadId, namespace, systemPrompt, scope, canvasId, origin, messages, maxIterations }` — no live `Agent` / `Map` on it. The factory is an L1 artifact closing over `getLLMModel` / `ensureApiKey` / `buildToolsForScope` / `getSessionReadSet` directly (no `factoryArgs`); `create(spec)` builds `new Agent({…})`, resolving `readSet` via `getSessionReadSet(spec.threadId)` **inside** the closure, and returns `BuiltinAgentHandle`. Depends on I1.
+  3. ☐ **S2 — host: fix the driver-kind naming + mount the built-in** (symmetric with ACP). Introduce `INTERNAL_DRIVER_KIND = 'internal'` (the *contract* kind / `driverName`) and rename `BUILTIN_DRIVER_KIND` `'builtin'` → `BUILTIN_FACTORY_NAME = 'builtin'` (the *impl* identity / `factoryName`) — `'builtin'` was the factory name all along, not the contract kind. Mount `.addFactory(BUILTIN_FACTORY_NAME, builtinDriverFactory).register(INTERNAL_DRIVER_KIND, BUILTIN_FACTORY_NAME)`, and widen the instance generics to the union (`build<AcpWorkloadSpec | BuiltinWorkloadSpec, AcpHandle | BuiltinHandle>()`). Depends on S1.
+  4. ☐ **S3 — host: flip `runAgent` (`agent.service.ts`) onto the instance** — bake the transcript into `spec.messages` (`workloadKind: 'Job'`) and call `agenetes.create(spec).run(request, render, ctx)` instead of `getBuiltinDriver().create({ agent })` (narrowing the union handle by `spec.kind`); drop the `create({ agent })` live-object entry point; L1 sheds `getBuiltinDriver` / `builtinAgentDriver`. Depends on S2.
+  5. ☐ **F1 — verify** (`build:agenetes` + `apps/server` typecheck + the full suite + lint, all green).
+  6. ☐ **F2 — commit** (the I1 subtree change committed **separately** from the S1–S3 host rewiring — [§6.2](#62-subtree-maintenance)) + push.
 
 - *Goal.* Close the last divergence between the code and I9.5: today the canvas-coupled built-in driver stays L1 as a **plain const** (`builtinAgentDriver.create({ agent })`), so it is never instance-dispatched — a small residual runtime surface L1 still reaches around the instance. M5.1 makes the built-in a real `.register('internal', 'builtin')` driver, symmetric with the `external` ACP driver, so **every** agent turn (built-in or external) flows through the one `instance.create(spec).run(...)` seam and L1 holds no driver handle of its own.
 
 - *Why it is safe (does not violate the invariants).* The earlier worry was that the built-in `create({ agent })` passes a **live** `Agent` object across the L1↔L2 seam (a closure, not data — would breach [I8.5](../../external/agenetes/README.md)). The resolution is a factory + a serializable spec:
   1. **`builtinDriverFactory` is an L1 artifact** (it lives in `apps/server`, exactly I9.5's "(a) host-appended, canvas-coupled" factory). Because it is authored in L1, it **closes over the host singletons directly** — `getLLMModel` / `ensureApiKey` / `buildToolsForScope` / `getSessionReadSet` — so it needs **no `factoryArgs`** (factoryArgs exist for *cross-package* DI, e.g. the subtree ACP factory; a host-local factory that already sees the host's module graph does not use them).
-  2. **Only a serializable spec crosses the per-turn seam** — an internal Job spec `{ kind: 'internal', threadId, systemPrompt, scope, canvasId, origin, messages, maxIterations }`. The one live value the old path carried, the tool `readSet` (a live `Map`), is **resolved inside the L1 closure** via `getSessionReadSet(spec.threadId)` — it never crosses the seam. This honours [I8.5](../../external/agenetes/README.md) (messages, not closures) and [I9.2](../../external/agenetes/README.md) (L2 stays canvas-agnostic — every canvas fact travels as opaque spec data the injected L1 factory interprets).
-  3. **A Job is minted fresh each turn and never cached** — exactly I9.3's `create` contract ("a one-shot **Job** gets a transient handle that never registers"; `get(threadId)` returns nothing for a Job). So `create(spec)` builds `new Agent({ … })` from the spec + closed-over singletons, returns the `BuiltinAgentHandle`, runs one turn, and discards it. No live-handle table entry, no reconcile — which is *already* the stated built-in Job semantic (see [`builtin-handle.ts`](../../apps/server/src/modules/agent/agenetes/builtin-handle.ts): "a Job never enters the live-handle registry; `close()` is a no-op").
+  2. **Only a serializable spec crosses the per-turn seam** — an internal Job spec `{ kind: 'internal', workloadKind: 'Job', threadId, namespace, systemPrompt, scope, canvasId, origin, messages, maxIterations }`. The one live value the old path carried, the tool `readSet` (a live `Map`), is **resolved inside the L1 closure** via `getSessionReadSet(spec.threadId)` — it never crosses the seam. This honours [I8.5](../../external/agenetes/README.md) (messages, not closures) and [I9.2](../../external/agenetes/README.md) (L2 stays canvas-agnostic — every canvas fact travels as opaque spec data the injected L1 factory interprets).
+  3. **A Job is minted fresh each turn and never cached** — exactly I9.3's `create` contract ("a one-shot **Job** gets a transient handle that never registers"; `get(threadId)` returns nothing for a Job). This is *not* automatic today: `instance.create()` currently always routes through `runtime.create(threadId, …)`, which get-or-creates and **caches** the handle in the live-handle table — so a second built-in turn would return the first turn's handle (reuse-ignores-spec) with a stale transcript. **I1 fixes this** by branching on the `workloadKind` field that already rides every `WorkloadSpec` ([`workload.ts`](../../external/agenetes/packages/protocol/src/workload.ts) — "the lifecycle axis, owned by the control plane, orthogonal to the driver route"): a `Job` is minted fresh per turn and never entered into the table, so `close()` is a no-op and `get(threadId)` is `undefined` — matching the stated built-in Job semantic ([`builtin-handle.ts`](../../apps/server/src/modules/agent/agenetes/builtin-handle.ts)).
   4. **L1 keeps the multi-turn assembly** — it loads the prior transcript and bakes it into `spec.messages`, and persists the output delta after the turn. The framework runs one Job per turn; the *conversation* is L1's composition (this is the "built-in = L1 multi-turn-wrapping a Job Agent" model). The transcript rides the **spec** (create-time) rather than `request`, because a Job minted fresh each turn has no prior state of its own — the spec is the honest, complete description of that turn's unit of work.
 
-- *Shape of the L1 factory (illustrative).*
+- *What the instance must learn (the I1 subtree change).* The instance dispatches Job vs Deployment off the spec's control-plane `workloadKind`, **not** off the driver `kind` or `capabilities` (the lifecycle axis is orthogonal to the driver route):
+
+  ```ts
+  // external/agenetes/packages/agenetes/src/instance.ts
+  export interface WorkloadSpecShape {
+    readonly threadId: string;
+    readonly kind: string;
+    readonly workloadKind: WorkloadKind; // 'Job' | 'Deployment' (new)
+    readonly namespace: Namespace;
+  }
+
+  create(spec: TSpec): THandle {
+    const driver = runtime.resolve(spec.kind);
+    if (!driver) throw new Error(`no agent driver registered for kind '${spec.kind}'`);
+    const handle =
+      spec.workloadKind === 'Job'
+        ? (driver.create(spec) as THandle) // Job: fresh each turn, never in the live table (I3.2/I9.3)
+        : (runtime.create(spec.threadId, () => driver.create(spec)) as THandle); // Deployment: cached
+    threadStore.upsert(spec.namespace, spec.threadId, {
+      spec,
+      state: new AgentPersistentState(spec.namespace.storage?.root),
+    });
+    return handle;
+  }
+  ```
+
+- *Shape of the L1 factory + mount (illustrative).*
 
   ```ts
   // apps/server/src/modules/agent/agenetes/drivers.ts  (L1 — closes over host singletons directly)
@@ -805,24 +830,24 @@ No big-bang. The refactor is a chain of **milestones**, each a standalone, revie
     },
   });
 
-  // mount: the built-in registers exactly like the ACP driver, no factoryArgs
+  // mount: symmetric with the ACP driver — factoryName is the impl id, driverName the contract kind
   mountAgenetes()
-    .addFactory(ACP_FACTORY_NAME, acpDriverFactory)
-    .register(EXTERNAL_DRIVER_KIND, ACP_FACTORY_NAME)
-    .addFactory('builtin', builtinDriverFactory)
-    .register(BUILTIN_DRIVER_KIND /* 'internal' */, 'builtin')
-    .build();
+    .addFactory(ACP_FACTORY_NAME /* 'acp' */, acpDriverFactory)
+    .register(EXTERNAL_DRIVER_KIND /* 'external' */, ACP_FACTORY_NAME)
+    .addFactory(BUILTIN_FACTORY_NAME /* 'builtin' */, builtinDriverFactory)
+    .register(INTERNAL_DRIVER_KIND /* 'internal' */, BUILTIN_FACTORY_NAME)
+    .build<AcpWorkloadSpec | BuiltinWorkloadSpec, AcpHandle | BuiltinHandle>();
   ```
 
 - *Deliverables.*
-  - Rename `BUILTIN_DRIVER_KIND` `'builtin'` → the contract kind `'internal'` (aligned with the wire `agentBindingSchema` `kind: 'internal'`), injected at `.register('internal', 'builtin')`.
-  - Add `builtinDriverFactory` (above) + a serializable `BuiltinWorkloadSpec` (protocol-shaped, `kind: 'internal'`); drop the `create({ agent })` live-object entry point.
-  - `runAgent` in `agent.service.ts` bakes the spec (transcript → `spec.messages`) and calls `agenetes.create(spec).run(request, render, ctx)` instead of `getBuiltinDriver().create({ agent })`; L1 sheds `getBuiltinDriver` / `builtinAgentDriver`.
-  - Confirm the instance's `create` honours I9.3's Job-transient rule for `kind: 'internal'` (mint fresh, never register, `get` returns nothing) — add/extend an `instance.test.ts` case if not already covered.
+  - **(subtree)** Instance `create()` branches on `spec.workloadKind`; `WorkloadSpecShape` gains `workloadKind`; `instance.test.ts` gains a Job-transient case.
+  - **(host)** Introduce `INTERNAL_DRIVER_KIND = 'internal'` + rename `BUILTIN_DRIVER_KIND` → `BUILTIN_FACTORY_NAME = 'builtin'`; add `builtinDriverFactory` + a serializable `BuiltinWorkloadSpec`; drop the `create({ agent })` live-object entry point and `getBuiltinDriver` / `builtinAgentDriver`.
+  - **(host)** `runAgent` bakes the spec (transcript → `spec.messages`, `workloadKind: 'Job'`) and calls `agenetes.create(spec).run(request, render, ctx)`, narrowing the union handle by `spec.kind`.
+  - Widen the mounted instance generics to the `Acp*` | `Builtin*` union.
 
-- *Depends on:* M5.09 (so the factory is authored without a throwaway `kind`). Independent of M5.5 (which lifts the *stores*; this lifts *dispatch*). **Host-only** — the instance + builder already support register + Job-transient handles ([INST], I9.3/I9.5), so no subtree change is expected (if the instance does not yet special-case Job caching, that fix lands in `@agenetes/agenetes` and commits separately per [§6.2](#62-subtree-maintenance)).
+- *Depends on:* M5.09 (so the factory is authored without a throwaway `kind`). Independent of M5.5 (which lifts the *stores*; this lifts *dispatch*). Touches the `external/agenetes` subtree once (I1) — commit that separately from the host rewiring ([§6.2](#62-subtree-maintenance)).
 
-- *Acceptance:* `apps/server` holds no driver handle of its own (`getBuiltinDriver` / `builtinAgentDriver` gone); both built-in and external turns flow through `instance.create(spec).run(...)`; the built-in spec is fully serializable (no live `Agent` / `Map` on the seam); a built-in `create(spec)` is not cached (`get(threadId)` → `undefined`); L1 still owns transcript assembly + delta persistence; behaviour unchanged; full `apps/server` suite green.
+- *Acceptance:* `apps/server` holds no driver handle of its own (`getBuiltinDriver` / `builtinAgentDriver` gone); both built-in and external turns flow through `instance.create(spec).run(...)`; the built-in spec is fully serializable (no live `Agent` / `Map` on the seam); a built-in (`workloadKind: 'Job'`) `create(spec)` is **not** cached — two `create`s yield distinct handles and `get(threadId)` → `undefined`; a Deployment still get-or-creates as before; L1 still owns transcript assembly + delta persistence; behaviour unchanged; full `apps/server` suite green.
 
 **M5.5 — Sediment two driver-agnostic L2 stores into the framework: turn-history + agent-metadata.**
 - *Goal:* the two stores M5 deliberately left ACP-shaped are in fact **driver-agnostic** — every agent runtime has a conversation history and a metadata surface (selectable models / modes / config-options / slash-commands / usage / title). M5.5 lifts both into L2 *framework* infrastructure (`@agenetes/runtime` + `@agenetes/protocol`), so a second driver (or the built-in) surfaces the same shapes, and L1 becomes a uniform *consumer* of both.
