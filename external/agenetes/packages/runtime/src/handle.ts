@@ -34,19 +34,50 @@ import type {
 } from '@agenetes/protocol';
 
 /**
+ * The per-turn *session state* a handle hands its `render` closure (the
+ * second `render` argument). A stateful render — one whose output depends
+ * on where in the session this turn falls — reads it here rather than
+ * reaching into driver-owned session state itself. It is deliberately a
+ * small, DRIVER-AGNOSTIC descriptor (generic session facts like "is this
+ * the first message"), NOT a driver-specific instruction: the driver
+ * (L2) *owns* and supplies the state; the render (L1) *interprets* it
+ * (e.g. the ACP render maps `isFirstMessage` onto whether to prepend its
+ * one-shot system preamble). New generic fields (turn index, resumed-ness)
+ * are added here over time; nothing driver-specific belongs on it.
+ */
+export interface AgentTurnState {
+  /**
+   * Whether this is, in the session's own reckoning, its first message —
+   * i.e. no prior turn has effectively landed yet (a fresh session, not a
+   * resumed one). Each driver defines what "first" means for its backend;
+   * a render uses it to decide first-turn-only content.
+   */
+  readonly isFirstMessage: boolean;
+}
+
+/**
  * Turns a (non-null) request into the backend-native payload a handle
  * feeds its runtime. Supplied explicitly to {@link AgentHandle.run} —
  * render belongs to the caller, not the handle. It is only ever invoked
  * for a non-null request, so it never has to model the "no new input"
  * case (see {@link AgentHandle.run}).
  *
+ * The handle also passes the per-turn {@link AgentTurnState} it owns as
+ * the second argument, so a *stateful* render can vary its output by
+ * session position without reading driver-owned state directly (the
+ * driver supplies the state; the render interprets it). A stateless
+ * render simply ignores it.
+ *
  * `TRequest` is the host request shape (the L1↔L2 request contract, kept
  * as a type parameter so this package stays host-agnostic). `TRendered`
  * is the backend-native render output (pi-ai `Message[]` for the built-in
- * path, ACP prompt blocks for the external path).
+ * path, ACP prompt blocks for the external path). `TState` is the
+ * driver-supplied turn state, defaulting to the canonical
+ * {@link AgentTurnState}.
  */
-export type RenderFn<TRequest, TRendered> = (
+export type RenderFn<TRequest, TRendered, TState = AgentTurnState> = (
   request: TRequest,
+  state: TState,
 ) => TRendered | Promise<TRendered>;
 
 /**

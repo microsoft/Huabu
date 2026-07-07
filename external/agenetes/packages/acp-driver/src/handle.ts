@@ -15,19 +15,18 @@
  * cross-turn `control`, and has a liveness dimension a Job never has. So
  * the handle itself is long-lived: `AgentRuntime` holds it across turns
  * keyed by `threadId`, and it is addressable out-of-turn for `control()`
- * / `close()`. Its backing {@link AcpSessionEntry} is re-resolved *per
- * turn* (the shell's get-or-create) and handed in on the
- * {@link AcpTurnCtx} — so the handle never captures a stale entry.
- * Out-of-turn (`control` / `close`) it resolves the live entry from
+ * / `close()`. It bakes its {@link AcpCreateSpec} at construction and
+ * self-resolves its backing {@link AcpSessionEntry} *per turn* (via
+ * `ensureAcpSession`, get-or-create) inside {@link run} — so the handle
+ * owns its whole session lifecycle and the composition shell no longer
+ * opens the session out-of-band and hands the entry in. Out-of-turn
+ * (`control` / `close`) it resolves the live entry from
  * `acpSessionRegistry` by `threadId` (a precondition failure when no
  * session is live — we do not lazily spawn one just to, e.g., set a mode).
  *
- * The heavy session-open logic stays in the composition shell; this class
- * only touches the ready entry (via the turn ctx) and the registry
- * lookup. Two session-lifecycle side effects that reach back into the
- * composition layer's persistence — promoting the entry to a durable
- * record on first success — are injected as {@link AcpTurnCtx} callbacks
- * rather than imported.
+ * The heavy session-open logic lives in `ensureAcpSession` (this same
+ * package); the handle drives it from its baked spec and internalizes the
+ * first-success promotion to a durable record (`promoteEntryToPersisted`).
  *
  * The handle is generic over the host request shape (`TRequest`): it never
  * inspects the request, only forwards it to the injected `render` closure,
@@ -39,23 +38,26 @@
 
 import { fauxAssistantMessage } from '@earendil-works/pi-ai';
 
-import { acpSessionRegistry } from './session-registry.js';
-import { acpUpdateToStreamEvent, mergeThinkingChunk } from './translator.js';
 import { applyToolExt } from './overlay.js';
+import { acpSessionRegistry } from './session-registry.js';
+import { ensureAcpSession, promoteEntryToPersisted } from './session.js';
+import { acpUpdateToStreamEvent, mergeThinkingChunk } from './translator.js';
 
-import type { AcpSessionEntry } from './session-registry.js';
 import type { AcpTurnOverlay } from './overlay.js';
-import type { TranslatorLogger } from './translator.js';
-import type {
-  AgentHandle as RuntimeAgentHandle,
-  RenderFn as RuntimeRenderFn,
-} from '@agenetes/runtime';
+import type { AcpBindingRecipe } from './session-store.js';
+import type { AcpSessionLogger } from './session.js';
+import type { Namespace } from '@agenetes/protocol';
 import type {
   AgentCapabilities,
   AgentStreamEvent,
   ControlAck,
   ControlMsg,
 } from '@agenetes/protocol';
+import type {
+  AgentHandle as RuntimeAgentHandle,
+  AgentTurnState,
+  RenderFn as RuntimeRenderFn,
+} from '@agenetes/runtime';
 import type {
   ContentBlock as AcpContentBlock,
   PlanEntry as AcpPlanEntry,
@@ -87,14 +89,37 @@ export interface PreparedAcpPrompt {
   preparedError?: string;
 }
 
+/**
+ * The minimal `WorkloadSpec` projection the ACP handle bakes at
+ * construction (I9.3 `resolve(spec.kind).create(spec)`). It carries
+ * everything the handle needs to self-resolve its live session per turn —
+ * so the composition shell no longer opens the session out-of-band and
+ * hands the entry in. A full host `WorkloadSpec` satisfies this
+ * structurally, so the mounted instance passes its spec straight through.
+ */
+export interface AcpCreateSpec {
+  /** The L1-minted addressable id this Deployment is keyed by (I4.2). */
+  readonly threadId: string;
+  /**
+   * The dispatch `kind` (I5). Optional here — the handle never reads it
+   * (the instance dispatches on it before `create`) — but present on the
+   * full host spec, which is why it is accepted.
+   */
+  readonly kind?: string;
+  /** Storage / metadata scope for this session (I4.1 / §7 M5.0). */
+  readonly namespace: Namespace;
+  /** External binding (alias + profileId) for the thread. */
+  readonly binding: { readonly alias: string; readonly profileId: string };
+  /** `cwd` for `session/new`; when omitted, derived from the bound recipe. */
+  readonly cwd?: string;
+  /** Pre-resolved spawn recipe for a first-time thread (host-resolved). */
+  readonly recipe?: AcpBindingRecipe | null;
+  /** L1-assembled agent reachback env, passed through to the spawn call. */
+  readonly env?: Record<string, string>;
+}
+
 /** The per-turn context an {@link AcpAgentHandle.run} accepts. */
 export interface AcpTurnCtx {
-  /**
-   * The live ACP session for THIS turn, re-resolved by the composition
-   * shell (get-or-create) and handed in per turn so the long-lived handle
-   * never captures a stale entry.
-   */
-  entry: AcpSessionEntry;
   /**
    * Mutable per-turn ACP overlay (tool extensions keyed by `toolCallId`
    * + the turn's plan). Route-owned; mutated in place as events arrive
@@ -103,14 +128,14 @@ export interface AcpTurnCtx {
   overlay: AcpTurnOverlay;
   /** Cancellation signal — wired through to `session/cancel`. */
   signal?: AbortSignal;
-  logger: TranslatorLogger;
   /**
-   * Invoked once the `session/prompt` promise resolves successfully,
-   * before the terminal frame. The composition layer wires this to
-   * `promoteEntryToPersisted(entry, logger)` — a registry/persistence
-   * side effect kept out of the driver to avoid a circular import.
+   * The request-scoped logger for THIS turn. Per-turn (not baked at
+   * construction) so log lines stay correlated to the driving request.
+   * Typed as the wider {@link AcpSessionLogger} because the handle now
+   * drives `ensureAcpSession` / `promoteEntryToPersisted` with it (which
+   * need `debug` / `error`), as well as the per-update translation.
    */
-  onPromptSettled?: () => void;
+  logger: AcpSessionLogger;
   /**
    * Optional developer aid invoked with the serialized prompt payload the
    * moment after `render` runs. Lets the composition layer dump the
@@ -152,9 +177,10 @@ function mapStopReason(
 }
 
 /**
- * The ACP-backed {@link AgentHandle} — a long-lived Deployment. Holds only
- * its `threadId`; the live {@link AcpSessionEntry} for a turn arrives on
- * the {@link AcpTurnCtx} ({@link run}), and out-of-turn ops resolve the
+ * The ACP-backed {@link AgentHandle} — a long-lived Deployment. Bakes its
+ * {@link AcpCreateSpec} at construction and self-resolves the live
+ * {@link AcpSessionEntry} for a turn inside {@link run} (get-or-create);
+ * out-of-turn ops resolve the
  * live session from `acpSessionRegistry` by `threadId`.
  *
  * `TRequest` is the host request shape — never inspected here, only
@@ -177,14 +203,14 @@ export class AcpAgentHandle<TRequest = unknown>
    */
   readonly capabilities: AgentCapabilities = ACP_CAPABILITIES;
 
-  constructor(private readonly threadId: string) {}
+  constructor(private readonly spec: AcpCreateSpec) {}
 
   async *run(
     request: TRequest | null,
     render: RuntimeRenderFn<TRequest, PreparedAcpPrompt>,
     ctx: AcpTurnCtx,
   ): AsyncGenerator<InStreamEvent, Message[]> {
-    const { entry, overlay, signal, logger, onPromptSettled, onPrepared } = ctx;
+    const { overlay, signal, logger, onPrepared } = ctx;
 
     // ACP always needs fresh input — a `session/prompt` with nothing to
     // say is meaningless. A null request (no new input / resume-only) is
@@ -201,10 +227,33 @@ export class AcpAgentHandle<TRequest = unknown>
       return [];
     }
 
+    // Self-resolve (open or reuse) THIS turn's live ACP session from the
+    // baked spec — the handle owns its session lifecycle now, so the
+    // composition shell no longer opens it out-of-band and hands the entry
+    // in. `ensureAcpSession` handles connection lookup, stale-entry
+    // eviction, initialize + session/new, and listener registration; a
+    // hard failure (unbound profile / bridge down) throws here, surfacing
+    // on the generator's first `next()` exactly as before.
+    const entry = await ensureAcpSession({
+      threadId: this.spec.threadId,
+      binding: this.spec.binding,
+      namespace: this.spec.namespace,
+      ...(this.spec.cwd !== undefined && { cwd: this.spec.cwd }),
+      ...(this.spec.recipe !== undefined && { recipe: this.spec.recipe }),
+      ...(this.spec.env !== undefined && { env: this.spec.env }),
+      logger,
+    });
+
     // Render THIS turn's envelope into ACP wire blocks (the composition
     // layer's render closure owns the preprocessor + raw-text fallback, so
-    // `blocks` is always valid here).
-    const prepared = await render(request);
+    // `blocks` is always valid here). The driver OWNS the per-turn session
+    // state and supplies it to render as the second argument: `render`
+    // interprets `isFirstMessage` (→ whether to prepend the one-shot system
+    // preamble) — the "has the preamble been sent" bookkeeping stays L2.
+    const turnState: AgentTurnState = {
+      isFirstMessage: !entry.systemPreambleSent,
+    };
+    const prepared = await render(request, turnState);
     onPrepared?.(prepared.serialized);
 
     // Bridge the per-update callback into an async iterable via a queue.
@@ -354,9 +403,9 @@ export class AcpAgentHandle<TRequest = unknown>
       .then((result) => {
         stopReason = result.stopReason;
         // First-prompt promotion: now that the agent has processed a user
-        // turn its session is genuinely recoverable. Injected so the driver
-        // stays free of the registry/persistence layer.
-        onPromptSettled?.();
+        // turn its session is genuinely recoverable. Internalized here (the
+        // handle owns its session lifecycle) — no longer a ctx callback.
+        promoteEntryToPersisted(entry, logger);
         // Mark the one-shot system preamble delivered, but only if this
         // turn actually carried it — a failed turn or slash-command
         // short-circuit leaves the flag untouched so the next real turn
@@ -458,11 +507,11 @@ export class AcpAgentHandle<TRequest = unknown>
     // Resolve the live session out-of-turn. A control op with no live
     // session to act on is a precondition failure — we do NOT lazily spawn
     // one just to, e.g., set a mode (§3.6.2 / M2.6).
-    const entry = acpSessionRegistry.get(this.threadId);
+    const entry = acpSessionRegistry.get(this.spec.threadId);
     if (!entry) {
       return {
         ok: false,
-        error: `no active ACP session for thread ${this.threadId}`,
+        error: `no active ACP session for thread ${this.spec.threadId}`,
         code: 'not_found',
       };
     }
@@ -519,6 +568,6 @@ export class AcpAgentHandle<TRequest = unknown>
    * registry. Idempotent — a no-op when no session is live.
    */
   close(): void {
-    acpSessionRegistry.remove(this.threadId);
+    acpSessionRegistry.remove(this.spec.threadId);
   }
 }

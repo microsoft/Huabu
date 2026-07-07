@@ -19,20 +19,28 @@ describe('acpDriverFactory (M5 FACTORY)', () => {
     expect(driver.capabilities).toBe(ACP_CAPABILITIES);
   });
 
-  it('create(spec) mints an AcpAgentHandle keyed by spec.threadId (I9.3)', () => {
+  it('create(spec) mints an AcpAgentHandle from the baked spec (I9.3)', () => {
     const driver = acpDriverFactory();
-    const handle = driver.create({ threadId: 'thr_1' });
+    const handle = driver.create({
+      threadId: 'thr_1',
+      namespace: { name: 'canvas_1', storage: { root: '/data/c1' } },
+      binding: { alias: 'copilot', profileId: 'prof_1' },
+    });
     expect(handle).toBeInstanceOf(AcpAgentHandle);
   });
 
-  it('accepts a wider spec structurally, reading only threadId', () => {
+  it('accepts a wider spec structurally (a full WorkloadSpec)', () => {
     const driver = acpDriverFactory();
     // A full WorkloadSpec-shaped object satisfies AcpCreateSpec structurally.
     const handle = driver.create({
       threadId: 'thr_2',
       kind: 'acp',
       namespace: { name: 'canvas_1', storage: { root: '/data/c1' } },
-    } as { threadId: string });
+      binding: { alias: 'claude', profileId: 'prof_2' },
+      cwd: '/work',
+      recipe: null,
+      env: { HUABU_THREAD_ID: 'thr_2' },
+    });
     expect(handle).toBeInstanceOf(AcpAgentHandle);
   });
 });

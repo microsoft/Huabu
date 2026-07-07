@@ -13,6 +13,7 @@
 import {
   ACP_CAPABILITIES,
   AcpAgentHandle,
+  type AcpCreateSpec,
   type AcpTurnCtx,
   type InStreamEvent,
   type PreparedAcpPrompt,
@@ -21,27 +22,17 @@ import {
 import type { AgentDriver } from '@agenetes/runtime';
 import type { Message } from '@earendil-works/pi-ai';
 
+// `AcpCreateSpec` (the create-time WorkloadSpec projection the handle
+// bakes) is defined next to the handle that consumes it; re-exported here
+// so the driver's public surface stays the stable import point.
+export type { AcpCreateSpec } from './handle.js';
+
 /**
  * Dispatch key for the external ACP (agentlet) driver — the I5 contract
  * `kind` the instance's `create(spec)` resolves on. (The I5.1 rename to
  * the contract kind `external` is a separate, later step — M5 item 15.)
  */
 export const ACP_DRIVER_KIND = 'acp';
-
-/**
- * The minimal `WorkloadSpec` projection the ACP driver reads at `create`
- * (I9.3 `resolve(spec.kind).create(spec)`). Today it needs only the
- * addressable `threadId`; the live session is still resolved per turn by
- * the composition shell and handed in on {@link AcpTurnCtx}. C4b grows the
- * projection to the full baked spec (binding / cwd / recipe / namespace /
- * env) once the handle self-resolves its own session. A full `WorkloadSpec`
- * satisfies this structurally, so the mounted instance can pass its spec
- * straight through.
- */
-export interface AcpCreateSpec {
-  /** The L1-minted addressable id this Deployment is keyed by (I4.2). */
-  readonly threadId: string;
-}
 
 /**
  * The concrete ACP {@link AgentDriver} type (a Deployment: full control +
@@ -59,15 +50,17 @@ export type AcpAgentDriver<TRequest = unknown> = AgentDriver<
 
 /**
  * Bootstrap config for {@link acpDriverFactory} (the I9.5 `factoryArgs`).
- * Empty today — the handle still receives its live session via the turn
- * ctx; C4b adds the ACP-private transport backing here.
+ * Empty — the ACP session transport is reached through the
+ * `@agenetes/agentlet-host` module getter (wired at mount), and every
+ * per-thread input (binding / cwd / recipe / namespace / env) rides the
+ * baked {@link AcpCreateSpec}, so the factory needs no config.
  */
 export type AcpDriverFactoryConfig = void;
 
 /**
  * The I9.5 driver factory for the standard ACP driver. Produces a driver
- * whose `create(spec)` mints a long-lived {@link AcpAgentHandle} keyed by
- * `spec.threadId`.
+ * whose `create(spec)` mints a long-lived {@link AcpAgentHandle} that bakes
+ * `spec` and self-resolves its live session per turn (I9.3).
  */
 export function acpDriverFactory<TRequest = unknown>(
   _config?: AcpDriverFactoryConfig,
@@ -75,6 +68,6 @@ export function acpDriverFactory<TRequest = unknown>(
   return {
     kind: ACP_DRIVER_KIND,
     capabilities: ACP_CAPABILITIES,
-    create: (spec) => new AcpAgentHandle<TRequest>(spec.threadId),
+    create: (spec) => new AcpAgentHandle<TRequest>(spec),
   };
 }

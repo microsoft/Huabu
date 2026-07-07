@@ -21,7 +21,7 @@
 // its own transport or receives a shared reference is an impl choice.
 
 import { createAgentRuntime } from '@agenetes/runtime';
-import type { AgentDriver } from '@agenetes/runtime';
+
 
 import {
   createAgenetesInstance,
@@ -32,6 +32,8 @@ import {
   InMemoryThreadStore,
   type ThreadStore,
 } from './thread-store.js';
+
+import type { AgentDriver, AgentHandle } from '@agenetes/runtime';
 
 /**
  * A driver factory: constructs one {@link AgentDriver} from its
@@ -81,7 +83,8 @@ export interface AgenetesBuilder<FMap = Record<never, never>> {
   /** Run every registration and return the mounted instance. */
   build<
     TSpec extends WorkloadSpecShape = WorkloadSpecShape,
-  >(): Agenetes<TSpec>;
+    THandle extends AgentHandle = AgentHandle,
+  >(): Agenetes<TSpec, THandle>;
 }
 
 interface Registration {
@@ -126,7 +129,10 @@ export function mountAgenetes(
       });
       return builder as never;
     },
-    build<TSpec extends WorkloadSpecShape = WorkloadSpecShape>() {
+    build<
+      TSpec extends WorkloadSpecShape = WorkloadSpecShape,
+      THandle extends AgentHandle = AgentHandle,
+    >() {
       const runtime = createAgentRuntime();
       for (const { driverName, factoryName, factoryArgs } of registrations) {
         const factory = factories.get(factoryName);
@@ -144,7 +150,7 @@ export function mountAgenetes(
           create: (input) => driver.create(input),
         });
       }
-      return createAgenetesInstance<TSpec>(runtime, threadStore);
+      return createAgenetesInstance<TSpec, THandle>(runtime, threadStore);
     },
   };
 
