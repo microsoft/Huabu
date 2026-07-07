@@ -40,7 +40,7 @@ describe('CONNECT_NODES — visible endpoint failures', () => {
       {
         type: 'CONNECT_NODES',
         edges: [{ source: 'a', target: 'ghost' }],
-      } as CanvasCommand,
+      } as unknown as CanvasCommand,
       [node('a')],
     );
 
@@ -55,7 +55,7 @@ describe('CONNECT_NODES — visible endpoint failures', () => {
       {
         type: 'CONNECT_NODES',
         edges: [{ source: 'ghost', target: 'b' }],
-      } as CanvasCommand,
+      } as unknown as CanvasCommand,
       [node('b')],
     );
 
@@ -72,7 +72,7 @@ describe('CONNECT_NODES — visible endpoint failures', () => {
           { source: 'a', target: 'b' },
           { source: 'a', target: 'ghost' },
         ],
-      } as CanvasCommand,
+      } as unknown as CanvasCommand,
       [node('a'), node('b')],
     );
 
@@ -88,7 +88,7 @@ describe('CONNECT_NODES — visible endpoint failures', () => {
       {
         type: 'CONNECT_NODES',
         edges: [{ source: 'a', target: 'b' }],
-      } as CanvasCommand,
+      } as unknown as CanvasCommand,
       [node('a'), node('b')],
     );
 
@@ -105,7 +105,7 @@ describe('SET_NODE_PARENT — visible target/parent failures', () => {
         type: 'SET_NODE_PARENT',
         nodeIds: ['ghost'],
         parentId: 'frame-1',
-      } as CanvasCommand,
+      } as unknown as CanvasCommand,
       [frame('frame-1')],
     );
 
@@ -119,7 +119,7 @@ describe('SET_NODE_PARENT — visible target/parent failures', () => {
         type: 'SET_NODE_PARENT',
         nodeIds: ['a'],
         parentId: 'ghost-frame',
-      } as CanvasCommand,
+      } as unknown as CanvasCommand,
       [node('a')],
     );
 
@@ -133,7 +133,7 @@ describe('SET_NODE_PARENT — visible target/parent failures', () => {
         type: 'SET_NODE_PARENT',
         nodeIds: ['a'],
         parentId: 'frame-1',
-      } as CanvasCommand,
+      } as unknown as CanvasCommand,
       [node('a'), frame('frame-1')],
     );
 
