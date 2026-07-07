@@ -72,7 +72,7 @@ export const NodeStyleSchema = Type.Object(
  * Structured `data` payload for create / merge commands.
  *
  * Field applicability depends on `nodeType` — note/text/question use
- * `content`, web/image/pdf/office/video/audio use `src`, frame uses only
+ * `content`, web/image/pdf/office/video use `src`, frame uses only
  * `label`. The description spells this out for the LLM so it can validate
  * locally.
  */
@@ -93,7 +93,7 @@ export const NodeDataSchema = Type.Object(
     src: Type.Optional(
       Type.String({
         description:
-          "Source pointer for media nodes. `web` takes a URL. `image` / `video` / `audio` / `pdf` / `office` take a staged upload path (`upload/<name>`), a bare artifact key a tool handed you (`artifact-…` / `gen-…`), or an `https://…` URL — the server relocates / downloads the bytes into the artifact store and persists a bare key (you don't convert an upload into a key yourself). For image nodes, updating `src` also re-derives the node's height from the new image's aspect ratio.",
+          "Source pointer for media nodes. `web` takes a URL. `image` / `video` / `pdf` / `office` take a staged upload path (`upload/<name>`), a bare artifact key a tool handed you (`artifact-…` / `gen-…`), or an `https://…` URL — the server relocates / downloads the bytes into the artifact store and persists a bare key (you don't convert an upload into a key yourself). For image nodes, updating `src` also re-derives the node's height from the new image's aspect ratio.",
       }),
     ),
     style: Type.Optional(NodeStyleSchema),

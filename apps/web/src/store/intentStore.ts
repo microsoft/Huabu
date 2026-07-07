@@ -355,17 +355,15 @@ export const useIntentStore = create<IntentState>()((set, get) => ({
 
     // Drop the strokes themselves so the grey gesture also disappears.
     if (cluster.strokeIds.length > 0) {
-      useCanvasStore
-        .getState()
-        .executeCommands(
-          [
-            {
-              type: 'DELETE_NODES',
-              nodeIds: cluster.strokeIds as CanvasNodeId[],
-            },
-          ],
-          'ui',
-        );
+      useCanvasStore.getState().executeCommands(
+        [
+          {
+            type: 'DELETE_NODES',
+            nodeIds: cluster.strokeIds as CanvasNodeId[],
+          },
+        ],
+        'ui',
+      );
     }
 
     set({
@@ -388,17 +386,15 @@ export const useIntentStore = create<IntentState>()((set, get) => ({
     }
 
     if (cluster.strokeIds.length > 0) {
-      useCanvasStore
-        .getState()
-        .executeCommands(
-          [
-            {
-              type: 'DELETE_NODES',
-              nodeIds: cluster.strokeIds as CanvasNodeId[],
-            },
-          ],
-          'ui',
-        );
+      useCanvasStore.getState().executeCommands(
+        [
+          {
+            type: 'DELETE_NODES',
+            nodeIds: cluster.strokeIds as CanvasNodeId[],
+          },
+        ],
+        'ui',
+      );
     }
 
     set({
