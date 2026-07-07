@@ -1,6 +1,6 @@
 # Command Cookbook
 
-Composed `canvas_commands` batches for common user intents. Each recipe is a single batch unless noted, and every recipe assumes the conventions in [`commands.md`](commands.md): explicit ids when later commands reference earlier creations, an **explicit `position` on every `CREATE_NODES` / `CREATE_QUESTION` entry**.
+Composed `canvas_commands` batches for common user intents. Each recipe is a single batch unless noted, and every recipe assumes the conventions in [`commands.md`](commands.md): explicit ids when later commands reference earlier creations, an **explicit `position` on every `CREATE_NODES` entry**.
 
 > **Schema is the source of truth.** Field names below come from the `canvas_commands` schemas; this file is about _which commands to compose_, not which fields to type.
 
@@ -62,7 +62,7 @@ Single batch:
 
 Goal: surface a follow-up the agent cannot answer alone.
 
-Single `CREATE_QUESTION` command. Use this instead of asking in chat — the question becomes a node in the canvas, lives next to the context that prompted it, and the user's answer flows back into the same workflow.
+Single `CREATE_NODES` command with one `nodeType: "question"` entry. Use this instead of asking in chat — the question becomes a node in the canvas, lives next to the context that prompted it, and the user's answer flows back into the same workflow.
 
 If the question targets an existing node, `read` that node's markdown first so the question is phrased with real context, not just the label.
 

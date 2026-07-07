@@ -7,7 +7,7 @@ Opinionated layouts for structured diagrams (architecture diagrams, flowcharts, 
 - The canvas uses x (right = positive) and y (down = positive) coordinates.
 - A standard node is about **400px wide** and **300px tall**. Use a gap of **~50px** between nodes.
 - Headers / labels can be narrower (≈250px wide).
-- **`position` is required** on every `CREATE_NODES` / `CREATE_QUESTION` entry and is honoured verbatim by the engine. There is no fallback layout to fall back on — if you don't pick a slot, the call will be rejected.
+- **`position` is required** on every `CREATE_NODES` entry and is honoured verbatim by the engine. There is no fallback layout to fall back on — if you don't pick a slot, the call will be rejected.
 
 ## Positioning patterns
 

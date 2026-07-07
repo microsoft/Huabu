@@ -1,6 +1,8 @@
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { getQuestionNodeStatus } from '@sediment/shared';
+
 import { CanvasLayerTree } from './CanvasLayerTree';
 import { CanvasSearchInput } from './CanvasSearchInput';
 import { CanvasSearchResults } from './CanvasSearchResults';
@@ -25,7 +27,6 @@ import type {
   CanvasNodeType,
   ExternalNoteItem,
   OfficeFormat,
-  QuestionNodeStatus,
   SketchStroke,
 } from '@sediment/shared';
 
@@ -65,8 +66,8 @@ const renderNodeIcon = (node: DataSourceNodeLike) => {
   // doubles as an "ambient" status board for in-flight conversations,
   // mirroring what the on-canvas `StatusBadge` shows.
   if (node.type === 'question') {
-    const status = node.data.status as QuestionNodeStatus | undefined;
-    if (!status) return iconEl;
+    const status = getQuestionNodeStatus(node.data);
+    if (status === 'idle') return iconEl;
     return (
       <span className="relative inline-flex">
         {iconEl}

@@ -51,7 +51,6 @@ export function createQuestionNodeAndCompose(opts: {
     placementPoint: opts.placementPoint,
     data: {
       content: '',
-      status: 'idle',
       threadId,
       origin: { type: 'user-created' },
     },

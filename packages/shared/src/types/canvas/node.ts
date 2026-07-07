@@ -33,8 +33,6 @@ export type CanvasNodeType = (typeof CANVAS_NODE_TYPES)[number];
  * Node kinds the agent is allowed to construct via `CREATE_NODES`.
  * Excludes:
  * - `sketch` — produced only by the freehand drawing tool.
- * - `question` — created via the dedicated `CREATE_QUESTION` command,
- *   which carries question-specific fields.
  */
 export const AGENT_CREATABLE_NODE_TYPES = [
   'note',
@@ -45,6 +43,7 @@ export const AGENT_CREATABLE_NODE_TYPES = [
   'office',
   'video',
   'frame',
+  'question',
 ] as const;
 export type AgentCreatableNodeType =
   (typeof AGENT_CREATABLE_NODE_TYPES)[number];
@@ -496,6 +495,17 @@ export interface SketchNodeData extends BaseNodeData {
 /** Execution status of a question node. */
 export type QuestionNodeStatus = 'idle' | 'running' | 'done' | 'error';
 
+/** Resolve the sparse persisted question status; absent means idle. */
+export function getQuestionNodeStatus(data: unknown): QuestionNodeStatus {
+  const status =
+    typeof data === 'object' && data !== null && 'status' in data
+      ? (data as { status?: unknown }).status
+      : undefined;
+  return status === 'running' || status === 'done' || status === 'error'
+    ? status
+    : 'idle';
+}
+
 /** Question node: AI interaction medium embedded on canvas. */
 export interface QuestionNodeData extends BaseNodeData {
   type: 'question';
@@ -507,8 +517,8 @@ export interface QuestionNodeData extends BaseNodeData {
    * anything.
    */
   content: string;
-  /** Current execution status. */
-  status: QuestionNodeStatus;
+  /** Current execution status. Absent means `idle`. */
+  status?: QuestionNodeStatus;
   /** Agent thread ID (set when the node is opened for composition). */
   threadId?: string;
   /** Error message when status === 'error'. */

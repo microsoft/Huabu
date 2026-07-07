@@ -80,11 +80,11 @@ Every `CanvasCommand`:
 
 ### Command Catalog
 
-See `packages/shared/src/types/canvas/command.ts` for the full discriminated union (17 command types). Summary:
+See `packages/shared/src/types/canvas/command.ts` for the full discriminated union. Summary:
 
 | Category         | Commands                                                |
 | ---------------- | ------------------------------------------------------- |
-| Node lifecycle   | `CREATE_NODES`, `DELETE_NODES`, `CREATE_QUESTION`       |
+| Node lifecycle   | `CREATE_NODES`, `DELETE_NODES`                          |
 | Node editing     | `MERGE_NODE_DATA`, `CHANGE_NODE_TYPE`                   |
 | Structure        | `SET_NODE_PARENT`, `DISSOLVE_FRAME`, `SET_FRAME_LAYOUT` |
 | Geometry         | `SET_NODE_GEOMETRY`                                     |
@@ -93,6 +93,14 @@ See `packages/shared/src/types/canvas/command.ts` for the full discriminated uni
 | Locking          | `SET_NODE_LOCKED`                                       |
 | Edge graph       | `CONNECT_NODES`, `DISCONNECT_EDGES`, `SET_EDGE_STYLE`   |
 | Algorithms       | `ALIGN_NODES`, `DISTRIBUTE_NODES`                       |
+
+Geometry commands preserve each node type's sizing model. `text` and
+`question` nodes are always content-height nodes: `CREATE_NODES`,
+`SET_NODE_GEOMETRY`, and `CHANGE_NODE_TYPE` preserve/write their top-level
+`style.width` but do not persist top-level `style.height`. Use
+`data.style.fontSize` to change their rendered scale. `note` nodes are
+different: they may either clear top-level `style.height` for auto height or pin
+it for fixed-height notes.
 
 ### Explicit IDs
 

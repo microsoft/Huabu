@@ -18,6 +18,10 @@ type Querystring = WebLookupQuery;
 const REMOTE_URL_RE = /^https?:\/\//i;
 const DATA_URL_RE = /^data:/i;
 
+function isMhtmlArtifactKey(src: string): boolean {
+  return src.toLowerCase().endsWith('.mhtml');
+}
+
 function toReaderHtml(markdown: string): string {
   const rawHtml = marked.parse(markdown) as string;
 
@@ -309,6 +313,9 @@ const webRoutes: FastifyPluginAsync = async (fastify) => {
         src: `/api/canvas/${encodeURIComponent(canvasId)}/artifact/${encodeURIComponent(mhtmlArtifact)}`,
         kind: 'html',
         embeddable: true,
+        // Static archive of an already-rendered page. The client must
+        // embed it with scripts off — see `WebPageResponse.snapshot`.
+        snapshot: true,
       };
       return reply.send(payload);
     }
@@ -337,6 +344,7 @@ const webRoutes: FastifyPluginAsync = async (fastify) => {
       src: `/api/canvas/${encodeURIComponent(canvasId)}/artifact/${encodeURIComponent(src)}`,
       kind: 'html',
       embeddable: true,
+      ...(isMhtmlArtifactKey(src) ? { snapshot: true } : {}),
     };
     return reply.send(payload);
   });

@@ -1,5 +1,6 @@
 import { noop, type CommandDefinition } from './types.js';
 import { stripMarkdown } from '../utils/markdown.js';
+import { isAlwaysAutoHeightNodeType } from '../utils/nodeSizes.js';
 
 import type { CanvasCommand } from '../../index.js';
 
@@ -17,14 +18,9 @@ type Cmd = Extract<CanvasCommand, { type: 'CHANGE_NODE_TYPE' }>;
  * `stripMarkdown` — otherwise users would see literal `**bold**` / `# heading`
  * markers in a node that has no Markdown renderer.
  *
- * Sizing: `note` and `text` use different sizing models — `note` keeps a
- * fixed `style.width` (default 400) with auto-grown height, while `text`
- * uses content-measured auto-width unless both width and height are set.
- * To avoid a jarring jump on conversion, we preserve the node's currently
- * rendered footprint by carrying both width and height onto the new node,
- * falling back to React Flow's `measured` dimensions when the user hasn't
- * pinned an explicit size. This keeps the visual box stable across the
- * toggle; the user can still resize freely afterwards.
+ * Sizing: `note` may pin top-level `style.height`; `text` is always
+ * content-height and uses `data.style.fontSize` for scale. Conversion preserves
+ * width, but drops height whenever the target type is always auto-height.
  */
 const NOTE_ONLY_DATA_KEYS = ['provenance'] as const;
 
@@ -75,16 +71,22 @@ const changeNodeType: CommandDefinition<Cmd> = {
         typeof n.measured?.height === 'number' ? n.measured.height : undefined;
       const nextWidth = prevStyle.width ?? measuredWidth;
       const nextHeight = prevStyle.height ?? measuredHeight;
+      const targetKeepsHeight = !isAlwaysAutoHeightNodeType(cmd.to);
+      const nextStyle = {
+        ...prevStyle,
+        ...(nextWidth !== undefined ? { width: nextWidth } : {}),
+      };
+      if (targetKeepsHeight && nextHeight !== undefined) {
+        nextStyle.height = nextHeight;
+      } else {
+        delete nextStyle.height;
+      }
 
       return {
         ...n,
         type: cmd.to,
         data,
-        style: {
-          ...prevStyle,
-          ...(nextWidth !== undefined ? { width: nextWidth } : {}),
-          ...(nextHeight !== undefined ? { height: nextHeight } : {}),
-        },
+        style: nextStyle,
       };
     });
 

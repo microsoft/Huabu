@@ -62,8 +62,8 @@ export const NodeStyleSchema = Type.Object(
 /**
  * Structured `data` payload for create / merge commands.
  *
- * Field applicability depends on `nodeType` — note/text use `content`,
- * web/image/pdf/video use `src`, frame uses only `label`. The
+ * Field applicability depends on `nodeType` — note/text/question use
+ * `content`, web/image/pdf/video use `src`, frame uses only `label`. The
  * description spells this out for the LLM so it can validate locally.
  */
 export const NodeDataSchema = Type.Object(
@@ -71,7 +71,8 @@ export const NodeDataSchema = Type.Object(
     label: Type.Optional(Type.String({ description: 'Display label / title' })),
     content: Type.Optional(
       Type.String({
-        description: 'Markdown content (note nodes) or plain text (text nodes)',
+        description:
+          'Markdown content (note nodes) or plain text (text/question nodes)',
       }),
     ),
     src: Type.Optional(
@@ -83,7 +84,7 @@ export const NodeDataSchema = Type.Object(
   },
   {
     description:
-      'Node data. Fields depend on nodeType: note → label, content, style; text → label, content, style; web/image/pdf/video → label, src; frame → label',
+      'Node data. Fields depend on nodeType: note → label, content, style; text/question → label, content, style; web/image/pdf/video → label, src; frame → label',
   },
 );
 

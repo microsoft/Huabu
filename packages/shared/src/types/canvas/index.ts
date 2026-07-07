@@ -83,6 +83,7 @@ export {
   isFrameNode,
   isSketchNode,
   isQuestionNode,
+  getQuestionNodeStatus,
   normalizeOrigin,
 } from './node.js';
 

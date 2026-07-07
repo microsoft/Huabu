@@ -108,7 +108,7 @@ export default function resolvePasteClipboard(
       if (clonedData.__forkConversation) {
         delete clonedData.__forkConversation;
       } else {
-        clonedData.status = 'idle';
+        delete clonedData.status;
         delete clonedData.runAt;
         delete clonedData.threadId;
         delete clonedData.errorMessage;

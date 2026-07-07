@@ -10,7 +10,6 @@ import alignNodes from './alignNodes.js';
 import changeNodeType from './changeNodeType.js';
 import connectNodes from './connectNodes.js';
 import createNodes from './createNodes.js';
-import createQuestion from './createQuestion.js';
 import deleteNodes from './deleteNodes.js';
 import disconnectEdges from './disconnectEdges.js';
 import dissolveFrame from './dissolveFrame.js';
@@ -42,7 +41,6 @@ type HandlerMap = {
 
 export const HANDLERS: HandlerMap = {
   CREATE_NODES: createNodes.handler,
-  CREATE_QUESTION: createQuestion.handler,
   DELETE_NODES: deleteNodes.handler,
   MERGE_NODE_DATA: mergeNodeData.handler,
   SET_NODE_PARENT: setNodeParent.handler,
@@ -66,7 +64,6 @@ export const HANDLERS: HandlerMap = {
 
 export const COMMAND_META: Record<CanvasCommandType, CommandMeta> = {
   CREATE_NODES: createNodes.meta,
-  CREATE_QUESTION: createQuestion.meta,
   DELETE_NODES: deleteNodes.meta,
   MERGE_NODE_DATA: mergeNodeData.meta,
   SET_NODE_PARENT: setNodeParent.meta,

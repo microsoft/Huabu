@@ -80,7 +80,7 @@ const DEFAULT_ORIGIN: NodeOrigin = { type: 'ai-operate' };
  * Execute a batch of canvas commands and return the SSE-bound payload.
  *
  * `origin` controls the `NodeOrigin` stamp injected onto every CREATE /
- * MERGE / CREATE_QUESTION command. Defaults to `{ type: 'ai-operate' }`
+ * MERGE command. Defaults to `{ type: 'ai-operate' }`
  * for the chat/operate agent; the sketch pipeline overrides this to
  * `{ type: 'sketch-recognized' }` so user-authored gestures are not
  * mis-tagged as AI-initiated. Provenance (`author: 'ai'`) and
@@ -209,13 +209,6 @@ export async function handleCanvasCommands(
           );
           return stamped === entry.style ? entry : { ...entry, style: stamped };
         }),
-      };
-    }
-    if (cmd.type === 'CREATE_QUESTION') {
-      const raw = cmd as Record<string, unknown>;
-      return {
-        ...raw,
-        origin,
       };
     }
     return cmd;

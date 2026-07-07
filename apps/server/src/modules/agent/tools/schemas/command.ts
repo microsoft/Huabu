@@ -27,7 +27,7 @@ import { NodeCreateInputSchema, NodeDataSchema } from './node.js';
 export const AlignDirectionSchema = literalUnion(CANVAS_ALIGN_DIRECTIONS);
 
 /**
- * The 13-arm discriminated union of agent-allowed canvas commands.
+ * Discriminated union of agent-allowed canvas commands.
  * Order here mirrors the order documented in `canvasCommandsTool`'s
  * description so the LLM-facing schema and prose stay in sync.
  */
@@ -98,25 +98,6 @@ export const AgentCanvasCommandSchema = Type.Union([
   Type.Object({
     type: Type.Literal('DISTRIBUTE_NODES'),
     nodeIds: Type.Array(Type.String()),
-  }),
-  Type.Object({
-    type: Type.Literal('CREATE_QUESTION'),
-    id: Type.Optional(
-      Type.String({ description: 'Explicit node ID (node-<uuid>)' }),
-    ),
-    content: Type.String({ description: 'The question text content' }),
-    position: Type.Optional(
-      Type.Object(PointSchema.properties, {
-        description:
-          'Required. The top-left position of the question node. Although marked optional in the schema for compatibility, you MUST always specify explicit coordinates because the auto-layout engine has been removed.',
-      }),
-    ),
-    size: Type.Optional(NodeSizeSchema),
-    parentId: Type.Optional(
-      Type.Union([Type.String(), Type.Null()], {
-        description: 'Parent frame id, or null for root',
-      }),
-    ),
   }),
   Type.Object({
     type: Type.Literal('SET_FRAME_LAYOUT'),
