@@ -21,7 +21,10 @@ import {
   type PreparedAcpPrompt,
 } from '@agenetes/acp-driver';
 import { mountAgenetes } from '@agenetes/agenetes';
+import { Agent } from '@earendil-works/pi-agent-core';
 
+import { ensureApiKey, getLLMModel } from '../llm.js';
+import { getSessionReadSet } from '../session-read-set.js';
 import {
   BUILTIN_CAPABILITIES,
   BuiltinAgentHandle,
@@ -34,11 +37,12 @@ import {
   type AgentRequest,
   type InStreamEvent,
 } from './handle.js';
+import { buildToolsForScope, type ToolScope } from '../tools/index.js';
 
 import type { Agenetes } from '@agenetes/agenetes';
-import type { WorkloadType } from '@agenetes/protocol';
-import type { Agent } from '@earendil-works/pi-agent-core';
+import type { Namespace, WorkloadType } from '@agenetes/protocol';
 import type { Message } from '@earendil-works/pi-ai';
+import type { NodeOrigin } from '@sediment/shared';
 
 /**
  * Dispatch key reserved for the in-process pi-agent-core (built-in) driver.
@@ -98,6 +102,95 @@ export type AcpWorkloadSpec = AcpCreateSpec & {
 
 /** The concrete long-lived ACP (Deployment) handle type. */
 export type AcpHandle = AgentHandle<PreparedAcpPrompt, AcpTurnCtx>;
+
+/**
+ * The serializable built-in `WorkloadSpec` (I8.5 / I9.6) — a Job. It is a
+ * pure-data projection the built-in factory constructs a fresh backing
+ * `Agent` from each turn: NO live `Agent` / no live `Map` rides it (the
+ * one live value the old `create({ agent })` path carried — the tool
+ * `readSet` — is resolved *inside* the factory closure via
+ * {@link getSessionReadSet}, never on the seam).
+ *
+ * A Job is minted fresh every turn, so the spec is the honest, complete
+ * description of that turn's unit of work: the prior transcript rides
+ * `messages` (baked at create-time by L1's multi-turn assembly, I9.3),
+ * not `request`.
+ */
+export interface BuiltinWorkloadSpec {
+  /** The driver route (I5) — the built-in's contract kind (`internal`). */
+  readonly kind: string;
+  /** The lifecycle axis (I3.2) — always `'Job'` for the built-in. */
+  readonly workloadType: WorkloadType;
+  /** Conversation thread identity (I4.2). */
+  readonly threadId: string;
+  /** The namespace the durable record is persisted under (I4.1). */
+  readonly namespace: Namespace;
+  /** System prompt for this turn's backing agent. */
+  readonly systemPrompt?: string;
+  /** Tool surface + scope-specific wiring (`buildToolsForScope`). */
+  readonly scope: ToolScope;
+  /** Current canvas id, implicit context for canvas-aware tools. */
+  readonly canvasId?: string;
+  /** `NodeOrigin` stamp forwarded to `canvas_commands`. */
+  readonly origin?: NodeOrigin;
+  /** Prior transcript the agent runs over (baked by L1, read-only input). */
+  readonly messages: Message[];
+  /** Soft cap on agent turns (LLM call + tool batch). */
+  readonly maxIterations?: number;
+}
+
+/**
+ * The I9.5 driver factory for the in-process built-in ("internal") driver
+ * — a Job (cancel-only control). Unlike the ACP factory (which ships in a
+ * cross-package subtree and takes its transport via `factoryArgs`), this
+ * is an **L1 artifact**: it lives in `apps/server`, so it closes over the
+ * host singletons directly (`getLLMModel` / `ensureApiKey` /
+ * `buildToolsForScope` / `getSessionReadSet`) and needs no `factoryArgs`.
+ * `create(spec)` builds a fresh backing `Agent` over the baked transcript
+ * and wraps it in a {@link BuiltinAgentHandle}.
+ */
+export const builtinDriverFactory = (): AgentDriver<
+  BuiltinWorkloadSpec,
+  AgentRequest,
+  BuiltinRendered,
+  Message[],
+  InStreamEvent,
+  BuiltinTurnCtx
+> => ({
+  // No `kind`: dispatch is external (M5.09) — the mount
+  // `.register(INTERNAL_DRIVER_KIND, BUILTIN_FACTORY_NAME)` fixes it.
+  capabilities: BUILTIN_CAPABILITIES,
+  create(spec: BuiltinWorkloadSpec): BuiltinAgentHandle {
+    const tools = buildToolsForScope(spec.scope, {
+      canvasId: spec.canvasId,
+      origin: spec.origin,
+      threadId: spec.threadId,
+      // Session-scoped read-set (per conversation thread), resolved INSIDE
+      // this L1 closure — a live Map that never crosses the L1↔L2 seam.
+      readSet: getSessionReadSet(spec.threadId),
+    });
+    ensureApiKey();
+    const agent = new Agent({
+      initialState: {
+        systemPrompt: spec.systemPrompt,
+        model: getLLMModel(),
+        tools,
+        // Prior transcript baked by L1; this turn's rendered rows are
+        // appended by the handle's `run` (`agent.prompt`), leaving these
+        // read-only input whose output travels out via the run's return.
+        messages: spec.messages,
+      },
+      convertToLlm: (msgs) => msgs as Message[],
+      // Invoked before every LLM call (incl. across long tool batches) so
+      // short-lived OAuth bearers can refresh — reuse the host resolver.
+      getApiKey: () => ensureApiKey(),
+      // Independent tool calls in a batch run concurrently; a batch with a
+      // canvas write falls back to serial via the tool's `executionMode`.
+      toolExecution: 'parallel',
+    });
+    return new BuiltinAgentHandle(agent);
+  },
+});
 
 /**
  * The in-process built-in driver (a Job: cancel-only control). Held as a
