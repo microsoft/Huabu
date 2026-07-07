@@ -18,18 +18,17 @@
  */
 
 import {
-  ensureAcpSession,
-  promoteEntryToPersisted,
-} from '@agenetes/acp-driver';
-
-import {
   prepareExternalAgentPrompt,
   serializeRawPrompt,
 } from './preprocessor.js';
 import { getProfile } from './profile-store.js';
 import { buildReachbackEnv } from './reachback-env.js';
 import { canvasAcpNamespace } from '../../storage/paths.js';
-import { acquireAcpHandle } from '../agenetes/drivers.js';
+import {
+  agenetes,
+  ACP_DRIVER_KIND,
+  type AcpWorkloadSpec,
+} from '../agenetes/drivers.js';
 import { type RenderFn } from '../agenetes/handle.js';
 import { dumpAssembledPrompt } from '../conversation/prompt/debug-prompt.js';
 
@@ -171,34 +170,36 @@ export async function* runAcpAgent(
   // Verbatim user text for the raw-text fallback + slash detection.
   const rawText = opts.envelope.user.text;
 
-  // 1-2. Ensure (open or reuse) the per-thread ACP session. The helper
-  //      handles connection lookup, stale-entry eviction, initialize +
-  //      session/new, and registers the `available_commands_update`
-  //      listener. We deliberately do NOT pass `cwd` here so
-  //      `ensureAcpSession` derives it from the bound profile.
-  const entry = await ensureAcpSession({
+  // Bake this thread's WorkloadSpec (I9.6). The ACP handle self-resolves
+  // (opens or reuses) its live session per turn from these fields — L1 no
+  // longer opens the session out-of-band. We deliberately do NOT set `cwd`
+  // when the caller omitted it, so the handle derives it from the bound
+  // profile's recipe.
+  const spec: AcpWorkloadSpec = {
     threadId,
-    binding,
+    kind: ACP_DRIVER_KIND,
     namespace: canvasAcpNamespace(canvasId),
+    binding,
     env: buildReachbackEnv(threadId, canvasId),
     ...(opts.cwd !== undefined && { cwd: opts.cwd }),
     recipe: resolveBindingRecipe(binding.profileId),
-    logger,
-  });
+  };
 
-  // 3. The render closure: envelope -> ACP wire blocks. Owns the
-  //    preprocessor + raw-text fallback so the driver always receives
-  //    valid blocks. `includeSystem` reads the entry's one-shot preamble
-  //    flag at render time; the handle flips it on prompt success.
+  // The render closure: (envelope, turnState) -> ACP wire blocks. Owns the
+  // preprocessor + raw-text fallback so the driver always receives valid
+  // blocks. The driver (L2) owns the per-turn session state and supplies
+  // it here: `state.isFirstMessage` drives the one-shot system preamble —
+  // L1 no longer reads the entry's `systemPreambleSent` flag itself.
   const render: RenderFn<PreparedAcpPrompt> = async (
     request,
+    state,
   ): Promise<PreparedAcpPrompt> => {
     try {
       const result = await prepareExternalAgentPrompt({
         envelope: request,
         agentAlias: binding.alias,
         canvasId: canvasId || null,
-        includeSystem: !entry.systemPreambleSent,
+        includeSystem: state.isFirstMessage,
         logger,
       });
       return {
@@ -245,15 +246,15 @@ export async function* runAcpAgent(
       }
     : undefined;
 
-  const handle = acquireAcpHandle(threadId);
+  // Get-or-create the long-lived ACP handle for this thread (I9.3) and
+  // drive one turn. The handle self-resolves its session inside `run`, so
+  // any session-open failure (unbound profile / bridge down) throws on the
+  // generator's first `next()` — exactly as before.
+  const handle = agenetes.create(spec);
   return yield* handle.run(opts.envelope, render, {
-    entry,
     overlay,
     signal,
     logger,
-    // First-prompt promotion is a registry/persistence side effect, kept
-    // out of the driver and injected here (see AcpTurnCtx).
-    onPromptSettled: () => promoteEntryToPersisted(entry, logger),
     onPrepared,
   });
 }

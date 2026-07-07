@@ -42,7 +42,11 @@ import {
 import { buildReachbackEnv } from './reachback-env.js';
 import { resolveBindingRecipe } from './service.js';
 import { canvasAcpNamespace } from '../../storage/paths.js';
-import { acquireAcpHandle } from '../agenetes/index.js';
+import {
+  agenetes,
+  ACP_DRIVER_KIND,
+  type AcpWorkloadSpec,
+} from '../agenetes/index.js';
 
 import type { AcpSessionEntry } from '@agenetes/acp-driver';
 import type { AcpSessionPersistedMeta } from '@agenetes/acp-driver';
@@ -84,12 +88,28 @@ async function resolveSetRpcEntry(
   ctx: { profileId?: string; canvasId?: string; cwd?: string },
   logger: FastifyBaseLogger,
 ): Promise<
-  | { ok: true; entry: AcpSessionEntry }
+  | { ok: true; entry: AcpSessionEntry; spec: AcpWorkloadSpec }
   | { ok: false; status: number; body: { message: string; code: string } }
 > {
   const existing = acpSessionRegistry.get(threadId);
-  if (existing) return { ok: true, entry: existing };
   if (!ctx.profileId) {
+    if (existing) {
+      return {
+        ok: true,
+        entry: existing,
+        // A live session with no profileId in the request: rebuild the
+        // spec from the entry so the handle can be (re)created for the
+        // control op. `binding.alias` falls back to the profileId.
+        spec: {
+          threadId,
+          kind: ACP_DRIVER_KIND,
+          namespace: existing.namespace,
+          binding: { alias: existing.profileId, profileId: existing.profileId },
+          cwd: existing.cwd,
+          recipe: existing.bindingRecipe,
+        },
+      };
+    }
     return {
       ok: false,
       status: 404,
@@ -99,17 +119,27 @@ async function resolveSetRpcEntry(
       },
     };
   }
+  const spec: AcpWorkloadSpec = {
+    threadId,
+    kind: ACP_DRIVER_KIND,
+    namespace: canvasAcpNamespace(ctx.canvasId ?? ''),
+    binding: { alias: ctx.profileId, profileId: ctx.profileId },
+    env: buildReachbackEnv(threadId, ctx.canvasId ?? ''),
+    ...(ctx.cwd !== undefined && { cwd: ctx.cwd }),
+    recipe: resolveBindingRecipe(ctx.profileId),
+  };
+  if (existing) return { ok: true, entry: existing, spec };
   try {
     const entry = await ensureAcpSession({
-      threadId,
-      binding: { alias: ctx.profileId, profileId: ctx.profileId },
-      namespace: canvasAcpNamespace(ctx.canvasId ?? ''),
-      env: buildReachbackEnv(threadId, ctx.canvasId ?? ''),
-      cwd: ctx.cwd,
-      recipe: resolveBindingRecipe(ctx.profileId),
+      threadId: spec.threadId,
+      binding: spec.binding,
+      namespace: spec.namespace,
+      env: spec.env,
+      ...(spec.cwd !== undefined && { cwd: spec.cwd }),
+      recipe: spec.recipe,
       logger,
     });
-    return { ok: true, entry };
+    return { ok: true, entry, spec };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const code = err instanceof AcpServiceError ? err.code : 'internal';
@@ -370,8 +400,12 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
     Reply: AcpPermissionDecisionResponse | { message: string; code?: string };
   }>('/threads/:threadId/permission', async (request, reply) => {
     const { threadId } = request.params;
-    const entry = acpSessionRegistry.get(threadId);
-    if (!entry) {
+    // A permission answer only ever arrives mid-turn (correlated with a
+    // `permission_request` emitted during an in-flight `session/prompt`),
+    // so a live handle for this thread is the precondition. `get` never
+    // spawns one (I9.3): a missing handle is a dead-session 404.
+    const handle = agenetes.get(threadId);
+    if (!handle) {
       return reply.status(404).send({
         message: 'No ACP session for this thread',
         code: 'session_not_found',
@@ -397,7 +431,7 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
     // session precondition (L1); `control()` resolves the same entry by
     // threadId. `ok:false` here means no suspended request matched (already
     // answered / timed out / session ended) — surfaced as `resolved:false`.
-    const ack = await acquireAcpHandle(threadId).control({
+    const ack = await handle.control({
       type: 'answer_permission',
       data: {
         requestId,
@@ -457,7 +491,7 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
     // spawn orchestration (resolveSetRpcEntry get-or-create with spec) and
     // the optimistic local cache update; the actual set-RPC goes through
     // `handle.control()`, which resolves the same entry by threadId.
-    const ack = await acquireAcpHandle(threadId).control({
+    const ack = await agenetes.create(resolved.spec).control({
       type: 'set_mode',
       data: { modeId: parsed.data.modeId },
     });
@@ -506,7 +540,7 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
       return reply.status(resolved.status).send(resolved.body);
     }
     const entry = resolved.entry;
-    const ack = await acquireAcpHandle(threadId).control({
+    const ack = await agenetes.create(resolved.spec).control({
       type: 'set_model',
       data: { modelId: parsed.data.modelId },
     });
@@ -557,7 +591,7 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
       return reply.status(resolved.status).send(resolved.body);
     }
     const entry = resolved.entry;
-    const ack = await acquireAcpHandle(threadId).control({
+    const ack = await agenetes.create(resolved.spec).control({
       type: 'set_config_option',
       data: {
         optionId: parsed.data.configOptionId,

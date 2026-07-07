@@ -149,8 +149,13 @@ export class BuiltinAgentHandle implements AgentHandle<
     const { maxIterations = 20, signal, logger, onRendered } = ctx;
 
     // Render THIS turn at the last moment. A null request means "no new
-    // input" — resume the pre-loaded transcript with `continue()`.
-    const turnMessages = request === null ? [] : await render(request);
+    // input" — resume the pre-loaded transcript with `continue()`. The
+    // driver supplies the per-turn session state: for this in-process Job
+    // "first message" means the backing agent had no prior transcript.
+    const turnMessages =
+      request === null
+        ? []
+        : await render(request, { isFirstMessage: priorLen === 0 });
     onRendered?.(turnMessages);
 
     // This run's output delta — the single value we return (see the tail).

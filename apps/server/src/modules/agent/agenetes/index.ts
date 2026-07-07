@@ -33,15 +33,14 @@ export {
   type AcpTurnCtx,
 } from '@agenetes/acp-driver';
 export {
-  agentRuntime,
-  acquireAcpHandle,
+  agenetes,
   builtinAgentDriver,
   getBuiltinDriver,
-  getAcpDriver,
   BUILTIN_DRIVER_KIND,
   ACP_DRIVER_KIND,
   type AcpHandle,
+  type AcpWorkloadSpec,
+  type AcpCreateSpec,
   type BuiltinDriverInput,
   type BuiltinAgentDriver,
-  type AcpAgentDriver,
 } from './drivers.js';

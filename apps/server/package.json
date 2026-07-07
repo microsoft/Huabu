@@ -23,6 +23,7 @@
     "@agenetes/protocol": "workspace:*",
     "@agenetes/runtime": "workspace:*",
     "@agenetes/acp-driver": "workspace:*",
+    "@agenetes/agenetes": "workspace:*",
     "@agentclientprotocol/sdk": "^0.22.1",
     "@agentlet/protocol": "workspace:*",
     "@agentlet/server": "workspace:*",
