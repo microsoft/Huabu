@@ -22,7 +22,6 @@
  * `token-store.ts`.
  */
 
-import { readAcpSessionRecord } from '@agenetes/acp-driver';
 import { acpSessionRegistry } from '@agenetes/acp-driver';
 import { AcpServiceError } from '@agenetes/acp-driver';
 import { ensureAcpSession } from '@agenetes/acp-driver';
@@ -35,10 +34,8 @@ import {
   setAcpSessionModelRequestSchema,
 } from '@sediment/shared';
 
-import {
-  getProfileSchemaCache,
-  type AcpProfileSchemaCacheEntry,
-} from './profile-schema-cache.js';
+import { ensureProfileCacheSubscription } from './profile-cache-port.js';
+import { getProfileSchemaCache } from './profile-schema-cache.js';
 import { buildReachbackEnv } from './reachback-env.js';
 import { resolveBindingRecipe } from './service.js';
 import { canvasAcpNamespace } from '../../storage/paths.js';
@@ -48,8 +45,9 @@ import {
   type AcpWorkloadSpec,
 } from '../agenetes/index.js';
 
+import type { AcpProfileSchemaCacheEntry } from './profile-schema-cache.js';
 import type { AcpSessionEntry } from '@agenetes/acp-driver';
-import type { AcpSessionPersistedMeta } from '@agenetes/acp-driver';
+import type { AgentMetadata } from '@agenetes/protocol';
 import type {
   AcpPermissionDecisionResponse,
   AcpSessionMetaSnapshot,
@@ -94,6 +92,7 @@ async function resolveSetRpcEntry(
   const existing = acpSessionRegistry.get(threadId);
   if (!ctx.profileId) {
     if (existing) {
+      ensureProfileCacheSubscription(threadId, existing.profileId);
       return {
         ok: true,
         entry: existing,
@@ -130,6 +129,7 @@ async function resolveSetRpcEntry(
     ...(ctx.cwd !== undefined && { cwd: ctx.cwd }),
     recipe: resolveBindingRecipe(ctx.profileId),
   };
+  ensureProfileCacheSubscription(threadId, ctx.profileId);
   if (existing) return { ok: true, entry: existing, spec };
   try {
     const entry = await ensureAcpSession({
@@ -192,7 +192,7 @@ function emptySessionMetaSnapshot(): AcpSessionMetaSnapshot {
  * whenever an in-memory entry exists.
  */
 function snapshotMetaFromPersisted(
-  meta: AcpSessionPersistedMeta,
+  meta: AgentMetadata,
 ): AcpSessionMetaSnapshot {
   return {
     availableModes: meta.availableModes ?? [],
@@ -370,12 +370,10 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
     const live = acpSessionRegistry.get(threadId);
     if (live) return { sessionMeta: snapshotSessionMeta(live) };
     if (canvasId) {
-      const persisted = readAcpSessionRecord(
-        canvasAcpNamespace(canvasId),
-        threadId,
-      );
-      if (persisted?.meta) {
-        return { sessionMeta: snapshotMetaFromPersisted(persisted.meta) };
+      const record = agenetes.record(canvasAcpNamespace(canvasId), threadId);
+      const persistedMeta = record?.state?.metadata;
+      if (persistedMeta) {
+        return { sessionMeta: snapshotMetaFromPersisted(persistedMeta) };
       }
     }
     if (profileId) {

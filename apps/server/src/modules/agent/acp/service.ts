@@ -21,6 +21,7 @@ import {
   prepareExternalAgentPrompt,
   serializeRawPrompt,
 } from './preprocessor.js';
+import { ensureProfileCacheSubscription } from './profile-cache-port.js';
 import { getProfile } from './profile-store.js';
 import { buildReachbackEnv } from './reachback-env.js';
 import { canvasAcpNamespace } from '../../storage/paths.js';
@@ -254,6 +255,10 @@ export async function* runAcpAgent(
   // generator's first `next()` — exactly as before. `spec.kind` is
   // `external`, so the instance's union handle narrows to an `AcpHandle`.
   const handle = agenetes.create(spec) as AcpHandle;
+  // Fold this thread's up-reported metadata into the L1 profile cache
+  // (I9.7). Idempotent per thread — subscribing before `run()` so the
+  // handle's initial state up-report is captured.
+  ensureProfileCacheSubscription(threadId, binding.profileId);
   return yield* handle.run(opts.envelope, render, {
     overlay,
     signal,
