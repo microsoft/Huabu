@@ -16,7 +16,7 @@
 //     {@link Agenetes} instance.
 //
 // All `factoryArgs` are bootstrap-time DI below the handle I/O seam, so
-// (unlike per-turn handle inputs, I8.4) they may carry live objects / the
+// (unlike per-turn handle inputs, I8.5) they may carry live objects / the
 // logger. This module fixes only the mechanism; whether a factory mounts
 // its own transport or receives a shared reference is an impl choice.
 
