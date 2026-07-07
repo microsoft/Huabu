@@ -178,6 +178,7 @@ export async function* runAcpAgent(
   const spec: AcpWorkloadSpec = {
     threadId,
     kind: EXTERNAL_DRIVER_KIND,
+    workloadType: 'Deployment',
     namespace: canvasAcpNamespace(canvasId),
     binding,
     env: buildReachbackEnv(threadId, canvasId),

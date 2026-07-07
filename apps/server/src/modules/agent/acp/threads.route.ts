@@ -103,6 +103,7 @@ async function resolveSetRpcEntry(
         spec: {
           threadId,
           kind: EXTERNAL_DRIVER_KIND,
+          workloadType: 'Deployment',
           namespace: existing.namespace,
           binding: { alias: existing.profileId, profileId: existing.profileId },
           cwd: existing.cwd,
@@ -122,6 +123,7 @@ async function resolveSetRpcEntry(
   const spec: AcpWorkloadSpec = {
     threadId,
     kind: EXTERNAL_DRIVER_KIND,
+    workloadType: 'Deployment',
     namespace: canvasAcpNamespace(ctx.canvasId ?? ''),
     binding: { alias: ctx.profileId, profileId: ctx.profileId },
     env: buildReachbackEnv(threadId, ctx.canvasId ?? ''),

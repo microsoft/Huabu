@@ -36,6 +36,7 @@ import {
 } from './handle.js';
 
 import type { Agenetes } from '@agenetes/agenetes';
+import type { WorkloadType } from '@agenetes/protocol';
 import type { Agent } from '@earendil-works/pi-agent-core';
 import type { Message } from '@earendil-works/pi-ai';
 
@@ -85,10 +86,15 @@ export type BuiltinAgentDriver = AgentDriver<
 /**
  * The host `WorkloadSpec` the ACP driver is created from — the baked
  * {@link AcpCreateSpec} plus the dispatch `kind` the instance routes on
- * (I5). L1 mints it per thread and hands it to {@link agenetes.create};
- * the handle bakes it and self-resolves its live session per turn.
+ * (I5) and the lifecycle `workloadType` (I3.2). An ACP session is a
+ * long-lived, stateful connection, so it is always a `Deployment`. L1
+ * mints it per thread and hands it to {@link agenetes.create}; the handle
+ * bakes it and self-resolves its live session per turn.
  */
-export type AcpWorkloadSpec = AcpCreateSpec & { readonly kind: string };
+export type AcpWorkloadSpec = AcpCreateSpec & {
+  readonly kind: string;
+  readonly workloadType: WorkloadType;
+};
 
 /** The concrete long-lived ACP (Deployment) handle type. */
 export type AcpHandle = AgentHandle<PreparedAcpPrompt, AcpTurnCtx>;
