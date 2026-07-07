@@ -141,6 +141,8 @@ export {
   fitFrames,
   getFrameSizing,
   moveNodeOutOfFrame,
+  assignNodeZIndices,
+  edgeZIndex,
 } from './frame/index.js';
 export {
   DEFAULT_EDGE_STROKE_WIDTH,
