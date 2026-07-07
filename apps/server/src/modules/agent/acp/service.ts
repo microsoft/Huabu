@@ -26,7 +26,7 @@ import { buildReachbackEnv } from './reachback-env.js';
 import { canvasAcpNamespace } from '../../storage/paths.js';
 import {
   agenetes,
-  ACP_DRIVER_KIND,
+  EXTERNAL_DRIVER_KIND,
   type AcpWorkloadSpec,
 } from '../agenetes/drivers.js';
 import { type RenderFn } from '../agenetes/handle.js';
@@ -177,7 +177,7 @@ export async function* runAcpAgent(
   // profile's recipe.
   const spec: AcpWorkloadSpec = {
     threadId,
-    kind: ACP_DRIVER_KIND,
+    kind: EXTERNAL_DRIVER_KIND,
     namespace: canvasAcpNamespace(canvasId),
     binding,
     env: buildReachbackEnv(threadId, canvasId),

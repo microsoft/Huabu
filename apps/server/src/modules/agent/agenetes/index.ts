@@ -37,7 +37,7 @@ export {
   builtinAgentDriver,
   getBuiltinDriver,
   BUILTIN_DRIVER_KIND,
-  ACP_DRIVER_KIND,
+  EXTERNAL_DRIVER_KIND,
   type AcpHandle,
   type AcpWorkloadSpec,
   type AcpCreateSpec,

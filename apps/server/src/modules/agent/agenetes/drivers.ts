@@ -16,7 +16,6 @@
 
 import {
   acpDriverFactory,
-  ACP_DRIVER_KIND,
   type AcpCreateSpec,
   type AcpTurnCtx,
   type PreparedAcpPrompt,
@@ -43,9 +42,15 @@ import type { Message } from '@earendil-works/pi-ai';
 /** Dispatch key for the in-process pi-agent-core (built-in) driver. */
 export const BUILTIN_DRIVER_KIND = 'builtin';
 
-// The external ACP driver's dispatch kind lives with the driver in
-// `@agenetes/acp-driver`; re-exported for existing host importers.
-export { ACP_DRIVER_KIND };
+/**
+ * The external ACP driver's dispatch `kind` — the I5 *contract* kind L1
+ * injects at `register()` (I5.1 alias / I9.5), aligned with the wire
+ * `agentBindingSchema` `kind: 'external'`. It is L1's to choose at mount,
+ * so it lives here (not in the driver package): the driver's own advertised
+ * `.kind` (`acp`) is its *implementation* identity and is overridden by this
+ * `driverName` when the builder registers it.
+ */
+export const EXTERNAL_DRIVER_KIND = 'external';
 export type { AcpCreateSpec };
 
 /** The factory-dictionary name (impl identity) for the ACP driver (I5.1). */
@@ -103,7 +108,7 @@ export const builtinAgentDriver: BuiltinAgentDriver = {
  */
 export const agenetes: Agenetes<AcpWorkloadSpec, AcpHandle> = mountAgenetes()
   .addFactory(ACP_FACTORY_NAME, acpDriverFactory<AgentRequest>)
-  .register(ACP_DRIVER_KIND, ACP_FACTORY_NAME)
+  .register(EXTERNAL_DRIVER_KIND, ACP_FACTORY_NAME)
   .build<AcpWorkloadSpec, AcpHandle>();
 
 /**

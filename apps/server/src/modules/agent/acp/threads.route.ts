@@ -44,7 +44,7 @@ import { resolveBindingRecipe } from './service.js';
 import { canvasAcpNamespace } from '../../storage/paths.js';
 import {
   agenetes,
-  ACP_DRIVER_KIND,
+  EXTERNAL_DRIVER_KIND,
   type AcpWorkloadSpec,
 } from '../agenetes/index.js';
 
@@ -102,7 +102,7 @@ async function resolveSetRpcEntry(
         // control op. `binding.alias` falls back to the profileId.
         spec: {
           threadId,
-          kind: ACP_DRIVER_KIND,
+          kind: EXTERNAL_DRIVER_KIND,
           namespace: existing.namespace,
           binding: { alias: existing.profileId, profileId: existing.profileId },
           cwd: existing.cwd,
@@ -121,7 +121,7 @@ async function resolveSetRpcEntry(
   }
   const spec: AcpWorkloadSpec = {
     threadId,
-    kind: ACP_DRIVER_KIND,
+    kind: EXTERNAL_DRIVER_KIND,
     namespace: canvasAcpNamespace(ctx.canvasId ?? ''),
     binding: { alias: ctx.profileId, profileId: ctx.profileId },
     env: buildReachbackEnv(threadId, ctx.canvasId ?? ''),
