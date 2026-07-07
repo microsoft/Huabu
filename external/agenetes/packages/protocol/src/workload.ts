@@ -7,8 +7,10 @@
 // discriminants:
 //   - `kind`         — WHICH driver (route); also fixes the `spec` TYPE.
 //                      Public, required.
-//   - `workloadKind` — Job | Deployment (completion semantics). Only
-//                      decides whether `request` is required.
+//   - `workloadType` — Job | Deployment (completion semantics). Only
+//                      decides whether `request` is required. Named
+//                      `workloadType`, not `workloadKind`, so it never
+//                      collides with the driver-route `kind`.
 // The per-turn `request` is NOT owned by the driver: it is a separately
 // composed, polymorphic, driver-agnostic union (see ./request.ts) shared
 // across every `kind`. A driver contributes only its create-time `spec`.
@@ -33,15 +35,15 @@ import { namespaceSchema } from './namespace.js';
  * long-lived (its first `request` is optional — connect first, then
  * `submit`). See §3.2.
  */
-export const workloadKindSchema = z.enum(['Job', 'Deployment']);
-export type WorkloadKind = z.infer<typeof workloadKindSchema>;
+export const workloadTypeSchema = z.enum(['Job', 'Deployment']);
+export type WorkloadType = z.infer<typeof workloadTypeSchema>;
 
 /**
  * The typed member schema a single driver contributes to the
  * `WorkloadSpec` union before the shared `request` field is injected:
- * `{ kind, workloadKind, namespace, threadId, spec }`.
+ * `{ kind, workloadType, namespace, threadId, spec }`.
  * {@link composeWorkloadSpec} extends each member with `request` and
- * enforces the `workloadKind === 'Job' ⇒ request required` invariant once,
+ * enforces the `workloadType === 'Job' ⇒ request required` invariant once,
  * at the union level.
  */
 export type BindingMemberSchema<
@@ -49,7 +51,7 @@ export type BindingMemberSchema<
   Spec extends z.ZodTypeAny,
 > = z.ZodObject<{
   kind: z.ZodLiteral<Kind>;
-  workloadKind: typeof workloadKindSchema;
+  workloadType: typeof workloadTypeSchema;
   namespace: typeof namespaceSchema;
   threadId: typeof threadIdSchema;
   spec: Spec;
@@ -85,7 +87,7 @@ export function defineBinding<
 >(config: { kind: Kind; spec: Spec }): BindingDefinition<Kind, Spec> {
   const member = z.object({
     kind: z.literal(config.kind),
-    workloadKind: workloadKindSchema,
+    workloadType: workloadTypeSchema,
     namespace: namespaceSchema,
     threadId: threadIdSchema,
     spec: config.spec,
@@ -119,7 +121,7 @@ export function composeWorkloadSpec<
   ) as unknown as [z.ZodObject, z.ZodObject, ...z.ZodObject[]];
 
   return z.discriminatedUnion('kind', members).superRefine((value, ctx) => {
-    if (value.workloadKind === 'Job' && value.request === undefined) {
+    if (value.workloadType === 'Job' && value.request === undefined) {
       ctx.addIssue({
         code: 'custom',
         message: 'A Job workload requires an initial request.',

@@ -39,12 +39,12 @@ export type { Namespace } from './namespace.js';
 // WorkloadSpec building blocks (§3.6.1): the protocol ships the blocks,
 // the host composes the closed union.
 export {
-  workloadKindSchema,
+  workloadTypeSchema,
   defineBinding,
   composeWorkloadSpec,
 } from './workload.js';
 export type {
-  WorkloadKind,
+  WorkloadType,
   BindingDefinition,
   AnyBindingDefinition,
   BindingMemberSchema,
