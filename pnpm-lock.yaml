@@ -403,6 +403,9 @@ importers:
         specifier: workspace:*
         version: link:../runtime
     devDependencies:
+      '@types/node':
+        specifier: ^22.15.0
+        version: 22.19.21
       typescript:
         specifier: ^5.9.0
         version: 5.9.3
