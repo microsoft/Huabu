@@ -14,11 +14,11 @@ Sediment-specific entry point for reviewing this repo's agent primitives. It add
 
 ## Artifact locations
 
-| Artifact          | Path                                                                                                                              | Rubric to apply  |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
-| System prompt     | `apps/server/src/prompt/agents/operate/AGENT.md` (same structure for `ask/`, `intent/`, `sketch/`)                                | agent-prompt     |
-| Tool descriptions | `apps/server/src/modules/agent/tools/definitions.ts`                                                                              | tool-description |
-| Skills            | `apps/server/src/prompt/skills/` — `canvas/`, `memory/`, `sketch-gestures/`, `create-skill/`, `update-skill/` (each a `SKILL.md`) | skill-quality    |
+| Artifact          | Path                                                                                                                                                                                                                                                                                                                                                     | Rubric to apply  |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
+| System prompt     | `apps/server/src/prompt/agents/operate/AGENT.md` (same structure for `ask/`, `intent/`, `sketch/`)                                                                                                                                                                                                                                                       | agent-prompt     |
+| Tool descriptions | `apps/server/src/modules/agent/tools/definitions.ts` **plus the TypeBox field descriptions it validates against** in `apps/server/src/modules/agent/tools/schemas/*.ts` (e.g. `node.ts`, `edge.ts`) — these `description:` strings are the load-bearing text the model reads at call time, so review them together with `definitions.ts`, not separately | tool-description |
+| Skills            | `apps/server/src/prompt/skills/` — `canvas/` (its `SKILL.md` **and** every file under `canvas/references/`), `memory/`, `sketch-gestures/`, `create-skill/`, `update-skill/`                                                                                                                                                                             | skill-quality    |
 
 ## How to review
 
@@ -35,3 +35,4 @@ When reviewing more than one artifact together, pay special attention to:
 - Multi-step canvas procedures belong in `prompt/skills/`, not restated inside `AGENT.md`.
 - Tools referenced by `AGENT.md` must exist and be scoped in `definitions.ts` (no dangling references).
 - Skill `name`/`description` under `prompt/skills/` must not collide, and each must carry clear "use when / don't use when" triggers.
+- **Same-fact fan-out (lockstep-sync smell).** One rule about the canvas often lives in _many same-type files at once_ — a `definitions.ts` tool desc **and** its `schemas/*.ts` field description, or a `SKILL.md` **and** its own `references/*.md`, or two sibling skills (`canvas/` vs `sketch-gestures/`). The cross-artifact-**type** checks above will not catch this because both copies are the same type. When you find one, trace every other file that states the same fact (grep the distinctive phrase), verify they don't drift or contradict after a change, and flag it as a `Warn`: converge to one canonical owner with a full statement + pointers, unless the copies genuinely diverge by audience/path (e.g. the chat "omit `id`" vs sketch "set explicit `id`" split) — in which case keep them but note that they must change in lockstep.

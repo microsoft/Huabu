@@ -40,7 +40,7 @@ These five principles come from the "context engineering" line of thinking and c
    | Tool description / spec | [references/tool-description.md](references/tool-description.md) |
    | Agent / system prompt | [references/agent-prompt.md](references/agent-prompt.md) |
    | Skill (`SKILL.md`) | [references/skill-quality.md](references/skill-quality.md) |
-4. **When all three exist together**, additionally check cross-artifact issues: duplicated context across prompt and tool descriptions, procedures restated in the system prompt that belong in a skill, tools the prompt references but doesn't scope, and name/description keywords that collide between skills or similar tools.
+4. **When all three exist together**, additionally check cross-artifact issues: duplicated context across prompt and tool descriptions, procedures restated in the system prompt that belong in a skill, tools the prompt references but doesn't scope, and name/description keywords that collide between skills or similar tools. Also check **same-type fan-out**: one fact restated across files of the _same_ type — a tool description and its own parameter/field-schema `description` strings, a `SKILL.md` and its sibling reference files, or two peer skills. The cross-artifact-type lens misses these because both copies are the same type; grep the distinctive phrase to find every copy, then flag lockstep-sync risk (see the fan-out signal under Placement mode).
 5. **Report** using the output format below.
 
 ## Placement mode (which primitive should this live in?)
@@ -60,6 +60,7 @@ Decision signals:
 - Has a side effect or needs live state → tool.
 - Multi-step / branching / needs code or assets / only sometimes → skill.
 - Same content appears in two places → converge to a single owner (prefer the most specific: skill > instructions).
+- **Same fact fanned out across many _same-type_ files** (tool desc + its field-schema `description`s, a `SKILL.md` + its `references/`, two peer skills) → this is a maintainability/lockstep-sync smell, not a type-placement question. Converge to one canonical statement + pointers **unless** the copies genuinely diverge by audience/execution path — then keep them but call out that they must change together, and make sure the review surface actually includes every copy (e.g. schema files, not just the tool-definition file).
 - A whole procedure sitting in the system prompt → move it to a skill (preserves reuse, versioning, and on-demand loading).
 
 ## Scoring model
