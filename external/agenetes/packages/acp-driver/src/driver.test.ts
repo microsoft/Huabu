@@ -8,14 +8,12 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { ACP_DRIVER_KIND, acpDriverFactory } from './driver.js';
+import { acpDriverFactory } from './driver.js';
 import { AcpAgentHandle, ACP_CAPABILITIES } from './handle.js';
 
 describe('acpDriverFactory (M5 FACTORY)', () => {
-  it('produces a driver keyed by the ACP dispatch kind + capabilities', () => {
+  it('produces a driver advertising capabilities (dispatch kind is external, set at register)', () => {
     const driver = acpDriverFactory();
-    expect(driver.kind).toBe(ACP_DRIVER_KIND);
-    expect(driver.kind).toBe('acp');
     expect(driver.capabilities).toBe(ACP_CAPABILITIES);
   });
 

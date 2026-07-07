@@ -28,16 +28,6 @@ import type { Message } from '@earendil-works/pi-ai';
 export type { AcpCreateSpec } from './handle.js';
 
 /**
- * The ACP driver's *implementation* identity (I5.1 `factoryName`), set as
- * its advertised `AgentDriver.kind`. This is NOT the dispatch key: the
- * *contract* `kind` (`driverName`, e.g. `external`) is L1's to choose and is
- * injected at `register()`, overriding this advertised value when the
- * builder mounts the driver (I9.5). Kept as the factory's self-description
- * (and used by tests).
- */
-export const ACP_DRIVER_KIND = 'acp';
-
-/**
  * The concrete ACP {@link AgentDriver} type (a Deployment: full control +
  * `session/load`). Generic over the host request shape (`TRequest`), which
  * the handle never inspects — it only forwards it to `render`.
@@ -69,7 +59,6 @@ export function acpDriverFactory<TRequest = unknown>(
   _config?: AcpDriverFactoryConfig,
 ): AcpAgentDriver<TRequest> {
   return {
-    kind: ACP_DRIVER_KIND,
     capabilities: ACP_CAPABILITIES,
     create: (spec) => new AcpAgentHandle<TRequest>(spec),
   };

@@ -23,9 +23,13 @@ import type { AgentCapabilities, AgentStreamEvent } from '@agenetes/protocol';
  * without knowing a driver's concrete input/request/result shapes.
  */
 export interface AgentDriverInfo {
-  /** Stable driver-kind key (e.g. `'builtin'`, `'acp'`) — the dispatch key. */
-  readonly kind: string;
-  /** The capability descriptor every handle from this driver advertises. */
+  /**
+   * The capability descriptor every handle from this driver advertises.
+   *
+   * A driver carries **no `kind`**: dispatch is decided entirely by the
+   * caller that registers it (`register(kind, driver)`) — the contract
+   * `kind` is external to the factory, not a property it advertises.
+   */
   readonly capabilities: AgentCapabilities;
 }
 
@@ -74,8 +78,12 @@ export interface AgentDriver<
  * `undefined` for it.
  */
 export interface AgentRuntime {
-  /** Register (inject) a driver. Re-registering a kind replaces it. */
-  register(driver: AgentDriver): void;
+  /**
+   * Register (inject) a driver under the dispatch `kind`. The `kind` is
+   * supplied by the caller (never read off the driver — a driver carries
+   * no `kind`); re-registering a `kind` replaces it.
+   */
+  register(kind: string, driver: AgentDriver): void;
 
   /**
    * Look up a driver by kind. The caller knows the concrete driver shape
@@ -160,8 +168,8 @@ export function createAgentRuntime(): AgentRuntime {
   // per `threadId`. Jobs never enter here.
   const handles = new Map<string, AgentHandle>();
   return {
-    register(driver: AgentDriver): void {
-      drivers.set(driver.kind, driver);
+    register(kind: string, driver: AgentDriver): void {
+      drivers.set(kind, driver);
     },
     resolve<
       TInput,

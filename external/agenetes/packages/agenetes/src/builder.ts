@@ -143,9 +143,9 @@ export function mountAgenetes(
         }
         const driver = factory(factoryArgs as never);
         // `driverName` is the dispatch `kind` (I5.1 alias): register under
-        // the contract kind, not the factory's implementation identity.
-        runtime.register({
-          kind: driverName,
+        // the contract kind. The driver carries no `kind` of its own —
+        // dispatch is external, supplied here as the first `register` arg.
+        runtime.register(driverName, {
           capabilities: driver.capabilities,
           create: (input) => driver.create(input),
         });
