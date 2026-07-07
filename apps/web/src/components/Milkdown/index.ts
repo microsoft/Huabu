@@ -31,7 +31,4 @@ export type {
   MilkdownInlineMark,
   MilkdownTextColor,
   MilkdownToolbarMode,
-  MilkdownToolbarPlacement,
-  MilkdownToolbarSettings,
 } from './types';
-export { DEFAULT_MILKDOWN_TOOLBAR_SETTINGS } from './types';

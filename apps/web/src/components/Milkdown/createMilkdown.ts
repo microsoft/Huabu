@@ -12,7 +12,6 @@
 import {
   editorViewCtx,
   parserCtx,
-  prosePluginsCtx,
   schemaCtx,
   serializerCtx,
 } from '@milkdown/core';
@@ -53,11 +52,11 @@ import type {
   MilkdownFormattingState,
   MilkdownInlineMark,
   MilkdownTextColor,
-  MilkdownToolbarMode,
 } from './types';
 import type { Ctx } from '@milkdown/ctx';
 import type {
   Fragment,
+  Mark,
   MarkType,
   Node as ProseNode,
   NodeType,
@@ -120,7 +119,7 @@ export interface MilkdownFactoryOptions {
   /** Optional placeholder text shown when the doc is empty. */
   placeholder?: string;
   /** Which selection toolbar surface should be active. Default `sediment`. */
-  toolbarMode?: MilkdownToolbarMode;
+  toolbarMode?: 'none' | 'sediment';
   /**
    * Drag-only preview mode (chat AI messages, etc.). Default `false`.
    *
@@ -235,14 +234,10 @@ export interface MilkdownInstance {
   setBackgroundColor(color: MilkdownBackgroundColor | null): void;
   /** Apply or clear a link mark at the current selection. */
   setLink(href: string | null, range?: MilkdownTextRange | null): void;
-  /** Temporary V1 link entry point. */
-  toggleLink(): void;
   /** Insert an inline math scaffold at the current selection. */
   insertInlineMath(): void;
   /** Insert or update an inline math node. */
   setInlineMath(value: string, range?: MilkdownTextRange | null): void;
-  /** Convert the current block to a code block. */
-  setCodeBlock(): void;
   /**
    * Subscribe to markdown changes. Returns an unsubscribe function.
    * Listeners receive the raw editor output — components are expected to
@@ -445,13 +440,29 @@ function colorCssForAccent(
   return kind === 'text' ? tokens.fg : tokens.highlightBg;
 }
 
-function parseOpeningColorSpanHtml(
-  value: unknown,
-): { dataAttr: SedimentColorDataAttr; token: AccentToken } | null {
-  if (typeof value !== 'string') return null;
+function normalizeSafeLinkHref(href: string | null | undefined): string | null {
+  const trimmed = href?.trim();
+  if (!trimmed) return null;
+  try {
+    const url = new URL(trimmed);
+    return url.protocol === 'http:' || url.protocol === 'https:'
+      ? trimmed
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseOpeningColorSpanHtml(value: unknown): Array<{
+  dataAttr: SedimentColorDataAttr;
+  token: AccentToken;
+}> {
+  if (typeof value !== 'string') return [];
   const match = value.match(/^<span\b([^>]*)>$/i);
-  if (!match) return null;
+  if (!match) return [];
   const attrs = match[1] ?? '';
+  const parsed: Array<{ dataAttr: SedimentColorDataAttr; token: AccentToken }> =
+    [];
   for (const dataAttr of [
     'data-sediment-text-color',
     'data-sediment-background-color',
@@ -460,9 +471,9 @@ function parseOpeningColorSpanHtml(
       new RegExp(`${dataAttr}=["']([^"']+)["']`, 'i'),
     );
     const token = tokenMatch?.[1];
-    if (isAccentToken(token)) return { dataAttr, token };
+    if (isAccentToken(token)) parsed.push({ dataAttr, token });
   }
-  return null;
+  return parsed;
 }
 
 function isClosingSpanHtml(node: MarkdownNodeLike | undefined): boolean {
@@ -483,7 +494,7 @@ function collapseSedimentColorSpanNodes(node: MarkdownNodeLike): void {
     }
 
     const parsed = parseOpeningColorSpanHtml(child.value);
-    if (!parsed) {
+    if (parsed.length === 0) {
       nextChildren.push(child);
       continue;
     }
@@ -497,12 +508,18 @@ function collapseSedimentColorSpanNodes(node: MarkdownNodeLike): void {
       continue;
     }
 
-    nextChildren.push({
-      type: SEDIMENT_COLOR_MARKDOWN_NODE_TYPE,
-      dataAttr: parsed.dataAttr,
-      token: parsed.token,
-      children: node.children.slice(index + 1, closeIndex),
-    } satisfies SedimentColorMarkdownNode);
+    let children = node.children.slice(index + 1, closeIndex);
+    for (const color of parsed.slice().reverse()) {
+      children = [
+        {
+          type: SEDIMENT_COLOR_MARKDOWN_NODE_TYPE,
+          dataAttr: color.dataAttr,
+          token: color.token,
+          children,
+        } satisfies SedimentColorMarkdownNode,
+      ];
+    }
+    nextChildren.push(...children);
     index = closeIndex;
   }
   node.children = nextChildren;
@@ -548,6 +565,23 @@ function isSedimentColorMarkdownNode(
   );
 }
 
+function markToken(mark: Mark | null | undefined): AccentToken | null {
+  const token = mark?.attrs.token;
+  return isAccentToken(token) ? token : null;
+}
+
+function markColor(mark: Mark | null | undefined): string | null {
+  const color = mark?.attrs.color;
+  return typeof color === 'string' && color.length > 0 ? color : null;
+}
+
+function colorMarkForNode(
+  node: ProseNode,
+  name: typeof TEXT_COLOR_MARK_NAME | typeof BACKGROUND_COLOR_MARK_NAME,
+): Mark | null {
+  return node.marks.find((mark) => mark.type.name === name) ?? null;
+}
+
 function createAccentColorMarkSchema(
   name: typeof TEXT_COLOR_MARK_NAME | typeof BACKGROUND_COLOR_MARK_NAME,
   dataAttr: 'data-sediment-text-color' | 'data-sediment-background-color',
@@ -555,6 +589,7 @@ function createAccentColorMarkSchema(
   kind: 'text' | 'background',
 ) {
   return $markSchema(name, () => ({
+    excludes: name,
     attrs: {
       token: { default: '', validate: 'string' },
       color: { default: '', validate: 'string' },
@@ -610,13 +645,40 @@ function createAccentColorMarkSchema(
     toMarkdown: {
       match: (mark) => mark.type.name === name,
       runner: (state, mark, node) => {
-        const token = String(mark.attrs.token || '');
-        const color = String(mark.attrs.color || '');
+        const textColorMark = colorMarkForNode(node, TEXT_COLOR_MARK_NAME);
+        const backgroundColorMark = colorMarkForNode(
+          node,
+          BACKGROUND_COLOR_MARK_NAME,
+        );
+        if (name === BACKGROUND_COLOR_MARK_NAME && textColorMark) return false;
+
+        const textToken = markToken(textColorMark);
+        const backgroundToken = markToken(backgroundColorMark);
+        const styleParts: string[] = [];
+        if (textColorMark) {
+          styleParts.push(`color: ${markColor(textColorMark) ?? ''}`);
+        }
+        if (backgroundColorMark) {
+          styleParts.push(
+            `background-color: ${markColor(backgroundColorMark) ?? ''}`,
+          );
+        }
+        const attrs = [
+          textToken
+            ? `data-sediment-text-color="${escapeHtml(textToken)}"`
+            : null,
+          backgroundToken
+            ? `data-sediment-background-color="${escapeHtml(backgroundToken)}"`
+            : null,
+          styleParts.length > 0
+            ? `style="${escapeHtml(styleParts.join('; '))}"`
+            : null,
+        ].filter(Boolean);
         const text = node.text ?? '';
         state.withMark(
           mark,
           'html',
-          `<span ${dataAttr}="${escapeHtml(token)}" style="${cssProp}: ${escapeHtml(color)}">${escapeHtml(text)}</span>`,
+          `<span ${attrs.join(' ')}>${escapeHtml(text)}</span>`,
         );
         return true;
       },
@@ -940,121 +1002,6 @@ function replaceCurrentTopLevelBlockWithTable(ctx: Ctx): void {
     '|   |   |   |\n| --- | --- | --- |\n|   |   |   |\n|   |   |   |\n',
   );
 }
-
-/**
- * Build the `buildToolbar` callback Crepe invokes after it has queued
- * its own `formatting` (bold / italic / strikethrough) and `function`
- * (code / latex / link) groups. We append a single dropdown trigger
- * whose icon mirrors the current block type and whose menu lets the
- * user "turn into" any of paragraph / H1-H3 / quote / bullet list /
- * ordered list / code block — Crepe's built-in toolbar only ships
- * inline-mark items, and the slash menu's `setBlockTypeCommand` chain
- * clears the block's text first, so neither surface exposes a
- * "turn this H1 into H2 (keeping the words)" path.
- *
- * Implementation notes:
- *  - The trigger renders ALL eight slash-menu SVGs side-by-side; CSS
- *    hides every icon except the one whose `data-key` matches the
- *    wrapper's `data-current` attribute. A ProseMirror plugin
- *    (`createBlockTypeIndicatorPlugin`) updates `data-current` after
- *    every selection change. We can't compute the icon dynamically
- *    inside `addItem` because Crepe memoises the toolbar group via
- *    `computed(getGroups)` and only re-evaluates `active`, not `icon`.
- *  - Clicking the trigger opens a body-mounted floating menu; we have
- *    to mount to body (not inside the toolbar) because the toolbar's
- *    floating-ui boundary clips overflow.
- *  - `setBlockType` is the heading/paragraph/code-block lever; it only
- *    swaps `nodeType` and preserves inline content. `wrapIn` and
- *    `wrapInList` cover the wrapper types.
- *  - When a node type is missing from the schema (e.g. a plugin was
- *    disabled) the corresponding entry is silently no-op'd.
- */
-
-/**
- * Slash-menu SVG paths lifted from
- * `@milkdown/crepe/lib/esm/feature/block-edit/index.js` (lines 46-348).
- * Kept as raw `<path d=…>` strings rather than the original full
- * `<svg>…<defs><clipPath/></defs></svg>` because the clip-path is a
- * no-op (every path is already bounded by the 24x24 viewBox) and
- * stripping it sidesteps duplicate-id collisions when the same icon
- * appears in both the toolbar trigger and a menu item.
- */
-const BLOCK_TYPE_ICON_PATHS = {
-  paragraph:
-    'M5 5.5C5 6.33 5.67 7 6.5 7H10.5V17.5C10.5 18.33 11.17 19 12 19C12.83 19 13.5 18.33 13.5 17.5V7H17.5C18.33 7 19 6.33 19 5.5C19 4.67 18.33 4 17.5 4H6.5C5.67 4 5 4.67 5 5.5Z',
-  'heading-1':
-    'M19 3H5C3.9 3 3 3.9 3 5V19C3 20.1 3.9 21 5 21H19C20.1 21 21 20.1 21 19V5C21 3.9 20.1 3 19 3ZM19 19H5V5H19V19ZM12 17H14V7H10V9H12V17Z',
-  'heading-2':
-    'M19 3H5C3.9 3 3 3.9 3 5V19C3 20.1 3.9 21 5 21H19C20.1 21 21 20.1 21 19V5C21 3.9 20.1 3 19 3ZM19 19H5V5H19V19ZM15 15H11V13H13C14.1 13 15 12.11 15 11V9C15 7.89 14.1 7 13 7H9V9H13V11H11C9.9 11 9 11.89 9 13V17H15V15Z',
-  'heading-3':
-    'M19 3H5C3.9 3 3 3.9 3 5V19C3 20.1 3.9 21 5 21H19C20.1 21 21 20.1 21 19V5C21 3.9 20.1 3 19 3ZM19 19H5V5H19V19ZM15 15V13.5C15 12.67 14.33 12 13.5 12C14.33 12 15 11.33 15 10.5V9C15 7.89 14.1 7 13 7H9V9H13V11H11V13H13V15H9V17H13C14.1 17 15 16.11 15 15Z',
-  'heading-4':
-    'M19 3H5C3.9 3 3 3.9 3 5V19C3 20.1 3.9 21 5 21H19C20.1 21 21 20.1 21 19V5C21 3.9 20.1 3 19 3ZM19 19H5V5H19V19ZM16 15H15V7H13L8 14V17H13V15H10.3L13 11.2V15H16Z',
-  'heading-5':
-    'M19 3H5C3.9 3 3 3.9 3 5V19C3 20.1 3.9 21 5 21H19C20.1 21 21 20.1 21 19V5C21 3.9 20.1 3 19 3ZM19 19H5V5H19V19ZM15 7H9V13H13V15H9V17H13C14.1 17 15 16.11 15 15V13C15 11.89 14.1 11 13 11H11V9H15V7Z',
-  'heading-6':
-    'M19 3H5C3.9 3 3 3.9 3 5V19C3 20.1 3.9 21 5 21H19C20.1 21 21 20.1 21 19V5C21 3.9 20.1 3 19 3ZM19 19H5V5H19V19ZM15 9V7H11C9.9 7 9 7.89 9 9V15C9 16.11 9.9 17 11 17H13C14.1 17 15 16.11 15 15V13C15 11.89 14.1 11 13 11H11V9H15ZM11 13H13V15H11V13Z',
-  blockquote:
-    'M7.17 17C7.68 17 8.15 16.71 8.37 16.26L9.79 13.42C9.93 13.14 10 12.84 10 12.53V8C10 7.45 9.55 7 9 7H5C4.45 7 4 7.45 4 8V12C4 12.55 4.45 13 5 13H7L5.97 15.06C5.52 15.95 6.17 17 7.17 17ZM17.17 17C17.68 17 18.15 16.71 18.37 16.26L19.79 13.42C19.93 13.14 20 12.84 20 12.53V8C20 7.45 19.55 7 19 7H15C14.45 7 14 7.45 14 8V12C14 12.55 14.45 13 15 13H17L15.97 15.06C15.52 15.95 16.17 17 17.17 17Z',
-  'bullet-list':
-    'M4 10.5C3.17 10.5 2.5 11.17 2.5 12C2.5 12.83 3.17 13.5 4 13.5C4.83 13.5 5.5 12.83 5.5 12C5.5 11.17 4.83 10.5 4 10.5ZM4 4.5C3.17 4.5 2.5 5.17 2.5 6C2.5 6.83 3.17 7.5 4 7.5C4.83 7.5 5.5 6.83 5.5 6C5.5 5.17 4.83 4.5 4 4.5ZM4 16.5C3.17 16.5 2.5 17.18 2.5 18C2.5 18.82 3.18 19.5 4 19.5C4.82 19.5 5.5 18.82 5.5 18C5.5 17.18 4.83 16.5 4 16.5ZM8 19H20C20.55 19 21 18.55 21 18C21 17.45 20.55 17 20 17H8C7.45 17 7 17.45 7 18C7 18.55 7.45 19 8 19ZM8 13H20C20.55 13 21 12.55 21 12C21 11.45 20.55 11 20 11H8C7.45 11 7 11.45 7 12C7 12.55 7.45 13 8 13ZM7 6C7 6.55 7.45 7 8 7H20C20.55 7 21 6.55 21 6C21 5.45 20.55 5 20 5H8C7.45 5 7 5.45 7 6Z',
-  'ordered-list':
-    'M8 7H20C20.55 7 21 6.55 21 6C21 5.45 20.55 5 20 5H8C7.45 5 7 5.45 7 6C7 6.55 7.45 7 8 7ZM20 17H8C7.45 17 7 17.45 7 18C7 18.55 7.45 19 8 19H20C20.55 19 21 18.55 21 18C21 17.45 20.55 17 20 17ZM20 11H8C7.45 11 7 11.45 7 12C7 12.55 7.45 13 8 13H20C20.55 13 21 12.55 21 12C21 11.45 20.55 11 20 11ZM4.5 16H2.5C2.22 16 2 16.22 2 16.5C2 16.78 2.22 17 2.5 17H4V17.5H3.5C3.22 17.5 3 17.72 3 18C3 18.28 3.22 18.5 3.5 18.5H4V19H2.5C2.22 19 2 19.22 2 19.5C2 19.78 2.22 20 2.5 20H4.5C4.78 20 5 19.78 5 19.5V16.5C5 16.22 4.78 16 4.5 16ZM2.5 5H3V7.5C3 7.78 3.22 8 3.5 8C3.78 8 4 7.78 4 7.5V4.5C4 4.22 3.78 4 3.5 4H2.5C2.22 4 2 4.22 2 4.5C2 4.78 2.22 5 2.5 5ZM4.5 10H2.5C2.22 10 2 10.22 2 10.5C2 10.78 2.22 11 2.5 11H3.8L2.12 12.96C2.04 13.05 2 13.17 2 13.28V13.5C2 13.78 2.22 14 2.5 14H4.5C4.78 14 5 13.78 5 13.5C5 13.22 4.78 13 4.5 13H3.2L4.88 11.04C4.96 10.95 5 10.83 5 10.72V10.5C5 10.22 4.78 10 4.5 10Z',
-  'task-list':
-    'M3.5 5.5C3.5 4.67 4.17 4 5 4H7C7.83 4 8.5 4.67 8.5 5.5V7.5C8.5 8.33 7.83 9 7 9H5C4.17 9 3.5 8.33 3.5 7.5V5.5ZM10.5 6.5C10.5 5.95 10.95 5.5 11.5 5.5H20C20.55 5.5 21 5.95 21 6.5C21 7.05 20.55 7.5 20 7.5H11.5C10.95 7.5 10.5 7.05 10.5 6.5ZM3.5 11C3.5 10.17 4.17 9.5 5 9.5H7C7.83 9.5 8.5 10.17 8.5 11V13C8.5 13.83 7.83 14.5 7 14.5H5C4.17 14.5 3.5 13.83 3.5 13V11ZM10.5 12C10.5 11.45 10.95 11 11.5 11H20C20.55 11 21 11.45 21 12C21 12.55 20.55 13 20 13H11.5C10.95 13 10.5 12.55 10.5 12ZM4.9 17.4L3.8 16.3L2.8 17.3L4.9 19.4L8.4 15.9L7.4 14.9L4.9 17.4ZM10.5 17.5C10.5 16.95 10.95 16.5 11.5 16.5H20C20.55 16.5 21 16.95 21 17.5C21 18.05 20.55 18.5 20 18.5H11.5C10.95 18.5 10.5 18.05 10.5 17.5Z',
-  'code-block':
-    'M9.4 16.6L4.8 12L9.4 7.4L8 6L2 12L8 18L9.4 16.6ZM14.6 16.6L19.2 12L14.6 7.4L16 6L22 12L16 18L14.6 16.6Z',
-  table:
-    'M4 4H20C20.55 4 21 4.45 21 5V19C21 19.55 20.55 20 20 20H4C3.45 20 3 19.55 3 19V5C3 4.45 3.45 4 4 4ZM5 8H10V6H5V8ZM12 8H19V6H12V8ZM5 13H10V10H5V13ZM12 13H19V10H12V13ZM5 18H10V15H5V18ZM12 18H19V15H12V18Z',
-  math: 'M18 5H6C5.45 5 5 5.45 5 6C5 6.55 5.45 7 6 7H11.59L7.29 11.29C6.9 11.68 6.9 12.32 7.29 12.71L11.59 17H6C5.45 17 5 17.45 5 18C5 18.55 5.45 19 6 19H18C18.55 19 19 18.55 19 18C19 17.45 18.55 17 18 17H14.41L9.41 12L14.41 7H18C18.55 7 19 6.55 19 6C19 5.45 18.55 5 18 5Z',
-  divider:
-    'M5 11H19C19.55 11 20 11.45 20 12C20 12.55 19.55 13 19 13H5C4.45 13 4 12.55 4 12C4 11.45 4.45 11 5 11Z',
-} as const;
-
-type BlockTypeKey = keyof typeof BLOCK_TYPE_ICON_PATHS;
-
-const BLOCK_TYPE_KEYS: readonly BlockTypeKey[] = [
-  'paragraph',
-  'heading-1',
-  'heading-2',
-  'heading-3',
-  'heading-4',
-  'heading-5',
-  'heading-6',
-  'blockquote',
-  'divider',
-  'bullet-list',
-  'ordered-list',
-  'task-list',
-  'code-block',
-  'table',
-  'math',
-];
-
-/** Label rendered in the dropdown menu (icon-only on the trigger). */
-const BLOCK_TYPE_LABELS: Record<BlockTypeKey, string> = {
-  paragraph: 'Text',
-  'heading-1': 'Heading 1',
-  'heading-2': 'Heading 2',
-  'heading-3': 'Heading 3',
-  'heading-4': 'Heading 4',
-  'heading-5': 'Heading 5',
-  'heading-6': 'Heading 6',
-  blockquote: 'Quote',
-  divider: 'Divider',
-  'bullet-list': 'Bullet List',
-  'ordered-list': 'Ordered List',
-  'task-list': 'Task List',
-  'code-block': 'Code',
-  table: 'Table',
-  math: 'Math',
-};
-
-/** Minimal `<svg>` wrapper around a single path; sized via the parent. */
-function blockTypeIconSvg(key: BlockTypeKey): string {
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="${BLOCK_TYPE_ICON_PATHS[key]}"/></svg>`;
-}
-
 /**
  * Resolve which supported block type describes the block under the current
  * selection's `$from`.
@@ -1216,234 +1163,14 @@ function runBlockTypeCommand(ctx: Ctx, key: MilkdownBlockType): void {
 }
 
 /**
- * ProseMirror plugin that keeps every visible
- * `.mb-block-type-trigger`'s `data-current` attribute synced with the
- * current selection's block type. Plugin (rather than per-item
- * `active` callback) because Crepe memoises the toolbar group's
- * `icon` field and only re-evaluates `active` — we need to drive
- * the icon through CSS, hence DOM-attribute mutation.
- *
- * Runs on every `view.update`; cheap (one selector + attribute write).
- */
-function createBlockTypeIndicatorPlugin(): Plugin {
-  return new Plugin({
-    view: () => ({
-      update(view) {
-        const resolved = resolveBlockTypeKey(view.state) ?? 'paragraph';
-        const key = BLOCK_TYPE_KEYS.includes(resolved as BlockTypeKey)
-          ? resolved
-          : 'paragraph';
-        const triggers = document.querySelectorAll<HTMLElement>(
-          '.mb-block-type-trigger',
-        );
-        triggers.forEach((el) => {
-          if (el.dataset.current !== key) el.dataset.current = key;
-        });
-      },
-    }),
-  });
-}
-
-// ---------- Block-type dropdown menu (singleton, body-mounted) ----------
-
-interface BlockTypeMenuState {
-  ctx: Ctx;
-  /**
-   * Editor mount root that owns this menu. Used by `createMilkdown`'s
-   * `destroy()` so an unmounting editor can close its own dangling
-   * menu without needing to re-enter `editor.action(ctx)` (which
-   * itself may throw mid-teardown).
-   */
-  ownerRoot: HTMLElement;
-  root: HTMLElement;
-  cleanup: () => void;
-}
-
-let activeBlockTypeMenu: BlockTypeMenuState | null = null;
-
-function closeBlockTypeMenu(): void {
-  if (!activeBlockTypeMenu) return;
-  const { root, cleanup } = activeBlockTypeMenu;
-  activeBlockTypeMenu = null;
-  cleanup();
-  root.remove();
-}
-
-/**
- * Close the active menu iff it is owned by `ownerRoot`. Safe to call
- * from a partially-torn-down editor — performs no editor lookups.
- */
-function closeBlockTypeMenuIfOwnedBy(ownerRoot: HTMLElement): void {
-  if (activeBlockTypeMenu?.ownerRoot === ownerRoot) {
-    closeBlockTypeMenu();
-  }
-}
-
-function findVisibleTrigger(): HTMLElement | null {
-  const triggers = document.querySelectorAll<HTMLElement>(
-    '.mb-block-type-trigger',
-  );
-  for (const el of triggers) {
-    const rect = el.getBoundingClientRect();
-    if (rect.width > 0 && rect.height > 0) return el;
-  }
-  return null;
-}
-
-function openBlockTypeMenu(
-  ctx: Ctx,
-  ownerRoot: HTMLElement,
-  triggerEl: HTMLElement,
-): void {
-  closeBlockTypeMenu();
-
-  const view = ctx.get(editorViewCtx);
-  const activeKey = resolveBlockTypeKey(view.state);
-
-  const root = document.createElement('div');
-  root.className = 'mb-block-type-menu';
-  root.setAttribute('role', 'menu');
-  root.innerHTML = BLOCK_TYPE_KEYS.map(
-    (key) =>
-      `<button type="button" role="menuitem" class="mb-block-type-menu__item${key === activeKey ? ' is-active' : ''}" data-key="${key}">` +
-      `<span class="mb-block-type-menu__icon">${blockTypeIconSvg(key)}</span>` +
-      `<span class="mb-block-type-menu__label">${BLOCK_TYPE_LABELS[key]}</span>` +
-      `</button>`,
-  ).join('');
-
-  // Position below the trigger, right-aligned to its right edge so the
-  // menu doesn't overflow when the toolbar is near the viewport edge.
-  // We use `position: fixed` because the toolbar is itself
-  // floating-ui-positioned and its containing block clips overflow.
-  const triggerRect = triggerEl.getBoundingClientRect();
-  document.body.appendChild(root);
-  const menuRect = root.getBoundingClientRect();
-  const left = Math.max(
-    8,
-    Math.min(
-      window.innerWidth - menuRect.width - 8,
-      triggerRect.left + triggerRect.width / 2 - menuRect.width / 2,
-    ),
-  );
-  const top = Math.min(
-    window.innerHeight - menuRect.height - 8,
-    triggerRect.bottom + 6,
-  );
-  root.style.left = `${left}px`;
-  root.style.top = `${top}px`;
-
-  // Mousedown on a menu item: prevent the default focus shuffle (which
-  // would collapse the editor selection before our command runs), then
-  // dispatch the turn-into command and close.
-  const onMousedown = (event: MouseEvent) => {
-    const target = event.target as HTMLElement | null;
-    const item = target?.closest<HTMLElement>('.mb-block-type-menu__item');
-    if (!item || !root.contains(item)) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const key = item.dataset.key as BlockTypeKey | undefined;
-    if (!key) return;
-    runBlockTypeCommand(ctx, key);
-    closeBlockTypeMenu();
-  };
-  root.addEventListener('mousedown', onMousedown);
-
-  // Outside-click → close. `mousedown` (not `click`) so we close before
-  // the toolbar's own click handlers run, matching popover convention.
-  const onDocPointerDown = (event: MouseEvent) => {
-    const target = event.target as Node | null;
-    if (target && root.contains(target)) return;
-    if (target && triggerEl.contains(target)) return;
-    closeBlockTypeMenu();
-  };
-  document.addEventListener('mousedown', onDocPointerDown, true);
-
-  const onKeyDown = (event: KeyboardEvent) => {
-    if (event.key === 'Escape') {
-      event.stopPropagation();
-      closeBlockTypeMenu();
-      view.focus();
-    }
-  };
-  document.addEventListener('keydown', onKeyDown, true);
-
-  // Toolbar can be repositioned on scroll/resize; just close.
-  const onScrollOrResize = () => closeBlockTypeMenu();
-  window.addEventListener('scroll', onScrollOrResize, true);
-  window.addEventListener('resize', onScrollOrResize, true);
-
-  const cleanup = () => {
-    root.removeEventListener('mousedown', onMousedown);
-    document.removeEventListener('mousedown', onDocPointerDown, true);
-    document.removeEventListener('keydown', onKeyDown, true);
-    window.removeEventListener('scroll', onScrollOrResize, true);
-    window.removeEventListener('resize', onScrollOrResize, true);
-  };
-
-  activeBlockTypeMenu = { ctx, ownerRoot, root, cleanup };
-}
-
-function configureBlockTypeToolbar(
-  builder: {
-    addGroup: (
-      key: string,
-      label: string,
-    ) => {
-      addItem: (
-        key: string,
-        item: {
-          active: (ctx: Ctx) => boolean;
-          icon: string;
-          onRun?: (ctx: Ctx) => void;
-        },
-      ) => unknown;
-    };
-  },
-  ownerRoot: HTMLElement,
-): void {
-  const group = builder.addGroup('block-type', 'Block type');
-
-  // Trigger icon: render ALL eight SVGs side-by-side; CSS shows only
-  // the one matching `data-current`. Default to "paragraph" so the
-  // first paint (before any selection update fires) isn't blank.
-  const triggerInner = BLOCK_TYPE_KEYS.map(
-    (key) =>
-      `<span class="mb-block-type-trigger__icon" data-key="${key}">${blockTypeIconSvg(key)}</span>`,
-  ).join('');
-  const triggerHtml =
-    `<span class="mb-block-type-trigger" data-current="paragraph">` +
-    triggerInner +
-    `</span>`;
-
-  group.addItem('block-type-trigger', {
-    icon: triggerHtml,
-    // We mark the trigger active iff a menu is open for it; otherwise
-    // the toolbar's own "highlight current group" logic would never
-    // light up because we don't have a per-key active state on this
-    // single item. Keeping it `false` is fine — the dynamic icon is
-    // already a stronger indicator than a background highlight.
-    active: () => false,
-    onRun: (ctx) => {
-      // If the menu is already open, toggle closed (Notion behavior).
-      if (activeBlockTypeMenu) {
-        closeBlockTypeMenu();
-        return;
-      }
-      const triggerEl = findVisibleTrigger();
-      if (!triggerEl) return;
-      openBlockTypeMenu(ctx, ownerRoot, triggerEl);
-    },
-  });
-}
-
-/**
  * Build and start a Crepe-backed editor.
  *
  * The feature set is hand-picked to match what we ship in Sediment:
  *  - `ImageBlock` is disabled because it pulls Vue into the bundle.
  *  - `AI` and `TopBar` are disabled because we render our own chrome.
- *  - When `previewMode` is set, `Toolbar` / `LinkTooltip` / `Table` /
- *    `Cursor` are additionally disabled — see
+ *  - `Toolbar` and `LinkTooltip` are disabled because React owns
+ *    editing chrome.
+ *  - When `previewMode` is set, `Table` / `Cursor` are additionally disabled — see
  *    `MilkdownFactoryOptions.previewMode`.
  *
  * Everything else (block-edit drag handle, list-item, latex,
@@ -1461,8 +1188,7 @@ export async function createMilkdown(
     toolbarMode = 'sediment',
     previewMode = false,
   } = options;
-  const useCrepeToolbar = !previewMode && toolbarMode === 'crepe';
-  const useCrepeLinkTooltip = useCrepeToolbar;
+  const useReactToolbar = !previewMode && toolbarMode === 'sediment';
 
   // Normalize LaTeX-style math delimiters (`\[…\]`, `\(…\)`)
   // emitted by AI assistants into the `$$…$$` / `$…$` form that
@@ -1478,7 +1204,7 @@ export async function createMilkdown(
       [Crepe.Feature.ImageBlock]: false,
       [Crepe.Feature.AI]: false,
       [Crepe.Feature.TopBar]: false,
-      [Crepe.Feature.Toolbar]: useCrepeToolbar,
+      [Crepe.Feature.Toolbar]: false,
       // Hide Crepe edit-time popovers when React owns the toolbar, and
       // in preview mode. BlockEdit stays on so the drag handle is still
       // rendered; the slash menu inside BlockEdit is naturally suppressed
@@ -1492,7 +1218,7 @@ export async function createMilkdown(
       // never receive typing input, so both are dead weight — and with
       // N message cards in a long thread we'd otherwise leak N hidden
       // overlay divs into the DOM.
-      ...(!useCrepeLinkTooltip
+      ...(useReactToolbar || previewMode
         ? {
             [Crepe.Feature.LinkTooltip]: false,
           }
@@ -1508,12 +1234,6 @@ export async function createMilkdown(
       ...(placeholder
         ? { [Crepe.Feature.Placeholder]: { text: placeholder } }
         : {}),
-      // Append a "Block type" group (paragraph / H1-H3 / quote / lists /
-      // code) after Crepe's own `formatting` and `function` groups —
-      // see `configureBlockTypeToolbar` for the rationale.
-      [Crepe.Feature.Toolbar]: {
-        buildToolbar: (builder) => configureBlockTypeToolbar(builder, root),
-      },
     },
   });
 
@@ -1611,19 +1331,6 @@ export async function createMilkdown(
         return true;
       },
     });
-  });
-
-  // Register the block-type indicator plugin via `prosePluginsCtx`.
-  // It mutates `data-current` on every `.mb-block-type-trigger` after
-  // every selection change, so the toolbar's dropdown trigger always
-  // reflects the block under the cursor. See
-  // `createBlockTypeIndicatorPlugin` for why we drive this via a PM
-  // plugin rather than the toolbar item's own `active` callback.
-  crepe.editor.config((ctx) => {
-    ctx.update(prosePluginsCtx, (plugins) => [
-      ...plugins,
-      createBlockTypeIndicatorPlugin(),
-    ]);
   });
 
   // Phase 4: provenance decoration plugin.
@@ -1920,7 +1627,7 @@ export async function createMilkdown(
             : null;
         const targetRange = range ?? selectionRange;
 
-        const nextHref = href?.trim();
+        const nextHref = normalizeSafeLinkHref(href);
         if (!targetRange || targetRange.from >= targetRange.to) {
           if (nextHref) {
             const mark = linkType.create({ href: nextHref });
@@ -1963,24 +1670,6 @@ export async function createMilkdown(
             .addMark(from, to, linkType.create({ href: nextHref }))
             .scrollIntoView(),
         );
-        view.focus();
-      });
-    },
-    toggleLink: () => {
-      crepe.editor.action((ctx) => {
-        const view = ctx.get(editorViewCtx);
-        const linkType = getMarkType(ctx, 'link');
-        if (!linkType) return;
-        const { from, to, empty } = view.state.selection;
-        if (empty) {
-          view.focus();
-          return;
-        }
-        if (view.state.doc.rangeHasMark(from, to, linkType)) {
-          view.dispatch(
-            view.state.tr.removeMark(from, to, linkType).scrollIntoView(),
-          );
-        }
         view.focus();
       });
     },
@@ -2035,9 +1724,6 @@ export async function createMilkdown(
         view.dispatch(tr.scrollIntoView());
         view.focus();
       });
-    },
-    setCodeBlock: () => {
-      crepe.editor.action((ctx) => runBlockTypeCommand(ctx, 'code-block'));
     },
     onMarkdownUpdated: (listener) => {
       listeners.add(listener);
@@ -2368,13 +2054,6 @@ export async function createMilkdown(
 
     destroy: async () => {
       listeners.clear();
-      // Close any block-type menu still open against THIS editor. The
-      // menu is a body-mounted singleton (only one open at a time
-      // globally) so if the user pops it open and then unmounts the
-      // editor — virtualisation, route change, panel close — we must
-      // take the menu down with us instead of leaving a dangling DOM
-      // node with stale `ctx` references.
-      closeBlockTypeMenuIfOwnedBy(root);
       // Neutralise the EditorView's `dispatch` BEFORE we tear Crepe
       // down. Crepe internals schedule transactions through several
       // async paths (tooltip providers' debounced shouldShow that may

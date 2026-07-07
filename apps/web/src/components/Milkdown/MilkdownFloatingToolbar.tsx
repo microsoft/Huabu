@@ -46,15 +46,12 @@ import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { Input } from '@/components/Common/Input';
 import { getAccentTokens } from '@/components/Nodes/accentTokens';
 
-import {
-  DEFAULT_MILKDOWN_TOOLBAR_SETTINGS,
-  type MilkdownBlockType,
-  type MilkdownFormattingState,
-  type MilkdownInlineMark,
-  type MilkdownToolbarSettings,
-} from './types';
-
 import type { MilkdownInstance, MilkdownTextRange } from './createMilkdown';
+import type {
+  MilkdownBlockType,
+  MilkdownFormattingState,
+  MilkdownInlineMark,
+} from './types';
 import type { ColorPreset } from '@/components/Common/ColorPicker';
 import type { LucideIcon } from 'lucide-react';
 
@@ -64,24 +61,6 @@ type MilkdownToolbarPopover =
   | 'background-color'
   | 'link'
   | 'inline-math';
-
-const ALL_BLOCK_TYPES: readonly MilkdownBlockType[] = [
-  'paragraph',
-  'heading-1',
-  'heading-2',
-  'heading-3',
-  'heading-4',
-  'heading-5',
-  'heading-6',
-  'blockquote',
-  'divider',
-  'bullet-list',
-  'ordered-list',
-  'task-list',
-  'code-block',
-  'table',
-  'math',
-];
 
 const BLOCK_GROUPS: ReadonlyArray<{
   label: string;
@@ -166,28 +145,11 @@ const BACKGROUND_COLOR_PICKER_OPTIONS: readonly ColorPreset[] =
     };
   });
 
-function resolveBlockTypes(
-  configured: MilkdownToolbarSettings['blockTypes'],
-): readonly MilkdownBlockType[] {
-  if (!configured || configured === 'all') return ALL_BLOCK_TYPES;
-  return configured;
-}
-
-function resolveBlockGroups(
-  configured: MilkdownToolbarSettings['blockTypes'],
-): ReadonlyArray<{ label: string; types: readonly MilkdownBlockType[] }> {
-  const enabled = new Set(resolveBlockTypes(configured));
-  return BLOCK_GROUPS.map((group) => ({
-    ...group,
-    types: group.types.filter((type) => enabled.has(type)),
-  })).filter((group) => group.types.length > 0);
-}
-
-function resolveInlineMarks(
-  configured: MilkdownToolbarSettings['inlineMarks'],
-): readonly MilkdownInlineMark[] {
-  return configured ?? DEFAULT_MILKDOWN_TOOLBAR_SETTINGS.inlineMarks;
-}
+const TEXT_STYLE_MARKS: readonly MilkdownInlineMark[] = [
+  'bold',
+  'italic',
+  'strike',
+];
 
 function readFormattingState(
   instance: MilkdownInstance | null,
@@ -241,18 +203,15 @@ function BackgroundColorTrigger({ color }: { color: string | null }) {
 
 export interface MilkdownFloatingToolbarProps {
   instance: MilkdownInstance | null;
-  settings?: MilkdownToolbarSettings;
   disabled?: boolean;
   className?: string;
 }
 
 export function MilkdownFloatingToolbar({
   instance,
-  settings,
   disabled = false,
   className,
 }: MilkdownFloatingToolbarProps): JSX.Element | null {
-  const mergedSettings = { ...DEFAULT_MILKDOWN_TOOLBAR_SETTINGS, ...settings };
   const [formatting, setFormatting] = useState(() =>
     readFormattingState(instance),
   );
@@ -271,9 +230,7 @@ export function MilkdownFloatingToolbar({
   const blockListOpen = openPopover === 'block-list';
   const linkOpen = openPopover === 'link';
   const mathOpen = openPopover === 'inline-math';
-  const placement = mergedSettings.placement ?? 'selection';
-  const shouldFollowSelection = placement === 'selection';
-  const toolbarOpen = !shouldFollowSelection || selectionRect !== null;
+  const toolbarOpen = selectionRect !== null;
   const virtualSelectionReference = useMemo(() => {
     if (!selectionRect) return null;
     return {
@@ -374,12 +331,8 @@ export function MilkdownFloatingToolbar({
     });
   }, [mathOpen]);
 
-  if (mergedSettings.mode === 'none' || !instance) return null;
+  if (!instance) return null;
 
-  const blockGroups = resolveBlockGroups(mergedSettings.blockTypes);
-  const inlineMarks = resolveInlineMarks(mergedSettings.inlineMarks);
-  const textStyleMarks = inlineMarks.filter((mark) => mark !== 'inlineCode');
-  const showInlineCode = inlineMarks.includes('inlineCode');
   const activeBlock = formatting.blockType;
   const ActiveBlockIcon = BLOCK_ICONS[activeBlock];
   const textColorCss = colorCssForAccentToken(formatting.textColor, 'text');
@@ -476,7 +429,7 @@ export function MilkdownFloatingToolbar({
                 onMouseDown={(event) => event.stopPropagation()}
                 onClick={(event) => event.stopPropagation()}
               >
-                {blockGroups.map((group) => (
+                {BLOCK_GROUPS.map((group) => (
                   <div key={group.label} className="flex flex-col gap-1">
                     <div className="text-fg-subtle px-2 pt-1 pb-0.5 text-[11px] leading-none font-semibold">
                       {group.label}
@@ -513,133 +466,112 @@ export function MilkdownFloatingToolbar({
           )
         : null}
 
-      {textStyleMarks.length > 0 ? (
-        <>
-          <FloatingToolbar.Divider />
-
-          <FloatingToolbar.Group>
-            {textStyleMarks.map((mark) => {
-              const Icon = INLINE_MARK_ICONS[mark];
-              return (
-                <FloatingToolbar.ToggleButton
-                  key={mark}
-                  active={formatting.activeMarks.has(mark)}
-                  title={INLINE_MARK_TITLES[mark]}
-                  disabled={disabled}
-                  onClick={() => run(() => instance.toggleMark(mark))}
-                >
-                  <Icon />
-                </FloatingToolbar.ToggleButton>
-              );
-            })}
-          </FloatingToolbar.Group>
-        </>
-      ) : null}
-
-      {(mergedSettings.showTextColor || mergedSettings.showBackgroundColor) && (
-        <FloatingToolbar.Divider />
-      )}
+      <FloatingToolbar.Divider />
 
       <FloatingToolbar.Group>
-        {mergedSettings.showTextColor ? (
-          <FloatingToolbar.ColorPicker
-            colors={ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT}
-            value={formatting.textColor ?? ACCENT_NONE_TOKEN}
-            onSelect={(token) => selectColor(token, instance.setTextColor)}
-            title="Text color"
-            open={openPopover === 'text-color'}
-            onOpenChange={(open) => setOpenPopover(open ? 'text-color' : null)}
-          >
-            <TextColorTrigger color={textColorCss} />
-          </FloatingToolbar.ColorPicker>
-        ) : null}
-        {mergedSettings.showBackgroundColor ? (
-          <FloatingToolbar.ColorPicker
-            colors={BACKGROUND_COLOR_PICKER_OPTIONS}
-            value={formatting.backgroundColor ?? ACCENT_NONE_TOKEN}
-            onSelect={(token) =>
-              selectColor(token, instance.setBackgroundColor)
-            }
-            title="Highlight color"
-            open={openPopover === 'background-color'}
-            onOpenChange={(open) =>
-              setOpenPopover(open ? 'background-color' : null)
-            }
-          >
-            <BackgroundColorTrigger color={backgroundColorCss} />
-          </FloatingToolbar.ColorPicker>
-        ) : null}
+        {TEXT_STYLE_MARKS.map((mark) => {
+          const Icon = INLINE_MARK_ICONS[mark];
+          return (
+            <FloatingToolbar.ToggleButton
+              key={mark}
+              active={formatting.activeMarks.has(mark)}
+              title={INLINE_MARK_TITLES[mark]}
+              disabled={disabled}
+              onClick={() => run(() => instance.toggleMark(mark))}
+            >
+              <Icon />
+            </FloatingToolbar.ToggleButton>
+          );
+        })}
       </FloatingToolbar.Group>
 
-      {(mergedSettings.showLink ||
-        showInlineCode ||
-        mergedSettings.showMath) && <FloatingToolbar.Divider />}
+      <FloatingToolbar.Divider />
 
       <FloatingToolbar.Group>
-        {mergedSettings.showLink ? (
-          <div ref={linkRefs.setReference} className="flex items-center">
-            <FloatingToolbar.ActionButton
-              title="Link"
-              disabled={disabled}
-              onClick={(event) => {
-                event.stopPropagation();
-                setOpenPopover((open) => {
-                  const nextOpen = open === 'link' ? null : 'link';
-                  if (nextOpen) {
-                    const activeLink = instance.getActiveLink();
-                    linkSelectionRef.current =
-                      activeLink?.range ?? instance.getSelectionRange();
-                    setLinkHref(activeLink?.href ?? '');
-                  } else {
-                    linkSelectionRef.current = null;
-                  }
-                  return nextOpen;
-                });
-              }}
-            >
-              <Link />
-            </FloatingToolbar.ActionButton>
-          </div>
-        ) : null}
-        {showInlineCode ? (
-          <FloatingToolbar.ToggleButton
-            active={formatting.activeMarks.has('inlineCode')}
-            title={INLINE_MARK_TITLES.inlineCode}
+        <FloatingToolbar.ColorPicker
+          colors={ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT}
+          value={formatting.textColor ?? ACCENT_NONE_TOKEN}
+          onSelect={(token) => selectColor(token, instance.setTextColor)}
+          title="Text color"
+          open={openPopover === 'text-color'}
+          onOpenChange={(open) => setOpenPopover(open ? 'text-color' : null)}
+        >
+          <TextColorTrigger color={textColorCss} />
+        </FloatingToolbar.ColorPicker>
+        <FloatingToolbar.ColorPicker
+          colors={BACKGROUND_COLOR_PICKER_OPTIONS}
+          value={formatting.backgroundColor ?? ACCENT_NONE_TOKEN}
+          onSelect={(token) => selectColor(token, instance.setBackgroundColor)}
+          title="Highlight color"
+          open={openPopover === 'background-color'}
+          onOpenChange={(open) =>
+            setOpenPopover(open ? 'background-color' : null)
+          }
+        >
+          <BackgroundColorTrigger color={backgroundColorCss} />
+        </FloatingToolbar.ColorPicker>
+      </FloatingToolbar.Group>
+
+      <FloatingToolbar.Divider />
+
+      <FloatingToolbar.Group>
+        <div ref={linkRefs.setReference} className="flex items-center">
+          <FloatingToolbar.ActionButton
+            title="Link"
             disabled={disabled}
-            onClick={() => run(() => instance.toggleMark('inlineCode'))}
+            onClick={(event) => {
+              event.stopPropagation();
+              setOpenPopover((open) => {
+                const nextOpen = open === 'link' ? null : 'link';
+                if (nextOpen) {
+                  const activeLink = instance.getActiveLink();
+                  linkSelectionRef.current =
+                    activeLink?.range ?? instance.getSelectionRange();
+                  setLinkHref(activeLink?.href ?? '');
+                } else {
+                  linkSelectionRef.current = null;
+                }
+                return nextOpen;
+              });
+            }}
           >
-            <Code />
-          </FloatingToolbar.ToggleButton>
-        ) : null}
-        {mergedSettings.showMath ? (
-          <div ref={mathRefs.setReference} className="flex items-center">
-            <FloatingToolbar.ActionButton
-              title="Inline math"
-              disabled={disabled}
-              onClick={(event) => {
-                event.stopPropagation();
-                setOpenPopover((open) => {
-                  const nextOpen =
-                    open === 'inline-math' ? null : 'inline-math';
-                  if (nextOpen) {
-                    const activeMath = instance.getActiveInlineMath();
-                    const selectionRange = instance.getSelectionRange(true);
-                    mathSelectionRef.current =
-                      activeMath?.range ?? selectionRange;
-                    setMathValue(
-                      activeMath?.value ?? instance.getSelectionText() ?? 'x',
-                    );
-                  } else {
-                    mathSelectionRef.current = null;
-                  }
-                  return nextOpen;
-                });
-              }}
-            >
-              <Sigma />
-            </FloatingToolbar.ActionButton>
-          </div>
-        ) : null}
+            <Link />
+          </FloatingToolbar.ActionButton>
+        </div>
+        <FloatingToolbar.ToggleButton
+          active={formatting.activeMarks.has('inlineCode')}
+          title={INLINE_MARK_TITLES.inlineCode}
+          disabled={disabled}
+          onClick={() => run(() => instance.toggleMark('inlineCode'))}
+        >
+          <Code />
+        </FloatingToolbar.ToggleButton>
+        <div ref={mathRefs.setReference} className="flex items-center">
+          <FloatingToolbar.ActionButton
+            title="Inline math"
+            disabled={disabled}
+            onClick={(event) => {
+              event.stopPropagation();
+              setOpenPopover((open) => {
+                const nextOpen = open === 'inline-math' ? null : 'inline-math';
+                if (nextOpen) {
+                  const activeMath = instance.getActiveInlineMath();
+                  const selectionRange = instance.getSelectionRange(true);
+                  mathSelectionRef.current =
+                    activeMath?.range ?? selectionRange;
+                  setMathValue(
+                    activeMath?.value ?? instance.getSelectionText() ?? 'x',
+                  );
+                } else {
+                  mathSelectionRef.current = null;
+                }
+                return nextOpen;
+              });
+            }}
+          >
+            <Sigma />
+          </FloatingToolbar.ActionButton>
+        </div>
       </FloatingToolbar.Group>
 
       {linkOpen
@@ -751,7 +683,6 @@ export function MilkdownFloatingToolbar({
     </FloatingToolbar>
   );
 
-  if (!shouldFollowSelection) return toolbar;
   if (!selectionRect) return null;
 
   return createPortal(

@@ -26,8 +26,8 @@ semantic command API on `MilkdownInstance`.
    touching Crepe state directly.
 3. Disable Crepe's built-in toolbar wherever the Sediment toolbar is active so
    users never see two competing editing surfaces.
-4. Support a focused V1 set of formatting settings that covers common note
-   editing without expanding into a full document editor.
+4. Support a focused V1 button set for expanded note editing without expanding
+   into a general Milkdown toolbar configuration API.
 5. Keep `MilkdownPreview` read-only by default and free of selection editing
    chrome.
 
@@ -39,6 +39,7 @@ semantic command API on `MilkdownInstance`.
 3. Rebuilding slash menu, table controls, image upload, AI commands, or Crepe
    top-bar behavior in V1.
 4. Per-workspace persistent toolbar preferences in V1.
+5. Public toolbar composition or visibility settings in V1.
 
 ## Proposed Shape
 
@@ -57,49 +58,35 @@ selection inspection, focus restoration, and feature toggles.
 
 Both text-selection and block-handle entry points must route through the same
 React toolbar and `MilkdownInstance.setBlockType()` command surface. Crepe's
-legacy toolbar customization remains only as a temporary `'crepe'` migration
-mode; it must not be extended as a parallel implementation for the Sediment
-toolbar.
+legacy toolbar customization has been removed so the React toolbar is the single
+editing toolbar path.
 
 ### Code Entry Points
 
 | File/dir                                                                                                                                   | Responsibility                                                                                     |
 | ------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
-| [`../../apps/web/src/components/Milkdown/MilkdownEditor.tsx`](../../apps/web/src/components/Milkdown/MilkdownEditor.tsx)                   | Expose toolbar mode/settings props and `onReady` instance handoff.                                 |
+| [`../../apps/web/src/components/Milkdown/MilkdownEditor.tsx`](../../apps/web/src/components/Milkdown/MilkdownEditor.tsx)                   | Mount editable Milkdown and hand its instance to the note preview through `onReady`.               |
 | [`../../apps/web/src/components/Milkdown/createMilkdown.ts`](../../apps/web/src/components/Milkdown/createMilkdown.ts)                     | Disable Crepe toolbar when requested; implement semantic editor commands and active-state queries. |
 | [`../../apps/web/src/components/Milkdown/MilkdownFloatingToolbar.tsx`](../../apps/web/src/components/Milkdown/MilkdownFloatingToolbar.tsx) | React toolbar component for editable notes.                                                        |
 | [`../../apps/web/src/components/Common/FloatingToolbar.tsx`](../../apps/web/src/components/Common/FloatingToolbar.tsx)                     | Shared toolbar chrome, buttons, dividers, selects, popovers.                                       |
 | [`../../apps/web/src/components/Nodes/note/NotePreview.tsx`](../../apps/web/src/components/Nodes/note/NotePreview.tsx)                     | Mount the note editing toolbar next to the editor in expanded note editing.                        |
 | [`../../apps/web/src/components/Milkdown/MilkdownPreview.tsx`](../../apps/web/src/components/Milkdown/MilkdownPreview.tsx)                 | Keep preview surfaces read-only and toolbar-free.                                                  |
 
-## Public API Draft
+## Public API Shape
 
 ### `MilkdownEditorProps`
 
+`MilkdownEditor` does not expose a public toolbar settings object in V1. The
+React toolbar is owned by expanded note editing and is mounted by
+`NotePreview` next to the editor instance it receives from `onReady`.
+
 ```ts
-import type { AccentToken } from '@sediment/shared';
-
-type MilkdownToolbarMode = 'none' | 'crepe' | 'sediment';
-type MilkdownTextColor = AccentToken;
-type MilkdownBackgroundColor = AccentToken;
-
-interface MilkdownToolbarSettings {
-  mode?: MilkdownToolbarMode;
-  groups?: MilkdownToolbarGroup[];
-  blockTypes?: 'all' | MilkdownBlockType[];
-  inlineMarks?: MilkdownInlineMark[];
-  showLink?: boolean;
-  showMath?: boolean;
-  showCode?: boolean;
-  showTextColor?: boolean;
-  showBackgroundColor?: boolean;
-}
+type MilkdownToolbarMode = 'none' | 'sediment';
 ```
 
-`mode` defaults to `'sediment'` for editable `MilkdownEditor` instances once the
-new toolbar ships. `MilkdownPreview` should use `'none'` internally.
-`'crepe'` remains as a temporary migration escape hatch until the React toolbar
-reaches parity with the current editing flow.
+`createMilkdown` keeps an internal `toolbarMode` option so editable notes can
+enable the Sediment toolbar command path while `MilkdownPreview` uses `'none'`.
+Crepe's built-in toolbar remains disabled in both modes.
 
 ### `MilkdownInstance`
 
@@ -110,13 +97,15 @@ internals:
 interface MilkdownInstance {
   focus(): void;
   getFormattingState(): MilkdownFormattingState;
+  getSelectionRange(includeEmpty?: boolean): MilkdownTextRange | null;
+  getActiveLink(): MilkdownLinkState | null;
   toggleMark(mark: MilkdownInlineMark): void;
   setBlockType(type: MilkdownBlockType): void;
   setTextColor(color: MilkdownTextColor | null): void;
   setBackgroundColor(color: MilkdownBackgroundColor | null): void;
-  toggleLink(): void;
+  setLink(href: string | null, range?: MilkdownTextRange | null): void;
   insertInlineMath(): void;
-  setCodeBlock(): void;
+  setInlineMath(value: string, range?: MilkdownTextRange | null): void;
 }
 ```
 
@@ -124,40 +113,22 @@ interface MilkdownInstance {
 If toolbar active state needs to update on every selection move, prefer an
 `onFormattingStateUpdated(listener)` subscription over polling from React.
 
-## V1 Settings Priority
+## V1 Toolbar Shape
 
-### P0: Ship First
+The V1 toolbar is a fixed expanded-note toolbar, not a configurable toolbar
+framework. It follows the active text selection with Floating UI and exposes the
+formatting controls needed by note editing:
 
-| Setting               | Values                                          | Why V1                                                                                                          |
-| --------------------- | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `mode`                | `'none'`, `'sediment'`, temporary `'crepe'`     | Lets previews hide chrome, editable notes opt into the React toolbar, and migration fall back safely.           |
-| `inlineMarks`         | `bold`, `italic`, `strike`, `inlineCode`        | Matches the visible Crepe inline toolbar and covers the most common editing actions.                            |
-| `blockTypes`          | `'all'` or ordered supported block type IDs     | Lets users switch between every supported Milkdown block type through a scrollable popup list.                  |
-| `showLink`            | boolean                                         | Link editing is already exposed by Crepe; V1 should provide an equivalent entry point or deliberately hide it.  |
-| `showMath`            | boolean                                         | Math is a shipped content feature, so the toolbar should keep inline/block math discoverable.                   |
-| `showTextColor`       | boolean                                         | Text color is a common note-editing affordance and should be available without opening Markdown syntax.         |
-| `showBackgroundColor` | boolean                                         | Background/highlight color is useful for emphasis in notes and should ship with text color as a paired control. |
-| `placement`           | `'selection'`, `'editor-top'`, `'node-toolbar'` | V1 follows the active text selection while keeping stable editor/node placements available for later variants.  |
+- Block type popup with the supported Milkdown block types grouped as Text,
+  List, and Advanced.
+- Inline typographic marks: bold, italic, and strikethrough.
+- Text color and highlight color from Sediment `AccentToken` values.
+- Link popover with safe URL handling.
+- Inline code and inline math controls.
 
-Recommended V1 default:
-
-```ts
-const DEFAULT_MILKDOWN_TOOLBAR_SETTINGS = {
-  mode: 'sediment',
-  inlineMarks: ['bold', 'italic', 'strike', 'inlineCode'],
-  blockTypes: 'all',
-  showLink: true,
-  showMath: true,
-  showTextColor: true,
-  showBackgroundColor: true,
-  placement: 'selection',
-} satisfies MilkdownToolbarSettings;
-```
-
-The selection placement should use Floating UI with a virtual selection
-reference, `offset`, `flip`, `shift`, and `autoUpdate` so the toolbar appears
-near the selected text and can choose a visible side when the editor is near a
-viewport edge.
+The toolbar should use Floating UI with a virtual selection reference, `offset`,
+`flip`, `shift`, and `autoUpdate` so it appears near the selected text and can
+choose a visible side when the editor is near a viewport edge.
 
 `inlineCode` remains a mark internally, but the React toolbar should render it
 next to inline math rather than beside bold / italic / strike because both code
@@ -195,19 +166,17 @@ opening HTML node, inline children, and closing HTML node
 back into one color mark so reopening WYSIWYG mode never displays the span source
 as plain text.
 
-Link editing starts with a basic URL prompt behind `MilkdownInstance.toggleLink()`.
-A custom popover can replace that prompt once validation and keyboard behavior are
-designed.
+Link editing uses a React popover and routes writes through
+`MilkdownInstance.setLink()`, which rejects unsafe URL schemes.
 
-### P1: Add After V1 Stabilizes
+### Deferred Until There Is a Real Multi-Context Need
 
-| Setting        | Values                               | Reason to defer                                                                        |
-| -------------- | ------------------------------------ | -------------------------------------------------------------------------------------- |
-| `groups`       | ordered group IDs                    | Useful for product variants, but it adds API surface before the command set is proven. |
-| `visibleWhen`  | `'selection'`, `'focus'`, `'always'` | Requires more selection/focus state plumbing and keyboard testing.                     |
-| `linkMode`     | `'prompt'`, `'popover'`              | A polished link popover should be designed with validation and keyboard behavior.      |
-| `mathMode`     | `'inline'`, `'block'`, `'both'`      | Needs clear UX around existing selection replacement.                                  |
-| `mobileLayout` | `'scroll'`, `'wrap'`, `'compact'`    | Should be driven by screenshots once desktop behavior is correct.                      |
+| Capability                           | Reason to defer                                                                |
+| ------------------------------------ | ------------------------------------------------------------------------------ |
+| Configurable toolbar groups          | Adds public surface before there is more than one real toolbar consumer.       |
+| Configurable visibility / placement  | Expanded note editing only needs selection-following behavior in V1.           |
+| Configurable link or math modes      | Current note editing has concrete popover behavior; alternatives are not used. |
+| Mobile-specific toolbar layout modes | Should be driven by screenshots after the fixed note toolbar is stable.        |
 
 ### Explicitly Out of V1
 
@@ -216,12 +185,13 @@ designed.
 | Custom React render functions per toolbar item | Too much public surface before the internal command API is stable.        |
 | Arbitrary ProseMirror command injection        | Leaks editor internals and makes focus / undo behavior hard to guarantee. |
 | Persistent user toolbar customization          | Product decision; not needed for the first implementation.                |
+| Public toolbar settings object                 | Over-designed while the toolbar only serves expanded note editing.        |
 | Image, upload, AI, and rich table controls     | These are larger workflows with separate state and permissions.           |
 
 ## Implementation Plan
 
-1. Add `toolbarMode?: 'none' | 'crepe' | 'sediment'` to the factory options and
-   disable `Crepe.Feature.Toolbar` when the mode is `'none'` or `'sediment'`.
+1. Keep the factory-level `toolbarMode?: 'none' | 'sediment'` internal option
+   and keep `Crepe.Feature.Toolbar` disabled.
 2. Move the existing block-type command implementation behind
    `MilkdownInstance.setBlockType()` and remove Crepe-specific toolbar DOM code
    once the React toolbar covers it.
@@ -239,7 +209,8 @@ designed.
 7. Mount the toolbar in note editing flows and pass the instance received from
    `MilkdownEditor.onReady`.
 8. Make `MilkdownPreview` explicitly toolbar-free, independent of drag mode.
-9. Remove the Crepe toolbar migration path after parity is verified.
+9. Keep Crepe toolbar customization deleted; all note editing toolbar UI should
+   go through `MilkdownFloatingToolbar`.
 
 ## Validation
 
@@ -255,12 +226,6 @@ designed.
 
 ## Open Questions
 
-1. Should `editor-top` remain as a configurable fallback for contexts where
-   selection-following UI is too noisy? Recommendation: keep the setting but use
-   `selection` as the editable note default.
-2. Should the basic link URL prompt be replaced with a custom popover matching
-   canvas toolbar style? Recommendation: keep the prompt until validation and
-   keyboard behavior are designed.
-3. Should the toolbar appear for inline note editing on the canvas, expanded note
+1. Should the toolbar appear for inline note editing on the canvas, expanded note
    editing, or both? Recommendation: expanded note editing first, because it has
    fewer collision risks with node-level canvas controls.

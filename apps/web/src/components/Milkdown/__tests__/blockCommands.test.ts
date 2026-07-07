@@ -43,6 +43,16 @@ describe('Milkdown block commands', () => {
     expect(instance.getMarkdown()).not.toContain('https://example.com');
   });
 
+  it('rejects unsafe link schemes', async () => {
+    const instance = await mount('hello');
+
+    instance.__selectAllTextForTest?.();
+    instance.setLink('javascript:alert(1)');
+
+    expect(instance.getMarkdown()).toContain('hello');
+    expect(instance.getMarkdown()).not.toContain('javascript:');
+  });
+
   it('reads and updates an active link', async () => {
     const instance = await mount('[hello](https://example.com)');
 
