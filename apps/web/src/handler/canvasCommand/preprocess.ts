@@ -66,6 +66,7 @@ export function buildPreprocessSnapshot(
       })
       .filter((l) => l.length > 0);
     return {
+      title: (data?.label as string) || undefined,
       childLabels,
       labelSource: (data?.labelSource as string) || undefined,
     };
