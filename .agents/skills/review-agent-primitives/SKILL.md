@@ -60,7 +60,7 @@ Decision signals:
 - Has a side effect or needs live state → tool.
 - Multi-step / branching / needs code or assets / only sometimes → skill.
 - Same content appears in two places → converge to a single owner (prefer the most specific: skill > instructions).
-- **Same fact fanned out across many _same-type_ files** (tool desc + its field-schema `description`s, a `SKILL.md` + its `references/`, two peer skills) → this is a maintainability/lockstep-sync smell, not a type-placement question. Converge to one canonical statement + pointers **unless** the copies genuinely diverge by audience/execution path — then keep them but call out that they must change together, and make sure the review surface actually includes every copy (e.g. schema files, not just the tool-definition file).
+- **Same fact fanned out across many _same-type_ files** (tool desc + its field-schema `description`s, a `SKILL.md` + its `references/`, two peer skills) → this is a maintainability/lockstep-sync smell, not a type-placement question. Converge to one canonical statement + pointers **unless** the copies genuinely diverge by audience/execution path — then keep them but call out that they must change together, and make sure the review surface actually includes every copy (e.g. schema files, not just the tool-definition file). When the fanned-out fact is a machine-derivable enumeration (e.g. a prose list of command/variant names mirroring a schema union), the strongest form of "converge" is to derive it from the schema (codegen or a compile-time guard) so the copies cannot drift at all.
 - A whole procedure sitting in the system prompt → move it to a skill (preserves reuse, versioning, and on-demand loading).
 
 ## Scoring model

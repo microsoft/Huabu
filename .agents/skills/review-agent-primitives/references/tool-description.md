@@ -47,6 +47,19 @@ Score each item `Pass / Warn / Fail`. Items are ordered by how strongly they aff
 - Validation/errors must state the specific, correctable problem and show a correctly-formatted example — not an opaque code or traceback.
 - **Good:** "start_date must be ISO-8601, e.g. 2025-03-01; you sent '03/01/25'." **Bad:** `Error 422`.
 
+## 9. Multiplexer tools: per-variant detail lives on the variant, not the shared blurb
+
+- Applies to a tool that dispatches on a `type` discriminator (or carries many mutually-exclusive optional fields). Keep the top-level description to cross-cutting invariants only — ordering, the `results[]` contract, batching. Push each variant's own semantics, pre/post-conditions, and its one gotcha onto that variant's schema `description`.
+- A caveat that governs one field belongs on that field, where the model reads it while constructing that exact call — not in the shared blurb it skimmed once on entry.
+- **Bad:** the tool blurb explains an image-only aspect-ratio rule that only `CREATE_NODES.size` triggers. **Good:** that rule sits on the `size` field's `description`.
+- Boundary vs #4: #4 asks whether the info is present and clear anywhere; this asks whether it is attached to the schema node that governs it.
+
+## 10. Multiplexer tools: annotate every variant to equal depth
+
+- In a discriminated union, one richly-described variant next to bare siblings tells the model the bare ones are simpler or gotcha-free — a false signal that drives wrong calls on the undocumented ones.
+- Document every variant to comparable depth (at minimum a one-line "what it does + its lone constraint"), or defer them all to a reference — but do not mix rich-inline with bare-inline.
+- The signal this is missing: one variant carries a paragraph while its peers carry only their `type` literal.
+
 ## Cross-check
 
 - Tool descriptions must not contradict the system prompt's tool guidance.
