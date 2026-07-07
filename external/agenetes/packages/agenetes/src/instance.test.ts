@@ -113,6 +113,25 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
     expect(inst.record(spec.namespace, 'thr_job')?.spec.note).toBe('second');
   });
 
+  it('a transient Job (empty threadId) upserts no durable record (I9.4)', () => {
+    const inst = mount();
+    const namespace = ns('canvas_1', '/data/c1');
+    const spec: StubSpec = {
+      threadId: '',
+      kind: 'external',
+      workloadType: 'Job',
+      namespace,
+      note: 'stateless',
+    };
+    // it still runs and returns a fresh handle …
+    const handle = inst.create(spec) as unknown as StubHandle;
+    expect(handle.spec.note).toBe('stateless');
+    // … but leaves no durable footprint: an empty key would collide across
+    // every transient Job in the namespace and accumulate junk records.
+    expect(inst.record(namespace, '')).toBeUndefined();
+    expect(inst.records(namespace)).toEqual([]);
+  });
+
   it('create() dispatches on spec.kind; unknown kind throws', () => {
     const inst = mount();
     expect(() =>

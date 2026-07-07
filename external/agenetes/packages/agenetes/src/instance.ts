@@ -109,10 +109,21 @@ export function createAgenetesInstance<
         spec.workloadType === 'Job'
           ? driver.create(spec)
           : runtime.create(spec.threadId, () => driver.create(spec));
-      threadStore.upsert(spec.namespace, spec.threadId, {
-        spec,
-        state: new AgentPersistentState(spec.namespace.storage?.root),
-      });
+      // Persist a durable record only when the workload has a real thread
+      // identity. A Deployment always does (its `threadId` is also the
+      // live-table cache key). A Job usually carries a thread too, but a
+      // *transient* Job — a stateless one-shot invoked with an empty
+      // `threadId` (e.g. the host's memory / sketch / reachback turns) —
+      // has no durable identity to key on, so it writes nothing: an empty
+      // key would otherwise collide across every transient Job in the same
+      // namespace and accumulate junk records nobody reads.
+      const isTransientJob = spec.workloadType === 'Job' && !spec.threadId;
+      if (!isTransientJob) {
+        threadStore.upsert(spec.namespace, spec.threadId, {
+          spec,
+          state: new AgentPersistentState(spec.namespace.storage?.root),
+        });
+      }
       return handle as THandle;
     },
     get(threadId: string): THandle | undefined {
