@@ -309,7 +309,7 @@ describe('WorkloadSpec + request conformance', () => {
   it('expresses an internal-driver Job (request required)', () => {
     const spec = {
       kind: 'internal',
-      workloadKind: 'Job',
+      workloadType: 'Job',
       namespace: { name: 'canvas_1', storage: { root: '/data/history/canvas_1' } },
       threadId: 'thr_1',
       spec: { agentId: 'ask', tools: ['read', 'canvas_commands'] },
@@ -321,7 +321,7 @@ describe('WorkloadSpec + request conformance', () => {
   it('rejects a Job without an initial request', () => {
     const spec = {
       kind: 'internal',
-      workloadKind: 'Job',
+      workloadType: 'Job',
       namespace: { name: 'canvas_1' },
       threadId: 'thr_1',
       spec: { agentId: 'ask', tools: [] },
@@ -332,7 +332,7 @@ describe('WorkloadSpec + request conformance', () => {
   it('expresses an external-driver Deployment (request optional)', () => {
     const spec = {
       kind: 'external',
-      workloadKind: 'Deployment',
+      workloadType: 'Deployment',
       namespace: { name: 'canvas_2', storage: { root: '/data/history/canvas_2' } },
       threadId: 'thr_2',
       spec: { profileId: 'copilot', alias: 'Copilot', cwd: '/repo' },
@@ -356,7 +356,7 @@ describe('WorkloadSpec + request conformance', () => {
   it('requires a namespace on every WorkloadSpec member', () => {
     const spec = {
       kind: 'external',
-      workloadKind: 'Deployment',
+      workloadType: 'Deployment',
       threadId: 'thr_3',
       spec: { profileId: 'copilot', alias: 'Copilot' },
     };
