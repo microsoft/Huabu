@@ -6,8 +6,27 @@
  * can stay focused on its own view logic.
  */
 
-import type { CanvasChange } from '../../../../hooks/useCanvasChanges';
 import type { AssistantToolPart } from '@sediment/shared';
+
+/**
+ * Display-only description of a single canvas mutation, reconstructed from a
+ * `canvas_commands` tool result for the CanvasCommandCard. Revert is owned by
+ * the broadcast-fed ChangeReviewCard, so these carry no inverse commands.
+ */
+export interface CanvasChange {
+  id: string;
+  tool: string;
+  label: string;
+  nodeType?: string;
+  nodeId?: string;
+  sourceNodeId?: string;
+  targetNodeId?: string;
+  /** Snapshot labels captured at extraction time (stable across preview swaps). */
+  nodeLabel?: string;
+  sourceNodeLabel?: string;
+  targetNodeLabel?: string;
+  revertible: boolean;
+}
 
 /** Truncate a string to a max length with ellipsis. */
 export const truncate = (s: string, n: number) =>

@@ -27,7 +27,6 @@ import type { Context } from '@earendil-works/pi-ai';
 import type {
   SketchClusterContext,
   SketchCommandResponse,
-  CanvasCommand,
   WireNodeRef,
 } from '@sediment/shared';
 
@@ -146,7 +145,6 @@ export async function recognizeSketchCommands(
     messages: [{ role: 'user', content: userContent, timestamp: Date.now() }],
   };
 
-  const collectedCommands: CanvasCommand[] = [];
   const reasoningParts: string[] = [];
 
   // Attribute this recognition's canvas mutations to a synthetic thread so
@@ -156,17 +154,15 @@ export async function recognizeSketchCommands(
   const threadId = createId('sketch');
 
   // ── Diagnostics ────────────────────────────────────────────────────
-  // Track which tool calls the LLM actually issued and what the handler
-  // returned, so we can distinguish "LLM never called canvas_commands"
-  // (the JSON-in-prose failure mode) from "called it but commands array
-  // came back empty" (handler issue) from "handler errored".
+  // Track which tool calls the LLM issued so we can spot the "LLM never
+  // called canvas_commands" failure mode (JSON written into assistant
+  // prose instead of a real tool call).
   const toolStartCounts = new Map<string, number>();
   const toolResultCounts = new Map<string, number>();
   // Recover the machine tool name on `tool_call_update` (which carries
   // only `toolCallId`) by indexing the name from the originating
   // `tool_call` event.
   const toolNameById = new Map<string, string>();
-  let canvasCommandsErrorPayload: string | null = null;
 
   const stream = runAgent({
     scope: 'sketch',
@@ -213,17 +209,6 @@ export async function recognizeSketchCommands(
         },
         'tool_call_update',
       );
-      if (toolName === 'canvas_commands') {
-        const extracted = extractCommandsFromToolResult(result);
-        log.debug(
-          { count: extracted.length, types: extracted.map((c) => c.type) },
-          'canvas_commands extracted',
-        );
-        if (extracted.length === 0) {
-          canvasCommandsErrorPayload = result;
-        }
-        collectedCommands.push(...extracted);
-      }
     } else if (event.type === 'done' && event.data.message) {
       reasoningParts.push(event.data.message);
     } else if (event.type === 'text_delta' && event.data.content) {
@@ -242,14 +227,11 @@ export async function recognizeSketchCommands(
       toolStarts: Object.fromEntries(toolStartCounts),
       toolResults: Object.fromEntries(toolResultCounts),
       canvasCommandsCalled: (toolStartCounts.get('canvas_commands') ?? 0) > 0,
-      collectedCommandCount: collectedCommands.length,
       reasoningPreview: reasoningText.slice(0, 200),
       suspectedFailureMode:
         (toolStartCounts.get('canvas_commands') ?? 0) === 0
           ? 'LLM_NEVER_INVOKED_TOOL (JSON likely written into assistant text)'
-          : canvasCommandsErrorPayload
-            ? 'TOOL_INVOKED_BUT_RESULT_HAD_NO_COMMANDS'
-            : 'OK',
+          : 'OK',
     },
     'run summary',
   );
@@ -258,24 +240,4 @@ export async function recognizeSketchCommands(
     reasoning: reasoningText,
     threadId,
   };
-}
-
-/**
- * Pull the `commands` array out of a `canvas_commands` tool result
- * payload. The handler returns `{ source, canvasId, commands }` JSON;
- * pi-agent-core wraps thrown errors in a `{ status: 'error', ... }`
- * envelope (see `runAgent`'s `tool_execution_end` branch). We tolerate
- * both shapes and silently drop malformed payloads — sketch
- * already handles "no commands" as a valid no-op outcome.
- */
-function extractCommandsFromToolResult(payload: string): CanvasCommand[] {
-  try {
-    const parsed = JSON.parse(payload) as { commands?: unknown };
-    if (Array.isArray(parsed.commands)) {
-      return parsed.commands as CanvasCommand[];
-    }
-  } catch {
-    // Non-JSON or error envelope — leave commands empty.
-  }
-  return [];
 }
