@@ -146,6 +146,34 @@ describe('Milkdown block commands', () => {
     expect(instance.getMarkdown()).toContain('* [ ] hello');
   });
 
+  it('converts only the current nested list item to a bullet list', async () => {
+    const instance = await mount(`# Update
+
+1. huabu agent
+
+   1. layout
+2. sync`);
+
+    instance.__setCursorAfterTextForTest?.('layout');
+    instance.setBlockType('bullet-list');
+
+    expect(instance.getMarkdown()).toContain('   * layout');
+    expect(instance.getMarkdown()).toContain('2. sync');
+  });
+
+  it('indents and outdents bullet list items with Tab', async () => {
+    const instance = await mount('- first\n- second');
+
+    instance.__setCursorAfterTextForTest?.('second');
+    instance.__dispatchKeyDownForTest?.('Tab');
+
+    expect(instance.getMarkdown()).toContain('  * second');
+
+    instance.__dispatchKeyDownForTest?.('Tab', true);
+
+    expect(instance.getMarkdown()).toContain('* second');
+  });
+
   it('replaces the current block with a valid table', async () => {
     const instance = await mount('hello');
 

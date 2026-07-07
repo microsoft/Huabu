@@ -24,7 +24,8 @@ import {
   toggleMark,
   wrapIn,
 } from '@milkdown/prose/commands';
-import { liftListItem } from '@milkdown/prose/schema-list';
+import { keymap } from '@milkdown/prose/keymap';
+import { liftListItem, sinkListItem } from '@milkdown/prose/schema-list';
 import {
   NodeSelection,
   Plugin,
@@ -214,6 +215,10 @@ export interface MilkdownInstance {
   __selectCurrentBlockForTest?(): void;
   /** Test-only helper: select the document's text content. */
   __selectAllTextForTest?(): void;
+  /** Test-only helper: place the cursor after the first text occurrence. */
+  __setCursorAfterTextForTest?(text: string): void;
+  /** Test-only helper: dispatch a keydown on the editor DOM. */
+  __dispatchKeyDownForTest?(key: string, shiftKey?: boolean): void;
   /** Viewport rect for the current non-empty editor selection. */
   getSelectionClientRect(): DOMRect | null;
   /** Current text selection range, in ProseMirror doc positions. */
@@ -926,6 +931,41 @@ function currentTopLevelBlockRange(state: EditorState): {
   return null;
 }
 
+function currentListItemRange(state: EditorState): {
+  from: number;
+  to: number;
+  index: number;
+  listFrom: number;
+  listTo: number;
+  listNode: ProseNode;
+  text: string;
+} | null {
+  const { $from } = state.selection;
+  for (let depth = $from.depth; depth > 0; depth--) {
+    if ($from.node(depth).type.name !== 'list_item') continue;
+    const listDepth = depth - 1;
+    const listNode = $from.node(listDepth);
+    if (!['bullet_list', 'ordered_list'].includes(listNode.type.name)) {
+      continue;
+    }
+    const node = $from.node(depth);
+    let index = 0;
+    listNode.forEach((child, _offset, childIndex) => {
+      if (child === node) index = childIndex;
+    });
+    return {
+      from: $from.before(depth),
+      to: $from.after(depth),
+      index,
+      listFrom: $from.before(listDepth),
+      listTo: $from.after(listDepth),
+      listNode,
+      text: node.textBetween(0, node.content.size, ' ').trim() || ' ',
+    };
+  }
+  return null;
+}
+
 function textInsertionPosForNodeSelection(
   state: EditorState,
   selection: NodeSelection,
@@ -990,6 +1030,63 @@ function replaceCurrentTopLevelBlockWithList(
   key: 'bullet-list' | 'ordered-list' | 'task-list',
 ): void {
   const view = ctx.get(editorViewCtx);
+  const listItemRange = currentListItemRange(view.state);
+  if (listItemRange) {
+    const nodes = parseTopLevelMarkdown(
+      ctx,
+      markdownForBlockType(key, listItemRange.text),
+    );
+    const replacementList = nodes[0];
+    if (!replacementList) return;
+
+    const beforeItems: ProseNode[] = [];
+    const afterItems: ProseNode[] = [];
+    listItemRange.listNode.forEach((child, _offset, childIndex) => {
+      if (childIndex < listItemRange.index) beforeItems.push(child);
+      if (childIndex > listItemRange.index) afterItems.push(child);
+    });
+
+    const replacementNodes: ProseNode[] = [];
+    if (beforeItems.length > 0) {
+      replacementNodes.push(
+        listItemRange.listNode.type.create(
+          listItemRange.listNode.attrs,
+          beforeItems,
+        ),
+      );
+    }
+    const replacementStartOffset = replacementNodes.reduce(
+      (offset, node) => offset + node.nodeSize,
+      0,
+    );
+    replacementNodes.push(replacementList);
+    if (afterItems.length > 0) {
+      replacementNodes.push(
+        listItemRange.listNode.type.create(
+          listItemRange.listNode.attrs,
+          afterItems,
+        ),
+      );
+    }
+
+    const tr = view.state.tr.replaceWith(
+      listItemRange.listFrom,
+      listItemRange.listTo,
+      replacementNodes,
+    );
+    const selectionPos = Math.min(
+      listItemRange.listFrom + replacementStartOffset + 2,
+      tr.doc.content.size,
+    );
+    view.dispatch(
+      tr
+        .setSelection(TextSelection.near(tr.doc.resolve(selectionPos)))
+        .scrollIntoView(),
+    );
+    view.focus();
+    return;
+  }
+
   const range = currentTopLevelBlockRange(view.state);
   if (!range) return;
   const text = range.text;
@@ -1106,6 +1203,11 @@ function runBlockTypeCommand(ctx: Ctx, key: MilkdownBlockType): void {
     return;
   }
 
+  if (key === 'bullet-list' || key === 'ordered-list' || key === 'task-list') {
+    replaceCurrentTopLevelBlockWithList(ctx, key);
+    return;
+  }
+
   // Lift the cursor out of every `blockquote` / `list_item` wrapper
   // before applying the target type. Without this step, switching FROM
   // a blockquote (or list item) to anything is a visual no-op: the
@@ -1153,10 +1255,6 @@ function runBlockTypeCommand(ctx: Ctx, key: MilkdownBlockType): void {
     runCommand(ctx, setBlockType(type, { language: 'LaTeX' }));
   } else if (key === 'blockquote') {
     runCommand(ctx, wrapIn(type));
-  } else if (key === 'bullet-list' || key === 'ordered-list') {
-    replaceCurrentTopLevelBlockWithList(ctx, key);
-  } else if (key === 'task-list') {
-    replaceCurrentTopLevelBlockWithList(ctx, key);
   } else if (key === 'table') {
     replaceCurrentTopLevelBlockWithTable(ctx);
   }
@@ -1260,6 +1358,16 @@ export async function createMilkdown(
     .use(sedimentColorSpanRemarkPlugin)
     .use(textColorMarkSchema)
     .use(backgroundColorMarkSchema);
+  crepe.editor.use(
+    $prose((ctx) => {
+      const listItemType = ctx.get(schemaCtx).nodes.list_item;
+      if (!listItemType) return new Plugin({});
+      return keymap({
+        Tab: sinkListItem(listItemType),
+        'Shift-Tab': liftListItem(listItemType),
+      });
+    }),
+  );
   crepe.editor.use(
     $prose(
       (ctx) =>
@@ -1586,6 +1694,41 @@ export async function createMilkdown(
           view.state.tr.setSelection(
             TextSelection.create(view.state.doc, from, to),
           ),
+        );
+      });
+    },
+    __setCursorAfterTextForTest: (text) => {
+      crepe.editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        let cursorPos: number | null = null;
+        view.state.doc.descendants((node, pos) => {
+          if (cursorPos !== null) return false;
+          if (!node.isText) return true;
+          const value = node.text ?? '';
+          const index = value.indexOf(text);
+          if (index === -1) return true;
+          cursorPos = pos + index + text.length;
+          return false;
+        });
+        if (cursorPos === null) return;
+        view.dispatch(
+          view.state.tr
+            .setSelection(TextSelection.create(view.state.doc, cursorPos))
+            .scrollIntoView(),
+        );
+        view.focus();
+      });
+    },
+    __dispatchKeyDownForTest: (key, shiftKey = false) => {
+      crepe.editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        view.dom.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key,
+            shiftKey,
+            bubbles: true,
+            cancelable: true,
+          }),
         );
       });
     },
