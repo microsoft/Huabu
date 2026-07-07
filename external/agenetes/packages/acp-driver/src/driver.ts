@@ -28,9 +28,12 @@ import type { Message } from '@earendil-works/pi-ai';
 export type { AcpCreateSpec } from './handle.js';
 
 /**
- * Dispatch key for the external ACP (agentlet) driver — the I5 contract
- * `kind` the instance's `create(spec)` resolves on. (The I5.1 rename to
- * the contract kind `external` is a separate, later step — M5 item 15.)
+ * The ACP driver's *implementation* identity (I5.1 `factoryName`), set as
+ * its advertised `AgentDriver.kind`. This is NOT the dispatch key: the
+ * *contract* `kind` (`driverName`, e.g. `external`) is L1's to choose and is
+ * injected at `register()`, overriding this advertised value when the
+ * builder mounts the driver (I9.5). Kept as the factory's self-description
+ * (and used by tests).
  */
 export const ACP_DRIVER_KIND = 'acp';
 
