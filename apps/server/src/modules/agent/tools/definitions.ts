@@ -16,6 +16,8 @@
 
 import { Type } from '@earendil-works/pi-ai';
 
+import { AGENT_CANVAS_COMMAND_TYPES } from '@sediment/shared';
+
 import { AgentCanvasCommandSchema } from './schemas/command.js';
 import {
   EdgeDirectionSchema,
@@ -323,9 +325,9 @@ export const canvasCommandsTool: ToolDefinition = {
   label: 'Canvas Commands',
   description: `Execute canvas commands. Commands run in the order given; each command succeeds or fails independently, and every command's outcome — including a failure \`reason\` — is reported back in \`results[]\`. Always check it: a command is not guaranteed to succeed (e.g. CONNECT_NODES / SET_NODE_PARENT fail with \`invalid-target\` when an endpoint doesn't exist).
 
-Batch **independent** commands together (fewer re-renders). Do **not** put a command that references a node you are creating in the **same** call — it cannot see that node's server-assigned id yet. Create the nodes first; the result echoes each created node's id in \`results[].nodes\`. Then reference those real ids in a follow-up call (next turn).
+Batch **independent** commands together (fewer re-renders); **dependent** commands — where one references a node another creates — must be split across calls (the canvas commands reference covers the create-then-wire-up flow).
 
-Supported command types: CREATE_NODES, DELETE_NODES, MERGE_NODE_DATA, SET_NODE_PARENT, DISSOLVE_FRAME, SET_NODE_GEOMETRY, REORDER_NODES, CONNECT_NODES, DISCONNECT_EDGES, SET_EDGE_STYLE, ALIGN_NODES, DISTRIBUTE_NODES, SET_FRAME_LAYOUT. Field-level requirements (which fields each command takes) are described by this tool's parameter schema.
+Supported command types: ${AGENT_CANVAS_COMMAND_TYPES.join(', ')}. Field-level requirements (which fields each command takes) are described by this tool's parameter schema.
 
 **Image Nodes - Automatic Aspect Ratio Preservation:**
 For image nodes, set only \`width\` — via \`size.width\` in \`CREATE_NODES\`, an updated \`src\` in \`MERGE_NODE_DATA\`, or \`size.width\` in \`SET_NODE_GEOMETRY\`; the server always derives \`height\` from the image's actual ratio (any \`height\` you pass is ignored) and returns the final \`width\`/\`height\` in the tool result \`results[].nodes\`.

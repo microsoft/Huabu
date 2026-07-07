@@ -98,7 +98,6 @@ The filesystem tools (`read`, `find`, `ls`, `grep`) are read-only — there is n
 - If `canvas_commands` is **not** in your available tool list → you are in read-only mode. Do not attempt mutations and do not claim in your reply that you performed any.
 - If `canvas_commands` **is** available → before issuing your first batch, `read("skills/canvas/references/commands.md")` for the catalogue, ID conventions, dependency-ordering rules, and style hints. The tool's own schema description tells you which fields each command takes; the reference tells you which command to pick and how to compose them.
 - **Commands are not guaranteed to succeed.** Each command in a call reports its own outcome in `results[]`; on failure it carries a `reason` (e.g. `invalid-target` when a CONNECT / SET_NODE_PARENT endpoint doesn't exist). Read it and adjust — don't assume a write landed.
-- **Don't reference a node you're creating in the same call.** Create the nodes first; the result echoes each new node's server-assigned id in `results[].nodes`. Wire them up (`CONNECT_NODES` / `SET_NODE_PARENT`) in a follow-up call using those ids.
 
 ---
 
