@@ -1,6 +1,6 @@
 # Command Cookbook
 
-Composed `canvas_commands` sequences for common user intents. When a step needs the **id of a node an earlier step created**, it goes in a **follow-up call** (a command can't reference a node that doesn't exist yet — see [`commands.md` §4](commands.md)); the recipes below mark those splits. Independent steps stay in one call. Every `CREATE_NODES` entry needs an **explicit `position`**; node ids, by contrast, are **assigned by the server** and read back from `results[].nodes`.
+Composed `canvas_commands` sequences for common user intents. When a step needs the **id of a node an earlier step created**, it goes in a **follow-up call** (a command can't reference a node that doesn't exist yet — the `canvas_commands` tool description states the dependency rule); the recipes below mark those splits. Independent steps stay in one call. Every `CREATE_NODES` entry needs an **explicit `position`**; node ids, by contrast, are **assigned by the server** and read back from `results[].nodes`.
 
 > **Schema is the source of truth.** Field names below come from the `canvas_commands` schemas; this file is about _which commands to compose_, not which fields to type.
 
@@ -53,14 +53,6 @@ Single call:
 
 1. `ALIGN_NODES` — pick the axis (`top`, `middle-h`, `bottom`, `left`, `center-v`, `right`) that makes the row read straight.
 2. `DISTRIBUTE_NODES` — only meaningful for ≥3 nodes; pick the same axis as the alignment.
-
-## Recipe: ask the user a question
-
-Goal: surface a follow-up the agent cannot answer alone.
-
-Single `CREATE_NODES` command with one `nodeType: "question"` entry. Use this instead of asking in chat — the question becomes a node in the canvas, lives next to the context that prompted it, and the user's answer flows back into the same workflow.
-
-If the question targets an existing node, `read` that node's markdown first so the question is phrased with real context, not just the label.
 
 ## Recipe: redirect / rewire a connection
 

@@ -325,17 +325,11 @@ export const canvasCommandsTool: ToolDefinition = {
   label: 'Canvas Commands',
   description: `Execute canvas commands. Commands run in the order given; each command succeeds or fails independently, and every command's outcome — including a failure \`reason\` — is reported back in \`results[]\`. Always check it: a command is not guaranteed to succeed (e.g. CONNECT_NODES / SET_NODE_PARENT fail with \`invalid-target\` when an endpoint doesn't exist).
 
-Batch **independent** commands together (fewer re-renders); **dependent** commands — where one references a node another creates — must be split across calls (the canvas commands reference covers the create-then-wire-up flow).
+Batch **independent** commands together (fewer re-renders). **Dependency rule:** the server assigns every node/edge id, so a command can't reference a node created earlier in the **same call or turn** — its id isn't known yet. Create first, read the assigned ids from \`results[].nodes\`, then CONNECT / SET_NODE_PARENT them in a **follow-up call** (next turn). \`ALIGN_NODES\` / \`DISTRIBUTE_NODES\` touch only existing nodes, so they can ride along once you hold the ids.
 
 Supported command types: ${AGENT_CANVAS_COMMAND_TYPES.join(', ')}. Field-level requirements (which fields each command takes) are described by this tool's parameter schema.
 
-**Image Nodes - Automatic Aspect Ratio Preservation:**
-For image nodes, set only \`width\` — via \`size.width\` in \`CREATE_NODES\`, an updated \`src\` in \`MERGE_NODE_DATA\`, or \`size.width\` in \`SET_NODE_GEOMETRY\`; the server always derives \`height\` from the image's actual ratio (any \`height\` you pass is ignored) and returns the final \`width\`/\`height\` in the tool result \`results[].nodes\`.
-
-**Text / Question Nodes - Content-Driven Height:**
-For \`text\` and \`question\` nodes, set only \`size.width\` in \`CREATE_NODES\` / \`SET_NODE_GEOMETRY\`. Their height is content-driven and must not be pinned with \`size.height\`; to make the rendered text larger or smaller, set \`data.style.fontSize\` via \`CREATE_NODES\` or \`MERGE_NODE_DATA\`.
-
-For per-command semantics, idiomatic compositions, and worked examples (group into frame, brainstorm-and-connect, merge/synthesize, restyle a cluster, tidy a row), call \`read("skills/canvas/SKILL.md")\` and follow its links into \`skills/canvas/references/\`.`,
+For worked multi-command recipes (group into frame, brainstorm-and-connect, merge/synthesize, restyle a cluster, tidy a row), \`read("skills/canvas/references/command-cookbook.md")\`; for diagram geometry and layout, \`read("skills/canvas/references/layout-recipes.md")\`.`,
   parameters: canvasCommandsParamsSchema,
   // Force serial execution: two canvas_commands in the same batch can
   // race in two ways. Server-side, the handler reads canvas state once

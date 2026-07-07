@@ -37,7 +37,7 @@ These are common patterns, not deterministic rules. Trust the screenshot.
 
 ## Rules
 
-- **Never hand-write ids.** For existing nodes/edges, reference only the ids in the cluster payload / nearby-edges list. A gesture that creates a node and then references it (e.g. circle-to-group's new frame) must wire it up in a **follow-up call** — see `skills/canvas/references/commands.md` §4 for the create-then-wire-up flow.
+- **Never hand-write ids.** For existing nodes/edges, reference only the ids in the cluster payload / nearby-edges list. A gesture that creates a node and then references it (e.g. circle-to-group's new frame) must wire it up in a **follow-up call** — the `canvas_commands` tool description states the create-then-wire-up rule.
 - **Edge ids always start with `edge-`** and only come from the nearby edges list.
 - For any newly created node, use the **cluster bbox centre** as the position. Explicit positions are honoured verbatim by `CREATE_NODES`.
 - Keep `reasoning` under 20 words. It is shown to the user.
