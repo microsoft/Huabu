@@ -3,7 +3,7 @@
 > Structure, dependency rules, and conventions for the frontend. The point of
 > this doc is the **layering rules** below — not an exhaustive file listing
 > (those rot fast; `ls` the dir for the current files).
-> Last updated: 2026-06-30
+> Last updated: 2026-07-01
 
 ---
 
@@ -73,7 +73,41 @@ What stays in `apps/web/src/handler/canvasCommand/`:
 
 ---
 
-## 5. Related docs
+## 5. Node & edge stacking (z-order)
+
+The **Layers panel order = the `nodes` array order = the sole stacking
+authority.** Later in the array ⇒ painted on top. A plain node ordered after a
+frame covers that frame **and its entire subtree**; ordered before, it is
+covered by the whole subtree.
+
+React Flow's default `zIndexMode: 'auto'` does **not** honour this: it forces
+every child above its parent and lifts framed top-level frames by a fixed band,
+so a framed subtree always floats above unframed siblings regardless of order.
+To make array order authoritative we render with
+[`<ReactFlow zIndexMode="manual">`](../../apps/web/src/components/Panels/Canvas/Canvas.tsx)
+and derive every `zIndex` ourselves in the **render layer**:
+
+- [`assignNodeZIndices`](../../packages/shared/src/canvas-engine/frame/zorder.ts)
+  — a depth-first walk of the parent/child forest (parents before children,
+  siblings in array order) assigns each node a contiguous z. Children land
+  immediately above their frame; a later sibling out-ranks the whole preceding
+  subtree.
+- [`edgeZIndex`](../../packages/shared/src/canvas-engine/frame/zorder.ts) — an
+  edge floats at the z of its highest **framed** endpoint (0 when both endpoints
+  are top-level), mirroring React Flow's old auto-mode edge behaviour, which
+  manual mode otherwise drops. `Canvas.tsx` writes this onto `edge.zIndex`; the
+  label portal reuses it via
+  [`getEdgeRenderZ`](../../apps/web/src/components/Panels/Canvas/edges/edgeZ.ts).
+
+These are derived at render only. The engine's legacy `zIndex: -1` writes on
+framed children are now harmless vestigial values (the render layer overrides
+them), so **persistence, diff/delta, the server executor, and realtime sync are
+untouched.** The z-wrapping in `Canvas.tsx` is cached by source-node/edge ref so
+selection toggles don't break xyflow's per-element `React.memo`.
+
+---
+
+## 6. Related docs
 
 - [canvas-command-architecture.md](./canvas-command-architecture.md) — the command/engine model (shared, server + web).
 - [agent-context.md](./agent-context.md) — how the web assembles agent context.

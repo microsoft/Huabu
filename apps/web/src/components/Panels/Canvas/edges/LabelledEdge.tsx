@@ -224,26 +224,19 @@ function EdgeLabelEditor({
   // this number competes directly with the edge SVGs and node wrappers
   // in the viewport (DOM order: edges → edge-label renderer → nodes).
   //
-  // `getEdgeRenderZ` is a faithful mirror of React Flow's internal
-  // edge render formula (`edge.zIndex + max(endpoints.internals.z)`),
-  // so the label always shares its edge line's exact layer. Because DOM
-  // order paints the label after the edge but before nodes, at equal z
-  // the label sits above its own edge line yet behind any node on the
-  // same level — and naturally stays below higher nodes / above lower
-  // ones, exactly like the edge. Selection does NOT lift the label
-  // (Figma-style: `<ReactFlow elevateNodesOnSelect={false}>` and no
-  // edge-z bump); selection feedback comes from stroke/marker styling.
+  // Under `zIndexMode="manual"` React Flow paints the edge SVG at
+  // `edge.zIndex` verbatim (Sediment assigns that value in `Canvas.tsx`),
+  // so `getEdgeRenderZ` simply mirrors `edge.zIndex` and the label always
+  // shares its edge line's exact layer. Because DOM order paints the label
+  // after the edge but before nodes, at equal z the label sits above its
+  // own edge line yet behind any node on the same level — and naturally
+  // stays below higher nodes / above lower ones, exactly like the edge.
+  // Selection does NOT lift the label (Figma-style:
+  // `<ReactFlow elevateNodesOnSelect={false}>` and no edge-z bump);
+  // selection feedback comes from stroke/marker styling.
   const edgeZIndex = useStore(
     useCallback(
-      (s) => {
-        const edge = s.edgeLookup.get(edgeId);
-        if (!edge) return 0;
-        return getEdgeRenderZ(
-          edge.zIndex,
-          s.nodeLookup.get(edge.source)?.internals.z,
-          s.nodeLookup.get(edge.target)?.internals.z,
-        );
-      },
+      (s) => getEdgeRenderZ(s.edgeLookup.get(edgeId)?.zIndex),
       [edgeId],
     ),
   );
