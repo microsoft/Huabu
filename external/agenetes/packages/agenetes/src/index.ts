@@ -13,5 +13,9 @@ export type {
 export { createAgenetesInstance } from './instance.js';
 export type { Agenetes, WorkloadSpecShape } from './instance.js';
 
-export { AgentPersistentState, InMemoryThreadStore } from './thread-store.js';
+export {
+  AgentPersistentState,
+  InMemoryThreadStore,
+  FileThreadStore,
+} from './thread-store.js';
 export type { ThreadRecord, ThreadStore } from './thread-store.js';
