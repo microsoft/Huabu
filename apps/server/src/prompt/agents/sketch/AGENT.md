@@ -60,6 +60,8 @@ Common patterns, not deterministic rules. Trust the screenshot.
 | "!" / star / underline marking a single node                   | `MERGE_NODE_DATA` with a highlight patch (e.g. `style.accent`), OR `CREATE_NODES` with a sibling note expanding on the topic. Highlighting **is** the action — do not skip it as "just emphasis". |
 | Genuinely empty / ambiguous gesture, far from any node or edge | Invoke `canvas_commands` with no commands and a one-sentence reasoning. Reserved for true no-ops; default to mapping the gesture to _some_ command.                                               |
 
+When a gesture creates a node and then references it — circle-to-group (`CREATE_NODES` a frame, then `SET_NODE_PARENT` the enclosed nodes onto it) — **omit the id** on `CREATE_NODES` and issue the `SET_NODE_PARENT` / `CONNECT_NODES` in a **follow-up call**, using the id the tool result echoes in `results[].nodes` (the pattern the `canvas_commands` tool describes). Never hand-write ids; for existing nodes and edges use the ids from the cluster payload / nearby-edges list.
+
 ## Deeper canvas knowledge
 
 Only load these on demand — most sketches don't need them:

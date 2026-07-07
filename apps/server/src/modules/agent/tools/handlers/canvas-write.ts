@@ -226,21 +226,6 @@ export async function handleCanvasCommands(
 
   const runId = createId('run');
 
-  // M2 sketch carve-out: the sketch pipeline still applies commands
-  // client-side via `useCanvasStore.executeCommands('agent')` after
-  // receiving the SketchCommandResponse. Running the executor here
-  // would double-apply and immediately desync local `version`. The
-  // chat agent path (default origin `ai-operate`) is the one that
-  // benefits from server-side execution today; sketch joins in M3
-  // when broadcast lands.
-  if (origin.type === 'sketch-recognized') {
-    return JSON.stringify({
-      source: 'agent',
-      canvasId: args.canvasId,
-      commands: annotated,
-    });
-  }
-
   try {
     const result = await executeOnServer({
       canvasId: args.canvasId,

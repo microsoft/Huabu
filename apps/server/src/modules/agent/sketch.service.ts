@@ -14,6 +14,8 @@
  * `canvas_commands` server-side execution — is shared with `runAgent`.
  */
 
+import { createId } from '@sediment/shared';
+
 import { runAgent } from './agent.service.js';
 import { loadAgent, renderAgentTemplate } from '../../prompt/index.js';
 import { getLogger } from '../../utils/logger.js';
@@ -147,6 +149,12 @@ export async function recognizeSketchCommands(
   const collectedCommands: CanvasCommand[] = [];
   const reasoningParts: string[] = [];
 
+  // Attribute this recognition's canvas mutations to a synthetic thread so
+  // executeOnServer computes revertible change records (broadcast to the
+  // client) — the sketch overlay drives Keep / Revert / Preview off them,
+  // the same machinery the chat ChangeReviewCard uses.
+  const threadId = createId('sketch');
+
   // ── Diagnostics ────────────────────────────────────────────────────
   // Track which tool calls the LLM actually issued and what the handler
   // returned, so we can distinguish "LLM never called canvas_commands"
@@ -162,6 +170,7 @@ export async function recognizeSketchCommands(
 
   const stream = runAgent({
     scope: 'sketch',
+    threadId,
     canvasId,
     origin: agentCfg.runtime.defaultOrigin ?? { type: 'sketch-recognized' },
     context: piContext,
@@ -247,7 +256,7 @@ export async function recognizeSketchCommands(
 
   return {
     reasoning: reasoningText,
-    commands: collectedCommands,
+    threadId,
   };
 }
 
