@@ -93,7 +93,7 @@ Keep edges minimal — let proximity and alignment imply relationships. Only con
 
 ### Order (across calls)
 
-1. **Create call** — `CREATE_NODES` (headers + main + sub, all with explicit positions; omit ids). Read the assigned ids back from `results[].nodes`.
+1. **Create call** — `CREATE_NODES` (headers + main + sub, all with explicit positions). Read the assigned ids back from `results[].nodes`.
 2. **Follow-up call**, using those ids:
    - `CONNECT_NODES` (horizontal sequence + cross-track verticals).
    - `ALIGN_NODES` (`center-v` per row) + `DISTRIBUTE_NODES` (per row).

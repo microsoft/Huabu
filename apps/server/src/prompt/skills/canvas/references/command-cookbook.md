@@ -1,6 +1,6 @@
 # Command Cookbook
 
-Composed `canvas_commands` sequences for common user intents. When a step needs the **id of a node an earlier step created**, it goes in a **follow-up call** (a command can't reference a node that doesn't exist yet — see [`commands.md` §4](commands.md)); the recipes below mark those splits. Independent steps stay in one call. Every `CREATE_NODES` entry needs an **explicit `position`**; node ids, by contrast, are **assigned by the server** — never hand-write them, read them back from `results[].nodes`.
+Composed `canvas_commands` sequences for common user intents. When a step needs the **id of a node an earlier step created**, it goes in a **follow-up call** (a command can't reference a node that doesn't exist yet — see [`commands.md` §4](commands.md)); the recipes below mark those splits. Independent steps stay in one call. Every `CREATE_NODES` entry needs an **explicit `position`**; node ids, by contrast, are **assigned by the server** and read back from `results[].nodes`.
 
 > **Schema is the source of truth.** Field names below come from the `canvas_commands` schemas; this file is about _which commands to compose_, not which fields to type.
 
@@ -23,7 +23,7 @@ Composed `canvas_commands` sequences for common user intents. When a step needs 
 Goal: turn one node into a fan of related ideas.
 
 1. `read("nodes/<filename>.md")` if you need its actual content.
-2. Create call — `CREATE_NODES`: N idea nodes with explicit positions placed in a fan around the source. Same `style.accent` so they read as a group. Omit ids; read the assigned ids back from `results[].nodes`.
+2. Create call — `CREATE_NODES`: N idea nodes with explicit positions placed in a fan around the source. Same `style.accent` so they read as a group. Read the assigned ids back from `results[].nodes`.
 3. Follow-up call — `CONNECT_NODES`: one edge per idea, source → idea, using the ids from step 2. Use `direction: "forward"` if the cause→effect direction is obvious.
 4. Optional polish: `ALIGN_NODES` if the fan should sit on a clean line, then `DISTRIBUTE_NODES` (can ride along with step 3).
 
@@ -32,7 +32,7 @@ Goal: turn one node into a fan of related ideas.
 Goal: replace a noisy cluster with a single distilled note.
 
 1. `read("nodes/<filename>.md")` for **every** input — synthesis must be grounded in the actual text, not the labels.
-2. Create call — `CREATE_NODES`: one synthesised `note` with substantive Markdown body and a clear label. Position near the cluster centroid (use the outline you fetched when entering the canvas). Omit its id; read it back from `results[].nodes`.
+2. Create call — `CREATE_NODES`: one synthesised `note` with substantive Markdown body and a clear label. Position near the cluster centroid (use the outline you fetched when entering the canvas). Read its id back from `results[].nodes`.
 3. Follow-up call — `DELETE_NODES` the originals, and `CONNECT_NODES` to link the new note (by its returned id) to whichever upstream context still applies (e.g. the source the originals were derived from).
 4. If the user asked to "keep the originals", skip `DELETE_NODES` and instead `CONNECT_NODES` from each original to the synthesised note.
 
@@ -41,7 +41,7 @@ Goal: replace a noisy cluster with a single distilled note.
 Goal: take a loose group of nodes and put them in a frame with a meaningful title.
 
 1. Use `inspect_nodes({ inSameClusterAs: "<anchorId>" })` (or `inRect` if you have a region) to enumerate members and pick a bounding box.
-2. Create call — `CREATE_NODES`: one `frame`, position = top-left of the bbox minus ~40px padding, size = bbox + ~80px padding. Set `data.label` to a meaningful theme name. Omit its id; read the frame id back from `results[].nodes`.
+2. Create call — `CREATE_NODES`: one `frame`, position = top-left of the bbox minus ~40px padding, size = bbox + ~80px padding. Set `data.label` to a meaningful theme name. Read the frame id back from `results[].nodes`.
 3. Follow-up call — `SET_NODE_PARENT`: each member → the new frame (by its returned id).
 4. Optional: `MERGE_NODE_DATA` to give every member the same `style.accent` for visual cohesion with the frame (can ride along with step 3, since members already exist).
 
@@ -81,5 +81,5 @@ Single `SET_NODE_PARENT { nodeId: "<child>", parentId: null }`. Keeps the node's
 
 - **Referencing a node you're creating in the same call.** A `CONNECT_NODES` / `SET_NODE_PARENT` can't see a node created earlier in the same call — its server id isn't known yet. Create first, then wire up in a follow-up call using the ids from `results[].nodes`.
 - **Splitting _independent_ commands needlessly.** If commands don't depend on each other's new ids (creating several unrelated nodes, restyling a cluster, aligning a row), keep them in one call — fewer re-renders. Only split when there's a real id dependency.
-- **Trying to name a node or edge you're creating.** Omit `id` on `CREATE_NODES` / `CONNECT_NODES` — the server assigns unique ids and returns them in `results[].nodes`. Look up ids for existing nodes/edges via `inspect_nodes` / `inspect_edges`.
+- **Guessing ids for existing nodes/edges.** Look them up via `inspect_nodes` / `inspect_edges` — don't guess.
 - **Restyling via `MERGE_NODE_DATA` with `data: { style: { accent: ... } }` plus other fields you did not mean to touch.** Merge is shallow on `data` — keep the patch minimal and explicit.

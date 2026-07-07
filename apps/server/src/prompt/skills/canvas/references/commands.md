@@ -39,8 +39,7 @@ Everything you need to mutate a canvas. **Load this before issuing your first `c
 
 ## 3. ID conventions
 
-- **Omit `id` on `CREATE_NODES` — the server assigns node ids.** It mints a unique `node-<uuid>` and echoes it (with the node's label) in `results[].nodes`. Don't hand-write one: a reused placeholder collides across runs.
-- Edge ids are assigned the same way — omit `id` on `CONNECT_NODES`.
+- **The server assigns every id.** It mints a unique `node-<uuid>` / `edge-<uuid>` for each `CREATE_NODES` / `CONNECT_NODES` entry and echoes each created node's id (with its label) in `results[].nodes`. There is no `id` field to set.
 - To reference a node you just created (connect it, reparent it), read its id from the create call's `results[].nodes` and use it in a **follow-up** call.
 
 ## 4. Ordering & dependencies
@@ -49,7 +48,7 @@ Within a single `canvas_commands` call the commands run in declared order, but t
 
 **So split dependent work across turns:**
 
-1. **Create** the nodes (and frames) you need — omit ids, let the server assign them.
+1. **Create** the nodes (and frames) you need — the server assigns their ids.
 2. Read the assigned ids from `results[].nodes`.
 3. **Wire** it up in the next call (`CONNECT_NODES`, `SET_NODE_PARENT`) using those real ids.
 4. **Polish** (`ALIGN_NODES`, `DISTRIBUTE_NODES`) — these only touch existing nodes, so they can ride along with any call that already has their ids.

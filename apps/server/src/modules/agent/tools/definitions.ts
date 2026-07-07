@@ -333,8 +333,6 @@ For image nodes, set only \`width\` — via \`size.width\` in \`CREATE_NODES\`, 
 **Text / Question Nodes - Content-Driven Height:**
 For \`text\` and \`question\` nodes, set only \`size.width\` in \`CREATE_NODES\` / \`SET_NODE_GEOMETRY\`. Their height is content-driven and must not be pinned with \`size.height\`; to make the rendered text larger or smaller, set \`data.style.fontSize\` via \`CREATE_NODES\` or \`MERGE_NODE_DATA\`.
 
-ID conventions: omit \`id\` on \`CREATE_NODES\` / \`CONNECT_NODES\` — the server assigns node and edge ids and echoes each created node's id (with its label) in \`results[].nodes\`.
-
 For per-command semantics, idiomatic compositions, and worked examples (group into frame, brainstorm-and-connect, merge/synthesize, restyle a cluster, tidy a row), call \`read("skills/canvas/SKILL.md")\` and follow its links into \`skills/canvas/references/\`.`,
   parameters: canvasCommandsParamsSchema,
   // Force serial execution: two canvas_commands in the same batch can
