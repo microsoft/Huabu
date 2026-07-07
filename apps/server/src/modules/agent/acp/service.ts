@@ -27,6 +27,7 @@ import { canvasAcpNamespace } from '../../storage/paths.js';
 import {
   agenetes,
   EXTERNAL_DRIVER_KIND,
+  type AcpHandle,
   type AcpWorkloadSpec,
 } from '../agenetes/drivers.js';
 import { type RenderFn } from '../agenetes/handle.js';
@@ -250,8 +251,9 @@ export async function* runAcpAgent(
   // Get-or-create the long-lived ACP handle for this thread (I9.3) and
   // drive one turn. The handle self-resolves its session inside `run`, so
   // any session-open failure (unbound profile / bridge down) throws on the
-  // generator's first `next()` — exactly as before.
-  const handle = agenetes.create(spec);
+  // generator's first `next()` — exactly as before. `spec.kind` is
+  // `external`, so the instance's union handle narrows to an `AcpHandle`.
+  const handle = agenetes.create(spec) as AcpHandle;
   return yield* handle.run(opts.envelope, render, {
     overlay,
     signal,

@@ -45,12 +45,21 @@ import type { Message } from '@earendil-works/pi-ai';
 import type { NodeOrigin } from '@sediment/shared';
 
 /**
- * Dispatch key reserved for the in-process pi-agent-core (built-in) driver.
- * The built-in is currently a plain const (not registry-dispatched), so this
- * is not wired at `register()` yet — it becomes the `.register('internal', …)`
- * contract kind when the built-in is folded into the instance (M5.1).
+ * The built-in driver's factory-dictionary name (its *implementation*
+ * identity, I5.1) — the `.addFactory(BUILTIN_FACTORY_NAME, …)` key,
+ * mirroring the ACP driver's {@link ACP_FACTORY_NAME}. `'builtin'` was the
+ * factory name all along, not the contract kind (that is
+ * {@link INTERNAL_DRIVER_KIND}).
  */
-export const BUILTIN_DRIVER_KIND = 'builtin';
+export const BUILTIN_FACTORY_NAME = 'builtin';
+
+/**
+ * The built-in driver's dispatch `kind` — the I5 *contract* kind L1 injects
+ * at `register()` (I5.1 alias / I9.5), the `internal` counterpart to the
+ * ACP driver's `external` ({@link EXTERNAL_DRIVER_KIND}). It is L1's to
+ * choose at mount, and rides `spec.kind` on the built-in `WorkloadSpec`.
+ */
+export const INTERNAL_DRIVER_KIND = 'internal';
 
 /**
  * The external ACP driver's dispatch `kind` — the I5 *contract* kind L1
@@ -103,6 +112,15 @@ export type AcpWorkloadSpec = AcpCreateSpec & {
 /** The concrete long-lived ACP (Deployment) handle type. */
 export type AcpHandle = AgentHandle<PreparedAcpPrompt, AcpTurnCtx>;
 
+/** The concrete built-in (Job) handle type. */
+export type BuiltinHandle = AgentHandle<BuiltinRendered, BuiltinTurnCtx>;
+
+/** The union `WorkloadSpec` the mounted instance dispatches on `kind`. */
+export type AgenetesWorkloadSpec = AcpWorkloadSpec | BuiltinWorkloadSpec;
+
+/** The union handle the mounted instance's `create` / `get` return. */
+export type AgenetesHandle = AcpHandle | BuiltinHandle;
+
 /**
  * The serializable built-in `WorkloadSpec` (I8.5 / I9.6) — a Job. It is a
  * pure-data projection the built-in factory constructs a fresh backing
@@ -149,7 +167,9 @@ export interface BuiltinWorkloadSpec {
  * `create(spec)` builds a fresh backing `Agent` over the baked transcript
  * and wraps it in a {@link BuiltinAgentHandle}.
  */
-export const builtinDriverFactory = (): AgentDriver<
+export const builtinDriverFactory = (
+  _config?: void,
+): AgentDriver<
   BuiltinWorkloadSpec,
   AgentRequest,
   BuiltinRendered,
@@ -203,17 +223,22 @@ export const builtinAgentDriver: BuiltinAgentDriver = {
 };
 
 /**
- * The mounted Agenetes instance (I9) — the single L2 object L1 faces for
- * the ACP path. It owns the ACP driver (registered via the I9.5 builder),
- * the global live-handle table (`create` / `get` / `close`), and the
- * per-namespace durable thread table (`record` / `records`). The built-in
- * driver is intentionally NOT registered here (see {@link
- * builtinAgentDriver}).
+ * The mounted Agenetes instance (I9) — the single L2 object L1 faces. It
+ * owns both drivers (registered via the I9.5 builder), the global
+ * live-handle table (`create` / `get` / `close`), and the per-namespace
+ * durable thread table (`record` / `records`). Both the `external` ACP
+ * (Deployment) driver and the `internal` built-in (Job) driver are mounted
+ * here symmetrically, so **every** agent turn flows through
+ * `agenetes.create(spec).run(...)`; the instance dispatches the driver on
+ * `spec.kind` and the lifecycle on `spec.workloadType` (I3.2).
  */
-export const agenetes: Agenetes<AcpWorkloadSpec, AcpHandle> = mountAgenetes()
-  .addFactory(ACP_FACTORY_NAME, acpDriverFactory<AgentRequest>)
-  .register(EXTERNAL_DRIVER_KIND, ACP_FACTORY_NAME)
-  .build<AcpWorkloadSpec, AcpHandle>();
+export const agenetes: Agenetes<AgenetesWorkloadSpec, AgenetesHandle> =
+  mountAgenetes()
+    .addFactory(ACP_FACTORY_NAME, acpDriverFactory<AgentRequest>)
+    .register(EXTERNAL_DRIVER_KIND, ACP_FACTORY_NAME)
+    .addFactory(BUILTIN_FACTORY_NAME, builtinDriverFactory)
+    .register(INTERNAL_DRIVER_KIND, BUILTIN_FACTORY_NAME)
+    .build<AgenetesWorkloadSpec, AgenetesHandle>();
 
 /**
  * Resolve the built-in Job driver. It is a plain const (not registry
