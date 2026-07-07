@@ -14,7 +14,7 @@
 // `create` / `get` return.
 
 import type { AgentHandle, AgentRuntime } from '@agenetes/runtime';
-import type { Namespace } from '@agenetes/protocol';
+import type { Namespace, WorkloadType } from '@agenetes/protocol';
 
 import {
   AgentPersistentState,
@@ -26,12 +26,14 @@ import {
  * The minimal shape the instance reads off a `WorkloadSpec` (I9.6). The
  * host composes the concrete closed union from the `@agenetes/protocol`
  * building blocks; the instance stays generic over it and only needs the
- * three identity/dispatch fields — `threadId` (I4.2), `kind` (I5), and the
- * `namespace` (I4.1) it persists the durable record under.
+ * identity/dispatch fields — `threadId` (I4.2), the driver route `kind`
+ * (I5), the lifecycle axis `workloadType` (I3.2, orthogonal to `kind`),
+ * and the `namespace` (I4.1) it persists the durable record under.
  */
 export interface WorkloadSpecShape {
   readonly threadId: string;
   readonly kind: string;
+  readonly workloadType: WorkloadType;
   readonly namespace: Namespace;
 }
 
@@ -46,12 +48,20 @@ export interface Agenetes<
   THandle extends AgentHandle = AgentHandle,
 > {
   /**
-   * Get-or-create by `spec.threadId`, dispatching on `spec.kind` (I9.3):
-   * `resolve(spec.kind).create(spec)` internally. An existing live handle
-   * is returned as-is — **reuse ignores spec**, no reconcile (changing a
-   * spec is an explicit `close()` + `create()` the caller decides). Also
-   * upserts the durable thread record so the query surface can read it
-   * independent of handle liveness (I9.4).
+   * Realise the workload for `spec`, dispatching the driver on `spec.kind`
+   * and the lifecycle on `spec.workloadType` (I3.2 / I9.3):
+   *
+   *   - a **`Deployment`** get-or-creates by `spec.threadId` — an existing
+   *     live handle is returned as-is (**reuse ignores spec**, no reconcile;
+   *     changing a spec is an explicit `close()` + `create()` the caller
+   *     decides), and it is cached in the live-handle table so `get` can
+   *     find it;
+   *   - a **`Job`** is minted fresh every call (`driver.create(spec)`
+   *     directly) and **never** enters the live-handle table, so
+   *     `get(threadId)` stays `undefined` and `close()` is a no-op for it.
+   *
+   * Either way the durable thread record is upserted so the query surface
+   * can read it independent of handle liveness (I9.4).
    */
   create(spec: TSpec): THandle;
   /**
@@ -85,15 +95,20 @@ export function createAgenetesInstance<
 >(runtime: AgentRuntime, threadStore: ThreadStore): Agenetes<TSpec, THandle> {
   return {
     create(spec: TSpec): THandle {
-      const handle = runtime.create(spec.threadId, () => {
-        const driver = runtime.resolve(spec.kind);
-        if (!driver) {
-          throw new Error(`no agent driver registered for kind '${spec.kind}'`);
-        }
-        // End-state dispatch (I9.3): the driver's factory takes the spec.
-        // Drivers still on object-injection inputs conform at M5 C4b/E2.
-        return driver.create(spec);
-      });
+      const driver = runtime.resolve(spec.kind);
+      if (!driver) {
+        throw new Error(`no agent driver registered for kind '${spec.kind}'`);
+      }
+      // Dispatch the lifecycle axis (I3.2) off the control-plane
+      // `workloadType`, orthogonal to the driver route (`kind`): a Job is
+      // minted fresh per turn and never enters the live-handle table (so
+      // `get(threadId)` stays undefined and `close()` is a no-op for it),
+      // while a Deployment get-or-creates + caches the long-lived handle
+      // keyed by `threadId` (reuse ignores spec — no reconcile).
+      const handle: AgentHandle =
+        spec.workloadType === 'Job'
+          ? driver.create(spec)
+          : runtime.create(spec.threadId, () => driver.create(spec));
       threadStore.upsert(spec.namespace, spec.threadId, {
         spec,
         state: new AgentPersistentState(spec.namespace.storage?.root),

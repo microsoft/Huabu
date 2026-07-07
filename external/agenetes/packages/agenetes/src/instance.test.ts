@@ -55,6 +55,7 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
     const spec: StubSpec = {
       threadId: 'thr_1',
       kind: 'external',
+      workloadType: 'Deployment',
       namespace: ns('canvas_1', '/data/c1'),
       note: 'first',
     };
@@ -71,6 +72,7 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
     const spec: StubSpec = {
       threadId: 'thr_1',
       kind: 'external',
+      workloadType: 'Deployment',
       namespace: ns('canvas_1'),
     };
     const created = inst.create(spec);
@@ -82,11 +84,33 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
     const handle = inst.create({
       threadId: 'thr_1',
       kind: 'external',
+      workloadType: 'Deployment',
       namespace: ns('canvas_1'),
     }) as unknown as StubHandle;
     inst.close('thr_1');
     expect(handle.closed).toBe(true);
     expect(inst.get('thr_1')).toBeUndefined();
+  });
+
+  it('a Job is minted fresh each turn and never enters the live table (I3.2/I9.3)', () => {
+    const inst = mount();
+    const spec: StubSpec = {
+      threadId: 'thr_job',
+      kind: 'external',
+      workloadType: 'Job',
+      namespace: ns('canvas_1', '/data/c1'),
+      note: 'first',
+    };
+    const h1 = inst.create(spec) as unknown as StubHandle;
+    const h2 = inst.create({ ...spec, note: 'second' }) as unknown as StubHandle;
+    // distinct handles — a Job is not cached / reused
+    expect(h2).not.toBe(h1);
+    expect(h1.spec.note).toBe('first');
+    expect(h2.spec.note).toBe('second');
+    // and it never registers in the live-handle table
+    expect(inst.get('thr_job')).toBeUndefined();
+    // but the durable record is still upserted (query surface, I9.4)
+    expect(inst.record(spec.namespace, 'thr_job')?.spec.note).toBe('second');
   });
 
   it('create() dispatches on spec.kind; unknown kind throws', () => {
@@ -95,6 +119,7 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
       inst.create({
         threadId: 'thr_x',
         kind: 'nope',
+        workloadType: 'Deployment',
         namespace: ns('canvas_1'),
       }),
     ).toThrow(/no agent driver registered for kind 'nope'/);
@@ -103,7 +128,12 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
   it('query surface reads durable records, orthogonal to liveness (I9.4)', () => {
     const inst = mount();
     const namespace = ns('canvas_1', '/data/c1');
-    const spec: StubSpec = { threadId: 'thr_1', kind: 'external', namespace };
+    const spec: StubSpec = {
+      threadId: 'thr_1',
+      kind: 'external',
+      workloadType: 'Deployment',
+      namespace,
+    };
     inst.create(spec);
 
     const rec = inst.record(namespace, 'thr_1');
@@ -121,8 +151,18 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
     const inst = mount();
     const nsA = ns('canvas_A', '/data/a');
     const nsB = ns('canvas_B', '/data/b');
-    inst.create({ threadId: 'thr_a', kind: 'external', namespace: nsA });
-    inst.create({ threadId: 'thr_b', kind: 'external', namespace: nsB });
+    inst.create({
+      threadId: 'thr_a',
+      kind: 'external',
+      workloadType: 'Deployment',
+      namespace: nsA,
+    });
+    inst.create({
+      threadId: 'thr_b',
+      kind: 'external',
+      workloadType: 'Deployment',
+      namespace: nsB,
+    });
 
     expect(inst.records(nsA).map((r) => r.spec.threadId)).toEqual(['thr_a']);
     expect(inst.records(nsB).map((r) => r.spec.threadId)).toEqual(['thr_b']);
@@ -154,7 +194,12 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
       .build<StubSpec>();
 
     const namespace = ns('canvas_1');
-    inst.create({ threadId: 'thr_1', kind: 'external', namespace });
+    inst.create({
+      threadId: 'thr_1',
+      kind: 'external',
+      workloadType: 'Deployment',
+      namespace,
+    });
     expect(upsert).toHaveBeenCalledTimes(1);
     inst.records(namespace);
     expect(list).toHaveBeenCalledWith(namespace);
