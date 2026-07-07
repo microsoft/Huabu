@@ -19,6 +19,19 @@
 // tests that exercise font fitting assert against the SAME measurement path,
 // so only determinism and monotonicity matter, not pixel accuracy.
 // ---------------------------------------------------------------------------
+if (typeof document !== 'undefined' && !document.doctype) {
+  document.insertBefore(
+    document.implementation.createDocumentType('html', '', ''),
+    document.documentElement,
+  );
+}
+if (typeof document !== 'undefined' && document.compatMode !== 'CSS1Compat') {
+  Object.defineProperty(document, 'compatMode', {
+    configurable: true,
+    value: 'CSS1Compat',
+  });
+}
+
 const measureCtx = {
   font: '10px sans-serif',
   measureText(text: string): TextMetrics {

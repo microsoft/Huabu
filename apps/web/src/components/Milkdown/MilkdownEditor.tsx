@@ -29,6 +29,7 @@ import { createMilkdown, type MilkdownInstance } from './createMilkdown';
 import { markdownEquals, normalizeMarkdown } from './markdownUtils';
 
 import type { MilkdownBlockDragEvent, MilkdownDecorationSpec } from './types';
+import type { MilkdownToolbarSettings } from './types';
 
 export interface MilkdownEditorProps {
   /** Source of truth. Controlled. */
@@ -41,6 +42,8 @@ export interface MilkdownEditorProps {
   placeholder?: string;
   /** Optional className applied to the editor root. */
   className?: string;
+  /** Toolbar mode/settings for editable surfaces. Defaults to Sediment toolbar. */
+  toolbar?: MilkdownToolbarSettings;
   /**
    * Phase 4 provenance. The editor only renders the `blocks` half
    * (block-level highlights via `Decoration.node`); `tombstones` is
@@ -87,6 +90,7 @@ export function MilkdownEditor(props: MilkdownEditorProps): JSX.Element {
     editable = true,
     placeholder,
     className,
+    toolbar,
     decorations,
     onExternalUpdate,
     onReady,
@@ -136,6 +140,7 @@ export function MilkdownEditor(props: MilkdownEditorProps): JSX.Element {
         initialMarkdown: lastSyncedRef.current,
         editable,
         placeholder,
+        toolbarMode: toolbar?.mode ?? 'sediment',
       });
 
       if (cancelled) {

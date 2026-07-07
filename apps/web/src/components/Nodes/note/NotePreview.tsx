@@ -33,6 +33,7 @@ import { createPortal } from 'react-dom';
 
 import { Button } from '@/components/Common/Button';
 import { MilkdownEditor } from '@/components/Milkdown';
+import { MilkdownFloatingToolbar } from '@/components/Milkdown/MilkdownFloatingToolbar';
 import { usePreviewHeaderSlot } from '@/components/Nodes/PreviewHeaderSlot';
 import useCanvasStore from '@/store/canvasStore';
 import {
@@ -597,6 +598,7 @@ export const NotePreview = ({
       >
         {editMode === 'wysiwyg' ? (
           <>
+            {!readOnly ? <MilkdownFloatingToolbar instance={editor} /> : null}
             <MilkdownEditor
               markdown={markdown}
               editable={!readOnly}

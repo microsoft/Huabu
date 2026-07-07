@@ -127,6 +127,7 @@ export function MilkdownPreview(props: MilkdownPreviewProps): JSX.Element {
         // Table reorder handles) when the surface is drag-only. See
         // `MilkdownFactoryOptions.previewMode`.
         previewMode: enableBlockDrag,
+        toolbarMode: 'none',
       });
 
       if (cancelled) {

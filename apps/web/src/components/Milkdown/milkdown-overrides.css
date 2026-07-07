@@ -116,6 +116,14 @@
   opacity: 0.6;
 }
 
+/* React `MilkdownFloatingToolbar` owns inline math editing in Sediment
+   mode. Crepe's Vue inline-latex tooltip is visually inconsistent with
+   the shared toolbar popovers, so keep the schema/rendering feature but
+   suppress its built-in editor chrome. */
+.milkdown-latex-inline-edit {
+  display: none;
+}
+
 .milkdown .ProseMirror {
   /* Zero the 60px×120px editor padding; parents already provide their
      own padding (e.g. AIMessage's chat card uses `px-4`). */
@@ -374,6 +382,120 @@
 .milkdown .milkdown-block-handle .operation-item svg g,
 .milkdown .milkdown-block-handle .operation-item svg path {
   clip-path: none !important;
+}
+
+/* Crepe's block-handle add menu is rendered by Crepe's internal Vue
+   `blockEdit` feature, so it cannot mount our React `FloatingToolbar`
+   menu directly. Keep the behaviour upstream-owned, but restyle the
+   generated `.milkdown-slash-menu` DOM to match the React toolbar's
+   grouped block popup: compact surface, 1px edge, muted section labels,
+   full-width ghost rows, and info-tinted active state. */
+.milkdown .milkdown-slash-menu {
+  min-width: 12rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--edge-default);
+  border-radius: 0.375rem;
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.04),
+    0 8px 24px rgb(0 0 0 / 0.12);
+  color: var(--fg-default);
+  font-family: inherit;
+  overflow: hidden;
+}
+
+.milkdown .milkdown-slash-menu .tab-group {
+  padding: 0.25rem 0.25rem 0;
+  border-bottom: 1px solid var(--edge-default);
+}
+
+.milkdown .milkdown-slash-menu .tab-group ul {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0;
+}
+
+.milkdown .milkdown-slash-menu .tab-group ul li {
+  padding: 0.375rem 0.5rem;
+  border-radius: 0.375rem;
+  color: var(--fg-muted);
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1rem;
+}
+
+.milkdown .milkdown-slash-menu .tab-group ul li:hover {
+  background: var(--bg-hover);
+  color: var(--fg-default);
+}
+
+.milkdown .milkdown-slash-menu .tab-group ul li.selected {
+  background: var(--info-bg);
+  color: var(--info);
+}
+
+.milkdown .milkdown-slash-menu .menu-groups {
+  max-height: 16rem;
+  padding: 0.25rem;
+  overflow-y: auto;
+}
+
+.milkdown .milkdown-slash-menu .menu-groups .menu-group + .menu-group::before {
+  background: var(--edge-default);
+  margin: 0.25rem 0.5rem;
+}
+
+.milkdown .milkdown-slash-menu .menu-groups .menu-group h6 {
+  padding: 0.375rem 0.5rem 0.25rem;
+  color: var(--fg-subtle);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1;
+  text-transform: none;
+}
+
+.milkdown .milkdown-slash-menu .menu-groups .menu-group ul {
+  padding: 0;
+}
+
+.milkdown .milkdown-slash-menu .menu-groups .menu-group li {
+  min-width: 100%;
+  gap: 0.5rem;
+  padding: 0.375rem 0.5rem;
+  border-radius: 0.375rem;
+  color: var(--fg-muted);
+}
+
+.milkdown .milkdown-slash-menu .menu-groups .menu-group li.hover {
+  background: var(--bg-hover);
+  color: var(--fg-default);
+}
+
+.milkdown .milkdown-slash-menu .menu-groups .menu-group li.active {
+  background: var(--info-bg);
+  color: var(--info);
+}
+
+.milkdown .milkdown-slash-menu .menu-groups .menu-group li .milkdown-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  color: currentColor;
+}
+
+.milkdown .milkdown-slash-menu .menu-groups .menu-group li svg,
+.milkdown .milkdown-slash-menu .menu-groups .menu-group li svg path {
+  width: 1rem;
+  height: 1rem;
+  color: currentColor;
+  fill: currentColor;
+}
+
+.milkdown .milkdown-slash-menu .menu-groups .menu-group li > span {
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1rem;
 }
 
 /* ── Chat preview overrides ─────────────────────────────────────────
@@ -811,8 +933,28 @@
 .milkdown
   .milkdown-toolbar
   .toolbar-item
+  .mb-block-type-trigger[data-current='heading-4']
+  > .mb-block-type-trigger__icon[data-key='heading-4'],
+.milkdown
+  .milkdown-toolbar
+  .toolbar-item
+  .mb-block-type-trigger[data-current='heading-5']
+  > .mb-block-type-trigger__icon[data-key='heading-5'],
+.milkdown
+  .milkdown-toolbar
+  .toolbar-item
+  .mb-block-type-trigger[data-current='heading-6']
+  > .mb-block-type-trigger__icon[data-key='heading-6'],
+.milkdown
+  .milkdown-toolbar
+  .toolbar-item
   .mb-block-type-trigger[data-current='blockquote']
   > .mb-block-type-trigger__icon[data-key='blockquote'],
+.milkdown
+  .milkdown-toolbar
+  .toolbar-item
+  .mb-block-type-trigger[data-current='divider']
+  > .mb-block-type-trigger__icon[data-key='divider'],
 .milkdown
   .milkdown-toolbar
   .toolbar-item
@@ -826,8 +968,23 @@
 .milkdown
   .milkdown-toolbar
   .toolbar-item
+  .mb-block-type-trigger[data-current='task-list']
+  > .mb-block-type-trigger__icon[data-key='task-list'],
+.milkdown
+  .milkdown-toolbar
+  .toolbar-item
   .mb-block-type-trigger[data-current='code-block']
-  > .mb-block-type-trigger__icon[data-key='code-block'] {
+  > .mb-block-type-trigger__icon[data-key='code-block'],
+.milkdown
+  .milkdown-toolbar
+  .toolbar-item
+  .mb-block-type-trigger[data-current='table']
+  > .mb-block-type-trigger__icon[data-key='table'],
+.milkdown
+  .milkdown-toolbar
+  .toolbar-item
+  .mb-block-type-trigger[data-current='math']
+  > .mb-block-type-trigger__icon[data-key='math'] {
   display: inline-flex;
 }
 

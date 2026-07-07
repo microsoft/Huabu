@@ -1,4 +1,11 @@
 import {
+  autoUpdate,
+  flip,
+  offset,
+  shift,
+  useFloating,
+} from '@floating-ui/react';
+import {
   AlignCenterHorizontal,
   AlignCenterVertical,
   AlignEndHorizontal,
@@ -10,6 +17,7 @@ import {
   Ungroup,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { Button } from './Button';
 import { cn } from './cn';
@@ -47,6 +55,7 @@ export const FLOATING_TOOLBAR_CLASS =
 interface RootProps {
   children: ReactNode;
   className?: string;
+  onMouseDown?: (event: React.MouseEvent<HTMLDivElement>) => void;
 }
 
 /**
@@ -54,9 +63,14 @@ interface RootProps {
  * For node toolbars, prefer applying `FLOATING_TOOLBAR_CLASS` directly
  * to `<NodeToolbar className>` to avoid an extra wrapper div.
  */
-function Root({ children, className }: RootProps) {
+function Root({ children, className, onMouseDown }: RootProps) {
   return (
-    <div className={cn(FLOATING_TOOLBAR_CLASS, className)}>{children}</div>
+    <div
+      className={cn(FLOATING_TOOLBAR_CLASS, className)}
+      onMouseDown={onMouseDown}
+    >
+      {children}
+    </div>
   );
 }
 
@@ -223,6 +237,10 @@ interface ToolbarColorPickerProps {
   onSelect: (token: string) => void;
   /** Tooltip label for the trigger button. */
   title?: string;
+  /** Optional controlled open state. When omitted, the picker manages itself. */
+  open?: boolean;
+  /** Called when the popover should open or close. */
+  onOpenChange?: (open: boolean) => void;
   /**
    * Custom trigger content. When omitted, a circular swatch showing the
    * current color is rendered.
@@ -239,25 +257,22 @@ function ToolbarColorPicker({
   value,
   onSelect,
   title = 'Change color',
+  open,
+  onOpenChange,
   children,
 }: ToolbarColorPickerProps) {
-  const [isOpen, setIsOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  // Close when clicking outside
-  useEffect(() => {
-    if (!isOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (
-        containerRef.current &&
-        !containerRef.current.contains(e.target as HTMLElement)
-      ) {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [isOpen]);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const isOpen = open ?? uncontrolledOpen;
+  const setIsOpen = (nextOpen: boolean) => {
+    if (open === undefined) setUncontrolledOpen(nextOpen);
+    onOpenChange?.(nextOpen);
+  };
+  const { refs, floatingStyles, isPositioned } = useFloating({
+    open: isOpen,
+    placement: 'top',
+    middleware: [offset(8), flip({ padding: 8 }), shift({ padding: 8 })],
+    whileElementsMounted: autoUpdate,
+  });
 
   // Resolve the token to a CSS color for the trigger swatch.
   // Legacy hex / CSS keyword passes through unchanged.
@@ -285,7 +300,12 @@ function ToolbarColorPicker({
   );
 
   return (
-    <div ref={containerRef} className="relative flex items-center">
+    <div
+      ref={(node) => {
+        refs.setReference(node);
+      }}
+      className="flex items-center"
+    >
       <Button
         variant="outline"
         iconOnly
@@ -300,30 +320,39 @@ function ToolbarColorPicker({
         {children ?? defaultTrigger}
       </Button>
 
-      {isOpen && (
-        <>
-          <div
-            className="fixed inset-0 z-40"
-            onClick={(e) => {
-              e.stopPropagation();
-              setIsOpen(false);
-            }}
-          />
-          <div
-            className="border-edge-default shadow-bottom animate-in fade-in zoom-in bg-surface absolute bottom-full left-1/2 z-50 mb-2 -translate-x-1/2 rounded-full border px-2 py-1.5 duration-200"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <ColorPicker
-              colors={colors}
-              activeToken={value}
-              onSelect={(t) => {
-                onSelect(t);
-                setIsOpen(false);
-              }}
-            />
-          </div>
-        </>
-      )}
+      {isOpen
+        ? createPortal(
+            <>
+              <div
+                className="fixed inset-0 z-40"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsOpen(false);
+                }}
+              />
+              <div
+                ref={refs.setFloating}
+                className="border-edge-default shadow-bottom bg-surface z-50 rounded-full border px-2 py-1.5"
+                style={{
+                  ...floatingStyles,
+                  visibility: isPositioned ? 'visible' : 'hidden',
+                }}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <ColorPicker
+                  colors={colors}
+                  activeToken={value}
+                  onSelect={(t) => {
+                    onSelect(t);
+                    setIsOpen(false);
+                  }}
+                />
+              </div>
+            </>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

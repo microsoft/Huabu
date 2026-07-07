@@ -5,6 +5,67 @@
  * Anything Crepe / ProseMirror specific stays internal.
  */
 
+import type { AccentToken } from '@sediment/shared';
+
+export type MilkdownToolbarMode = 'none' | 'crepe' | 'sediment';
+
+export type MilkdownInlineMark = 'bold' | 'italic' | 'strike' | 'inlineCode';
+
+export type MilkdownBlockType =
+  | 'paragraph'
+  | 'heading-1'
+  | 'heading-2'
+  | 'heading-3'
+  | 'heading-4'
+  | 'heading-5'
+  | 'heading-6'
+  | 'blockquote'
+  | 'divider'
+  | 'bullet-list'
+  | 'ordered-list'
+  | 'task-list'
+  | 'table'
+  | 'math'
+  | 'code-block';
+
+export type MilkdownTextColor = AccentToken;
+export type MilkdownBackgroundColor = AccentToken;
+
+export type MilkdownToolbarPlacement =
+  | 'selection'
+  | 'editor-top'
+  | 'node-toolbar';
+
+export interface MilkdownToolbarSettings {
+  mode?: MilkdownToolbarMode;
+  blockTypes?: 'all' | MilkdownBlockType[];
+  inlineMarks?: MilkdownInlineMark[];
+  showLink?: boolean;
+  showMath?: boolean;
+  showCode?: boolean;
+  showTextColor?: boolean;
+  showBackgroundColor?: boolean;
+  placement?: MilkdownToolbarPlacement;
+}
+
+export interface MilkdownFormattingState {
+  blockType: MilkdownBlockType;
+  activeMarks: ReadonlySet<MilkdownInlineMark>;
+  textColor: MilkdownTextColor | null;
+  backgroundColor: MilkdownBackgroundColor | null;
+}
+
+export const DEFAULT_MILKDOWN_TOOLBAR_SETTINGS = {
+  mode: 'sediment',
+  inlineMarks: ['bold', 'italic', 'strike', 'inlineCode'],
+  blockTypes: 'all',
+  showLink: true,
+  showMath: true,
+  showTextColor: true,
+  showBackgroundColor: true,
+  placement: 'selection',
+} satisfies MilkdownToolbarSettings;
+
 /**
  * Phase 4 decoration spec.
  *
