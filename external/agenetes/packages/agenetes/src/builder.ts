@@ -147,7 +147,7 @@ export function mountAgenetes(
         // dispatch is external, supplied here as the first `register` arg.
         runtime.register(driverName, {
           capabilities: driver.capabilities,
-          create: (input) => driver.create(input),
+          create: (input, priorState) => driver.create(input, priorState),
         });
       }
       return createAgenetesInstance<TSpec, THandle>(runtime, threadStore);

@@ -31,7 +31,7 @@
  */
 
 import type { AcpAgentClient } from './client.js';
-import type { AcpBindingRecipe } from './session-store.js';
+import type { AcpBindingRecipe } from './binding-recipe.js';
 import type { Namespace } from '@agenetes/protocol';
 import type {
   Cost as AcpCost,

@@ -25,8 +25,9 @@
  * session is live — we do not lazily spawn one just to, e.g., set a mode).
  *
  * The heavy session-open logic lives in `ensureAcpSession` (this same
- * package); the handle drives it from its baked spec and internalizes the
- * first-success promotion to a durable record (`promoteEntryToPersisted`).
+ * package); the handle drives it from its baked spec, installs the entry's
+ * up-report hook (`reportState`), and internalizes the first-success
+ * promotion of the session's `sessionId` into the durable snapshot.
  *
  * The handle is generic over the host request shape (`TRequest`): it never
  * inspects the request, only forwards it to the injected `render` closure,
@@ -40,13 +41,13 @@ import { fauxAssistantMessage } from '@earendil-works/pi-ai';
 
 import { applyToolExt } from './overlay.js';
 import { acpSessionRegistry } from './session-registry.js';
-import { ensureAcpSession, promoteEntryToPersisted } from './session.js';
+import { ensureAcpSession, registerAcpStateListener, reportEntryState } from './session.js';
 import { acpUpdateToStreamEvent, mergeThinkingChunk } from './translator.js';
 
 import type { AcpTurnOverlay } from './overlay.js';
-import type { AcpBindingRecipe } from './session-store.js';
+import type { AcpBindingRecipe } from './binding-recipe.js';
 import type { AcpSessionLogger } from './session.js';
-import type { Namespace } from '@agenetes/protocol';
+import type { AgentStateSnapshot, Namespace } from '@agenetes/protocol';
 import type {
   AgentCapabilities,
   AgentStreamEvent,
@@ -132,8 +133,8 @@ export interface AcpTurnCtx {
    * The request-scoped logger for THIS turn. Per-turn (not baked at
    * construction) so log lines stay correlated to the driving request.
    * Typed as the wider {@link AcpSessionLogger} because the handle now
-   * drives `ensureAcpSession` / `promoteEntryToPersisted` with it (which
-   * need `debug` / `error`), as well as the per-update translation.
+   * drives `ensureAcpSession` with it (which needs `debug` / `error`), as
+   * well as the per-update translation.
    */
   logger: AcpSessionLogger;
   /**
@@ -203,7 +204,29 @@ export class AcpAgentHandle<TRequest = unknown>
    */
   readonly capabilities: AgentCapabilities = ACP_CAPABILITIES;
 
-  constructor(private readonly spec: AcpCreateSpec) {}
+  /**
+   * @param spec       The baked create-time WorkloadSpec projection.
+   * @param priorState The instance's down-feed (I9.7): the durable
+   *   `AgentStateSnapshot` last persisted for this thread, forwarded into
+   *   `ensureAcpSession` so the session resumes / rehydrates from it. A
+   *   fresh thread receives `undefined`.
+   */
+  constructor(
+    private readonly spec: AcpCreateSpec,
+    private readonly priorState?: AgentStateSnapshot,
+  ) {}
+
+  /**
+   * Register the instance's up-report listener (I9.7). The listener is
+   * keyed by `threadId` in the driver's module-level registry, so it fires
+   * for every meta change on this thread — including out-of-turn set-RPCs
+   * that resolve an entry without going through `run`. Returns an
+   * unsubscribe that clears it. The instance wires this once per live
+   * Deployment handle.
+   */
+  onState(listener: (snapshot: AgentStateSnapshot) => void): () => void {
+    return registerAcpStateListener(this.spec.threadId, listener);
+  }
 
   async *run(
     request: TRequest | null,
@@ -241,8 +264,15 @@ export class AcpAgentHandle<TRequest = unknown>
       ...(this.spec.cwd !== undefined && { cwd: this.spec.cwd }),
       ...(this.spec.recipe !== undefined && { recipe: this.spec.recipe }),
       ...(this.spec.env !== undefined && { env: this.spec.env }),
+      ...(this.priorState !== undefined && { priorState: this.priorState }),
       logger,
     });
+
+    // Fire an initial up-report (I9.7) now that the entry is resolved and
+    // in the live registry: this persists the resumed session's sessionId
+    // (when already recoverable) + seeded metadata through the instance,
+    // folding in any replay touches that landed before the listener wired.
+    reportEntryState(entry);
 
     // Render THIS turn's envelope into ACP wire blocks (the composition
     // layer's render closure owns the preprocessor + raw-text fallback, so
@@ -403,9 +433,14 @@ export class AcpAgentHandle<TRequest = unknown>
       .then((result) => {
         stopReason = result.stopReason;
         // First-prompt promotion: now that the agent has processed a user
-        // turn its session is genuinely recoverable. Internalized here (the
-        // handle owns its session lifecycle) — no longer a ctx callback.
-        promoteEntryToPersisted(entry, logger);
+        // turn its session is genuinely recoverable. Flip the flag and
+        // up-report so the durable snapshot now carries the sessionId
+        // (withheld until now — see `snapshotEntryState`). Internalized
+        // here (the handle owns its session lifecycle).
+        if (!entry.persistedToDisk) {
+          entry.persistedToDisk = true;
+          reportEntryState(entry);
+        }
         // Mark the one-shot system preamble delivered, but only if this
         // turn actually carried it — a failed turn or slash-command
         // short-circuit leaves the flag untouched so the next real turn

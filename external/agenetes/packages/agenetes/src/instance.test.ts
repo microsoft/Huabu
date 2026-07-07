@@ -8,10 +8,15 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-import type { AgentCapabilities } from '@agenetes/protocol';
-import type { AgentDriver, AgentHandle } from '@agenetes/runtime';
+import { InMemoryThreadStore } from './thread-store.js';
 
 import { mountAgenetes, type WorkloadSpecShape } from './index.js';
+
+import type { AgentCapabilities } from '@agenetes/protocol';
+import type { AgentStateSnapshot } from '@agenetes/protocol';
+import type { AgentDriver, AgentHandle } from '@agenetes/runtime';
+
+
 
 const CAPS = {} as AgentCapabilities;
 
@@ -22,7 +27,10 @@ interface StubSpec extends WorkloadSpecShape {
 /** A stub handle recording its close() so teardown is observable. */
 class StubHandle {
   closed = false;
-  constructor(readonly spec: StubSpec) {}
+  constructor(
+    readonly spec: StubSpec,
+    readonly priorState?: AgentStateSnapshot,
+  ) {}
   close(): void {
     this.closed = true;
   }
@@ -32,7 +40,8 @@ class StubHandle {
 function stubDriver(): AgentDriver<StubSpec> {
   return {
     capabilities: CAPS,
-    create: (spec) => new StubHandle(spec) as unknown as AgentHandle,
+    create: (spec, priorState) =>
+      new StubHandle(spec, priorState) as unknown as AgentHandle,
   };
 }
 
@@ -187,6 +196,47 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
     expect(inst.records(nsA).map((r) => r.spec.threadId)).toEqual(['thr_a']);
     expect(inst.records(nsB).map((r) => r.spec.threadId)).toEqual(['thr_b']);
     expect(inst.record(nsA, 'thr_b')).toBeUndefined();
+  });
+
+  it('down-feeds the durable snapshot into driver.create and preserves it on reuse (I9.7)', () => {
+    const store = new InMemoryThreadStore();
+    const namespace = ns('canvas_1', '/data/c1');
+    const prior: AgentStateSnapshot = {
+      sessionId: 'sess_abc' as AgentStateSnapshot['sessionId'],
+      metadata: { currentModeId: 'ask' },
+    };
+    // Pre-seed a durable record as if a prior process had up-reported.
+    store.upsert(namespace, 'thr_1', {
+      spec: {
+        threadId: 'thr_1',
+        kind: 'external',
+        workloadType: 'Deployment',
+        namespace,
+      } as StubSpec,
+      state: prior,
+    });
+    const inst = mountAgenetes({ threadStore: store })
+      .addFactory('stub', stubDriver)
+      .register('external', 'stub')
+      .build<StubSpec>();
+
+    const spec: StubSpec = {
+      threadId: 'thr_1',
+      kind: 'external',
+      workloadType: 'Deployment',
+      namespace,
+    };
+    // Down-feed: the driver receives the persisted snapshot at create time.
+    const handle = inst.create(spec) as unknown as StubHandle;
+    expect(handle.priorState).toEqual(prior);
+
+    // The state-preserving upsert must NOT clobber the persisted snapshot
+    // back to `{}` — a returning thread keeps its resume token + metadata.
+    expect(inst.record(namespace, 'thr_1')?.state).toEqual(prior);
+
+    // Reuse (get-or-create) also leaves the durable state intact.
+    inst.create(spec);
+    expect(inst.record(namespace, 'thr_1')?.state).toEqual(prior);
   });
 
   it('build() throws when a registration names an unknown factory', () => {

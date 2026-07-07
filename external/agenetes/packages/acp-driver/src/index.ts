@@ -44,17 +44,7 @@ export type {
   PermissionDecision,
 } from './client.js';
 
-export {
-  readAcpSessionRecord,
-  writeAcpSessionRecord,
-  writeAcpSessionMeta,
-  deleteAcpSessionRecord,
-} from './session-store.js';
-export type {
-  AcpBindingRecipe,
-  AcpSessionPersistedMeta,
-  AcpSessionRecord,
-} from './session-store.js';
+export type { AcpBindingRecipe } from './binding-recipe.js';
 
 export { acpSessionRegistry } from './session-registry.js';
 export type { AcpSessionEntry } from './session-registry.js';
@@ -96,7 +86,6 @@ export {
 
 export {
   ensureAcpSession,
-  promoteEntryToPersisted,
   setAcpProfileCachePort,
 } from './session.js';
 export type {

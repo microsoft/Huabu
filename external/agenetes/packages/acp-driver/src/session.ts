@@ -9,17 +9,22 @@
  * the session twice.
  *
  * The session-meta handlers (`handleSessionMetaUpdate` + the `apply*Update`
- * family + snapshot/hydrate/seed/schedule/promote) own the ACP-SDK-shaped
- * control-plane state — modes / models / config-options / slash-command
- * catalogue / usage / title — that `control` mutates and that is persisted
- * (debounced) to the session store for cross-restart recovery.
+ * family + `snapshotEntryMeta` / `snapshotEntryState` / hydrate / seed) own
+ * the ACP-SDK-shaped control-plane state — modes / models / config-options
+ * / slash-command catalogue / usage / title — that `control` mutates. It is
+ * no longer persisted here: every mutation calls `entry.reportState()`,
+ * the up-report hook the owning handle installs, which pushes the folded
+ * `AgentStateSnapshot` up to the Agenetes instance (the sole ThreadStore
+ * writer + notification re-emitter, I9.7). Durable recovery state is
+ * likewise DOWN-fed on create as `opts.priorState`, not read from disk.
  *
  * Host-agnostic: storage scope arrives as a `Namespace` on the options /
  * entry (L1 maps its canvasId → namespace); the agent reachback env is
  * L1-assembled and handed in on `env`; the profile-schema cache is an
- * injected {@link AcpProfileCachePort} (L1 owns the projection). This
- * module never reads a host port, assembles an RFS URL, or imports
- * `@sediment/shared`. See docs/proposals/layered-architecture.md §7 (M5).
+ * injected read-only {@link AcpProfileCachePort} (L1 owns the projection
+ * and now feeds it from `notifications()`). This module never reads a host
+ * port, assembles an RFS URL, or imports `@sediment/shared`. See
+ * docs/proposals/layered-architecture.md §7 (M5).
  */
 
 import { getAgentletServer } from '@agenetes/agentlet-host';
@@ -27,21 +32,17 @@ import { getAgentletServer } from '@agenetes/agentlet-host';
 import { AcpAgentClient } from './client.js';
 import { AcpServiceError } from './errors.js';
 import { acpSessionRegistry } from './session-registry.js';
-import {
-  deleteAcpSessionRecord,
-  readAcpSessionRecord,
-  writeAcpSessionMeta,
-  writeAcpSessionRecord,
-} from './session-store.js';
 import { ensureAgentForThread } from './spawn-orchestrator.js';
 
 import type { AcpInitializeResult } from './client.js';
 import type { AcpSessionEntry } from './session-registry.js';
+import type { AcpBindingRecipe } from './binding-recipe.js';
 import type {
-  AcpBindingRecipe,
-  AcpSessionPersistedMeta,
-} from './session-store.js';
-import type { Namespace } from '@agenetes/protocol';
+  AgentMetadata,
+  AgentStateSnapshot,
+  Namespace,
+  SessionId,
+} from '@agenetes/protocol';
 import type {
   ModelInfo as AcpModelInfo,
   SessionConfigOption as AcpSessionConfigOption,
@@ -70,17 +71,15 @@ export interface AcpSessionLogger {
 // the caching policy + cold-start seeding are L1's. This composition shell
 // (destined L2) therefore does NOT import the cache directly; L1 injects an
 // implementation of this port at bootstrap (see `profile-cache-port.ts`),
-// and this module only emits into / reads from the port. When no port is
-// installed (e.g. a unit test) every call is a silent no-op / cache miss.
+// and this module only reads from the port. When no port is installed (e.g.
+// a unit test) every call is a silent cache miss.
+//
+// The WRITE direction (mirroring a live entry's schema into the cache) is
+// no longer a port method: L1 now subscribes to `agenetes.notifications()`
+// (I9.7) and folds each up-reported `AgentMetadata` into the cache itself,
+// so the only inbound port is the cold-start `readCommands` pull.
 // See docs/proposals/layered-architecture.md §7 (M3).
 export interface AcpProfileCachePort {
-  /**
-   * Mirror a live session entry's schema + last-known state into the
-   * cross-thread, on-disk profile cache. Called after any out-of-turn meta
-   * update that changes a profile-shared field (mode / model / config /
-   * slash-command catalogue). L1 owns the projection + persistence.
-   */
-  mirror(entry: AcpSessionEntry): void;
   /**
    * Read the warm-start slash-command list cached for a profile, or `null`
    * when none is cached. Used to paint the `/` menu on a fresh session
@@ -103,6 +102,52 @@ export function setAcpProfileCachePort(port: AcpProfileCachePort | null): void {
   profileCachePort = port;
 }
 
+// ─── Up-report channel (I9.7) ─────────────────────────────────────────────
+//
+// The instance's per-thread up-report listeners, keyed by threadId. The
+// owning `AcpAgentHandle` registers one via `registerAcpStateListener` when
+// the Agenetes instance wires it (`handle.onState`), independent of whether
+// a `run` is active — so an out-of-turn set-RPC (which resolves an entry
+// via `ensureAcpSession` before any prompt) still up-reports its meta
+// change. The meta-update handlers push through `reportEntryState`, which
+// folds the entry into an `AgentStateSnapshot` and hands it to the listener
+// (the instance persists it as the sole ThreadStore writer, then re-emits).
+const stateListeners = new Map<
+  string,
+  (snapshot: AgentStateSnapshot) => void
+>();
+
+/**
+ * Register (replace) the up-report listener for `threadId`. Returns an
+ * unsubscribe that removes it only if it is still the current listener.
+ * Called by {@link AcpAgentHandle.onState}.
+ */
+export function registerAcpStateListener(
+  threadId: string,
+  listener: (snapshot: AgentStateSnapshot) => void,
+): () => void {
+  stateListeners.set(threadId, listener);
+  return () => {
+    if (stateListeners.get(threadId) === listener) {
+      stateListeners.delete(threadId);
+    }
+  };
+}
+
+/**
+ * Push the entry's current durable state up to its thread's registered
+ * up-report listener (I9.7). No-op when the entry is not (or no longer) in
+ * the live registry, or when no listener is registered for its thread — the
+ * early replay touches inside `ensureAcpSession` (before the handle wires
+ * its listener) are simply folded into the initial report the handle fires
+ * once it resolves the entry.
+ */
+export function reportEntryState(entry: AcpSessionEntry): void {
+  const threadId = findThreadIdForEntry(entry);
+  if (!threadId) return;
+  stateListeners.get(threadId)?.(snapshotEntryState(entry));
+}
+
 // ─── Session lifecycle helper ─────────────────────────────────────────────
 
 export interface EnsureAcpSessionOptions {
@@ -116,14 +161,14 @@ export interface EnsureAcpSessionOptions {
    */
   cwd?: string;
   /**
-   * Pre-resolved spawn recipe for a first-time thread (no persisted
-   * `bindingRecipe` yet). The host composition layer resolves this from
-   * its profile store *before* calling in, so the session-lifecycle code
-   * never reaches back into an L1 module (`profile-store`). For a
-   * returning thread the persisted `bindingRecipe` snapshot wins and this
-   * is ignored; when both are absent the binding is unbound and the call
-   * throws. Carrying the recipe on the options (rather than looking it up
-   * here) is what makes the create-time spec fully serializable.
+   * Pre-resolved spawn recipe for the thread — the L1-baked recipe that
+   * rides the create-time `WorkloadSpec`. Under recipe-first-via-L1 (I9.6,
+   * decision R1) L1 owns keeping a returning thread's recipe stable, so the
+   * driver forwards this verbatim on every turn and no longer resolves the
+   * recipe from a persisted snapshot; when absent the binding is unbound
+   * and the call throws. Carrying the recipe on the options (rather than
+   * looking it up here) is what makes the create-time spec fully
+   * serializable.
    */
   recipe?: AcpBindingRecipe | null;
   /**
@@ -139,6 +184,16 @@ export interface EnsureAcpSessionOptions {
    * The driver neither builds nor interprets it.
    */
   env?: Record<string, string>;
+  /**
+   * The instance's **down-feed** (I9.7): the durable `AgentStateSnapshot`
+   * last persisted for this thread, threaded down from `driver.create`. The
+   * session lifecycle resumes its low-level session from
+   * `priorState.sessionId` (via `session/load`) and rehydrates the entry's
+   * observable metadata from `priorState.metadata` — replacing the old
+   * on-disk `readAcpSessionRecord` read entirely. `undefined` for a fresh
+   * thread (no durable record yet).
+   */
+  priorState?: AgentStateSnapshot;
   logger: AcpSessionLogger;
 }
 
@@ -171,27 +226,12 @@ function ensureSessionKey(
 }
 
 /**
- * Per-`(scopeName, threadId)` debounce slots for meta persistence. Meta
- * updates can arrive in bursts (e.g. an `available_commands_update`
- * immediately followed by a `config_option_update` on session warm-up,
- * or a flurry of `usage_update`s during a long turn), and persisting
- * each one independently would hit the JSON store dozens of times per
- * second on a busy thread. We collapse them into a single tail-write
- * by deferring the flush by {@link META_PERSIST_DEBOUNCE_MS}.
- *
- * Cancellation: callers MUST invoke `cancelPersistEntryMeta` whenever
- * the record is being deleted (binding switch, scope switch, load
- * failure) — otherwise a queued timer could re-create the file
- * milliseconds after a deliberate `deleteAcpSessionRecord` call.
+ * Fold the entry's current ACP-SDK-shaped control-plane state into the
+ * driver-neutral {@link AgentMetadata} snapshot — the ACP driver's
+ * translator (I9.7 / M5.5). The field shapes already align (both reference
+ * the ACP SDK zod types), so this is a straight structural projection.
  */
-const META_PERSIST_DEBOUNCE_MS = 250;
-const pendingMetaPersists = new Map<string, NodeJS.Timeout>();
-
-function metaPersistKey(scopeName: string, threadId: string): string {
-  return `${scopeName}|${threadId}`;
-}
-
-function snapshotEntryMeta(entry: AcpSessionEntry): AcpSessionPersistedMeta {
+function snapshotEntryMeta(entry: AcpSessionEntry): AgentMetadata {
   return {
     availableCommands: entry.availableCommands,
     commandsUpdatedAt: entry.commandsUpdatedAt,
@@ -207,8 +247,42 @@ function snapshotEntryMeta(entry: AcpSessionEntry): AcpSessionPersistedMeta {
 }
 
 /**
- * Hydrate a fresh registry entry from a previously-persisted meta
- * snapshot. Used by the "already loaded" recovery path where neither
+ * Fold the entry into the full durable {@link AgentStateSnapshot} the
+ * handle up-reports (I9.7). The `sessionId` is included ONLY once the
+ * session is genuinely recoverable — i.e. after the first successful
+ * prompt has flipped `persistedToDisk` (or on a resumed session, which
+ * starts persisted). Before that, an agent like Copilot CLI has not yet
+ * committed the session, so persisting its `sessionId` would make a
+ * restart replay a `session/load` that fails with `Resource not found`;
+ * omitting it lets the next lifetime start fresh while still keeping any
+ * seeded `metadata` warm.
+ */
+export function snapshotEntryState(entry: AcpSessionEntry): AgentStateSnapshot {
+  return {
+    ...(entry.persistedToDisk
+      ? { sessionId: entry.sessionId as SessionId }
+      : {}),
+    metadata: snapshotEntryMeta(entry),
+  };
+}
+
+/**
+ * Reverse-lookup the threadId for a registry entry. The registry maps
+ * threadId → entry but the entry itself doesn't carry the threadId. Used by
+ * {@link reportEntryState} to key the up-report listener map. Linear scan
+ * over O(threads-on-this-server) — a single server holds a handful of live
+ * ACP sessions, and this only runs on the meta-update path.
+ */
+function findThreadIdForEntry(entry: AcpSessionEntry): string | null {
+  for (const [threadId, candidate] of acpSessionRegistry.entries()) {
+    if (candidate === entry) return threadId;
+  }
+  return null;
+}
+
+/**
+ * Hydrate a fresh registry entry from a down-fed {@link AgentMetadata}
+ * snapshot (I9.7). Used by the "already loaded" recovery path where neither
  * `session/new` nor `session/load` provides a meta seed and the agent
  * will not re-emit notifications because it never dropped the session
  * from its own memory.
@@ -219,7 +293,7 @@ function snapshotEntryMeta(entry: AcpSessionEntry): AcpSessionPersistedMeta {
  */
 function hydrateEntryFromPersistedMeta(
   entry: AcpSessionEntry,
-  meta: AcpSessionPersistedMeta,
+  meta: AgentMetadata,
 ): void {
   if (meta.availableCommands) entry.availableCommands = meta.availableCommands;
   if (typeof meta.commandsUpdatedAt === 'number') {
@@ -294,10 +368,10 @@ function seedEntryFromNewSessionResult(
   if (!seeded) return;
 
   entry.metaUpdatedAt = Date.now();
-  // Propagate the schema to the per-profile cache so sibling threads of
-  // the same profile resolve `/cached-meta` without re-spawning. L1 owns
-  // the cache; we only emit into the injected port.
-  profileCachePort?.mirror(entry);
+  // The per-profile schema cache is fed by L1's `notifications()`
+  // subscriber (I9.7) now, not a driver-side mirror; the up-report the
+  // handle fires after installing `reportState` carries this seeded state
+  // up to it. We only stamp `metaUpdatedAt` here.
   logger.info(
     {
       sessionId: entry.sessionId,
@@ -307,118 +381,6 @@ function seedEntryFromNewSessionResult(
     },
     '[acp] seeded session meta from session/new response',
   );
-}
-
-/**
- * Schedule (or reschedule) a debounced write of the entry's current
- * meta snapshot to disk. Safe to call from notification handlers on
- * the hot path — the actual write happens asynchronously and never
- * throws (failures are logged and swallowed; we never want a
- * persistence hiccup to kill an SSE stream).
- *
- * No-op when the entry has an empty scope (`namespace.name` — anonymous
- * threads are not persisted at all — see `writeAcpSessionRecord`).
- */
-function schedulePersistEntryMeta(
-  entry: AcpSessionEntry,
-  logger: AcpSessionLogger,
-): void {
-  if (!entry.namespace.name) return;
-  const threadId = findThreadIdForEntry(entry);
-  if (!threadId) return;
-  const key = metaPersistKey(entry.namespace.name, threadId);
-  const prior = pendingMetaPersists.get(key);
-  if (prior) clearTimeout(prior);
-  const timer = setTimeout(() => {
-    pendingMetaPersists.delete(key);
-    try {
-      writeAcpSessionMeta(
-        entry.namespace,
-        threadId,
-        snapshotEntryMeta(entry),
-      );
-    } catch (err) {
-      logger.warn(
-        {
-          threadId,
-          scopeName: entry.namespace.name,
-          err: err instanceof Error ? err.message : String(err),
-        },
-        '[acp] failed to persist session meta snapshot (will retry on next update)',
-      );
-    }
-  }, META_PERSIST_DEBOUNCE_MS);
-  // `unref` so a stale pending timer never blocks process shutdown.
-  if (typeof timer.unref === 'function') timer.unref();
-  pendingMetaPersists.set(key, timer);
-}
-
-function cancelPersistEntryMeta(scopeName: string, threadId: string): void {
-  if (!scopeName) return;
-  const key = metaPersistKey(scopeName, threadId);
-  const prior = pendingMetaPersists.get(key);
-  if (prior) {
-    clearTimeout(prior);
-    pendingMetaPersists.delete(key);
-  }
-}
-
-/**
- * One-shot promotion of a freshly-opened ACP session to the on-disk
- * record. Called after the FIRST successful `session/prompt` on a
- * thread — see {@link AcpSessionEntry.persistedToDisk} for the full
- * rationale. No-op when the entry is already persisted, when it has
- * an empty scope (`namespace.name` — anonymous threads aren't persisted),
- * or when the reverse lookup fails (entry already removed).
- *
- * Failures are logged and swallowed: missing the promotion just
- * means the user has to re-open the thread on the next server
- * restart, which is the pre-fix behaviour anyway.
- */
-export function promoteEntryToPersisted(
-  entry: AcpSessionEntry,
-  logger: AcpSessionLogger,
-): void {
-  if (entry.persistedToDisk) return;
-  if (!entry.namespace.name) return;
-  const threadId = findThreadIdForEntry(entry);
-  if (!threadId) return;
-  try {
-    writeAcpSessionRecord(entry.namespace, threadId, {
-      sessionId: entry.sessionId,
-      profileId: entry.profileId,
-      cwd: entry.cwd,
-      bindingRecipe: entry.bindingRecipe,
-      meta: snapshotEntryMeta(entry),
-    });
-    entry.persistedToDisk = true;
-  } catch (err) {
-    logger.warn(
-      {
-        threadId,
-        scopeName: entry.namespace.name,
-        err: err instanceof Error ? err.message : String(err),
-      },
-      '[acp] failed to persist session record on first-prompt promotion (recovery after restart will fall back)',
-    );
-  }
-}
-
-/**
- * Reverse-lookup the threadId for a registry entry. The registry maps
- * threadId → entry but the entry itself doesn't carry the threadId
- * (it would be redundant in normal flow). We need it here because the
- * persistence layer is keyed by `(scopeName, threadId)`.
- *
- * Linear scan over O(threads-on-this-server) — acceptable: a single
- * Sediment server typically holds a handful of live ACP sessions, and
- * this only runs on the (debounced) meta-persist path.
- */
-function findThreadIdForEntry(entry: AcpSessionEntry): string | null {
-  for (const [threadId, candidate] of acpSessionRegistry.entries()) {
-    if (candidate === entry) return threadId;
-  }
-  return null;
 }
 
 /**
@@ -474,25 +436,19 @@ async function ensureAcpSessionInner(
   const { threadId, binding, logger } = opts;
   const namespace = opts.namespace;
   const scopeName = namespace.name;
-  const persisted = readAcpSessionRecord(
-    namespace,
-    threadId,
-  );
+  // Down-feed (I9.7): the durable snapshot the instance read off the
+  // ThreadStore and threaded down on create. Its `sessionId` drives resume
+  // (`session/load`) and its `metadata` seeds the entry — no on-disk
+  // `readAcpSessionRecord` read anymore.
+  const priorState = opts.priorState;
+  const priorSessionId = priorState?.sessionId;
 
-  // Recipe-first resolution:
-  //   1. Trust the persisted `bindingRecipe` snapshot (returning thread —
-  //      profile mutations / deletions after thread creation must NOT
-  //      reach the running agent).
-  //   2. Fall back to the host-resolved recipe passed on the options
-  //      (first-time thread, or legacy v2 record without a recipe). The
-  //      host resolves this from its profile store before calling in; we
-  //      then snapshot it onto the record below so subsequent calls hit
-  //      (1). This keeps the session-lifecycle code free of any L1
-  //      profile-store dependency.
-  //   3. If neither is available, the binding is unbound — fail with a
-  //      clear, user-actionable error.
-  const recipe: AcpBindingRecipe | null =
-    persisted?.bindingRecipe ?? opts.recipe ?? null;
+  // Recipe resolution (recipe-first-via-L1, I9.6 / R1): use the L1-baked
+  // recipe that rode the create-time spec verbatim. L1 owns keeping a
+  // returning thread's recipe stable; the driver no longer reads a
+  // persisted `bindingRecipe`. When absent, the binding is unbound — fail
+  // with a clear, user-actionable error.
+  const recipe: AcpBindingRecipe | null = opts.recipe ?? null;
   if (!recipe) {
     throw new AcpServiceError(
       'profile_missing',
@@ -512,14 +468,14 @@ async function ensureAcpSessionInner(
   // Resolve the thread to a live agentlet agent. Each thread owns its
   // own CLI process — the orchestrator either returns the cached spawn
   // or asks the daemon to start a new one keyed on `threadId`.
-  // When a persisted sessionId exists, pass it to the orchestrator so
+  // When a down-fed sessionId exists, pass it to the orchestrator so
   // the daemon can resume a suspended session instead of creating new.
   // Failures here surface as a 503 from the caller with a user-actionable
   // hint pointing at Settings → External Agents.
   const { sessionId: agentSessionId } = await ensureAgentForThread(
     threadId,
     recipe,
-    persisted?.sessionId,
+    priorSessionId,
     opts.env,
   );
   const conn = server.getConnection(agentSessionId);
@@ -545,12 +501,11 @@ async function ensureAcpSessionInner(
       },
       '[acp] thread scope changed \u2014 discarding stale session (sandbox scope mismatch)',
     );
-    cancelPersistEntryMeta(entry.namespace.name, threadId);
+    // The durable record is namespace-partitioned in the ThreadStore, so a
+    // scope switch already writes under the new namespace and the old
+    // record simply lingers unread — the instance (sole store writer) owns
+    // any cleanup, not the driver. We only drop the live in-memory entry.
     acpSessionRegistry.remove(threadId);
-    // Persisted record is scope-namespaced (see session-store path layout),
-    // so the wrong-scope case is already handled implicitly. We still
-    // proactively drop the OLD scope's record to keep the store tidy.
-    deleteAcpSessionRecord(entry.namespace, threadId);
     entry = undefined;
   }
   if (entry && entry.client.isClosed) {
@@ -558,7 +513,6 @@ async function ensureAcpSessionInner(
       { threadId },
       '[acp] stored session client was closed \u2014 reopening',
     );
-    cancelPersistEntryMeta(entry.namespace.name, threadId);
     acpSessionRegistry.remove(threadId);
     entry = undefined;
   }
@@ -616,22 +570,22 @@ async function ensureAcpSessionInner(
     cwd,
     createdAt: Date.now(),
     bindingRecipe: recipe,
-    // Resume path (`persisted?.sessionId` was supplied + agent
-    // accepted it) already has a valid on-disk record we want to
-    // keep alive; refresh it below. Fresh `session/new` sessions
-    // start as NOT persisted — the record is created lazily on
-    // first user prompt (see `promoteEntryToPersisted`) so an
-    // unused thread never leaves a stale sessionId for the next
-    // server lifetime to choke on.
-    persistedToDisk: !!persisted?.sessionId,
-    // Resume-from-disk (`persisted.sessionId` set) means the agent's
+    // Resume path (`priorSessionId` was down-fed + agent accepted it)
+    // already has a recoverable session, so the entry starts persisted and
+    // the handle's first up-report refreshes the durable record. Fresh
+    // `session/new` sessions start NOT persisted — `sessionId` is withheld
+    // from the up-reported snapshot (see `snapshotEntryState`) until the
+    // first user prompt promotes it, so an unused thread never leaves a
+    // stale sessionId for the next server lifetime to choke on.
+    persistedToDisk: !!priorSessionId,
+    // Resume-from-disk (`priorSessionId` set) means the agent's
     // transcript is restored via `session/load`, so the one-shot system
     // preamble it already received is back in context — mark it sent.
     // A fresh `session/new` starts blank, so the preamble must ride
     // along with this thread's first user prompt (see
     // `AcpSessionEntry.systemPreambleSent` and the preprocessor's
     // `includeSystem`).
-    systemPreambleSent: !!persisted?.sessionId,
+    systemPreambleSent: !!priorSessionId,
     availableCommands: [],
     commandsUpdatedAt: 0,
     availableModes: [],
@@ -654,19 +608,19 @@ async function ensureAcpSessionInner(
   // response (Copilot CLI delivers them here rather than via notifications).
   // Done BEFORE replay so a genuinely-newer notification still wins.
   //
-  // Gated on the ABSENCE of a per-thread persisted snapshot: the
-  // `session/new` blob is frozen at session-creation time, so its
-  // `current*` fields (currentModelId / currentModeId / configOption
-  // currentValues) are the agent's defaults from back then. On a fresh
-  // session that is exactly right (no user choice exists yet). On RESUME
-  // (`persisted.meta` present) those frozen defaults are the STALEST
-  // source of `current*` — staler than the user's last selection in
-  // `persisted.meta` and staler than any replayed/live notification — so
-  // we skip the seed entirely and let `replay` + `hydrateEntryFromPersistedMeta`
-  // restore the up-to-date state instead of clobbering it.
+  // Gated on the ABSENCE of a down-fed meta snapshot: the `session/new`
+  // blob is frozen at session-creation time, so its `current*` fields
+  // (currentModelId / currentModeId / configOption currentValues) are the
+  // agent's defaults from back then. On a fresh session that is exactly
+  // right (no user choice exists yet). On RESUME (`priorState.metadata`
+  // present) those frozen defaults are the STALEST source of `current*` —
+  // staler than the user's last selection in `priorState.metadata` and
+  // staler than any replayed/live notification — so we skip the seed
+  // entirely and let `replay` + `hydrateEntryFromPersistedMeta` restore
+  // the up-to-date state instead of clobbering it.
   seedEntryFromNewSessionResult(
     created,
-    persisted?.meta ? undefined : sessionRecord?.newSessionResult,
+    priorState?.metadata ? undefined : sessionRecord?.newSessionResult,
     logger,
   );
 
@@ -676,12 +630,12 @@ async function ensureAcpSessionInner(
   // available_commands that would otherwise be lost.
   replayEventStoreMeta(server, sessionId, created, logger);
 
-  // If the persisted Huabu-side record has a meta snapshot (e.g. from
-  // a previous server lifetime), use it as a fallback seed — it may
-  // carry modes/models/configOptions that the agent doesn't re-push
-  // after bootstrap.
-  if (persisted?.meta && created.metaUpdatedAt === 0) {
-    hydrateEntryFromPersistedMeta(created, persisted.meta);
+  // If the down-fed snapshot has a meta payload (e.g. from a previous
+  // server lifetime), use it as a fallback seed — it may carry
+  // modes/models/configOptions that the agent doesn't re-push after
+  // bootstrap.
+  if (priorState?.metadata && created.metaUpdatedAt === 0) {
+    hydrateEntryFromPersistedMeta(created, priorState.metadata);
     logger.info(
       {
         threadId,
@@ -689,7 +643,7 @@ async function ensureAcpSessionInner(
         commandCount: created.availableCommands.length,
         modeCount: created.availableModes.length,
       },
-      '[acp] hydrated session meta from persisted snapshot (fallback)',
+      '[acp] hydrated session meta from down-fed snapshot (fallback)',
     );
   }
 
@@ -718,31 +672,11 @@ async function ensureAcpSessionInner(
 
   acpSessionRegistry.set(threadId, created);
 
-  // Refresh the on-disk record ONLY when we're resuming a session
-  // that already has a record (so the next restart can recover it
-  // again). For fresh sessions we defer this write to first prompt
-  // — see the field doc for `AcpSessionEntry.persistedToDisk` and
-  // the `promoteEntryToPersisted` helper above.
-  if (created.persistedToDisk) {
-    try {
-      writeAcpSessionRecord(namespace, threadId, {
-        sessionId,
-        profileId: binding.profileId,
-        cwd,
-        bindingRecipe: recipe,
-        meta: snapshotEntryMeta(created),
-      });
-    } catch (err) {
-      logger.warn(
-        {
-          threadId,
-          scopeName,
-          err: err instanceof Error ? err.message : String(err),
-        },
-        '[acp] failed to refresh persisted session record (recovery after restart will fall back)',
-      );
-    }
-  }
+  // The durable record is refreshed via the up-report channel (I9.7): the
+  // owning handle installs `reportState` on this entry the moment it
+  // resolves it in `run` and fires an initial report, which persists the
+  // resumed session's `sessionId` + seeded `metadata` through the instance
+  // (the sole ThreadStore writer). No direct on-disk write here anymore.
 
   return created;
 }
@@ -818,15 +752,12 @@ function handleSessionMetaUpdate(
   switch (update.sessionUpdate) {
     case 'available_commands_update':
       applyAvailableCommandsUpdate(entry, update, logger);
-      profileCachePort?.mirror(entry);
       return;
     case 'config_option_update':
       applyConfigOptionUpdate(entry, update, logger);
-      profileCachePort?.mirror(entry);
       return;
     case 'current_mode_update':
       applyCurrentModeUpdate(entry, update, logger);
-      profileCachePort?.mirror(entry);
       return;
     case 'session_info_update':
       applySessionInfoUpdate(entry, update, logger);
@@ -887,7 +818,9 @@ function applyAvailableCommandsUpdate(
   }
   entry.availableCommands = next;
   entry.commandsUpdatedAt = Date.now();
-  schedulePersistEntryMeta(entry, logger);
+  // Up-report (I9.7): push the folded snapshot up so the instance
+  // persists it (sole ThreadStore writer) and re-emits via notifications().
+  reportEntryState(entry);
   logger.info(
     {
       sessionId: entry.sessionId,
@@ -937,7 +870,9 @@ function applyConfigOptionUpdate(
     entry.configOptions = Array.from(byId.values());
   }
   entry.metaUpdatedAt = Date.now();
-  schedulePersistEntryMeta(entry, logger);
+  // Up-report (I9.7): push the folded snapshot up so the instance
+  // persists it (sole ThreadStore writer) and re-emits via notifications().
+  reportEntryState(entry);
   logger.info(
     { sessionId: entry.sessionId, count: entry.configOptions.length },
     '[acp] config_option_update applied',
@@ -959,7 +894,9 @@ function applyCurrentModeUpdate(
   }
   entry.currentModeId = id;
   entry.metaUpdatedAt = Date.now();
-  schedulePersistEntryMeta(entry, logger);
+  // Up-report (I9.7): push the folded snapshot up so the instance
+  // persists it (sole ThreadStore writer) and re-emits via notifications().
+  reportEntryState(entry);
   logger.info(
     { sessionId: entry.sessionId, currentModeId: id },
     '[acp] current_mode_update applied',
@@ -987,7 +924,9 @@ function applySessionInfoUpdate(
     updatedAt: updatedAt === undefined ? prior.updatedAt : updatedAt,
   };
   entry.metaUpdatedAt = Date.now();
-  schedulePersistEntryMeta(entry, logger);
+  // Up-report (I9.7): push the folded snapshot up so the instance
+  // persists it (sole ThreadStore writer) and re-emits via notifications().
+  reportEntryState(entry);
   logger.info(
     { sessionId: entry.sessionId, info: entry.sessionInfo },
     '[acp] session_info_update applied',
@@ -1018,7 +957,9 @@ function applyUsageUpdate(
   }
   entry.usage = { used, size, cost };
   entry.metaUpdatedAt = Date.now();
-  schedulePersistEntryMeta(entry, logger);
+  // Up-report (I9.7): push the folded snapshot up so the instance
+  // persists it (sole ThreadStore writer) and re-emits via notifications().
+  reportEntryState(entry);
   logger.info(
     { sessionId: entry.sessionId, used, size },
     '[acp] usage_update applied',

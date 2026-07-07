@@ -60,6 +60,7 @@ export function acpDriverFactory<TRequest = unknown>(
 ): AcpAgentDriver<TRequest> {
   return {
     capabilities: ACP_CAPABILITIES,
-    create: (spec) => new AcpAgentHandle<TRequest>(spec),
+    create: (spec, priorState) =>
+      new AcpAgentHandle<TRequest>(spec, priorState),
   };
 }

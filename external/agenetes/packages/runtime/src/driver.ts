@@ -16,7 +16,11 @@
 // registered by L1. Today both are registered as objects.
 
 import type { AgentHandle } from './handle.js';
-import type { AgentCapabilities, AgentStreamEvent } from '@agenetes/protocol';
+import type {
+  AgentCapabilities,
+  AgentStateSnapshot,
+  AgentStreamEvent,
+} from '@agenetes/protocol';
 
 /**
  * The generics-free driver metadata the registry can store and enumerate
@@ -48,9 +52,19 @@ export interface AgentDriver<
   TEvent extends AgentStreamEvent = AgentStreamEvent,
   TTurnCtx = unknown,
 > extends AgentDriverInfo {
-  /** Produce a handle for one workload from the host-injected `input`. */
+  /**
+   * Produce a handle for one workload from the host-injected `input`.
+   *
+   * The optional `priorState` is the instance's **down-feed** (I9.7): the
+   * durable `AgentStateSnapshot` last persisted for this thread, read off
+   * the {@link ThreadStore} and passed at create time so the handle can
+   * *resume* its low-level session (`priorState.sessionId`) and *rehydrate*
+   * its observable metadata (`priorState.metadata`) without ever reading a
+   * store itself. A fresh thread (no durable record) receives `undefined`.
+   */
   create(
     input: TInput,
+    priorState?: AgentStateSnapshot,
   ): AgentHandle<TRequest, TRendered, TResult, TEvent, TTurnCtx>;
 }
 

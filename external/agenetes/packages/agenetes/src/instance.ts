@@ -135,6 +135,15 @@ export function createAgenetesInstance<
       if (!driver) {
         throw new Error(`no agent driver registered for kind '${spec.kind}'`);
       }
+      // Down-feed (I9.7): read the durable snapshot last persisted for this
+      // thread and hand it to the driver at create time, so a returning
+      // handle resumes/rehydrates from it instead of reading a store. A
+      // fresh thread has no record → `undefined`. `state: {}` (a live but
+      // never-up-reported thread) also feeds through as an empty snapshot.
+      const prior = spec.threadId
+        ? threadStore.get<TSpec>(spec.namespace, spec.threadId)
+        : undefined;
+      const priorState = prior?.state;
       // Dispatch the lifecycle axis (I3.2) off the control-plane
       // `workloadType`, orthogonal to the driver route (`kind`): a Job is
       // minted fresh per turn and never enters the live-handle table (so
@@ -143,12 +152,14 @@ export function createAgenetesInstance<
       // keyed by `threadId` (reuse ignores spec — no reconcile).
       let handle: AgentHandle;
       if (spec.workloadType === 'Job') {
-        handle = driver.create(spec);
+        handle = driver.create(spec, priorState);
       } else {
         // Detect a *fresh* create vs a get-or-create reuse so the up-report
         // listener is wired exactly once per handle (reuse ignores spec).
         const wasLive = runtime.get(spec.threadId) !== undefined;
-        handle = runtime.create(spec.threadId, () => driver.create(spec));
+        handle = runtime.create(spec.threadId, () =>
+          driver.create(spec, priorState),
+        );
         if (!wasLive) wireUpReport(spec, handle);
       }
       // Persist a durable record only when the workload has a real thread
@@ -161,9 +172,12 @@ export function createAgenetesInstance<
       // namespace and accumulate junk records nobody reads.
       const isTransientJob = spec.workloadType === 'Job' && !spec.threadId;
       if (!isTransientJob) {
+        // Refresh the spec (recipe rides it, L1-baked) but PRESERVE the
+        // durable state: create must never clobber a thread's up-reported
+        // sessionId/metadata back to empty. A brand-new thread seeds `{}`.
         threadStore.upsert(spec.namespace, spec.threadId, {
           spec,
-          state: {},
+          state: priorState ?? {},
         });
       }
       return handle as THandle;

@@ -47,7 +47,7 @@ import {
 
 import { AcpServiceError } from './errors.js';
 
-import type { AcpBindingRecipe } from './session-store.js';
+import type { AcpBindingRecipe } from './binding-recipe.js';
 
 /**
  * Default idle timeout (seconds) before the agentlet daemon suspends
