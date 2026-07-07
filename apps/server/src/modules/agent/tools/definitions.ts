@@ -16,6 +16,8 @@
 
 import { Type } from '@earendil-works/pi-ai';
 
+import { AGENT_CANVAS_COMMAND_TYPES } from '@sediment/shared';
+
 import { AgentCanvasCommandSchema } from './schemas/command.js';
 import {
   EdgeDirectionSchema,
@@ -306,7 +308,7 @@ export const inspectEdgesParamsSchema = Type.Object({
 export const inspectEdgesTool: ToolDefinition = {
   name: 'inspect_edges',
   label: 'Inspect Edges',
-  description: `Find canvas edges by predicate (id / endpoints / EdgeStyle attributes) and return each match with its full EdgeStyle. Predicates AND together; with no predicate, every edge is returned (subject to \`limit\`). Returns JSON: { count, total, truncated, edges: [{ id?, source, target, lineType?, lineStyle?, stroke?, strokeWidth?, direction?, label?, labelSource? }] }. \`count\` is items in this response (≤ limit); \`total\` is the full match count before \`limit\` was applied — when \`truncated:true\`, raise \`limit\` to ≥\`total\` or refine your query. EdgeStyle fields are omitted when unset on disk (defaults: \`direction='none'\`, \`lineStyle='solid'\`, \`lineType='bezier'\`, no label); the \`by*\` predicates apply these same defaults so a query like \`byLineStyle:'solid'\` matches edges with no explicit \`lineStyle\` too. \`label\` is short free-text rendered at the edge midpoint; \`labelSource\` records who last set it ('user' / 'agent' / 'auto'). Use this when you need styling info — outline only carries topology. Common flows: pass \`edgeIds\` from \`inspect_nodes({ connectedTo })\` via \`ids\`; or query \`byDirection:'forward'\` to find directed edges; or \`byLabel:'blocks'\` to find labelled edges.`,
+  description: `Find canvas edges by predicate (id / endpoints / EdgeStyle attributes) and return each match with its full EdgeStyle. Predicates AND together. Like \`inspect_nodes\`, prefer at least one predicate; unlike it, a no-predicate call is fine here — it returns every edge (subject to \`limit\`) because edges are typically few and \`get_canvas_outline\` carries only topology, not EdgeStyle. Reach for a no-predicate call when you specifically need every edge's full style. Returns JSON: { count, total, truncated, edges: [{ id?, source, target, lineType?, lineStyle?, stroke?, strokeWidth?, direction?, label?, labelSource? }] }. \`count\` is items in this response (≤ limit); \`total\` is the full match count before \`limit\` was applied — when \`truncated:true\`, raise \`limit\` to ≥\`total\` or refine your query. EdgeStyle fields are omitted when unset on disk (defaults: \`direction='none'\`, \`lineStyle='solid'\`, \`lineType='bezier'\`, no label); the \`by*\` predicates apply these same defaults so a query like \`byLineStyle:'solid'\` matches edges with no explicit \`lineStyle\` too. \`label\` is short free-text rendered at the edge midpoint; \`labelSource\` records who last set it ('user' / 'agent' / 'auto'). Use this when you need styling info — outline only carries topology. Common flows: pass \`edgeIds\` from \`inspect_nodes({ connectedTo })\` via \`ids\`; or query \`byDirection:'forward'\` to find directed edges; or \`byLabel:'blocks'\` to find labelled edges.`,
   parameters: inspectEdgesParamsSchema,
 };
 
@@ -321,22 +323,13 @@ export const canvasCommandsParamsSchema = Type.Object({
 export const canvasCommandsTool: ToolDefinition = {
   name: 'canvas_commands',
   label: 'Canvas Commands',
-  description: `Execute a batch of canvas commands atomically. All commands in a single call are applied as one undo step.
+  description: `Execute canvas commands. Commands run in the order given; each command succeeds or fails independently, and every command's outcome — including a failure \`reason\` — is reported back in \`results[]\`. Always check it: a command is not guaranteed to succeed (e.g. CONNECT_NODES / SET_NODE_PARENT fail with \`invalid-target\` when an endpoint doesn't exist).
 
-Supported command types: CREATE_NODES, DELETE_NODES, MERGE_NODE_DATA, SET_NODE_PARENT, DISSOLVE_FRAME, SET_NODE_GEOMETRY, REORDER_NODES, CONNECT_NODES, DISCONNECT_EDGES, SET_EDGE_STYLE, ALIGN_NODES, DISTRIBUTE_NODES, SET_FRAME_LAYOUT. Field-level requirements (which fields each command takes) are described by this tool's parameter schema.
+Batch **independent** commands together (fewer re-renders). **Dependency rule:** the server assigns every node/edge id, so a command can't reference a node created earlier in the **same call or turn** — its id isn't known yet. Create first, read the assigned ids from \`results[].nodes\`, then CONNECT / SET_NODE_PARENT them in a **follow-up call** (next turn). \`ALIGN_NODES\` / \`DISTRIBUTE_NODES\` touch only existing nodes, so they can ride along once you hold the ids.
 
-**Image Nodes - Automatic Aspect Ratio Preservation:**
-For image nodes, set only \`width\` — via \`size.width\` in \`CREATE_NODES\`, an updated \`src\` in \`MERGE_NODE_DATA\`, or \`size.width\` in \`SET_NODE_GEOMETRY\`; the server always derives \`height\` from the image's actual ratio (any \`height\` you pass is ignored) and returns the final \`width\`/\`height\` in the tool result \`results[].nodes\`.
+Supported command types: ${AGENT_CANVAS_COMMAND_TYPES.join(', ')}. Field-level requirements (which fields each command takes) are described by this tool's parameter schema.
 
-**Text / Question Nodes - Content-Driven Height:**
-For \`text\` and \`question\` nodes, set only \`size.width\` in \`CREATE_NODES\` / \`SET_NODE_GEOMETRY\`. Their height is content-driven and must not be pinned with \`size.height\`; to make the rendered text larger or smaller, set \`data.style.fontSize\` via \`CREATE_NODES\` or \`MERGE_NODE_DATA\`.
-
-ID conventions:
-- Node IDs: \`node-<uuid>\` (use crypto.randomUUID()).
-- Edge IDs: \`edge-<uuid>\`.
-- When a later command in the batch references a node created earlier in the same batch, give that node an explicit \`id\` on its CREATE_NODES entry.
-
-For per-command semantics, idiomatic compositions, and worked examples (group into frame, brainstorm-and-connect, merge/synthesize, restyle a cluster, tidy a row), call \`read("skills/canvas/SKILL.md")\` and follow its links into \`skills/canvas/references/\`.`,
+For worked multi-command recipes (group into frame, brainstorm-and-connect, merge/synthesize, restyle a cluster, tidy a row), \`read("skills/canvas/references/command-cookbook.md")\`; for diagram geometry and layout, \`read("skills/canvas/references/layout-recipes.md")\`.`,
   parameters: canvasCommandsParamsSchema,
   // Force serial execution: two canvas_commands in the same batch can
   // race in two ways. Server-side, the handler reads canvas state once

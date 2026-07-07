@@ -277,6 +277,13 @@ P3 → P5 (+ P4 for text). P6 only when leaving the single-process desktop.
 > Preserved verbatim from the original M3 broadcast design. These decisions
 > still govern the mechanisms above — P1–P2 are largely the implementation of
 > C3–C7.
+>
+> **Note (2026-07):** the appendices below reference
+> `apps/web/src/hooks/useCanvasChanges.ts` / `snapshotAndExtractChanges`, a
+> client-side change-capture hook that has since been **deleted**. Revertible
+> AI changes are now server-authored delta records surfaced through
+> `acpThreadChangesStore`; read those names as the historical stand-in for that
+> machinery.
 
 ### C1 — Plan A (server-side SSE broadcast) is the chosen mechanism
 

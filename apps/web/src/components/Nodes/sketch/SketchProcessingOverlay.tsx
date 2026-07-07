@@ -14,19 +14,27 @@
 
 import { ViewportPortal } from '@xyflow/react';
 import { Blend, Check, Undo2 } from 'lucide-react';
-import { memo, useMemo } from 'react';
+import { memo, useCallback, useMemo, useRef } from 'react';
 
+import { applyDeltas } from '@sediment/shared/canvas-engine';
+
+import {
+  useAcpThreadChangesStore,
+  isChangeStale,
+} from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 import { useIntentStore } from '@/store/intentStore';
 import { usePanelStore } from '@/store/panelStore';
 
-import { useCanvasChangePreview } from '../../../hooks/useCanvasChanges';
 import { Button } from '../../Common/Button';
 import { StatusBadge } from '../../Common/StatusBadge';
 
 import type { SketchProcessingCluster } from '@/store/intentStore';
-import type { Node } from '@xyflow/react';
+import type { CanvasChangeRecord, Delta } from '@sediment/shared/canvas-engine';
+import type { Node, Edge } from '@xyflow/react';
+
+const EMPTY_RECORDS: CanvasChangeRecord[] = [];
 
 /** Walk the parent chain to compute a node's absolute flow-space position. */
 function absolutePosition(
@@ -120,18 +128,57 @@ const ClusterOverlay = memo(
     // persisted question-replay pointer for this canvas — sketch and
     // replay are mutually exclusive views.
     const canvasId = useCanvasStore((s) => s.canvasId);
+    const edges = useCanvasStore((s) => s.edges);
 
     const handleOpenInspector = () => {
       openSketchCluster(cluster.id, canvasId || undefined);
       requestOpenRightPanel();
     };
 
-    const changes = useMemo(() => cluster.changes ?? [], [cluster.changes]);
-    const { handlePreviewAllDown, handlePreviewUp } =
-      useCanvasChangePreview(changes);
+    // Change-review records for this cluster's synthetic thread — the
+    // overlay's Keep / Revert / Preview act on them exactly like the chat
+    // ChangeReviewCard does.
+    const records = useAcpThreadChangesStore((s) =>
+      cluster.threadId
+        ? (s.byThread[cluster.threadId] ?? EMPTY_RECORDS)
+        : EMPTY_RECORDS,
+    );
+    const revertable = useMemo(
+      () => records.filter((r) => !isChangeStale(r, nodes, edges)),
+      [records, nodes, edges],
+    );
 
-    const showActions = cluster.status === 'done' && changes.length > 0;
-    const anyRevertible = changes.some((c) => c.revertible);
+    // Press-and-hold preview: temporarily apply the thread's inverse deltas
+    // (reverse order) without autosave; restore the snapshot on release.
+    const snapshotRef = useRef<{ nodes: Node[]; edges: Edge[] } | null>(null);
+    const handlePreviewAllDown = useCallback(() => {
+      if (snapshotRef.current || revertable.length === 0) return;
+      const state = useCanvasStore.getState();
+      snapshotRef.current = { nodes: state.nodes, edges: state.edges };
+      const deltas: Delta[] = [];
+      for (let i = revertable.length - 1; i >= 0; i--) {
+        deltas.push(...revertable[i].revertDeltas);
+      }
+      const next = applyDeltas(
+        { nodes: state.nodes, edges: state.edges },
+        deltas,
+      );
+      state._setStateNoAutosave({
+        nodes: next.nodes as Node[],
+        edges: next.edges as Edge[],
+      });
+    }, [revertable]);
+    const handlePreviewUp = useCallback(() => {
+      const snap = snapshotRef.current;
+      if (!snap) return;
+      snapshotRef.current = null;
+      useCanvasStore
+        .getState()
+        ._setStateNoAutosave({ nodes: snap.nodes, edges: snap.edges });
+    }, []);
+
+    const showActions = cluster.status === 'done';
+    const anyRevertible = revertable.length > 0;
 
     if (!bbox) return null;
 

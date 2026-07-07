@@ -17,8 +17,6 @@
 
 import { useMemo } from 'react';
 
-import { createId } from '@sediment/shared';
-
 import { useIntentStore } from '@/store/intentStore';
 
 import type { AssistantSegment, ChatMessage } from '@/store/chatTypes';
@@ -57,33 +55,13 @@ function buildMessages(cluster: SketchProcessingCluster): ChatMessage[] {
     content: userParts.join('\n'),
   });
 
-  // 2. Assistant message — reasoning text + synthetic canvas_commands
-  //    tool part that mimics the shape `CanvasCommandCard` consumes
-  //    from a real agent turn.
+  // 2. Assistant message — the recognition reasoning. The canvas mutations
+  //    themselves are applied + reviewed server-side (broadcast change
+  //    records drive the overlay's Keep / Revert), so there is no synthetic
+  //    command card here.
   const segments: AssistantSegment[] = [];
   if (cluster.reasoning) {
     segments.push({ kind: 'text', text: cluster.reasoning });
-  }
-  const hasCanvas =
-    (cluster.commands?.length ?? 0) > 0 || (cluster.changes?.length ?? 0) > 0;
-  if (hasCanvas) {
-    segments.push({
-      kind: 'tool',
-      toolCallId: createId('toolcall'),
-      title: 'canvas_commands',
-      status: 'completed',
-      variant: 'canvas_commands',
-      data: {
-        tool: 'canvas_commands',
-        status: 'success',
-        data: {
-          source: 'agent',
-          canvasId: cluster.canvasId,
-          commands: cluster.commands ?? [],
-          canvasChanges: cluster.changes ?? [],
-        },
-      },
-    });
   }
   if (segments.length > 0) {
     messages.push({

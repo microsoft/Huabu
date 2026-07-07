@@ -27,6 +27,22 @@ const setNodeParent: CommandDefinition<Cmd> = {
     const affectedFrameIds = new Set<string>();
     const parentId = cmd.parentId as string | null;
 
+    // Whole-command validation gate. A missing target node or a missing
+    // parent frame is a hard error surfaced to the caller (`invalid-target`
+    // / `invalid-parent`), not a silent skip. Silent skipping previously
+    // returned `applied: true` while doing nothing, leaving the agent
+    // believing a reparent happened. Reject the whole command so the
+    // caller can react — dependent reparents should run in a later turn
+    // against the real ids returned by CREATE_NODES.
+    for (const nodeId of cmd.nodeIds) {
+      if (!result.some((n) => n.id === (nodeId as string))) {
+        return noop(state, 'invalid-target');
+      }
+    }
+    if (parentId && !result.some((n) => n.id === parentId)) {
+      return noop(state, 'invalid-parent');
+    }
+
     for (const nodeId of cmd.nodeIds) {
       const id = nodeId as string;
       const node = result.find((n) => n.id === id);

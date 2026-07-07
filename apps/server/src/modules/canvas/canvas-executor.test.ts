@@ -336,3 +336,49 @@ describe('executeOnServer — MERGE_NODE_DATA CAS', () => {
     expect(style.height).toBe(250);
   });
 });
+
+describe('executeOnServer — CREATE_NODES id echo', () => {
+  it('echoes the server-assigned id and label of every created node', async () => {
+    const store = getCanvasStore('c1');
+    store.write({
+      canvasId: 'c1',
+      title: null,
+      version: 1,
+      state: { nodes: [], edges: [] },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+
+    const out = await executeOnServer({
+      canvasId: 'c1',
+      commands: [
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              nodeType: 'note',
+              position: { x: 0, y: 0 },
+              data: { label: 'Finding A', content: 'a' },
+            },
+            {
+              nodeType: 'note',
+              position: { x: 200, y: 0 },
+              data: { label: 'Finding B', content: 'b' },
+            },
+          ],
+        } as unknown as CanvasCommand,
+      ],
+      originator: AGENT,
+    });
+
+    expect(out.results[0]?.applied).toBe(true);
+    const echoed = out.results[0]?.nodes ?? [];
+    expect(echoed).toHaveLength(2);
+    // Ids are server-assigned (agent omitted them) and unique.
+    expect(echoed[0]?.nodeId).toMatch(/^node-/);
+    expect(echoed[1]?.nodeId).toMatch(/^node-/);
+    expect(echoed[0]?.nodeId).not.toBe(echoed[1]?.nodeId);
+    // Labels are echoed so the agent can correlate ids to intent.
+    expect(echoed.map((n) => n.label)).toEqual(['Finding A', 'Finding B']);
+  });
+});

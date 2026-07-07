@@ -15,6 +15,22 @@ const connectNodes: CommandDefinition<Cmd> = {
   handler(cmd, state) {
     if (cmd.edges.length === 0) return noop(state);
 
+    // Endpoint existence check (whole-command gate). Every edge's source
+    // and target must resolve to a live node; a missing endpoint is a
+    // hard error, not a silent skip. Rejecting the whole command (rather
+    // than dropping the offending edge) gives the agent an actionable
+    // `invalid-target` result to react to — the alternative (partial,
+    // silent application) leaves it believing edges landed that never
+    // did. Dependent connects should run in a later turn against the
+    // real ids returned by CREATE_NODES, so a well-formed batch never
+    // trips this.
+    const nodeIds = new Set(state.nodes.map((n) => n.id));
+    const hasMissingEndpoint = cmd.edges.some(
+      (e) =>
+        !nodeIds.has(e.source as string) || !nodeIds.has(e.target as string),
+    );
+    if (hasMissingEndpoint) return noop(state, 'invalid-target');
+
     const nextEdges: Edge[] = [...state.edges];
 
     for (const edgeInput of cmd.edges) {
@@ -22,7 +38,8 @@ const connectNodes: CommandDefinition<Cmd> = {
       const target = edgeInput.target as string;
       const id = (edgeInput.id as string | undefined) ?? createId('edge');
 
-      // Skip duplicate edges (same behavior as RF addEdge).
+      // Skip duplicate edges (same behavior as RF addEdge). A duplicate
+      // is a legitimate no-op, not a failure — the command still applies.
       const exists = nextEdges.some(
         (e) => e.source === source && e.target === target,
       );
