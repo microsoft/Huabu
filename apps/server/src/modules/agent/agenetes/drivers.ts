@@ -39,16 +39,22 @@ import type { Agenetes } from '@agenetes/agenetes';
 import type { Agent } from '@earendil-works/pi-agent-core';
 import type { Message } from '@earendil-works/pi-ai';
 
-/** Dispatch key for the in-process pi-agent-core (built-in) driver. */
+/**
+ * Dispatch key reserved for the in-process pi-agent-core (built-in) driver.
+ * The built-in is currently a plain const (not registry-dispatched), so this
+ * is not wired at `register()` yet — it becomes the `.register('internal', …)`
+ * contract kind when the built-in is folded into the instance (M5.1).
+ */
 export const BUILTIN_DRIVER_KIND = 'builtin';
 
 /**
  * The external ACP driver's dispatch `kind` — the I5 *contract* kind L1
  * injects at `register()` (I5.1 alias / I9.5), aligned with the wire
  * `agentBindingSchema` `kind: 'external'`. It is L1's to choose at mount,
- * so it lives here (not in the driver package): the driver's own advertised
- * `.kind` (`acp`) is its *implementation* identity and is overridden by this
- * `driverName` when the builder registers it.
+ * so it lives here (not in the driver package): the driver carries no `kind`
+ * of its own (dispatch is external, M5.09), and this `driverName` is the sole
+ * dispatch key the builder registers it under. The factory-dictionary name
+ * (`acp`, {@link ACP_FACTORY_NAME}) is its *implementation* identity.
  */
 export const EXTERNAL_DRIVER_KIND = 'external';
 export type { AcpCreateSpec };
@@ -93,7 +99,6 @@ export type AcpHandle = AgentHandle<PreparedAcpPrompt, AcpTurnCtx>;
  * runtime registry; the host constructs its handle directly per turn.
  */
 export const builtinAgentDriver: BuiltinAgentDriver = {
-  kind: BUILTIN_DRIVER_KIND,
   capabilities: BUILTIN_CAPABILITIES,
   create: ({ agent }) => new BuiltinAgentHandle(agent),
 };
