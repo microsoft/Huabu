@@ -28,6 +28,7 @@
 
 import type {
   AgentCapabilities,
+  AgentStateSnapshot,
   AgentStreamEvent,
   ControlAck,
   ControlMsg,
@@ -174,6 +175,28 @@ export interface AgentHandle<
    * a no-op (the single `run` already ended its life). Idempotent.
    */
   close(): void;
+
+  /**
+   * The **up-report seam** (README I9.7): subscribe to this handle's
+   * durable-state changes. The handle is the SOLE folder — it folds its
+   * driver-native meta into a single full {@link AgentStateSnapshot} and
+   * pushes the *whole current snapshot* to `listener` on every change (a
+   * full snapshot, never a per-field delta, so the subscriber stays
+   * stateless and replaces wholesale). Returns an unsubscribe function.
+   *
+   * The instance registers ONE listener per Deployment handle at `create`
+   * (push, not a per-handle polling loop) to persist the snapshot and
+   * re-emit it on `notifications(threadId)`; it calls the returned
+   * unsubscribe at `close`.
+   *
+   * Optional: a handle with no out-of-turn state — a Job, or a driver
+   * (e.g. the built-in) that reports no meta — simply omits it, and its
+   * `notifications` stream stays empty. In-turn meta still rides `run`'s
+   * event stream for the live UI regardless; `onState` is the persistence
+   * / out-of-turn channel, so the two never double-fold (the fold happens
+   * once, here).
+   */
+  onState?(listener: (snapshot: AgentStateSnapshot) => void): () => void;
 
   /** The capability descriptor this handle advertises. */
   readonly capabilities: AgentCapabilities;

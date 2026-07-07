@@ -120,6 +120,14 @@ export type {
 export { agentMetadataSchema } from './agent-metadata.js';
 export type { AgentMetadata } from './agent-metadata.js';
 
+// AgentStateSnapshot (§5 / M5.5 / README I9.7): the driver-agnostic
+// durable-state snapshot for one thread — the single full `{ sessionId?,
+// metadata? }` type the handle up-reports, the instance persists as
+// `ThreadRecord.state`, and L1 reads `.metadata` from. Never a per-field
+// delta; the opaque `sessionId` (I4.3) rides it unfiltered.
+export { agentStateSnapshotSchema } from './agent-state.js';
+export type { AgentStateSnapshot } from './agent-state.js';
+
 // Agentlet daemon status (M4): the wire snapshot the L2 control plane
 // surfaces about the single embedded agentlet it supervises. Browser-safe
 // (zod-only) so L1's UI can consume it transitively through

@@ -14,70 +14,28 @@
 // {@link FileThreadStore} (the restart-surviving on-disk backing, persisting
 // `(namespace, threadId) → ThreadRecord` under the namespace's `storage`
 // root). A host injects `FileThreadStore` at mount time (M5.5/A4). The
-// per-driver `sessionId` + `AgentMetadata` on {@link AgentPersistentState}
-// (M5.5) subsume what the ACP-coupled session store previously held.
+// per-thread `state` — a driver-agnostic {@link AgentStateSnapshot} carrying
+// the driver `sessionId` + folded `AgentMetadata` (M5.5, README I9.7) —
+// subsumes what the ACP-coupled session store previously held.
 
-import type { Namespace } from '@agenetes/protocol';
-import { agentMetadataSchema, type AgentMetadata } from '@agenetes/protocol';
+import type { Namespace, AgentStateSnapshot } from '@agenetes/protocol';
+import { agentMetadataSchema, sessionIdSchema } from '@agenetes/protocol';
 
 import { atomicWriteJson, readJson, sanitizeId } from './io.js';
 
 /**
- * The durable, restart-surviving state Agenetes keeps for one thread —
- * the "persistent" half of a thread-table entry, held independently of
- * whether a live handle exists (I9.4).
- *
- * It pins the namespace `storage` root the thread persists under (I4.1),
- * the low-level driver `sessionId` (I4.3 — e.g. an ACP session id for
- * `session/load` recovery), and the last-known driver-agnostic
- * {@link AgentMetadata} snapshot (M5.5) folded from the agent's meta
- * updates. `sessionId` / `metadata` are absent until a driver reports
- * them; the metadata is replaced wholesale on each update via a
- * {@link ThreadStore} `upsert` (this class is immutable — no in-place
- * mutation).
- */
-export class AgentPersistentState {
-  /**
-   * Absolute root this thread's L2 state persists under, derived from its
-   * namespace's `storage.root` (I4.1). `undefined` when the namespace
-   * supplied no storage (L2 falls back to its own default location).
-   */
-  readonly storageRoot: string | undefined;
-
-  /**
-   * The low-level driver session id (I4.3), e.g. the ACP session id the
-   * driver reuses for `session/load` recovery. Absent until the driver
-   * establishes one.
-   */
-  readonly sessionId: string | undefined;
-
-  /**
-   * Last-known driver-agnostic metadata snapshot (M5.5): the folded
-   * selectable / usage surface. Absent until the agent reports any meta.
-   */
-  readonly metadata: AgentMetadata | undefined;
-
-  constructor(
-    storageRoot: string | undefined,
-    sessionId?: string,
-    metadata?: AgentMetadata,
-  ) {
-    this.storageRoot = storageRoot;
-    this.sessionId = sessionId;
-    this.metadata = metadata;
-  }
-}
-
-/**
  * One entry of the per-namespace persistent thread table: the durable
  * `spec` baked at `create` (I9.6, opaque and serializable) plus the
- * {@link AgentPersistentState} Agenetes keeps alongside it.
+ * driver-agnostic {@link AgentStateSnapshot} the instance persists
+ * alongside it (README I9.7). `state` is the SAME full-snapshot type the
+ * handle up-reports and L1 reads — one type, three roles — so the instance
+ * writes it verbatim with no translation.
  */
 export interface ThreadRecord<TSpec = unknown> {
   /** The workload spec this thread was created from (durable, opaque). */
   readonly spec: TSpec;
   /** Agenetes-owned durable state, independent of any live handle. */
-  readonly state: AgentPersistentState;
+  readonly state: AgentStateSnapshot;
 }
 
 /**
@@ -156,11 +114,7 @@ export class InMemoryThreadStore implements ThreadStore {
 const THREAD_STORE_SCHEMA_VERSION = 1;
 
 /** The persisted shape of one thread record's durable `state`. */
-interface PersistedState {
-  storageRoot?: string;
-  sessionId?: string;
-  metadata?: AgentMetadata;
-}
+type PersistedState = AgentStateSnapshot;
 
 /** The on-disk `threads.json` file shape. */
 interface ThreadStoreFile {
@@ -249,11 +203,7 @@ export class FileThreadStore implements ThreadStore {
   }): ThreadRecord<TSpec> {
     return {
       spec: entry.spec as TSpec,
-      state: new AgentPersistentState(
-        entry.state.storageRoot,
-        entry.state.sessionId,
-        entry.state.metadata,
-      ),
+      state: entry.state,
     };
   }
 
@@ -265,9 +215,6 @@ export class FileThreadStore implements ThreadStore {
     sanitizeId(threadId, 'threadId');
     const file = this.#readFile(namespace);
     const state: PersistedState = {};
-    if (record.state.storageRoot !== undefined) {
-      state.storageRoot = record.state.storageRoot;
-    }
     if (record.state.sessionId !== undefined) {
       state.sessionId = record.state.sessionId;
     }
@@ -301,17 +248,19 @@ export class FileThreadStore implements ThreadStore {
 }
 
 /**
- * Defensively shape-check a persisted `state` blob. Passes `storageRoot` /
- * `sessionId` through when they are strings, and re-validates `metadata`
- * via {@link agentMetadataSchema} so a malformed snapshot is dropped rather
- * than trusted. Never throws — a corrupt state degrades to an empty one.
+ * Defensively shape-check a persisted `state` blob. Passes `sessionId`
+ * through when it validates (branded via {@link sessionIdSchema}) and
+ * re-validates `metadata` via {@link agentMetadataSchema} so a malformed
+ * snapshot is dropped rather than trusted. Per-field tolerant — one bad
+ * field never discards the other. Never throws — a corrupt state degrades
+ * to an empty one.
  */
 function sanitizeState(raw: unknown): PersistedState {
   if (!raw || typeof raw !== 'object') return {};
   const r = raw as Record<string, unknown>;
   const out: PersistedState = {};
-  if (typeof r.storageRoot === 'string') out.storageRoot = r.storageRoot;
-  if (typeof r.sessionId === 'string') out.sessionId = r.sessionId;
+  const sid = sessionIdSchema.safeParse(r.sessionId);
+  if (sid.success) out.sessionId = sid.data;
   if (r.metadata !== undefined) {
     const parsed = agentMetadataSchema.safeParse(r.metadata);
     if (parsed.success) out.metadata = parsed.data;

@@ -157,8 +157,9 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
 
     const rec = inst.record(namespace, 'thr_1');
     expect(rec?.spec).toEqual(spec);
-    // AgentPersistentState derives its root from namespace.storage.root
-    expect(rec?.state.storageRoot).toBe('/data/c1');
+    // A freshly-created record starts with an empty AgentStateSnapshot;
+    // sessionId / metadata are filled in later via up-reports (I9.7).
+    expect(rec?.state).toEqual({});
 
     // closing the live handle does NOT drop the durable record
     inst.close('thr_1');

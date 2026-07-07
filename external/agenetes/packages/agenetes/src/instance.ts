@@ -14,13 +14,15 @@
 // `create` / `get` return.
 
 import type { AgentHandle, AgentRuntime } from '@agenetes/runtime';
-import type { Namespace, WorkloadType } from '@agenetes/protocol';
+import type {
+  AgentMetadata,
+  AgentStateSnapshot,
+  Namespace,
+  WorkloadType,
+} from '@agenetes/protocol';
 
-import {
-  AgentPersistentState,
-  type ThreadRecord,
-  type ThreadStore,
-} from './thread-store.js';
+import { type ThreadRecord, type ThreadStore } from './thread-store.js';
+import { ThreadNotificationBus } from './notifications.js';
 
 /**
  * The minimal shape the instance reads off a `WorkloadSpec` (I9.6). The
@@ -79,6 +81,15 @@ export interface Agenetes<
   record(namespace: Namespace, threadId: string): ThreadRecord<TSpec> | undefined;
   /** Enumerate a namespace's persisted thread records (I9.4). */
   records(namespace: Namespace): ThreadRecord<TSpec>[];
+  /**
+   * The notification surface (I9.7): subscribe to a thread's driver-agnostic
+   * `AgentMetadata` as it changes. The instance persists each up-reported
+   * snapshot into the {@link ThreadStore} FIRST, then re-emits its
+   * `metadata` here (persist-then-notify), so a `record` read after a
+   * notification always observes the latest state. The stream ends when the
+   * thread's handle is `close`d or the consumer breaks out of the loop.
+   */
+  notifications(threadId: string): AsyncIterable<AgentMetadata>;
 }
 
 /**
@@ -93,6 +104,31 @@ export function createAgenetesInstance<
   TSpec extends WorkloadSpecShape = WorkloadSpecShape,
   THandle extends AgentHandle = AgentHandle,
 >(runtime: AgentRuntime, threadStore: ThreadStore): Agenetes<TSpec, THandle> {
+  // The instance is the SOLE ThreadStore writer and the owner of the
+  // per-thread notification fan-out (I9.7). It registers ONE up-report
+  // listener per live Deployment handle (keyed by threadId) and tears it
+  // down at close; the handle is the sole folder, the instance the sole
+  // persister + re-emitter.
+  const bus = new ThreadNotificationBus();
+  const unsubscribers = new Map<string, () => void>();
+
+  // Register the handle's up-report listener: persist the full snapshot
+  // FIRST (sole writer), then re-emit its metadata (persist-then-notify).
+  // A handle without `onState` (a driver that reports no out-of-turn meta)
+  // wires nothing and its notification stream stays empty.
+  const wireUpReport = (spec: TSpec, handle: AgentHandle): void => {
+    const unsub = handle.onState?.((snapshot: AgentStateSnapshot) => {
+      threadStore.upsert(spec.namespace, spec.threadId, {
+        spec,
+        state: snapshot,
+      });
+      if (snapshot.metadata !== undefined) {
+        bus.publish(spec.threadId, snapshot.metadata);
+      }
+    });
+    if (unsub) unsubscribers.set(spec.threadId, unsub);
+  };
+
   return {
     create(spec: TSpec): THandle {
       const driver = runtime.resolve(spec.kind);
@@ -105,10 +141,16 @@ export function createAgenetesInstance<
       // `get(threadId)` stays undefined and `close()` is a no-op for it),
       // while a Deployment get-or-creates + caches the long-lived handle
       // keyed by `threadId` (reuse ignores spec — no reconcile).
-      const handle: AgentHandle =
-        spec.workloadType === 'Job'
-          ? driver.create(spec)
-          : runtime.create(spec.threadId, () => driver.create(spec));
+      let handle: AgentHandle;
+      if (spec.workloadType === 'Job') {
+        handle = driver.create(spec);
+      } else {
+        // Detect a *fresh* create vs a get-or-create reuse so the up-report
+        // listener is wired exactly once per handle (reuse ignores spec).
+        const wasLive = runtime.get(spec.threadId) !== undefined;
+        handle = runtime.create(spec.threadId, () => driver.create(spec));
+        if (!wasLive) wireUpReport(spec, handle);
+      }
       // Persist a durable record only when the workload has a real thread
       // identity. A Deployment always does (its `threadId` is also the
       // live-table cache key). A Job usually carries a thread too, but a
@@ -121,7 +163,7 @@ export function createAgenetesInstance<
       if (!isTransientJob) {
         threadStore.upsert(spec.namespace, spec.threadId, {
           spec,
-          state: new AgentPersistentState(spec.namespace.storage?.root),
+          state: {},
         });
       }
       return handle as THandle;
@@ -130,6 +172,14 @@ export function createAgenetesInstance<
       return runtime.get(threadId) as THandle | undefined;
     },
     close(threadId: string): void {
+      // Tear down the up-report listener + end any open notification streams
+      // before evicting the live handle.
+      const unsub = unsubscribers.get(threadId);
+      if (unsub) {
+        unsub();
+        unsubscribers.delete(threadId);
+      }
+      bus.closeThread(threadId);
       runtime.close(threadId);
     },
     record(
@@ -140,6 +190,9 @@ export function createAgenetesInstance<
     },
     records(namespace: Namespace): ThreadRecord<TSpec>[] {
       return threadStore.list<TSpec>(namespace);
+    },
+    notifications(threadId: string): AsyncIterable<AgentMetadata> {
+      return bus.subscribe(threadId);
     },
   };
 }
