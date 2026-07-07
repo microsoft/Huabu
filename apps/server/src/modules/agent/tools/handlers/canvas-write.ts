@@ -108,16 +108,10 @@ export async function handleCanvasCommands(
       return {
         ...cmd,
         nodes: nodes.map((node) => {
-          // Node ids are assigned by the server (executeOnServer →
-          // preAssignIds) and echoed back in `results[].nodes`. The agent
-          // schema no longer exposes an `id` field; strip any stray one so
-          // an invented placeholder can never collide across runs.
-          const rest = { ...node };
-          delete rest.id;
-          const data = (rest.data as Record<string, unknown> | undefined) ?? {};
+          const data = (node.data as Record<string, unknown> | undefined) ?? {};
           const hasLabel = typeof data.label === 'string';
           return {
-            ...rest,
+            ...node,
             data: {
               ...data,
               origin,
@@ -198,14 +192,10 @@ export async function handleCanvasCommands(
         return {
           ...cmd,
           edges: edges.map((edge) => {
-            // Edge ids are server-assigned too; strip any stray id (see the
-            // CREATE_NODES note above).
-            const rest = { ...edge };
-            delete rest.id;
             const stamped = stampStyle(
-              rest.style as Record<string, unknown> | undefined,
+              edge.style as Record<string, unknown> | undefined,
             );
-            return stamped === rest.style ? rest : { ...rest, style: stamped };
+            return stamped === edge.style ? edge : { ...edge, style: stamped };
           }),
         };
       }
@@ -225,6 +215,21 @@ export async function handleCanvasCommands(
   });
 
   const runId = createId('run');
+
+  // M2 sketch carve-out: the sketch pipeline still applies commands
+  // client-side via `useCanvasStore.executeCommands('agent')` after
+  // receiving the SketchCommandResponse. Running the executor here
+  // would double-apply and immediately desync local `version`. The
+  // chat agent path (default origin `ai-operate`) is the one that
+  // benefits from server-side execution today; sketch joins in M3
+  // when broadcast lands.
+  if (origin.type === 'sketch-recognized') {
+    return JSON.stringify({
+      source: 'agent',
+      canvasId: args.canvasId,
+      commands: annotated,
+    });
+  }
 
   try {
     const result = await executeOnServer({

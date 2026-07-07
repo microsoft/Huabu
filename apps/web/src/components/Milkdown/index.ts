@@ -22,4 +22,13 @@ export {
   normalizeMathDelimiters,
 } from './markdownUtils';
 
-export type { MilkdownBlockDragEvent, MilkdownDecorationSpec } from './types';
+export type {
+  MilkdownBackgroundColor,
+  MilkdownBlockDragEvent,
+  MilkdownBlockType,
+  MilkdownDecorationSpec,
+  MilkdownFormattingState,
+  MilkdownInlineMark,
+  MilkdownTextColor,
+  MilkdownToolbarMode,
+} from './types';

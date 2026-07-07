@@ -11,14 +11,14 @@
 const ACCENT_FG_MIX = 60;
 /** % of accent mixed over the surface for tinted backgrounds. */
 const ACCENT_BG_MIX = 10;
-/** % of accent over transparent for hover backgrounds. */
-const ACCENT_HOVER_MIX = 8;
 /** % of accent over transparent for very subtle section tints. */
 const ACCENT_SOFT_MIX = 4;
 /** % of accent over transparent for a solid accent border. */
 const ACCENT_BORDER_MIX = 50;
 /** % of accent over transparent for a thin accent divider. */
 const ACCENT_DIVIDER_MIX = 25;
+/** % of accent over transparent for inline text highlights. */
+const ACCENT_HIGHLIGHT_BG_MIX = 25;
 
 /**
  * Matches "white-ish" accent strings (CSS keyword `white`, `#fff`, `#ffffff`).
@@ -39,12 +39,10 @@ export interface AccentTokens {
   border: string;
   /** Thin accent divider (e.g. section separator). */
   divider: string;
-  /** Hover background tint over a neutral surface. */
-  hoverBg: string;
   /** Very subtle accent tint for static section backgrounds. */
   softBg: string;
-  /** Strong accent color for drop shadows (frame node uses 100% accent). */
-  shadow: string;
+  /** Inline text highlight background. */
+  highlightBg: string;
 }
 
 export function getAccentTokens(accent: string): AccentTokens {
@@ -64,8 +62,7 @@ export function getAccentTokens(accent: string): AccentTokens {
     // inline style and the swatch appeared to "stick".
     border: `color-mix(in srgb, ${accent} ${ACCENT_BORDER_MIX}%, transparent)`,
     divider: `color-mix(in srgb, ${accent} ${ACCENT_DIVIDER_MIX}%, transparent)`,
-    hoverBg: `color-mix(in srgb, ${accent} ${ACCENT_HOVER_MIX}%, transparent)`,
     softBg: `color-mix(in srgb, ${accent} ${ACCENT_SOFT_MIX}%, transparent)`,
-    shadow: accent,
+    highlightBg: `color-mix(in srgb, ${accent} ${ACCENT_HIGHLIGHT_BG_MIX}%, transparent)`,
   };
 }

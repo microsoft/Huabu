@@ -136,6 +136,7 @@ export function MilkdownEditor(props: MilkdownEditorProps): JSX.Element {
         initialMarkdown: lastSyncedRef.current,
         editable,
         placeholder,
+        toolbarMode: 'sediment',
       });
 
       if (cancelled) {
