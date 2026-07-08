@@ -10,6 +10,7 @@
  */
 
 import { getLogger } from '../../../utils/logger.js';
+import { getProfile } from '../profiles.js';
 
 import type { CanvasStore } from '../../storage/canvas-store.js';
 import type {
@@ -17,6 +18,7 @@ import type {
   NormalizeResult,
   PersistResult,
 } from '../types.js';
+import type { CanvasNodeType } from '@sediment/shared';
 
 const log = getLogger('preprocessing.persist');
 
@@ -32,6 +34,33 @@ export function persist(
 
   const nodeId = normalized.nodeId;
   const existing = store.readNode(nodeId);
+
+  // Authored-body CAS guard (data-loss prevention). For node types whose body
+  // is user-authored (`bodyOwnership: 'authored'` — note/text), the per-node
+  // content PUT is the sole authoritative writer of the body and enforces the
+  // rev-CAS. If the on-disk body has diverged from the snapshot we are about to
+  // persist, that divergence is a concurrent edit (another tab / device, an
+  // external editor, or a Google-Drive-synced copy). Writing here would bypass
+  // the content PUT's CAS and silently clobber the newer body — which was the
+  // reported bug. Skip the whole persist so the content PUT owns the
+  // resolution, and so a title / summary derived from the stale snapshot is
+  // never written against a body it no longer matches (title–body consistency).
+  // See `docs/proposals/node-write-unification-plan.md` §0 / §3f.
+  const bodyOwnership = getProfile(
+    contentKind as CanvasNodeType,
+  )?.bodyOwnership;
+  if (
+    bodyOwnership === 'authored' &&
+    existing &&
+    existing.content !== normalized.canonicalContent
+  ) {
+    log.warn(
+      { nodeId },
+      'persist skipped: authored body diverged from snapshot ' +
+        '(concurrent edit) — content PUT owns the CAS resolution',
+    );
+    return { nodeId, isNew: false, contentChanged: false };
+  }
 
   // Content-based dedup inside this canvas: skip rewrite when canonical
   // content has not changed. Label and a small allow-list of metadata
