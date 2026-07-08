@@ -68,6 +68,19 @@ export type NodeContentKind =
 export interface NodePreprocessProfile {
   nodeType: CanvasNodeType;
   contentKind?: NodeContentKind;
+  /**
+   * Who authors the node body, and therefore whether writes to it are
+   * guarded by the rev-CAS (optimistic concurrency):
+   *  - `'authored'` → user-editable in-app; a write must carry the caller's
+   *    baseline revision and is rejected when the on-disk body diverged (so a
+   *    concurrent tab / device / external edit is never silently clobbered).
+   *  - `'derived'` → produced by the pipeline (extraction) or bodyless;
+   *    read-only in-app, no CAS (last-write-wins).
+   * Required on every profile (no default) so a new editable node type cannot
+   * silently ship without CAS — a missing value is a compile error, not a
+   * data-loss foot-gun. See `docs/proposals/node-write-unification-plan.md` §3f.
+   */
+  bodyOwnership: 'authored' | 'derived';
   capabilities: Capability[];
   /** Node data fields that, when changed, should trigger preprocessing. */
   watchFields: string[];
