@@ -19,7 +19,7 @@ import { useState } from 'react';
 
 import { copyToClipboard } from '../../../utils/io/clipboard';
 import { Button } from '../../Common/Button';
-import { Spinner } from '../../Common/Spinner';
+import { Loading } from '../../Common/Loading';
 
 import type { AcpPlanEntry } from '@sediment/shared';
 
@@ -97,7 +97,7 @@ export function PlanCard({ entries }: PlanCardProps) {
                   {entry.status === 'completed' ? (
                     <Check size={12} className="text-success" />
                   ) : entry.status === 'in_progress' ? (
-                    <Spinner size="xs" className="text-info" />
+                    <Loading layout="inline" size="xs" className="text-info" />
                   ) : (
                     <Circle size={12} className="text-fg-muted" />
                   )}

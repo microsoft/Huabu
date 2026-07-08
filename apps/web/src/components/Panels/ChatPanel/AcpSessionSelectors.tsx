@@ -17,8 +17,8 @@
 
 import { useMemo } from 'react';
 
+import { Loading } from '../../Common/Loading';
 import { Select, type SelectOption } from '../../Common/Select';
-import { Spinner } from '../../Common/Spinner';
 
 import type {
   AcpSessionConfigOption,
@@ -264,7 +264,7 @@ export const AcpSessionSelectors = ({
           aria-label="Loading agent options"
           className="text-fg-subtle inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs whitespace-nowrap"
         >
-          <Spinner size="xs" />
+          <Loading layout="inline" size="xs" />
           <span>Loading agent options…</span>
         </span>
       );

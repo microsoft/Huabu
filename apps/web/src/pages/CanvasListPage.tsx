@@ -11,9 +11,8 @@ import {
 } from '../api/canvas';
 import { Button } from '../components/Common/Button';
 import { EmptyState } from '../components/Common/EmptyState';
-import { LoadingState } from '../components/Common/LoadingState';
+import { Loading } from '../components/Common/Loading';
 import { Modal } from '../components/Common/Modal';
-import { Spinner } from '../components/Common/Spinner';
 import { toast } from '../components/Common/Toast';
 import { Tooltip } from '../components/Common/Tooltip';
 import { Header } from '../components/Panels/Header/Header';
@@ -205,7 +204,11 @@ export default function CanvasListPage() {
               disabled={isDeleting}
             >
               {isDeleting ? (
-                <Spinner size="sm" className="text-fg-inverse" />
+                <Loading
+                  layout="inline"
+                  size="sm"
+                  className="text-fg-inverse"
+                />
               ) : (
                 'Delete'
               )}
@@ -285,7 +288,11 @@ export default function CanvasListPage() {
                 disabled={isImporting}
               >
                 {isImporting ? (
-                  <Spinner size="sm" className="text-fg-subtle" />
+                  <Loading
+                    layout="inline"
+                    size="sm"
+                    className="text-fg-subtle"
+                  />
                 ) : (
                   <Upload />
                 )}
@@ -297,7 +304,11 @@ export default function CanvasListPage() {
                 disabled={isCreating}
               >
                 {isCreating ? (
-                  <Spinner size="sm" className="text-fg-inverse" />
+                  <Loading
+                    layout="inline"
+                    size="sm"
+                    className="text-fg-inverse"
+                  />
                 ) : (
                   <Plus />
                 )}
@@ -307,7 +318,14 @@ export default function CanvasListPage() {
           </div>
 
           {isLoading ? (
-            <LoadingState message="Loading canvases…" className="py-20" />
+            <Loading
+              variant="spinner"
+              layout="block"
+              size="md"
+              message="Loading canvases…"
+              className="py-20"
+              indicatorClassName="text-fg-subtle"
+            />
           ) : canvases.length === 0 ? (
             <EmptyState
               message="No canvases yet."
@@ -363,7 +381,11 @@ export default function CanvasListPage() {
                     disabled={exportingId === canvas.canvasId}
                   >
                     {exportingId === canvas.canvasId ? (
-                      <Spinner size="sm" className="text-fg-subtle" />
+                      <Loading
+                        layout="inline"
+                        size="sm"
+                        className="text-fg-subtle"
+                      />
                     ) : (
                       <Download className="text-fg-subtle" />
                     )}

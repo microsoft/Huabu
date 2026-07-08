@@ -34,6 +34,6 @@ Return **at most 5** intents the user is most likely to pursue next. Fewer is fi
 
 Return **only** a JSON array (no markdown fences, no commentary). Each element:
 {
-"label": "short actionable description",
+"label": "short actionable description"
 }
 Sorted by confidence descending.

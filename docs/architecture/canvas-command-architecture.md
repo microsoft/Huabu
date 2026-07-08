@@ -14,6 +14,12 @@ Data flow:
 2. Agent response → `CanvasCommand[]` → `CanvasExecution` → executor
 3. Executor → validate, apply, trace, snapshot, effects
 
+`CanvasExecution.source` defaults to `ui`. Most command behavior is shared
+across sources; the notable selection exception is `CREATE_NODES`: UI-created
+non-`question` entries in that command become the active selection, while
+agent/system-created entries and `question` entries preserve the existing
+selection.
+
 ## Layer 1: CanvasUiIntent
 
 `CanvasUiIntent` is a web-only input model for user gestures. It resolves UI-specific ambiguity (selection, clipboard, drag context, viewport position, rectangle hit-testing) into explicit `CanvasCommand` operands.
@@ -62,6 +68,7 @@ Composite intent examples:
 
 - `DELETE_NODES` automatically removes incident edges.
 - `SET_NODE_PARENT` rejects invalid targets or cycles.
+- `CONNECT_NODES` rejects the command (`applied: false`, `reason: 'invalid-target'`) when any edge endpoint is not a live node — it never silently drops the edge.
 - `ALIGN_NODES` aligns provided nodes without relying on selection.
 
 Every `CanvasCommand`:
@@ -74,11 +81,11 @@ Every `CanvasCommand`:
 
 ### Command Catalog
 
-See `packages/shared/src/types/canvas/command.ts` for the full discriminated union (17 command types). Summary:
+See `packages/shared/src/types/canvas/command.ts` for the full discriminated union. Summary:
 
 | Category         | Commands                                                |
 | ---------------- | ------------------------------------------------------- |
-| Node lifecycle   | `CREATE_NODES`, `DELETE_NODES`, `CREATE_QUESTION`       |
+| Node lifecycle   | `CREATE_NODES`, `DELETE_NODES`                          |
 | Node editing     | `MERGE_NODE_DATA`, `CHANGE_NODE_TYPE`                   |
 | Structure        | `SET_NODE_PARENT`, `DISSOLVE_FRAME`, `SET_FRAME_LAYOUT` |
 | Geometry         | `SET_NODE_GEOMETRY`                                     |
@@ -88,9 +95,21 @@ See `packages/shared/src/types/canvas/command.ts` for the full discriminated uni
 | Edge graph       | `CONNECT_NODES`, `DISCONNECT_EDGES`, `SET_EDGE_STYLE`   |
 | Algorithms       | `ALIGN_NODES`, `DISTRIBUTE_NODES`                       |
 
-### Explicit IDs
+Geometry commands preserve each node type's sizing model. `text` and
+`question` nodes are always content-height nodes: `CREATE_NODES`,
+`SET_NODE_GEOMETRY`, and `CHANGE_NODE_TYPE` preserve/write their top-level
+`style.width` but do not persist top-level `style.height`. Use
+`data.style.fontSize` to change their rendered scale. `note` nodes are
+different: they may either clear top-level `style.height` for auto height or pin
+it for fixed-height notes.
 
-Node ids use `node-<uuid>`, edge ids use `edge-<uuid>`. Callers that need to reference a newly created node in a later command within the same batch provide the explicit id in `CREATE_NODES`.
+### IDs
+
+Node ids use `node-<uuid>`, edge ids use `edge-<uuid>`.
+
+- **Web / UI callers** mint ids up front and build the whole batch client-side, so a later command in the same batch can reference an earlier `CREATE_NODES` entry by its explicit id (each command sees prior commands' state — see Execution Semantics).
+- **The agent path is different.** The LLM writes every command's arguments before it can observe any result, and reusing a hand-written id across separate runs collides with nodes created earlier. So on the server-applied path the `canvas_commands` handler (`canvas-write.ts`) **strips any `id`** off `CREATE_NODES` / `CONNECT_NODES` entries before execution; `preAssignIds` (`canvas-executor.ts`) then assigns a unique id to every id-less entry, and the executor echoes each created node's id (and label) in `results[].nodes`. To connect or reparent freshly created nodes, the agent reads those ids and issues a **follow-up** `canvas_commands` call in the next turn. This is why the operate prompt tells the agent to split dependent operations across calls rather than self-reference invented ids in one batch.
+- **Sketch is a normal server-applied writer.** The sketch pipeline (`origin.type === 'sketch-recognized'`) runs through `executeOnServer` + broadcast like every other agent path: `recognizeSketchCommands` attributes the batch to a synthetic `threadId` (with `computeChanges`), so the mutation is applied + persisted server-side, broadcast to every tab, and produces revertible change records. The on-canvas sketch overlay drives Keep / Revert / Preview off those records (the same machinery as the chat `ChangeReviewCard`). So sketch reads real ids from `results[].nodes` and self-references created nodes (e.g. circle-to-group's new frame) via the standard omit-id / follow-up-call pattern — there is no id carve-out.
 
 ## Layer 3: CanvasExecution
 
@@ -162,6 +181,11 @@ The LLM emits `CanvasCommand` JSON directly from the tool-call layer; no server 
 `apps/server/src/modules/agent/tools/handlers/canvas-write.ts` handles `canvas_commands`: it injects `NodeOrigin` into `CREATE_NODES` then calls `executeOnServer()` ([canvas-executor.ts](../../apps/server/src/modules/canvas/canvas-executor.ts)) — the **command batch executes on the server** through the shared engine, persists `canvas.json` + node `.md` sidecars, appends one `delta-log.jsonl` row, and returns the structural deltas + per-command results. The LLM gets real success/error feedback. (`sketch-recognized` origin is the exception: it still returns commands to the client for the Accept/Revert overlay.)
 
 Same engine runs both sides; the only authority is the server. `POST /api/canvas/:canvasId/execute` is the shared entry, guarded by a per-canvas mutex (headless executor, M2).
+
+Two properties make the agent loop self-correcting:
+
+- **Per-command outcomes are visible.** Each command reports `applied` and, on failure, a typed `reason` in `results[]` (e.g. `CONNECT_NODES` → `invalid-target` when an endpoint is missing, `SET_NODE_PARENT` → `invalid-target` / `invalid-parent`). Commands are validated independently — the version bumps only if at least one command changed state; an all-rejected batch is a no-op (`toVersion === fromVersion`).
+- **Created ids come back.** `results[].nodes` echoes the server-assigned id (and label) of every node a `CREATE_NODES` command created, so the next turn can wire them up with real ids instead of invented ones.
 
 ### Web-Side Apply
 

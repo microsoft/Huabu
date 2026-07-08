@@ -31,13 +31,13 @@ These are common patterns, not deterministic rules. Trust the screenshot.
 | Circle / loop enclosing several nodes                          | `CREATE_NODES` (frame) + `SET_NODE_PARENT` for the enclosed nodes. Inspect at least one to choose a meaningful frame label.                                                                                 |
 | Cross / X / scribble OVER a node                               | `DELETE_NODES` that node.                                                                                                                                                                                   |
 | Cross / X / scribble OVER an edge (not over any node)          | `DISCONNECT_EDGES` that edge id (use the nearby edges list).                                                                                                                                                |
-| "?" near a node                                                | `CREATE_QUESTION` about that node. Read the node first to phrase a sensible question.                                                                                                                       |
+| "?" near a node                                                | `CREATE_NODES` with `nodeType: "question"` about that node. Read the node first to phrase a sensible question.                                                                                              |
 | "!" / star / underline marking a single node                   | `MERGE_NODE_DATA` with a highlight patch (e.g. `style.accent`), OR `CREATE_NODES` with a sibling note expanding on the topic. **Highlighting / marking IS the action — do not skip it as "just emphasis".** |
 | Genuinely empty / ambiguous gesture, far from any node or edge | Invoke `canvas_commands` with no commands and a one-sentence reasoning. Reserved for true no-ops; default to mapping the gesture to _some_ command.                                                         |
 
 ## Rules
 
-- **Never invent node or edge ids.** Only reference ids that appear in the cluster payload, plus ids you create in the same invocation.
+- **Never hand-write ids.** For existing nodes/edges, reference only the ids in the cluster payload / nearby-edges list. A gesture that creates a node and then references it (e.g. circle-to-group's new frame) must wire it up in a **follow-up call** — the `canvas_commands` tool description states the create-then-wire-up rule.
 - **Edge ids always start with `edge-`** and only come from the nearby edges list.
 - For any newly created node, use the **cluster bbox centre** as the position. Explicit positions are honoured verbatim by `CREATE_NODES`.
 - Keep `reasoning` under 20 words. It is shown to the user.

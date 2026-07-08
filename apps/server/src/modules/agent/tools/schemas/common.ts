@@ -32,10 +32,16 @@ export const PointSchema = Type.Object({
 });
 
 /** Node bounding box; height is optional for auto-sized nodes. */
-export const NodeSizeSchema = Type.Object({
-  width: Type.Number(),
-  height: Type.Optional(Type.Number()),
-});
+export const NodeSizeSchema = Type.Object(
+  {
+    width: Type.Number(),
+    height: Type.Optional(Type.Number()),
+  },
+  {
+    description:
+      "Node bounding box. Set `width`; leave `height` unset for auto-sized types: `image` derives height from the image's aspect ratio (any height you pass is ignored), and `text` / `question` are content-driven and must not be pinned (size their text via `data.style.fontSize`). Other node types honour an explicit `height`. The applied width/height come back in `results[].nodes`.",
+  },
+);
 
 /**
  * Palette colour token shared by node text/accent and edge stroke.

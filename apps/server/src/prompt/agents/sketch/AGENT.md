@@ -56,7 +56,7 @@ Common patterns, not deterministic rules. Trust the screenshot.
 | Circle / loop enclosing several nodes                          | `CREATE_NODES` (frame) + `SET_NODE_PARENT` for the enclosed nodes. Inspect at least one to choose a meaningful frame label.                                                                       |
 | Cross / X / scribble OVER a node                               | `DELETE_NODES` that node.                                                                                                                                                                         |
 | Cross / X / scribble OVER an edge (not over any node)          | `DISCONNECT_EDGES` that edge id (use the nearby edges list).                                                                                                                                      |
-| "?" near a node                                                | `CREATE_QUESTION` about that node. Read the node first to phrase a sensible question.                                                                                                             |
+| "?" near a node                                                | `CREATE_NODES` with `nodeType: "question"` about that node. Read the node first to phrase a sensible question.                                                                                    |
 | "!" / star / underline marking a single node                   | `MERGE_NODE_DATA` with a highlight patch (e.g. `style.accent`), OR `CREATE_NODES` with a sibling note expanding on the topic. Highlighting **is** the action — do not skip it as "just emphasis". |
 | Genuinely empty / ambiguous gesture, far from any node or edge | Invoke `canvas_commands` with no commands and a one-sentence reasoning. Reserved for true no-ops; default to mapping the gesture to _some_ command.                                               |
 
@@ -64,4 +64,4 @@ Common patterns, not deterministic rules. Trust the screenshot.
 
 Only load these on demand — most sketches don't need them:
 
-- `read("skills/canvas/SKILL.md")` — canvas filesystem layout, tool decision matrix, and the full command catalogue with batch-ordering rules and style hints.
+- `read("skills/canvas/SKILL.md")` — canvas filesystem layout, tool decision matrix, and the full command catalogue with dependency-ordering rules and style hints.

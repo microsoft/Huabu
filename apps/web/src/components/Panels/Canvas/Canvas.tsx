@@ -18,7 +18,11 @@ import React, {
 } from 'react';
 import '@xyflow/react/dist/style.css';
 
-import { createId } from '@sediment/shared';
+import {
+  assignNodeZIndices,
+  edgeZIndex,
+  indexById,
+} from '@sediment/shared/canvas-engine';
 
 import { resolveArtifactUrl } from '@/api/artifact';
 import { AudioNode } from '@/components/Nodes/audio/AudioNode';
@@ -57,9 +61,7 @@ import { SnapGuidesOverlay } from './SnapGuidesOverlay.tsx';
 import { StructuredDropOverlay } from './StructuredDropOverlay.tsx';
 import { GRID_SIZE, MAX_ZOOM, MIN_ZOOM } from '../../../config/canvas.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
-import { useChatStore } from '../../../store/chatStore.ts';
 import { useGesturePreviewStore } from '../../../store/gesturePreviewStore.ts';
-import { usePanelStore } from '../../../store/panelStore.ts';
 import { usePreviewStore } from '../../../store/previewStore.ts';
 import { useToolStore } from '../../../store/toolStore.ts';
 import {
@@ -69,6 +71,7 @@ import {
 } from '../../../utils/io/dragDrop.ts';
 import { looksLikeUrl } from '../../../utils/io/media.ts';
 import { FrameNode } from '../../Nodes/frame/FrameNode.tsx';
+import { createQuestionNodeAndCompose } from '../../Nodes/question/questionCompose.ts';
 import { QuestionNode } from '../../Nodes/question/QuestionNode.tsx';
 import { SketchNode } from '../../Nodes/sketch/SketchNode.tsx';
 import { SketchOverlay } from '../../Nodes/sketch/SketchOverlay.tsx';
@@ -77,8 +80,11 @@ import { VideoNode } from '../../Nodes/video/VideoNode.tsx';
 import { WebNode } from '../../Nodes/web/WebNode.tsx';
 
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
-import type { CanvasNodeId, CanvasViewport } from '@sediment/shared';
-import type { FrameFitResult } from '@sediment/shared/canvas-engine';
+import type { CanvasViewport } from '@sediment/shared';
+import type {
+  FrameFitResult,
+  NestableNode,
+} from '@sediment/shared/canvas-engine';
 
 const nodeTypes = {
   image: ImageNode,
@@ -395,34 +401,72 @@ export const Canvas: React.FC<CanvasProps> = ({
     () => new Set(previewEdgeIds),
     [previewEdgeIds],
   );
-  const displayNodes = useMemo<typeof nodes>(
-    () =>
-      nodes.map((node) => {
-        // Reuse the original node reference whenever the computed
-        // `className` matches what's already on the node. Without this
-        // check, `clsx('foo', false)` returns `'foo'` (truthy), so the
-        // ternary in the previous implementation re-spread every node
-        // that had any pre-existing className — defeating xyflow's
-        // per-node `React.memo` on every selection click.
-        const wantsLassoClass = lassoPreviewNodeIdSet.has(node.id);
-        const baseClassName = node.className;
-        const nextClassName = wantsLassoClass
-          ? clsx(baseClassName, 'canvas-lasso-preview')
-          : baseClassName;
-        if (nextClassName === baseClassName) return node;
-        return { ...node, className: nextClassName };
-      }),
-    [lassoPreviewNodeIdSet, nodes],
+  // Manual z-order: array/forest order is the sole stacking authority
+  // (see `assignNodeZIndices`). React Flow runs in `zIndexMode="manual"`
+  // so these derived values are used verbatim; without this a framed
+  // node always paints above unframed siblings regardless of order.
+  const nodesById = useMemo(() => indexById(nodes as NestableNode[]), [nodes]);
+  const zByNode = useMemo(
+    () => assignNodeZIndices(nodes as NestableNode[]),
+    [nodes],
   );
+
+  // Cache of the wrapped node objects emitted last render, keyed by their
+  // SOURCE node ref. Selection toggles only swap the toggled nodes' refs
+  // (see `setNodeSelection`), so reusing the prior wrapped ref for every
+  // untouched node keeps xyflow's per-node `React.memo` intact.
+  const zWrapCacheRef = useRef<
+    Map<(typeof nodes)[number], (typeof nodes)[number]>
+  >(new Map());
+
+  const displayNodes = useMemo<typeof nodes>(() => {
+    const prevCache = zWrapCacheRef.current;
+    const nextCache = new Map<(typeof nodes)[number], (typeof nodes)[number]>();
+
+    const result = nodes.map((node) => {
+      const z = zByNode.get(node.id) ?? 0;
+      const wantsLassoClass = lassoPreviewNodeIdSet.has(node.id);
+      const baseClassName = node.className;
+      const nextClassName = wantsLassoClass
+        ? clsx(baseClassName, 'canvas-lasso-preview')
+        : baseClassName;
+
+      const cached = prevCache.get(node);
+      if (cached && cached.zIndex === z && cached.className === nextClassName) {
+        nextCache.set(node, cached);
+        return cached;
+      }
+
+      const needsWrap = nextClassName !== baseClassName || node.zIndex !== z;
+      const wrapped = needsWrap
+        ? { ...node, className: nextClassName, zIndex: z }
+        : node;
+      nextCache.set(node, wrapped);
+      return wrapped;
+    });
+
+    zWrapCacheRef.current = nextCache;
+    return result;
+  }, [lassoPreviewNodeIdSet, nodes, zByNode]);
 
   // Override marker colors on selected edges so arrows match the selection
   // highlight color (--color-info). CSS cannot style SVG <marker> referenced
-  // via url() from <defs>, so we swap the marker config in JS.
+  // via url() from <defs>, so we swap the marker config in JS. Also folds in
+  // the manual-mode edge z (see `edgeZIndex`): under `zIndexMode="manual"`
+  // React Flow paints edges at `edge.zIndex` verbatim, so we must assign the
+  // "float above the endpoints' frame" value ourselves (auto mode did this).
+  const edgeZWrapCacheRef = useRef<
+    Map<(typeof edges)[number], (typeof edges)[number]>
+  >(new Map());
+
   const displayEdges = useMemo(() => {
     // Cached module-level read — see `getInfoColor` above.
     const infoColor = getInfoColor();
-    if (!infoColor) return edges;
-    return edges.map((e) => {
+    const prevCache = edgeZWrapCacheRef.current;
+    const nextCache = new Map<(typeof edges)[number], (typeof edges)[number]>();
+
+    const styleEdge = (e: (typeof edges)[number]): (typeof edges)[number] => {
+      if (!infoColor) return e;
       const isLassoPreviewSelected = lassoPreviewEdgeIdSet.has(e.id);
       const isNodeSelectionSelected = selectedEdgeIdSet.has(e.id);
       const shouldStaySelected =
@@ -435,11 +479,7 @@ export const Canvas: React.FC<CanvasProps> = ({
 
       if (!isVisuallySelected) {
         if (!e.selected) return e;
-
-        return {
-          ...e,
-          selected: false,
-        };
+        return { ...e, selected: false };
       }
 
       // Only allocate a new marker object when its color actually needs
@@ -470,13 +510,36 @@ export const Canvas: React.FC<CanvasProps> = ({
         markerEnd: nextMarkerEnd,
         markerStart: nextMarkerStart,
       };
+    };
+
+    const result = edges.map((e) => {
+      const styled = styleEdge(e);
+      const z = edgeZIndex(zByNode, nodesById, e.source, e.target);
+
+      // Reuse the wrapped edge emitted last render when the
+      // selection-styled ref and derived z are both unchanged, so
+      // xyflow's edge memo survives selection toggles.
+      const cached = prevCache.get(styled);
+      if (cached && cached.zIndex === z) {
+        nextCache.set(styled, cached);
+        return cached;
+      }
+
+      const finalEdge = styled.zIndex === z ? styled : { ...styled, zIndex: z };
+      nextCache.set(styled, finalEdge);
+      return finalEdge;
     });
+
+    edgeZWrapCacheRef.current = nextCache;
+    return result;
   }, [
     edges,
     isBoxSelecting,
     lassoPreviewEdgeIdSet,
     selectedEdgeIdSet,
     selectedNodeIds,
+    zByNode,
+    nodesById,
   ]);
 
   // Cancel any other pending node placement (note / text / question) with Escape.
@@ -514,25 +577,12 @@ export const Canvas: React.FC<CanvasProps> = ({
         // the agent inline). Presetting `id` is supported by the
         // ADD_NODES resolver and already used by paste.
         if (pendingNodeType === 'question') {
-          const nodeId = createId('node') as CanvasNodeId;
-          const threadId = createId('thread');
-          addNode({
-            nodeType: 'question',
+          createQuestionNodeAndCompose({
+            addNode,
             placementPoint: position,
-            id: nodeId,
-            data: {
-              content: '',
-              status: 'idle',
-              threadId,
-              origin: { type: 'user-created' },
-            },
+            canvasId,
           });
           setPendingNodeType(null);
-          useChatStore
-            .getState()
-            .openQuestionCompose(nodeId, threadId, canvasId || undefined);
-          usePanelStore.getState().requestOpenRightPanel();
-          usePanelStore.getState().requestFocusChatInput();
           return;
         }
 
@@ -921,6 +971,12 @@ export const Canvas: React.FC<CanvasProps> = ({
         // visible. Disabling this also stops a selected covered node
         // from popping above the node covering it, which previously felt
         // like the click silently reordered the layers.
+        // Manual z-order: Sediment derives every node's `zIndex` from
+        // forest order (`assignNodeZIndices`) so the Layers-panel / array
+        // order is the SOLE stacking authority. `auto` would instead force
+        // framed subtrees above unframed siblings and lift framed frames by
+        // a fixed band, making a node unable to cover a frame by order.
+        zIndexMode="manual"
         elevateNodesOnSelect={false}
       >
         <CanvasGestures wrapperRef={wrapperRef} rfInstanceRef={rfInstanceRef} />

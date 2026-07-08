@@ -1,4 +1,11 @@
 import {
+  autoUpdate,
+  flip,
+  offset,
+  shift,
+  useFloating,
+} from '@floating-ui/react';
+import {
   AlignCenterHorizontal,
   AlignCenterVertical,
   AlignEndHorizontal,
@@ -10,6 +17,7 @@ import {
   Ungroup,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { Button } from './Button';
 import { cn } from './cn';
@@ -47,6 +55,7 @@ export const FLOATING_TOOLBAR_CLASS =
 interface RootProps {
   children: ReactNode;
   className?: string;
+  onMouseDown?: (event: React.MouseEvent<HTMLDivElement>) => void;
 }
 
 /**
@@ -54,9 +63,14 @@ interface RootProps {
  * For node toolbars, prefer applying `FLOATING_TOOLBAR_CLASS` directly
  * to `<NodeToolbar className>` to avoid an extra wrapper div.
  */
-function Root({ children, className }: RootProps) {
+function Root({ children, className, onMouseDown }: RootProps) {
   return (
-    <div className={cn(FLOATING_TOOLBAR_CLASS, className)}>{children}</div>
+    <div
+      className={cn(FLOATING_TOOLBAR_CLASS, className)}
+      onMouseDown={onMouseDown}
+    >
+      {children}
+    </div>
   );
 }
 
@@ -223,6 +237,10 @@ interface ToolbarColorPickerProps {
   onSelect: (token: string) => void;
   /** Tooltip label for the trigger button. */
   title?: string;
+  /** Optional controlled open state. When omitted, the picker manages itself. */
+  open?: boolean;
+  /** Called when the popover should open or close. */
+  onOpenChange?: (open: boolean) => void;
   /**
    * Custom trigger content. When omitted, a circular swatch showing the
    * current color is rendered.
@@ -239,25 +257,22 @@ function ToolbarColorPicker({
   value,
   onSelect,
   title = 'Change color',
+  open,
+  onOpenChange,
   children,
 }: ToolbarColorPickerProps) {
-  const [isOpen, setIsOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  // Close when clicking outside
-  useEffect(() => {
-    if (!isOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (
-        containerRef.current &&
-        !containerRef.current.contains(e.target as HTMLElement)
-      ) {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [isOpen]);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const isOpen = open ?? uncontrolledOpen;
+  const setIsOpen = (nextOpen: boolean) => {
+    if (open === undefined) setUncontrolledOpen(nextOpen);
+    onOpenChange?.(nextOpen);
+  };
+  const { refs, floatingStyles, isPositioned } = useFloating({
+    open: isOpen,
+    placement: 'top',
+    middleware: [offset(8), flip({ padding: 8 }), shift({ padding: 8 })],
+    whileElementsMounted: autoUpdate,
+  });
 
   // Resolve the token to a CSS color for the trigger swatch.
   // Legacy hex / CSS keyword passes through unchanged.
@@ -285,7 +300,12 @@ function ToolbarColorPicker({
   );
 
   return (
-    <div ref={containerRef} className="relative flex items-center">
+    <div
+      ref={(node) => {
+        refs.setReference(node);
+      }}
+      className="flex items-center"
+    >
       <Button
         variant="outline"
         iconOnly
@@ -300,30 +320,39 @@ function ToolbarColorPicker({
         {children ?? defaultTrigger}
       </Button>
 
-      {isOpen && (
-        <>
-          <div
-            className="fixed inset-0 z-40"
-            onClick={(e) => {
-              e.stopPropagation();
-              setIsOpen(false);
-            }}
-          />
-          <div
-            className="border-edge-default shadow-bottom animate-in fade-in zoom-in bg-surface absolute bottom-full left-1/2 z-50 mb-2 -translate-x-1/2 rounded-full border px-2 py-1.5 duration-200"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <ColorPicker
-              colors={colors}
-              activeToken={value}
-              onSelect={(t) => {
-                onSelect(t);
-                setIsOpen(false);
-              }}
-            />
-          </div>
-        </>
-      )}
+      {isOpen
+        ? createPortal(
+            <>
+              <div
+                className="fixed inset-0 z-40"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsOpen(false);
+                }}
+              />
+              <div
+                ref={refs.setFloating}
+                className="border-edge-default shadow-bottom bg-surface z-50 rounded-full border px-2 py-1.5"
+                style={{
+                  ...floatingStyles,
+                  visibility: isPositioned ? 'visible' : 'hidden',
+                }}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <ColorPicker
+                  colors={colors}
+                  activeToken={value}
+                  onSelect={(t) => {
+                    onSelect(t);
+                    setIsOpen(false);
+                  }}
+                />
+              </div>
+            </>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
@@ -349,6 +378,8 @@ interface ToolbarSizePickerProps {
   onApply: (size: { width?: number; height?: number }) => void;
   /** Lower bound enforced on both inputs. Defaults to 20. */
   minSize?: number;
+  /** Whether to render the H input. Defaults to true. */
+  showHeight?: boolean;
   /**
    * When provided, renders a small toggle next to the H input that
    * flips the node between fixed (pinned) and auto-fit height modes.
@@ -402,6 +433,105 @@ interface ToolbarSizePickerProps {
 const SIZE_INPUT_CLASS =
   'border-edge-default focus:border-info nodrag w-12 rounded border bg-transparent px-1.5 py-0.5 text-xs outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none';
 
+interface ToolbarNumberInputProps {
+  label: string;
+  ariaLabel: string;
+  value: number | null;
+  onApply: (value: number) => void;
+  min?: number;
+  max?: number;
+  step?: number;
+  inputClassName?: string;
+  disabled?: boolean;
+  title?: string;
+}
+
+function ToolbarNumberInput({
+  label,
+  ariaLabel,
+  value,
+  onApply,
+  min = 1,
+  max,
+  step = 1,
+  inputClassName,
+  disabled = false,
+  title,
+}: ToolbarNumberInputProps) {
+  const [text, setText] = useState('');
+
+  useEffect(() => {
+    setText(typeof value === 'number' ? String(Math.round(value)) : '');
+  }, [value]);
+
+  const restore = () => {
+    setText(typeof value === 'number' ? String(Math.round(value)) : '');
+  };
+
+  const commit = () => {
+    if (disabled) {
+      restore();
+      return;
+    }
+    const trimmed = text.trim();
+    if (trimmed === '') {
+      restore();
+      return;
+    }
+    const parsed = Number.parseFloat(trimmed);
+    if (!Number.isFinite(parsed)) {
+      restore();
+      return;
+    }
+    const clamped = Math.max(
+      min,
+      max === undefined ? parsed : Math.min(max, parsed),
+    );
+    const next = Math.round(clamped);
+    setText(String(next));
+    if (typeof value !== 'number' || next !== Math.round(value)) {
+      onApply(next);
+    }
+  };
+
+  return (
+    <label className="flex items-center gap-1" title={title}>
+      <span className="text-fg-subtle text-xs" aria-hidden="true">
+        {label}
+      </span>
+      <input
+        type="number"
+        inputMode="numeric"
+        aria-label={ariaLabel}
+        min={min}
+        max={max}
+        step={step}
+        disabled={disabled}
+        value={text}
+        placeholder={typeof value === 'number' ? '' : '—'}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={commit}
+        onMouseDown={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === 'Enter') {
+            commit();
+            (e.target as HTMLInputElement).blur();
+          } else if (e.key === 'Escape') {
+            restore();
+            (e.target as HTMLInputElement).blur();
+          }
+        }}
+        className={cn(
+          SIZE_INPUT_CLASS,
+          disabled && 'cursor-not-allowed opacity-50',
+          inputClassName,
+        )}
+      />
+    </label>
+  );
+}
+
 /**
  * Inline width / height editor for a node's geometry.
  *
@@ -426,6 +556,7 @@ function ToolbarSizePicker({
   height,
   onApply,
   minSize = 20,
+  showHeight = true,
   heightAuto,
   autoSize,
 }: ToolbarSizePickerProps) {
@@ -439,140 +570,43 @@ function ToolbarSizePicker({
   const heightIsAuto = autoActive;
   const widthIsAuto = autoActive && auto?.dimensions === 'both';
 
-  // Local draft state per input. Synced from the canonical canvas value
-  // whenever it changes externally (drag-resize, undo, auto/fixed toggle).
-  // Kept separate from the prop so the user can type freely without the
-  // value reformatting itself on every keystroke.
-  const [wText, setWText] = useState('');
-  const [hText, setHText] = useState('');
-
-  useEffect(() => {
-    setWText(typeof width === 'number' ? String(Math.round(width)) : '');
-  }, [width]);
-
-  useEffect(() => {
-    setHText(typeof height === 'number' ? String(Math.round(height)) : '');
-  }, [height]);
-
-  const commitW = () => {
-    const trimmed = wText.trim();
-    if (trimmed === '') {
-      // Empty: restore the displayed value rather than dispatching.
-      setWText(typeof width === 'number' ? String(Math.round(width)) : '');
-      return;
-    }
-    const parsed = Number.parseFloat(trimmed);
-    if (!Number.isFinite(parsed)) {
-      setWText(typeof width === 'number' ? String(Math.round(width)) : '');
-      return;
-    }
-    const next = Math.max(minSize, Math.round(parsed));
-    setWText(String(next));
-    // In auto-size-both mode, always dispatch so typing pins the
-    // width even when the typed value matches the current measured
-    // size (the host promotes the node out of auto mode).
-    if (
-      widthIsAuto ||
-      typeof width !== 'number' ||
-      next !== Math.round(width)
-    ) {
-      onApply({ width: next });
-    }
-  };
-
-  const commitH = () => {
-    const trimmed = hText.trim();
-    if (trimmed === '') {
-      setHText(typeof height === 'number' ? String(Math.round(height)) : '');
-      return;
-    }
-    const parsed = Number.parseFloat(trimmed);
-    if (!Number.isFinite(parsed)) {
-      setHText(typeof height === 'number' ? String(Math.round(height)) : '');
-      return;
-    }
-    const next = Math.max(minSize, Math.round(parsed));
-    setHText(String(next));
-    // In auto-fit mode, always dispatch so typing pins the height even
-    // when the typed value matches the current measured size.
-    if (
-      heightIsAuto ||
-      typeof height !== 'number' ||
-      next !== Math.round(height)
-    ) {
-      onApply({ height: next });
-    }
-  };
-
   return (
     <div className="flex items-center gap-1">
-      <label className="flex items-center gap-1">
-        <span className="text-fg-subtle text-xs" aria-hidden="true">
-          W
-        </span>
-        <input
-          type="number"
-          inputMode="numeric"
-          aria-label="Width"
+      <ToolbarNumberInput
+        label="W"
+        ariaLabel="Width"
+        value={width}
+        min={minSize}
+        inputClassName={widthIsAuto ? 'text-fg-subtle italic' : undefined}
+        onApply={(next) => {
+          if (
+            widthIsAuto ||
+            typeof width !== 'number' ||
+            next !== Math.round(width)
+          ) {
+            onApply({ width: next });
+          }
+        }}
+      />
+      {showHeight && (
+        <ToolbarNumberInput
+          label="H"
+          ariaLabel="Height"
+          value={height}
           min={minSize}
-          step={1}
-          value={wText}
-          placeholder={typeof width === 'number' ? '' : '—'}
-          onChange={(e) => setWText(e.target.value)}
-          onBlur={commitW}
-          onMouseDown={(e) => e.stopPropagation()}
-          onKeyDown={(e) => {
-            e.stopPropagation();
-            if (e.key === 'Enter') {
-              commitW();
-              (e.target as HTMLInputElement).blur();
-            } else if (e.key === 'Escape') {
-              setWText(
-                typeof width === 'number' ? String(Math.round(width)) : '',
-              );
-              (e.target as HTMLInputElement).blur();
+          inputClassName={heightIsAuto ? 'text-fg-subtle italic' : undefined}
+          onApply={(next) => {
+            if (
+              heightIsAuto ||
+              typeof height !== 'number' ||
+              next !== Math.round(height)
+            ) {
+              onApply({ height: next });
             }
           }}
-          className={cn(
-            SIZE_INPUT_CLASS,
-            widthIsAuto && 'text-fg-subtle italic',
-          )}
         />
-      </label>
-      <label className="flex items-center gap-1">
-        <span className="text-fg-subtle text-xs" aria-hidden="true">
-          H
-        </span>
-        <input
-          type="number"
-          inputMode="numeric"
-          aria-label="Height"
-          min={minSize}
-          step={1}
-          value={hText}
-          placeholder={typeof height === 'number' ? '' : '—'}
-          onChange={(e) => setHText(e.target.value)}
-          onBlur={commitH}
-          onMouseDown={(e) => e.stopPropagation()}
-          onKeyDown={(e) => {
-            e.stopPropagation();
-            if (e.key === 'Enter') {
-              commitH();
-              (e.target as HTMLInputElement).blur();
-            } else if (e.key === 'Escape') {
-              setHText(
-                typeof height === 'number' ? String(Math.round(height)) : '',
-              );
-              (e.target as HTMLInputElement).blur();
-            }
-          }}
-          className={cn(
-            SIZE_INPUT_CLASS,
-            heightIsAuto && 'text-fg-subtle italic',
-          )}
-        />
-      </label>
-      {auto && (
+      )}
+      {auto && showHeight && (
         <ToggleButton
           active={autoActive}
           title={
@@ -787,5 +821,6 @@ export const FloatingToolbar = Object.assign(Root, {
   Select: ToolbarSelect,
   ColorPicker: ToolbarColorPicker,
   SizePicker: ToolbarSizePicker,
+  NumberInput: ToolbarNumberInput,
   AlignPicker: ToolbarAlignPicker,
 });

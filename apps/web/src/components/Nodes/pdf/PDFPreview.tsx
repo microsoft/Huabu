@@ -17,7 +17,7 @@ import { FloatingDragHandle } from '../FloatingDragHandle';
 import { PDFPageWithOverlay } from './PDFPageWithOverlay';
 import { PDF_DOCUMENT_OPTIONS } from './pdfWorker';
 import { Button } from '../../Common/Button';
-import { LoadingState } from '../../Common/LoadingState';
+import { Loading } from '../../Common/Loading';
 
 import type { AreaCapturedEvent, NormalizedRect } from './PDFPageWithOverlay';
 import type { PreviewComponentProps } from '../note/NotePreview';
@@ -420,7 +420,7 @@ export const PDFPreview = ({
     <div className="relative flex h-full flex-col">
       {headerSlotEl ? createPortal(headerActions, headerSlotEl) : null}
       {/* Loading overlay — visible until document metadata is parsed */}
-      {src && !docLoaded && <LoadingState overlay variant="skeleton" />}
+      {src && !docLoaded && <Loading layout="overlay" variant="skeleton" />}
       {/* ── PDF pages ── */}
       <div
         ref={scrollContainerRef}

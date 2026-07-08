@@ -7,6 +7,7 @@ import {
   ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT,
   type FrameNodeData,
 } from '@sediment/shared';
+import { isAlwaysAutoHeightNodeType } from '@sediment/shared/canvas-engine';
 
 import { CanvasFloatingPopover } from '@/components/Common/CanvasFloatingPopover';
 import {
@@ -83,6 +84,7 @@ export const NodeFloatingToolbar = memo(
     const expandedNodeId = useCanvasStore((s) => s.expandedNodeId);
     const ingestion = useCanvasStore((s) => s.ingestionByNodeId[id]);
     const isNotMouse = useIsNotMouse();
+    const isTextFlowNode = isAlwaysAutoHeightNodeType(type);
 
     // Disable the text/note toggle while the large-view editor is open
     // on this node (dirty editor state would otherwise overwrite the
@@ -254,7 +256,8 @@ export const NodeFloatingToolbar = memo(
 
         <FloatingToolbar.SizePicker
           width={currentWidth}
-          height={currentHeight}
+          height={isTextFlowNode ? null : currentHeight}
+          showHeight={!isTextFlowNode}
           onApply={({ width, height }) => {
             if (!internalNode) return;
             const resolved = resolveGeometryEdit(internalNode, {
@@ -280,7 +283,10 @@ export const NodeFloatingToolbar = memo(
             setNodeGeometry([
               {
                 nodeId: id,
-                size: { width: resolved.width, height: resolved.height },
+                size: {
+                  width: resolved.width,
+                  height: resolved.height,
+                },
               },
             ]);
           }}
@@ -308,6 +314,21 @@ export const NodeFloatingToolbar = memo(
               : undefined
           }
         />
+
+        {isTextFlowNode && (
+          <FloatingToolbar.NumberInput
+            label="Font"
+            ariaLabel="Font size"
+            value={data.style?.fontSize ?? 16}
+            min={8}
+            max={160}
+            onApply={(fontSize) => {
+              updateNodeData(id, {
+                style: { ...(data.style ?? {}), fontSize },
+              });
+            }}
+          />
+        )}
 
         {/* ── Group 3: Canvas display effects ── */}
         {toolbar && (

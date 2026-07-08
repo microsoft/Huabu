@@ -36,6 +36,24 @@ export function indexById(nodes: NestableNode[]): Map<string, NestableNode> {
 }
 
 /**
+ * Single source of truth for "does this node nest under a live parent?"
+ *
+ * A node is nested only when its `parentId` resolves to a node actually
+ * present in `byId`. A dangling `parentId` (parent just deleted, or the two
+ * arrays momentarily out of sync) is treated as top-level — the same root
+ * fallback `normalizeTreeOrder`, `getAbsolutePosition`, and the z-order walk
+ * all apply. Centralising it here keeps every parent/child consumer's
+ * root-vs-nested decision from drifting apart.
+ */
+export function hasLiveParent(
+  byId: ReadonlyMap<string, NestableNode>,
+  id: string,
+): boolean {
+  const parentId = byId.get(id)?.parentId;
+  return parentId != null && byId.has(parentId);
+}
+
+/**
  * Ensures nodes are ordered so parents appear before their children.
  * This is required by React Flow to avoid "parent node not found" errors.
  * Also removes dangling parent references and breaks cycles.

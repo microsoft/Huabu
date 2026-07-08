@@ -49,6 +49,15 @@ The M1→M2→M3→M4 milestones below describe the **target architecture**. Thi
 
 Engine extraction (1.1–1.6, 1.8–1.10) landed. **Task 1.7 (move per-command change extractors to `deltaExpanders.ts`) was deferred** — the extractors in `apps/web/src/hooks/useCanvasChanges.ts` remain client-side. Phase A absorbs this by computing deltas via a coarse `diffCanvasState(prev, next)` (see below) instead of per-command expanders. Per-command, per-property expanders only become useful when fine-grained `SET_DATA(key, prev, next)` deltas are needed (M5 / CRDT) — defer until then.
 
+> **Superseded (2026-07):** once the sketch pipeline moved to server-side
+> apply, `apps/web/src/hooks/useCanvasChanges.ts` had no remaining callers and
+> was **deleted wholesale** — the extractors were never moved into the engine
+> (task 1.7 is moot). Revertible AI changes are now server-authored delta
+> records surfaced through `acpThreadChangesStore`; later references in this
+> doc and its appendices to `useCanvasChanges.ts` /
+> `snapshotAndExtractChanges` describe that since-removed client-side
+> mechanism.
+
 ### Phase A = M2 + M3.1–3.4 (one release, four PRs)
 
 Ship M2 and M3's **passive-sync subset** together. Phase A solves the headless-agent and per-tab agent-write visibility problems; multi-tab UI co-editing still falls back to today's 409 path.

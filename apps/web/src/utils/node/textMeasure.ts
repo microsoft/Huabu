@@ -287,8 +287,9 @@ export function fitFontSize(
 
 /**
  * Largest font size that fills `contentHeight` at `contentWidth` for
- * TextNode / QuestionNode / frame-resize cascade. Fine snap, reserves a
- * trailing caret line, small safety inset, no cache.
+ * TextNode / QuestionNode / frame-resize cascade. Snaps to whole px so
+ * the persisted `data.style.fontSize` matches the integer shown in the
+ * toolbar, reserves a trailing caret line, small safety inset, no cache.
  */
 export function computeFontSizeForHeight(
   text: string,
@@ -301,7 +302,7 @@ export function computeFontSizeForHeight(
     minSize: 1,
     maxSize: 200,
     floorSize: 1,
-    snapStep: 0.5,
+    snapStep: 1,
     iterations: 15,
     reserveTrailingLine: true,
     widthInset: 4,

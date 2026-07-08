@@ -1,18 +1,15 @@
-import clsx from 'clsx';
 import { Fullscreen, ArrowUpRight, ImageOff } from 'lucide-react';
 import { memo, useEffect, useMemo, useState } from 'react';
 
 import { resolveAccent } from '@sediment/shared';
 
-import { resolveArtifactUrl } from '@/api/artifact';
 import { getWebPreview } from '@/api/web';
 
 import { getNodeIcon } from '../../../config/nodeIcons.ts';
-import { isElectron } from '../../../hooks/useElectron.ts';
 import { useNodeScale } from '../../../hooks/useNodeScale.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import { FloatingToolbar } from '../../Common/FloatingToolbar.tsx';
-import { LoadingState } from '../../Common/LoadingState.tsx';
+import { Loading } from '../../Common/Loading';
 import { getAccentTokens } from '../accentTokens.ts';
 import { NodeWrapper } from '../NodeWrapper.tsx';
 import { useDeferredHydration } from '../shared/nodeHydrationScheduler.ts';
@@ -58,11 +55,6 @@ export const WebNode = memo(
 
     const src = typeof data?.src === 'string' ? data.src : '';
     const isRemoteUrl = REMOTE_URL_RE.test(src);
-    const isDataUrl = /^data:/i.test(src);
-    // "Artifact" = canvas-local HTML file uploaded by the user (e.g.
-    // `art_abc.html`). Identified by elimination: has content but isn't
-    // a remote URL or a self-contained `data:` URL.
-    const isHtmlArtifact = src.length > 0 && !isRemoteUrl && !isDataUrl;
 
     // URL surfaced as the "open externally" link in the floating toolbar.
     // Only remote http(s) URLs have a meaningful destination — uploaded
@@ -73,32 +65,6 @@ export const WebNode = memo(
       () => (isRemoteUrl ? src : ''),
       [isRemoteUrl, src],
     );
-
-    // Iframe target for the live snapshot. Same canonical form the Preview
-    // panel uses — remote URL, self-contained data URL, or same-origin
-    // artifact URL. All three can be set directly as an iframe `src`.
-    //
-    // When the preprocess pipeline has captured a one-shot `.mhtml`
-    // snapshot for this URL, prefer that over the live remote URL: the
-    // artifact route serves it as same-origin `text/html` so we (a)
-    // avoid re-hitting the network on every render and (b) sidestep
-    // X-Frame-Options entirely — meaning the iframe works in a plain
-    // browser too, not just Electron.
-    const livePreviewSrc = useMemo(() => {
-      if (preview?.mhtmlArtifact)
-        return resolveArtifactUrl(preview.mhtmlArtifact, canvasId);
-      if (isRemoteUrl) return src;
-      if (isDataUrl) return src;
-      if (isHtmlArtifact) return resolveArtifactUrl(src, canvasId);
-      return '';
-    }, [
-      preview?.mhtmlArtifact,
-      isRemoteUrl,
-      isDataUrl,
-      isHtmlArtifact,
-      src,
-      canvasId,
-    ]);
 
     useEffect(() => {
       if (ingestion?.status === 'pending') {
@@ -153,28 +119,6 @@ export const WebNode = memo(
         cancelled = true;
       };
     }, [src, canvasId, ingestion?.status, id, webHydrated]);
-
-    // Live iframe is reserved for the desktop build only — *unless* the
-    // src is a same-origin artifact (uploaded HTML, or a captured `.mhtml`
-    // snapshot). In Electron the main process strips `X-Frame-Options`
-    // and CSP `frame-ancestors`, so any URL embeds cleanly. In a plain
-    // browser those headers stay in place and ~50% of real sites would
-    // render as a blank gray box — we'd rather show the og:image /
-    // favicon fallback than gamble on the iframe. Artifact-backed
-    // sources (`/api/canvas/.../artifact/...`) are same-origin and have
-    // no embedding restrictions, so we always render them inline.
-    const inElectron = useMemo(() => isElectron(), []);
-    const isSameOriginPreview =
-      !!preview?.mhtmlArtifact || isHtmlArtifact || isDataUrl;
-    const liveIframeSrc =
-      inElectron || isSameOriginPreview ? livePreviewSrc : '';
-
-    // Track the live iframe's load state so we can fade it in (avoids
-    // a flash of about:blank while the page paints).
-    const [iframeReady, setIframeReady] = useState(false);
-    useEffect(() => {
-      setIframeReady(false);
-    }, [liveIframeSrc]);
 
     // Track image-load failures so we degrade cleanly. Without these the
     // browser would show its built-in "broken image" placeholder (the
@@ -279,42 +223,53 @@ export const WebNode = memo(
             ) : (
               <div className="flex h-full w-full flex-col">
                 {/* ── Thumbnail area ──────────────────────────────────
-                    Always shows *something* — never the empty gray box
-                    or the browser's broken-image placeholder. Layer
+                    Static preview only — no live iframe (the embedded
+                    page's scripts were a large per-node perf cost and are
+                    reserved for the expanded Preview panel now). Layer
                     order (bottom → top):
                       1. Accent-tinted background (or paper-white).
-                      2. Centered favicon / globe icon "logo card" — the
-                         baseline fallback that's always visible.
-                      3. og:image cover (when present and not failed).
-                      4. Live iframe (desktop only). */}
+                      2. Favicon "logo card", or a "No preview" hint when
+                         even the favicon is missing.
+                      3. og:image cover (when present and not failed). */}
                 <div
                   className="relative min-h-0 flex-1 overflow-hidden"
                   style={thumbBgStyle}
                 >
-                  {/* Layer 1: logo / favicon fallback. Always rendered so
-                      a broken og:image (Layer 2) and a slow / blocked
-                      iframe (Layer 3) both reveal a sensible visual
-                      underneath instead of a gray box. */}
+                  {/* Layer 1: favicon fallback, or a "No preview" hint.
+                      Always rendered so a missing / broken og:image
+                      (Layer 2) reveals a sensible visual underneath
+                      instead of a gray box. */}
                   <div
                     className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6"
                     style={accentFg}
                   >
                     {showThumbFavicon ? (
-                      <img
-                        src={favicon}
-                        alt=""
-                        className="h-16 w-16 rounded-md object-contain"
-                        decoding="async"
-                        onError={() => setThumbFaviconFailed(true)}
-                      />
+                      <>
+                        <img
+                          src={favicon}
+                          alt=""
+                          className="h-16 w-16 rounded-md object-contain"
+                          decoding="async"
+                          onError={() => setThumbFaviconFailed(true)}
+                        />
+                        {siteName ? (
+                          <span className="text-fg-muted max-w-full truncate text-sm">
+                            {siteName}
+                          </span>
+                        ) : null}
+                      </>
                     ) : (
-                      <NodeTypeIcon size={56} strokeWidth={1.25} />
+                      <>
+                        <NodeTypeIcon
+                          size={40}
+                          strokeWidth={1.25}
+                          className="text-fg-subtle"
+                        />
+                        <span className="text-fg-subtle text-sm">
+                          {siteName || 'No preview'}
+                        </span>
+                      </>
                     )}
-                    {siteName ? (
-                      <span className="text-fg-muted max-w-full truncate text-sm">
-                        {siteName}
-                      </span>
-                    ) : null}
                   </div>
 
                   {/* Layer 2: og:image cover. Sits above the favicon
@@ -326,36 +281,14 @@ export const WebNode = memo(
                       src={fallbackImage}
                       alt={title}
                       className="absolute inset-0 block h-full w-full object-cover"
-                      style={{ objectPosition: 'top' }}
                       decoding="async"
                       draggable={false}
                       onError={() => setCoverImageFailed(true)}
                     />
                   ) : null}
 
-                  {/* Layer 3: live iframe. Mounted only inside Electron
-                      (the browser variant never gets past X-Frame-Options
-                      reliably enough to be worth the gray-box risk).
-                      `allow-scripts` so SPA-only sites render at all;
-                      no `allow-same-origin` so the embed cannot reach
-                      our cookies. Pointer-events disabled — node view
-                      is a thumbnail; interaction lives in Preview. */}
-                  {liveIframeSrc ? (
-                    <iframe
-                      src={liveIframeSrc}
-                      sandbox="allow-scripts"
-                      referrerPolicy="no-referrer"
-                      title="Live snapshot"
-                      className={clsx(
-                        'bg-surface pointer-events-none absolute inset-0 block h-full w-full border-0 transition-opacity duration-200',
-                        iframeReady ? 'opacity-100' : 'opacity-0',
-                      )}
-                      onLoad={() => setIframeReady(true)}
-                    />
-                  ) : null}
-
                   {previewLoading && !preview ? (
-                    <LoadingState overlay variant="skeleton" />
+                    <Loading layout="overlay" variant="skeleton" />
                   ) : null}
                 </div>
 
@@ -398,7 +331,11 @@ export const WebNode = memo(
 
           {/* Loading overlay while preprocessing is in-flight. */}
           {ingestion?.status === 'pending' && !preview ? (
-            <LoadingState overlay variant="skeleton" message="Processing..." />
+            <Loading
+              layout="overlay"
+              variant="skeleton"
+              message="Processing..."
+            />
           ) : null}
 
           {/* Subtle "no preview" hint when extraction failed but the node still mounts. */}

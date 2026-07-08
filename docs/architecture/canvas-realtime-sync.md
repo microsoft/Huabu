@@ -77,12 +77,15 @@ batch — there is no per-caller broadcast flag. This unifies all writers:
   broadcast.
 - ACP / headless writers hit `POST /:canvasId/execute`, which calls the same
   `executeOnServer`.
+- Sketch recognition is now a normal server-applied writer too: it runs the
+  agent through `executeOnServer` under a synthetic per-recognition `threadId`,
+  so the mutation is broadcast + produces change records like any other agent
+  batch. The on-canvas sketch overlay drives Keep / Revert / Preview off those
+  records (same as the chat `ChangeReviewCard`) — there is no longer a
+  client-side apply carve-out.
 - There is **no per-client echo filter** yet: correctness relies on the single
   apply path + id-keyed `applyDeltas`. A `clientId` filter is only needed once
   user hand-edits also broadcast (deferred — see the plan).
-
-**Exception:** sketch recognition keeps its own client-side Accept/Revert
-overlay (`sketch-recognized` carve-out) and is deliberately not broadcast-only.
 
 ## Conflict model — version + dirty-node protection
 

@@ -65,6 +65,22 @@ function bodyOf(canvasId: string, id: string): string | undefined {
   return getCanvasStore(canvasId).readNode(id)?.content ?? undefined;
 }
 
+function imageStyleOf(
+  canvasId: string,
+  nodeId: string,
+): { width?: unknown; height?: unknown } {
+  const canvas = getCanvasStore(canvasId).read();
+  const nodes = (canvas?.state.nodes ?? []) as Array<{
+    id?: unknown;
+    style?: unknown;
+  }>;
+  const node = nodes.find((n) => n.id === nodeId);
+  return ((node as { style?: unknown } | undefined)?.style ?? {}) as Record<
+    string,
+    unknown
+  >;
+}
+
 function mergeContent(
   nodeId: string,
   content: string,
@@ -210,5 +226,159 @@ describe('executeOnServer — MERGE_NODE_DATA CAS', () => {
     expect(out.conflicts ?? []).toHaveLength(0);
     expect(out.toVersion).toBe(out.fromVersion + 1);
     expect(getCanvasStore('c1').readNode('m1')?.src).toBe('artifacts/new.png');
+  });
+
+  it('auto-updates image height when MERGE_NODE_DATA rewrites src', async () => {
+    const store = getCanvasStore('c1');
+    store.write({
+      canvasId: 'c1',
+      title: null,
+      version: 1,
+      state: {
+        nodes: [
+          {
+            id: 'm1',
+            type: 'image',
+            position: { x: 0, y: 0 },
+            data: { label: 'Pic', src: 'old.svg' },
+            style: { width: 300, height: 300 },
+          },
+        ],
+        edges: [],
+      },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    store.writeNode('m1', {
+      nodeId: 'm1',
+      type: 'image',
+      label: 'Pic',
+      src: 'old.svg',
+      content: '',
+    });
+    await store.writeArtifactBuffer(
+      { id: 'new', ext: '.svg', mimeType: 'image/svg+xml' },
+      Buffer.from(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"></svg>',
+      ),
+    );
+
+    const out = await executeOnServer({
+      canvasId: 'c1',
+      commands: [
+        {
+          type: 'MERGE_NODE_DATA',
+          patches: [{ nodeId: 'm1', patch: { src: 'new.svg' } }],
+        } as unknown as CanvasCommand,
+      ],
+      originator: AGENT,
+    });
+
+    expect(out.conflicts ?? []).toHaveLength(0);
+    expect(getCanvasStore('c1').readNode('m1')?.src).toBe('new.svg');
+    const style = imageStyleOf('c1', 'm1');
+    expect(style.width).toBe(300);
+    expect(style.height).toBe(150);
+    expect(out.results[0]?.nodes).toEqual([
+      { nodeId: 'm1', width: 300, height: 150, src: 'new.svg' },
+    ]);
+  });
+
+  it('recomputes image height when SET_NODE_GEOMETRY pins a mismatched size', async () => {
+    const store = getCanvasStore('c1');
+    store.write({
+      canvasId: 'c1',
+      title: null,
+      version: 1,
+      state: {
+        nodes: [
+          {
+            id: 'g1',
+            type: 'image',
+            position: { x: 0, y: 0 },
+            data: { label: 'Pic', src: 'pic.svg' },
+            style: { width: 400, height: 300 },
+          },
+        ],
+        edges: [],
+      },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    store.writeNode('g1', {
+      nodeId: 'g1',
+      type: 'image',
+      label: 'Pic',
+      src: 'pic.svg',
+      content: '',
+    });
+    await store.writeArtifactBuffer(
+      { id: 'pic', ext: '.svg', mimeType: 'image/svg+xml' },
+      Buffer.from(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"></svg>',
+      ),
+    );
+
+    const out = await executeOnServer({
+      canvasId: 'c1',
+      commands: [
+        {
+          type: 'SET_NODE_GEOMETRY',
+          items: [{ nodeId: 'g1', size: { width: 500, height: 500 } }],
+        } as unknown as CanvasCommand,
+      ],
+      originator: AGENT,
+    });
+
+    expect(out.conflicts ?? []).toHaveLength(0);
+    const style = imageStyleOf('c1', 'g1');
+    expect(style.width).toBe(500);
+    expect(style.height).toBe(250);
+  });
+});
+
+describe('executeOnServer — CREATE_NODES id echo', () => {
+  it('echoes the server-assigned id and label of every created node', async () => {
+    const store = getCanvasStore('c1');
+    store.write({
+      canvasId: 'c1',
+      title: null,
+      version: 1,
+      state: { nodes: [], edges: [] },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+
+    const out = await executeOnServer({
+      canvasId: 'c1',
+      commands: [
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              nodeType: 'note',
+              position: { x: 0, y: 0 },
+              data: { label: 'Finding A', content: 'a' },
+            },
+            {
+              nodeType: 'note',
+              position: { x: 200, y: 0 },
+              data: { label: 'Finding B', content: 'b' },
+            },
+          ],
+        } as unknown as CanvasCommand,
+      ],
+      originator: AGENT,
+    });
+
+    expect(out.results[0]?.applied).toBe(true);
+    const echoed = out.results[0]?.nodes ?? [];
+    expect(echoed).toHaveLength(2);
+    // Ids are server-assigned (agent omitted them) and unique.
+    expect(echoed[0]?.nodeId).toMatch(/^node-/);
+    expect(echoed[1]?.nodeId).toMatch(/^node-/);
+    expect(echoed[0]?.nodeId).not.toBe(echoed[1]?.nodeId);
+    // Labels are echoed so the agent can correlate ids to intent.
+    expect(echoed.map((n) => n.label)).toEqual(['Finding A', 'Finding B']);
   });
 });

@@ -1,8 +1,8 @@
 import { clsx } from 'clsx';
-import { AlertTriangle, MessageSquare } from 'lucide-react';
+import { AlertTriangle, MapPin, MessageSquare } from 'lucide-react';
 import { memo, useCallback, useMemo, useRef } from 'react';
 
-import { createId } from '@sediment/shared';
+import { createId, getQuestionNodeStatus } from '@sediment/shared';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
 import { StatusBadge } from '@/components/Common/StatusBadge.tsx';
@@ -18,8 +18,10 @@ import {
   QUESTION_NODE_PADDING as NODE_PADDING,
   QUESTION_NODE_PLACEHOLDER,
 } from '@/utils/node/nodeFontConfig';
+import { getQuestionDisplayText } from '@/utils/node/questionDisplayText';
 
 import { NodeWrapper } from '../NodeWrapper';
+import { enterQuestionCompose } from './questionCompose.ts';
 import { TextNodeBody } from '../shared/TextNodeBody';
 
 import type { CanvasQuestionNodeData } from '../types';
@@ -29,21 +31,6 @@ export type QuestionNodeType = Node<CanvasQuestionNodeData, 'question'>;
 
 /** Sticky-note warm background colour (design token). */
 const STICKY_BG = 'var(--question-bg)';
-
-/**
- * Max characters of the first message shown on the node while the
- * generated `label` is still pending. Bounds the auto-sized footprint
- * so a very long first message doesn't blow the node up (and so the
- * later swap to the shorter label barely changes size).
- */
-const PREVIEW_MAX_CHARS = 80;
-
-/** Trim the first-message fallback to a short, single-block preview. */
-function truncatePreview(text: string): string {
-  const trimmed = text.trim();
-  if (trimmed.length <= PREVIEW_MAX_CHARS) return trimmed;
-  return `${trimmed.slice(0, PREVIEW_MAX_CHARS).trimEnd()}…`;
-}
 
 /**
  * Question node — a canvas anchor for a chat thread.
@@ -63,9 +50,6 @@ export const QuestionNode = memo(
     const patchNodeSilent = useCanvasStore((state) => state.patchNodeSilent);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-    const inputContent = typeof data.content === 'string' ? data.content : '';
-    const label = typeof data.label === 'string' ? data.label.trim() : '';
-
     // On-canvas anchor text. Prefer the generated `label` (a concise
     // title) once preprocessing produced one; fall back to a truncated
     // preview of the first message while the label is still pending
@@ -73,7 +57,7 @@ export const QuestionNode = memo(
     // auto-sized footprint bounded, so the eventual swap to the (usually
     // shorter) label is at most a small, `transition-all`-animated size
     // change rather than a large jump from a very long first message.
-    const displayText = label || truncatePreview(inputContent);
+    const displayText = getQuestionDisplayText(data);
 
     // ------------------------------------------------------------------
     // Shared surface (auto-size + read-only body prop bundles).
@@ -92,7 +76,7 @@ export const QuestionNode = memo(
       placeholder: QUESTION_NODE_PLACEHOLDER,
     });
 
-    const status = data.status ?? 'idle';
+    const status = getQuestionNodeStatus(data);
     const viewed = data.viewed ?? false;
 
     // Count of this thread's agent changes that were SKIPPED because the
@@ -133,9 +117,11 @@ export const QuestionNode = memo(
       !!data.threadId && (hasRun || status === 'running') && !isForkPending;
 
     const openQuestionThread = useChatStore((s) => s.openQuestionThread);
-    const openQuestionCompose = useChatStore((s) => s.openQuestionCompose);
+    const showChatAnchor = useChatStore(
+      (s) => s.viewingQuestionThread?.nodeId === id,
+    );
+    const isRightPanelCollapsed = usePanelStore((s) => s.isRightCollapsed);
     const requestOpenRightPanel = usePanelStore((s) => s.requestOpenRightPanel);
-    const requestFocusChatInput = usePanelStore((s) => s.requestFocusChatInput);
     const canvasId = useCanvasStore((s) => s.canvasId);
 
     // ------------------------------------------------------------------
@@ -177,18 +163,8 @@ export const QuestionNode = memo(
         threadId = createId('thread');
         patchNodeSilent(id, { threadId });
       }
-      openQuestionCompose(id, threadId, canvasId || undefined);
-      requestOpenRightPanel();
-      requestFocusChatInput();
-    }, [
-      id,
-      data.threadId,
-      canvasId,
-      patchNodeSilent,
-      openQuestionCompose,
-      requestOpenRightPanel,
-      requestFocusChatInput,
-    ]);
+      enterQuestionCompose(id, threadId, canvasId);
+    }, [id, data.threadId, canvasId, patchNodeSilent]);
 
     // ------------------------------------------------------------------
     // Double-click:
@@ -293,6 +269,7 @@ export const QuestionNode = memo(
             />
           )}
         </TextNodeBody>
+        {showChatAnchor && !isRightPanelCollapsed && <ChatAnchorOverlay />}
       </NodeWrapper>
     );
   },
@@ -315,5 +292,46 @@ function ConflictBadge({ count }: { count: number }) {
         {count}
       </span>
     </Tooltip>
+  );
+}
+
+function ChatAnchorOverlay() {
+  // A light "anchored" mask laid over the question node's content layer.
+  // Deliberately a content-layer overlay (not a floating corner badge and
+  // not a wraparound glow): it sits above the card body, so it never fights
+  // the sticky depth board's stacking and never competes with the run-status
+  // badge that floats above the node. A warm, low-alpha wash (not a grey
+  // scrim, which would read as "disabled") keeps the text readable while an
+  // anchor watermark makes the "this node anchors the open chat" state clear.
+  return (
+    <div
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-0 overflow-hidden rounded-lg"
+      style={{
+        // Size container so the watermark can scale with the node via
+        // `cqh` (height) / `cqi` (width) units below.
+        containerType: 'size',
+        background:
+          'color-mix(in srgb, var(--question-border) 9%, transparent)',
+        boxShadow:
+          'inset 0 0 0 1.5px color-mix(in srgb, var(--question-border) 55%, transparent), inset 0 0 12px color-mix(in srgb, var(--question-border) 20%, transparent)',
+      }}
+    >
+      <MapPin
+        strokeWidth={1.5}
+        className="absolute"
+        style={{
+          // Adaptive size: ~60% of the node's shorter side (min of height
+          // `cqh` / width `cqi`), clamped so it never gets tiny or
+          // overwhelms the card. Tune the two percentages to taste.
+          height: 'clamp(20px, min(60cqh, 34cqi), 88px)',
+          width: 'auto',
+          right: -2,
+          bottom: -2,
+          color: 'var(--question-border)',
+          opacity: 0.32,
+        }}
+      />
+    </div>
   );
 }

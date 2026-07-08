@@ -8,7 +8,7 @@ import { getWebPage, getWebReader } from '@/api/web';
 import { isElectron } from '../../../hooks/useElectron.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import { Button } from '../../Common/Button';
-import { LoadingState } from '../../Common/LoadingState';
+import { Loading } from '../../Common/Loading';
 import { usePreviewHeaderSlot } from '../PreviewHeaderSlot';
 
 import type { PreviewComponentProps } from '../note/NotePreview';
@@ -54,6 +54,7 @@ export const WebPreview = ({ id, data }: PreviewComponentProps) => {
   const [mode, setMode] = useState<ViewMode>('live');
   const [pageSrc, setPageSrc] = useState<string>('');
   const [pageKind, setPageKind] = useState<'url' | 'html' | null>(null);
+  const [pageSnapshot, setPageSnapshot] = useState(false);
   const [pageEmbeddable, setPageEmbeddable] = useState<boolean | undefined>(
     undefined,
   );
@@ -109,6 +110,7 @@ export const WebPreview = ({ id, data }: PreviewComponentProps) => {
     if (!src || !id || !canvasId) {
       setPageSrc('');
       setPageKind(null);
+      setPageSnapshot(false);
       setPageEmbeddable(undefined);
       setPageError(null);
       setLoadingPage(false);
@@ -129,11 +131,13 @@ export const WebPreview = ({ id, data }: PreviewComponentProps) => {
             : resolveArtifactUrl(result.src, canvasId);
         setPageSrc(resolved);
         setPageKind(result.kind);
+        setPageSnapshot(result.snapshot === true);
         setPageEmbeddable(result.embeddable);
       } catch (error) {
         if (cancelled) return;
         setPageSrc('');
         setPageKind(null);
+        setPageSnapshot(false);
         setPageEmbeddable(undefined);
         setPageError(error instanceof Error ? error.message : String(error));
       } finally {
@@ -275,6 +279,7 @@ export const WebPreview = ({ id, data }: PreviewComponentProps) => {
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <base target="_blank" />
     <style>
+      html { color-scheme: light; }
       html, body { margin: 0; padding: 0; overflow: hidden; }
       body { padding: 16px; font-family: system-ui, -apple-system, sans-serif; line-height: 1.5; }
       img { max-width: 100%; height: auto; }
@@ -322,6 +327,28 @@ export const WebPreview = ({ id, data }: PreviewComponentProps) => {
 
   const showLive = mode === 'live';
 
+  // Sandbox flags for the live-page iframe, keyed on what `src` actually is:
+  //  - `url` (remote site): grant `allow-same-origin` so the *remote* page
+  //    can read its own cookies / storage (many SPAs throw at boot without
+  //    it); it still can't reach the host, being a different origin.
+  //  - `html` snapshot (.mhtml archive): scripts OFF. The archive already
+  //    holds the rendered DOM; re-running the origin site's client bundle
+  //    boots its router against the artifact URL, fails to match, and wipes
+  //    the page to blank on first scroll. See `WebPageResponse.snapshot`.
+  //    KNOWN LIMITATION: this makes snapshots display-only — static content,
+  //    native links and text selection work, but all JS-driven interaction
+  //    (tabs, dropdowns, search, forms, lazy-loading) is inert. Full
+  //    interactivity is only available via the live remote page (`url`).
+  //  - `html` interactive artifact / `data:` URL: scripts ON but no
+  //    `allow-same-origin`, so an attacker-controlled upload served from our
+  //    same-origin artifact route can't read the host's cookies.
+  const livePageSandbox =
+    pageKind === 'url'
+      ? 'allow-scripts allow-forms allow-popups allow-same-origin'
+      : pageSnapshot
+        ? 'allow-popups'
+        : 'allow-scripts allow-forms allow-popups';
+
   const headerActions =
     pageSrc || externalHref ? (
       <>
@@ -364,7 +391,7 @@ export const WebPreview = ({ id, data }: PreviewComponentProps) => {
       <div className="relative h-full flex-1 overflow-hidden">
         {showLive ? (
           loadingPage ? (
-            <LoadingState message="Loading..." variant="skeleton" />
+            <Loading message="Loading..." variant="skeleton" />
           ) : pageError ? (
             <div className="text-fg-subtle flex h-full w-full flex-col items-center justify-center gap-2 text-sm">
               <div>Failed to load page</div>
@@ -382,30 +409,14 @@ export const WebPreview = ({ id, data }: PreviewComponentProps) => {
               <iframe
                 key={`${pageSrc}-${iframeBumpKey}`}
                 src={pageSrc}
-                // Full interactivity in the Preview panel.
-                //  - `allow-scripts`         JS-heavy SPAs need to boot.
-                //  - `allow-forms`           login forms, search, etc.
-                //  - `allow-popups`          links with target=_blank.
-                //  - `allow-same-origin`     enabled for remote URLs so
-                //                            the page can read its own
-                //                            cookies / storage; OMITTED
-                //                            for HTML artifacts since the
-                //                            artifact URL is same-origin
-                //                            with the host app — granting
-                //                            `same-origin` there would
-                //                            give an attacker-controlled
-                //                            HTML upload access to our
-                //                            cookies. The sandbox is
-                //                            sufficient for displaying
-                //                            uploaded content.
-                sandbox={
-                  pageKind === 'url'
-                    ? 'allow-scripts allow-forms allow-popups allow-same-origin'
-                    : 'allow-scripts allow-forms allow-popups'
-                }
+                // Sandbox is computed above as `livePageSandbox` — the flag
+                // set depends on whether `src` is a remote URL, a static
+                // `.mhtml` snapshot, or an interactive artifact.
+                sandbox={livePageSandbox}
                 referrerPolicy="no-referrer"
                 title="Live page"
                 className="bg-surface block h-full w-full border-0"
+                style={pageSnapshot ? { colorScheme: 'light' } : undefined}
                 onLoad={() => setIframeReady(true)}
               />
               {!iframeReady ? (
@@ -421,7 +432,7 @@ export const WebPreview = ({ id, data }: PreviewComponentProps) => {
             </div>
           )
         ) : loadingReader ? (
-          <LoadingState message="Loading..." variant="skeleton" />
+          <Loading message="Loading..." variant="skeleton" />
         ) : readerError ? (
           <div className="text-fg-subtle flex h-full w-full flex-col items-center justify-center gap-2 text-sm">
             <div>Failed to load reader view</div>
@@ -431,7 +442,10 @@ export const WebPreview = ({ id, data }: PreviewComponentProps) => {
           <div className="bg-surface h-full overflow-x-hidden overflow-y-auto p-1">
             <iframe
               className="nodrag w-full border-0"
-              style={{ height: readerHeight ? `${readerHeight}px` : '100%' }}
+              style={{
+                colorScheme: 'light',
+                height: readerHeight ? `${readerHeight}px` : '100%',
+              }}
               title="Reader View"
               sandbox="allow-popups allow-scripts"
               srcDoc={readerSrcDoc}

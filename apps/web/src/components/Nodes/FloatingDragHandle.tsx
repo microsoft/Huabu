@@ -9,8 +9,8 @@ import { setDragPayload } from '@/utils/io/dragDrop';
 import { NODE_ICON } from '../../config/nodeIcons';
 import { Button } from '../Common/Button';
 import { DragToCanvasHandleButton } from '../Common/DragToCanvasHandleButton';
+import { Loading } from '../Common/Loading';
 import { Popover } from '../Common/Popover';
-import { Spinner } from '../Common/Spinner';
 
 import type { ChatAttachment } from '@sediment/shared';
 import type { FC } from 'react';
@@ -189,7 +189,7 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
       {/* ── Image button (or status) ── */}
       {capturing && (
         <div className="text-fg-subtle flex items-center gap-1 text-xs">
-          <Spinner size="xs" />
+          <Loading layout="inline" size="xs" />
         </div>
       )}
       {isImageReady &&

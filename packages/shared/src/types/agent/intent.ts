@@ -1,6 +1,5 @@
 import type { Rect } from '../../utils/spatial/index.js';
 import type { WireNodeRef } from '../api/agent.js';
-import type { CanvasCommand } from '../canvas/command.js';
 
 // ==================== Intent Recognition ====================
 
@@ -155,14 +154,22 @@ export interface SketchClusterContext {
 
 /**
  * Response body for the one-step sketch → canvas commands endpoint.
- * The LLM reasons about the user's intent and emits the executable command
- * batch directly — no separate intent label, no operate-agent roundtrip.
+ * The sketch agent applies the recognised commands **server-side** (like
+ * every other agent path) and attributes the resulting canvas changes to a
+ * synthetic `threadId`. The client drives the sketch overlay's
+ * Keep / Revert / Preview off that thread's change-review records — it no
+ * longer receives or applies the raw commands itself.
  */
 export interface SketchCommandResponse {
   /** One-sentence reason describing what the user meant. */
   reasoning: string;
-  /** Atomic batch of canvas commands to execute. */
-  commands: CanvasCommand[];
+  /**
+   * Synthetic thread the recognition's canvas changes are attributed to,
+   * so the client can Keep / Revert / Preview them via the standard
+   * change-review store. Present whenever recognition ran (even if it made
+   * no mutation — the thread simply has no change records then).
+   */
+  threadId?: string;
 }
 
 // ==================== Sketch Pipeline Context ====================
@@ -178,12 +185,12 @@ export interface SketchContext {
   nearbyEdgeIds: string[];
 }
 
-/** A resolved sketch intent — directly executable canvas commands. */
+/** A resolved sketch intent — recognition applied server-side. */
 export interface ResolvedSketchIntent {
-  /** Atomic batch of canvas commands to execute. */
-  commands: CanvasCommand[];
   /** One-sentence explanation of what the user meant. */
   reasoning: string;
+  /** Synthetic thread the recognition's canvas changes are attributed to. */
+  threadId?: string;
   /** The sketch cluster that produced this intent. */
   cluster: SketchCluster;
 }

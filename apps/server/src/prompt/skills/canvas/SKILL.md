@@ -79,9 +79,9 @@ Where each node sits, how big it is, which frame it belongs to, what colour it's
 | "List all PDFs"                                | `find("**/*.pdf")` or `inspect_nodes({ byType: "pdf" })` |
 | "Load a deeper canvas reference"               | `read("skills/canvas/references/<name>.md")`             |
 
-> Per-tool argument shapes, defaults, and return envelopes live on each tool's schema description — trust those rather than restating them here. The notes below cover only behaviour the schema can't convey.
-
 ## Gotchas
+
+Behaviour the schema can't convey:
 
 - ** Selection & Position Geometry (CRITICAL):** The selected-node / anchor context **DOES NOT** directly contain position, size, parent frame, or geometry coordinates. If you need to place a new node near, relative to, or offset from a selected or anchor node, **you MUST first call `inspect_nodes({ ids: ["<anchorId>"] })`** (or `get_canvas_outline`) to query its absolute `(x, y)` position and size.
 - **Nodes in context are metadata only.** Pass a node's supplied `file` path straight to `read` for the body. Only when a node is mentioned outside your context (e.g. it appears in a canvas snapshot but wasn't shown as a `<node>`) do you build the path yourself via the safeLabel rule above. For spatial / structural info (including position), call `inspect_nodes({ ids: ["<id>"] })`.
@@ -96,7 +96,8 @@ Where each node sits, how big it is, which frame it belongs to, what colour it's
 The filesystem tools (`read`, `find`, `ls`, `grep`) are read-only — there is no `write` / `edit_file` / `rm`. **Every mutation flows through one tool: `canvas_commands`.**
 
 - If `canvas_commands` is **not** in your available tool list → you are in read-only mode. Do not attempt mutations and do not claim in your reply that you performed any.
-- If `canvas_commands` **is** available → before issuing your first batch, `read("skills/canvas/references/commands.md")` for the catalogue, ID conventions, batch-ordering rules, and style hints. The tool's own schema description tells you which fields each command takes; the reference tells you which command to pick and how to compose them.
+- If `canvas_commands` **is** available → the tool's own schema and description carry the full command set, the id / dependency-ordering rule, and per-field behaviour. For composed multi-command recipes see `command-cookbook.md`; for diagram geometry see `layout-recipes.md`.
+- **Commands are not guaranteed to succeed.** Each command in a call reports its own outcome in `results[]`; on failure it carries a `reason` (e.g. `invalid-target` when a CONNECT / SET_NODE_PARENT endpoint doesn't exist). Read it and adjust — don't assume a write landed.
 
 ---
 
@@ -104,6 +105,5 @@ The filesystem tools (`read`, `find`, `ls`, `grep`) are read-only — there is n
 
 Load on demand when the situation calls for it:
 
-- `read("skills/canvas/references/commands.md")` — **read this before any mutation.** The full `canvas_commands` catalogue, ID conventions, batch ordering, style hints.
 - `read("skills/canvas/references/command-cookbook.md")` — composed batch patterns: brainstorm, merge / synthesize, group into a frame, restyle a cluster, tidy a row, …
 - `read("skills/canvas/references/layout-recipes.md")` — coordinate system, hierarchical / left-to-right / grid layouts, frames, and the row-track flowchart / roadmap recipe.

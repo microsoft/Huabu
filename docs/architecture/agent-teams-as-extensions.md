@@ -33,7 +33,7 @@ Huabu already has this foundation via the **Huabu Reachback Tool (HRT)**:
 - **Write**: `write-node --type note <file>` (create) / `write-node --id <id> <file>` (update), with `--link-to` / `--link-from` for edge creation
 - **Vision**: `snapshot <id>` — rasterize sketch/image nodes to PNG for vision-capable agents
 - **Semantic**: `ask-agent "<prompt>"` — delegate complex spatial/semantic queries to built-in agents with full canvas context
-- **Internal tools**: `get_canvas_outline`, `inspect_nodes`, `canvas_commands` (14 commands) for the built-in agent
+- **Internal tools**: `get_canvas_outline`, `inspect_nodes`, `canvas_commands` (13 commands) for the built-in agent
 
 The "plugin API" is simply: _the reachback tool_ + _whatever external tools the agent has access to_. No SDK, no hooks — just CLI commands.
 

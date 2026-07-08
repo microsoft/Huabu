@@ -26,7 +26,7 @@ import {
 import { getNodeContent, revealCanvasNodesFolder } from '@/api/canvas.ts';
 import { Button } from '@/components/Common/Button.tsx';
 import { cn } from '@/components/Common/cn.ts';
-import { Spinner } from '@/components/Common/Spinner.tsx';
+import { Loading } from '@/components/Common/Loading';
 import { toast } from '@/components/Common/Toast';
 import { Tooltip } from '@/components/Common/Tooltip.tsx';
 import { NodeFloatingToolbar } from '@/components/Panels/Canvas/FloatingToolbars/NodeFloatingToolbar.tsx';
@@ -606,7 +606,7 @@ export const NodeWrapper = memo(
         >
           {showIngestionOverlay && (
             <div className="pointer-events-none absolute right-1.5 bottom-1.5 z-10">
-              <Spinner size="xs" className="text-fg-subtle" />
+              <Loading layout="inline" size="xs" className="text-fg-subtle" />
             </div>
           )}
 

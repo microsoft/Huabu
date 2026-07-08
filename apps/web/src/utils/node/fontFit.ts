@@ -26,6 +26,7 @@ import {
   TEXT_NODE_PADDING,
   TEXT_NODE_PLACEHOLDER,
 } from './nodeFontConfig';
+import { getQuestionDisplayText } from './questionDisplayText';
 import { computeFontSizeForHeight, type FontOpts } from './textMeasure';
 
 import type { Node } from '@xyflow/react';
@@ -58,6 +59,7 @@ export interface NodeFontFit {
 export function getNodeFontFit(node: Node): NodeFontFit | null {
   const data = (node.data ?? {}) as {
     content?: unknown;
+    label?: unknown;
     input?: { kind?: string; content?: unknown };
     style?: {
       fontFamily?: string;
@@ -79,7 +81,7 @@ export function getNodeFontFit(node: Node): NodeFontFit | null {
 
   if (node.type === 'question') {
     return {
-      text: typeof data.content === 'string' ? data.content : '',
+      text: getQuestionDisplayText(data),
       placeholder: QUESTION_NODE_PLACEHOLDER,
       fontOpts: getQuestionFontOpts(),
       inset: QUESTION_NODE_PADDING,

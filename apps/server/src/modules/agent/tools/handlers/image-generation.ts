@@ -280,7 +280,12 @@ export async function handleGenerateImage(
   // The requested size string ("auto" included) drives what we
   // report back; gpt-image-* generally honours the request size, and
   // "auto" reports 0×0 because the actual chosen size isn't echoed
-  // back in the response body — the agent typically doesn't need it.
+  // back in the response body.
+  //
+  // IMPORTANT: the returned `width` and `height` should be passed to
+  // the `size` parameter when creating the image node via CREATE_NODES,
+  // to preserve the correct aspect ratio on the canvas. The default
+  // image node size (400×300) distorts square and portrait images.
   let w = 0;
   let h = 0;
   if (size !== 'auto') {

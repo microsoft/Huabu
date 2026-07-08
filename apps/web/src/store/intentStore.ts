@@ -12,7 +12,7 @@ import { createId } from '@sediment/shared';
 
 import { captureCanvasScreenshot } from '@/handler/canvasCommand/utils/screenshot';
 import { clusterSketches, extractSketchContext } from '@/handler/sketch';
-import { snapshotAndExtractChanges } from '@/hooks/useCanvasChanges';
+import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 
 import useCanvasStore from './canvasStore';
 import {
@@ -21,13 +21,11 @@ import {
   logIntentEpisode,
 } from '../api/intent';
 
-import type { CanvasChange } from '@/hooks/useCanvasChanges';
 import type {
   SketchNodeRef,
   SketchContext,
   SketchCluster,
   ResolvedSketchIntent,
-  CanvasCommand,
   CanvasNodeId,
   IntentCandidate,
   IntentEpisode,
@@ -57,17 +55,13 @@ export interface SketchProcessingCluster {
   strokeIds: string[];
   status: SketchProcessingStatus;
   /**
-   * Canvas changes produced by this cluster's intent commands. Captured at
-   * recognition time (pre-execution) so each entry carries its revert data.
-   * Only populated once `status === 'done'`.
+   * Synthetic thread the recognition's canvas changes are attributed to.
+   * The overlay drives Keep / Revert / Preview off this thread's records in
+   * `acpThreadChangesStore`. Only populated once `status === 'done'`.
    */
-  changes?: CanvasChange[];
-  /** Resolution path. Always `'llm'` since the rule engine has been removed. */
-  source?: 'llm';
+  threadId?: string;
   /** One-sentence reason describing what the user meant. */
   reasoning?: string;
-  /** Raw canvas commands produced for this cluster. */
-  commands?: CanvasCommand[];
   /** Short text summary of the nearby / enclosed nodes used as context. */
   contextSummary?: string;
   /** Canvas id this cluster was recognised against. */
@@ -350,6 +344,15 @@ export const useIntentStore = create<IntentState>()((set, get) => ({
     const cluster = get().processingClusters.find((c) => c.id === clusterId);
     if (!cluster) return;
 
+    // Keep the recognised changes: discard the thread's review records
+    // (they were already applied + persisted server-side) so they stop
+    // showing as revertible.
+    if (cluster.threadId && cluster.canvasId) {
+      void useAcpThreadChangesStore
+        .getState()
+        .acceptAll(cluster.canvasId, cluster.threadId);
+    }
+
     // Drop the strokes themselves so the grey gesture also disappears.
     if (cluster.strokeIds.length > 0) {
       useCanvasStore.getState().executeCommands(
@@ -374,27 +377,24 @@ export const useIntentStore = create<IntentState>()((set, get) => ({
     const cluster = get().processingClusters.find((c) => c.id === clusterId);
     if (!cluster) return;
 
-    // Walk changes in reverse order, collecting any revert commands that
-    // were captured before the original intent commands ran.
-    const revertCmds: CanvasCommand[] = [];
-    const changes = cluster.changes ?? [];
-    for (let i = changes.length - 1; i >= 0; i--) {
-      const c = changes[i];
-      if (!c?.revertible) continue;
-      if (c.revertCommands) revertCmds.push(...c.revertCommands);
-      else if (c.revertCommand) revertCmds.push(c.revertCommand);
+    // Revert the recognised changes server-side (applies the inverse deltas
+    // + broadcasts them back), then delete the sketch strokes.
+    if (cluster.threadId && cluster.canvasId) {
+      void useAcpThreadChangesStore
+        .getState()
+        .revertAll(cluster.canvasId, cluster.threadId);
     }
 
-    // Always also delete the sketch strokes themselves on revert.
     if (cluster.strokeIds.length > 0) {
-      revertCmds.push({
-        type: 'DELETE_NODES',
-        nodeIds: cluster.strokeIds as CanvasNodeId[],
-      });
-    }
-
-    if (revertCmds.length > 0) {
-      useCanvasStore.getState().executeCommands(revertCmds, 'ui');
+      useCanvasStore.getState().executeCommands(
+        [
+          {
+            type: 'DELETE_NODES',
+            nodeIds: cluster.strokeIds as CanvasNodeId[],
+          },
+        ],
+        'ui',
+      );
     }
 
     set({
@@ -562,14 +562,13 @@ async function resolveByLLM(
     canvasId,
   );
 
-  // An empty `commands` array is a VALID outcome: the LLM understood the
-  // gesture but decided no canvas mutation was warranted (e.g. an ambiguous
-  // deletion stroke that doesn't clearly target any node). Surface the
-  // reasoning so the detail panel can show what the LLM thought, instead of
-  // silently flipping the cluster into an error state.
+  // Recognition applied its commands server-side and attributed them to a
+  // synthetic thread. A missing `threadId` is a VALID outcome: the LLM
+  // understood the gesture but made no canvas mutation (e.g. an ambiguous
+  // stroke). Surface the reasoning either way.
   return {
-    commands: response.commands ?? [],
     reasoning: response.reasoning,
+    ...(response.threadId ? { threadId: response.threadId } : {}),
     cluster: ctx.cluster,
   };
 }
@@ -738,60 +737,13 @@ async function triggerSketchRecognition(
       return;
     }
 
-    // Capture per-cluster CanvasChanges BEFORE executing anything, so each
-    // entry's revert data reflects the canvas state that existed prior to
-    // the intent batch.
-    const changesByCluster = new Map<string, CanvasChange[]>();
-    for (const { clusterId: cid, intent } of resolvedIntents) {
-      if (intent.commands.length === 0) continue;
-      const captured = snapshotAndExtractChanges(intent.commands);
-      const existing = changesByCluster.get(cid) ?? [];
-      changesByCluster.set(cid, [...existing, ...captured]);
-    }
+    // Recognition already applied its commands server-side (executeOnServer
+    // broadcasts the deltas + the thread's change records); the initiating
+    // tab receives that broadcast through canvasSyncStore, so there is
+    // nothing to apply here.
 
-    // Aggregate all resolved commands and execute atomically as one batch.
-    // Sketch nodes are kept on the canvas as ordinary nodes after
-    // recognition \u2014 the user may invoke recognition repeatedly on the
-    // same node (e.g. after editing nearby context). The Accept / Revert
-    // buttons in `SketchProcessingOverlay` still let the user delete the
-    // strokes when the resolution is committed.
-    const allCommands: CanvasCommand[] = resolvedIntents.flatMap(
-      (r) => r.intent.commands,
-    );
-
-    if (allCommands.length > 0) {
-      if (resolvedIntents.length > 0) {
-        console.log(
-          '[Sketch Intent] Executing',
-          resolvedIntents.length,
-          'resolved intent(s):',
-          resolvedIntents.map((r) => r.intent.reasoning).join(' | '),
-        );
-      }
-
-      // Promote any clusters still in pending/preparing to 'running' for the
-      // brief duration of executeCommands so the user sees the same
-      // lifecycle. Scoped to this batch's ids only.
-      set({
-        processingClusters: get().processingClusters.map((c) =>
-          batchIds.has(c.id) &&
-          (c.status === 'pending' || c.status === 'preparing')
-            ? { ...c, status: 'running' }
-            : c,
-        ),
-      });
-
-      // Final canvas check immediately before commit.
-      if (!isStillCurrent()) {
-        clearBatchInProgress();
-        return;
-      }
-
-      useCanvasStore.getState().executeCommands(allCommands, 'agent');
-    }
-
-    // Index resolved intents by cluster so the final write can attach
-    // source / reasoning / commands per overlay.
+    // Index resolved intents by cluster so we can attach thread id +
+    // reasoning to each overlay.
     const intentByCluster = new Map<string, ResolvedSketchIntent>();
     for (const { clusterId, intent } of resolvedIntents) {
       intentByCluster.set(clusterId, intent);
@@ -808,10 +760,8 @@ async function triggerSketchRecognition(
         return {
           ...c,
           status: 'done',
-          changes: changesByCluster.get(c.id) ?? c.changes,
-          commands: intent?.commands ?? c.commands,
+          threadId: intent?.threadId ?? c.threadId,
           reasoning: intent?.reasoning ?? c.reasoning,
-          source: intent ? 'llm' : c.source,
           error: errorByCluster.get(c.id) ?? c.error,
         };
       }),

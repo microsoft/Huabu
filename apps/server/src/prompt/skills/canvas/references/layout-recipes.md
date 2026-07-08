@@ -1,13 +1,13 @@
 # Layout Recipes
 
-Opinionated layouts for structured diagrams (architecture diagrams, flowcharts, mind maps, hierarchies, roadmaps). Load this when the user asks for a structured diagram or you are building one from scratch. The mental model lives in [`SKILL.md`](../SKILL.md) and the command catalogue in [`commands.md`](commands.md); this file is purely about geometry and visual grouping.
+Opinionated layouts for structured diagrams (architecture diagrams, flowcharts, mind maps, hierarchies, roadmaps). Load this when the user asks for a structured diagram or you are building one from scratch. The mental model lives in [`SKILL.md`](../SKILL.md); this file is purely about geometry and visual grouping.
 
 ## Coordinate system
 
 - The canvas uses x (right = positive) and y (down = positive) coordinates.
 - A standard node is about **400px wide** and **300px tall**. Use a gap of **~50px** between nodes.
 - Headers / labels can be narrower (≈250px wide).
-- **`position` is required** on every `CREATE_NODES` / `CREATE_QUESTION` entry and is honoured verbatim by the engine. There is no fallback layout to fall back on — if you don't pick a slot, the call will be rejected.
+- **`position` is required** on every `CREATE_NODES` entry and is honoured verbatim by the engine. There is no fallback layout to fall back on — if you don't pick a slot, the call will be rejected.
 
 ## Positioning patterns
 
@@ -65,7 +65,7 @@ In structured layouts, accent doubles as a layout primitive: pick **one accent t
 
 - Optionally call `ALIGN_NODES` on nodes within the same row / column for pixel-perfect alignment.
 - Call `DISTRIBUTE_NODES` on a row / column of ≥3 nodes for even spacing.
-- Both run inside the same batch as the creates — the user sees one undo step.
+- Both operate on the created nodes, so run them in the **follow-up call** (alongside `CONNECT_NODES`) using the ids the create step returned in `results[].nodes` — not in the create call itself.
 
 ## Recipe: row-track flowchart / research roadmap
 
@@ -91,11 +91,12 @@ Pick **one accent token** per track and apply it to every node in that track; us
 
 Keep edges minimal — let proximity and alignment imply relationships. Only connect nodes where the relationship is non-obvious (cross-track support, semantic dependency).
 
-### Single-batch order
+### Order (across calls)
 
-1. `CREATE_NODES` (headers + main + sub, all with explicit positions and ids).
-2. `CONNECT_NODES` (horizontal sequence + cross-track verticals).
-3. `ALIGN_NODES` (`center-v` per row) + `DISTRIBUTE_NODES` (per row).
+1. **Create call** — `CREATE_NODES` (headers + main + sub, all with explicit positions). Read the assigned ids back from `results[].nodes`.
+2. **Follow-up call**, using those ids:
+   - `CONNECT_NODES` (horizontal sequence + cross-track verticals).
+   - `ALIGN_NODES` (`center-v` per row) + `DISTRIBUTE_NODES` (per row).
 
 ### Example 3-track layout
 

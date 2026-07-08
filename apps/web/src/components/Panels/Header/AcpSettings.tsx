@@ -50,12 +50,12 @@ import {
 } from '@/api/acp';
 import { Button } from '@/components/Common/Button';
 import { Input } from '@/components/Common/Input';
+import { Loading } from '@/components/Common/Loading';
 import { Modal } from '@/components/Common/Modal';
 import { PathInput } from '@/components/Common/PathInput';
 import { Select } from '@/components/Common/Select';
 import { SettingRow } from '@/components/Common/SettingRow';
 import { SettingSection } from '@/components/Common/SettingSection';
-import { Spinner } from '@/components/Common/Spinner';
 import { TabGroup } from '@/components/Common/TabGroup';
 import { toast } from '@/components/Common/Toast';
 import { Tooltip } from '@/components/Common/Tooltip';
@@ -1105,7 +1105,11 @@ export const AcpSettings: React.FC = () => {
               disabled={isDeleting}
             >
               {isDeleting ? (
-                <Spinner size="sm" className="text-fg-inverse" />
+                <Loading
+                  layout="inline"
+                  size="sm"
+                  className="text-fg-inverse"
+                />
               ) : (
                 'Delete'
               )}

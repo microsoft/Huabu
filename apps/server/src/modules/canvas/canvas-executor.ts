@@ -26,6 +26,11 @@
  *     fine-grained `SET_*` deltas.
  */
 
+import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+
+import { imageSize } from 'image-size';
+
 import {
   createId,
   type CanvasCommand,
@@ -50,6 +55,7 @@ import {
 
 import { publishCanvasUpdate } from './canvas-sync.js';
 import { importForeignNodeSources } from './import-node-src.js';
+import { getLogger } from '../../utils/logger.js';
 import {
   getCanvasStore,
   type CanvasFile,
@@ -57,6 +63,9 @@ import {
   type DeltaLogEntry,
   type NodeContent,
 } from '../storage/index.js';
+import { artifactPath } from '../storage/paths.js';
+
+const log = getLogger('canvas.executor');
 
 // ── Per-canvas async mutex ───────────────────────────────────────────────
 //
@@ -305,6 +314,204 @@ function preAssignIds(commands: readonly CanvasCommand[]): CanvasCommand[] {
   return out;
 }
 
+// ── Image node size normalization ────────────────────────────────────────
+//
+// Image nodes should render at their source image's real aspect ratio. Agents
+// provide only a target `width`; the server reads the artifact and derives the
+// matching `height`. Two entry points share one helper:
+//   - CREATE_NODES: fill in the create-input `size.height` before the engine runs.
+//   - MERGE_NODE_DATA(src): append a SET_NODE_GEOMETRY so an in-place `src` swap
+//     re-fits height to the new image.
+
+/** Read a `src` string off a node's `data` bag, or null when absent/empty. */
+function imageDataSrc(data: unknown): string | null {
+  const src = (data as Record<string, unknown> | undefined)?.['src'];
+  return typeof src === 'string' && src ? src : null;
+}
+
+/**
+ * Read the image artifact at `src` and return the height that preserves its
+ * aspect ratio at `width`. Returns null when the file is missing, unreadable,
+ * or not a recognized image — callers then keep whatever size they had. Never
+ * throws.
+ */
+async function aspectHeightForWidth(
+  canvasId: string,
+  src: string,
+  width: number,
+): Promise<number | null> {
+  try {
+    const fullPath = artifactPath(canvasId, src);
+    if (!existsSync(fullPath)) return null;
+    const buffer = await readFile(fullPath);
+    const dim = imageSize(buffer);
+    if (!dim?.width || !dim?.height || dim.width <= 0 || dim.height <= 0) {
+      return null;
+    }
+    return Math.round(width * (dim.height / dim.width));
+  } catch (error) {
+    log.warn({ canvasId, src, error }, 'Failed to read image aspect ratio');
+    return null;
+  }
+}
+
+/**
+ * CREATE_NODES: for image nodes given a `width` but no `height`, fill in the
+ * height from the source image's real aspect ratio.
+ */
+async function normalizeImageNodeSizes(
+  canvasId: string,
+  commands: readonly CanvasCommand[],
+): Promise<CanvasCommand[]> {
+  const out: CanvasCommand[] = [];
+  for (const cmd of commands) {
+    if (cmd.type !== 'CREATE_NODES') {
+      out.push(cmd);
+      continue;
+    }
+    const nodes = await Promise.all(
+      cmd.nodes.map(async (node) => {
+        if (
+          node.nodeType !== 'image' ||
+          !node.size ||
+          typeof node.size.height === 'number'
+        ) {
+          return node;
+        }
+        const src = imageDataSrc(node.data);
+        if (!src) return node;
+        const height = await aspectHeightForWidth(
+          canvasId,
+          src,
+          node.size.width,
+        );
+        if (height === null) return node;
+        return { ...node, size: { width: node.size.width, height } };
+      }),
+    );
+    out.push({ ...cmd, nodes });
+  }
+  return out;
+}
+
+/**
+ * MERGE_NODE_DATA(src): when an agent points an existing image node at a new
+ * artifact its aspect ratio changes. Append a SET_NODE_GEOMETRY (keeping the
+ * node's current width) so height tracks the new image. Skipped when the same
+ * batch already sets that node's geometry explicitly.
+ */
+async function normalizeMergeImageGeometry(
+  canvasId: string,
+  commands: readonly CanvasCommand[],
+  prestateNodes: readonly CanvasNode[],
+): Promise<CanvasCommand[]> {
+  const nodeById = new Map<string, CanvasNode>();
+  for (const node of prestateNodes) {
+    if (typeof node.id === 'string') nodeById.set(node.id, node);
+  }
+  const explicitGeometry = new Set<string>();
+  for (const cmd of commands) {
+    if (cmd.type === 'SET_NODE_GEOMETRY') {
+      for (const item of cmd.items) explicitGeometry.add(item.nodeId);
+    }
+  }
+
+  const out: CanvasCommand[] = [];
+  for (const cmd of commands) {
+    out.push(cmd);
+    if (cmd.type !== 'MERGE_NODE_DATA') continue;
+
+    const items: Extract<
+      CanvasCommand,
+      { type: 'SET_NODE_GEOMETRY' }
+    >['items'] = [];
+    for (const entry of cmd.patches) {
+      if (explicitGeometry.has(entry.nodeId)) continue;
+      const src = entry.patch?.['src'];
+      if (typeof src !== 'string' || !src) continue;
+      const node = nodeById.get(entry.nodeId);
+      if (node?.type !== 'image') continue;
+      const width = (node.style as Record<string, unknown> | undefined)?.[
+        'width'
+      ];
+      if (typeof width !== 'number' || width <= 0) continue;
+      const height = await aspectHeightForWidth(canvasId, src, width);
+      if (height === null) continue;
+      items.push({ nodeId: entry.nodeId, size: { width, height } });
+    }
+    if (items.length > 0) out.push({ type: 'SET_NODE_GEOMETRY', items });
+  }
+  return out;
+}
+
+/**
+ * SET_NODE_GEOMETRY: agents can pin an image node to an arbitrary width/height,
+ * which would letterbox the image (it renders `object-contain`, so it never
+ * distorts — it just gains whitespace bars). For any geometry item that sets a
+ * `width` on an image node, recompute `height` from the source image's real
+ * aspect ratio so the node box always hugs the image. Also fixes width-only
+ * items, which would otherwise clear the pinned height and collapse the node.
+ *
+ * `src` is resolved by a forward walk so an in-batch create/`src`-swap that
+ * precedes the resize uses the correct image. Nodes handled by
+ * {@link normalizeMergeImageGeometry} are disjoint (that pass only appends
+ * geometry for nodes WITHOUT an explicit item), so the two never double-read.
+ */
+async function normalizeSetGeometryImageSizes(
+  canvasId: string,
+  commands: readonly CanvasCommand[],
+  prestateNodes: readonly CanvasNode[],
+): Promise<CanvasCommand[]> {
+  // nodeId → current image `src`; only image nodes are tracked.
+  const imageSrcById = new Map<string, string>();
+  for (const node of prestateNodes) {
+    if (node.type !== 'image' || typeof node.id !== 'string') continue;
+    const src = imageDataSrc(node.data);
+    if (src) imageSrcById.set(node.id, src);
+  }
+
+  const out: CanvasCommand[] = [];
+  for (const cmd of commands) {
+    // Update the src map from creates / src-swaps BEFORE handling a resize,
+    // so a create-then-resize (or merge-then-resize) in this batch resolves.
+    if (cmd.type === 'CREATE_NODES') {
+      for (const node of cmd.nodes) {
+        if (node.nodeType !== 'image' || !node.id) continue;
+        const src = imageDataSrc(node.data);
+        if (src) imageSrcById.set(node.id, src);
+      }
+    } else if (cmd.type === 'MERGE_NODE_DATA') {
+      for (const patch of cmd.patches) {
+        if (!imageSrcById.has(patch.nodeId)) continue;
+        const src = patch.patch?.['src'];
+        if (typeof src === 'string' && src) imageSrcById.set(patch.nodeId, src);
+      }
+    }
+
+    if (cmd.type !== 'SET_NODE_GEOMETRY') {
+      out.push(cmd);
+      continue;
+    }
+
+    const items = await Promise.all(
+      cmd.items.map(async (item) => {
+        if (!item.size || typeof item.size.width !== 'number') return item;
+        const src = imageSrcById.get(item.nodeId);
+        if (!src) return item;
+        const height = await aspectHeightForWidth(
+          canvasId,
+          src,
+          item.size.width,
+        );
+        if (height === null || height === item.size.height) return item;
+        return { ...item, size: { width: item.size.width, height } };
+      }),
+    );
+    out.push({ ...cmd, items });
+  }
+  return out;
+}
+
 // ── Public entry ─────────────────────────────────────────────────────────
 
 export interface ExecuteOnServerInput {
@@ -330,6 +537,21 @@ export interface ExecuteOnServerOutput {
     command: CanvasCommand;
     applied: boolean;
     reason?: CanvasCommandFailureReason;
+    /**
+     * For CREATE_NODES commands, the server-assigned id of every created
+     * node (with its label) so the agent can reference them in a follow-up
+     * CONNECT_NODES / SET_NODE_PARENT call instead of inventing ids. Image
+     * nodes additionally carry their server-derived width/height/src for
+     * exact follow-up layout. Also emitted for MERGE_NODE_DATA writes that
+     * change an image src.
+     */
+    nodes?: Array<{
+      nodeId: string;
+      label?: string;
+      width: number;
+      height: number;
+      src?: string;
+    }>;
   }>;
   /** Commands as the executor saw them — ids assigned, source-stamped. */
   commands: CanvasCommand[];
@@ -400,6 +622,10 @@ export async function executeOnServer(
       canvasId,
       commands,
     );
+
+    // For image nodes with only width specified, calculate height from actual
+    // image aspect ratio. This ensures correct proportions for all image sources.
+    commands = await normalizeImageNodeSizes(canvasId, commands);
   }
 
   return await withCanvasMutex(canvasId, async () => {
@@ -417,6 +643,22 @@ export async function executeOnServer(
       canvas.state.nodes as CanvasNode[],
     );
     const prestateEdges = (canvas.state.edges ?? []) as CanvasEdge[];
+
+    if (originator.source === 'agent') {
+      // Order matters: fix explicit image resizes first (edits items in
+      // place), then let the merge pass append geometry for src-swaps that
+      // have no explicit resize. The two target disjoint node sets.
+      commands = await normalizeSetGeometryImageSizes(
+        canvasId,
+        commands,
+        prestateNodes,
+      );
+      commands = await normalizeMergeImageGeometry(
+        canvasId,
+        commands,
+        prestateNodes,
+      );
+    }
 
     // Compare-and-swap pre-flight (agent writes only). A stale or
     // never-read content rewrite mutates NOTHING — the whole batch is a
@@ -473,11 +715,64 @@ export async function executeOnServer(
       { nodes: finalNodes, edges: finalEdges },
     );
 
-    const results = commandResults.map((r) => ({
-      command: r.command,
-      applied: r.applied,
-      ...(r.reason ? { reason: r.reason } : {}),
-    }));
+    // Built once: id → final node, used to echo image dimensions back so
+    // agents can lay out follow-up nodes with exact geometry.
+    const finalById = new Map<string, CanvasNode>();
+    for (const node of finalNodes) finalById.set(node.id as string, node);
+
+    const results = commandResults.map((r) => {
+      const result: ExecuteOnServerOutput['results'][0] = {
+        command: r.command,
+        applied: r.applied,
+        ...(r.reason ? { reason: r.reason } : {}),
+      };
+
+      // Echo created node ids (+labels) so the agent can wire them up in a
+      // follow-up CONNECT_NODES / SET_NODE_PARENT call with the real,
+      // server-assigned ids instead of inventing ids that collide across
+      // runs. Image nodes also carry server-derived dimensions/src.
+      if (r.applied && r.command.type === 'CREATE_NODES') {
+        const nodes = r.command.nodes
+          .map((n) => {
+            const node = finalById.get(n.id as string);
+            if (!node) return null;
+            const style = (node.style ?? {}) as Record<string, unknown>;
+            const label = node.data?.label;
+            return {
+              nodeId: node.id as string,
+              ...(typeof label === 'string' ? { label } : {}),
+              width: typeof style.width === 'number' ? style.width : 0,
+              height: typeof style.height === 'number' ? style.height : 0,
+              ...(node.type === 'image' && typeof node.data?.src === 'string'
+                ? { src: node.data.src }
+                : {}),
+            };
+          })
+          .filter((n): n is NonNullable<typeof n> => n !== null);
+
+        if (nodes.length > 0) result.nodes = nodes;
+      } else if (r.applied && r.command.type === 'MERGE_NODE_DATA') {
+        // Echo final image dimensions when a MERGE rewrote an image src.
+        const nodes = r.command.patches
+          .filter((p) => typeof p.patch?.['src'] === 'string')
+          .map((p) => {
+            const node = finalById.get(p.nodeId);
+            if (node?.type !== 'image') return null;
+            const style = (node.style ?? {}) as Record<string, unknown>;
+            return {
+              nodeId: p.nodeId,
+              width: typeof style.width === 'number' ? style.width : 0,
+              height: typeof style.height === 'number' ? style.height : 0,
+              src: (node.data?.src as string) || '',
+            };
+          })
+          .filter((n): n is NonNullable<typeof n> => n !== null);
+
+        if (nodes.length > 0) result.nodes = nodes;
+      }
+
+      return result;
+    });
 
     // Detect order-only mutations that `diffCanvasState` cannot see.
     //

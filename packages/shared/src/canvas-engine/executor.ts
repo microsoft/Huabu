@@ -16,11 +16,10 @@
  * - Uses COMMAND_META to determine snapshot policy and edge reroute needs.
  * - Collects pending effects from all commands.
  *
- * Source-agnostic: behaviour does not depend on `execution.source`. The
- * caller can still force a refit pass over every affected frame (even
- * `sizing: 'manual'`) via `options.forceFitFrames`, but the default
- * behaviour now respects each frame's own sizing policy without any
- * global toggle.
+ * Most behaviour is source-agnostic. Handlers receive `execution.source`
+ * for narrow source-specific semantics (for example, user-created nodes
+ * becoming selected), and callers can force a refit pass over every affected
+ * frame (even `sizing: 'manual'`) via `options.forceFitFrames`.
  *
  * Does NOT:
  * - Call set() on the store.
@@ -94,6 +93,8 @@ export function executeCanvasCommands(
   state: CanvasReadState,
   options: ExecutorOptions = {},
 ): ExecutorOutput {
+  const source = execution.source ?? 'ui';
+
   // Mutable accumulators — built up as commands are processed.
   const commandResults: CanvasCommandResult[] = [];
   const pendingEffects: PendingEffects = {
@@ -136,6 +137,7 @@ export function executeCanvasCommands(
       nodes: currentNodes,
       edges: currentEdges,
       canvasId: state.canvasId,
+      source,
     });
 
     // Record the command result.
@@ -258,7 +260,7 @@ export function executeCanvasCommands(
   // ------------------------------------------------------------------
   if (
     anyApplied &&
-    execution.source === 'agent' &&
+    source === 'agent' &&
     pendingEffects.contentEditedNodeIds.length > 0
   ) {
     const prevById = new Map(state.nodes.map((n) => [n.id, n]));

@@ -10,8 +10,8 @@ import { useMemo, useState } from 'react';
 
 import { partIsExecuting, truncate, type ToolPart } from './helpers';
 import { ToolKindIcon } from './ToolKindIcon';
+import { Loading } from '../../../Common/Loading';
 import { NodeRef } from '../../../Common/NodeRef';
-import { Spinner } from '../../../Common/Spinner';
 
 import type { AgentToolPart } from '@sediment/shared';
 
@@ -342,7 +342,7 @@ export function MergedAgentToolRow({
   }, [tool, entries, count]);
 
   const statusIcon = isExecuting ? (
-    <Spinner size="xs" className="text-info" />
+    <Loading layout="inline" size="xs" className="text-info" />
   ) : isError ? (
     <XIcon size={12} className="text-danger" />
   ) : (

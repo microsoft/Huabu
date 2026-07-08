@@ -41,7 +41,7 @@ Like sketch nodes, a question node has two independent relationships with AI:
 | Field             | Persisted | Notes                                                                                                                                |
 | ----------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | `content`         | sidecar   | The question text; stored in `nodes/<safeLabel>.md` body like text/note (`TEXT_BEARING_NODE_TYPES`), stripped from the structure PUT |
-| `status`          | ✅        | `idle` / `running` / `done` / `error`                                                                                                |
+| `status`          | ✅        | Optional sparse status: absent means `idle`; non-default values are `running` / `done` / `error`                                     |
 | `threadId`        | ✅        | Owns one chat thread; minted on first compose                                                                                        |
 | `agentBinding`    | ✅        | Internal or external agent, locked on first send                                                                                     |
 | `agentMode`       | ✅        | `ask` (default) / `operate` for the internal agent                                                                                   |
@@ -60,12 +60,17 @@ visible to agents (`type: 'question'` in `get_canvas_outline`). See
 
 ## 3. Node lifecycle
 
-Created like any node via `ADD_NODES` ([resolveAddNodes.ts](../../apps/web/src/handler/canvasCommand/resolvers/resolveAddNodes.ts)) with `status: 'idle'` and empty `content`. Nothing fires automatically. From there:
+Created like any node via `CREATE_NODES` ([resolveAddNodes.ts](../../apps/web/src/handler/canvasCommand/resolvers/resolveAddNodes.ts)) with `nodeType: 'question'` and empty `content`. Missing `status` is the idle state, and nothing fires automatically. From there:
 
 - **Idle** → double-click opens compose (§5).
 - After sending: **running → done / error**.
 - Move / delete / resize / re-frame all go through the normal node flow; a stale
   pasted copy strips transient state so it starts fresh.
+- Question height is content-driven like text nodes. Drag-resize may use the
+  transient box height to derive a locked `data.style.fontSize`, but the node's
+  top-level `style.height` is not persisted. The floating toolbar therefore
+  exposes width + font size for question/text nodes rather than an editable
+  height field.
 
 Two independent uses branch from here: read as content (§4) or ask in chat (§5).
 
@@ -100,7 +105,9 @@ helpers can target it, mirroring how preview-body matches are handled.
 
 ### 5.1 Trigger
 
-Double-click the node → `openInCompose()` ([QuestionNode.tsx](../../apps/web/src/components/Nodes/question/QuestionNode.tsx)):
+Double-click the node → `openInCompose()` ([QuestionNode.tsx](../../apps/web/src/components/Nodes/question/QuestionNode.tsx)).
+Creating a question through the toolbar placement flow or the connected-node
+picker also mints the thread and opens compose immediately:
 
 - mints a `threadId` if missing, opens the chat panel in **compose mode**
 - inherits the canvas's last-used agent binding; user can switch agent
@@ -108,6 +115,14 @@ Double-click the node → `openInCompose()` ([QuestionNode.tsx](../../apps/web/s
 
 Toolbar (single action): **Ask** when idle, **View / Watch conversation** once a
 thread exists.
+
+While the chat panel is expanded and viewing or composing a question node
+thread, the canvas renders four glowing corners outside that node
+([QuestionNode.tsx](../../apps/web/src/components/Nodes/question/QuestionNode.tsx)).
+This is an informational "active chat anchor" affordance only: it does not set
+React Flow selection, does not show editing toolbars, does not cover the
+question status badge, and does not affect which selected nodes are sent as
+additional chat context.
 
 ### 5.2 Dispatch
 
