@@ -110,15 +110,22 @@ export class InMemoryThreadStore implements ThreadStore {
   }
 }
 
-/** Bumped only on a breaking layout change to the persisted file. */
-const THREAD_STORE_SCHEMA_VERSION = 1;
+/**
+ * The on-disk format lineage tag for the new Agenetes-era stores. The
+ * value is a lineage-qualified string (not a bare number) so it is
+ * globally unambiguous across the different store files — a
+ * `schemaVersion` of `3` in the legacy `acp-sessions.json` is a
+ * different lineage from this one. Bumped (e.g. `agenetes-v2`) only on a
+ * breaking layout change to the persisted file.
+ */
+const THREAD_STORE_SCHEMA_VERSION = 'agenetes-v1';
 
 /** The persisted shape of one thread record's durable `state`. */
 type PersistedState = AgentStateSnapshot;
 
 /** The on-disk `threads.json` file shape. */
 interface ThreadStoreFile {
-  schemaVersion: number;
+  schemaVersion: string;
   records: Record<string, { spec: unknown; state: PersistedState }>;
 }
 
