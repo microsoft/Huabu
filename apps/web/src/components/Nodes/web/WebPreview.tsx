@@ -1,6 +1,7 @@
 import { ArrowUpRight, RotateCw } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
 
 import { resolveArtifactUrl } from '@/api/artifact';
 import { getWebPage, getWebReader } from '@/api/web';
@@ -41,6 +42,7 @@ const IFRAME_SPINNER_DISMISS_MS = 1500;
 const LIVE_LOAD_TIMEOUT_MS = 3500;
 
 export const WebPreview = ({ id, data }: PreviewComponentProps) => {
+  const { t } = useTranslation();
   const src = typeof data.src === 'string' ? data.src : '';
   const canvasId = useCanvasStore((s) => s.canvasId);
 
@@ -320,7 +322,7 @@ export const WebPreview = ({ id, data }: PreviewComponentProps) => {
   if (!src) {
     return (
       <div className="text-fg-subtle flex h-full w-full items-center justify-center text-sm">
-        Invalid URL
+        {t('node.invalidUrl')}
       </div>
     );
   }
@@ -358,9 +360,9 @@ export const WebPreview = ({ id, data }: PreviewComponentProps) => {
             tone="neutral"
             size="sm"
             iconOnly
-            title="Reload"
+            title={t('node.reload')}
             tooltipPlacement="bottom"
-            aria-label="Reload page"
+            aria-label={t('node.reloadPage')}
             onClick={handleReload}
           >
             <RotateCw />
@@ -372,9 +374,9 @@ export const WebPreview = ({ id, data }: PreviewComponentProps) => {
             tone="neutral"
             size="sm"
             iconOnly
-            title="Open externally"
+            title={t('node.openExternally')}
             tooltipPlacement="bottom"
-            aria-label="Open page in external browser"
+            aria-label={t('node.openPageExternal')}
             onClick={() => window.open(externalHref, '_blank', 'noopener')}
           >
             <ArrowUpRight />
@@ -391,10 +393,10 @@ export const WebPreview = ({ id, data }: PreviewComponentProps) => {
       <div className="relative h-full flex-1 overflow-hidden">
         {showLive ? (
           loadingPage ? (
-            <Loading message="Loading..." variant="skeleton" />
+            <Loading message={t('status.loading')} variant="skeleton" />
           ) : pageError ? (
             <div className="text-fg-subtle flex h-full w-full flex-col items-center justify-center gap-2 text-sm">
-              <div>Failed to load page</div>
+              <div>{t('node.failedLoadPage')}</div>
               <p className="text-xs">{pageError}</p>
             </div>
           ) : pageSrc ? (
@@ -414,7 +416,7 @@ export const WebPreview = ({ id, data }: PreviewComponentProps) => {
                 // `.mhtml` snapshot, or an interactive artifact.
                 sandbox={livePageSandbox}
                 referrerPolicy="no-referrer"
-                title="Live page"
+                title={t('node.livePage')}
                 className="bg-surface block h-full w-full border-0"
                 style={pageSnapshot ? { colorScheme: 'light' } : undefined}
                 onLoad={() => setIframeReady(true)}
@@ -422,20 +424,22 @@ export const WebPreview = ({ id, data }: PreviewComponentProps) => {
               {!iframeReady ? (
                 <div className="bg-bg-default/90 pointer-events-none absolute top-2 left-2 z-10 flex items-center gap-1.5 rounded-full px-2 py-1 shadow-sm backdrop-blur">
                   <span className="text-fg-subtle inline-block h-2 w-2 animate-pulse rounded-full bg-current" />
-                  <span className="text-fg-muted text-xs">Loading…</span>
+                  <span className="text-fg-muted text-xs">
+                    {t('status.loadingProgress')}
+                  </span>
                 </div>
               ) : null}
             </>
           ) : (
             <div className="text-fg-subtle flex h-full w-full items-center justify-center text-sm">
-              No source
+              {t('node.noSource')}
             </div>
           )
         ) : loadingReader ? (
-          <Loading message="Loading..." variant="skeleton" />
+          <Loading message={t('status.loading')} variant="skeleton" />
         ) : readerError ? (
           <div className="text-fg-subtle flex h-full w-full flex-col items-center justify-center gap-2 text-sm">
-            <div>Failed to load reader view</div>
+            <div>{t('node.failedLoadReader')}</div>
             <p className="text-xs">{readerError}</p>
           </div>
         ) : readerHtml ? (
@@ -446,7 +450,7 @@ export const WebPreview = ({ id, data }: PreviewComponentProps) => {
                 colorScheme: 'light',
                 height: readerHeight ? `${readerHeight}px` : '100%',
               }}
-              title="Reader View"
+              title={t('node.readerView')}
               sandbox="allow-popups allow-scripts"
               srcDoc={readerSrcDoc}
               scrolling="no"
@@ -454,7 +458,7 @@ export const WebPreview = ({ id, data }: PreviewComponentProps) => {
           </div>
         ) : (
           <div className="text-fg-subtle flex h-full w-full items-center justify-center text-sm">
-            Reader view not ready
+            {t('node.readerViewNotReady')}
           </div>
         )}
       </div>

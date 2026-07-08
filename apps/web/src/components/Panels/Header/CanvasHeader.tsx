@@ -1,6 +1,7 @@
 import clsx from 'clsx';
 import { ListIndentDecrease, ListIndentIncrease } from 'lucide-react';
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 
 import { CanvasMenu } from './CanvasMenu.tsx';
@@ -44,6 +45,7 @@ export const CanvasHeader: React.FC<CanvasHeaderProps> = ({
   compact = false,
   onOpenShortcuts,
 }) => {
+  const { t } = useTranslation();
   // The desktop title bar (`WindowChrome`) also shows a Home button, but
   // we still render the in-canvas logo here so the floating / in-column
   // header reads consistently with the web build. The two affordances
@@ -63,10 +65,10 @@ export const CanvasHeader: React.FC<CanvasHeaderProps> = ({
           : 'border-edge-default h-12 border-r border-b',
       )}
     >
-      <Link to="/" aria-label="Back to home" className="shrink-0">
+      <Link to="/" aria-label={t('navigation.backHome')} className="shrink-0">
         <img
           src="/favicon.svg"
-          alt="Logo"
+          alt={t('app.logoAlt')}
           className={compact ? 'h-6 w-6' : 'h-8 w-8'}
         />
       </Link>
@@ -80,9 +82,9 @@ export const CanvasHeader: React.FC<CanvasHeaderProps> = ({
           variant="ghost"
           iconOnly
           onClick={onToggle}
-          title={isCollapsed ? 'Show Layers' : 'Collapse Layers'}
+          title={isCollapsed ? t('layers.show') : t('layers.collapse')}
           aria-label={
-            isCollapsed ? 'Show layers panel' : 'Collapse layers panel'
+            isCollapsed ? t('layers.showPanel') : t('layers.collapsePanel')
           }
         >
           {isCollapsed ? (

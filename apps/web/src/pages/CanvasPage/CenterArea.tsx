@@ -1,5 +1,6 @@
 import { Bot, BookOpen } from 'lucide-react';
 import React, { useCallback, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { Button } from '../../components/Common/Button';
 import { cn } from '../../components/Common/cn';
@@ -34,6 +35,7 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
   isChatCollapsed,
   onToggleChat,
 }) => {
+  const { t } = useTranslation();
   const expandedNodeId = useCanvasStore((s) => s.expandedNodeId);
   const canvasExpandMode = useCanvasStore((s) => s.expandMode);
 
@@ -155,8 +157,8 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
                 size="lg"
                 iconOnly
                 onClick={() => window.open('/docs', '_blank', 'noopener')}
-                title="User Handbook"
-                aria-label="Open user handbook"
+                title={t('navigation.userHandbook')}
+                aria-label={t('navigation.openUserHandbook')}
               >
                 <BookOpen />
               </Button>
@@ -170,10 +172,10 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
               iconOnly
               size="lg"
               onClick={onToggleChat}
-              title={isChatCollapsed ? 'Open Chat' : 'Close Chat'}
+              title={isChatCollapsed ? t('chat.open') : t('chat.close')}
               tooltipPlacement="bottom"
               aria-label={
-                isChatCollapsed ? 'Open chat panel' : 'Close chat panel'
+                isChatCollapsed ? t('chat.openPanel') : t('chat.closePanel')
               }
               aria-pressed={!isChatCollapsed}
               className={cn(

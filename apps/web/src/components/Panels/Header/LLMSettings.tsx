@@ -6,6 +6,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import {
   DEFAULT_AZURE_IMAGE_API_VERSION,
@@ -82,6 +83,7 @@ const TEXT_INPUT_CLASS =
  * — no Save button. Selecting from a `<Select>` saves immediately.
  */
 export const LLMSettings: React.FC = () => {
+  const { t } = useTranslation();
   const llmConfig = useLLMStore((s) => s.config);
   const llmImageConfig = useLLMStore((s) => s.imageConfig);
   const llmProviders = useLLMStore((s) => s.providers);
@@ -234,8 +236,8 @@ export const LLMSettings: React.FC = () => {
 
   return (
     <>
-      <SettingSection title="LLM Provider" collapsible>
-        <SettingRow title="Provider">
+      <SettingSection title={t('settings.llmProvider')} collapsible>
+        <SettingRow title={t('settings.provider')}>
           <div className="w-44">
             <Select
               options={llmProviders.map((p) => ({
@@ -245,13 +247,13 @@ export const LLMSettings: React.FC = () => {
               value={llmConfig?.provider ?? ''}
               onChange={(v) => void handleProviderChange(v)}
               disabled={llmSaving}
-              placeholder="Select provider…"
+              placeholder={t('settings.selectProvider')}
             />
           </div>
         </SettingRow>
 
         {llmConfig?.provider && llmModels.length > 0 && !isAzure && (
-          <SettingRow title="Model">
+          <SettingRow title={t('settings.model')}>
             <div className="w-44">
               <Select
                 options={llmModels.map((m) => ({
@@ -267,7 +269,7 @@ export const LLMSettings: React.FC = () => {
         )}
 
         {llmConfig?.provider && llmModels.length === 0 && !isAzure && (
-          <SettingRow title="Model">
+          <SettingRow title={t('settings.model')}>
             <input
               type="text"
               placeholder="e.g. gpt-4o"
@@ -285,7 +287,7 @@ export const LLMSettings: React.FC = () => {
         {/* Azure OpenAI — dedicated multi-field cluster */}
         {isAzure && (
           <>
-            <SettingRow title="Endpoint">
+            <SettingRow title={t('settings.endpoint')}>
               <input
                 type="text"
                 placeholder="https://…cognitiveservices.azure.com/openai/v1"
@@ -299,7 +301,7 @@ export const LLMSettings: React.FC = () => {
               />
             </SettingRow>
 
-            <SettingRow title="Deployment">
+            <SettingRow title={t('settings.deployment')}>
               <input
                 type="text"
                 placeholder="e.g. gpt-5-chat"
@@ -313,7 +315,7 @@ export const LLMSettings: React.FC = () => {
               />
             </SettingRow>
 
-            <SettingRow title="API Version">
+            <SettingRow title={t('settings.apiVersion')}>
               <input
                 type="text"
                 placeholder="e.g. 2025-04-01-preview"
@@ -328,11 +330,11 @@ export const LLMSettings: React.FC = () => {
             </SettingRow>
 
             <SettingRow
-              title="API Key"
+              title={t('settings.apiKey')}
               description={
                 llmConfig?.authenticated
-                  ? 'A key is already saved — leave empty to keep it.'
-                  : 'Required to make requests to Azure OpenAI.'
+                  ? t('settings.savedKeyKeepEmpty')
+                  : t('settings.azureKeyRequired')
               }
             >
               <div className="flex items-center gap-1.5">
@@ -361,7 +363,7 @@ export const LLMSettings: React.FC = () => {
 
         {/* OAuth auth row */}
         {llmConfig && isOAuth && !oauthPending && (
-          <SettingRow title="Authentication">
+          <SettingRow title={t('settings.authentication')}>
             {llmConfig.authenticated ? (
               <Button
                 variant="ghost"
@@ -370,7 +372,7 @@ export const LLMSettings: React.FC = () => {
                 onClick={() => void llmLogoutOAuth()}
               >
                 <LogOut />
-                Logout
+                {t('settings.logout')}
               </Button>
             ) : (
               <Button
@@ -381,7 +383,7 @@ export const LLMSettings: React.FC = () => {
                 disabled={oauthPending}
               >
                 <LogIn />
-                Login
+                {t('settings.login')}
               </Button>
             )}
           </SettingRow>
@@ -391,7 +393,7 @@ export const LLMSettings: React.FC = () => {
         {llmConfig && isOAuth && oauthPending && oauthUserCode && (
           <div className="bg-info-bg px-3 py-2.5">
             <p className="mb-1.5 text-xs">
-              Enter this code at the opened page:
+              {t('settings.enterCodeAtOpenedPage')}
             </p>
             <div className="mb-1.5 flex items-center gap-2">
               <code className="bg-surface rounded px-2 py-1 font-mono text-lg font-bold">
@@ -402,7 +404,7 @@ export const LLMSettings: React.FC = () => {
                 iconOnly
                 size="sm"
                 tone="info"
-                title="Copy code"
+                title={t('settings.copyCode')}
                 tooltipPlacement="bottom"
                 onClick={() => void copyToClipboard(oauthUserCode)}
               >
@@ -411,7 +413,7 @@ export const LLMSettings: React.FC = () => {
             </div>
             {oauthVerificationUri && (
               <p className="text-info mb-1.5 text-[11px]">
-                Or visit:{' '}
+                {t('settings.orVisit')}{' '}
                 <a
                   href={oauthVerificationUri}
                   target="_blank"
@@ -423,7 +425,7 @@ export const LLMSettings: React.FC = () => {
               </p>
             )}
             <Button variant="ghost" tone="info" size="sm" onClick={cancelOAuth}>
-              Cancel
+              {t('actions.cancel')}
             </Button>
           </div>
         )}
@@ -431,11 +433,11 @@ export const LLMSettings: React.FC = () => {
         {/* Generic (non-Azure, non-OAuth) API key row — auto-saves on input */}
         {llmConfig && !isOAuth && !isAzure && (
           <SettingRow
-            title="API Key"
+            title={t('settings.apiKey')}
             description={
               llmConfig.authenticated
-                ? 'A key is already saved — leave empty to keep it.'
-                : 'Required to make requests to this provider.'
+                ? t('settings.savedKeyKeepEmpty')
+                : t('settings.providerKeyRequired')
             }
           >
             <div className="flex items-center gap-1.5">
@@ -451,10 +453,10 @@ export const LLMSettings: React.FC = () => {
                 onClick={() => setShowApiKeyInput(!showApiKeyInput)}
               >
                 {showApiKeyInput
-                  ? 'Cancel'
+                  ? t('actions.cancel')
                   : llmConfig.authenticated
-                    ? 'Update Key'
-                    : 'Set API Key'}
+                    ? t('settings.updateKey')
+                    : t('settings.setApiKey')}
               </Button>
             </div>
           </SettingRow>
@@ -478,19 +480,23 @@ export const LLMSettings: React.FC = () => {
         )}
       </SettingSection>
 
-      <SettingSection title="Image Provider" collapsible defaultCollapsed>
-        <SettingRow title="Provider">
+      <SettingSection
+        title={t('settings.imageProvider')}
+        collapsible
+        defaultCollapsed
+      >
+        <SettingRow title={t('settings.provider')}>
           <div className="w-44">
             <Select
               options={imageProviderOptions}
               value={llmImageConfig?.provider || 'azure-openai'}
               onChange={(v) => saveImage({ provider: v })}
-              placeholder="Select provider…"
+              placeholder={t('settings.selectProvider')}
             />
           </div>
         </SettingRow>
 
-        <SettingRow title="Endpoint">
+        <SettingRow title={t('settings.endpoint')}>
           <input
             type="text"
             placeholder="https://…cognitiveservices.azure.com"
@@ -504,7 +510,7 @@ export const LLMSettings: React.FC = () => {
           />
         </SettingRow>
 
-        <SettingRow title="Model">
+        <SettingRow title={t('settings.model')}>
           <div className="w-56">
             <Select
               options={IMAGE_MODEL_FAMILY_OPTIONS}
@@ -519,8 +525,8 @@ export const LLMSettings: React.FC = () => {
         </SettingRow>
 
         <SettingRow
-          title="Deployment"
-          description="Optional. Override only if your Azure deployment name differs from the model above."
+          title={t('settings.deployment')}
+          description={t('settings.deploymentOptional')}
         >
           <input
             type="text"
@@ -535,10 +541,13 @@ export const LLMSettings: React.FC = () => {
           />
         </SettingRow>
 
-        <SettingRow title="API Version" description="Optional.">
+        <SettingRow
+          title={t('settings.apiVersion')}
+          description={t('settings.optional')}
+        >
           <input
             type="text"
-            placeholder="Use 2025-04-01-preview or later."
+            placeholder={t('settings.imageApiVersionPlaceholder')}
             value={imgApiVersion}
             onChange={(e) => {
               const v = e.target.value;
@@ -549,7 +558,7 @@ export const LLMSettings: React.FC = () => {
           />
         </SettingRow>
 
-        <SettingRow title="Image Quality">
+        <SettingRow title={t('settings.imageQuality')}>
           <div className="w-56">
             <Select
               options={getImageCapabilities(imgModelFamily).qualities.map(
@@ -558,7 +567,9 @@ export const LLMSettings: React.FC = () => {
                     q === getImageCapabilities(imgModelFamily).defaultQuality;
                   return {
                     value: q,
-                    label: isDefault ? `${q} (default)` : q,
+                    label: isDefault
+                      ? t('settings.defaultSuffix', { value: q })
+                      : q,
                   };
                 },
               )}
@@ -573,11 +584,11 @@ export const LLMSettings: React.FC = () => {
         </SettingRow>
 
         <SettingRow
-          title="API Key"
+          title={t('settings.apiKey')}
           description={
             llmImageConfig?.authenticated
-              ? 'A key is already saved — leave empty to keep it.'
-              : 'Required to call the image API.'
+              ? t('settings.savedKeyKeepEmpty')
+              : t('settings.imageKeyRequired')
           }
         >
           <div className="flex items-center gap-1.5">

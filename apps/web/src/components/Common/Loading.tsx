@@ -1,5 +1,6 @@
 import Lottie from 'lottie-react';
 import { Loader2 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import loadingAnimation from '@/assets/loading.json';
 
@@ -37,12 +38,13 @@ function SpinnerLoadingIndicator({
   size?: LoadingSize;
   className?: string;
 }) {
+  const { t } = useTranslation();
   // Rotate a plain HTML element instead of the SVG itself so Chromium can
   // promote the transform animation to the compositor during canvas jank.
   return (
     <span
       role="status"
-      aria-label="Loading"
+      aria-label={t('status.loading')}
       className={cn(
         'inline-flex animate-spin will-change-transform',
         className,
@@ -60,12 +62,13 @@ function BrandLoadingIndicator({
   size?: LoadingSize;
   className?: string;
 }) {
+  const { t } = useTranslation();
   const px = sizeMap[size];
 
   return (
     <span
       role="status"
-      aria-label="Loading"
+      aria-label={t('status.loading')}
       className={cn('inline-flex shrink-0', className)}
       style={{ width: px, height: px }}
     >

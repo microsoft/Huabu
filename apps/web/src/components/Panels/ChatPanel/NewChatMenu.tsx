@@ -7,6 +7,7 @@
 
 import { Bookmark, ChevronDown, Plus } from 'lucide-react';
 import { useCallback, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import {
   AgentMenuOptions,
@@ -63,6 +64,7 @@ export const NewChatMenu = ({
   disabled = false,
   busy = false,
 }: NewChatMenuProps) => {
+  const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const triggerRef = useRef<HTMLDivElement>(null);
   const justDismissedRef = useRef(false);
@@ -90,8 +92,8 @@ export const NewChatMenu = ({
 
   const shortcutTitle =
     currentBinding.kind === 'external'
-      ? `New chat with ${currentBinding.alias}`
-      : 'New conversation';
+      ? t('chat.newChatWith', { name: currentBinding.alias })
+      : t('chat.newConversation');
 
   const handleShortcut = useCallback(() => {
     if (disabled || busy) return;
@@ -117,7 +119,7 @@ export const NewChatMenu = ({
             iconOnly
             onClick={onSave}
             disabled={disabled || busy || !canSave}
-            title="Save chat as question node"
+            title={t('chat.saveAsQuestion')}
             tooltipPlacement="bottom"
             className="rounded-r-none"
           >
@@ -145,7 +147,7 @@ export const NewChatMenu = ({
           onClick={handleToggle}
           disabled={disabled}
           aria-expanded={isOpen}
-          title="Start chat with…"
+          title={t('chat.startChatWith')}
           tooltipPlacement="bottom"
           className={cn(
             'rounded-l-none px-0.5 [&_svg]:h-3 [&_svg]:w-3',
@@ -166,12 +168,12 @@ export const NewChatMenu = ({
           className="flex max-w-[min(20rem,calc(100vw-1rem))] flex-col overflow-hidden py-1"
         >
           <AgentMenuOptions
-            heading="Start new chat with"
+            heading={t('chat.startNewChatWith')}
             currentBinding={currentBinding}
             currentMode={currentMode}
             profiles={profiles}
             busy={busy}
-            currentRowTitle="Current — starts another thread with the same setup"
+            currentRowTitle={t('chat.currentStartsSameSetup')}
             onSelect={handleSelect}
             onAddAgent={
               onRefreshProfiles

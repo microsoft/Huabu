@@ -1,5 +1,6 @@
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/Common/Button';
 
@@ -13,6 +14,7 @@ export const AiSummaryBanner = ({
   summary,
   keywords,
 }: AiSummaryBannerProps) => {
+  const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState(false);
 
   const hasSummary = typeof summary === 'string' && summary.trim().length > 0;
@@ -28,7 +30,7 @@ export const AiSummaryBanner = ({
         onClick={() => setCollapsed((prev) => !prev)}
       >
         {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
-        <span>AI Summary</span>
+        <span>{t('node.aiSummary')}</span>
       </Button>
       {!collapsed && (
         <div className="animate-in fade-in flex flex-col gap-1.5 px-3 pb-2 duration-150">

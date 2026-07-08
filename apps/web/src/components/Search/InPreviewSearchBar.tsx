@@ -28,6 +28,7 @@
 
 import { ChevronDown, ChevronUp, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { findNthRange, scrollRangeIntoView } from '../../hooks/searchDom';
 import { useTextHighlight } from '../../hooks/useTextHighlight';
@@ -42,6 +43,7 @@ interface InPreviewSearchBarProps {
 export const InPreviewSearchBar = ({
   scopeEl,
 }: InPreviewSearchBarProps): JSX.Element | null => {
+  const { t } = useTranslation();
   const scope = useSearchStore((s) => s.scope);
   const query = useSearchStore((s) => s.query);
   const setQuery = useSearchStore((s) => s.setQuery);
@@ -125,7 +127,7 @@ export const InPreviewSearchBar = ({
         ref={inputRef}
         type="text"
         value={query}
-        placeholder="Find…"
+        placeholder={t('search.findPlaceholder')}
         onChange={(e) => setQuery(e.target.value)}
         className="placeholder:text-fg-subtle text-fg-default w-44 min-w-0 bg-transparent px-1 text-sm outline-none"
       />
@@ -140,7 +142,7 @@ export const InPreviewSearchBar = ({
         variant="ghost"
         iconOnly
         size="sm"
-        title="Previous match (Shift+Enter)"
+        title={t('search.previousMatchShortcut')}
         disabled={matchCount === 0}
         onClick={() => jumpToMatch(activeMatchIdx - 1)}
       >
@@ -150,7 +152,7 @@ export const InPreviewSearchBar = ({
         variant="ghost"
         iconOnly
         size="sm"
-        title="Next match (Enter)"
+        title={t('search.nextMatchShortcut')}
         disabled={matchCount === 0}
         onClick={() => jumpToMatch(activeMatchIdx + 1)}
       >
@@ -163,7 +165,7 @@ export const InPreviewSearchBar = ({
         iconOnly
         size="sm"
         className="p-0.5"
-        title="Close (Esc)"
+        title={t('actions.closeEsc')}
         onClick={close}
       >
         <X />

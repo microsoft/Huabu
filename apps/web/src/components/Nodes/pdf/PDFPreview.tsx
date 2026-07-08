@@ -2,6 +2,7 @@ import clsx from 'clsx';
 import { Highlighter, Scan } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
 import { Document } from 'react-pdf';
 
 import { resolveArtifactUrl, uploadImage } from '@/api/artifact';
@@ -49,6 +50,7 @@ export const PDFPreview = ({
   data,
   onDataChange,
 }: PreviewComponentProps) => {
+  const { t } = useTranslation();
   const src = typeof data.src === 'string' ? data.src : '';
   const canvasId = useCanvasStore((s) => s.canvasId);
   const resolvedSrc = resolveArtifactUrl(src, canvasId);
@@ -378,9 +380,9 @@ export const PDFPreview = ({
         tone="neutral"
         size="sm"
         iconOnly
-        title="Select Area"
+        title={t('node.selectArea')}
         tooltipPlacement="bottom"
-        aria-label="Select area to capture"
+        aria-label={t('node.selectAreaToCapture')}
         aria-pressed={captureMode}
         className={clsx(captureMode && 'text-info bg-bg-default')}
         onClick={() => {
@@ -397,9 +399,9 @@ export const PDFPreview = ({
         tone="neutral"
         size="sm"
         iconOnly
-        title="Highlight Text"
+        title={t('node.highlightText')}
         tooltipPlacement="bottom"
-        aria-label="Highlight text"
+        aria-label={t('node.highlightText')}
         aria-pressed={highlightMode}
         className={clsx(highlightMode && 'bg-bg-default text-warning-light')}
         onClick={() => {
@@ -441,7 +443,7 @@ export const PDFPreview = ({
               loading=""
               error={
                 <div className="text-danger-light p-4 text-xs">
-                  Error loading PDF
+                  {t('node.errorLoadingPdf')}
                 </div>
               }
               className={clsx('flex flex-col items-center gap-0')}
@@ -466,7 +468,7 @@ export const PDFPreview = ({
           </div>
         ) : (
           <div className="text-fg-subtle flex h-full w-full items-center justify-center text-sm">
-            No PDF Source
+            {t('node.noPdfSource')}
           </div>
         )}
       </div>

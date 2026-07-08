@@ -10,6 +10,7 @@
  */
 
 import { Camera, X as XIcon } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import { partIsExecuting } from './helpers';
 import { resolveArtifactUrl } from '../../../../api/artifact';
@@ -44,35 +45,42 @@ function pickDataFields(part: SnapshotNodesToolPart): {
   return {
     nodeIds: [],
     snapshots: [],
-    error: typeof env.error === 'string' ? env.error : 'Snapshot failed',
+    error: typeof env.error === 'string' ? env.error : undefined,
   };
 }
 
 export function SnapshotNodesCard({ part }: SnapshotNodesCardProps) {
+  const { t } = useTranslation();
   const canvasId = useCanvasStore((s) => s.canvasId);
-  const { nodeIds, snapshots, error } = pickDataFields(part);
+  const { nodeIds, snapshots, error: rawError } = pickDataFields(part);
   const executing = partIsExecuting(part);
-  const failed = part.status === 'failed' || error !== undefined;
+  const failed = part.status === 'failed' || rawError !== undefined;
+  const error = rawError ?? (failed ? t('messages.snapshotFailed') : undefined);
 
   // ── Title ──────────────────────────────────────────────────────────
   const nodeCount = nodeIds.length;
   const imageCount = snapshots.length;
-  const nodesLabel = nodeCount === 1 ? 'node' : 'nodes';
-  const imagesLabel = imageCount === 1 ? 'image' : 'images';
+  const nodesLabel = t('messages.node', { count: nodeCount });
+  const imagesLabel = t('messages.image', { count: imageCount });
 
   let title: string;
   if (executing) {
     title =
       nodeCount > 0
-        ? `Snapshotting ${nodeCount} ${nodesLabel}…`
-        : 'Snapshotting nodes…';
+        ? t('messages.snapshottingNodesCount', { count: nodeCount })
+        : t('messages.snapshottingNodes');
   } else if (failed) {
-    title = 'Snapshot failed';
+    title = t('messages.snapshotFailed');
   } else if (imageCount === nodeCount) {
     // 1:1 mapping (typical for pure image nodes / single-stroke sketches)
-    title = `Snapshotted ${nodeCount} ${nodesLabel}`;
+    title = t('messages.snapshottedNodes', { count: nodeCount });
   } else {
-    title = `Snapshotted ${nodeCount} ${nodesLabel} → ${imageCount} ${imagesLabel}`;
+    title = t('messages.snapshottedNodesImages', {
+      nodes: nodeCount,
+      nodeLabel: nodesLabel,
+      images: imageCount,
+      imageLabel: imagesLabel,
+    });
   }
 
   // ── Icon ───────────────────────────────────────────────────────────
@@ -111,12 +119,12 @@ export function SnapshotNodesCard({ part }: SnapshotNodesCardProps) {
                     href={url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    title={`Open ${snap.src} in a new tab`}
+                    title={t('messages.openSnapshot', { src: snap.src })}
                     className="border-edge-default bg-bg-default block h-24 overflow-hidden rounded-md border"
                   >
                     <img
                       src={url}
-                      alt={`Snapshot ${i + 1}`}
+                      alt={t('messages.snapshotAlt', { count: i + 1 })}
                       className="size-full object-contain"
                       loading="lazy"
                     />

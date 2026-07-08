@@ -16,6 +16,7 @@ import {
   useStore,
 } from '@xyflow/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import useCanvasStore from '@/store/canvasStore';
 
@@ -215,6 +216,7 @@ function EdgeLabelEditor({
   editing: boolean;
   setEditing: (next: boolean) => void;
 }) {
+  const { t } = useTranslation();
   const executeCommands = useCanvasStore((s) => s.executeCommands);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -414,7 +416,7 @@ function EdgeLabelEditor({
         ref={ref}
         contentEditable={editing}
         suppressContentEditableWarning
-        aria-label="Edge label"
+        aria-label={t('node.edgeLabel')}
         title={hasLabel && !editing ? value : undefined}
         spellCheck={editing}
         onBlur={commit}

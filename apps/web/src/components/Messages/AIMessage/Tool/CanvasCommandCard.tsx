@@ -7,6 +7,7 @@
 
 import { Check, ChevronRight, Command } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import {
   partIsExecuting,
@@ -19,6 +20,7 @@ import { NodeRef } from '../../../Common/NodeRef';
 import type { CanvasCommandsToolPart } from '@sediment/shared';
 
 export function CanvasCommandCard({ part }: ToolPart<CanvasCommandsToolPart>) {
+  const { t } = useTranslation();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const toolResponse = part.data ?? null;
   const isExecuting = partIsExecuting(part);
@@ -37,6 +39,24 @@ export function CanvasCommandCard({ part }: ToolPart<CanvasCommandsToolPart>) {
 
   const hasChanges = displayChanges.length > 0;
 
+  const translatedChangeLabel = (label: string) => {
+    const [prefix, ...rest] = label.split(':');
+    const suffix = rest.length > 0 ? `:${rest.join(':')}` : '';
+    const translatedPrefix =
+      {
+        Created: t('messages.canvasChange.created'),
+        Deleted: t('messages.canvasChange.deleted'),
+        Updated: t('messages.canvasChange.updated'),
+        Connected: t('messages.canvasChange.connected'),
+        Disconnected: t('messages.canvasChange.disconnected'),
+        'Moved into frame': t('messages.canvasChange.movedIntoFrame'),
+        'Moved out of frame': t('messages.canvasChange.movedOutOfFrame'),
+        'Dissolved frame': t('messages.canvasChange.dissolvedFrame'),
+        Repositioned: t('messages.canvasChange.repositioned'),
+      }[prefix] ?? prefix;
+    return `${translatedPrefix}${suffix}`;
+  };
+
   const statusIcon = isExecuting ? (
     <Loading layout="inline" size="xs" className="text-info" />
   ) : (
@@ -47,8 +67,8 @@ export function CanvasCommandCard({ part }: ToolPart<CanvasCommandsToolPart>) {
   if (hasChanges) {
     const title =
       displayChanges.length === 1
-        ? 'Canvas 1 change'
-        : `Canvas ${displayChanges.length} changes`;
+        ? t('messages.canvasChangeCount', { count: 1 })
+        : t('messages.canvasChangeCount', { count: displayChanges.length });
 
     // Single change → simple inline row (matches read-node single style)
     if (displayChanges.length === 1) {
@@ -60,7 +80,7 @@ export function CanvasCommandCard({ part }: ToolPart<CanvasCommandsToolPart>) {
       const content =
         change.sourceNodeId && change.targetNodeId ? (
           <>
-            {change.label.split(':')[0] || 'Connected'}{' '}
+            {translatedChangeLabel(change.label.split(':')[0] || 'Connected')}{' '}
             <NodeRef
               nodeId={change.sourceNodeId}
               snapshotLabel={change.sourceNodeLabel}
@@ -73,11 +93,11 @@ export function CanvasCommandCard({ part }: ToolPart<CanvasCommandsToolPart>) {
           </>
         ) : change.nodeId ? (
           <>
-            {change.label.split(':')[0]}:{' '}
+            {translatedChangeLabel(change.label.split(':')[0])}:{' '}
             <NodeRef nodeId={change.nodeId} snapshotLabel={change.nodeLabel} />
           </>
         ) : (
-          change.label
+          translatedChangeLabel(change.label)
         );
       return (
         <div className="flex justify-start">
@@ -118,7 +138,9 @@ export function CanvasCommandCard({ part }: ToolPart<CanvasCommandsToolPart>) {
               {displayChanges.map((change) => {
                 const renderLabel = () => {
                   if (change.sourceNodeId && change.targetNodeId) {
-                    const verb = change.label.split(':')[0] || 'Connected';
+                    const verb = translatedChangeLabel(
+                      change.label.split(':')[0] || 'Connected',
+                    );
                     return (
                       <>
                         {verb}{' '}
@@ -135,7 +157,9 @@ export function CanvasCommandCard({ part }: ToolPart<CanvasCommandsToolPart>) {
                     );
                   }
                   if (change.nodeId) {
-                    const prefix = change.label.split(':')[0];
+                    const prefix = translatedChangeLabel(
+                      change.label.split(':')[0],
+                    );
                     return (
                       <>
                         {prefix}:{' '}
@@ -146,7 +170,7 @@ export function CanvasCommandCard({ part }: ToolPart<CanvasCommandsToolPart>) {
                       </>
                     );
                   }
-                  return change.label;
+                  return translatedChangeLabel(change.label);
                 };
 
                 return (
@@ -174,7 +198,9 @@ export function CanvasCommandCard({ part }: ToolPart<CanvasCommandsToolPart>) {
         <div className="text-fg-muted hover:bg-hover flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors">
           {statusIcon}
           <Command size={12} className="text-fg-muted/60 flex-shrink-0" />
-          <span className="flex-1 truncate">Canvas commands</span>
+          <span className="flex-1 truncate">
+            {t('messages.canvasCommands')}
+          </span>
         </div>
       </div>
     </div>

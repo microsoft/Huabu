@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { resolveArtifactUrl, uploadImage, uploadPdf } from '@/api/artifact';
 import useCanvasStore from '@/store/canvasStore';
@@ -104,9 +105,10 @@ export const ChatInput = ({
   agentSelectorSlot,
   contextUsageOverride,
   disabled = false,
-  placeholder = 'Asking anything here...',
+  placeholder,
   connectedTop = false,
 }: ChatInputProps) => {
+  const { t } = useTranslation();
   const isSubmitDisabled = disabled || !value.trim();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const historyIndexRef = useRef(-1);
@@ -167,7 +169,7 @@ export const ChatInput = ({
             type: 'image',
             source: 'upload',
             url,
-            label: file.name || 'Image',
+            label: file.name || t('chat.attachmentFallbackImage'),
           });
         } else if (file.type === 'application/pdf') {
           const url = await uploadPdf(file, canvasId);
@@ -175,7 +177,7 @@ export const ChatInput = ({
             type: 'pdf',
             source: 'upload',
             url,
-            label: file.name || 'PDF',
+            label: file.name || t('chat.attachmentFallbackPdf'),
             filename: file.name,
           });
         } else {
@@ -191,7 +193,7 @@ export const ChatInput = ({
             source: 'upload',
             url,
             content: textContent,
-            label: file.name || 'File',
+            label: file.name || t('chat.attachmentFallbackFile'),
             filename: file.name,
           });
         }
@@ -199,7 +201,7 @@ export const ChatInput = ({
         console.error('Failed to upload file:', err);
       }
     },
-    [addPendingAttachment, canvasId],
+    [addPendingAttachment, canvasId, t],
   );
 
   // Handle paste — upload pasted images/files as attachments
@@ -245,7 +247,9 @@ export const ChatInput = ({
 
   // Dynamic placeholder based on mode
   const currentPlaceholder =
-    mode === 'operate' ? 'Describe the canvas change you want...' : placeholder;
+    mode === 'operate'
+      ? t('chat.operatePlaceholder')
+      : (placeholder ?? t('chat.inputPlaceholder'));
 
   // Auto-resize textarea.
   // Runs synchronously before paint to avoid the brief flash where the
@@ -384,13 +388,18 @@ export const ChatInput = ({
                 (() => {
                   const att = selectionAttachment;
                   const sourceNodeId = att.originNodeId;
-                  const previewText = att.content ?? att.label ?? 'text';
+                  const previewText =
+                    att.content ??
+                    att.label ??
+                    t('chat.attachmentFallbackText');
 
                   const tooltipParts: React.ReactNode[] = [];
                   if (sourceNodeId) {
                     tooltipParts.push(
                       <div key="src" className="flex items-center gap-1">
-                        <span className="text-fg-subtle">Source:</span>
+                        <span className="text-fg-subtle">
+                          {t('chat.attachmentSource')}
+                        </span>
                         <span className="[&>div]:text-fg-inverse [&>div]:border-fg-inverse/30 [&>div:hover]:bg-fg-inverse/10">
                           <NodeRef nodeId={sourceNodeId} />
                         </span>
@@ -405,7 +414,9 @@ export const ChatInput = ({
                         : att.content;
                     tooltipParts.push(
                       <div key="content" className="mt-1 max-w-[360px]">
-                        <span className="text-fg-subtle">Content: </span>
+                        <span className="text-fg-subtle">
+                          {t('chat.attachmentContent')}{' '}
+                        </span>
                         <span className="break-words whitespace-pre-wrap">
                           {truncated}
                         </span>
@@ -440,7 +451,7 @@ export const ChatInput = ({
                         }}
                         tooltipWrapperClassName="absolute top-0.5 right-0.5 inline-flex opacity-0 transition-opacity group-hover:opacity-100"
                         className="text-fg-inverse bg-inverse/50 enabled:hover:bg-inverse/70 p-0.5"
-                        title="Remove attachment"
+                        title={t('chat.removeAttachment')}
                       >
                         <X />
                       </Button>
@@ -469,14 +480,19 @@ export const ChatInput = ({
 
                 // Text preview for the tile
                 const previewText =
-                  att.content ?? att.label ?? att.filename ?? 'file';
+                  att.content ??
+                  att.label ??
+                  att.filename ??
+                  t('chat.attachmentFallbackFileLower');
 
                 // Build tooltip content: source + content
                 const tooltipParts: React.ReactNode[] = [];
                 if (sourceNodeId) {
                   tooltipParts.push(
                     <div key="src" className="flex items-center gap-1">
-                      <span className="text-fg-subtle">Source:</span>
+                      <span className="text-fg-subtle">
+                        {t('chat.attachmentSource')}
+                      </span>
                       <span className="[&>div]:text-fg-inverse [&>div]:border-fg-inverse/30 [&>div:hover]:bg-fg-inverse/10">
                         <NodeRef nodeId={sourceNodeId} />
                       </span>
@@ -491,7 +507,9 @@ export const ChatInput = ({
                       : att.content;
                   tooltipParts.push(
                     <div key="content" className="mt-1 max-w-[360px]">
-                      <span className="text-fg-subtle">Content: </span>
+                      <span className="text-fg-subtle">
+                        {t('chat.attachmentContent')}{' '}
+                      </span>
                       <span className="break-words whitespace-pre-wrap">
                         {truncated}
                       </span>
@@ -513,7 +531,7 @@ export const ChatInput = ({
                     {att.type === 'image' && att.url ? (
                       <img
                         src={resolveArtifactUrl(att.url, canvasId ?? undefined)}
-                        alt={att.label ?? 'Attached image'}
+                        alt={att.label ?? t('chat.attachedImageAlt')}
                         className="h-12 w-12 rounded-md object-contain"
                       />
                     ) : (
@@ -534,7 +552,7 @@ export const ChatInput = ({
                       }}
                       tooltipWrapperClassName="absolute top-0.5 right-0.5 inline-flex opacity-0 transition-opacity group-hover:opacity-100"
                       className="text-fg-inverse bg-inverse/50 enabled:hover:bg-inverse/70 p-0.5"
-                      title="Remove attachment"
+                      title={t('chat.removeAttachment')}
                     >
                       <X />
                     </Button>
@@ -606,9 +624,9 @@ export const ChatInput = ({
                   iconOnly
                   size="sm"
                   type="button"
-                  title="Stop generating"
+                  title={t('chat.stopGenerating')}
                   onClick={onStop}
-                  aria-label="Stop"
+                  aria-label={t('chat.stop')}
                 >
                   <Square />
                 </Button>
@@ -619,9 +637,9 @@ export const ChatInput = ({
                   iconOnly
                   size="sm"
                   type="submit"
-                  title="Send Message"
+                  title={t('chat.sendMessage')}
                   disabled={isSubmitDisabled}
-                  aria-label="Send"
+                  aria-label={t('chat.send')}
                 >
                   <ArrowUp />
                 </Button>

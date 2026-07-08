@@ -1,6 +1,7 @@
 import { clsx } from 'clsx';
 import { AlertTriangle, MapPin, MessageSquare } from 'lucide-react';
 import { memo, useCallback, useMemo, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { createId, getQuestionNodeStatus } from '@sediment/shared';
 
@@ -47,6 +48,7 @@ const STICKY_BG = 'var(--question-bg)';
  */
 export const QuestionNode = memo(
   ({ id, data, selected, width }: NodeProps<QuestionNodeType>) => {
+    const { t } = useTranslation();
     const patchNodeSilent = useCanvasStore((state) => state.patchNodeSilent);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -196,19 +198,22 @@ export const QuestionNode = memo(
           <FloatingToolbar.ActionButton
             title={
               status === 'running'
-                ? 'Watch live conversation'
-                : 'View conversation'
+                ? t('node.watchLiveConversation')
+                : t('node.viewConversation')
             }
             onClick={openInChat}
           >
             <MessageSquare size={14} />
           </FloatingToolbar.ActionButton>
         ) : (
-          <FloatingToolbar.ActionButton title="Ask" onClick={openInCompose}>
+          <FloatingToolbar.ActionButton
+            title={t('node.ask')}
+            onClick={openInCompose}
+          >
             <MessageSquare size={14} />
           </FloatingToolbar.ActionButton>
         ),
-      [isForkPending, canOpenInChat, status, openInChat, openInCompose],
+      [isForkPending, canOpenInChat, status, openInChat, openInCompose, t],
     );
 
     const isDoneUnviewed = status === 'done' && !viewed;
@@ -257,8 +262,8 @@ export const QuestionNode = memo(
               title={
                 canOpenInChat
                   ? status === 'running'
-                    ? 'Watch live conversation'
-                    : 'Open conversation'
+                    ? t('node.watchLiveConversation')
+                    : t('node.openConversation')
                   : undefined
               }
               trailing={
@@ -283,10 +288,9 @@ export const QuestionNode = memo(
  * opens the conversation where the skipped rows are listed.
  */
 function ConflictBadge({ count }: { count: number }) {
+  const { t } = useTranslation();
   return (
-    <Tooltip
-      content={`${count} agent ${count === 1 ? 'change was' : 'changes were'} skipped because you were editing.`}
-    >
+    <Tooltip content={t('node.agentChangesSkipped', { count })}>
       <span className="bg-warning-bg text-warning pointer-events-auto inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs font-semibold shadow-sm">
         <AlertTriangle size={12} />
         {count}

@@ -1,5 +1,6 @@
 import { ArrowLeft, ListIndentIncrease, PanelRightOpen } from 'lucide-react';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import {
   setAcpSessionConfigOption,
@@ -53,6 +54,7 @@ interface ChatPanelProps {
 }
 
 export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
+  const { t } = useTranslation();
   const [input, setInput] = useState('');
   const setLastAction = useChatStore((state) => state.setLastAction);
 
@@ -348,8 +350,8 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         applyAcpSessionMetaOptimistic({ currentModeId: previousModeId });
         toast(
           err instanceof Error
-            ? `Failed to switch mode: ${err.message}`
-            : 'Failed to switch mode',
+            ? t('chat.failedSwitchModeWithMessage', { message: err.message })
+            : t('chat.failedSwitchMode'),
           { tone: 'danger' },
         );
       }
@@ -359,6 +361,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       applyAcpSessionMetaEvent,
       applyAcpSessionMetaOptimistic,
       acpSetRpcSpawnCtx,
+      t,
     ],
   );
 
@@ -374,13 +377,13 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         applyAcpSessionMetaOptimistic({ currentModelId: previousModelId });
         toast(
           err instanceof Error
-            ? `Failed to switch model: ${err.message}`
-            : 'Failed to switch model',
+            ? t('chat.failedSwitchModelWithMessage', { message: err.message })
+            : t('chat.failedSwitchModel'),
           { tone: 'danger' },
         );
       }
     },
-    [threadId, applyAcpSessionMetaOptimistic, acpSetRpcSpawnCtx],
+    [threadId, applyAcpSessionMetaOptimistic, acpSetRpcSpawnCtx, t],
   );
 
   const handleAcpSelectConfigOption = useCallback(
@@ -412,13 +415,13 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         }
         toast(
           err instanceof Error
-            ? `Failed to update option: ${err.message}`
-            : 'Failed to update option',
+            ? t('chat.failedUpdateOptionWithMessage', { message: err.message })
+            : t('chat.failedUpdateOption'),
           { tone: 'danger' },
         );
       }
     },
-    [threadId, applyAcpSessionMetaOptimistic, acpSetRpcSpawnCtx],
+    [threadId, applyAcpSessionMetaOptimistic, acpSetRpcSpawnCtx, t],
   );
 
   // Question thread replay mode
@@ -453,23 +456,26 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   }, [llmConfig?.model, llmModels]);
 
   const panelTitle = useMemo(() => {
-    if (viewingSketchCluster) return 'Sketch Recognition';
+    if (viewingSketchCluster) return t('chat.sketchRecognition');
     if (viewingQuestionThread) {
       // Composing a fresh node: it has no real label yet, so show a
       // neutral title instead of the auto-generated "Question N".
-      if (isComposingQuestion) return 'New question';
-      return viewingQuestionLabel ?? 'Question';
+      if (isComposingQuestion) return t('chat.newQuestion');
+      return viewingQuestionLabel ?? t('chat.question');
     }
     // When the thread is delegated to an external ACP agent, the
     // built-in model name is irrelevant — surface the agent alias
     // instead so the header reflects who's actually answering.
     if (agentBinding.kind === 'external') {
-      return `Chat with ${agentBinding.alias}`;
+      return t('chat.chatWith', { name: agentBinding.alias });
     }
-    return activeModelName ? `Chat with ${activeModelName}` : 'Chat';
+    return activeModelName
+      ? t('chat.chatWith', { name: activeModelName })
+      : t('chat.title');
   }, [
     activeModelName,
     agentBinding,
+    t,
     viewingQuestionThread,
     isComposingQuestion,
     viewingQuestionLabel,
@@ -676,7 +682,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
                   ? closeSketchCluster
                   : handleCloseQuestionThread
               }
-              title="Back to chat"
+              title={t('chat.backToChat')}
               tooltipPlacement="bottom"
               className="-ml-1 shrink-0"
             >

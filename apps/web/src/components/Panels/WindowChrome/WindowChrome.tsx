@@ -1,5 +1,6 @@
 import { BookOpen, House } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link, useLocation } from 'react-router-dom';
 
 import { APP_NAME } from '../../../config/app';
@@ -41,6 +42,7 @@ const LEFT_GUTTER_MAC_PX = 76;
  * the OS-drawn caption controls float above the right edge of this row.
  */
 export function WindowChrome() {
+  const { t } = useTranslation();
   const bridge = getElectronBridge();
   const location = useLocation();
   const canvasTitle = useCanvasStore((s) => s.canvasTitle);
@@ -170,10 +172,10 @@ export function WindowChrome() {
           } as React.CSSProperties
         }
       >
-        <Tooltip content="Home" placement="bottom">
+        <Tooltip content={t('navigation.home')} placement="bottom">
           <Link
             to="/"
-            aria-label="Back to home"
+            aria-label={t('navigation.backHome')}
             className="text-fg-muted hover:bg-hover hover:text-fg-default flex h-7 w-7 items-center justify-center rounded-md transition-colors"
           >
             <House className="h-4 w-4" />
@@ -197,16 +199,18 @@ export function WindowChrome() {
               <div className="text-center">
                 <div>
                   {workspacePath
-                    ? `Path: ${workspacePath}`
-                    : `Workspace: ${workspaceLabel}`}
+                    ? t('workspace.path', { path: workspacePath })
+                    : t('workspace.workspace', { workspace: workspaceLabel })}
                 </div>
                 {canvasCount !== null && (
                   <div>
-                    {canvasCount} canvas{canvasCount !== 1 ? 'es' : ''}
+                    {t('canvasList.canvasCount', { count: canvasCount })}
                   </div>
                 )}
                 {canChangeWorkspace && (
-                  <div className="text-fg-subtle mt-1">Click to switch</div>
+                  <div className="text-fg-subtle mt-1">
+                    {t('workspace.clickToSwitch')}
+                  </div>
                 )}
               </div>
             }
@@ -257,9 +261,9 @@ export function WindowChrome() {
           variant="ghost"
           size="md"
           iconOnly
-          title="User Handbook"
+          title={t('navigation.userHandbook')}
           tooltipPlacement="bottom"
-          aria-label="Open user handbook"
+          aria-label={t('navigation.openUserHandbook')}
           onClick={() => window.open('/docs', '_blank', 'noopener')}
         >
           <BookOpen />

@@ -1,5 +1,6 @@
 import { Fullscreen, ArrowUpRight, ImageOff } from 'lucide-react';
 import { memo, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { resolveAccent } from '@sediment/shared';
 
@@ -34,6 +35,7 @@ function shortenForToolbar(src: string): string {
 
 export const WebNode = memo(
   ({ id, data, selected }: NodeProps<WebNodeType>) => {
+    const { t } = useTranslation();
     const scale = useNodeScale(id, 'web');
     const openExpanded = useCanvasStore((s) => s.openExpanded);
     const canvasId = useCanvasStore((s) => s.canvasId);
@@ -186,7 +188,7 @@ export const WebNode = memo(
           </a>
         ) : null}
         <FloatingToolbar.ActionButton
-          title="Open Large View"
+          title={t('node.openLargeView')}
           onClick={(e) => {
             e.stopPropagation();
             openExpanded(id);
@@ -218,7 +220,7 @@ export const WebNode = memo(
           >
             {!src ? (
               <div className="text-fg-subtle flex h-full w-full items-center justify-center text-base">
-                Invalid URL
+                {t('node.invalidUrl')}
               </div>
             ) : (
               <div className="flex h-full w-full flex-col">
@@ -266,7 +268,7 @@ export const WebNode = memo(
                           className="text-fg-subtle"
                         />
                         <span className="text-fg-subtle text-sm">
-                          {siteName || 'No preview'}
+                          {siteName || t('node.noPreview')}
                         </span>
                       </>
                     )}
@@ -334,7 +336,7 @@ export const WebNode = memo(
             <Loading
               layout="overlay"
               variant="skeleton"
-              message="Processing..."
+              message={t('node.processing')}
             />
           ) : null}
 

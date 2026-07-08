@@ -1,4 +1,5 @@
 import { GripVertical } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import { Button, type ButtonProps } from './Button';
 import { cn } from './cn';
@@ -20,6 +21,7 @@ export const DragToCanvasHandleButton = ({
   children,
   ...props
 }: DragToCanvasHandleButtonProps) => {
+  const { t } = useTranslation();
   const baseClassName = children
     ? 'cursor-grab active:cursor-grabbing'
     : 'h-4.5 w-4.5 p-px! text-fg-subtle hover:text-fg-default flex cursor-grab items-center justify-center rounded';
@@ -28,7 +30,7 @@ export const DragToCanvasHandleButton = ({
     <Button
       variant="ghost"
       iconOnly
-      aria-label="Drag block to canvas"
+      aria-label={t('toolbar.dragBlockToCanvas')}
       draggable
       className={cn(baseClassName, '[&_svg]:h-auto [&_svg]:w-auto', className)}
       onMouseDown={(e) => {

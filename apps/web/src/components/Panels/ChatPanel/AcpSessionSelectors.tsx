@@ -16,6 +16,7 @@
  */
 
 import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { Loading } from '../../Common/Loading';
 import { Select, type SelectOption } from '../../Common/Select';
@@ -75,6 +76,7 @@ function ConfigOptionSelect({
   disabled: boolean;
   onSelect: (value: string | boolean) => void | Promise<void>;
 }) {
+  const { t } = useTranslation();
   const id = String((option as { id?: unknown }).id ?? '');
   const label = String(
     (option as { name?: unknown }).name ??
@@ -90,8 +92,8 @@ function ConfigOptionSelect({
       (option as { currentValue?: unknown }).currentValue,
     );
     const options: SelectOption<'true' | 'false'>[] = [
-      { value: 'true', label: 'On' },
-      { value: 'false', label: 'Off' },
+      { value: 'true', label: t('chat.on') },
+      { value: 'false', label: t('chat.off') },
     ];
     return (
       <Select<'true' | 'false'>
@@ -195,6 +197,7 @@ export const AcpSessionSelectors = ({
   onSelectModel,
   onSelectConfigOption,
 }: AcpSessionSelectorsProps) => {
+  const { t } = useTranslation();
   // ── Mode selector ────────────────────────────────────────────────
   const modeOptions = useMemo<SelectOption<string>[]>(
     () =>
@@ -261,11 +264,11 @@ export const AcpSessionSelectors = ({
         <span
           role="status"
           aria-live="polite"
-          aria-label="Loading agent options"
+          aria-label={t('chat.loadingAgentOptions')}
           className="text-fg-subtle inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs whitespace-nowrap"
         >
           <Loading layout="inline" size="xs" />
-          <span>Loading agent options…</span>
+          <span>{t('chat.loadingAgentOptionsProgress')}</span>
         </span>
       );
     }
@@ -280,7 +283,7 @@ export const AcpSessionSelectors = ({
           value={meta.currentModeId ?? modeOptions[0].value}
           onChange={(next) => void onSelectMode(next)}
           disabled={disabled}
-          title="Agent Mode"
+          title={t('chat.agentMode')}
           variant="ghost"
           shape="pill"
           tone="neutral"
@@ -295,7 +298,7 @@ export const AcpSessionSelectors = ({
           value={meta.currentModelId ?? modelOptions[0].value}
           onChange={(next) => void onSelectModel(next)}
           disabled={disabled}
-          title="Model"
+          title={t('chat.model')}
           variant="ghost"
           shape="pill"
           tone="neutral"

@@ -20,17 +20,28 @@
  */
 import { CANVAS_NODE_TYPES, OFFICE_FORMATS } from '@sediment/shared';
 
-import {
-  NODE_ICON,
-  NODE_TYPE_LABEL,
-  OFFICE_FORMAT_ICON,
-} from '@/config/nodeIcons';
+import { NODE_ICON, OFFICE_FORMAT_ICON } from '@/config/nodeIcons';
 
 import type { CanvasNodeType, OfficeFormat } from '@sediment/shared';
 import type { LucideIcon } from 'lucide-react';
 
 export type OfficeFilterKey = `office:${OfficeFormat}`;
 export type LayerFilterKey = CanvasNodeType | OfficeFilterKey;
+export type LayerFilterLabelKey =
+  | 'layers.filterLabels.note'
+  | 'layers.filterLabels.text'
+  | 'layers.filterLabels.image'
+  | 'layers.filterLabels.pdf'
+  | 'layers.filterLabels.office.generic'
+  | 'layers.filterLabels.office.docx'
+  | 'layers.filterLabels.office.xlsx'
+  | 'layers.filterLabels.office.pptx'
+  | 'layers.filterLabels.video'
+  | 'layers.filterLabels.audio'
+  | 'layers.filterLabels.web'
+  | 'layers.filterLabels.frame'
+  | 'layers.filterLabels.sketch'
+  | 'layers.filterLabels.question';
 
 const OFFICE_FORMAT_LABEL: Record<OfficeFormat, string> = {
   docx: 'Word',
@@ -54,19 +65,50 @@ export function buildOfficeFilterKey(format: OfficeFormat): OfficeFilterKey {
  */
 export function getFilterKeyMeta(key: LayerFilterKey): {
   icon: LucideIcon;
-  label: string;
 } {
   if (isOfficeFilterKey(key)) {
     const format = key.slice('office:'.length) as OfficeFormat;
     return {
       icon: OFFICE_FORMAT_ICON[format] ?? NODE_ICON.office,
-      label: OFFICE_FORMAT_LABEL[format] ?? NODE_TYPE_LABEL.office,
     };
   }
   return {
     icon: NODE_ICON[key],
-    label: NODE_TYPE_LABEL[key],
   };
+}
+
+const FILTER_LABEL_KEY_BY_TYPE: Record<CanvasNodeType, LayerFilterLabelKey> = {
+  note: 'layers.filterLabels.note',
+  text: 'layers.filterLabels.text',
+  image: 'layers.filterLabels.image',
+  pdf: 'layers.filterLabels.pdf',
+  office: 'layers.filterLabels.office.generic',
+  video: 'layers.filterLabels.video',
+  audio: 'layers.filterLabels.audio',
+  web: 'layers.filterLabels.web',
+  frame: 'layers.filterLabels.frame',
+  sketch: 'layers.filterLabels.sketch',
+  question: 'layers.filterLabels.question',
+};
+
+const FILTER_LABEL_KEY_BY_OFFICE_FORMAT: Record<
+  OfficeFormat,
+  LayerFilterLabelKey
+> = {
+  docx: 'layers.filterLabels.office.docx',
+  xlsx: 'layers.filterLabels.office.xlsx',
+  pptx: 'layers.filterLabels.office.pptx',
+};
+
+export function getFilterKeyLabelKey(key: LayerFilterKey): LayerFilterLabelKey {
+  if (isOfficeFilterKey(key)) {
+    const format = key.slice('office:'.length) as OfficeFormat;
+    if (format in OFFICE_FORMAT_LABEL) {
+      return FILTER_LABEL_KEY_BY_OFFICE_FORMAT[format];
+    }
+    return 'layers.filterLabels.office.generic';
+  }
+  return FILTER_LABEL_KEY_BY_TYPE[key];
 }
 
 /**

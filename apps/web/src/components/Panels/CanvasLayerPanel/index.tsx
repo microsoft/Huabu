@@ -1,5 +1,6 @@
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { getQuestionNodeStatus } from '@sediment/shared';
 
@@ -172,6 +173,7 @@ export const CanvasLayerPanel = ({
   isCollapsed,
   onToggle,
 }: CanvasLayerPanelProps) => {
+  const { t } = useTranslation();
   // `MainLayout` keeps this subtree mounted while the column animates to
   // width 0 (to avoid a content-swap flash mid-animation), so the local
   // `isCollapsed` prop is always `false`. We read the real collapse state
@@ -387,7 +389,7 @@ export const CanvasLayerPanel = ({
   }, [layerItems, isFilterActive, selectedKeys]);
 
   const itemsToRender = isFilterActive ? (filteredFlatItems ?? []) : layerItems;
-  const emptyText = isFilterActive ? 'No matching layers' : undefined;
+  const emptyText = isFilterActive ? t('layers.noMatches') : t('layers.empty');
 
   // Build external (not-yet-imported) note rows. Filter out any whose
   // frontmatter id already lives in the canvas state — handles the race
@@ -443,7 +445,7 @@ export const CanvasLayerPanel = ({
 
   return (
     <SidebarPanel
-      title="Layers"
+      title={t('layers.title')}
       isCollapsed={isCollapsed}
       onToggle={onToggle}
       iconCollapsed={<PanelLeftOpen size={16} />}

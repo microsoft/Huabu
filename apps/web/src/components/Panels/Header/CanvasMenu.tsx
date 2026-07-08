@@ -1,6 +1,7 @@
 import clsx from 'clsx';
 import { ChevronDown } from 'lucide-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { exportCanvas } from '../../../api/canvas.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
@@ -23,6 +24,7 @@ interface CanvasMenuProps {
  * Sits in the header and exposes Export / Import canvas actions.
  */
 export const CanvasMenu: React.FC<CanvasMenuProps> = ({ onOpenShortcuts }) => {
+  const { t } = useTranslation();
   const canvasTitle = useCanvasStore((s) => s.canvasTitle);
   const tryRename = useCanvasStore((s) => s.tryRename);
   const canvasId = useCanvasStore((s) => s.canvasId);
@@ -73,13 +75,13 @@ export const CanvasMenu: React.FC<CanvasMenuProps> = ({ onOpenShortcuts }) => {
     setIsOpen(false);
     try {
       await exportCanvas(canvasId);
-      toast('Export started', { tone: 'success' });
+      toast(t('canvasList.exportStarted'), { tone: 'success' });
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Export failed', {
+      toast(err instanceof Error ? err.message : t('canvasList.exportFailed'), {
         tone: 'danger',
       });
     }
-  }, [canvasId]);
+  }, [canvasId, t]);
 
   return (
     <div className="flex w-full min-w-0 items-center">
@@ -105,14 +107,19 @@ export const CanvasMenu: React.FC<CanvasMenuProps> = ({ onOpenShortcuts }) => {
             inputRef.current?.blur();
           }
         }}
-        aria-label="Canvas title"
+        aria-label={t('canvasHeader.titleAria')}
       />
 
       <DropdownMenu
         open={isOpen}
         onOpenChange={setIsOpen}
         trigger={
-          <Button variant="ghost" size="sm" iconOnly aria-label="Canvas menu">
+          <Button
+            variant="ghost"
+            size="sm"
+            iconOnly
+            aria-label={t('canvasHeader.menuAria')}
+          >
             <ChevronDown
               className={clsx(
                 'text-fg-subtle transition-transform duration-150',
@@ -130,7 +137,7 @@ export const CanvasMenu: React.FC<CanvasMenuProps> = ({ onOpenShortcuts }) => {
             undo();
           }}
         >
-          Undo
+          {t('actions.undo')}
         </DropdownMenuItem>
         <DropdownMenuItem
           shortcut={formatShortcut('Ctrl/Cmd+Shift+Z')}
@@ -140,11 +147,11 @@ export const CanvasMenu: React.FC<CanvasMenuProps> = ({ onOpenShortcuts }) => {
             redo();
           }}
         >
-          Redo
+          {t('actions.redo')}
         </DropdownMenuItem>
         <div className="border-edge-default my-1 border-t" />
         <DropdownMenuItem onClick={() => void handleExport()}>
-          Export Canvas
+          {t('canvasHeader.exportCanvas')}
         </DropdownMenuItem>
         {onOpenShortcuts && (
           <DropdownMenuItem
@@ -154,7 +161,7 @@ export const CanvasMenu: React.FC<CanvasMenuProps> = ({ onOpenShortcuts }) => {
               onOpenShortcuts();
             }}
           >
-            Keyboard Shortcuts
+            {t('shortcuts.title')}
           </DropdownMenuItem>
         )}
       </DropdownMenu>

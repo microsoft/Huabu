@@ -11,6 +11,7 @@
 
 import { AlertTriangle, Check, ChevronRight, Eye, Undo2 } from 'lucide-react';
 import { useCallback, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { applyDeltas } from '@sediment/shared/canvas-engine';
 
@@ -41,6 +42,7 @@ export function ChangeReviewCard({
   canvasId,
   threadId,
 }: ChangeReviewCardProps) {
+  const { t } = useTranslation();
   const records = useAcpThreadChangesStore(
     (s) => s.byThread[threadId] ?? EMPTY,
   );
@@ -107,7 +109,7 @@ export function ChangeReviewCard({
     startPreviewDeltas(deltas);
   };
 
-  const title = records.length === 1 ? '1 change' : `${records.length} changes`;
+  const title = t('chat.changeCount', { count: records.length });
 
   return (
     <div className="border-edge-default bg-surface -mb-px rounded-t-2xl border border-b-0 text-xs">
@@ -133,8 +135,8 @@ export function ChangeReviewCard({
           disabled={!hasRevertable}
           title={
             hasRevertable
-              ? 'Hold to preview the state before all changes'
-              : 'Preview unavailable — no revertable changes'
+              ? t('chat.previewAllChanges')
+              : t('chat.previewNoRevertableChanges')
           }
           className="h-5 w-5 rounded-sm"
         >
@@ -146,17 +148,17 @@ export function ChangeReviewCard({
           size="sm"
           className="h-5 rounded-sm"
         >
-          Keep all
+          {t('chat.keepAllChanges')}
         </Button>
         <Button
           onClick={() => void revertAll(canvasId, threadId)}
           variant="outline"
           size="sm"
           disabled={!hasRevertable}
-          title={hasRevertable ? undefined : 'No revertable changes remain'}
+          title={hasRevertable ? undefined : t('chat.noRevertableChanges')}
           className="h-5 rounded-sm"
         >
-          Revert all
+          {t('chat.revertAllChanges')}
         </Button>
       </div>
       {!collapsed && (
@@ -198,6 +200,7 @@ function ChangeRow({
   onKeep: () => void;
   onRevert: () => void;
 }) {
+  const { t } = useTranslation();
   const isEdge = EDGE_KINDS.has(record.kind);
 
   return (
@@ -207,7 +210,7 @@ function ChangeRow({
           <AlertTriangle
             size={12}
             className="text-warning shrink-0"
-            aria-label="Skipped due to a conflict with your edit"
+            aria-label={t('chat.skippedConflictAria')}
           />
         )}
         {isEdge ? (
@@ -244,9 +247,9 @@ function ChangeRow({
           <span className="text-fg-muted truncate">{record.label}</span>
         )}
         {conflicted && (
-          <Tooltip content="The agent tried to change this node, but you were editing it at the same time — your local edit was kept and the agent's change was skipped.">
+          <Tooltip content={t('chat.skippedConflictTooltip')}>
             <span className="text-warning shrink-0 cursor-help whitespace-nowrap">
-              · skipped
+              · {t('chat.skipped')}
             </span>
           </Tooltip>
         )}
@@ -262,10 +265,10 @@ function ChangeRow({
           disabled={stale}
           title={
             conflicted
-              ? 'Preview unavailable — this change was skipped because you were editing this node'
+              ? t('chat.previewSkippedConflict')
               : stale
-                ? 'Preview unavailable — the target was deleted or changed since this edit'
-                : 'Hold to preview the state before this change'
+                ? t('chat.previewStaleChange')
+                : t('chat.previewChange')
           }
           className="h-5 w-5 rounded-sm"
         >
@@ -277,7 +280,7 @@ function ChangeRow({
           size="sm"
           iconOnly
           title={
-            conflicted ? 'Dismiss this skipped change' : 'Keep this change'
+            conflicted ? t('chat.dismissSkippedChange') : t('chat.keepChange')
           }
           className="h-5 w-5 rounded-sm"
         >
@@ -291,10 +294,10 @@ function ChangeRow({
           disabled={stale}
           title={
             conflicted
-              ? 'Nothing to revert — this change was skipped (your edit was kept)'
+              ? t('chat.nothingToRevertSkipped')
               : stale
-                ? 'Revert unavailable — the target was deleted or changed since this edit'
-                : 'Revert this change'
+                ? t('chat.revertStaleChange')
+                : t('chat.revertChange')
           }
           className="h-5 w-5 rounded-sm"
         >

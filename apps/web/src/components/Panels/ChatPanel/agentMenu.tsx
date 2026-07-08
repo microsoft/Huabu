@@ -13,6 +13,7 @@
 
 import { MessageSquare, Plus, Route, Sprout } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { Button } from '../../Common/Button';
 import { cn } from '../../Common/cn';
@@ -117,9 +118,14 @@ export function AgentMenuOptions({
   onSelect,
   onAddAgent,
 }: AgentMenuOptionsProps) {
+  const { t } = useTranslation();
   const modeItems: { mode: AgentMode; label: string; icon: ReactNode }[] = [
-    { mode: 'ask', label: 'Chat', icon: <MessageSquare size={14} /> },
-    { mode: 'operate', label: 'Agent', icon: <Sprout size={14} /> },
+    {
+      mode: 'ask',
+      label: t('chat.modeChat'),
+      icon: <MessageSquare size={14} />,
+    },
+    { mode: 'operate', label: t('chat.modeAgent'), icon: <Sprout size={14} /> },
   ];
 
   return (
@@ -154,7 +160,7 @@ export function AgentMenuOptions({
           className="text-fg-muted mt-1 flex items-center gap-2 px-3 pt-1 pb-0.5 text-[10px] tracking-wider uppercase select-none"
         >
           <span className="bg-edge-default h-px flex-1" />
-          <span>External Agents</span>
+          <span>{t('chat.externalAgents')}</span>
           <span className="bg-edge-default h-px flex-1" />
         </div>
       )}
@@ -192,7 +198,7 @@ export function AgentMenuOptions({
               className="w-full justify-start gap-1.5 rounded px-2 py-1.5 text-left"
             >
               <Plus size={14} />
-              <span className="text-xs">Add agent</span>
+              <span className="text-xs">{t('chat.addAgent')}</span>
             </Button>
           </div>
         </>

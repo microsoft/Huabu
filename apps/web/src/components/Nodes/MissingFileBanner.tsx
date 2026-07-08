@@ -1,5 +1,6 @@
 import { FileWarning, Trash2 } from 'lucide-react';
 import { memo, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/Common/Button';
 import useCanvasStore from '@/store/canvasStore';
@@ -36,6 +37,7 @@ export const MissingFileBanner = memo(
     description,
     variant = 'fill',
   }: MissingFileBannerProps) => {
+    const { t } = useTranslation();
     const deleteNodes = useCanvasStore((s) => s.deleteNodes);
 
     const handleRemove = useCallback(
@@ -58,7 +60,7 @@ export const MissingFileBanner = memo(
             variant="ghost"
             tone="danger"
             iconOnly
-            title="Remove node"
+            title={t('node.removeNode')}
             onClick={handleRemove}
           >
             <Trash2 />
@@ -85,7 +87,7 @@ export const MissingFileBanner = memo(
           onClick={handleRemove}
         >
           <Trash2 />
-          Remove from canvas
+          {t('node.removeFromCanvas')}
         </Button>
       </div>
     );

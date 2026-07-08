@@ -7,6 +7,7 @@
 
 import { Check, ChevronRight, X as XIcon } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { partIsExecuting, truncate, type ToolPart } from './helpers';
 import { ToolKindIcon } from './ToolKindIcon';
@@ -50,7 +51,10 @@ function partFailed(part: AgentToolPart): boolean {
  * field (new), or `data.content` (older shape that projected a thrown
  * handler as a `success` envelope with the message in the body).
  */
-function partErrorText(part: AgentToolPart): string | null {
+function partErrorText(
+  part: AgentToolPart,
+  failedFallback = 'Failed',
+): string | null {
   if (!partFailed(part)) return null;
   const data = part.data as { error?: unknown; data?: unknown } | undefined;
   if (typeof data?.error === 'string' && data.error) return data.error;
@@ -58,8 +62,8 @@ function partErrorText(part: AgentToolPart): string | null {
   if (typeof payload.content === 'string' && payload.content)
     return payload.content;
   if (typeof payload.path === 'string' && payload.path)
-    return `Failed: ${payload.path}`;
-  return 'Failed';
+    return `${failedFallback}: ${payload.path}`;
+  return failedFallback;
 }
 
 /**
@@ -68,7 +72,15 @@ function partErrorText(part: AgentToolPart): string | null {
  * …) is expanded. `read` and `inspect_nodes` have their own richer
  * per-item renderers and don't go through here.
  */
-function callSummary(part: AgentToolPart): string {
+function callSummary(
+  part: AgentToolPart,
+  labels: {
+    match: (count: number) => string;
+    file: (count: number) => string;
+    entry: (count: number) => string;
+    canvasOutline: string;
+  },
+): string {
   const payload = ((part.data as { data?: unknown } | undefined)?.data ??
     {}) as Record<string, unknown>;
   const num = (v: unknown) => (typeof v === 'number' ? v : 0);
@@ -77,23 +89,23 @@ function callSummary(part: AgentToolPart): string {
     case 'grep': {
       const c = num(payload.count);
       const pat = str(payload.pattern);
-      const matchLabel = `${c} ${c === 1 ? 'match' : 'matches'}`;
+      const matchLabel = labels.match(c);
       return pat ? `${pat} — ${matchLabel}` : matchLabel;
     }
     case 'find': {
       const c = num(payload.count);
       const pat = str(payload.pattern);
-      const fileLabel = `${c} ${c === 1 ? 'file' : 'files'}`;
+      const fileLabel = labels.file(c);
       return pat ? `${pat} — ${fileLabel}` : fileLabel;
     }
     case 'ls': {
       const p = str(payload.path);
       const c = num(payload.count);
-      const entryLabel = `${c} ${c === 1 ? 'entry' : 'entries'}`;
+      const entryLabel = labels.entry(c);
       return p ? `${p} — ${entryLabel}` : entryLabel;
     }
     case 'get_canvas_outline':
-      return 'canvas outline';
+      return labels.canvasOutline;
     default:
       return part.toolName;
   }
@@ -106,6 +118,7 @@ export function MergedAgentToolRow({
   tool: string;
   entries: ToolPart<AgentToolPart>[];
 }) {
+  const { t } = useTranslation();
   const [isExpanded, setIsExpanded] = useState(false);
   const count = entries.length;
 
@@ -151,12 +164,12 @@ export function MergedAgentToolRow({
         const ok = tr?.status === 'success' && !!path;
         // Failure text via the shared helper (handles both history shapes),
         // prefixed with the attempted path when we still have it.
-        const err = partErrorText(e.part) ?? '';
+        const err = partErrorText(e.part, t('messages.failed')) ?? '';
         const text = ok ? path : path || err;
         return { path, text, ok, nodeId: ok ? nodeId : undefined };
       })
       .filter((x) => x.text || x.nodeId);
-  }, [tool, entries]);
+  }, [tool, entries, t]);
 
   // Generic per-call failures across ANY merged tool (e.g. an
   // `inspect_nodes` call that threw). Rendered as ✗ rows in the expanded
@@ -165,9 +178,9 @@ export function MergedAgentToolRow({
   const failedEntries = useMemo(
     () =>
       entries
-        .map((e) => partErrorText(e.part))
+        .map((e) => partErrorText(e.part, t('messages.failed')))
         .filter((t): t is string => t !== null),
-    [entries],
+    [entries, t],
   );
 
   // Generic per-CALL detail rows for every tool that isn't `read` or
@@ -180,11 +193,16 @@ export function MergedAgentToolRow({
     return entries.map((e) => {
       const ok = !partFailed(e.part);
       const text = ok
-        ? callSummary(e.part)
-        : (partErrorText(e.part) ?? 'Failed');
+        ? callSummary(e.part, {
+            match: (value) => t('messages.match', { count: value }),
+            file: (value) => t('messages.file', { count: value }),
+            entry: (value) => t('messages.entry', { count: value }),
+            canvasOutline: t('messages.canvasOutline'),
+          })
+        : (partErrorText(e.part, t('messages.failed')) ?? t('messages.failed'));
       return { ok, text };
     });
-  }, [tool, entries]);
+  }, [tool, entries, t]);
 
   // Build merged title and content
   const { title, nodeRefs } = useMemo(() => {
@@ -217,9 +235,9 @@ export function MergedAgentToolRow({
         title:
           count === 1
             ? totalMatched === 1
-              ? 'Inspected 1 node'
-              : `Inspected ${totalMatched} nodes`
-            : `Inspected nodes (×${count})`,
+              ? t('messages.inspectedNodes', { count: 1 })
+              : t('messages.inspectedNodes', { count: totalMatched })
+            : t('messages.inspectedNodesMultipleCalls', { count }),
         nodeRefs: refs,
       };
     }
@@ -238,9 +256,9 @@ export function MergedAgentToolRow({
         title:
           count === 1
             ? firstPath
-              ? `Read ${truncate(firstPath, 60)}`
-              : 'Read file'
-            : `Read ${count} files`,
+              ? t('messages.readPath', { path: truncate(firstPath, 60) })
+              : t('messages.readFile')
+            : t('messages.readFiles', { count }),
         nodeRefs: emptyRefs,
       };
     }
@@ -265,13 +283,19 @@ export function MergedAgentToolRow({
           : {};
       const pattern =
         typeof firstData.pattern === 'string' ? firstData.pattern : '';
-      const matchLabel = totalMatches === 1 ? 'match' : 'matches';
+      const matchLabel = t('messages.match', { count: totalMatches });
       const query = pattern ? ` ${truncate(pattern, 40)}` : '';
       return {
         title:
           count === 1
-            ? `Grep${query} — ${totalMatches} ${matchLabel}`
-            : `Grep (×${count}) — ${totalMatches} ${matchLabel}`,
+            ? t('messages.grepTitle', {
+                query,
+                matches: matchLabel,
+              })
+            : t('messages.grepTitleMultipleCalls', {
+                count,
+                matches: matchLabel,
+              }),
         nodeRefs: emptyRefs,
       };
     }
@@ -296,13 +320,19 @@ export function MergedAgentToolRow({
           : {};
       const pattern =
         typeof firstData.pattern === 'string' ? firstData.pattern : '';
-      const fileLabel = totalPaths === 1 ? 'file' : 'files';
+      const fileLabel = t('messages.file', { count: totalPaths });
       const query = pattern ? ` ${truncate(pattern, 40)}` : '';
       return {
         title:
           count === 1
-            ? `Find${query} — ${totalPaths} ${fileLabel}`
-            : `Find (×${count}) — ${totalPaths} ${fileLabel}`,
+            ? t('messages.findTitle', {
+                query,
+                files: fileLabel,
+              })
+            : t('messages.findTitleMultipleCalls', {
+                count,
+                files: fileLabel,
+              }),
         nodeRefs: emptyRefs,
       };
     }
@@ -316,14 +346,17 @@ export function MergedAgentToolRow({
           : {};
       const firstPath = (first.path as string) || '';
       const firstCount = typeof first.count === 'number' ? first.count : 0;
-      const entryLabel = firstCount === 1 ? 'entry' : 'entries';
+      const entryLabel = t('messages.entry', { count: firstCount });
       return {
         title:
           count === 1
             ? firstPath
-              ? `Ls ${truncate(firstPath, 40)} — ${firstCount} ${entryLabel}`
-              : `Ls — ${firstCount} ${entryLabel}`
-            : `Ls (×${count})`,
+              ? t('messages.lsTitlePath', {
+                  path: truncate(firstPath, 40),
+                  entries: entryLabel,
+                })
+              : t('messages.lsTitle', { entries: entryLabel })
+            : t('messages.lsTitleMultipleCalls', { count }),
         nodeRefs: emptyRefs,
       };
     }
@@ -332,14 +365,14 @@ export function MergedAgentToolRow({
       return {
         title:
           count === 1
-            ? 'Read canvas outline'
-            : `Read canvas outline (×${count})`,
+            ? t('messages.readCanvasOutline')
+            : t('messages.readCanvasOutlineMultipleCalls', { count }),
         nodeRefs: emptyRefs,
       };
     }
 
     return { title: tool, nodeRefs: emptyRefs };
-  }, [tool, entries, count]);
+  }, [tool, entries, count, t]);
 
   const statusIcon = isExecuting ? (
     <Loading layout="inline" size="xs" className="text-info" />
@@ -369,7 +402,7 @@ export function MergedAgentToolRow({
               <ToolKindIcon part={iconPart} className="text-fg-muted/60" />
             )}
             <span className="flex-1 truncate">
-              Inspected{' '}
+              {t('messages.inspected')}{' '}
               <NodeRef
                 nodeId={nodeRefs[0].nodeId}
                 fallbackLabel={nodeRefs[0].label}
@@ -394,7 +427,7 @@ export function MergedAgentToolRow({
               <ToolKindIcon part={iconPart} className="text-fg-muted/60" />
             )}
             <span className="flex-1 truncate">
-              Read{' '}
+              {t('messages.read')}{' '}
               {entry.ok && entry.nodeId ? (
                 <NodeRef
                   nodeId={entry.nodeId}

@@ -1,6 +1,7 @@
 import clsx from 'clsx';
 import { ChevronDown, ChevronRight, Lock, Plus, Unlock } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { Button } from '../../Common/Button';
 
@@ -123,6 +124,7 @@ export const TreeRowItem = React.memo(
     className,
     ...rest
   }: TreeRowItemProps) => {
+    const { t } = useTranslation();
     const [isEditing, setIsEditing] = useState(false);
     const [editValue, setEditValue] = useState(label);
     const inputRef = useRef<HTMLInputElement>(null);
@@ -275,7 +277,9 @@ export const TreeRowItem = React.memo(
                 size="sm"
                 onClick={handleToggleCollapse}
                 className="text-fg-subtle opacity-0 transition-opacity group-hover:opacity-100 hover:!bg-transparent"
-                aria-label={isCollapsed ? 'Expand' : 'Collapse'}
+                aria-label={
+                  isCollapsed ? t('actions.expand') : t('actions.collapse')
+                }
                 aria-expanded={!isCollapsed}
               >
                 {isCollapsed ? (
@@ -330,8 +334,8 @@ export const TreeRowItem = React.memo(
                 size="sm"
                 onClick={handleImport}
                 className="hover:text-fg-default text-fg-subtle opacity-0 transition-opacity group-hover:opacity-100"
-                title="Add to canvas"
-                aria-label="Add to canvas"
+                title={t('layers.addToCanvas')}
+                aria-label={t('layers.addToCanvas')}
               >
                 <Plus />
               </Button>
@@ -349,7 +353,7 @@ export const TreeRowItem = React.memo(
                     ? 'text-fg-default opacity-100'
                     : 'hover:text-fg-default opacity-0 group-hover:opacity-100',
                 )}
-                aria-label={isLocked ? 'Unlock' : 'Lock'}
+                aria-label={isLocked ? t('actions.unlock') : t('actions.lock')}
               >
                 {isLocked ? <Lock /> : <Unlock />}
               </Button>

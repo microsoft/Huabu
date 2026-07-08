@@ -13,7 +13,7 @@ import { join } from 'node:path';
 /** Hook name -> command executed by that hook. */
 const HOOKS = {
   'pre-commit': 'pnpm exec lint-staged',
-  'pre-push': 'pnpm run typecheck',
+  'pre-push': 'pnpm run typecheck && pnpm run check:i18n',
 };
 
 function resolveHooksDir() {

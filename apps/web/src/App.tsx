@@ -1,5 +1,6 @@
 import { FloatingDelayGroup } from '@floating-ui/react';
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   createBrowserRouter,
   Navigate,
@@ -26,13 +27,14 @@ import { useWorkspaceStore } from './store/workspaceStore';
  * Loading spinner shown during workspace initialisation.
  */
 function LoadingScreen() {
+  const { t } = useTranslation();
   return (
     <div className="bg-bg-default h-full">
       <Loading
         variant="brand"
         layout="block"
         size="md"
-        message="Loading workspace…"
+        message={t('app.loadingWorkspace')}
       />
     </div>
   );
@@ -65,6 +67,7 @@ const InitialisingContext = createContext(true);
  * future unmount means no leak window.
  */
 function RootLayout() {
+  const { t } = useTranslation();
   // Block any pathname change that's *leaving* a canvas route, so
   // pending debounced editor edits and the canvas-level structure
   // PUT have time to land before the captured `canvasId` becomes
@@ -132,7 +135,7 @@ function RootLayout() {
           variant="spinner"
           layout="block"
           size="md"
-          message="Saving canvas…"
+          message={t('app.savingCanvas')}
           indicatorClassName="text-fg-subtle"
         />
       )}

@@ -50,3 +50,6 @@ jobs:
 
       - name: Typecheck
         run: pnpm run typecheck
+
+      - name: i18n parity
+        run: pnpm run check:i18n
