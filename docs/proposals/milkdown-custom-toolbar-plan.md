@@ -143,7 +143,12 @@ Milkdown `paragraph` node type, but the UI label follows Crepe and displays
 `Text`. Unsupported or extension-gated block types should stay out of the
 command surface. List and table actions should prefer Milkdown's own markdown
 parser to create schema-valid nodes rather than hand-building ProseMirror node
-trees. When the current source block is a table, conversions back to text,
+trees. List actions preserve the user's current list item and nesting level;
+when a cursor sits inside a nested ordered/task/bullet item, changing the list
+type rewrites that item's immediate list segment rather than lifting the item or
+replacing the whole top-level list. Editable Milkdown instances also bind
+`Tab` / `Shift+Tab` to list indent / outdent for bullet, ordered, and task
+items. When the current source block is a table, conversions back to text,
 headings, quote, list, code, math, or divider should also replace the whole
 top-level table from parser-created markdown instead of running textblock-only
 ProseMirror commands inside a table cell.

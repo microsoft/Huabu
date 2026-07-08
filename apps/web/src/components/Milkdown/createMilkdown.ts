@@ -24,7 +24,8 @@ import {
   toggleMark,
   wrapIn,
 } from '@milkdown/prose/commands';
-import { liftListItem } from '@milkdown/prose/schema-list';
+import { keymap } from '@milkdown/prose/keymap';
+import { liftListItem, sinkListItem } from '@milkdown/prose/schema-list';
 import {
   NodeSelection,
   Plugin,
@@ -214,6 +215,14 @@ export interface MilkdownInstance {
   __selectCurrentBlockForTest?(): void;
   /** Test-only helper: select the document's text content. */
   __selectAllTextForTest?(): void;
+  /** Test-only helper: place the cursor after the first text occurrence. */
+  __setCursorAfterTextForTest?(text: string): void;
+  /** Test-only helper: node-select the list item containing the first text occurrence. */
+  __selectListItemContainingTextForTest?(text: string): void;
+  /** Test-only helper: text-select a list item as a range at the list level (mimics the block handle). */
+  __selectListItemAsRangeForTest?(text: string): void;
+  /** Test-only helper: dispatch a keydown on the editor DOM. */
+  __dispatchKeyDownForTest?(key: string, shiftKey?: boolean): void;
   /** Viewport rect for the current non-empty editor selection. */
   getSelectionClientRect(): DOMRect | null;
   /** Current text selection range, in ProseMirror doc positions. */
@@ -926,6 +935,90 @@ function currentTopLevelBlockRange(state: EditorState): {
   return null;
 }
 
+function currentListItemRange(state: EditorState): {
+  from: number;
+  to: number;
+  index: number;
+  listFrom: number;
+  listTo: number;
+  listNode: ProseNode;
+  text: string;
+} | null {
+  if (
+    state.selection instanceof NodeSelection &&
+    state.selection.node.type.name === 'list_item'
+  ) {
+    const listDepth = state.selection.$from.depth;
+    const listNode = state.selection.$from.node(listDepth);
+    if (['bullet_list', 'ordered_list'].includes(listNode.type.name)) {
+      return {
+        from: state.selection.from,
+        to: state.selection.to,
+        index: state.selection.$from.index(listDepth),
+        listFrom: state.selection.$from.before(listDepth),
+        listTo: state.selection.$from.after(listDepth),
+        listNode,
+        text:
+          state.selection.node
+            .textBetween(0, state.selection.node.content.size, ' ')
+            .trim() || ' ',
+      };
+    }
+  }
+
+  const { $from } = state.selection;
+
+  // The block handle presents a nested list item as a TextSelection whose
+  // `$from` resolves to the *list* level — directly inside the containing
+  // `bullet_list` / `ordered_list`, positioned before the target item —
+  // rather than inside the item's own text. Walking up from there would
+  // wrongly grab the ancestor list_item (the parent). Detect this case and
+  // target the item at the selection's start index within that list.
+  const startNode = $from.node($from.depth);
+  if (
+    ['bullet_list', 'ordered_list'].includes(startNode.type.name) &&
+    $from.index($from.depth) < startNode.childCount
+  ) {
+    const listDepth = $from.depth;
+    const index = $from.index(listDepth);
+    const item = startNode.child(index);
+    const itemFrom = $from.posAtIndex(index, listDepth);
+    return {
+      from: itemFrom,
+      to: itemFrom + item.nodeSize,
+      index,
+      listFrom: $from.before(listDepth),
+      listTo: $from.after(listDepth),
+      listNode: startNode,
+      text: item.textBetween(0, item.content.size, ' ').trim() || ' ',
+    };
+  }
+
+  for (let depth = $from.depth; depth > 0; depth--) {
+    if ($from.node(depth).type.name !== 'list_item') continue;
+    const listDepth = depth - 1;
+    const listNode = $from.node(listDepth);
+    if (!['bullet_list', 'ordered_list'].includes(listNode.type.name)) {
+      continue;
+    }
+    const node = $from.node(depth);
+    let index = 0;
+    listNode.forEach((child, _offset, childIndex) => {
+      if (child === node) index = childIndex;
+    });
+    return {
+      from: $from.before(depth),
+      to: $from.after(depth),
+      index,
+      listFrom: $from.before(listDepth),
+      listTo: $from.after(listDepth),
+      listNode,
+      text: node.textBetween(0, node.content.size, ' ').trim() || ' ',
+    };
+  }
+  return null;
+}
+
 function textInsertionPosForNodeSelection(
   state: EditorState,
   selection: NodeSelection,
@@ -990,6 +1083,124 @@ function replaceCurrentTopLevelBlockWithList(
   key: 'bullet-list' | 'ordered-list' | 'task-list',
 ): void {
   const view = ctx.get(editorViewCtx);
+
+  // A block-handle (NodeSelection) on a nested list item resolves to the whole
+  // enclosing top-level list. Converting it must preserve the list's structure:
+  // the fall-through below flattens every item's text into a single line, which
+  // merges the parent and child rows. Convert every list node and list_item in
+  // the selected subtree to the target type in place instead.
+  //
+  // Both the parent list node type AND each `list_item`'s `listType` attr must
+  // change together: a Milkdown plugin keeps them in sync and reverts partial
+  // edits, so changing only one is a silent no-op.
+  const { selection } = view.state;
+  if (
+    selection instanceof NodeSelection &&
+    (selection.node.type.name === 'bullet_list' ||
+      selection.node.type.name === 'ordered_list')
+  ) {
+    const targetListType =
+      key === 'ordered-list'
+        ? view.state.schema.nodes.ordered_list
+        : view.state.schema.nodes.bullet_list;
+    if (!targetListType) return;
+    const targetItemListType = key === 'ordered-list' ? 'ordered' : 'bullet';
+    const checkedValue = key === 'task-list' ? false : null;
+    const tr = view.state.tr;
+    view.state.doc.nodesBetween(selection.from, selection.to, (node, pos) => {
+      if (
+        node.type.name === 'bullet_list' ||
+        node.type.name === 'ordered_list'
+      ) {
+        tr.setNodeMarkup(pos, targetListType, null);
+      } else if (node.type.name === 'list_item') {
+        tr.setNodeMarkup(pos, undefined, {
+          ...node.attrs,
+          listType: targetItemListType,
+          checked: checkedValue,
+        });
+      }
+    });
+    view.dispatch(tr.scrollIntoView());
+    view.focus();
+    return;
+  }
+
+  const listItemRange = currentListItemRange(view.state);
+  if (listItemRange) {
+    const targetListType =
+      key === 'ordered-list'
+        ? view.state.schema.nodes.ordered_list
+        : view.state.schema.nodes.bullet_list;
+    if (!targetListType) return;
+    const targetItemListType = key === 'ordered-list' ? 'ordered' : 'bullet';
+    const checkedValue = key === 'task-list' ? false : null;
+
+    // Reuse the original list_item's content (including any nested
+    // sub-lists) instead of flattening its text. Flattening via
+    // `listItemRange.text` + re-parse merges the item and its nested rows
+    // into a single line. Only the item's own marker type changes; its
+    // `listType` attr must match the new parent list type or a Milkdown
+    // sync plugin reverts the change.
+    const originalItem = listItemRange.listNode.child(listItemRange.index);
+    const convertedItem = originalItem.type.create(
+      {
+        ...originalItem.attrs,
+        listType: targetItemListType,
+        checked: checkedValue,
+      },
+      originalItem.content,
+    );
+    const replacementList = targetListType.create(null, [convertedItem]);
+
+    const beforeItems: ProseNode[] = [];
+    const afterItems: ProseNode[] = [];
+    listItemRange.listNode.forEach((child, _offset, childIndex) => {
+      if (childIndex < listItemRange.index) beforeItems.push(child);
+      if (childIndex > listItemRange.index) afterItems.push(child);
+    });
+
+    const replacementNodes: ProseNode[] = [];
+    if (beforeItems.length > 0) {
+      replacementNodes.push(
+        listItemRange.listNode.type.create(
+          listItemRange.listNode.attrs,
+          beforeItems,
+        ),
+      );
+    }
+    const replacementStartOffset = replacementNodes.reduce(
+      (offset, node) => offset + node.nodeSize,
+      0,
+    );
+    replacementNodes.push(replacementList);
+    if (afterItems.length > 0) {
+      replacementNodes.push(
+        listItemRange.listNode.type.create(
+          listItemRange.listNode.attrs,
+          afterItems,
+        ),
+      );
+    }
+
+    const tr = view.state.tr.replaceWith(
+      listItemRange.listFrom,
+      listItemRange.listTo,
+      replacementNodes,
+    );
+    const selectionPos = Math.min(
+      listItemRange.listFrom + replacementStartOffset + 2,
+      tr.doc.content.size,
+    );
+    view.dispatch(
+      tr
+        .setSelection(TextSelection.near(tr.doc.resolve(selectionPos)))
+        .scrollIntoView(),
+    );
+    view.focus();
+    return;
+  }
+
   const range = currentTopLevelBlockRange(view.state);
   if (!range) return;
   const text = range.text;
@@ -1092,6 +1303,33 @@ const BLOCK_TYPE_NODE_NAME: Record<MilkdownBlockType, string> = {
 function runBlockTypeCommand(ctx: Ctx, key: MilkdownBlockType): void {
   const view = ctx.get(editorViewCtx);
 
+  if (key === 'bullet-list' || key === 'ordered-list' || key === 'task-list') {
+    replaceCurrentTopLevelBlockWithList(ctx, key);
+    return;
+  }
+
+  // A block-handle (NodeSelection) selection on a list item must not fall
+  // through to the whole-top-level-block replacement below: for a nested
+  // item, `currentTopLevelBlockRange` resolves to the *entire* enclosing
+  // list, so replacing it would merge the parent item's text into the
+  // target block (e.g. turning a child into a paragraph would swallow the
+  // parent). Collapse the selection to a caret inside the item so the
+  // list-item lifting path handles it exactly like a caret selection.
+  if (
+    view.state.selection instanceof NodeSelection &&
+    view.state.selection.node.type.name === 'list_item'
+  ) {
+    const insidePos = Math.min(
+      view.state.selection.from + 1,
+      view.state.doc.content.size,
+    );
+    view.dispatch(
+      view.state.tr.setSelection(
+        TextSelection.near(view.state.doc.resolve(insidePos)),
+      ),
+    );
+  }
+
   const sourceRange = currentTopLevelBlockRange(view.state);
   if (
     sourceRange &&
@@ -1153,10 +1391,6 @@ function runBlockTypeCommand(ctx: Ctx, key: MilkdownBlockType): void {
     runCommand(ctx, setBlockType(type, { language: 'LaTeX' }));
   } else if (key === 'blockquote') {
     runCommand(ctx, wrapIn(type));
-  } else if (key === 'bullet-list' || key === 'ordered-list') {
-    replaceCurrentTopLevelBlockWithList(ctx, key);
-  } else if (key === 'task-list') {
-    replaceCurrentTopLevelBlockWithList(ctx, key);
   } else if (key === 'table') {
     replaceCurrentTopLevelBlockWithTable(ctx);
   }
@@ -1260,6 +1494,16 @@ export async function createMilkdown(
     .use(sedimentColorSpanRemarkPlugin)
     .use(textColorMarkSchema)
     .use(backgroundColorMarkSchema);
+  crepe.editor.use(
+    $prose((ctx) => {
+      const listItemType = ctx.get(schemaCtx).nodes.list_item;
+      if (!listItemType) return new Plugin({});
+      return keymap({
+        Tab: sinkListItem(listItemType),
+        'Shift-Tab': liftListItem(listItemType),
+      });
+    }),
+  );
   crepe.editor.use(
     $prose(
       (ctx) =>
@@ -1586,6 +1830,99 @@ export async function createMilkdown(
           view.state.tr.setSelection(
             TextSelection.create(view.state.doc, from, to),
           ),
+        );
+      });
+    },
+    __setCursorAfterTextForTest: (text) => {
+      crepe.editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        let cursorPos: number | null = null;
+        view.state.doc.descendants((node, pos) => {
+          if (cursorPos !== null) return false;
+          if (!node.isText) return true;
+          const value = node.text ?? '';
+          const index = value.indexOf(text);
+          if (index === -1) return true;
+          cursorPos = pos + index + text.length;
+          return false;
+        });
+        if (cursorPos === null) return;
+        view.dispatch(
+          view.state.tr
+            .setSelection(TextSelection.create(view.state.doc, cursorPos))
+            .scrollIntoView(),
+        );
+        view.focus();
+      });
+    },
+    __selectListItemContainingTextForTest: (text) => {
+      crepe.editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        let listItemPos: number | null = null;
+        view.state.doc.descendants((node, pos) => {
+          if (listItemPos !== null) return false;
+          if (!node.isText) return true;
+          const value = node.text ?? '';
+          if (!value.includes(text)) return true;
+          const $resolved = view.state.doc.resolve(pos + 1);
+          for (let depth = $resolved.depth; depth > 0; depth--) {
+            if ($resolved.node(depth).type.name !== 'list_item') continue;
+            listItemPos = $resolved.before(depth);
+            return false;
+          }
+          return true;
+        });
+        if (listItemPos === null) return;
+        view.dispatch(
+          view.state.tr.setSelection(
+            NodeSelection.create(view.state.doc, listItemPos),
+          ),
+        );
+        view.focus();
+      });
+    },
+    __selectListItemAsRangeForTest: (text) => {
+      crepe.editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        let itemFrom: number | null = null;
+        let itemTo: number | null = null;
+        view.state.doc.descendants((node, pos) => {
+          if (itemFrom !== null) return false;
+          if (!node.isText) return true;
+          const value = node.text ?? '';
+          if (!value.includes(text)) return true;
+          const $resolved = view.state.doc.resolve(pos + 1);
+          for (let depth = $resolved.depth; depth > 0; depth--) {
+            if ($resolved.node(depth).type.name !== 'list_item') continue;
+            itemFrom = $resolved.before(depth);
+            itemTo = $resolved.after(depth);
+            return false;
+          }
+          return true;
+        });
+        if (itemFrom === null || itemTo === null) return;
+        // Mimic Crepe's block handle: a TextSelection spanning the item at
+        // the enclosing list level (its `$from` resolves to the list node).
+        view.dispatch(
+          view.state.tr
+            .setSelection(
+              TextSelection.create(view.state.doc, itemFrom, itemTo),
+            )
+            .scrollIntoView(),
+        );
+        view.focus();
+      });
+    },
+    __dispatchKeyDownForTest: (key, shiftKey = false) => {
+      crepe.editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        view.dom.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key,
+            shiftKey,
+            bubbles: true,
+            cancelable: true,
+          }),
         );
       });
     },
