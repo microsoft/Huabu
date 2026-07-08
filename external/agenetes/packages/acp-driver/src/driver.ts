@@ -20,7 +20,7 @@ import {
 } from './handle.js';
 
 import type { AgentDriver } from '@agenetes/runtime';
-import type { Message } from '@earendil-works/pi-ai';
+import type { FoldedMessage } from '@agenetes/protocol';
 
 // `AcpCreateSpec` (the create-time WorkloadSpec projection the handle
 // bakes) is defined next to the handle that consumes it; re-exported here
@@ -30,13 +30,15 @@ export type { AcpCreateSpec } from './handle.js';
 /**
  * The concrete ACP {@link AgentDriver} type (a Deployment: full control +
  * `session/load`). Generic over the host request shape (`TRequest`), which
- * the handle never inspects — it only forwards it to `render`.
+ * the handle never inspects — it only forwards it to `render`. The handle's
+ * `run` returns the turn's transcript as `FoldedMessage[]` (README I8.2 /
+ * I9.8), folded from the ACP `session/update` stream inside `run`.
  */
 export type AcpAgentDriver<TRequest = unknown> = AgentDriver<
   AcpCreateSpec,
   TRequest,
   PreparedAcpPrompt,
-  Message[],
+  FoldedMessage[],
   InStreamEvent,
   AcpTurnCtx
 >;

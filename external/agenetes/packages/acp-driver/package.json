@@ -24,8 +24,7 @@
     "@agenetes/agentlet-host": "workspace:*",
     "@agenetes/protocol": "workspace:*",
     "@agenetes/runtime": "workspace:*",
-    "@agentclientprotocol/sdk": "^0.22.1",
-    "@earendil-works/pi-ai": "^0.75.5"
+    "@agentclientprotocol/sdk": "^0.22.1"
   },
   "devDependencies": {
     "typescript": "^5.9.0",

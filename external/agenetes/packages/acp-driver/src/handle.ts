@@ -37,8 +37,6 @@
  * See docs/proposals/layered-architecture.md §3.6 / §7 (M2 / M2.6 / M5).
  */
 
-import { fauxAssistantMessage } from '@earendil-works/pi-ai';
-
 import { applyToolExt } from './overlay.js';
 import { acpSessionRegistry } from './session-registry.js';
 import { ensureAcpSession, registerAcpStateListener, reportEntryState } from './session.js';
@@ -47,7 +45,11 @@ import { acpUpdateToStreamEvent, mergeThinkingChunk } from './translator.js';
 import type { AcpTurnOverlay } from './overlay.js';
 import type { AcpBindingRecipe } from './binding-recipe.js';
 import type { AcpSessionLogger } from './session.js';
-import type { AgentStateSnapshot, Namespace } from '@agenetes/protocol';
+import type {
+  AgentStateSnapshot,
+  FoldedMessage,
+  Namespace,
+} from '@agenetes/protocol';
 import type {
   AgentCapabilities,
   AgentStreamEvent,
@@ -63,7 +65,6 @@ import type {
   ContentBlock as AcpContentBlock,
   PlanEntry as AcpPlanEntry,
 } from '@agentclientprotocol/sdk';
-import type { AssistantMessage, Message } from '@earendil-works/pi-ai';
 
 /**
  * The events a handle actually emits: every `AgentStreamEvent` frame
@@ -166,17 +167,6 @@ export const ACP_CAPABILITIES: AgentCapabilities = {
   turnInput: 'blocking',
 };
 
-/** ACP stop reasons we know about; mapped onto pi-ai `stopReason`. */
-function mapStopReason(
-  reason: string | undefined,
-  aborted: boolean,
-): AssistantMessage['stopReason'] {
-  if (aborted || reason === 'cancelled') return 'aborted';
-  if (reason === 'max_tokens') return 'length';
-  // Default to 'stop' for end_turn, max_turn_requests, refusal, anything else.
-  return 'stop';
-}
-
 /**
  * The ACP-backed {@link AgentHandle} — a long-lived Deployment. Bakes its
  * {@link AcpCreateSpec} at construction and self-resolves the live
@@ -192,7 +182,7 @@ export class AcpAgentHandle<TRequest = unknown>
     RuntimeAgentHandle<
       TRequest,
       PreparedAcpPrompt,
-      Message[],
+      FoldedMessage[],
       InStreamEvent,
       AcpTurnCtx
     >
@@ -232,7 +222,7 @@ export class AcpAgentHandle<TRequest = unknown>
     request: TRequest | null,
     render: RuntimeRenderFn<TRequest, PreparedAcpPrompt>,
     ctx: AcpTurnCtx,
-  ): AsyncGenerator<InStreamEvent, Message[]> {
+  ): AsyncGenerator<InStreamEvent, FoldedMessage[]> {
     const { overlay, signal, logger, onPrepared } = ctx;
 
     // ACP always needs fresh input — a `session/prompt` with nothing to
@@ -294,28 +284,20 @@ export class AcpAgentHandle<TRequest = unknown>
     let stopReason: string | undefined;
     let done = false;
 
-    // `contentBlocks` accumulates text / thinking / tool-call blocks in
-    // WIRE ORDER; it becomes the persisted `fauxAssistantMessage`, so a
-    // refresh preserves interleaving + thinking blocks + tool-call order.
-    // `sidecar` enrichment (toolKind / status / plan) accumulates into the
-    // route-owned `overlay` as events arrive.
-    type AssistantContentBlock =
-      | { type: 'text'; text: string }
-      | { type: 'thinking'; thinking: string }
-      | {
-          type: 'toolCall';
-          id: string;
-          name: string;
-          arguments: Record<string, unknown>;
-        };
-    const contentBlocks: AssistantContentBlock[] = [];
-    // THIS turn's assembled assistant message(s), RETURNED as the
-    // generator's value. Filled in the `finally` so a partial reply
-    // survives abort/error.
-    const outMessages: Message[] = [];
-    const toolCallByCallId = new Map<
+    // `folded` accumulates the turn's transcript as `FoldedMessage`s in
+    // WIRE ORDER — the driver-agnostic Tier-2 form this handle RETURNS (the
+    // fold lives inside `run`, the symmetric twin of translating each ACP
+    // `session/update` into an `AgentStreamEvent`; README I8.2 / I9.8). It
+    // preserves interleaving + thinking blocks + tool-call order, so the
+    // folded turn replays faithfully. Separate from the route-owned
+    // `overlay`, which still carries the LIVE sidecar enrichment (toolKind /
+    // status / plan) for the in-flight UI.
+    const folded: FoldedMessage[] = [];
+    // Index the folded tool-call messages by `toolCallId` so a later
+    // `tool_call_update` folds into the same entry (final-state semantics).
+    const foldedToolByCallId = new Map<
       string,
-      Extract<AssistantContentBlock, { type: 'toolCall' }>
+      Extract<FoldedMessage, { type: 'tool_call' }>
     >();
     // Plan entries are staged until the turn ends (full-replacement wire
     // semantics: latest plan wins).
@@ -354,23 +336,23 @@ export class AcpAgentHandle<TRequest = unknown>
           }
           if (evt.type === 'text_delta') {
             assembledText += evt.data.content;
-            const last = contentBlocks[contentBlocks.length - 1];
+            const last = folded[folded.length - 1];
             if (last?.type === 'text') {
-              last.text += evt.data.content;
+              last.data.content += evt.data.content;
             } else {
-              contentBlocks.push({ type: 'text', text: evt.data.content });
+              folded.push({ type: 'text', data: { content: evt.data.content } });
             }
           } else if (evt.type === 'thinking_delta') {
-            const last = contentBlocks[contentBlocks.length - 1];
+            const last = folded[folded.length - 1];
             if (last?.type === 'thinking') {
-              last.thinking = mergeThinkingChunk(
-                last.thinking,
+              last.data.content = mergeThinkingChunk(
+                last.data.content,
                 evt.data.content,
               );
             } else {
-              contentBlocks.push({
+              folded.push({
                 type: 'thinking',
-                thinking: evt.data.content,
+                data: { content: evt.data.content },
               });
             }
           } else if (evt.type === 'tool_call') {
@@ -381,24 +363,15 @@ export class AcpAgentHandle<TRequest = unknown>
               content: evt.data.content,
               rawOutput: undefined,
             });
-            // `rawInput` may be any JSON shape; pi-ai's `ToolCall.arguments`
-            // requires a plain object, so narrow defensively.
-            const rawInput = evt.data.rawInput;
-            const args: Record<string, unknown> =
-              rawInput !== null &&
-              typeof rawInput === 'object' &&
-              !Array.isArray(rawInput)
-                ? (rawInput as Record<string, unknown>)
-                : {};
-            const block: Extract<AssistantContentBlock, { type: 'toolCall' }> =
-              {
-                type: 'toolCall',
-                id: evt.data.toolCallId,
-                name: evt.data.title || evt.data.toolKind || 'tool',
-                arguments: args,
-              };
-            contentBlocks.push(block);
-            toolCallByCallId.set(evt.data.toolCallId, block);
+            // Fold the tool call in its initial state; a later
+            // `tool_call_update` merges into this same entry. Copy the data
+            // so mutating the fold never touches the yielded event.
+            const block: Extract<FoldedMessage, { type: 'tool_call' }> = {
+              type: 'tool_call',
+              data: { ...evt.data, rawOutput: undefined },
+            };
+            folded.push(block);
+            foldedToolByCallId.set(evt.data.toolCallId, block);
           } else if (evt.type === 'tool_call_update') {
             applyToolExt(overlay, evt.data.toolCallId, {
               status: evt.data.status,
@@ -406,15 +379,22 @@ export class AcpAgentHandle<TRequest = unknown>
               content: evt.data.content,
               rawOutput: evt.data.rawOutput,
             });
-            // ACP allows refining the title mid-flight (e.g. "Reading"
-            // → "Reading app.ts"); mirror onto the persisted block.
-            if (evt.data.title) {
-              const tc = toolCallByCallId.get(evt.data.toolCallId);
-              if (tc) tc.name = evt.data.title;
+            // Fold the update into the tool call's final state (ACP may
+            // refine the title mid-flight, e.g. "Reading" → "Reading app.ts").
+            const tc = foldedToolByCallId.get(evt.data.toolCallId);
+            if (tc) {
+              if (evt.data.status !== undefined) tc.data.status = evt.data.status;
+              if (evt.data.title !== undefined) tc.data.title = evt.data.title;
+              if (evt.data.content !== undefined)
+                tc.data.content = evt.data.content;
+              if (evt.data.locations !== undefined)
+                tc.data.locations = evt.data.locations;
+              if (evt.data.rawOutput !== undefined)
+                tc.data.rawOutput = evt.data.rawOutput;
             }
           } else if (evt.type === 'plan') {
-            // Full-replacement wire semantics: latest plan wins.
-            // Staged until the assistant timestamp is known (finally).
+            // Full-replacement wire semantics: latest plan wins. Folded once
+            // at the turn's end (finally).
             pendingPlan = evt.data.entries;
           }
           queue.push(evt);
@@ -481,28 +461,17 @@ export class AcpAgentHandle<TRequest = unknown>
         const reason = stopReason ?? 'unknown';
         const synthetic = `_(agent returned no text — stopReason: ${reason}. Usually a tool-only turn or a refusal without prose. Extend the ACP translator if you need tool-call rendering.)_`;
         assembledText = synthetic;
-        contentBlocks.push({ type: 'text', text: synthetic });
+        folded.push({ type: 'text', data: { content: synthetic } });
         yield { type: 'text_delta', data: { content: synthetic } };
       }
     } finally {
-      // Persist assistant output. `contentBlocks` is already in wire order,
-      // so we hand it straight to pi-ai. Mirrors the built-in path's
-      // `finally` so partial replies survive abort/error.
-      if (contentBlocks.length > 0) {
-        const aborted = signal?.aborted ?? false;
-        const timestamp = Date.now();
-        outMessages.push(
-          fauxAssistantMessage(contentBlocks, {
-            stopReason: mapStopReason(stopReason, aborted),
-            timestamp,
-          }),
-        );
-      }
-      // Commit the turn's plan (full-replacement; latest wins) into the
-      // route-owned overlay. Tool extensions were accumulated as events
-      // arrived.
+      // Commit the turn's plan (full-replacement; latest wins): into the
+      // route-owned `overlay` for the live sidecar AND as a folded `plan`
+      // message so the durable transcript carries it. Tool extensions were
+      // accumulated as events arrived.
       if (pendingPlan) {
         overlay.plan = pendingPlan;
+        folded.push({ type: 'plan', data: { entries: pendingPlan } });
         pendingPlan = null;
       }
     }
@@ -518,7 +487,9 @@ export class AcpAgentHandle<TRequest = unknown>
         '[acp] session/prompt failed',
       );
       yield { type: 'error', data: { error: msg } };
-      return outMessages;
+      // Fold the error into the transcript so a reload sees it.
+      folded.push({ type: 'error', data: { error: msg } });
+      return folded;
     }
 
     yield {
@@ -528,7 +499,7 @@ export class AcpAgentHandle<TRequest = unknown>
         meta: { stopReason },
       },
     };
-    return outMessages;
+    return folded;
   }
 
   async control(msg: ControlMsg): Promise<ControlAck> {
