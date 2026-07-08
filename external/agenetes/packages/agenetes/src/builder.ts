@@ -32,6 +32,12 @@ import {
   InMemoryThreadStore,
   type ThreadStore,
 } from './thread-store.js';
+import {
+  EventLog,
+  InMemoryEventLogStore,
+  type EventLogStore,
+} from './event-log.js';
+import { InMemoryTurnStore, type TurnStore } from './turn-store.js';
 
 import type { AgentDriver, AgentHandle } from '@agenetes/runtime';
 
@@ -101,6 +107,20 @@ export interface MountAgenetesOptions {
    * adapter here at M5 E2 for restart-surviving records.
    */
   threadStore?: ThreadStore;
+  /**
+   * The Tier-1 event-log backing for the two-tier conversation log (I9.8).
+   * Defaults to an in-memory store; a host wires {@link FileEventLogStore}
+   * for a restart-surviving `<ns.root>/chat_v2/<threadId>.events.jsonl`. The
+   * instance wraps it in an {@link EventLog} for the live-tail pub/sub.
+   */
+  eventLogStore?: EventLogStore;
+  /**
+   * The Tier-2 folded-turn backing for the two-tier conversation log
+   * (I9.8). Defaults to an in-memory store; a host wires
+   * {@link FileTurnStore} for a restart-surviving
+   * `<ns.root>/chat_v2/<threadId>.turns.jsonl`.
+   */
+  turnStore?: TurnStore;
 }
 
 /**
@@ -115,6 +135,10 @@ export function mountAgenetes(
   const factories = new Map<string, DriverFactory<never>>();
   const registrations: Registration[] = [];
   const threadStore = options.threadStore ?? new InMemoryThreadStore();
+  const eventLog = new EventLog(
+    options.eventLogStore ?? new InMemoryEventLogStore(),
+  );
+  const turnStore = options.turnStore ?? new InMemoryTurnStore();
 
   const builder: AgenetesBuilder<Record<string, DriverFactory<never>>> = {
     addFactory(factoryName, factory) {
@@ -150,7 +174,12 @@ export function mountAgenetes(
           create: (input, priorState) => driver.create(input, priorState),
         });
       }
-      return createAgenetesInstance<TSpec, THandle>(runtime, threadStore);
+      return createAgenetesInstance<TSpec, THandle>(
+        runtime,
+        threadStore,
+        eventLog,
+        turnStore,
+      );
     },
   };
 

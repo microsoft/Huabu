@@ -11,7 +11,12 @@ export type {
 } from './builder.js';
 
 export { createAgenetesInstance } from './instance.js';
-export type { Agenetes, WorkloadSpecShape } from './instance.js';
+export type {
+  Agenetes,
+  WorkloadSpecShape,
+  HistoryOptions,
+  ThreadHistory,
+} from './instance.js';
 
 export {
   InMemoryThreadStore,
@@ -29,3 +34,9 @@ export type {
   EventLogStore,
   EventLogListener,
 } from './event-log.js';
+
+export {
+  InMemoryTurnStore,
+  FileTurnStore,
+} from './turn-store.js';
+export type { PersistedTurn, TurnStore } from './turn-store.js';
