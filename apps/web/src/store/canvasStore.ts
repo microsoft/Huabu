@@ -1300,6 +1300,18 @@ const useCanvasStore = create<RFState>()(
         version: toVersion,
       });
 
+      // Re-seed the content-CAS baseline for the nodes this agent write
+      // actually applied (skipped mid-edit nodes keep their own baseline
+      // so the user's pending edit is still guarded). Co-delivered with
+      // the content change above so a subsequent user edit doesn't false-
+      // conflict against an agent write already reflected in their view.
+      {
+        const skippedSet = new Set(skippedNodeIds);
+        nodeContentQueue.seedBaselines(
+          (applied.nodes as Node[]).filter((n) => !skippedSet.has(n.id)),
+        );
+      }
+
       // Post-effects must not run for nodes whose delta we skipped — they
       // were not actually mutated locally, so preprocessing / fit them is
       // wrong.
@@ -1506,6 +1518,12 @@ const useCanvasStore = create<RFState>()(
           ingestionByNodeId: {},
           pendingForkThreadIds: {},
         });
+
+        // Seed each md-backed node's optimistic-concurrency baseline from
+        // the authoritative content we just loaded, so the first edit
+        // carries the correct `expectRev` and the per-node content CAS can
+        // catch a concurrent (cross-tab / cross-device / agent) write.
+        nodeContentQueue.seedBaselines(loadedNodes);
 
         // If the user left a question-replay open on this canvas in a
         // previous session and that question node has since been

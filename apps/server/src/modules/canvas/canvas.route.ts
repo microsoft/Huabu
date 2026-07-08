@@ -19,6 +19,7 @@ import {
   putNodeContentBodySchema,
   canvasSearchRequestSchema,
 } from '@sediment/shared';
+import { nodeRevisionOf } from '@sediment/shared/canvas-engine';
 
 import {
   CanvasNotFoundError,
@@ -648,6 +649,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       summary,
       keywords,
       provenance,
+      expectRev,
     } = parsed.data;
 
     if (!MD_BACKED_NODE_TYPES.has(nodeType)) {
@@ -661,6 +663,36 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       existing = store.readNode(nodeId);
     } catch {
       existing = null;
+    }
+
+    // Optimistic-concurrency (compare-and-swap) on the node's authored
+    // content. `expectRev` is the {@link nodeRevision} the client's edit
+    // descends from; we recompute the on-disk node's revision and reject
+    // when they differ, so a concurrent write (another tab / device / an
+    // agent, or a Google-Drive-synced newer copy) surfaces as a conflict
+    // instead of being silently overwritten. A brand-new node carries the
+    // empty-content revision, which only matches while no file exists yet
+    // (so a create-race is also caught). `expectRev` is omitted by non-CAS
+    // callers, in which case we skip the check for backward compatibility.
+    if (expectRev !== undefined) {
+      const currentRev = nodeRevisionOf({
+        ...(typeof existing?.content === 'string'
+          ? { content: existing.content }
+          : {}),
+        ...(typeof existing?.src === 'string' ? { src: existing.src } : {}),
+      });
+      if (expectRev !== currentRev) {
+        return reply.code(409).send({
+          code: 'NODE_CONTENT_CONFLICT',
+          message:
+            `Node "${nodeId}" changed since you last loaded it ` +
+            '(another tab, device, or agent wrote it). Refresh to get the ' +
+            'latest content before editing.',
+          nodeId,
+          currentRev,
+          expectedRev: expectRev,
+        } satisfies CanvasConflictResponse);
+      }
     }
 
     // Body resolution:
@@ -773,6 +805,18 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     const response: PutNodeContentResponse = {
       nodeId,
       label: writeResult.label,
+      // The revision of the content actually persisted (authoritative:
+      // reflects the refused-empty-clobber case where `safeBody` kept the
+      // existing content). The client stores this as the node's new CAS
+      // baseline, co-delivered with the write it confirms.
+      rev: nodeRevisionOf({
+        ...(typeof nodeContent.content === 'string'
+          ? { content: nodeContent.content }
+          : {}),
+        ...(typeof nodeContent.src === 'string'
+          ? { src: nodeContent.src }
+          : {}),
+      }),
     };
     // `artifactMissing` is only meaningful for src-backed types and is
     // surfaced so the client can render the same placeholder UI it
@@ -841,6 +885,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         type: nodeType,
         label: null,
         content: '',
+        // Empty-content revision so the client seeds a baseline that only
+        // matches a first write while no file exists yet (create-race safe).
+        rev: nodeRevisionOf({}),
         contentMissing: true,
       } satisfies GetNodeContentResponse);
     }
@@ -854,14 +901,21 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     });
     const data = (hydrated.data ?? {}) as Record<string, unknown>;
 
+    const resolvedContent =
+      typeof data['content'] === 'string'
+        ? (data['content'] as string)
+        : (existing.content ?? '');
     const response: GetNodeContentResponse = {
       nodeId,
       type: nodeType,
       label: existing.label,
-      content:
-        typeof data['content'] === 'string'
-          ? (data['content'] as string)
-          : (existing.content ?? ''),
+      content: resolvedContent,
+      // Baseline revision co-delivered with the content, so a single-node
+      // refresh re-seeds the client's CAS baseline atomically.
+      rev: nodeRevisionOf({
+        content: resolvedContent,
+        ...(typeof existing.src === 'string' ? { src: existing.src } : {}),
+      }),
     };
     const ls = existing['labelSource'];
     if (ls === 'user' || ls === 'auto' || ls === 'agent') {

@@ -20,6 +20,8 @@
  * See `docs/node-content-api-split.md`.
  */
 
+import { nodeRevisionOf } from '@sediment/shared/canvas-engine';
+
 import {
   CanvasConflictError,
   NodeDuplicateFilesError,
@@ -37,6 +39,25 @@ import { createPerKeyDebouncer } from './perKeyDebouncer';
 
 import type { PutNodeContentRequest } from '@sediment/shared';
 import type { Node } from '@xyflow/react';
+
+/**
+ * Revision of an empty node ({@link nodeRevisionOf} over no authored
+ * content). A brand-new node the client is creating sends this as its
+ * `expectRev` baseline, so the create only succeeds while no `.md` exists
+ * yet on the server — closing the create-race window.
+ */
+const REV_EMPTY = nodeRevisionOf({});
+
+/** Compute a node's content revision (the CAS baseline) from its data. */
+function revOfNode(node: Node): string {
+  const data = (node.data ?? {}) as Record<string, unknown>;
+  return nodeRevisionOf({
+    ...(typeof data['content'] === 'string'
+      ? { content: data['content'] as string }
+      : {}),
+    ...(typeof data['src'] === 'string' ? { src: data['src'] as string } : {}),
+  });
+}
 
 /**
  * Slice fields the queue reads at fire time. Kept structural (not
@@ -126,6 +147,18 @@ export type NodeContentQueue = {
    * user is mid-editing from an incoming agent write.
    */
   pendingNodeIds(): string[];
+
+  /**
+   * Seed (or refresh) the optimistic-concurrency baseline revision for
+   * each given node from its current authored content. Called with the
+   * authoritative server state so content and its baseline are updated
+   * together (never through separate channels): on `loadCanvas` for every
+   * loaded node, and on `applyDeltasFromAgent` for the nodes an agent
+   * write actually applied. This is what keeps a subsequent user edit
+   * from a false `NODE_CONTENT_CONFLICT` after an agent write that was
+   * already reflected in the user's view.
+   */
+  seedBaselines(nodes: readonly Node[]): void;
 };
 
 /**
@@ -157,6 +190,24 @@ export function createNodeContentQueue(opts: {
     string,
     { label: string | null; labelSource: string | undefined }
   >();
+
+  /**
+   * Optimistic-concurrency baseline: the {@link nodeRevision} each node's
+   * last server-agreed content had. Seeded on load / agent-sync (via
+   * {@link seedBaselines}) and updated to the server-returned rev after
+   * every successful write, so content and its baseline always move
+   * together. A node with no entry sends {@link REV_EMPTY} (treated as
+   * "I believe this is a fresh create").
+   */
+  const baselineRev = new Map<string, string>();
+
+  /**
+   * Node ids for which the persistent `NODE_CONTENT_CONFLICT` toast is
+   * already showing. Rate-limits the toast to once per node (autosave
+   * would otherwise re-pop it on every keystroke while the node stays
+   * blocked). Cleared on a successful write or a baseline reseed.
+   */
+  const contentConflictToasted = new Set<string>();
 
   /**
    * Node ids for which we have already shown the persistent
@@ -218,6 +269,11 @@ export function createNodeContentQueue(opts: {
       body.provenance = data['provenance'];
     }
 
+    // Optimistic-concurrency baseline. A node we've loaded / synced has a
+    // seeded rev; a brand-new node (no entry) sends the empty-content rev
+    // so its create only lands while no `.md` exists yet on the server.
+    body.expectRev = baselineRev.get(nodeId) ?? REV_EMPTY;
+
     return body;
   }
 
@@ -240,6 +296,13 @@ export function createNodeContentQueue(opts: {
     const body = buildRequest(nodeId);
     if (!body) return;
     const response = await putNodeContent(canvasId, nodeId, body, kOpts);
+    // Content and its baseline update together: record the rev the server
+    // actually persisted so the next edit's `expectRev` is fresh (and a
+    // rapid follow-up edit doesn't 409 against our own just-committed
+    // write). Also clear any content-conflict toast guard — a success
+    // means the node is no longer blocked.
+    baselineRev.set(nodeId, response.rev);
+    contentConflictToasted.delete(nodeId);
     // A write that succeeded means any prior duplicate has been
     // resolved — drop the once-per-node toast guard so a future
     // recurrence alerts again, and clear the node's duplicate banner
@@ -285,6 +348,43 @@ export function createNodeContentQueue(opts: {
   }
 
   /**
+   * Surface a `NODE_CONTENT_CONFLICT`: the node's content changed on the
+   * server since we loaded it (another tab / device / agent, or a
+   * Google-Drive-synced newer copy), so our write was refused to avoid
+   * clobbering the newer content. The user's in-editor text is left
+   * untouched. We show a persistent, one-per-node toast offering a
+   * reload — the same recovery affordance as the canvas-level version
+   * conflict. The baseline is intentionally NOT advanced here, so every
+   * further autosave stays refused (never clobbers) until the reload
+   * re-seeds a fresh baseline.
+   */
+  function handleContentConflict(nodeId: string): void {
+    if (contentConflictToasted.has(nodeId)) return;
+    contentConflictToasted.add(nodeId);
+    const state = opts.getState();
+    const node = state.nodes.find((n) => n.id === nodeId);
+    const label =
+      node && typeof node.data?.['label'] === 'string'
+        ? (node.data['label'] as string)
+        : 'a note';
+    toast(
+      `“${label}” was changed elsewhere. Your edits here aren't being saved. ` +
+        'Reload to get the latest version.',
+      {
+        tone: 'danger',
+        duration: 0,
+        action: {
+          label: 'Reload',
+          onClick: () => {
+            if (typeof window !== 'undefined') window.location.reload();
+          },
+        },
+      },
+    );
+    console.warn('[node-content] write refused (stale content):', nodeId);
+  }
+
+  /**
    * Wrap {@link performSave} with the standard failure routing:
    * `CanvasConflictError` (409) is re-thrown immediately so
    * `tryRename`'s awaited path can revert the optimistic label and
@@ -310,7 +410,20 @@ export function createNodeContentQueue(opts: {
         notifyDuplicate(nodeId, err);
         throw err;
       }
-      if (err instanceof CanvasConflictError) throw err;
+      if (err instanceof CanvasConflictError) {
+        // A content-revision conflict is NOT a rename collision: the
+        // node changed on the server since we loaded it (another tab /
+        // device / agent, or a Drive-synced newer copy). Do NOT revert
+        // or retry — keep the user's text and stop writing so we never
+        // clobber the newer server content. Surface a one-per-node
+        // "reload to get the latest" prompt; the baseline stays stale so
+        // further autosaves keep being refused until the user reloads.
+        if (err.code === 'NODE_CONTENT_CONFLICT') {
+          handleContentConflict(nodeId);
+          return;
+        }
+        throw err;
+      }
       handleSaveFailure(canvasId, nodeId, source, err);
       throw err;
     }
@@ -542,6 +655,18 @@ export function createNodeContentQueue(opts: {
 
     clearDuplicateGuard(nodeId) {
       duplicateToasted.delete(nodeId);
+    },
+
+    seedBaselines(nodes) {
+      for (const node of nodes) {
+        const nodeType = typeof node.type === 'string' ? node.type : '';
+        if (!MD_BACKED_NODE_TYPES.has(nodeType)) continue;
+        baselineRev.set(node.id, revOfNode(node));
+        // A fresh authoritative baseline means any prior conflict for this
+        // node is resolved — drop the toast guard so a later divergence
+        // alerts again.
+        contentConflictToasted.delete(node.id);
+      }
     },
 
     pendingNodeIds() {
