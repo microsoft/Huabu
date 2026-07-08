@@ -1,5 +1,6 @@
 import { Download, Plus, Trash2, Upload } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import { useNavigate, Link } from 'react-router-dom';
 
 import {
@@ -27,6 +28,7 @@ import type { CanvasSummary } from '@sediment/shared';
  * Users can create a new canvas or click one to open it.
  */
 export default function CanvasListPage() {
+  const { t, i18n } = useTranslation();
   const [canvases, setCanvases] = useState<CanvasSummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
@@ -92,11 +94,14 @@ export default function CanvasListPage() {
     setExportingId(canvasId);
     try {
       await exportCanvas(canvasId);
-      toast('Export started', { tone: 'success' });
+      toast(t('canvasList.exportStarted'), { tone: 'success' });
     } catch (error) {
-      toast(error instanceof Error ? error.message : 'Export failed', {
-        tone: 'danger',
-      });
+      toast(
+        error instanceof Error ? error.message : t('canvasList.exportFailed'),
+        {
+          tone: 'danger',
+        },
+      );
     } finally {
       setExportingId(null);
     }
@@ -155,7 +160,7 @@ export default function CanvasListPage() {
   };
 
   const formatDate = (timestamp: number) => {
-    return new Date(timestamp).toLocaleDateString(undefined, {
+    return new Date(timestamp).toLocaleDateString(i18n.language, {
       year: 'numeric',
       month: 'short',
       day: 'numeric',
@@ -168,16 +173,21 @@ export default function CanvasListPage() {
     <div className="bg-bg-default flex h-full flex-col">
       <Modal
         isOpen={pendingDelete !== null}
-        title="Delete canvas?"
+        title={t('canvasList.deleteTitle')}
         description={
           pendingDelete ? (
-            <>
-              Are you sure you want to delete{' '}
-              <span className="text-fg-default font-medium">
-                “{pendingDelete.title || pendingDelete.canvasId}”
-              </span>
-              ? This action cannot be undone.
-            </>
+            <Trans
+              i18nKey="canvasList.deleteDescriptionRich"
+              values={{
+                title: pendingDelete.title || pendingDelete.canvasId,
+              }}
+              components={{
+                name: (
+                  // The Trans component injects the translated title here.
+                  <span className="text-fg-default font-medium" />
+                ),
+              }}
+            />
           ) : null
         }
         onClose={closeDeleteModal}
@@ -193,7 +203,7 @@ export default function CanvasListPage() {
               onClick={closeDeleteModal}
               disabled={isDeleting}
             >
-              Cancel
+              {t('actions.cancel')}
             </Button>
             <Button
               ref={confirmDeleteButtonRef}
@@ -210,7 +220,7 @@ export default function CanvasListPage() {
                   className="text-fg-inverse"
                 />
               ) : (
-                'Delete'
+                t('actions.delete')
               )}
             </Button>
           </>
@@ -239,14 +249,16 @@ export default function CanvasListPage() {
                 <div className="text-center">
                   <div>
                     {workspacePath
-                      ? `Path: ${workspacePath}`
-                      : `Workspace: ${workspaceLabel}`}
+                      ? t('workspace.path', { path: workspacePath })
+                      : t('workspace.workspace', { workspace: workspaceLabel })}
                   </div>
                   <div>
-                    {canvases.length} canvas{canvases.length !== 1 ? 'es' : ''}
+                    {t('canvasList.canvasCount', { count: canvases.length })}
                   </div>
                   {canChangeWorkspace && (
-                    <div className="text-fg-subtle mt-1">Click to switch</div>
+                    <div className="text-fg-subtle mt-1">
+                      {t('workspace.clickToSwitch')}
+                    </div>
                   )}
                 </div>
               }
@@ -256,12 +268,16 @@ export default function CanvasListPage() {
                   to="/setup"
                   className="text-fg-subtle hover:text-fg-default mt-0.5 ml-1 truncate text-xs transition-colors"
                 >
-                  {workspacePath ? 'Path: ' : 'Workspace: '}
+                  {workspacePath
+                    ? t('workspace.pathPrefix')
+                    : t('workspace.workspacePrefix')}
                   {workspaceLabel}
                 </Link>
               ) : (
                 <span className="text-fg-subtle mt-0.5 ml-1 cursor-default truncate text-xs">
-                  {workspacePath ? 'Path: ' : 'Workspace: '}
+                  {workspacePath
+                    ? t('workspace.pathPrefix')
+                    : t('workspace.workspacePrefix')}
                   {workspaceLabel}
                 </span>
               )}
@@ -275,9 +291,11 @@ export default function CanvasListPage() {
         <main className="mx-auto w-full max-w-4xl px-6 py-10">
           <div className="mb-8 flex items-center justify-between">
             <div>
-              <h2 className="text-fg-default text-2xl font-bold">Canvases</h2>
+              <h2 className="text-fg-default text-2xl font-bold">
+                {t('canvasList.title')}
+              </h2>
               <p className="text-fg-subtle mt-1 text-sm">
-                Select a canvas to open, or create a new one.
+                {t('canvasList.subtitle')}
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -296,7 +314,7 @@ export default function CanvasListPage() {
                 ) : (
                   <Upload />
                 )}
-                Import
+                {t('actions.import')}
               </Button>
               <Button
                 variant="solid"
@@ -312,7 +330,7 @@ export default function CanvasListPage() {
                 ) : (
                   <Plus />
                 )}
-                New Canvas
+                {t('actions.newCanvas')}
               </Button>
             </div>
           </div>
@@ -322,13 +340,13 @@ export default function CanvasListPage() {
               variant="spinner"
               layout="block"
               size="md"
-              message="Loading canvases…"
+              message={t('canvasList.loading')}
               className="py-20"
               indicatorClassName="text-fg-subtle"
             />
           ) : canvases.length === 0 ? (
             <EmptyState
-              message="No canvases yet."
+              message={t('canvasList.empty')}
               className="border-edge-default rounded-xl border-2 border-dashed"
               action={
                 <Button
@@ -338,7 +356,7 @@ export default function CanvasListPage() {
                   disabled={isCreating}
                   className="text-fg-default hover:text-fg-muted text-sm font-medium underline"
                 >
-                  Create your first canvas
+                  {t('canvasList.createFirst')}
                 </Button>
               }
             />
@@ -354,14 +372,17 @@ export default function CanvasListPage() {
                     className="flex flex-1 flex-col text-left"
                   >
                     <h3 className="text-fg-default group-hover:text-fg-default truncate text-sm font-semibold">
-                      {canvas.title || 'Untitled'}
+                      {canvas.title || t('canvasList.untitled')}
                     </h3>
                     <p className="text-fg-subtle mt-1 text-xs">
-                      {canvas.nodeCount} node
-                      {canvas.nodeCount !== 1 ? 's' : ''}
+                      {t('canvasList.nodeCount', {
+                        count: canvas.nodeCount,
+                      })}
                     </p>
                     <div className="text-fg-subtle mt-auto pt-4 text-xs">
-                      Updated {formatDate(canvas.updatedAt)}
+                      {t('canvasList.updated', {
+                        date: formatDate(canvas.updatedAt),
+                      })}
                     </div>
                   </button>
                   {/* Export button */}
@@ -375,8 +396,8 @@ export default function CanvasListPage() {
                     tooltipWrapperClassName="absolute top-3 right-10 inline-flex opacity-0 transition-opacity group-hover:opacity-100"
                     title={
                       exportingId === canvas.canvasId
-                        ? 'Exporting…'
-                        : 'Export canvas'
+                        ? t('canvasList.exporting')
+                        : t('canvasList.exportCanvas')
                     }
                     disabled={exportingId === canvas.canvasId}
                   >
@@ -399,7 +420,7 @@ export default function CanvasListPage() {
                       requestDelete(canvas.canvasId, canvas.title);
                     }}
                     tooltipWrapperClassName="absolute top-3 right-3 inline-flex opacity-0 transition-opacity group-hover:opacity-100"
-                    title="Delete canvas"
+                    title={t('canvasList.deleteCanvas')}
                   >
                     <Trash2 className="text-fg-subtle" />
                   </Button>

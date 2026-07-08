@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
 
 import {
   ACCENT_NONE_TOKEN,
@@ -63,11 +64,11 @@ type MilkdownToolbarPopover =
   | 'inline-math';
 
 const BLOCK_GROUPS: ReadonlyArray<{
-  label: string;
+  labelKey: 'text' | 'list' | 'advanced';
   types: readonly MilkdownBlockType[];
 }> = [
   {
-    label: 'Text',
+    labelKey: 'text',
     types: [
       'paragraph',
       'heading-1',
@@ -80,27 +81,9 @@ const BLOCK_GROUPS: ReadonlyArray<{
       'divider',
     ],
   },
-  { label: 'List', types: ['bullet-list', 'ordered-list', 'task-list'] },
-  { label: 'Advanced', types: ['code-block', 'table', 'math'] },
+  { labelKey: 'list', types: ['bullet-list', 'ordered-list', 'task-list'] },
+  { labelKey: 'advanced', types: ['code-block', 'table', 'math'] },
 ];
-
-const BLOCK_LABELS: Record<MilkdownBlockType, string> = {
-  paragraph: 'Text',
-  'heading-1': 'Heading 1',
-  'heading-2': 'Heading 2',
-  'heading-3': 'Heading 3',
-  'heading-4': 'Heading 4',
-  'heading-5': 'Heading 5',
-  'heading-6': 'Heading 6',
-  blockquote: 'Quote',
-  divider: 'Divider',
-  'bullet-list': 'Bullet List',
-  'ordered-list': 'Ordered List',
-  'task-list': 'Task List',
-  'code-block': 'Code',
-  table: 'Table',
-  math: 'Math',
-};
 
 const BLOCK_ICONS: Record<MilkdownBlockType, LucideIcon> = {
   paragraph: Type,
@@ -125,13 +108,6 @@ const INLINE_MARK_ICONS: Record<MilkdownInlineMark, LucideIcon> = {
   italic: Italic,
   strike: Strikethrough,
   inlineCode: Code,
-};
-
-const INLINE_MARK_TITLES: Record<MilkdownInlineMark, string> = {
-  bold: 'Bold',
-  italic: 'Italic',
-  strike: 'Strikethrough',
-  inlineCode: 'Inline code',
 };
 
 const BACKGROUND_COLOR_PICKER_OPTIONS: readonly ColorPreset[] =
@@ -212,6 +188,7 @@ export function MilkdownFloatingToolbar({
   disabled = false,
   className,
 }: MilkdownFloatingToolbarProps): JSX.Element | null {
+  const { t } = useTranslation();
   const [formatting, setFormatting] = useState(() =>
     readFormattingState(instance),
   );
@@ -334,6 +311,34 @@ export function MilkdownFloatingToolbar({
   if (!instance) return null;
 
   const activeBlock = formatting.blockType;
+  const blockGroupLabels = {
+    text: t('editor.blockGroups.text'),
+    list: t('editor.blockGroups.list'),
+    advanced: t('editor.blockGroups.advanced'),
+  };
+  const blockLabels: Record<MilkdownBlockType, string> = {
+    paragraph: t('editor.blocks.paragraph'),
+    'heading-1': t('editor.blocks.heading1'),
+    'heading-2': t('editor.blocks.heading2'),
+    'heading-3': t('editor.blocks.heading3'),
+    'heading-4': t('editor.blocks.heading4'),
+    'heading-5': t('editor.blocks.heading5'),
+    'heading-6': t('editor.blocks.heading6'),
+    blockquote: t('editor.blocks.blockquote'),
+    divider: t('editor.blocks.divider'),
+    'bullet-list': t('editor.blocks.bulletList'),
+    'ordered-list': t('editor.blocks.orderedList'),
+    'task-list': t('editor.blocks.taskList'),
+    'code-block': t('editor.blocks.codeBlock'),
+    table: t('editor.blocks.table'),
+    math: t('editor.blocks.math'),
+  };
+  const inlineMarkTitles: Record<MilkdownInlineMark, string> = {
+    bold: t('editor.inlineMarks.bold'),
+    italic: t('editor.inlineMarks.italic'),
+    strike: t('editor.inlineMarks.strikethrough'),
+    inlineCode: t('editor.inlineMarks.inlineCode'),
+  };
   const ActiveBlockIcon = BLOCK_ICONS[activeBlock];
   const textColorCss = colorCssForAccentToken(formatting.textColor, 'text');
   const backgroundColorCss = colorCssForAccentToken(
@@ -391,7 +396,7 @@ export function MilkdownFloatingToolbar({
           <Button
             variant="ghost"
             size="sm"
-            title="Block type"
+            title={t('editor.blockType')}
             disabled={disabled}
             onClick={(event) => {
               event.stopPropagation();
@@ -402,7 +407,7 @@ export function MilkdownFloatingToolbar({
             className="text-fg-muted hover:bg-bg-default gap-1"
           >
             <ActiveBlockIcon className="size-3.5" />
-            <span className="text-xs">{BLOCK_LABELS[activeBlock]}</span>
+            <span className="text-xs">{blockLabels[activeBlock]}</span>
             <ChevronDown className="size-3" />
           </Button>
         </div>
@@ -430,9 +435,9 @@ export function MilkdownFloatingToolbar({
                 onClick={(event) => event.stopPropagation()}
               >
                 {BLOCK_GROUPS.map((group) => (
-                  <div key={group.label} className="flex flex-col gap-1">
+                  <div key={group.labelKey} className="flex flex-col gap-1">
                     <div className="text-fg-subtle px-2 pt-1 pb-0.5 text-[11px] leading-none font-semibold">
-                      {group.label}
+                      {blockGroupLabels[group.labelKey]}
                     </div>
                     {group.types.map((type) => {
                       const Icon = BLOCK_ICONS[type];
@@ -441,7 +446,7 @@ export function MilkdownFloatingToolbar({
                           key={type}
                           variant="ghost"
                           size="sm"
-                          title={BLOCK_LABELS[type]}
+                          title={blockLabels[type]}
                           onClick={() => {
                             run(() => instance.setBlockType(type));
                             setOpenPopover(null);
@@ -454,7 +459,7 @@ export function MilkdownFloatingToolbar({
                           )}
                         >
                           <Icon className="size-3.5" />
-                          <span className="text-xs">{BLOCK_LABELS[type]}</span>
+                          <span className="text-xs">{blockLabels[type]}</span>
                         </Button>
                       );
                     })}
@@ -475,7 +480,7 @@ export function MilkdownFloatingToolbar({
             <FloatingToolbar.ToggleButton
               key={mark}
               active={formatting.activeMarks.has(mark)}
-              title={INLINE_MARK_TITLES[mark]}
+              title={inlineMarkTitles[mark]}
               disabled={disabled}
               onClick={() => run(() => instance.toggleMark(mark))}
             >
@@ -492,7 +497,7 @@ export function MilkdownFloatingToolbar({
           colors={ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT}
           value={formatting.textColor ?? ACCENT_NONE_TOKEN}
           onSelect={(token) => selectColor(token, instance.setTextColor)}
-          title="Text color"
+          title={t('editor.textColor')}
           open={openPopover === 'text-color'}
           onOpenChange={(open) => setOpenPopover(open ? 'text-color' : null)}
         >
@@ -502,7 +507,7 @@ export function MilkdownFloatingToolbar({
           colors={BACKGROUND_COLOR_PICKER_OPTIONS}
           value={formatting.backgroundColor ?? ACCENT_NONE_TOKEN}
           onSelect={(token) => selectColor(token, instance.setBackgroundColor)}
-          title="Highlight color"
+          title={t('editor.highlightColor')}
           open={openPopover === 'background-color'}
           onOpenChange={(open) =>
             setOpenPopover(open ? 'background-color' : null)
@@ -517,7 +522,7 @@ export function MilkdownFloatingToolbar({
       <FloatingToolbar.Group>
         <div ref={linkRefs.setReference} className="flex items-center">
           <FloatingToolbar.ActionButton
-            title="Link"
+            title={t('editor.link')}
             disabled={disabled}
             onClick={(event) => {
               event.stopPropagation();
@@ -540,7 +545,7 @@ export function MilkdownFloatingToolbar({
         </div>
         <FloatingToolbar.ToggleButton
           active={formatting.activeMarks.has('inlineCode')}
-          title={INLINE_MARK_TITLES.inlineCode}
+          title={inlineMarkTitles.inlineCode}
           disabled={disabled}
           onClick={() => run(() => instance.toggleMark('inlineCode'))}
         >
@@ -548,7 +553,7 @@ export function MilkdownFloatingToolbar({
         </FloatingToolbar.ToggleButton>
         <div ref={mathRefs.setReference} className="flex items-center">
           <FloatingToolbar.ActionButton
-            title="Inline math"
+            title={t('editor.inlineMath')}
             disabled={disabled}
             onClick={(event) => {
               event.stopPropagation();
@@ -609,11 +614,11 @@ export function MilkdownFloatingToolbar({
                     }
                   }}
                   placeholder="https://example.com"
-                  aria-label="Link URL"
+                  aria-label={t('editor.linkUrl')}
                   className="border-edge-default bg-bg-default text-fg-default placeholder:text-fg-subtle focus:border-info h-7 w-56 rounded-sm border px-2 text-xs outline-none"
                 />
                 <Button type="submit" variant="solid" size="sm">
-                  Apply
+                  {t('actions.apply')}
                 </Button>
                 <Button
                   type="button"
@@ -621,7 +626,7 @@ export function MilkdownFloatingToolbar({
                   size="sm"
                   onClick={clearLink}
                 >
-                  Clear
+                  {t('actions.clear')}
                 </Button>
               </form>
             </>,
@@ -663,7 +668,7 @@ export function MilkdownFloatingToolbar({
                     }
                   }}
                   placeholder="x + y"
-                  aria-label="Inline math"
+                  aria-label={t('editor.inlineMath')}
                   className="border-edge-default bg-bg-default text-fg-default placeholder:text-fg-subtle focus:border-info h-7 w-56 rounded-sm border px-2 font-mono text-xs outline-none"
                 />
                 <Button
@@ -671,7 +676,7 @@ export function MilkdownFloatingToolbar({
                   variant="solid"
                   size="sm"
                   iconOnly
-                  title="Apply inline math"
+                  title={t('editor.applyInlineMath')}
                 >
                   <Check className="size-3.5" />
                 </Button>

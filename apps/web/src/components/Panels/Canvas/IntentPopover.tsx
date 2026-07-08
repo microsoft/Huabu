@@ -7,6 +7,7 @@ import React, {
   useState,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/Common/Button';
 import { EmptyState } from '@/components/Common/EmptyState';
@@ -18,6 +19,7 @@ import { useIntentStore } from '@/store/intentStore';
 // ---------------------------------------------------------------------------
 
 const IntentSelectStep: React.FC<{ anchorY: number }> = ({ anchorY }) => {
+  const { t } = useTranslation();
   const candidates = useIntentStore((s) => s.candidates);
   const selectedIndex = useIntentStore((s) => s.selectedIndex);
   const customIntent = useIntentStore((s) => s.customIntent);
@@ -52,7 +54,7 @@ const IntentSelectStep: React.FC<{ anchorY: number }> = ({ anchorY }) => {
   return (
     <div className="flex flex-col">
       {candidates.length === 0 && !isStreaming ? (
-        <EmptyState message="No suggestions available." className="px-3 py-4" />
+        <EmptyState message={t('intent.noSuggestions')} className="px-3 py-4" />
       ) : (
         <ul className="my-1 flex flex-col">
           {candidates.map((c, idx) => {
@@ -98,7 +100,7 @@ const IntentSelectStep: React.FC<{ anchorY: number }> = ({ anchorY }) => {
           {isStreaming && (
             <li className="text-fg-subtle flex items-center gap-1.5 px-4 py-1.5 text-xs">
               <Loading layout="inline" size="xs" />
-              <span>Thinking…</span>
+              <span>{t('messages.thinking')}</span>
             </li>
           )}
         </ul>
@@ -111,7 +113,7 @@ const IntentSelectStep: React.FC<{ anchorY: number }> = ({ anchorY }) => {
           <input
             ref={inputRef}
             type="text"
-            placeholder="Describe your intent…"
+            placeholder={t('intent.placeholder')}
             className="text-fg-default placeholder:text-fg-subtle/50 w-full bg-transparent text-sm outline-none"
             value={customIntent}
             onChange={(e) => setCustomIntent(e.target.value)}
@@ -124,7 +126,7 @@ const IntentSelectStep: React.FC<{ anchorY: number }> = ({ anchorY }) => {
             iconOnly
             size="sm"
             type="button"
-            title="Send"
+            title={t('chat.send')}
             disabled={!customIntent.trim()}
             onClick={handleCustomSubmit}
           >
@@ -148,6 +150,7 @@ const MARGIN = 12;
 const GAP = 12;
 
 export const IntentPopover: React.FC = () => {
+  const { t } = useTranslation();
   const isOpen = useIntentStore((s) => s.isOpen);
   const isLoading = useIntentStore((s) => s.isLoading);
   const position = useIntentStore((s) => s.position);
@@ -279,7 +282,7 @@ export const IntentPopover: React.FC = () => {
           variant="ghost"
           iconOnly
           size="sm"
-          title="Close"
+          title={t('actions.close')}
           onClick={dismiss}
         >
           <X />
@@ -289,7 +292,7 @@ export const IntentPopover: React.FC = () => {
       {isLoading ? (
         <div className="text-fg-subtle flex items-center gap-2 px-3 py-4 text-sm">
           <Loading layout="inline" size="sm" />
-          <span>Analyzing context…</span>
+          <span>{t('intent.analyzingContext')}</span>
         </div>
       ) : (
         <IntentSelectStep anchorY={position.y} />

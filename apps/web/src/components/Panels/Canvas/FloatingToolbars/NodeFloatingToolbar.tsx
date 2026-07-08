@@ -1,6 +1,7 @@
 import { useInternalNode } from '@xyflow/react';
 import { Trash2 } from 'lucide-react';
 import { memo, useCallback, useMemo, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import {
   ACCENT_NONE_TOKEN,
@@ -17,6 +18,7 @@ import {
 import { Tooltip } from '@/components/Common/Tooltip';
 import { NODE_ICON } from '@/config/nodeIcons';
 import { useIsNotMouse } from '@/hooks/useInputMode';
+import { translateColorOptions } from '@/i18n/colors';
 import useCanvasStore from '@/store/canvasStore';
 import { resolveGeometryEdit } from '@/utils/node/geometry';
 
@@ -75,6 +77,7 @@ interface NodeFloatingToolbarProps {
  */
 export const NodeFloatingToolbar = memo(
   ({ id, type, data, toolbar, actions }: NodeFloatingToolbarProps) => {
+    const { t } = useTranslation();
     const internalNode = useInternalNode(id);
     const updateNodeData = useCanvasStore((s) => s.updateNodeData);
     const convertNodeType = useCanvasStore((s) => s.convertNodeType);
@@ -85,6 +88,10 @@ export const NodeFloatingToolbar = memo(
     const ingestion = useCanvasStore((s) => s.ingestionByNodeId[id]);
     const isNotMouse = useIsNotMouse();
     const isTextFlowNode = isAlwaysAutoHeightNodeType(type);
+    const accentPickerOptions = useMemo(
+      () => translateColorOptions(ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT, t),
+      [t],
+    );
 
     // Disable the text/note toggle while the large-view editor is open
     // on this node (dirty editor state would otherwise overwrite the
@@ -93,9 +100,9 @@ export const NodeFloatingToolbar = memo(
       expandedNodeId === id || ingestion?.status === 'pending';
     const typeToggleDisabledReason =
       expandedNodeId === id
-        ? 'Close the editor to change type'
+        ? t('toolbar.closeEditorChangeType')
         : ingestion?.status === 'pending'
-          ? 'Ingestion in progress'
+          ? t('toolbar.ingestionInProgress')
           : null;
 
     // Anchor rect in flow (canvas) coordinates. `useInternalNode`
@@ -206,7 +213,9 @@ export const NodeFloatingToolbar = memo(
               disabled={isTypeToggleDisabled}
               title={
                 typeToggleDisabledReason ??
-                (type === 'text' ? 'Text' : 'Convert to Text')
+                (type === 'text'
+                  ? t('layers.filterLabels.text')
+                  : t('toolbar.convertToText'))
               }
               onClick={() => convertNodeType(id, 'text')}
             >
@@ -217,7 +226,9 @@ export const NodeFloatingToolbar = memo(
               disabled={isTypeToggleDisabled}
               title={
                 typeToggleDisabledReason ??
-                (type === 'note' ? 'Note' : 'Convert to Note')
+                (type === 'note'
+                  ? t('layers.filterLabels.note')
+                  : t('toolbar.convertToNote'))
               }
               onClick={() => convertNodeType(id, 'note')}
             >
@@ -240,7 +251,7 @@ export const NodeFloatingToolbar = memo(
         {/* ── Group 2: Style — color + size ── */}
         {type !== 'question' && type !== 'sketch' && (
           <FloatingToolbar.ColorPicker
-            colors={ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT}
+            colors={accentPickerOptions}
             value={data.style?.accent ?? ACCENT_NONE}
             onSelect={(t) =>
               updateNodeData(id, {
@@ -250,7 +261,7 @@ export const NodeFloatingToolbar = memo(
                 },
               })
             }
-            title="Accent Color"
+            title={t('toolbar.accentColor')}
           />
         )}
 
@@ -351,7 +362,7 @@ export const NodeFloatingToolbar = memo(
           <>
             <FloatingToolbar.Divider />
             <FloatingToolbar.ActionButton
-              title="Delete"
+              title={t('actions.delete')}
               tone="danger"
               onClick={() => deleteNodes([id])}
             >

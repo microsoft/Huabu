@@ -1,6 +1,7 @@
 import { AlertTriangle, Check, Info, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
 
 import { Button, type Tone } from './Button';
 import { cn } from './cn';
@@ -141,6 +142,7 @@ const toneIcons: Record<ToastTone, IconComponent> = {
 };
 
 function ToastEntry({ item }: { item: ToastItem }) {
+  const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -209,7 +211,7 @@ function ToastEntry({ item }: { item: ToastItem }) {
           size="sm"
           iconOnly
           className={buttonClass}
-          aria-label="Dismiss"
+          aria-label={t('actions.dismiss')}
           onClick={() => dismissToast(item.id)}
         >
           <X />

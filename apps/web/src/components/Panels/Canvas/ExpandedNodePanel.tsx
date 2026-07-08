@@ -1,6 +1,7 @@
 import clsx from 'clsx';
 import { ArrowLeft, Bot, Columns2, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import useCanvasStore from '../../../store/canvasStore.ts';
 import { useChatStore } from '../../../store/chatStore.ts';
@@ -25,6 +26,7 @@ export const ExpandedNodePanel = ({
   isChatCollapsed,
   onToggleChat,
 }: ExpandedNodePanelProps) => {
+  const { t } = useTranslation();
   // Canvas Store State
   const expandedNodeId = useCanvasStore((s) => s.expandedNodeId);
   const canvasExpandMode = useCanvasStore((s) => s.expandMode);
@@ -296,7 +298,7 @@ export const ExpandedNodePanel = ({
               <Input
                 ref={titleInputRef}
                 value={draftTitle}
-                placeholder="Untitled"
+                placeholder={t('node.untitled')}
                 wrapperClassName="min-w-0"
                 className="text-fg-default bg-bg-default border-edge-default w-64 max-w-lg min-w-0 truncate rounded border px-1 py-0.5 text-sm font-medium outline-none"
                 onChange={(e) => setDraftTitle(e.target.value)}
@@ -322,7 +324,7 @@ export const ExpandedNodePanel = ({
                   'text-fg-muted max-w-lg truncate rounded border border-transparent px-1 py-0.5',
                   canEditTitle && 'hover:text-fg-default cursor-text',
                 )}
-                title={canEditTitle ? 'Rename node' : undefined}
+                title={canEditTitle ? t('node.rename') : undefined}
                 role={canEditTitle ? 'button' : undefined}
                 tabIndex={canEditTitle ? 0 : undefined}
                 onClick={() => {
@@ -336,12 +338,12 @@ export const ExpandedNodePanel = ({
                   }
                 }}
               >
-                {liveLabel || 'Untitled'}
+                {liveLabel || t('node.untitled')}
               </span>
             )}
             {activeItem.readOnly && (
               <span className="bg-bg-default text-fg-muted rounded px-1.5 py-0.5 text-xs uppercase">
-                Preview
+                {t('node.preview')}
               </span>
             )}
           </div>
@@ -383,10 +385,10 @@ export const ExpandedNodePanel = ({
                   ? 'text-info bg-info-bg enabled:hover:bg-info-bg-hover'
                   : ''
               }
-              title={isChatCollapsed ? 'Open Chat' : 'Close Chat'}
+              title={isChatCollapsed ? t('chat.open') : t('chat.close')}
               tooltipPlacement="bottom"
               aria-label={
-                isChatCollapsed ? 'Open chat panel' : 'Close chat panel'
+                isChatCollapsed ? t('chat.openPanel') : t('chat.closePanel')
               }
               aria-pressed={!isChatCollapsed}
               onClick={onToggleChat}
@@ -400,7 +402,7 @@ export const ExpandedNodePanel = ({
             iconOnly
             size="sm"
             className={!isReplace ? 'text-fg-default bg-bg-default' : ''}
-            title={isReplace ? 'Split view' : 'Full view'}
+            title={isReplace ? t('node.splitView') : t('node.fullView')}
             tooltipPlacement="bottom"
             onClick={() => activeItem.setMode(isReplace ? 'split' : 'replace')}
           >
@@ -411,7 +413,7 @@ export const ExpandedNodePanel = ({
             variant="ghost"
             iconOnly
             size="sm"
-            title="Close"
+            title={t('actions.close')}
             tooltipPlacement="bottom"
             onClick={(e) => {
               e.stopPropagation();

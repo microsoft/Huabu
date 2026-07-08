@@ -1,6 +1,7 @@
 import clsx from 'clsx';
 import { Columns3, Move, Rows3, Ungroup } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import {
   FRAME_GRID_DEFAULT_COUNT,
@@ -44,6 +45,7 @@ const COUNT_INPUT_CLASS =
 
 export const FrameNode = memo(
   ({ id, data, selected }: NodeProps<FrameNodeType>) => {
+    const { t } = useTranslation();
     const unframe = useCanvasStore((state) => state.unframe);
     const tryRename = useCanvasStore((state) => state.tryRename);
     const dispatchUiIntent = useCanvasStore((state) => state.dispatchUiIntent);
@@ -138,7 +140,15 @@ export const FrameNode = memo(
     const FrameActions = (
       <>
         <FloatingToolbar.Select
-          options={LAYOUT_MODE_OPTIONS}
+          options={LAYOUT_MODE_OPTIONS.map((option) => ({
+            ...option,
+            label:
+              option.value === 'free'
+                ? t('node.frameLayoutFree')
+                : option.value === 'column'
+                  ? t('node.frameLayoutColumn')
+                  : t('node.frameLayoutRow'),
+          }))}
           value={layoutMode}
           onChange={setMode}
         />
@@ -147,11 +157,13 @@ export const FrameNode = memo(
           <input
             type="number"
             inputMode="numeric"
-            aria-label={layoutMode === 'column' ? 'Columns' : 'Rows'}
+            aria-label={
+              layoutMode === 'column' ? t('node.columns') : t('node.rows')
+            }
             title={
               layoutMode === 'column'
-                ? `Columns (1–${maxCount})`
-                : `Rows (1–${maxCount})`
+                ? t('node.columnsRange', { max: maxCount })
+                : t('node.rowsRange', { max: maxCount })
             }
             min={FRAME_GRID_MIN_COUNT}
             max={maxCount}
@@ -177,7 +189,7 @@ export const FrameNode = memo(
         <FloatingToolbar.Divider />
 
         <FloatingToolbar.ActionButton
-          title="Unframe"
+          title={t('node.unframe')}
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -192,8 +204,8 @@ export const FrameNode = memo(
     const label = useMemo(() => {
       const raw = typeof data.label === 'string' ? data.label : '';
       const trimmed = raw.trim();
-      return trimmed.length > 0 ? trimmed : 'Frame';
-    }, [data.label]);
+      return trimmed.length > 0 ? trimmed : t('layers.filterLabels.frame');
+    }, [data.label, t]);
 
     const [isEditingLabel, setIsEditingLabel] = useState(false);
     const [draftLabel, setDraftLabel] = useState(label);
@@ -211,7 +223,7 @@ export const FrameNode = memo(
     }, [isEditingLabel]);
 
     const commitLabel = () => {
-      const next = draftLabel.trim() || 'Frame';
+      const next = draftLabel.trim() || t('layers.filterLabels.frame');
       // Route through tryRename so a sibling-label collision triggers the
       // shared alert + revert flow instead of silently overwriting state.
       void tryRename('node', id, next).then((accepted) => {
@@ -285,7 +297,7 @@ export const FrameNode = memo(
           ref={labelInputRef}
           value={draftLabel}
           readOnly={!isEditingLabel}
-          title="Edit frame name"
+          title={t('node.editFrameName')}
           wrapperClassName="col-start-1 row-start-1 min-w-0 w-full"
           tooltipOffset={0}
           size={1}

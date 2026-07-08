@@ -1,6 +1,7 @@
 import { clsx } from 'clsx';
 import { Download, Fullscreen } from 'lucide-react';
 import { memo, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { resolveAccent } from '@sediment/shared';
 
@@ -72,6 +73,7 @@ function getFormatMeta(format: OfficeFormat | undefined): FormatMeta {
  */
 export const OfficeNode = memo(
   ({ id, data, selected }: NodeProps<OfficeNodeType>) => {
+    const { t } = useTranslation();
     const scale = useNodeScale(id, 'office');
     const openExpanded = useCanvasStore((s) => s.openExpanded);
     const canvasId = useCanvasStore((s) => s.canvasId);
@@ -114,7 +116,7 @@ export const OfficeNode = memo(
     const OfficeActions = (
       <>
         <FloatingToolbar.ActionButton
-          title="Open Large View"
+          title={t('node.openLargeView')}
           onClick={(e) => {
             e.stopPropagation();
             openExpanded(id);
@@ -122,7 +124,10 @@ export const OfficeNode = memo(
         >
           <Fullscreen />
         </FloatingToolbar.ActionButton>
-        <FloatingToolbar.ActionButton title="Download" onClick={handleDownload}>
+        <FloatingToolbar.ActionButton
+          title={t('node.download')}
+          onClick={handleDownload}
+        >
           <Download />
         </FloatingToolbar.ActionButton>
       </>
@@ -151,8 +156,8 @@ export const OfficeNode = memo(
             {data.artifactMissing ? (
               <MissingFileBanner
                 nodeId={id}
-                title={`${meta.label} file missing`}
-                description="The artifact for this node was deleted or renamed outside the app."
+                title={t('node.officeFileMissing', { label: meta.label })}
+                description={t('node.artifactMissingDescription')}
               />
             ) : src ? (
               <div className="bg-surface relative flex h-full w-full flex-col overflow-hidden">
@@ -198,7 +203,8 @@ export const OfficeNode = memo(
                       className="min-w-0 text-lg font-medium wrap-break-word"
                       style={{ color: iconColor }}
                     >
-                      {(data.label as string) || `Untitled ${meta.label}`}
+                      {(data.label as string) ||
+                        t('node.untitledTypedDocument', { label: meta.label })}
                     </span>
                   </div>
                   {summary ? (
@@ -210,7 +216,7 @@ export const OfficeNode = memo(
               </div>
             ) : (
               <div className="text-fg-subtle flex h-full w-full items-center justify-center text-sm">
-                No Office Source
+                {t('node.noOfficeSource')}
               </div>
             )}
           </div>

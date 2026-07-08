@@ -1,7 +1,8 @@
 import { X } from 'lucide-react';
-import { Fragment } from 'react';
+import { Fragment, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 
-import { keyboardShortcutSections } from '../../../config/shortcuts';
+import { getKeyboardShortcutSections } from '../../../config/shortcuts';
 import { isMac, shortcutTokens } from '../../../utils/platform';
 import { Button } from '../../Common/Button';
 import { Modal } from '../../Common/Modal';
@@ -15,6 +16,12 @@ export function KeyboardShortcutsModal({
   isOpen,
   onClose,
 }: KeyboardShortcutsModalProps) {
+  const { t } = useTranslation();
+  const keyboardShortcutSections = useMemo(
+    () => getKeyboardShortcutSections(t),
+    [t],
+  );
+
   return (
     <Modal
       isOpen={isOpen}
@@ -24,15 +31,15 @@ export function KeyboardShortcutsModal({
       <div className="border-edge-default flex flex-shrink-0 items-start justify-between border-b px-6 py-5">
         <div>
           <h3 className="text-fg-default text-base font-semibold">
-            Keyboard Shortcuts
+            {t('shortcuts.title')}
           </h3>
         </div>
         <Button
           variant="ghost"
           iconOnly
           onClick={onClose}
-          title="Close (Esc)"
-          aria-label="Close keyboard shortcuts"
+          title={t('shortcuts.closeTitle')}
+          aria-label={t('shortcuts.closeAria')}
         >
           <X />
         </Button>

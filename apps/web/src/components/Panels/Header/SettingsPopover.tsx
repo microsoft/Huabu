@@ -1,5 +1,6 @@
 import { Settings } from 'lucide-react';
 import React, { useCallback, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { AcpSettings } from './AcpSettings';
 import { CanvasSettings } from './CanvasSettings';
@@ -39,6 +40,7 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
   size = 'md',
   tooltipPlacement,
 }) => {
+  const { t } = useTranslation();
   const llmInit = useLLMStore((s) => s.init);
   const acpInit = useAcpProfilesStore((s) => s.init);
 
@@ -85,10 +87,10 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
           shape={shape}
           size={size}
           iconOnly
-          title="Settings"
+          title={t('settings.title')}
           tooltipPlacement={tooltipPlacement}
           onClick={handleToggle}
-          aria-label="Open settings"
+          aria-label={t('settings.open')}
         >
           <Settings />
         </Button>
@@ -103,7 +105,7 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
           className="flex max-h-[calc(100vh-24px)] w-120 flex-col p-4"
         >
           <h3 className="text-fg-default mb-3 shrink-0 text-sm font-semibold">
-            Settings
+            {t('settings.title')}
           </h3>
 
           <div className="-mx-4 min-h-0 flex-1 overflow-y-auto px-4 pb-2">
@@ -117,7 +119,7 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
           <div className="mt-4 flex shrink-0 items-center justify-between">
             <span
               className="text-fg-subtle font-mono text-[11px] select-text"
-              title="App version"
+              title={t('settings.appVersion')}
             >
               v{__APP_VERSION__}
             </span>
@@ -127,7 +129,7 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
               size="sm"
               onClick={handleClose}
             >
-              Close
+              {t('actions.close')}
             </Button>
           </div>
         </Popover>

@@ -19,6 +19,7 @@
  */
 
 import { Loader2 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import { AssistantDisclosure } from '../AssistantDisclosure';
 
@@ -60,6 +61,7 @@ export function ThinkingCard({
   children,
   closed,
 }: ThinkingCardProps) {
+  const { t } = useTranslation();
   if (!text) {
     // Defensive: a phase head with empty text — render its tool runs
     // flat rather than an empty title row.
@@ -91,7 +93,7 @@ export function ThinkingCard({
   return (
     <AssistantDisclosure
       icon={icon}
-      title={showSpinner && !preview ? 'Thinking…' : preview}
+      title={showSpinner && !preview ? t('messages.thinking') : preview}
       titleTooltip={showBodyText ? undefined : preview}
       defaultCollapsed={closed}
       collapseSignal={closed}

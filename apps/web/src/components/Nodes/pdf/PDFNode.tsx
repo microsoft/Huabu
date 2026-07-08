@@ -1,6 +1,7 @@
 import { clsx } from 'clsx';
 import { Download, Fullscreen, ImageOff } from 'lucide-react';
 import { lazy, memo, Suspense, useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { resolveArtifactUrl } from '@/api/artifact';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
@@ -34,6 +35,7 @@ const FirstPageThumbnail = lazy(() => import('./PDFFirstPageThumbnail'));
 
 export const PDFNode = memo(
   ({ id, data, selected }: NodeProps<PDFNodeType>) => {
+    const { t } = useTranslation();
     const scale = useNodeScale(id, 'pdf');
     const isMinimalLOD = useNodeLOD(id, 'pdf') === 'minimal';
     const openExpanded = useCanvasStore((s) => s.openExpanded);
@@ -105,7 +107,7 @@ export const PDFNode = memo(
     const PDFActions = (
       <>
         <FloatingToolbar.ActionButton
-          title="Open Large View"
+          title={t('node.openLargeView')}
           onClick={(e) => {
             e.stopPropagation();
             openExpanded(id);
@@ -113,12 +115,15 @@ export const PDFNode = memo(
         >
           <Fullscreen />
         </FloatingToolbar.ActionButton>
-        <FloatingToolbar.ActionButton title="Download" onClick={handleDownload}>
+        <FloatingToolbar.ActionButton
+          title={t('node.download')}
+          onClick={handleDownload}
+        >
           <Download />
         </FloatingToolbar.ActionButton>
         {hasCover && (
           <FloatingToolbar.ActionButton
-            title="Delete Cover"
+            title={t('node.deleteCover')}
             onClick={handleDeleteCover}
           >
             <ImageOff />
@@ -167,15 +172,15 @@ export const PDFNode = memo(
             {data.artifactMissing ? (
               <MissingFileBanner
                 nodeId={id}
-                title="PDF file missing"
-                description="The artifact for this node was deleted or renamed outside the app."
+                title={t('node.pdfFileMissing')}
+                description={t('node.artifactMissingDescription')}
               />
             ) : src ? (
               <PreviewCard
                 image={coverImage}
-                imageAlt={data.label || 'PDF cover'}
+                imageAlt={data.label || t('node.pdfCover')}
                 nodeType="pdf"
-                title={data.label || 'Untitled PDF'}
+                title={data.label || t('node.untitledPdf')}
                 loading={!coverImage}
                 imagePosition="top"
                 accentColor={data.style?.accent}
@@ -188,7 +193,7 @@ export const PDFNode = memo(
               </PreviewCard>
             ) : (
               <div className="text-fg-subtle flex h-full w-full items-center justify-center text-sm">
-                No PDF Source
+                {t('node.noPdfSource')}
               </div>
             )}
           </div>

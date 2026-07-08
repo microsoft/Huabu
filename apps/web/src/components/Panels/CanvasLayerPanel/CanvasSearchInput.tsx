@@ -32,6 +32,7 @@
 
 import { Loader2, Search, X } from 'lucide-react';
 import { useCallback, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import useCanvasStore from '../../../store/canvasStore';
 import { usePanelStore } from '../../../store/panelStore';
@@ -59,6 +60,7 @@ export function ensureCanvasSearchScope(canvasId: string | null): void {
 export const CanvasSearchInput = ({
   inputRef: externalRef,
 }: CanvasSearchInputProps): JSX.Element => {
+  const { t } = useTranslation();
   const localRef = useRef<HTMLInputElement>(null);
   const inputRef = externalRef ?? localRef;
 
@@ -171,16 +173,17 @@ export const CanvasSearchInput = ({
         value={query}
         onChange={handleChange}
         onKeyDown={handleKeyDown}
-        placeholder="Search this canvas…"
+        placeholder={t('layers.searchPlaceholder')}
         spellCheck={false}
         className="text-fg-default placeholder:text-fg-subtle min-w-0 flex-1 bg-transparent py-1 text-xs outline-none"
-        aria-label="Search this canvas"
+        data-canvas-search-input="true"
+        aria-label={t('layers.searchAria')}
       />
       {isStreaming && (
         <Loader2
           size={11}
           className="text-fg-subtle shrink-0 animate-spin"
-          aria-label="Searching"
+          aria-label={t('search.searching')}
         />
       )}
       {showCount && (
@@ -193,7 +196,7 @@ export const CanvasSearchInput = ({
           variant="ghost"
           iconOnly
           size="sm"
-          title="Clear search (Esc)"
+          title={t('search.clearEsc')}
           onClick={handleClear}
           className="p-0.5!"
         >

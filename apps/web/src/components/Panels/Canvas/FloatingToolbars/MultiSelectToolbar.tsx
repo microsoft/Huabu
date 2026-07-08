@@ -1,5 +1,6 @@
 import { Sparkles, Trash2 } from 'lucide-react';
 import { useCallback, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import {
   ACCENT_NONE_TOKEN,
@@ -17,6 +18,7 @@ import {
   FLOATING_TOOLBAR_CLASS,
 } from '@/components/Common/FloatingToolbar';
 import { useIsNotMouse } from '@/hooks/useInputMode';
+import { translateColorOptions } from '@/i18n/colors';
 import useCanvasStore from '@/store/canvasStore';
 import { useIntentStore } from '@/store/intentStore';
 import { resolveGeometryEdit } from '@/utils/node/geometry';
@@ -37,6 +39,7 @@ interface GeometryToolbarItem {
  * multi-selection bounding box when two or more nodes are selected.
  */
 export const MultiSelectToolbar = () => {
+  const { t } = useTranslation();
   const nodes = useCanvasStore((s) => s.nodes);
   const alignSelectedNodes = useCanvasStore((s) => s.alignSelectedNodes);
   const spreadSelectedNodes = useCanvasStore((s) => s.spreadSelectedNodes);
@@ -107,7 +110,10 @@ export const MultiSelectToolbar = () => {
   // node defaults to a null accent and the picker had no way to express
   // that state — once a coloured swatch was clicked it could not be
   // undone.
-  const accentPickerOptions = ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT;
+  const accentPickerOptions = useMemo(
+    () => translateColorOptions(ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT, t),
+    [t],
+  );
 
   // Common width / height across selected nodes. `null` when the
   // selected nodes do not all share the same value — the size picker
@@ -272,7 +278,7 @@ export const MultiSelectToolbar = () => {
         <>
           <FloatingToolbar.Divider />
           <FloatingToolbar.ActionButton
-            title="Apply Sketch (interpret strokes with AI)"
+            title={t('node.applySketchPlural')}
             onClick={() => requestSketchRecognition(sketchIds)}
           >
             <Sparkles />
@@ -302,7 +308,7 @@ export const MultiSelectToolbar = () => {
             },
           ]);
         }}
-        title="Accent Color"
+        title={t('toolbar.accentColor')}
       />
 
       {/* Non-mouse only: mouse users have keyboard Delete / Backspace. */}
@@ -310,7 +316,7 @@ export const MultiSelectToolbar = () => {
         <>
           <FloatingToolbar.Divider />
           <FloatingToolbar.ActionButton
-            title="Delete Selected"
+            title={t('toolbar.deleteSelected')}
             tone="danger"
             onClick={() => {
               if (selectedNodes.length === 0) return;

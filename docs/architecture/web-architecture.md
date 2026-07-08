@@ -20,6 +20,7 @@ apps/web/src/
 ├── hooks/         # Shared React hooks
 ├── store/         # Zustand global state
 ├── api/           # Backend API clients (one file per endpoint group)
+├── i18n/          # i18next setup, locale resources, and translation helpers
 ├── config/        # Static config & constants
 └── utils/         # Generic utilities (non-React)
 ```
@@ -73,7 +74,37 @@ What stays in `apps/web/src/handler/canvasCommand/`:
 
 ---
 
-## 5. Node & edge stacking (z-order)
+## 5. Internationalisation
+
+The web app uses [`i18next`](../../apps/web/src/i18n/index.ts) with
+`react-i18next` for React components.
+
+- Initialise i18n once from [`main.tsx`](../../apps/web/src/main.tsx) by
+  importing `apps/web/src/i18n`.
+- Locale resources live under
+  [`apps/web/src/i18n/resources`](../../apps/web/src/i18n/resources). Keep
+  user-facing UI copy in translation files rather than inline strings.
+- React components should call `useTranslation()` and pass translated strings
+  into common components (`Button.title`, `Loading.message`, `Modal.title`,
+  etc.).
+- Non-React code may import the shared `i18n` instance and call `i18n.t(...)`
+  for user-facing copy (for example toast messages emitted from stores).
+- Shared package constants remain token/fallback oriented. Web helpers such as
+  [`translateColorOptions`](../../apps/web/src/i18n/colors.ts) map stable
+  shared tokens to localised labels at the UI boundary.
+- Server API errors expose stable `code` values and English `message`
+  fallbacks. Client UI should branch on the code and localise the displayed
+  copy; show the server message only as a fallback for unknown errors.
+- Date/number formatting should use `i18n.language` rather than the implicit
+  browser default when the formatted value is part of translated UI.
+
+`i18next-icu` is intentionally not part of the baseline. Use i18next's built-in
+plural suffixes (`key_one`, `key_other`) for simple counts; add ICU only if the
+product starts relying on complex plural/select/date message patterns.
+
+---
+
+## 6. Node & edge stacking (z-order)
 
 The **Layers panel order = the `nodes` array order = the sole stacking
 authority.** Later in the array ⇒ painted on top. A plain node ordered after a
@@ -107,7 +138,7 @@ selection toggles don't break xyflow's per-element `React.memo`.
 
 ---
 
-## 6. Related docs
+## 7. Related docs
 
 - [canvas-command-architecture.md](./canvas-command-architecture.md) — the command/engine model (shared, server + web).
 - [agent-context.md](./agent-context.md) — how the web assembles agent context.

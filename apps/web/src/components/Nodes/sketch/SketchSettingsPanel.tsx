@@ -1,4 +1,5 @@
 import { Eraser } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import {
   FLOATING_TOOLBAR_CLASS,
@@ -33,6 +34,7 @@ const PenIcon = NODE_ICON.sketch;
  * onto each new sketch node so the chosen look survives reload.
  */
 export function SketchSettingsPanel() {
+  const { t } = useTranslation();
   const sketchDraft = useToolStore((s) => s.sketchDraft);
   const setSketchDraft = useToolStore((s) => s.setSketchDraft);
   const isErasing = sketchDraft.mode === 'erase';
@@ -46,7 +48,7 @@ export function SketchSettingsPanel() {
       {/* Mode switcher: icon-only, on the left. */}
       <FloatingToolbar.ToggleButton
         active={!isErasing}
-        title="Pen"
+        title={t('node.pen')}
         size="md"
         onClick={() => setSketchDraft({ mode: 'draw' })}
       >
@@ -54,7 +56,7 @@ export function SketchSettingsPanel() {
       </FloatingToolbar.ToggleButton>
       <FloatingToolbar.ToggleButton
         active={isErasing}
-        title="Eraser"
+        title={t('node.eraser')}
         size="md"
         onClick={() => setSketchDraft({ mode: 'erase' })}
       >
@@ -74,7 +76,7 @@ export function SketchSettingsPanel() {
             value={sketchDraft.eraserSize}
             min={SKETCH_ERASER_RADIUS_MIN_PX}
             max={SKETCH_ERASER_RADIUS_MAX_PX}
-            label="Eraser size"
+            label={t('node.eraserSize')}
             size="md"
             onChange={(eraserSize) => setSketchDraft({ eraserSize })}
           />

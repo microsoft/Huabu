@@ -1,5 +1,6 @@
 import { Download } from 'lucide-react';
 import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
 
 import { resolveArtifactUrl } from '@/api/artifact';
 import { Button } from '@/components/Common/Button';
@@ -20,12 +21,13 @@ import type { PreviewComponentProps } from '../note/NotePreview';
  * source application.
  */
 export const OfficePreview = ({ data }: PreviewComponentProps) => {
+  const { t } = useTranslation();
   const src = typeof data.src === 'string' ? data.src : '';
   const markdown = typeof data.content === 'string' ? data.content : '';
   const label =
     typeof data.label === 'string' && data.label.trim().length > 0
       ? data.label.trim()
-      : 'Untitled Office document';
+      : t('node.untitledOfficeDocument');
   const canvasId = useCanvasStore((s) => s.canvasId);
   const { el: headerSlotEl } = usePreviewHeaderSlot();
 
@@ -45,8 +47,8 @@ export const OfficePreview = ({ data }: PreviewComponentProps) => {
       tone="neutral"
       size="sm"
       iconOnly
-      title="Download original file"
-      aria-label="Download original file"
+      title={t('node.downloadOriginalFile')}
+      aria-label={t('node.downloadOriginalFile')}
       onClick={handleDownload}
     >
       <Download />
@@ -62,8 +64,7 @@ export const OfficePreview = ({ data }: PreviewComponentProps) => {
       <div className="flex-1 overflow-auto px-6 py-4">
         {markdown.trim().length === 0 ? (
           <div className="text-fg-subtle flex h-full w-full items-center justify-center text-sm">
-            No extracted content yet. The text will appear here once
-            preprocessing finishes.
+            {t('node.noExtractedContentYet')}
           </div>
         ) : (
           <MilkdownPreview markdown={markdown} />

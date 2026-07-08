@@ -12,6 +12,7 @@ import {
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
 
 import { createId, type EdgeStyle } from '@sediment/shared';
 import {
@@ -392,6 +393,7 @@ interface NodeSideAffordanceProps {
 
 export const NodeSideAffordance = memo(
   ({ nodeId, selected, editing, onCreate }: NodeSideAffordanceProps) => {
+    const { t } = useTranslation();
     const domNode = useStore((state) => state.domNode);
     const rendererEl = useMemo(
       () => domNode?.querySelector('.react-flow__renderer') ?? null,
@@ -522,7 +524,7 @@ export const NodeSideAffordance = memo(
                 variant="ghost"
                 iconOnly
                 size="md"
-                title="Create connected node"
+                title={t('node.createConnectedNode')}
                 onClick={(event) => {
                   event.stopPropagation();
                   setOpenSide(isOpen ? null : side);
@@ -546,7 +548,7 @@ export const NodeSideAffordance = memo(
                     variant="ghost"
                     iconOnly
                     size="sm"
-                    title="New note"
+                    title={t('node.newNote')}
                     onClick={() => {
                       onCreate(side, 'note');
                       setOpenSide(null);
@@ -559,7 +561,7 @@ export const NodeSideAffordance = memo(
                     variant="ghost"
                     iconOnly
                     size="sm"
-                    title="New question"
+                    title={t('node.newQuestion')}
                     onClick={() => {
                       onCreate(side, 'question');
                       setOpenSide(null);

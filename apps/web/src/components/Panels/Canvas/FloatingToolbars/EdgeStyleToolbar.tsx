@@ -1,5 +1,6 @@
 import { Trash2 } from 'lucide-react';
 import { useCallback, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { ACCENT_PALETTE, EDGE_STROKE_WIDTHS } from '@sediment/shared';
 import { DEFAULT_EDGE_STROKE_WIDTH } from '@sediment/shared/canvas-engine';
@@ -10,6 +11,7 @@ import {
   FLOATING_TOOLBAR_CLASS,
 } from '@/components/Common/FloatingToolbar';
 import { useIsNotMouse } from '@/hooks/useInputMode';
+import { translateColorOptions } from '@/i18n/colors';
 import useCanvasStore from '@/store/canvasStore';
 
 import type { SelectOption } from '@/components/Common/Select';
@@ -115,31 +117,6 @@ function LineTypeIcon({ type }: { type: EdgeLineType }) {
   );
 }
 
-// ---- Select options ----
-
-const LINE_TYPE_OPTIONS: SelectOption<EdgeLineType>[] = [
-  { value: 'bezier', label: 'Bezier', icon: <LineTypeIcon type="bezier" /> },
-  {
-    value: 'straight',
-    label: 'Straight',
-    icon: <LineTypeIcon type="straight" />,
-  },
-  { value: 'step', label: 'Step', icon: <LineTypeIcon type="step" /> },
-];
-
-const LINE_STYLE_OPTIONS: SelectOption<EdgeLineStyle>[] = [
-  { value: 'solid', label: 'Solid', icon: <LineStyleIcon /> },
-  { value: 'dashed', label: 'Dashed', icon: <LineStyleIcon dash="4 3" /> },
-  { value: 'dotted', label: 'Dotted', icon: <LineStyleIcon dash="1.5 3" /> },
-];
-
-const DIRECTION_OPTIONS: SelectOption<EdgeDirection>[] = [
-  { value: 'none', label: 'No arrow', icon: <ArrowIcon /> },
-  { value: 'forward', label: 'Forward', icon: <ArrowIcon right /> },
-  { value: 'backward', label: 'Backward', icon: <ArrowIcon left /> },
-  { value: 'both', label: 'Both', icon: <ArrowIcon left right /> },
-];
-
 const STROKE_WIDTH_OPTIONS: SelectOption<`${EdgeStrokeWidth}`>[] =
   EDGE_STROKE_WIDTHS.map((w) => ({
     value: `${w}` as `${typeof w}`,
@@ -199,6 +176,7 @@ function useEdgeMidpoint(selectedEdge: Edge | null, nodes: Node[]) {
  * Follows the same styling pattern as MultiSelectToolbar.
  */
 export const EdgeStyleToolbar = () => {
+  const { t } = useTranslation();
   const nodes = useCanvasStore((s) => s.nodes);
   const edges = useCanvasStore((s) => s.edges);
   const executeCommands = useCanvasStore((s) => s.executeCommands);
@@ -248,6 +226,78 @@ export const EdgeStyleToolbar = () => {
   const currentStroke = style.stroke ?? ACCENT_PALETTE[0].token;
   const currentWidth = style.strokeWidth ?? DEFAULT_EDGE_STROKE_WIDTH;
   const currentDirection: EdgeDirection = style.direction ?? 'none';
+  const accentColors = useMemo(
+    () => translateColorOptions(ACCENT_PALETTE, t),
+    [t],
+  );
+
+  const lineTypeOptions = useMemo<SelectOption<EdgeLineType>[]>(
+    () => [
+      {
+        value: 'bezier',
+        label: t('edgeToolbar.lineType.bezier'),
+        icon: <LineTypeIcon type="bezier" />,
+      },
+      {
+        value: 'straight',
+        label: t('edgeToolbar.lineType.straight'),
+        icon: <LineTypeIcon type="straight" />,
+      },
+      {
+        value: 'step',
+        label: t('edgeToolbar.lineType.step'),
+        icon: <LineTypeIcon type="step" />,
+      },
+    ],
+    [t],
+  );
+
+  const lineStyleOptions = useMemo<SelectOption<EdgeLineStyle>[]>(
+    () => [
+      {
+        value: 'solid',
+        label: t('edgeToolbar.lineStyle.solid'),
+        icon: <LineStyleIcon />,
+      },
+      {
+        value: 'dashed',
+        label: t('edgeToolbar.lineStyle.dashed'),
+        icon: <LineStyleIcon dash="4 3" />,
+      },
+      {
+        value: 'dotted',
+        label: t('edgeToolbar.lineStyle.dotted'),
+        icon: <LineStyleIcon dash="1.5 3" />,
+      },
+    ],
+    [t],
+  );
+
+  const directionOptions = useMemo<SelectOption<EdgeDirection>[]>(
+    () => [
+      {
+        value: 'none',
+        label: t('edgeToolbar.direction.none'),
+        icon: <ArrowIcon />,
+      },
+      {
+        value: 'forward',
+        label: t('edgeToolbar.direction.forward'),
+        icon: <ArrowIcon right />,
+      },
+      {
+        value: 'backward',
+        label: t('edgeToolbar.direction.backward'),
+        icon: <ArrowIcon left />,
+      },
+      {
+        value: 'both',
+        label: t('edgeToolbar.direction.both'),
+        icon: <ArrowIcon left right />,
+      },
+    ],
+    [t],
+  );
 
   return (
     <CanvasFloatingPopover
@@ -261,8 +311,8 @@ export const EdgeStyleToolbar = () => {
       className={FLOATING_TOOLBAR_CLASS}
     >
       <FloatingToolbar.Select
-        label="Type"
-        options={LINE_TYPE_OPTIONS}
+        label={t('edgeToolbar.type')}
+        options={lineTypeOptions}
         value={currentLineType}
         onChange={(v) => setStyle({ lineType: v })}
         iconOnly
@@ -271,8 +321,8 @@ export const EdgeStyleToolbar = () => {
       <FloatingToolbar.Divider />
 
       <FloatingToolbar.Select
-        label="Style"
-        options={LINE_STYLE_OPTIONS}
+        label={t('edgeToolbar.style')}
+        options={lineStyleOptions}
         value={currentLineStyle}
         onChange={(v) => setStyle({ lineStyle: v })}
         iconOnly
@@ -281,8 +331,8 @@ export const EdgeStyleToolbar = () => {
       <FloatingToolbar.Divider />
 
       <FloatingToolbar.Select
-        label="Arrow"
-        options={DIRECTION_OPTIONS}
+        label={t('edgeToolbar.arrow')}
+        options={directionOptions}
         value={currentDirection}
         onChange={(v) => setStyle({ direction: v })}
         iconOnly
@@ -291,7 +341,7 @@ export const EdgeStyleToolbar = () => {
       <FloatingToolbar.Divider />
 
       <FloatingToolbar.Select
-        label="Width"
+        label={t('edgeToolbar.width')}
         options={STROKE_WIDTH_OPTIONS}
         value={`${currentWidth}`}
         onChange={(v) =>
@@ -304,10 +354,10 @@ export const EdgeStyleToolbar = () => {
 
       {/* Color picker */}
       <FloatingToolbar.ColorPicker
-        colors={ACCENT_PALETTE}
+        colors={accentColors}
         value={currentStroke}
         onSelect={(t) => setStyle({ stroke: t })}
-        title="Edge color"
+        title={t('edgeToolbar.edgeColor')}
       />
 
       {/* Non-mouse only: mouse users have keyboard Delete / Backspace. */}
@@ -315,7 +365,7 @@ export const EdgeStyleToolbar = () => {
         <>
           <FloatingToolbar.Divider />
           <FloatingToolbar.ActionButton
-            title="Delete Edge"
+            title={t('edgeToolbar.deleteEdge')}
             tone="danger"
             onClick={() => {
               if (selectedEdge) disconnectEdges([selectedEdge.id]);

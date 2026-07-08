@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
 
 import { Button } from './Button';
 import { cn } from './cn';
@@ -560,6 +561,7 @@ function ToolbarSizePicker({
   heightAuto,
   autoSize,
 }: ToolbarSizePickerProps) {
+  const { t } = useTranslation();
   // Normalise: `autoSize` wins over the legacy `heightAuto` shorthand
   // so a caller passing both gets predictable behaviour (instead of
   // them silently fighting).
@@ -613,11 +615,11 @@ function ToolbarSizePicker({
             auto.title ??
             (auto.dimensions === 'both'
               ? autoActive
-                ? 'Switch to manual size'
-                : 'Fit size to content'
+                ? t('toolbar.size.switchManual')
+                : t('toolbar.size.fitSize')
               : autoActive
-                ? 'Switch to fixed height'
-                : 'Fit height to content')
+                ? t('toolbar.size.switchFixedHeight')
+                : t('toolbar.size.fitHeight'))
           }
           onClick={auto.onToggle}
         >
@@ -659,8 +661,9 @@ interface ToolbarAlignPickerProps {
 function ToolbarAlignPicker({
   onAlign,
   onSpread,
-  title = 'Align & Distribute',
+  title,
 }: ToolbarAlignPickerProps) {
+  const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -711,20 +714,36 @@ function ToolbarAlignPicker({
     title: string;
     Icon: typeof AlignStartVertical;
   }> = [
-    { direction: 'left', title: 'Align Left', Icon: AlignStartVertical },
+    {
+      direction: 'left',
+      title: t('toolbar.align.left'),
+      Icon: AlignStartVertical,
+    },
     {
       direction: 'center-h',
-      title: 'Align Center',
+      title: t('toolbar.align.center'),
       Icon: AlignCenterVertical,
     },
-    { direction: 'right', title: 'Align Right', Icon: AlignEndVertical },
-    { direction: 'top', title: 'Align Top', Icon: AlignStartHorizontal },
+    {
+      direction: 'right',
+      title: t('toolbar.align.right'),
+      Icon: AlignEndVertical,
+    },
+    {
+      direction: 'top',
+      title: t('toolbar.align.top'),
+      Icon: AlignStartHorizontal,
+    },
     {
       direction: 'center-v',
-      title: 'Align Middle',
+      title: t('toolbar.align.middle'),
       Icon: AlignCenterHorizontal,
     },
-    { direction: 'bottom', title: 'Align Bottom', Icon: AlignEndHorizontal },
+    {
+      direction: 'bottom',
+      title: t('toolbar.align.bottom'),
+      Icon: AlignEndHorizontal,
+    },
   ];
 
   return (
@@ -733,7 +752,7 @@ function ToolbarAlignPicker({
         variant="ghost"
         iconOnly
         size="sm"
-        title={title}
+        title={title ?? t('toolbar.align.title')}
         onClick={(e) => {
           e.stopPropagation();
           setIsOpen(!isOpen);
@@ -797,7 +816,7 @@ function ToolbarAlignPicker({
                 variant="ghost"
                 iconOnly
                 size="sm"
-                title="Spread Apart"
+                title={t('toolbar.align.spreadApart')}
                 onClick={spread}
                 className="text-fg-muted hover:bg-bg-default"
               >

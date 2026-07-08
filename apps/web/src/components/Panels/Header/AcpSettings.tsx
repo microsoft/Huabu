@@ -40,6 +40,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 
 import {
   createAcpProfile,
@@ -87,6 +88,7 @@ const AgentletHealthBanner: React.FC<AgentletHealthBannerProps> = ({
   onRestart,
   restarting,
 }) => {
+  const { t } = useTranslation();
   if (!agentlet) return null;
   if (agentlet.online && !agentlet.lastError) return null;
 
@@ -99,7 +101,7 @@ const AgentletHealthBanner: React.FC<AgentletHealthBannerProps> = ({
       <AlertTriangle className="text-warning mt-0.5 h-3.5 w-3.5 shrink-0" />
       <div className="min-w-0 flex-1">
         <p className="text-fg-default text-xs font-medium">
-          External-agent worker is offline
+          {t('settings.workerOffline')}
         </p>
         {agentlet.lastError && (
           <p className="text-fg-muted mt-0.5 text-[11px] leading-snug wrap-break-word">
@@ -108,7 +110,7 @@ const AgentletHealthBanner: React.FC<AgentletHealthBannerProps> = ({
         )}
         {nextRestartInSec !== null && nextRestartInSec > 0 && (
           <p className="text-fg-subtle mt-0.5 text-[11px] leading-snug">
-            Next auto-retry in {nextRestartInSec}s.
+            {t('settings.nextAutoRetry', { seconds: nextRestartInSec })}
           </p>
         )}
       </div>
@@ -118,14 +120,16 @@ const AgentletHealthBanner: React.FC<AgentletHealthBannerProps> = ({
         size="sm"
         onClick={() => void onRestart()}
         disabled={restarting}
-        title="Force the worker to restart now"
+        title={t('settings.forceRestartWorker')}
         className="shrink-0"
       >
         <RefreshCw
           size={12}
           className={restarting ? 'animate-spin' : undefined}
         />
-        <span>{restarting ? 'Restarting…' : 'Restart worker'}</span>
+        <span>
+          {restarting ? t('settings.restarting') : t('settings.restartWorker')}
+        </span>
       </Button>
     </div>
   );
@@ -240,9 +244,10 @@ function basenameFromPath(p: string): string {
 function buildDefaultDisplayName(
   cliDisplayName: string | null,
   cwd: string,
+  customAgentLabel: string,
 ): string {
   const folder = basenameFromPath(cwd.trim());
-  const agent = cliDisplayName?.trim() || 'Custom agent';
+  const agent = cliDisplayName?.trim() || customAgentLabel;
   return folder ? `${agent} (${folder})` : agent;
 }
 
@@ -305,26 +310,29 @@ function parseCommandIntoForm(
 const FieldLabel: React.FC<{
   children: React.ReactNode;
   hint?: React.ReactNode;
-}> = ({ children, hint }) => (
-  <span className="text-fg-muted flex items-center gap-1">
-    <span>{children}</span>
-    {hint ? (
-      <Tooltip
-        content={hint}
-        contentClassName="max-w-80 leading-snug whitespace-normal"
-      >
-        <span
-          role="img"
-          aria-label="More info"
-          tabIndex={0}
-          className="text-fg-subtle hover:text-fg-default focus-visible:text-fg-default inline-flex cursor-help outline-none"
+}> = ({ children, hint }) => {
+  const { t } = useTranslation();
+  return (
+    <span className="text-fg-muted flex items-center gap-1">
+      <span>{children}</span>
+      {hint ? (
+        <Tooltip
+          content={hint}
+          contentClassName="max-w-80 leading-snug whitespace-normal"
         >
-          <Info size={12} />
-        </span>
-      </Tooltip>
-    ) : null}
-  </span>
-);
+          <span
+            role="img"
+            aria-label={t('settings.moreInfo')}
+            tabIndex={0}
+            className="text-fg-subtle hover:text-fg-default focus-visible:text-fg-default inline-flex cursor-help outline-none"
+          >
+            <Info size={12} />
+          </span>
+        </Tooltip>
+      ) : null}
+    </span>
+  );
+};
 
 export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
   isOpen,
@@ -333,6 +341,7 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
   onClose,
   onSaved,
 }) => {
+  const { t } = useTranslation();
   const [form, setForm] = useState<ProfileFormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
 
@@ -421,8 +430,13 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
    * reflects what the saved profile will be called.
    */
   const defaultDisplayName = useMemo(
-    () => buildDefaultDisplayName(selectedCli?.displayName ?? null, form.cwd),
-    [selectedCli, form.cwd],
+    () =>
+      buildDefaultDisplayName(
+        selectedCli?.displayName ?? null,
+        form.cwd,
+        t('settings.customAgent'),
+      ),
+    [selectedCli, form.cwd, t],
   );
 
   const handleSubmit = useCallback(async () => {
@@ -431,11 +445,13 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
     if (isAgentTeam) {
       const agentDir = form.agentDir.trim();
       if (!agentDir) {
-        toast('Agent directory is required', { tone: 'danger' });
+        toast(t('settings.agentDirectoryRequired'), { tone: 'danger' });
         return;
       }
       const displayName =
-        form.displayName.trim() || agentDir.split('/').pop() || 'Agent Team';
+        form.displayName.trim() ||
+        agentDir.split('/').pop() ||
+        t('settings.agentTeam');
       setSaving(true);
       try {
         if (editing) {
@@ -448,7 +464,7 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
             },
           };
           await updateAcpProfile(editing.id, patch);
-          toast('Profile updated', { tone: 'success' });
+          toast(t('settings.profileUpdated'), { tone: 'success' });
         } else {
           const payload: AcpProfileCreateRequest = {
             displayName,
@@ -460,14 +476,17 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
             },
           };
           await createAcpProfile(payload);
-          toast('Profile created', { tone: 'success' });
+          toast(t('settings.profileCreated'), { tone: 'success' });
         }
         await onSaved();
         onClose();
       } catch (err) {
-        toast(err instanceof Error ? err.message : 'Failed to save profile', {
-          tone: 'danger',
-        });
+        toast(
+          err instanceof Error ? err.message : t('settings.profileSaveFailed'),
+          {
+            tone: 'danger',
+          },
+        );
       } finally {
         setSaving(false);
       }
@@ -477,11 +496,11 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
     const command = buildCommand(form, detectedClis);
     const cwd = form.cwd.trim();
     if (!command) {
-      toast('Command is required', { tone: 'danger' });
+      toast(t('settings.commandRequired'), { tone: 'danger' });
       return;
     }
     if (!cwd) {
-      toast('Working directory is required', { tone: 'danger' });
+      toast(t('settings.workingDirectoryRequired'), { tone: 'danger' });
       return;
     }
     // Empty input → fall back to the computed default so the user
@@ -498,7 +517,7 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
           autoRestart: form.autoRestart,
         };
         await updateAcpProfile(editing.id, patch);
-        toast('Profile updated', { tone: 'success' });
+        toast(t('settings.profileUpdated'), { tone: 'success' });
       } else {
         const payload: AcpProfileCreateRequest = {
           displayName,
@@ -508,18 +527,21 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
           autoRestart: form.autoRestart,
         };
         await createAcpProfile(payload);
-        toast('Profile created', { tone: 'success' });
+        toast(t('settings.profileCreated'), { tone: 'success' });
       }
       await onSaved();
       onClose();
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Failed to save profile', {
-        tone: 'danger',
-      });
+      toast(
+        err instanceof Error ? err.message : t('settings.profileSaveFailed'),
+        {
+          tone: 'danger',
+        },
+      );
     } finally {
       setSaving(false);
     }
-  }, [form, defaultDisplayName, detectedClis, editing, onSaved, onClose]);
+  }, [form, defaultDisplayName, detectedClis, editing, onSaved, onClose, t]);
 
   const cliOptions = useMemo(
     () =>
@@ -590,7 +612,11 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={editing ? 'Edit external agent' : 'New external agent'}
+      title={
+        editing
+          ? t('settings.editExternalAgent')
+          : t('settings.newExternalAgent')
+      }
       className="w-104"
       footer={
         <div className="flex justify-end gap-2">
@@ -601,7 +627,7 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
             onClick={onClose}
             disabled={saving}
           >
-            Cancel
+            {t('actions.cancel')}
           </Button>
           <Button
             variant="solid"
@@ -610,7 +636,11 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
             onClick={() => void handleSubmit()}
             disabled={saving}
           >
-            {saving ? 'Saving…' : editing ? 'Save changes' : 'Create profile'}
+            {saving
+              ? t('settings.saving')
+              : editing
+                ? t('settings.saveChanges')
+                : t('settings.createProfile')}
           </Button>
         </div>
       }
@@ -628,14 +658,14 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
             editing.cliId === 'agent-team' ? (
               <div className="flex flex-col gap-3">
                 <label className="flex flex-col gap-1 text-xs">
-                  <FieldLabel>Agent</FieldLabel>
+                  <FieldLabel>{t('settings.agent')}</FieldLabel>
                   <div className="border-edge-default bg-surface text-fg-default rounded border px-2 py-1 text-xs">
-                    Agent Team
+                    {t('settings.agentTeam')}
                   </div>
                 </label>
                 <label className="flex flex-col gap-1 text-xs">
-                  <FieldLabel hint="Absolute path to the agent-team directory containing agentlet.yaml.">
-                    Agent directory
+                  <FieldLabel hint={t('settings.agentDirectoryHint')}>
+                    {t('settings.agentDirectory')}
                   </FieldLabel>
                   <PathInput
                     value={form.agentDir}
@@ -643,13 +673,16 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
                     placeholder="/path/to/agent-teams/my-agent"
                     size="sm"
                     mono
-                    pickTitle="Pick a folder"
+                    pickTitle={t('settings.pickFolder')}
                     inputClassName="rounded"
                   />
                 </label>
                 <label className="flex flex-col gap-1 text-xs">
-                  <FieldLabel hint="Optional harness override. Leave blank to use the manifest default.">
-                    Harness <span className="text-fg-subtle">(optional)</span>
+                  <FieldLabel hint={t('settings.harnessHint')}>
+                    {t('settings.harness')}{' '}
+                    <span className="text-fg-subtle">
+                      ({t('settings.optional')})
+                    </span>
                   </FieldLabel>
                   <Input
                     value={form.harness}
@@ -663,10 +696,12 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
               </div>
             ) : (
               <label className="flex flex-col gap-1 text-xs">
-                <FieldLabel>Agent</FieldLabel>
+                <FieldLabel>{t('settings.agent')}</FieldLabel>
                 <div className="border-edge-default bg-surface text-fg-default rounded border px-2 py-1 text-xs">
                   {detectedClis.find((c) => c.id === form.cliId)?.displayName ??
-                    (form.cliId === 'custom' ? 'Custom command' : form.cliId)}
+                    (form.cliId === 'custom'
+                      ? t('settings.customCommand')
+                      : form.cliId)}
                 </div>
               </label>
             )
@@ -676,9 +711,9 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
                 value={agentMode}
                 onChange={handleAgentModeChange}
                 options={[
-                  { value: 'detected', label: 'Built-in' },
-                  { value: 'custom', label: 'Custom' },
-                  { value: 'agent-team', label: 'Agent Team' },
+                  { value: 'detected', label: t('settings.builtIn') },
+                  { value: 'custom', label: t('settings.custom') },
+                  { value: 'agent-team', label: t('settings.agentTeam') },
                 ]}
                 size="sm"
                 className="self-start"
@@ -686,8 +721,8 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
               {agentMode === 'agent-team' ? (
                 <div className="flex flex-col gap-3">
                   <label className="flex flex-col gap-1 text-xs">
-                    <FieldLabel hint="Absolute path to the agent-team directory containing agentlet.yaml. The daemon resolves the manifest to determine the launch command and working directory.">
-                      Agent directory
+                    <FieldLabel hint={t('settings.agentDirectoryDetailedHint')}>
+                      {t('settings.agentDirectory')}
                     </FieldLabel>
                     <PathInput
                       value={form.agentDir}
@@ -695,13 +730,16 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
                       placeholder="/path/to/agent-teams/my-agent"
                       size="sm"
                       mono
-                      pickTitle="Pick a folder"
+                      pickTitle={t('settings.pickFolder')}
                       inputClassName="rounded"
                     />
                   </label>
                   <label className="flex flex-col gap-1 text-xs">
-                    <FieldLabel hint="Optional harness override (e.g. 'claude', 'copilot'). Leave blank to use the first harness declared in the manifest.">
-                      Harness <span className="text-fg-subtle">(optional)</span>
+                    <FieldLabel hint={t('settings.harnessDetailedHint')}>
+                      {t('settings.harness')}{' '}
+                      <span className="text-fg-subtle">
+                        ({t('settings.optional')})
+                      </span>
                     </FieldLabel>
                     <Input
                       value={form.harness}
@@ -715,7 +753,7 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
                 </div>
               ) : agentMode === 'detected' ? (
                 <label className="flex flex-col gap-1 text-xs">
-                  <FieldLabel>Agent</FieldLabel>
+                  <FieldLabel>{t('settings.agent')}</FieldLabel>
                   {cliOptions.length > 0 ? (
                     <Select
                       value={form.cliId}
@@ -724,15 +762,17 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
                     />
                   ) : (
                     <div className="border-edge-default bg-surface text-fg-muted rounded border px-2 py-1 text-xs leading-snug">
-                      No ACP-capable CLIs found on your PATH. Switch to{' '}
-                      <strong>Custom</strong> to type a launch command yourself.
+                      <Trans
+                        i18nKey="settings.noCliFound"
+                        components={{ strong: <strong /> }}
+                      />
                     </div>
                   )}
                 </label>
               ) : (
                 <label className="flex flex-col gap-1 text-xs">
-                  <FieldLabel hint="Full command line the worker should spawn (binary + all flags). Use this for binaries that aren't on PATH or for flags not exposed by an auto-detected agent.">
-                    Launch command
+                  <FieldLabel hint={t('settings.launchCommandHint')}>
+                    {t('settings.launchCommand')}
                   </FieldLabel>
                   <Input
                     value={form.customCommand}
@@ -760,8 +800,8 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
                   setForm((p) => ({ ...p, allowAll: e.target.checked }))
                 }
               />
-              <FieldLabel hint="Skip the per-tool confirmation prompt. Convenient for sandboxed runs, risky for anything that can touch your filesystem or network.">
-                Auto-approve all tool calls (
+              <FieldLabel hint={t('settings.autoApproveAllToolCallsHint')}>
+                {t('settings.autoApproveAllToolCalls')} (
                 <code className="font-mono">{selectedCli.allowAllFlag}</code>)
               </FieldLabel>
             </label>
@@ -772,8 +812,8 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
         {agentMode !== 'agent-team' && (
           <div className="flex flex-col gap-3">
             <label className="flex flex-col gap-1 text-xs">
-              <FieldLabel hint="The agent is spawned with this as its working directory and treats it as the project root for file edits and tool calls.">
-                Working directory
+              <FieldLabel hint={t('settings.workingDirectoryHint')}>
+                {t('settings.workingDirectory')}
               </FieldLabel>
               <PathInput
                 value={form.cwd}
@@ -781,7 +821,7 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
                 placeholder="/Users/me/project-x"
                 size="sm"
                 mono
-                pickTitle="Pick a folder"
+                pickTitle={t('settings.pickFolder')}
                 inputClassName="rounded"
               />
             </label>
@@ -791,7 +831,8 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
         {/* ─── Display name (placed last per UX request) ─────────── */}
         <label className="flex flex-col gap-1 text-xs">
           <FieldLabel>
-            Display name <span className="text-fg-subtle">(optional)</span>
+            {t('settings.displayName')}{' '}
+            <span className="text-fg-subtle">({t('settings.optional')})</span>
           </FieldLabel>
           <Input
             value={form.displayName}
@@ -858,6 +899,7 @@ export function useDetectedClis(): AcpAgentCliInfo[] {
 }
 
 export const AcpSettings: React.FC = () => {
+  const { t } = useTranslation();
   const profiles = useAcpProfilesStore((s) => s.profiles);
   const agentlet = useAcpProfilesStore((s) => s.agentlet);
   const loaded = useAcpProfilesStore((s) => s.loaded);
@@ -933,17 +975,20 @@ export const AcpSettings: React.FC = () => {
     setIsDeleting(true);
     try {
       await deleteAcpProfile(pendingDelete.id);
-      toast('Profile deleted', { tone: 'success' });
+      toast(t('settings.profileDeleted'), { tone: 'success' });
       await refresh();
       setPendingDelete(null);
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Failed to delete profile', {
-        tone: 'danger',
-      });
+      toast(
+        err instanceof Error ? err.message : t('settings.profileDeleteFailed'),
+        {
+          tone: 'danger',
+        },
+      );
     } finally {
       setIsDeleting(false);
     }
-  }, [pendingDelete, refresh]);
+  }, [pendingDelete, refresh, t]);
 
   const handleRestart = useCallback(async () => {
     setRestarting(true);
@@ -953,16 +998,19 @@ export const AcpSettings: React.FC = () => {
       // (and the profile-list runtime flags update).
       await refresh();
       if (next.online) {
-        toast('Worker restarted', { tone: 'success' });
+        toast(t('settings.workerRestarted'), { tone: 'success' });
       }
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Failed to restart worker', {
-        tone: 'danger',
-      });
+      toast(
+        err instanceof Error ? err.message : t('settings.workerRestartFailed'),
+        {
+          tone: 'danger',
+        },
+      );
     } finally {
       setRestarting(false);
     }
-  }, [refresh]);
+  }, [refresh, t]);
 
   const handleSaved = useCallback(async () => {
     await refresh();
@@ -983,11 +1031,11 @@ export const AcpSettings: React.FC = () => {
         restarting={restarting}
       />
 
-      <SettingSection title="External Agents">
+      <SettingSection title={t('settings.externalAgents')}>
         {profiles.length === 0 ? (
           <SettingRow
-            title="No agents configured"
-            description="Add a Copilot / Claude / custom profile to bind chats to an external agent."
+            title={t('settings.noAgents')}
+            description={t('settings.noAgentsDescription')}
           >
             <Button
               variant="outline"
@@ -997,7 +1045,7 @@ export const AcpSettings: React.FC = () => {
               disabled={!loaded}
             >
               <Plus size={12} />
-              <span>Add agent</span>
+              <span>{t('settings.addAgent')}</span>
             </Button>
           </SettingRow>
         ) : (
@@ -1010,7 +1058,7 @@ export const AcpSettings: React.FC = () => {
                     tone="neutral"
                     size="sm"
                     iconOnly
-                    title="Edit profile"
+                    title={t('settings.editProfile')}
                     onClick={() => handleEdit(profile)}
                   >
                     <Pencil size={12} />
@@ -1020,7 +1068,7 @@ export const AcpSettings: React.FC = () => {
                     tone="danger"
                     size="sm"
                     iconOnly
-                    title="Delete profile"
+                    title={t('settings.deleteProfile')}
                     onClick={() => handleDelete(profile)}
                   >
                     <Trash2 size={12} />
@@ -1029,8 +1077,8 @@ export const AcpSettings: React.FC = () => {
               </SettingRow>
             ))}
             <SettingRow
-              title="Add another agent"
-              description="Configure a new external agent to bind chats to."
+              title={t('settings.addAnotherAgent')}
+              description={t('settings.addAnotherAgentDescription')}
             >
               <Button
                 variant="outline"
@@ -1040,7 +1088,7 @@ export const AcpSettings: React.FC = () => {
                 disabled={!loaded}
               >
                 <Plus size={12} />
-                <span>Add agent</span>
+                <span>{t('settings.addAgent')}</span>
               </Button>
             </SettingRow>
           </>
@@ -1068,17 +1116,16 @@ export const AcpSettings: React.FC = () => {
        */}
       <Modal
         isOpen={pendingDelete !== null}
-        title="Delete external agent?"
+        title={t('settings.deleteExternalAgentTitle')}
         description={
           pendingDelete ? (
-            <>
-              Are you sure you want to delete{' '}
-              <span className="text-fg-default font-medium">
-                “{pendingDelete.displayName}”
-              </span>
-              ? You won't be able to start new chats with it. Chats already
-              using it keep running with the current settings.
-            </>
+            <Trans
+              i18nKey="settings.deleteExternalAgentDescription"
+              values={{ name: pendingDelete.displayName }}
+              components={{
+                name: <span className="text-fg-default font-medium" />,
+              }}
+            />
           ) : null
         }
         onClose={closeDeleteModal}
@@ -1094,7 +1141,7 @@ export const AcpSettings: React.FC = () => {
               onClick={closeDeleteModal}
               disabled={isDeleting}
             >
-              Cancel
+              {t('actions.cancel')}
             </Button>
             <Button
               ref={confirmDeleteButtonRef}
@@ -1111,7 +1158,7 @@ export const AcpSettings: React.FC = () => {
                   className="text-fg-inverse"
                 />
               ) : (
-                'Delete'
+                t('actions.delete')
               )}
             </Button>
           </>

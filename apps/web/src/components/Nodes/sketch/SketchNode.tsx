@@ -1,5 +1,6 @@
 import { Sparkles } from 'lucide-react';
 import { memo, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { resolveAccent } from '@sediment/shared';
 
@@ -52,6 +53,7 @@ const StrokePath = memo(function StrokePath({
 
 export const SketchNode = memo(
   ({ id, data, selected, width, height }: NodeProps<SketchNodeType>) => {
+    const { t } = useTranslation();
     const w = width ?? data.initialSize?.width ?? 1;
     const h = height ?? data.initialSize?.height ?? 1;
     const scaleX = w / (data.initialSize?.width || 1);
@@ -90,7 +92,7 @@ export const SketchNode = memo(
 
     const sketchActions = (
       <FloatingToolbar.ActionButton
-        title="Apply Sketch (interpret stroke with AI)"
+        title={t('node.applySketch')}
         onClick={(e) => {
           e.stopPropagation();
           requestSketchRecognition([id]);
