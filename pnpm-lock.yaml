@@ -383,9 +383,6 @@ importers:
       '@agentclientprotocol/sdk':
         specifier: ^0.22.1
         version: 0.22.1(zod@4.4.3)
-      '@earendil-works/pi-ai':
-        specifier: ^0.75.5
-        version: 0.75.5(ws@8.21.0)(zod@4.4.3)
     devDependencies:
       typescript:
         specifier: ^5.9.0
