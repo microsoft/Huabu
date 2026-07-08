@@ -18,3 +18,14 @@ export {
   FileThreadStore,
 } from './thread-store.js';
 export type { ThreadRecord, ThreadStore } from './thread-store.js';
+
+export {
+  EventLog,
+  InMemoryEventLogStore,
+  FileEventLogStore,
+} from './event-log.js';
+export type {
+  EventLogEntry,
+  EventLogStore,
+  EventLogListener,
+} from './event-log.js';
