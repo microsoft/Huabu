@@ -29,6 +29,7 @@ import {
 } from '@/api/canvas';
 import { toast } from '@/components/Common/Toast';
 import { i18n } from '@/i18n';
+import { copyToClipboard } from '@/utils/io/clipboard';
 
 import {
   MD_BACKED_NODE_TYPES,
@@ -210,6 +211,19 @@ export function createNodeContentQueue(opts: {
   const contentConflictToasted = new Set<string>();
 
   /**
+   * Nodes frozen after a `NODE_CONTENT_CONFLICT`, mapped to the on-disk
+   * revision we collided with. While a node is frozen {@link buildRequest}
+   * returns `null`, so NO write path — debounced autosave, `flushNow`, or
+   * the `beforeunload` keepalive — can PUT it. This is what makes the
+   * "Load latest" (reload) resolution safe: reloading can never leak our
+   * stale in-app version onto disk and clobber the newer server content.
+   * The stored rev lets "Keep mine" re-baseline and force the overwrite.
+   * Cleared when the node is resolved (reseeded on load / agent-sync, or
+   * a successful forced write).
+   */
+  const frozen = new Map<string, string>();
+
+  /**
    * Node ids for which we have already shown the persistent
    * "duplicate files on disk" toast. Autosave retries while the
    * duplicate persists would otherwise pop a fresh toast on every
@@ -229,6 +243,11 @@ export function createNodeContentQueue(opts: {
     if (!node) return null;
     const nodeType = typeof node.type === 'string' ? node.type : '';
     if (!MD_BACKED_NODE_TYPES.has(nodeType)) return null;
+
+    // Frozen after a content conflict: refuse every write path until the
+    // user resolves it, so neither a debounced autosave nor the unload
+    // keepalive can clobber the newer server content.
+    if (frozen.has(nodeId)) return null;
 
     const data = (node.data ?? {}) as Record<string, unknown>;
     const body: PutNodeContentRequest = { nodeType };
@@ -352,13 +371,25 @@ export function createNodeContentQueue(opts: {
    * server since we loaded it (another tab / device / agent, or a
    * Google-Drive-synced newer copy), so our write was refused to avoid
    * clobbering the newer content. The user's in-editor text is left
-   * untouched. We show a persistent, one-per-node toast offering a
-   * reload — the same recovery affordance as the canvas-level version
-   * conflict. The baseline is intentionally NOT advanced here, so every
-   * further autosave stays refused (never clobbers) until the reload
-   * re-seeds a fresh baseline.
+   * untouched.
+   *
+   * The node is **frozen** ({@link buildRequest} now returns `null` for
+   * it), so no further write path — debounced autosave, `flushNow`, or
+   * the `beforeunload` keepalive — can PUT it. That is what makes the
+   * "Load latest" reload genuinely safe: reloading can no longer leak our
+   * stale version onto disk.
+   *
+   * The user gets a real two-way choice:
+   *   - **Keep mine** — re-baseline to the on-disk rev and force the
+   *     overwrite (deliberately replaces the server's version with ours).
+   *   - **Load latest** — copy our in-app text to the clipboard as a
+   *     safety net, then reload to adopt the server's version (our unsaved
+   *     in-app edit is discarded, but recoverable from the clipboard).
    */
-  function handleContentConflict(nodeId: string): void {
+  function handleContentConflict(nodeId: string, currentRev: string): void {
+    // Freeze regardless of the once-per-node toast guard, so a repeat
+    // conflict can't leave the node writable.
+    frozen.set(nodeId, currentRev);
     if (contentConflictToasted.has(nodeId)) return;
     contentConflictToasted.add(nodeId);
     const state = opts.getState();
@@ -368,20 +399,56 @@ export function createNodeContentQueue(opts: {
         ? (node.data['label'] as string)
         : 'a note';
     toast(
-      `“${label}” was changed elsewhere. Your edits here aren't being saved. ` +
-        'Reload to get the latest version.',
+      `“${label}” was changed elsewhere. Keep your version (overwrites the ` +
+        'other change) or load the latest (copies your text to the clipboard ' +
+        'first).',
       {
         tone: 'danger',
         duration: 0,
-        action: {
-          label: 'Reload',
+        secondaryAction: {
+          label: 'Keep mine',
           onClick: () => {
-            if (typeof window !== 'undefined') window.location.reload();
+            void resolveKeepMine(nodeId);
+          },
+        },
+        action: {
+          label: 'Load latest',
+          onClick: () => {
+            const cur = opts.getState().nodes.find((n) => n.id === nodeId);
+            const text =
+              cur && typeof cur.data?.['content'] === 'string'
+                ? (cur.data['content'] as string)
+                : '';
+            const reload = () => {
+              if (typeof window !== 'undefined') window.location.reload();
+            };
+            if (text) {
+              void copyToClipboard(text).finally(reload);
+            } else {
+              reload();
+            }
           },
         },
       },
     );
     console.warn('[node-content] write refused (stale content):', nodeId);
+  }
+
+  /**
+   * Resolve a content conflict by keeping the local version: adopt the
+   * on-disk rev we collided with as the new baseline, unfreeze, and force
+   * an immediate write so our content deliberately overwrites the other
+   * change. If the disk moved again in the meantime the write re-conflicts
+   * and re-freezes (correct — the user can decide again).
+   */
+  async function resolveKeepMine(nodeId: string): Promise<void> {
+    const currentRev = frozen.get(nodeId);
+    if (currentRev !== undefined) baselineRev.set(nodeId, currentRev);
+    frozen.delete(nodeId);
+    contentConflictToasted.delete(nodeId);
+    const canvasId = opts.getState().canvasId;
+    if (!canvasId) return;
+    await serializedFlush(canvasId, nodeId, 'user').catch(() => undefined);
   }
 
   /**
@@ -419,7 +486,7 @@ export function createNodeContentQueue(opts: {
         // "reload to get the latest" prompt; the baseline stays stale so
         // further autosaves keep being refused until the user reloads.
         if (err.code === 'NODE_CONTENT_CONFLICT') {
-          handleContentConflict(nodeId);
+          handleContentConflict(nodeId, err.currentRev ?? REV_EMPTY);
           return;
         }
         throw err;
@@ -663,9 +730,10 @@ export function createNodeContentQueue(opts: {
         if (!MD_BACKED_NODE_TYPES.has(nodeType)) continue;
         baselineRev.set(node.id, revOfNode(node));
         // A fresh authoritative baseline means any prior conflict for this
-        // node is resolved — drop the toast guard so a later divergence
-        // alerts again.
+        // node is resolved — drop the toast guard and unfreeze it so a
+        // later divergence alerts again and writes resume.
         contentConflictToasted.delete(node.id);
+        frozen.delete(node.id);
       }
     },
 

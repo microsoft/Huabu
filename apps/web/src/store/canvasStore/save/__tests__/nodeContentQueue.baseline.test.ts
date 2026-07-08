@@ -91,7 +91,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
     expect(putMock.mock.calls[0][2].expectRev).toBe(nodeRevisionOf({}));
   });
 
-  it('on NODE_CONTENT_CONFLICT: no throw, keeps text, toasts once', async () => {
+  it('on NODE_CONTENT_CONFLICT: no throw, keeps text, freezes, toasts once', async () => {
     const node = noteNode('v1');
     const { queue, state } = makeQueue(node);
     queue.seedBaselines([node]);
@@ -109,9 +109,43 @@ describe('nodeContentQueue baseline lifecycle', () => {
     // User's text is never reverted on a content conflict.
     expect(state._setStateNoAutosave).not.toHaveBeenCalled();
     expect(toastMock).toHaveBeenCalledTimes(1);
+    expect(putMock).toHaveBeenCalledTimes(1);
 
-    // A second refused write does not re-toast (once per node).
+    // The node is now frozen: a subsequent flush (autosave / keepalive)
+    // must NOT issue another PUT — nothing can clobber the newer server
+    // content while the conflict is unresolved.
     await queue.flushNow('c1', 'n1');
+    expect(putMock).toHaveBeenCalledTimes(1);
     expect(toastMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('"Keep mine" re-baselines to the disk rev and force-writes over it', async () => {
+    const node = noteNode('mine');
+    const { queue } = makeQueue(node);
+    queue.seedBaselines([node]);
+
+    const conflict = new CanvasConflictError({
+      code: 'NODE_CONTENT_CONFLICT',
+      message: 'changed elsewhere',
+      nodeId: 'n1',
+      currentRev: 'DISK_REV',
+    });
+    putMock.mockRejectedValueOnce(conflict);
+    await queue.flushNow('c1', 'n1');
+
+    // Grab the "Keep mine" action from the toast and invoke it.
+    const toastOpts = toastMock.mock.calls[0][1] as {
+      secondaryAction: { onClick: () => void };
+    };
+    putMock.mockResolvedValueOnce({ nodeId: 'n1', label: 'Note', rev: 'SRV9' });
+    toastOpts.secondaryAction.onClick();
+    // Let the forced flush settle.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // The forced write carries the disk rev we collided with, so it
+    // deliberately overwrites the other change.
+    const forced = putMock.mock.calls[1][2];
+    expect(forced.expectRev).toBe('DISK_REV');
   });
 });

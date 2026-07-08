@@ -34,6 +34,12 @@ export interface ToastItem {
   /** Optional inline action button (e.g. Reload / Undo). */
   action?: ToastAction;
   /**
+   * Optional second inline action button, rendered before {@link action}.
+   * Used when a message needs a genuine two-way choice (e.g. a content
+   * conflict: "Keep mine" vs "Load latest").
+   */
+  secondaryAction?: ToastAction;
+  /**
    * Whether to render a × close button. Defaults to true whenever the
    * toast is persistent (`duration <= 0`) or carries an action — those
    * cases must always be user-dismissible. Auto-dismissing info toasts
@@ -62,6 +68,7 @@ export function toast(
     tone?: ToastTone;
     duration?: number;
     action?: ToastAction;
+    secondaryAction?: ToastAction;
     dismissible?: boolean;
   },
 ): string {
@@ -167,6 +174,7 @@ function ToastEntry({ item }: { item: ToastItem }) {
   // Hoist into a local so the click handler closes over a non-null
   // reference (avoids the non-null assertion lint).
   const action = item.action;
+  const secondaryAction = item.secondaryAction;
   const tone = item.tone ?? 'info';
   const StatusIcon = toneIcons[tone];
   const buttonClass = toneButtonClasses[tone];
@@ -191,6 +199,20 @@ function ToastEntry({ item }: { item: ToastItem }) {
         <StatusIcon className="h-3 w-3" strokeWidth={3} />
       </span>
       <span className="min-w-0 flex-1">{item.message}</span>
+      {secondaryAction && (
+        <Button
+          variant="ghost"
+          size="sm"
+          tone={tone}
+          className={buttonClass}
+          onClick={() => {
+            secondaryAction.onClick();
+            dismissToast(item.id);
+          }}
+        >
+          {secondaryAction.label}
+        </Button>
+      )}
       {action && (
         <Button
           variant="outline"
