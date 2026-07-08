@@ -40,14 +40,13 @@
 import { applyToolExt } from './overlay.js';
 import { acpSessionRegistry } from './session-registry.js';
 import { ensureAcpSession, registerAcpStateListener, reportEntryState } from './session.js';
-import { acpUpdateToStreamEvent, mergeThinkingChunk } from './translator.js';
+import { acpUpdateToStreamEvent } from './translator.js';
 
 import type { AcpTurnOverlay } from './overlay.js';
 import type { AcpBindingRecipe } from './binding-recipe.js';
 import type { AcpSessionLogger } from './session.js';
 import type {
   AgentStateSnapshot,
-  FoldedMessage,
   Namespace,
 } from '@agenetes/protocol';
 import type {
@@ -182,7 +181,7 @@ export class AcpAgentHandle<TRequest = unknown>
     RuntimeAgentHandle<
       TRequest,
       PreparedAcpPrompt,
-      FoldedMessage[],
+      void,
       InStreamEvent,
       AcpTurnCtx
     >
@@ -222,7 +221,7 @@ export class AcpAgentHandle<TRequest = unknown>
     request: TRequest | null,
     render: RuntimeRenderFn<TRequest, PreparedAcpPrompt>,
     ctx: AcpTurnCtx,
-  ): AsyncGenerator<InStreamEvent, FoldedMessage[]> {
+  ): AsyncGenerator<InStreamEvent, void> {
     const { overlay, signal, logger, onPrepared } = ctx;
 
     // ACP always needs fresh input — a `session/prompt` with nothing to
@@ -237,7 +236,7 @@ export class AcpAgentHandle<TRequest = unknown>
             'AcpAgentHandle requires a request (resume-without-input is unsupported)',
         },
       };
-      return [];
+      return;
     }
 
     // Self-resolve (open or reuse) THIS turn's live ACP session from the
@@ -284,23 +283,12 @@ export class AcpAgentHandle<TRequest = unknown>
     let stopReason: string | undefined;
     let done = false;
 
-    // `folded` accumulates the turn's transcript as `FoldedMessage`s in
-    // WIRE ORDER — the driver-agnostic Tier-2 form this handle RETURNS (the
-    // fold lives inside `run`, the symmetric twin of translating each ACP
-    // `session/update` into an `AgentStreamEvent`; README I8.2 / I9.8). It
-    // preserves interleaving + thinking blocks + tool-call order, so the
-    // folded turn replays faithfully. Separate from the route-owned
-    // `overlay`, which still carries the LIVE sidecar enrichment (toolKind /
-    // status / plan) for the in-flight UI.
-    const folded: FoldedMessage[] = [];
-    // Index the folded tool-call messages by `toolCallId` so a later
-    // `tool_call_update` folds into the same entry (final-state semantics).
-    const foldedToolByCallId = new Map<
-      string,
-      Extract<FoldedMessage, { type: 'tool_call' }>
-    >();
-    // Plan entries are staged until the turn ends (full-replacement wire
-    // semantics: latest plan wins).
+    // The turn's assistant transcript is folded from the yielded event
+    // stream by L2 (the generic Tier-1 → Tier-2 fold, README I9.8), so this
+    // handle does NOT assemble a return transcript — `run` returns `void`.
+    // We still stage the plan locally to commit it into the route-owned
+    // `overlay` (the LIVE sidecar for the in-flight UI), which is separate
+    // from the durable log.
     let pendingPlan: AcpPlanEntry[] | null = null;
 
     const wake = () => {
@@ -336,25 +324,6 @@ export class AcpAgentHandle<TRequest = unknown>
           }
           if (evt.type === 'text_delta') {
             assembledText += evt.data.content;
-            const last = folded[folded.length - 1];
-            if (last?.type === 'text') {
-              last.data.content += evt.data.content;
-            } else {
-              folded.push({ type: 'text', data: { content: evt.data.content } });
-            }
-          } else if (evt.type === 'thinking_delta') {
-            const last = folded[folded.length - 1];
-            if (last?.type === 'thinking') {
-              last.data.content = mergeThinkingChunk(
-                last.data.content,
-                evt.data.content,
-              );
-            } else {
-              folded.push({
-                type: 'thinking',
-                data: { content: evt.data.content },
-              });
-            }
           } else if (evt.type === 'tool_call') {
             applyToolExt(overlay, evt.data.toolCallId, {
               toolKind: evt.data.toolKind,
@@ -363,15 +332,6 @@ export class AcpAgentHandle<TRequest = unknown>
               content: evt.data.content,
               rawOutput: undefined,
             });
-            // Fold the tool call in its initial state; a later
-            // `tool_call_update` merges into this same entry. Copy the data
-            // so mutating the fold never touches the yielded event.
-            const block: Extract<FoldedMessage, { type: 'tool_call' }> = {
-              type: 'tool_call',
-              data: { ...evt.data, rawOutput: undefined },
-            };
-            folded.push(block);
-            foldedToolByCallId.set(evt.data.toolCallId, block);
           } else if (evt.type === 'tool_call_update') {
             applyToolExt(overlay, evt.data.toolCallId, {
               status: evt.data.status,
@@ -379,22 +339,9 @@ export class AcpAgentHandle<TRequest = unknown>
               content: evt.data.content,
               rawOutput: evt.data.rawOutput,
             });
-            // Fold the update into the tool call's final state (ACP may
-            // refine the title mid-flight, e.g. "Reading" → "Reading app.ts").
-            const tc = foldedToolByCallId.get(evt.data.toolCallId);
-            if (tc) {
-              if (evt.data.status !== undefined) tc.data.status = evt.data.status;
-              if (evt.data.title !== undefined) tc.data.title = evt.data.title;
-              if (evt.data.content !== undefined)
-                tc.data.content = evt.data.content;
-              if (evt.data.locations !== undefined)
-                tc.data.locations = evt.data.locations;
-              if (evt.data.rawOutput !== undefined)
-                tc.data.rawOutput = evt.data.rawOutput;
-            }
           } else if (evt.type === 'plan') {
-            // Full-replacement wire semantics: latest plan wins. Folded once
-            // at the turn's end (finally).
+            // Full-replacement wire semantics: latest plan wins. Committed
+            // into the overlay at the turn's end (finally).
             pendingPlan = evt.data.entries;
           }
           queue.push(evt);
@@ -461,17 +408,15 @@ export class AcpAgentHandle<TRequest = unknown>
         const reason = stopReason ?? 'unknown';
         const synthetic = `_(agent returned no text — stopReason: ${reason}. Usually a tool-only turn or a refusal without prose. Extend the ACP translator if you need tool-call rendering.)_`;
         assembledText = synthetic;
-        folded.push({ type: 'text', data: { content: synthetic } });
         yield { type: 'text_delta', data: { content: synthetic } };
       }
     } finally {
-      // Commit the turn's plan (full-replacement; latest wins): into the
-      // route-owned `overlay` for the live sidecar AND as a folded `plan`
-      // message so the durable transcript carries it. Tool extensions were
-      // accumulated as events arrived.
+      // Commit the turn's plan (full-replacement; latest wins) into the
+      // route-owned `overlay` for the live sidecar. The durable transcript's
+      // plan is folded from the yielded `plan` events by L2. Tool extensions
+      // were accumulated as events arrived.
       if (pendingPlan) {
         overlay.plan = pendingPlan;
-        folded.push({ type: 'plan', data: { entries: pendingPlan } });
         pendingPlan = null;
       }
     }
@@ -487,9 +432,7 @@ export class AcpAgentHandle<TRequest = unknown>
         '[acp] session/prompt failed',
       );
       yield { type: 'error', data: { error: msg } };
-      // Fold the error into the transcript so a reload sees it.
-      folded.push({ type: 'error', data: { error: msg } });
-      return folded;
+      return;
     }
 
     yield {
@@ -499,7 +442,6 @@ export class AcpAgentHandle<TRequest = unknown>
         meta: { stopReason },
       },
     };
-    return folded;
   }
 
   async control(msg: ControlMsg): Promise<ControlAck> {

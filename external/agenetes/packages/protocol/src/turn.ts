@@ -5,7 +5,9 @@
 // append-only frames a running agent emits (Tier 1 of the conversation
 // log). `AgentTurn` is the *folded* view of the same turn (Tier 2): one
 // immutable record per completed `run()`, produced by L2 folding the
-// turn's Tier-1 event range together with the run's return transcript.
+// turn's Tier-1 event range with a single generic, driver-agnostic fold
+// (`createTranscriptFolder`). The fold reads ONLY the yielded event
+// stream — never the run's return value — so a driver's `TResult` is free.
 //
 // The two are twins over the SAME event vocabulary. Folding collapses the
 // stream's deltas into their accumulated form:
@@ -28,10 +30,10 @@
 //
 // SKELETON (M5.6 / C1): this file fixes the `AgentTurn` envelope and the
 // `FoldedMessage` union shape. The exact folded-message vocabulary is
-// refined as the fold (C3) and the driver transcript translators (C4 ACP /
-// C5 built-in) land — hosts widen individual payloads via the exported
-// per-member data schemas exactly as they do for `AgentStreamEvent`, never
-// adding members out-of-band.
+// refined as the generic fold (C3, `createTranscriptFolder`) lands — hosts
+// widen individual payloads via the exported per-member data schemas
+// exactly as they do for `AgentStreamEvent`, never adding members
+// out-of-band.
 
 import { z } from 'zod';
 

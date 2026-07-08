@@ -20,7 +20,6 @@ import {
 } from './handle.js';
 
 import type { AgentDriver } from '@agenetes/runtime';
-import type { FoldedMessage } from '@agenetes/protocol';
 
 // `AcpCreateSpec` (the create-time WorkloadSpec projection the handle
 // bakes) is defined next to the handle that consumes it; re-exported here
@@ -31,14 +30,15 @@ export type { AcpCreateSpec } from './handle.js';
  * The concrete ACP {@link AgentDriver} type (a Deployment: full control +
  * `session/load`). Generic over the host request shape (`TRequest`), which
  * the handle never inspects — it only forwards it to `render`. The handle's
- * `run` returns the turn's transcript as `FoldedMessage[]` (README I8.2 /
- * I9.8), folded from the ACP `session/update` stream inside `run`.
+ * `run` returns `void`: the turn's durable transcript is folded from the
+ * yielded event stream by L2 (README I9.8), so the driver's `TResult` is
+ * free.
  */
 export type AcpAgentDriver<TRequest = unknown> = AgentDriver<
   AcpCreateSpec,
   TRequest,
   PreparedAcpPrompt,
-  FoldedMessage[],
+  void,
   InStreamEvent,
   AcpTurnCtx
 >;

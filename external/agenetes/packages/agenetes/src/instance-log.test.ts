@@ -229,7 +229,7 @@ describe('Agenetes two-tier conversation log (M5.6/C3)', () => {
     expect(await iter.next()).toEqual({ value: undefined, done: true });
   });
 
-  it('a Job is not logged — history stays empty (I9.8: log is for Deployments)', async () => {
+  it('a threaded Job IS logged — history folds its turn (I9.8: any durable thread)', async () => {
     const inst = mount();
     const jobSpec: WorkloadSpecShape = {
       threadId: 'thr_job',
@@ -240,10 +240,33 @@ describe('Agenetes two-tier conversation log (M5.6/C3)', () => {
     const handle = inst.create(jobSpec);
     raw!.scripts.push({
       events: [text('job'), end()],
-      result: [{ type: 'text', data: { content: 'job' } }],
+      result: [],
     });
     await drain(handle, { type: 'user_text', content: 'go' });
 
-    expect(inst.history(ns, 'thr_job').turns).toEqual([]);
+    expect(inst.history(ns, 'thr_job').turns).toEqual([
+      {
+        request: { type: 'user_text', content: 'go' },
+        transcript: [{ type: 'text', data: { content: 'job' } }],
+      },
+    ]);
+  });
+
+  it('a transient Job (no threadId) is NOT logged — nothing to fold against', async () => {
+    const inst = mount();
+    const jobSpec: WorkloadSpecShape = {
+      threadId: '',
+      kind: 'external',
+      workloadType: 'Job',
+      namespace: ns,
+    };
+    const handle = inst.create(jobSpec);
+    raw!.scripts.push({
+      events: [text('transient'), end()],
+      result: [],
+    });
+    await drain(handle, { type: 'user_text', content: 'go' });
+
+    expect(inst.history(ns, '').turns).toEqual([]);
   });
 });

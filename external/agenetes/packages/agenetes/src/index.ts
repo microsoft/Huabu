@@ -40,3 +40,5 @@ export {
   FileTurnStore,
 } from './turn-store.js';
 export type { PersistedTurn, TurnStore } from './turn-store.js';
+export { createTranscriptFolder } from './fold.js';
+export type { TranscriptFolder } from './fold.js';

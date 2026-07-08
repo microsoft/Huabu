@@ -17,7 +17,6 @@ import type { AgentHandle, AgentRuntime } from '@agenetes/runtime';
 import {
   AGENT_STREAM_EVENTS,
   agentRequestBaseSchema,
-  foldedMessageSchema,
 } from '@agenetes/protocol';
 import type {
   AgentMetadata,
@@ -26,7 +25,6 @@ import type {
   AgentStreamEvent,
   AgentTurn,
   AgentTurnMeta,
-  FoldedMessage,
   Namespace,
   WorkloadType,
 } from '@agenetes/protocol';
@@ -39,6 +37,7 @@ import {
   type EventLogEntry,
 } from './event-log.js';
 import { InMemoryTurnStore, type TurnStore } from './turn-store.js';
+import { createTranscriptFolder } from './fold.js';
 
 /**
  * The minimal shape the instance reads off a `WorkloadSpec` (I9.6). The
@@ -166,25 +165,6 @@ function coerceRequest(request: unknown): AgentRequest | null {
   if (request == null) return null;
   const parsed = agentRequestBaseSchema.safeParse(request);
   return parsed.success ? parsed.data : null;
-}
-
-/**
- * Coerce a `run()` return value into the persisted `FoldedMessage[]`
- * transcript. A logged handle binds `TResult` to `FoldedMessage[]` (README
- * I8/I9.8 convention): the driver translates its native transcript to the
- * protocol shape inside `run()` (the symmetric twin of translating
- * `session/update` → `AgentStreamEvent`). This validates each entry and
- * drops any that does not match, so a driver that has not yet adopted the
- * binding degrades to a partial / empty transcript rather than throwing.
- */
-function coerceTranscript(value: unknown): FoldedMessage[] {
-  if (!Array.isArray(value)) return [];
-  const out: FoldedMessage[] = [];
-  for (const item of value) {
-    const parsed = foldedMessageSchema.safeParse(item);
-    if (parsed.success) out.push(parsed.data);
-  }
-  return out;
 }
 
 /**
@@ -330,16 +310,18 @@ export function createAgenetesInstance<
     if (unsub) unsubscribers.set(spec.threadId, unsub);
   };
 
-  // Wrap a Deployment handle so every `run()` transparently feeds the
-  // two-tier conversation log (I9.8): each yielded frame is teed into the
-  // Tier-1 EventLog as it streams (making the stream durable + live-tailable
+  // Wrap a handle so every `run()` transparently feeds the two-tier
+  // conversation log (I9.8): each yielded frame is teed into the Tier-1
+  // EventLog as it streams (making the stream durable + live-tailable
   // without the host's fragile draft slot), and on return the turn's Tier-1
-  // range is folded — together with the run's `FoldedMessage[]` return — into
-  // one immutable Tier-2 AgentTurn. Transparent to L1: the caller still holds
-  // an AgentHandle and calls `run(...)` exactly as before. The decoration is
-  // applied INSIDE the runtime factory so the live-handle table caches the
-  // decorated handle, and `get(threadId)` returns the same logging handle for
-  // every subsequent turn.
+  // range is FOLDED into one immutable Tier-2 AgentTurn. The fold reads only
+  // the yielded event stream — never the run's return value — so a driver's
+  // `TResult` is free (need not equal `FoldedMessage[]`). Transparent to L1:
+  // the caller still holds an AgentHandle and calls `run(...)` exactly as
+  // before. For a Deployment the decoration is applied INSIDE the runtime
+  // factory so the live-handle table caches the decorated handle and
+  // `get(threadId)` returns the same logging handle every turn; a threaded
+  // Job is decorated per-turn (it never enters the live table).
   //
   // A `Proxy` intercepts ONLY `run`; every other access (control / close /
   // onState / capabilities, and any driver-native surface) forwards to the
@@ -354,22 +336,27 @@ export function createAgenetesInstance<
       request: unknown,
     ): AsyncGenerator<AgentStreamEvent, unknown> {
       const seqStart = eventLog.maxSeq(namespace, threadId) + 1;
+      // Fold Tier-2 from the LIVE Tier-1 stream, not from the run's return
+      // value (README I9.8): the folded transcript is fully derivable from
+      // the deltas the driver already yields, so `TResult` stays free.
+      const folder = createTranscriptFolder();
       let meta: AgentTurnMeta | undefined;
       let step = await source.next();
       while (!step.done) {
         const event = step.value;
         eventLog.append(namespace, threadId, event);
+        folder.fold(event);
         if (event.type === AGENT_STREAM_EVENTS.Done) meta = event.data.meta;
         yield event;
         step = await source.next();
       }
-      // The generator returned: `step.value` is this turn's TResult. Fold it
-      // into a Tier-2 turn pinned to its Tier-1 range and pass the raw value
-      // through unchanged, so the host's own consumer still sees its TResult.
+      // The generator returned. Commit the Tier-2 turn pinned to its Tier-1
+      // range, then pass the raw return value through UNCHANGED so the host's
+      // own consumer still sees whatever `TResult` the driver produced.
       const seqEnd = eventLog.maxSeq(namespace, threadId);
       const turn: AgentTurn = {
         request: coerceRequest(request),
-        transcript: coerceTranscript(step.value),
+        transcript: folder.result(),
         ...(meta ? { meta } : {}),
       };
       turnStore.append(namespace, threadId, { turn, seqStart, seqEnd });
@@ -427,10 +414,19 @@ export function createAgenetesInstance<
       // keyed by `threadId` (reuse ignores spec — no reconcile).
       let handle: AgentHandle;
       if (spec.workloadType === 'Job') {
-        // A Job is one-shot / transient and is NOT logged (the two-tier
-        // conversation log is for long-lived Deployment threads, I9.8): its
-        // `TResult` is unconstrained and it holds no durable transcript.
-        handle = driver.create(spec, priorState);
+        // A Job is minted fresh per turn and never enters the live-handle
+        // table (so `get(threadId)` stays undefined and `close()` is a no-op
+        // for it). It is still LOGGED when it carries a durable `threadId` —
+        // a threaded Job (e.g. the host's built-in chat) is a multi-turn
+        // conversation whose transcript must persist, so we decorate it
+        // per-turn to feed the two-tier log (I9.8). A *transient* Job (empty
+        // `threadId` — a stateless one-shot) has no thread to log against and
+        // runs raw.
+        const raw = driver.create(spec, priorState);
+        handle =
+          spec.threadId.length > 0
+            ? decorateForLogging(raw, spec.namespace, spec.threadId)
+            : raw;
       } else {
         // Detect a *fresh* create vs a get-or-create reuse so the up-report
         // listener is wired exactly once per handle (reuse ignores spec).
