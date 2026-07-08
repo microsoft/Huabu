@@ -39,6 +39,24 @@ export interface AgentInput {
 }
 
 /**
+ * The driver-agnostic *base* shape every composed request variant
+ * satisfies: a string-literal `type` discriminant plus a variant-specific
+ * `content`. A host composes a closed union of concrete variants
+ * ({@link composeRequest}); this base is what the framework persists and
+ * replays — the raw request is plain JSON-serializable data, so persisting
+ * it to the durable turn log (README I9.8) is just `JSON.stringify`, and
+ * the raw request (never a rendered result) is the source of truth for
+ * replay. Any concrete variant value is assignable to this base.
+ */
+export const agentRequestBaseSchema = z.object({
+  type: z.string(),
+  content: z.unknown(),
+});
+
+/** The persisted, driver-agnostic per-turn request (see {@link agentRequestBaseSchema}). */
+export type AgentRequest = z.infer<typeof agentRequestBaseSchema>;
+
+/**
  * A request variant's object schema. It MUST carry the string-literal
  * discriminant `type` (so variants can be told apart on the wire) and a
  * `content` payload member; anything else is variant-specific.

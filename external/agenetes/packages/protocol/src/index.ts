@@ -55,8 +55,10 @@ export type {
 // per-turn request. The request is plain data; rendering to AgentInput is a
 // separate concern a driver's submit(request, render) receives explicitly.
 export { defineRequest, composeRequest } from './request.js';
+export { agentRequestBaseSchema } from './request.js';
 export type {
   AgentInput,
+  AgentRequest,
   Renderer,
   RequestVariantSchema,
   RequestDefinition,
@@ -87,6 +89,30 @@ export {
   endEventDataSchema,
 } from './stream-event.js';
 export type { AgentStreamEvent, AgentStreamEventType } from './stream-event.js';
+
+// AgentTurn (M5.6 / README I9.8): the FOLDED twin of AgentStreamEvent —
+// one immutable Tier-2 record per completed run(), produced by L2 folding
+// a turn's Tier-1 event range + the run's return transcript. The folded
+// `{ type, data }` FoldedMessage union reuses the stream per-event data
+// schemas (same vocabulary, accumulated form). Skeleton (C1); the folded
+// vocabulary is refined as the fold (C3) and driver translators (C4/C5)
+// land.
+export {
+  FOLDED_MESSAGE_TYPES,
+  foldedMessageSchema,
+  foldedTextDataSchema,
+  foldedThinkingDataSchema,
+  foldedToolCallDataSchema,
+  foldedPlanDataSchema,
+  foldedErrorDataSchema,
+  agentTurnMetaSchema,
+  agentTurnSchema,
+} from './turn.js';
+export type {
+  FoldedMessage,
+  FoldedMessageType,
+  AgentTurn,
+} from './turn.js';
 
 // ControlMsg + AgentCapabilities (§3.6.2): the host->agent control plane.
 // A closed { type, data } vocabulary symmetric with AgentStreamEvent on the
