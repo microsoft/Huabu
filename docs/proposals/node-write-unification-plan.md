@@ -397,3 +397,40 @@ Each phase ships behind its own tests; the app stays shippable between phases
   paths this plan unifies.
 - [node-preprocessing.md](../architecture/node-preprocessing.md) — current
   6-stage pipeline this plan turns into the single node-write path.
+
+---
+
+## 10. Appendix — label-commit cadence (current implementation)
+
+Findings from tracing how a node's `label` (which **is** the on-disk filename
+`nodes/<safe(label)>.md`) gets committed today. Two paths, very different
+cadences:
+
+| Path                          | Trigger                                                                                                                                                           | Cadence                                                                          | `labelSource` |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- | ------------- |
+| **User explicit rename**      | rename UI → `tryRename` ([canvasStore.ts](../../apps/web/src/store/canvasStore.ts)) → `updateNodeData({label, labelSource:'user'})` → `nodeContentQueue.flushNow` | **immediate, single commit, strict** (0 ms; awaits the 409)                      | `user`        |
+| **Auto-extract from heading** | typing → `updateNodeData({content})` → `UPDATE_NODE_DATA` → web post-effects → `preprocessQueue.schedule` → `resolve_title` → persist writes `label`              | **1 s debounce** (`PREPROCESS_DEBOUNCE_MS`), but **fires on every typing pause** | `auto`        |
+
+**Why the auto path feels high-frequency.** The debounce resets on each
+keystroke, so preprocessing fires ~1 s after typing _pauses_ — not per
+keystroke. But while composing a heading a user pauses several times, and each
+pause re-derives the title from the **partial** heading and rewrites `label` →
+which **renames the `.md` file** (`H.md` → `He.md` → `Hea.md` → …). So a single
+heading can churn the filename many times: bad for Drive sync (a burst of file
+renames + possible conflicted copies), for anything referencing the file by
+path, and for undo/history noise. The body save (`NODE_CONTENT_DEBOUNCE_MS` =
+0.5 s, same file, cheap) is fine at that cadence; the **label/filename** is not.
+
+**P0a does not address this.** The persist guard only stops the body _clobber_;
+in the normal typing case the on-disk body matches the snapshot, so the dedup
+branch still refreshes the drifting auto-label on every pause.
+
+**Recommended rule (for the label endpoint / auto-label commit).** Decouple the
+two cadences: keep the body save fast, but commit the **auto-derived label
+(filename) only when the heading is _settled_** — a longer idle (e.g. 1.5–2 s) or
+a stronger signal (editor blur / leaving the node / the heading line being
+"complete"), never on every intermediate pause. The **display** label may still
+update live/optimistically in-memory for UX; only the **persisted rename** is
+gated. User-explicit renames keep their immediate one-shot commit (they already
+express finished intent). This belongs in the label-endpoint design (§3e) as an
+explicit "settled-only auto-rename" policy.
