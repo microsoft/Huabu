@@ -1483,13 +1483,26 @@ const useCanvasStore = create<RFState>()(
             ? state.viewport
             : null;
         const loadedViewport = sessionViewport ?? legacyServerViewport;
-        set({
+        // Apply the authoritative server state via the no-autosave setter.
+        // A load must NEVER schedule a structure PUT: the nodes/edges we
+        // just fetched already ARE the server's state, so bumping the
+        // canvas `version` would be a spurious self-write. Relying on the
+        // `!prev.isLoading` autosave gate was not enough — two concurrent
+        // loads (e.g. the CanvasPage mount load racing the realtime-sync
+        // `snapshot` reload) can flip `isLoading` false before the losing
+        // load's commit runs, leaking a PUT that resets `updatedAt` to the
+        // open time. History is cleared above, so `canUndo`/`canRedo` are
+        // reset here too (the no-autosave setter skips the middleware's
+        // availability sync).
+        get()._setStateNoAutosave({
           nodes: loadedNodes,
           edges: loadedEdges,
           viewport: loadedViewport,
           canvasTitle: response.title || 'Untitled',
           version: response.version,
           isLoading: false,
+          canUndo: false,
+          canRedo: false,
           ingestionByNodeId: {},
           pendingForkThreadIds: {},
         });
