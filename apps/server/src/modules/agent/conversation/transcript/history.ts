@@ -1,25 +1,24 @@
 /**
- * History projection — turn records → `ChatHistoryItem[]` for the UI.
+ * History projection — folded `AgentTurn`s → `ChatHistoryItem[]` for the UI.
  *
  * The transcript counterpart to `prompt/build-prompt.ts`: where that
- * renders a turn into prompt messages for the model, this rebuilds the
- * user-facing chat transcript from the same structured turn records
- * (envelope + transcript + ACP overlay). Pure functions over the stored
- * `ChatTurnRecord` — no IO, so the route stays a thin loader and this is
- * unit-testable in isolation.
+ * projects a turn into prompt messages for the model, this rebuilds the
+ * user-facing chat transcript from the same L2 Tier-2 records — a folded
+ * {@link AgentTurn} per completed run (README I9.8). The user side is
+ * rebuilt from `turn.request.content` (the persisted {@link ChatEnvelope},
+ * wrapped as the host's `huabu.chat` request variant); the assistant / tool
+ * side from `turn.transcript` (a flat {@link FoldedMessage}[] in emission
+ * order). Pure functions — no IO, so the route stays a thin loader and this
+ * is unit-testable in isolation.
  */
 
 import { commandFromRawInput, variantForInternalTool } from '@sediment/shared';
 
+import { unwrapChatRequest } from '../../agenetes/handle.js';
 import { projectUserVisibleAttachments } from './attachment-chips.js';
 
-import type {
-  ChatTurnRecord,
-  PiMessage,
-} from '../../store/chat-thread-store.js';
 import type { ChatEnvelope } from '../envelope.js';
-import type { ToolAcpExtension } from '@agenetes/acp-driver';
-import type { AssistantMessage } from '@earendil-works/pi-ai';
+import type { AgentTurn, FoldedMessage } from '@agenetes/protocol';
 import type {
   AssistantHistoryPart,
   ChatAttachment,
@@ -30,27 +29,29 @@ import type {
   WebSearchToolResponse,
 } from '@sediment/shared';
 
+/** The folded `tool_call` payload, plus the host-extension fields that
+ *  ride verbatim through the fold (never declared on the base schema). */
+type FoldedToolCallData = Extract<
+  FoldedMessage,
+  { type: 'tool_call' }
+>['data'] & {
+  /** Machine tool name (built-in only) — drives the render variant. */
+  internalToolName?: string;
+  /** Result payload folded from `tool_call_update.rawOutput`. */
+  rawOutput?: unknown;
+};
+
 /**
- * Parse a pi-ai tool-result text payload into the canonical
- * `ToolResponse<…>` envelope. Mirrors the legacy `role:'tool'`
- * reconstruction logic — preserved here because every rich-variant
- * tool part carries this envelope as its `data` field.
- *
- * `isError` is the pi-agent-core flag set when the tool handler threw
- * (e.g. `read` on a missing path). Such results carry a plain message,
- * not a JSON envelope, so we map them to a `status: 'error'` response
- * with the message preserved — otherwise the `catch` below would
- * mislabel a failed call as a successful one with the error text buried
- * in `data.content`, and the UI could not tell success from failure.
+ * Parse a tool-result text payload into the canonical
+ * `ToolResponse<…>` envelope. Every rich-variant tool part carries this
+ * envelope as its `data` field. Built-in tools deliver a JSON-encoded
+ * `ToolResponse` on the folded `tool_call.data.rawOutput`; a bare or
+ * non-JSON payload is wrapped as a `status: 'success'` content blob.
  */
 function parseToolResultText(
   toolName: string,
   resultText: string,
-  isError = false,
 ): ToolResponse<string, unknown> {
-  if (isError) {
-    return { tool: toolName, status: 'error', error: resultText };
-  }
   try {
     const parsed = JSON.parse(resultText);
     if (
@@ -86,295 +87,253 @@ function parseToolResultText(
 }
 
 /**
- * Index the `toolResult` messages in a message list by `toolCallId`,
- * so an assistant `toolCall` block can find its result in O(1).
- */
-function indexToolResults(
-  msgs: readonly PiMessage[],
-): Map<string, { toolName: string; resultText: string; isError: boolean }> {
-  const map = new Map<
-    string,
-    { toolName: string; resultText: string; isError: boolean }
-  >();
-  for (const m of msgs) {
-    if (m.role === 'toolResult') {
-      const resultText = m.content
-        .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
-        .map((b) => b.text)
-        .join('');
-      map.set(m.toolCallId, {
-        toolName: m.toolName ?? 'unknown',
-        resultText,
-        isError: m.isError === true,
-      });
-    }
-  }
-  return map;
-}
-
-/** Extract the text of a (possibly multipart) user message. */
-function extractUserText(msg: Extract<PiMessage, { role: 'user' }>): string {
-  return typeof msg.content === 'string'
-    ? msg.content
-    : Array.isArray(msg.content)
-      ? msg.content
-          .filter(
-            (b): b is { type: 'text'; text: string } =>
-              typeof b === 'object' && b !== null && b.type === 'text',
-          )
-          .map((b) => b.text)
-          .join('\n')
-      : '';
-}
-
-/**
- * Build the ordered `AssistantHistoryPart[]` for one pi-ai assistant
- * message: text / thinking blocks plus tool segments folded in by
- * `toolCallId`. The ACP overlay (`toolExtras`) supplies the semantic
- * fields; the matching pi-ai `toolResult` (when present) supplies the
- * typed `data` envelope for built-in tools. Plans are NOT appended
- * here — the caller owns plan placement (turn-level).
- */
-function buildAssistantParts(
-  msg: AssistantMessage,
-  toolResultByCallId: Map<
-    string,
-    { toolName: string; resultText: string; isError: boolean }
-  >,
-  toolExtras: Record<string, ToolAcpExtension> | undefined,
-): AssistantHistoryPart[] {
-  const parts: AssistantHistoryPart[] = [];
-  for (const block of msg.content) {
-    if (block.type === 'text') {
-      if (block.text.length > 0) {
-        parts.push({ kind: 'text', text: block.text });
-      }
-    } else if (block.type === 'thinking') {
-      if (block.thinking.length > 0) {
-        parts.push({ kind: 'thinking', text: block.thinking });
-      }
-    } else if (block.type === 'toolCall') {
-      const toolCallId = block.id;
-      const toolName = block.name;
-      const result = toolResultByCallId.get(toolCallId);
-      const extras = toolExtras?.[toolCallId];
-      // Structural internal-vs-external discriminator: the internal
-      // pi-ai bridge pushes a matching `toolResult`; the ACP path does
-      // not. So the presence of `result` is itself the signal.
-      const toolData = result
-        ? parseToolResultText(toolName, result.resultText)
-        : undefined;
-      const variant = toolData ? variantForInternalTool(toolName) : 'generic';
-      const command = commandFromRawInput(block.arguments);
-      const base = {
-        kind: 'tool' as const,
-        toolCallId,
-        title: toolName,
-        ...(command ? { command } : {}),
-        ...(extras?.toolKind ? { toolKind: extras.toolKind } : {}),
-        ...(extras?.status ? { status: extras.status } : {}),
-        ...(extras?.locations ? { locations: extras.locations } : {}),
-        ...(extras?.content ? { content: extras.content } : {}),
-        ...(extras?.rawOutput !== undefined
-          ? { rawOutput: extras.rawOutput }
-          : {}),
-        ...(extras?.permission ? { permission: extras.permission } : {}),
-      };
-      switch (variant) {
-        case 'agent_tool': {
-          // Fold the call's input args UNDER the result payload (result
-          // wins), mirroring the live stream (`applyInternalToolResult`).
-          // This surfaces query params the result doesn't echo — e.g. a
-          // `find` / `grep` `pattern` — so the UI can show WHAT was
-          // searched, WITHOUT the tool echoing its own input back into
-          // the model-visible result.
-          const args =
-            block.arguments && typeof block.arguments === 'object'
-              ? (block.arguments as Record<string, unknown>)
-              : undefined;
-          const data =
-            toolData && toolData.status === 'success' && args
-              ? {
-                  ...toolData,
-                  data: {
-                    ...args,
-                    ...((toolData.data as
-                      | Record<string, unknown>
-                      | undefined) ?? {}),
-                  },
-                }
-              : toolData;
-          parts.push({
-            ...base,
-            variant: 'agent_tool',
-            toolName,
-            ...(data ? { data } : {}),
-          });
-          break;
-        }
-        case 'canvas_commands':
-          parts.push({
-            ...base,
-            variant: 'canvas_commands',
-            ...(toolData
-              ? {
-                  data: toolData as ToolResponse<
-                    'canvas_commands',
-                    Record<string, unknown>
-                  >,
-                }
-              : {}),
-          });
-          break;
-        case 'web_search':
-          parts.push({
-            ...base,
-            variant: 'web_search',
-            ...(toolData ? { data: toolData as WebSearchToolResponse } : {}),
-          });
-          break;
-        case 'image_generation':
-          parts.push({
-            ...base,
-            variant: 'image_generation',
-            ...(toolData
-              ? {
-                  data: toolData as ToolResponse<
-                    'generate_image',
-                    ImageGenerationData
-                  >,
-                }
-              : {}),
-          });
-          break;
-        case 'snapshot_nodes':
-          parts.push({
-            ...base,
-            variant: 'snapshot_nodes',
-            ...(toolData
-              ? {
-                  data: toolData as ToolResponse<
-                    'snapshot_nodes',
-                    SnapshotNodesData
-                  >,
-                }
-              : {}),
-          });
-          break;
-        case 'generic':
-          parts.push({ ...base, variant: 'generic' });
-          break;
-      }
-    }
-  }
-  return parts;
-}
-
-/**
- * Convert the structured per-turn records into `ChatHistoryItem`
- * entries for the client.
+ * Build one `AssistantHistoryPart` for a folded `tool_call` message.
  *
- * Each turn emits a user item directly from its {@link ChatEnvelope}
- * (no `[SYSTEM …]` tag stripping — selection / skills / attachments
- * are already structured fields) followed by the assistant/tool/status
- * items reconstructed from the turn's transcript. Message ORDER comes
- * from the transcript array; the ACP overlay (`turn.toolExtras` /
- * `turn.plan`) joins by stable `toolCallId` and is turn-level — no
- * timestamps, no position arrays, no separate sidecar.
+ * Everything the renderer needs already lives on the folded
+ * `tool_call.data` (the initial `tool_call` merged with every
+ * `tool_call_update`): the ACP semantic fields (`toolKind` / `status` /
+ * `locations` / `content` / `rawOutput`) and, for built-in tools, the
+ * machine `internalToolName` + the JSON `ToolResponse` on `rawOutput`.
+ * Built-in tools resolve a rich render `variant` from `internalToolName`;
+ * external (ACP) tools carry no `internalToolName` and stay `generic`.
+ */
+function buildToolPart(data: FoldedToolCallData): AssistantHistoryPart {
+  const toolCallId = data.toolCallId;
+  const internalName = data.internalToolName;
+  const command = data.command ?? commandFromRawInput(data.rawInput);
+  // The result envelope. Built-in tools carry a JSON `ToolResponse` string
+  // on `rawOutput`; external (ACP) tools do not, so they stay data-less and
+  // render from `content[]` / `locations[]` on the generic card.
+  const toolData =
+    internalName !== undefined && typeof data.rawOutput === 'string'
+      ? parseToolResultText(internalName, data.rawOutput)
+      : undefined;
+  const variant = internalName
+    ? variantForInternalTool(internalName)
+    : 'generic';
+
+  const base = {
+    kind: 'tool' as const,
+    toolCallId,
+    title: data.title ?? internalName ?? 'tool',
+    ...(command ? { command } : {}),
+    ...(data.toolKind ? { toolKind: data.toolKind } : {}),
+    ...(data.status ? { status: data.status } : {}),
+    ...(data.locations ? { locations: data.locations } : {}),
+    ...(data.content ? { content: data.content } : {}),
+    // Surface the raw ACP output on the generic card; built-in output is
+    // already folded into the typed `toolData` below.
+    ...(internalName === undefined && data.rawOutput !== undefined
+      ? { rawOutput: data.rawOutput }
+      : {}),
+  };
+
+  switch (variant) {
+    case 'agent_tool': {
+      // Fold the call's input args UNDER the result payload (result wins),
+      // mirroring the live stream (`applyInternalToolResult`) — surfaces
+      // query params the result doesn't echo (e.g. a `grep` `pattern`).
+      const args =
+        data.rawInput && typeof data.rawInput === 'object'
+          ? (data.rawInput as Record<string, unknown>)
+          : undefined;
+      const merged =
+        toolData && toolData.status === 'success' && args
+          ? {
+              ...toolData,
+              data: {
+                ...args,
+                ...((toolData.data as Record<string, unknown> | undefined) ??
+                  {}),
+              },
+            }
+          : toolData;
+      return {
+        ...base,
+        variant: 'agent_tool',
+        toolName: internalName ?? base.title,
+        ...(merged ? { data: merged } : {}),
+      };
+    }
+    case 'canvas_commands':
+      return {
+        ...base,
+        variant: 'canvas_commands',
+        ...(toolData
+          ? {
+              data: toolData as ToolResponse<
+                'canvas_commands',
+                Record<string, unknown>
+              >,
+            }
+          : {}),
+      };
+    case 'web_search':
+      return {
+        ...base,
+        variant: 'web_search',
+        ...(toolData ? { data: toolData as WebSearchToolResponse } : {}),
+      };
+    case 'image_generation':
+      return {
+        ...base,
+        variant: 'image_generation',
+        ...(toolData
+          ? {
+              data: toolData as ToolResponse<
+                'generate_image',
+                ImageGenerationData
+              >,
+            }
+          : {}),
+      };
+    case 'snapshot_nodes':
+      return {
+        ...base,
+        variant: 'snapshot_nodes',
+        ...(toolData
+          ? {
+              data: toolData as ToolResponse<'snapshot_nodes', SnapshotNodesData>,
+            }
+          : {}),
+      };
+    case 'generic':
+    default:
+      return { ...base, variant: 'generic' };
+  }
+}
+
+/**
+ * Extract the folded envelope from a turn's `request`. The host persists
+ * its per-turn request as the `huabu.chat` variant (`{ type, content }`),
+ * so the envelope is `request.content`. A `null` request (a resume turn
+ * with no new user input) yields no user bubble.
+ */
+function envelopeOf(turn: AgentTurn): ChatEnvelope | null {
+  return unwrapChatRequest(turn.request);
+}
+
+/**
+ * Convert the folded per-turn records into `ChatHistoryItem` entries for
+ * the client.
+ *
+ * Each turn emits a user item from its {@link ChatEnvelope} (selection /
+ * skills / attachments are structured fields — no `[SYSTEM …]` tag
+ * stripping) followed by the assistant / tool / status items rebuilt from
+ * the turn's folded transcript. Message ORDER is the transcript array
+ * order; a turn-level `plan` (folded once at turn end) is appended after
+ * the assistant parts, and an interrupted / errored run surfaces a status
+ * row from `turn.meta.stopReason` / a folded `error` message.
  */
 export function buildHistoryFromTurns(
-  turns: readonly ChatTurnRecord[],
+  turns: readonly AgentTurn[],
   messages: ChatHistoryItem[],
 ): void {
   for (const turn of turns) {
-    const envelope: ChatEnvelope = turn.envelope;
+    const envelope = envelopeOf(turn);
 
     // 1. User item, straight from the structured envelope.
-    const allAttachments = [
-      ...envelope.user.attachments,
-      ...envelope.focus.selection.imageAttachments,
-      ...envelope.focus.selection.snapshotAttachments,
-    ];
-    const attachments = projectUserVisibleAttachments(
-      allAttachments,
-      envelope.focus.selection.selectedIds,
-    );
-    const selectedNodeIds = envelope.focus.selection.selectedIds;
-    const invokedSkills = envelope.skills.invokedIds;
-    if (
-      envelope.user.text.trim() ||
-      attachments.length > 0 ||
-      selectedNodeIds.length > 0
-    ) {
-      messages.push({
-        role: 'user',
-        content: envelope.user.text,
-        ...(attachments.length > 0 && {
-          attachments: attachments as ChatAttachment[],
-        }),
-        ...(selectedNodeIds.length > 0 && { selectedNodeIds }),
-        ...(invokedSkills.length > 0 && { invokedSkills }),
-      });
+    if (envelope) {
+      const allAttachments = [
+        ...envelope.user.attachments,
+        ...envelope.focus.selection.imageAttachments,
+        ...envelope.focus.selection.snapshotAttachments,
+      ];
+      const attachments = projectUserVisibleAttachments(
+        allAttachments,
+        envelope.focus.selection.selectedIds,
+      );
+      const selectedNodeIds = envelope.focus.selection.selectedIds;
+      const invokedSkills = envelope.skills.invokedIds;
+      if (
+        envelope.user.text.trim() ||
+        attachments.length > 0 ||
+        selectedNodeIds.length > 0
+      ) {
+        messages.push({
+          role: 'user',
+          content: envelope.user.text,
+          ...(attachments.length > 0 && {
+            attachments: attachments as ChatAttachment[],
+          }),
+          ...(selectedNodeIds.length > 0 && { selectedNodeIds }),
+          ...(invokedSkills.length > 0 && { invokedSkills }),
+        });
+      }
     }
 
-    // 2. Transcript: assistant / tool / status items.
-    let pendingStatus: ChatHistoryItem | null = null;
+    // 2. Transcript: assistant / tool items, in emission order.
     let currentAssistant: Extract<
       ChatHistoryItem,
       { role: 'assistant' }
     > | null = null;
-    const flushStatus = () => {
-      if (pendingStatus) {
-        messages.push(pendingStatus);
-        pendingStatus = null;
-        currentAssistant = null;
+    let planPart: AssistantHistoryPart | null = null;
+    let errorDetail: string | null = null;
+
+    const pushAssistantParts = (parts: AssistantHistoryPart[]): void => {
+      if (parts.length === 0) return;
+      if (currentAssistant) {
+        currentAssistant.parts.push(...parts);
+      } else {
+        const item: Extract<ChatHistoryItem, { role: 'assistant' }> = {
+          role: 'assistant',
+          parts,
+        };
+        messages.push(item);
+        currentAssistant = item;
       }
     };
 
-    const toolResultByCallId = indexToolResults(turn.transcript);
-    const toolExtras = turn.toolExtras;
-
     for (const msg of turn.transcript) {
-      if (msg.role === 'user') {
-        // Only `[SYSTEM …]` status rows appear in a transcript — the
-        // real user message is the envelope above. Legacy
-        // `[SYSTEM PreparedPrompt]` rows (now retired) are ignored.
-        const content = extractUserText(msg).trim();
-        if (content.startsWith('[SYSTEM Interrupted]')) {
-          pendingStatus = { role: 'status', status: 'interrupted' };
-          continue;
-        }
-        if (content.startsWith('[SYSTEM Error]')) {
-          const detail = content.slice('[SYSTEM Error] '.length);
-          pendingStatus = { role: 'status', status: 'error', detail };
-          continue;
-        }
-        // Any other unexpected user-role row in a transcript is ignored.
-        continue;
-      } else if (msg.role === 'assistant') {
-        const parts = buildAssistantParts(msg, toolResultByCallId, toolExtras);
-        if (parts.length > 0) {
-          if (currentAssistant) {
-            currentAssistant.parts.push(...parts);
-          } else {
-            const item: Extract<ChatHistoryItem, { role: 'assistant' }> = {
-              role: 'assistant',
-              parts,
-            };
-            messages.push(item);
-            currentAssistant = item;
+      switch (msg.type) {
+        case 'text':
+          if (msg.data.content.length > 0) {
+            pushAssistantParts([{ kind: 'text', text: msg.data.content }]);
           }
-        }
-        flushStatus();
+          break;
+        case 'thinking':
+          if (msg.data.content.length > 0) {
+            pushAssistantParts([
+              { kind: 'thinking', text: msg.data.content },
+            ]);
+          }
+          break;
+        case 'tool_call':
+          pushAssistantParts([
+            buildToolPart(msg.data as FoldedToolCallData),
+          ]);
+          break;
+        case 'plan':
+          // Latest-wins; the fold appends it once at turn end. Held and
+          // attached after the assistant parts (turn-level placement).
+          if (msg.data.entries.length > 0) {
+            planPart = { kind: 'plan', entries: msg.data.entries };
+          }
+          break;
+        case 'error':
+          errorDetail = msg.data.error ?? 'Agent error';
+          break;
       }
-      // toolResult: folded into the assistant turn via toolCallId.
     }
 
-    // Turn-level plan (folded ACP overlay): appended once at the end.
-    if (turn.plan && turn.plan.length > 0 && currentAssistant) {
-      currentAssistant.parts.push({ kind: 'plan', entries: turn.plan });
+    // Turn-level plan (folded ACP overlay): appended once at the end to
+    // this turn's assistant item (the last pushed message when present).
+    if (planPart) {
+      const last = messages[messages.length - 1];
+      if (last && last.role === 'assistant') {
+        last.parts.push(planPart);
+      }
     }
 
-    flushStatus();
+    // 3. Terminal status row (interrupted / error), derived from the run
+    // metadata + any folded error — not from a synthetic transcript row.
+    // Both the built-in (`aborted`) and ACP (`cancelled`) backends signal a
+    // user interruption via `meta.stopReason`.
+    const stopReason = turn.meta?.stopReason;
+    if (stopReason === 'aborted' || stopReason === 'cancelled') {
+      messages.push({ role: 'status', status: 'interrupted' });
+    } else if (errorDetail) {
+      messages.push({ role: 'status', status: 'error', detail: errorDetail });
+    }
   }
 }

@@ -16,8 +16,11 @@ import { appendFileSync } from 'node:fs';
 import { mkdirp } from '../../../storage/io.js';
 import { chatDir, chatPromptLogPath } from '../../../storage/paths.js';
 
-import type { PiMessage } from '../../store/chat-thread-store.js';
+import type { Context } from '@earendil-works/pi-ai';
 import type { FastifyBaseLogger } from 'fastify';
+
+/** A pi-ai conversation message (the built-in agent's context unit). */
+type PiMessage = Context['messages'][number];
 
 /**
  * Truthy check for the debug flag.

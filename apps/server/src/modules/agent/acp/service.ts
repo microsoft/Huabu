@@ -31,7 +31,7 @@ import {
   type AcpHandle,
   type AcpWorkloadSpec,
 } from '../agenetes/drivers.js';
-import { type RenderFn } from '../agenetes/handle.js';
+import { type RenderFn, wrapChatRequest } from '../agenetes/handle.js';
 import { dumpAssembledPrompt } from '../conversation/prompt/debug-prompt.js';
 
 import type { ChatEnvelope } from '../conversation/envelope.js';
@@ -166,7 +166,7 @@ function contentPartsToAcpBlocks(parts: ContentPart[]): AcpContentBlock[] {
 
 export async function* runAcpAgent(
   opts: RunAcpAgentOptions,
-): AsyncGenerator<AgentStreamEvent, Message[]> {
+): AsyncGenerator<AgentStreamEvent, void> {
   const { binding, threadId, overlay, signal, logger } = opts;
   const canvasId = opts.canvasId ?? '';
   // Verbatim user text for the raw-text fallback + slash detection.
@@ -199,7 +199,7 @@ export async function* runAcpAgent(
   ): Promise<PreparedAcpPrompt> => {
     try {
       const result = await prepareExternalAgentPrompt({
-        envelope: request,
+        envelope: request.content,
         agentAlias: binding.alias,
         canvasId: canvasId || null,
         includeSystem: state.isFirstMessage,
@@ -259,7 +259,7 @@ export async function* runAcpAgent(
   // (I9.7). Idempotent per thread — subscribing before `run()` so the
   // handle's initial state up-report is captured.
   ensureProfileCacheSubscription(threadId, binding.profileId);
-  return yield* handle.run(opts.envelope, render, {
+  yield* handle.run(wrapChatRequest(opts.envelope), render, {
     overlay,
     signal,
     logger,

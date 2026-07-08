@@ -39,9 +39,11 @@ import {
   type SearchField,
 } from '@sediment/shared';
 
-import { loadTurns } from '../agent/store/chat-thread-store.js';
+import { agenetes } from '../agent/agenetes/drivers.js';
+import { unwrapChatRequest } from '../agent/agenetes/handle.js';
+import { canvasAcpNamespace } from '../storage/paths.js';
 
-import type { ChatTurnRecord } from '../agent/store/chat-thread-store.js';
+import type { AgentTurn } from '@agenetes/protocol';
 import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
 
 /** Window of characters shown around each match in `snippet`. */
@@ -214,27 +216,19 @@ function scanNodeContent(
  * user message and an unrelated reply, while `buildSnippet`'s
  * whitespace collapse still renders them on one row.
  */
-function buildThreadHaystack(turns: readonly ChatTurnRecord[]): string {
+function buildThreadHaystack(turns: readonly AgentTurn[]): string {
   const segments: string[] = [];
   for (const turn of turns) {
-    const userText = turn.envelope?.user?.text;
+    const userText = unwrapChatRequest(turn.request)?.user?.text;
     if (typeof userText === 'string' && userText.length > 0) {
       segments.push(userText);
     }
     for (const msg of turn.transcript) {
-      // Only assistant messages contribute model speech; in-transcript
-      // `user` rows are `[SYSTEM …]` status markers and `tool` rows are
-      // results — both excluded.
-      if (!msg || msg.role !== 'assistant') continue;
-      const blocks = (msg as { content?: unknown }).content;
-      if (!Array.isArray(blocks)) continue;
-      for (const block of blocks) {
-        if (!block || typeof block !== 'object') continue;
-        // Keep plain assistant prose; drop `toolCall` / `thinking`.
-        if ((block as { type?: unknown }).type !== 'text') continue;
-        const text = (block as { text?: unknown }).text;
-        if (typeof text === 'string' && text.length > 0) segments.push(text);
-      }
+      // Only assistant prose contributes model speech; `tool_call`,
+      // `thinking`, `plan`, and `error` fragments are excluded.
+      if (msg.type !== 'text') continue;
+      const text = msg.data.content;
+      if (typeof text === 'string' && text.length > 0) segments.push(text);
     }
   }
   return segments.join('\n\n');
@@ -256,7 +250,10 @@ function scanNodeConversation(
   tryEmit: (match: CanvasSearchMatch) => boolean,
 ): void {
   if (!node.threadId) return;
-  const turns = loadTurns(node.threadId, canvasId);
+  const { turns } = agenetes.history(
+    canvasAcpNamespace(canvasId),
+    node.threadId,
+  );
   if (turns.length === 0) return;
   const haystack = buildThreadHaystack(turns);
   if (haystack.length === 0) return;

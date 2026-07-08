@@ -230,7 +230,7 @@ export function useChatHistory(
         }
       };
 
-      const connected = await agentApi.reconnectStream(ownerThreadId, {
+      const connected = await agentApi.reconnectStream(ownerThreadId, canvasId, {
         onEvent: (event: AgentStreamEvent) => {
           if (cancelled) return;
           if (event.type === 'done') sawDone = true;

@@ -373,8 +373,24 @@ export class BuiltinAgentHandle implements AgentHandle<
                 },
               };
             } else if (stopReason === 'aborted') {
-              // Real user-initiated abort: route handles UX
-              // (cleanUpAbortedMessages + status row). Nothing to emit.
+              // Real user-initiated abort. Emit a terminal `done` carrying
+              // `stopReason: 'aborted'` so L2 folds an *aborted* turn: the
+              // history projection then surfaces the `interrupted` status
+              // row and the built-in context rebuild injects the
+              // `[SYSTEM Interrupted]` notice. Partial assistant text
+              // already rode out as `text_delta`s (folded verbatim), so the
+              // `message` body is just that last text (may be empty).
+              yield {
+                type: 'done',
+                data: {
+                  message: finalText,
+                  meta: {
+                    stopReason,
+                    usage: lastAssistant?.usage,
+                    iterations: turnCount,
+                  },
+                },
+              };
             } else {
               yield {
                 type: 'done',

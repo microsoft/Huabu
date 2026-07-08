@@ -20,7 +20,12 @@ import {
   type AcpTurnCtx,
   type PreparedAcpPrompt,
 } from '@agenetes/acp-driver';
-import { mountAgenetes, FileThreadStore } from '@agenetes/agenetes';
+import {
+  mountAgenetes,
+  FileThreadStore,
+  FileEventLogStore,
+  FileTurnStore,
+} from '@agenetes/agenetes';
 import { Agent } from '@earendil-works/pi-agent-core';
 
 import { ensureApiKey, getLLMModel } from '../llm.js';
@@ -203,7 +208,11 @@ export const builtinDriverFactory = (
  * `spec.kind` and the lifecycle on `spec.workloadType` (I3.2).
  */
 export const agenetes: Agenetes<AgenetesWorkloadSpec, AgenetesHandle> =
-  mountAgenetes({ threadStore: new FileThreadStore() })
+  mountAgenetes({
+    threadStore: new FileThreadStore(),
+    eventLogStore: new FileEventLogStore(),
+    turnStore: new FileTurnStore(),
+  })
     .addFactory(ACP_FACTORY_NAME, acpDriverFactory<AgentRequest>)
     .register(EXTERNAL_DRIVER_KIND, ACP_FACTORY_NAME)
     .addFactory(BUILTIN_FACTORY_NAME, builtinDriverFactory)

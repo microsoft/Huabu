@@ -34,12 +34,48 @@ export type {
 export { createAgentRuntime } from '@agenetes/runtime';
 
 /**
- * The per-turn request a host handle accepts — the canvas
- * {@link ChatEnvelope}. Bound here (not in the subtree) so `@agenetes/runtime`
- * stays host-agnostic; a future driver-agnostic `@agenetes/protocol`
- * request union would replace this alias without touching the seam.
+ * The host's `AgentRequest` variant discriminant. The host adopts the
+ * `@agenetes/protocol` request contract (`{ type, content }`, README I6):
+ * its single per-turn request variant wraps the canvas {@link ChatEnvelope}
+ * as `content`. Persisting it to the L2 turn log (I9.8) is `JSON.stringify`,
+ * and `AgentTurn.request` replays it verbatim — the driver-agnostic source
+ * of truth for both history rendering and built-in context assembly.
  */
-export type AgentRequest = ChatEnvelope;
+export const HUABU_CHAT_REQUEST_TYPE = 'huabu.chat';
+
+/**
+ * The per-turn request a host handle accepts — the `{ type, content }`
+ * request-variant contract with the canvas {@link ChatEnvelope} riding as
+ * `content`. Bound here (not in the subtree) so `@agenetes/runtime` stays
+ * host-agnostic; `content` is opaque to L2 (`AgentRequest.content` is
+ * `unknown`), so the whole envelope persists losslessly.
+ */
+export interface AgentRequest {
+  readonly type: typeof HUABU_CHAT_REQUEST_TYPE;
+  readonly content: ChatEnvelope;
+}
+
+/** Wrap a {@link ChatEnvelope} into the persisted host {@link AgentRequest}. */
+export function wrapChatRequest(envelope: ChatEnvelope): AgentRequest {
+  return { type: HUABU_CHAT_REQUEST_TYPE, content: envelope };
+}
+
+/**
+ * Recover the {@link ChatEnvelope} from a persisted `AgentTurn.request`
+ * (the L2 folded turn, README I9.8). Returns `null` for a resume turn
+ * (`request === null`) or any request that is not the host's `huabu.chat`
+ * variant — the caller then emits no user bubble / user message.
+ */
+export function unwrapChatRequest(request: unknown): ChatEnvelope | null {
+  if (
+    request &&
+    typeof request === 'object' &&
+    (request as { type?: unknown }).type === HUABU_CHAT_REQUEST_TYPE
+  ) {
+    return (request as { content: ChatEnvelope }).content;
+  }
+  return null;
+}
 
 /**
  * Host-bound render fn: the request is always the host {@link AgentRequest}.
