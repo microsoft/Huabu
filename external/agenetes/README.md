@@ -2,22 +2,36 @@
 
 **Agent-as-a-Local-Service — an agent control plane.**
 
-Agenetes is the reusable runtime layer that turns "an agent" into a managed local service. It sits above a per-node agent relay (`agentlet`) and below a host application (e.g. a canvas UI): the host defines and @-mentions agents; Agenetes guarantees that a session exists to receive queries and return a stream of agent messages, tracks each workload's lifecycle, routes its stream, and persists its log.
+Agenetes is the "Kubernetes for agents" in one precise sense: it is a **control plane for agent workloads**, not an agent UI and not a model runtime. It takes a declarative `WorkloadSpec`, resolves it to a concrete driver/runtime, ensures a session exists, routes queries in and agent messages out, tracks lifecycle, and persists the conversation log.
+
+More concretely, Agenetes sits **above** a per-node relay such as `agentlet` and **below** a host application such as a canvas UI or chat surface. The host decides _which_ workload to declare and _when_ to invoke it; Agenetes owns the contract in between. Like Kubernetes, it separates declaration, lifecycle, communication, and persistence into orthogonal dimensions so different runtimes and transports can plug into the same control surface.
+
+The analogy should not be overextended: Agenetes is **not** a scheduler. It does not place workloads onto fungible nodes. It is closer to the part of Kubernetes that says "given this declared workload, make sure the bound runtime exists, can receive input, can stream output, and can be recovered from durable state." Its single success criterion is therefore simple: **once an agent workload is defined, then when it is invoked a session exists to receive queries and return a stream of agent messages.**
+
+Agenetes 可以在一个精确的意义上被理解为“agent 的 Kubernetes”：它是一个 **agent workload 的控制平面**，而不是 agent UI，也不是 model runtime。它接收一份声明式的 `WorkloadSpec`，把它解析到具体的 driver/runtime，确保存在一个 session，负责把 query 送入、把 agent message 流送出，跟踪生命周期，并持久化会话日志。
+
+更具体地说，Agenetes 位于 per-node relay（例如 `agentlet`）**之上**、宿主应用（例如画布 UI 或聊天界面）**之下**。宿主决定要声明_哪一种_ workload，以及_何时_调用它；Agenetes 拥有的是两者之间的契约。和 Kubernetes 一样，它把声明、生命周期、通信与持久化拆成彼此正交的维度，使不同 runtime 与 transport 可以接到同一个控制面上。
+
+但这个类比不能被过度拉伸：Agenetes **不是**调度器。它不会把 workload 放到一组可互换的 node 上做选址。它更接近 Kubernetes 里这样的一部分能力："给定这份已声明的 workload，确保被绑定的 runtime 存在、能接收输入、能流式返回输出，并且能从持久状态恢复。" 因而它的成败标准也非常单一：**一旦某个 agent workload 已被定义，那么当它被调用时，就一定存在一个 session 来接收 query 并返回 agent message 流。**
 
 > **Status.** This README is the current design source of truth for Agenetes. It captures the consensus reached while extracting Agenetes out of its first host (Huabu / Sediment). It will later be refined into the project's internal docs; for now it is authoritative. Downstream design documents should reference this file rather than restating these decisions.
 
 ## The one guarantee / 唯一保证
 
 **G — The single guarantee / 唯一保证.**
-Agenetes succeeds or fails on a single guarantee, not on any feature: **once an agent is defined (e.g. via an agent template), then when it is @-mentioned a session exists to receive user queries and return a stream of agent messages.** It is deliberately incurious about _what_ the agent does or _how_ the host UI looks — it owns the contract in between.
+The opening above already states this guarantee; this section keeps it as a short citation anchor for the rest of the document: **once an agent workload is defined, then when it is invoked a session exists to receive queries and return a stream of agent messages.**
 
-Agenetes 的成败只取决于一条保证，而非任何具体功能：**一旦某个 agent 被定义（例如通过 agent 模板），那么当它被 @-mention 时，就一定存在一个 session 来接收用户查询并返回一串 agent 消息。** 它刻意不关心 agent _做什么_、宿主 UI _长什么样_——它只拥有两者之间的契约。
+上面的 opening 已经说明了这条保证；这里保留它，只是为了给后文提供一个简短的引用锚点：**一旦某个 agent workload 已被定义，那么当它被调用时，就一定存在一个 session 来接收 query 并返回 agent message 流。**
 
 ## The name
 
 `agentlet` : kubelet :: **Agenetes** : Kubernetes. `agentlet` is the per-node relay that spawns and babysits _one_ runtime; Agenetes is the layer above it that dispatches a session to its agentlet, tracks its lifecycle, routes its stream, and persists its log.
 
+`agentlet` : kubelet :: **Agenetes** : Kubernetes。`agentlet` 是 per-node relay，负责拉起并看护 _一个_ runtime；Agenetes 则是其上的那一层：把某个 session 分派给它的 agentlet，跟踪其生命周期，路由其流，并持久化其日志。
+
 The name is formed like its model: Ancient Greek κυβερνήτης (_kubernḗtēs_, "helmsman/governor") = the root _kubern-_ + the agentive suffix **-ήτης (_-ētēs_)**, "the one who —". We attach that true agentive suffix to the root **ag-** (shared by Greek ἄγω "to lead/drive" and Latin _agō_ → _agent_, both from PIE \*h₂eǵ- "to drive"): **Agen-** (keeps "agent" legible) + **-ētēs** (exactly as in _kubernḗtēs_) → "the one who drives / sets in motion" — precisely a control plane's job. It scans like its model: Ku-ber-NÉ-tēs ⟷ A-ge-NÉ-tēs. (Not "Agentnetes": that bolts the whole word _agent_ onto the mis-cut fragment "-netes", preserving a false morpheme.)
+
+这个名字是按它所比照的模型构成的：古希腊语 κυβερνήτης（_kubernḗtēs_，“舵手 / 治理者”）= 词根 _kubern-_ + 施事后缀 **-ήτης (_-ētēs_)**，意为“那个去做……的人”。我们把这个真正的施事后缀接到词根 **ag-** 上（它同时见于希腊语 ἄγω“引导 / 驱动”与拉丁语 _agō_，后者通向 _agent_；二者都可追溯到 PIE \*h₂eǵ-，“驱动”）：**Agen-**（保留 “agent” 的可辨识性）+ **-ētēs**（与 _kubernḗtēs_ 完全同一个后缀）→ “the one who drives / sets in motion”，这正是 control plane 的工作。它的重音节奏也与其模型对应：Ku-ber-NÉ-tēs ⟷ A-ge-NÉ-tēs。（不是 “Agentnetes”：那是把整个单词 _agent_ 硬接到切错的碎片 “-netes” 上，保留了一个错误的词素切分。）
 
 ## The four orthogonal dimensions / 四个正交维度
 
@@ -25,10 +39,10 @@ Agenetes decomposes into four dimensions that must stay decoupled so they compos
 
 Agenetes 分解为四个必须保持解耦的维度，以便它们能自由组合——任一维度上的任意取值，都能与其它维度上的任意取值配合工作：
 
-**D1 · Definition · Registry · Discover — _what agents exist_ / 定义 · 注册 · 发现——_有哪些 agent_.**
-An agent template is a pure definition (e.g. `{ agentletId, cmd, cwd }` or a built-in profile); adding one registers it but creates no session. Owns the registry, agent profiles, and team manifests; answers "what can I @-mention?". _(K8s: the API server + declarative specs.)_
+**D1 · Definition · WorkloadSpec — _what workload may be declared_ / 定义 · WorkloadSpec——_能声明什么工作负载_.**
+A `WorkloadSpec` is a pure declaration of a workload (its kind, identity, binding, and spawn inputs); defining or storing one still creates no session. This dimension owns the declarative shape itself and how callers use it to say "run this kind of workload here". Registry, profiles, and discovery may be layered on top as conveniences, but they are secondary to the spec contract. _(K8s: declarative specs first; API-server-style registry/discovery is layered around them.)_
 
-agent 模板是一份纯定义（例如 `{ agentletId, cmd, cwd }` 或一个内置 profile）；添加它只是注册，不会创建 session。该维度拥有注册表、agent profile 与 team manifest，回答"我能 @-mention 谁"。_(对应 K8s：API server + 声明式 spec。)_
+`WorkloadSpec` 是一份对工作负载的纯声明（包括它的 kind、identity、binding 以及 spawn 输入）；定义或保存它本身仍不会创建 session。该维度的核心是这个声明式 shape 本身，以及调用方如何用它表达“在这里运行这一类 workload”。注册表、profile 与 discover 可以作为围绕它的便利层叠加上去，但它们相对于 spec 契约是次要的。_(对应 K8s：首先是声明式 spec；类似 API server 的注册 / 发现能力是围绕它叠加的。)_
 
 **D2 · Lifecycle — _the workload state machine_ / 生命周期——_工作负载状态机_.**
 `spawn` (lazily, on first @-mention) → `resume` (from idle-suspend) → `close` (explicit, idle-timeout, or task completion). Owns only a workload's existence and state — nothing about how bytes move or what the agent is. _(K8s: the controller reconcile loop — but Agenetes has **no scheduler**, see I1.)_
