@@ -602,6 +602,7 @@ export const NotePreview = ({
             <MilkdownEditor
               markdown={markdown}
               editable={!readOnly}
+              canvasId={canvasId ?? undefined}
               onChange={handleEditorChange}
               onExternalUpdate={handleExternalUpdate}
               onReady={setEditor}

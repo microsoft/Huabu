@@ -43,6 +43,12 @@ type ArtifactType = 'image' | 'pdf' | 'office' | 'video' | 'audio' | 'html';
 export function resolveArtifactUrl(src: string, canvasId?: string): string {
   if (!src) return src;
   if (src.startsWith('data:')) return src;
+  // Object URLs are session-local and must never be treated as a bare
+  // artifact key (that would build a nonsensical
+  // `/api/canvas/<id>/artifact/blob:…` path). Pass them through so an
+  // in-flight paste still previews; persistence replaces them with the
+  // uploaded artifact key.
+  if (src.startsWith('blob:')) return src;
 
   if (/^https?:\/\//.test(src)) {
     try {

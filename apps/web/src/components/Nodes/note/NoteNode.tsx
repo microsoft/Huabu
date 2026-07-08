@@ -466,6 +466,7 @@ export const NoteNode = memo(
                   {hydrated ? (
                     <MilkdownPreview
                       markdown={markdown}
+                      canvasId={canvasId ?? undefined}
                       className="pointer-events-none w-full select-none"
                     />
                   ) : (
