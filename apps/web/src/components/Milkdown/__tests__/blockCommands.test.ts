@@ -161,6 +161,108 @@ describe('Milkdown block commands', () => {
     expect(instance.getMarkdown()).toContain('2. sync');
   });
 
+  it('converts only a node-selected nested list item to a bullet list', async () => {
+    const instance = await mount(`# Update
+
+1. huabu agent
+
+   1. layout
+2. sync`);
+
+    instance.__selectListItemContainingTextForTest?.('layout');
+    instance.setBlockType('bullet-list');
+
+    expect(instance.getMarkdown()).toContain('1. huabu agent');
+    expect(instance.getMarkdown()).toContain('   * layout');
+    expect(instance.getMarkdown()).toContain('2. sync');
+  });
+
+  it('converts a node-selected nested list item to a paragraph without merging its parent', async () => {
+    const instance = await mount('- A\n  - B');
+
+    instance.__selectListItemContainingTextForTest?.('B');
+    instance.setBlockType('paragraph');
+
+    const markdown = instance.getMarkdown();
+    expect(markdown).toContain('* A');
+    expect(markdown).not.toContain('A B');
+  });
+
+  it('converts a node-selected top-level list item to a paragraph without merging siblings', async () => {
+    const instance = await mount('- A\n- B');
+
+    instance.__selectListItemContainingTextForTest?.('A');
+    instance.setBlockType('paragraph');
+
+    const markdown = instance.getMarkdown();
+    expect(markdown).toContain('* B');
+    expect(markdown).not.toContain('A B');
+  });
+
+  it('converts a block-handle-selected nested list to bullets without merging rows', async () => {
+    const instance = await mount('# Update\n\n1. huabu agent\n   1. layout\n');
+
+    // Simulate the drag-handle selecting the whole enclosing top-level list.
+    instance.__setCursorAfterTextForTest?.('layout');
+    instance.__selectCurrentBlockForTest?.();
+    instance.setBlockType('bullet-list');
+
+    const markdown = instance.getMarkdown();
+    expect(markdown).toContain('* huabu agent');
+    expect(markdown).toContain('  * layout');
+    expect(markdown).not.toContain('huabu agent layout');
+  });
+
+  it('converts a block-handle-selected nested list to a task list', async () => {
+    const instance = await mount('- huabu agent\n  - layout\n');
+
+    instance.__setCursorAfterTextForTest?.('layout');
+    instance.__selectCurrentBlockForTest?.();
+    instance.setBlockType('task-list');
+
+    const markdown = instance.getMarkdown();
+    expect(markdown).toContain('* [ ] huabu agent');
+    expect(markdown).toContain('  * [ ] layout');
+  });
+
+  it('converts a list item that has a nested child without merging its rows', async () => {
+    const instance = await mount('- parent\n  - layout\n');
+
+    instance.__setCursorAfterTextForTest?.('parent');
+    instance.setBlockType('ordered-list');
+
+    const markdown = instance.getMarkdown();
+    expect(markdown).toContain('1. parent');
+    expect(markdown).toContain('   * layout');
+    expect(markdown).not.toContain('parent layout');
+  });
+
+  it('converts a node-selected parent list item without merging its nested child', async () => {
+    const instance = await mount('- parent\n  - layout\n');
+
+    instance.__selectListItemContainingTextForTest?.('parent');
+    instance.setBlockType('ordered-list');
+
+    const markdown = instance.getMarkdown();
+    expect(markdown).toContain('1. parent');
+    expect(markdown).toContain('   * layout');
+    expect(markdown).not.toContain('parent layout');
+  });
+
+  it('block-handle range on a nested child targets the child, not the parent', async () => {
+    const instance = await mount('# Update\n\n1. huabu agent\n   1. layout\n');
+
+    // The drag handle presents a nested item as a TextSelection spanning the
+    // item at the enclosing list level (its `$from` resolves to the list).
+    instance.__selectListItemAsRangeForTest?.('layout');
+    instance.setBlockType('bullet-list');
+
+    const markdown = instance.getMarkdown();
+    expect(markdown).toContain('1. huabu agent');
+    expect(markdown).toContain('   * layout');
+    expect(markdown).not.toContain('* huabu agent');
+  });
+
   it('indents and outdents bullet list items with Tab', async () => {
     const instance = await mount('- first\n- second');
 
