@@ -17,10 +17,7 @@ export type InputResolveCapability = 'resolve_input';
 export type ExtractCapability = 'extract_text' | 'fetch_remote_content';
 
 /** Capabilities that belong to the Normalize stage. */
-export type NormalizeCapability =
-  | 'compute_fingerprint'
-  | 'resolve_title'
-  | 'merge_metadata';
+export type NormalizeCapability = 'resolve_title' | 'merge_metadata';
 
 /** Capabilities that belong to the Enrich (LLM) stage. */
 export type EnrichCapability =

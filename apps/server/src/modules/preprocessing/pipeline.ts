@@ -174,8 +174,17 @@ export async function runPipeline(
   }
 
   // Stage 3 — Normalize
+  // Normalize builds the canonical record (`ctx.normalized`) that Persist
+  // writes and Enrich reads. Run it whenever a downstream stage will consume
+  // that record — the node will persist a sidecar or run LLM enrichment — or
+  // when title / metadata resolution is explicitly requested. (Replaces the
+  // former `compute_fingerprint` gate, a vestige of a removed content-hash
+  // step; the real content-change dedup lives in Persist as a string compare.)
   if (
-    has('compute_fingerprint') ||
+    has('persist_source') ||
+    has('generate_label') ||
+    has('generate_summary') ||
+    has('generate_keywords') ||
     has('resolve_title') ||
     has('merge_metadata')
   ) {
@@ -185,8 +194,6 @@ export async function runPipeline(
         ctx.extracted ?? { skipped: true },
         contentKind,
       );
-      if (has('compute_fingerprint'))
-        usedCapabilities.push('compute_fingerprint');
       if (has('resolve_title')) usedCapabilities.push('resolve_title');
       if (has('merge_metadata')) usedCapabilities.push('merge_metadata');
     } catch (error) {

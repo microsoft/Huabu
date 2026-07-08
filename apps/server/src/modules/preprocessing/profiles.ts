@@ -15,7 +15,6 @@ export const profiles: Record<CanvasNodeType, NodePreprocessProfile> = {
     capabilities: [
       'resolve_input',
       'extract_text',
-      'compute_fingerprint',
       'resolve_title',
       'merge_metadata',
       'persist_source',
@@ -29,7 +28,6 @@ export const profiles: Record<CanvasNodeType, NodePreprocessProfile> = {
     capabilities: [
       'resolve_input',
       'extract_text',
-      'compute_fingerprint',
       'resolve_title',
       'merge_metadata',
       'persist_source',
@@ -43,7 +41,6 @@ export const profiles: Record<CanvasNodeType, NodePreprocessProfile> = {
     capabilities: [
       'resolve_input',
       'fetch_remote_content',
-      'compute_fingerprint',
       'resolve_title',
       'merge_metadata',
       'generate_label',
@@ -65,7 +62,6 @@ export const profiles: Record<CanvasNodeType, NodePreprocessProfile> = {
     capabilities: [
       'resolve_input',
       'extract_text',
-      'compute_fingerprint',
       'resolve_title',
       'merge_metadata',
       'generate_label',
@@ -87,7 +83,6 @@ export const profiles: Record<CanvasNodeType, NodePreprocessProfile> = {
     capabilities: [
       'resolve_input',
       'extract_text',
-      'compute_fingerprint',
       'resolve_title',
       'merge_metadata',
       'generate_label',
@@ -108,7 +103,6 @@ export const profiles: Record<CanvasNodeType, NodePreprocessProfile> = {
     contentKind: 'image',
     capabilities: [
       'resolve_input',
-      'compute_fingerprint',
       'generate_label',
       'persist_source',
       'build_patch',
@@ -121,12 +115,7 @@ export const profiles: Record<CanvasNodeType, NodePreprocessProfile> = {
   video: {
     nodeType: 'video',
     contentKind: 'video',
-    capabilities: [
-      'resolve_input',
-      'compute_fingerprint',
-      'persist_source',
-      'build_patch',
-    ],
+    capabilities: ['resolve_input', 'persist_source', 'build_patch'],
     watchFields: ['src'],
   },
   audio: {
@@ -136,12 +125,7 @@ export const profiles: Record<CanvasNodeType, NodePreprocessProfile> = {
   },
   frame: {
     nodeType: 'frame',
-    capabilities: [
-      'resolve_input',
-      'compute_fingerprint',
-      'generate_label',
-      'build_patch',
-    ],
+    capabilities: ['resolve_input', 'generate_label', 'build_patch'],
     watchFields: ['childLabels', 'labelSource'],
     capabilityTriggers: {
       generate_label: ['childLabels'],
@@ -154,12 +138,7 @@ export const profiles: Record<CanvasNodeType, NodePreprocessProfile> = {
   },
   question: {
     nodeType: 'question',
-    capabilities: [
-      'resolve_input',
-      'compute_fingerprint',
-      'generate_label',
-      'build_patch',
-    ],
+    capabilities: ['resolve_input', 'generate_label', 'build_patch'],
     watchFields: ['content'],
     capabilityTriggers: {
       generate_label: ['content'],

@@ -157,6 +157,6 @@ describe('buildPlan — overrides & unchanged', () => {
     );
     expect(plan).not.toContain('generate_label');
     expect(plan).toContain('resolve_input');
-    expect(plan).toContain('compute_fingerprint');
+    expect(plan).toContain('build_patch');
   });
 });

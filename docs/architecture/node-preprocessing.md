@@ -20,14 +20,14 @@ A node is processed by asking "which capabilities are dirty for this change", no
 
 Every node passes the same stages; the dispatcher skips those whose capabilities aren't in the node's profile. **All LLM / paid-provider work lives only in Enrich.**
 
-| Stage           | Purpose                                                                                             | LLM?    | Persist?           |
-| --------------- | --------------------------------------------------------------------------------------------------- | ------- | ------------------ |
-| 1 Input Resolve | normalise raw node data into canonical input (resolve URL, artifact path, child labels)             | no      | no                 |
-| 2 Extract       | parse / fetch content — text / pdf (`pdf2md`) / web (Tavily) / office / youtube loaders             | no      | no                 |
-| 3 Normalize     | content hash, title, metadata merge (web/pdf cache short-circuit on unchanged `src`)                | no      | no                 |
-| 4 Enrich        | `generate_label` / `generate_summary` / `generate_keywords` via `ProviderManager`                   | **yes** | no                 |
-| 5 Persist       | write/update node `.md` (canvas-local, keyed by `nodeId`), hash-dedup, placeholder for empty/failed | no      | yes (policy-gated) |
-| 6 Project       | assemble authoritative `patch` + diagnostics for the client                                         | no      | no                 |
+| Stage           | Purpose                                                                                                         | LLM?    | Persist?           |
+| --------------- | --------------------------------------------------------------------------------------------------------------- | ------- | ------------------ |
+| 1 Input Resolve | normalise raw node data into canonical input (resolve URL, artifact path, child labels)                         | no      | no                 |
+| 2 Extract       | parse / fetch content — text / pdf (`pdf2md`) / web (Tavily) / office / youtube loaders                         | no      | no                 |
+| 3 Normalize     | canonical content, title, metadata merge (web/pdf cache short-circuit on unchanged `src`)                       | no      | no                 |
+| 4 Enrich        | `generate_label` / `generate_summary` / `generate_keywords` via `ProviderManager`                               | **yes** | no                 |
+| 5 Persist       | write/update node `.md` (canvas-local, keyed by `nodeId`), content-equality dedup, placeholder for empty/failed | no      | yes (policy-gated) |
+| 6 Project       | assemble authoritative `patch` + diagnostics for the client                                                     | no      | no                 |
 
 Web / pdf skip Stages 2–5 when `src` is unchanged and content is cached on disk ([cache-check.ts](../../apps/server/src/modules/preprocessing/stages/cache-check.ts)); `force=true` overrides. `allowLLM=false` / interactive mode → Enrich skipped, result still valid.
 
