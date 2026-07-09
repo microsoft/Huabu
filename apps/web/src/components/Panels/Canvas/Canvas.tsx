@@ -964,7 +964,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         minZoom={MIN_ZOOM}
         maxZoom={MAX_ZOOM}
         onlyRenderVisibleElements
-        // Figma-style: selecting a node MUST NOT alter its z-order. The
+        // Design-tool style: selecting a node MUST NOT alter its z-order. The
         // selection indicator (drawn by `<SelectionOutlines />` below)
         // lives on a separate overlay layer that is always on top, so we
         // do not need xyflow's `+1000` internal-z bump to make the ring

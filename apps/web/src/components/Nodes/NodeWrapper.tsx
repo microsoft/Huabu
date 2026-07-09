@@ -570,7 +570,7 @@ export const NodeWrapper = memo(
             !accentTokens && !fillColor && 'bg-transparent',
             // Selection outline is rendered as a screen-space HUD overlay
             // by `<SelectionOutlines />` (Canvas-level), not as a ring on
-            // the node DOM. Mirroring Figma: clicking a node MUST NOT
+            // the node DOM. Mirroring common design tools: clicking a node MUST NOT
             // change its z-order, so the selection indicator lives on a
             // layer that is always on top regardless of node stacking.
             // Hover ring (only for non-sketch) stays here because it

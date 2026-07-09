@@ -14,7 +14,7 @@
  *
  * Note: Sediment also runs `elevateNodesOnSelect={false}` and does not
  * bump edge `zIndex` on selection, so a selected edge stays on its natural
- * layer (Figma-style). The selection highlight is delivered purely by
+ * layer (design-tool style). The selection highlight is delivered purely by
  * stroke/marker styling.
  */
 

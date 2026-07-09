@@ -19,7 +19,7 @@ Last updated: 2026-07-02
 
 ## 0. End state & the two-wave strategy
 
-The target is a **hybrid**, matching the Figma / tldraw / Linear consensus —
+The target is a **hybrid**, matching the industry consensus —
 **no single CRDT for everything**, because structure and content have
 different conflict semantics:
 
@@ -370,7 +370,7 @@ evolution target.**
 
 ### C7 — AI-change undo/reversibility model (industry-aligned, but split by origin)
 
-Adopt the tldraw/Figma/Cursor consensus, but classify by **who initiated the
+Adopt the industry consensus, but classify by **who initiated the
 change AND how its delta reaches the frontend** — there are THREE categories,
 not two. ACP is user-initiated and interactive (it has a chat card), so it
 belongs with the built-in agent in the "local interactive" bucket — NOT the

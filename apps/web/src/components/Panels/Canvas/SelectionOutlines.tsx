@@ -16,7 +16,7 @@ import type { CanvasNode } from '@/components/Nodes/types';
  * Per-node selection outlines, rendered above all canvas content.
  *
  * Sediment runs `<ReactFlow elevateNodesOnSelect={false}>` so a node's
- * z-order does not change when it is selected (Figma-style: selection is
+ * z-order does not change when it is selected (design-tool style: selection is
  * a HUD layer, not a re-stacking gesture). To keep the selection still
  * legible when the selected node sits behind another, this component
  * draws each selected node's outline as a screen-space overlay portalled
@@ -30,7 +30,7 @@ import type { CanvasNode } from '@/components/Nodes/types';
  *    `rounded-lg` corners at any view scale.
  *  - `pointer-events: none` — purely cosmetic; pointer hit-testing still
  *    targets the underlying node DOM (so a covered selected node remains
- *    un-clickable through the covering node, matching Figma).
+ *    un-clickable through the covering node, matching common design tools).
  *
  * Multi-select bounding-box + corner handles continue to come from
  * `MultiSelectResizer`; this component draws the individual node
