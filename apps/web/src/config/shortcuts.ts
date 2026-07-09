@@ -1,3 +1,4 @@
+import { isElectron } from '@/hooks/useElectron';
 import { isMac } from '@/utils/platform';
 
 import type { ParseKeys, TFunction } from 'i18next';
@@ -49,6 +50,7 @@ export type ShortcutDef = {
 };
 
 const SECTION = {
+  general: 'shortcuts.sections.general',
   editing: 'shortcuts.sections.editing',
   layout: 'shortcuts.sections.layout',
   toolbar: 'shortcuts.sections.toolbar',
@@ -272,6 +274,45 @@ export const SHORTCUTS: ShortcutDef[] = [
 ];
 
 /**
+ * App-level shortcuts (New Canvas, Settings) — same `ShortcutDef` shape as
+ * {@link SHORTCUTS}, kept in a separate array because they live app-wide
+ * rather than inside the canvas. The help modal lists them only where they
+ * actually work (Electron; see {@link getKeyboardShortcutSections}), and
+ * the `AppMenu` dropdown reads their `keys` by id for its hints.
+ *
+ * The `?` help shortcut is intentionally NOT here — it already lives in
+ * {@link SHORTCUTS} as `help.show`, so both the dropdown hint and the help
+ * modal source it from that single entry.
+ */
+export const APP_SHORTCUTS: ShortcutDef[] = [
+  {
+    id: 'app.newCanvas',
+    keys: 'Ctrl/Cmd+N',
+    descriptionKey: 'shortcuts.items.newCanvas',
+    section: SECTION.general,
+  },
+  {
+    id: 'app.openSettings',
+    keys: 'Ctrl/Cmd+,',
+    descriptionKey: 'shortcuts.items.openSettings',
+    section: SECTION.general,
+  },
+];
+
+const SHORTCUTS_BY_ID = new Map(
+  [...SHORTCUTS, ...APP_SHORTCUTS].map((s) => [s.id, s] as const),
+);
+
+/**
+ * Look up a shortcut's display `keys` template by id across both catalogs.
+ * Used by the `AppMenu` dropdown so its hints come from the same
+ * definitions the help modal renders. Format with `formatShortcut`.
+ */
+export function getShortcutKeys(id: string): string | undefined {
+  return SHORTCUTS_BY_ID.get(id)?.keys;
+}
+
+/**
  * Group the catalog into the section shape the help modal consumes,
  * resolving i18n keys with the caller's `t`. Sections keep their
  * first-encounter order from {@link SHORTCUTS}; items keep array order.
@@ -280,7 +321,12 @@ export function getKeyboardShortcutSections(t: TFunction): ShortcutSection[] {
   const order: I18nKey[] = [];
   const bySection = new Map<I18nKey, ShortcutItem[]>();
 
-  for (const def of SHORTCUTS) {
+  // App-level shortcuts lead the list, but only where they actually work
+  // (Electron). In a plain browser Cmd/Ctrl+N is reserved by the OS for a
+  // new window, so listing it would mislead.
+  const defs = isElectron() ? [...APP_SHORTCUTS, ...SHORTCUTS] : SHORTCUTS;
+
+  for (const def of defs) {
     let items = bySection.get(def.section);
     if (!items) {
       items = [];

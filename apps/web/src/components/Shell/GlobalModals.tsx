@@ -1,8 +1,8 @@
-import { useGlobalShortcutsHotkey } from '../hooks/shortcuts';
-import { useSettingsUiStore } from '../store/settingsUiStore';
-import { useShortcutsUiStore } from '../store/shortcutsUiStore';
-import { KeyboardShortcutsModal } from './Panels/Header/KeyboardShortcutsModal';
-import { SettingsModal } from './Settings/SettingsModal';
+import { useAppShortcuts, useShortcutsHelpHotkey } from '../../hooks/shortcuts';
+import { useSettingsUiStore } from '../../store/settingsUiStore';
+import { useShortcutsUiStore } from '../../store/shortcutsUiStore';
+import { KeyboardShortcutsModal } from '../Panels/Header/KeyboardShortcutsModal';
+import { SettingsModal } from '../Settings/SettingsModal';
 
 /**
  * Mounts the app-wide singleton modals (Settings + Keyboard Shortcuts)
@@ -21,7 +21,8 @@ export function GlobalModals() {
   const shortcutsOpen = useShortcutsUiStore((s) => s.isOpen);
   const closeShortcuts = useShortcutsUiStore((s) => s.close);
 
-  useGlobalShortcutsHotkey();
+  useShortcutsHelpHotkey();
+  useAppShortcuts();
 
   return (
     <>

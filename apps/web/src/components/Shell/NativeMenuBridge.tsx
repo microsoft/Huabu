@@ -2,12 +2,12 @@ import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 
-import { APP_NAME } from '../config/app';
-import { useCanvasActions } from '../hooks/useCanvasActions';
-import { getElectronBridge } from '../hooks/useElectron';
-import { useSettingsUiStore } from '../store/settingsUiStore';
-import { useShortcutsUiStore } from '../store/shortcutsUiStore';
-import { useWorkspaceStore } from '../store/workspaceStore';
+import { APP_NAME } from '../../config/app';
+import { useCanvasActions } from '../../hooks/useCanvasActions';
+import { getElectronBridge } from '../../hooks/useElectron';
+import { useSettingsUiStore } from '../../store/settingsUiStore';
+import { useShortcutsUiStore } from '../../store/shortcutsUiStore';
+import { useWorkspaceStore } from '../../store/workspaceStore';
 
 /**
  * Bridges the native macOS menu bar to the in-app action handlers.

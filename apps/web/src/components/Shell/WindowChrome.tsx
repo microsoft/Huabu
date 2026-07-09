@@ -5,16 +5,16 @@ import { Link, useLocation } from 'react-router-dom';
 
 import { SettingsPopover } from '@/components/Settings/SettingsPopover';
 
-import { APP_NAME } from '../../../config/app';
-import { getElectronBridge } from '../../../hooks/useElectron';
-import useCanvasStore from '../../../store/canvasStore';
+import { APP_NAME } from '../../config/app';
+import { getElectronBridge } from '../../hooks/useElectron';
+import useCanvasStore from '../../store/canvasStore';
 import {
   useWorkspaceLabel,
   useWorkspaceStore,
-} from '../../../store/workspaceStore';
-import { Button } from '../../Common/Button';
-import { Tooltip } from '../../Common/Tooltip';
-import { AppMenu } from '../Header/AppMenu';
+} from '../../store/workspaceStore';
+import { Button } from '../Common/Button';
+import { Tooltip } from '../Common/Tooltip';
+import { AppMenu } from '../Panels/Header/AppMenu';
 
 /**
  * Width (in px) reserved on the right edge of the title bar for the

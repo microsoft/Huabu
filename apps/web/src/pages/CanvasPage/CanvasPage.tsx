@@ -11,11 +11,9 @@ import { CanvasLayerPanel } from '../../components/Panels/CanvasLayerPanel';
 import { ChatPanel } from '../../components/Panels/ChatPanel';
 import { CanvasHeader } from '../../components/Panels/Header/CanvasHeader.tsx';
 import { useGlobalSearchHotkey } from '../../hooks/useGlobalSearchHotkey';
-import useStore, {
-  dismissVersionConflictToast,
-} from '../../store/canvasStore.ts';
-import { useCanvasSyncStore } from '../../store/canvasSyncStore.ts';
-import { useShortcutsUiStore } from '../../store/shortcutsUiStore.ts';
+import useStore, { dismissVersionConflictToast } from '../../store/canvasStore';
+import { useCanvasSyncStore } from '../../store/canvasSyncStore';
+import { useShortcutsUiStore } from '../../store/shortcutsUiStore';
 
 /**
  * Page component for a single canvas.

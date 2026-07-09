@@ -18,7 +18,7 @@ import { useShortcutsUiStore } from '../../store/shortcutsUiStore';
  * inside an input / textarea / contentEditable target so typing a
  * literal question mark doesn't pop the modal.
  */
-export function useGlobalShortcutsHotkey(): void {
+export function useShortcutsHelpHotkey(): void {
   const toggle = useShortcutsUiStore((s) => s.toggle);
 
   useEffect(() => {

@@ -11,9 +11,9 @@ import {
 
 import { Loading } from './components/Common/Loading';
 import { ToastContainer } from './components/Common/Toast';
-import { GlobalModals } from './components/GlobalModals';
-import { NativeMenuBridge } from './components/NativeMenuBridge';
-import { WindowChrome } from './components/Panels/WindowChrome';
+import { GlobalModals } from './components/Shell/GlobalModals';
+import { NativeMenuBridge } from './components/Shell/NativeMenuBridge';
+import { WindowChrome } from './components/Shell/WindowChrome';
 import DocsPage from './docs/DocsPage';
 import { useDisableBrowserZoom } from './hooks/useDisableBrowserZoom';
 import { useInputModeListener } from './hooks/useInputMode';

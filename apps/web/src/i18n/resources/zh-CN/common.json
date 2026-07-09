@@ -692,6 +692,7 @@
     "closeTitle": "关闭（Esc）",
     "closeAria": "关闭键盘快捷键",
     "sections": {
+      "general": "通用",
       "editing": "编辑",
       "layout": "布局",
       "toolbar": "工具栏",
@@ -702,6 +703,8 @@
       "help": "帮助"
     },
     "items": {
+      "newCanvas": "新建画布",
+      "openSettings": "打开设置",
       "undo": "撤销",
       "redo": "重做",
       "copySelectedNodes": "复制选中的节点",

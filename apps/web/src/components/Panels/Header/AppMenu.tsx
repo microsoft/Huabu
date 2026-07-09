@@ -2,10 +2,13 @@ import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 
+import { getShortcutKeys } from '../../../config/shortcuts';
 import { useCanvasActions } from '../../../hooks/useCanvasActions';
+import { isElectron } from '../../../hooks/useElectron';
 import { useSettingsUiStore } from '../../../store/settingsUiStore';
 import { useShortcutsUiStore } from '../../../store/shortcutsUiStore';
 import { useWorkspaceStore } from '../../../store/workspaceStore';
+import { formatShortcut } from '../../../utils/platform';
 import { DropdownMenu, DropdownMenuItem } from '../../Common/DropdownMenu';
 
 interface AppMenuProps {
@@ -52,6 +55,24 @@ export const AppMenu: React.FC<AppMenuProps> = ({
     fn();
   };
 
+  // New Canvas / Settings only fire via a global hotkey inside Electron
+  // (macOS routes them through the native menu; browsers reserve Cmd+N).
+  // Show those hints only where they actually work; the `?` help hotkey
+  // is global on every platform, so it always shows.
+  const appHintsVisible = isElectron();
+  const newCanvasKeys = getShortcutKeys('app.newCanvas');
+  const settingsKeys = getShortcutKeys('app.openSettings');
+  const shortcutsKeys = getShortcutKeys('help.show');
+  const newCanvasHint =
+    appHintsVisible && newCanvasKeys
+      ? formatShortcut(newCanvasKeys)
+      : undefined;
+  const settingsHint =
+    appHintsVisible && settingsKeys ? formatShortcut(settingsKeys) : undefined;
+  const shortcutsHint = shortcutsKeys
+    ? formatShortcut(shortcutsKeys)
+    : undefined;
+
   return (
     <>
       {/* Hidden file input for import — clicked via the hook's
@@ -81,7 +102,10 @@ export const AppMenu: React.FC<AppMenuProps> = ({
           </button>
         }
       >
-        <DropdownMenuItem onClick={runAndClose(() => void create())}>
+        <DropdownMenuItem
+          shortcut={newCanvasHint}
+          onClick={runAndClose(() => void create())}
+        >
           {t('actions.newCanvas')}
         </DropdownMenuItem>
         <DropdownMenuItem onClick={runAndClose(openImportDialog)}>
@@ -98,7 +122,10 @@ export const AppMenu: React.FC<AppMenuProps> = ({
         )}
 
         <div className="border-edge-default my-1 border-t" />
-        <DropdownMenuItem onClick={runAndClose(openSettings)}>
+        <DropdownMenuItem
+          shortcut={settingsHint}
+          onClick={runAndClose(openSettings)}
+        >
           {t('settings.title')}
         </DropdownMenuItem>
         <DropdownMenuItem
@@ -108,7 +135,10 @@ export const AppMenu: React.FC<AppMenuProps> = ({
         >
           {t('navigation.userHandbook')}
         </DropdownMenuItem>
-        <DropdownMenuItem shortcut="?" onClick={runAndClose(openShortcuts)}>
+        <DropdownMenuItem
+          shortcut={shortcutsHint}
+          onClick={runAndClose(openShortcuts)}
+        >
           {t('shortcuts.title')}
         </DropdownMenuItem>
       </DropdownMenu>

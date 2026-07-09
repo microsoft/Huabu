@@ -692,6 +692,7 @@
     "closeTitle": "Close (Esc)",
     "closeAria": "Close keyboard shortcuts",
     "sections": {
+      "general": "General",
       "editing": "Editing",
       "layout": "Layout",
       "toolbar": "Toolbar",
@@ -702,6 +703,8 @@
       "help": "Help"
     },
     "items": {
+      "newCanvas": "New canvas",
+      "openSettings": "Open settings",
       "undo": "Undo",
       "redo": "Redo",
       "copySelectedNodes": "Copy selected nodes",
