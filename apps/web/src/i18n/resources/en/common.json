@@ -32,6 +32,9 @@
     "title": "Settings",
     "open": "Open settings",
     "appVersion": "App version",
+    "models": "Models",
+    "sectionRegular": "General",
+    "about": "About",
     "general": "General",
     "language": "Language",
     "languageDescription": "Choose the display language for the interface.",
@@ -210,6 +213,12 @@
     "titleAria": "Canvas title",
     "menuAria": "Canvas menu",
     "exportCanvas": "Export Canvas"
+  },
+  "canvasPage": {
+    "loading": "Loading canvas…",
+    "notFoundTitle": "Canvas not found",
+    "notFoundDescription": "This canvas doesn't exist or may have been deleted.",
+    "backToList": "Back to canvas list"
   },
   "node": {
     "untitled": "Untitled",

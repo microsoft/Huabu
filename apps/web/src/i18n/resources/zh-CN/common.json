@@ -32,6 +32,9 @@
     "title": "设置",
     "open": "打开设置",
     "appVersion": "应用版本",
+    "models": "模型",
+    "sectionRegular": "常规",
+    "about": "关于",
     "general": "通用",
     "language": "语言",
     "languageDescription": "选择界面的显示语言。",
@@ -210,6 +213,12 @@
     "titleAria": "画布标题",
     "menuAria": "画布菜单",
     "exportCanvas": "导出画布"
+  },
+  "canvasPage": {
+    "loading": "正在加载画布…",
+    "notFoundTitle": "未找到画布",
+    "notFoundDescription": "该画布不存在，或已被删除。",
+    "backToList": "返回画布列表"
   },
   "node": {
     "untitled": "未命名",
