@@ -1,11 +1,3 @@
-import {
-  BookOpen,
-  FolderOpen,
-  Keyboard,
-  Plus,
-  Settings,
-  Upload,
-} from 'lucide-react';
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -89,51 +81,34 @@ export const AppMenu: React.FC<AppMenuProps> = ({
           </button>
         }
       >
-        <DropdownMenuItem
-          icon={<Plus size={14} />}
-          onClick={runAndClose(() => void create())}
-        >
+        <DropdownMenuItem onClick={runAndClose(() => void create())}>
           {t('actions.newCanvas')}
         </DropdownMenuItem>
-        <DropdownMenuItem
-          icon={<Upload size={14} />}
-          onClick={runAndClose(openImportDialog)}
-        >
-          {t('actions.import')}
+        <DropdownMenuItem onClick={runAndClose(openImportDialog)}>
+          {t('actions.importCanvas')}
         </DropdownMenuItem>
 
         {canChangeWorkspace && (
           <>
             <div className="border-edge-default my-1 border-t" />
-            <DropdownMenuItem
-              icon={<FolderOpen size={14} />}
-              onClick={runAndClose(() => navigate('/setup'))}
-            >
+            <DropdownMenuItem onClick={runAndClose(() => navigate('/setup'))}>
               {t('navigation.switchWorkspace')}
             </DropdownMenuItem>
           </>
         )}
 
         <div className="border-edge-default my-1 border-t" />
-        <DropdownMenuItem
-          icon={<Settings size={14} />}
-          onClick={runAndClose(openSettings)}
-        >
+        <DropdownMenuItem onClick={runAndClose(openSettings)}>
           {t('settings.title')}
         </DropdownMenuItem>
         <DropdownMenuItem
-          icon={<BookOpen size={14} />}
           onClick={runAndClose(() =>
             window.open('/docs', '_blank', 'noopener'),
           )}
         >
           {t('navigation.userHandbook')}
         </DropdownMenuItem>
-        <DropdownMenuItem
-          icon={<Keyboard size={14} />}
-          shortcut="?"
-          onClick={runAndClose(openShortcuts)}
-        >
+        <DropdownMenuItem shortcut="?" onClick={runAndClose(openShortcuts)}>
           {t('shortcuts.title')}
         </DropdownMenuItem>
       </DropdownMenu>

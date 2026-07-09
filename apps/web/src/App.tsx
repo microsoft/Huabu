@@ -12,6 +12,7 @@ import {
 import { Loading } from './components/Common/Loading';
 import { ToastContainer } from './components/Common/Toast';
 import { GlobalModals } from './components/GlobalModals';
+import { NativeMenuBridge } from './components/NativeMenuBridge';
 import { WindowChrome } from './components/Panels/WindowChrome';
 import DocsPage from './docs/DocsPage';
 import { useDisableBrowserZoom } from './hooks/useDisableBrowserZoom';
@@ -123,6 +124,9 @@ function RootLayout() {
   return (
     <div className="flex h-screen flex-col">
       <WindowChrome />
+      {/* Bridges the native macOS menu bar to the in-app action
+          handlers. Renders nothing off macOS. */}
+      <NativeMenuBridge />
       <div className="relative min-h-0 flex-1">
         <Outlet />
       </div>

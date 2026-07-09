@@ -178,7 +178,14 @@ export function WindowChrome() {
           // already home), so the left slot hosts the app menu instead.
           // Inside a canvas the House button below keeps its back-to-list
           // navigation and the app menu lives in the canvas header.
-          <AppMenu compact />
+          //
+          // macOS is the exception: its workspace-level actions live in
+          // the native menu bar (see `NativeMenuBridge`), so we leave the
+          // left slot empty here rather than crowd a logo dropdown next
+          // to the traffic-lights.
+          isMac ? null : (
+            <AppMenu compact />
+          )
         ) : (
           <Tooltip content={t('navigation.home')} placement="bottom">
             <Link

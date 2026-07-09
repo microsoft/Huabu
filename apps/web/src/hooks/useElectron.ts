@@ -32,6 +32,71 @@ interface ElectronWindowApi {
 }
 
 /**
+ * Labels forwarded to the native macOS menu bar. Covers both custom
+ * items and standard `role` items — Electron's built-in role labels are
+ * English-only and do not track a language switch, so we push explicit
+ * localized labels for all of them to keep the menu in the in-app
+ * language.
+ */
+interface ElectronMenuLabels {
+  file: string;
+  edit: string;
+  view: string;
+  window: string;
+  help: string;
+  about: string;
+  services: string;
+  hide: string;
+  hideOthers: string;
+  unhide: string;
+  quit: string;
+  undo: string;
+  redo: string;
+  cut: string;
+  copy: string;
+  paste: string;
+  pasteAndMatchStyle: string;
+  selectAll: string;
+  minimize: string;
+  zoom: string;
+  front: string;
+  close: string;
+  toggleFullScreen: string;
+  newCanvas: string;
+  import: string;
+  switchWorkspace: string;
+  settings: string;
+  userHandbook: string;
+  keyboardShortcuts: string;
+}
+
+/**
+ * Native macOS menu bar bridge. On macOS the workspace-level actions
+ * live in the OS menu bar (platform convention) rather than the in-app
+ * `AppMenu` dropdown; both surfaces reuse the same renderer handlers.
+ * On Windows / Linux these calls are harmless no-ops — there is no
+ * native menu bar and the title-bar dropdown stays the entry point.
+ */
+interface ElectronMenuApi {
+  /**
+   * Push localized labels + capability flags to the main process so it
+   * can (re)build the menu bar. Call on mount and whenever the language
+   * or `canChangeWorkspace` capability changes.
+   */
+  configure: (config: {
+    labels: ElectronMenuLabels;
+    canChangeWorkspace: boolean;
+  }) => void;
+  /**
+   * Subscribe to native menu-item activations; returns an unsubscribe
+   * function. Command ids: 'new-canvas' | 'import-canvas' |
+   * 'switch-workspace' | 'open-settings' | 'open-handbook' |
+   * 'open-shortcuts'.
+   */
+  onCommand: (cb: (command: string) => void) => () => void;
+}
+
+/**
  * Native OS dialogs forwarded from the Electron main process.
  *
  * `pickFolder` swaps the server's legacy PowerShell folder picker for
@@ -76,6 +141,7 @@ interface ElectronBridge {
   workspace?: ElectronWorkspaceApi;
   window?: ElectronWindowApi;
   dialog?: ElectronDialogApi;
+  menu?: ElectronMenuApi;
 }
 
 declare global {

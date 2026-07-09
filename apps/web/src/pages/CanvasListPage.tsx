@@ -278,7 +278,7 @@ export default function CanvasListPage() {
                 ) : (
                   <Upload />
                 )}
-                {t('actions.import')}
+                {t('actions.importCanvas')}
               </Button>
               <Button
                 variant="solid"
