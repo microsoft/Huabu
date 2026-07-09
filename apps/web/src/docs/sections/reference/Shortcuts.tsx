@@ -1,6 +1,7 @@
-import { Fragment } from 'react';
+import { Fragment, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 
-import { keyboardShortcutSections } from '../../../config/shortcuts';
+import { getKeyboardShortcutSections } from '../../../config/shortcuts';
 import {
   Callout,
   H2,
@@ -16,14 +17,6 @@ const PASTE_SECTION = {
   id: 'paste-behaviour',
   label: 'Paste behaviour',
 } as const;
-
-const toc: TocEntry[] = [
-  ...keyboardShortcutSections.map((section) => ({
-    id: slugify(section.title),
-    label: section.title,
-  })),
-  { id: PASTE_SECTION.id, label: PASTE_SECTION.label },
-];
 
 /**
  * Maps shortcut-template tokens that would otherwise collide with the `+`
@@ -93,6 +86,22 @@ function ShortcutKbd({ template }: { template: string }) {
 }
 
 export default function Shortcuts() {
+  const { t } = useTranslation();
+  const keyboardShortcutSections = useMemo(
+    () => getKeyboardShortcutSections(t),
+    [t],
+  );
+  const toc = useMemo<TocEntry[]>(
+    () => [
+      ...keyboardShortcutSections.map((section) => ({
+        id: slugify(section.title),
+        label: section.title,
+      })),
+      { id: PASTE_SECTION.id, label: PASTE_SECTION.label },
+    ],
+    [keyboardShortcutSections],
+  );
+
   return (
     <PageLayout
       title="Keyboard Shortcuts"

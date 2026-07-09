@@ -1,5 +1,6 @@
 import { HelpCircle } from 'lucide-react';
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 
 import { CanvasMenu } from './CanvasMenu.tsx';
@@ -18,6 +19,7 @@ interface HeaderProps {
  * collapsed / floating logic.
  */
 export const Header: React.FC<HeaderProps> = ({ children, onOpenHelp }) => {
+  const { t } = useTranslation();
   // In Electron the custom title bar (`WindowChrome`) already provides a
   // Home button and the global settings popover, so we hide the duplicates
   // here to keep the inner header focused on the canvas menu.
@@ -26,8 +28,8 @@ export const Header: React.FC<HeaderProps> = ({ children, onOpenHelp }) => {
   return (
     <header className="border-edge-default bg-surface flex h-12 items-center gap-3 border-b px-3">
       {!isElectronApp && (
-        <Link to="/" aria-label="Back to home">
-          <img src="/favicon.svg" alt="Logo" className="h-6 w-6" />
+        <Link to="/" aria-label={t('navigation.backHome')}>
+          <img src="/favicon.svg" alt={t('app.logoAlt')} className="h-6 w-6" />
         </Link>
       )}
 
@@ -40,9 +42,9 @@ export const Header: React.FC<HeaderProps> = ({ children, onOpenHelp }) => {
           variant="outline"
           shape="pill"
           iconOnly
-          title="Keyboard Shortcuts (?)"
+          title={`${t('shortcuts.title')} (?)`}
           onClick={onOpenHelp}
-          aria-label="Keyboard shortcuts"
+          aria-label={t('shortcuts.title')}
         >
           <HelpCircle />
         </Button>

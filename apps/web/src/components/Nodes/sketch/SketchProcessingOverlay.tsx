@@ -15,6 +15,7 @@
 import { ViewportPortal } from '@xyflow/react';
 import { Blend, Check, Undo2 } from 'lucide-react';
 import { memo, useCallback, useMemo, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { applyDeltas } from '@sediment/shared/canvas-engine';
 
@@ -112,6 +113,7 @@ SketchProcessingOverlay.displayName = 'SketchProcessingOverlay';
 
 const ClusterOverlay = memo(
   ({ cluster }: { cluster: SketchProcessingCluster }) => {
+    const { t } = useTranslation();
     // Subscribe to the canvas nodes so the bbox follows live edits and
     // disappears when the strokes are deleted.
     const nodes = useCanvasStore((s) => s.nodes);
@@ -199,7 +201,7 @@ const ClusterOverlay = memo(
           status={cluster.status}
           offset={{ top: -22, left: -2 }}
           onClick={handleOpenInspector}
-          title="Open recognition details in chat panel"
+          title={t('node.openRecognitionDetails')}
           trailing={
             showActions && (
               <div className="pointer-events-auto flex items-center gap-0.5 rounded-md p-0.5">
@@ -207,7 +209,7 @@ const ClusterOverlay = memo(
                   variant="ghost"
                   iconOnly
                   size="sm"
-                  title="Keep changes"
+                  title={t('node.keepChanges')}
                   onClick={() => acceptCluster(cluster.id)}
                 >
                   <Check />
@@ -216,7 +218,7 @@ const ClusterOverlay = memo(
                   variant="ghost"
                   iconOnly
                   size="sm"
-                  title="Revert changes"
+                  title={t('node.revertChanges')}
                   disabled={!anyRevertible}
                   onClick={() => revertCluster(cluster.id)}
                 >
@@ -226,7 +228,7 @@ const ClusterOverlay = memo(
                   variant="ghost"
                   iconOnly
                   size="sm"
-                  title="Hold to preview before"
+                  title={t('node.holdPreviewBefore')}
                   disabled={!anyRevertible}
                   onPointerDown={handlePreviewAllDown}
                   onPointerUp={handlePreviewUp}

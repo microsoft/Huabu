@@ -19,6 +19,8 @@
 
 import { useCallback, useEffect, useRef } from 'react';
 
+import { resolveArtifactUrl } from '@/api/artifact';
+
 import { attachBlockDragListeners } from './blockDrag';
 import { createMilkdown, type MilkdownInstance } from './createMilkdown';
 import { markdownEquals, normalizeMarkdown } from './markdownUtils';
@@ -27,6 +29,12 @@ import type { MilkdownBlockDragEvent } from './types';
 export interface MilkdownPreviewProps {
   markdown: string;
   className?: string;
+  /**
+   * Canvas id used to resolve artifact-key image `src`s (e.g.
+   * `art_abc.png`) into fetchable URLs for the rendered `<img>`. When
+   * omitted, image srcs render verbatim.
+   */
+  canvasId?: string;
   /**
    * Show Crepe's block drag handle and call `onBlockDragStart` when the
    * user starts dragging a block out of the editor. Default `false`.
@@ -78,6 +86,7 @@ export function MilkdownPreview(props: MilkdownPreviewProps): JSX.Element {
   const {
     markdown,
     className,
+    canvasId,
     enableBlockDrag = false,
     onBlockDragStart,
   } = props;
@@ -90,6 +99,9 @@ export function MilkdownPreview(props: MilkdownPreviewProps): JSX.Element {
   // stable while still reading fresh closures.
   const onBlockDragStartRef = useRef(onBlockDragStart);
   onBlockDragStartRef.current = onBlockDragStart;
+  /** Track latest canvasId so the mount-only editor reads a fresh value. */
+  const canvasIdRef = useRef(canvasId);
+  canvasIdRef.current = canvasId;
 
   useEffect(() => {
     let cancelled = false;
@@ -128,6 +140,10 @@ export function MilkdownPreview(props: MilkdownPreviewProps): JSX.Element {
         // `MilkdownFactoryOptions.previewMode`.
         previewMode: enableBlockDrag,
         toolbarMode: 'none',
+        resolveImageSrc: (src) => {
+          const id = canvasIdRef.current;
+          return id ? resolveArtifactUrl(src, id) : src;
+        },
       });
 
       if (cancelled) {

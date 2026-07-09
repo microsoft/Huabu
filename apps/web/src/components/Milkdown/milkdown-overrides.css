@@ -588,6 +588,34 @@
     0 2px 4px rgb(0 0 0 / 0.08);
 }
 
+/* ── Image upload placeholder ───────────────────────────────────────
+   Widget decoration shown at the insertion point while a pasted /
+   dropped image is uploading to the canvas artifact store (see the
+   image-upload plugin in `createMilkdown.ts`). Removed and replaced by
+   the real `image` node once the upload resolves. Tokens come from the
+   global design system so dark mode tracks automatically. */
+.milkdown .milkdown-image-uploading {
+  display: inline-block;
+  padding: 1px 8px;
+  border: 1px dashed var(--edge-default);
+  border-radius: 6px;
+  color: var(--fg-muted);
+  font-size: 0.85em;
+  background: var(--bg-hover);
+  user-select: none;
+  animation: milkdown-image-uploading-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes milkdown-image-uploading-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
 /* ─────────────────────────────────────────────────────────────────────────
    Code / LaTeX block container
    ─────────────────────────────────────────────────────────────────────────

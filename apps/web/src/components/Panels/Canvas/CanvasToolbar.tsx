@@ -11,6 +11,7 @@ import {
   Sprout,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import {
   uploadHtml,
@@ -44,6 +45,7 @@ interface NodeToolbarProps {
 }
 
 export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
+  const { t } = useTranslation();
   const addNodes = useCanvasStore((s) => s.addNodes);
   const pendingNodeType = useToolStore((s) => s.pendingNodeType);
   const setPendingNodeType = useToolStore((s) => s.setPendingNodeType);
@@ -79,24 +81,24 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
     () => [
       {
         value: 'select',
-        label: 'Select',
+        label: t('toolbar.tools.select'),
         icon: <MousePointer2 />,
         shortcut: 'S',
       },
       {
         value: 'pan',
-        label: 'Pan',
+        label: t('toolbar.tools.pan'),
         icon: <Hand />,
         shortcut: 'P',
       },
       {
         value: 'lasso',
-        label: 'Lasso',
+        label: t('toolbar.tools.lasso'),
         icon: <Lasso />,
         shortcut: 'L',
       },
     ],
-    [],
+    [t],
   );
 
   // Single-character keyboard shortcuts for the toolbar items, mirroring
@@ -171,14 +173,27 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
     setSketchDraft,
   ]);
 
-  const resourceOptions: {
-    value: 'upload' | 'link';
-    label: string;
-    icon: React.ReactNode;
-  }[] = [
-    { value: 'upload', label: 'Upload Files', icon: <UploadCloud /> },
-    { value: 'link', label: 'Add Links', icon: <LinkIcon /> },
-  ];
+  const resourceOptions = useMemo<
+    {
+      value: 'upload' | 'link';
+      label: string;
+      icon: React.ReactNode;
+    }[]
+  >(
+    () => [
+      {
+        value: 'upload',
+        label: t('toolbar.resources.uploadFiles'),
+        icon: <UploadCloud />,
+      },
+      {
+        value: 'link',
+        label: t('toolbar.resources.addLinks'),
+        icon: <LinkIcon />,
+      },
+    ],
+    [t],
+  );
 
   const getResourceMenuPosition = () => {
     if (!resourceMenuRef.current) return { x: 0, y: 0 };
@@ -360,12 +375,12 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             align="top-left"
             primaryTitle={
               activeTool === 'lasso'
-                ? 'Lasso (L)'
+                ? `${t('toolbar.tools.lasso')} (L)`
                 : activeTool === 'pan'
-                  ? 'Pan (P)'
-                  : 'Select (S)'
+                  ? `${t('toolbar.tools.pan')} (P)`
+                  : `${t('toolbar.tools.select')} (S)`
             }
-            menuTitle="More Tools"
+            menuTitle={t('toolbar.tools.moreTools')}
             primaryShortcutBadge={
               activeTool === 'lasso' ? 'L' : activeTool === 'pan' ? 'P' : 'S'
             }
@@ -385,7 +400,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           <Button
             variant="ghost"
             iconOnly
-            title="Frame (1)"
+            title={`${t('toolbar.nodes.frame')} (1)`}
             shortcutBadge="1"
             shortcutBadgeActive={pendingNodeType === 'frame'}
             className={clsx(
@@ -400,7 +415,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           <Button
             variant="ghost"
             iconOnly
-            title="Note (2)"
+            title={`${t('toolbar.nodes.note')} (2)`}
             shortcutBadge="2"
             shortcutBadgeActive={pendingNodeType === 'note'}
             className={clsx(
@@ -415,7 +430,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           <Button
             variant="ghost"
             iconOnly
-            title="Text (3)"
+            title={`${t('toolbar.nodes.text')} (3)`}
             shortcutBadge="3"
             shortcutBadgeActive={pendingNodeType === 'text'}
             className={clsx(
@@ -432,7 +447,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             <Button
               variant="ghost"
               iconOnly
-              title="Sketch (4)"
+              title={`${t('toolbar.nodes.sketch')} (4)`}
               shortcutBadge="4"
               shortcutBadgeActive={pendingNodeType === 'sketch'}
               className={clsx(
@@ -453,7 +468,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           <Button
             variant="ghost"
             iconOnly
-            title="Audio (5)"
+            title={`${t('toolbar.nodes.audio')} (5)`}
             shortcutBadge="5"
             shortcutBadgeActive={pendingNodeType === 'audio'}
             className={clsx(
@@ -472,7 +487,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             variant="ghost"
             size="sm"
             iconOnly
-            title="Upload or Link"
+            title={t('toolbar.resources.uploadOrLink')}
             className={clsx(resourceMenuOpen && 'bg-bg-default')}
             onClick={() => {
               if (resourceJustDismissedRef.current) return;
@@ -528,7 +543,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           <Button
             variant="ghost"
             iconOnly
-            title="Question Sticker (Q)"
+            title={`${t('toolbar.nodes.questionSticker')} (Q)`}
             shortcutBadge="Q"
             shortcutBadgeActive={pendingNodeType === 'question'}
             className={clsx(
@@ -546,7 +561,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           <Button
             variant="ghost"
             iconOnly
-            title="Intent"
+            title={t('toolbar.intent')}
             className={clsx(intentOpen && 'text-info bg-bg-default')}
             onClick={() => {
               const rect = intentButtonRef.current?.getBoundingClientRect();
@@ -569,7 +584,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
               <Button
                 variant="ghost"
                 iconOnly
-                title="Undo"
+                title={t('actions.undo')}
                 disabled={!canUndo}
                 onClick={() => undo()}
               >
@@ -578,7 +593,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
               <Button
                 variant="ghost"
                 iconOnly
-                title="Redo"
+                title={t('actions.redo')}
                 disabled={!canRedo}
                 onClick={() => redo()}
               >
@@ -592,8 +607,8 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
       {/* --- Modals --- */}
       {/* 1. File Upload Modal */}
       <Modal
-        title="Upload Local Files"
-        description="Supports Images, PDFs, Videos, Office files (Word / Excel / PowerPoint), and HTML pages. Select multiple files to upload in batch."
+        title={t('toolbar.resources.uploadTitle')}
+        description={t('toolbar.resources.uploadDescription')}
         isOpen={activeModal === 'upload'}
         onClose={() => setActiveModal(null)}
       >
@@ -605,7 +620,9 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             className="w-full flex-col border-dashed px-4 py-8"
           >
             <UploadCloud size={24} />
-            <span className="text-sm">Click to select files</span>
+            <span className="text-sm">
+              {t('toolbar.resources.selectFiles')}
+            </span>
           </Button>
 
           {/* Hidden Input for Multiple Selection */}
@@ -622,8 +639,8 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
 
       {/* 2. Link Input Modal */}
       <Modal
-        title="Add Links"
-        description="Paste URLs below (one per line)."
+        title={t('toolbar.resources.addLinks')}
+        description={t('toolbar.resources.linkDescription')}
         isOpen={activeModal === 'link'}
         onClose={() => setActiveModal(null)}
         footer={
@@ -633,10 +650,10 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
               tone="neutral"
               onClick={() => setActiveModal(null)}
             >
-              Cancel
+              {t('actions.cancel')}
             </Button>
             <Button variant="solid" tone="info" onClick={handleLinkSubmit}>
-              Confirm
+              {t('actions.confirm')}
             </Button>
           </>
         }

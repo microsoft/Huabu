@@ -30,6 +30,7 @@ import {
   useState,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/Common/Button';
 import { MilkdownEditor } from '@/components/Milkdown';
@@ -94,6 +95,7 @@ export const NotePreview = ({
   onContentChange,
   onDataChange,
 }: PreviewComponentProps) => {
+  const { t } = useTranslation();
   // `content` is the canonical Markdown string. Brand-new note records
   // may have it absent or non-string; normalise to empty.
   const markdown = typeof data.content === 'string' ? data.content : '';
@@ -545,7 +547,7 @@ export const NotePreview = ({
     provenance.blocks.length + provenance.deletedBlocks.length;
   // Compact single-line summary — collapse edited + deleted into one
   // count (e.g. "2 changes") to keep the chip narrow.
-  const summaryLabel = `${totalPending} change${totalPending === 1 ? '' : 's'}`;
+  const summaryLabel = t('node.pendingEdits', { count: totalPending });
   const showProvenanceChip =
     PROVENANCE_ENABLED &&
     !readOnly &&
@@ -568,12 +570,16 @@ export const NotePreview = ({
           ? 'text-info bg-info-bg enabled:hover:bg-info-bg-hover'
           : ''
       }
-      title={editMode === 'wysiwyg' ? 'Edit raw markdown' : 'Edit rich text'}
+      title={
+        editMode === 'wysiwyg'
+          ? t('node.editRawMarkdown')
+          : t('node.editRichText')
+      }
       tooltipPlacement="bottom"
       aria-label={
         editMode === 'wysiwyg'
-          ? 'Switch to raw markdown editor'
-          : 'Switch to rich text editor'
+          ? t('node.switchToRawMarkdown')
+          : t('node.switchToRichText')
       }
       aria-pressed={editMode === 'raw'}
       onClick={() => setEditMode((m) => (m === 'wysiwyg' ? 'raw' : 'wysiwyg'))}
@@ -602,6 +608,7 @@ export const NotePreview = ({
             <MilkdownEditor
               markdown={markdown}
               editable={!readOnly}
+              canvasId={canvasId ?? undefined}
               onChange={handleEditorChange}
               onExternalUpdate={handleExternalUpdate}
               onReady={setEditor}
@@ -627,7 +634,7 @@ export const NotePreview = ({
           <Suspense
             fallback={
               <div className="text-fg-subtle px-2 py-1 text-xs">
-                Loading source editor…
+                {t('node.loadingSourceEditor')}
               </div>
             }
           >
@@ -635,7 +642,7 @@ export const NotePreview = ({
               value={markdown}
               readOnly={readOnly}
               onChange={handleRawChange}
-              ariaLabel="Raw markdown source"
+              ariaLabel={t('node.rawMarkdownSource')}
               className="sediment-raw-markdown"
             />
           </Suspense>
@@ -645,7 +652,9 @@ export const NotePreview = ({
         <div
           className="bg-surface absolute bottom-3 left-1/2 z-20 flex w-fit -translate-x-1/2 items-center gap-1.5 rounded-md py-1 pr-1 pl-2.5 whitespace-nowrap shadow-[0_0_14px_rgba(0,0,0,0.12)]"
           role="status"
-          aria-label={`AI made ${totalPending} pending edit${totalPending === 1 ? '' : 's'} on this note`}
+          aria-label={t('node.aiPendingEditsAria', {
+            count: totalPending,
+          })}
         >
           <Sparkles className="text-ai size-3.5 shrink-0" />
           <span className="text-fg-muted text-xs">{summaryLabel}</span>
@@ -655,18 +664,18 @@ export const NotePreview = ({
             tone="neutral"
             size="sm"
             onClick={handleRejectAll}
-            title="Restore all blocks to their pre-AI baseline"
+            title={t('node.restoreAllBlocks')}
           >
-            Reject
+            {t('node.reject')}
           </Button>
           <Button
             variant="solid"
             tone="info"
             size="sm"
             onClick={handleAcceptAll}
-            title="Keep all AI changes and clear the markers"
+            title={t('node.keepAllAiChanges')}
           >
-            Accept
+            {t('node.accept')}
           </Button>
         </div>
       ) : null}

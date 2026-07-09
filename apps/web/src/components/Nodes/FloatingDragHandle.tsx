@@ -1,6 +1,7 @@
 import clsx from 'clsx';
 import { MessageSquare, Plus, Star } from 'lucide-react';
 import { useCallback, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import useCanvasStore from '@/store/canvasStore';
 import { usePreviewStore } from '@/store/previewStore';
@@ -54,6 +55,7 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
   onSendToChat,
   onSetCover,
 }) => {
+  const { t } = useTranslation();
   const hasText = text.trim().length > 0;
   const isImageReady = !!imageUrl && !capturing;
 
@@ -135,12 +137,12 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
       source: 'excerpt',
       url: imageUrl,
       content: hasText ? text : undefined,
-      label: 'PDF capture',
+      label: t('node.pdfCapture'),
       originNodeId: expandedNodeId ?? undefined,
     };
     onSendToChat(attachment);
     onDismiss();
-  }, [onSendToChat, imageUrl, hasText, text, expandedNodeId, onDismiss]);
+  }, [onSendToChat, imageUrl, hasText, text, expandedNodeId, onDismiss, t]);
 
   const handleSetCover = useCallback(() => {
     if (!onSetCover || !imageUrl) return;
@@ -168,7 +170,7 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
             variant="ghost"
             iconOnly
             className={clsx(dragBtnClass, '[&_svg]:h-auto [&_svg]:w-auto')}
-            title="Add selected text as a note"
+            title={t('node.addSelectedTextAsNote')}
             onClick={handleAddNote}
           >
             <Plus size={10} className="shrink-0" />
@@ -180,7 +182,7 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
             onDragStart={handleTextDragStart}
             onDragEnd={handleDragEnd}
             className={dragBtnClass}
-            title="Drag selected text as a note"
+            title={t('node.dragSelectedTextAsNote')}
           >
             <NODE_ICON.note size={14} className="shrink-0" />
           </DragToCanvasHandleButton>
@@ -198,7 +200,7 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
             variant="ghost"
             iconOnly
             className={clsx(dragBtnClass, '[&_svg]:h-auto [&_svg]:w-auto')}
-            title="Add captured area as an image"
+            title={t('node.addCapturedAreaAsImage')}
             onClick={handleAddImage}
           >
             <Plus size={10} className="shrink-0" />
@@ -210,7 +212,7 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
             onDragStart={handleImageDragStart}
             onDragEnd={handleDragEnd}
             className={dragBtnClass}
-            title="Drag captured area as an image"
+            title={t('node.dragCapturedAreaAsImage')}
           >
             <NODE_ICON.image size={14} className="shrink-0" />
           </DragToCanvasHandleButton>
@@ -222,7 +224,7 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
           variant="ghost"
           iconOnly
           className={clsx(dragBtnClass, '[&_svg]:h-auto [&_svg]:w-auto')}
-          title="Send captured area to chat"
+          title={t('node.sendCapturedAreaToChat')}
           onClick={handleSendToChat}
         >
           {/* Plus icon matching the GripVertical icon width in DragToCanvasHandleButton */}
@@ -237,7 +239,7 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
           variant="ghost"
           iconOnly
           className={clsx(dragBtnClass, '[&_svg]:h-auto [&_svg]:w-auto')}
-          title="Set captured area as PDF cover"
+          title={t('node.setCapturedAreaAsPdfCover')}
           onClick={handleSetCover}
         >
           <Plus size={10} className="shrink-0" />

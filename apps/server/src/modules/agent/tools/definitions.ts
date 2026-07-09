@@ -379,7 +379,9 @@ export const readParamsSchema = Type.Object({
 export const readTool: ToolDefinition = {
   name: 'read',
   label: 'Read',
-  description: `Read the contents of a **single** text file under the current canvas folder — no globs (use find to enumerate, then read each match). Returns JSON: { path, startLine, endLine, totalLines, truncated, nextOffset?, content, frontmatter? }. Output is truncated to 2000 lines or 50 KB, whichever is hit first; when truncated:true, nextOffset is the 1-indexed line number of the next unread line — pass it as the next offset to keep paging. Binary files (images, archives, .artifacts/*) are rejected with an error.
+  description: `Read the contents of a **single** file under the current canvas folder — no globs (use find to enumerate, then read each match). Text files return JSON: { path, startLine, endLine, totalLines, truncated, nextOffset?, content, frontmatter? }, truncated to 2000 lines or 50 KB, whichever is hit first; when truncated:true, nextOffset is the 1-indexed line number of the next unread line — pass it as the next offset to keep paging.
+
+Raster image artifacts (png / jpg / gif / webp, stored under \`.artifacts/\`) are returned **inline as vision content you can actually see** — so to view an inline \`![](<key>)\` image referenced in a note body, call \`read(".artifacts/<key>")\` (the file also shows up as \`.artifacts/<key>\` in find / grep / ls output). Other binary files (pdf / video / archives) are rejected with an error; use the node's \`src\` URL or the canvas UI for those.
 
 When the file begins with a YAML frontmatter block ("---" fences), the parsed frontmatter is also returned as a structured object so you don't have to parse YAML yourself.
 

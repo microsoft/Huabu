@@ -26,6 +26,7 @@ import {
   putNodeContent,
 } from '@/api/canvas';
 import { toast } from '@/components/Common/Toast';
+import { i18n } from '@/i18n';
 
 import {
   MD_BACKED_NODE_TYPES,
@@ -408,9 +409,9 @@ export function createNodeContentQueue(opts: {
           };
         }),
       });
-      const displayName = lastGood.label ?? 'previous name';
+      const displayName = lastGood.label ?? i18n.t('errors.previousName');
       if (source === 'user') {
-        toast(`Couldn't rename node — reverted to "${displayName}".`, {
+        toast(i18n.t('errors.nodeRenameReverted', { name: displayName }), {
           tone: 'danger',
         });
       }
@@ -422,10 +423,7 @@ export function createNodeContentQueue(opts: {
     // anchor to revert to): toast (user path) or log (auto path); the
     // in-store body is left alone so the user's typing isn't lost.
     if (source === 'user') {
-      toast(
-        "Couldn't save a node's changes — your latest edits may not be persisted.",
-        { tone: 'danger' },
-      );
+      toast(i18n.t('errors.nodeChangesMayNotPersist'), { tone: 'danger' });
     }
     console.error('Node content save failed:', nodeId, err);
   }

@@ -1,5 +1,6 @@
 import { PlayCircle, Fullscreen, Play } from 'lucide-react';
 import { memo } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { resolveArtifactUrl } from '@/api/artifact';
 import useCanvasStore from '@/store/canvasStore.ts';
@@ -15,12 +16,13 @@ export type VideoNodeType = Node<CanvasVideoNodeData, 'video'>;
 
 export const VideoNode = memo(
   ({ id, data, selected }: NodeProps<VideoNodeType>) => {
+    const { t } = useTranslation();
     const openExpanded = useCanvasStore((s) => s.openExpanded);
     const canvasId = useCanvasStore((s) => s.canvasId);
 
     const VideoActions = (
       <FloatingToolbar.ActionButton
-        title="Open Large View"
+        title={t('node.openLargeView')}
         onClick={(e) => {
           e.stopPropagation();
           openExpanded(id);
@@ -44,8 +46,8 @@ export const VideoNode = memo(
             {data?.artifactMissing ? (
               <MissingFileBanner
                 nodeId={id}
-                title="Video file missing"
-                description="The artifact for this node was deleted or renamed outside the app."
+                title={t('node.videoFileMissing')}
+                description={t('node.artifactMissingDescription')}
               />
             ) : data?.src ? (
               <>
@@ -67,7 +69,7 @@ export const VideoNode = memo(
             ) : (
               <div className="text-fg-subtle flex h-full w-full flex-col items-center justify-center gap-2 text-sm">
                 <PlayCircle size={24} className="opacity-20" />
-                <span>No Video Source</span>
+                <span>{t('node.noVideoSource')}</span>
               </div>
             )}
           </div>

@@ -32,6 +32,8 @@
  * `agentBinding.kind === 'external'` first.
  */
 
+import { useTranslation } from 'react-i18next';
+
 import { Tooltip } from '@/components/Common/Tooltip';
 
 import type { AcpEnsureErrorCode } from '@sediment/shared';
@@ -63,12 +65,13 @@ export const AcpConnectionBadge: FC<AcpConnectionBadgeProps> = ({
   errorMessage,
   errorCode,
 }) => {
+  const { t } = useTranslation();
   if (status === 'connecting') {
     return (
-      <Tooltip content={`Connecting…`} placement="bottom">
+      <Tooltip content={t('chat.connecting')} placement="bottom">
         <span
           className="inline-flex shrink-0 items-center gap-1 px-0.5 py-0.5"
-          aria-label={`Connecting`}
+          aria-label={t('chat.connecting')}
         >
           <span
             aria-hidden
@@ -81,10 +84,10 @@ export const AcpConnectionBadge: FC<AcpConnectionBadgeProps> = ({
 
   if (status === 'connected') {
     return (
-      <Tooltip content={`Connected`} placement="bottom">
+      <Tooltip content={t('chat.connected')} placement="bottom">
         <span
           className="inline-flex shrink-0 items-center gap-1 px-0.5 py-0.5"
-          aria-label={`Connected`}
+          aria-label={t('chat.connected')}
         >
           <span
             aria-hidden
@@ -100,7 +103,7 @@ export const AcpConnectionBadge: FC<AcpConnectionBadgeProps> = ({
   // without needing to read the raw error. The detail message is
   // appended on a second line so power users can still see the
   // underlying server text.
-  const headline = headlineForCode(errorCode, alias);
+  const headline = headlineForCode(errorCode, alias, t);
   const tooltipText =
     errorMessage && errorMessage.length > 0
       ? `${headline}\n\n${errorMessage}`
@@ -119,7 +122,7 @@ export const AcpConnectionBadge: FC<AcpConnectionBadgeProps> = ({
           aria-hidden
           className="bg-danger h-1.5 w-1.5 shrink-0 rounded-full"
         />
-        {labelForCode(errorCode)}
+        {labelForCode(errorCode, t)}
       </span>
     </Tooltip>
   );
@@ -130,20 +133,23 @@ export const AcpConnectionBadge: FC<AcpConnectionBadgeProps> = ({
  * (≤7 chars) so it doesn't blow out the toolbar; the full sentence
  * lives in the tooltip.
  */
-function labelForCode(code: AcpEnsureErrorCode | null | undefined): string {
+function labelForCode(
+  code: AcpEnsureErrorCode | null | undefined,
+  t: ReturnType<typeof useTranslation>['t'],
+): string {
   switch (code) {
     case 'worker_not_ready':
-      return 'Worker';
+      return t('chat.connectionLabel.worker');
     case 'profile_missing':
-      return 'Profile';
+      return t('chat.connectionLabel.profile');
     case 'spawn_failed':
-      return 'Spawn';
+      return t('chat.connectionLabel.spawn');
     case 'connect_timeout':
-      return 'Timeout';
+      return t('chat.connectionLabel.timeout');
     case 'bridge_not_mounted':
-      return 'Starting';
+      return t('chat.connectionLabel.starting');
     default:
-      return 'Failed';
+      return t('chat.connectionLabel.failed');
   }
 }
 
@@ -155,21 +161,22 @@ function labelForCode(code: AcpEnsureErrorCode | null | undefined): string {
 function headlineForCode(
   code: AcpEnsureErrorCode | null | undefined,
   alias: string,
+  t: ReturnType<typeof useTranslation>['t'],
 ): string {
   switch (code) {
     case 'worker_not_ready':
-      return `Agent worker is offline. Try "Restart worker" in Settings → External Agents.`;
+      return t('chat.connectionHeadline.workerNotReady');
     case 'profile_missing':
-      return `Profile for ${alias} no longer exists. Re-create it in Settings → External Agents.`;
+      return t('chat.connectionHeadline.profileMissing', { alias });
     case 'spawn_failed':
-      return `Could not start ${alias}. Check the command path and working directory in Settings.`;
+      return t('chat.connectionHeadline.spawnFailed', { alias });
     case 'connect_timeout':
-      return `${alias} started but never responded. It may need to re-authenticate (e.g. Copilot OAuth) or crashed on startup.`;
+      return t('chat.connectionHeadline.connectTimeout', { alias });
     case 'bridge_not_mounted':
-      return `Sediment is still starting up. Try again in a moment.`;
+      return t('chat.connectionHeadline.bridgeNotMounted');
     case 'internal':
-      return `An unexpected error occurred while connecting to ${alias}.`;
+      return t('chat.connectionHeadline.internal', { alias });
     default:
-      return `Could not connect to ${alias}. Check Settings → External Agents.`;
+      return t('chat.connectionHeadline.fallback', { alias });
   }
 }

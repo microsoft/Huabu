@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next';
+
 import { NodeRef } from '../Common/NodeRef';
 
 import type { ChatAttachment } from '@sediment/shared';
@@ -22,6 +24,7 @@ export const UserMessage = ({
   selectedNodeIds,
   invokedSkills,
 }: UserMessageProps) => {
+  const { t } = useTranslation();
   const hasRefs =
     (attachments && attachments.length > 0) ||
     (selectedNodeIds && selectedNodeIds.length > 0);
@@ -37,7 +40,7 @@ export const UserMessage = ({
                 <span
                   key={id}
                   className="text-ai mr-1 font-mono"
-                  title={`Invoked skill: ${id}`}
+                  title={t('messages.invokedSkill', { id })}
                 >
                   /{id}
                 </span>

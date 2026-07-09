@@ -14,6 +14,7 @@
  */
 
 import { ImagePlus, X as XIcon } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import { partIsExecuting, truncate } from './helpers';
 import { resolveArtifactUrl } from '../../../../api/artifact';
@@ -41,16 +42,18 @@ function pickDataFields(part: ImageGenerationToolPart) {
   }
   return {
     args: {} as Record<string, unknown>,
-    error:
-      typeof env.error === 'string' ? env.error : 'Image generation failed',
+    error: typeof env.error === 'string' ? env.error : undefined,
   };
 }
 
 export function ImageGenerationCard({ part }: ImageGenerationCardProps) {
+  const { t } = useTranslation();
   const canvasId = useCanvasStore((s) => s.canvasId);
-  const { args, error } = pickDataFields(part);
+  const { args, error: rawError } = pickDataFields(part);
   const executing = partIsExecuting(part);
-  const failed = part.status === 'failed' || error !== undefined;
+  const failed = part.status === 'failed' || rawError !== undefined;
+  const error =
+    rawError ?? (failed ? t('messages.imageGenerationFailed') : undefined);
 
   const prompt = typeof args.prompt === 'string' ? args.prompt : undefined;
   const size = typeof args.size === 'string' ? args.size : undefined;
@@ -70,20 +73,20 @@ export function ImageGenerationCard({ part }: ImageGenerationCardProps) {
   let title: string;
   if (executing) {
     title = promptSnippet
-      ? `Generating image: "${promptSnippet}"…`
-      : 'Generating image…';
+      ? t('messages.generatingImageWithPrompt', { prompt: promptSnippet })
+      : t('messages.generatingImage');
   } else if (failed) {
     title = promptSnippet
-      ? `Image generation failed — "${promptSnippet}"`
-      : 'Image generation failed';
+      ? t('messages.imageGenerationFailedWithPrompt', { prompt: promptSnippet })
+      : t('messages.imageGenerationFailed');
   } else if (mode === 'edit') {
     title = promptSnippet
-      ? `Edited image: "${promptSnippet}"`
-      : `Edited image from ${refs.length} reference${refs.length === 1 ? '' : 's'}`;
+      ? t('messages.editedImage', { prompt: promptSnippet })
+      : t('messages.editedImageFromRefs', { count: refs.length });
   } else {
     title = promptSnippet
-      ? `Generated image: "${promptSnippet}"`
-      : 'Generated image';
+      ? t('messages.generatedImageWithPrompt', { prompt: promptSnippet })
+      : t('messages.generatedImage');
   }
 
   // ── Icon (leading) ─────────────────────────────────────────────────
@@ -103,10 +106,12 @@ export function ImageGenerationCard({ part }: ImageGenerationCardProps) {
   const dims =
     width && height && (width > 0 || height > 0) ? `${width}×${height}` : size;
   const metaBits = [
-    mode === 'edit' ? 'edit' : 'generate',
+    mode === 'edit' ? t('messages.modeEdit') : t('messages.modeGenerate'),
     dims,
     quality,
-    refs.length > 0 ? `refs: ${refs.length}` : undefined,
+    refs.length > 0
+      ? t('messages.refsMeta', { count: refs.length })
+      : undefined,
   ].filter((s): s is string => !!s);
 
   const body = (
@@ -122,11 +127,11 @@ export function ImageGenerationCard({ part }: ImageGenerationCardProps) {
           target="_blank"
           rel="noopener noreferrer"
           className="inline-block w-fit"
-          title="Open full-size image in a new tab"
+          title={t('messages.openFullImage')}
         >
           <img
             src={previewUrl}
-            alt={prompt ?? 'Generated image'}
+            alt={prompt ?? t('messages.generatedImage')}
             className="border-edge-default max-h-64 max-w-full rounded-md border object-contain"
             loading="lazy"
           />
@@ -148,7 +153,7 @@ export function ImageGenerationCard({ part }: ImageGenerationCardProps) {
       {/* Prompt */}
       {prompt ? (
         <div className="text-fg-muted text-xs">
-          <span className="text-fg-subtle">Prompt: </span>
+          <span className="text-fg-subtle">{t('messages.prompt')} </span>
           <span className="whitespace-pre-wrap">{prompt}</span>
         </div>
       ) : null}
@@ -157,7 +162,7 @@ export function ImageGenerationCard({ part }: ImageGenerationCardProps) {
           model is re-interpreting their intent. */}
       {revisedPrompt && revisedPrompt !== prompt ? (
         <div className="text-fg-muted text-xs">
-          <span className="text-fg-subtle">Revised: </span>
+          <span className="text-fg-subtle">{t('messages.revised')} </span>
           <span className="whitespace-pre-wrap">{revisedPrompt}</span>
         </div>
       ) : null}
@@ -167,7 +172,7 @@ export function ImageGenerationCard({ part }: ImageGenerationCardProps) {
       {refs.length > 0 ? (
         <div className="flex flex-col gap-1">
           <span className="text-fg-subtle text-xs">
-            References ({refs.length})
+            {t('messages.references', { count: refs.length })}
           </span>
           <div className="flex flex-wrap gap-1.5">
             {refs.map((refSrc, i) => {
@@ -183,7 +188,7 @@ export function ImageGenerationCard({ part }: ImageGenerationCardProps) {
                 >
                   <img
                     src={url}
-                    alt={`Reference ${i + 1}`}
+                    alt={t('messages.referenceAlt', { count: i + 1 })}
                     className="size-full object-cover"
                     loading="lazy"
                   />

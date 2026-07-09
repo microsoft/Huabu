@@ -1,4 +1,5 @@
 import { Copy } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import { groupByThinkingPhase, type SegmentGroup } from './groupParts';
 import { MilkdownMessageCard } from './MilkdownMessageCard';
@@ -108,6 +109,7 @@ export const AIMessage = ({
   isStreaming,
   hideActions,
 }: AIMessageProps) => {
+  const { t } = useTranslation();
   const addNode = useCanvasStore((state) => state.addNode);
   const threadId = useChatStore((s) => s.threadId);
 
@@ -242,8 +244,8 @@ export const AIMessage = ({
               iconOnly
               size="sm"
               className="text-fg-subtle"
-              aria-label="Add as note"
-              title="Add as note"
+              aria-label={t('messages.addAsNote')}
+              title={t('messages.addAsNote')}
               onClick={() => {
                 addNode({
                   nodeType: 'note',
@@ -262,8 +264,8 @@ export const AIMessage = ({
               iconOnly
               size="sm"
               className="text-fg-subtle"
-              aria-label="Copy message"
-              title="Copy"
+              aria-label={t('messages.copyMessage')}
+              title={t('messages.copy')}
               onClick={() => copyToClipboard(plainText)}
             >
               <Copy />

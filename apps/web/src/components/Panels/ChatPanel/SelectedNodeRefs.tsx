@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { Tooltip } from '@/components/Common/Tooltip';
 import useCanvasStore from '@/store/canvasStore';
@@ -11,6 +12,7 @@ import { useChatStore } from '@/store/chatStore';
  * Hovering reveals the names of the selected nodes.
  */
 export const SourceCount = () => {
+  const { t } = useTranslation();
   const nodes = useCanvasStore((s) => s.nodes);
   // The question node whose conversation is currently open. That node is
   // the subject of this very thread, so selecting it should not add it as
@@ -36,21 +38,25 @@ export const SourceCount = () => {
           | undefined;
         return (
           <span key={n.id} className="text-xs">
-            {label || n.type || 'Untitled'}
+            {label || n.type || t('node.untitled')}
           </span>
         );
       })}
     </div>
   );
 
-  const accessibleLabel = `${count} selected ${count === 1 ? 'source' : 'sources'}: ${selectedNodes
+  const sourceNames = selectedNodes
     .map((n) => {
       const label = (n.data as Record<string, unknown> | undefined)?.label as
         | string
         | undefined;
-      return label || n.type || 'Untitled';
+      return label || n.type || t('node.untitled');
     })
-    .join(', ')}`;
+    .join(', ');
+  const accessibleLabel = t('chat.selectedSourcesLabel', {
+    count,
+    sources: sourceNames,
+  });
 
   return (
     <Tooltip content={tooltipContent}>
@@ -60,7 +66,7 @@ export const SourceCount = () => {
         className="text-fg-muted inline-flex cursor-default items-center gap-1 text-sm leading-tight focus:outline-none"
       >
         <span>{count}</span>
-        <span>{count === 1 ? 'source' : 'sources'}</span>
+        <span>{t('chat.sourceLabel', { count })}</span>
       </span>
     </Tooltip>
   );

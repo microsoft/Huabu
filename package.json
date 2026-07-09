@@ -16,6 +16,7 @@
     "build:desktop:mac": "pnpm run build:agentlet && pnpm run build:agenetes && pnpm --filter @sediment/shared build && pnpm --filter @sediment/server bundle && pnpm --filter @sediment/web build && pnpm --filter @sediment/desktop dist:mac",
     "build:desktop:win": "pnpm run build:agentlet && pnpm run build:agenetes && pnpm --filter @sediment/shared build && pnpm --filter @sediment/server bundle && pnpm --filter @sediment/web build && pnpm --filter @sediment/desktop dist:win",
     "build:desktop:linux": "pnpm run build:agentlet && pnpm run build:agenetes && pnpm --filter @sediment/shared build && pnpm --filter @sediment/server bundle && pnpm --filter @sediment/web build && pnpm --filter @sediment/desktop dist:linux",
+    "check:i18n": "node scripts/check-i18n-parity.mjs",
     "subtree:pull:agentlet": "git subtree pull --prefix=external/agentlet agentlet-upstream main --squash",
     "subtree:push:agentlet": "git subtree push --prefix=external/agentlet agentlet-upstream main",
     "lint": "eslint .",

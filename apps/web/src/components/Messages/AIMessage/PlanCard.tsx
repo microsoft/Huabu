@@ -16,6 +16,7 @@
 
 import { Check, ChevronRight, Circle, Copy } from 'lucide-react';
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { copyToClipboard } from '../../../utils/io/clipboard';
 import { Button } from '../../Common/Button';
@@ -43,6 +44,7 @@ function toMarkdownChecklist(entries: AcpPlanEntry[]): string {
 }
 
 export function PlanCard({ entries }: PlanCardProps) {
+  const { t } = useTranslation();
   const [isCollapsed, setIsCollapsed] = useState(false);
 
   if (entries.length === 0) return null;
@@ -67,7 +69,7 @@ export function PlanCard({ entries }: PlanCardProps) {
                 !isCollapsed ? 'rotate-90' : ''
               }`}
             />
-            <span className="font-medium">Plan</span>
+            <span className="font-medium">{t('messages.plan')}</span>
             <span className="text-fg-muted">
               · {completed}/{total}
             </span>
@@ -77,8 +79,8 @@ export function PlanCard({ entries }: PlanCardProps) {
             iconOnly
             size="sm"
             className="text-fg-subtle"
-            aria-label="Copy plan"
-            title="Copy plan as markdown checklist"
+            aria-label={t('messages.copyPlan')}
+            title={t('messages.copyPlanMarkdown')}
             onClick={() => copyToClipboard(toMarkdownChecklist(entries))}
           >
             <Copy />
@@ -132,7 +134,7 @@ export function PlanCard({ entries }: PlanCardProps) {
         {/* Subtle hint that the plan is mid-execution */}
         {inProgress && (
           <div className="border-edge-default/40 text-fg-subtle border-t px-3 py-1 text-[10px]">
-            In progress…
+            {t('messages.planInProgress')}
           </div>
         )}
       </div>

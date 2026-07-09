@@ -1,4 +1,5 @@
 import { BadgeInfo, RefreshCw, XCircle } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import { Button } from '../Common/Button';
 
@@ -14,7 +15,7 @@ const STATUS_CONFIG: Record<
   StatusType,
   {
     icon: typeof XCircle;
-    label: string;
+    labelKey: 'messages.generationInterrupted' | 'messages.somethingWentWrong';
     bg: string;
     iconColor: string;
     textColor: string;
@@ -23,7 +24,7 @@ const STATUS_CONFIG: Record<
 > = {
   interrupted: {
     icon: BadgeInfo,
-    label: 'Generation interrupted',
+    labelKey: 'messages.generationInterrupted',
     bg: 'bg-info-bg',
     iconColor: 'text-info-light',
     textColor: 'text-info',
@@ -31,7 +32,7 @@ const STATUS_CONFIG: Record<
   },
   error: {
     icon: XCircle,
-    label: 'Something went wrong',
+    labelKey: 'messages.somethingWentWrong',
     bg: 'bg-danger-bg',
     iconColor: 'text-danger-light',
     textColor: 'text-danger',
@@ -44,6 +45,7 @@ export const StatusMessage = ({
   detail,
   onRetry,
 }: StatusMessageProps) => {
+  const { t } = useTranslation();
   const config = STATUS_CONFIG[status];
   const Icon = config.icon;
 
@@ -54,7 +56,7 @@ export const StatusMessage = ({
       >
         <Icon size={12} className={config.iconColor} />
         <span className={`min-w-0 flex-1 break-words ${config.textColor}`}>
-          {detail || config.label}
+          {detail || t(config.labelKey)}
         </span>
         {onRetry && (
           <Button
@@ -63,7 +65,7 @@ export const StatusMessage = ({
             size="sm"
             onClick={onRetry}
             className={`${config.textColor} ${config.retryHoverBg}`}
-            title="Retry"
+            title={t('messages.retry')}
           >
             <RefreshCw />
           </Button>

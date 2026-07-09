@@ -1,5 +1,6 @@
 import { Pause, Play } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { resolveArtifactUrl, uploadAudio } from '@/api/artifact';
 import { cn } from '@/components/Common/cn';
@@ -75,6 +76,7 @@ const LIVE_BARS = Array.from({ length: BAR_COUNT }, (_, i) => i);
 
 export const AudioNode = memo(
   ({ id, data, selected }: NodeProps<AudioNodeType>) => {
+    const { t } = useTranslation();
     const canvasId = useCanvasStore((s) => s.canvasId);
     const updateNodeData = useCanvasStore((s) => s.updateNodeData);
 
@@ -112,7 +114,7 @@ export const AudioNode = memo(
 
     const startRecording = useCallback(async () => {
       if (!canvasId) {
-        setErrMsg('No canvas to save into');
+        setErrMsg(t('node.noCanvasToSave'));
         setRecState('error');
         return;
       }
@@ -151,7 +153,9 @@ export const AudioNode = memo(
             setElapsedMs(0);
           } catch (err) {
             console.error('Audio upload failed:', err);
-            setErrMsg(err instanceof Error ? err.message : 'Upload failed');
+            setErrMsg(
+              err instanceof Error ? err.message : t('node.uploadFailed'),
+            );
             setRecState('error');
           }
         };
@@ -169,13 +173,13 @@ export const AudioNode = memo(
         console.error('getUserMedia failed:', err);
         setErrMsg(
           err instanceof Error
-            ? `Mic blocked: ${err.message}`
-            : 'Microphone access denied',
+            ? t('node.micBlocked', { message: err.message })
+            : t('node.microphoneAccessDenied'),
         );
         setRecState('error');
         cleanupStream();
       }
-    }, [canvasId, cleanupStream, id, updateNodeData]);
+    }, [canvasId, cleanupStream, id, updateNodeData, t]);
 
     const stopRecording = useCallback(() => {
       const recorder = recorderRef.current;
@@ -300,14 +304,14 @@ export const AudioNode = memo(
       body = (
         <MissingFileBanner
           nodeId={id}
-          title="Audio file missing"
-          description="The artifact for this node was deleted or renamed outside the app."
+          title={t('node.audioFileMissing')}
+          description={t('node.artifactMissingDescription')}
         />
       );
     } else if (recState === 'uploading') {
       body = (
         <span className="text-fg-muted w-full text-center text-xs">
-          Saving…
+          {t('node.saving')}
         </span>
       );
     } else if (hasAudio) {
@@ -315,8 +319,8 @@ export const AudioNode = memo(
         <>
           <button
             type="button"
-            aria-label={isPlaying ? 'Pause' : 'Play'}
-            title={isPlaying ? 'Pause' : 'Play'}
+            aria-label={isPlaying ? t('node.pause') : t('node.play')}
+            title={isPlaying ? t('node.pause') : t('node.play')}
             onClick={(e) => {
               e.stopPropagation();
               togglePlay();
@@ -336,7 +340,7 @@ export const AudioNode = memo(
               seekTo(e);
             }}
             role="slider"
-            aria-label="Seek"
+            aria-label={t('node.seek')}
             aria-valuemin={0}
             aria-valuemax={durationSec || 0}
             aria-valuenow={currentSec}
@@ -373,8 +377,8 @@ export const AudioNode = memo(
         <>
           <button
             type="button"
-            aria-label="Stop recording"
-            title="Stop recording"
+            aria-label={t('node.stopRecording')}
+            title={t('node.stopRecording')}
             onClick={(e) => {
               e.stopPropagation();
               stopRecording();
@@ -405,8 +409,8 @@ export const AudioNode = memo(
         <>
           <button
             type="button"
-            aria-label="Start recording"
-            title="Start recording"
+            aria-label={t('node.startRecording')}
+            title={t('node.startRecording')}
             onClick={(e) => {
               e.stopPropagation();
               void startRecording();
@@ -416,7 +420,7 @@ export const AudioNode = memo(
             <span className="bg-danger block h-4 w-4 rounded-full" />
           </button>
           <span className="text-fg-muted flex-1 text-center text-[12px]">
-            Tap to record
+            {t('node.tapToRecord')}
           </span>
           <span className="text-fg-subtle shrink-0 text-[11px] tabular-nums">
             0:00

@@ -1,7 +1,8 @@
 import clsx from 'clsx';
 import { ChevronsDownUp, ChevronsUpDown, Search } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
-import { getFilterKeyMeta } from './layerFilterKey';
+import { getFilterKeyLabelKey, getFilterKeyMeta } from './layerFilterKey';
 import { Button } from '../../Common/Button';
 
 import type { LayerFilterKey } from './layerFilterKey';
@@ -80,12 +81,13 @@ export const LayerFilterBar = ({
   isSearchOpen,
   onToggleSearch,
 }: LayerFilterBarProps) => {
+  const { t } = useTranslation();
   const showChipRow = availableKeys.length >= 2;
   const showCollapseAll = hasAnyFrame && !isSearchActive;
   const CollapseAllIcon = hasAnyExpandedFrame ? ChevronsDownUp : ChevronsUpDown;
   const collapseAllTitle = hasAnyExpandedFrame
-    ? 'Collapse all frames'
-    : 'Expand all frames';
+    ? t('layers.collapseAllFrames')
+    : t('layers.expandAllFrames');
 
   // The search toggle is the bar's permanent anchor — once the
   // toggle moved into this row, the bar always has at least one
@@ -102,7 +104,8 @@ export const LayerFilterBar = ({
           // affordance (icon-only buttons with per-type tooltips like
           // "Filter by Image").
           availableKeys.map((key) => {
-            const { icon: Icon, label } = getFilterKeyMeta(key);
+            const { icon: Icon } = getFilterKeyMeta(key);
+            const label = t(getFilterKeyLabelKey(key));
             const isSelected = selectedKeys.has(key);
             return (
               <Button
@@ -115,8 +118,8 @@ export const LayerFilterBar = ({
                 onClick={() => onToggleKey(key)}
                 title={
                   isSelected
-                    ? `Stop filtering by ${label}`
-                    : `Filter by ${label}`
+                    ? t('layers.stopFilteringBy', { label })
+                    : t('layers.filterBy', { label })
                 }
                 className={clsx(
                   'p-1!',
@@ -151,7 +154,7 @@ export const LayerFilterBar = ({
           size="sm"
           onClick={onToggleSearch}
           title={
-            isSearchOpen ? 'Close search (Esc)' : 'Search this canvas (Cmd+F)'
+            isSearchOpen ? t('layers.closeSearch') : t('layers.searchCanvas')
           }
           className={clsx(
             'p-1!',

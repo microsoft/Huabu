@@ -6,6 +6,7 @@
 
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { SourceCard, type Source } from './SourceCard';
 import { Button } from '../../../Common/Button';
@@ -13,6 +14,7 @@ import { Button } from '../../../Common/Button';
 import type { WebSearchToolPart } from '@sediment/shared';
 
 export function WebSearchToolDisplay({ part }: { part: WebSearchToolPart }) {
+  const { t } = useTranslation();
   const [isExpanded, setIsExpanded] = useState(false);
   const toolResponse = part.data ?? null;
 
@@ -30,14 +32,14 @@ export function WebSearchToolDisplay({ part }: { part: WebSearchToolPart }) {
     return (
       <div className="flex justify-start">
         <div className="text-fg-muted border-edge-default bg-surface rounded-2xl border px-4 py-3 text-sm whitespace-pre-wrap">
-          Used 0 references
+          {t('messages.usedReferences', { count: 0 })}
         </div>
       </div>
     );
   }
 
   const count = sources.length;
-  const label = count === 1 ? 'reference' : 'references';
+  const label = t('messages.reference', { count });
 
   return (
     <div className="flex justify-start">
@@ -46,12 +48,12 @@ export function WebSearchToolDisplay({ part }: { part: WebSearchToolPart }) {
           variant="ghost"
           tone="neutral"
           aria-expanded={isExpanded}
-          aria-label={`Toggle sources (${count} ${label})`}
+          aria-label={t('messages.toggleSources', { count, label })}
           onClick={() => setIsExpanded((v) => !v)}
         >
           {isExpanded ? <ChevronDown /> : <ChevronRight />}
           <span className="mr-1 ml-2">
-            Used {count} {label}
+            {t('messages.usedReferences', { count })}
           </span>
         </Button>
 

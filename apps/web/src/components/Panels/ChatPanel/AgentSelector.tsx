@@ -18,6 +18,7 @@
 
 import { ChevronDown, MessageSquare, Route, Sprout } from 'lucide-react';
 import { useCallback, useRef, useState, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import {
   AgentMenuOptions,
@@ -59,13 +60,14 @@ interface AgentSelectorProps {
 function describeBinding(
   binding: AgentBinding,
   mode: AgentMode,
+  labels: { chat: string; agent: string },
 ): { icon: ReactNode; label: string } {
   if (binding.kind === 'external') {
     return { icon: <Route size={13} />, label: binding.alias };
   }
   return mode === 'operate'
-    ? { icon: <Sprout size={13} />, label: 'Agent' }
-    : { icon: <MessageSquare size={13} />, label: 'Chat' };
+    ? { icon: <Sprout size={13} />, label: labels.agent }
+    : { icon: <MessageSquare size={13} />, label: labels.chat };
 }
 
 export const AgentSelector = ({
@@ -77,6 +79,7 @@ export const AgentSelector = ({
   onRefreshProfiles,
   disabled = false,
 }: AgentSelectorProps) => {
+  const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const justDismissedRef = useRef(false);
@@ -116,7 +119,10 @@ export const AgentSelector = ({
     return { x: rect.left, y: rect.top };
   }, []);
 
-  const current = describeBinding(currentBinding, currentMode);
+  const current = describeBinding(currentBinding, currentMode, {
+    chat: t('chat.modeChat'),
+    agent: t('chat.modeAgent'),
+  });
 
   return (
     <>
@@ -126,7 +132,11 @@ export const AgentSelector = ({
         onClick={handleToggle}
         disabled={disabled || !editable}
         aria-expanded={editable ? isOpen : undefined}
-        title={editable ? 'Choose agent' : `Agent: ${current.label}`}
+        title={
+          editable
+            ? t('chat.chooseAgent')
+            : t('chat.agentLabel', { label: current.label })
+        }
         className={cn(
           'flex h-6 shrink-0 items-center gap-1 rounded px-1.5 text-xs',
           'text-fg-muted',
@@ -158,11 +168,11 @@ export const AgentSelector = ({
           className="flex max-w-[min(20rem,calc(100vw-1rem))] flex-col overflow-hidden py-1"
         >
           <AgentMenuOptions
-            heading="Agent"
+            heading={t('chat.agentHeading')}
             currentBinding={currentBinding}
             currentMode={currentMode}
             profiles={profiles}
-            currentRowTitle="Current agent for this conversation"
+            currentRowTitle={t('chat.currentAgentThread')}
             onSelect={handleSelect}
             onAddAgent={
               onRefreshProfiles

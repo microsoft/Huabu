@@ -32,7 +32,7 @@ import { useSearchStore } from '../store/searchStore';
 type SearchScopeAttr = 'canvas' | 'node';
 
 /** DOM hook the in-panel `CanvasSearchInput` tags on its `<input>`. */
-const CANVAS_SEARCH_INPUT_SELECTOR = 'input[aria-label="Search this canvas"]';
+const CANVAS_SEARCH_INPUT_SELECTOR = 'input[data-canvas-search-input="true"]';
 
 function resolveScopeFromFocus(active: Element | null): SearchScopeAttr | null {
   if (!active) return null;

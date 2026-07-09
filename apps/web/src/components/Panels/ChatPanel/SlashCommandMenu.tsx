@@ -25,6 +25,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import type { AvailableCommand } from '@sediment/shared';
 
@@ -76,6 +77,7 @@ export const SlashCommandMenu = forwardRef<
   SlashCommandMenuRef,
   SlashCommandMenuProps
 >(({ commands, filter, onSelect, loading = false }, ref) => {
+  const { t } = useTranslation();
   const filtered = useMemo(
     () => filterCommands(commands, filter),
     [commands, filter],
@@ -133,7 +135,7 @@ export const SlashCommandMenu = forwardRef<
       return (
         <div
           role="listbox"
-          aria-label="Slash commands"
+          aria-label={t('chat.slashCommands')}
           aria-busy="true"
           className="border-edge-default bg-surface absolute right-0 bottom-full left-0 z-50 mb-2 rounded-lg border shadow-lg"
         >
@@ -142,7 +144,7 @@ export const SlashCommandMenu = forwardRef<
               aria-hidden
               className="border-edge-default border-t-fg-muted size-3.5 animate-spin rounded-full border-2"
             />
-            Loading commands…
+            {t('chat.loadingCommands')}
           </div>
         </div>
       );
@@ -154,7 +156,7 @@ export const SlashCommandMenu = forwardRef<
     <div
       ref={listRef}
       role="listbox"
-      aria-label="Slash commands"
+      aria-label={t('chat.slashCommands')}
       className="border-edge-default bg-surface absolute right-0 bottom-full left-0 z-50 mb-2 max-h-64 overflow-y-auto rounded-lg border shadow-lg"
     >
       {filtered.map((cmd, idx) => {

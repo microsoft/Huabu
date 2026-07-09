@@ -24,6 +24,11 @@
 
 import { useEffect, useRef } from 'react';
 
+import {
+  resolveArtifactUrl,
+  uploadImage as uploadImageApi,
+} from '@/api/artifact';
+
 import { attachBlockDragListeners } from './blockDrag';
 import { createMilkdown, type MilkdownInstance } from './createMilkdown';
 import { markdownEquals, normalizeMarkdown } from './markdownUtils';
@@ -41,6 +46,13 @@ export interface MilkdownEditorProps {
   placeholder?: string;
   /** Optional className applied to the editor root. */
   className?: string;
+  /**
+   * Canvas id used to (a) resolve artifact-key image `src`s to fetchable
+   * URLs for display and (b) upload pasted / dropped images to this
+   * canvas' artifact store. When omitted, images render with their raw
+   * `src` and paste / drop upload is disabled.
+   */
+  canvasId?: string;
   /**
    * Phase 4 provenance. The editor only renders the `blocks` half
    * (block-level highlights via `Decoration.node`); `tombstones` is
@@ -87,6 +99,7 @@ export function MilkdownEditor(props: MilkdownEditorProps): JSX.Element {
     editable = true,
     placeholder,
     className,
+    canvasId,
     decorations,
     onExternalUpdate,
     onReady,
@@ -111,6 +124,9 @@ export function MilkdownEditor(props: MilkdownEditorProps): JSX.Element {
   /** Track latest onReady callback. */
   const onReadyRef = useRef(onReady);
   onReadyRef.current = onReady;
+  /** Track latest canvasId so the mount-only editor reads a fresh value. */
+  const canvasIdRef = useRef(canvasId);
+  canvasIdRef.current = canvasId;
 
   // Mount the editor once. The async lifecycle is guarded with a
   // `cancelled` flag so React 18 StrictMode's double-effect cleans up
@@ -137,6 +153,15 @@ export function MilkdownEditor(props: MilkdownEditorProps): JSX.Element {
         editable,
         placeholder,
         toolbarMode: 'sediment',
+        resolveImageSrc: (src) => {
+          const id = canvasIdRef.current;
+          return id ? resolveArtifactUrl(src, id) : src;
+        },
+        uploadImage: async (file) => {
+          const id = canvasIdRef.current;
+          if (!id) throw new Error('No canvas bound for image upload');
+          return uploadImageApi(file, id);
+        },
       });
 
       if (cancelled) {

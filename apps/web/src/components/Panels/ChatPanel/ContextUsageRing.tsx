@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 
 import { agentApi } from '@/api/agent';
 import { Tooltip } from '@/components/Common/Tooltip';
@@ -73,6 +74,7 @@ export const ContextUsageRing = ({
   isStreaming,
   usageOverride,
 }: ContextUsageRingProps) => {
+  const { t } = useTranslation();
   const messages = useChatStore(selectCurrentMessages);
   const threadId = useChatStore((s) => s.threadId);
   const canvasId = useCanvasStore((s) => s.canvasId);
@@ -163,18 +165,26 @@ export const ContextUsageRing = ({
   const tooltipContent = (
     <div className="space-y-0.5 text-xs">
       <div>
-        Context:{' '}
-        <strong>
-          {formatTokens(usedTokens)} / {formatTokens(contextWindow)}
-        </strong>{' '}
-        ({percentage}%)
+        <Trans
+          i18nKey="chat.contextUsage"
+          values={{
+            used: formatTokens(usedTokens),
+            window: formatTokens(contextWindow),
+            percentage,
+          }}
+          components={{ strong: <strong /> }}
+        />
       </div>
       {cost && (
         <div>
-          Cost:{' '}
-          <strong>
-            ${cost.amount.toFixed(4)} {cost.currency}
-          </strong>
+          <Trans
+            i18nKey="chat.contextCost"
+            values={{
+              amount: cost.amount.toFixed(4),
+              currency: cost.currency,
+            }}
+            components={{ strong: <strong /> }}
+          />
         </div>
       )}
     </div>
@@ -184,7 +194,11 @@ export const ContextUsageRing = ({
     <Tooltip content={tooltipContent}>
       <span
         tabIndex={0}
-        aria-label={`Context usage ${formatTokens(usedTokens)} of ${formatTokens(contextWindow)} tokens, ${percentage} percent`}
+        aria-label={t('chat.contextUsageAria', {
+          used: formatTokens(usedTokens),
+          window: formatTokens(contextWindow),
+          percentage,
+        })}
         className="inline-flex cursor-default items-center justify-center focus:outline-none"
       >
         <svg

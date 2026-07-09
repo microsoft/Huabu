@@ -2,11 +2,8 @@
  * Milkdown-backed renderer for AI chat messages.
  */
 
-import { useMemo } from 'react';
-
 import { parseArtifactUrl } from '@sediment/shared';
 
-import { resolveArtifactUrl } from '@/api/artifact';
 import { MilkdownPreview } from '@/components/Milkdown';
 import useCanvasStore from '@/store/canvasStore';
 import { setDragPayload } from '@/utils/io/dragDrop';
@@ -24,23 +21,6 @@ interface MilkdownMessageCardProps {
    * we don't subscribe N times for N rendered cards.
    */
   threadId: string;
-}
-
-const MD_LINK_OR_IMAGE_RE = /(!?)\[([^\]]*)\]\(([^)\s]+)(\s+"[^"]*")?\)/g;
-
-export function rewriteChatImageUrls(
-  markdown: string,
-  canvasId: string | null,
-): string {
-  if (!markdown || !canvasId) return markdown;
-  return markdown.replace(
-    MD_LINK_OR_IMAGE_RE,
-    (match, bang, alt, src, title) => {
-      const resolved = resolveArtifactUrl(String(src), canvasId);
-      if (resolved === src) return match;
-      return `${bang}[${alt}](${resolved}${title ?? ''})`;
-    },
-  );
 }
 
 /**
@@ -109,14 +89,11 @@ export const MilkdownMessageCard: FC<MilkdownMessageCardProps> = ({
   threadId,
 }) => {
   const canvasId = useCanvasStore((s) => s.canvasId);
-  const rewritten = useMemo(
-    () => rewriteChatImageUrls(content, canvasId),
-    [content, canvasId],
-  );
 
   return (
     <MilkdownPreview
-      markdown={rewritten}
+      markdown={content}
+      canvasId={canvasId ?? undefined}
       enableBlockDrag
       onBlockDragStart={({ markdown, nativeEvent }) => {
         const built =

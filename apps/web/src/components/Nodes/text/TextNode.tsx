@@ -1,5 +1,6 @@
 import { Bold, Italic, Underline, Strikethrough } from 'lucide-react';
 import { memo, useCallback, useState, useRef, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { resolveAccent } from '@sediment/shared';
 
@@ -34,6 +35,7 @@ export type TextNodeType = Node<CanvasTextNodeData, 'text'>;
 
 export const TextNode = memo(
   ({ id, data, selected, width }: NodeProps<TextNodeType>) => {
+    const { t } = useTranslation();
     const updateNodeData = useCanvasStore((state) => state.updateNodeData);
     const [isEditing, setIsEditing] = useState(false);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -122,7 +124,14 @@ export const TextNode = memo(
         <FloatingToolbar.Select
           options={FONT_FAMILY_OPTIONS.map((f) => ({
             value: f.value,
-            label: f.name,
+            label:
+              f.value === 'default'
+                ? t('node.fontDefault')
+                : f.value === 'serif'
+                  ? t('node.fontSerif')
+                  : f.value === 'mono'
+                    ? t('node.fontMono')
+                    : t('node.fontHand'),
           }))}
           value={style.fontFamily ?? 'default'}
           onChange={(v) => updateStyle({ fontFamily: v })}
@@ -132,7 +141,7 @@ export const TextNode = memo(
 
         <FloatingToolbar.ToggleButton
           active={style.fontWeight === 'bold'}
-          title="Bold"
+          title={t('editor.inlineMarks.bold')}
           onClick={() =>
             updateStyle({
               fontWeight: style.fontWeight === 'bold' ? 'normal' : 'bold',
@@ -144,7 +153,7 @@ export const TextNode = memo(
 
         <FloatingToolbar.ToggleButton
           active={style.fontStyle === 'italic'}
-          title="Italic"
+          title={t('editor.inlineMarks.italic')}
           onClick={() =>
             updateStyle({
               fontStyle: style.fontStyle === 'italic' ? 'normal' : 'italic',
@@ -156,7 +165,7 @@ export const TextNode = memo(
 
         <FloatingToolbar.ToggleButton
           active={textDecoration.includes('underline')}
-          title="Underline"
+          title={t('node.underline')}
           onClick={() => toggleDecoration('underline')}
         >
           <Underline />
@@ -164,7 +173,7 @@ export const TextNode = memo(
 
         <FloatingToolbar.ToggleButton
           active={textDecoration.includes('line-through')}
-          title="Strikethrough"
+          title={t('editor.inlineMarks.strikethrough')}
           onClick={() => toggleDecoration('line-through')}
         >
           <Strikethrough />
@@ -209,7 +218,7 @@ export const TextNode = memo(
             <div className="absolute top-1 right-1 left-1 z-10">
               <MissingFileBanner
                 nodeId={id}
-                title="Text file missing — type to recreate it"
+                title={t('node.textFileMissingRecreate')}
                 variant="inline"
               />
             </div>

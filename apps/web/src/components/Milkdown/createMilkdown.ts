@@ -42,6 +42,7 @@ import {
 } from '@sediment/shared';
 import { fingerprintMarkdownKeys } from '@sediment/shared/canvas-engine';
 
+import { toast } from '@/components/Common/Toast';
 import { getAccentTokens } from '@/components/Nodes/accentTokens';
 import { fingerprintBlocks, type BlockSnapshot } from '@/utils/blockProvenance';
 
@@ -110,6 +111,47 @@ function blockKeysForDoc(
   return fingerprintBlocks(snaps);
 }
 
+/**
+ * Collect image files from a clipboard or drag `DataTransfer`. Returns
+ * only entries whose MIME type is `image/*`; an empty array means the
+ * paste / drop carried no images and callers should fall through to the
+ * editor's default handling (text, HTML, in-editor block reorder, etc.).
+ *
+ * Both `DataTransfer.files` and `DataTransfer.items` are inspected:
+ * screenshots / file copies populate `files`, but pasted images from
+ * many apps only surface via `items` (kind `file`). Without the `items`
+ * fallback the paste falls through to the browser default, which
+ * inserts an ephemeral `blob:` `<img>` — exactly what this feature
+ * exists to avoid.
+ */
+export function extractImageFiles(dt: DataTransfer | null | undefined): File[] {
+  if (!dt) return [];
+  const files: File[] = [];
+  const seen = new Set<File>();
+  for (const file of Array.from(dt.files)) {
+    if (file.type.startsWith('image/') && !seen.has(file)) {
+      seen.add(file);
+      files.push(file);
+    }
+  }
+  if (dt.items) {
+    for (const item of Array.from(dt.items)) {
+      if (item.kind !== 'file' || !item.type.startsWith('image/')) continue;
+      const file = item.getAsFile();
+      if (file && !seen.has(file)) {
+        seen.add(file);
+        files.push(file);
+      }
+    }
+  }
+  return files;
+}
+
+/** Strip the extension from a filename for use as image alt text. */
+export function fileNameToAlt(name: string): string {
+  return name.replace(/\.[^./\\]+$/, '').trim();
+}
+
 export interface MilkdownFactoryOptions {
   /** Element the editor view will be mounted into. */
   root: HTMLElement;
@@ -121,6 +163,22 @@ export interface MilkdownFactoryOptions {
   placeholder?: string;
   /** Which selection toolbar surface should be active. Default `sediment`. */
   toolbarMode?: 'none' | 'sediment';
+  /**
+   * Resolve an image node's stored `src` (a bare artifact key such as
+   * `art_abc.png`, or a legacy full URL) into a fetchable URL for the
+   * rendered `<img>`. The stored attribute — and therefore the
+   * serialized markdown — is left untouched, so the document and the
+   * `onChange` payload keep the canonical bare key. Defaults to identity
+   * (used by test / preview surfaces that have no canvas context).
+   */
+  resolveImageSrc?: (src: string) => string;
+  /**
+   * Upload a pasted or dropped image file and resolve to the bare
+   * artifact key to persist (e.g. `art_abc.png`). When omitted, image
+   * paste / drop is not intercepted and the editor's default handling
+   * runs. Errors are surfaced by the factory via a toast.
+   */
+  uploadImage?: (file: File) => Promise<string>;
   /**
    * Drag-only preview mode (chat AI messages, etc.). Default `false`.
    *
@@ -1421,7 +1479,9 @@ export async function createMilkdown(
     placeholder,
     toolbarMode = 'sediment',
     previewMode = false,
+    uploadImage,
   } = options;
+  const resolveImageSrc = options.resolveImageSrc ?? ((src: string) => src);
   const useReactToolbar = !previewMode && toolbarMode === 'sediment';
 
   // Normalize LaTeX-style math delimiters (`\[…\]`, `\(…\)`)
@@ -1667,6 +1727,235 @@ export async function createMilkdown(
         }),
     ),
   );
+
+  // Image nodeView: resolve the stored `src` (bare artifact key or
+  // legacy URL) to a fetchable URL for the rendered `<img>` ONLY. The
+  // node attribute — and thus the serialized markdown / `onChange`
+  // payload / block-provenance fingerprint — keeps the canonical bare
+  // key untouched. This is why we resolve at the DOM boundary via a
+  // nodeView rather than rewriting the markdown: rewriting would put
+  // URLs into the live doc and desync the client's block fingerprints
+  // from the server's (which are computed over the key-form markdown).
+  crepe.editor.use(
+    $prose(
+      () =>
+        new Plugin({
+          props: {
+            nodeViews: {
+              image: (node) => {
+                const dom = document.createElement('img');
+                const applyAttrs = (n: ProseNode): void => {
+                  dom.setAttribute(
+                    'src',
+                    resolveImageSrc(String(n.attrs.src ?? '')),
+                  );
+                  const alt = String(n.attrs.alt ?? '');
+                  if (alt) dom.setAttribute('alt', alt);
+                  else dom.removeAttribute('alt');
+                  const title = String(n.attrs.title ?? '');
+                  if (title) dom.setAttribute('title', title);
+                  else dom.removeAttribute('title');
+                };
+                applyAttrs(node);
+                return {
+                  dom,
+                  update: (updated: ProseNode) => {
+                    if (updated.type.name !== 'image') return false;
+                    applyAttrs(updated);
+                    return true;
+                  },
+                };
+              },
+            },
+          },
+        }),
+    ),
+  );
+
+  // Paste / drop image upload. Only wired when an `uploadImage` uploader
+  // is supplied (editable note surfaces). Pasted or dropped image files
+  // are intercepted BEFORE the browser inserts an ephemeral `blob:` URL,
+  // uploaded to the canvas artifact store, and re-inserted as an `image`
+  // node carrying the returned bare artifact key (which the nodeView
+  // above resolves for display). An "uploading" placeholder widget marks
+  // the insertion point while the async upload is in flight; its position
+  // is tracked through concurrent edits by mapping the decoration set.
+  if (uploadImage) {
+    const doUpload = uploadImage;
+    const uploadKey = new PluginKey<DecorationSet>('sediment-image-upload');
+
+    const findPlaceholderPos = (
+      state: EditorState,
+      id: object,
+    ): number | null => {
+      const set = uploadKey.getState(state);
+      if (!set) return null;
+      const found = set.find(
+        undefined,
+        undefined,
+        (spec) => (spec as { id?: object }).id === id,
+      );
+      return found.length > 0 ? found[0].from : null;
+    };
+
+    const runUploads = async (
+      view: EditorView,
+      files: File[],
+      startPos: number,
+    ): Promise<void> => {
+      let anchor = startPos;
+      for (const file of files) {
+        const id = {};
+        const widget = document.createElement('span');
+        widget.className = 'milkdown-image-uploading';
+        widget.textContent = 'Uploading image…';
+        const deco = Decoration.widget(anchor, widget, { id });
+        view.dispatch(view.state.tr.setMeta(uploadKey, { add: deco }));
+        try {
+          const key = await doUpload(file);
+          const imageType = view.state.schema.nodes.image;
+          const pos = findPlaceholderPos(view.state, id) ?? anchor;
+          const tr = view.state.tr.setMeta(uploadKey, { remove: id });
+          if (imageType) {
+            const node = imageType.create({
+              src: key,
+              alt: fileNameToAlt(file.name),
+            });
+            tr.insert(pos, node);
+            anchor = pos + node.nodeSize;
+          }
+          view.dispatch(tr.scrollIntoView());
+        } catch (err) {
+          view.dispatch(view.state.tr.setMeta(uploadKey, { remove: id }));
+          toast('Failed to upload image', { tone: 'danger' });
+          console.error('[milkdown] image upload failed', err);
+        }
+      }
+    };
+
+    crepe.editor.use(
+      $prose(
+        () =>
+          new Plugin<DecorationSet>({
+            key: uploadKey,
+            state: {
+              init: () => DecorationSet.empty,
+              apply: (tr, set) => {
+                let next = set.map(tr.mapping, tr.doc);
+                const meta = tr.getMeta(uploadKey) as
+                  | { add?: Decoration; remove?: object }
+                  | undefined;
+                if (meta?.add) {
+                  next = next.add(tr.doc, [meta.add]);
+                } else if (meta?.remove) {
+                  const id = meta.remove;
+                  next = next.remove(
+                    next.find(
+                      undefined,
+                      undefined,
+                      (spec) => (spec as { id?: object }).id === id,
+                    ),
+                  );
+                }
+                return next;
+              },
+            },
+            props: {
+              decorations: (state) => uploadKey.getState(state),
+              handlePaste: (view, event) => {
+                const files = extractImageFiles(event.clipboardData);
+                if (files.length === 0) return false;
+                event.preventDefault();
+                void runUploads(view, files, view.state.selection.from);
+                return true;
+              },
+              handleDrop: (view, event) => {
+                const files = extractImageFiles(event.dataTransfer);
+                if (files.length === 0) return false;
+                event.preventDefault();
+                const coords = view.posAtCoords({
+                  left: event.clientX,
+                  top: event.clientY,
+                });
+                const pos = coords ? coords.pos : view.state.selection.from;
+                void runUploads(view, files, pos);
+                return true;
+              },
+            },
+          }),
+      ),
+    );
+
+    // Blob-image catch-all. Some paste sources (e.g. copying an <img>
+    // element off a web page) put ONLY an HTML `<img src="blob:…">`
+    // reference on the clipboard — no image bytes in `files` / `items`
+    // — so `handlePaste` above cannot intercept them and the browser's
+    // default inserts an ephemeral object-URL image that would be
+    // persisted verbatim and die on the next reload / port change.
+    // This plugin watches for any `blob:` image node that lands in the
+    // doc, fetches its bytes (the object URL is same-origin and still
+    // live within the session), uploads it, and rewrites the node's
+    // `src` to the returned bare artifact key.
+    const handledBlobs = new Set<string>();
+
+    const replaceBlobImage = async (
+      view: EditorView,
+      blobUrl: string,
+    ): Promise<void> => {
+      handledBlobs.add(blobUrl);
+      try {
+        const res = await fetch(blobUrl);
+        const blob = await res.blob();
+        const ext = (blob.type.split('/')[1] || 'png').split('+')[0];
+        const file = new File([blob], `pasted.${ext}`, {
+          type: blob.type || 'image/png',
+        });
+        const key = await doUpload(file);
+        const { state } = view;
+        const tr = state.tr;
+        let changed = false;
+        state.doc.descendants((node, pos) => {
+          if (
+            node.type.name === 'image' &&
+            String(node.attrs.src ?? '') === blobUrl
+          ) {
+            tr.setNodeMarkup(pos, undefined, { ...node.attrs, src: key });
+            changed = true;
+          }
+        });
+        if (changed) view.dispatch(tr);
+      } catch (err) {
+        // Keep the blob in `handledBlobs` so we don't spin retrying a
+        // permanently-dead object URL every doc update.
+        toast('Failed to upload pasted image', { tone: 'danger' });
+        console.error('[milkdown] blob image upload failed', err);
+      }
+    };
+
+    crepe.editor.use(
+      $prose(
+        () =>
+          new Plugin({
+            view: () => ({
+              update: (view, prevState) => {
+                if (view.state.doc.eq(prevState.doc)) return;
+                const pending = new Set<string>();
+                view.state.doc.descendants((node) => {
+                  if (node.type.name !== 'image') return;
+                  const src = String(node.attrs.src ?? '');
+                  if (src.startsWith('blob:') && !handledBlobs.has(src)) {
+                    pending.add(src);
+                  }
+                });
+                for (const blobUrl of pending) {
+                  void replaceBlobImage(view, blobUrl);
+                }
+              },
+            }),
+          }),
+      ),
+    );
+  }
 
   await crepe.create();
   crepe.setReadonly(!editable);

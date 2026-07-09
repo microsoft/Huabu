@@ -19,6 +19,7 @@
 
 import { ShieldQuestion } from 'lucide-react';
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { respondAcpPermission } from '../../../api/acp';
 import { useChatStore } from '../../../store/chatStore';
@@ -123,11 +124,12 @@ export function PermissionCard({
   messageId,
   part,
 }: PermissionCardProps) {
+  const { t } = useTranslation();
   const updateMessage = useChatStore((s) => s.updateMessage);
   const [submitting, setSubmitting] = useState(false);
 
   const { requestId, toolCall, options, resolution } = part;
-  const title = toolCall.title?.trim() || 'Permission requested';
+  const title = toolCall.title?.trim() || t('messages.permissionRequested');
 
   // Pick the most informative preview: rich `content` first (the agent
   // explicitly composed it for display), then `rawInput` (structured
@@ -184,8 +186,8 @@ export function PermissionCard({
       ? options.find((o) => o.optionId === resolution.optionId)
       : undefined;
     const label = resolution.cancelled
-      ? 'Cancelled'
-      : (picked?.name ?? 'Decided');
+      ? t('messages.cancelled')
+      : (picked?.name ?? t('messages.decided'));
     return (
       <div className="flex justify-start">
         <div className="border-edge-default bg-surface text-fg-muted ml-1 flex w-full items-center gap-1.5 rounded-md border px-3 py-2 text-xs">
@@ -202,7 +204,7 @@ export function PermissionCard({
     <div className="flex justify-start">
       <div
         role="group"
-        aria-label="Agent permission request"
+        aria-label={t('messages.permissionRequestAria')}
         aria-live="polite"
         className="border-edge-default bg-surface ml-1 w-full rounded-md border"
       >

@@ -2,6 +2,7 @@ import { type Node, type NodeProps, useStore } from '@xyflow/react';
 import clsx from 'clsx';
 import { ChevronsDown, Fullscreen } from 'lucide-react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { Loading } from '@/components/Common/Loading';
@@ -51,6 +52,7 @@ function appendMarkdownBlock(existing: string, snippet: string): string {
 
 export const NoteNode = memo(
   ({ id, data, selected }: NodeProps<NoteNodeType>) => {
+    const { t } = useTranslation();
     const openExpanded = useCanvasStore((s) => s.openExpanded);
     const setNoteHeightMode = useCanvasStore((s) => s.setNoteHeightMode);
     const patchNodeSilent = useCanvasStore((s) => s.patchNodeSilent);
@@ -137,7 +139,7 @@ export const NoteNode = memo(
 
     const NoteActions = (
       <FloatingToolbar.ActionButton
-        title="Expand"
+        title={t('node.expand')}
         onClick={(e) => {
           e.stopPropagation();
           openExpanded(id);
@@ -399,8 +401,8 @@ export const NoteNode = memo(
         {isContentMissing ? (
           <MissingFileBanner
             nodeId={id}
-            title="Note file missing"
-            description="The note file for this node was deleted or renamed outside the app."
+            title={t('node.noteFileMissing')}
+            description={t('node.noteFileMissingDescription')}
           />
         ) : (
           <>
@@ -466,6 +468,7 @@ export const NoteNode = memo(
                   {hydrated ? (
                     <MilkdownPreview
                       markdown={markdown}
+                      canvasId={canvasId ?? undefined}
                       className="pointer-events-none w-full select-none"
                     />
                   ) : (
@@ -521,7 +524,7 @@ export const NoteNode = memo(
                     }
                   }}
                   className="group absolute right-0 bottom-0 left-0 flex h-10 cursor-pointer items-end justify-center pb-1"
-                  aria-label="Show all content"
+                  aria-label={t('node.showAllContent')}
                 >
                   {/* Fade gradient — deepens on hover */}
                   <div

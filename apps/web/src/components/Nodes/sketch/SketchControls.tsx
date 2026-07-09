@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next';
+
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { RangeSlider } from '@/components/Common/RangeSlider';
 
@@ -43,19 +45,20 @@ export function SketchControls({
   onSizeChange,
   sliderSize = 'sm',
 }: SketchControlsProps) {
+  const { t } = useTranslation();
   return (
     <>
       <FloatingToolbar.ColorPicker
         colors={SKETCH_COLOR_OPTIONS}
         value={color}
         onSelect={onColorChange}
-        title="Stroke color"
+        title={t('node.strokeColor')}
       />
       <RangeSlider
         value={size}
         min={SKETCH_SIZE_MIN}
         max={SKETCH_SIZE_MAX}
-        label="Stroke thickness"
+        label={t('node.strokeThickness')}
         size={sliderSize}
         onChange={onSizeChange}
       />

@@ -1,5 +1,6 @@
 import { Fullscreen, Image as ImageIcon } from 'lucide-react';
 import { memo, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { resolveArtifactUrl } from '@/api/artifact';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
@@ -15,6 +16,7 @@ export type ImageNodeType = Node<CanvasImageNodeData, 'image'>;
 
 export const ImageNode = memo(
   ({ id, data, selected }: NodeProps<ImageNodeType>) => {
+    const { t } = useTranslation();
     const openExpanded = useCanvasStore((s) => s.openExpanded);
     const canvasId = useCanvasStore((s) => s.canvasId);
 
@@ -32,7 +34,7 @@ export const ImageNode = memo(
 
     const ImageActions = (
       <FloatingToolbar.ActionButton
-        title="Open Large View"
+        title={t('node.openLargeView')}
         onClick={(e) => {
           e.stopPropagation();
           openExpanded(id);
@@ -56,14 +58,14 @@ export const ImageNode = memo(
             {data?.artifactMissing ? (
               <MissingFileBanner
                 nodeId={id}
-                title="Image file missing"
-                description="The artifact for this node was deleted or renamed outside the app."
+                title={t('node.imageFileMissing')}
+                description={t('node.artifactMissingDescription')}
               />
             ) : src ? (
               <>
                 <img
                   src={resolveArtifactUrl(src, canvasId)}
-                  alt={data?.label || 'Node image'}
+                  alt={data?.label || t('node.nodeImage')}
                   className="pointer-events-none h-full w-full rounded-lg border-0 object-contain"
                   onLoad={() => setImgLoaded(true)}
                   onError={() => setImgLoaded(true)}
@@ -94,7 +96,7 @@ export const ImageNode = memo(
               </>
             ) : (
               <div className="text-fg-subtle flex h-full w-full items-center justify-center text-sm">
-                No Image Source
+                {t('node.noImageSource')}
               </div>
             )}
           </div>

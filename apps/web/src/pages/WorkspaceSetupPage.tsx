@@ -1,5 +1,6 @@
 import { FolderOpen, X } from 'lucide-react';
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Navigate, useNavigate } from 'react-router-dom';
 
 import { Button } from '../components/Common/Button';
@@ -20,6 +21,7 @@ import { useWorkspaceStore } from '../store/workspaceStore';
  * by the external-agent settings form.
  */
 export default function WorkspaceSetupPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const mode = useWorkspaceStore((s) => s.mode);
   const isSyncing = useWorkspaceStore((s) => s.isSyncing);
@@ -46,11 +48,9 @@ export default function WorkspaceSetupPage() {
             className="mx-auto mb-4 h-16 w-16"
           />
           <h1 className="text-fg-default text-2xl font-bold">
-            Welcome to {APP_NAME}
+            {t('workspace.welcome', { appName: APP_NAME })}
           </h1>
-          <p className="text-fg-subtle mt-2 text-sm">
-            Choose a folder to store your canvases, notes, and artifacts.
-          </p>
+          <p className="text-fg-subtle mt-2 text-sm">{t('workspace.intro')}</p>
         </div>
 
         <FreeSetup
@@ -88,6 +88,7 @@ function FreeSetup({
   selectWorkspace,
   onActivated,
 }: FreeSetupProps) {
+  const { t } = useTranslation();
   const [error, setError] = useState<string | null>(null);
   const [pathInput, setPathInput] = useState('');
 
@@ -102,7 +103,9 @@ function FreeSetup({
       await selectWorkspace(p);
       onActivated();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to open path');
+      setError(
+        err instanceof Error ? err.message : t('workspace.openPathFailed'),
+      );
     }
   };
 
@@ -118,7 +121,7 @@ function FreeSetup({
     <>
       {/* Path input + optional native folder picker */}
       <label className="text-fg-subtle mb-1.5 block text-xs font-medium">
-        Workspace folder
+        {t('workspace.folder')}
       </label>
       <PathInput
         value={pathInput}
@@ -128,7 +131,7 @@ function FreeSetup({
         onKeyDown={(e) => {
           if (e.key === 'Enter') void handleSubmitPath();
         }}
-        placeholder="Type an absolute path, then press Enter"
+        placeholder={t('workspace.pathPlaceholder')}
         disabled={isLoading}
         className="gap-2"
       />
@@ -137,7 +140,7 @@ function FreeSetup({
       {recentWorkspaces.length > 0 && (
         <div className="mt-6">
           <div className="text-fg-subtle mb-2 flex items-center gap-1.5 text-xs font-medium">
-            <span>Recent Workspaces</span>
+            <span>{t('workspace.recent')}</span>
           </div>
           <ul className="space-y-1">
             {recentWorkspaces.map((path) => (
@@ -159,7 +162,7 @@ function FreeSetup({
                   size="sm"
                   onClick={() => removeRecentWorkspace(path)}
                   className="opacity-0 transition-all group-hover:opacity-100"
-                  title="Remove from recent"
+                  title={t('workspace.removeRecent')}
                 >
                   <X size={14} />
                 </Button>
