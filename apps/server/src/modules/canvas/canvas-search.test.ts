@@ -22,7 +22,6 @@ import { wrapChatRequest } from '../agent/agenetes/handle.js';
 
 import type { ChatEnvelope } from '../agent/conversation/envelope.js';
 import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
-import type * as StoragePathsModule from '../storage/paths.js';
 import type { AgentTurn } from '@agenetes/protocol';
 import type { CanvasSearchEvent, CanvasSearchRequest } from '@sediment/shared';
 
@@ -42,7 +41,7 @@ vi.mock('../agent/agenetes/drivers.js', () => ({
 }));
 
 vi.mock('../storage/paths.js', async (importActual) => ({
-  ...(await importActual<StoragePathsModule>()),
+  ...((await importActual()) as Record<string, unknown>),
   canvasAcpNamespace: (canvasId: string) => ({ name: canvasId, root: '' }),
 }));
 
