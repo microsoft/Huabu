@@ -5,10 +5,12 @@ import {
   getLLMImageConfig,
   getLLMModels,
   getLLMProviders,
+  getLLMUtilityConfig,
   logoutOAuth,
   pollOAuthLogin,
   putLLMConfig,
   putLLMImageConfig,
+  putLLMUtilityConfig,
   startOAuthLogin,
 } from '../api/llm';
 
@@ -19,6 +21,8 @@ import type {
   LLMImageConfigUpdate,
   LLMModelInfo,
   LLMProviderInfo,
+  LLMUtilityConfig,
+  LLMUtilityConfigUpdate,
 } from '@sediment/shared';
 
 interface LLMState {
@@ -26,16 +30,22 @@ interface LLMState {
   config: LLMConfig | null;
   /** Current image-generation configuration from the server. */
   imageConfig: LLMImageConfig | null;
+  /** Current utility-tier model configuration from the server. */
+  utilityConfig: LLMUtilityConfig | null;
   /** Available providers. */
   providers: LLMProviderInfo[];
   /** Models for the currently selected provider. */
   models: LLMModelInfo[];
+  /** Models for the currently selected utility provider. */
+  utilityModels: LLMModelInfo[];
   /** Whether data is being loaded. */
   loading: boolean;
   /** Whether a config update is in progress. */
   saving: boolean;
   /** Whether an image-config update is in progress. */
   imageSaving: boolean;
+  /** Whether a utility-config update is in progress. */
+  utilitySaving: boolean;
   /** Last error message. */
   error: string | null;
 
@@ -51,10 +61,14 @@ interface LLMState {
   init: () => Promise<void>;
   /** Load models for a specific provider. */
   loadModels: (provider: string) => Promise<void>;
+  /** Load models for the utility provider. */
+  loadUtilityModels: (provider: string) => Promise<void>;
   /** Update provider/model (and optionally API key). */
   updateConfig: (update: LLMConfigUpdate) => Promise<void>;
   /** Update image-generation provider config. */
   updateImageConfig: (update: LLMImageConfigUpdate) => Promise<void>;
+  /** Update utility-tier model config. */
+  updateUtilityConfig: (update: LLMUtilityConfigUpdate) => Promise<void>;
   /** Start an OAuth device code login flow. */
   startOAuth: () => Promise<void>;
   /** Cancel an in-progress OAuth flow. */
@@ -66,11 +80,14 @@ interface LLMState {
 export const useLLMStore = create<LLMState>()((set, get) => ({
   config: null,
   imageConfig: null,
+  utilityConfig: null,
   providers: [],
   models: [],
+  utilityModels: [],
   loading: false,
   saving: false,
   imageSaving: false,
+  utilitySaving: false,
   error: null,
   oauthPending: false,
   oauthUserCode: null,
@@ -80,17 +97,25 @@ export const useLLMStore = create<LLMState>()((set, get) => ({
     if (get().loading) return;
     set({ loading: true, error: null });
     try {
-      const [config, imageConfig, providers] = await Promise.all([
-        getLLMConfig(),
-        getLLMImageConfig(),
-        getLLMProviders(),
-      ]);
-      set({ config, imageConfig, providers, loading: false });
+      const [config, imageConfig, utilityConfig, providers] = await Promise.all(
+        [
+          getLLMConfig(),
+          getLLMImageConfig(),
+          getLLMUtilityConfig(),
+          getLLMProviders(),
+        ],
+      );
+      set({ config, imageConfig, utilityConfig, providers, loading: false });
 
       // Pre-load models for the active provider
       if (config.provider) {
         const models = await getLLMModels(config.provider);
         set({ models });
+      }
+      // Pre-load models for the utility provider (when not following chat)
+      if (utilityConfig.provider) {
+        const utilityModels = await getLLMModels(utilityConfig.provider);
+        set({ utilityModels });
       }
     } catch (err) {
       set({
@@ -104,6 +129,17 @@ export const useLLMStore = create<LLMState>()((set, get) => ({
     try {
       const models = await getLLMModels(provider);
       set({ models });
+    } catch (err) {
+      set({
+        error: err instanceof Error ? err.message : 'Failed to load models',
+      });
+    }
+  },
+
+  loadUtilityModels: async (provider: string) => {
+    try {
+      const utilityModels = await getLLMModels(provider);
+      set({ utilityModels });
     } catch (err) {
       set({
         error: err instanceof Error ? err.message : 'Failed to load models',
@@ -135,6 +171,22 @@ export const useLLMStore = create<LLMState>()((set, get) => ({
         error:
           err instanceof Error ? err.message : 'Failed to update image config',
         imageSaving: false,
+      });
+    }
+  },
+
+  updateUtilityConfig: async (update) => {
+    set({ utilitySaving: true, error: null });
+    try {
+      const utilityConfig = await putLLMUtilityConfig(update);
+      set({ utilityConfig, utilitySaving: false });
+    } catch (err) {
+      set({
+        error:
+          err instanceof Error
+            ? err.message
+            : 'Failed to update utility config',
+        utilitySaving: false,
       });
     }
   },

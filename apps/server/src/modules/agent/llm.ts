@@ -28,6 +28,7 @@ import {
   DEFAULT_AZURE_IMAGE_API_VERSION,
   DEFAULT_IMAGE_MODEL_FAMILY,
   isImageModelFamily,
+  MODEL_ROLES,
 } from '@sediment/shared';
 
 import {
@@ -55,6 +56,9 @@ import type {
   LLMImageConfigUpdate,
   LLMModelInfo,
   LLMProviderInfo,
+  LLMUtilityConfig,
+  LLMUtilityConfigUpdate,
+  ModelRole,
 } from '@sediment/shared';
 
 const log = getLogger('llm');
@@ -195,6 +199,26 @@ interface PersistedStore {
    * `providers`. See {@link ImageConfigPersisted}.
    */
   imageConfig?: ImageConfigPersisted;
+  /**
+   * Utility-tier model config (labeling / summaries / keywords). Lives at
+   * the top level, independent of `active`. Absent (or `provider` unset)
+   * means "follow the chat model". Note: **no `apiKey` here** — the
+   * utility model's credential is resolved from the shared `providers` map
+   * keyed by `provider`, so a key entered in the utility panel is stored
+   * once and reused whether the same provider drives chat or utility.
+   */
+  utilityConfig?: UtilityConfigPersisted;
+}
+
+/**
+ * Persisted utility-tier config. Chat-shaped minus the key (see
+ * {@link PersistedStore.utilityConfig}).
+ */
+interface UtilityConfigPersisted {
+  provider?: string;
+  model?: string;
+  baseUrl?: string;
+  apiVersion?: string;
 }
 
 /**
@@ -251,6 +275,12 @@ function loadPersistedStore(): PersistedStore {
       | undefined;
     if (existingImageConfig && typeof existingImageConfig === 'object') {
       store.imageConfig = existingImageConfig;
+    }
+    const existingUtilityConfig = parsed.utilityConfig as
+      | UtilityConfigPersisted
+      | undefined;
+    if (existingUtilityConfig && typeof existingUtilityConfig === 'object') {
+      store.utilityConfig = existingUtilityConfig;
     }
     // Migrate pre-split shape: image fields nested under the Azure
     // chat entry. Only seed `imageConfig` when it isn't already set,
@@ -360,6 +390,14 @@ let cachedModel: Model<Api> | null = null;
 let cachedApiKey: string | null = null;
 let activeConfig: PersistedConfig | null = null;
 
+/**
+ * Cached utility-tier model. Built from `store.utilityConfig` and
+ * invalidated whenever {@link setUtilityConfig} writes. When utility is
+ * following the chat model (no utility config), the resolver returns the
+ * chat model directly and this stays null.
+ */
+let cachedUtilityModel: Model<Api> | null = null;
+
 /** Resolve the API key for a provider from memory, persisted config, or env vars. */
 function resolveApiKey(
   providerId: string,
@@ -372,6 +410,11 @@ function resolveApiKey(
   if (cfg?.provider === providerId && cfg.apiKey) {
     return cfg.apiKey;
   }
+
+  // Any provider's stored key — the utility tier may target a provider
+  // that is not the active chat provider, and keys are stored per-provider.
+  const stored = loadPersistedStore().providers[providerId]?.apiKey;
+  if (stored) return stored;
 
   // Fall back to environment variables via pi-ai
   // pi-ai uses 'azure-openai-responses' instead of our 'azure-openai'
@@ -890,6 +933,162 @@ export function getConfiguredImageModelFamily(): ImageModelFamily {
   return isImageModelFamily(family) ? family : DEFAULT_IMAGE_MODEL_FAMILY;
 }
 
+// ==================== Utility-tier config ====================
+
+/**
+ * Project `store.utilityConfig` down to a `PersistedConfig`, or `null`
+ * when the utility tier is unconfigured / following the chat model.
+ *
+ * No `apiKey` is attached — it is resolved per-provider at call time via
+ * {@link resolveApiKey} / {@link resolveApiKeyAsync}, so the key entered in
+ * the utility panel (stored in the shared `providers` map) is reused.
+ */
+function loadUtilityPersistedConfig(): PersistedConfig | null {
+  const u = loadPersistedStore().utilityConfig;
+  if (!u || !u.provider) return null;
+  return {
+    provider: u.provider,
+    model: u.model ?? '',
+    ...(u.baseUrl ? { baseUrl: u.baseUrl } : {}),
+    ...(u.apiVersion ? { apiVersion: u.apiVersion } : {}),
+  };
+}
+
+/**
+ * Get the saved utility-tier configuration. An empty `provider` (the
+ * default) means "follow the chat model". `authenticated` reflects whether
+ * the chosen provider has a resolvable key (shared per-provider store or
+ * env), so the Settings UI can show whether an inline key is still needed.
+ */
+export function getUtilityConfig(): LLMUtilityConfig {
+  const u = loadPersistedStore().utilityConfig;
+  if (!u || !u.provider) {
+    return { provider: '', model: '', authenticated: false };
+  }
+  return {
+    provider: u.provider,
+    model: u.model ?? '',
+    authenticated: !!resolveApiKey(u.provider),
+    ...(u.baseUrl ? { baseUrl: u.baseUrl } : {}),
+    ...(u.apiVersion ? { apiVersion: u.apiVersion } : {}),
+  };
+}
+
+/**
+ * Update the utility-tier configuration.
+ *
+ * Semantics mirror {@link setLLMConfig}: an empty `provider` clears the
+ * utility entry (→ follow chat); otherwise the model resolves to
+ * explicit > previously-saved > first built-in default. `baseUrl` /
+ * `apiVersion` follow the omit=keep / empty=clear rule.
+ *
+ * The optional `apiKey` is written into the **shared** `providers` map
+ * (not into `utilityConfig`), so entering a key here authenticates that
+ * provider for both chat and utility (v1.5 inline-key flow).
+ */
+export function setUtilityConfig(
+  update: LLMUtilityConfigUpdate,
+): LLMUtilityConfig {
+  const store = loadPersistedStore();
+
+  // Empty provider → follow the chat model: drop the utility entry.
+  if (!update.provider) {
+    delete store.utilityConfig;
+    savePersistedStore(store);
+    cachedUtilityModel = null;
+    return getUtilityConfig();
+  }
+
+  const existing: UtilityConfigPersisted = store.utilityConfig ?? {};
+  const next: UtilityConfigPersisted = {
+    ...existing,
+    provider: update.provider,
+  };
+
+  // Resolve the effective model (same precedence as setLLMConfig).
+  let resolvedModel = update.model || existing.model || '';
+  if (!resolvedModel) {
+    const providerInfo = getProviderCatalog().find(
+      (p) => p.id === update.provider,
+    );
+    if (providerInfo?.builtIn) {
+      const models = getModelsForProvider(update.provider);
+      if (models.length > 0) resolvedModel = models[0].id;
+    }
+  }
+  next.model = resolvedModel;
+
+  if (update.baseUrl !== undefined) {
+    if (update.baseUrl) next.baseUrl = update.baseUrl;
+    else delete next.baseUrl;
+  }
+  if (update.apiVersion !== undefined) {
+    if (update.apiVersion) next.apiVersion = update.apiVersion;
+    else delete next.apiVersion;
+  }
+  store.utilityConfig = next;
+
+  // API key → shared per-provider credential store.
+  if (update.apiKey !== undefined) {
+    const entry: ProviderPersisted = store.providers[update.provider] ?? {};
+    if (update.apiKey) entry.apiKey = update.apiKey;
+    else delete entry.apiKey;
+    store.providers[update.provider] = entry;
+  }
+
+  savePersistedStore(store);
+  cachedUtilityModel = null;
+  return getUtilityConfig();
+}
+
+/**
+ * Get the (cached) utility-tier model, or the chat model when utility is
+ * following chat. Built like any chat model; the key is applied at call
+ * time, so key changes need not invalidate this cache.
+ */
+function getUtilityModel(): Model<Api> {
+  const cfg = loadUtilityPersistedConfig();
+  if (!cfg) return getLLMModel();
+  if (cachedUtilityModel) return cachedUtilityModel;
+  cachedUtilityModel = buildModel(cfg);
+  return cachedUtilityModel;
+}
+
+/**
+ * Resolve `(config, model)` for a role via the two-layer binding:
+ * the role's default tier picks chat or utility; utility falls through to
+ * chat when unconfigured. A **vision guard** steps a resolved model up to
+ * chat when the role may carry an image (`hasImage`) but the model cannot
+ * accept image input.
+ */
+function resolveForRole(
+  role: ModelRole,
+  opts?: { hasImage?: boolean },
+): { cfg: PersistedConfig; model: Model<Api> } {
+  const chat = (): { cfg: PersistedConfig; model: Model<Api> } => ({
+    cfg: ensureConfig(),
+    model: getLLMModel(),
+  });
+
+  const info = MODEL_ROLES[role];
+  let resolved = chat();
+  if (info.defaultTier === 'utility') {
+    const utilityCfg = loadUtilityPersistedConfig();
+    if (utilityCfg) resolved = { cfg: utilityCfg, model: getUtilityModel() };
+  }
+
+  // Vision guard: only relevant when an image is actually being sent.
+  if (
+    info.vision &&
+    opts?.hasImage &&
+    !resolved.model.input.includes('image')
+  ) {
+    resolved = chat();
+  }
+
+  return resolved;
+}
+
 /**
  * Get a configured pi-ai Model instance for the active provider/model.
  */
@@ -938,8 +1137,9 @@ export async function ensureApiKey(): Promise<string> {
   return key;
 }
 
-function getProviderSpecificOptions(): Record<string, unknown> {
-  const cfg = activeConfig;
+function getProviderSpecificOptions(
+  cfg: PersistedConfig | null,
+): Record<string, unknown> {
   if (!cfg) return {};
 
   if (cfg.provider === 'azure-openai') {
@@ -955,34 +1155,56 @@ function getProviderSpecificOptions(): Record<string, unknown> {
   return {};
 }
 
+/** Resolve (and OAuth-refresh) the API key for an arbitrary config. */
+async function ensureApiKeyFor(cfg: PersistedConfig): Promise<string> {
+  const key = await resolveApiKeyAsync(cfg.provider, cfg.apiKey);
+  if (!key) {
+    const provInfo = getProviderCatalog().find((p) => p.id === cfg.provider);
+    throw new Error(
+      `Authentication failed for provider "${cfg.provider}". ` +
+        (provInfo?.authType === 'oauth'
+          ? 'Please log in via Settings.'
+          : `Set the API key in .env or configure via Settings.`),
+    );
+  }
+  return key;
+}
+
 /**
- * Stream LLM responses with the active model.
+ * Per-call options: the pi-ai stream options plus the role selector that
+ * routes the call to a model tier. `role` defaults to `'chat'`, so
+ * existing callers are unaffected. `hasImage` enables the vision guard
+ * (see {@link resolveForRole}) — set it when the context carries an image.
  */
-export async function llmStream(
-  context: Context,
-  options?: ProviderStreamOptions,
-) {
-  const model = getLLMModel();
-  const apiKey = await ensureApiKey();
+export interface LLMCallOptions extends ProviderStreamOptions {
+  role?: ModelRole;
+  hasImage?: boolean;
+}
+
+/**
+ * Stream LLM responses with the model for the requested role.
+ */
+export async function llmStream(context: Context, options?: LLMCallOptions) {
+  const { role = 'chat', hasImage, ...streamOptions } = options ?? {};
+  const { cfg, model } = resolveForRole(role, { hasImage });
+  const apiKey = await ensureApiKeyFor(cfg);
   return piStream(model, context, {
     apiKey,
-    ...getProviderSpecificOptions(),
-    ...options,
+    ...getProviderSpecificOptions(cfg),
+    ...streamOptions,
   });
 }
 
 /**
- * Complete (non-streaming) LLM call with the active model.
+ * Complete (non-streaming) LLM call with the model for the requested role.
  */
-export async function llmComplete(
-  context: Context,
-  options?: ProviderStreamOptions,
-) {
-  const model = getLLMModel();
-  const apiKey = await ensureApiKey();
+export async function llmComplete(context: Context, options?: LLMCallOptions) {
+  const { role = 'chat', hasImage, ...streamOptions } = options ?? {};
+  const { cfg, model } = resolveForRole(role, { hasImage });
+  const apiKey = await ensureApiKeyFor(cfg);
   return piComplete(model, context, {
     apiKey,
-    ...getProviderSpecificOptions(),
-    ...options,
+    ...getProviderSpecificOptions(cfg),
+    ...streamOptions,
   });
 }

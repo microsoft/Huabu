@@ -7,12 +7,13 @@ import { Select } from '@/components/Common/Select';
 import { SettingRow } from '@/components/Common/SettingRow';
 import { SettingSection } from '@/components/Common/SettingSection';
 import { toast } from '@/components/Common/Toast';
+import { Toggle } from '@/components/Common/Toggle';
 import { useLLMStore } from '@/store/llmStore';
 import { copyToClipboard } from '@/utils/io/clipboard';
 
 import { TEXT_INPUT_CLASS, useDebouncedSave } from '../utils';
 
-import type { LLMConfigUpdate } from '@sediment/shared';
+import type { LLMConfigUpdate, LLMUtilityConfigUpdate } from '@sediment/shared';
 
 /**
  * LLM provider/model configuration section.
@@ -37,6 +38,13 @@ export const LLMSettings: React.FC = () => {
   const llmLoadModels = useLLMStore((s) => s.loadModels);
   const llmUpdateConfig = useLLMStore((s) => s.updateConfig);
 
+  // Utility-tier model
+  const utilityConfig = useLLMStore((s) => s.utilityConfig);
+  const utilityModels = useLLMStore((s) => s.utilityModels);
+  const utilitySaving = useLLMStore((s) => s.utilitySaving);
+  const loadUtilityModels = useLLMStore((s) => s.loadUtilityModels);
+  const updateUtilityConfig = useLLMStore((s) => s.updateUtilityConfig);
+
   // OAuth
   const oauthPending = useLLMStore((s) => s.oauthPending);
   const oauthUserCode = useLLMStore((s) => s.oauthUserCode);
@@ -56,6 +64,11 @@ export const LLMSettings: React.FC = () => {
   const [apiKeyValue, setApiKeyValue] = useState('');
   const [showApiKeyInput, setShowApiKeyInput] = useState(false);
   const [manualModel, setManualModel] = useState('');
+
+  // ── Utility-tier form state ──
+  const [utilityManualModel, setUtilityManualModel] = useState('');
+  const [utilityApiKey, setUtilityApiKey] = useState('');
+  const utilityFollowsChat = !utilityConfig?.provider;
 
   const isAzure = llmConfig?.provider === 'azure-openai';
   const selectedProvider = llmProviders.find(
@@ -95,6 +108,52 @@ export const LLMSettings: React.FC = () => {
     [llmConfig?.provider, llmConfig?.model, llmUpdateConfig],
   );
   const debouncedSaveChat = useDebouncedSave(saveChat);
+
+  // Utility-tier debounced saver (patches keep the current utility provider).
+  const saveUtility = useCallback(
+    (patch: Partial<LLMUtilityConfigUpdate>) => {
+      const provider = utilityConfig?.provider ?? '';
+      if (!provider) return;
+      void updateUtilityConfig({
+        provider,
+        model: utilityConfig?.model ?? '',
+        ...patch,
+      });
+    },
+    [utilityConfig?.provider, utilityConfig?.model, updateUtilityConfig],
+  );
+  const debouncedSaveUtility = useDebouncedSave(saveUtility);
+
+  // Keep the utility manual-model / API-key inputs in sync with persisted
+  // config (initial load, provider switch). API key is never pre-filled.
+  useEffect(() => {
+    setUtilityManualModel(utilityConfig?.model ?? '');
+    setUtilityApiKey('');
+  }, [utilityConfig?.provider, utilityConfig?.model]);
+
+  // ── Utility handlers ──
+  const handleUtilityFollowChange = async (follow: boolean) => {
+    if (follow) {
+      // Empty provider → follow the chat model.
+      await updateUtilityConfig({ provider: '', model: '' });
+      return;
+    }
+    // Seed with the current chat provider so the picker starts valid.
+    const provider = llmConfig?.provider ?? '';
+    if (provider) await loadUtilityModels(provider);
+    await updateUtilityConfig({ provider, model: '' });
+  };
+
+  const handleUtilityProviderChange = async (providerId: string) => {
+    await loadUtilityModels(providerId);
+    await updateUtilityConfig({ provider: providerId, model: '' });
+  };
+
+  const handleUtilityModelChange = async (modelId: string) => {
+    const provider = utilityConfig?.provider ?? '';
+    if (!provider) return;
+    await updateUtilityConfig({ provider, model: modelId });
+  };
 
   // ─── Handlers ─────────────────────────────────────────────────────
   const handleProviderChange = async (providerId: string) => {
@@ -358,6 +417,101 @@ export const LLMSettings: React.FC = () => {
               autoFocus
             />
           </div>
+        )}
+      </SettingSection>
+
+      <SettingSection title={t('settings.utilityModel')} collapsible>
+        <SettingRow
+          title={t('settings.followChatModel')}
+          description={t('settings.utilityModelDesc')}
+        >
+          <Toggle
+            checked={utilityFollowsChat}
+            onChange={(follow) => void handleUtilityFollowChange(follow)}
+            disabled={utilitySaving}
+            label={t('settings.followChatModel')}
+          />
+        </SettingRow>
+
+        {!utilityFollowsChat && (
+          <>
+            <SettingRow title={t('settings.provider')}>
+              <div className="w-44">
+                <Select
+                  options={llmProviders.map((p) => ({
+                    value: p.id,
+                    label: p.name,
+                  }))}
+                  value={utilityConfig?.provider ?? ''}
+                  onChange={(v) => void handleUtilityProviderChange(v)}
+                  disabled={utilitySaving}
+                  placeholder={t('settings.selectProvider')}
+                />
+              </div>
+            </SettingRow>
+
+            {utilityModels.length > 0 ? (
+              <SettingRow title={t('settings.model')}>
+                <div className="w-44">
+                  <Select
+                    options={utilityModels.map((m) => ({
+                      value: m.id,
+                      label: m.name || m.id,
+                    }))}
+                    value={utilityConfig?.model ?? ''}
+                    onChange={(v) => void handleUtilityModelChange(v)}
+                    disabled={utilitySaving}
+                  />
+                </div>
+              </SettingRow>
+            ) : (
+              <SettingRow title={t('settings.model')}>
+                <input
+                  type="text"
+                  placeholder="e.g. gpt-4o-mini"
+                  value={utilityManualModel}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setUtilityManualModel(v);
+                    debouncedSaveUtility({ model: v.trim() });
+                  }}
+                  className={`${TEXT_INPUT_CLASS} w-44`}
+                />
+              </SettingRow>
+            )}
+
+            {/* Inline API key — only when the chosen provider has no saved key */}
+            {utilityConfig && !utilityConfig.authenticated && (
+              <SettingRow
+                title={t('settings.apiKey')}
+                description={t('settings.providerKeyRequired')}
+              >
+                <div className="flex items-center gap-1.5">
+                  <Key size={14} className="text-warning" />
+                  <input
+                    type="password"
+                    placeholder="sk-…"
+                    value={utilityApiKey}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setUtilityApiKey(v);
+                      if (v.trim()) debouncedSaveUtility({ apiKey: v.trim() });
+                    }}
+                    className={`${TEXT_INPUT_CLASS} w-44`}
+                  />
+                </div>
+              </SettingRow>
+            )}
+
+            {utilityConfig?.authenticated && (
+              <SettingRow
+                title={t('settings.apiKey')}
+                description={t('settings.savedKeyKeepEmpty')}
+              >
+                <Check size={14} className="text-success" />
+              </SettingRow>
+            )}
+          </>
         )}
       </SettingSection>
     </>

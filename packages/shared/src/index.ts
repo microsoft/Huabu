@@ -5,3 +5,4 @@ export * from './utils/id.js';
 export * from './utils/spatial/index.js';
 export * from './utils/artifact-url.js';
 export * from './llm/image-capabilities.js';
+export * from './llm/model-roles.js';

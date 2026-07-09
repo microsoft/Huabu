@@ -33,6 +33,8 @@ Every node passes the same stages; the dispatcher skips those whose capabilities
 
 Web / pdf skip Stages 2–5 when `src` is unchanged and content is cached on disk ([cache-check.ts](../../apps/server/src/modules/preprocessing/stages/cache-check.ts)); `force=true` overrides. `allowLLM=false` / interactive mode → Enrich skipped, result still valid.
 
+Enrich runs on the **utility model tier**, not the chat model: `ProviderManager` calls `llmComplete(ctx, { role })` with the `imageLabel` / `frameLabel` / `contentMeta` roles, so labeling / summaries / keywords resolve through the user's utility model (a faster/cheaper model, or the chat model when utility follows chat). See [model-role-routing](../proposals/model-role-routing.md).
+
 ---
 
 ## 3. Node profiles
