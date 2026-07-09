@@ -24,6 +24,7 @@ import { nodeRevisionOf } from '@sediment/shared/canvas-engine';
 
 import {
   CanvasConflictError,
+  getNodeContent,
   NodeDuplicateFilesError,
   putNodeContent,
 } from '@/api/canvas';
@@ -233,6 +234,18 @@ export function createNodeContentQueue(opts: {
   const duplicateToasted = new Set<string>();
 
   /**
+   * Node ids for which we have already shown the persistent save-failed
+   * toast. Unlike a `NODE_CONTENT_CONFLICT` (a benign concurrency race,
+   * handled separately) this is a genuine write failure (500 / IO / Drive
+   * lock) where the body AND any rename silently did not land. We surface
+   * it even for background (`auto`) saves so the user isn't left unaware
+   * their last edit wasn't persisted — but throttle to once per node until
+   * a save succeeds (or the user clicks Retry) so a repeatedly-failing
+   * autosave can't spam. Cleared on the next successful write.
+   */
+  const saveErrorToasted = new Set<string>();
+
+  /**
    * Build the `PutNodeContentRequest` body for `nodeId` from the
    * latest store snapshot. Returns `null` when the node has gone
    * away (e.g. deleted between debounce-schedule and flush) or its
@@ -322,6 +335,7 @@ export function createNodeContentQueue(opts: {
     // means the node is no longer blocked.
     baselineRev.set(nodeId, response.rev);
     contentConflictToasted.delete(nodeId);
+    saveErrorToasted.delete(nodeId);
     // A write that succeeded means any prior duplicate has been
     // resolved — drop the once-per-node toast guard so a future
     // recurrence alerts again, and clear the node's duplicate banner
@@ -376,15 +390,16 @@ export function createNodeContentQueue(opts: {
    * The node is **frozen** ({@link buildRequest} now returns `null` for
    * it), so no further write path — debounced autosave, `flushNow`, or
    * the `beforeunload` keepalive — can PUT it. That is what makes the
-   * "Load latest" reload genuinely safe: reloading can no longer leak our
-   * stale version onto disk.
+   * "Load latest" refresh genuinely safe: while frozen we can never leak
+   * our stale version onto disk.
    *
    * The user gets a real two-way choice:
    *   - **Keep mine** — re-baseline to the on-disk rev and force the
    *     overwrite (deliberately replaces the server's version with ours).
    *   - **Load latest** — copy our in-app text to the clipboard as a
-   *     safety net, then reload to adopt the server's version (our unsaved
-   *     in-app edit is discarded, but recoverable from the clipboard).
+   *     safety net, then refetch just this node's server state and adopt
+   *     it in place (no full page reload). Our unsaved in-app edit is
+   *     discarded, but recoverable from the clipboard.
    */
   function handleContentConflict(nodeId: string, currentRev: string): void {
     // Freeze regardless of the once-per-node toast guard, so a repeat
@@ -397,40 +412,23 @@ export function createNodeContentQueue(opts: {
     const label =
       node && typeof node.data?.['label'] === 'string'
         ? (node.data['label'] as string)
-        : 'a note';
-    toast(
-      `“${label}” was changed elsewhere. Keep your version (overwrites the ` +
-        'other change) or load the latest (copies your text to the clipboard ' +
-        'first).',
-      {
-        tone: 'danger',
-        duration: 0,
-        secondaryAction: {
-          label: 'Keep mine',
-          onClick: () => {
-            void resolveKeepMine(nodeId);
-          },
-        },
-        action: {
-          label: 'Load latest',
-          onClick: () => {
-            const cur = opts.getState().nodes.find((n) => n.id === nodeId);
-            const text =
-              cur && typeof cur.data?.['content'] === 'string'
-                ? (cur.data['content'] as string)
-                : '';
-            const reload = () => {
-              if (typeof window !== 'undefined') window.location.reload();
-            };
-            if (text) {
-              void copyToClipboard(text).finally(reload);
-            } else {
-              reload();
-            }
-          },
+        : i18n.t('node.untitled');
+    toast(i18n.t('node.contentConflict', { label }), {
+      tone: 'danger',
+      duration: 0,
+      secondaryAction: {
+        label: i18n.t('node.contentConflictKeepMine'),
+        onClick: () => {
+          void resolveKeepMine(nodeId);
         },
       },
-    );
+      action: {
+        label: i18n.t('node.contentConflictLoadLatest'),
+        onClick: () => {
+          void resolveLoadLatest(nodeId);
+        },
+      },
+    });
     console.warn('[node-content] write refused (stale content):', nodeId);
   }
 
@@ -449,6 +447,79 @@ export function createNodeContentQueue(opts: {
     const canvasId = opts.getState().canvasId;
     if (!canvasId) return;
     await serializedFlush(canvasId, nodeId, 'user').catch(() => undefined);
+  }
+
+  /**
+   * Resolve a content conflict by discarding the local version and
+   * adopting the server's — without a full page reload. Copies our
+   * in-app text to the clipboard as a safety net, refetches just this
+   * node's persisted sidecar, and swaps it into the store in place.
+   *
+   * The refreshed content is written through `_setStateNoAutosave`, so
+   * adopting it cannot schedule a redundant PUT back; the node is then
+   * re-baselined to the returned server rev and unfrozen so the next
+   * user edit is checked against the version we just adopted. The open
+   * editor picks up the new `data.content` via its external-update
+   * reconcile (`setMarkdown`), exactly like an agent/realtime write.
+   *
+   * If the refetch fails the node stays **frozen** (still safe — a stale
+   * version can never leak onto disk) and the user is asked to retry.
+   */
+  async function resolveLoadLatest(nodeId: string): Promise<void> {
+    const state = opts.getState();
+    const canvasId = state.canvasId;
+    const cur = state.nodes.find((n) => n.id === nodeId);
+    const localText =
+      cur && typeof cur.data?.['content'] === 'string'
+        ? (cur.data['content'] as string)
+        : '';
+    // Safety net first: preserve the discarded edit on the clipboard
+    // before we overwrite it with the server's version.
+    if (localText) await copyToClipboard(localText).catch(() => undefined);
+    if (!canvasId) return;
+
+    const res = await getNodeContent(canvasId, nodeId);
+    if (!res) {
+      // Keep the node frozen (still safe) and let the user retry.
+      toast(i18n.t('node.contentConflictLoadFailed'), {
+        tone: 'danger',
+        duration: 0,
+      });
+      return;
+    }
+
+    // Overlay only the content-owned keys; UI / geometry fields stay
+    // untouched. `_setStateNoAutosave` skips the content diff so adopting
+    // the server state never schedules a PUT back onto disk.
+    const nextNodes = opts.getState().nodes.map((n) =>
+      n.id === nodeId
+        ? {
+            ...n,
+            data: {
+              ...(n.data ?? {}),
+              content: res.content,
+              label: res.label,
+              labelSource: res.labelSource,
+              src: res.src,
+              summary: res.summary,
+              keywords: res.keywords,
+              contentDuplicate: res.contentDuplicate ?? false,
+              duplicateFiles: res.duplicateFiles ?? [],
+            },
+          }
+        : n,
+    );
+    opts.getState()._setStateNoAutosave({ nodes: nextNodes });
+
+    // Re-baseline to the server rev and unfreeze so editing resumes.
+    baselineRev.set(nodeId, res.rev);
+    lastSuccessful.set(nodeId, {
+      label: res.label,
+      labelSource: res.labelSource,
+    });
+    frozen.delete(nodeId);
+    contentConflictToasted.delete(nodeId);
+    toast(i18n.t('node.contentConflictLoaded'), { tone: 'success' });
   }
 
   /**
@@ -554,7 +625,6 @@ export function createNodeContentQueue(opts: {
     source: 'user' | 'auto',
     err: unknown,
   ): void {
-    void canvasId;
     const state = opts.getState();
     const node = state.nodes.find((n) => n.id === nodeId);
     if (!node) return; // node was deleted mid-flight — nothing to do
@@ -589,12 +659,14 @@ export function createNodeContentQueue(opts: {
           };
         }),
       });
-      const displayName = lastGood.label ?? i18n.t('errors.previousName');
-      if (source === 'user') {
-        toast(i18n.t('errors.nodeRenameReverted', { name: displayName }), {
-          tone: 'danger',
-        });
-      }
+      surfaceSaveError(
+        canvasId,
+        nodeId,
+        i18n.t('errors.nodeSaveFailed', {
+          name: lastGood.label ?? i18n.t('node.untitled'),
+        }),
+        source,
+      );
       console.error('Node rename failed; reverted:', nodeId, err);
       return;
     }
@@ -602,10 +674,46 @@ export function createNodeContentQueue(opts: {
     // Content-only failure (or first-ever write with no last-good
     // anchor to revert to): toast (user path) or log (auto path); the
     // in-store body is left alone so the user's typing isn't lost.
-    if (source === 'user') {
-      toast(i18n.t('errors.nodeChangesMayNotPersist'), { tone: 'danger' });
-    }
+    surfaceSaveError(
+      canvasId,
+      nodeId,
+      i18n.t('errors.nodeSaveFailed', {
+        name: currentLabel || i18n.t('node.untitled'),
+      }),
+      source,
+    );
     console.error('Node content save failed:', nodeId, err);
+  }
+
+  /**
+   * Surface a genuine (non-conflict) save failure with a persistent,
+   * dismissible toast carrying a **Retry** action. The in-store body /
+   * label are still intact after a failure, so Retry simply re-flushes the
+   * node's pending content (as a user-initiated write). Background (`auto`)
+   * failures are throttled to once per node (see {@link saveErrorToasted});
+   * user-initiated failures always toast since the user expects feedback.
+   */
+  function surfaceSaveError(
+    canvasId: string,
+    nodeId: string,
+    message: string,
+    source: 'user' | 'auto',
+  ): void {
+    if (source === 'auto' && saveErrorToasted.has(nodeId)) return;
+    saveErrorToasted.add(nodeId);
+    toast(message, {
+      tone: 'danger',
+      duration: 0,
+      dismissible: true,
+      action: {
+        label: i18n.t('messages.retry'),
+        onClick: () => {
+          // Allow a later failure to re-alert, then re-attempt the write.
+          saveErrorToasted.delete(nodeId);
+          void serializedFlush(canvasId, nodeId, 'user').catch(() => undefined);
+        },
+      },
+    });
   }
 
   /**

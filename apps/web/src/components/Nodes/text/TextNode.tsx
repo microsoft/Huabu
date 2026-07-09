@@ -6,7 +6,7 @@ import { resolveAccent } from '@sediment/shared';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
 import { useTextNodeSurface } from '@/hooks/useTextNodeSurface';
-import useCanvasStore from '@/store/canvasStore.ts';
+import useCanvasStore, { settleNodePreprocess } from '@/store/canvasStore.ts';
 import {
   FONT_FAMILY_CSS,
   getTextNodeFontOpts,
@@ -117,6 +117,11 @@ export const TextNode = memo(
       setIsEditing(false);
       if (surface.draft === content) return;
       updateNodeData(id, { content: surface.draft });
+      // Exit-edit "settle": commit the auto-derived label (the `.md`
+      // filename) now that the user left the inline editor, instead of on
+      // every keystroke pause. See
+      // `docs/proposals/node-write-unification-plan.md` §3e / §10.
+      settleNodePreprocess(id);
     }, [surface.draft, content, id, updateNodeData]);
 
     const TextToolbar = (

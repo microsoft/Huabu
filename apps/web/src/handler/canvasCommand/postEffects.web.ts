@@ -60,7 +60,16 @@ export function runWebPostEffects(input: RunWebPostEffectsInput): void {
 
   // 1. Trigger preprocessing for created / mutated nodes. The server
   // decides per node profile whether any actual work runs.
+  //
+  // `note` / `text` are deliberately excluded here: their label is
+  // auto-derived from the first heading, so firing on every keystroke
+  // pause renamed the `.md` file through every partial heading
+  // (`Note 1.md` → `H.md` → `He.md` → …). Their preprocessing is instead
+  // triggered once the user leaves the node (exit-edit → `settleNodePreprocess`
+  // in `NodeWrapper`), so the filename is committed only when the heading
+  // is settled. See `docs/proposals/node-write-unification-plan.md` §3e / §10.
   for (const node of effects.mutatedNodes) {
+    if (node.type === 'note' || node.type === 'text') continue;
     triggerPreprocessing(node);
   }
 

@@ -1,7 +1,7 @@
 # Node Write Unification — one writer per field (content / label / derived)
 
 Status: Draft
-Last updated: 2026-07-08
+Last updated: 2026-07-09
 
 > **Why this exists.** A user edited a note's `.md` externally (Google-Drive
 > folder), then edited the same node in-app. The app showed a
@@ -168,6 +168,37 @@ label endpoint **directly** — no debounce queue — mirroring today's
 Strict vs lazy rename policy (user = strict 409, agent/auto = ` (N)` dedupe) is
 preserved via `labelSource` + `writeNode({ strictRename })`.
 
+**Auto-derived label — settle-triggered (SHIPPED, the label-churn fix).**
+`note`/`text` titles auto-derive from the first heading/line inside the
+preprocess pipeline. The churn — renaming the `.md` through every partial
+heading (`Note 1.md` → `H.md` → `He.md` → …; see §10) — came from firing
+preprocess on **every ~1 s typing pause**. The shipped fix moves the trigger to
+a **settle** boundary (the user leaving the editor), so preprocess (and the
+rename it drives) fires once per edit session, not per keystroke pause:
+
+- `note` (edited only in the expanded panel): settled on `closeExpanded` /
+  `openExpanded` ([canvasStore.ts](../../apps/web/src/store/canvasStore.ts)).
+- `text` (inline textarea): settled on `TextNode`'s blur handler
+  ([TextNode.tsx](../../apps/web/src/components/Nodes/text/TextNode.tsx)).
+
+The body keeps saving on the fast per-node content cadence (`nodeContentQueue`)
+independently, and the `beforeunload` keepalive flushes a pending settle on
+close. New nodes are created with a stable placeholder label (`Note 1`,
+`Text 1`, … via `generateNextLabel`
+[labels.ts](../../packages/shared/src/canvas-engine/utils/labels.ts)), so the
+sidecar lives at `nodes/Note 1.md` from creation and is renamed to the
+heading-derived name at the first settle.
+
+**No "sticky" freeze (NOT implemented — deferred).** The filename is **not**
+frozen after first commit: whenever the heading/first line changes and the user
+settles, the file is renamed to stay consistent with it. The accepted behaviour
+is **"label follows the heading/first line."** A one-time "sticky slug" (name
+once, then never auto-rename) was considered but deferred; note that the actual
+rename flows through the preprocess `project` stage → client patch → the content
+PUT — **none of which gate on a settled flag** — so a real sticky implementation
+would have to gate `project` (not just `persist`) and the content-PUT rename,
+not the persist stage alone. See §5.
+
 ### 3f. Profile-driven CAS policy (declarative, not hardcoded)
 
 Whether a node type's body is CAS-guarded must **not** be hardcoded as
@@ -292,30 +323,56 @@ would allow.
 
 ## 5. Migration plan
 
-Phased so the critical save path is never half-migrated. **P0a is the actual
-data-loss fix and ships alone** — deliberately decoupled from the endpoint merge
-so a regression in the (larger) refactor can't block or obscure the bugfix.
+Status reflects what has shipped. The **data-loss fix** and the **label-churn
+fix** are independent and each shippable alone; the endpoint merge is deferred
+(no longer necessary — see below).
 
-1. **P0a — minimal CAS in persist (the bugfix, tens of lines).** Add the
-   guard-ordered check (§3h: CAS → wouldClobber → dedup) before `writeNode` in
-   [persist.ts](../../apps/server/src/modules/preprocessing/stages/persist.ts),
-   for authored bodies (§3f), inside `withCanvasMutex` (§3g). Wire `expectRev`
-   through the preprocess request contract. **This stops the clobber** without
-   touching the endpoint shape. Independently shippable + testable.
-2. **P0b — fold content-PUT semantics into the node-write endpoint.** Move
-   strict-rename, synchronous `{rev,label}`, and the early fast-fail CAS onto the
-   (renamed) `ingest-content` handler. Larger; not required for the bugfix.
-3. **P1 — label endpoint.** Add `PUT /nodes/:id/label`; move user-rename off the
-   content path onto it. Keep strict/lazy policy.
-4. **P2 — client unification.** Rename `preprocessQueue` → `nodeIngestQueue`;
-   absorb `nodeContentQueue`'s serialization / baseline / freeze / keepalive;
-   route label renames to the direct label call. Delete `nodeContentQueue`.
-5. **P3 — delete content PUT** and the `preprocess` endpoint name; update docs
-   ([node-preprocessing.md](../architecture/node-preprocessing.md),
-   [agent-node-freshness-cas-plan.md](./agent-node-freshness-cas-plan.md)).
-
-Each phase ships behind its own tests; the app stays shippable between phases
-(**P0a fixes the data-loss bug on its own**, before any endpoint merge).
+1. **P0a — authored-body CAS guard (the data-loss fix). ✅ Done.**
+   [persist.ts](../../apps/server/src/modules/preprocessing/stages/persist.ts)
+   skips the whole persist when an `authored` body (`bodyOwnership: 'authored'`)
+   has diverged from the snapshot, so the content PUT stays the **sole
+   authoritative body writer** and the newer on-disk body is never clobbered.
+   Covered by
+   [persist.test.ts](../../apps/server/src/modules/preprocessing/stages/persist.test.ts).
+   (The `bodyOwnership` profile flag of §3f also already shipped.)
+2. **P0.5 — label-churn fix (settle trigger). ✅ Done.** The auto-derived
+   `note`/`text` label (the `.md` filename) is committed **at a settle boundary**
+   (the user leaving the editor) instead of on every keystroke pause. Only the
+   client trigger moved; the server derivation path is unchanged:
+   - **Client — settle-only trigger.**
+     [postEffects.web.ts](../../apps/web/src/handler/canvasCommand/postEffects.web.ts)
+     no longer fires `triggerPreprocessing` for `note`/`text` on every mutation.
+     Instead `settleNodePreprocess`
+     ([canvasStore.ts](../../apps/web/src/store/canvasStore.ts)) fires at the real
+     edit-done boundaries: `closeExpanded` / `openExpanded` for a `note` (edited
+     only in the expanded panel) and `TextNode`'s blur handler
+     ([TextNode.tsx](../../apps/web/src/components/Nodes/text/TextNode.tsx)) for
+     an inline `text`. The body keeps saving on the fast `nodeContentQueue`
+     cadence independently, and the `beforeunload` keepalive flushes a pending
+     settle on tab close.
+   - **Behaviour:** the label follows the heading / first line and is renamed on
+     each settle where it changed — mid-typing churn is gone, but there is **no
+     "sticky" freeze** (see §3e). A one-time sticky slug is deferred; the accepted
+     behaviour is "label follows the heading/first line."
+   - **Background save-failure surfacing. ✅ Done.** The settle-driven preprocess
+     and its content-PUT rename run on the `auto` cadence. A genuine (non-conflict)
+     failure — where the rename **and** the body write both fail — is no longer
+     console-only: [nodeContentQueue.ts](../../apps/web/src/store/canvasStore/save/nodeContentQueue.ts)
+     `handleSaveFailure` now surfaces a persistent, dismissible toast with a
+     **Retry** action (re-flushes the node's still-in-store body/label), throttled
+     to once per node on the `auto` path until a save succeeds. Benign
+     `NODE_CONTENT_CONFLICT` (409) stays silent-and-frozen as before.
+3. **P1 (optional) — rename-only label endpoint.** `PUT /nodes/:id/label` to give
+   user rename a strict-CAS home separate from the body's rev-CAS (§3e). **Not
+   required:** user rename already works correctly via the content PUT's
+   `flushNow`. Defer until the label-CAS / body-CAS split is worth a new endpoint.
+4. **Deferred — endpoint merge / rename (§1, §2).** Folding content PUT +
+   preprocess into a single `ingest-content` endpoint is **no longer necessary**:
+   once the label-derive step moved off the body-save cadence (§3e), `note`/`text`
+   bodies already have a single writer (content PUT) and their label is committed
+   by the settle path. The remaining preprocess pipeline is effectively
+   artifact-only (`web`/`pdf`/`office`, `src`-triggered). Revisit the merge only if
+   the separate endpoints prove confusing.
 
 ---
 
@@ -421,16 +478,19 @@ renames + possible conflicted copies), for anything referencing the file by
 path, and for undo/history noise. The body save (`NODE_CONTENT_DEBOUNCE_MS` =
 0.5 s, same file, cheap) is fine at that cadence; the **label/filename** is not.
 
-**P0a does not address this.** The persist guard only stops the body _clobber_;
-in the normal typing case the on-disk body matches the snapshot, so the dedup
-branch still refreshes the drifting auto-label on every pause.
+**P0a does not address this — P0.5 does.** The persist CAS guard only stops the
+body _clobber_; in the normal typing case the on-disk body matches the snapshot,
+so before P0.5 the dedup branch still refreshed the drifting auto-label on every
+pause. The churn is now fixed by the **settle trigger** shipped in **P0.5** (see
+§5): preprocess for `note`/`text` fires when the user leaves the editor, not on
+every typing pause.
 
-**Recommended rule (for the label endpoint / auto-label commit).** Decouple the
-two cadences: keep the body save fast, but commit the **auto-derived label
-(filename) only when the heading is _settled_** — a longer idle (e.g. 1.5–2 s) or
-a stronger signal (editor blur / leaving the node / the heading line being
-"complete"), never on every intermediate pause. The **display** label may still
-update live/optimistically in-memory for UX; only the **persisted rename** is
-gated. User-explicit renames keep their immediate one-shot commit (they already
-express finished intent). This belongs in the label-endpoint design (§3e) as an
-explicit "settled-only auto-rename" policy.
+**What P0.5 shipped (and did not).** Decouple the two cadences: the body save
+stays fast, but the auto-derived label (filename) is committed **only at a settle
+boundary** — the real edit-done points: `closeExpanded` / `openExpanded` for a
+`note` and `TextNode`'s blur handler for an inline `text` (not a
+`NodeWrapper.onBlur`, which sits on the read-only card). New nodes already live at
+a stable `Note N` name (`generateNextLabel`), renamed to the heading-derived name
+at settle. There is **no sticky freeze**: the label follows the heading / first
+line and is renamed on each settle where it changed. A one-time sticky slug and
+surfacing background (`auto`) save failures are both open follow-ups (see §5).

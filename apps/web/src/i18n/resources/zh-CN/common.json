@@ -238,6 +238,11 @@
     "ask": "提问",
     "agentChangesSkipped_one": "{{count}} 个 Agent 更改因你正在编辑而被跳过",
     "agentChangesSkipped_other": "{{count}} 个 Agent 更改因你正在编辑而被跳过",
+    "contentConflict": "“{{label}}”已在别处被修改。保留你的版本(覆盖对方的改动),或加载最新版本(会先把你的文本复制到剪贴板)。",
+    "contentConflictKeepMine": "保留我的",
+    "contentConflictLoadLatest": "加载最新",
+    "contentConflictLoadFailed": "无法加载最新版本 —— 请重试。",
+    "contentConflictLoaded": "已加载最新版本。",
     "fontDefault": "默认",
     "fontSerif": "衬线",
     "fontMono": "等宽",
@@ -688,8 +693,6 @@
     }
   },
   "errors": {
-    "previousName": "之前的名称",
-    "nodeRenameReverted": "无法重命名节点，已恢复为「{{name}}」。",
-    "nodeChangesMayNotPersist": "无法保存节点更改，最新编辑可能尚未持久化。"
+    "nodeSaveFailed": "「{{name}}」写盘失败，可能文件被占用或没有写入权限。"
   }
 }

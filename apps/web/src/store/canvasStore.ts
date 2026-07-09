@@ -830,6 +830,25 @@ export function clearNodeDuplicateGuard(nodeId: string): void {
   nodeContentQueue.clearDuplicateGuard(nodeId);
 }
 
+/**
+ * Trigger preprocessing for a single node once the user has finished
+ * editing it (exit-edit "settle").
+ *
+ * Used by `NodeWrapper` for editor-authored nodes (`note` / `text`),
+ * whose auto-derived label (the on-disk `.md` filename) must be committed
+ * only when the heading is settled — never on every keystroke pause, which
+ * churned the filename through every partial heading (`Note 1.md` →
+ * `H.md` → `He.md` → …). These types are excluded from the per-mutation
+ * `triggerPreprocessing` fan-out in `runWebPostEffects`, so this exit-edit
+ * call is their sole preprocessing trigger. The body itself keeps saving on
+ * the fast per-node content cadence (`nodeContentQueue`) independently. See
+ * `docs/proposals/node-write-unification-plan.md` §3e / §10.
+ */
+export function settleNodePreprocess(nodeId: string): void {
+  const node = useCanvasStore.getState().nodes.find((n) => n.id === nodeId);
+  if (node) preprocessQueue.schedule(node);
+}
+
 // ─── Action-history ring ──────────────────────────────────────────────────
 //
 // The short, in-memory action trail (cap 10, no timestamps) that
@@ -1092,6 +1111,17 @@ const useCanvasStore = create<RFState>()(
     expandMode: 'split',
     expandedNodeFocusTick: 0,
     openExpanded: (nodeId) => {
+      // Switching straight from one expanded node to another does not fire
+      // `closeExpanded`, so settle the outgoing authored node here to
+      // commit its auto-derived label (the `.md` filename). See
+      // `docs/proposals/node-write-unification-plan.md` §3e / §10.
+      const prev = get().expandedNodeId;
+      if (prev && prev !== nodeId) {
+        const prevNode = get().nodes.find((n) => n.id === prev);
+        if (prevNode?.type === 'note' || prevNode?.type === 'text') {
+          settleNodePreprocess(prev);
+        }
+      }
       get().dispatchUiIntent({ type: 'EXPAND_NODE', nodeId });
       // Bump the focus tick AFTER the intent resolves so any
       // already-mounted preview re-focuses its editor on a
@@ -1101,7 +1131,22 @@ const useCanvasStore = create<RFState>()(
       // still triggers focus.
       set((s) => ({ expandedNodeFocusTick: s.expandedNodeFocusTick + 1 }));
     },
-    closeExpanded: () => set({ expandedNodeId: null }),
+    closeExpanded: () => {
+      // Exit-edit "settle" for editor-authored nodes: a `note` (and a
+      // `text` edited in the panel) is authored in the expanded editor, so
+      // closing it (X / Esc / back) is the real "done editing" boundary at
+      // which the auto-derived label (the `.md` filename) should be
+      // committed — never on every keystroke pause. See
+      // `docs/proposals/node-write-unification-plan.md` §3e / §10.
+      const { expandedNodeId, nodes } = get();
+      if (expandedNodeId) {
+        const node = nodes.find((n) => n.id === expandedNodeId);
+        if (node?.type === 'note' || node?.type === 'text') {
+          settleNodePreprocess(expandedNodeId);
+        }
+      }
+      set({ expandedNodeId: null });
+    },
     setExpandMode: (mode) => set({ expandMode: mode }),
 
     collapsedFrameIds: new Set<string>(),
