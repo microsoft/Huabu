@@ -82,7 +82,7 @@ export const SnapGuidesOverlay: React.FC<Props> = ({
  * of the dragged source is identical. For a guide spanning N rects
  * (always 3 in practice — the source plus its two neighbours), the
  * overlay renders N-1 ticks, one per gap. Mirrors the double-tick
- * Figma renders on its equal-spacing guides (we use info-tone for
+ * common design tools render on their equal-spacing guides (we use info-tone for
  * visual consistency with the rest of the alignment overlay).
  */
 const EqualSpacingTick: React.FC<{

@@ -13,7 +13,7 @@ export interface SplitSelectOption<T extends string = string> {
   buttonLabel?: string;
   /**
    * Optional keyboard shortcut hint shown muted on the right side of the
-   * option in the dropdown menu (Figma-style). Purely visual; the parent
+   * option in the dropdown menu. Purely visual; the parent
    * is responsible for actually binding the key.
    */
   shortcut?: React.ReactNode;

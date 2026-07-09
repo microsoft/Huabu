@@ -4,7 +4,7 @@ import { useEffect, useRef, type MutableRefObject } from 'react';
 /**
  * Auto-pan the React Flow viewport while a selection drag is in progress and
  * the cursor approaches (or exits) the wrapper edge. Mirrors the behaviour
- * familiar from Figma / illustration tools: dragging a marquee or lasso
+ * familiar from professional canvas / illustration tools: dragging a marquee or lasso
  * toward the viewport edge scrolls the canvas to reveal more content,
  * extending the selection naturally.
  *

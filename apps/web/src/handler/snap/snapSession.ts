@@ -138,7 +138,7 @@ let _bypass = false;
  * When true, Space is currently held during a drag — used to bypass
  * auto-reparenting (entering / leaving frames) so the user can
  * reposition a node freely without changing parent membership. This
- * is the "opt out of auto reparent" gesture, matching Figma's
+ * is the "opt out of auto reparent" gesture, matching common canvas-editor
  * Space-drag semantics. Always false outside an active drag session.
  */
 let _reparentBypassed = false;
@@ -234,7 +234,7 @@ let _absPosGetter: ((nodeId: string) => XYPosition | null) | null = null;
  *
  * Tracking Alt at window-level (rather than only sampling the
  * gesture-start event) lets users press / release Alt mid-gesture
- * without dropping it — the same UX Figma offers.
+ * without dropping it — the same UX professional canvas editors offer.
  *
  * Using a single AbortController per gesture instead of separate
  * handler refs is what makes cleanup robust against:
@@ -530,7 +530,7 @@ export function setSnapStructuredSuppressed(suppressed: boolean): void {
 /**
  * True while the user is holding Space during an active drag —
  * meaning auto-reparenting (entering / leaving frames) should be
- * skipped for this gesture. Mirrors Figma's Space-drag opt-out.
+ * skipped for this gesture. Mirrors the common Space-drag opt-out.
  * Always false outside a drag session.
  */
 export function isReparentBypassed(): boolean {

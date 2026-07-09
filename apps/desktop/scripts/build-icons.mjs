@@ -48,7 +48,7 @@ const SOURCE_SVG = join(RESOURCES, 'logo.svg');
  * `size` (so `0.10` = 10% margin per side, artwork fills the central 80%).
  * Apple's macOS app-icon template expects ~10% margin around the artwork
  * so the Dock / Launchpad cell renders the icon at the same visual size as
- * native apps (WeChat / Figma / Safari). Without this, our edge-to-edge
+ * native apps. Without this, our edge-to-edge
  * rounded square fills the entire cell and looks oversized.
  */
 async function renderPng(size, pad = 0) {

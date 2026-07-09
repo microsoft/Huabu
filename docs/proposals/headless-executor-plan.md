@@ -320,7 +320,7 @@ After M3 ships, revisit whether real usage justifies any of:
 - **Cross-turn surgical revert that preserves user's interleaved edits** — deferred to M5; today's all-or-nothing per-message revert is preserved through M4.
 - AI attribution overlay in the canvas itself (text-level provenance via Milkdown already handles content; canvas-level attribution deferred).
 - Approve / reject "AI proposed changes" UX. Today's flow auto-applies; reconsider if user feedback demands it.
-- **Real-time multi-user co-editing of canvas structure** (Figma-style). The delta abstraction (D5) leaves room to add a CRDT layer on top of the delta log later if needed — deltas correspond closely to CRDT ops, so the addition would be additive rather than a rewrite. Not pursued in M1–M4 because (a) Sediment's current workload is single-user + agent + multi-tab; (b) CRDT-for-structure requires non-trivial invariant-compensation machinery (label uniqueness, frame nesting, edge integrity) that off-the-shelf Yjs cannot enforce.
+- **Real-time multi-user co-editing of canvas structure** (collaborative-editor style). The delta abstraction (D5) leaves room to add a CRDT layer on top of the delta log later if needed — deltas correspond closely to CRDT ops, so the addition would be additive rather than a rewrite. Not pursued in M1–M4 because (a) Sediment's current workload is single-user + agent + multi-tab; (b) CRDT-for-structure requires non-trivial invariant-compensation machinery (label uniqueness, frame nesting, edge integrity) that off-the-shelf Yjs cannot enforce.
 
 ## Validation Strategy
 

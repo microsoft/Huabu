@@ -18,7 +18,7 @@
  *      identical gaps along an axis)
  *
  * Each axis is evaluated independently — you can snap X to an edge
- * while Y snaps to an equal-spacing target, matching Figma behaviour.
+ * while Y snaps to an equal-spacing target, matching common design-tool behaviour.
  *
  * Coordinate space: every position and rect is **absolute flow-space**.
  * The caller converts to/from React Flow's local coordinates (which are
@@ -255,8 +255,8 @@ function bestAxisHit(
 
 /**
  * Build a guide segment that spans both the candidate rect and the
- * (post-snap) source rect on the parallel axis. Mirrors Figma's
- * "draw line through both rects" behaviour.
+ * (post-snap) source rect on the parallel axis. Mirrors the common
+ * "draw line through both rects" alignment-guide behaviour.
  */
 function buildGuide(
   axis: 'x' | 'y',
@@ -287,7 +287,7 @@ function buildGuide(
  * Algorithm:
  *   1. Filter candidate rects to those that *do not* overlap the
  *      source on the perpendicular axis (so equal-spacing is between
- *      visually-aligned rows / columns only — same rule as Figma).
+ *      visually-aligned rows / columns only — same rule as common design tools).
  *   2. Split by side: leftOf (rect.max <= source.min) / rightOf
  *      (rect.min >= source.max).
  *   3. For each (L, R) pair, compute the source position that yields
@@ -318,7 +318,7 @@ function bestEqualSpacingHit(
     const rPerpMax = axis === 'x' ? r.y + r.h : r.x + r.w;
 
     // Skip rects that are vertically/horizontally disjoint on the
-    // perpendicular axis (Figma only shows equal-spacing for rects in
+    // perpendicular axis (design tools only show equal-spacing for rects in
     // the same "row" or "column"). A 1px overlap is enough — strict
     // disjoint cuts noise without losing useful matches.
     if (rPerpMax <= srcPerpMin || rPerpMin >= srcPerpMax) continue;
@@ -365,7 +365,7 @@ function bestEqualSpacingHit(
  * two siblings on one side of the source already define a rhythm
  * (their gap `d`), and snaps the source so that the gap from the
  * nearest sibling to the source is also `d` — i.e. the source
- * "continues the row". Matches the Figma behaviour where dragging a
+ * "continues the row". Matches the common design-tool behaviour where dragging a
  * fourth shape to the right of three evenly-spaced ones pulls it
  * into the same cadence.
  *
@@ -428,8 +428,8 @@ function bestTrailingSpacingHit(
   // the source, but that doesn't guarantee they overlap *each other*.
   // A tall/thin source can be flanked by two small siblings that sit
   // at its top and bottom — visually they don't form a row, so we
-  // must not infer a trailing rhythm from them. Figma applies the
-  // same triple-overlap rule.
+  // must not infer a trailing rhythm from them. Common design tools apply
+  // the same triple-overlap rule.
   const perpOverlap = (a: Rect, b: Rect) =>
     !(perpMaxOf(a) <= perpMinOf(b) || perpMinOf(a) >= perpMaxOf(b));
 
