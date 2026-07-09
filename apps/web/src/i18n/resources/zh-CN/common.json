@@ -718,6 +718,7 @@
       "noteMode": "笔记放置模式",
       "textMode": "文本放置模式",
       "sketchMode": "手绘模式",
+      "audioMode": "音频放置模式",
       "questionMode": "问题贴纸放置模式",
       "sendBack": "将选中节点置于底层",
       "bringFront": "将选中节点置于顶层",

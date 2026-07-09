@@ -718,6 +718,7 @@
       "noteMode": "Note placement mode",
       "textMode": "Text placement mode",
       "sketchMode": "Sketch mode",
+      "audioMode": "Audio placement mode",
       "questionMode": "Question Sticker placement mode",
       "sendBack": "Send selected nodes to back",
       "bringFront": "Bring selected nodes to front",
