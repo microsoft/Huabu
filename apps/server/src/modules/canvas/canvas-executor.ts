@@ -58,6 +58,7 @@ import { importForeignNodeSources } from './import-node-src.js';
 import { getLogger } from '../../utils/logger.js';
 import {
   getCanvasStore,
+  withCanvasMutex,
   type CanvasFile,
   type CanvasStore,
   type DeltaLogEntry,
@@ -66,32 +67,6 @@ import {
 import { artifactPath } from '../storage/paths.js';
 
 const log = getLogger('canvas.executor');
-
-// ── Per-canvas async mutex ───────────────────────────────────────────────
-//
-// A single promise per canvasId records the tail of the in-flight task
-// chain. New callers attach onto that tail; the chain catches errors so
-// one failed batch does not poison subsequent ones. We clean up the map
-// entry only when our own chain is still the head — otherwise newer
-// schedules already extended it and own the cleanup.
-
-const canvasMutexChains = new Map<string, Promise<unknown>>();
-
-async function withCanvasMutex<T>(
-  canvasId: string,
-  task: () => Promise<T>,
-): Promise<T> {
-  const prev = canvasMutexChains.get(canvasId) ?? Promise.resolve();
-  const next = prev.catch(() => undefined).then(task);
-  canvasMutexChains.set(canvasId, next);
-  try {
-    return await next;
-  } finally {
-    if (canvasMutexChains.get(canvasId) === next) {
-      canvasMutexChains.delete(canvasId);
-    }
-  }
-}
 
 // ── Markdown-backed-node knowledge (mirrors canvas.route.ts) ─────────────
 //

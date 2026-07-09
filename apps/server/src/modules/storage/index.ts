@@ -25,6 +25,7 @@ import type { CanvasFile } from './canvas-store.js';
 import type { CanvasSummary } from '@sediment/shared';
 
 export { CanvasStore } from './canvas-store.js';
+export { withCanvasMutex } from './write-coordinator.js';
 export type {
   CanvasFile,
   CanvasEvent,
