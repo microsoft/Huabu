@@ -1272,6 +1272,7 @@ const useCanvasStore = create<RFState>()(
         getNodes: () => get().nodes,
         setNodes: (nodes) => set({ nodes }),
         triggerPreprocessing: preprocessQueue.schedule,
+        forgetNodeContent: nodeContentQueue.forgetNode,
       });
     },
 
@@ -1399,6 +1400,7 @@ const useCanvasStore = create<RFState>()(
         getNodes: () => get().nodes,
         setNodes: (nodes) => get()._setStateNoAutosave({ nodes }),
         triggerPreprocessing: preprocessQueue.schedule,
+        forgetNodeContent: nodeContentQueue.forgetNode,
       });
 
       return skippedNodeIds;

@@ -144,6 +144,19 @@ export type NodeContentQueue = {
   clearDuplicateGuard(nodeId: string): void;
 
   /**
+   * Drop ALL per-node bookkeeping for a node that no longer exists
+   * (deleted / removed from the canvas). Cancels any pending debounce
+   * and clears its entries in every per-node map/set — the CAS
+   * baseline, the frozen/conflict guards, the save-error and duplicate
+   * toast guards, and the last-good rename anchor — so a long session
+   * of create/delete churn does not leak memory keyed by dead node ids.
+   * Idempotent: forgetting an unknown node is a no-op. An in-flight PUT
+   * is left to settle on its own (its `inflight` entry self-clears);
+   * `buildRequest` already returns `null` for a node gone from the store.
+   */
+  forgetNode(nodeId: string): void;
+
+  /**
    * Node ids with un-persisted content edits — pending debounced saves
    * plus in-flight PUTs. Used by the sync applier to protect a node the
    * user is mid-editing from an incoming agent write.
@@ -304,6 +317,11 @@ export function createNodeContentQueue(opts: {
     // Optimistic-concurrency baseline. A node we've loaded / synced has a
     // seeded rev; a brand-new node (no entry) sends the empty-content rev
     // so its create only lands while no `.md` exists yet on the server.
+    // The web sends this uniformly for every md-backed node; the server
+    // applies the rev-CAS only for `authored` bodies (note / text /
+    // question) and ignores it for `derived` (last-write-wins) types —
+    // `bodyOwnership` in the preprocessing profiles is the single source
+    // of truth, so the client need not know the classification.
     body.expectRev = baselineRev.get(nodeId) ?? REV_EMPTY;
 
     return body;
@@ -830,6 +848,16 @@ export function createNodeContentQueue(opts: {
 
     clearDuplicateGuard(nodeId) {
       duplicateToasted.delete(nodeId);
+    },
+
+    forgetNode(nodeId) {
+      debouncer.cancel(nodeId);
+      baselineRev.delete(nodeId);
+      frozen.delete(nodeId);
+      contentConflictToasted.delete(nodeId);
+      saveErrorToasted.delete(nodeId);
+      duplicateToasted.delete(nodeId);
+      lastSuccessful.delete(nodeId);
     },
 
     seedBaselines(nodes) {

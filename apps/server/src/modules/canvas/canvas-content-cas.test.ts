@@ -211,4 +211,33 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
       await app.close();
     }
   });
+
+  it('ignores expectRev for a derived node type (last-write-wins)', async () => {
+    // `pdf` is a `derived` body (bodyOwnership !== 'authored'): its text is
+    // produced by preprocessing, not authored in-app, so the server drops
+    // any `expectRev` and lets the write land even when the client's baseline
+    // is stale — the web sends `expectRev` uniformly but only `authored`
+    // types are CAS-guarded. Without this a brand-new pdf's `expectRev`
+    // would false-conflict against its own `persist_source` write.
+    const app = await buildApp();
+    try {
+      seedCanvas('c1', 'n1', 'Doc');
+      getCanvasStore('c1').writeNode('n1', {
+        nodeId: 'n1',
+        type: 'pdf',
+        label: 'Doc',
+        content: 'extracted text on disk',
+      });
+      // A stale REV_EMPTY baseline would 409 for an authored node, but a
+      // derived node ignores it → the write is accepted (overwrite).
+      const res = await putContent(app, 'c1', 'n1', {
+        nodeType: 'pdf',
+        content: 're-extracted text',
+        expectRev: REV_EMPTY,
+      });
+      expect(res.statusCode).toBe(200);
+    } finally {
+      await app.close();
+    }
+  });
 });

@@ -45,6 +45,7 @@ function run(
     getNodes: () => [],
     setNodes: () => undefined,
     triggerPreprocessing,
+    forgetNodeContent: () => undefined,
   });
 }
 

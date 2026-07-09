@@ -29,7 +29,7 @@ import {
 import { searchCanvas } from './canvas-search.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
 import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
-import { getPreprocessDispatcher } from '../preprocessing/index.js';
+import { getPreprocessDispatcher, getProfile } from '../preprocessing/index.js';
 import { stripOfficeparserPreamble } from '../preprocessing/loaders/office-strip.js';
 import {
   refreshCanvasDirIndex,
@@ -44,6 +44,7 @@ import {
   listCanvasSummaries,
   updateNode,
   type CanvasFile,
+  type UpdateNodeOutcome,
 } from '../storage/index.js';
 import { canvasRoot, nodesDir } from '../storage/paths.js';
 import { getWorkspacePath } from '../workspace.js';
@@ -718,10 +719,23 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     // Strict rename only for user-typed labels: the `tryRename` flow awaits
     // the 409 to revert the optimistic label. Agent / auto labels lazy-dedupe
     // with `(N)` suffixes because batched agent runs cannot react to a 409.
-    let outcome;
+    //
+    // rev-CAS gating lives HERE, keyed off the node's `bodyOwnership` in the
+    // preprocessing profiles — the single source of truth for who is
+    // CAS-guarded. Only `authored` bodies (note / text / question) are
+    // optimistic-concurrency-checked: their in-app body is the resource a
+    // stale writer could clobber. `derived` bodies (extracted / bodyless) are
+    // last-write-wins — their sole concurrent writer is preprocess `persist`,
+    // which writes without CAS, so honoring `expectRev` for them would buy no
+    // safety and only risk a false `NODE_CONTENT_CONFLICT` (e.g. a brand-new
+    // image whose `expectRev` races its own `persist_source` write). The web
+    // sends `expectRev` uniformly and need not know the classification; the
+    // server drops it for non-authored types.
+    const isAuthored = getProfile(nodeType)?.bodyOwnership === 'authored';
+    let outcome: UpdateNodeOutcome;
     try {
       outcome = await updateNode(store, nodeId, {
-        expectRev,
+        expectRev: isAuthored ? expectRev : undefined,
         apply,
         strictRename: labelSource === 'user',
       });

@@ -45,6 +45,14 @@ export interface RunWebPostEffectsInput {
    * timer map), so it is provided per-call rather than imported.
    */
   triggerPreprocessing: (node: Node) => void;
+  /**
+   * Drop all per-node save-queue bookkeeping (CAS baseline, conflict /
+   * error guards, rename anchor) for a deleted node. Injected as a
+   * closure over the store's private `nodeContentQueue` singleton, same
+   * pattern as {@link triggerPreprocessing}, to keep this module free of
+   * a back-import cycle with the canvas store.
+   */
+  forgetNodeContent: (nodeId: string) => void;
 }
 
 /**
@@ -56,7 +64,14 @@ export interface RunWebPostEffectsInput {
  *  3. deferred frame fit (double-rAF)
  */
 export function runWebPostEffects(input: RunWebPostEffectsInput): void {
-  const { effects, canvasId, getNodes, setNodes, triggerPreprocessing } = input;
+  const {
+    effects,
+    canvasId,
+    getNodes,
+    setNodes,
+    triggerPreprocessing,
+    forgetNodeContent,
+  } = input;
 
   // 1. Trigger preprocessing for created / mutated nodes. The server
   // decides per node profile whether any actual work runs.
@@ -88,6 +103,9 @@ export function runWebPostEffects(input: RunWebPostEffectsInput): void {
   // 2. Track server-side deletes for local history.
   for (const nodeId of effects.deletedNodeIds) {
     canvasHistoryManager.trackDelete(canvasId, nodeId);
+    // Release the node's per-node save-queue state so a long session of
+    // create/delete churn doesn't leak bookkeeping keyed by dead ids.
+    forgetNodeContent(nodeId);
   }
 
   // 2b. If a deleted node was a question node whose conversation is
