@@ -22,32 +22,79 @@ export type ShortcutSection = {
 };
 
 /**
+ * A real, matchable key combo — the canonical (machine-first) form. Handlers
+ * compare a `KeyboardEvent` against this directly (no string parsing); the
+ * display template is *derived* from it via `comboToTemplate`.
+ *
+ * - `mod`   Cmd on macOS / Ctrl elsewhere.
+ * - `key`   The main key, compared against `KeyboardEvent.key`. An array
+ *           means "any of" — aliases or multi-bindings (`['[', '【']`,
+ *           `['+', '=']`); the FIRST entry is the one shown in the UI.
+ */
+export type KeyCombo = {
+  mod?: boolean;
+  shift?: boolean;
+  alt?: boolean;
+  key: string | string[];
+};
+
+/**
  * Metadata for a single user-facing shortcut — the single source of truth
- * that feeds every surface which *displays* a shortcut (today: the
- * keyboard-shortcuts help modal; next: the app-menu / dropdown hints).
+ * feeding every surface that *displays* a shortcut (help modal, docs page,
+ * AppMenu dropdown hints). Runtime *handlers* stay in their own
+ * components/hooks (context-specific guards can't be centralized) but match
+ * against `combo` directly, so display and behaviour can't drift.
  *
- * The runtime *handlers* still live in their own components/hooks (they
- * carry context-specific guards that can't be centralized); this catalog
- * only owns the display metadata so those surfaces can't drift apart.
+ * Each entry is EITHER a `combo` (a real, matchable key combination) OR a
+ * `gesture` (a display-only string for things that aren't a plain combo:
+ * `Space (hold)`, `↑ / ↓`, the drag-copy modifier). The union enforces
+ * exactly one of the two.
  *
- * - `id`      Stable identity. Not consumed by the help modal itself, but
- *             the anchor the menu / dropdown reference a specific shortcut
- *             by (and the future key for user-rebinding).
- * - `keys`    The existing `Ctrl/Cmd+…` template understood by
- *             `shortcutTokens` / `formatShortcut` in `utils/platform.ts`.
- *             Descriptive gestures (`Space (hold)`, `↑ / ↓`) pass through
- *             unchanged, so this one field covers both real key combos and
- *             documented gestures — no separate representation needed.
- * - `descriptionKey`  i18n key, resolved with `t()` at render time (kept as
- *             a key so the catalog stays a static, side-effect-free const).
- * - `section` i18n key for the group heading in the help modal.
+ * `descriptionKey` / `section` are i18n keys resolved with `t()` at render
+ * time, so the catalog stays a static, side-effect-free const.
  */
 export type ShortcutDef = {
   id: string;
-  keys: string;
   descriptionKey: I18nKey;
   section: I18nKey;
+} & ({ combo: KeyCombo; gesture?: never } | { gesture: string; combo?: never });
+
+/**
+ * Placeholder tokens for keys that would collide with the `+` separator in
+ * the display template (mirrors `utils/platform.ts`), plus friendlier
+ * labels for a couple of named keys.
+ */
+const COMBO_DISPLAY_TOKEN: Record<string, string> = {
+  '+': 'Plus',
+  '-': 'Minus',
+  '=': 'Equal',
+  Escape: 'Esc',
 };
+
+/**
+ * Derive the legacy `Ctrl/Cmd+…` display template from a {@link KeyCombo} so
+ * the existing string-based renderers (`shortcutTokens`, the docs
+ * `ShortcutKbd`) and `formatShortcut` keep working unchanged. Uses the
+ * FIRST key of an alias array for display; single-letter keys are
+ * upper-cased.
+ */
+function comboToTemplate(combo: KeyCombo): string {
+  const parts: string[] = [];
+  if (combo.mod) parts.push('Ctrl/Cmd');
+  if (combo.shift) parts.push('Shift');
+  if (combo.alt) parts.push('Alt');
+  const primary = Array.isArray(combo.key) ? combo.key[0] : combo.key;
+  parts.push(
+    COMBO_DISPLAY_TOKEN[primary] ??
+      (primary.length === 1 ? primary.toUpperCase() : primary),
+  );
+  return parts.join('+');
+}
+
+/** The display template for any def, whether a `combo` or a `gesture`. */
+function shortcutTemplate(def: ShortcutDef): string {
+  return def.combo ? comboToTemplate(def.combo) : def.gesture;
+}
 
 const SECTION = {
   general: 'shortcuts.sections.general',
@@ -69,31 +116,31 @@ export const SHORTCUTS: ShortcutDef[] = [
   // Editing
   {
     id: 'edit.undo',
-    keys: 'Ctrl/Cmd+Z',
+    combo: { mod: true, key: 'z' },
     descriptionKey: 'shortcuts.items.undo',
     section: SECTION.editing,
   },
   {
     id: 'edit.redo',
-    keys: 'Ctrl/Cmd+Shift+Z',
+    combo: { mod: true, shift: true, key: 'z' },
     descriptionKey: 'shortcuts.items.redo',
     section: SECTION.editing,
   },
   {
     id: 'edit.copy',
-    keys: 'Ctrl/Cmd+C',
+    combo: { mod: true, key: 'c' },
     descriptionKey: 'shortcuts.items.copySelectedNodes',
     section: SECTION.editing,
   },
   {
     id: 'edit.paste',
-    keys: 'Ctrl/Cmd+V',
+    combo: { mod: true, key: 'v' },
     descriptionKey: 'shortcuts.items.paste',
     section: SECTION.editing,
   },
   {
     id: 'edit.delete',
-    keys: 'Delete / Backspace',
+    gesture: 'Delete / Backspace',
     descriptionKey: 'shortcuts.items.deleteSelected',
     section: SECTION.editing,
   },
@@ -101,13 +148,13 @@ export const SHORTCUTS: ShortcutDef[] = [
   // Layout
   {
     id: 'view.zoomIn',
-    keys: 'Ctrl/Cmd+Plus',
+    combo: { mod: true, key: ['+', '='] },
     descriptionKey: 'shortcuts.items.zoomIn',
     section: SECTION.layout,
   },
   {
     id: 'view.zoomOut',
-    keys: 'Ctrl/Cmd+Minus',
+    combo: { mod: true, key: ['-', '_'] },
     descriptionKey: 'shortcuts.items.zoomOut',
     section: SECTION.layout,
   },
@@ -115,67 +162,67 @@ export const SHORTCUTS: ShortcutDef[] = [
   // Toolbar (tools + placement modes)
   {
     id: 'tool.temporaryPan',
-    keys: 'Space (hold)',
+    gesture: 'Space (hold)',
     descriptionKey: 'shortcuts.items.temporaryPan',
     section: SECTION.toolbar,
   },
   {
     id: 'tool.moveWithoutFrame',
-    keys: 'Space (hold while dragging)',
+    gesture: 'Space (hold while dragging)',
     descriptionKey: 'shortcuts.items.moveWithoutFrame',
     section: SECTION.toolbar,
   },
   {
     id: 'tool.select',
-    keys: 'S',
+    combo: { key: 's' },
     descriptionKey: 'shortcuts.items.selectTool',
     section: SECTION.toolbar,
   },
   {
     id: 'tool.pan',
-    keys: 'P',
+    combo: { key: 'p' },
     descriptionKey: 'shortcuts.items.panTool',
     section: SECTION.toolbar,
   },
   {
     id: 'tool.lasso',
-    keys: 'L',
+    combo: { key: 'l' },
     descriptionKey: 'shortcuts.items.lassoTool',
     section: SECTION.toolbar,
   },
   {
     id: 'mode.frame',
-    keys: '1',
+    combo: { key: '1' },
     descriptionKey: 'shortcuts.items.frameMode',
     section: SECTION.toolbar,
   },
   {
     id: 'mode.note',
-    keys: '2',
+    combo: { key: '2' },
     descriptionKey: 'shortcuts.items.noteMode',
     section: SECTION.toolbar,
   },
   {
     id: 'mode.text',
-    keys: '3',
+    combo: { key: '3' },
     descriptionKey: 'shortcuts.items.textMode',
     section: SECTION.toolbar,
   },
   {
     id: 'mode.sketch',
-    keys: '4',
+    combo: { key: '4' },
     descriptionKey: 'shortcuts.items.sketchMode',
     section: SECTION.toolbar,
   },
   {
     id: 'mode.audio',
-    keys: '5',
+    combo: { key: '5' },
     descriptionKey: 'shortcuts.items.audioMode',
     section: SECTION.toolbar,
   },
   {
     id: 'mode.question',
-    keys: 'Q',
+    combo: { key: 'q' },
     descriptionKey: 'shortcuts.items.questionMode',
     section: SECTION.toolbar,
   },
@@ -183,29 +230,30 @@ export const SHORTCUTS: ShortcutDef[] = [
   // Layering & grouping
   {
     id: 'layer.sendBack',
-    keys: '[',
+    combo: { key: ['[', '【'] },
     descriptionKey: 'shortcuts.items.sendBack',
     section: SECTION.layeringGrouping,
   },
   {
     id: 'layer.bringFront',
-    keys: ']',
+    combo: { key: [']', '】'] },
     descriptionKey: 'shortcuts.items.bringFront',
     section: SECTION.layeringGrouping,
   },
   {
     id: 'layer.group',
-    keys: 'Ctrl/Cmd+G',
+    combo: { mod: true, key: 'g' },
     descriptionKey: 'shortcuts.items.groupFrame',
     section: SECTION.layeringGrouping,
   },
 
-  // Drag & drop. Platform-aware: macOS uses Option (matches Finder; Cmd is
-  // reserved by the OS for NSDragOperation and cannot be read reliably as a
-  // JS drag modifier), Windows / Linux use Ctrl (matches Explorer / Files).
+  // Drag & drop (display-only gesture; the modifier is read off the drag
+  // event, not a keydown). Platform-aware: macOS uses Option (Cmd is
+  // reserved by the OS for NSDragOperation and can't be read as a JS drag
+  // modifier), Windows / Linux use Ctrl.
   {
     id: 'dnd.copyNoteBlock',
-    keys: isMac
+    gesture: isMac
       ? 'Option / ⌥ (hold while dragging)'
       : 'Ctrl (hold while dragging)',
     descriptionKey: 'shortcuts.items.copyNoteBlock',
@@ -215,13 +263,13 @@ export const SHORTCUTS: ShortcutDef[] = [
   // AI
   {
     id: 'ai.openIntent',
-    keys: 'Ctrl/Cmd+I',
+    combo: { mod: true, key: 'i' },
     descriptionKey: 'shortcuts.items.openIntent',
     section: SECTION.ai,
   },
   {
     id: 'ai.submitQuestion',
-    keys: 'Shift+Enter',
+    combo: { shift: true, key: 'Enter' },
     descriptionKey: 'shortcuts.items.submitQuestion',
     section: SECTION.ai,
   },
@@ -229,31 +277,31 @@ export const SHORTCUTS: ShortcutDef[] = [
   // Search
   {
     id: 'search.open',
-    keys: 'Ctrl/Cmd+F',
+    combo: { mod: true, key: 'f' },
     descriptionKey: 'shortcuts.items.searchCanvas',
     section: SECTION.search,
   },
   {
     id: 'search.jumpResult',
-    keys: 'Enter',
+    combo: { key: 'Enter' },
     descriptionKey: 'shortcuts.items.jumpResult',
     section: SECTION.search,
   },
   {
     id: 'search.previousMatch',
-    keys: 'Shift+Enter',
+    combo: { shift: true, key: 'Enter' },
     descriptionKey: 'shortcuts.items.previousMatch',
     section: SECTION.search,
   },
   {
     id: 'search.moveBetweenResults',
-    keys: '↑ / ↓',
+    gesture: '↑ / ↓',
     descriptionKey: 'shortcuts.items.moveBetweenResults',
     section: SECTION.search,
   },
   {
     id: 'search.close',
-    keys: 'Esc',
+    combo: { key: 'Escape' },
     descriptionKey: 'shortcuts.items.closeSearch',
     section: SECTION.search,
   },
@@ -261,13 +309,13 @@ export const SHORTCUTS: ShortcutDef[] = [
   // Help
   {
     id: 'help.show',
-    keys: '?',
+    combo: { key: '?' },
     descriptionKey: 'shortcuts.items.showShortcuts',
     section: SECTION.help,
   },
   {
     id: 'help.close',
-    keys: 'Esc',
+    combo: { key: 'Escape' },
     descriptionKey: 'shortcuts.items.closeShortcuts',
     section: SECTION.help,
   },
@@ -287,13 +335,13 @@ export const SHORTCUTS: ShortcutDef[] = [
 export const APP_SHORTCUTS: ShortcutDef[] = [
   {
     id: 'app.newCanvas',
-    keys: 'Ctrl/Cmd+N',
+    combo: { mod: true, key: 'n' },
     descriptionKey: 'shortcuts.items.newCanvas',
     section: SECTION.general,
   },
   {
     id: 'app.openSettings',
-    keys: 'Ctrl/Cmd+,',
+    combo: { mod: true, key: ',' },
     descriptionKey: 'shortcuts.items.openSettings',
     section: SECTION.general,
   },
@@ -304,12 +352,14 @@ const SHORTCUTS_BY_ID = new Map(
 );
 
 /**
- * Look up a shortcut's display `keys` template by id across both catalogs.
- * Used by the `AppMenu` dropdown so its hints come from the same
- * definitions the help modal renders. Format with `formatShortcut`.
+ * Look up a shortcut's display `keys` template by id across both catalogs
+ * (derived from its `combo`, or the raw `gesture` string). Used by the
+ * `AppMenu` dropdown so its hints come from the same definitions the help
+ * modal renders. Format with `formatShortcut`.
  */
 export function getShortcutKeys(id: string): string | undefined {
-  return SHORTCUTS_BY_ID.get(id)?.keys;
+  const def = SHORTCUTS_BY_ID.get(id);
+  return def ? shortcutTemplate(def) : undefined;
 }
 
 /**
@@ -333,7 +383,10 @@ export function getKeyboardShortcutSections(t: TFunction): ShortcutSection[] {
       bySection.set(def.section, items);
       order.push(def.section);
     }
-    items.push({ keys: def.keys, description: t(def.descriptionKey) });
+    items.push({
+      keys: shortcutTemplate(def),
+      description: t(def.descriptionKey),
+    });
   }
 
   return order.map((section) => ({
