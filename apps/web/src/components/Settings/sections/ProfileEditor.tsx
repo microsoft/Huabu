@@ -37,6 +37,14 @@ interface ProfileEditorFormProps {
   editing: AcpAgentProfile | null;
   /** Host-detected CLIs used to pre-fill `command` for new profiles. */
   detectedClis: AcpAgentCliInfo[];
+  /**
+   * Whether host-CLI detection has settled at least once. Until it has,
+   * a new profile keeps the Built-in tab active with a "detecting…"
+   * placeholder instead of prematurely falling back to Custom — which
+   * would flash the Custom tab open on mount and then snap to Built-in
+   * once the CLIs arrive.
+   */
+  detectionLoaded: boolean;
   /** Dismiss the editor (cancel or after a successful save). */
   onClose: () => void;
   /** Parent re-fetches profiles after the mutation succeeds. */
@@ -236,11 +244,19 @@ const FieldLabel: React.FC<{
 export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
   editing,
   detectedClis,
+  detectionLoaded,
   onClose,
   onSaved,
 }) => {
   const { t } = useTranslation();
-  const [form, setForm] = useState<ProfileFormState>(EMPTY_FORM);
+  // Start a *new* profile on the Built-in tab (empty `cliId` → the
+  // `agentMode` derivation below reads it as 'detected'). This keeps the
+  // Built-in tab active while detection is still in flight so the tab
+  // never flashes Custom → Built-in. The effect below commits the real
+  // default (first CLI, or Custom when none) once detection settles.
+  const [form, setForm] = useState<ProfileFormState>(() =>
+    editing ? EMPTY_FORM : { ...EMPTY_FORM, cliId: '' },
+  );
   const [saving, setSaving] = useState(false);
 
   // Reset the form whenever the editor is (re)opened for a different
@@ -283,7 +299,12 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
         });
       }
     } else {
-      // For new profiles, default to the first detected CLI so the
+      // For new profiles, wait for host-CLI detection to settle before
+      // committing a default. Until then keep `cliId` empty so the
+      // Built-in tab stays active with a "detecting…" placeholder
+      // (see the render below) rather than momentarily showing Custom.
+      if (!detectionLoaded) return;
+      // Detection done: default to the first detected CLI so the
       // structured controls appear immediately. Falls back to
       // `'custom'` when nothing is on PATH. `displayName` stays empty
       // so the input's placeholder shows the derived default — the
@@ -295,7 +316,7 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
         cliId: firstDetected ? firstDetected.id : 'custom',
       });
     }
-  }, [editing, detectedClis]);
+  }, [editing, detectedClis, detectionLoaded]);
 
   /**
    * Switching CLIs resets the per-CLI allow-all flag since the
@@ -616,7 +637,14 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
             ) : agentMode === 'detected' ? (
               <label className="flex flex-col gap-1 text-xs">
                 <FieldLabel>{t('settings.agent')}</FieldLabel>
-                {cliOptions.length > 0 ? (
+                {!detectionLoaded ? (
+                  // Detection still in flight — a neutral placeholder
+                  // avoids flashing the "no CLI found" copy before the
+                  // CLIs have actually been probed.
+                  <div className="border-edge-default bg-surface text-fg-subtle rounded border px-2 py-1 text-xs leading-snug">
+                    {t('settings.detectingClis')}
+                  </div>
+                ) : cliOptions.length > 0 ? (
                   <Select
                     value={form.cliId}
                     onChange={handleCliChange}
@@ -746,6 +774,7 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
   isOpen,
   editing,
   detectedClis,
+  detectionLoaded,
   onClose,
   onSaved,
 }) => {
@@ -764,6 +793,7 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
       <ProfileEditorForm
         editing={editing}
         detectedClis={detectedClis}
+        detectionLoaded={detectionLoaded}
         onClose={onClose}
         onSaved={onSaved}
       />
@@ -778,9 +808,19 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
  *
  * Detection failures degrade silently — callers receive `[]` and the
  * editor's Auto-detected dropdown just falls back to "Custom command".
+ *
+ * `loaded` starts `false` and flips `true` after the first detection
+ * attempt settles (success or failure). Callers use it to avoid
+ * committing a "no CLI found → custom" default before detection has
+ * actually run, which would otherwise flash the Custom tab open on
+ * mount and then snap to Built-in once the CLIs arrive.
  */
-export function useDetectedClis(): AcpAgentCliInfo[] {
+export function useDetectedClis(): {
+  detectedClis: AcpAgentCliInfo[];
+  loaded: boolean;
+} {
   const [detectedClis, setDetectedClis] = useState<AcpAgentCliInfo[]>([]);
+  const [loaded, setLoaded] = useState(false);
   useEffect(() => {
     let cancelled = false;
     /**
@@ -799,6 +839,9 @@ export function useDetectedClis(): AcpAgentCliInfo[] {
           // Detection failure is non-fatal — the Custom option still
           // works. Don't pop a toast; the dropdown just shows "Custom"
           // as the only entry.
+        })
+        .finally(() => {
+          if (!cancelled) setLoaded(true);
         });
     };
     load();
@@ -809,5 +852,5 @@ export function useDetectedClis(): AcpAgentCliInfo[] {
       window.removeEventListener('workspace-changed', handler);
     };
   }, []);
-  return detectedClis;
+  return { detectedClis, loaded };
 }

@@ -128,7 +128,7 @@ export const AcpSettings: React.FC = () => {
   // Host-CLI detection — see the shared `useDetectedClis` hook above
   // for rationale (single fetch, silent on failure). Re-using the hook
   // keeps Settings and `NewChatMenu`'s inline editor in lockstep.
-  const detectedClis = useDetectedClis();
+  const { detectedClis, loaded: detectionLoaded } = useDetectedClis();
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<AcpAgentProfile | null>(null);
@@ -332,6 +332,7 @@ export const AcpSettings: React.FC = () => {
             <ProfileEditorForm
               editing={editing}
               detectedClis={detectedClis}
+              detectionLoaded={detectionLoaded}
               onClose={() => setEditorOpen(false)}
               onSaved={handleSaved}
             />
