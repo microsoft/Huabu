@@ -50,6 +50,7 @@ import { canvasRoot, nodesDir } from '../storage/paths.js';
 import { getWorkspacePath } from '../workspace.js';
 
 import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
+import type { CanvasNodeType } from '@sediment/shared';
 import type {
   ApiResult,
   CanvasCommand,
@@ -731,7 +732,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     // image whose `expectRev` races its own `persist_source` write). The web
     // sends `expectRev` uniformly and need not know the classification; the
     // server drops it for non-authored types.
-    const isAuthored = getProfile(nodeType)?.bodyOwnership === 'authored';
+    const isAuthored =
+      getProfile(nodeType as CanvasNodeType)?.bodyOwnership === 'authored';
     let outcome: UpdateNodeOutcome;
     try {
       outcome = await updateNode(store, nodeId, {
