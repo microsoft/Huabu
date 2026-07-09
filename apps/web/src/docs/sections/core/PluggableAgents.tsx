@@ -47,10 +47,10 @@ export default function PluggableAgents() {
       </ul>
       <P>
         Any external agent that speaks a standard agent protocol can plug in.
-        The coding CLIs Huabu detects out of the box — <Code>claude</Code>,{' '}
-        <Code>copilot</Code> and <Code>gemini</Code> — are just the obvious
-        starting points; any other compatible agent works through the same
-        bridge.
+        The coding CLIs Huabu detects out of the box — <Code>copilot</Code>,{' '}
+        <Code>claude</Code>, <Code>gemini</Code> and <Code>codex</Code> — are
+        just the obvious starting points; any other compatible agent works
+        through the same bridge.
       </P>
 
       <H2>How the bridge works</H2>

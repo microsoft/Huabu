@@ -29,7 +29,7 @@ export default function QuickStart() {
 │   ├── canvas.json          # canvas topology
 │   ├── nodes/               # one Markdown file per node
 │   ├── .artifacts/          # raw binaries (PDFs, images, videos)
-│   ├── memory/canvas.md     # AI-written canvas memory
+│   ├── .memory/canvas.md    # AI-written canvas memory
 │   └── .history/            # chat + intent history
 └── setting/
     ├── .huabu.md            # workspace-wide memory

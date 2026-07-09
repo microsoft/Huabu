@@ -14,7 +14,7 @@ import {
 } from '../../components';
 
 const toc: TocEntry[] = [
-  { id: 'the-nine-types', label: 'The nine node types' },
+  { id: 'the-ten-node-types', label: 'The ten node types' },
   { id: 'expand-and-edit', label: 'Expand & edit' },
   { id: 'single-select-toolbar', label: 'Single-select toolbar' },
   { id: 'multi-select-toolbar', label: 'Multi-select toolbar' },

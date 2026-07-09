@@ -179,7 +179,7 @@ export default function Overview() {
             icon={Boxes}
             eyebrow="Canvas"
             title="Nodes"
-            description="Nine node types — Note, Text, Image, PDF, Video, Web, Frame, Sketch, Question."
+            description="Ten node types — Note, Text, Image, PDF, Office, Video, Web, Frame, Sketch, Question."
           />
           <NavCard
             to="/docs/nodes/edges"

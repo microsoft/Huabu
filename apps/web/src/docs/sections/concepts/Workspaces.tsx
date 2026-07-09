@@ -54,7 +54,7 @@ export default function Workspaces() {
 │   ├── canvas.json          topology (nodes, edges, version)
 │   ├── nodes/               one Markdown file per node
 │   ├── .artifacts/          hidden: raw binaries (PDFs, images, videos)
-│   ├── memory/canvas.md     AI-written canvas memory
+│   ├── .memory/canvas.md    AI-written canvas memory
 │   └── .history/            hidden: chat & intent history
 └── setting/
     ├── .huabu.md            workspace-wide memory
