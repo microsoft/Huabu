@@ -124,7 +124,7 @@ export const IntegrationsSettings: React.FC = () => {
   }, [init]);
 
   return (
-    <SettingSection title={t('settings.integrations')} collapsible>
+    <SettingSection title={t('settings.otherCapabilities')} collapsible>
       <IntegrationKeyRow
         title={t('settings.webSearch')}
         description={t('settings.webSearchDescription')}

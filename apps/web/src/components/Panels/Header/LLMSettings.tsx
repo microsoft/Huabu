@@ -117,7 +117,7 @@ export const LLMSettings: React.FC = () => {
 
   return (
     <>
-      <SettingSection title={t('settings.llmProvider')} collapsible>
+      <SettingSection title={t('settings.chatModel')} collapsible>
         <SettingRow title={t('settings.provider')}>
           <div className="w-44">
             <Select

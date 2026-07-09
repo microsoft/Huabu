@@ -1,8 +1,8 @@
 import React from 'react';
 
 interface SettingRowProps {
-  /** Primary label for the setting. */
-  title: string;
+  /** Primary label for the setting. Omit when the section heading already names it. */
+  title?: string;
   /** Optional secondary description text. */
   description?: string;
   /** Control element rendered on the right (e.g. Button, Toggle, Select, link icon). */
@@ -27,7 +27,9 @@ export const SettingRow: React.FC<SettingRowProps> = ({
       className={`flex items-center justify-between gap-3 px-3 py-2.5 ${className}`.trim()}
     >
       <div className="min-w-0 flex-1">
-        <p className="text-fg-default text-xs font-medium">{title}</p>
+        {title && (
+          <p className="text-fg-default text-xs font-medium">{title}</p>
+        )}
         {description && (
           <p className="text-fg-subtle mt-0.5 text-[11px] leading-snug">
             {description}

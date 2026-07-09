@@ -100,11 +100,7 @@ export const ImageProviderSettings: React.FC = () => {
   );
 
   return (
-    <SettingSection
-      title={t('settings.imageProvider')}
-      collapsible
-      defaultCollapsed
-    >
+    <SettingSection title={t('settings.imageGeneration')} collapsible>
       <SettingRow title={t('settings.provider')}>
         <div className="w-44">
           <Select

@@ -135,17 +135,21 @@ const AgentletHealthBanner: React.FC<AgentletHealthBannerProps> = ({
   );
 };
 
-// ── Profile editor modal ──────────────────────────────────────────────
+// ── Profile editor ────────────────────────────────────────────────────
 
-interface ProfileEditorModalProps {
-  isOpen: boolean;
+interface ProfileEditorFormProps {
   /** When non-null we're editing; when null we're creating. */
   editing: AcpAgentProfile | null;
   /** Host-detected CLIs used to pre-fill `command` for new profiles. */
   detectedClis: AcpAgentCliInfo[];
+  /** Dismiss the editor (cancel or after a successful save). */
   onClose: () => void;
   /** Parent re-fetches profiles after the mutation succeeds. */
   onSaved: () => Promise<void>;
+}
+
+interface ProfileEditorModalProps extends ProfileEditorFormProps {
+  isOpen: boolean;
 }
 
 interface ProfileFormState {
@@ -334,8 +338,7 @@ const FieldLabel: React.FC<{
   );
 };
 
-export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
-  isOpen,
+export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
   editing,
   detectedClis,
   onClose,
@@ -345,11 +348,11 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
   const [form, setForm] = useState<ProfileFormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
 
-  // Reset the form whenever the dialog opens for a different profile
-  // (or transitions create ↔ edit). Done as an effect so the form
-  // state is reset before the first render of the open dialog.
+  // Reset the form whenever the editor is (re)opened for a different
+  // profile (or transitions create ↔ edit). The form only mounts while
+  // the editor is visible — as a Modal child (unmounted when closed) or
+  // as the inline detail pane — so a mount is equivalent to an "open".
   useEffect(() => {
-    if (!isOpen) return;
     if (editing) {
       if (editing.cliId === 'agent-team' && editing.agentTeam) {
         // Agent Team profile — populate agent-team fields
@@ -397,7 +400,7 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
         cliId: firstDetected ? firstDetected.id : 'custom',
       });
     }
-  }, [isOpen, editing, detectedClis]);
+  }, [editing, detectedClis]);
 
   /**
    * Switching CLIs resets the per-CLI allow-all flag since the
@@ -609,62 +612,83 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
   );
 
   return (
-    <Modal
-      isOpen={isOpen}
-      onClose={onClose}
-      title={
-        editing
-          ? t('settings.editExternalAgent')
-          : t('settings.newExternalAgent')
-      }
-      className="w-104"
-      footer={
-        <div className="flex justify-end gap-2">
-          <Button
-            variant="outline"
-            tone="neutral"
-            size="sm"
-            onClick={onClose}
-            disabled={saving}
-          >
-            {t('actions.cancel')}
-          </Button>
-          <Button
-            variant="solid"
-            tone="info"
-            size="sm"
-            onClick={() => void handleSubmit()}
-            disabled={saving}
-          >
-            {saving
-              ? t('settings.saving')
-              : editing
-                ? t('settings.saveChanges')
-                : t('settings.createProfile')}
-          </Button>
-        </div>
-      }
-    >
-      <div className="flex flex-col gap-5 px-1 py-1">
-        {/* ─── Agent ─────────────────────────────────────────────── */}
-        <div className="flex flex-col gap-3">
-          {/*
-           * Hide the picker on edit because `cliId` is immutable in the
-           * update schema (changing it would silently break the persisted
-           * binding). Show the chosen agent as a static label so the user
-           * still sees what's wired up.
-           */}
-          {editing ? (
-            editing.cliId === 'agent-team' ? (
+    <div className="flex flex-col gap-5">
+      {/* ─── Agent ─────────────────────────────────────────────── */}
+      <div className="flex flex-col gap-3">
+        {/*
+         * Hide the picker on edit because `cliId` is immutable in the
+         * update schema (changing it would silently break the persisted
+         * binding). Show the chosen agent as a static label so the user
+         * still sees what's wired up.
+         */}
+        {editing ? (
+          editing.cliId === 'agent-team' ? (
+            <div className="flex flex-col gap-3">
+              <label className="flex flex-col gap-1 text-xs">
+                <FieldLabel>{t('settings.agent')}</FieldLabel>
+                <div className="border-edge-default bg-surface text-fg-default rounded border px-2 py-1 text-xs">
+                  {t('settings.agentTeam')}
+                </div>
+              </label>
+              <label className="flex flex-col gap-1 text-xs">
+                <FieldLabel hint={t('settings.agentDirectoryHint')}>
+                  {t('settings.agentDirectory')}
+                </FieldLabel>
+                <PathInput
+                  value={form.agentDir}
+                  onChange={setAgentDir}
+                  placeholder="/path/to/agent-teams/my-agent"
+                  size="sm"
+                  mono
+                  pickTitle={t('settings.pickFolder')}
+                  inputClassName="rounded"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs">
+                <FieldLabel hint={t('settings.harnessHint')}>
+                  {t('settings.harness')}{' '}
+                  <span className="text-fg-subtle">
+                    ({t('settings.optional')})
+                  </span>
+                </FieldLabel>
+                <Input
+                  value={form.harness}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, harness: e.target.value }))
+                  }
+                  placeholder="claude"
+                  className="border-edge-default bg-surface rounded border px-2 py-1 font-mono text-xs"
+                />
+              </label>
+            </div>
+          ) : (
+            <label className="flex flex-col gap-1 text-xs">
+              <FieldLabel>{t('settings.agent')}</FieldLabel>
+              <div className="border-edge-default bg-surface text-fg-default rounded border px-2 py-1 text-xs">
+                {detectedClis.find((c) => c.id === form.cliId)?.displayName ??
+                  (form.cliId === 'custom'
+                    ? t('settings.customCommand')
+                    : form.cliId)}
+              </div>
+            </label>
+          )
+        ) : (
+          <div className="flex flex-col gap-2">
+            <TabGroup
+              value={agentMode}
+              onChange={handleAgentModeChange}
+              options={[
+                { value: 'detected', label: t('settings.builtIn') },
+                { value: 'custom', label: t('settings.custom') },
+                { value: 'agent-team', label: t('settings.agentTeam') },
+              ]}
+              size="sm"
+              className="self-start"
+            />
+            {agentMode === 'agent-team' ? (
               <div className="flex flex-col gap-3">
                 <label className="flex flex-col gap-1 text-xs">
-                  <FieldLabel>{t('settings.agent')}</FieldLabel>
-                  <div className="border-edge-default bg-surface text-fg-default rounded border px-2 py-1 text-xs">
-                    {t('settings.agentTeam')}
-                  </div>
-                </label>
-                <label className="flex flex-col gap-1 text-xs">
-                  <FieldLabel hint={t('settings.agentDirectoryHint')}>
+                  <FieldLabel hint={t('settings.agentDirectoryDetailedHint')}>
                     {t('settings.agentDirectory')}
                   </FieldLabel>
                   <PathInput
@@ -678,7 +702,7 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
                   />
                 </label>
                 <label className="flex flex-col gap-1 text-xs">
-                  <FieldLabel hint={t('settings.harnessHint')}>
+                  <FieldLabel hint={t('settings.harnessDetailedHint')}>
                     {t('settings.harness')}{' '}
                     <span className="text-fg-subtle">
                       ({t('settings.optional')})
@@ -694,156 +718,160 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
                   />
                 </label>
               </div>
-            ) : (
+            ) : agentMode === 'detected' ? (
               <label className="flex flex-col gap-1 text-xs">
                 <FieldLabel>{t('settings.agent')}</FieldLabel>
-                <div className="border-edge-default bg-surface text-fg-default rounded border px-2 py-1 text-xs">
-                  {detectedClis.find((c) => c.id === form.cliId)?.displayName ??
-                    (form.cliId === 'custom'
-                      ? t('settings.customCommand')
-                      : form.cliId)}
-                </div>
-              </label>
-            )
-          ) : (
-            <div className="flex flex-col gap-2">
-              <TabGroup
-                value={agentMode}
-                onChange={handleAgentModeChange}
-                options={[
-                  { value: 'detected', label: t('settings.builtIn') },
-                  { value: 'custom', label: t('settings.custom') },
-                  { value: 'agent-team', label: t('settings.agentTeam') },
-                ]}
-                size="sm"
-                className="self-start"
-              />
-              {agentMode === 'agent-team' ? (
-                <div className="flex flex-col gap-3">
-                  <label className="flex flex-col gap-1 text-xs">
-                    <FieldLabel hint={t('settings.agentDirectoryDetailedHint')}>
-                      {t('settings.agentDirectory')}
-                    </FieldLabel>
-                    <PathInput
-                      value={form.agentDir}
-                      onChange={setAgentDir}
-                      placeholder="/path/to/agent-teams/my-agent"
-                      size="sm"
-                      mono
-                      pickTitle={t('settings.pickFolder')}
-                      inputClassName="rounded"
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1 text-xs">
-                    <FieldLabel hint={t('settings.harnessDetailedHint')}>
-                      {t('settings.harness')}{' '}
-                      <span className="text-fg-subtle">
-                        ({t('settings.optional')})
-                      </span>
-                    </FieldLabel>
-                    <Input
-                      value={form.harness}
-                      onChange={(e) =>
-                        setForm((p) => ({ ...p, harness: e.target.value }))
-                      }
-                      placeholder="claude"
-                      className="border-edge-default bg-surface rounded border px-2 py-1 font-mono text-xs"
-                    />
-                  </label>
-                </div>
-              ) : agentMode === 'detected' ? (
-                <label className="flex flex-col gap-1 text-xs">
-                  <FieldLabel>{t('settings.agent')}</FieldLabel>
-                  {cliOptions.length > 0 ? (
-                    <Select
-                      value={form.cliId}
-                      onChange={handleCliChange}
-                      options={cliOptions}
-                    />
-                  ) : (
-                    <div className="border-edge-default bg-surface text-fg-muted rounded border px-2 py-1 text-xs leading-snug">
-                      <Trans
-                        i18nKey="settings.noCliFound"
-                        components={{ strong: <strong /> }}
-                      />
-                    </div>
-                  )}
-                </label>
-              ) : (
-                <label className="flex flex-col gap-1 text-xs">
-                  <FieldLabel hint={t('settings.launchCommandHint')}>
-                    {t('settings.launchCommand')}
-                  </FieldLabel>
-                  <Input
-                    value={form.customCommand}
-                    onChange={(e) =>
-                      setForm((p) => ({
-                        ...p,
-                        customCommand: e.target.value,
-                      }))
-                    }
-                    placeholder="/usr/local/bin/copilot --acp --allow-all"
-                    className="border-edge-default bg-surface rounded border px-2 py-1 font-mono text-xs"
+                {cliOptions.length > 0 ? (
+                  <Select
+                    value={form.cliId}
+                    onChange={handleCliChange}
+                    options={cliOptions}
                   />
-                </label>
-              )}
-            </div>
-          )}
-
-          {isStructured && selectedCli?.allowAllFlag && (
-            <label className="text-fg-default flex cursor-pointer items-start gap-2 text-xs select-none">
-              <input
-                type="checkbox"
-                className="accent-info mt-0.5 h-3.5 w-3.5"
-                checked={form.allowAll}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, allowAll: e.target.checked }))
-                }
-              />
-              <FieldLabel hint={t('settings.autoApproveAllToolCallsHint')}>
-                {t('settings.autoApproveAllToolCalls')} (
-                <code className="font-mono">{selectedCli.allowAllFlag}</code>)
-              </FieldLabel>
-            </label>
-          )}
-        </div>
-
-        {/* ─── Workspace (hidden for Agent Team — daemon resolves cwd) */}
-        {agentMode !== 'agent-team' && (
-          <div className="flex flex-col gap-3">
-            <label className="flex flex-col gap-1 text-xs">
-              <FieldLabel hint={t('settings.workingDirectoryHint')}>
-                {t('settings.workingDirectory')}
-              </FieldLabel>
-              <PathInput
-                value={form.cwd}
-                onChange={setCwd}
-                placeholder="/Users/me/project-x"
-                size="sm"
-                mono
-                pickTitle={t('settings.pickFolder')}
-                inputClassName="rounded"
-              />
-            </label>
+                ) : (
+                  <div className="border-edge-default bg-surface text-fg-muted rounded border px-2 py-1 text-xs leading-snug">
+                    <Trans
+                      i18nKey="settings.noCliFound"
+                      components={{ strong: <strong /> }}
+                    />
+                  </div>
+                )}
+              </label>
+            ) : (
+              <label className="flex flex-col gap-1 text-xs">
+                <FieldLabel hint={t('settings.launchCommandHint')}>
+                  {t('settings.launchCommand')}
+                </FieldLabel>
+                <Input
+                  value={form.customCommand}
+                  onChange={(e) =>
+                    setForm((p) => ({
+                      ...p,
+                      customCommand: e.target.value,
+                    }))
+                  }
+                  placeholder="/usr/local/bin/copilot --acp --allow-all"
+                  className="border-edge-default bg-surface rounded border px-2 py-1 font-mono text-xs"
+                />
+              </label>
+            )}
           </div>
         )}
 
-        {/* ─── Display name (placed last per UX request) ─────────── */}
-        <label className="flex flex-col gap-1 text-xs">
-          <FieldLabel>
-            {t('settings.displayName')}{' '}
-            <span className="text-fg-subtle">({t('settings.optional')})</span>
-          </FieldLabel>
-          <Input
-            value={form.displayName}
-            onChange={(e) =>
-              setForm((p) => ({ ...p, displayName: e.target.value }))
-            }
-            placeholder={defaultDisplayName}
-            className="border-edge-default bg-surface rounded border px-2 py-1 text-xs"
-          />
-        </label>
+        {isStructured && selectedCli?.allowAllFlag && (
+          <label className="text-fg-default flex cursor-pointer items-start gap-2 text-xs select-none">
+            <input
+              type="checkbox"
+              className="accent-info mt-0.5 h-3.5 w-3.5"
+              checked={form.allowAll}
+              onChange={(e) =>
+                setForm((p) => ({ ...p, allowAll: e.target.checked }))
+              }
+            />
+            <FieldLabel hint={t('settings.autoApproveAllToolCallsHint')}>
+              {t('settings.autoApproveAllToolCalls')} (
+              <code className="font-mono">{selectedCli.allowAllFlag}</code>)
+            </FieldLabel>
+          </label>
+        )}
       </div>
+
+      {/* ─── Workspace (hidden for Agent Team — daemon resolves cwd) */}
+      {agentMode !== 'agent-team' && (
+        <div className="flex flex-col gap-3">
+          <label className="flex flex-col gap-1 text-xs">
+            <FieldLabel hint={t('settings.workingDirectoryHint')}>
+              {t('settings.workingDirectory')}
+            </FieldLabel>
+            <PathInput
+              value={form.cwd}
+              onChange={setCwd}
+              placeholder="/Users/me/project-x"
+              size="sm"
+              mono
+              pickTitle={t('settings.pickFolder')}
+              inputClassName="rounded"
+            />
+          </label>
+        </div>
+      )}
+
+      {/* ─── Display name (placed last per UX request) ─────────── */}
+      <label className="flex flex-col gap-1 text-xs">
+        <FieldLabel>
+          {t('settings.displayName')}{' '}
+          <span className="text-fg-subtle">({t('settings.optional')})</span>
+        </FieldLabel>
+        <Input
+          value={form.displayName}
+          onChange={(e) =>
+            setForm((p) => ({ ...p, displayName: e.target.value }))
+          }
+          placeholder={defaultDisplayName}
+          className="border-edge-default bg-surface rounded border px-2 py-1 text-xs"
+        />
+      </label>
+
+      {/* ─── Actions ───────────────────────────────────────────── */}
+      <div className="flex justify-end gap-2">
+        <Button
+          variant="outline"
+          tone="neutral"
+          size="sm"
+          onClick={onClose}
+          disabled={saving}
+        >
+          {t('actions.cancel')}
+        </Button>
+        <Button
+          variant="solid"
+          tone="info"
+          size="sm"
+          onClick={() => void handleSubmit()}
+          disabled={saving}
+        >
+          {saving
+            ? t('settings.saving')
+            : editing
+              ? t('settings.saveChanges')
+              : t('settings.createProfile')}
+        </Button>
+      </div>
+    </div>
+  );
+};
+
+/**
+ * Modal wrapper around {@link ProfileEditorForm}. Used by surfaces that
+ * have no host container of their own (e.g. the chat panel's "Add agent"
+ * menu), where a standalone dialog is the right pattern. Inside Settings
+ * the form is rendered inline as a master-detail pane instead, so the
+ * editor never stacks a second modal on top of the Settings modal.
+ */
+export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
+  isOpen,
+  editing,
+  detectedClis,
+  onClose,
+  onSaved,
+}) => {
+  const { t } = useTranslation();
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={
+        editing
+          ? t('settings.editExternalAgent')
+          : t('settings.newExternalAgent')
+      }
+      className="w-104"
+    >
+      <ProfileEditorForm
+        editing={editing}
+        detectedClis={detectedClis}
+        onClose={onClose}
+        onSaved={onSaved}
+      />
     </Modal>
   );
 };
@@ -1031,7 +1059,7 @@ export const AcpSettings: React.FC = () => {
         restarting={restarting}
       />
 
-      <SettingSection title={t('settings.externalAgents')} collapsible>
+      <SettingSection>
         {profiles.length === 0 ? (
           <SettingRow
             title={t('settings.noAgents')}
@@ -1096,18 +1124,29 @@ export const AcpSettings: React.FC = () => {
       </SettingSection>
 
       {/*
-       * Modal is portalled to document.body — it doesn't matter where
-       * we mount it in the tree, but keeping it as a sibling of the
-       * section (rather than inside the rounded card) keeps the DOM
-       * sensible when devtools is open.
+       * Inline add/edit form: opening the editor expands it *below* the
+       * list (a "new row" pattern) instead of drilling in or stacking a
+       * second modal — the profile list stays visible for context. The
+       * chat panel's "Add agent" menu still uses `ProfileEditorModal`
+       * since it has no host surface of its own.
        */}
-      <ProfileEditorModal
-        isOpen={editorOpen}
-        editing={editing}
-        detectedClis={detectedClis}
-        onClose={() => setEditorOpen(false)}
-        onSaved={handleSaved}
-      />
+      {editorOpen && (
+        <div className="mt-3 flex flex-col gap-2">
+          <h4 className="text-fg-muted px-1 text-xs font-medium">
+            {editing
+              ? t('settings.editExternalAgent')
+              : t('settings.newExternalAgent')}
+          </h4>
+          <div className="border-edge-default bg-surface ring-edge-default/50 rounded-md p-4 shadow-sm ring-1">
+            <ProfileEditorForm
+              editing={editing}
+              detectedClis={detectedClis}
+              onClose={() => setEditorOpen(false)}
+              onSaved={handleSaved}
+            />
+          </div>
+        </div>
+      )}
 
       {/*
        * Confirmation modal for destructive profile deletion. Mirrors the

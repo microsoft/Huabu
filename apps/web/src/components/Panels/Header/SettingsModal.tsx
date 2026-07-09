@@ -1,8 +1,7 @@
-import { Cpu, LayoutGrid, Plug, Settings2, Sparkles, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { AboutSettings } from './AboutSettings';
 import { AcpSettings } from './AcpSettings';
 import { CanvasSettings } from './CanvasSettings';
 import { GeneralSettings } from './GeneralSettings';
@@ -12,30 +11,26 @@ import { LLMSettings } from './LLMSettings';
 import { getElectronBridge } from '../../../hooks/useElectron';
 import { useAcpProfilesStore } from '../../../store/acpProfilesStore';
 import { useLLMStore } from '../../../store/llmStore';
-
-import type { LucideIcon } from 'lucide-react';
+import { SettingSection } from '../../Common/SettingSection';
 
 /** Identifiers for the settings tabs (left-nav order). */
-type SettingsTab = 'general' | 'models' | 'capabilities' | 'agents' | 'canvas';
+type SettingsTab = 'general' | 'huabuAgent' | 'agents' | 'canvas';
 
 interface TabDef {
   id: SettingsTab;
   /** i18n key for the tab label. */
   labelKey:
     | 'settings.general'
-    | 'settings.models'
-    | 'settings.integrations'
+    | 'settings.huabuAgent'
     | 'settings.externalAgents'
     | 'settings.canvas';
-  icon: LucideIcon;
 }
 
 const TABS: TabDef[] = [
-  { id: 'general', labelKey: 'settings.general', icon: Settings2 },
-  { id: 'models', labelKey: 'settings.models', icon: Cpu },
-  { id: 'capabilities', labelKey: 'settings.integrations', icon: Sparkles },
-  { id: 'agents', labelKey: 'settings.externalAgents', icon: Plug },
-  { id: 'canvas', labelKey: 'settings.canvas', icon: LayoutGrid },
+  { id: 'huabuAgent', labelKey: 'settings.huabuAgent' },
+  { id: 'agents', labelKey: 'settings.externalAgents' },
+  { id: 'general', labelKey: 'settings.general' },
+  { id: 'canvas', labelKey: 'settings.canvas' },
 ];
 
 interface SettingsModalProps {
@@ -49,10 +44,14 @@ interface SettingsModalProps {
  * pane, so the panel height stays fixed as more settings are added.
  *
  * Each tab renders the existing self-contained `*Settings` components:
- *  - **General** — language (regular) + version (about)
- *  - **Models** — chat LLM provider + image generation
- *  - **Agent Capabilities** — web search / YouTube transcripts
+ *  - **General** — language selection
+ *  - **Huabu Agent** — chat LLM (required) + optional capabilities
+ *    (image generation, web search, YouTube transcripts)
+ *  - **External Agents** — ACP profile management
  *  - **Canvas** — minimap etc.
+ *
+ * The app version sits at the bottom of the left tab rail (a product-wide
+ * fact, decoupled from any single tab).
  */
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
@@ -61,7 +60,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const { t } = useTranslation();
   const llmInit = useLLMStore((s) => s.init);
   const acpInit = useAcpProfilesStore((s) => s.init);
-  const [activeTab, setActiveTab] = useState<SettingsTab>('general');
+  const [activeTab, setActiveTab] = useState<SettingsTab>(TABS[0].id);
 
   // Load LLM + ACP config lazily when the dialog opens (Models / External
   // Agents tabs). The integrations store self-initialises in its component.
@@ -114,7 +113,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <h2 className="text-fg-default mb-2 pr-2 pl-3 text-sm font-semibold">
             {t('settings.title')}
           </h2>
-          {TABS.map(({ id, labelKey, icon: Icon }) => {
+          {TABS.map(({ id, labelKey }) => {
             const active = id === activeTab;
             return (
               <button
@@ -128,11 +127,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     : 'text-fg-muted hover:text-fg-default border-transparent'
                 }`}
               >
-                <Icon size={15} className="shrink-0" />
                 <span className="truncate">{t(labelKey)}</span>
               </button>
             );
           })}
+
+          {/*
+           * App version pinned to the bottom of the rail: a product-wide
+           * fact, not a General-tab setting, so it lives here (decoupled
+           * from any tab) as a muted signature rather than mixed in with
+           * editable preferences. `__APP_VERSION__` is inlined at build
+           * time from `apps/desktop/package.json` (see vite.config.ts).
+           */}
+          <span className="text-fg-subtle mt-auto px-3 pt-2 font-mono text-[11px] select-text">
+            v{__APP_VERSION__}
+          </span>
         </nav>
 
         {/* Right content pane */}
@@ -153,18 +162,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
           <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
             {activeTab === 'general' && (
-              <>
+              <SettingSection>
                 <GeneralSettings />
-                <AboutSettings />
-              </>
+              </SettingSection>
             )}
-            {activeTab === 'models' && (
+            {activeTab === 'huabuAgent' && (
               <>
                 <LLMSettings />
                 <ImageProviderSettings />
+                <IntegrationsSettings />
               </>
             )}
-            {activeTab === 'capabilities' && <IntegrationsSettings />}
             {activeTab === 'agents' && <AcpSettings />}
             {activeTab === 'canvas' && <CanvasSettings />}
           </div>
