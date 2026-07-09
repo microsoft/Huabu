@@ -1,8 +1,8 @@
 import { HelpCircle } from 'lucide-react';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link } from 'react-router-dom';
 
+import { AppMenu } from './AppMenu';
 import { CanvasMenu } from './CanvasMenu.tsx';
 import { SettingsPopover } from './SettingsPopover';
 import { isElectron } from '../../../hooks/useElectron';
@@ -27,11 +27,7 @@ export const Header: React.FC<HeaderProps> = ({ children, onOpenHelp }) => {
 
   return (
     <header className="border-edge-default bg-surface flex h-12 items-center gap-3 border-b px-3">
-      {!isElectronApp && (
-        <Link to="/" aria-label={t('navigation.backHome')}>
-          <img src="/favicon.svg" alt={t('app.logoAlt')} className="h-6 w-6" />
-        </Link>
-      )}
+      {!isElectronApp && <AppMenu compact />}
 
       {children ?? <CanvasMenu />}
 

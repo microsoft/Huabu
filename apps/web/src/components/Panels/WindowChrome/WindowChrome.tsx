@@ -12,6 +12,7 @@ import {
 } from '../../../store/workspaceStore';
 import { Button } from '../../Common/Button';
 import { Tooltip } from '../../Common/Tooltip';
+import { AppMenu } from '../Header/AppMenu';
 import { SettingsPopover } from '../Header/SettingsPopover';
 
 /**
@@ -172,15 +173,23 @@ export function WindowChrome() {
           } as React.CSSProperties
         }
       >
-        <Tooltip content={t('navigation.home')} placement="bottom">
-          <Link
-            to="/"
-            aria-label={t('navigation.backHome')}
-            className="text-fg-muted hover:bg-hover hover:text-fg-default flex h-7 w-7 items-center justify-center rounded-md transition-colors"
-          >
-            <House className="h-4 w-4" />
-          </Link>
-        </Tooltip>
+        {onCanvasListRoute ? (
+          // On the canvas list page the "home" button is a no-op (you're
+          // already home), so the left slot hosts the app menu instead.
+          // Inside a canvas the House button below keeps its back-to-list
+          // navigation and the app menu lives in the canvas header.
+          <AppMenu compact />
+        ) : (
+          <Tooltip content={t('navigation.home')} placement="bottom">
+            <Link
+              to="/"
+              aria-label={t('navigation.backHome')}
+              className="text-fg-muted hover:bg-hover hover:text-fg-default flex h-7 w-7 items-center justify-center rounded-md transition-colors"
+            >
+              <House className="h-4 w-4" />
+            </Link>
+          </Tooltip>
+        )}
       </div>
 
       {/* Center: page / canvas title, or the workspace folder name on

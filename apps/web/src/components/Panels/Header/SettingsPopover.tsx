@@ -1,8 +1,8 @@
 import { Settings } from 'lucide-react';
-import React, { useState } from 'react';
+import React from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { SettingsModal } from './SettingsModal';
+import { useSettingsUiStore } from '../../../store/settingsUiStore';
 import { Button } from '../../Common/Button';
 
 import type { TooltipPlacement } from '../../Common/Tooltip';
@@ -28,7 +28,9 @@ interface SettingsPopoverProps {
 /**
  * Settings trigger — a gear button that opens the tabbed {@link SettingsModal}.
  * Kept as `SettingsPopover` so the three call sites (Electron title bar,
- * web header, canvas floating controls) don't need to change.
+ * web header, canvas floating controls) don't need to change. The modal
+ * itself is a single global instance mounted at the router root; this
+ * button just flips the shared `settingsUi` store open.
  */
 export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
   variant = 'ghost',
@@ -37,24 +39,20 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
   tooltipPlacement,
 }) => {
   const { t } = useTranslation();
-  const [isOpen, setIsOpen] = useState(false);
+  const openSettings = useSettingsUiStore((s) => s.open);
 
   return (
-    <>
-      <Button
-        variant={variant}
-        shape={shape}
-        size={size}
-        iconOnly
-        title={t('settings.title')}
-        tooltipPlacement={tooltipPlacement}
-        onClick={() => setIsOpen(true)}
-        aria-label={t('settings.open')}
-      >
-        <Settings />
-      </Button>
-
-      <SettingsModal isOpen={isOpen} onClose={() => setIsOpen(false)} />
-    </>
+    <Button
+      variant={variant}
+      shape={shape}
+      size={size}
+      iconOnly
+      title={t('settings.title')}
+      tooltipPlacement={tooltipPlacement}
+      onClick={openSettings}
+      aria-label={t('settings.open')}
+    >
+      <Settings />
+    </Button>
   );
 };

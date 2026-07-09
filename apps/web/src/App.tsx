@@ -11,6 +11,7 @@ import {
 
 import { Loading } from './components/Common/Loading';
 import { ToastContainer } from './components/Common/Toast';
+import { GlobalModals } from './components/GlobalModals';
 import { WindowChrome } from './components/Panels/WindowChrome';
 import DocsPage from './docs/DocsPage';
 import { useDisableBrowserZoom } from './hooks/useDisableBrowserZoom';
@@ -125,6 +126,11 @@ function RootLayout() {
       <div className="relative min-h-0 flex-1">
         <Outlet />
       </div>
+      {/* App-wide singleton modals (Settings + Keyboard Shortcuts) and
+          the global `?` hotkey. Mounted here on the never-unmounting
+          router root so every trigger (title-bar gear, floating canvas
+          gear, AppMenu, canvas menu) drives one shared instance. */}
+      <GlobalModals />
       {/* Full-screen overlay shown while pending saves drain before a
           blocked route change proceeds. `Loading layout="block"`
           already provides the centered loading state. Rendered as a sibling

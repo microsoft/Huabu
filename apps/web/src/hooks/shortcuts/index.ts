@@ -13,7 +13,6 @@ export type {
   UseCanvasShortcutsOptions,
 } from './useCanvasShortcuts';
 
-export { usePageShortcuts } from './usePageShortcuts';
-export type { UsePageShortcutsResult } from './usePageShortcuts';
+export { useGlobalShortcutsHotkey } from './useGlobalShortcutsHotkey';
 
 export { isEditableTarget } from './isEditableTarget';

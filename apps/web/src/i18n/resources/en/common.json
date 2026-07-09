@@ -25,6 +25,8 @@
   "navigation": {
     "backHome": "Back to home",
     "home": "Home",
+    "appMenu": "Application menu",
+    "switchWorkspace": "Switch workspace",
     "userHandbook": "User Handbook",
     "openUserHandbook": "Open user handbook"
   },

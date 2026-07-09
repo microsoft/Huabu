@@ -25,6 +25,8 @@
   "navigation": {
     "backHome": "返回首页",
     "home": "首页",
+    "appMenu": "应用菜单",
+    "switchWorkspace": "切换工作区",
     "userHandbook": "用户手册",
     "openUserHandbook": "打开用户手册"
   },

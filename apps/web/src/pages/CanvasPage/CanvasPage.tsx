@@ -10,13 +10,12 @@ import { Loading } from '../../components/Common/Loading';
 import { CanvasLayerPanel } from '../../components/Panels/CanvasLayerPanel';
 import { ChatPanel } from '../../components/Panels/ChatPanel';
 import { CanvasHeader } from '../../components/Panels/Header/CanvasHeader.tsx';
-import { KeyboardShortcutsModal } from '../../components/Panels/Header/KeyboardShortcutsModal.tsx';
-import { usePageShortcuts } from '../../hooks/shortcuts';
 import { useGlobalSearchHotkey } from '../../hooks/useGlobalSearchHotkey';
 import useStore, {
   dismissVersionConflictToast,
 } from '../../store/canvasStore.ts';
 import { useCanvasSyncStore } from '../../store/canvasSyncStore.ts';
+import { useShortcutsUiStore } from '../../store/shortcutsUiStore.ts';
 
 /**
  * Page component for a single canvas.
@@ -37,7 +36,8 @@ export default function CanvasPage() {
   // `loadCanvas` and flips `isLoading` on.
   const storeCanvasId = useStore((s) => s.canvasId);
   const initialised = useRef(false);
-  const { isShortcutsOpen, openShortcuts, closeShortcuts } = usePageShortcuts();
+  const isShortcutsOpen = useShortcutsUiStore((s) => s.isOpen);
+  const openShortcuts = useShortcutsUiStore((s) => s.open);
   // Cmd+F / Ctrl+F → focus the canvas-wide search input in the
   // left layer panel (or, when focus is inside the expanded
   // preview, the in-preview find bar).
@@ -128,19 +128,12 @@ export default function CanvasPage() {
   }
 
   return (
-    <>
-      <MainLayout
-        header={<CanvasHeader onOpenShortcuts={openShortcuts} />}
-        leftPanel={<CanvasLayerPanel />}
-        rightPanel={<ChatPanel />}
-      >
-        <CenterArea canvasShortcutsDisabled={isShortcutsOpen} />
-      </MainLayout>
-
-      <KeyboardShortcutsModal
-        isOpen={isShortcutsOpen}
-        onClose={closeShortcuts}
-      />
-    </>
+    <MainLayout
+      header={<CanvasHeader onOpenShortcuts={openShortcuts} />}
+      leftPanel={<CanvasLayerPanel />}
+      rightPanel={<ChatPanel />}
+    >
+      <CenterArea canvasShortcutsDisabled={isShortcutsOpen} />
+    </MainLayout>
   );
 }

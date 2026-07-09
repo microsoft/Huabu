@@ -3,13 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import { useNavigate, Link } from 'react-router-dom';
 
-import {
-  listCanvases,
-  createCanvas,
-  exportCanvas,
-  importCanvas,
-  deleteCanvasById,
-} from '../api/canvas';
+import { listCanvases, exportCanvas, deleteCanvasById } from '../api/canvas';
 import { Button } from '../components/Common/Button';
 import { EmptyState } from '../components/Common/EmptyState';
 import { Loading } from '../components/Common/Loading';
@@ -18,6 +12,7 @@ import { toast } from '../components/Common/Toast';
 import { Tooltip } from '../components/Common/Tooltip';
 import { Header } from '../components/Panels/Header/Header';
 import { APP_NAME } from '../config/app';
+import { useCanvasActions } from '../hooks/useCanvasActions';
 import { isElectron } from '../hooks/useElectron';
 import { useWorkspaceLabel, useWorkspaceStore } from '../store/workspaceStore';
 
@@ -31,17 +26,22 @@ export default function CanvasListPage() {
   const { t, i18n } = useTranslation();
   const [canvases, setCanvases] = useState<CanvasSummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isCreating, setIsCreating] = useState(false);
-  const [isImporting, setIsImporting] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<{
     canvasId: string;
     title: string | null;
   } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [exportingId, setExportingId] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const confirmDeleteButtonRef = useRef<HTMLButtonElement>(null);
   const navigate = useNavigate();
+  const {
+    create: handleCreate,
+    isCreating,
+    openImportDialog: handleImportClick,
+    isImporting,
+    fileInputRef,
+    onFileChange: handleFileChange,
+  } = useCanvasActions();
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
   const workspaceLabel = useWorkspaceLabel();
   const canChangeWorkspace = useWorkspaceStore(
@@ -74,18 +74,6 @@ export default function CanvasListPage() {
     return () => window.removeEventListener('workspace-changed', handler);
   }, [fetchCanvases]);
 
-  const handleCreate = async () => {
-    try {
-      setIsCreating(true);
-      const response = await createCanvas();
-      navigate(`/canvas/${response.canvasId}`);
-    } catch (error) {
-      console.error('Failed to create canvas:', error);
-    } finally {
-      setIsCreating(false);
-    }
-  };
-
   const handleOpen = (canvasId: string) => {
     navigate(`/canvas/${canvasId}`);
   };
@@ -105,10 +93,6 @@ export default function CanvasListPage() {
     } finally {
       setExportingId(null);
     }
-  };
-
-  const handleImportClick = () => {
-    fileInputRef.current?.click();
   };
 
   const requestDelete = (canvasId: string, title: string | null) => {
@@ -136,26 +120,6 @@ export default function CanvasListPage() {
       console.error('Failed to delete canvas:', error);
     } finally {
       setIsDeleting(false);
-    }
-  };
-
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    // Reset so the same file can be re-selected if needed
-    e.target.value = '';
-
-    setIsImporting(true);
-
-    try {
-      const result = await importCanvas(file);
-      // Navigate to the newly created canvas
-      navigate(`/canvas/${result.canvasId}`);
-    } catch (err) {
-      console.error('Failed to import canvas:', err);
-    } finally {
-      setIsImporting(false);
     }
   };
 
