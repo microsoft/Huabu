@@ -1,7 +1,13 @@
 # Node Write Unification — one writer per field (content / label / derived)
 
-Status: Draft
+Status: Shipped (P0a / P0.5 / P0.6 done; P1 + endpoint merge deferred as non-essential). Durable facts folded into `docs/architecture/{canvas-storage,node-preprocessing,canvas-realtime-sync}.md`.
 Last updated: 2026-07-09
+
+> **Archived.** This plan shipped (P0a / P0.5 / P0.6). The lasting design now
+> lives in `docs/architecture/canvas-storage.md` §4 (write coordinator),
+> `docs/architecture/node-preprocessing.md` §3–§4 (`bodyOwnership` CAS +
+> settle trigger), and `docs/architecture/canvas-realtime-sync.md` (baseline
+> rebase). Kept here as read-only history; do not treat as current.
 
 > **Why this exists.** A user edited a note's `.md` externally (Google-Drive
 > folder), then edited the same node in-app. The app showed a

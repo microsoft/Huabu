@@ -120,7 +120,7 @@ export const TextNode = memo(
       // Exit-edit "settle": commit the auto-derived label (the `.md`
       // filename) now that the user left the inline editor, instead of on
       // every keystroke pause. See
-      // `docs/proposals/node-write-unification-plan.md` §3e / §10.
+      // `docs/architecture/node-preprocessing.md` §4 (Triggers & state).
       settleNodePreprocess(id);
     }, [surface.draft, content, id, updateNodeData]);
 

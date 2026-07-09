@@ -8,7 +8,7 @@
  * `settleNodePreprocess`). But a one-time create / duplicate / import mutation
  * is NOT a content edit (it never appears in `contentEditedNodeIds`), so it
  * still fans out once. Every other node type always fans out on mutation. See
- * `docs/proposals/node-write-unification-plan.md` §3e/§10.
+ * `docs/architecture/node-preprocessing.md` §4 (Triggers & state).
  */
 
 import { describe, expect, it, vi } from 'vitest';

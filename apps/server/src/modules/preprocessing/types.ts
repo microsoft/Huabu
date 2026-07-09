@@ -84,7 +84,7 @@ export interface NodePreprocessProfile {
    * editable node type cannot silently ship without CAS — a missing value is a
    * compile error, not a data-loss foot-gun. Threaded to the Persist stage's
    * authored-body guard by the dispatcher.
-   * See `docs/proposals/node-write-unification-plan.md` §3f.
+   * See `docs/architecture/node-preprocessing.md` §3 (Node profiles).
    */
   bodyOwnership: BodyOwnership;
   capabilities: Capability[];

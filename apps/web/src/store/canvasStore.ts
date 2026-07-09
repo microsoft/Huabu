@@ -845,7 +845,7 @@ export function clearNodeDuplicateGuard(nodeId: string): void {
  * still fan out there), so this exit-edit call is their sole preprocessing
  * trigger for content edits. The body itself keeps saving on the fast
  * per-node content cadence (`nodeContentQueue`) independently. See
- * `docs/proposals/node-write-unification-plan.md` §3e / §10.
+ * `docs/architecture/node-preprocessing.md` §4 (Triggers & state).
  */
 export function settleNodePreprocess(nodeId: string): void {
   const node = useCanvasStore.getState().nodes.find((n) => n.id === nodeId);
@@ -1117,7 +1117,7 @@ const useCanvasStore = create<RFState>()(
       // Switching straight from one expanded node to another does not fire
       // `closeExpanded`, so settle the outgoing authored node here to
       // commit its auto-derived label (the `.md` filename). See
-      // `docs/proposals/node-write-unification-plan.md` §3e / §10.
+      // `docs/architecture/node-preprocessing.md` §4 (Triggers & state).
       const prev = get().expandedNodeId;
       if (prev && prev !== nodeId) {
         const prevNode = get().nodes.find((n) => n.id === prev);
@@ -1140,7 +1140,7 @@ const useCanvasStore = create<RFState>()(
       // closing it (X / Esc / back) is the real "done editing" boundary at
       // which the auto-derived label (the `.md` filename) should be
       // committed — never on every keystroke pause. See
-      // `docs/proposals/node-write-unification-plan.md` §3e / §10.
+      // `docs/architecture/node-preprocessing.md` §4 (Triggers & state).
       const { expandedNodeId, nodes } = get();
       if (expandedNodeId) {
         const node = nodes.find((n) => n.id === expandedNodeId);

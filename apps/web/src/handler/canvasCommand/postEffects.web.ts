@@ -73,7 +73,7 @@ export function runWebPostEffects(input: RunWebPostEffectsInput): void {
   // appears in `contentEditedNodeIds`), so it still needs its single
   // preprocess pass to persist the sidecar and derive the initial label.
   // Skip only the content-edit churn path, not the create/import path.
-  // See `docs/proposals/node-write-unification-plan.md` §3e / §10.
+  // See `docs/architecture/node-preprocessing.md` §4 (Triggers & state).
   const contentEdited = new Set(effects.contentEditedNodeIds);
   for (const node of effects.mutatedNodes) {
     if (
