@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 
 import { isEditableTarget } from './isEditableTarget';
+import { getCombo, matches } from '../../config/shortcuts';
 import { useSettingsUiStore } from '../../store/settingsUiStore';
 import { useCanvasActions } from '../useCanvasActions';
 import { getElectronBridge } from '../useElectron';
@@ -26,17 +27,18 @@ export function useAppShortcuts(): void {
   const openSettings = useSettingsUiStore((s) => s.open);
 
   useEffect(() => {
+    const newCanvasCombo = getCombo('app.newCanvas');
+    const settingsCombo = getCombo('app.openSettings');
+
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.repeat) return;
-      const mod = e.metaKey || e.ctrlKey;
-      if (!mod || e.altKey || e.shiftKey) return;
       if (isEditableTarget(e.target)) return;
 
       const bridge = getElectronBridge();
       const isMacElectron = bridge?.platform === 'darwin';
 
       // Settings — Ctrl/Cmd+,. Skipped on macOS (native menu owns it).
-      if (e.key === ',') {
+      if (settingsCombo && matches(e, settingsCombo)) {
         if (isMacElectron) return;
         e.preventDefault();
         openSettings();
@@ -45,7 +47,7 @@ export function useAppShortcuts(): void {
 
       // New Canvas — Ctrl/Cmd+N. Native menu owns it on macOS; browsers
       // reserve it for a new window, so only wire it inside Electron.
-      if (e.key.toLowerCase() === 'n') {
+      if (newCanvasCombo && matches(e, newCanvasCombo)) {
         if (isMacElectron || !bridge) return;
         e.preventDefault();
         void create();

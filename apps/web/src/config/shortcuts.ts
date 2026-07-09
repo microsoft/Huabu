@@ -363,6 +363,46 @@ export function getShortcutKeys(id: string): string | undefined {
 }
 
 /**
+ * Look up a shortcut's {@link KeyCombo} by id. Returns `undefined` for an
+ * unknown id and for gesture-only entries (which have no matchable combo).
+ * Handlers use this so the key they fire on comes from the same definition
+ * the UI displays — closing the display-vs-behaviour drift.
+ */
+export function getCombo(id: string): KeyCombo | undefined {
+  return SHORTCUTS_BY_ID.get(id)?.combo;
+}
+
+/**
+ * Does a keyboard event match a {@link KeyCombo}? Pure comparison, no
+ * string parsing. `mod` is Cmd on macOS / Ctrl elsewhere. `key` is compared
+ * case-insensitively against `KeyboardEvent.key`; an array matches any of
+ * its entries (aliases / multi-bindings). Modifiers are compared strictly,
+ * so e.g. `⌘Z` does not also fire on `⌘⇧Z`.
+ *
+ * Note: symbol keys whose character is itself produced by Shift (e.g. `?`
+ * = Shift+/) don't fit the strict-shift model — such shortcuts keep their
+ * own bespoke check rather than going through `matches`.
+ */
+export function matches(e: KeyboardEvent, combo: KeyCombo): boolean {
+  if ((e.metaKey || e.ctrlKey) !== !!combo.mod) return false;
+  if (e.shiftKey !== !!combo.shift) return false;
+  if (e.altKey !== !!combo.alt) return false;
+  const keys = Array.isArray(combo.key) ? combo.key : [combo.key];
+  const eventKey = e.key.toLowerCase();
+  return keys.some((k) => k.toLowerCase() === eventKey);
+}
+
+/**
+ * Convenience wrapper: does the event match the combo registered under
+ * `id`? `false` for unknown ids and gesture-only entries. Handlers use this
+ * so the key they fire on is sourced from the catalog the UI displays.
+ */
+export function matchesShortcut(e: KeyboardEvent, id: string): boolean {
+  const combo = getCombo(id);
+  return combo ? matches(e, combo) : false;
+}
+
+/**
  * Group the catalog into the section shape the help modal consumes,
  * resolving i18n keys with the caller's `t`. Sections keep their
  * first-encounter order from {@link SHORTCUTS}; items keep array order.
