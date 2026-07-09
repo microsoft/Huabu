@@ -27,7 +27,7 @@
  */
 
 import { existsSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { open, readFile } from 'node:fs/promises';
 
 import { imageSize } from 'image-size';
 
@@ -59,6 +59,7 @@ import { getLogger } from '../../utils/logger.js';
 import {
   getCanvasStore,
   withCanvasMutex,
+  applyNodeUpdate,
   type CanvasFile,
   type CanvasStore,
   type DeltaLogEntry,
@@ -318,8 +319,7 @@ async function aspectHeightForWidth(
   try {
     const fullPath = artifactPath(canvasId, src);
     if (!existsSync(fullPath)) return null;
-    const buffer = await readFile(fullPath);
-    const dim = imageSize(buffer);
+    const dim = await readImageDimensions(fullPath);
     if (!dim?.width || !dim?.height || dim.width <= 0 || dim.height <= 0) {
       return null;
     }
@@ -328,6 +328,40 @@ async function aspectHeightForWidth(
     log.warn({ canvasId, src, error }, 'Failed to read image aspect ratio');
     return null;
   }
+}
+
+/**
+ * Read just enough of an image file to extract its intrinsic dimensions.
+ *
+ * `imageSize` only needs the format header (a few KB for PNG/GIF/WEBP/BMP; a
+ * little more for some JPEGs), so we read a 64 KB head chunk instead of the
+ * whole file — a multi-MB artifact would otherwise be read fully into memory
+ * here, and this runs inside the executor's per-canvas write lock. Only when the
+ * head chunk is too small to carry the dimension marker (e.g. a JPEG with a
+ * large EXIF thumbnail before its SOF) do we fall back to reading the entire
+ * file. Can throw (unreadable / not an image) — the caller treats that as null.
+ */
+async function readImageDimensions(
+  fullPath: string,
+): Promise<{ width?: number; height?: number } | null> {
+  const HEAD_BYTES = 64 * 1024;
+  const handle = await open(fullPath, 'r');
+  let head: Buffer;
+  try {
+    const buf = Buffer.alloc(HEAD_BYTES);
+    const { bytesRead } = await handle.read(buf, 0, HEAD_BYTES, 0);
+    head = buf.subarray(0, bytesRead);
+  } finally {
+    await handle.close();
+  }
+  try {
+    const dim = imageSize(head);
+    if (dim?.width && dim?.height) return dim;
+  } catch {
+    // Head chunk too small / dimension marker not reached yet — fall through
+    // to the (rare) full-file read below.
+  }
+  return imageSize(await readFile(fullPath));
 }
 
 /**
@@ -811,14 +845,20 @@ export async function executeOnServer(
     for (const node of pendingEffects.mutatedNodes) {
       const nodeContent = buildNodeContent(node);
       if (!nodeContent) continue;
-      const result = store.writeNode(nodeContent.nodeId, nodeContent, {
+      // Already inside `withCanvasMutex` (this whole batch holds the canvas
+      // lock), so use the non-locking core to route every `.md` write through
+      // the one coordinator entry point without a re-entrant deadlock. The
+      // executor's own prestate CAS (`collectMergeConflicts`) is the batch's
+      // freshness guard, so no per-node `expectRev` here.
+      const outcome = applyNodeUpdate(store, nodeContent.nodeId, {
+        apply: () => nodeContent,
         strictRename: nodeContent['labelSource'] === 'user',
       });
-      if (!result.ok) {
+      if (outcome.status === 'rejected') {
         const detail =
-          result.reason === 'conflict'
-            ? `label conflicts with existing node "${result.conflictWith.filename}"`
-            : result.reason;
+          outcome.result.reason === 'conflict'
+            ? `label conflicts with existing node "${outcome.result.conflictWith.filename}"`
+            : outcome.result.reason;
         throw new Error(
           `[canvas-executor] writeNode rejected ${nodeContent.nodeId}: ${detail}`,
         );
@@ -1002,7 +1042,9 @@ export async function applyDeltasOnServer(input: {
         if (d.type === 'REPLACE_NODE') contentEditedNodeIds.push(node.id);
         const content = buildNodeContent(node);
         if (content) {
-          store.writeNode(content.nodeId, content, {
+          // Inside `withCanvasMutex` already → non-locking core (see above).
+          applyNodeUpdate(store, content.nodeId, {
+            apply: () => content,
             strictRename: content['labelSource'] === 'user',
           });
         }

@@ -42,6 +42,7 @@ import {
   getCanvasStore,
   listCanvases,
   listCanvasSummaries,
+  updateNode,
   type CanvasFile,
 } from '../storage/index.js';
 import { canvasRoot, nodesDir } from '../storage/paths.js';
@@ -658,109 +659,75 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       });
     }
 
-    let existing: NodeContent | null = null;
-    try {
-      existing = store.readNode(nodeId);
-    } catch {
-      existing = null;
-    }
+    // Build the record to persist. Field-ownership policy lives HERE (the
+    // caller): body resolution, the empty-body clobber guard, and label
+    // resolution. The serialized read → rev-CAS → write is owned by
+    // `updateNode` (storage layer), which reads the current on-disk record
+    // inside the shared canvas lock and hands it to this `apply` — so the
+    // resolution below is atomic with the write and can't race another
+    // writer (another tab / device / agent / preprocess). See
+    // `storage/write-coordinator.ts`.
+    let persisted: NodeContent | undefined;
+    const apply = (existing: NodeContent | null): NodeContent => {
+      // Body resolution:
+      //   - text-bearing nodes (including `question`): prefer the caller's
+      //     content; fall back to the existing on-disk body so a label-only
+      //     update doesn't wipe it.
+      //   - frontmatter-only nodes (image/video/frame): always empty.
+      const acceptsBody = TEXT_BEARING_NODE_TYPES.has(nodeType);
+      const body = acceptsBody
+        ? (incomingContent ?? existing?.content ?? '')
+        : '';
+      // Guard against accidental content wipes (autosave race vs. editor
+      // flush): an explicit `content: ""` over a non-empty body keeps the
+      // existing body but still refreshes the frontmatter.
+      const wouldClobber =
+        acceptsBody &&
+        incomingContent === '' &&
+        typeof existing?.content === 'string' &&
+        existing.content.length > 0;
+      const safeBody = wouldClobber ? existing!.content : body;
+      // Label resolution: explicit `null` clears; absent leaves it untouched.
+      const resolvedLabel =
+        incomingLabel === undefined
+          ? (existing?.label ?? null)
+          : (incomingLabel ?? null);
 
-    // Optimistic-concurrency (compare-and-swap) on the node's authored
-    // content. `expectRev` is the {@link nodeRevision} the client's edit
-    // descends from; we recompute the on-disk node's revision and reject
-    // when they differ, so a concurrent write (another tab / device / an
-    // agent, or a Google-Drive-synced newer copy) surfaces as a conflict
-    // instead of being silently overwritten. A brand-new node carries the
-    // empty-content revision, which only matches while no file exists yet
-    // (so a create-race is also caught). `expectRev` is omitted by non-CAS
-    // callers, in which case we skip the check for backward compatibility.
-    if (expectRev !== undefined) {
-      const currentRev = nodeRevisionOf({
-        ...(typeof existing?.content === 'string'
-          ? { content: existing.content }
-          : {}),
-        ...(typeof existing?.src === 'string' ? { src: existing.src } : {}),
-      });
-      if (expectRev !== currentRev) {
-        return reply.code(409).send({
-          code: 'NODE_CONTENT_CONFLICT',
-          message:
-            `Node "${nodeId}" changed since you last loaded it ` +
-            '(another tab, device, or agent wrote it). Refresh to get the ' +
-            'latest content before editing.',
-          nodeId,
-          currentRev,
-          expectedRev: expectRev,
-        } satisfies CanvasConflictResponse);
-      }
-    }
-
-    // Body resolution:
-    //   - text-bearing nodes (including `question`, whose prompt is
-    //     stored at `data.content` and mirrored into the sidecar so
-    //     canvas search can hit it): prefer the caller's content; fall
-    //     back to the existing on-disk body to avoid wiping it when
-    //     the caller only meant to update e.g. the label.
-    //   - frontmatter-only nodes (image/video/frame): always empty.
-    const acceptsBody = TEXT_BEARING_NODE_TYPES.has(nodeType);
-    const body = acceptsBody
-      ? (incomingContent ?? existing?.content ?? '')
-      : '';
-
-    // Guard against accidental content wipes (autosave race vs. editor
-    // flush): if the caller explicitly sent `content: ""` but the
-    // existing markdown is non-empty, refuse the body write but still
-    // update frontmatter (label / src / summary / keywords / provenance).
-    const wouldClobber =
-      acceptsBody &&
-      incomingContent === '' &&
-      typeof existing?.content === 'string' &&
-      existing.content.length > 0;
-    const safeBody = wouldClobber ? existing!.content : body;
-
-    // Label resolution: a present-but-explicit `null` clears the label;
-    // an absent field leaves the existing label untouched.
-    const resolvedLabel =
-      incomingLabel === undefined
-        ? (existing?.label ?? null)
-        : (incomingLabel ?? null);
-
-    const nodeContent: NodeContent = {
-      ...(existing ?? {}),
-      nodeId,
-      type: nodeType,
-      label: resolvedLabel,
-      // Only include `src` when the caller or existing record actually
-      // had one — keeps the frontmatter free of `src: undefined` for
-      // pure note/text/frame nodes.
-      ...(incomingSrc !== undefined
-        ? { src: incomingSrc }
-        : existing?.src !== undefined
-          ? { src: existing.src }
-          : {}),
-      content: safeBody,
+      const nodeContent: NodeContent = {
+        ...(existing ?? {}),
+        nodeId,
+        type: nodeType,
+        label: resolvedLabel,
+        // Only include `src` when the caller or existing record had one, so
+        // pure note/text/frame frontmatter never gets a `src: undefined`.
+        ...(incomingSrc !== undefined
+          ? { src: incomingSrc }
+          : existing?.src !== undefined
+            ? { src: existing.src }
+            : {}),
+        content: safeBody,
+      };
+      if (labelSource !== undefined) nodeContent['labelSource'] = labelSource;
+      if (summary !== undefined) nodeContent['summary'] = summary;
+      if (keywords !== undefined) nodeContent['keywords'] = keywords;
+      if (provenance !== undefined) nodeContent['provenance'] = provenance;
+      persisted = nodeContent;
+      return nodeContent;
     };
-    if (labelSource !== undefined) {
-      nodeContent['labelSource'] = labelSource;
-    }
-    if (summary !== undefined) nodeContent['summary'] = summary;
-    if (keywords !== undefined) nodeContent['keywords'] = keywords;
-    if (provenance !== undefined) nodeContent['provenance'] = provenance;
 
-    // Strict rename only for user-typed labels. The `tryRename` flow on
-    // the web force-flushes the per-node save and awaits it so the
-    // collision can be surfaced as an alert and the optimistic label
-    // reverted. Agent / auto labels lazy-dedupe with `(N)` suffixes
-    // because batched agent runs cannot react to a 409.
-    const strictRename = labelSource === 'user';
-
-    let writeResult: ReturnType<CanvasStore['writeNode']>;
+    // Strict rename only for user-typed labels: the `tryRename` flow awaits
+    // the 409 to revert the optimistic label. Agent / auto labels lazy-dedupe
+    // with `(N)` suffixes because batched agent runs cannot react to a 409.
+    let outcome;
     try {
-      writeResult = store.writeNode(nodeId, nodeContent, { strictRename });
+      outcome = await updateNode(store, nodeId, {
+        expectRev,
+        apply,
+        strictRename: labelSource === 'user',
+      });
     } catch (error) {
-      // CanvasStoreIOError (ENOSPC, EACCES, EROFS, …) and any other
-      // unexpected throw — all environmental, none actionable by the
-      // client. Surface as 500 so the web shows a toast.
+      // CanvasStoreIOError (ENOSPC, EACCES, EROFS, …) / any unexpected throw
+      // — environmental, not client-actionable. Surface as 500 (web toasts).
       request.log.error(
         { canvasId, nodeId, err: toMessage(error) },
         'Failed to write node markdown',
@@ -768,62 +735,71 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.code(500).send({ message: 'Failed to write node content' });
     }
 
-    if (!writeResult.ok && writeResult.reason === 'conflict') {
+    // rev-CAS conflict: a concurrent write (another tab / device / agent, or
+    // a Google-Drive-synced copy) moved the on-disk body past the client's
+    // baseline — surface instead of silently overwriting it.
+    if (outcome.status === 'rev-conflict') {
       return reply.code(409).send({
-        code: 'NODE_LABEL_CONFLICT',
-        message: `Another node already uses the label "${resolvedLabel ?? ''}"`,
-        nodeId,
-        conflictWith: writeResult.conflictWith.filename,
-      } satisfies CanvasConflictResponse);
-    }
-    if (!writeResult.ok && writeResult.reason === 'duplicate') {
-      // Two `.md` sidecars on disk currently claim this nodeId (a failed
-      // rename or an external copy). writeNode refuses to pick one
-      // arbitrarily; surface a 409 so the user resolves the duplicate
-      // before editing instead of letting the app compound it.
-      request.log.warn(
-        { canvasId, nodeId, files: writeResult.files },
-        'Refusing node write: duplicate sidecars on disk',
-      );
-      return reply.code(409).send({
-        code: 'NODE_DUPLICATE_FILES',
+        code: 'NODE_CONTENT_CONFLICT',
         message:
-          `Node "${nodeId}" has multiple markdown files on disk ` +
-          `(${writeResult.files.join(', ')}); ` +
-          'resolve the duplicate before editing.',
+          `Node "${nodeId}" changed since you last loaded it ` +
+          '(another tab, device, or agent wrote it). Refresh to get the ' +
+          'latest content before editing.',
         nodeId,
-        duplicateFiles: writeResult.files,
+        currentRev: outcome.currentRev,
+        expectedRev: expectRev,
       } satisfies CanvasConflictResponse);
     }
-    if (!writeResult.ok) {
-      // `not-found` should not happen here — we constructed the file
-      // via writeNode. Treat as 500 defensively.
-      request.log.error({ canvasId, nodeId, writeResult }, 'Node write failed');
+    if (outcome.status === 'rejected') {
+      const result = outcome.result;
+      if (result.reason === 'conflict') {
+        return reply.code(409).send({
+          code: 'NODE_LABEL_CONFLICT',
+          message: `Another node already uses the label "${persisted?.label ?? ''}"`,
+          nodeId,
+          conflictWith: result.conflictWith.filename,
+        } satisfies CanvasConflictResponse);
+      }
+      if (result.reason === 'duplicate') {
+        // Two `.md` sidecars claim this nodeId (a failed rename or an external
+        // copy). Refuse rather than compound it; surface a 409 to resolve.
+        request.log.warn(
+          { canvasId, nodeId, files: result.files },
+          'Refusing node write: duplicate sidecars on disk',
+        );
+        return reply.code(409).send({
+          code: 'NODE_DUPLICATE_FILES',
+          message:
+            `Node "${nodeId}" has multiple markdown files on disk ` +
+            `(${result.files.join(', ')}); ` +
+            'resolve the duplicate before editing.',
+          nodeId,
+          duplicateFiles: result.files,
+        } satisfies CanvasConflictResponse);
+      }
+      // `not-found` should not happen here — we just constructed the record.
+      request.log.error({ canvasId, nodeId, result }, 'Node write failed');
+      return reply.code(500).send({ message: 'Failed to write node content' });
+    }
+    if (outcome.status !== 'ok') {
+      // Unreachable: `apply` always returns a record, so 'noop' can't occur.
       return reply.code(500).send({ message: 'Failed to write node content' });
     }
 
     const response: PutNodeContentResponse = {
       nodeId,
-      label: writeResult.label,
-      // The revision of the content actually persisted (authoritative:
-      // reflects the refused-empty-clobber case where `safeBody` kept the
-      // existing content). The client stores this as the node's new CAS
-      // baseline, co-delivered with the write it confirms.
-      rev: nodeRevisionOf({
-        ...(typeof nodeContent.content === 'string'
-          ? { content: nodeContent.content }
-          : {}),
-        ...(typeof nodeContent.src === 'string'
-          ? { src: nodeContent.src }
-          : {}),
-      }),
+      label: outcome.label,
+      // Authoritative rev of the content actually persisted (reflects the
+      // refused-empty-clobber case), co-delivered with the write it confirms
+      // as the client's new CAS baseline.
+      rev: outcome.rev,
     };
     // `artifactMissing` is only meaningful for src-backed types and is
-    // surfaced so the client can render the same placeholder UI it
-    // gets back on a hydrate-time miss.
+    // surfaced so the client can render the same placeholder UI it gets
+    // back on a hydrate-time miss.
     if (ARTIFACT_BACKED_NODE_TYPES.has(nodeType)) {
       const srcForCheck =
-        typeof nodeContent.src === 'string' ? nodeContent.src : '';
+        typeof persisted?.src === 'string' ? persisted.src : '';
       if (
         srcForCheck &&
         isArtifactMissing(store, { src: srcForCheck } as Record<

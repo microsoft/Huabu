@@ -304,7 +304,7 @@ export async function runPipeline(
                 .join('; '),
             },
           };
-          ctx.persisted = persist(
+          ctx.persisted = await persist(
             placeholderNormalized,
             contentKind,
             bodyOwnership,
@@ -319,7 +319,7 @@ export async function runPipeline(
               'Persisted placeholder source because extraction failed — content is empty',
           });
         } else {
-          ctx.persisted = persist(
+          ctx.persisted = await persist(
             ctx.normalized,
             contentKind,
             bodyOwnership,

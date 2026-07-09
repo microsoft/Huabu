@@ -236,6 +236,12 @@ body, per §4, likewise keys off the same profile.)
 
 ### 3g. Cross-writer safety — `withCanvasMutex` around the sync critical section
 
+> **✅ Shipped as P0.6 (§5), with two deviations from the sketch below:** the
+> lock lives in `storage/write-coordinator.ts` (not the executor); the executor
+> still holds it for its **whole batch** (incl. async image-normalize), not only
+> the sync write — see the §5 P0.6 side-effect note. The `apply(current)` policy
+> supersedes the inline `isLabelProtected` snippet here.
+
 A node's `nodes/<safe(label)>.md` has **three** writers — `ingest-content` (body
 
 - derived label), the **label endpoint** (rename → changes the _filename_), and
@@ -362,17 +368,54 @@ fix** are independent and each shippable alone; the endpoint merge is deferred
      **Retry** action (re-flushes the node's still-in-store body/label), throttled
      to once per node on the `auto` path until a save succeeds. Benign
      `NODE_CONTENT_CONFLICT` (409) stays silent-and-frozen as before.
-3. **P1 (optional) — rename-only label endpoint.** `PUT /nodes/:id/label` to give
+3. **P0.6 — unified write coordinator. ✅ Done.** All durable node `.md` writes
+   now funnel through one storage-layer coordinator
+   ([write-coordinator.ts](../../apps/server/src/modules/storage/write-coordinator.ts)),
+   so serialization + rev-CAS live in one place instead of being re-implemented
+   per call site (§3g realized — **mechanism only**; field-ownership policy stays
+   in each caller's `apply`):
+   - **`withCanvasMutex`** (the per-canvas write lock) was lifted out of the
+     executor into the coordinator so **every** writer shares one lock.
+   - **`updateNode(store, id, { expectRev?, apply, strictRename? })`** — locking:
+     `read → rev-CAS → apply(current) → writeNode`, atomic under the lock. Used by
+     the **content PUT** ([canvas.route.ts](../../apps/server/src/modules/canvas/canvas.route.ts),
+     its hand-written rev-CAS branch deleted) and **preprocess persist**
+     ([persist.ts](../../apps/server/src/modules/preprocessing/stages/persist.ts),
+     now `async`; **P0a survives as its `apply` field-ownership policy**, not a
+     bespoke top-level skip — the lock stops interleaving but does NOT stop a
+     stale-snapshot write, so the authored-body guard is still required).
+   - **`applyNodeUpdate(...)`** — the same core WITHOUT the lock, for writers
+     already inside the canvas lock. Used by the **executor**
+     ([canvas-executor.ts](../../apps/server/src/modules/canvas/canvas-executor.ts)),
+     whose whole batch already holds `withCanvasMutex` (a re-entrant `updateNode`
+     would deadlock).
+
+   Net: content-PUT / preprocess / executor can no longer interleave on a node's
+   `.md`, so the double-rename race (the `Node rename failed` 500) is structurally
+   closed. Covered by
+   [write-coordinator.test.ts](../../apps/server/src/modules/storage/__tests__/write-coordinator.test.ts)
+   plus the content-CAS / executor / persist suites.
+
+   > **Side effect (known):** node writes to a canvas now serialize on the
+   > per-canvas lock, and the executor holds it for its **whole batch** — which
+   > includes **async image-geometry normalization**. So a user content-save (or
+   > a preprocess write) can wait for an in-flight agent batch before landing.
+   > Short in the common case (sync writes), but not bounded while an agent batch
+   > normalizes images. Acceptable for correctness; revisit by narrowing the
+   > executor's lock to only its sync writes (§3g's "lock only the sync critical
+   > section") if save latency during heavy agent activity is observed.
+
+4. **P1 (optional) — rename-only label endpoint.** `PUT /nodes/:id/label` to give
    user rename a strict-CAS home separate from the body's rev-CAS (§3e). **Not
    required:** user rename already works correctly via the content PUT's
    `flushNow`. Defer until the label-CAS / body-CAS split is worth a new endpoint.
-4. **Deferred — endpoint merge / rename (§1, §2).** Folding content PUT +
+5. **Deferred — endpoint merge / rename (§1, §2).** Folding content PUT +
    preprocess into a single `ingest-content` endpoint is **no longer necessary**:
-   once the label-derive step moved off the body-save cadence (§3e), `note`/`text`
-   bodies already have a single writer (content PUT) and their label is committed
-   by the settle path. The remaining preprocess pipeline is effectively
-   artifact-only (`web`/`pdf`/`office`, `src`-triggered). Revisit the merge only if
-   the separate endpoints prove confusing.
+   the **write coordinator (P0.6)** already realizes "one authoritative writer" at
+   the **storage layer** — every writer funnels through `updateNode` /
+   `applyNodeUpdate` — so the HTTP endpoints can stay separate. "One writer" means
+   one write chokepoint, not one endpoint. Revisit the merge only if the separate
+   endpoints prove confusing.
 
 ---
 
