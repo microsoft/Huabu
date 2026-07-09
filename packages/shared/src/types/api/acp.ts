@@ -156,10 +156,12 @@ export type AcpDaemonRestartResponse = AcpAgentletRestartResponse;
 
 // ─── Local agent CLI detection ────────────────────────────────────────
 //
-// The server probes the host for known ACP-capable CLI binaries
-// (`copilot`, `claude`, `gemini`) and reports the ones it found.
-// Powers the CLI dropdown in the Profile Editor — picking a detected
-// CLI pre-fills `command` for the new profile.
+// The server probes the host for known ACP-capable agent binaries
+// (`copilot`, `gemini` natively; `claude-agent-acp` and `codex-acp` for
+// Claude / Codex, which have no native ACP mode and are driven through
+// their ACP adapters) and reports the ones it found. Powers the agent
+// dropdown in the Profile Editor — picking a detected agent pre-fills
+// `command` for the new profile.
 //
 // This endpoint is loopback-only — it shells out to discover host
 // binaries and must never be reachable from a remote browser.
@@ -170,7 +172,10 @@ export interface AcpAgentCliInfo {
   id: string;
   /** Display name shown in the Profile Editor. */
   displayName: string;
-  /** Binary name the user must install (`copilot`). */
+  /**
+   * Binary name the user must install and that the daemon launches
+   * (`copilot`, or `claude-agent-acp` for the Claude ACP adapter).
+   */
   binary: string;
   /** Args after the binary to enter ACP mode (typically `['--acp']`). */
   acpArgs: string[];

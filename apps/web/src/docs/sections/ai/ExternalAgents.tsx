@@ -42,21 +42,22 @@ export default function ExternalAgents() {
           className="inline-block size-[1em] align-[-0.15em]"
         />
         ) → <strong>External Agents</strong> and click{' '}
-        <strong>Add agent</strong>. The editor opens with two tabs:
+        <strong>Add agent</strong>. The editor opens with these tabs:
       </P>
       <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
         <li>
-          <strong>Built-in</strong> — pick from the supported agents Huabu
-          detected on your <Code>PATH</Code> (<Code>copilot</Code>,{' '}
-          <Code>claude</Code>, <Code>gemini</Code>, and any other compatible
-          agent that ships with Huabu). The launch command is assembled for you;
-          you don&apos;t see or edit the command string directly.
+          <strong>Detected agent</strong> — pick from the supported agents Huabu
+          detected on your <Code>PATH</Code>. Copilot (<Code>copilot</Code>) and
+          Gemini (<Code>gemini</Code>) speak ACP natively; Claude has no native
+          ACP mode, so it&apos;s detected and launched through its ACP adapter
+          bin (<Code>claude-agent-acp</Code>). The launch command is assembled
+          for you; you don&apos;t see or edit the command string directly.
         </li>
         <li>
-          <strong>Custom</strong> — type the full launch command yourself. Use
-          this for binaries that aren&apos;t on <Code>PATH</Code>, for flags the
-          structured form doesn&apos;t expose, or for any agent Huabu
-          didn&apos;t detect. See the{' '}
+          <strong>Custom command</strong> — type the full launch command
+          yourself. Use this for binaries that aren&apos;t on <Code>PATH</Code>,
+          for flags the structured form doesn&apos;t expose, or for any agent
+          Huabu didn&apos;t detect. See the{' '}
           <DocLink href="https://github.com/hai-team/agentlet#readme">
             agentlet README
           </DocLink>{' '}
@@ -71,9 +72,10 @@ export default function ExternalAgents() {
         every chat surface — no restart, no terminal step.
       </P>
       <Callout tone="info">
-        If no supported agent shows up under <strong>Built-in</strong>, install
-        one first — for example <Code>npm install -g @github/copilot</Code>,{' '}
-        <Code>npm install -g @anthropic-ai/claude-code</Code>, or{' '}
+        If no supported agent shows up under <strong>Detected agent</strong>,
+        install one first — for example{' '}
+        <Code>npm install -g @github/copilot</Code>,{' '}
+        <Code>npm install -g @agentclientprotocol/claude-agent-acp</Code>, or{' '}
         <Code>npm install -g @google/gemini-cli</Code> — then re-open the
         editor. Detection re-runs every time Settings is opened.
       </Callout>
