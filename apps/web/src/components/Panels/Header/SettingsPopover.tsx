@@ -1,17 +1,9 @@
 import { Settings } from 'lucide-react';
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { AcpSettings } from './AcpSettings';
-import { CanvasSettings } from './CanvasSettings';
-import { GeneralSettings } from './GeneralSettings';
-import { ImageProviderSettings } from './ImageProviderSettings';
-import { IntegrationsSettings } from './IntegrationsSettings';
-import { LLMSettings } from './LLMSettings';
-import { useAcpProfilesStore } from '../../../store/acpProfilesStore';
-import { useLLMStore } from '../../../store/llmStore';
+import { SettingsModal } from './SettingsModal';
 import { Button } from '../../Common/Button';
-import { Popover } from '../../Common/Popover';
 
 import type { TooltipPlacement } from '../../Common/Tooltip';
 
@@ -34,8 +26,9 @@ interface SettingsPopoverProps {
 }
 
 /**
- * Settings popover. Currently only exposes LLM provider/model configuration.
- * Workspace switching lives on the home page (`/` and `/setup`).
+ * Settings trigger — a gear button that opens the tabbed {@link SettingsModal}.
+ * Kept as `SettingsPopover` so the three call sites (Electron title bar,
+ * web header, canvas floating controls) don't need to change.
  */
 export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
   variant = 'ghost',
@@ -44,105 +37,24 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
   tooltipPlacement,
 }) => {
   const { t } = useTranslation();
-  const llmInit = useLLMStore((s) => s.init);
-  const acpInit = useAcpProfilesStore((s) => s.init);
-
   const [isOpen, setIsOpen] = useState(false);
-
-  const triggerRef = useRef<HTMLDivElement>(null);
-  const justDismissedRef = useRef(false);
-
-  const handleClose = useCallback(() => {
-    setIsOpen(false);
-  }, []);
-
-  const handleDismiss = useCallback(() => {
-    justDismissedRef.current = true;
-    handleClose();
-    requestAnimationFrame(() => {
-      justDismissedRef.current = false;
-    });
-  }, [handleClose]);
-
-  const handleToggle = useCallback(() => {
-    if (justDismissedRef.current) return;
-    setIsOpen((prev) => {
-      const next = !prev;
-      if (next) {
-        void llmInit();
-        void acpInit();
-      }
-      return next;
-    });
-  }, [acpInit, llmInit]);
-
-  const getPopoverPosition = () => {
-    if (!triggerRef.current) return { x: 0, y: 0 };
-    const rect = triggerRef.current.getBoundingClientRect();
-    return { x: rect.right, y: rect.bottom };
-  };
 
   return (
     <>
-      <div ref={triggerRef}>
-        <Button
-          variant={variant}
-          shape={shape}
-          size={size}
-          iconOnly
-          title={t('settings.title')}
-          tooltipPlacement={tooltipPlacement}
-          onClick={handleToggle}
-          aria-label={t('settings.open')}
-        >
-          <Settings />
-        </Button>
-      </div>
+      <Button
+        variant={variant}
+        shape={shape}
+        size={size}
+        iconOnly
+        title={t('settings.title')}
+        tooltipPlacement={tooltipPlacement}
+        onClick={() => setIsOpen(true)}
+        aria-label={t('settings.open')}
+      >
+        <Settings />
+      </Button>
 
-      {isOpen && (
-        <Popover
-          position={getPopoverPosition()}
-          onDismiss={handleDismiss}
-          anchor="top-right"
-          offset={{ x: 0, y: 6 }}
-          className="flex max-h-[calc(100vh-24px)] w-120 flex-col p-4"
-        >
-          <h3 className="text-fg-default mb-3 shrink-0 text-sm font-semibold">
-            {t('settings.title')}
-          </h3>
-
-          <div className="-mx-4 min-h-0 flex-1 overflow-y-auto px-4 pb-2">
-            <GeneralSettings />
-
-            <LLMSettings />
-
-            <AcpSettings />
-
-            <IntegrationsSettings />
-
-            <ImageProviderSettings />
-
-            <CanvasSettings />
-          </div>
-
-          <div className="mt-4 flex shrink-0 items-center justify-between">
-            <span
-              className="text-fg-subtle font-mono text-[11px] select-text"
-              title={t('settings.appVersion')}
-            >
-              v{__APP_VERSION__}
-            </span>
-            <Button
-              variant="outline"
-              tone="neutral"
-              size="sm"
-              onClick={handleClose}
-            >
-              {t('actions.close')}
-            </Button>
-          </div>
-        </Popover>
-      )}
+      <SettingsModal isOpen={isOpen} onClose={() => setIsOpen(false)} />
     </>
   );
 };

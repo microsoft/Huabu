@@ -9,6 +9,7 @@ import {
 import { createPortal } from 'react-dom';
 
 import { cn } from './cn';
+import { getElectronBridge } from '../../hooks/useElectron';
 
 export type ModalProps = {
   isOpen: boolean;
@@ -109,10 +110,17 @@ export function Modal({
 
   if (!isOpen) return null;
 
+  // In the Electron shell keep the custom title bar (`WindowChrome`)
+  // fully visible above the modal: offset the overlay below the
+  // title-bar strip so the backdrop never covers it. Otherwise the OS
+  // caption-button overlay stays opaque while the HTML chrome is dimmed,
+  // leaving a visibly half-covered, "incomplete" header.
+  const titleBarInset = getElectronBridge()?.titleBarHeight ?? 0;
+
   return createPortal(
     <div
-      className="bg-bg-default/80 animate-in fade-in fixed inset-0 flex items-center justify-center backdrop-blur-[1px] duration-200"
-      style={{ zIndex }}
+      className="bg-bg-default/80 animate-in fade-in fixed inset-0 flex items-center justify-center backdrop-blur-sm duration-200"
+      style={{ zIndex, top: titleBarInset || undefined }}
     >
       <div
         className="absolute inset-0"
