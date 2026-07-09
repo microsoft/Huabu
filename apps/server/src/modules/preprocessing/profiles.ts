@@ -12,10 +12,10 @@ export const profiles: Record<CanvasNodeType, NodePreprocessProfile> = {
   note: {
     nodeType: 'note',
     contentKind: 'note',
+    bodyOwnership: 'authored',
     capabilities: [
       'resolve_input',
       'extract_text',
-      'compute_fingerprint',
       'resolve_title',
       'merge_metadata',
       'persist_source',
@@ -26,10 +26,10 @@ export const profiles: Record<CanvasNodeType, NodePreprocessProfile> = {
   text: {
     nodeType: 'text',
     contentKind: 'text',
+    bodyOwnership: 'authored',
     capabilities: [
       'resolve_input',
       'extract_text',
-      'compute_fingerprint',
       'resolve_title',
       'merge_metadata',
       'persist_source',
@@ -40,10 +40,10 @@ export const profiles: Record<CanvasNodeType, NodePreprocessProfile> = {
   web: {
     nodeType: 'web',
     contentKind: 'web',
+    bodyOwnership: 'derived',
     capabilities: [
       'resolve_input',
       'fetch_remote_content',
-      'compute_fingerprint',
       'resolve_title',
       'merge_metadata',
       'generate_label',
@@ -62,10 +62,10 @@ export const profiles: Record<CanvasNodeType, NodePreprocessProfile> = {
   pdf: {
     nodeType: 'pdf',
     contentKind: 'pdf',
+    bodyOwnership: 'derived',
     capabilities: [
       'resolve_input',
       'extract_text',
-      'compute_fingerprint',
       'resolve_title',
       'merge_metadata',
       'generate_label',
@@ -84,10 +84,10 @@ export const profiles: Record<CanvasNodeType, NodePreprocessProfile> = {
   office: {
     nodeType: 'office',
     contentKind: 'office',
+    bodyOwnership: 'derived',
     capabilities: [
       'resolve_input',
       'extract_text',
-      'compute_fingerprint',
       'resolve_title',
       'merge_metadata',
       'generate_label',
@@ -106,9 +106,9 @@ export const profiles: Record<CanvasNodeType, NodePreprocessProfile> = {
   image: {
     nodeType: 'image',
     contentKind: 'image',
+    bodyOwnership: 'derived',
     capabilities: [
       'resolve_input',
-      'compute_fingerprint',
       'generate_label',
       'persist_source',
       'build_patch',
@@ -121,27 +121,20 @@ export const profiles: Record<CanvasNodeType, NodePreprocessProfile> = {
   video: {
     nodeType: 'video',
     contentKind: 'video',
-    capabilities: [
-      'resolve_input',
-      'compute_fingerprint',
-      'persist_source',
-      'build_patch',
-    ],
+    bodyOwnership: 'derived',
+    capabilities: ['resolve_input', 'persist_source', 'build_patch'],
     watchFields: ['src'],
   },
   audio: {
     nodeType: 'audio',
+    bodyOwnership: 'derived',
     capabilities: ['resolve_input', 'build_patch'],
     watchFields: ['src'],
   },
   frame: {
     nodeType: 'frame',
-    capabilities: [
-      'resolve_input',
-      'compute_fingerprint',
-      'generate_label',
-      'build_patch',
-    ],
+    bodyOwnership: 'derived',
+    capabilities: ['resolve_input', 'generate_label', 'build_patch'],
     watchFields: ['childLabels', 'labelSource'],
     capabilityTriggers: {
       generate_label: ['childLabels'],
@@ -149,17 +142,14 @@ export const profiles: Record<CanvasNodeType, NodePreprocessProfile> = {
   },
   sketch: {
     nodeType: 'sketch',
+    bodyOwnership: 'derived',
     capabilities: ['resolve_input', 'build_patch'],
     watchFields: [],
   },
   question: {
     nodeType: 'question',
-    capabilities: [
-      'resolve_input',
-      'compute_fingerprint',
-      'generate_label',
-      'build_patch',
-    ],
+    bodyOwnership: 'authored',
+    capabilities: ['resolve_input', 'generate_label', 'build_patch'],
     watchFields: ['content'],
     capabilityTriggers: {
       generate_label: ['content'],

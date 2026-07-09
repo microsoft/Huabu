@@ -830,6 +830,28 @@ export function clearNodeDuplicateGuard(nodeId: string): void {
   nodeContentQueue.clearDuplicateGuard(nodeId);
 }
 
+/**
+ * Trigger preprocessing for a single node once the user has finished
+ * editing it (exit-edit "settle").
+ *
+ * Called for editor-authored nodes (`note` / `text`) from their exit-edit
+ * boundaries — `closeExpanded` / `openExpanded` for `note` and `TextNode`'s
+ * blur handler for `text` — whose auto-derived label (the on-disk `.md`
+ * filename) must be committed only when the heading is settled, never on
+ * every keystroke pause, which churned the filename through every partial
+ * heading (`Note 1.md` → `H.md` → `He.md` → …). Their per-keystroke content
+ * edits are excluded from the `triggerPreprocessing` fan-out in
+ * `runWebPostEffects` (only one-time create / duplicate / import mutations
+ * still fan out there), so this exit-edit call is their sole preprocessing
+ * trigger for content edits. The body itself keeps saving on the fast
+ * per-node content cadence (`nodeContentQueue`) independently. See
+ * `docs/architecture/node-preprocessing.md` §4 (Triggers & state).
+ */
+export function settleNodePreprocess(nodeId: string): void {
+  const node = useCanvasStore.getState().nodes.find((n) => n.id === nodeId);
+  if (node) preprocessQueue.schedule(node);
+}
+
 // ─── Action-history ring ──────────────────────────────────────────────────
 //
 // The short, in-memory action trail (cap 10, no timestamps) that
@@ -1092,6 +1114,17 @@ const useCanvasStore = create<RFState>()(
     expandMode: 'split',
     expandedNodeFocusTick: 0,
     openExpanded: (nodeId) => {
+      // Switching straight from one expanded node to another does not fire
+      // `closeExpanded`, so settle the outgoing authored node here to
+      // commit its auto-derived label (the `.md` filename). See
+      // `docs/architecture/node-preprocessing.md` §4 (Triggers & state).
+      const prev = get().expandedNodeId;
+      if (prev && prev !== nodeId) {
+        const prevNode = get().nodes.find((n) => n.id === prev);
+        if (prevNode?.type === 'note' || prevNode?.type === 'text') {
+          settleNodePreprocess(prev);
+        }
+      }
       get().dispatchUiIntent({ type: 'EXPAND_NODE', nodeId });
       // Bump the focus tick AFTER the intent resolves so any
       // already-mounted preview re-focuses its editor on a
@@ -1101,7 +1134,22 @@ const useCanvasStore = create<RFState>()(
       // still triggers focus.
       set((s) => ({ expandedNodeFocusTick: s.expandedNodeFocusTick + 1 }));
     },
-    closeExpanded: () => set({ expandedNodeId: null }),
+    closeExpanded: () => {
+      // Exit-edit "settle" for editor-authored nodes: a `note` (and a
+      // `text` edited in the panel) is authored in the expanded editor, so
+      // closing it (X / Esc / back) is the real "done editing" boundary at
+      // which the auto-derived label (the `.md` filename) should be
+      // committed — never on every keystroke pause. See
+      // `docs/architecture/node-preprocessing.md` §4 (Triggers & state).
+      const { expandedNodeId, nodes } = get();
+      if (expandedNodeId) {
+        const node = nodes.find((n) => n.id === expandedNodeId);
+        if (node?.type === 'note' || node?.type === 'text') {
+          settleNodePreprocess(expandedNodeId);
+        }
+      }
+      set({ expandedNodeId: null });
+    },
     setExpandMode: (mode) => set({ expandMode: mode }),
 
     collapsedFrameIds: new Set<string>(),
@@ -1224,6 +1272,7 @@ const useCanvasStore = create<RFState>()(
         getNodes: () => get().nodes,
         setNodes: (nodes) => set({ nodes }),
         triggerPreprocessing: preprocessQueue.schedule,
+        forgetNodeContent: nodeContentQueue.forgetNode,
       });
     },
 
@@ -1248,12 +1297,14 @@ const useCanvasStore = create<RFState>()(
       // can flag the conflict on the originating thread's change card.
       const dirty = new Set(nodeContentQueue.pendingNodeIds());
       const skippedNodeIds: string[] = [];
+      const skippedRemoteNodes: Node[] = [];
       const safeDeltas =
         dirty.size === 0
           ? deltas
           : deltas.filter((d) => {
               if (d.type === 'REPLACE_NODE' && dirty.has(d.next.id)) {
                 skippedNodeIds.push(d.next.id);
+                skippedRemoteNodes.push(d.next as unknown as Node);
                 return false;
               }
               if (d.type === 'DELETE_NODE' && dirty.has(d.node.id)) {
@@ -1262,6 +1313,18 @@ const useCanvasStore = create<RFState>()(
               }
               return true;
             });
+
+      // Local-first rebase for a node the user is mid-editing: we keep their
+      // in-memory version (skipped above) but adopt the agent's just-written
+      // revision as the save baseline. The user's next autosave then rebases
+      // on top (expectRev = agent's rev) and cleanly overwrites the agent's
+      // version, instead of tripping a false NODE_CONTENT_CONFLICT against a
+      // change the local-first policy already decided the user wins. The
+      // "your version was kept" notice tells the user what happened; the
+      // change-review card lets them inspect the agent's dropped edit.
+      if (skippedRemoteNodes.length > 0) {
+        nodeContentQueue.seedBaselines(skippedRemoteNodes);
+      }
 
       if (safeDeltas.length === 0) {
         // Nothing to apply locally (empty batch, or every row protected).
@@ -1300,6 +1363,17 @@ const useCanvasStore = create<RFState>()(
         version: toVersion,
       });
 
+      // Re-seed the content-CAS baseline for the nodes this agent write
+      // actually applied. Skipped mid-edit nodes had their baseline adopted
+      // to the agent's rev above (local-first rebase), so exclude them here
+      // to avoid clobbering that with their own unchanged local content.
+      {
+        const skippedSet = new Set(skippedNodeIds);
+        nodeContentQueue.seedBaselines(
+          (applied.nodes as Node[]).filter((n) => !skippedSet.has(n.id)),
+        );
+      }
+
       // Post-effects must not run for nodes whose delta we skipped — they
       // were not actually mutated locally, so preprocessing / fit them is
       // wrong.
@@ -1326,6 +1400,7 @@ const useCanvasStore = create<RFState>()(
         getNodes: () => get().nodes,
         setNodes: (nodes) => get()._setStateNoAutosave({ nodes }),
         triggerPreprocessing: preprocessQueue.schedule,
+        forgetNodeContent: nodeContentQueue.forgetNode,
       });
 
       return skippedNodeIds;
@@ -1483,16 +1558,35 @@ const useCanvasStore = create<RFState>()(
             ? state.viewport
             : null;
         const loadedViewport = sessionViewport ?? legacyServerViewport;
-        set({
+        // Apply the authoritative server state via the no-autosave setter.
+        // A load must NEVER schedule a structure PUT: the nodes/edges we
+        // just fetched already ARE the server's state, so bumping the
+        // canvas `version` would be a spurious self-write. Relying on the
+        // `!prev.isLoading` autosave gate was not enough — two concurrent
+        // loads (e.g. the CanvasPage mount load racing the realtime-sync
+        // `snapshot` reload) can flip `isLoading` false before the losing
+        // load's commit runs, leaking a PUT that resets `updatedAt` to the
+        // open time. History is cleared above, so `canUndo`/`canRedo` are
+        // reset here too (the no-autosave setter skips the middleware's
+        // availability sync).
+        get()._setStateNoAutosave({
           nodes: loadedNodes,
           edges: loadedEdges,
           viewport: loadedViewport,
           canvasTitle: response.title || 'Untitled',
           version: response.version,
           isLoading: false,
+          canUndo: false,
+          canRedo: false,
           ingestionByNodeId: {},
           pendingForkThreadIds: {},
         });
+
+        // Seed each md-backed node's optimistic-concurrency baseline from
+        // the authoritative content we just loaded, so the first edit
+        // carries the correct `expectRev` and the per-node content CAS can
+        // catch a concurrent (cross-tab / cross-device / agent) write.
+        nodeContentQueue.seedBaselines(loadedNodes);
 
         // If the user left a question-replay open on this canvas in a
         // previous session and that question node has since been

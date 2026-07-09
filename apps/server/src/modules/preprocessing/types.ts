@@ -17,10 +17,7 @@ export type InputResolveCapability = 'resolve_input';
 export type ExtractCapability = 'extract_text' | 'fetch_remote_content';
 
 /** Capabilities that belong to the Normalize stage. */
-export type NormalizeCapability =
-  | 'compute_fingerprint'
-  | 'resolve_title'
-  | 'merge_metadata';
+export type NormalizeCapability = 'resolve_title' | 'merge_metadata';
 
 /** Capabilities that belong to the Enrich (LLM) stage. */
 export type EnrichCapability =
@@ -65,12 +62,31 @@ export type NodeContentKind =
   | 'video';
 
 /**
+ * Who authors a node body, and therefore whether writes to it are guarded by
+ * the rev-CAS (optimistic concurrency):
+ *  - `'authored'` → user-editable in-app; a write must carry the caller's
+ *    baseline revision and is rejected when the on-disk body diverged (so a
+ *    concurrent tab / device / external edit is never silently clobbered).
+ *  - `'derived'` → produced by the pipeline (extraction) or bodyless;
+ *    read-only in-app, no CAS (last-write-wins).
+ */
+export type BodyOwnership = 'authored' | 'derived';
+
+/**
  * Declarative preprocessing profile for a canvas node type.
  * The dispatcher uses this to decide which pipeline stages to execute.
  */
 export interface NodePreprocessProfile {
   nodeType: CanvasNodeType;
   contentKind?: NodeContentKind;
+  /**
+   * See {@link BodyOwnership}. Required on every profile (no default) so a new
+   * editable node type cannot silently ship without CAS — a missing value is a
+   * compile error, not a data-loss foot-gun. Threaded to the Persist stage's
+   * authored-body guard by the dispatcher.
+   * See `docs/architecture/node-preprocessing.md` §3 (Node profiles).
+   */
+  bodyOwnership: BodyOwnership;
   capabilities: Capability[];
   /** Node data fields that, when changed, should trigger preprocessing. */
   watchFields: string[];

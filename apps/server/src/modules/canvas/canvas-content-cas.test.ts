@@ -1,0 +1,243 @@
+/**
+ * Tests for the per-node content endpoint's optimistic-concurrency
+ * (compare-and-swap) guard: `PUT /api/canvas/:canvasId/nodes/:nodeId/content`
+ * rejects a write whose `expectRev` no longer matches the on-disk node's
+ * {@link nodeRevisionOf}, so a concurrent (cross-tab / cross-device /
+ * agent, or Google-Drive-synced) write is surfaced as `NODE_CONTENT_CONFLICT`
+ * instead of being silently overwritten.
+ *
+ * Exercised via Fastify `inject()` so the zod body parse, the CAS branch,
+ * and the returned `rev` are covered end-to-end. Auth is applied by the
+ * global preHandler in `app.ts`, not the route plugin, so injecting the
+ * plugin directly needs no Bearer token.
+ */
+
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import fastify from 'fastify';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { nodeRevisionOf } from '@sediment/shared/canvas-engine';
+
+import canvasRoutes from './canvas.route.js';
+import { getCanvasStore } from '../storage/index.js';
+import { setWorkspacePath } from '../workspace.js';
+
+let tmp: string;
+
+const REV_EMPTY = nodeRevisionOf({});
+
+async function buildApp() {
+  const app = fastify();
+  await app.register(canvasRoutes, { prefix: '/canvas' });
+  await app.ready();
+  return app;
+}
+
+/** Seed a canvas.json with a single note node (no `.md` body yet). */
+function seedCanvas(canvasId: string, nodeId: string, label: string): void {
+  getCanvasStore(canvasId).write({
+    canvasId,
+    title: null,
+    version: 1,
+    state: {
+      nodes: [
+        { id: nodeId, type: 'note', position: { x: 0, y: 0 }, data: { label } },
+      ],
+      edges: [],
+    },
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  });
+}
+
+function putContent(
+  app: Awaited<ReturnType<typeof buildApp>>,
+  canvasId: string,
+  nodeId: string,
+  body: Record<string, unknown>,
+) {
+  return app.inject({
+    method: 'PUT',
+    url: `/canvas/${canvasId}/nodes/${nodeId}/content`,
+    headers: { 'content-type': 'application/json' },
+    payload: JSON.stringify(body),
+  });
+}
+
+beforeEach(() => {
+  tmp = mkdtempSync(join(tmpdir(), 'sediment-cas-'));
+  setWorkspacePath(tmp);
+});
+
+afterEach(() => {
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+describe('PUT /nodes/:nodeId/content — content CAS', () => {
+  it('creates a brand-new node when expectRev is the empty-content rev', async () => {
+    const app = await buildApp();
+    try {
+      seedCanvas('c1', 'n1', 'Note');
+      const res = await putContent(app, 'c1', 'n1', {
+        nodeType: 'note',
+        content: 'first body',
+        expectRev: REV_EMPTY,
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json<{ rev: string }>().rev).toBe(
+        nodeRevisionOf({ content: 'first body' }),
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('accepts a follow-up write that carries the current rev', async () => {
+    const app = await buildApp();
+    try {
+      seedCanvas('c1', 'n1', 'Note');
+      const first = await putContent(app, 'c1', 'n1', {
+        nodeType: 'note',
+        content: 'v1',
+        expectRev: REV_EMPTY,
+      });
+      const rev1 = first.json<{ rev: string }>().rev;
+
+      const second = await putContent(app, 'c1', 'n1', {
+        nodeType: 'note',
+        content: 'v2',
+        expectRev: rev1,
+      });
+      expect(second.statusCode).toBe(200);
+      expect(second.json<{ rev: string }>().rev).toBe(
+        nodeRevisionOf({ content: 'v2' }),
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('rejects a write whose expectRev is stale (concurrent edit)', async () => {
+    const app = await buildApp();
+    try {
+      seedCanvas('c1', 'n1', 'Note');
+      // Establish content "v1" on disk.
+      await putContent(app, 'c1', 'n1', {
+        nodeType: 'note',
+        content: 'v1',
+        expectRev: REV_EMPTY,
+      });
+      // A second writer still believes the node is empty → conflict.
+      const res = await putContent(app, 'c1', 'n1', {
+        nodeType: 'note',
+        content: 'racing body',
+        expectRev: REV_EMPTY,
+      });
+      expect(res.statusCode).toBe(409);
+      const body = res.json<{ code: string; currentRev: string }>();
+      expect(body.code).toBe('NODE_CONTENT_CONFLICT');
+      expect(body.currentRev).toBe(nodeRevisionOf({ content: 'v1' }));
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('catches a create-race: empty-rev write when a file already exists', async () => {
+    const app = await buildApp();
+    try {
+      seedCanvas('c1', 'n1', 'Note');
+      getCanvasStore('c1').writeNode('n1', {
+        nodeId: 'n1',
+        type: 'note',
+        label: 'Note',
+        content: 'already here',
+      });
+      const res = await putContent(app, 'c1', 'n1', {
+        nodeType: 'note',
+        content: 'my new note',
+        expectRev: REV_EMPTY,
+      });
+      expect(res.statusCode).toBe(409);
+      expect(res.json<{ code: string }>().code).toBe('NODE_CONTENT_CONFLICT');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('does not conflict on a label-only change (rev covers content, not label)', async () => {
+    const app = await buildApp();
+    try {
+      seedCanvas('c1', 'n1', 'Note');
+      const first = await putContent(app, 'c1', 'n1', {
+        nodeType: 'note',
+        content: 'body',
+        expectRev: REV_EMPTY,
+      });
+      const rev1 = first.json<{ rev: string }>().rev;
+      // Rename only: same content, same rev → allowed.
+      const res = await putContent(app, 'c1', 'n1', {
+        nodeType: 'note',
+        content: 'body',
+        label: 'Renamed',
+        labelSource: 'user',
+        expectRev: rev1,
+      });
+      expect(res.statusCode).toBe(200);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('skips the CAS entirely when expectRev is omitted', async () => {
+    const app = await buildApp();
+    try {
+      seedCanvas('c1', 'n1', 'Note');
+      getCanvasStore('c1').writeNode('n1', {
+        nodeId: 'n1',
+        type: 'note',
+        label: 'Note',
+        content: 'on disk',
+      });
+      // No expectRev → legacy/non-CAS caller → overwrite allowed.
+      const res = await putContent(app, 'c1', 'n1', {
+        nodeType: 'note',
+        content: 'overwrite',
+      });
+      expect(res.statusCode).toBe(200);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('ignores expectRev for a derived node type (last-write-wins)', async () => {
+    // `pdf` is a `derived` body (bodyOwnership !== 'authored'): its text is
+    // produced by preprocessing, not authored in-app, so the server drops
+    // any `expectRev` and lets the write land even when the client's baseline
+    // is stale — the web sends `expectRev` uniformly but only `authored`
+    // types are CAS-guarded. Without this a brand-new pdf's `expectRev`
+    // would false-conflict against its own `persist_source` write.
+    const app = await buildApp();
+    try {
+      seedCanvas('c1', 'n1', 'Doc');
+      getCanvasStore('c1').writeNode('n1', {
+        nodeId: 'n1',
+        type: 'pdf',
+        label: 'Doc',
+        content: 'extracted text on disk',
+      });
+      // A stale REV_EMPTY baseline would 409 for an authored node, but a
+      // derived node ignores it → the write is accepted (overwrite).
+      const res = await putContent(app, 'c1', 'n1', {
+        nodeType: 'pdf',
+        content: 're-extracted text',
+        expectRev: REV_EMPTY,
+      });
+      expect(res.statusCode).toBe(200);
+    } finally {
+      await app.close();
+    }
+  });
+});

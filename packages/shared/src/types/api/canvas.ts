@@ -69,6 +69,19 @@ export const putNodeContentBodySchema = z.object({
   keywords: z.array(z.string()).optional(),
   /** Opaque pass-through frontmatter blob (e.g. AI provenance markers). */
   provenance: z.unknown().optional(),
+  /**
+   * Optimistic-concurrency baseline: the {@link nodeRevision} the client's
+   * edit descends from (a deterministic djb2 over the node's authored
+   * `content` / `src`). The server recomputes the on-disk node's revision
+   * and rejects the write with `NODE_CONTENT_CONFLICT` when it differs, so
+   * a concurrent edit (another tab / device / an agent, or a Google-Drive
+   * synced newer copy) is surfaced as a conflict instead of silently
+   * overwritten. A brand-new node the client is creating carries the
+   * revision of empty content (`nodeRevisionOf({})`), so the create only
+   * succeeds while no file exists yet (guards create-races too). Omit to
+   * skip the check entirely (kept optional so non-CAS callers still work).
+   */
+  expectRev: z.string().optional(),
 });
 export type PutNodeContentRequest = z.infer<typeof putNodeContentBodySchema>;
 
@@ -84,6 +97,15 @@ export type PutNodeContentRequest = z.infer<typeof putNodeContentBodySchema>;
 export interface PutNodeContentResponse {
   nodeId: string;
   label: string | null;
+  /**
+   * The {@link nodeRevision} of the content the server actually persisted.
+   * The client stores this as the node's new optimistic-concurrency
+   * baseline (co-delivered with the write it confirms, so content and its
+   * baseline never update through separate channels). Authoritative: it
+   * reflects any server-side normalization (e.g. a refused empty-body
+   * clobber that kept the existing content).
+   */
+  rev: string;
   /** True when the markdown file could not be read back after write. */
   contentMissing?: boolean;
   /** True when the referenced artifact file is missing on disk. */
@@ -104,6 +126,12 @@ export interface GetNodeContentResponse {
   labelSource?: 'user' | 'auto' | 'agent';
   src?: string;
   content: string;
+  /**
+   * The {@link nodeRevision} of the returned content. The client seeds this
+   * as the node's optimistic-concurrency baseline on a single-node refresh
+   * (same co-delivery discipline as {@link PutNodeContentResponse.rev}).
+   */
+  rev: string;
   summary?: string;
   keywords?: string[];
   contentMissing?: boolean;
@@ -162,6 +190,7 @@ export type CanvasErrorCode =
   | 'CANVAS_TITLE_CONFLICT'
   | 'NODE_LABEL_CONFLICT'
   | 'NODE_DUPLICATE_FILES'
+  | 'NODE_CONTENT_CONFLICT'
   | 'CANVAS_VERSION_CONFLICT'
   | 'INVALID_REQUEST'
   | 'CANVAS_NOT_FOUND'
@@ -188,6 +217,17 @@ export interface CanvasConflictResponse {
    * the duplicate banner instead of forcing a reload to learn them.
    */
   duplicateFiles?: string[];
+  /**
+   * For `NODE_CONTENT_CONFLICT`: the on-disk node's current
+   * {@link nodeRevision}. Lets the client re-seed its baseline after the
+   * user chooses to refresh, and is handy for diagnostics.
+   */
+  currentRev?: string;
+  /**
+   * For `NODE_CONTENT_CONFLICT`: the baseline revision the rejected write
+   * was based on (echo of the request's `expectRev`).
+   */
+  expectedRev?: string;
 }
 
 export interface UpdateCanvasStateParams {

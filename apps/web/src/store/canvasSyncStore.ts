@@ -134,6 +134,17 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
             if (canvasStore.canvasId !== canvasId) return;
 
             if (event.type === 'snapshot') {
+              // Skip the catch-up reload while an initial/primary load is
+              // still in flight. On fresh open the CanvasPage mount load
+              // is already fetching the latest state, but it hasn't set
+              // `version` yet when this snapshot arrives — without this
+              // guard the stale-version comparison below fires a second,
+              // redundant `loadCanvas` that races the mount load and
+              // leaks a spurious structure PUT (resetting `updatedAt` to
+              // the open time). The in-flight load already brings the
+              // freshest state, so a snapshot-driven reload is only
+              // meaningful once we've settled.
+              if (canvasStore.isLoading) return;
               if (event.data.version !== canvasStore.version) {
                 void canvasStore.loadCanvas(canvasId);
               }

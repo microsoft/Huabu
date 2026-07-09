@@ -32,6 +32,8 @@ export class CanvasConflictError extends Error {
   readonly conflictWith?: string;
   readonly nodeId?: string;
   readonly serverVersion?: number;
+  /** For `NODE_CONTENT_CONFLICT`: the on-disk node's current revision. */
+  readonly currentRev?: string;
 
   constructor(payload: CanvasConflictResponse) {
     super(payload.message);
@@ -40,6 +42,7 @@ export class CanvasConflictError extends Error {
     this.conflictWith = payload.conflictWith;
     this.nodeId = payload.nodeId;
     this.serverVersion = payload.serverVersion;
+    this.currentRev = payload.currentRev;
   }
 }
 

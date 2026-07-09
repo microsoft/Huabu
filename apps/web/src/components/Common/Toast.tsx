@@ -34,6 +34,12 @@ export interface ToastItem {
   /** Optional inline action button (e.g. Reload / Undo). */
   action?: ToastAction;
   /**
+   * Optional second inline action button, rendered before {@link action}.
+   * Used when a message needs a genuine two-way choice (e.g. a content
+   * conflict: "Keep mine" vs "Load latest").
+   */
+  secondaryAction?: ToastAction;
+  /**
    * Whether to render a × close button. Defaults to true whenever the
    * toast is persistent (`duration <= 0`) or carries an action — those
    * cases must always be user-dismissible. Auto-dismissing info toasts
@@ -62,6 +68,7 @@ export function toast(
     tone?: ToastTone;
     duration?: number;
     action?: ToastAction;
+    secondaryAction?: ToastAction;
     dismissible?: boolean;
   },
 ): string {
@@ -167,55 +174,104 @@ function ToastEntry({ item }: { item: ToastItem }) {
   // Hoist into a local so the click handler closes over a non-null
   // reference (avoids the non-null assertion lint).
   const action = item.action;
+  const secondaryAction = item.secondaryAction;
   const tone = item.tone ?? 'info';
   const StatusIcon = toneIcons[tone];
   const buttonClass = toneButtonClasses[tone];
 
+  // A genuine two-way choice (both actions present) gets a stacked
+  // layout: message on top, an end-aligned button bar below. A long
+  // conflict message would otherwise leave the buttons floating in the
+  // vertical centre of the wrapped text. Single-action / info-only
+  // toasts keep the compact single-row layout.
+  const stacked = !!action && !!secondaryAction;
+
+  const badge = (
+    <span
+      aria-hidden
+      className={cn(
+        'flex h-5 w-5 shrink-0 items-center justify-center rounded-full',
+        toneBadgeClasses[tone],
+      )}
+    >
+      <StatusIcon className="h-3 w-3" strokeWidth={3} />
+    </span>
+  );
+
+  const secondaryButton = secondaryAction && (
+    <Button
+      variant="ghost"
+      size="sm"
+      tone={tone}
+      className={buttonClass}
+      onClick={() => {
+        secondaryAction.onClick();
+        dismissToast(item.id);
+      }}
+    >
+      {secondaryAction.label}
+    </Button>
+  );
+
+  const actionButton = action && (
+    <Button
+      variant="outline"
+      size="sm"
+      tone={tone}
+      className={buttonClass}
+      onClick={() => {
+        action.onClick();
+        dismissToast(item.id);
+      }}
+    >
+      {action.label}
+    </Button>
+  );
+
+  const closeButton = showClose && (
+    <Button
+      variant="ghost"
+      size="sm"
+      iconOnly
+      className={buttonClass}
+      aria-label={t('actions.dismiss')}
+      onClick={() => dismissToast(item.id)}
+    >
+      <X />
+    </Button>
+  );
+
   return (
     <div
       className={cn(
-        'pointer-events-auto flex w-fit max-w-md items-center gap-3 rounded-xl border px-3 py-2.5 text-sm shadow-lg transition-all duration-200',
+        'pointer-events-auto flex w-fit max-w-md rounded-xl border px-3 py-2.5 text-sm shadow-lg transition-all duration-200',
+        stacked ? 'flex-col gap-2' : 'items-center gap-3',
         visible ? 'translate-y-0 opacity-100' : '-translate-y-2 opacity-0',
         toneSurfaceClasses[tone],
         toneTextClasses[tone],
       )}
       role="status"
     >
-      <span
-        aria-hidden
-        className={cn(
-          'flex h-5 w-5 shrink-0 items-center justify-center rounded-full',
-          toneBadgeClasses[tone],
-        )}
-      >
-        <StatusIcon className="h-3 w-3" strokeWidth={3} />
-      </span>
-      <span className="min-w-0 flex-1">{item.message}</span>
-      {action && (
-        <Button
-          variant="outline"
-          size="sm"
-          tone={tone}
-          className={buttonClass}
-          onClick={() => {
-            action.onClick();
-            dismissToast(item.id);
-          }}
-        >
-          {action.label}
-        </Button>
-      )}
-      {showClose && (
-        <Button
-          variant="ghost"
-          size="sm"
-          iconOnly
-          className={buttonClass}
-          aria-label={t('actions.dismiss')}
-          onClick={() => dismissToast(item.id)}
-        >
-          <X />
-        </Button>
+      {stacked ? (
+        <>
+          <div className="flex items-start gap-3">
+            {badge}
+            <span className="min-w-0 flex-1 py-0.5">{item.message}</span>
+            {closeButton}
+          </div>
+          <div className="flex justify-end gap-2">
+            {secondaryButton}
+            {actionButton}
+          </div>
+        </>
+      ) : (
+        <>
+          {badge}
+          <span className="min-w-0 flex-1">{item.message}</span>
+          {secondaryButton}
+          {actionButton}
+          {closeButton}
+        </>
       )}
     </div>
   );

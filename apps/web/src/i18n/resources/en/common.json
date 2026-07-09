@@ -238,6 +238,11 @@
     "ask": "Ask",
     "agentChangesSkipped_one": "{{count}} agent change was skipped because you were editing.",
     "agentChangesSkipped_other": "{{count}} agent changes were skipped because you were editing.",
+    "contentConflict": "“{{label}}” was changed elsewhere. Keep your version (overwrites the other change) or load the latest (your text is copied to the clipboard first).",
+    "contentConflictKeepMine": "Keep mine",
+    "contentConflictLoadLatest": "Load latest",
+    "contentConflictLoadFailed": "Could not load the latest version — please try again.",
+    "contentConflictLoaded": "Loaded the latest version.",
     "fontDefault": "Default",
     "fontSerif": "Serif",
     "fontMono": "Mono",
@@ -688,8 +693,6 @@
     }
   },
   "errors": {
-    "previousName": "previous name",
-    "nodeRenameReverted": "Couldn't rename node — reverted to \"{{name}}\".",
-    "nodeChangesMayNotPersist": "Couldn't save a node's changes — your latest edits may not be persisted."
+    "nodeSaveFailed": "Couldn't write \"{{name}}\" to disk — the file may be locked or not writable."
   }
 }
