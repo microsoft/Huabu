@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '../../components/Common/Button';
 import { cn } from '../../components/Common/cn';
 import { Canvas } from '../../components/Panels/Canvas/Canvas';
-import { ExpandedNodePanel } from '../../components/Panels/Canvas/ExpandedNodePanel';
+import { ExpandedNodePanel } from '../../components/Panels/ExpandedNodePanel/ExpandedNodePanel';
 import { SettingsPopover } from '../../components/Panels/Header/SettingsPopover';
 import { isElectron } from '../../hooks/useElectron';
 import useCanvasStore from '../../store/canvasStore';

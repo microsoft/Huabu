@@ -30,10 +30,10 @@ import { ChevronDown, ChevronUp, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { findNthRange, scrollRangeIntoView } from '../../hooks/searchDom';
-import { useTextHighlight } from '../../hooks/useTextHighlight';
-import { useSearchStore } from '../../store/searchStore';
-import { Button } from '../Common/Button';
+import { findNthRange, scrollRangeIntoView } from '../../../hooks/searchDom';
+import { useTextHighlight } from '../../../hooks/useTextHighlight';
+import { useSearchStore } from '../../../store/searchStore';
+import { Button } from '../../Common/Button';
 
 interface InPreviewSearchBarProps {
   /** Root of the preview content. Highlights paint over its descendants. */
