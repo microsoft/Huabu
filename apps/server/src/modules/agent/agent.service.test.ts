@@ -1,17 +1,18 @@
 /**
  * Output-delta tests for {@link runAgent} (single-channel dispatch).
  *
- * `runAgent` renders THIS turn's envelope into its user message
- * internally and runs the agent over `[prior history + this turn]` held
- * in a LOCAL array. The invariant under test: the run delivers its output
- * ONLY via the generator's RETURN value (the messages the agent
- * appended); `context.messages` is read-only INPUT and is never mutated.
- * The rendered user message is kept OUT of the returned delta (it is
- * re-derived from the envelope on reload).
+ * `runAgent` renders THIS turn's envelope into its user message and runs
+ * the built-in agent over `[prior history + this turn]`. The prior history
+ * seeds the injected `Agent`; this turn's rendered message is appended by
+ * the handle via `agent.prompt(...)`. The invariant under test: the run
+ * delivers its output ONLY via the generator's RETURN value (the messages
+ * the agent appended); `context.messages` is read-only INPUT and is never
+ * mutated. The rendered user message is kept OUT of the returned delta (it
+ * is re-derived from the envelope on reload).
  *
- * The envelope-less callers (memory analyzer / sketch / reachback) run
- * over `context.messages` as-is and likewise receive the delta via the
- * return value.
+ * The envelope-less callers (memory analyzer / sketch / reachback) submit
+ * a null request; the handle runs over `context.messages` as-is via
+ * `agent.continue()` and likewise receives the delta via the return value.
  *
  * pi-agent-core's `Agent` is mocked to a deterministic fake that appends
  * a configurable output tail and emits a single `agent_end`.
@@ -21,7 +22,8 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
 
-// The output tail the fake Agent appends to its transcript on `continue()`.
+// The output tail the fake Agent appends to its transcript on
+// `prompt()` / `continue()`.
 let mockOutputTail: Array<Record<string, unknown>> = [];
 
 vi.mock('@earendil-works/pi-agent-core', () => {
@@ -44,6 +46,17 @@ vi.mock('@earendil-works/pi-agent-core', () => {
     }
 
     async continue(): Promise<void> {
+      this.state.messages.push(...mockOutputTail);
+      this.cb?.({ type: 'agent_end' });
+    }
+
+    async prompt(
+      message: Record<string, unknown> | Array<Record<string, unknown>>,
+    ): Promise<void> {
+      // Mirror the real `prompt`: append this turn's message(s), then run
+      // (which appends the output tail) and emit `agent_end`.
+      const turn = Array.isArray(message) ? message : [message];
+      this.state.messages.push(...turn);
       this.state.messages.push(...mockOutputTail);
       this.cb?.({ type: 'agent_end' });
     }

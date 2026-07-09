@@ -67,6 +67,7 @@ import path from 'node:path';
 import { getDataDir } from '../../../data-dir.js';
 import { atomicWriteJson, readJson } from '../../storage/io.js';
 
+import type { AgentMetadata } from '@agenetes/protocol';
 import type {
   AcpModelInfo,
   AcpSessionConfigOption,
@@ -291,6 +292,42 @@ export function invalidateProfileSchemaCache(profileId: string): void {
   const cache = ensureLoaded();
   if (!cache.delete(profileId)) return;
   flushWriteNow();
+}
+
+/**
+ * Fold a driver-neutral {@link AgentMetadata} snapshot — up-reported by the
+ * Agenetes instance over `notifications()` (I9.7) — into the per-profile
+ * cache. L1 subscribes per thread (keyed to the thread's `profileId` at
+ * spawn) and calls this for each pushed snapshot, replacing the old
+ * driver-side `AcpProfileCachePort.mirror(entry)` write.
+ *
+ * Only the profile-shared surface is mirrored (mode / model catalogue,
+ * config options, slash commands, and the last-known `current*` defaults).
+ * The per-session fields on the snapshot (`sessionInfo`, `usage`) are not
+ * profile-scoped, so they are dropped here.
+ *
+ * `availableCommands` is mirrored on an optimistic basis — the agent's SSE
+ * `available_commands_update` replaces the cached list wholesale on the
+ * next session, so any per-session drift self-corrects.
+ *
+ * The cache is what `/cached-meta` falls back to when a brand-new thread
+ * has no per-thread durable record — see `threads.route.ts`.
+ */
+export function foldMetadataIntoProfileCache(
+  profileId: string,
+  meta: AgentMetadata,
+): void {
+  if (!profileId) return;
+  mergeProfileSchemaCache(profileId, {
+    availableModes: meta.availableModes,
+    currentModeId: meta.currentModeId,
+    availableModels: meta.availableModels,
+    currentModelId: meta.currentModelId,
+    configOptions: meta.configOptions,
+    availableCommands: meta.availableCommands,
+    commandsUpdatedAt: meta.commandsUpdatedAt,
+    metaUpdatedAt: meta.metaUpdatedAt,
+  });
 }
 
 /**

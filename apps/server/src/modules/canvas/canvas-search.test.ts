@@ -18,21 +18,31 @@ import {
   type SearchableEdge,
   type SearchableNode,
 } from './canvas-search.js';
+import { wrapChatRequest } from '../agent/agenetes/handle.js';
 
-import type { ChatTurnRecord } from '../agent/store/chat-thread-store.js';
+import type { ChatEnvelope } from '../agent/conversation/envelope.js';
 import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
+import type { AgentTurn } from '@agenetes/protocol';
 import type { CanvasSearchEvent, CanvasSearchRequest } from '@sediment/shared';
 
 /**
- * In-memory chat-thread registry backing the mocked `loadTurns`. Keyed
- * by `threadId`; the conversation tier reads it instead of disk so the
- * scanner can be exercised without writing `.turns.jsonl` fixtures.
+ * In-memory chat-thread registry backing the mocked `agenetes.history`.
+ * Keyed by `threadId`; the conversation tier reads it instead of disk so
+ * the scanner can be exercised without writing `chat_v2/` fixtures.
  */
-const turnsByThread = vi.hoisted(() => new Map<string, ChatTurnRecord[]>());
+const turnsByThread = vi.hoisted(() => new Map<string, AgentTurn[]>());
 
-vi.mock('../agent/store/chat-thread-store.js', () => ({
-  loadTurns: (threadId: string): ChatTurnRecord[] =>
-    turnsByThread.get(threadId) ?? [],
+vi.mock('../agent/agenetes/drivers.js', () => ({
+  agenetes: {
+    history: (_ns: unknown, threadId: string) => ({
+      turns: turnsByThread.get(threadId) ?? [],
+    }),
+  },
+}));
+
+vi.mock('../storage/paths.js', async (importActual) => ({
+  ...((await importActual()) as Record<string, unknown>),
+  canvasAcpNamespace: (canvasId: string) => ({ name: canvasId, root: '' }),
 }));
 
 function mkNode(id: string, type: string, threadId?: string): SearchableNode {
@@ -548,27 +558,23 @@ describe('searchCanvas — edge labels', () => {
 
 describe('searchCanvas — conversation tier', () => {
   /** Build a turn with one user message + one assistant text reply. */
-  function mkTurn(userText: string, assistantText: string): ChatTurnRecord {
-    return {
-      envelope: {
-        user: { text: userText, attachments: [] },
-        skills: { invokedIds: [], resolved: [] },
-        focus: {
-          selection: {
-            refs: [],
-            selectedIds: [],
-            imageAttachments: [],
-            snapshotAttachments: [],
-          },
+  function mkTurn(userText: string, assistantText: string): AgentTurn {
+    const envelope = {
+      user: { text: userText, attachments: [] },
+      skills: { invokedIds: [], resolved: [] },
+      focus: {
+        selection: {
+          refs: [],
+          selectedIds: [],
+          imageAttachments: [],
+          snapshotAttachments: [],
         },
       },
-      transcript: [
-        {
-          role: 'assistant',
-          content: [{ type: 'text', text: assistantText }],
-        },
-      ],
-    } as unknown as ChatTurnRecord;
+    } as unknown as ChatEnvelope;
+    return {
+      request: wrapChatRequest(envelope),
+      transcript: [{ type: 'text', data: { content: assistantText } }],
+    };
   }
 
   it('matches user messages and assistant replies in a thread', async () => {
@@ -598,7 +604,7 @@ describe('searchCanvas — conversation tier', () => {
     turnsByThread.clear();
     turnsByThread.set('t1', [
       {
-        envelope: {
+        request: wrapChatRequest({
           user: { text: 'run the build', attachments: [] },
           skills: { invokedIds: [], resolved: [] },
           focus: {
@@ -609,27 +615,21 @@ describe('searchCanvas — conversation tier', () => {
               snapshotAttachments: [],
             },
           },
-        },
+        } as unknown as ChatEnvelope),
         transcript: [
+          { type: 'text', data: { content: 'building now' } },
           {
-            role: 'assistant',
-            content: [
-              { type: 'text', text: 'building now' },
-              {
-                type: 'toolCall',
-                id: 'tc1',
-                name: 'run_build',
-                arguments: { secret: 'SECRETTOKEN' },
-              },
-            ],
-          },
-          {
-            role: 'tool',
-            toolCallId: 'tc1',
-            content: 'SECRETTOKEN build output',
-          },
+            type: 'tool_call',
+            data: {
+              toolCallId: 'tc1',
+              title: 'run_build',
+              internalToolName: 'run_build',
+              rawInput: { secret: 'SECRETTOKEN' },
+              rawOutput: 'SECRETTOKEN build output',
+            },
+          } as unknown as AgentTurn['transcript'][number],
         ],
-      } as unknown as ChatTurnRecord,
+      },
     ]);
 
     const hitText = await collect(

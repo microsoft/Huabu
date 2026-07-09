@@ -1,0 +1,29 @@
+{
+  "name": "@agenetes/protocol",
+  "version": "0.1.0",
+  "description": "Frozen L1<->L2 contract for the Agenetes agent control plane (WorkloadSpec, ControlMsg, AgentStreamEvent, AgentCapabilities). zod schemas + z.infer types.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "^0.22.1",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}

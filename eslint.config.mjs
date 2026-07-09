@@ -23,7 +23,10 @@ export default typescriptEslint.config(
       '**/.vite/**',
       '**/*.min.*',
       // Vendored upstream code — lint with its own rules in the agentlet repo.
-      'external/**',
+      // NOTE: external/agenetes is authored by us and IS linted with the
+      // repo's rules (see the TS project list + Node env block below); only
+      // the vendored agentlet subtree is ignored here.
+      'external/agentlet/**',
       // Agent Team packages are self-contained plugins with their own
       // scripts/prompts; not part of the app's lint surface.
       'agent-teams/**',
@@ -46,6 +49,8 @@ export default typescriptEslint.config(
           './apps/web/tsconfig.json',
           './apps/web/tsconfig.node.json',
           './packages/shared/tsconfig.json',
+          './external/agenetes/packages/protocol/tsconfig.json',
+          './external/agenetes/packages/runtime/tsconfig.json',
         ],
         tsconfigRootDir: __dirname,
       },
@@ -59,6 +64,8 @@ export default typescriptEslint.config(
             './apps/desktop/tsconfig.json',
             './apps/web/tsconfig.json',
             './packages/shared/tsconfig.json',
+            './external/agenetes/packages/protocol/tsconfig.json',
+            './external/agenetes/packages/runtime/tsconfig.json',
           ],
         },
       },
@@ -68,6 +75,35 @@ export default typescriptEslint.config(
       eqeqeq: 'warn',
       'no-throw-literal': 'warn',
       semi: 'error',
+      // Layer seam boundaries (L1 Huabu / L2 Agenetes / L3 plugins) —
+      // docs/proposals/layered-architecture.md §5. Enforce only the
+      // dependency arrows that already hold physically today; the
+      // L1↔L2-*internal* boundary is deferred until modules/agent is
+      // physically extracted (§7 M5/M6), because L1 and L2 still share
+      // the apps/server process for now.
+      'import/no-restricted-paths': [
+        'error',
+        {
+          zones: [
+            {
+              // L1 web client ↛ L2/host server runtime. The only legal
+              // channel is HTTP/SSE + shared wire types.
+              target: './apps/web/src',
+              from: './apps/server/src',
+              message:
+                'L1 (web client) must not import L2/host server code. Cross the seam via HTTP/SSE and shared wire types in packages/shared. See docs/proposals/layered-architecture.md §5.',
+            },
+            {
+              // The shared contract package is the seam vocabulary and
+              // must stay app-independent (no cycles, server-portable).
+              target: './packages/shared/src',
+              from: './apps',
+              message:
+                'The shared contract package must not depend on any app. Move the shared type/logic into packages/shared instead. See docs/architecture/api-design.md.',
+            },
+          ],
+        },
+      ],
       'no-unused-vars': 'off',
       '@typescript-eslint/no-unused-vars': [
         'error',
@@ -132,6 +168,7 @@ export default typescriptEslint.config(
       'apps/desktop/src/**/*.{ts,tsx}',
       'apps/desktop/scripts/**/*.{js,mjs,cjs}',
       'packages/shared/src/**/*.{ts,tsx}',
+      'external/agenetes/packages/*/src/**/*.{ts,tsx}',
       'vite.config.ts',
       '*.config.js',
       '*.config.mjs',

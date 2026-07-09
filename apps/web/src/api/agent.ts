@@ -145,13 +145,17 @@ export const agentApi = {
    */
   reconnectStream: async (
     threadId: string,
+    canvasId: string | undefined,
     callbacks: AgentStreamCallbacks,
     signal?: AbortSignal,
   ): Promise<boolean> => {
     try {
-      const response = await fetch(apiUrl(routes.agentStream(threadId)), {
-        signal,
-      });
+      const response = await fetch(
+        apiUrl(routes.agentStream(threadId, canvasId)),
+        {
+          signal,
+        },
+      );
 
       if (response.status === 404) return false;
       if (!response.ok || !response.body) return false;

@@ -76,6 +76,7 @@ docs/
 | [content-before-ai-design.md](./proposals/content-before-ai-design.md)         | Unknown — needs owner review                    | Block-level provenance (AI vs user authorship) + inline word-level diff bars per block.                                        |
 | [headless-executor-plan.md](./proposals/headless-executor-plan.md)             | Partly shipped (M2 referenced from `canvas.ts`) | Server-side headless canvas executor + structure/content sync split.                                                           |
 | [huabu-cli-design.md](./proposals/huabu-cli-design.md)                         | Draft                                           | `huabu` CLI + MCP server so any agent can read/write canvases without a custom adapter.                                        |
+| [layered-architecture.md](./proposals/layered-architecture.md)                 | Draft                                           | Three-layer model — Interaction-driven (HAI) / Protocol-driven (Agent-as-a-Local-Service) / Task-driven (Task Automation).     |
 | [milkdown-custom-toolbar-plan.md](./proposals/milkdown-custom-toolbar-plan.md) | Draft                                           | Replace Crepe's built-in Milkdown toolbar with a Sediment-owned React toolbar and semantic editor command API.                 |
 
 When you ship one of these, edit it to add `Status: Shipped` + the merge

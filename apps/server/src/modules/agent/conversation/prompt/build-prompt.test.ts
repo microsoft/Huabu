@@ -18,16 +18,23 @@ import {
   renderEnvelopeMessages,
   rebuildContextMessages,
 } from './build-prompt.js';
+import { wrapChatRequest } from '../../agenetes/handle.js';
 import { buildAgentNodePreview } from '../../node-ref.js';
 
 import type { NodeNeighbourhoodContext } from '../../../canvas/node-neighbourhood.js';
 import type { AgentNodeRef } from '../../node-ref.js';
-import type {
-  ChatTurnRecord,
-  PiMessage,
-} from '../../store/chat-thread-store.js';
 import type { ChatEnvelope, ResolvedSkill } from '../envelope.js';
+import type { AgentTurn, FoldedMessage } from '@agenetes/protocol';
+import type { Message } from '@earendil-works/pi-ai';
 import type { ChatAttachment } from '@sediment/shared';
+
+/** Build an {@link AgentTurn} from an envelope + folded transcript. */
+function makeTurn(
+  envelope: ChatEnvelope,
+  transcript: FoldedMessage[],
+): AgentTurn {
+  return { request: wrapChatRequest(envelope), transcript };
+}
 
 // ─── Fixtures ────────────────────────────────────────────────────────────
 
@@ -61,7 +68,7 @@ function makeEnvelope(over: {
 }
 
 /** Flatten a message's content to a single string for assertions. */
-function textOf(content: PiMessage['content']): string {
+function textOf(content: Message['content']): string {
   if (typeof content === 'string') return content;
   return content
     .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
@@ -231,22 +238,15 @@ describe('renderEnvelopeMessages', () => {
 
 describe('rebuildContextMessages', () => {
   it('re-derives the user message from each stored envelope without duplicating it', async () => {
-    const assistantReply: PiMessage = {
-      role: 'assistant',
-      content: [{ type: 'text', text: 'sure' }],
-      timestamp: 1,
-    } as PiMessage;
-
-    const turns: ChatTurnRecord[] = [
-      {
-        envelope: makeEnvelope({ text: 'hi' }),
-        transcript: [assistantReply],
-      },
+    const turns: AgentTurn[] = [
+      makeTurn(makeEnvelope({ text: 'hi' }), [
+        { type: 'text', data: { content: 'sure' } },
+      ]),
     ];
 
     const out = await rebuildContextMessages(turns, NO_CANVAS);
 
-    // Exactly one rendered user message + one persisted assistant row —
+    // Exactly one rendered user message + one projected assistant row —
     // the user message is NOT also present in the transcript.
     expect(out).toHaveLength(2);
     expect(out[0].role).toBe('user');
@@ -288,7 +288,7 @@ describe('rebuildContextMessages', () => {
     // …but once the same turn is replayed as history, it is stripped so
     // the message prefix stays byte-stable / cache-friendly.
     const out = await rebuildContextMessages(
-      [{ envelope, transcript: [] }],
+      [makeTurn(envelope, [])],
       NO_CANVAS,
     );
     expect(textOf(out[0].content)).not.toContain('<canvas_neighbourhood>');
@@ -297,14 +297,12 @@ describe('rebuildContextMessages', () => {
   });
 
   it('skips empty turns but still appends their transcript', async () => {
-    const toolRow: PiMessage = {
-      role: 'assistant',
-      content: [{ type: 'text', text: 'auto' }],
-      timestamp: 2,
-    } as PiMessage;
-
     const out = await rebuildContextMessages(
-      [{ envelope: makeEnvelope({ text: '' }), transcript: [toolRow] }],
+      [
+        makeTurn(makeEnvelope({ text: '' }), [
+          { type: 'text', data: { content: 'auto' } },
+        ]),
+      ],
       NO_CANVAS,
     );
 

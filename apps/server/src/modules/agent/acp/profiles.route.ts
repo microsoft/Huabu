@@ -24,12 +24,13 @@
 
 import { randomUUID } from 'node:crypto';
 
+import { getDaemonSupervisor } from '@agenetes/agentlet-host';
+
 import {
   acpProfileCreateRequestSchema,
   acpProfileUpdateRequestSchema,
 } from '@sediment/shared';
 
-import { getDaemonSupervisor } from './daemon-supervisor.js';
 import { invalidateProfileSchemaCache } from './profile-schema-cache.js';
 import {
   deleteProfile,

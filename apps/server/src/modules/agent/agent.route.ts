@@ -9,6 +9,8 @@
  * GET  /api/agent/history/:threadId — Load conversation history
  */
 
+import { emptyAcpOverlay } from '@agenetes/acp-driver';
+
 import {
   AGENT_SSE_EVENTS,
   agentCanvasIdQuerySchema,
@@ -19,23 +21,17 @@ import {
 
 import { loadAgent } from '../../prompt/index.js';
 import { runAcpAgent } from '../agent/acp/service.js';
+import { agenetes } from '../agent/agenetes/drivers.js';
 import { runAgent } from '../agent/agent.service.js';
 import { buildChatEnvelope } from '../agent/conversation/envelope.js';
 import { rebuildContextMessages } from '../agent/conversation/prompt/build-prompt.js';
 import { buildHistoryFromTurns } from '../agent/conversation/transcript/history.js';
 import { getLLMModel } from '../agent/llm.js';
 import { readWorkspaceMemory } from '../agent/memory/index.js';
-import {
-  appendTurn,
-  clearActiveTurn,
-  emptyAcpOverlay,
-  finalizeActiveTurn,
-  loadTurns,
-  writeActiveTurn,
-} from '../agent/store/chat-thread-store.js';
+import { canvasAcpNamespace } from '../storage/paths.js';
 
-import type { ChatTurnRecord } from '../agent/store/chat-thread-store.js';
-import type { AssistantMessage, Context, Message } from '@earendil-works/pi-ai';
+import type { AgentTurn } from '@agenetes/protocol';
+import type { Context } from '@earendil-works/pi-ai';
 import type {
   AgentCanvasIdQuery,
   AgentRequest,
@@ -57,65 +53,11 @@ function getOrCreateThreadId(value: unknown): string {
   return createId('thread');
 }
 
-function writeSSE(raw: NodeJS.WritableStream, event: AgentStreamEvent): void {
+function writeSSE(
+  raw: NodeJS.WritableStream,
+  event: { type: string; data: unknown },
+): void {
   raw.write(`event: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`);
-}
-
-/**
- * Repair this turn's output messages after an abort.
- *
- * Keeps all completed messages (partial assistant text, finished tool
- * calls and results) — these are visible to the user and may have already
- * affected the canvas.
- *
- * Only repairs the broken tail:
- * 1. If the last assistant message requested tool calls that never got
- *    results, strip those orphaned toolCall entries so the LLM doesn't
- *    see an invalid conversation state.
- * 2. Append an interruption notice telling the LLM not to resume.
- */
-function cleanUpAbortedMessages(msgs: Message[]): void {
-  // Collect IDs of all toolResults we have
-  const completedCallIds = new Set<string>();
-  for (const m of msgs) {
-    if (m.role === 'toolResult') {
-      completedCallIds.add(m.toolCallId);
-    }
-  }
-
-  // Find the last assistant message and strip orphaned toolCalls
-  for (let i = msgs.length - 1; i >= 0; i--) {
-    const m = msgs[i];
-    if (m.role === 'assistant') {
-      const assistant = m as AssistantMessage;
-      const hadToolCalls = assistant.content.some((b) => b.type === 'toolCall');
-      if (hadToolCalls) {
-        // Keep only text/thinking content + toolCalls that have results
-        assistant.content = assistant.content.filter(
-          (b) => b.type !== 'toolCall' || completedCallIds.has(b.id),
-        );
-        // If all toolCalls were removed, fix stopReason so LLM doesn't
-        // expect more tool results.
-        const remainingCalls = assistant.content.filter(
-          (b) => b.type === 'toolCall',
-        );
-        if (remainingCalls.length === 0) {
-          assistant.stopReason = 'stop';
-        }
-      }
-      break;
-    }
-  }
-
-  // Append interruption notice
-  msgs.push({
-    role: 'user',
-    content:
-      '[SYSTEM Interrupted] The user interrupted the previous operation. ' +
-      'Do NOT continue or retry the interrupted task. ' +
-      'Wait for the next user message and treat it as a new request.',
-    timestamp: Date.now(),
-  });
 }
 
 /**
@@ -126,10 +68,10 @@ function cleanUpAbortedMessages(msgs: Message[]): void {
  * no Context.
  *
  * Takes `priorTurns` (already loaded by the caller for the debug turn
- * count) to avoid a second `loadTurns`.
+ * count) to avoid a second history read.
  */
 async function resumeThreadContext(params: {
-  priorTurns: ReturnType<typeof loadTurns>;
+  priorTurns: readonly AgentTurn[];
   canvasId: string | undefined;
   mode: Parameters<typeof loadAgent>[0];
 }): Promise<Context> {
@@ -164,13 +106,13 @@ async function resumeThreadContext(params: {
 
 // ==================== Route ====================
 
-/** State for an active agent run, supporting client reconnection. */
+/**
+ * State for an active agent run. Reconnecting clients now replay from
+ * L2's Tier-1 event log (`agenetes.tail`), so the host keeps only the
+ * abort handle + a completion flag needed by `/stop` and `/stream`.
+ */
 interface ActiveRun {
   abortController: AbortController;
-  /** All events emitted so far — replayed to reconnecting clients. */
-  eventBuffer: AgentStreamEvent[];
-  /** Live subscribers (reconnected SSE clients). */
-  subscribers: Set<(event: AgentStreamEvent) => void>;
   /** Whether the run has finished (success, error, or abort). */
   completed: boolean;
 }
@@ -195,8 +137,9 @@ const agentRoutes: FastifyPluginAsync = async (
 ): Promise<void> => {
   /**
    * GET /agent/history/:threadId
-   * Reconstructs the UI message list from the structured per-turn
-   * records (envelope + transcript).
+   * Reconstructs the UI message list from L2's folded Tier-2 turn log
+   * (`agenetes.history`), the single source of truth for conversation
+   * history.
    */
   fastify.get<{
     Params: { threadId: string };
@@ -216,11 +159,12 @@ const agentRoutes: FastifyPluginAsync = async (
       return reply.code(400).send({ message: 'threadId is required' });
     }
 
-    const turns = loadTurns(threadId, canvasId);
+    const { turns } = agenetes.history(
+      canvasAcpNamespace(canvasId ?? ''),
+      threadId,
+    );
     if (turns.length === 0) {
-      // No turn log → empty. Legacy `.json` threads are converted to
-      // `.turns.jsonl` at startup (migrateLegacyChatThreads), so a
-      // missing log means a genuinely empty/new thread.
+      // No folded turns → empty/new thread.
       return reply.send({ threadId, messages: [] });
     }
 
@@ -232,11 +176,13 @@ const agentRoutes: FastifyPluginAsync = async (
 
   /**
    * POST /agent/history/:threadId/fork
-   * Copy a thread's persisted conversation onto a fresh thread id so a
-   * duplicated question node owns an independent continuation that still
-   * starts from the same history. Built-in agent only — the caller is
-   * responsible for not forking external (ACP) threads, whose live
-   * session state lives inside the agent process and cannot be copied.
+   *
+   * Legacy feature (M6.95 known issue: unsupported legacy features).
+   * Historically this copied a thread's persisted conversation onto a
+   * fresh thread id so a duplicated question node owned an independent
+   * continuation. With L2 owning the conversation log, cross-thread copy
+   * is not yet reimplemented, so this degrades gracefully to a no-op
+   * (`forked: false`) instead of half-copying state.
    */
   fastify.post<{
     Params: { threadId: string };
@@ -274,25 +220,11 @@ const agentRoutes: FastifyPluginAsync = async (
         .send({ message: 'target thread must differ from source' });
     }
 
-    // Copy the source thread's structured turn log onto the target
-    // thread. `loadTurns` yields the finalized JSONL turns plus any
-    // in-progress active turn; each is appended as a finalized turn to
-    // the (fresh, empty) target so the fork owns an independent,
-    // immutable snapshot — the rich-ACP overlay (`toolExtras`, `plan`)
-    // travels inside each record, so there is no separate sidecar to
-    // copy.
-    const turns = loadTurns(threadId, canvasId);
-    if (turns.length === 0) {
-      // Source has no persisted history — nothing to fork. The copy
-      // simply starts as a fresh (empty) thread.
-      return reply.send({ threadId: targetThreadId, forked: false });
-    }
-
-    for (const turn of turns) {
-      appendTurn(targetThreadId, turn, dstCanvasId);
-    }
-
-    return reply.send({ threadId: targetThreadId, forked: true });
+    // Fork is a legacy feature not yet reimplemented over the L2-owned
+    // conversation log (M6.95 known issue). Rather than half-copy state,
+    // degrade gracefully to a no-op so the duplicated node simply starts
+    // as a fresh thread; the client surfaces this via `forked: false`.
+    return reply.send({ threadId: targetThreadId, forked: false });
   });
 
   /**
@@ -315,58 +247,78 @@ const agentRoutes: FastifyPluginAsync = async (
 
   /**
    * GET /agent/stream/:threadId
-   * Reconnect to an active (or recently completed) agent run.
-   * Replays buffered events, then streams new events live.
+   * Reconnect to an active agent run. Replays L2's Tier-1 event log from
+   * the last folded turn (`agenetes.tail`), then follows live events until
+   * the run's terminal (`done` / `error` / `end`) frame or client
+   * disconnect. L2 is the single source of truth, so no host-side event
+   * buffer is kept.
    */
-  fastify.get<{ Params: { threadId: string } }>(
-    '/stream/:threadId',
-    async function (request, reply) {
-      const { threadId } = request.params;
-      const run = activeRuns.get(threadId);
-
-      // Only reconnect to runs that are still in progress.
-      // Completed runs have already been fully persisted via flushSave(),
-      // so the history endpoint returns complete data — no need to replay.
-      if (!run || run.completed) {
-        return reply.code(404).send({ message: 'No active run' });
-      }
-
-      // SSE setup
-      reply.hijack();
-      reply.raw.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        Connection: 'keep-alive',
-        'Access-Control-Allow-Origin': '*',
-        'X-Accel-Buffering': 'no',
+  fastify.get<{
+    Params: { threadId: string };
+    Querystring: AgentCanvasIdQuery;
+  }>('/stream/:threadId', async function (request, reply) {
+    const { threadId } = request.params;
+    const parsedQuery = agentCanvasIdQuerySchema.safeParse(request.query);
+    if (!parsedQuery.success) {
+      return reply.code(400).send({
+        message: parsedQuery.error.issues[0]?.message ?? 'Invalid query',
       });
-      reply.raw.flushHeaders?.();
-      reply.raw.write(': ok\n\n');
+    }
+    const { canvasId } = parsedQuery.data;
+    const run = activeRuns.get(threadId);
 
-      // Replay all buffered events
-      for (const ev of run.eventBuffer) {
-        writeSSE(reply.raw, ev);
-      }
+    // Only reconnect to runs that are still in progress. Completed runs
+    // are fully folded into the Tier-2 log, so the history endpoint
+    // returns complete data — no need to replay a live tail.
+    if (!run || run.completed) {
+      return reply.code(404).send({ message: 'No active run' });
+    }
 
-      // Subscribe for new live events
-      const subscriber = (event: AgentStreamEvent) => {
+    // SSE setup
+    reply.hijack();
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'Access-Control-Allow-Origin': '*',
+      'X-Accel-Buffering': 'no',
+    });
+    reply.raw.flushHeaders?.();
+    reply.raw.write(': ok\n\n');
+
+    // Stop pumping if the client goes away mid-stream.
+    let clientGone = false;
+    const onClose = () => {
+      clientGone = true;
+    };
+    reply.raw.once('close', onClose);
+    request.raw.socket?.once('close', onClose);
+
+    try {
+      // Replay the in-flight turn's events (fenced to just after the last
+      // folded turn) and follow live appends. The tail self-terminates on
+      // the run's terminal frame; the handles emit `done` / `error` (the
+      // route synthesizes `end` outside L2), so we also break on those.
+      for await (const event of agenetes.tail(
+        canvasAcpNamespace(canvasId ?? ''),
+        threadId,
+      )) {
+        if (clientGone) break;
         writeSSE(reply.raw, event);
         if (
-          event.type === AGENT_SSE_EVENTS.End ||
-          event.type === AGENT_SSE_EVENTS.Error
+          event.type === AGENT_SSE_EVENTS.Done ||
+          event.type === AGENT_SSE_EVENTS.Error ||
+          event.type === AGENT_SSE_EVENTS.End
         ) {
-          reply.raw.end();
-          run.subscribers.delete(subscriber);
+          break;
         }
-      };
-      run.subscribers.add(subscriber);
-
-      // Clean up if this client disconnects
-      const cleanup = () => run.subscribers.delete(subscriber);
-      reply.raw.once('close', cleanup);
-      request.raw.socket?.once('close', cleanup);
-    },
-  );
+      }
+    } finally {
+      reply.raw.removeListener('close', onClose);
+      request.raw.socket?.removeListener('close', onClose);
+      if (!clientGone) reply.raw.end();
+    }
+  });
 
   /**
    * GET /agent/context-tokens/:threadId
@@ -408,7 +360,10 @@ const agentRoutes: FastifyPluginAsync = async (
       /* keep fallback */
     }
 
-    const turns = loadTurns(threadId, canvasId);
+    const { turns } = agenetes.history(
+      canvasAcpNamespace(canvasId ?? ''),
+      threadId,
+    );
     if (turns.length === 0) {
       return reply.send({
         contextTokens: 0,
@@ -417,30 +372,33 @@ const agentRoutes: FastifyPluginAsync = async (
         fromProvider: false,
       });
     }
-    // Provider-reported usage lives on the assistant messages in each
-    // turn's transcript.
-    const transcriptMessages = turns.flatMap((t) => t.transcript);
+
+    // Provider-reported usage is captured per turn in `meta.usage` (the
+    // built-in handle folds `done.meta.usage`; the ACP path reports none).
+    // It is opaque `unknown` at the protocol layer, so read it defensively.
+    type TurnUsage = {
+      input?: number;
+      output?: number;
+      cost?: { total?: number };
+    };
 
     // ---- Preferred path: provider-reported usage ----
-    let lastUsage: AssistantMessage['usage'] | null = null;
+    let lastUsage: TurnUsage | null = null;
     let totalCost = 0;
-    let hasCost = false;
-    for (const msg of transcriptMessages) {
-      if (msg.role !== 'assistant') continue;
-      const am = msg as AssistantMessage;
-      if (am.usage) {
-        lastUsage = am.usage;
-        const c = am.usage.cost?.total;
-        if (typeof c === 'number' && Number.isFinite(c)) {
-          totalCost += c;
-        }
+    for (const turn of turns) {
+      const usage = turn.meta?.usage as TurnUsage | undefined;
+      if (!usage || typeof usage !== 'object') continue;
+      lastUsage = usage;
+      const c = usage.cost?.total;
+      if (typeof c === 'number' && Number.isFinite(c)) {
+        totalCost += c;
       }
     }
     // Only surface cost when at least one turn billed > 0. Providers
     // without per-call billing (e.g. GitHub Copilot OAuth, self-hosted
     // OSS models) report 0 across the board; hiding the field is
     // truer than showing "$0.0000".
-    hasCost = totalCost > 0;
+    const hasCost = totalCost > 0;
 
     if (lastUsage) {
       // `input` already includes system prompt + tool schemas + every
@@ -514,12 +472,15 @@ const agentRoutes: FastifyPluginAsync = async (
 
     const resolvedThreadId = getOrCreateThreadId(threadId);
 
-    // Commit any crash-leftover in-progress turn, then load the prior
-    // turns. Both backends need this: `priorTurns.length` drives the debug
-    // turn number, and finalize repairs a crashed active turn regardless
-    // of binding.
-    finalizeActiveTurn(resolvedThreadId, canvasId);
-    const priorTurns = loadTurns(resolvedThreadId, canvasId);
+    // Load the thread's prior folded turns from L2 (the single source of
+    // truth). Both backends need this: `priorTurns.length` drives the
+    // debug turn number, and the built-in path rebuilds its Context from
+    // them. A crashed in-flight turn is folded by L2 on next append; no
+    // host-side active-turn finalize is required.
+    const { turns: priorTurns } = agenetes.history(
+      canvasAcpNamespace(canvasId ?? ''),
+      resolvedThreadId,
+    );
 
     // Build this turn's structured envelope (memory pre-read, auto-
     // snapshot, skill resolution, neighbourhood render). The envelope is
@@ -573,77 +534,23 @@ const agentRoutes: FastifyPluginAsync = async (
     const abortController = new AbortController();
     const run: ActiveRun = {
       abortController,
-      eventBuffer: [metaEvent],
-      subscribers: new Set(),
       completed: false,
     };
     activeRuns.set(resolvedThreadId, run);
 
-    // Per-turn state consumed by `buildTurnRecord` below. `turnMessages`:
-    // this turn's output transcript, delivered by BOTH backends as the
-    // dispatch generator's RETURN value (collected when the stream drains).
     // `acpOverlay`: tool extensions + plan, mutated by `runAcpAgent` only.
-    const turnMessages: Message[] = [];
+    // Persistence is now owned entirely by L2 (the dispatch runs through
+    // `agenetes.create(spec).run(...)`, which tees every event into the
+    // Tier-1 log and folds the Tier-2 turn on return), so the route no
+    // longer builds or writes any turn record.
     const acpOverlay = emptyAcpOverlay();
-    const buildTurnRecord = (): ChatTurnRecord => ({
-      envelope,
-      transcript: [...turnMessages],
-      ...(Object.keys(acpOverlay.toolExtras).length > 0 && {
-        toolExtras: acpOverlay.toolExtras,
-      }),
-      ...(acpOverlay.plan &&
-        acpOverlay.plan.length > 0 && {
-          plan: acpOverlay.plan,
-        }),
-    });
 
-    // Persist this turn's in-progress state (envelope + transcript so
-    // far) to the active sidecar. The finalized JSONL log is appended
-    // only once, when the turn completes (see `finalizeTurn` below), so
-    // streaming saves never rewrite the whole thread.
-    const persistActiveTurn = () => {
-      writeActiveTurn(resolvedThreadId, buildTurnRecord(), canvasId);
-    };
-    const finalizeTurn = () => {
-      appendTurn(resolvedThreadId, buildTurnRecord(), canvasId);
-      clearActiveTurn(resolvedThreadId, canvasId);
-    };
-
-    // Save immediately so history includes the user message on refresh.
-    persistActiveTurn();
-
-    // Debounced save — keeps disk copy fresh during streaming so
-    // refreshes always see partial progress. Flushes at most every 2 seconds.
-    let savePending = false;
-    let saveTimer: ReturnType<typeof setTimeout> | null = null;
-    const debouncedSave = () => {
-      savePending = true;
-      if (!saveTimer) {
-        saveTimer = setTimeout(() => {
-          saveTimer = null;
-          if (savePending) {
-            savePending = false;
-            persistActiveTurn();
-          }
-        }, 2000);
-      }
-    };
-    const flushSave = () => {
-      if (saveTimer) {
-        clearTimeout(saveTimer);
-        saveTimer = null;
-      }
-      persistActiveTurn();
-    };
-
-    // Emit an event: buffer it, write to original client, forward to subscribers.
+    // Emit an event to the connected client. Reconnecting clients replay
+    // from L2's tail (see `/stream`), so there is no host-side buffer or
+    // subscriber fan-out to maintain here.
     const emit = (event: AgentStreamEvent) => {
-      run.eventBuffer.push(event);
       if (clientConnected) {
         writeSSE(reply.raw, event);
-      }
-      for (const sub of run.subscribers) {
-        sub(event);
       }
     };
 
@@ -665,7 +572,7 @@ const agentRoutes: FastifyPluginAsync = async (
       // else (including missing/`internal` bindings) goes to the built-in
       // pi-agent-core loop. Both paths yield the same `AgentStreamEvent`
       // shape so the consume loop below is binding-agnostic.
-      let stream: AsyncGenerator<AgentStreamEvent, Message[]>;
+      let stream: AsyncGenerator<AgentStreamEvent, unknown>;
       if (agentBinding?.kind === 'external') {
         stream = runAcpAgent({
           binding: {
@@ -708,62 +615,20 @@ const agentRoutes: FastifyPluginAsync = async (
         });
       }
 
-      // Track the latest agent error; persisted into `turnMessages` after
-      // the stream drains (below).
-      let lastErrorDetail: string | null = null;
-
-      // Manual iteration (not `for await`) so we can read the generator's
-      // RETURN value on `done` — how both backends deliver this turn's
-      // transcript. On abort we do NOT `break` (that calls
-      // `iterator.return()` and drops the return value); we stop forwarding
-      // to the client but keep draining so the dispatch settles and returns.
+      // Consume the dispatch stream, forwarding events to the connected
+      // client. L2 tees every event into the Tier-1 log and folds the
+      // Tier-2 turn on return, so the route no longer collects or persists
+      // the transcript. On abort we do NOT `break` (that calls
+      // `iterator.return()` and can cut the dispatch short before it emits
+      // its terminal frame); we stop forwarding to the client but keep
+      // draining so the dispatch settles and L2 folds a complete turn.
       const iterator = stream[Symbol.asyncIterator]();
       while (true) {
         const { value, done } = await iterator.next();
-        if (done) {
-          if (value) turnMessages.push(...value);
-          break;
-        }
+        if (done) break;
         if (abortController.signal.aborted) continue;
         emit(value);
-
-        // Capture the latest error; we persist it post-loop.
-        if (value.type === AGENT_SSE_EVENTS.Error && value.data.error) {
-          lastErrorDetail = value.data.error;
-        }
-
-        // Periodically save so partial progress survives refreshes.
-        debouncedSave();
       }
-
-      // The stream has fully drained; `turnMessages` now holds this turn's
-      // output (collected from the generator return value above).
-
-      // Persist any agent error into the transcript so it survives reload.
-      if (lastErrorDetail) {
-        turnMessages.push({
-          role: 'user',
-          content: `[SYSTEM Error] ${lastErrorDetail}`,
-          timestamp: Date.now(),
-        });
-      }
-
-      // Explicit abort (user clicked stop): repair the transcript. Partial
-      // assistant text is already preserved — pi-agent-core finalizes the
-      // in-flight message (`stopReason: 'aborted'`) and `runAgent` returns
-      // it in the delta collected above.
-      if (abortController.signal.aborted) {
-        const before = turnMessages.length;
-        cleanUpAbortedMessages(turnMessages);
-        request.log.info(
-          '[agent] Abort — transcript cleaned up (%d → %d messages)',
-          before,
-          turnMessages.length,
-        );
-      }
-
-      // Final save — flush any pending debounce and persist the complete context
-      flushSave();
 
       if (!abortController.signal.aborted) {
         emit({ type: AGENT_SSE_EVENTS.End, data: {} });
@@ -774,22 +639,8 @@ const agentRoutes: FastifyPluginAsync = async (
         const errorMsg =
           error instanceof Error ? error.message : 'Internal Error';
         emit({ type: AGENT_SSE_EVENTS.Error, data: { error: errorMsg } });
-
-        // Persist the error into the transcript so it shows up on reload.
-        // (Any output the dispatch produced before throwing is lost with
-        // the generator's return value — an error path, so acceptable.)
-        turnMessages.push({
-          role: 'user',
-          content: `[SYSTEM Error] ${errorMsg}`,
-          timestamp: Date.now(),
-        });
-        persistActiveTurn();
       }
     } finally {
-      // Promote the in-progress turn to the append-only JSONL log and
-      // clear the active sidecar — by now `turnMessages` holds the final
-      // state (agent output + any error / abort-cleanup rows).
-      finalizeTurn();
       run.completed = true;
       scheduleRunCleanup(resolvedThreadId);
       reply.raw.removeListener('close', onDisconnect);

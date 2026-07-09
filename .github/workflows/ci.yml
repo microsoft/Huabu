@@ -36,11 +36,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # typecheck pulls in @agentlet/* workspace packages whose dist/
-      # outputs don't exist on a fresh checkout, so build them first
+      # typecheck pulls in workspace packages whose dist/ outputs don't
+      # exist on a fresh checkout. Build both external trees first
       # (same rationale as release.yml).
-      - name: Build agentlet workspace packages
-        run: pnpm run build:agentlet
+      - name: Build workspace protocol/runtime packages
+        run: pnpm run build:agentlet && pnpm run build:agenetes
 
       - name: Lint
         run: pnpm run lint

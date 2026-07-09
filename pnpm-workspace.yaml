@@ -5,6 +5,11 @@ packages:
   - external/agentlet/packages/server
   - external/agentlet/packages/local
   - external/agentlet/packages/agent-team
+  - external/agenetes/packages/protocol
+  - external/agenetes/packages/runtime
+  - external/agenetes/packages/agentlet-host
+  - external/agenetes/packages/acp-driver
+  - external/agenetes/packages/agenetes
 
 ignoredBuiltDependencies:
   - electron-winstaller

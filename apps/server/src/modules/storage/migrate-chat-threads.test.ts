@@ -28,7 +28,7 @@ import {
   migrateLegacyThreadFile,
 } from './migrate-chat-threads.js';
 
-import type { ChatTurnRecord } from '../agent/store/chat-thread-store.js';
+import type { LegacyChatTurnRecord as ChatTurnRecord } from './legacy/chat-turn-record.js';
 import type { Context } from '@earendil-works/pi-ai';
 
 let tmp: string;

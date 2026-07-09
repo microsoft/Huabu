@@ -31,6 +31,8 @@ import { canvasDirName } from './canvas-dirs.js';
 import { sanitizeId } from './io.js';
 import { getWorkspacePath } from '../workspace.js';
 
+import type { Namespace } from '@agenetes/protocol';
+
 export function canvasRoot(canvasId: string): string {
   const safeId = sanitizeId(canvasId, 'canvasId');
   return path.join(getWorkspacePath(), canvasDirName(safeId));
@@ -170,35 +172,6 @@ export function changesPath(canvasId: string, threadId: string): string {
 }
 
 /**
- * Structured thread record paired with a thread — the source of truth
- * for chat history in the envelope-persistence model. An append-only
- * JSONL log of finalized turns, each carrying the user's structured
- * {@link ChatEnvelope} plus the assistant/tool transcript it produced.
- * Kept on a distinct `.turns.jsonl` path so legacy `.json` pi-ai
- * `Context` files are simply ignored (no migration). See
- * `chat-thread-store.ts` for the schema.
- */
-export function chatTurnsPath(canvasId: string, threadId: string): string {
-  return path.join(
-    chatDir(canvasId),
-    `${sanitizeId(threadId, 'threadId')}.turns.jsonl`,
-  );
-}
-
-/**
- * The single in-progress turn for a thread, rewritten on each debounced
- * save during streaming so a mid-generation reload still shows partial
- * progress. Promoted to a `.turns.jsonl` line (and deleted) when the
- * turn finalizes. See `chat-thread-store.ts`.
- */
-export function chatActiveTurnPath(canvasId: string, threadId: string): string {
-  return path.join(
-    chatDir(canvasId),
-    `${sanitizeId(threadId, 'threadId')}.active.json`,
-  );
-}
-
-/**
  * Human-readable debug dump of the assembled prompt sent to the agent,
  * one block per turn with strong turn separators. Append-only, written
  * only when the `HUABU_DEBUG_PROMPT` env flag is set. Never read by the
@@ -249,4 +222,20 @@ export function deltaLogPath(canvasId: string): string {
  */
 export function acpSessionsPath(canvasId: string): string {
   return path.join(historyDir(canvasId), 'acp-sessions.json');
+}
+
+/**
+ * The Agenetes {@link Namespace} (L2 storage/metadata scope) for a
+ * canvas's ACP session store. `canvasId` is Sediment's de-facto namespace
+ * key; `storage.root` is the canvas history dir, so the driver's store
+ * persists `<storage.root>/acp-sessions.json` — byte-for-byte the same file
+ * {@link acpSessionsPath} names today. Empty `canvasId` yields a name-less
+ * namespace the store treats as non-persistent (mirrors the previous
+ * empty-canvasId no-op). See docs/proposals/layered-architecture.md §7 M5.0.
+ */
+export function canvasAcpNamespace(canvasId: string): Namespace {
+  return {
+    name: canvasId,
+    storage: canvasId ? { root: historyDir(canvasId) } : undefined,
+  };
 }

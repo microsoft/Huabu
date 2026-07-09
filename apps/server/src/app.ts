@@ -8,15 +8,17 @@ import multipart from '@fastify/multipart';
 import staticPlugin from '@fastify/static';
 import { fastify, type FastifyBaseLogger } from 'fastify';
 
+import { getConnectionToken } from './connection-token.js';
 import { getDataDir } from './data-dir.js';
-import { getDaemonAuth } from './modules/agent/acp/daemon-auth.js';
+import { setHostServerPort } from './host-port.js';
 import {
   acpAgentCliRoutes,
   acpAgentletRoutes,
   acpProfilesRoutes,
   acpThreadsRoutes,
-  getDaemonSupervisor,
-  mountAgentletServer,
+  installAcpProfileCachePort,
+  mountAgenetes,
+  resolveDaemonEntry,
 } from './modules/agent/acp/index.js';
 import agentRoutes from './modules/agent/agent.route.js';
 import intentRoutes from './modules/agent/intent.route.js';
@@ -152,7 +154,7 @@ if (basicAuthUser && basicAuthPass) {
 
     // Bearer token (agentlet RFS)
     if (authHeader.startsWith('Bearer ')) {
-      const daemonToken = getDaemonAuth().getToken();
+      const daemonToken = getConnectionToken();
       if (daemonToken && authHeader.slice(7) === daemonToken) return;
     }
 
@@ -173,7 +175,7 @@ if (basicAuthUser && basicAuthPass) {
     }
     const authHeader = request.headers.authorization || '';
     if (authHeader.startsWith('Bearer ')) {
-      const daemonToken = getDaemonAuth().getToken();
+      const daemonToken = getConnectionToken();
       if (daemonToken && authHeader.slice(7) === daemonToken) return;
     }
     reply.status(401).send({ message: 'Authentication required' });
@@ -219,18 +221,23 @@ app.register(skillsRoutes, { prefix: '/api/skills' });
 app.register(workspaceRoutes, { prefix: '/api/workspace' });
 app.register(rfsRoutes, { prefix: '/api/rfs' });
 
-// ── External agent (ACP) bridge ───────────────────────────────────────
-// Mount @agentlet/server in daemon mode: an embedded supervisor
-// (`DaemonSupervisor`) forks `agentlet daemon …` as a child process
-// and connects it to this Fastify server via WebSocket loopback. The
-// daemon owns the agent worker pool; the server tells it which agent
-// CLI to spawn (per user profile). The daemon token never crosses the
-// HTTP boundary — it lives only in-process and on the loopback WS.
+// ── External agent (ACP) transport host ───────────────────────────────
+// Mount the Agenetes agentlet transport host (`@agenetes/agentlet-host`).
+// It embeds @agentlet/server, forks & supervises the agentlet daemon,
+// and authenticates connections against the host-injected connection
+// token. The daemon owns the agent worker pool; the server tells it
+// which agent CLI to spawn (per user profile). The connection token
+// never crosses the HTTP boundary — it lives only in-process and on the
+// loopback WS.
+//
+// L1 owns all deployment-layout knowledge and injects it downward:
+// the global connection token, the data directory, and the resolved
+// absolute daemon entry path.
 //
 // Legacy migration: older builds persisted an `enabled` flag + shared
 // token in `data/acp-config.json`. The file is no longer read; if it
 // exists we silently delete it so a stale 0600 file does not linger.
-// The daemon supervisor also drops `data/acp-tickets.json` on attach.
+// The transport host also drops `data/acp-tickets.json` on attach.
 try {
   const legacyAcpConfigPath = join(getDataDir(), 'acp-config.json');
   unlinkSync(legacyAcpConfigPath);
@@ -244,8 +251,23 @@ try {
     app.log.warn({ err }, '[acp] could not remove legacy acp-config.json');
   }
 }
-mountAgentletServer(app);
-getDaemonSupervisor().attach(app);
+mountAgenetes(app, {
+  connectionToken: getConnectionToken(),
+  dataDir: getDataDir(),
+  daemonEntryPath: resolveDaemonEntry() ?? '',
+});
+// Capture the bound TCP port for L1-owned reachback (RFS): the
+// canvas-scoped `HUABU_RFS_URL` base is built from this. RFS is
+// canvas-coupled and therefore a pure L1 concern, so the port lives in
+// L1 rather than being read back out of the L2 transport host.
+app.addHook('onListen', async () => {
+  const addr = app.server.address();
+  if (addr && typeof addr !== 'string') setHostServerPort(addr.port);
+});
+// Inject the L1-owned profile-schema-cache port into the ACP composition
+// shell so out-of-turn meta pushes feed the cache without L2 importing it
+// (M3). See modules/agent/acp/profile-cache-port.ts.
+installAcpProfileCachePort();
 app.register(acpProfilesRoutes, { prefix: '/api/acp' });
 app.register(acpAgentletRoutes, { prefix: '/api/acp' });
 app.register(acpAgentCliRoutes, { prefix: '/api/acp' });

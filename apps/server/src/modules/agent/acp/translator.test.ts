@@ -14,15 +14,14 @@
  *     (Copilot CLI re-emits intent chunks instead of streaming deltas)
  */
 
-import { beforeEach, describe, expect, it } from 'vitest';
-
 import {
   acpUpdateToStreamEvent,
   getTranslatorCounters,
   mergeThinkingChunk,
   resetTranslatorCounters,
   type TranslatorLogger,
-} from './translator.js';
+} from '@agenetes/acp-driver';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 const silentLogger: TranslatorLogger = {
   info: () => undefined,

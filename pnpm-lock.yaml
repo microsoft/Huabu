@@ -84,6 +84,21 @@ importers:
 
   apps/server:
     dependencies:
+      '@agenetes/acp-driver':
+        specifier: workspace:*
+        version: link:../../external/agenetes/packages/acp-driver
+      '@agenetes/agenetes':
+        specifier: workspace:*
+        version: link:../../external/agenetes/packages/agenetes
+      '@agenetes/agentlet-host':
+        specifier: workspace:*
+        version: link:../../external/agenetes/packages/agentlet-host
+      '@agenetes/protocol':
+        specifier: workspace:*
+        version: link:../../external/agenetes/packages/protocol
+      '@agenetes/runtime':
+        specifier: workspace:*
+        version: link:../../external/agenetes/packages/runtime
       '@agentclientprotocol/sdk':
         specifier: ^0.22.1
         version: 0.22.1(zod@4.4.3)
@@ -366,6 +381,89 @@ importers:
         specifier: ^4.0.18
         version: 4.1.8(@types/node@22.19.21)(happy-dom@15.11.7)(vite@6.4.3(@types/node@22.19.21)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.22.4)(yaml@2.9.0))
 
+  external/agenetes/packages/acp-driver:
+    dependencies:
+      '@agenetes/agentlet-host':
+        specifier: workspace:*
+        version: link:../agentlet-host
+      '@agenetes/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@agenetes/runtime':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentclientprotocol/sdk':
+        specifier: ^0.22.1
+        version: 0.22.1(zod@4.4.3)
+    devDependencies:
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+      vitest:
+        specifier: ^4.0.18
+        version: 4.1.8(@types/node@22.19.21)(happy-dom@15.11.7)(vite@7.3.5(@types/node@22.19.21)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.22.4)(yaml@2.9.0))
+
+  external/agenetes/packages/agenetes:
+    dependencies:
+      '@agenetes/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@agenetes/runtime':
+        specifier: workspace:*
+        version: link:../runtime
+    devDependencies:
+      '@types/node':
+        specifier: ^22.15.0
+        version: 22.19.21
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+      vitest:
+        specifier: ^4.0.18
+        version: 4.1.8(@types/node@22.19.21)(happy-dom@15.11.7)(vite@7.3.5(@types/node@22.19.21)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.22.4)(yaml@2.9.0))
+
+  external/agenetes/packages/agentlet-host:
+    dependencies:
+      '@agenetes/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@agentlet/protocol':
+        specifier: workspace:*
+        version: link:../../../agentlet/packages/protocol
+      '@agentlet/server':
+        specifier: workspace:*
+        version: link:../../../agentlet/packages/server
+    devDependencies:
+      fastify:
+        specifier: ^5.2.0
+        version: 5.8.5
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+
+  external/agenetes/packages/protocol:
+    dependencies:
+      '@agentclientprotocol/sdk':
+        specifier: ^0.22.1
+        version: 0.22.1(zod@4.4.3)
+      zod:
+        specifier: ^4.3.6
+        version: 4.4.3
+    devDependencies:
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+
+  external/agenetes/packages/runtime:
+    dependencies:
+      '@agenetes/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+    devDependencies:
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+
   external/agentlet/packages/agent-team:
     dependencies:
       commander:
@@ -437,6 +535,9 @@ importers:
 
   packages/shared:
     dependencies:
+      '@agenetes/protocol':
+        specifier: workspace:*
+        version: link:../../external/agenetes/packages/protocol
       '@agentclientprotocol/sdk':
         specifier: ^0.22.1
         version: 0.22.1(zod@4.4.3)
