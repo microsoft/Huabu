@@ -5,6 +5,8 @@ import { useTranslation } from 'react-i18next';
 import { AcpSettings } from './AcpSettings';
 import { CanvasSettings } from './CanvasSettings';
 import { GeneralSettings } from './GeneralSettings';
+import { ImageProviderSettings } from './ImageProviderSettings';
+import { IntegrationsSettings } from './IntegrationsSettings';
 import { LLMSettings } from './LLMSettings';
 import { useAcpProfilesStore } from '../../../store/acpProfilesStore';
 import { useLLMStore } from '../../../store/llmStore';
@@ -115,6 +117,10 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
             <LLMSettings />
 
             <AcpSettings />
+
+            <IntegrationsSettings />
+
+            <ImageProviderSettings />
 
             <CanvasSettings />
           </div>

@@ -14,6 +14,7 @@ export * from './canvas-search.js';
 export * from './workspace.js';
 export * from './web.js';
 export * from './llm.js';
+export * from './integrations.js';
 export * from './preprocessing.js';
 export * from './agent.js';
 export * from './artifact.js';

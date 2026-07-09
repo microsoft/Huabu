@@ -1,19 +1,6 @@
 import { Check, Copy, Key, LogIn, LogOut } from 'lucide-react';
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-
-import {
-  DEFAULT_AZURE_IMAGE_API_VERSION,
-  DEFAULT_IMAGE_MODEL_FAMILY,
-  IMAGE_MODEL_FAMILIES,
-  getImageCapabilities,
-} from '@sediment/shared';
 
 import { Button } from '@/components/Common/Button';
 import { Select } from '@/components/Common/Select';
@@ -23,51 +10,9 @@ import { toast } from '@/components/Common/Toast';
 import { useLLMStore } from '@/store/llmStore';
 import { copyToClipboard } from '@/utils/io/clipboard';
 
-import type {
-  ImageModelFamily,
-  LLMConfigUpdate,
-  LLMImageConfigUpdate,
-} from '@sediment/shared';
+import { TEXT_INPUT_CLASS, useDebouncedSave } from './settingsFormUtils';
 
-/** Static family options for the model-family dropdown. */
-const IMAGE_MODEL_FAMILY_OPTIONS = IMAGE_MODEL_FAMILIES.map((f) => ({
-  value: f,
-  label: f,
-}));
-
-/**
- * Debounce a save callback so the parent can call it on every keystroke
- * but the network round-trip only fires after the user pauses typing
- * for {@link delay} ms. The callback is replaced lazily via a ref so
- * each save sees the latest closure (current store state, current
- * provider selection, …) without re-allocating the returned function.
- */
-function useDebouncedSave<TArg>(
-  fn: (arg: TArg) => void,
-  delay = 600,
-): (arg: TArg) => void {
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const fnRef = useRef(fn);
-  useEffect(() => {
-    fnRef.current = fn;
-  }, [fn]);
-  useEffect(
-    () => () => {
-      if (timer.current) clearTimeout(timer.current);
-    },
-    [],
-  );
-  return useCallback(
-    (arg: TArg) => {
-      if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(() => fnRef.current(arg), delay);
-    },
-    [delay],
-  );
-}
-
-const TEXT_INPUT_CLASS =
-  'border-edge-default bg-surface text-fg-muted focus:ring-info-light rounded border px-2 py-1.5 text-xs focus:ring-1 focus:outline-none';
+import type { LLMConfigUpdate } from '@sediment/shared';
 
 /**
  * LLM provider/model configuration section.
@@ -85,14 +30,12 @@ const TEXT_INPUT_CLASS =
 export const LLMSettings: React.FC = () => {
   const { t } = useTranslation();
   const llmConfig = useLLMStore((s) => s.config);
-  const llmImageConfig = useLLMStore((s) => s.imageConfig);
   const llmProviders = useLLMStore((s) => s.providers);
   const llmModels = useLLMStore((s) => s.models);
   const llmSaving = useLLMStore((s) => s.saving);
   const llmError = useLLMStore((s) => s.error);
   const llmLoadModels = useLLMStore((s) => s.loadModels);
   const llmUpdateConfig = useLLMStore((s) => s.updateConfig);
-  const llmUpdateImageConfig = useLLMStore((s) => s.updateImageConfig);
 
   // OAuth
   const oauthPending = useLLMStore((s) => s.oauthPending);
@@ -114,21 +57,6 @@ export const LLMSettings: React.FC = () => {
   const [showApiKeyInput, setShowApiKeyInput] = useState(false);
   const [manualModel, setManualModel] = useState('');
 
-  // ── Image-provider form state ──
-  // Currently only `azure-openai` is supported, so the provider Select
-  // is a single-option dropdown today; structured this way so adding a
-  // second image provider later is purely a data change.
-  const [imgEndpoint, setImgEndpoint] = useState('');
-  const [imgDeployment, setImgDeployment] = useState('');
-  const [imgModelFamily, setImgModelFamily] = useState<ImageModelFamily>(
-    DEFAULT_IMAGE_MODEL_FAMILY,
-  );
-  const [imgApiVersion, setImgApiVersion] = useState('');
-  const [imgApiKey, setImgApiKey] = useState('');
-  const [imgQuality, setImgQuality] = useState<
-    'low' | 'medium' | 'high' | 'auto'
-  >('low');
-
   const isAzure = llmConfig?.provider === 'azure-openai';
   const selectedProvider = llmProviders.find(
     (p) => p.id === llmConfig?.provider,
@@ -145,39 +73,6 @@ export const LLMSettings: React.FC = () => {
     setAzureApiVersion(llmConfig?.apiVersion ?? '');
     setAzureApiKey('');
   }, [isAzure, llmConfig?.baseUrl, llmConfig?.model, llmConfig?.apiVersion]);
-
-  // Sync image fields with the persisted image config.
-  //
-  // `apiVersion` is pre-filled with {@link DEFAULT_AZURE_IMAGE_API_VERSION}
-  // when nothing has been saved yet — the API requires `2025-04-01-preview`
-  // or later, and asking the user to look it up adds friction.
-  // `modelFamily` falls back to {@link DEFAULT_IMAGE_MODEL_FAMILY}
-  // which matches the server-side default in `getAzureImageConfig`.
-  useEffect(() => {
-    setImgEndpoint(llmImageConfig?.baseUrl ?? '');
-    setImgDeployment(llmImageConfig?.model ?? '');
-    setImgModelFamily(
-      llmImageConfig?.modelFamily ?? DEFAULT_IMAGE_MODEL_FAMILY,
-    );
-    setImgApiVersion(
-      llmImageConfig?.apiVersion ?? DEFAULT_AZURE_IMAGE_API_VERSION,
-    );
-    setImgApiKey('');
-  }, [
-    llmImageConfig?.baseUrl,
-    llmImageConfig?.model,
-    llmImageConfig?.modelFamily,
-    llmImageConfig?.apiVersion,
-  ]);
-
-  // Image quality default depends on the selected family (see
-  // shared capability registry). Recompute whenever the family or
-  // persisted quality changes so the dropdown selection lines up with
-  // what the server will actually use.
-  useEffect(() => {
-    const caps = getImageCapabilities(imgModelFamily);
-    setImgQuality(llmImageConfig?.quality ?? caps.defaultQuality);
-  }, [imgModelFamily, llmImageConfig?.quality]);
 
   // Surface store errors as transient toasts.
   useEffect(() => {
@@ -201,14 +96,6 @@ export const LLMSettings: React.FC = () => {
   );
   const debouncedSaveChat = useDebouncedSave(saveChat);
 
-  const saveImage = useCallback(
-    (patch: LLMImageConfigUpdate) => {
-      void llmUpdateImageConfig({ provider: 'azure-openai', ...patch });
-    },
-    [llmUpdateImageConfig],
-  );
-  const debouncedSaveImage = useDebouncedSave(saveImage);
-
   // ─── Handlers ─────────────────────────────────────────────────────
   const handleProviderChange = async (providerId: string) => {
     await llmLoadModels(providerId);
@@ -227,12 +114,6 @@ export const LLMSettings: React.FC = () => {
     const provider = llmConfig?.provider ?? '';
     await llmUpdateConfig({ provider, model: modelId });
   };
-
-  // Image provider dropdown — only Azure supported today.
-  const imageProviderOptions = useMemo(
-    () => [{ value: 'azure-openai', label: 'Azure OpenAI' }],
-    [],
-  );
 
   return (
     <>
@@ -478,140 +359,6 @@ export const LLMSettings: React.FC = () => {
             />
           </div>
         )}
-      </SettingSection>
-
-      <SettingSection
-        title={t('settings.imageProvider')}
-        collapsible
-        defaultCollapsed
-      >
-        <SettingRow title={t('settings.provider')}>
-          <div className="w-44">
-            <Select
-              options={imageProviderOptions}
-              value={llmImageConfig?.provider || 'azure-openai'}
-              onChange={(v) => saveImage({ provider: v })}
-              placeholder={t('settings.selectProvider')}
-            />
-          </div>
-        </SettingRow>
-
-        <SettingRow title={t('settings.endpoint')}>
-          <input
-            type="text"
-            placeholder="https://…cognitiveservices.azure.com"
-            value={imgEndpoint}
-            onChange={(e) => {
-              const v = e.target.value;
-              setImgEndpoint(v);
-              debouncedSaveImage({ baseUrl: v });
-            }}
-            className={`${TEXT_INPUT_CLASS} w-56`}
-          />
-        </SettingRow>
-
-        <SettingRow title={t('settings.model')}>
-          <div className="w-56">
-            <Select
-              options={IMAGE_MODEL_FAMILY_OPTIONS}
-              value={imgModelFamily}
-              onChange={(v) => {
-                const next = v as ImageModelFamily;
-                setImgModelFamily(next);
-                saveImage({ modelFamily: next });
-              }}
-            />
-          </div>
-        </SettingRow>
-
-        <SettingRow
-          title={t('settings.deployment')}
-          description={t('settings.deploymentOptional')}
-        >
-          <input
-            type="text"
-            placeholder={imgModelFamily}
-            value={imgDeployment}
-            onChange={(e) => {
-              const v = e.target.value;
-              setImgDeployment(v);
-              debouncedSaveImage({ model: v });
-            }}
-            className={`${TEXT_INPUT_CLASS} w-56`}
-          />
-        </SettingRow>
-
-        <SettingRow
-          title={t('settings.apiVersion')}
-          description={t('settings.optional')}
-        >
-          <input
-            type="text"
-            placeholder={t('settings.imageApiVersionPlaceholder')}
-            value={imgApiVersion}
-            onChange={(e) => {
-              const v = e.target.value;
-              setImgApiVersion(v);
-              debouncedSaveImage({ apiVersion: v });
-            }}
-            className={`${TEXT_INPUT_CLASS} w-56`}
-          />
-        </SettingRow>
-
-        <SettingRow title={t('settings.imageQuality')}>
-          <div className="w-56">
-            <Select
-              options={getImageCapabilities(imgModelFamily).qualities.map(
-                (q) => {
-                  const isDefault =
-                    q === getImageCapabilities(imgModelFamily).defaultQuality;
-                  return {
-                    value: q,
-                    label: isDefault
-                      ? t('settings.defaultSuffix', { value: q })
-                      : q,
-                  };
-                },
-              )}
-              value={imgQuality}
-              onChange={(v) => {
-                const next = v as 'low' | 'medium' | 'high' | 'auto';
-                setImgQuality(next);
-                saveImage({ quality: next });
-              }}
-            />
-          </div>
-        </SettingRow>
-
-        <SettingRow
-          title={t('settings.apiKey')}
-          description={
-            llmImageConfig?.authenticated
-              ? t('settings.savedKeyKeepEmpty')
-              : t('settings.imageKeyRequired')
-          }
-        >
-          <div className="flex items-center gap-1.5">
-            {llmImageConfig?.authenticated ? (
-              <Check size={14} className="text-success" />
-            ) : (
-              <Key size={14} className="text-warning" />
-            )}
-            <input
-              type="password"
-              placeholder={
-                llmImageConfig?.authenticated ? '••••••••' : 'Azure key'
-              }
-              value={imgApiKey}
-              onChange={(e) => {
-                const v = e.target.value;
-                setImgApiKey(v);
-                if (v.trim()) debouncedSaveImage({ apiKey: v.trim() });
-              }}
-              className={`${TEXT_INPUT_CLASS} w-44`}
-            />
-          </div>
-        </SettingRow>
       </SettingSection>
     </>
   );

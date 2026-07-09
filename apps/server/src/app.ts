@@ -29,6 +29,7 @@ import artifactRoute from './modules/artifact/artifact.route.js';
 import canvasRoutes from './modules/canvas/canvas.route.js';
 import externalNoteRoutes from './modules/canvas/external.route.js';
 import syncRoutes from './modules/canvas/sync.route.js';
+import integrationsRoutes from './modules/integrations/integrations.route.js';
 import rfsRoutes from './modules/remote_fs/rfs.route.js';
 import {
   hostGuardPlugin,
@@ -199,7 +200,8 @@ app.addHook('preHandler', async (request, reply) => {
     !isWorkspaceConfigured() &&
     url.startsWith('/api') &&
     !url.startsWith('/api/workspace') &&
-    !url.startsWith('/api/llm')
+    !url.startsWith('/api/llm') &&
+    !url.startsWith('/api/integrations')
   ) {
     return reply.status(503).send({
       message:
@@ -217,6 +219,7 @@ app.register(artifactRoute, { prefix: '/api/canvas' });
 
 app.register(intentRoutes, { prefix: '/api/intent' });
 app.register(llmRoutes, { prefix: '/api/llm' });
+app.register(integrationsRoutes, { prefix: '/api/integrations' });
 app.register(skillsRoutes, { prefix: '/api/skills' });
 app.register(workspaceRoutes, { prefix: '/api/workspace' });
 app.register(rfsRoutes, { prefix: '/api/rfs' });
