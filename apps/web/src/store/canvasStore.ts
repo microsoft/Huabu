@@ -1296,12 +1296,14 @@ const useCanvasStore = create<RFState>()(
       // can flag the conflict on the originating thread's change card.
       const dirty = new Set(nodeContentQueue.pendingNodeIds());
       const skippedNodeIds: string[] = [];
+      const skippedRemoteNodes: Node[] = [];
       const safeDeltas =
         dirty.size === 0
           ? deltas
           : deltas.filter((d) => {
               if (d.type === 'REPLACE_NODE' && dirty.has(d.next.id)) {
                 skippedNodeIds.push(d.next.id);
+                skippedRemoteNodes.push(d.next as unknown as Node);
                 return false;
               }
               if (d.type === 'DELETE_NODE' && dirty.has(d.node.id)) {
@@ -1310,6 +1312,18 @@ const useCanvasStore = create<RFState>()(
               }
               return true;
             });
+
+      // Local-first rebase for a node the user is mid-editing: we keep their
+      // in-memory version (skipped above) but adopt the agent's just-written
+      // revision as the save baseline. The user's next autosave then rebases
+      // on top (expectRev = agent's rev) and cleanly overwrites the agent's
+      // version, instead of tripping a false NODE_CONTENT_CONFLICT against a
+      // change the local-first policy already decided the user wins. The
+      // "your version was kept" notice tells the user what happened; the
+      // change-review card lets them inspect the agent's dropped edit.
+      if (skippedRemoteNodes.length > 0) {
+        nodeContentQueue.seedBaselines(skippedRemoteNodes);
+      }
 
       if (safeDeltas.length === 0) {
         // Nothing to apply locally (empty batch, or every row protected).
@@ -1349,10 +1363,9 @@ const useCanvasStore = create<RFState>()(
       });
 
       // Re-seed the content-CAS baseline for the nodes this agent write
-      // actually applied (skipped mid-edit nodes keep their own baseline
-      // so the user's pending edit is still guarded). Co-delivered with
-      // the content change above so a subsequent user edit doesn't false-
-      // conflict against an agent write already reflected in their view.
+      // actually applied. Skipped mid-edit nodes had their baseline adopted
+      // to the agent's rev above (local-first rebase), so exclude them here
+      // to avoid clobbering that with their own unchanged local content.
       {
         const skippedSet = new Set(skippedNodeIds);
         nodeContentQueue.seedBaselines(

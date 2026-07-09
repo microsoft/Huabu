@@ -102,6 +102,14 @@ otherwise                → apply
 - Resolution is deterministic **local-first**: a skipped node keeps the human's
   value, and its post-effects (preprocessing / fit) are skipped too. `version`
   still advances to `toVersion` so the next autosave doesn't 409.
+- **Baseline rebase (no false conflict):** for a skipped `REPLACE_NODE`, the
+  applier adopts the agent's just-written revision as that node's content-CAS
+  baseline (`nodeContentQueue.seedBaselines` on the delta's `next`) **without**
+  touching the human's in-memory content. The human's next autosave then carries
+  `expectRev = agent's rev`, matches the agent's on-disk write, and cleanly
+  overwrites it — so local-first "the human wins" is delivered as a silent rebase
+  instead of a `NODE_CONTENT_CONFLICT` red toast. The amber "your version was
+  kept" notice + change-review card remain the record of the agent's dropped edit.
 - On a **version gap** (`toVersion > local`), the tab catches up with
   `loadCanvas` — but **only when there are no dirty nodes**. With local dirty
   state a blind `loadCanvas` would lose the edit, so the tab defers to autosave's
