@@ -1,37 +1,38 @@
-# Agenetes
+# Agenetes - The Kubernetes-Like Control Plane for Agent-as-a-Service
 
 **Agent-as-a-Local-Service — an agent control plane.**
 
-Agenetes is the "Kubernetes for agents" in one precise sense: it is a **control plane for agent workloads**, not an agent UI and not a model runtime. It takes a declarative `WorkloadSpec`, resolves it to a concrete driver/runtime, ensures a session exists, routes queries in and agent messages out, tracks lifecycle, and persists the conversation log.
+Agenetes is a control plane for agent workloads. Just as Kubernetes' key capability is to guarantee that a declared pod (e.g., a docker container) exists and is reachable, Agenetes guarantees that **given an agent workload declaration, a process running that agent exists and is reachable**. According to the declaration, that process may run **in the current process** (the agent invoked directly as a library, with no cross-process communication), **on the current machine** (spawned as a local subprocess), or **on a remote server reached through Agenetes**. With its pluggable agent runtimes, various supported transports, a two-tier persistent logging system, and (soon) an agent service gateway, Agenetes lets you run any kind of agent behind a single runtime contract, place it anywhere, keep every conversation durable and replayable, and let agents and external tools discover and call one another as services. So you can focus on your agent's logic and not on the plumbing.
 
-More concretely, Agenetes sits **above** a per-node relay such as `agentlet` and **below** a host application such as a canvas UI or chat surface. The host decides _which_ workload to declare and _when_ to invoke it; Agenetes owns the contract in between. Like Kubernetes, it separates declaration, lifecycle, communication, and persistence into orthogonal dimensions so different runtimes and transports can plug into the same control surface.
+Agenetes 是一个面向 agent workload 的控制平面。正如 Kubernetes 的关键能力在于保证一个已声明的 pod（例如一个 docker 容器）**存在且可达**，Agenetes 保证的是：**给定一份 agent workload 声明，就存在一个跑着该 agent 的进程，且它是可达的**。根据声明的不同，这个进程可以**就在当前进程内**运行（agent 作为库被直接调用，没有任何跨进程通信）、**在当前机器上**运行（作为本机子进程被拉起）、或**在一台通过 Agenetes 连接的远程服务器上**运行。凭借**可插拔的 agent runtime**、**多种受支持的 transport**、一套**两级持久化日志系统**，以及（即将支持的）**agent service gateway**，Agenetes 让你可以用同一套运行时契约运行任意类型的 agent、把它部署在任意位置、让每段对话都可持久化并可回放，并让 agent 与外部工具彼此发现、作为服务相互调用。于是你可以专注于 agent 自身的逻辑，而不必操心底层管道。
 
-The analogy should not be overextended: Agenetes is **not** a scheduler. It does not place workloads onto fungible nodes. It is closer to the part of Kubernetes that says "given this declared workload, make sure the bound runtime exists, can receive input, can stream output, and can be recovered from durable state." Its single success criterion is therefore simple: **once an agent workload is defined, then when it is invoked a session exists to receive queries and return a stream of agent messages.**
+## Interface & framework at a glance / 接口与框架速览
 
-Agenetes 可以在一个精确的意义上被理解为“agent 的 Kubernetes”：它是一个 **agent workload 的控制平面**，而不是 agent UI，也不是 model runtime。它接收一份声明式的 `WorkloadSpec`，把它解析到具体的 driver/runtime，确保存在一个 session，负责把 query 送入、把 agent message 流送出，跟踪生命周期，并持久化会话日志。
+Agenetes follows the same outer shape that makes Kubernetes easy to reason about: a declarative spec is bound to a runtime, the runtime materializes an execution instance, and the caller receives a live handle for continued interaction.
 
-更具体地说，Agenetes 位于 per-node relay（例如 `agentlet`）**之上**、宿主应用（例如画布 UI 或聊天界面）**之下**。宿主决定要声明*哪一种* workload，以及*何时*调用它；Agenetes 拥有的是两者之间的契约。和 Kubernetes 一样，它把声明、生命周期、通信与持久化拆成彼此正交的维度，使不同 runtime 与 transport 可以接到同一个控制面上。
+![Agenetes interface and framework at a glance](docs/assets/interface-framework-at-a-glance.svg)
 
-但这个类比不能被过度拉伸：Agenetes **不是**调度器。它不会把 workload 放到一组可互换的 node 上做选址。它更接近 Kubernetes 里这样的一部分能力："给定这份已声明的 workload，确保被绑定的 runtime 存在、能接收输入、能流式返回输出，并且能从持久状态恢复。" 因而它的成败标准也非常单一：**一旦某个 agent workload 已被定义，那么当它被调用时，就一定存在一个 session 来接收 query 并返回 agent message 流。**
+The same concepts can be read as a compact vocabulary map:
 
-> **Status.** This README is the current design source of truth for Agenetes. It captures the consensus reached while extracting Agenetes out of its first host (Huabu / Sediment). It will later be refined into the project's internal docs; for now it is authoritative. Downstream design documents should reference this file rather than restating these decisions.
+| Kubernetes | Agenetes | Meaning |
+| --- | --- | --- |
+| user / kubectl | host app | Declares and invokes workloads. |
+| Pod spec | `WorkloadSpec` | The declarative workload description. |
+| scheduler | dispatcher | Kubernetes chooses a node; Agenetes resolves `WorkloadSpec.kind` to a driver. |
+| container runtime, such as containerd (previously Docker) | Agent Driver | The pluggable runtime implementation that materializes the workload. |
+| Pod | Agent Process | The execution instance that actually runs the declared workload. |
+| Pod handle / pod subresources | Agent Handle | The live per-workload surface for running turns, sending controls, receiving streams, and closing the workload. |
+| Service / DNS | agent service gateway *(planned)* | The stable discovery and invocation surface for agents and external tools. |
 
-## The one guarantee / 唯一保证
+The defining difference is the scheduler/dispatcher step. Kubernetes **schedules** a pod by choosing a node; Agenetes **dispatches** a workload by resolving `WorkloadSpec.kind` to an Agent Driver. Placement is part of the declaration itself — in the current process, on the local machine, or on a remote server — rather than a decision made by Agenetes. The Agent Driver is the pluggable runtime implementation that materializes the Agent Process; the Agent Handle it returns is the live per-workload surface the host app drives through the uniform runtime contract.
 
-**G — The single guarantee / 唯一保证.**
-The opening above already states this guarantee; this section keeps it as a short citation anchor for the rest of the document: **once an agent workload is defined, then when it is invoked a session exists to receive queries and return a stream of agent messages.**
+关键差异在第三列。Kubernetes 会通过**调度**为 pod 选择一个 node；Agenetes 则通过**分发**把 `WorkloadSpec.kind` 解析到某个 Agent Driver。位置是声明本身的一部分——当前进程、本机、或远程服务器——而不是 Agenetes 做出的选择。Agent Driver 是负责物化 Agent Process 的可插拔 runtime 实现；它返回的 Agent Handle 则是 host app 通过统一运行时契约继续驱动的、每工作负载一个的 live surface。
 
-上面的 opening 已经说明了这条保证；这里保留它，只是为了给后文提供一个简短的引用锚点：**一旦某个 agent workload 已被定义，那么当它被调用时，就一定存在一个 session 来接收 query 并返回 agent message 流。**
+**The Name**
 
-## The name
+The name is coined in the shape of its model, Kubernetes. Ancient Greek κυβερνήτης (_kubernḗtēs_, "helmsman/governor") is built from the root _kubern-_ plus the agentive suffix **-ήτης (_-ētēs_)**, "the one who does." Agenetes keeps **ag- / agen-** legible as "agent" while pointing back to the older "act / drive / lead" family behind Greek ἄγω and Latin _agō_ → _agent_; it then mirrors the same **-ētēs** agentive ending. The result suggests "the one who drives agents / sets agent workloads in motion" — precisely a control plane's job. It scans like its model: Ku-ber-NÉ-tēs ⟷ A-ge-NÉ-tēs.
 
-`agentlet` : kubelet :: **Agenetes** : Kubernetes. `agentlet` is the per-node relay that spawns and babysits _one_ runtime; Agenetes is the layer above it that dispatches a session to its agentlet, tracks its lifecycle, routes its stream, and persists its log.
-
-`agentlet` : kubelet :: **Agenetes** : Kubernetes。`agentlet` 是 per-node relay，负责拉起并看护 _一个_ runtime；Agenetes 则是其上的那一层：把某个 session 分派给它的 agentlet，跟踪其生命周期，路由其流，并持久化其日志。
-
-The name is formed like its model: Ancient Greek κυβερνήτης (_kubernḗtēs_, "helmsman/governor") = the root _kubern-_ + the agentive suffix **-ήτης (_-ētēs_)**, "the one who —". We attach that true agentive suffix to the root **ag-** (shared by Greek ἄγω "to lead/drive" and Latin _agō_ → _agent_, both from PIE \*h₂eǵ- "to drive"): **Agen-** (keeps "agent" legible) + **-ētēs** (exactly as in _kubernḗtēs_) → "the one who drives / sets in motion" — precisely a control plane's job. It scans like its model: Ku-ber-NÉ-tēs ⟷ A-ge-NÉ-tēs. (Not "Agentnetes": that bolts the whole word _agent_ onto the mis-cut fragment "-netes", preserving a false morpheme.)
-
-这个名字是按它所比照的模型构成的：古希腊语 κυβερνήτης（_kubernḗtēs_，“舵手 / 治理者”）= 词根 _kubern-_ + 施事后缀 **-ήτης (_-ētēs_)**，意为“那个去做……的人”。我们把这个真正的施事后缀接到词根 **ag-** 上（它同时见于希腊语 ἄγω“引导 / 驱动”与拉丁语 _agō_，后者通向 _agent_；二者都可追溯到 PIE \*h₂eǵ-，“驱动”）：**Agen-**（保留 “agent” 的可辨识性）+ **-ētēs**（与 _kubernḗtēs_ 完全同一个后缀）→ “the one who drives / sets in motion”，这正是 control plane 的工作。它的重音节奏也与其模型对应：Ku-ber-NÉ-tēs ⟷ A-ge-NÉ-tēs。（不是 “Agentnetes”：那是把整个单词 _agent_ 硬接到切错的碎片 “-netes” 上，保留了一个错误的词素切分。）
+这个名字是按 Kubernetes 的构词方式造出的。古希腊语 κυβερνήτης（_kubernḗtēs_，“舵手 / 治理者”）由词根 _kubern-_ 加施事后缀 **-ήτης (_-ētēs_)** 构成，意为“那个去做……的人”。Agenetes 中的 **ag- / agen-** 既保留了 “agent” 的可辨识性，也指向希腊语 ἄγω 与拉丁语 _agō_ → _agent_ 背后的“行动 / 驱动 / 引导”语义；结尾则对应同一个 **-ētēs** 施事后缀。因此它表达的不是简单的 `agen + netes` 切分，而是“驱动 agent / 使 agent workload 运转起来的人”——这正是 control plane 的工作。它的重音节奏也与其模型对应：Ku-ber-NÉ-tēs ⟷ A-ge-NÉ-tēs。
 
 ## The four orthogonal dimensions / 四个正交维度
 
