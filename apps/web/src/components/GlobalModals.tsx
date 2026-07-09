@@ -2,7 +2,7 @@ import { useGlobalShortcutsHotkey } from '../hooks/shortcuts';
 import { useSettingsUiStore } from '../store/settingsUiStore';
 import { useShortcutsUiStore } from '../store/shortcutsUiStore';
 import { KeyboardShortcutsModal } from './Panels/Header/KeyboardShortcutsModal';
-import { SettingsModal } from './Panels/Header/SettingsModal';
+import { SettingsModal } from './Settings/SettingsModal';
 
 /**
  * Mounts the app-wide singleton modals (Settings + Keyboard Shortcuts)

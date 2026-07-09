@@ -2,9 +2,10 @@ import { HelpCircle } from 'lucide-react';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { SettingsPopover } from '@/components/Settings/SettingsPopover';
+
 import { AppMenu } from './AppMenu';
 import { CanvasMenu } from './CanvasMenu.tsx';
-import { SettingsPopover } from './SettingsPopover';
 import { isElectron } from '../../../hooks/useElectron';
 import { Button } from '../../Common/Button';
 

@@ -2,16 +2,17 @@ import { X } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { AcpSettings } from './AcpSettings';
-import { CanvasSettings } from './CanvasSettings';
-import { GeneralSettings } from './GeneralSettings';
-import { ImageProviderSettings } from './ImageProviderSettings';
-import { IntegrationsSettings } from './IntegrationsSettings';
-import { LLMSettings } from './LLMSettings';
-import { getElectronBridge } from '../../../hooks/useElectron';
-import { useAcpProfilesStore } from '../../../store/acpProfilesStore';
-import { useLLMStore } from '../../../store/llmStore';
-import { SettingSection } from '../../Common/SettingSection';
+import { SettingSection } from '@/components/Common/SettingSection';
+import { getElectronBridge } from '@/hooks/useElectron';
+import { useAcpProfilesStore } from '@/store/acpProfilesStore';
+import { useLLMStore } from '@/store/llmStore';
+
+import { AcpSettings } from './sections/AcpSettings';
+import { CanvasSettings } from './sections/CanvasSettings';
+import { GeneralSettings } from './sections/GeneralSettings';
+import { ImageProviderSettings } from './sections/ImageProviderSettings';
+import { IntegrationsSettings } from './sections/IntegrationsSettings';
+import { LLMSettings } from './sections/LLMSettings';
 
 /** Identifiers for the settings tabs (left-nav order). */
 type SettingsTab = 'general' | 'huabuAgent' | 'agents' | 'canvas';

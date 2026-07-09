@@ -15,9 +15,13 @@ import { MessageSquare, Plus, Route, Sprout } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import {
+  ProfileEditorModal,
+  useDetectedClis,
+} from '@/components/Settings/sections/ProfileEditor';
+
 import { Button } from '../../Common/Button';
 import { cn } from '../../Common/cn';
-import { ProfileEditorModal, useDetectedClis } from '../Header/AcpSettings';
 
 import type {
   AcpAgentProfile,

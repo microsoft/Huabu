@@ -10,7 +10,7 @@ import { toast } from '@/components/Common/Toast';
 import { useLLMStore } from '@/store/llmStore';
 import { copyToClipboard } from '@/utils/io/clipboard';
 
-import { TEXT_INPUT_CLASS, useDebouncedSave } from './settingsFormUtils';
+import { TEXT_INPUT_CLASS, useDebouncedSave } from '../utils';
 
 import type { LLMConfigUpdate } from '@sediment/shared';
 

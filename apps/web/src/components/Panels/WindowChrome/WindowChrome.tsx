@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useLocation } from 'react-router-dom';
 
+import { SettingsPopover } from '@/components/Settings/SettingsPopover';
+
 import { APP_NAME } from '../../../config/app';
 import { getElectronBridge } from '../../../hooks/useElectron';
 import useCanvasStore from '../../../store/canvasStore';
@@ -13,7 +15,6 @@ import {
 import { Button } from '../../Common/Button';
 import { Tooltip } from '../../Common/Tooltip';
 import { AppMenu } from '../Header/AppMenu';
-import { SettingsPopover } from '../Header/SettingsPopover';
 
 /**
  * Width (in px) reserved on the right edge of the title bar for the

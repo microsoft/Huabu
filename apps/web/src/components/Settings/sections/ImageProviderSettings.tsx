@@ -14,7 +14,7 @@ import { SettingRow } from '@/components/Common/SettingRow';
 import { SettingSection } from '@/components/Common/SettingSection';
 import { useLLMStore } from '@/store/llmStore';
 
-import { TEXT_INPUT_CLASS, useDebouncedSave } from './settingsFormUtils';
+import { TEXT_INPUT_CLASS, useDebouncedSave } from '../utils';
 
 import type { ImageModelFamily, LLMImageConfigUpdate } from '@sediment/shared';
 

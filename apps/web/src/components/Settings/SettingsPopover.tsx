@@ -2,10 +2,10 @@ import { Settings } from 'lucide-react';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { useSettingsUiStore } from '../../../store/settingsUiStore';
-import { Button } from '../../Common/Button';
+import { Button } from '@/components/Common/Button';
+import { useSettingsUiStore } from '@/store/settingsUiStore';
 
-import type { TooltipPlacement } from '../../Common/Tooltip';
+import type { TooltipPlacement } from '@/components/Common/Tooltip';
 
 interface SettingsPopoverProps {
   /**
