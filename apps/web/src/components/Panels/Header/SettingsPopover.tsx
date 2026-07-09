@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 
 import { AcpSettings } from './AcpSettings';
 import { CanvasSettings } from './CanvasSettings';
+import { GeneralSettings } from './GeneralSettings';
 import { LLMSettings } from './LLMSettings';
 import { useAcpProfilesStore } from '../../../store/acpProfilesStore';
 import { useLLMStore } from '../../../store/llmStore';
@@ -109,6 +110,8 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
           </h3>
 
           <div className="-mx-4 min-h-0 flex-1 overflow-y-auto px-4 pb-2">
+            <GeneralSettings />
+
             <LLMSettings />
 
             <AcpSettings />

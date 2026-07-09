@@ -12,7 +12,7 @@ export const CanvasSettings: React.FC = () => {
   const toggleMinimap = useCanvasStore((s) => s.toggleMinimap);
 
   return (
-    <SettingSection title={t('settings.canvas')}>
+    <SettingSection title={t('settings.canvas')} collapsible>
       <SettingRow
         title={t('settings.showMiniMap')}
         description={t('settings.miniMapDescription')}

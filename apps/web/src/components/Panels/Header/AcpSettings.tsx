@@ -1031,7 +1031,7 @@ export const AcpSettings: React.FC = () => {
         restarting={restarting}
       />
 
-      <SettingSection title={t('settings.externalAgents')}>
+      <SettingSection title={t('settings.externalAgents')} collapsible>
         {profiles.length === 0 ? (
           <SettingRow
             title={t('settings.noAgents')}
