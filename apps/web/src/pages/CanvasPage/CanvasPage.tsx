@@ -1,5 +1,6 @@
 import { ArrowLeft } from 'lucide-react';
 import { useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 
 import { CenterArea } from '@/pages/CanvasPage/CenterArea.tsx';
@@ -9,19 +10,17 @@ import { Loading } from '../../components/Common/Loading';
 import { CanvasLayerPanel } from '../../components/Panels/CanvasLayerPanel';
 import { ChatPanel } from '../../components/Panels/ChatPanel';
 import { CanvasHeader } from '../../components/Panels/Header/CanvasHeader.tsx';
-import { KeyboardShortcutsModal } from '../../components/Panels/Header/KeyboardShortcutsModal.tsx';
-import { usePageShortcuts } from '../../hooks/shortcuts';
 import { useGlobalSearchHotkey } from '../../hooks/useGlobalSearchHotkey';
-import useStore, {
-  dismissVersionConflictToast,
-} from '../../store/canvasStore.ts';
-import { useCanvasSyncStore } from '../../store/canvasSyncStore.ts';
+import useStore, { dismissVersionConflictToast } from '../../store/canvasStore';
+import { useCanvasSyncStore } from '../../store/canvasSyncStore';
+import { useShortcutsUiStore } from '../../store/shortcutsUiStore';
 
 /**
  * Page component for a single canvas.
  * Reads the `canvasId` from the URL and loads / switches the canvas accordingly.
  */
 export default function CanvasPage() {
+  const { t } = useTranslation();
   const { canvasId } = useParams<{ canvasId: string }>();
   const navigate = useNavigate();
   const switchCanvas = useStore((s) => s.switchCanvas);
@@ -35,7 +34,8 @@ export default function CanvasPage() {
   // `loadCanvas` and flips `isLoading` on.
   const storeCanvasId = useStore((s) => s.canvasId);
   const initialised = useRef(false);
-  const { isShortcutsOpen, openShortcuts, closeShortcuts } = usePageShortcuts();
+  const isShortcutsOpen = useShortcutsUiStore((s) => s.isOpen);
+  const openShortcuts = useShortcutsUiStore((s) => s.open);
   // Cmd+F / Ctrl+F → focus the canvas-wide search input in the
   // left layer panel (or, when focus is inside the expanded
   // preview, the in-preview find bar).
@@ -98,7 +98,7 @@ export default function CanvasPage() {
         variant="brand"
         layout="block"
         size="md"
-        message="Loading canvas…"
+        message={t('canvasPage.loading')}
       />
     );
   }
@@ -108,10 +108,10 @@ export default function CanvasPage() {
       <div className="flex h-full flex-col items-center justify-center gap-4">
         <div className="text-center">
           <h2 className="text-fg-default text-lg font-semibold">
-            Canvas not found
+            {t('canvasPage.notFoundTitle')}
           </h2>
           <p className="text-fg-subtle mt-1 text-sm">
-            This canvas doesn&apos;t exist or may have been deleted.
+            {t('canvasPage.notFoundDescription')}
           </p>
         </div>
         <Link
@@ -119,26 +119,19 @@ export default function CanvasPage() {
           className="bg-inverse text-fg-inverse hover:bg-inverse/90 inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors"
         >
           <ArrowLeft className="h-4 w-4" />
-          Back to canvas list
+          {t('canvasPage.backToList')}
         </Link>
       </div>
     );
   }
 
   return (
-    <>
-      <MainLayout
-        header={<CanvasHeader onOpenShortcuts={openShortcuts} />}
-        leftPanel={<CanvasLayerPanel />}
-        rightPanel={<ChatPanel />}
-      >
-        <CenterArea canvasShortcutsDisabled={isShortcutsOpen} />
-      </MainLayout>
-
-      <KeyboardShortcutsModal
-        isOpen={isShortcutsOpen}
-        onClose={closeShortcuts}
-      />
-    </>
+    <MainLayout
+      header={<CanvasHeader onOpenShortcuts={openShortcuts} />}
+      leftPanel={<CanvasLayerPanel />}
+      rightPanel={<ChatPanel />}
+    >
+      <CenterArea canvasShortcutsDisabled={isShortcutsOpen} />
+    </MainLayout>
   );
 }

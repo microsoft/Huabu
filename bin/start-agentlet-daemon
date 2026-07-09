@@ -135,8 +135,11 @@ if [ -n "$agent_cmd" ]; then
         echo "  Install the CLI first, e.g.:" >&2
         case "$agent_bin" in
           copilot) echo "    npm install -g @github/copilot" >&2 ;;
-          claude)  echo "    npm install -g @anthropic-ai/claude-code" >&2 ;;
+          claude-agent-acp)
+                   echo "    npm install -g @agentclientprotocol/claude-agent-acp" >&2 ;;
           gemini)  echo "    npm install -g @google/gemini-cli" >&2 ;;
+          codex-acp)
+                   echo "    npm install -g @agentclientprotocol/codex-acp" >&2 ;;
           *)       echo "    (see the agent's own install instructions)" >&2 ;;
         esac
         exit 127

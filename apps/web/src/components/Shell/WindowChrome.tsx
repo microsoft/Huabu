@@ -3,16 +3,18 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useLocation } from 'react-router-dom';
 
-import { APP_NAME } from '../../../config/app';
-import { getElectronBridge } from '../../../hooks/useElectron';
-import useCanvasStore from '../../../store/canvasStore';
+import { SettingsPopover } from '@/components/Settings/SettingsPopover';
+
+import { APP_NAME } from '../../config/app';
+import { getElectronBridge } from '../../hooks/useElectron';
+import useCanvasStore from '../../store/canvasStore';
 import {
   useWorkspaceLabel,
   useWorkspaceStore,
-} from '../../../store/workspaceStore';
-import { Button } from '../../Common/Button';
-import { Tooltip } from '../../Common/Tooltip';
-import { SettingsPopover } from '../Header/SettingsPopover';
+} from '../../store/workspaceStore';
+import { Button } from '../Common/Button';
+import { Tooltip } from '../Common/Tooltip';
+import { AppMenu } from '../Panels/Header/AppMenu';
 
 /**
  * Width (in px) reserved on the right edge of the title bar for the
@@ -172,15 +174,30 @@ export function WindowChrome() {
           } as React.CSSProperties
         }
       >
-        <Tooltip content={t('navigation.home')} placement="bottom">
-          <Link
-            to="/"
-            aria-label={t('navigation.backHome')}
-            className="text-fg-muted hover:bg-hover hover:text-fg-default flex h-7 w-7 items-center justify-center rounded-md transition-colors"
-          >
-            <House className="h-4 w-4" />
-          </Link>
-        </Tooltip>
+        {onCanvasListRoute ? (
+          // On the canvas list page the "home" button is a no-op (you're
+          // already home), so the left slot hosts the app menu instead.
+          // Inside a canvas the House button below keeps its back-to-list
+          // navigation and the app menu lives in the canvas header.
+          //
+          // macOS is the exception: its workspace-level actions live in
+          // the native menu bar (see `NativeMenuBridge`), so we leave the
+          // left slot empty here rather than crowd a logo dropdown next
+          // to the traffic-lights.
+          isMac ? null : (
+            <AppMenu compact />
+          )
+        ) : (
+          <Tooltip content={t('navigation.home')} placement="bottom">
+            <Link
+              to="/"
+              aria-label={t('navigation.backHome')}
+              className="text-fg-muted hover:bg-hover hover:text-fg-default flex h-7 w-7 items-center justify-center rounded-md transition-colors"
+            >
+              <House className="h-4 w-4" />
+            </Link>
+          </Tooltip>
+        )}
       </div>
 
       {/* Center: page / canvas title, or the workspace folder name on

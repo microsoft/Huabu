@@ -5,6 +5,7 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  type CSSProperties,
   type MutableRefObject,
   type Ref,
   useRef,
@@ -105,6 +106,15 @@ export type PopoverProps = {
    */
   className?: string;
 
+  /**
+   * Extra inline styles merged onto the panel `<div>`. Positioning
+   * fields (`left`/`top`/`visibility`/`zIndex`) are always applied last
+   * and cannot be overridden. Use this for dynamic dimensions the
+   * caller must compute at runtime — e.g. matching the panel's
+   * `minWidth` to a trigger element's measured width.
+   */
+  style?: CSSProperties;
+
   /** Portal target. Defaults to `document.body`. */
   container?: Element;
 
@@ -135,6 +145,7 @@ export const Popover: FC<PopoverProps> = ({
   boundary,
   zIndex = 9999,
   className,
+  style,
   container,
   contentRef,
   children,
@@ -289,6 +300,7 @@ export const Popover: FC<PopoverProps> = ({
           className,
         )}
         style={{
+          ...style,
           left: isMeasuring ? 0 : clamped.x,
           top: isMeasuring ? 0 : clamped.y,
           visibility: isMeasuring ? 'hidden' : 'visible',

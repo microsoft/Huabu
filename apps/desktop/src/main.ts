@@ -38,18 +38,11 @@ import {
 import net from 'node:net';
 import { isAbsolute, join } from 'node:path';
 
-import {
-  app,
-  BrowserWindow,
-  dialog,
-  ipcMain,
-  Menu,
-  session,
-  shell,
-} from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron';
 import { utilityProcess, type UtilityProcess } from 'electron';
 import getPort from 'get-port';
 
+import { applyApplicationMenu, registerMenuIpc } from './mac-menu.js';
 import { TITLE_BAR_HEIGHT } from './title-bar.js';
 
 // ── Constants ────────────────────────────────────────────────────────
@@ -913,14 +906,17 @@ function createWindow(port: number): void {
 // ── App lifecycle ────────────────────────────────────────────────────
 
 app.whenReady().then(async () => {
-  // Drop the default Electron Application menu (`File / Edit / View /
-  // Window / Help`). The Huabu shell paints its own minimal title
-  // bar — keeping the OS menu around just adds visual noise. Chromium
-  // still wires up the usual editing keyboard accelerators (cut / copy
-  // / paste / undo / select-all) without it, and our DevTools /
-  // reload accelerators are re-bound per window via
-  // `before-input-event` inside `createWindow`.
-  Menu.setApplicationMenu(null);
+  // Per-platform application menu. macOS gets a native menu bar (the
+  // platform-conventional home for workspace-level actions); Windows /
+  // Linux keep it cleared and rely on the custom title bar's `AppMenu`
+  // dropdown instead. The menu is built with English fallback labels
+  // here so the standard Edit / Window accelerators and ⌘, / ⌘N work
+  // from the first frame; the renderer re-pushes localized labels via
+  // `menu:configure` once i18n is ready. Chromium still wires up the
+  // usual editing keyboard accelerators, and our DevTools / reload
+  // accelerators are re-bound per window via `before-input-event`
+  // inside `createWindow`.
+  applyApplicationMenu(() => mainWindow);
 
   // Register IPC handlers BEFORE any window is created so the preload
   // script's `ipcRenderer.invoke('workspace:get', …)` calls always have
@@ -928,6 +924,7 @@ app.whenReady().then(async () => {
   registerWorkspaceIpc();
   registerWindowIpc();
   registerDialogIpc();
+  registerMenuIpc(() => mainWindow);
 
   // macOS Dock icon. In a packaged .app this comes from the bundle's
   // .icns automatically, but in dev (`electron .`) the Dock would show

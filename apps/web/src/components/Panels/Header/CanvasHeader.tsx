@@ -2,8 +2,8 @@ import clsx from 'clsx';
 import { ListIndentDecrease, ListIndentIncrease } from 'lucide-react';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link } from 'react-router-dom';
 
+import { AppMenu } from './AppMenu.tsx';
 import { CanvasMenu } from './CanvasMenu.tsx';
 import { Button } from '../../Common/Button';
 
@@ -46,11 +46,10 @@ export const CanvasHeader: React.FC<CanvasHeaderProps> = ({
   onOpenShortcuts,
 }) => {
   const { t } = useTranslation();
-  // The desktop title bar (`WindowChrome`) also shows a Home button, but
-  // we still render the in-canvas logo here so the floating / in-column
-  // header reads consistently with the web build. The two affordances
-  // both link to "/" — having them stacked is acceptable and matches the
-  // visual the user expects.
+  // The desktop title bar (`WindowChrome`) shows a Home button for
+  // back-to-list navigation; here the logo hosts the workspace-level
+  // `AppMenu` (new / import canvas, switch workspace, settings, …), so
+  // the two affordances no longer duplicate each other.
   return (
     <header
       className={clsx(
@@ -65,13 +64,7 @@ export const CanvasHeader: React.FC<CanvasHeaderProps> = ({
           : 'border-edge-default h-12 border-r border-b',
       )}
     >
-      <Link to="/" aria-label={t('navigation.backHome')} className="shrink-0">
-        <img
-          src="/favicon.svg"
-          alt={t('app.logoAlt')}
-          className={compact ? 'h-6 w-6' : 'h-8 w-8'}
-        />
-      </Link>
+      <AppMenu compact={compact} />
 
       <div className="min-w-0 flex-1">
         {children ?? <CanvasMenu onOpenShortcuts={onOpenShortcuts} />}

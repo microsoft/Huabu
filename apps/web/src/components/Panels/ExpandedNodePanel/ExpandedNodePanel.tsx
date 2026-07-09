@@ -3,6 +3,7 @@ import { ArrowLeft, Bot, Columns2, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { InPreviewSearchBar } from './InPreviewSearchBar.tsx';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import { useChatStore } from '../../../store/chatStore.ts';
 import { usePreviewStore } from '../../../store/previewStore.ts';
@@ -10,7 +11,6 @@ import { Button } from '../../Common/Button.tsx';
 import { Input } from '../../Common/Input.tsx';
 import { NodePreviewContent } from '../../Nodes/NodePreviewContent.tsx';
 import { PreviewHeaderSlotContext } from '../../Nodes/PreviewHeaderSlot.tsx';
-import { InPreviewSearchBar } from '../../Search/InPreviewSearchBar.tsx';
 
 /* ------------------------------------------------------------------ */
 /*  ExpandedNodePanel – inline panel that replaces or sits beside     */

@@ -110,8 +110,8 @@ export function PathInput({
         disabled={disabled}
         wrapperClassName="min-w-0 flex-1"
         className={cn(
-          'border-edge-default bg-surface text-fg-default placeholder:text-fg-subtle focus:border-edge-strong w-full rounded-md border text-sm focus:outline-none',
-          size === 'sm' ? 'px-2 py-1' : 'px-2.5 py-1.5',
+          'border-edge-default bg-surface text-fg-default placeholder:text-fg-subtle focus:border-edge-strong w-full rounded-md border focus:outline-none',
+          size === 'sm' ? 'px-2 py-1 text-xs' : 'px-2.5 py-1.5 text-sm',
           mono && 'font-mono',
           inputClassName,
         )}
@@ -125,6 +125,7 @@ export function PathInput({
           title={pickTitle}
           onClick={() => void handlePick()}
           disabled={disabled || picking}
+          className="aspect-square"
         >
           {picking ? (
             <Loading layout="inline" size="sm" className="text-fg-subtle" />

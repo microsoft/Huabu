@@ -26,6 +26,9 @@ export const routes = {
   llmOAuthStatus: '/llm/oauth/status',
   llmOAuthLogout: '/llm/oauth/logout',
 
+  // ── Integrations (third-party API keys) ──────────────────────────
+  integrationsConfig: '/integrations/config',
+
   // ── Canvas ────────────────────────────────────────────────────────
   canvasList: '/canvas',
   canvasImport: '/canvas/import',
