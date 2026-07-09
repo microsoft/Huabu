@@ -39,16 +39,17 @@
 
 import { applyToolExt } from './overlay.js';
 import { acpSessionRegistry } from './session-registry.js';
-import { ensureAcpSession, registerAcpStateListener, reportEntryState } from './session.js';
+import {
+  ensureAcpSession,
+  registerAcpStateListener,
+  reportEntryState,
+} from './session.js';
 import { acpUpdateToStreamEvent } from './translator.js';
 
-import type { AcpTurnOverlay } from './overlay.js';
 import type { AcpBindingRecipe } from './binding-recipe.js';
+import type { AcpTurnOverlay } from './overlay.js';
 import type { AcpSessionLogger } from './session.js';
-import type {
-  AgentStateSnapshot,
-  Namespace,
-} from '@agenetes/protocol';
+import type { AgentStateSnapshot, Namespace } from '@agenetes/protocol';
 import type {
   AgentCapabilities,
   AgentStreamEvent,
@@ -70,10 +71,7 @@ import type {
  * except the transport-synthesized `meta` / `end` (those are added by the
  * route around a turn, not by a handle).
  */
-export type InStreamEvent = Exclude<
-  AgentStreamEvent,
-  { type: 'meta' | 'end' }
->;
+export type InStreamEvent = Exclude<AgentStreamEvent, { type: 'meta' | 'end' }>;
 
 /**
  * The external path's render output: the deterministic ACP prompt payload
@@ -176,16 +174,13 @@ export const ACP_CAPABILITIES: AgentCapabilities = {
  * `TRequest` is the host request shape — never inspected here, only
  * forwarded to `render` — so the driver stays host-agnostic.
  */
-export class AcpAgentHandle<TRequest = unknown>
-  implements
-    RuntimeAgentHandle<
-      TRequest,
-      PreparedAcpPrompt,
-      void,
-      InStreamEvent,
-      AcpTurnCtx
-    >
-{
+export class AcpAgentHandle<TRequest = unknown> implements RuntimeAgentHandle<
+  TRequest,
+  PreparedAcpPrompt,
+  void,
+  InStreamEvent,
+  AcpTurnCtx
+> {
   /**
    * A Deployment advertises the full control set and can resume a prior
    * session (`session/load`). It accepts turn input blocking (the ACP

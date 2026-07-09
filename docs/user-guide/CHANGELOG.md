@@ -2,6 +2,25 @@
 
 每次重要功能变更都会记录在此文件中，按时间倒序排列。
 
+## 2026-07-09 · 引入 Agenetes:agent 执行统一到一层控制平面
+
+**What Changed**
+
+把「内置原生 agent（`ask`/`operate`/`sketch`）」和「外部 ACP agent」两条以前各走各路的执行链，收敛到同一个 **agent 控制平面 Agenetes（L2）**——「agent 界的 Kubernetes」：一份声明式的 `WorkloadSpec` 进来，控制平面负责解析到具体 driver、确保 session 存在、把 query 送进去、把 agent message 流送出来、跟踪生命周期并持久化会话日志。对 Huabu 开发者而言，这带来三处 dev-facing 的直接变化：
+
+1. **一个统一的执行接缝**——服务端在 `app.ts` 里通过 `mountAgenetes` 起一个进程内 Agenetes 实例，agent 一律经 `instance.create(spec).run(request, render)` 驱动，不再有并列的 `runAgent` / `runAcpAgent` 私有通路。内置与外部 agent 现在共享同一套 `WorkloadSpec` / `AgentHandle` 契约（`run` / `control` / `capabilities` / `close`），contract 层只认 `kind: 'internal' | 'external'` 这个语义路由，实现名（`acp` 等）对 L1 隐藏。
+2. **会话历史由 L2 独家拥有、两级存储**——聊天历史改由控制平面持久化：一层 append-only 的细粒度事件日志（`chat_v2/<threadId>.events.jsonl`）+ 一层折叠后的 turn 日志（`chat_v2/<threadId>.turns.jsonl`）。宿主侧只通过 `agenetes.history()` / `agenetes.tail()` **读**，一个字节都不再自己写；`/history`、context-tokens、画布搜索的 conversation 层、断线重连都改挂到这个接缝上。
+3. **旧数据开机自动前滚，用户无感**——服务端启动时一次性把 pre-Agenetes 的磁盘数据迁移到新形态：`acp-sessions.json` → `threads.json` 的 `ThreadRecord`，`.history/chat/<tid>.turns.jsonl` → `chat_v2/` 的折叠 turn 日志。迁移**幂等、留 `.bak`、绝不覆盖已存在记录**，无需任何用户操作或手动脚本。
+
+**Notes**
+
+- 这是 issue [#265](https://github.com/hai-team/Sediment/issues/265) 分层重构（L1 人机界面 / L2 Agenetes / L3 任务自动化）的中段成果，**本条只记录已 shipped 的部分**（M1–M5、M5.5、M5.6 C1–C5、M6.9）；agentlet↔agenetes 边界重划（M6）与 RFS 资源泛化（M7）仍在途，未落入本条。
+- L2 作为独立子树落在 `external/agenetes/packages/` 下，按维度拆包：[`protocol`](../../external/agenetes/packages/protocol)（冻结的 L1↔L2 wire 契约，zod-only、host-agnostic，**不依赖** `@sediment/shared`）、[`runtime`](../../external/agenetes/packages/runtime)（host-agnostic 的 driver 注册 / dispatch 框架）、[`acp-driver`](../../external/agenetes/packages/acp-driver)（标准 ACP driver + 其 session 管理）、[`agenetes`](../../external/agenetes/packages/agenetes)（顶层装配 `mountAgenetes`）。设计的 source of truth 是 [external/agenetes/README.md](../../external/agenetes/README.md)。
+- driver 注入沿用 K8s/CRI 心智模型:canvas-coupled 的内置 agent 由 L1 注入 built-in driver factory，L2 永不 import canvas 代码；箭头始终是 L1→L2。
+- 每个 thread 的持久状态按 **namespace 隔离**（Sediment 里 `canvasId → { name: canvasId, storage.root: historyDir(canvasId) }`），`threads.json`、`chat_v2/` 都落在该 namespace 的 root 之下，各消费者自行派生子路径。
+- 迁移前请注意子树构建:`pnpm i` 不会重建 `@agenetes/*`，其类型经 gitignored 的 `dist/` 暴露，需 `pnpm run build:agenetes`（`predev` 已自动带上）；漏构建会报 TS2307。
+- 相关文档：迁移步骤与里程碑账本见 [docs/proposals/layered-architecture.md](../proposals/layered-architecture.md)，L2 运行时细节见 [agent-architecture.md](../architecture/agent-architecture.md)。
+
 ## 2026-07-02 · Agent Reachback 改用 RFS:外部 agent 用 `curl` 直连画布
 
 **What Changed**

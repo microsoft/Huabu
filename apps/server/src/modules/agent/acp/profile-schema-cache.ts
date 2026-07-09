@@ -75,7 +75,6 @@ import type {
   AvailableCommand,
 } from '@sediment/shared';
 
-
 const CACHE_FILE = 'acp-profile-schema-cache.json';
 const SCHEMA_VERSION = 1;
 const DEBOUNCE_MS = 250;

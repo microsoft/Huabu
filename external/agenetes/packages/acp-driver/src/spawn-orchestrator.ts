@@ -233,8 +233,7 @@ export async function ensureAgentForThread(
   // thread id). It is passed straight through — this module never reads
   // a host port or interprets any entry. AGENTLET_SERVER / AGENTLET_TOKEN
   // are injected by the daemon itself.
-  const spawnEnv =
-    env && Object.keys(env).length > 0 ? env : undefined;
+  const spawnEnv = env && Object.keys(env).length > 0 ? env : undefined;
 
   let sessionId: string;
   let pid: number;

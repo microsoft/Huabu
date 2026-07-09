@@ -74,7 +74,10 @@ describe('createTranscriptFolder', () => {
   it('keeps only the latest plan (replace-semantics), appended at the end', () => {
     const folded = foldAll([
       { type: 'text_delta', data: { content: 'hi' } },
-      { type: 'plan', data: { entries: [{ content: 'a', status: 'pending' }] } },
+      {
+        type: 'plan',
+        data: { entries: [{ content: 'a', status: 'pending' }] },
+      },
       {
         type: 'plan',
         data: { entries: [{ content: 'b', status: 'completed' }] },
@@ -82,7 +85,10 @@ describe('createTranscriptFolder', () => {
     ]);
     expect(folded).toEqual([
       { type: 'text', data: { content: 'hi' } },
-      { type: 'plan', data: { entries: [{ content: 'b', status: 'completed' }] } },
+      {
+        type: 'plan',
+        data: { entries: [{ content: 'b', status: 'completed' }] },
+      },
     ]);
   });
 

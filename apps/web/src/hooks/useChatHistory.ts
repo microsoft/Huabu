@@ -230,52 +230,56 @@ export function useChatHistory(
         }
       };
 
-      const connected = await agentApi.reconnectStream(ownerThreadId, canvasId, {
-        onEvent: (event: AgentStreamEvent) => {
-          if (cancelled) return;
-          if (event.type === 'done') sawDone = true;
-          if (!streaming) {
-            streaming = true;
-            setIsLoading(ownerThreadId, true);
+      const connected = await agentApi.reconnectStream(
+        ownerThreadId,
+        canvasId,
+        {
+          onEvent: (event: AgentStreamEvent) => {
+            if (cancelled) return;
+            if (event.type === 'done') sawDone = true;
+            if (!streaming) {
+              streaming = true;
+              setIsLoading(ownerThreadId, true);
+              clearStaleMessages();
+            }
+            handleStreamEvent(event, { threadId: ownerThreadId, assistantId });
+          },
+          onError: (err) => {
+            if (cancelled) return;
             clearStaleMessages();
-          }
-          handleStreamEvent(event, { threadId: ownerThreadId, assistantId });
+            addMessage(ownerThreadId, {
+              id: createId('status'),
+              role: 'status',
+              status: 'error',
+              detail: err.message,
+            });
+            setIsLoading(ownerThreadId, false);
+            // A reconnected run that errors must still terminalize the
+            // owning question node — otherwise it stalls at `running`.
+            rescueQuestionNode(
+              ownerThreadId,
+              sawDone
+                ? { status: 'done', errorMessage: undefined }
+                : { status: 'error', errorMessage: err.message },
+            );
+          },
+          onComplete: () => {
+            if (cancelled) return;
+            setIsLoading(ownerThreadId, false);
+            // When the reconnect stream is the consumer that sees the run
+            // finish, the originating `useQuestionRunner` callback may
+            // never fire (its POST stream was superseded / dropped). Drive
+            // the question node to `done` here so the status badge + chat
+            // affordance reappear. The user has this thread open, so the
+            // completion counts as viewed.
+            rescueQuestionNode(ownerThreadId, {
+              status: 'done',
+              errorMessage: undefined,
+              viewed: true,
+            });
+          },
         },
-        onError: (err) => {
-          if (cancelled) return;
-          clearStaleMessages();
-          addMessage(ownerThreadId, {
-            id: createId('status'),
-            role: 'status',
-            status: 'error',
-            detail: err.message,
-          });
-          setIsLoading(ownerThreadId, false);
-          // A reconnected run that errors must still terminalize the
-          // owning question node — otherwise it stalls at `running`.
-          rescueQuestionNode(
-            ownerThreadId,
-            sawDone
-              ? { status: 'done', errorMessage: undefined }
-              : { status: 'error', errorMessage: err.message },
-          );
-        },
-        onComplete: () => {
-          if (cancelled) return;
-          setIsLoading(ownerThreadId, false);
-          // When the reconnect stream is the consumer that sees the run
-          // finish, the originating `useQuestionRunner` callback may
-          // never fire (its POST stream was superseded / dropped). Drive
-          // the question node to `done` here so the status badge + chat
-          // affordance reappear. The user has this thread open, so the
-          // completion counts as viewed.
-          rescueQuestionNode(ownerThreadId, {
-            status: 'done',
-            errorMessage: undefined,
-            viewed: true,
-          });
-        },
-      });
+      );
 
       if (connected && !cancelled) {
         // Reconnection was successful — events were processed above

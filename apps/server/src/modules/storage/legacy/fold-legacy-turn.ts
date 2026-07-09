@@ -33,8 +33,15 @@
 
 import { HUABU_CHAT_REQUEST_TYPE } from '../../agent/agenetes/handle.js';
 
-import type { AgentTurn, AgentTurnMeta, FoldedMessage } from '@agenetes/protocol';
-import type { LegacyChatTurnRecord, LegacyPiMessage } from './chat-turn-record.js';
+import type {
+  LegacyChatTurnRecord,
+  LegacyPiMessage,
+} from './chat-turn-record.js';
+import type {
+  AgentTurn,
+  AgentTurnMeta,
+  FoldedMessage,
+} from '@agenetes/protocol';
 
 /**
  * The folded `tool_call` payload widened with the built-in host-extension
@@ -112,7 +119,9 @@ export function legacyChatTurnToAgentTurn(
             ...(overlay?.toolKind !== undefined
               ? { toolKind: overlay.toolKind }
               : {}),
-            ...(overlay?.status !== undefined ? { status: overlay.status } : {}),
+            ...(overlay?.status !== undefined
+              ? { status: overlay.status }
+              : {}),
             ...(overlay?.locations !== undefined
               ? { locations: overlay.locations }
               : {}),

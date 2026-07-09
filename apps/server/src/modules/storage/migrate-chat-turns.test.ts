@@ -9,7 +9,13 @@
  *   ✓ tolerant — a canvas with no chat dir is skipped
  */
 
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -119,8 +125,8 @@ describe('migrateLegacyChatTurns', () => {
   it('skips a canvas that has no legacy chat dir', () => {
     mkdirSync(join(tmp, 'Empty Canvas', '.history'), { recursive: true });
     expect(() => migrateLegacyChatTurns(tmp)).not.toThrow();
-    expect(
-      existsSync(join(tmp, 'Empty Canvas', '.history', 'chat_v2')),
-    ).toBe(false);
+    expect(existsSync(join(tmp, 'Empty Canvas', '.history', 'chat_v2'))).toBe(
+      false,
+    );
   });
 });

@@ -12,14 +12,14 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import type { AgentTurn, Namespace } from '@agenetes/protocol';
-
 import {
   FileTurnStore,
   InMemoryTurnStore,
   type PersistedTurn,
   type TurnStore,
 } from './index.js';
+
+import type { AgentTurn, Namespace } from '@agenetes/protocol';
 
 let tmp: string;
 

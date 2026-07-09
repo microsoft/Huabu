@@ -168,8 +168,11 @@ export async function* runAgent(
   // submits a NULL request and the handle resumes via `agent.continue()` —
   // `render` is never invoked in that case.
   const render: RenderFn<BuiltinRendered> = async (request) =>
-    (await renderEnvelopeMessages(request.content, { canvasId: canvasId ?? null }))
-      .messages;
+    (
+      await renderEnvelopeMessages(request.content, {
+        canvasId: canvasId ?? null,
+      })
+    ).messages;
 
   // Optional developer aid: dump the fully-assembled prompt (system +
   // prior history + this turn). No-op unless HUABU_DEBUG_PROMPT is set.
@@ -219,10 +222,14 @@ export async function* runAgent(
   // envelope → the handle resumes the pre-loaded transcript
   // (`agent.continue()`).
   const handle = agenetes.create(spec) as BuiltinHandle;
-  return yield* handle.run(envelope ? wrapChatRequest(envelope) : null, render, {
-    maxIterations,
-    signal,
-    logger,
-    onRendered,
-  });
+  return yield* handle.run(
+    envelope ? wrapChatRequest(envelope) : null,
+    render,
+    {
+      maxIterations,
+      signal,
+      logger,
+      onRendered,
+    },
+  );
 }

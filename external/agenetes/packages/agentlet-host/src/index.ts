@@ -24,8 +24,8 @@ import { getDaemonAuth } from './daemon-auth.js';
 import { getDaemonSupervisor } from './daemon-supervisor.js';
 import { mountAgentletServer } from './server-mount.js';
 
-import type { AgentletServer } from '@agentlet/server';
 import type { AgentletServerOptions } from '@agentlet/protocol';
+import type { AgentletServer } from '@agentlet/server';
 import type { FastifyInstance } from 'fastify';
 
 export { ACP_UPGRADE_PATH, getAgentletServer } from './server-mount.js';
@@ -34,10 +34,7 @@ export {
   getDaemonStatus,
   _resetDaemonSupervisorForTests,
 } from './daemon-supervisor.js';
-export {
-  getDaemonAuth,
-  _resetDaemonAuthForTests,
-} from './daemon-auth.js';
+export { getDaemonAuth, _resetDaemonAuthForTests } from './daemon-auth.js';
 
 export type { AttachOptions } from './daemon-supervisor.js';
 export type { MountAcpOptions } from './server-mount.js';

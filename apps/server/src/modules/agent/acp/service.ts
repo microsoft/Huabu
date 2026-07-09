@@ -38,7 +38,6 @@ import type { ChatEnvelope } from '../conversation/envelope.js';
 import type { ContentPart } from '../conversation/prompt/attachments.js';
 import type { AcpTurnOverlay, PreparedAcpPrompt } from '@agenetes/acp-driver';
 import type { AcpBindingRecipe } from '@agenetes/acp-driver';
-import type { Message } from '@earendil-works/pi-ai';
 import type { AcpContentBlock } from '@sediment/shared';
 import type { AgentStreamEvent } from '@sediment/shared';
 import type { FastifyBaseLogger } from 'fastify';

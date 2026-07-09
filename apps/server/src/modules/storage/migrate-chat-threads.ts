@@ -20,8 +20,8 @@ import path from 'node:path';
 import { appendJsonLine, mkdirp, readJson } from './io.js';
 import { buildAgentNodePreview } from '../agent/node-ref.js';
 
-import type { ChatEnvelope } from '../agent/conversation/envelope.js';
 import type { LegacyChatTurnRecord as ChatTurnRecord } from './legacy/chat-turn-record.js';
+import type { ChatEnvelope } from '../agent/conversation/envelope.js';
 import type { Context } from '@earendil-works/pi-ai';
 import type { CanvasNodeType } from '@sediment/shared';
 

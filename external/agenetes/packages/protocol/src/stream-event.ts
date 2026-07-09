@@ -21,9 +21,7 @@
 // closed protocol vocabulary; the host may only widen individual payloads
 // with optional fields, never add new event types out-of-band.
 
-import { z } from 'zod';
 import {
-  zContentBlock as ZAcpContentBlock,
   zCost as ZAcpCost,
   zPermissionOption as ZAcpPermissionOption,
   zPlanEntry as ZAcpPlanEntry,
@@ -34,6 +32,7 @@ import {
   zToolCallStatus as ZAcpToolCallStatus,
   zToolKind as ZAcpToolKind,
 } from '@agentclientprotocol/sdk/dist/schema/zod.gen.js';
+import { z } from 'zod';
 
 import { threadIdSchema } from './identity.js';
 

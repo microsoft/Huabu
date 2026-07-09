@@ -13,18 +13,18 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import {
+  FileThreadStore,
+  type ThreadRecord,
+  type WorkloadSpecShape,
+} from './index.js';
+
 import type {
   AgentMetadata,
   AgentStateSnapshot,
   Namespace,
   SessionId,
 } from '@agenetes/protocol';
-
-import {
-  FileThreadStore,
-  type ThreadRecord,
-  type WorkloadSpecShape,
-} from './index.js';
 
 interface Spec extends WorkloadSpecShape {
   readonly note?: string;

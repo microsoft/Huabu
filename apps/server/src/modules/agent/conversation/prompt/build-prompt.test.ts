@@ -18,11 +18,11 @@ import {
   renderEnvelopeMessages,
   rebuildContextMessages,
 } from './build-prompt.js';
+import { wrapChatRequest } from '../../agenetes/handle.js';
 import { buildAgentNodePreview } from '../../node-ref.js';
 
 import type { NodeNeighbourhoodContext } from '../../../canvas/node-neighbourhood.js';
 import type { AgentNodeRef } from '../../node-ref.js';
-import { wrapChatRequest } from '../../agenetes/handle.js';
 import type { ChatEnvelope, ResolvedSkill } from '../envelope.js';
 import type { AgentTurn, FoldedMessage } from '@agenetes/protocol';
 import type { Message } from '@earendil-works/pi-ai';

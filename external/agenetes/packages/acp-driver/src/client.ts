@@ -51,7 +51,6 @@ const JSON_RPC_METHOD_NOT_FOUND = -32601;
 const JSON_RPC_INVALID_PARAMS = -32602;
 const JSON_RPC_INTERNAL_ERROR = -32603;
 
-
 /** ACP `PermissionOption` (subset) — `optionId` is echoed back in the response. */
 interface PermissionOption {
   optionId: string;

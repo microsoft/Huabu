@@ -18,10 +18,7 @@ export type {
   ThreadHistory,
 } from './instance.js';
 
-export {
-  InMemoryThreadStore,
-  FileThreadStore,
-} from './thread-store.js';
+export { InMemoryThreadStore, FileThreadStore } from './thread-store.js';
 export type { ThreadRecord, ThreadStore } from './thread-store.js';
 
 export {
@@ -35,10 +32,7 @@ export type {
   EventLogListener,
 } from './event-log.js';
 
-export {
-  InMemoryTurnStore,
-  FileTurnStore,
-} from './turn-store.js';
+export { InMemoryTurnStore, FileTurnStore } from './turn-store.js';
 export type { PersistedTurn, TurnStore } from './turn-store.js';
 export { createTranscriptFolder } from './fold.js';
 export type { TranscriptFolder } from './fold.js';

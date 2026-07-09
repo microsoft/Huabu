@@ -66,7 +66,10 @@ describe('buildHistoryFromTurns', () => {
     expect(out[0]).toMatchObject({ role: 'user', content: 'hello there' });
     expect(out[1].role).toBe('assistant');
     if (out[1].role !== 'assistant') throw new Error('unreachable');
-    expect(out[1].parts).toContainEqual({ kind: 'text', text: 'general kenobi' });
+    expect(out[1].parts).toContainEqual({
+      kind: 'text',
+      text: 'general kenobi',
+    });
   });
 
   it('omits the user bubble for a resume turn with a null request', () => {
@@ -105,11 +108,9 @@ describe('buildHistoryFromTurns', () => {
 
   it('surfaces an interrupted status row for an aborted turn', () => {
     const out = build([
-      makeTurn(
-        'stop me',
-        [{ type: 'text', data: { content: 'partial' } }],
-        { stopReason: 'aborted' },
-      ),
+      makeTurn('stop me', [{ type: 'text', data: { content: 'partial' } }], {
+        stopReason: 'aborted',
+      }),
     ]);
 
     expect(out.at(-1)).toEqual({ role: 'status', status: 'interrupted' });

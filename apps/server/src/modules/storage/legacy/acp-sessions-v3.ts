@@ -153,7 +153,9 @@ export function sanitizeBindingRecipe(
  * Returns a cleaned copy containing only fields that pass minimal type
  * validation, or `undefined` when no valid field is present.
  */
-export function sanitizeMeta(raw: unknown): AcpSessionPersistedMeta | undefined {
+export function sanitizeMeta(
+  raw: unknown,
+): AcpSessionPersistedMeta | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const r = raw as Record<string, unknown>;
   const out: AcpSessionPersistedMeta = {};

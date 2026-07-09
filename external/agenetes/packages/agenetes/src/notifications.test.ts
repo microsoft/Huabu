@@ -8,6 +8,8 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { mountAgenetes, type WorkloadSpecShape } from './index.js';
+
 import type {
   AgentCapabilities,
   AgentMetadata,
@@ -16,11 +18,9 @@ import type {
 } from '@agenetes/protocol';
 import type { AgentDriver, AgentHandle } from '@agenetes/runtime';
 
-import { mountAgenetes, type WorkloadSpecShape } from './index.js';
-
 const CAPS = {} as AgentCapabilities;
 
-interface StubSpec extends WorkloadSpecShape {}
+type StubSpec = WorkloadSpecShape;
 
 /** A stub handle that captures its up-report listener so a test can fire it. */
 class ReportingHandle {
@@ -113,7 +113,9 @@ describe('notification surface (M5.5/A3.0, I9.7)', () => {
 
     // Only the metadata-bearing snapshot reaches L1.
     expect(await collected).toEqual([meta]);
-    expect(inst.record(spec.namespace, 'thr_1')?.state.sessionId).toBe('sess-1');
+    expect(inst.record(spec.namespace, 'thr_1')?.state.sessionId).toBe(
+      'sess-1',
+    );
   });
 
   it('wires the listener exactly once across get-or-create reuse', () => {

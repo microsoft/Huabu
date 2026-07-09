@@ -14,8 +14,8 @@
 
 import { commandFromRawInput, variantForInternalTool } from '@sediment/shared';
 
-import { unwrapChatRequest } from '../../agenetes/handle.js';
 import { projectUserVisibleAttachments } from './attachment-chips.js';
+import { unwrapChatRequest } from '../../agenetes/handle.js';
 
 import type { ChatEnvelope } from '../envelope.js';
 import type { AgentTurn, FoldedMessage } from '@agenetes/protocol';
@@ -193,7 +193,10 @@ function buildToolPart(data: FoldedToolCallData): AssistantHistoryPart {
         variant: 'snapshot_nodes',
         ...(toolData
           ? {
-              data: toolData as ToolResponse<'snapshot_nodes', SnapshotNodesData>,
+              data: toolData as ToolResponse<
+                'snapshot_nodes',
+                SnapshotNodesData
+              >,
             }
           : {}),
       };
@@ -293,15 +296,11 @@ export function buildHistoryFromTurns(
           break;
         case 'thinking':
           if (msg.data.content.length > 0) {
-            pushAssistantParts([
-              { kind: 'thinking', text: msg.data.content },
-            ]);
+            pushAssistantParts([{ kind: 'thinking', text: msg.data.content }]);
           }
           break;
         case 'tool_call':
-          pushAssistantParts([
-            buildToolPart(msg.data as FoldedToolCallData),
-          ]);
+          pushAssistantParts([buildToolPart(msg.data as FoldedToolCallData)]);
           break;
         case 'plan':
           // Latest-wins; the fold appends it once at turn end. Held and

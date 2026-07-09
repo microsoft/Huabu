@@ -34,9 +34,9 @@ import { AcpServiceError } from './errors.js';
 import { acpSessionRegistry } from './session-registry.js';
 import { ensureAgentForThread } from './spawn-orchestrator.js';
 
+import type { AcpBindingRecipe } from './binding-recipe.js';
 import type { AcpInitializeResult } from './client.js';
 import type { AcpSessionEntry } from './session-registry.js';
-import type { AcpBindingRecipe } from './binding-recipe.js';
 import type {
   AgentMetadata,
   AgentStateSnapshot,

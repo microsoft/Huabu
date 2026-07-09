@@ -78,7 +78,10 @@ export function migrateAcpSessionsFile(
       kind: EXTERNAL_DRIVER_KIND,
       workloadType: ACP_WORKLOAD_TYPE,
       namespace,
-      binding: { alias: record.bindingRecipe.alias, profileId: record.profileId },
+      binding: {
+        alias: record.bindingRecipe.alias,
+        profileId: record.profileId,
+      },
       ...(record.cwd ? { cwd: record.cwd } : {}),
       recipe: record.bindingRecipe,
     };

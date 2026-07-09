@@ -29,12 +29,11 @@ import { renderNeighbourhoodSection } from './neighbourhood.js';
 import { INTERNAL_PROFILE } from './profile.js';
 import { renderSelectedNodesSection } from './selected-nodes.js';
 import { renderSketchRasterHint } from './sketch-hint.js';
+import { unwrapChatRequest } from '../../agenetes/handle.js';
 
 import type { ChatEnvelope } from '../envelope.js';
 import type { ContentPart, UserContent } from './attachments.js';
 import type { RenderProfile } from './profile.js';
-import { unwrapChatRequest } from '../../agenetes/handle.js';
-
 import type { AgentTurn } from '@agenetes/protocol';
 import type { Message } from '@earendil-works/pi-ai';
 
@@ -251,7 +250,12 @@ function foldedTranscriptToPiMessages(turn: AgentTurn): PiMessage[] {
         data.rawInput && typeof data.rawInput === 'object'
           ? (data.rawInput as Record<string, unknown>)
           : {};
-      content.push({ type: 'toolCall', id: data.toolCallId, name, arguments: args });
+      content.push({
+        type: 'toolCall',
+        id: data.toolCallId,
+        name,
+        arguments: args,
+      });
       sawToolCall = true;
       const resultText =
         typeof data.rawOutput === 'string'
@@ -282,7 +286,11 @@ function foldedTranscriptToPiMessages(turn: AgentTurn): PiMessage[] {
   out.push(...toolResults);
 
   if (turn.meta?.stopReason === 'aborted') {
-    out.push({ role: 'user', content: INTERRUPTED_NOTICE, timestamp: Date.now() });
+    out.push({
+      role: 'user',
+      content: INTERRUPTED_NOTICE,
+      timestamp: Date.now(),
+    });
   } else if (errorDetail) {
     out.push({
       role: 'user',

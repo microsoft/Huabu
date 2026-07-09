@@ -15,6 +15,7 @@
 // history. Stripping via a strict `parse` here would silently drop them.
 
 import { AGENT_STREAM_EVENTS } from '@agenetes/protocol';
+
 import type { AgentStreamEvent, FoldedMessage } from '@agenetes/protocol';
 
 /** One folded `tool_call` message (narrowed off the union). */
@@ -68,7 +69,10 @@ export function createTranscriptFolder(): TranscriptFolder {
   const toolByCallId = new Map<string, FoldedToolCall>();
   // Plans use REPLACE-semantics (latest wins) and render turn-level, so we
   // stage the final entries and append one folded `plan` at `result()`.
-  type PlanEntries = Extract<FoldedMessage, { type: 'plan' }>['data']['entries'];
+  type PlanEntries = Extract<
+    FoldedMessage,
+    { type: 'plan' }
+  >['data']['entries'];
   let planEntries: PlanEntries | null = null;
 
   return {

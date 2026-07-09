@@ -27,7 +27,6 @@
 
 import path from 'node:path';
 
-
 import { canvasDirName } from './canvas-dirs.js';
 import { sanitizeId } from './io.js';
 import { getWorkspacePath } from '../workspace.js';

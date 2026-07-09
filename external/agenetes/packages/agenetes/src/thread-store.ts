@@ -18,10 +18,11 @@
 // the driver `sessionId` + folded `AgentMetadata` (M5.5, README I9.7) —
 // subsumes what the ACP-coupled session store previously held.
 
-import type { Namespace, AgentStateSnapshot } from '@agenetes/protocol';
 import { agentMetadataSchema, sessionIdSchema } from '@agenetes/protocol';
 
 import { atomicWriteJson, readJson, sanitizeId } from './io.js';
+
+import type { Namespace, AgentStateSnapshot } from '@agenetes/protocol';
 
 /**
  * One entry of the per-namespace persistent thread table: the durable

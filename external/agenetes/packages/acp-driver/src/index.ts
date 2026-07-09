@@ -61,11 +61,7 @@ export type {
 } from './overlay.js';
 
 export { AcpAgentHandle, ACP_CAPABILITIES } from './handle.js';
-export type {
-  InStreamEvent,
-  PreparedAcpPrompt,
-  AcpTurnCtx,
-} from './handle.js';
+export type { InStreamEvent, PreparedAcpPrompt, AcpTurnCtx } from './handle.js';
 
 export { acpDriverFactory } from './driver.js';
 export type {
@@ -84,10 +80,7 @@ export {
   _resetSpawnOrchestratorForTests,
 } from './spawn-orchestrator.js';
 
-export {
-  ensureAcpSession,
-  setAcpProfileCachePort,
-} from './session.js';
+export { ensureAcpSession, setAcpProfileCachePort } from './session.js';
 export type {
   EnsureAcpSessionOptions,
   AcpProfileCachePort,

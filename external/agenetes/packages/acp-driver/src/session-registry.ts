@@ -30,8 +30,8 @@
  * what the user sees.
  */
 
-import type { AcpAgentClient } from './client.js';
 import type { AcpBindingRecipe } from './binding-recipe.js';
+import type { AcpAgentClient } from './client.js';
 import type { Namespace } from '@agenetes/protocol';
 import type {
   Cost as AcpCost,

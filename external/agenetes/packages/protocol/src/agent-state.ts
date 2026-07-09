@@ -18,9 +18,10 @@
 //   - `metadata`: the folded, driver-agnostic `AgentMetadata` snapshot
 //     (M5.5) — the selectable / usage surface L1 consumes.
 
-import { sessionIdSchema } from './identity.js';
-import { agentMetadataSchema } from './agent-metadata.js';
 import { z } from 'zod';
+
+import { agentMetadataSchema } from './agent-metadata.js';
+import { sessionIdSchema } from './identity.js';
 
 /**
  * The driver-agnostic durable-state snapshot for one thread — the full

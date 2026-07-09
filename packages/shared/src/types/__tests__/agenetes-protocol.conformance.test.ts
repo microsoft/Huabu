@@ -310,7 +310,10 @@ describe('WorkloadSpec + request conformance', () => {
     const spec = {
       kind: 'internal',
       workloadType: 'Job',
-      namespace: { name: 'canvas_1', storage: { root: '/data/history/canvas_1' } },
+      namespace: {
+        name: 'canvas_1',
+        storage: { root: '/data/history/canvas_1' },
+      },
       threadId: 'thr_1',
       spec: { agentId: 'ask', tools: ['read', 'canvas_commands'] },
       request: { type: 'text', content: 'summarise this canvas' },
@@ -333,7 +336,10 @@ describe('WorkloadSpec + request conformance', () => {
     const spec = {
       kind: 'external',
       workloadType: 'Deployment',
-      namespace: { name: 'canvas_2', storage: { root: '/data/history/canvas_2' } },
+      namespace: {
+        name: 'canvas_2',
+        storage: { root: '/data/history/canvas_2' },
+      },
       threadId: 'thr_2',
       spec: { profileId: 'copilot', alias: 'Copilot', cwd: '/repo' },
     };

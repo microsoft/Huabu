@@ -13,11 +13,21 @@
 // never on the instance (I9.2), so the host composes them off the handle
 // `create` / `get` return.
 
-import type { AgentHandle, AgentRuntime } from '@agenetes/runtime';
 import {
   AGENT_STREAM_EVENTS,
   agentRequestBaseSchema,
 } from '@agenetes/protocol';
+
+import {
+  EventLog,
+  InMemoryEventLogStore,
+  type EventLogEntry,
+} from './event-log.js';
+import { createTranscriptFolder } from './fold.js';
+import { ThreadNotificationBus } from './notifications.js';
+import { type ThreadRecord, type ThreadStore } from './thread-store.js';
+import { InMemoryTurnStore, type TurnStore } from './turn-store.js';
+
 import type {
   AgentMetadata,
   AgentRequest,
@@ -28,16 +38,7 @@ import type {
   Namespace,
   WorkloadType,
 } from '@agenetes/protocol';
-
-import { type ThreadRecord, type ThreadStore } from './thread-store.js';
-import { ThreadNotificationBus } from './notifications.js';
-import {
-  EventLog,
-  InMemoryEventLogStore,
-  type EventLogEntry,
-} from './event-log.js';
-import { InMemoryTurnStore, type TurnStore } from './turn-store.js';
-import { createTranscriptFolder } from './fold.js';
+import type { AgentHandle, AgentRuntime } from '@agenetes/runtime';
 
 /**
  * The minimal shape the instance reads off a `WorkloadSpec` (I9.6). The
@@ -93,7 +94,10 @@ export interface Agenetes<
    * Read one durable thread record by `(namespace, threadId)` (I9.4),
    * independent of whether a handle is live.
    */
-  record(namespace: Namespace, threadId: string): ThreadRecord<TSpec> | undefined;
+  record(
+    namespace: Namespace,
+    threadId: string,
+  ): ThreadRecord<TSpec> | undefined;
   /** Enumerate a namespace's persisted thread records (I9.4). */
   records(namespace: Namespace): ThreadRecord<TSpec>[];
   /**
@@ -185,9 +189,8 @@ function createTail(
   return {
     [Symbol.asyncIterator](): AsyncIterator<AgentStreamEvent> {
       const live: EventLogEntry[] = [];
-      let waiting:
-        | ((r: IteratorResult<AgentStreamEvent>) => void)
-        | null = null;
+      let waiting: ((r: IteratorResult<AgentStreamEvent>) => void) | null =
+        null;
       let finished = false;
       // The highest seq already delivered; the dedup / resume watermark.
       let lastSeq = sinceSeq;

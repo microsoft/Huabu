@@ -22,9 +22,9 @@
 // on-disk backing, one JSONL file per thread under the namespace's
 // `chat_v2/` sub-dir, the folded twin of the Tier-1 `.events.jsonl`).
 
-import type { AgentTurn, Namespace } from '@agenetes/protocol';
-
 import { appendJsonLine, readJsonLines, sanitizeId } from './io.js';
+
+import type { AgentTurn, Namespace } from '@agenetes/protocol';
 
 /**
  * One persisted Tier-2 record: the folded {@link AgentTurn} plus the

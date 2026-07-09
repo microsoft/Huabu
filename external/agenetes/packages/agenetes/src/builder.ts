@@ -22,21 +22,17 @@
 
 import { createAgentRuntime } from '@agenetes/runtime';
 
-
-import {
-  createAgenetesInstance,
-  type Agenetes,
-  type WorkloadSpecShape,
-} from './instance.js';
-import {
-  InMemoryThreadStore,
-  type ThreadStore,
-} from './thread-store.js';
 import {
   EventLog,
   InMemoryEventLogStore,
   type EventLogStore,
 } from './event-log.js';
+import {
+  createAgenetesInstance,
+  type Agenetes,
+  type WorkloadSpecShape,
+} from './instance.js';
+import { InMemoryThreadStore, type ThreadStore } from './thread-store.js';
 import { InMemoryTurnStore, type TurnStore } from './turn-store.js';
 
 import type { AgentDriver, AgentHandle } from '@agenetes/runtime';
@@ -48,20 +44,16 @@ import type { AgentDriver, AgentHandle } from '@agenetes/runtime';
 export type DriverFactory<TCfg = void> = (cfg: TCfg) => AgentDriver;
 
 /** The config type a registered factory named `FN` expects. */
-type CfgOf<FMap, FN extends keyof FMap> = FMap[FN] extends DriverFactory<
-  infer TCfg
->
-  ? TCfg
-  : never;
+type CfgOf<FMap, FN extends keyof FMap> =
+  FMap[FN] extends DriverFactory<infer TCfg> ? TCfg : never;
 
 /**
  * `.register`'s third parameter is required only when the named factory
  * declares a non-`void` config, so a config-less factory registers with
  * just `(driverName, factoryName)`.
  */
-type RegisterArgs<FMap, FN extends keyof FMap> = CfgOf<FMap, FN> extends void
-  ? []
-  : [factoryArgs: CfgOf<FMap, FN>];
+type RegisterArgs<FMap, FN extends keyof FMap> =
+  CfgOf<FMap, FN> extends void ? [] : [factoryArgs: CfgOf<FMap, FN>];
 
 /**
  * The accumulating I9.5 builder. `FMap` is the `factoryName → factory`

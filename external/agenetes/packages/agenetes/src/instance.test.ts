@@ -16,8 +16,6 @@ import type { AgentCapabilities } from '@agenetes/protocol';
 import type { AgentStateSnapshot } from '@agenetes/protocol';
 import type { AgentDriver, AgentHandle } from '@agenetes/runtime';
 
-
-
 const CAPS = {} as AgentCapabilities;
 
 interface StubSpec extends WorkloadSpecShape {
@@ -51,11 +49,13 @@ const ns = (name: string, root?: string) => ({
 });
 
 function mount() {
-  return mountAgenetes()
-    .addFactory('stub', stubDriver)
-    // driverName === contract kind (I5.1 alias); factoryName === impl id
-    .register('external', 'stub')
-    .build<StubSpec>();
+  return (
+    mountAgenetes()
+      .addFactory('stub', stubDriver)
+      // driverName === contract kind (I5.1 alias); factoryName === impl id
+      .register('external', 'stub')
+      .build<StubSpec>()
+  );
 }
 
 describe('mounted Agenetes instance (M5 INST skeleton)', () => {
@@ -69,7 +69,10 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
       note: 'first',
     };
     const h1 = inst.create(spec) as unknown as StubHandle;
-    const h2 = inst.create({ ...spec, note: 'second' }) as unknown as StubHandle;
+    const h2 = inst.create({
+      ...spec,
+      note: 'second',
+    }) as unknown as StubHandle;
     expect(h2).toBe(h1);
     // reuse-ignores-spec: the live handle keeps its original spec
     expect(h1.spec.note).toBe('first');
@@ -111,7 +114,10 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
       note: 'first',
     };
     const h1 = inst.create(spec) as unknown as StubHandle;
-    const h2 = inst.create({ ...spec, note: 'second' }) as unknown as StubHandle;
+    const h2 = inst.create({
+      ...spec,
+      note: 'second',
+    }) as unknown as StubHandle;
     // distinct handles — a Job is not cached / reused
     expect(h2).not.toBe(h1);
     expect(h1.spec.note).toBe('first');

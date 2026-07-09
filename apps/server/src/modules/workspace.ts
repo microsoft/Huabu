@@ -40,10 +40,10 @@ import { resetExternalNoteWatcher } from './canvas/external-watcher.js';
 // @deprecated Launch-only legacy migration. Remove once all workspaces have
 // been migrated to the canvas-centric layout.
 import { refreshCanvasDirIndex } from './storage/canvas-dirs.js';
+import { migrateLegacyAcpSessions } from './storage/migrate-acp-sessions.js';
 import { migrateBareArtifactKeys } from './storage/migrate-artifact-keys.js';
 import { migrateLegacyChatThreads } from './storage/migrate-chat-threads.js';
 import { migrateLegacyChatTurns } from './storage/migrate-chat-turns.js';
-import { migrateLegacyAcpSessions } from './storage/migrate-acp-sessions.js';
 import { migrateLabeledNames } from './storage/migrate-labels.js';
 import { migrateLegacyMemory } from './storage/migrate-memory.js';
 import { migrateQuestionContent } from './storage/migrate-question-content.js';

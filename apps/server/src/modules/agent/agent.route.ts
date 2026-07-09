@@ -21,8 +21,8 @@ import {
 
 import { loadAgent } from '../../prompt/index.js';
 import { runAcpAgent } from '../agent/acp/service.js';
-import { runAgent } from '../agent/agent.service.js';
 import { agenetes } from '../agent/agenetes/drivers.js';
+import { runAgent } from '../agent/agent.service.js';
 import { buildChatEnvelope } from '../agent/conversation/envelope.js';
 import { rebuildContextMessages } from '../agent/conversation/prompt/build-prompt.js';
 import { buildHistoryFromTurns } from '../agent/conversation/transcript/history.js';

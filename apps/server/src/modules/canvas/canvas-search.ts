@@ -43,8 +43,8 @@ import { agenetes } from '../agent/agenetes/drivers.js';
 import { unwrapChatRequest } from '../agent/agenetes/handle.js';
 import { canvasAcpNamespace } from '../storage/paths.js';
 
-import type { AgentTurn } from '@agenetes/protocol';
 import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
+import type { AgentTurn } from '@agenetes/protocol';
 
 /** Window of characters shown around each match in `snippet`. */
 const SNIPPET_RADIUS = 60;

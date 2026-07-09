@@ -20,9 +20,8 @@
  * driving an incoming message and asserting on dispatched state.
  */
 
-import { describe, expect, it } from 'vitest';
-
 import { AcpAgentClient, agentSupportsLoadSession } from '@agenetes/acp-driver';
+import { describe, expect, it } from 'vitest';
 
 import type { AgentConnection, AcpMessage } from '@agentlet/protocol';
 import type { AcpSessionUpdate } from '@sediment/shared';

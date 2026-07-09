@@ -23,13 +23,9 @@
 // handles the live fan-out. All of this is L2-internal — the sequence
 // numbers, the pub/sub, and the file layout never leak to L1 (I9.8).
 
-import type { AgentStreamEvent, Namespace } from '@agenetes/protocol';
+import { appendJsonLine, readJsonLines, sanitizeId } from './io.js';
 
-import {
-  appendJsonLine,
-  readJsonLines,
-  sanitizeId,
-} from './io.js';
+import type { AgentStreamEvent, Namespace } from '@agenetes/protocol';
 
 /**
  * One durable entry of a thread's Tier-1 event log: the appended
@@ -128,11 +124,7 @@ export class InMemoryEventLogStore implements EventLogStore {
     return entry;
   }
 
-  read(
-    namespace: Namespace,
-    threadId: string,
-    sinceSeq = 0,
-  ): EventLogEntry[] {
+  read(namespace: Namespace, threadId: string, sinceSeq = 0): EventLogEntry[] {
     const log = this.#byNamespace.get(namespace.name)?.get(threadId);
     if (!log) return [];
     return sinceSeq > 0 ? log.filter((e) => e.seq > sinceSeq) : [...log];
@@ -199,11 +191,7 @@ export class FileEventLogStore implements EventLogStore {
     return entry;
   }
 
-  read(
-    namespace: Namespace,
-    threadId: string,
-    sinceSeq = 0,
-  ): EventLogEntry[] {
+  read(namespace: Namespace, threadId: string, sinceSeq = 0): EventLogEntry[] {
     const entries = readJsonLines<unknown>(
       this.#path(namespace, threadId),
     ).filter(isEntry);

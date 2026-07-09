@@ -14,8 +14,6 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import type { AgentStreamEvent, Namespace } from '@agenetes/protocol';
-
 import {
   EventLog,
   FileEventLogStore,
@@ -23,6 +21,8 @@ import {
   type EventLogEntry,
   type EventLogStore,
 } from './index.js';
+
+import type { AgentStreamEvent, Namespace } from '@agenetes/protocol';
 
 let tmp: string;
 
@@ -75,9 +75,9 @@ describe.each<[string, () => EventLogStore]>([
 
     const past1 = store.read(n, 'thread-1', 1);
     expect(past1.map((e) => e.seq)).toEqual([2, 3]);
-    expect((past1[0]!.event as { data: { content: string } }).data.content).toBe(
-      'b',
-    );
+    expect(
+      (past1[0]!.event as { data: { content: string } }).data.content,
+    ).toBe('b');
 
     expect(store.read(n, 'thread-1', 3)).toEqual([]);
   });
