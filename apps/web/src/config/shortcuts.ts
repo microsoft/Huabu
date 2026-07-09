@@ -374,10 +374,17 @@ export function getCombo(id: string): KeyCombo | undefined {
 
 /**
  * Does a keyboard event match a {@link KeyCombo}? Pure comparison, no
- * string parsing. `mod` is Cmd on macOS / Ctrl elsewhere. `key` is compared
- * case-insensitively against `KeyboardEvent.key`; an array matches any of
- * its entries (aliases / multi-bindings). Modifiers are compared strictly,
- * so e.g. `⌘Z` does not also fire on `⌘⇧Z`.
+ * string parsing. `key` is compared case-insensitively against
+ * `KeyboardEvent.key`; an array matches any of its entries (aliases /
+ * multi-bindings). `shift` / `alt` are compared strictly, so e.g. `⌘Z`
+ * does not also fire on `⌘⇧Z`.
+ *
+ * `mod` requires the platform accelerator modifier but accepts EITHER
+ * Cmd or Ctrl on both platforms (Cmd is the canonical one on macOS, Ctrl
+ * elsewhere) — a laptop with an external PC keyboard still triggers
+ * `⌘`-labelled shortcuts via Ctrl, and vice versa. A `combo` without
+ * `mod` still requires both to be absent, so a plain-letter shortcut
+ * never steals Cmd/Ctrl combos.
  *
  * Note: symbol keys whose character is itself produced by Shift (e.g. `?`
  * = Shift+/) don't fit the strict-shift model — such shortcuts keep their

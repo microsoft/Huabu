@@ -5,10 +5,8 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/Common/Button';
 import { SettingRow } from '@/components/Common/SettingRow';
 import { SettingSection } from '@/components/Common/SettingSection';
+import { TEXT_INPUT_CLASS } from '@/components/Settings/utils';
 import { useIntegrationsStore } from '@/store/integrationsStore';
-
-const TEXT_INPUT_CLASS =
-  'border-edge-default bg-surface text-fg-muted focus:ring-info-light rounded border px-2 py-1.5 text-xs focus:ring-1 focus:outline-none';
 
 interface IntegrationKeyRowProps {
   /** Label for the integration (e.g. "Web Search (Tavily)"). */

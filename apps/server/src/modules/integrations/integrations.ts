@@ -39,9 +39,22 @@ interface PersistedIntegrations {
   rapidApiKey?: string;
 }
 
+/**
+ * In-memory copy of the parsed store. `integrations.json` is only ever
+ * written through {@link saveStore} in this process, so we read the file
+ * once and serve every subsequent lookup (`getTavilyApiKey` /
+ * `getRapidApiKey`, called on each web-search / YouTube fetch) from here
+ * instead of a sync disk read per call. `saveStore` refreshes it.
+ */
+let cache: PersistedIntegrations | null = null;
+
 function loadStore(): PersistedIntegrations {
+  if (cache) return cache;
   try {
-    if (!existsSync(CONFIG_FILE)) return {};
+    if (!existsSync(CONFIG_FILE)) {
+      cache = {};
+      return cache;
+    }
     const raw = readFileSync(CONFIG_FILE, 'utf-8');
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     const store: PersistedIntegrations = {};
@@ -51,10 +64,12 @@ function loadStore(): PersistedIntegrations {
     if (typeof parsed.rapidApiKey === 'string') {
       store.rapidApiKey = parsed.rapidApiKey;
     }
-    return store;
+    cache = store;
+    return cache;
   } catch (err) {
     log.warn({ err }, 'Failed to read integrations.json — treating as empty');
-    return {};
+    cache = {};
+    return cache;
   }
 }
 
@@ -64,6 +79,8 @@ function saveStore(store: PersistedIntegrations): void {
     mkdirSync(dir, { recursive: true });
   }
   writeFileSync(CONFIG_FILE, JSON.stringify(store, null, 2), 'utf-8');
+  // Keep the in-memory copy in sync with what we just persisted.
+  cache = store;
   try {
     chmodSync(CONFIG_FILE, 0o600);
   } catch {
@@ -92,7 +109,9 @@ export function getIntegrationsConfig(): IntegrationsConfig {
 export function setIntegrationsConfig(
   update: IntegrationsConfigUpdate,
 ): IntegrationsConfig {
-  const store = loadStore();
+  // Work on a copy so a failed write can't leave the in-memory cache
+  // ahead of disk (saveStore commits the copy to the cache on success).
+  const store = { ...loadStore() };
   if (typeof update.tavilyApiKey === 'string' && update.tavilyApiKey !== '') {
     store.tavilyApiKey = update.tavilyApiKey;
   }
