@@ -10,21 +10,21 @@
  */
 
 import { getLogger } from '../../../utils/logger.js';
-import { getProfile } from '../profiles.js';
 
 import type { CanvasStore } from '../../storage/canvas-store.js';
 import type {
+  BodyOwnership,
   NodeContentKind,
   NormalizeResult,
   PersistResult,
 } from '../types.js';
-import type { CanvasNodeType } from '@sediment/shared';
 
 const log = getLogger('preprocessing.persist');
 
 export function persist(
   normalized: NormalizeResult,
   contentKind: NodeContentKind | undefined,
+  bodyOwnership: BodyOwnership | undefined,
   store: CanvasStore,
   src?: string,
 ): PersistResult {
@@ -45,10 +45,11 @@ export function persist(
   // reported bug. Skip the whole persist so the content PUT owns the
   // resolution, and so a title / summary derived from the stale snapshot is
   // never written against a body it no longer matches (title–body consistency).
+  // `bodyOwnership` is threaded in from the node's profile by the caller (the
+  // authoritative source) rather than re-derived from `contentKind` here, so a
+  // future authored type whose `contentKind` differs from its node type cannot
+  // silently slip past the guard.
   // See `docs/proposals/node-write-unification-plan.md` §0 / §3f.
-  const bodyOwnership = getProfile(
-    contentKind as CanvasNodeType,
-  )?.bodyOwnership;
   if (
     bodyOwnership === 'authored' &&
     existing &&

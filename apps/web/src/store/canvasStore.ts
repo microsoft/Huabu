@@ -834,14 +834,17 @@ export function clearNodeDuplicateGuard(nodeId: string): void {
  * Trigger preprocessing for a single node once the user has finished
  * editing it (exit-edit "settle").
  *
- * Used by `NodeWrapper` for editor-authored nodes (`note` / `text`),
- * whose auto-derived label (the on-disk `.md` filename) must be committed
- * only when the heading is settled — never on every keystroke pause, which
- * churned the filename through every partial heading (`Note 1.md` →
- * `H.md` → `He.md` → …). These types are excluded from the per-mutation
- * `triggerPreprocessing` fan-out in `runWebPostEffects`, so this exit-edit
- * call is their sole preprocessing trigger. The body itself keeps saving on
- * the fast per-node content cadence (`nodeContentQueue`) independently. See
+ * Called for editor-authored nodes (`note` / `text`) from their exit-edit
+ * boundaries — `closeExpanded` / `openExpanded` for `note` and `TextNode`'s
+ * blur handler for `text` — whose auto-derived label (the on-disk `.md`
+ * filename) must be committed only when the heading is settled, never on
+ * every keystroke pause, which churned the filename through every partial
+ * heading (`Note 1.md` → `H.md` → `He.md` → …). Their per-keystroke content
+ * edits are excluded from the `triggerPreprocessing` fan-out in
+ * `runWebPostEffects` (only one-time create / duplicate / import mutations
+ * still fan out there), so this exit-edit call is their sole preprocessing
+ * trigger for content edits. The body itself keeps saving on the fast
+ * per-node content cadence (`nodeContentQueue`) independently. See
  * `docs/proposals/node-write-unification-plan.md` §3e / §10.
  */
 export function settleNodePreprocess(nodeId: string): void {

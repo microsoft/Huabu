@@ -20,6 +20,7 @@ import { project } from './stages/project.js';
 
 import type { ProviderManager } from './provider-manager.js';
 import type {
+  BodyOwnership,
   Capability,
   NodeContentKind,
   PipelineContext,
@@ -42,6 +43,7 @@ export async function runPipeline(
   request: PreprocessNodeRequest,
   plan: Capability[],
   contentKind: NodeContentKind | undefined,
+  bodyOwnership: BodyOwnership | undefined,
   deps: PipelineDeps,
 ): Promise<PreprocessNodeResult> {
   const requestId = randomUUID();
@@ -305,6 +307,7 @@ export async function runPipeline(
           ctx.persisted = persist(
             placeholderNormalized,
             contentKind,
+            bodyOwnership,
             deps.store,
             src,
           );
@@ -316,7 +319,13 @@ export async function runPipeline(
               'Persisted placeholder source because extraction failed — content is empty',
           });
         } else {
-          ctx.persisted = persist(ctx.normalized, contentKind, deps.store, src);
+          ctx.persisted = persist(
+            ctx.normalized,
+            contentKind,
+            bodyOwnership,
+            deps.store,
+            src,
+          );
         }
         usedCapabilities.push('persist_source');
       } catch (error) {

@@ -166,6 +166,12 @@ export class PreprocessDispatcher {
       provider: this.provider,
     };
 
-    return runPipeline(request, plan, profile.contentKind, deps);
+    return runPipeline(
+      request,
+      plan,
+      profile.contentKind,
+      profile.bodyOwnership,
+      deps,
+    );
   }
 }

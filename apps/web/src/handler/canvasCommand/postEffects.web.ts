@@ -61,15 +61,27 @@ export function runWebPostEffects(input: RunWebPostEffectsInput): void {
   // 1. Trigger preprocessing for created / mutated nodes. The server
   // decides per node profile whether any actual work runs.
   //
-  // `note` / `text` are deliberately excluded here: their label is
-  // auto-derived from the first heading, so firing on every keystroke
-  // pause renamed the `.md` file through every partial heading
-  // (`Note 1.md` → `H.md` → `He.md` → …). Their preprocessing is instead
-  // triggered once the user leaves the node (exit-edit → `settleNodePreprocess`
-  // in `NodeWrapper`), so the filename is committed only when the heading
-  // is settled. See `docs/proposals/node-write-unification-plan.md` §3e / §10.
+  // `note` / `text` need special handling: their label auto-derives from
+  // the first heading, so firing preprocess on every keystroke content edit
+  // renamed the `.md` file through every partial heading (`Note 1.md` →
+  // `H.md` → `He.md` → …). Those keystroke edits arrive as `MERGE_NODE_DATA`
+  // content rewrites (their ids land in `contentEditedNodeIds`) and are
+  // instead settled on exit-edit (`settleNodePreprocess`, wired from
+  // `closeExpanded` / `openExpanded` for `note` and `TextNode`'s blur for
+  // `text`). But a one-time structural mutation — create / duplicate /
+  // import — is NOT a keystroke edit (it arrives via `CREATE_NODES` and never
+  // appears in `contentEditedNodeIds`), so it still needs its single
+  // preprocess pass to persist the sidecar and derive the initial label.
+  // Skip only the content-edit churn path, not the create/import path.
+  // See `docs/proposals/node-write-unification-plan.md` §3e / §10.
+  const contentEdited = new Set(effects.contentEditedNodeIds);
   for (const node of effects.mutatedNodes) {
-    if (node.type === 'note' || node.type === 'text') continue;
+    if (
+      (node.type === 'note' || node.type === 'text') &&
+      contentEdited.has(node.id)
+    ) {
+      continue;
+    }
     triggerPreprocessing(node);
   }
 

@@ -72,7 +72,12 @@ describe('persist — authored-body CAS guard', () => {
     const store = getCanvasStore('c1');
 
     // Preprocess snapshot is stale — on-disk body has moved on.
-    const result = persist(normalized('n1', 'stale-snapshot'), 'note', store);
+    const result = persist(
+      normalized('n1', 'stale-snapshot'),
+      'note',
+      'authored',
+      store,
+    );
 
     expect(result.contentChanged).toBe(false);
     // The newer on-disk body is preserved — NOT clobbered.
@@ -83,7 +88,12 @@ describe('persist — authored-body CAS guard', () => {
     seedNode('c1', 'n1', 'web', 'old-extraction');
     const store = getCanvasStore('c1');
 
-    const result = persist(normalized('n1', 'fresh-extraction'), 'web', store);
+    const result = persist(
+      normalized('n1', 'fresh-extraction'),
+      'web',
+      'derived',
+      store,
+    );
 
     expect(result.contentChanged).toBe(true);
     expect(bodyOf('c1', 'n1')).toBe('fresh-extraction');
@@ -104,7 +114,12 @@ describe('persist — authored-body CAS guard', () => {
     });
     const store = getCanvasStore('c2');
 
-    const result = persist(normalized('n1', 'first body'), 'note', store);
+    const result = persist(
+      normalized('n1', 'first body'),
+      'note',
+      'authored',
+      store,
+    );
 
     expect(result.contentChanged).toBe(true);
     expect(bodyOf('c2', 'n1')).toBe('first body');
