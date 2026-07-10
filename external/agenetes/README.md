@@ -14,16 +14,16 @@ Agenetes follows the same outer shape that makes Kubernetes easy to reason about
 
 The same concepts can be read as a compact vocabulary map:
 
-| Kubernetes | Agenetes | Meaning |
-| --- | --- | --- |
-| user / kubectl | host application | Declares and invokes workloads. |
-| Pod spec | `WorkloadSpec` | The declarative workload description. |
-| Job / long-running workload | Workload lifecycle type (`workloadType`: `Job` / `Deployment`) | Lifecycle semantics: a `Job` mints a fresh handle for a run; a `Deployment` keeps one live handle by `threadId`. |
-| scheduler | dispatcher | Kubernetes chooses a node; Agenetes resolves `WorkloadSpec.kind` to a driver. |
-| container runtime, such as containerd (previously Docker) | Agent Driver | The pluggable runtime implementation that materializes the workload. |
-| Pod | Agent Process | The execution instance that actually runs the declared workload. |
-| Pod handle / pod subresources | Agent Handle | The live per-workload surface for running turns, sending controls, receiving streams, and closing the workload. |
-| Service / DNS | agent service gateway *(planned)* | The stable discovery and invocation surface for agents and external tools. |
+| Kubernetes                                                | Agenetes                                                       | Meaning                                                                                                          |
+| --------------------------------------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| user / kubectl                                            | host application                                               | Declares and invokes workloads.                                                                                  |
+| Pod spec                                                  | `WorkloadSpec`                                                 | The declarative workload description.                                                                            |
+| Job / long-running workload                               | Workload lifecycle type (`workloadType`: `Job` / `Deployment`) | Lifecycle semantics: a `Job` mints a fresh handle for a run; a `Deployment` keeps one live handle by `threadId`. |
+| scheduler                                                 | dispatcher                                                     | Kubernetes chooses a node; Agenetes resolves `WorkloadSpec.kind` to a driver.                                    |
+| container runtime, such as containerd (previously Docker) | Agent Driver                                                   | The pluggable runtime implementation that materializes the workload.                                             |
+| Pod                                                       | Agent Process                                                  | The execution instance that actually runs the declared workload.                                                 |
+| Pod handle / pod subresources                             | Agent Handle                                                   | The live per-workload surface for running turns, sending controls, receiving streams, and closing the workload.  |
+| Service / DNS                                             | agent service gateway _(planned)_                              | The stable discovery and invocation surface for agents and external tools.                                       |
 
 From the host application's point of view, the flow is straightforward: declare a `WorkloadSpec`, invoke it, let Agenetes resolve the spec to an Agent Driver, and then drive the returned Agent Handle. The driver materializes the Agent Process at the placement already declared by the spec — in the current process, on the local machine, or on a remote server — and the handle is the live per-workload surface exposed through the uniform runtime contract. This is dispatching rather than scheduling because Agenetes resources are not fungible: an in-process runtime is tied to the current process and its injected capabilities, while a local or remote runtime may be tied to a particular filesystem, credential set, daemon, or execution environment. Treating those environments as interchangeable nodes would create the wrong abstraction.
 
@@ -35,35 +35,35 @@ The user-facing API surface separates four concerns:
 
 面向用户的 API 表面分为四类关注点：
 
-| Surface | Responsibility |
-| --- | --- |
-| Instance | Top-level workload entrypoint: accept a `WorkloadSpec`, dispatch it to a driver, and return or locate the Agent Handle. |
-| Agent Handle | Per-workload live interaction surface: run turns, stream output, send controls, inspect capabilities, and close. |
-| Persistent Querying | Durable read surface: inspect persisted thread records, replay folded history, and follow live state/event tails. |
-| Configuration | Embedding-time setup surface: mount Agenetes, provide persistence backends, register driver factories, and bind driver kinds. |
+| Surface             | Responsibility                                                                                                                |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Instance            | Top-level workload entrypoint: accept a `WorkloadSpec`, dispatch it to a driver, and return or locate the Agent Handle.       |
+| Agent Handle        | Per-workload live interaction surface: run turns, stream output, send controls, inspect capabilities, and close.              |
+| Persistent Querying | Durable read surface: inspect persisted thread records, replay folded history, and follow live state/event tails.             |
+| Configuration       | Embedding-time setup surface: mount Agenetes, provide persistence backends, register driver factories, and bind driver kinds. |
 
 Each surface has an in-process programmatic form today, used when Agenetes is mounted directly into a host application. The API-shaped forms below are suggested projections for a future process or network boundary; they describe the expected REST/SSE shape, not a finalized HTTP contract.
 
 每个 surface 当前都有一种进程内的程序调用形态，用于 Agenetes 被直接 mount 进 host application 的场景。下表中的 API-shaped forms 是未来跨进程或网络边界时的投影建议；它们描述的是预期的 REST/SSE 形态，而不是最终 HTTP contract。
 
-| Surface | Current in-process API | Suggested API-shaped form *(planned)* | Meaning |
-| --- | --- | --- | --- |
-| Instance | `Agenetes.create(spec) -> AgentHandle` | `POST /workloads` | Realize a `WorkloadSpec`: Jobs mint a fresh handle; Deployments get-or-create the live handle by `threadId`. |
-| Instance | `Agenetes.get(threadId) -> AgentHandle \| undefined` | `GET /workloads/:threadId/live` | Return the live Deployment handle when one is already running; never spawns. |
-| Instance | `Agenetes.close(threadId) -> void` | `DELETE /workloads/:threadId/live` | Close and evict the live handle for a thread. |
-| Agent Handle | `AgentHandle.run(request, render, ctx) -> AsyncGenerator<AgentStreamEvent, TResult>` | `POST /workloads/:threadId/runs` + stream | Run one turn, stream `AgentStreamEvent`s, and return the driver's per-turn result. |
-| Agent Handle | `AgentHandle.control(msg) -> Promise<ControlAck>` | `POST /workloads/:threadId/control` | Send an out-of-turn `ControlMsg` and receive a `ControlAck`. |
-| Agent Handle | `AgentHandle.close() -> void` | `DELETE /workloads/:threadId/live` | Release this workload through the handle surface. |
-| Agent Handle | `AgentHandle.capabilities -> AgentCapabilities` | `GET /workloads/:threadId/capabilities` | Read the operations and features this handle advertises. |
-| Persistent Querying | `Agenetes.record(namespace, threadId) -> ThreadRecord \| undefined` | `GET /namespaces/:namespace/workloads/:threadId` | Read one durable thread record independent of handle liveness. |
-| Persistent Querying | `Agenetes.records(namespace) -> ThreadRecord[]` | `GET /namespaces/:namespace/workloads` | Enumerate persisted thread records in one namespace. |
-| Persistent Querying | `Agenetes.notifications(threadId) -> AsyncIterable<AgentMetadata>` | `GET /workloads/:threadId/notifications` | Subscribe to persisted AgentMetadata updates. |
-| Persistent Querying | `Agenetes.history(namespace, threadId, { withTail? }) -> ThreadHistory` | `GET /namespaces/:namespace/workloads/:threadId/history?tail=1` | Read folded turns, optionally with a live tail fenced after the last folded turn. |
-| Persistent Querying | `Agenetes.tail(namespace, threadId) -> AsyncIterable<AgentStreamEvent>` | `GET /namespaces/:namespace/workloads/:threadId/events` | Follow the live Tier-1 event tail after the latest folded turn. |
-| Configuration | `mountAgenetes(options) -> AgenetesBuilder` | deployment / configuration API | Create a builder and inject persistence backends such as thread, event, and turn stores. |
-| Configuration | `AgenetesBuilder.addFactory(factoryName, factory) -> AgenetesBuilder` | deployment / configuration API | Add a driver factory to the embedding's factory dictionary. |
-| Configuration | `AgenetesBuilder.register(driverName, factoryName, args?) -> AgenetesBuilder` | deployment / configuration API | Bind a workload `kind` (`driverName`) to a named driver factory and its configuration. |
-| Configuration | `AgenetesBuilder.build() -> Agenetes` | deployment / configuration API | Materialize the configured `Agenetes` instance. |
+| Surface             | Current in-process API                                                               | Suggested API-shaped form _(planned)_                           | Meaning                                                                                                      |
+| ------------------- | ------------------------------------------------------------------------------------ | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Instance            | `Agenetes.create(spec) -> AgentHandle`                                               | `POST /workloads`                                               | Realize a `WorkloadSpec`: Jobs mint a fresh handle; Deployments get-or-create the live handle by `threadId`. |
+| Instance            | `Agenetes.get(threadId) -> AgentHandle \| undefined`                                 | `GET /workloads/:threadId/live`                                 | Return the live Deployment handle when one is already running; never spawns.                                 |
+| Instance            | `Agenetes.close(threadId) -> void`                                                   | `DELETE /workloads/:threadId/live`                              | Close and evict the live handle for a thread.                                                                |
+| Agent Handle        | `AgentHandle.run(request, render, ctx) -> AsyncGenerator<AgentStreamEvent, TResult>` | `POST /workloads/:threadId/runs` + stream                       | Run one turn, stream `AgentStreamEvent`s, and return the driver's per-turn result.                           |
+| Agent Handle        | `AgentHandle.control(msg) -> Promise<ControlAck>`                                    | `POST /workloads/:threadId/control`                             | Send an out-of-turn `ControlMsg` and receive a `ControlAck`.                                                 |
+| Agent Handle        | `AgentHandle.close() -> void`                                                        | `DELETE /workloads/:threadId/live`                              | Release this workload through the handle surface.                                                            |
+| Agent Handle        | `AgentHandle.capabilities -> AgentCapabilities`                                      | `GET /workloads/:threadId/capabilities`                         | Read the operations and features this handle advertises.                                                     |
+| Persistent Querying | `Agenetes.record(namespace, threadId) -> ThreadRecord \| undefined`                  | `GET /namespaces/:namespace/workloads/:threadId`                | Read one durable thread record independent of handle liveness.                                               |
+| Persistent Querying | `Agenetes.records(namespace) -> ThreadRecord[]`                                      | `GET /namespaces/:namespace/workloads`                          | Enumerate persisted thread records in one namespace.                                                         |
+| Persistent Querying | `Agenetes.notifications(threadId) -> AsyncIterable<AgentMetadata>`                   | `GET /workloads/:threadId/notifications`                        | Subscribe to persisted AgentMetadata updates.                                                                |
+| Persistent Querying | `Agenetes.history(namespace, threadId, { withTail? }) -> ThreadHistory`              | `GET /namespaces/:namespace/workloads/:threadId/history?tail=1` | Read folded turns, optionally with a live tail fenced after the last folded turn.                            |
+| Persistent Querying | `Agenetes.tail(namespace, threadId) -> AsyncIterable<AgentStreamEvent>`              | `GET /namespaces/:namespace/workloads/:threadId/events`         | Follow the live Tier-1 event tail after the latest folded turn.                                              |
+| Configuration       | `mountAgenetes(options) -> AgenetesBuilder`                                          | deployment / configuration API                                  | Create a builder and inject persistence backends such as thread, event, and turn stores.                     |
+| Configuration       | `AgenetesBuilder.addFactory(factoryName, factory) -> AgenetesBuilder`                | deployment / configuration API                                  | Add a driver factory to the embedding's factory dictionary.                                                  |
+| Configuration       | `AgenetesBuilder.register(driverName, factoryName, args?) -> AgenetesBuilder`        | deployment / configuration API                                  | Bind a workload `kind` (`driverName`) to a named driver factory and its configuration.                       |
+| Configuration       | `AgenetesBuilder.build() -> Agenetes`                                                | deployment / configuration API                                  | Materialize the configured `Agenetes` instance.                                                              |
 
 ## The Name: Agenetes / 名称：Agenetes
 
@@ -403,12 +403,12 @@ A turn's inputs split across four layers by lifetime and ownership — the handl
 
 一次轮次的输入按生命周期与归属分为四层——handle 的 `run(request, render, ctx)` 签名（I8）刻意让 `render` 作为独立的位置参数，_而非_ `ctx` 的字段，因为渲染归调用方所有、不归 handle（I6）；handle 侧的接缝本身（含 render 的第二个 `AgentTurnState` 参数）由 I8.3 固定：
 
-| Layer                                                     | Lifetime                                               | Carries                                                                                                                                                                                                         |
-| --------------------------------------------------------- | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **`WorkloadSpec`** — _"which workload"_                   | baked by the host application at `create`; durable, serializable, opaque | `threadId` · `kind` · `binding {alias, profileId}` · `cwd` · `recipe` · `namespace {name, storage}` · `env` (the opaque reachback env, I10)                                                                     |
-| **request** — _"this turn's input"_ (driver-agnostic, I6) | per `run`                                              | the `envelope`, passed as `handle.run(request, …)`'s first arg                                                                                                                                                  |
-| **render** — _"how to render this turn's request"_ (I6)   | per `run` (separate positional arg)                    | the canvas-coupled `envelope → ACP blocks` closure (genuine host application prompt semantics), invoked by the driver at the last moment for a non-null request; also given the handle's `AgentTurnState` as a 2nd arg (I8.3) |
-| **ctx** — _"this turn's host application injections"_      | per `run`                                              | `{ overlay, signal, onPrepared? }` — `onPrepared` the host application's debug dump                                                                                                                             |
+| Layer                                                     | Lifetime                                                                 | Carries                                                                                                                                                                                                                       |
+| --------------------------------------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`WorkloadSpec`** — _"which workload"_                   | baked by the host application at `create`; durable, serializable, opaque | `threadId` · `kind` · `binding {alias, profileId}` · `cwd` · `recipe` · `namespace {name, storage}` · `env` (the opaque reachback env, I10)                                                                                   |
+| **request** — _"this turn's input"_ (driver-agnostic, I6) | per `run`                                                                | the `envelope`, passed as `handle.run(request, …)`'s first arg                                                                                                                                                                |
+| **render** — _"how to render this turn's request"_ (I6)   | per `run` (separate positional arg)                                      | the canvas-coupled `envelope → ACP blocks` closure (genuine host application prompt semantics), invoked by the driver at the last moment for a non-null request; also given the handle's `AgentTurnState` as a 2nd arg (I8.3) |
+| **ctx** — _"this turn's host application injections"_     | per `run`                                                                | `{ overlay, signal, onPrepared? }` — `onPrepared` the host application's debug dump                                                                                                                                           |
 
 The ACP handle **self-resolves its own live session per turn** (calling the in-package `ensureAcpSession`), but its _durable_ state rides the I9.7 channel, not the handle: it **rehydrates** `sessionId` / `metadata` from the down-fed `priorState` (never reading a store) and **up-reports** changes via `onState` (never writing one). So the `ctx` still carries neither the live session nor a persistence callback — the low-level session (I4.3) stays entirely below the instance, unseen by the host application. The spawn `recipe` is **not** part of this state channel: it rides the durable `WorkloadSpec`, baked by the host application, which owns keeping a returning thread's recipe stable — Agenetes forwards the spec's recipe verbatim and at most **warns** when it drifts from the persisted record.
 

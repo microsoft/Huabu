@@ -67,13 +67,13 @@ Transport 回答的是：runtime protocol 通过什么通道传输？
 
 `WorkloadSpec` 中有几根必须分清的轴：
 
-| Field | Meaning |
-| --- | --- |
-| `kind` | Driver route：决定 dispatch 到哪个 Agent Driver。 |
-| `workloadType` | Workload lifecycle type：`Job` 或 `Deployment`，决定完成语义。 |
-| `namespace` / `threadId` | 持久化与 live-handle 寻址范围。 |
-| `spec` | Driver-specific binding schema：由该 driver 的 binding definition 贡献；具体 driver 实现也可以接收包含公共字段的完整 spec 投影。 |
-| `request` | Per-turn input：共享的 request union，不属于 driver binding schema。 |
+| Field                    | Meaning                                                                                                                          |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `kind`                   | Driver route：决定 dispatch 到哪个 Agent Driver。                                                                                |
+| `workloadType`           | Workload lifecycle type：`Job` 或 `Deployment`，决定完成语义。                                                                   |
+| `namespace` / `threadId` | 持久化与 live-handle 寻址范围。                                                                                                  |
+| `spec`                   | Driver-specific binding schema：由该 driver 的 binding definition 贡献；具体 driver 实现也可以接收包含公共字段的完整 spec 投影。 |
+| `request`                | Per-turn input：共享的 request union，不属于 driver binding schema。                                                             |
 
 其中 `kind` 与 `workloadType` 是正交的顶层字段。`kind` 决定“哪个 driver 运行它”，`workloadType` 决定“它是一次性完成还是长期持有 live handle”。Agent Command Driver / Agent Harness Driver 的差异主要体现在 `spec` 的 schema 形状，而不是 `kind` 或 `workloadType`。
 
@@ -107,12 +107,12 @@ Persistence 不是 driver 的第四个维度。它属于 Agenetes instance 的 d
 
 ## 8. 典型组合
 
-| Binding schema | Runtime protocol | Transport | Example |
-| --- | --- | --- | --- |
-| command-shaped | ACP | stdio | Generic ACP CLI agent；也包括把 `copilot --acp` 当成普通 `command + args` 内容的情况。 |
-| command-shaped | ACP | WebSocket / agentlet relay | Remote ACP agent。 |
-| harness-shaped → command-shaped | ACP | stdio | Copilot-aware driver：先把 prompt / skills / tools / permission policy / model 等语义编译成 `copilot --acp ...argv`，再走 command-shaped ACP path。 |
-| harness-shaped | SDK/native `AgentHandle` contract | in-process function call | 进程内 SDK / harness driver。 |
-| workload-shaped | Agenetes API-shaped protocol | HTTP/SSE | 未来跨进程或跨网络边界的 Agenetes facade。 |
+| Binding schema                  | Runtime protocol                  | Transport                  | Example                                                                                                                                             |
+| ------------------------------- | --------------------------------- | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| command-shaped                  | ACP                               | stdio                      | Generic ACP CLI agent；也包括把 `copilot --acp` 当成普通 `command + args` 内容的情况。                                                              |
+| command-shaped                  | ACP                               | WebSocket / agentlet relay | Remote ACP agent。                                                                                                                                  |
+| harness-shaped → command-shaped | ACP                               | stdio                      | Copilot-aware driver：先把 prompt / skills / tools / permission policy / model 等语义编译成 `copilot --acp ...argv`，再走 command-shaped ACP path。 |
+| harness-shaped                  | SDK/native `AgentHandle` contract | in-process function call   | 进程内 SDK / harness driver。                                                                                                                       |
+| workload-shaped                 | Agenetes API-shaped protocol      | HTTP/SSE                   | 未来跨进程或跨网络边界的 Agenetes facade。                                                                                                          |
 
 这些组合只是示例，不是完整矩阵。Agenetes 只承诺每个已注册 driver 给出一个明确、可支持的组合；不承诺任意 binding schema、protocol、transport 都能自由互换。
