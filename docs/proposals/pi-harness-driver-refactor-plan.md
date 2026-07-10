@@ -121,16 +121,26 @@ const agenetes = mountAgenetes()
 
 There are two separate bootstrap choices here. Adding a factory makes an implementation available; registering a driver binds a host contract `kind` to one available factory. A host should always explicitly register the contract kinds it exposes, because those names are part of its persisted workload contract. It should not necessarily have to call `addFactory` for every standard factory by hand if a higher-level Agenetes assembly package or preset can preinstall standard factories in the builder. The current core `@agenetes/agenetes` package deliberately does not do that because it depends only on `@agenetes/protocol` and `@agenetes/runtime`; importing standard drivers such as ACP or pi would change its dependency boundary. A future convenience entry point can pre-add standard factories while still requiring explicit `.register(...)` calls.
 
-`resolveModel` and `getApiKey` are separate on purpose. The model object is a pi-agent-core runtime requirement, but credentials are frequently short-lived and may need refresh before every LLM call. Huabu's current `ensureApiKey()` already has that shape.
+`resolveModel` and `getApiKey` are separate on purpose. The model object is a pi-agent-core runtime requirement, but credentials are frequently short-lived and may need refresh before every LLM call. Huabu's current `ensureApiKey()` already has that shape. With a symbolic `PiModelRef` such as `{ type: 'host', id: 'active' }`, `resolveModel` may also be invoked again at turn boundaries so a live Deployment can track host policy changes without recreating the handle.
 
 `renderFallback` is optional and does not replace `run(request, render, ctx)`. The per-run renderer remains the primary request-render seam. A fallback port only exists for simple hosts or safe plain-text requests when the composed renderer cannot handle a request variant.
 
 ## 8. Proposed binding schema
 
 ```ts
-type PiModelRef =
-  | { type: "registered"; id: string }
-  | { type: "pi-ai"; provider: string; model: string; options?: JsonObject };
+type PiModelRef = {
+  /**
+   * Host-managed symbolic model selector. The driver does not interpret the
+   * id; it passes the ref to `resolveModel` / `getApiKey`.
+   *
+   * Examples:
+   *   { type: "host", id: "active" }   // Huabu first milestone
+   *   { type: "host", id: "fast" }     // future host-defined profile
+   */
+  type: "host";
+  id: string;
+  options?: JsonObject;
+};
 
 type PiToolRef = {
   name: string;
@@ -159,11 +169,15 @@ type PiWorkloadSpec = {
 
 `hostContext` is intentionally opaque to the standard driver. Huabu can place a canvas id, origin stamp, profile id, or other routing facts there, and the driver only passes it back to registered ports.
 
-The exact `PiModelRef` shape should be validated against pi-ai/pi-agent-core before implementation. The invariant to preserve is not the concrete field names above; it is that the spec carries a durable model reference while host code resolves it to the concrete pi-ai model and credential policy.
+The first milestone should keep `PiModelRef` **symbolic and host-managed**, not a serialized pi-ai `Model<Api>` and not a provider/model/baseUrl tuple. The concrete pi-ai `Model<Api>` is a runtime object with many transport- and provider-specific fields (`api`, `baseUrl`, `headers`, `compat`, cost metadata, etc.), while today's Huabu built-in path does not let AGENT profiles choose a provider/model at all — it simply uses the host's current active LLM config (`getLLMModel()` / `ensureApiKey()`). So the minimal durable contract is an opaque host selector that registered ports resolve into the live pi-ai model and credential policy.
+
+For Huabu's first milestone the selector should simply be `{ type: "host", id: "active" }`, preserving current semantics. If the host later wants named model policies (`fast`, `best`, `reasoning`, per-agent defaults, …), those remain host-defined ids interpreted only by the ports. A future cross-host proposal can still add an explicit provider/model branch if a genuine standard use case emerges; it is not needed to ship the first standard pi driver.
 
 ## 9. Runtime behavior
 
 For `workloadType: "Deployment"`, `create(spec)` creates or reuses one `PiAgentHandle` for `threadId`. The handle owns the long-lived pi `Agent` and treats each `run(request, render, ctx)` as a turn submitted to that live harness.
+
+Before each turn, the handle may re-resolve symbolic recipe members that represent host policy rather than driver-owned mutable state. In Huabu's first milestone that specifically means `recipe.model = { type: "host", id: "active" }`: before `prompt()` / `continue()`, the handle resolves the current host-selected pi model and assigns `agent.state.model`. This preserves today's semantics where changing the host's active LLM configuration affects the next built-in turn, without forcing the protocol to serialize provider-specific model objects.
 
 For `workloadType: "Job"`, `create(spec)` creates a transient `PiAgentHandle` and a transient pi `Agent` for exactly one run. This is still useful for pipeline-style workloads, evaluations, tests, and programmatic one-shot tasks.
 
@@ -333,12 +347,11 @@ These updates should be made in host-application-neutral language. The Agenetes 
 
 ## 15. Open questions
 
-Only the questions below should block the first implementation pass.
-
-1. What is the minimal `PiModelRef` schema for the first milestone? The likely answer is a durable host-resolved reference rather than a provider-platform schema: the port returns a concrete pi-ai `Model<any>`, so the ref shape is a host/protocol choice and does not gate the driver internals. It should still be validated against pi-ai before the protocol type is frozen.
+No unresolved protocol question remains for the first implementation pass.
 
 Resolved during review (were open questions, now decided):
 
+- `PiModelRef` for the first milestone is a host-managed symbolic selector (`{ type: 'host', id: string }`), with Huabu using `{ type: 'host', id: 'active' }`; see §8.
 - pi-agent-core behavior guarantees for Deployment — verified against the installed version; see §9.1.
 - Dynamic system-prompt / skill / memory refresh under a Deployment — modelled as a `set_context` control message carried in `supportedControlMessages`, driven by a host write-dirty flag; see §9.2 and §12.4.
 

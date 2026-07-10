@@ -242,20 +242,22 @@ describe('ControlMsg conformance', () => {
 
   it('expresses Job vs Deployment capability sets', () => {
     // A Job's near-empty control plane.
-    const job = agentCapabilitiesSchema.parse({ control: ['cancel'] });
+    const job = agentCapabilitiesSchema.parse({
+      supportedControlMessages: ['cancel'],
+    });
     expect(job.turnInput).toBe('blocking');
 
     // A Deployment's full, capability-gated surface.
     const deployment = agentCapabilitiesSchema.safeParse({
-      control: [
+      supportedControlMessages: [
         'cancel',
         'set_mode',
         'set_model',
         'set_config_option',
         'answer_permission',
+        'set_context',
       ],
       loadSession: true,
-      slashCommands: true,
       turnInput: 'queue',
     });
     expect(deployment.success).toBe(true);

@@ -68,7 +68,7 @@ export type BuiltinRendered = Message[];
  * (`./drivers.ts`) can advertise it before a handle instance exists.
  */
 export const BUILTIN_CAPABILITIES: AgentCapabilities = {
-  control: ['cancel'],
+  supportedControlMessages: ['cancel'],
   turnInput: 'blocking',
 };
 
@@ -441,7 +441,7 @@ export class BuiltinAgentHandle implements AgentHandle<
   }
 
   async control(msg: ControlMsg): Promise<ControlAck> {
-    if (!this.capabilities.control.includes(msg.type)) {
+    if (!this.capabilities.supportedControlMessages.includes(msg.type)) {
       return {
         ok: false,
         error: `unsupported control operation: ${msg.type}`,
