@@ -28,7 +28,13 @@ import type {
  */
 export interface AgentDriverInfo {
   /**
-   * The capability descriptor every handle from this driver advertises.
+   * Optional natural-language self-description for discovery / UX. Never
+   * a gating input; runtime branching must rely on `capabilities`.
+   */
+  readonly description?: string;
+  /**
+   * The driver-class capability descriptor used for discovery / admission.
+   * A concrete handle may negotiate a subset at create / initialize time.
    *
    * A driver carries **no `kind`**: dispatch is decided entirely by the
    * caller that registers it (`register(kind, driver)`) — the contract

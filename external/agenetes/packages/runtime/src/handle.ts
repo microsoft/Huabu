@@ -162,7 +162,8 @@ export interface AgentHandle<
 
   /**
    * Send a host→agent control operation. Resolves to a `ControlAck`;
-   * unsupported operations (not in `capabilities.control`) resolve to
+   * unsupported operations (not in
+   * `capabilities.supportedControlMessages`) resolve to
    * `{ ok: false, code: 'unsupported' }` rather than throwing. On a
    * long-lived Deployment this is usable out-of-turn (between runs); an
    * op that has no live session to act on resolves to a failure ack.

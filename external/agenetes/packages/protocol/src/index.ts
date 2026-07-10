@@ -128,6 +128,7 @@ export {
   setModelControlDataSchema,
   setConfigOptionControlDataSchema,
   answerPermissionControlDataSchema,
+  setContextControlDataSchema,
   controlAckSchema,
   agentCapabilitiesSchema,
 } from './control.js';

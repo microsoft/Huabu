@@ -145,7 +145,7 @@ export interface AcpTurnCtx {
 }
 
 /** The full control set an ACP Deployment honours. */
-const ACP_CONTROL_OPS: AgentCapabilities['control'] = [
+const ACP_CONTROL_OPS: AgentCapabilities['supportedControlMessages'] = [
   'cancel',
   'set_mode',
   'set_model',
@@ -159,7 +159,7 @@ const ACP_CONTROL_OPS: AgentCapabilities['control'] = [
  * ACP driver can advertise it before a handle instance exists.
  */
 export const ACP_CAPABILITIES: AgentCapabilities = {
-  control: ACP_CONTROL_OPS,
+  supportedControlMessages: ACP_CONTROL_OPS,
   loadSession: true,
   turnInput: 'blocking',
 };
@@ -440,7 +440,7 @@ export class AcpAgentHandle<TRequest = unknown> implements RuntimeAgentHandle<
   }
 
   async control(msg: ControlMsg): Promise<ControlAck> {
-    if (!this.capabilities.control.includes(msg.type)) {
+    if (!this.capabilities.supportedControlMessages.includes(msg.type)) {
       return {
         ok: false,
         error: `unsupported control operation: ${msg.type}`,
