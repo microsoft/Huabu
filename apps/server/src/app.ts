@@ -11,7 +11,6 @@ import { fastify, type FastifyBaseLogger } from 'fastify';
 import { getConnectionToken } from './connection-token.js';
 import { getDataDir } from './data-dir.js';
 import { setHostServerPort } from './host-port.js';
-import { MAX_UPLOAD_BYTES } from './upload-limits.js';
 import {
   acpAgentCliRoutes,
   acpAgentletRoutes,
