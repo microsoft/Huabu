@@ -15,7 +15,7 @@ import { SECRET_IDS } from '../../security/secret-ids.js';
 import {
   getPersistedSecret,
   getSecret,
-  setSecret,
+  setSecrets,
 } from '../../security/secret-store.js';
 
 import type {
@@ -43,12 +43,20 @@ export function getIntegrationsConfig(): IntegrationsConfig {
 export async function setIntegrationsConfig(
   update: IntegrationsConfigUpdate,
 ): Promise<IntegrationsConfig> {
+  // Collect all touched keys and write them in one batch. On the
+  // encrypted-file backend this is a single atomic file replacement; on the
+  // Electron bridge backend it currently degrades to a sequential per-key
+  // write, so a mid-batch failure there can still leave an earlier key
+  // committed (see ElectronSecretStore.setMany). Batching keeps the call site
+  // ready for full atomicity once the bridge gains a batch message.
+  const updates: Record<string, string | null> = {};
   if (typeof update.tavilyApiKey === 'string' && update.tavilyApiKey !== '') {
-    await setSecret(SECRET_IDS.tavilyApiKey, update.tavilyApiKey);
+    updates[SECRET_IDS.tavilyApiKey] = update.tavilyApiKey;
   }
   if (typeof update.rapidApiKey === 'string' && update.rapidApiKey !== '') {
-    await setSecret(SECRET_IDS.rapidApiKey, update.rapidApiKey);
+    updates[SECRET_IDS.rapidApiKey] = update.rapidApiKey;
   }
+  if (Object.keys(updates).length > 0) await setSecrets(updates);
   return getIntegrationsConfig();
 }
 

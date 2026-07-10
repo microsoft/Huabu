@@ -94,6 +94,25 @@ export async function setSecret(
   else await primaryStore.set(id, value);
 }
 
+/**
+ * Write several credentials in one operation. On the encrypted-file backend
+ * this is atomic (all-or-nothing); on the desktop bridge it degrades to a
+ * sequential apply. Prefer this over multiple {@link setSecret} calls when a
+ * single settings update touches more than one secret.
+ */
+export async function setSecrets(
+  updates: Record<string, string | null>,
+): Promise<void> {
+  assertInitialized();
+  if (!primaryStore) {
+    for (const [id, value] of Object.entries(updates)) {
+      await environmentStore.set(id, value);
+    }
+    return;
+  }
+  await primaryStore.setMany(updates);
+}
+
 export function getSecretStoreKind(): string {
   assertInitialized();
   return primaryStore?.kind ?? environmentStore.kind;

@@ -36,4 +36,10 @@ export class EnvironmentSecretStore implements SecretStore {
       'Credential storage is read-only. Set HUABU_SECRET_KEY to enable encrypted settings persistence.',
     );
   }
+
+  async setMany(_updates: Record<string, string | null>): Promise<void> {
+    throw new Error(
+      'Credential storage is read-only. Set HUABU_SECRET_KEY to enable encrypted settings persistence.',
+    );
+  }
 }

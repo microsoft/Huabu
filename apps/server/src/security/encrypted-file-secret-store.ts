@@ -162,7 +162,7 @@ export class EncryptedFileSecretStore implements SecretStore {
   /** Persist several values in one authenticated, atomic file replacement. */
   async setMany(
     updates: Record<string, string | null>,
-    overwrite: boolean,
+    overwrite = true,
   ): Promise<void> {
     const next = new Map(this.secrets);
     for (const [id, value] of Object.entries(updates)) {

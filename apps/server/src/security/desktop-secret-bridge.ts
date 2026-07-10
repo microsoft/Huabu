@@ -157,4 +157,12 @@ export class ElectronSecretStore implements SecretStore {
   async set(id: string, value: string | null): Promise<void> {
     await setDesktopSecret(id, value);
   }
+
+  async setMany(updates: Record<string, string | null>): Promise<void> {
+    // The Electron bridge writes one secret per round-trip, so this is a
+    // sequential best-effort apply rather than a single atomic replacement.
+    for (const [id, value] of Object.entries(updates)) {
+      await setDesktopSecret(id, value);
+    }
+  }
 }

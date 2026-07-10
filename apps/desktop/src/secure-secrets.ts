@@ -44,16 +44,24 @@ interface PlaintextMigration {
 
 const SECURE_SECRETS_FILENAME = 'secure-secrets.json';
 
+/**
+ * Read a JSON object from disk. A missing file is a legitimate empty state
+ * (returns null); a present-but-corrupt file is fatal (throws) so callers
+ * fail closed instead of silently treating destroyed data as "no data".
+ */
 function readJsonObject(path: string): Record<string, unknown> | null {
+  if (!existsSync(path)) return null;
+  const raw = readFileSync(path, 'utf-8');
+  let value: unknown;
   try {
-    if (!existsSync(path)) return null;
-    const value = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
-    return value && typeof value === 'object' && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : null;
+    value = JSON.parse(raw) as unknown;
   } catch {
-    return null;
+    throw new Error(`Cannot parse corrupted credential file: ${path}`);
   }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`Malformed credential file: ${path}`);
+  }
+  return value as Record<string, unknown>;
 }
 
 function writeJsonAtomic(path: string, value: unknown): void {
@@ -69,20 +77,31 @@ function writeJsonAtomic(path: string, value: unknown): void {
   renameSync(temporary, path);
 }
 
+/**
+ * Load the encrypted secret file. Absent = a fresh empty store; present but
+ * corrupt/unsupported = fatal, so we never mistake a damaged vault for an
+ * empty one and let a later write overwrite the user's real credentials.
+ */
 function readEncryptedFile(path: string): EncryptedSecretFile {
   const parsed = readJsonObject(path);
-  if (!parsed || parsed.version !== 1) return { version: 1, entries: {} };
+  if (!parsed) return { version: 1, entries: {} };
+  if (parsed.version !== 1) {
+    throw new Error(`Unsupported secure credential file version: ${path}`);
+  }
   const rawEntries = parsed.entries;
   if (
     !rawEntries ||
     typeof rawEntries !== 'object' ||
     Array.isArray(rawEntries)
   ) {
-    return { version: 1, entries: {} };
+    throw new Error(`Malformed secure credential entries: ${path}`);
   }
   const entries: Record<string, string> = {};
   for (const [key, value] of Object.entries(rawEntries)) {
-    if (typeof value === 'string') entries[key] = value;
+    if (typeof value !== 'string') {
+      throw new Error(`Malformed secure credential entry "${key}": ${path}`);
+    }
+    entries[key] = value;
   }
   return { version: 1, entries };
 }
@@ -134,8 +153,9 @@ function collectLlmMigration(dataDir: string): PlaintextMigration | null {
   ) {
     secrets[desktopLlmProviderApiKeySecretId(parsed.provider)] = parsed.apiKey;
     if (
-      typeof parsed.imageModel === 'string' ||
-      typeof parsed.imageQuality === 'string'
+      parsed.provider === 'azure-openai' &&
+      (typeof parsed.imageModel === 'string' ||
+        typeof parsed.imageQuality === 'string')
     ) {
       secrets[DESKTOP_SECRET_IDS.imageApiKey] = parsed.apiKey;
     }
@@ -223,6 +243,8 @@ function collectOAuthMigration(dataDir: string): PlaintextMigration | null {
 export class DesktopSecureSecretStore {
   private readonly path: string;
   private encrypted: EncryptedSecretFile;
+  /** True only once the on-disk vault has been read cleanly. */
+  private loaded = false;
 
   constructor(
     private readonly dataDir: string,
@@ -230,10 +252,26 @@ export class DesktopSecureSecretStore {
   ) {
     this.path = join(dataDir, SECURE_SECRETS_FILENAME);
     this.encrypted = readEncryptedFile(this.path);
+    this.loaded = true;
+  }
+
+  /**
+   * Defense in depth: never replace the on-disk vault unless we know we hold
+   * a clean, complete view of it. A fail-closed read already throws on
+   * corruption, but this guard also stops any future regression from
+   * overwriting real credentials with a partially-loaded snapshot.
+   */
+  private assertLoaded(): void {
+    if (!this.loaded) {
+      throw new Error(
+        'Refusing to write secure credentials before a clean load',
+      );
+    }
   }
 
   /** Encrypt legacy plaintext values first, verify them, then scrub source JSON. */
   migratePlaintextFiles(): void {
+    this.assertLoaded();
     const migrations = [
       collectLlmMigration(this.dataDir),
       collectIntegrationsMigration(this.dataDir),
@@ -282,6 +320,7 @@ export class DesktopSecureSecretStore {
   }
 
   set(key: string, value: string | null): void {
+    this.assertLoaded();
     const entries = { ...this.encrypted.entries };
     if (value === null) {
       delete entries[key];

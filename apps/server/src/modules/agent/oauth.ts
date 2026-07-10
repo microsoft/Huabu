@@ -13,7 +13,11 @@ import {
 } from '@earendil-works/pi-ai/oauth';
 
 import { SECRET_IDS } from '../../security/secret-ids.js';
-import { getSecret, setSecret } from '../../security/secret-store.js';
+import {
+  getPersistedSecret,
+  getSecret,
+  setSecret,
+} from '../../security/secret-store.js';
 import { getLogger } from '../../utils/logger.js';
 
 import type { OAuthCredentials } from '@earendil-works/pi-ai';
@@ -40,11 +44,11 @@ export async function saveCredentials(creds: OAuthCredentials): Promise<void> {
 }
 
 async function clearCredentials(): Promise<void> {
-  try {
-    await setSecret(SECRET_IDS.copilotOAuth, null);
-  } catch {
-    // Ignore
-  }
+  // Nothing persisted (e.g. env-only headless mode) → logout is a no-op
+  // success. Otherwise a deletion failure must surface so the client is
+  // never told "logged out" while a valid refresh token remains on disk.
+  if (getPersistedSecret(SECRET_IDS.copilotOAuth) === null) return;
+  await setSecret(SECRET_IDS.copilotOAuth, null);
 }
 
 // ==================== Device Code Flow ====================

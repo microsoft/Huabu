@@ -740,11 +740,16 @@ export async function setLLMConfig(
   // Build the merged entry. `apiKey` / `baseUrl` / `apiVersion` semantics:
   // omitted (undefined) → keep previous; empty string → clear.
   const entry: ProviderPersisted = { ...existingEntry, model: resolvedModel };
+  // The api key lives in the secret store while the rest lives in a plain
+  // config file — two subsystems that cannot be written atomically. Snapshot
+  // the previous key so a failed config write can be rolled back, keeping the
+  // two stores from diverging on a partial update.
+  let apiKeySecretId: string | null = null;
+  let previousApiKey: string | null = null;
   if (update.apiKey !== undefined) {
-    await setSecret(
-      llmProviderApiKeySecretId(update.provider),
-      update.apiKey || null,
-    );
+    apiKeySecretId = llmProviderApiKeySecretId(update.provider);
+    previousApiKey = getPersistedSecret(apiKeySecretId);
+    await setSecret(apiKeySecretId, update.apiKey || null);
     delete entry.apiKey;
   }
   if (update.baseUrl !== undefined) {
@@ -757,7 +762,38 @@ export async function setLLMConfig(
   }
   store.providers[update.provider] = entry;
   store.active = update.provider;
-  savePersistedStore(store);
+  try {
+    savePersistedStore(store);
+  } catch (error) {
+    if (apiKeySecretId !== null) {
+      try {
+        await setSecret(apiKeySecretId, previousApiKey);
+      } catch (rollbackError) {
+        // Both the config write AND the api-key rollback failed: the secret
+        // store and the plain config file are now inconsistent (the new key
+        // may be persisted while provider/model stayed at their old values).
+        // Log loudly and tell the caller this was a partial commit rather
+        // than swallowing the rollback failure.
+        log.error(
+          { err: error, rollbackError, provider: update.provider },
+          'LLM config write failed and api-key rollback also failed; ' +
+            'secret store and config file are now inconsistent',
+        );
+        const configMessage =
+          error instanceof Error ? error.message : String(error);
+        const rollbackMessage =
+          rollbackError instanceof Error
+            ? rollbackError.message
+            : String(rollbackError);
+        throw new Error(
+          `LLM settings partially committed: config write failed (${configMessage}) ` +
+            `and api-key rollback failed (${rollbackMessage}); the new key may be ` +
+            'persisted while provider/model remain at their previous values',
+        );
+      }
+    }
+    throw error;
+  }
 
   const persisted = buildPersistedConfig(store, update.provider) ?? {
     provider: update.provider,

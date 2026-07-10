@@ -1,7 +1,11 @@
+import { randomBytes } from 'node:crypto';
 import {
   chmodSync,
+  closeSync,
   existsSync,
+  fsyncSync,
   mkdirSync,
+  openSync,
   readFileSync,
   renameSync,
   writeFileSync,
@@ -32,8 +36,14 @@ function readJsonObject(path: string): Record<string, unknown> | null {
 function writeJsonAtomic(path: string, value: unknown): void {
   const dir = dirname(path);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  const temporary = `${path}.${process.pid}.tmp`;
-  writeFileSync(temporary, JSON.stringify(value, null, 2), 'utf-8');
+  const temporary = `${path}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
+  const fd = openSync(temporary, 'wx', 0o600);
+  try {
+    writeFileSync(fd, JSON.stringify(value, null, 2), 'utf-8');
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
   try {
     chmodSync(temporary, 0o600);
   } catch {

@@ -122,4 +122,49 @@ describe('DesktopSecureSecretStore', () => {
       'keep-me',
     );
   });
+
+  it('refuses to load a corrupt vault instead of treating it as empty', () => {
+    const dataDir = createDataDir();
+    const vaultPath = join(dataDir, 'secure-secrets.json');
+    writeFileSync(vaultPath, '{ this is not valid json');
+    const before = readFileSync(vaultPath, 'utf-8');
+
+    expect(() => new DesktopSecureSecretStore(dataDir, codec)).toThrow(
+      /corrupted credential file/i,
+    );
+    // A failed load must never overwrite the damaged file.
+    expect(readFileSync(vaultPath, 'utf-8')).toBe(before);
+  });
+
+  it('refuses a vault with an unsupported version', () => {
+    const dataDir = createDataDir();
+    writeFileSync(
+      join(dataDir, 'secure-secrets.json'),
+      JSON.stringify({ version: 2, entries: {} }),
+    );
+
+    expect(() => new DesktopSecureSecretStore(dataDir, codec)).toThrow(
+      /unsupported secure credential file version/i,
+    );
+  });
+
+  it('fails closed on a corrupt legacy config instead of skipping migration', () => {
+    const dataDir = createDataDir();
+    const configPath = join(dataDir, 'llm-config.json');
+    writeFileSync(configPath, '{ broken');
+    const store = new DesktopSecureSecretStore(dataDir, codec);
+
+    expect(() => store.migratePlaintextFiles()).toThrow(
+      /corrupted credential file/i,
+    );
+    // The corrupt plaintext must be left untouched, not silently dropped.
+    expect(readFileSync(configPath, 'utf-8')).toBe('{ broken');
+  });
+
+  // Deferred: desktop multi-key writes go through ElectronSecretStore.setMany,
+  // which currently loops one IPC round-trip per key (not atomic). A real
+  // atomic batch needs a `secret:mutateMany` bridge message routed to
+  // DesktopSecureSecretStore.setMany.
+  // See docs/proposals/credential-storage-hardening-followups.md (item 1).
+  it.todo('applies a multi-key batch write atomically via a batch IPC message');
 });

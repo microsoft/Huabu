@@ -9,4 +9,10 @@ export interface SecretStore {
   get(id: string): string | null;
   /** Persist or delete a value. Null means delete. */
   set(id: string, value: string | null): Promise<void>;
+  /**
+   * Persist or delete several values in one shot. Backends that can do so
+   * apply the batch atomically (all-or-nothing); others fall back to a
+   * best-effort sequential apply. Null values delete.
+   */
+  setMany(updates: Record<string, string | null>): Promise<void>;
 }
