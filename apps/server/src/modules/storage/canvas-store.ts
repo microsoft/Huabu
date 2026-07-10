@@ -1234,7 +1234,7 @@ export class CanvasStore {
       this.invalidateNodeIndex();
       return false;
     }
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     unregisterCanvasDir(this.canvasId);
     this.invalidateNodeIndex();
     return true;

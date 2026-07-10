@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import chokidar, { type FSWatcher } from 'chokidar';
 
+import { getLogger } from '../../utils/logger.js';
 import {
   listCanvasDirEntries,
   refreshCanvasDirIndex,
@@ -137,7 +138,15 @@ export async function resetExternalNoteWatcher(): Promise<void> {
   });
   watcher
     .on('add', (abs: string) => void handleAdd(abs))
-    .on('unlink', (abs: string) => handleUnlink(abs));
+    .on('unlink', (abs: string) => handleUnlink(abs))
+    // Swallow watcher errors. When a canvas directory is deleted while
+    // chokidar is mid-scan (common on virtual/network filesystems such as
+    // Google Drive), readdirp can emit a transient EINVAL/ENOENT `lstat`
+    // error. Without this handler the FSWatcher re-emits it as an unhandled
+    // 'error' event, which crashes the whole server process. Log and ignore.
+    .on('error', (err: unknown) => {
+      getLogger().warn({ err }, 'external note watcher error (ignored)');
+    });
 }
 
 export function snapshotExternalNotes(canvasId: string): ExternalNoteItem[] {
