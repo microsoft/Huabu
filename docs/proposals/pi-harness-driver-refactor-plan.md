@@ -2,7 +2,7 @@
 
 > Turn the current Huabu built-in pi-agent-core path from a per-turn replay workaround into a conversation-native Agenetes standard driver.
 >
-> Status: **Draft** · Last updated 2026-07-10
+> Status: **In-Progress** · Last updated 2026-07-11
 
 ---
 
@@ -10,11 +10,11 @@
 
 Agenetes now has a clearer positioning: it is an aggregating control plane for agents across environments, not a full agent-hosting platform, and its driver model is defined by binding schema, runtime protocol, and transport.
 
-The current Huabu built-in agent path predates that model and still runs multi-turn chat as a threaded Job workaround: every turn rebuilds a fresh `@earendil-works/pi-agent-core` `Agent`, reconstructs the prior pi message array from durable history, appends the current request, streams the answer, and lets Agenetes fold the emitted events back into history.
+The original Huabu built-in agent path predates that model and ran multi-turn chat as a threaded Job workaround: every turn rebuilt a fresh `@earendil-works/pi-agent-core` `Agent`, reconstructed the prior pi message array from durable history, appended the current request, streamed the answer, and let Agenetes fold the emitted events back into history.
 
-That shape was useful during the rush to unify built-in and external agents behind Agenetes, but it is not the target architecture. Interactive multi-turn conversations should be conversation-native Deployments: one durable `threadId` owns one long-lived runtime handle, normal turns continue the live harness state, and durable history is used for UI rendering and tail reconnect rather than for routine per-turn context reconstruction.
+That shape was useful during the rush to unify built-in and external agents behind Agenetes, but it was never the target architecture. Interactive multi-turn conversations should be conversation-native Deployments: one durable `threadId` owns one long-lived runtime handle, normal turns continue the live harness state, and durable history is used for UI rendering and tail reconnect rather than for routine per-turn context reconstruction.
 
-This proposal designs a standard pi harness driver and the Huabu-side refactor that migrates built-in agents onto it.
+This proposal originally scoped the standard pi harness driver and the Huabu-side refactor that migrates built-in agents onto it. Most of that cutover has now shipped; the remaining work is concentrated around removing the last host-owned recovery fallback.
 
 ## 2. Goals
 
@@ -37,15 +37,16 @@ This proposal does not require the first milestone to support remote pi harness 
 
 | File/dir | Current responsibility |
 | --- | --- |
-| [apps/server/src/modules/agent/agent.route.ts](../../apps/server/src/modules/agent/agent.route.ts) | Chat route dispatches built-in vs ACP and rebuilds built-in context from prior turns before each run. |
-| [apps/server/src/modules/agent/agent.service.ts](../../apps/server/src/modules/agent/agent.service.ts) | Composition shell that bakes prompt, messages, scope, canvas metadata, and runtime knobs into the current built-in workload spec. |
-| [apps/server/src/modules/agent/agenetes/drivers.ts](../../apps/server/src/modules/agent/agenetes/drivers.ts) | Host-owned `builtinDriverFactory` closes over `getLLMModel`, `ensureApiKey`, `buildToolsForScope`, and `getSessionReadSet`, then constructs a fresh pi `Agent` per invocation. |
-| [apps/server/src/modules/agent/agenetes/builtin-handle.ts](../../apps/server/src/modules/agent/agenetes/builtin-handle.ts) | Translates pi-agent-core events into Agenetes stream events and extracts the native pi message delta returned by the run. |
+| [apps/server/src/modules/agent/agent.route.ts](../../apps/server/src/modules/agent/agent.route.ts) | Chat route dispatches built-in vs ACP, reuses a live built-in Deployment handle when present, and still keeps a host-side cold-start recovery fallback that rebuilds built-in context from prior turns. |
+| [apps/server/src/modules/agent/agent.service.ts](../../apps/server/src/modules/agent/agent.service.ts) | Composition shell that compiles the built-in request into a serializable pi workload spec, drives `runAgent`, and pushes `set_context` before Deployment turns. |
+| [apps/server/src/modules/agent/agenetes/drivers.ts](../../apps/server/src/modules/agent/agenetes/drivers.ts) | Host-owned registration layer that mounts the standard ACP and pi drivers and binds Huabu contract kinds to them. |
+| [apps/server/src/modules/agent/agenetes/pi-driver.ts](../../apps/server/src/modules/agent/agenetes/pi-driver.ts) | Huabu adapter that wires host model, credential, and tool ports into the standard pi driver and compiles built-in profiles into `PiWorkloadSpec`. |
+| [external/agenetes/packages/pi-driver](../../external/agenetes/packages/pi-driver) | Standard in-process pi-agent-core driver package used by both Job and Deployment lifecycles. |
 | [apps/server/src/prompt/agents](../../apps/server/src/prompt/agents) | Huabu-owned agent profile content: frontmatter, system prompts, tools, skill scope, and runtime defaults. |
 | [apps/server/src/modules/agent/tools](../../apps/server/src/modules/agent/tools) | Huabu-owned tool definitions and executable tool bindings. |
 | [apps/server/src/modules/agent/llm.ts](../../apps/server/src/modules/agent/llm.ts) | Huabu-owned provider/account/OAuth settings and pi-ai model construction. |
 
-The key split is already visible: `builtin-handle.ts` is close to reusable pi harness driver code, while `drivers.ts` currently mixes driver construction with Huabu provider, tool, and context concerns.
+The key split is now explicit: the reusable pi harness runtime lives in the standard subtree driver package, while Huabu-specific provider, tool, request, and recovery concerns remain in the host adapter/composition layer.
 
 ## 5. Target architecture
 
@@ -302,33 +303,43 @@ A handle that supports live context refresh includes `set_context` in its `suppo
 
 ## 13. Huabu refactor plan
 
-### M1. Extract pi handle code
+| Milestone | Status | Current state |
+| --- | --- | --- |
+| M1. Extract pi handle code | **Completed** | The reusable pi-agent-core execution layer now lives in [`external/agenetes/packages/pi-driver`](../../external/agenetes/packages/pi-driver), and the last host-owned legacy `builtin-handle.ts` file has been removed. |
+| M2. Introduce pi driver ports | **Completed** | Huabu now registers model, credential, tool, and request-render integration through [`agenetes/pi-driver.ts`](../../apps/server/src/modules/agent/agenetes/pi-driver.ts). |
+| M3. Compile Huabu profiles into pi workload specs | **Completed** | Built-in agent composition now emits serializable `PiWorkloadSpec` data instead of constructing a fresh pi `Agent` directly in the host route. |
+| M4. Make interactive built-in threads Deployments | **In Progress** | The main built-in chat path now runs as a live Deployment and uses `set_context`, but cold-start / restart still falls back to host-side recovery replay. |
+| M5. Remove legacy per-turn replay dependencies | **In Progress** | Routine per-turn replay is gone from the live path, but the route still contains a host-owned cold-start recovery fallback. Issue [#295](https://github.com/hai-team/Sediment/issues/295) tracks moving that recovery into Agenetes-managed rehydration. |
+| M6. Keep pipeline jobs explicit | **Completed** | Interactive built-in chat uses `workloadType: "Deployment"` while non-conversational callers can remain explicit `Job`s. |
+| M7. Fold shipped design into architecture docs | **In Progress** | [`docs/architecture/agent-architecture.md`](../architecture/agent-architecture.md) already reflects the Deployment cutover, but this proposal remains in flight until the remaining recovery boundary work is settled. |
 
-Move the reusable parts of [builtin-handle.ts](../../apps/server/src/modules/agent/agenetes/builtin-handle.ts) into a new standard driver package. Keep only Huabu-specific event extensions or UI assumptions in Huabu if any remain.
+### M1. Extract pi handle code — Completed
 
-### M2. Introduce pi driver ports
+The reusable pi handle logic has been extracted into [`external/agenetes/packages/pi-driver`](../../external/agenetes/packages/pi-driver). The former host-owned `builtin-handle.ts` execution path has now been deleted, leaving only the Huabu adapter and composition layers in the host.
 
-Register ports in the mounted Agenetes instance: model resolution delegates to [llm.ts](../../apps/server/src/modules/agent/llm.ts), tool resolution delegates to [tools/index.ts](../../apps/server/src/modules/agent/tools/index.ts), and request rendering delegates to the existing conversation renderer.
+### M2. Introduce pi driver ports — Completed
 
-### M3. Compile Huabu profiles into pi workload specs
+Huabu now registers pi-driver ports at mount time: model resolution delegates to [llm.ts](../../apps/server/src/modules/agent/llm.ts), tool resolution delegates to [tools/index.ts](../../apps/server/src/modules/agent/tools/index.ts), and request rendering continues to use the existing conversation renderer through the host composition layer.
 
-Change the built-in chat composition layer so AGENT.md loading produces a serializable pi `recipe` plus opaque `hostContext`, instead of directly constructing a pi `Agent`.
+### M3. Compile Huabu profiles into pi workload specs — Completed
 
-### M4. Make interactive built-in threads Deployments
+The built-in chat composition layer now compiles AGENT.md-derived settings into a serializable pi `recipe` plus opaque `hostContext`, instead of directly constructing a pi `Agent`.
 
-Change the chat path so the first turn creates a Deployment handle and later turns use `get(threadId)` or `create(spec)` get-or-create semantics. Remove routine `rebuildContextMessages(priorTurns)` from the normal path. Wire a write-dirty flag on the built-in `write` tool's memory/skill paths so a changed system prompt is pushed to the live handle via a `set_context` control message before the next turn (§9.2, §12.2).
+### M4. Make interactive built-in threads Deployments — In Progress
 
-### M5. Remove legacy per-turn replay dependencies
+The chat path already creates or reuses a Deployment handle per `threadId`, and the live path no longer rebuilds history on every turn. The remaining gap is that cold-start / restart still uses the host-side replay fallback, and `set_context` is currently pushed unconditionally before Deployment turns rather than through a narrower dirty-triggered path.
 
-Delete or isolate the legacy route-level context rebuild path so normal built-in chat turns cannot silently fall back to fresh-Agent replay. Any restart recovery gap should be tracked explicitly as driver-agnostic Agenetes backlog, not solved inside the pi driver.
+### M5. Remove legacy per-turn replay dependencies — In Progress
 
-### M6. Keep pipeline jobs explicit
+Routine replay has already been removed from the normal live Deployment path, but the route still owns the cold-start recovery fallback via `priorTurns -> resumeThreadContext(...)`. The remaining task is to remove that host-side replay path and replace it with Agenetes-managed recovery, tracked separately in issue [#295](https://github.com/hai-team/Sediment/issues/295).
 
-Keep pipeline and one-shot callers on `workloadType: "Job"` unless they need a long-lived conversation. This prevents the interactive chat migration from forcing every pi harness use case into Deployment lifecycle.
+### M6. Keep pipeline jobs explicit — Completed
 
-### M7. Fold shipped design into architecture docs
+The migration keeps pipeline and one-shot callers on `workloadType: "Job"` unless they need a long-lived conversation. The built-in main chat path is now the explicit Deployment consumer.
 
-After the migration ships, update [docs/architecture/agent-architecture.md](../architecture/agent-architecture.md) and any Agenetes architecture docs that describe driver lifecycle. Move or archive this proposal when it is no longer in flight.
+### M7. Fold shipped design into architecture docs — In Progress
+
+The architecture docs have already been updated to describe the shipped Deployment cutover. This proposal should be archived only after the remaining recovery/replay follow-up is designed and the host-side fallback is gone.
 
 ## 14. Agenetes invariant updates
 
