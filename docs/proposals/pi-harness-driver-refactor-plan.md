@@ -159,15 +159,18 @@ type PiWorkloadSpec = {
       tools?: PiToolRef[];
       runtime?: {
         maxIterations?: number;
-        toolExecution?: "parallel" | "serial";
+        toolExecution?: "parallel" | "sequential";
       };
     };
+    initialMessages?: Message[];
     hostContext?: JsonObject;
   };
 };
 ```
 
 `hostContext` is intentionally opaque to the standard driver. Huabu can place a canvas id, origin stamp, profile id, or other routing facts there, and the driver only passes it back to registered ports.
+
+`initialMessages` is the create-time transcript seed. It is not part of the reusable profile recipe; it is the serializable state input that lets the host do a Job-first cutover without changing its current history assembly model. A live Deployment usually seeds this once, then mutates `agent.state.messages` in memory across turns.
 
 The first milestone should keep `PiModelRef` **symbolic and host-managed**, not a serialized pi-ai `Model<Api>` and not a provider/model/baseUrl tuple. The concrete pi-ai `Model<Api>` is a runtime object with many transport- and provider-specific fields (`api`, `baseUrl`, `headers`, `compat`, cost metadata, etc.), while today's Huabu built-in path does not let AGENT profiles choose a provider/model at all — it simply uses the host's current active LLM config (`getLLMModel()` / `ensureApiKey()`). So the minimal durable contract is an opaque host selector that registered ports resolve into the live pi-ai model and credential policy.
 

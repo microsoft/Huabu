@@ -13,23 +13,25 @@
  *    themselves and pull the relevant `tool_result` payload.
  */
 
-import { type BuiltinRendered } from './agenetes/builtin-handle.js';
 import {
   agenetes,
   INTERNAL_DRIVER_KIND,
   type BuiltinHandle,
   type BuiltinWorkloadSpec,
 } from './agenetes/drivers.js';
+import { buildHuabuPiWorkloadSpec } from './agenetes/pi-driver.js';
 import { type RenderFn, wrapChatRequest } from './agenetes/handle.js';
 import { canvasAcpNamespace } from '../storage/paths.js';
 import { renderEnvelopeMessages } from './conversation/prompt/build-prompt.js';
 import { dumpAssembledPrompt } from './conversation/prompt/debug-prompt.js';
 import { type ToolScope } from './tools/index.js';
+import { loadAgent, type AgentId } from '../../prompt/index.js';
 
 import type { ChatEnvelope } from './conversation/envelope.js';
 import type { Context, Message } from '@earendil-works/pi-ai';
 import type { AgentStreamEvent, NodeOrigin } from '@sediment/shared';
 import type { FastifyBaseLogger } from 'fastify';
+import type { WorkloadType } from '@agenetes/protocol';
 
 /**
  * SSE events yielded by `runAgent`.
@@ -110,6 +112,13 @@ export interface AgentRunOptions {
   maxIterations?: number;
   /** Abort signal for cancellation */
   signal?: AbortSignal;
+  /**
+   * Lifecycle axis for the underlying driver.
+   *
+   * Main chat can now use a long-lived Deployment handle; envelope-less
+   * internal callers (memory/sketch/reachback) stay Job-shaped.
+   */
+  workloadType?: WorkloadType;
   /** Structured logger for request-scoped diagnostics */
   logger?: AgentLogger;
   /**
@@ -134,14 +143,13 @@ export interface AgentRunOptions {
  *
  * This is now a thin COMPOSITION shell over the mounted Agenetes instance:
  * it owns the multi-turn assembly (baking the prior transcript into the
- * Job spec's `messages`) and the per-turn render / prompt-debug closures,
- * then hands a serializable {@link BuiltinWorkloadSpec} to
- * `agenetes.create(spec)` and drives one `run(...)`. The pi-SDK
- * construction + host singletons (`getLLMModel` / `ensureApiKey` /
- * `buildToolsForScope` / `getSessionReadSet`) live inside the built-in
- * driver factory (`agenetes/drivers.ts`), reached through the instance —
- * L1 no longer holds a driver handle of its own. Behaviour is identical to
- * the pre-instance path; only the dispatch seam moved.
+ * Job spec's `initialMessages`) and the per-turn render / prompt-debug
+ * closures, then hands a serializable {@link BuiltinWorkloadSpec} to
+ * `agenetes.create(spec)` and drives one `run(...)`. The execution logic
+ * now lives inside the standard `@agenetes/pi-driver`; this module keeps
+ * only the Huabu adapter layer (profile -> tool refs/runtime + opaque host
+ * context) and patches the standard tool-call stream back into the host's
+ * `internalToolName` extension for existing UI consumers.
  *
  * `context.messages` is treated as read-only input; this run's output
  * delta leaves solely via the generator's return value.
@@ -158,6 +166,7 @@ export async function* runAgent(
     origin,
     maxIterations,
     signal,
+    workloadType = 'Job',
     logger,
     debugPrompt,
   } = options;
@@ -167,7 +176,7 @@ export async function* runAgent(
   // sketch / reachback) has already assembled `context.messages`, so it
   // submits a NULL request and the handle resumes via `agent.continue()` —
   // `render` is never invoked in that case.
-  const render: RenderFn<BuiltinRendered> = async (request) =>
+  const render: RenderFn<Message[]> = async (request) =>
     (
       await renderEnvelopeMessages(request.content, {
         canvasId: canvasId ?? null,
@@ -193,9 +202,13 @@ export async function* runAgent(
       }
     : undefined;
 
-  // Bake this turn's built-in WorkloadSpec (I9.6) — a serializable Job. L1
-  // owns the multi-turn assembly: the prior transcript rides `messages`,
-  // and the driver factory builds a fresh backing `Agent` from the spec.
+  const agentCfg = loadAgent(scope as AgentId);
+
+  // Bake this turn's built-in WorkloadSpec (I9.6) — now a Job-shaped
+  // `PiWorkloadSpec`. L1 still owns the multi-turn assembly: the prior
+  // transcript rides `initialMessages`, and the Huabu adapter compiles the
+  // loaded profile into tool refs + runtime knobs while the standard
+  // pi-driver owns the actual harness execution.
   //
   // Envelope-less / stateless callers (memory / sketch / reachback) have no
   // conversation thread. `threadId: ''` keeps the instance record key inert
@@ -203,33 +216,59 @@ export async function* runAgent(
   // writes unattributed (every downstream consumer truthy-guards the thread
   // id), reproducing the pre-instance behaviour where these callers omitted
   // `threadId` entirely.
-  const spec: BuiltinWorkloadSpec = {
+  const spec: BuiltinWorkloadSpec = buildHuabuPiWorkloadSpec({
     kind: INTERNAL_DRIVER_KIND,
-    workloadType: 'Job',
+    workloadType,
     threadId: threadId ?? '',
     namespace: canvasAcpNamespace(canvasId ?? ''),
     systemPrompt: context.systemPrompt,
-    scope,
+    toolNames: agentCfg.toolNames,
+    initialMessages: context.messages,
+    maxIterations: maxIterations ?? agentCfg.runtime.maxIterations,
+    toolExecution: agentCfg.runtime.toolExecution,
     canvasId,
     origin,
-    messages: context.messages,
-    maxIterations,
-  };
+  });
 
-  // `spec.kind` is `internal`, so the instance's union handle narrows to a
-  // `BuiltinHandle`. A Job is minted fresh each turn (never cached), so
-  // this always yields a new handle. `null` request when there is no
-  // envelope → the handle resumes the pre-loaded transcript
-  // (`agent.continue()`).
+  // `spec.kind` is `internal`, so the instance's union handle narrows to
+  // the built-in pi-backed handle. For `Deployment`, `create(spec)` is
+  // get-or-create by `threadId`; for `Job`, it mints a fresh handle.
   const handle = agenetes.create(spec) as BuiltinHandle;
-  return yield* handle.run(
-    envelope ? wrapChatRequest(envelope) : null,
-    render,
-    {
-      maxIterations,
-      signal,
-      logger,
-      onRendered,
-    },
-  );
+  if (workloadType === 'Deployment' && context.systemPrompt !== undefined) {
+    const ack = await handle.control({
+      type: 'set_context',
+      data: { systemPrompt: context.systemPrompt },
+    });
+    if (!ack.ok) {
+      throw new Error(
+        `[runAgent] Failed to push Deployment system prompt via set_context: ${ack.error}`,
+      );
+    }
+  }
+  const iterator = handle.run(envelope ? wrapChatRequest(envelope) : null, render, {
+    maxIterations: maxIterations ?? agentCfg.runtime.maxIterations,
+    signal,
+    logger,
+    onRendered,
+  });
+
+  while (true) {
+    const next = await iterator.next();
+    if (next.done) return next.value;
+    const event = next.value;
+    if (event.type === 'tool_call') {
+      yield {
+        ...event,
+        data: {
+          ...event.data,
+          internalToolName:
+            event.data.title && event.data.title.length > 0
+              ? event.data.title
+              : undefined,
+        },
+      };
+      continue;
+    }
+    yield event;
+  }
 }

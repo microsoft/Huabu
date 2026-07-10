@@ -7,11 +7,10 @@
  * `@agenetes/acp-driver` and self-resolves its own session per turn, so it
  * is registered into the mounted instance through the I9.5
  * driver-factory-dictionary builder ({@link mountAgenetes}). The built-in
- * pi-agent-core driver is deliberately canvas-coupled — its `create`
- * needs a per-turn, history-built `Agent`, so it cannot be constructed
- * from a serializable spec alone — and therefore stays a host-owned Job
- * driver, invoked directly (never through the instance). See
- * docs/proposals/layered-architecture.md §3.6 / §7 (M5).
+ * path is now in transition: L1 still owns the Huabu-specific adapter
+ * (model/account/tool ports + spec compilation), but the execution logic
+ * itself is delegated to the standard `@agenetes/pi-driver`. See
+ * docs/proposals/pi-harness-driver-refactor-plan.md.
  */
 
 import {
@@ -21,33 +20,28 @@ import {
   type PreparedAcpPrompt,
 } from '@agenetes/acp-driver';
 import {
+  piDriverFactory,
+  type PiRenderedInput,
+  type PiTurnCtx,
+  type PiWorkloadSpec,
+} from '@agenetes/pi-driver';
+import {
   mountAgenetes,
   FileThreadStore,
   FileEventLogStore,
   FileTurnStore,
 } from '@agenetes/agenetes';
-import { Agent } from '@earendil-works/pi-agent-core';
 
-import { ensureApiKey, getLLMModel } from '../llm.js';
-import { getSessionReadSet } from '../session-read-set.js';
-import {
-  BUILTIN_CAPABILITIES,
-  BuiltinAgentHandle,
-  type BuiltinTurnCtx,
-  type BuiltinRendered,
-} from './builtin-handle.js';
 import {
   type AgentDriver,
   type AgentHandle,
   type AgentRequest,
   type InStreamEvent,
 } from './handle.js';
-import { buildToolsForScope, type ToolScope } from '../tools/index.js';
+import { huabuPiDriverPorts } from './pi-driver.js';
 
 import type { Agenetes } from '@agenetes/agenetes';
-import type { Namespace, WorkloadType } from '@agenetes/protocol';
-import type { Message } from '@earendil-works/pi-ai';
-import type { NodeOrigin } from '@sediment/shared';
+import type { WorkloadType } from '@agenetes/protocol';
 
 /**
  * The built-in driver's factory-dictionary name (its *implementation*
@@ -97,8 +91,8 @@ export type AcpWorkloadSpec = AcpCreateSpec & {
 /** The concrete long-lived ACP (Deployment) handle type. */
 export type AcpHandle = AgentHandle<PreparedAcpPrompt, AcpTurnCtx>;
 
-/** The concrete built-in (Job) handle type. */
-export type BuiltinHandle = AgentHandle<BuiltinRendered, BuiltinTurnCtx>;
+/** The concrete built-in (Job-first) handle type. */
+export type BuiltinHandle = AgentHandle<PiRenderedInput, PiTurnCtx>;
 
 /** The union `WorkloadSpec` the mounted instance dispatches on `kind`. */
 export type AgenetesWorkloadSpec = AcpWorkloadSpec | BuiltinWorkloadSpec;
@@ -106,96 +100,26 @@ export type AgenetesWorkloadSpec = AcpWorkloadSpec | BuiltinWorkloadSpec;
 /** The union handle the mounted instance's `create` / `get` return. */
 export type AgenetesHandle = AcpHandle | BuiltinHandle;
 
-/**
- * The serializable built-in `WorkloadSpec` (I8.5 / I9.6) — a Job. It is a
- * pure-data projection the built-in factory constructs a fresh backing
- * `Agent` from each turn: NO live `Agent` / no live `Map` rides it (the
- * one live value the old `create({ agent })` path carried — the tool
- * `readSet` — is resolved *inside* the factory closure via
- * {@link getSessionReadSet}, never on the seam).
- *
- * A Job is minted fresh every turn, so the spec is the honest, complete
- * description of that turn's unit of work: the prior transcript rides
- * `messages` (baked at create-time by L1's multi-turn assembly, I9.3),
- * not `request`.
- */
-export interface BuiltinWorkloadSpec {
-  /** The driver route (I5) — the built-in's contract kind (`internal`). */
-  readonly kind: string;
-  /** The lifecycle axis (I3.2) — always `'Job'` for the built-in. */
-  readonly workloadType: WorkloadType;
-  /** Conversation thread identity (I4.2). */
-  readonly threadId: string;
-  /** The namespace the durable record is persisted under (I4.1). */
-  readonly namespace: Namespace;
-  /** System prompt for this turn's backing agent. */
-  readonly systemPrompt?: string;
-  /** Tool surface + scope-specific wiring (`buildToolsForScope`). */
-  readonly scope: ToolScope;
-  /** Current canvas id, implicit context for canvas-aware tools. */
-  readonly canvasId?: string;
-  /** `NodeOrigin` stamp forwarded to `canvas_commands`. */
-  readonly origin?: NodeOrigin;
-  /** Prior transcript the agent runs over (baked by L1, read-only input). */
-  readonly messages: Message[];
-  /** Soft cap on agent turns (LLM call + tool batch). */
-  readonly maxIterations?: number;
-}
+/** The serializable built-in WorkloadSpec — now the standard pi-driver spec. */
+export type BuiltinWorkloadSpec = PiWorkloadSpec;
 
 /**
- * The I9.5 driver factory for the in-process built-in ("internal") driver
- * — a Job (cancel-only control). Unlike the ACP factory (which ships in a
- * cross-package subtree and takes its transport via `factoryArgs`), this
- * is an **L1 artifact**: it lives in `apps/server`, so it closes over the
- * host singletons directly (`getLLMModel` / `ensureApiKey` /
- * `buildToolsForScope` / `getSessionReadSet`) and needs no `factoryArgs`.
- * `create(spec)` builds a fresh backing `Agent` over the baked transcript
- * and wraps it in a {@link BuiltinAgentHandle}.
+ * The L1 wrapper factory for the built-in ("internal") driver.
+ *
+ * The execution logic now lives in the standard `@agenetes/pi-driver`;
+ * this host-side wrapper only injects the Huabu-specific ports once and
+ * exposes the result under the existing internal contract kind.
  */
 export const builtinDriverFactory = (
   _config?: void,
 ): AgentDriver<
   BuiltinWorkloadSpec,
   AgentRequest,
-  BuiltinRendered,
-  Message[],
+  PiRenderedInput,
+  PiRenderedInput,
   InStreamEvent,
-  BuiltinTurnCtx
-> => ({
-  // No `kind`: dispatch is external (M5.09) — the mount
-  // `.register(INTERNAL_DRIVER_KIND, BUILTIN_FACTORY_NAME)` fixes it.
-  capabilities: BUILTIN_CAPABILITIES,
-  create(spec: BuiltinWorkloadSpec): BuiltinAgentHandle {
-    const tools = buildToolsForScope(spec.scope, {
-      canvasId: spec.canvasId,
-      origin: spec.origin,
-      threadId: spec.threadId,
-      // Session-scoped read-set (per conversation thread), resolved INSIDE
-      // this L1 closure — a live Map that never crosses the L1↔L2 seam.
-      readSet: getSessionReadSet(spec.threadId),
-    });
-    ensureApiKey();
-    const agent = new Agent({
-      initialState: {
-        systemPrompt: spec.systemPrompt,
-        model: getLLMModel(),
-        tools,
-        // Prior transcript baked by L1; this turn's rendered rows are
-        // appended by the handle's `run` (`agent.prompt`), leaving these
-        // read-only input whose output travels out via the run's return.
-        messages: spec.messages,
-      },
-      convertToLlm: (msgs) => msgs as Message[],
-      // Invoked before every LLM call (incl. across long tool batches) so
-      // short-lived OAuth bearers can refresh — reuse the host resolver.
-      getApiKey: () => ensureApiKey(),
-      // Independent tool calls in a batch run concurrently; a batch with a
-      // canvas write falls back to serial via the tool's `executionMode`.
-      toolExecution: 'parallel',
-    });
-    return new BuiltinAgentHandle(agent);
-  },
-});
+  PiTurnCtx
+> => piDriverFactory<AgentRequest>({ ports: huabuPiDriverPorts });
 
 /**
  * The mounted Agenetes instance (I9) — the single L2 object L1 faces. It

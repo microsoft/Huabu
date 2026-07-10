@@ -79,6 +79,7 @@ vi.mock('./llm.js', () => ({
 
 vi.mock('./tools/index.js', () => ({
   buildToolsForScope: () => [],
+  buildAgentToolsByNames: () => [],
 }));
 
 // Deterministic per-turn render: one user message, no canvas / I/O.

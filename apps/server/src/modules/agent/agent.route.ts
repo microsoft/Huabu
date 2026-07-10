@@ -70,13 +70,11 @@ function writeSSE(
  * Takes `priorTurns` (already loaded by the caller for the debug turn
  * count) to avoid a second history read.
  */
-async function resumeThreadContext(params: {
-  priorTurns: readonly AgentTurn[];
+function buildAgentSystemPrompt(params: {
   canvasId: string | undefined;
   mode: Parameters<typeof loadAgent>[0];
-}): Promise<Context> {
-  const { priorTurns, canvasId, mode } = params;
-
+}): string {
+  const { canvasId, mode } = params;
   // We re-render the agent's system prompt on every turn so the
   // `{{skillCatalogue}}` placeholder reflects freshly written user
   // skills. `canvasId` flows into `loadAgent({ canvasId })` for
@@ -88,9 +86,19 @@ async function resumeThreadContext(params: {
   // tagged block — grounding every turn and staying cache-friendly —
   // rather than as a one-shot first-turn user message.
   const workspaceMemory = readWorkspaceMemory();
-  const systemPrompt = workspaceMemory
+  return workspaceMemory
     ? `${agentCfg.systemPrompt}\n\n<workspace_memory>\n${workspaceMemory}\n</workspace_memory>`
     : agentCfg.systemPrompt;
+}
+
+async function resumeThreadContext(params: {
+  priorTurns: readonly AgentTurn[];
+  canvasId: string | undefined;
+  mode: Parameters<typeof loadAgent>[0];
+}): Promise<Context> {
+  const { priorTurns, canvasId, mode } = params;
+
+  const systemPrompt = buildAgentSystemPrompt({ canvasId, mode });
 
   // Rebuild `Context.messages` by re-serialising each prior turn's
   // envelope + appending its transcript. The `[SYSTEM …]` encoding is
@@ -474,9 +482,10 @@ const agentRoutes: FastifyPluginAsync = async (
 
     // Load the thread's prior folded turns from L2 (the single source of
     // truth). Both backends need this: `priorTurns.length` drives the
-    // debug turn number, and the built-in path rebuilds its Context from
-    // them. A crashed in-flight turn is folded by L2 on next append; no
-    // host-side active-turn finalize is required.
+    // debug turn number, and the built-in path uses them as the cold-start
+    // recovery seed when no live Deployment handle exists. A crashed
+    // in-flight turn is folded by L2 on next append; no host-side
+    // active-turn finalize is required.
     const { turns: priorTurns } = agenetes.history(
       canvasAcpNamespace(canvasId ?? ''),
       resolvedThreadId,
@@ -588,17 +597,24 @@ const agentRoutes: FastifyPluginAsync = async (
           debugPrompt,
         });
       } else {
-        // Built-in path: rebuild the Context this turn runs over
-        // (systemPrompt + history) — the agent's entire memory. Only this
-        // branch needs it, so we build it here rather than up front; the
-        // ACP branch never touches a Context.
-        const context = await resumeThreadContext({
-          priorTurns,
-          canvasId,
-          mode,
-        });
+        // Built-in path: if a live Deployment handle already exists, keep
+        // using its in-memory transcript and only refresh the current
+        // system prompt; otherwise cold-start from durable history.
+        const liveHandle = agenetes.get(resolvedThreadId);
+        const context = liveHandle
+          ? {
+              systemPrompt: buildAgentSystemPrompt({ canvasId, mode }),
+              messages: [],
+              tools: [],
+            }
+          : await resumeThreadContext({
+              priorTurns,
+              canvasId,
+              mode,
+            });
         stream = runAgent({
           scope: mode,
+          workloadType: 'Deployment',
           // The built-in chat agent's canvas writes are delivered to the
           // frontend ONLY via the sync broadcast (like ACP), not applied
           // from the chat tool result. Attributing them to the chat

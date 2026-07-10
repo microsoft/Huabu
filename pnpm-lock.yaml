@@ -93,6 +93,9 @@ importers:
       '@agenetes/agentlet-host':
         specifier: workspace:*
         version: link:../../external/agenetes/packages/agentlet-host
+      '@agenetes/pi-driver':
+        specifier: workspace:*
+        version: link:../../external/agenetes/packages/pi-driver
       '@agenetes/protocol':
         specifier: workspace:*
         version: link:../../external/agenetes/packages/protocol
@@ -437,6 +440,25 @@ importers:
       fastify:
         specifier: ^5.2.0
         version: 5.8.5
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+
+  external/agenetes/packages/pi-driver:
+    dependencies:
+      '@agenetes/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@agenetes/runtime':
+        specifier: workspace:*
+        version: link:../runtime
+      '@earendil-works/pi-agent-core':
+        specifier: ^0.75.5
+        version: 0.75.5(ws@8.21.0)(zod@4.4.3)
+      '@earendil-works/pi-ai':
+        specifier: ^0.75.5
+        version: 0.75.5(ws@8.21.0)(zod@4.4.3)
+    devDependencies:
       typescript:
         specifier: ^5.9.0
         version: 5.9.3
