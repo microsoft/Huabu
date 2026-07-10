@@ -31,7 +31,7 @@ export function WebSearchToolDisplay({ part }: { part: WebSearchToolPart }) {
   if (sources.length === 0) {
     return (
       <div className="flex justify-start">
-        <div className="text-fg-muted border-edge-default bg-surface rounded-2xl border px-4 py-3 text-sm whitespace-pre-wrap">
+        <div className="text-fg-muted border-edge-default bg-surface rounded-md border px-2 py-1 text-xs whitespace-pre-wrap">
           {t('messages.usedReferences', { count: 0 })}
         </div>
       </div>
@@ -45,8 +45,10 @@ export function WebSearchToolDisplay({ part }: { part: WebSearchToolPart }) {
     <div className="flex justify-start">
       <div className="flex w-full flex-col items-start gap-2">
         <Button
+          size="sm"
           variant="ghost"
           tone="neutral"
+          className="w-full justify-start px-2 py-0.5"
           aria-expanded={isExpanded}
           aria-label={t('messages.toggleSources', { count, label })}
           onClick={() => setIsExpanded((v) => !v)}

@@ -80,7 +80,7 @@ export const SourceCard = ({ source }: { source: Source }) => {
           ) : null}
 
           <div className="min-w-0 flex-1">
-            <div className="text-fg-muted flex min-w-0 items-center gap-2 text-sm font-medium">
+            <div className="text-fg-muted flex min-w-0 items-center gap-2 text-xs font-medium">
               <span className="truncate">{title}</span>
               <ArrowUpRight
                 className="text-fg-muted flex-none"

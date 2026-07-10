@@ -7,6 +7,7 @@
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "test": "vitest run src",
     "icons:build": "node scripts/build-icons.mjs",
     "dist": "pnpm run build && electron-builder",
     "dist:mac": "pnpm run build && electron-builder --mac",
@@ -23,6 +24,7 @@
     "electron-builder": "^26.0.0",
     "png2icons": "^2.0.1",
     "sharp": "^0.34.5",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
   }
 }

@@ -38,11 +38,23 @@ import {
 import net from 'node:net';
 import { isAbsolute, join } from 'node:path';
 
-import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  safeStorage,
+  session,
+  shell,
+} from 'electron';
 import { utilityProcess, type UtilityProcess } from 'electron';
 import getPort from 'get-port';
 
 import { applyApplicationMenu, registerMenuIpc } from './mac-menu.js';
+import {
+  DesktopSecureSecretStore,
+  isDesktopSecretId,
+} from './secure-secrets.js';
 import { TITLE_BAR_HEIGHT } from './title-bar.js';
 
 // ── Constants ────────────────────────────────────────────────────────
@@ -189,6 +201,7 @@ async function ensureShellPath(): Promise<void> {
 
 let serverProcess: UtilityProcess | null = null;
 let serverPort = 0;
+let secureSecretStore: DesktopSecureSecretStore | null = null;
 /**
  * Ring buffer of the server child's most recent stderr output. Reset on
  * each fork. Drained to a crash-dump file only when the child exits with
@@ -375,6 +388,7 @@ function buildServerEnv(port: number): NodeJS.ProcessEnv {
     SERVER_PORT: String(port),
     HUABU_BIND_HOST: '127.0.0.1',
     HUABU_DATA_DIR: dataDir,
+    HUABU_SECRET_BRIDGE: '1',
     ...(webDistPath ? { WEB_DIST_PATH: webDistPath } : {}),
     NODE_ENV: IS_DEV ? 'development' : 'production',
   };
@@ -382,6 +396,7 @@ function buildServerEnv(port: number): NodeJS.ProcessEnv {
 
 async function startServer(port: number): Promise<void> {
   const serverEntry = resolveServerEntry();
+  const secretSnapshot = secureSecretStore?.snapshot() ?? {};
 
   if (!existsSync(serverEntry)) {
     await dialog.showErrorBox(
@@ -400,6 +415,53 @@ async function startServer(port: number): Promise<void> {
     // would otherwise let the pipe buffer fill and back-pressure the
     // server's writes — see the always-on no-op drain below.
     stdio: 'pipe',
+  });
+  const child = serverProcess;
+
+  child.on('message', (message: unknown) => {
+    if (!secureSecretStore || !message || typeof message !== 'object') return;
+    const request = message as Record<string, unknown>;
+    if (
+      request.type !== 'secret:mutate' ||
+      typeof request.requestId !== 'string'
+    ) {
+      return;
+    }
+    if (
+      typeof request.key !== 'string' ||
+      !isDesktopSecretId(request.key) ||
+      (request.value !== null && typeof request.value !== 'string')
+    ) {
+      child.postMessage({
+        type: 'secret:result',
+        requestId: request.requestId,
+        ok: false,
+        error: 'Invalid secure credential mutation',
+      });
+      return;
+    }
+    try {
+      secureSecretStore.set(request.key, request.value as string | null);
+      child.postMessage({
+        type: 'secret:result',
+        requestId: request.requestId,
+        ok: true,
+      });
+    } catch (err) {
+      child.postMessage({
+        type: 'secret:result',
+        requestId: request.requestId,
+        ok: false,
+        error:
+          err instanceof Error ? err.message : 'Secure secret write failed',
+      });
+    }
+  });
+  child.once('spawn', () => {
+    child.postMessage({
+      type: 'secret:init',
+      secrets: secretSnapshot,
+    });
   });
 
   // Always-on safety net: an `on('data')` listener (even empty) puts
@@ -937,13 +999,40 @@ app.whenReady().then(async () => {
   }
 
   try {
+    const external = getExternalServerUrl();
+    if (!external) {
+      if (!safeStorage.isEncryptionAvailable()) {
+        throw new Error(
+          'Operating-system credential encryption is unavailable.',
+        );
+      }
+      if (
+        process.platform === 'linux' &&
+        safeStorage.getSelectedStorageBackend() === 'basic_text'
+      ) {
+        throw new Error(
+          'A Linux Secret Service or KWallet backend is required to protect credentials.',
+        );
+      }
+      const probe = `huabu-safe-storage-probe-${Date.now()}`;
+      if (
+        safeStorage.decryptString(safeStorage.encryptString(probe)) !== probe
+      ) {
+        throw new Error(
+          'Operating-system credential encryption verification failed.',
+        );
+      }
+      const dataDir = join(app.getPath('userData'), 'data');
+      secureSecretStore = new DesktopSecureSecretStore(dataDir, safeStorage);
+      secureSecretStore.migratePlaintextFiles();
+    }
+
     // Augment PATH from the user's login shell BEFORE forking the
     // server so host-CLI detection (`which copilot` / `claude` /
     // `gemini`) sees the same entries the user has in their Terminal.
     // See `ensureShellPath` for rationale.
     await ensureShellPath();
 
-    const external = getExternalServerUrl();
     if (external) {
       // External dev server: don't fork our own, just point at the
       // already-running one. We still wait for the port so the window

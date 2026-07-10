@@ -2,18 +2,8 @@
  * GitHub Copilot OAuth — thin wrapper around pi-ai's OAuth implementation.
  *
  * Delegates the device code flow, token refresh, and model modification
- * to @earendil-works/pi-ai/oauth. Credentials are persisted to
- * data/oauth-credentials.json.
+ * to @earendil-works/pi-ai/oauth. Credentials use the runtime SecretStore.
  */
-
-import {
-  chmodSync,
-  existsSync,
-  readFileSync,
-  writeFileSync,
-  mkdirSync,
-} from 'node:fs';
-import { dirname, join } from 'node:path';
 
 import { getModels } from '@earendil-works/pi-ai';
 import {
@@ -22,7 +12,12 @@ import {
   loginGitHubCopilot,
 } from '@earendil-works/pi-ai/oauth';
 
-import { getDataDir } from '../../data-dir.js';
+import { SECRET_IDS } from '../../security/secret-ids.js';
+import {
+  getPersistedSecret,
+  getSecret,
+  setSecret,
+} from '../../security/secret-store.js';
 import { getLogger } from '../../utils/logger.js';
 
 import type { OAuthCredentials } from '@earendil-works/pi-ai';
@@ -32,42 +27,28 @@ const log = getLogger('oauth');
 
 // ==================== Persisted Credentials ====================
 
-const AUTH_FILE = join(getDataDir(), 'oauth-credentials.json');
-
 export function loadCredentials(): OAuthCredentials | null {
   try {
-    if (existsSync(AUTH_FILE)) {
-      const raw = readFileSync(AUTH_FILE, 'utf-8');
-      const parsed = JSON.parse(raw) as OAuthCredentials;
-      if (parsed.refresh && parsed.access) return parsed;
-    }
+    const raw = getSecret(SECRET_IDS.copilotOAuth);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as OAuthCredentials;
+    return parsed.refresh && parsed.access ? parsed : null;
   } catch {
     // Corrupted — fall through
   }
   return null;
 }
 
-export function saveCredentials(creds: OAuthCredentials): void {
-  const dir = dirname(AUTH_FILE);
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
-  }
-  writeFileSync(AUTH_FILE, JSON.stringify(creds, null, 2), 'utf-8');
-  try {
-    chmodSync(AUTH_FILE, 0o600);
-  } catch {
-    // Non-critical — best effort on platforms that support it
-  }
+export async function saveCredentials(creds: OAuthCredentials): Promise<void> {
+  await setSecret(SECRET_IDS.copilotOAuth, JSON.stringify(creds));
 }
 
-function clearCredentials(): void {
-  try {
-    if (existsSync(AUTH_FILE)) {
-      writeFileSync(AUTH_FILE, '{}', 'utf-8');
-    }
-  } catch {
-    // Ignore
-  }
+async function clearCredentials(): Promise<void> {
+  // Nothing persisted (e.g. env-only headless mode) → logout is a no-op
+  // success. Otherwise a deletion failure must surface so the client is
+  // never told "logged out" while a valid refresh token remains on disk.
+  if (getPersistedSecret(SECRET_IDS.copilotOAuth) === null) return;
+  await setSecret(SECRET_IDS.copilotOAuth, null);
 }
 
 // ==================== Device Code Flow ====================
@@ -200,7 +181,7 @@ export async function pollDeviceCode(): Promise<
 
   if (result.status === 'complete') {
     // Save credentials and clean up
-    saveCredentials(result.creds);
+    await saveCredentials(result.creds);
     pendingLogin = null;
     return 'complete';
   }
@@ -236,7 +217,7 @@ export async function getCopilotApiKey(): Promise<string | null> {
       return null;
     }
     // Persist potentially refreshed credentials
-    saveCredentials(result.newCredentials);
+    await saveCredentials(result.newCredentials);
     return result.apiKey;
   } catch (err) {
     log.error({ err }, 'getCopilotApiKey failed');
@@ -435,10 +416,10 @@ export async function verifyOAuthCredentials(
 /**
  * Clear stored OAuth credentials (logout).
  */
-export function logoutOAuth(): void {
+export async function logoutOAuth(): Promise<void> {
   if (pendingLogin) {
     pendingLogin.abortController.abort();
     pendingLogin = null;
   }
-  clearCredentials();
+  await clearCredentials();
 }

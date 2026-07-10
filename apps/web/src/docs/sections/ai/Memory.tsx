@@ -52,7 +52,7 @@ export default function Memory() {
           [
             <strong>Canvas</strong>,
             'Just this one canvas.',
-            <Code>memory/canvas.md</Code>,
+            <Code>.memory/canvas.md</Code>,
             'Narrative state of this canvas — the topic, decisions made, things to revisit.',
           ],
         ]}

@@ -38,8 +38,8 @@ export default function Storage() {
 │   ├── canvas.json
 │   ├── nodes/<node-title>.md
 │   ├── .artifacts/<artifactId>.<ext>
-│   ├── memory/canvas.md
-│   └── .history/{chat/<threadId>.json, intent.json, events.json}
+│   ├── .memory/canvas.md
+│   └── .history/{chat/<threadId>.turns.jsonl, intent.json, events.jsonl}
 └── setting/
     ├── .huabu.md                      # workspace memory
     └── skills/<id>/SKILL.md           # user-authored skills`}</CodeBlock>
@@ -64,13 +64,13 @@ export default function Storage() {
             'PDF / image / video originals; filename = artifactId, served at /api/canvas/<canvasId>/artifact/<artifactId>.<ext>.',
           ],
           [
-            <Code>memory/canvas.md</Code>,
+            <Code>.memory/canvas.md</Code>,
             'Markdown',
-            'Canvas-level memory the AI writes. Capped at ~4 KB on the next AI write.',
+            'Canvas-level memory the AI writes (hidden dir). Capped at ~4 KB on the next AI write.',
           ],
           [
             <Code>.history/</Code>,
-            'JSON',
+            'JSON / JSONL',
             'Chat threads, intent log, event timeline. Cleared on canvas delete.',
           ],
         ]}

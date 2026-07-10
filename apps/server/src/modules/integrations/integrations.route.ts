@@ -48,7 +48,7 @@ const integrationsRoutes: FastifyPluginAsync = async (app) => {
         .send({ message: parsed.error.issues[0]?.message ?? 'Invalid body' });
     }
 
-    return reply.send(setIntegrationsConfig(parsed.data));
+    return reply.send(await setIntegrationsConfig(parsed.data));
   });
 };
 

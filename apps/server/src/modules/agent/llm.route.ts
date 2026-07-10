@@ -2,6 +2,7 @@ import {
   llmConfigUpdateSchema,
   llmImageConfigUpdateSchema,
   llmModelsQuerySchema,
+  llmUtilityConfigUpdateSchema,
   oauthStatusQuerySchema,
 } from '@sediment/shared';
 
@@ -10,8 +11,10 @@ import {
   getImageConfig,
   getLLMConfig,
   getModelsForProviderLive,
+  getUtilityConfig,
   setImageConfig,
   setLLMConfig,
+  setUtilityConfig,
 } from './llm.js';
 import {
   logoutOAuth,
@@ -30,6 +33,8 @@ import type {
   LLMModelsQuery,
   LLMModelsResponse,
   LLMProvidersResponse,
+  LLMUtilityConfig,
+  LLMUtilityConfigUpdate,
   OAuthDeviceCodeResponse,
   OAuthLogoutResponse,
   OAuthPollResponse,
@@ -88,7 +93,37 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
           .send({ message: parsed.error.issues[0]?.message ?? 'Invalid body' });
       }
 
-      const result = setImageConfig(parsed.data);
+      const result = await setImageConfig(parsed.data);
+      return reply.send(result);
+    },
+  );
+
+  // GET /api/llm/utility-config — return utility-tier model config
+  app.get<{ Reply: ApiResult<LLMUtilityConfig> }>(
+    '/utility-config',
+    async () => {
+      return getUtilityConfig();
+    },
+  );
+
+  // PUT /api/llm/utility-config — update utility-tier model config
+  app.put<{ Body: LLMUtilityConfigUpdate; Reply: ApiResult<LLMUtilityConfig> }>(
+    '/utility-config',
+    async (request, reply) => {
+      if (!isLoopbackRequest(request)) {
+        return reply.status(403).send({
+          message: 'Forbidden: LLM settings can only be changed from localhost',
+        });
+      }
+
+      const parsed = llmUtilityConfigUpdateSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply
+          .status(400)
+          .send({ message: parsed.error.issues[0]?.message ?? 'Invalid body' });
+      }
+
+      const result = await setUtilityConfig(parsed.data);
       return reply.send(result);
     },
   );
@@ -182,7 +217,7 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
         return reply.status(403).send({ message: 'Forbidden' });
       }
 
-      logoutOAuth();
+      await logoutOAuth();
       return reply.send({ ok: true });
     },
   );

@@ -27,7 +27,7 @@ const toc: TocEntry[] = [
   { id: 'why-canvas', label: 'Why a canvas, not a chat sidebar' },
   { id: 'three-layers', label: 'Three layers, one surface' },
   { id: 'the-surface', label: 'Layer 1 — The surface' },
-  { id: 'the-units', label: 'Layer 2 — The units (nine node types)' },
+  { id: 'the-units', label: 'Layer 2 — The units (ten node types)' },
   { id: 'the-structure', label: 'Layer 3 — Structure & navigation' },
   { id: 'how-they-compose', label: 'How the layers compose' },
   { id: 'design-principles', label: 'Design principles' },
@@ -106,7 +106,7 @@ export default function ExternalizedSensemaking() {
           [
             <strong>Units</strong>,
             'What you put on the surface — typed pieces of content.',
-            'Nine node types: Note, Text, Image, PDF, Video, Web, Frame, Sketch, Question.',
+            'Ten node types: Note, Text, Image, PDF, Office, Video, Web, Frame, Sketch, Question.',
           ],
           [
             <strong>Structure & navigation</strong>,
@@ -150,12 +150,12 @@ export default function ExternalizedSensemaking() {
         />
       </CardGrid>
 
-      <H2>Layer 2 — The units (nine node types)</H2>
+      <H2>Layer 2 — The units (ten node types)</H2>
       <P>
         Nodes are the things you place on the canvas. Each type has its own
         editor, its own toolbar, and its own on-disk storage shape, but they
-        share the same drag / resize / connect / lock affordances. The nine
-        types fall into four loose categories — content, media, structure,
+        share the same drag / resize / connect / lock affordances. The ten types
+        fall into four loose categories — content, media, structure,
         interactive.
       </P>
 
@@ -192,6 +192,13 @@ export default function ExternalizedSensemaking() {
           eyebrow="Media"
           title="PDF Node"
           description="Full document with thumbnails, screenshots, text selection. The AI reads extracted text by tool call."
+        />
+        <NavCard
+          to="/docs/nodes/office"
+          icon={NODE_ICON.office}
+          eyebrow="Media"
+          title="Office Node"
+          description="View-only Word / Excel / PowerPoint. Text is extracted in the background so the AI can read it."
         />
         <NavCard
           to="/docs/nodes/video"

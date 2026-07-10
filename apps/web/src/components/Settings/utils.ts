@@ -1,12 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 
-/**
- * Shared class for the small text inputs used across the settings forms
- * (LLM provider, image provider). Kept in one place so the two settings
- * components stay visually identical.
- */
-export const TEXT_INPUT_CLASS =
-  'border-edge-default bg-surface text-fg-muted focus:ring-info-light rounded border px-2 py-1.5 text-xs focus:ring-1 focus:outline-none';
+export { TEXT_INPUT_CLASS } from '@/components/Common/Input';
 
 /**
  * Debounce a save callback so the caller can invoke it on every keystroke

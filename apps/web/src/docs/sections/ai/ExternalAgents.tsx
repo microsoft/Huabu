@@ -48,10 +48,11 @@ export default function ExternalAgents() {
         <li>
           <strong>Detected agent</strong> — pick from the supported agents Huabu
           detected on your <Code>PATH</Code>. Copilot (<Code>copilot</Code>) and
-          Gemini (<Code>gemini</Code>) speak ACP natively; Claude has no native
-          ACP mode, so it&apos;s detected and launched through its ACP adapter
-          bin (<Code>claude-agent-acp</Code>). The launch command is assembled
-          for you; you don&apos;t see or edit the command string directly.
+          Gemini (<Code>gemini</Code>) speak ACP natively; Claude and Codex have
+          no native ACP mode, so they&apos;re detected and launched through
+          their ACP adapter bins (<Code>claude-agent-acp</Code> /{' '}
+          <Code>codex-acp</Code>). The launch command is assembled for you; you
+          don&apos;t see or edit the command string directly.
         </li>
         <li>
           <strong>Custom command</strong> — type the full launch command
@@ -75,9 +76,10 @@ export default function ExternalAgents() {
         If no supported agent shows up under <strong>Detected agent</strong>,
         install one first — for example{' '}
         <Code>npm install -g @github/copilot</Code>,{' '}
-        <Code>npm install -g @agentclientprotocol/claude-agent-acp</Code>, or{' '}
-        <Code>npm install -g @google/gemini-cli</Code> — then re-open the
-        editor. Detection re-runs every time Settings is opened.
+        <Code>npm install -g @agentclientprotocol/claude-agent-acp</Code>,{' '}
+        <Code>npm install -g @google/gemini-cli</Code>, or{' '}
+        <Code>npm install -g @agentclientprotocol/codex-acp</Code> — then
+        re-open the editor. Detection re-runs every time Settings is opened.
       </Callout>
 
       <H2>Using a profile in chat</H2>
