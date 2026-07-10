@@ -122,9 +122,7 @@ The config is persisted on the server side, so you only need to do this once per
 
 ## Connecting external coding agents
 
-Huabu can talk to AI coding agents running on your machine —
-**GitHub Copilot CLI**, **Claude Code**, **Gemini CLI**, and others that
-speak the [Agent Client Protocol](https://agentclientprotocol.com).
+Huabu can talk to AI coding agents running on your machine — **GitHub Copilot**, **Claude Agent**, **Gemini**, **Codex**, **Qwen Code**, **Kimi Code CLI**, **OpenCode**, **Cursor**, and others that speak the [Agent Client Protocol](https://agentclientprotocol.com).
 
 First install the agent CLI(s) you want and complete their sign-in flow.
 Then open **Settings → External Agents**, create a profile for the agent
