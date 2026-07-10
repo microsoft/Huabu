@@ -41,7 +41,7 @@ export interface KnownCli {
    * instead of printing a version.
    */
   skipVersionProbe?: boolean;
-  /** One-line `npm install -g …` hint used in error / help text. */
+  /** One-line installation hint used in error / help text. */
   installHint: string;
 }
 
@@ -52,7 +52,7 @@ export interface KnownCli {
 export const KNOWN_CLIS: readonly KnownCli[] = [
   {
     id: 'copilot',
-    displayName: 'GitHub Copilot CLI',
+    displayName: 'GitHub Copilot',
     binary: 'copilot',
     acpArgs: ['--acp'],
     allowAllFlag: '--allow-all',
@@ -60,8 +60,8 @@ export const KNOWN_CLIS: readonly KnownCli[] = [
   },
   {
     id: 'claude',
-    displayName: 'Claude Code',
-    // Claude Code has no native ACP mode; it's driven through the
+    displayName: 'Claude Agent',
+    // Claude Agent has no native ACP mode; it's driven through the
     // official ACP adapter (backed by the Claude Agent SDK). Users
     // install the adapter globally and we detect + launch its
     // `claude-agent-acp` bin directly — the bin *is* the ACP agent, so
@@ -79,7 +79,7 @@ export const KNOWN_CLIS: readonly KnownCli[] = [
   },
   {
     id: 'gemini',
-    displayName: 'Gemini CLI',
+    displayName: 'Gemini',
     binary: 'gemini',
     acpArgs: ['--acp'],
     allowAllFlag: null,
@@ -87,7 +87,7 @@ export const KNOWN_CLIS: readonly KnownCli[] = [
   },
   {
     id: 'codex',
-    displayName: 'Codex CLI',
+    displayName: 'Codex',
     // Codex has no native ACP mode; it's driven through the Codex ACP
     // adapter (a Rust binary named `codex-acp`). Users install it via
     // the adapter's npm package or a GitHub release, and we detect +
@@ -103,5 +103,37 @@ export const KNOWN_CLIS: readonly KnownCli[] = [
     // version, which would burn the full probe timeout.
     skipVersionProbe: true,
     installHint: 'npm install -g @agentclientprotocol/codex-acp',
+  },
+  {
+    id: 'qwen',
+    displayName: 'Qwen Code',
+    binary: 'qwen',
+    acpArgs: ['--acp'],
+    allowAllFlag: null,
+    installHint: 'npm install -g @qwen-code/qwen-code',
+  },
+  {
+    id: 'kimi',
+    displayName: 'Kimi Code',
+    binary: 'kimi',
+    acpArgs: ['acp'],
+    allowAllFlag: null,
+    installHint: 'Install from https://code.kimi.com/',
+  },
+  {
+    id: 'opencode',
+    displayName: 'OpenCode',
+    binary: 'opencode',
+    acpArgs: ['acp'],
+    allowAllFlag: null,
+    installHint: 'npm install -g opencode-ai@latest',
+  },
+  {
+    id: 'cursor',
+    displayName: 'Cursor',
+    binary: 'agent',
+    acpArgs: ['acp'],
+    allowAllFlag: null,
+    installHint: 'Install from https://cursor.com/docs/cli/installation',
   },
 ];
