@@ -43,6 +43,7 @@ import {
 } from './modules/workspace.js';
 import workspaceRoutes from './modules/workspace.route.js';
 import { preloadSkills } from './prompt/index.js';
+import { MAX_UPLOAD_BYTES } from './upload-limits.js';
 import { logger } from './utils/logger.js';
 
 // Lock the workspace at startup if HUABU_WORKSPACE is set (managed mode).
@@ -72,7 +73,7 @@ preloadSkills();
 // resolved to pino's stricter `Logger` and fail to type-check.
 export const app = fastify({
   loggerInstance: logger as unknown as FastifyBaseLogger,
-  bodyLimit: 100 * 1024 * 1024, // 100MB for file uploads
+  bodyLimit: MAX_UPLOAD_BYTES, // large enough for canvas bundle imports
 });
 
 // Register response compression
@@ -118,11 +119,13 @@ app.register(cors, {
 app.register(hostGuardPlugin);
 app.register(originGuardPlugin);
 
-// Register multipart for file uploads
-// Max file size: 100MB
+// Register multipart for file uploads.
+// The file-size ceiling is shared with `bodyLimit` above and tunable via
+// `HUABU_MAX_UPLOAD_BYTES`; canvas imports bundle their `.artifacts/` dir
+// and can be large.
 app.register(multipart, {
   limits: {
-    fileSize: 100 * 1024 * 1024, // 100MB max file size
+    fileSize: MAX_UPLOAD_BYTES,
   },
 });
 

@@ -9,6 +9,7 @@ import yauzl from 'yauzl';
 
 import {
   createCanvasBodySchema,
+  canvasSearchRequestSchema,
   createId,
   exportCanvasQuerySchema,
   getCanvasEventsQuerySchema,
@@ -17,7 +18,6 @@ import {
   preprocessNodeBodySchema,
   putCanvasBodySchema,
   putNodeContentBodySchema,
-  canvasSearchRequestSchema,
 } from '@sediment/shared';
 import { nodeRevisionOf } from '@sediment/shared/canvas-engine';
 
@@ -28,6 +28,7 @@ import {
 } from './canvas-executor.js';
 import { searchCanvas } from './canvas-search.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
+import { MAX_UPLOAD_BYTES } from '../../upload-limits.js';
 import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
 import { getPreprocessDispatcher, getProfile } from '../preprocessing/index.js';
 import { stripOfficeparserPreamble } from '../preprocessing/loaders/office-strip.js';
@@ -1507,6 +1508,20 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           ws.on('error', reject);
           file.file.on('error', reject);
         });
+
+        // `@fastify/multipart` silently *truncates* the file stream once it
+        // exceeds the configured `fileSize` limit rather than throwing. A
+        // truncated bundle is a corrupt zip, which surfaces downstream as a
+        // cryptic "End of central directory record" yauzl error. Detect it
+        // here and return an actionable 413 instead.
+        if (file.file.truncated) {
+          await unlink(tmpZip).catch(() => {});
+          return reply.code(413).send({
+            message: `Bundle exceeds the maximum upload size of ${Math.floor(
+              MAX_UPLOAD_BYTES / (1024 * 1024),
+            )}MB`,
+          });
+        }
 
         mkdirSync(stagingDir, { recursive: true });
 
