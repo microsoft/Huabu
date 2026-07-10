@@ -1,0 +1,363 @@
+# Pi Harness Standard Driver and Huabu Built-in Agent Refactor
+
+> Turn the current Huabu built-in pi-agent-core path from a per-turn replay workaround into a conversation-native Agenetes standard driver.
+>
+> Status: **Draft** · Last updated 2026-07-10
+
+---
+
+## 1. Context
+
+Agenetes now has a clearer positioning: it is an aggregating control plane for agents across environments, not a full agent-hosting platform, and its driver model is defined by binding schema, runtime protocol, and transport.
+
+The current Huabu built-in agent path predates that model and still runs multi-turn chat as a threaded Job workaround: every turn rebuilds a fresh `@earendil-works/pi-agent-core` `Agent`, reconstructs the prior pi message array from durable history, appends the current request, streams the answer, and lets Agenetes fold the emitted events back into history.
+
+That shape was useful during the rush to unify built-in and external agents behind Agenetes, but it is not the target architecture. Interactive multi-turn conversations should be conversation-native Deployments: one durable `threadId` owns one long-lived runtime handle, normal turns continue the live harness state, and durable history is used for UI rendering and tail reconnect rather than for routine per-turn context reconstruction.
+
+This proposal designs a standard pi harness driver and the Huabu-side refactor that migrates built-in agents onto it.
+
+## 2. Goals
+
+1. Ship a standard Agenetes pi harness driver that wraps pi-agent-core behind the shared `AgentHandle` contract.
+2. Make interactive built-in conversations use Deployment semantics with a long-lived pi `Agent` per `threadId`.
+3. Keep Huabu-specific profile content, canvas tools, request rendering, model/account configuration, and workspace/canvas memory outside the standard driver.
+4. Remove routine per-turn transcript replay from the Huabu built-in chat path.
+5. Preserve the per-request render insight while allowing fallback renderers.
+6. Update Agenetes invariants where the current README still reflects the legacy fresh-Job built-in path.
+
+## 3. Non-goals
+
+This proposal does not turn Agenetes into a model-provider abstraction, credential vault, hosted agent platform, scheduler, sandbox, multi-tenant runtime, or fleet orchestrator.
+
+This proposal does not move Huabu agent profiles into Agenetes. Profiles remain host-owned catalog entries that compile into driver-specific workload specs.
+
+This proposal does not require the first milestone to support remote pi harness execution. The initial transport is in-process function calls; remote transport can be designed later if the same driver contract proves stable.
+
+## 4. Current code shape
+
+| File/dir | Current responsibility |
+| --- | --- |
+| [apps/server/src/modules/agent/agent.route.ts](../../apps/server/src/modules/agent/agent.route.ts) | Chat route dispatches built-in vs ACP and rebuilds built-in context from prior turns before each run. |
+| [apps/server/src/modules/agent/agent.service.ts](../../apps/server/src/modules/agent/agent.service.ts) | Composition shell that bakes prompt, messages, scope, canvas metadata, and runtime knobs into the current built-in workload spec. |
+| [apps/server/src/modules/agent/agenetes/drivers.ts](../../apps/server/src/modules/agent/agenetes/drivers.ts) | Host-owned `builtinDriverFactory` closes over `getLLMModel`, `ensureApiKey`, `buildToolsForScope`, and `getSessionReadSet`, then constructs a fresh pi `Agent` per invocation. |
+| [apps/server/src/modules/agent/agenetes/builtin-handle.ts](../../apps/server/src/modules/agent/agenetes/builtin-handle.ts) | Translates pi-agent-core events into Agenetes stream events and extracts the native pi message delta returned by the run. |
+| [apps/server/src/prompt/agents](../../apps/server/src/prompt/agents) | Huabu-owned agent profile content: frontmatter, system prompts, tools, skill scope, and runtime defaults. |
+| [apps/server/src/modules/agent/tools](../../apps/server/src/modules/agent/tools) | Huabu-owned tool definitions and executable tool bindings. |
+| [apps/server/src/modules/agent/llm.ts](../../apps/server/src/modules/agent/llm.ts) | Huabu-owned provider/account/OAuth settings and pi-ai model construction. |
+
+The key split is already visible: `builtin-handle.ts` is close to reusable pi harness driver code, while `drivers.ts` currently mixes driver construction with Huabu provider, tool, and context concerns.
+
+## 5. Target architecture
+
+```text
+Huabu profile/catalog layer
+  AGENT.md + workspace memory + canvas context + provider settings
+      │ compiles serializable recipe + opaque host context
+      ▼
+Agenetes instance
+  create(spec) / get(threadId) / close(threadId)
+      │ dispatch by spec.kind
+      ▼
+@agenetes/pi-driver
+  PiAgentHandle implements AgentHandle over pi-agent-core
+      │ uses mount-time ports for code extension
+      ▼
+pi-agent-core Agent
+  long-lived state.messages, tools, model, control, events
+```
+
+The driver is standard because it is shipped inside the Agenetes package set and understands the pi-agent-core harness contract. The driver is not Huabu-specific because every host-specific behavior enters through serializable recipe fields or mount-time registered ports.
+
+## 6. Driver ownership model
+
+The most important boundary is that the pi driver is a pi-agent-core harness driver, not an LLM-provider platform driver.
+
+The driver should understand how to construct and drive a pi-agent-core `Agent`: system prompt, pi messages, model object, tools, API-key callback, tool execution policy, abort, event subscription, and transcript delta extraction.
+
+The driver should not own provider accounts, OAuth refresh, Huabu settings, canvas tools, AGENT.md parsing, skill catalogue rendering, workspace memory, or request variants.
+
+| Concern | Owner | Why |
+| --- | --- | --- |
+| pi-agent-core `Agent` lifecycle | pi driver | This is the driver runtime protocol. |
+| `AgentEvent` to `AgentStreamEvent` translation | pi driver | This is the anti-corruption wrapper from pi native events to Agenetes events. |
+| `PiModelRef` schema | pi driver or pi protocol package | The driver needs a durable create-time way to say which pi model is requested. |
+| `PiModelRef` resolution to pi-ai `Model<Api>` | mount-time port | Provider catalog, local settings, OAuth, and account policy are host-specific. |
+| API key refresh | mount-time port | It depends on host credential policy and may need per-call refresh. |
+| executable tools | mount-time port | Tool implementations are code extension, not serializable customization. |
+| tool refs and tool policy | serializable spec | A profile can durably declare which pre-registered capabilities it requests. |
+| request rendering | request variant / host renderer, with fallback | Request semantics are host-owned, but generic fallback can handle safe plain-text requests. |
+| profile loading | host | Profiles are content/defaults/catalog entries, not drivers. |
+| durable thread history | Agenetes instance | The log is framework infrastructure; the driver only emits observable facts. |
+
+## 7. Proposed driver factory API
+
+```ts
+export interface PiDriverPorts<TRequest = unknown> {
+  resolveModel(ref: PiModelRef, ctx: PiModelContext): Promise<Model<Api>>;
+  getApiKey(ref: PiModelRef, ctx: PiModelContext): Promise<string>;
+  resolveTools(refs: PiToolRef[], ctx: PiToolContext): Promise<AgentTool[]>;
+  renderFallback?: PiRequestRenderer<TRequest>;
+}
+
+export interface PiDriverFactoryConfig<TRequest = unknown> {
+  ports: PiDriverPorts<TRequest>;
+}
+
+export function piDriverFactory<TRequest = unknown>(
+  config: PiDriverFactoryConfig<TRequest>,
+): AgentDriver<PiWorkloadSpec, TRequest, PiRenderedInput, PiRunResult>;
+```
+
+The package exports an I9.5 driver factory, not an ad-hoc driver constructor. The mounted instance installs it through the same factory dictionary used by other drivers:
+
+```ts
+const agenetes = mountAgenetes()
+  .addFactory("pi", piDriverFactory)
+  .register("internal", "pi", { ports })
+  .build();
+```
+
+`"pi"` is the implementation factory name; `"internal"` is an example contract `kind` chosen by the host application. The driver object itself carries no `kind`. The package API accepts ports at mount time through `factoryArgs`. Per-create inputs remain serializable `WorkloadSpec` data, so behavior extension happens by factory registration and data customization happens by spec.
+
+There are two separate bootstrap choices here. Adding a factory makes an implementation available; registering a driver binds a host contract `kind` to one available factory. A host should always explicitly register the contract kinds it exposes, because those names are part of its persisted workload contract. It should not necessarily have to call `addFactory` for every standard factory by hand if a higher-level Agenetes assembly package or preset can preinstall standard factories in the builder. The current core `@agenetes/agenetes` package deliberately does not do that because it depends only on `@agenetes/protocol` and `@agenetes/runtime`; importing standard drivers such as ACP or pi would change its dependency boundary. A future convenience entry point can pre-add standard factories while still requiring explicit `.register(...)` calls.
+
+`resolveModel` and `getApiKey` are separate on purpose. The model object is a pi-agent-core runtime requirement, but credentials are frequently short-lived and may need refresh before every LLM call. Huabu's current `ensureApiKey()` already has that shape.
+
+`renderFallback` is optional and does not replace `run(request, render, ctx)`. The per-run renderer remains the primary request-render seam. A fallback port only exists for simple hosts or safe plain-text requests when the composed renderer cannot handle a request variant.
+
+## 8. Proposed binding schema
+
+```ts
+type PiModelRef =
+  | { type: "registered"; id: string }
+  | { type: "pi-ai"; provider: string; model: string; options?: JsonObject };
+
+type PiToolRef = {
+  name: string;
+  options?: JsonObject;
+};
+
+type PiWorkloadSpec = {
+  kind: "pi";
+  workloadType: "Deployment" | "Job";
+  namespace: Namespace;
+  threadId?: ThreadId;
+  spec: {
+    recipe: {
+      systemPrompt?: string;
+      model: PiModelRef;
+      tools?: PiToolRef[];
+      runtime?: {
+        maxIterations?: number;
+        toolExecution?: "parallel" | "serial";
+      };
+    };
+    hostContext?: JsonObject;
+  };
+};
+```
+
+`hostContext` is intentionally opaque to the standard driver. Huabu can place a canvas id, origin stamp, profile id, or other routing facts there, and the driver only passes it back to registered ports.
+
+The exact `PiModelRef` shape should be validated against pi-ai/pi-agent-core before implementation. The invariant to preserve is not the concrete field names above; it is that the spec carries a durable model reference while host code resolves it to the concrete pi-ai model and credential policy.
+
+## 9. Runtime behavior
+
+For `workloadType: "Deployment"`, `create(spec)` creates or reuses one `PiAgentHandle` for `threadId`. The handle owns the long-lived pi `Agent` and treats each `run(request, render, ctx)` as a turn submitted to that live harness.
+
+For `workloadType: "Job"`, `create(spec)` creates a transient `PiAgentHandle` and a transient pi `Agent` for exactly one run. This is still useful for pipeline-style workloads, evaluations, tests, and programmatic one-shot tasks.
+
+The normal Deployment path should not rebuild `state.messages` from history on every turn. It should initialize once and continue from live pi state. If the live state is missing after process restart or explicit teardown, robust rehydration is a driver-agnostic Agenetes backlog item rather than part of this pi-driver migration.
+
+### 9.1. pi-agent-core capabilities relevant to Deployment (verified)
+
+The behavior guarantees a Deployment handle relies on are confirmed against `@earendil-works/pi-agent-core@0.75.5` (`dist/agent.js`, `dist/types.d.ts`):
+
+- **Long-lived live state exists.** `AgentState` exposes `messages`, `tools`, `systemPrompt`, `model`, and `thinkingLevel` as settable accessors ("model used for future turns", "system prompt sent with each model request"). The handle can hold one `Agent`, append turns, and reconfigure it in place without minting a fresh instance.
+- **Concurrent turns are rejected, not queued implicitly.** `prompt()` and `continue()` throw `"Agent is already processing…"` when a run is active. The handle must serialize turns per `threadId` (reject overlap, or use the built-in `steer()` / `followUp()` queues). This is a hard, well-defined contract.
+- **In-turn abort is supported.** `abort()` cancels the active run's `AbortController`; the existing built-in handle already maps `control('cancel')` onto it.
+- **Subscription is per-run-safe.** `subscribe(listener)` returns an unsubscribe; the current handle subscribes and unsubscribes around each `run`, which is valid to repeat over a long-lived `Agent`.
+- **Reconfiguration is possible in place.** Because `state.model` / `state.tools` / `state.systemPrompt` are live setters, `set_model` / tool refresh / prompt refresh are mechanically feasible on a live handle; the driver still chooses which of these it advertises as control capabilities (see §12).
+
+Conclusion: pi-agent-core is Deployment-capable. Original open question 2 (behavior guarantees) is answered by code and is no longer a coding blocker.
+
+### 9.2. Per-turn recomputed context is not only the transcript
+
+The legacy per-turn rebuild in `resumeThreadContext` re-derives more than history on every turn: it re-renders the agent system prompt so `{{skillCatalogue}}` reflects freshly written user skills, and it re-appends the `<workspace_memory>` block from `readWorkspaceMemory()`. Both currently ride `spec.systemPrompt` into a fresh `Agent` each turn.
+
+This recomputed content genuinely can change within one conversation, because the built-in `write` tool (`tools/definitions.ts`) targets `memory/workspace.md`, `memory/canvas.md`, and `skills/<id>/SKILL.md`. So a Deployment must not silently freeze the skill catalogue and workspace memory after create. Two facts settle the mechanism:
+
+- pi-agent-core reads `state.systemPrompt` fresh at the start of every run (`createContextSnapshot`, verified in §9.1), so the system prompt can be updated between turns without recreating the `Agent`.
+- Refreshing the prompt is a **live host-initiated imperative**, not a create-time or ambient trait. It therefore belongs in the control plane as a control message, not as a behavioural boolean (see §12.1/§12.4): the host detects a memory/skill write (a dirty flag), and before the next turn sends a `set_context` control message. The driver applies it by assigning `agent.state.systemPrompt`.
+
+This removes the unconditional per-turn re-render (which also wasted prompt-cache reuse) while preserving correct refresh exactly when content changes.
+
+## 10. Request rendering model
+
+Per-request rendering remains the primary model because request variants own their semantics. A canvas selection, a slash-style command, a natural-language prompt, and a structured workflow request should not be flattened by the driver before the host has interpreted them.
+
+The renderer resolution chain should be explicit:
+
+```text
+request-variant renderer
+  -> host-registered renderer for request.type
+  -> driver-registered generic renderer
+  -> default text renderer only for safe plain-text request shapes
+```
+
+The fallback chain preserves the insight in Agenetes I6 while making simple hosts easier to integrate. A fallback renderer must never infer host-specific meaning from opaque request data. In the first Huabu migration, the existing per-run renderer remains the primary path; driver-level fallback is optional and should not block the Deployment migration.
+
+## 11. Future: driver-agnostic recovery model
+
+Recovery should be designed as a driver-agnostic Agenetes feature, not as pi-driver-specific replay logic.
+
+Two likely future recovery sources are:
+
+1. Driver-native snapshot: the handle up-reports an opaque pi driver snapshot through `AgentStateSnapshot.metadata` or a future driver-state field, and `create(spec, priorState)` restores it.
+2. Agenetes history projection: if no usable snapshot exists, the driver asks a registered recovery port to project folded `AgentTurn[]` into pi messages, then seeds the pi `Agent`.
+
+That design belongs in a later cross-driver recovery proposal. The current pi-driver refactor should not add a `PiRecoveryPort`, should not make history projection a pi driver responsibility, and should not keep Huabu's route-level per-turn rebuild as a hidden fallback.
+
+The exact storage location for opaque driver state is an open design point. If `AgentMetadata` should remain purely user-facing control-plane metadata, Agenetes may need a separate `driverState?: JsonObject` channel alongside `sessionId` and `metadata`.
+
+## 12. Capabilities and control
+
+Deployment must not imply full control support. It means the handle has out-of-turn life and can accept control messages when it advertises them. Lifecycle (Job vs Deployment) and the advertised control set are related but not identical.
+
+### 12.1. The capability descriptor: `supportedControlMessages` as the primary contract
+
+Every host→agent **callable** capability is a control message from the closed, Agenetes-owned vocabulary. So the primary capability contract is a single uniform list — the subset of that vocabulary a handle honours. The current `AgentCapabilities.control` field is renamed to make this louder:
+
+```ts
+interface AgentCapabilities {
+  // Primary contract: the subset of the closed control vocabulary this
+  // handle honours. Adding a new callable capability = adding a member here;
+  // no new bespoke field per capability.
+  supportedControlMessages: ControlMsgType[];
+
+  // Residual behavioural traits that are genuinely NOT callable control
+  // messages, so they cannot fold into the list above:
+  turnInput: 'blocking' | 'queue' | 'concurrent'; // data-plane run() behaviour
+  loadSession?: boolean;                           // create-time resume capability
+}
+```
+
+`turnInput` (can the host submit input mid-turn) is a data-plane run behaviour, and `loadSession` (can this handle resume from prior state at create) is a create-time lifecycle capability. Neither is a host→agent imperative, so both stay as their own fields. `slashCommands` is dropped: slash support is inferable from `available_commands_update` notifications (I8.2), so it needs no static flag.
+
+This subsumes the earlier "boolean vs. control method" question into one rule: **a host→agent callable capability is always a control message and lives in `supportedControlMessages`; only a non-callable trait gets its own field.** `set_context` (below) is therefore just another member of the list, not a special case.
+
+### 12.2. Capabilities are derived per handle (I8.6 dynamic phase)
+
+`supportedControlMessages` is computed **per handle from the actual backend**, realizing the dynamic half of I8.6's two-phase negotiation (driver class advertises candidates at register; handle reports the negotiated set after create/initialize):
+
+- The ACP handle derives it from the ACP `initialize` / `newSession` response: advertised modes → `set_mode`, advertised models → `set_model`, config options → `set_config_option`, a wired permission handler → `answer_permission`, always → `cancel`.
+- The pi handle derives it from its lifecycle: a Job → `['cancel']`; a Deployment → `['cancel', 'set_context', …]`.
+
+`handle.capabilities` (already on the handle in I8) is where this per-handle descriptor is reported; the driver-class `AgentDriverInfo.capabilities` remains the static candidate set for discovery/admission.
+
+### 12.3. Driver self-description
+
+`AgentDriverInfo` (in `@agenetes/runtime`) gains an optional human-readable field so a driver can describe itself, frontmatter-style, for discovery and UX:
+
+```ts
+interface AgentDriverInfo {
+  /** Natural-language summary for discovery / UX. Never a gating input. */
+  readonly description?: string;
+  /** Structured capability descriptor; the source of truth for gating. */
+  readonly capabilities: AgentCapabilities;
+}
+```
+
+Rule (structured vs. natural language): a capability is **normalized into the structured descriptor only when a consumer branches on it at runtime** (admission, routing, UI enablement). Everything else — the long tail meant purely for humans — lives in `description`. `description` must never become an implicit gating channel (e.g. an LLM reading English to infer support); that would demote a gated capability into fragile prose. No `name` field is introduced, and the existing invariant that a driver carries no dispatch `kind` still holds.
+
+### 12.4. Live context update: `set_context`
+
+Refreshing the system prompt mid-conversation is a live host→agent imperative, so — per §12.1 — it is a control message, not a boolean. It is added to the closed vocabulary:
+
+```ts
+// CONTROL_MSGS gains:
+SetContext: 'set_context',
+// payload (minimal first; extensible to tools later):
+setContextControlDataSchema = z.object({ systemPrompt: z.string().optional() });
+```
+
+A handle that supports live context refresh includes `set_context` in its `supportedControlMessages` (the pi Deployment handle does; Job handles and backends without the semantics omit it). The host sends `{ type: 'set_context', data: { systemPrompt } }` before the next turn; the driver applies it by assigning `agent.state.systemPrompt`. This is the mechanism that replaces the legacy per-turn re-render described in §9.2.
+
+## 13. Huabu refactor plan
+
+### M1. Extract pi handle code
+
+Move the reusable parts of [builtin-handle.ts](../../apps/server/src/modules/agent/agenetes/builtin-handle.ts) into a new standard driver package. Keep only Huabu-specific event extensions or UI assumptions in Huabu if any remain.
+
+### M2. Introduce pi driver ports
+
+Register ports in the mounted Agenetes instance: model resolution delegates to [llm.ts](../../apps/server/src/modules/agent/llm.ts), tool resolution delegates to [tools/index.ts](../../apps/server/src/modules/agent/tools/index.ts), and request rendering delegates to the existing conversation renderer.
+
+### M3. Compile Huabu profiles into pi workload specs
+
+Change the built-in chat composition layer so AGENT.md loading produces a serializable pi `recipe` plus opaque `hostContext`, instead of directly constructing a pi `Agent`.
+
+### M4. Make interactive built-in threads Deployments
+
+Change the chat path so the first turn creates a Deployment handle and later turns use `get(threadId)` or `create(spec)` get-or-create semantics. Remove routine `rebuildContextMessages(priorTurns)` from the normal path. Wire a write-dirty flag on the built-in `write` tool's memory/skill paths so a changed system prompt is pushed to the live handle via a `set_context` control message before the next turn (§9.2, §12.2).
+
+### M5. Remove legacy per-turn replay dependencies
+
+Delete or isolate the legacy route-level context rebuild path so normal built-in chat turns cannot silently fall back to fresh-Agent replay. Any restart recovery gap should be tracked explicitly as driver-agnostic Agenetes backlog, not solved inside the pi driver.
+
+### M6. Keep pipeline jobs explicit
+
+Keep pipeline and one-shot callers on `workloadType: "Job"` unless they need a long-lived conversation. This prevents the interactive chat migration from forcing every pi harness use case into Deployment lifecycle.
+
+### M7. Fold shipped design into architecture docs
+
+After the migration ships, update [docs/architecture/agent-architecture.md](../architecture/agent-architecture.md) and any Agenetes architecture docs that describe driver lifecycle. Move or archive this proposal when it is no longer in flight.
+
+## 14. Agenetes invariant updates
+
+These updates should be made in host-application-neutral language. The Agenetes README should not mention Huabu-specific concepts or named application agents when describing general invariants.
+
+| Invariant area | Current issue | Proposed update |
+| --- | --- | --- |
+| Standard vs host-builtin driver | Current wording can imply in-process harness drivers are necessarily host-builtin custom drivers. | A standard driver can be in-process and still host-agnostic if behavior extension enters through mount-time ports and per-create serializable specs. |
+| Object-injection bridge | Current text treats object injection as the bridge away from `create(spec)`, but does not clearly distinguish per-create object injection from mount-time port registration. | State that `create(spec)` receives only serializable workload data; new behavior is registered at mount time as code ports. |
+| Fresh SDK Job built-in | Current description records the legacy fresh-agent-per-invocation path. | Mark that pattern as transitional; interactive conversation drivers should use Deployment semantics when the harness supports long-lived state. |
+| Deployment realizability | Current wording says Deployment requires ACP only. | Change to “Deployment requires a stateful runtime”; ACP and pi harness are examples. |
+| Render closure | Current `run(request, render, ctx)` shape captures the per-request render insight but creates tension with “messages, not closures” if the seam later crosses a process boundary. | Preserve per-request render semantics while allowing registered renderers or prepared serializable input at the seam. |
+| Capabilities vs lifecycle | Current wording can imply Deployment means the full control set. | Decouple lifecycle from advertised control capabilities; a Deployment advertises the subset its runtime supports. |
+| Capability descriptor shape | `AgentCapabilities.control` sits among heterogeneous fields; per-capability booleans invite ad-hoc growth. | Rename `control` → `supportedControlMessages` and make it the primary contract: every host→agent callable capability is a member; only genuinely non-callable traits (`turnInput`, `loadSession`) keep their own field; drop `slashCommands` (inferable from `available_commands_update`). |
+| Per-handle capability derivation | I8.6 already defines a dynamic per-handle phase, but capabilities are treated as mostly static per driver class. | State that `supportedControlMessages` is derived per handle from the actual backend (ACP from its `initialize`/session capabilities; pi from its lifecycle), reported via `handle.capabilities`. |
+| Control vocabulary extension | The closed control vocabulary has no operation for live context refresh. | Add `set_context` (payload `{ systemPrompt? }`, extensible) to the control union; support is declared by its presence in `supportedControlMessages`, not a redundant boolean. |
+| Driver self-description | `AgentDriverInfo` carries only `capabilities`. | Add an optional natural-language `description` for discovery/UX; normalize a capability into the structured descriptor only when a consumer branches on it, otherwise describe it. `description` is never a gating input; no dispatch `kind` or `name` is added. |
+| Recovery state | Current examples are ACP-oriented around `sessionId`, but recovery is broader than the pi driver. | Track driver-agnostic recovery as future work; do not use pi-driver migration to introduce a driver-specific recovery replay model. |
+
+## 15. Open questions
+
+Only the questions below should block the first implementation pass.
+
+1. What is the minimal `PiModelRef` schema for the first milestone? The likely answer is a durable host-resolved reference rather than a provider-platform schema: the port returns a concrete pi-ai `Model<any>`, so the ref shape is a host/protocol choice and does not gate the driver internals. It should still be validated against pi-ai before the protocol type is frozen.
+
+Resolved during review (were open questions, now decided):
+
+- pi-agent-core behavior guarantees for Deployment — verified against the installed version; see §9.1.
+- Dynamic system-prompt / skill / memory refresh under a Deployment — modelled as a `set_context` control message carried in `supportedControlMessages`, driven by a host write-dirty flag; see §9.2 and §12.4.
+
+The following are now decisions, not open questions for this proposal:
+
+| Topic | Decision |
+| --- | --- |
+| Factory ergonomics | Defer; focus on pi driver. Standard factories may be preinstalled later, but host contract `kind` registration remains explicit. |
+| Recovery replay | Defer as driver-agnostic Agenetes backlog; do not implement pi-specific replay in this migration. |
+| Renderer fallback placement | Keep per-run render as primary. Optional fallback can be host-composed or driver-provided later, but it must not block the migration. |
+| Spec drift | Follow existing reuse-ignores-spec semantics: no hidden reconcile. A changed profile requires explicit close/recreate or future explicit reconfigure control. |
+| Remote pi runtime | Non-goal for the first milestone; initial transport is in-process. |
+
+## 16. Acceptance criteria
+
+1. Interactive built-in conversations no longer rebuild a fresh pi `Agent` from history on every turn.
+2. The standard pi driver package contains no Huabu canvas, profile, settings, route, or storage imports.
+3. Huabu registers model, credential, tool, and request-render ports at Agenetes mount time.
+4. The built-in chat path compiles host profiles into serializable pi workload specs.
+5. Agenetes remains the only writer of durable conversation history.
+6. Restart recovery remains explicitly tracked as driver-agnostic backlog rather than being implemented as pi-specific replay.
+7. README invariant updates use host-application-neutral examples only.
