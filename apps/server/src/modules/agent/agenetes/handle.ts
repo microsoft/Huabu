@@ -10,12 +10,11 @@
  * a single, stable import surface while the contracts themselves stay in
  * the subtree.
  *
- * The two concrete handles (`BuiltinAgentHandle`, `AcpAgentHandle`) still
- * live in the host and are injected into the runtime as driver objects
- * (see `./drivers.ts`): standard drivers (ACP) are destined to move into
- * the subtree once M4/M5 make their host couplings injectable; the
- * canvas-coupled built-in driver stays host-owned and injected. See
- * docs/proposals/layered-architecture.md §3.6 / §7.
+ * Standard drivers (`@agenetes/acp-driver`, `@agenetes/pi-driver`) now
+ * live in subtree packages and are injected into the runtime through the
+ * host's mount/adapter layer (`./drivers.ts`, `./pi-driver.ts`). This
+ * module only binds the generic execution seam to the host's concrete
+ * request/transcript/event types.
  */
 
 import type { ChatEnvelope } from '../conversation/envelope.js';
@@ -80,7 +79,7 @@ export function unwrapChatRequest(request: unknown): ChatEnvelope | null {
 /**
  * Host-bound render fn: the request is always the host {@link AgentRequest}.
  * `TRendered` is the backend-native render output (pi-ai `Message[]` for the
- * built-in path, ACP prompt blocks for the external path).
+ * built-in pi-driver path, ACP prompt blocks for the external path).
  */
 export type RenderFn<TRendered> = RuntimeRenderFn<AgentRequest, TRendered>;
 

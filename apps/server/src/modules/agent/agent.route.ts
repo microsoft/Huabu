@@ -465,7 +465,7 @@ const agentRoutes: FastifyPluginAsync = async (
 
     // Log the thread→agent binding so external dispatches are visible
     // in the server log. When `kind === 'external'`, the dispatch below
-    // routes to `runAcpAgent` instead of the built-in pi-agent-core loop.
+    // routes to `runAcpAgent` instead of the built-in pi-driver path.
     if (agentBinding && agentBinding.kind === 'external') {
       request.log.info(
         {
@@ -579,8 +579,9 @@ const agentRoutes: FastifyPluginAsync = async (
     try {
       // Route dispatch: external bindings go to `runAcpAgent`, everything
       // else (including missing/`internal` bindings) goes to the built-in
-      // pi-agent-core loop. Both paths yield the same `AgentStreamEvent`
-      // shape so the consume loop below is binding-agnostic.
+      // pi-driver-backed path. Both paths yield the same
+      // `AgentStreamEvent` shape so the consume loop below is
+      // binding-agnostic.
       let stream: AsyncGenerator<AgentStreamEvent, unknown>;
       if (agentBinding?.kind === 'external') {
         stream = runAcpAgent({

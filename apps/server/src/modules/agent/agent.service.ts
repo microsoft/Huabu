@@ -1,10 +1,12 @@
 /**
  * Unified Agent Service
  *
- * Drives the agent loop using `@earendil-works/pi-agent-core`'s `Agent`
- * class. The class owns the transcript, executes tools, and emits
- * lifecycle events; this module bridges those events into the
- * `AsyncGenerator<StreamEvent>` shape every consumer (chat / operate
+ * Drives the built-in agent loop through the standard
+ * `@agenetes/pi-driver`. The underlying pi-agent-core `Agent` owns the
+ * transcript, executes tools, and emits lifecycle events; this module is
+ * the Huabu composition layer that compiles the serializable workload
+ * spec, supplies the render closure, and bridges the yielded events into
+ * the `AsyncGenerator<StreamEvent>` shape every consumer (chat / operate
  * SSE route, sketch pipeline) consumes.
  *
  * Public surface:
