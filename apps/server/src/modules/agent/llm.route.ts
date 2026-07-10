@@ -93,7 +93,7 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
           .send({ message: parsed.error.issues[0]?.message ?? 'Invalid body' });
       }
 
-      const result = setImageConfig(parsed.data);
+      const result = await setImageConfig(parsed.data);
       return reply.send(result);
     },
   );
@@ -217,7 +217,7 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
         return reply.status(403).send({ message: 'Forbidden' });
       }
 
-      logoutOAuth();
+      await logoutOAuth();
       return reply.send({ ok: true });
     },
   );

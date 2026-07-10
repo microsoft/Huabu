@@ -5,11 +5,11 @@
  *   - **Tavily** — `web_search` agent tool.
  *   - **RapidAPI** — YouTube transcript loader (node preprocessing).
  *
- * Configuration is persisted to `data/integrations.json` (chmod 600) and
- * edited via the `/api/integrations` routes. Environment variables
- * (`TAVILY_API_KEY`, `RAPIDAPI_KEY`) remain honoured as a fallback for
- * headless / Docker deployments — a stored key always wins, an env var is
- * used only when no key has been saved through the UI.
+ * Electron-managed credentials are encrypted by safeStorage; standalone
+ * credentials are persisted to `data/integrations.json` (chmod 600). Both
+ * are edited via `/api/integrations`. Environment variables
+ * (`TAVILY_API_KEY`, `RAPIDAPI_KEY`) remain fallback sources for headless /
+ * Docker deployments — a UI-stored key always wins.
  */
 
 import {
@@ -22,6 +22,12 @@ import {
 import { dirname, join } from 'node:path';
 
 import { getDataDir } from '../../data-dir.js';
+import {
+  getDesktopSecret,
+  isDesktopSecretBridgeEnabled,
+  setDesktopSecret,
+} from '../../security/desktop-secret-bridge.js';
+import { SECRET_IDS } from '../../security/secret-ids.js';
 import { getLogger } from '../../utils/logger.js';
 
 import type {
@@ -94,6 +100,12 @@ function saveStore(store: PersistedIntegrations): void {
  * counted here so the toggle accurately shows what the user stored).
  */
 export function getIntegrationsConfig(): IntegrationsConfig {
+  if (isDesktopSecretBridgeEnabled()) {
+    return {
+      hasTavilyKey: Boolean(getDesktopSecret(SECRET_IDS.tavilyApiKey)),
+      hasRapidApiKey: Boolean(getDesktopSecret(SECRET_IDS.rapidApiKey)),
+    };
+  }
   const store = loadStore();
   return {
     hasTavilyKey: Boolean(store.tavilyApiKey),
@@ -106,9 +118,18 @@ export function getIntegrationsConfig(): IntegrationsConfig {
  * empty field leaves the existing key untouched (so the client never has
  * to echo back a secret it cannot read). Returns the fresh masked model.
  */
-export function setIntegrationsConfig(
+export async function setIntegrationsConfig(
   update: IntegrationsConfigUpdate,
-): IntegrationsConfig {
+): Promise<IntegrationsConfig> {
+  if (isDesktopSecretBridgeEnabled()) {
+    if (typeof update.tavilyApiKey === 'string' && update.tavilyApiKey !== '') {
+      await setDesktopSecret(SECRET_IDS.tavilyApiKey, update.tavilyApiKey);
+    }
+    if (typeof update.rapidApiKey === 'string' && update.rapidApiKey !== '') {
+      await setDesktopSecret(SECRET_IDS.rapidApiKey, update.rapidApiKey);
+    }
+    return getIntegrationsConfig();
+  }
   // Work on a copy so a failed write can't leave the in-memory cache
   // ahead of disk (saveStore commits the copy to the cache on success).
   const store = { ...loadStore() };
@@ -131,6 +152,11 @@ export function setIntegrationsConfig(
  * when neither is set.
  */
 export function getTavilyApiKey(): string | undefined {
+  if (isDesktopSecretBridgeEnabled()) {
+    return (
+      getDesktopSecret(SECRET_IDS.tavilyApiKey) || process.env.TAVILY_API_KEY
+    );
+  }
   return loadStore().tavilyApiKey || process.env.TAVILY_API_KEY || undefined;
 }
 
@@ -140,5 +166,8 @@ export function getTavilyApiKey(): string | undefined {
  * when neither is set.
  */
 export function getRapidApiKey(): string | undefined {
+  if (isDesktopSecretBridgeEnabled()) {
+    return getDesktopSecret(SECRET_IDS.rapidApiKey) || process.env.RAPIDAPI_KEY;
+  }
   return loadStore().rapidApiKey || process.env.RAPIDAPI_KEY || undefined;
 }
