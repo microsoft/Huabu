@@ -6,7 +6,7 @@ Agenetes is a control plane for agent workloads. Just as Kubernetes' key capabil
 
 Agenetes 是一个面向 agent workload 的控制平面。正如 Kubernetes 的关键能力在于保证一个已声明的 pod（例如一个 docker 容器）**存在且可达**，Agenetes 保证的是：**给定一份 agent workload 声明，就存在一个跑着该 agent 的进程，且它是可达的**。根据声明的不同，这个进程可以**就在当前进程内**运行（agent 作为库被直接调用，没有任何跨进程通信）、**在当前机器上**运行（作为本机子进程被拉起）、或**在一台通过 Agenetes 连接的远程服务器上**运行。凭借**可插拔的 agent runtime**、**多种受支持的 transport**、一套**两级持久化日志系统**，以及（即将支持的）**agent service gateway**，Agenetes 让你可以用同一套运行时契约运行任意类型的 agent、把它部署在任意位置、让每段对话都可持久化并可回放，并让 agent 与外部工具彼此发现、作为服务相互调用。于是你可以专注于 agent 自身的逻辑，而不必操心底层管道。
 
-## Interface & framework at a glance / 接口与框架速览
+## Core Concepts / 核心概念
 
 Agenetes follows the same outer shape that makes Kubernetes easy to reason about: a declarative spec is bound to a runtime, the runtime materializes an execution instance, and the caller receives a live handle for continued interaction.
 
@@ -18,17 +18,54 @@ The same concepts can be read as a compact vocabulary map:
 | --- | --- | --- |
 | user / kubectl | host app | Declares and invokes workloads. |
 | Pod spec | `WorkloadSpec` | The declarative workload description. |
+| Job / long-running workload | Workload lifecycle type (`workloadType`: `Job` / `Deployment`) | Lifecycle semantics: a `Job` mints a fresh handle for a run; a `Deployment` keeps one live handle by `threadId`. |
 | scheduler | dispatcher | Kubernetes chooses a node; Agenetes resolves `WorkloadSpec.kind` to a driver. |
 | container runtime, such as containerd (previously Docker) | Agent Driver | The pluggable runtime implementation that materializes the workload. |
 | Pod | Agent Process | The execution instance that actually runs the declared workload. |
 | Pod handle / pod subresources | Agent Handle | The live per-workload surface for running turns, sending controls, receiving streams, and closing the workload. |
 | Service / DNS | agent service gateway *(planned)* | The stable discovery and invocation surface for agents and external tools. |
 
-The defining difference is the scheduler/dispatcher step. Kubernetes **schedules** a pod by choosing a node; Agenetes **dispatches** a workload by resolving `WorkloadSpec.kind` to an Agent Driver. Placement is part of the declaration itself — in the current process, on the local machine, or on a remote server — rather than a decision made by Agenetes. The Agent Driver is the pluggable runtime implementation that materializes the Agent Process; the Agent Handle it returns is the live per-workload surface the host app drives through the uniform runtime contract.
+From the host app's point of view, the flow is straightforward: declare a `WorkloadSpec`, invoke it, let Agenetes resolve the spec to an Agent Driver, and then drive the returned Agent Handle. The driver materializes the Agent Process at the placement already declared by the spec — in the current process, on the local machine, or on a remote server — and the handle is the live per-workload surface exposed through the uniform runtime contract. This is dispatching rather than scheduling because Agenetes resources are not fungible: an in-process runtime is tied to the current process and its injected capabilities, while a local or remote runtime may be tied to a particular filesystem, credential set, daemon, or execution environment. Treating those environments as interchangeable nodes would create the wrong abstraction.
 
-关键差异在第三列。Kubernetes 会通过**调度**为 pod 选择一个 node；Agenetes 则通过**分发**把 `WorkloadSpec.kind` 解析到某个 Agent Driver。位置是声明本身的一部分——当前进程、本机、或远程服务器——而不是 Agenetes 做出的选择。Agent Driver 是负责物化 Agent Process 的可插拔 runtime 实现；它返回的 Agent Handle 则是 host app 通过统一运行时契约继续驱动的、每工作负载一个的 live surface。
+从 host app 的视角看，流程很直接：声明一份 `WorkloadSpec`，调用它，让 Agenetes 把这份 spec 解析到某个 Agent Driver，然后继续驱动返回的 Agent Handle。driver 会在 spec 已经声明好的位置物化 Agent Process——当前进程、本机、或远程服务器——而 handle 则是通过统一运行时契约暴露出来的、每工作负载一个的 live surface。这是分发而不是调度，因为 Agenetes 面对的资源并不是可互换的：进程内 runtime 绑定在当前进程及其注入能力上，本机或远程 runtime 则可能绑定在某个特定文件系统、凭据集合、daemon 或执行环境上。把这些环境当作可互换 node 来选择，会制造错误的抽象。
 
-**The Name**
+## User-facing API surface / 面向用户的 API 表面
+
+The user-facing API surface separates four concerns:
+
+面向用户的 API 表面分为四类关注点：
+
+| Surface | Responsibility |
+| --- | --- |
+| Instance | Top-level workload entrypoint: accept a `WorkloadSpec`, dispatch it to a driver, and return or locate the Agent Handle. |
+| Agent Handle | Per-workload live interaction surface: run turns, stream output, send controls, inspect capabilities, and close. |
+| Persistent Querying | Durable read surface: inspect persisted thread records, replay folded history, and follow live state/event tails. |
+| Configuration | Embedding-time setup surface: mount Agenetes, provide persistence backends, register driver factories, and bind driver kinds. |
+
+Each surface has an in-process programmatic form today, used when Agenetes is mounted directly into a host app. The API-shaped forms below are suggested projections for a future process or network boundary; they describe the expected REST/SSE shape, not a finalized HTTP contract.
+
+每个 surface 当前都有一种进程内的程序调用形态，用于 Agenetes 被直接 mount 进 host app 的场景。下表中的 API-shaped forms 是未来跨进程或网络边界时的投影建议；它们描述的是预期的 REST/SSE 形态，而不是最终 HTTP contract。
+
+| Surface | Current in-process API | Suggested API-shaped form *(planned)* | Meaning |
+| --- | --- | --- | --- |
+| Instance | `Agenetes.create(spec) -> AgentHandle` | `POST /workloads` | Realize a `WorkloadSpec`: Jobs mint a fresh handle; Deployments get-or-create the live handle by `threadId`. |
+| Instance | `Agenetes.get(threadId) -> AgentHandle \| undefined` | `GET /workloads/:threadId/live` | Return the live Deployment handle when one is already running; never spawns. |
+| Instance | `Agenetes.close(threadId) -> void` | `DELETE /workloads/:threadId/live` | Close and evict the live handle for a thread. |
+| Agent Handle | `AgentHandle.run(request, render, ctx) -> AsyncGenerator<AgentStreamEvent, TResult>` | `POST /workloads/:threadId/runs` + stream | Run one turn, stream `AgentStreamEvent`s, and return the driver's per-turn result. |
+| Agent Handle | `AgentHandle.control(msg) -> Promise<ControlAck>` | `POST /workloads/:threadId/control` | Send an out-of-turn `ControlMsg` and receive a `ControlAck`. |
+| Agent Handle | `AgentHandle.close() -> void` | `DELETE /workloads/:threadId/live` | Release this workload through the handle surface. |
+| Agent Handle | `AgentHandle.capabilities -> AgentCapabilities` | `GET /workloads/:threadId/capabilities` | Read the operations and features this handle advertises. |
+| Persistent Querying | `Agenetes.record(namespace, threadId) -> ThreadRecord \| undefined` | `GET /namespaces/:namespace/workloads/:threadId` | Read one durable thread record independent of handle liveness. |
+| Persistent Querying | `Agenetes.records(namespace) -> ThreadRecord[]` | `GET /namespaces/:namespace/workloads` | Enumerate persisted thread records in one namespace. |
+| Persistent Querying | `Agenetes.notifications(threadId) -> AsyncIterable<AgentMetadata>` | `GET /workloads/:threadId/notifications` | Subscribe to persisted AgentMetadata updates. |
+| Persistent Querying | `Agenetes.history(namespace, threadId, { withTail? }) -> ThreadHistory` | `GET /namespaces/:namespace/workloads/:threadId/history?tail=1` | Read folded turns, optionally with a live tail fenced after the last folded turn. |
+| Persistent Querying | `Agenetes.tail(namespace, threadId) -> AsyncIterable<AgentStreamEvent>` | `GET /namespaces/:namespace/workloads/:threadId/events` | Follow the live Tier-1 event tail after the latest folded turn. |
+| Configuration | `mountAgenetes(options) -> AgenetesBuilder` | deployment / configuration API | Create a builder and inject persistence backends such as thread, event, and turn stores. |
+| Configuration | `AgenetesBuilder.addFactory(factoryName, factory) -> AgenetesBuilder` | deployment / configuration API | Add a driver factory to the embedding's factory dictionary. |
+| Configuration | `AgenetesBuilder.register(driverName, factoryName, args?) -> AgenetesBuilder` | deployment / configuration API | Bind a workload `kind` (`driverName`) to a named driver factory and its configuration. |
+| Configuration | `AgenetesBuilder.build() -> Agenetes` | deployment / configuration API | Materialize the configured `Agenetes` instance. |
+
+## The Name: Agenetes / 名称：Agenetes
 
 The name is coined in the shape of its model, Kubernetes. Ancient Greek κυβερνήτης (_kubernḗtēs_, "helmsman/governor") is built from the root _kubern-_ plus the agentive suffix **-ήτης (_-ētēs_)**, "the one who does." Agenetes keeps **ag- / agen-** legible as "agent" while pointing back to the older "act / drive / lead" family behind Greek ἄγω and Latin _agō_ → _agent_; it then mirrors the same **-ētēs** agentive ending. The result suggests "the one who drives agents / sets agent workloads in motion" — precisely a control plane's job. It scans like its model: Ku-ber-NÉ-tēs ⟷ A-ge-NÉ-tēs.
 
@@ -155,11 +192,11 @@ This object-injection form is the pragmatic bridge; collapsing it into the clean
 
 这种对象注入形态是务实的过渡桥；把它收拢进干净的 `create(spec)` 工厂（挪到被挂载实例*内部*，从而宿主永不自己调用 `create`）才是目标终态。
 
-### I3. Workload kinds: Job vs Deployment / 工作负载种类：Job vs Deployment
+### I3. Workload lifecycle types: Job vs Deployment / 工作负载生命周期类型：Job vs Deployment
 
-Callers do not choose a reconcile strategy (declarative vs imperative — that is an internal detail); they choose a **workload kind**, which differs only in **completion semantics**:
+Callers do not choose a reconcile strategy (declarative vs imperative — that is an internal detail); they choose a **workload lifecycle type** (`workloadType`), which differs only in **completion semantics**:
 
-调用方不选择 reconcile 策略（声明式 vs 命令式——那是内部细节）；他们选择一个**工作负载种类（workload kind）**，二者只在**完成语义**上不同：
+调用方不选择 reconcile 策略（声明式 vs 命令式——那是内部细节）；他们选择一个**工作负载生命周期类型（workload lifecycle type）**，也就是 `workloadType`，二者只在**完成语义**上不同：
 
 | Kind           | Desired state                                               | Completion                    | K8s analogue  |
 | -------------- | ----------------------------------------------------------- | ----------------------------- | ------------- |
@@ -215,9 +252,9 @@ Unlike a fungible K8s PodSpec, the Agenetes caller **knows exactly which driver 
 不同于可互换的 K8s PodSpec，Agenetes 的调用方**明确知道自己要哪个 driver 并点名它**——因为 driver 不可互换。因此 `WorkloadSpec` 是一个以必填、顶层、公开的 `kind` 字段（`internal` / `external`……）为键的 tagged union，每个成员只携带其 driver 消费的字段。关键在于：`kind` 是**契约**命名空间里的值，绝非 Agenetes 的*实现*标识符（`acp` / `sdk`）：正是 `kind → driver` 这层别名，才让一个 driver 可以被重命名、拆分或合并，而不破坏每一份 spec（包括已持久化的）。
 
 **I5.2 Two orthogonal top-level discriminants coexist / 两个正交的顶层判别式共存.**
-The driver route (`kind`) and the workload kind (`Job` / `Deployment`) are independent top-level axes.
+The driver route (`kind`) and the workload lifecycle type (`workloadType`: `Job` / `Deployment`) are independent top-level axes.
 
-驱动路由（`kind`）与工作负载种类（`Job` / `Deployment`）是两根独立的顶层轴。
+驱动路由（`kind`）与工作负载生命周期类型（`workloadType`：`Job` / `Deployment`）是两根独立的顶层轴。
 
 ### I6. The request is driver-agnostic and polymorphic / request 与 driver 无关且多态
 
@@ -270,9 +307,9 @@ The interface is modelled on the ACP client role (a complete, well-worn duplex v
 该接口以 ACP 客户端角色为原型（一套完整、久经考验的全双工词汇），但由 Agenetes 拥有，只暴露它需要的子集。ACP 只是*一个向下的 driver*，绝非面向上层的契约：`AcpAgentHandle` 包装 ACP SDK，`BuiltinAgentHandle` 包装进程内 harness，二者满足同一个 `AgentHandle`。日后替换 ACP，绝不波及 L1。
 
 **I8.2 One `run` is the shared unit; data plane vs control plane stay logically distinct / 一次 `run` 是共享的单元；数据面与控制面在逻辑上仍不同.**
-A single **run/turn** — `run(request, render, ctx)` — is the unit both workload kinds share, since a run _is_ "submit this turn's input, then stream its output" (M2's separate `submit` + `events()` merged into one call). A **Job** _is_ exactly one run then terminal (its handle's life == the run; `close()` a no-op); a **Deployment** _has-a_ run-producer: a long-lived session hosting many runs plus `control` / notifications / liveness. Content updates (message / tool / plan / thought) flow as the run's yielded `AgentStreamEvent`s — the **data plane**. A run additionally **returns** a generator `TResult`, but **L2 never reads it** — the durable transcript is folded from the run's _yielded_ `AgentStreamEvent`s (I9.8), so a driver's `TResult` stays **free** (native to that driver, or `void`). The **control plane** is affordance/meta traffic, split by direction. Host→agent operations are the handle's `control(msg: ControlMsg): Promise<ControlAck>`: `ControlMsg` is a **closed, Agenetes-owned vocabulary** of exactly five ops — `cancel`, `set_mode`, `set_model`, `set_config_option`, `answer_permission` — each **capability-gated** (a Job honours only `cancel`; a Deployment the full set — the `AgentCapabilities.control` list) and resolving to a **minimal `ControlAck`** (`{ ok: true }`, or `{ ok: false, error, code? }` with a `code` like `unsupported`), never a stream. Agent→host affordance updates (`available_commands_update`, `current_mode_update`, `permission_request`) do _not_ use `control` — they ride the run's `AgentStreamEvent`s as notifications; `answer_permission` is precisely the host _replying_ to a `permission_request`, correlated by `requestId`. So `control` is **host→agent only, not itself duplex** — the two directions are logically distinct even when they share one physical stream. Slash follows ACP exactly: discover via an `available_commands_update` notification, _invoke_ by putting the command text into an ordinary data-plane prompt — there is no `runCommand`.
+A single **run/turn** — `run(request, render, ctx)` — is the unit both workload lifecycle types share, since a run _is_ "submit this turn's input, then stream its output" (M2's separate `submit` + `events()` merged into one call). A **Job** _is_ exactly one run then terminal (its handle's life == the run; `close()` a no-op); a **Deployment** _has-a_ run-producer: a long-lived session hosting many runs plus `control` / notifications / liveness. Content updates (message / tool / plan / thought) flow as the run's yielded `AgentStreamEvent`s — the **data plane**. A run additionally **returns** a generator `TResult`, but **L2 never reads it** — the durable transcript is folded from the run's _yielded_ `AgentStreamEvent`s (I9.8), so a driver's `TResult` stays **free** (native to that driver, or `void`). The **control plane** is affordance/meta traffic, split by direction. Host→agent operations are the handle's `control(msg: ControlMsg): Promise<ControlAck>`: `ControlMsg` is a **closed, Agenetes-owned vocabulary** of exactly five ops — `cancel`, `set_mode`, `set_model`, `set_config_option`, `answer_permission` — each **capability-gated** (a Job honours only `cancel`; a Deployment the full set — the `AgentCapabilities.control` list) and resolving to a **minimal `ControlAck`** (`{ ok: true }`, or `{ ok: false, error, code? }` with a `code` like `unsupported`), never a stream. Agent→host affordance updates (`available_commands_update`, `current_mode_update`, `permission_request`) do _not_ use `control` — they ride the run's `AgentStreamEvent`s as notifications; `answer_permission` is precisely the host _replying_ to a `permission_request`, correlated by `requestId`. So `control` is **host→agent only, not itself duplex** — the two directions are logically distinct even when they share one physical stream. Slash follows ACP exactly: discover via an `available_commands_update` notification, _invoke_ by putting the command text into an ordinary data-plane prompt — there is no `runCommand`.
 
-一次**run/轮次**——`run(request, render, ctx)`——是两种工作负载种类共享的单元，因为一次 run _就是_"提交本轮输入、再流式输出其结果"（M2 中分开的 `submit` + `events()` 已合并为一次调用）。**Job** *就是*恰好一次 run 然后终止（其 handle 的生命 == 那次 run；`close()` 为空操作）；**Deployment** *拥有*一个 run 生产者：一个长期存活、承载多次 run 的 session，外加 `control` / 通知 / 存活性。内容更新（message / tool / plan / thought）作为 run 产出的 `AgentStreamEvent` 流动——即**数据面**。一次 run 还会以其生成器 **返回**一个 `TResult`，但 **L2 从不读取它**——持久 transcript 是从 run *产出*的 `AgentStreamEvent` 折叠而来（I9.8），因此 driver 的 `TResult` 保持**自由**（可以是该 driver 的原生形状，或 `void`）。**控制面**是能力/元信息流量，按方向拆分。host→agent 的操作是 handle 的 `control(msg: ControlMsg): Promise<ControlAck>`：`ControlMsg` 是一个**由 Agenetes 拥有的封闭词汇**，恰好五个操作——`cancel`、`set_mode`、`set_model`、`set_config_option`、`answer_permission`——每个都受**能力门控**（Job 只认 `cancel`；Deployment 认全套——即 `AgentCapabilities.control` 列表），并解析为一个**极简 `ControlAck`**（`{ ok: true }`，或带 `code`（如 `unsupported`）的 `{ ok: false, error, code? }`），绝非一条流。agent→host 的能力更新（`available_commands_update`、`current_mode_update`、`permission_request`）*不*走 `control`——它们作为通知走在 run 的 `AgentStreamEvent` 上；`answer_permission` 恰恰是 host 对某个 `permission_request` 的*回复*，按 `requestId` 关联。所以 `control` 是 **host→agent 单向的，本身不是双工**——即便两个方向共用同一条物理流，在逻辑上仍不同。斜杠命令完全遵循 ACP：经 `available_commands_update` 通知*发现*，通过把命令文本放进普通的数据面 prompt 来*执行*——没有 `runCommand`。
+一次**run/轮次**——`run(request, render, ctx)`——是两种工作负载生命周期类型共享的单元，因为一次 run _就是_"提交本轮输入、再流式输出其结果"（M2 中分开的 `submit` + `events()` 已合并为一次调用）。**Job** *就是*恰好一次 run 然后终止（其 handle 的生命 == 那次 run；`close()` 为空操作）；**Deployment** *拥有*一个 run 生产者：一个长期存活、承载多次 run 的 session，外加 `control` / 通知 / 存活性。内容更新（message / tool / plan / thought）作为 run 产出的 `AgentStreamEvent` 流动——即**数据面**。一次 run 还会以其生成器 **返回**一个 `TResult`，但 **L2 从不读取它**——持久 transcript 是从 run *产出*的 `AgentStreamEvent` 折叠而来（I9.8），因此 driver 的 `TResult` 保持**自由**（可以是该 driver 的原生形状，或 `void`）。**控制面**是能力/元信息流量，按方向拆分。host→agent 的操作是 handle 的 `control(msg: ControlMsg): Promise<ControlAck>`：`ControlMsg` 是一个**由 Agenetes 拥有的封闭词汇**，恰好五个操作——`cancel`、`set_mode`、`set_model`、`set_config_option`、`answer_permission`——每个都受**能力门控**（Job 只认 `cancel`；Deployment 认全套——即 `AgentCapabilities.control` 列表），并解析为一个**极简 `ControlAck`**（`{ ok: true }`，或带 `code`（如 `unsupported`）的 `{ ok: false, error, code? }`），绝非一条流。agent→host 的能力更新（`available_commands_update`、`current_mode_update`、`permission_request`）*不*走 `control`——它们作为通知走在 run 的 `AgentStreamEvent` 上；`answer_permission` 恰恰是 host 对某个 `permission_request` 的*回复*，按 `requestId` 关联。所以 `control` 是 **host→agent 单向的，本身不是双工**——即便两个方向共用同一条物理流，在逻辑上仍不同。斜杠命令完全遵循 ACP：经 `available_commands_update` 通知*发现*，通过把命令文本放进普通的数据面 prompt 来*执行*——没有 `runCommand`。
 
 **I8.3 A run's inputs are `request` / `render` / `ctx`; `render` is stateful over the session via a driver-supplied `AgentTurnState` / 一次 run 的入参是 `request` / `render` / `ctx`；`render` 通过 driver 提供的 `AgentTurnState` 对 session 有状态.**
 A run's per-turn inputs are three positional args — `run(request, render, ctx)` — over the create-time `WorkloadSpec` the handle already holds (the full four-layer lifetime/ownership table, incl. the spec, is I9.6; here we fix only the handle-side seam). `request` is the driver-agnostic turn envelope (I6); `render` is the caller's `request → wire blocks` closure, kept a **separate positional arg, not a `ctx` field**, precisely because rendering is L1's, not the handle's (I6), and is invoked at the last moment; `ctx` is the per-turn L1 injections (`overlay`, `signal`, `onPrepared?`). Crucially `render` is **stateful over the session**: the handle feeds it a second positional arg — a small, **driver-agnostic** `AgentTurnState` (today `{ isFirstMessage }`; later generic fields such as a turn index or resume flag, **never** driver-specific ones) carrying descriptive session-position facts the handle owns (I4.3). `render(request, state)` interprets it (e.g. include the system preamble only on the first message): render still owns the _content_ decision, the handle only _describes_ the position — keeping "preamble already sent" inside L2 while the preamble text stays with L1 (I6). The `state` is **offered, not imposed**: a render is free to ignore it and stay stateless — consuming it is the render's own implementation choice.
@@ -290,9 +327,9 @@ Handle I/O is serializable messages, never method calls carrying live objects or
 handle 的 I/O 是可序列化消息，绝不用携带活对象或闭包的方法调用跨越接缝（闭包跨越就是把两层焊死的坏味道）。控制操作是一条消息（`control({ type: 'set_mode', … })`）。注入*新行为*（一个工具实现、一个新 harness）是注册行为（代码，在接缝之下）；可序列化的 spec 只*参数化*已注册的能力。
 
 **I8.6 Capabilities are composable and negotiated, not all-or-nothing / 能力是可组合、经协商的，而非全有或全无.**
-The handle is a small core plus segregated opt-in facets (`Cancellable`, `ModeSwitchable`, …), aligned to the workload kind: a **Job** is core + `Cancellable`; a **Deployment** is the full set. Capabilities are negotiated in two phases mapped onto the candidacy/binding split (I2.3): a driver _class_ advertises candidate capabilities at `register` (static — feeds discovery/UI/admission), a _handle_ reports the actually-negotiated set after create/initialize (dynamic). The capability set is open (open/closed): adding one touches no existing driver.
+The handle is a small core plus segregated opt-in facets (`Cancellable`, `ModeSwitchable`, …), aligned to the workload lifecycle type: a **Job** is core + `Cancellable`; a **Deployment** is the full set. Capabilities are negotiated in two phases mapped onto the candidacy/binding split (I2.3): a driver _class_ advertises candidate capabilities at `register` (static — feeds discovery/UI/admission), a _handle_ reports the actually-negotiated set after create/initialize (dynamic). The capability set is open (open/closed): adding one touches no existing driver.
 
-handle 是一个小内核加上分离的可选 facet（`Cancellable`、`ModeSwitchable`……），与工作负载种类对齐：**Job** = 内核 + `Cancellable`；**Deployment** = 完整集合。能力分两阶段协商，对应候选/绑定的划分（I2.3）：driver _类_ 在 `register` 时声明候选能力（静态——喂给发现/UI/准入），_handle_ 在 create/initialize 后报告实际协商到的集合（动态）。能力集合是开放的（开闭原则）：新增一项不触动任何现有 driver。
+handle 是一个小内核加上分离的可选 facet（`Cancellable`、`ModeSwitchable`……），与工作负载生命周期类型对齐：**Job** = 内核 + `Cancellable`；**Deployment** = 完整集合。能力分两阶段协商，对应候选/绑定的划分（I2.3）：driver _类_ 在 `register` 时声明候选能力（静态——喂给发现/UI/准入），_handle_ 在 create/initialize 后报告实际协商到的集合（动态）。能力集合是开放的（开闭原则）：新增一项不触动任何现有 driver。
 
 ### I9. The host addresses one mounted instance; the core surface stays minimal / 宿主面对一个被挂载的实例；核心表面保持最小
 
