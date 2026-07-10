@@ -1,4 +1,3 @@
-import { Check, Key } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -9,6 +8,7 @@ import {
   getImageCapabilities,
 } from '@sediment/shared';
 
+import { ApiKeyRow } from '@/components/Common/ApiKeyRow';
 import { Select } from '@/components/Common/Select';
 import { SettingRow } from '@/components/Common/SettingRow';
 import { SettingSection } from '@/components/Common/SettingSection';
@@ -40,6 +40,7 @@ const IMAGE_MODEL_FAMILY_OPTIONS = IMAGE_MODEL_FAMILIES.map((f) => ({
 export const ImageProviderSettings: React.FC = () => {
   const { t } = useTranslation();
   const llmImageConfig = useLLMStore((s) => s.imageConfig);
+  const llmImageSaving = useLLMStore((s) => s.imageSaving);
   const llmUpdateImageConfig = useLLMStore((s) => s.updateImageConfig);
 
   const [imgEndpoint, setImgEndpoint] = useState('');
@@ -48,7 +49,6 @@ export const ImageProviderSettings: React.FC = () => {
     DEFAULT_IMAGE_MODEL_FAMILY,
   );
   const [imgApiVersion, setImgApiVersion] = useState('');
-  const [imgApiKey, setImgApiKey] = useState('');
   const [imgQuality, setImgQuality] = useState<
     'low' | 'medium' | 'high' | 'auto'
   >('low');
@@ -69,7 +69,6 @@ export const ImageProviderSettings: React.FC = () => {
     setImgApiVersion(
       llmImageConfig?.apiVersion ?? DEFAULT_AZURE_IMAGE_API_VERSION,
     );
-    setImgApiKey('');
   }, [
     llmImageConfig?.baseUrl,
     llmImageConfig?.model,
@@ -197,35 +196,18 @@ export const ImageProviderSettings: React.FC = () => {
         </div>
       </SettingRow>
 
-      <SettingRow
+      <ApiKeyRow
         title={t('settings.apiKey')}
         description={
           llmImageConfig?.authenticated
-            ? t('settings.savedKeyKeepEmpty')
+            ? undefined
             : t('settings.imageKeyRequired')
         }
-      >
-        <div className="flex items-center gap-1.5">
-          {llmImageConfig?.authenticated ? (
-            <Check size={14} className="text-success" />
-          ) : (
-            <Key size={14} className="text-warning" />
-          )}
-          <input
-            type="password"
-            placeholder={
-              llmImageConfig?.authenticated ? '••••••••' : 'Azure key'
-            }
-            value={imgApiKey}
-            onChange={(e) => {
-              const v = e.target.value;
-              setImgApiKey(v);
-              if (v.trim()) debouncedSaveImage({ apiKey: v.trim() });
-            }}
-            className={`${TEXT_INPUT_CLASS} w-44`}
-          />
-        </div>
-      </SettingRow>
+        saved={llmImageConfig?.authenticated ?? false}
+        placeholder="Azure key"
+        saving={llmImageSaving}
+        onSave={(key) => saveImage({ apiKey: key })}
+      />
     </SettingSection>
   );
 };

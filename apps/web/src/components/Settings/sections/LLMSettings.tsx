@@ -1,7 +1,8 @@
-import { Check, Copy, Key, LogIn, LogOut } from 'lucide-react';
+import { Check, Copy, LogIn, LogOut } from 'lucide-react';
 import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { ApiKeyRow } from '@/components/Common/ApiKeyRow';
 import { Button } from '@/components/Common/Button';
 import { Select } from '@/components/Common/Select';
 import { SettingRow } from '@/components/Common/SettingRow';
@@ -60,14 +61,10 @@ export const LLMSettings: React.FC = () => {
   const [azureEndpoint, setAzureEndpoint] = useState('');
   const [azureDeployment, setAzureDeployment] = useState('');
   const [azureApiVersion, setAzureApiVersion] = useState('');
-  const [azureApiKey, setAzureApiKey] = useState('');
-  const [apiKeyValue, setApiKeyValue] = useState('');
-  const [showApiKeyInput, setShowApiKeyInput] = useState(false);
   const [manualModel, setManualModel] = useState('');
 
   // ── Utility-tier form state ──
   const [utilityManualModel, setUtilityManualModel] = useState('');
-  const [utilityApiKey, setUtilityApiKey] = useState('');
   const utilityFollowsChat = !utilityConfig?.provider;
 
   const isAzure = llmConfig?.provider === 'azure-openai';
@@ -75,6 +72,15 @@ export const LLMSettings: React.FC = () => {
     (p) => p.id === llmConfig?.provider,
   );
   const isOAuth = selectedProvider?.authType === 'oauth';
+
+  // The utility tier can target any provider independently of chat, so it
+  // needs its own OAuth check: OAuth providers (e.g. Copilot) authenticate
+  // via login — never an inline API key — and that login is shared with the
+  // chat tier, so signing in once covers both.
+  const utilitySelectedProvider = llmProviders.find(
+    (p) => p.id === utilityConfig?.provider,
+  );
+  const isUtilityOAuth = utilitySelectedProvider?.authType === 'oauth';
 
   // Sync chat Azure fields with the persisted config whenever it
   // changes (initial load, after auto-save, or when switching to
@@ -84,7 +90,6 @@ export const LLMSettings: React.FC = () => {
     setAzureEndpoint(llmConfig?.baseUrl ?? '');
     setAzureDeployment(llmConfig?.model ?? '');
     setAzureApiVersion(llmConfig?.apiVersion ?? '');
-    setAzureApiKey('');
   }, [isAzure, llmConfig?.baseUrl, llmConfig?.model, llmConfig?.apiVersion]);
 
   // Surface store errors as transient toasts.
@@ -124,11 +129,9 @@ export const LLMSettings: React.FC = () => {
   );
   const debouncedSaveUtility = useDebouncedSave(saveUtility);
 
-  // Keep the utility manual-model / API-key inputs in sync with persisted
-  // config (initial load, provider switch). API key is never pre-filled.
+  // Keep the utility manual-model input in sync with persisted config.
   useEffect(() => {
     setUtilityManualModel(utilityConfig?.model ?? '');
-    setUtilityApiKey('');
   }, [utilityConfig?.provider, utilityConfig?.model]);
 
   // ── Utility handlers ──
@@ -158,8 +161,6 @@ export const LLMSettings: React.FC = () => {
   // ─── Handlers ─────────────────────────────────────────────────────
   const handleProviderChange = async (providerId: string) => {
     await llmLoadModels(providerId);
-    setShowApiKeyInput(false);
-    setApiKeyValue('');
     setManualModel('');
     // Send an empty model — the server restores this provider's
     // previously-saved model from its per-provider store, or
@@ -269,35 +270,18 @@ export const LLMSettings: React.FC = () => {
               />
             </SettingRow>
 
-            <SettingRow
+            <ApiKeyRow
               title={t('settings.apiKey')}
               description={
                 llmConfig?.authenticated
                   ? t('settings.savedKeyKeepEmpty')
                   : t('settings.azureKeyRequired')
               }
-            >
-              <div className="flex items-center gap-1.5">
-                {llmConfig?.authenticated ? (
-                  <Check size={14} className="text-success" />
-                ) : (
-                  <Key size={14} className="text-warning" />
-                )}
-                <input
-                  type="password"
-                  placeholder={
-                    llmConfig?.authenticated ? '••••••••' : 'Azure key'
-                  }
-                  value={azureApiKey}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setAzureApiKey(v);
-                    if (v.trim()) debouncedSaveChat({ apiKey: v.trim() });
-                  }}
-                  className={`${TEXT_INPUT_CLASS} w-44`}
-                />
-              </div>
-            </SettingRow>
+              saved={llmConfig?.authenticated ?? false}
+              placeholder="Azure key"
+              saving={llmSaving}
+              onSave={(key) => saveChat({ apiKey: key })}
+            />
           </>
         )}
 
@@ -370,53 +354,20 @@ export const LLMSettings: React.FC = () => {
           </div>
         )}
 
-        {/* Generic (non-Azure, non-OAuth) API key row — auto-saves on input */}
+        {/* Generic API-key providers use the shared intentional edit flow. */}
         {llmConfig && !isOAuth && !isAzure && (
-          <SettingRow
+          <ApiKeyRow
             title={t('settings.apiKey')}
             description={
               llmConfig.authenticated
                 ? t('settings.savedKeyKeepEmpty')
                 : t('settings.providerKeyRequired')
             }
-          >
-            <div className="flex items-center gap-1.5">
-              {llmConfig.authenticated ? (
-                <Check size={14} className="text-success" />
-              ) : (
-                <Key size={14} className="text-warning" />
-              )}
-              <Button
-                variant="outline"
-                tone="neutral"
-                size="sm"
-                onClick={() => setShowApiKeyInput(!showApiKeyInput)}
-              >
-                {showApiKeyInput
-                  ? t('actions.cancel')
-                  : llmConfig.authenticated
-                    ? t('settings.updateKey')
-                    : t('settings.setApiKey')}
-              </Button>
-            </div>
-          </SettingRow>
-        )}
-
-        {llmConfig && !isOAuth && !isAzure && showApiKeyInput && (
-          <div className="px-3 py-2.5">
-            <input
-              type="password"
-              placeholder="sk-…"
-              value={apiKeyValue}
-              onChange={(e) => {
-                const v = e.target.value;
-                setApiKeyValue(v);
-                if (v.trim()) debouncedSaveChat({ apiKey: v.trim() });
-              }}
-              className={`${TEXT_INPUT_CLASS} w-full`}
-              autoFocus
-            />
-          </div>
+            saved={llmConfig.authenticated}
+            placeholder="sk-…"
+            saving={llmSaving}
+            onSave={(key) => saveChat({ apiKey: key })}
+          />
         )}
       </SettingSection>
 
@@ -480,36 +431,48 @@ export const LLMSettings: React.FC = () => {
               </SettingRow>
             )}
 
-            {/* Inline API key — only when the chosen provider has no saved key */}
-            {utilityConfig && !utilityConfig.authenticated && (
-              <SettingRow
-                title={t('settings.apiKey')}
-                description={t('settings.providerKeyRequired')}
-              >
-                <div className="flex items-center gap-1.5">
-                  <Key size={14} className="text-warning" />
-                  <input
-                    type="password"
-                    placeholder="sk-…"
-                    value={utilityApiKey}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setUtilityApiKey(v);
-                      if (v.trim()) debouncedSaveUtility({ apiKey: v.trim() });
-                    }}
-                    className={`${TEXT_INPUT_CLASS} w-44`}
-                  />
-                </div>
-              </SettingRow>
-            )}
-
-            {utilityConfig?.authenticated && (
-              <SettingRow
-                title={t('settings.apiKey')}
-                description={t('settings.savedKeyKeepEmpty')}
-              >
-                <Check size={14} className="text-success" />
-              </SettingRow>
+            {/* OAuth providers (e.g. Copilot) authenticate via login, which
+                is shared with the chat tier — never an inline API key. */}
+            {utilityConfig && isUtilityOAuth ? (
+              utilityConfig.authenticated ? (
+                <SettingRow
+                  title={t('settings.authentication')}
+                  description={t('settings.utilityUsesLogin')}
+                >
+                  <Check size={14} className="text-success" />
+                </SettingRow>
+              ) : (
+                <SettingRow
+                  title={t('settings.authentication')}
+                  description={t('settings.utilityLoginRequired')}
+                >
+                  <Button
+                    variant="outline"
+                    tone="info"
+                    size="sm"
+                    onClick={() => void startOAuth()}
+                    disabled={oauthPending}
+                  >
+                    <LogIn />
+                    {t('settings.login')}
+                  </Button>
+                </SettingRow>
+              )
+            ) : (
+              utilityConfig && (
+                <ApiKeyRow
+                  title={t('settings.apiKey')}
+                  description={
+                    utilityConfig.authenticated
+                      ? t('settings.savedKeyKeepEmpty')
+                      : t('settings.providerKeyRequired')
+                  }
+                  saved={utilityConfig.authenticated}
+                  placeholder="sk-…"
+                  saving={utilitySaving}
+                  onSave={(key) => saveUtility({ apiKey: key })}
+                />
+              )
             )}
           </>
         )}

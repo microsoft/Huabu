@@ -957,18 +957,26 @@ function loadUtilityPersistedConfig(): PersistedConfig | null {
 /**
  * Get the saved utility-tier configuration. An empty `provider` (the
  * default) means "follow the chat model". `authenticated` reflects whether
- * the chosen provider has a resolvable key (shared per-provider store or
- * env), so the Settings UI can show whether an inline key is still needed.
+ * the chosen provider is usable: for OAuth providers it performs an
+ * authoritative credential check (shared with the chat config, so logging
+ * in once covers both tiers); for API-key providers it checks the shared
+ * per-provider store / env. This lets the Settings UI show whether an
+ * inline key is still needed, and never asks OAuth providers for a key.
  */
-export function getUtilityConfig(): LLMUtilityConfig {
+export async function getUtilityConfig(): Promise<LLMUtilityConfig> {
   const u = loadPersistedStore().utilityConfig;
   if (!u || !u.provider) {
     return { provider: '', model: '', authenticated: false };
   }
+  const providerInfo = getProviderCatalog().find((p) => p.id === u.provider);
+  const isOAuth = providerInfo?.authType === 'oauth';
+  const authenticated = isOAuth
+    ? await verifyOAuthCredentials(u.provider)
+    : !!resolveApiKey(u.provider);
   return {
     provider: u.provider,
     model: u.model ?? '',
-    authenticated: !!resolveApiKey(u.provider),
+    authenticated,
     ...(u.baseUrl ? { baseUrl: u.baseUrl } : {}),
     ...(u.apiVersion ? { apiVersion: u.apiVersion } : {}),
   };
@@ -986,9 +994,9 @@ export function getUtilityConfig(): LLMUtilityConfig {
  * (not into `utilityConfig`), so entering a key here authenticates that
  * provider for both chat and utility (v1.5 inline-key flow).
  */
-export function setUtilityConfig(
+export async function setUtilityConfig(
   update: LLMUtilityConfigUpdate,
-): LLMUtilityConfig {
+): Promise<LLMUtilityConfig> {
   const store = loadPersistedStore();
 
   // Empty provider → follow the chat model: drop the utility entry.

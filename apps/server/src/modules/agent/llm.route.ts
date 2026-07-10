@@ -123,7 +123,7 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
           .send({ message: parsed.error.issues[0]?.message ?? 'Invalid body' });
       }
 
-      const result = setUtilityConfig(parsed.data);
+      const result = await setUtilityConfig(parsed.data);
       return reply.send(result);
     },
   );
