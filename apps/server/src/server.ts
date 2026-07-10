@@ -2,7 +2,7 @@ import './load-env.js';
 import './setup-proxy.js';
 import { app } from './app.js';
 import { resolveBindHost } from './bind-host.js';
-import { initializeDesktopSecretBridge } from './security/desktop-secret-bridge.js';
+import { initializeSecretStore } from './security/secret-store.js';
 import { getLogger } from './utils/logger.js';
 
 const log = getLogger('server');
@@ -19,7 +19,7 @@ const HOST = resolveBindHost();
 
 async function start(): Promise<void> {
   try {
-    await initializeDesktopSecretBridge();
+    await initializeSecretStore();
     await app.listen({ port: PORT, host: HOST });
     // When bound to a wildcard address, "localhost" is still the URL a
     // browser on this machine would use — but log both so operators on a

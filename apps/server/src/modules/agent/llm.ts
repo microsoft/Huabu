@@ -3,8 +3,7 @@
  *
  * Supports dynamic provider/model switching at runtime.
  * Non-secret configuration is persisted to data/llm-config.json. API keys
- * use Electron safeStorage when managed by desktop, or the same JSON file in
- * standalone server mode. All settings are changed via the /api/llm routes.
+ * use the runtime SecretStore. All settings are changed via the /api/llm routes.
  */
 
 import {
@@ -41,14 +40,14 @@ import {
 } from './oauth.js';
 import { getDataDir } from '../../data-dir.js';
 import {
-  getDesktopSecret,
-  isDesktopSecretBridgeEnabled,
-  setDesktopSecret,
-} from '../../security/desktop-secret-bridge.js';
-import {
   llmProviderApiKeySecretId,
   SECRET_IDS,
 } from '../../security/secret-ids.js';
+import {
+  getPersistedSecret,
+  getSecret,
+  setSecret,
+} from '../../security/secret-store.js';
 import { getLogger } from '../../utils/logger.js';
 
 import type {
@@ -359,10 +358,8 @@ function extractLegacyImageConfig(
 }
 
 function savePersistedStore(store: PersistedStore): void {
-  if (isDesktopSecretBridgeEnabled()) {
-    for (const entry of Object.values(store.providers)) delete entry.apiKey;
-    if (store.imageConfig) delete store.imageConfig.apiKey;
-  }
+  for (const entry of Object.values(store.providers)) delete entry.apiKey;
+  if (store.imageConfig) delete store.imageConfig.apiKey;
   const dir = dirname(CONFIG_FILE);
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
@@ -417,32 +414,9 @@ function resolveApiKey(
   providerId: string,
   explicitKey?: string,
 ): string | null {
-  if (isDesktopSecretBridgeEnabled()) {
-    const secured = getDesktopSecret(llmProviderApiKeySecretId(providerId));
-    if (secured) return secured;
-    const piProviderId =
-      providerId === 'azure-openai' ? 'azure-openai-responses' : providerId;
-    return getEnvApiKey(piProviderId as KnownProvider) ?? null;
-  }
-
-  if (explicitKey) return explicitKey;
-
-  // Prefer in-memory config (avoids redundant disk reads)
-  const cfg = activeConfig ?? loadPersistedConfig();
-  if (cfg?.provider === providerId && cfg.apiKey) {
-    return cfg.apiKey;
-  }
-
-  // Any provider's stored key — the utility tier may target a provider
-  // that is not the active chat provider, and keys are stored per-provider.
-  const stored = loadPersistedStore().providers[providerId]?.apiKey;
-  if (stored) return stored;
-
-  // Fall back to environment variables via pi-ai
-  // pi-ai uses 'azure-openai-responses' instead of our 'azure-openai'
-  const piProviderId =
-    providerId === 'azure-openai' ? 'azure-openai-responses' : providerId;
-  return getEnvApiKey(piProviderId as KnownProvider) ?? null;
+  return (
+    getSecret(llmProviderApiKeySecretId(providerId)) ?? explicitKey ?? null
+  );
 }
 
 /**
@@ -767,14 +741,11 @@ export async function setLLMConfig(
   // omitted (undefined) → keep previous; empty string → clear.
   const entry: ProviderPersisted = { ...existingEntry, model: resolvedModel };
   if (update.apiKey !== undefined) {
-    if (isDesktopSecretBridgeEnabled()) {
-      await setDesktopSecret(
-        llmProviderApiKeySecretId(update.provider),
-        update.apiKey || null,
-      );
-      delete entry.apiKey;
-    } else if (update.apiKey) entry.apiKey = update.apiKey;
-    else delete entry.apiKey;
+    await setSecret(
+      llmProviderApiKeySecretId(update.provider),
+      update.apiKey || null,
+    );
+    delete entry.apiKey;
   }
   if (update.baseUrl !== undefined) {
     if (update.baseUrl) entry.baseUrl = update.baseUrl;
@@ -829,9 +800,7 @@ export function getImageConfig(): LLMImageConfig {
   }
   return {
     provider: image.provider ?? '',
-    authenticated: isDesktopSecretBridgeEnabled()
-      ? Boolean(getDesktopSecret(SECRET_IDS.imageApiKey))
-      : Boolean(image.apiKey),
+    authenticated: Boolean(getPersistedSecret(SECRET_IDS.imageApiKey)),
     ...(image.baseUrl ? { baseUrl: image.baseUrl } : {}),
     ...(image.model ? { model: image.model } : {}),
     ...(image.modelFamily ? { modelFamily: image.modelFamily } : {}),
@@ -872,11 +841,8 @@ export async function setImageConfig(
     else delete next.apiVersion;
   }
   if (update.apiKey !== undefined) {
-    if (isDesktopSecretBridgeEnabled()) {
-      await setDesktopSecret(SECRET_IDS.imageApiKey, update.apiKey || null);
-      delete next.apiKey;
-    } else if (update.apiKey) next.apiKey = update.apiKey;
-    else delete next.apiKey;
+    await setSecret(SECRET_IDS.imageApiKey, update.apiKey || null);
+    delete next.apiKey;
   }
   if (update.quality !== undefined) {
     // Enum schema rejects empty strings, so a present value always
@@ -922,9 +888,7 @@ export function getAzureImageConfig(): {
   }
   const endpoint = image?.baseUrl?.replace(/\/+$/, '') ?? '';
   const explicitDeployment = image?.model?.trim() ?? '';
-  const apiKey = isDesktopSecretBridgeEnabled()
-    ? (getDesktopSecret(SECRET_IDS.imageApiKey) ?? '')
-    : (image?.apiKey ?? '');
+  const apiKey = getSecret(SECRET_IDS.imageApiKey) ?? '';
   // Fall back to the same default the Settings input is pre-filled
   // with, so users who never touched the API Version field (and thus
   // never triggered a save for it) still get a working request.
@@ -1075,19 +1039,12 @@ export async function setUtilityConfig(
 
   // API key → shared per-provider credential store.
   if (update.apiKey !== undefined) {
-    if (isDesktopSecretBridgeEnabled()) {
-      await setDesktopSecret(
-        llmProviderApiKeySecretId(update.provider),
-        update.apiKey || null,
-      );
-      const entry = store.providers[update.provider];
-      if (entry) delete entry.apiKey;
-    } else {
-      const entry: ProviderPersisted = store.providers[update.provider] ?? {};
-      if (update.apiKey) entry.apiKey = update.apiKey;
-      else delete entry.apiKey;
-      store.providers[update.provider] = entry;
-    }
+    await setSecret(
+      llmProviderApiKeySecretId(update.provider),
+      update.apiKey || null,
+    );
+    const entry = store.providers[update.provider];
+    if (entry) delete entry.apiKey;
   }
 
   savePersistedStore(store);

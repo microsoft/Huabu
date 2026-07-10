@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
+import type { SecretStore } from './secret-store-types.js';
+
 interface ParentPort {
   on(event: 'message', listener: (event: { data: unknown }) => void): void;
   postMessage(message: unknown): void;
@@ -137,4 +139,22 @@ export async function setDesktopSecret(
   });
   if (value === null) secrets.delete(key);
   else secrets.set(key, value);
+}
+
+/** SecretStore adapter over Electron main's safeStorage bridge. */
+export class ElectronSecretStore implements SecretStore {
+  readonly kind = 'electron-safe-storage';
+  readonly writable = true;
+
+  async initialize(): Promise<void> {
+    await initializeDesktopSecretBridge();
+  }
+
+  get(id: string): string | null {
+    return getDesktopSecret(id);
+  }
+
+  async set(id: string, value: string | null): Promise<void> {
+    await setDesktopSecret(id, value);
+  }
 }
