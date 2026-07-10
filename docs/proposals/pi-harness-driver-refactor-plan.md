@@ -303,43 +303,60 @@ A handle that supports live context refresh includes `set_context` in its `suppo
 
 ## 13. Huabu refactor plan
 
-| Milestone | Status | Current state |
-| --- | --- | --- |
-| M1. Extract pi handle code | **Completed** | The reusable pi-agent-core execution layer now lives in [`external/agenetes/packages/pi-driver`](../../external/agenetes/packages/pi-driver), and the last host-owned legacy `builtin-handle.ts` file has been removed. |
-| M2. Introduce pi driver ports | **Completed** | Huabu now registers model, credential, tool, and request-render integration through [`agenetes/pi-driver.ts`](../../apps/server/src/modules/agent/agenetes/pi-driver.ts). |
-| M3. Compile Huabu profiles into pi workload specs | **Completed** | Built-in agent composition now emits serializable `PiWorkloadSpec` data instead of constructing a fresh pi `Agent` directly in the host route. |
-| M4. Make interactive built-in threads Deployments | **In Progress** | The main built-in chat path now runs as a live Deployment and uses `set_context`, but cold-start / restart still falls back to host-side recovery replay. |
-| M5. Remove legacy per-turn replay dependencies | **In Progress** | Routine per-turn replay is gone from the live path, but the route still contains a host-owned cold-start recovery fallback. Issue [#295](https://github.com/hai-team/Sediment/issues/295) tracks moving that recovery into Agenetes-managed rehydration. |
-| M6. Keep pipeline jobs explicit | **Completed** | Interactive built-in chat uses `workloadType: "Deployment"` while non-conversational callers can remain explicit `Job`s. |
-| M7. Fold shipped design into architecture docs | **In Progress** | [`docs/architecture/agent-architecture.md`](../architecture/agent-architecture.md) already reflects the Deployment cutover, but this proposal remains in flight until the remaining recovery boundary work is settled. |
-
-### M1. Extract pi handle code — Completed
+### ✅ M1. Extract pi handle code
 
 The reusable pi handle logic has been extracted into [`external/agenetes/packages/pi-driver`](../../external/agenetes/packages/pi-driver). The former host-owned `builtin-handle.ts` execution path has now been deleted, leaving only the Huabu adapter and composition layers in the host.
 
-### M2. Introduce pi driver ports — Completed
+- ✅ Reusable pi-agent-core execution logic moved into the standard subtree driver package.
+- ✅ The last host-owned legacy built-in handle file has been removed.
+
+### ✅ M2. Introduce pi driver ports
 
 Huabu now registers pi-driver ports at mount time: model resolution delegates to [llm.ts](../../apps/server/src/modules/agent/llm.ts), tool resolution delegates to [tools/index.ts](../../apps/server/src/modules/agent/tools/index.ts), and request rendering continues to use the existing conversation renderer through the host composition layer.
 
-### M3. Compile Huabu profiles into pi workload specs — Completed
+- ✅ Model resolution is injected through host ports.
+- ✅ Credential / API-key resolution is injected through host ports.
+- ✅ Tool resolution is injected through host ports.
+- ✅ Request rendering remains host-owned rather than driver-owned.
+
+### ✅ M3. Compile Huabu profiles into pi workload specs
 
 The built-in chat composition layer now compiles AGENT.md-derived settings into a serializable pi `recipe` plus opaque `hostContext`, instead of directly constructing a pi `Agent`.
 
-### M4. Make interactive built-in threads Deployments — In Progress
+- ✅ Built-in composition emits serializable `PiWorkloadSpec`.
+- ✅ Profile/runtime choices now flow through recipe + hostContext rather than direct `Agent` construction.
+
+### ▶️ M4. Make interactive built-in threads Deployments
 
 The chat path already creates or reuses a Deployment handle per `threadId`, and the live path no longer rebuilds history on every turn. The remaining gap is that cold-start / restart still uses the host-side replay fallback, and `set_context` is currently pushed unconditionally before Deployment turns rather than through a narrower dirty-triggered path.
 
-### M5. Remove legacy per-turn replay dependencies — In Progress
+- ✅ Main built-in chat path now uses `workloadType: "Deployment"`.
+- ✅ Live turns reuse the Deployment handle instead of rebuilding history each turn.
+- ✅ `set_context` is available and used on the Deployment path.
+- ▶️ Cold-start / restart still falls back to host-side recovery replay.
+- ▶️ `set_context` refresh is still broader than a narrow dirty-triggered path.
+
+### ▶️ M5. Remove legacy per-turn replay dependencies
 
 Routine replay has already been removed from the normal live Deployment path, but the route still owns the cold-start recovery fallback via `priorTurns -> resumeThreadContext(...)`. The remaining task is to remove that host-side replay path and replace it with Agenetes-managed recovery, tracked separately in issue [#295](https://github.com/hai-team/Sediment/issues/295).
 
-### M6. Keep pipeline jobs explicit — Completed
+- ✅ Normal live Deployment turns no longer rely on per-turn replay.
+- ▶️ Host-side cold-start recovery replay still exists in the route.
+- ▶️ Agenetes-managed recovery is not implemented yet.
+
+### ✅ M6. Keep pipeline jobs explicit
 
 The migration keeps pipeline and one-shot callers on `workloadType: "Job"` unless they need a long-lived conversation. The built-in main chat path is now the explicit Deployment consumer.
 
-### M7. Fold shipped design into architecture docs — In Progress
+- ✅ Interactive built-in chat is the explicit Deployment consumer.
+- ✅ Non-conversational callers can remain on `Job`.
+
+### ▶️ M7. Fold shipped design into architecture docs
 
 The architecture docs have already been updated to describe the shipped Deployment cutover. This proposal should be archived only after the remaining recovery/replay follow-up is designed and the host-side fallback is gone.
+
+- ✅ [`docs/architecture/agent-architecture.md`](../architecture/agent-architecture.md) already reflects the Deployment cutover.
+- ▶️ This proposal remains in flight until the recovery boundary work is settled.
 
 ## 14. Agenetes invariant updates
 
