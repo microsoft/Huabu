@@ -145,7 +145,10 @@ export async function resetExternalNoteWatcher(): Promise<void> {
     // error. Without this handler the FSWatcher re-emits it as an unhandled
     // 'error' event, which crashes the whole server process. Log and ignore.
     .on('error', (err: unknown) => {
-      getLogger().warn({ err }, 'external note watcher error (ignored)');
+      getLogger('external-note-watcher').warn(
+        { err },
+        'external note watcher error (ignored)',
+      );
     });
 }
 
