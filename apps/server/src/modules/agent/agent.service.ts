@@ -43,6 +43,34 @@ import type { FastifyBaseLogger } from 'fastify';
  */
 export type StreamEvent = Exclude<AgentStreamEvent, { type: 'meta' | 'end' }>;
 
+const appliedDeploymentSystemPrompts = new WeakMap<BuiltinHandle, string>();
+
+/**
+ * Keep a live Deployment's system prompt aligned with host-rendered context
+ * without sending an identical control message before every turn.
+ */
+export async function syncDeploymentSystemPrompt(
+  handle: BuiltinHandle,
+  systemPrompt: string,
+  initialSpecIsCurrent: boolean,
+): Promise<void> {
+  const appliedSystemPrompt = appliedDeploymentSystemPrompts.get(handle);
+  if (appliedSystemPrompt === systemPrompt) return;
+
+  if (!initialSpecIsCurrent || appliedSystemPrompt !== undefined) {
+    const ack = await handle.control({
+      type: 'set_context',
+      data: { systemPrompt },
+    });
+    if (!ack.ok) {
+      throw new Error(
+        `[runAgent] Failed to push Deployment system prompt via set_context: ${ack.error}`,
+      );
+    }
+  }
+  appliedDeploymentSystemPrompts.set(handle, systemPrompt);
+}
+
 interface AgentLogger {
   info: (message: string) => void;
 }
@@ -55,23 +83,8 @@ export interface AgentRunOptions {
    */
   scope: ToolScope;
   /**
-   * Conversation thread id. System-wide this is the same concept as the
-   * ACP path's `threadId` — the stable identity a conversation resumes
-   * from — but the two backends resume through different media, so its
-   * role *inside this function* differs:
-   *
-   *  - ACP: `threadId` keys a live session registry; resume means
-   *    re-prompting the still-running external agent process, whose
-   *    memory Sediment cannot otherwise reach. Stateful, in the dispatch
-   *    layer.
-   *  - Built-in: the conversation has no live process — its memory is
-   *    externalized to the on-disk turn log. The route already resumed
-   *    it (`loadTurns` + `rebuildContextMessages`) into {@link context}
-   *    BEFORE calling `runAgent`. So by the time we get here `threadId`
-   *    no longer drives resume; it is only a provenance tag for canvas
-   *    writes (feeds the per-thread change card / revert). Omitting it
-   *    leaves the dialogue intact — `context` already holds it — and
-   *    only detaches canvas writes from their owning thread.
+   * Stable conversation identity. A Deployment uses it to reuse or recover
+   * its live handle; Jobs use it only as canvas-write provenance.
    */
   threadId?: string;
   /** Current canvas ID available as implicit context for canvas-aware tools. */
@@ -91,11 +104,10 @@ export interface AgentRunOptions {
    */
   envelope?: ChatEnvelope;
   /**
-   * pi-ai Context for this run: `systemPrompt` + the prior messages the
-   * agent runs over (rebuilt history for the chat route; a caller-built
-   * message list for envelope-less callers). Treated as read-only INPUT —
-   * the run's output is delivered ONLY via the generator's return value,
-   * never by mutating `messages`.
+   * pi-ai Context for this run. The system prompt is host-rendered current
+   * context; messages seed fresh handles and envelope-less Jobs. Durable
+   * Deployment recovery is supplied by Agenetes instead. Treated as
+   * read-only input: output leaves only through the generator return value.
    */
   context: Context;
   /**
@@ -215,11 +227,21 @@ export async function* runAgent(
   // writes unattributed (every downstream consumer truthy-guards the thread
   // id), reproducing the pre-instance behaviour where these callers omitted
   // `threadId` entirely.
+  const namespace = canvasAcpNamespace(canvasId ?? '');
+  const deploymentThreadId = threadId ?? '';
+  const liveHandle =
+    workloadType === 'Deployment'
+      ? agenetes.get(deploymentThreadId)
+      : undefined;
+  const durableRecord =
+    workloadType === 'Deployment'
+      ? agenetes.record(namespace, deploymentThreadId)
+      : undefined;
   const spec: BuiltinWorkloadSpec = buildHuabuPiWorkloadSpec({
     kind: INTERNAL_DRIVER_KIND,
     workloadType,
-    threadId: threadId ?? '',
-    namespace: canvasAcpNamespace(canvasId ?? ''),
+    threadId: deploymentThreadId,
+    namespace,
     systemPrompt: context.systemPrompt,
     toolNames: agentCfg.toolNames,
     initialMessages: context.messages,
@@ -234,15 +256,11 @@ export async function* runAgent(
   // get-or-create by `threadId`; for `Job`, it mints a fresh handle.
   const handle = agenetes.create(spec) as BuiltinHandle;
   if (workloadType === 'Deployment' && context.systemPrompt !== undefined) {
-    const ack = await handle.control({
-      type: 'set_context',
-      data: { systemPrompt: context.systemPrompt },
-    });
-    if (!ack.ok) {
-      throw new Error(
-        `[runAgent] Failed to push Deployment system prompt via set_context: ${ack.error}`,
-      );
-    }
+    await syncDeploymentSystemPrompt(
+      handle,
+      context.systemPrompt,
+      liveHandle === undefined && durableRecord === undefined,
+    );
   }
   const iterator = handle.run(
     envelope ? wrapChatRequest(envelope) : null,

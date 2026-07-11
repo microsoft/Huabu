@@ -10,7 +10,7 @@
  * path is now in transition: L1 still owns the Huabu-specific adapter
  * (model/account/tool ports + spec compilation), but the execution logic
  * itself is delegated to the standard `@agenetes/pi-driver`. See
- * docs/proposals/pi-harness-driver-refactor-plan.md.
+ * docs/archive/pi-harness-driver-refactor-plan.md.
  */
 
 import {

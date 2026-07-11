@@ -2,7 +2,7 @@
 
 > Turn the current Huabu built-in pi-agent-core path from a per-turn replay workaround into a conversation-native Agenetes standard driver.
 >
-> Status: **In-Progress** · Last updated 2026-07-11
+> Status: **Shipped** · Last updated 2026-07-11
 
 ---
 
@@ -14,7 +14,7 @@ The original Huabu built-in agent path predates that model and ran multi-turn ch
 
 That shape was useful during the rush to unify built-in and external agents behind Agenetes, but it was never the target architecture. Interactive multi-turn conversations should be conversation-native Deployments: one durable `threadId` owns one long-lived runtime handle, normal turns continue the live harness state, and durable history is used for UI rendering and tail reconnect rather than for routine per-turn context reconstruction.
 
-This proposal originally scoped the standard pi harness driver and the Huabu-side refactor that migrates built-in agents onto it. The driver, Deployment cutover, and Agenetes-managed restart recovery have shipped; the remaining work is the narrower dirty-triggered `set_context` optimization.
+This proposal scoped the standard pi harness driver and the Huabu-side refactor that migrated built-in agents onto it. The driver, Deployment cutover, Agenetes-managed restart recovery, and content-triggered `set_context` synchronization have shipped.
 
 ## 2. Goals
 
@@ -35,16 +35,16 @@ This proposal does not require the first milestone to support remote pi harness 
 
 ## 4. Current code shape
 
-| File/dir                                                                                                         | Current responsibility                                                                                                                                                            |
-| ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [apps/server/src/modules/agent/agent.route.ts](../../apps/server/src/modules/agent/agent.route.ts)               | Chat route dispatches built-in vs ACP and supplies current host policy/request data; durable recovery and fork realization are owned below the route by Agenetes and its drivers. |
-| [apps/server/src/modules/agent/agent.service.ts](../../apps/server/src/modules/agent/agent.service.ts)           | Composition shell that compiles the built-in request into a serializable pi workload spec, drives `runAgent`, and pushes `set_context` before Deployment turns.                   |
-| [apps/server/src/modules/agent/agenetes/drivers.ts](../../apps/server/src/modules/agent/agenetes/drivers.ts)     | Host-owned registration layer that mounts the standard ACP and pi drivers and binds Huabu contract kinds to them.                                                                 |
-| [apps/server/src/modules/agent/agenetes/pi-driver.ts](../../apps/server/src/modules/agent/agenetes/pi-driver.ts) | Huabu adapter that wires host model, credential, and tool ports into the standard pi driver and compiles built-in profiles into `PiWorkloadSpec`.                                 |
-| [external/agenetes/packages/pi-driver](../../external/agenetes/packages/pi-driver)                               | Standard in-process pi-agent-core driver package used by both Job and Deployment lifecycles.                                                                                      |
-| [apps/server/src/prompt/agents](../../apps/server/src/prompt/agents)                                             | Huabu-owned agent profile content: frontmatter, system prompts, tools, skill scope, and runtime defaults.                                                                         |
-| [apps/server/src/modules/agent/tools](../../apps/server/src/modules/agent/tools)                                 | Huabu-owned tool definitions and executable tool bindings.                                                                                                                        |
-| [apps/server/src/modules/agent/llm.ts](../../apps/server/src/modules/agent/llm.ts)                               | Huabu-owned provider/account/OAuth settings and pi-ai model construction.                                                                                                         |
+| File/dir                                                                                                         | Current responsibility                                                                                                                                                                  |
+| ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [apps/server/src/modules/agent/agent.route.ts](../../apps/server/src/modules/agent/agent.route.ts)               | Chat route dispatches built-in vs ACP and supplies current host policy/request data; durable recovery and fork realization are owned below the route by Agenetes and its drivers.       |
+| [apps/server/src/modules/agent/agent.service.ts](../../apps/server/src/modules/agent/agent.service.ts)           | Composition shell that compiles the built-in request into a serializable pi workload spec, drives `runAgent`, and synchronizes changed Deployment system prompts through `set_context`. |
+| [apps/server/src/modules/agent/agenetes/drivers.ts](../../apps/server/src/modules/agent/agenetes/drivers.ts)     | Host-owned registration layer that mounts the standard ACP and pi drivers and binds Huabu contract kinds to them.                                                                       |
+| [apps/server/src/modules/agent/agenetes/pi-driver.ts](../../apps/server/src/modules/agent/agenetes/pi-driver.ts) | Huabu adapter that wires host model, credential, and tool ports into the standard pi driver and compiles built-in profiles into `PiWorkloadSpec`.                                       |
+| [external/agenetes/packages/pi-driver](../../external/agenetes/packages/pi-driver)                               | Standard in-process pi-agent-core driver package used by both Job and Deployment lifecycles.                                                                                            |
+| [apps/server/src/prompt/agents](../../apps/server/src/prompt/agents)                                             | Huabu-owned agent profile content: frontmatter, system prompts, tools, skill scope, and runtime defaults.                                                                               |
+| [apps/server/src/modules/agent/tools](../../apps/server/src/modules/agent/tools)                                 | Huabu-owned tool definitions and executable tool bindings.                                                                                                                              |
+| [apps/server/src/modules/agent/llm.ts](../../apps/server/src/modules/agent/llm.ts)                               | Huabu-owned provider/account/OAuth settings and pi-ai model construction.                                                                                                               |
 
 The key split is now explicit: the reusable pi harness runtime and driver-specific history loading live below the host route, while Huabu-specific provider, tool, request, and target-spec compilation remain in the host adapter/composition layer.
 
@@ -206,9 +206,9 @@ The legacy per-turn rebuild in `resumeThreadContext` re-derived more than histor
 This recomputed content genuinely can change within one conversation, because the built-in `write` tool (`tools/definitions.ts`) targets `memory/workspace.md`, `memory/canvas.md`, and `skills/<id>/SKILL.md`. So a Deployment must not silently freeze the skill catalogue and workspace memory after create. Two facts settle the mechanism:
 
 - pi-agent-core reads `state.systemPrompt` fresh at the start of every run (`createContextSnapshot`, verified in §9.1), so the system prompt can be updated between turns without recreating the `Agent`.
-- Refreshing the prompt is a **live host-initiated imperative**, not a create-time or ambient trait. It therefore belongs in the control plane as a control message, not as a behavioural boolean (see §12.1/§12.4): the host detects a memory/skill write (a dirty flag), and before the next turn sends a `set_context` control message. The driver applies it by assigning `agent.state.systemPrompt`.
+- Refreshing the prompt is a **live host-initiated imperative**, not a create-time or ambient trait. It therefore belongs in the control plane as a control message, not as a behavioural boolean (see §12.1/§12.4): the host compares the fully rendered prompt with the last prompt applied to the live handle and sends `set_context` only when the content differs. This content comparison catches canonical memory/skill writes as well as direct user edits without coupling prompt synchronization to individual write paths. The driver applies the update by assigning `agent.state.systemPrompt`.
 
-This removes the unconditional per-turn re-render (which also wasted prompt-cache reuse) while preserving correct refresh exactly when content changes.
+This removes the unconditional per-turn control update while preserving refresh exactly when rendered content changes. A newly created Deployment already receives the current prompt through its spec; a recovered handle is synchronized once before its first turn because persisted Deployment specs remain authoritative during realization and may contain an older prompt.
 
 ## 10. Request rendering model
 
@@ -298,7 +298,7 @@ SetContext: ('set_context',
   })));
 ```
 
-A handle that supports live context refresh includes `set_context` in its `supportedControlMessages` (the pi Deployment handle does; Job handles and backends without the semantics omit it). The host sends `{ type: 'set_context', data: { systemPrompt } }` before the next turn; the driver applies it by assigning `agent.state.systemPrompt`. This is the mechanism that replaces the legacy per-turn re-render described in §9.2.
+A handle that supports live context refresh includes `set_context` in its `supportedControlMessages` (the pi Deployment handle does; Job handles and backends without the semantics omit it). When the current rendered prompt differs from the prompt last applied to a live handle, the host sends `{ type: 'set_context', data: { systemPrompt } }` before the next turn; the driver applies it by assigning `agent.state.systemPrompt`. This is the mechanism that replaces the legacy fresh-Agent prompt injection described in §9.2.
 
 ## 13. Huabu refactor plan
 
@@ -325,15 +325,15 @@ The built-in chat composition layer now compiles AGENT.md-derived settings into 
 - ✅ Built-in composition emits serializable `PiWorkloadSpec`.
 - ✅ Profile/runtime choices now flow through recipe + hostContext rather than direct `Agent` construction.
 
-### ▶️ M4. Make interactive built-in threads Deployments
+### ✅ M4. Make interactive built-in threads Deployments
 
-The chat path creates or reuses a Deployment handle per `threadId`, and both live continuation and restart recovery are now owned below the route. The remaining gap is that `set_context` is pushed unconditionally before Deployment turns rather than through a narrower dirty-triggered path.
+The chat path creates or reuses a Deployment handle per `threadId`, and both live continuation and restart recovery are owned below the route. System-prompt synchronization compares rendered content per live handle, avoiding redundant `set_context` controls while retaining memory/skill freshness.
 
 - ✅ Main built-in chat path now uses `workloadType: "Deployment"`.
 - ✅ Live turns reuse the Deployment handle instead of rebuilding history each turn.
 - ✅ `set_context` is available and used on the Deployment path.
 - ✅ Cold-start / restart uses Agenetes-managed recovery.
-- ▶️ `set_context` refresh is still broader than a narrow dirty-triggered path.
+- ✅ `set_context` is sent only when rendered context changes, with one mandatory synchronization for recovered handles.
 
 ### ✅ M5. Remove legacy per-turn replay dependencies
 
@@ -383,7 +383,7 @@ Resolved during review (were open questions, now decided):
 
 - `PiModelRef` for the first milestone is a host-managed symbolic selector (`{ type: 'host', id: string }`), with Huabu using `{ type: 'host', id: 'active' }`; see §8.
 - pi-agent-core behavior guarantees for Deployment — verified against the installed version; see §9.1.
-- Dynamic system-prompt / skill / memory refresh under a Deployment — modelled as a `set_context` control message carried in `supportedControlMessages`, driven by a host write-dirty flag; see §9.2 and §12.4.
+- Dynamic system-prompt / skill / memory refresh under a Deployment — modelled as a `set_context` control message carried in `supportedControlMessages`, driven by a per-handle rendered-content comparison; see §9.2 and §12.4.
 
 The following are now decisions, not open questions for this proposal:
 
