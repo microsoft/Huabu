@@ -463,13 +463,10 @@ const agentRoutes: FastifyPluginAsync = async (
 
     const resolvedThreadId = getOrCreateThreadId(threadId);
 
-    // Load the thread's prior folded turns from L2 (the single source of
-    // truth). Both backends need this: `priorTurns.length` drives the
-    // debug turn number, and the built-in path uses them as the cold-start
-    // recovery seed when no live Deployment handle exists. A crashed
-    // in-flight turn is folded by L2 on next append; no host-side
-    // active-turn finalize is required.
-    const { turns: priorTurns } = agenetes.history(
+    // Read the existing folded turns only to number the optional debug
+    // prompt dump. Recovery history flows from Agenetes into the selected
+    // driver through AgentCreateContext; the host does not replay it.
+    const { turns: existingTurns } = agenetes.history(
       canvasAcpNamespace(canvasId ?? ''),
       resolvedThreadId,
     );
@@ -493,7 +490,7 @@ const agentRoutes: FastifyPluginAsync = async (
     // Debug-prompt metadata forwarded to the dispatch layer (it assembles
     // the final prompt). No-op unless HUABU_DEBUG_PROMPT is set.
     const debugPrompt = {
-      turnNumber: priorTurns.length + 1,
+      turnNumber: existingTurns.length + 1,
       threadId: resolvedThreadId,
       mode:
         agentBinding?.kind === 'external'
