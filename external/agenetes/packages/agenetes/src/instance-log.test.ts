@@ -105,6 +105,10 @@ describe('Agenetes two-tier conversation log (M5.6/C3)', () => {
       { type: 'text', data: { content: 'hi' } },
     ]);
     expect(turns[0]!.meta).toEqual({ stopReason: 'end_turn' });
+    expect(inst.logMetadata(ns, threadId)).toEqual({
+      eventCount: 3,
+      turnCount: 1,
+    });
   });
 
   it('get(threadId) returns the same logging handle, so later turns fold too', async () => {
@@ -152,6 +156,11 @@ describe('Agenetes two-tier conversation log (M5.6/C3)', () => {
     );
     await gen.next(); // yields live-a  → Tier-1 append
     await gen.next(); // yields live-b  → Tier-1 append
+
+    expect(inst.logMetadata(ns, threadId)).toEqual({
+      eventCount: 4,
+      turnCount: 1,
+    });
 
     const { turns, tail } = inst.history(ns, threadId, { withTail: true });
     expect(turns).toHaveLength(1); // only the committed turn

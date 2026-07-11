@@ -57,6 +57,8 @@ export interface TurnStore {
   ): void;
   /** Read every folded turn for a thread, in fold (emission) order. */
   list(namespace: Namespace, threadId: string): PersistedTurn[];
+  /** The number of folded turns persisted for a thread. */
+  count(namespace: Namespace, threadId: string): number;
   /**
    * The `seqEnd` of the last folded turn — the Tier-1 fence a live tail
    * resumes from — or `0` when the thread has no folded turn yet (tail from
@@ -114,6 +116,10 @@ export class InMemoryTurnStore implements TurnStore {
     return log ? [...log] : [];
   }
 
+  count(namespace: Namespace, threadId: string): number {
+    return this.#byNamespace.get(namespace.name)?.get(threadId)?.length ?? 0;
+  }
+
   fence(namespace: Namespace, threadId: string): number {
     const log = this.#byNamespace.get(namespace.name)?.get(threadId);
     return log && log.length > 0 ? log[log.length - 1]!.seqEnd : 0;
@@ -133,10 +139,15 @@ export class InMemoryTurnStore implements TurnStore {
  *
  * Appends are O(one line) (`appendJsonLine`). Reads tolerate a missing /
  * partially-written file and skip any malformed line, so a corrupt tail
- * never bricks a read; `fence` is served by scanning the (short) turn log —
- * turns are coarse, so this stays cheap.
+ * never bricks a read. `count` and `fence` share process-local metadata
+ * seeded by the first file scan, so subsequent reads and appends are O(1).
  */
 export class FileTurnStore implements TurnStore {
+  readonly #metadataByPath = new Map<
+    string,
+    { readonly count: number; readonly fence: number }
+  >();
+
   #path(namespace: Namespace, threadId: string): string {
     sanitizeId(threadId, 'threadId');
     const root =
@@ -153,18 +164,51 @@ export class FileTurnStore implements TurnStore {
     threadId: string,
     persisted: PersistedTurn,
   ): void {
-    appendJsonLine(this.#path(namespace, threadId), persisted);
+    const filePath = this.#path(namespace, threadId);
+    const metadata = this.#metadata(filePath);
+    appendJsonLine(filePath, persisted);
+    this.#metadataByPath.set(filePath, {
+      count: metadata.count + 1,
+      fence: persisted.seqEnd,
+    });
   }
 
   list(namespace: Namespace, threadId: string): PersistedTurn[] {
-    return readJsonLines<unknown>(this.#path(namespace, threadId)).filter(
-      isPersistedTurn,
-    );
+    const filePath = this.#path(namespace, threadId);
+    const log = this.#read(filePath);
+    this.#metadataByPath.set(filePath, this.#metadataFor(log));
+    return log;
+  }
+
+  count(namespace: Namespace, threadId: string): number {
+    return this.#metadata(this.#path(namespace, threadId)).count;
   }
 
   fence(namespace: Namespace, threadId: string): number {
-    const log = this.list(namespace, threadId);
-    return log.length > 0 ? log[log.length - 1]!.seqEnd : 0;
+    return this.#metadata(this.#path(namespace, threadId)).fence;
+  }
+
+  #read(filePath: string): PersistedTurn[] {
+    return readJsonLines<unknown>(filePath).filter(isPersistedTurn);
+  }
+
+  #metadata(filePath: string): { count: number; fence: number } {
+    const cached = this.#metadataByPath.get(filePath);
+    if (cached) return cached;
+    const log = this.#read(filePath);
+    const metadata = this.#metadataFor(log);
+    this.#metadataByPath.set(filePath, metadata);
+    return metadata;
+  }
+
+  #metadataFor(log: readonly PersistedTurn[]): {
+    count: number;
+    fence: number;
+  } {
+    return {
+      count: log.length,
+      fence: log[log.length - 1]?.seqEnd ?? 0,
+    };
   }
 }
 

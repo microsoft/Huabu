@@ -17,6 +17,7 @@ export type {
   WorkloadSpecShape,
   HistoryOptions,
   ThreadHistory,
+  ThreadLogMetadata,
 } from './instance.js';
 
 export { InMemoryThreadStore, FileThreadStore } from './thread-store.js';

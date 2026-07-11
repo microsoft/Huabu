@@ -463,10 +463,10 @@ const agentRoutes: FastifyPluginAsync = async (
 
     const resolvedThreadId = getOrCreateThreadId(threadId);
 
-    // Read the existing folded turns only to number the optional debug
+    // Read lightweight L2 log metadata only to number the optional debug
     // prompt dump. Recovery history flows from Agenetes into the selected
-    // driver through AgentCreateContext; the host does not replay it.
-    const { turns: existingTurns } = agenetes.history(
+    // driver through AgentCreateContext; the host does not load or replay it.
+    const { turnCount } = agenetes.logMetadata(
       canvasAcpNamespace(canvasId ?? ''),
       resolvedThreadId,
     );
@@ -490,7 +490,7 @@ const agentRoutes: FastifyPluginAsync = async (
     // Debug-prompt metadata forwarded to the dispatch layer (it assembles
     // the final prompt). No-op unless HUABU_DEBUG_PROMPT is set.
     const debugPrompt = {
-      turnNumber: existingTurns.length + 1,
+      turnNumber: turnCount + 1,
       threadId: resolvedThreadId,
       mode:
         agentBinding?.kind === 'external'

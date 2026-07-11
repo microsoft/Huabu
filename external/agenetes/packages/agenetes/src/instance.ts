@@ -127,6 +127,11 @@ export interface Agenetes<
    */
   notifications(threadId: string): AsyncIterable<AgentMetadata>;
   /**
+   * Read lightweight metadata about the two-tier conversation log without
+   * loading its events or folded turns.
+   */
+  logMetadata(namespace: Namespace, threadId: string): ThreadLogMetadata;
+  /**
    * Read a thread's durable conversation as folded {@link AgentTurn}s
    * (Tier 2 of the two-tier log, README I9.8) — the driver-agnostic,
    * seq-free replay view. With `withTail`, also returns a live `tail`
@@ -166,6 +171,14 @@ export interface ThreadHistory {
   readonly turns: AgentTurn[];
   /** Present only when `withTail` was set: the fenced live tail. */
   readonly tail?: AsyncIterable<AgentStreamEvent>;
+}
+
+/** Lightweight counts for one thread's two-tier conversation log. */
+export interface ThreadLogMetadata {
+  /** Number of durable Tier-1 AgentStreamEvents. */
+  readonly eventCount: number;
+  /** Number of durable Tier-2 folded AgentTurns. */
+  readonly turnCount: number;
 }
 
 /** Stream frames that terminate a run's live tail (README I8 run contract). */
@@ -550,6 +563,12 @@ export function createAgenetesInstance<
     },
     notifications(threadId: string): AsyncIterable<AgentMetadata> {
       return bus.subscribe(threadId);
+    },
+    logMetadata(namespace: Namespace, threadId: string): ThreadLogMetadata {
+      return {
+        eventCount: eventLog.maxSeq(namespace, threadId),
+        turnCount: turnStore.count(namespace, threadId),
+      };
     },
     history(
       namespace: Namespace,
