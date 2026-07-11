@@ -35,8 +35,6 @@ export {
 } from '@agenetes/pi-driver';
 export {
   agenetes,
-  builtinDriverFactory,
-  BUILTIN_FACTORY_NAME,
   INTERNAL_DRIVER_KIND,
   EXTERNAL_DRIVER_KIND,
   type AcpHandle,
