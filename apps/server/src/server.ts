@@ -31,7 +31,10 @@ async function start(): Promise<void> {
     log.info(`Server running at http://${displayHost}:${PORT}`);
   } catch (err) {
     log.error({ err }, 'Failed to start server');
-    process.exit(1);
+    // Let Node drain Pino's asynchronous SonicBoom destinations before
+    // exiting. A synchronous process.exit() here can run Pino's exit hook
+    // before the destinations are ready and mask the real startup error.
+    process.exitCode = 1;
   }
 }
 

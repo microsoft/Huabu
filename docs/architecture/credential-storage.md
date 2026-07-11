@@ -15,6 +15,8 @@ All server modules use a single synchronous-read, asynchronous-write `SecretStor
 
 Electron enables the bridge with `HUABU_SECRET_BRIDGE=1`; the server waits for a `secret:init` snapshot over `utilityProcess` messaging before binding its HTTP port, and settings mutations are acknowledged only after Electron has encrypted and atomically persisted the new value.
 
+The source workflows `pnpm dev` and `pnpm dev:desktop` run the server as an external development process, so they use the standalone backend rather than Electron `safeStorage`. They require a stable `HUABU_SECRET_KEY` when the Settings UI persists credentials, when legacy plaintext credentials need migration, or when an encrypted credential file already exists.
+
 For standalone deployments, the encrypted primary backend wins over the environment fallback. Writes target only the primary backend; the application never modifies `.env` or `process.env`. A `.env` file is merely one way `dotenv` can populate `process.env` during startup.
 
 The renderer never receives plaintext credentials. Existing HTTP read models continue to return only authentication/status booleans.

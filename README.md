@@ -71,12 +71,23 @@ Requirements: Node.js 20+ and pnpm 10+.
 
 ```bash
 pnpm install
+```
+
+The source development server needs a stable encryption key before credentials can be saved through the Settings UI. Copy `.env.example` to `.env`, generate a key with the following command, and paste its output into `HUABU_SECRET_KEY=`:
+
+```bash
+node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"
+```
+
+Keep that key unchanged: existing encrypted credentials cannot be opened with a different key. The `.env` file is git-ignored. Packaged Electron releases use the operating system's secure storage and do not require `HUABU_SECRET_KEY`.
+
+Then launch the desktop development environment:
+
+```bash
 pnpm run dev:desktop
 ```
 
-This launches the desktop app (recommended), starting the server, the web
-client, and the shared package in watch mode, then opening Huabu in its
-own desktop window.
+This launches the desktop app (recommended), starting the server, the web client, and the shared package in watch mode, then opening Huabu in its own desktop window.
 
 ### Local quality checks (optional)
 
@@ -113,7 +124,7 @@ in-canvas AI features. Open the Settings button → **LLM Provider**.
    - **API key** providers — click **Set key**, paste, save.
    - **GitHub Copilot** (OAuth) — click **Login**, then enter the shown user code at the opened GitHub page.
 
-The config is persisted on the server side, so you only need to do this once per machine.
+The config is persisted on the server side, so you only need to do this once per machine. Source development uses the `HUABU_SECRET_KEY` configured during setup; packaged Electron releases use OS-protected storage instead.
 
 > Coding agents you connect through **External Agents** (below) bring
 > their own auth and don't use this provider setting.
