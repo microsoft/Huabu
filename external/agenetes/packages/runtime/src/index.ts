@@ -4,3 +4,17 @@
 export type { AgentHandle, AgentTurnState, RenderFn } from './handle.js';
 export type { AgentDriver, AgentDriverInfo, AgentRuntime } from './driver.js';
 export { createAgentRuntime } from './driver.js';
+export type {
+  AgentCreateContext,
+  AgentDurableInput,
+  AgentDurableRecord,
+  AgentRealizationMode,
+  AgentRecoveryContext,
+  HistoryLoadAuthorization,
+  HistoryLoadAuthorizationInput,
+  ThreadIdentity,
+} from './realization.js';
+export {
+  classifyAgentRealization,
+  HistoryLoadDeniedError,
+} from './realization.js';

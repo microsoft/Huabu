@@ -2,7 +2,7 @@
 
 > Unify recovery-only replay and thread forking under one Agenetes-managed model for realizing live agent state from durable thread state.
 >
-> Status: **Planning** · Last updated 2026-07-11
+> Status: **In-Progress** · Last updated 2026-07-11
 
 ---
 
@@ -34,10 +34,10 @@ This proposal does not make Agenetes understand host-specific request payloads s
 
 Recovery and forking are two variants of the same operation:
 
-| Operation | Source durable state | Target live state |
-| --- | --- | --- |
-| Recovery | Thread `T` | Recreate or resume live runtime for the same thread `T` |
-| Forking | Thread `T` | Create a new live runtime for a new thread `T'` derived from `T` |
+| Operation | Source durable state | Target live state                                                |
+| --------- | -------------------- | ---------------------------------------------------------------- |
+| Recovery  | Thread `T`           | Recreate or resume live runtime for the same thread `T`          |
+| Forking   | Thread `T`           | Create a new live runtime for a new thread `T'` derived from `T` |
 
 In both cases the runtime may need:
 
@@ -83,10 +83,10 @@ The comparison should be based on durable thread identity, ideally `(namespace, 
 
 The likely ownership split is:
 
-| Layer | Responsibility |
-| --- | --- |
-| Host (`apps/server`) | Supplies optional host-specific ports only when a driver chooses to use them; it does not orchestrate replay in route code. |
-| Agenetes instance/runtime | Owns recovery/fork orchestration, reads durable thread state, and passes recovery inputs to drivers. |
+| Layer                                              | Responsibility                                                                                                                                                                                     |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Host (`apps/server`)                               | Supplies optional host-specific ports only when a driver chooses to use them; it does not orchestrate replay in route code.                                                                        |
+| Agenetes instance/runtime                          | Owns recovery/fork orchestration, reads durable thread state, and passes recovery inputs to drivers.                                                                                               |
 | Driver (`pi-driver`, `acp-driver`, future drivers) | Owns its realization flow and decides how to load folded turns: native transcript seed, textual serialization, combined first run, optional projection port, or another backend-specific strategy. |
 
 This means the current Huabu route-level sequence:
@@ -115,6 +115,8 @@ For now, the design direction is to use a **cheap estimation** only. This is a h
 
 The threshold values themselves should be configurable. The current direction is to place that configuration at the **Agenetes instance level** during mount and to name the primary gate with a size/limit-style concept rather than a token-accounting one.
 
+When no override is supplied, `mountAgenetes()` enables automatic recovery with `safeHistoryLoadLimit: 10_000` and `onThresholdExceeded: 'deny'`.
+
 The current minimal policy shape is:
 
 ```ts
@@ -135,9 +137,7 @@ Its semantics are intentionally simple:
 The `limit` is interpreted through a documented cheap estimation formula rather than a precise tokenizer result. The first version measures only the folded turn log:
 
 ```ts
-textualBytes = sum(
-  Buffer.byteLength(JSON.stringify(turn), 'utf8')
-);
+textualBytes = sum(Buffer.byteLength(JSON.stringify(turn), 'utf8'));
 ```
 
 It then applies the first-pass heuristic:
@@ -159,7 +159,7 @@ It is intentionally not a tokenizer-accurate result and not suitable for billing
 
 For the first version, this formula is the default recoverability heuristic unless later implementation evidence shows it is too weak or too conservative.
 
-When recovery exceeds the safe automatic budget, `deny` fails fast. `confirm` delegates to the mount-time host handler; refusal, handler failure, or no installed handler denies recovery.
+When recovery exceeds the safe automatic budget, `deny` fails fast. `confirm` delegates to the mount-time host handler; refusal or no installed handler returns a structured denial, while handler failures propagate as real errors.
 
 ## 8. Candidate seam
 
@@ -300,7 +300,7 @@ The current default direction is also that first-version forking should **not** 
 
 ## 10. Planned subtasks
 
-### ▶️ Define a generic recovery/fork vocabulary and runtime seam
+### ✅ Define a generic recovery/fork vocabulary and runtime seam
 
 Replace the narrow `create(spec, priorState)` down-feed with the agreed create context, durable input, and shared authorization utilities.
 
@@ -308,16 +308,16 @@ Replace the narrow `create(spec, priorState)` down-feed with the agreed create c
 - ✅ First-version durable input is source identity + `ThreadRecord` + folded `AgentTurn[]`.
 - ✅ Place `AgentDurableInput<TSpec>` in `@agenetes/runtime` without introducing a runtime → instance dependency.
 - ✅ Wrap durable input and instance services in `AgentCreateContext<TSpec>`.
-- ▶️ Implement instance-provided recovery authorization and remaining shared utilities.
+- ✅ Implement instance-provided recovery authorization and remaining shared utilities.
 - ✅ Preserve the fallback-ladder semantics instead of collapsing recovery into immediate replay.
 
-### ▶️ Implement pi-driver turn loading
+### ✅ Implement pi-driver turn loading
 
 pi-driver should load folded turns inside its own realization flow without importing Huabu route code into the subtree.
 
 - ✅ First-version strategy: serialized folded turns → synthetic pi message → `Agent.initialState.messages`.
-- ▶️ Define the synthetic recovery-message format.
-- ⚪ Keep host-specific prompt assembly out of the subtree package.
+- ✅ Define the synthetic recovery-message format.
+- ✅ Keep host-specific prompt assembly out of the subtree package.
 - ✅ No projection port is required for the first version.
 
 ### ▶️ Implement ACP fallback turn loading
@@ -329,13 +329,13 @@ pi-driver should load folded turns inside its own realization flow without impor
 - ✅ Do not use error-text matching for fallback classification.
 - ⚪ Create a fresh ACP session without the stale source `sessionId` before loading history.
 
-### ⚪ Move built-in cold-start replay out of `agent.route.ts`
+### ✅ Move built-in cold-start replay out of `agent.route.ts`
 
 The target is to remove route-level `priorTurns -> resumeThreadContext(...)`.
 
-- ⚪ Delete host-route ownership of built-in recovery replay.
-- ⚪ Re-home cold-start recovery behind an Agenetes-managed seam and policy.
-- ⚪ Make the built-in path enter the same recovery ladder as other drivers instead of keeping a route-local fallback.
+- ✅ Delete host-route ownership of built-in recovery replay.
+- ✅ Re-home cold-start recovery behind an Agenetes-managed seam and policy.
+- ✅ Make the built-in path enter the same recovery ladder as other drivers instead of keeping a route-local fallback.
 
 ### ▶️ Define Agenetes-level thread fork semantics for all drivers
 

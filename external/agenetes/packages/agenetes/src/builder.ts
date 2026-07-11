@@ -34,6 +34,10 @@ import {
 } from './instance.js';
 import { InMemoryThreadStore, type ThreadStore } from './thread-store.js';
 import { InMemoryTurnStore, type TurnStore } from './turn-store.js';
+import {
+  DEFAULT_AUTO_RECOVER_POLICY,
+  type AutoRecoverPolicy,
+} from './recovery.js';
 
 import type { AgentDriver, AgentHandle } from '@agenetes/runtime';
 
@@ -94,6 +98,12 @@ interface Registration {
 /** Options for {@link mountAgenetes}. */
 export interface MountAgenetesOptions {
   /**
+   * Instance-wide gate for driver-requested folded-history loading.
+   * Defaults to automatic recovery up to 10,000 estimated tokens and deny
+   * above the threshold.
+   */
+  autoRecoverPolicy?: AutoRecoverPolicy;
+  /**
    * The durable thread-record backing for the query surface (I9.4).
    * Defaults to an in-memory store; a host wires an ACP-session-store
    * adapter here at M5 E2 for restart-surviving records.
@@ -131,6 +141,8 @@ export function mountAgenetes(
     options.eventLogStore ?? new InMemoryEventLogStore(),
   );
   const turnStore = options.turnStore ?? new InMemoryTurnStore();
+  const autoRecoverPolicy =
+    options.autoRecoverPolicy ?? DEFAULT_AUTO_RECOVER_POLICY;
 
   const builder: AgenetesBuilder<Record<string, DriverFactory<never>>> = {
     addFactory(factoryName, factory) {
@@ -163,7 +175,7 @@ export function mountAgenetes(
         // dispatch is external, supplied here as the first `register` arg.
         runtime.register(driverName, {
           capabilities: driver.capabilities,
-          create: (input, priorState) => driver.create(input, priorState),
+          create: (input, context) => driver.create(input, context),
         });
       }
       return createAgenetesInstance<TSpec, THandle>(
@@ -171,6 +183,7 @@ export function mountAgenetes(
         threadStore,
         eventLog,
         turnStore,
+        autoRecoverPolicy,
       );
     },
   };

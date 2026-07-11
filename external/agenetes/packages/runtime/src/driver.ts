@@ -16,11 +16,8 @@
 // registered by L1. Today both are registered as objects.
 
 import type { AgentHandle } from './handle.js';
-import type {
-  AgentCapabilities,
-  AgentStateSnapshot,
-  AgentStreamEvent,
-} from '@agenetes/protocol';
+import type { AgentCreateContext } from './realization.js';
+import type { AgentCapabilities, AgentStreamEvent } from '@agenetes/protocol';
 
 /**
  * The generics-free driver metadata the registry can store and enumerate
@@ -44,11 +41,10 @@ export interface AgentDriverInfo {
 }
 
 /**
- * A registered driver: wraps a host-injected backing object into an
- * {@link AgentHandle}. `TInput` is the host-shaped construction bundle
- * (backing runtime object + per-invocation options); the host driver
- * forwards it to its concrete handle constructor. Kept fully generic so
- * this package never names a host type.
+ * A registered driver realizes a target create input into an
+ * {@link AgentHandle}. The create context carries any source thread's
+ * durable record and folded turns plus instance-level recovery policy.
+ * Kept fully generic so this package never names a host spec type.
  */
 export interface AgentDriver<
   TInput = unknown,
@@ -59,18 +55,12 @@ export interface AgentDriver<
   TTurnCtx = unknown,
 > extends AgentDriverInfo {
   /**
-   * Produce a handle for one workload from the host-injected `input`.
-   *
-   * The optional `priorState` is the instance's **down-feed** (I9.7): the
-   * durable `AgentStateSnapshot` last persisted for this thread, read off
-   * the {@link ThreadStore} and passed at create time so the handle can
-   * *resume* its low-level session (`priorState.sessionId`) and *rehydrate*
-   * its observable metadata (`priorState.metadata`) without ever reading a
-   * store itself. A fresh thread (no durable record) receives `undefined`.
+   * Produce a handle for one target workload. The context is always
+   * provided; `durableInput` is absent for a fresh create.
    */
   create(
     input: TInput,
-    priorState?: AgentStateSnapshot,
+    context: AgentCreateContext<TInput>,
   ): AgentHandle<TRequest, TRendered, TResult, TEvent, TTurnCtx>;
 }
 

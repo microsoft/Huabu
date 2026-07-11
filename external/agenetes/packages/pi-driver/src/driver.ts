@@ -1,13 +1,19 @@
-import { PI_DRIVER_CAPABILITIES, PiAgentHandle, type InStreamEvent, type PiTurnCtx } from './handle.js';
+import {
+  PI_DRIVER_CAPABILITIES,
+  PiAgentHandle,
+  type InStreamEvent,
+  type PiTurnCtx,
+} from './handle.js';
 
 import type { AgentDriver } from '@agenetes/runtime';
-import type { PiDriverFactoryConfig, PiRenderedInput, PiRunResult, PiWorkloadSpec } from './types.js';
-
-export type {
+import type {
+  PiDriverFactoryConfig,
   PiRenderedInput,
   PiRunResult,
   PiWorkloadSpec,
 } from './types.js';
+
+export type { PiRenderedInput, PiRunResult, PiWorkloadSpec } from './types.js';
 
 export type PiAgentDriver<TRequest = unknown> = AgentDriver<
   PiWorkloadSpec,
@@ -25,6 +31,7 @@ export function piDriverFactory<TRequest = unknown>(
     description:
       'Standard in-process pi-agent-core driver with Job and Deployment lifecycles; host policy enters through model, credential, and tool ports.',
     capabilities: PI_DRIVER_CAPABILITIES,
-    create: (spec) => new PiAgentHandle<TRequest>(spec, config.ports),
+    create: (spec, context) =>
+      new PiAgentHandle<TRequest>(spec, config.ports, context),
   };
 }

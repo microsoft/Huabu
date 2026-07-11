@@ -25,6 +25,11 @@ import {
 } from './event-log.js';
 import { createTranscriptFolder } from './fold.js';
 import { ThreadNotificationBus } from './notifications.js';
+import {
+  createAgentRecoveryContext,
+  DEFAULT_AUTO_RECOVER_POLICY,
+  type AutoRecoverPolicy,
+} from './recovery.js';
 import { type ThreadRecord, type ThreadStore } from './thread-store.js';
 import { InMemoryTurnStore, type TurnStore } from './turn-store.js';
 
@@ -38,7 +43,11 @@ import type {
   Namespace,
   WorkloadType,
 } from '@agenetes/protocol';
-import type { AgentHandle, AgentRuntime } from '@agenetes/runtime';
+import type {
+  AgentCreateContext,
+  AgentHandle,
+  AgentRuntime,
+} from '@agenetes/runtime';
 
 /**
  * The minimal shape the instance reads off a `WorkloadSpec` (I9.6). The
@@ -287,6 +296,7 @@ export function createAgenetesInstance<
   threadStore: ThreadStore,
   eventLog: EventLog = new EventLog(new InMemoryEventLogStore()),
   turnStore: TurnStore = new InMemoryTurnStore(),
+  autoRecoverPolicy: AutoRecoverPolicy = DEFAULT_AUTO_RECOVER_POLICY,
 ): Agenetes<TSpec, THandle> {
   // The instance is the SOLE ThreadStore writer and the owner of the
   // per-thread notification fan-out (I9.7). It registers ONE up-report
@@ -295,6 +305,7 @@ export function createAgenetesInstance<
   // persister + re-emitter.
   const bus = new ThreadNotificationBus();
   const unsubscribers = new Map<string, () => void>();
+  const recovery = createAgentRecoveryContext(autoRecoverPolicy);
 
   // Register the handle's up-report listener: persist the full snapshot
   // FIRST (sole writer), then re-emit its metadata (persist-then-notify).
@@ -396,19 +407,36 @@ export function createAgenetesInstance<
 
   return {
     create(spec: TSpec): THandle {
-      const driver = runtime.resolve(spec.kind);
-      if (!driver) {
-        throw new Error(`no agent driver registered for kind '${spec.kind}'`);
-      }
-      // Down-feed (I9.7): read the durable snapshot last persisted for this
-      // thread and hand it to the driver at create time, so a returning
-      // handle resumes/rehydrates from it instead of reading a store. A
-      // fresh thread has no record → `undefined`. `state: {}` (a live but
-      // never-up-reported thread) also feeds through as an empty snapshot.
+      // A persisted same-thread spec is authoritative across restart,
+      // preserving reuse-ignores-spec semantics when no live handle exists.
       const prior = spec.threadId
         ? threadStore.get<TSpec>(spec.namespace, spec.threadId)
         : undefined;
-      const priorState = prior?.state;
+      const targetSpec =
+        prior?.spec.workloadType === 'Deployment' ? prior.spec : spec;
+      const driver = runtime.resolve<TSpec>(targetSpec.kind);
+      if (!driver) {
+        throw new Error(
+          `no agent driver registered for kind '${targetSpec.kind}'`,
+        );
+      }
+      const context: AgentCreateContext<TSpec> = {
+        ...(prior
+          ? {
+              durableInput: {
+                source: {
+                  namespace: spec.namespace,
+                  threadId: spec.threadId,
+                },
+                record: prior,
+                turns: turnStore
+                  .list(spec.namespace, spec.threadId)
+                  .map(({ turn }) => turn),
+              },
+            }
+          : {}),
+        recovery,
+      };
       // Dispatch the lifecycle axis (I3.2) off the control-plane
       // `workloadType`, orthogonal to the driver route (`kind`): a Job is
       // minted fresh per turn and never enters the live-handle table (so
@@ -416,7 +444,7 @@ export function createAgenetesInstance<
       // while a Deployment get-or-creates + caches the long-lived handle
       // keyed by `threadId` (reuse ignores spec — no reconcile).
       let handle: AgentHandle;
-      if (spec.workloadType === 'Job') {
+      if (targetSpec.workloadType === 'Job') {
         // A Job is minted fresh per turn and never enters the live-handle
         // table (so `get(threadId)` stays undefined and `close()` is a no-op
         // for it). It is still LOGGED when it carries a durable `threadId` —
@@ -425,26 +453,26 @@ export function createAgenetesInstance<
         // per-turn to feed the two-tier log (I9.8). A *transient* Job (empty
         // `threadId` — a stateless one-shot) has no thread to log against and
         // runs raw.
-        const raw = driver.create(spec, priorState);
+        const raw = driver.create(targetSpec, context);
         handle =
-          spec.threadId.length > 0
-            ? decorateForLogging(raw, spec.namespace, spec.threadId)
+          targetSpec.threadId.length > 0
+            ? decorateForLogging(raw, targetSpec.namespace, targetSpec.threadId)
             : raw;
       } else {
         // Detect a *fresh* create vs a get-or-create reuse so the up-report
         // listener is wired exactly once per handle (reuse ignores spec).
-        const wasLive = runtime.get(spec.threadId) !== undefined;
+        const wasLive = runtime.get(targetSpec.threadId) !== undefined;
         // Decorate INSIDE the factory so the live-handle table caches the
         // logging handle: both this `create` return and every later
         // `get(threadId)` yield the same log-feeding handle.
-        handle = runtime.create(spec.threadId, () =>
+        handle = runtime.create(targetSpec.threadId, () =>
           decorateForLogging(
-            driver.create(spec, priorState),
-            spec.namespace,
-            spec.threadId,
+            driver.create(targetSpec, context),
+            targetSpec.namespace,
+            targetSpec.threadId,
           ),
         );
-        if (!wasLive) wireUpReport(spec, handle);
+        if (!wasLive) wireUpReport(targetSpec, handle);
       }
       // Persist a durable record only when the workload has a real thread
       // identity. A Deployment always does (its `threadId` is also the
@@ -454,14 +482,14 @@ export function createAgenetesInstance<
       // has no durable identity to key on, so it writes nothing: an empty
       // key would otherwise collide across every transient Job in the same
       // namespace and accumulate junk records nobody reads.
-      const isTransientJob = spec.workloadType === 'Job' && !spec.threadId;
+      const isTransientJob =
+        targetSpec.workloadType === 'Job' && !targetSpec.threadId;
       if (!isTransientJob) {
-        // Refresh the spec (recipe rides it, L1-baked) but PRESERVE the
-        // durable state: create must never clobber a thread's up-reported
-        // sessionId/metadata back to empty. A brand-new thread seeds `{}`.
-        threadStore.upsert(spec.namespace, spec.threadId, {
-          spec,
-          state: priorState ?? {},
+        // Preserve both the authoritative durable spec and up-reported
+        // state. A brand-new thread seeds its target spec with empty state.
+        threadStore.upsert(targetSpec.namespace, targetSpec.threadId, {
+          spec: targetSpec,
+          state: prior?.state ?? {},
         });
       }
       return handle as THandle;

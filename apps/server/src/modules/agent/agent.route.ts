@@ -24,14 +24,11 @@ import { runAcpAgent } from '../agent/acp/service.js';
 import { agenetes } from '../agent/agenetes/drivers.js';
 import { runAgent } from '../agent/agent.service.js';
 import { buildChatEnvelope } from '../agent/conversation/envelope.js';
-import { rebuildContextMessages } from '../agent/conversation/prompt/build-prompt.js';
 import { buildHistoryFromTurns } from '../agent/conversation/transcript/history.js';
 import { getLLMModel } from '../agent/llm.js';
 import { readWorkspaceMemory } from '../agent/memory/index.js';
 import { canvasAcpNamespace } from '../storage/paths.js';
 
-import type { AgentTurn } from '@agenetes/protocol';
-import type { Context } from '@earendil-works/pi-ai';
 import type {
   AgentCanvasIdQuery,
   AgentRequest,
@@ -60,16 +57,6 @@ function writeSSE(
   raw.write(`event: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`);
 }
 
-/**
- * Rebuild the pi-ai {@link Context} a BUILT-IN agent turn runs over from
- * the thread's prior turns. Built-in only: `runAgent` is stateless per
- * turn, so this `systemPrompt` + rebuilt `messages` IS its memory. The
- * ACP path keeps memory in its live session (`ensureAcpSession`) and gets
- * no Context.
- *
- * Takes `priorTurns` (already loaded by the caller for the debug turn
- * count) to avoid a second history read.
- */
 function buildAgentSystemPrompt(params: {
   canvasId: string | undefined;
   mode: Parameters<typeof loadAgent>[0];
@@ -89,27 +76,6 @@ function buildAgentSystemPrompt(params: {
   return workspaceMemory
     ? `${agentCfg.systemPrompt}\n\n<workspace_memory>\n${workspaceMemory}\n</workspace_memory>`
     : agentCfg.systemPrompt;
-}
-
-async function resumeThreadContext(params: {
-  priorTurns: readonly AgentTurn[];
-  canvasId: string | undefined;
-  mode: Parameters<typeof loadAgent>[0];
-}): Promise<Context> {
-  const { priorTurns, canvasId, mode } = params;
-
-  const systemPrompt = buildAgentSystemPrompt({ canvasId, mode });
-
-  // Rebuild `Context.messages` by re-serialising each prior turn's
-  // envelope + appending its transcript. The `[SYSTEM …]` encoding is
-  // regenerated here on the fly — it is never the source of truth on disk.
-  return {
-    systemPrompt,
-    messages: await rebuildContextMessages(priorTurns, {
-      canvasId: canvasId ?? null,
-    }),
-    tools: [],
-  };
 }
 
 // ==================== Route ====================
@@ -598,21 +564,13 @@ const agentRoutes: FastifyPluginAsync = async (
           debugPrompt,
         });
       } else {
-        // Built-in path: if a live Deployment handle already exists, keep
-        // using its in-memory transcript and only refresh the current
-        // system prompt; otherwise cold-start from durable history.
-        const liveHandle = agenetes.get(resolvedThreadId);
-        const context = liveHandle
-          ? {
-              systemPrompt: buildAgentSystemPrompt({ canvasId, mode }),
-              messages: [],
-              tools: [],
-            }
-          : await resumeThreadContext({
-              priorTurns,
-              canvasId,
-              mode,
-            });
+        // The pi-driver owns restart recovery from Agenetes durable input.
+        // L1 supplies only current host policy and the current request.
+        const context = {
+          systemPrompt: buildAgentSystemPrompt({ canvasId, mode }),
+          messages: [],
+          tools: [],
+        };
         stream = runAgent({
           scope: mode,
           workloadType: 'Deployment',

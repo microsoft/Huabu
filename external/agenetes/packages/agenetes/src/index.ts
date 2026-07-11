@@ -36,3 +36,13 @@ export { InMemoryTurnStore, FileTurnStore } from './turn-store.js';
 export type { PersistedTurn, TurnStore } from './turn-store.js';
 export { createTranscriptFolder } from './fold.js';
 export type { TranscriptFolder } from './fold.js';
+
+export {
+  DEFAULT_AUTO_RECOVER_POLICY,
+  createAgentRecoveryContext,
+  estimateHistoryLoadSize,
+} from './recovery.js';
+export type {
+  AutoRecoverPolicy,
+  RecoveryConfirmationContext,
+} from './recovery.js';

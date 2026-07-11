@@ -144,9 +144,8 @@ export interface AgentRunOptions {
  * generator.
  *
  * This is now a thin COMPOSITION shell over the mounted Agenetes instance:
- * it owns the multi-turn assembly (baking the prior transcript into the
- * Job spec's `initialMessages`) and the per-turn render / prompt-debug
- * closures, then hands a serializable {@link BuiltinWorkloadSpec} to
+ * it owns per-turn host policy and render / prompt-debug closures, then
+ * hands a serializable {@link BuiltinWorkloadSpec} to
  * `agenetes.create(spec)` and drives one `run(...)`. The execution logic
  * now lives inside the standard `@agenetes/pi-driver`; this module keeps
  * only the Huabu adapter layer (profile -> tool refs/runtime + opaque host
@@ -206,11 +205,9 @@ export async function* runAgent(
 
   const agentCfg = loadAgent(scope as AgentId);
 
-  // Bake this turn's built-in WorkloadSpec (I9.6) — now a Job-shaped
-  // `PiWorkloadSpec`. L1 still owns the multi-turn assembly: the prior
-  // transcript rides `initialMessages`, and the Huabu adapter compiles the
-  // loaded profile into tool refs + runtime knobs while the standard
-  // pi-driver owns the actual harness execution.
+  // Bake this turn's built-in WorkloadSpec (I9.6). The Huabu adapter
+  // compiles the loaded profile into tool refs + runtime knobs while the
+  // standard pi-driver owns harness execution and durable-history recovery.
   //
   // Envelope-less / stateless callers (memory / sketch / reachback) have no
   // conversation thread. `threadId: ''` keeps the instance record key inert
@@ -247,12 +244,16 @@ export async function* runAgent(
       );
     }
   }
-  const iterator = handle.run(envelope ? wrapChatRequest(envelope) : null, render, {
-    maxIterations: maxIterations ?? agentCfg.runtime.maxIterations,
-    signal,
-    logger,
-    onRendered,
-  });
+  const iterator = handle.run(
+    envelope ? wrapChatRequest(envelope) : null,
+    render,
+    {
+      maxIterations: maxIterations ?? agentCfg.runtime.maxIterations,
+      signal,
+      logger,
+      onRendered,
+    },
+  );
 
   while (true) {
     const next = await iterator.next();
