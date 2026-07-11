@@ -23,8 +23,8 @@ import type {
   PiWorkloadSpec,
 } from '@agenetes/pi-driver';
 import type { Namespace, WorkloadType } from '@agenetes/protocol';
-import type { Message } from '@earendil-works/pi-ai';
 import type { ToolExecutionMode } from '@earendil-works/pi-agent-core';
+import type { Message } from '@earendil-works/pi-ai';
 import type { NodeOrigin } from '@sediment/shared';
 
 interface HuabuPiHostContext {

@@ -1,7 +1,10 @@
-import type { AgentTool, ToolExecutionMode } from '@earendil-works/pi-agent-core';
-import type { Api, Message, Model } from '@earendil-works/pi-ai';
 import type { Namespace, WorkloadType } from '@agenetes/protocol';
 import type { RenderFn as RuntimeRenderFn } from '@agenetes/runtime';
+import type {
+  AgentTool,
+  ToolExecutionMode,
+} from '@earendil-works/pi-agent-core';
+import type { Api, Message, Model } from '@earendil-works/pi-ai';
 
 export type JsonObject = Record<string, unknown>;
 
@@ -33,9 +36,8 @@ export interface PiRecipe {
 export interface PiSpec {
   readonly recipe: PiRecipe;
   /**
-   * Create-time transcript seed. Job-first Huabu cutover uses this to
-   * carry the rebuilt prior transcript; a live Deployment normally seeds
-   * it once and then keeps mutating in-memory state.
+   * Optional fresh-create transcript seed. Durable recovery history is
+   * supplied separately through AgentCreateContext.
    */
   readonly initialMessages?: readonly Message[];
   /**
@@ -65,16 +67,25 @@ export interface PiModelContext {
   readonly hostContext?: JsonObject;
 }
 
-export interface PiToolContext extends PiModelContext {}
+export type PiToolContext = PiModelContext;
 
 export type PiRenderedInput = Message[];
 export type PiRunResult = Message[];
-export type PiRequestRenderer<TRequest> = RuntimeRenderFn<TRequest, PiRenderedInput>;
+export type PiRequestRenderer<TRequest> = RuntimeRenderFn<
+  TRequest,
+  PiRenderedInput
+>;
 
 export interface PiDriverPorts<TRequest = unknown> {
   resolveModel(ref: PiModelRef, ctx: PiModelContext): Promise<Model<Api>>;
-  getApiKey(ref: PiModelRef, ctx: PiModelContext): Promise<string | undefined> | string | undefined;
-  resolveTools(refs: readonly PiToolRef[], ctx: PiToolContext): Promise<AgentTool[]>;
+  getApiKey(
+    ref: PiModelRef,
+    ctx: PiModelContext,
+  ): Promise<string | undefined> | string | undefined;
+  resolveTools(
+    refs: readonly PiToolRef[],
+    ctx: PiToolContext,
+  ): Promise<AgentTool[]>;
   renderFallback?: PiRequestRenderer<TRequest>;
 }
 

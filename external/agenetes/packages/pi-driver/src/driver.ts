@@ -5,13 +5,13 @@ import {
   type PiTurnCtx,
 } from './handle.js';
 
-import type { AgentDriver } from '@agenetes/runtime';
 import type {
   PiDriverFactoryConfig,
   PiRenderedInput,
   PiRunResult,
   PiWorkloadSpec,
 } from './types.js';
+import type { AgentDriver } from '@agenetes/runtime';
 
 export type { PiRenderedInput, PiRunResult, PiWorkloadSpec } from './types.js';
 

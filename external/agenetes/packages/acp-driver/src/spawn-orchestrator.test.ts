@@ -1,6 +1,5 @@
-import { describe, expect, it } from 'vitest';
-
 import { AgentletRequestError } from '@agenetes/agentlet-host';
+import { describe, expect, it } from 'vitest';
 
 import { isSessionResumeUnavailableError } from './spawn-orchestrator.js';
 

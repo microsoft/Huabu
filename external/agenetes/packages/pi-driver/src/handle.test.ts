@@ -1,12 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { HistoryLoadDeniedError } from '@agenetes/runtime';
-
 import { resolvePiInitialMessages } from './handle.js';
 
-import type { AgentTurn } from '@agenetes/protocol';
-import type { AgentCreateContext } from '@agenetes/runtime';
 import type { PiWorkloadSpec } from './types.js';
+import type { AgentTurn } from '@agenetes/protocol';
+import type { HistoryLoadDeniedError } from '@agenetes/runtime';
+import type { AgentCreateContext } from '@agenetes/runtime';
 
 const spec: PiWorkloadSpec = {
   kind: 'internal',

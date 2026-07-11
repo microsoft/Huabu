@@ -21,8 +21,8 @@ import {
   type BuiltinHandle,
   type BuiltinWorkloadSpec,
 } from './agenetes/drivers.js';
-import { buildHuabuPiWorkloadSpec } from './agenetes/pi-driver.js';
 import { type RenderFn, wrapChatRequest } from './agenetes/handle.js';
+import { buildHuabuPiWorkloadSpec } from './agenetes/pi-driver.js';
 import { canvasAcpNamespace } from '../storage/paths.js';
 import { renderEnvelopeMessages } from './conversation/prompt/build-prompt.js';
 import { dumpAssembledPrompt } from './conversation/prompt/debug-prompt.js';
@@ -30,10 +30,10 @@ import { type ToolScope } from './tools/index.js';
 import { loadAgent, type AgentId } from '../../prompt/index.js';
 
 import type { ChatEnvelope } from './conversation/envelope.js';
+import type { WorkloadType } from '@agenetes/protocol';
 import type { Context, Message } from '@earendil-works/pi-ai';
 import type { AgentStreamEvent, NodeOrigin } from '@sediment/shared';
 import type { FastifyBaseLogger } from 'fastify';
-import type { WorkloadType } from '@agenetes/protocol';
 
 /**
  * SSE events yielded by `runAgent`.

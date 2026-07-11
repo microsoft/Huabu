@@ -2,7 +2,7 @@
 
 > Unify recovery-only replay and thread forking under one Agenetes-managed model for realizing live agent state from durable thread state.
 >
-> Status: **In-Progress** · Last updated 2026-07-11
+> Status: **Completed** · Last updated 2026-07-11
 
 ---
 
@@ -286,15 +286,15 @@ Safe fallback requires a structured `session_resume_unavailable` reason propagat
 
 Thread forking should not be a custom built-in-only history-copy trick. It should become an Agenetes operation that realizes a new `threadId` from a source durable thread, letting each driver decide whether that means cloning native state, replaying durable turns, or starting a fresh runtime with projected seed state.
 
-The current direction is that forking should require a **new target spec**, not blindly clone the source thread's persisted spec. The target `threadId` must be fresh; `namespace` defaults to the source namespace but may be explicitly overridden; `kind` and `workloadType` default to the source values but may be explicitly overridden; and the non-identity portion of the target spec defaults to full source-spec inheritance plus host patch/override.
+Forking requires a **complete target spec**, not a partial patch or a blind clone of the source thread's persisted spec. The host compiles every target field, including `threadId`, `namespace`, `kind`, `workloadType`, and driver-specific options. The target `threadId` must be fresh.
 
-For the first version, this merge is Agenetes-owned:
+The first-version operation is therefore:
 
-```text
-source spec + target identity + host patch/override = target spec
+```ts
+fork(sourceIdentity, targetSpec);
 ```
 
-No driver-specific spec-merge hook is required initially. Drivers receive the already-derived target spec plus source durable input. A driver-specific merge hook should only be introduced later when a concrete driver demonstrates that the common rule cannot safely express its target spec.
+Agenetes performs no field-level merge and maintains no ad-hoc list of identity or option fields. It validates source existence, target freshness, and identity separation, then gives the target driver the complete target spec plus source durable input.
 
 The current default direction is also that first-version forking should **not** blindly inherit driver-native `priorState` into the new thread. `priorState` primarily serves same-thread recovery; a new thread should be realized from the source spec/history model unless a driver later defines a safe, explicit native-state clone rule.
 
@@ -337,28 +337,28 @@ The target is to remove route-level `priorTurns -> resumeThreadContext(...)`.
 - ✅ Re-home cold-start recovery behind an Agenetes-managed seam and policy.
 - ✅ Make the built-in path enter the same recovery ladder as other drivers instead of keeping a route-local fallback.
 
-### ▶️ Define Agenetes-level thread fork semantics for all drivers
+### ✅ Define Agenetes-level thread fork semantics for all drivers
 
 This needs to cover source thread, target thread, spec derivation, and durable record behavior.
 
 - ✅ Define the source/target thread identity contract as `(namespace, threadId)`.
-- ✅ First-version target spec derivation is source spec + target identity + host patch/override.
+- ✅ L1 supplies a complete target spec; Agenetes performs no field-level merge.
 - ✅ First-version fork carries folded turns but does not inherit driver-native `priorState`.
-- ✅ No driver-specific merge hook in the first version; defer until a concrete driver requires one.
+- ✅ No driver-specific merge hook; target-spec compilation belongs to L1.
 
-### ⚪ Implement the Agenetes thread fork operation
+### ✅ Implement the Agenetes thread fork operation
 
-- ⚪ Reject a missing source record or an already-existing target identity.
-- ⚪ Derive the target spec from source inheritance, target identity, and host patch/override.
-- ⚪ Create the target handle with source durable input so the driver classifies it as a fork.
-- ⚪ Persist the target record independently without inheriting source driver-native state.
+- ✅ Reject a missing source record or an already-existing target identity.
+- ✅ Accept the complete host-compiled target spec without field-level composition.
+- ✅ Create the target handle with source durable input so the driver classifies it as a fork.
+- ✅ Persist the target record and folded turns independently without inheriting source driver-native state.
 
 ### ✅ Decide how recovery/fork interacts with `reuse-ignores-spec`
 
 Restoring a broken Deployment and creating a new forked thread are similar but not identical spec/lifecycle operations.
 
 - ✅ Same-thread recovery uses the source `ThreadRecord.spec`; configuration drift requires explicit recreation/new thread.
-- ✅ Forking derives a new target spec and may alter it through the established host patch/override rule.
+- ✅ Forking uses the complete target spec supplied by L1.
 
 ## 11. Future / backlog
 
@@ -366,4 +366,4 @@ Restoring a broken Deployment and creating a new forked thread are similar but n
 - A second hard recovery limit; the first version has one safe limit plus confirm/deny.
 - Tier-1 event-tail and incomplete in-flight turn recovery; the first version uses folded turns only.
 - Opaque `driverState` in `AgentStateSnapshot`; add it only when a concrete driver needs more than `sessionId + metadata`.
-- Driver-specific fork merge hooks or native-state cloning; add them only when a concrete driver cannot use the common spec/history model.
+- Driver-specific native-state cloning; add it only when a concrete driver cannot use the common history model.

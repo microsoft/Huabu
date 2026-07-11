@@ -31,13 +31,7 @@ Key runtime characteristics:
 - **`getApiKey: () => ensureApiKey()`**: the OAuth token can be refreshed during
   long-running tools ([llm.ts](../../apps/server/src/modules/agent/llm.ts) /
   [oauth.ts](../../apps/server/src/modules/agent/oauth.ts)).
-- **Built-in chat is now a Deployment**: `POST /api/agent` reuses one live
-  `PiAgentHandle` per `threadId` (get-or-create by Agenetes). The route still
-  rebuilds transcript context as a recovery seed, but a live handle ignores
-  spec drift and continues from in-memory `agent.state.messages`; before each
-  turn the host pushes the current rendered system prompt through
-  `set_context`, and the pi driver re-resolves the symbolic
-  `{ type: 'host', id: 'active' }` model ref at the turn boundary.
+- **Built-in chat is now a Deployment**: `POST /api/agent` reuses one live `PiAgentHandle` per `threadId` (get-or-create by Agenetes). On restart, Agenetes supplies the durable source record and folded turns through `AgentCreateContext`; pi-driver authorizes history loading and seeds one synthetic JSONL history message through pi-agent-core's native `initialState.messages`. The route no longer rebuilds transcript context. A live handle ignores spec drift and continues from in-memory `agent.state.messages`; before each turn the host pushes the current rendered system prompt through `set_context`, and the pi driver re-resolves the symbolic `{ type: 'host', id: 'active' }` model ref at the turn boundary.
 - **Abort**: route `signal` → `agent.abort()`; pi-agent-core writes a final
   message with `stopReason: 'aborted'`.
 
@@ -50,12 +44,12 @@ Five built-in agents, each with a
 declares `tools` / `skillScope` / `runtime`; loader in
 [agents/loader.ts](../../apps/server/src/prompt/agents/loader.ts)):
 
-| Agent             | Entry point                                                                                                                                         | Notes                                                                                                                             |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Agent             | Entry point                                                                                                                                         | Notes                                                                                                                                                                               |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ask` / `operate` | `POST /api/agent` ([agent.route.ts](../../apps/server/src/modules/agent/agent.route.ts) → `runAgent`)                                               | Main chat path; ask is read-only, operate can write. This path now uses a built-in **Deployment** handle (one live pi session per `threadId`). Question nodes also go through here. |
-| `sketch`          | [sketch.service.ts](../../apps/server/src/modules/agent/sketch.service.ts) `recognizeSketchCommands()`                                              | Gesture → `CanvasCommand[]`; same `runAgent` but with `sketch` scope + `sketch-recognized` origin, drains the generator (no SSE). |
-| `intent`          | [intent.route.ts](../../apps/server/src/modules/agent/intent.route.ts) → [intent.service.ts](../../apps/server/src/modules/agent/intent.service.ts) | A single LLM call that ranks candidates, `tools: []`, no agent loop.                                                              |
-| `memory`          | [memory/](../../apps/server/src/modules/agent/memory) background curator                                                                            | Triggered by the op-counter; see [agent-memory.md](./agent-memory.md).                                                            |
+| `sketch`          | [sketch.service.ts](../../apps/server/src/modules/agent/sketch.service.ts) `recognizeSketchCommands()`                                              | Gesture → `CanvasCommand[]`; same `runAgent` but with `sketch` scope + `sketch-recognized` origin, drains the generator (no SSE).                                                   |
+| `intent`          | [intent.route.ts](../../apps/server/src/modules/agent/intent.route.ts) → [intent.service.ts](../../apps/server/src/modules/agent/intent.service.ts) | A single LLM call that ranks candidates, `tools: []`, no agent loop.                                                                                                                |
+| `memory`          | [memory/](../../apps/server/src/modules/agent/memory) background curator                                                                            | Triggered by the op-counter; see [agent-memory.md](./agent-memory.md).                                                                                                              |
 
 **External / ACP agents**: when a chat request carries a `binding` field it
 routes through [acp/](../../apps/server/src/modules/agent/acp) (§6) instead of

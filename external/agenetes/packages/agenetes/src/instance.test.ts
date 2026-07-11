@@ -108,6 +108,101 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
     );
   });
 
+  it('fork() realizes a fresh target from source durable input', () => {
+    const store = new InMemoryThreadStore();
+    const turnStore = new InMemoryTurnStore();
+    const sourceNamespace = ns('canvas_1', '/data/c1');
+    const targetNamespace = ns('canvas_2', '/data/c2');
+    const sourceSpec: StubSpec = {
+      threadId: 'source_thread',
+      kind: 'external',
+      workloadType: 'Deployment',
+      namespace: sourceNamespace,
+      note: 'source',
+    };
+    const sourceState: AgentStateSnapshot = {
+      sessionId: 'source_session',
+    };
+    const sourceTurn: AgentTurn = {
+      request: { type: 'user_text', content: 'before fork' },
+      transcript: [{ type: 'text', data: { content: 'source answer' } }],
+    };
+    store.upsert(sourceNamespace, sourceSpec.threadId, {
+      spec: sourceSpec,
+      state: sourceState,
+    });
+    turnStore.append(sourceNamespace, sourceSpec.threadId, {
+      turn: sourceTurn,
+      seqStart: 1,
+      seqEnd: 2,
+    });
+    const inst = mountAgenetes({ threadStore: store, turnStore })
+      .addFactory('stub', stubDriver)
+      .register('external', 'stub')
+      .build<StubSpec>();
+    const targetSpec: StubSpec = {
+      threadId: 'target_thread',
+      kind: 'external',
+      workloadType: 'Deployment',
+      namespace: targetNamespace,
+      note: 'complete target',
+    };
+
+    const handle = inst.fork(
+      { namespace: sourceNamespace, threadId: sourceSpec.threadId },
+      targetSpec,
+    ) as unknown as StubHandle;
+
+    expect(handle.spec).toEqual(targetSpec);
+    expect(handle.createContext.durableInput).toEqual({
+      source: {
+        namespace: sourceNamespace,
+        threadId: sourceSpec.threadId,
+      },
+      record: { spec: sourceSpec, state: sourceState },
+      turns: [sourceTurn],
+    });
+    expect(inst.record(targetNamespace, targetSpec.threadId)).toEqual({
+      spec: targetSpec,
+      state: {},
+    });
+    expect(inst.history(targetNamespace, targetSpec.threadId).turns).toEqual([
+      sourceTurn,
+    ]);
+    expect(inst.record(sourceNamespace, sourceSpec.threadId)?.state).toEqual(
+      sourceState,
+    );
+  });
+
+  it('fork() rejects a missing source and non-fresh target', () => {
+    const inst = mount();
+    const namespace = ns('canvas_1');
+    const targetSpec: StubSpec = {
+      threadId: 'target_thread',
+      kind: 'external',
+      workloadType: 'Deployment',
+      namespace,
+    };
+    expect(() =>
+      inst.fork({ namespace, threadId: 'missing' }, targetSpec),
+    ).toThrow(/missing source thread/);
+
+    inst.create({
+      ...targetSpec,
+      threadId: 'source_thread',
+    });
+    expect(() =>
+      inst.fork(
+        { namespace, threadId: 'source_thread' },
+        { ...targetSpec, threadId: 'source_thread' },
+      ),
+    ).toThrow(/target threadId must differ/);
+    inst.create(targetSpec);
+    expect(() =>
+      inst.fork({ namespace, threadId: 'source_thread' }, targetSpec),
+    ).toThrow(/target thread already exists/);
+  });
+
   it('get() is a pure lookup that never spawns (I9.3)', () => {
     const inst = mount();
     expect(inst.get('missing')).toBeUndefined();

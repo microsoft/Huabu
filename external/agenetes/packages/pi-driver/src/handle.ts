@@ -1,9 +1,17 @@
-import { Agent, convertToLlm } from '@earendil-works/pi-agent-core';
 import {
   classifyAgentRealization,
   HistoryLoadDeniedError,
 } from '@agenetes/runtime';
+import { Agent, convertToLlm } from '@earendil-works/pi-agent-core';
 
+import type {
+  PiDriverPorts,
+  PiModelContext,
+  PiRenderedInput,
+  PiRunResult,
+  PiToolContext,
+  PiWorkloadSpec,
+} from './types.js';
 import type {
   AgentCapabilities,
   AgentStreamEvent,
@@ -25,15 +33,6 @@ import type {
   Message,
   TextContent,
 } from '@earendil-works/pi-ai';
-
-import type {
-  PiDriverPorts,
-  PiModelContext,
-  PiRenderedInput,
-  PiRunResult,
-  PiToolContext,
-  PiWorkloadSpec,
-} from './types.js';
 
 export type InStreamEvent = Exclude<AgentStreamEvent, { type: 'meta' | 'end' }>;
 

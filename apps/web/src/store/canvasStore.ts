@@ -2843,16 +2843,13 @@ const useCanvasStore = create<RFState>()(
       // ── Question-node conversation handling ─────────────────────────
       // A copied question node that already holds a conversation is
       // special-cased:
-      //   - built-in agent → fork the thread server-side so the copy
-      //     keeps the same history but continues on its own independent
-      //     thread (`resolvePasteClipboard` preserves the new threadId
-      //     for nodes flagged `__forkConversation`).
-      //   - external (ACP) agent → cannot be forked (the protocol has no
-      //     session-copy primitive), so skip the node and toast.
+      //   - fork the thread server-side so the copy keeps the same history
+      //     but continues on its own independent thread
+      //     (`resolvePasteClipboard` preserves the new threadId for nodes
+      //     flagged `__forkConversation`).
       // Never-run / empty question nodes fall through to a plain fresh
       // copy (the resolver resets their runtime state as before).
       const forkTasks: { srcThreadId: string; dstThreadId: string }[] = [];
-      let blockedExternal = 0;
       const prepared: Node[] = [];
       for (const node of clipboardNodes) {
         const data = (node.data ?? {}) as Record<string, unknown>;
@@ -2865,11 +2862,6 @@ const useCanvasStore = create<RFState>()(
           !!threadId &&
           (status === 'done' || status === 'error' || status === 'running');
         if (hasConversation) {
-          const binding = data.agentBinding as { kind?: string } | undefined;
-          if (binding?.kind === 'external') {
-            blockedExternal += 1;
-            continue;
-          }
           const dstThreadId = createId('thread');
           forkTasks.push({ srcThreadId: threadId, dstThreadId });
           prepared.push({
@@ -2887,19 +2879,9 @@ const useCanvasStore = create<RFState>()(
         prepared.push(node);
       }
 
-      if (blockedExternal > 0) {
-        toast(
-          blockedExternal === 1
-            ? "External agent conversations can't be copied — node skipped"
-            : `External agent conversations can't be copied — ${blockedExternal} nodes skipped`,
-          { tone: 'warning' },
-        );
-      }
-      // Everything in the clipboard was a blocked external conversation.
-      if (prepared.length === 0) return;
       clipboardNodes = prepared;
 
-      // Fire the server-side history forks for built-in copies. The copy
+      // Fire the server-side history forks. The copy
       // already points at its new threadId, but until the server finishes
       // copying the history the node must not be opened (it would load an
       // empty conversation). We flag each new threadId as fork-pending up

@@ -47,6 +47,7 @@ import type {
   AgentCreateContext,
   AgentHandle,
   AgentRuntime,
+  ThreadIdentity,
 } from '@agenetes/runtime';
 
 /**
@@ -91,6 +92,13 @@ export interface Agenetes<
    * can read it independent of handle liveness (I9.4).
    */
   create(spec: TSpec): THandle;
+  /**
+   * Realise a fresh target thread from a durable source thread. The host
+   * supplies the complete target spec; Agenetes performs no field-level
+   * merge. The target receives the source record and folded turns but
+   * starts with an empty target state.
+   */
+  fork(source: ThreadIdentity, targetSpec: TSpec): THandle;
   /**
    * Pure lookup of the live handle for `threadId` — **never spawns**
    * (I9.3). A missing handle is a precondition failure (e.g. a control
@@ -405,6 +413,62 @@ export function createAgenetesInstance<
     });
   };
 
+  const createContext = (
+    source: ThreadIdentity,
+    record: ThreadRecord<TSpec>,
+  ): AgentCreateContext<TSpec> => ({
+    durableInput: {
+      source,
+      record,
+      turns: turnStore
+        .list(source.namespace, source.threadId)
+        .map(({ turn }) => turn),
+    },
+    recovery,
+  });
+
+  const realize = (
+    targetSpec: TSpec,
+    context: AgentCreateContext<TSpec>,
+    initialState: AgentStateSnapshot,
+  ): THandle => {
+    const driver = runtime.resolve<TSpec>(targetSpec.kind);
+    if (!driver) {
+      throw new Error(
+        `no agent driver registered for kind '${targetSpec.kind}'`,
+      );
+    }
+
+    let handle: AgentHandle;
+    if (targetSpec.workloadType === 'Job') {
+      const raw = driver.create(targetSpec, context);
+      handle =
+        targetSpec.threadId.length > 0
+          ? decorateForLogging(raw, targetSpec.namespace, targetSpec.threadId)
+          : raw;
+    } else {
+      const wasLive = runtime.get(targetSpec.threadId) !== undefined;
+      handle = runtime.create(targetSpec.threadId, () =>
+        decorateForLogging(
+          driver.create(targetSpec, context),
+          targetSpec.namespace,
+          targetSpec.threadId,
+        ),
+      );
+      if (!wasLive) wireUpReport(targetSpec, handle);
+    }
+
+    const isTransientJob =
+      targetSpec.workloadType === 'Job' && !targetSpec.threadId;
+    if (!isTransientJob) {
+      threadStore.upsert(targetSpec.namespace, targetSpec.threadId, {
+        spec: targetSpec,
+        state: initialState,
+      });
+    }
+    return handle as THandle;
+  };
+
   return {
     create(spec: TSpec): THandle {
       // A persisted same-thread spec is authoritative across restart,
@@ -414,85 +478,52 @@ export function createAgenetesInstance<
         : undefined;
       const targetSpec =
         prior?.spec.workloadType === 'Deployment' ? prior.spec : spec;
-      const driver = runtime.resolve<TSpec>(targetSpec.kind);
-      if (!driver) {
+      const context = prior
+        ? createContext(
+            { namespace: spec.namespace, threadId: spec.threadId },
+            prior,
+          )
+        : { recovery };
+      return realize(targetSpec, context, prior?.state ?? {});
+    },
+    fork(source: ThreadIdentity, targetSpec: TSpec): THandle {
+      const sourceRecord = threadStore.get<TSpec>(
+        source.namespace,
+        source.threadId,
+      );
+      if (!sourceRecord) {
         throw new Error(
-          `no agent driver registered for kind '${targetSpec.kind}'`,
+          `cannot fork missing source thread '${source.namespace.name}/${source.threadId}'`,
         );
       }
-      const context: AgentCreateContext<TSpec> = {
-        ...(prior
-          ? {
-              durableInput: {
-                source: {
-                  namespace: spec.namespace,
-                  threadId: spec.threadId,
-                },
-                record: prior,
-                turns: turnStore
-                  .list(spec.namespace, spec.threadId)
-                  .map(({ turn }) => turn),
-              },
-            }
-          : {}),
-        recovery,
-      };
-      // Dispatch the lifecycle axis (I3.2) off the control-plane
-      // `workloadType`, orthogonal to the driver route (`kind`): a Job is
-      // minted fresh per turn and never enters the live-handle table (so
-      // `get(threadId)` stays undefined and `close()` is a no-op for it),
-      // while a Deployment get-or-creates + caches the long-lived handle
-      // keyed by `threadId` (reuse ignores spec — no reconcile).
-      let handle: AgentHandle;
-      if (targetSpec.workloadType === 'Job') {
-        // A Job is minted fresh per turn and never enters the live-handle
-        // table (so `get(threadId)` stays undefined and `close()` is a no-op
-        // for it). It is still LOGGED when it carries a durable `threadId` —
-        // a threaded Job (e.g. the host's built-in chat) is a multi-turn
-        // conversation whose transcript must persist, so we decorate it
-        // per-turn to feed the two-tier log (I9.8). A *transient* Job (empty
-        // `threadId` — a stateless one-shot) has no thread to log against and
-        // runs raw.
-        const raw = driver.create(targetSpec, context);
-        handle =
-          targetSpec.threadId.length > 0
-            ? decorateForLogging(raw, targetSpec.namespace, targetSpec.threadId)
-            : raw;
-      } else {
-        // Detect a *fresh* create vs a get-or-create reuse so the up-report
-        // listener is wired exactly once per handle (reuse ignores spec).
-        const wasLive = runtime.get(targetSpec.threadId) !== undefined;
-        // Decorate INSIDE the factory so the live-handle table caches the
-        // logging handle: both this `create` return and every later
-        // `get(threadId)` yield the same log-feeding handle.
-        handle = runtime.create(targetSpec.threadId, () =>
-          decorateForLogging(
-            driver.create(targetSpec, context),
-            targetSpec.namespace,
-            targetSpec.threadId,
-          ),
-        );
-        if (!wasLive) wireUpReport(targetSpec, handle);
+      if (source.threadId === targetSpec.threadId) {
+        throw new Error('fork target threadId must differ from source');
       }
-      // Persist a durable record only when the workload has a real thread
-      // identity. A Deployment always does (its `threadId` is also the
-      // live-table cache key). A Job usually carries a thread too, but a
-      // *transient* Job — a stateless one-shot invoked with an empty
-      // `threadId` (e.g. the host's memory / sketch / reachback turns) —
-      // has no durable identity to key on, so it writes nothing: an empty
-      // key would otherwise collide across every transient Job in the same
-      // namespace and accumulate junk records nobody reads.
-      const isTransientJob =
-        targetSpec.workloadType === 'Job' && !targetSpec.threadId;
-      if (!isTransientJob) {
-        // Preserve both the authoritative durable spec and up-reported
-        // state. A brand-new thread seeds its target spec with empty state.
-        threadStore.upsert(targetSpec.namespace, targetSpec.threadId, {
-          spec: targetSpec,
-          state: prior?.state ?? {},
+      if (
+        runtime.get(targetSpec.threadId) !== undefined ||
+        threadStore.get(targetSpec.namespace, targetSpec.threadId) !==
+          undefined ||
+        turnStore.list(targetSpec.namespace, targetSpec.threadId).length > 0
+      ) {
+        throw new Error(
+          `fork target thread already exists '${targetSpec.namespace.name}/${targetSpec.threadId}'`,
+        );
+      }
+      if (!targetSpec.threadId) {
+        throw new Error('fork target threadId must not be empty');
+      }
+      const context = createContext(source, sourceRecord);
+      const handle = realize(targetSpec, context, {});
+      for (const turn of context.durableInput?.turns ?? []) {
+        // Forked turns have no Tier-1 events in the target log. Empty
+        // ranges keep its tail fence at zero until the first target run.
+        turnStore.append(targetSpec.namespace, targetSpec.threadId, {
+          turn,
+          seqStart: 1,
+          seqEnd: 0,
         });
       }
-      return handle as THandle;
+      return handle;
     },
     get(threadId: string): THandle | undefined {
       return runtime.get(threadId) as THandle | undefined;

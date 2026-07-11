@@ -22,6 +22,7 @@ import {
 import { loadAgent } from '../../prompt/index.js';
 import { runAcpAgent } from '../agent/acp/service.js';
 import { agenetes } from '../agent/agenetes/drivers.js';
+import { buildForkTargetSpec } from '../agent/agenetes/fork.js';
 import { runAgent } from '../agent/agent.service.js';
 import { buildChatEnvelope } from '../agent/conversation/envelope.js';
 import { buildHistoryFromTurns } from '../agent/conversation/transcript/history.js';
@@ -151,12 +152,9 @@ const agentRoutes: FastifyPluginAsync = async (
   /**
    * POST /agent/history/:threadId/fork
    *
-   * Legacy feature (M6.95 known issue: unsupported legacy features).
-   * Historically this copied a thread's persisted conversation onto a
-   * fresh thread id so a duplicated question node owned an independent
-   * continuation. With L2 owning the conversation log, cross-thread copy
-   * is not yet reimplemented, so this degrades gracefully to a no-op
-   * (`forked: false`) instead of half-copying state.
+   * Realises a fresh target thread from the source's durable folded turns.
+   * L1 compiles the complete target spec; Agenetes validates freshness,
+   * copies durable history, and lets the target driver load it.
    */
   fastify.post<{
     Params: { threadId: string };
@@ -188,17 +186,36 @@ const agentRoutes: FastifyPluginAsync = async (
     if (!canvasId || !dstCanvasId) {
       return reply.code(400).send({ message: 'canvasId is required' });
     }
-    if (targetThreadId === threadId && dstCanvasId === canvasId) {
+    if (targetThreadId === threadId) {
       return reply
         .code(400)
         .send({ message: 'target thread must differ from source' });
     }
 
-    // Fork is a legacy feature not yet reimplemented over the L2-owned
-    // conversation log (M6.95 known issue). Rather than half-copy state,
-    // degrade gracefully to a no-op so the duplicated node simply starts
-    // as a fresh thread; the client surfaces this via `forked: false`.
-    return reply.send({ threadId: targetThreadId, forked: false });
+    const sourceNamespace = canvasAcpNamespace(canvasId);
+    const sourceRecord = agenetes.record(sourceNamespace, threadId);
+    const sourceTurns = agenetes.history(sourceNamespace, threadId).turns;
+    if (!sourceRecord || sourceTurns.length === 0) {
+      return reply.send({ threadId: targetThreadId, forked: false });
+    }
+
+    const targetSpec = buildForkTargetSpec(
+      sourceRecord.spec,
+      targetThreadId,
+      dstCanvasId,
+    );
+    try {
+      agenetes.fork({ namespace: sourceNamespace, threadId }, targetSpec);
+    } catch (error) {
+      request.log.warn(
+        { err: error, threadId, targetThreadId },
+        'Failed to fork agent thread',
+      );
+      return reply.code(409).send({
+        message: error instanceof Error ? error.message : 'Fork failed',
+      });
+    }
+    return reply.send({ threadId: targetThreadId, forked: true });
   });
 
   /**

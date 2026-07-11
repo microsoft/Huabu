@@ -32,12 +32,12 @@ import {
   type Agenetes,
   type WorkloadSpecShape,
 } from './instance.js';
-import { InMemoryThreadStore, type ThreadStore } from './thread-store.js';
-import { InMemoryTurnStore, type TurnStore } from './turn-store.js';
 import {
   DEFAULT_AUTO_RECOVER_POLICY,
   type AutoRecoverPolicy,
 } from './recovery.js';
+import { InMemoryThreadStore, type ThreadStore } from './thread-store.js';
+import { InMemoryTurnStore, type TurnStore } from './turn-store.js';
 
 import type { AgentDriver, AgentHandle } from '@agenetes/runtime';
 

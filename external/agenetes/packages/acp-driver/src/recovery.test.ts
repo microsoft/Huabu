@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { emptyAcpOverlay } from './overlay.js';
 import { AcpServiceError } from './errors.js';
+import { AcpAgentHandle } from './handle.js';
+import { emptyAcpOverlay } from './overlay.js';
 
+import type { AcpCreateSpec, PreparedAcpPrompt } from './handle.js';
 import type { AcpSessionEntry } from './session-registry.js';
 import type { AgentCreateContext } from '@agenetes/runtime';
-import type { AcpCreateSpec, PreparedAcpPrompt } from './handle.js';
 
 const sessionMocks = vi.hoisted(() => ({
   ensureAcpSession: vi.fn(),
@@ -14,8 +15,6 @@ const sessionMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('./session.js', () => sessionMocks);
-
-import { AcpAgentHandle } from './handle.js';
 
 const spec: AcpCreateSpec = {
   threadId: 'thread_1',

@@ -279,8 +279,8 @@ export type AgentCanvasIdQuery = z.infer<typeof agentCanvasIdQuerySchema>;
  * question node owns an independent continuation that nonetheless starts
  * from the same history. The `canvasId` query selects the SOURCE canvas;
  * `targetCanvasId` (when set) lets a cross-canvas paste land the copy on
- * a different canvas. Only meaningful for the built-in agent — external
- * ACP sessions cannot be duplicated (the protocol has no session fork).
+ * a different canvas. Both built-in and external agents fork from the
+ * driver-agnostic durable turn log; each target driver chooses how to load it.
  */
 export const forkThreadBodySchema = z.object({
   targetThreadId: z.string().min(1),
