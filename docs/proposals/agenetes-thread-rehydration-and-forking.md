@@ -2,7 +2,7 @@
 
 > Unify recovery-only replay and thread forking under one Agenetes-managed model for realizing live agent state from durable thread state.
 >
-> Status: **Draft** · Last updated 2026-07-11
+> Status: **Planning** · Last updated 2026-07-11
 
 ---
 
@@ -19,7 +19,7 @@ These are not identical product features, but they are the same systems problem 
 1. Define a driver-agnostic Agenetes model for rehydrating a live agent runtime from durable thread state.
 2. Design thread forking as a sibling operation to recovery, not as a host-only built-in special case.
 3. Remove host-route ownership of history replay for built-in recovery.
-4. Preserve the host/L2 boundary: hosts may provide projection/render ports, but Agenetes owns the recovery and fork lifecycle.
+4. Preserve the host/L2 boundary: Agenetes supplies durable inputs and shared policy utilities, while each driver decides how to load folded turns into its backend.
 5. Treat recovery primarily as an automatic lifecycle behavior, while keeping fork as an explicit operation.
 
 ## 3. Non-goals
@@ -28,7 +28,7 @@ This proposal does not reintroduce per-turn replay for normal live conversations
 
 This proposal does not require every driver to recover in the same way. ACP may prefer session resume; pi may rebuild runtime state from durable turns; other drivers may use different native snapshots.
 
-This proposal does not make Agenetes understand host-specific request payloads such as Huabu's `ChatEnvelope` directly. Host-specific projection remains a registered extension point.
+This proposal does not make Agenetes understand host-specific request payloads such as Huabu's `ChatEnvelope` directly. A driver may use a host-provided projection port when needed, but projection is not a mandatory cross-driver recovery seam.
 
 ## 4. Unifying model
 
@@ -39,14 +39,15 @@ Recovery and forking are two variants of the same operation:
 | Recovery | Thread `T` | Recreate or resume live runtime for the same thread `T` |
 | Forking | Thread `T` | Create a new live runtime for a new thread `T'` derived from `T` |
 
-In both cases the runtime may need some mixture of:
+In both cases the runtime may need:
 
-- durable thread record (`spec`, `priorState`)
+- the target spec
+- the source durable `ThreadRecord` (`spec` + `AgentStateSnapshot`)
 - folded turn history (`AgentTurn[]`)
-- backend-native recovery data if the driver had previously persisted it
-- host-provided projection from durable turns into backend-native input/state
 
 The important boundary is that Agenetes decides **when** rehydration is needed and **which durable facts** are supplied to the driver, while each driver decides **how** to rebuild its backend-native runtime.
+
+The current `priorState` term is intentionally narrower than "all durable recovery input". Today it only carries the persisted `AgentStateSnapshot` down-fed from the thread store (currently `sessionId?` plus `metadata?`). It is useful for native same-thread resume, but it is not by itself sufficient for history-based recovery or fork-from-history. This proposal therefore replaces that narrow argument with a durable input carrying the full source `ThreadRecord` plus folded turns.
 
 ## 5. Current design direction
 
@@ -70,15 +71,23 @@ The current recovery direction also prefers a **fallback ladder** over a one-sho
 
 In this model, "durable record exists but no live handle exists" is the **entry condition for a recovery ladder**, not the same thing as "start replay now".
 
+The same realization model should also distinguish three cases cleanly:
+
+- **fresh create**: no durable source thread is supplied
+- **same-thread realization**: the source durable identity and target identity are the same, so the goal is recovery
+- **cross-thread realization**: the source durable identity and target identity differ, so the goal is fork
+
+The comparison should be based on durable thread identity, ideally `(namespace, threadId)`, not on `priorState` alone. `priorState` does not itself encode thread identity.
+
 ## 6. Candidate layering
 
 The likely ownership split is:
 
 | Layer | Responsibility |
 | --- | --- |
-| Host (`apps/server`) | Supplies host-specific ports that can project durable turns into backend-native input/state when the driver cannot recover from native snapshot alone. |
+| Host (`apps/server`) | Supplies optional host-specific ports only when a driver chooses to use them; it does not orchestrate replay in route code. |
 | Agenetes instance/runtime | Owns recovery/fork orchestration, reads durable thread state, and passes recovery inputs to drivers. |
-| Driver (`pi-driver`, `acp-driver`, future drivers) | Chooses native resume vs history projection vs mixed strategy for one backend. |
+| Driver (`pi-driver`, `acp-driver`, future drivers) | Owns its realization flow and decides how to load folded turns: native transcript seed, textual serialization, combined first run, optional projection port, or another backend-specific strategy. |
 
 This means the current Huabu route-level sequence:
 
@@ -92,96 +101,233 @@ should eventually become something closer to:
 create-or-recover(spec) -> driver-owned rehydration -> run()
 ```
 
-with any host-specific history projection hidden behind registered ports rather than route code.
+with turn loading owned inside the driver rather than route code.
 
 ## 7. Recovery policy and uncertainty budget
 
 Automatic recovery should not mean unconditional replay. Recovery is only safe when the system has enough confidence that durable state can be rehydrated without silently drifting semantics too far.
 
-The likely policy shape needs to answer at least these questions:
-
-- When a durable thread record exists but no live handle exists, should Agenetes attempt recovery automatically?
-- Should the driver first try native resume (`session/load`, snapshot restore, etc.) before any history-based recovery?
-- When history-based recovery is required, when is the projected replay small/stable enough to allow?
-- When it is too large or too uncertain, should the system deny recovery, require a user-visible confirmation, or fall back to a more lossy mode?
+The policy applies when a durable thread record exists but no live handle exists. The driver should prefer native resume (`session/load`, snapshot restore, etc.) before history-based recovery, and history-based recovery is gated by the instance-level safe limit.
 
 The key risk is not just turn count, but **recovery uncertainty**. A long replay may trigger harness compaction, truncation, or other backend-native behaviors whose effect is not fully predictable. So the gating threshold should likely be framed as a **recoverability budget**, not a single boolean.
 
 For now, the design direction is to use a **cheap estimation** only. This is a heuristic recoverability gate, not billing-grade token accounting and not a precise tokenizer-backed budget system.
 
-Possible budget dimensions include:
+The threshold values themselves should be configurable. The current direction is to place that configuration at the **Agenetes instance level** during mount and to name the primary gate with a size/limit-style concept rather than a token-accounting one.
 
-- folded turn count
-- approximate token/size estimate derived cheaply from durable turns
-- approximate tool-result payload size
-- presence of content that is expensive or unstable to replay
-
-The threshold values themselves should be configurable (for example, a conservative `safeAutoRecoverTokens`-style setting). The current direction is to place that configuration at the **Agenetes instance level** during mount. This proposal does not fix the exact policy object yet; it treats the threshold/budget problem as a first-class design constraint rather than an implementation detail.
-
-When recovery exceeds the safe automatic budget, the preferred behavior is:
-
-- **confirm** when a user-visible confirmation flow is simple enough to implement cleanly
-- otherwise **deny/fail fast**
-
-The first implementation therefore does not need to force a confirmation UX if that path would complicate the system too much; a deny-first implementation is acceptable.
-
-## 8. Candidate seam
-
-The current runtime seam already down-feeds `priorState` into `driver.create(spec, priorState)`. That is enough for native session resume flows such as ACP `session/load`, but it is not enough for history-based recovery or fork-from-history.
-
-The minimal extension should likely add a recovery/fork input alongside `priorState`, rather than teaching route handlers to read `history()` and replay manually.
-
-One plausible shape is:
+The current minimal policy shape is:
 
 ```ts
-interface AgentRecoveryInput<TSpec = unknown> {
-  readonly sourceThreadId?: string;
-  readonly sourceSpec?: TSpec;
-  readonly priorState?: AgentStateSnapshot;
-  readonly turns?: readonly AgentTurn[];
+interface AutoRecoverPolicy {
+  enabled: boolean;
+  safeHistoryLoadLimit: number;
+  onThresholdExceeded: 'confirm' | 'deny';
+  confirm?: (context: RecoveryConfirmationContext) => Promise<boolean>;
 }
 ```
 
-This proposal does not lock that exact API yet. The important design rule is that `AgentTurn[]` and any derived recovery inputs should flow **through Agenetes into the driver**, not around Agenetes through host route code.
+Its semantics are intentionally simple:
+
+- if the cheap recovery estimate is `<= safeHistoryLoadLimit`, Agenetes may load history automatically
+- if the estimate is `> safeHistoryLoadLimit`, Agenetes follows `onThresholdExceeded`
+- `confirm` calls the mount-time handler; a missing handler safely degrades to `deny`
+
+The `limit` is interpreted through a documented cheap estimation formula rather than a precise tokenizer result. The first version measures only the folded turn log:
+
+```ts
+textualBytes = sum(
+  Buffer.byteLength(JSON.stringify(turn), 'utf8')
+);
+```
+
+It then applies the first-pass heuristic:
+
+```ts
+estimatedWords = textualBytes / 6;
+estimatedTokens = estimatedWords / 0.75;
+// simplified:
+estimatedTokens = textualBytes / 4.5;
+```
+
+This should be read as a conservative heuristic pipeline:
+
+- derive a cheap textual size signal from serialized folded `AgentTurn`s
+- approximate words from that size
+- approximate token-like cost from the word count
+
+It is intentionally not a tokenizer-accurate result and not suitable for billing/accounting use cases. Its only purpose is deciding whether auto-recovery is comfortably small enough to proceed without confirmation.
+
+For the first version, this formula is the default recoverability heuristic unless later implementation evidence shows it is too weak or too conservative.
+
+When recovery exceeds the safe automatic budget, `deny` fails fast. `confirm` delegates to the mount-time host handler; refusal, handler failure, or no installed handler denies recovery.
+
+## 8. Candidate seam
+
+The current runtime seam already down-feeds `priorState` into `driver.create(spec, priorState)`. That is enough for native same-thread resume flows such as ACP `session/load`, but it is not enough for history-based recovery or fork-from-history because it does not carry source-thread identity or the wider durable inputs the fallback ladder may need.
+
+The current design direction is **not** to force every driver through the same decomposed recovery sub-methods (`tryResume`, `tryRealizeFromHistory`, and so on). Those boundaries are likely too backend-specific to standardize cleanly.
+
+Instead, the preferred direction is:
+
+- **Agenetes provides shared, driver-agnostic utilities** for realization classification, same-thread vs fork detection, cheap estimation, threshold/policy checks, and confirm/deny handling.
+- **Each driver owns its realization flow through the concrete `AgentHandle` it creates**. The driver should leverage the strongest history-loading mechanism its harness provides: it may seed turns directly while constructing native state, resume a native session, defer asynchronous loading until the handle is first used, combine recovery material with the first real run, or choose another backend-specific strategy.
+
+For the first version, recovery should therefore remain **implicit inside the driver-owned handle lifecycle**, not split into a separate Agenetes runtime recovery operation.
+
+In that model, the important standardization target is not a rigid sequence of recovery sub-methods, but:
+
+- the shape of the durable realization input
+- the shared helper/policy utilities
+- the expectation that the driver-created handle realizes fresh create, same-thread recovery, or fork from that input using the best mechanism available to its harness
+
+The minimal extension should therefore replace the second input to `create(...)`, rather than teaching route handlers to read `history()` and replay manually.
+
+The first-version shape is:
+
+```ts
+interface ThreadIdentity {
+  readonly namespace: Namespace;
+  readonly threadId: string;
+}
+
+interface AgentDurableInput<TSpec = unknown> {
+  readonly source: ThreadIdentity;
+  readonly record: {
+    readonly spec: TSpec;
+    readonly state: AgentStateSnapshot;
+  };
+  readonly turns: readonly AgentTurn[];
+}
+```
+
+`AgentDurableInput<TSpec>` belongs in `@agenetes/runtime` alongside `AgentDriver`, using only types imported from `@agenetes/protocol`. `@agenetes/agenetes` constructs it from `ThreadStore` and `TurnStore`; runtime must not import the higher-level instance package. `ThreadRecord` may reuse or alias the durable record member shape. The dependency direction remains:
+
+```text
+@agenetes/protocol <- @agenetes/runtime <- @agenetes/agenetes
+```
+
+Here `spec` remains the **target** realization spec. `AgentDurableInput` identifies and describes the **source** durable thread. That gives Agenetes enough information to distinguish:
+
+- no durable input → fresh create
+- source identity equals target identity → same-thread recovery
+- source identity differs from target identity → fork
+
+For same-thread recovery, the source `ThreadRecord.spec` is authoritative. Automatic recovery must not silently absorb a newly compiled or otherwise drifted incoming spec after a process restart. Applying configuration changes requires an explicit thread recreation or a new thread, preserving `reuse-ignores-spec` semantics across both live reuse and restart recovery.
+
+The durable data is wrapped in a create-time context so instance-level recovery policy does not contaminate `AgentDurableInput`:
+
+```ts
+interface AgentCreateContext<TSpec = unknown> {
+  readonly durableInput?: AgentDurableInput<TSpec>;
+  readonly recovery: {
+    authorizeHistoryLoad(input: {
+      mode: 'recover' | 'fork';
+      turns: readonly AgentTurn[];
+    }): Promise<HistoryLoadAuthorization>;
+  };
+}
+
+type HistoryLoadAuthorization =
+  | {
+      readonly allowed: true;
+      readonly estimatedSize: number;
+    }
+  | {
+      readonly allowed: false;
+      readonly code:
+        | 'auto_recover_disabled'
+        | 'safe_limit_exceeded'
+        | 'confirmation_unavailable'
+        | 'confirmation_declined';
+      readonly estimatedSize: number;
+      readonly safeLimit: number;
+    };
+
+create(
+  targetSpec: TSpec,
+  context: AgentCreateContext<TSpec>,
+): AgentHandle;
+```
+
+The Agenetes instance constructs `context.recovery` from its mount-time `AutoRecoverPolicy`. A driver/handle calls `authorizeHistoryLoad(...)` only after its stronger native resume strategy is unavailable or has failed. The service encapsulates cheap estimation, `safeHistoryLoadLimit`, confirmation, and deny behavior, so drivers do not duplicate or reinterpret instance policy.
+
+Expected policy denial is a structured result, not an exception. The handle can surface the denial code as an explicit recovery error. Unexpected failures from the confirmation handler or policy infrastructure propagate as real errors rather than being silently converted into denial.
+
+`enabled` controls automatic same-thread recovery only. An explicit fork may still load source turns when auto-recovery is disabled; it bypasses only the `enabled` gate and remains subject to the shared `safeHistoryLoadLimit` plus confirm/deny behavior.
+
+Turn-loading timing is deliberately not standardized. A harness that can directly seed native transcript state should do so. A driver that must perform asynchronous resume or prompt-based loading may retain private bootstrap state (for example, `turnsToLoad`) and consume it when the handle is first used. `AgentTurnState.isFirstMessage` remains only a render hint about the current backend session; it does not carry durable history or prescribe when history is loaded.
+
+The first version deliberately includes **folded turn-level history only**. It does not include the Tier-1 event tail or attempt to recover an incomplete in-flight turn. Event-tail recovery remains a future extension; the existing Tier-1 log continues to serve reconnect and live-tail behavior independently.
+
+The important design rule is that folded turns and the source thread record flow **through Agenetes into the driver**, not around Agenetes through host route code.
 
 One consequence of the current direction is that a future recovery design may not need to expose a public `recover(...)` call at all. Instead, Agenetes may only need:
 
 - an internal realization/recovery seam
+- shared driver-agnostic helper utilities
 - a configurable auto-recover policy
 - a separate explicit fork operation
 
 ## 9. Driver implications
 
-### 7.1. pi-driver
+### 9.1. pi-driver
 
-pi-driver is the clearest first consumer because its current recovery path is still host-owned. It likely needs a registered port that projects folded `AgentTurn[]` into pi `Message[]` (and perhaps rebuilt system-context inputs) without importing Huabu route code into the subtree.
+pi-driver is the clearest first consumer because its current recovery path is still host-owned. For the first version, it serializes folded turns into a synthetic pi recovery message and seeds that message through pi-agent-core's native `Agent.initialState.messages` support. The first real `run()` then appends only the current request. This requires no host projection port and creates no extra recovery run. The cross-driver contract still does not prescribe this strategy for other drivers.
 
-### 7.2. ACP driver
+### 9.2. ACP driver
 
-ACP should continue to prefer native `session/load` when a valid `sessionId` exists. The same Agenetes recovery seam can still serve ACP later when a session id is stale, missing, or otherwise unusable and a driver-managed replay strategy is needed.
+ACP should continue to prefer native session resume/load when a valid `sessionId` exists. For same-thread recovery, only a missing, invalid, or unsupported native session is eligible for history fallback; worker unavailability, authentication failure, invalid recipe, and similar operational errors remain hard failures.
 
-### 7.3. Forking
+When native recovery is unavailable, ACP requests history-load authorization, creates a fresh session without the stale source `sessionId`, serializes the folded turns, and prepends that recovery material to the first real prompt. Fork follows the same fresh-session + first-real-prompt history load path directly. ACP does not execute a separate bootstrap prompt, avoiding extra model output, tool side effects, and conversation-log pollution.
+
+Safe fallback requires a structured `session_resume_unavailable` reason propagated from agentlet session bootstrap through the spawn RPC into the ACP driver. The driver must never infer fallback eligibility by matching error text. Missing/unsupported native sessions map to this reason; worker, authentication, recipe, transport, and unknown failures remain hard errors. Because this propagation touches `external/agentlet/`, its change must be committed separately from Agenetes/Sediment changes.
+
+### 9.3. Forking
 
 Thread forking should not be a custom built-in-only history-copy trick. It should become an Agenetes operation that realizes a new `threadId` from a source durable thread, letting each driver decide whether that means cloning native state, replaying durable turns, or starting a fresh runtime with projected seed state.
 
-The current direction is that forking should require a **new target spec**, not blindly clone the source thread's persisted spec. Some merge or inheritance rules may still exist, but they are likely to be at least partly **driver-specific** rather than one rigid cross-driver rule.
+The current direction is that forking should require a **new target spec**, not blindly clone the source thread's persisted spec. The target `threadId` must be fresh; `namespace` defaults to the source namespace but may be explicitly overridden; `kind` and `workloadType` default to the source values but may be explicitly overridden; and the non-identity portion of the target spec defaults to full source-spec inheritance plus host patch/override.
+
+For the first version, this merge is Agenetes-owned:
+
+```text
+source spec + target identity + host patch/override = target spec
+```
+
+No driver-specific spec-merge hook is required initially. Drivers receive the already-derived target spec plus source durable input. A driver-specific merge hook should only be introduced later when a concrete driver demonstrates that the common rule cannot safely express its target spec.
+
+The current default direction is also that first-version forking should **not** blindly inherit driver-native `priorState` into the new thread. `priorState` primarily serves same-thread recovery; a new thread should be realized from the source spec/history model unless a driver later defines a safe, explicit native-state clone rule.
 
 ## 10. Planned subtasks
 
-### ⚪ Define a generic recovery/fork vocabulary and runtime seam
+### ▶️ Define a generic recovery/fork vocabulary and runtime seam
 
-Decide whether recovery extends `create(...)`, adds a new instance surface, or introduces a separate realization API.
+Replace the narrow `create(spec, priorState)` down-feed with the agreed create context, durable input, and shared authorization utilities.
 
-- ⚪ Decide whether recovery stays implicit inside Deployment realization or still needs a first-class runtime operation.
-- ⚪ Decide what durable inputs flow through Agenetes into the driver.
-- ⚪ Preserve the fallback-ladder semantics instead of collapsing recovery into immediate replay.
+- ✅ Carry source durable identity separately from target spec so same-thread recovery and fork are unambiguous.
+- ✅ First-version durable input is source identity + `ThreadRecord` + folded `AgentTurn[]`.
+- ✅ Place `AgentDurableInput<TSpec>` in `@agenetes/runtime` without introducing a runtime → instance dependency.
+- ✅ Wrap durable input and instance services in `AgentCreateContext<TSpec>`.
+- ▶️ Implement instance-provided recovery authorization and remaining shared utilities.
+- ✅ Preserve the fallback-ladder semantics instead of collapsing recovery into immediate replay.
 
-### ⚪ Specify pi-driver history projection port(s)
+### ▶️ Implement pi-driver turn loading
 
-This needs a host-injected port rather than subtree imports of Huabu prompt builders.
+pi-driver should load folded turns inside its own realization flow without importing Huabu route code into the subtree.
 
-- ⚪ Define the minimal projection port from folded `AgentTurn[]` into pi-native recovery input.
+- ✅ First-version strategy: serialized folded turns → synthetic pi message → `Agent.initialState.messages`.
+- ▶️ Define the synthetic recovery-message format.
 - ⚪ Keep host-specific prompt assembly out of the subtree package.
+- ✅ No projection port is required for the first version.
+
+### ▶️ Implement ACP fallback turn loading
+
+- ✅ Prefer native session resume/load for same-thread recovery.
+- ✅ Fall back only for missing, invalid, or unsupported native sessions; unrelated operational failures remain hard errors.
+- ✅ First-version fallback: serialized folded turns are prepended to the first real ACP prompt.
+- ▶️ Propagate structured `session_resume_unavailable` from agentlet bootstrap through spawn RPC.
+- ✅ Do not use error-text matching for fallback classification.
+- ⚪ Create a fresh ACP session without the stale source `sessionId` before loading history.
 
 ### ⚪ Move built-in cold-start replay out of `agent.route.ts`
 
@@ -191,28 +337,26 @@ The target is to remove route-level `priorTurns -> resumeThreadContext(...)`.
 - ⚪ Re-home cold-start recovery behind an Agenetes-managed seam and policy.
 - ⚪ Make the built-in path enter the same recovery ladder as other drivers instead of keeping a route-local fallback.
 
-### ⚪ Define Agenetes-level thread fork semantics for all drivers
+### ▶️ Define Agenetes-level thread fork semantics for all drivers
 
 This needs to cover source thread, target thread, spec derivation, and durable record behavior.
 
-- ⚪ Define the source/target thread contract.
-- ⚪ Define how a fork derives or overrides the new target spec.
-- ⚪ Define what durable state is copied, projected, or rehydrated.
-- ⚪ Decide which merge/inheritance rules are global and which are driver-specific.
+- ✅ Define the source/target thread identity contract as `(namespace, threadId)`.
+- ✅ First-version target spec derivation is source spec + target identity + host patch/override.
+- ✅ First-version fork carries folded turns but does not inherit driver-native `priorState`.
+- ✅ No driver-specific merge hook in the first version; defer until a concrete driver requires one.
 
-### ⚪ Decide how recovery/fork interacts with `reuse-ignores-spec`
+### ✅ Decide how recovery/fork interacts with `reuse-ignores-spec`
 
 Restoring a broken Deployment and creating a new forked thread are similar but not identical spec/lifecycle operations.
 
-- ⚪ Decide whether same-thread recovery always preserves the persisted spec.
-- ⚪ Decide whether forking is allowed to alter spec at realization time.
+- ✅ Same-thread recovery uses the source `ThreadRecord.spec`; configuration drift requires explicit recreation/new thread.
+- ✅ Forking derives a new target spec and may alter it through the established host patch/override rule.
 
-## 11. Open questions
+## 11. Future / backlog
 
-1. Should recovery remain a purely implicit part of Deployment realization, or does Agenetes still need an explicit internal/runtime recovery operation even if it is not product-facing?
-2. What should the instance-level auto-recover policy shape be?
-3. What should the cheap recoverability estimate measure: turn count, approximate tokens/size, payload size, or a richer uncertainty score?
-4. When recovery exceeds the allowed budget, what is the minimal confirmation/prompt shape worth supporting before the system should just deny?
-5. Which parts of a fork's target spec, if any, may be inherited or merged from the source thread, and which parts must be supplied fresh?
-6. Where should opaque driver-native recovery blobs live if `AgentStateSnapshot.metadata` remains user-facing rather than driver-facing?
-7. Can one recovery seam cover both same-thread restore and new-thread fork cleanly, or do they diverge enough to justify separate APIs?
+- Per-driver auto-recover policy overrides; the first version has instance-level configuration only.
+- A second hard recovery limit; the first version has one safe limit plus confirm/deny.
+- Tier-1 event-tail and incomplete in-flight turn recovery; the first version uses folded turns only.
+- Opaque `driverState` in `AgentStateSnapshot`; add it only when a concrete driver needs more than `sessionId + metadata`.
+- Driver-specific fork merge hooks or native-state cloning; add them only when a concrete driver cannot use the common spec/history model.

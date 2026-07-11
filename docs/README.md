@@ -79,7 +79,7 @@ docs/
 | [layered-architecture.md](./proposals/layered-architecture.md)                 | Draft                                           | Three-layer model — Interaction-driven (HAI) / Protocol-driven (Agent-as-a-Local-Service) / Task-driven (Task Automation).     |
 | [milkdown-custom-toolbar-plan.md](./proposals/milkdown-custom-toolbar-plan.md) | Draft                                           | Replace Crepe's built-in Milkdown toolbar with a Sediment-owned React toolbar and semantic editor command API.                 |
 | [pi-harness-driver-refactor-plan.md](./proposals/pi-harness-driver-refactor-plan.md) | In-Progress                                     | Standard Agenetes pi harness driver plus Huabu built-in agent refactor from threaded Job replay to conversation-native Deployment. |
-| [agenetes-thread-rehydration-and-forking.md](./proposals/agenetes-thread-rehydration-and-forking.md) | Draft                                           | Agenetes-managed recovery and thread forking as one durable-thread realization model across drivers.                            |
+| [agenetes-thread-rehydration-and-forking.md](./proposals/agenetes-thread-rehydration-and-forking.md) | Planning                                        | Agenetes-managed recovery and thread forking as one durable-thread realization model across drivers.                            |
 
 When you ship one of these, edit it to add `Status: Shipped` + the merge
 commit/PR, and either fold lasting parts into the matching
