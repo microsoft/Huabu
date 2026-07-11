@@ -37,6 +37,7 @@ export function Search() {
         bundlePath: withBasePath('pagefind/'),
         baseUrl: withBasePath(''),
         showSubResults: true,
+        pageSize: 10,
       });
       isReady.current = true;
       focusSearchInput();
@@ -121,7 +122,7 @@ export function Search() {
         aria-haspopup="dialog"
       >
         <SearchIcon className="h-4 w-4" />
-        <span className="flex-1">Search handbook</span>
+        <span className="flex-1">Search</span>
         <kbd className="rounded border border-gray-200 bg-gray-50 px-1.5 py-0.5 font-sans text-[10px] text-gray-500">
           Ctrl K
         </kbd>
@@ -146,9 +147,9 @@ export function Search() {
               onKeyDown={trapFocus}
             >
               <h2 id={`${id}-title`} className="sr-only">
-                Search handbook
+                Search
               </h2>
-              <div className="min-h-0 overflow-y-auto p-4 sm:p-6">
+              <div className="min-h-0 overflow-x-hidden overflow-y-auto p-3 sm:p-4">
                 {import.meta.env.DEV ? (
                   <div className="flex min-h-32 items-center justify-center rounded-xl border border-dashed border-gray-200 px-6 text-center text-sm text-gray-500">
                     Search is available in a built preview.
@@ -161,14 +162,14 @@ export function Search() {
                   <div id={id} />
                 )}
               </div>
-              <div className="flex items-center justify-end border-t border-gray-100 bg-gray-50 px-5 py-3 text-xs text-gray-500">
+              <div className="flex items-center justify-end border-t border-gray-100 bg-gray-50 px-4 py-1.5 text-xs text-gray-500">
                 <button
                   ref={closeRef}
                   type="button"
                   onClick={closeSearch}
-                  className="rounded-md px-2 py-1 transition-colors hover:bg-gray-200 hover:text-gray-900"
+                  className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 leading-none transition-colors hover:bg-gray-200 hover:text-gray-900"
                 >
-                  <kbd className="mr-1 rounded border border-gray-300 bg-white px-1.5 py-0.5 font-sans text-[10px]">
+                  <kbd className="inline-flex h-5 items-center rounded border border-gray-300 bg-white px-1.5 font-sans text-[10px] leading-none">
                     Esc
                   </kbd>
                   Close

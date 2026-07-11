@@ -7,6 +7,7 @@ declare module '@pagefind/default-ui' {
       bundlePath?: string;
       baseUrl?: string;
       showSubResults?: boolean;
+      pageSize?: number;
     });
   }
 }
