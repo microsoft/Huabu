@@ -45,6 +45,14 @@ export interface RunWebPostEffectsInput {
    * timer map), so it is provided per-call rather than imported.
    */
   triggerPreprocessing: (node: Node) => void;
+  /**
+   * Drop all per-node save-queue bookkeeping (CAS baseline, conflict /
+   * error guards, rename anchor) for a deleted node. Injected as a
+   * closure over the store's private `nodeContentQueue` singleton, same
+   * pattern as {@link triggerPreprocessing}, to keep this module free of
+   * a back-import cycle with the canvas store.
+   */
+  forgetNodeContent: (nodeId: string) => void;
 }
 
 /**
@@ -56,17 +64,48 @@ export interface RunWebPostEffectsInput {
  *  3. deferred frame fit (double-rAF)
  */
 export function runWebPostEffects(input: RunWebPostEffectsInput): void {
-  const { effects, canvasId, getNodes, setNodes, triggerPreprocessing } = input;
+  const {
+    effects,
+    canvasId,
+    getNodes,
+    setNodes,
+    triggerPreprocessing,
+    forgetNodeContent,
+  } = input;
 
   // 1. Trigger preprocessing for created / mutated nodes. The server
   // decides per node profile whether any actual work runs.
+  //
+  // `note` / `text` need special handling: their label auto-derives from
+  // the first heading, so firing preprocess on every keystroke content edit
+  // renamed the `.md` file through every partial heading (`Note 1.md` →
+  // `H.md` → `He.md` → …). Those keystroke edits arrive as `MERGE_NODE_DATA`
+  // content rewrites (their ids land in `contentEditedNodeIds`) and are
+  // instead settled on exit-edit (`settleNodePreprocess`, wired from
+  // `closeExpanded` / `openExpanded` for `note` and `TextNode`'s blur for
+  // `text`). But a one-time structural mutation — create / duplicate /
+  // import — is NOT a keystroke edit (it arrives via `CREATE_NODES` and never
+  // appears in `contentEditedNodeIds`), so it still needs its single
+  // preprocess pass to persist the sidecar and derive the initial label.
+  // Skip only the content-edit churn path, not the create/import path.
+  // See `docs/architecture/node-preprocessing.md` §4 (Triggers & state).
+  const contentEdited = new Set(effects.contentEditedNodeIds);
   for (const node of effects.mutatedNodes) {
+    if (
+      (node.type === 'note' || node.type === 'text') &&
+      contentEdited.has(node.id)
+    ) {
+      continue;
+    }
     triggerPreprocessing(node);
   }
 
   // 2. Track server-side deletes for local history.
   for (const nodeId of effects.deletedNodeIds) {
     canvasHistoryManager.trackDelete(canvasId, nodeId);
+    // Release the node's per-node save-queue state so a long session of
+    // create/delete churn doesn't leak bookkeeping keyed by dead ids.
+    forgetNodeContent(nodeId);
   }
 
   // 2b. If a deleted node was a question node whose conversation is

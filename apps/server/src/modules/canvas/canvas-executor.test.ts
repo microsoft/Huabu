@@ -382,3 +382,70 @@ describe('executeOnServer — CREATE_NODES id echo', () => {
     expect(echoed.map((n) => n.label)).toEqual(['Finding A', 'Finding B']);
   });
 });
+
+describe('executeOnServer — batch node writes route through the non-locking core', () => {
+  it('persists every node in a multi-node batch without self-deadlocking on the canvas lock', async () => {
+    // The executor holds `withCanvasMutex` for the WHOLE batch and writes each
+    // mutated node's `.md` via the NON-locking `applyNodeUpdate`. The
+    // promise-chain mutex is not re-entrant, so if any per-node write went
+    // through the locking `updateNode` instead, this batch would deadlock and
+    // the test would hang until vitest's timeout. Two mutated nodes under one
+    // lock is the minimal case that pins that contract.
+    const store = getCanvasStore('c1');
+    store.write({
+      canvasId: 'c1',
+      title: null,
+      version: 1,
+      state: {
+        nodes: [
+          {
+            id: 'n1',
+            type: 'note',
+            position: { x: 0, y: 0 },
+            data: { label: 'A' },
+          },
+          {
+            id: 'n2',
+            type: 'note',
+            position: { x: 200, y: 0 },
+            data: { label: 'B' },
+          },
+        ],
+        edges: [],
+      },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    store.writeNode('n1', {
+      nodeId: 'n1',
+      type: 'note',
+      label: 'A',
+      content: 'a1',
+    });
+    store.writeNode('n2', {
+      nodeId: 'n2',
+      type: 'note',
+      label: 'B',
+      content: 'b1',
+    });
+
+    const out = await executeOnServer({
+      canvasId: 'c1',
+      commands: [
+        {
+          type: 'MERGE_NODE_DATA',
+          patches: [
+            { nodeId: 'n1', patch: { content: 'a2' } },
+            { nodeId: 'n2', patch: { content: 'b2' } },
+          ],
+        } as unknown as CanvasCommand,
+      ],
+      originator: UI,
+    });
+
+    expect(out.conflicts ?? []).toHaveLength(0);
+    // Both `.md` sidecars landed — the batch completed, so no deadlock.
+    expect(bodyOf('c1', 'n1')).toBe('a2');
+    expect(bodyOf('c1', 'n2')).toBe('b2');
+  });
+});

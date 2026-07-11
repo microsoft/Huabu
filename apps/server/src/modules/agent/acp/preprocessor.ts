@@ -1,7 +1,7 @@
 /**
  * ACP Preprocessor — deterministic prompt builder.
  *
- * The external agent (Claude Code, Copilot CLI, …) **never sees the
+ * The external agent (Claude Agent, GitHub Copilot, …) **never sees the
  * canvas** directly. This module turns the raw user message plus the
  * user's node selection into an {@link ExternalAgentPrompt} *without
  * any LLM call*:

@@ -1222,8 +1222,7 @@ export class CanvasStore {
   // (`<workspace>/setting/.huabu.md`) and canvas-scoped canvas memory
   // lives at `<canvasDir>/.memory/canvas.md`. Both are owned by the
   // memory sub-agent, not the per-canvas store. See
-  // `modules/agent/memory/` and the migration in
-  // `modules/storage/migrate-memory.ts`.
+  // `modules/agent/memory/`.
 
   // ── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -1235,7 +1234,12 @@ export class CanvasStore {
       this.invalidateNodeIndex();
       return false;
     }
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 100,
+    });
     unregisterCanvasDir(this.canvasId);
     this.invalidateNodeIndex();
     return true;

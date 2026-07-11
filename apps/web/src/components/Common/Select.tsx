@@ -115,6 +115,9 @@ export function Select<T extends string = string>({
   footerSlot,
 }: SelectProps<T>) {
   const [isOpen, setIsOpen] = useState(false);
+  const [triggerWidth, setTriggerWidth] = useState<number | undefined>(
+    undefined,
+  );
   const triggerRef = useRef<HTMLDivElement>(null);
   const justDismissedRef = useRef(false);
 
@@ -132,6 +135,14 @@ export function Select<T extends string = string>({
     if (justDismissedRef.current) return;
     setIsOpen((prev) => {
       const next = !prev;
+      // Snapshot the trigger width on open so the panel can adopt it as
+      // a `minWidth` — keeps the dropdown at least as wide as the trigger
+      // (often `w-full`) instead of shrinking to fit-content. Measured
+      // here (event time) rather than during render to avoid a
+      // setState-in-render loop.
+      if (next && triggerRef.current) {
+        setTriggerWidth(triggerRef.current.getBoundingClientRect().width);
+      }
       // Only fire on the closed → open transition. Fired *outside* the
       // setState updater would also work but this keeps the logic
       // co-located with the state change that triggers it.
@@ -202,6 +213,12 @@ export function Select<T extends string = string>({
           onDismiss={handleDismiss}
           anchor={anchor}
           offset={{ x: 0, y: isTop ? -4 : 4 }}
+          // Match the panel's minimum width to the trigger so a
+          // full-width trigger (`w-full`) gets a dropdown of the same
+          // width instead of one that shrinks to its longest option.
+          // The `max-w-*` cap below still lets long descriptions grow
+          // the panel up to the ceiling.
+          style={triggerWidth ? { minWidth: triggerWidth } : undefined}
           // Cap panel width so long descriptions truncate instead of
           // pushing the dropdown wider than the parent column (e.g.
           // ChatPanel). 24rem leaves room for a useful description

@@ -248,7 +248,7 @@ export const CanvasLayerTree = ({
   } | null>(null);
 
   // Auto-expand collapsed frames after the cursor lingers on them.
-  // Mirrors the file-explorer / Figma pattern so the user can target
+  // Mirrors the file-explorer pattern so the user can target
   // descendants without first clicking the chevron. Cancelled on every
   // `onDragMove` tick that changes the target.
   const expandTimerRef = useRef<{

@@ -25,6 +25,7 @@
 import { useEffect } from 'react';
 
 import { ensureCanvasSearchScope } from '../components/Panels/CanvasLayerPanel/CanvasSearchInput';
+import { matchesShortcut } from '../config/shortcuts';
 import useCanvasStore from '../store/canvasStore';
 import { usePanelStore } from '../store/panelStore';
 import { useSearchStore } from '../store/searchStore';
@@ -105,10 +106,9 @@ export function useGlobalSearchHotkey(): void {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
-      const isCmd = e.metaKey || e.ctrlKey;
-      if (!isCmd || e.key.toLowerCase() !== 'f') return;
-      // Don't steal Cmd+F + modifier combos used by other tools.
-      if (e.altKey || e.shiftKey) return;
+      // Cmd/Ctrl+F only — sourced from the shared shortcut catalog.
+      // `matches` also rejects the extra Alt/Shift combos other tools use.
+      if (!matchesShortcut(e, 'search.open')) return;
 
       const active = document.activeElement;
       const focusScope = resolveScopeFromFocus(active);

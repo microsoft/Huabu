@@ -2,6 +2,7 @@ import './load-env.js';
 import './setup-proxy.js';
 import { app } from './app.js';
 import { resolveBindHost } from './bind-host.js';
+import { initializeSecretStore } from './security/secret-store.js';
 import { getLogger } from './utils/logger.js';
 
 const log = getLogger('server');
@@ -16,18 +17,28 @@ const PORT =
 
 const HOST = resolveBindHost();
 
-app.listen({ port: PORT, host: HOST }, (err: Error | null) => {
-  if (err) {
+async function start(): Promise<void> {
+  try {
+    await initializeSecretStore();
+    await app.listen({ port: PORT, host: HOST });
+    // When bound to a wildcard address, "localhost" is still the URL a
+    // browser on this machine would use — but log both so operators on a
+    // remote machine know how to reach the server.
+    const displayHost =
+      HOST === '0.0.0.0' || HOST === '::'
+        ? `localhost (bound on ${HOST})`
+        : HOST;
+    log.info(`Server running at http://${displayHost}:${PORT}`);
+  } catch (err) {
     log.error({ err }, 'Failed to start server');
-    process.exit(1);
+    // Let Node drain Pino's asynchronous SonicBoom destinations before
+    // exiting. A synchronous process.exit() here can run Pino's exit hook
+    // before the destinations are ready and mask the real startup error.
+    process.exitCode = 1;
   }
-  // When bound to a wildcard address, "localhost" is still the URL a
-  // browser on this machine would use — but log both so operators on a
-  // remote machine know how to reach the server.
-  const displayHost =
-    HOST === '0.0.0.0' || HOST === '::' ? `localhost (bound on ${HOST})` : HOST;
-  log.info(`Server running at http://${displayHost}:${PORT}`);
-});
+}
+
+void start();
 
 // Graceful shutdown on termination signals.
 //

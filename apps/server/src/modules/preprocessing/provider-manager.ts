@@ -62,7 +62,10 @@ export class ProviderManager {
           },
         ],
       };
-      const result = await llmComplete(piContext);
+      const result = await llmComplete(piContext, {
+        role: 'imageLabel',
+        hasImage: true,
+      });
       const text = result.content
         .filter((b) => b.type === 'text')
         .map((b) => (b as { type: 'text'; text: string }).text)
@@ -93,7 +96,7 @@ export class ProviderManager {
           },
         ],
       };
-      const result = await llmComplete(piContext);
+      const result = await llmComplete(piContext, { role: 'frameLabel' });
       const text = result.content
         .filter((b) => b.type === 'text')
         .map((b) => (b as { type: 'text'; text: string }).text)
@@ -134,7 +137,7 @@ export class ProviderManager {
           },
         ],
       };
-      const result = await llmComplete(piContext);
+      const result = await llmComplete(piContext, { role: 'contentMeta' });
       const text = result.content
         .filter((b) => b.type === 'text')
         .map((b) => (b as { type: 'text'; text: string }).text)

@@ -129,6 +129,29 @@ export const llmConfigUpdateSchema = z.object({
 export type LLMConfigUpdate = z.infer<typeof llmConfigUpdateSchema>;
 
 /**
+ * The utility-tier LLM configuration — the model used for lightweight
+ * background roles (labeling, summaries, keywords). Its read shape is
+ * **identical** to {@link LLMConfig}, so it is an alias, not a new
+ * interface. An empty `provider` means "follow the chat model".
+ */
+export type LLMUtilityConfig = LLMConfig;
+
+/**
+ * Body for `PUT /api/llm/utility-config`. Reuses {@link llmConfigUpdateSchema}
+ * but relaxes the one rule that differs: `provider` may be empty (`''`),
+ * which the server interprets as "follow the chat model". The optional
+ * `apiKey` is written back into the shared per-provider credential store
+ * (v1.5 inline-key flow), so pointing utility at a not-yet-authenticated
+ * provider does not require configuring it through the chat panel first.
+ */
+export const llmUtilityConfigUpdateSchema = llmConfigUpdateSchema.extend({
+  provider: z.string(),
+});
+export type LLMUtilityConfigUpdate = z.infer<
+  typeof llmUtilityConfigUpdateSchema
+>;
+
+/**
  * Body for `PUT /api/llm/image-config`. Every field is optional so a
  * single update can patch one field at a time (the UI auto-saves on
  * every keystroke). Omitting a field keeps the previously-saved value;

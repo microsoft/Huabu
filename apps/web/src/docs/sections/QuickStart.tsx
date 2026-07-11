@@ -1,7 +1,6 @@
-// TODO: fill in real handbook content for this section.
 import {
   Callout,
-  CodeBlock,
+  DocImage,
   DocLink,
   H2,
   Kbd,
@@ -13,118 +12,168 @@ export default function QuickStart() {
   return (
     <PageLayout
       title="Quick Start"
-      description="From a fresh install to a productive canvas in four steps. Each step links to the deeper reference page if you want more detail."
+      description="From download to a productive thinking space in six steps, with links to deeper guides when you want more detail."
     >
-      <H2>1. Pick a workspace</H2>
+      <H2>1. Download and install Huabu</H2>
       <P>
-        On first launch Huabu asks for a <strong>workspace</strong> — a local
-        folder it will use to store everything. Pick any folder (an empty one is
-        easiest). All canvases, notes, AI history, and attachments live inside
-        that folder as plain files, so backups and cross-machine sync work with
-        whatever tool you already use.
+        Download the latest version from{' '}
+        <DocLink href="https://github.com/microsoft/Huabu/releases/latest">
+          GitHub Releases
+        </DocLink>
+        . Choose the <code>.dmg</code> package on macOS or the <code>.exe</code>{' '}
+        package on Windows, then install and launch Huabu.
       </P>
-      <P>Inside the workspace Huabu creates one subfolder per canvas:</P>
-      <CodeBlock language="text">{`<workspace>/
-├── <canvas-title>/
-│   ├── canvas.json          # canvas topology
-│   ├── nodes/               # one Markdown file per node
-│   ├── .artifacts/          # raw binaries (PDFs, images, videos)
-│   ├── memory/canvas.md     # AI-written canvas memory
-│   └── .history/            # chat + intent history
-└── setting/
-    ├── .huabu.md            # workspace-wide memory
-    └── skills/              # your custom skills`}</CodeBlock>
-      <Callout tone="info">
-        You can switch workspaces at any time from Settings. Recent workspaces
-        are remembered so flipping between projects is one click.
-      </Callout>
 
-      <H2>2. Create a canvas</H2>
+      <H2>2. Choose a Vault</H2>
       <P>
-        Inside a workspace you land on the canvas list. Hit{' '}
-        <strong>New canvas</strong>, give it a name that describes what
-        you&apos;re about to explore, and press <Kbd>Enter</Kbd> — you&apos;ll
-        drop straight into the empty canvas, ready to work.
+        On first launch, choose a local folder for Huabu to use as your{' '}
+        <strong>Vault</strong>. A Vault holds all of your Spaces, settings,
+        skills, and shared memory.
       </P>
       <P>
         See{' '}
-        <DocLink href="/docs/concepts/workspaces">
-          Workspaces &amp; Canvases
-        </DocLink>{' '}
-        for the full lifecycle, including importing and exporting canvases as
-        <code>.zip</code> bundles.
+        <DocLink href="/docs/concepts/workspaces">data storage details</DocLink>{' '}
+        to learn how Huabu organizes data in this folder.
       </P>
 
-      <H2>3. Configure an LLM</H2>
+      <H2>3. Configure Huabu Agent</H2>
       <P>
-        Open the settings popover in the canvas header (gear icon) and pick a
-        model under <strong>LLM Settings</strong>. Two ways to authenticate:
+        Open <strong>Settings</strong> from the app header, then select{' '}
+        <strong>Huabu Agent</strong>. Configure the capabilities you want to
+        use:
       </P>
       <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
         <li>
-          <strong>API key</strong> — for OpenAI / Anthropic / Google / Mistral /
-          Groq and friends. Keys are saved locally and only ever sent on the
-          actual model call.
+          <strong>Chat Model (required)</strong> — choose the provider and model
+          that power Chat, Agent, and other AI interactions, then complete the
+          provider&apos;s API key or OAuth authentication.
         </li>
         <li>
-          <strong>GitHub Copilot (OAuth)</strong> — pick the provider, click{' '}
-          <em>Login with GitHub</em>, paste the device code into the GitHub page
-          that opens, done. Tokens refresh themselves.
+          <strong>Utility Model (optional)</strong> — follow the Chat Model or
+          choose a faster, lower-cost model for lightweight background tasks
+          such as labels and summaries.
         </li>
         <li>
-          <strong>External agent CLI</strong> — if you already use{' '}
-          <code>copilot</code>, <code>claude</code> or <code>gemini</code>{' '}
-          locally, the Settings popover detects them and offers a one-click{' '}
-          <em>Connect</em>. See{' '}
-          <DocLink href="/docs/ai/external-agents">External Agents</DocLink>.
+          <strong>Image Generation (optional)</strong> — configure an image
+          model if you want Huabu Agent to generate images in your Space.
+        </li>
+        <li>
+          <strong>Other Capabilities (optional)</strong> — add a Tavily API key
+          for web search and a RapidAPI key for importing YouTube transcripts.
         </li>
       </ul>
       <Callout tone="tip">
-        Full provider list, OAuth notes and troubleshooting tips live in{' '}
+        Provider details, authentication steps, and troubleshooting live in{' '}
         <DocLink href="/docs/reference/settings">Settings &amp; LLM</DocLink>.
       </Callout>
+      <DocImage
+        src="/docs/quick-start/configure-llm-web.png"
+        alt="Huabu Agent settings showing the conversation model configuration"
+        caption="Web preview — this screenshot will be replaced with the desktop version."
+        className="mx-auto max-w-2xl"
+      />
+      <Callout tone="info" title="Using an external agent?">
+        Install and authenticate an ACP-compatible agent such as Copilot or
+        Gemini, or an ACP adapter for Claude or Codex. Then open{' '}
+        <strong>Settings → External Agents</strong> and select{' '}
+        <strong>Add agent</strong>. See{' '}
+        <DocLink href="/docs/ai/external-agents">External Agents</DocLink> for
+        profile setup and usage.
+      </Callout>
 
-      <H2>4. Put something on the canvas</H2>
-      <P>The surface is yours. A few ways to get content in:</P>
+      <H2>4. Create a Space</H2>
+      <P>
+        A <strong>Space</strong> is an independent place to think and work on a
+        topic, question, or project. Inside your Vault, select{' '}
+        <strong>New canvas</strong> to create a Space and open its infinite
+        canvas immediately.
+      </P>
+      <DocImage
+        src="/docs/quick-start/create-canvas-web.png"
+        alt="Huabu canvas list with the New canvas button"
+        caption="Web preview — this screenshot will be replaced with the desktop version."
+        className="mx-auto max-w-2xl"
+      />
+
+      <H2>5. Bring materials into your Space</H2>
+      <P>
+        Add the materials you want to think with, then arrange them in whatever
+        structure makes sense:
+      </P>
       <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
         <li>
-          <strong>Drag a file in</strong> from your OS to drop a PDF, image or
-          video as a node.
+          <strong>Add source material</strong> — drag in PDFs, images, videos,
+          or other supported files, or paste URLs for web pages and YouTube
+          videos. Huabu creates the appropriate node for each item.
         </li>
         <li>
-          <strong>Paste a URL</strong> with <Kbd>Ctrl</Kbd>/<Kbd>Cmd</Kbd>+
-          <Kbd>V</Kbd> — Huabu auto-detects images, PDFs, web pages and YouTube
-          links and creates the right node.
+          <strong>Add your own thinking</strong> — create Notes, Text, and
+          Sketch nodes from the toolbar, or paste text directly onto the Space.
         </li>
         <li>
-          <strong>Click a node tool</strong> in the top toolbar (Frame / Note /
-          Text / Sketch / Question), then click on the canvas.
-        </li>
-        <li>
-          <strong>Write a Question</strong> — drop a Question node, type the
-          question, and the AI answers in a connected reply node.
+          <strong>Shape your Space</strong> — place related nodes near each
+          other, connect explicit relationships with edges, or wrap a group in a
+          Frame. Select multiple nodes and press <Kbd>Ctrl</Kbd>/<Kbd>Cmd</Kbd>+
+          <Kbd>G</Kbd> to frame them together.
         </li>
       </ul>
-      <P>
-        Once you have a handful of nodes, wrap related ones with <Kbd>Cmd</Kbd>+
-        <Kbd>G</Kbd> to make a <strong>Frame</strong> — that gives the AI a
-        clean unit of context to reason about.
-      </P>
+      <DocImage
+        src="/docs/quick-start/add-content-web.png"
+        alt="Huabu Space with a new Note node and the node toolbar"
+        caption="Web preview — this screenshot will be replaced with the desktop version."
+        className="mx-auto max-w-2xl"
+      />
 
-      <H2>Bring the AI in</H2>
+      <H2>6. Think and work with AI</H2>
       <P>
-        Open the chat panel on the right and ask anything about the canvas. The
-        AI sees the same nodes you do — selecting nodes first focuses the
-        conversation on them. Or press <Kbd>Cmd</Kbd>+<Kbd>I</Kbd> to ask the AI
-        to suggest the next move based on the canvas&apos; current state.
+        Once your materials are in the Space, choose how you want AI to
+        participate:
       </P>
+      <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
+        <li>
+          <strong>
+            <DocLink href="/docs/concepts/chat-panel">Chat Panel</DocLink>
+          </strong>{' '}
+          — talk with Huabu Agent or any paired external agent. Select the nodes
+          you want to use as context, then drag useful parts of a reply back
+          into the Space to continue organizing your thinking.
+        </li>
+        <li>
+          <strong>Agent Mode</strong> — describe what you want to accomplish and
+          let Huabu Agent work with the materials and structure in your Space.
+          It presents any proposed changes for you to review before applying
+          them.
+        </li>
+        <li>
+          <strong>
+            <DocLink href="/docs/nodes/question">Question Node</DocLink>
+          </strong>{' '}
+          — ask beside relevant material so the question stays in context with
+          the ideas and sources around it.
+        </li>
+        {/*
+          <li>
+            <strong>Intent</strong> — press <Kbd>Cmd</Kbd>+<Kbd>I</Kbd> to ask the
+            AI to suggest the next move based on the Space&apos;s current state.
+          </li>
+        */}
+        <li>
+          <strong>
+            <DocLink href="/docs/ai/external-agents">External Agents</DocLink>
+          </strong>{' '}
+          — bring a paired ACP agent into your Space when you need specialized
+          context or capabilities, such as understanding a repository, producing
+          a presentation, or taking action with its own tools.
+        </li>
+      </ul>
       <Callout tone="tip" title="Where to next">
-        Press <Kbd>?</Kbd> on any canvas to view the shortcut modal. Browse{' '}
-        <DocLink href="/docs/concepts/canvas-basics">Canvas Basics</DocLink> for
-        the rest of the workflow, or jump straight to{' '}
-        <DocLink href="/docs/ai/chat-mode">Chat Mode</DocLink> and{' '}
-        <DocLink href="/docs/ai/agent-mode">Agent Mode</DocLink> to learn the
-        two AI modes.
+        Continue with{' '}
+        <DocLink href="/docs/concepts/canvas-basics">Canvas Basics</DocLink> to
+        learn how to select, arrange, connect, and frame materials in a Space.
+        For deeper AI workflows, explore{' '}
+        <DocLink href="/docs/ai/chat-mode">Chat Mode</DocLink>,{' '}
+        <DocLink href="/docs/ai/agent-mode">Agent Mode</DocLink>, or{' '}
+        <DocLink href="/docs/ai/external-agents">External Agents</DocLink>.
       </Callout>
     </PageLayout>
   );

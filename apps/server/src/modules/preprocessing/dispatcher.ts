@@ -33,19 +33,15 @@ import type { PreprocessNodeRequest } from '@sediment/shared';
  *        label is already user/agent-owned — the generated value would be
  *        discarded by the Project stage anyway (see {@link isLabelProtected}).
  *
- * Structural capabilities (`resolve_input`, `compute_fingerprint`,
- * `build_patch`) carry no triggers and therefore always run.
+ * Structural capabilities (`resolve_input`, `build_patch`) carry no triggers
+ * and therefore always run.
  */
 export function buildPlan(
   profile: NodePreprocessProfile,
   request: PreprocessNodeRequest,
 ): Capability[] {
   // Always include structural capabilities
-  const structural: Capability[] = [
-    'resolve_input',
-    'compute_fingerprint',
-    'build_patch',
-  ];
+  const structural: Capability[] = ['resolve_input', 'build_patch'];
 
   // Repair / manual triggers force a full run, overriding all gating.
   if (request.options?.force) {
@@ -64,7 +60,8 @@ export function buildPlan(
       );
 
   if (!isFirstRun && dirtyFields.length === 0) {
-    // Nothing changed — still run structural caps for fingerprint check
+    // Nothing changed — still run the structural caps (input resolve + patch
+    // assembly); no extract / normalize / persist needed.
     return structural.filter((c) => profile.capabilities.includes(c));
   }
 
@@ -169,6 +166,12 @@ export class PreprocessDispatcher {
       provider: this.provider,
     };
 
-    return runPipeline(request, plan, profile.contentKind, deps);
+    return runPipeline(
+      request,
+      plan,
+      profile.contentKind,
+      profile.bodyOwnership,
+      deps,
+    );
   }
 }

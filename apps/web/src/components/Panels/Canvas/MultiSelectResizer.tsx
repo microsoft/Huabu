@@ -187,7 +187,7 @@ export const MultiSelectResizer = () => {
     } else {
       // Free-axis mode: each axis tracks the cursor independently.
       // Matches the convention used by single-node resizing and most
-      // 2D editors (Figma, Sketch, Illustrator).
+      // 2D design editors.
       scaleX = snap.diag.x === 0 ? 1 : offX / snap.diag.x;
       scaleY = snap.diag.y === 0 ? 1 : offY / snap.diag.y;
       if (!Number.isFinite(scaleX)) scaleX = 1;

@@ -22,11 +22,12 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
+    "pretypecheck": "pnpm run build:agentlet && pnpm run build:agenetes",
     "typecheck": "pnpm -r --parallel typecheck",
     "hooks:install": "node scripts/install-git-hooks.mjs",
     "hooks:uninstall": "node scripts/uninstall-git-hooks.mjs",
     "clean": "node scripts/clean.mjs",
-    "postinstall": "node scripts/install-agentlet-to-path.mjs"
+    "postinstall": "pnpm run build:agentlet && pnpm run build:agenetes && node scripts/install-agentlet-to-path.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",

@@ -1,4 +1,5 @@
 import { getLogger } from '../../../utils/logger.js';
+import { getRapidApiKey } from '../../integrations/integrations.js';
 
 import type { IDocumentLoader, LoadResult } from './loader.interface.js';
 
@@ -120,9 +121,11 @@ export class YoutubeLoader implements IDocumentLoader {
     transcript: YoutubeTranscriptItem[];
     transcript_text?: string;
   }> {
-    const apiKey = process.env.RAPIDAPI_KEY;
+    const apiKey = getRapidApiKey();
     if (!apiKey) {
-      throw new Error('Missing RAPIDAPI_KEY in environment variables.');
+      throw new Error(
+        'Missing RapidAPI key. Add it in Settings → Integrations (or set RAPIDAPI_KEY).',
+      );
     }
 
     const response = await fetch(
@@ -161,9 +164,11 @@ export class YoutubeLoader implements IDocumentLoader {
   private async fetchVideoInfo(
     videoId: string,
   ): Promise<YoutubeVideoInfoResponse> {
-    const apiKey = process.env.RAPIDAPI_KEY;
+    const apiKey = getRapidApiKey();
     if (!apiKey) {
-      throw new Error('Missing RAPIDAPI_KEY in environment variables.');
+      throw new Error(
+        'Missing RapidAPI key. Add it in Settings → Integrations (or set RAPIDAPI_KEY).',
+      );
     }
 
     const abortController = new AbortController();

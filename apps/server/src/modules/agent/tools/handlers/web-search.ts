@@ -12,6 +12,7 @@
  */
 
 import { getLogger } from '../../../../utils/logger.js';
+import { getTavilyApiKey } from '../../../integrations/integrations.js';
 
 import type { webSearchParamsSchema } from '../definitions.js';
 import type { Static } from '@earendil-works/pi-ai';
@@ -21,10 +22,10 @@ const log = getLogger('tool.web-search');
 export type WebSearchArgs = Static<typeof webSearchParamsSchema>;
 
 export async function handleWebSearch(args: WebSearchArgs): Promise<string> {
-  const apiKey = process.env.TAVILY_API_KEY;
+  const apiKey = getTavilyApiKey();
   if (!apiKey) {
     throw new Error(
-      'Missing TAVILY_API_KEY in environment variables. Set TAVILY_API_KEY in the repo-root .env to enable web_search.',
+      'Missing Tavily API key. Add it in Settings → Integrations (or set TAVILY_API_KEY) to enable web_search.',
     );
   }
 

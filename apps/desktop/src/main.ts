@@ -43,13 +43,18 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
-  Menu,
+  safeStorage,
   session,
   shell,
 } from 'electron';
 import { utilityProcess, type UtilityProcess } from 'electron';
 import getPort from 'get-port';
 
+import { applyApplicationMenu, registerMenuIpc } from './mac-menu.js';
+import {
+  DesktopSecureSecretStore,
+  isDesktopSecretId,
+} from './secure-secrets.js';
 import { TITLE_BAR_HEIGHT } from './title-bar.js';
 
 // ── Constants ────────────────────────────────────────────────────────
@@ -196,6 +201,7 @@ async function ensureShellPath(): Promise<void> {
 
 let serverProcess: UtilityProcess | null = null;
 let serverPort = 0;
+let secureSecretStore: DesktopSecureSecretStore | null = null;
 /**
  * Ring buffer of the server child's most recent stderr output. Reset on
  * each fork. Drained to a crash-dump file only when the child exits with
@@ -382,6 +388,7 @@ function buildServerEnv(port: number): NodeJS.ProcessEnv {
     SERVER_PORT: String(port),
     HUABU_BIND_HOST: '127.0.0.1',
     HUABU_DATA_DIR: dataDir,
+    HUABU_SECRET_BRIDGE: '1',
     ...(webDistPath ? { WEB_DIST_PATH: webDistPath } : {}),
     NODE_ENV: IS_DEV ? 'development' : 'production',
   };
@@ -389,6 +396,7 @@ function buildServerEnv(port: number): NodeJS.ProcessEnv {
 
 async function startServer(port: number): Promise<void> {
   const serverEntry = resolveServerEntry();
+  const secretSnapshot = secureSecretStore?.snapshot() ?? {};
 
   if (!existsSync(serverEntry)) {
     await dialog.showErrorBox(
@@ -407,6 +415,53 @@ async function startServer(port: number): Promise<void> {
     // would otherwise let the pipe buffer fill and back-pressure the
     // server's writes — see the always-on no-op drain below.
     stdio: 'pipe',
+  });
+  const child = serverProcess;
+
+  child.on('message', (message: unknown) => {
+    if (!secureSecretStore || !message || typeof message !== 'object') return;
+    const request = message as Record<string, unknown>;
+    if (
+      request.type !== 'secret:mutate' ||
+      typeof request.requestId !== 'string'
+    ) {
+      return;
+    }
+    if (
+      typeof request.key !== 'string' ||
+      !isDesktopSecretId(request.key) ||
+      (request.value !== null && typeof request.value !== 'string')
+    ) {
+      child.postMessage({
+        type: 'secret:result',
+        requestId: request.requestId,
+        ok: false,
+        error: 'Invalid secure credential mutation',
+      });
+      return;
+    }
+    try {
+      secureSecretStore.set(request.key, request.value as string | null);
+      child.postMessage({
+        type: 'secret:result',
+        requestId: request.requestId,
+        ok: true,
+      });
+    } catch (err) {
+      child.postMessage({
+        type: 'secret:result',
+        requestId: request.requestId,
+        ok: false,
+        error:
+          err instanceof Error ? err.message : 'Secure secret write failed',
+      });
+    }
+  });
+  child.once('spawn', () => {
+    child.postMessage({
+      type: 'secret:init',
+      secrets: secretSnapshot,
+    });
   });
 
   // Always-on safety net: an `on('data')` listener (even empty) puts
@@ -913,14 +968,17 @@ function createWindow(port: number): void {
 // ── App lifecycle ────────────────────────────────────────────────────
 
 app.whenReady().then(async () => {
-  // Drop the default Electron Application menu (`File / Edit / View /
-  // Window / Help`). The Huabu shell paints its own minimal title
-  // bar — keeping the OS menu around just adds visual noise. Chromium
-  // still wires up the usual editing keyboard accelerators (cut / copy
-  // / paste / undo / select-all) without it, and our DevTools /
-  // reload accelerators are re-bound per window via
-  // `before-input-event` inside `createWindow`.
-  Menu.setApplicationMenu(null);
+  // Per-platform application menu. macOS gets a native menu bar (the
+  // platform-conventional home for workspace-level actions); Windows /
+  // Linux keep it cleared and rely on the custom title bar's `AppMenu`
+  // dropdown instead. The menu is built with English fallback labels
+  // here so the standard Edit / Window accelerators and ⌘, / ⌘N work
+  // from the first frame; the renderer re-pushes localized labels via
+  // `menu:configure` once i18n is ready. Chromium still wires up the
+  // usual editing keyboard accelerators, and our DevTools / reload
+  // accelerators are re-bound per window via `before-input-event`
+  // inside `createWindow`.
+  applyApplicationMenu(() => mainWindow);
 
   // Register IPC handlers BEFORE any window is created so the preload
   // script's `ipcRenderer.invoke('workspace:get', …)` calls always have
@@ -928,6 +986,7 @@ app.whenReady().then(async () => {
   registerWorkspaceIpc();
   registerWindowIpc();
   registerDialogIpc();
+  registerMenuIpc(() => mainWindow);
 
   // macOS Dock icon. In a packaged .app this comes from the bundle's
   // .icns automatically, but in dev (`electron .`) the Dock would show
@@ -940,13 +999,40 @@ app.whenReady().then(async () => {
   }
 
   try {
+    const external = getExternalServerUrl();
+    if (!external) {
+      if (!safeStorage.isEncryptionAvailable()) {
+        throw new Error(
+          'Operating-system credential encryption is unavailable.',
+        );
+      }
+      if (
+        process.platform === 'linux' &&
+        safeStorage.getSelectedStorageBackend() === 'basic_text'
+      ) {
+        throw new Error(
+          'A Linux Secret Service or KWallet backend is required to protect credentials.',
+        );
+      }
+      const probe = `huabu-safe-storage-probe-${Date.now()}`;
+      if (
+        safeStorage.decryptString(safeStorage.encryptString(probe)) !== probe
+      ) {
+        throw new Error(
+          'Operating-system credential encryption verification failed.',
+        );
+      }
+      const dataDir = join(app.getPath('userData'), 'data');
+      secureSecretStore = new DesktopSecureSecretStore(dataDir, safeStorage);
+      secureSecretStore.migratePlaintextFiles();
+    }
+
     // Augment PATH from the user's login shell BEFORE forking the
     // server so host-CLI detection (`which copilot` / `claude` /
     // `gemini`) sees the same entries the user has in their Terminal.
     // See `ensureShellPath` for rationale.
     await ensureShellPath();
 
-    const external = getExternalServerUrl();
     if (external) {
       // External dev server: don't fork our own, just point at the
       // already-running one. We still wait for the port so the window

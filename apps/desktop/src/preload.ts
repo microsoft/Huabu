@@ -101,6 +101,28 @@ contextBridge.exposeInMainWorld('electronBridge', {
   },
 
   /**
+   * Native macOS menu bar bridge. `configure` pushes localized labels +
+   * capability flags to the main process so it can (re)build the menu in
+   * the in-app language; `onCommand` subscribes to menu-item activations
+   * so the renderer can dispatch them onto the same handlers that back
+   * the in-app `AppMenu`. No-op on Windows / Linux (no native menu bar).
+   */
+  menu: {
+    configure: (config: unknown): void => {
+      ipcRenderer.send('menu:configure', config);
+    },
+    onCommand: (cb: (command: string) => void): (() => void) => {
+      const listener = (_event: unknown, command: string): void => {
+        cb(command);
+      };
+      ipcRenderer.on('menu:command', listener);
+      return () => {
+        ipcRenderer.removeListener('menu:command', listener);
+      };
+    },
+  },
+
+  /**
    * Native OS dialogs forwarded from the main process. Currently only
    * `pickFolder` is exposed — used by Settings panels and the
    * workspace setup flow to swap the server's legacy PowerShell

@@ -20,6 +20,7 @@ import {
   uploadPdf,
   uploadVideo,
 } from '@/api/artifact';
+import { matchesShortcut } from '@/config/shortcuts';
 import { isEditableTarget } from '@/hooks/shortcuts';
 import { useIsNotMouse } from '@/hooks/useInputMode';
 import { useIntentStore } from '@/store/intentStore';
@@ -116,51 +117,58 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
       // Don't fire while a modal is open (file upload / add links).
       if (activeModal) return;
 
-      switch (e.key) {
-        case 's':
-          e.preventDefault();
-          if (pendingNodeType) setPendingNodeType(null);
-          onToolChange('select');
-          return;
-        case 'p':
-          e.preventDefault();
-          if (pendingNodeType) setPendingNodeType(null);
-          onToolChange('pan');
-          return;
-        case 'l':
-          e.preventDefault();
-          if (pendingNodeType) setPendingNodeType(null);
-          onToolChange('lasso');
-          return;
-        case '1':
-          e.preventDefault();
-          setPendingNodeType(pendingNodeType === 'frame' ? null : 'frame');
-          return;
-        case '2':
-          e.preventDefault();
-          setPendingNodeType(pendingNodeType === 'note' ? null : 'note');
-          return;
-        case '3':
-          e.preventDefault();
-          setPendingNodeType(pendingNodeType === 'text' ? null : 'text');
-          return;
-        case '4':
-          e.preventDefault();
-          // Match the click handler: always reset the sketch tool to draw
-          // mode so the eraser doesn't silently persist between sessions.
-          setSketchDraft({ mode: 'draw' });
-          setPendingNodeType(pendingNodeType === 'sketch' ? null : 'sketch');
-          return;
-        case '5':
-          e.preventDefault();
-          setPendingNodeType(pendingNodeType === 'audio' ? null : 'audio');
-          return;
-        case 'q':
-          e.preventDefault();
-          setPendingNodeType(
-            pendingNodeType === 'question' ? null : 'question',
-          );
-          return;
+      // Keys sourced from the shared shortcut catalog. Tools (S/P/L) clear
+      // any pending placement first; placement modes toggle themselves.
+      if (matchesShortcut(e, 'tool.select')) {
+        e.preventDefault();
+        if (pendingNodeType) setPendingNodeType(null);
+        onToolChange('select');
+        return;
+      }
+      if (matchesShortcut(e, 'tool.pan')) {
+        e.preventDefault();
+        if (pendingNodeType) setPendingNodeType(null);
+        onToolChange('pan');
+        return;
+      }
+      if (matchesShortcut(e, 'tool.lasso')) {
+        e.preventDefault();
+        if (pendingNodeType) setPendingNodeType(null);
+        onToolChange('lasso');
+        return;
+      }
+      if (matchesShortcut(e, 'mode.frame')) {
+        e.preventDefault();
+        setPendingNodeType(pendingNodeType === 'frame' ? null : 'frame');
+        return;
+      }
+      if (matchesShortcut(e, 'mode.note')) {
+        e.preventDefault();
+        setPendingNodeType(pendingNodeType === 'note' ? null : 'note');
+        return;
+      }
+      if (matchesShortcut(e, 'mode.text')) {
+        e.preventDefault();
+        setPendingNodeType(pendingNodeType === 'text' ? null : 'text');
+        return;
+      }
+      if (matchesShortcut(e, 'mode.sketch')) {
+        e.preventDefault();
+        // Match the click handler: always reset the sketch tool to draw
+        // mode so the eraser doesn't silently persist between sessions.
+        setSketchDraft({ mode: 'draw' });
+        setPendingNodeType(pendingNodeType === 'sketch' ? null : 'sketch');
+        return;
+      }
+      if (matchesShortcut(e, 'mode.audio')) {
+        e.preventDefault();
+        setPendingNodeType(pendingNodeType === 'audio' ? null : 'audio');
+        return;
+      }
+      if (matchesShortcut(e, 'mode.question')) {
+        e.preventDefault();
+        setPendingNodeType(pendingNodeType === 'question' ? null : 'question');
+        return;
       }
     };
     window.addEventListener('keydown', onKeyDown);

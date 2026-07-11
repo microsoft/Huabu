@@ -1,6 +1,6 @@
 # Canvas Storage Architecture
 
-> Last updated: 2026-06-29
+> Last updated: 2026-07-09
 
 ## 1. Overview
 
@@ -43,17 +43,40 @@ Key points:
 
 `apps/server/src/modules/storage/`
 
-| File                                                                             | Responsibility                                                                            |
-| -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `paths.ts`                                                                       | The only place that joins workspace paths. All path helpers live here.                    |
-| `io.ts`                                                                          | Atomic writes, JSONL helpers, `sanitizeId`, `safeJoin`, `mkdirp`, `readJson`              |
-| `frontmatter.ts`                                                                 | `toFrontmatter` / `parseFrontmatter`                                                      |
-| `naming.ts`                                                                      | `toSafeFilename`, `dedupeName`, `dedupeArtifactFilename`, `normalizeForCompare`           |
-| `name-index.ts`                                                                  | In-memory `id ↔ filename` index — shared by canvas-dirs, node list, artifacts             |
-| `canvas-dirs.ts`                                                                 | Workspace-level `canvasId → dirName` index; scan-on-demand; handles renames               |
-| `canvas-store.ts`                                                                | `CanvasStore` class (per-canvas facade)                                                   |
-| `index.ts`                                                                       | `getCanvasStore` / `listCanvases` / `createCanvas` / `deleteCanvas` / `resetStorageCache` |
-| `migrate.ts`                                                                     | Legacy V1→V2 migration (deprecated; runs once on workspace open)                          |
-| `migrate-labels.ts`                                                              | V2→V3 (label-based dir/file renames) and V3→V4 (`.artifacts/` rename) migrations          |
-| `migrate-memory.ts` · `migrate-artifact-keys.ts` · `migrate-question-content.ts` | Further one-shot migrations (memory dir, artifact keys, question sidecar body)            |
-| `migration-logger.ts`                                                            | Shared logging for the one-shot migrations                                                |
+| File                      | Responsibility                                                                                  |
+| ------------------------- | ----------------------------------------------------------------------------------------------- |
+| `paths.ts`                | The only place that joins workspace paths. All path helpers live here.                          |
+| `io.ts`                   | Atomic writes, JSONL helpers, `sanitizeId`, `safeJoin`, `mkdirp`, `readJson`                    |
+| `frontmatter.ts`          | `toFrontmatter` / `parseFrontmatter`                                                            |
+| `naming.ts`               | `toSafeFilename`, `dedupeName`, `dedupeArtifactFilename`, `normalizeForCompare`                 |
+| `name-index.ts`           | In-memory `id ↔ filename` index — shared by canvas-dirs, node list, artifacts                   |
+| `canvas-dirs.ts`          | Workspace-level `canvasId → dirName` index; scan-on-demand; handles renames                     |
+| `canvas-store.ts`         | `CanvasStore` class (per-canvas facade)                                                         |
+| `write-coordinator.ts`    | Single durable-write chokepoint — `withCanvasMutex` / `updateNode` / `applyNodeUpdate` (see §4) |
+| `index.ts`                | `getCanvasStore` / `listCanvases` / `createCanvas` / `deleteCanvas` / `resetStorageCache`       |
+| `migrate-chat-threads.ts` | One-shot pi-ai `Context` → structured `.turns.jsonl` chat-thread migration                      |
+
+## 4. Write coordinator — one chokepoint for durable node writes
+
+`store.readNode` / `store.writeNode` are the raw sync primitives, but a node's
+`nodes/<safe(label)>.md` has **three** would-be writers — the content PUT
+(in-app editor), preprocess persist, and the agent executor. To stop them
+interleaving or clobbering each other, every durable node write funnels through
+[write-coordinator.ts](../../apps/server/src/modules/storage/write-coordinator.ts):
+
+| Export                                                        | Concurrency                                                                       | Used by                                                |
+| ------------------------------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| `withCanvasMutex(canvasId, fn)`                               | per-canvas promise-chain lock                                                     | the lock itself; executor holds it for its whole batch |
+| `updateNode(store, id, { expectRev?, apply, strictRename? })` | **locking** `read → rev-CAS → apply(current) → writeNode`, atomic under the mutex | content PUT, preprocess persist                        |
+| `applyNodeUpdate(store, id, opts)`                            | the same core **without** the lock (caller already holds it)                      | executor (its batch already owns `withCanvasMutex`)    |
+
+- **rev-CAS** compares `expectRev` against `nodeRevisionOf({ content, src })` of
+  the current on-disk record; a stale baseline returns `{ status: 'rev-conflict', currentRev }`
+  (mapped to `NODE_CONTENT_CONFLICT` 409) and writes nothing.
+- **Field-ownership policy stays in each caller's `apply(current)`** — the
+  coordinator only guarantees serialization + CAS, not which fields win. (e.g.
+  preprocess's authored-body guard and label protection live in its `apply`.)
+- The mutex being per-canvas (coarser than per-node) is deliberate: it wraps only
+  the microsecond sync `.md` write, so contention is negligible. Known trade-off:
+  the executor holds it for its whole (LLM-free but image-normalizing) batch, so a
+  user save can briefly wait behind an agent batch.

@@ -1,6 +1,6 @@
 /**
  * `GET /api/acp/agent-cli` — host-side detection of installed ACP-capable
- * agent CLIs (Copilot / Claude / Gemini).
+ * agent CLIs from the trusted built-in catalogue.
  *
  * Powers the "Detected agents" cards in the Settings UI. The user picks
  * one of the detected CLIs when creating a profile; the server then

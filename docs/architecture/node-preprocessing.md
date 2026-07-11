@@ -5,6 +5,8 @@
 > knowledge sources. Every node type runs the same pipeline; a per-type profile
 > decides which stages execute.
 
+> Last updated: 2026-07-09
+
 ---
 
 ## 1. Two concepts kept separate
@@ -20,16 +22,18 @@ A node is processed by asking "which capabilities are dirty for this change", no
 
 Every node passes the same stages; the dispatcher skips those whose capabilities aren't in the node's profile. **All LLM / paid-provider work lives only in Enrich.**
 
-| Stage           | Purpose                                                                                             | LLM?    | Persist?           |
-| --------------- | --------------------------------------------------------------------------------------------------- | ------- | ------------------ |
-| 1 Input Resolve | normalise raw node data into canonical input (resolve URL, artifact path, child labels)             | no      | no                 |
-| 2 Extract       | parse / fetch content — text / pdf (`pdf2md`) / web (Tavily) / office / youtube loaders             | no      | no                 |
-| 3 Normalize     | content hash, title, metadata merge (web/pdf cache short-circuit on unchanged `src`)                | no      | no                 |
-| 4 Enrich        | `generate_label` / `generate_summary` / `generate_keywords` via `ProviderManager`                   | **yes** | no                 |
-| 5 Persist       | write/update node `.md` (canvas-local, keyed by `nodeId`), hash-dedup, placeholder for empty/failed | no      | yes (policy-gated) |
-| 6 Project       | assemble authoritative `patch` + diagnostics for the client                                         | no      | no                 |
+| Stage           | Purpose                                                                                                                                       | LLM?    | Persist?           |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------------------ |
+| 1 Input Resolve | normalise raw node data into canonical input (resolve URL, artifact path, child labels)                                                       | no      | no                 |
+| 2 Extract       | parse / fetch content — text / pdf (`pdf2md`) / web (Tavily) / office / youtube loaders                                                       | no      | no                 |
+| 3 Normalize     | canonical content, title, metadata merge (web/pdf cache short-circuit on unchanged `src`)                                                     | no      | no                 |
+| 4 Enrich        | `generate_label` / `generate_summary` / `generate_keywords` via `ProviderManager`                                                             | **yes** | no                 |
+| 5 Persist       | write/update node `.md` via the storage `updateNode` coordinator (serialized + rev-CAS), content-equality dedup, placeholder for empty/failed | no      | yes (policy-gated) |
+| 6 Project       | assemble authoritative `patch` + diagnostics for the client                                                                                   | no      | no                 |
 
 Web / pdf skip Stages 2–5 when `src` is unchanged and content is cached on disk ([cache-check.ts](../../apps/server/src/modules/preprocessing/stages/cache-check.ts)); `force=true` overrides. `allowLLM=false` / interactive mode → Enrich skipped, result still valid.
+
+Enrich runs on the **utility model tier**, not the chat model: `ProviderManager` calls `llmComplete(ctx, { role })` with the `imageLabel` / `frameLabel` / `contentMeta` roles, so labeling / summaries / keywords resolve through the user's utility model (a faster/cheaper model, or the chat model when utility follows chat). See [model-role-routing](../proposals/model-role-routing.md).
 
 ---
 
@@ -50,11 +54,14 @@ Each `CanvasNodeType` declares `{ contentKind?, capabilities, watchFields }`. Se
 
 `question` runs `generate_label` to auto-name itself but has no `persist_source` (not a knowledge source). `sketch` / `audio` only do `resolve_input` + `build_patch`. The `contentKind?` field (`web` / `pdf` / `office` / `note` / `text` / `image` / `video`) is just the Persist gate — set it and Stage 5 writes the node as a knowledge source; question has none. Registry: [profiles.ts](../../apps/server/src/modules/preprocessing/profiles.ts).
 
+Each profile also declares **`bodyOwnership`** (`types.ts`): `'authored'` for user-editable bodies (`note` / `text`) → the Persist write is rev-CAS-guarded so a concurrent edit can't clobber the user's body; `'derived'` for pipeline-extracted, in-app read-only bodies (`web` / `pdf` / `office`) → no CAS (last-extraction-wins). The Persist stage reads this flag rather than hardcoding node types.
+
 ---
 
 ## 4. Triggers & state
 
 - Frontend `preprocessNodeIfNeeded` ([preprocess.ts](../../apps/web/src/handler/canvasCommand/preprocess.ts)) is the unified entry; one `triggerPreprocessing` callback, debounced per node via [preprocessQueue.ts](../../apps/web/src/store/canvasStore/save/preprocessQueue.ts).
+- **`note` / `text` are settle-triggered, not mutation-triggered.** Their label auto-derives from the first heading/line, so firing preprocess on every typing pause churned the `.md` filename. Instead [postEffects.web.ts](../../apps/web/src/handler/canvasCommand/postEffects.web.ts) skips them on mutation, and `settleNodePreprocess` ([canvasStore.ts](../../apps/web/src/store/canvasStore.ts)) fires once at the edit-done boundary — `closeExpanded` / `openExpanded` for a `note`, `TextNode`'s blur for inline `text`. The body still saves on the fast `nodeContentQueue` cadence independently; other node types keep the per-mutation debounce.
 - `node_inserted` / `node_updated` carry a snapshot; dispatcher diffs against the profile's `watchFields` to plan the minimum stages.
 - Label policy: Enrich may propose a label, but Project includes it only when `labelSource !== 'user'`.
 - Error recovery: failed extraction throws `EXTRACT_FAILED`; Persist is canvas-local (keyed by `nodeId`, written to `nodes/<nodeId>.md`) and stores a placeholder for empty / failed nodes.
@@ -65,15 +72,15 @@ Each `CanvasNodeType` declares `{ contentKind?, capabilities, watchFields }`. Se
 
 `apps/server/src/modules/preprocessing/`
 
-| File / dir            | Responsibility                                                                 |
-| --------------------- | ------------------------------------------------------------------------------ |
-| `dispatcher.ts`       | dirty-field analysis → execution plan                                          |
-| `pipeline.ts`         | ordered stage runner                                                           |
-| `profiles.ts`         | per-node capability registry                                                   |
-| `provider-manager.ts` | single LLM/provider entry (wraps `agent/llm.ts`)                               |
-| `types.ts`            | `Capability` / `NodeContentKind` / `NodePreprocessProfile`                     |
-| `stages/`             | input-resolve · cache-check · extract · normalize · enrich · persist · project |
-| `loaders/`            | text · pdf · web · office · youtube                                            |
+| File / dir            | Responsibility                                                                     |
+| --------------------- | ---------------------------------------------------------------------------------- |
+| `dispatcher.ts`       | dirty-field analysis → execution plan                                              |
+| `pipeline.ts`         | ordered stage runner                                                               |
+| `profiles.ts`         | per-node capability registry                                                       |
+| `provider-manager.ts` | single LLM/provider entry (wraps `agent/llm.ts`)                                   |
+| `types.ts`            | `Capability` / `NodeContentKind` / `NodePreprocessProfile` (incl. `bodyOwnership`) |
+| `stages/`             | input-resolve · cache-check · extract · normalize · enrich · persist · project     |
+| `loaders/`            | text · pdf · web · office · youtube                                                |
 
 One route: `POST /api/canvas/:id/nodes/:nodeId/preprocess` → dispatcher.
 

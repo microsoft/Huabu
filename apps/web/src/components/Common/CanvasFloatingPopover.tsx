@@ -15,6 +15,7 @@ import {
 import { createPortal } from 'react-dom';
 
 import useCanvasStore from '@/store/canvasStore';
+import { useAnyGlobalModalOpen } from '@/store/globalModalUi';
 import { usePreviewStore } from '@/store/previewStore';
 
 /**
@@ -100,6 +101,13 @@ export function CanvasFloatingPopover({
   );
   const hiddenByExpandedPanel = canvasReplaced || previewReplaced;
 
+  // Hide whenever an app-wide modal (Settings / Keyboard Shortcuts) is
+  // open. Those modals render their own dimmed backdrop over the whole
+  // window, but canvas floating toolbars portal to `document.body` at
+  // z-index 1000 and would otherwise paint on top of the backdrop —
+  // leaving two competing floating layers on screen at once.
+  const hiddenByGlobalModal = useAnyGlobalModalOpen();
+
   // Virtual reference element: Floating UI calls `getBoundingClientRect`
   // on every position recalculation, so we always read fresh values
   // from the live React Flow container. The identity changes whenever
@@ -175,7 +183,13 @@ export function CanvasFloatingPopover({
     return () => observer.disconnect();
   }, [domNode, update]);
 
-  if (!open || !virtualReference || hiddenByExpandedPanel) return null;
+  if (
+    !open ||
+    !virtualReference ||
+    hiddenByExpandedPanel ||
+    hiddenByGlobalModal
+  )
+    return null;
 
   return createPortal(
     <div

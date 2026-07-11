@@ -20,13 +20,17 @@
  * See `docs/node-content-api-split.md`.
  */
 
+import { nodeRevisionOf } from '@sediment/shared/canvas-engine';
+
 import {
   CanvasConflictError,
+  getNodeContent,
   NodeDuplicateFilesError,
   putNodeContent,
 } from '@/api/canvas';
 import { toast } from '@/components/Common/Toast';
 import { i18n } from '@/i18n';
+import { copyToClipboard } from '@/utils/io/clipboard';
 
 import {
   MD_BACKED_NODE_TYPES,
@@ -37,6 +41,25 @@ import { createPerKeyDebouncer } from './perKeyDebouncer';
 
 import type { PutNodeContentRequest } from '@sediment/shared';
 import type { Node } from '@xyflow/react';
+
+/**
+ * Revision of an empty node ({@link nodeRevisionOf} over no authored
+ * content). A brand-new node the client is creating sends this as its
+ * `expectRev` baseline, so the create only succeeds while no `.md` exists
+ * yet on the server — closing the create-race window.
+ */
+const REV_EMPTY = nodeRevisionOf({});
+
+/** Compute a node's content revision (the CAS baseline) from its data. */
+function revOfNode(node: Node): string {
+  const data = (node.data ?? {}) as Record<string, unknown>;
+  return nodeRevisionOf({
+    ...(typeof data['content'] === 'string'
+      ? { content: data['content'] as string }
+      : {}),
+    ...(typeof data['src'] === 'string' ? { src: data['src'] as string } : {}),
+  });
+}
 
 /**
  * Slice fields the queue reads at fire time. Kept structural (not
@@ -121,11 +144,36 @@ export type NodeContentQueue = {
   clearDuplicateGuard(nodeId: string): void;
 
   /**
+   * Drop ALL per-node bookkeeping for a node that no longer exists
+   * (deleted / removed from the canvas). Cancels any pending debounce
+   * and clears its entries in every per-node map/set — the CAS
+   * baseline, the frozen/conflict guards, the save-error and duplicate
+   * toast guards, and the last-good rename anchor — so a long session
+   * of create/delete churn does not leak memory keyed by dead node ids.
+   * Idempotent: forgetting an unknown node is a no-op. An in-flight PUT
+   * is left to settle on its own (its `inflight` entry self-clears);
+   * `buildRequest` already returns `null` for a node gone from the store.
+   */
+  forgetNode(nodeId: string): void;
+
+  /**
    * Node ids with un-persisted content edits — pending debounced saves
    * plus in-flight PUTs. Used by the sync applier to protect a node the
    * user is mid-editing from an incoming agent write.
    */
   pendingNodeIds(): string[];
+
+  /**
+   * Seed (or refresh) the optimistic-concurrency baseline revision for
+   * each given node from its current authored content. Called with the
+   * authoritative server state so content and its baseline are updated
+   * together (never through separate channels): on `loadCanvas` for every
+   * loaded node, and on `applyDeltasFromAgent` for the nodes an agent
+   * write actually applied. This is what keeps a subsequent user edit
+   * from a false `NODE_CONTENT_CONFLICT` after an agent write that was
+   * already reflected in the user's view.
+   */
+  seedBaselines(nodes: readonly Node[]): void;
 };
 
 /**
@@ -159,6 +207,37 @@ export function createNodeContentQueue(opts: {
   >();
 
   /**
+   * Optimistic-concurrency baseline: the {@link nodeRevision} each node's
+   * last server-agreed content had. Seeded on load / agent-sync (via
+   * {@link seedBaselines}) and updated to the server-returned rev after
+   * every successful write, so content and its baseline always move
+   * together. A node with no entry sends {@link REV_EMPTY} (treated as
+   * "I believe this is a fresh create").
+   */
+  const baselineRev = new Map<string, string>();
+
+  /**
+   * Node ids for which the persistent `NODE_CONTENT_CONFLICT` toast is
+   * already showing. Rate-limits the toast to once per node (autosave
+   * would otherwise re-pop it on every keystroke while the node stays
+   * blocked). Cleared on a successful write or a baseline reseed.
+   */
+  const contentConflictToasted = new Set<string>();
+
+  /**
+   * Nodes frozen after a `NODE_CONTENT_CONFLICT`, mapped to the on-disk
+   * revision we collided with. While a node is frozen {@link buildRequest}
+   * returns `null`, so NO write path — debounced autosave, `flushNow`, or
+   * the `beforeunload` keepalive — can PUT it. This is what makes the
+   * "Load latest" (reload) resolution safe: reloading can never leak our
+   * stale in-app version onto disk and clobber the newer server content.
+   * The stored rev lets "Keep mine" re-baseline and force the overwrite.
+   * Cleared when the node is resolved (reseeded on load / agent-sync, or
+   * a successful forced write).
+   */
+  const frozen = new Map<string, string>();
+
+  /**
    * Node ids for which we have already shown the persistent
    * "duplicate files on disk" toast. Autosave retries while the
    * duplicate persists would otherwise pop a fresh toast on every
@@ -166,6 +245,18 @@ export function createNodeContentQueue(opts: {
    * successful write (so a recurrence later in the session re-alerts).
    */
   const duplicateToasted = new Set<string>();
+
+  /**
+   * Node ids for which we have already shown the persistent save-failed
+   * toast. Unlike a `NODE_CONTENT_CONFLICT` (a benign concurrency race,
+   * handled separately) this is a genuine write failure (500 / IO / Drive
+   * lock) where the body AND any rename silently did not land. We surface
+   * it even for background (`auto`) saves so the user isn't left unaware
+   * their last edit wasn't persisted — but throttle to once per node until
+   * a save succeeds (or the user clicks Retry) so a repeatedly-failing
+   * autosave can't spam. Cleared on the next successful write.
+   */
+  const saveErrorToasted = new Set<string>();
 
   /**
    * Build the `PutNodeContentRequest` body for `nodeId` from the
@@ -178,6 +269,11 @@ export function createNodeContentQueue(opts: {
     if (!node) return null;
     const nodeType = typeof node.type === 'string' ? node.type : '';
     if (!MD_BACKED_NODE_TYPES.has(nodeType)) return null;
+
+    // Frozen after a content conflict: refuse every write path until the
+    // user resolves it, so neither a debounced autosave nor the unload
+    // keepalive can clobber the newer server content.
+    if (frozen.has(nodeId)) return null;
 
     const data = (node.data ?? {}) as Record<string, unknown>;
     const body: PutNodeContentRequest = { nodeType };
@@ -218,6 +314,16 @@ export function createNodeContentQueue(opts: {
       body.provenance = data['provenance'];
     }
 
+    // Optimistic-concurrency baseline. A node we've loaded / synced has a
+    // seeded rev; a brand-new node (no entry) sends the empty-content rev
+    // so its create only lands while no `.md` exists yet on the server.
+    // The web sends this uniformly for every md-backed node; the server
+    // applies the rev-CAS only for `authored` bodies (note / text /
+    // question) and ignores it for `derived` (last-write-wins) types —
+    // `bodyOwnership` in the preprocessing profiles is the single source
+    // of truth, so the client need not know the classification.
+    body.expectRev = baselineRev.get(nodeId) ?? REV_EMPTY;
+
     return body;
   }
 
@@ -240,6 +346,14 @@ export function createNodeContentQueue(opts: {
     const body = buildRequest(nodeId);
     if (!body) return;
     const response = await putNodeContent(canvasId, nodeId, body, kOpts);
+    // Content and its baseline update together: record the rev the server
+    // actually persisted so the next edit's `expectRev` is fresh (and a
+    // rapid follow-up edit doesn't 409 against our own just-committed
+    // write). Also clear any content-conflict toast guard — a success
+    // means the node is no longer blocked.
+    baselineRev.set(nodeId, response.rev);
+    contentConflictToasted.delete(nodeId);
+    saveErrorToasted.delete(nodeId);
     // A write that succeeded means any prior duplicate has been
     // resolved — drop the once-per-node toast guard so a future
     // recurrence alerts again, and clear the node's duplicate banner
@@ -285,6 +399,148 @@ export function createNodeContentQueue(opts: {
   }
 
   /**
+   * Surface a `NODE_CONTENT_CONFLICT`: the node's content changed on the
+   * server since we loaded it (another tab / device / agent, or a
+   * Google-Drive-synced newer copy), so our write was refused to avoid
+   * clobbering the newer content. The user's in-editor text is left
+   * untouched.
+   *
+   * The node is **frozen** ({@link buildRequest} now returns `null` for
+   * it), so no further write path — debounced autosave, `flushNow`, or
+   * the `beforeunload` keepalive — can PUT it. That is what makes the
+   * "Load latest" refresh genuinely safe: while frozen we can never leak
+   * our stale version onto disk.
+   *
+   * The user gets a real two-way choice:
+   *   - **Keep mine** — re-baseline to the on-disk rev and force the
+   *     overwrite (deliberately replaces the server's version with ours).
+   *   - **Load latest** — copy our in-app text to the clipboard as a
+   *     safety net, then refetch just this node's server state and adopt
+   *     it in place (no full page reload). Our unsaved in-app edit is
+   *     discarded, but recoverable from the clipboard.
+   */
+  function handleContentConflict(nodeId: string, currentRev: string): void {
+    // Freeze regardless of the once-per-node toast guard, so a repeat
+    // conflict can't leave the node writable.
+    frozen.set(nodeId, currentRev);
+    if (contentConflictToasted.has(nodeId)) return;
+    contentConflictToasted.add(nodeId);
+    const state = opts.getState();
+    const node = state.nodes.find((n) => n.id === nodeId);
+    const label =
+      node && typeof node.data?.['label'] === 'string'
+        ? (node.data['label'] as string)
+        : i18n.t('node.untitled');
+    toast(i18n.t('node.contentConflict', { label }), {
+      tone: 'danger',
+      duration: 0,
+      secondaryAction: {
+        label: i18n.t('node.contentConflictKeepMine'),
+        onClick: () => {
+          void resolveKeepMine(nodeId);
+        },
+      },
+      action: {
+        label: i18n.t('node.contentConflictLoadLatest'),
+        onClick: () => {
+          void resolveLoadLatest(nodeId);
+        },
+      },
+    });
+    console.warn('[node-content] write refused (stale content):', nodeId);
+  }
+
+  /**
+   * Resolve a content conflict by keeping the local version: adopt the
+   * on-disk rev we collided with as the new baseline, unfreeze, and force
+   * an immediate write so our content deliberately overwrites the other
+   * change. If the disk moved again in the meantime the write re-conflicts
+   * and re-freezes (correct — the user can decide again).
+   */
+  async function resolveKeepMine(nodeId: string): Promise<void> {
+    const currentRev = frozen.get(nodeId);
+    if (currentRev !== undefined) baselineRev.set(nodeId, currentRev);
+    frozen.delete(nodeId);
+    contentConflictToasted.delete(nodeId);
+    const canvasId = opts.getState().canvasId;
+    if (!canvasId) return;
+    await serializedFlush(canvasId, nodeId, 'user').catch(() => undefined);
+  }
+
+  /**
+   * Resolve a content conflict by discarding the local version and
+   * adopting the server's — without a full page reload. Copies our
+   * in-app text to the clipboard as a safety net, refetches just this
+   * node's persisted sidecar, and swaps it into the store in place.
+   *
+   * The refreshed content is written through `_setStateNoAutosave`, so
+   * adopting it cannot schedule a redundant PUT back; the node is then
+   * re-baselined to the returned server rev and unfrozen so the next
+   * user edit is checked against the version we just adopted. The open
+   * editor picks up the new `data.content` via its external-update
+   * reconcile (`setMarkdown`), exactly like an agent/realtime write.
+   *
+   * If the refetch fails the node stays **frozen** (still safe — a stale
+   * version can never leak onto disk) and the user is asked to retry.
+   */
+  async function resolveLoadLatest(nodeId: string): Promise<void> {
+    const state = opts.getState();
+    const canvasId = state.canvasId;
+    const cur = state.nodes.find((n) => n.id === nodeId);
+    const localText =
+      cur && typeof cur.data?.['content'] === 'string'
+        ? (cur.data['content'] as string)
+        : '';
+    // Safety net first: preserve the discarded edit on the clipboard
+    // before we overwrite it with the server's version.
+    if (localText) await copyToClipboard(localText).catch(() => undefined);
+    if (!canvasId) return;
+
+    const res = await getNodeContent(canvasId, nodeId);
+    if (!res) {
+      // Keep the node frozen (still safe) and let the user retry.
+      toast(i18n.t('node.contentConflictLoadFailed'), {
+        tone: 'danger',
+        duration: 0,
+      });
+      return;
+    }
+
+    // Overlay only the content-owned keys; UI / geometry fields stay
+    // untouched. `_setStateNoAutosave` skips the content diff so adopting
+    // the server state never schedules a PUT back onto disk.
+    const nextNodes = opts.getState().nodes.map((n) =>
+      n.id === nodeId
+        ? {
+            ...n,
+            data: {
+              ...(n.data ?? {}),
+              content: res.content,
+              label: res.label,
+              labelSource: res.labelSource,
+              src: res.src,
+              summary: res.summary,
+              keywords: res.keywords,
+              contentDuplicate: res.contentDuplicate ?? false,
+              duplicateFiles: res.duplicateFiles ?? [],
+            },
+          }
+        : n,
+    );
+    opts.getState()._setStateNoAutosave({ nodes: nextNodes });
+
+    // Re-baseline to the server rev and unfreeze so editing resumes.
+    baselineRev.set(nodeId, res.rev);
+    lastSuccessful.set(nodeId, {
+      label: res.label,
+      labelSource: res.labelSource,
+    });
+    frozen.delete(nodeId);
+    contentConflictToasted.delete(nodeId);
+    toast(i18n.t('node.contentConflictLoaded'), { tone: 'success' });
+  }
+
+  /**
    * Wrap {@link performSave} with the standard failure routing:
    * `CanvasConflictError` (409) is re-thrown immediately so
    * `tryRename`'s awaited path can revert the optimistic label and
@@ -310,7 +566,20 @@ export function createNodeContentQueue(opts: {
         notifyDuplicate(nodeId, err);
         throw err;
       }
-      if (err instanceof CanvasConflictError) throw err;
+      if (err instanceof CanvasConflictError) {
+        // A content-revision conflict is NOT a rename collision: the
+        // node changed on the server since we loaded it (another tab /
+        // device / agent, or a Drive-synced newer copy). Do NOT revert
+        // or retry — keep the user's text and stop writing so we never
+        // clobber the newer server content. Surface a one-per-node
+        // "reload to get the latest" prompt; the baseline stays stale so
+        // further autosaves keep being refused until the user reloads.
+        if (err.code === 'NODE_CONTENT_CONFLICT') {
+          handleContentConflict(nodeId, err.currentRev ?? REV_EMPTY);
+          return;
+        }
+        throw err;
+      }
       handleSaveFailure(canvasId, nodeId, source, err);
       throw err;
     }
@@ -374,7 +643,6 @@ export function createNodeContentQueue(opts: {
     source: 'user' | 'auto',
     err: unknown,
   ): void {
-    void canvasId;
     const state = opts.getState();
     const node = state.nodes.find((n) => n.id === nodeId);
     if (!node) return; // node was deleted mid-flight — nothing to do
@@ -409,12 +677,14 @@ export function createNodeContentQueue(opts: {
           };
         }),
       });
-      const displayName = lastGood.label ?? i18n.t('errors.previousName');
-      if (source === 'user') {
-        toast(i18n.t('errors.nodeRenameReverted', { name: displayName }), {
-          tone: 'danger',
-        });
-      }
+      surfaceSaveError(
+        canvasId,
+        nodeId,
+        i18n.t('errors.nodeSaveFailed', {
+          name: lastGood.label ?? i18n.t('node.untitled'),
+        }),
+        source,
+      );
       console.error('Node rename failed; reverted:', nodeId, err);
       return;
     }
@@ -422,10 +692,46 @@ export function createNodeContentQueue(opts: {
     // Content-only failure (or first-ever write with no last-good
     // anchor to revert to): toast (user path) or log (auto path); the
     // in-store body is left alone so the user's typing isn't lost.
-    if (source === 'user') {
-      toast(i18n.t('errors.nodeChangesMayNotPersist'), { tone: 'danger' });
-    }
+    surfaceSaveError(
+      canvasId,
+      nodeId,
+      i18n.t('errors.nodeSaveFailed', {
+        name: currentLabel || i18n.t('node.untitled'),
+      }),
+      source,
+    );
     console.error('Node content save failed:', nodeId, err);
+  }
+
+  /**
+   * Surface a genuine (non-conflict) save failure with a persistent,
+   * dismissible toast carrying a **Retry** action. The in-store body /
+   * label are still intact after a failure, so Retry simply re-flushes the
+   * node's pending content (as a user-initiated write). Background (`auto`)
+   * failures are throttled to once per node (see {@link saveErrorToasted});
+   * user-initiated failures always toast since the user expects feedback.
+   */
+  function surfaceSaveError(
+    canvasId: string,
+    nodeId: string,
+    message: string,
+    source: 'user' | 'auto',
+  ): void {
+    if (source === 'auto' && saveErrorToasted.has(nodeId)) return;
+    saveErrorToasted.add(nodeId);
+    toast(message, {
+      tone: 'danger',
+      duration: 0,
+      dismissible: true,
+      action: {
+        label: i18n.t('messages.retry'),
+        onClick: () => {
+          // Allow a later failure to re-alert, then re-attempt the write.
+          saveErrorToasted.delete(nodeId);
+          void serializedFlush(canvasId, nodeId, 'user').catch(() => undefined);
+        },
+      },
+    });
   }
 
   /**
@@ -542,6 +848,29 @@ export function createNodeContentQueue(opts: {
 
     clearDuplicateGuard(nodeId) {
       duplicateToasted.delete(nodeId);
+    },
+
+    forgetNode(nodeId) {
+      debouncer.cancel(nodeId);
+      baselineRev.delete(nodeId);
+      frozen.delete(nodeId);
+      contentConflictToasted.delete(nodeId);
+      saveErrorToasted.delete(nodeId);
+      duplicateToasted.delete(nodeId);
+      lastSuccessful.delete(nodeId);
+    },
+
+    seedBaselines(nodes) {
+      for (const node of nodes) {
+        const nodeType = typeof node.type === 'string' ? node.type : '';
+        if (!MD_BACKED_NODE_TYPES.has(nodeType)) continue;
+        baselineRev.set(node.id, revOfNode(node));
+        // A fresh authoritative baseline means any prior conflict for this
+        // node is resolved — drop the toast guard and unfreeze it so a
+        // later divergence alerts again and writes resume.
+        contentConflictToasted.delete(node.id);
+        frozen.delete(node.id);
+      }
     },
 
     pendingNodeIds() {

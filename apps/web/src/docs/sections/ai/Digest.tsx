@@ -87,7 +87,7 @@ export default function Digest() {
           only adds something here if it generalises beyond this one canvas.
         </li>
         <li>
-          <Code>memory/canvas.md</Code> — per-canvas memory; this is where most
+          <Code>.memory/canvas.md</Code> — per-canvas memory; this is where most
           Digest output lands.
         </li>
       </ul>
@@ -126,14 +126,14 @@ export default function Digest() {
       <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
         <li>
           The current state of memory is in <Code>setting/.huabu.md</Code> and{' '}
-          <Code>memory/canvas.md</Code>.
+          <Code>.memory/canvas.md</Code>.
         </li>
         <li>
           The raw inputs are under <Code>.history/</Code> inside each canvas
           folder — chat transcripts, ops log, intent episodes.
         </li>
         <li>
-          To start fresh on a canvas, delete <Code>memory/canvas.md</Code> (the
+          To start fresh on a canvas, delete <Code>.memory/canvas.md</Code> (the
           Digest will rebuild it next pass) or wipe <Code>.history/</Code> to
           restart from zero context.
         </li>

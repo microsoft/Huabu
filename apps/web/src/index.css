@@ -424,7 +424,7 @@ body:not(.canvas-resize-active) .react-flow__node-frame:not(.dragging) {
 
 /* Sketch nodes: hit-test only the painted stroke pixels so clicks in the
    blank area of the bounding box "drill through" to nodes underneath
-   (Figma-like behaviour for overlapping freehand strokes).
+   (matching professional vector editors for overlapping freehand strokes).
 
    Default state: every sketch wrapper (and its descendants) is
    pointer-event-transparent — ReactFlow still renders, but the bounding

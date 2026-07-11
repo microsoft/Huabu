@@ -69,24 +69,6 @@ export function artifactPath(canvasId: string, filename: string): string {
   return path.join(artifactsDir(canvasId), base);
 }
 
-/**
- * @deprecated Legacy V0 memory directory (`<canvasDir>/memory/`).
- * Retained only so the one-shot {@link import('./migrate-memory.js').migrateLegacyMemory}
- * pass can find old `preferences.md` files and mv them into `.memory/canvas.md`.
- * Do not use in new code — the active path is {@link canvasMemoryDir}.
- */
-export function memoryDir(canvasId: string): string {
-  return path.join(canvasRoot(canvasId), 'memory');
-}
-
-/**
- * @deprecated See {@link memoryDir}. The current canvas memory path
- * is {@link canvasMemoryPath}.
- */
-export function prefsPath(canvasId: string): string {
-  return path.join(memoryDir(canvasId), 'preferences.md');
-}
-
 // ─── Memory module paths ───────────────────────────────────────────────────
 //
 // Two scopes:

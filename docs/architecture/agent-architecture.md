@@ -51,9 +51,7 @@ declares `tools` / `skillScope` / `runtime`; loader in
 | `intent`          | [intent.route.ts](../../apps/server/src/modules/agent/intent.route.ts) → [intent.service.ts](../../apps/server/src/modules/agent/intent.service.ts) | A single LLM call that ranks candidates, `tools: []`, no agent loop.                                                                                                                |
 | `memory`          | [memory/](../../apps/server/src/modules/agent/memory) background curator                                                                            | Triggered by the op-counter; see [agent-memory.md](./agent-memory.md).                                                                                                              |
 
-**External / ACP agents**: when a chat request carries a `binding` field it
-routes through [acp/](../../apps/server/src/modules/agent/acp) (§6) instead of
-the built-in `runAgent`.
+**External / ACP agents**: when a chat request carries a `binding` field it routes through [acp/](../../apps/server/src/modules/agent/acp) (§6) instead of the built-in `runAgent`.
 
 ---
 
@@ -149,8 +147,7 @@ Chat context is assembled with an **envelope-first** model (see
 
 ## 6. External agents (ACP)
 
-[acp/](../../apps/server/src/modules/agent/acp) is the integration layer for
-external agents (Copilot CLI / Claude Code / Gemini / agentlet):
+[acp/](../../apps/server/src/modules/agent/acp) is the integration layer for external agents. Its trusted built-in catalogue detects and launches GitHub Copilot, Claude Agent, Gemini, Codex, Qwen Code, Kimi Code CLI, OpenCode, and Cursor; custom commands remain available for other ACP-compatible agents.
 
 - [service.ts](../../apps/server/src/modules/agent/acp/service.ts) `runAcpAgent()` — the
   counterpart of `runAgent`, talking to an external daemon

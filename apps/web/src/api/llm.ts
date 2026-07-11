@@ -10,6 +10,8 @@ import type {
   LLMModelsResponse,
   LLMProviderInfo,
   LLMProvidersResponse,
+  LLMUtilityConfig,
+  LLMUtilityConfigUpdate,
   OAuthDeviceCodeResponse,
   OAuthPollResponse,
   OAuthStatusResponse,
@@ -50,6 +52,24 @@ export async function putLLMImageConfig(
     method: 'PUT',
     json: update,
     fallbackMessage: 'Failed to update image config',
+  });
+}
+
+/** Fetch the current utility-tier model configuration. */
+export async function getLLMUtilityConfig(): Promise<LLMUtilityConfig> {
+  return apiFetch<LLMUtilityConfig>(routes.llmUtilityConfig, {
+    fallbackMessage: 'Failed to get utility config',
+  });
+}
+
+/** Update the utility-tier model configuration. */
+export async function putLLMUtilityConfig(
+  update: LLMUtilityConfigUpdate,
+): Promise<LLMUtilityConfig> {
+  return apiFetch<LLMUtilityConfig>(routes.llmUtilityConfig, {
+    method: 'PUT',
+    json: update,
+    fallbackMessage: 'Failed to update utility config',
   });
 }
 

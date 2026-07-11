@@ -1,7 +1,7 @@
 # Agent Node Freshness & Write-Safety (Stateless Rev + CAS)
 
-Status: In-Progress — Phase 1 (read) + Phase 2 (write CAS) implemented.
-Last updated: 2026-07-02
+Status: In-Progress — Phase 1 (read) + Phase 2 (agent write CAS) + Phase 3 (human web content-PUT CAS) implemented.
+Last updated: 2026-07-08
 
 > **Context — Reachback v2 (RFS + ask-agent).** External ACP agents no longer
 > ship a `.mjs` reachback tool with `read-node` / `write-node`; they get three
@@ -362,6 +362,34 @@ into the one writer.
    it actually read the full body this session. Conflicts return `currentContent`
    - `currentRev`; the agent reconciles and retries within its loop. Both the
      built-in chat agent and `ask-agent` share the single executor + read-set path.
+3. **Phase 3 (human web write path) — ✅ SHIPPED:** the same `nodeRevision` CAS
+   now guards the **web per-node content PUT**
+   (`PUT /api/canvas/:id/nodes/:nodeId/content`), closing the one write path that
+   had no optimistic-concurrency at all. This is the cross-machine safety net for
+   users who sync a canvas folder via Google Drive / Dropbox: a stale-baseline
+   content write (another tab/device, or a Drive-synced newer copy) is refused
+   with `NODE_CONTENT_CONFLICT` instead of silently overwriting the newer body.
+   - **Contract** ([`types/api/canvas.ts`](../../packages/shared/src/types/api/canvas.ts)):
+     `putNodeContentBodySchema.expectRev?`, `PutNodeContentResponse.rev`,
+     `GetNodeContentResponse.rev`, and the `NODE_CONTENT_CONFLICT` code.
+   - **Server** ([`canvas.route.ts`](../../apps/server/src/modules/canvas/canvas.route.ts)):
+     compares `expectRev` against `nodeRevisionOf` of the on-disk node (empty
+     content ⇒ empty rev), 409s on mismatch, and returns the persisted `rev`. A
+     brand-new node sends the empty-content rev, so a **create-race** (two
+     machines both creating the same node) is also caught. Omitting `expectRev`
+     skips the check (backward-compatible / non-CAS callers).
+   - **Client** ([`nodeContentQueue.ts`](../../apps/web/src/store/canvasStore/save/nodeContentQueue.ts)):
+     a per-node baseline map, seeded on `loadCanvas` and on
+     `applyDeltasFromAgent` (for the nodes a broadcast actually applied) and
+     advanced to the server-returned `rev` after every successful write.
+     **Co-delivery invariant** — content and its baseline always update through
+     the same payload/store-write, so there is no window where they diverge and
+     a false conflict becomes structurally impossible. On `NODE_CONTENT_CONFLICT`
+     the queue keeps the user's text, stops writing (never clobbers the newer
+     server content), and shows a one-per-node persistent "reload" toast.
+   - **Note**: `nodeRevision` covers authored `content` / `src` only, so this
+     protects note/text body loss. Structural (`canvas.json`) cross-machine loss
+     still relies on the local-only `version` OCC — a separate follow-up.
 
 ## 8. Edge cases
 

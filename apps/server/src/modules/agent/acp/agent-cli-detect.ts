@@ -21,58 +21,14 @@ import { execFile } from 'node:child_process';
 import { platform } from 'node:os';
 import { promisify } from 'node:util';
 
+import { KNOWN_CLIS } from './known-agents.js';
+
 import type { AcpAgentCliInfo } from '@sediment/shared';
 
 const execFileP = promisify(execFile);
 
 /** Hard cap per spawned probe so a wedged CLI never blocks the request. */
 const PROBE_TIMEOUT_MS = 2_500;
-
-interface KnownCli {
-  id: string;
-  displayName: string;
-  binary: string;
-  acpArgs: string[];
-  /**
-   * Recognized auto-approve flag for this CLI, or `null` if none is
-   * exposed as a simple toggle. Claude has `--dangerously-skip-permissions`
-   * but we intentionally do NOT surface it as a one-click toggle — users
-   * who want it can build the command manually.
-   */
-  allowAllFlag: string | null;
-  installHint: string;
-}
-
-/**
- * Canonical catalogue of ACP-capable CLIs the Settings UI knows how to
- * launch via agentlet. Order is the order shown in the UI.
- */
-export const KNOWN_CLIS: readonly KnownCli[] = [
-  {
-    id: 'copilot',
-    displayName: 'GitHub Copilot CLI',
-    binary: 'copilot',
-    acpArgs: ['--acp'],
-    allowAllFlag: '--allow-all',
-    installHint: 'npm install -g @github/copilot',
-  },
-  {
-    id: 'claude',
-    displayName: 'Claude Code',
-    binary: 'claude',
-    acpArgs: ['--acp'],
-    allowAllFlag: null,
-    installHint: 'npm install -g @anthropic-ai/claude-code',
-  },
-  {
-    id: 'gemini',
-    displayName: 'Gemini CLI',
-    binary: 'gemini',
-    acpArgs: ['--acp'],
-    allowAllFlag: null,
-    installHint: 'npm install -g @google/gemini-cli',
-  },
-];
 
 /**
  * Resolve a binary name against PATH. Returns the resolved absolute
@@ -132,7 +88,9 @@ export async function detectAgentClis(): Promise<AcpAgentCliInfo[]> {
           installHint: cli.installHint,
         } satisfies AcpAgentCliInfo;
       }
-      const version = await probeVersion(cli.binary);
+      const version = cli.skipVersionProbe
+        ? ''
+        : await probeVersion(cli.binary);
       return {
         id: cli.id,
         displayName: cli.displayName,

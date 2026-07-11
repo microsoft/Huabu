@@ -233,7 +233,7 @@ function EdgeLabelEditor({
   // after the edge but before nodes, at equal z the label sits above its
   // own edge line yet behind any node on the same level — and naturally
   // stays below higher nodes / above lower ones, exactly like the edge.
-  // Selection does NOT lift the label (Figma-style:
+  // Selection does NOT lift the label (design-tool style:
   // `<ReactFlow elevateNodesOnSelect={false}>` and no edge-z bump);
   // selection feedback comes from stroke/marker styling.
   const edgeZIndex = useStore(

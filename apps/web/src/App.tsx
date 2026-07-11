@@ -11,7 +11,9 @@ import {
 
 import { Loading } from './components/Common/Loading';
 import { ToastContainer } from './components/Common/Toast';
-import { WindowChrome } from './components/Panels/WindowChrome';
+import { GlobalModals } from './components/Shell/GlobalModals';
+import { NativeMenuBridge } from './components/Shell/NativeMenuBridge';
+import { WindowChrome } from './components/Shell/WindowChrome';
 import DocsPage from './docs/DocsPage';
 import { useDisableBrowserZoom } from './hooks/useDisableBrowserZoom';
 import { useInputModeListener } from './hooks/useInputMode';
@@ -122,9 +124,17 @@ function RootLayout() {
   return (
     <div className="flex h-screen flex-col">
       <WindowChrome />
+      {/* Bridges the native macOS menu bar to the in-app action
+          handlers. Renders nothing off macOS. */}
+      <NativeMenuBridge />
       <div className="relative min-h-0 flex-1">
         <Outlet />
       </div>
+      {/* App-wide singleton modals (Settings + Keyboard Shortcuts) and
+          the global `?` hotkey. Mounted here on the never-unmounting
+          router root so every trigger (title-bar gear, floating canvas
+          gear, AppMenu, canvas menu) drives one shared instance. */}
+      <GlobalModals />
       {/* Full-screen overlay shown while pending saves drain before a
           blocked route change proceeds. `Loading layout="block"`
           already provides the centered loading state. Rendered as a sibling
