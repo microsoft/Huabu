@@ -2,7 +2,7 @@
 // See ./handle.ts for the design rules and layering rationale.
 
 export type { AgentHandle, AgentTurnState, RenderFn } from './handle.js';
-export type { AgentDriver, AgentDriverInfo, AgentRuntime } from './driver.js';
+export type { AgentDriver, AgentRuntime } from './driver.js';
 export { createAgentRuntime } from './driver.js';
 export type {
   AgentCreateContext,

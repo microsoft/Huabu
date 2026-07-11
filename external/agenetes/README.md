@@ -107,7 +107,7 @@ So the control-plane roles Agenetes fills are:
 | K8s control-plane role                                 | In Agenetes?                                                   |
 | ------------------------------------------------------ | -------------------------------------------------------------- |
 | Scheduler (choose placement among candidates)          | **No** — placement is declared in the spec, pinned by affinity |
-| Admission (gate: requested capabilities ⊆ advertised)  | Yes                                                            |
+| Admission (gate: requested capabilities ⊆ advertised)  | **No** — capabilities describe a realized handle, not routing  |
 | kubelet / CRI (execute + reconcile a _given_ workload) | Yes — `create` + pipe + lifecycle                              |
 | Service / DNS (resolve a name → a fixed endpoint)      | Yes — deterministic `kind → driver`                            |
 
@@ -115,62 +115,128 @@ Agenetes is therefore closer to a **service-mesh sidecar / reverse proxy**: reso
 
 因此 Agenetes 更接近一个 **service-mesh sidecar / 反向代理**：按声明的身份解析、准入、然后转接。跨资源调度（机队装箱、跨机自动扩缩）是明确的**非目标**——真要用到，那也是 Agenetes 之上的一个*新层*，而不是把这一层撑大。（daemon 的惰性 spawn / idle 挂起 / resume 是对*一个已绑定资源*的生命周期 _reconcile_——一件 kubelet 的活——而非放置选择。）
 
-### I2. Drivers: pluggable agent runtimes — standard Agenetes vs host-builtin custom, and today's object-injection interface / Driver：可插拔 agent runtime——standard Agenetes 与 host-builtin custom，及当前的对象注入接口
+### I2. Drivers are registered workload-realization implementations / Driver 是注册后负责 workload realization 的实现
 
-A **driver** teaches Agenetes how to run one _kind_ of agent workload — the direct analogue of a container runtime such as containerd or CRI-O. It is invisible to whoever _defines_ the agent: the definition names a semantic offering, and Agenetes resolves that to a driver behind the scenes. Two representative drivers exist today: a **host-builtin driver** and a **standard Agenetes driver**. The host-builtin driver is owned by the host application and tightly coupled to its native agents and capability ports, so it is not something Agenetes can offer as a generic supported driver. The current standard Agenetes driver is the **ACP driver**, which is generic and speaks ACP over stdio / WebSocket transport.
+A **driver** teaches Agenetes how to realize one supported class of agent workload and exposes the result as an `AgentHandle` — the direct analogue of a container runtime such as containerd or CRI-O. The host application explicitly selects a registered driver through the public `WorkloadSpec.kind` route (I5); Agenetes does not infer a driver from an agent definition or choose among interchangeable candidates. The current standard drivers are ACP, which realizes ACP-connected agents, and pi, which realizes in-process pi-agent-core workloads.
 
-一个 **driver** 教会 Agenetes 如何运行*一类* agent workload——它对应 containerd、CRI-O 这样的容器运行时。它对*定义* agent 的人不可见：定义只命名一个语义化的"供给项（offering）"，Agenetes 在幕后把它解析到某个 driver。今天有两个代表性 driver：一个 **host-builtin driver**，以及一个 **standard Agenetes driver**。host-builtin driver 由宿主应用拥有，并与宿主的原生 agent 和能力端口紧耦合，因此不是 Agenetes 能作为通用 supported driver 提供的东西。当前的 standard Agenetes driver 是 **ACP driver**，它是通用的，并通过 stdio / WebSocket transport 说 ACP。
+一个 **driver** 教会 Agenetes 如何物化一类受支持的 agent workload，并将结果暴露为 `AgentHandle`——它直接对应 containerd、CRI-O 这样的容器运行时。host application 通过公开的 `WorkloadSpec.kind` route（I5）显式选择已注册 driver；Agenetes 不从 agent definition 推断 driver，也不在可互换候选项之间进行选择。当前的 standard drivers 是 ACP 与 pi：前者物化 ACP-connected agents，后者物化 in-process pi-agent-core workloads。
 
-For a deeper driver-specific model, see [`docs/concepts/driver_cn.md`](docs/concepts/driver_cn.md): it explains drivers by three mostly independent dimensions — binding schema, runtime protocol, and transport — and separates driver concerns from agent templates / profiles.
+Each concrete driver fixes one supported combination of three mostly independent dimensions: **binding schema** — the create-time declaration under `WorkloadSpec.spec` that the driver understands; **runtime protocol** — the backend interaction semantics that the driver normalizes into `AgentHandle`; and **transport** — how that protocol is carried, such as in-process calls, stdio, WebSocket, or an agentlet relay. Agenetes does not require a complete Cartesian product across these dimensions. Workload lifecycle (`Job` / `Deployment`, I3) is an orthogonal control-plane axis, while agent templates and profiles remain an upper-layer catalog/content concern rather than another driver category.
 
-关于 driver 的更细模型，见 [`docs/concepts/driver_cn.md`](docs/concepts/driver_cn.md)：它用三根基本维度——binding schema、runtime protocol、transport——解释 driver，并把 driver 关注点与 agent template / profile 区分开。
+每个具体 driver 固定三根基本独立维度的一种受支持组合：**binding schema**——driver 所理解的、位于 `WorkloadSpec.spec` 下的 create-time declaration；**runtime protocol**——driver 归一化为 `AgentHandle` 的 backend interaction semantics；以及 **transport**——该 protocol 的承载方式，例如 in-process calls、stdio、WebSocket 或 agentlet relay。Agenetes 不要求这些维度形成完整笛卡尔积。workload lifecycle（`Job` / `Deployment`，I3）是正交的 control-plane axis；agent templates 与 profiles 则属于上层 catalog/content concern，而不是另一种 driver category。
 
-**I2.1 Standard Agenetes vs host-builtin custom — who ships the driver / standard Agenetes 与 host-builtin custom——谁来交付这个 driver.**
-A **standard Agenetes driver** is generic and ships _inside_ Agenetes: the mounted instance can pre-mount it, the analogue of a container runtime built into the platform. The current example is the ACP driver. A **host-builtin custom driver** is business-coupled and **host application-owned**: the host application's own native agents (canvas-coupled tools, host capability ports) that only make sense in that host application, always **registered by the host application at bootstrap**, never shipped as a generic Agenetes-supported driver. Note the naming: the driver the code calls `builtin` is _built into the host application_ (its in-process native agents) — from Agenetes' point of view that is a host-builtin custom driver, distinct from a standard driver built into _Agenetes_.
+For the deeper driver model and representative combinations, see [`docs/concepts/driver_cn.md`](docs/concepts/driver_cn.md).
 
-**standard Agenetes driver** 是通用的，随 Agenetes *内部*一起交付：被挂载的实例可以预挂载它，相当于平台自带的容器运行时。当前例子是 ACP driver。**host-builtin custom driver** 则与业务耦合、由**宿主拥有**：宿主自己的原生 agent（与画布耦合的工具、宿主能力端口），只在那个宿主里才有意义，总是**由宿主在 bootstrap 时注册**，绝不作为 Agenetes 的通用 supported driver 交付。注意命名：代码里叫 `builtin` 的那个 driver 是*内建于宿主*的（宿主的进程内原生 agent）——从 Agenetes 的视角看，它是 host-builtin custom driver，区别于内建于 _Agenetes_ 的 standard driver。
+关于更完整的 driver 模型与代表性组合，见 [`docs/concepts/driver_cn.md`](docs/concepts/driver_cn.md)。
 
-**I2.2 The runtime framework (`AgentRuntime`) has two orthogonal faces / 运行时框架 `AgentRuntime` 有两个正交面.**
-`AgentRuntime` is the runtime framework; drivers are the runtimes it dispatches to. Its two faces are: (a) _driver dispatch_ — `register(driver)` / `resolve(kind)` / `has(kind)` / `kinds`: map a driver _kind_ to the object that knows how to create its handles; (b) _handle lifecycle_ — `get(threadId)` / `create(threadId, factory)` / `close(threadId)`: hold the one live Deployment handle for a `threadId` (get-or-create by identity; **reuse-ignores-spec**, i.e. no desired-state reconcile — changing a spec is an explicit `close()` + `create()` the caller decides, never a hidden reconcile). A one-shot Job never enters this lifecycle registry — its handle lives only for its single run.
+**I2.1 Drivers are built by factories; standard vs custom identifies who provides the factory / Driver 由 factory 构造；standard 与 custom 区分 factory 的提供方.**
+Agenetes owns a driver factory dictionary named `factories`, initially populated with the standard factories maintained and supported by the Agenetes project; ACP and pi are the current standard examples. While mounting, a host application may append custom factories with `AgenetesBuilder.addFactory(factoryName, factory)`. Through the mounting builder, the host application explicitly registers each driver with `AgenetesBuilder.register(driverName, factoryName, factoryArgs)`, conceptually `drivers[driverName] = factories[factoryName](factoryArgs)`; the registration is materialized when `AgenetesBuilder.build()` runs. `driverName` is the public contract route carried by `WorkloadSpec.kind`; `factoryName` is the implementation identity and one factory may instantiate multiple named drivers with different arguments. Standard and custom drivers are structurally identical after construction: the distinction records who provides and supports the factory, not how the resulting `AgentDriver` behaves. Configuring or wrapping a standard factory with host-owned ports does not by itself make the driver custom. Factory extension through `AgenetesBuilder.addFactory(...)` and driver registration through `AgenetesBuilder.register(...)` are static mount-time wiring; the built instance exposes no dynamic registration surface.
 
-`AgentRuntime` 是运行时框架；driver 是它分发的目标运行时。它的两个面是：(a) _驱动分发_——`register(driver)` / `resolve(kind)` / `has(kind)` / `kinds`：把 driver 的 _kind_ 映射到知道如何创建其 handle 的对象；(b) _handle 生命周期_——`get(threadId)` / `create(threadId, factory)` / `close(threadId)`：为一个 `threadId` 持有那唯一的活 Deployment handle（按身份 get-or-create；**复用即忽略 spec**，即不做期望状态 reconcile——改 spec 是调用方显式的 `close()` + `create()`，绝非隐式 reconcile）。一次性的 Job 从不进入这个生命周期注册表——它的 handle 只在那单次运行期间存在。
+Agenetes 持有一个名为 `factories` 的 driver factory dictionary，初始包含由 Agenetes 项目维护并提供支持的 standard factories；当前的 standard 例子是 ACP 与 pi。mounting 期间，host application 可以通过 `AgenetesBuilder.addFactory(factoryName, factory)` 追加 custom factories。host application 通过 mounting builder，以 `AgenetesBuilder.register(driverName, factoryName, factoryArgs)` 显式注册每个 driver；其概念上等价于 `drivers[driverName] = factories[factoryName](factoryArgs)`，该注册在 `AgenetesBuilder.build()` 时物化。`driverName` 是由 `WorkloadSpec.kind` 携带的公开契约 route；`factoryName` 是实现身份，同一个 factory 可以用不同参数实例化多个具名 driver。standard 与 custom driver 在构造后结构完全相同：该区分记录的是谁提供并支持 factory，而不是生成的 `AgentDriver` 如何运行。用 host-owned ports 配置或包装 standard factory，本身不会让该 driver 变成 custom。通过 `AgenetesBuilder.addFactory(...)` 扩展 factory、通过 `AgenetesBuilder.register(...)` 注册 driver，二者都是静态的 mount-time wiring；构建完成的 instance 不暴露动态注册接口。
 
-**I2.3 Registration advertises candidacy; Agenetes decides the binding / 注册即声明候选资格；绑定由 Agenetes 决定.**
-Only a driver knows what it implements, so at registration it _advertises_ the binding kinds it serves and the capabilities (tools, control verbs) it carries — an _input_ to routing, not routing itself. Agenetes stays the authority over the **route** (which registered driver actually backs a `kind`) and the **admission** check (the tool names in a spec ⊆ what the driver advertises).
+**I2.2 Agenetes dispatches create calls by `kind` and routes handle lifecycle by `workloadType` / Agenetes 按 `kind` 分发 create call，并按 `workloadType` 路由 handle 生命周期.**
+When a host calls `Agenetes.create(spec: WorkloadSpec)` (I9.3), Agenetes selects `drivers[spec.kind]`, where `spec.kind` is the registered `driverName` (I5.1). If `spec.workloadType === 'Job'` (I3), Agenetes creates a fresh `AgentHandle` (I8) through `AgentDriver.create(spec, createContext)` and returns it without retaining it in the live-handle table. If `spec.workloadType === 'Deployment'`, Agenetes first looks up the globally unique `spec.threadId` (I4.2) in the live-handle table: when a live handle exists, Agenetes returns it directly; otherwise Agenetes creates one through the same `AgentDriver.create(spec, createContext)` path, stores it under `spec.threadId`, and returns it. The Deployment-side live-handle lookup and storage are implemented internally by `AgentRuntime`. How Agenetes derives the spec and `AgentCreateContext` supplied to this flow for fresh creation, recovery, and fork is defined separately.
 
-只有 driver 才知道自己实现了什么，因此在注册时它会*声明*自己服务哪些 binding kind、携带哪些能力（工具、控制动作）——这是路由的*输入*，而非路由本身。Agenetes 始终是**路由**（哪个已注册 driver 实际支撑某个 `kind`）与**准入**检查（spec 中的工具名 ⊆ driver 声明的能力）的权威。
+当 host 调用 `Agenetes.create(spec: WorkloadSpec)`（I9.3）时，Agenetes 选择 `drivers[spec.kind]`，其中 `spec.kind` 就是注册时的 `driverName`（I5.1）。如果 `spec.workloadType === 'Job'`（I3），Agenetes 通过 `AgentDriver.create(spec, createContext)` 创建一个 fresh `AgentHandle`（I8）并直接返回，不将其保留在 live-handle table 中。如果 `spec.workloadType === 'Deployment'`，Agenetes 首先使用全局唯一的 `spec.threadId`（I4.2）查询 live-handle table：如果已有 live handle，Agenetes 直接返回；否则 Agenetes 通过同一条 `AgentDriver.create(spec, createContext)` 路径创建 handle，将其以 `spec.threadId` 为键存入表中，再返回该 handle。Deployment 一侧的 live-handle 查询与存储由内部的 `AgentRuntime` 实现。对于 fresh creation、recovery 与 fork，Agenetes 如何推导传入这一流程的 spec 与 `AgentCreateContext`，将在其他段落单独定义。
 
-**I2.4 The driver interface (`AgentDriver`) / driver 接口 `AgentDriver`.**
-A driver is its metadata (`AgentDriverInfo` — an optional natural-language `description` plus the driver-class `AgentCapabilities` candidate set for discovery / admission) plus a single factory method. The dispatch `kind` is supplied by the instance registry (`register(kind, driver)`), not carried by the driver object itself:
+**I2.3 Absorbed into I2.1 and I2.2 / 已合并至 I2.1 与 I2.2.**
+The former candidacy and capability-based routing model has been retired. Factory registration is defined by I2.1; exact `kind` dispatch and lifecycle routing are defined by I2.2.
 
-一个 driver = 它的元数据（`AgentDriverInfo`——一个可选的自然语言 `description`，加上供发现 / 准入使用的 driver 类级 `AgentCapabilities` 候选集合）+ 一个工厂方法。分发键 `kind` 由 instance registry（`register(kind, driver)`）提供，并不由 driver 对象自己携带：
+原先的 candidacy 与 capability-based routing 模型已经废弃。factory registration 由 I2.1 定义；精确的 `kind` dispatch 与 lifecycle routing 由 I2.2 定义。
+
+**I2.4 `AgentDriver` realizes workloads; it does not route them / `AgentDriver` 物化 workload，但不负责路由.**
+Routing and workload realization are separate responsibilities. Agenetes owns routing: `AgenetesBuilder.register(...)` binds a public `driverName` to a constructed `AgentDriver` (I2.1), and `Agenetes.create(...)` selects that driver through `WorkloadSpec.kind` (I2.2). Once selected, the `AgentDriver` owns only realization: `AgentDriver.create(spec, createContext)` turns the workload's serializable spec and creation context into an `AgentHandle` (I8). An `AgentDriver` therefore carries no dispatch `kind`, does not advertise candidate routes, and does not select or fall back to another driver.
+
+Routing 与 workload realization 是两项分离的职责。Agenetes 拥有 routing：`AgenetesBuilder.register(...)` 将公开的 `driverName` 绑定到一个构造完成的 `AgentDriver`（I2.1），`Agenetes.create(...)` 再通过 `WorkloadSpec.kind` 选择该 driver（I2.2）。driver 被选中后，`AgentDriver` 只负责 realization：`AgentDriver.create(spec, createContext)` 将 workload 的可序列化 spec 与 creation context 物化为 `AgentHandle`（I8）。因此，`AgentDriver` 不携带 dispatch `kind`，不声明候选 route，也不选择或 fallback 到其他 driver。
 
 ```ts
-interface AgentDriver<TInput = unknown, …> extends AgentDriverInfo {
-  readonly description?: string;             // natural-language self-description for discovery / UX
-  readonly capabilities: AgentCapabilities;  // driver-class candidate capabilities
-  create(input: TInput): AgentHandle;        // wrap a backing object into a handle
+interface AgentDriver<TSpec = unknown, …> {
+  create(
+    spec: TSpec,
+    createContext: AgentCreateContext<TSpec>,
+  ): AgentHandle;
 }
 ```
 
-**I2.5 Object-injection — today's stand-in for the clean `create(spec)` factory / 对象注入——当前对干净的 `create(spec)` 工厂的过渡替代.**
-The end-state factory is _spec in, no host application objects_: `driver.create(spec)`, the driver resolving its own backing state from a serializable `WorkloadSpec`. Until the package boundaries make a driver's host application resources injectable, the host application still constructs each backing runtime object (it owns the host application singletons and host application coupling) and hands it in via `create(input)`, where `TInput` is a **host-application-shaped construction bundle** kept fully generic so the framework never names a host application type.
+**I2.5 Standard driver factories expose typed ports for host customization / Standard driver factory 通过 typed ports 暴露 host customization.**
+Besides adding a custom driver factory, a host application can customize a standard driver by implementing the typed ports exposed through that standard factory's `factoryArgs`. These ports connect host-owned models, credentials, tools, transports, and policy services to the standard driver while preserving its workload realization model. Per-workload `WorkloadSpec` data may carry symbolic references and opaque host context that the driver passes to those ports. The ports are bootstrap-time dependencies supplied through `AgenetesBuilder.register(...)`; they are not backing agent or session objects injected into each `AgentDriver.create(...)` call.
 
-终态工厂是*传入 spec、不传宿主对象*：`driver.create(spec)`，由 driver 从一个可序列化的 `WorkloadSpec` 自行解析出它的后端状态。在包边界尚未让 driver 的宿主资源变得可注入之前，宿主仍然自己构造每个后端运行时对象（它拥有宿主单例与宿主耦合），并经 `create(input)` 递入；其中 `TInput` 是一个**宿主形状的构造包**，保持完全泛型，使框架永不指名任何宿主类型。
+除了添加 custom driver factory，host application 还可以通过实现 standard factory 在 `factoryArgs` 中暴露的 typed ports，来定制 standard driver。这些 ports 将 host-owned models、credentials、tools、transports 与 policy services 接入 standard driver，同时保持该 driver 的 workload realization model。per-workload `WorkloadSpec` data 可以携带 symbolic references 与 opaque host context，由 driver 将其传递给这些 ports。这些 ports 是通过 `AgenetesBuilder.register(...)` 提供的 bootstrap-time dependencies，而不是在每次 `AgentDriver.create(...)` call 中注入的 backing agent 或 session objects。
 
-**I2.5.1 The host-builtin custom driver / host-builtin custom driver.**
-A **Job**, cancel-only control — takes the whole backing agent as its input: `create: ({ agent }) => new BuiltinAgentHandle(agent)`. The SDK `Agent` is a fresh instance per invocation, so it _is_ the construction input; per-turn context flows through the handle's `run(...)`.
+For example, Huabu configures the standard pi driver with `PiDriverPorts`: `PiDriverPorts.resolveModel(...)` resolves the host's active model, `PiDriverPorts.getApiKey(...)` supplies its current credential, and `PiDriverPorts.resolveTools(...)` turns symbolic `PiToolRef`s into Huabu's concrete canvas-aware tools. The driver registration supplies those ports once, while each `PiWorkloadSpec` carries only serializable model/tool references and opaque canvas context:
 
-一个 **Job**，只支持 cancel 控制——把整个后端 agent 作为输入：`create: ({ agent }) => new BuiltinAgentHandle(agent)`。SDK 的 `Agent` 每次调用都是全新实例，所以它*就是*构造输入；每轮上下文经 handle 的 `run(...)` 流入。
+例如，Huabu 通过 `PiDriverPorts` 配置 standard pi driver：`PiDriverPorts.resolveModel(...)` 解析 host 的 active model，`PiDriverPorts.getApiKey(...)` 提供当前 credential，`PiDriverPorts.resolveTools(...)` 将 symbolic `PiToolRef` 转换为 Huabu 具体的、canvas-aware tools。driver registration 只注入一次这些 ports，而每个 `PiWorkloadSpec` 只携带可序列化的 model/tool references 与 opaque canvas context：
 
-**I2.5.2 The current standard Agenetes driver: ACP / 当前 standard Agenetes driver：ACP.**
-A **Deployment**, full control + session-load — takes only the addressable id: `create: ({ threadId }) => new AcpAgentHandle(threadId)`. The handle is long-lived and holds only its `threadId`; the live session entry and per-turn context arrive on each `run(...)`, so reuse-ignores-spec holds trivially.
+```ts
+const agenetes = mountAgenetes()
+  .register('internal', 'pi', { ports: huabuPiDriverPorts })
+  .build();
+```
 
-一个 **Deployment**，完整控制 + session-load——只取可寻址的 id：`create: ({ threadId }) => new AcpAgentHandle(threadId)`。该 handle 长期存活，只持有它的 `threadId`；活 session entry 与每轮上下文在每次 `run(...)` 时到达，因此"复用即忽略 spec"天然成立。
+**I2.5.1 Absorbed into I2.5 / 已合并至 I2.5.**
+The former host-builtin object-injection example has been retired; Huabu now configures the standard pi driver through typed ports.
 
-This object-injection form is the pragmatic bridge; collapsing it into the clean `create(spec)` factory (moved _inside_ the mounted instance, so the host application never calls `create` itself) is the target end-state.
+原先的 host-builtin object-injection 示例已经废弃；Huabu 现在通过 typed ports 配置 standard pi driver。
 
-这种对象注入形态是务实的过渡桥；把它收拢进干净的 `create(spec)` 工厂（挪到被挂载实例*内部*，从而宿主永不自己调用 `create`）才是目标终态。
+**I2.5.2 Absorbed into I2.2 and I2.4 / 已合并至 I2.2 与 I2.4.**
+The former ACP-specific creation example has been retired. Driver dispatch and lifecycle routing are defined by I2.2; workload realization is defined by I2.4.
+
+原先的 ACP-specific creation 示例已经废弃。driver dispatch 与 lifecycle routing 由 I2.2 定义；workload realization 由 I2.4 定义。
+
+**I2.6 `AgentDriver.create(...)` is a staged realization process for durable workloads / 对于 durable workload，`AgentDriver.create(...)` 是一个分级 realization 过程.**
+For a Deployment, `AgentDriver.create(spec, createContext)` is reached only after Agenetes finds no live handle for the globally unique `spec.threadId` (I2.2, I4.2). Agenetes supplies every durable input needed by realization through `AgentCreateContext`: the source identity, its durable `ThreadRecord` (`spec` plus `AgentStateSnapshot`), its folded `AgentTurn`s, and the recovery-policy service. The driver never reads Agenetes stores directly. A threaded Job can receive the same durable input through the same interface, but its newly created handle is not retained in the live-handle table (I2.2, I3).
+
+对于 Deployment，只有在 Agenetes 没有找到全局唯一 `spec.threadId` 所对应的 live handle 后，才会进入 `AgentDriver.create(spec, createContext)`（I2.2、I4.2）。realization 所需的所有 durable input 都由 Agenetes 通过 `AgentCreateContext` 提供：source identity、其 durable `ThreadRecord`（`spec` 加 `AgentStateSnapshot`）、其 folded `AgentTurn`s，以及 recovery-policy service。driver 绝不直接读取 Agenetes stores。threaded Job 也可以通过同一接口接收相同的 durable input，但其新建 handle 不会保留在 live-handle table 中（I2.2、I3）。
+
+Conceptually, the handle created by `AgentDriver.create(...)` realizes its backend through the following conditional flow. A driver may perform these stages eagerly during creation or lazily when the handle is first used, according to what its harness supports:
+
+概念上，由 `AgentDriver.create(...)` 创建的 handle 按以下条件流物化其 backend。driver 可以根据 harness 所支持的机制，在 creation 期间 eager 执行这些阶段，或延迟到 handle 首次使用时 lazy 执行：
+
+```text
+if createContext.durableInput is absent:
+  create a fresh backend from spec
+else if durableInput.source identity equals spec target identity:
+  if the backend can use durableInput.record.state for native recovery:
+    try native session resume or snapshot restoration
+    if recovery succeeds:
+      use the recovered backend
+    if recovery fails for any reason other than structured "resume unavailable":
+      fail
+  authorize history loading through createContext.recovery
+  create a new backend and load durableInput.turns using the strongest mechanism the harness provides
+```
+
+History loading is driver-owned: a harness may absorb turns while constructing native state, initialize from a native transcript, defer loading until first use, or combine history with the first real turn. Agenetes standardizes the durable inputs and authorization service, not a mandatory sequence of driver recovery methods.
+
+history loading 由 driver 拥有：harness 可以在构造 native state 时吸收 turns、从 native transcript 初始化、延迟到首次使用时加载，或将 history 与第一个真实 turn 合并。Agenetes 标准化的是 durable inputs 与 authorization service，而不是一套强制的 driver recovery methods 序列。
+
+Fork uses the same realization interface. `Agenetes.fork(sourceIdentity, targetSpec)` supplies an `AgentCreateContext` whose durable input comes from the source thread, while `targetSpec` contains the new target thread identity and complete target configuration. The target starts with empty driver-native state, so the driver creates a new backend and realizes it from the source turns rather than inheriting the source `sessionId`; Agenetes also copies those folded turns into the target's durable turn log.
+
+fork 使用同一个 realization interface。`Agenetes.fork(sourceIdentity, targetSpec)` 提供的 `AgentCreateContext` 中，durable input 来自 source thread，而 `targetSpec` 包含新的 target thread identity 与完整 target configuration。target 从空的 driver-native state 开始，因此 driver 创建新的 backend，并根据 source turns 物化它，而不继承 source `sessionId`；Agenetes 同时将这些 folded turns 复制到 target 的 durable turn log。
+
+**I2.6.1 History loading is gated by the instance auto-recovery policy / History loading 受 instance auto-recovery policy 约束.**
+The policy gates folded-history loading only; successful backend-native recovery does not consume this uncertainty budget. Before loading turns for recovery or fork, a driver calls `AgentRecoveryContext.authorizeHistoryLoad(...)`. Agenetes estimates the load as `ceil(serialized AgentTurn UTF-8 bytes / 4.5)` and applies the mount-time `AutoRecoverPolicy`:
+
+该 policy 只约束 folded-history loading；成功的 backend-native recovery 不消耗这份 uncertainty budget。在为 recovery 或 fork 加载 turns 前，driver 调用 `AgentRecoveryContext.authorizeHistoryLoad(...)`。Agenetes 以 `ceil(serialized AgentTurn UTF-8 bytes / 4.5)` 估算 load，并应用 mount-time `AutoRecoverPolicy`：
+
+```text
+if mode is "recover" and policy.enabled is false:
+  deny with "auto_recover_disabled"
+else if estimated size <= policy.safeHistoryLoadLimit:
+  allow
+else if policy.onThresholdExceeded is "deny":
+  deny with "safe_limit_exceeded"
+else if no policy.confirm handler is installed:
+  deny with "confirmation_unavailable"
+else if policy.confirm(...) returns false:
+  deny with "confirmation_declined"
+else:
+  allow
+```
+
+The default policy is `{ enabled: true, safeHistoryLoadLimit: 10_000, onThresholdExceeded: 'deny' }`. Explicit fork is not disabled by `policy.enabled`, because fork is already an explicit host action, but it remains subject to the same size limit and confirm-or-deny behavior.
+
+默认 policy 是 `{ enabled: true, safeHistoryLoadLimit: 10_000, onThresholdExceeded: 'deny' }`。显式 fork 不受 `policy.enabled` 禁用，因为 fork 本身已经是 host 的显式操作；但它仍受同一 size limit 与 confirm-or-deny behavior 约束。
 
 ### I3. Workload lifecycle types: Job vs Deployment / 工作负载生命周期类型：Job vs Deployment
 
@@ -306,10 +372,19 @@ Handle I/O is serializable messages, never method calls carrying live objects or
 
 handle 的 I/O 是可序列化消息，绝不用携带活对象或闭包的方法调用跨越接缝（闭包跨越就是把两层焊死的坏味道）。控制操作是一条消息（`control({ type: 'set_mode', … })`）。注入*新行为*（一个工具实现、一个新 harness）是注册行为（代码，在接缝之下）；可序列化的 spec 只*参数化*已注册的能力。
 
-**I8.6 Capabilities are composable and negotiated, not all-or-nothing / 能力是可组合、经协商的，而非全有或全无.**
-The handle is a small core plus segregated opt-in facets (`Cancellable`, `ModeSwitchable`, …), aligned to the workload lifecycle type: a **Job** is core + `Cancellable`; a **Deployment** can negotiate additional facets, but advertises only the subset its runtime actually honours. Capabilities are negotiated in two phases mapped onto the candidacy/binding split (I2.3): a driver _class_ advertises candidate capabilities at `register` (static — feeds discovery/UI/admission), a _handle_ reports the actually-negotiated set after create/initialize (dynamic). The primary callable capability contract is `AgentCapabilities.supportedControlMessages`; only genuinely non-callable traits (e.g. `turnInput`, `loadSession`) remain separate fields. The capability set is open (open/closed): adding one touches no existing driver.
+**I8.6 Capabilities belong to the realized `AgentHandle` and describe the surface it actually honours / Capabilities 属于 realization 后的 `AgentHandle`，描述它实际兑现的 surface.**
 
-handle 是一个小内核加上分离的可选 facet（`Cancellable`、`ModeSwitchable`……），与工作负载生命周期类型对齐：**Job** = 内核 + `Cancellable`；**Deployment** 可以协商出更多 facet，但只声明其 runtime 真实支持的子集。能力分两阶段协商，对应候选/绑定的划分（I2.3）：driver _类_ 在 `register` 时声明候选能力（静态——喂给发现/UI/准入），_handle_ 在 create/initialize 后报告实际协商到的集合（动态）。主 callable 能力契约是 `AgentCapabilities.supportedControlMessages`；只有真正*不可调用*的 trait（如 `turnInput`、`loadSession`）才保留为独立字段。能力集合是开放的（开闭原则）：新增一项不触动任何现有 driver。
+`AgentHandle.capabilities` is a serializable runtime descriptor of one realized workload, not a routing input, driver-candidacy advertisement, or separate opt-in method-facet hierarchy. Its primary callable field, `AgentCapabilities.supportedControlMessages`, lists the exact subset of the closed `ControlMsg` vocabulary that `AgentHandle.control(...)` accepts; an operation outside that set resolves to `{ ok: false, code: 'unsupported' }`. Non-callable behavioural facts such as `turnInput` and `loadSession` remain explicit descriptor fields rather than pretending to be methods.
+
+`AgentHandle.capabilities` 是某个 realization 后 workload 的可序列化 runtime descriptor，不是 routing input、driver candidacy advertisement，也不是另一套 opt-in method facet hierarchy。它的主要 callable 字段 `AgentCapabilities.supportedControlMessages` 精确列出 `AgentHandle.control(...)` 所接受的封闭 `ControlMsg` 词汇子集；集合之外的操作解析为 `{ ok: false, code: 'unsupported' }`。`turnInput`、`loadSession` 等不可调用的行为事实继续作为显式 descriptor fields，而不伪装成 methods。
+
+Capabilities are determined while realizing the handle because they may depend on the complete `WorkloadSpec`, especially its lifecycle. The same registered pi driver, for example, realizes a Job handle supporting only `cancel`, but a Deployment handle supporting `cancel` and `set_context`; an ACP Deployment advertises its own larger control subset plus `loadSession`. A factory or driver may reuse constants or helper functions to construct these descriptors, but `AgentDriver` itself does not promise a candidate capability set: only the returned `AgentHandle` is authoritative.
+
+Capabilities 在 realization handle 时确定，因为它们可能依赖完整的 `WorkloadSpec`，尤其是其中的 lifecycle。例如，同一个已注册 pi driver realization 出的 Job handle 只支持 `cancel`，而 Deployment handle 支持 `cancel` 与 `set_context`；ACP Deployment 则声明自己的更大 control 子集以及 `loadSession`。factory 或 driver 可以复用 constants 或 helper functions 来构造这些 descriptors，但 `AgentDriver` 本身不承诺 candidate capability set；只有返回的 `AgentHandle` 才是权威来源。
+
+**Expected state.** An ACP driver knows the protocol-level capabilities it may expose, but the realized handle can determine its authoritative descriptor only after inspecting the concrete agent's `initialize` or session-bootstrap result. Two agents created through the same ACP driver may therefore expose different control operations or session features. (**Not aligned with the status quo:** `AcpAgentHandle` currently returns a fixed `ACP_CAPABILITIES` descriptor; the next implementation step is to derive and update `AgentHandle.capabilities` from the initialized ACP session.)
+
+**预期状态。** ACP driver 知道协议层可能暴露的 capabilities，但 realization 后的 handle 只有检查具体 agent 的 `initialize` 或 session-bootstrap result，才能确定其权威 descriptor。因此，由同一个 ACP driver 创建的两个 agent 可能暴露不同的 control operations 或 session features。（**与当前实现尚未对齐：** `AcpAgentHandle` 当前仍返回固定的 `ACP_CAPABILITIES` descriptor；下一步实现工作是根据已初始化的 ACP session 派生并更新 `AgentHandle.capabilities`。）
 
 ### I9. The host addresses one mounted instance; the core surface stays minimal / 宿主面对一个被挂载的实例；核心表面保持最小
 
@@ -358,47 +433,29 @@ Alongside the imperative _runtime surface_ (I9.3, which owns _live_ handles) the
 
 在命令式的*运行期表面*（I9.3，拥有*活* handle）之外，实例还暴露一个独立的**查询表面**，面向 Agenetes 所拥有的**持久记录**，按 `namespace` / `threadId`（I4）寻址。它刻意与运行期表面正交：它操作已持久化的状态，**与是否有活 handle 无关**——所以一次控制写不会惰性拉起 session（I9.3 的 `get`），一次持久记录读同样不需要活 session。今天已确认的持久实例是框架自带的 `FileThreadStore`，它把 `(namespace, threadId) → 记录` 持久化为 `<namespace.storage.root>/threads.json`、每个 namespace 一个文件（I4.1）；枚举某个 namespace 已持久化的 thread 就是在这张 per-namespace **持久 thread table** 上的一次原生查询。每条记录是 `{ spec, state }`，其中 `state` 是 driver-agnostic 的 **`AgentStateSnapshot { sessionId?, metadata? }`**（I9.7）——不透明的底层 driver `sessionId`（I4.3）加上一个折叠后的 `AgentMetadata` 快照（M5.5）。driver 只提供一个从其原生 meta 到该形状的翻译器，而持久化本身是统一且 driver 中立的。该表面像 `run` 的 `TResult` 一样保持宿主无关：它返回 Agenetes 拥有的、driver-agnostic 的记录，绝不返回 canvas 形状的投影——任何宿主形状的视图（例如聊天记录）都是宿主基于所读内容的自有投影。`create(spec)` 只有在工作负载具备持久 thread 身份时才 upsert 记录：Deployment 总是有（其 `threadId` 同时是活表的键），带非空 `threadId` 的 Job 也有；而**瞬时 Job**——以空 `threadId` 发起的无状态一次性调用——不写任何记录，因为空键会在同一 namespace 内的所有瞬时 Job 之间相互碰撞，堆积无人读取的垃圾记录。
 
-**I9.5 The bootstrap surface is a driver-factory dictionary; drivers are fixed as static wiring at mount / 引导期表面是一个 driver factory 字典；driver 在 mount 时定死为静态接线.**
+**I9.5 Mounting assembles one statically wired Agenetes instance / Mounting 组装一个静态接线的 Agenetes instance.**
 
-The instance holds a **driver factory dictionary** `dfs: Record<factoryName, DriverFactory>`, each factory of the form `(cfg?) => AgentDriver`. The standard factory (e.g. `acp`) is **pre-registered** by the instance; the host customises via two mechanisms — **(a)** append factories (`customDriverFactories`, where the business/canvas-coupled built-in enters, structurally identical to a pre-registered one), and **(b)** instantiate drivers as `(driverName, factoryName, factoryArgs)` entries (which factory builds which driver, with what args):
+`mountAgenetes(options)` creates an `AgenetesBuilder` around instance-level configuration such as durable stores and the auto-recovery policy. The builder already contains the standard driver factories. During mounting, the host application may register standard drivers, append custom factories, and register drivers built from those factories; `AgenetesBuilder.build()` materializes that wiring and returns one `Agenetes` instance. The resulting instance is fixed: it exposes no dynamic factory-extension or driver-registration surface. Driver factory ownership and registration identity are defined by I2.1; typed-port customization is defined by I2.5.
 
-实例持有一个 **driver factory 字典** `dfs: Record<factoryName, DriverFactory>`，每个 factory 形如 `(cfg?) => AgentDriver`。标准 factory（如 `acp`）由实例**预置**；宿主用两条机制定制——**(a)** 追加 factory（`customDriverFactories`，业务/canvas 耦合的 built-in 从此进入，与预置项同构），**(b)** 以 `(driverName, factoryName, factoryArgs)` 条目实例化 driver（哪个 factory 用什么参数构造哪个 driver）：
+`mountAgenetes(options)` 围绕 durable stores、auto-recovery policy 等 instance-level configuration 创建一个 `AgenetesBuilder`。builder 已包含 standard driver factories。mounting 期间，host application 可以注册 standard drivers、追加 custom factories，并注册由这些 factories 构造的 drivers；`AgenetesBuilder.build()` 物化这些 wiring，返回一个 `Agenetes` instance。生成的 instance 是固定的：它不暴露动态 factory extension 或 driver registration surface。driver factory ownership 与 registration identity 由 I2.1 定义；typed-port customization 由 I2.5 定义。
 
 ```ts
-const instance: Agenetes = mountAgenetes(app)
-  .addFactory('acp', acpDriverFactory) // pre-registered by the instance
-  .addFactory('builtin', builtinDriverFactory) // (a) host-appended, canvas-coupled
-  // (b) instantiate: driverName === the I5 contract `kind`
-  .register('external', 'acp', {
-    app,
-    connectionToken,
-    dataDir,
-    daemonEntryPath,
-    logger,
+const agenetes = mountAgenetes({
+  threadStore: new FileThreadStore(),
+  eventLogStore: new FileEventLogStore(),
+  turnStore: new FileTurnStore(),
+  autoRecoverPolicy,
+})
+  // Standard factories are already present.
+  .register('external', 'acp')
+  .register('internal', 'pi', {
+    ports: huabuPiDriverPorts,
   })
-  .register('internal', 'builtin', { logger })
+  // Host-provided factories use the same registration path.
+  .addFactory('custom-harness', customHarnessDriverFactory)
+  .register('specialized', 'custom-harness', customHarnessConfig)
   .build();
 ```
-
-- **`driverName` === the dispatch `kind` (I5).** It is the required, unique key in the _contract_ namespace that `create(spec)` resolves on. This realises I5.1's `kind → driver` alias: `factoryName` is the _implementation_ identity (`acp` / `sdk`), `driverName` the contract `kind` (`external`) — so a driver can be renamed, split, or merged without touching any spec.
-
-  **`driverName` === 分发键 `kind`（I5）.** 它是*契约*命名空间里必填、唯一的键，`create(spec)` 据此解析。这落地了 I5.1 的 `kind → driver` 别名：`factoryName` 是*实现*身份（`acp` / `sdk`），`driverName` 是契约 `kind`（`external`）——driver 可重命名/拆分/合并而不动任何 spec。
-
-- **`factoryArgs` carries that factory's construction dependencies** — both the _kind-private backing resources_ (e.g. the ACP factory's `{ app, connectionToken, dataDir, daemonEntryPath }`, the agentlet _downward_ transport that `@agenetes/agentlet-host` labels `TRANSPORT · ACP-private`; the host-builtin driver never touches it — unrelated to I7's _upward_ host application↔Agenetes seam) and the _cross-cutting_ `logger` (no longer a special top-level opt — just an ordinary factory arg passed through the same channel to whichever factory declares it).
-
-  **`factoryArgs` 承载该 factory 的构造依赖**——既有 _kind 私有 backing 资源_（如 ACP factory 的 `{ app, connectionToken, dataDir, daemonEntryPath }`，即 agentlet _向下_ transport，`@agenetes/agentlet-host` 标注为 `TRANSPORT · ACP-private`；host-builtin driver 从不碰它——与 I7 那条*向上*的 host application↔Agenetes 接缝无关），也有*横切*的 `logger`（不再是顶层特殊 opt，只是普通 factory arg，经同一条通道传给声明支持它的 factory）。
-
-- All `factoryArgs` are **bootstrap-time DI** (below the seam): they may carry live objects / the logger, and are _not_ bound by I8.5 ("messages, not closures" governs the per-workload / per-turn handle I/O seam, not mount-time wiring).
-
-  所有 `factoryArgs` 都是 **bootstrap 期 DI**（接缝之下）：允许携带 live 对象 / logger，*不*受 I8.5 约束（"传消息不传闭包"约束的是 per-workload / per-turn 的 handle I/O 接缝，而非 mount 期接线）。
-
-- **Type safety.** The heterogeneous per-factory `cfg` is _not_ `unknown`: an accumulating builder threads a `factoryName → cfg` type map through its generics, so `(b)`'s `factoryArgs` is checked against the named factory with full inference (no hand-written registry interface) — fitting custom drivers arriving from the host application's single composition root. Cross-package / third-party factory contribution can later layer an augmentable registry interface (declaration merging) on top.
-
-  **类型安全.** 各 factory 异构的 `cfg` *不*用 `unknown`：累积式 builder 用泛型串起 `factoryName → cfg` 类型映射，`(b)` 的 `factoryArgs` 被具名 factory 精确约束、全程推理（无需手写注册表接口）——契合 custom driver 来自 host application 的单一 composition root。日后若需跨包/第三方贡献 factory，再叠加可增强注册表接口（declaration merging）。
-
-This invariant fixes only the **mechanism**. Implementation choices (whether the ACP transport is mounted inside its factory via `mountAgentletServer(app, …)` or mounted once by the instance and passed in as a server reference; whether the built-in's canvas couplings arrive via `(a)`'s closure or `(b)`'s `factoryArgs`) are settled at implementation time, not here.
-
-本不变量只钉**机制**。实现选择（ACP transport 是在 factory 内 `mountAgentletServer(app, …)` 挂载，还是实例挂一次再把 server 引用传入；built-in 的 canvas 耦合走 (a) 的闭包还是 (b) 的 `factoryArgs`）留待实作时定，不在此固化。
 
 **I9.6 The `spec` / `request` / `render` / `ctx` boundary / `spec`、`request`、`render`、`ctx` 边界.**
 

@@ -21,6 +21,8 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@agenetes/acp-driver": "workspace:*",
+    "@agenetes/pi-driver": "workspace:*",
     "@agenetes/protocol": "workspace:*",
     "@agenetes/runtime": "workspace:*"
   },

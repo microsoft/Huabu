@@ -25,11 +25,7 @@ import type {
 import type { Message } from '@earendil-works/pi-ai';
 import type { AgentStreamEvent } from '@sediment/shared';
 
-export type {
-  AgentDriver,
-  AgentDriverInfo,
-  AgentRuntime,
-} from '@agenetes/runtime';
+export type { AgentDriver, AgentRuntime } from '@agenetes/runtime';
 export { createAgentRuntime } from '@agenetes/runtime';
 
 /**

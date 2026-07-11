@@ -3,7 +3,7 @@ export type { PiAgentDriver } from './driver.js';
 
 export {
   PiAgentHandle,
-  PI_DRIVER_CAPABILITIES,
+  PI_DEPLOYMENT_CAPABILITIES,
   piCapabilitiesForWorkloadType,
 } from './handle.js';
 export type { InStreamEvent, PiTurnCtx } from './handle.js';

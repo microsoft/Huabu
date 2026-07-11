@@ -36,10 +36,10 @@ import type {
 
 export type InStreamEvent = Exclude<AgentStreamEvent, { type: 'meta' | 'end' }>;
 
-const PI_DRIVER_CANDIDATE_CONTROLS = ['cancel', 'set_context'] as const;
+const PI_DEPLOYMENT_CONTROL_OPS = ['cancel', 'set_context'] as const;
 
-export const PI_DRIVER_CAPABILITIES: AgentCapabilities = {
-  supportedControlMessages: [...PI_DRIVER_CANDIDATE_CONTROLS],
+export const PI_DEPLOYMENT_CAPABILITIES: AgentCapabilities = {
+  supportedControlMessages: [...PI_DEPLOYMENT_CONTROL_OPS],
   turnInput: 'blocking',
 };
 
@@ -47,7 +47,7 @@ export function piCapabilitiesForWorkloadType(
   workloadType: WorkloadType,
 ): AgentCapabilities {
   return workloadType === 'Deployment'
-    ? PI_DRIVER_CAPABILITIES
+    ? PI_DEPLOYMENT_CAPABILITIES
     : {
         supportedControlMessages: ['cancel'],
         turnInput: 'blocking',

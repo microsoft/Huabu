@@ -44,7 +44,6 @@ let raw: ScriptedHandle | undefined;
 
 function scriptedDriver(): AgentDriver<WorkloadSpecShape> {
   return {
-    capabilities: {} as AgentCapabilities,
     create: () => (raw = new ScriptedHandle()) as unknown as AgentHandle,
   };
 }

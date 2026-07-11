@@ -1,10 +1,9 @@
 // M5 FACTORY acceptance — the ACP driver's I9.5 factory.
 //
 // Proves the standard ACP driver, now produced by `acpDriverFactory`
-// inside this package (relocated from the host), advertises the contract
-// dispatch kind + capabilities and mints a long-lived handle keyed by
-// `spec.threadId` (I9.3). A full WorkloadSpec satisfies the create input
-// structurally — only `threadId` is read today.
+// inside this package (relocated from the host), mints a long-lived handle
+// keyed by `spec.threadId` (I9.3). A full WorkloadSpec satisfies the create
+// input structurally — only `threadId` is read today.
 
 import { describe, expect, it } from 'vitest';
 
@@ -21,11 +20,6 @@ const freshContext = {
 };
 
 describe('acpDriverFactory (M5 FACTORY)', () => {
-  it('produces a driver advertising capabilities (dispatch kind is external, set at register)', () => {
-    const driver = acpDriverFactory();
-    expect(driver.capabilities).toBe(ACP_CAPABILITIES);
-  });
-
   it('create(spec) mints an AcpAgentHandle from the baked spec (I9.3)', () => {
     const driver = acpDriverFactory();
     const handle = driver.create(
@@ -37,6 +31,7 @@ describe('acpDriverFactory (M5 FACTORY)', () => {
       freshContext,
     );
     expect(handle).toBeInstanceOf(AcpAgentHandle);
+    expect(handle.capabilities).toBe(ACP_CAPABILITIES);
   });
 
   it('accepts a wider spec structurally (a full WorkloadSpec)', () => {

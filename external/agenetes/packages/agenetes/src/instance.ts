@@ -448,7 +448,7 @@ export function createAgenetesInstance<
           : raw;
     } else {
       const wasLive = runtime.get(targetSpec.threadId) !== undefined;
-      handle = runtime.create(targetSpec.threadId, () =>
+      handle = runtime.getOrCreate(targetSpec.threadId, () =>
         decorateForLogging(
           driver.create(targetSpec, context),
           targetSpec.namespace,

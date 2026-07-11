@@ -8,6 +8,7 @@ export type {
   AgenetesBuilder,
   DriverFactory,
   MountAgenetesOptions,
+  StandardDriverFactoryMap,
 } from './builder.js';
 
 export { createAgenetesInstance } from './instance.js';

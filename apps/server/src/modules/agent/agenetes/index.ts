@@ -15,7 +15,6 @@ export type {
   AgentRequest,
   RenderFn,
   AgentDriver,
-  AgentDriverInfo,
   AgentRuntime,
 } from './handle.js';
 export { createAgentRuntime } from './handle.js';
@@ -27,7 +26,7 @@ export {
 } from '@agenetes/acp-driver';
 export {
   PiAgentHandle,
-  PI_DRIVER_CAPABILITIES,
+  PI_DEPLOYMENT_CAPABILITIES,
   piCapabilitiesForWorkloadType,
   type PiRenderedInput,
   type PiTurnCtx,

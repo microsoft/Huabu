@@ -11,7 +11,6 @@
 // session (M5 C4b). See docs/proposals/layered-architecture.md §7 (M5).
 
 import {
-  ACP_CAPABILITIES,
   AcpAgentHandle,
   type AcpCreateSpec,
   type AcpTurnCtx,
@@ -61,7 +60,6 @@ export function acpDriverFactory<TRequest = unknown>(
   _config?: AcpDriverFactoryConfig,
 ): AcpAgentDriver<TRequest> {
   return {
-    capabilities: ACP_CAPABILITIES,
     create: (spec, context) => new AcpAgentHandle<TRequest>(spec, context),
   };
 }

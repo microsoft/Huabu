@@ -156,17 +156,16 @@ export type ControlAck = z.infer<typeof controlAckSchema>;
 // ── Capabilities descriptor ────────────────────────────────────────────
 
 /**
- * The serializable capability descriptor an agent advertises — the single
- * source of truth for discovery, capability-aware UX, and admission. It is
- * composable (OCP): a new host→agent callable capability extends
+ * The serializable capability descriptor a realized handle advertises. It
+ * is composable: a new host→agent callable capability extends
  * `supportedControlMessages`; a new non-callable behavioural trait adds a
  * field with a conservative default.
  *
  * A `Job` advertises only `{ supportedControlMessages: ['cancel'] }`; a
  * `Deployment` advertises the subset its runtime supports, plus any
  * non-callable traits such as `loadSession`. The Job/Deployment presets
- * are NOT encoded here — each driver advertises its own descriptor at
- * registration / handle initialization.
+ * are not encoded here — each realized handle reports the descriptor it
+ * actually honours.
  */
 export const agentCapabilitiesSchema = z.object({
   /**

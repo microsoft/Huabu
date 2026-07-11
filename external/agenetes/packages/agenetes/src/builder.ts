@@ -2,8 +2,9 @@
 // fixes drivers as static wiring at mount time. `mountAgenetes()` returns
 // an accumulating, type-safe builder:
 //
-//   - `.addFactory(factoryName, factory)` grows the factory dictionary
-//     `dfs: Record<factoryName, (cfg) => AgentDriver>`, threading a
+//   - standard ACP and pi factories are present from the start;
+//   - `.addFactory(factoryName, factory)` grows the factory dictionary,
+//     threading a
 //     `factoryName → cfg` type map through the builder generics so a later
 //     `.register` is checked against the named factory (no `unknown`, no
 //     hand-written registry interface);
@@ -20,6 +21,14 @@
 // logger. This module fixes only the mechanism; whether a factory mounts
 // its own transport or receives a shared reference is an impl choice.
 
+import {
+  acpDriverFactory,
+  type AcpDriverFactoryConfig,
+} from '@agenetes/acp-driver';
+import {
+  piDriverFactory,
+  type PiDriverFactoryConfig,
+} from '@agenetes/pi-driver';
 import { createAgentRuntime } from '@agenetes/runtime';
 
 import {
@@ -46,6 +55,12 @@ import type { AgentDriver, AgentHandle } from '@agenetes/runtime';
  * bootstrap-time config `cfg`. A factory with no config uses `void`.
  */
 export type DriverFactory<TCfg = void> = (cfg: TCfg) => AgentDriver;
+
+/** Standard factories available on every newly mounted builder. */
+export interface StandardDriverFactoryMap {
+  readonly acp: DriverFactory<AcpDriverFactoryConfig>;
+  readonly pi: DriverFactory<PiDriverFactoryConfig>;
+}
 
 /** The config type a registered factory named `FN` expects. */
 type CfgOf<FMap, FN extends keyof FMap> =
@@ -126,15 +141,16 @@ export interface MountAgenetesOptions {
 }
 
 /**
- * Open an {@link AgenetesBuilder} (I9.5). The standard factories (e.g.
- * `acp`) are NOT pre-registered by this core yet — that wiring, and the
- * host-appended canvas-coupled `builtin` factory, arrive at M5 E2; the
- * builder mechanism they use is what lands here.
+ * Open an {@link AgenetesBuilder} (README I9.5) with the standard ACP and
+ * pi factories already available for registration.
  */
 export function mountAgenetes(
   options: MountAgenetesOptions = {},
-): AgenetesBuilder {
-  const factories = new Map<string, DriverFactory<never>>();
+): AgenetesBuilder<StandardDriverFactoryMap> {
+  const factories = new Map<string, DriverFactory<never>>([
+    ['acp', acpDriverFactory as DriverFactory<never>],
+    ['pi', piDriverFactory as DriverFactory<never>],
+  ]);
   const registrations: Registration[] = [];
   const threadStore = options.threadStore ?? new InMemoryThreadStore();
   const eventLog = new EventLog(
@@ -144,7 +160,7 @@ export function mountAgenetes(
   const autoRecoverPolicy =
     options.autoRecoverPolicy ?? DEFAULT_AUTO_RECOVER_POLICY;
 
-  const builder: AgenetesBuilder<Record<string, DriverFactory<never>>> = {
+  const builder: AgenetesBuilder<StandardDriverFactoryMap> = {
     addFactory(factoryName, factory) {
       factories.set(factoryName, factory as DriverFactory<never>);
       return builder as never;
@@ -173,10 +189,7 @@ export function mountAgenetes(
         // `driverName` is the dispatch `kind` (I5.1 alias): register under
         // the contract kind. The driver carries no `kind` of its own —
         // dispatch is external, supplied here as the first `register` arg.
-        runtime.register(driverName, {
-          capabilities: driver.capabilities,
-          create: (input, context) => driver.create(input, context),
-        });
+        runtime.register(driverName, driver);
       }
       return createAgenetesInstance<TSpec, THandle>(
         runtime,
@@ -188,5 +201,5 @@ export function mountAgenetes(
     },
   };
 
-  return builder as AgenetesBuilder;
+  return builder;
 }

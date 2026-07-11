@@ -408,6 +408,12 @@ importers:
 
   external/agenetes/packages/agenetes:
     dependencies:
+      '@agenetes/acp-driver':
+        specifier: workspace:*
+        version: link:../acp-driver
+      '@agenetes/pi-driver':
+        specifier: workspace:*
+        version: link:../pi-driver
       '@agenetes/protocol':
         specifier: workspace:*
         version: link:../protocol

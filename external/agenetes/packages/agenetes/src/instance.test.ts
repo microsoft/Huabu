@@ -45,7 +45,6 @@ class StubHandle {
 /** A driver whose end-state `create(spec)` (I9.3) mints a stub handle. */
 function stubDriver(): AgentDriver<StubSpec> {
   return {
-    capabilities: CAPS,
     create: (spec, context) =>
       new StubHandle(spec, context) as unknown as AgentHandle,
   };

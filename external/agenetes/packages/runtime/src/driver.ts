@@ -1,44 +1,12 @@
-// The driver register / injection seam (§3.6.1 / §3.6.2).
-//
-// `AgentDriver` is how L1 teaches L2 to run one *kind* of agent: given a
-// host-injected backing object (a pi-agent-core `Agent`, an ACP session
-// entry, …), produce an {@link AgentHandle}. This is the pragmatic,
-// object-injection stand-in for the clean §3.6 `driver.create(spec)`
-// factory: the host still constructs the backing runtime instance (it
-// owns the host singletons + canvas coupling), and hands it in via
-// `create(input)`. The clean factory (spec in, no host objects) lands once
-// M4 (canvas DI) / M5 (package boundary) make those resources injectable.
-//
-// The K8s/CRI analogy the design leans on: `AgentRuntime` is the runtime
-// framework, `AgentDriver`s are the runtimes it dispatches to. Standard
-// drivers (e.g. ACP) are destined to ship *inside* this package; custom,
-// business-coupled drivers (the canvas built-in agents) are always
-// registered by L1. Today both are registered as objects.
+// The workload-realization and live-handle lifecycle seams (README I2).
+// Agenetes dispatches a serializable workload spec to a registered
+// `AgentDriver`; the driver realizes it as an `AgentHandle`. Host-owned
+// dependencies enter standard drivers through their mount-time factory
+// ports, never as per-create backing objects.
 
 import type { AgentHandle } from './handle.js';
 import type { AgentCreateContext } from './realization.js';
-import type { AgentCapabilities, AgentStreamEvent } from '@agenetes/protocol';
-
-/**
- * The generics-free driver metadata the registry can store and enumerate
- * without knowing a driver's concrete input/request/result shapes.
- */
-export interface AgentDriverInfo {
-  /**
-   * Optional natural-language self-description for discovery / UX. Never
-   * a gating input; runtime branching must rely on `capabilities`.
-   */
-  readonly description?: string;
-  /**
-   * The driver-class capability descriptor used for discovery / admission.
-   * A concrete handle may negotiate a subset at create / initialize time.
-   *
-   * A driver carries **no `kind`**: dispatch is decided entirely by the
-   * caller that registers it (`register(kind, driver)`) — the contract
-   * `kind` is external to the factory, not a property it advertises.
-   */
-  readonly capabilities: AgentCapabilities;
-}
+import type { AgentStreamEvent } from '@agenetes/protocol';
 
 /**
  * A registered driver realizes a target create input into an
@@ -53,7 +21,7 @@ export interface AgentDriver<
   TResult = unknown,
   TEvent extends AgentStreamEvent = AgentStreamEvent,
   TTurnCtx = unknown,
-> extends AgentDriverInfo {
+> {
   /**
    * Produce a handle for one target workload. The context is always
    * provided; `durableInput` is absent for a fresh create.
@@ -74,7 +42,7 @@ export interface AgentDriver<
  * Two orthogonal concerns:
  *   - *Driver dispatch* (`register` / `resolve` / `has` / `kinds`): map a
  *     driver *kind* to the object that knows how to `create` its handles.
- *   - *Handle lifecycle* (`get` / `create` / `close`): hold the live
+ *   - *Handle lifecycle* (`get` / `getOrCreate` / `close`): hold the live
  *     Deployment handle for a `threadId`, generalising today's
  *     `ensureAcpSession` (get-or-create-by-threadId). This is imperative
  *     lifecycle ownership of one named workload per `threadId` — no queue,
@@ -141,19 +109,16 @@ export interface AgentRuntime {
   ): AgentHandle<TRequest, TRendered, TResult, TEvent, TTurnCtx> | undefined;
 
   /**
-   * Get-or-create the live handle for `threadId`. If one is already live
-   * it is returned as-is (collapsing the concurrent-first-call race);
-   * otherwise `factory` constructs it and it is registered. The `factory`
-   * closes over the workload spec — spec is used **only at construction**;
+   * Get or create the live handle for `threadId`. If one is already live
+   * it is returned as-is; otherwise `createHandle` constructs and registers
+   * it. `createHandle` closes over the workload spec, which is used only at
+   * construction;
    * this deliberately **does not reconcile spec drift** (changing the spec
    * is an explicit `close()` + `create()` the caller decides, not a hidden
    * reconcile). This matches `ensureAcpSession`'s reuse-ignores-spec
-   * behaviour. (The clean `create(threadId, spec)` factory — spec in, no
-   * host objects — lands once M4/M5 make the ACP driver's host resources
-   * injectable; today the host-supplied `factory` is the object-injection
-   * stand-in.)
+   * behaviour.
    */
-  create<
+  getOrCreate<
     TRequest = unknown,
     TRendered = unknown,
     TResult = unknown,
@@ -161,7 +126,13 @@ export interface AgentRuntime {
     TTurnCtx = unknown,
   >(
     threadId: string,
-    factory: () => AgentHandle<TRequest, TRendered, TResult, TEvent, TTurnCtx>,
+    createHandle: () => AgentHandle<
+      TRequest,
+      TRendered,
+      TResult,
+      TEvent,
+      TTurnCtx
+    >,
   ): AgentHandle<TRequest, TRendered, TResult, TEvent, TTurnCtx>;
 
   /**
@@ -214,7 +185,7 @@ export function createAgentRuntime(): AgentRuntime {
         | AgentHandle<TRequest, TRendered, TResult, TEvent, TTurnCtx>
         | undefined;
     },
-    create<
+    getOrCreate<
       TRequest,
       TRendered,
       TResult,
@@ -222,7 +193,7 @@ export function createAgentRuntime(): AgentRuntime {
       TTurnCtx,
     >(
       threadId: string,
-      factory: () => AgentHandle<
+      createHandle: () => AgentHandle<
         TRequest,
         TRendered,
         TResult,
@@ -240,7 +211,7 @@ export function createAgentRuntime(): AgentRuntime {
           TTurnCtx
         >;
       }
-      const created = factory();
+      const created = createHandle();
       handles.set(threadId, created as AgentHandle);
       return created;
     },

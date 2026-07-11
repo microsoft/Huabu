@@ -51,7 +51,7 @@ class SilentHandle {
 }
 
 function driver(make: (spec: StubSpec) => unknown): AgentDriver<StubSpec> {
-  return { capabilities: CAPS, create: (spec) => make(spec) as AgentHandle };
+  return { create: (spec) => make(spec) as AgentHandle };
 }
 
 const ns = (name: string, root?: string) => ({
