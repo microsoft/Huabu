@@ -1,7 +1,7 @@
 import type {
   AgentStateSnapshot,
-  AgentTurn,
   Namespace,
+  ObservedAgentTurn,
 } from '@agenetes/protocol';
 
 /** Durable identity of a source thread used to realize a handle. */
@@ -20,13 +20,13 @@ export interface AgentDurableRecord<TSpec = unknown> {
 export interface AgentDurableInput<TSpec = unknown> {
   readonly source: ThreadIdentity;
   readonly record: AgentDurableRecord<TSpec>;
-  readonly turns: readonly AgentTurn[];
+  readonly turns: readonly ObservedAgentTurn[];
 }
 
 /** A history-loading operation a driver wants Agenetes to authorize. */
 export interface HistoryLoadAuthorizationInput {
   readonly mode: 'recover' | 'fork';
-  readonly turns: readonly AgentTurn[];
+  readonly turns: readonly ObservedAgentTurn[];
 }
 
 /** Structured result of the instance-level history-load policy. */

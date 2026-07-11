@@ -113,6 +113,7 @@ export type {
   FoldedMessageType,
   AgentTurn,
   AgentTurnMeta,
+  ObservedAgentTurn,
 } from './turn.js';
 
 // ControlMsg + AgentCapabilities (§3.6.2): the host->agent control plane.

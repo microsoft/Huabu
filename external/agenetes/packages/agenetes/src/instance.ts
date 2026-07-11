@@ -22,8 +22,10 @@ import {
   EventLog,
   InMemoryEventLogStore,
   type EventLogEntry,
+  type TurnStartLogEntry,
 } from './event-log.js';
 import { createTranscriptFolder } from './fold.js';
+import { materializeHistory } from './materialize-history.js';
 import { ThreadNotificationBus } from './notifications.js';
 import {
   createAgentRecoveryContext,
@@ -41,6 +43,7 @@ import type {
   AgentTurn,
   AgentTurnMeta,
   Namespace,
+  ObservedAgentTurn,
   WorkloadType,
 } from '@agenetes/protocol';
 import type {
@@ -133,11 +136,9 @@ export interface Agenetes<
   logMetadata(namespace: Namespace, threadId: string): ThreadLogMetadata;
   /**
    * Read a thread's durable conversation as folded {@link AgentTurn}s
-   * (Tier 2 of the two-tier log, README I9.8) — the driver-agnostic,
-   * seq-free replay view. With `withTail`, also returns a live `tail`
-   * fenced to just after the last folded turn, so a caller can render the
-   * committed history AND follow the in-flight turn from one call without
-   * ever seeing a sequence number (the fence stays L2-internal).
+   * (Tier 2 of the two-tier log, README I9.8). With `withTail`, the
+   * uncovered Tier-1 suffix is folded into one read-time incomplete turn;
+   * the persistent stores remain unchanged.
    */
   history(
     namespace: Namespace,
@@ -158,24 +159,20 @@ export interface Agenetes<
 /** Options for {@link Agenetes.history}. */
 export interface HistoryOptions {
   /**
-   * Also return a live `tail` fenced to just after the last folded turn.
-   * The fence (a Tier-1 `seq`) is composed and consumed entirely inside
-   * L2; it never appears in the returned value (I9.8).
+   * Project the uncovered Tier-1 suffix as an incomplete final turn.
    */
   readonly withTail?: boolean;
 }
 
 /** The result of {@link Agenetes.history}. */
 export interface ThreadHistory {
-  /** The folded conversation, in turn order (Tier 2). */
-  readonly turns: AgentTurn[];
-  /** Present only when `withTail` was set: the fenced live tail. */
-  readonly tail?: AsyncIterable<AgentStreamEvent>;
+  /** Completed turns plus the optional read-time incomplete projection. */
+  readonly turns: ObservedAgentTurn[];
 }
 
 /** Lightweight counts for one thread's two-tier conversation log. */
 export interface ThreadLogMetadata {
-  /** Number of durable Tier-1 AgentStreamEvents. */
+  /** Tier-1 record high-water mark, including internal turn starts. */
   readonly eventCount: number;
   /** Number of durable Tier-2 folded AgentTurns. */
   readonly turnCount: number;
@@ -328,6 +325,20 @@ export function createAgenetesInstance<
   const unsubscribers = new Map<string, () => void>();
   const recovery = createAgentRecoveryContext(autoRecoverPolicy);
 
+  const readHistory = (
+    namespace: Namespace,
+    threadId: string,
+    withTail: boolean,
+  ): ObservedAgentTurn[] => {
+    const persisted = turnStore.list(namespace, threadId);
+    if (!withTail) return persisted.map(({ turn }) => turn);
+    const fence = persisted[persisted.length - 1]?.seqEnd ?? 0;
+    return materializeHistory(
+      persisted,
+      eventLog.readRecords(namespace, threadId, fence),
+    );
+  };
+
   // Register the handle's up-report listener: persist the full snapshot
   // FIRST (sole writer), then re-emit its metadata (persist-then-notify).
   // A handle without `onState` (a driver that reports no out-of-turn meta)
@@ -368,9 +379,9 @@ export function createAgenetesInstance<
   ): AgentHandle => {
     async function* loggingRun(
       source: AsyncGenerator<AgentStreamEvent, unknown>,
-      request: unknown,
+      start: TurnStartLogEntry,
     ): AsyncGenerator<AgentStreamEvent, unknown> {
-      const seqStart = eventLog.maxSeq(namespace, threadId) + 1;
+      const seqStart = start.seq;
       // Fold Tier-2 from the LIVE Tier-1 stream, not from the run's return
       // value (README I9.8): the folded transcript is fully derivable from
       // the deltas the driver already yields, so `TResult` stays free.
@@ -390,7 +401,7 @@ export function createAgenetesInstance<
       // own consumer still sees whatever `TResult` the driver produced.
       const seqEnd = eventLog.maxSeq(namespace, threadId);
       const turn: AgentTurn = {
-        request: coerceRequest(request),
+        request: start.request,
         transcript: folder.result(),
         ...(meta ? { meta } : {}),
       };
@@ -405,8 +416,13 @@ export function createAgenetesInstance<
             request: unknown,
             render: unknown,
             ctx: unknown,
-          ): AsyncGenerator<AgentStreamEvent, unknown> =>
-            loggingRun(
+          ): AsyncGenerator<AgentStreamEvent, unknown> => {
+            const start = eventLog.beginTurn(
+              namespace,
+              threadId,
+              coerceRequest(request),
+            );
+            return loggingRun(
               (
                 target.run as (
                   r: unknown,
@@ -414,8 +430,9 @@ export function createAgenetesInstance<
                   c: unknown,
                 ) => AsyncGenerator<AgentStreamEvent, unknown>
               )(request, render, ctx),
-              request,
+              start,
             );
+          };
         }
         // Forward every other member to the backing handle. Bind methods to
         // the target so private state / getters resolve against the real
@@ -433,9 +450,7 @@ export function createAgenetesInstance<
     durableInput: {
       source,
       record,
-      turns: turnStore
-        .list(source.namespace, source.threadId)
-        .map(({ turn }) => turn),
+      turns: readHistory(source.namespace, source.threadId, true),
     },
     recovery,
   });
@@ -526,17 +541,7 @@ export function createAgenetesInstance<
         throw new Error('fork target threadId must not be empty');
       }
       const context = createContext(source, sourceRecord);
-      const handle = realize(targetSpec, context, {});
-      for (const turn of context.durableInput?.turns ?? []) {
-        // Forked turns have no Tier-1 events in the target log. Empty
-        // ranges keep its tail fence at zero until the first target run.
-        turnStore.append(targetSpec.namespace, targetSpec.threadId, {
-          turn,
-          seqStart: 1,
-          seqEnd: 0,
-        });
-      }
-      return handle;
+      return realize(targetSpec, context, {});
     },
     get(threadId: string): THandle | undefined {
       return runtime.get(threadId) as THandle | undefined;
@@ -575,14 +580,9 @@ export function createAgenetesInstance<
       threadId: string,
       options?: HistoryOptions,
     ): ThreadHistory {
-      const turns = turnStore
-        .list(namespace, threadId)
-        .map((persisted) => persisted.turn);
-      if (!options?.withTail) return { turns };
-      // Fence the live tail to just after the last folded turn and compose
-      // it internally — the seq never surfaces to L1 (I9.8).
-      const fence = turnStore.fence(namespace, threadId);
-      return { turns, tail: createTail(eventLog, namespace, threadId, fence) };
+      return {
+        turns: readHistory(namespace, threadId, options?.withTail === true),
+      };
     },
     tail(
       namespace: Namespace,

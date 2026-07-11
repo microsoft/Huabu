@@ -1,10 +1,10 @@
 // Tier 1 of the two-tier conversation log (README I9.8 / proposal M5.6) —
-// the fine, append-only, monotonically-sequenced `AgentStreamEvent` log.
+// the fine, append-only, monotonically-sequenced turn/event record log.
 //
 // The instance owns a two-tier conversation log per `(namespace, threadId)`
-// (README I9.8). This module is TIER 1: every frame a `run()` yields is
-// appended as it streams, so the stream itself becomes durable. Tier 1 is
-// the write-ahead / streaming layer:
+// (README I9.8). This module is TIER 1: `run(request, ...)` first appends an
+// internal turn boundary carrying the request, then every yielded frame is
+// appended as it streams. Tier 1 is the write-ahead / streaming layer:
 //   - append-only + monotonically sequenced — never rewritten, renamed or
 //     deleted, so it dissolves the host's fragile mutable draft slot and
 //     makes the in-memory live buffer durable;
@@ -25,7 +25,11 @@
 
 import { appendJsonLine, readJsonLines, sanitizeId } from './io.js';
 
-import type { AgentStreamEvent, Namespace } from '@agenetes/protocol';
+import type {
+  AgentRequest,
+  AgentStreamEvent,
+  Namespace,
+} from '@agenetes/protocol';
 
 /**
  * One durable entry of a thread's Tier-1 event log: the appended
@@ -43,8 +47,25 @@ export interface EventLogEntry {
 }
 
 /**
- * The durable Tier-1 event-log store — a per-`(namespace, threadId)`
- * append-only sequence of {@link EventLogEntry}s (I9.8). Kept a narrow
+ * Internal Tier-1 boundary written synchronously when `run(request, ...)`
+ * begins. It carries the request needed to project an uncovered event tail
+ * as a complete read-time turn, but never enters the public event stream.
+ */
+export interface TurnStartLogEntry {
+  /** Monotonic sequence shared with streamed event entries. */
+  readonly seq: number;
+  /** Epoch ms the turn began. */
+  readonly ts: number;
+  readonly kind: 'turn_start';
+  readonly request: AgentRequest | null;
+}
+
+/** Every durable Tier-1 record, including internal turn boundaries. */
+export type EventLogRecord = EventLogEntry | TurnStartLogEntry;
+
+/**
+ * The durable Tier-1 log store — a per-`(namespace, threadId)` append-only
+ * sequence of {@link EventLogRecord}s (I9.8). Kept a narrow
  * port, exactly like {@link ThreadStore}, so the in-memory default and the
  * on-disk backing are interchangeable and a host injects the file variant
  * at mount. Durability only — the live pub/sub is {@link EventLog}'s.
@@ -52,6 +73,12 @@ export interface EventLogEntry {
  * layer on later.
  */
 export interface EventLogStore {
+  /** Append the internal boundary for a newly-started turn. */
+  appendTurnStart(
+    namespace: Namespace,
+    threadId: string,
+    request: AgentRequest | null,
+  ): TurnStartLogEntry;
   /**
    * Append `event` to the thread's log, assigning the next `seq`
    * (`maxSeq + 1`). Returns the durable entry, whose `seq` is the fence for
@@ -72,6 +99,12 @@ export interface EventLogStore {
     threadId: string,
     sinceSeq?: number,
   ): EventLogEntry[];
+  /** Read both internal turn boundaries and streamed event entries. */
+  readRecords(
+    namespace: Namespace,
+    threadId: string,
+    sinceSeq?: number,
+  ): EventLogRecord[];
   /** The highest `seq` persisted for a thread, or `0` when the log is empty. */
   maxSeq(namespace: Namespace, threadId: string): number;
 }
@@ -88,6 +121,23 @@ function isEntry(value: unknown): value is EventLogEntry {
   );
 }
 
+/** Defensive shape-check for an internal turn boundary read from disk. */
+function isTurnStartEntry(value: unknown): value is TurnStartLogEntry {
+  if (!value || typeof value !== 'object') return false;
+  const entry = value as Partial<TurnStartLogEntry>;
+  return (
+    entry.kind === 'turn_start' &&
+    typeof entry.seq === 'number' &&
+    typeof entry.ts === 'number' &&
+    (entry.request === null ||
+      (typeof entry.request === 'object' && entry.request !== null))
+  );
+}
+
+function isRecord(value: unknown): value is EventLogRecord {
+  return isEntry(value) || isTurnStartEntry(value);
+}
+
 /**
  * A process-local {@link EventLogStore} keyed by `namespace.name` — the
  * self-contained default so the instance needs no host wiring to run (and
@@ -96,9 +146,9 @@ function isEntry(value: unknown): value is EventLogEntry {
  * isolated: logs never leak across `name`.
  */
 export class InMemoryEventLogStore implements EventLogStore {
-  readonly #byNamespace = new Map<string, Map<string, EventLogEntry[]>>();
+  readonly #byNamespace = new Map<string, Map<string, EventLogRecord[]>>();
 
-  #log(namespace: Namespace, threadId: string): EventLogEntry[] {
+  #log(namespace: Namespace, threadId: string): EventLogRecord[] {
     let scope = this.#byNamespace.get(namespace.name);
     if (!scope) {
       scope = new Map();
@@ -110,6 +160,22 @@ export class InMemoryEventLogStore implements EventLogStore {
       scope.set(threadId, log);
     }
     return log;
+  }
+
+  appendTurnStart(
+    namespace: Namespace,
+    threadId: string,
+    request: AgentRequest | null,
+  ): TurnStartLogEntry {
+    const log = this.#log(namespace, threadId);
+    const entry: TurnStartLogEntry = {
+      seq: (log[log.length - 1]?.seq ?? 0) + 1,
+      ts: Date.now(),
+      kind: 'turn_start',
+      request,
+    };
+    log.push(entry);
+    return entry;
   }
 
   append(
@@ -125,6 +191,14 @@ export class InMemoryEventLogStore implements EventLogStore {
   }
 
   read(namespace: Namespace, threadId: string, sinceSeq = 0): EventLogEntry[] {
+    return this.readRecords(namespace, threadId, sinceSeq).filter(isEntry);
+  }
+
+  readRecords(
+    namespace: Namespace,
+    threadId: string,
+    sinceSeq = 0,
+  ): EventLogRecord[] {
     const log = this.#byNamespace.get(namespace.name)?.get(threadId);
     if (!log) return [];
     return sinceSeq > 0 ? log.filter((e) => e.seq > sinceSeq) : [...log];
@@ -172,7 +246,7 @@ export class FileEventLogStore implements EventLogStore {
     if (cached !== undefined) return cached;
     let max = 0;
     for (const entry of readJsonLines<unknown>(filePath)) {
-      if (isEntry(entry) && entry.seq > max) max = entry.seq;
+      if (isRecord(entry) && entry.seq > max) max = entry.seq;
     }
     this.#seqByPath.set(filePath, max);
     return max;
@@ -191,11 +265,39 @@ export class FileEventLogStore implements EventLogStore {
     return entry;
   }
 
+  appendTurnStart(
+    namespace: Namespace,
+    threadId: string,
+    request: AgentRequest | null,
+  ): TurnStartLogEntry {
+    const filePath = this.#path(namespace, threadId);
+    const seq = this.#lastSeq(filePath) + 1;
+    const entry: TurnStartLogEntry = {
+      seq,
+      ts: Date.now(),
+      kind: 'turn_start',
+      request,
+    };
+    appendJsonLine(filePath, entry);
+    this.#seqByPath.set(filePath, seq);
+    return entry;
+  }
+
   read(namespace: Namespace, threadId: string, sinceSeq = 0): EventLogEntry[] {
-    const entries = readJsonLines<unknown>(
+    return this.readRecords(namespace, threadId, sinceSeq).filter(isEntry);
+  }
+
+  readRecords(
+    namespace: Namespace,
+    threadId: string,
+    sinceSeq = 0,
+  ): EventLogRecord[] {
+    const records = readJsonLines<unknown>(
       this.#path(namespace, threadId),
-    ).filter(isEntry);
-    return sinceSeq > 0 ? entries.filter((e) => e.seq > sinceSeq) : entries;
+    ).filter(isRecord);
+    return sinceSeq > 0
+      ? records.filter((entry) => entry.seq > sinceSeq)
+      : records;
   }
 
   maxSeq(namespace: Namespace, threadId: string): number {
@@ -212,7 +314,7 @@ export type EventLogListener = (entry: EventLogEntry) => void;
  * (durability) and THEN fans it out to current live subscribers (the live
  * tail), so a subscriber that first drains `read(sinceSeq)` and then
  * receives live entries observes a gap-free, duplicate-free sequence — the
- * fence the `tail`/`history({ withTail })` surface composes on in C3.
+ * fence the `tail` and history materializer compose on.
  *
  * The live fan-out is keyed by `threadId` alone: `threadId` is globally
  * unique (a host guarantee, I4.2), matching the threadId-keyed notification
@@ -224,6 +326,18 @@ export class EventLog {
 
   constructor(store: EventLogStore) {
     this.#store = store;
+  }
+
+  /**
+   * Persist a turn boundary without publishing it to live event
+   * subscribers. Public tail consumers observe only AgentStreamEvents.
+   */
+  beginTurn(
+    namespace: Namespace,
+    threadId: string,
+    request: AgentRequest | null,
+  ): TurnStartLogEntry {
+    return this.#store.appendTurnStart(namespace, threadId, request);
   }
 
   /** Append + persist an event, then notify live subscribers of the thread. */
@@ -248,6 +362,15 @@ export class EventLog {
     sinceSeq?: number,
   ): EventLogEntry[] {
     return this.#store.read(namespace, threadId, sinceSeq);
+  }
+
+  /** Durable read of all Tier-1 records for history materialization. */
+  readRecords(
+    namespace: Namespace,
+    threadId: string,
+    sinceSeq?: number,
+  ): EventLogRecord[] {
+    return this.#store.readRecords(namespace, threadId, sinceSeq);
   }
 
   /** The highest persisted `seq` for a thread (the fence), or `0` when empty. */

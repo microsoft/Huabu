@@ -92,6 +92,16 @@ describe('createTranscriptFolder', () => {
     ]);
   });
 
+  it('returns an idempotent snapshot when a plan is present', () => {
+    const folder = createTranscriptFolder();
+    folder.fold({
+      type: 'plan',
+      data: { entries: [{ content: 'a', status: 'pending' }] },
+    });
+
+    expect(folder.result()).toEqual(folder.result());
+  });
+
   it('folds an error row and ignores envelope frames (done/end/meta)', () => {
     expect(
       foldAll([

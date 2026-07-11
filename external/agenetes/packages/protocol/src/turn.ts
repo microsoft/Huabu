@@ -144,3 +144,12 @@ export const agentTurnSchema = z.object({
 
 /** The `AgentTurn` record type, derived from the schema. */
 export type AgentTurn = z.infer<typeof agentTurnSchema>;
+
+/**
+ * Read-time view of a turn. Persisted Tier-2 turns are plain
+ * {@link AgentTurn}s; a query that materializes the uncovered Tier-1 tail
+ * appends one projected turn marked `isIncomplete`.
+ */
+export type ObservedAgentTurn = AgentTurn & {
+  readonly isIncomplete?: true;
+};

@@ -8,6 +8,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { InMemoryEventLogStore } from './event-log.js';
 import { InMemoryThreadStore } from './thread-store.js';
 import { InMemoryTurnStore } from './turn-store.js';
 
@@ -109,6 +110,7 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
 
   it('fork() realizes a fresh target from source durable input', () => {
     const store = new InMemoryThreadStore();
+    const eventLogStore = new InMemoryEventLogStore();
     const turnStore = new InMemoryTurnStore();
     const sourceNamespace = ns('canvas_1', '/data/c1');
     const targetNamespace = ns('canvas_2', '/data/c2');
@@ -135,7 +137,27 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
       seqStart: 1,
       seqEnd: 2,
     });
-    const inst = mountAgenetes({ threadStore: store, turnStore })
+    eventLogStore.append(sourceNamespace, sourceSpec.threadId, {
+      type: 'text_delta',
+      data: { content: 'source answer' },
+    });
+    eventLogStore.append(sourceNamespace, sourceSpec.threadId, {
+      type: 'end',
+      data: {},
+    });
+    eventLogStore.appendTurnStart(sourceNamespace, sourceSpec.threadId, {
+      type: 'user_text',
+      content: 'in flight',
+    });
+    eventLogStore.append(sourceNamespace, sourceSpec.threadId, {
+      type: 'text_delta',
+      data: { content: 'partial answer' },
+    });
+    const inst = mountAgenetes({
+      threadStore: store,
+      eventLogStore,
+      turnStore,
+    })
       .addFactory('stub', stubDriver)
       .register('external', 'stub')
       .build<StubSpec>();
@@ -159,15 +181,22 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
         threadId: sourceSpec.threadId,
       },
       record: { spec: sourceSpec, state: sourceState },
-      turns: [sourceTurn],
+      turns: [
+        sourceTurn,
+        {
+          request: { type: 'user_text', content: 'in flight' },
+          transcript: [{ type: 'text', data: { content: 'partial answer' } }],
+          isIncomplete: true,
+        },
+      ],
     });
     expect(inst.record(targetNamespace, targetSpec.threadId)).toEqual({
       spec: targetSpec,
       state: {},
     });
-    expect(inst.history(targetNamespace, targetSpec.threadId).turns).toEqual([
-      sourceTurn,
-    ]);
+    expect(inst.history(targetNamespace, targetSpec.threadId).turns).toEqual(
+      [],
+    );
     expect(inst.record(sourceNamespace, sourceSpec.threadId)?.state).toEqual(
       sourceState,
     );

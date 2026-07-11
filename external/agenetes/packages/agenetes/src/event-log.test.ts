@@ -22,7 +22,11 @@ import {
   type EventLogStore,
 } from './index.js';
 
-import type { AgentStreamEvent, Namespace } from '@agenetes/protocol';
+import type {
+  AgentRequest,
+  AgentStreamEvent,
+  Namespace,
+} from '@agenetes/protocol';
 
 let tmp: string;
 
@@ -43,6 +47,7 @@ const text = (content: string): AgentStreamEvent => ({
   type: 'text_delta',
   data: { content },
 });
+const request: AgentRequest = { type: 'user_text', content: 'hello' };
 
 const eventFilePath = (namespace: Namespace, threadId: string): string =>
   path.join(namespace.storage!.root!, 'chat_v2', `${threadId}.events.jsonl`);
@@ -60,6 +65,19 @@ describe.each<[string, () => EventLogStore]>([
     const b = store.append(n, 'thread-1', text('b'));
     expect(a.seq).toBe(1);
     expect(b.seq).toBe(2);
+    expect(store.maxSeq(n, 'thread-1')).toBe(2);
+  });
+
+  it('sequences internal turn starts but keeps them out of event reads', () => {
+    const store = make();
+    const n = ns('canvas-1');
+    const start = store.appendTurnStart(n, 'thread-1', request);
+    const event = store.append(n, 'thread-1', text('a'));
+
+    expect(start.seq).toBe(1);
+    expect(event.seq).toBe(2);
+    expect(store.read(n, 'thread-1')).toEqual([event]);
+    expect(store.readRecords(n, 'thread-1')).toEqual([start, event]);
     expect(store.maxSeq(n, 'thread-1')).toBe(2);
   });
 
@@ -146,16 +164,20 @@ describe('EventLog — durable append + live pub/sub', () => {
     const seen: EventLogEntry[] = [];
     const unsub = log.subscribe('thread-1', (e) => seen.push(e));
 
+    log.beginTurn(n, 'thread-1', request);
     log.append(n, 'thread-1', text('live-1'));
     log.append(n, 'thread-1', text('live-2'));
 
-    expect(seen.map((e) => e.seq)).toEqual([2, 3]);
+    expect(seen.map((e) => e.seq)).toEqual([3, 4]);
     // Backfill is served by read, gap-free with the live tail.
-    expect(log.read(n, 'thread-1').map((e) => e.seq)).toEqual([1, 2, 3]);
+    expect(log.read(n, 'thread-1').map((e) => e.seq)).toEqual([1, 3, 4]);
+    expect(log.readRecords(n, 'thread-1').map((e) => e.seq)).toEqual([
+      1, 2, 3, 4,
+    ]);
 
     unsub();
     log.append(n, 'thread-1', text('after-unsub'));
-    expect(seen.map((e) => e.seq)).toEqual([2, 3]);
+    expect(seen.map((e) => e.seq)).toEqual([3, 4]);
   });
 
   it('only notifies subscribers of the matching threadId', () => {
