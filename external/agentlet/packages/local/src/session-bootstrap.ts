@@ -27,6 +27,33 @@ const INITIALIZE_NOTIFICATION_GRACE_MS = 0
  */
 const DEFAULT_BOOTSTRAP_TIMEOUT_MS = 90_000
 
+const SESSION_RESUME_UNAVAILABLE_RPC_CODES = new Set([
+  -32601, // Method not found.
+  -32602, // Invalid session identifier/parameters.
+  -32002, // ACP resource not found.
+])
+
+export class SessionResumeUnavailableError extends Error {
+  readonly code = 'session_resume_unavailable' as const
+
+  constructor(message: string) {
+    super(message)
+    this.name = 'SessionResumeUnavailableError'
+  }
+}
+
+function throwResumeError(
+  method: 'session/resume' | 'session/load',
+  sessionId: string,
+  error: { code: number; message: string },
+): never {
+  const message = `${method} failed for session ${sessionId}: ${JSON.stringify(error)}`
+  if (SESSION_RESUME_UNAVAILABLE_RPC_CODES.has(error.code)) {
+    throw new SessionResumeUnavailableError(message)
+  }
+  throw new Error(message)
+}
+
 /**
  * Result of a successful ACP session bootstrap (initialize + session/new or session/load/resume).
  * Stored as the "agent session profile" and reported to the server.
@@ -213,9 +240,8 @@ async function bootstrapResumeOrLoad(
     // Prefer session/resume — no history replay needed
     logger.info('session_bootstrap_session_resume', { sessionId, cwd: options.cwd })
     const response = await sendRequest(agent, 2, 'session/resume', sessionParams, timeout)
-    if (!response.result && response.error) {
-      throw new Error(`session/resume failed: ${JSON.stringify(response.error)}`)
-    }
+    if (response.error) throwResumeError('session/resume', sessionId, response.error)
+    if (response.result === undefined) throw new Error('session/resume returned no result')
     return sessionId
   }
 
@@ -223,13 +249,12 @@ async function bootstrapResumeOrLoad(
     // Fall back to session/load — must handle session/update notifications during load
     logger.info('session_bootstrap_session_load', { sessionId, cwd: options.cwd })
     const response = await sendRequestWithNotificationDrain(agent, 2, 'session/load', sessionParams, timeout, logger)
-    if (!response.result && response.error) {
-      throw new Error(`session/load failed: ${JSON.stringify(response.error)}`)
-    }
+    if (response.error) throwResumeError('session/load', sessionId, response.error)
+    if (response.result === undefined) throw new Error('session/load returned no result')
     return sessionId
   }
 
-  throw new Error(
+  throw new SessionResumeUnavailableError(
     `Cannot resume session ${sessionId}: agent supports neither session/resume nor session/load`
   )
 }

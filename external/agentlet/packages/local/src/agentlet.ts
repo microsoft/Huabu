@@ -15,13 +15,18 @@ import {
   type StopParams,
   type SendResourceParams,
   type JsonRpcMessage,
+  type JsonRpcError,
 } from '@agentlet/protocol'
 import { resolveAgentTeam } from '@agentlet/agent-team'
 import { AgentProcess } from './agent-process.js'
 import { WsClient } from './ws-client.js'
 import { Relay } from './relay.js'
 import { Logger } from './logger.js'
-import { bootstrapSession, type SessionProfile } from './session-bootstrap.js'
+import {
+  bootstrapSession,
+  SessionResumeUnavailableError,
+  type SessionProfile,
+} from './session-bootstrap.js'
 import type { AgentletOptions } from './cli.js'
 
 type AgentletState = 'starting' | 'connecting' | 'handshaking' | 'relaying' | 'reconnecting' | 'shutting_down' | 'stopped'
@@ -538,6 +543,9 @@ export class Agentlet {
         this.sendDaemonResponse(requestId, undefined, {
           code: -32000,
           message: `Session bootstrap failed: ${err instanceof Error ? err.message : String(err)}`,
+          ...(err instanceof SessionResumeUnavailableError
+            ? { data: { code: err.code } }
+            : {}),
         })
         return
       }
@@ -823,7 +831,7 @@ export class Agentlet {
     this.logger.info('idle_suspend_complete', { sessionId })
   }
 
-  private sendDaemonResponse(id: string | number, result?: unknown, error?: { code: number; message: string }): void {
+  private sendDaemonResponse(id: string | number, result?: unknown, error?: JsonRpcError): void {
     if (!this.controlWs || this.controlWs.readyState !== WebSocket.OPEN) return
 
     const msg: JsonRpcMessage = error

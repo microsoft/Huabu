@@ -202,6 +202,11 @@ export interface SpawnResult {
   pid: number
 }
 
+/** Structured daemon error data for a failed session resume/load. */
+export interface SessionResumeUnavailableErrorData {
+  code: 'session_resume_unavailable'
+}
+
 /** server/stop — stop agent session */
 export interface StopParams {
   sessionId: string

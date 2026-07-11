@@ -118,7 +118,7 @@ The server registers the connection in a **connection registry**. Registered age
 
 For the full control message schemas (`server/spawn`, `server/stop`, `server/list`, `agent/suspended`), see the [Bridge channel in asyncapi.yaml](asyncapi.yaml).
 
-**Spawn lifecycle:** On `server/spawn`, the agentlet validates `sessionSpec.command` / `sessionSpec.cwd` (or resolves them from `sessionSpec.agentTeam` — see below), spawns the process, performs session bootstrap (`session/new` or `session/resume` / `session/load` if `sessionId` is provided), opens a second WebSocket (standard `agent/hello` with attached `sessionProfile.agent`), and returns the result. If bootstrap fails, the agentlet terminates the agent and returns a JSON-RPC error.
+**Spawn lifecycle:** On `server/spawn`, the agentlet validates `sessionSpec.command` / `sessionSpec.cwd` (or resolves them from `sessionSpec.agentTeam` — see below), spawns the process, performs session bootstrap (`session/new` or `session/resume` / `session/load` if `sessionId` is provided), opens a second WebSocket (standard `agent/hello` with attached `sessionProfile.agent`), and returns the result. If bootstrap fails, the agentlet terminates the agent and returns a JSON-RPC error. When native resume/load is unavailable because the method is unsupported, the session identifier is invalid, or the ACP resource no longer exists, the error carries `data: { code: "session_resume_unavailable" }`; other bootstrap failures do not carry this code.
 
 **Agent Team resolution:** If `sessionSpec.agentTeam` is present (containing `agentDir` and optionally `harness`), the agentlet resolves the concrete spawn parameters from the Agent Team package before proceeding with the normal spawn flow:
 
@@ -243,7 +243,7 @@ The definitive type contract for the protocol lives in `@agentlet/protocol` (sou
 | **Agentlet Handshake** — `AgentletProfile`, `AgentletHelloParams`, `AgentletHelloResult` | [`packages/protocol/src/messages.ts`](../packages/protocol/src/messages.ts) |
 | **Agent Handshake** — `AgentHelloParams`, `AgentHelloResult`, `AgentHelloError` | [`packages/protocol/src/messages.ts`](../packages/protocol/src/messages.ts) |
 | **Agent Notifications** — `AgentExitedParams`, `AgentRestartedParams`, `AgentGoodbyeParams`, `AgentOverflowParams`, `AgentSuspendedParams`, `AgentPongParams` | [`packages/protocol/src/messages.ts`](../packages/protocol/src/messages.ts) |
-| **Server Control** — `ServerReplayParams`, `ServerPingParams`, `ServerShutdownParams`, `SpawnParams`, `SpawnResult`, `StopParams`, `StopResult`, `ListParams`, `ListResult`, `SendResourceParams` | [`packages/protocol/src/messages.ts`](../packages/protocol/src/messages.ts) |
+| **Server Control** — `ServerReplayParams`, `ServerPingParams`, `ServerShutdownParams`, `SpawnParams`, `SpawnResult`, `SessionResumeUnavailableErrorData`, `StopParams`, `StopResult`, `ListParams`, `ListResult`, `SendResourceParams` | [`packages/protocol/src/messages.ts`](../packages/protocol/src/messages.ts) |
 | **Lifecycle Events** — `LifecycleEvent` | [`packages/protocol/src/messages.ts`](../packages/protocol/src/messages.ts) |
 | **Server Configuration** — `AgentletServerOptions`, `AuthResult` | [`packages/protocol/src/gateway-types.ts`](../packages/protocol/src/gateway-types.ts) |
 | **AgentConnection** — the interface host apps interact with | [`packages/protocol/src/gateway-types.ts`](../packages/protocol/src/gateway-types.ts) |

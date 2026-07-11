@@ -20,6 +20,7 @@ import { AgentConnectionImpl } from './connection.js'
 import { DataStore, tokenSignature } from './data-store.js'
 import { EventStore } from './event-store.js'
 import { JsonlStorage } from './jsonl-storage.js'
+import { AgentletRequestError } from './request-error.js'
 
 /**
  * Timeout for a server→agentlet control request (server/spawn, server/stop,
@@ -481,7 +482,7 @@ export class AgentletServer {
 
     this.pendingRequests.delete(requestKey)
     if ('error' in msg && msg.error) {
-      pending.reject(new Error(msg.error.message))
+      pending.reject(new AgentletRequestError(msg.error))
     } else if ('result' in msg) {
       pending.resolve(msg.result)
     }

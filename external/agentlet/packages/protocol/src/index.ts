@@ -44,6 +44,7 @@ export type {
   ServerShutdownParams,
   SpawnParams,
   SpawnResult,
+  SessionResumeUnavailableErrorData,
   StopParams,
   StopResult,
   ListParams,
