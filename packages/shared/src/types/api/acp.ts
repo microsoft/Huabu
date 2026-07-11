@@ -358,6 +358,7 @@ export interface AcpThreadCachedMetaResponse {
  *   • `profile_missing` — bound profile no longer exists.
  *   • `bridge_not_mounted` — embedded agentlet bridge still booting.
  *   • `worker_not_ready` — agentlet daemon worker never came online.
+ *   • `session_resume_unavailable` — persisted native session is gone.
  *   • `spawn_failed` — daemon rejected the spawn RPC (bad recipe).
  *   • `connect_timeout` — agent process started but never opened WS
  *     (most often: interactive auth needed, e.g. expired Copilot
@@ -368,6 +369,7 @@ export type AcpEnsureErrorCode =
   | 'profile_missing'
   | 'bridge_not_mounted'
   | 'worker_not_ready'
+  | 'session_resume_unavailable'
   | 'spawn_failed'
   | 'connect_timeout'
   | 'internal';

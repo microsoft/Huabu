@@ -550,6 +550,7 @@ const KNOWN_ENSURE_CODES: readonly AcpEnsureErrorCode[] = [
   'profile_missing',
   'bridge_not_mounted',
   'worker_not_ready',
+  'session_resume_unavailable',
   'spawn_failed',
   'connect_timeout',
   'internal',

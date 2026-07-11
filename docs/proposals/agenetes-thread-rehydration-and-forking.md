@@ -320,14 +320,14 @@ pi-driver should load folded turns inside its own realization flow without impor
 - ✅ Keep host-specific prompt assembly out of the subtree package.
 - ✅ No projection port is required for the first version.
 
-### ▶️ Implement ACP fallback turn loading
+### ✅ Implement ACP fallback turn loading
 
 - ✅ Prefer native session resume/load for same-thread recovery.
 - ✅ Fall back only for missing, invalid, or unsupported native sessions; unrelated operational failures remain hard errors.
 - ✅ First-version fallback: serialized folded turns are prepended to the first real ACP prompt.
-- ▶️ Propagate structured `session_resume_unavailable` from agentlet bootstrap through spawn RPC.
+- ✅ Propagate structured `session_resume_unavailable` from agentlet bootstrap through spawn RPC.
 - ✅ Do not use error-text matching for fallback classification.
-- ⚪ Create a fresh ACP session without the stale source `sessionId` before loading history.
+- ✅ Create a fresh ACP session without the stale source `sessionId` before loading history.
 
 ### ✅ Move built-in cold-start replay out of `agent.route.ts`
 
@@ -345,6 +345,13 @@ This needs to cover source thread, target thread, spec derivation, and durable r
 - ✅ First-version target spec derivation is source spec + target identity + host patch/override.
 - ✅ First-version fork carries folded turns but does not inherit driver-native `priorState`.
 - ✅ No driver-specific merge hook in the first version; defer until a concrete driver requires one.
+
+### ⚪ Implement the Agenetes thread fork operation
+
+- ⚪ Reject a missing source record or an already-existing target identity.
+- ⚪ Derive the target spec from source inheritance, target identity, and host patch/override.
+- ⚪ Create the target handle with source durable input so the driver classifies it as a fork.
+- ⚪ Persist the target record independently without inheriting source driver-native state.
 
 ### ✅ Decide how recovery/fork interacts with `reuse-ignores-spec`
 
