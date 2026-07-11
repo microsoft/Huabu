@@ -47,7 +47,7 @@ In both cases the runtime may need:
 
 The important boundary is that Agenetes decides **when** rehydration is needed and **which durable facts** are supplied to the driver, while each driver decides **how** to rebuild its backend-native runtime.
 
-The current `priorState` term is intentionally narrower than "all durable recovery input". Today it only carries the persisted `AgentStateSnapshot` down-fed from the thread store (currently `sessionId?` plus `metadata?`). It is useful for native same-thread resume, but it is not by itself sufficient for history-based recovery or fork-from-history. This proposal therefore replaces that narrow argument with a durable input carrying the full source `ThreadRecord` plus folded turns.
+The current `priorState` term is intentionally narrower than "all durable recovery input". Today it only carries the persisted `AgentStateSnapshot` down-fed from the thread store (currently `sessionId?` plus `metadata?`). It is useful for native same-thread resume, but it is not by itself sufficient for history-based recovery or fork-from-history. This proposal therefore replaces that narrow argument with a durable input carrying the full source `ThreadRecord` plus materialized turns.
 
 ## 5. Current design direction
 
@@ -196,7 +196,7 @@ interface AgentDurableInput<TSpec = unknown> {
     readonly spec: TSpec;
     readonly state: AgentStateSnapshot;
   };
-  readonly turns: readonly AgentTurn[];
+  readonly turns: readonly ObservedAgentTurn[];
 }
 ```
 
@@ -222,7 +222,7 @@ interface AgentCreateContext<TSpec = unknown> {
   readonly recovery: {
     authorizeHistoryLoad(input: {
       mode: 'recover' | 'fork';
-      turns: readonly AgentTurn[];
+      turns: readonly ObservedAgentTurn[];
     }): Promise<HistoryLoadAuthorization>;
   };
 }
@@ -257,7 +257,7 @@ Expected policy denial is a structured result, not an exception. The handle can 
 
 Turn-loading timing is deliberately not standardized. A harness that can directly seed native transcript state should do so. A driver that must perform asynchronous resume or prompt-based loading may retain private bootstrap state (for example, `turnsToLoad`) and consume it when the handle is first used. `AgentTurnState.isFirstMessage` remains only a render hint about the current backend session; it does not carry durable history or prescribe when history is loaded.
 
-The first version deliberately includes **folded turn-level history only**. It does not include the Tier-1 event tail or attempt to recover an incomplete in-flight turn. Event-tail recovery remains a future extension; the existing Tier-1 log continues to serve reconnect and live-tail behavior independently.
+The realization input uses the same snapshot materialization as `history({ withTail: true })`: completed Tier-2 turns plus an optional `{ ...AgentTurn, isIncomplete: true }` projection of the uncovered Tier-1 suffix. Tier 1 records an internal `turn_start` carrying the request before the yielded events, so the projected turn has the same request/transcript envelope as a completed turn without being appended to Tier 2. The independent `tail()` surface continues to serve raw live-event reconnect.
 
 The important design rule is that folded turns and the source thread record flow **through Agenetes into the driver**, not around Agenetes through host route code.
 
@@ -305,7 +305,7 @@ The current default direction is also that first-version forking should **not** 
 Replace the narrow `create(spec, priorState)` down-feed with the agreed create context, durable input, and shared authorization utilities.
 
 - ✅ Carry source durable identity separately from target spec so same-thread recovery and fork are unambiguous.
-- ✅ First-version durable input is source identity + `ThreadRecord` + folded `AgentTurn[]`.
+- ✅ Durable input is source identity + `ThreadRecord` + materialized `ObservedAgentTurn[]`.
 - ✅ Place `AgentDurableInput<TSpec>` in `@agenetes/runtime` without introducing a runtime → instance dependency.
 - ✅ Wrap durable input and instance services in `AgentCreateContext<TSpec>`.
 - ✅ Implement instance-provided recovery authorization and remaining shared utilities.
@@ -343,7 +343,7 @@ This needs to cover source thread, target thread, spec derivation, and durable r
 
 - ✅ Define the source/target thread identity contract as `(namespace, threadId)`.
 - ✅ L1 supplies a complete target spec; Agenetes performs no field-level merge.
-- ✅ First-version fork carries folded turns but does not inherit driver-native `priorState`.
+- ✅ Fork carries materialized source turns, including an optional incomplete tail projection, but does not inherit driver-native `priorState`.
 - ✅ No driver-specific merge hook; target-spec compilation belongs to L1.
 
 ### ✅ Implement the Agenetes thread fork operation
@@ -351,7 +351,7 @@ This needs to cover source thread, target thread, spec derivation, and durable r
 - ✅ Reject a missing source record or an already-existing target identity.
 - ✅ Accept the complete host-compiled target spec without field-level composition.
 - ✅ Create the target handle with source durable input so the driver classifies it as a fork.
-- ✅ Persist the target record and folded turns independently without inheriting source driver-native state.
+- ✅ Persist the fresh target record without inheriting source driver-native state; source turns seed the target driver's native context and are not copied into the target Tier-2 log.
 
 ### ✅ Decide how recovery/fork interacts with `reuse-ignores-spec`
 
@@ -364,6 +364,5 @@ Restoring a broken Deployment and creating a new forked thread are similar but n
 
 - Per-driver auto-recover policy overrides; the first version has instance-level configuration only.
 - A second hard recovery limit; the first version has one safe limit plus confirm/deny.
-- Tier-1 event-tail and incomplete in-flight turn recovery; the first version uses folded turns only.
 - Opaque `driverState` in `AgentStateSnapshot`; add it only when a concrete driver needs more than `sessionId + metadata`.
 - Driver-specific native-state cloning; add it only when a concrete driver cannot use the common history model.

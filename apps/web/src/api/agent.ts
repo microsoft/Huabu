@@ -105,9 +105,8 @@ export const agentApi = {
   },
 
   /**
-   * Fork a thread's conversation onto a new thread id so a duplicated
-   * question node continues independently from the same history. Returns
-   * the (server-confirmed) new thread id. Built-in agent only.
+   * Realize a new thread from a source conversation so a duplicated question
+   * node continues independently from the same materialized history.
    */
   forkThread: async (
     threadId: string,

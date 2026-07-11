@@ -280,7 +280,8 @@ export type AgentCanvasIdQuery = z.infer<typeof agentCanvasIdQuerySchema>;
  * from the same history. The `canvasId` query selects the SOURCE canvas;
  * `targetCanvasId` (when set) lets a cross-canvas paste land the copy on
  * a different canvas. Both built-in and external agents fork from the
- * driver-agnostic durable turn log; each target driver chooses how to load it.
+ * driver-agnostic materialized source history; each target driver chooses how
+ * to load completed turns plus an optional incomplete tail projection.
  */
 export const forkThreadBodySchema = z.object({
   targetThreadId: z.string().min(1),
@@ -289,7 +290,7 @@ export const forkThreadBodySchema = z.object({
 export type ForkThreadBody = z.infer<typeof forkThreadBodySchema>;
 
 export interface ForkThreadResponse {
-  /** The new thread id the history was copied onto. */
+  /** The new thread id realized from the source history. */
   threadId: string;
   /** False when the source thread had no persisted history to copy. */
   forked: boolean;

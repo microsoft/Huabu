@@ -152,9 +152,9 @@ const agentRoutes: FastifyPluginAsync = async (
   /**
    * POST /agent/history/:threadId/fork
    *
-   * Realises a fresh target thread from the source's durable folded turns.
-   * L1 compiles the complete target spec; Agenetes validates freshness,
-   * copies durable history, and lets the target driver load it.
+   * Realises a fresh target thread from the source's materialized history.
+   * L1 compiles the complete target spec; Agenetes validates freshness and
+   * lets the target driver load completed plus optional incomplete turns.
    */
   fastify.post<{
     Params: { threadId: string };
@@ -194,8 +194,7 @@ const agentRoutes: FastifyPluginAsync = async (
 
     const sourceNamespace = canvasAcpNamespace(canvasId);
     const sourceRecord = agenetes.record(sourceNamespace, threadId);
-    const sourceTurns = agenetes.history(sourceNamespace, threadId).turns;
-    if (!sourceRecord || sourceTurns.length === 0) {
+    if (!sourceRecord) {
       return reply.send({ threadId: targetThreadId, forked: false });
     }
 
