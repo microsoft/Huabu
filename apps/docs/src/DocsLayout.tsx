@@ -1,19 +1,19 @@
 import { Link, NavLink } from 'react-router-dom';
 
+import { withBasePath } from './basePath';
 import { cn } from './components/cn';
+import { Search } from './components/Search';
 import { groups, pinnedItems, type DocsItem } from './navigation';
 
 import type { CSSProperties, ReactNode } from 'react';
 
 /**
- * Shell for every page under `/docs/*`.
+ * Shell for every page on the standalone handbook site.
  *
  * Layout:
  * - Floating sidebar pinned to the viewport on the left (logo +
  *   pinned shortcuts always visible; groups scroll below).
- * - Main content area on the right that owns its own vertical
- *   scroll — the global `<body>` has `overflow: hidden` for the
- *   canvas app, so we re-enable scroll inside the docs shell.
+ * - Main content area on the right owns the article content.
  *
  * Horizontal spacing (kept consistent across every section page):
  * - Sidebar occupies `left-4 + w-60` = 256px from the viewport's
@@ -23,8 +23,7 @@ import type { CSSProperties, ReactNode } from 'react';
  *   right padding (toc → viewport edge).
  * - Content-to-TOC gap is `4vw` (set inside `PageLayout`).
  *
- * The whole module is intentionally decoupled from the surrounding
- * web app — only Tailwind utilities and react-router are used.
+ * The module has no product-application dependency.
  */
 export function DocsLayout({ children }: { children: ReactNode }) {
   return (
@@ -75,9 +74,10 @@ function DocsSidebar() {
           to="/docs"
           className="mb-3 flex items-center gap-2 text-[15px] font-semibold text-gray-900"
         >
-          <img src="/favicon.svg" alt="" className="h-5 w-5" />
+          <img src={withBasePath('favicon.svg')} alt="" className="h-5 w-5" />
           <span>Huabu Handbook</span>
         </Link>
+        <Search />
         <ul className="space-y-0.5">
           {pinnedItems.map((item) => (
             <li key={item.to}>
@@ -112,11 +112,16 @@ function DocsSidebar() {
         </ul>
       </nav>
 
-      {/* Pinned footer — quick exit back to the app. */}
+      {/* The standalone site links to the public project, not an app route. */}
       <div className="shrink-0 border-t border-gray-100 px-4 py-3 text-[12px] text-gray-500">
-        <Link to="/" className="transition-colors hover:text-gray-900">
-          ← Back to app
-        </Link>
+        <a
+          href="https://github.com/cxxxxxn/Sediment"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="transition-colors hover:text-gray-900"
+        >
+          View project on GitHub ↗
+        </a>
       </div>
     </aside>
   );

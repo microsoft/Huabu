@@ -56,6 +56,7 @@ docs/
 | [canvas-action-log.md](./architecture/canvas-action-log.md)                     | Persistent `events.jsonl` user-action trail; consumed by the memory curator.                                       |
 | [canvas-realtime-sync.md](./architecture/canvas-realtime-sync.md)               | Multi-agent real-time sync: SSE broadcast, dirty-node conflict model, per-thread change-review card.               |
 | [credential-storage.md](./architecture/credential-storage.md)                   | Electron OS-protected credentials, utility-process bridge, migration, and standalone fallback.                     |
+| [docs-architecture.md](./architecture/docs-architecture.md)                     | Standalone user handbook, prerendering, Pagefind indexing, and GitHub Pages deployment.                            |
 | [agent-memory.md](./architecture/agent-memory.md)                               | Three-layer memory (workspace / canvas / skill); **Shipped**.                                                      |
 | [question-node.md](./architecture/question-node.md)                             | Question node: a content node that anchors a chat thread, runs the agent with its spatial neighbourhood.           |
 | [node-preprocessing.md](./architecture/node-preprocessing.md)                   | Unified 6-stage preprocessing pipeline; per-node profiles decide extract / enrich / persist.                       |
@@ -91,6 +92,8 @@ commit/PR, and either fold lasting parts into the matching
 
 Shipped or superseded proposals end up under [archive/](./archive/) so
 `grep` against `proposals/` only returns work that's actually in flight.
+
+The shipped standalone handbook plan is retained as [docs-github-pages-plan.md](./archive/docs-github-pages-plan.md).
 
 ---
 

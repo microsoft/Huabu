@@ -1,6 +1,4 @@
 // TODO: fill in real handbook content for this section.
-import { NODE_ICON } from '@/config/nodeIcons';
-
 import {
   Callout,
   CardGrid,
@@ -12,6 +10,7 @@ import {
   Table,
   type TocEntry,
 } from '../../components';
+import { NODE_ICON } from '../../config/nodeIcons';
 
 const toc: TocEntry[] = [
   { id: 'the-ten-node-types', label: 'The ten node types' },

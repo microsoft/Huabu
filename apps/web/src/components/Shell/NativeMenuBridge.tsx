@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 
 import { APP_NAME } from '../../config/app';
+import { openUserHandbook } from '../../config/handbook';
 import { useCanvasActions } from '../../hooks/useCanvasActions';
 import { getElectronBridge } from '../../hooks/useElectron';
 import { useSettingsUiStore } from '../../store/settingsUiStore';
@@ -107,7 +108,7 @@ export function NativeMenuBridge() {
           openSettings();
           break;
         case 'open-handbook':
-          window.open('/docs', '_blank', 'noopener');
+          openUserHandbook();
           break;
         case 'open-shortcuts':
           openShortcuts();

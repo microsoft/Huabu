@@ -7,6 +7,7 @@
  */
 
 import { cn } from './cn';
+import { withBasePath } from '../basePath';
 
 type DocImageProps = {
   src: string;
@@ -16,6 +17,7 @@ type DocImageProps = {
 };
 
 export function DocImage({ src, alt, caption, className }: DocImageProps) {
+  const resolvedSrc = src.startsWith('/') ? withBasePath(src) : src;
   return (
     <figure
       className={cn(
@@ -23,7 +25,7 @@ export function DocImage({ src, alt, caption, className }: DocImageProps) {
         className,
       )}
     >
-      <img src={src} alt={alt} className="block h-auto w-full" />
+      <img src={resolvedSrc} alt={alt} className="block h-auto w-full" />
       {caption && (
         <figcaption className="border-t border-gray-200 bg-gray-50 px-4 py-2 text-[12px] text-gray-600">
           {caption}

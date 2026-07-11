@@ -6,6 +6,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { SettingsPopover } from '@/components/Settings/SettingsPopover';
 
 import { APP_NAME } from '../../config/app';
+import { openUserHandbook } from '../../config/handbook';
 import { getElectronBridge } from '../../hooks/useElectron';
 import useCanvasStore from '../../store/canvasStore';
 import {
@@ -281,7 +282,7 @@ export function WindowChrome() {
           title={t('navigation.userHandbook')}
           tooltipPlacement="bottom"
           aria-label={t('navigation.openUserHandbook')}
-          onClick={() => window.open('/docs', '_blank', 'noopener')}
+          onClick={openUserHandbook}
         >
           <BookOpen />
         </Button>

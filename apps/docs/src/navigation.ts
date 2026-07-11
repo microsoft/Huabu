@@ -28,6 +28,7 @@ type RawItem = {
   /** Absolute path under `/docs`, with leading slash. */
   to: string;
   label: string;
+  description?: string;
   load: SectionLoader;
 };
 
@@ -251,6 +252,7 @@ export type DocsItem = {
   /** Absolute path including the `/docs` prefix. */
   to: string;
   label: string;
+  description: string;
   Component: ComponentType;
 };
 
@@ -263,6 +265,8 @@ function buildItem(item: RawItem): DocsItem {
   return {
     to: item.to,
     label: item.label,
+    description:
+      item.description ?? `Learn about ${item.label.toLowerCase()} in Huabu.`,
     Component: lazy(item.load),
   };
 }
@@ -290,11 +294,24 @@ const allItems: DocsItem[] = [
     label: 'Nodes',
     load: () => import('./sections/nodes/Overview'),
   }),
+  buildItem({
+    to: '/docs/nodes/content',
+    label: 'Node Content',
+    load: () => import('./sections/nodes/Content'),
+  }),
 ];
 
 const seen = new Set<string>();
 export const allRoutes: DocsItem[] = allItems.filter((item) => {
-  if (seen.has(item.to)) return false;
+  if (seen.has(item.to)) {
+    throw new Error(`Duplicate handbook route: ${item.to}`);
+  }
   seen.add(item.to);
   return true;
 });
+
+export const routeManifest = allRoutes.map(({ to, label, description }) => ({
+  path: to,
+  title: label,
+  description,
+}));

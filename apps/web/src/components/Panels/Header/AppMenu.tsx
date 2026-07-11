@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
 
+import { openUserHandbook } from '../../../config/handbook';
 import { getShortcutKeys } from '../../../config/shortcuts';
 import { useCanvasActions } from '../../../hooks/useCanvasActions';
 import { isElectron } from '../../../hooks/useElectron';
@@ -139,11 +140,7 @@ export const AppMenu: React.FC<AppMenuProps> = ({
         >
           {t('settings.title')}
         </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={runAndClose(() =>
-            window.open('/docs', '_blank', 'noopener'),
-          )}
-        >
+        <DropdownMenuItem onClick={runAndClose(openUserHandbook)}>
           {t('navigation.userHandbook')}
         </DropdownMenuItem>
         <DropdownMenuItem

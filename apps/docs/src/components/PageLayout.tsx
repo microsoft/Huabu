@@ -33,7 +33,7 @@ export function PageLayout({
     // viewport edge. The gap between the content column and the
     // sticky TOC is fixed at 4vw per the docs spacing spec.
     <div className="flex gap-x-[4vw] py-12">
-      <article className="min-w-0 flex-1 space-y-6">
+      <article data-pagefind-body className="min-w-0 flex-1 space-y-6">
         <header className="space-y-3">
           <H1>{title}</H1>
           {description && <P className="text-base">{description}</P>}

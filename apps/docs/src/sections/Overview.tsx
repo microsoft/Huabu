@@ -24,7 +24,7 @@ import { CardGrid, H2, NavCard, P } from '../components';
 
 export default function Overview() {
   return (
-    <div className="py-24">
+    <article data-pagefind-body className="py-24">
       <header className="mb-20 space-y-4 text-center">
         <h1 className="text-fg-default text-4xl font-semibold tracking-tight">
           Huabu Handbook
@@ -243,6 +243,6 @@ export default function Overview() {
           />
         </CardGrid>
       </div>
-    </div>
+    </article>
   );
 }

@@ -9,6 +9,7 @@ import { ArrowUpRight } from 'lucide-react';
 import { useRef } from 'react';
 import { Link } from 'react-router-dom';
 
+import { withBasePath } from '../basePath';
 import { cn } from './cn';
 
 import type { LucideIcon } from 'lucide-react';
@@ -72,7 +73,7 @@ export function NavCard({
     >
       {image ? (
         <img
-          src={image}
+          src={image.startsWith('/') ? withBasePath(image) : image}
           alt={imageAlt ?? title}
           className="h-full w-full object-cover transition-transform duration-500 ease-out group-hover:scale-105"
         />

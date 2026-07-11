@@ -7,8 +7,6 @@ import {
   Network,
 } from 'lucide-react';
 
-import { NODE_ICON } from '@/config/nodeIcons';
-
 import {
   Callout,
   CardGrid,
@@ -21,6 +19,7 @@ import {
   Table,
   type TocEntry,
 } from '../../components';
+import { NODE_ICON } from '../../config/nodeIcons';
 
 const toc: TocEntry[] = [
   { id: 'the-problem', label: 'The problem we are solving' },

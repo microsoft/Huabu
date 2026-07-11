@@ -1,7 +1,5 @@
 import { Fragment, useMemo } from 'react';
-import { useTranslation } from 'react-i18next';
 
-import { getKeyboardShortcutSections } from '../../../config/shortcuts';
 import {
   Callout,
   H2,
@@ -12,6 +10,7 @@ import {
   Table,
   type TocEntry,
 } from '../../components';
+import { keyboardShortcutSections } from '../../config/shortcuts';
 
 const PASTE_SECTION = {
   id: 'paste-behaviour',
@@ -86,11 +85,6 @@ function ShortcutKbd({ template }: { template: string }) {
 }
 
 export default function Shortcuts() {
-  const { t } = useTranslation();
-  const keyboardShortcutSections = useMemo(
-    () => getKeyboardShortcutSections(t),
-    [t],
-  );
   const toc = useMemo<TocEntry[]>(
     () => [
       ...keyboardShortcutSections.map((section) => ({
@@ -99,7 +93,7 @@ export default function Shortcuts() {
       })),
       { id: PASTE_SECTION.id, label: PASTE_SECTION.label },
     ],
-    [keyboardShortcutSections],
+    [],
   );
 
   return (
