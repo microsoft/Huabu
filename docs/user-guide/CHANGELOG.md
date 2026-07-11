@@ -2,23 +2,62 @@
 
 每次重要功能变更都会记录在此文件中，按时间倒序排列。
 
-## 2026-07-11 · Agent 会话回到 long-lived runtime：统一 recovery、fork 与未完成历史
+## 2026-07-11 · 内置 Agent 切换到长期运行的 pi-driver Deployment
 
 **What Changed**
 
-本次把内置 agent 从「每轮重新创建并拼接历史」的临时多轮方案，迁回由 Agenetes 管理的长期会话模型，并让 recovery 与 fork 成为所有 driver 共享的标准生命周期能力：
-
-1. **内置 chat 改为标准 pi-driver Deployment**——`ask` / `operate` 不再每轮重建 agent；同一 `threadId` 复用一个 live `PiAgentHandle`，直接延续 pi-agent-core 的原生 conversation state。system prompt 变化通过 `set_context` 同步，当前 model 在每轮边界重新解析，普通多轮对话不再依赖 replay。
-2. **Recovery 完全下沉到 Agenetes / driver**——host route 不再读取历史并重建 backend context。Agenetes 在 cold start 时把 source record 与 materialized history 交给 driver：pi-driver 通过 native `initialState.messages` 注入一条 synthetic JSONL history；ACP 优先恢复原生 session，仅在收到结构化 `session_resume_unavailable` 时创建新 session 并回退到 history load。自动 recovery 受统一的 size budget 与 confirm/deny policy 约束。
-3. **Thread fork 成为跨 driver 标准能力**——复制 Question 节点时，Agenetes 以完整 target spec 创建新 thread，并把 source materialized history交给目标 driver；pi 与 ACP 都能从相同历史独立继续，跨 canvas copy/paste 同样适用。fork 不继承 source sessionId，也不把 source turns 复制进 target Tier-2 log。
-4. **未完成 turn 不再在 recovery / fork 时整段丢失**——Tier-1 日志在 `run(request, ...)` 开始时追加内部 `turn_start(request)`，随后记录 streamed events。`history({ withTail: true })` 会在读取时把尚未 checkpoint 的 request + event prefix 投影成最后一条 `ObservedAgentTurn { isIncomplete: true }`；projection 不落入 Tier-2，默认 `history()` 与持续实时 `tail()` 的行为保持不变。
-5. **Driver realization contract 收敛**——Agenetes 内置标准 `pi` / `acp` factories，Huabu composition root 直接注册标准 factory；driver contract 聚焦 `create(...)`，capabilities 归 realization 后的 `AgentHandle`，runtime API 使用语义更准确的 `getOrCreate(...)`。调试 prompt 的 `TURN N` 改从 lightweight `logMetadata().turnCount` 获取，不再为编号加载整段历史。
+`ask` / `operate` 从「每轮重新创建 agent 并拼接历史」的临时多轮方案，迁移到标准 `@agenetes/pi-driver` Deployment：同一 `threadId` 复用一个 live `PiAgentHandle`，直接延续 pi-agent-core 的原生 conversation state，普通多轮对话不再依赖 replay。
 
 **Notes**
 
-- 本条完成 issue [#285](https://github.com/hai-team/Sediment/issues/285)（all-agent thread fork）与 [#295](https://github.com/hai-team/Sediment/issues/295)（Agenetes-managed recovery）的代码目标。
-- Recovery 是 live handle 缺失时的 lifecycle fallback，不会重新引入普通会话的 per-turn replay。ACP native resume 优先；history load 只在 native resume 明确不可用时发生。
-- `withTail` 是调用时刻的 snapshot projection，不是 watch/event pipe；页面断线重连继续使用独立的 `Agenetes.tail()`。
+- system prompt 变化通过 `set_context` 同步到现有 handle；当前 model 在每轮边界重新解析。
+- Recovery 仍可在 live handle 丢失时重建上下文，但不再污染正常 turn 的执行路径。
+- 运行时细节见 [agent-architecture.md](../architecture/agent-architecture.md)。
+
+## 2026-07-11 · Recovery 下沉到 Agenetes：driver 自己恢复 backend context
+
+**What Changed**
+
+host route 不再读取历史并重建 backend-native context。Agenetes 在 cold start 时把 source record 与 materialized history 交给 driver：pi-driver 通过 native `initialState.messages` 注入一条 synthetic JSONL history；ACP 优先恢复原生 session，仅在收到结构化 `session_resume_unavailable` 时创建新 session 并回退到 history load。
+
+**Notes**
+
+- 自动 recovery 受统一的 size budget 与 confirm/deny policy 约束。
+- Recovery 是 live handle 缺失时的 lifecycle fallback，不会重新引入普通会话的 per-turn replay。
+- 本条完成 issue [#295](https://github.com/hai-team/Sediment/issues/295)。
+
+## 2026-07-11 · Thread fork 成为所有 Agent 的标准生命周期能力
+
+**What Changed**
+
+复制 Question 节点时，Agenetes 以完整 target spec 创建新 thread，并把 source materialized history 交给目标 driver；pi 与 ACP 都能从相同历史独立继续，跨 canvas copy/paste 同样适用。
+
+**Notes**
+
+- fork 不继承 source `sessionId`，也不把 source turns 复制进 target Tier-2 log；source history 只用于 seed 目标 driver 的 native context。
+- target spec 由 host 完整编译，Agenetes 不做字段级 merge。
+- 本条完成 issue [#285](https://github.com/hai-team/Sediment/issues/285)。
+
+## 2026-07-11 · 未完成 turn 可作为 history snapshot 参与 recovery 与 fork
+
+**What Changed**
+
+Tier-1 日志现在会在 `run(request, ...)` 开始时追加内部 `turn_start(request)`，随后记录 streamed events。`history({ withTail: true })` 在读取时把尚未 checkpoint 的 request + event prefix 投影成最后一条 `ObservedAgentTurn { isIncomplete: true }`，避免包含大量 messages / internal turns 的在飞 turn 在 recovery 或 fork 时整段丢失。
+
+**Notes**
+
+- projection 只在读取时生成，不写入 Tier-2，也不改变 logging store state。
+- 默认 `history()` 行为不变；`withTail` 是调用时刻的 snapshot projection，不是 watch/event pipe。
+- 页面断线重连继续使用独立的 `Agenetes.tail()`。
+
+## 2026-07-11 · Agenetes driver realization contract 收敛
+
+**What Changed**
+
+Agenetes 现在内置标准 `pi` / `acp` factories，Huabu composition root 直接注册标准 factory；driver contract 聚焦 `create(...)`，capabilities 归 realization 后的 `AgentHandle`，runtime API 使用语义更准确的 `getOrCreate(...)`。调试 prompt 的 `TURN N` 改从 lightweight `logMetadata().turnCount` 获取，不再为编号加载整段历史。
+
+**Notes**
+
 - ACP capabilities 目前仍是固定声明；根据初始化 session 动态推导 capabilities 已单独记录为低优先级 issue [#296](https://github.com/hai-team/Sediment/issues/296)。
 - 设计 source of truth：[external/agenetes/README.md](../../external/agenetes/README.md) 的 Driver Invariants 与 I9.8–I9.9；实现/里程碑记录见 [agenetes-thread-rehydration-and-forking.md](../proposals/agenetes-thread-rehydration-and-forking.md)。
 
