@@ -269,17 +269,19 @@ Add a portable text-only member to `WorkloadSpec`:
 
 ```ts
 interface WorkloadSpec {
-  readonly initialPreamble?: string;
+  readonly initialPreamble?: readonly string[];
 }
 ```
 
-`initialPreamble` is not a backend-native system-role message. Its contract is to be concatenated with the first ordinary canonical input accepted by the handle.
+`initialPreamble` is an ordered list of portable text fragments, not backend-native system-role messages and not multiple user messages. The handle joins the fragments with `\n\n` and prepends the resulting text to the first ordinary canonical input.
+
+The array form lets the host compose independently owned sections such as agent identity, tool policy, and canvas-access guidance without requiring every caller to rebuild one monolithic string. An empty or absent array means no preamble.
 
 The handle tracks delivery independently from native session message count:
 
 ```ts
 class AgentHandle {
-  private preamblePending = this.spec.initialPreamble !== undefined;
+  private preamblePending = (this.spec.initialPreamble?.length ?? 0) > 0;
 }
 ```
 
@@ -287,8 +289,9 @@ After resolving submission inputs, the handle prepends to the first non-command 
 
 ```ts
 const inputs = resolveAgentInputs(submission);
+const preamble = this.spec.initialPreamble?.join('\n\n') ?? '';
 const effectiveInputs = this.preamblePending
-  ? prependToFirstOrdinaryInput(this.spec.initialPreamble, inputs)
+  ? prependToFirstOrdinaryInput(preamble, inputs)
   : inputs;
 
 const result = await this.runInputs(effectiveInputs, ctx);
@@ -403,7 +406,7 @@ Backend-native input is never persisted. Base64 inside canonical `AgentInputPart
 
 ### Stage 4: Preamble lifecycle
 
-1. Add text-only `initialPreamble` to the shared workload contract.
+1. Add ordered text-fragment `initialPreamble` to the shared workload contract.
 2. Move ACP's first-message preamble and delivered flag into the handle.
 3. Make command-only sequences defer preamble delivery.
 4. Restore delivered state during native session resume.
@@ -422,12 +425,13 @@ The implementation must cover:
 7. Text and image parts lower equivalently to current pi and ACP payloads.
 8. Rendering failure before `run()` creates no turn; execution failure after `run()` starts leaves an incomplete turn containing the submission.
 9. An ordinary first input receives the initial preamble exactly once.
-10. A failed ordinary submission does not consume the pending preamble.
-11. Command-only input remains first and does not consume the pending preamble.
-12. Recovery and fork use stored `rendered` inputs without host rendering.
-13. Target preamble policy is applied independently from stored inputs.
-14. Inline base64 image parts round-trip without storage optimization.
-15. ACP namespace/session isolation and reachback remain independent of rendering.
+10. Multiple preamble fragments join in order with one blank line between fragments.
+11. A failed ordinary submission does not consume the pending preamble.
+12. Command-only input remains first and does not consume the pending preamble.
+13. Recovery and fork use stored `rendered` inputs without host rendering.
+14. Target preamble policy is applied independently from stored inputs.
+15. Inline base64 image parts round-trip without storage optimization.
+16. ACP namespace/session isolation and reachback remain independent of rendering.
 
 ## 15. Expected code entry points
 
@@ -435,7 +439,7 @@ The implementation must cover:
 | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
 | [`external/agenetes/packages/protocol/src/request.ts`](../../external/agenetes/packages/protocol/src/request.ts)                               | `AgentSubmission`, `AgentInput`, fallback normalization |
 | [`external/agenetes/packages/protocol/src/turn.ts`](../../external/agenetes/packages/protocol/src/turn.ts)                                     | Durable submission on each folded turn                  |
-| [`external/agenetes/packages/protocol/src/workload.ts`](../../external/agenetes/packages/protocol/src/workload.ts)                             | Portable text `initialPreamble`                         |
+| [`external/agenetes/packages/protocol/src/workload.ts`](../../external/agenetes/packages/protocol/src/workload.ts)                             | Ordered portable text-fragment `initialPreamble`        |
 | [`external/agenetes/packages/runtime/src/handle.ts`](../../external/agenetes/packages/runtime/src/handle.ts)                                   | `run(submission, ctx)` execution seam                   |
 | [`external/agenetes/packages/pi-driver/src/handle.ts`](../../external/agenetes/packages/pi-driver/src/handle.ts)                               | Preamble policy and pi sequence lowering                |
 | [`external/agenetes/packages/acp-driver/src/handle.ts`](../../external/agenetes/packages/acp-driver/src/handle.ts)                             | Preamble/command policy and ACP sequence lowering       |
