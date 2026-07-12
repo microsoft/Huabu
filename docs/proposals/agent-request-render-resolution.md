@@ -30,7 +30,7 @@ other content  -> one JSON AgentTextInput
 
 An explicitly present empty array means zero inputs and must not trigger fallback.
 
-Huabu normally supplies `rendered` using one pre-registered `ChatEnvelope -> AgentInput[]` renderer shared by internal and external agents. `AgentHandle.run()` receives the complete submission and never receives a render function.
+Huabu supplies `rendered` through stable host renderers before calling the handle. The behavior-preserving migration may keep separate internal and external adapters that both produce `AgentInput[]`; converging them into one `ChatEnvelope -> AgentInput[]` renderer is a final best-effort cleanup rather than a prerequisite. `AgentHandle.run()` receives the complete submission and never receives a render function.
 
 The complete submission is persisted in the existing `request` position in Tier 1 and Tier 2. Recovery and fork consume stored `rendered` inputs when available and use the same generic content fallback when they are absent.
 
@@ -62,7 +62,7 @@ Consequences include:
 
 1. Preserve the existing `{ type, content }` source shape and outer logging format.
 2. Add an optional ordered canonical input sequence to the same submission.
-3. Let internal and external Huabu agents use one pre-registered renderer.
+3. Give internal and external Huabu agents the same canonical `AgentInput[]` output contract, enabling a later shared renderer.
 4. Remove renderer functions and backend-native rendered generics from `run()`.
 5. Let recovery and fork consume durable canonical inputs without re-rendering new turns.
 6. Give submissions without `rendered` a universal text fallback.
@@ -216,9 +216,18 @@ The existing `defineRequest()` / `composeRequest()` helpers are unnecessary for 
 
 If host rendering fails, no submission reaches `run()` and no Tier-1 turn starts. If the caller wants the generic fallback instead, it omits `rendered`.
 
-## 7. One renderer for internal and external Huabu chat
+## 7. Optional convergence to one Huabu renderer
 
-Both routes already build the same `ChatEnvelope`, and both already delegate most prompt composition to the same `renderTurn()` function. The target model removes the per-backend render closure:
+Both routes already build the same `ChatEnvelope`, and both already delegate most prompt composition to the same `renderTurn()` function. The initial migration should retain two stable host adapters so it does not need to solve every wording and command difference at the same time as the protocol boundary:
+
+```text
+internal: ChatEnvelope -> renderTurn(INTERNAL_PROFILE) -> AgentInput[]
+external: ChatEnvelope -> renderTurn(ACP_PROFILE)      -> AgentInput[]
+```
+
+These adapters are selected before `run()` and are not passed as per-turn functions. Their outputs share the same durable canonical type, so logging, recovery, fork, handle policy, and driver lowering are already unified.
+
+After parity is established, a best-effort cleanup may converge them:
 
 ```text
 ChatEnvelope
@@ -229,7 +238,7 @@ ChatEnvelope
        `-> ACP lowerInputs() -> ACP content blocks
 ```
 
-`renderChatEnvelope()` performs slash-command recognition once:
+The eventual shared `renderChatEnvelope()` performs slash-command recognition once:
 
 ```ts
 async function renderChatEnvelope(
@@ -257,7 +266,9 @@ async function renderChatEnvelope(
 
 The renderer may return multiple `AgentInput` members when one UI envelope needs multiple user-message boundaries.
 
-The current internal/reachback profile wording must either become neutral request wording or move into the portable initial preamble that describes the available tool surface. Driver lowering must remain mechanical and must not select Huabu prompt wording.
+Convergence requires the current internal/reachback profile wording to become neutral request wording or move into the portable initial preamble that describes the available tool surface. Driver lowering must remain mechanical and must not select Huabu prompt wording.
+
+Failure to converge the two host adapters does not compromise the new protocol boundary. It leaves a small host-level rendering variation while preserving all submission and lifecycle invariants.
 
 `ChatEnvelope` should carry the `canvasId` already known by `buildChatEnvelope()` so attachment resolution does not rely on a per-turn closure.
 
@@ -388,13 +399,14 @@ Backend-native input is never persisted. Base64 inside canonical `AgentInputPart
 4. Remove `defineRequest()` / `composeRequest()` and their conformance-only tests.
 5. Extend `AgentTurn.request` to the submission schema with optional `rendered`.
 
-### Stage 2: Shared Huabu renderer
+### Stage 2: Behavior-preserving Huabu adapters
 
 1. Promote server-local `ContentPart` to `AgentInputPart`.
 2. Add `canvasId` to newly built `ChatEnvelope`s.
-3. Consolidate internal/ACP request wording into one `renderChatEnvelope()` policy.
-4. Emit `AgentCommandInput` for leading slash commands.
-5. Construct complete submissions before calling either driver.
+3. Adapt `INTERNAL_PROFILE` output to canonical `AgentInput[]`.
+4. Adapt `ACP_PROFILE` / `ACP_SLASH_PROFILE` output to canonical `AgentInput[]`.
+5. Emit `AgentCommandInput` for leading slash commands.
+6. Construct complete submissions before calling either driver.
 
 ### Stage 3: Handle and driver boundary
 
@@ -412,6 +424,12 @@ Backend-native input is never persisted. Base64 inside canonical `AgentInputPart
 4. Restore delivered state during native session resume.
 5. Remove `binding.alias`, logger, `includeSystem`, and captured `canvasId` from ACP request rendering.
 
+### Stage 5: Best-effort renderer convergence
+
+1. Compare internal and external canonical inputs for equivalent envelopes.
+2. Neutralize or relocate tool-surface-specific wording.
+3. Replace the two stable adapters with one `renderChatEnvelope()` only when prompt and attachment parity is demonstrated.
+
 ## 14. Validation
 
 The implementation must cover:
@@ -420,7 +438,7 @@ The implementation must cover:
 2. New records preserve `type`, `content`, and ordered `rendered` inputs unchanged.
 3. Missing `rendered` uses verbatim string content or one JSON text input.
 4. `rendered: []` does not trigger fallback.
-5. Internal and external chat invoke the same `renderChatEnvelope()` function.
+5. Internal and external adapters both produce valid ordered `AgentInput[]`.
 6. One envelope may render into multiple ordered canonical messages.
 7. Text and image parts lower equivalently to current pi and ACP payloads.
 8. Rendering failure before `run()` creates no turn; execution failure after `run()` starts leaves an incomplete turn containing the submission.
@@ -432,6 +450,7 @@ The implementation must cover:
 14. Target preamble policy is applied independently from stored inputs.
 15. Inline base64 image parts round-trip without storage optimization.
 16. ACP namespace/session isolation and reachback remain independent of rendering.
+17. If renderer convergence is performed, parity tests prove equivalent prompt and attachment behavior before deleting either adapter.
 
 ## 15. Expected code entry points
 
@@ -447,6 +466,6 @@ The implementation must cover:
 | [`external/agenetes/packages/agenetes/src/event-log.ts`](../../external/agenetes/packages/agenetes/src/event-log.ts)                           | Tier-1 `turn_start` submission persistence              |
 | [`external/agenetes/packages/agenetes/src/materialize-history.ts`](../../external/agenetes/packages/agenetes/src/materialize-history.ts)       | Complete and incomplete turn materialization            |
 | [`apps/server/src/modules/agent/conversation/envelope.ts`](../../apps/server/src/modules/agent/conversation/envelope.ts)                       | Huabu source content including `canvasId`               |
-| [`apps/server/src/modules/agent/conversation/prompt/build-prompt.ts`](../../apps/server/src/modules/agent/conversation/prompt/build-prompt.ts) | Shared `ChatEnvelope -> AgentInput[]` renderer          |
+| [`apps/server/src/modules/agent/conversation/prompt/build-prompt.ts`](../../apps/server/src/modules/agent/conversation/prompt/build-prompt.ts) | Canonical adapters and eventual shared renderer         |
 | [`apps/server/src/modules/agent/agent.service.ts`](../../apps/server/src/modules/agent/agent.service.ts)                                       | Internal submission construction                        |
 | [`apps/server/src/modules/agent/acp/service.ts`](../../apps/server/src/modules/agent/acp/service.ts)                                           | External submission construction                        |
