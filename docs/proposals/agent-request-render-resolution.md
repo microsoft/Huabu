@@ -11,9 +11,9 @@ Separate the durable semantic request from the clean input consumed by an agent 
 `AgentHandle.run()` receives an `AgentSubmission` containing both representations:
 
 ```ts
-type AgentSubmission<TRequest extends AgentRequest = AgentRequest> =
+type AgentSubmission<TSourceRequest = unknown> =
   | {
-      readonly sourceRequest: TRequest;
+      readonly sourceRequest: TSourceRequest;
       readonly agentInputs: readonly AgentInput[];
     }
   | {
@@ -24,7 +24,7 @@ type AgentSubmission<TRequest extends AgentRequest = AgentRequest> =
 
 `sourceRequest` is the structured, JSON-serializable source used by host history and projections. `agentInputs` is the ordered, already-rendered, driver-agnostic message sequence used to reconstruct backend context during recovery and fork and sent onward to the pi or ACP harness. One UI request may render into zero, one, or many agent messages.
 
-Request rendering happens before `run()` through a host-composed registry keyed by `sourceRequest.type`. The registry is created once; callers do not pass a render function on every turn. `run()` does not resolve or invoke renderers.
+Request rendering happens before `run()` through a host-composed renderer. Huabu chooses a discriminated registry keyed by `sourceRequest.type`, but the generic submission and handle contracts do not require that shape. The renderer is created once; callers do not pass a render function on every turn. `run()` does not resolve or invoke renderers.
 
 The handle may prepend a portable text `initialPreamble` from `WorkloadSpec` to the first ordinary message. A command is a distinct `AgentInput` member, allowing the handle to preserve a leading slash command and defer the preamble until the next ordinary message.
 
@@ -36,7 +36,7 @@ The current `AgentHandle.run(request, render, ctx)` seam combines two different 
 
 ```text
 L1 -> L2
-AgentRequest / ChatEnvelope
+TSourceRequest / ChatEnvelope
 durable semantic source for logs and lifecycle operations
 
 L2 -> harness
@@ -50,7 +50,7 @@ Consequences include:
 
 1. Every upper-layer turn passes a renderer even when request semantics are stable.
 2. Backend-native rendered types leak into the generic handle signature.
-3. Drivers see host request variants such as `huabu.chat`.
+3. Drivers see host source-request variants such as `huabu.chat`.
 4. `AgentTurnState` crosses back into host rendering to support backend lifecycle details such as ACP's one-shot preamble.
 5. The ownership of raw request data, prompt composition, session state, and native lowering is difficult to explain independently.
 
@@ -82,9 +82,18 @@ This proposal does not optimize the storage size of base64 image parts. Replacin
 
 ## 5. Boundary contracts
 
-### 5.1 `AgentRequest`: durable semantic source
+### 5.1 `TSourceRequest`: generic durable semantic source
 
-`AgentRequest` remains the driver-agnostic discriminated request union:
+The control plane treats the source request as an unconstrained generic:
+
+```ts
+type AgentSubmission<TSourceRequest = unknown> = ...;
+type AgentTurn<TSourceRequest = unknown> = ...;
+```
+
+The handle and durable store do not require `{ type, content }`. The host binds `TSourceRequest` to its own structured, JSON-serializable type and validates it before submission.
+
+Huabu currently binds the generic to its discriminated request union:
 
 ```ts
 interface HuabuChatRequest {
@@ -93,9 +102,9 @@ interface HuabuChatRequest {
 }
 ```
 
-It is plain serializable data and remains the source-request value stored in `turn_start` and `AgentTurn.request`.
+That Huabu value is plain serializable data and remains the source-request value stored in `turn_start` and the generic `AgentTurn<TSourceRequest>`.
 
-The host may add request variants without changing drivers. Drivers never dispatch on `AgentRequest.type`.
+The existing protocol `AgentRequest` base and `defineRequest()` / `composeRequest()` remain optional helpers for hosts that want `{ type, content }` dispatch. They must not constrain `AgentSubmission`, `AgentHandle`, logging, history, recovery, or fork. Drivers never dispatch on the host source type.
 
 ### 5.2 `AgentInput`: clean harness input
 
@@ -143,9 +152,9 @@ The current server-local `ContentPart[]` already matches the text/image portion 
 `AgentSubmission` pairs the two boundary values without treating either as the other:
 
 ```ts
-export type AgentSubmission<TRequest extends AgentRequest = AgentRequest> =
+export type AgentSubmission<TSourceRequest = unknown> =
   | {
-      readonly sourceRequest: TRequest;
+      readonly sourceRequest: TSourceRequest;
       readonly agentInputs: readonly AgentInput[];
     }
   | {
@@ -175,8 +184,8 @@ const requestRenderers = composeRequest([
 The renderer is independent of handle and session state:
 
 ```ts
-type AgentInputRenderer<TRequest> = (
-  request: TRequest,
+type AgentInputRenderer<TSourceRequest> = (
+  sourceRequest: TSourceRequest,
 ) => readonly AgentInput[] | Promise<readonly AgentInput[]>;
 ```
 
@@ -202,11 +211,11 @@ No function is passed to `run()`. An exceptional caller overrides rendering by c
 An unknown or unregistered request variant uses a default renderer:
 
 ```ts
-function renderRequestAsJson(request: AgentRequest): readonly AgentInput[] {
+function renderRequestAsJson(sourceRequest: unknown): readonly AgentInput[] {
   return [
     {
       type: 'text',
-      text: JSON.stringify(request),
+      text: JSON.stringify(sourceRequest),
     },
   ];
 }
@@ -369,7 +378,7 @@ beginTurn(sourceRequest, agentInputs)
   -> driver lowering
   -> execute harness
   -> append and fold AgentStreamEvents
-  -> append AgentTurn { request: sourceRequest, agentInputs, transcript, meta }
+  -> append AgentTurn { sourceRequest, agentInputs, transcript, meta }
 ```
 
 Tier 1 stores both `sourceRequest` and ordered `agentInputs` in `turn_start`; Tier 2 stores both in the folded `AgentTurn`. The preamble-composed effective sequence and backend-native messages are not persisted because the workload spec supplies the target preamble and each driver can lower canonical input again.
@@ -447,19 +456,19 @@ The implementation must cover:
 
 ## 15. Expected code entry points
 
-| File                                                                                                                                           | Responsibility                                                       |
-| ---------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| [`external/agenetes/packages/protocol/src/request.ts`](../../external/agenetes/packages/protocol/src/request.ts)                               | `AgentRequest`, `AgentInput`, `AgentSubmission`, request composition |
-| [`external/agenetes/packages/protocol/src/turn.ts`](../../external/agenetes/packages/protocol/src/turn.ts)                                     | Durable ordered `agentInputs` on each folded turn                    |
-| [`external/agenetes/packages/protocol/src/workload.ts`](../../external/agenetes/packages/protocol/src/workload.ts)                             | Portable text `initialPreamble`                                      |
-| [`external/agenetes/packages/runtime/src/handle.ts`](../../external/agenetes/packages/runtime/src/handle.ts)                                   | `run(submission, ctx)` execution seam                                |
-| [`external/agenetes/packages/pi-driver/src/handle.ts`](../../external/agenetes/packages/pi-driver/src/handle.ts)                               | Preamble policy and pi lowering                                      |
-| [`external/agenetes/packages/acp-driver/src/handle.ts`](../../external/agenetes/packages/acp-driver/src/handle.ts)                             | Preamble/command policy and ACP lowering                             |
-| [`external/agenetes/packages/agenetes/src/instance.ts`](../../external/agenetes/packages/agenetes/src/instance.ts)                             | Logging decoration over both submission fields                       |
-| [`external/agenetes/packages/agenetes/src/event-log.ts`](../../external/agenetes/packages/agenetes/src/event-log.ts)                           | Tier-1 `turn_start` persistence for both submission fields           |
-| [`external/agenetes/packages/agenetes/src/materialize-history.ts`](../../external/agenetes/packages/agenetes/src/materialize-history.ts)       | Complete and incomplete turn materialization with `agentInputs`      |
-| [`apps/server/src/modules/agent/conversation/envelope.ts`](../../apps/server/src/modules/agent/conversation/envelope.ts)                       | Self-contained Huabu source request including `canvasId`             |
-| [`apps/server/src/modules/agent/conversation/prompt/build-prompt.ts`](../../apps/server/src/modules/agent/conversation/prompt/build-prompt.ts) | Shared `huabu.chat` renderer                                         |
-| [`apps/server/src/modules/agent/agenetes/drivers.ts`](../../apps/server/src/modules/agent/agenetes/drivers.ts)                                 | Renderer registration and driver composition                         |
-| [`apps/server/src/modules/agent/agent.service.ts`](../../apps/server/src/modules/agent/agent.service.ts)                                       | Internal submission construction                                     |
-| [`apps/server/src/modules/agent/acp/service.ts`](../../apps/server/src/modules/agent/acp/service.ts)                                           | External submission construction                                     |
+| File                                                                                                                                           | Responsibility                                                        |
+| ---------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| [`external/agenetes/packages/protocol/src/request.ts`](../../external/agenetes/packages/protocol/src/request.ts)                               | `AgentInput`, generic `AgentSubmission`, optional request composition |
+| [`external/agenetes/packages/protocol/src/turn.ts`](../../external/agenetes/packages/protocol/src/turn.ts)                                     | Durable ordered `agentInputs` on each folded turn                     |
+| [`external/agenetes/packages/protocol/src/workload.ts`](../../external/agenetes/packages/protocol/src/workload.ts)                             | Portable text `initialPreamble`                                       |
+| [`external/agenetes/packages/runtime/src/handle.ts`](../../external/agenetes/packages/runtime/src/handle.ts)                                   | `run(submission, ctx)` execution seam                                 |
+| [`external/agenetes/packages/pi-driver/src/handle.ts`](../../external/agenetes/packages/pi-driver/src/handle.ts)                               | Preamble policy and pi lowering                                       |
+| [`external/agenetes/packages/acp-driver/src/handle.ts`](../../external/agenetes/packages/acp-driver/src/handle.ts)                             | Preamble/command policy and ACP lowering                              |
+| [`external/agenetes/packages/agenetes/src/instance.ts`](../../external/agenetes/packages/agenetes/src/instance.ts)                             | Logging decoration over both submission fields                        |
+| [`external/agenetes/packages/agenetes/src/event-log.ts`](../../external/agenetes/packages/agenetes/src/event-log.ts)                           | Tier-1 `turn_start` persistence for both submission fields            |
+| [`external/agenetes/packages/agenetes/src/materialize-history.ts`](../../external/agenetes/packages/agenetes/src/materialize-history.ts)       | Complete and incomplete turn materialization with `agentInputs`       |
+| [`apps/server/src/modules/agent/conversation/envelope.ts`](../../apps/server/src/modules/agent/conversation/envelope.ts)                       | Self-contained Huabu source request including `canvasId`              |
+| [`apps/server/src/modules/agent/conversation/prompt/build-prompt.ts`](../../apps/server/src/modules/agent/conversation/prompt/build-prompt.ts) | Shared `huabu.chat` renderer                                          |
+| [`apps/server/src/modules/agent/agenetes/drivers.ts`](../../apps/server/src/modules/agent/agenetes/drivers.ts)                                 | Renderer registration and driver composition                          |
+| [`apps/server/src/modules/agent/agent.service.ts`](../../apps/server/src/modules/agent/agent.service.ts)                                       | Internal submission construction                                      |
+| [`apps/server/src/modules/agent/acp/service.ts`](../../apps/server/src/modules/agent/acp/service.ts)                                           | External submission construction                                      |
