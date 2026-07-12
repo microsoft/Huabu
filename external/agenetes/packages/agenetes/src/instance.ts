@@ -13,10 +13,7 @@
 // never on the instance (I9.2), so the host composes them off the handle
 // `create` / `get` return.
 
-import {
-  AGENT_STREAM_EVENTS,
-  agentRequestBaseSchema,
-} from '@agenetes/protocol';
+import { AGENT_STREAM_EVENTS, agentSubmissionSchema } from '@agenetes/protocol';
 
 import {
   EventLog,
@@ -37,7 +34,7 @@ import { InMemoryTurnStore, type TurnStore } from './turn-store.js';
 
 import type {
   AgentMetadata,
-  AgentRequest,
+  AgentSubmission,
   AgentStateSnapshot,
   AgentStreamEvent,
   AgentTurn,
@@ -185,16 +182,13 @@ const TERMINAL_EVENT_TYPES = new Set<string>([
 ]);
 
 /**
- * Coerce a `run(request, …)` argument into the persisted, driver-agnostic
- * {@link AgentRequest} for a folded turn. A logged handle binds `TRequest`
- * to `AgentRequest` (README I8/I9.8 convention), so this normally validates
- * as-is; a `null` request (a resume turn) persists as `null`; anything that
- * does not match the contract degrades to `null` (tolerant — the driver
- * owns returning the protocol shape, the log never throws on it).
+ * Coerce a run argument into the persisted driver-agnostic
+ * {@link AgentSubmission}. A null submission persists as a resume turn;
+ * malformed values degrade to null so logging cannot break execution.
  */
-function coerceRequest(request: unknown): AgentRequest | null {
+function coerceSubmission(request: unknown): AgentSubmission | null {
   if (request == null) return null;
-  const parsed = agentRequestBaseSchema.safeParse(request);
+  const parsed = agentSubmissionSchema.safeParse(request);
   return parsed.success ? parsed.data : null;
 }
 
@@ -413,23 +407,21 @@ export function createAgenetesInstance<
       get(target, prop) {
         if (prop === 'run') {
           return (
-            request: unknown,
-            render: unknown,
+            submission: unknown,
             ctx: unknown,
           ): AsyncGenerator<AgentStreamEvent, unknown> => {
             const start = eventLog.beginTurn(
               namespace,
               threadId,
-              coerceRequest(request),
+              coerceSubmission(submission),
             );
             return loggingRun(
               (
                 target.run as (
-                  r: unknown,
-                  rn: unknown,
+                  s: unknown,
                   c: unknown,
                 ) => AsyncGenerator<AgentStreamEvent, unknown>
-              )(request, render, ctx),
+              )(submission, ctx),
               start,
             );
           };

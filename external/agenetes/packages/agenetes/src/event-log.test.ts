@@ -23,7 +23,7 @@ import {
 } from './index.js';
 
 import type {
-  AgentRequest,
+  AgentSubmission,
   AgentStreamEvent,
   Namespace,
 } from '@agenetes/protocol';
@@ -47,7 +47,11 @@ const text = (content: string): AgentStreamEvent => ({
   type: 'text_delta',
   data: { content },
 });
-const request: AgentRequest = { type: 'user_text', content: 'hello' };
+const request: AgentSubmission = {
+  type: 'user_text',
+  content: 'hello',
+  rendered: [{ type: 'text', text: 'hello' }],
+};
 
 const eventFilePath = (namespace: Namespace, threadId: string): string =>
   path.join(namespace.storage!.root!, 'chat_v2', `${threadId}.events.jsonl`);

@@ -1,6 +1,6 @@
 // The `ControlMsg` contract — the L1->L2->agent CONTROL plane: the
 // host-to-agent operations that steer a live session (as opposed to the
-// per-turn `AgentRequest` data plane and the agent-to-host
+// per-turn `AgentSubmission` data plane and the agent-to-host
 // `AgentStreamEvent` notification stream). See
 // docs/proposals/layered-architecture.md §3.6.2.
 //

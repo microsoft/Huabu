@@ -74,15 +74,9 @@ const done = (message: string): AgentStreamEvent => ({
 });
 const end = (): AgentStreamEvent => ({ type: 'end', data: {} });
 
-const noopRender = (r: unknown): unknown => r;
-
 /** Fully drive a run() to completion (folds a Tier-2 turn). */
 async function drain(handle: AgentHandle, request: unknown): Promise<void> {
-  for await (const _ of handle.run(
-    request as never,
-    noopRender as never,
-    {} as never,
-  )) {
+  for await (const _ of handle.run(request as never, {} as never)) {
     // discard — the fold happens on the generator's return
   }
 }
@@ -151,7 +145,6 @@ describe('Agenetes two-tier conversation log (M5.6/C3)', () => {
     });
     const gen = handle.run(
       { type: 'user_text', content: 'q2' } as never,
-      noopRender as never,
       {} as never,
     );
     expect(inst.history(ns, threadId, { withTail: true }).turns[1]).toEqual({
@@ -200,7 +193,6 @@ describe('Agenetes two-tier conversation log (M5.6/C3)', () => {
     });
     const gen = handle.run(
       { type: 'user_text', content: 'q2' } as never,
-      noopRender as never,
       {} as never,
     );
     await gen.next(); // text x
@@ -227,7 +219,6 @@ describe('Agenetes two-tier conversation log (M5.6/C3)', () => {
     });
     const gen = handle.run(
       { type: 'user_text', content: 'q' } as never,
-      noopRender as never,
       {} as never,
     );
     await gen.next(); // yields + appends `live` → wakes the parked tail

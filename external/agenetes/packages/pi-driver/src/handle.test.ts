@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { resolvePiInitialMessages } from './handle.js';
+import {
+  lowerPiInputs,
+  resolvePiInitialMessages,
+  resolvePiSystemPrompt,
+} from './handle.js';
 
 import type { PiWorkloadSpec } from './types.js';
 import type { AgentTurn } from '@agenetes/protocol';
@@ -67,8 +71,50 @@ describe('pi durable history seed', () => {
     });
     expect(messages).toHaveLength(1);
     expect(messages[0]).toMatchObject({ role: 'user' });
-    expect(messages[0]?.content).toContain(JSON.stringify(foldedTurn));
+    expect(messages[0]?.content).toContain(
+      '"rendered":[{"type":"text","text":"hello"}]',
+    );
     expect(messages[0]?.content).not.toContain('legacy seed');
+  });
+
+  describe('pi canonical input lowering', () => {
+    it('preserves multiple input members in one atomic prompt payload', () => {
+      expect(
+        lowerPiInputs([
+          { type: 'text', text: 'first' },
+          {
+            type: 'parts',
+            parts: [
+              { type: 'text', text: 'second' },
+              { type: 'image', data: 'aGVsbG8=', mimeType: 'image/png' },
+            ],
+          },
+        ]),
+      ).toMatchObject([
+        { role: 'user', content: 'first' },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'second' },
+            { type: 'image', data: 'aGVsbG8=', mimeType: 'image/png' },
+          ],
+        },
+      ]);
+    });
+
+    describe('pi initial preamble realization', () => {
+      it('maps portable fragments onto the harness-native system prompt', () => {
+        expect(
+          resolvePiSystemPrompt({
+            ...spec,
+            initialPreamble: ['identity', 'tool policy'],
+          }),
+        ).toBe('identity\n\ntool policy');
+        expect(resolvePiSystemPrompt({ ...spec, initialPreamble: [] })).toBe(
+          undefined,
+        );
+      });
+    });
   });
 
   it('classifies a different source identity as a fork', async () => {

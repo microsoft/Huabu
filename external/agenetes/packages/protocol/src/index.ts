@@ -25,7 +25,7 @@
  * Contract version for the Agenetes L1<->L2 protocol. Bump on any
  * breaking change to the wire schemas exported from this package.
  */
-export const AGENETES_PROTOCOL_VERSION = '0.1.0';
+export const AGENETES_PROTOCOL_VERSION = '0.2.0';
 
 // Two-level identity contract (§8).
 export { threadIdSchema, sessionIdSchema } from './identity.js';
@@ -51,19 +51,25 @@ export type {
   WorkloadSpecSchema,
 } from './workload.js';
 
-// AgentRequest building blocks (§3.6.1): the polymorphic, driver-agnostic
-// per-turn request. The request is plain data; rendering to AgentInput is a
-// separate concern a driver's submit(request, render) receives explicitly.
-export { defineRequest, composeRequest } from './request.js';
-export { agentRequestBaseSchema } from './request.js';
+// AgentSubmission: durable host source data plus optional canonical inputs.
+// Host rendering is complete before run(); drivers lower AgentInput[] into
+// their backend-native form.
+export {
+  agentInputPartSchema,
+  agentTextInputSchema,
+  agentPartsInputSchema,
+  agentCommandInputSchema,
+  agentInputSchema,
+  agentSubmissionSchema,
+  resolveAgentInputs,
+} from './request.js';
 export type {
+  AgentInputPart,
+  AgentTextInput,
+  AgentPartsInput,
+  AgentCommandInput,
   AgentInput,
-  AgentRequest,
-  Renderer,
-  RequestVariantSchema,
-  RequestDefinition,
-  AnyRequestDefinition,
-  ComposedRequest,
+  AgentSubmission,
 } from './request.js';
 
 // AgentStreamEvent (§3.6 / §5): the driver-agnostic L2->L1 event stream.
@@ -150,10 +156,9 @@ export { agentMetadataSchema } from './agent-metadata.js';
 export type { AgentMetadata } from './agent-metadata.js';
 
 // AgentStateSnapshot (§5 / M5.5 / README I9.7): the driver-agnostic
-// durable-state snapshot for one thread — the single full `{ sessionId?,
-// metadata? }` type the handle up-reports, the instance persists as
-// `ThreadRecord.state`, and L1 reads `.metadata` from. Never a per-field
-// delta; the opaque `sessionId` (I4.3) rides it unfiltered.
+// durable-state snapshot for one thread — the full `{ sessionId?, metadata?,
+// initialPreambleDelivered? }` value the handle up-reports and the instance
+// persists as `ThreadRecord.state`. Never a per-field delta.
 export { agentStateSnapshotSchema } from './agent-state.js';
 export type { AgentStateSnapshot } from './agent-state.js';
 

@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AcpServiceError } from './errors.js';
-import { AcpAgentHandle } from './handle.js';
+import { AcpAgentHandle, lowerAcpInputs } from './handle.js';
 import { emptyAcpOverlay } from './overlay.js';
 
-import type { AcpCreateSpec, PreparedAcpPrompt } from './handle.js';
+import type { AcpCreateSpec } from './handle.js';
 import type { AcpSessionEntry } from './session-registry.js';
 import type { AgentCreateContext } from '@agenetes/runtime';
 
@@ -50,6 +50,7 @@ function durableContext(
         state: {
           sessionId: 'stale_session',
           metadata: { currentModeId: 'ask' },
+          initialPreambleDelivered: false,
         },
       },
       turns: [foldedTurn],
@@ -66,24 +67,47 @@ function sessionEntry() {
       sessionId: 'fresh_session',
       profileId: 'profile_1',
       namespace: spec.namespace,
-      systemPreambleSent: false,
+      initialPreambleDelivered: false,
       persistedToDisk: false,
     } as unknown as AcpSessionEntry,
     prompt,
   };
 }
 
-const render = vi.fn(
-  async (): Promise<PreparedAcpPrompt> => ({
-    serialized: 'current request',
-    includedSystem: true,
-    blocks: [{ type: 'text', text: 'current request' }],
-  }),
-);
+const submission = {
+  type: 'user_text',
+  content: 'current request',
+  rendered: [{ type: 'text' as const, text: 'current request' }],
+};
 
 describe('ACP durable history recovery', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  describe('ACP canonical input lowering', () => {
+    it('flattens members into one ordered prompt while preserving commands', () => {
+      expect(
+        lowerAcpInputs([
+          {
+            type: 'command',
+            text: '/review',
+            context: [
+              { type: 'text', text: 'selection' },
+              { type: 'image', data: 'aGVsbG8=', mimeType: 'image/png' },
+            ],
+          },
+        ]),
+      ).toEqual({
+        blocks: [
+          { type: 'text', text: '/review' },
+          { type: 'text', text: 'selection' },
+          { type: 'image', data: 'aGVsbG8=', mimeType: 'image/png' },
+        ],
+        serialized: '/review\nselection',
+        isCommand: true,
+      });
+    });
   });
 
   it('falls back only from structured native-resume unavailability', async () => {
@@ -105,7 +129,7 @@ describe('ACP durable history recovery', () => {
       spec,
       durableContext(authorizeHistoryLoad),
     );
-    for await (const _event of handle.run({ text: 'current' }, render, {
+    for await (const _event of handle.run(submission, {
       overlay: emptyAcpOverlay(),
       logger,
     })) {
@@ -114,7 +138,10 @@ describe('ACP durable history recovery', () => {
 
     expect(sessionMocks.ensureAcpSession).toHaveBeenCalledTimes(2);
     expect(sessionMocks.ensureAcpSession.mock.calls[0]?.[0]).toMatchObject({
-      priorState: { sessionId: 'stale_session' },
+      priorState: {
+        sessionId: 'stale_session',
+        initialPreambleDelivered: false,
+      },
     });
     expect(sessionMocks.ensureAcpSession.mock.calls[1]?.[0]).toMatchObject({
       priorState: { metadata: { currentModeId: 'ask' } },
@@ -129,7 +156,9 @@ describe('ACP durable history recovery', () => {
     expect(prompt.mock.calls[0]?.[1]).toEqual([
       expect.objectContaining({
         type: 'text',
-        text: expect.stringContaining(JSON.stringify(foldedTurn)),
+        text: expect.stringContaining(
+          '"rendered":[{"type":"text","text":"earlier question"}]',
+        ),
       }),
       { type: 'text', text: 'current request' },
     ]);
@@ -147,7 +176,7 @@ describe('ACP durable history recovery', () => {
 
     await expect(
       handle
-        .run({ text: 'current' }, render, {
+        .run(submission, {
           overlay: emptyAcpOverlay(),
           logger,
         })
@@ -155,5 +184,56 @@ describe('ACP durable history recovery', () => {
     ).rejects.toMatchObject({ code: 'spawn_failed' });
     expect(sessionMocks.ensureAcpSession).toHaveBeenCalledTimes(1);
     expect(authorizeHistoryLoad).not.toHaveBeenCalled();
+  });
+
+  it('persists a command-created session without consuming its preamble', async () => {
+    const { entry, prompt } = sessionEntry();
+    sessionMocks.ensureAcpSession.mockResolvedValue(entry);
+    const handle = new AcpAgentHandle(
+      { ...spec, initialPreamble: ['SYSTEM'] },
+      {
+        recovery: {
+          authorizeHistoryLoad: vi.fn(async () => ({
+            allowed: true as const,
+            estimatedSize: 0,
+          })),
+        },
+      },
+    );
+
+    for await (const _event of handle.run(
+      {
+        type: 'huabu.chat',
+        content: {},
+        rendered: [{ type: 'command', text: '/compact', context: [] }],
+      },
+      { overlay: emptyAcpOverlay(), logger },
+    )) {
+      // Drain the command turn.
+    }
+
+    expect(prompt.mock.calls[0]?.[1]).toEqual([
+      { type: 'text', text: '/compact' },
+    ]);
+    expect(entry.persistedToDisk).toBe(true);
+    expect(entry.initialPreambleDelivered).toBe(false);
+
+    for await (const _event of handle.run(
+      {
+        type: 'huabu.chat',
+        content: {},
+        rendered: [{ type: 'text', text: 'hello' }],
+      },
+      { overlay: emptyAcpOverlay(), logger },
+    )) {
+      // Drain the ordinary turn.
+    }
+
+    expect(prompt.mock.calls[1]?.[1]).toEqual([
+      { type: 'text', text: 'SYSTEM' },
+      { type: 'text', text: 'hello' },
+    ]);
+    expect(entry.initialPreambleDelivered).toBe(true);
+    expect(sessionMocks.reportEntryState).toHaveBeenCalledTimes(4);
   });
 });

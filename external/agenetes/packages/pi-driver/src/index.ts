@@ -14,8 +14,6 @@ export type {
   PiDriverPorts,
   PiModelContext,
   PiModelRef,
-  PiRenderedInput,
-  PiRequestRenderer,
   PiRunResult,
   PiSpec,
   PiToolContext,

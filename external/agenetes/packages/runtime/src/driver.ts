@@ -6,7 +6,7 @@
 
 import type { AgentHandle } from './handle.js';
 import type { AgentCreateContext } from './realization.js';
-import type { AgentStreamEvent } from '@agenetes/protocol';
+import type { AgentStreamEvent, AgentSubmission } from '@agenetes/protocol';
 
 /**
  * A registered driver realizes a target create input into an
@@ -16,8 +16,7 @@ import type { AgentStreamEvent } from '@agenetes/protocol';
  */
 export interface AgentDriver<
   TInput = unknown,
-  TRequest = unknown,
-  TRendered = unknown,
+  TSubmission extends AgentSubmission = AgentSubmission,
   TResult = unknown,
   TEvent extends AgentStreamEvent = AgentStreamEvent,
   TTurnCtx = unknown,
@@ -29,7 +28,7 @@ export interface AgentDriver<
   create(
     input: TInput,
     context: AgentCreateContext<TInput>,
-  ): AgentHandle<TRequest, TRendered, TResult, TEvent, TTurnCtx>;
+  ): AgentHandle<TSubmission, TResult, TEvent, TTurnCtx>;
 }
 
 /**
@@ -69,16 +68,13 @@ export interface AgentRuntime {
    */
   resolve<
     TInput = unknown,
-    TRequest = unknown,
-    TRendered = unknown,
+    TSubmission extends AgentSubmission = AgentSubmission,
     TResult = unknown,
     TEvent extends AgentStreamEvent = AgentStreamEvent,
     TTurnCtx = unknown,
   >(
     kind: string,
-  ):
-    | AgentDriver<TInput, TRequest, TRendered, TResult, TEvent, TTurnCtx>
-    | undefined;
+  ): AgentDriver<TInput, TSubmission, TResult, TEvent, TTurnCtx> | undefined;
 
   /** Whether a driver is registered for `kind`. */
   has(kind: string): boolean;
@@ -99,14 +95,13 @@ export interface AgentRuntime {
    * it knows lives under `threadId`.
    */
   get<
-    TRequest = unknown,
-    TRendered = unknown,
+    TSubmission extends AgentSubmission = AgentSubmission,
     TResult = unknown,
     TEvent extends AgentStreamEvent = AgentStreamEvent,
     TTurnCtx = unknown,
   >(
     threadId: string,
-  ): AgentHandle<TRequest, TRendered, TResult, TEvent, TTurnCtx> | undefined;
+  ): AgentHandle<TSubmission, TResult, TEvent, TTurnCtx> | undefined;
 
   /**
    * Get or create the live handle for `threadId`. If one is already live
@@ -119,21 +114,14 @@ export interface AgentRuntime {
    * behaviour.
    */
   getOrCreate<
-    TRequest = unknown,
-    TRendered = unknown,
+    TSubmission extends AgentSubmission = AgentSubmission,
     TResult = unknown,
     TEvent extends AgentStreamEvent = AgentStreamEvent,
     TTurnCtx = unknown,
   >(
     threadId: string,
-    createHandle: () => AgentHandle<
-      TRequest,
-      TRendered,
-      TResult,
-      TEvent,
-      TTurnCtx
-    >,
-  ): AgentHandle<TRequest, TRendered, TResult, TEvent, TTurnCtx>;
+    createHandle: () => AgentHandle<TSubmission, TResult, TEvent, TTurnCtx>,
+  ): AgentHandle<TSubmission, TResult, TEvent, TTurnCtx>;
 
   /**
    * Close and evict the live handle for `threadId` (calls `handle.close()`
@@ -154,8 +142,7 @@ export function createAgentRuntime(): AgentRuntime {
     },
     resolve<
       TInput,
-      TRequest,
-      TRendered,
+      TSubmission extends AgentSubmission,
       TResult,
       TEvent extends AgentStreamEvent,
       TTurnCtx,
@@ -163,7 +150,7 @@ export function createAgentRuntime(): AgentRuntime {
       // The registry is heterogeneous (each kind has its own input/result
       // shapes); the caller supplies the concrete generics for its kind.
       return drivers.get(kind) as
-        | AgentDriver<TInput, TRequest, TRendered, TResult, TEvent, TTurnCtx>
+        | AgentDriver<TInput, TSubmission, TResult, TEvent, TTurnCtx>
         | undefined;
     },
     has(kind: string): boolean {
@@ -173,8 +160,7 @@ export function createAgentRuntime(): AgentRuntime {
       return [...drivers.keys()];
     },
     get<
-      TRequest,
-      TRendered,
+      TSubmission extends AgentSubmission,
       TResult,
       TEvent extends AgentStreamEvent,
       TTurnCtx,
@@ -182,34 +168,21 @@ export function createAgentRuntime(): AgentRuntime {
       // Heterogeneous like `resolve`: the caller binds the generics for
       // the kind it knows lives under `threadId`.
       return handles.get(threadId) as
-        | AgentHandle<TRequest, TRendered, TResult, TEvent, TTurnCtx>
+        | AgentHandle<TSubmission, TResult, TEvent, TTurnCtx>
         | undefined;
     },
     getOrCreate<
-      TRequest,
-      TRendered,
+      TSubmission extends AgentSubmission,
       TResult,
       TEvent extends AgentStreamEvent,
       TTurnCtx,
     >(
       threadId: string,
-      createHandle: () => AgentHandle<
-        TRequest,
-        TRendered,
-        TResult,
-        TEvent,
-        TTurnCtx
-      >,
+      createHandle: () => AgentHandle<TSubmission, TResult, TEvent, TTurnCtx>,
     ) {
       const existing = handles.get(threadId);
       if (existing) {
-        return existing as AgentHandle<
-          TRequest,
-          TRendered,
-          TResult,
-          TEvent,
-          TTurnCtx
-        >;
+        return existing as AgentHandle<TSubmission, TResult, TEvent, TTurnCtx>;
       }
       const created = createHandle();
       handles.set(threadId, created as AgentHandle);

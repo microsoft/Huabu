@@ -2,8 +2,9 @@
 // the fine, append-only, monotonically-sequenced turn/event record log.
 //
 // The instance owns a two-tier conversation log per `(namespace, threadId)`
-// (README I9.8). This module is TIER 1: `run(request, ...)` first appends an
-// internal turn boundary carrying the request, then every yielded frame is
+// (README I9.8). This module is TIER 1: `run(submission, ctx)` first appends an
+// internal turn boundary carrying the submission in the legacy-named request
+// field, then every yielded frame is
 // appended as it streams. Tier 1 is the write-ahead / streaming layer:
 //   - append-only + monotonically sequenced — never rewritten, renamed or
 //     deleted, so it dissolves the host's fragile mutable draft slot and
@@ -26,7 +27,7 @@
 import { appendJsonLine, readJsonLines, sanitizeId } from './io.js';
 
 import type {
-  AgentRequest,
+  AgentSubmission,
   AgentStreamEvent,
   Namespace,
 } from '@agenetes/protocol';
@@ -47,9 +48,9 @@ export interface EventLogEntry {
 }
 
 /**
- * Internal Tier-1 boundary written synchronously when `run(request, ...)`
- * begins. It carries the request needed to project an uncovered event tail
- * as a complete read-time turn, but never enters the public event stream.
+ * Internal Tier-1 boundary written synchronously when `run(submission, ctx)`
+ * begins. It carries the submission needed to project an uncovered event
+ * tail as a complete read-time turn, but never enters the public event stream.
  */
 export interface TurnStartLogEntry {
   /** Monotonic sequence shared with streamed event entries. */
@@ -57,7 +58,7 @@ export interface TurnStartLogEntry {
   /** Epoch ms the turn began. */
   readonly ts: number;
   readonly kind: 'turn_start';
-  readonly request: AgentRequest | null;
+  readonly request: AgentSubmission | null;
 }
 
 /** Every durable Tier-1 record, including internal turn boundaries. */
@@ -77,7 +78,7 @@ export interface EventLogStore {
   appendTurnStart(
     namespace: Namespace,
     threadId: string,
-    request: AgentRequest | null,
+    request: AgentSubmission | null,
   ): TurnStartLogEntry;
   /**
    * Append `event` to the thread's log, assigning the next `seq`
@@ -165,7 +166,7 @@ export class InMemoryEventLogStore implements EventLogStore {
   appendTurnStart(
     namespace: Namespace,
     threadId: string,
-    request: AgentRequest | null,
+    request: AgentSubmission | null,
   ): TurnStartLogEntry {
     const log = this.#log(namespace, threadId);
     const entry: TurnStartLogEntry = {
@@ -268,7 +269,7 @@ export class FileEventLogStore implements EventLogStore {
   appendTurnStart(
     namespace: Namespace,
     threadId: string,
-    request: AgentRequest | null,
+    request: AgentSubmission | null,
   ): TurnStartLogEntry {
     const filePath = this.#path(namespace, threadId);
     const seq = this.#lastSeq(filePath) + 1;
@@ -335,7 +336,7 @@ export class EventLog {
   beginTurn(
     namespace: Namespace,
     threadId: string,
-    request: AgentRequest | null,
+    request: AgentSubmission | null,
   ): TurnStartLogEntry {
     return this.#store.appendTurnStart(namespace, threadId, request);
   }

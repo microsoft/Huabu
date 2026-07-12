@@ -37,7 +37,7 @@
 
 import { z } from 'zod';
 
-import { agentRequestBaseSchema } from './request.js';
+import { agentSubmissionSchema } from './request.js';
 import {
   errorEventDataSchema,
   planEventDataSchema,
@@ -127,17 +127,14 @@ export const agentTurnMetaSchema = z.object({
 export type AgentTurnMeta = z.infer<typeof agentTurnMetaSchema>;
 
 /**
- * One completed turn: the raw `request` the caller submitted (I6, the
- * driver-agnostic source of truth for replay) plus the folded `transcript`
- * the agent produced in response, and optional run-level `meta`. Only the
- * *assistant/tool* output lives in `transcript`; the user side is rebuilt
- * from `request`, matching how the host rebuilds its `Context` from the
- * envelope. `request` is `null` for a *resume* turn (a `run(null, …)` that
- * carried no new input — README I8 run contract), which still produces a
- * transcript. Immutable once written — the Tier-2 checkpoint (README I9.8).
+ * One completed turn: the durable submission the caller supplied plus the
+ * folded `transcript` the agent produced in response and optional run-level
+ * `meta`. `request` keeps its historical outer field name; new submissions
+ * may additionally persist canonical `rendered` inputs for recovery and
+ * fork. It is `null` for a resume turn that carried no new input.
  */
 export const agentTurnSchema = z.object({
-  request: agentRequestBaseSchema.nullable(),
+  request: agentSubmissionSchema.nullable(),
   transcript: z.array(foldedMessageSchema),
   meta: agentTurnMetaSchema.optional(),
 });

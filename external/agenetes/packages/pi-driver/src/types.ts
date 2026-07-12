@@ -1,5 +1,4 @@
 import type { Namespace, WorkloadType } from '@agenetes/protocol';
-import type { RenderFn as RuntimeRenderFn } from '@agenetes/runtime';
 import type {
   AgentTool,
   ToolExecutionMode,
@@ -57,6 +56,7 @@ export interface PiWorkloadSpec {
   readonly workloadType: WorkloadType;
   readonly namespace: Namespace;
   readonly threadId: string;
+  readonly initialPreamble?: readonly string[];
   readonly spec: PiSpec;
 }
 
@@ -69,14 +69,9 @@ export interface PiModelContext {
 
 export type PiToolContext = PiModelContext;
 
-export type PiRenderedInput = Message[];
 export type PiRunResult = Message[];
-export type PiRequestRenderer<TRequest> = RuntimeRenderFn<
-  TRequest,
-  PiRenderedInput
->;
 
-export interface PiDriverPorts<TRequest = unknown> {
+export interface PiDriverPorts {
   resolveModel(ref: PiModelRef, ctx: PiModelContext): Promise<Model<Api>>;
   getApiKey(
     ref: PiModelRef,
@@ -86,9 +81,8 @@ export interface PiDriverPorts<TRequest = unknown> {
     refs: readonly PiToolRef[],
     ctx: PiToolContext,
   ): Promise<AgentTool[]>;
-  renderFallback?: PiRequestRenderer<TRequest>;
 }
 
-export interface PiDriverFactoryConfig<TRequest = unknown> {
-  readonly ports: PiDriverPorts<TRequest>;
+export interface PiDriverFactoryConfig {
+  readonly ports: PiDriverPorts;
 }
