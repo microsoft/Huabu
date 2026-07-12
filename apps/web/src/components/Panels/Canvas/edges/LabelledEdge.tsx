@@ -15,11 +15,12 @@ import {
   getStraightPath,
   useStore,
 } from '@xyflow/react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { getAccentTokens } from '@/components/Nodes/accentTokens';
 import useCanvasStore from '@/store/canvasStore';
+import { measureTextContent } from '@/utils/node/textMeasure';
 
 import { getEdgeRenderZ } from './edgeZ';
 
@@ -28,6 +29,24 @@ import type { EdgeProps } from '@xyflow/react';
 
 /** Hard cap matching the agent-facing `EdgeStyleSchema`. */
 const LABEL_MAX_LENGTH = 120;
+
+/** Canvas-space width (px) at which an idle label wraps onto multiple lines. */
+const LABEL_WRAP_CAP = 120;
+/** Pill horizontal padding + border budget (px-2 = 16 + ~2px border). */
+const LABEL_BOX_INSET = 18;
+/** Rendered label font size (px) — kept in sync with the `text-[12px]` class. */
+const LABEL_FONT_SIZE = 12;
+/**
+ * Font used to *measure* the label's tight width. `buildFontStr` only honours
+ * `bold`, so `font-medium` is measured as normal and renders a hair wider — a
+ * few px of slack (see `tightMaxWidth`) absorbs the gap.
+ */
+const LABEL_FONT = {
+  fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
+  fontWeight: 'normal',
+  fontStyle: 'normal',
+  lineHeight: 1.375,
+} as const;
 
 function getEdgeStyle(data: EdgeProps['data']): EdgeStyle {
   return (data?.edgeStyle as EdgeStyle | undefined) ?? {};
@@ -357,10 +376,28 @@ function EdgeLabelEditor({
     !useInfoColors && edgeStrokeColor
       ? getAccentTokens(edgeStrokeColor).fg
       : undefined;
+  // Measure the label's longest wrapped line (pretext, no DOM reflow — the
+  // same engine node auto-size uses) and pin the pill's max-width to it, so a
+  // wrapped label hugs its text instead of padding out to the full wrap cap
+  // (a fixed max-width leaves dead space on the shorter lines). While editing
+  // we keep the full cap so typing wraps naturally. `Math.ceil(...) + slack`
+  // covers the medium/normal weight measurement gap.
+  const tightMaxWidth = useMemo(() => {
+    if (!hasLabel) return undefined;
+    const contentCap = LABEL_WRAP_CAP - LABEL_BOX_INSET;
+    const { width } = measureTextContent(value, {
+      ...LABEL_FONT,
+      fontSize: LABEL_FONT_SIZE,
+      maxWidth: contentCap,
+    });
+    return Math.min(LABEL_WRAP_CAP, Math.ceil(width) + LABEL_BOX_INSET + 3);
+  }, [value, hasLabel]);
   const pillStyle = {
     borderColor,
     borderWidth: `${borderPx}px`,
     color: textColor,
+    // Idle: hug the measured longest line; editing: keep the full wrap cap.
+    maxWidth: editing ? LABEL_WRAP_CAP : tightMaxWidth,
     // Bounded inverse-zoom scaling (see `labelScale`). `transform-origin:
     // center` scales the pill about its own middle, which coincides with the
     // wrapper's translate anchor, so the label stays centred on the edge
