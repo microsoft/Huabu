@@ -1,4 +1,4 @@
-# Agent Request Render Resolution
+# Agent Submission and Input Boundary
 
 > Status: **Draft**
 >
@@ -6,61 +6,85 @@
 
 ## 1. Summary
 
-Resolve request rendering through one ordered ladder instead of requiring every `AgentHandle.run()` call to supply a backend-native renderer:
+Separate the durable semantic request from the clean input consumed by an agent harness.
 
-```text
-per-run native renderer
-  > per-driver native renderer
-  > per-request-type AgentInput renderer
-  > default JSON AgentTextInput renderer
-  > driver lowerInput()
+`AgentHandle.run()` receives an `AgentSubmission` containing both representations:
+
+```ts
+type AgentSubmission<TRequest extends AgentRequest = AgentRequest> =
+  | {
+      readonly sourceRequest: TRequest;
+      readonly agentInput: AgentInput;
+    }
+  | {
+      readonly sourceRequest: null;
+      readonly agentInput: null;
+    };
 ```
 
-The first implementation is deliberately transitional. Existing pi and ACP rich renderers may remain backend-native at the two highest-priority levels, while request-type and default renderers produce the canonical `AgentInput`. This removes repetitive per-turn wiring without forcing image parts, ACP prompt metadata, and every existing backend detail into the first `AgentInput` revision.
+`sourceRequest` is the structured, JSON-serializable source of truth used by logging, history, recovery, fork, and host projections. `agentInput` is the already-rendered, driver-agnostic input sent onward to the pi or ACP harness.
 
-Rendering remains host application-owned. Drivers select and invoke an injected renderer at the last moment, supply the narrow driver-agnostic `AgentTurnState`, and lower canonical input into their backend-native prompt shape when no native override was selected.
+Request rendering happens before `run()` through a host-composed registry keyed by `sourceRequest.type`. The registry is created once; callers do not pass a render function on every turn. `run()` does not resolve or invoke renderers.
 
-## 2. Context
+The handle may prepend a portable text `initialPreamble` from `WorkloadSpec` to the first ordinary message. A command is a distinct `AgentInput` member, allowing the handle to preserve a leading slash command and defer the preamble until the next ordinary message.
 
-The current runtime contract requires `run(request, render, ctx)` on every turn. Huabu consequently rebuilds equivalent closures at both built-in and ACP call sites even though the request variant is normally the same `huabu.chat` envelope and the rendering policy is stable across turns.
+Only `sourceRequest` is persisted. `agentInput` remains an ephemeral execution projection.
 
-The protocol package already contains `defineRequest()` / `composeRequest()` and an initial `{ message: string }` `AgentInput`, while pi-driver already declares an unused `renderFallback` port. The implementation therefore has the pieces of a request-oriented rendering model but currently bypasses them in favour of mandatory per-run backend-native rendering.
+## 2. Problem
 
-The desired resolution order is:
+The current `AgentHandle.run(request, render, ctx)` seam combines two different boundaries:
 
-1. An exceptional turn may provide a per-run override.
-2. A driver registration may provide a backend-specific renderer shared by its handles.
-3. Otherwise the request's `type` selects a host-composed canonical renderer.
-4. An unknown or unregistered request type falls back to rendering the complete request as JSON text.
+```text
+L1 -> L2
+AgentRequest / ChatEnvelope
+durable semantic source for logs and lifecycle operations
+
+L2 -> harness
+Message[] / ACP blocks
+ephemeral input for actual execution
+```
+
+A driver currently receives the durable request only because Agenetes must log it, then invokes a caller-supplied renderer to obtain backend-native input. This makes the generic handle simultaneously act as a logging boundary, request-rendering boundary, and harness execution boundary.
+
+Consequences include:
+
+1. Every upper-layer turn passes a renderer even when request semantics are stable.
+2. Backend-native rendered types leak into the generic handle signature.
+3. Drivers see host request variants such as `huabu.chat`.
+4. `AgentTurnState` crosses back into host rendering to support backend lifecycle details such as ACP's one-shot preamble.
+5. The ownership of raw request data, prompt composition, session state, and native lowering is difficult to explain independently.
 
 ## 3. Goals
 
-1. Make the renderer argument optional at ordinary upper-layer `run()` call sites.
-2. Preserve an explicit per-run override for exceptional backend-specific turns.
-3. Allow a host-injected per-driver renderer to preserve existing rich pi and ACP behaviour during migration.
-4. Make request-type rendering reusable across drivers and keyed by the request discriminant rather than the driver route.
-5. Provide a universal text fallback that every text-capable driver can lower.
-6. Keep `AgentTurnState` narrow and driver-agnostic.
-7. Preserve the existing durable logging, history, recovery, and fork formats without migration.
-8. Make `ChatEnvelope` carry every canvas fact required to render itself, including `canvasId`, instead of relying on a call-site closure.
+1. Give `run()` one explicit envelope containing the durable source request and the ephemeral agent input.
+2. Persist only the source request and folded output transcript.
+3. Let internal and external agents use the same pre-registered `huabu.chat` renderer.
+4. Remove rendering logic and renderer resolution from `AgentHandle.run()`.
+5. Keep harness-facing input free of canvas, binding, logging, and host request concepts.
+6. Preserve text and image input without forcing either driver to understand `ChatEnvelope`.
+7. Move first-message preamble delivery into handle lifecycle state.
+8. Represent slash commands explicitly so preamble handling never relies on reparsing backend-native messages.
+9. Preserve existing Tier-1, Tier-2, history, recovery, and fork formats.
 
 ## 4. Non-goals
 
-This proposal does not make `binding`, `WorkloadSpec`, or opaque per-turn `ctx` visible to a request renderer.
+This proposal does not persist rendered agent input.
 
-This proposal does not make ACP session binding part of prompt rendering. ACP binding continues to select a profile and session recipe; canvas isolation continues to ride the workload namespace.
+This proposal does not make ACP binding or namespace part of request rendering.
 
-This proposal does not require the first implementation to represent every rich backend input as canonical `AgentInput`.
+This proposal does not expose handle state to request renderers.
 
-This proposal does not persist rendered input, backend-native prompts, or resolved renderer identity.
+This proposal does not require pi and ACP to use the same backend-native message format.
 
-This proposal does not change the `AgentTurn`, `AgentStreamEvent`, Tier-1 event log, or Tier-2 turn log schemas.
+This proposal does not make the request renderer responsible for system/session lifecycle.
 
-## 5. Request and input model
+This proposal does not define a deterministic replay cache of historical rendered prompts. The durable source remains the structured request.
 
-### 5.1 Raw request remains the durable source of truth
+## 5. Boundary contracts
 
-The caller submits a plain JSON-serializable request:
+### 5.1 `AgentRequest`: durable semantic source
+
+`AgentRequest` remains the driver-agnostic discriminated request union:
 
 ```ts
 interface HuabuChatRequest {
@@ -69,43 +93,113 @@ interface HuabuChatRequest {
 }
 ```
 
-The raw request remains independent of the driver and is persisted verbatim in `turn_start` / `AgentTurn.request`. Rendering is an ephemeral projection performed only when a live driver consumes a non-null request.
+It is plain serializable data and remains the value stored in `turn_start` and `AgentTurn.request`.
 
-### 5.2 `ChatEnvelope` carries render inputs
+The host may add request variants without changing drivers. Drivers never dispatch on `AgentRequest.type`.
 
-`ChatEnvelope` should add the canvas identity already known by `buildChatEnvelope()`:
+### 5.2 `AgentInput`: clean harness input
 
-```ts
-interface ChatEnvelope {
-  readonly canvasId: string | null;
-  readonly user: ...;
-  readonly skills: ...;
-  readonly focus: ...;
-}
-```
-
-The Huabu renderer can then derive markdown, attachment references, and image resolution context from the request alone. The current ACP closure must no longer capture `canvasId`.
-
-Historical envelopes without `canvasId` are read as `null`; no durable-data rewrite is required. This compatibility normalization belongs at the host envelope boundary, not in Agenetes.
-
-`binding.alias` is not rendering input. It is currently used only for diagnostics in ACP preprocessing and should be removed from the prompt-builder contract. Logging belongs around renderer execution rather than inside the deterministic request template.
-
-### 5.3 Canonical text input
-
-Replace the current implicit `{ message: string }` shape with an extensible discriminated member:
+`AgentInput` is the canonical input vocabulary between the handle and a harness adapter:
 
 ```ts
+export type AgentInput = AgentTextInput | AgentPartsInput | AgentCommandInput;
+
 export interface AgentTextInput {
   readonly type: 'text';
   readonly text: string;
 }
 
-export type AgentInput = AgentTextInput;
+export interface AgentPartsInput {
+  readonly type: 'parts';
+  readonly parts: readonly AgentInputPart[];
+}
+
+export interface AgentCommandInput {
+  readonly type: 'command';
+  /** The complete command line, preserved verbatim. */
+  readonly text: string;
+  /** Selection, attachments, and other context appended after the command. */
+  readonly context: readonly AgentInputPart[];
+}
+
+export type AgentInputPart =
+  | {
+      readonly type: 'text';
+      readonly text: string;
+    }
+  | {
+      readonly type: 'image';
+      readonly data: string;
+      readonly mimeType: string;
+    };
 ```
 
-`AgentInput` starts as a one-member union so drivers can exhaustively lower it today and a future `AgentPartsInput` can be added without redefining what text means.
+`AgentInput` contains no request discriminant, canvas id, ACP profile binding, namespace, logger, abort signal, or persisted turn metadata.
 
-The default renderer serializes the complete request, including its `type`, rather than serializing only `request.content`:
+The current server-local `ContentPart[]` already matches the text/image portion of this vocabulary and should be promoted rather than reimplemented.
+
+### 5.3 `AgentSubmission`: the complete `run()` envelope
+
+`AgentSubmission` pairs the two boundary values without treating either as the other:
+
+```ts
+export type AgentSubmission<TRequest extends AgentRequest = AgentRequest> =
+  | {
+      readonly sourceRequest: TRequest;
+      readonly agentInput: AgentInput;
+    }
+  | {
+      readonly sourceRequest: null;
+      readonly agentInput: null;
+    };
+```
+
+The union prevents invalid combinations such as a non-null source request with no executable input.
+
+`sourceRequest` is intentionally not named `rawRequest`: it has already been parsed into a structured semantic request and is not raw bytes. `agentInput` is intentionally not named `renderedMessages`: it may be a command or structured parts and has not yet been lowered to pi `Message[]` or ACP blocks.
+
+## 6. Rendering before `run()`
+
+The host composes a request renderer registry once:
+
+```ts
+const requestRenderers = composeRequest([
+  defineRequest({
+    type: 'huabu.chat',
+    schema: huabuChatRequestSchema,
+    render: renderHuabuChat,
+  }),
+]);
+```
+
+The renderer is independent of handle and session state:
+
+```ts
+type AgentInputRenderer<TRequest> = (
+  request: TRequest,
+) => AgentInput | Promise<AgentInput>;
+```
+
+An ordinary upper-layer call becomes:
+
+```ts
+const sourceRequest = wrapChatRequest(envelope);
+const agentInput = await requestRenderers.render(sourceRequest);
+
+await consume(
+  handle.run(
+    {
+      sourceRequest,
+      agentInput,
+    },
+    turnContext,
+  ),
+);
+```
+
+No function is passed to `run()`. An exceptional caller overrides rendering by constructing a different `agentInput`, not by changing handle execution semantics.
+
+An unknown or unregistered request variant uses a default renderer:
 
 ```ts
 function renderRequestAsJson(request: AgentRequest): AgentTextInput {
@@ -116,250 +210,238 @@ function renderRequestAsJson(request: AgentRequest): AgentTextInput {
 }
 ```
 
-If serialization fails, resolution throws an explicit render error. It must not return a success-shaped placeholder.
+The default serializes the complete request, including its `type`. Serialization or rendering failure occurs before `run()` and propagates to the caller; because no submission reached the handle, no Tier-1 turn is started for that failure.
 
-## 6. Renderer scopes
+## 7. One renderer for internal and external Huabu chat
 
-### 6.1 State remains narrow
+Both routes already build the same `ChatEnvelope`, and both already delegate most prompt composition to the same `renderTurn()` function. The remaining difference is that the shared composer currently receives `INTERNAL_PROFILE`, `ACP_PROFILE`, or `ACP_SLASH_PROFILE`.
 
-All renderers continue to receive the existing driver-supplied state:
+The target model registers one `huabu.chat` renderer:
 
-```ts
-interface AgentTurnState {
-  readonly isFirstMessage: boolean;
-}
+```text
+ChatEnvelope
+  -> renderHuabuChat()
+  -> AgentInput
+  -> AgentSubmission
+       |-> pi lowerInput()  -> Message[]
+       `-> ACP lowerInput() -> ACP content blocks
 ```
 
-The state describes generic session position; it does not expose `WorkloadSpec`, ACP binding, driver internals, logger, abort signal, overlay, or the opaque per-turn context.
-
-Additional state fields may be added only when they are meaningful across drivers, such as a turn index or recovered-session flag. A renderer may ignore state and remain stateless.
-
-### 6.2 Native renderer
-
-The compatibility renderer keeps the current output type:
+`renderHuabuChat()` performs slash-command recognition once:
 
 ```ts
-type NativeRenderFn<TRequest, TRendered> = (
-  request: TRequest,
-  state: AgentTurnState,
-) => TRendered | Promise<TRendered>;
-```
+async function renderHuabuChat(request: HuabuChatRequest): Promise<AgentInput> {
+  const parts = await renderTurn(request.content);
 
-A per-run native renderer is an exceptional override. A per-driver native renderer is injected by the host at driver registration and shared across handles; it must derive request semantics from the request and generic state, not from a handle-specific closure.
-
-For the initial migration, Huabu may register:
-
-- `huabu.chat -> Message[]` as the pi per-driver renderer.
-- `huabu.chat -> PreparedAcpPrompt` as the ACP per-driver renderer.
-
-Both can read `canvasId` from `request.content`. ACP profile binding and namespace remain outside rendering.
-
-### 6.3 Canonical request renderer
-
-A request-type renderer produces `AgentInput`:
-
-```ts
-type AgentInputRenderer<TRequest> = (
-  request: TRequest,
-  state: AgentTurnState,
-) => AgentInput | Promise<AgentInput>;
-```
-
-The host composes these renderers by request `type` and injects the composed registry once when mounting Agenetes. A driver does not define the semantics of `huabu.chat`; it only receives the registry and lowers its result.
-
-The existing `defineRequest()` / `composeRequest()` API should evolve to support `AgentTurnState` and asynchronous rendering rather than introducing a second unrelated request registry.
-
-## 7. Resolution algorithm
-
-For a non-null request, a driver resolves exactly one path:
-
-```ts
-async function resolveRenderedInput(options): Promise<TRendered> {
-  const nativeRenderer = options.perRun ?? options.perDriver;
-
-  if (nativeRenderer) {
-    return nativeRenderer(options.request, options.state);
+  if (isSlashCommand(request.content.user.text)) {
+    return {
+      type: 'command',
+      text: request.content.user.text,
+      context: partsWithoutUserText(parts),
+    };
   }
 
-  const inputRenderer =
-    options.requestRenderers.get(options.request.type) ?? renderRequestAsJson;
-
-  const input = await inputRenderer(options.request, options.state);
-  return options.lowerInput(input);
+  return parts.length === 1 && parts[0].type === 'text'
+    ? { type: 'text', text: parts[0].text }
+    : { type: 'parts', parts };
 }
 ```
 
-Resolution is based only on renderer presence. If the selected renderer throws or rejects, the error propagates; the resolver must not retry a lower-priority renderer because that would conceal defects and could submit a materially different prompt.
+The current internal/reachback profile wording must either become neutral request wording or move into the portable initial preamble that describes the available tool surface. Driver lowering must remain mechanical and must not select Huabu prompt wording.
 
-`request === null` bypasses resolution entirely and retains its current driver-defined meaning.
-
-## 8. Driver lowering
-
-Each driver owns only the conversion from canonical `AgentInput` to its backend-native submission shape:
+`ChatEnvelope` should carry the `canvasId` already known by `buildChatEnvelope()` so attachment resolution does not rely on a per-turn closure:
 
 ```ts
-type LowerInputFn<TRendered> = (
+interface ChatEnvelope {
+  readonly canvasId: string | null;
+  readonly user: ...;
+  readonly skills: ...;
+  readonly focus: ...;
+}
+```
+
+Historical envelopes without `canvasId` normalize it to `null` at the host boundary. No durable-data rewrite is required.
+
+ACP binding remains `{ alias, profileId }`; canvas-scoped session isolation remains in `WorkloadSpec.namespace`; reachback remains in `WorkloadSpec.env`. None of these values enters `renderHuabuChat()`.
+
+## 8. Portable initial preamble
+
+Add a portable text-only member to `WorkloadSpec`:
+
+```ts
+interface WorkloadSpec {
+  readonly initialPreamble?: string;
+}
+```
+
+`initialPreamble` is not a backend-native system-role message. Its contract is to be concatenated with the first ordinary `AgentInput` accepted by the handle.
+
+The handle tracks delivery independently from the number of native session messages:
+
+```ts
+class AgentHandle {
+  private preamblePending = this.spec.initialPreamble !== undefined;
+}
+```
+
+For ordinary input:
+
+```ts
+const effectiveInput = this.preamblePending
+  ? prependText(this.spec.initialPreamble, submission.agentInput)
+  : submission.agentInput;
+
+const result = await this.runInput(effectiveInput, ctx);
+this.preamblePending = false;
+return result;
+```
+
+The pending flag is cleared only after the backend accepts the input successfully. Recovery must restore whether the preamble has already been delivered as part of driver persistent state; it must not infer delivery solely from source turn count.
+
+This replaces the current pattern in which ACP gives `isFirstMessage` to a host renderer so that the renderer can prepend `external-agent/system_prompt.md`.
+
+## 9. Command handling
+
+A command must remain the leading content of the submitted prompt. The handle therefore treats it separately:
+
+```ts
+if (submission.agentInput.type === 'command') {
+  return this.runInput(submission.agentInput, ctx);
+}
+```
+
+A command does not consume `preamblePending`:
+
+```text
+first input is a command
+  -> send command first
+  -> keep preamblePending = true
+
+next input is an ordinary message
+  -> prepend initialPreamble
+  -> clear preamblePending after successful submission
+```
+
+ACP lowering emits the command text as the first content block and appends `context` afterwards. A harness without native command semantics may lower it to an ordinary message whose first line remains the command.
+
+The handle switches on `agentInput.type`; it never reparses slash syntax from backend-native messages.
+
+## 10. Harness lowering
+
+Each driver owns only the exhaustive conversion from `AgentInput` into its native input:
+
+```ts
+type LowerInputFn<TNativeInput> = (
   input: AgentInput,
-) => TRendered | Promise<TRendered>;
+) => TNativeInput | Promise<TNativeInput>;
 ```
 
-The initial lowerings are straightforward:
+The standard lowerings are:
 
 ```text
-AgentTextInput -> pi user Message[]
-AgentTextInput -> ACP text content block
+AgentTextInput    -> pi user Message / ACP text block
+AgentPartsInput   -> pi content parts / ACP content blocks
+AgentCommandInput -> leading command plus trailing context
 ```
 
-Lowering must not inspect the host request type, canvas identity, ACP binding, or Huabu markdown semantics.
+Lowering does not inspect `sourceRequest`, `ChatEnvelope`, request type, canvas id, ACP binding, namespace, or Huabu render profiles.
 
-When canonical rich input is later required, add an `AgentPartsInput` member with text/image parts and extend each driver's exhaustive lowering. That migration can then remove the corresponding native renderer without changing upper-layer `run()` calls.
+## 11. Logging and lifecycle compatibility
 
-## 9. Upper-layer API
-
-Reorder the runtime call so ordinary calls do not pass an empty renderer position:
-
-```ts
-run(
-  request: TRequest | null,
-  ctx: TTurnCtx,
-  options?: {
-    render?: NativeRenderFn<TRequest, TRendered>;
-  },
-): AsyncGenerator<TEvent, TResult>;
-```
-
-The normal Huabu call becomes:
-
-```ts
-const handle = await agenetes.getOrCreate(spec);
-
-for await (const event of handle.run(wrapChatRequest(envelope), turnContext)) {
-  yield event;
-}
-```
-
-An exceptional turn may still override rendering:
-
-```ts
-handle.run(request, turnContext, {
-  render: renderSpecialNativeInput,
-});
-```
-
-The host registers stable driver and request policies once at composition:
-
-```ts
-const agenetes = mountAgenetes({
-  requestRenderers: composeRequest([
-    defineRequest({
-      type: 'huabu.chat',
-      schema: huabuChatRequestSchema,
-      render: renderHuabuChatInput,
-    }),
-  ]),
-  drivers: {
-    pi: createPiDriverFactory({
-      ports: piPorts,
-      render: renderHuabuChatForPi,
-    }),
-    acp: createAcpDriverFactory({
-      ports: acpPorts,
-      render: renderHuabuChatForAcp,
-    }),
-  },
-});
-```
-
-The concrete builder surface may differ, but ownership must remain as shown: request semantics are host registrations, driver-native compatibility renderers are host injections, and drivers own only resolution mechanics plus lowering.
-
-## 10. Logging, recovery, and fork compatibility
-
-The logging decorator must call `beginTurn(originalRequest)` before advancing the driver's async generator, exactly as it does today. Renderer resolution remains inside the wrapped `run()` generator.
-
-The data path remains:
+The logging decorator starts the turn from `submission.sourceRequest`:
 
 ```text
-beginTurn(original request)
-  -> resolve renderer
-  -> render / lower
-  -> execute backend
+beginTurn(sourceRequest)
+  -> handle preamble/command policy
+  -> driver lowering
+  -> execute harness
   -> append and fold AgentStreamEvents
-  -> append completed AgentTurn
+  -> append AgentTurn { request: sourceRequest, transcript, meta }
 ```
 
-Neither `AgentInput` nor backend-native rendered input is persisted. Existing logs therefore require no schema conversion or migration.
+Only `sourceRequest` is written to Tier 1 and Tier 2. `agentInput`, the preamble-composed effective input, and backend-native messages are not persisted.
 
-If rendering fails, the original request remains visible as an incomplete Tier-1 turn, preserving the current failure semantics and allowing `history({ withTail: true })` to materialize it.
+Existing event logs and turn logs require no schema migration.
 
-Recovery and fork continue to consume materialized `AgentTurn[]`. They do not depend on which renderer won resolution for the original live turn.
+`request === null` becomes `{ sourceRequest: null, agentInput: null }` and preserves its current driver-defined resume semantics.
 
-## 11. ACP canvas and binding boundaries
+History, recovery, and fork continue to consume materialized `AgentTurn[]`. They remain independent of the `AgentInput` used by the original live turn.
 
-ACP's profile binding remains:
+Rendered input may still be emitted through explicit debug instrumentation, but it is not a second durable source of truth.
 
-```ts
-binding: {
-  alias: string;
-  profileId: string;
-}
-```
+## 12. Ownership table
 
-Canvas-scoped session isolation remains encoded separately through `spec.namespace = canvasAcpNamespace(canvasId)`, and reachback configuration continues to ride `spec.env`.
+| Value                           | Lifetime                     | Owner                           | Consumer                         |
+| ------------------------------- | ---------------------------- | ------------------------------- | -------------------------------- |
+| `WorkloadSpec.initialPreamble`  | handle/session               | host policy, executed by handle | handle preamble lifecycle        |
+| `AgentSubmission.sourceRequest` | one turn, durable projection | host request model              | logging, history, recovery, fork |
+| `AgentSubmission.agentInput`    | one turn, ephemeral          | pre-registered host renderer    | handle and driver lowering       |
+| backend-native input            | one submission               | driver                          | pi harness or ACP session        |
+| `AgentStreamEvent`              | one running turn             | driver translation              | live clients and durable fold    |
 
-The same `canvasId` may also appear in `ChatEnvelope` because it serves a different purpose: it is request data required to render that envelope deterministically. This does not make ACP binding canvas-aware and does not let the request renderer inspect the workload namespace.
+## 13. Implementation stages
 
-## 12. Implementation stages
+### Stage 1: Protocol vocabulary
 
-### Stage 1: Canonical text contract and resolver
+1. Replace the current `{ message: string }` `AgentInput` with the text, parts, and command union.
+2. Add `AgentSubmission`.
+3. Make `defineRequest()` / `composeRequest()` asynchronous and return `AgentInput`.
+4. Add the complete-request JSON fallback.
 
-1. Introduce `AgentTextInput` and make `AgentInput` a discriminated union.
-2. Extend `defineRequest()` / `composeRequest()` for asynchronous state-aware rendering.
-3. Add a shared typed resolver and explicit JSON render errors.
-4. Add pi and ACP `AgentTextInput` lowerings.
-5. Preserve current mandatory render call sites until the compatibility tests pass.
+### Stage 2: Shared Huabu renderer
 
-### Stage 2: Stable driver registration
+1. Promote the current server-local `ContentPart` vocabulary to `AgentInputPart`.
+2. Add `canvasId` to newly built `ChatEnvelope`s with backward-compatible normalization.
+3. Consolidate `INTERNAL_PROFILE` / `ACP_PROFILE` request wording into one `renderHuabuChat()` policy.
+4. Emit `AgentCommandInput` for leading slash commands.
+5. Register the composed renderer once at the host composition root.
 
-1. Add an optional per-driver native renderer to both standard factory configurations.
-2. Make the per-run renderer optional and adopt the new `run(request, ctx, options?)` call shape.
-3. Move the current pi and ACP render functions from per-turn service closures to stable host registrations.
-4. Add `canvasId` to newly built `ChatEnvelope`s and remove ACP render's captured `canvasId`.
-5. Remove renderer-only `binding.alias` and logger parameters from ACP prompt preparation.
+### Stage 3: Handle and driver boundary
 
-### Stage 3: Canonical Huabu rendering
+1. Change `AgentHandle.run()` to `run(submission, ctx)`.
+2. Change logging decoration to persist `submission.sourceRequest`.
+3. Remove `RenderFn`, `TRendered`, and `AgentTurnState` from the public run seam.
+4. Add exhaustive pi and ACP `AgentInput` lowering.
+5. Remove per-run render closures from `agent.service.ts` and `acp/service.ts`.
 
-1. Register `huabu.chat` as a request-type renderer.
-2. Move drivers that need only text from native rendering to `AgentTextInput`.
-3. Define `AgentPartsInput` before migrating any path whose current image or attachment behaviour cannot be represented losslessly as text.
-4. Remove native compatibility renderers only after parity tests prove equivalent prompts and attachments.
+### Stage 4: Preamble lifecycle
 
-## 13. Validation
+1. Add text-only `initialPreamble` to the shared workload contract.
+2. Move ACP's first-message preamble composition and delivered flag into the handle.
+3. Make command input defer preamble delivery.
+4. Persist or recover the delivered state through the driver's existing persistent state mechanism.
+5. Remove `binding.alias`, logger, `includeSystem`, and captured `canvasId` from ACP request rendering.
+
+## 14. Validation
 
 The implementation must cover:
 
-1. Each resolution precedence edge, including per-run over per-driver and per-driver over request-type.
-2. Unknown request type JSON fallback preserving the full request object.
-3. Selected renderer failure propagating without fallback.
-4. `request === null` bypassing every renderer.
-5. `AgentTurnState` reaching each renderer unchanged.
-6. pi and ACP text lowering.
-7. Existing rich pi and ACP prompt parity while native compatibility renderers remain.
-8. Logging the original request rather than canonical or native rendered input.
-9. Renderer failure leaving an incomplete turn snapshot.
-10. Historical `ChatEnvelope`s without `canvasId` remaining readable.
-11. ACP namespace/session isolation remaining independent of envelope rendering.
+1. `sourceRequest` is logged unchanged while `agentInput` is never persisted.
+2. Internal and external chat invoke the same registered `huabu.chat` renderer.
+3. Text and image parts lower equivalently to current pi and ACP payloads.
+4. JSON fallback preserves the complete unknown request.
+5. Rendering failure occurs before `run()` and does not create an incomplete turn.
+6. Harness execution failure after `run()` starts does create an incomplete turn.
+7. An ordinary first input receives the initial preamble exactly once.
+8. A failed first submission does not consume the pending preamble.
+9. A command remains first and does not consume the pending preamble.
+10. A harness without command semantics receives an ordinary message with the command still leading.
+11. Historical envelopes without `canvasId` remain readable.
+12. Recovery and fork remain based on durable source requests and folded transcripts.
+13. ACP namespace/session isolation and reachback remain independent of request rendering.
 
-## 14. Expected code entry points
+## 15. Expected code entry points
 
-| File                                                                                                                     | Responsibility                                               |
-| ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------ |
-| [`external/agenetes/packages/protocol/src/request.ts`](../../external/agenetes/packages/protocol/src/request.ts)         | `AgentInput`, request definitions, composed request renderer |
-| [`external/agenetes/packages/runtime/src/handle.ts`](../../external/agenetes/packages/runtime/src/handle.ts)             | Optional per-run render contract and narrow `AgentTurnState` |
-| `external/agenetes/packages/runtime/src/render.ts`                                                                       | Shared precedence resolver and render errors                 |
-| [`external/agenetes/packages/pi-driver/src/types.ts`](../../external/agenetes/packages/pi-driver/src/types.ts)           | Per-driver native renderer configuration                     |
-| [`external/agenetes/packages/pi-driver/src/handle.ts`](../../external/agenetes/packages/pi-driver/src/handle.ts)         | Resolution invocation and pi lowering                        |
-| [`external/agenetes/packages/acp-driver/src/handle.ts`](../../external/agenetes/packages/acp-driver/src/handle.ts)       | Resolution invocation and ACP lowering                       |
-| [`apps/server/src/modules/agent/conversation/envelope.ts`](../../apps/server/src/modules/agent/conversation/envelope.ts) | Self-contained Huabu request envelope including `canvasId`   |
-| [`apps/server/src/modules/agent/agenetes/drivers.ts`](../../apps/server/src/modules/agent/agenetes/drivers.ts)           | Host composition and stable renderer registration            |
-| [`apps/server/src/modules/agent/agent.service.ts`](../../apps/server/src/modules/agent/agent.service.ts)                 | Built-in upper-layer call migration                          |
-| [`apps/server/src/modules/agent/acp/service.ts`](../../apps/server/src/modules/agent/acp/service.ts)                     | ACP upper-layer call migration and closure removal           |
+| File                                                                                                                                           | Responsibility                                                       |
+| ---------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| [`external/agenetes/packages/protocol/src/request.ts`](../../external/agenetes/packages/protocol/src/request.ts)                               | `AgentRequest`, `AgentInput`, `AgentSubmission`, request composition |
+| [`external/agenetes/packages/protocol/src/workload.ts`](../../external/agenetes/packages/protocol/src/workload.ts)                             | Portable text `initialPreamble`                                      |
+| [`external/agenetes/packages/runtime/src/handle.ts`](../../external/agenetes/packages/runtime/src/handle.ts)                                   | `run(submission, ctx)` execution seam                                |
+| [`external/agenetes/packages/pi-driver/src/handle.ts`](../../external/agenetes/packages/pi-driver/src/handle.ts)                               | Preamble policy and pi lowering                                      |
+| [`external/agenetes/packages/acp-driver/src/handle.ts`](../../external/agenetes/packages/acp-driver/src/handle.ts)                             | Preamble/command policy and ACP lowering                             |
+| [`external/agenetes/packages/agenetes/src/instance.ts`](../../external/agenetes/packages/agenetes/src/instance.ts)                             | Logging decoration over `sourceRequest`                              |
+| [`apps/server/src/modules/agent/conversation/envelope.ts`](../../apps/server/src/modules/agent/conversation/envelope.ts)                       | Self-contained Huabu source request including `canvasId`             |
+| [`apps/server/src/modules/agent/conversation/prompt/build-prompt.ts`](../../apps/server/src/modules/agent/conversation/prompt/build-prompt.ts) | Shared `huabu.chat` renderer                                         |
+| [`apps/server/src/modules/agent/agenetes/drivers.ts`](../../apps/server/src/modules/agent/agenetes/drivers.ts)                                 | Renderer registration and driver composition                         |
+| [`apps/server/src/modules/agent/agent.service.ts`](../../apps/server/src/modules/agent/agent.service.ts)                                       | Internal submission construction                                     |
+| [`apps/server/src/modules/agent/acp/service.ts`](../../apps/server/src/modules/agent/acp/service.ts)                                           | External submission construction                                     |
