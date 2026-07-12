@@ -13,6 +13,7 @@ const toc: TocEntry[] = [
   { id: 'what-it-is', label: 'What Semantic Zoom does' },
   { id: 'why', label: 'Why it exists' },
   { id: 'thresholds', label: 'When nodes switch' },
+  { id: 'typography', label: 'Font size follows node size' },
   { id: 'which-nodes', label: 'Which nodes participate' },
   { id: 'hysteresis', label: 'No flicker — the hysteresis buffer' },
   { id: 'interaction', label: 'Interacting with minimal nodes' },
@@ -67,14 +68,33 @@ export default function SemanticZoom() {
       </P>
       <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
         <li>
-          <strong>≤ 150 px wide on screen</strong> → render <Code>minimal</Code>{' '}
-          (icon + label placeholder).
-        </li>
-        <li>
           <strong>&gt; 150 px wide on screen</strong> → render <Code>full</Code>{' '}
           (the normal component).
         </li>
+        <li>
+          <strong>≤ 150 px wide on screen</strong> → render <Code>minimal</Code>{' '}
+          (a tier-sized title placeholder).
+        </li>
       </ul>
+
+      <H2>Font size follows node size</H2>
+      <P>
+        A minimal node&apos;s title font is chosen from a small set of{' '}
+        <strong>discrete tiers keyed on the node&apos;s size</strong> — never on
+        how long the title is. Two nodes of the same size always render at the
+        same font size, so a zoomed-out canvas keeps a steady typographic rhythm
+        instead of scattering a 40&nbsp;px title next to an 11&nbsp;px one.
+        Bigger nodes get a bigger font, which lets more important content stand
+        out at a glance. Because the tier font is a canvas size, the label
+        simply scales down with the node as you zoom out — a smaller node always
+        shows smaller text, with no separate icon or floor.
+      </P>
+      <P>
+        Titles that don&apos;t fit <strong>wrap at word boundaries</strong>{' '}
+        (never mid-word) and then ellipsize; the font is never shrunk to squeeze
+        the text in. Taller nodes allow more lines before the title is
+        truncated.
+      </P>
 
       <H2>Which nodes participate</H2>
       <P>

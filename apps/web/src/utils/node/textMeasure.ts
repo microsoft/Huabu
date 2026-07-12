@@ -1,7 +1,7 @@
 /**
- * Pure pretext-based text measurement, shared by TextNode/QuestionNode
- * auto-sizing (via {@link computeFontSizeForHeight}) and SemanticPlaceholder
- * labels (via the `useFitText` hook → {@link fitFontSize}).
+ * Pure pretext-based text measurement, used by TextNode/QuestionNode
+ * auto-sizing (via {@link computeFontSizeForHeight}, a preset over the shared
+ * {@link fitFontSize} core).
  *
  * Both paths use a single binary-search core that prepares the text
  * once at `REF_SIZE`, then reuses that measurement in every probe by
