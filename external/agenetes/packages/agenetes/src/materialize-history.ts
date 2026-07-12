@@ -2,9 +2,9 @@ import { AGENT_STREAM_EVENTS } from '@agenetes/protocol';
 
 import { createTranscriptFolder } from './fold.js';
 
-import type { AgentTurnMeta, ObservedAgentTurn } from '@agenetes/protocol';
 import type { EventLogRecord } from './event-log.js';
 import type { PersistedTurn } from './turn-store.js';
+import type { AgentTurnMeta, ObservedAgentTurn } from '@agenetes/protocol';
 
 /**
  * Build the read-time history snapshot from committed Tier-2 turns and the

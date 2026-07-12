@@ -14,18 +14,12 @@ import { InMemoryTurnStore } from './turn-store.js';
 
 import { mountAgenetes, type WorkloadSpecShape } from './index.js';
 
-import type {
-  AgentCapabilities,
-  AgentStateSnapshot,
-  AgentTurn,
-} from '@agenetes/protocol';
+import type { AgentStateSnapshot, AgentTurn } from '@agenetes/protocol';
 import type {
   AgentCreateContext,
   AgentDriver,
   AgentHandle,
 } from '@agenetes/runtime';
-
-const CAPS = {} as AgentCapabilities;
 
 interface StubSpec extends WorkloadSpecShape {
   readonly note?: string;
