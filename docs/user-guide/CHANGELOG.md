@@ -2,6 +2,20 @@
 
 每次重要功能变更都会记录在此文件中，按时间倒序排列。
 
+## 2026-07-12 · Agent turn 改用可持久化的 Submission 边界
+
+**What Changed**
+
+内置 pi agent 与外部 ACP agent 的每轮输入统一为 `AgentSubmission<TSource> { type, content, rendered? }`：`content` 保留原始 `ChatEnvelope`，`rendered` 保存 host 在 `run()` 前生成的 canonical `AgentInput[]`。`AgentHandle.run()` 因而收敛为 `run(submission, ctx)`，不再把 host render closure 传给 driver；同一 submission 无论包含多少 canonical members，都严格对应一个 backend turn。
+
+**Notes**
+
+- Agenetes protocol 升至 `0.2.0`，新增 text / parts / command 三类 canonical input；slash command 必须作为唯一顶层 command member，其 selection 与 attachments 放在 `command.context`。
+- Tier-1 / Tier-2 日志现在保存完整 submission。Recovery 与 fork 优先复用已持久化的 `rendered`，旧 `{ type, content }` 记录则继续通过 string / JSON fallback 兼容。
+- `WorkloadSpec.initialPreamble` 只运输有序 instruction fragments，具体 realization 归 driver：pi 使用 harness-native `systemPrompt`，ACP 在首条普通 prompt 上使用 prefix fallback；command-only turn 不消费 pending preamble。
+- ACP 将 `initialPreambleDelivered` 作为独立 durable state 持久化，不能再从 `sessionId` 推断 preamble 已送达。
+- internal 与 ACP adapter 复用共享 `renderTurn()` 和 attachment primitives，同时保留各自必要的 tool-surface profile 与 command policy。架构细节见 [agent-architecture.md](../architecture/agent-architecture.md) 与 [Agenetes README](../../external/agenetes/README.md)。
+
 ## 2026-07-11 · 内置 Agent 切换到长期运行的 pi-driver Deployment
 
 **What Changed**

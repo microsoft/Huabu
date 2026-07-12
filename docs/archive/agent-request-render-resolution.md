@@ -4,6 +4,8 @@
 >
 > Last updated: 2026-07-12
 
+> Current architecture: [agent-architecture.md](../architecture/agent-architecture.md) and [Agenetes README](../../external/agenetes/README.md)
+
 ## 1. Summary
 
 Replace Agenetes' current `AgentRequest` with one generic, backward-compatible `AgentSubmission`:
