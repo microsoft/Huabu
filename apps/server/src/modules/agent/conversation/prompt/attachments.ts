@@ -36,12 +36,11 @@ import { escapeXmlAttr, escapeXmlText } from './node-element.js';
 import { ARTIFACT_URL_REGEX } from '../../../artifact/utils.js';
 import { getCanvasStore } from '../../../storage/index.js';
 
+import type { AgentInputPart } from '@agenetes/protocol';
 import type { ChatAttachment } from '@sediment/shared';
 
 /** pi-ai user-message content: text and/or vision parts. */
-export type ContentPart =
-  | { type: 'text'; text: string }
-  | { type: 'image'; data: string; mimeType: string };
+export type ContentPart = AgentInputPart;
 export type UserContent = string | ContentPart[];
 
 /**

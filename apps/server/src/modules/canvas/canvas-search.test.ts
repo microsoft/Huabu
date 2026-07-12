@@ -18,7 +18,7 @@ import {
   type SearchableEdge,
   type SearchableNode,
 } from './canvas-search.js';
-import { wrapChatRequest } from '../agent/agenetes/handle.js';
+import { createChatSubmission } from '../agent/agenetes/handle.js';
 
 import type { ChatEnvelope } from '../agent/conversation/envelope.js';
 import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
@@ -572,7 +572,7 @@ describe('searchCanvas — conversation tier', () => {
       },
     } as unknown as ChatEnvelope;
     return {
-      request: wrapChatRequest(envelope),
+      request: createChatSubmission(envelope),
       transcript: [{ type: 'text', data: { content: assistantText } }],
     };
   }
@@ -604,7 +604,7 @@ describe('searchCanvas — conversation tier', () => {
     turnsByThread.clear();
     turnsByThread.set('t1', [
       {
-        request: wrapChatRequest({
+        request: createChatSubmission({
           user: { text: 'run the build', attachments: [] },
           skills: { invokedIds: [], resolved: [] },
           focus: {

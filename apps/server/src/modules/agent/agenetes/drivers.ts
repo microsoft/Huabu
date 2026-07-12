@@ -10,28 +10,21 @@
  * L1 owns only its model, account, and tool ports plus spec compilation.
  */
 
-import {
-  type AcpCreateSpec,
-  type AcpTurnCtx,
-  type PreparedAcpPrompt,
-} from '@agenetes/acp-driver';
+import { type AcpCreateSpec, type AcpTurnCtx } from '@agenetes/acp-driver';
 import {
   mountAgenetes,
   FileThreadStore,
   FileEventLogStore,
   FileTurnStore,
 } from '@agenetes/agenetes';
-import {
-  type PiRenderedInput,
-  type PiTurnCtx,
-  type PiWorkloadSpec,
-} from '@agenetes/pi-driver';
+import { type PiTurnCtx, type PiWorkloadSpec } from '@agenetes/pi-driver';
 
 import { type AgentHandle } from './handle.js';
 import { huabuPiDriverPorts } from './pi-driver.js';
 
 import type { Agenetes } from '@agenetes/agenetes';
 import type { WorkloadType } from '@agenetes/protocol';
+import type { Message } from '@earendil-works/pi-ai';
 
 /**
  * The built-in driver's dispatch `kind` — the I5 *contract* kind L1 injects
@@ -64,10 +57,10 @@ export type AcpWorkloadSpec = AcpCreateSpec & {
 };
 
 /** The concrete long-lived ACP (Deployment) handle type. */
-export type AcpHandle = AgentHandle<PreparedAcpPrompt, AcpTurnCtx>;
+export type AcpHandle = AgentHandle<void, AcpTurnCtx>;
 
 /** The concrete built-in (Job-first) handle type. */
-export type BuiltinHandle = AgentHandle<PiRenderedInput, PiTurnCtx>;
+export type BuiltinHandle = AgentHandle<Message[], PiTurnCtx>;
 
 /** The union `WorkloadSpec` the mounted instance dispatches on `kind`. */
 export type AgenetesWorkloadSpec = AcpWorkloadSpec | BuiltinWorkloadSpec;

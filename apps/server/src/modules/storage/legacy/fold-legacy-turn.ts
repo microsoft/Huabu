@@ -31,7 +31,7 @@
  * machine name) to drive the rich render variant.
  */
 
-import { HUABU_CHAT_REQUEST_TYPE } from '../../agent/agenetes/handle.js';
+import { HUABU_CHAT_SUBMISSION_TYPE } from '../../agent/agenetes/handle.js';
 
 import type {
   LegacyChatTurnRecord,
@@ -166,7 +166,7 @@ export function legacyChatTurnToAgentTurn(
     : undefined;
 
   return {
-    request: { type: HUABU_CHAT_REQUEST_TYPE, content: record.envelope },
+    request: { type: HUABU_CHAT_SUBMISSION_TYPE, content: record.envelope },
     transcript,
     ...(meta ? { meta } : {}),
   };

@@ -84,9 +84,12 @@ vi.mock('./tools/index.js', () => ({
 
 // Deterministic per-turn render: one user message, no canvas / I/O.
 vi.mock('./conversation/prompt/build-prompt.js', () => ({
-  renderEnvelopeMessages: vi.fn(async () => ({
-    messages: [{ role: 'user', content: 'TURN_USER_MESSAGE', timestamp: 1 }],
-  })),
+  renderInternalAgentInputs: vi.fn(async () => [
+    { type: 'text', text: 'TURN_USER_MESSAGE' },
+  ]),
+  agentInputsToPiMessages: vi.fn(() => [
+    { role: 'user', content: 'TURN_USER_MESSAGE', timestamp: 1 },
+  ]),
 }));
 
 import { runAgent, syncDeploymentSystemPrompt } from './agent.service.js';

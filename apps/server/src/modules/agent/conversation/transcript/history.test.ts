@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { buildHistoryFromTurns } from './history.js';
-import { wrapChatRequest } from '../../agenetes/handle.js';
+import { createChatSubmission } from '../../agenetes/handle.js';
 
 import type { ChatEnvelope } from '../envelope.js';
 import type { AgentTurn, FoldedMessage } from '@agenetes/protocol';
@@ -42,7 +42,7 @@ function makeTurn(
   meta?: AgentTurn['meta'],
 ): AgentTurn {
   return {
-    request: text === null ? null : wrapChatRequest(makeEnvelope(text)),
+    request: text === null ? null : createChatSubmission(makeEnvelope(text)),
     transcript,
     ...(meta ? { meta } : {}),
   };

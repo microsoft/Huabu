@@ -12,8 +12,7 @@
 
 export type {
   AgentHandle,
-  AgentRequest,
-  RenderFn,
+  HuabuSubmission,
   AgentDriver,
   AgentRuntime,
 } from './handle.js';
@@ -21,14 +20,12 @@ export { createAgentRuntime } from './handle.js';
 export {
   AcpAgentHandle,
   ACP_CAPABILITIES,
-  type PreparedAcpPrompt,
   type AcpTurnCtx,
 } from '@agenetes/acp-driver';
 export {
   PiAgentHandle,
   PI_DEPLOYMENT_CAPABILITIES,
   piCapabilitiesForWorkloadType,
-  type PiRenderedInput,
   type PiTurnCtx,
   type PiWorkloadSpec,
   type PiDriverPorts,

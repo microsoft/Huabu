@@ -5,9 +5,9 @@
  * `@agenetes/pi-driver`. The underlying pi-agent-core `Agent` owns the
  * transcript, executes tools, and emits lifecycle events; this module is
  * the Huabu composition layer that compiles the serializable workload
- * spec, supplies the render closure, and bridges the yielded events into
- * the `AsyncGenerator<StreamEvent>` shape every consumer (chat / operate
- * SSE route, sketch pipeline) consumes.
+ * spec, renders the durable canonical submission, and bridges yielded
+ * events into the `AsyncGenerator<StreamEvent>` shape every consumer
+ * (chat / operate SSE route, sketch pipeline) consumes.
  *
  * Public surface:
  *  - {@link runAgent} — yields SSE-shaped events. Callers that need
@@ -15,19 +15,19 @@
  *    themselves and pull the relevant `tool_result` payload.
  */
 
+import { loadAgent, type AgentId } from '../../prompt/index.js';
+import { canvasAcpNamespace } from '../storage/paths.js';
 import {
   agenetes,
   INTERNAL_DRIVER_KIND,
   type BuiltinHandle,
   type BuiltinWorkloadSpec,
 } from './agenetes/drivers.js';
-import { type RenderFn, wrapChatRequest } from './agenetes/handle.js';
+import { createChatSubmission } from './agenetes/handle.js';
 import { buildHuabuPiWorkloadSpec } from './agenetes/pi-driver.js';
-import { canvasAcpNamespace } from '../storage/paths.js';
-import { renderEnvelopeMessages } from './conversation/prompt/build-prompt.js';
+import { renderInternalAgentInputs } from './conversation/prompt/build-prompt.js';
 import { dumpAssembledPrompt } from './conversation/prompt/debug-prompt.js';
 import { type ToolScope } from './tools/index.js';
-import { loadAgent, type AgentId } from '../../prompt/index.js';
 
 import type { ChatEnvelope } from './conversation/envelope.js';
 import type { WorkloadType } from '@agenetes/protocol';
@@ -156,7 +156,7 @@ export interface AgentRunOptions {
  * generator.
  *
  * This is now a thin COMPOSITION shell over the mounted Agenetes instance:
- * it owns per-turn host policy and render / prompt-debug closures, then
+ * it owns per-turn host policy, canonical rendering, and prompt debugging, then
  * hands a serializable {@link BuiltinWorkloadSpec} to
  * `agenetes.create(spec)` and drives one `run(...)`. The execution logic
  * now lives inside the standard `@agenetes/pi-driver`; this module keeps
@@ -184,22 +184,17 @@ export async function* runAgent(
     debugPrompt,
   } = options;
 
-  // This turn's render. An envelope renders to this turn's user message(s)
-  // (the handle calls `agent.prompt`); an envelope-less caller (memory /
-  // sketch / reachback) has already assembled `context.messages`, so it
-  // submits a NULL request and the handle resumes via `agent.continue()` —
-  // `render` is never invoked in that case.
-  const render: RenderFn<Message[]> = async (request) =>
-    (
-      await renderEnvelopeMessages(request.content, {
+  const rendered = envelope
+    ? await renderInternalAgentInputs(envelope, {
         canvasId: canvasId ?? null,
       })
-    ).messages;
+    : undefined;
+  const submission = envelope ? createChatSubmission(envelope, rendered) : null;
 
   // Optional developer aid: dump the fully-assembled prompt (system +
   // prior history + this turn). No-op unless HUABU_DEBUG_PROMPT is set.
   // Lives in the composition layer so the built-in driver need not import
-  // the host's prompt-debug util; the handle calls it back post-render.
+  // the host's prompt-debug utility; the handle calls it after lowering.
   const onRendered = debugPrompt
     ? (renderedMessages: Message[]) => {
         dumpAssembledPrompt({
@@ -262,16 +257,12 @@ export async function* runAgent(
       liveHandle === undefined && durableRecord === undefined,
     );
   }
-  const iterator = handle.run(
-    envelope ? wrapChatRequest(envelope) : null,
-    render,
-    {
-      maxIterations: maxIterations ?? agentCfg.runtime.maxIterations,
-      signal,
-      logger,
-      onRendered,
-    },
-  );
+  const iterator = handle.run(submission, {
+    maxIterations: maxIterations ?? agentCfg.runtime.maxIterations,
+    signal,
+    logger,
+    onRendered,
+  });
 
   while (true) {
     const next = await iterator.next();

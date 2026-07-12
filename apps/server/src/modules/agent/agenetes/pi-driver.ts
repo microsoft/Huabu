@@ -115,9 +115,11 @@ export function buildHuabuPiWorkloadSpec(
     workloadType: options.workloadType,
     namespace: options.namespace,
     threadId: options.threadId,
+    ...(options.systemPrompt
+      ? { initialPreamble: [options.systemPrompt] }
+      : {}),
     spec: {
       recipe: {
-        systemPrompt: options.systemPrompt,
         model: { type: 'host', id: 'active' },
         tools: toolRefs,
         runtime: {

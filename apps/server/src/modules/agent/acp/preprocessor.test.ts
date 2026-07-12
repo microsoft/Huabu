@@ -1,21 +1,19 @@
 /**
  * Tests for the deterministic preprocessor.
  *
- * Lock the on-the-wire shape of `serializePrompt` (rendered from
- * `prompt/external-agent/user_prompt.md`, with the one-shot
- * `system_prompt.md` preamble prepended on the first turn) and the
- * slash-command short-circuit / node-flattening behaviour of
- * `prepareExternalAgentPrompt`, so the format the external agent sees
- * can't regress silently.
+ * Lock the canonical AgentInput shape produced by the ACP host adapter.
+ * Backend lowering and initial-preamble realization are tested in
+ * @agenetes/acp-driver.
  */
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { prepareExternalAgentPrompt } from './preprocessor.js';
+import { renderExternalAgentInputs } from './preprocessor.js';
 import { buildAgentNodePreview, buildAgentNodeRef } from '../node-ref.js';
 
 import type { NodeNeighbourhoodContext } from '../../canvas/node-neighbourhood.js';
 import type { ChatEnvelope } from '../conversation/envelope.js';
+import type { AgentInput, AgentInputPart } from '@agenetes/protocol';
 import type { CanvasNodeType, ChatAttachment } from '@sediment/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
@@ -58,9 +56,36 @@ function makeEnvelope(opts: {
   };
 }
 
-describe('serializePrompt', () => {
+function flattenForAssertions(inputs: readonly AgentInput[]): AgentInputPart[] {
+  return inputs.flatMap((input) => {
+    if (input.type === 'text') return [{ type: 'text', text: input.text }];
+    if (input.type === 'parts') return input.parts;
+    return [{ type: 'text', text: input.text }, ...input.context];
+  });
+}
+
+async function renderExternalForAssertions(input: {
+  envelope: ChatEnvelope;
+  agentAlias: string;
+  canvasId?: string | null;
+  logger: FastifyBaseLogger;
+}) {
+  const blocks = flattenForAssertions(await renderExternalAgentInputs(input));
+  return {
+    serialized: blocks
+      .filter(
+        (part): part is Extract<AgentInputPart, { type: 'text' }> =>
+          part.type === 'text',
+      )
+      .map((part) => part.text)
+      .join('\n'),
+    blocks,
+  };
+}
+
+describe('renderExternalAgentInputs', () => {
   it('emits the verbatim task and no selected-nodes section when nothing is selected', async () => {
-    const { serialized } = await prepareExternalAgentPrompt({
+    const { serialized } = await renderExternalForAssertions({
       envelope: makeEnvelope({
         text: 'Explain the difference between async iterators and generators.',
       }),
@@ -77,7 +102,7 @@ describe('serializePrompt', () => {
   });
 
   it('wraps a selected-nodes list in <selected_nodes> when nodes are present', async () => {
-    const { serialized } = await prepareExternalAgentPrompt({
+    const { serialized } = await renderExternalForAssertions({
       envelope: makeEnvelope({
         text: 'Compare these notes.',
         selection: [
@@ -108,7 +133,7 @@ describe('serializePrompt', () => {
   });
 
   it('mentions RFS download in the selected-nodes intro', async () => {
-    const { serialized } = await prepareExternalAgentPrompt({
+    const { serialized } = await renderExternalForAssertions({
       envelope: makeEnvelope({
         text: 'task',
         selection: [{ id: 'n1', type: 'note' }],
@@ -120,7 +145,7 @@ describe('serializePrompt', () => {
   });
 
   it('escapes XML-special characters in labels so the attribute cannot break', async () => {
-    const { serialized } = await prepareExternalAgentPrompt({
+    const { serialized } = await renderExternalForAssertions({
       envelope: makeEnvelope({
         text: 'task',
         selection: [{ id: 'n1', type: 'note', label: 'a " <b>' }],
@@ -133,7 +158,7 @@ describe('serializePrompt', () => {
     );
   });
   it('wraps off-canvas attachments in <attachments> before the user request', async () => {
-    const { serialized } = await prepareExternalAgentPrompt({
+    const { serialized } = await renderExternalForAssertions({
       envelope: makeEnvelope({
         text: 'summarize the attached note',
         attachments: [
@@ -168,50 +193,48 @@ describe('serializePrompt', () => {
       serialized.indexOf('<user_request>'),
     );
   });
-  it('omits the system preamble by default and prepends it when includeSystem is set', async () => {
-    const withoutSystem = (
-      await prepareExternalAgentPrompt({
-        envelope: makeEnvelope({ text: 'ZZ_UNIQUE_TASK_BODY' }),
-        agentAlias: 'claude',
-        logger,
-      })
-    ).serialized;
-    expect(withoutSystem).not.toContain('## Working with this canvas');
-    expect(withoutSystem).not.toContain('Huabu');
-
-    const withSystem = (
-      await prepareExternalAgentPrompt({
-        envelope: makeEnvelope({ text: 'ZZ_UNIQUE_TASK_BODY' }),
-        agentAlias: 'claude',
-        includeSystem: true,
-        logger,
-      })
-    ).serialized;
-    expect(withSystem).toContain('## Working with this canvas');
-    expect(withSystem).toContain('Huabu');
-    expect(withSystem.indexOf('## Working with this canvas')).toBeLessThan(
-      withSystem.indexOf('ZZ_UNIQUE_TASK_BODY'),
-    );
-  });
 });
 
-describe('prepareExternalAgentPrompt', () => {
-  it('forwards slash commands verbatim and never includes the system preamble', async () => {
-    const result = await prepareExternalAgentPrompt({
+describe('canonical ACP rendering', () => {
+  it('renders ordinary input and slash commands into canonical members', async () => {
+    await expect(
+      renderExternalAgentInputs({
+        envelope: makeEnvelope({ text: 'hello' }),
+        agentAlias: 'claude',
+        logger,
+      }),
+    ).resolves.toEqual([{ type: 'text', text: 'hello' }]);
+
+    await expect(
+      renderExternalAgentInputs({
+        envelope: makeEnvelope({
+          text: '/compact now',
+          selection: [{ id: 'n1', type: 'note' }],
+        }),
+        agentAlias: 'claude',
+        logger,
+      }),
+    ).resolves.toMatchObject([
+      {
+        type: 'command',
+        text: '/compact now',
+        context: [{ type: 'text' }],
+      },
+    ]);
+  });
+
+  it('forwards slash commands verbatim', async () => {
+    const result = await renderExternalForAssertions({
       envelope: makeEnvelope({ text: '/compact please' }),
       agentAlias: 'claude',
-      includeSystem: true,
       logger,
     });
 
     expect(result.serialized).toBe('/compact please');
-    // Even when asked to include it, a slash short-circuit must not —
-    // so the flag stays unsent for the next real turn.
-    expect(result.includedSystem).toBe(false);
   });
 
   it('builds selectedNodes from the envelope selection refs', async () => {
-    const result = await prepareExternalAgentPrompt({
+    const result = await renderExternalForAssertions({
       envelope: makeEnvelope({
         text: 'do something',
         selection: [
@@ -227,31 +250,6 @@ describe('prepareExternalAgentPrompt', () => {
     expect(result.serialized).toContain(
       '<node id="child-1" type="note" label="Child" file="nodes/Child.md" />',
     );
-    expect(result.includedSystem).toBe(false);
-  });
-
-  it('includes the system preamble on the first turn when includeSystem is set', async () => {
-    const result = await prepareExternalAgentPrompt({
-      envelope: makeEnvelope({ text: 'first message' }),
-      agentAlias: 'claude',
-      includeSystem: true,
-      logger,
-    });
-
-    expect(result.includedSystem).toBe(true);
-    expect(result.serialized).toContain('## Working with this canvas');
-    expect(result.serialized).toContain('first message');
-  });
-
-  it('does not prepend the preamble when includeSystem is unset', async () => {
-    const result = await prepareExternalAgentPrompt({
-      envelope: makeEnvelope({ text: 'later message' }),
-      agentAlias: 'claude',
-      logger,
-    });
-
-    expect(result.includedSystem).toBe(false);
-    expect(result.serialized).not.toContain('## Working with this canvas');
   });
 
   it('renders a canvas-neighbourhood section when the envelope carries one', async () => {
@@ -278,7 +276,7 @@ describe('prepareExternalAgentPrompt', () => {
       relevantEdges: [],
     };
 
-    const result = await prepareExternalAgentPrompt({
+    const result = await renderExternalForAssertions({
       envelope: makeEnvelope({ text: 'generate an image', neighbourhood }),
       agentAlias: 'claude',
       logger,
@@ -299,7 +297,7 @@ describe('prepareExternalAgentPrompt', () => {
   });
 
   it('omits the canvas-neighbourhood section when the envelope has none', async () => {
-    const result = await prepareExternalAgentPrompt({
+    const result = await renderExternalForAssertions({
       envelope: makeEnvelope({ text: 'plain request' }),
       agentAlias: 'claude',
       logger,
@@ -308,8 +306,8 @@ describe('prepareExternalAgentPrompt', () => {
     expect(result.serialized).not.toContain('<canvas_neighbourhood>');
   });
 
-  it('appends neighbourhood context after the slash command, never the preamble', async () => {
-    const result = await prepareExternalAgentPrompt({
+  it('appends neighbourhood context after the slash command', async () => {
+    const result = await renderExternalForAssertions({
       envelope: makeEnvelope({
         text: '/compact now',
         neighbourhood: {
@@ -330,19 +328,15 @@ describe('prepareExternalAgentPrompt', () => {
         },
       }),
       agentAlias: 'claude',
-      includeSystem: true,
       logger,
     });
 
     expect(result.serialized.startsWith('/compact now')).toBe(true);
     expect(result.serialized).toContain('<canvas_neighbourhood>');
-    // No system preamble for slash turns, even when asked.
-    expect(result.serialized).not.toContain('## Working with this canvas');
-    expect(result.includedSystem).toBe(false);
   });
 
   it('forwards off-canvas text uploads into the prompt attachments', async () => {
-    const result = await prepareExternalAgentPrompt({
+    const result = await renderExternalForAssertions({
       envelope: makeEnvelope({
         text: 'use the attached excerpt',
         attachments: [
@@ -365,7 +359,7 @@ describe('prepareExternalAgentPrompt', () => {
   });
 
   it('drops a content-less image upload from the wire (no resolvable bytes)', async () => {
-    const result = await prepareExternalAgentPrompt({
+    const result = await renderExternalForAssertions({
       envelope: makeEnvelope({
         text: 'look at this',
         attachments: [

@@ -19,14 +19,15 @@
 
 import {
   agentCapabilitiesSchema,
+  agentStateSnapshotSchema,
+  agentSubmissionSchema,
   agentStreamEventSchema,
-  composeRequest,
   composeWorkloadSpec,
   controlAckSchema,
   controlMsgSchema,
   defineBinding,
-  defineRequest,
   namespaceSchema,
+  resolveAgentInputs,
   type AgentStreamEvent as ProtocolStreamEvent,
   type ControlMsg,
   type Namespace,
@@ -282,29 +283,12 @@ const externalSpecSchema = z.object({
   cwd: z.string().optional(),
 });
 
-const textRequest = defineRequest({
-  type: 'text',
-  schema: z.object({ type: z.literal('text'), content: z.string() }),
-  render: (data) => ({ message: data.content }),
-});
-const selectionRequest = defineRequest({
-  type: 'huabu.selection',
-  schema: z.object({
-    type: z.literal('huabu.selection'),
-    content: z.object({ nodeIds: z.array(z.string()) }),
-  }),
-  render: (data) => ({
-    message: `Selected nodes: ${data.content.nodeIds.join(', ')}`,
-  }),
-});
-
-const request = composeRequest([textRequest, selectionRequest]);
 const workloadSpecSchema = composeWorkloadSpec({
   bindings: [
     defineBinding({ kind: 'internal', spec: internalSpecSchema }),
     defineBinding({ kind: 'external', spec: externalSpecSchema }),
   ],
-  request: request.schema,
+  request: agentSubmissionSchema,
 });
 
 describe('WorkloadSpec + request conformance', () => {
@@ -343,21 +327,84 @@ describe('WorkloadSpec + request conformance', () => {
         storage: { root: '/data/history/canvas_2' },
       },
       threadId: 'thr_2',
+      initialPreamble: ['agent identity', 'tool policy'],
       spec: { profileId: 'copilot', alias: 'Copilot', cwd: '/repo' },
     };
     expect(workloadSpecSchema.safeParse(spec).success).toBe(true);
   });
 
-  it('routes and renders each request variant driver-agnostically', () => {
-    const text = request.schema.parse({ type: 'text', content: 'hello' });
-    expect(request.render(text)).toEqual({ message: 'hello' });
-
-    const selection = request.schema.parse({
+  it('preserves canonical inputs and resolves generic fallbacks', () => {
+    const rendered = agentSubmissionSchema.parse({
       type: 'huabu.selection',
       content: { nodeIds: ['n1', 'n2'] },
+      rendered: [
+        { type: 'text', text: 'Selected nodes: n1, n2' },
+        {
+          type: 'parts',
+          parts: [
+            { type: 'text', text: 'Reference image' },
+            { type: 'image', data: 'aGVsbG8=', mimeType: 'image/png' },
+          ],
+        },
+      ],
     });
-    expect(request.render(selection)).toEqual({
-      message: 'Selected nodes: n1, n2',
+    expect(resolveAgentInputs(rendered)).toEqual(rendered.rendered);
+
+    expect(resolveAgentInputs({ type: 'text', content: 'hello' })).toEqual([
+      { type: 'text', text: 'hello' },
+    ]);
+    expect(
+      resolveAgentInputs({
+        type: 'huabu.selection',
+        content: { nodeIds: ['n1', 'n2'] },
+      }),
+    ).toEqual([
+      {
+        type: 'text',
+        text: '{"nodeIds":["n1","n2"]}',
+      },
+    ]);
+    expect(
+      resolveAgentInputs({ type: 'text', content: 'ignored', rendered: [] }),
+    ).toEqual([]);
+  });
+
+  it('rejects mixed command sequences', () => {
+    expect(
+      agentSubmissionSchema.safeParse({
+        type: 'huabu.chat',
+        content: {},
+        rendered: [
+          { type: 'command', text: '/review', context: [] },
+          { type: 'text', text: 'extra' },
+        ],
+      }).success,
+    ).toBe(false);
+
+    expect(
+      agentSubmissionSchema.safeParse({
+        type: 'huabu.chat',
+        content: {},
+        rendered: [
+          {
+            type: 'command',
+            text: '/review',
+            context: [{ type: 'text', text: 'selected code' }],
+          },
+        ],
+      }).success,
+    ).toBe(true);
+  });
+
+  it('round-trips durable preamble delivery state independently of sessionId', () => {
+    expect(
+      agentStateSnapshotSchema.parse({
+        sessionId: 'session_1',
+        initialPreambleDelivered: false,
+      }),
+    ).toEqual({
+      sessionId: 'session_1',
+      initialPreambleDelivered: false,
     });
   });
 
