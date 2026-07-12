@@ -18,6 +18,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { getAccentTokens } from '@/components/Nodes/accentTokens';
 import useCanvasStore from '@/store/canvasStore';
 
 import { getEdgeRenderZ } from './edgeZ';
@@ -120,13 +121,6 @@ export function LabelledEdge(props: EdgeProps) {
           edgeStrokeColor={
             typeof style?.stroke === 'string' ? style.stroke : undefined
           }
-          edgeStrokeWidth={
-            typeof style?.strokeWidth === 'number'
-              ? style.strokeWidth
-              : typeof style?.strokeWidth === 'string'
-                ? Number(style.strokeWidth) || undefined
-                : undefined
-          }
         />
       </EdgeLabelRenderer>
     </>
@@ -162,7 +156,6 @@ function EdgeLabelHost(props: {
   value: string;
   selected: boolean;
   edgeStrokeColor: string | undefined;
-  edgeStrokeWidth: number | undefined;
 }) {
   const [editing, setEditing] = useState(false);
   const hasLabel = props.value.length > 0;
@@ -192,7 +185,6 @@ function EdgeLabelEditor({
   value,
   selected,
   edgeStrokeColor,
-  edgeStrokeWidth,
   editing,
   setEditing,
 }: {
@@ -207,12 +199,6 @@ function EdgeLabelEditor({
    * visually "belongs" to its edge regardless of palette colour.
    */
   edgeStrokeColor: string | undefined;
-  /**
-   * Edge `strokeWidth` (px). Drives the label border thickness so a
-   * 4px edge gets a beefier pill border than a 1px edge; clamped to
-   * a small range so chunky edges don't produce chunky pills.
-   */
-  edgeStrokeWidth: number | undefined;
   editing: boolean;
   setEditing: (next: boolean) => void;
 }) {
@@ -326,11 +312,24 @@ function EdgeLabelEditor({
   // Background tint tracks the selection / edit state, but the border
   // is always solid: selected / editing -> info blue (matches React
   // Flow's `.react-flow__edge.selected` stroke override in
-  // `index.css`); otherwise -> the edge's own stroke colour. Border
-  // thickness follows the edge `strokeWidth`, clamped to keep the pill
-  // legible on both 1px hairline edges and chunky 8px edges.
+  // `index.css`); otherwise -> the edge's own stroke colour.
   const useInfoColors = selected || editing;
   const showPlaceholderHint = !hasLabel && !editing;
+
+  // An edge label conveys a *relationship*, which must stay legible even when
+  // the connected nodes have shrunk. The pill lives inside the zoomed viewport
+  // (`EdgeLabelRenderer`), so a fixed canvas font would render at `font ×
+  // zoom` — ~3px at 25% zoom. Counter-scale by a bounded inverse zoom so the
+  // label defends roughly its base on-screen size when zoomed out, without
+  // shrinking when zoomed in (floor 1×) or ballooning / colliding at very low
+  // zoom (cap 2.5×). Only the pill scales (see `pillStyle`); the positioning
+  // wrapper is untouched so the midpoint anchor never drifts.
+  const zoom = useStore((s) => s.transform[2]);
+  const labelScale = Math.min(Math.max(1 / zoom, 1), 2.5);
+
+  // Hovering an idle pill expands it to the full label so a long relationship
+  // phrase can be read without selecting the edge (see `clampLabel`).
+  const [hovered, setHovered] = useState(false);
 
   // When the edge has no explicit `style.stroke`, the SVG path renders
   // with React Flow's default token (`--xy-edge-stroke-default`, which
@@ -342,19 +341,38 @@ function EdgeLabelEditor({
     ? 'var(--color-info)'
     : (edgeStrokeColor ??
       'var(--xy-edge-stroke, var(--xy-edge-stroke-default))');
-  const borderPx = Math.min(Math.max(edgeStrokeWidth ?? 1, 1), 3);
+  // Border stays deliberately thin so an unselected pill reads as a quiet
+  // annotation on its edge rather than a heavy chip — it no longer tracks the
+  // edge's `strokeWidth` (a chunky 8px edge used to get a chunky pill border).
+  const borderPx = useInfoColors ? 1.5 : 1;
+  // Tint the text toward the edge's own colour so a label visibly belongs to
+  // its edge — but via the SAME readability-safe formula as node accents
+  // (`getAccentTokens(...).fg`, the single source of truth) rather than the raw
+  // stroke colour, which for a pale palette edge (light yellow/green) would be
+  // unreadable on the near-white pill. Reusing the shared token also inherits
+  // its white/achromatic special-case. Only applied when the edge has an
+  // explicit colour and is not selected/editing (those use the neutral
+  // info-tinted foreground).
+  const textColor =
+    !useInfoColors && edgeStrokeColor
+      ? getAccentTokens(edgeStrokeColor).fg
+      : undefined;
   const pillStyle = {
     borderColor,
     borderWidth: `${borderPx}px`,
+    color: textColor,
+    // Bounded inverse-zoom scaling (see `labelScale`). `transform-origin:
+    // center` scales the pill about its own middle, which coincides with the
+    // wrapper's translate anchor, so the label stays centred on the edge
+    // midpoint at every zoom.
+    transform: `scale(${labelScale})`,
+    transformOrigin: 'center',
   };
 
-  // Cap the pill width so very long labels wrap onto multiple lines
-  // instead of stretching into a long single-line ribbon that visually
-  // dominates the canvas. The cap is generous (~30 CJK chars / ~50
-  // Latin chars at 11px) so most labels still fit on one line, but
-  // anything longer wraps naturally. `whitespace-pre-wrap` preserves
-  // explicit Shift+Enter newlines; `break-words` lets very long
-  // single tokens break instead of overflowing.
+  // Cap the pill width so very long labels wrap onto multiple lines instead of
+  // stretching into a ribbon that overlaps nearby nodes. `whitespace-pre-wrap`
+  // preserves explicit Shift+Enter newlines; `break-words` handles long single
+  // tokens.
   //
   // The empty min-size (`min-w` / `min-h`) is applied whenever the
   // pill has no characters, so the "Add label" hint box and the empty
@@ -362,12 +380,18 @@ function EdgeLabelEditor({
   // doesn't make the box visibly shrink. `border-solid` ensures the
   // dynamic `borderStyle` from `pillStyle` defaults to solid even
   // when Tailwind's reset would otherwise leave it as `none`.
+  // Idle labels clamp to three lines. Hover, selection, or editing reveals the
+  // complete relationship without permanently covering nearby nodes.
+  const clampLabel = hasLabel && !useInfoColors && !hovered;
   const pillClasses = [
     'sediment-edge-label',
-    'inline-block max-w-[120px] cursor-text rounded-md border-solid px-2 py-0.5',
-    'text-[11px] font-medium leading-snug whitespace-pre-wrap break-words',
+    'max-w-[120px] cursor-text rounded-md border-solid px-2 py-0.5 shadow-sm',
+    'text-[12px] font-medium leading-snug break-words',
     'outline-none',
     useInfoColors ? 'bg-info-bg text-fg-default' : 'bg-surface text-fg-default',
+    clampLabel
+      ? 'line-clamp-3 w-fit whitespace-pre-wrap'
+      : 'inline-block whitespace-pre-wrap',
     hasLabel ? '' : 'min-w-[72px] min-h-[20px]',
     editing ? 'focus:ring-1 focus:ring-[color:var(--color-info)]' : '',
   ]
@@ -388,6 +412,8 @@ function EdgeLabelEditor({
         zIndex: edgeZIndex,
       }}
       onMouseDown={(e) => e.stopPropagation()}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       onClick={(e) => {
         // When the "Add label" hint is visible the edge is already
         // selected, so a single click on the pill is the most natural
