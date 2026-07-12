@@ -30,7 +30,7 @@ other content  -> one JSON AgentTextInput
 
 An explicitly present empty array means zero inputs and must not trigger fallback.
 
-Huabu supplies `rendered` through stable host renderers before calling the handle. The behavior-preserving migration may keep separate internal and external adapters that both produce `AgentInput[]`; converging them into one `ChatEnvelope -> AgentInput[]` renderer is a final best-effort cleanup rather than a prerequisite. `AgentHandle.run()` receives the complete submission and never receives a render function.
+Huabu supplies `rendered` through stable host renderers before calling the handle. The behavior-preserving migration may keep separate internal and external adapters that both produce `AgentInput[]`; converging them into one shared host renderer is a final best-effort cleanup rather than a prerequisite. `AgentHandle.run()` receives the complete submission and never receives a render function.
 
 The complete submission is persisted in the existing `request` position in Tier 1 and Tier 2. Recovery and fork consume stored `rendered` inputs when available and use the same generic content fallback when they are absent.
 
@@ -71,8 +71,6 @@ Consequences include:
 9. Represent slash commands explicitly so preamble handling does not parse native messages.
 
 ## 4. Non-goals
-
-This proposal does not make ACP binding or namespace part of request rendering.
 
 This proposal does not expose handle state to request renderers.
 
@@ -188,29 +186,31 @@ Resolution tests field presence, not array length. `rendered: []` is an explicit
 
 This fallback is protocol normalization, not host prompt rendering. It does not inspect `submission.type`, invoke a registry, or understand `ChatEnvelope`.
 
-## 6. Rendering before `run()`
+## 6. Host rendering before `run()`
 
-Huabu defines one stable renderer:
+Rendering is a pure host operation outside the Agenetes contract. Agenetes constrains only the serializable `rendered: AgentInput[]` result; it does not define renderer signatures, dependency injection, registries, or execution context.
 
 ```ts
-type HuabuRenderer = (
-  envelope: ChatEnvelope,
-) => readonly AgentInput[] | Promise<readonly AgentInput[]>;
+const rendered = await renderInternalEnvelope(envelope, {
+  canvasId,
+  logger,
+  // Any other host-owned rendering dependency.
+});
 ```
 
-An ordinary call becomes:
+An ordinary call then becomes:
 
 ```ts
 const submission: HuabuSubmission = {
   type: 'huabu.chat',
   content: envelope,
-  rendered: await renderChatEnvelope(envelope),
+  rendered,
 };
 
 handle.run(submission, turnContext);
 ```
 
-No function is passed to `run()`. An exceptional caller overrides rendering by constructing a different `rendered` sequence.
+No function is passed to `run()`. An exceptional caller overrides rendering by constructing a different `rendered` sequence. A renderer may read canvas id, binding metadata, logger, files, caches, or any other host-owned context; none of those dependencies enters the Agenetes interface unless the host deliberately includes their result in `content` or `rendered`.
 
 The existing `defineRequest()` / `composeRequest()` helpers are unnecessary for Huabu and should be removed with `AgentRequest`. A future host that wants renderer dispatch may implement it entirely above the submission contract.
 
@@ -227,10 +227,10 @@ external: ChatEnvelope -> renderTurn(ACP_PROFILE)      -> AgentInput[]
 
 These adapters are selected before `run()` and are not passed as per-turn functions. Their outputs share the same durable canonical type, so logging, recovery, fork, handle policy, and driver lowering are already unified.
 
-After parity is established, a best-effort cleanup may converge them:
+After parity is established, a best-effort cleanup may converge them. The shared function may still accept arbitrary host context:
 
 ```text
-ChatEnvelope
+ChatEnvelope + host render context
   -> renderChatEnvelope()
   -> AgentInput[]
   -> AgentSubmission { type, content, rendered }
@@ -243,8 +243,9 @@ The eventual shared `renderChatEnvelope()` performs slash-command recognition on
 ```ts
 async function renderChatEnvelope(
   envelope: ChatEnvelope,
+  context: HuabuRenderContext,
 ): Promise<readonly AgentInput[]> {
-  const parts = await renderTurn(envelope);
+  const parts = await renderTurn(envelope, context);
 
   if (isSlashCommand(envelope.user.text)) {
     return [
@@ -270,9 +271,7 @@ Convergence requires the current internal/reachback profile wording to become ne
 
 Failure to converge the two host adapters does not compromise the new protocol boundary. It leaves a small host-level rendering variation while preserving all submission and lifecycle invariants.
 
-`ChatEnvelope` should carry the `canvasId` already known by `buildChatEnvelope()` so attachment resolution does not rely on a per-turn closure.
-
-ACP binding remains `{ alias, profileId }`; canvas-scoped session isolation remains in `WorkloadSpec.namespace`; reachback remains in `WorkloadSpec.env`. None of these values enters `renderChatEnvelope()`.
+ACP binding remains `{ alias, profileId }`; canvas-scoped session isolation remains in `WorkloadSpec.namespace`; reachback remains in `WorkloadSpec.env`. A host renderer may also read any of these values when producing canonical input, but Agenetes neither requires nor interprets that dependency.
 
 ## 8. Portable initial preamble
 
@@ -402,11 +401,10 @@ Backend-native input is never persisted. Base64 inside canonical `AgentInputPart
 ### Stage 2: Behavior-preserving Huabu adapters
 
 1. Promote server-local `ContentPart` to `AgentInputPart`.
-2. Add `canvasId` to newly built `ChatEnvelope`s.
-3. Adapt `INTERNAL_PROFILE` output to canonical `AgentInput[]`.
-4. Adapt `ACP_PROFILE` / `ACP_SLASH_PROFILE` output to canonical `AgentInput[]`.
-5. Emit `AgentCommandInput` for leading slash commands.
-6. Construct complete submissions before calling either driver.
+2. Adapt `INTERNAL_PROFILE` output to canonical `AgentInput[]`.
+3. Adapt `ACP_PROFILE` / `ACP_SLASH_PROFILE` output to canonical `AgentInput[]`.
+4. Emit `AgentCommandInput` for leading slash commands.
+5. Construct complete submissions before calling either driver.
 
 ### Stage 3: Handle and driver boundary
 
@@ -422,7 +420,6 @@ Backend-native input is never persisted. Base64 inside canonical `AgentInputPart
 2. Move ACP's first-message preamble and delivered flag into the handle.
 3. Make command-only sequences defer preamble delivery.
 4. Restore delivered state during native session resume.
-5. Remove `binding.alias`, logger, `includeSystem`, and captured `canvasId` from ACP request rendering.
 
 ### Stage 5: Best-effort renderer convergence
 
@@ -465,7 +462,7 @@ The implementation must cover:
 | [`external/agenetes/packages/agenetes/src/instance.ts`](../../external/agenetes/packages/agenetes/src/instance.ts)                             | Logging decoration over complete submissions            |
 | [`external/agenetes/packages/agenetes/src/event-log.ts`](../../external/agenetes/packages/agenetes/src/event-log.ts)                           | Tier-1 `turn_start` submission persistence              |
 | [`external/agenetes/packages/agenetes/src/materialize-history.ts`](../../external/agenetes/packages/agenetes/src/materialize-history.ts)       | Complete and incomplete turn materialization            |
-| [`apps/server/src/modules/agent/conversation/envelope.ts`](../../apps/server/src/modules/agent/conversation/envelope.ts)                       | Huabu source content including `canvasId`               |
+| [`apps/server/src/modules/agent/conversation/envelope.ts`](../../apps/server/src/modules/agent/conversation/envelope.ts)                       | Huabu source content                                    |
 | [`apps/server/src/modules/agent/conversation/prompt/build-prompt.ts`](../../apps/server/src/modules/agent/conversation/prompt/build-prompt.ts) | Canonical adapters and eventual shared renderer         |
 | [`apps/server/src/modules/agent/agent.service.ts`](../../apps/server/src/modules/agent/agent.service.ts)                                       | Internal submission construction                        |
 | [`apps/server/src/modules/agent/acp/service.ts`](../../apps/server/src/modules/agent/acp/service.ts)                                           | External submission construction                        |
