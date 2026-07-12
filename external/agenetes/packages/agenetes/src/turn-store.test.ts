@@ -83,6 +83,15 @@ describe.each<[string, () => TurnStore]>([
     expect(store.fence(n, 'thread-1')).toBe(7);
   });
 
+  it('count() returns the number of folded turns without loading them', () => {
+    const store = make();
+    const n = ns('canvas-1');
+    expect(store.count(n, 'thread-1')).toBe(0);
+    store.append(n, 'thread-1', persisted('a', 1, 3));
+    store.append(n, 'thread-1', persisted('b', 4, 7));
+    expect(store.count(n, 'thread-1')).toBe(2);
+  });
+
   it('isolates turns per (namespace, threadId)', () => {
     const store = make();
     const a = ns('canvas-a');
@@ -113,6 +122,7 @@ describe('FileTurnStore — on-disk specifics', () => {
     // A fresh store reads the same on-disk log (restart-surviving).
     const restarted = new FileTurnStore();
     expect(restarted.list(n, 'thread-1').map((p) => p.seqEnd)).toEqual([3, 7]);
+    expect(restarted.count(n, 'thread-1')).toBe(2);
     expect(restarted.fence(n, 'thread-1')).toBe(7);
   });
 

@@ -54,6 +54,7 @@ export type BindingMemberSchema<
   workloadType: typeof workloadTypeSchema;
   namespace: typeof namespaceSchema;
   threadId: typeof threadIdSchema;
+  initialPreamble: z.ZodOptional<z.ZodReadonly<z.ZodArray<z.ZodString>>>;
   spec: Spec;
 }>;
 
@@ -90,6 +91,7 @@ export function defineBinding<
     workloadType: workloadTypeSchema,
     namespace: namespaceSchema,
     threadId: threadIdSchema,
+    initialPreamble: z.array(z.string()).readonly().optional(),
     spec: config.spec,
   }) as BindingMemberSchema<Kind, Spec>;
 

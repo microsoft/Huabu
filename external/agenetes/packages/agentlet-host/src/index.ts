@@ -44,6 +44,7 @@ export type { AgentletStatus } from '@agenetes/protocol';
 // without importing @agentlet/protocol directly (agentlet stays hidden
 // behind this L2 transport package).
 export type { AgentConnection, AcpMessage } from '@agentlet/protocol';
+export { AgentletRequestError } from '@agentlet/server';
 
 /** Host-injected configuration for {@link mountAgenetes}. */
 export interface MountAgenetesOptions {

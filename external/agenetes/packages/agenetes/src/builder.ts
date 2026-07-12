@@ -2,8 +2,9 @@
 // fixes drivers as static wiring at mount time. `mountAgenetes()` returns
 // an accumulating, type-safe builder:
 //
-//   - `.addFactory(factoryName, factory)` grows the factory dictionary
-//     `dfs: Record<factoryName, (cfg) => AgentDriver>`, threading a
+//   - standard ACP and pi factories are present from the start;
+//   - `.addFactory(factoryName, factory)` grows the factory dictionary,
+//     threading a
 //     `factoryName → cfg` type map through the builder generics so a later
 //     `.register` is checked against the named factory (no `unknown`, no
 //     hand-written registry interface);
@@ -20,6 +21,14 @@
 // logger. This module fixes only the mechanism; whether a factory mounts
 // its own transport or receives a shared reference is an impl choice.
 
+import {
+  acpDriverFactory,
+  type AcpDriverFactoryConfig,
+} from '@agenetes/acp-driver';
+import {
+  piDriverFactory,
+  type PiDriverFactoryConfig,
+} from '@agenetes/pi-driver';
 import { createAgentRuntime } from '@agenetes/runtime';
 
 import {
@@ -32,6 +41,10 @@ import {
   type Agenetes,
   type WorkloadSpecShape,
 } from './instance.js';
+import {
+  DEFAULT_AUTO_RECOVER_POLICY,
+  type AutoRecoverPolicy,
+} from './recovery.js';
 import { InMemoryThreadStore, type ThreadStore } from './thread-store.js';
 import { InMemoryTurnStore, type TurnStore } from './turn-store.js';
 
@@ -42,6 +55,12 @@ import type { AgentDriver, AgentHandle } from '@agenetes/runtime';
  * bootstrap-time config `cfg`. A factory with no config uses `void`.
  */
 export type DriverFactory<TCfg = void> = (cfg: TCfg) => AgentDriver;
+
+/** Standard factories available on every newly mounted builder. */
+export interface StandardDriverFactoryMap {
+  readonly acp: DriverFactory<AcpDriverFactoryConfig>;
+  readonly pi: DriverFactory<PiDriverFactoryConfig>;
+}
 
 /** The config type a registered factory named `FN` expects. */
 type CfgOf<FMap, FN extends keyof FMap> =
@@ -94,6 +113,12 @@ interface Registration {
 /** Options for {@link mountAgenetes}. */
 export interface MountAgenetesOptions {
   /**
+   * Instance-wide gate for driver-requested folded-history loading.
+   * Defaults to automatic recovery up to 10,000 estimated tokens and deny
+   * above the threshold.
+   */
+  autoRecoverPolicy?: AutoRecoverPolicy;
+  /**
    * The durable thread-record backing for the query surface (I9.4).
    * Defaults to an in-memory store; a host wires an ACP-session-store
    * adapter here at M5 E2 for restart-surviving records.
@@ -116,23 +141,26 @@ export interface MountAgenetesOptions {
 }
 
 /**
- * Open an {@link AgenetesBuilder} (I9.5). The standard factories (e.g.
- * `acp`) are NOT pre-registered by this core yet — that wiring, and the
- * host-appended canvas-coupled `builtin` factory, arrive at M5 E2; the
- * builder mechanism they use is what lands here.
+ * Open an {@link AgenetesBuilder} (README I9.5) with the standard ACP and
+ * pi factories already available for registration.
  */
 export function mountAgenetes(
   options: MountAgenetesOptions = {},
-): AgenetesBuilder {
-  const factories = new Map<string, DriverFactory<never>>();
+): AgenetesBuilder<StandardDriverFactoryMap> {
+  const factories = new Map<string, DriverFactory<never>>([
+    ['acp', acpDriverFactory as DriverFactory<never>],
+    ['pi', piDriverFactory as DriverFactory<never>],
+  ]);
   const registrations: Registration[] = [];
   const threadStore = options.threadStore ?? new InMemoryThreadStore();
   const eventLog = new EventLog(
     options.eventLogStore ?? new InMemoryEventLogStore(),
   );
   const turnStore = options.turnStore ?? new InMemoryTurnStore();
+  const autoRecoverPolicy =
+    options.autoRecoverPolicy ?? DEFAULT_AUTO_RECOVER_POLICY;
 
-  const builder: AgenetesBuilder<Record<string, DriverFactory<never>>> = {
+  const builder: AgenetesBuilder<StandardDriverFactoryMap> = {
     addFactory(factoryName, factory) {
       factories.set(factoryName, factory as DriverFactory<never>);
       return builder as never;
@@ -161,19 +189,17 @@ export function mountAgenetes(
         // `driverName` is the dispatch `kind` (I5.1 alias): register under
         // the contract kind. The driver carries no `kind` of its own —
         // dispatch is external, supplied here as the first `register` arg.
-        runtime.register(driverName, {
-          capabilities: driver.capabilities,
-          create: (input, priorState) => driver.create(input, priorState),
-        });
+        runtime.register(driverName, driver);
       }
       return createAgenetesInstance<TSpec, THandle>(
         runtime,
         threadStore,
         eventLog,
         turnStore,
+        autoRecoverPolicy,
       );
     },
   };
 
-  return builder as AgenetesBuilder;
+  return builder;
 }

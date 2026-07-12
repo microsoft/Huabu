@@ -1,159 +1,106 @@
-// The `AgentRequest` contract — the per-turn payload a caller sends to a
-// running agent. See docs/proposals/layered-architecture.md §3.6.1.
-//
-// A request is INDEPENDENT of the driver route (`kind`): the same driver's
-// `submit()` may receive heterogeneous requests (e.g. a canvas selection vs
-// a dictionary to render as a markdown table), each with completely
-// different rendering. So the polymorphism lives on the REQUEST VARIANT,
-// not on the driver. Every variant only has to carry:
-//
-//   - `type`    — the string-literal discriminant (tells variants apart).
-//   - `content` — the payload data member (shape is variant-specific).
-//
-// The request itself is plain, JSON-serializable data — persisting the raw
-// request to the durable log is just `JSON.stringify(request)`, and the raw
-// request (not any rendered result) is the source of truth for replay.
-//
-// Rendering — turning a request into the uniform `AgentInput` fed to L3 —
-// is a SEPARATE, driver-agnostic concern. Each variant declares its own
-// `render`; `composeRequest` folds the registered variants into one wire
-// `schema` plus a single type-dispatching `render` function. A driver's
-// `submit(request, render)` receives that composed renderer explicitly and
-// invokes it at the last moment — the driver never owns rendering.
-//
-// "Protocol gives the blocks, the host composes." This package ships
-// `defineRequest` / `composeRequest`; concrete variants (e.g. Sediment's
-// `huabu.selection`) and their `render` implementations are host
-// registrations, never upstream.
+// The `AgentSubmission` contract — the durable per-turn source payload plus
+// its optional host-rendered canonical input. Rendering is complete before
+// `AgentHandle.run()`; drivers receive data, never host render functions.
 
 import { z } from 'zod';
 
-/**
- * The uniform, driver-agnostic input every `render` produces and every
- * driver's `submit()` ultimately feeds to L3. Kept minimal for M1 — this
- * is the L2<->L3 (ACP) seam and will grow (parts / attachments / …) when
- * the drivers are wired.
- */
-export interface AgentInput {
-  readonly message: string;
-}
+export const agentInputPartSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('text'),
+    text: z.string(),
+  }),
+  z.object({
+    type: z.literal('image'),
+    data: z.string(),
+    mimeType: z.string(),
+  }),
+]);
 
-/**
- * The driver-agnostic *base* shape every composed request variant
- * satisfies: a string-literal `type` discriminant plus a variant-specific
- * `content`. A host composes a closed union of concrete variants
- * ({@link composeRequest}); this base is what the framework persists and
- * replays — the raw request is plain JSON-serializable data, so persisting
- * it to the durable turn log (README I9.8) is just `JSON.stringify`, and
- * the raw request (never a rendered result) is the source of truth for
- * replay. Any concrete variant value is assignable to this base.
- */
-export const agentRequestBaseSchema = z.object({
-  type: z.string(),
-  content: z.unknown(),
+export type AgentInputPart = z.infer<typeof agentInputPartSchema>;
+
+export const agentTextInputSchema = z.object({
+  type: z.literal('text'),
+  text: z.string(),
 });
 
-/** The persisted, driver-agnostic per-turn request (see {@link agentRequestBaseSchema}). */
-export type AgentRequest = z.infer<typeof agentRequestBaseSchema>;
+export type AgentTextInput = z.infer<typeof agentTextInputSchema>;
 
-/**
- * A request variant's object schema. It MUST carry the string-literal
- * discriminant `type` (so variants can be told apart on the wire) and a
- * `content` payload member; anything else is variant-specific.
- */
-export type RequestVariantSchema<Type extends string> = z.ZodObject<
-  {
-    type: z.ZodLiteral<Type>;
-    content: z.ZodTypeAny;
-  },
-  z.core.$catchall<z.ZodTypeAny> | z.core.$strip
->;
+export const agentPartsInputSchema = z.object({
+  type: z.literal('parts'),
+  parts: z.array(agentInputPartSchema).readonly(),
+});
 
-/**
- * A type-dispatching renderer over a composed request schema: maps any
- * validated request to the uniform {@link AgentInput}.
- */
-export type Renderer<Schema extends z.ZodTypeAny> = (
-  request: z.infer<Schema>,
-) => AgentInput;
+export type AgentPartsInput = z.infer<typeof agentPartsInputSchema>;
 
-/**
- * One request variant: its wire-data `schema` plus the `render` behaviour
- * that belongs to it. `render` is typed against this variant's own data.
- */
-export interface RequestDefinition<
-  Type extends string = string,
-  Schema extends RequestVariantSchema<Type> = RequestVariantSchema<Type>,
+export const agentCommandInputSchema = z.object({
+  type: z.literal('command'),
+  text: z.string(),
+  context: z.array(agentInputPartSchema).readonly(),
+});
+
+export type AgentCommandInput = z.infer<typeof agentCommandInputSchema>;
+
+export const agentInputSchema = z.discriminatedUnion('type', [
+  agentTextInputSchema,
+  agentPartsInputSchema,
+  agentCommandInputSchema,
+]);
+
+export type AgentInput = z.infer<typeof agentInputSchema>;
+
+export interface AgentSubmission<
+  TSource = unknown,
+  TType extends string = string,
 > {
-  readonly type: Type;
-  readonly schema: Schema;
-  readonly render: (data: z.infer<Schema>) => AgentInput;
+  readonly type: TType;
+  readonly content: TSource;
+  readonly rendered?: readonly AgentInput[];
 }
 
-/** A request definition with its type parameters erased. */
-export type AnyRequestDefinition = RequestDefinition;
-
-/**
- * Declare one request variant. The host calls this once per registered
- * variant (e.g. `defineRequest({ type: 'huabu.selection', schema, render
- * })`) and passes the collection to {@link composeRequest}.
- */
-export function defineRequest<
-  Type extends string,
-  Schema extends RequestVariantSchema<Type>,
->(config: {
-  type: Type;
-  schema: Schema;
-  render: (data: z.infer<Schema>) => AgentInput;
-}): RequestDefinition<Type, Schema> {
-  return config;
-}
-
-/**
- * Fold the host's registered request variants into a closed request
- * contract: a `discriminatedUnion('type', …)` `schema` for wire validation
- * (yielding plain data) and a single `render` function that dispatches on
- * `type` to the matching variant's renderer. The composed `render` is what
- * a driver's `submit(request, render)` receives — one renderer shared
- * across every driver.
- */
-export function composeRequest<
-  const Variants extends readonly [
-    AnyRequestDefinition,
-    ...AnyRequestDefinition[],
-  ],
->(variants: Variants) {
-  const byType = new Map(
-    variants.map((variant) => [variant.type, variant] as const),
-  );
-
-  const schemas = variants.map((variant) => variant.schema) as unknown as [
-    Variants[number]['schema'],
-    ...Variants[number]['schema'][],
-  ];
-
-  const schema = z.discriminatedUnion('type', schemas);
-
-  const render: Renderer<typeof schema> = (request) => {
-    const variant = byType.get(request.type);
-    if (variant === undefined) {
-      // Unreachable: `schema` already rejected unknown `type`.
-      throw new Error(
-        `No request variant registered for type "${request.type}".`,
-      );
+export const agentSubmissionSchema: z.ZodType<AgentSubmission> = z
+  .object({
+    type: z.string(),
+    content: z.unknown(),
+    rendered: z.array(agentInputSchema).readonly().optional(),
+  })
+  .superRefine((submission, ctx) => {
+    const rendered = submission.rendered;
+    if (
+      rendered !== undefined &&
+      rendered.some((input) => input.type === 'command') &&
+      (rendered.length !== 1 || rendered[0]?.type !== 'command')
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'An AgentCommandInput must be the only top-level rendered input.',
+        path: ['rendered'],
+      });
     }
-    return variant.render(request);
-  };
+  });
 
-  return { schema, render };
+export function resolveAgentInputs(
+  submission: AgentSubmission,
+): readonly AgentInput[] {
+  if (submission.rendered !== undefined) {
+    return submission.rendered;
+  }
+
+  if (typeof submission.content === 'string') {
+    return [{ type: 'text', text: submission.content }];
+  }
+
+  let text: string | undefined;
+  try {
+    text = JSON.stringify(submission.content);
+  } catch (error) {
+    throw new TypeError('Agent submission content is not JSON serializable', {
+      cause: error,
+    });
+  }
+  if (text === undefined) {
+    throw new TypeError('Agent submission content is not JSON serializable');
+  }
+
+  return [{ type: 'text', text }];
 }
-
-/**
- * The composed request contract produced by {@link composeRequest} — the
- * wire `schema` plus its type-dispatching `render`. Use
- * `z.infer<ComposedRequest<…>['schema']>` to derive the request union type
- * in the host.
- */
-export type ComposedRequest<
-  Variants extends readonly [AnyRequestDefinition, ...AnyRequestDefinition[]],
-> = ReturnType<typeof composeRequest<Variants>>;

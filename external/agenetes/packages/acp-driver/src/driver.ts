@@ -11,14 +11,13 @@
 // session (M5 C4b). See docs/proposals/layered-architecture.md §7 (M5).
 
 import {
-  ACP_CAPABILITIES,
   AcpAgentHandle,
   type AcpCreateSpec,
   type AcpTurnCtx,
   type InStreamEvent,
-  type PreparedAcpPrompt,
 } from './handle.js';
 
+import type { AgentSubmission } from '@agenetes/protocol';
 import type { AgentDriver } from '@agenetes/runtime';
 
 // `AcpCreateSpec` (the create-time WorkloadSpec projection the handle
@@ -27,21 +26,12 @@ import type { AgentDriver } from '@agenetes/runtime';
 export type { AcpCreateSpec } from './handle.js';
 
 /**
- * The concrete ACP {@link AgentDriver} type (a Deployment: full control +
- * `session/load`). Generic over the host request shape (`TRequest`), which
- * the handle never inspects — it only forwards it to `render`. The handle's
- * `run` returns `void`: the turn's durable transcript is folded from the
- * yielded event stream by L2 (README I9.8), so the driver's `TResult` is
- * free.
+ * The concrete ACP {@link AgentDriver} type. Generic over the submission's
+ * opaque host source while lowering only protocol-owned canonical inputs.
  */
-export type AcpAgentDriver<TRequest = unknown> = AgentDriver<
-  AcpCreateSpec,
-  TRequest,
-  PreparedAcpPrompt,
-  void,
-  InStreamEvent,
-  AcpTurnCtx
->;
+export type AcpAgentDriver<
+  TSubmission extends AgentSubmission = AgentSubmission,
+> = AgentDriver<AcpCreateSpec, TSubmission, void, InStreamEvent, AcpTurnCtx>;
 
 /**
  * Bootstrap config for {@link acpDriverFactory} (the I9.5 `factoryArgs`).
@@ -57,12 +47,10 @@ export type AcpDriverFactoryConfig = void;
  * whose `create(spec)` mints a long-lived {@link AcpAgentHandle} that bakes
  * `spec` and self-resolves its live session per turn (I9.3).
  */
-export function acpDriverFactory<TRequest = unknown>(
-  _config?: AcpDriverFactoryConfig,
-): AcpAgentDriver<TRequest> {
+export function acpDriverFactory<
+  TSubmission extends AgentSubmission = AgentSubmission,
+>(_config?: AcpDriverFactoryConfig): AcpAgentDriver<TSubmission> {
   return {
-    capabilities: ACP_CAPABILITIES,
-    create: (spec, priorState) =>
-      new AcpAgentHandle<TRequest>(spec, priorState),
+    create: (spec, context) => new AcpAgentHandle<TSubmission>(spec, context),
   };
 }

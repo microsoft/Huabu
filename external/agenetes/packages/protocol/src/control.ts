@@ -1,6 +1,6 @@
 // The `ControlMsg` contract — the L1->L2->agent CONTROL plane: the
 // host-to-agent operations that steer a live session (as opposed to the
-// per-turn `AgentRequest` data plane and the agent-to-host
+// per-turn `AgentSubmission` data plane and the agent-to-host
 // `AgentStreamEvent` notification stream). See
 // docs/proposals/layered-architecture.md §3.6.2.
 //
@@ -13,8 +13,9 @@
 //
 // Which operations a given agent actually honours is a runtime concern,
 // described by {@link AgentCapabilities} (a Job advertises only `cancel`;
-// a Deployment advertises the full set). Capability GATING is enforced by
-// the control plane at call time; this schema only fixes the wire SHAPE.
+// a Deployment advertises the subset it actually honours). Capability
+// GATING is enforced by the control plane at call time; this schema only
+// fixes the wire SHAPE.
 
 import { z } from 'zod';
 
@@ -30,12 +31,13 @@ export const CONTROL_MSGS = {
   SetModel: 'set_model',
   SetConfigOption: 'set_config_option',
   AnswerPermission: 'answer_permission',
+  SetContext: 'set_context',
 } as const;
 
 /**
  * The set of control-operation discriminants. Also the element type of
- * {@link AgentCapabilities.control}, which lists exactly the operations an
- * agent honours.
+ * {@link AgentCapabilities.supportedControlMessages}, which lists exactly
+ * the operations an agent honours.
  */
 export const controlMsgTypeSchema = z.enum([
   'cancel',
@@ -43,6 +45,7 @@ export const controlMsgTypeSchema = z.enum([
   'set_model',
   'set_config_option',
   'answer_permission',
+  'set_context',
 ]);
 
 /** A control-operation discriminant. */
@@ -91,6 +94,17 @@ export const answerPermissionControlDataSchema = z.object({
   ]),
 });
 
+/**
+ * `set_context` — update driver-owned live context between turns.
+ *
+ * Minimal first shape: lets the host refresh a long-lived session's system
+ * prompt without recreating it. May grow further optional fields (e.g.
+ * tools) as standard use cases emerge.
+ */
+export const setContextControlDataSchema = z.object({
+  systemPrompt: z.string().optional(),
+});
+
 // ── Envelope union ─────────────────────────────────────────────────────
 
 /**
@@ -110,6 +124,10 @@ export const controlMsgSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('answer_permission'),
     data: answerPermissionControlDataSchema,
+  }),
+  z.object({
+    type: z.literal('set_context'),
+    data: setContextControlDataSchema,
   }),
 ]);
 
@@ -138,23 +156,25 @@ export type ControlAck = z.infer<typeof controlAckSchema>;
 // ── Capabilities descriptor ────────────────────────────────────────────
 
 /**
- * The serializable capability descriptor an agent advertises — the single
- * source of truth for discovery, capability-aware UX, and admission. It is
- * composable (OCP): a new method capability extends `control`; a new
- * behavioural capability adds a field with a conservative default.
+ * The serializable capability descriptor a realized handle advertises. It
+ * is composable: a new host→agent callable capability extends
+ * `supportedControlMessages`; a new non-callable behavioural trait adds a
+ * field with a conservative default.
  *
- * A `Job` advertises only `{ control: ['cancel'] }`; a `Deployment`
- * advertises the full control set plus `loadSession` / `slashCommands`.
- * The Job/Deployment presets are NOT encoded here — each driver advertises
- * its own descriptor at registration.
+ * A `Job` advertises only `{ supportedControlMessages: ['cancel'] }`; a
+ * `Deployment` advertises the subset its runtime supports, plus any
+ * non-callable traits such as `loadSession`. The Job/Deployment presets
+ * are not encoded here — each realized handle reports the descriptor it
+ * actually honours.
  */
 export const agentCapabilitiesSchema = z.object({
-  /** Which control operations the agent honours (subset of the union). */
-  control: z.array(controlMsgTypeSchema),
+  /**
+   * Which control operations the agent honours (subset of the closed
+   * `ControlMsg` vocabulary).
+   */
+  supportedControlMessages: z.array(controlMsgTypeSchema),
   /** Whether the agent can resume a prior session (ACP `loadSession`). */
   loadSession: z.boolean().optional(),
-  /** Whether the agent advertises a slash-command catalogue. */
-  slashCommands: z.boolean().optional(),
   /**
    * How the agent accepts turn input while a turn is in flight. Behavioural
    * capability; conservative default `'blocking'` (turn-based, the ACP

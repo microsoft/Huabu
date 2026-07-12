@@ -40,7 +40,7 @@ import {
 } from '@sediment/shared';
 
 import { agenetes } from '../agent/agenetes/drivers.js';
-import { unwrapChatRequest } from '../agent/agenetes/handle.js';
+import { chatEnvelopeFromSubmission } from '../agent/agenetes/handle.js';
 import { canvasAcpNamespace } from '../storage/paths.js';
 
 import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
@@ -219,7 +219,7 @@ function scanNodeContent(
 function buildThreadHaystack(turns: readonly AgentTurn[]): string {
   const segments: string[] = [];
   for (const turn of turns) {
-    const userText = unwrapChatRequest(turn.request)?.user?.text;
+    const userText = chatEnvelopeFromSubmission(turn.request)?.user?.text;
     if (typeof userText === 'string' && userText.length > 0) {
       segments.push(userText);
     }

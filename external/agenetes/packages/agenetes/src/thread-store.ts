@@ -23,6 +23,7 @@ import { agentMetadataSchema, sessionIdSchema } from '@agenetes/protocol';
 import { atomicWriteJson, readJson, sanitizeId } from './io.js';
 
 import type { Namespace, AgentStateSnapshot } from '@agenetes/protocol';
+import type { AgentDurableRecord } from '@agenetes/runtime';
 
 /**
  * One entry of the per-namespace persistent thread table: the durable
@@ -32,12 +33,7 @@ import type { Namespace, AgentStateSnapshot } from '@agenetes/protocol';
  * handle up-reports and L1 reads — one type, three roles — so the instance
  * writes it verbatim with no translation.
  */
-export interface ThreadRecord<TSpec = unknown> {
-  /** The workload spec this thread was created from (durable, opaque). */
-  readonly spec: TSpec;
-  /** Agenetes-owned durable state, independent of any live handle. */
-  readonly state: AgentStateSnapshot;
-}
+export type ThreadRecord<TSpec = unknown> = AgentDurableRecord<TSpec>;
 
 /**
  * The durable thread-record store the query surface reads — a per-namespace

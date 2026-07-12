@@ -134,10 +134,9 @@ export function createTranscriptFolder(): TranscriptFolder {
       }
     },
     result(): FoldedMessage[] {
-      if (planEntries) {
-        folded.push({ type: 'plan', data: { entries: planEntries } });
-      }
-      return folded;
+      return planEntries
+        ? [...folded, { type: 'plan', data: { entries: planEntries } }]
+        : [...folded];
     },
   };
 }

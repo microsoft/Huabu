@@ -28,58 +28,12 @@
 
 import type {
   AgentCapabilities,
+  AgentSubmission,
   AgentStateSnapshot,
   AgentStreamEvent,
   ControlAck,
   ControlMsg,
 } from '@agenetes/protocol';
-
-/**
- * The per-turn *session state* a handle hands its `render` closure (the
- * second `render` argument). A stateful render — one whose output depends
- * on where in the session this turn falls — reads it here rather than
- * reaching into driver-owned session state itself. It is deliberately a
- * small, DRIVER-AGNOSTIC descriptor (generic session facts like "is this
- * the first message"), NOT a driver-specific instruction: the driver
- * (L2) *owns* and supplies the state; the render (L1) *interprets* it
- * (e.g. the ACP render maps `isFirstMessage` onto whether to prepend its
- * one-shot system preamble). New generic fields (turn index, resumed-ness)
- * are added here over time; nothing driver-specific belongs on it.
- */
-export interface AgentTurnState {
-  /**
-   * Whether this is, in the session's own reckoning, its first message —
-   * i.e. no prior turn has effectively landed yet (a fresh session, not a
-   * resumed one). Each driver defines what "first" means for its backend;
-   * a render uses it to decide first-turn-only content.
-   */
-  readonly isFirstMessage: boolean;
-}
-
-/**
- * Turns a (non-null) request into the backend-native payload a handle
- * feeds its runtime. Supplied explicitly to {@link AgentHandle.run} —
- * render belongs to the caller, not the handle. It is only ever invoked
- * for a non-null request, so it never has to model the "no new input"
- * case (see {@link AgentHandle.run}).
- *
- * The handle also passes the per-turn {@link AgentTurnState} it owns as
- * the second argument, so a *stateful* render can vary its output by
- * session position without reading driver-owned state directly (the
- * driver supplies the state; the render interprets it). A stateless
- * render simply ignores it.
- *
- * `TRequest` is the host request shape (the L1↔L2 request contract, kept
- * as a type parameter so this package stays host-agnostic). `TRendered`
- * is the backend-native render output (pi-ai `Message[]` for the built-in
- * path, ACP prompt blocks for the external path). `TState` is the
- * driver-supplied turn state, defaulting to the canonical
- * {@link AgentTurnState}.
- */
-export type RenderFn<TRequest, TRendered, TState = AgentTurnState> = (
-  request: TRequest,
-  state: TState,
-) => TRendered | Promise<TRendered>;
 
 /**
  * The in-process handle to one live agent workload — the ACP *client
@@ -97,14 +51,9 @@ export type RenderFn<TRequest, TRendered, TState = AgentTurnState> = (
  *
  * Its facets:
  *
- *   - `run(request, render, ctx)` — the data plane for one turn. Merges
- *     "submit this turn's input" with "stream this turn's output": renders
- *     the (non-null) request at the last moment (render belongs to the
- *     caller, not the handle), feeds it to the backing runtime, and yields
- *     the per-turn `AgentStreamEvent`s — returning this turn's transcript
- *     delta ({@link TResult}) as the generator's return value. `ctx` is the
- *     host-supplied per-turn context (see {@link TTurnCtx}). Called once
- *     for a Job; once per turn on a long-lived Deployment.
+ *   - `run(submission, ctx)` — the data plane for one turn. The submission
+ *     carries durable host source data plus optional canonical inputs. The
+ *     driver resolves and lowers those inputs into its backend-native form.
  *   - `control(msg)` — the control plane: host→agent operations over the
  *     `@agenetes/protocol` `ControlMsg` vocabulary, gated by
  *     {@link AgentHandle.capabilities}. Usable out-of-turn on a Deployment.
@@ -113,34 +62,27 @@ export type RenderFn<TRequest, TRendered, TState = AgentTurnState> = (
  *     ended it); a Deployment tears down its long-lived session.
  *   - `capabilities` — the advertised capability descriptor.
  *
- * The type parameters keep the framework host-agnostic: `TRequest` is the
- * host request shape, `TRendered` the backend-native render output,
- * `TResult` the transcript-delta the generator returns (the host binds it
- * to e.g. pi-ai `Message[]`), `TEvent` the (protocol-assignable) event
- * union it yields, and `TTurnCtx` the host's per-turn context bundle.
+ * The type parameters keep the framework host-agnostic: `TSubmission` is
+ * the host's source specialization, `TResult` is the run return value,
+ * `TEvent` is the yielded protocol event union, and `TTurnCtx` is the
+ * host's per-turn context bundle.
  */
 export interface AgentHandle<
-  TRequest = unknown,
-  TRendered = unknown,
+  TSubmission extends AgentSubmission = AgentSubmission,
   TResult = unknown,
   TEvent extends AgentStreamEvent = AgentStreamEvent,
   TTurnCtx = unknown,
 > {
   /**
-   * Run one turn: render + submit this turn's input, then stream its
-   * output. When `request` is non-null it is rendered via `render` at the
-   * last moment and fed to the backing runtime (built-in: `agent.prompt`;
-   * external: `client.prompt`); the generator then yields the turn's
-   * `AgentStreamEvent`s and returns the turn's transcript delta (the
-   * messages to persist) as its return value.
+   * Run one turn by resolving the submission's canonical inputs, lowering
+   * them to the backend, and streaming the resulting events.
    *
    * `request` MAY be `null`, meaning "no new input this turn". The
    * interface fixes only that null is *accepted*; its meaning is entirely
    * driver-defined and carries NO protocol-level contract. A driver is
    * free to treat it as "resume the pre-loaded transcript" (the built-in
    * path calls `agent.continue()`), or to reject it (a driver that always
-   * needs fresh input may emit an `error` event or no-op). When `request`
-   * is null, `render` is never invoked.
+   * needs fresh input may emit an `error` event or no-op).
    *
    * `ctx` carries the host's per-turn context (the mutable overlay, the
    * turn's abort signal, the request-scoped logger, per-turn hooks, and —
@@ -155,14 +97,14 @@ export interface AgentHandle<
    * constrained to remain protocol-assignable, keeping the wire contract.
    */
   run(
-    request: TRequest | null,
-    render: RenderFn<TRequest, TRendered>,
+    submission: TSubmission | null,
     ctx: TTurnCtx,
   ): AsyncGenerator<TEvent, TResult>;
 
   /**
    * Send a host→agent control operation. Resolves to a `ControlAck`;
-   * unsupported operations (not in `capabilities.control`) resolve to
+   * unsupported operations (not in
+   * `capabilities.supportedControlMessages`) resolve to
    * `{ ok: false, code: 'unsupported' }` rather than throwing. On a
    * long-lived Deployment this is usable out-of-turn (between runs); an
    * op that has no live session to act on resolves to a failure ack.

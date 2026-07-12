@@ -15,7 +15,7 @@
 import { commandFromRawInput, variantForInternalTool } from '@sediment/shared';
 
 import { projectUserVisibleAttachments } from './attachment-chips.js';
-import { unwrapChatRequest } from '../../agenetes/handle.js';
+import { chatEnvelopeFromSubmission } from '../../agenetes/handle.js';
 
 import type { ChatEnvelope } from '../envelope.js';
 import type { AgentTurn, FoldedMessage } from '@agenetes/protocol';
@@ -213,7 +213,7 @@ function buildToolPart(data: FoldedToolCallData): AssistantHistoryPart {
  * with no new user input) yields no user bubble.
  */
 function envelopeOf(turn: AgentTurn): ChatEnvelope | null {
-  return unwrapChatRequest(turn.request);
+  return chatEnvelopeFromSubmission(turn.request);
 }
 
 /**

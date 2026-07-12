@@ -2,8 +2,8 @@
 // instance (README I9.8). A Deployment handle is transparently decorated so
 // every run() tees its frames into Tier-1 and folds its return into a
 // Tier-2 AgentTurn; `history()` reads the folded turns back and
-// `history({ withTail })` / `tail()` compose the live tail fenced to just
-// after the last folded turn — all without a seq ever surfacing to L1.
+// `history({ withTail })` projects the uncovered suffix as an incomplete
+// turn, while `tail()` keeps serving the raw live events.
 
 import { describe, expect, it } from 'vitest';
 
@@ -44,7 +44,6 @@ let raw: ScriptedHandle | undefined;
 
 function scriptedDriver(): AgentDriver<WorkloadSpecShape> {
   return {
-    capabilities: {} as AgentCapabilities,
     create: () => (raw = new ScriptedHandle()) as unknown as AgentHandle,
   };
 }
@@ -75,15 +74,9 @@ const done = (message: string): AgentStreamEvent => ({
 });
 const end = (): AgentStreamEvent => ({ type: 'end', data: {} });
 
-const noopRender = (r: unknown): unknown => r;
-
 /** Fully drive a run() to completion (folds a Tier-2 turn). */
 async function drain(handle: AgentHandle, request: unknown): Promise<void> {
-  for await (const _ of handle.run(
-    request as never,
-    noopRender as never,
-    {} as never,
-  )) {
+  for await (const _ of handle.run(request as never, {} as never)) {
     // discard — the fold happens on the generator's return
   }
 }
@@ -106,6 +99,10 @@ describe('Agenetes two-tier conversation log (M5.6/C3)', () => {
       { type: 'text', data: { content: 'hi' } },
     ]);
     expect(turns[0]!.meta).toEqual({ stopReason: 'end_turn' });
+    expect(inst.logMetadata(ns, threadId)).toEqual({
+      eventCount: 4,
+      turnCount: 1,
+    });
   });
 
   it('get(threadId) returns the same logging handle, so later turns fold too', async () => {
@@ -130,7 +127,7 @@ describe('Agenetes two-tier conversation log (M5.6/C3)', () => {
     ]);
   });
 
-  it('history({ withTail }) replays the in-flight (uncommitted) turn, no seq leaked', async () => {
+  it('history({ withTail }) projects the in-flight turn, no seq leaked', async () => {
     const inst = mount();
     const handle = inst.create(deployment);
     // Turn 1 completes → folded (fence at its last seq).
@@ -148,27 +145,32 @@ describe('Agenetes two-tier conversation log (M5.6/C3)', () => {
     });
     const gen = handle.run(
       { type: 'user_text', content: 'q2' } as never,
-      noopRender as never,
       {} as never,
     );
+    expect(inst.history(ns, threadId, { withTail: true }).turns[1]).toEqual({
+      request: { type: 'user_text', content: 'q2' },
+      transcript: [],
+      isIncomplete: true,
+    });
     await gen.next(); // yields live-a  → Tier-1 append
     await gen.next(); // yields live-b  → Tier-1 append
 
-    const { turns, tail } = inst.history(ns, threadId, { withTail: true });
-    expect(turns).toHaveLength(1); // only the committed turn
-    expect(tail).toBeDefined();
+    expect(inst.logMetadata(ns, threadId)).toEqual({
+      eventCount: 6,
+      turnCount: 1,
+    });
 
-    const iter = tail![Symbol.asyncIterator]();
-    const a = await iter.next();
-    const b = await iter.next();
-    expect(a.value).toEqual(text('live-a'));
-    expect(b.value).toEqual(text('live-b'));
-    // No terminal yet → break (do not pull a 3rd time, which would park).
-    await iter.return?.();
+    const { turns } = inst.history(ns, threadId, { withTail: true });
+    expect(turns).toHaveLength(2);
+    expect(turns[1]).toEqual({
+      request: { type: 'user_text', content: 'q2' },
+      transcript: [{ type: 'text', data: { content: 'live-alive-b' } }],
+      isIncomplete: true,
+    });
 
     // The returned AgentTurn carries no seq / fence field — the Tier-1
     // sequence stays entirely L2-internal (I9.8).
-    const keys = Object.keys(turns[0]!);
+    const keys = Object.keys(turns[1]!);
     expect(keys).not.toContain('seq');
     expect(keys).not.toContain('seqStart');
     expect(keys).not.toContain('seqEnd');
@@ -191,7 +193,6 @@ describe('Agenetes two-tier conversation log (M5.6/C3)', () => {
     });
     const gen = handle.run(
       { type: 'user_text', content: 'q2' } as never,
-      noopRender as never,
       {} as never,
     );
     await gen.next(); // text x
@@ -218,7 +219,6 @@ describe('Agenetes two-tier conversation log (M5.6/C3)', () => {
     });
     const gen = handle.run(
       { type: 'user_text', content: 'q' } as never,
-      noopRender as never,
       {} as never,
     );
     await gen.next(); // yields + appends `live` → wakes the parked tail

@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { legacyChatTurnToAgentTurn } from './fold-legacy-turn.js';
-import { HUABU_CHAT_REQUEST_TYPE } from '../../agent/agenetes/handle.js';
+import { HUABU_CHAT_SUBMISSION_TYPE } from '../../agent/agenetes/handle.js';
 
 import type {
   LegacyChatEnvelope,
@@ -64,7 +64,7 @@ describe('legacyChatTurnToAgentTurn', () => {
     const env = envelope('do the thing');
     const turn = legacyChatTurnToAgentTurn(record([], { envelope: env }));
     expect(turn.request).toEqual({
-      type: HUABU_CHAT_REQUEST_TYPE,
+      type: HUABU_CHAT_SUBMISSION_TYPE,
       content: env,
     });
   });

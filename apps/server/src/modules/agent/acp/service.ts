@@ -18,8 +18,8 @@
  */
 
 import {
-  prepareExternalAgentPrompt,
-  serializeRawPrompt,
+  renderExternalAgentInputs,
+  renderSystemPreamble,
 } from './preprocessor.js';
 import { ensureProfileCacheSubscription } from './profile-cache-port.js';
 import { getProfile } from './profile-store.js';
@@ -31,14 +31,11 @@ import {
   type AcpHandle,
   type AcpWorkloadSpec,
 } from '../agenetes/drivers.js';
-import { type RenderFn, wrapChatRequest } from '../agenetes/handle.js';
+import { createChatSubmission } from '../agenetes/handle.js';
 import { dumpAssembledPrompt } from '../conversation/prompt/debug-prompt.js';
 
 import type { ChatEnvelope } from '../conversation/envelope.js';
-import type { ContentPart } from '../conversation/prompt/attachments.js';
-import type { AcpTurnOverlay, PreparedAcpPrompt } from '@agenetes/acp-driver';
-import type { AcpBindingRecipe } from '@agenetes/acp-driver';
-import type { AcpContentBlock } from '@sediment/shared';
+import type { AcpBindingRecipe, AcpTurnOverlay } from '@agenetes/acp-driver';
 import type { AgentStreamEvent } from '@sediment/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
@@ -139,37 +136,18 @@ export function resolveBindingRecipe(
   };
 }
 
-/**
- * Map the host's generic per-turn content parts onto ACP content blocks.
- * This is the L1 responsibility that used to live inside the ACP client:
- * the driver now speaks pure ACP, so the render closure produces
- * driver-native blocks. Explicit per-type so a new `ContentPart` variant
- * (audio / resource) breaks here until it gets its own block.
- */
-function contentPartsToAcpBlocks(parts: ContentPart[]): AcpContentBlock[] {
-  return parts.map((b): AcpContentBlock => {
-    switch (b.type) {
-      case 'image':
-        return { type: 'image', data: b.data, mimeType: b.mimeType };
-      case 'text':
-        return { type: 'text', text: b.text };
-      default: {
-        const _exhaustive: never = b;
-        throw new Error(
-          `Unhandled content part: ${JSON.stringify(_exhaustive)}`,
-        );
-      }
-    }
-  });
-}
-
 export async function* runAcpAgent(
   opts: RunAcpAgentOptions,
 ): AsyncGenerator<AgentStreamEvent, void> {
   const { binding, threadId, overlay, signal, logger } = opts;
   const canvasId = opts.canvasId ?? '';
-  // Verbatim user text for the raw-text fallback + slash detection.
-  const rawText = opts.envelope.user.text;
+  const rendered = await renderExternalAgentInputs({
+    envelope: opts.envelope,
+    agentAlias: binding.alias,
+    canvasId: canvasId || null,
+    logger,
+  });
+  const submission = createChatSubmission(opts.envelope, rendered);
 
   // Bake this thread's WorkloadSpec (I9.6). The ACP handle self-resolves
   // (opens or reuses) its live session per turn from these fields — L1 no
@@ -181,48 +159,11 @@ export async function* runAcpAgent(
     kind: EXTERNAL_DRIVER_KIND,
     workloadType: 'Deployment',
     namespace: canvasAcpNamespace(canvasId),
+    initialPreamble: [renderSystemPreamble()],
     binding,
     env: buildReachbackEnv(threadId, canvasId),
     ...(opts.cwd !== undefined && { cwd: opts.cwd }),
     recipe: resolveBindingRecipe(binding.profileId),
-  };
-
-  // The render closure: (envelope, turnState) -> ACP wire blocks. Owns the
-  // preprocessor + raw-text fallback so the driver always receives valid
-  // blocks. The driver (L2) owns the per-turn session state and supplies
-  // it here: `state.isFirstMessage` drives the one-shot system preamble —
-  // L1 no longer reads the entry's `systemPreambleSent` flag itself.
-  const render: RenderFn<PreparedAcpPrompt> = async (
-    request,
-    state,
-  ): Promise<PreparedAcpPrompt> => {
-    try {
-      const result = await prepareExternalAgentPrompt({
-        envelope: request.content,
-        agentAlias: binding.alias,
-        canvasId: canvasId || null,
-        includeSystem: state.isFirstMessage,
-        logger,
-      });
-      return {
-        serialized: result.serialized,
-        includedSystem: result.includedSystem,
-        blocks: contentPartsToAcpBlocks(result.blocks),
-      };
-    } catch (err) {
-      const preparedError = err instanceof Error ? err.message : String(err);
-      logger.warn(
-        { threadId, agentAlias: binding.alias, err: preparedError },
-        '[acp] preprocessor failed — falling back to raw user text',
-      );
-      const serialized = serializeRawPrompt(rawText);
-      return {
-        serialized,
-        includedSystem: false,
-        blocks: [{ type: 'text', text: serialized }],
-        preparedError,
-      };
-    }
   };
 
   // Optional developer aid: dump the exact text payload handed to ACP
@@ -258,7 +199,7 @@ export async function* runAcpAgent(
   // (I9.7). Idempotent per thread — subscribing before `run()` so the
   // handle's initial state up-report is captured.
   ensureProfileCacheSubscription(threadId, binding.profileId);
-  yield* handle.run(wrapChatRequest(opts.envelope), render, {
+  yield* handle.run(submission, {
     overlay,
     signal,
     logger,

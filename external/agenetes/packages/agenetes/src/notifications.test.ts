@@ -11,14 +11,11 @@ import { describe, expect, it } from 'vitest';
 import { mountAgenetes, type WorkloadSpecShape } from './index.js';
 
 import type {
-  AgentCapabilities,
   AgentMetadata,
   AgentStateSnapshot,
   SessionId,
 } from '@agenetes/protocol';
 import type { AgentDriver, AgentHandle } from '@agenetes/runtime';
-
-const CAPS = {} as AgentCapabilities;
 
 type StubSpec = WorkloadSpecShape;
 
@@ -51,7 +48,7 @@ class SilentHandle {
 }
 
 function driver(make: (spec: StubSpec) => unknown): AgentDriver<StubSpec> {
-  return { capabilities: CAPS, create: (spec) => make(spec) as AgentHandle };
+  return { create: (spec) => make(spec) as AgentHandle };
 }
 
 const ns = (name: string, root?: string) => ({

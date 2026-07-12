@@ -263,6 +263,7 @@ export function snapshotEntryState(entry: AcpSessionEntry): AgentStateSnapshot {
       ? { sessionId: entry.sessionId as SessionId }
       : {}),
     metadata: snapshotEntryMeta(entry),
+    initialPreambleDelivered: entry.initialPreambleDelivered,
   };
 }
 
@@ -578,14 +579,9 @@ async function ensureAcpSessionInner(
     // first user prompt promotes it, so an unused thread never leaves a
     // stale sessionId for the next server lifetime to choke on.
     persistedToDisk: !!priorSessionId,
-    // Resume-from-disk (`priorSessionId` set) means the agent's
-    // transcript is restored via `session/load`, so the one-shot system
-    // preamble it already received is back in context — mark it sent.
-    // A fresh `session/new` starts blank, so the preamble must ride
-    // along with this thread's first user prompt (see
-    // `AcpSessionEntry.systemPreambleSent` and the preprocessor's
-    // `includeSystem`).
-    systemPreambleSent: !!priorSessionId,
+    // Delivery is independent from session creation: a command may create
+    // and persist a session without consuming the pending preamble.
+    initialPreambleDelivered: priorState?.initialPreambleDelivered ?? false,
     availableCommands: [],
     commandsUpdatedAt: 0,
     availableModes: [],

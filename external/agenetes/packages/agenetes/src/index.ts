@@ -8,6 +8,7 @@ export type {
   AgenetesBuilder,
   DriverFactory,
   MountAgenetesOptions,
+  StandardDriverFactoryMap,
 } from './builder.js';
 
 export { createAgenetesInstance } from './instance.js';
@@ -16,6 +17,7 @@ export type {
   WorkloadSpecShape,
   HistoryOptions,
   ThreadHistory,
+  ThreadLogMetadata,
 } from './instance.js';
 
 export { InMemoryThreadStore, FileThreadStore } from './thread-store.js';
@@ -28,11 +30,24 @@ export {
 } from './event-log.js';
 export type {
   EventLogEntry,
+  EventLogRecord,
   EventLogStore,
   EventLogListener,
+  TurnStartLogEntry,
 } from './event-log.js';
 
 export { InMemoryTurnStore, FileTurnStore } from './turn-store.js';
 export type { PersistedTurn, TurnStore } from './turn-store.js';
 export { createTranscriptFolder } from './fold.js';
 export type { TranscriptFolder } from './fold.js';
+export { materializeHistory } from './materialize-history.js';
+
+export {
+  DEFAULT_AUTO_RECOVER_POLICY,
+  createAgentRecoveryContext,
+  estimateHistoryLoadSize,
+} from './recovery.js';
+export type {
+  AutoRecoverPolicy,
+  RecoveryConfirmationContext,
+} from './recovery.js';

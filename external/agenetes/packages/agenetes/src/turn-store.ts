@@ -9,11 +9,9 @@
 // conversation, driver-agnostic and seq-free (I9.8).
 //
 // Each persisted record additionally pins the turn to its Tier-1 range via
-// `seqStart..seqEnd`. That fence is the internal cursor `history({ withTail
-// })` / `tail()` resume the live tail from (`EventLog.read(sinceSeq =
-// fence)`). It is L2-INTERNAL bookkeeping and never leaves this package:
-// `history()` returns only `AgentTurn`s, so the sequence numbers stay
-// hidden from L1 (I9.8).
+// `seqStart..seqEnd`. That fence is the internal cursor the history
+// materializer and `tail()` use to read the uncovered Tier-1 suffix. It is
+// L2-INTERNAL bookkeeping and never leaves this package.
 //
 // Like {@link ThreadStore} and {@link EventLogStore}, this ships a storage
 // PORT plus two host-agnostic implementations — {@link InMemoryTurnStore}
@@ -28,14 +26,15 @@ import type { AgentTurn, Namespace } from '@agenetes/protocol';
 
 /**
  * One persisted Tier-2 record: the folded {@link AgentTurn} plus the
- * `seqStart..seqEnd` fence pinning it to its Tier-1 event range (inclusive;
- * `seqStart > seqEnd` — an empty range — for a turn that folded no events).
- * The fence is L2-internal (never surfaced through `history`).
+ * inclusive `seqStart..seqEnd` range pinning it to its Tier-1 records,
+ * beginning with `turn_start` and followed by zero or more event records.
+ * Legacy/imported turns with no corresponding Tier-1 records may use an
+ * empty range (`seqStart > seqEnd`). The fence is L2-internal.
  */
 export interface PersistedTurn {
   /** The folded, immutable turn record (the only thing `history` exposes). */
   readonly turn: AgentTurn;
-  /** First Tier-1 `seq` this turn covers (1-based, inclusive). */
+  /** First Tier-1 record this turn covers, normally its `turn_start`. */
   readonly seqStart: number;
   /** Last Tier-1 `seq` this turn covers — the fence for the next tail. */
   readonly seqEnd: number;
@@ -57,6 +56,8 @@ export interface TurnStore {
   ): void;
   /** Read every folded turn for a thread, in fold (emission) order. */
   list(namespace: Namespace, threadId: string): PersistedTurn[];
+  /** The number of folded turns persisted for a thread. */
+  count(namespace: Namespace, threadId: string): number;
   /**
    * The `seqEnd` of the last folded turn — the Tier-1 fence a live tail
    * resumes from — or `0` when the thread has no folded turn yet (tail from
@@ -114,6 +115,10 @@ export class InMemoryTurnStore implements TurnStore {
     return log ? [...log] : [];
   }
 
+  count(namespace: Namespace, threadId: string): number {
+    return this.#byNamespace.get(namespace.name)?.get(threadId)?.length ?? 0;
+  }
+
   fence(namespace: Namespace, threadId: string): number {
     const log = this.#byNamespace.get(namespace.name)?.get(threadId);
     return log && log.length > 0 ? log[log.length - 1]!.seqEnd : 0;
@@ -133,10 +138,15 @@ export class InMemoryTurnStore implements TurnStore {
  *
  * Appends are O(one line) (`appendJsonLine`). Reads tolerate a missing /
  * partially-written file and skip any malformed line, so a corrupt tail
- * never bricks a read; `fence` is served by scanning the (short) turn log —
- * turns are coarse, so this stays cheap.
+ * never bricks a read. `count` and `fence` share process-local metadata
+ * seeded by the first file scan, so subsequent reads and appends are O(1).
  */
 export class FileTurnStore implements TurnStore {
+  readonly #metadataByPath = new Map<
+    string,
+    { readonly count: number; readonly fence: number }
+  >();
+
   #path(namespace: Namespace, threadId: string): string {
     sanitizeId(threadId, 'threadId');
     const root =
@@ -153,18 +163,51 @@ export class FileTurnStore implements TurnStore {
     threadId: string,
     persisted: PersistedTurn,
   ): void {
-    appendJsonLine(this.#path(namespace, threadId), persisted);
+    const filePath = this.#path(namespace, threadId);
+    const metadata = this.#metadata(filePath);
+    appendJsonLine(filePath, persisted);
+    this.#metadataByPath.set(filePath, {
+      count: metadata.count + 1,
+      fence: persisted.seqEnd,
+    });
   }
 
   list(namespace: Namespace, threadId: string): PersistedTurn[] {
-    return readJsonLines<unknown>(this.#path(namespace, threadId)).filter(
-      isPersistedTurn,
-    );
+    const filePath = this.#path(namespace, threadId);
+    const log = this.#read(filePath);
+    this.#metadataByPath.set(filePath, this.#metadataFor(log));
+    return log;
+  }
+
+  count(namespace: Namespace, threadId: string): number {
+    return this.#metadata(this.#path(namespace, threadId)).count;
   }
 
   fence(namespace: Namespace, threadId: string): number {
-    const log = this.list(namespace, threadId);
-    return log.length > 0 ? log[log.length - 1]!.seqEnd : 0;
+    return this.#metadata(this.#path(namespace, threadId)).fence;
+  }
+
+  #read(filePath: string): PersistedTurn[] {
+    return readJsonLines<unknown>(filePath).filter(isPersistedTurn);
+  }
+
+  #metadata(filePath: string): { count: number; fence: number } {
+    const cached = this.#metadataByPath.get(filePath);
+    if (cached) return cached;
+    const log = this.#read(filePath);
+    const metadata = this.#metadataFor(log);
+    this.#metadataByPath.set(filePath, metadata);
+    return metadata;
+  }
+
+  #metadataFor(log: readonly PersistedTurn[]): {
+    count: number;
+    fence: number;
+  } {
+    return {
+      count: log.length,
+      fence: log[log.length - 1]?.seqEnd ?? 0,
+    };
   }
 }
 

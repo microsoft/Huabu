@@ -45,6 +45,9 @@ export type AcpEnsureErrorCode =
    *  permission error). Remediation: "Restart worker" in Settings →
    *  External Agents. */
   | 'worker_not_ready'
+  /** Native session resume/load is unavailable for the persisted session.
+   *  Driver-owned recovery may fall back to folded history. */
+  | 'session_resume_unavailable'
   /** The agentlet was online but the `spawnOnAgentlet` RPC rejected —
    *  typically a bad recipe (command not found, cwd missing) or a
    *  daemon-side validation failure. */

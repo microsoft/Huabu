@@ -41,6 +41,7 @@
  */
 
 import {
+  AgentletRequestError,
   getDaemonSupervisor,
   getAgentletServer,
 } from '@agenetes/agentlet-host';
@@ -48,6 +49,14 @@ import {
 import { AcpServiceError } from './errors.js';
 
 import type { AcpBindingRecipe } from './binding-recipe.js';
+
+export function isSessionResumeUnavailableError(error: unknown): boolean {
+  if (!(error instanceof AgentletRequestError)) return false;
+  if (!error.data || typeof error.data !== 'object') return false;
+  return (
+    (error.data as { code?: unknown }).code === 'session_resume_unavailable'
+  );
+}
 
 /**
  * Default idle timeout (seconds) before the agentlet daemon suspends
@@ -253,6 +262,12 @@ export async function ensureAgentForThread(
     sessionId = result.sessionId;
     pid = result.pid;
   } catch (err) {
+    if (existingSessionId && isSessionResumeUnavailableError(err)) {
+      throw new AcpServiceError(
+        'session_resume_unavailable',
+        `External agent '${recipe.alias}' can no longer resume session '${existingSessionId}'`,
+      );
+    }
     // The agentlet RPC itself rejected — typically a bad recipe
     // (command not found, cwd missing) or a daemon-side validation
     // failure. Preserve the daemon's message so the UI can surface

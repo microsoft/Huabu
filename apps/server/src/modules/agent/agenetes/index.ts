@@ -4,38 +4,34 @@
  * The generic contracts (the `AgentHandle` execution seam + the driver
  * register/injection seam) now live in the host-agnostic
  * `@agenetes/runtime` package; `./handle.js` binds them to the host's
- * concrete request/transcript types and re-exports them. The standard ACP
- * driver (`AcpAgentHandle`) now lives in the `@agenetes/acp-driver`
- * subtree package and is re-exported here; the canvas-coupled built-in
- * driver stays host-owned. Both are injected into the runtime by
- * `./drivers.js` (object injection).
+ * concrete request/transcript types and re-exports them. Standard drivers
+ * now live in subtree packages (`@agenetes/acp-driver`,
+ * `@agenetes/pi-driver`); the host keeps only the Huabu-specific adapter
+ * layer that compiles requests/specs and injects ports into those drivers.
  */
 
 export type {
   AgentHandle,
-  AgentRequest,
-  RenderFn,
+  HuabuSubmission,
   AgentDriver,
-  AgentDriverInfo,
   AgentRuntime,
 } from './handle.js';
 export { createAgentRuntime } from './handle.js';
 export {
-  BuiltinAgentHandle,
-  BUILTIN_CAPABILITIES,
-  type BuiltinRendered,
-  type BuiltinTurnCtx,
-} from './builtin-handle.js';
-export {
   AcpAgentHandle,
   ACP_CAPABILITIES,
-  type PreparedAcpPrompt,
   type AcpTurnCtx,
 } from '@agenetes/acp-driver';
 export {
+  PiAgentHandle,
+  PI_DEPLOYMENT_CAPABILITIES,
+  piCapabilitiesForWorkloadType,
+  type PiTurnCtx,
+  type PiWorkloadSpec,
+  type PiDriverPorts,
+} from '@agenetes/pi-driver';
+export {
   agenetes,
-  builtinDriverFactory,
-  BUILTIN_FACTORY_NAME,
   INTERNAL_DRIVER_KIND,
   EXTERNAL_DRIVER_KIND,
   type AcpHandle,
@@ -46,3 +42,4 @@ export {
   type AgenetesWorkloadSpec,
   type AcpCreateSpec,
 } from './drivers.js';
+export { buildForkTargetSpec } from './fork.js';

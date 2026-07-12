@@ -22,16 +22,14 @@ import {
 import { loadAgent } from '../../prompt/index.js';
 import { runAcpAgent } from '../agent/acp/service.js';
 import { agenetes } from '../agent/agenetes/drivers.js';
+import { buildForkTargetSpec } from '../agent/agenetes/fork.js';
 import { runAgent } from '../agent/agent.service.js';
 import { buildChatEnvelope } from '../agent/conversation/envelope.js';
-import { rebuildContextMessages } from '../agent/conversation/prompt/build-prompt.js';
 import { buildHistoryFromTurns } from '../agent/conversation/transcript/history.js';
 import { getLLMModel } from '../agent/llm.js';
 import { readWorkspaceMemory } from '../agent/memory/index.js';
 import { canvasAcpNamespace } from '../storage/paths.js';
 
-import type { AgentTurn } from '@agenetes/protocol';
-import type { Context } from '@earendil-works/pi-ai';
 import type {
   AgentCanvasIdQuery,
   AgentRequest,
@@ -60,23 +58,11 @@ function writeSSE(
   raw.write(`event: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`);
 }
 
-/**
- * Rebuild the pi-ai {@link Context} a BUILT-IN agent turn runs over from
- * the thread's prior turns. Built-in only: `runAgent` is stateless per
- * turn, so this `systemPrompt` + rebuilt `messages` IS its memory. The
- * ACP path keeps memory in its live session (`ensureAcpSession`) and gets
- * no Context.
- *
- * Takes `priorTurns` (already loaded by the caller for the debug turn
- * count) to avoid a second history read.
- */
-async function resumeThreadContext(params: {
-  priorTurns: readonly AgentTurn[];
+function buildAgentSystemPrompt(params: {
   canvasId: string | undefined;
   mode: Parameters<typeof loadAgent>[0];
-}): Promise<Context> {
-  const { priorTurns, canvasId, mode } = params;
-
+}): string {
+  const { canvasId, mode } = params;
   // We re-render the agent's system prompt on every turn so the
   // `{{skillCatalogue}}` placeholder reflects freshly written user
   // skills. `canvasId` flows into `loadAgent({ canvasId })` for
@@ -88,20 +74,9 @@ async function resumeThreadContext(params: {
   // tagged block — grounding every turn and staying cache-friendly —
   // rather than as a one-shot first-turn user message.
   const workspaceMemory = readWorkspaceMemory();
-  const systemPrompt = workspaceMemory
+  return workspaceMemory
     ? `${agentCfg.systemPrompt}\n\n<workspace_memory>\n${workspaceMemory}\n</workspace_memory>`
     : agentCfg.systemPrompt;
-
-  // Rebuild `Context.messages` by re-serialising each prior turn's
-  // envelope + appending its transcript. The `[SYSTEM …]` encoding is
-  // regenerated here on the fly — it is never the source of truth on disk.
-  return {
-    systemPrompt,
-    messages: await rebuildContextMessages(priorTurns, {
-      canvasId: canvasId ?? null,
-    }),
-    tools: [],
-  };
 }
 
 // ==================== Route ====================
@@ -177,12 +152,9 @@ const agentRoutes: FastifyPluginAsync = async (
   /**
    * POST /agent/history/:threadId/fork
    *
-   * Legacy feature (M6.95 known issue: unsupported legacy features).
-   * Historically this copied a thread's persisted conversation onto a
-   * fresh thread id so a duplicated question node owned an independent
-   * continuation. With L2 owning the conversation log, cross-thread copy
-   * is not yet reimplemented, so this degrades gracefully to a no-op
-   * (`forked: false`) instead of half-copying state.
+   * Realises a fresh target thread from the source's materialized history.
+   * L1 compiles the complete target spec; Agenetes validates freshness and
+   * lets the target driver load completed plus optional incomplete turns.
    */
   fastify.post<{
     Params: { threadId: string };
@@ -214,17 +186,35 @@ const agentRoutes: FastifyPluginAsync = async (
     if (!canvasId || !dstCanvasId) {
       return reply.code(400).send({ message: 'canvasId is required' });
     }
-    if (targetThreadId === threadId && dstCanvasId === canvasId) {
+    if (targetThreadId === threadId) {
       return reply
         .code(400)
         .send({ message: 'target thread must differ from source' });
     }
 
-    // Fork is a legacy feature not yet reimplemented over the L2-owned
-    // conversation log (M6.95 known issue). Rather than half-copy state,
-    // degrade gracefully to a no-op so the duplicated node simply starts
-    // as a fresh thread; the client surfaces this via `forked: false`.
-    return reply.send({ threadId: targetThreadId, forked: false });
+    const sourceNamespace = canvasAcpNamespace(canvasId);
+    const sourceRecord = agenetes.record(sourceNamespace, threadId);
+    if (!sourceRecord) {
+      return reply.send({ threadId: targetThreadId, forked: false });
+    }
+
+    const targetSpec = buildForkTargetSpec(
+      sourceRecord.spec,
+      targetThreadId,
+      dstCanvasId,
+    );
+    try {
+      agenetes.fork({ namespace: sourceNamespace, threadId }, targetSpec);
+    } catch (error) {
+      request.log.warn(
+        { err: error, threadId, targetThreadId },
+        'Failed to fork agent thread',
+      );
+      return reply.code(409).send({
+        message: error instanceof Error ? error.message : 'Fork failed',
+      });
+    }
+    return reply.send({ threadId: targetThreadId, forked: true });
   });
 
   /**
@@ -457,7 +447,7 @@ const agentRoutes: FastifyPluginAsync = async (
 
     // Log the thread→agent binding so external dispatches are visible
     // in the server log. When `kind === 'external'`, the dispatch below
-    // routes to `runAcpAgent` instead of the built-in pi-agent-core loop.
+    // routes to `runAcpAgent` instead of the built-in pi-driver path.
     if (agentBinding && agentBinding.kind === 'external') {
       request.log.info(
         {
@@ -472,12 +462,10 @@ const agentRoutes: FastifyPluginAsync = async (
 
     const resolvedThreadId = getOrCreateThreadId(threadId);
 
-    // Load the thread's prior folded turns from L2 (the single source of
-    // truth). Both backends need this: `priorTurns.length` drives the
-    // debug turn number, and the built-in path rebuilds its Context from
-    // them. A crashed in-flight turn is folded by L2 on next append; no
-    // host-side active-turn finalize is required.
-    const { turns: priorTurns } = agenetes.history(
+    // Read lightweight L2 log metadata only to number the optional debug
+    // prompt dump. Recovery history flows from Agenetes into the selected
+    // driver through AgentCreateContext; the host does not load or replay it.
+    const { turnCount } = agenetes.logMetadata(
       canvasAcpNamespace(canvasId ?? ''),
       resolvedThreadId,
     );
@@ -501,7 +489,7 @@ const agentRoutes: FastifyPluginAsync = async (
     // Debug-prompt metadata forwarded to the dispatch layer (it assembles
     // the final prompt). No-op unless HUABU_DEBUG_PROMPT is set.
     const debugPrompt = {
-      turnNumber: priorTurns.length + 1,
+      turnNumber: turnCount + 1,
       threadId: resolvedThreadId,
       mode:
         agentBinding?.kind === 'external'
@@ -570,8 +558,9 @@ const agentRoutes: FastifyPluginAsync = async (
     try {
       // Route dispatch: external bindings go to `runAcpAgent`, everything
       // else (including missing/`internal` bindings) goes to the built-in
-      // pi-agent-core loop. Both paths yield the same `AgentStreamEvent`
-      // shape so the consume loop below is binding-agnostic.
+      // pi-driver-backed path. Both paths yield the same
+      // `AgentStreamEvent` shape so the consume loop below is
+      // binding-agnostic.
       let stream: AsyncGenerator<AgentStreamEvent, unknown>;
       if (agentBinding?.kind === 'external') {
         stream = runAcpAgent({
@@ -588,17 +577,16 @@ const agentRoutes: FastifyPluginAsync = async (
           debugPrompt,
         });
       } else {
-        // Built-in path: rebuild the Context this turn runs over
-        // (systemPrompt + history) — the agent's entire memory. Only this
-        // branch needs it, so we build it here rather than up front; the
-        // ACP branch never touches a Context.
-        const context = await resumeThreadContext({
-          priorTurns,
-          canvasId,
-          mode,
-        });
+        // The pi-driver owns restart recovery from Agenetes durable input.
+        // L1 supplies only current host policy and the current request.
+        const context = {
+          systemPrompt: buildAgentSystemPrompt({ canvasId, mode }),
+          messages: [],
+          tools: [],
+        };
         stream = runAgent({
           scope: mode,
+          workloadType: 'Deployment',
           // The built-in chat agent's canvas writes are delivered to the
           // frontend ONLY via the sync broadcast (like ACP), not applied
           // from the chat tool result. Attributing them to the chat

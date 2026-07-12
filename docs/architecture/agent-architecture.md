@@ -1,8 +1,7 @@
 # Agent Architecture
 
-> Runtime architecture of the server-side agent: runtime, entry points, tools,
-> skills, external agents, persistence.
-> Last updated: 2026-07-10
+> Runtime architecture of the server-side agent: runtime, entry points, tools, skills, external agents, persistence.
+> Last updated: 2026-07-11
 
 Module root: [apps/server/src/modules/agent](../../apps/server/src/modules/agent) · prompt root: [apps/server/src/prompt](../../apps/server/src/prompt)
 
@@ -10,9 +9,7 @@ Module root: [apps/server/src/modules/agent](../../apps/server/src/modules/agent
 
 ## 1. Runtime
 
-The server-side agent loop runs on the `Agent` class from
-`@earendil-works/pi-agent-core`, wrapped in the `runAgent()` async generator in
-[agent.service.ts](../../apps/server/src/modules/agent/agent.service.ts).
+The server-side built-in agent loop runs through the standard [`@agenetes/pi-driver`](../../external/agenetes/packages/pi-driver), which wraps one `@earendil-works/pi-agent-core` `Agent` behind the shared `AgentHandle` contract. The host-side [runAgent()](../../apps/server/src/modules/agent/agent.service.ts) generator is the Huabu adapter layer: it renders a `ChatEnvelope` into canonical `AgentInput[]`, constructs an `AgentSubmission<ChatEnvelope>`, compiles the loaded AGENT.md profile into a serializable `PiWorkloadSpec`, injects model/account/tool ports, and forwards yielded `AgentStreamEvent`s to the route and internal callers.
 
 Key runtime characteristics:
 
@@ -26,6 +23,7 @@ Key runtime characteristics:
 - **`getApiKey: () => ensureApiKey()`**: the OAuth token can be refreshed during
   long-running tools ([llm.ts](../../apps/server/src/modules/agent/llm.ts) /
   [oauth.ts](../../apps/server/src/modules/agent/oauth.ts)).
+- **Built-in chat is a Deployment**: `POST /api/agent` reuses one live `PiAgentHandle` per `threadId` (get-or-create by Agenetes). On restart, Agenetes supplies durable materialized history through `AgentCreateContext`; that history contains completed Tier-2 turns plus an optional read-time incomplete turn projected from the Tier-1 `turn_start` and event suffix. pi-driver authorizes history loading and seeds one synthetic JSONL history message through pi-agent-core's native `initialState.messages`. The route no longer rebuilds transcript context or persists turns. The workload's `initialPreamble` is mapped to pi-agent-core's native `systemPrompt`; later prompt changes use native `set_context`. The pi driver also re-resolves the symbolic `{ type: 'host', id: 'active' }` model ref at every turn boundary.
 - **Abort**: route `signal` → `agent.abort()`; pi-agent-core writes a final
   message with `stopReason: 'aborted'`.
 
@@ -38,12 +36,12 @@ Five built-in agents, each with a
 declares `tools` / `skillScope` / `runtime`; loader in
 [agents/loader.ts](../../apps/server/src/prompt/agents/loader.ts)):
 
-| Agent             | Entry point                                                                                                                                         | Notes                                                                                                                             |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `ask` / `operate` | `POST /api/agent` ([agent.route.ts](../../apps/server/src/modules/agent/agent.route.ts) → `runAgent`)                                               | Main chat path; ask is read-only, operate can write. Question nodes also go through here.                                         |
-| `sketch`          | [sketch.service.ts](../../apps/server/src/modules/agent/sketch.service.ts) `recognizeSketchCommands()`                                              | Gesture → `CanvasCommand[]`; same `runAgent` but with `sketch` scope + `sketch-recognized` origin, drains the generator (no SSE). |
-| `intent`          | [intent.route.ts](../../apps/server/src/modules/agent/intent.route.ts) → [intent.service.ts](../../apps/server/src/modules/agent/intent.service.ts) | A single LLM call that ranks candidates, `tools: []`, no agent loop.                                                              |
-| `memory`          | [memory/](../../apps/server/src/modules/agent/memory) background curator                                                                            | Triggered by the op-counter; see [agent-memory.md](./agent-memory.md).                                                            |
+| Agent             | Entry point                                                                                                                                         | Notes                                                                                                                                                                               |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ask` / `operate` | `POST /api/agent` ([agent.route.ts](../../apps/server/src/modules/agent/agent.route.ts) → `runAgent`)                                               | Main chat path; ask is read-only, operate can write. This path now uses a built-in **Deployment** handle (one live pi session per `threadId`). Question nodes also go through here. |
+| `sketch`          | [sketch.service.ts](../../apps/server/src/modules/agent/sketch.service.ts) `recognizeSketchCommands()`                                              | Gesture → `CanvasCommand[]`; same `runAgent` but with `sketch` scope + `sketch-recognized` origin, drains the generator (no SSE).                                                   |
+| `intent`          | [intent.route.ts](../../apps/server/src/modules/agent/intent.route.ts) → [intent.service.ts](../../apps/server/src/modules/agent/intent.service.ts) | A single LLM call that ranks candidates, `tools: []`, no agent loop.                                                                                                                |
+| `memory`          | [memory/](../../apps/server/src/modules/agent/memory) background curator                                                                            | Triggered by the op-counter; see [agent-memory.md](./agent-memory.md).                                                                                                              |
 
 **External / ACP agents**: when a chat request carries a `binding` field it routes through [acp/](../../apps/server/src/modules/agent/acp) (§6) instead of the built-in `runAgent`.
 
@@ -121,21 +119,12 @@ execute server-side, persist to disk, and return deltas; see
 
 ## 5. Context & persistence
 
-Chat context is assembled with an **envelope-first** model (see
-[agent-context.md](./agent-context.md)):
+Chat context uses an **envelope-first submission boundary** (see [agent-context.md](./agent-context.md)):
 
-- [conversation/](../../apps/server/src/modules/agent/conversation) renders each
-  turn into a `ChatEnvelope` (user text + selection + anchor + skills), then
-  serializes it into pi-ai messages.
-- Persistence lives in
-  [store/chat-thread-store.ts](../../apps/server/src/modules/agent/store/chat-thread-store.ts):
-  `<canvasDir>/.history/chat/<threadId>.turns.jsonl` (append-only completed
-  turns) + `.active.json` (in-progress). Each turn records
-  `{ envelope, transcript, acp? }`; the envelope is the single source of truth —
-  the user message is not persisted separately and is rebuilt from the envelope
-  on reload (`rebuildContextMessages`).
-- Intent episodes are recorded in
-  [store/intent-store.ts](../../apps/server/src/modules/agent/store/intent-store.ts).
+- [conversation/](../../apps/server/src/modules/agent/conversation) builds each turn's `ChatEnvelope` (user text + selection + anchor + skills). Before calling an agent handle, the selected host adapter renders that envelope into ordered canonical `AgentInput[]` and constructs `{ type: 'huabu.chat', content: envelope, rendered }`.
+- `AgentHandle.run(submission, ctx)` receives only data and live turn context; no host render closure crosses into Agenetes. One submission always remains one backend turn. pi preserves multiple canonical members through one atomic `agent.prompt(Message[])`; ACP flattens them in order into one `session/prompt`.
+- Agenetes owns conversation persistence per `(namespace, threadId)`: Tier 1 stores the complete submission plus streamed events, and Tier 2 stores the folded completed `AgentTurn`. The historical field remains named `request` for log compatibility but now carries the complete submission. Recovery serializes the stored canonical `rendered` input, using the protocol fallback only for older records that lack it.
+- Intent episodes remain in [store/intent-store.ts](../../apps/server/src/modules/agent/store/intent-store.ts).
 
 ---
 
@@ -143,19 +132,10 @@ Chat context is assembled with an **envelope-first** model (see
 
 [acp/](../../apps/server/src/modules/agent/acp) is the integration layer for external agents. Its trusted built-in catalogue detects and launches GitHub Copilot, Claude Agent, Gemini, Codex, Qwen Code, Kimi Code CLI, OpenCode, and Cursor; custom commands remain available for other ACP-compatible agents.
 
-- [service.ts](../../apps/server/src/modules/agent/acp/service.ts) `runAcpAgent()` — the
-  counterpart of `runAgent`, talking to an external daemon
-- [preprocessor.ts](../../apps/server/src/modules/agent/acp/preprocessor.ts) — serializes
-  the `ChatEnvelope` into the external wire payload (internal & external share the
-  same envelope)
-- [translator.ts](../../apps/server/src/modules/agent/acp/translator.ts) — ACP update →
-  `AgentStreamEvent`
-- [session-registry.ts](../../apps/server/src/modules/agent/acp/session-registry.ts) /
-  [session-store.ts](../../apps/server/src/modules/agent/acp/session-store.ts) — one ACP
-  session per Sediment thread
-- [profile-store.ts](../../apps/server/src/modules/agent/acp/profile-store.ts) /
-  [spawn-orchestrator.ts](../../apps/server/src/modules/agent/acp/spawn-orchestrator.ts) /
-  daemon routes — agent configuration + daemon lifecycle
+- [service.ts](../../apps/server/src/modules/agent/acp/service.ts) `runAcpAgent()` is the external counterpart of `runAgent`: it performs host rendering, constructs the submission and `WorkloadSpec`, and drives one Agenetes turn.
+- [preprocessor.ts](../../apps/server/src/modules/agent/acp/preprocessor.ts) renders the shared `ChatEnvelope` into canonical `AgentInput[]`. Slash commands become one exclusive `AgentCommandInput`; selection and attachments ride its `context`.
+- [`@agenetes/acp-driver`](../../external/agenetes/packages/acp-driver) owns ACP session creation/resume, canonical-input flattening, ACP update translation, and durable state up-reporting. Because ACP has no native system instruction channel, the driver prefixes joined `initialPreamble` fragments to the first ordinary prompt. Command-only turns do not consume the preamble, and `initialPreambleDelivered` is persisted independently from `sessionId`.
+- [profile-store.ts](../../apps/server/src/modules/agent/acp/profile-store.ts), [spawn-orchestrator.ts](../../apps/server/src/modules/agent/acp/spawn-orchestrator.ts), and daemon routes own host configuration and daemon lifecycle.
 
 External agents can read/write the canvas through the **reachback** channel (see
 [agent-reachback.md](./agent-reachback.md)). The connection / protocol internals

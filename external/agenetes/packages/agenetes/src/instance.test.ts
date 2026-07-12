@@ -8,15 +8,18 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { InMemoryEventLogStore } from './event-log.js';
 import { InMemoryThreadStore } from './thread-store.js';
+import { InMemoryTurnStore } from './turn-store.js';
 
 import { mountAgenetes, type WorkloadSpecShape } from './index.js';
 
-import type { AgentCapabilities } from '@agenetes/protocol';
-import type { AgentStateSnapshot } from '@agenetes/protocol';
-import type { AgentDriver, AgentHandle } from '@agenetes/runtime';
-
-const CAPS = {} as AgentCapabilities;
+import type { AgentStateSnapshot, AgentTurn } from '@agenetes/protocol';
+import type {
+  AgentCreateContext,
+  AgentDriver,
+  AgentHandle,
+} from '@agenetes/runtime';
 
 interface StubSpec extends WorkloadSpecShape {
   readonly note?: string;
@@ -27,7 +30,7 @@ class StubHandle {
   closed = false;
   constructor(
     readonly spec: StubSpec,
-    readonly priorState?: AgentStateSnapshot,
+    readonly createContext: AgentCreateContext<StubSpec>,
   ) {}
   close(): void {
     this.closed = true;
@@ -37,9 +40,8 @@ class StubHandle {
 /** A driver whose end-state `create(spec)` (I9.3) mints a stub handle. */
 function stubDriver(): AgentDriver<StubSpec> {
   return {
-    capabilities: CAPS,
-    create: (spec, priorState) =>
-      new StubHandle(spec, priorState) as unknown as AgentHandle,
+    create: (spec, context) =>
+      new StubHandle(spec, context) as unknown as AgentHandle,
   };
 }
 
@@ -76,6 +78,151 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
     expect(h2).toBe(h1);
     // reuse-ignores-spec: the live handle keeps its original spec
     expect(h1.spec.note).toBe('first');
+  });
+
+  it('restart recovery keeps the persisted spec authoritative', () => {
+    const inst = mount();
+    const spec: StubSpec = {
+      threadId: 'thr_1',
+      kind: 'external',
+      workloadType: 'Deployment',
+      namespace: ns('canvas_1', '/data/c1'),
+      note: 'persisted',
+    };
+    inst.create(spec);
+    inst.close(spec.threadId);
+
+    const recovered = inst.create({
+      ...spec,
+      note: 'drifted',
+    }) as unknown as StubHandle;
+    expect(recovered.spec.note).toBe('persisted');
+    expect(inst.record(spec.namespace, spec.threadId)?.spec.note).toBe(
+      'persisted',
+    );
+  });
+
+  it('fork() realizes a fresh target from source durable input', () => {
+    const store = new InMemoryThreadStore();
+    const eventLogStore = new InMemoryEventLogStore();
+    const turnStore = new InMemoryTurnStore();
+    const sourceNamespace = ns('canvas_1', '/data/c1');
+    const targetNamespace = ns('canvas_2', '/data/c2');
+    const sourceSpec: StubSpec = {
+      threadId: 'source_thread',
+      kind: 'external',
+      workloadType: 'Deployment',
+      namespace: sourceNamespace,
+      note: 'source',
+    };
+    const sourceState: AgentStateSnapshot = {
+      sessionId: 'source_session',
+    };
+    const sourceTurn: AgentTurn = {
+      request: { type: 'user_text', content: 'before fork' },
+      transcript: [{ type: 'text', data: { content: 'source answer' } }],
+    };
+    store.upsert(sourceNamespace, sourceSpec.threadId, {
+      spec: sourceSpec,
+      state: sourceState,
+    });
+    turnStore.append(sourceNamespace, sourceSpec.threadId, {
+      turn: sourceTurn,
+      seqStart: 1,
+      seqEnd: 2,
+    });
+    eventLogStore.append(sourceNamespace, sourceSpec.threadId, {
+      type: 'text_delta',
+      data: { content: 'source answer' },
+    });
+    eventLogStore.append(sourceNamespace, sourceSpec.threadId, {
+      type: 'end',
+      data: {},
+    });
+    eventLogStore.appendTurnStart(sourceNamespace, sourceSpec.threadId, {
+      type: 'user_text',
+      content: 'in flight',
+    });
+    eventLogStore.append(sourceNamespace, sourceSpec.threadId, {
+      type: 'text_delta',
+      data: { content: 'partial answer' },
+    });
+    const inst = mountAgenetes({
+      threadStore: store,
+      eventLogStore,
+      turnStore,
+    })
+      .addFactory('stub', stubDriver)
+      .register('external', 'stub')
+      .build<StubSpec>();
+    const targetSpec: StubSpec = {
+      threadId: 'target_thread',
+      kind: 'external',
+      workloadType: 'Deployment',
+      namespace: targetNamespace,
+      note: 'complete target',
+    };
+
+    const handle = inst.fork(
+      { namespace: sourceNamespace, threadId: sourceSpec.threadId },
+      targetSpec,
+    ) as unknown as StubHandle;
+
+    expect(handle.spec).toEqual(targetSpec);
+    expect(handle.createContext.durableInput).toEqual({
+      source: {
+        namespace: sourceNamespace,
+        threadId: sourceSpec.threadId,
+      },
+      record: { spec: sourceSpec, state: sourceState },
+      turns: [
+        sourceTurn,
+        {
+          request: { type: 'user_text', content: 'in flight' },
+          transcript: [{ type: 'text', data: { content: 'partial answer' } }],
+          isIncomplete: true,
+        },
+      ],
+    });
+    expect(inst.record(targetNamespace, targetSpec.threadId)).toEqual({
+      spec: targetSpec,
+      state: {},
+    });
+    expect(inst.history(targetNamespace, targetSpec.threadId).turns).toEqual(
+      [],
+    );
+    expect(inst.record(sourceNamespace, sourceSpec.threadId)?.state).toEqual(
+      sourceState,
+    );
+  });
+
+  it('fork() rejects a missing source and non-fresh target', () => {
+    const inst = mount();
+    const namespace = ns('canvas_1');
+    const targetSpec: StubSpec = {
+      threadId: 'target_thread',
+      kind: 'external',
+      workloadType: 'Deployment',
+      namespace,
+    };
+    expect(() =>
+      inst.fork({ namespace, threadId: 'missing' }, targetSpec),
+    ).toThrow(/missing source thread/);
+
+    inst.create({
+      ...targetSpec,
+      threadId: 'source_thread',
+    });
+    expect(() =>
+      inst.fork(
+        { namespace, threadId: 'source_thread' },
+        { ...targetSpec, threadId: 'source_thread' },
+      ),
+    ).toThrow(/target threadId must differ/);
+    inst.create(targetSpec);
+    expect(() =>
+      inst.fork({ namespace, threadId: 'source_thread' }, targetSpec),
+    ).toThrow(/target thread already exists/);
   });
 
   it('get() is a pure lookup that never spawns (I9.3)', () => {
@@ -206,6 +353,7 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
 
   it('down-feeds the durable snapshot into driver.create and preserves it on reuse (I9.7)', () => {
     const store = new InMemoryThreadStore();
+    const turnStore = new InMemoryTurnStore();
     const namespace = ns('canvas_1', '/data/c1');
     const prior: AgentStateSnapshot = {
       sessionId: 'sess_abc' as AgentStateSnapshot['sessionId'],
@@ -221,7 +369,16 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
       } as StubSpec,
       state: prior,
     });
-    const inst = mountAgenetes({ threadStore: store })
+    const foldedTurn: AgentTurn = {
+      request: { type: 'user_text', content: 'hello' },
+      transcript: [{ type: 'text', data: { content: 'world' } }],
+    };
+    turnStore.append(namespace, 'thr_1', {
+      turn: foldedTurn,
+      seqStart: 1,
+      seqEnd: 2,
+    });
+    const inst = mountAgenetes({ threadStore: store, turnStore })
       .addFactory('stub', stubDriver)
       .register('external', 'stub')
       .build<StubSpec>();
@@ -232,9 +389,14 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
       workloadType: 'Deployment',
       namespace,
     };
-    // Down-feed: the driver receives the persisted snapshot at create time.
+    // Down-feed: the driver receives the durable record at create time.
     const handle = inst.create(spec) as unknown as StubHandle;
-    expect(handle.priorState).toEqual(prior);
+    expect(handle.createContext.durableInput?.record.state).toEqual(prior);
+    expect(handle.createContext.durableInput?.source).toEqual({
+      namespace,
+      threadId: 'thr_1',
+    });
+    expect(handle.createContext.durableInput?.turns).toEqual([foldedTurn]);
 
     // The state-preserving upsert must NOT clobber the persisted snapshot
     // back to `{}` — a returning thread keeps its resume token + metadata.

@@ -13,32 +13,42 @@
 // never on the instance (I9.2), so the host composes them off the handle
 // `create` / `get` return.
 
-import {
-  AGENT_STREAM_EVENTS,
-  agentRequestBaseSchema,
-} from '@agenetes/protocol';
+import { AGENT_STREAM_EVENTS, agentSubmissionSchema } from '@agenetes/protocol';
 
 import {
   EventLog,
   InMemoryEventLogStore,
   type EventLogEntry,
+  type TurnStartLogEntry,
 } from './event-log.js';
 import { createTranscriptFolder } from './fold.js';
+import { materializeHistory } from './materialize-history.js';
 import { ThreadNotificationBus } from './notifications.js';
+import {
+  createAgentRecoveryContext,
+  DEFAULT_AUTO_RECOVER_POLICY,
+  type AutoRecoverPolicy,
+} from './recovery.js';
 import { type ThreadRecord, type ThreadStore } from './thread-store.js';
 import { InMemoryTurnStore, type TurnStore } from './turn-store.js';
 
 import type {
   AgentMetadata,
-  AgentRequest,
+  AgentSubmission,
   AgentStateSnapshot,
   AgentStreamEvent,
   AgentTurn,
   AgentTurnMeta,
   Namespace,
+  ObservedAgentTurn,
   WorkloadType,
 } from '@agenetes/protocol';
-import type { AgentHandle, AgentRuntime } from '@agenetes/runtime';
+import type {
+  AgentCreateContext,
+  AgentHandle,
+  AgentRuntime,
+  ThreadIdentity,
+} from '@agenetes/runtime';
 
 /**
  * The minimal shape the instance reads off a `WorkloadSpec` (I9.6). The
@@ -83,6 +93,13 @@ export interface Agenetes<
    */
   create(spec: TSpec): THandle;
   /**
+   * Realise a fresh target thread from a durable source thread. The host
+   * supplies the complete target spec; Agenetes performs no field-level
+   * merge. The target receives the source record and folded turns but
+   * starts with an empty target state.
+   */
+  fork(source: ThreadIdentity, targetSpec: TSpec): THandle;
+  /**
    * Pure lookup of the live handle for `threadId` — **never spawns**
    * (I9.3). A missing handle is a precondition failure (e.g. a control
    * write on a dead thread), not a lazy spawn.
@@ -110,12 +127,15 @@ export interface Agenetes<
    */
   notifications(threadId: string): AsyncIterable<AgentMetadata>;
   /**
+   * Read lightweight metadata about the two-tier conversation log without
+   * loading its events or folded turns.
+   */
+  logMetadata(namespace: Namespace, threadId: string): ThreadLogMetadata;
+  /**
    * Read a thread's durable conversation as folded {@link AgentTurn}s
-   * (Tier 2 of the two-tier log, README I9.8) — the driver-agnostic,
-   * seq-free replay view. With `withTail`, also returns a live `tail`
-   * fenced to just after the last folded turn, so a caller can render the
-   * committed history AND follow the in-flight turn from one call without
-   * ever seeing a sequence number (the fence stays L2-internal).
+   * (Tier 2 of the two-tier log, README I9.8). With `withTail`, the
+   * uncovered Tier-1 suffix is folded into one read-time incomplete turn;
+   * the persistent stores remain unchanged.
    */
   history(
     namespace: Namespace,
@@ -136,19 +156,23 @@ export interface Agenetes<
 /** Options for {@link Agenetes.history}. */
 export interface HistoryOptions {
   /**
-   * Also return a live `tail` fenced to just after the last folded turn.
-   * The fence (a Tier-1 `seq`) is composed and consumed entirely inside
-   * L2; it never appears in the returned value (I9.8).
+   * Project the uncovered Tier-1 suffix as an incomplete final turn.
    */
   readonly withTail?: boolean;
 }
 
 /** The result of {@link Agenetes.history}. */
 export interface ThreadHistory {
-  /** The folded conversation, in turn order (Tier 2). */
-  readonly turns: AgentTurn[];
-  /** Present only when `withTail` was set: the fenced live tail. */
-  readonly tail?: AsyncIterable<AgentStreamEvent>;
+  /** Completed turns plus the optional read-time incomplete projection. */
+  readonly turns: ObservedAgentTurn[];
+}
+
+/** Lightweight counts for one thread's two-tier conversation log. */
+export interface ThreadLogMetadata {
+  /** Tier-1 record high-water mark, including internal turn starts. */
+  readonly eventCount: number;
+  /** Number of durable Tier-2 folded AgentTurns. */
+  readonly turnCount: number;
 }
 
 /** Stream frames that terminate a run's live tail (README I8 run contract). */
@@ -158,16 +182,13 @@ const TERMINAL_EVENT_TYPES = new Set<string>([
 ]);
 
 /**
- * Coerce a `run(request, …)` argument into the persisted, driver-agnostic
- * {@link AgentRequest} for a folded turn. A logged handle binds `TRequest`
- * to `AgentRequest` (README I8/I9.8 convention), so this normally validates
- * as-is; a `null` request (a resume turn) persists as `null`; anything that
- * does not match the contract degrades to `null` (tolerant — the driver
- * owns returning the protocol shape, the log never throws on it).
+ * Coerce a run argument into the persisted driver-agnostic
+ * {@link AgentSubmission}. A null submission persists as a resume turn;
+ * malformed values degrade to null so logging cannot break execution.
  */
-function coerceRequest(request: unknown): AgentRequest | null {
+function coerceSubmission(request: unknown): AgentSubmission | null {
   if (request == null) return null;
-  const parsed = agentRequestBaseSchema.safeParse(request);
+  const parsed = agentSubmissionSchema.safeParse(request);
   return parsed.success ? parsed.data : null;
 }
 
@@ -287,6 +308,7 @@ export function createAgenetesInstance<
   threadStore: ThreadStore,
   eventLog: EventLog = new EventLog(new InMemoryEventLogStore()),
   turnStore: TurnStore = new InMemoryTurnStore(),
+  autoRecoverPolicy: AutoRecoverPolicy = DEFAULT_AUTO_RECOVER_POLICY,
 ): Agenetes<TSpec, THandle> {
   // The instance is the SOLE ThreadStore writer and the owner of the
   // per-thread notification fan-out (I9.7). It registers ONE up-report
@@ -295,6 +317,21 @@ export function createAgenetesInstance<
   // persister + re-emitter.
   const bus = new ThreadNotificationBus();
   const unsubscribers = new Map<string, () => void>();
+  const recovery = createAgentRecoveryContext(autoRecoverPolicy);
+
+  const readHistory = (
+    namespace: Namespace,
+    threadId: string,
+    withTail: boolean,
+  ): ObservedAgentTurn[] => {
+    const persisted = turnStore.list(namespace, threadId);
+    if (!withTail) return persisted.map(({ turn }) => turn);
+    const fence = persisted[persisted.length - 1]?.seqEnd ?? 0;
+    return materializeHistory(
+      persisted,
+      eventLog.readRecords(namespace, threadId, fence),
+    );
+  };
 
   // Register the handle's up-report listener: persist the full snapshot
   // FIRST (sole writer), then re-emit its metadata (persist-then-notify).
@@ -336,9 +373,9 @@ export function createAgenetesInstance<
   ): AgentHandle => {
     async function* loggingRun(
       source: AsyncGenerator<AgentStreamEvent, unknown>,
-      request: unknown,
+      start: TurnStartLogEntry,
     ): AsyncGenerator<AgentStreamEvent, unknown> {
-      const seqStart = eventLog.maxSeq(namespace, threadId) + 1;
+      const seqStart = start.seq;
       // Fold Tier-2 from the LIVE Tier-1 stream, not from the run's return
       // value (README I9.8): the folded transcript is fully derivable from
       // the deltas the driver already yields, so `TResult` stays free.
@@ -358,7 +395,7 @@ export function createAgenetesInstance<
       // own consumer still sees whatever `TResult` the driver produced.
       const seqEnd = eventLog.maxSeq(namespace, threadId);
       const turn: AgentTurn = {
-        request: coerceRequest(request),
+        request: start.request,
         transcript: folder.result(),
         ...(meta ? { meta } : {}),
       };
@@ -370,20 +407,24 @@ export function createAgenetesInstance<
       get(target, prop) {
         if (prop === 'run') {
           return (
-            request: unknown,
-            render: unknown,
+            submission: unknown,
             ctx: unknown,
-          ): AsyncGenerator<AgentStreamEvent, unknown> =>
-            loggingRun(
+          ): AsyncGenerator<AgentStreamEvent, unknown> => {
+            const start = eventLog.beginTurn(
+              namespace,
+              threadId,
+              coerceSubmission(submission),
+            );
+            return loggingRun(
               (
                 target.run as (
-                  r: unknown,
-                  rn: unknown,
+                  s: unknown,
                   c: unknown,
                 ) => AsyncGenerator<AgentStreamEvent, unknown>
-              )(request, render, ctx),
-              request,
+              )(submission, ctx),
+              start,
             );
+          };
         }
         // Forward every other member to the backing handle. Bind methods to
         // the target so private state / getters resolve against the real
@@ -394,77 +435,105 @@ export function createAgenetesInstance<
     });
   };
 
+  const createContext = (
+    source: ThreadIdentity,
+    record: ThreadRecord<TSpec>,
+  ): AgentCreateContext<TSpec> => ({
+    durableInput: {
+      source,
+      record,
+      turns: readHistory(source.namespace, source.threadId, true),
+    },
+    recovery,
+  });
+
+  const realize = (
+    targetSpec: TSpec,
+    context: AgentCreateContext<TSpec>,
+    initialState: AgentStateSnapshot,
+  ): THandle => {
+    const driver = runtime.resolve<TSpec>(targetSpec.kind);
+    if (!driver) {
+      throw new Error(
+        `no agent driver registered for kind '${targetSpec.kind}'`,
+      );
+    }
+
+    let handle: AgentHandle;
+    if (targetSpec.workloadType === 'Job') {
+      const raw = driver.create(targetSpec, context);
+      handle =
+        targetSpec.threadId.length > 0
+          ? decorateForLogging(raw, targetSpec.namespace, targetSpec.threadId)
+          : raw;
+    } else {
+      const wasLive = runtime.get(targetSpec.threadId) !== undefined;
+      handle = runtime.getOrCreate(targetSpec.threadId, () =>
+        decorateForLogging(
+          driver.create(targetSpec, context),
+          targetSpec.namespace,
+          targetSpec.threadId,
+        ),
+      );
+      if (!wasLive) wireUpReport(targetSpec, handle);
+    }
+
+    const isTransientJob =
+      targetSpec.workloadType === 'Job' && !targetSpec.threadId;
+    if (!isTransientJob) {
+      threadStore.upsert(targetSpec.namespace, targetSpec.threadId, {
+        spec: targetSpec,
+        state: initialState,
+      });
+    }
+    return handle as THandle;
+  };
+
   return {
     create(spec: TSpec): THandle {
-      const driver = runtime.resolve(spec.kind);
-      if (!driver) {
-        throw new Error(`no agent driver registered for kind '${spec.kind}'`);
-      }
-      // Down-feed (I9.7): read the durable snapshot last persisted for this
-      // thread and hand it to the driver at create time, so a returning
-      // handle resumes/rehydrates from it instead of reading a store. A
-      // fresh thread has no record → `undefined`. `state: {}` (a live but
-      // never-up-reported thread) also feeds through as an empty snapshot.
+      // A persisted same-thread spec is authoritative across restart,
+      // preserving reuse-ignores-spec semantics when no live handle exists.
       const prior = spec.threadId
         ? threadStore.get<TSpec>(spec.namespace, spec.threadId)
         : undefined;
-      const priorState = prior?.state;
-      // Dispatch the lifecycle axis (I3.2) off the control-plane
-      // `workloadType`, orthogonal to the driver route (`kind`): a Job is
-      // minted fresh per turn and never enters the live-handle table (so
-      // `get(threadId)` stays undefined and `close()` is a no-op for it),
-      // while a Deployment get-or-creates + caches the long-lived handle
-      // keyed by `threadId` (reuse ignores spec — no reconcile).
-      let handle: AgentHandle;
-      if (spec.workloadType === 'Job') {
-        // A Job is minted fresh per turn and never enters the live-handle
-        // table (so `get(threadId)` stays undefined and `close()` is a no-op
-        // for it). It is still LOGGED when it carries a durable `threadId` —
-        // a threaded Job (e.g. the host's built-in chat) is a multi-turn
-        // conversation whose transcript must persist, so we decorate it
-        // per-turn to feed the two-tier log (I9.8). A *transient* Job (empty
-        // `threadId` — a stateless one-shot) has no thread to log against and
-        // runs raw.
-        const raw = driver.create(spec, priorState);
-        handle =
-          spec.threadId.length > 0
-            ? decorateForLogging(raw, spec.namespace, spec.threadId)
-            : raw;
-      } else {
-        // Detect a *fresh* create vs a get-or-create reuse so the up-report
-        // listener is wired exactly once per handle (reuse ignores spec).
-        const wasLive = runtime.get(spec.threadId) !== undefined;
-        // Decorate INSIDE the factory so the live-handle table caches the
-        // logging handle: both this `create` return and every later
-        // `get(threadId)` yield the same log-feeding handle.
-        handle = runtime.create(spec.threadId, () =>
-          decorateForLogging(
-            driver.create(spec, priorState),
-            spec.namespace,
-            spec.threadId,
-          ),
+      const targetSpec =
+        prior?.spec.workloadType === 'Deployment' ? prior.spec : spec;
+      const context = prior
+        ? createContext(
+            { namespace: spec.namespace, threadId: spec.threadId },
+            prior,
+          )
+        : { recovery };
+      return realize(targetSpec, context, prior?.state ?? {});
+    },
+    fork(source: ThreadIdentity, targetSpec: TSpec): THandle {
+      const sourceRecord = threadStore.get<TSpec>(
+        source.namespace,
+        source.threadId,
+      );
+      if (!sourceRecord) {
+        throw new Error(
+          `cannot fork missing source thread '${source.namespace.name}/${source.threadId}'`,
         );
-        if (!wasLive) wireUpReport(spec, handle);
       }
-      // Persist a durable record only when the workload has a real thread
-      // identity. A Deployment always does (its `threadId` is also the
-      // live-table cache key). A Job usually carries a thread too, but a
-      // *transient* Job — a stateless one-shot invoked with an empty
-      // `threadId` (e.g. the host's memory / sketch / reachback turns) —
-      // has no durable identity to key on, so it writes nothing: an empty
-      // key would otherwise collide across every transient Job in the same
-      // namespace and accumulate junk records nobody reads.
-      const isTransientJob = spec.workloadType === 'Job' && !spec.threadId;
-      if (!isTransientJob) {
-        // Refresh the spec (recipe rides it, L1-baked) but PRESERVE the
-        // durable state: create must never clobber a thread's up-reported
-        // sessionId/metadata back to empty. A brand-new thread seeds `{}`.
-        threadStore.upsert(spec.namespace, spec.threadId, {
-          spec,
-          state: priorState ?? {},
-        });
+      if (source.threadId === targetSpec.threadId) {
+        throw new Error('fork target threadId must differ from source');
       }
-      return handle as THandle;
+      if (
+        runtime.get(targetSpec.threadId) !== undefined ||
+        threadStore.get(targetSpec.namespace, targetSpec.threadId) !==
+          undefined ||
+        turnStore.list(targetSpec.namespace, targetSpec.threadId).length > 0
+      ) {
+        throw new Error(
+          `fork target thread already exists '${targetSpec.namespace.name}/${targetSpec.threadId}'`,
+        );
+      }
+      if (!targetSpec.threadId) {
+        throw new Error('fork target threadId must not be empty');
+      }
+      const context = createContext(source, sourceRecord);
+      return realize(targetSpec, context, {});
     },
     get(threadId: string): THandle | undefined {
       return runtime.get(threadId) as THandle | undefined;
@@ -492,19 +561,20 @@ export function createAgenetesInstance<
     notifications(threadId: string): AsyncIterable<AgentMetadata> {
       return bus.subscribe(threadId);
     },
+    logMetadata(namespace: Namespace, threadId: string): ThreadLogMetadata {
+      return {
+        eventCount: eventLog.maxSeq(namespace, threadId),
+        turnCount: turnStore.count(namespace, threadId),
+      };
+    },
     history(
       namespace: Namespace,
       threadId: string,
       options?: HistoryOptions,
     ): ThreadHistory {
-      const turns = turnStore
-        .list(namespace, threadId)
-        .map((persisted) => persisted.turn);
-      if (!options?.withTail) return { turns };
-      // Fence the live tail to just after the last folded turn and compose
-      // it internally — the seq never surfaces to L1 (I9.8).
-      const fence = turnStore.fence(namespace, threadId);
-      return { turns, tail: createTail(eventLog, namespace, threadId, fence) };
+      return {
+        turns: readHistory(namespace, threadId, options?.withTail === true),
+      };
     },
     tail(
       namespace: Namespace,

@@ -18,7 +18,7 @@ import {
   renderEnvelopeMessages,
   rebuildContextMessages,
 } from './build-prompt.js';
-import { wrapChatRequest } from '../../agenetes/handle.js';
+import { createChatSubmission } from '../../agenetes/handle.js';
 import { buildAgentNodePreview } from '../../node-ref.js';
 
 import type { NodeNeighbourhoodContext } from '../../../canvas/node-neighbourhood.js';
@@ -33,7 +33,7 @@ function makeTurn(
   envelope: ChatEnvelope,
   transcript: FoldedMessage[],
 ): AgentTurn {
-  return { request: wrapChatRequest(envelope), transcript };
+  return { request: createChatSubmission(envelope), transcript };
 }
 
 // ─── Fixtures ────────────────────────────────────────────────────────────

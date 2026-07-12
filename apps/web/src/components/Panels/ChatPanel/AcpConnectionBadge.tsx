@@ -143,6 +143,7 @@ function labelForCode(
     case 'profile_missing':
       return t('chat.connectionLabel.profile');
     case 'spawn_failed':
+    case 'session_resume_unavailable':
       return t('chat.connectionLabel.spawn');
     case 'connect_timeout':
       return t('chat.connectionLabel.timeout');
@@ -169,6 +170,7 @@ function headlineForCode(
     case 'profile_missing':
       return t('chat.connectionHeadline.profileMissing', { alias });
     case 'spawn_failed':
+    case 'session_resume_unavailable':
       return t('chat.connectionHeadline.spawnFailed', { alias });
     case 'connect_timeout':
       return t('chat.connectionHeadline.connectTimeout', { alias });

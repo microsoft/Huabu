@@ -18,9 +18,8 @@
  *   image-inlining.ts — image URL → base64 vision bytes
  *   profile.ts        — per-backend switches (built-in / ACP)
  *
- * `renderTurn(env, profile)` builds the shared `ContentPart[]`; both
- * backends call it and differ only by their {@link RenderProfile}.
- * `renderEnvelopeMessages` wraps it for the built-in pi-ai path.
+ * `renderTurn(env, profile)` builds shared canonical parts; both backends
+ * call it and differ only by their {@link RenderProfile}.
  */
 
 import { buildAttachmentParts } from './attachments.js';
@@ -29,12 +28,12 @@ import { renderNeighbourhoodSection } from './neighbourhood.js';
 import { INTERNAL_PROFILE } from './profile.js';
 import { renderSelectedNodesSection } from './selected-nodes.js';
 import { renderSketchRasterHint } from './sketch-hint.js';
-import { unwrapChatRequest } from '../../agenetes/handle.js';
+import { chatEnvelopeFromSubmission } from '../../agenetes/handle.js';
 
 import type { ChatEnvelope } from '../envelope.js';
 import type { ContentPart, UserContent } from './attachments.js';
 import type { RenderProfile } from './profile.js';
-import type { AgentTurn } from '@agenetes/protocol';
+import type { AgentInput, AgentInputPart, AgentTurn } from '@agenetes/protocol';
 import type { Message } from '@earendil-works/pi-ai';
 
 /** A pi-ai conversation message (the built-in agent's context unit). */
@@ -157,6 +156,55 @@ export async function renderTurn(
   return parts;
 }
 
+function partsToAgentInputs(parts: readonly AgentInputPart[]): AgentInput[] {
+  if (parts.length === 0) return [];
+  if (parts.length === 1 && parts[0]?.type === 'text') {
+    return [{ type: 'text', text: parts[0].text }];
+  }
+  return [{ type: 'parts', parts }];
+}
+
+/** Render one Huabu envelope into the built-in route's canonical inputs. */
+export async function renderInternalAgentInputs(
+  env: ChatEnvelope,
+  opts: { canvasId: string | null; includeNeighbourhood?: boolean },
+): Promise<AgentInput[]> {
+  return partsToAgentInputs(await renderTurn(env, INTERNAL_PROFILE, opts));
+}
+
+/** Lower canonical inputs to the pi harness without host-source inspection. */
+export function agentInputsToPiMessages(
+  inputs: readonly AgentInput[],
+): PiMessage[] {
+  return inputs.map((input): PiMessage => {
+    switch (input.type) {
+      case 'text':
+        return {
+          role: 'user',
+          content: input.text,
+          timestamp: Date.now(),
+        };
+      case 'parts':
+        return {
+          role: 'user',
+          content: [...input.parts],
+          timestamp: Date.now(),
+        };
+      case 'command': {
+        const content: UserContent =
+          input.context.length === 0
+            ? input.text
+            : [{ type: 'text', text: input.text }, ...input.context];
+        return { role: 'user', content, timestamp: Date.now() };
+      }
+      default: {
+        const _exhaustive: never = input;
+        throw new Error(`Unhandled AgentInput: ${JSON.stringify(_exhaustive)}`);
+      }
+    }
+  });
+}
+
 /**
  * Render a {@link ChatEnvelope} into the per-turn pi-ai user message,
  * WITHOUT touching any `Context`. Wraps {@link renderTurn} with the
@@ -166,14 +214,8 @@ export async function renderEnvelopeMessages(
   env: ChatEnvelope,
   opts: { canvasId: string | null; includeNeighbourhood?: boolean },
 ): Promise<{ messages: PiMessage[] }> {
-  const parts = await renderTurn(env, INTERNAL_PROFILE, opts);
-  if (parts.length === 0) return { messages: [] };
-  // Bare-text fast path: a single text part collapses to a plain string.
-  const content: UserContent =
-    parts.length === 1 && parts[0].type === 'text' ? parts[0].text : parts;
-  return {
-    messages: [{ role: 'user', content, timestamp: Date.now() }],
-  };
+  const inputs = await renderInternalAgentInputs(env, opts);
+  return { messages: agentInputsToPiMessages(inputs) };
 }
 
 /**
@@ -190,7 +232,7 @@ export async function rebuildContextMessages(
 ): Promise<PiMessage[]> {
   const out: PiMessage[] = [];
   for (const turn of turns) {
-    const envelope = unwrapChatRequest(turn.request);
+    const envelope = chatEnvelopeFromSubmission(turn.request);
     if (envelope) {
       // History turns render WITHOUT their neighbourhood: it was a
       // point-in-time snapshot only relevant while that turn was live.

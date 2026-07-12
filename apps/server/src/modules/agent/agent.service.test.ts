@@ -79,17 +79,22 @@ vi.mock('./llm.js', () => ({
 
 vi.mock('./tools/index.js', () => ({
   buildToolsForScope: () => [],
+  buildAgentToolsByNames: () => [],
 }));
 
 // Deterministic per-turn render: one user message, no canvas / I/O.
 vi.mock('./conversation/prompt/build-prompt.js', () => ({
-  renderEnvelopeMessages: vi.fn(async () => ({
-    messages: [{ role: 'user', content: 'TURN_USER_MESSAGE', timestamp: 1 }],
-  })),
+  renderInternalAgentInputs: vi.fn(async () => [
+    { type: 'text', text: 'TURN_USER_MESSAGE' },
+  ]),
+  agentInputsToPiMessages: vi.fn(() => [
+    { role: 'user', content: 'TURN_USER_MESSAGE', timestamp: 1 },
+  ]),
 }));
 
-import { runAgent } from './agent.service.js';
+import { runAgent, syncDeploymentSystemPrompt } from './agent.service.js';
 
+import type { BuiltinHandle } from './agenetes/drivers.js';
 import type { ChatEnvelope } from './conversation/envelope.js';
 import type { Context, Message } from '@earendil-works/pi-ai';
 
@@ -178,5 +183,38 @@ describe('runAgent output delta', () => {
     // Output delta = the appended assistant reply.
     expect(output).toHaveLength(1);
     expect(output[0]).toMatchObject({ role: 'assistant' });
+  });
+});
+
+describe('syncDeploymentSystemPrompt', () => {
+  it('sends set_context only when a live handle needs a different prompt', async () => {
+    const control = vi.fn().mockResolvedValue({ ok: true });
+    const handle = { control } as unknown as BuiltinHandle;
+
+    await syncDeploymentSystemPrompt(handle, 'SYS-A', true);
+    await syncDeploymentSystemPrompt(handle, 'SYS-A', false);
+    expect(control).not.toHaveBeenCalled();
+
+    await syncDeploymentSystemPrompt(handle, 'SYS-B', false);
+    await syncDeploymentSystemPrompt(handle, 'SYS-B', false);
+
+    expect(control).toHaveBeenCalledTimes(1);
+    expect(control).toHaveBeenCalledWith({
+      type: 'set_context',
+      data: { systemPrompt: 'SYS-B' },
+    });
+  });
+
+  it('synchronizes a recovered handle before its first turn', async () => {
+    const control = vi.fn().mockResolvedValue({ ok: true });
+    const handle = { control } as unknown as BuiltinHandle;
+
+    await syncDeploymentSystemPrompt(handle, 'CURRENT-SYS', false);
+
+    expect(control).toHaveBeenCalledOnce();
+    expect(control).toHaveBeenCalledWith({
+      type: 'set_context',
+      data: { systemPrompt: 'CURRENT-SYS' },
+    });
   });
 });
