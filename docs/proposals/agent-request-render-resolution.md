@@ -22,13 +22,13 @@ type AgentSubmission<TRequest extends AgentRequest = AgentRequest> =
     };
 ```
 
-`sourceRequest` is the structured, JSON-serializable source of truth used by logging, history, recovery, fork, and host projections. `agentInput` is the already-rendered, driver-agnostic input sent onward to the pi or ACP harness.
+`sourceRequest` is the structured, JSON-serializable source used by host history and projections. `agentInput` is the already-rendered, driver-agnostic input used to reconstruct backend context during recovery and fork and sent onward to the pi or ACP harness.
 
 Request rendering happens before `run()` through a host-composed registry keyed by `sourceRequest.type`. The registry is created once; callers do not pass a render function on every turn. `run()` does not resolve or invoke renderers.
 
 The handle may prepend a portable text `initialPreamble` from `WorkloadSpec` to the first ordinary message. A command is a distinct `AgentInput` member, allowing the handle to preserve a leading slash command and defer the preamble until the next ordinary message.
 
-Only `sourceRequest` is persisted. `agentInput` remains an ephemeral execution projection.
+Both fields are persisted in the turn log. The backend-native result of lowering `agentInput` remains ephemeral.
 
 ## 2. Problem
 
@@ -56,19 +56,17 @@ Consequences include:
 
 ## 3. Goals
 
-1. Give `run()` one explicit envelope containing the durable source request and the ephemeral agent input.
-2. Persist only the source request and folded output transcript.
+1. Give `run()` one explicit envelope containing the durable source request and canonical agent input.
+2. Persist the source request, canonical agent input, and folded output transcript.
 3. Let internal and external agents use the same pre-registered `huabu.chat` renderer.
 4. Remove rendering logic and renderer resolution from `AgentHandle.run()`.
 5. Keep harness-facing input free of canvas, binding, logging, and host request concepts.
 6. Preserve text and image input without forcing either driver to understand `ChatEnvelope`.
 7. Move first-message preamble delivery into handle lifecycle state.
 8. Represent slash commands explicitly so preamble handling never relies on reparsing backend-native messages.
-9. Preserve existing Tier-1, Tier-2, history, recovery, and fork formats.
+9. Extend Tier-1 and Tier-2 compatibly so recovery and fork consume stored canonical input instead of re-rendering historical source requests.
 
 ## 4. Non-goals
-
-This proposal does not persist rendered agent input.
 
 This proposal does not make ACP binding or namespace part of request rendering.
 
@@ -78,7 +76,9 @@ This proposal does not require pi and ACP to use the same backend-native message
 
 This proposal does not make the request renderer responsible for system/session lifecycle.
 
-This proposal does not define a deterministic replay cache of historical rendered prompts. The durable source remains the structured request.
+This proposal does not persist backend-native pi messages or ACP blocks. Canonical `AgentInput` is the durable execution representation.
+
+This proposal does not optimize the storage size of base64 image parts. Replacing inline image data with durable artifact references is a separate follow-up.
 
 ## 5. Boundary contracts
 
@@ -93,7 +93,7 @@ interface HuabuChatRequest {
 }
 ```
 
-It is plain serializable data and remains the value stored in `turn_start` and `AgentTurn.request`.
+It is plain serializable data and remains the source-request value stored in `turn_start` and `AgentTurn.request`.
 
 The host may add request variants without changing drivers. Drivers never dispatch on `AgentRequest.type`.
 
@@ -134,7 +134,7 @@ export type AgentInputPart =
     };
 ```
 
-`AgentInput` contains no request discriminant, canvas id, ACP profile binding, namespace, logger, abort signal, or persisted turn metadata.
+`AgentInput` contains no request discriminant, canvas id, ACP profile binding, namespace, logger, abort signal, or turn metadata. It is nevertheless serializable and durable because recovery and fork need the already-rendered input rather than a new rendering of the historical source request.
 
 The current server-local `ContentPart[]` already matches the text/image portion of this vocabulary and should be promoted rather than reimplemented.
 
@@ -296,7 +296,7 @@ this.preamblePending = false;
 return result;
 ```
 
-The pending flag is cleared only after the backend accepts the input successfully. Recovery must restore whether the preamble has already been delivered as part of driver persistent state; it must not infer delivery solely from source turn count.
+The pending flag is cleared only after the backend accepts the input successfully. History-based recovery and fork reapply the target workload's preamble to the first stored non-command `agentInput`; native session resume restores its existing delivered state through the driver persistent state.
 
 This replaces the current pattern in which ACP gives `isFirstMessage` to a host renderer so that the renderer can prepend `external-agent/system_prompt.md`.
 
@@ -348,36 +348,36 @@ Lowering does not inspect `sourceRequest`, `ChatEnvelope`, request type, canvas 
 
 ## 11. Logging and lifecycle compatibility
 
-The logging decorator starts the turn from `submission.sourceRequest`:
+The logging decorator starts the turn from the complete submission:
 
 ```text
-beginTurn(sourceRequest)
+beginTurn(sourceRequest, agentInput)
   -> handle preamble/command policy
   -> driver lowering
   -> execute harness
   -> append and fold AgentStreamEvents
-  -> append AgentTurn { request: sourceRequest, transcript, meta }
+  -> append AgentTurn { request: sourceRequest, agentInput, transcript, meta }
 ```
 
-Only `sourceRequest` is written to Tier 1 and Tier 2. `agentInput`, the preamble-composed effective input, and backend-native messages are not persisted.
+Tier 1 stores both `sourceRequest` and `agentInput` in `turn_start`; Tier 2 stores both in the folded `AgentTurn`. The preamble-composed effective input and backend-native messages are not persisted because the workload spec supplies the target preamble and each driver can lower canonical input again.
 
-Existing event logs and turn logs require no schema migration.
+New turn records require `agentInput`. Legacy Tier-1 and Tier-2 records without it remain readable through an optional compatibility field; when recovery or fork needs such a turn, the host request renderer materializes `agentInput` from the stored source request as a legacy-only fallback. This cannot guarantee historical renderer identity, which is why every new turn stores the canonical input.
 
 `request === null` becomes `{ sourceRequest: null, agentInput: null }` and preserves its current driver-defined resume semantics.
 
-History, recovery, and fork continue to consume materialized `AgentTurn[]`. They remain independent of the `AgentInput` used by the original live turn.
+History, recovery, and fork continue to consume materialized `AgentTurn[]`. Recovery and fork use each stored `agentInput` directly, apply the target workload's preamble policy, and let the target driver lower it to native backend input without inspecting or re-rendering `sourceRequest`.
 
-Rendered input may still be emitted through explicit debug instrumentation, but it is not a second durable source of truth.
+`sourceRequest` and `agentInput` are complementary durable representations rather than competing sources of truth: the former preserves host semantics, while the latter preserves execution semantics. Backend-native input may still be emitted through explicit debug instrumentation but is not durable.
 
 ## 12. Ownership table
 
-| Value                           | Lifetime                     | Owner                           | Consumer                         |
-| ------------------------------- | ---------------------------- | ------------------------------- | -------------------------------- |
-| `WorkloadSpec.initialPreamble`  | handle/session               | host policy, executed by handle | handle preamble lifecycle        |
-| `AgentSubmission.sourceRequest` | one turn, durable projection | host request model              | logging, history, recovery, fork |
-| `AgentSubmission.agentInput`    | one turn, ephemeral          | pre-registered host renderer    | handle and driver lowering       |
-| backend-native input            | one submission               | driver                          | pi harness or ACP session        |
-| `AgentStreamEvent`              | one running turn             | driver translation              | live clients and durable fold    |
+| Value                           | Lifetime          | Owner                           | Consumer                            |
+| ------------------------------- | ----------------- | ------------------------------- | ----------------------------------- |
+| `WorkloadSpec.initialPreamble`  | handle/session    | host policy, executed by handle | handle preamble lifecycle           |
+| `AgentSubmission.sourceRequest` | one turn, durable | host request model              | host history and projections        |
+| `AgentSubmission.agentInput`    | one turn, durable | pre-registered host renderer    | recovery, fork, and driver lowering |
+| backend-native input            | one submission    | driver                          | pi harness or ACP session           |
+| `AgentStreamEvent`              | one running turn  | driver translation              | live clients and durable fold       |
 
 ## 13. Implementation stages
 
@@ -399,7 +399,7 @@ Rendered input may still be emitted through explicit debug instrumentation, but 
 ### Stage 3: Handle and driver boundary
 
 1. Change `AgentHandle.run()` to `run(submission, ctx)`.
-2. Change logging decoration to persist `submission.sourceRequest`.
+2. Change `turn_start` and logging decoration to persist both submission fields.
 3. Remove `RenderFn`, `TRendered`, and `AgentTurnState` from the public run seam.
 4. Add exhaustive pi and ACP `AgentInput` lowering.
 5. Remove per-run render closures from `agent.service.ts` and `acp/service.ts`.
@@ -416,7 +416,7 @@ Rendered input may still be emitted through explicit debug instrumentation, but 
 
 The implementation must cover:
 
-1. `sourceRequest` is logged unchanged while `agentInput` is never persisted.
+1. `sourceRequest` and canonical `agentInput` are logged unchanged while backend-native input is never persisted.
 2. Internal and external chat invoke the same registered `huabu.chat` renderer.
 3. Text and image parts lower equivalently to current pi and ACP payloads.
 4. JSON fallback preserves the complete unknown request.
@@ -427,19 +427,24 @@ The implementation must cover:
 9. A command remains first and does not consume the pending preamble.
 10. A harness without command semantics receives an ordinary message with the command still leading.
 11. Historical envelopes without `canvasId` remain readable.
-12. Recovery and fork remain based on durable source requests and folded transcripts.
-13. ACP namespace/session isolation and reachback remain independent of request rendering.
+12. Recovery and fork use stored `agentInput` without re-rendering new turns, while legacy turns without it use the explicit compatibility fallback.
+13. Target preamble policy is reapplied independently from stored `agentInput`.
+14. Inline base64 image parts round-trip through Tier 1 and Tier 2 without a storage optimization in this scope.
+15. ACP namespace/session isolation and reachback remain independent of request rendering.
 
 ## 15. Expected code entry points
 
 | File                                                                                                                                           | Responsibility                                                       |
 | ---------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
 | [`external/agenetes/packages/protocol/src/request.ts`](../../external/agenetes/packages/protocol/src/request.ts)                               | `AgentRequest`, `AgentInput`, `AgentSubmission`, request composition |
+| [`external/agenetes/packages/protocol/src/turn.ts`](../../external/agenetes/packages/protocol/src/turn.ts)                                     | Durable `agentInput` on each folded turn                             |
 | [`external/agenetes/packages/protocol/src/workload.ts`](../../external/agenetes/packages/protocol/src/workload.ts)                             | Portable text `initialPreamble`                                      |
 | [`external/agenetes/packages/runtime/src/handle.ts`](../../external/agenetes/packages/runtime/src/handle.ts)                                   | `run(submission, ctx)` execution seam                                |
 | [`external/agenetes/packages/pi-driver/src/handle.ts`](../../external/agenetes/packages/pi-driver/src/handle.ts)                               | Preamble policy and pi lowering                                      |
 | [`external/agenetes/packages/acp-driver/src/handle.ts`](../../external/agenetes/packages/acp-driver/src/handle.ts)                             | Preamble/command policy and ACP lowering                             |
-| [`external/agenetes/packages/agenetes/src/instance.ts`](../../external/agenetes/packages/agenetes/src/instance.ts)                             | Logging decoration over `sourceRequest`                              |
+| [`external/agenetes/packages/agenetes/src/instance.ts`](../../external/agenetes/packages/agenetes/src/instance.ts)                             | Logging decoration over both submission fields                       |
+| [`external/agenetes/packages/agenetes/src/event-log.ts`](../../external/agenetes/packages/agenetes/src/event-log.ts)                           | Tier-1 `turn_start` persistence for both submission fields           |
+| [`external/agenetes/packages/agenetes/src/materialize-history.ts`](../../external/agenetes/packages/agenetes/src/materialize-history.ts)       | Complete and incomplete turn materialization with `agentInput`       |
 | [`apps/server/src/modules/agent/conversation/envelope.ts`](../../apps/server/src/modules/agent/conversation/envelope.ts)                       | Self-contained Huabu source request including `canvasId`             |
 | [`apps/server/src/modules/agent/conversation/prompt/build-prompt.ts`](../../apps/server/src/modules/agent/conversation/prompt/build-prompt.ts) | Shared `huabu.chat` renderer                                         |
 | [`apps/server/src/modules/agent/agenetes/drivers.ts`](../../apps/server/src/modules/agent/agenetes/drivers.ts)                                 | Renderer registration and driver composition                         |
