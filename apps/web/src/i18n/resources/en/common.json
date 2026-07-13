@@ -634,7 +634,8 @@
       "switchManual": "Switch to manual size",
       "fitSize": "Fit size to content",
       "switchFixedHeight": "Switch to fixed height",
-      "fitHeight": "Fit height to content"
+      "fitHeight": "Fit height to content",
+      "auto": "Auto"
     },
     "align": {
       "title": "Align",
@@ -684,7 +685,7 @@
     }
   },
   "colors": {
-    "transparent": "Transparent",
+    "none": "No accent",
     "white": "White",
     "grey": "Grey",
     "teal": "Teal",

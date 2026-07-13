@@ -128,24 +128,6 @@ export const TextNode = memo(
 
     const TextToolbar = (
       <>
-        <FloatingToolbar.Select
-          options={FONT_FAMILY_OPTIONS.map((f) => ({
-            value: f.value,
-            label:
-              f.value === 'default'
-                ? t('node.fontDefault')
-                : f.value === 'serif'
-                  ? t('node.fontSerif')
-                  : f.value === 'mono'
-                    ? t('node.fontMono')
-                    : t('node.fontHand'),
-          }))}
-          value={style.fontFamily ?? 'default'}
-          onChange={(v) => updateStyle({ fontFamily: v })}
-        />
-
-        <FloatingToolbar.Divider />
-
         <FloatingToolbar.ToggleButton
           active={style.fontWeight === 'bold'}
           title={t('editor.inlineMarks.bold')}
@@ -185,6 +167,24 @@ export const TextNode = memo(
         >
           <Strikethrough />
         </FloatingToolbar.ToggleButton>
+
+        <FloatingToolbar.Divider />
+
+        <FloatingToolbar.Select
+          options={FONT_FAMILY_OPTIONS.map((f) => ({
+            value: f.value,
+            label:
+              f.value === 'default'
+                ? t('node.fontDefault')
+                : f.value === 'serif'
+                  ? t('node.fontSerif')
+                  : f.value === 'mono'
+                    ? t('node.fontMono')
+                    : t('node.fontHand'),
+          }))}
+          value={style.fontFamily ?? 'default'}
+          onChange={(v) => updateStyle({ fontFamily: v })}
+        />
       </>
     );
 

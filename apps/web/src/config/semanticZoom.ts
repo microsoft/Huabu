@@ -56,6 +56,9 @@ export const SEMANTIC_ZOOM_CONFIG: SemanticZoomConfig = {
   },
 };
 
+/** Hide provenance chrome once a node is too small to read it meaningfully. */
+export const AI_BADGE_MIN_SCREEN_WIDTH = 150;
+
 /**
  * A discrete font tier for `minimal` placeholders.
  *

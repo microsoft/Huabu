@@ -617,13 +617,19 @@ export function rerouteAllEdges<
  */
 /** Default stroke width applied to every new edge. */
 export const DEFAULT_EDGE_STROKE_WIDTH = EDGE_STROKE_WIDTHS[1];
+/** Neutral palette token used when an edge has no explicit stroke. */
+export const DEFAULT_EDGE_STROKE_TOKEN = 'grey' as const;
 
 export function applyEdgeStyle(edge: Edge, style?: EdgeStyle): Edge {
-  // Always ensure a baseline strokeWidth even when no style is provided.
+  // Always ensure baseline stroke and width even when no style is provided.
   if (!style) {
     return {
       ...edge,
-      style: { ...edge.style, strokeWidth: DEFAULT_EDGE_STROKE_WIDTH },
+      style: {
+        ...edge.style,
+        stroke: resolveAccent(DEFAULT_EDGE_STROKE_TOKEN) ?? undefined,
+        strokeWidth: DEFAULT_EDGE_STROKE_WIDTH,
+      },
     };
   }
 
@@ -632,7 +638,9 @@ export function applyEdgeStyle(edge: Edge, style?: EdgeStyle): Edge {
   };
 
   // Stored as palette token (or legacy hex); resolve to CSS color for SVG.
-  const resolvedStroke = resolveAccent(style.stroke);
+  const resolvedStroke = resolveAccent(
+    style.stroke ?? DEFAULT_EDGE_STROKE_TOKEN,
+  );
   if (resolvedStroke) rfStyle.stroke = resolvedStroke;
   const w = style.strokeWidth ?? DEFAULT_EDGE_STROKE_WIDTH;
   rfStyle.strokeWidth = w;

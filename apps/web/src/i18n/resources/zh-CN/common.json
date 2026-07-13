@@ -634,7 +634,8 @@
       "switchManual": "切换为手动尺寸",
       "fitSize": "适应内容尺寸",
       "switchFixedHeight": "切换为固定高度",
-      "fitHeight": "适应内容高度"
+      "fitHeight": "适应内容高度",
+      "auto": "Auto"
     },
     "align": {
       "title": "对齐",
@@ -684,7 +685,7 @@
     }
   },
   "colors": {
-    "transparent": "透明",
+    "none": "无强调色",
     "white": "白色",
     "grey": "灰色",
     "teal": "深青色",

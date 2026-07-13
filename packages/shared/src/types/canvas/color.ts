@@ -78,9 +78,9 @@ export interface ColorPickerOption {
 }
 
 /**
- * Accent picker swatches **with** a leading `Transparent` sentinel.
+ * Accent picker swatches **with** a leading `No accent` sentinel.
  *
- * `Transparent` (`token: 'none'`, `value: 'transparent'`) represents the
+ * `No accent` (`token: 'none'`, `value: 'transparent'`) represents the
  * true "no accent" state — canvas data encodes this as
  * `style.accent: null` and the node renders with `bg-transparent`
  * (showing the canvas through). Without the sentinel, picking any
@@ -94,7 +94,7 @@ export interface ColorPickerOption {
  */
 export const ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT: readonly ColorPickerOption[] =
   [
-    { token: ACCENT_NONE_TOKEN, name: 'Transparent', value: 'transparent' },
+    { token: ACCENT_NONE_TOKEN, name: 'No accent', value: 'transparent' },
     ...ACCENT_PALETTE,
   ];
 

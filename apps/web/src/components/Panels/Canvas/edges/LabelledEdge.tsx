@@ -35,8 +35,8 @@ const LABEL_MAX_LENGTH = 120;
 const LABEL_WRAP_CAP = 120;
 /** Approximate left + right border budget used by tight-width measurement. */
 const LABEL_BORDER_INSET = 2;
-/** Rendered label font size (px) — kept in sync with the `text-[12px]` class. */
-const LABEL_FONT_SIZE = 12;
+/** Rendered label font size (px) — kept in sync with the `text-[10px]` class. */
+const LABEL_FONT_SIZE = 10;
 /**
  * Font used to *measure* the label's tight width. `buildFontStr` only honours
  * `bold`, so `font-medium` is measured as normal and renders a hair wider — a
@@ -432,9 +432,10 @@ function EdgeLabelEditor({
   const clampLabel = hasLabel && !useInfoColors && !hovered;
   const pillClasses = [
     'sediment-edge-label',
-    'max-w-[120px] cursor-text rounded-md border-solid py-0.5 shadow-sm',
-    'text-[12px] font-medium leading-snug break-words',
+    'max-w-[120px] cursor-text rounded-md border-solid py-0.5 transition-shadow',
+    'text-[10px] font-medium leading-snug break-words',
     'outline-none',
+    hovered || useInfoColors ? 'shadow-sm' : 'shadow-none',
     useInfoColors ? 'bg-info-bg text-fg-default' : 'bg-surface text-fg-default',
     clampLabel
       ? 'line-clamp-3 w-fit whitespace-pre-wrap'
