@@ -31,8 +31,10 @@ export interface TextNodeBodyProps {
   effectiveHeight: number;
   /** Font size (px) for the textarea. */
   effectiveFontSize: number;
-  /** Inner padding (px), applied on all sides. */
-  padding: number;
+  /** Horizontal inner padding (px). */
+  paddingX: number;
+  /** Vertical inner padding (px). */
+  paddingY: number;
 
   // -------- Editing state --------
   /** Current draft text (controlled by parent via `setDraft`). */
@@ -104,7 +106,8 @@ export const TextNodeBody = forwardRef<HTMLTextAreaElement, TextNodeBodyProps>(
       effectiveWidth,
       effectiveHeight,
       effectiveFontSize,
-      padding,
+      paddingX,
+      paddingY,
       draft,
       onChange,
       onBlur,
@@ -131,7 +134,7 @@ export const TextNodeBody = forwardRef<HTMLTextAreaElement, TextNodeBodyProps>(
       <div
         className={clsx('relative', containerClassName)}
         style={{
-          padding: `${padding}px`,
+          padding: `${paddingY}px ${paddingX}px`,
           width: effectiveWidth,
           height: effectiveHeight,
         }}
@@ -166,7 +169,7 @@ export const TextNodeBody = forwardRef<HTMLTextAreaElement, TextNodeBodyProps>(
             aria-hidden="true"
             className="pointer-events-none absolute inset-0 z-1 overflow-hidden"
             style={{
-              padding: `${padding}px`,
+              padding: `${paddingY}px ${paddingX}px`,
               color,
               fontFamily,
               fontWeight,

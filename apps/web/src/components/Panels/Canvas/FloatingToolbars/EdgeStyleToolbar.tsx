@@ -3,7 +3,10 @@ import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { ACCENT_PALETTE, EDGE_STROKE_WIDTHS } from '@sediment/shared';
-import { DEFAULT_EDGE_STROKE_WIDTH } from '@sediment/shared/canvas-engine';
+import {
+  DEFAULT_EDGE_STROKE_TOKEN,
+  DEFAULT_EDGE_STROKE_WIDTH,
+} from '@sediment/shared/canvas-engine';
 
 import { CanvasFloatingPopover } from '@/components/Common/CanvasFloatingPopover';
 import {
@@ -223,7 +226,7 @@ export const EdgeStyleToolbar = () => {
 
   const currentLineType: EdgeLineType = style.lineType ?? 'bezier';
   const currentLineStyle: EdgeLineStyle = style.lineStyle ?? 'solid';
-  const currentStroke = style.stroke ?? ACCENT_PALETTE[0].token;
+  const currentStroke = style.stroke ?? DEFAULT_EDGE_STROKE_TOKEN;
   const currentWidth = style.strokeWidth ?? DEFAULT_EDGE_STROKE_WIDTH;
   const currentDirection: EdgeDirection = style.direction ?? 'none';
   const accentColors = useMemo(
@@ -356,7 +359,7 @@ export const EdgeStyleToolbar = () => {
       <FloatingToolbar.ColorPicker
         colors={accentColors}
         value={currentStroke}
-        onSelect={(t) => setStyle({ stroke: t })}
+        onSelect={(token) => setStyle({ stroke: token })}
         title={t('edgeToolbar.edgeColor')}
       />
 

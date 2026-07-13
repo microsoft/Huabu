@@ -11,7 +11,8 @@ import {
   FONT_FAMILY_CSS,
   getTextNodeFontOpts,
   TEXT_ACCENT_BORDER as ACCENT_BORDER,
-  TEXT_NODE_PADDING as NODE_PADDING,
+  TEXT_NODE_PADDING_X as NODE_PADDING_X,
+  TEXT_NODE_PADDING_Y as NODE_PADDING_Y,
   TEXT_NODE_PLACEHOLDER,
 } from '@/utils/node/nodeFontConfig';
 
@@ -88,7 +89,8 @@ export const TextNode = memo(
       isEditing,
       content,
       baseFontSize: 16,
-      padding: NODE_PADDING,
+      paddingX: NODE_PADDING_X,
+      paddingY: NODE_PADDING_Y,
       borderInset,
       fontOpts,
       placeholder: TEXT_NODE_PLACEHOLDER,
@@ -126,24 +128,6 @@ export const TextNode = memo(
 
     const TextToolbar = (
       <>
-        <FloatingToolbar.Select
-          options={FONT_FAMILY_OPTIONS.map((f) => ({
-            value: f.value,
-            label:
-              f.value === 'default'
-                ? t('node.fontDefault')
-                : f.value === 'serif'
-                  ? t('node.fontSerif')
-                  : f.value === 'mono'
-                    ? t('node.fontMono')
-                    : t('node.fontHand'),
-          }))}
-          value={style.fontFamily ?? 'default'}
-          onChange={(v) => updateStyle({ fontFamily: v })}
-        />
-
-        <FloatingToolbar.Divider />
-
         <FloatingToolbar.ToggleButton
           active={style.fontWeight === 'bold'}
           title={t('editor.inlineMarks.bold')}
@@ -183,6 +167,24 @@ export const TextNode = memo(
         >
           <Strikethrough />
         </FloatingToolbar.ToggleButton>
+
+        <FloatingToolbar.Divider />
+
+        <FloatingToolbar.Select
+          options={FONT_FAMILY_OPTIONS.map((f) => ({
+            value: f.value,
+            label:
+              f.value === 'default'
+                ? t('node.fontDefault')
+                : f.value === 'serif'
+                  ? t('node.fontSerif')
+                  : f.value === 'mono'
+                    ? t('node.fontMono')
+                    : t('node.fontHand'),
+          }))}
+          value={style.fontFamily ?? 'default'}
+          onChange={(v) => updateStyle({ fontFamily: v })}
+        />
       </>
     );
 

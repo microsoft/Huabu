@@ -1,9 +1,11 @@
 import { clsx } from 'clsx';
 
+import { Button } from './Button';
+
 /**
  * One selectable entry in a `ColorPicker`.
  * - `token`: stable identifier persisted to canvas data.
- * - `name`:  display label shown as a tooltip.
+ * - `name`:  display label shown by the common tooltip.
  * - `value`: CSS color used to render the swatch (hex / keyword / `var(...)`).
  */
 export interface ColorPreset {
@@ -38,11 +40,14 @@ export const ColorPicker = ({
       {colors.map((c) => {
         const isTransparent = c.value === 'transparent' || !c.value;
         return (
-          <button
+          <Button
             key={c.token}
+            variant="ghost"
+            iconOnly
+            size="sm"
             onClick={() => onSelect(c.token)}
             className={clsx(
-              'h-4 w-4 rounded-full border-2 transition-all hover:scale-110',
+              'h-4 w-4 rounded-full border-2 border-solid p-0 transition-transform hover:scale-110',
               activeToken === c.token
                 ? 'border-info scale-110'
                 : 'border-edge-default',
@@ -61,7 +66,10 @@ export const ColorPicker = ({
                 : { backgroundColor: c.value }
             }
             title={c.name}
-          />
+            aria-label={c.name}
+          >
+            <span className="sr-only">{c.name}</span>
+          </Button>
         );
       })}
     </div>

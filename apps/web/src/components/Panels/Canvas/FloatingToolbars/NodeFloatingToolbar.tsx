@@ -307,9 +307,6 @@ export const NodeFloatingToolbar = memo(
                   dimensions: 'both',
                   active: isFrameHug,
                   onToggle: toggleFrameSizing,
-                  title: isFrameHug
-                    ? 'Switch to manual size'
-                    : 'Fit size to content',
                 }
               : undefined
           }
@@ -318,9 +315,6 @@ export const NodeFloatingToolbar = memo(
               ? {
                   active: isNoteAutoHeight,
                   onToggle: toggleNoteAutoHeight,
-                  title: isNoteAutoHeight
-                    ? 'Switch to fixed height'
-                    : 'Fit height to content',
                 }
               : undefined
           }

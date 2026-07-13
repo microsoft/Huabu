@@ -3,6 +3,7 @@ import { H2, P, PageLayout, Table, type TocEntry } from '../../components';
 
 const toc: TocEntry[] = [
   { id: 'creating-edges', label: 'Creating edges' },
+  { id: 'edge-labels', label: 'Edge labels' },
   { id: 'styling-an-edge', label: 'Styling an edge' },
   { id: 'arrow-direction', label: 'Arrow direction' },
   { id: 'editing-and-deleting', label: 'Editing & deleting' },
@@ -21,6 +22,16 @@ export default function Edges() {
         Hover any node and connection handles appear on its sides. Drag from a
         handle to another node to create the edge. The connection inherits a
         sensible default style; selecting it brings up a styling toolbar.
+      </P>
+
+      <H2>Edge labels</H2>
+      <P>
+        Edge labels describe relationships and remain readable as the canvas is
+        zoomed out because their size is partially counter-scaled. Long labels
+        wrap and show up to three lines by default to avoid covering nearby
+        nodes; hover, select, or edit the edge to reveal the complete text.
+        Double-click an edge or an existing label to edit it, then press Enter
+        or click elsewhere to save.
       </P>
 
       <H2>Styling an edge</H2>

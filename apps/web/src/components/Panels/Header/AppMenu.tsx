@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 import { getShortcutKeys } from '../../../config/shortcuts';
 import { useCanvasActions } from '../../../hooks/useCanvasActions';
@@ -39,8 +39,10 @@ export const AppMenu: React.FC<AppMenuProps> = ({
   logoClassName,
 }) => {
   const { t } = useTranslation();
+  const location = useLocation();
   const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
+  const showCanvasListLink = location.pathname !== '/';
 
   const canChangeWorkspace = useWorkspaceStore(
     (s) => s.capabilities?.canChangeWorkspace ?? true,
@@ -102,6 +104,15 @@ export const AppMenu: React.FC<AppMenuProps> = ({
           </button>
         }
       >
+        {showCanvasListLink && (
+          <>
+            <DropdownMenuItem onClick={runAndClose(() => navigate('/'))}>
+              {t('canvasPage.backToList')}
+            </DropdownMenuItem>
+            <div className="border-edge-default my-1 border-t" />
+          </>
+        )}
+
         <DropdownMenuItem
           shortcut={newCanvasHint}
           onClick={runAndClose(() => void create())}

@@ -27,12 +27,15 @@ export interface KnownCli {
   /** Args after the binary to enter ACP mode (typically `['--acp']`). */
   acpArgs: string[];
   /**
-   * Recognized auto-approve flag for this CLI, or `null` if none is
-   * exposed as a simple toggle. Claude has `--dangerously-skip-permissions`
-   * but we intentionally do NOT surface it as a one-click toggle — users
-   * who want it can build the command manually.
+   * Official arguments that enable full tool auto-approval, or `null` when
+   * the agent requires a non-argument mechanism. Claude Agent ACP delegates
+   * permissions to ACP requests, Codex ACP uses `INITIAL_AGENT_MODE`, and
+   * OpenCode's `--auto` is not documented for its ACP subcommand.
    */
-  allowAllFlag: string | null;
+  autoApprove: {
+    args: string[];
+    position: 'before-acp' | 'after-acp';
+  } | null;
   /**
    * When true, skip the `<binary> --version` probe during detection.
    * Used for agents whose bin starts an interactive / stdio server on
@@ -55,7 +58,10 @@ export const KNOWN_CLIS: readonly KnownCli[] = [
     displayName: 'GitHub Copilot',
     binary: 'copilot',
     acpArgs: ['--acp'],
-    allowAllFlag: '--allow-all',
+    autoApprove: {
+      args: ['--allow-all'],
+      position: 'after-acp',
+    },
     installHint: 'npm install -g @github/copilot',
   },
   {
@@ -70,7 +76,7 @@ export const KNOWN_CLIS: readonly KnownCli[] = [
     // the `claude` binary being on PATH.
     binary: 'claude-agent-acp',
     acpArgs: [],
-    allowAllFlag: null,
+    autoApprove: null,
     // The adapter bin starts the stdio ACP server on any invocation and
     // would block on stdin rather than print a version, so skip the
     // probe to avoid burning the full timeout on the happy path.
@@ -82,7 +88,10 @@ export const KNOWN_CLIS: readonly KnownCli[] = [
     displayName: 'Gemini',
     binary: 'gemini',
     acpArgs: ['--acp'],
-    allowAllFlag: null,
+    autoApprove: {
+      args: ['--approval-mode=yolo'],
+      position: 'after-acp',
+    },
     installHint: 'npm install -g @google/gemini-cli',
   },
   {
@@ -97,7 +106,7 @@ export const KNOWN_CLIS: readonly KnownCli[] = [
     // NOT require the `codex` binary on PATH.
     binary: 'codex-acp',
     acpArgs: [],
-    allowAllFlag: null,
+    autoApprove: null,
     // Skip the version probe: like other ACP adapters the bin may start
     // the stdio ACP server and block on stdin rather than print a
     // version, which would burn the full probe timeout.
@@ -109,7 +118,10 @@ export const KNOWN_CLIS: readonly KnownCli[] = [
     displayName: 'Qwen Code',
     binary: 'qwen',
     acpArgs: ['--acp'],
-    allowAllFlag: null,
+    autoApprove: {
+      args: ['--approval-mode=yolo'],
+      position: 'after-acp',
+    },
     installHint: 'npm install -g @qwen-code/qwen-code',
   },
   {
@@ -117,7 +129,10 @@ export const KNOWN_CLIS: readonly KnownCli[] = [
     displayName: 'Kimi Code',
     binary: 'kimi',
     acpArgs: ['acp'],
-    allowAllFlag: null,
+    autoApprove: {
+      args: ['--yolo'],
+      position: 'before-acp',
+    },
     installHint: 'Install from https://code.kimi.com/',
   },
   {
@@ -125,7 +140,7 @@ export const KNOWN_CLIS: readonly KnownCli[] = [
     displayName: 'OpenCode',
     binary: 'opencode',
     acpArgs: ['acp'],
-    allowAllFlag: null,
+    autoApprove: null,
     installHint: 'npm install -g opencode-ai@latest',
   },
   {
@@ -133,7 +148,10 @@ export const KNOWN_CLIS: readonly KnownCli[] = [
     displayName: 'Cursor',
     binary: 'agent',
     acpArgs: ['acp'],
-    allowAllFlag: null,
+    autoApprove: {
+      args: ['--yolo'],
+      position: 'before-acp',
+    },
     installHint: 'Install from https://cursor.com/docs/cli/installation',
   },
 ];

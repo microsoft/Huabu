@@ -1,7 +1,7 @@
 /**
- * Pure pretext-based text measurement, shared by TextNode/QuestionNode
- * auto-sizing (via {@link computeFontSizeForHeight}) and SemanticPlaceholder
- * labels (via the `useFitText` hook → {@link fitFontSize}).
+ * Pure pretext-based text measurement, used by TextNode/QuestionNode
+ * auto-sizing (via {@link computeFontSizeForHeight}, a preset over the shared
+ * {@link fitFontSize} core).
  *
  * Both paths use a single binary-search core that prepares the text
  * once at `REF_SIZE`, then reuses that measurement in every probe by
@@ -139,7 +139,7 @@ export function measureTextHeight(
 /* ---------------- Unified font-fit core ---------------- */
 
 /** Options accepted by {@link fitFontSize}. */
-export interface FitFontOptions {
+interface FitFontOptions {
   /** Default 1. */
   minSize?: number;
   /** Default 200. */
@@ -176,7 +176,7 @@ export interface FitFontOptions {
  * prepared run at the scaled budget `realBudget * REF_SIZE / mid` —
  * no `measureText` calls inside the loop.
  */
-export function fitFontSize(
+function fitFontSize(
   text: string,
   contentWidth: number,
   contentHeight: number,

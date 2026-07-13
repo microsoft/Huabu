@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { getNodeFontFit, refitFont } from '@/utils/node/fontFit';
+import {
+  TEXT_ACCENT_BORDER,
+  TEXT_NODE_PADDING_X,
+  TEXT_NODE_PADDING_Y,
+} from '@/utils/node/nodeFontConfig';
 
 import { createSnapshot } from '../../../canvasHistoryManager';
 import {
@@ -160,6 +165,10 @@ describe('resize-preview controller — child font refit', () => {
       getState: store.getState,
     });
     const fit = getNodeFontFit(child);
+    expect(fit).toMatchObject({
+      insetX: TEXT_NODE_PADDING_X + TEXT_ACCENT_BORDER,
+      insetY: TEXT_NODE_PADDING_Y + TEXT_ACCENT_BORDER,
+    });
 
     controller.captureFrameResizeSnapshot('frame');
     // Frame 196×196 → 146×146: uniform scale sx = sy = 146/196.
@@ -274,8 +283,8 @@ describe('resize-preview controller — child font refit', () => {
     expect(fontSize).toBe(expected);
     // The placeholder is a multi-character string, so the fitted font must
     // be far smaller than the old "fill the height with one line" value.
-    const inset = fit!.inset;
-    const oneLineFont = (box.height - inset * 2) / fit!.fontOpts.lineHeight;
+    const oneLineFont =
+      (box.height - fit!.insetY * 2) / fit!.fontOpts.lineHeight;
     expect(fontSize).toBeLessThan(oneLineFont);
 
     controller.clearFrameResizeSnapshot();

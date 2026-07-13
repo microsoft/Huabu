@@ -23,7 +23,8 @@ import {
   QUESTION_NODE_PADDING,
   QUESTION_NODE_PLACEHOLDER,
   TEXT_ACCENT_BORDER,
-  TEXT_NODE_PADDING,
+  TEXT_NODE_PADDING_X,
+  TEXT_NODE_PADDING_Y,
   TEXT_NODE_PLACEHOLDER,
 } from './nodeFontConfig';
 import { getQuestionDisplayText } from './questionDisplayText';
@@ -47,8 +48,10 @@ export interface NodeFontFit {
   placeholder: string;
   /** Pretext font options matching the node's own measurement path. */
   fontOpts: FontOpts;
-  /** Padding + border inset per side (content area = box − inset·2). */
-  inset: number;
+  /** Horizontal padding + border inset per side. */
+  insetX: number;
+  /** Vertical padding + border inset per side. */
+  insetY: number;
 }
 
 /**
@@ -75,7 +78,8 @@ export function getNodeFontFit(node: Node): NodeFontFit | null {
       text: typeof data.content === 'string' ? data.content : '',
       placeholder: TEXT_NODE_PLACEHOLDER,
       fontOpts: getTextNodeFontOpts(style),
-      inset: TEXT_NODE_PADDING + (style.accent ? TEXT_ACCENT_BORDER : 0),
+      insetX: TEXT_NODE_PADDING_X + (style.accent ? TEXT_ACCENT_BORDER : 0),
+      insetY: TEXT_NODE_PADDING_Y + (style.accent ? TEXT_ACCENT_BORDER : 0),
     };
   }
 
@@ -84,7 +88,8 @@ export function getNodeFontFit(node: Node): NodeFontFit | null {
       text: getQuestionDisplayText(data),
       placeholder: QUESTION_NODE_PLACEHOLDER,
       fontOpts: getQuestionFontOpts(),
-      inset: QUESTION_NODE_PADDING,
+      insetX: QUESTION_NODE_PADDING,
+      insetY: QUESTION_NODE_PADDING,
     };
   }
 
@@ -94,15 +99,15 @@ export function getNodeFontFit(node: Node): NodeFontFit | null {
 /**
  * Re-derive the largest fontSize whose text fits the node's NEW box,
  * matching the node's own resize-end behaviour. `width`/`height` are the
- * node's outer box; the content area subtracts {@link NodeFontFit.inset}.
+ * node's outer box; the content area subtracts the axis-specific insets.
  */
 export function refitFont(
   fit: NodeFontFit,
   width: number,
   height: number,
 ): number {
-  const contentWidth = width - fit.inset * 2;
-  const contentHeight = height - fit.inset * 2;
+  const contentWidth = width - fit.insetX * 2;
+  const contentHeight = height - fit.insetY * 2;
   // Mirror `useTextAutoSize`: when empty, size the placeholder so the
   // cascaded font matches what a direct resize of the empty node lands on.
   const measureText = fit.text.trim() ? fit.text : fit.placeholder;

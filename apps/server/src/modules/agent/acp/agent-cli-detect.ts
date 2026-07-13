@@ -83,7 +83,9 @@ export async function detectAgentClis(): Promise<AcpAgentCliInfo[]> {
           displayName: cli.displayName,
           binary: cli.binary,
           acpArgs: [...cli.acpArgs],
-          allowAllFlag: cli.allowAllFlag,
+          autoApprove: cli.autoApprove
+            ? { ...cli.autoApprove, args: [...cli.autoApprove.args] }
+            : null,
           installed: false,
           installHint: cli.installHint,
         } satisfies AcpAgentCliInfo;
@@ -96,7 +98,9 @@ export async function detectAgentClis(): Promise<AcpAgentCliInfo[]> {
         displayName: cli.displayName,
         binary: cli.binary,
         acpArgs: [...cli.acpArgs],
-        allowAllFlag: cli.allowAllFlag,
+        autoApprove: cli.autoApprove
+          ? { ...cli.autoApprove, args: [...cli.autoApprove.args] }
+          : null,
         installed: true,
         version: version || undefined,
         installHint: cli.installHint,

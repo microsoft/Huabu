@@ -2,26 +2,21 @@ import { resolveAccent } from '@sediment/shared';
 
 import { cn } from '@/components/Common/cn';
 import { NODE_TYPE_LABEL } from '@/config/nodeIcons';
-import { useFitText } from '@/hooks/useFitText';
+import {
+  MINIMAL_LINE_HEIGHT,
+  MINIMAL_MAX_LINES,
+  selectTypographyTier,
+} from '@/config/semanticZoom';
 
 import { getAccentTokens } from './accentTokens';
 
 import type { CanvasNodeType, NodeData } from './types';
 
-const ZWS = '\u200B';
-
-/** Insert zero-width spaces at camelCase / digit-letter boundaries so
- *  line-breaking prefers natural word segments over arbitrary splits. */
-function insertSoftBreaks(text: string): string {
-  return text
-    .replace(/([a-z])([A-Z])/g, `$1${ZWS}$2`)
-    .replace(/(\d)([A-Za-z])/g, `$1${ZWS}$2`)
-    .replace(/([A-Za-z])(\d)/g, `$1${ZWS}$2`);
-}
-
 interface SemanticPlaceholderProps {
   type: CanvasNodeType;
   data: NodeData;
+  /** Whether minimal LOD is currently active. */
+  active: boolean;
   /** Canvas-space width of the node. */
   width: number;
   /** Canvas-space height of the node. */
@@ -34,72 +29,90 @@ const PAD_Y = 16;
 
 /**
  * Lightweight placeholder rendered when a node is in 'minimal' LOD.
- * Shows a type icon + label with a font size dynamically computed
- * (via pretext) to fill the available space.
+ *
+ * The font size expresses HIERARCHY (node size), not title length: it is
+ * chosen from a discrete tier scale keyed on the node's canvas dimensions
+ * (see {@link selectTypographyTier}), so same-size nodes always match and the
+ * zoomed-out canvas keeps a stable typographic rhythm. Because the tier font
+ * is a canvas size, the label simply scales down with the node as you zoom
+ * out — a smaller node always shows smaller text. Titles that don't fit wrap
+ * at word boundaries (never mid-word) and then ellipsize via line-clamp; the
+ * number of lines is bounded by whatever physically fits the node height, so
+ * taller nodes get more lines.
  */
 export function SemanticPlaceholder({
   type,
   data,
+  active,
   width,
   height,
 }: SemanticPlaceholderProps) {
+  // Stored value is a palette token (or legacy hex); resolve to CSS color.
+  const accent = resolveAccent(data.style?.accent);
+  const accentTokens = accent ? getAccentTokens(accent) : null;
+
+  const containerClassName = cn(
+    'semantic-lod-placeholder pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-lg p-2',
+    !accentTokens && 'bg-surface',
+  );
+  const containerStyle = accentTokens
+    ? {
+        background: accentTokens.bg,
+        color: accentTokens.fg,
+      }
+    : undefined;
+
   const rawLabel =
     ('label' in data && typeof data.label === 'string' ? data.label : null) ||
     ('title' in data && typeof data.title === 'string' ? data.title : null) ||
     NODE_TYPE_LABEL[type] ||
     type;
 
-  const label = insertSoftBreaks(rawLabel);
+  const { fontSize } = selectTypographyTier(width, height);
 
-  // Stored value is a palette token (or legacy hex); resolve to CSS color.
-  const accent = resolveAccent(data.style?.accent);
-  const accentTokens = accent ? getAccentTokens(accent) : null;
-
-  const fontSize = useFitText(
-    label,
-    Math.max(0, width - PAD_X * 2),
-    Math.max(0, height - PAD_Y * 2),
+  // Max lines = however many physically fit the padded height, capped. Taller
+  // nodes get more lines before the label ellipsizes.
+  const availableHeight = Math.max(0, height - PAD_Y * 2);
+  const maxLines = Math.max(
+    1,
+    Math.min(
+      MINIMAL_MAX_LINES,
+      Math.floor(availableHeight / (fontSize * MINIMAL_LINE_HEIGHT)),
+    ),
   );
 
   return (
     <div
-      className={cn(
-        'pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-lg p-2 transition-all duration-120',
-        !accentTokens && 'bg-surface shadow',
-        accentTokens && 'border-4',
-      )}
-      style={
-        accentTokens
-          ? {
-              borderColor: accentTokens.border,
-              background: accentTokens.bg,
-              color: accentTokens.fg,
-            }
-          : undefined
-      }
+      className={containerClassName}
+      style={containerStyle}
+      data-lod={active ? 'minimal' : 'full'}
+      aria-hidden={!active}
     >
       {/*
-        Wrapping rules — matched to pretext's greedy line breaker (which
-        `useFitText` uses to size the font). `wrap-break-word` =
-        `overflow-wrap: break-word`: only split inside a word when the
-        word alone wouldn't fit. `text-balance` is intentionally NOT used
-        here: the browser would otherwise pick alternative break points
-        to balance line lengths, and combined with any in-word break
-        permission it loves to slice English words mid-letter — pretext
-        doesn't model balancing so the picked font would then misalign
-        with the actual rendered height anyway.
+        `overflow-wrap: break-word` wraps at word boundaries first and only
+        splits *inside* a token when that token alone is wider than the box —
+        which prevents a long unbreakable string (e.g. "arXiv:1409.3215") from
+        overflowing the frame and being clipped mid-character. Normal words are
+        never broken. `-webkit-box` + `-webkit-line-clamp` clamps to `maxLines`
+        and appends an ellipsis on overflow; the font size is NOT reduced to
+        fit, keeping the tier-based rhythm intact.
       */}
       <span
-        // `block w-full` constrains the text to the padded box width so
-        // `overflow-wrap: break-word` actually wraps. An `inline-flex`
-        // span would shrink-wrap to the word's max-content width and
-        // never wrap — an unbreakable token (e.g. "Hubua") would then
-        // render as one oversized line overflowing the frame, even
-        // though `useFitText` sized the font assuming the word wraps.
-        className="block w-full text-center leading-snug font-medium wrap-break-word"
-        style={{ fontSize: `${fontSize}px` }}
+        className="block w-full text-center font-medium"
+        style={{
+          fontSize: `${fontSize}px`,
+          lineHeight: MINIMAL_LINE_HEIGHT,
+          paddingLeft: PAD_X - 8,
+          paddingRight: PAD_X - 8,
+          display: '-webkit-box',
+          WebkitBoxOrient: 'vertical',
+          WebkitLineClamp: maxLines,
+          overflow: 'hidden',
+          wordBreak: 'normal',
+          overflowWrap: 'break-word',
+        }}
       >
-        {label}
+        {rawLabel}
       </span>
     </div>
   );

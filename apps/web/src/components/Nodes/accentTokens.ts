@@ -13,8 +13,15 @@ const ACCENT_FG_MIX = 60;
 const ACCENT_BG_MIX = 10;
 /** % of accent over transparent for very subtle section tints. */
 const ACCENT_SOFT_MIX = 4;
-/** % of accent over transparent for a solid accent border. */
-const ACCENT_BORDER_MIX = 50;
+/**
+ * % of accent over transparent for a solid node border.
+ *
+ * Edges use the raw accent at 100%. Node borders are thicker and cover a much
+ * larger perimeter, so keeping them slightly quieter preserves hierarchy while
+ * 75% remains close enough for a node and its same-accent edge to read as one
+ * visual family.
+ */
+const ACCENT_BORDER_MIX = 75;
 /** % of accent over transparent for a thin accent divider. */
 const ACCENT_DIVIDER_MIX = 25;
 /** % of accent over transparent for inline text highlights. */

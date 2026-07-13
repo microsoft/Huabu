@@ -4,7 +4,13 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { getSmartHandles, rerouteAllEdges } from '../edge.js';
+import { resolveAccent } from '../../../index.js';
+import {
+  applyEdgeStyle,
+  DEFAULT_EDGE_STROKE_TOKEN,
+  getSmartHandles,
+  rerouteAllEdges,
+} from '../edge.js';
 
 import type { ObstacleRect } from '../edge.js';
 import type { Node, Edge } from '@xyflow/react';
@@ -33,6 +39,20 @@ function makeNode(
 function makeEdge(source: string, target: string): Edge {
   return { id: `${source}->${target}`, source, target } as Edge;
 }
+
+describe('applyEdgeStyle — defaults', () => {
+  it('renders an unstyled edge with the neutral grey palette token', () => {
+    const edge = applyEdgeStyle(makeEdge('s', 't'));
+
+    expect(edge.style?.stroke).toBe(resolveAccent(DEFAULT_EDGE_STROKE_TOKEN));
+  });
+
+  it('uses neutral grey when other edge styles omit stroke', () => {
+    const edge = applyEdgeStyle(makeEdge('s', 't'), { lineStyle: 'dashed' });
+
+    expect(edge.style?.stroke).toBe(resolveAccent(DEFAULT_EDGE_STROKE_TOKEN));
+  });
+});
 
 // ── getSmartHandles: obstacle avoidance ────────────────────────────────
 

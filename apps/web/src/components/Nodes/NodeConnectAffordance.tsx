@@ -5,6 +5,7 @@
 import {
   Handle,
   Position,
+  useConnection,
   useInternalNode,
   useStore,
   useViewport,
@@ -276,6 +277,10 @@ export const NodeConnectionHandles = memo(
       const factor = Math.max(1 / s.transform[2], 1);
       return baseHandleSize * factor;
     });
+    // While a connection drag is in progress, promote every exposed dot
+    // from its idle hollow state to a filled + glowing state so the user
+    // gets a strong "drop it here" affordance on valid endpoints.
+    const connecting = useConnection((c) => c.inProgress);
 
     return (
       <>
@@ -341,12 +346,35 @@ export const NodeConnectionHandles = memo(
                     };
           // Dot is centred on the (collapsed) bbox; `pointer-events:
           // auto` makes the dot the actual click target.
+          //
+          // State progression:
+          //   - idle (node hovered, NOT selected): hollow – surface fill
+          //     + info ring, visually light so four dots don't clutter
+          //     the card.
+          //   - selected: filled info. The selection outline (a z-998
+          //     HUD line drawn by `<SelectionOutlines />`) sits above the
+          //     node DOM and would otherwise slice a hollow dot's white
+          //     centre in two ("cut apart" look). Filling the dot with
+          //     the same `--color-info` makes that line blend into the
+          //     dot instead of bisecting it.
+          //   - connecting (drag in progress): filled info + glow, a
+          //     strong endpoint affordance mirroring the selected-edge
+          //     glow used elsewhere.
+          const solid = connecting || selected;
           const dotStyle: React.CSSProperties = {
             width: dotSize,
             height: dotSize,
             top: '50%',
             left: '50%',
             transform: 'translate(-50%, -50%)',
+            boxSizing: 'border-box',
+            borderWidth: 2.5,
+            borderStyle: 'solid',
+            borderColor: 'var(--color-info)',
+            backgroundColor: solid ? 'var(--color-info)' : 'var(--bg-surface)',
+            boxShadow: connecting
+              ? '0 0 3px var(--color-info-light)'
+              : undefined,
           };
           return (
             <Handle
@@ -372,7 +400,7 @@ export const NodeConnectionHandles = memo(
             >
               <span
                 aria-hidden
-                className="bg-info pointer-events-auto absolute rounded-full"
+                className="pointer-events-auto absolute rounded-full transition-colors"
                 style={dotStyle}
               />
             </Handle>

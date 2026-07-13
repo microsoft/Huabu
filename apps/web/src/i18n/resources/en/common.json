@@ -106,10 +106,9 @@
     "editExternalAgent": "Edit external agent",
     "newExternalAgent": "New external agent",
     "customAgent": "Custom agent",
-    "customCommand": "Custom command",
+    "customCommand": "Manual setup",
+    "acpAgent": "ACP Agent",
     "agentTeam": "Agent Team",
-    "builtIn": "Detected agent",
-    "custom": "Custom command",
     "agent": "Agent",
     "agentDirectory": "Agent directory",
     "agentDirectoryHint": "Absolute path to the agent-team directory containing agentlet.yaml.",
@@ -118,13 +117,12 @@
     "harnessHint": "Optional harness override. Leave blank to use the manifest default.",
     "harnessDetailedHint": "Optional harness override (e.g. 'claude', 'copilot'). Leave blank to use the first harness declared in the manifest.",
     "launchCommand": "Launch command",
-    "launchCommandHint": "Full command line the worker should spawn (binary + all flags). Use this for binaries that aren't on PATH or for flags not exposed by an auto-detected agent.",
+    "launchCommandHint": "Full command line the worker should spawn (binary + all flags). Use this for binaries that aren't on PATH or for flags not exposed by a preset agent.",
     "autoApproveAllToolCalls": "Auto-approve all tool calls",
     "autoApproveAllToolCallsHint": "Skip the per-tool confirmation prompt. Convenient for sandboxed runs, risky for anything that can touch your filesystem or network.",
     "workingDirectory": "Working directory",
     "workingDirectoryHint": "The agent is spawned with this as its working directory and treats it as the project root for file edits and tool calls.",
     "displayName": "Display name",
-    "noCliFound": "No ACP-capable agents found on your PATH. Switch to <strong>Custom command</strong> to type a launch command yourself.",
     "detectingClis": "Detecting agents…",
     "moreInfo": "More info",
     "pickFolder": "Pick a folder",
@@ -633,7 +631,8 @@
       "switchManual": "Switch to manual size",
       "fitSize": "Fit size to content",
       "switchFixedHeight": "Switch to fixed height",
-      "fitHeight": "Fit height to content"
+      "fitHeight": "Fit height to content",
+      "auto": "Auto"
     },
     "align": {
       "title": "Align",
@@ -683,12 +682,13 @@
     }
   },
   "colors": {
-    "transparent": "Transparent",
+    "none": "No accent",
     "white": "White",
     "grey": "Grey",
+    "teal": "Teal",
     "red": "Red",
     "orange": "Orange",
-    "amber": "Amber",
+    "amber": "Yellow",
     "green": "Green",
     "blue": "Blue",
     "purple": "Purple"

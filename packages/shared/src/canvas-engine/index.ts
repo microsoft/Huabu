@@ -145,6 +145,7 @@ export {
   edgeZIndex,
 } from './frame/index.js';
 export {
+  DEFAULT_EDGE_STROKE_TOKEN,
   DEFAULT_EDGE_STROKE_WIDTH,
   applyEdgeStyle,
   mergeEdgeStyle,

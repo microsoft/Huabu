@@ -20,8 +20,10 @@ export const FONT_FAMILY_CSS: Record<NodeFontFamily, string> = {
   hand: '"Comic Sans MS", "Chalkboard SE", sans-serif',
 };
 
-/** Padding inside a TextNode (px on each side). */
-export const TEXT_NODE_PADDING = 4;
+/** Horizontal padding inside a TextNode (px on the left and right). */
+export const TEXT_NODE_PADDING_X = 12;
+/** Vertical padding inside a TextNode (px on the top and bottom). */
+export const TEXT_NODE_PADDING_Y = 4;
 /** Border width NodeWrapper applies when an accent is set (`border-3`). */
 export const TEXT_ACCENT_BORDER = 3;
 

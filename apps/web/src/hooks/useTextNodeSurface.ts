@@ -18,7 +18,8 @@
  *   isEditing,
  *   content,             // current persisted text
  *   baseFontSize: 16,
- *   padding: NODE_PADDING,
+ *   paddingX: NODE_PADDING,
+ *   paddingY: NODE_PADDING,
  *   borderInset,
  *   fontOpts,
  *   placeholder: 'Type...',
@@ -62,7 +63,8 @@ export interface UseTextNodeSurfaceOpts {
 
   // -------- Sizing config --------
   baseFontSize?: number;
-  padding: number;
+  paddingX: number;
+  paddingY: number;
   borderInset?: number;
   fontOpts: FontOpts;
   placeholder?: string;
@@ -88,7 +90,8 @@ export interface UseTextNodeSurfaceResult {
     effectiveWidth: number;
     effectiveHeight: number;
     effectiveFontSize: number;
-    padding: number;
+    paddingX: number;
+    paddingY: number;
   };
 }
 
@@ -101,7 +104,8 @@ export function useTextNodeSurface(
     isEditing,
     content,
     baseFontSize = 16,
-    padding,
+    paddingX,
+    paddingY,
     borderInset = 0,
     fontOpts,
     placeholder = 'Type...',
@@ -119,7 +123,8 @@ export function useTextNodeSurface(
     nodeId,
     text: draft,
     baseFontSize,
-    padding,
+    paddingX,
+    paddingY,
     borderInset,
     fontOpts,
     placeholder,
@@ -139,7 +144,8 @@ export function useTextNodeSurface(
       effectiveWidth: autoSize.effectiveWidth,
       effectiveHeight: autoSize.effectiveHeight,
       effectiveFontSize: autoSize.effectiveFontSize,
-      padding,
+      paddingX,
+      paddingY,
     },
   };
 }
