@@ -23,21 +23,21 @@ import { NODE_ICON } from '../../config/nodeIcons';
 
 const toc: TocEntry[] = [
   { id: 'the-problem', label: 'The problem we are solving' },
-  { id: 'why-canvas', label: 'Why a canvas, not a chat sidebar' },
+  { id: 'why-canvas', label: 'Why a Space, not a chat sidebar' },
   { id: 'three-layers', label: 'Three layers, one surface' },
   { id: 'the-surface', label: 'Layer 1 — The surface' },
   { id: 'the-units', label: 'Layer 2 — The units (ten node types)' },
   { id: 'the-structure', label: 'Layer 3 — Structure & navigation' },
   { id: 'how-they-compose', label: 'How the layers compose' },
   { id: 'design-principles', label: 'Design principles' },
-  { id: 'when-not', label: 'When the canvas is the wrong tool' },
+  { id: 'when-not', label: 'When the Space is the wrong tool' },
 ];
 
 export default function ExternalizedSensemaking() {
   return (
     <PageLayout
       title="Externalized Sensemaking"
-      description="Huabu treats the canvas as a persistent place to put the things you are still figuring out. Spreading thought outwards — onto a surface you can rearrange, group and revisit — is the design centre of the product. This page walks the whole stack: why we built it, what it is made of, and how the pieces compose."
+      description="Huabu treats the Space as a persistent place to put the things you are still figuring out. Spreading thought outwards — onto a surface you can rearrange, group and revisit — is the design centre of the product. This page walks the whole stack: why we built it, what it is made of, and how the pieces compose."
       toc={toc}
     >
       <H2>The problem we are solving</H2>
@@ -52,23 +52,23 @@ export default function ExternalizedSensemaking() {
       </P>
       <P>
         Huabu&apos;s answer is to give externalisation a single, persistent
-        visual home — a canvas that holds notes, sources, sketches, AI replies
+        visual home — a Space that holds notes, sources, sketches, AI replies
         and the relationships between them. Because everything lives on the same
         surface, both you and the AI can read the whole picture.
       </P>
 
-      <H2>Why a canvas, not a chat sidebar</H2>
+      <H2>Why a Space, not a chat sidebar</H2>
       <P>
         The dominant pattern for AI tooling today is a sidebar with a single
         chat thread. It works for short questions; it falls apart the moment the
-        problem outgrows one prompt. A canvas inverts each weakness:
+        problem outgrows one prompt. A Space inverts each weakness:
       </P>
       <Table
-        headers={['Chat sidebar', 'Canvas']}
+        headers={['Chat sidebar', 'Space']}
         rows={[
           [
             'Context window is the last few messages.',
-            'Context window is the whole canvas — nodes, edges, layout, history.',
+            'Context window is the whole Space — nodes, edges, layout, history.',
           ],
           [
             'Outputs are linear: scroll up to find anything older.',
@@ -91,16 +91,16 @@ export default function ExternalizedSensemaking() {
 
       <H2>Three layers, one surface</H2>
       <P>
-        A Huabu canvas is built out of three layers stacked on top of each
-        other. Every feature in the product belongs to one of them:
+        A Huabu Space is built out of three layers stacked on top of each other.
+        Every feature in the product belongs to one of them:
       </P>
       <Table
         headers={['Layer', 'Purpose', 'Examples']}
         rows={[
           [
             <strong>Surface</strong>,
-            'Where work happens — the container and the canvas itself.',
-            'Workspace, Canvas, tools & gestures.',
+            'Where work happens — the container and the Space itself.',
+            'Home, Space, tools & gestures.',
           ],
           [
             <strong>Units</strong>,
@@ -121,7 +121,7 @@ export default function ExternalizedSensemaking() {
 
       <H2>Layer 1 — The surface</H2>
       <P>
-        The surface is the canvas plus everything around it: the local folder
+        The surface is the Space plus everything around it: the local folder
         that holds your work, the infinite 2D plane you draw on, and the
         gestures you use to move things around.
       </P>
@@ -130,14 +130,14 @@ export default function ExternalizedSensemaking() {
           to="/docs/concepts/workspaces"
           icon={FolderTree}
           eyebrow="Container"
-          title="Workspace"
-          description="A local folder you pick once. Holds every canvas, attachment, memory and history file. Pick any folder; an empty one is easiest."
+          title="Home"
+          description="A local folder you pick once. Holds every Space, attachment, memory and history file. Pick any folder; an empty one is easiest."
         />
         <NavCard
           to="/docs/concepts/canvas-basics"
           icon={Layout}
           eyebrow="Surface"
-          title="Canvas"
+          title="Space"
           description="An infinite 2D plane with pan, zoom, marquee select, lasso select and direct manipulation."
         />
         <NavCard
@@ -145,13 +145,13 @@ export default function ExternalizedSensemaking() {
           icon={MousePointer2}
           eyebrow="Interaction"
           title="Tools & Gestures"
-          description="Select, pan, lasso, multi-select toolbar, alignment, distribution, copy / paste / undo across the canvas."
+          description="Select, pan, lasso, multi-select toolbar, alignment, distribution, copy / paste / undo across the Space."
         />
       </CardGrid>
 
       <H2>Layer 2 — The units (ten node types)</H2>
       <P>
-        Nodes are the things you place on the canvas. Each type has its own
+        Nodes are the things you place on the Space. Each type has its own
         editor, its own toolbar, and its own on-disk storage shape, but they
         share the same drag / resize / connect / lock affordances. The ten types
         fall into four loose categories — content, media, structure,
@@ -246,8 +246,8 @@ export default function ExternalizedSensemaking() {
 
       <H2>Layer 3 — Structure & navigation</H2>
       <P>
-        Nodes alone are confetti. What turns a busy canvas into something you
-        can read and the AI can use are the structural features — connections
+        Nodes alone are confetti. What turns a busy Space into something you can
+        read and the AI can use are the structural features — connections
         between nodes, containers that carry layout, and panels that let you
         navigate without panning.
       </P>
@@ -271,27 +271,27 @@ export default function ExternalizedSensemaking() {
           icon={Layers}
           eyebrow="Navigation"
           title="Layers Panel"
-          description="A flat, searchable list of every node on the canvas — rename, lock, jump-to. The canvas's table of contents."
+          description="A flat, searchable list of every node on the Space — rename, lock, jump-to. The Space's table of contents."
         />
         <NavCard
           to="/docs/concepts/chat-panel"
           icon={MessageSquare}
           eyebrow="Conversation"
           title="Chat Panel"
-          description="Persistent threads that always see the canvas alongside you. Sends selected nodes as focus automatically."
+          description="Persistent threads that always see the Space alongside you. Sends selected nodes as focus automatically."
         />
         <NavCard
           to="/docs/nodes/content"
           icon={FolderTree}
           eyebrow="Under the hood"
           title="Node Content"
-          description="How node bodies are ingested into Markdown the AI can read — the bridge between canvas and AI context."
+          description="How node bodies are ingested into Markdown the AI can read — the bridge between Space and AI context."
         />
       </CardGrid>
 
       <H2>How the layers compose</H2>
       <P>
-        A useful canvas is rarely one node type alone. Most of the value comes
+        A useful Space is rarely one node type alone. Most of the value comes
         from how the layers combine. A few common shapes:
       </P>
       <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
@@ -337,7 +337,7 @@ export default function ExternalizedSensemaking() {
         </li>
         <li>
           <strong>Cheap iteration.</strong> Drag, regroup, undo, restart. The
-          canvas rewards messy first passes and tightening later.
+          Space rewards messy first passes and tightening later.
         </li>
         <li>
           <strong>One surface for everything.</strong> Sources, notes, sketches,
@@ -346,15 +346,15 @@ export default function ExternalizedSensemaking() {
         </li>
         <li>
           <strong>Your files, your format.</strong> See{' '}
-          <DocLink href="/docs/core/open-vault">Open Vault</DocLink> — nothing
-          is locked inside the app.
+          <DocLink href="/docs/core/open-vault">Open Home</DocLink> — nothing is
+          locked inside the app.
         </li>
       </ul>
 
-      <H2>When the canvas is the wrong tool</H2>
+      <H2>When the Space is the wrong tool</H2>
       <P>
         It&apos;s worth being honest about where Huabu doesn&apos;t earn its
-        keep. A canvas is overkill for:
+        keep. A Space is overkill for:
       </P>
       <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
         <li>
@@ -374,7 +374,7 @@ export default function ExternalizedSensemaking() {
       <Callout tone="tip">
         Read this page once for orientation. Day-to-day, the things you reach
         for most are{' '}
-        <DocLink href="/docs/concepts/canvas-basics">Canvas</DocLink> and the
+        <DocLink href="/docs/concepts/canvas-basics">Space</DocLink> and the
         per-node pages — start with{' '}
         <DocLink href="/docs/nodes/note">Note</DocLink> and{' '}
         <DocLink href="/docs/nodes/frames">Frame</DocLink>.

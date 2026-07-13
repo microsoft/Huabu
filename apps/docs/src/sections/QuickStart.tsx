@@ -24,10 +24,10 @@ export default function QuickStart() {
         package on Windows, then install and launch Huabu.
       </P>
 
-      <H2>2. Choose a Vault</H2>
+      <H2>2. Choose a Home</H2>
       <P>
         On first launch, choose a local folder for Huabu to use as your{' '}
-        <strong>Vault</strong>. A Vault holds all of your Spaces, settings,
+        <strong>Home</strong>. A Home holds all of your Spaces, settings,
         skills, and shared memory.
       </P>
       <P>
@@ -84,13 +84,12 @@ export default function QuickStart() {
       <H2>4. Create a Space</H2>
       <P>
         A <strong>Space</strong> is an independent place to think and work on a
-        topic, question, or project. Inside your Vault, select{' '}
-        <strong>New canvas</strong> to create a Space and open its infinite
-        canvas immediately.
+        topic, question, or project. Inside your Home, select{' '}
+        <strong>New Space</strong> to create a Space and open it immediately.
       </P>
       <DocImage
         src="/docs/quick-start/create-canvas-web.png"
-        alt="Huabu canvas list with the New canvas button"
+        alt="Huabu Space list with the New Space button"
         caption="Web preview — this screenshot will be replaced with the desktop version."
         className="mx-auto max-w-2xl"
       />
@@ -168,7 +167,7 @@ export default function QuickStart() {
       </ul>
       <Callout tone="tip" title="Where to next">
         Continue with{' '}
-        <DocLink href="/docs/concepts/canvas-basics">Canvas Basics</DocLink> to
+        <DocLink href="/docs/concepts/canvas-basics">Space Basics</DocLink> to
         learn how to select, arrange, connect, and frame materials in a Space.
         For deeper AI workflows, explore{' '}
         <DocLink href="/docs/ai/chat-mode">Chat Mode</DocLink>,{' '}

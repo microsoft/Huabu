@@ -22,7 +22,7 @@ export default function Question() {
   return (
     <PageLayout
       title="Question Nodes"
-      description="A canvas-native Ask. Drop a Question node next to the relevant material and the AI answers right there, with its reply attached as a connected node."
+      description="A Space-native Ask. Drop a Question node next to the relevant material and the AI answers right there, with its reply attached as a connected node."
       toc={toc}
     >
       <H2>Why a question node</H2>
@@ -37,7 +37,7 @@ export default function Question() {
         </li>
         <li>
           The question is <strong>local</strong> — about a specific area of the
-          canvas — and shouldn&apos;t pull in the whole context.
+          Space — and shouldn&apos;t pull in the whole context.
         </li>
         <li>
           You&apos;re building a spatial thread (question → answer → follow-up)
@@ -48,7 +48,7 @@ export default function Question() {
       <H2>Workflow</H2>
       <ol className="list-decimal space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
         <li>
-          Pick the Question tool from the canvas toolbar and click to place it.
+          Pick the Question tool from the Space toolbar and click to place it.
         </li>
         <li>Double-click to edit and type the question.</li>
         <li>
@@ -104,12 +104,12 @@ export default function Question() {
 
       <H2>Spatial context</H2>
       <P>
-        Question nodes don&apos;t consume the entire canvas — they consume the{' '}
+        Question nodes don&apos;t consume the entire Space — they consume the{' '}
         <strong>semantic neighbourhood</strong> around themselves:
       </P>
       <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
         <li>The Question&apos;s parent frame (if any).</li>
-        <li>Nodes spatially adjacent on the canvas.</li>
+        <li>Nodes spatially adjacent on the Space.</li>
         <li>Nodes connected by edges.</li>
       </ul>
       <Callout tone="tip">

@@ -19,7 +19,7 @@ export default function PdfNode() {
   return (
     <PageLayout
       title="PDF"
-      description="PDFs live on the canvas as full documents. The lightbox viewer offers page thumbnails, download, and a selection mode that drags text or screenshots back onto the canvas."
+      description="PDFs live on the Space as full documents. The lightbox viewer offers page thumbnails, download, and a selection mode that drags text or screenshots back onto the Space."
       toc={toc}
     >
       <H2>Creating</H2>
@@ -44,7 +44,7 @@ export default function PdfNode() {
       </P>
       <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
         <li>
-          Drag a text selection onto the canvas — it lands as a Note containing
+          Drag a text selection onto the Space — it lands as a Note containing
           the copied text.
         </li>
         <li>
@@ -58,7 +58,7 @@ export default function PdfNode() {
         </li>
       </ul>
       <Callout tone="tip">
-        Either way the new node lives next to the PDF on the canvas so you can
+        Either way the new node lives next to the PDF on the Space so you can
         revisit the source quickly.
       </Callout>
 

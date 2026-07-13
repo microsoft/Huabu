@@ -21,9 +21,9 @@ import {
 } from '../../components';
 
 const toc: TocEntry[] = [
-  { id: 'what-it-means', label: 'What "agentic canvas" means' },
-  { id: 'shared-memory', label: 'The canvas as shared memory' },
-  { id: 'surfaces', label: 'Six AI surfaces on one canvas' },
+  { id: 'what-it-means', label: 'What "agentic Space" means' },
+  { id: 'shared-memory', label: 'The Space as shared memory' },
+  { id: 'surfaces', label: 'Six AI surfaces on one Space' },
   { id: 'what-ai-sees', label: 'What the AI actually sees' },
   { id: 'edits-as-objects', label: 'Edits are first-class objects' },
   { id: 'safety', label: 'Safety rails' },
@@ -32,35 +32,35 @@ const toc: TocEntry[] = [
 export default function AgenticCanvas() {
   return (
     <PageLayout
-      title="Agentic Canvas"
-      description="Huabu's AI isn't a sidebar — it's a participant on the same surface you work on. It reads the whole canvas, writes back into it, and exposes its capabilities through six distinct surfaces tuned to different moments in your workflow."
+      title="Agentic Space"
+      description="Huabu's AI isn't a sidebar — it's a participant on the same surface you work on. It reads the whole Space, writes back into it, and exposes its capabilities through six distinct surfaces tuned to different moments in your workflow."
       toc={toc}
     >
-      <H2>What &quot;agentic canvas&quot; means</H2>
+      <H2>What &quot;agentic Space&quot; means</H2>
       <P>
-        The phrase has two pieces. <strong>Canvas</strong> means the AI works on
+        The phrase has two pieces. <strong>Space</strong> means the AI works on
         the same 2D surface you do, with the same nodes, frames and edges.{' '}
         <strong>Agentic</strong> means the AI can take initiative — call tools,
-        run multi-step plans, edit the canvas, ask permission for anything it
+        run multi-step plans, edit the Space, ask permission for anything it
         can&apos;t do alone — instead of just responding to one prompt at a
         time.
       </P>
 
-      <H2>The canvas as shared memory</H2>
+      <H2>The Space as shared memory</H2>
       <P>
         Most assistants are stateless between turns. Huabu&apos;s AI is
-        stateless between turns <em>too</em>, but the canvas itself is the
-        state: what you see is what it sees, and what it writes is something you
-        can edit. Three concrete consequences:
+        stateless between turns <em>too</em>, but the Space itself is the state:
+        what you see is what it sees, and what it writes is something you can
+        edit. Three concrete consequences:
       </P>
       <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
         <li>
           <strong>Pointing is selection.</strong> Highlighting nodes on the
-          canvas tells the AI which inputs matter for the next turn.
+          Space tells the AI which inputs matter for the next turn.
         </li>
         <li>
           <strong>Grouping is grammar.</strong> Frame names and edge labels show
-          up in the canvas overview the AI reads each turn.
+          up in the Space overview the AI reads each turn.
         </li>
         <li>
           <strong>Output is durable.</strong> Anything the AI produces is a real
@@ -69,10 +69,10 @@ export default function AgenticCanvas() {
         </li>
       </ul>
 
-      <H2>Six AI surfaces on one canvas</H2>
+      <H2>Six AI surfaces on one Space</H2>
       <P>
         Pick the surface that matches what you&apos;re trying to do. They all
-        share the canvas, so you can hop between them without losing context.
+        share the Space, so you can hop between them without losing context.
       </P>
       <CardGrid>
         <NavCard
@@ -87,19 +87,19 @@ export default function AgenticCanvas() {
           icon={Bot}
           eyebrow="Chat"
           title="Agent Mode"
-          description="Structured canvas edits with a reviewable change list before anything commits."
+          description="Structured Space edits with a reviewable change list before anything commits."
         />
         <NavCard
           to="/docs/ai/question-mode"
           icon={Lightbulb}
-          eyebrow="On the canvas"
+          eyebrow="On the Space"
           title="Question Mode"
           description="Ask a question right where the source material is; the AI answers in line."
         />
         <NavCard
           to="/docs/ai/intent"
           icon={Sparkles}
-          eyebrow="On the canvas"
+          eyebrow="On the Space"
           title="Intent"
           description="Context-aware “what next” suggestions you can run with one click."
         />
@@ -108,7 +108,7 @@ export default function AgenticCanvas() {
           icon={Brain}
           eyebrow="Long-term"
           title="Memory"
-          description="Cross-canvas preferences and per-canvas notes the AI maintains for you."
+          description="Cross-Space preferences and per-Space notes the AI maintains for you."
         />
         <NavCard
           to="/docs/ai/skills"
@@ -130,7 +130,7 @@ export default function AgenticCanvas() {
       <P>Two things travel with every message you send:</P>
       <ol className="list-decimal space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
         <li>
-          A compact <strong>canvas overview</strong> — node list, frame
+          A compact <strong>Space overview</strong> — node list, frame
           hierarchy, recent operations.
         </li>
         <li>
@@ -170,8 +170,8 @@ export default function AgenticCanvas() {
       <H2>Safety rails</H2>
       <Callout tone="info">
         Nothing the AI does happens silently. Built-in tools are sandboxed to
-        the current workspace; external agents stay read-only by default and
-        prompt for permission for anything beyond that. See{' '}
+        the current Home; external agents stay read-only by default and prompt
+        for permission for anything beyond that. See{' '}
         <DocLink href="/docs/core/pluggable-agents">Pluggable Agents</DocLink>{' '}
         for the full security model.
       </Callout>

@@ -23,7 +23,7 @@ export default function NoteNode() {
   return (
     <PageLayout
       title="Note"
-      description="Notes are Markdown blocks for thoughts, outlines, and AI-written prose. They're the canvas's main text container and the most common node type."
+      description="Notes are Markdown blocks for thoughts, outlines, and AI-written prose. They're the Space's main text container and the most common node type."
       toc={toc}
     >
       <H2>What a Note is</H2>
@@ -38,10 +38,10 @@ export default function NoteNode() {
       <Table
         headers={['Source', 'How']}
         rows={[
-          ['Toolbar', 'Pick Note from the canvas toolbar.'],
+          ['Toolbar', 'Pick Note from the Space toolbar.'],
           [
             'Paste text',
-            'Paste plain text or Markdown on an empty canvas spot.',
+            'Paste plain text or Markdown on an empty Space spot.',
           ],
           [
             'Drag a block',
@@ -49,7 +49,7 @@ export default function NoteNode() {
           ],
           [
             'From chat',
-            'Drag an AI response from the chat panel onto the canvas.',
+            'Drag an AI response from the chat panel onto the Space.',
           ],
         ]}
       />

@@ -103,7 +103,7 @@ export default function Shortcuts() {
         <>
           <Kbd>Ctrl</Kbd> on Windows / Linux, <Kbd>Cmd</Kbd> (⌘) on macOS — the
           tables below write it as <Kbd>Ctrl</Kbd>/<Kbd>Cmd</Kbd>. Press{' '}
-          <Kbd>?</Kbd> on any canvas to view the same list in-app.
+          <Kbd>?</Kbd> on any Space to view the same list in-app.
         </>
       }
       toc={toc}
@@ -130,7 +130,7 @@ export default function Shortcuts() {
         headers={['Clipboard contents', 'Result']}
         rows={[
           [
-            'Canvas nodes copied earlier',
+            'Space nodes copied earlier',
             'Pasted as duplicates at the cursor position.',
           ],
           ['Image file', 'Creates an Image node and uploads it.'],

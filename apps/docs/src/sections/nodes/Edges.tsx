@@ -14,7 +14,7 @@ export default function Edges() {
   return (
     <PageLayout
       title="Edges & Connections"
-      description="Edges are first-class objects on the canvas. They aren't decoration — the AI reads them as part of the canvas structure, so connecting two nodes is itself an authoring act."
+      description="Edges are first-class objects on the Space. They aren't decoration — the AI reads them as part of the Space structure, so connecting two nodes is itself an authoring act."
       toc={toc}
     >
       <H2>Creating edges</H2>
@@ -26,7 +26,7 @@ export default function Edges() {
 
       <H2>Edge labels</H2>
       <P>
-        Edge labels describe relationships and remain readable as the canvas is
+        Edge labels describe relationships and remain readable as the Space is
         zoomed out because their size is partially counter-scaled. Long labels
         wrap and show up to three lines by default to avoid covering nearby
         nodes; hover, select, or edit the edge to reveal the complete text.
@@ -80,7 +80,7 @@ export default function Edges() {
       <H2>AI-created edges</H2>
       <P>
         When the AI runs in Operate mode (or when you accept an Intent
-        suggestion), it can create edges as part of its batch of canvas commands
+        suggestion), it can create edges as part of its batch of Space commands
         — and it picks colours and styles that mirror the relationship it&apos;s
         expressing. You see them in the change list before they&apos;re
         committed and can edit or delete them like any other edge.

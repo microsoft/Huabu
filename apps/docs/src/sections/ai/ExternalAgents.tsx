@@ -73,7 +73,7 @@ export default function ExternalAgents() {
       </ul>
       <P>
         Fill in <strong>Working directory</strong> (the project root the agent
-        should treat as its workspace), optionally tweak the{' '}
+        should treat as its working directory), optionally tweak the{' '}
         <strong>Display name</strong>, and click <strong>Create profile</strong>
         . The profile is persisted on the server and shows up immediately in
         every chat surface — no restart, no terminal step.

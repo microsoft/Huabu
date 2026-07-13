@@ -23,14 +23,14 @@ export default function Settings() {
   return (
     <PageLayout
       title="Settings & LLM"
-      description="Pick which model the AI uses, how it authenticates with your provider, and how to connect external coding-agent CLIs. Settings are application-wide — one configuration is shared across every workspace and canvas."
+      description="Pick which model the AI uses, how it authenticates with your provider, and how to connect external coding-agent CLIs. Settings are application-wide — one configuration is shared across every Home and Space."
       toc={toc}
     >
       <H2>Opening settings</H2>
       <P>
         Click the gear icon in the floating top-right controls (visible on every
-        canvas). The settings popover has two main sections:{' '}
-        <strong>LLM</strong> and <strong>External Agents</strong>.
+        Space). The settings popover has two main sections: <strong>LLM</strong>{' '}
+        and <strong>External Agents</strong>.
       </P>
 
       <H2>Providers and models</H2>

@@ -12,10 +12,10 @@ import {
 } from '../../components';
 
 const toc: TocEntry[] = [
-  { id: 'picking-a-workspace', label: 'Picking a workspace' },
-  { id: 'switching-workspaces', label: 'Switching workspaces' },
-  { id: 'the-canvas-list', label: 'The canvas list' },
-  { id: 'lifecycle-of-a-canvas', label: 'Lifecycle of a canvas' },
+  { id: 'picking-a-home', label: 'Picking a Home' },
+  { id: 'switching-homes', label: 'Switching Homes' },
+  { id: 'the-space-list', label: 'The Space list' },
+  { id: 'lifecycle-of-a-space', label: 'Lifecycle of a Space' },
   { id: 'import-export', label: 'Import & export' },
   { id: 'sharing-and-collaboration', label: 'Sharing & collaboration' },
 ];
@@ -23,14 +23,14 @@ const toc: TocEntry[] = [
 export default function Workspaces() {
   return (
     <PageLayout
-      title="Workspaces & Canvases"
-      description="All your data lives inside a single local folder you choose — a workspace. Each workspace holds any number of canvases, and each canvas is a self-contained subdirectory."
+      title="Homes & Spaces"
+      description="All your data lives inside a single local folder you choose — a Home. Each Home holds any number of Spaces, and each Space is a self-contained subdirectory."
       toc={toc}
     >
-      <H2>Picking a workspace</H2>
+      <H2>Picking a Home</H2>
       <P>
-        On first launch you&apos;re shown a workspace picker. Either select a
-        folder via the native OS dialog or pick one from the recent list.
+        On first launch you&apos;re shown a Home picker. Either select a folder
+        via the native OS dialog or pick one from the recent list.
       </P>
       <Table
         headers={['Action', 'What it does']}
@@ -40,14 +40,14 @@ export default function Workspaces() {
             'Use a native OS dialog to choose any folder. An empty one is easiest, but Huabu coexists with existing files.',
           ],
           [
-            <strong>Recent workspaces</strong>,
-            'Open or remove a previously used workspace in one click; the list is remembered locally.',
+            <strong>Recent Homes</strong>,
+            'Open or remove a previously used Home in one click; the list is remembered locally.',
           ],
         ]}
       />
       <P>
-        Inside the chosen folder Huabu creates one subdirectory per canvas (and
-        a <Code>setting/</Code> folder for workspace-wide memory and skills):
+        Inside the chosen folder Huabu creates one subdirectory per Space (and a{' '}
+        <Code>setting/</Code> folder for Home-wide memory and skills):
       </P>
       <CodeBlock language="text">{`<workspace>/
 ├── <canvas-title>/          one folder per canvas
@@ -60,56 +60,56 @@ export default function Workspaces() {
     ├── .huabu.md            workspace-wide memory
     └── skills/              your custom skills`}</CodeBlock>
       <P>
-        Your last-opened workspace is remembered, so re-launching Huabu drops
-        you back where you left off.
+        Your last-opened Home is remembered, so re-launching Huabu drops you
+        back where you left off.
       </P>
 
-      <H2>Switching workspaces</H2>
+      <H2>Switching Homes</H2>
       <P>
-        Open Settings at any time to switch. Switching swaps the canvas list,
-        node contents and chat history for the new workspace; the previous
-        folder is never touched.
+        Open Settings at any time to switch. Switching swaps the Space list,
+        node contents and chat history for the new Home; the previous folder is
+        never touched.
       </P>
       <Callout tone="tip">
-        Workspaces are <strong>plain folders</strong>. Back them up with Time
-        Machine / Restic / rsync, sync them through iCloud / Dropbox /
-        Syncthing, or commit them to Git — whatever you already use for files.
+        Homes are <strong>plain folders</strong>. Back them up with Time Machine
+        / Restic / rsync, sync them through iCloud / Dropbox / Syncthing, or
+        commit them to Git — whatever you already use for files.
       </Callout>
 
-      <H2>The canvas list</H2>
+      <H2>The Space list</H2>
       <P>
-        Once a workspace is loaded, the canvas list (the &quot;Home&quot;
-        screen) lets you create, open, delete, import and export canvases. The
-        header shows the current workspace path and a link to switch.
+        Once a Home is loaded, the Space list (the &quot;Home&quot; screen) lets
+        you create, open, delete, import and export Spaces. The header shows the
+        current Home path and a link to switch.
       </P>
       <Table
         headers={['Action', 'What it does']}
         rows={[
           [
-            <strong>New canvas</strong>,
-            'Create an empty canvas and jump into it.',
+            <strong>New Space</strong>,
+            'Create an empty Space and jump into it.',
           ],
-          [<strong>Open canvas</strong>, 'Click a card to open the canvas.'],
+          [<strong>Open Space</strong>, 'Click a card to open the Space.'],
           [
-            <strong>Delete canvas</strong>,
-            'Removes the canvas folder entirely, including its chat and intent history.',
-          ],
-          [
-            <strong>Export canvas</strong>,
-            'Bundles the canvas folder into a .zip you can hand off; attachments are included.',
+            <strong>Delete Space</strong>,
+            'Removes the Space folder entirely, including its chat and intent history.',
           ],
           [
-            <strong>Import canvas</strong>,
-            'Restores a canvas from a previously exported .zip; a fresh canvas ID is assigned.',
+            <strong>Export Space</strong>,
+            'Bundles the Space folder into a .zip you can hand off; attachments are included.',
+          ],
+          [
+            <strong>Import Space</strong>,
+            'Restores a Space from a previously exported .zip; a fresh Space ID is assigned.',
           ],
         ]}
       />
 
-      <H2>Lifecycle of a canvas</H2>
+      <H2>Lifecycle of a Space</H2>
       <ol className="list-decimal space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
         <li>
-          <strong>Create</strong> — click <em>New canvas</em>; the app drops you
-          straight into the new canvas.
+          <strong>Create</strong> — click <em>New Space</em>; the app drops you
+          straight into the new Space.
         </li>
         <li>
           <strong>Edit</strong> — add nodes, draw connections, chat with the AI.
@@ -131,25 +131,23 @@ export default function Workspaces() {
 
       <H2>Import & export</H2>
       <P>
-        Export produces a <Code>.zip</Code> archive containing the canvas
+        Export produces a <Code>.zip</Code> archive containing the Space
         directory and its <Code>.artifacts/</Code>. Import accepts the same
-        bundle and reconstitutes the canvas under a new ID, so you can hand a
+        bundle and reconstitutes the Space under a new ID, so you can hand a
         snapshot to a teammate without worrying about ID collisions.
       </P>
 
       <H2>Sharing & collaboration</H2>
       <P>
         The current version is <strong>single-machine, local-first</strong>. One
-        canvas is expected to be edited by one client at a time. To share work:
+        Space is expected to be edited by one client at a time. To share work:
       </P>
       <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
         <li>
-          Export the canvas to a <Code>.zip</Code> bundle and hand over the
+          Export the Space to a <Code>.zip</Code> bundle and hand over the
           snapshot.
         </li>
-        <li>
-          Or put the whole workspace folder in version control / a sync drive.
-        </li>
+        <li>Or put the whole Home folder in version control / a sync drive.</li>
       </ul>
       <P>Real-time multi-user collaboration is not yet available.</P>
       <Callout tone="info">

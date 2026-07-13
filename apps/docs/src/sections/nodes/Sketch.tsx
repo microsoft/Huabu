@@ -44,10 +44,10 @@ export default function Sketch() {
 
       <H2>Drawing</H2>
       <P>
-        Activate the Sketch tool from the canvas toolbar, then drag on the
-        canvas to draw a stroke. Each click-drag adds a new stroke to the
-        current Sketch node; release and draw again to keep adding. The toolbar
-        carries swatches for the pen colour and a slider for the stroke width.
+        Activate the Sketch tool from the Space toolbar, then drag on the Space
+        to draw a stroke. Each click-drag adds a new stroke to the current
+        Sketch node; release and draw again to keep adding. The toolbar carries
+        swatches for the pen colour and a slider for the stroke width.
       </P>
       <P>
         Sketch nodes are resizable like any other node — strokes scale
@@ -66,7 +66,7 @@ export default function Sketch() {
       <Table
         headers={['Action', 'What it does']}
         rows={[
-          ['Accept', 'Apply the proposed nodes and edges to the canvas.'],
+          ['Accept', 'Apply the proposed nodes and edges to the Space.'],
           ['Revert', 'Discard the suggestion and keep the sketch as-is.'],
           [
             'Edit then accept',
@@ -102,7 +102,7 @@ export default function Sketch() {
       </ul>
       <Callout tone="tip">
         Press <Kbd>Esc</Kbd> after triggering Apply Sketch to dismiss the
-        overlay without committing — the strokes stay on the canvas.
+        overlay without committing — the strokes stay on the Space.
       </Callout>
     </PageLayout>
   );

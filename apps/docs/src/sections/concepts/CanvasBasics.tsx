@@ -27,8 +27,8 @@ const toc: TocEntry[] = [
 export default function CanvasBasics() {
   return (
     <PageLayout
-      title="Canvas Basics"
-      description="The canvas is Huabu's main work surface — an infinite 2D plane with pan, zoom and direct manipulation. This page covers the moves that apply across all node types."
+      title="Space Basics"
+      description="The Space is Huabu's main work surface — an infinite 2D plane with pan, zoom and direct manipulation. This page covers the moves that apply across all node types."
       toc={toc}
     >
       <H2>Selection & pan tools</H2>
@@ -61,7 +61,7 @@ export default function CanvasBasics() {
       <H2>Node creators</H2>
       <P>
         The second toolbar group has one button per creatable node type. Click
-        the button to activate the tool, then click on the canvas to drop the
+        the button to activate the tool, then click on the Space to drop the
         node. <Kbd>Esc</Kbd> (or clicking the button again) cancels.
       </P>
       <Table
@@ -70,7 +70,7 @@ export default function CanvasBasics() {
           [
             <strong>Frame</strong>,
             'Group rectangle',
-            'Drag a rectangle on the canvas instead of clicking once.',
+            'Drag a rectangle on the Space instead of clicking once.',
           ],
           [
             <strong>Note</strong>,
@@ -101,7 +101,7 @@ export default function CanvasBasics() {
         <li>
           <strong>Upload</strong> — multi-file picker for images (PNG / JPG /
           GIF / WebP / SVG), PDFs and videos (MP4 / WebM / MOV / OGG). You can
-          also drop files directly onto the canvas.
+          also drop files directly onto the Space.
         </li>
         <li>
           <strong>Add link</strong> — paste one URL per line; Huabu detects each
@@ -135,7 +135,7 @@ export default function CanvasBasics() {
           ],
           ['Rectangle select', 'Drag in empty space (Select tool).'],
           ['Lasso select', 'Draw a freehand loop (Lasso tool).'],
-          ['Deselect', 'Click empty canvas.'],
+          ['Deselect', 'Click empty Space.'],
         ]}
       />
       <P>
@@ -164,7 +164,7 @@ export default function CanvasBasics() {
           ['Paste plain text', 'Becomes a Note node.'],
           [
             'Drag from chat',
-            'Drag a message snippet from the chat panel onto the canvas.',
+            'Drag a message snippet from the chat panel onto the Space.',
           ],
           [
             'Drag a block out of a Note',
@@ -256,15 +256,15 @@ export default function CanvasBasics() {
         ]}
       />
       <P>
-        Paste drops content at the cursor position. Nearly every canvas
-        operation is undoable; bulk AI edits in Operate mode come with their own
+        Paste drops content at the cursor position. Nearly every Space operation
+        is undoable; bulk AI edits in Operate mode come with their own
         batch-undo via the change list — see{' '}
         <DocLink href="/docs/ai/chat-mode">Chat Mode</DocLink> and{' '}
         <DocLink href="/docs/ai/agent-mode">Agent Mode</DocLink>.
       </P>
 
       <H2>Floating top-right controls</H2>
-      <P>A small floating row sits in the top-right of every canvas:</P>
+      <P>A small floating row sits in the top-right of every Space:</P>
       <Table
         headers={['Button', 'What it does']}
         rows={[
@@ -274,7 +274,7 @@ export default function CanvasBasics() {
           ],
           [
             <strong>Handbook</strong>,
-            'Opens this handbook in a new browser tab without disturbing the canvas.',
+            'Opens this handbook in a new browser tab without disturbing the Space.',
           ],
           [
             <strong>Settings</strong>,
@@ -290,7 +290,7 @@ export default function CanvasBasics() {
         The left{' '}
         <DocLink href="/docs/concepts/layers-panel">Layers panel</DocLink> and
         the right Chat panel are both collapsible. The two panels and the
-        floating controls together make up the main canvas chrome.
+        floating controls together make up the main Space chrome.
       </Callout>
     </PageLayout>
   );

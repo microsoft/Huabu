@@ -20,7 +20,7 @@ export default function PluggableAgents() {
   return (
     <PageLayout
       title="Pluggable Agents"
-      description="Huabu is where you think; the agents you trust are where things get done. Pluggable Agents lets any external agent — coding CLIs like Claude, Copilot and Gemini, or any other compatible agent — plug into a chat thread, so the canvas can both hand finished thinking off to them and pull more minds into the thinking itself."
+      description="Huabu is where you think; the agents you trust are where things get done. Pluggable Agents lets any external agent — coding CLIs like Claude, Copilot and Gemini, or any other compatible agent — plug into a chat thread, so the Space can both hand finished thinking off to them and pull more minds into the thinking itself."
       toc={toc}
     >
       <H2>The idea</H2>
@@ -32,7 +32,7 @@ export default function PluggableAgents() {
       </P>
       <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
         <li>
-          <strong>Get finished thinking off the canvas, fast.</strong> Hand a
+          <strong>Get finished thinking off the Space, fast.</strong> Hand a
           plan, a spec or a question to an external agent and let it turn the
           idea into edits, commits, tool calls or whatever else its toolbelt
           supports — using its login, its quota and its tool catalogue, not a
@@ -57,7 +57,7 @@ export default function PluggableAgents() {
       <P>
         Under the hood Huabu talks to your agent through an open agent protocol,
         so there&apos;s no per-vendor glue code: install a supported agent,
-        point a profile at it in Settings → External Agents, and the canvas can
+        point a profile at it in Settings → External Agents, and the Space can
         drive it. You never launch or pair anything by hand — Huabu starts the
         agent for you when a chat first needs it and shuts it down when
         it&apos;s no longer in use.
@@ -80,7 +80,7 @@ export default function PluggableAgents() {
           You type a message in the chat panel and pick an external agent.
         </li>
         <li>
-          Huabu rewrites it into a structured prompt (the task plus the canvas
+          Huabu rewrites it into a structured prompt (the task plus the Space
           nodes / files it should look at) so the agent has the context it
           needs.
         </li>
@@ -105,7 +105,7 @@ export default function PluggableAgents() {
         <li>
           <strong>Read-only file access</strong> by default — the agent can read{' '}
           <Code>canvas.json</Code>, <Code>nodes/**</Code> and{' '}
-          <Code>.artifacts/**</Code> inside the current canvas; nothing else on
+          <Code>.artifacts/**</Code> inside the current Space; nothing else on
           disk.
         </li>
         <li>

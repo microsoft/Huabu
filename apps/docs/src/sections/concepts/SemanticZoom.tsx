@@ -23,21 +23,21 @@ export default function SemanticZoom() {
   return (
     <PageLayout
       title="Semantic Zoom"
-      description="As you zoom out, heavy nodes — Notes, PDFs, web articles — automatically collapse to a lightweight title placeholder. Zoom back in and they re-render in full. The canvas stays fast and the overview stays readable, even with hundreds of nodes."
+      description="As you zoom out, heavy nodes — Notes, PDFs, web articles — automatically collapse to a lightweight title placeholder. Zoom back in and they re-render in full. The Space stays fast and the overview stays readable, even with hundreds of nodes."
       toc={toc}
     >
       <H2>What Semantic Zoom does</H2>
       <P>
         Most nodes render at the same fidelity regardless of zoom level. That
-        works for small canvases. Once you have a few dozen Notes, PDFs and web
+        works for small Spaces. Once you have a few dozen Notes, PDFs and web
         pages on the same surface, rendering all of them in full at every zoom
         level becomes both visually noisy (you can&apos;t read any of it) and
         computationally expensive.
       </P>
       <P>
-        Semantic Zoom is the canvas&apos;s answer: each heavy node has two
-        render modes, and the canvas picks one based on how big the node is on
-        your screen.
+        Semantic Zoom is the Space&apos;s answer: each heavy node has two render
+        modes, and the Space picks one based on how big the node is on your
+        screen.
       </P>
 
       <H2>Why it exists</H2>
@@ -45,7 +45,7 @@ export default function SemanticZoom() {
         headers={['Without Semantic Zoom', 'With Semantic Zoom']}
         rows={[
           [
-            'A zoomed-out canvas is a wall of tiny illegible text.',
+            'A zoomed-out Space is a wall of tiny illegible text.',
             'Zoomed-out nodes show their title — instantly scannable.',
           ],
           [
@@ -82,12 +82,12 @@ export default function SemanticZoom() {
         A minimal node&apos;s title font is chosen from a small set of{' '}
         <strong>discrete tiers keyed on the node&apos;s size</strong> — never on
         how long the title is. Two nodes of the same size always render at the
-        same font size, so a zoomed-out canvas keeps a steady typographic rhythm
+        same font size, so a zoomed-out Space keeps a steady typographic rhythm
         instead of scattering a 40&nbsp;px title next to an 11&nbsp;px one.
         Bigger nodes get a bigger font, which lets more important content stand
-        out at a glance. Because the tier font is a canvas size, the label
-        simply scales down with the node as you zoom out — a smaller node always
-        shows smaller text, with no separate icon or floor.
+        out at a glance. Because the tier font is a Space size, the label simply
+        scales down with the node as you zoom out — a smaller node always shows
+        smaller text, with no separate icon or floor.
       </P>
       <P>
         Titles that don&apos;t fit <strong>wrap at word boundaries</strong>{' '}

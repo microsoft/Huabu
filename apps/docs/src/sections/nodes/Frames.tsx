@@ -28,14 +28,14 @@ export default function Frames() {
     >
       <H2>What a frame is</H2>
       <P>
-        Drop a frame on the canvas, then drag other nodes inside its bounds —
+        Drop a frame on the Space, then drag other nodes inside its bounds —
         they become its children. Frames can be nested, and dragging a parent
         carries every descendant.
       </P>
       <P>
         Frames also act as <strong>context units for the AI</strong>. When the
         AI generates an answer about &quot;the search-results frame&quot;, it
-        knows the exact subset of the canvas you&apos;re referring to.
+        knows the exact subset of the Space you&apos;re referring to.
       </P>
 
       <H2>Layout modes</H2>
@@ -72,7 +72,7 @@ export default function Frames() {
           ],
           [
             <strong>Manual</strong>,
-            'The frame keeps the size you set. Children can move freely inside without reshaping the container. Useful when you want a fixed canvas region.',
+            'The frame keeps the size you set. Children can move freely inside without reshaping the container. Useful when you want a fixed Space region.',
           ],
         ]}
       />
@@ -132,7 +132,7 @@ export default function Frames() {
         rows={[
           [
             'Create empty frame',
-            <>Toolbar &gt; Frame, then drag a rectangle on the canvas.</>,
+            <>Toolbar &gt; Frame, then drag a rectangle on the Space.</>,
           ],
           [
             'Wrap a selection',

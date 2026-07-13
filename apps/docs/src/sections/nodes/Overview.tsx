@@ -122,7 +122,7 @@ export default function NodesOverview() {
             'Title editor and layout-mode picker (free / column / row).',
           ],
           ['Question', 'Opens a chat session in the side panel — no lightbox.'],
-          ['Sketch', 'No lightbox; you draw directly on the canvas.'],
+          ['Sketch', 'No lightbox; you draw directly on the Space.'],
         ]}
       />
 

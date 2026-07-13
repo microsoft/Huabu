@@ -19,7 +19,7 @@ export default function OfficeNode() {
   return (
     <PageLayout
       title="Office"
-      description="Word, Excel, and PowerPoint files live on the canvas as view-only cards. Huabu extracts their text for the AI; you download the original to edit it."
+      description="Word, Excel, and PowerPoint files live on the Space as view-only cards. Huabu extracts their text for the AI; you download the original to edit it."
       toc={toc}
     >
       <H2>What an Office node is</H2>
@@ -35,7 +35,7 @@ export default function OfficeNode() {
       <Table
         headers={['Source', 'How']}
         rows={[
-          ['Upload', 'Drag a file onto the canvas.'],
+          ['Upload', 'Drag a file onto the Space.'],
           ['Paste', 'Paste an Office file from the clipboard.'],
         ]}
       />

@@ -23,7 +23,7 @@ export default function AgentMode() {
   return (
     <PageLayout
       title="Agent Mode"
-      description="Agent Mode is the surface for structured, multi-step canvas edits. You describe the outcome; the AI plans a batch of operations; you review and accept (or discard) the batch as a single unit."
+      description="Agent Mode is the surface for structured, multi-step Space edits. You describe the outcome; the AI plans a batch of operations; you review and accept (or discard) the batch as a single unit."
       toc={toc}
     >
       <H2>What Agent Mode is</H2>
@@ -32,7 +32,7 @@ export default function AgentMode() {
         describe what you want. The AI emits a structured plan — a sequence of
         operations like <em>create</em>, <em>move</em>, <em>connect</em>,{' '}
         <em>group</em>, <em>edit</em> — and shows it in a change-review panel
-        before anything commits to the canvas.
+        before anything commits to the Space.
       </P>
 
       <H2>When to reach for it</H2>
@@ -40,7 +40,7 @@ export default function AgentMode() {
         headers={['Situation', 'Why Agent Mode fits']}
         rows={[
           [
-            'Tidying a busy canvas',
+            'Tidying a busy Space',
             'One prompt produces a coordinated reshuffle you can accept or revert as one.',
           ],
           [
@@ -61,10 +61,10 @@ export default function AgentMode() {
       <H2>The change list</H2>
       <P>
         Once the AI proposes a batch, a change-review panel slides in next to
-        the canvas. Every operation gets its own card:
+        the Space. Every operation gets its own card:
       </P>
       <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
-        <li>Click a card to highlight the affected node on the canvas.</li>
+        <li>Click a card to highlight the affected node on the Space.</li>
         <li>Accept or discard individual items.</li>
         <li>
           Or accept / discard the <strong>whole batch</strong> — perfect for
@@ -75,7 +75,7 @@ export default function AgentMode() {
           .
         </li>
         <li>
-          A discarded batch leaves the canvas untouched. A discarded single-item
+          A discarded batch leaves the Space untouched. A discarded single-item
           only rolls back that operation; the rest of the batch stays.
         </li>
       </ul>
@@ -91,11 +91,10 @@ export default function AgentMode() {
           You type a prompt; optionally pre-select nodes that should be the
           focus.
         </li>
-        <li>The AI inspects the canvas overview and any selected nodes.</li>
+        <li>The AI inspects the Space overview and any selected nodes.</li>
         <li>It emits a plan as a structured batch of operations.</li>
         <li>
-          The change-review panel shows the plan; nothing has hit the canvas
-          yet.
+          The change-review panel shows the plan; nothing has hit the Space yet.
         </li>
         <li>
           You accept the batch (or individual items). Accepted operations commit
@@ -107,7 +106,7 @@ export default function AgentMode() {
       <H2>Slash commands &amp; skills</H2>
       <P>
         Type <Code>/</Code> at the start of the composer to open a typeahead of
-        available commands. With the built-in agent the list is your workspace{' '}
+        available commands. With the built-in agent the list is your Home{' '}
         <DocLink href="/docs/ai/skills">skills</DocLink> — reusable recipes
         you&apos;ve saved. With an{' '}
         <DocLink href="/docs/ai/external-agents">external agent</DocLink> bound

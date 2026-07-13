@@ -66,7 +66,7 @@ const groupsRaw: RawGroup[] = [
       },
       {
         to: '/docs/core/agentic-canvas',
-        label: 'Agentic Canvas',
+        label: 'Agentic Space',
         load: () => import('./sections/core/AgenticCanvas'),
       },
       {
@@ -76,7 +76,7 @@ const groupsRaw: RawGroup[] = [
       },
       {
         to: '/docs/core/open-vault',
-        label: 'Open Vault',
+        label: 'Open Home',
         load: () => import('./sections/core/OpenVault'),
       },
     ],
@@ -127,16 +127,16 @@ const groupsRaw: RawGroup[] = [
     ],
   },
   {
-    label: 'Work in Canvas',
+    label: 'Work in Space',
     items: [
       {
         to: '/docs/concepts/workspaces',
-        label: 'Workspaces',
+        label: 'Home',
         load: () => import('./sections/concepts/Workspaces'),
       },
       {
         to: '/docs/concepts/canvas-basics',
-        label: 'Canvas',
+        label: 'Space',
         load: () => import('./sections/concepts/CanvasBasics'),
       },
       {
@@ -238,11 +238,6 @@ const groupsRaw: RawGroup[] = [
         to: '/docs/reference/issues',
         label: 'Reporting Issues',
         load: () => import('./sections/reference/IssueReporting'),
-      },
-      {
-        to: '/docs/reference/changelog',
-        label: 'Changelog',
-        load: () => import('./sections/reference/Changelog'),
       },
     ],
   },

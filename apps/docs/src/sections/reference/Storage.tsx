@@ -11,9 +11,9 @@ import {
 } from '../../components';
 
 const toc: TocEntry[] = [
-  { id: 'workspace-layout', label: 'Workspace layout' },
-  { id: 'per-canvas-files', label: 'Per-canvas files' },
-  { id: 'workspace-settings', label: 'Workspace settings & skills' },
+  { id: 'home-layout', label: 'Home layout' },
+  { id: 'per-space-files', label: 'Per-Space files' },
+  { id: 'home-settings', label: 'Home settings & skills' },
   { id: 'app-data', label: 'App-wide data' },
   { id: 'backup-and-migration', label: 'Backup & migration' },
   { id: 'hand-editing', label: 'Hand-editing files' },
@@ -23,15 +23,14 @@ export default function Storage() {
   return (
     <PageLayout
       title="Data Storage"
-      description="Huabu stores data in two places: the workspace folder you choose (per-canvas data, backup-friendly) and an app-wide data folder (model credentials, machine-local). Everything is plain files — no opaque database."
+      description="Huabu stores data in two places: the Home folder you choose (per-Space data, backup-friendly) and an app-wide data folder (model credentials, machine-local). Everything is plain files — no opaque database."
       toc={toc}
     >
-      <H2>Workspace layout</H2>
+      <H2>Home layout</H2>
       <P>
-        A workspace is <strong>canvas-self-contained</strong> — each canvas is
-        one directory holding everything related to it. A separate{' '}
-        <Code>setting/</Code> folder holds workspace-wide things (memory &
-        skills).
+        A Home is <strong>Space-self-contained</strong> — each Space is one
+        directory holding everything related to it. A separate{' '}
+        <Code>setting/</Code> folder holds Home-wide things (memory & skills).
       </P>
       <CodeBlock language="text">{`<workspace>/
 ├── <canvas-title>/                    # one folder per canvas
@@ -44,7 +43,7 @@ export default function Storage() {
     ├── .huabu.md                      # workspace memory
     └── skills/<id>/SKILL.md           # user-authored skills`}</CodeBlock>
 
-      <H2>Per-canvas files</H2>
+      <H2>Per-Space files</H2>
       <Table
         headers={['Item', 'Format', 'Notes']}
         rows={[
@@ -66,12 +65,12 @@ export default function Storage() {
           [
             <Code>.memory/canvas.md</Code>,
             'Markdown',
-            'Canvas-level memory the AI writes (hidden dir). Capped at ~4 KB on the next AI write.',
+            'Space-level memory the AI writes (hidden dir). Capped at ~4 KB on the next AI write.',
           ],
           [
             <Code>.history/</Code>,
             'JSON / JSONL',
-            'Chat threads, intent log, event timeline. Cleared on canvas delete.',
+            'Chat threads, intent log, event timeline. Cleared on Space delete.',
           ],
         ]}
       />
@@ -82,13 +81,13 @@ export default function Storage() {
         with no body.
       </Callout>
 
-      <H2>Workspace settings & skills</H2>
+      <H2>Home settings & skills</H2>
       <Table
         headers={['File', 'Contents']}
         rows={[
           [
             <Code>setting/.huabu.md</Code>,
-            'Workspace-wide memory — preferences and context that apply across every canvas. Capped at ~4 KB.',
+            'Home-wide memory — preferences and context that apply across every Space. Capped at ~4 KB.',
           ],
           [
             <Code>setting/skills/&lt;id&gt;/SKILL.md</Code>,
@@ -99,9 +98,9 @@ export default function Storage() {
 
       <H2>App-wide data</H2>
       <P>
-        Beyond your workspace, Huabu also keeps a small machine-local data
-        folder for credentials. Treat it as private — do not commit it to a
-        public repository.
+        Beyond your Home, Huabu also keeps a small machine-local data folder for
+        credentials. Treat it as private — do not commit it to a public
+        repository.
       </P>
       <Table
         headers={['File', 'Contents']}
@@ -119,15 +118,15 @@ export default function Storage() {
 
       <H2>Backup & migration</H2>
       <P>
-        Because a workspace is a <strong>plain folder</strong>, backup and
-        migration are straightforward:
+        Because a Home is a <strong>plain folder</strong>, backup and migration
+        are straightforward:
       </P>
       <Table
         headers={['Scenario', 'How']}
         rows={[
           [
             'Routine local backup',
-            'Copy the workspace folder, or include it in your usual snapshot routine.',
+            'Copy the Home folder, or include it in your usual snapshot routine.',
           ],
           [
             'Cross-device sync',
@@ -136,22 +135,22 @@ export default function Storage() {
           [
             'Version control',
             <>
-              <Code>git init</Code> the workspace; each save is a diff-able JSON
+              <Code>git init</Code> the Home; each save is a diff-able JSON
               change.
             </>,
           ],
           [
-            'Switch workspaces',
+            'Switch Homes',
             'Pick a different folder in Settings; the old one stays untouched.',
           ],
           [
-            'Share one canvas',
-            'Export to a .zip from the canvas list; the recipient imports it.',
+            'Share one Space',
+            'Export to a .zip from the Space list; the recipient imports it.',
           ],
         ]}
       />
       <Callout tone="tip">
-        Exported canvas bundles include <Code>.artifacts/</Code>, so attachments
+        Exported Space bundles include <Code>.artifacts/</Code>, so attachments
         come along for the ride — no separate file transfer needed.
       </Callout>
 
@@ -167,7 +166,7 @@ export default function Storage() {
             <>
               <Code>nodes/&lt;title&gt;.md</Code> body
             </>,
-            '✅ Yes — next canvas load picks it up.',
+            '✅ Yes — next Space load picks it up.',
           ],
           [
             <>
@@ -192,7 +191,7 @@ export default function Storage() {
           ],
           [
             <Code>.history/.../*.json</Code>,
-            'Not recommended — but deletions only lose conversation context, not canvas content.',
+            'Not recommended — but deletions only lose conversation context, not Space content.',
           ],
           [
             <Code>setting/.huabu.md</Code>,

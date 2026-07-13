@@ -22,14 +22,14 @@ export default function LayersPanel() {
   return (
     <PageLayout
       title="Layers Panel"
-      description="The collapsible panel on the left of every canvas — a tree view of every node and frame, plus tools to search, re-parent, lock, and rename them."
+      description="The collapsible panel on the left of every Space — a tree view of every node and frame, plus tools to search, re-parent, lock, and rename them."
       toc={toc}
     >
       <H2>What&apos;s in the panel</H2>
       <P>
-        The Layers panel mirrors your canvas as a hierarchical list: top-level
+        The Layers panel mirrors your Space as a hierarchical list: top-level
         nodes at the root, nested children inside their parent frames. Selecting
-        a row selects the node on the canvas (and vice versa), so the panel
+        a row selects the node on the Space (and vice versa), so the panel
         doubles as both a navigator and a structural map.
       </P>
 
@@ -46,7 +46,7 @@ export default function LayersPanel() {
       <P>
         Drag any row onto another to re-parent it (or into the empty space at
         the top to move it back to the root). Re-parenting also moves the node
-        on the canvas — frames carry their children, and dragging out of a frame
+        on the Space — frames carry their children, and dragging out of a frame
         removes the parent link.
       </P>
 
@@ -59,7 +59,7 @@ export default function LayersPanel() {
         ]}
       />
       <P>
-        Locked nodes can&apos;t be dragged or resized on the canvas. Locked
+        Locked nodes can&apos;t be dragged or resized on the Space. Locked
         frames freeze their children too and stop auto-resizing. Locked nodes
         can still be edited and deleted.
       </P>
@@ -67,7 +67,7 @@ export default function LayersPanel() {
       <H2>Collapsing frames</H2>
       <P>
         Frames have an expand/collapse chevron. Collapsing hides their children
-        in the panel but doesn&apos;t change anything on the canvas — useful for
+        in the panel but doesn&apos;t change anything on the Space — useful for
         taming long lists. Search results respect the collapsed state, so you
         can fold sections you&apos;re not looking at.
       </P>
@@ -79,7 +79,7 @@ export default function LayersPanel() {
         answers.
       </P>
       <Callout tone="tip">
-        Pair the Layers panel with multi-select on the canvas: <Kbd>Cmd</Kbd>+
+        Pair the Layers panel with multi-select on the Space: <Kbd>Cmd</Kbd>+
         click rows to multi-select, then act in bulk (group into a frame, align,
         delete).
       </Callout>

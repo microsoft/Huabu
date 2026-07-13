@@ -26,7 +26,7 @@ export default function WebNode() {
       <Table
         headers={['Source', 'How']}
         rows={[
-          ['Paste URL', 'Paste a link on an empty canvas spot.'],
+          ['Paste URL', 'Paste a link on an empty Space spot.'],
           [
             'Link dialog',
             'Toolbar &gt; Web, then paste a URL into the dialog.',

@@ -22,15 +22,15 @@ export default function Intent() {
   return (
     <PageLayout
       title="Intent"
-      description="Intent reads the current canvas state and your recent operations, then proposes a few concrete next moves — each one packaged as a one-click executable plan you can review before it touches the canvas."
+      description="Intent reads the current Space state and your recent operations, then proposes a few concrete next moves — each one packaged as a one-click executable plan you can review before it touches the Space."
       toc={toc}
     >
       <H2>What Intent does</H2>
       <P>
-        Most canvas work has a natural rhythm: you capture, the canvas gets
-        busy, you pause, and then it&apos;s not obvious what the highest-value
-        next move is. Intent is built for that pause. It looks at what&apos;s on
-        the canvas (and what you did last), suggests 3–5 things worth doing, and
+        Most Space work has a natural rhythm: you capture, the Space gets busy,
+        you pause, and then it&apos;s not obvious what the highest-value next
+        move is. Intent is built for that pause. It looks at what&apos;s on the
+        Space (and what you did last), suggests 3–5 things worth doing, and
         turns whichever one you pick into a reviewable batch of edits.
       </P>
 
@@ -63,7 +63,7 @@ export default function Intent() {
       <H2>Two-step flow</H2>
       <H3>Step 1 — Choose an intent</H3>
       <P>
-        Huabu sends a canvas overview (node summaries + recent ops) to the AI,
+        Huabu sends a Space overview (node summaries + recent ops) to the AI,
         which streams 3–5 candidate intents, e.g.:
       </P>
       <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
@@ -74,7 +74,7 @@ export default function Intent() {
           <em>Group the search results into a new frame.</em>
         </li>
         <li>
-          <em>Draft a mind-map outline from this canvas.</em>
+          <em>Draft a mind-map outline from this Space.</em>
         </li>
       </ul>
       <P>Pick a suggestion, or type your own intent in the input.</P>
@@ -83,7 +83,7 @@ export default function Intent() {
       <P>
         After picking (or typing) an intent, Huabu switches to{' '}
         <DocLink href="/docs/ai/agent-mode">Agent Mode</DocLink> and asks the AI
-        to turn the intent into concrete canvas operations. The result appears
+        to turn the intent into concrete Space operations. The result appears
         with a <strong>change list</strong> so you can accept, tweak or undo the
         whole batch as a single unit.
       </P>
@@ -104,8 +104,8 @@ export default function Intent() {
         </li>
         <li>
           <strong>Use it after capture sprints.</strong> Intent shines right
-          after you&apos;ve dumped a lot of raw material on the canvas and want
-          a hand structuring it.
+          after you&apos;ve dumped a lot of raw material on the Space and want a
+          hand structuring it.
         </li>
       </ul>
       <Callout tone="info">

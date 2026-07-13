@@ -34,7 +34,7 @@ export default function Skills() {
       <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
         <li>&quot;Turn a research session into a comparison table.&quot;</li>
         <li>
-          &quot;Clean up this canvas the way I like — frame loose notes, label
+          &quot;Clean up this Space the way I like — frame loose notes, label
           clusters, prune duplicates.&quot;
         </li>
         <li>&quot;Draft a one-page spec from these decision Notes.&quot;</li>
@@ -133,8 +133,8 @@ Given the currently selected nodes:
     └── SKILL.md`}</CodeBlock>
       <P>
         Because skills are plain folders of Markdown, you can version-control
-        them, share them between workspaces by copy-paste, or move them
-        wholesale to a teammate&apos;s machine.
+        them, share them between Homes by copy-paste, or move them wholesale to
+        a teammate&apos;s machine.
       </P>
     </PageLayout>
   );

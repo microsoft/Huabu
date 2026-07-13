@@ -23,12 +23,12 @@ export default function Alignment() {
   return (
     <PageLayout
       title="Layout & Alignment"
-      description="Three ways the canvas helps you keep things tidy: the multi-select toolbar (align + distribute), smart-snap guides while dragging, and Frame layout modes."
+      description="Three ways the Space helps you keep things tidy: the multi-select toolbar (align + distribute), smart-snap guides while dragging, and Frame layout modes."
       toc={toc}
     >
       <H2>Why alignment exists</H2>
       <P>
-        A canvas is freeform on purpose, but freeform doesn&apos;t mean sloppy.
+        A Space is freeform on purpose, but freeform doesn&apos;t mean sloppy.
         Aligned nodes are easier for you to scan and easier for the AI to read —
         &quot;these three rows&quot; or &quot;this column&quot; becomes a real
         structural cue when the spacing is consistent. Huabu gives you four
@@ -81,9 +81,9 @@ export default function Alignment() {
         four columns and want the gaps to match.
       </P>
       <Callout tone="tip">
-        Distribute respects the outermost two nodes as anchors. Resize the
-        canvas region you want by moving the first and last; everything in
-        between fills the gap.
+        Distribute respects the outermost two nodes as anchors. Resize the Space
+        region you want by moving the first and last; everything in between
+        fills the gap.
       </Callout>
 
       <H2>Smart-snap guides</H2>

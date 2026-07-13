@@ -11,7 +11,7 @@ import {
 
 const toc: TocEntry[] = [
   { id: 'why-memory', label: 'Why memory exists' },
-  { id: 'two-tiers', label: 'Two tiers: workspace & canvas' },
+  { id: 'two-tiers', label: 'Two tiers: Home & Space' },
   { id: 'how-it-fills-up', label: 'How memory fills up' },
   { id: 'how-its-read', label: "How it's read back" },
   { id: 'hand-editing', label: 'Hand-editing memory' },
@@ -22,14 +22,14 @@ export default function Memory() {
   return (
     <PageLayout
       title="Memory"
-      description="Memory is a small amount of long-lived context the AI carries between messages, canvases and sessions. Two tiers — workspace and canvas — answer different questions for it."
+      description="Memory is a small amount of long-lived context the AI carries between messages, Spaces and sessions. Two tiers — Home and Space — answer different questions for it."
       toc={toc}
     >
       <H2>Why memory exists</H2>
       <P>
         Without memory, every new chat thread is a stranger again. The AI
         re-learns your preferences, re-asks the same clarifying questions and
-        re-derives context the canvas already implies. Memory is the smallest
+        re-derives context the Space already implies. Memory is the smallest
         possible cure: a few lines of plain text that ride along on every turn.
       </P>
       <Callout tone="info">
@@ -39,21 +39,21 @@ export default function Memory() {
         entries.
       </Callout>
 
-      <H2>Two tiers: workspace &amp; canvas</H2>
+      <H2>Two tiers: Home &amp; Space</H2>
       <Table
         headers={['Tier', 'Scope', 'Where it lives', 'Typical contents']}
         rows={[
           [
-            <strong>Workspace</strong>,
-            'Applies to every canvas in this workspace.',
+            <strong>Home</strong>,
+            'Applies to every Space in this Home.',
             <Code>setting/.huabu.md</Code>,
             'Preferences ("respond in Markdown"), constraints ("Python 3.11"), recurring vocabulary.',
           ],
           [
-            <strong>Canvas</strong>,
-            'Just this one canvas.',
+            <strong>Space</strong>,
+            'Just this one Space.',
             <Code>.memory/canvas.md</Code>,
-            'Narrative state of this canvas — the topic, decisions made, things to revisit.',
+            'Narrative state of this Space — the topic, decisions made, things to revisit.',
           ],
         ]}
       />
@@ -67,10 +67,10 @@ export default function Memory() {
       <P>Two write paths feed each tier:</P>
       <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
         <li>
-          <strong>Automatic curation.</strong> After enough canvas activity, a
-          background curator agent reviews recent operations and updates
-          workspace / canvas memory. You don&apos;t see it happen; you see the
-          effect on the next AI reply.
+          <strong>Automatic curation.</strong> After enough Space activity, a
+          background curator agent reviews recent operations and updates Home /
+          Space memory. You don&apos;t see it happen; you see the effect on the
+          next AI reply.
         </li>
         <li>
           <strong>Explicit ask.</strong> Tell the AI in chat — &quot;remember
@@ -83,12 +83,12 @@ export default function Memory() {
       <H2>How it&apos;s read back</H2>
       <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
         <li>
-          <strong>Workspace memory</strong> is auto-injected at the start of
-          every new chat thread, so cross-canvas preferences apply from the
-          first message.
+          <strong>Home memory</strong> is auto-injected at the start of every
+          new chat thread, so cross-Space preferences apply from the first
+          message.
         </li>
         <li>
-          <strong>Canvas memory</strong> is pulled on demand — the AI knows it
+          <strong>Space memory</strong> is pulled on demand — the AI knows it
           exists and reads it when the topic warrants.
         </li>
       </ul>
@@ -102,7 +102,7 @@ export default function Memory() {
       <Callout tone="tip">
         If you find yourself reaching for memory to store a large body of
         reference material, that&apos;s a sign the material wants to be a Note
-        or PDF on a dedicated canvas instead — node content has no size cap.
+        or PDF on a dedicated Space instead — node content has no size cap.
       </Callout>
 
       <H2>Memory vs. notes</H2>
@@ -117,7 +117,7 @@ export default function Memory() {
             'Auto-injected into prompts.',
             'Read only when explicitly attached or selected.',
           ],
-          ['Lives outside any single canvas.', 'Lives inside a canvas folder.'],
+          ['Lives outside any single Space.', 'Lives inside a Space folder.'],
           [
             'Best for preferences and recurring context.',
             'Best for content you might want to re-read.',

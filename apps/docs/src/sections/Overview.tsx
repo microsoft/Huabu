@@ -30,7 +30,7 @@ export default function Overview() {
           Huabu Handbook
         </h1>
         <P className="mx-auto max-w-2xl text-base">
-          Huabu is a canvas-based human-AI collaboration framework. Spread your
+          Huabu is a Space-based human-AI collaboration framework. Spread your
           thinking out as nodes on an infinite 2D surface and work side-by-side
           with an AI that sees the whole picture.
         </P>
@@ -43,21 +43,21 @@ export default function Overview() {
             icon={Sparkles}
             eyebrow="Start here"
             title="Quick Start"
-            description="From a fresh install to a productive canvas in four steps."
+            description="From a fresh install to a productive Space in four steps."
           />
           <NavCard
             to="/docs/showcase"
             icon={ImageIcon}
             eyebrow="See it"
             title="Showcase"
-            description="A visual tour of the kinds of work Huabu canvases tend to fit."
+            description="A visual tour of the kinds of work Huabu Spaces tend to fit."
           />
           <NavCard
             to="/docs/core/externalized-sensemaking"
             icon={Layers}
             eyebrow="Read first"
             title="Externalized Sensemaking"
-            description="The case for treating the canvas as external memory — the design centre of the product."
+            description="The case for treating the Space as external memory — the design centre of the product."
           />
         </CardGrid>
 
@@ -73,14 +73,14 @@ export default function Overview() {
             icon={Layers}
             eyebrow="Core"
             title="Externalized Sensemaking"
-            description="Workspace, canvas, nodes, edges, panels — the building blocks at a glance."
+            description="Home, Space, nodes, edges, panels — the building blocks at a glance."
           />
           <NavCard
             to="/docs/core/agentic-canvas"
             icon={Bot}
             eyebrow="Core"
-            title="Agentic Canvas"
-            description="Seven surfaces of AI on one canvas, all reading the same shared memory."
+            title="Agentic Space"
+            description="Seven surfaces of AI on one Space, all reading the same shared memory."
           />
           <NavCard
             to="/docs/core/pluggable-agents"
@@ -93,8 +93,8 @@ export default function Overview() {
             to="/docs/core/open-vault"
             icon={FolderTree}
             eyebrow="Core"
-            title="Open Vault"
-            description="Every canvas is a folder of Markdown files. Back it up, sync it, version it."
+            title="Open Home"
+            description="Every Space is a folder of Markdown files. Back it up, sync it, version it."
           />
         </CardGrid>
 
@@ -112,7 +112,7 @@ export default function Overview() {
             icon={Bot}
             eyebrow="AI"
             title="Agent Mode"
-            description="Structured canvas edits with a reviewable change list before anything commits."
+            description="Structured Space edits with a reviewable change list before anything commits."
           />
           <NavCard
             to="/docs/ai/question-mode"
@@ -133,14 +133,14 @@ export default function Overview() {
             icon={Soup}
             eyebrow="AI"
             title="Digest"
-            description="The background job that folds canvas activity into long-lived memory."
+            description="The background job that folds Space activity into long-lived memory."
           />
           <NavCard
             to="/docs/ai/memory"
             icon={Brain}
             eyebrow="AI"
             title="Memory"
-            description="Workspace + canvas memory tiers the AI maintains for you."
+            description="Home + Space memory tiers the AI maintains for you."
           />
           <NavCard
             to="/docs/ai/skills"
@@ -158,63 +158,63 @@ export default function Overview() {
           />
         </CardGrid>
 
-        <H2>Work in Canvas</H2>
+        <H2>Work in Space</H2>
         <CardGrid>
           <NavCard
             to="/docs/concepts/workspaces"
             icon={FolderTree}
-            eyebrow="Canvas"
-            title="Workspaces"
-            description="Pick a local folder, organise work as one or many canvases, import & export."
+            eyebrow="Space"
+            title="Home"
+            description="Pick a local folder, organise work as one or many Spaces, import & export."
           />
           <NavCard
             to="/docs/concepts/canvas-basics"
             icon={Layout}
-            eyebrow="Canvas"
-            title="Canvas"
+            eyebrow="Space"
+            title="Space"
             description="Select, pan, lasso, place nodes, marquee select, alignment, distribution."
           />
           <NavCard
             to="/docs/nodes/overview"
             icon={Boxes}
-            eyebrow="Canvas"
+            eyebrow="Space"
             title="Nodes"
             description="Ten node types — Note, Text, Image, PDF, Office, Video, Web, Frame, Sketch, Question."
           />
           <NavCard
             to="/docs/nodes/edges"
             icon={Network}
-            eyebrow="Canvas"
+            eyebrow="Space"
             title="Edges"
             description="Typed connections with direction, colour, dash and weight."
           />
           <NavCard
             to="/docs/concepts/alignment"
             icon={AlignVerticalJustifyCenter}
-            eyebrow="Canvas"
+            eyebrow="Space"
             title="Layout & Alignment"
             description="Multi-select align + distribute, smart-snap guides and Frame layouts."
           />
           <NavCard
             to="/docs/concepts/semantic-zoom"
             icon={ScanSearch}
-            eyebrow="Canvas"
+            eyebrow="Space"
             title="Semantic Zoom"
             description="Heavy nodes collapse to a lightweight placeholder when zoomed out."
           />
           <NavCard
             to="/docs/concepts/layers-panel"
             icon={Layers}
-            eyebrow="Canvas"
+            eyebrow="Space"
             title="Layers Panel"
-            description="A flat list of every node on the canvas — rename, lock, jump-to."
+            description="A flat list of every node on the Space — rename, lock, jump-to."
           />
           <NavCard
             to="/docs/concepts/chat-panel"
             icon={MessageSquare}
-            eyebrow="Canvas"
+            eyebrow="Space"
             title="Chat Panel"
-            description="The persistent thread on the right side that always sees the canvas."
+            description="The persistent thread on the right side that always sees the Space."
           />
         </CardGrid>
 

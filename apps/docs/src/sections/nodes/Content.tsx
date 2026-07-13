@@ -26,7 +26,7 @@ export default function Content() {
       toc={toc}
     >
       <H2>Storage model</H2>
-      <P>Every canvas maps to one folder:</P>
+      <P>Every Space maps to one folder:</P>
       <CodeBlock language="text">{`<workspace>/<canvas-title>/
 ├── canvas.json              # topology (positions, edges, frames)
 ├── nodes/<node-title>.md    # ingested content + metadata per node
@@ -35,7 +35,7 @@ export default function Content() {
 └── .history/                # hidden: chat / intent / event history`}</CodeBlock>
       <P>
         Node <strong>content</strong> and node{' '}
-        <strong>position on the canvas</strong> are kept as two separate pieces
+        <strong>position on the Space</strong> are kept as two separate pieces
         of state — the topology is in <Code>canvas.json</Code>, and each
         node&apos;s ingested body is a separate Markdown file under{' '}
         <Code>nodes/</Code>.

@@ -11,7 +11,7 @@ export default function VideoNode() {
   return (
     <PageLayout
       title="Video"
-      description="Drop video files or paste a YouTube link — the node embeds the player directly on the canvas."
+      description="Drop video files or paste a YouTube link — the node embeds the player directly on the Space."
       toc={toc}
     >
       <H2>Supported sources</H2>

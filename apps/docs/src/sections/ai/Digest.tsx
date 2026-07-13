@@ -22,12 +22,12 @@ export default function Digest() {
   return (
     <PageLayout
       title="Digest"
-      description="The Digest is a small background agent that watches your canvas activity — chat turns, AI operations, intent runs — and folds them into memory. It's the reason the AI seems to “remember” what your canvas is about without you having to retell it every turn."
+      description="The Digest is a small background agent that watches your Space activity — chat turns, AI operations, intent runs — and folds them into memory. It's the reason the AI seems to “remember” what your Space is about without you having to retell it every turn."
       toc={toc}
     >
       <H2>What Digest does</H2>
       <P>
-        Each canvas accumulates raw activity: chat transcripts, the operations
+        Each Space accumulates raw activity: chat transcripts, the operations
         the AI ran, the intents you accepted, the nodes that appeared and moved.
         Most of that is too noisy to read back into every future prompt. The
         Digest job compresses it down to the parts worth remembering and writes
@@ -46,11 +46,11 @@ export default function Digest() {
         rows={[
           [
             <strong>Chat threads</strong>,
-            'Recent user / assistant turns from the canvas — questions you asked, decisions you reached.',
+            'Recent user / assistant turns from the Space — questions you asked, decisions you reached.',
           ],
           [
             <strong>Recent operations</strong>,
-            'The last ~100 canvas operations (create / move / connect / edit) — what changed and in what order.',
+            'The last ~100 Space operations (create / move / connect / edit) — what changed and in what order.',
           ],
           [
             <strong>Intent episodes</strong>,
@@ -68,26 +68,26 @@ export default function Digest() {
 
       <H2>When it runs</H2>
       <P>
-        The Digest runs in the background after enough canvas activity
+        The Digest runs in the background after enough Space activity
         accumulates — you don&apos;t trigger it manually and there&apos;s no
         modal to confirm. The effect is visible only on the AI&apos;s next reply
         (it will reference things from earlier turns more naturally) or on the
-        file system, where workspace / canvas memory gets a few new lines.
+        file system, where Home / Space memory gets a few new lines.
       </P>
       <Callout tone="info">
         Digest is intentionally quiet. If it ran with a notification every time,
-        it would pull your attention away from the canvas — exactly the wrong
+        it would pull your attention away from the Space — exactly the wrong
         tradeoff for a feature whose job is to be invisible.
       </Callout>
 
       <H2>Where it writes</H2>
       <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
         <li>
-          <Code>setting/.huabu.md</Code> — workspace-wide memory; the curator
-          only adds something here if it generalises beyond this one canvas.
+          <Code>setting/.huabu.md</Code> — Home-wide memory; the curator only
+          adds something here if it generalises beyond this one Space.
         </li>
         <li>
-          <Code>.memory/canvas.md</Code> — per-canvas memory; this is where most
+          <Code>.memory/canvas.md</Code> — per-Space memory; this is where most
           Digest output lands.
         </li>
       </ul>
@@ -105,7 +105,7 @@ export default function Digest() {
         </li>
         <li>
           <strong>Name your frames.</strong> Frame titles are the cheapest way
-          to label a region of the canvas; the Digest picks them up alongside
+          to label a region of the Space; the Digest picks them up alongside
           node titles.
         </li>
         <li>
@@ -129,11 +129,11 @@ export default function Digest() {
           <Code>.memory/canvas.md</Code>.
         </li>
         <li>
-          The raw inputs are under <Code>.history/</Code> inside each canvas
+          The raw inputs are under <Code>.history/</Code> inside each Space
           folder — chat transcripts, ops log, intent episodes.
         </li>
         <li>
-          To start fresh on a canvas, delete <Code>.memory/canvas.md</Code> (the
+          To start fresh on a Space, delete <Code>.memory/canvas.md</Code> (the
           Digest will rebuild it next pass) or wipe <Code>.history/</Code> to
           restart from zero context.
         </li>

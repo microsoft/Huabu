@@ -12,7 +12,7 @@ export default function ImageNode() {
   return (
     <PageLayout
       title="Image"
-      description="Drop images on the canvas — Huabu auto-fits each node to the source aspect ratio and lets you zoom into it in the lightbox."
+      description="Drop images on the Space — Huabu auto-fits each node to the source aspect ratio and lets you zoom into it in the lightbox."
       toc={toc}
     >
       <H2>Supported formats</H2>
@@ -23,12 +23,12 @@ export default function ImageNode() {
         headers={['Source', 'How']}
         rows={[
           ['Upload', 'Toolbar &gt; Image, then pick a file.'],
-          ['Paste', 'Paste an image from the clipboard onto the canvas.'],
+          ['Paste', 'Paste an image from the clipboard onto the Space.'],
           ['Drag', 'Drag an image file from your OS file browser.'],
           ['URL', 'Paste a direct image URL.'],
           [
             'PDF screenshot',
-            'In the PDF lightbox, take a rectangular screenshot of a page; it lands on the canvas as an Image node.',
+            'In the PDF lightbox, take a rectangular screenshot of a page; it lands on the Space as an Image node.',
           ],
         ]}
       />

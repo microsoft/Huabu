@@ -26,7 +26,7 @@ const scenes: ShowcaseScene[] = [
   {
     eyebrow: 'Research',
     title: 'Read a dense paper without losing the thread',
-    body: 'Drop a stack of PDFs onto the canvas, attach a Note beside each one for your own summary, and let the AI synthesise across them when you are ready. The sources stay visible while you write.',
+    body: 'Drop a stack of PDFs onto the Space, attach a Note beside each one for your own summary, and let the AI synthesise across them when you are ready. The sources stay visible while you write.',
     cta: { label: 'See the walkthrough idea', to: '/docs/quickstart' },
   },
   {
@@ -37,18 +37,18 @@ const scenes: ShowcaseScene[] = [
   {
     eyebrow: 'Brainstorming',
     title: 'From sticky-note chaos to clustered themes',
-    body: 'Drop one Text node per idea. When the canvas is full, hit ⌘+I to ask the AI to cluster everything into labelled frames — accept the change list and the surface tidies itself.',
+    body: 'Drop one Text node per idea. When the Space is full, hit ⌘+I to ask the AI to cluster everything into labelled frames — accept the change list and the surface tidies itself.',
   },
   {
     eyebrow: 'Coding agents',
     title: 'Pair Huabu with Claude / Copilot / Gemini CLIs',
-    body: 'Through the Pluggable Agents bridge, your existing agent CLI drives the chat panel. The canvas is the agent’s scratchpad; sources, decisions and outputs all land where you can see them.',
+    body: 'Through the Pluggable Agents bridge, your existing agent CLI drives the chat panel. The Space is the agent’s scratchpad; sources, decisions and outputs all land where you can see them.',
     cta: { label: 'How it works', to: '/docs/core/pluggable-agents' },
   },
   {
     eyebrow: 'Reading club / study',
     title: 'Capture a curriculum on one infinite surface',
-    body: 'Web articles, PDFs, your highlights, AI explanations, the questions still bothering you — all sit on the same canvas. Each Question node gets an AI reply right where the source material is.',
+    body: 'Web articles, PDFs, your highlights, AI explanations, the questions still bothering you — all sit on the same Space. Each Question node gets an AI reply right where the source material is.',
   },
 ];
 
@@ -60,9 +60,9 @@ export default function Showcase() {
           What people use Huabu for
         </h1>
         <P className="mx-auto max-w-2xl text-base">
-          A short visual tour of the kinds of work the canvas fits. These
+          A short visual tour of the kinds of work the Space fits. These
           aren&apos;t step-by-step recipes — they&apos;re snapshots of what a
-          loaded Huabu canvas tends to look like.
+          loaded Huabu Space tends to look like.
         </P>
       </header>
 
@@ -75,7 +75,7 @@ export default function Showcase() {
       <footer className="mt-24 rounded-2xl bg-gray-50 px-8 py-10 text-center">
         <H2>Ready to try it?</H2>
         <P className="mx-auto mt-2 max-w-xl text-base">
-          The Quick Start walks you from a fresh install to a productive canvas
+          The Quick Start walks you from a fresh install to a productive Space
           in four short steps.
         </P>
         <Link

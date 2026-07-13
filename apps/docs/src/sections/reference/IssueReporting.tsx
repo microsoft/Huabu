@@ -36,14 +36,9 @@ export default function IssueReporting() {
           — your symptom may already be tracked.
         </li>
         <li>
-          <strong>Try a fresh canvas.</strong> If the bug doesn&apos;t reproduce
-          on an empty canvas, it&apos;s likely tied to a specific node or
+          <strong>Try a fresh Space.</strong> If the bug doesn&apos;t reproduce
+          on an empty Space, it&apos;s likely tied to a specific node or
           operation — that&apos;s a useful data point.
-        </li>
-        <li>
-          <strong>Check the changelog.</strong> A recent release may have
-          changed behaviour intentionally — see{' '}
-          <DocLink href="/docs/reference/changelog">Changelog</DocLink>.
         </li>
       </ul>
 
@@ -65,7 +60,7 @@ export default function IssueReporting() {
           ],
           [
             <strong>Steps to reproduce</strong>,
-            'A numbered list, starting from "open Huabu" or "open canvas X". If you can\'t reproduce reliably, say so — intermittent bugs still matter.',
+            'A numbered list, starting from "open Huabu" or "open Space X". If you can\'t reproduce reliably, say so — intermittent bugs still matter.',
           ],
           [
             <strong>Environment</strong>,
@@ -76,7 +71,7 @@ export default function IssueReporting() {
           ],
           [
             <strong>Screenshot / screen recording</strong>,
-            'Worth a thousand words for canvas glitches and layout bugs.',
+            'Worth a thousand words for Space glitches and layout bugs.',
           ],
           [
             <strong>Logs</strong>,
@@ -86,31 +81,55 @@ export default function IssueReporting() {
       />
 
       <Callout tone="tip">
-        If a specific canvas reproduces the bug and you&apos;re willing to share
-        it, export it to a <Code>.zip</Code> bundle from the canvas list and
-        attach that. The team can drop it straight into a workspace and click
-        around.
+        If a specific Space reproduces the bug and you&apos;re willing to share
+        it, export it to a <Code>.zip</Code> bundle from the Space list and
+        attach that. The team can drop it straight into a Home and click around.
       </Callout>
 
       <H2>Where to find logs</H2>
-      <H3>Server logs</H3>
+      <H3>Desktop app troubleshooting</H3>
       <P>
-        The Sediment server prints to its terminal. If you started it via{' '}
-        <Code>pnpm dev</Code>, the relevant lines are in that terminal pane. For
-        long sessions, redirect to a file:
+        In the installed Huabu app, open <em>Help → Troubleshooting</em> on
+        macOS, or open the application menu and find <em>Troubleshooting</em> on
+        Windows and Linux. The three support actions there cover the information
+        most bug reports need:
+      </P>
+      <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
+        <li>
+          <strong>Open Server Log</strong> reveals <Code>server.log</Code> in
+          Finder or Explorer. Attach the relevant log to the issue after
+          checking it for information you do not want to share.
+        </li>
+        <li>
+          <strong>Open Developer Tools</strong> exposes the Console and Network
+          tabs for frontend errors and failed requests. Copy only the entries
+          around the problem because request details may contain Space data.
+        </li>
+        <li>
+          <strong>Copy System Information</strong> copies the Huabu, operating
+          system, CPU architecture, and Electron versions. Paste it into the
+          Environment field of the issue.
+        </li>
+      </ul>
+
+      <H3>Development server logs</H3>
+      <P>
+        When running Huabu from source with <Code>pnpm dev</Code>, Server logs
+        also appear in that terminal pane. For long sessions, redirect them to a
+        file:
       </P>
       <CodeBlock language="bash">{`pnpm dev 2>&1 | tee huabu-server.log`}</CodeBlock>
 
       <H3>Browser console</H3>
       <P>
-        Open DevTools (<Code>F12</Code> on most browsers) and copy the Console +
-        Network tabs. The first red error after the misbehaviour usually points
-        at the offending request.
+        In the web build, open DevTools (<Code>F12</Code> on most browsers) and
+        inspect the Console and Network tabs. The first red error after the
+        misbehaviour usually points at the offending request.
       </P>
 
-      <H3>Canvas history</H3>
+      <H3>Space history</H3>
       <P>
-        Each canvas keeps a <Code>.history/</Code> directory with chat
+        Each Space keeps a <Code>.history/</Code> directory with chat
         transcripts and intent suggestions. Attach the relevant file if the bug
         is about AI behaviour — but skim it first for anything sensitive
         you&apos;d rather not share.

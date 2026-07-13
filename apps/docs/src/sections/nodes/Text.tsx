@@ -26,8 +26,8 @@ export default function TextNode() {
       <Table
         headers={['Source', 'How']}
         rows={[
-          ['Toolbar', 'Pick Text from the canvas toolbar.'],
-          ['Paste', 'Paste a short string on an empty canvas spot.'],
+          ['Toolbar', 'Pick Text from the Space toolbar.'],
+          ['Paste', 'Paste a short string on an empty Space spot.'],
         ]}
       />
 

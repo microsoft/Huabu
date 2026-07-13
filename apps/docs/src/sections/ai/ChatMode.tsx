@@ -23,14 +23,14 @@ export default function ChatMode() {
   return (
     <PageLayout
       title="Chat Mode"
-      description="Chat Mode is Huabu's free-form conversation surface. You talk; the AI answers, streaming text and occasionally creating a single node when you ask for it. Use it when you want a discussion, an explanation or a quick note — not a sweeping canvas reorg."
+      description="Chat Mode is Huabu's free-form conversation surface. You talk; the AI answers, streaming text and occasionally creating a single node when you ask for it. Use it when you want a discussion, an explanation or a quick note — not a sweeping Space reorg."
       toc={toc}
     >
       <H2>What Chat Mode is</H2>
       <P>
         Open the chat panel, set the mode selector to <strong>Chat</strong>,
         type, hit <Kbd>Enter</Kbd>. Replies stream into the conversation. The AI
-        sees the canvas overview plus any nodes you have selected as the
+        sees the Space overview plus any nodes you have selected as the
         spotlight — selecting before sending is how you point.
       </P>
 
@@ -39,12 +39,12 @@ export default function ChatMode() {
         headers={['Situation', 'Why Chat Mode fits']}
         rows={[
           [
-            'Asking a question about a source on the canvas',
+            'Asking a question about a source on the Space',
             'You want a streamed answer in the panel, not a node creation.',
           ],
           [
             'Brainstorming or rubber-ducking',
-            'Iteration is fast; nothing commits to the canvas until you ask.',
+            'Iteration is fast; nothing commits to the Space until you ask.',
           ],
           [
             'Getting a single Note written from a topic',
@@ -62,7 +62,7 @@ export default function ChatMode() {
         <li>Stream natural language replies into the conversation.</li>
         <li>
           Call read-only tools on demand — inspect nodes, run grep / find on the
-          canvas, fetch a URL, search the web.
+          Space, fetch a URL, search the web.
         </li>
         <li>
           Create the occasional one-off node when you explicitly ask
@@ -70,7 +70,7 @@ export default function ChatMode() {
         </li>
       </ul>
       <Callout tone="info">
-        Chat Mode <strong>doesn&apos;t batch-edit</strong> the canvas. If you
+        Chat Mode <strong>doesn&apos;t batch-edit</strong> the Space. If you
         want grouped edits with a preview, switch to{' '}
         <DocLink href="/docs/ai/agent-mode">Agent Mode</DocLink>.
       </Callout>
@@ -78,7 +78,7 @@ export default function ChatMode() {
       <H2>How edits arrive</H2>
       <P>
         Anything Chat Mode does create appears one node at a time. Each creation
-        is a normal canvas operation — undoable with <Kbd>Ctrl</Kbd>/
+        is a normal Space operation — undoable with <Kbd>Ctrl</Kbd>/
         <Kbd>Cmd</Kbd>+<Kbd>Z</Kbd>, editable like a node you made yourself.
       </P>
 
@@ -86,13 +86,13 @@ export default function ChatMode() {
       <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
         <li>
           <strong>Selection auto-attaches.</strong> Send while nodes are
-          selected on the canvas and their full content rides along.
+          selected on the Space and their full content rides along.
         </li>
         <li>
           <strong>
             <Code>@</Code> picker
           </strong>{' '}
-          — type <Code>@</Code> in the composer to fuzzy-search any canvas node
+          — type <Code>@</Code> in the composer to fuzzy-search any Space node
           by title and inline it as a reference.
         </li>
         <li>
@@ -108,10 +108,10 @@ export default function ChatMode() {
           [
             'Primary output',
             'Streamed conversation',
-            'Reviewable change list on the canvas',
+            'Reviewable change list on the Space',
           ],
           [
-            'Canvas edits',
+            'Space edits',
             'One at a time when you ask',
             'Batched: create / move / connect / group / edit',
           ],

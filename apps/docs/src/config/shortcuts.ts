@@ -59,7 +59,7 @@ export const keyboardShortcutSections: ShortcutSection[] = [
     items: [
       {
         keys: 'Option / Ctrl (hold while dragging)',
-        description: 'Copy a Note block to the canvas instead of moving it',
+        description: 'Copy a Note block to the Space instead of moving it',
       },
     ],
   },
@@ -76,10 +76,10 @@ export const keyboardShortcutSections: ShortcutSection[] = [
   {
     title: 'Search',
     items: [
-      { keys: 'Ctrl/Cmd+F', description: 'Search the canvas' },
+      { keys: 'Ctrl/Cmd+F', description: 'Search the Space' },
       { keys: 'Enter', description: 'Jump to active result or next match' },
       { keys: 'Shift+Enter', description: 'Previous match in preview' },
-      { keys: '↑ / ↓', description: 'Move between canvas search results' },
+      { keys: '↑ / ↓', description: 'Move between Space search results' },
       { keys: 'Esc', description: 'Close the search bar' },
     ],
   },

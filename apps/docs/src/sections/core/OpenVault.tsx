@@ -17,7 +17,7 @@ const toc: TocEntry[] = [
   { id: 'the-promise', label: 'The promise: your folder, your data' },
   { id: 'why-files', label: 'Why files, not a database' },
   { id: 'why-markdown', label: 'Why Markdown specifically' },
-  { id: 'layout', label: 'Anatomy of a workspace folder' },
+  { id: 'layout', label: 'Anatomy of a Home folder' },
   { id: 'sub-features', label: 'Sub-features built on the file model' },
   { id: 'sync-and-backup', label: 'Sync, backup & version control' },
   { id: 'interop', label: 'Interop with other tools' },
@@ -26,14 +26,14 @@ const toc: TocEntry[] = [
 export default function OpenVault() {
   return (
     <PageLayout
-      title="Open Vault"
-      description="There is no server-side database. Every canvas, note, attachment, AI history file, memory entry and skill is a plain file inside a folder you chose — an open vault you can back up, sync, version-control or edit with any other tool. That single architectural decision shapes how the product feels."
+      title="Open Home"
+      description="There is no server-side database. Every Space, note, attachment, AI history file, memory entry and skill is a plain file inside a folder you chose — an open Home you can back up, sync, version-control or edit with any other tool. That single architectural decision shapes how the product feels."
       toc={toc}
     >
       <H2>The promise: your folder, your data</H2>
       <P>
-        When you open a workspace you point Huabu at any folder on disk. From
-        that moment on, every change you make — drawing a node, asking the AI a
+        When you open a Home you point Huabu at any folder on disk. From that
+        moment on, every change you make — drawing a node, asking the AI a
         question, saving a skill — lands somewhere inside that folder as a plain
         file. There is no hidden database, no cloud copy, no export step. If
         Huabu disappeared tomorrow your work would still open in any text
@@ -46,7 +46,7 @@ export default function OpenVault() {
         rows={[
           [
             <strong>Standard tools just work</strong>,
-            'Time Machine, iCloud, Dropbox, Syncthing, Git, ripgrep — they all treat a Huabu workspace like any other folder.',
+            'Time Machine, iCloud, Dropbox, Syncthing, Git, ripgrep — they all treat a Huabu Home like any other folder.',
           ],
           [
             <strong>Human-readable diffs</strong>,
@@ -73,7 +73,7 @@ export default function OpenVault() {
         every editor on your machine already speaks.
       </P>
 
-      <H2>Anatomy of a workspace folder</H2>
+      <H2>Anatomy of a Home folder</H2>
       <CodeBlock language="text">{`<workspace>/
 ├── <canvas-title>/          one folder per canvas
 │   ├── canvas.json          topology (nodes, edges, version)
@@ -107,8 +107,8 @@ export default function OpenVault() {
           to="/docs/concepts/workspaces"
           icon={FolderTree}
           eyebrow="Container"
-          title="Workspaces"
-          description="Switching, recents, lifecycle of a canvas, import/export of canvas bundles."
+          title="Home"
+          description="Switching, recents, lifecycle of a Space, import/export of Space bundles."
         />
         <NavCard
           to="/docs/reference/storage"
@@ -129,7 +129,7 @@ export default function OpenVault() {
           icon={GitBranch}
           eyebrow="AI"
           title="Memory"
-          description="Workspace + canvas memory tiers, both as hand-editable Markdown."
+          description="Home + Space memory tiers, both as hand-editable Markdown."
         />
       </CardGrid>
 
@@ -139,26 +139,26 @@ export default function OpenVault() {
         rows={[
           [
             <strong>Time Machine / Restic / rsync</strong>,
-            'Point your backup at the workspace folder. No special setup.',
+            'Point your backup at the Home folder. No special setup.',
           ],
           [
             <strong>iCloud / Dropbox / OneDrive / Syncthing</strong>,
-            'Put the workspace inside the synced folder. Avoid editing the same canvas on two machines at once (no real-time merge yet).',
+            'Put the Home inside the synced folder. Avoid editing the same Space on two machines at once (no real-time merge yet).',
           ],
           [
             <strong>Git</strong>,
             <>
-              <Code>git init</Code> the workspace, commit{' '}
-              <Code>canvas.json</Code> and <Code>nodes/**</Code>, ignore{' '}
-              <Code>.artifacts/</Code> and <Code>.history/</Code> if you
-              don&apos;t want the binaries / chat logs in history.
+              <Code>git init</Code> the Home, commit <Code>canvas.json</Code>{' '}
+              and <Code>nodes/**</Code>, ignore <Code>.artifacts/</Code> and{' '}
+              <Code>.history/</Code> if you don&apos;t want the binaries / chat
+              logs in history.
             </>,
           ],
         ]}
       />
       <Callout tone="warning">
-        Huabu is single-machine today. If two clients open the same canvas at
-        the same time the second writer wins. Real-time multi-user collaboration
+        Huabu is single-machine today. If two clients open the same Space at the
+        same time the second writer wins. Real-time multi-user collaboration
         isn&apos;t implemented yet.
       </Callout>
 
@@ -170,12 +170,12 @@ export default function OpenVault() {
           next save.
         </li>
         <li>
-          <strong>ripgrep / fzf</strong> work over the whole workspace, so
-          full-text search across canvases is one shell command away.
+          <strong>ripgrep / fzf</strong> work over the whole Home, so full-text
+          search across Spaces is one shell command away.
         </li>
         <li>
           <strong>Static-site generators</strong> can publish the{' '}
-          <Code>nodes/</Code> folder of a canvas as a website without extracting
+          <Code>nodes/</Code> folder of a Space as a website without extracting
           from a database.
         </li>
       </ul>

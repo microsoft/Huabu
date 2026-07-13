@@ -111,18 +111,6 @@ function DocsSidebar() {
           ))}
         </ul>
       </nav>
-
-      {/* The standalone site links to the public project, not an app route. */}
-      <div className="shrink-0 border-t border-gray-100 px-4 py-3 text-[12px] text-gray-500">
-        <a
-          href="https://github.com/cxxxxxn/Sediment"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="transition-colors hover:text-gray-900"
-        >
-          View project on GitHub ↗
-        </a>
-      </div>
     </aside>
   );
 }
