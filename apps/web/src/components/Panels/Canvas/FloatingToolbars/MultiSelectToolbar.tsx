@@ -22,9 +22,10 @@ import { translateColorOptions } from '@/i18n/colors';
 import useCanvasStore from '@/store/canvasStore';
 import { useIntentStore } from '@/store/intentStore';
 import { resolveGeometryEdit } from '@/utils/node/geometry';
+import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
 import type { CanvasNode } from '@/components/Nodes/types';
-import type { CanvasNodeId } from '@sediment/shared';
+import type { CanvasEdgeId, CanvasNodeId } from '@sediment/shared';
 
 /** Sentinel token representing "no accent". */
 const ACCENT_NONE = ACCENT_NONE_TOKEN;
@@ -41,6 +42,7 @@ interface GeometryToolbarItem {
 export const MultiSelectToolbar = () => {
   const { t } = useTranslation();
   const nodes = useCanvasStore((s) => s.nodes);
+  const edges = useCanvasStore((s) => s.edges);
   const alignSelectedNodes = useCanvasStore((s) => s.alignSelectedNodes);
   const spreadSelectedNodes = useCanvasStore((s) => s.spreadSelectedNodes);
   const executeCommands = useCanvasStore((s) => s.executeCommands);
@@ -57,6 +59,19 @@ export const MultiSelectToolbar = () => {
     () => nodes.filter((n) => n.selected) as CanvasNode[],
     [nodes],
   );
+
+  // Edges whose endpoints are both in the node selection participate in
+  // multi-selection styling. This matches the derived edge highlighting in
+  // Canvas without turning those edges into independently selected objects.
+  const selectedInternalEdges = useMemo(() => {
+    const edgeIds = new Set(
+      getEdgeIdsBetweenSelectedNodes(
+        selectedNodes.map((node) => node.id),
+        edges,
+      ),
+    );
+    return edges.filter((edge) => edgeIds.has(edge.id));
+  }, [edges, selectedNodes]);
 
   // Sketch (annotation) selections expose an `Apply Sketch` action that
   // hands the selected stroke ids to the vision-LLM recognition pipeline.
@@ -288,12 +303,12 @@ export const MultiSelectToolbar = () => {
 
       <FloatingToolbar.Divider />
 
-      {/* Accent color for all selected nodes */}
+      {/* Accent color for selected nodes and the edges between them. */}
       <FloatingToolbar.ColorPicker
         colors={accentPickerOptions}
         value={commonAccent}
-        onSelect={(t) => {
-          const accent = t === ACCENT_NONE ? null : t;
+        onSelect={(token) => {
+          const accent = token === ACCENT_NONE ? null : token;
           if (selectedNodes.length === 0) return;
 
           executeCommands([
@@ -306,6 +321,17 @@ export const MultiSelectToolbar = () => {
                 },
               })),
             },
+            ...(accent && selectedInternalEdges.length > 0
+              ? [
+                  {
+                    type: 'SET_EDGE_STYLE' as const,
+                    edges: selectedInternalEdges.map((edge) => ({
+                      edge: edge.id as CanvasEdgeId,
+                      style: { stroke: accent },
+                    })),
+                  },
+                ]
+              : []),
           ]);
         }}
         title={t('toolbar.accentColor')}
