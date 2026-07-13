@@ -30,6 +30,7 @@ import { Loading } from '@/components/Common/Loading';
 import { toast } from '@/components/Common/Toast';
 import { Tooltip } from '@/components/Common/Tooltip.tsx';
 import { NodeFloatingToolbar } from '@/components/Panels/Canvas/FloatingToolbars/NodeFloatingToolbar.tsx';
+import { SEMANTIC_ZOOM_CONFIG } from '@/config/semanticZoom.ts';
 import {
   beginSnapSession,
   endSnapSession,
@@ -481,6 +482,8 @@ export const NodeWrapper = memo(
     );
 
     const isMinimal = renderMode === 'minimal';
+    const supportsMinimalLOD =
+      SEMANTIC_ZOOM_CONFIG.nodeLOD[type]?.minimal === 'minimal';
 
     // Per-node resize handles are only ever shown when this is the *sole*
     // selected node (multi-selection draws a single bounding-box resizer
@@ -535,16 +538,6 @@ export const NodeWrapper = memo(
           </OverlayPortal>
         )}
 
-        {/* Semantic zoom: placeholder overlay when in minimal LOD */}
-        {isMinimal && (
-          <SemanticPlaceholder
-            type={type}
-            data={data}
-            width={nodeWidth}
-            height={nodeHeight}
-          />
-        )}
-
         <div
           className={cn(
             // `transition` (not `transition-all`) intentionally
@@ -560,7 +553,7 @@ export const NodeWrapper = memo(
             // `transition` still animates color / bg / border / ring
             // / shadow / transform / opacity — i.e. all the
             // selection-state visuals this class is here to smooth.
-            'group relative flex h-full w-full flex-col rounded-lg transition duration-120',
+            'semantic-lod-node group relative flex h-full w-full flex-col rounded-lg transition duration-120',
 
             type !== 'text' &&
               type !== 'sketch' &&
@@ -598,12 +591,29 @@ export const NodeWrapper = memo(
               borderColor: 'transparent',
             }),
           }}
+          data-lod={renderMode}
           onDoubleClick={onDoubleClick}
           onPointerEnter={() => setHovered(true)}
           onPointerLeave={() => setHovered(false)}
           onFocus={() => setEditing(true)}
           onBlur={() => setEditing(false)}
         >
+          {/*
+            Keep the lightweight placeholder mounted inside the node shell
+            so CSS can cross-fade both directions. Its position in this
+            shared containing block also guarantees that the full-LOD hiding
+            selector and the absolute inset use the same structural anchor.
+          */}
+          {supportsMinimalLOD && (
+            <SemanticPlaceholder
+              type={type}
+              data={data}
+              active={isMinimal}
+              width={nodeWidth}
+              height={nodeHeight}
+            />
+          )}
+
           {showIngestionOverlay && (
             <div className="pointer-events-none absolute right-1.5 bottom-1.5 z-10">
               <Loading layout="inline" size="xs" className="text-fg-subtle" />
@@ -685,10 +695,9 @@ export const NodeWrapper = memo(
 
           <div
             className={clsx(
-              'p-0',
+              'semantic-lod-content p-0',
 
               hasFixedNodeHeight ? 'min-h-0 flex-1' : 'min-h-0',
-              isMinimal && 'invisible',
 
               allowOverflow ? 'overflow-visible' : 'overflow-hidden rounded-md',
             )}

@@ -15,6 +15,8 @@ import type { CanvasNodeType, NodeData } from './types';
 interface SemanticPlaceholderProps {
   type: CanvasNodeType;
   data: NodeData;
+  /** Whether minimal LOD is currently active. */
+  active: boolean;
   /** Canvas-space width of the node. */
   width: number;
   /** Canvas-space height of the node. */
@@ -41,6 +43,7 @@ const PAD_Y = 16;
 export function SemanticPlaceholder({
   type,
   data,
+  active,
   width,
   height,
 }: SemanticPlaceholderProps) {
@@ -49,13 +52,11 @@ export function SemanticPlaceholder({
   const accentTokens = accent ? getAccentTokens(accent) : null;
 
   const containerClassName = cn(
-    'pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-lg p-2 transition-all duration-120',
-    !accentTokens && 'bg-surface shadow',
-    accentTokens && 'border-4',
+    'semantic-lod-placeholder pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-lg p-2',
+    !accentTokens && 'bg-surface',
   );
   const containerStyle = accentTokens
     ? {
-        borderColor: accentTokens.border,
         background: accentTokens.bg,
         color: accentTokens.fg,
       }
@@ -81,7 +82,12 @@ export function SemanticPlaceholder({
   );
 
   return (
-    <div className={containerClassName} style={containerStyle}>
+    <div
+      className={containerClassName}
+      style={containerStyle}
+      data-lod={active ? 'minimal' : 'full'}
+      aria-hidden={!active}
+    >
       {/*
         `overflow-wrap: break-word` wraps at word boundaries first and only
         splits *inside* a token when that token alone is wider than the box —

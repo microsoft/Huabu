@@ -1,4 +1,3 @@
-import { clsx } from 'clsx';
 import { Download, Fullscreen, ImageOff } from 'lucide-react';
 import { lazy, memo, Suspense, useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -141,7 +140,7 @@ export const PDFNode = memo(
         actions={PDFActions}
         resizable
         keepAspectRatio={false}
-        className={clsx('bg-surface transition-all duration-300 ease-in-out')}
+        className="bg-surface"
       >
         <div className="relative flex h-full w-full flex-col overflow-hidden rounded-lg">
           {/* Render the first page off-screen to capture a thumbnail when no

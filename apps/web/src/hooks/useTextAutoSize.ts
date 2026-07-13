@@ -42,7 +42,8 @@ export interface UseTextAutoSizeOpts {
   nodeId: string;
   text: string;
   baseFontSize?: number;
-  padding: number;
+  paddingX: number;
+  paddingY: number;
   borderInset?: number;
   fontOpts: FontOpts;
   /** Placeholder text used to measure minimum width when content is empty. */
@@ -72,7 +73,8 @@ export function useTextAutoSize({
   nodeId,
   text,
   baseFontSize = 16,
-  padding,
+  paddingX,
+  paddingY,
   borderInset = 0,
   fontOpts,
   placeholder = 'Type...',
@@ -112,7 +114,8 @@ export function useTextAutoSize({
     [nodeId],
   );
 
-  const inset = padding + borderInset;
+  const insetX = paddingX + borderInset;
+  const insetY = paddingY + borderInset;
 
   // --------------------------------------------------------------------
   // @deprecated MIGRATION_FONTSIZE_FROM_HEIGHT
@@ -135,13 +138,13 @@ export function useTextAutoSize({
       return;
     }
     if (persistedHeight === undefined || width === undefined) return;
-    if (width - inset * 2 <= 0 || persistedHeight - inset * 2 <= 0) return;
+    if (width - insetX * 2 <= 0 || persistedHeight - insetY * 2 <= 0) return;
     migrationDoneRef.current = true;
     const derived = text.trim()
       ? computeFontSizeForHeight(
           text,
-          width - inset * 2,
-          persistedHeight - inset * 2,
+          width - insetX * 2,
+          persistedHeight - insetY * 2,
           fontOpts,
         )
       : baseFontSize;
@@ -178,7 +181,7 @@ export function useTextAutoSize({
   }, [text, baseFontSize, fontOpts, maxAutoWidth, placeholder]);
 
   const autoWidth = Math.max(
-    autoContent.width + WRAP_TOLERANCE + inset * 2,
+    autoContent.width + WRAP_TOLERANCE + insetX * 2,
     30,
   );
 
@@ -191,7 +194,7 @@ export function useTextAutoSize({
   // --------------------------------------------------------------------
   const effectiveWidth =
     liveSize?.width ?? (hasFixedWidth ? (width ?? autoWidth) : autoWidth);
-  const contentWidth = Math.max(effectiveWidth - inset * 2, 1);
+  const contentWidth = Math.max(effectiveWidth - insetX * 2, 1);
 
   // Placeholder renders at the same font size as user-typed text so there
   // is no visual jump between empty and filled states. The placeholder
@@ -208,8 +211,8 @@ export function useTextAutoSize({
   const effectiveHeight =
     liveSize?.height ??
     Math.max(
-      measuredHeight + inset * 2,
-      renderFontSize * fontOpts.lineHeight + inset * 2,
+      measuredHeight + insetY * 2,
+      renderFontSize * fontOpts.lineHeight + insetY * 2,
     );
 
   // --------------------------------------------------------------------
@@ -233,12 +236,12 @@ export function useTextAutoSize({
       // on an empty node still scales the font naturally (same behaviour
       // and same final size as if the user had typed something).
       const target = text.trim() ? text : placeholder;
-      const cw = w - inset * 2;
-      const ch = h - inset * 2;
+      const cw = w - insetX * 2;
+      const ch = h - insetY * 2;
       const fs = computeFontSizeForHeight(target, cw, ch, fontOpts);
       setLiveFontSize(fs);
     },
-    [text, placeholder, fontOpts, inset],
+    [text, placeholder, fontOpts, insetX, insetY],
   );
 
   const handleResizeEnd = useCallback(
@@ -249,8 +252,8 @@ export function useTextAutoSize({
       const target = text.trim() ? text : placeholder;
       const finalFontSize = computeFontSizeForHeight(
         target,
-        w - inset * 2,
-        h - inset * 2,
+        w - insetX * 2,
+        h - insetY * 2,
         fontOpts,
       );
       writeLockedFontSize(finalFontSize);
@@ -261,7 +264,7 @@ export function useTextAutoSize({
       setLiveFontSize(null);
       setLiveSize(null);
     },
-    [text, placeholder, fontOpts, inset, writeLockedFontSize],
+    [text, placeholder, fontOpts, insetX, insetY, writeLockedFontSize],
   );
 
   return {

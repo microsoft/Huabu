@@ -11,7 +11,8 @@ import {
   FONT_FAMILY_CSS,
   getTextNodeFontOpts,
   TEXT_ACCENT_BORDER as ACCENT_BORDER,
-  TEXT_NODE_PADDING as NODE_PADDING,
+  TEXT_NODE_PADDING_X as NODE_PADDING_X,
+  TEXT_NODE_PADDING_Y as NODE_PADDING_Y,
   TEXT_NODE_PLACEHOLDER,
 } from '@/utils/node/nodeFontConfig';
 
@@ -88,7 +89,8 @@ export const TextNode = memo(
       isEditing,
       content,
       baseFontSize: 16,
-      padding: NODE_PADDING,
+      paddingX: NODE_PADDING_X,
+      paddingY: NODE_PADDING_Y,
       borderInset,
       fontOpts,
       placeholder: TEXT_NODE_PLACEHOLDER,

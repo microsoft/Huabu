@@ -20,6 +20,7 @@ import { useTranslation } from 'react-i18next';
 
 import { getAccentTokens } from '@/components/Nodes/accentTokens';
 import useCanvasStore from '@/store/canvasStore';
+import { TEXT_NODE_PADDING_X } from '@/utils/node/nodeFontConfig';
 import { measureTextContent } from '@/utils/node/textMeasure';
 
 import { getEdgeRenderZ } from './edgeZ';
@@ -32,8 +33,8 @@ const LABEL_MAX_LENGTH = 120;
 
 /** Canvas-space width (px) at which an idle label wraps onto multiple lines. */
 const LABEL_WRAP_CAP = 120;
-/** Pill horizontal padding + border budget (px-2 = 16 + ~2px border). */
-const LABEL_BOX_INSET = 18;
+/** Approximate left + right border budget used by tight-width measurement. */
+const LABEL_BORDER_INSET = 2;
 /** Rendered label font size (px) — kept in sync with the `text-[12px]` class. */
 const LABEL_FONT_SIZE = 12;
 /**
@@ -345,6 +346,12 @@ function EdgeLabelEditor({
   // wrapper is untouched so the midpoint anchor never drifts.
   const zoom = useStore((s) => s.transform[2]);
   const labelScale = Math.min(Math.max(1 / zoom, 1), 2.5);
+  // The inverse scale keeps relationship text legible when zoomed out, but
+  // scaling the pill's padding by the same amount makes its whitespace look
+  // larger than a TextNode's. Counter-scale only the horizontal padding so
+  // both surfaces retain the same screen-space inset. Reuse TextNode's
+  // canonical padding to keep the two visual contracts in sync.
+  const horizontalPadding = TEXT_NODE_PADDING_X / labelScale;
 
   // Hovering an idle pill expands it to the full label so a long relationship
   // phrase can be read without selecting the edge (see `clampLabel`).
@@ -384,18 +391,21 @@ function EdgeLabelEditor({
   // covers the medium/normal weight measurement gap.
   const tightMaxWidth = useMemo(() => {
     if (!hasLabel) return undefined;
-    const contentCap = LABEL_WRAP_CAP - LABEL_BOX_INSET;
+    const horizontalInset = horizontalPadding * 2 + LABEL_BORDER_INSET;
+    const contentCap = LABEL_WRAP_CAP - horizontalInset;
     const { width } = measureTextContent(value, {
       ...LABEL_FONT,
       fontSize: LABEL_FONT_SIZE,
       maxWidth: contentCap,
     });
-    return Math.min(LABEL_WRAP_CAP, Math.ceil(width) + LABEL_BOX_INSET + 3);
-  }, [value, hasLabel]);
+    return Math.min(LABEL_WRAP_CAP, Math.ceil(width) + horizontalInset + 3);
+  }, [value, hasLabel, horizontalPadding]);
   const pillStyle = {
     borderColor,
     borderWidth: `${borderPx}px`,
     color: textColor,
+    paddingLeft: `${horizontalPadding}px`,
+    paddingRight: `${horizontalPadding}px`,
     // Idle: hug the measured longest line; editing: keep the full wrap cap.
     maxWidth: editing ? LABEL_WRAP_CAP : tightMaxWidth,
     // Bounded inverse-zoom scaling (see `labelScale`). `transform-origin:
@@ -422,7 +432,7 @@ function EdgeLabelEditor({
   const clampLabel = hasLabel && !useInfoColors && !hovered;
   const pillClasses = [
     'sediment-edge-label',
-    'max-w-[120px] cursor-text rounded-md border-solid px-2 py-0.5 shadow-sm',
+    'max-w-[120px] cursor-text rounded-md border-solid py-0.5 shadow-sm',
     'text-[12px] font-medium leading-snug break-words',
     'outline-none',
     useInfoColors ? 'bg-info-bg text-fg-default' : 'bg-surface text-fg-default',
