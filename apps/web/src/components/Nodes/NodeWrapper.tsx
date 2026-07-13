@@ -62,10 +62,16 @@ const OverlayPortal = memo(
   ({
     nodeId,
     offsetY,
+    semanticVisible,
+    ownerInteractionPriority,
+    maxWidth,
     children,
   }: {
     nodeId: string;
     offsetY: number;
+    semanticVisible: boolean;
+    ownerInteractionPriority: number;
+    maxWidth?: number;
     children: React.ReactNode;
   }) => {
     const domNode = useStore((state) => state.domNode);
@@ -78,6 +84,13 @@ const OverlayPortal = memo(
 
     const absX = internalNode?.internals.positionAbsolute?.x ?? 0;
     const absY = internalNode?.internals.positionAbsolute?.y ?? 0;
+
+    const [overlayHovered, setOverlayHovered] = useState(false);
+    const interactionPriority = Math.max(
+      ownerInteractionPriority,
+      overlayHovered ? 1 : 0,
+    );
+    const visible = interactionPriority > 0 || semanticVisible;
 
     // left/top always equal the final screen position so the label stays
     // correct during pan/zoom without any extra logic.
@@ -126,15 +139,25 @@ const OverlayPortal = memo(
       <div
         style={{
           position: 'absolute',
-          zIndex: 1000,
+          zIndex: 1000 + interactionPriority,
           left,
           top,
-          pointerEvents: 'auto',
+          maxWidth,
+          opacity: visible ? 1 : 0,
+          visibility: visible ? 'visible' : 'hidden',
+          pointerEvents: visible ? 'auto' : 'none',
           transform: `translate(${flipOffset.x}px, ${flipOffset.y}px)`,
-          transition: playing
-            ? 'transform 350ms cubic-bezier(0.4, 0, 0.2, 1)'
-            : undefined,
+          transition: [
+            playing ? 'transform 350ms cubic-bezier(0.4, 0, 0.2, 1)' : null,
+            'opacity 120ms ease',
+            `visibility 0s linear ${visible ? '0s' : '120ms'}`,
+          ]
+            .filter(Boolean)
+            .join(', '),
         }}
+        aria-hidden={!visible}
+        onPointerEnter={() => setOverlayHovered(true)}
+        onPointerLeave={() => setOverlayHovered(false)}
       >
         {children}
       </div>,
@@ -162,6 +185,12 @@ interface NodeWrapperProps {
   overlayContent?: React.ReactNode;
   /** Vertical offset in screen pixels from the node's top edge. Negative = above. */
   overlayOffsetY?: number;
+  /** Semantic visibility computed by the overlay owner. */
+  overlayVisible?: boolean;
+  /** Owner interaction priority: idle 0, hovered 1, selected 2, editing 3. */
+  overlayInteractionPriority?: number;
+  /** Optional screen-space width cap for overlay content. */
+  overlayMaxWidth?: number;
 
   keepAspectRatio?: boolean;
   resizable?: boolean;
@@ -224,6 +253,9 @@ export const NodeWrapper = memo(
     actions,
     overlayContent,
     overlayOffsetY = 0,
+    overlayVisible = true,
+    overlayInteractionPriority = 0,
+    overlayMaxWidth,
     keepAspectRatio = false,
     resizable = true,
 
@@ -547,7 +579,16 @@ export const NodeWrapper = memo(
 
         {/* Zoom-invariant overlay portal — isolated component to avoid re-rendering the entire NodeWrapper on pan/zoom */}
         {overlayContent && (
-          <OverlayPortal nodeId={id} offsetY={overlayOffsetY}>
+          <OverlayPortal
+            nodeId={id}
+            offsetY={overlayOffsetY}
+            semanticVisible={overlayVisible}
+            ownerInteractionPriority={Math.max(
+              overlayInteractionPriority,
+              hovered ? 1 : 0,
+            )}
+            maxWidth={overlayMaxWidth}
+          >
             {overlayContent}
           </OverlayPortal>
         )}
