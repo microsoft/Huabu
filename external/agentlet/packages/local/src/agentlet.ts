@@ -29,8 +29,6 @@ import {
 } from './session-bootstrap.js'
 import type { AgentletOptions } from './cli.js'
 
-type AgentletState = 'starting' | 'connecting' | 'handshaking' | 'relaying' | 'reconnecting' | 'shutting_down' | 'stopped'
-
 interface ManagedAgent {
   sessionId: string
   command: string
@@ -46,10 +44,6 @@ interface ManagedAgent {
   idleSuspending: boolean
 }
 
-function defaultDaemonId(): string {
-  return hostname()
-}
-
 /**
  * Upper bound on the early-message buffer (notifications collected between
  * bootstrap completing and the relay attaching). If the WS handshake stalls,
@@ -57,35 +51,24 @@ function defaultDaemonId(): string {
  */
 const EARLY_MESSAGE_BUFFER_CAP = 1000
 
+export function resolveAgentletId(
+  configuredId: string | undefined,
+  machineHostname = hostname(),
+): string {
+  return configuredId?.trim() || machineHostname
+}
+
 /**
- * Agentlet is the unified lifecycle state machine for the agentlet CLI.
- *
- * Two modes, selected by the presence of `options.agent`:
- *
- * - **Bridge mode** (`--agent <cmd>`): Spawns a single local ACP agent,
- *   bootstraps an ACP session, and relays messages over a WebSocket to the
- *   server.
- *
- * - **Daemon mode** (no `--agent`): Connects a control channel to the server
- *   and waits for `server/spawn` commands, managing multiple agents on demand.
+ * Agentlet connects a machine-level control channel and manages agent
+ * processes requested by the host.
  */
 export class Agentlet {
   private readonly options: AgentletOptions
   private readonly logger: Logger
-  private readonly mode: 'bridge' | 'daemon'
-  private state: AgentletState = 'starting'
   private reconnectAttempt = 0
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private shutdownInProgress = false
 
-  // Bridge mode state
-  private agent!: AgentProcess
-  private sessionProfile!: SessionProfile
-  private sessionWs!: WsClient
-  private relay!: Relay
-  private buffer: JsonRpcMessage[] = []
-
-  // Daemon mode state
   private readonly daemonId: string
   private controlWs: WebSocket | null = null
   private readonly agents = new Map<string, ManagedAgent>()
@@ -102,8 +85,7 @@ export class Agentlet {
   constructor(options: AgentletOptions, logger: Logger) {
     this.options = options
     this.logger = logger
-    this.mode = options.agent ? 'bridge' : 'daemon'
-    this.daemonId = options.agentletId ?? hostname()
+    this.daemonId = resolveAgentletId(options.agentletId)
 
     // Well-known env vars with defaults — process.env overrides if set.
     // Values are resolved to absolute paths against the daemon cwd so that
@@ -118,173 +100,7 @@ export class Agentlet {
 
   async start(): Promise<void> {
     this.setupSignalHandlers()
-    if (this.mode === 'bridge') {
-      await this.startBridge()
-    } else {
-      this.startDaemon()
-    }
-  }
-
-  // ── Bridge mode ──────────────────────────────────────────────────────
-
-  /** Start bridge: spawn agent, bootstrap session, connect WebSocket, begin relay */
-  private async startBridge(): Promise<void> {
-    const cwd = resolve(this.options.cwd)
-
-    this.state = 'starting'
-    this.agent = new AgentProcess({
-      command: this.options.agent!,
-      cwd,
-      env: this.options.env,
-    })
-
-    this.agent.on('exit', (code, signal) => {
-      this.logger.info('agent_exited', { code, signal })
-      this.sendBridgeNotification(AgentMethods.EXITED, {
-        code, signal, willRestart: this.options.autoRestart && code !== 0,
-      })
-
-      if (this.shutdownInProgress) return
-
-      if (this.options.autoRestart && code !== 0) {
-        this.restartBridgeAgent(cwd)
-      } else {
-        this.shutdown('agent_exited')
-      }
-    })
-
-    this.agent.on('error', (err) => {
-      this.logger.error('agent_error', { message: err.message })
-    })
-
-    this.agent.on('stderr', (line) => {
-      this.logger.debug('agent_stderr', { line })
-    })
-
-    this.agent.start()
-    this.logger.info('agent_spawned', { pid: this.agent.pid, command: this.options.agent })
-
-    // Session bootstrap (initialize + session/new)
-    this.sessionProfile = await bootstrapSession(this.agent, { cwd }, this.logger)
-
-    // Wire up the message handler for relay/buffering (after bootstrap is done)
-    this.agent.on('message', (data) => {
-      if (this.state === 'reconnecting') {
-        if (this.buffer.length < this.options.bufferLimit) {
-          this.buffer.push(data as JsonRpcMessage)
-        } else {
-          this.logger.warn('buffer_overflow', { dropped: 1 })
-        }
-      }
-    })
-
-    this.connectBridgeWebSocket(cwd)
-  }
-
-  private connectBridgeWebSocket(cwd: string): void {
-    this.state = 'connecting'
-
-    this.sessionWs = new WsClient({
-      serverUrl: this.options.server,
-      token: this.options.token,
-      sessionId: this.sessionProfile.sessionId,
-      role: 'session',
-      agentletId: hostname(),
-      agent: {
-        command: this.options.agent!,
-        pid: this.agent.pid!,
-        cwd,
-      },
-      session: this.sessionProfile,
-      capabilities: {
-        autoRestart: this.options.autoRestart,
-        bufferLimit: this.options.bufferLimit,
-      },
-      heartbeatInterval: this.options.heartbeat,
-      allowInsecure: this.options.allowInsecure,
-      machine: { hostname: hostname(), platform: platform() },
-    })
-
-    this.sessionWs.on('open', () => {
-      this.state = 'handshaking'
-      this.logger.info('ws_connected', { server: this.options.server })
-    })
-
-    this.sessionWs.on('handshake_ok', (result) => {
-      this.state = 'relaying'
-      this.reconnectAttempt = 0
-      this.logger.info('handshake_ok', { sessionId: result.sessionId })
-
-      // Flush any buffered messages from reconnection
-      if (this.buffer.length > 0) {
-        this.logger.info('buffer_flushing', { count: this.buffer.length })
-        for (const msg of this.buffer) {
-          this.sessionWs.send(msg)
-        }
-        this.buffer = []
-      }
-
-      // Start relay
-      this.relay = new Relay(this.agent, this.sessionWs, this.logger)
-      this.relay.start()
-    })
-
-    this.sessionWs.on('handshake_error', (err) => {
-      this.logger.error('handshake_failed', { code: err.code, message: err.message })
-      this.shutdown('handshake_failed')
-    })
-
-    this.sessionWs.on('close', (code, reason) => {
-      if (this.shutdownInProgress) return
-      this.logger.warn('ws_disconnected', { code, reason })
-      this.relay?.stop()
-      this.startBridgeReconnection(cwd)
-    })
-
-    this.sessionWs.on('error', (err) => {
-      this.logger.error('ws_error', { message: err.message })
-    })
-
-    this.sessionWs.connect()
-  }
-
-  private startBridgeReconnection(cwd: string): void {
-    this.state = 'reconnecting'
-    this.reconnectAttempt++
-
-    const backoff = Math.min(
-      Math.pow(2, this.reconnectAttempt - 1) * 1000,
-      this.options.reconnectMax * 1000
-    )
-
-    this.logger.info('reconnecting', { attempt: this.reconnectAttempt, backoff_ms: backoff })
-
-    this.reconnectTimer = setTimeout(() => {
-      this.connectBridgeWebSocket(cwd)
-    }, backoff)
-  }
-
-  private restartBridgeAgent(cwd: string): void {
-    const attempt = this.reconnectAttempt + 1
-    if (attempt > this.options.restartMax) {
-      this.logger.error('max_restarts_exceeded', { max: this.options.restartMax })
-      this.sendBridgeNotification(AgentMethods.GOODBYE, { reason: 'max_restarts_exceeded' })
-      this.shutdown('max_restarts_exceeded')
-      return
-    }
-
-    setTimeout(() => {
-      this.agent.start()
-      this.logger.info('agent_restarted', { pid: this.agent.pid, attempt })
-      this.sendBridgeNotification(AgentMethods.RESTARTED, {
-        pid: this.agent.pid!, attempt,
-      })
-    }, this.options.restartDelay)
-  }
-
-  private sendBridgeNotification(method: string, params: Record<string, unknown>): void {
-    const msg: JsonRpcMessage = { jsonrpc: '2.0', method, params }
-    this.sessionWs?.send(msg)
+    this.startDaemon()
   }
 
   // ── Resource handling ───────────────────────────────────────────────
@@ -321,8 +137,6 @@ export class Agentlet {
       })
     }
   }
-
-  // ── Daemon mode ──────────────────────────────────────────────────────
 
   private startDaemon(): void {
     this.logger.info('daemon_starting', { daemonId: this.daemonId })
@@ -381,7 +195,7 @@ export class Agentlet {
   private sendDaemonHello(): void {
     const agentletProfile: AgentletProfile = {
       bridge: { name: 'agentlet', version: PROTOCOL_VERSION },
-      machine: { hostname: hostname(), platform: platform() },
+      machine: { hostname: this.daemonId, platform: platform() },
       capabilities: {
         autoRestart: true,
         bufferLimit: this.options.bufferLimit,
@@ -661,7 +475,7 @@ export class Agentlet {
         capabilities: { autoRestart, bufferLimit: this.options.bufferLimit },
         heartbeatInterval: this.options.heartbeat,
         allowInsecure: this.options.allowInsecure,
-        machine: { hostname: hostname(), platform: platform() },
+        machine: { hostname: this.daemonId, platform: platform() },
       })
 
       managed.ws = agentWs
@@ -850,12 +664,9 @@ export class Agentlet {
     this.reconnectTimer = setTimeout(() => this.connectDaemonControl(), backoff)
   }
 
-  // ── Shared ───────────────────────────────────────────────────────────
-
   private async shutdown(reason: string): Promise<void> {
     if (this.shutdownInProgress) return
     this.shutdownInProgress = true
-    this.state = 'shutting_down'
 
     this.logger.info('shutting_down', { reason })
 
@@ -865,40 +676,8 @@ export class Agentlet {
       this.reconnectTimer = null
     }
 
-    if (this.mode === 'bridge') {
-      await this.shutdownBridge(reason)
-    } else {
-      await this.shutdownDaemon(reason)
-    }
-
-    this.state = 'stopped'
+    await this.shutdownDaemon(reason)
     this.logger.info('stopped', { reason })
-  }
-
-  private async shutdownBridge(reason: string): Promise<void> {
-    // Send goodbye
-    this.sendBridgeNotification(AgentMethods.GOODBYE, { reason })
-
-    // Stop relay
-    this.relay?.stop()
-
-    // Shutdown agent: close stdin, wait, then force kill
-    if (this.agent?.running) {
-      this.agent.closeStdin()
-      await this.waitForAgentExit(this.agent, 5000)
-
-      if (this.agent.running) {
-        this.agent.terminate()
-        await this.waitForAgentExit(this.agent, 2000)
-      }
-
-      if (this.agent.running) {
-        this.agent.kill()
-      }
-    }
-
-    // Close WebSocket
-    this.sessionWs?.close()
   }
 
   private async shutdownDaemon(reason: string): Promise<void> {

@@ -78,20 +78,7 @@ agentlet-server --port 8080 --token "./tokens.json" --allow-insecure
 
 The server is now listening on `http://localhost:8080` with the Web UI, REST API, and WebSocket endpoints.
 
-**3. Connect an agent (self-spawn mode)**
-
-In the agent-side terminal, where you previously ran the agent command (e.g., `copilot --allow-all` or `claude`, etc.), run the `agentlet` CLI to start an agent instance in the current directory and connect it to the server:
-
-```bash
-agentlet daemon --agent "copilot --acp --allow-all" \
-         --server "ws://localhost:8080/api/bridge" \
-         --token "tok_dev_123" \
-         --allow-insecure
-```
-
-**3b. Or: run an idle agentlet (server-driven agent spawning)**
-
-Instead of manually specifying which agent to run, start an idle agentlet and let the server decide:
+**3. Run the agentlet daemon**
 
 ```bash
 agentlet daemon --server "ws://localhost:8080/api/bridge" \
@@ -122,8 +109,7 @@ You can also use the headless WebSocket API (e.g., via `@agentlet/client`) or em
 
 | Component | Package | Where it runs | Nature |
 |---|---|---|---|
-| **Agent-side adapter** | `agentlet` | User's machine (next to the agent) | CLI tool (installed by end user) |
-| **Agent-side agentlet** | `agentlet` (without `--agent`) | Worker node (always-on) | CLI tool — idle mode, awaits server-driven spawn |
+| **Agent-side daemon** | `agentlet` | Worker node (next to the agents) | CLI tool — awaits server-driven spawn |
 | **Relay server** | `@agentlet/server` | Remote server | Library (embedded) or standalone executable |
 | **Host-side SDK** | `@agentlet/client` | Inside the host application | Library (imported by host app developers) |
 | **Web UI** | `@agentlet/ui` | Browser (served by standalone server) | Built-in first-party host app (Vue 3 SPA — thin message viewport) |
@@ -161,16 +147,7 @@ The `agentlet` CLI exposes two subcommands:
 | `agentlet daemon …` | Run the network adapter that bridges local ACP agents to a remote server. |
 | `agentlet agent-team …` | Prepare and inspect [Agent Team](#) packages (`setup` / `validate` / `doctor`). |
 
-Within `agentlet daemon`, the presence of `--agent` determines the role:
-
-| Role | Use case | How |
-|---|---|---|
-| **Self-spawn** | User explicitly spawns one agent (ad-hoc / development) | `agentlet daemon --agent "copilot --acp" --server wss://...` |
-| **Idle agentlet** | Machine is an always-on worker node; server controls which agents to spawn | `agentlet daemon --server wss://...` (no `--agent`) |
-
-When `--agent` is provided, the agentlet spawns the agent, bootstraps its ACP session, and immediately begins relaying. Without `--agent`, the agentlet connects to the server and waits for `server/spawn` requests — analogous to `kubelet` in Kubernetes. Each spawned agent gets its own session — from the server's perspective, server-spawned agents are indistinguishable from self-spawned agents.
-
-Self-spawn is useful during development or when connecting a single agent on demand. Idle agentlet mode is preferred for production because it enables centralized orchestration — the server decides what to run, where, and when.
+`agentlet daemon` registers one machine-level control channel and waits for `server/spawn` requests. The server decides what to run, where, and when; each spawned agent receives its own ACP session and WebSocket relay.
 
 ### 3.3. Two modes for the relay server
 
@@ -199,7 +176,7 @@ Every message between the relay server and the agent is a **standard ACP JSON-RP
 
 ### 3.5. Session Ownership Model
 
-**Agentlet owns the ACP session lifecycle.** When an agent process is spawned (whether self-spawned via `--agent` or server-driven), agentlet immediately sends `initialize` and `session/new` (or `session/resume`/`session/load` when resuming a previous session) to the agent — before any remote client connects. The resulting session profile (sessionId, agent capabilities) is reported to the server via `agent/hello`.
+**Agentlet owns the ACP session lifecycle.** When an agent process is spawned by the server, agentlet immediately sends `initialize` and `session/new` (or `session/resume`/`session/load` when resuming a previous session) to the agent — before any remote client connects. The resulting session profile (sessionId, agent capabilities) is reported to the server via `agent/hello`.
 
 This means:
 - The server never sends `initialize` or `session/new` — it's a pure message router
@@ -291,11 +268,11 @@ Agentlet CLI ↔ Server. After handshake, raw ACP messages (non-JSON-RPC)
 are forwarded as-is between the agent process and connected host clients.
 
 **Connection flow:**
-1. Agentlet opens WebSocket to `/api/bridge?token=<token>`
-2. Sends `agent/hello { sessionId, sessionProfile }` within 10 s handshake timeout
-3. Server authenticates, registers by `sessionId`, responds with result
-4. If `sessionProfile.agent` is present → ACP relay begins immediately (self-spawn mode, no `appId`)
-5. If no agent attached → agentlet waits for `server/spawn` requests from host
+1. Agentlet opens a control WebSocket and sends `agentlet/hello { agentletId, agentletProfile }`
+2. The host sends `server/spawn { appId, sessionSpec }` over that control channel
+3. Agentlet spawns and bootstraps the ACP process
+4. Agentlet opens a session WebSocket and sends `agent/hello { sessionId, sessionProfile }`
+5. Server authenticates, registers by `(agentletId, sessionId)`, and ACP relay begins
 
 **`sessionProfile`** contains all session metadata:
 `{ agentletId, appId?, bridge, agent?, session?, machine?, capabilities }`
@@ -368,15 +345,14 @@ npm install -g agentlet
 ### 4.5. Usage
 
 ```bash
-agentlet daemon --server <wss-url> --token <token> [--agent <command>] [options]
+agentlet daemon --server <wss-url> --token <token> [options]
 agentlet agent-team <setup|validate|doctor> [dir] [--harness <name>]
 ```
 
-With `agentlet daemon --agent`: spawns the agent locally, bootstraps the ACP session, and relays immediately (**self-spawn**).
-With `agentlet daemon` and no `--agent`: connects to the server and waits for `server/spawn` requests (**idle agentlet** — analogous to `kubelet`).
+With `agentlet daemon`: connects to the server and waits for `server/spawn` requests.
 With `agentlet agent-team`: prepares per-harness workspaces from an Agent Team manifest, or inspects readiness.
 
-> **Sources:** [`packages/local/src/bridge.ts`](packages/local/src/bridge.ts) (self-spawn), [`packages/local/src/daemon.ts`](packages/local/src/daemon.ts) (idle mode), [`packages/agent-team`](packages/agent-team) (agent-team)
+> **Sources:** [`packages/local/src/agentlet.ts`](packages/local/src/agentlet.ts) (daemon lifecycle), [`packages/agent-team`](packages/agent-team) (agent-team)
 
 ### 4.6. Arguments
 
@@ -386,17 +362,12 @@ The arguments below apply to `agentlet daemon`.
 |---|---|---|---|
 | `--server` | ✅ | — | Server's agent channel endpoint (WSS URL). | 
 | `--token` | ✅ | — | Authentication token identifying this connection. |
-| `--agent` | — | (idle mode) | Shell command to spawn the agent. Must support ACP stdio. If omitted, agentlet waits for server-driven spawn. |
-| `--cwd` | — | Current directory | Working directory for the agent subprocess |
-| `--max-agents` | — | `10` | Maximum concurrent agents (idle mode only) |
+| `--agentlet-id` | — | OS hostname | Machine identity shared by the control and session channels |
+| `--max-agents` | — | `10` | Maximum concurrent agents |
 | `--reconnect-max` | — | `300` (5 min) | Maximum reconnection backoff in seconds |
 | `--buffer-limit` | — | `1000` | Max messages buffered during disconnection (oldest dropped on overflow) |
-| `--auto-restart` | — | `false` | Restart agent subprocess if it exits unexpectedly |
-| `--restart-delay` | — | `2000` | Milliseconds to wait before restarting agent |
-| `--restart-max` | — | `5` | Maximum consecutive restart attempts before giving up |
 | `--log-level` | — | `info` | Logging verbosity: `debug`, `info`, `warn`, `error` |
 | `--log-file` | — | (none) | Path to write structured log output (JSON lines) |
-| `--env` | — | (none) | Extra environment variables for the agent: `--env KEY=VALUE` (repeatable) |
 | `--heartbeat` | — | `30` | WebSocket ping interval in seconds (0 to disable) |
 | `--allow-insecure` | — | `false` | Allow ws:// (non-TLS) connections (local development only) |
 
@@ -411,32 +382,14 @@ always operates on the current working directory.
 ### 4.7. Examples
 
 ```bash
-# Self-spawn: connect Claude Code to a remote server
-agentlet daemon --agent "claude --acp --stdio" \
-         --server "wss://app.example.com/api/bridge" \
-         --token "tok_from_server_ui"
-
-# Self-spawn: Copilot CLI with a specific project directory
-agentlet daemon --agent "copilot --acp --stdio" \
-         --server "wss://localhost:3001/api/bridge" \
-         --token "tok_dev_local" \
-         --cwd "/home/user/my-project" \
-         --auto-restart
-
-# Self-spawn: custom environment for the agent
-agentlet daemon --agent "gemini-cli --stdio" \
-         --server "wss://app.example.com/api/bridge" \
-         --token "tok_xyz" \
-         --env "GEMINI_API_KEY=sk-..." \
-         --env "PROJECT_ROOT=/workspace"
-
-# Idle agentlet: worker node waiting for server-driven spawn
+# Worker node waiting for server-driven spawn
 agentlet daemon --server "wss://app.example.com/api/bridge" \
          --token "tok_worker_node_1"
 
-# Idle agentlet: local development with higher agent limit
+# Local development with an explicit machine identity and higher agent limit
 agentlet daemon --server "ws://localhost:8080/api/bridge" \
          --token "tok_dev_123" \
+         --agentlet-id "dev-laptop" \
          --max-agents 20 \
          --allow-insecure
 
@@ -450,13 +403,7 @@ agentlet agent-team doctor --harness copilot
 
 ### 4.8. How it works
 
-**Self-spawn** (`--agent` provided):
-1. Agentlet spawns the agent subprocess, bootstraps the ACP session (`initialize` + `session/new`).
-2. Connects to `/api/bridge?token=<token>`, sends `agent/hello { sessionId, sessionProfile }` with `sessionProfile.agent` present.
-3. Server registers with role `agent-session`, ACP relay begins immediately.
-
-**Idle mode** (no `--agent`):
-1. Agentlet connects to `/api/bridge?token=<token>`, sends `agent/hello` without `sessionProfile.agent`.
+1. Agentlet connects to `/api/bridge?token=<token>&role=agentlet&id=<agentletId>`, then sends `agentlet/hello`.
 2. Server registers with role `agentlet`, waits for spawn commands.
 3. Server (via REST API or UI) sends `server/spawn { appId, sessionId?, sessionSpec }`.
 4. Agentlet spawns the agent, bootstraps ACP session, opens a second WebSocket for relay.
@@ -481,12 +428,12 @@ See [Protocol Specification — Connection Establishment](spec/protocol.md#conne
 | Exit type | Action |
 |---|---|
 | Clean exit (code 0) | Send `agent/exited` with code 0. Do not restart. |
-| Crash (code ≠ 0) | Send `agent/exited`. If `--auto-restart` enabled, restart after delay (up to `--restart-max`). |
-| Signal (SIGTERM, SIGKILL) | Send `agent/exited` with signal name. Respect `--auto-restart`. |
+| Crash (code ≠ 0) | Send `agent/exited`. Restart when the host's session spec enables `autoRestart`. |
+| Signal (SIGTERM, SIGKILL) | Send `agent/exited` with signal name. Respect the session spec's `autoRestart`. |
 
 #### Graceful Shutdown
 
-> **Source:** `Bridge.shutdown()` in [`packages/local/src/bridge.ts`](packages/local/src/bridge.ts)
+> **Source:** `Agentlet.shutdown()` in [`packages/local/src/agentlet.ts`](packages/local/src/agentlet.ts)
 
 On SIGINT or SIGTERM to Agentlet:
 
@@ -1034,9 +981,7 @@ The current architecture is **forward-compatible**: the `agent/hello` handshake 
 
 **Current design:** The relay server and Web UI **natively support multiple agents** — any number of agent-side adapters can connect simultaneously, each identified by its unique `sessionId`. The server maintains a connection registry (`Map<sessionId, AgentConnection>`), the REST API lists all sessions, and the UI provides an agent selector.
 
-**Agent-side (self-spawn):** Each `agentlet daemon --agent ...` instance spawns and manages exactly **one** agent process. To connect multiple agents, run multiple `agentlet daemon` instances (one per agent). This keeps each adapter simple and independently restartable.
-
-**Agent-side (idle agentlet):** A single idle `agentlet` instance can manage **multiple** agent processes concurrently — each spawned on demand from the server. This is the recommended approach for worker nodes that need to run multiple agents.
+**Agent-side daemon:** A single `agentlet daemon` instance manages multiple agent processes concurrently, each spawned on demand from the server.
 
 **Future (post-v1):** Static config file support:
 
@@ -1068,8 +1013,7 @@ agentlet/
 │   │   ├── src/
 │   │   │   ├── index.ts          # CLI entry point
 │   │   │   ├── cli.ts            # Argument parsing & validation (single command)
-│   │   │   ├── bridge.ts         # Self-spawn orchestrator (lifecycle state machine)
-│   │   │   ├── daemon.ts         # Idle agentlet orchestrator (multi-agent, server-driven)
+│   │   │   ├── agentlet.ts       # Daemon orchestrator (multi-agent, server-driven)
 │   │   │   ├── agent-process.ts  # Subprocess spawning, stdio handling, restart logic
 │   │   │   ├── session-bootstrap.ts # ACP session bootstrap (initialize + session/new + session/resume + session/load)
 │   │   │   ├── ws-client.ts      # WebSocket connection, reconnection, buffering
@@ -1148,7 +1092,7 @@ agentlet/
 | **M3: Agent lifecycle** | Auto-restart, graceful shutdown, exit reporting. | Agent crash → auto-restart → server notified → new session resumes. | Not started |
 | **M4: Standalone server** | REST API, host-side WS, per-agent raw ACP WS endpoint, static token auth. | `agentlet-server --port 8080` works; agents connectable via REST + WS. | ✅ Done |
 | **M5: Web UI** | Built-in Vue 3 SPA: chat, agent selector, permissions, traffic monitor. | Can chat with a connected agent via browser at `http://localhost:8080/`. | ✅ Done |
-| **M5.5: Idle agentlet mode** | Agentlet idle mode, server-side connection registry, REST API, UI spawn/stop panel. | `agentlet` (without `--agent`) registers with server; agents spawnable/stoppable via REST/UI. | ✅ Done |
+| **M5.5: Agentlet daemon mode** | Agentlet daemon, server-side connection registry, REST API, UI spawn/stop panel. | `agentlet daemon` registers with server; agents spawnable/stoppable via REST/UI. | ✅ Done |
 | **M5.6: Session lifecycle** | Session store (sql.js), idle timeout, session suspend/resume, display names. | Sessions persist across agent restarts; idle agents auto-suspend; `server/spawn` with `sessionId` resumes. | ✅ Done |
 | **M5.7: Event persistence** | Per-session event log (JSONL), session event WS (replay + live), session REST APIs, UI delta sync. | Chat history survives page refresh; `afterSeq` delta sync on reconnect; agent API deprecated in favor of session API. | ✅ Done |
 | **M6: Production readiness** | TLS enforcement, logging, error handling, tests, docs. | CI green, README complete, npm publishable. | Not started |

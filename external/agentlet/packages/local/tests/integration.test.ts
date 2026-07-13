@@ -93,6 +93,7 @@ describe('M1: End-to-end transparent relay', () => {
       token: 'test-token',
       sessionId: 'test-session-1',
       role: 'session',
+      agentletId: 'test-machine',
       agent: {
         command: 'mock-agent',
         pid: agent.pid!,
@@ -163,6 +164,7 @@ describe('M1: End-to-end transparent relay', () => {
       token: 'tok-1',
       sessionId: 'test-session-2',
       role: 'session',
+      agentletId: 'test-machine',
       agent: {
         command: 'test',
         pid: agent.pid!,

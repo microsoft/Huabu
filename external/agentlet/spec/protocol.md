@@ -6,12 +6,7 @@
 
 ## 1. Connection Establishment
 
-Every agent session follows the **same lifecycle**, regardless of how it was initiated. The `agentlet` CLI first registers with the server via `agentlet/hello`, then processes spawn requests from a queue. The only difference is *who seeds the queue*:
-
-| Source | How the spawn request arrives |
-|---|---|
-| **Self-spawn** (`--agent`) | CLI pre-seeds the queue with a single `{ sessionSpec }` at startup |
-| **Server-driven** (no `--agent`) | Server sends `server/spawn { appId, sessionSpec }` via WS |
+Every agent session follows the same server-driven lifecycle. The `agentlet` CLI first registers the machine with the server via `agentlet/hello`, then processes `server/spawn { appId, sessionSpec }` requests over that control channel.
 
 ```mermaid
 sequenceDiagram
@@ -35,13 +30,9 @@ sequenceDiagram
     end
 
     rect rgb(245, 245, 255)
-    Note over CLI: Phase 2 — Spawn Request (one of two sources)
-    alt --agent provided (self-spawn)
-        Note over CLI: Queue pre-seeded with { sessionSpec: { command, cwd, ... } }
-    else no --agent (idle agentlet)
-        Host->>Server: POST /api/agentlets/{id}/spawn
-        Server->>CLI: server/spawn { appId, sessionId?, sessionSpec }
-    end
+    Note over CLI: Phase 2 — Server-driven Spawn Request
+    Host->>Server: POST /api/agentlets/{id}/spawn
+    Server->>CLI: server/spawn { appId, sessionId?, sessionSpec }
     end
 
     Note over CLI,Agent: Phase 3 — Session Bootstrap (local)
@@ -74,7 +65,7 @@ sequenceDiagram
     Server->>Host: server/event { sessionId, seq, event }
 ```
 
-**Key insight:** In self-spawn mode, the agentlet registration (Phase 1) and spawn processing (Phase 2–4) happen back-to-back automatically. In idle mode, Phase 1 completes and the agentlet waits — Phase 2 is triggered later by `server/spawn`. But the bootstrap and relay logic (Phase 3–5) is identical in both cases.
+**Key insight:** Machine registration and per-agent session registration are separate. Phase 1 establishes the daemon control channel; each `server/spawn` request then creates an independently routed session through Phases 2–5.
 
 The two handshakes serve distinct purposes: `agentlet/hello` registers the **adapter** (machine, capabilities); `agent/hello` registers an **agent session** (process info, ACP capabilities). Each opens its own WebSocket — the agentlet control channel and per-session relay channels are independent connections.
 
@@ -93,6 +84,7 @@ The agentlet registers itself using a two-step handshake: minimal identity in th
   "method": "agentlet/hello",
   "id": 1,
   "params": {
+    "agentletId": "worker-01",
     "agentletProfile": {
       "bridge": { "name": "agentlet", "version": "1.0.0" },
       "machine": { "hostname": "worker-01", "platform": "linux" },
@@ -106,13 +98,13 @@ The agentlet registers itself using a two-step handshake: minimal identity in th
   "jsonrpc": "2.0",
   "id": 1,
   "result": {
-    "agentletId": "worker-01:agentlet",
+    "agentletId": "worker-01",
     "status": "registered"
   }
 }
 ```
 
-The `agentletId` in the response is the server-confirmed identifier — either echoing back the `id` from the query param, or a server-assigned ID if none was provided.
+The `agentletId` in the response confirms the machine identity supplied in the query and `agentlet/hello`.
 
 The server registers the connection in a **connection registry**. Registered agentlets are addressable via REST API (`GET /api/agentlets`, `POST /api/agentlets/:agentletId/spawn`, etc.).
 
@@ -142,10 +134,10 @@ See [`spec/agent-team.md`](agent-team.md) for the full Agent Team packaging mode
 
 | Entity | Identity Source | Format | Example | Lifecycle |
 |---|---|---|---|---|
-| Agentlet | `?id=` query param or server-assigned | `<hostname>:agentlet` | `worker-01:agentlet` | Stable for the agentlet connection lifetime |
+| Agentlet | `--agentlet-id`, defaulting to the OS hostname | `<machine-name>` | `worker-01` | Stable until the machine name changes |
 | Agent session | ACP session bootstrap (`session/new`) | `<sessionId>` | `sess_abc123` | Primary routing key for the session — stable across resumes |
 
-The agentlet's identity (`agentletId`) is established during the WebSocket handshake — either self-chosen via `?id=xxx` or assigned by the server in the `agentlet/hello` response. The agent session's identity (`sessionId`) is established during Phase 3 bootstrap and is the primary routing key for ACP message relay. Display-oriented metadata such as `displayName` is derived separately from the session command and is not part of the bridge handshake. The `authenticate()` callback validates the query token and returns optional metadata; it does not assign identity.
+The agentlet's identity (`agentletId`) is the daemon's machine name. The supervising host may pass it explicitly with `--agentlet-id`; otherwise the daemon uses the OS hostname. The same value appears in the control query and hello, and in every child session's `sessionProfile.agentletId`. Changing the machine name therefore creates a new execution-node identity. The agent session's identity (`sessionId`) is established during Phase 3 bootstrap and is the primary routing key for ACP message relay. Display-oriented metadata such as `displayName` is derived separately from the session command and is not part of the bridge handshake. The `authenticate()` callback validates the query token and returns optional metadata; it does not assign identity.
 
 **Duplicate session:** If an agentlet connects with a `sessionId` that is already in use by another incompatible active connection, the server rejects the connection with error code `-32004` (`DUPLICATE_SESSION`). If the existing connection is disconnected (stale), the new connection is treated as a reconnection.
 
@@ -318,7 +310,7 @@ Agentlet is intentionally server-agnostic. Any system can accept Agentlet connec
 1. **WebSocket endpoint** — accepts incoming WSS connections at `/api/bridge` with `role` and `id` query parameters. Authenticates via `Authorization: Bearer <token>` header (CLI clients) or short-lived ticket / cookie (browser clients).
 2. **Handshakes** — `agentlet/hello` for agentlet registration (validates query params, stores agentlet profile, returns `agentletId`), and `agent/hello` for agent-session registration (validates token, stores session profile, returns `sessionId`).
 3. **ACP message relay** — forwards ACP JSON-RPC messages between host apps and agents transparently (no interpretation or rewriting).
-4. **Control messages** — handles `agent/exited`, `agent/goodbye`, etc. as lifecycle signals, plus `server/spawn`, `server/stop`, and `server/list` for idle agentlets.
+4. **Control messages** — handles `agent/exited`, `agent/goodbye`, etc. as lifecycle signals, plus `server/spawn`, `server/stop`, and `server/list` for agentlet daemons.
 5. **Reconnection** — recognizes a reconnecting agentlet (same token + `sessionId`) and optionally replays lost messages.
 
 Note: The server does **not** need to implement ACP client behavior (`initialize`, `session/new`). Session bootstrap is owned by agentlet — the server only stores and exposes the resulting session profile.

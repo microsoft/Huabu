@@ -112,6 +112,7 @@ describe('M4: Standalone server', { timeout: 30000 }, () => {
       token: 'test-token',
       sessionId: 'test-standalone-session',
       role: 'session',
+      agentletId: 'test-machine',
       agent: {
         command: 'echo-agent',
         pid: agent.pid!,

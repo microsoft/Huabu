@@ -24,6 +24,7 @@ interface Harness {
   httpServer: Server
   serverUrl: string
   storeDir: string
+  hellos: Array<AgentletHelloParams | AgentHelloParams>
 }
 
 const harnesses: Harness[] = []
@@ -60,11 +61,13 @@ async function startHarness(options?: {
   delaySessionUpgradeMs?: number
 }): Promise<Harness> {
   const storeDir = mkdtempSync(join(tmpdir(), 'agentlet-characterization-'))
+  const hellos: Array<AgentletHelloParams | AgentHelloParams> = []
   const agentletServer = new AgentletServer({
     storeDir,
     outboundBufferLimit: options?.outboundBufferLimit,
-    authenticate: async (token) => {
+    authenticate: async (token, params) => {
       if (token !== 'test-token') throw new Error('Invalid token')
+      hellos.push(params)
       return { metadata: { authenticated: true } }
     },
   })
@@ -90,6 +93,7 @@ async function startHarness(options?: {
     httpServer,
     serverUrl: `ws://127.0.0.1:${port}`,
     storeDir,
+    hellos,
   }
   harnesses.push(harness)
   return harness
@@ -302,7 +306,7 @@ describe.sequential('Gateway migration characterization', () => {
     const exitSpy = vi
       .spyOn(process, 'exit')
       .mockImplementation((() => undefined) as never)
-    const { agentletServer, serverUrl, storeDir } = await startHarness({
+    const { agentletServer, serverUrl, storeDir, hellos } = await startHarness({
       delaySessionUpgradeMs: 500,
     })
     const mockAgentPath = join(storeDir, 'mock-acp-agent.cjs')
@@ -331,11 +335,6 @@ describe.sequential('Gateway migration characterization', () => {
         heartbeat: 0,
         allowInsecure: true,
         logLevel: 'error',
-        cwd: process.cwd(),
-        env: {},
-        autoRestart: false,
-        restartDelay: 100,
-        restartMax: 0,
         agentletId: 'machine-a',
         maxAgents: 10,
       },
@@ -356,6 +355,22 @@ describe.sequential('Gateway migration characterization', () => {
     await waitUntil(
       () => agentletServer.getConnection('native-bootstrap')?.status === 'connected',
     )
+    const controlHello = hellos.find(
+      (params): params is AgentletHelloParams => 'agentletProfile' in params,
+    )
+    const sessionHello = hellos.find(
+      (params): params is AgentHelloParams => 'sessionProfile' in params,
+    )
+    expect(controlHello).toMatchObject({
+      agentletId: 'machine-a',
+      agentletProfile: { machine: { hostname: 'machine-a' } },
+    })
+    expect(sessionHello).toMatchObject({
+      sessionProfile: {
+        agentletId: 'machine-a',
+        machine: { hostname: 'machine-a' },
+      },
+    })
     await waitUntil(() =>
       agentletServer
         .getEventStore()
