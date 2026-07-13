@@ -683,7 +683,7 @@ async function ensureAcpSessionInner(
  * AcpAgentClient). This catches modes, models, configOptions, and
  * available_commands that the agent pushed in response to `session/new`.
  */
-function replayEventStoreMeta(
+export function replayEventStoreMeta(
   server: NonNullable<ReturnType<typeof getAgentletServer>>,
   sessionId: string,
   entry: AcpSessionEntry,
