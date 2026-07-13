@@ -1,5 +1,3 @@
-const DEFAULT_HANDBOOK_URL = 'https://cxxxxxn.github.io/Sediment/docs/';
-
 export function validateHandbookUrl(
   configuredUrl: string,
   isProduction: boolean,
@@ -13,8 +11,12 @@ export function validateHandbookUrl(
     );
   }
 
+  const isLoopbackHost =
+    url.hostname === 'localhost' ||
+    url.hostname === '127.0.0.1' ||
+    url.hostname === '[::1]';
   const isLocalDevelopment =
-    !isProduction && url.protocol === 'http:' && url.hostname === 'localhost';
+    !isProduction && url.protocol === 'http:' && isLoopbackHost;
   if (url.protocol !== 'https:' && !isLocalDevelopment) {
     throw new Error(
       'VITE_HANDBOOK_URL must use HTTPS, except for HTTP localhost during development.',
@@ -30,9 +32,26 @@ export function validateHandbookUrl(
   return url.toString();
 }
 
-export const userHandbookUrl = validateHandbookUrl(
-  import.meta.env.VITE_HANDBOOK_URL?.trim() || DEFAULT_HANDBOOK_URL,
+export function resolveHandbookUrl(
+  configuredUrl: string | undefined,
+  isProduction: boolean,
+  developmentOrigin?: string,
+): string {
+  const configured = configuredUrl?.trim();
+  if (configured) return validateHandbookUrl(configured, isProduction);
+  if (isProduction) {
+    throw new Error('VITE_HANDBOOK_URL is required in production.');
+  }
+  return validateHandbookUrl(
+    new URL('/docs/', developmentOrigin).toString(),
+    false,
+  );
+}
+
+export const userHandbookUrl = resolveHandbookUrl(
+  import.meta.env.VITE_HANDBOOK_URL,
   import.meta.env.PROD,
+  window.location.origin,
 );
 
 export function openUserHandbook(): Window | null {

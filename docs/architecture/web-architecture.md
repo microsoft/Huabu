@@ -150,7 +150,7 @@ selection toggles don't break xyflow's per-element `React.memo`.
 
 The web application does not contain handbook pages, assets, or a `/docs/*` route. Product actions call the leaf-level [`openUserHandbook()` helper](../../apps/web/src/config/handbook.ts), which validates an absolute URL and opens it in a separate browser context.
 
-The default is `https://cxxxxxn.github.io/Sediment/docs/`; deployments may set `VITE_HANDBOOK_URL`. Production accepts HTTPS only, while development also accepts HTTP on `localhost`. Electron continues to deny renderer child windows and sends HTTP(S) targets to the operating system through its existing `setWindowOpenHandler` in [`apps/desktop/src/main.ts`](../../apps/desktop/src/main.ts).
+Production requires `VITE_HANDBOOK_URL`; the checked-in [`apps/web/.env.production`](../../apps/web/.env.production) supplies the Microsoft Huabu Pages URL, and deployment environments may override it. Both `pnpm dev` and `pnpm dev:desktop` start the independent docs server on a dynamically selected free port and inject its actual URL through the same variable. Other development entry points resolve `/docs/` against the current page origin when the variable is unset. Production accepts HTTPS only, while development also accepts HTTP on loopback hosts. Electron continues to deny renderer child windows and sends HTTP(S) targets to the operating system through its existing `setWindowOpenHandler` in [`apps/desktop/src/main.ts`](../../apps/desktop/src/main.ts).
 
 The independent handbook architecture is documented in [docs-architecture.md](./docs-architecture.md).
 

@@ -5,26 +5,34 @@ import { defineConfig } from 'vite';
 
 import { normalizeBasePath } from './src/normalizeBasePath';
 
-export default defineConfig(({ isSsrBuild }) => ({
-  base: normalizeBasePath(process.env.DOCS_BASE_PATH),
-  plugins: [react()],
-  resolve: {
-    alias: {
-      '@': fileURLToPath(new URL('./src', import.meta.url)),
+export default defineConfig(({ isSsrBuild }) => {
+  const parsedDocsPort = Number.parseInt(process.env.DOCS_PORT || '', 10);
+  const docsPort =
+    Number.isFinite(parsedDocsPort) && parsedDocsPort > 0
+      ? parsedDocsPort
+      : 5174;
+
+  return {
+    base: normalizeBasePath(process.env.DOCS_BASE_PATH),
+    plugins: [react()],
+    resolve: {
+      alias: {
+        '@': fileURLToPath(new URL('./src', import.meta.url)),
+      },
     },
-  },
-  server: {
-    host: true,
-    port: 5174,
-    strictPort: true,
-  },
-  preview: {
-    host: true,
-    port: 4174,
-    strictPort: true,
-  },
-  build: {
-    manifest: !isSsrBuild,
-    sourcemap: false,
-  },
-}));
+    server: {
+      host: true,
+      port: docsPort,
+      strictPort: true,
+    },
+    preview: {
+      host: true,
+      port: 4174,
+      strictPort: true,
+    },
+    build: {
+      manifest: !isSsrBuild,
+      sourcemap: false,
+    },
+  };
+});

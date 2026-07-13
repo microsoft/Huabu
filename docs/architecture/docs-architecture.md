@@ -6,7 +6,7 @@
 
 The public Huabu user handbook is an independent Vite workspace application under [`apps/docs`](../../apps/docs). It imports no source from `apps/web`, `apps/desktop`, or `apps/server`; handbook content, icons, styles, and public assets are owned by the documentation app.
 
-The product web app has no `/docs/*` route. Its translated handbook actions call the validated external URL helper described in [web-architecture.md](./web-architecture.md#8-external-user-handbook).
+The product web app has no production `/docs/*` route. Its translated handbook actions call the validated URL helper described in [web-architecture.md](./web-architecture.md#9-external-user-handbook), which resolves the local `/docs/` path from the current page origin during development and reads the public deployment target from `VITE_HANDBOOK_URL` in production.
 
 ## Layout
 
@@ -60,14 +60,16 @@ The artifact validator compares generated pages with the source route registry, 
 
 The dedicated GitHub Actions workflow builds on pull requests and deploys only [`apps/docs/dist`](../../apps/docs) on `main` or manual dispatch. It derives the repository Pages base from `GITHUB_REPOSITORY` unless the repository variable `DOCS_BASE_PATH` overrides it. The workflow uses GitHub Pages artifact and deployment actions with only `contents: read`, `pages: write`, and `id-token: write`.
 
+Both `pnpm dev` and `pnpm dev:desktop` dynamically select a free docs port, start the handbook alongside server and web, and inject its actual URL into the web build through `VITE_HANDBOOK_URL`. `DOCS_PORT` changes the preferred starting port; either orchestrator may advance to another free port when it is occupied.
+
 ## Commands
 
-| Command             | Responsibility                                                 |
-| ------------------- | -------------------------------------------------------------- |
-| `pnpm dev:docs`     | Run the independent Vite development server on port 5174.      |
-| `pnpm test:docs`    | Run handbook source and helper tests.                          |
-| `pnpm build:docs`   | Typecheck, build, prerender, index, and validate the artifact. |
-| `pnpm preview:docs` | Serve the final static artifact on port 4174.                  |
+| Command             | Responsibility                                                             |
+| ------------------- | -------------------------------------------------------------------------- |
+| `pnpm dev:docs`     | Run the independent Vite development server on `DOCS_PORT` (default 5174). |
+| `pnpm test:docs`    | Run handbook source and helper tests.                                      |
+| `pnpm build:docs`   | Typecheck, build, prerender, index, and validate the artifact.             |
+| `pnpm preview:docs` | Serve the final static artifact on port 4174.                              |
 
 ## Code entry points
 
