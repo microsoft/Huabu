@@ -42,27 +42,33 @@ export default function ExternalAgents() {
           className="inline-block size-[1em] align-[-0.15em]"
         />
         ) → <strong>External Agents</strong> and click{' '}
-        <strong>Add agent</strong>. The editor opens with these tabs:
+        <strong>Add agent</strong>. The editor separates regular ACP agents from
+        Agent Teams:
       </P>
       <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
         <li>
-          <strong>Detected agent</strong> — pick from the supported agents Huabu
-          detected on your <Code>PATH</Code>. Copilot (<Code>copilot</Code>) and
-          Gemini (<Code>gemini</Code>) speak ACP natively; Claude and Codex have
-          no native ACP mode, so they&apos;re detected and launched through
-          their ACP adapter bins (<Code>claude-agent-acp</Code> /{' '}
-          <Code>codex-acp</Code>). The launch command is assembled for you; you
-          don&apos;t see or edit the command string directly.
+          <strong>ACP Agent</strong> — choose a supported agent detected on your{' '}
+          <Code>PATH</Code>, or choose <strong>Manual setup</strong> from the
+          same Agent menu. Copilot (<Code>copilot</Code>) and Gemini (
+          <Code>gemini</Code>) speak ACP natively; Claude and Codex are launched
+          through their ACP adapter bins (<Code>claude-agent-acp</Code> /{' '}
+          <Code>codex-acp</Code>). Huabu assembles preset commands and offers an
+          auto-approve toggle when the selected CLI documents a compatible
+          launch option.
         </li>
         <li>
-          <strong>Custom command</strong> — type the full launch command
-          yourself. Use this for binaries that aren&apos;t on <Code>PATH</Code>,
-          for flags the structured form doesn&apos;t expose, or for any agent
-          Huabu didn&apos;t detect. See the{' '}
+          <strong>Manual setup</strong> — type the full launch command yourself.
+          Use this for binaries that aren&apos;t on <Code>PATH</Code>, for flags
+          the preset form doesn&apos;t expose, or for any agent Huabu
+          didn&apos;t detect. See the{' '}
           <DocLink href="https://github.com/hai-team/agentlet#readme">
             agentlet README
           </DocLink>{' '}
           for the full list of supported agents and flags.
+        </li>
+        <li>
+          <strong>Agent Team</strong> — launch a prepared Agent Team from its
+          directory and optionally override its harness.
         </li>
       </ul>
       <P>
@@ -73,7 +79,7 @@ export default function ExternalAgents() {
         every chat surface — no restart, no terminal step.
       </P>
       <Callout tone="info">
-        If no supported agent shows up under <strong>Detected agent</strong>,
+        If no supported preset appears in the <strong>Agent</strong> menu,
         install one first — for example{' '}
         <Code>npm install -g @github/copilot</Code>,{' '}
         <Code>npm install -g @agentclientprotocol/claude-agent-acp</Code>,{' '}

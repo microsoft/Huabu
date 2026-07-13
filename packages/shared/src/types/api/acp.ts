@@ -180,11 +180,15 @@ export interface AcpAgentCliInfo {
   /** Args after the binary to enter ACP mode (typically `['--acp']`). */
   acpArgs: string[];
   /**
-   * Auto-approve flag this agent supports, or `null` if none is
-   * recognized. UI shows a toggle ONLY when this is non-null;
-   * checked → flag appended to the launch command.
+   * Official CLI arguments that enable full tool auto-approval, or `null`
+   * when the agent requires another mechanism such as an environment
+   * variable or an ACP session mode. `position` preserves CLIs where global
+   * options must precede an ACP subcommand.
    */
-  allowAllFlag: string | null;
+  autoApprove: {
+    args: string[];
+    position: 'before-acp' | 'after-acp';
+  } | null;
   /**
    * `<binary> --version` first line (trimmed). May be an empty string
    * when the binary is on PATH but the version probe failed (network
