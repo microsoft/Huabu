@@ -221,6 +221,16 @@ Changes under `external/agentlet/` are always committed separately from Agenetes
 | Validation | Tests pass against the current implementation before Gateway extraction.                                                                                                                               |
 | Commit     | Agentlet tests and Agenetes tests remain separate commits by subtree.                                                                                                                                  |
 
+### G1a — Register the Gateway workspace and build order
+
+| Item       | Detail                                                                                                                                                                                                                                                                       |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Scope      | Root `pnpm-workspace.yaml` and `package.json`.                                                                                                                                                                                                                               |
+| Work       | Register `external/agenetes/packages/agentlet-gateway` as a workspace package and add it to `build:agenetes` before `agentlet-host`. This is required when G1 lands because `@agenetes/*` packages resolve types from gitignored `dist/`; registration cannot wait until G8. |
+| Dependency | G0.                                                                                                                                                                                                                                                                          |
+| Validation | The normal workspace filter resolves the new package and `build:agenetes` builds it before downstream consumers.                                                                                                                                                             |
+| Commit     | Sediment-only enabling commit.                                                                                                                                                                                                                                               |
+
 ### G1 — Create the durably stateless Agenetes Gateway
 
 | Item               | Detail                                                                                                                                                                                                                                                                                                      |
@@ -228,7 +238,7 @@ Changes under `external/agentlet/` are always committed separately from Agenetes
 | Scope              | New `external/agenetes/packages/agentlet-gateway/`.                                                                                                                                                                                                                                                         |
 | Work               | Move WebSocket handshake, live connection registry, pending RPC correlation, spawn/stop/list/send-resource routing, lifecycle callbacks, and current outbound buffer/reconnect behavior from `@agentlet/server`; omit DataStore, EventStore, REST, host/raw-agent WebSockets, UI, and token administration. |
 | Required additions | Composite session key `(agentletId, nativeAcpSessionId)`, live `sessionProfile` accessor, bounded drain-once inbound pre-attach buffer, and host-injected `authenticateAgentlet(machineName, token)`.                                                                                                       |
-| Dependency         | G0.                                                                                                                                                                                                                                                                                                         |
+| Dependency         | G1a.                                                                                                                                                                                                                                                                                                        |
 | Validation         | Unit tests cover two simultaneous daemons, same-credential control replacement, different-credential duplicate rejection, independent control/session disconnects, outbound reconnect flush, inbound pre-attach drain order, and FIFO drop-oldest behavior with an overflow warning.                        |
 | Commit             | Agenetes-only commit.                                                                                                                                                                                                                                                                                       |
 
@@ -294,20 +304,20 @@ Changes under `external/agentlet/` are always committed separately from Agenetes
 
 ### G8 — Remove obsolete root build wiring
 
-| Item       | Detail                                                                                                        |
-| ---------- | ------------------------------------------------------------------------------------------------------------- |
-| Scope      | Root package scripts, server bundling configuration, development watchers, and documentation indexes.         |
-| Work       | Remove `@agentlet/server` build/watch/externalization entries and add the Gateway package to Agenetes builds. |
-| Dependency | G7.                                                                                                           |
-| Validation | Targeted agentlet, Agenetes, shared, server, and desktop builds pass from a clean checkout.                   |
-| Commit     | Sediment-only commit.                                                                                         |
+| Item       | Detail                                                                                                                                                    |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Scope      | Root package scripts, server bundling configuration, development watchers, and documentation indexes.                                                     |
+| Work       | Remove obsolete `@agentlet/server` build/watch/externalization entries; retain the Gateway workspace and `build:agenetes` registration introduced by G1a. |
+| Dependency | G7.                                                                                                                                                       |
+| Validation | Targeted agentlet, Agenetes, shared, server, and desktop builds pass from a clean checkout.                                                               |
+| Commit     | Sediment-only commit.                                                                                                                                     |
 
 ### Dependency order
 
 ```text
 G0
-├── G1 ──┬── G3 ── G4 ── G5 ── G6 ── G7 ── G8
-└── G2 ──┘
+├── G1a ── G1 ──┬── G3 ── G4 ── G5 ── G6 ── G7 ── G8
+└────── G2 ─────┘
 ```
 
 ## 11. Acceptance criteria
