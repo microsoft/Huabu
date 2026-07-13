@@ -23,7 +23,7 @@ export default function SemanticZoom() {
   return (
     <PageLayout
       title="Semantic Zoom"
-      description="As you zoom out, heavy nodes — Notes, PDFs, web articles — automatically collapse to a lightweight icon-and-label placeholder. Zoom back in and they re-render in full. The canvas stays fast and the overview stays readable, even with hundreds of nodes."
+      description="As you zoom out, heavy nodes — Notes, PDFs, web articles — automatically collapse to a lightweight title placeholder. Zoom back in and they re-render in full. The canvas stays fast and the overview stays readable, even with hundreds of nodes."
       toc={toc}
     >
       <H2>What Semantic Zoom does</H2>
@@ -46,15 +46,15 @@ export default function SemanticZoom() {
         rows={[
           [
             'A zoomed-out canvas is a wall of tiny illegible text.',
-            'Zoomed-out nodes show their icon + title — instantly scannable.',
+            'Zoomed-out nodes show their title — instantly scannable.',
           ],
           [
             'Performance degrades with every heavy node you add.',
-            'Zoomed-out nodes skip their expensive render path entirely.',
+            'Zoomed-out nodes defer expensive hydration and preview requests.',
           ],
           [
             'You have to zoom in to recognise what a node is.',
-            'Type and title are visible at every zoom level.',
+            'The node title stays visible at every zoom level.',
           ],
         ]}
       />
