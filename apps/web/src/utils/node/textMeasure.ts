@@ -139,7 +139,7 @@ export function measureTextHeight(
 /* ---------------- Unified font-fit core ---------------- */
 
 /** Options accepted by {@link fitFontSize}. */
-export interface FitFontOptions {
+interface FitFontOptions {
   /** Default 1. */
   minSize?: number;
   /** Default 200. */
@@ -176,7 +176,7 @@ export interface FitFontOptions {
  * prepared run at the scaled budget `realBudget * REF_SIZE / mid` —
  * no `measureText` calls inside the loop.
  */
-export function fitFontSize(
+function fitFontSize(
   text: string,
   contentWidth: number,
   contentHeight: number,

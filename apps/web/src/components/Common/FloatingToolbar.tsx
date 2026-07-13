@@ -403,7 +403,6 @@ interface ToolbarSizePickerProps {
   heightAuto?: {
     active: boolean;
     onToggle: () => void;
-    title?: string;
   };
   /**
    * Generalised auto-size toggle. Like `heightAuto` but also covers
@@ -432,7 +431,6 @@ interface ToolbarSizePickerProps {
     dimensions?: 'height' | 'both';
     active: boolean;
     onToggle: () => void;
-    title?: string;
   };
 }
 

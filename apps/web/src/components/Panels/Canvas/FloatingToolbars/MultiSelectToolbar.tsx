@@ -7,6 +7,7 @@ import {
   ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT,
 } from '@sediment/shared';
 import {
+  DEFAULT_EDGE_STROKE_TOKEN,
   getSelectionBounds,
   getNodeSize,
   isAlwaysAutoHeightNodeType,
@@ -258,9 +259,6 @@ export const MultiSelectToolbar = () => {
             ? {
                 active: noteAutoState.active,
                 onToggle: toggleNotesAutoHeight,
-                title: noteAutoState.active
-                  ? 'Switch to fixed height'
-                  : 'Fit height to content',
               }
             : undefined
         }
@@ -321,13 +319,15 @@ export const MultiSelectToolbar = () => {
                 },
               })),
             },
-            ...(accent && selectedInternalEdges.length > 0
+            ...(selectedInternalEdges.length > 0
               ? [
                   {
                     type: 'SET_EDGE_STYLE' as const,
                     edges: selectedInternalEdges.map((edge) => ({
                       edge: edge.id as CanvasEdgeId,
-                      style: { stroke: accent },
+                      style: {
+                        stroke: accent ?? DEFAULT_EDGE_STROKE_TOKEN,
+                      },
                     })),
                   },
                 ]
