@@ -107,6 +107,16 @@ require:
     - system_prompt.md
   skills:
     - ./skills/huabu-read
+  env:
+    - name: HACKMD_API_TOKEN
+      description: API token used to publish documents
+      required: true
+      secret: true
+    - name: HACKMD_API_URL
+      description: HackMD API base URL
+      required: false
+      secret: false
+      default: https://api.hackmd.io/v1
   copies:
     - from: deepv.mjs
       to: deepv.mjs
@@ -120,8 +130,10 @@ require:
 | `name` | `string` | yes | Stable package name. |
 | `description` | `string` | yes | Human-readable summary. |
 | `command` | `Record<string, string>` | yes | Command used to launch the agent process over ACP stdio. The keys implicitly define the supported harnesses. |
-| `require` | `{ cli-tools?: string[]; prompts?: string[]; skills?: string[]; copies?: { from: string; to: string }[] }` | no | Declarative setup requirements: npm CLI tools, prompt files, skills, and plain file/directory copies to materialize in each workspace. |
+| `require` | `{ cli-tools?: string[]; prompts?: string[]; skills?: string[]; env?: EnvField[]; copies?: { from: string; to: string }[] }` | no | Declarative setup and runtime requirements: npm CLI tools, prompt files, skills, ordered environment fields, and plain file/directory copies. |
 | `onInstall` | `string` | no | Path to a custom setup script (relative to package root). Dynamically imported after the declarative pipeline. Must export a default async function. |
+
+Each `require.env` entry contains `name`, `description`, `required`, and `secret`. A non-secret entry may also declare a string `default`; secret entries cannot declare defaults.
 
 ### 4.3 `command`
 

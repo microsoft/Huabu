@@ -23,6 +23,7 @@ export {
 } from './workspace.js';
 export type {
   AgentTeamManifest,
+  AgentTeamEnvField,
   CopyEntry,
   HarnessName,
   HarnessPromptTarget,

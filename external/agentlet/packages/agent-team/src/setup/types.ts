@@ -10,6 +10,16 @@ export interface CopyEntry {
   to: string;
 }
 
+/** One host-configurable environment field declared by an Agent Team. */
+export interface AgentTeamEnvField {
+  name: string;
+  description: string;
+  required: boolean;
+  secret: boolean;
+  /** Optional non-secret default. Secret fields must never declare defaults. */
+  default?: string;
+}
+
 /** Parsed agentlet.yaml manifest. */
 export interface AgentTeamManifest {
   schema: string;
@@ -24,6 +34,8 @@ export interface AgentTeamManifest {
     prompts?: string[];
     /** Skill paths to install via `npx skills add`. */
     skills?: string[];
+    /** Ordered host-configurable environment schema. */
+    env?: AgentTeamEnvField[];
     /**
      * Plain file/directory copies from the package root into each
      * workspace, e.g. helper scripts the agent invokes at runtime.

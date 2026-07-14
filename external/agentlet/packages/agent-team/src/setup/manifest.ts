@@ -115,6 +115,56 @@ function validateManifest(
           });
         }
       }
+
+      const env = requireDoc.env;
+      if (env !== undefined) {
+        if (!Array.isArray(env)) {
+          errors.push('`require.env` must be an array');
+        } else {
+          env.forEach((entry: unknown, i) => {
+            if (
+              typeof entry !== 'object' ||
+              entry === null ||
+              Array.isArray(entry)
+            ) {
+              errors.push(`\`require.env[${i}]\` must be an object`);
+              return;
+            }
+
+            const field = entry as Record<string, unknown>;
+            if (typeof field.name !== 'string' || field.name.trim() === '') {
+              errors.push(
+                `\`require.env[${i}].name\` must be a non-empty string`,
+              );
+            }
+            if (
+              typeof field.description !== 'string' ||
+              field.description.trim() === ''
+            ) {
+              errors.push(
+                `\`require.env[${i}].description\` must be a non-empty string`,
+              );
+            }
+            if (typeof field.required !== 'boolean') {
+              errors.push(`\`require.env[${i}].required\` must be a boolean`);
+            }
+            if (typeof field.secret !== 'boolean') {
+              errors.push(`\`require.env[${i}].secret\` must be a boolean`);
+            }
+            if (
+              field.default !== undefined &&
+              typeof field.default !== 'string'
+            ) {
+              errors.push(`\`require.env[${i}].default\` must be a string`);
+            }
+            if (field.secret === true && field.default !== undefined) {
+              errors.push(
+                `\`require.env[${i}].default\` is not allowed for secret fields`,
+              );
+            }
+          });
+        }
+      }
     }
   }
 
