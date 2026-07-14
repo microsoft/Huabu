@@ -138,12 +138,9 @@ export const AppMenu: React.FC<AppMenuProps> = ({
         </DropdownMenuItem>
 
         {canChangeWorkspace && (
-          <>
-            <div className="border-edge-default my-1 border-t" />
-            <DropdownMenuItem onClick={runAndClose(() => navigate('/setup'))}>
-              {t('navigation.switchWorkspace')}
-            </DropdownMenuItem>
-          </>
+          <DropdownMenuItem onClick={runAndClose(() => navigate('/setup'))}>
+            {t('navigation.switchWorkspace')}
+          </DropdownMenuItem>
         )}
 
         <div className="border-edge-default my-1 border-t" />
@@ -153,42 +150,39 @@ export const AppMenu: React.FC<AppMenuProps> = ({
         >
           {t('settings.title')}
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={runAndClose(openUserHandbook)}>
-          {t('navigation.userHandbook')}
-        </DropdownMenuItem>
         <DropdownMenuItem
           shortcut={shortcutsHint}
           onClick={runAndClose(openShortcuts)}
         >
           {t('shortcuts.title')}
         </DropdownMenuItem>
+        <DropdownMenuItem onClick={runAndClose(openUserHandbook)}>
+          {t('navigation.userHandbook')}
+        </DropdownMenuItem>
 
         {diagnosticsAvailable && (
-          <>
-            <div className="border-edge-default my-1 border-t" />
-            <DropdownMenuSubmenu label={t('troubleshooting.title')}>
-              <DropdownMenuItem
-                onClick={runAndClose(() => runDiagnostic(openServerLog))}
-              >
-                {t('troubleshooting.openServerLog')}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={runAndClose(() => runDiagnostic(openDeveloperTools))}
-              >
-                {t('troubleshooting.openDeveloperTools')}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={runAndClose(() =>
-                  runDiagnostic(
-                    copySystemInfo,
-                    t('troubleshooting.systemInfoCopied'),
-                  ),
-                )}
-              >
-                {t('troubleshooting.copySystemInfo')}
-              </DropdownMenuItem>
-            </DropdownMenuSubmenu>
-          </>
+          <DropdownMenuSubmenu label={t('troubleshooting.title')}>
+            <DropdownMenuItem
+              onClick={runAndClose(() => runDiagnostic(openServerLog))}
+            >
+              {t('troubleshooting.openServerLog')}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={runAndClose(() => runDiagnostic(openDeveloperTools))}
+            >
+              {t('troubleshooting.openDeveloperTools')}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={runAndClose(() =>
+                runDiagnostic(
+                  copySystemInfo,
+                  t('troubleshooting.systemInfoCopied'),
+                ),
+              )}
+            >
+              {t('troubleshooting.copySystemInfo')}
+            </DropdownMenuItem>
+          </DropdownMenuSubmenu>
         )}
       </DropdownMenu>
     </>

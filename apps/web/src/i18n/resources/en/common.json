@@ -568,8 +568,8 @@
     "image_other": "images",
     "openSnapshot": "Open {{src}} in a new tab",
     "snapshotAlt": "Snapshot {{count}}",
-    "canvasChangeCount_one": "Space {{count}} change",
-    "canvasChangeCount_other": "Space {{count}} changes",
+    "canvasChangeCount_one": "Made {{count}} change",
+    "canvasChangeCount_other": "Made {{count}} changes",
     "canvasCommands": "Space commands",
     "canvasChange": {
       "created": "Created",

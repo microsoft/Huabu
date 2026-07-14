@@ -568,8 +568,8 @@
     "image_other": "张图片",
     "openSnapshot": "在新标签页打开 {{src}}",
     "snapshotAlt": "快照 {{count}}",
-    "canvasChangeCount_one": "Space {{count}} 个更改",
-    "canvasChangeCount_other": "Space {{count}} 个更改",
+    "canvasChangeCount_one": "已完成 {{count}} 项更改",
+    "canvasChangeCount_other": "已完成 {{count}} 项更改",
     "canvasCommands": "Space 命令",
     "canvasChange": {
       "created": "已创建",
