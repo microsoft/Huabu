@@ -116,7 +116,7 @@ Each deployment alias provides:
 
 1. An independent enable/disable toggle.
 2. A harness dropdown populated from the harnesses declared by the member manifest.
-3. An optional `workingDirPath`.
+3. A required `workingDirPath` whose initial UI value defaults to `<manifest-directory>/workspaces/<harness>/`.
 
 A deployment cannot be enabled while any member-level required environment variable is missing. The member Configs table identifies all missing required values.
 
@@ -145,13 +145,13 @@ Deleting a deployment closes its live handles and removes its stable deployment 
 
 The harness dropdown allows the user to select any harness declared by the manifest even when that harness is not currently installed on the selected daemon host. Missing harness executables are reported as explicit errors during deployment creation or runtime rather than blocking selection in Settings.
 
-`workingDirPath` is both the target directory prepared by setup and the process working directory. If omitted, its resolved value is:
+`workingDirPath` is both the target directory prepared by setup and the process working directory. The UI derives its initial value from the selected member's `manifestPath` and harness:
 
 ```text
 <manifest-directory>/workspaces/<harness>/
 ```
 
-The target agentlet daemon performs this default resolution with its own platform path semantics, confines the harness-derived path below the package's `workspaces` directory, and returns the final absolute path for Agenetes to persist. Agenetes never derives a remote workspace path with the host machine's path utilities.
+The UI submits the complete `(machine, manifestPath, harness, workingDirPath)` tuple. Agenetes persists that complete value, and `agent-team/setup` and `agent-team/validate` require it; backend layers never represent an omitted working directory.
 
 At runtime, environment sources merge in this precedence order:
 

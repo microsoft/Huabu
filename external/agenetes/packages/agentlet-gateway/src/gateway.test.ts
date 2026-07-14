@@ -511,7 +511,6 @@ describe('AgentletGateway', () => {
             result: {
               operationId: 'setup-a',
               accepted: true,
-              workingDirPath: '/deployments/reviewer',
             },
           }),
         );
@@ -597,7 +596,6 @@ describe('AgentletGateway', () => {
     ).resolves.toEqual({
       operationId: 'setup-a',
       accepted: true,
-      workingDirPath: '/deployments/reviewer',
     });
     await waitUntil(() => setupProgress.mock.calls.length === 1);
     expect(setupProgress).toHaveBeenCalledWith('machine-a', {
