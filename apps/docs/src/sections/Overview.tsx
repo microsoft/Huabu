@@ -140,7 +140,7 @@ export default function Overview() {
             icon={Brain}
             eyebrow="AI"
             title="Memory"
-            description="Home + Space memory tiers the AI maintains for you."
+            description="User + Space memory tiers the AI maintains for you."
           />
           <NavCard
             to="/docs/ai/skills"

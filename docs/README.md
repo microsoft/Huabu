@@ -17,7 +17,6 @@ docs/
   architecture/   ← Long-lived "what exists today". The system reference.
   proposals/      ← In-flight design / refactor plans. Each has a Status header.
   archive/        ← Shipped or superseded proposals, kept for history.
-  user-guide/     ← End-user facing guides + changelog.
 ```
 
 **Rules**
@@ -48,12 +47,12 @@ docs/
 | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | [agent-architecture.md](./architecture/agent-architecture.md)                   | Server-side agent runtime, tools, skills, SSE protocol.                                                            |
 | [agent-context.md](./architecture/agent-context.md)                             | How canvas state gets shaped into `AgentChatContext` / `IntentContext` and reaches the model.                      |
-| [agent-reachback.md](./architecture/agent-reachback.md)                         | Huabu Reachback Tool (HRT) — how external agents read/write the canvas out-of-band.                                |
+| [agent-reachback.md](./architecture/agent-reachback.md)                         | Huabu Reachback Tool (HRT) — how external agents read/write the Space out-of-band.                                 |
 | [agent-teams-as-extensions.md](./architecture/agent-teams-as-extensions.md)     | Product/vision: managed Agent Teams as Huabu's "plugin system".                                                    |
 | [api-design.md](./architecture/api-design.md)                                   | **Authoritative** rules for every HTTP / SSE endpoint, zod-first wire contracts.                                   |
 | [canvas-command-architecture.md](./architecture/canvas-command-architecture.md) | `CanvasUiIntent` / `CanvasCommand` / `CanvasExecution` three-layer model.                                          |
 | [canvas-zoom-rendering.md](./architecture/canvas-zoom-rendering.md)             | Node LOD, Frame/edge label readability, and interaction chrome across canvas zoom.                                 |
-| [canvas-storage.md](./architecture/canvas-storage.md)                           | On-disk layout of a canvas (`canvas.json`, `nodes/`, `.artifacts/`, `memory/`).                                    |
+| [canvas-storage.md](./architecture/canvas-storage.md)                           | On-disk layout of a canvas (`space.json`, `nodes/`, `.artifacts/`, `memory/`).                                     |
 | [canvas-action-log.md](./architecture/canvas-action-log.md)                     | Persistent `events.jsonl` user-action trail; consumed by the memory curator.                                       |
 | [canvas-realtime-sync.md](./architecture/canvas-realtime-sync.md)               | Multi-agent real-time sync: SSE broadcast, dirty-node conflict model, per-thread change-review card.               |
 | [credential-storage.md](./architecture/credential-storage.md)                   | Electron OS-protected credentials, utility-process bridge, migration, and standalone fallback.                     |

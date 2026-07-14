@@ -11,7 +11,7 @@ import {
 
 const toc: TocEntry[] = [
   { id: 'why-memory', label: 'Why memory exists' },
-  { id: 'two-tiers', label: 'Two tiers: Home & Space' },
+  { id: 'two-tiers', label: 'Two tiers: User & Space' },
   { id: 'how-it-fills-up', label: 'How memory fills up' },
   { id: 'how-its-read', label: "How it's read back" },
   { id: 'hand-editing', label: 'Hand-editing memory' },
@@ -22,7 +22,7 @@ export default function Memory() {
   return (
     <PageLayout
       title="Memory"
-      description="Memory is a small amount of long-lived context the AI carries between messages, Spaces and sessions. Two tiers — Home and Space — answer different questions for it."
+      description="Memory is a small amount of long-lived context the AI carries between messages, Spaces and sessions. Two tiers — User and Space — answer different questions for it."
       toc={toc}
     >
       <H2>Why memory exists</H2>
@@ -39,12 +39,12 @@ export default function Memory() {
         entries.
       </Callout>
 
-      <H2>Two tiers: Home &amp; Space</H2>
+      <H2>Two tiers: User &amp; Space</H2>
       <Table
         headers={['Tier', 'Scope', 'Where it lives', 'Typical contents']}
         rows={[
           [
-            <strong>Home</strong>,
+            <strong>User</strong>,
             'Applies to every Space in this Home.',
             <Code>setting/.huabu.md</Code>,
             'Preferences ("respond in Markdown"), constraints ("Python 3.11"), recurring vocabulary.',
@@ -68,7 +68,7 @@ export default function Memory() {
       <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
         <li>
           <strong>Automatic curation.</strong> After enough Space activity, a
-          background curator agent reviews recent operations and updates Home /
+          background curator agent reviews recent operations and updates User /
           Space memory. You don&apos;t see it happen; you see the effect on the
           next AI reply.
         </li>
@@ -83,7 +83,7 @@ export default function Memory() {
       <H2>How it&apos;s read back</H2>
       <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
         <li>
-          <strong>Home memory</strong> is auto-injected at the start of every
+          <strong>User memory</strong> is auto-injected at the start of every
           new chat thread, so cross-Space preferences apply from the first
           message.
         </li>

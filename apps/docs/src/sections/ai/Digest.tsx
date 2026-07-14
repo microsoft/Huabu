@@ -72,7 +72,7 @@ export default function Digest() {
         accumulates — you don&apos;t trigger it manually and there&apos;s no
         modal to confirm. The effect is visible only on the AI&apos;s next reply
         (it will reference things from earlier turns more naturally) or on the
-        file system, where Home / Space memory gets a few new lines.
+        file system, where User / Space memory gets a few new lines.
       </P>
       <Callout tone="info">
         Digest is intentionally quiet. If it ran with a notification every time,
@@ -83,8 +83,8 @@ export default function Digest() {
       <H2>Where it writes</H2>
       <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
         <li>
-          <Code>setting/.huabu.md</Code> — Home-wide memory; the curator only
-          adds something here if it generalises beyond this one Space.
+          <Code>setting/.huabu.md</Code> — User memory; the curator only adds
+          something here if it generalises beyond this one Space.
         </li>
         <li>
           <Code>.memory/canvas.md</Code> — per-Space memory; this is where most

@@ -74,15 +74,15 @@ export default function OpenVault() {
       </P>
 
       <H2>Anatomy of a Home folder</H2>
-      <CodeBlock language="text">{`<workspace>/
-├── <canvas-title>/          one folder per canvas
+      <CodeBlock language="text">{`<home>/
+├── <space-title>/          one folder per Space
 │   ├── canvas.json          topology (nodes, edges, version)
 │   ├── nodes/               one Markdown file per node
 │   ├── .artifacts/          hidden: raw binaries (PDFs, images, videos)
-│   ├── .memory/canvas.md    AI-written canvas memory
+│   ├── .memory/canvas.md    AI-written Space memory
 │   └── .history/            hidden: chat + intent history
 └── setting/
-    ├── .huabu.md            workspace-wide memory
+    ├── .huabu.md            User memory
     └── skills/              reusable AI recipes (one folder each)`}</CodeBlock>
       <P>Three things worth calling out in this layout:</P>
       <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
@@ -129,7 +129,7 @@ export default function OpenVault() {
           icon={GitBranch}
           eyebrow="AI"
           title="Memory"
-          description="Home + Space memory tiers, both as hand-editable Markdown."
+          description="User + Space memory tiers, both as hand-editable Markdown."
         />
       </CardGrid>
 

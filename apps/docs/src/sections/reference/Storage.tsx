@@ -32,16 +32,22 @@ export default function Storage() {
         directory holding everything related to it. A separate{' '}
         <Code>setting/</Code> folder holds Home-wide things (memory & skills).
       </P>
-      <CodeBlock language="text">{`<workspace>/
-├── <canvas-title>/                    # one folder per canvas
-│   ├── canvas.json
+      <CodeBlock language="text">{`<home>/
+├── <space-title>/                     # one folder per Space
+│   ├── canvas.json                    # this Space's topology
 │   ├── nodes/<node-title>.md
 │   ├── .artifacts/<artifactId>.<ext>
-│   ├── .memory/canvas.md
+│   ├── .memory/canvas.md              # Space memory (hidden)
 │   └── .history/{chat/<threadId>.turns.jsonl, intent.json, events.jsonl}
 └── setting/
-    ├── .huabu.md                      # workspace memory
+    ├── .huabu.md                      # User memory
     └── skills/<id>/SKILL.md           # user-authored skills`}</CodeBlock>
+      <Callout tone="info">
+        The on-disk names <Code>canvas.json</Code>,{' '}
+        <Code>.memory/canvas.md</Code> and <Code>.huabu.md</Code> are kept from
+        earlier versions for compatibility. Conceptually they are this
+        Space&apos;s topology, its Space memory, and your User memory.
+      </Callout>
 
       <H2>Per-Space files</H2>
       <Table
@@ -87,7 +93,7 @@ export default function Storage() {
         rows={[
           [
             <Code>setting/.huabu.md</Code>,
-            'Home-wide memory — preferences and context that apply across every Space. Capped at ~4 KB.',
+            'User memory — preferences and context that apply across every Space. Capped at ~4 KB.',
           ],
           [
             <Code>setting/skills/&lt;id&gt;/SKILL.md</Code>,

@@ -47,17 +47,17 @@ export default function Workspaces() {
       />
       <P>
         Inside the chosen folder Huabu creates one subdirectory per Space (and a{' '}
-        <Code>setting/</Code> folder for Home-wide memory and skills):
+        <Code>setting/</Code> folder for User memory and skills):
       </P>
-      <CodeBlock language="text">{`<workspace>/
-├── <canvas-title>/          one folder per canvas
+      <CodeBlock language="text">{`<home>/
+├── <space-title>/          one folder per Space
 │   ├── canvas.json          topology (nodes, edges, version)
 │   ├── nodes/               one Markdown file per node
 │   ├── .artifacts/          hidden: raw binaries (PDFs, images, videos)
-│   ├── .memory/canvas.md    AI-written canvas memory
+│   ├── .memory/canvas.md    AI-written Space memory
 │   └── .history/            hidden: chat & intent history
 └── setting/
-    ├── .huabu.md            workspace-wide memory
+    ├── .huabu.md            User memory
     └── skills/              your custom skills`}</CodeBlock>
       <P>
         Your last-opened Home is remembered, so re-launching Huabu drops you

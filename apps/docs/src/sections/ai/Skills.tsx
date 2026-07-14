@@ -123,7 +123,7 @@ Given the currently selected nodes:
       </P>
 
       <H2>Where skills live on disk</H2>
-      <CodeBlock language="text">{`<workspace>/setting/skills/
+      <CodeBlock language="text">{`<home>/setting/skills/
 ├── comparison-table/
 │   ├── SKILL.md
 │   └── template.md

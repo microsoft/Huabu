@@ -27,11 +27,11 @@ export default function Content() {
     >
       <H2>Storage model</H2>
       <P>Every Space maps to one folder:</P>
-      <CodeBlock language="text">{`<workspace>/<canvas-title>/
+      <CodeBlock language="text">{`<home>/<space-title>/
 ├── canvas.json              # topology (positions, edges, frames)
 ├── nodes/<node-title>.md    # ingested content + metadata per node
 ├── .artifacts/              # hidden: raw binaries (PDFs, images, videos)
-├── .memory/canvas.md        # AI-written canvas memory
+├── .memory/canvas.md        # AI-written Space memory
 └── .history/                # hidden: chat / intent / event history`}</CodeBlock>
       <P>
         Node <strong>content</strong> and node{' '}
