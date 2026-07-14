@@ -33,6 +33,7 @@ import {
 } from '../agenetes/drivers.js';
 import { createChatSubmission } from '../agenetes/handle.js';
 import { dumpAssembledPrompt } from '../conversation/prompt/debug-prompt.js';
+import { getSupervisedAgentletId } from '@agenetes/agentlet-host';
 
 import type { ChatEnvelope } from '../conversation/envelope.js';
 import type { AcpBindingRecipe, AcpTurnOverlay } from '@agenetes/acp-driver';
@@ -156,6 +157,7 @@ export async function* runAcpAgent(
   // profile's recipe.
   const spec: AcpWorkloadSpec = {
     threadId,
+    agentletId: getSupervisedAgentletId(),
     kind: EXTERNAL_DRIVER_KIND,
     workloadType: 'Deployment',
     namespace: canvasAcpNamespace(canvasId),

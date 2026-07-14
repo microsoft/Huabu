@@ -316,6 +316,12 @@ export interface EnsureAcpSessionResponse {
   sessionMeta: AcpSessionMetaSnapshot;
 }
 
+/** Query for `GET /api/acp/threads/:threadId/commands`. */
+export interface AcpThreadCommandsQuery {
+  /** Canvas containing the persisted workload placement. */
+  canvasId?: string;
+}
+
 /** Response body for `GET /api/acp/threads/:threadId/commands`. */
 export interface AcpThreadCommandsResponse {
   sessionId: string;
@@ -363,6 +369,7 @@ export interface AcpThreadCachedMetaResponse {
  *   • `profile_missing` — bound profile no longer exists.
  *   • `bridge_not_mounted` — embedded agentlet bridge still booting.
  *   • `worker_not_ready` — agentlet daemon worker never came online.
+ *   • `placement_unavailable` — the explicitly targeted agentlet is offline.
  *   • `session_resume_unavailable` — persisted native session is gone.
  *   • `spawn_failed` — daemon rejected the spawn RPC (bad recipe).
  *   • `connect_timeout` — agent process started but never opened WS
@@ -374,6 +381,7 @@ export type AcpEnsureErrorCode =
   | 'profile_missing'
   | 'bridge_not_mounted'
   | 'worker_not_ready'
+  | 'placement_unavailable'
   | 'session_resume_unavailable'
   | 'spawn_failed'
   | 'connect_timeout'
@@ -593,6 +601,11 @@ export const ensureAcpSessionResponseSchema = z.object({
   updatedAt: z.number().int().nonnegative(),
   sessionMeta: acpSessionMetaSnapshotSchema,
 }) satisfies z.ZodType<EnsureAcpSessionResponse>;
+
+/** Schema mirror of {@link AcpThreadCommandsQuery}. */
+export const acpThreadCommandsQuerySchema = z.object({
+  canvasId: z.string().min(1).optional(),
+}) satisfies z.ZodType<AcpThreadCommandsQuery>;
 
 /** Schema mirror of {@link AcpThreadCommandsResponse}. */
 export const acpThreadCommandsResponseSchema = z.object({

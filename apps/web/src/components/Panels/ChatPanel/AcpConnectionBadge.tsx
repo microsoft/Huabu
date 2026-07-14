@@ -139,6 +139,7 @@ function labelForCode(
 ): string {
   switch (code) {
     case 'worker_not_ready':
+    case 'placement_unavailable':
       return t('chat.connectionLabel.worker');
     case 'profile_missing':
       return t('chat.connectionLabel.profile');
@@ -166,6 +167,7 @@ function headlineForCode(
 ): string {
   switch (code) {
     case 'worker_not_ready':
+    case 'placement_unavailable':
       return t('chat.connectionHeadline.workerNotReady');
     case 'profile_missing':
       return t('chat.connectionHeadline.profileMissing', { alias });

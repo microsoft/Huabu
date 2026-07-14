@@ -25,9 +25,11 @@
 import { acpSessionRegistry } from '@agenetes/acp-driver';
 import { AcpServiceError } from '@agenetes/acp-driver';
 import { ensureAcpSession } from '@agenetes/acp-driver';
+import { getSupervisedAgentletId } from '@agenetes/agentlet-host';
 
 import {
   acpPermissionDecisionSchema,
+  acpThreadCommandsQuerySchema,
   ensureAcpSessionRequestSchema,
   setAcpSessionConfigOptionRequestSchema,
   setAcpSessionModeRequestSchema,
@@ -51,6 +53,7 @@ import type { AgentMetadata } from '@agenetes/protocol';
 import type {
   AcpPermissionDecisionResponse,
   AcpSessionMetaSnapshot,
+  AcpThreadCommandsQuery,
   AcpThreadCachedMetaResponse,
   AcpThreadCommandsResponse,
   EnsureAcpSessionResponse,
@@ -62,6 +65,16 @@ import type { FastifyBaseLogger, FastifyPluginAsync } from 'fastify';
 
 interface ThreadParams {
   threadId: string;
+}
+
+function resolveThreadAgentletId(threadId: string, canvasId?: string): string {
+  if (canvasId) {
+    const record = agenetes.record(canvasAcpNamespace(canvasId), threadId);
+    if (record && 'binding' in record.spec && record.spec.agentletId) {
+      return record.spec.agentletId;
+    }
+  }
+  return getSupervisedAgentletId();
 }
 
 /**
@@ -89,7 +102,8 @@ async function resolveSetRpcEntry(
   | { ok: true; entry: AcpSessionEntry; spec: AcpWorkloadSpec }
   | { ok: false; status: number; body: { message: string; code: string } }
 > {
-  const existing = acpSessionRegistry.get(threadId);
+  const agentletId = resolveThreadAgentletId(threadId, ctx.canvasId);
+  const existing = acpSessionRegistry.get(agentletId, threadId);
   if (!ctx.profileId) {
     if (existing) {
       ensureProfileCacheSubscription(threadId, existing.profileId);
@@ -101,6 +115,7 @@ async function resolveSetRpcEntry(
         // control op. `binding.alias` falls back to the profileId.
         spec: {
           threadId,
+          agentletId: existing.agentletId,
           kind: EXTERNAL_DRIVER_KIND,
           workloadType: 'Deployment',
           namespace: existing.namespace,
@@ -121,6 +136,7 @@ async function resolveSetRpcEntry(
   }
   const spec: AcpWorkloadSpec = {
     threadId,
+    agentletId,
     kind: EXTERNAL_DRIVER_KIND,
     workloadType: 'Deployment',
     namespace: canvasAcpNamespace(ctx.canvasId ?? ''),
@@ -133,6 +149,7 @@ async function resolveSetRpcEntry(
   if (existing) return { ok: true, entry: existing, spec };
   try {
     const entry = await ensureAcpSession({
+      agentletId,
       threadId: spec.threadId,
       binding: spec.binding,
       namespace: spec.namespace,
@@ -261,7 +278,12 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
     }
 
     try {
+      const agentletId = resolveThreadAgentletId(
+        threadId,
+        parsed.data.canvasId,
+      );
       const entry = await ensureAcpSession({
+        agentletId,
         threadId,
         binding: {
           // Alias is purely a display hint at this stage \u2014 there's no
@@ -310,10 +332,26 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
    */
   app.get<{
     Params: ThreadParams;
+    Querystring: AcpThreadCommandsQuery;
     Reply: AcpThreadCommandsResponse | { message: string; code?: string };
   }>('/threads/:threadId/commands', async (request, reply) => {
     const { threadId } = request.params;
-    const entry = acpSessionRegistry.get(threadId);
+    const parsed = acpThreadCommandsQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      request.log.warn(
+        { threadId, issues: parsed.error.issues },
+        '[acp/threads] invalid commands query',
+      );
+      return reply.status(400).send({
+        message: 'Invalid query',
+        code: 'validation_failed',
+      });
+    }
+    const agentletId = resolveThreadAgentletId(
+      threadId,
+      parsed.data.canvasId,
+    );
+    const entry = acpSessionRegistry.get(agentletId, threadId);
     if (!entry) {
       return reply.status(404).send({
         message: 'No ACP session for this thread',
@@ -367,7 +405,8 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
   }>('/threads/:threadId/cached-meta', async (request) => {
     const { threadId } = request.params;
     const { canvasId, profileId } = request.query;
-    const live = acpSessionRegistry.get(threadId);
+    const agentletId = resolveThreadAgentletId(threadId, canvasId);
+    const live = acpSessionRegistry.get(agentletId, threadId);
     if (live) return { sessionMeta: snapshotSessionMeta(live) };
     if (canvasId) {
       const record = agenetes.record(canvasAcpNamespace(canvasId), threadId);

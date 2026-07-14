@@ -104,6 +104,7 @@ describe('migrateLegacyAcpSessions', () => {
       profileId: 'claude-code',
     });
     expect(v3?.spec.recipe?.command).toBe('claude-code-acp');
+    expect(v3?.spec.agentletId).toBeUndefined();
     expect(v3?.state.sessionId).toBe('sess-abc');
     expect(v3?.state.metadata).toMatchObject({ currentModelId: 'sonnet' });
     // reachback env is never a durable spec field.
@@ -140,6 +141,31 @@ describe('migrateLegacyAcpSessions', () => {
 
     const kept = store.get(namespace, 'thread-v3');
     expect(kept?.state.sessionId).toBe('live-session');
+  });
+
+  it('preserves explicit agentlet placement in a persisted WorkloadSpec', () => {
+    const namespace: Namespace = {
+      name: 'canvas-42',
+      storage: { root: join(tmp, 'placement', '.history') },
+    };
+    const store = new FileThreadStore();
+    store.upsert(namespace, 'thread-placed', {
+      spec: {
+        threadId: 'thread-placed',
+        agentletId: 'machine-b',
+        kind: 'external',
+        workloadType: 'Deployment',
+        namespace,
+        binding: { alias: 'Claude', profileId: 'claude-code' },
+      } as AcpWorkloadSpec,
+      state: {},
+    });
+
+    const reloaded = new FileThreadStore().get<AcpWorkloadSpec>(
+      namespace,
+      'thread-placed',
+    );
+    expect(reloaded?.spec.agentletId).toBe('machine-b');
   });
 
   it('is idempotent — a second sweep is a no-op', () => {

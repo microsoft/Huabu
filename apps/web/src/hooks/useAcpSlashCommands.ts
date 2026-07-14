@@ -265,7 +265,10 @@ export function useAcpSlashCommands({
         for (const delay of EMPTY_POLL_BACKOFF_MS) {
           await new Promise((r) => setTimeout(r, delay));
           if (!isCurrent()) return;
-          const followup = await getAcpThreadCommands(threadId);
+          const followup = await getAcpThreadCommands(
+            threadId,
+            canvasId ?? undefined,
+          );
           if (!isCurrent()) return;
           if (followup && followup.availableCommands.length > 0) {
             setCommands(followup.availableCommands);

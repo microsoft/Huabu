@@ -195,10 +195,11 @@ export async function ensureAcpSession(
  */
 export async function getAcpThreadCommands(
   threadId: string,
+  canvasId?: string,
 ): Promise<AcpThreadCommandsResponse | null> {
   try {
     return await apiFetch<AcpThreadCommandsResponse>(
-      routes.acpThreadCommands(threadId),
+      routes.acpThreadCommands(threadId, canvasId),
       { fallbackMessage: 'Failed to fetch ACP slash commands' },
     );
   } catch (err) {
