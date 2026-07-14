@@ -1,6 +1,6 @@
 export {
   mountAgenetes,
-  getAgentletServer,
+  getAgentTeamRegistry,
   ACP_UPGRADE_PATH,
 } from '@agenetes/agentlet-host';
 export type {

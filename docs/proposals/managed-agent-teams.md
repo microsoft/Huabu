@@ -173,6 +173,8 @@ Agenetes defines the Agent Team registries and state transitions and owns the fi
 
 The implementation places this host-agnostic control plane in `@agenetes/agent-team`. Its registry persists roots, scan diagnostics, members, root-to-member provenance, deployments, and member-level non-secret Config overrides under the host-provided storage directory; a failed root scan preserves the last successful provenance instead of marking every previously discovered member missing. Secret Configs use stable opaque IDs through an injected managed-secret port, read models expose only configured state, and runtime-only resolution is the sole surface that returns secret plaintext inside Agenetes.
 
+`@agenetes/agentlet-host.mountAgenetes(...)` owns the composition boundary: after mounting one Agentlet Gateway, it internally supplies that Gateway as the registry's `AgentTeamControlPort`. Huabu supplies only the Agent Team storage directory and secret-store port and may obtain the mounted registry for HTTP projection; it never passes, selects, or coordinates a Gateway for Agent Team operations.
+
 ### Agentlet control-plane consolidation
 
 Agent Team depends on the shipped [Agenetes Agentlet Gateway Consolidation](../archive/agenetes-agentlet-gateway-consolidation.md).

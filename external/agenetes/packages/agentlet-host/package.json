@@ -1,7 +1,7 @@
 {
   "name": "@agenetes/agentlet-host",
   "version": "0.1.0",
-  "description": "L2 transport host: mounts the stateless Agenetes Agentlet Gateway into Fastify and supervises the local agentlet daemon.",
+  "description": "L2 composition host: mounts the Agentlet Gateway and Agent Team control plane into Fastify and supervises the local agentlet daemon.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -21,6 +21,7 @@
     "test": "vitest run src"
   },
   "dependencies": {
+    "@agenetes/agent-team": "workspace:*",
     "@agenetes/agentlet-gateway": "workspace:*",
     "@agenetes/protocol": "workspace:*",
     "@agentlet/protocol": "workspace:*"

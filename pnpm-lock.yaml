@@ -471,6 +471,9 @@ importers:
 
   external/agenetes/packages/agentlet-host:
     dependencies:
+      '@agenetes/agent-team':
+        specifier: workspace:*
+        version: link:../agent-team
       '@agenetes/agentlet-gateway':
         specifier: workspace:*
         version: link:../agentlet-gateway

@@ -43,6 +43,7 @@ import {
 } from './modules/workspace.js';
 import workspaceRoutes from './modules/workspace.route.js';
 import { preloadSkills } from './prompt/index.js';
+import { getPersistedSecret, setSecrets } from './security/secret-store.js';
 import { MAX_UPLOAD_BYTES } from './upload-limits.js';
 import { logger } from './utils/logger.js';
 
@@ -260,6 +261,13 @@ mountAgenetes(app, {
   connectionToken: getConnectionToken(),
   dataDir: getDataDir(),
   daemonEntryPath: resolveDaemonEntry() ?? '',
+  agentTeam: {
+    storageDir: join(getDataDir(), 'agent-team'),
+    secretStore: {
+      get: getPersistedSecret,
+      setMany: setSecrets,
+    },
+  },
 });
 // Capture the bound TCP port for L1-owned reachback (RFS): the
 // canvas-scoped `HUABU_RFS_URL` base is built from this. RFS is

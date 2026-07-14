@@ -17,6 +17,10 @@
 
 import { hostname } from 'node:os';
 
+import {
+  getAgentTeamRegistry,
+  mountAgentTeamRegistry,
+} from './agent-team-mount.js';
 import { getDaemonAuth } from './daemon-auth.js';
 import { getDaemonSupervisor } from './daemon-supervisor.js';
 import { mountAgentletGateway } from './gateway-mount.js';
@@ -35,6 +39,7 @@ export function getSupervisedAgentletId(): string {
   return supervisedAgentletId;
 }
 
+export { getAgentTeamRegistry } from './agent-team-mount.js';
 export {
   ACP_UPGRADE_PATH,
   getAgentletGateway,
@@ -49,6 +54,7 @@ export {
 export { getDaemonAuth, _resetDaemonAuthForTests } from './daemon-auth.js';
 
 export type { AttachOptions } from './daemon-supervisor.js';
+export type { MountAgentTeamOptions } from './agent-team-mount.js';
 export type {
   MountAcpOptions,
   MountAgentletGatewayOptions,
@@ -91,6 +97,11 @@ export interface MountAgenetesOptions {
    * connection-token validator in {@link getDaemonAuth}.
    */
   authenticate?: AgentletGatewayOptions['authenticateAgentlet'];
+  /**
+   * Host capabilities for the durable Agent Team control plane. The mounted
+   * Gateway is connected internally and is never supplied by the host.
+   */
+  agentTeam?: import('./agent-team-mount.js').MountAgentTeamOptions;
 }
 
 /**
@@ -99,7 +110,8 @@ export interface MountAgenetesOptions {
  * Wires the three pieces in dependency order:
  *   1. Store the host connection token so handshakes can be validated.
  *   2. Mount the stateless Agentlet Gateway.
- *   3. Fork & supervise the agentlet daemon child.
+ *   3. Mount the durable Agent Team registry when host capabilities exist.
+ *   4. Fork & supervise the agentlet daemon child.
  *
  * Idempotent — the underlying server mount and supervisor attach are
  * each no-ops on a second call.
@@ -114,6 +126,10 @@ export function mountAgenetes(
   const gateway = mountAgentletGateway(app, {
     authenticate: opts.authenticate,
   });
+
+  if (opts.agentTeam) {
+    mountAgentTeamRegistry(app, opts.agentTeam, gateway);
+  }
 
   getDaemonSupervisor().attach(app, {
     daemonEntryPath: opts.daemonEntryPath,
