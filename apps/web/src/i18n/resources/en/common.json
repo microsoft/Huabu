@@ -15,7 +15,6 @@
     "undo": "Undo",
     "redo": "Redo",
     "close": "Close",
-    "closeEsc": "Close (Esc)",
     "apply": "Apply",
     "clear": "Clear",
     "expand": "Expand",
@@ -170,9 +169,9 @@
   },
   "search": {
     "findPlaceholder": "Find…",
-    "previousMatchShortcut": "Previous match (Shift+Enter)",
-    "nextMatchShortcut": "Next match (Enter)",
-    "clearEsc": "Clear search (Esc)",
+    "previousMatch": "Previous match",
+    "nextMatch": "Next match",
+    "clear": "Clear search",
     "searching": "Searching"
   },
   "editor": {
@@ -395,8 +394,8 @@
     "collapseAllFrames": "Collapse all frames",
     "expandAllFrames": "Expand all frames",
     "addToCanvas": "Add to Space",
-    "searchCanvas": "Search this Space (Cmd+F)",
-    "closeSearch": "Close search (Esc)",
+    "searchCanvas": "Search this Space",
+    "closeSearch": "Close search",
     "searchPlaceholder": "Search this Space…",
     "searchAria": "Search this Space",
     "filterLabels": {
@@ -704,7 +703,6 @@
   },
   "shortcuts": {
     "title": "Keyboard Shortcuts",
-    "closeTitle": "Close (Esc)",
     "closeAria": "Close keyboard shortcuts",
     "sections": {
       "general": "General",

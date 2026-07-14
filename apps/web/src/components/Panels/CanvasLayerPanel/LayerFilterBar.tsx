@@ -3,6 +3,7 @@ import { ChevronsDownUp, ChevronsUpDown, Search } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { getFilterKeyLabelKey, getFilterKeyMeta } from './layerFilterKey';
+import { formatShortcutById } from '../../../config/shortcuts';
 import { Button } from '../../Common/Button';
 
 import type { LayerFilterKey } from './layerFilterKey';
@@ -154,7 +155,9 @@ export const LayerFilterBar = ({
           size="sm"
           onClick={onToggleSearch}
           title={
-            isSearchOpen ? t('layers.closeSearch') : t('layers.searchCanvas')
+            isSearchOpen
+              ? `${t('layers.closeSearch')} (${formatShortcutById('search.close')})`
+              : `${t('layers.searchCanvas')} (${formatShortcutById('search.open')})`
           }
           className={clsx(
             'p-1!',
