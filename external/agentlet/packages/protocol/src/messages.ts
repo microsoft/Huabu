@@ -246,6 +246,42 @@ export interface SendResourceParams {
   content: string
 }
 
+// ─── Agent Team Control ──────────────────────────────────────────────────────
+
+/** Host-configurable environment field exposed by an Agent Team manifest. */
+export interface AgentTeamEnvField {
+  name: string
+  description: string
+  required: boolean
+  secret: boolean
+  default?: string
+}
+
+/** agent-team/scan — discover Agent Team manifests below one collection root. */
+export interface AgentTeamScanParams {
+  rootPath: string
+}
+
+export interface AgentTeamScanMember {
+  name: string
+  manifestPath: string
+  description: string
+  harnesses: string[]
+  env: AgentTeamEnvField[]
+}
+
+export interface AgentTeamScanDiagnostic {
+  manifestPath: string
+  code: 'invalid_manifest' | 'manifest_unreadable'
+  message: string
+}
+
+export interface AgentTeamScanResult {
+  rootPath: string
+  members: AgentTeamScanMember[]
+  diagnostics: AgentTeamScanDiagnostic[]
+}
+
 // ─── Lifecycle Events (surfaced to host app) ──────────────────────────────────
 
 /** Union of all lifecycle events the server surfaces to the host app */

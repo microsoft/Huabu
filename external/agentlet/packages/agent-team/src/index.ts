@@ -10,3 +10,11 @@ export * from './setup/index.js';
 // Resolve — Agent Team ref → concrete spawn params (used by daemon)
 export { resolveAgentTeam } from './resolve/index.js';
 export type { AgentTeamRef, ResolvedSpawn } from './resolve/index.js';
+
+// Discovery — scan one collection root without executing package code
+export { scanAgentTeamRoot } from './scan.js';
+export type {
+  AgentTeamScanMember,
+  AgentTeamScanDiagnostic,
+  AgentTeamScanResult,
+} from './scan.js';

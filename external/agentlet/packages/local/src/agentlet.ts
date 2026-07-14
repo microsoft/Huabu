@@ -14,10 +14,11 @@ import {
   type SpawnParams,
   type StopParams,
   type SendResourceParams,
+  type AgentTeamScanParams,
   type JsonRpcMessage,
   type JsonRpcError,
 } from '@agentlet/protocol'
-import { resolveAgentTeam } from '@agentlet/agent-team'
+import { resolveAgentTeam, scanAgentTeamRoot } from '@agentlet/agent-team'
 import { AgentProcess } from './agent-process.js'
 import { WsClient } from './ws-client.js'
 import { Relay } from './relay.js'
@@ -260,8 +261,32 @@ export class Agentlet {
       case ServerMethods.LIST:
         this.handleList(msg.id)
         break
+      case ServerMethods.AGENT_TEAM_SCAN:
+        this.handleAgentTeamScan(msg.id, msg.params as unknown as AgentTeamScanParams)
+        break
       default:
         this.sendDaemonResponse(msg.id, undefined, { code: -32601, message: `Unknown method: ${msg.method}` })
+    }
+  }
+
+  private handleAgentTeamScan(requestId: string | number, params: AgentTeamScanParams): void {
+    if (!params || typeof params.rootPath !== 'string' || params.rootPath.trim() === '') {
+      this.sendDaemonResponse(requestId, undefined, {
+        code: -32602,
+        message: 'Missing required param: rootPath',
+      })
+      return
+    }
+
+    try {
+      this.sendDaemonResponse(requestId, scanAgentTeamRoot(params.rootPath))
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.sendDaemonResponse(requestId, undefined, {
+        code: -32602,
+        message,
+        data: { code: 'agent_team_scan_failed' },
+      })
     }
   }
 

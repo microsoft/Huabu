@@ -26,6 +26,7 @@ export const ServerMethods = {
   STOP: 'server/stop',
   LIST: 'server/list',
   SEND_RESOURCE: 'server/sendResource',
+  AGENT_TEAM_SCAN: 'agent-team/scan',
 } as const
 
 /** Error codes used in agent/hello rejection */

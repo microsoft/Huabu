@@ -48,6 +48,11 @@ export type {
   ListParams,
   ListResult,
   SendResourceParams,
+  AgentTeamEnvField,
+  AgentTeamScanParams,
+  AgentTeamScanMember,
+  AgentTeamScanDiagnostic,
+  AgentTeamScanResult,
   LifecycleEvent,
 } from './messages.js'
 

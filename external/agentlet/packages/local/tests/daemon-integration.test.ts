@@ -1,5 +1,5 @@
 import { createServer, type Server } from 'node:http'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -70,7 +70,7 @@ describe('agentlet daemon integration', () => {
     exitSpy?.mockRestore()
   })
 
-  it('spawns, bootstraps, and flushes pre-attach ACP updates', async () => {
+  it('scans Agent Teams, spawns, bootstraps, and flushes pre-attach ACP updates', async () => {
     exitSpy = vi
       .spyOn(process, 'exit')
       .mockImplementation((() => undefined) as never)
@@ -90,6 +90,19 @@ describe('agentlet daemon integration', () => {
         "    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { sessionId: 'native-bootstrap' } }) + '\\n')",
         '  }',
         '})',
+      ].join('\n'),
+    )
+    const teamsRoot = join(tempDir, 'teams')
+    const reviewerDir = join(teamsRoot, 'reviewer')
+    mkdirSync(reviewerDir, { recursive: true })
+    writeFileSync(
+      join(reviewerDir, 'agentlet.yaml'),
+      [
+        'schema: agentlet-agent-schema-v1',
+        'name: reviewer',
+        'description: Reviews changes',
+        'command:',
+        '  copilot: copilot --acp',
       ].join('\n'),
     )
 
@@ -173,6 +186,35 @@ describe('agentlet daemon integration', () => {
     )
     await daemon.start()
     await waitUntil(() => controlHello !== undefined)
+
+    controlSocket?.send(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: ServerMethods.AGENT_TEAM_SCAN,
+        id: 9,
+        params: { rootPath: teamsRoot },
+      }),
+    )
+    await waitUntil(() =>
+      controlMessages.some(
+        (message) => 'id' in message && message.id === 9 && 'result' in message,
+      ),
+    )
+    expect(
+      controlMessages.find((message) => 'id' in message && message.id === 9),
+    ).toMatchObject({
+      result: {
+        rootPath: teamsRoot,
+        members: [
+          {
+            name: 'reviewer',
+            manifestPath: join(reviewerDir, 'agentlet.yaml'),
+            harnesses: ['copilot'],
+          },
+        ],
+        diagnostics: [],
+      },
+    })
 
     controlSocket?.send(
       JSON.stringify({

@@ -81,6 +81,7 @@ Both hello methods are requests and require a matching JSON-RPC response before 
 | `server/spawn` | Request | Launch and bootstrap an ACP agent. |
 | `server/stop` | Request | Stop one managed agent session. |
 | `server/list` | Request | List the daemon's active agents. |
+| `agent-team/scan` | Request | Scan one absolute collection root and return valid members plus diagnostics for invalid manifests. |
 | `server/sendResource` | Notification | Write a host-provided resource through the daemon environment registry. |
 | `server/replay` | Notification | Replay Gateway-to-daemon messages buffered during disconnection. |
 | `server/ping` | Notification | Application-level heartbeat request. |
