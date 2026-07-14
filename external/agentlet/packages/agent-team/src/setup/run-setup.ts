@@ -10,7 +10,17 @@
  */
 
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseSetupArgs } from './cli.js';
@@ -24,9 +34,16 @@ import {
   getPromptTarget,
 } from './harness.js';
 import { readManifest } from './manifest.js';
+import {
+  cliToolExecutablesExist,
+  cliToolIsReady,
+  recordCliTool,
+  resolveNpmToolsRoot,
+} from './npm-tools.js';
 import type {
   AgentTeamManifest,
   CallbackContext,
+  CliToolRequirement,
   CopyEntry,
   ManagedSetupOptions,
   ManagedSetupPhase,
@@ -100,7 +117,9 @@ function resolveHarnesses(
 
 // ── Declarative pipeline steps ─────────────────────────────────────────
 
-function getRequiredCliTools(manifest: AgentTeamManifest): string[] {
+function getRequiredCliTools(
+  manifest: AgentTeamManifest,
+): CliToolRequirement[] {
   return manifest.require?.['cli-tools'] ?? [];
 }
 
@@ -116,7 +135,6 @@ function getRequiredCopies(manifest: AgentTeamManifest): CopyEntry[] {
   return manifest.require?.copies ?? [];
 }
 
-/** Install CLI tools declared in manifest.require['cli-tools'] via npm. */
 async function runCommand(
   command: string,
   args: string[],
@@ -149,6 +167,127 @@ async function runCommand(
   });
 }
 
+async function waitForLock(signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
+  await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+}
+
+async function withInstallLock(
+  root: string,
+  signal: AbortSignal | undefined,
+  action: () => Promise<void>,
+): Promise<void> {
+  mkdirSync(root, { recursive: true });
+  const lockPath = join(root, '.agentlet-install-lock');
+  const ownerPath = join(lockPath, 'owner');
+  const owner = randomUUID();
+  const deadline = Date.now() + 120_000;
+  while (true) {
+    signal?.throwIfAborted();
+    try {
+      mkdirSync(lockPath);
+      writeFileSync(ownerPath, owner, 'utf8');
+      break;
+    } catch (error) {
+      if (
+        !(
+          error instanceof Error &&
+          'code' in error &&
+          error.code === 'EEXIST'
+        )
+      ) {
+        throw error;
+      }
+      let lockAge: number;
+      try {
+        lockAge = Date.now() - statSync(lockPath).mtimeMs;
+      } catch {
+        continue;
+      }
+      if (lockAge > 30 * 60_000) {
+        const stalePath = `${lockPath}.stale-${owner}`;
+        try {
+          renameSync(lockPath, stalePath);
+          rmSync(stalePath, { recursive: true, force: true });
+        } catch {
+          // Another waiter or the active owner changed the lock first.
+        }
+        continue;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(`Timed out waiting for npm tools lock: ${lockPath}`);
+      }
+      await waitForLock(signal);
+    }
+  }
+  const ownsLock = () => {
+    try {
+      return readFileSync(ownerPath, 'utf8') === owner;
+    } catch {
+      return false;
+    }
+  };
+  const heartbeat = setInterval(() => {
+    if (!ownsLock()) return;
+    try {
+      const now = new Date();
+      utimesSync(lockPath, now, now);
+    } catch {
+      // Losing the lock is detected before release.
+    }
+  }, 30_000);
+  heartbeat.unref();
+  try {
+    await action();
+  } finally {
+    clearInterval(heartbeat);
+    if (ownsLock()) {
+      rmSync(lockPath, { recursive: true, force: true });
+    }
+  }
+}
+
+function ensureNpmRoot(root: string): void {
+  mkdirSync(root, { recursive: true });
+  const packageJsonPath = join(root, 'package.json');
+  if (!existsSync(packageJsonPath)) {
+    writeFileSync(
+      packageJsonPath,
+      `${JSON.stringify({ private: true }, null, 2)}\n`,
+      'utf8',
+    );
+  }
+}
+
+async function installTool(
+  tool: CliToolRequirement,
+  workspaceDir: string,
+  log: SetupLogger,
+  signal?: AbortSignal,
+): Promise<void> {
+  const root = resolveNpmToolsRoot(tool, workspaceDir);
+  await withInstallLock(root, signal, async () => {
+    if (cliToolIsReady(root, tool)) {
+      log.info(`Tool already ready: ${tool.package} (${tool.scope})`);
+      return;
+    }
+    ensureNpmRoot(root);
+    await runCommand(
+      'npm',
+      ['install', '--prefix', root, '--save-exact', tool.package],
+      root,
+      signal,
+    );
+    if (!cliToolExecutablesExist(root, tool)) {
+      throw new Error(
+        `Installed package "${tool.package}" did not provide required executable(s): ${tool.executables.join(', ')}`,
+      );
+    }
+    recordCliTool(root, tool);
+    log.success(`Tool installed: ${tool.package} (${tool.scope})`);
+  });
+}
+
 async function installTools(
   manifest: AgentTeamManifest,
   workspaceDir: string,
@@ -157,16 +296,12 @@ async function installTools(
 ): Promise<void> {
   const cliTools = getRequiredCliTools(manifest);
   if (cliTools.length === 0) return;
-  log.info(`Installing tools: ${cliTools.join(', ')}`);
-
-  // Ensure package.json exists so npm install works
-  const pkgJson = join(workspaceDir, 'package.json');
-  if (!existsSync(pkgJson)) {
-    await runCommand('npm', ['init', '-y', '--silent'], workspaceDir, signal);
+  log.info(
+    `Preparing tools: ${cliTools.map((tool) => tool.package).join(', ')}`,
+  );
+  for (const tool of cliTools) {
+    await installTool(tool, workspaceDir, log, signal);
   }
-
-  await runCommand('npm', ['install', ...cliTools], workspaceDir, signal);
-  log.success('Tools installed');
 }
 
 /** Install skills declared in manifest.require.skills via `npx skills add`. */
@@ -492,7 +627,11 @@ async function runDoctor(
   log.info(`Schema:       ${manifest.schema}`);
   log.info(`Harnesses:    ${harnesses.join(', ')}`);
   if (getRequiredCliTools(manifest).length) {
-    log.info(`CLI tools:    ${getRequiredCliTools(manifest).join(', ')}`);
+    log.info(
+      `CLI tools:    ${getRequiredCliTools(manifest)
+        .map((tool) => `${tool.package} (${tool.installer}/${tool.scope})`)
+        .join(', ')}`,
+    );
   }
   if (getRequiredSkills(manifest).length) {
     log.info(`Skills:       ${getRequiredSkills(manifest).join(', ')}`);

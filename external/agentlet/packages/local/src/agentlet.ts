@@ -547,11 +547,11 @@ export class Agentlet {
     // Agent Team resolution: translate { agentDir, harness } → { command, cwd, env }
     if (sessionSpec?.agentTeam) {
       try {
-        const resolved = resolveAgentTeam(sessionSpec.agentTeam)
+        const resolved = resolveAgentTeam(sessionSpec.agentTeam, sessionSpec.env)
         sessionSpec.command = resolved.command
         sessionSpec.cwd = resolved.cwd
-        // Env merge: daemon defaults < .env from agentDir < sessionSpec.env from host
-        sessionSpec.env = { ...resolved.env, ...sessionSpec.env }
+        // resolveAgentTeam merges .env < host env, then prepends managed tool paths.
+        sessionSpec.env = resolved.env
         this.logger.info('agent_team_resolved', {
           agentDir: sessionSpec.agentTeam.agentDir,
           harness: sessionSpec.agentTeam.harness,

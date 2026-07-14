@@ -104,7 +104,11 @@ command:
 
 require:
   cli-tools:
-    - hackmd-cli
+    - package: "@hackmd/hackmd-cli"
+      installer: npm
+      scope: shared
+      executables:
+        - hackmd
   prompts:
     - system_prompt.md
   skills:
@@ -132,10 +136,21 @@ require:
 | `name` | `string` | yes | Stable package name. |
 | `description` | `string` | yes | Human-readable summary. |
 | `command` | `Record<string, string>` | yes | Command used to launch the agent process over ACP stdio. The keys implicitly define the supported harnesses. |
-| `require` | `{ cli-tools?: string[]; prompts?: string[]; skills?: string[]; env?: EnvField[]; copies?: { from: string; to: string }[] }` | no | Declarative setup and runtime requirements: npm CLI tools, prompt files, skills, ordered environment fields, and plain file/directory copies. |
+| `require` | `{ cli-tools?: CliTool[]; prompts?: string[]; skills?: string[]; env?: EnvField[]; copies?: { from: string; to: string }[] }` | no | Declarative setup and runtime requirements: CLI packages, prompt files, skills, ordered environment fields, and plain file/directory copies. |
 | `onInstall` | `string` | no | Path to a custom setup script (relative to package root). Dynamically imported after the declarative pipeline. Must export a default async function. |
 
 Each `require.env` entry contains `name`, `description`, `required`, and `secret`. A non-secret entry may also declare a string `default`; secret entries cannot declare defaults.
+
+Each `require.cli-tools` entry contains:
+
+| Field | Type | Required | Meaning |
+| --- | --- | ---: | --- |
+| `package` | `string` | yes | Package identifier passed to the installer. |
+| `installer` | `"npm"` | yes | Installation backend. The current schema supports only npm; other installers require an explicit future protocol extension. |
+| `scope` | `"workspace" \| "shared"` | yes | `workspace` installs into one deployment workspace; `shared` installs once into agentlet-managed storage and is reusable across packages and deployments on that host. |
+| `executables` | `string[]` | yes | Non-empty list of commands that setup and validation require the installed package to expose. |
+
+`executables` uses installer-independent command names rather than npm's `bin` terminology. For example, the npm package `@hackmd/hackmd-cli` exposes the `hackmd` executable.
 
 ### 4.3 `command`
 
@@ -152,7 +167,7 @@ The daemon reads this field at spawn time to determine what process to launch.
 
 The `@agentlet/agent-team` CLI processes these manifest fields in order:
 
-1. **`require.cli-tools`** — installs npm packages in the workspace (`npm install <pkg>`)
+1. **`require.cli-tools`** — checks each package receipt and required executable, then installs missing npm tools into either the deployment workspace or the shared agentlet tools store
 2. **`require.skills`** — installs skills via `npx skills add <path> --agent <agent>`,
    using the harness registry's `skillsAgent` mapping (e.g., `claude` →
    `claude-code`, `copilot` → `github-copilot`)
@@ -176,10 +191,11 @@ best-effort during setup: the CLI still installs `require.cli-tools`, copies
 `require.copies`, and runs `onInstall`, but skips skills installation and
 prompt placement because those need harness-specific registry entries.
 
-Most agent teams need only `require.cli-tools`, `require.skills`,
-`require.prompts`, and `require.copies`. The `onInstall` script is for truly
-custom logic beyond what the declarative fields cover (generating config files,
-fetching external data, etc.).
+For `scope: workspace`, npm packages and receipts live in the deployment workspace. For `scope: shared`, they live under `~/.agentlet/tools/npm` by default; operators may set `AGENTLET_SHARED_NPM_TOOLS_DIR` to an absolute alternative. Shared installation is protected by an inter-process lock so concurrent deployment setup does not mutate the same npm prefix simultaneously.
+
+Setup skips installation only when the stored receipt exactly matches the declared package and executable list and every executable exists. A successful npm process that does not expose all declared executables fails setup. Both workspace and shared `.bin` directories are prepended to the spawned agent's `PATH`.
+
+Most agent teams need only `require.cli-tools`, `require.skills`, `require.prompts`, and `require.copies`. The `onInstall` script is for truly custom logic beyond what the declarative fields cover (generating config files, fetching external data, etc.).
 
 ### 4.5 `onInstall` Script Contract
 
@@ -342,8 +358,8 @@ When the daemon receives `{ agent_dir, harness }`:
 3. **Resolve** `command` from the manifest for the chosen harness
 4. **Derive** `cwd = agent_dir/workspaces/<harness|default>/`
 5. **Load** `.env` from `agent_dir` if present
-6. **Spawn** the resolved command — from here on, identical to any other ACP
-   session
+6. **Prepend** the deployment workspace and agentlet-shared npm `.bin` directories to `PATH`
+7. **Spawn** the resolved command — from here on, identical to any other ACP session
 
 The daemon does **not**:
 
@@ -370,5 +386,5 @@ internally. The host only needs to know:
 - **callback API**: `(harness, workspaceDir, ctx)` where `ctx = { packageDir, manifest, harness, workspaceDir, log }`
 - **package name**: `@agentlet/agent-team`
 - **setup entry point**: `@agentlet/agent-team` CLI is the primary entry point; per-package `agent-setup.mjs` is optional
-- **declarative setup**: `require.cli-tools`, `require.skills`, `require.prompts`, `require.copies` in manifest; `onInstall` for custom logic
+- **declarative setup**: structured npm requirements in `require.cli-tools`, plus `require.skills`, `require.prompts`, and `require.copies`; `onInstall` remains available for custom logic
 - **SessionSpec variant**: nested `agentTeam?: { agentDir, harness? }` field on existing `SessionSpec`

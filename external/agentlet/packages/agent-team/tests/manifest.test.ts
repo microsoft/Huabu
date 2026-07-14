@@ -61,6 +61,94 @@ require:
     ]);
   });
 
+  describe('agentlet.yaml require.cli-tools', () => {
+    it('preserves structured npm tool requirements', () => {
+      const manifest = readManifest(
+        writeManifest(`
+  schema: agentlet-agent-schema-v1
+  name: Publisher
+  description: Publishes documents
+  command:
+    copilot: copilot --acp
+  require:
+    cli-tools:
+      - package: "@hackmd/hackmd-cli"
+        installer: npm
+        scope: shared
+        executables:
+          - hackmd
+  `),
+      );
+
+      expect(manifest.require?.['cli-tools']).toEqual([
+        {
+          package: '@hackmd/hackmd-cli',
+          installer: 'npm',
+          scope: 'shared',
+          executables: ['hackmd'],
+        },
+      ]);
+    });
+
+    it('rejects legacy string tool requirements', () => {
+      expect(() =>
+        readManifest(
+          writeManifest(`
+  schema: agentlet-agent-schema-v1
+  name: Publisher
+  description: Publishes documents
+  command:
+    copilot: copilot --acp
+  require:
+    cli-tools:
+      - "@hackmd/hackmd-cli"
+  `),
+        ),
+      ).toThrow('require.cli-tools[0]` must be an object');
+    });
+
+    it('rejects unsupported installers and empty executable lists', () => {
+      expect(() =>
+        readManifest(
+          writeManifest(`
+  schema: agentlet-agent-schema-v1
+  name: Publisher
+  description: Publishes documents
+  command:
+    copilot: copilot --acp
+  require:
+    cli-tools:
+      - package: publisher
+        installer: apt
+        scope: shared
+        executables: []
+  `),
+        ),
+      ).toThrow('installer` must be "npm"');
+    });
+
+    it('rejects executable paths and npm option injection', () => {
+      expect(() =>
+        readManifest(
+          writeManifest(`
+  schema: agentlet-agent-schema-v1
+  name: Publisher
+  description: Publishes documents
+  command:
+    copilot: copilot --acp
+  require:
+    cli-tools:
+      - package: -g
+        installer: npm
+        scope: shared
+        executables:
+          - ../../package.json
+  `),
+        ),
+      ).toThrow('without surrounding whitespace or a leading dash');
+    });
+  });
+
   it('rejects defaults on secret fields', () => {
     expect(() =>
       readManifest(

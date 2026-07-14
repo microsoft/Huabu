@@ -2,13 +2,18 @@ import { statSync } from 'node:fs';
 
 import { readManifest } from './setup/manifest.js';
 import { isManagedSetupReady } from './managed-workspace.js';
+import {
+  cliToolIsReady,
+  resolveNpmToolsRoot,
+} from './setup/npm-tools.js';
 
 export interface ManagedAgentTeamValidationIssue {
   code:
     | 'manifest_invalid'
     | 'harness_unsupported'
     | 'workspace_missing'
-    | 'workspace_not_ready';
+    | 'workspace_not_ready'
+    | 'tools_missing';
   message: string;
 }
 
@@ -59,6 +64,24 @@ export function validateManagedAgentTeam(options: {
       code: 'workspace_not_ready',
       message: `Workspace has no valid completed-setup marker: ${options.workingDirPath}`,
     });
+  }
+  if (manifest) {
+    for (const tool of manifest.require?.['cli-tools'] ?? []) {
+      const root = resolveNpmToolsRoot(tool, options.workingDirPath);
+      try {
+        if (!cliToolIsReady(root, tool)) {
+          issues.push({
+            code: 'tools_missing',
+            message: `CLI tool is missing or incomplete: ${tool.package}`,
+          });
+        }
+      } catch (error) {
+        issues.push({
+          code: 'tools_missing',
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
   }
 
   return { valid: issues.length === 0, issues };

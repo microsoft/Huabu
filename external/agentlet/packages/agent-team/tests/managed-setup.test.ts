@@ -1,4 +1,11 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -9,6 +16,7 @@ import type { SetupLogger } from '../src/setup/types.js';
 import { validateManagedAgentTeam } from '../src/validate.js';
 
 const tempDirs: string[] = [];
+const originalSharedToolsDir = process.env.AGENTLET_SHARED_NPM_TOOLS_DIR;
 const logger: SetupLogger = {
   info: vi.fn(),
   warn: vi.fn(),
@@ -44,6 +52,11 @@ afterEach(() => {
   vi.clearAllMocks();
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
+  }
+  if (originalSharedToolsDir === undefined) {
+    delete process.env.AGENTLET_SHARED_NPM_TOOLS_DIR;
+  } else {
+    process.env.AGENTLET_SHARED_NPM_TOOLS_DIR = originalSharedToolsDir;
   }
 });
 
@@ -85,5 +98,66 @@ describe('runManagedSetup', () => {
       status: 'completed',
       message: 'Running custom setup',
     });
+  });
+
+  it('reuses a ready shared npm tool across deployment workspaces', async () => {
+    const toolDir = mkdtempSync(join(tmpdir(), 'agentlet-test-tool-'));
+    tempDirs.push(toolDir);
+    writeFileSync(
+      join(toolDir, 'package.json'),
+      JSON.stringify({
+        name: 'agentlet-test-tool',
+        version: '1.0.0',
+        bin: { 'agentlet-test-tool': 'cli.mjs' },
+      }),
+    );
+    writeFileSync(
+      join(toolDir, 'cli.mjs'),
+      '#!/usr/bin/env node\nconsole.log("ready");\n',
+    );
+    chmodSync(join(toolDir, 'cli.mjs'), 0o755);
+
+    const packageDir = createTeam();
+    writeFileSync(
+      join(packageDir, 'agentlet.yaml'),
+      [
+        'schema: agentlet-agent-schema-v1',
+        'name: reviewer',
+        'description: Reviews changes',
+        'command:',
+        '  copilot: copilot --acp',
+        'require:',
+        '  cli-tools:',
+        `    - package: ${JSON.stringify(toolDir)}`,
+        '      installer: npm',
+        '      scope: shared',
+        '      executables:',
+        '        - agentlet-test-tool',
+        '  prompts:',
+        '    - system-prompt.md',
+      ].join('\n'),
+    );
+    process.env.AGENTLET_SHARED_NPM_TOOLS_DIR = join(
+      packageDir,
+      'shared-tools',
+    );
+
+    await runManagedSetup({
+      packageDir,
+      harness: 'copilot',
+      workingDirPath: join(packageDir, 'deployments', 'first'),
+      log: logger,
+    });
+    vi.clearAllMocks();
+    await runManagedSetup({
+      packageDir,
+      harness: 'copilot',
+      workingDirPath: join(packageDir, 'deployments', 'second'),
+      log: logger,
+    });
+
+    expect(logger.info).toHaveBeenCalledWith(
+      `Tool already ready: ${toolDir} (shared)`,
+    );
   });
 });

@@ -24,6 +24,7 @@ export {
 export type {
   AgentTeamManifest,
   AgentTeamEnvField,
+  CliToolRequirement,
   CopyEntry,
   HarnessName,
   HarnessPromptTarget,

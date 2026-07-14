@@ -20,6 +20,18 @@ export interface AgentTeamEnvField {
   default?: string;
 }
 
+/** One CLI package installed during setup. */
+export interface CliToolRequirement {
+  /** Package identifier understood by the selected installer. */
+  package: string;
+  /** Installation backend. Only npm is currently supported. */
+  installer: 'npm';
+  /** Install into this deployment workspace or the agentlet-managed shared store. */
+  scope: 'workspace' | 'shared';
+  /** Commands that must exist after installation. */
+  executables: string[];
+}
+
 /** Parsed agentlet.yaml manifest. */
 export interface AgentTeamManifest {
   schema: string;
@@ -28,8 +40,8 @@ export interface AgentTeamManifest {
   command: Record<string, string>;
   /** Declarative requirements to materialize in each workspace. */
   require?: {
-    /** Harness-agnostic CLI tools to install via npm. */
-    'cli-tools'?: string[];
+    /** Harness-agnostic CLI tools to install and validate. */
+    'cli-tools'?: CliToolRequirement[];
     /** Canonical prompt files relative to the package root. */
     prompts?: string[];
     /** Skill paths to install via `npx skills add`. */
