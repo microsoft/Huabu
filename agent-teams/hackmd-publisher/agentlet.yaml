@@ -16,7 +16,11 @@ require:
       required: true
       secret: true
   cli-tools:
-    - '@hackmd/hackmd-cli'
+    - package: '@hackmd/hackmd-cli'
+      installer: npm
+      scope: shared
+      executables:
+        - hackmd
   skills:
     - https://github.com/hackmdio/hackmd-cli/tree/develop/hackmd-cli
   prompts:
