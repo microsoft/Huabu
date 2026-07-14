@@ -12,13 +12,13 @@ maxIterations: 6
 # "did the agent (a) reach for the right tool, (b) hit the right path,
 # and (c) ground its reply in the file's content".
 prompt: |
-  There is a note on this canvas labeled "Dolphin Migration".
+  There is a note in this Space labeled "Dolphin Migration".
   Read its contents and tell me, in one sentence, the average annual
   round-trip distance the females travel.
 
 assertions:
   # 1. The agent must call read at least once with the expected path.
-  #    Any extra read of skills/canvas/SKILL.md is fine — we only pin
+  #    Any extra read of skills/space/SKILL.md is fine — we only pin
   #    the node-markdown path.
   - kind: tool_called
     name: read

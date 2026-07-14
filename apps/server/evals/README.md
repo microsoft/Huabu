@@ -1,7 +1,7 @@
 # Agent eval harness
 
 Offline regression suite for the Sediment agent. Each case ships a
-minimal vault (`fixture`) plus a user prompt and a list of assertions
+minimal Home fixture plus a user prompt and a list of assertions
 on the resulting agent trace. Cases run **without** booting Fastify or
 the web UI — the runner imports `runAgent` directly and replays its
 events into a structured JSON `Trace`.
@@ -129,7 +129,7 @@ pnpm --filter @sediment/server eval:baseline main
 
 # 2. Switch to your branch, change some skill / tool / prompt
 git checkout my-skill-tweak
-# … edit prompt/skills/canvas/SKILL.md …
+# … edit prompt/skills/space/SKILL.md …
 
 # 3. Diff
 pnpm --filter @sediment/server eval:diff main
