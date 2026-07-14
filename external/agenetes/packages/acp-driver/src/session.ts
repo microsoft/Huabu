@@ -27,7 +27,7 @@
  * docs/proposals/layered-architecture.md §7 (M5).
  */
 
-import { getAgentletServer } from '@agenetes/agentlet-host';
+import { getAgentletGateway } from '@agenetes/agentlet-host';
 
 import { AcpAgentClient } from './client.js';
 import { AcpServiceError } from './errors.js';
@@ -325,8 +325,8 @@ function hydrateEntryFromPersistedMeta(
  * selectors until the user sends the first prompt.
  *
  * The blob is opaque (persisted verbatim by agentlet), so every field is
- * validated defensively. Called BEFORE {@link replayEventStoreMeta} so a
- * genuinely-newer replayed notification still overrides this seed.
+ * validated defensively. Called before the live listener is installed so
+ * buffered bootstrap notifications drain afterward and override this seed.
  */
 function seedEntryFromNewSessionResult(
   entry: AcpSessionEntry,
@@ -458,8 +458,8 @@ async function ensureAcpSessionInner(
   }
   const cwd = opts.cwd ?? recipe.cwd ?? recipe.agentTeam?.agentDir ?? '';
 
-  const server = getAgentletServer();
-  if (!server) {
+  const gateway = getAgentletGateway();
+  if (!gateway) {
     throw new AcpServiceError(
       'bridge_not_mounted',
       'ACP bridge is not mounted \u2014 the embedded agentlet daemon is not running yet',
@@ -473,13 +473,13 @@ async function ensureAcpSessionInner(
   // the daemon can resume a suspended session instead of creating new.
   // Failures here surface as a 503 from the caller with a user-actionable
   // hint pointing at Settings → External Agents.
-  const { sessionId: agentSessionId } = await ensureAgentForThread(
+  const { agentletId, sessionId: agentSessionId } = await ensureAgentForThread(
     threadId,
     recipe,
     priorSessionId,
     opts.env,
   );
-  const conn = server.getConnection(agentSessionId);
+  const conn = gateway.getSession(agentletId, agentSessionId);
   if (!conn || conn.status !== 'connected') {
     // Agentlet acknowledged the spawn but the agent's own WS session
     // never reached `connected` (or has since dropped). Surfaces the
@@ -529,35 +529,33 @@ async function ensureAcpSessionInner(
   //
   // The agentlet daemon has already bootstrapped the session
   // (initialize + session/new) during spawn. We seed the client from
-  // the DataStore's SessionRecord instead of calling those RPCs again.
+  // the live session profile instead of calling those RPCs again.
   // This fixes the split-brain sessionId divergence where Huabu's
   // second session/new created a different sessionId from the one the
-  // WS relay + EventStore are keyed on.
+  // WS relay is keyed on.
 
   const client = new AcpAgentClient(conn, { scopeName, logger });
 
-  // Seed initializeResult from the DataStore (persisted by the server
-  // on agent/hello). The record contains the agent's capabilities from
-  // the daemon's bootstrap — no need to re-initialize.
-  const dataStore = server.getDataStore();
-  const sessionRecord = dataStore.getSession(agentSessionId);
-  if (sessionRecord?.initializeResult) {
+  // The live profile carries the daemon's bootstrap results, so the
+  // stateless Gateway does not need a DataStore.
+  const bootstrapProfile = conn.sessionProfile?.session;
+  if (bootstrapProfile?.initializeResult) {
     client.seedFromRecord(
-      sessionRecord.initializeResult as AcpInitializeResult,
+      bootstrapProfile.initializeResult as AcpInitializeResult,
     );
     logger.info(
       {
         threadId,
         sessionId: agentSessionId,
-        agentInfo: (sessionRecord.initializeResult as AcpInitializeResult)
+        agentInfo: (bootstrapProfile.initializeResult as AcpInitializeResult)
           .agentInfo,
       },
-      '[acp] seeded client from DataStore (skipped redundant initialize + session/new)',
+      '[acp] seeded client from live session profile (skipped redundant initialize + session/new)',
     );
   } else {
     logger.warn(
       { threadId, sessionId: agentSessionId },
-      '[acp] DataStore has no initializeResult for session — agent capabilities unknown',
+      '[acp] live session profile has no initializeResult — agent capabilities unknown',
     );
   }
 
@@ -594,15 +592,10 @@ async function ensureAcpSessionInner(
     metaUpdatedAt: 0,
   };
 
-  // Install the long-lived listener so live session/update notifications
-  // (available_commands_update, mode updates, etc.) flow to the entry.
-  client.registerSessionListener(sessionId, (update) => {
-    handleSessionMetaUpdate(created, update, logger);
-  });
-
   // Seed modes/models/configOptions inline from the agent's `session/new`
   // response (Copilot CLI delivers them here rather than via notifications).
-  // Done BEFORE replay so a genuinely-newer notification still wins.
+  // Done before attaching the listener so a buffered, genuinely-newer
+  // notification drains afterward and wins.
   //
   // Gated on the ABSENCE of a down-fed meta snapshot: the `session/new`
   // blob is frozen at session-creation time, so its `current*` fields
@@ -611,20 +604,20 @@ async function ensureAcpSessionInner(
   // right (no user choice exists yet). On RESUME (`priorState.metadata`
   // present) those frozen defaults are the STALEST source of `current*` —
   // staler than the user's last selection in `priorState.metadata` and
-  // staler than any replayed/live notification — so we skip the seed
-  // entirely and let `replay` + `hydrateEntryFromPersistedMeta` restore
+  // staler than any buffered/live notification — so we skip the seed
+  // entirely and let notifications + `hydrateEntryFromPersistedMeta` restore
   // the up-to-date state instead of clobbering it.
   seedEntryFromNewSessionResult(
     created,
-    priorState?.metadata ? undefined : sessionRecord?.newSessionResult,
+    priorState?.metadata ? undefined : bootstrapProfile?.newSessionResult,
     logger,
   );
 
-  // Replay any session/update notifications from EventStore that the
-  // agent sent during the daemon's session bootstrap (before Huabu
-  // constructed the client). These include modes/models/configOptions/
-  // available_commands that would otherwise be lost.
-  replayEventStoreMeta(server, sessionId, created, logger);
+  // Installing the listener synchronously drains Gateway pre-attach messages
+  // that AcpAgentClient retained as orphan updates during construction.
+  client.registerSessionListener(sessionId, (update) => {
+    handleSessionMetaUpdate(created, update, logger);
+  });
 
   // If the down-fed snapshot has a meta payload (e.g. from a previous
   // server lifetime), use it as a fallback seed — it may carry
@@ -675,50 +668,6 @@ async function ensureAcpSessionInner(
   // (the sole ThreadStore writer). No direct on-disk write here anymore.
 
   return created;
-}
-
-/**
- * Replay `session/update` notifications from the EventStore that arrived
- * during the daemon's session bootstrap (before Huabu constructed the
- * AcpAgentClient). This catches modes, models, configOptions, and
- * available_commands that the agent pushed in response to `session/new`.
- */
-export function replayEventStoreMeta(
-  server: NonNullable<ReturnType<typeof getAgentletServer>>,
-  sessionId: string,
-  entry: AcpSessionEntry,
-  logger: AcpSessionLogger,
-): void {
-  const eventStore = server.getEventStore();
-  let replayed = 0;
-  try {
-    const events = eventStore.getEventsSince(sessionId, 0);
-    for (const ev of events) {
-      if (ev.dir !== 'agent') continue;
-      const msg = ev.event as unknown as Record<string, unknown>;
-      if (msg.method !== 'session/update') continue;
-      const params = msg.params as
-        | { update?: AcpSessionUpdate }
-        | null
-        | undefined;
-      const update = params?.update;
-      if (update && typeof update === 'object' && 'sessionUpdate' in update) {
-        handleSessionMetaUpdate(entry, update as AcpSessionUpdate, logger);
-        replayed++;
-      }
-    }
-  } catch (err) {
-    logger.warn(
-      { sessionId, err: err instanceof Error ? err.message : String(err) },
-      '[acp] failed to replay EventStore meta — UI selectors may start empty',
-    );
-  }
-  if (replayed > 0) {
-    logger.info(
-      { sessionId, replayed },
-      '[acp] replayed session/update events from EventStore for meta seeding',
-    );
-  }
 }
 
 /**

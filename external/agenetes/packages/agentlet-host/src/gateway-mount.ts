@@ -1,8 +1,8 @@
-import { AgentletServer } from '@agentlet/server';
+import { AgentletGateway } from '@agenetes/agentlet-gateway';
 
 import { getDaemonAuth } from './daemon-auth.js';
 
-import type { AgentletServerOptions } from '@agentlet/protocol';
+import type { AgentletGatewayOptions } from '@agenetes/agentlet-gateway';
 import type { FastifyInstance } from 'fastify';
 
 /**
@@ -22,17 +22,9 @@ import type { FastifyInstance } from 'fastify';
  */
 export const ACP_UPGRADE_PATH = '/api/acp/agent';
 
-let instance: AgentletServer | null = null;
+let instance: AgentletGateway | null = null;
 
-export interface MountAcpOptions {
-  /**
-   * Absolute directory for agentlet's persistent stores (`sessions.db`).
-   * Global, not per-canvas: the AgentletServer is a singleton whose
-   * store spans every canvas, so the host passes its server-level data
-   * directory here (the host owns the layout — this package does not
-   * resolve it).
-   */
-  storeDir: string;
+export interface MountAgentletGatewayOptions {
   /**
    * Override the default authenticator. By default we delegate to
    * {@link getDaemonAuth}, which only accepts connections carrying the
@@ -40,75 +32,94 @@ export interface MountAcpOptions {
    * is no persistence and no pairing UI: the only legitimate connection
    * comes from the agentlet we just forked.
    */
-  authenticate?: AgentletServerOptions['authenticate'];
+  authenticate?: AgentletGatewayOptions['authenticateAgentlet'];
 }
 
 /**
- * Embed `@agentlet/server` into the running Fastify HTTP server so the
+ * Mount `@agenetes/agentlet-gateway` on the running Fastify HTTP server so the
  * embedded agentlet (forked by {@link ./daemon-supervisor.ts}) can
  * connect over WebSocket. Idempotent — calling twice returns the same
  * instance.
  */
-export function mountAgentletServer(
+export function mountAgentletGateway(
   app: FastifyInstance,
-  opts: MountAcpOptions,
-): AgentletServer {
+  opts: MountAgentletGatewayOptions,
+): AgentletGateway {
   if (instance) return instance;
 
   const daemonAuth = getDaemonAuth();
 
-  const server = new AgentletServer({
-    storeDir: opts.storeDir,
-    authenticate:
+  const gateway = new AgentletGateway({
+    authenticateAgentlet:
       opts.authenticate ??
-      (async (token, meta) => daemonAuth.validate(token, meta)),
-    onConnection: (agent) => {
+      ((agentletId, token) => daemonAuth.validateAgentlet(agentletId, token)),
+    onConnection: (connection) => {
       app.log.info(
-        { sessionId: agent.sessionId, role: agent.role },
-        '[acp] agent connected',
+        {
+          agentletId: connection.agentletId,
+          sessionId: connection.sessionId,
+          role: connection.role,
+        },
+        '[acp] agentlet connection established',
       );
     },
-    onReconnection: (agent) => {
+    onReconnection: (connection) => {
       app.log.info(
-        { sessionId: agent.sessionId, role: agent.role },
-        '[acp] agent reconnected',
+        {
+          agentletId: connection.agentletId,
+          sessionId: connection.sessionId,
+          role: connection.role,
+        },
+        '[acp] agentlet connection re-established',
       );
     },
-    onDisconnection: (agent, reason) => {
+    onDisconnection: (connection, reason) => {
       app.log.info(
-        { sessionId: agent.sessionId, reason },
-        '[acp] agent disconnected',
+        {
+          agentletId: connection.agentletId,
+          sessionId: connection.sessionId,
+          reason,
+        },
+        '[acp] agentlet connection disconnected',
       );
+    },
+    logger: {
+      info: (fields, message) => app.log.info(fields, message),
+      warn: (fields, message) => app.log.warn(fields, message),
     },
   });
 
   // Attach the WS upgrade listener once the underlying HTTP server is bound.
   // Fastify exposes `app.server` after `listen()`, which is what `onReady` waits for.
   app.addHook('onReady', async () => {
-    // Initialize persistent stores before accepting connections.
-    await server.init();
     app.server.on('upgrade', (req, socket, head) => {
       if (req.url && req.url.startsWith(ACP_UPGRADE_PATH)) {
-        server.handleUpgrade(req, socket, head);
+        gateway.handleUpgrade(req, socket, head);
       }
       // Other upgrade requests are intentionally ignored here — let any
       // future WS plugin handle its own paths.
     });
     app.log.info(
-      `[acp] agentlet server mounted at ws://<host>${ACP_UPGRADE_PATH}`,
+      `[acp] Agentlet Gateway mounted at ws://<host>${ACP_UPGRADE_PATH}`,
     );
   });
 
-  app.addHook('onClose', async () => {
-    await server.close();
+  app.addHook('preClose', async () => {
+    gateway.close();
     instance = null;
   });
 
-  instance = server;
-  return server;
+  instance = gateway;
+  return gateway;
 }
 
-/** Returns the singleton instance, or null if `mountAgentletServer` was never called. */
-export function getAgentletServer(): AgentletServer | null {
+/** Returns the singleton Gateway, or null if it has not been mounted. */
+export function getAgentletGateway(): AgentletGateway | null {
   return instance;
 }
+
+/** @deprecated Use {@link getAgentletGateway}. */
+export const getAgentletServer = getAgentletGateway;
+
+/** @deprecated Use {@link MountAgentletGatewayOptions}. */
+export type MountAcpOptions = MountAgentletGatewayOptions;

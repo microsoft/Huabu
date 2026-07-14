@@ -43,7 +43,7 @@
 import {
   AgentletRequestError,
   getDaemonSupervisor,
-  getAgentletServer,
+  getAgentletGateway,
 } from '@agenetes/agentlet-host';
 
 import { AcpServiceError } from './errors.js';
@@ -109,12 +109,12 @@ export function threadKey(_canvasId: string, threadId: string): string {
 function readActiveAgentlet(): {
   agentletId: string;
 } | null {
-  const server = getAgentletServer();
-  if (!server) return null;
-  const live = server.getAgentlets();
+  const gateway = getAgentletGateway();
+  if (!gateway) return null;
+  const live = gateway.getAgentlets({ status: 'connected' });
   const agentlet = live[0];
   if (!agentlet) return null;
-  const id = agentlet.sessionId;
+  const id = agentlet.agentletId;
   if (activeAgentletId && activeAgentletId !== id) {
     threadToAgent.clear();
   }
@@ -146,13 +146,14 @@ async function waitForActiveAgentlet(
  * connection registry, or return null on timeout.
  */
 async function waitForAgentConnection(
+  agentletId: string,
   sessionId: string,
   timeoutMs: number,
 ): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const server = getAgentletServer();
-    const conn = server?.getConnection(sessionId);
+    const gateway = getAgentletGateway();
+    const conn = gateway?.getSession(agentletId, sessionId);
     if (conn?.status === 'connected') return true;
     await new Promise((r) => setTimeout(r, 100));
   }
@@ -204,7 +205,7 @@ export async function ensureAgentForThread(
   recipe: AcpBindingRecipe,
   existingSessionId?: string,
   env?: Record<string, string>,
-): Promise<{ sessionId: string; pid: number }> {
+): Promise<{ agentletId: string; sessionId: string; pid: number }> {
   const agentlet = await waitForActiveAgentlet(AGENTLET_READY_TIMEOUT_MS);
   if (!agentlet) {
     const supervisorStatus = getDaemonSupervisor().getStatus();
@@ -219,10 +220,11 @@ export async function ensureAgentForThread(
 
   const cached = threadToAgent.get(threadId);
   if (cached && cached.agentletId === agentlet.agentletId) {
-    const server = getAgentletServer();
-    const conn = server?.getConnection(cached.sessionId);
+    const gateway = getAgentletGateway();
+    const conn = gateway?.getSession(cached.agentletId, cached.sessionId);
     if (conn && conn.status === 'connected') {
       return {
+        agentletId: cached.agentletId,
         sessionId: cached.sessionId,
         pid: cached.pid,
       };
@@ -230,11 +232,11 @@ export async function ensureAgentForThread(
     threadToAgent.delete(threadId);
   }
 
-  const server = getAgentletServer();
-  if (!server) {
+  const gateway = getAgentletGateway();
+  if (!gateway) {
     throw new AcpServiceError(
       'bridge_not_mounted',
-      'agentlet server is not mounted',
+      'Agentlet Gateway is not mounted',
     );
   }
 
@@ -247,7 +249,7 @@ export async function ensureAgentForThread(
   let sessionId: string;
   let pid: number;
   try {
-    const result = await server.spawnOnAgentlet(agentlet.agentletId, {
+    const result = await gateway.spawnOnAgentlet(agentlet.agentletId, {
       appId: threadId,
       ...(existingSessionId ? { sessionId: existingSessionId } : {}),
       sessionSpec: {
@@ -284,7 +286,11 @@ export async function ensureAgentForThread(
   // we surface a `connect_timeout` — the spawn succeeded but the
   // process is silent. Common when the agent is blocked on
   // interactive auth (Copilot OAuth expired) or crashed on startup.
-  const connected = await waitForAgentConnection(sessionId, 3000);
+  const connected = await waitForAgentConnection(
+    agentlet.agentletId,
+    sessionId,
+    3000,
+  );
   if (!connected) {
     throw new AcpServiceError(
       'connect_timeout',
@@ -297,7 +303,7 @@ export async function ensureAgentForThread(
     pid,
     agentletId: agentlet.agentletId,
   });
-  return { sessionId, pid };
+  return { agentletId: agentlet.agentletId, sessionId, pid };
 }
 
 /**
@@ -308,10 +314,10 @@ export async function releaseThread(threadId: string): Promise<void> {
   const cached = threadToAgent.get(threadId);
   threadToAgent.delete(threadId);
   if (!cached) return;
-  const server = getAgentletServer();
-  if (!server) return;
+  const gateway = getAgentletGateway();
+  if (!gateway) return;
   try {
-    await server.stopOnAgentlet(cached.agentletId, {
+    await gateway.stopOnAgentlet(cached.agentletId, {
       sessionId: cached.sessionId,
     });
   } catch {
