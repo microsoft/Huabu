@@ -35,14 +35,18 @@
 import { existsSync, readdirSync, renameSync, statSync } from 'node:fs';
 import path from 'node:path';
 
+import { getLogger } from '../../utils/logger.js';
+
+const log = getLogger('migrate-canvas-to-space');
+
 /** Rename `from`→`to` only when the source exists and the target does not. */
 function renameIfPending(from: string, to: string): void {
   try {
     if (existsSync(from) && !existsSync(to)) {
       renameSync(from, to);
     }
-  } catch {
-    // tolerant: a single failed rename never aborts the batch
+  } catch (err) {
+    log.warn({ err, from, to }, 'failed to migrate legacy filename');
   }
 }
 

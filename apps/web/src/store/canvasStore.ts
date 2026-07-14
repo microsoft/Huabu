@@ -144,22 +144,6 @@ function readViewportFromStorage(canvasId: string): CanvasViewport | null {
   if (!canvasId) return null;
   const key = viewportStorageKey(canvasId);
 
-  // Migrate the current tab's value from builds that used sessionStorage.
-  try {
-    const sessionViewport = parseStoredViewport(sessionStorage.getItem(key));
-    if (sessionViewport) {
-      try {
-        localStorage.setItem(key, JSON.stringify(sessionViewport));
-        sessionStorage.removeItem(key);
-      } catch {
-        // Keep the valid session value when persistent storage is unavailable.
-      }
-      return sessionViewport;
-    }
-  } catch {
-    // Continue with persistent storage when sessionStorage is unavailable.
-  }
-
   try {
     return parseStoredViewport(localStorage.getItem(key));
   } catch {
@@ -176,17 +160,8 @@ function writeViewportToStorage(
   const key = viewportStorageKey(canvasId);
   try {
     localStorage.setItem(key, JSON.stringify(viewport));
-    try {
-      sessionStorage.removeItem(key);
-    } catch {
-      // Persistent storage succeeded; stale migration data is harmless.
-    }
   } catch {
-    try {
-      sessionStorage.setItem(key, JSON.stringify(viewport));
-    } catch {
-      // Viewport persistence must never block interaction.
-    }
+    // Viewport persistence must never block interaction.
   }
 }
 
@@ -657,7 +632,7 @@ type RFState = {
    * request survives the page close. Per-node content (markdown,
    * label, src, summary, …) is stripped before sending — it rides
    * the per-node content PUT, not this one. Viewport is intentionally
-   * excluded: it lives in `sessionStorage` per tab.
+   * excluded: it lives in local UI storage.
    *
    * `force` bypasses the in-flight coalescing guard (which normally
    * defers a concurrent save into `pendingSave`). The `beforeunload`

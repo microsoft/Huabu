@@ -99,8 +99,7 @@ body {
   border-radius: 10px;
 }
 
-.docs-search-modal
-  .pagefind-ui__result.pagefind-ui__result:last-of-type {
+.docs-search-modal .pagefind-ui__result.pagefind-ui__result:last-of-type {
   border-bottom: 1px solid #e5e7eb;
 }
 
