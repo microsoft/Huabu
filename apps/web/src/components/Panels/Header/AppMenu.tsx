@@ -5,12 +5,23 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { openUserHandbook } from '../../../config/handbook';
 import { getShortcutKeys } from '../../../config/shortcuts';
 import { useCanvasActions } from '../../../hooks/useCanvasActions';
-import { isElectron } from '../../../hooks/useElectron';
+import {
+  copySystemInfo,
+  desktopDiagnosticsAvailable,
+  isElectron,
+  openDeveloperTools,
+  openServerLog,
+} from '../../../hooks/useElectron';
+import { useRunDiagnostic } from '../../../hooks/useRunDiagnostic';
 import { useSettingsUiStore } from '../../../store/settingsUiStore';
 import { useShortcutsUiStore } from '../../../store/shortcutsUiStore';
 import { useWorkspaceStore } from '../../../store/workspaceStore';
 import { formatShortcut } from '../../../utils/platform';
-import { DropdownMenu, DropdownMenuItem } from '../../Common/DropdownMenu';
+import {
+  DropdownMenu,
+  DropdownMenuItem,
+  DropdownMenuSubmenu,
+} from '../../Common/DropdownMenu';
 
 interface AppMenuProps {
   /**
@@ -52,6 +63,8 @@ export const AppMenu: React.FC<AppMenuProps> = ({
     useCanvasActions();
   const openSettings = useSettingsUiStore((s) => s.open);
   const openShortcuts = useShortcutsUiStore((s) => s.open);
+  const diagnosticsAvailable = desktopDiagnosticsAvailable();
+  const runDiagnostic = useRunDiagnostic();
 
   const runAndClose = (fn: () => void) => () => {
     setIsOpen(false);
@@ -149,6 +162,34 @@ export const AppMenu: React.FC<AppMenuProps> = ({
         >
           {t('shortcuts.title')}
         </DropdownMenuItem>
+
+        {diagnosticsAvailable && (
+          <>
+            <div className="border-edge-default my-1 border-t" />
+            <DropdownMenuSubmenu label={t('troubleshooting.title')}>
+              <DropdownMenuItem
+                onClick={runAndClose(() => runDiagnostic(openServerLog))}
+              >
+                {t('troubleshooting.openServerLog')}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={runAndClose(() => runDiagnostic(openDeveloperTools))}
+              >
+                {t('troubleshooting.openDeveloperTools')}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={runAndClose(() =>
+                  runDiagnostic(
+                    copySystemInfo,
+                    t('troubleshooting.systemInfoCopied'),
+                  ),
+                )}
+              >
+                {t('troubleshooting.copySystemInfo')}
+              </DropdownMenuItem>
+            </DropdownMenuSubmenu>
+          </>
+        )}
       </DropdownMenu>
     </>
   );

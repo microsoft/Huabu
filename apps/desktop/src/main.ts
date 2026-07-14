@@ -36,6 +36,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import net from 'node:net';
+import { release as getOsRelease } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 
 import {
@@ -710,6 +711,61 @@ function registerWindowIpc(): void {
 }
 
 /**
+ * Desktop-only support actions exposed through the sandboxed preload bridge.
+ * Paths stay in the main process: the renderer may ask Electron to reveal the
+ * canonical server log, but never receives an arbitrary local filesystem path.
+ */
+function registerDiagnosticsIpc(): void {
+  ipcMain.handle(
+    'diagnostics:open-server-log',
+    async (): Promise<{ ok: true } | { ok: false; error: string }> => {
+      const configuredDataDir = process.env.HUABU_DATA_DIR?.trim();
+      if (getExternalServerUrl() && !configuredDataDir) {
+        return {
+          ok: false,
+          error:
+            'The external Server did not provide its data directory. Set HUABU_DATA_DIR when launching the desktop app.',
+        };
+      }
+      const dataDir = configuredDataDir
+        ? configuredDataDir
+        : join(app.getPath('userData'), 'data');
+      const logsDir = join(dataDir, 'logs');
+      const logFile = join(logsDir, 'server.log');
+      mkdirSync(logsDir, { recursive: true });
+
+      if (existsSync(logFile)) {
+        shell.showItemInFolder(logFile);
+        return { ok: true };
+      }
+
+      const error = await shell.openPath(logsDir);
+      return error ? { ok: false, error } : { ok: true };
+    },
+  );
+
+  ipcMain.handle(
+    'diagnostics:open-developer-tools',
+    (): { ok: true } | { ok: false; error: string } => {
+      const win = BrowserWindow.getFocusedWindow() ?? mainWindow;
+      if (!win || win.webContents.isDestroyed()) {
+        return { ok: false, error: 'No application window is available.' };
+      }
+      win.webContents.openDevTools();
+      return { ok: true };
+    },
+  );
+
+  ipcMain.handle('diagnostics:get-system-info', () => ({
+    appVersion: app.getVersion(),
+    platform: process.platform,
+    osRelease: getOsRelease(),
+    architecture: process.arch,
+    electronVersion: process.versions.electron,
+  }));
+}
+
+/**
  * Native folder-picker IPC.
  *
  * Routes the renderer's `pickFolder()` call to Electron's
@@ -985,6 +1041,7 @@ app.whenReady().then(async () => {
   // a handler to talk to, even on the very first render.
   registerWorkspaceIpc();
   registerWindowIpc();
+  registerDiagnosticsIpc();
   registerDialogIpc();
   registerMenuIpc(() => mainWindow);
 

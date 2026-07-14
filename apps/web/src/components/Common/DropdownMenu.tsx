@@ -1,6 +1,8 @@
+import { ChevronRight } from 'lucide-react';
 import {
   cloneElement,
   useCallback,
+  useEffect,
   useRef,
   useState,
   type ReactElement,
@@ -20,6 +22,8 @@ type DropdownMenuItemProps = {
   children: ReactNode;
   /** Optional keyboard shortcut hint rendered on the right side. */
   shortcut?: string;
+  /** Optional trailing affordance such as a submenu chevron. */
+  trailing?: ReactNode;
   className?: string;
 } & Omit<
   ButtonHTMLAttributes<HTMLButtonElement>,
@@ -33,6 +37,7 @@ export const DropdownMenuItem: React.FC<DropdownMenuItemProps> = ({
   icon,
   children,
   shortcut,
+  trailing,
   className,
   ...props
 }) => (
@@ -51,6 +56,7 @@ export const DropdownMenuItem: React.FC<DropdownMenuItemProps> = ({
     {shortcut && (
       <span className="text-fg-subtle ml-4 shrink-0 text-xs">{shortcut}</span>
     )}
+    {trailing}
   </Button>
 );
 
@@ -74,8 +80,16 @@ type DropdownMenuProps = {
    * `"bottom-right"` opens below, right-aligned.
    * `"top-left"` opens above, left-aligned.
    * `"top-right"` opens above, right-aligned.
+   * `"right-top"` opens to the right, top-aligned.
+   * `"left-top"` opens to the left, top-aligned.
    */
-  align?: 'bottom-left' | 'bottom-right' | 'top-left' | 'top-right';
+  align?:
+    | 'bottom-left'
+    | 'bottom-right'
+    | 'top-left'
+    | 'top-right'
+    | 'right-top'
+    | 'left-top';
   /** Controlled open state. When provided, the component becomes controlled. */
   open?: boolean;
   /** Called when the open state changes (controlled mode). */
@@ -134,21 +148,31 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
     });
   }, [setIsOpen]);
 
+  const opensSideways = align === 'right-top' || align === 'left-top';
   const isRight = align === 'bottom-right' || align === 'top-right';
   const isTop = align === 'top-left' || align === 'top-right';
 
   // Map DropdownMenu align → Popover anchor (vertical direction inverts)
-  const anchor =
-    `${isTop ? 'bottom' : 'top'}-${isRight ? 'right' : 'left'}` as const;
+  const anchor = opensSideways
+    ? align === 'right-top'
+      ? ('top-left' as const)
+      : ('top-right' as const)
+    : (`${isTop ? 'bottom' : 'top'}-${isRight ? 'right' : 'left'}` as const);
 
   const computePosition = useCallback(() => {
     if (!triggerRef.current) return { x: 0, y: 0 };
     const rect = triggerRef.current.getBoundingClientRect();
+    if (opensSideways) {
+      return {
+        x: align === 'right-top' ? rect.right : rect.left,
+        y: rect.top,
+      };
+    }
     return {
       x: isRight ? rect.right : rect.left,
       y: isTop ? rect.top : rect.bottom,
     };
-  }, [isRight, isTop]);
+  }, [align, isRight, isTop, opensSideways]);
 
   const clonedTrigger = cloneElement(trigger, {
     onClick: (event) => {
@@ -170,12 +194,87 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
           position={computePosition()}
           onDismiss={handleDismiss}
           anchor={anchor}
-          offset={offset ?? { x: 0, y: isTop ? -4 : 4 }}
+          offset={
+            offset ??
+            (opensSideways ? { x: 0, y: 0 } : { x: 0, y: isTop ? -4 : 4 })
+          }
           className={cn('flex flex-col overflow-hidden py-1', className)}
         >
           {children}
         </Popover>
       )}
     </>
+  );
+};
+
+type DropdownMenuSubmenuProps = {
+  label: ReactNode;
+  children: ReactNode;
+  className?: string;
+};
+
+/**
+ * A desktop-style nested menu that opens beside its parent item. It supports
+ * click, hover, and ArrowRight keyboard activation while composing the same
+ * `DropdownMenu` and `DropdownMenuItem` primitives as a top-level menu.
+ */
+export const DropdownMenuSubmenu: React.FC<DropdownMenuSubmenuProps> = ({
+  label,
+  children,
+  className,
+}) => {
+  const [open, setOpen] = useState(false);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cancelClose = useCallback(() => {
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = null;
+  }, []);
+
+  const scheduleClose = useCallback(() => {
+    cancelClose();
+    closeTimerRef.current = setTimeout(() => setOpen(false), 120);
+  }, [cancelClose]);
+
+  const openSubmenu = useCallback(() => {
+    cancelClose();
+    setOpen(true);
+  }, [cancelClose]);
+
+  useEffect(() => cancelClose, [cancelClose]);
+
+  return (
+    <div onPointerEnter={openSubmenu} onPointerLeave={scheduleClose}>
+      <DropdownMenu
+        open={open}
+        onOpenChange={setOpen}
+        align="right-top"
+        className={cn('min-w-44', className)}
+        trigger={
+          <DropdownMenuItem
+            aria-haspopup="menu"
+            trailing={
+              <ChevronRight
+                aria-hidden="true"
+                size={14}
+                className="text-fg-subtle ml-4 shrink-0"
+              />
+            }
+            onKeyDown={(event) => {
+              if (event.key === 'ArrowRight') {
+                event.preventDefault();
+                openSubmenu();
+              }
+            }}
+          >
+            {label}
+          </DropdownMenuItem>
+        }
+      >
+        <div onPointerEnter={cancelClose} onPointerLeave={scheduleClose}>
+          {children}
+        </div>
+      </DropdownMenu>
+    </div>
   );
 };

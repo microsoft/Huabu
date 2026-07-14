@@ -5,7 +5,13 @@ import { useNavigate } from 'react-router-dom';
 import { APP_NAME } from '../../config/app';
 import { openUserHandbook } from '../../config/handbook';
 import { useCanvasActions } from '../../hooks/useCanvasActions';
-import { getElectronBridge } from '../../hooks/useElectron';
+import {
+  copySystemInfo,
+  getElectronBridge,
+  openDeveloperTools,
+  openServerLog,
+} from '../../hooks/useElectron';
+import { useRunDiagnostic } from '../../hooks/useRunDiagnostic';
 import { useSettingsUiStore } from '../../store/settingsUiStore';
 import { useShortcutsUiStore } from '../../store/shortcutsUiStore';
 import { useWorkspaceStore } from '../../store/workspaceStore';
@@ -46,6 +52,7 @@ export function NativeMenuBridge() {
     useCanvasActions();
   const openSettings = useSettingsUiStore((s) => s.open);
   const openShortcuts = useShortcutsUiStore((s) => s.open);
+  const runDiagnostic = useRunDiagnostic();
 
   // Push localized labels + capability flags to the native menu. Re-runs
   // when the interface language or the workspace capability changes so
@@ -83,6 +90,10 @@ export function NativeMenuBridge() {
         settings: t('settings.title'),
         userHandbook: t('navigation.userHandbook'),
         keyboardShortcuts: t('shortcuts.title'),
+        troubleshooting: t('troubleshooting.title'),
+        openServerLog: t('troubleshooting.openServerLog'),
+        openDeveloperTools: t('troubleshooting.openDeveloperTools'),
+        copySystemInfo: t('troubleshooting.copySystemInfo'),
       },
       canChangeWorkspace,
     });
@@ -113,6 +124,15 @@ export function NativeMenuBridge() {
         case 'open-shortcuts':
           openShortcuts();
           break;
+        case 'open-server-log':
+          runDiagnostic(openServerLog);
+          break;
+        case 'open-developer-tools':
+          runDiagnostic(openDeveloperTools);
+          break;
+        case 'copy-system-info':
+          runDiagnostic(copySystemInfo, t('troubleshooting.systemInfoCopied'));
+          break;
         default:
           break;
       }
@@ -125,6 +145,8 @@ export function NativeMenuBridge() {
     navigate,
     openSettings,
     openShortcuts,
+    runDiagnostic,
+    t,
   ]);
 
   if (!enabled) return null;

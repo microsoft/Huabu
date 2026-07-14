@@ -354,6 +354,8 @@ function spawnLongRunning(filter, label, extraEnv = {}) {
 /* ─── main ────────────────────────────────────────────────────────── */
 
 async function main() {
+  const serverDataDir = path.join(repoRoot, 'apps/server/data');
+
   // 1. Prime Electron's main/preload output. tsc is fast on incremental
   //    builds; the only reason to run it every time is that changes to
   //    these files require re-running the orchestrator anyway, so a
@@ -402,6 +404,7 @@ async function main() {
   spawnLongRunning('@sediment/server', 'server', {
     SERVER_PORT: String(serverPort),
     HUABU_BIND_HOST: HOST,
+    HUABU_DATA_DIR: serverDataDir,
   });
 
   // 3. Start the standalone handbook on its resolved port. The docs Vite
@@ -450,6 +453,7 @@ async function main() {
     ...process.env,
     WEB_DEV_SERVER_URL: `http://${HOST}:${vitePort}`,
     EXTERNAL_SERVER_URL: `http://${HOST}:${serverPort}`,
+    HUABU_DATA_DIR: serverDataDir,
   };
   // VS Code's task terminal sometimes leaks this and it would make
   // `electron .` run as a plain Node process instead of an Electron app.

@@ -75,6 +75,10 @@ interface MenuLabels {
   settings: string;
   userHandbook: string;
   keyboardShortcuts: string;
+  troubleshooting: string;
+  openServerLog: string;
+  openDeveloperTools: string;
+  copySystemInfo: string;
 }
 
 interface MenuConfig {
@@ -118,6 +122,10 @@ const DEFAULT_MENU_CONFIG: MenuConfig = {
     settings: 'Settings',
     userHandbook: 'User Handbook',
     keyboardShortcuts: 'Keyboard Shortcuts',
+    troubleshooting: 'Troubleshooting',
+    openServerLog: 'Open Server Log',
+    openDeveloperTools: 'Open Developer Tools',
+    copySystemInfo: 'Copy System Information',
   },
   canChangeWorkspace: true,
 };
@@ -183,6 +191,10 @@ function normalizeMenuConfig(raw: unknown): MenuConfig {
       settings: pick('settings'),
       userHandbook: pick('userHandbook'),
       keyboardShortcuts: pick('keyboardShortcuts'),
+      troubleshooting: pick('troubleshooting'),
+      openServerLog: pick('openServerLog'),
+      openDeveloperTools: pick('openDeveloperTools'),
+      copySystemInfo: pick('copySystemInfo'),
     },
     canChangeWorkspace:
       typeof obj.canChangeWorkspace === 'boolean'
@@ -287,6 +299,24 @@ function buildMacMenu(config: MenuConfig): Menu {
         {
           label: labels.keyboardShortcuts,
           click: () => sendMenuCommand('open-shortcuts'),
+        },
+        { type: 'separator' },
+        {
+          label: labels.troubleshooting,
+          submenu: [
+            {
+              label: labels.openServerLog,
+              click: () => sendMenuCommand('open-server-log'),
+            },
+            {
+              label: labels.openDeveloperTools,
+              click: () => sendMenuCommand('open-developer-tools'),
+            },
+            {
+              label: labels.copySystemInfo,
+              click: () => sendMenuCommand('copy-system-info'),
+            },
+          ],
         },
       ],
     },
