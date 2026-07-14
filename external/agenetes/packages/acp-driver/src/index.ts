@@ -60,7 +60,12 @@ export type {
   AcpTurnOverlay,
 } from './overlay.js';
 
-export { AcpAgentHandle, ACP_CAPABILITIES, lowerAcpInputs } from './handle.js';
+export {
+  AcpAgentHandle,
+  ACP_CAPABILITIES,
+  lowerAcpInputs,
+  resolveAcpAgentletId,
+} from './handle.js';
 export type { InStreamEvent, AcpTurnCtx } from './handle.js';
 
 export { acpDriverFactory } from './driver.js';

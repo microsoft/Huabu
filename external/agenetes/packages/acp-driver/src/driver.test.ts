@@ -8,7 +8,12 @@
 import { describe, expect, it } from 'vitest';
 
 import { acpDriverFactory } from './driver.js';
-import { AcpAgentHandle, ACP_CAPABILITIES } from './handle.js';
+import {
+  AcpAgentHandle,
+  ACP_CAPABILITIES,
+  resolveAcpAgentletId,
+} from './handle.js';
+import { getSupervisedAgentletId } from '@agenetes/agentlet-host';
 
 const freshContext = {
   recovery: {
@@ -20,6 +25,24 @@ const freshContext = {
 };
 
 describe('acpDriverFactory (M5 FACTORY)', () => {
+  it('preserves explicit placement and resolves legacy specs without mutation', () => {
+    const explicit = {
+      threadId: 'thr_explicit',
+      agentletId: 'machine-b',
+      namespace: { name: 'canvas_1' },
+      binding: { alias: 'copilot', profileId: 'prof_1' },
+    };
+    const legacy = {
+      threadId: 'thr_legacy',
+      namespace: { name: 'canvas_1' },
+      binding: { alias: 'copilot', profileId: 'prof_1' },
+    };
+
+    expect(resolveAcpAgentletId(explicit)).toBe('machine-b');
+    expect(resolveAcpAgentletId(legacy)).toBe(getSupervisedAgentletId());
+    expect('agentletId' in legacy).toBe(false);
+  });
+
   it('create(spec) mints an AcpAgentHandle from the baked spec (I9.3)', () => {
     const driver = acpDriverFactory();
     const handle = driver.create(

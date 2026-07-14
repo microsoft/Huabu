@@ -11,22 +11,19 @@
  * The agentlet-facing model is a pool of live agent sessions addressed
  * by `sessionId`. This module bridges the two:
  *
- *   `ensureAgentForThread(threadId, recipe, existingSessionId?, env?)`
- *     → returns `{sessionId, pid}` for the agent currently hosting
+ *   `ensureAgentForThread(agentletId, threadId, recipe, existingSessionId?, env?)`
+ *     → returns `{agentletId, sessionId, pid}` for the explicitly targeted node
  *       that thread, spawning a new one on the agentlet if none is
  *       alive. Each thread gets its OWN CLI process; we do not share
  *       processes across threads.
  *
- *   `releaseThread(threadId)`
+ *   `releaseThread(agentletId, threadId)`
  *     → drop the cached mapping and best-effort ask the agentlet to
  *       stop the spawned agent. Used when a thread is deleted.
  *
- * Caching: the map lives in this process's memory and is keyed
- * `threadId → sessionId`. `threadId` is globally unique so there is
- * no need to include the canvasId in the key. An agentlet disconnect
- * invalidates the entire cache because the new agentlet (re-fork by
- * the supervisor) starts with an empty agent pool. We detect the swap
- * by tracking `activeAgentletId` and wiping the map whenever it changes.
+ * Caching: the map lives in this process's memory and is keyed by
+ * `(agentletId, threadId)`, so reconnecting one daemon cannot invalidate
+ * or alias sessions owned by another execution node.
  *
  * Session lifecycle: sessions are NOT eagerly destroyed. The agentlet
  * daemon auto-suspends idle sessions after `idleTimeoutSecs` and can
@@ -44,6 +41,7 @@ import {
   AgentletRequestError,
   getDaemonSupervisor,
   getAgentletGateway,
+  getSupervisedAgentletId,
 } from '@agenetes/agentlet-host';
 
 import { AcpServiceError } from './errors.js';
@@ -88,55 +86,43 @@ interface CachedAgent {
 }
 
 const threadToAgent = new Map<string, CachedAgent>();
-/**
- * The agentletId we believe is currently connected. Set on every
- * `ensureAgentForThread` call by `readActiveAgentlet`; a change drops
- * the entire cache because the previous agentlet's agents are by
- * definition dead with their parent.
- */
-let activeAgentletId: string | null = null;
 
 /** @deprecated Use threadId directly — kept for backwards compat during migration. */
 export function threadKey(_canvasId: string, threadId: string): string {
   return threadId;
 }
 
-/**
- * Resolve the single connected agentlet (we only ever run one) and
- * invalidate the per-thread cache when it has been replaced since
- * the last call. Returns `null` when no agentlet is currently online.
- */
-function readActiveAgentlet(): {
-  agentletId: string;
-} | null {
+function agentletThreadKey(agentletId: string, threadId: string): string {
+  return JSON.stringify([agentletId, threadId]);
+}
+
+/** Resolve one explicitly targeted execution node. */
+function readTargetAgentlet(agentletId: string): { agentletId: string } | null {
   const gateway = getAgentletGateway();
   if (!gateway) return null;
-  const live = gateway.getAgentlets({ status: 'connected' });
-  const agentlet = live[0];
-  if (!agentlet) return null;
-  const id = agentlet.agentletId;
-  if (activeAgentletId && activeAgentletId !== id) {
-    threadToAgent.clear();
-  }
-  activeAgentletId = id;
-  return { agentletId: id };
+  const agentlet = gateway.getAgentlet(agentletId);
+  return agentlet?.status === 'connected' ? { agentletId } : null;
 }
 
 /**
- * Poll {@link readActiveAgentlet} until an agentlet is online or
+ * Poll {@link readTargetAgentlet} until the target agentlet is online or
  * `timeoutMs` elapses. Returns the resolved descriptor or `null` on
  * timeout (or as soon as the supervisor has stopped trying).
  */
-async function waitForActiveAgentlet(
+async function waitForTargetAgentlet(
+  agentletId: string,
   timeoutMs: number,
 ): Promise<{ agentletId: string } | null> {
   const deadline = Date.now() + timeoutMs;
   const supervisor = getDaemonSupervisor();
-  let agentlet = readActiveAgentlet();
+  const supervisedAgentletId = getSupervisedAgentletId();
+  let agentlet = readTargetAgentlet(agentletId);
   while (!agentlet && Date.now() < deadline) {
-    if (supervisor.hasGivenUp()) return null;
+    if (agentletId === supervisedAgentletId && supervisor.hasGivenUp()) {
+      return null;
+    }
     await new Promise((r) => setTimeout(r, 100));
-    agentlet = readActiveAgentlet();
+    agentlet = readTargetAgentlet(agentletId);
   }
   return agentlet;
 }
@@ -197,29 +183,37 @@ async function waitForAgentConnection(
  *   • the agentlet RPC for spawn fails.
  *
  * Idempotent within a single agentlet's lifetime — repeat calls for
- * the same `threadId` return the same `sessionId` until the agent
+ * the same `(agentletId, threadId)` return the same `sessionId` until the agent
  * dies or the agentlet is re-forked.
  */
 export async function ensureAgentForThread(
+  agentletId: string,
   threadId: string,
   recipe: AcpBindingRecipe,
   existingSessionId?: string,
   env?: Record<string, string>,
 ): Promise<{ agentletId: string; sessionId: string; pid: number }> {
-  const agentlet = await waitForActiveAgentlet(AGENTLET_READY_TIMEOUT_MS);
+  const agentlet = await waitForTargetAgentlet(
+    agentletId,
+    AGENTLET_READY_TIMEOUT_MS,
+  );
   if (!agentlet) {
-    const supervisorStatus = getDaemonSupervisor().getStatus();
-    const hint = supervisorStatus.lastError
+    const supervisorStatus =
+      agentletId === getSupervisedAgentletId()
+        ? getDaemonSupervisor().getStatus()
+        : null;
+    const hint = supervisorStatus?.lastError
       ? ` (${supervisorStatus.lastError})`
       : '';
     throw new AcpServiceError(
-      'worker_not_ready',
-      `External agent worker is not ready${hint}. Try "Restart worker" in Settings → External Agents.`,
+      'placement_unavailable',
+      `Target agentlet '${agentletId}' is not connected${hint}.`,
     );
   }
 
-  const cached = threadToAgent.get(threadId);
-  if (cached && cached.agentletId === agentlet.agentletId) {
+  const cacheKey = agentletThreadKey(agentletId, threadId);
+  const cached = threadToAgent.get(cacheKey);
+  if (cached) {
     const gateway = getAgentletGateway();
     const conn = gateway?.getSession(cached.agentletId, cached.sessionId);
     if (conn && conn.status === 'connected') {
@@ -229,7 +223,7 @@ export async function ensureAgentForThread(
         pid: cached.pid,
       };
     }
-    threadToAgent.delete(threadId);
+    threadToAgent.delete(cacheKey);
   }
 
   const gateway = getAgentletGateway();
@@ -298,7 +292,7 @@ export async function ensureAgentForThread(
     );
   }
 
-  threadToAgent.set(threadId, {
+  threadToAgent.set(cacheKey, {
     sessionId,
     pid,
     agentletId: agentlet.agentletId,
@@ -310,9 +304,13 @@ export async function ensureAgentForThread(
  * Drop the cached mapping for `threadId` and best-effort ask the
  * agentlet to stop the spawned agent. Called when a thread is deleted.
  */
-export async function releaseThread(threadId: string): Promise<void> {
-  const cached = threadToAgent.get(threadId);
-  threadToAgent.delete(threadId);
+export async function releaseThread(
+  agentletId: string,
+  threadId: string,
+): Promise<void> {
+  const key = agentletThreadKey(agentletId, threadId);
+  const cached = threadToAgent.get(key);
+  threadToAgent.delete(key);
   if (!cached) return;
   const gateway = getAgentletGateway();
   if (!gateway) return;
@@ -329,5 +327,4 @@ export async function releaseThread(threadId: string): Promise<void> {
 /** Test-only: clear the cache between vitest cases. */
 export function _resetSpawnOrchestratorForTests(): void {
   threadToAgent.clear();
-  activeAgentletId = null;
 }

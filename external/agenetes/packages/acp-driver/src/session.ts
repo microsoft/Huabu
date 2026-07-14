@@ -104,7 +104,7 @@ export function setAcpProfileCachePort(port: AcpProfileCachePort | null): void {
 
 // ─── Up-report channel (I9.7) ─────────────────────────────────────────────
 //
-// The instance's per-thread up-report listeners, keyed by threadId. The
+// The instance's per-thread up-report listeners, keyed by placement + threadId. The
 // owning `AcpAgentHandle` registers one via `registerAcpStateListener` when
 // the Agenetes instance wires it (`handle.onState`), independent of whether
 // a `run` is active — so an out-of-turn set-RPC (which resolves an entry
@@ -117,19 +117,25 @@ const stateListeners = new Map<
   (snapshot: AgentStateSnapshot) => void
 >();
 
+function placementThreadKey(agentletId: string, threadId: string): string {
+  return JSON.stringify([agentletId, threadId]);
+}
+
 /**
  * Register (replace) the up-report listener for `threadId`. Returns an
  * unsubscribe that removes it only if it is still the current listener.
  * Called by {@link AcpAgentHandle.onState}.
  */
 export function registerAcpStateListener(
+  agentletId: string,
   threadId: string,
   listener: (snapshot: AgentStateSnapshot) => void,
 ): () => void {
-  stateListeners.set(threadId, listener);
+  const key = placementThreadKey(agentletId, threadId);
+  stateListeners.set(key, listener);
   return () => {
-    if (stateListeners.get(threadId) === listener) {
-      stateListeners.delete(threadId);
+    if (stateListeners.get(key) === listener) {
+      stateListeners.delete(key);
     }
   };
 }
@@ -143,14 +149,21 @@ export function registerAcpStateListener(
  * once it resolves the entry.
  */
 export function reportEntryState(entry: AcpSessionEntry): void {
-  const threadId = findThreadIdForEntry(entry);
-  if (!threadId) return;
-  stateListeners.get(threadId)?.(snapshotEntryState(entry));
+  if (
+    acpSessionRegistry.get(entry.agentletId, entry.threadId) !== entry
+  ) {
+    return;
+  }
+  stateListeners
+    .get(placementThreadKey(entry.agentletId, entry.threadId))
+    ?.(snapshotEntryState(entry));
 }
 
 // ─── Session lifecycle helper ─────────────────────────────────────────────
 
 export interface EnsureAcpSessionOptions {
+  /** Explicit execution-node placement for this session. */
+  agentletId: string;
   threadId: string;
   /** External binding for the thread (see {@link RunAcpAgentOptions.binding}). */
   binding: { alias: string; profileId: string };
@@ -200,7 +213,7 @@ export interface EnsureAcpSessionOptions {
 /**
  * Per-key map of in-flight `ensureAcpSession` work, used to coalesce
  * concurrent callers so we never run `initialize() + session/new`
- * twice for the same `{threadId, profileId, scopeName}` triple.
+ * twice for the same `{agentletId, threadId, profileId, scopeName}` tuple.
  *
  * Why this matters: the ChatPanel mount fires
  * `POST /api/acp/threads/:id/session` to warm the slash-command cache,
@@ -211,18 +224,19 @@ export interface EnsureAcpSessionOptions {
  * `shutdown()`s the first client — which silently invalidates the
  * first request's listener registration and wastes one round-trip.
  *
- * Keying by all three staleness inputs means: different profile / scope
- * / thread → independent slots, so a binding switch is never blocked
+ * Keying by all four staleness inputs means: different placement / profile /
+ * scope / thread → independent slots, so a binding switch is never blocked
  * waiting on a stale promise.
  */
 const inflightEnsureSessions = new Map<string, Promise<AcpSessionEntry>>();
 
 function ensureSessionKey(
+  agentletId: string,
   threadId: string,
   profileId: string,
   scopeName: string,
 ): string {
-  return `${threadId}|${profileId}|${scopeName}`;
+  return JSON.stringify([agentletId, threadId, profileId, scopeName]);
 }
 
 /**
@@ -265,20 +279,6 @@ export function snapshotEntryState(entry: AcpSessionEntry): AgentStateSnapshot {
     metadata: snapshotEntryMeta(entry),
     initialPreambleDelivered: entry.initialPreambleDelivered,
   };
-}
-
-/**
- * Reverse-lookup the threadId for a registry entry. The registry maps
- * threadId → entry but the entry itself doesn't carry the threadId. Used by
- * {@link reportEntryState} to key the up-report listener map. Linear scan
- * over O(threads-on-this-server) — a single server holds a handful of live
- * ACP sessions, and this only runs on the meta-update path.
- */
-function findThreadIdForEntry(entry: AcpSessionEntry): string | null {
-  for (const [threadId, candidate] of acpSessionRegistry.entries()) {
-    if (candidate === entry) return threadId;
-  }
-  return null;
 }
 
 /**
@@ -409,6 +409,7 @@ export async function ensureAcpSession(
   opts: EnsureAcpSessionOptions,
 ): Promise<AcpSessionEntry> {
   const key = ensureSessionKey(
+    opts.agentletId,
     opts.threadId,
     opts.binding.profileId,
     opts.namespace.name,
@@ -434,7 +435,7 @@ export async function ensureAcpSession(
 async function ensureAcpSessionInner(
   opts: EnsureAcpSessionOptions,
 ): Promise<AcpSessionEntry> {
-  const { threadId, binding, logger } = opts;
+  const { agentletId, threadId, binding, logger } = opts;
   const namespace = opts.namespace;
   const scopeName = namespace.name;
   // Down-feed (I9.7): the durable snapshot the instance read off the
@@ -473,7 +474,8 @@ async function ensureAcpSessionInner(
   // the daemon can resume a suspended session instead of creating new.
   // Failures here surface as a 503 from the caller with a user-actionable
   // hint pointing at Settings → External Agents.
-  const { agentletId, sessionId: agentSessionId } = await ensureAgentForThread(
+  const { sessionId: agentSessionId } = await ensureAgentForThread(
+    agentletId,
     threadId,
     recipe,
     priorSessionId,
@@ -492,7 +494,7 @@ async function ensureAcpSessionInner(
     );
   }
 
-  let entry = acpSessionRegistry.get(threadId);
+  let entry = acpSessionRegistry.get(agentletId, threadId);
   if (entry && entry.namespace.name !== scopeName) {
     logger.info(
       {
@@ -506,7 +508,7 @@ async function ensureAcpSessionInner(
     // scope switch already writes under the new namespace and the old
     // record simply lingers unread — the instance (sole store writer) owns
     // any cleanup, not the driver. We only drop the live in-memory entry.
-    acpSessionRegistry.remove(threadId);
+    acpSessionRegistry.remove(agentletId, threadId);
     entry = undefined;
   }
   if (entry && entry.client.isClosed) {
@@ -514,7 +516,7 @@ async function ensureAcpSessionInner(
       { threadId },
       '[acp] stored session client was closed \u2014 reopening',
     );
-    acpSessionRegistry.remove(threadId);
+    acpSessionRegistry.remove(agentletId, threadId);
     entry = undefined;
   }
   if (entry) {
@@ -562,6 +564,8 @@ async function ensureAcpSessionInner(
   const sessionId = agentSessionId;
 
   const created: AcpSessionEntry = {
+    agentletId,
+    threadId,
     client,
     sessionId,
     profileId: binding.profileId,
@@ -659,7 +663,7 @@ async function ensureAcpSessionInner(
     }
   }
 
-  acpSessionRegistry.set(threadId, created);
+  acpSessionRegistry.set(agentletId, threadId, created);
 
   // The durable record is refreshed via the up-report channel (I9.7): the
   // owning handle installs `reportState` on this entry the moment it

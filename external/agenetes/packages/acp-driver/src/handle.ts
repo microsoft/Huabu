@@ -35,6 +35,7 @@
  */
 
 import { resolveAgentInputs } from '@agenetes/protocol';
+import { getSupervisedAgentletId } from '@agenetes/agentlet-host';
 import {
   classifyAgentRealization,
   HistoryLoadDeniedError,
@@ -161,12 +162,22 @@ export interface AcpCreateSpec {
   readonly namespace: Namespace;
   /** External binding (alias + profileId) for the thread. */
   readonly binding: { readonly alias: string; readonly profileId: string };
+  /**
+   * Explicit execution-node placement. Optional only when reading legacy
+   * persisted specs; newly compiled specs must always provide it.
+   */
+  readonly agentletId?: string;
   /** `cwd` for `session/new`; when omitted, derived from the bound recipe. */
   readonly cwd?: string;
   /** Pre-resolved spawn recipe for a first-time thread (host-resolved). */
   readonly recipe?: AcpBindingRecipe | null;
   /** L1-assembled agent reachback env, passed through to the spawn call. */
   readonly env?: Record<string, string>;
+}
+
+/** Resolve explicit placement or the read-only legacy local fallback. */
+export function resolveAcpAgentletId(spec: AcpCreateSpec): string {
+  return spec.agentletId ?? getSupervisedAgentletId();
 }
 
 /** The per-turn context an {@link AcpAgentHandle.run} accepts. */
@@ -244,7 +255,11 @@ export class AcpAgentHandle<
   constructor(
     private readonly spec: AcpCreateSpec,
     private readonly createContext: AgentCreateContext<AcpCreateSpec>,
-  ) {}
+  ) {
+    this.agentletId = resolveAcpAgentletId(spec);
+  }
+
+  private readonly agentletId: string;
 
   private async authorizeHistoryLoad(
     mode: 'recover' | 'fork',
@@ -304,6 +319,7 @@ export class AcpAgentHandle<
     logger: AcpSessionLogger,
   ): Promise<AcpSessionEntry> {
     return ensureAcpSession({
+      agentletId: this.agentletId,
       threadId: this.spec.threadId,
       binding: this.spec.binding,
       namespace: this.spec.namespace,
@@ -324,7 +340,11 @@ export class AcpAgentHandle<
    * Deployment handle.
    */
   onState(listener: (snapshot: AgentStateSnapshot) => void): () => void {
-    return registerAcpStateListener(this.spec.threadId, listener);
+    return registerAcpStateListener(
+      this.agentletId,
+      this.spec.threadId,
+      listener,
+    );
   }
 
   async *run(
@@ -579,7 +599,10 @@ export class AcpAgentHandle<
     // Resolve the live session out-of-turn. A control op with no live
     // session to act on is a precondition failure — we do NOT lazily spawn
     // one just to, e.g., set a mode (§3.6.2 / M2.6).
-    const entry = acpSessionRegistry.get(this.spec.threadId);
+    const entry = acpSessionRegistry.get(
+      this.agentletId,
+      this.spec.threadId,
+    );
     if (!entry) {
       return {
         ok: false,
@@ -640,6 +663,6 @@ export class AcpAgentHandle<
    * registry. Idempotent — a no-op when no session is live.
    */
   close(): void {
-    acpSessionRegistry.remove(this.spec.threadId);
+    acpSessionRegistry.remove(this.agentletId, this.spec.threadId);
   }
 }

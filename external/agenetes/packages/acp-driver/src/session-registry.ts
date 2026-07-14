@@ -1,5 +1,5 @@
 /**
- * Per-process registry of live ACP sessions, keyed by Sediment threadId.
+ * Per-process registry of live ACP sessions, keyed by agentletId + threadId.
  *
  * Persistence model: every Sediment chat thread bound to an external
  * agent (`AgentBindingExternal`) owns one long-lived ACP session on
@@ -43,6 +43,10 @@ import type {
 
 /** A single live ACP session owned by one Sediment thread. */
 export interface AcpSessionEntry {
+  /** Execution node that owns this session. */
+  agentletId: string;
+  /** Agenetes thread that owns this session. */
+  threadId: string;
   /** The shared ACP client that talks to the agentlet `AgentConnection`. */
   client: AcpAgentClient;
   /** ACP session id returned by `session/new`. */
@@ -186,48 +190,43 @@ export interface AcpSessionEntry {
 }
 
 class AcpSessionRegistry {
-  private readonly byThread = new Map<string, AcpSessionEntry>();
+  private readonly byPlacementAndThread = new Map<string, AcpSessionEntry>();
 
-  /** Look up the session bound to `threadId`, if any. */
-  get(threadId: string): AcpSessionEntry | undefined {
-    return this.byThread.get(threadId);
+  /** Look up the session bound to one placement/thread pair. */
+  get(agentletId: string, threadId: string): AcpSessionEntry | undefined {
+    return this.byPlacementAndThread.get(registryKey(agentletId, threadId));
   }
 
-  /** Register a fresh session for `threadId`. Overwrites any prior entry. */
-  set(threadId: string, entry: AcpSessionEntry): void {
-    const prior = this.byThread.get(threadId);
+  /** Register a fresh session for one placement/thread pair. */
+  set(agentletId: string, threadId: string, entry: AcpSessionEntry): void {
+    const key = registryKey(agentletId, threadId);
+    const prior = this.byPlacementAndThread.get(key);
     if (prior && prior !== entry) {
       prior.client.shutdown('session_replaced');
     }
-    this.byThread.set(threadId, entry);
+    this.byPlacementAndThread.set(key, entry);
   }
 
   /**
    * Drop and shutdown the session bound to `threadId`.
    * Returns true if an entry was removed.
    */
-  remove(threadId: string): boolean {
-    const entry = this.byThread.get(threadId);
+  remove(agentletId: string, threadId: string): boolean {
+    const key = registryKey(agentletId, threadId);
+    const entry = this.byPlacementAndThread.get(key);
     if (!entry) return false;
     entry.client.shutdown('thread_session_removed');
-    return this.byThread.delete(threadId);
+    return this.byPlacementAndThread.delete(key);
   }
 
   /** Number of live sessions \u2014 used by tests / diagnostics. */
   get size(): number {
-    return this.byThread.size;
+    return this.byPlacementAndThread.size;
   }
+}
 
-  /**
-   * Iterate over all live `(threadId, entry)` pairs. Used by
-   * persistence helpers in service.ts that need to reverse-look-up the
-   * threadId for an entry. The returned iterator is a thin pass-through
-   * to the underlying Map iterator and is invalidated by concurrent
-   * mutation — callers MUST NOT call `set`/`remove` mid-iteration.
-   */
-  entries(): IterableIterator<[string, AcpSessionEntry]> {
-    return this.byThread.entries();
-  }
+function registryKey(agentletId: string, threadId: string): string {
+  return JSON.stringify([agentletId, threadId]);
 }
 
 /** Process-wide singleton. */

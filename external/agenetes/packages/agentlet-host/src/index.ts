@@ -28,6 +28,13 @@ import type {
 } from '@agenetes/agentlet-gateway';
 import type { FastifyInstance } from 'fastify';
 
+const supervisedAgentletId = hostname();
+
+/** Machine identity used by Sediment's supervised local daemon. */
+export function getSupervisedAgentletId(): string {
+  return supervisedAgentletId;
+}
+
 export {
   ACP_UPGRADE_PATH,
   getAgentletGateway,
@@ -101,7 +108,7 @@ export function mountAgenetes(
   app: FastifyInstance,
   opts: MountAgenetesOptions,
 ): AgentletGateway {
-  const agentletId = hostname();
+  const agentletId = getSupervisedAgentletId();
   getDaemonAuth().configure(agentletId, opts.connectionToken);
 
   const gateway = mountAgentletGateway(app, {
