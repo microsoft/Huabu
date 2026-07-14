@@ -5,6 +5,7 @@ import {
   agentTeamRootKey,
   sameAgentTeamRoot,
 } from './identity.js';
+import { AgentTeamError } from './errors.js';
 import { agentTeamMemberSecretId } from './secret-id.js';
 
 import type { AgentTeamSetupProgressParams } from '@agentlet/protocol';
@@ -13,6 +14,8 @@ import type {
   AgentTeamDeployment,
   AgentTeamMemberConfigView,
   AgentTeamMember,
+  AgentTeamRegistryChangeErrorHandler,
+  AgentTeamRegistryChangeHandler,
   AgentTeamRegistryState,
   AgentTeamRegistryStore,
   AgentTeamRescanResult,
@@ -69,6 +72,10 @@ export class AgentTeamRegistry {
     { epoch: number; promise: Promise<AgentTeamRescanResult> }
   >();
   private readonly unsubscribeSetupProgress?: () => void;
+  private readonly changeSubscriptions = new Set<{
+    handler: AgentTeamRegistryChangeHandler;
+    onError: AgentTeamRegistryChangeErrorHandler;
+  }>();
 
   constructor(
     private readonly store: AgentTeamRegistryStore,
@@ -90,6 +97,16 @@ export class AgentTeamRegistry {
 
   dispose(): void {
     this.unsubscribeSetupProgress?.();
+    this.changeSubscriptions.clear();
+  }
+
+  onChange(
+    handler: AgentTeamRegistryChangeHandler,
+    onError: AgentTeamRegistryChangeErrorHandler,
+  ): () => void {
+    const subscription = { handler, onError };
+    this.changeSubscriptions.add(subscription);
+    return () => this.changeSubscriptions.delete(subscription);
   }
 
   listRoots(): AgentTeamRoot[] {
@@ -200,12 +217,14 @@ export class AgentTeamRegistry {
     for (const [name, value] of Object.entries(updates)) {
       const field = fields.get(name);
       if (!field) {
-        throw new Error(
+        throw new AgentTeamError(
+          'config_field_not_found',
           `Agent Team member does not declare environment field: ${name}`,
         );
       }
       if (typeof value !== 'string' && value !== null) {
-        throw new Error(
+        throw new AgentTeamError(
+          'invalid_config_value',
           `Agent Team config value must be a string or null: ${name}`,
         );
       }
@@ -245,6 +264,8 @@ export class AgentTeamRegistry {
     try {
       if (ordinaryChanged) {
         this.commit({ ...cloneState(this.state), configs });
+      } else if (Object.keys(secretUpdates).length > 0) {
+        this.notifyChange();
       }
     } catch (error) {
       if (Object.keys(secretUpdates).length > 0 && this.secretStore) {
@@ -332,7 +353,10 @@ export class AgentTeamRegistry {
       (deployment) => deployment.id === id,
     );
     if (!current) {
-      throw new Error(`Agent Team deployment not found: ${id}`);
+      throw new AgentTeamError(
+        'deployment_not_found',
+        `Agent Team deployment not found: ${id}`,
+      );
     }
     if (input.alias !== undefined && input.alias !== current.alias) {
       this.assertAliasAvailable(input.alias, id);
@@ -346,7 +370,8 @@ export class AgentTeamRegistry {
       placementChanged &&
       (current.enabled || current.setup.status === 'setting_up')
     ) {
-      throw new Error(
+      throw new AgentTeamError(
+        'deployment_busy',
         `Disable Agent Team deployment before changing placement: ${id}`,
       );
     }
@@ -382,7 +407,8 @@ export class AgentTeamRegistry {
       (deployment) => deployment.id === id,
     );
     if (current?.enabled || current?.setup.status === 'setting_up') {
-      throw new Error(
+      throw new AgentTeamError(
+        'deployment_busy',
         `Disable Agent Team deployment before deleting it: ${id}`,
       );
     }
@@ -398,7 +424,8 @@ export class AgentTeamRegistry {
     const deployment = this.requireDeployment(id);
     if (deployment.enabled) return structuredClone(deployment);
     if (deployment.setup.status === 'setting_up') {
-      throw new Error(
+      throw new AgentTeamError(
+        'deployment_busy',
         `Agent Team deployment setup transition is already in progress: ${id}`,
       );
     }
@@ -408,7 +435,8 @@ export class AgentTeamRegistry {
   async retryDeploymentSetup(id: string): Promise<AgentTeamDeployment> {
     const deployment = this.requireDeployment(id);
     if (!deployment.enabled || deployment.setup.status !== 'error') {
-      throw new Error(
+      throw new AgentTeamError(
+        'invalid_setup_transition',
         `Agent Team deployment is not eligible for setup retry: ${id}`,
       );
     }
@@ -457,7 +485,7 @@ export class AgentTeamRegistry {
           deployment.setup.operationId,
           error,
         );
-        throw new Error(error.message);
+        throw new AgentTeamError('setup_cancel_rejected', error.message);
       }
     } catch (error) {
       const current = this.requireDeployment(id);
@@ -491,7 +519,10 @@ export class AgentTeamRegistry {
 
   async addRoot(root: AgentTeamRootRef): Promise<AgentTeamRescanResult> {
     if (!root.machine.trim() || !root.path.trim()) {
-      throw new Error('Agent Team root machine and path must be non-empty');
+      throw new AgentTeamError(
+        'invalid_root',
+        'Agent Team root machine and path must be non-empty',
+      );
     }
     if (!this.findRoot(root)) {
       this.bumpRootEpoch(root);
@@ -526,7 +557,10 @@ export class AgentTeamRegistry {
   ): Promise<AgentTeamRescanResult> {
     const existingRoot = this.findRoot(root);
     if (!existingRoot) {
-      throw new Error(`Agent Team root not found: ${agentTeamRootKey(root)}`);
+      throw new AgentTeamError(
+        'root_not_found',
+        `Agent Team root not found: ${agentTeamRootKey(root)}`,
+      );
     }
 
     const attemptedAt = this.now();
@@ -537,7 +571,8 @@ export class AgentTeamRegistry {
       });
     } catch (error) {
       if (!this.isCurrentRoot(root, epoch)) {
-        throw new Error(
+        throw new AgentTeamError(
+          'root_scan_stale',
           `Agent Team root was removed or replaced during scan: ${agentTeamRootKey(root)}`,
         );
       }
@@ -556,7 +591,8 @@ export class AgentTeamRegistry {
     }
 
     if (!this.isCurrentRoot(root, epoch)) {
-      throw new Error(
+      throw new AgentTeamError(
+        'root_scan_stale',
         `Agent Team root was removed or replaced during scan: ${agentTeamRootKey(root)}`,
       );
     }
@@ -670,7 +706,8 @@ export class AgentTeamRegistry {
       deployment.manifestPath,
     );
     if (!config.ready) {
-      throw new Error(
+      throw new AgentTeamError(
+        'config_incomplete',
         `Agent Team deployment is missing required Configs: ${config.missingRequired.join(', ')}`,
       );
     }
@@ -835,7 +872,10 @@ export class AgentTeamRegistry {
       (candidate) => candidate.id === id,
     );
     if (!deployment) {
-      throw new Error(`Agent Team deployment not found: ${id}`);
+      throw new AgentTeamError(
+        'deployment_not_found',
+        `Agent Team deployment not found: ${id}`,
+      );
     }
     return deployment;
   }
@@ -862,7 +902,8 @@ export class AgentTeamRegistry {
   ): AgentTeamMember {
     const member = this.requireMember(machine, manifestPath);
     if (member.status !== 'active') {
-      throw new Error(
+      throw new AgentTeamError(
+        'member_missing',
         `Agent Team member is missing: ${agentTeamMemberKey(member)}`,
       );
     }
@@ -879,7 +920,8 @@ export class AgentTeamRegistry {
         candidate.manifestPath === manifestPath,
     );
     if (!member) {
-      throw new Error(
+      throw new AgentTeamError(
+        'member_not_found',
         `Agent Team member not found: ${agentTeamMemberKey({ machine, manifestPath })}`,
       );
     }
@@ -888,7 +930,8 @@ export class AgentTeamRegistry {
 
   private assertAliasAvailable(alias: string, currentId?: string): void {
     if (!alias.trim() || alias.trim() !== alias) {
-      throw new Error(
+      throw new AgentTeamError(
+        'invalid_alias',
         'Agent Team deployment alias must be non-empty without surrounding whitespace',
       );
     }
@@ -898,7 +941,10 @@ export class AgentTeamRegistry {
           deployment.alias === alias && deployment.id !== currentId,
       )
     ) {
-      throw new Error(`Agent Team deployment alias already exists: ${alias}`);
+      throw new AgentTeamError(
+        'alias_conflict',
+        `Agent Team deployment alias already exists: ${alias}`,
+      );
     }
   }
 
@@ -907,7 +953,8 @@ export class AgentTeamRegistry {
     harness: string,
   ): void {
     if (!member.harnesses.includes(harness)) {
-      throw new Error(
+      throw new AgentTeamError(
+        'unsupported_harness',
         `Harness "${harness}" is not declared by Agent Team member ${agentTeamMemberKey(member)}`,
       );
     }
@@ -915,7 +962,10 @@ export class AgentTeamRegistry {
 
   private assertWorkingDirPath(workingDirPath: string): void {
     if (!workingDirPath.trim()) {
-      throw new Error('Agent Team workingDirPath must be non-empty');
+      throw new AgentTeamError(
+        'invalid_working_directory',
+        'Agent Team workingDirPath must be non-empty',
+      );
     }
   }
 
@@ -934,5 +984,16 @@ export class AgentTeamRegistry {
   private commit(nextState: AgentTeamRegistryState): void {
     this.store.save(nextState);
     this.state = cloneState(nextState);
+    this.notifyChange();
+  }
+
+  private notifyChange(): void {
+    for (const { handler, onError } of this.changeSubscriptions) {
+      try {
+        handler();
+      } catch (error) {
+        onError(error);
+      }
+    }
   }
 }

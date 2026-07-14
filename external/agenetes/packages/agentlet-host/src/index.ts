@@ -71,6 +71,8 @@ export type AgentConnection = Omit<
 >;
 export type { AcpMessage } from '@agentlet/protocol';
 export { AgentletRequestError } from '@agenetes/agentlet-gateway';
+export { AgentTeamError } from '@agenetes/agent-team';
+export type { AgentTeamRegistry } from '@agenetes/agent-team';
 
 /** Host-injected configuration for {@link mountAgenetes}. */
 export interface MountAgenetesOptions {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { AgentTeamRegistry } from './registry.js';
 import { agentTeamMemberSecretId } from './secret-id.js';
@@ -90,6 +90,40 @@ async function createRegistry(options?: {
 }
 
 describe('Agent Team member Configs', () => {
+  it('notifies subscribers after a secret-only update', async () => {
+    const { registry } = await createRegistry();
+    const handler = vi.fn();
+    registry.onChange(handler, vi.fn());
+
+    await registry.updateMemberConfigs(machine, manifestPath, {
+      TOKEN: 'secret',
+    });
+
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it('isolates subscriber failures from secret persistence', async () => {
+    const { registry } = await createRegistry();
+    const subscriberError = new Error('subscriber failed');
+    const onError = vi.fn();
+    registry.onChange(() => {
+      throw subscriberError;
+    }, onError);
+
+    await expect(
+      registry.updateMemberConfigs(machine, manifestPath, {
+        TOKEN: 'secret',
+      }),
+    ).resolves.toMatchObject({ ready: false });
+
+    expect(onError).toHaveBeenCalledWith(subscriberError);
+    expect(
+      registry
+        .getMemberConfig(machine, manifestPath)
+        .fields.find((field) => field.name === 'TOKEN'),
+    ).toMatchObject({ configured: true });
+  });
+
   it('combines defaults and overrides while redacting secret values', async () => {
     const { registry, store } = await createRegistry();
 

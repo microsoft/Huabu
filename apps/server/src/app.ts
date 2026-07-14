@@ -21,6 +21,7 @@ import {
   resolveDaemonEntry,
 } from './modules/agent/acp/index.js';
 import agentRoutes from './modules/agent/agent.route.js';
+import agentTeamRoutes from './modules/agent-team/agent-team.route.js';
 import intentRoutes from './modules/agent/intent.route.js';
 import llmRoutes from './modules/agent/llm.route.js';
 import { registerOpCounterHook } from './modules/agent/memory/op-counter-hook.js';
@@ -227,6 +228,7 @@ app.register(integrationsRoutes, { prefix: '/api/integrations' });
 app.register(skillsRoutes, { prefix: '/api/skills' });
 app.register(workspaceRoutes, { prefix: '/api/workspace' });
 app.register(rfsRoutes, { prefix: '/api/rfs' });
+app.register(agentTeamRoutes, { prefix: '/api/agent-team' });
 
 // ── External agent (ACP) transport host ───────────────────────────────
 // Mount the Agenetes agentlet transport host (`@agenetes/agentlet-host`).

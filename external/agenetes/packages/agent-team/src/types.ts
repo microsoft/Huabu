@@ -120,6 +120,9 @@ export interface AgentTeamRegistryStore {
   save(state: AgentTeamRegistryState): void;
 }
 
+export type AgentTeamRegistryChangeHandler = () => void;
+export type AgentTeamRegistryChangeErrorHandler = (error: unknown) => void;
+
 export interface AgentTeamScanPort {
   scanAgentTeams(
     machine: string,

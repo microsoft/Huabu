@@ -2,7 +2,7 @@
 
 > Redesign Agent Teams as a Huabu-managed experience so non-expert users do not need to operate agentlet or manually register an External Agent profile.
 >
-> Status: **Draft** · Last updated: 2026-07-13 · Tracks: [#253](https://github.com/hai-team/Sediment/issues/253)
+> Status: **Draft** · Last updated: 2026-07-14 · Tracks: [#253](https://github.com/hai-team/Sediment/issues/253)
 
 ---
 
@@ -142,6 +142,8 @@ The first version does not resume setup operations across Huabu, Agenetes, daemo
 Turning off the enable toggle during `setting_up` immediately records disabled intent and asks the daemon to cancel the active setup operation. A successful cancellation returns the deployment to `disabled`; cancellation failures remain visible rather than allowing an unreported background operation.
 
 The implemented Agenetes state machine persists enabled intent, operation identity, setup status, structured errors, and a bounded phase log before and during daemon operations. Progress is matched by both machine and operation ID, so stale notifications are ignored and terminal progress that arrives before the setup or cancellation response is retained. Placement changes and deletion are rejected while setup or cancellation is active.
+
+The first-version `/api/agent-team/settings/*` read, mutation, and SSE routes are loopback-only because their redacted read model still exposes daemon filesystem paths and their mutations can write secrets or execute package-defined setup code. The Huabu adapter validates every request through shared Zod contracts and projects full redacted Settings snapshots; asynchronous registry changes publish replacement snapshots over SSE.
 
 Disabling a ready deployment immediately rejects new create and run calls and closes all live handles bound to that deployment. Durable threads are retained and may recover after the deployment is enabled and ready again, provided its placement revision has not changed.
 

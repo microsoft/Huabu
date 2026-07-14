@@ -30,6 +30,20 @@ export const routes = {
   // ── Integrations (third-party API keys) ──────────────────────────
   integrationsConfig: '/integrations/config',
 
+  // ── Agent Team Settings (loopback-only) ─────────────────────────
+  agentTeamSettings: '/agent-team/settings',
+  agentTeamSettingsEvents: '/agent-team/settings/events',
+  agentTeamRoots: '/agent-team/settings/roots',
+  agentTeamRootsRescan: '/agent-team/settings/roots/rescan',
+  agentTeamConfigs: '/agent-team/settings/configs',
+  agentTeamDeployments: '/agent-team/settings/deployments',
+  agentTeamDeployment: (id: string) =>
+    `/agent-team/settings/deployments/${enc(id)}`,
+  agentTeamDeploymentAction: (
+    id: string,
+    action: 'enable' | 'disable' | 'retry',
+  ) => `/agent-team/settings/deployments/${enc(id)}/${action}`,
+
   // ── Canvas ────────────────────────────────────────────────────────
   canvasList: '/canvas',
   canvasImport: '/canvas/import',
