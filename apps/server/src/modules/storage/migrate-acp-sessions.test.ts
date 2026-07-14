@@ -4,7 +4,7 @@
  *   ✓ folds a self-contained v3 record into a reconstructed ThreadRecord
  *     (spec kind/workloadType/namespace/binding/recipe + state.sessionId)
  *   ✓ maps the v3 `meta` snapshot 1:1 onto state.metadata
- *   ✓ persists `spec.namespace.name` as the real canvasId (from space.json)
+ *   ✓ persists `spec.namespace.name` as the canonical canvasId
  *   ✓ skips a v2 (recipe-absent) record
  *   ✓ never clobbers a thread already present in threads.json
  *   ✓ renames the source to `.bak`; a second sweep is a no-op
@@ -63,7 +63,7 @@ const V2_RECORD = {
   // no bindingRecipe → v2 → must be skipped
 };
 
-/** Seed a Space with space.json + an acp-sessions.json v3 file. */
+/** Seed a Space with topology and an acp-sessions.json v3 file. */
 function seedCanvas(
   dirName: string,
   canvasId: string,
@@ -94,7 +94,7 @@ describe('migrateLegacyAcpSessions', () => {
     expect(v3).toBeDefined();
     expect(v3?.spec.kind).toBe('external');
     expect(v3?.spec.workloadType).toBe('Deployment');
-    // namespace.name persisted as the real canvasId (from space.json).
+    // namespace.name persisted as the canonical canvasId.
     expect(v3?.spec.namespace.name).toBe('canvas-42');
     expect(v3?.spec.binding).toEqual({
       alias: 'Claude',

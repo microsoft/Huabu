@@ -97,7 +97,7 @@ export const webSearchTool: ToolDefinition = {
 // Boundary with `read`: anything in the node markdown frontmatter
 // (label, type, src, content, summary, keywords) lives in
 // `nodes/*.md` and is owned by `read`. The three canvas tools
-// own everything in `space.json` (position/size/parent/style on
+// own structural state (position/size/parent/style on
 // nodes, EdgeStyle on edges) plus derived spatial/topological
 // metadata.
 //
@@ -242,7 +242,7 @@ export const inspectNodesParamsSchema = Type.Object({
 export const inspectNodesTool: ToolDefinition = {
   name: 'inspect_nodes',
   label: 'Inspect Nodes',
-  description: `Find nodes by predicate (attribute / spatial / topological) and return each match with full geometry + visual style + derived fields. Predicates AND together. **Always supply at least one predicate** — calling with no predicates returns every node, which is wasteful; for whole-Space reads use get_space_outline instead. Returns JSON: { count, total, truncated, arrangement?, nodes: [{ id, type, label, filename, parentFrame?: { id, label? }, position, size: { width, height }, style?, distance?, centerDistance?, direction?, edgeIds?, hops?, clusterId? }] }. \`count\` is items in this response (≤ limit); \`total\` is the full match count before \`limit\` was applied — when \`truncated:true\`, raise \`limit\` to ≥\`total\` or refine your query. \`arrangement\` is a human-readable summary of the matched node set's layout (e.g. "4 nodes in a horizontal row", "6 nodes in a 2×3 grid", "3 nodes in a vertical column", "5 nodes scattered"); only emitted when \`count >= 2\`. Note on connectedTo: the target node itself is excluded from results. Use this for "where is X?" (ids), "what's near X?" (nearNode), "what connects to X?" (connectedTo), "what's in this region?" (inRect), or any combination. For full node content (label/text/summary/keywords) call read on the \`filename\` field ("nodes/*.md") — only space.json fields are surfaced here.`,
+  description: `Find nodes by predicate (attribute / spatial / topological) and return each match with full geometry + visual style + derived fields. Predicates AND together. **Always supply at least one predicate** — calling with no predicates returns every node, which is wasteful; for whole-Space reads use get_space_outline instead. Returns JSON: { count, total, truncated, arrangement?, nodes: [{ id, type, label, filename, parentFrame?: { id, label? }, position, size: { width, height }, style?, distance?, centerDistance?, direction?, edgeIds?, hops?, clusterId? }] }. \`count\` is items in this response (≤ limit); \`total\` is the full match count before \`limit\` was applied — when \`truncated:true\`, raise \`limit\` to ≥\`total\` or refine your query. \`arrangement\` is a human-readable summary of the matched node set's layout (e.g. "4 nodes in a horizontal row", "6 nodes in a 2×3 grid", "3 nodes in a vertical column", "5 nodes scattered"); only emitted when \`count >= 2\`. Note on connectedTo: the target node itself is excluded from results. Use this for "where is X?" (ids), "what's near X?" (nearNode), "what connects to X?" (connectedTo), "what's in this region?" (inRect), or any combination. For full node content (label/text/summary/keywords) call read on the \`filename\` field ("nodes/*.md") — only topology fields are surfaced here.`,
   parameters: inspectNodesParamsSchema,
 };
 

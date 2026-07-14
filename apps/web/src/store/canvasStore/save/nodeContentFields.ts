@@ -15,7 +15,7 @@
 
 /**
  * `data` keys whose values live in the per-node markdown sidecar
- * (`nodes/<safe(label)>.md`), not in `space.json`. A patch touching
+ * (`nodes/<safe(label)>.md`), not in structural state. A patch touching
  * any of these schedules a per-node content save and the key is
  * stripped from the structure PUT body so a viewport drag does not
  * rewrite content.
@@ -47,7 +47,7 @@ export const NODE_CONTENT_KEYS: ReadonlySet<string> = new Set([
  * `label` / `labelSource`. Without a sidecar those fields would only
  * live in memory and the layer panel would show a blank row after
  * reload. The sidecar is frontmatter-only — stroke geometry stays
- * inline in `space.json`.
+ * inline in structural state.
  */
 export const MD_BACKED_NODE_TYPES: ReadonlySet<string> = new Set([
   'note',

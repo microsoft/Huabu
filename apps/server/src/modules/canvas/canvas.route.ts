@@ -165,8 +165,8 @@ function openInFileManager(targetPath: string): void {
  *
  * `sketch` is included for the same reason: the canvas engine
  * auto-stamps a `Sketch N` label on `CREATE_NODES` and the user can
- * rename it from the layer panel. Stroke geometry stays inline in
- * `space.json` — only the label / labelSource live in the sidecar's
+ * rename it from the layer panel. Stroke geometry stays in structural
+ * state; only the label / labelSource live in the sidecar's
  * frontmatter.
  */
 const MD_BACKED_NODE_TYPES = new Set([
@@ -228,7 +228,7 @@ const WIRE_INLINE_CONTENT_TYPES = new Set([
 /**
  * Per-node `data` keys whose values live exclusively in the markdown
  * sidecar (`nodes/<safe(label)>.md`). The structure PUT strips these
- * before persisting to `space.json` so the two stores cannot drift;
+ * before persisting structural state so the two stores cannot drift;
  * `hydrateNodeContent` re-attaches them from the `.md` on read.
  *
  * Must stay in sync with `NODE_CONTENT_KEYS` on the web (see
@@ -246,7 +246,7 @@ const NODE_CONTENT_KEYS = new Set([
 
 /**
  * Strip every per-node content / label / source / summary / keyword
- * field from each node's `data` before persisting `space.json`. The
+ * field from each node's `data` before persisting structural state. The
  * structure PUT no longer carries those fields — they are persisted via
  * the dedicated `PUT /:canvasId/nodes/:nodeId/content` endpoint and
  * re-attached on read by {@link hydrateNodeContent}.
@@ -355,8 +355,8 @@ function hydrateOneNode(
 
   // ----- Read markdown side-file first -----
   // The structure PUT strips every per-node content key (src,
-  // provenance, label, summary, keywords, …) before persisting
-  // `space.json` via {@link stripNodesForCanvas}. The markdown sidecar
+  // provenance, label, summary, keywords, …) before persisting structural
+  // state via {@link stripNodesForCanvas}. The markdown sidecar
   // is the only source of truth for those fields, so we read it before
   // any check that depends on them (notably the artifact-missing probe,
   // which needs the hydrated `src`).
@@ -421,7 +421,7 @@ function hydrateOneNode(
   // Rehydrate the source URL for artifact-backed (image/pdf/video) and
   // remote (web) nodes. Without this step the structure PUT permanently
   // wipes `data.src` from the canvas state on the next reload because
-  // `stripNodesForCanvas` removed it before writing `space.json`.
+  // `stripNodesForCanvas` removed it before persistence.
   if (typeof nodeContent.src === 'string' && nodeContent.src.length > 0) {
     data['src'] = nodeContent.src;
   }
@@ -451,7 +451,7 @@ function hydrateOneNode(
   // canvas always reflects what was last persisted via the per-node
   // content endpoint. Nodes without an `.md` fall through the early
   // return above and keep whatever transient label the client placed
-  // on `space.json`.
+  // in structural state.
   data['label'] = nodeContent.label;
   const persistedLabelSource = nodeContent['labelSource'];
   data['labelSource'] =
@@ -510,8 +510,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get<{ Reply: ApiResult<ListCanvasesResponse> }>(
     '/',
     async function (_request, reply) {
-      // Built straight from the canvas-dir index (single parse per
-      // space.json) rather than re-reading every file via listCanvases().
+      // Built from the canvas-dir index rather than re-reading every Space.
       const summaries = listCanvasSummaries();
 
       // Sort by most recently updated first
@@ -566,10 +565,10 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Delete a node — removes its markdown sidecar.
   //
-  // Note: this endpoint deliberately does *not* mutate `space.json`.
+  // This endpoint deliberately does not mutate structural state.
   // The client owns the canvas state (nodes / edges) and will persist
-  // the updated state via the autosave PUT on `/:canvasId`. Touching
-  // `space.json` here would race with that PUT and surface as a
+  // the updated state via the autosave PUT on `/:canvasId`. Doing so here
+  // would race with that PUT and surface as a
   // spurious 409 (CANVAS_VERSION_MISMATCH) on the very next autosave.
   //
   // What only the server can do — and therefore what this route
@@ -596,7 +595,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       // CanvasStoreIOError (unlink rejected by the OS, e.g. EPERM /
       // EACCES). Surface the failure so the client can revert its
       // optimistic delete (or at least toast). Silently returning
-      // success here would leave space.json with no reference to
+      // success here would leave structural state with no reference to
       // the node but its `.md` orphaned on disk forever.
       //
       // `code` is the stable contract — the client maps it to a
@@ -1143,8 +1142,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
   // --- POST /:canvasId/execute (headless executor, M2) -----------------
   //
-  // Runs a batch of `CanvasCommand`s server-side: hydrates content from
-  // .md sidecars, drives the shared engine, persists space.json + .md,
+  // Runs a batch of `CanvasCommand`s server-side: hydrates sidecar content,
+  // drives the shared engine, persists topology and content,
   // appends one row to the delta log, and returns the structural delta
   // the client can apply locally without re-issuing a full snapshot.
   //
@@ -1375,8 +1374,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   /**
    * Stream the entire `<canvasId>/` directory as a `.sediment.zip` archive.
    *
-  * The zip mirrors the on-disk layout (space.json, nodes/, artifacts/,
-   * memory/, .history/) with a `manifest.json` at the root identifying
+   * The zip mirrors the complete Space layout, with a root manifest identifying
    * the export version and source canvas id.
    */
   /**

@@ -174,7 +174,7 @@ export async function deleteNode(
 /**
  * Persist a single node's markdown sidecar
  * (`nodes/<safe(label)>.md`). Unlike `putCanvas`, this endpoint never
- * touches `space.json` and therefore does not participate in the
+ * touches structural state and therefore does not participate in the
  * canvas-level optimistic-concurrency `version` counter — concurrent
  * editor edits and viewport drags never collide on it.
  *

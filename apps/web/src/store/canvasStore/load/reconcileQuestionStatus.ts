@@ -8,7 +8,7 @@
  * ## Why this exists
  *
  * A question node's `status` (`idle | pending | running | done | error`)
- * is persisted in `space.json` via the structure PUT, which uses
+ * is persisted as structural state via the structure PUT, which uses
  * optimistic concurrency control keyed on `canvas.version`. When the
  * agent edits the canvas *during* a question's conversation (emitting
  * `space_commands`), the server `version` advances; if the client's

@@ -3,7 +3,7 @@
  * Design doc: docs/architecture/agent-architecture.md
  *
  * Split with the filesystem `read` tool: these handlers expose what
- * lives in `space.json` (position, size, parentId, visual style on
+ * lives in structural state (position, size, parentId, visual style on
  * `data.style`, edge endpoints + `data.edgeStyle`, plus derived
  * spatial / topological metadata). Anything that round-trips through
  * `nodes/*.md` (label, type, src, content, summary, keywords) is

@@ -15,7 +15,7 @@ export interface Bounds {
 }
 
 /**
- * Pan + zoom of the React Flow viewport. Persisted in `space.json`
+ * Pan + zoom of the React Flow viewport. Persisted with Space topology
  * (under `state.viewport`) so the user lands back at the same view
  * when reopening a canvas, and so adding/removing nodes never
  * silently re-fits the canvas.

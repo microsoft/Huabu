@@ -920,7 +920,7 @@ export class CanvasStore {
    * out with a few immediate retries before we give up. The in-memory
    * NameIndex is left untouched on failure so a retry sees the same
    * state. Callers must let the error bubble — silently swallowing it
-   * would leave `space.json` without a reference to the node while its
+   * would leave structural state without a reference to the node while its
    * `.md` stays on disk as a permanent orphan.
    */
   deleteNode(nodeId: string): 'deleted' | 'absent' {
@@ -1218,10 +1218,8 @@ export class CanvasStore {
 
   // ── Preferences (removed) ────────────────────────────────────────────────
   //
-  // Long-term user memory now lives at the workspace level
-  // (`<workspace>/setting/user.md`) and Space-scoped memory lives at
-  // `<canvasDir>/.memory/space.md`. Both are owned by the
-  // memory sub-agent, not the per-canvas store. See
+  // User and Space memory are owned by the memory sub-agent, not the
+  // per-canvas store. See
   // `modules/agent/memory/`.
 
   // ── Lifecycle ────────────────────────────────────────────────────────────

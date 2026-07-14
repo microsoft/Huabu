@@ -125,13 +125,13 @@ const CLUSTER_DISTANCE_THRESHOLD = 200;
 // time. Top-level `node.width` / `node.height` are **never** written by
 // the engine, so we do not consult them here.
 //
-// `space.json` is geometry/style only: content keys on `data`
+// Topology is geometry/style only: content keys on `data`
 // (`content` / `label` / `labelSource` / `src` / `summary` / `keywords` /
 // `provenance`) are stripped by `stripNodesForCanvas` before write and
 // re-hydrated from the markdown sidecar on read. Sketch nodes are the
-// exception: their `strokes` + `initialSize` live in `space.json` and
+// exception: their `strokes` + `initialSize` live in topology and
 // match {@link SketchNodeData} exactly. We read it as a `Partial<…>`
-// because space.json is JSON-deserialized and may be missing fields on
+// because persisted JSON may be missing fields on
 // legacy or in-flight nodes.
 
 /**

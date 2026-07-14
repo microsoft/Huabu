@@ -33,7 +33,7 @@ afterEach(() => {
   rmSync(tmp, { recursive: true, force: true });
 });
 
-/** Seed a Space with one note (space.json entry + `.md` body). */
+/** Seed a Space with one note (topology entry + `.md` body). */
 function seedNote(canvasId: string, id: string, content: string): void {
   const store = getCanvasStore(canvasId);
   store.write({

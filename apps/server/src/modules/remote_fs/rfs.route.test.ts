@@ -31,9 +31,9 @@ async function buildApp() {
 }
 
 /**
- * Seed a note node (space.json entry + `nodes/<safeLabel>.md` body) and
+ * Seed a note node (topology entry + `nodes/<safeLabel>.md` body) and
  * return its download path. Re-calling with the same id/label overwrites the
- * body (space.json strips content, so the body only lives in the sidecar).
+ * body (topology strips content, so the body only lives in the sidecar).
  */
 function seedNote(
   canvasId: string,
