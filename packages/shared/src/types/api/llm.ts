@@ -30,8 +30,13 @@ export interface LLMProviderInfo {
   name: string;
   /** Default API protocol for models on this provider. */
   api: LLMApiType;
-  /** Default base URL (can be overridden at runtime). */
-  defaultBaseUrl?: string;
+  /** Base URL capability and optional provider default. */
+  baseUrl: {
+    /** Endpoint used when the user has not configured an override. */
+    default?: string;
+    /** Whether Settings should allow a user-provided endpoint. */
+    overridable: boolean;
+  };
   /** Whether this provider uses built-in pi-ai models. */
   builtIn: boolean;
   /** Authentication type: 'api-key' (default) or 'oauth'. */

@@ -76,6 +76,8 @@
     "provider": "提供商",
     "model": "模型",
     "endpoint": "端点",
+    "baseUrl": "基础 URL",
+    "baseUrlDescription": "可选。留空则使用提供商的默认地址。",
     "deployment": "部署",
     "apiVersion": "API 版本",
     "apiKey": "API 密钥",

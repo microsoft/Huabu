@@ -80,9 +80,11 @@ const PROVIDER_OVERRIDES: Record<string, Partial<LLMProviderInfo>> = {
     id: 'azure-openai',
     name: 'Azure OpenAI',
     builtIn: false,
+    baseUrl: { overridable: true },
   },
   'github-copilot': {
     authType: 'oauth',
+    baseUrl: { overridable: false },
   },
 };
 
@@ -111,13 +113,18 @@ function buildProviderCatalog(): LLMProviderInfo[] {
     const overrides = PROVIDER_OVERRIDES[id];
     const models = getModels(id);
     const api = models[0]?.api ?? 'openai-completions';
-    const baseUrl = models[0]?.baseUrl;
+    const defaultBaseUrl = models[0]?.baseUrl;
+    const baseUrl: LLMProviderInfo['baseUrl'] = {
+      ...(defaultBaseUrl ? { default: defaultBaseUrl } : {}),
+      ...overrides?.baseUrl,
+      overridable: overrides?.baseUrl?.overridable ?? Boolean(defaultBaseUrl),
+    };
     return {
       id: overrides?.id ?? id,
       name: PROVIDER_DISPLAY_NAMES[id] ?? id,
       api,
+      baseUrl,
       builtIn: overrides?.builtIn ?? true,
-      ...(baseUrl ? { defaultBaseUrl: baseUrl } : {}),
       ...(overrides?.authType ? { authType: overrides.authType } : {}),
     };
   });
@@ -473,7 +480,7 @@ function buildModel(cfg: PersistedConfig): Model<Api> {
     cfg.provider === 'github-copilot'
       ? 'openai-completions'
       : (providerInfo?.api ?? 'openai-completions');
-  let baseUrl = cfg.baseUrl ?? providerInfo?.defaultBaseUrl ?? '';
+  let baseUrl = cfg.baseUrl ?? providerInfo?.baseUrl.default ?? '';
 
   // Azure: fall back to legacy env var endpoint when no persisted baseUrl.
   // pi-ai's `normalizeAzureBaseUrl` will append `/openai/v1` as needed, so
