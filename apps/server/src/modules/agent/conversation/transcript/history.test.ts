@@ -106,6 +106,38 @@ describe('buildHistoryFromTurns', () => {
     });
   });
 
+  it.each(['space_commands', 'canvas_commands'])(
+    'normalizes the %s history tool to the canonical Space renderer',
+    (internalToolName) => {
+      const out = build([
+        makeTurn('change it', [
+          {
+            type: 'tool_call',
+            data: {
+              toolCallId: 'tc-space',
+              title: internalToolName,
+              internalToolName,
+              status: 'completed',
+              rawOutput: JSON.stringify({
+                tool: internalToolName,
+                status: 'success',
+                data: { commands: [] },
+              }),
+            },
+          } as FoldedMessage,
+        ]),
+      ]);
+
+      const assistant = out.find((m) => m.role === 'assistant');
+      if (assistant?.role !== 'assistant') throw new Error('unreachable');
+      const toolPart = assistant.parts.find((p) => p.kind === 'tool');
+      expect(toolPart).toMatchObject({
+        variant: 'space_commands',
+        data: { tool: 'space_commands', status: 'success' },
+      });
+    },
+  );
+
   it('surfaces an interrupted status row for an aborted turn', () => {
     const out = build([
       makeTurn('stop me', [{ type: 'text', data: { content: 'partial' } }], {

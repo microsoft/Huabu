@@ -155,16 +155,16 @@ function buildToolPart(data: FoldedToolCallData): AssistantHistoryPart {
         ...(merged ? { data: merged } : {}),
       };
     }
-    case 'canvas_commands':
+    case 'space_commands':
       return {
         ...base,
-        variant: 'canvas_commands',
+        variant: 'space_commands',
         ...(toolData
           ? {
-              data: toolData as ToolResponse<
-                'canvas_commands',
-                Record<string, unknown>
-              >,
+              data: {
+                ...toolData,
+                tool: 'space_commands',
+              } as ToolResponse<'space_commands', Record<string, unknown>>,
             }
           : {}),
       };

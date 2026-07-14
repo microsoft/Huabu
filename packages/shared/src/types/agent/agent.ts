@@ -69,17 +69,17 @@ export type AgentThinkingDeltaEventData = ProtocolEventData<'thinking_delta'>;
  * Host shell over the protocol payload with one added field:
  * `internalToolName`. Render-variant dispatch happens client-side via
  * {@link variantForInternalTool} keyed on it — internal-agent turns set it
- * and materialise as their dedicated variant (`canvas_commands`,
+ * and materialise as their dedicated variant (`space_commands`,
  * `agent_tool`, …); external ACP turns leave it undefined and always render
  * as `generic`, so its presence is the wire-level discriminator between
  * internal and external tool calls.
  */
 export interface AgentToolCallEventData extends ProtocolEventData<'tool_call'> {
   /**
-   * Stable tool name from the internal agent (`canvas_commands`,
+   * Stable tool name from the internal agent (`space_commands`,
    * `web_search`, `read`, `grep`, …). Drives client-side render-variant
    * dispatch via `variantForInternalTool()` and gates local side-effects
-   * (e.g. `canvas_commands` execution). Undefined for external ACP turns.
+   * (e.g. `space_commands` execution). Undefined for external ACP turns.
    */
   internalToolName?: string;
 }

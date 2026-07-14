@@ -4,7 +4,7 @@
  * Order of resolution:
  *   1. Explicit `toolKind` from the agent (ACP §session/update enum).
  *   2. Variant-driven icon for the rich-rendered internal tools
- *      (`canvas_commands`, `web_search`) and for `agent_tool` parts
+ *      (`space_commands`, `web_search`) and for `agent_tool` parts
  *      keyed by `toolName` — keeps the same icon the legacy
  *      `TOOL_ICON` map showed.
  *   3. Fallback heuristic on the title: classify the leading verb
@@ -56,8 +56,8 @@ const INTERNAL_TOOL_ICON: Record<string, IconComponent> = {
   ls: FolderOpen,
   inspect_nodes: Workflow,
   inspect_edges: Workflow,
+  get_space_outline: Workflow,
   get_canvas_outline: Workflow,
-  canvas_commands: Command,
   web_search: Search,
 };
 
@@ -92,7 +92,7 @@ export function ToolKindIcon({
     Icon = KIND_ICON[part.toolKind];
   } else {
     switch (part.variant) {
-      case 'canvas_commands':
+      case 'space_commands':
         Icon = Command;
         break;
       case 'web_search':

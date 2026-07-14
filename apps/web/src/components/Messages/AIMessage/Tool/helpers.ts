@@ -2,7 +2,7 @@
  * Shared helpers for tool-call renderers under `Messages/AIMessage/Tool/`.
  *
  * Extracted from the legacy `ToolMessage.tsx` so each renderer file
- * (`CanvasCommandCard`, `MergedAgentToolRow`, `WebSearchToolDisplay`)
+ * (`SpaceCommandCard`, `MergedAgentToolRow`, `WebSearchToolDisplay`)
  * can stay focused on its own view logic.
  */
 
@@ -10,7 +10,7 @@ import type { AssistantToolPart } from '@sediment/shared';
 
 /**
  * Display-only description of a single canvas mutation, reconstructed from a
- * `canvas_commands` tool result for the CanvasCommandCard. Revert is owned by
+ * `space_commands` tool result for the SpaceCommandCard. Revert is owned by
  * the broadcast-fed ChangeReviewCard, so these carry no inverse commands.
  */
 export interface CanvasChange {
@@ -65,7 +65,7 @@ export function reconstructChangesFromCommands(
             ?.label as string | undefined;
           changes.push({
             id: `hist-${counter++}`,
-            tool: 'canvas_commands',
+            tool: 'space_commands',
             label: `Created: ${truncate(label ?? 'untitled', 24)}`,
             nodeType: (node.nodeType as string) ?? 'note',
             nodeId: node.id as string,
@@ -80,7 +80,7 @@ export function reconstructChangesFromCommands(
         for (const nodeId of nodeIds) {
           changes.push({
             id: `hist-${counter++}`,
-            tool: 'canvas_commands',
+            tool: 'space_commands',
             label: `Deleted: ${truncate(nodeId, 24)}`,
             nodeId,
             revertible: false,
@@ -93,7 +93,7 @@ export function reconstructChangesFromCommands(
         for (const patch of patches) {
           changes.push({
             id: `hist-${counter++}`,
-            tool: 'canvas_commands',
+            tool: 'space_commands',
             label: `Updated: ${truncate((patch.nodeId as string) ?? '?', 24)}`,
             nodeId: patch.nodeId as string,
             revertible: false,
@@ -106,7 +106,7 @@ export function reconstructChangesFromCommands(
         for (const edge of edges) {
           changes.push({
             id: `hist-${counter++}`,
-            tool: 'canvas_commands',
+            tool: 'space_commands',
             label: 'Connected',
             sourceNodeId: edge.source as string,
             targetNodeId: edge.target as string,
@@ -126,7 +126,7 @@ export function reconstructChangesFromCommands(
             typeof edge === 'string' ? undefined : (edge.target as string);
           changes.push({
             id: `hist-${counter++}`,
-            tool: 'canvas_commands',
+            tool: 'space_commands',
             label: 'Disconnected',
             sourceNodeId: source,
             targetNodeId: target,
@@ -142,7 +142,7 @@ export function reconstructChangesFromCommands(
         for (const nodeId of nodeIds) {
           changes.push({
             id: `hist-${counter++}`,
-            tool: 'canvas_commands',
+            tool: 'space_commands',
             label: `${verb}: ${truncate(nodeId, 24)}`,
             nodeId,
             revertible: false,
@@ -153,7 +153,7 @@ export function reconstructChangesFromCommands(
       case 'DISSOLVE_FRAME': {
         changes.push({
           id: `hist-${counter++}`,
-          tool: 'canvas_commands',
+          tool: 'space_commands',
           label: 'Dissolved frame',
           nodeType: 'frame',
           nodeId: cmd.frameId as string,
@@ -166,7 +166,7 @@ export function reconstructChangesFromCommands(
         for (const item of items) {
           changes.push({
             id: `hist-${counter++}`,
-            tool: 'canvas_commands',
+            tool: 'space_commands',
             label: `Repositioned: ${truncate((item.nodeId as string) ?? '?', 24)}`,
             nodeId: item.nodeId as string,
             revertible: false,
@@ -178,7 +178,7 @@ export function reconstructChangesFromCommands(
         const nodeIds = (cmd.nodeIds ?? []) as string[];
         changes.push({
           id: `hist-${counter++}`,
-          tool: 'canvas_commands',
+          tool: 'space_commands',
           label: `Aligned ${nodeIds.length} node(s)`,
           revertible: false,
         });
@@ -188,7 +188,7 @@ export function reconstructChangesFromCommands(
         const nodeIds = (cmd.nodeIds ?? []) as string[];
         changes.push({
           id: `hist-${counter++}`,
-          tool: 'canvas_commands',
+          tool: 'space_commands',
           label: `Distributed ${nodeIds.length} node(s)`,
           revertible: false,
         });
@@ -197,7 +197,7 @@ export function reconstructChangesFromCommands(
       default:
         changes.push({
           id: `hist-${counter++}`,
-          tool: 'canvas_commands',
+          tool: 'space_commands',
           label: type || 'Unknown command',
           revertible: false,
         });

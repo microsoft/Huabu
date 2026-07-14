@@ -150,8 +150,8 @@ export interface AssistantPermissionPart {
  *                         without a dedicated rich renderer.
  *  - `agent_tool`       — built-in pi-ai agent tools (`read`, `grep`,
  *                         `find`, `ls`, `inspect_nodes`,
- *                         `inspect_edges`, `get_canvas_outline`).
- *  - `canvas_commands`  — the canvas mutation tool, rendered as a
+ *                         `inspect_edges`, `get_space_outline`).
+ *  - `space_commands`   — the Space mutation tool, rendered as a
  *                         change list with revert/keep/preview.
  *  - `web_search`       — the web search tool, rendered as a
  *                         draggable source list.
@@ -165,7 +165,7 @@ export interface AssistantPermissionPart {
 export type AssistantToolPart =
   | GenericToolPart
   | AgentToolPart
-  | CanvasCommandsToolPart
+  | SpaceCommandsToolPart
   | WebSearchToolPart
   | ImageGenerationToolPart
   | SnapshotNodesToolPart;
@@ -212,7 +212,7 @@ export interface GenericToolPart extends ToolPartBase {
 
 /**
  * Built-in pi-ai agent tool (`read` / `grep` / `find` / `ls` /
- * `inspect_*` / `get_canvas_outline`). Rendered by
+ * `inspect_*` / `get_space_outline`). Rendered by
  * `MergedAgentToolRow` which merges adjacent calls of the SAME
  * {@link toolName} into one collapsible row.
  */
@@ -229,7 +229,7 @@ export interface AgentToolPart extends ToolPartBase {
 }
 
 /**
- * The `canvas_commands` tool. Rendered by `CanvasCommandCard` as a
+ * The `space_commands` tool. Rendered by `SpaceCommandCard` as a
  * change list with revert / keep / preview controls.
  *
  * Live `canvasChanges` (and the originating `commands[]`) are nested
@@ -237,9 +237,9 @@ export interface AgentToolPart extends ToolPartBase {
  * canonical home for both, so the renderer's mutate-in-place revert
  * flow targets that single path.
  */
-export interface CanvasCommandsToolPart extends ToolPartBase {
-  variant: 'canvas_commands';
-  data?: ToolResponse<'canvas_commands', Record<string, unknown>>;
+export interface SpaceCommandsToolPart extends ToolPartBase {
+  variant: 'space_commands';
+  data?: ToolResponse<'space_commands', Record<string, unknown>>;
 }
 
 /**
@@ -337,7 +337,10 @@ export interface ImageGenerationToolPart extends ToolPartBase {
 export type AssistantToolVariant = AssistantToolPart['variant'];
 
 const VARIANT_BY_INTERNAL_TOOL: Record<string, AssistantToolVariant> = {
-  space_commands: 'canvas_commands',
+  // Normalize legacy persisted tool calls at the projection boundary so the
+  // old name never propagates into current UI state.
+  canvas_commands: 'space_commands',
+  space_commands: 'space_commands',
   web_search: 'web_search',
   read: 'agent_tool',
   grep: 'agent_tool',
@@ -345,6 +348,7 @@ const VARIANT_BY_INTERNAL_TOOL: Record<string, AssistantToolVariant> = {
   ls: 'agent_tool',
   inspect_nodes: 'agent_tool',
   inspect_edges: 'agent_tool',
+  get_canvas_outline: 'agent_tool',
   get_space_outline: 'agent_tool',
   generate_image: 'image_generation',
   snapshot_nodes: 'snapshot_nodes',
