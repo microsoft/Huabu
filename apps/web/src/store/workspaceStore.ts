@@ -298,8 +298,8 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
           workspacePath: null,
           error:
             err instanceof Error
-              ? `Saved workspace is no longer valid: ${err.message}`
-              : 'Saved workspace is no longer valid',
+              ? `Saved Home folder is no longer valid: ${err.message}`
+              : 'Saved Home folder is no longer valid',
         });
       }
     }
@@ -320,7 +320,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       emitWorkspaceChanged();
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : 'Failed to update workspace';
+        err instanceof Error ? err.message : 'Failed to update Home folder';
       set({ error: message, isSyncing: false });
       throw err;
     }

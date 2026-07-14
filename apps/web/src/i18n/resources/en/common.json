@@ -1,6 +1,6 @@
 {
   "app": {
-    "loadingWorkspace": "Loading your Home…",
+    "loadingWorkspace": "Loading your Home folder…",
     "savingCanvas": "Saving Space…",
     "logoAlt": "Logo"
   },
@@ -27,7 +27,7 @@
     "backHome": "Back to home",
     "home": "Home",
     "appMenu": "Application menu",
-    "switchWorkspace": "Switch Home",
+    "switchWorkspace": "Switch Home folder",
     "userHandbook": "User Handbook",
     "openUserHandbook": "Open user handbook"
   },
@@ -214,15 +214,15 @@
   },
   "workspace": {
     "welcome": "Welcome to {{appName}}",
-    "intro": "Choose a folder to store your Spaces, notes, and artifacts.",
+    "intro": "Choose a Home folder to store your Spaces, notes, and artifacts.",
     "folder": "Home folder",
     "pathPlaceholder": "Type an absolute path, then press Enter",
-    "recent": "Recent Homes",
+    "recent": "Recent Home folders",
     "removeRecent": "Remove from recent",
     "path": "Path: {{path}}",
     "pathPrefix": "Path: ",
-    "workspace": "Home: {{workspace}}",
-    "workspacePrefix": "Home: ",
+    "workspace": "Home folder: {{workspace}}",
+    "workspacePrefix": "Home folder: ",
     "clickToSwitch": "Click to switch",
     "openPathFailed": "Failed to open path"
   },

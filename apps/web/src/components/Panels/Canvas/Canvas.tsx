@@ -1000,7 +1000,7 @@ export const Canvas: React.FC<CanvasProps> = ({
           <MiniMap
             pannable
             zoomable
-            ariaLabel="Canvas minimap"
+            ariaLabel="Minimap"
             className="border-edge-default rounded-md border shadow-sm"
           />
         )}

@@ -1,6 +1,6 @@
 {
   "app": {
-    "loadingWorkspace": "正在加载你的 Home…",
+    "loadingWorkspace": "正在加载你的 Home 文件夹…",
     "savingCanvas": "正在保存 Space…",
     "logoAlt": "Logo"
   },
@@ -27,7 +27,7 @@
     "backHome": "返回首页",
     "home": "首页",
     "appMenu": "应用菜单",
-    "switchWorkspace": "切换 Home",
+    "switchWorkspace": "切换 Home 文件夹",
     "userHandbook": "用户手册",
     "openUserHandbook": "打开用户手册"
   },
@@ -214,15 +214,15 @@
   },
   "workspace": {
     "welcome": "欢迎使用 {{appName}}",
-    "intro": "选择一个文件夹来保存你的 Space、笔记和产物。",
+    "intro": "选择一个 Home 文件夹来保存你的 Space、笔记和产物。",
     "folder": "Home 文件夹",
     "pathPlaceholder": "输入绝对路径，然后按 Enter",
-    "recent": "最近的 Home",
+    "recent": "最近的 Home 文件夹",
     "removeRecent": "从最近列表中移除",
     "path": "路径：{{path}}",
     "pathPrefix": "路径：",
-    "workspace": "Home：{{workspace}}",
-    "workspacePrefix": "Home：",
+    "workspace": "Home 文件夹：{{workspace}}",
+    "workspacePrefix": "Home 文件夹：",
     "clickToSwitch": "点击切换",
     "openPathFailed": "打开路径失败"
   },

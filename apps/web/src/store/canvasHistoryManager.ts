@@ -59,7 +59,7 @@ function describeDeleteFailure(error: unknown): string {
       return "Couldn't delete a node's file on disk — it may be locked by another process.";
     }
     if (error.code === 'CANVAS_NOT_FOUND') {
-      return 'This canvas no longer exists on the server.';
+      return 'This Space no longer exists on the server.';
     }
     // Unknown server-emitted code: fall back to the server's English
     // message so the user at least sees *something* meaningful.

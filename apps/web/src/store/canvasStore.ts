@@ -206,7 +206,7 @@ function showVersionConflictToast(): void {
   // the 409 branch before `versionConflict` flips true.
   if (_versionConflictToastId) return;
   _versionConflictToastId = toast(
-    "This canvas was modified elsewhere. Your recent edits won't be saved.",
+    "This Space was modified elsewhere. Your recent edits won't be saved.",
     {
       tone: 'danger',
       duration: 0,
