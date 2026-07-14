@@ -53,6 +53,7 @@ const state: AgentTeamRegistryState = {
       harness: 'copilot',
       workingDirPath: '/teams/reviewer/workspaces/copilot',
       setup: { status: 'disabled' },
+      setupLog: [],
     },
   ],
   configs: [

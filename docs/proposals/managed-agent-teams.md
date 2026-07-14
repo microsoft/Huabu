@@ -75,8 +75,10 @@ interface AgentTeamDeployment {
   enabled: boolean;
   machine: string;
   manifestPath: string;
-  workingDirPath?: string;
+  workingDirPath: string;
   harness: string;
+  setup: AgentTeamDeploymentSetup;
+  setupLog: AgentTeamSetupLogEntry[];
 }
 ```
 
@@ -138,6 +140,8 @@ A setup failure leaves the deployment enabled with `setupStatus: "error"`. The U
 The first version does not resume setup operations across Huabu, Agenetes, daemon, or control-channel restarts. An interrupted operation becomes `error` with a structured `setup_interrupted` reason and requires explicit Retry.
 
 Turning off the enable toggle during `setting_up` immediately records disabled intent and asks the daemon to cancel the active setup operation. A successful cancellation returns the deployment to `disabled`; cancellation failures remain visible rather than allowing an unreported background operation.
+
+The implemented Agenetes state machine persists enabled intent, operation identity, setup status, structured errors, and a bounded phase log before and during daemon operations. Progress is matched by both machine and operation ID, so stale notifications are ignored and terminal progress that arrives before the setup or cancellation response is retained. Placement changes and deletion are rejected while setup or cancellation is active.
 
 Disabling a ready deployment immediately rejects new create and run calls and closes all live handles bound to that deployment. Durable threads are retained and may recover after the deployment is enabled and ready again, provided its placement revision has not changed.
 
@@ -213,7 +217,7 @@ The system provides an Agent Team service through which a user or an agent can t
 
 Agenetes owns the host-agnostic service API. Huabu provides a thin `/api/agent-team/*` HTTP/SSE adapter over that service rather than implementing a second Agent Team orchestration layer.
 
-Agenetes owns the first-version file-backed persistence implementation for Agent Team roots, discovery provenance, members, deployments, non-secret Configs, and setup state as those control-plane stages ship. The completed discovery-registry slice persists roots, discovery provenance, members, and scan diagnostics; deployment, Config, and setup-state records are added by their corresponding later slices. The host supplies only a local absolute storage directory when mounting Agenetes; Agenetes owns the file names, schema versioning, validation, reconciliation, and atomic reads and writes below that directory. In-memory persistence is test-only. Secret values remain behind a separately injected host `SecretStore` port because encryption and operating-system credential backends are host capabilities.
+Agenetes owns the first-version file-backed persistence implementation for Agent Team roots, discovery provenance, members, deployments, non-secret Configs, and setup state. These control-plane records, including bounded setup logs and interrupted-operation recovery, are implemented in `@agenetes/agent-team`. The host supplies only a local absolute storage directory when mounting Agenetes; Agenetes owns the file names, schema versioning, validation, reconciliation, and atomic reads and writes below that directory. In-memory persistence is test-only. Secret values remain behind a separately injected host `SecretStore` port because encryption and operating-system credential backends are host capabilities.
 
 The caller selects a deployment by its current alias and supplies a complete Agenetes `ThreadIdentity` containing `namespace` and `threadId`. The service resolves the alias to the stable deployment ID, constructs the Agent Team `WorkloadSpec`, and then uses standard `Agenetes.create(...)` semantics. Agent Team does not define a separate thread lifecycle, get-or-create rule, or persistence model.
 

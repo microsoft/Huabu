@@ -14,6 +14,7 @@ import type { AgentTeamScanDiagnostic } from '@agentlet/protocol';
 import type {
   AgentTeamDeployment,
   AgentTeamDeploymentSetup,
+  AgentTeamSetupLogEntry,
   AgentTeamMemberConfig,
   AgentTeamMember,
   AgentTeamRegistryState,
@@ -281,6 +282,57 @@ function parseDeploymentSetup(
   throw new Error(`Invalid Agent Team registry: ${label}.status`);
 }
 
+const SETUP_PHASES: ReadonlySet<string> = new Set([
+  'validating_manifest',
+  'preparing_workspace',
+  'installing_tools',
+  'installing_skills',
+  'placing_prompt',
+  'copying_files',
+  'running_custom_setup',
+]);
+
+function isSetupPhase(
+  value: unknown,
+): value is AgentTeamSetupLogEntry['phase'] {
+  return typeof value === 'string' && SETUP_PHASES.has(value);
+}
+
+function parseSetupLog(
+  value: unknown,
+  label: string,
+): AgentTeamSetupLogEntry[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    throw new Error(`Invalid Agent Team registry: ${label} must be an array`);
+  }
+  return value.map((entry, index) => {
+    const entryLabel = `${label}[${index}]`;
+    if (!isObject(entry)) {
+      throw new Error(
+        `Invalid Agent Team registry: ${entryLabel} must be an object`,
+      );
+    }
+    const receivedAt = parseTimestamp(
+      entry.receivedAt,
+      `${entryLabel}.receivedAt`,
+    );
+    if (!isSetupPhase(entry.phase)) {
+      throw new Error(`Invalid Agent Team registry: ${entryLabel}.phase`);
+    }
+    if (entry.status !== 'started' && entry.status !== 'completed') {
+      throw new Error(`Invalid Agent Team registry: ${entryLabel}.status`);
+    }
+    assertString(entry.message, `${entryLabel}.message`);
+    return {
+      receivedAt,
+      phase: entry.phase,
+      status: entry.status,
+      message: entry.message,
+    };
+  });
+}
+
 function parseDeployment(value: unknown, index: number): AgentTeamDeployment {
   const label = `deployments[${index}]`;
   if (!isObject(value)) {
@@ -321,6 +373,7 @@ function parseDeployment(value: unknown, index: number): AgentTeamDeployment {
     harness: value.harness,
     workingDirPath: value.workingDirPath,
     setup: parseDeploymentSetup(value.setup, `${label}.setup`),
+    setupLog: parseSetupLog(value.setupLog, `${label}.setupLog`),
   };
 }
 

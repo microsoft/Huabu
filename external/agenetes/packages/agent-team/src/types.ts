@@ -3,6 +3,13 @@ import type {
   AgentTeamScanDiagnostic,
   AgentTeamScanParams,
   AgentTeamScanResult,
+  AgentTeamSetupCancelParams,
+  AgentTeamSetupCancelResult,
+  AgentTeamSetupParams,
+  AgentTeamSetupProgressParams,
+  AgentTeamSetupStartResult,
+  AgentTeamValidateParams,
+  AgentTeamValidateResult,
 } from '@agentlet/protocol';
 
 export interface AgentTeamRootRef {
@@ -59,6 +66,14 @@ export interface AgentTeamDeployment {
   harness: string;
   workingDirPath: string;
   setup: AgentTeamDeploymentSetup;
+  setupLog: AgentTeamSetupLogEntry[];
+}
+
+export interface AgentTeamSetupLogEntry {
+  receivedAt: number;
+  phase: Extract<AgentTeamSetupProgressParams, { type: 'phase' }>['phase'];
+  status: 'started' | 'completed';
+  message: string;
 }
 
 export interface AgentTeamMemberConfig {
@@ -110,6 +125,24 @@ export interface AgentTeamScanPort {
     machine: string,
     params: AgentTeamScanParams,
   ): Promise<AgentTeamScanResult>;
+}
+
+export interface AgentTeamControlPort extends AgentTeamScanPort {
+  setupAgentTeam(
+    machine: string,
+    params: AgentTeamSetupParams,
+  ): Promise<AgentTeamSetupStartResult>;
+  cancelAgentTeamSetup(
+    machine: string,
+    params: AgentTeamSetupCancelParams,
+  ): Promise<AgentTeamSetupCancelResult>;
+  validateAgentTeam(
+    machine: string,
+    params: AgentTeamValidateParams,
+  ): Promise<AgentTeamValidateResult>;
+  onAgentTeamSetupProgress(
+    handler: (machine: string, progress: AgentTeamSetupProgressParams) => void,
+  ): () => void;
 }
 
 export type AgentTeamRescanResult =

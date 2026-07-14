@@ -15,6 +15,7 @@ export type {
   AgentTeamMember,
   AgentTeamDeployment,
   AgentTeamDeploymentSetup,
+  AgentTeamSetupLogEntry,
   AgentTeamSetupError,
   AgentTeamMemberConfig,
   AgentTeamConfigFieldView,
@@ -30,4 +31,5 @@ export type {
   AgentTeamRootRef,
   AgentTeamRootScan,
   AgentTeamScanPort,
+  AgentTeamControlPort,
 } from './types.js';

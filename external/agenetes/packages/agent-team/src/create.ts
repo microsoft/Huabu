@@ -1,11 +1,11 @@
 import { AgentTeamRegistry } from './registry.js';
 import { FileAgentTeamRegistryStore } from './store.js';
 
-import type { AgentTeamScanPort, AgentTeamSecretStore } from './types.js';
+import type { AgentTeamControlPort, AgentTeamSecretStore } from './types.js';
 
 export interface CreateAgentTeamRegistryOptions {
   storageDir: string;
-  scanPort: AgentTeamScanPort;
+  controlPort: AgentTeamControlPort;
   secretStore: AgentTeamSecretStore;
   now?: () => number;
 }
@@ -16,9 +16,10 @@ export function createAgentTeamRegistry(
 ): AgentTeamRegistry {
   return new AgentTeamRegistry(
     new FileAgentTeamRegistryStore(options.storageDir),
-    options.scanPort,
+    options.controlPort,
     options.now,
     undefined,
     options.secretStore,
+    options.controlPort,
   );
 }
