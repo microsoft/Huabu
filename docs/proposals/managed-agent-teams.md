@@ -163,7 +163,9 @@ Member Config values are delivered only at session spawn. The Agenetes Agent Tea
 
 Agenetes has a standard Agent Team driver built on the ACP driver. Agent Team discovery, deployment management, setup orchestration, readiness, and runtime realization belong to the Agenetes Agent Team control-plane module; Huabu provides the Settings UI and host-specific adapters such as secure credential storage and reachback environment construction.
 
-Agenetes defines the Agent Team registries, state transitions, and persistence ports. Huabu injects implementations for ordinary settings persistence and secure credential storage when mounting Agenetes. The Agenetes module does not import Huabu storage or security code.
+Agenetes defines the Agent Team registries and state transitions and owns the first-version file-backed persistence for ordinary Agent Team state. Huabu supplies a local absolute storage directory and an implementation of the secure credential port when mounting Agenetes. The Agenetes module does not import Huabu storage or security code.
+
+The implementation places this host-agnostic control plane in `@agenetes/agent-team`. Its discovery registry persists roots, scan diagnostics, members, and root-to-member provenance under the host-provided storage directory; a failed root scan preserves the last successful provenance instead of marking every previously discovered member missing.
 
 ### Agentlet control-plane consolidation
 
@@ -208,6 +210,8 @@ The standard ACP driver is generalized to accept an explicit `agentletId` placem
 The system provides an Agent Team service through which a user or an agent can talk to any enabled and ready deployment.
 
 Agenetes owns the host-agnostic service API. Huabu provides a thin `/api/agent-team/*` HTTP/SSE adapter over that service rather than implementing a second Agent Team orchestration layer.
+
+Agenetes owns the first-version file-backed persistence implementation for Agent Team roots, discovery provenance, members, deployments, non-secret Configs, and setup state as those control-plane stages ship. The completed discovery-registry slice persists roots, discovery provenance, members, and scan diagnostics; deployment, Config, and setup-state records are added by their corresponding later slices. The host supplies only a local absolute storage directory when mounting Agenetes; Agenetes owns the file names, schema versioning, validation, reconciliation, and atomic reads and writes below that directory. In-memory persistence is test-only. Secret values remain behind a separately injected host `SecretStore` port because encryption and operating-system credential backends are host capabilities.
 
 The caller selects a deployment by its current alias and supplies a complete Agenetes `ThreadIdentity` containing `namespace` and `threadId`. The service resolves the alias to the stable deployment ID, constructs the Agent Team `WorkloadSpec`, and then uses standard `Agenetes.create(...)` semantics. Agent Team does not define a separate thread lifecycle, get-or-create rule, or persistence model.
 

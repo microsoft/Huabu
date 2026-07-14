@@ -1,0 +1,325 @@
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from 'node:fs';
+import { dirname, isAbsolute, join } from 'node:path';
+
+import { agentTeamMemberKey, agentTeamRootKey } from './identity.js';
+
+import type { AgentTeamScanDiagnostic } from '@agentlet/protocol';
+import type {
+  AgentTeamMember,
+  AgentTeamRegistryState,
+  AgentTeamRegistryStore,
+  AgentTeamRoot,
+  AgentTeamRootRef,
+  AgentTeamRootScan,
+} from './types.js';
+
+const SCHEMA_VERSION = 1;
+const REGISTRY_FILENAME = 'registry.json';
+
+interface RegistryFile {
+  schemaVersion: typeof SCHEMA_VERSION;
+  state: AgentTeamRegistryState;
+}
+
+function emptyState(): AgentTeamRegistryState {
+  return { roots: [], members: [] };
+}
+
+function cloneState(state: AgentTeamRegistryState): AgentTeamRegistryState {
+  return structuredClone(state);
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function assertString(value: unknown, label: string): asserts value is string {
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new Error(
+      `Invalid Agent Team registry: ${label} must be a non-empty string`,
+    );
+  }
+}
+
+function parseRootRef(value: unknown, label: string): AgentTeamRootRef {
+  if (!isObject(value)) {
+    throw new Error(`Invalid Agent Team registry: ${label} must be an object`);
+  }
+  assertString(value.machine, `${label}.machine`);
+  assertString(value.path, `${label}.path`);
+  return { machine: value.machine, path: value.path };
+}
+
+function parseRootScan(value: unknown, label: string): AgentTeamRootScan {
+  if (!isObject(value)) {
+    throw new Error(`Invalid Agent Team registry: ${label} must be an object`);
+  }
+  if (value.status === 'never_scanned') return { status: 'never_scanned' };
+  if (value.status === 'error') {
+    if (
+      typeof value.attemptedAt !== 'number' ||
+      !Number.isFinite(value.attemptedAt)
+    ) {
+      throw new Error(
+        `Invalid Agent Team registry: ${label}.attemptedAt must be a number`,
+      );
+    }
+    assertString(value.message, `${label}.message`);
+    return {
+      status: 'error',
+      attemptedAt: value.attemptedAt,
+      message: value.message,
+    };
+  }
+  if (value.status === 'success') {
+    if (
+      typeof value.scannedAt !== 'number' ||
+      !Number.isFinite(value.scannedAt)
+    ) {
+      throw new Error(
+        `Invalid Agent Team registry: ${label}.scannedAt must be a number`,
+      );
+    }
+    if (!Array.isArray(value.diagnostics)) {
+      throw new Error(
+        `Invalid Agent Team registry: ${label}.diagnostics must be an array`,
+      );
+    }
+    const diagnostics = value.diagnostics.map<AgentTeamScanDiagnostic>(
+      (diagnostic, index) => {
+        if (!isObject(diagnostic)) {
+          throw new Error(
+            `Invalid Agent Team registry: ${label}.diagnostics[${index}] must be an object`,
+          );
+        }
+        assertString(
+          diagnostic.manifestPath,
+          `${label}.diagnostics[${index}].manifestPath`,
+        );
+        assertString(
+          diagnostic.message,
+          `${label}.diagnostics[${index}].message`,
+        );
+        const code = diagnostic.code;
+        if (code !== 'invalid_manifest' && code !== 'manifest_unreadable') {
+          throw new Error(
+            `Invalid Agent Team registry: ${label}.diagnostics[${index}].code`,
+          );
+        }
+        return {
+          manifestPath: diagnostic.manifestPath,
+          code,
+          message: diagnostic.message,
+        };
+      },
+    );
+    return { status: 'success', scannedAt: value.scannedAt, diagnostics };
+  }
+  throw new Error(`Invalid Agent Team registry: ${label}.status`);
+}
+
+function parseRoot(value: unknown, index: number): AgentTeamRoot {
+  if (!isObject(value)) {
+    throw new Error(
+      `Invalid Agent Team registry: roots[${index}] must be an object`,
+    );
+  }
+  const ref = parseRootRef(value, `roots[${index}]`);
+  return {
+    ...ref,
+    scan: parseRootScan(value.scan, `roots[${index}].scan`),
+  };
+}
+
+function parseMember(value: unknown, index: number): AgentTeamMember {
+  const label = `members[${index}]`;
+  if (!isObject(value)) {
+    throw new Error(`Invalid Agent Team registry: ${label} must be an object`);
+  }
+  assertString(value.machine, `${label}.machine`);
+  assertString(value.manifestPath, `${label}.manifestPath`);
+  assertString(value.name, `${label}.name`);
+  assertString(value.description, `${label}.description`);
+  if (
+    !Array.isArray(value.harnesses) ||
+    !value.harnesses.every((entry) => typeof entry === 'string')
+  ) {
+    throw new Error(
+      `Invalid Agent Team registry: ${label}.harnesses must be an array of strings`,
+    );
+  }
+  if (!Array.isArray(value.env)) {
+    throw new Error(
+      `Invalid Agent Team registry: ${label}.env must be an array`,
+    );
+  }
+  const env = value.env.map((field, fieldIndex) => {
+    if (!isObject(field)) {
+      throw new Error(
+        `Invalid Agent Team registry: ${label}.env[${fieldIndex}] must be an object`,
+      );
+    }
+    assertString(field.name, `${label}.env[${fieldIndex}].name`);
+    assertString(field.description, `${label}.env[${fieldIndex}].description`);
+    if (
+      typeof field.required !== 'boolean' ||
+      typeof field.secret !== 'boolean'
+    ) {
+      throw new Error(
+        `Invalid Agent Team registry: ${label}.env[${fieldIndex}] flags must be booleans`,
+      );
+    }
+    if (field.default !== undefined && typeof field.default !== 'string') {
+      throw new Error(
+        `Invalid Agent Team registry: ${label}.env[${fieldIndex}].default`,
+      );
+    }
+    if (field.secret === true && field.default !== undefined) {
+      throw new Error(
+        `Invalid Agent Team registry: ${label}.env[${fieldIndex}] secret default`,
+      );
+    }
+    return {
+      name: field.name,
+      description: field.description,
+      required: field.required,
+      secret: field.secret,
+      ...(field.default === undefined ? {} : { default: field.default }),
+    };
+  });
+  if (!Array.isArray(value.discoveredBy)) {
+    throw new Error(
+      `Invalid Agent Team registry: ${label}.discoveredBy must be an array`,
+    );
+  }
+  if (value.status !== 'active' && value.status !== 'member_missing') {
+    throw new Error(`Invalid Agent Team registry: ${label}.status`);
+  }
+  return {
+    machine: value.machine,
+    manifestPath: value.manifestPath,
+    name: value.name,
+    description: value.description,
+    harnesses: [...value.harnesses],
+    env,
+    discoveredBy: value.discoveredBy.map((root, rootIndex) =>
+      parseRootRef(root, `${label}.discoveredBy[${rootIndex}]`),
+    ),
+    status: value.status,
+  };
+}
+
+function parseRegistryFile(value: unknown): AgentTeamRegistryState {
+  if (
+    !isObject(value) ||
+    value.schemaVersion !== SCHEMA_VERSION ||
+    !isObject(value.state)
+  ) {
+    throw new Error(`Unsupported or invalid Agent Team registry schema`);
+  }
+  if (
+    !Array.isArray(value.state.roots) ||
+    !Array.isArray(value.state.members)
+  ) {
+    throw new Error('Invalid Agent Team registry state');
+  }
+  const state = {
+    roots: value.state.roots.map(parseRoot),
+    members: value.state.members.map(parseMember),
+  };
+  const rootKeys = new Set(state.roots.map(agentTeamRootKey));
+  if (rootKeys.size !== state.roots.length) {
+    throw new Error('Invalid Agent Team registry: duplicate root identity');
+  }
+  const memberKeys = new Set(state.members.map(agentTeamMemberKey));
+  if (memberKeys.size !== state.members.length) {
+    throw new Error('Invalid Agent Team registry: duplicate member identity');
+  }
+  for (const member of state.members) {
+    const discoveryKeys = new Set(member.discoveredBy.map(agentTeamRootKey));
+    if (discoveryKeys.size !== member.discoveredBy.length) {
+      throw new Error(
+        'Invalid Agent Team registry: duplicate discovery provenance',
+      );
+    }
+    if (
+      member.discoveredBy.some((root) => !rootKeys.has(agentTeamRootKey(root)))
+    ) {
+      throw new Error(
+        'Invalid Agent Team registry: member references an unknown root',
+      );
+    }
+    if (
+      (member.discoveredBy.length === 0) !==
+      (member.status === 'member_missing')
+    ) {
+      throw new Error(
+        'Invalid Agent Team registry: member status does not match discovery provenance',
+      );
+    }
+  }
+  return state;
+}
+
+export class InMemoryAgentTeamRegistryStore implements AgentTeamRegistryStore {
+  private state: AgentTeamRegistryState;
+
+  constructor(initialState: AgentTeamRegistryState = emptyState()) {
+    this.state = cloneState(initialState);
+  }
+
+  load(): AgentTeamRegistryState {
+    return cloneState(this.state);
+  }
+
+  save(state: AgentTeamRegistryState): void {
+    this.state = cloneState(state);
+  }
+}
+
+export class FileAgentTeamRegistryStore implements AgentTeamRegistryStore {
+  private readonly filePath: string;
+
+  constructor(storageDir: string) {
+    if (!isAbsolute(storageDir)) {
+      throw new Error('Agent Team storage directory must be absolute');
+    }
+    this.filePath = join(storageDir, REGISTRY_FILENAME);
+  }
+
+  load(): AgentTeamRegistryState {
+    if (!existsSync(this.filePath)) return emptyState();
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(readFileSync(this.filePath, 'utf8'));
+    } catch (error) {
+      throw new Error(
+        `Failed to read Agent Team registry: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    return parseRegistryFile(parsed);
+  }
+
+  save(state: AgentTeamRegistryState): void {
+    const file: RegistryFile = {
+      schemaVersion: SCHEMA_VERSION,
+      state: cloneState(state),
+    };
+    mkdirSync(dirname(this.filePath), { recursive: true });
+    const temporaryPath = `${this.filePath}.tmp`;
+    writeFileSync(temporaryPath, `${JSON.stringify(file, null, 2)}\n`, 'utf8');
+    renameSync(temporaryPath, this.filePath);
+    try {
+      chmodSync(this.filePath, 0o600);
+    } catch {
+      // POSIX permissions are best-effort on platforms that support them.
+    }
+  }
+}
