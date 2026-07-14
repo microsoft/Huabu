@@ -48,14 +48,6 @@ files:
 extraResources:
   - from: ../server/dist-bundle/server.js
     to: server/server.js
-  # sql.js (bundled into server.js via @agentlet/server -> DataStore)
-  # loads its wasm via `path.join(__dirname, 'sql-wasm.wasm')`, where
-  # __dirname (polyfilled in the tsup banner) = the directory of
-  # server.js. Ship the wasm next to server.js so the lookup succeeds.
-  # Missing this file = ENOENT during boot = the server process exits
-  # with code 1 and Electron shows the "failed to start" dialog.
-  - from: ../server/dist-bundle/sql-wasm.wasm
-    to: server/sql-wasm.wasm
   # @resvg/resvg-wasm — loaded on demand by the `rasterize_node` agent
   # tool via `path.join(__dirname, 'resvg-bg.wasm')` (bundle layout
   # fallback). Missing this file is non-fatal at boot but the tool
@@ -74,12 +66,9 @@ extraResources:
     to: server/agentlet
     filter:
       # Only the compiled .js + sourcemaps are needed at runtime; .d.ts
-      # files bloat the installer for no benefit. sql-wasm.wasm is
-      # required by sql.js when the forked daemon initialises its own
-      # DataStore — same __dirname-relative lookup as the main server.
+      # files bloat the installer for no benefit.
       - '**/*.js'
       - '**/*.js.map'
-      - '**/*.wasm'
   - from: ../web/dist
     to: web
     filter:

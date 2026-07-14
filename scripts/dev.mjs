@@ -280,13 +280,10 @@ function spawnAgentletWatch(filter, label) {
   return child;
 }
 
-console.log('[dev] starting agentlet watchers + shared + server …');
-// Order within the parallel group doesn't matter — agentlet/protocol is a
-// build-time dep of agentlet/server, but `predev` already ran a full build
-// so both watchers start from a populated `dist/` and only do incremental
-// recompiles from here on.
+console.log('[dev] starting agentlet watcher + shared + server …');
+// `predev` already populated protocol dist; this watcher keeps it current for
+// the daemon bundle and Agenetes Gateway consumers during development.
 spawnAgentletWatch('@agentlet/protocol', 'agentlet/protocol');
-spawnAgentletWatch('@agentlet/server', 'agentlet/server');
 spawnPnpmDev('@sediment/shared', 'shared');
 spawnPnpmDev('@sediment/server', 'server');
 
