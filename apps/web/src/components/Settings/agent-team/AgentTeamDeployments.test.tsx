@@ -184,6 +184,29 @@ function renderDeployment(item: AgentTeamDeploymentView, configReady: boolean) {
   return container;
 }
 
+function renderNewDeployment() {
+  container = document.createElement('div');
+  document.body.appendChild(container);
+  root = createRoot(container);
+  act(() => {
+    root?.render(
+      <AgentTeamDeployments
+        member={{
+          ...member,
+          harnesses: ['claude', 'copilot'],
+        }}
+        configReady
+        deployments={[]}
+        pendingAction={null}
+        mutate={async (_action, operation) => {
+          await operation();
+        }}
+      />,
+    );
+  });
+  return container;
+}
+
 afterEach(() => {
   act(() => root?.unmount());
   container?.remove();
@@ -193,6 +216,17 @@ afterEach(() => {
 });
 
 describe('AgentTeamDeployments', () => {
+  it('shows a labeled harness selector before the first deployment exists', () => {
+    const view = renderNewDeployment();
+    const harness = view.querySelector('select') as HTMLSelectElement;
+
+    expect(view.textContent).toContain('harness');
+    expect(Array.from(harness.options, (option) => option.value)).toEqual([
+      'claude',
+      'copilot',
+    ]);
+  });
+
   it('blocks enable until required Configs are ready', () => {
     const view = renderDeployment(deployment({ status: 'disabled' }), false);
     expect(

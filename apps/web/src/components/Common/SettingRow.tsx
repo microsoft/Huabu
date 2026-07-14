@@ -2,7 +2,7 @@ import React from 'react';
 
 interface SettingRowProps {
   /** Primary label for the setting. Omit when the section heading already names it. */
-  title?: string;
+  title?: React.ReactNode;
   /** Optional secondary description text. */
   description?: string;
   /** Control element rendered on the right (e.g. Button, Toggle, Select, link icon). */

@@ -60,9 +60,17 @@ function ConfigField({
     }
   };
 
-  const label = field.required
-    ? `${field.name} · ${t('required')}`
-    : field.name;
+  const label = (
+    <>
+      {field.name}
+      {field.required && (
+        <span className="text-danger" title={t('required')}>
+          {' '}
+          (*)
+        </span>
+      )}
+    </>
+  );
 
   return (
     <SettingRow title={label} description={field.description}>
@@ -136,19 +144,7 @@ export function AgentTeamConfigs(props: AgentTeamConfigsProps) {
     );
   }
 
-  return (
-    <>
-      {config.missingRequired.length > 0 && (
-        <SettingRow
-          title={t('missingRequired')}
-          description={config.missingRequired.join(', ')}
-        >
-          <Key className="text-warning" size={14} />
-        </SettingRow>
-      )}
-      {config.fields.map((field) => (
-        <ConfigField key={field.name} field={field} {...props} />
-      ))}
-    </>
-  );
+  return config.fields.map((field) => (
+    <ConfigField key={field.name} field={field} {...props} />
+  ));
 }

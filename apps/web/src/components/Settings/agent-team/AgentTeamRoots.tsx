@@ -147,6 +147,7 @@ export function AgentTeamRoots({
 
       {roots.map((root) => {
         const key = rootKey(root);
+        const rootRef = { machine: root.machine, path: root.path };
         const scanDescription =
           root.scan.status === 'error'
             ? root.scan.message
@@ -172,7 +173,7 @@ export function AgentTeamRoots({
                 onClick={() =>
                   void run(
                     `rescan:${key}`,
-                    () => rescanAgentTeamRoot(root),
+                    () => rescanAgentTeamRoot(rootRef),
                     t('rootRescanned'),
                   )
                 }
@@ -195,7 +196,7 @@ export function AgentTeamRoots({
                 onClick={() =>
                   void run(
                     `remove:${key}`,
-                    () => removeAgentTeamRoot(root),
+                    () => removeAgentTeamRoot(rootRef),
                     t('rootRemoved'),
                   )
                 }

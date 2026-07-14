@@ -4,10 +4,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AgentTeamRoots } from './AgentTeamRoots';
 
-import type { AgentTeamMachineView } from '@sediment/shared';
+import type { AgentTeamMachineView, AgentTeamRootView } from '@sediment/shared';
 
 const apiMocks = vi.hoisted(() => ({
   addRoot: vi.fn(),
+  rescanRoot: vi.fn(),
 }));
 
 vi.mock('react-i18next', () => ({
@@ -19,7 +20,7 @@ vi.mock('react-i18next', () => ({
 vi.mock('@/api/agent-team', () => ({
   addAgentTeamRoot: apiMocks.addRoot,
   removeAgentTeamRoot: vi.fn(),
-  rescanAgentTeamRoot: vi.fn(),
+  rescanAgentTeamRoot: apiMocks.rescanRoot,
 }));
 
 vi.mock('@/components/Common/Button', () => ({
@@ -112,7 +113,7 @@ const machines: AgentTeamMachineView[] = [
 let root: Root | null = null;
 let container: HTMLElement | null = null;
 
-function renderRoots() {
+function renderRoots(roots: AgentTeamRootView[] = []) {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -121,7 +122,7 @@ function renderRoots() {
       <AgentTeamRoots
         machines={machines}
         localMachine="local-id"
-        roots={[]}
+        roots={roots}
         pendingAction={null}
         mutate={async (_action, operation) => {
           await operation();
@@ -138,6 +139,7 @@ afterEach(() => {
   root = null;
   container = null;
   apiMocks.addRoot.mockReset();
+  apiMocks.rescanRoot.mockReset();
 });
 
 describe('AgentTeamRoots', () => {
@@ -173,5 +175,28 @@ describe('AgentTeamRoots', () => {
     });
 
     expect(path.value).toBe('/agent-team');
+  });
+
+  it('projects a root view to the strict root reference when rescanning', async () => {
+    apiMocks.rescanRoot.mockResolvedValueOnce({});
+    const view = renderRoots([
+      {
+        machine: 'local-id',
+        path: '/agent-team',
+        scan: { status: 'never_scanned' },
+      },
+    ]);
+    const rescan = view.querySelector(
+      'button[title="rescanRoot"]',
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      rescan.click();
+    });
+
+    expect(apiMocks.rescanRoot).toHaveBeenCalledWith({
+      machine: 'local-id',
+      path: '/agent-team',
+    });
   });
 });

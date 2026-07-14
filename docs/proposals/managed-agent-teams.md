@@ -98,7 +98,7 @@ Settings has a dedicated **Agent Team** tab rather than exposing Agent Teams as 
 
 The tab groups settings by discovered member. Each member has an expandable block or equivalent grouped surface with package information and member-level Configs, followed by the member's deployment aliases.
 
-The implemented Settings surface supports root add/rescan/remove, local-only folder picking, missing-required-Config summaries, secret replacement and clearing, deployment create/edit/delete with delete confirmation, enable/disable/retry actions, setup status and logs, and GET bootstrap followed by SSE replacement snapshots. Enable controls are disabled while required member Configs are incomplete, matching the backend state-machine gate.
+The implemented Settings surface supports root add/rescan/remove, local-only folder picking, red `(*)` markers on required Configs, secret replacement and clearing, deployment create/edit/delete with delete confirmation, labeled harness selection, enable/disable/retry actions, setup status and logs, and GET bootstrap followed by SSE replacement snapshots. The first deployment form is shown immediately so its harness selection is discoverable. Enable controls are disabled while required member Configs are incomplete, matching the backend state-machine gate.
 
 The member-level Configs table is shared by every deployment whose profile references the same `(machine, manifestPath)`.
 

@@ -54,6 +54,12 @@ function statusTone(
   return 'bg-bg-default text-fg-subtle';
 }
 
+function FieldLabel({ children }: { children: string }) {
+  return (
+    <span className="text-fg-muted text-[10px] font-medium">{children}</span>
+  );
+}
+
 const SETUP_STATUS_KEYS = {
   disabled: 'setupStatusDisabled',
   setting_up: 'setupStatusSettingUp',
@@ -148,36 +154,49 @@ function DeploymentRow({
         />
       </div>
 
-      <div className="grid grid-cols-[minmax(7rem,0.7fr)_minmax(7rem,0.6fr)_minmax(0,1.4fr)_auto_auto] gap-2">
-        <Input
-          value={alias}
-          onChange={(event) => setAlias(event.target.value)}
-          aria-label={t('alias')}
-          placeholder={t('alias')}
-          disabled={busy}
-          className={`${TEXT_INPUT_CLASS} min-w-0`}
-        />
-        <Select
-          options={member.harnesses.map((value) => ({ value, label: value }))}
-          value={harness}
-          onChange={(value) => {
-            setHarness(value);
-            if (!placementLocked) {
-              setWorkingDirPath(workspaceDefault(member.manifestPath, value));
-            }
-          }}
-          disabled={busy || placementLocked}
-          className="w-full"
-        />
-        <PathInput
-          value={workingDirPath}
-          onChange={setWorkingDirPath}
-          pickerEnabled={false}
-          placeholder={t('workingDirectory')}
-          disabled={busy || placementLocked}
-          size="sm"
-          mono
-        />
+      <div className="grid grid-cols-[minmax(7rem,0.7fr)_minmax(7rem,0.6fr)_minmax(0,1.4fr)_auto_auto] items-end gap-2">
+        <label className="space-y-1">
+          <FieldLabel>{t('alias')}</FieldLabel>
+          <Input
+            value={alias}
+            onChange={(event) => setAlias(event.target.value)}
+            placeholder={t('alias')}
+            disabled={busy}
+            className={`${TEXT_INPUT_CLASS} min-w-0`}
+          />
+        </label>
+        <div className="space-y-1">
+          <FieldLabel>{t('harness')}</FieldLabel>
+          <Select
+            options={member.harnesses.map((value) => ({
+              value,
+              label: value,
+            }))}
+            value={harness}
+            onChange={(value) => {
+              setHarness(value);
+              if (!placementLocked) {
+                setWorkingDirPath(workspaceDefault(member.manifestPath, value));
+              }
+            }}
+            disabled={busy || placementLocked}
+            className="w-full"
+            title={t('harness')}
+          />
+        </div>
+        <div className="space-y-1">
+          <FieldLabel>{t('workingDirectory')}</FieldLabel>
+          <PathInput
+            value={workingDirPath}
+            onChange={setWorkingDirPath}
+            pickerEnabled={false}
+            ariaLabel={t('workingDirectory')}
+            placeholder={t('workingDirectory')}
+            disabled={busy || placementLocked}
+            size="sm"
+            mono
+          />
+        </div>
         <Button
           variant="outline"
           tone="neutral"
@@ -271,6 +290,7 @@ export function AgentTeamDeployments({
   const [pendingDelete, setPendingDelete] =
     useState<AgentTeamDeploymentView | null>(null);
   const busy = pendingAction !== null;
+  const showCreate = creating || deployments.length === 0;
 
   const harnessOptions = useMemo(
     () => member.harnesses.map((value) => ({ value, label: value })),
@@ -335,48 +355,62 @@ export function AgentTeamDeployments({
         />
       ))}
 
-      {creating ? (
+      {showCreate ? (
         <div className="space-y-2 px-3 py-3">
           <p className="text-fg-default text-xs font-medium">
             {t('newDeployment')}
           </p>
           <div className="grid grid-cols-[minmax(7rem,0.7fr)_minmax(7rem,0.6fr)_minmax(0,1.4fr)] gap-2">
-            <Input
-              value={alias}
-              onChange={(event) => setAlias(event.target.value)}
-              placeholder={t('alias')}
-              aria-label={t('alias')}
-              className={`${TEXT_INPUT_CLASS} min-w-0`}
-              autoFocus
-            />
-            <Select
-              options={harnessOptions}
-              value={harness}
-              onChange={(value) => {
-                setHarness(value);
-                setWorkingDirPath(workspaceDefault(member.manifestPath, value));
-              }}
-              className="w-full"
-            />
-            <PathInput
-              value={workingDirPath}
-              onChange={setWorkingDirPath}
-              pickerEnabled={false}
-              placeholder={t('workingDirectory')}
-              size="sm"
-              mono
-            />
+            <label className="space-y-1">
+              <FieldLabel>{t('alias')}</FieldLabel>
+              <Input
+                value={alias}
+                onChange={(event) => setAlias(event.target.value)}
+                placeholder={t('alias')}
+                className={`${TEXT_INPUT_CLASS} min-w-0`}
+                autoFocus
+              />
+            </label>
+            <div className="space-y-1">
+              <FieldLabel>{t('harness')}</FieldLabel>
+              <Select
+                options={harnessOptions}
+                value={harness}
+                onChange={(value) => {
+                  setHarness(value);
+                  setWorkingDirPath(
+                    workspaceDefault(member.manifestPath, value),
+                  );
+                }}
+                className="w-full"
+                title={t('harness')}
+              />
+            </div>
+            <div className="space-y-1">
+              <FieldLabel>{t('workingDirectory')}</FieldLabel>
+              <PathInput
+                value={workingDirPath}
+                onChange={setWorkingDirPath}
+                pickerEnabled={false}
+                ariaLabel={t('workingDirectory')}
+                placeholder={t('workingDirectory')}
+                size="sm"
+                mono
+              />
+            </div>
           </div>
           <div className="flex justify-end gap-2">
-            <Button
-              variant="ghost"
-              tone="neutral"
-              size="sm"
-              onClick={() => setCreating(false)}
-              disabled={busy}
-            >
-              {t('cancel')}
-            </Button>
+            {deployments.length > 0 && (
+              <Button
+                variant="ghost"
+                tone="neutral"
+                size="sm"
+                onClick={() => setCreating(false)}
+                disabled={busy}
+              >
+                {t('cancel')}
+              </Button>
+            )}
             <Button
               variant="solid"
               tone="info"
