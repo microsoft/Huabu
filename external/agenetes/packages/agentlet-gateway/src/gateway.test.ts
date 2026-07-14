@@ -497,6 +497,23 @@ describe('AgentletGateway', () => {
           }),
         );
       }
+      if (
+        'method' in message &&
+        message.method === ServerMethods.AGENT_TEAM_SCAN &&
+        'id' in message
+      ) {
+        machineA.socket.send(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: message.id,
+            result: {
+              rootPath: '/teams',
+              members: [],
+              diagnostics: [],
+            },
+          }),
+        );
+      }
     });
 
     await expect(
@@ -505,6 +522,14 @@ describe('AgentletGateway', () => {
         sessionSpec: { command: 'mock-agent' },
       }),
     ).resolves.toEqual({ sessionId: 'native-a', pid: 456 });
+
+    await expect(
+      gateway.scanAgentTeams('machine-a', { rootPath: '/teams' }),
+    ).resolves.toEqual({
+      rootPath: '/teams',
+      members: [],
+      diagnostics: [],
+    });
   });
 
   it('rejects non-positive buffer limits', () => {

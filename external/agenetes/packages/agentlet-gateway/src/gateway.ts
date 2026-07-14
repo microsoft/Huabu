@@ -7,6 +7,8 @@ import {
   type AgentHelloResult,
   type AgentletHelloParams,
   type AgentletHelloResult,
+  type AgentTeamScanParams,
+  type AgentTeamScanResult,
   type JsonRpcError,
   type JsonRpcMessage,
   type SendResourceParams,
@@ -163,6 +165,17 @@ export class AgentletGateway {
     }>;
   }> {
     return this.sendControlRequest(agentletId, ServerMethods.LIST, {});
+  }
+
+  scanAgentTeams(
+    agentletId: string,
+    params: AgentTeamScanParams,
+  ): Promise<AgentTeamScanResult> {
+    return this.sendControlRequest(
+      agentletId,
+      ServerMethods.AGENT_TEAM_SCAN,
+      params,
+    );
   }
 
   sendResource(agentletId: string, params: SendResourceParams): void {
