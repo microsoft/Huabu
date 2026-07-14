@@ -3,7 +3,7 @@
 > Structure, dependency rules, and conventions for the frontend. The point of
 > this doc is the **layering rules** below — not an exhaustive file listing
 > (those rot fast; `ls` the dir for the current files).
-> Last updated: 2026-07-11
+> Last updated: 2026-07-14
 
 ---
 
@@ -139,6 +139,8 @@ selection toggles don't break xyflow's per-element `React.memo`.
 ---
 
 ## 7. Related docs
+
+Canvas pan and zoom are local UI state rather than canvas topology. [`canvasStore`](../../apps/web/src/store/canvasStore.ts) records the last viewport under a canvas-specific `localStorage` key, allowing both browser and Electron users to reopen a canvas at the previous view without creating server writes or sharing a viewport across devices. A one-time compatibility read migrates viewport values written to `sessionStorage` by older builds.
 
 - [canvas-command-architecture.md](./canvas-command-architecture.md) — the command/engine model (shared, server + web).
 - [agent-context.md](./agent-context.md) — how the web assembles agent context.

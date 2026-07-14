@@ -226,10 +226,10 @@ export async function recognizeSketchCommands(
     {
       toolStarts: Object.fromEntries(toolStartCounts),
       toolResults: Object.fromEntries(toolResultCounts),
-      canvasCommandsCalled: (toolStartCounts.get('canvas_commands') ?? 0) > 0,
+      canvasCommandsCalled: (toolStartCounts.get('space_commands') ?? 0) > 0,
       reasoningPreview: reasoningText.slice(0, 200),
       suspectedFailureMode:
-        (toolStartCounts.get('canvas_commands') ?? 0) === 0
+        (toolStartCounts.get('space_commands') ?? 0) === 0
           ? 'LLM_NEVER_INVOKED_TOOL (JSON likely written into assistant text)'
           : 'OK',
     },

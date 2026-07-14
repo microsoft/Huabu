@@ -107,23 +107,19 @@ const AUTOSAVE_DEBOUNCE_MS = 1000;
 const PREPROCESS_DEBOUNCE_MS = 1000;
 const NODE_CONTENT_DEBOUNCE_MS = 500;
 
-// ─── Viewport sessionStorage ──────────────────────────────────────────────
+// ─── Viewport localStorage ────────────────────────────────────────────────
 //
-// Pan + zoom is a per-tab view preference, not canvas data: persisting it
-// server-side forced every tab/device on the same canvas to share one
-// view and turned each `onMoveEnd` into a structure PUT that bumped
-// `version` (and could collide with the agent). We store it in
-// `sessionStorage` keyed by canvasId so each tab keeps its own scroll
-// position across refreshes without touching the server.
+// Pan + zoom is local UI state, not canvas data: persisting it server-side
+// forced every device onto one view and made viewport movement bump the canvas
+// version. localStorage keeps one last view per canvas across browser and
+// desktop restarts without touching the server.
 
 const viewportStorageKey = (canvasId: string) =>
   `sediment.viewport.${canvasId}`;
 
-function readViewportFromSession(canvasId: string): CanvasViewport | null {
-  if (!canvasId) return null;
+function parseStoredViewport(raw: string | null): CanvasViewport | null {
+  if (!raw) return null;
   try {
-    const raw = sessionStorage.getItem(viewportStorageKey(canvasId));
-    if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<CanvasViewport> | null;
     if (
       parsed &&
@@ -139,33 +135,67 @@ function readViewportFromSession(canvasId: string): CanvasViewport | null {
       };
     }
   } catch {
-    // Private mode / quota / corrupt entry — fall back to fitView.
+    // Corrupt entries are treated as missing viewport state.
   }
   return null;
 }
 
-function writeViewportToSession(
+function readViewportFromStorage(canvasId: string): CanvasViewport | null {
+  if (!canvasId) return null;
+  const key = viewportStorageKey(canvasId);
+
+  // Migrate the current tab's value from builds that used sessionStorage.
+  try {
+    const sessionViewport = parseStoredViewport(sessionStorage.getItem(key));
+    if (sessionViewport) {
+      try {
+        localStorage.setItem(key, JSON.stringify(sessionViewport));
+        sessionStorage.removeItem(key);
+      } catch {
+        // Keep the valid session value when persistent storage is unavailable.
+      }
+      return sessionViewport;
+    }
+  } catch {
+    // Continue with persistent storage when sessionStorage is unavailable.
+  }
+
+  try {
+    return parseStoredViewport(localStorage.getItem(key));
+  } catch {
+    // Private mode / disabled storage falls back to fitView.
+    return null;
+  }
+}
+
+function writeViewportToStorage(
   canvasId: string,
   viewport: CanvasViewport,
 ): void {
   if (!canvasId) return;
+  const key = viewportStorageKey(canvasId);
   try {
-    sessionStorage.setItem(
-      viewportStorageKey(canvasId),
-      JSON.stringify(viewport),
-    );
+    localStorage.setItem(key, JSON.stringify(viewport));
+    try {
+      sessionStorage.removeItem(key);
+    } catch {
+      // Persistent storage succeeded; stale migration data is harmless.
+    }
   } catch {
-    // Ignore: viewport is a UX nicety, never block the user on it.
+    try {
+      sessionStorage.setItem(key, JSON.stringify(viewport));
+    } catch {
+      // Viewport persistence must never block interaction.
+    }
   }
 }
 
 // ─── MiniMap-visibility localStorage ──────────────────────────────────────
 //
 // Whether the canvas MiniMap overlay is shown is a global UI preference
-// (not per-canvas, not per-tab), so it lives in `localStorage` rather
-// than the per-tab `sessionStorage` used for viewport above. Defaults to
-// off so first-time users get the cleaner canvas; once toggled in
-// Settings the choice survives refreshes / restarts.
+// (not per-canvas), so it uses a single localStorage key. Defaults to off so
+// first-time users get the cleaner canvas; once toggled in Settings the choice
+// survives refreshes / restarts.
 
 const MINIMAP_STORAGE_KEY = 'sediment.minimapEnabled';
 
@@ -530,13 +560,13 @@ type RFState = {
    * `null` means "no saved viewport yet" — on initial load that triggers a
    * one-shot `fitView`. After the user pans or zooms, `onMoveEnd` writes
    * the new viewport here through {@link setViewport}, which also
-   * mirrors it into `sessionStorage` (per-tab, per-canvas) so a refresh
-   * lands back at the same view without going through the server.
+   * mirrors it into `localStorage` (per-canvas) so reopening the browser or
+   * desktop app lands back at the same view without going through the server.
    */
   viewport: CanvasViewport | null;
   /**
    * Record a new viewport. Called from `<ReactFlow onMoveEnd>` after the
-   * user finishes panning/zooming. Writes to `sessionStorage` directly;
+   * user finishes panning/zooming. Writes to `localStorage` directly;
    * does NOT participate in the structure autosave (`viewport` is not
    * one of the persisted fields tracked by
    * `./canvasStore/save/structureDirtyDetector.ts`).
@@ -1528,8 +1558,8 @@ const useCanvasStore = create<RFState>()(
           nodes?: Node[];
           edges?: Edge[];
           // Legacy field: older canvases still carry a server-side
-          // viewport. Used only as a one-shot fallback when this tab
-          // has no sessionStorage entry yet; the next structure PUT
+          // viewport. Used only as a one-shot fallback when this client
+          // has no local viewport entry yet; the next structure PUT
           // strips it from persisted topology for good.
           viewport?: CanvasViewport;
         };
@@ -1544,11 +1574,11 @@ const useCanvasStore = create<RFState>()(
         // `done` here, restoring the badge + reopen affordance.
         const loadedNodes = reconcileQuestionStatus(state.nodes ?? []);
         const loadedEdges = state.edges ?? [];
-        // Prefer this tab's sessionStorage; fall back to whatever the
+        // Prefer this client's persistent UI state; fall back to whatever the
         // server still has from before viewport was moved client-side.
         // A corrupt entry on either side falls through to `null`, which
         // Canvas.tsx interprets as "do a one-shot fitView".
-        const sessionViewport = readViewportFromSession(targetId);
+        const storedViewport = readViewportFromStorage(targetId);
         const legacyServerViewport =
           state.viewport &&
           Number.isFinite(state.viewport.x) &&
@@ -1557,7 +1587,7 @@ const useCanvasStore = create<RFState>()(
           state.viewport.zoom > 0
             ? state.viewport
             : null;
-        const loadedViewport = sessionViewport ?? legacyServerViewport;
+        const loadedViewport = storedViewport ?? legacyServerViewport;
         // Apply the authoritative server state via the no-autosave setter.
         // A load must NEVER schedule a structure PUT: the nodes/edges we
         // just fetched already ARE the server's state, so bumping the
@@ -1702,8 +1732,8 @@ const useCanvasStore = create<RFState>()(
         // field from the body. Those live in `nodes/<safe(label)>.md`
         // now and ride the per-node content PUT, so the structure PUT
         // body shrinks to pure geometry + parenthood.
-        // Viewport is intentionally omitted: it's a per-tab UX state
-        // mirrored into `sessionStorage`, not canvas data.
+        // Viewport is intentionally omitted: it's local UI state mirrored
+        // into `localStorage`, not canvas data.
         const slimNodes = stripNodeContentForStructurePut(nodes);
         const response = await putCanvas(
           canvasId,
@@ -2619,9 +2649,9 @@ const useCanvasStore = create<RFState>()(
         return;
       }
       set({ viewport });
-      // Mirror into sessionStorage so a refresh restores this tab's
-      // pan + zoom without a server round-trip.
-      writeViewportToSession(get().canvasId, viewport);
+      // Mirror into localStorage so reopening the browser or desktop app
+      // restores this canvas's pan + zoom without a server round-trip.
+      writeViewportToStorage(get().canvasId, viewport);
     },
 
     addNodes: (inputs) => {

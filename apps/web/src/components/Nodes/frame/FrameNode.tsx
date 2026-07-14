@@ -137,7 +137,14 @@ export const FrameNode = memo(
       }
       return null;
     });
+    // Only a container frame (with at least one direct child) can hold a
+    // colliding selected descendant frame. A frame with zero children has an
+    // empty subtree, so it can skip the whole-graph scan entirely — this
+    // keeps the O(nodes) sweep off the vast majority of (leaf) frames and
+    // leaves it running only for the few frames that actually nest.
+    const isContainerFrame = childCount > 0;
     const selectedDescendantFrameY = useStore((state) => {
+      if (!isContainerFrame) return null;
       for (const candidate of state.nodeLookup.values()) {
         if (
           candidate.id === id ||
