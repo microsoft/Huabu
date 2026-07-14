@@ -13,8 +13,8 @@ non-blocking; the LLM decides what to write.
 
 | Tier      | Scope        | Path                                       | User-visible | Purpose                                                              |
 | --------- | ------------ | ------------------------------------------ | ------------ | -------------------------------------------------------------------- |
-| Workspace | cross-canvas | `<workspace>/setting/.huabu.md`            | ✅           | user profile, style prefs, answer length — cross-canvas preferences  |
-| Canvas    | per-canvas   | `<canvas>/.memory/canvas.md`               | ❌ hidden    | what this canvas is doing, current intent, small confirmed decisions |
+| Workspace | cross-canvas | `<workspace>/setting/user.md`              | ✅           | user profile, style prefs, answer length — cross-canvas preferences  |
+| Canvas    | per-canvas   | `<canvas>/.memory/space.md`                | ❌ hidden    | what this canvas is doing, current intent, small confirmed decisions |
 | Skill     | cross-canvas | `<workspace>/setting/skills/<id>/SKILL.md` | ✅           | reusable approaches / recipes                                        |
 
 **Caps**: workspace + canvas memory each hard-capped at 4 KB / 80 lines; skills have no size cap but a high creation bar (§4.3).
@@ -50,17 +50,17 @@ The ask / operate chat agents both get the memory write tool. **It may only be c
 
 There is one read path: the `read()` tool, three entries.
 
-| Tool call                                           | Resolves to                     |
-| --------------------------------------------------- | ------------------------------- |
-| `read("memory/workspace.md")`                       | `<workspace>/setting/.huabu.md` |
-| `read("memory/canvas.md")` (needs canvasId context) | `<canvas>/.memory/canvas.md`    |
-| `read("skills/<id>/SKILL.md")`                      | merged system + user skill body |
+| Tool call                                          | Resolves to                     |
+| -------------------------------------------------- | ------------------------------- |
+| `read("memory/user.md")`                           | `<workspace>/setting/user.md`   |
+| `read("memory/space.md")` (needs canvasId context) | `<canvas>/.memory/space.md`     |
+| `read("skills/<id>/SKILL.md")`                     | merged system + user skill body |
 
 Implemented in [tools/handlers/fs-read.ts](../../apps/server/src/modules/agent/tools/handlers/fs-read.ts); an unknown `memory/*.md` path errors back to the agent.
 
 **Injection strategy**:
 
-- **Every turn**: the route appends `.huabu.md` as a `<workspace_memory>` tag block at the end of the built-in agent's system prompt (so cross-canvas prefs apply stably each turn, and it stays prompt-cache-friendly). See where [agent.route.ts](../../apps/server/src/modules/agent/agent.route.ts) assembles `systemPrompt`. Built-in pi-agent path only; external/ACP has its own preamble and doesn't read workspace memory.
+- **Every turn**: the route appends `user.md` as a `<workspace_memory>` tag block at the end of the built-in agent's system prompt (so cross-canvas prefs apply stably each turn, and it stays prompt-cache-friendly). See where [agent.route.ts](../../apps/server/src/modules/agent/agent.route.ts) assembles `systemPrompt`. Built-in pi-agent path only; external/ACP has its own preamble and doesn't read workspace memory.
 - **Skill / memory entries**: listed in the "Available skills / memory" section of the system prompt; the agent decides whether to `read()`.
 
 Canvas memory is **always pull-only** — it's large and situational, so the agent decides whether to fetch it.
@@ -73,8 +73,8 @@ All three tiers share one tool: `fs_write({ path, mode, ... })`. The agent picks
 
 | `path`                 | File                                       | Note                                            |
 | ---------------------- | ------------------------------------------ | ----------------------------------------------- |
-| `memory/workspace.md`  | `<workspace>/setting/.huabu.md`            | cross-canvas user profile, pure bullet markdown |
-| `memory/canvas.md`     | `<canvas>/.memory/canvas.md`               | per-canvas situational brief                    |
+| `memory/user.md`       | `<workspace>/setting/user.md`              | cross-canvas user profile, pure bullet markdown |
+| `memory/space.md`      | `<canvas>/.memory/space.md`                | per-canvas situational brief                    |
 | `skills/<id>/SKILL.md` | `<workspace>/setting/skills/<id>/SKILL.md` | user skill; creation needs a `rationale`        |
 
 Both modes work on every path:
@@ -92,7 +92,7 @@ Implementation: routing + validation in [tools/handlers/fs-write.ts](../../apps/
 
 ### 4.2 Workspace-memory discipline
 
-There's no writer-level "append-only" guard anymore — overwrite can replace the whole file. It's held by prompt discipline (`prompt/skills/memory/write/workspace-memory-writing.md`): "default to `replace_string`; never delete a user's hand-edited bullet via `overwrite`". The agent must `read("memory/workspace.md")` first, know the current content, then decide what to change.
+There's no writer-level "append-only" guard anymore — overwrite can replace the whole file. It's held by prompt discipline (`prompt/skills/memory/write/user-memory-writing.md`): "default to `replace_string`; never delete a user's hand-edited bullet via `overwrite`". The agent must `read("memory/user.md")` first, know the current content, then decide what to change.
 
 ### 4.3 Skill-write bar
 
@@ -107,8 +107,8 @@ There's no writer-level "append-only" guard anymore — overwrite can replace th
 
 The tool description carries only mechanics (params / cap / validation); **policy lives in the write sub-docs** (pulled explicitly via `read()`, not in the catalogue):
 
-- [write/workspace-memory-writing.md](../../apps/server/src/prompt/skills/memory/write/workspace-memory-writing.md)
-- [write/canvas-memory-writing.md](../../apps/server/src/prompt/skills/memory/write/canvas-memory-writing.md)
+- [write/user-memory-writing.md](../../apps/server/src/prompt/skills/memory/write/user-memory-writing.md)
+- [write/space-memory-writing.md](../../apps/server/src/prompt/skills/memory/write/space-memory-writing.md)
 - [write/skills-writing.md](../../apps/server/src/prompt/skills/memory/write/skills-writing.md)
 
 Both the curator AGENT.md and the chat AGENT.md point at the same sub-docs to avoid the rules drifting in two places.
@@ -117,32 +117,32 @@ Both the curator AGENT.md and the chat AGENT.md point at the same sub-docs to av
 
 ## 5. Code entry points
 
-| Concern                                                 | File                                                                                                                                                                                                                                                                                                                |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Per-turn workspace-memory injection (system-prompt tag) | [agent.route.ts](../../apps/server/src/modules/agent/agent.route.ts)                                                                                                                                                                                                                                                |
-| Public entry `enqueue(canvasId)`                        | [memory/index.ts](../../apps/server/src/modules/agent/memory/index.ts)                                                                                                                                                                                                                                              |
-| op counter + state.json                                 | [memory/trigger.ts](../../apps/server/src/modules/agent/memory/trigger.ts)                                                                                                                                                                                                                                          |
-| Global Fastify hook                                     | [memory/op-counter-hook.ts](../../apps/server/src/modules/agent/memory/op-counter-hook.ts)                                                                                                                                                                                                                          |
-| Per-canvas single-flight                                | [memory/worker.ts](../../apps/server/src/modules/agent/memory/worker.ts)                                                                                                                                                                                                                                            |
-| context → runAgent → WriteResult                        | [memory/analyzer.ts](../../apps/server/src/modules/agent/memory/analyzer.ts)                                                                                                                                                                                                                                        |
-| overwrite + replace_string primitives                   | [memory/writers.ts](../../apps/server/src/modules/agent/memory/writers.ts)                                                                                                                                                                                                                                          |
-| Dual-root path check                                    | [memory/sandbox.ts](../../apps/server/src/modules/agent/memory/sandbox.ts)                                                                                                                                                                                                                                          |
-| Read entry                                              | [memory/read.ts](../../apps/server/src/modules/agent/memory/read.ts)                                                                                                                                                                                                                                                |
-| Path helpers                                            | [storage/paths.ts](../../apps/server/src/modules/storage/paths.ts)                                                                                                                                                                                                                                                  |
-| `fs_write` tool def                                     | [tools/definitions.ts](../../apps/server/src/modules/agent/tools/definitions.ts)                                                                                                                                                                                                                                    |
-| fs_write handler                                        | [tools/handlers/fs-write.ts](../../apps/server/src/modules/agent/tools/handlers/fs-write.ts)                                                                                                                                                                                                                        |
-| fs_read handler                                         | [tools/handlers/fs-read.ts](../../apps/server/src/modules/agent/tools/handlers/fs-read.ts)                                                                                                                                                                                                                          |
-| Curator system prompt                                   | [agents/memory/AGENT.md](../../apps/server/src/prompt/agents/memory/AGENT.md)                                                                                                                                                                                                                                       |
-| Chat agents                                             | [ask/AGENT.md](../../apps/server/src/prompt/agents/ask/AGENT.md) · [operate/AGENT.md](../../apps/server/src/prompt/agents/operate/AGENT.md)                                                                                                                                                                         |
-| Skill loader (dual-source + mtime cache)                | [skills/loader.ts](../../apps/server/src/prompt/skills/loader.ts)                                                                                                                                                                                                                                                   |
-| Write-policy sub-docs                                   | [write/workspace-memory-writing.md](../../apps/server/src/prompt/skills/memory/write/workspace-memory-writing.md) · [canvas-memory-writing.md](../../apps/server/src/prompt/skills/memory/write/canvas-memory-writing.md) · [skills-writing.md](../../apps/server/src/prompt/skills/memory/write/skills-writing.md) |
+| Concern                                                 | File                                                                                                                                                                                                                                                                                                    |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Per-turn workspace-memory injection (system-prompt tag) | [agent.route.ts](../../apps/server/src/modules/agent/agent.route.ts)                                                                                                                                                                                                                                    |
+| Public entry `enqueue(canvasId)`                        | [memory/index.ts](../../apps/server/src/modules/agent/memory/index.ts)                                                                                                                                                                                                                                  |
+| op counter + state.json                                 | [memory/trigger.ts](../../apps/server/src/modules/agent/memory/trigger.ts)                                                                                                                                                                                                                              |
+| Global Fastify hook                                     | [memory/op-counter-hook.ts](../../apps/server/src/modules/agent/memory/op-counter-hook.ts)                                                                                                                                                                                                              |
+| Per-canvas single-flight                                | [memory/worker.ts](../../apps/server/src/modules/agent/memory/worker.ts)                                                                                                                                                                                                                                |
+| context → runAgent → WriteResult                        | [memory/analyzer.ts](../../apps/server/src/modules/agent/memory/analyzer.ts)                                                                                                                                                                                                                            |
+| overwrite + replace_string primitives                   | [memory/writers.ts](../../apps/server/src/modules/agent/memory/writers.ts)                                                                                                                                                                                                                              |
+| Dual-root path check                                    | [memory/sandbox.ts](../../apps/server/src/modules/agent/memory/sandbox.ts)                                                                                                                                                                                                                              |
+| Read entry                                              | [memory/read.ts](../../apps/server/src/modules/agent/memory/read.ts)                                                                                                                                                                                                                                    |
+| Path helpers                                            | [storage/paths.ts](../../apps/server/src/modules/storage/paths.ts)                                                                                                                                                                                                                                      |
+| `fs_write` tool def                                     | [tools/definitions.ts](../../apps/server/src/modules/agent/tools/definitions.ts)                                                                                                                                                                                                                        |
+| fs_write handler                                        | [tools/handlers/fs-write.ts](../../apps/server/src/modules/agent/tools/handlers/fs-write.ts)                                                                                                                                                                                                            |
+| fs_read handler                                         | [tools/handlers/fs-read.ts](../../apps/server/src/modules/agent/tools/handlers/fs-read.ts)                                                                                                                                                                                                              |
+| Curator system prompt                                   | [agents/memory/AGENT.md](../../apps/server/src/prompt/agents/memory/AGENT.md)                                                                                                                                                                                                                           |
+| Chat agents                                             | [ask/AGENT.md](../../apps/server/src/prompt/agents/ask/AGENT.md) · [operate/AGENT.md](../../apps/server/src/prompt/agents/operate/AGENT.md)                                                                                                                                                             |
+| Skill loader (dual-source + mtime cache)                | [skills/loader.ts](../../apps/server/src/prompt/skills/loader.ts)                                                                                                                                                                                                                                       |
+| Write-policy sub-docs                                   | [write/user-memory-writing.md](../../apps/server/src/prompt/skills/memory/write/user-memory-writing.md) · [space-memory-writing.md](../../apps/server/src/prompt/skills/memory/write/space-memory-writing.md) · [skills-writing.md](../../apps/server/src/prompt/skills/memory/write/skills-writing.md) |
 
 ---
 
 ## 6. Relationship to existing systems
 
 - `events.jsonl` / chat thread files are untouched; the curator reuses the same data.
-- `<canvas>/.memory/` is in `ALWAYS_SKIP` ([fs-sandbox.ts](../../apps/server/src/modules/agent/tools/handlers/fs-sandbox.ts)) — invisible to grep / find / ls; reachable only through the controlled `read("memory/canvas.md")` path.
+- `<canvas>/.memory/` is in `ALWAYS_SKIP` ([fs-sandbox.ts](../../apps/server/src/modules/agent/tools/handlers/fs-sandbox.ts)) — invisible to grep / find / ls; reachable only through the controlled `read("memory/space.md")` path.
 - The skill loader uses mtime + 2s TTL + `invalidateUserSkill(id)` for write-then-read freshness. System skills are cached once-and-done.
 
 ---

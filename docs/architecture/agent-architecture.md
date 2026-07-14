@@ -14,7 +14,7 @@ The server-side built-in agent loop runs through the standard [`@agenetes/pi-dri
 Key runtime characteristics:
 
 - **Parallel tools**: `toolExecution: 'parallel'` dispatches concurrently by
-  default; `canvas_commands` / `fs_write` / `generate_image` carry
+  default; `space_commands` / `fs_write` / `generate_image` carry
   `executionMode: 'sequential'` on their def and degrade to serial execution
   (avoiding server-side races + SSE completion-order races).
 - **`maxIterations` soft cap**: the service counts `turn_end`; on overflow it
@@ -59,7 +59,7 @@ no awareness of pi-agent-core.
 
 Internal pi-ai tools and external ACP share the same `tool_call` envelope:
 internal turns carry `internalToolName` on `tool_call` to drive the frontend
-render variant + local side effects (e.g. executing `canvas_commands`); ACP
+render variant + local side effects (e.g. executing `space_commands`); ACP
 turns omit that field and render as `generic`.
 
 ---
@@ -80,16 +80,16 @@ tools/
 12 tools, assigned via each agent frontmatter's `tools` array (**not** a
 hardcoded list in code):
 
-| Tool                                                     | Handler                                                                                       | Scope                                         |
-| -------------------------------------------------------- | --------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| `get_canvas_outline` / `inspect_nodes` / `inspect_edges` | [canvas-query.ts](../../apps/server/src/modules/agent/tools/handlers/canvas-query.ts)         | ask/operate/sketch                            |
-| `read`                                                   | [fs-read.ts](../../apps/server/src/modules/agent/tools/handlers/fs-read.ts)                   | ask/operate/sketch/memory                     |
-| `grep` / `find` / `ls`                                   | [fs-search.ts](../../apps/server/src/modules/agent/tools/handlers/fs-search.ts)               | ask/operate/sketch                            |
-| `web_search`                                             | [web-search.ts](../../apps/server/src/modules/agent/tools/handlers/web-search.ts)             | ask/operate                                   |
-| `canvas_commands`                                        | [canvas-write.ts](../../apps/server/src/modules/agent/tools/handlers/canvas-write.ts)         | operate/sketch                                |
-| `fs_write`                                               | [fs-write.ts](../../apps/server/src/modules/agent/tools/handlers/fs-write.ts)                 | operate/memory                                |
-| `snapshot_nodes`                                         | [snapshot-node.ts](../../apps/server/src/modules/agent/tools/handlers/snapshot-node.ts)       | operate (+ auto snapshot on the sketch route) |
-| `generate_image`                                         | [image-generation.ts](../../apps/server/src/modules/agent/tools/handlers/image-generation.ts) | operate                                       |
+| Tool                                                    | Handler                                                                                       | Scope                                         |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| `get_space_outline` / `inspect_nodes` / `inspect_edges` | [canvas-query.ts](../../apps/server/src/modules/agent/tools/handlers/canvas-query.ts)         | ask/operate/sketch                            |
+| `read`                                                  | [fs-read.ts](../../apps/server/src/modules/agent/tools/handlers/fs-read.ts)                   | ask/operate/sketch/memory                     |
+| `grep` / `find` / `ls`                                  | [fs-search.ts](../../apps/server/src/modules/agent/tools/handlers/fs-search.ts)               | ask/operate/sketch                            |
+| `web_search`                                            | [web-search.ts](../../apps/server/src/modules/agent/tools/handlers/web-search.ts)             | ask/operate                                   |
+| `space_commands`                                        | [canvas-write.ts](../../apps/server/src/modules/agent/tools/handlers/canvas-write.ts)         | operate/sketch                                |
+| `fs_write`                                              | [fs-write.ts](../../apps/server/src/modules/agent/tools/handlers/fs-write.ts)                 | operate/memory                                |
+| `snapshot_nodes`                                        | [snapshot-node.ts](../../apps/server/src/modules/agent/tools/handlers/snapshot-node.ts)       | operate (+ auto snapshot on the sketch route) |
+| `generate_image`                                        | [image-generation.ts](../../apps/server/src/modules/agent/tools/handlers/image-generation.ts) | operate                                       |
 
 Design principles:
 
@@ -104,7 +104,7 @@ Design principles:
 4. **Truncation contract**: read tools return `count + truncated`, and add
    `total` only when the full set is cheap to obtain.
 
-`canvas_commands` covers 13 commands
+`space_commands` covers 13 commands
 ([schemas/command.ts](../../apps/server/src/modules/agent/tools/schemas/command.ts)):
 CREATE_NODES, DELETE_NODES, MERGE_NODE_DATA, SET_NODE_PARENT, DISSOLVE_FRAME,
 SET_NODE_GEOMETRY, REORDER_NODES, CONNECT_NODES, DISCONNECT_EDGES,
@@ -202,7 +202,7 @@ To add / change a skill:
 - [agent-memory.md](./agent-memory.md) — the three-layer memory and background
   curator.
 - [canvas-command-architecture.md](./canvas-command-architecture.md) — the
-  three-layer model of `canvas_commands` and server-side execution.
+  three-layer model of `space_commands` and server-side execution.
 - [sketch-node.md](./sketch-node.md) — sketch nodes and the recognition pipeline.
 - [agent-reachback.md](./agent-reachback.md) — the reachback channel external
   agents use to read/write the canvas.

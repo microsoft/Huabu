@@ -47,7 +47,7 @@ CanvasStore.appendEvents()  → appendJsonLines → events.jsonl (one write(2), 
 The agent does **not** consume the raw action log directly. The background **memory curator** periodically (op-counter triggered) reads an events digest and distils it into long-term memory:
 
 - [memory/analyzer.ts](../../apps/server/src/modules/agent/memory/analyzer.ts) `readEventsDigest(canvasId)` (up to `MAX_EVENTS_IN_DIGEST = 100`) is fed to the curator LLM alongside the chat digest + intent-episode digest.
-- The curator distils it into `<canvas>/.memory/canvas.md`; the chat agent then `read("memory/canvas.md")` on demand.
+- The curator distils it into `<canvas>/.memory/space.md`; the chat agent then `read("memory/space.md")` on demand.
 
 So: **raw log → curator distils → long-term memory → agent reads memory**. Cheaper on tokens and higher signal than injecting a raw action table every turn. See [agent-memory.md](./agent-memory.md).
 

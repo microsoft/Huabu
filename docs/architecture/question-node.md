@@ -1,7 +1,7 @@
 # Question Node
 
 > Question node (`type: 'question'`): a canvas node that anchors a chat thread
-> to a location on the canvas. It carries a **user question** as ordinary
+> to a location on the Space. It carries a **user question** as ordinary
 > searchable content and, when asked, runs the agent with the node's spatial
 > neighbourhood as context. The conversation is owned by the node and replayable
 > in the chat panel.
@@ -13,7 +13,7 @@
 Like sketch nodes, a question node has two independent relationships with AI:
 
 - **As a content node** (§4): it carries text, never disappears after being
-  answered, and is visible to every agent via `get_canvas_outline` /
+  answered, and is visible to every agent via `get_space_outline` /
   `read("nodes/<file>.md")`.
 - **As a chat anchor** (§5): the user opens it in the chat panel, picks an agent,
   and sends — the node binds to that thread and runs against its surroundings.
@@ -53,7 +53,7 @@ Not persisted: the in-flight `AbortController` (module-level in `useAgentStream`
 Question nodes are content nodes: their `content` runs through preprocessing's
 `generate_label` (LLM) to auto-name the node — but the profile has no
 `persist_source`, so they do **not** enter the knowledge base. They are still
-visible to agents (`type: 'question'` in `get_canvas_outline`). See
+visible to agents (`type: 'question'` in `get_space_outline`). See
 [node-preprocessing.md](./node-preprocessing.md) for the profile.
 
 ---
@@ -79,7 +79,7 @@ Two independent uses branch from here: read as content (§4) or ask in chat (§5
 ## 4. As a content node
 
 The question text lives in the markdown sidecar, so agents read it like any other
-text node — `read("nodes/<file>.md")` returns the body, and `get_canvas_outline`
+text node — `read("nodes/<file>.md")` returns the body, and `get_space_outline`
 lists it as `type: 'question'`. No trigger needed; it is just canvas content that
 also happens to own a thread.
 
@@ -144,7 +144,7 @@ Resolved entirely on the server — no spatial geometry crosses the wire. `rende
 | P2       | distance-sorted nearby nodes | label + snippet | proximity ≈ relevance |
 
 The LLM gets natural-language topology; for exact coordinates it calls
-`get_canvas_outline` / `inspect_nodes` on demand.
+`get_space_outline` / `inspect_nodes` on demand.
 
 ### 5.4 State machine
 
