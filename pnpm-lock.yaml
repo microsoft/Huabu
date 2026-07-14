@@ -458,22 +458,31 @@ importers:
 
   external/agenetes/packages/agentlet-host:
     dependencies:
+      '@agenetes/agentlet-gateway':
+        specifier: workspace:*
+        version: link:../agentlet-gateway
       '@agenetes/protocol':
         specifier: workspace:*
         version: link:../protocol
       '@agentlet/protocol':
         specifier: workspace:*
         version: link:../../../agentlet/packages/protocol
-      '@agentlet/server':
-        specifier: workspace:*
-        version: link:../../../agentlet/packages/server
     devDependencies:
+      '@types/ws':
+        specifier: ^8.5.0
+        version: 8.18.1
       fastify:
         specifier: ^5.2.0
         version: 5.8.5
       typescript:
         specifier: ^5.9.0
         version: 5.9.3
+      vitest:
+        specifier: ^4.0.18
+        version: 4.1.8(@types/node@22.19.21)(happy-dom@15.11.7)(vite@7.3.5(@types/node@22.19.21)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.22.4)(yaml@2.9.0))
+      ws:
+        specifier: ^8.18.0
+        version: 8.21.0
 
   external/agenetes/packages/pi-driver:
     dependencies:
