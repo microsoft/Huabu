@@ -233,7 +233,7 @@ describe('agentlet daemon integration', () => {
       },
     })
 
-    const reviewerWorkspace = join(tempDir, 'deployments', 'reviewer')
+    const reviewerWorkspace = join(reviewerDir, 'workspaces', 'copilot')
     controlSocket?.send(
       JSON.stringify({
         jsonrpc: '2.0',
@@ -243,7 +243,6 @@ describe('agentlet daemon integration', () => {
           operationId: 'setup-complete',
           manifestPath: join(reviewerDir, 'agentlet.yaml'),
           harness: 'copilot',
-          workingDirPath: reviewerWorkspace,
         },
       }),
     )
@@ -255,7 +254,11 @@ describe('agentlet daemon integration', () => {
     expect(
       controlMessages.find((message) => 'id' in message && message.id === 20),
     ).toMatchObject({
-      result: { operationId: 'setup-complete', accepted: true },
+      result: {
+        operationId: 'setup-complete',
+        accepted: true,
+        workingDirPath: reviewerWorkspace,
+      },
     })
     await waitUntil(() =>
       controlMessages.some(

@@ -21,6 +21,7 @@ export type {
 
 // Validation — inspect a managed deployment without repairing it
 export { validateManagedAgentTeam } from './validate.js';
+export { resolveManagedWorkingDirPath } from './managed-workspace.js';
 export type {
   ManagedAgentTeamValidationIssue,
   ManagedAgentTeamValidationResult,

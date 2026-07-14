@@ -287,12 +287,13 @@ export interface AgentTeamSetupParams {
   operationId: string
   manifestPath: string
   harness: string
-  workingDirPath: string
+  workingDirPath?: string
 }
 
 export interface AgentTeamSetupStartResult {
   operationId: string
   accepted: true
+  workingDirPath: string
 }
 
 /** agent-team/setup-progress — asynchronous phase and terminal setup events. */

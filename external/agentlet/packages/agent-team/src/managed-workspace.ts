@@ -4,7 +4,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
 const MARKER_SCHEMA = 'agentlet-managed-setup-v1';
 const MARKER_FILENAME = '.agentlet-setup.json';
@@ -12,6 +12,34 @@ const MARKER_FILENAME = '.agentlet-setup.json';
 interface ManagedSetupMarker {
   schema: typeof MARKER_SCHEMA;
   harness: string;
+}
+
+/** Resolve an explicit or harness-default workspace on the daemon host. */
+export function resolveManagedWorkingDirPath(
+  manifestPath: string,
+  harness: string,
+  workingDirPath?: string,
+): string {
+  if (workingDirPath !== undefined) {
+    if (!isAbsolute(workingDirPath)) {
+      throw new Error('Agent Team workingDirPath must be absolute');
+    }
+    return resolve(workingDirPath);
+  }
+
+  const workspaceRoot = resolve(dirname(manifestPath), 'workspaces');
+  const resolvedPath = resolve(workspaceRoot, harness);
+  const relativePath = relative(workspaceRoot, resolvedPath);
+  if (
+    relativePath === '' ||
+    relativePath.startsWith('..') ||
+    isAbsolute(relativePath)
+  ) {
+    throw new Error(
+      `Harness workspace must stay inside ${workspaceRoot}: ${harness}`,
+    );
+  }
+  return resolvedPath;
 }
 
 export function clearManagedSetupMarker(workingDirPath: string): void {
