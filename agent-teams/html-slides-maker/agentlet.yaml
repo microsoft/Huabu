@@ -1,0 +1,16 @@
+schema: agentlet-agent-schema-v1
+name: html-slides-maker
+description: >
+  Creates polished static HTML slide decks, with optional publication-ready
+  technical diagrams, after confirming the presentation brief with the user.
+
+command:
+  claude: claude-agent-acp
+  copilot: copilot --acp --allow-all
+
+require:
+  skills:
+    - https://github.com/lewislulu/html-ppt-skill
+    - https://github.com/yizhiyanhua-ai/fireworks-tech-graph
+  prompts:
+    - system_prompt.md
