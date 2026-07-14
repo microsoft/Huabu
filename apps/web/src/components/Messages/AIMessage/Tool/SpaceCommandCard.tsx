@@ -20,7 +20,7 @@ import { NodeRef } from '../../../Common/NodeRef';
 import type { SpaceCommandsToolPart } from '@sediment/shared';
 
 export function SpaceCommandCard({ part }: ToolPart<SpaceCommandsToolPart>) {
-  const { t } = useTranslation();
+  const { i18n, t } = useTranslation();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const toolResponse = part.data ?? null;
   const isExecuting = partIsExecuting(part);
@@ -57,6 +57,139 @@ export function SpaceCommandCard({ part }: ToolPart<SpaceCommandsToolPart>) {
     return `${translatedPrefix}${suffix}`;
   };
 
+  const renderFrameLayoutChange = (change: (typeof displayChanges)[number]) => {
+    if (!change.frameLayout || !change.nodeId) return null;
+
+    const { mode, gridCount, sizing } = change.frameLayout;
+    const layout =
+      mode === 'free'
+        ? t('messages.canvasChange.freeLayout')
+        : gridCount === undefined
+          ? t(
+              mode === 'row'
+                ? 'messages.canvasChange.rowLayout'
+                : 'messages.canvasChange.columnLayout',
+            )
+          : t(
+              mode === 'row'
+                ? 'messages.canvasChange.rows'
+                : 'messages.canvasChange.columns',
+              { count: gridCount },
+            );
+
+    const sizingLabel =
+      sizing === 'hug'
+        ? ` · ${t('toolbar.size.fitSize')}`
+        : sizing === 'manual'
+          ? ` · ${t('toolbar.size.switchManual')}`
+          : '';
+
+    return (
+      <>
+        {t('messages.canvasChange.setFrameLayout', { layout, sizingLabel })}{' '}
+        <NodeRef nodeId={change.nodeId} snapshotLabel={change.nodeLabel} />
+      </>
+    );
+  };
+
+  const renderChange = (change: (typeof displayChanges)[number]) => {
+    if (change.frameLayout) return renderFrameLayoutChange(change);
+
+    if (change.operation) {
+      const alignDetails = {
+        left: t('toolbar.align.left'),
+        'center-h': t('toolbar.align.center'),
+        right: t('toolbar.align.right'),
+        top: t('toolbar.align.top'),
+        'center-v': t('toolbar.align.middle'),
+        bottom: t('toolbar.align.bottom'),
+      };
+      const reorderDetails = i18n.language.startsWith('zh')
+        ? {
+            top: '移至最前',
+            bottom: '移至最后',
+            before: '移至另一节点之前',
+            after: '移至另一节点之后',
+          }
+        : {
+            top: 'to front',
+            bottom: 'to back',
+            before: 'before another node',
+            after: 'after another node',
+          };
+      const detail =
+        change.operation === 'aligned'
+          ? alignDetails[(change.detail ?? '') as keyof typeof alignDetails]
+          : change.operation === 'reordered'
+            ? reorderDetails[
+                (change.detail ?? '') as keyof typeof reorderDetails
+              ]
+            : undefined;
+      const options = {
+        count: change.count,
+        detail: detail ?? '',
+        nodeType: change.detail ?? '',
+      };
+      const label =
+        {
+          aligned: t('messages.commandOperationAligned', options),
+          distributed: t('messages.commandOperationDistributed', options),
+          reordered: t('messages.commandOperationReordered', options),
+          edgeStyle: t('messages.commandOperationEdgeStyle', options),
+        }[change.operation] ?? change.label;
+      return change.nodeId ? (
+        <>
+          {label}{' '}
+          <NodeRef nodeId={change.nodeId} snapshotLabel={change.nodeLabel} />
+        </>
+      ) : (
+        label
+      );
+    }
+
+    if (change.sourceNodeId && change.targetNodeId) {
+      const verb = translatedChangeLabel(
+        change.label.split(':')[0] || 'Connected',
+      );
+      return (
+        <>
+          {verb}{' '}
+          <NodeRef
+            nodeId={change.sourceNodeId}
+            snapshotLabel={change.sourceNodeLabel}
+          />{' '}
+          →{' '}
+          <NodeRef
+            nodeId={change.targetNodeId}
+            snapshotLabel={change.targetNodeLabel}
+          />
+        </>
+      );
+    }
+
+    if (change.edgeId) {
+      return `${t('messages.canvasChange.disconnected')} ${change.edgeId}`;
+    }
+
+    if (change.nodeId) {
+      const prefix = translatedChangeLabel(change.label.split(':')[0]);
+      return (
+        <>
+          {prefix}{' '}
+          <NodeRef nodeId={change.nodeId} snapshotLabel={change.nodeLabel} />
+          {change.targetFrameId ? (
+            <>
+              {' → '}
+              <NodeRef nodeId={change.targetFrameId} />
+            </>
+          ) : null}
+        </>
+      );
+    }
+
+    return translatedChangeLabel(change.label);
+  };
+
   const statusIcon = isExecuting ? (
     <Loading layout="inline" size="xs" className="text-info" />
   ) : (
@@ -71,28 +204,7 @@ export function SpaceCommandCard({ part }: ToolPart<SpaceCommandsToolPart>) {
 
     if (displayChanges.length === 1) {
       const change = displayChanges[0];
-      const content =
-        change.sourceNodeId && change.targetNodeId ? (
-          <>
-            {translatedChangeLabel(change.label.split(':')[0] || 'Connected')}{' '}
-            <NodeRef
-              nodeId={change.sourceNodeId}
-              snapshotLabel={change.sourceNodeLabel}
-            />{' '}
-            →{' '}
-            <NodeRef
-              nodeId={change.targetNodeId}
-              snapshotLabel={change.targetNodeLabel}
-            />
-          </>
-        ) : change.nodeId ? (
-          <>
-            {translatedChangeLabel(change.label.split(':')[0])}:{' '}
-            <NodeRef nodeId={change.nodeId} snapshotLabel={change.nodeLabel} />
-          </>
-        ) : (
-          translatedChangeLabel(change.label)
-        );
+      const content = renderChange(change);
       return (
         <div className="flex justify-start">
           <div className="w-full">
@@ -128,50 +240,13 @@ export function SpaceCommandCard({ part }: ToolPart<SpaceCommandsToolPart>) {
           {!isCollapsed && (
             <div className="border-edge-default/40 ml-4 flex max-h-[24vh] flex-col gap-1 overflow-y-auto border-l py-1 pl-3">
               {displayChanges.map((change) => {
-                const renderLabel = () => {
-                  if (change.sourceNodeId && change.targetNodeId) {
-                    const verb = translatedChangeLabel(
-                      change.label.split(':')[0] || 'Connected',
-                    );
-                    return (
-                      <>
-                        {verb}{' '}
-                        <NodeRef
-                          nodeId={change.sourceNodeId}
-                          snapshotLabel={change.sourceNodeLabel}
-                        />{' '}
-                        →{' '}
-                        <NodeRef
-                          nodeId={change.targetNodeId}
-                          snapshotLabel={change.targetNodeLabel}
-                        />
-                      </>
-                    );
-                  }
-                  if (change.nodeId) {
-                    const prefix = translatedChangeLabel(
-                      change.label.split(':')[0],
-                    );
-                    return (
-                      <>
-                        {prefix}:{' '}
-                        <NodeRef
-                          nodeId={change.nodeId}
-                          snapshotLabel={change.nodeLabel}
-                        />
-                      </>
-                    );
-                  }
-                  return translatedChangeLabel(change.label);
-                };
-
                 return (
                   <div
                     key={change.id}
                     className="text-fg-muted flex items-center gap-2 pr-2 text-xs"
                   >
                     <span className="min-w-0 flex-1 truncate">
-                      {renderLabel()}
+                      {renderChange(change)}
                     </span>
                   </div>
                 );

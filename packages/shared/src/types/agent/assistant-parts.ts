@@ -350,6 +350,7 @@ const VARIANT_BY_INTERNAL_TOOL: Record<string, AssistantToolVariant> = {
   inspect_edges: 'agent_tool',
   get_canvas_outline: 'agent_tool',
   get_space_outline: 'agent_tool',
+  fs_write: 'agent_tool',
   generate_image: 'image_generation',
   snapshot_nodes: 'snapshot_nodes',
 };

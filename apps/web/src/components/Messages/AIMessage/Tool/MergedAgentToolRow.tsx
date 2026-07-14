@@ -79,6 +79,9 @@ function callSummary(
     file: (count: number) => string;
     entry: (count: number) => string;
     canvasOutline: string;
+    connection: (count: number) => string;
+    updatedPath: (path: string) => string;
+    updatedFile: string;
   },
 ): string {
   const payload = ((part.data as { data?: unknown } | undefined)?.data ??
@@ -105,7 +108,14 @@ function callSummary(
       return p ? `${p} — ${entryLabel}` : entryLabel;
     }
     case 'get_canvas_outline':
+    case 'get_space_outline':
       return labels.canvasOutline;
+    case 'inspect_edges':
+      return labels.connection(num(payload.count));
+    case 'fs_write': {
+      const path = str(payload.path);
+      return path ? labels.updatedPath(path) : labels.updatedFile;
+    }
     default:
       return part.toolName;
   }
@@ -198,6 +208,10 @@ export function MergedAgentToolRow({
             file: (value) => t('messages.file', { count: value }),
             entry: (value) => t('messages.entry', { count: value }),
             canvasOutline: t('messages.canvasOutline'),
+            connection: (value) =>
+              t('messages.inspectedConnections', { count: value }),
+            updatedPath: (path) => t('messages.updatedPath', { path }),
+            updatedFile: t('messages.updatedFile'),
           })
         : (partErrorText(e.part, t('messages.failed')) ?? t('messages.failed'));
       return { ok, text };
@@ -361,12 +375,46 @@ export function MergedAgentToolRow({
       };
     }
 
-    if (tool === 'get_canvas_outline') {
+    if (tool === 'get_canvas_outline' || tool === 'get_space_outline') {
       return {
         title:
           count === 1
             ? t('messages.readCanvasOutline')
             : t('messages.readCanvasOutlineMultipleCalls', { count }),
+        nodeRefs: emptyRefs,
+      };
+    }
+
+    if (tool === 'inspect_edges') {
+      const totalEdges = entries.reduce((sum, entry) => {
+        const data =
+          entry.part.data?.status === 'success'
+            ? ((entry.part.data.data ?? {}) as Record<string, unknown>)
+            : {};
+        return sum + (typeof data.count === 'number' ? data.count : 0);
+      }, 0);
+      return {
+        title:
+          count === 1
+            ? t('messages.inspectedConnections', { count: totalEdges })
+            : t('messages.inspectedConnectionsMultipleCalls', { count }),
+        nodeRefs: emptyRefs,
+      };
+    }
+
+    if (tool === 'fs_write') {
+      const data =
+        entries[0]?.part.data?.status === 'success'
+          ? ((entries[0].part.data.data ?? {}) as Record<string, unknown>)
+          : {};
+      const path = typeof data.path === 'string' ? data.path : '';
+      return {
+        title:
+          count === 1
+            ? path
+              ? t('messages.updatedPath', { path: truncate(path, 60) })
+              : t('messages.updatedFile')
+            : t('messages.updatedFiles', { count }),
         nodeRefs: emptyRefs,
       };
     }

@@ -25,6 +25,16 @@ export interface CanvasChange {
   nodeLabel?: string;
   sourceNodeLabel?: string;
   targetNodeLabel?: string;
+  targetFrameId?: string;
+  edgeId?: string;
+  operation?: 'aligned' | 'distributed' | 'reordered' | 'edgeStyle';
+  count?: number;
+  detail?: string;
+  frameLayout?: {
+    mode: string;
+    gridCount?: number;
+    sizing?: string;
+  };
   revertible: boolean;
 }
 
@@ -130,6 +140,7 @@ export function reconstructChangesFromCommands(
             label: 'Disconnected',
             sourceNodeId: source,
             targetNodeId: target,
+            edgeId: typeof edge === 'string' ? edge : undefined,
             revertible: false,
           });
         }
@@ -145,6 +156,7 @@ export function reconstructChangesFromCommands(
             tool: 'space_commands',
             label: `${verb}: ${truncate(nodeId, 24)}`,
             nodeId,
+            targetFrameId: parentId ?? undefined,
             revertible: false,
           });
         }
@@ -157,6 +169,23 @@ export function reconstructChangesFromCommands(
           label: 'Dissolved frame',
           nodeType: 'frame',
           nodeId: cmd.frameId as string,
+          revertible: false,
+        });
+        break;
+      }
+      case 'SET_FRAME_LAYOUT': {
+        changes.push({
+          id: `hist-${counter++}`,
+          tool: 'space_commands',
+          label: 'Set frame layout',
+          nodeType: 'frame',
+          nodeId: cmd.frameId as string,
+          frameLayout: {
+            mode: (cmd.mode as string) || 'free',
+            gridCount:
+              typeof cmd.gridCount === 'number' ? cmd.gridCount : undefined,
+            sizing: typeof cmd.sizing === 'string' ? cmd.sizing : undefined,
+          },
           revertible: false,
         });
         break;
@@ -179,7 +208,10 @@ export function reconstructChangesFromCommands(
         changes.push({
           id: `hist-${counter++}`,
           tool: 'space_commands',
-          label: `Aligned ${nodeIds.length} node(s)`,
+          label: 'Aligned nodes',
+          operation: 'aligned',
+          count: nodeIds.length,
+          detail: typeof cmd.direction === 'string' ? cmd.direction : undefined,
           revertible: false,
         });
         break;
@@ -189,7 +221,39 @@ export function reconstructChangesFromCommands(
         changes.push({
           id: `hist-${counter++}`,
           tool: 'space_commands',
-          label: `Distributed ${nodeIds.length} node(s)`,
+          label: 'Distributed nodes',
+          operation: 'distributed',
+          count: nodeIds.length,
+          revertible: false,
+        });
+        break;
+      }
+      case 'REORDER_NODES': {
+        const nodeIds = (cmd.nodeIds ?? []) as string[];
+        changes.push({
+          id: `hist-${counter++}`,
+          tool: 'space_commands',
+          label: 'Reordered nodes',
+          operation: 'reordered',
+          count: nodeIds.length,
+          detail:
+            typeof cmd.to === 'string'
+              ? cmd.to
+              : cmd.to && typeof cmd.to === 'object'
+                ? Object.keys(cmd.to as Record<string, unknown>)[0]
+                : undefined,
+          revertible: false,
+        });
+        break;
+      }
+      case 'SET_EDGE_STYLE': {
+        const edges = (cmd.edges ?? []) as Array<Record<string, unknown>>;
+        changes.push({
+          id: `hist-${counter++}`,
+          tool: 'space_commands',
+          label: 'Updated connection style',
+          operation: 'edgeStyle',
+          count: edges.length,
           revertible: false,
         });
         break;

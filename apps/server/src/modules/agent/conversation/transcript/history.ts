@@ -86,24 +86,54 @@ function parseToolResultText(
   }
 }
 
+function mergeInternalToolArgs(
+  toolData: ToolResponse<string, unknown> | undefined,
+  rawInput: unknown,
+): ToolResponse<string, unknown> | undefined {
+  if (
+    !toolData ||
+    toolData.status !== 'success' ||
+    !rawInput ||
+    typeof rawInput !== 'object'
+  )
+    return toolData;
+  const resultData =
+    toolData.data &&
+    typeof toolData.data === 'object' &&
+    !Array.isArray(toolData.data)
+      ? (toolData.data as Record<string, unknown>)
+      : {};
+  return {
+    ...toolData,
+    data: {
+      ...(rawInput as Record<string, unknown>),
+      ...resultData,
+    },
+  } as ToolResponse<string, unknown>;
+}
+
 /**
  * Build one `AssistantHistoryPart` for a folded `tool_call` message.
  *
  * Everything the renderer needs already lives on the folded
  * `tool_call.data` (the initial `tool_call` merged with every
  * `tool_call_update`): the ACP semantic fields (`toolKind` / `status` /
- * `locations` / `content` / `rawOutput`) and, for built-in tools, the
- * machine `internalToolName` + the JSON `ToolResponse` on `rawOutput`.
- * Built-in tools resolve a rich render `variant` from `internalToolName`;
- * external (ACP) tools carry no `internalToolName` and stay `generic`.
+ * `locations` / `content` / `rawOutput`). Live events may include the machine
+ * `internalToolName`; folded internal workload history recovers that identity
+ * from `title` before calling this function. External ACP titles are never
+ * recovered as internal names, so those tools remain generic.
  */
-function buildToolPart(data: FoldedToolCallData): AssistantHistoryPart {
+function buildToolPart(
+  data: FoldedToolCallData,
+  recoverInternalToolName: boolean,
+): AssistantHistoryPart {
   const toolCallId = data.toolCallId;
-  const internalName = data.internalToolName;
+  const internalName =
+    data.internalToolName ?? (recoverInternalToolName ? data.title : undefined);
   const command = data.command ?? commandFromRawInput(data.rawInput);
-  // The result envelope. Built-in tools carry a JSON `ToolResponse` string
-  // on `rawOutput`; external (ACP) tools do not, so they stay data-less and
-  // render from `content[]` / `locations[]` on the generic card.
+  // Internal tools carry a JSON `ToolResponse` string on `rawOutput`.
+  // External ACP tools render their folded content, locations, and raw output
+  // on the generic card instead.
   const toolData =
     internalName !== undefined && typeof data.rawOutput === 'string'
       ? parseToolResultText(internalName, data.rawOutput)
@@ -111,6 +141,7 @@ function buildToolPart(data: FoldedToolCallData): AssistantHistoryPart {
   const variant = internalName
     ? variantForInternalTool(internalName)
     : 'generic';
+  const mergedToolData = mergeInternalToolArgs(toolData, data.rawInput);
 
   const base = {
     kind: 'tool' as const,
@@ -121,85 +152,73 @@ function buildToolPart(data: FoldedToolCallData): AssistantHistoryPart {
     ...(data.status ? { status: data.status } : {}),
     ...(data.locations ? { locations: data.locations } : {}),
     ...(data.content ? { content: data.content } : {}),
-    // Surface the raw ACP output on the generic card; built-in output is
-    // already folded into the typed `toolData` below.
-    ...(internalName === undefined && data.rawOutput !== undefined
+    // Surface raw output for every generic card, including unknown internal
+    // tools that do not have a dedicated renderer yet.
+    ...(variant === 'generic' && data.rawOutput !== undefined
       ? { rawOutput: data.rawOutput }
       : {}),
   };
 
   switch (variant) {
     case 'agent_tool': {
-      // Fold the call's input args UNDER the result payload (result wins),
-      // mirroring the live stream (`applyInternalToolResult`) — surfaces
-      // query params the result doesn't echo (e.g. a `grep` `pattern`).
-      const args =
-        data.rawInput && typeof data.rawInput === 'object'
-          ? (data.rawInput as Record<string, unknown>)
-          : undefined;
-      const merged =
-        toolData && toolData.status === 'success' && args
-          ? {
-              ...toolData,
-              data: {
-                ...args,
-                ...((toolData.data as Record<string, unknown> | undefined) ??
-                  {}),
-              },
-            }
-          : toolData;
       return {
         ...base,
         variant: 'agent_tool',
         toolName: internalName ?? base.title,
-        ...(merged ? { data: merged } : {}),
+        ...(mergedToolData ? { data: mergedToolData } : {}),
       };
     }
-    case 'space_commands':
+    case 'space_commands': {
       return {
         ...base,
         variant: 'space_commands',
-        ...(toolData
+        ...(mergedToolData
           ? {
               data: {
-                ...toolData,
+                ...mergedToolData,
                 tool: 'space_commands',
               } as ToolResponse<'space_commands', Record<string, unknown>>,
             }
           : {}),
       };
-    case 'web_search':
+    }
+    case 'web_search': {
       return {
         ...base,
         variant: 'web_search',
-        ...(toolData ? { data: toolData as WebSearchToolResponse } : {}),
+        ...(mergedToolData
+          ? { data: mergedToolData as WebSearchToolResponse }
+          : {}),
       };
-    case 'image_generation':
+    }
+    case 'image_generation': {
       return {
         ...base,
         variant: 'image_generation',
-        ...(toolData
+        ...(mergedToolData
           ? {
-              data: toolData as ToolResponse<
+              data: mergedToolData as ToolResponse<
                 'generate_image',
                 ImageGenerationData
               >,
             }
           : {}),
       };
-    case 'snapshot_nodes':
+    }
+    case 'snapshot_nodes': {
       return {
         ...base,
         variant: 'snapshot_nodes',
-        ...(toolData
+        ...(mergedToolData
           ? {
-              data: toolData as ToolResponse<
+              data: mergedToolData as ToolResponse<
                 'snapshot_nodes',
                 SnapshotNodesData
               >,
             }
           : {}),
       };
+    }
     case 'generic':
     default:
       return { ...base, variant: 'generic' };
@@ -231,6 +250,7 @@ function envelopeOf(turn: AgentTurn): ChatEnvelope | null {
 export function buildHistoryFromTurns(
   turns: readonly AgentTurn[],
   messages: ChatHistoryItem[],
+  options: { recoverInternalToolNames?: boolean } = {},
 ): void {
   for (const turn of turns) {
     const envelope = envelopeOf(turn);
@@ -300,7 +320,12 @@ export function buildHistoryFromTurns(
           }
           break;
         case 'tool_call':
-          pushAssistantParts([buildToolPart(msg.data as FoldedToolCallData)]);
+          pushAssistantParts([
+            buildToolPart(
+              msg.data as FoldedToolCallData,
+              options.recoverInternalToolNames === true,
+            ),
+          ]);
           break;
         case 'plan':
           // Latest-wins; the fold appends it once at turn end. Held and

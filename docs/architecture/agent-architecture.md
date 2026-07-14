@@ -57,10 +57,7 @@ The server emits only its custom
 the frontend [useAgentStream.ts](../../apps/web/src/hooks/useAgentStream.ts) has
 no awareness of pi-agent-core.
 
-Internal pi-ai tools and external ACP share the same `tool_call` envelope:
-internal turns carry `internalToolName` on `tool_call` to drive the frontend
-render variant + local side effects (e.g. executing `space_commands`); ACP
-turns omit that field and render as `generic`.
+Internal pi-ai tools and external ACP share the same `tool_call` envelope. On the live stream, the Huabu host adds `internalToolName` to internal turns to drive frontend render variants and local side effects (e.g. executing `space_commands`); ACP turns omit it and render as `generic`. Folded pi-driver history keeps the exact tool name in `title`; the history route recovers internal render variants from that field only when the persisted workload kind is `internal`, so an external tool with the same title remains generic.
 
 ---
 

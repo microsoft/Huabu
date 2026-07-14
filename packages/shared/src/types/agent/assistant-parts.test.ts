@@ -16,4 +16,11 @@ describe('variantForInternalTool', () => {
       expect(variantForInternalTool(toolName)).toBe('agent_tool');
     },
   );
+
+  it.each(['inspect_edges', 'fs_write'])(
+    'routes %s through the self-describing agent-tool renderer',
+    (toolName) => {
+      expect(variantForInternalTool(toolName)).toBe('agent_tool');
+    },
+  );
 });
