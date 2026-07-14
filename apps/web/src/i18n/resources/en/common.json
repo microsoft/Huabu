@@ -147,6 +147,7 @@
     "restarting": "Restarting…",
     "forceRestartWorker": "Force the worker to restart now",
     "nextAutoRetry": "Next auto-retry in {{seconds}}s.",
+    "agentTeams": "Agent Teams",
     "canvas": "Canvas",
     "showMiniMap": "Show MiniMap",
     "hideMiniMap": "Hide MiniMap",

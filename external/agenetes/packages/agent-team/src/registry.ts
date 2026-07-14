@@ -14,6 +14,7 @@ import type {
   AgentTeamDeployment,
   AgentTeamMemberConfigView,
   AgentTeamMember,
+  AgentTeamMachine,
   AgentTeamRegistryChangeErrorHandler,
   AgentTeamRegistryChangeHandler,
   AgentTeamRegistryState,
@@ -72,6 +73,7 @@ export class AgentTeamRegistry {
     { epoch: number; promise: Promise<AgentTeamRescanResult> }
   >();
   private readonly unsubscribeSetupProgress?: () => void;
+  private readonly unsubscribeMachinesChanged?: () => void;
   private readonly changeSubscriptions = new Set<{
     handler: AgentTeamRegistryChangeHandler;
     onError: AgentTeamRegistryChangeErrorHandler;
@@ -93,10 +95,14 @@ export class AgentTeamRegistry {
     this.unsubscribeSetupProgress = controlPort?.onAgentTeamSetupProgress(
       (machine, progress) => this.handleSetupProgress(machine, progress),
     );
+    this.unsubscribeMachinesChanged = controlPort?.onAgentTeamMachinesChanged(
+      () => this.notifyChange(),
+    );
   }
 
   dispose(): void {
     this.unsubscribeSetupProgress?.();
+    this.unsubscribeMachinesChanged?.();
     this.changeSubscriptions.clear();
   }
 
@@ -111,6 +117,10 @@ export class AgentTeamRegistry {
 
   listRoots(): AgentTeamRoot[] {
     return structuredClone(this.state.roots);
+  }
+
+  listMachines(): AgentTeamMachine[] {
+    return this.controlPort?.listAgentTeamMachines() ?? [];
   }
 
   listMembers(): AgentTeamMember[] {

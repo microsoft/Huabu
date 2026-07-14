@@ -73,6 +73,7 @@ export class AgentletGateway {
   private readonly setupProgressHandlers = new Set<
     (agentletId: string, progress: AgentTeamSetupProgressParams) => void
   >();
+  private readonly agentTeamMachineHandlers = new Set<() => void>();
   private readonly handshakeTimeout: number;
   private readonly controlRequestTimeout: number;
   private readonly outboundBufferLimit: number;
@@ -129,6 +130,30 @@ export class AgentletGateway {
       (connection) =>
         filter?.status === undefined || connection.status === filter.status,
     );
+  }
+
+  listAgentTeamMachines(): Array<{
+    machine: string;
+    hostname: string;
+    platform: string;
+  }> {
+    return this.getAgentlets({ status: 'connected' }).flatMap((connection) => {
+      const machine = connection.agentletProfile?.machine;
+      return machine
+        ? [
+            {
+              machine: connection.agentletId,
+              hostname: machine.hostname,
+              platform: machine.platform,
+            },
+          ]
+        : [];
+    });
+  }
+
+  onAgentTeamMachinesChanged(handler: () => void): () => void {
+    this.agentTeamMachineHandlers.add(handler);
+    return () => this.agentTeamMachineHandlers.delete(handler);
   }
 
   getSession(
@@ -428,6 +453,7 @@ export class AgentletGateway {
         this.options.onReconnection,
         existing,
       );
+      this.notifyAgentTeamMachinesChanged();
       return;
     }
 
@@ -452,6 +478,7 @@ export class AgentletGateway {
       this.options.onConnection,
       connection,
     );
+    this.notifyAgentTeamMachinesChanged();
   }
 
   private async handleSessionHello(
@@ -669,6 +696,9 @@ export class AgentletGateway {
     connection: AgentletConnection,
     reason: string,
   ): void {
+    if (connection.role === 'agentlet') {
+      this.notifyAgentTeamMachinesChanged();
+    }
     const callback = this.options.onDisconnection;
     if (!callback) return;
     try {
@@ -683,6 +713,22 @@ export class AgentletGateway {
         },
         'Agentlet Gateway lifecycle callback failed',
       );
+    }
+  }
+
+  private notifyAgentTeamMachinesChanged(): void {
+    for (const handler of this.agentTeamMachineHandlers) {
+      try {
+        handler();
+      } catch (error) {
+        this.logger.warn(
+          {
+            callback: 'onAgentTeamMachinesChanged',
+            error: error instanceof Error ? error.message : String(error),
+          },
+          'Agentlet Gateway machine-list callback failed',
+        );
+      }
     }
   }
 

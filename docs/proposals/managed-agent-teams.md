@@ -2,7 +2,7 @@
 
 > Redesign Agent Teams as a Huabu-managed experience so non-expert users do not need to operate agentlet or manually register an External Agent profile.
 >
-> Status: **Draft** · Last updated: 2026-07-14 · Tracks: [#253](https://github.com/hai-team/Sediment/issues/253)
+> Status: **In-Progress** · Last updated: 2026-07-14 · Tracks: [#253](https://github.com/hai-team/Sediment/issues/253)
 
 ---
 
@@ -25,6 +25,8 @@ Huabu may bundle selected Agent Teams in the future so those teams can enter the
 ### R2 — Root paths and member discovery
 
 The user adds Agent Team collection roots through the Huabu UI. Each root selects a currently connected agentlet daemon, shown to the user as a machine, and an absolute path in that daemon host's filesystem. The local agentlet daemon is selected by default. A native folder picker is available only for the local daemon; remote daemon roots use direct absolute-path input and are validated by `agent-team/scan`.
+
+The implemented machine catalog comes from connected daemon profiles exposed by the Agenetes Gateway. Connect, reconnect, and disconnect changes notify the Agent Team registry and publish a replacement Settings snapshot over SSE; the locally supervised daemon identity is supplied independently by the Huabu host rather than inferred by the Gateway.
 
 Huabu stores the roots as:
 
@@ -95,6 +97,8 @@ An alias selects one deployment profile for user-facing and API lookup, while th
 Settings has a dedicated **Agent Team** tab rather than exposing Agent Teams as a special mode inside the External Agent profile editor.
 
 The tab groups settings by discovered member. Each member has an expandable block or equivalent grouped surface with package information and member-level Configs, followed by the member's deployment aliases.
+
+The implemented Settings surface supports root add/rescan/remove, local-only folder picking, missing-required-Config summaries, secret replacement and clearing, deployment create/edit/delete with delete confirmation, enable/disable/retry actions, setup status and logs, and GET bootstrap followed by SSE replacement snapshots. Enable controls are disabled while required member Configs are incomplete, matching the backend state-machine gate.
 
 The member-level Configs table is shared by every deployment whose profile references the same `(machine, manifestPath)`.
 

@@ -36,6 +36,15 @@ export const agentTeamMemberRefSchema = z
   .strict();
 export type AgentTeamMemberRefBody = z.infer<typeof agentTeamMemberRefSchema>;
 
+export const agentTeamMachineSchema = z
+  .object({
+    machine: machineSchema,
+    hostname: trimmedString(255),
+    platform: trimmedString(255),
+  })
+  .strict();
+export type AgentTeamMachineView = z.infer<typeof agentTeamMachineSchema>;
+
 const agentTeamDiagnosticSchema = z
   .object({
     manifestPath: pathSchema,
@@ -171,6 +180,8 @@ export type AgentTeamMemberConfigView = z.infer<
 
 export const agentTeamSettingsStateSchema = z
   .object({
+    machines: z.array(agentTeamMachineSchema),
+    localMachine: machineSchema,
     roots: z.array(agentTeamRootSchema),
     members: z.array(agentTeamMemberSchema),
     deployments: z.array(agentTeamDeploymentSchema),

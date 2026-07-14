@@ -44,6 +44,14 @@ class FakeControlPort implements AgentTeamControlPort {
     (machine: string, progress: AgentTeamSetupProgressParams) => void
   >();
 
+  listAgentTeamMachines() {
+    return [{ machine: 'machine-a', hostname: 'machine-a', platform: 'linux' }];
+  }
+
+  onAgentTeamMachinesChanged(): () => void {
+    return () => {};
+  }
+
   async scanAgentTeams(_machine: string, params: { rootPath: string }) {
     return {
       rootPath: params.rootPath,
@@ -170,12 +178,12 @@ describe('Agent Team setup state machine', () => {
       return { operationId: params.operationId, accepted: true };
     });
 
-    await expect(registry.enableDeployment(deploymentId)).resolves.toMatchObject(
-      {
-        enabled: true,
-        setup: { status: 'ready' },
-      },
-    );
+    await expect(
+      registry.enableDeployment(deploymentId),
+    ).resolves.toMatchObject({
+      enabled: true,
+      setup: { status: 'ready' },
+    });
   });
 
   it('records start failures and supports explicit retry', async () => {

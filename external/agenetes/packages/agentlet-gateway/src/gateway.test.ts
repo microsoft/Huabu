@@ -471,7 +471,9 @@ describe('AgentletGateway', () => {
   it('routes control RPCs to the explicitly selected daemon', async () => {
     const { gateway, url } = await startHarness();
     const setupProgress = vi.fn();
+    const machinesChanged = vi.fn();
     gateway.onAgentTeamSetupProgress(setupProgress);
+    gateway.onAgentTeamMachinesChanged(machinesChanged);
     const machineA = await connect(url, {
       role: 'agentlet',
       queryId: 'machine-a',
@@ -484,6 +486,19 @@ describe('AgentletGateway', () => {
       token: 'token-b',
       hello: agentletHello('machine-b'),
     });
+    expect(gateway.listAgentTeamMachines()).toEqual([
+      {
+        machine: 'machine-a',
+        hostname: 'machine-a',
+        platform: process.platform,
+      },
+      {
+        machine: 'machine-b',
+        hostname: 'machine-b',
+        platform: process.platform,
+      },
+    ]);
+    expect(machinesChanged).toHaveBeenCalledTimes(2);
     machineA.socket.on('message', (data) => {
       const message = JSON.parse(data.toString()) as JsonRpcMessage;
       if (

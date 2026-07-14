@@ -29,6 +29,9 @@ function deployment() {
 function createRegistry(): AgentTeamSettingsRegistry {
   const listeners = new Set<() => void>();
   return {
+    listMachines: vi.fn(() => [
+      { machine: 'machine-a', hostname: 'machine-a', platform: 'linux' },
+    ]),
     listRoots: vi.fn(() => []),
     listMembers: vi.fn(() => []),
     listDeployments: vi.fn(() => []),
@@ -84,7 +87,10 @@ describe('Agent Team Settings routes', () => {
     const registry = createRegistry();
     app = Fastify({ logger: false });
     await app.register(
-      createAgentTeamRoutes(() => registry),
+      createAgentTeamRoutes(
+        () => registry,
+        () => 'machine-a',
+      ),
       {
         prefix: '/api/agent-team',
       },
@@ -97,6 +103,10 @@ describe('Agent Team Settings routes', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({
+      machines: [
+        { machine: 'machine-a', hostname: 'machine-a', platform: 'linux' },
+      ],
+      localMachine: 'machine-a',
       roots: [],
       members: [],
       deployments: [],
@@ -107,9 +117,12 @@ describe('Agent Team Settings routes', () => {
   it('rejects remote Settings callers before reading the registry', async () => {
     const getRegistry = vi.fn(() => createRegistry());
     app = Fastify({ logger: false });
-    await app.register(createAgentTeamRoutes(getRegistry), {
-      prefix: '/api/agent-team',
-    });
+    await app.register(
+      createAgentTeamRoutes(getRegistry, () => 'machine-a'),
+      {
+        prefix: '/api/agent-team',
+      },
+    );
 
     const response = await app.inject({
       method: 'GET',
@@ -126,7 +139,10 @@ describe('Agent Team Settings routes', () => {
     const registry = createRegistry();
     app = Fastify({ logger: false });
     await app.register(
-      createAgentTeamRoutes(() => registry),
+      createAgentTeamRoutes(
+        () => registry,
+        () => 'machine-a',
+      ),
       {
         prefix: '/api/agent-team',
       },
@@ -150,7 +166,10 @@ describe('Agent Team Settings routes', () => {
     });
     app = Fastify({ logger: false });
     await app.register(
-      createAgentTeamRoutes(() => registry),
+      createAgentTeamRoutes(
+        () => registry,
+        () => 'machine-a',
+      ),
       {
         prefix: '/api/agent-team',
       },
@@ -179,7 +198,10 @@ describe('Agent Team Settings routes', () => {
     const registry = createRegistry();
     app = Fastify({ logger: false });
     await app.register(
-      createAgentTeamRoutes(() => registry),
+      createAgentTeamRoutes(
+        () => registry,
+        () => 'machine-a',
+      ),
       {
         prefix: '/api/agent-team',
       },

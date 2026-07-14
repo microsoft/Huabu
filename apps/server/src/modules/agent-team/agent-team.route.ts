@@ -1,6 +1,7 @@
 import {
   AgentTeamError,
   getAgentTeamRegistry,
+  getSupervisedAgentletId,
   type AgentTeamRegistry,
 } from '@agenetes/agentlet-host';
 import {
@@ -37,6 +38,7 @@ export type AgentTeamSettingsRegistry = Pick<
   | 'enableDeployment'
   | 'getMemberConfig'
   | 'listDeployments'
+  | 'listMachines'
   | 'listMembers'
   | 'listRoots'
   | 'onChange'
@@ -71,9 +73,12 @@ function requireRegistry(
 
 function settingsState(
   registry: AgentTeamSettingsRegistry,
+  localMachine: string,
 ): AgentTeamSettingsState {
   const members = registry.listMembers();
   return {
+    machines: registry.listMachines(),
+    localMachine,
     roots: registry.listRoots(),
     members,
     deployments: registry.listDeployments(),
@@ -126,15 +131,18 @@ function writeSse(
 
 export function createAgentTeamRoutes(
   getRegistry: () => AgentTeamSettingsRegistry | null,
+  getLocalMachine: () => string,
 ): FastifyPluginAsync {
   return async (app) => {
+    const readState = (registry: AgentTeamSettingsRegistry) =>
+      settingsState(registry, getLocalMachine());
     app.get<{ Reply: ApiResult<AgentTeamSettingsState> }>(
       '/settings',
       async (request, reply) => {
         if (denyRemote(request, reply)) return;
         const registry = requireRegistry(reply, getRegistry);
         if (!registry) return;
-        return settingsState(registry);
+        return readState(registry);
       },
     );
 
@@ -165,7 +173,7 @@ export function createAgentTeamRoutes(
         try {
           writeSse(reply.raw, {
             type: AGENT_TEAM_SETTINGS_SSE_EVENTS.SNAPSHOT,
-            data: settingsState(registry),
+            data: readState(registry),
           });
         } catch (error) {
           writeSse(reply.raw, {
@@ -213,7 +221,7 @@ export function createAgentTeamRoutes(
       if (!registry) return;
       try {
         await registry.addRoot(parsed.data);
-        return settingsState(registry);
+        return readState(registry);
       } catch (error) {
         return sendAgentTeamError(error, reply);
       }
@@ -235,7 +243,7 @@ export function createAgentTeamRoutes(
       if (!registry) return;
       try {
         await registry.rescanRoot(parsed.data);
-        return settingsState(registry);
+        return readState(registry);
       } catch (error) {
         return sendAgentTeamError(error, reply);
       }
@@ -261,7 +269,7 @@ export function createAgentTeamRoutes(
           code: 'root_not_found',
         });
       }
-      return settingsState(registry);
+      return readState(registry);
     });
 
     app.put<{
@@ -286,7 +294,7 @@ export function createAgentTeamRoutes(
           parsed.data.manifestPath,
           parsed.data.values,
         );
-        return settingsState(registry);
+        return readState(registry);
       } catch (error) {
         return sendAgentTeamError(error, reply);
       }
@@ -310,7 +318,7 @@ export function createAgentTeamRoutes(
       if (!registry) return;
       try {
         registry.createDeployment(parsed.data);
-        return settingsState(registry);
+        return readState(registry);
       } catch (error) {
         return sendAgentTeamError(error, reply);
       }
@@ -343,7 +351,7 @@ export function createAgentTeamRoutes(
       if (!registry) return;
       try {
         registry.updateDeployment(params.data.id, body.data);
-        return settingsState(registry);
+        return readState(registry);
       } catch (error) {
         return sendAgentTeamError(error, reply);
       }
@@ -370,7 +378,7 @@ export function createAgentTeamRoutes(
             code: 'deployment_not_found',
           });
         }
-        return settingsState(registry);
+        return readState(registry);
       } catch (error) {
         return sendAgentTeamError(error, reply);
       }
@@ -401,7 +409,7 @@ export function createAgentTeamRoutes(
         if (!registry) return;
         try {
           await run(registry, parsed.data.id);
-          return settingsState(registry);
+          return readState(registry);
         } catch (error) {
           return sendAgentTeamError(error, reply);
         }
@@ -414,4 +422,7 @@ export function createAgentTeamRoutes(
   };
 }
 
-export default createAgentTeamRoutes(getAgentTeamRegistry);
+export default createAgentTeamRoutes(
+  getAgentTeamRegistry,
+  getSupervisedAgentletId,
+);

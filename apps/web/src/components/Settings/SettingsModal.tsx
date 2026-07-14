@@ -8,6 +8,7 @@ import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 import { useLLMStore } from '@/store/llmStore';
 
 import { AcpSettings } from './sections/AcpSettings';
+import { AgentTeamSettings } from './sections/AgentTeamSettings';
 import { CanvasSettings } from './sections/CanvasSettings';
 import { GeneralSettings } from './sections/GeneralSettings';
 import { ImageProviderSettings } from './sections/ImageProviderSettings';
@@ -15,7 +16,12 @@ import { IntegrationsSettings } from './sections/IntegrationsSettings';
 import { LLMSettings } from './sections/LLMSettings';
 
 /** Identifiers for the settings tabs (left-nav order). */
-type SettingsTab = 'general' | 'huabuAgent' | 'agents' | 'canvas';
+type SettingsTab =
+  | 'general'
+  | 'huabuAgent'
+  | 'agents'
+  | 'agentTeams'
+  | 'canvas';
 
 interface TabDef {
   id: SettingsTab;
@@ -24,12 +30,14 @@ interface TabDef {
     | 'settings.general'
     | 'settings.huabuAgent'
     | 'settings.externalAgents'
+    | 'settings.agentTeams'
     | 'settings.canvas';
 }
 
 const TABS: TabDef[] = [
   { id: 'huabuAgent', labelKey: 'settings.huabuAgent' },
   { id: 'agents', labelKey: 'settings.externalAgents' },
+  { id: 'agentTeams', labelKey: 'settings.agentTeams' },
   { id: 'general', labelKey: 'settings.general' },
   { id: 'canvas', labelKey: 'settings.canvas' },
 ];
@@ -175,6 +183,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </>
             )}
             {activeTab === 'agents' && <AcpSettings />}
+            {activeTab === 'agentTeams' && <AgentTeamSettings />}
             {activeTab === 'canvas' && <CanvasSettings />}
           </div>
         </div>

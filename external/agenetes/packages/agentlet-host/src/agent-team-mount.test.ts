@@ -19,6 +19,14 @@ class FakeControlPort implements AgentTeamControlPort {
     (machine: string, progress: AgentTeamSetupProgressParams) => void
   >();
 
+  listAgentTeamMachines() {
+    return [{ machine: 'machine-a', hostname: 'machine-a', platform: 'linux' }];
+  }
+
+  onAgentTeamMachinesChanged(): () => void {
+    return () => {};
+  }
+
   async scanAgentTeams(_machine: string, params: { rootPath: string }) {
     return { rootPath: params.rootPath, members: [], diagnostics: [] };
   }

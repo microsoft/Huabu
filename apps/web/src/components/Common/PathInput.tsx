@@ -37,6 +37,8 @@ export interface PathInputProps {
   mono?: boolean;
   /** Tooltip on the folder-picker button. */
   pickTitle?: string;
+  /** Whether this field may use the local native picker. Defaults to true. */
+  pickerEnabled?: boolean;
   /** Extra classes merged onto the input. Later classes win (tailwind-merge). */
   inputClassName?: string;
   /** Extra classes merged onto the flex row wrapper. */
@@ -63,6 +65,7 @@ export function PathInput({
   size = 'md',
   mono = false,
   pickTitle = 'Browse for a folder',
+  pickerEnabled = true,
   inputClassName,
   className,
   onKeyDown,
@@ -116,7 +119,7 @@ export function PathInput({
           inputClassName,
         )}
       />
-      {folderPickerSupported && (
+      {pickerEnabled && folderPickerSupported && (
         <Button
           variant="outline"
           tone="neutral"

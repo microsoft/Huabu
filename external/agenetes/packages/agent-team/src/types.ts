@@ -45,6 +45,12 @@ export interface AgentTeamMember {
   status: 'active' | 'member_missing';
 }
 
+export interface AgentTeamMachine {
+  machine: string;
+  hostname: string;
+  platform: string;
+}
+
 export interface AgentTeamSetupError {
   code: string;
   message: string;
@@ -131,6 +137,8 @@ export interface AgentTeamScanPort {
 }
 
 export interface AgentTeamControlPort extends AgentTeamScanPort {
+  listAgentTeamMachines(): AgentTeamMachine[];
+  onAgentTeamMachinesChanged(handler: () => void): () => void;
   setupAgentTeam(
     machine: string,
     params: AgentTeamSetupParams,

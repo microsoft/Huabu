@@ -15,6 +15,7 @@ export {
 } from './store.js';
 export type {
   AgentTeamMember,
+  AgentTeamMachine,
   AgentTeamDeployment,
   AgentTeamDeploymentSetup,
   AgentTeamSetupLogEntry,
