@@ -3,7 +3,9 @@
 > Upgrade Sediment's embedded agentlet from the old `bridge/daemon` protocol
 > to the latest `agentlet/hello` + `agent/hello` split protocol.
 >
-> Status: **Planning** · Last updated 2026-06-06
+> Status: **Superseded** · Last updated: 2026-07-14
+>
+> Superseded by [`agenetes-agentlet-gateway-consolidation.md`](./agenetes-agentlet-gateway-consolidation.md), which shipped the split hello protocol as part of the daemon/Gateway ownership migration.
 
 ---
 

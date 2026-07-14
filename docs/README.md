@@ -71,10 +71,7 @@ docs/
 
 | Doc                                                                                                  | Status                                          | Summary                                                                                                                        |
 | ---------------------------------------------------------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| [acp-eventstore-refactor-plan.md](./proposals/acp-eventstore-refactor-plan.md)                       | Plan                                            | Collapse the duplicated ACP init/session layers so daemon EventStore sees the same `sessionId` as Huabu's prompt traffic.      |
-| [agenetes-agentlet-gateway-consolidation.md](./proposals/agenetes-agentlet-gateway-consolidation.md) | In-Progress                                     | Retire standalone agentlet-server and consolidate its host relay and durable state ownership into Agenetes.                    |
 | [agenetes-thread-rehydration-and-forking.md](./proposals/agenetes-thread-rehydration-and-forking.md) | Completed                                       | Agenetes-managed recovery and thread forking as one durable-thread realization model across drivers.                           |
-| [agentlet-upgrade-plan.md](./proposals/agentlet-upgrade-plan.md)                                     | Planning                                        | Upgrade Sediment's embedded agentlet to the new `agentlet/hello` + `agent/hello` split protocol.                               |
 | [canvas-realtime-sync-plan.md](./proposals/canvas-realtime-sync-plan.md)                             | In-Progress (P0+P1 shipped)                     | Roadmap from multi-agent sync to multi-user co-editing; shipped foundation folded into `architecture/canvas-realtime-sync.md`. |
 | [content-before-ai-design.md](./proposals/content-before-ai-design.md)                               | Unknown — needs owner review                    | Block-level provenance (AI vs user authorship) + inline word-level diff bars per block.                                        |
 | [headless-executor-plan.md](./proposals/headless-executor-plan.md)                                   | Partly shipped (M2 referenced from `canvas.ts`) | Server-side headless canvas executor + structure/content sync split.                                                           |
@@ -93,6 +90,12 @@ commit/PR, and either fold lasting parts into the matching
 
 Shipped or superseded proposals end up under [archive/](./archive/) so
 `grep` against `proposals/` only returns work that's actually in flight.
+
+| Doc | Status | Summary |
+| --- | --- | --- |
+| [agenetes-agentlet-gateway-consolidation.md](./archive/agenetes-agentlet-gateway-consolidation.md) | Shipped | Replaced standalone agentlet-server with the stateless Agenetes Gateway and explicit ACP placement. |
+| [acp-eventstore-refactor-plan.md](./archive/acp-eventstore-refactor-plan.md) | Superseded | Earlier EventStore adaptation plan replaced by Gateway-owned live buffering and Agenetes durability. |
+| [agentlet-upgrade-plan.md](./archive/agentlet-upgrade-plan.md) | Superseded | Earlier split-hello migration plan absorbed by the Gateway consolidation. |
 
 ---
 

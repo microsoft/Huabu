@@ -2,7 +2,7 @@
 
 > Absorb the host-side agentlet relay into Agenetes, retire the standalone agentlet-server control plane, and make Agenetes the sole owner of durable workload and conversation state.
 >
-> Status: **In-Progress** · Last updated: 2026-07-14
+> Status: **Shipped** · Last updated: 2026-07-14
 
 ---
 
@@ -49,7 +49,7 @@ This proposal does not preserve the standalone agentlet REST API, built-in UI, M
 
 The first version does not add enrollment tokens, certificates, PKI, runtime credential rotation, or a credential administration API. The supervised local daemon retains its host-injected process-lifetime token; future remote daemon configuration uses manually configured long-lived tokens.
 
-This proposal does not add Agent Team scan/setup/validate protocol operations. It establishes the multi-daemon Gateway required by [`managed-agent-teams.md`](./managed-agent-teams.md); that proposal owns the later Agent Team control methods and UI.
+This proposal does not add Agent Team scan/setup/validate protocol operations. It establishes the multi-daemon Gateway required by [`managed-agent-teams.md`](../proposals/managed-agent-teams.md); that proposal owns the later Agent Team control methods and UI.
 
 ## 5. Target ownership
 
@@ -303,8 +303,9 @@ Changes under `external/agentlet/` are always committed separately from Agenetes
 
 | Item       | Detail                                                                                                                                                                                                                                                                   |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Status     | ✅ Complete.                                                                                                                                                                                                                                                             |
 | Scope      | `external/agentlet/packages/server/`, direct bridge code in `external/agentlet/packages/local/`, standalone UI, agentlet docs/examples, and agentlet workspace metadata.                                                                                                 |
-| Work       | Delete `@agentlet/server`, the `agentlet-server` binary, `agentlet --agent`, standalone REST/WS/token/UI surfaces, DataStore, EventStore, bridge-only reconnect code, and obsolete tests; replace standalone development examples with the Agenetes integration harness. |
+| Work       | Delete `@agentlet/server`, the `agentlet-server` binary, `agentlet --agent`, standalone REST/WS/token/UI surfaces, DataStore, EventStore, bridge-only reconnect code, and obsolete tests; replace standalone development examples with a daemon-facing Gateway integration harness. |
 | Dependency | G6 is merged and green.                                                                                                                                                                                                                                                  |
 | Validation | Agentlet workspace builds and tests without the server package; no source or package manifest references `@agentlet/server` or `agentlet-server`.                                                                                                                        |
 | Commit     | Agentlet-subtree-only commit.                                                                                                                                                                                                                                            |
@@ -313,6 +314,7 @@ Changes under `external/agentlet/` are always committed separately from Agenetes
 
 | Item       | Detail                                                                                                                                                    |
 | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Status     | ✅ Complete.                                                                                                                                              |
 | Scope      | Root package scripts, server bundling configuration, development watchers, and documentation indexes.                                                     |
 | Work       | Remove obsolete `@agentlet/server` build/watch/externalization entries; retain the Gateway workspace and `build:agenetes` registration introduced by G1a. |
 | Dependency | G7.                                                                                                                                                       |
@@ -352,8 +354,8 @@ The following changes are intentionally excluded from the ownership migration:
 
 ## 13. Related documents
 
-- [`managed-agent-teams.md`](./managed-agent-teams.md) — depends on the gateway consolidation for multi-daemon Agent Team discovery, setup, and runtime placement.
-- [`acp-eventstore-refactor-plan.md`](./acp-eventstore-refactor-plan.md) — earlier plan based on the current agentlet-server EventStore and DataStore architecture; must be reconciled with this replacement target.
-- [`layered-architecture.md`](./layered-architecture.md) — L1/L2 ownership and Agenetes package boundaries.
+- [`managed-agent-teams.md`](../proposals/managed-agent-teams.md) — depends on the shipped Gateway consolidation for multi-daemon Agent Team discovery, setup, and runtime placement.
+- [`acp-eventstore-refactor-plan.md`](./acp-eventstore-refactor-plan.md) — superseded EventStore-based plan retained for historical context.
+- [`layered-architecture.md`](../proposals/layered-architecture.md) — L1/L2 ownership and Agenetes package boundaries.
 - [`../../external/agenetes/README.md`](../../external/agenetes/README.md) — Agenetes control-plane invariants.
-- [`../../external/agentlet/spec/protocol.md`](../../external/agentlet/spec/protocol.md) — current agentlet protocol and standalone server assumptions.
+- [`../../external/agentlet/spec/protocol.md`](../../external/agentlet/spec/protocol.md) — current daemon/Gateway wire contract.

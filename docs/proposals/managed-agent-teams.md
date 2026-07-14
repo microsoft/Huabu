@@ -167,7 +167,7 @@ Agenetes defines the Agent Team registries, state transitions, and persistence p
 
 ### Agentlet control-plane consolidation
 
-Agent Team depends on the separate [Agenetes Agentlet Gateway Consolidation](./agenetes-agentlet-gateway-consolidation.md) proposal.
+Agent Team depends on the shipped [Agenetes Agentlet Gateway Consolidation](../archive/agenetes-agentlet-gateway-consolidation.md).
 
 That prerequisite retires standalone `agentlet-server`, moves the host-side relay into `@agenetes/agentlet-gateway`, makes Agenetes the sole owner of durable workload/session/event state, and leaves agentlet as the remotely deployable execution-plane daemon. This proposal consumes that boundary but does not own its migration.
 
@@ -234,7 +234,7 @@ The first version does not implement a package trust workflow, setup-plan previe
 
 This proposal defines the minimum environment-variable declaration and setup-progress requirements but does not yet define upgrades or uninstall behavior.
 
-The [Agentlet Gateway consolidation](./agenetes-agentlet-gateway-consolidation.md) is a prerequisite foundation for the multi-daemon Agent Team design, not an optional follow-up.
+The shipped [Agentlet Gateway consolidation](../archive/agenetes-agentlet-gateway-consolidation.md) is a prerequisite foundation for the multi-daemon Agent Team design, not an optional follow-up.
 
 ## 4. Related documents
 
@@ -242,4 +242,4 @@ The [Agentlet Gateway consolidation](./agenetes-agentlet-gateway-consolidation.m
 - [`../architecture/agent-teams-as-extensions.md`](../architecture/agent-teams-as-extensions.md) — current product vision.
 - [`../../external/agentlet/spec/agent-team.md`](../../external/agentlet/spec/agent-team.md) — current generic Agent Team package and setup contract.
 - [`../architecture/agent-architecture.md`](../architecture/agent-architecture.md) — current External Agent and Agenetes integration.
-- [`agenetes-agentlet-gateway-consolidation.md`](./agenetes-agentlet-gateway-consolidation.md) — prerequisite removal of standalone agentlet-server and consolidation of durable state into Agenetes.
+- [`agenetes-agentlet-gateway-consolidation.md`](../archive/agenetes-agentlet-gateway-consolidation.md) — shipped removal of standalone agentlet-server and consolidation of durable state into Agenetes.

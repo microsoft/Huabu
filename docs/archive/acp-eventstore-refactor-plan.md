@@ -1,5 +1,9 @@
 # Refactor: Drop Redundant ACP Re-initialization
 
+> Status: **Superseded** · Last updated: 2026-07-14
+>
+> Superseded by [`agenetes-agentlet-gateway-consolidation.md`](./agenetes-agentlet-gateway-consolidation.md), which removes the agentlet-owned EventStore and DataStore rather than adapting them.
+
 ## 1. Problem
 
 When Huabu opens a chat thread bound to an external agent, two layers of ACP
