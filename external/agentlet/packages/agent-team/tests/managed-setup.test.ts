@@ -7,7 +7,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { runManagedSetup } from '../src/setup/run-setup.js';
 import type { SetupLogger } from '../src/setup/types.js';
 import { validateManagedAgentTeam } from '../src/validate.js';
-import { resolveManagedWorkingDirPath } from '../src/managed-workspace.js';
 
 const tempDirs: string[] = [];
 const logger: SetupLogger = {
@@ -85,32 +84,6 @@ describe('runManagedSetup', () => {
       phase: 'running_custom_setup',
       status: 'completed',
       message: 'Running custom setup',
-    });
-  });
-
-  describe('resolveManagedWorkingDirPath', () => {
-    it('derives a confined harness workspace from the manifest path', () => {
-      expect(
-        resolveManagedWorkingDirPath(
-          '/teams/reviewer/agentlet.yaml',
-          'copilot',
-        ),
-      ).toBe('/teams/reviewer/workspaces/copilot');
-    });
-
-    it('rejects harness-derived paths that escape the workspace root', () => {
-      expect(() =>
-        resolveManagedWorkingDirPath(
-          '/teams/reviewer/agentlet.yaml',
-          '../../escape',
-        ),
-      ).toThrow('must stay inside');
-      expect(() =>
-        resolveManagedWorkingDirPath(
-          '/teams/reviewer/agentlet.yaml',
-          '/absolute/escape',
-        ),
-      ).toThrow('must stay inside');
     });
   });
 });

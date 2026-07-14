@@ -27,7 +27,6 @@ import {
 import {
   resolveAgentTeam,
   scanAgentTeamRoot,
-  resolveManagedWorkingDirPath,
   validateManagedAgentTeam,
   type ManagedSetupWorkerMessage,
 } from '@agentlet/agent-team'
@@ -321,7 +320,7 @@ export class Agentlet {
   }
 
   private handleAgentTeamSetup(requestId: string | number, params: AgentTeamSetupParams): void {
-    const validationError = this.validateManagedOperationParams(params, true, false)
+    const validationError = this.validateManagedOperationParams(params, true)
     if (validationError) {
       this.sendDaemonResponse(requestId, undefined, { code: -32602, message: validationError })
       return
@@ -334,20 +333,7 @@ export class Agentlet {
       })
       return
     }
-    let workingDirPath: string
-    try {
-      workingDirPath = resolveManagedWorkingDirPath(
-        params.manifestPath,
-        params.harness,
-        params.workingDirPath,
-      )
-    } catch (error) {
-      this.sendDaemonResponse(requestId, undefined, {
-        code: -32602,
-        message: error instanceof Error ? error.message : String(error),
-      })
-      return
-    }
+    const workingDirPath = resolve(params.workingDirPath)
     if (
       [...this.setupOperations.values()].some(
         (operation) => operation.workingDirPath === workingDirPath,
@@ -434,7 +420,6 @@ export class Agentlet {
       this.sendDaemonResponse(requestId, {
         operationId: params.operationId,
         accepted: true,
-        workingDirPath,
       })
     } catch (error) {
       this.sendDaemonResponse(requestId, undefined, {
@@ -471,7 +456,7 @@ export class Agentlet {
   }
 
   private handleAgentTeamValidate(requestId: string | number, params: AgentTeamValidateParams): void {
-    const validationError = this.validateManagedOperationParams(params, false, true)
+    const validationError = this.validateManagedOperationParams(params, false)
     if (validationError) {
       this.sendDaemonResponse(requestId, undefined, { code: -32602, message: validationError })
       return
@@ -489,7 +474,6 @@ export class Agentlet {
   private validateManagedOperationParams(
     params: AgentTeamSetupParams | AgentTeamValidateParams,
     requireOperationId: boolean,
-    requireWorkingDirPath: boolean,
   ): string | undefined {
     if (!params || typeof params !== 'object') return 'Missing Agent Team operation params'
     if (
@@ -507,16 +491,8 @@ export class Agentlet {
       return 'Missing required param: harness'
     }
     if (
-      requireWorkingDirPath &&
-      (typeof params.workingDirPath !== 'string' ||
-        !isAbsolute(params.workingDirPath))
-    ) {
-      return 'workingDirPath must be an absolute path'
-    }
-    if (
-      params.workingDirPath !== undefined &&
-      (typeof params.workingDirPath !== 'string' ||
-        !isAbsolute(params.workingDirPath))
+      typeof params.workingDirPath !== 'string' ||
+      !isAbsolute(params.workingDirPath)
     ) {
       return 'workingDirPath must be an absolute path'
     }

@@ -243,6 +243,7 @@ describe('agentlet daemon integration', () => {
           operationId: 'setup-complete',
           manifestPath: join(reviewerDir, 'agentlet.yaml'),
           harness: 'copilot',
+          workingDirPath: reviewerWorkspace,
         },
       }),
     )
@@ -257,7 +258,6 @@ describe('agentlet daemon integration', () => {
       result: {
         operationId: 'setup-complete',
         accepted: true,
-        workingDirPath: reviewerWorkspace,
       },
     })
     await waitUntil(() =>
