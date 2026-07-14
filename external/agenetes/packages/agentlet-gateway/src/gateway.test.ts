@@ -508,7 +508,11 @@ describe('AgentletGateway', () => {
           JSON.stringify({
             jsonrpc: '2.0',
             id: message.id,
-            result: { operationId: 'setup-a', accepted: true },
+            result: {
+              operationId: 'setup-a',
+              accepted: true,
+              workingDirPath: '/deployments/reviewer',
+            },
           }),
         );
         machineA.socket.send(
@@ -590,7 +594,11 @@ describe('AgentletGateway', () => {
         harness: 'copilot',
         workingDirPath: '/deployments/reviewer',
       }),
-    ).resolves.toEqual({ operationId: 'setup-a', accepted: true });
+    ).resolves.toEqual({
+      operationId: 'setup-a',
+      accepted: true,
+      workingDirPath: '/deployments/reviewer',
+    });
     await waitUntil(() => setupProgress.mock.calls.length === 1);
     expect(setupProgress).toHaveBeenCalledWith('machine-a', {
       operationId: 'setup-a',

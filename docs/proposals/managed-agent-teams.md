@@ -151,6 +151,8 @@ The harness dropdown allows the user to select any harness declared by the manif
 <manifest-directory>/workspaces/<harness>/
 ```
 
+The target agentlet daemon performs this default resolution with its own platform path semantics, confines the harness-derived path below the package's `workspaces` directory, and returns the final absolute path for Agenetes to persist. Agenetes never derives a remote workspace path with the host machine's path utilities.
+
 At runtime, environment sources merge in this precedence order:
 
 ```text
