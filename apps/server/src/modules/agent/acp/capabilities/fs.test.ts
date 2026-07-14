@@ -2,7 +2,7 @@
  * Tests for `fs/read_text_file` capability handler.
  *
  * Covers the security/contract surface that matters for v1:
- *   - virtual `/canvas/` prefix is mandatory
+ *   - virtual `/space/` prefix is mandatory
  *   - canvas-relative resolution + sandbox escape rejection
  *   - allowlist (`nodes/**`, `.artifacts/**`); everything else rejected
  *   - symlinks rejected even when their target would otherwise be in scope
@@ -95,21 +95,21 @@ afterAll(() => {
 // ─── Path namespace ─────────────────────────────────────────────────────────
 
 describe('fs/read_text_file — path namespace', () => {
-  it('reads a node file under /canvas/nodes/', () => {
+  it('reads a node file under /space/nodes/', () => {
     const result = handleFsReadTextFile(CANVAS_ID, {
       path: `${ACP_CANVAS_VFS_PREFIX}nodes/foo.md`,
     });
     expect(result.content).toBe(NODE_BODY);
   });
 
-  it('reads an artifact under /canvas/.artifacts/', () => {
+  it('reads an artifact under /space/.artifacts/', () => {
     const result = handleFsReadTextFile(CANVAS_ID, {
       path: `${ACP_CANVAS_VFS_PREFIX}.artifacts/bar.txt`,
     });
     expect(result.content).toBe(ARTIFACT_BODY);
   });
 
-  it('rejects a path without the /canvas/ prefix', () => {
+  it('rejects a path without the /space/ prefix', () => {
     expect(() =>
       handleFsReadTextFile(CANVAS_ID, { path: 'nodes/foo.md' }),
     ).toThrow(FsCapabilityError);
@@ -118,11 +118,11 @@ describe('fs/read_text_file — path namespace', () => {
   it('rejects a real absolute disk path even if it points inside the workspace', () => {
     const realAbs = path.join(canvasRoot, 'nodes', 'foo.md');
     expect(() => handleFsReadTextFile(CANVAS_ID, { path: realAbs })).toThrow(
-      /must begin with "\/canvas\/"/,
+      /must begin with "\/space\/"/,
     );
   });
 
-  it('rejects /canvas/ on its own (no file named)', () => {
+  it('rejects /space/ on its own (no file named)', () => {
     expect(() =>
       handleFsReadTextFile(CANVAS_ID, { path: ACP_CANVAS_VFS_PREFIX }),
     ).toThrow(FsCapabilityError);
