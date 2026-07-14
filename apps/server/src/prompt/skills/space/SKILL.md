@@ -1,32 +1,32 @@
 ---
-name: canvas
-description: Canvas mental model, tool boundaries, and command reference. The single entry point for any agent operating on a Huabu canvas.
+name: space
+description: Space mental model (the infinite work surface), tool boundaries, and command reference. The single entry point for any agent operating on a Huabu Space.
 appliesTo: [ask, operate, sketch, external]
 version: 1
 ---
 
-# Canvas
+# Space
 
-The canonical reference for working with a Huabu canvas. This file covers the **read** side: the on-disk layout and the tools that turn it into structured data. Mutation is gated behind a separate tool (`canvas_commands`) and a separate reference file — see the **Mutating a canvas** section below.
+The canonical reference for working with a Huabu Space. This file covers the **read** side: the on-disk layout and the tools that turn it into structured data. Mutation is gated behind a separate tool (`space_commands`) and a separate reference file — see the **Mutating a Space** section below.
 
 > **Schemas are the source of truth.** This skill explains _semantics_ and _idioms_. Field names, types, and required parameters live on the corresponding tool / command schema. When in doubt about a field, trust the schema.
 
 ---
 
-## A canvas has two surfaces
+## A Space has two surfaces
 
-A canvas exposes two complementary surfaces, each owned by its own family of tools. Pick the family by what you want to know, not by which tool feels familiar.
+A Space exposes two complementary surfaces, each owned by its own family of tools. Pick the family by what you want to know, not by which tool feels familiar.
 
 ### Surface A — A folder of text files
 
 Node text, frontmatter, skill files, memory, history. Read with `read`, `find`, `ls`, `grep`.
 
 ```
-<canvas>/
+<Space>/
   nodes/
     <safeLabel>.md         # one file per node: YAML frontmatter + Markdown body
   memory/*.md              # long-form, agent-curated memory
-  skills/<id>/SKILL.md     # per-canvas skill overrides (optional)
+  skills/<id>/SKILL.md     # per-Space skill overrides (optional)
   .artifacts/<id><ext>     # raw bytes (image / pdf / video / cover); `read` returns images inline, rejects pdf / video
   .history/                # saved threads, intent, event log (rarely needed)
 ```
@@ -52,24 +52,24 @@ Examples:
 - Have only the nodeId → `find("nodes/*.md")` or `grep` (results carry `nodeId`, `label`, `nodeType`); the stable id also lives in each file's `id:` frontmatter.
 - A direct read returns ENOENT (rare — usually means the label was just edited mid-flight) → fall back to `find` / `grep`.
 
-### Surface B — Layout & connectivity data (`canvas.json`)
+### Surface B — Layout & connectivity data (`space.json`)
 
-Where each node sits, how big it is, which frame it belongs to, what colour it's painted; every edge's endpoints and style. Stored as one `canvas.json` per canvas, served through `get_canvas_outline`, `inspect_nodes`, `inspect_edges`. These tools also expose **derived fields you can't read off disk** — `distance`, `direction`, `hops`, `clusterId`, `arrangement` — computed on the fly from the same data, which is why you should query through them rather than `read("canvas.json")` and parse it yourself.
+Where each node sits, how big it is, which frame it belongs to, what colour it's painted; every edge's endpoints and style. Stored as one `space.json` per Space, served through `get_space_outline`, `inspect_nodes`, `inspect_edges`. These tools also expose **derived fields you can't read off disk** — `distance`, `direction`, `hops`, `clusterId`, `arrangement` — computed on the fly from the same data, which is why you should query through them rather than `read("space.json")` and parse it yourself.
 
 ### Boundary rule of thumb
 
-| Property                                  | Tool                 |
-| ----------------------------------------- | -------------------- |
-| label, content, summary, keywords, src    | `read` / `grep`      |
-| position, size, parentFrame, visual style | `inspect_nodes`      |
-| edge direction / lineStyle / stroke       | `inspect_edges`      |
-| whole-canvas overview, spatial clusters   | `get_canvas_outline` |
+| Property                                  | Tool                |
+| ----------------------------------------- | ------------------- |
+| label, content, summary, keywords, src    | `read` / `grep`     |
+| position, size, parentFrame, visual style | `inspect_nodes`     |
+| edge direction / lineStyle / stroke       | `inspect_edges`     |
+| whole-Space overview, spatial clusters    | `get_space_outline` |
 
 ## Tool decision matrix
 
 | Question                                       | Tool                                                     |
 | ---------------------------------------------- | -------------------------------------------------------- |
-| "Give me the lay of the land"                  | `get_canvas_outline()`                                   |
+| "Give me the lay of the land"                  | `get_space_outline()`                                    |
 | "What does this node say?"                     | `read("nodes/<safeLabel>.md")`                           |
 | "Where is this node? How big? In which frame?" | `inspect_nodes({ ids: ["<id>"] })`                       |
 | "What's near this node?"                       | `inspect_nodes({ nearNode: { id } })`                    |
@@ -77,26 +77,26 @@ Where each node sits, how big it is, which frame it belongs to, what colour it's
 | "What does that edge look like?"               | `inspect_edges({ ids: ["<edgeId>"] })`                   |
 | "Which nodes mention 'gradient descent'?"      | `grep`                                                   |
 | "List all PDFs"                                | `find("**/*.pdf")` or `inspect_nodes({ byType: "pdf" })` |
-| "Load a deeper canvas reference"               | `read("skills/canvas/references/<name>.md")`             |
+| "Load a deeper Space reference"                | `read("skills/space/references/<name>.md")`              |
 
 ## Gotchas
 
 Behaviour the schema can't convey:
 
-- ** Selection & Position Geometry (CRITICAL):** The selected-node / anchor context **DOES NOT** directly contain position, size, parent frame, or geometry coordinates. If you need to place a new node near, relative to, or offset from a selected or anchor node, **you MUST first call `inspect_nodes({ ids: ["<anchorId>"] })`** (or `get_canvas_outline`) to query its absolute `(x, y)` position and size.
-- **Nodes in context are metadata only.** Pass a node's supplied `file` path straight to `read` for the body. Only when a node is mentioned outside your context (e.g. it appears in a canvas snapshot but wasn't shown as a `<node>`) do you build the path yourself via the safeLabel rule above. For spatial / structural info (including position), call `inspect_nodes({ ids: ["<id>"] })`.
-- **No cross-canvas access.** All paths are scoped to the active canvas.
+- ** Selection & Position Geometry (CRITICAL):** The selected-node / anchor context **DOES NOT** directly contain position, size, parent frame, or geometry coordinates. If you need to place a new node near, relative to, or offset from a selected or anchor node, **you MUST first call `inspect_nodes({ ids: ["<anchorId>"] })`** (or `get_space_outline`) to query its absolute `(x, y)` position and size.
+- **Nodes in context are metadata only.** Pass a node's supplied `file` path straight to `read` for the body. Only when a node is mentioned outside your context (e.g. it appears in a Space snapshot but wasn't shown as a `<node>`) do you build the path yourself via the safeLabel rule above. For spatial / structural info (including position), call `inspect_nodes({ ids: ["<id>"] })`.
+- **No cross-Space access.** All paths are scoped to the active Space.
 - **`read` returns image artifacts inline** as vision content: pass an image node's frontmatter `src` straight to `read`, OR — for an inline `![](<key>)` image embedded in a note body — call `read(".artifacts/<key>")` to see it. PDF / video bytes still live under `.artifacts/` but are not readable — their `src` URL is the only handle.
 - Before placing new nodes, anchor on the selection / a referenced node / a focal cluster — never pick coordinates from the global bbox alone, or new nodes land outside the user's viewport.
 
 ---
 
-## Mutating a canvas
+## Mutating a Space
 
-The filesystem tools (`read`, `find`, `ls`, `grep`) are read-only — there is no `write` / `edit_file` / `rm`. **Every mutation flows through one tool: `canvas_commands`.**
+The filesystem tools (`read`, `find`, `ls`, `grep`) are read-only — there is no `write` / `edit_file` / `rm`. **Every mutation flows through one tool: `space_commands`.**
 
-- If `canvas_commands` is **not** in your available tool list → you are in read-only mode. Do not attempt mutations and do not claim in your reply that you performed any.
-- If `canvas_commands` **is** available → the tool's own schema and description carry the full command set, the id / dependency-ordering rule, and per-field behaviour. For composed multi-command recipes see `command-cookbook.md`; for diagram geometry see `layout-recipes.md`.
+- If `space_commands` is **not** in your available tool list → you are in read-only mode. Do not attempt mutations and do not claim in your reply that you performed any.
+- If `space_commands` **is** available → the tool's own schema and description carry the full command set, the id / dependency-ordering rule, and per-field behaviour. For composed multi-command recipes see `command-cookbook.md`; for diagram geometry see `layout-recipes.md`.
 - **Commands are not guaranteed to succeed.** Each command in a call reports its own outcome in `results[]`; on failure it carries a `reason` (e.g. `invalid-target` when a CONNECT / SET_NODE_PARENT endpoint doesn't exist). Read it and adjust — don't assume a write landed.
 
 ---
@@ -105,5 +105,5 @@ The filesystem tools (`read`, `find`, `ls`, `grep`) are read-only — there is n
 
 Load on demand when the situation calls for it:
 
-- `read("skills/canvas/references/command-cookbook.md")` — composed batch patterns: brainstorm, merge / synthesize, group into a frame, restyle a cluster, tidy a row, …
-- `read("skills/canvas/references/layout-recipes.md")` — coordinate system, hierarchical / left-to-right / grid layouts, frames, and the row-track flowchart / roadmap recipe.
+- `read("skills/space/references/command-cookbook.md")` — composed batch patterns: brainstorm, merge / synthesize, group into a frame, restyle a cluster, tidy a row, …
+- `read("skills/space/references/layout-recipes.md")` — coordinate system, hierarchical / left-to-right / grid layouts, frames, and the row-track flowchart / roadmap recipe.

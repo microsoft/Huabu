@@ -337,7 +337,7 @@ export interface ImageGenerationToolPart extends ToolPartBase {
 export type AssistantToolVariant = AssistantToolPart['variant'];
 
 const VARIANT_BY_INTERNAL_TOOL: Record<string, AssistantToolVariant> = {
-  canvas_commands: 'canvas_commands',
+  space_commands: 'canvas_commands',
   web_search: 'web_search',
   read: 'agent_tool',
   grep: 'agent_tool',
@@ -345,7 +345,7 @@ const VARIANT_BY_INTERNAL_TOOL: Record<string, AssistantToolVariant> = {
   ls: 'agent_tool',
   inspect_nodes: 'agent_tool',
   inspect_edges: 'agent_tool',
-  get_canvas_outline: 'agent_tool',
+  get_space_outline: 'agent_tool',
   generate_image: 'image_generation',
   snapshot_nodes: 'snapshot_nodes',
 };

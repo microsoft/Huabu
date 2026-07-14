@@ -18,7 +18,7 @@ import {
 import { CanvasStore } from './canvas-store.js';
 import { atomicWriteJson, mkdirp, sanitizeId } from './io.js';
 import { toSafeFilename } from './naming.js';
-import { canvasJsonPath } from './paths.js';
+import { canvasJsonPath, SPACE_JSON_FILENAME } from './paths.js';
 import { getWorkspacePath } from '../workspace.js';
 
 import type { CanvasFile } from './canvas-store.js';
@@ -177,7 +177,7 @@ export function createCanvas(
     createdAt: now,
     updatedAt: now,
   };
-  atomicWriteJson(path.join(dirPath, 'canvas.json'), canvas);
+  atomicWriteJson(path.join(dirPath, SPACE_JSON_FILENAME), canvas);
   registerCanvasDir(safeId, dirName, resolvedTitle);
   return canvas;
 }

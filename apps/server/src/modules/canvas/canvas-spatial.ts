@@ -208,7 +208,6 @@ export interface CanvasOutlineCluster {
 }
 
 export interface CanvasOutline {
-  canvasId: string;
   version: number;
   bbox: { x: number; y: number; width: number; height: number } | null;
   nodes: CanvasOutlineNode[];
@@ -320,7 +319,6 @@ export function buildCanvasOutline(
   });
 
   return {
-    canvasId,
     version: canvas.version,
     bbox,
     nodes,

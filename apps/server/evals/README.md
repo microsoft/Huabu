@@ -46,7 +46,7 @@ evals/
 ├── fixtures/                 # Per-case minimal vaults (git-tracked)
 │   └── read-node-content/
 │       └── default-canvas/
-│           ├── canvas.json
+│           ├── space.json
 │           └── nodes/Dolphin Migration.md
 ├── runs/                     # Per-run output (git-ignored)
 │   └── 20260511-143022/
@@ -69,9 +69,9 @@ evals/
 ## Adding a case
 
 1. **Build the fixture.** Create `fixtures/<id>/<canvasDir>/`. Inside:
-   - `canvas.json` — at minimum `{ canvasId, title, version, state: { nodes, edges }, createdAt, updatedAt }`. The `canvasId` here MUST match the case YAML's `canvasId` (default: `default-canvas`).
-   - `nodes/<safe(label)>.md` — one file per node, frontmatter must include `id` (matching the node's id in `canvas.json`), `type`, and `label`. Body is the markdown the agent will read.
-     The directory name under `fixtures/<id>/` is arbitrary — `canvas.json`'s `canvasId` is what the storage layer uses to address the canvas.
+   - `space.json` — at minimum `{ canvasId, title, version, state: { nodes, edges }, createdAt, updatedAt }`. The `canvasId` here MUST match the case YAML's `canvasId` (default: `default-canvas`).
+   - `nodes/<safe(label)>.md` — one file per node, frontmatter must include `id` (matching the node's id in `space.json`), `type`, and `label`. Body is the markdown the agent will read.
+     The directory name under `fixtures/<id>/` is arbitrary — `space.json`'s `canvasId` is what the storage layer uses to address the canvas.
 2. **Write `cases/<id>.yml`** following the `read-node-content.yml` example. Validation is enforced by `case-loader.ts`'s zod schema, so typos surface as "Invalid case file" with a per-field message.
 3. **Run it.** `pnpm --filter @sediment/server eval -- --case <id>`.
 

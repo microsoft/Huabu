@@ -47,7 +47,7 @@ import {
   type CanvasFile,
   type UpdateNodeOutcome,
 } from '../storage/index.js';
-import { canvasRoot, nodesDir } from '../storage/paths.js';
+import { canvasRoot, nodesDir, SPACE_JSON_FILENAME } from '../storage/paths.js';
 import { getWorkspacePath } from '../workspace.js';
 
 import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
@@ -1564,16 +1564,24 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           await writeFile(dest, new Uint8Array(buf));
         });
 
-        // Rewrite canvas.json so canvasId matches the new directory.
-        const stagedJsonPath = path.join(stagingDir, 'canvas.json');
-        if (!existsSync(stagedJsonPath)) {
+        // Rewrite the topology file so canvasId matches the new directory.
+        // New bundles carry `space.json`; still accept legacy `canvas.json`
+        // exports and normalise them to the new name on the way in.
+        const stagedJsonPath = path.join(stagingDir, SPACE_JSON_FILENAME);
+        const legacyJsonPath = path.join(stagingDir, 'canvas.json');
+        const sourceJsonPath = existsSync(stagedJsonPath)
+          ? stagedJsonPath
+          : existsSync(legacyJsonPath)
+            ? legacyJsonPath
+            : null;
+        if (!sourceJsonPath) {
           await rm(stagingDir, { recursive: true, force: true });
           stagingCleanedUp = true;
           return reply.code(400).send({
-            message: 'Invalid bundle: missing canvas.json',
+            message: 'Invalid bundle: missing space.json',
           });
         }
-        const raw = await readFile(stagedJsonPath, 'utf-8');
+        const raw = await readFile(sourceJsonPath, 'utf-8');
         const parsed = JSON.parse(raw) as CanvasFile;
         const sourceCanvasId = parsed.canvasId;
         const importedManifest = manifest as ImportManifest | null;
@@ -1590,7 +1598,12 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
             targetCanvasId,
           ),
         };
+        // Always persist under the new name so the storage layer (which
+        // addresses `space.json`) can find it; drop a legacy source file.
         await writeFile(stagedJsonPath, JSON.stringify(remapped));
+        if (sourceJsonPath !== stagedJsonPath) {
+          await rm(sourceJsonPath, { force: true });
+        }
 
         // Move the staged dir into its final, title-derived location so
         // the on-disk basename matches the title and `read()` will not

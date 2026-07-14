@@ -4,7 +4,7 @@ Opinionated layouts for structured diagrams (architecture diagrams, flowcharts, 
 
 ## Coordinate system
 
-- The canvas uses x (right = positive) and y (down = positive) coordinates.
+- The Space uses x (right = positive) and y (down = positive) coordinates.
 - A standard node is about **400px wide** and **300px tall**. Use a gap of **~50px** between nodes.
 - Headers / labels can be narrower (≈250px wide).
 - **`position` is required** on every `CREATE_NODES` entry and is honoured verbatim by the engine. There is no fallback layout to fall back on — if you don't pick a slot, the call will be rejected.
@@ -31,7 +31,7 @@ Place the centre at `(cx, cy)`; place N children on a ring of radius `r`. For ev
 
 - Create a frame for each logical group / layer, sized to enclose its children with **~40px padding** on every side.
 - Use `SET_NODE_PARENT` to parent child nodes into the frame.
-- **Position the frame first**, then position children. Child positions are absolute (canvas-relative), not frame-relative — but it is easier to think of children as offsets from the frame's top-left.
+- **Position the frame first**, then position children. Child positions are absolute (Space-relative), not frame-relative — but it is easier to think of children as offsets from the frame's top-left.
 - Give the frame a clear `data.label` so the group is identifiable when zoomed out.
 
 ### Structured frame layout (`column` / `row`)
@@ -108,7 +108,7 @@ Track 3 (y=1000): [Header] [A]→[B]→[C]        sub(y=1250): [RefC]
 
 ## Future recipes (placeholders)
 
-The following are intentionally short stubs — fill them in when you ship the first canvas that needs the recipe.
+The following are intentionally short stubs — fill them in when you ship the first Space that needs the recipe.
 
 - **Mind map (radial).** Centre concept node, N first-level branches on a ring, sub-branches fanning further out.
 - **Timeline.** Single horizontal track with evenly-spaced date markers; optional sub-rows for parallel storylines.

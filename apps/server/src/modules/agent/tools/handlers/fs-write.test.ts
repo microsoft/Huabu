@@ -78,19 +78,19 @@ describe('handleFsWrite — path routing', () => {
     );
     expect(r.ok).toBe(false);
     expect(r.reason).toMatch(/unsupported path/);
-    expect(r.reason).toMatch(/memory\/workspace\.md/);
+    expect(r.reason).toMatch(/memory\/user\.md/);
   });
 
-  it('rejects canvas-memory writes without a bound canvasId', async () => {
+  it('rejects space-memory writes without a bound canvasId', async () => {
     const r = parse(
       await handleFsWrite({
-        path: 'memory/canvas.md',
+        path: 'memory/space.md',
         mode: 'overwrite',
         body: 'x',
       } as never),
     );
     expect(r.ok).toBe(false);
-    expect(r.reason).toMatch(/canvas-scoped but no canvasId/);
+    expect(r.reason).toMatch(/Space-scoped but no canvasId/);
   });
 
   it('rejects malformed skill paths (no nested dirs)', async () => {
@@ -127,7 +127,7 @@ describe('handleFsWrite — overwrite', () => {
   it('creates workspace memory with trailing newline', async () => {
     const r = parse(
       await handleFsWrite({
-        path: 'memory/workspace.md',
+        path: 'memory/user.md',
         mode: 'overwrite',
         body: '- prefers concise replies',
       } as never),
@@ -142,14 +142,14 @@ describe('handleFsWrite — overwrite', () => {
   it('overwrites existing workspace memory wholesale', async () => {
     // Seed
     await handleFsWrite({
-      path: 'memory/workspace.md',
+      path: 'memory/user.md',
       mode: 'overwrite',
       body: 'old line',
     } as never);
     // Overwrite
     const r = parse(
       await handleFsWrite({
-        path: 'memory/workspace.md',
+        path: 'memory/user.md',
         mode: 'overwrite',
         body: 'new line',
       } as never),
@@ -161,7 +161,7 @@ describe('handleFsWrite — overwrite', () => {
   it('writes canvas memory under the bound canvasId', async () => {
     const r = parse(
       await handleFsWrite({
-        path: 'memory/canvas.md',
+        path: 'memory/space.md',
         mode: 'overwrite',
         body: 'canvas briefing',
         canvasId,
@@ -178,7 +178,7 @@ describe('handleFsWrite — overwrite', () => {
     const body = 'x'.repeat(5000); // > 4 KB
     const r = parse(
       await handleFsWrite({
-        path: 'memory/workspace.md',
+        path: 'memory/user.md',
         mode: 'overwrite',
         body,
       } as never),
@@ -192,7 +192,7 @@ describe('handleFsWrite — overwrite', () => {
     const body = Array.from({ length: 90 }, (_, i) => `- line ${i}`).join('\n');
     const r = parse(
       await handleFsWrite({
-        path: 'memory/canvas.md',
+        path: 'memory/space.md',
         mode: 'overwrite',
         body,
         canvasId,
@@ -323,7 +323,7 @@ describe('handleFsWrite — replace_string', () => {
   beforeEach(async () => {
     // Seed workspace memory with deterministic content.
     await handleFsWrite({
-      path: 'memory/workspace.md',
+      path: 'memory/user.md',
       mode: 'overwrite',
       body: '- alpha\n- beta\n- gamma',
     } as never);
@@ -332,7 +332,7 @@ describe('handleFsWrite — replace_string', () => {
   it('rejects when file does not exist', async () => {
     const r = parse(
       await handleFsWrite({
-        path: 'memory/canvas.md',
+        path: 'memory/space.md',
         mode: 'replace_string',
         oldString: 'foo',
         newString: 'bar',
@@ -346,7 +346,7 @@ describe('handleFsWrite — replace_string', () => {
   it('rejects when oldString is missing entirely', async () => {
     const r = parse(
       await handleFsWrite({
-        path: 'memory/workspace.md',
+        path: 'memory/user.md',
         mode: 'replace_string',
         oldString: 'does-not-occur',
         newString: 'x',
@@ -359,13 +359,13 @@ describe('handleFsWrite — replace_string', () => {
   it('rejects when oldString matches multiple times', async () => {
     // Overwrite with a body that has duplicates.
     await handleFsWrite({
-      path: 'memory/workspace.md',
+      path: 'memory/user.md',
       mode: 'overwrite',
       body: '- alpha\n- alpha\n- beta',
     } as never);
     const r = parse(
       await handleFsWrite({
-        path: 'memory/workspace.md',
+        path: 'memory/user.md',
         mode: 'replace_string',
         oldString: '- alpha',
         newString: '- ALPHA',
@@ -378,7 +378,7 @@ describe('handleFsWrite — replace_string', () => {
   it('rejects empty oldString', async () => {
     const r = parse(
       await handleFsWrite({
-        path: 'memory/workspace.md',
+        path: 'memory/user.md',
         mode: 'replace_string',
         oldString: '',
         newString: 'x',
@@ -391,7 +391,7 @@ describe('handleFsWrite — replace_string', () => {
   it('rejects when oldString === newString', async () => {
     const r = parse(
       await handleFsWrite({
-        path: 'memory/workspace.md',
+        path: 'memory/user.md',
         mode: 'replace_string',
         oldString: '- alpha',
         newString: '- alpha',
@@ -404,7 +404,7 @@ describe('handleFsWrite — replace_string', () => {
   it('replaces a unique substring and preserves the rest', async () => {
     const r = parse(
       await handleFsWrite({
-        path: 'memory/workspace.md',
+        path: 'memory/user.md',
         mode: 'replace_string',
         oldString: '- beta',
         newString: '- BETA-NEW',
@@ -419,7 +419,7 @@ describe('handleFsWrite — replace_string', () => {
   it('supports deletion via empty newString', async () => {
     const r = parse(
       await handleFsWrite({
-        path: 'memory/workspace.md',
+        path: 'memory/user.md',
         mode: 'replace_string',
         oldString: '- beta\n',
         newString: '',
@@ -436,7 +436,7 @@ describe('handleFsWrite — replace_string', () => {
     const before = readFileSync(workspaceMemoryPath(), 'utf8');
     const r = parse(
       await handleFsWrite({
-        path: 'memory/workspace.md',
+        path: 'memory/user.md',
         mode: 'replace_string',
         oldString: '- beta',
         newString: 'x'.repeat(5000),
@@ -454,7 +454,7 @@ describe('handleFsWrite — mode validation', () => {
   it('rejects overwrite missing body', async () => {
     const r = parse(
       await handleFsWrite({
-        path: 'memory/workspace.md',
+        path: 'memory/user.md',
         mode: 'overwrite',
       } as never),
     );
@@ -464,13 +464,13 @@ describe('handleFsWrite — mode validation', () => {
 
   it('rejects replace_string missing newString', async () => {
     await handleFsWrite({
-      path: 'memory/workspace.md',
+      path: 'memory/user.md',
       mode: 'overwrite',
       body: 'seed',
     } as never);
     const r = parse(
       await handleFsWrite({
-        path: 'memory/workspace.md',
+        path: 'memory/user.md',
         mode: 'replace_string',
         oldString: 'seed',
       } as never),

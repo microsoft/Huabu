@@ -63,4 +63,4 @@ For a structural rewrite:
 ## After writing
 
 - Briefly confirm to the user: skill id, mode used (`replace_string` / `overwrite`), and a one-line summary of what changed.
-- Do **not** make canvas changes in the same turn.
+- Do **not** make Space changes in the same turn.

@@ -10,6 +10,7 @@ import path from 'node:path';
 import { readJson } from './io.js';
 import { NameIndex, type NameIndexResult } from './name-index.js';
 import { normalizeForCompare, toSafeFilename } from './naming.js';
+import { SPACE_JSON_FILENAME } from './paths.js';
 import { getWorkspacePath } from '../workspace.js';
 
 export interface CanvasDirEntry {
@@ -51,7 +52,7 @@ function scanWorkspace(): void {
       state?: { nodes?: unknown[] };
       createdAt?: number;
       updatedAt?: number;
-    }>(path.join(full, 'canvas.json'));
+    }>(path.join(full, SPACE_JSON_FILENAME));
     if (!json?.canvasId) continue;
     index.add({
       id: json.canvasId,

@@ -73,7 +73,7 @@ describe('GET /api/rfs/:canvasId/skill', () => {
       const res = await app.inject({ method: 'GET', url: '/rfs/c1/skill' });
       expect(res.statusCode).toBe(200);
       expect(res.headers['content-type']).toMatch(/text\/markdown/);
-      expect(res.body).toMatch(/Accessing this Huabu canvas/i);
+      expect(res.body).toMatch(/Accessing this Huabu Space/i);
     } finally {
       await app.close();
     }

@@ -1,8 +1,8 @@
 # DeepV Slides Maker
 
-You are a slide-making agent. You turn intent and context from the **Huabu canvas** into a finished slide deck (per-page images + an editable PowerPoint) using the **DeepV** agentic service, then write the results back onto the canvas.
+You are a slide-making agent. You turn intent and context from selected nodes into a finished slide deck (per-page images + an editable PowerPoint) using the **DeepV** agentic service, then write the results back as linked nodes.
 
-Your job has three parts: (1) read the user's intent from the selected canvas node(s), (2) drive DeepV to produce the deck, (3) write the outline, slide images, and `.pptx` back onto the canvas linked to the source node.
+Your job has three parts: (1) read the user's intent from the selected node(s), (2) drive DeepV to produce the deck, (3) write the outline, slide images, and `.pptx` back as nodes linked to the source node.
 
 ## Environment
 
@@ -11,15 +11,15 @@ Two variables are injected into your environment at spawn time (from `.env`):
 - `DEEPV_SERVER_ENDPOINT` — DeepV base URL, no trailing slash (e.g. `http://localhost:8000`).
 - `DEEPV_SERVER_API_KEY` — **this value is the DeepV account token itself.** Authenticate every request with the header `Authorization: Bearer $DEEPV_SERVER_API_KEY`. No separate registration/login step is needed.
 
-## Reading and writing the Huabu canvas
+## Reading and writing the Huabu Space
 
-Before acting on the canvas, fetch the access guide — it documents how to read/write files and talk to the canvas agent:
+Before acting on the Space, fetch the access guide — it documents how to read/write files and talk to the Space agent:
 
 ```
 GET ${HUABU_RFS_URL}/skill      (header: Authorization: Bearer ${AGENTLET_TOKEN})
 ```
 
-Both `HUABU_RFS_URL` and `AGENTLET_TOKEN` are set in your environment. The guide explains the three things you can do: **download** files by path, **upload** payloads, and **ask the canvas agent** to create / move / link / lay out nodes or find relevant files. Read it once, then use plain `curl` (or any HTTP client) for everything.
+Both `HUABU_RFS_URL` and `AGENTLET_TOKEN` are set in your environment. The guide explains the three things you can do: **download** files by path, **upload** payloads, and **ask the Space agent** to create / move / link / lay out nodes or find relevant files. Read it once, then use plain `curl` (or any HTTP client) for everything.
 
 ## Two ways to drive DeepV
 
@@ -38,11 +38,11 @@ node deepv.mjs "<intent>" ./out
 Typical end-to-end run:
 
 ```bash
-# 1. read the selected source node's content from the canvas RFS (see the /skill guide)
+# 1. read the selected source node's content via RFS (see the /skill guide)
 # 2. run the one-shot pipeline on that intent:
 node deepv.mjs "$INTENT" ./out            # reads the JSON summary from stdout
-# 3. upload ./out/outline.md, each ./out/slide_*.png, and ./out/deck.pptx back to the
-#    canvas via RFS, then ask the canvas agent to create + link nodes to the source node
+# 3. upload ./out/outline.md, each ./out/slide_*.png, and ./out/deck.pptx via RFS,
+#    then ask the Space agent to create + link nodes to the source node
 ```
 
 Use one-shot when the request maps cleanly to "generate a deck from this intent."
@@ -159,7 +159,7 @@ curl -s -X POST -H "$AUTH" -H 'Content-Type: application/json' "$API/api/session
 
 ## Writing results back to Huabu
 
-After harvesting, push each artifact to the canvas over RFS (upload the file, then ask the canvas agent to create a node from it and link it to the source node — see the `/skill` guide):
+After harvesting, push each artifact over RFS (upload the file, then ask the Space agent to create a node from it and link it to the source node — see the `/skill` guide):
 
 - **Outline** → upload `outline.md`, create a `note` node linked to the source.
 - **Each slide** → upload `slide_0.png … slide_N.png`, create an `image` node per page, in order, each linked to the source.

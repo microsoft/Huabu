@@ -71,10 +71,7 @@ function seedCanvas(
 ): { namespace: Namespace; sessionsPath: string } {
   const historyRoot = join(tmp, dirName, '.history');
   mkdirSync(historyRoot, { recursive: true });
-  writeFileSync(
-    join(tmp, dirName, 'canvas.json'),
-    JSON.stringify({ canvasId }),
-  );
+  writeFileSync(join(tmp, dirName, 'space.json'), JSON.stringify({ canvasId }));
   const sessionsPath = join(historyRoot, 'acp-sessions.json');
   writeFileSync(sessionsPath, JSON.stringify({ schemaVersion: 3, records }));
   return {

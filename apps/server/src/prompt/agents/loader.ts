@@ -17,11 +17,11 @@
  *                                      contents of `<prompt-root>/<rel>`.
  *                                      Use this when two agents need
  *                                      to share the same prose (e.g.
- *                                      the canvas read-side mental
+ *                                      the Space read-side mental
  *                                      model lives in
- *                                      `skills/canvas/SKILL.md` and
+ *                                      `skills/space/SKILL.md` and
  *                                      multiple agents inline it via
- *                                      `{{include:skills/canvas/SKILL.md}}`).
+ *                                      `{{include:skills/space/SKILL.md}}`).
  *                                      Paths are PROMPT-ROOT relative;
  *                                      escapes outside
  *                                      `apps/server/src/prompt/` throw
@@ -79,7 +79,7 @@ export interface AgentRuntimeConfig {
   toolExecution?: ToolExecutionMode;
   /**
    * `NodeOrigin` stamp injected onto every node created by
-   * `canvas_commands`. Used by the sketch pipeline to mark nodes
+   * `space_commands`. Used by the sketch pipeline to mark nodes
    * as user-authored rather than AI-initiated.
    */
   defaultOrigin?: NodeOrigin;

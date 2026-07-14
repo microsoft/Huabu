@@ -61,7 +61,7 @@ beforeAll(() => {
   // title === dir name === canvasId keeps the V2→V3 idempotent rename
   // pass a no-op for any future test that re-runs setWorkspacePath.
   writeFileSync(
-    path.join(canvasRoot, 'canvas.json'),
+    path.join(canvasRoot, 'space.json'),
     JSON.stringify({ canvasId: CANVAS_ID, title: CANVAS_ID }),
   );
   writeFileSync(path.join(canvasRoot, 'nodes', 'foo.md'), NODE_BODY);
@@ -132,10 +132,10 @@ describe('fs/read_text_file — path namespace', () => {
 // ─── Allowlist ──────────────────────────────────────────────────────────────
 
 describe('fs/read_text_file — allowlist', () => {
-  it('refuses canvas.json (intentionally excluded in v1)', () => {
+  it('refuses space.json (intentionally excluded in v1)', () => {
     expect(() =>
       handleFsReadTextFile(CANVAS_ID, {
-        path: `${ACP_CANVAS_VFS_PREFIX}canvas.json`,
+        path: `${ACP_CANVAS_VFS_PREFIX}space.json`,
       }),
     ).toThrow(/outside the external-agent read allowlist/);
   });

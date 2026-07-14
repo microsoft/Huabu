@@ -1,22 +1,22 @@
 # Command Cookbook
 
-Composed `canvas_commands` sequences for common user intents. When a step needs the **id of a node an earlier step created**, it goes in a **follow-up call** (a command can't reference a node that doesn't exist yet — the `canvas_commands` tool description states the dependency rule); the recipes below mark those splits. Independent steps stay in one call. Every `CREATE_NODES` entry needs an **explicit `position`**; node ids, by contrast, are **assigned by the server** and read back from `results[].nodes`.
+Composed `space_commands` sequences for common user intents. When a step needs the **id of a node an earlier step created**, it goes in a **follow-up call** (a command can't reference a node that doesn't exist yet — the `space_commands` tool description states the dependency rule); the recipes below mark those splits. Independent steps stay in one call. Every `CREATE_NODES` entry needs an **explicit `position`**; node ids, by contrast, are **assigned by the server** and read back from `results[].nodes`.
 
-> **Schema is the source of truth.** Field names below come from the `canvas_commands` schemas; this file is about _which commands to compose_, not which fields to type.
+> **Schema is the source of truth.** Field names below come from the `space_commands` schemas; this file is about _which commands to compose_, not which fields to type.
 
 ## Quick patterns
 
-| Intent                                  | Command sequence (`⇒` = follow-up call using returned ids)                                                                                      |
-| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Group existing nodes into a frame       | `CREATE_NODES` (frame) `⇒` `SET_NODE_PARENT` (children → new frame)                                                                             |
-| Brainstorm from a source                | `CREATE_NODES` (multiple ideas) `⇒` `CONNECT_NODES` (each → source)                                                                             |
-| Merge / synthesize                      | `read("nodes/<filename>.md")` for inputs → `CREATE_NODES` (synthesised note) `⇒` `DELETE_NODES` (originals) + `CONNECT_NODES` (link to context) |
-| Restyle a cluster                       | `MERGE_NODE_DATA` with `style.accent` on each member (one call)                                                                                 |
-| Tidy a row of nodes                     | `ALIGN_NODES` (axis) → `DISTRIBUTE_NODES` (one call)                                                                                            |
-| Convert a frame back to siblings        | `DISSOLVE_FRAME`                                                                                                                                |
-| Move a node into a frame                | `SET_NODE_PARENT { nodeId, parentId }`                                                                                                          |
-| Detach a node from its frame            | `SET_NODE_PARENT { nodeId, parentId: null } `                                                                                                   |
-| Add standalone nodes to existing canvas | `inspect_nodes`(anchor) → `CREATE_NODES` with position = anchor.position + (anchor.size.width + 100, 0).                                        |
+| Intent                                 | Command sequence (`⇒` = follow-up call using returned ids)                                                                                      |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Group existing nodes into a frame      | `CREATE_NODES` (frame) `⇒` `SET_NODE_PARENT` (children → new frame)                                                                             |
+| Brainstorm from a source               | `CREATE_NODES` (multiple ideas) `⇒` `CONNECT_NODES` (each → source)                                                                             |
+| Merge / synthesize                     | `read("nodes/<filename>.md")` for inputs → `CREATE_NODES` (synthesised note) `⇒` `DELETE_NODES` (originals) + `CONNECT_NODES` (link to context) |
+| Restyle a cluster                      | `MERGE_NODE_DATA` with `style.accent` on each member (one call)                                                                                 |
+| Tidy a row of nodes                    | `ALIGN_NODES` (axis) → `DISTRIBUTE_NODES` (one call)                                                                                            |
+| Convert a frame back to siblings       | `DISSOLVE_FRAME`                                                                                                                                |
+| Move a node into a frame               | `SET_NODE_PARENT { nodeId, parentId }`                                                                                                          |
+| Detach a node from its frame           | `SET_NODE_PARENT { nodeId, parentId: null } `                                                                                                   |
+| Add standalone nodes to existing Space | `inspect_nodes`(anchor) → `CREATE_NODES` with position = anchor.position + (anchor.size.width + 100, 0).                                        |
 
 ## Recipe: brainstorm from a source
 
@@ -32,7 +32,7 @@ Goal: turn one node into a fan of related ideas.
 Goal: replace a noisy cluster with a single distilled note.
 
 1. `read("nodes/<filename>.md")` for **every** input — synthesis must be grounded in the actual text, not the labels.
-2. Create call — `CREATE_NODES`: one synthesised `note` with substantive Markdown body and a clear label. Position near the cluster centroid (use the outline you fetched when entering the canvas). Read its id back from `results[].nodes`.
+2. Create call — `CREATE_NODES`: one synthesised `note` with substantive Markdown body and a clear label. Position near the cluster centroid (use the outline you fetched when entering the Space). Read its id back from `results[].nodes`.
 3. Follow-up call — `DELETE_NODES` the originals, and `CONNECT_NODES` to link the new note (by its returned id) to whichever upstream context still applies (e.g. the source the originals were derived from).
 4. If the user asked to "keep the originals", skip `DELETE_NODES` and instead `CONNECT_NODES` from each original to the synthesised note.
 
@@ -65,7 +65,7 @@ Single call (both endpoints already exist):
 
 ## Recipe: detach a single node from a frame
 
-Goal: lift one child out of a frame into the root canvas.
+Goal: lift one child out of a frame into the root Space.
 
 Single `SET_NODE_PARENT { nodeId: "<child>", parentId: null }`. Keeps the node's absolute position; do not also call `SET_NODE_GEOMETRY` unless you specifically want to move it.
 

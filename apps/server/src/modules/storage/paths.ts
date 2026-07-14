@@ -38,8 +38,15 @@ export function canvasRoot(canvasId: string): string {
   return path.join(getWorkspacePath(), canvasDirName(safeId));
 }
 
+/**
+ * On-disk topology filename. Agent- and user-visible (L1), so it uses the
+ * Space vocabulary; the TypeScript type of its contents stays `CanvasFile`
+ * (L2 internal). See migrate-canvas-to-space.ts for the legacy rename.
+ */
+export const SPACE_JSON_FILENAME = 'space.json';
+
 export function canvasJsonPath(canvasId: string): string {
-  return path.join(canvasRoot(canvasId), 'canvas.json');
+  return path.join(canvasRoot(canvasId), SPACE_JSON_FILENAME);
 }
 
 export function nodesDir(canvasId: string): string {
@@ -78,9 +85,9 @@ export function artifactPath(canvasId: string, filename: string): string {
 //     AI-private working notes for *this* canvas. The leading `.` puts
 //     it in the same hidden tier as `.history/` and `.artifacts/`.
 
-/** Workspace memory — cross-canvas user preferences: `<workspace>/setting/.huabu.md`. */
+/** Workspace memory — cross-canvas user preferences: `<workspace>/setting/user.md`. */
 export function workspaceMemoryPath(): string {
-  return path.join(settingDir(), '.huabu.md');
+  return path.join(settingDir(), 'user.md');
 }
 
 /** Hidden directory holding canvas-scoped canvas memory + bookkeeping. */
@@ -92,7 +99,7 @@ export function canvasMemoryDir(canvasId: string): string {
 
 /** Working memory body for a canvas. */
 export function canvasMemoryPath(canvasId: string): string {
-  return path.join(canvasMemoryDir(canvasId), 'canvas.md');
+  return path.join(canvasMemoryDir(canvasId), 'space.md');
 }
 
 /**

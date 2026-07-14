@@ -1,18 +1,18 @@
-# Workspace memory
+# User memory
 
-Tool: `fs_write({ path: "memory/workspace.md", mode, ... })`
+Tool: `fs_write({ path: "memory/user.md", mode, ... })`
 
-Cross-canvas user profile. Bullet-list markdown, no frontmatter. Shared with the user — they may hand-edit it.
+Cross-Space user profile. Bullet-list markdown, no frontmatter. Shared with the user — they may hand-edit it.
 
 ## Write what
 
-Durable traits the next chat on any canvas should know:
+Durable traits the next chat on any Space should know:
 
 - style / voice / language preferences
 - recurring topics, expertise, interests
 - workflow habits ("iterates in versions, never deletes prior drafts")
 
-Situational notes → canvas memory. Reusable how-tos → skill.
+Situational notes → Space memory. Reusable how-tos → skill.
 
 ## Modes
 
@@ -21,7 +21,7 @@ Situational notes → canvas memory. Reusable how-tos → skill.
 
 ## Rules
 
-- **`read("memory/workspace.md")` first.** Avoid dupes; pick a unique `oldString`.
+- **`read("memory/user.md")` first.** Avoid dupes; pick a unique `oldString`.
 - **Never delete user-authored bullets via `overwrite`.** If unsure, use `replace_string`.
 - One thought per bullet, ≤ 80 chars.
 - Merged body capped at 4 KB / 80 lines — oversized writes are rejected.
@@ -32,7 +32,7 @@ Add a bullet:
 
 ```json
 {
-  "path": "memory/workspace.md",
+  "path": "memory/user.md",
   "mode": "replace_string",
   "oldString": "- prefers concise replies\n",
   "newString": "- prefers concise replies\n- works primarily in Chinese\n"
@@ -43,7 +43,7 @@ First write (file missing):
 
 ```json
 {
-  "path": "memory/workspace.md",
+  "path": "memory/user.md",
   "mode": "overwrite",
   "body": "- prefers concise replies\n- works primarily in Chinese\n"
 }

@@ -26,7 +26,7 @@
  *   - `nodes/**`        — per-node markdown
  *   - `.artifacts/**`   — uploaded sources
  *
- * Everything else — `canvas.json`, `skills/**`, `memory/**`,
+ * Everything else — `space.json`, `skills/**`, `memory/**`,
  * `.history/**` — is rejected as outside the allowlist.
  */
 

@@ -100,7 +100,7 @@ function resolveTarget(
   }
   const rel = normalizeRel(args.path);
 
-  if (rel === 'memory/workspace.md') {
+  if (rel === 'memory/user.md') {
     return {
       tier: 'workspace',
       absPath: resolveLongTermPath(),
@@ -109,12 +109,12 @@ function resolveTarget(
     };
   }
 
-  if (rel === 'memory/canvas.md') {
+  if (rel === 'memory/space.md') {
     if (!args.canvasId) {
       return {
         path: rel,
         error:
-          'memory/canvas.md is canvas-scoped but no canvasId is bound to this request',
+          'memory/space.md is Space-scoped but no canvasId is bound to this request',
       };
     }
     return {
@@ -155,7 +155,7 @@ function resolveTarget(
 
   return {
     path: rel,
-    error: `fs_write: unsupported path "${rel}". Allowed: memory/workspace.md, memory/canvas.md, skills/<id>/SKILL.md`,
+    error: `fs_write: unsupported path "${rel}". Allowed: memory/user.md, memory/space.md, skills/<id>/SKILL.md`,
   };
 }
 

@@ -42,6 +42,7 @@ import { agentMetadataSchema } from '@agenetes/protocol';
 
 import { readJson } from './io.js';
 import { parseMigratableV3Records } from './legacy/acp-sessions-v3.js';
+import { SPACE_JSON_FILENAME } from './paths.js';
 
 import type { AcpWorkloadSpec } from '../agent/agenetes/drivers.js';
 import type { AgentStateSnapshot, Namespace } from '@agenetes/protocol';
@@ -131,7 +132,7 @@ export function migrateLegacyAcpSessions(workspace: string): void {
     if (!existsSync(sessionsPath)) continue;
 
     const canvasId =
-      readJson<{ canvasId?: string }>(path.join(canvasDir, 'canvas.json'))
+      readJson<{ canvasId?: string }>(path.join(canvasDir, SPACE_JSON_FILENAME))
         ?.canvasId ?? dirName;
     const namespace: Namespace = {
       name: canvasId,

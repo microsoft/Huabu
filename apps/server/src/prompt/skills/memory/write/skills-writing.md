@@ -2,14 +2,14 @@
 
 Tool: `fs_write({ path: "skills/<id>/SKILL.md", mode, ... })`
 
-Reusable how-to (decision rules, recipes, patterns) any future agent on an unrelated canvas can `read("skills/<id>/SKILL.md")` to apply.
+Reusable how-to (decision rules, recipes, patterns) any future agent on an unrelated Space can `read("skills/<id>/SKILL.md")` to apply.
 
 ## Write what
 
 - ✓ "for story outlines, use this 5-frame layout with these colour rules"
 - ✓ "when summarising research papers, group by methodology not topic"
-- ✗ "this canvas has 17 nodes about birds" — canvas memory
-- ✗ "user prefers concise replies" — workspace memory
+- ✗ "this Space has 17 nodes about birds" — Space memory
+- ✗ "user prefers concise replies" — User memory
 
 ## Modes
 

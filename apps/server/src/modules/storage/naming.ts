@@ -22,7 +22,7 @@ export const MAX_FILENAME_LENGTH = 120;
  * Replaces only `\ / : * ? " < > |` and ASCII control characters with
  * `_`. Spaces, hyphens, dots, parentheses and other characters are
  * preserved verbatim — the LLM expects this because the rule is
- * documented in `apps/server/src/prompt/skills/canvas/SKILL.md`.
+ * documented in `apps/server/src/prompt/skills/space/SKILL.md`.
  */
 export function toSafeFilename(
   name?: string | null,
