@@ -72,7 +72,8 @@ ensure_repo_root() {
 
 validate_version() {
   local v="$1"
-  [[ "${v}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.+-][0-9A-Za-z.-]+)?$ ]] ||
+  local semver_re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(\+([0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?$'
+  [[ "${v}" =~ ${semver_re} ]] ||
     die "invalid version '${v}'; expected semver like 0.3.0 or 0.3.0-rc.1"
 }
 
@@ -253,8 +254,7 @@ cmd_tag_push() {
   run git -C "${repo_root}" tag -a "${tag}" -m "${message}"
 
   log "Pushing ${branch} + ${tag} to origin (fires the Release workflow)"
-  run git -C "${repo_root}" push origin "${branch}"
-  run git -C "${repo_root}" push origin "refs/tags/${tag}"
+  run git -C "${repo_root}" push --atomic origin "${branch}" "refs/tags/${tag}"
 
   log "Done. Follow the build in GitHub Actions -> workflow \"Release\" for ${tag}."
 }
