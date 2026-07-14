@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
+import {
+  llmConfigUpdateSchema,
+  llmUtilityConfigUpdateSchema,
+} from '@sediment/shared';
+
 import { getAvailableProviders } from './llm.js';
 
 describe('LLM provider catalog', () => {
@@ -22,6 +27,29 @@ describe('LLM provider catalog', () => {
     expect(providers.get('github-copilot')?.baseUrl).toMatchObject({
       default: expect.any(String),
       overridable: false,
+    });
+  });
+});
+
+describe('LLM config patch schemas', () => {
+  it('accepts chat and utility updates without a model', () => {
+    expect(
+      llmConfigUpdateSchema.parse({
+        provider: 'openai',
+        baseUrl: 'https://proxy.example/v1',
+      }),
+    ).toEqual({
+      provider: 'openai',
+      baseUrl: 'https://proxy.example/v1',
+    });
+    expect(
+      llmUtilityConfigUpdateSchema.parse({
+        provider: 'anthropic',
+        baseUrl: 'https://proxy.example/anthropic',
+      }),
+    ).toEqual({
+      provider: 'anthropic',
+      baseUrl: 'https://proxy.example/anthropic',
     });
   });
 });

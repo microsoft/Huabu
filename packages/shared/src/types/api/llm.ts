@@ -124,7 +124,8 @@ export interface LLMImageConfig {
  */
 export const llmConfigUpdateSchema = z.object({
   provider: z.string().min(1, 'Provider is required'),
-  model: z.string(),
+  /** Optional patch field; omitted updates preserve the saved model. */
+  model: z.string().optional(),
   /** API key — only sent when setting a new key; never returned by GET. */
   apiKey: z.string().optional(),
   /** Optional base URL override. */

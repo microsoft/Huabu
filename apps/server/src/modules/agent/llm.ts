@@ -940,8 +940,11 @@ export function getAzureImageConfig(): {
   // Legacy configs (saved before `modelFamily` existed) all targeted
   // gpt-image-2, so that's the safe default — no heuristic guessing
   // from the deployment string is required.
-  const modelFamily: ImageModelFamily = isImageModelFamily(image?.modelFamily)
-    ? image!.modelFamily!
+  const configuredModelFamily = image?.modelFamily;
+  const modelFamily: ImageModelFamily = isImageModelFamily(
+    configuredModelFamily,
+  )
+    ? configuredModelFamily
     : DEFAULT_IMAGE_MODEL_FAMILY;
   // Most users name their Azure deployment after the model itself, so
   // when the Deployment field is blank we fall back to the model family

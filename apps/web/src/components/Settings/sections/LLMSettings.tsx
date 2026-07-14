@@ -150,31 +150,23 @@ export const LLMSettings: React.FC = () => {
 
   // ─── Debounced auto-savers ────────────────────────────────────────
   const saveChat = useCallback(
-    (patch: Partial<LLMConfigUpdate>) => {
+    (patch: Omit<LLMConfigUpdate, 'provider'>) => {
       const provider = llmConfig?.provider ?? '';
       if (!provider) return;
-      void llmUpdateConfig({
-        provider,
-        model: llmConfig?.model ?? '',
-        ...patch,
-      });
+      void llmUpdateConfig({ provider, ...patch });
     },
-    [llmConfig?.provider, llmConfig?.model, llmUpdateConfig],
+    [llmConfig?.provider, llmUpdateConfig],
   );
   const debouncedSaveChat = useDebouncedSave(saveChat);
 
   // Utility-tier debounced saver (patches keep the current utility provider).
   const saveUtility = useCallback(
-    (patch: Partial<LLMUtilityConfigUpdate>) => {
+    (patch: Omit<LLMUtilityConfigUpdate, 'provider'>) => {
       const provider = utilityConfig?.provider ?? '';
       if (!provider) return;
-      void updateUtilityConfig({
-        provider,
-        model: utilityConfig?.model ?? '',
-        ...patch,
-      });
+      void updateUtilityConfig({ provider, ...patch });
     },
-    [utilityConfig?.provider, utilityConfig?.model, updateUtilityConfig],
+    [utilityConfig?.provider, updateUtilityConfig],
   );
   const debouncedSaveUtility = useDebouncedSave(saveUtility);
 
