@@ -154,10 +154,18 @@ Production requires `VITE_HANDBOOK_URL`; the checked-in [`apps/web/.env.producti
 
 The independent handbook architecture is documented in [docs-architecture.md](./docs-architecture.md).
 
+## 9. Desktop troubleshooting actions
+
+The packaged desktop app exposes three support actions without granting the renderer general filesystem or Electron access: reveal the canonical Server log, open Chromium Developer Tools, and copy non-sensitive system information (Huabu version, OS release, CPU architecture, and Electron version). The sandboxed preload bridge exposes only these fixed operations under `electronBridge.diagnostics`; filesystem paths and shell calls remain in the main process. Packaged builds resolve the log below Electron's `userData/data`; `dev:desktop` passes the source Server's `apps/server/data` location to both processes through `HUABU_DATA_DIR`, so the same action always reveals the log written by the active Server.
+
+The native macOS Help menu and the Windows/Linux in-app application menu reuse the fixed operations exported by [`useElectron.ts`](../../apps/web/src/hooks/useElectron.ts) and add localized feedback at the UI boundary. On Windows and Linux, Troubleshooting is a side-opening submenu composed from the shared `DropdownMenu` primitives rather than a flat group of support actions. The browser build omits the actions because the diagnostics bridge is absent.
+
 ## Code entry points
 
-| File/dir                                                                   | Responsibility                                                |
-| -------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| [`apps/web/src/App.tsx`](../../apps/web/src/App.tsx)                       | Product router; deliberately has no handbook route.           |
-| [`apps/web/src/config/handbook.ts`](../../apps/web/src/config/handbook.ts) | Validate and open the canonical external handbook URL.        |
-| [`apps/desktop/src/main.ts`](../../apps/desktop/src/main.ts)               | Deny Electron child windows and open HTTP(S) URLs externally. |
+| File/dir                                                                       | Responsibility                                                                                |
+| ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| [`apps/web/src/App.tsx`](../../apps/web/src/App.tsx)                           | Product router; deliberately has no handbook route.                                           |
+| [`apps/web/src/config/handbook.ts`](../../apps/web/src/config/handbook.ts)     | Validate and open the canonical external handbook URL.                                        |
+| [`apps/web/src/hooks/useElectron.ts`](../../apps/web/src/hooks/useElectron.ts) | Typed Electron bridge access, fixed support operations, and copied system-information format. |
+| [`apps/desktop/src/preload.ts`](../../apps/desktop/src/preload.ts)             | Narrow sandbox bridge for native menu and diagnostics operations.                             |
+| [`apps/desktop/src/main.ts`](../../apps/desktop/src/main.ts)                   | Electron window security, external URLs, and fixed diagnostics IPC handlers.                  |
