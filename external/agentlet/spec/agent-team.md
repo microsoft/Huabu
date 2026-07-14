@@ -23,6 +23,8 @@ The key design principle is to separate:
 Setup is never hidden inside the first spawn. The user explicitly runs setup,
 and the daemon only launches from already-prepared workspaces.
 
+Managed hosts may invoke the same pipeline through the daemon's `agent-team/setup` control operation. Managed setup targets an explicit deployment workspace, runs in an isolated child process, emits structured progress, and can be cancelled without terminating the daemon.
+
 ## 2. Lifecycle
 
 ```text

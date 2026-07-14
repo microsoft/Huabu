@@ -82,10 +82,15 @@ Both hello methods are requests and require a matching JSON-RPC response before 
 | `server/stop` | Request | Stop one managed agent session. |
 | `server/list` | Request | List the daemon's active agents. |
 | `agent-team/scan` | Request | Scan one absolute collection root and return valid members plus diagnostics for invalid manifests. |
+| `agent-team/setup` | Request | Start an isolated asynchronous setup worker for one explicit deployment workspace. |
+| `agent-team/setup-cancel` | Request | Terminate one active setup worker by operation ID. |
+| `agent-team/validate` | Request | Validate one prepared deployment without mutating or repairing it. |
 | `server/sendResource` | Notification | Write a host-provided resource through the daemon environment registry. |
 | `server/replay` | Notification | Replay Gateway-to-daemon messages buffered during disconnection. |
 | `server/ping` | Notification | Application-level heartbeat request. |
 | `server/shutdown` | Notification | Ask the daemon to stop gracefully. |
+
+`agent-team/setup` returns after the worker is accepted. The daemon subsequently emits `agent-team/setup-progress` notifications containing structured phase events and exactly one terminal `completed`, `failed`, or `cancelled` event while the control connection remains available. The complete setup pipeline, including custom `onInstall`, runs in an isolated child process so cancellation never requires terminating the daemon. A daemon rejects concurrent setup operations targeting the same normalized workspace path.
 
 All JSON-RPC envelopes and method payloads are defined in [`messages.ts`](../packages/protocol/src/messages.ts) and [`json-rpc.ts`](../packages/protocol/src/json-rpc.ts).
 

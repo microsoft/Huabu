@@ -79,8 +79,31 @@ export interface SetupLogger {
   success(msg: string): void;
 }
 
-/**
- * Callbacks that per-package agent-setup.mjs can provide.
+export type ManagedSetupPhase =
+  | 'validating_manifest'
+  | 'preparing_workspace'
+  | 'installing_tools'
+  | 'installing_skills'
+  | 'placing_prompt'
+  | 'copying_files'
+  | 'running_custom_setup';
+
+export interface ManagedSetupProgress {
+  phase: ManagedSetupPhase;
+  status: 'started' | 'completed';
+  message: string;
+}
+
+export interface ManagedSetupOptions {
+  packageDir: string;
+  harness: string;
+  workingDirPath: string;
+  log: SetupLogger;
+  signal?: AbortSignal;
+  onProgress?(progress: ManagedSetupProgress): void;
+}
+
+/** Callbacks that per-package agent-setup.mjs can provide.
  * Each callback is invoked once per harness being processed.
  *
  * Signature: `(harness, workspaceDir, ctx)`

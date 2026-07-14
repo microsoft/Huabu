@@ -53,6 +53,14 @@ export type {
   AgentTeamScanMember,
   AgentTeamScanDiagnostic,
   AgentTeamScanResult,
+  AgentTeamSetupParams,
+  AgentTeamSetupStartResult,
+  AgentTeamSetupProgressParams,
+  AgentTeamSetupCancelParams,
+  AgentTeamSetupCancelResult,
+  AgentTeamValidateParams,
+  AgentTeamValidationIssue,
+  AgentTeamValidateResult,
   LifecycleEvent,
 } from './messages.js'
 

@@ -105,6 +105,23 @@ describe('agentlet daemon integration', () => {
         '  copilot: copilot --acp',
       ].join('\n'),
     )
+    const cancellableDir = join(teamsRoot, 'cancellable')
+    mkdirSync(cancellableDir)
+    writeFileSync(
+      join(cancellableDir, 'agentlet.yaml'),
+      [
+        'schema: agentlet-agent-schema-v1',
+        'name: cancellable',
+        'description: Exercises setup cancellation',
+        'command:',
+        '  copilot: copilot --acp',
+        'onInstall: ./hang.mjs',
+      ].join('\n'),
+    )
+    writeFileSync(
+      join(cancellableDir, 'hang.mjs'),
+      'export default async function () { await new Promise(() => setInterval(() => {}, 1000)) }',
+    )
 
     const controlMessages: JsonRpcMessage[] = []
     const sessionMessages: JsonRpcMessage[] = []
@@ -205,16 +222,147 @@ describe('agentlet daemon integration', () => {
     ).toMatchObject({
       result: {
         rootPath: teamsRoot,
-        members: [
-          {
+        members: expect.arrayContaining([
+          expect.objectContaining({
             name: 'reviewer',
             manifestPath: join(reviewerDir, 'agentlet.yaml'),
             harnesses: ['copilot'],
-          },
-        ],
+          }),
+        ]),
         diagnostics: [],
       },
     })
+
+    const reviewerWorkspace = join(tempDir, 'deployments', 'reviewer')
+    controlSocket?.send(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: ServerMethods.AGENT_TEAM_SETUP,
+        id: 20,
+        params: {
+          operationId: 'setup-complete',
+          manifestPath: join(reviewerDir, 'agentlet.yaml'),
+          harness: 'copilot',
+          workingDirPath: reviewerWorkspace,
+        },
+      }),
+    )
+    await waitUntil(() =>
+      controlMessages.some(
+        (message) => 'id' in message && message.id === 20 && 'result' in message,
+      ),
+    )
+    expect(
+      controlMessages.find((message) => 'id' in message && message.id === 20),
+    ).toMatchObject({
+      result: { operationId: 'setup-complete', accepted: true },
+    })
+    await waitUntil(() =>
+      controlMessages.some(
+        (message) =>
+          'method' in message &&
+          message.method === AgentletMethods.AGENT_TEAM_SETUP_PROGRESS &&
+          message.params?.operationId === 'setup-complete' &&
+          message.params?.type === 'completed',
+      ),
+    )
+
+    controlSocket?.send(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: ServerMethods.AGENT_TEAM_VALIDATE,
+        id: 21,
+        params: {
+          manifestPath: join(reviewerDir, 'agentlet.yaml'),
+          harness: 'copilot',
+          workingDirPath: reviewerWorkspace,
+        },
+      }),
+    )
+    await waitUntil(() =>
+      controlMessages.some(
+        (message) => 'id' in message && message.id === 21 && 'result' in message,
+      ),
+    )
+    expect(
+      controlMessages.find((message) => 'id' in message && message.id === 21),
+    ).toMatchObject({ result: { valid: true, issues: [] } })
+
+    const cancellableWorkspace = join(tempDir, 'deployments', 'cancellable')
+    controlSocket?.send(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: ServerMethods.AGENT_TEAM_SETUP,
+        id: 22,
+        params: {
+          operationId: 'setup-cancel',
+          manifestPath: join(cancellableDir, 'agentlet.yaml'),
+          harness: 'copilot',
+          workingDirPath: cancellableWorkspace,
+        },
+      }),
+    )
+    await waitUntil(() =>
+      controlMessages.some(
+        (message) =>
+          'method' in message &&
+          message.method === AgentletMethods.AGENT_TEAM_SETUP_PROGRESS &&
+          message.params?.operationId === 'setup-cancel' &&
+          message.params?.type === 'phase' &&
+          message.params?.phase === 'running_custom_setup' &&
+          message.params?.status === 'started',
+      ),
+    )
+    controlSocket?.send(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: ServerMethods.AGENT_TEAM_SETUP,
+        id: 24,
+        params: {
+          operationId: 'setup-conflict',
+          manifestPath: join(cancellableDir, 'agentlet.yaml'),
+          harness: 'copilot',
+          workingDirPath: cancellableWorkspace,
+        },
+      }),
+    )
+    await waitUntil(() =>
+      controlMessages.some(
+        (message) => 'id' in message && message.id === 24 && 'error' in message,
+      ),
+    )
+    expect(
+      controlMessages.find((message) => 'id' in message && message.id === 24),
+    ).toMatchObject({
+      error: { data: { code: 'workspace_setup_in_progress' } },
+    })
+    controlSocket?.send(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: ServerMethods.AGENT_TEAM_SETUP_CANCEL,
+        id: 23,
+        params: { operationId: 'setup-cancel' },
+      }),
+    )
+    await waitUntil(() =>
+      controlMessages.some(
+        (message) => 'id' in message && message.id === 23 && 'result' in message,
+      ),
+    )
+    expect(
+      controlMessages.find((message) => 'id' in message && message.id === 23),
+    ).toMatchObject({
+      result: { operationId: 'setup-cancel', cancelled: true },
+    })
+    await waitUntil(() =>
+      controlMessages.some(
+        (message) =>
+          'method' in message &&
+          message.method === AgentletMethods.AGENT_TEAM_SETUP_PROGRESS &&
+          message.params?.operationId === 'setup-cancel' &&
+          message.params?.type === 'cancelled',
+      ),
+    )
 
     controlSocket?.send(
       JSON.stringify({

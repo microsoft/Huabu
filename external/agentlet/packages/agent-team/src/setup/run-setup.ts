@@ -9,7 +9,7 @@
  *      Kept for backward compat and complex custom setups.
  */
 
-import { execSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -20,7 +20,15 @@ import {
   getPromptTarget,
 } from './harness.js';
 import { readManifest } from './manifest.js';
-import type { AgentTeamManifest, CallbackContext, CopyEntry, SetupCallbacks, SetupLogger } from './types.js';
+import type {
+  AgentTeamManifest,
+  CallbackContext,
+  CopyEntry,
+  ManagedSetupOptions,
+  ManagedSetupPhase,
+  SetupCallbacks,
+  SetupLogger,
+} from './types.js';
 import {
   createWorkspace,
   copyEntryToWorkspace,
@@ -105,11 +113,44 @@ function getRequiredCopies(manifest: AgentTeamManifest): CopyEntry[] {
 }
 
 /** Install CLI tools declared in manifest.require['cli-tools'] via npm. */
-function installTools(
+async function runCommand(
+  command: string,
+  args: string[],
+  cwd: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  signal?.throwIfAborted();
+  await new Promise<void>((resolveCommand, rejectCommand) => {
+    const child = spawn(command, args, {
+      cwd,
+      stdio: 'inherit',
+      signal,
+    });
+    child.once('error', rejectCommand);
+    child.once('exit', (code, childSignal) => {
+      if (code === 0) {
+        resolveCommand();
+        return;
+      }
+      if (signal?.aborted) {
+        rejectCommand(signal.reason);
+        return;
+      }
+      rejectCommand(
+        new Error(
+          `${command} exited with ${code === null ? `signal ${childSignal}` : `code ${code}`}`,
+        ),
+      );
+    });
+  });
+}
+
+async function installTools(
   manifest: AgentTeamManifest,
   workspaceDir: string,
   log: SetupLogger,
-): void {
+  signal?: AbortSignal,
+): Promise<void> {
   const cliTools = getRequiredCliTools(manifest);
   if (cliTools.length === 0) return;
   log.info(`Installing tools: ${cliTools.join(', ')}`);
@@ -117,22 +158,22 @@ function installTools(
   // Ensure package.json exists so npm install works
   const pkgJson = join(workspaceDir, 'package.json');
   if (!existsSync(pkgJson)) {
-    execSync('npm init -y --silent', { cwd: workspaceDir, stdio: 'pipe' });
+    await runCommand('npm', ['init', '-y', '--silent'], workspaceDir, signal);
   }
 
-  const pkgs = cliTools.join(' ');
-  execSync(`npm install ${pkgs}`, { cwd: workspaceDir, stdio: 'inherit' });
+  await runCommand('npm', ['install', ...cliTools], workspaceDir, signal);
   log.success('Tools installed');
 }
 
 /** Install skills declared in manifest.require.skills via `npx skills add`. */
-function installSkills(
+async function installSkills(
   manifest: AgentTeamManifest,
   harness: string,
   workspaceDir: string,
   packageDir: string,
   log: SetupLogger,
-): void {
+  signal?: AbortSignal,
+): Promise<void> {
   const skills = getRequiredSkills(manifest);
   if (skills.length === 0) return;
 
@@ -151,15 +192,36 @@ function installSkills(
     // `npx --yes` auto-confirms the one-time install of the `skills`
     // package; the trailing `--yes` skips the skills tool's own prompts
     // (e.g. installation scope) so setup stays fully non-interactive.
-    execSync(
-      `npx --yes skills add ${skillPath} --agent ${harnessInfo.skillsAgent} --yes`,
-      {
-        cwd: workspaceDir,
-        stdio: 'inherit',
-      },
+    await runCommand(
+      'npx',
+      [
+        '--yes',
+        'skills',
+        'add',
+        skillPath,
+        '--agent',
+        harnessInfo.skillsAgent,
+        '--yes',
+      ],
+      workspaceDir,
+      signal,
     );
   }
+
   log.success('Skills installed');
+}
+
+async function runPhase(
+  options: ManagedSetupOptions,
+  phase: ManagedSetupPhase,
+  message: string,
+  action: () => void | Promise<void>,
+): Promise<void> {
+  options.signal?.throwIfAborted();
+  options.onProgress?.({ phase, status: 'started', message });
+  await action();
+  options.signal?.throwIfAborted();
+  options.onProgress?.({ phase, status: 'completed', message });
 }
 
 /** Place the system prompt at the harness-specific location. */
@@ -242,6 +304,101 @@ async function runCustomOnInstall(
 
 // ── Command runners ────────────────────────────────────────────────────
 
+/** Materialize one explicit Agent Team deployment workspace. */
+export async function runManagedSetup(
+  options: ManagedSetupOptions,
+  callbacks: SetupCallbacks = {},
+): Promise<void> {
+  let manifest: AgentTeamManifest | undefined;
+  await runPhase(
+    options,
+    'validating_manifest',
+    'Validating Agent Team manifest',
+    () => {
+      manifest = readManifest(options.packageDir);
+      resolveHarnesses(manifest, options.harness, options.log);
+    },
+  );
+
+  const validatedManifest = manifest;
+  if (!validatedManifest) {
+    throw new Error('Agent Team manifest validation did not complete');
+  }
+
+  const { packageDir, harness, workingDirPath, log, signal } = options;
+  const harnessInfo = getHarnessInfo(harness);
+
+  await runPhase(
+    options,
+    'preparing_workspace',
+    'Preparing deployment workspace',
+    () => createWorkspace(workingDirPath),
+  );
+
+  if (!harnessInfo) {
+    log.warn(
+      `Unknown harness '${harness}', skipping prompt placement and skills installation`,
+    );
+  }
+
+  await runPhase(options, 'installing_tools', 'Installing CLI tools', () =>
+    installTools(validatedManifest, workingDirPath, log, signal),
+  );
+  await runPhase(options, 'installing_skills', 'Installing skills', () =>
+    installSkills(
+      validatedManifest,
+      harness,
+      workingDirPath,
+      packageDir,
+      log,
+      signal,
+    ),
+  );
+  await runPhase(options, 'placing_prompt', 'Placing system prompt', () =>
+    placeSystemPrompt(
+      validatedManifest,
+      packageDir,
+      workingDirPath,
+      harness,
+      log,
+    ),
+  );
+  await runPhase(options, 'copying_files', 'Copying declared files', () =>
+    distributeCopies(validatedManifest, packageDir, workingDirPath, log),
+  );
+
+  const ctx: CallbackContext = {
+    packageDir,
+    manifest: validatedManifest,
+    harness,
+    workspaceDir: workingDirPath,
+    log,
+  };
+  await runPhase(
+    options,
+    'running_custom_setup',
+    'Running custom setup',
+    async () => {
+      await runCustomOnInstall(
+        validatedManifest,
+        packageDir,
+        ctx,
+        log,
+      );
+      if (callbacks.onInstall) {
+        log.info('Running callback install...');
+        await callbacks.onInstall(harness, workingDirPath, ctx);
+      }
+      if (callbacks.onUnpack) {
+        log.info('Running callback unpack...');
+        await callbacks.onUnpack(harness, workingDirPath, ctx);
+      }
+    },
+  );
+
+  log.success(`Workspace ready: ${workingDirPath}`);
+}
+
 /** Run the `unpack` (or `setup`) command. */
 async function runUnpack(
   packageDir: string,
@@ -257,39 +414,10 @@ async function runUnpack(
   for (const harness of harnesses) {
     log.info(`Preparing workspace for "${harness}"...`);
     const workspaceDir = resolveWorkspaceDir(packageDir, harness);
-    const harnessInfo = getHarnessInfo(harness);
-
-    createWorkspace(workspaceDir);
-
-    if (!harnessInfo) {
-      log.warn(
-        `Unknown harness '${harness}', skipping prompt placement and skills installation`,
-      );
-    }
-
-    // Declarative pipeline: tools → skills → prompt → copies
-    installTools(manifest, workspaceDir, log);
-    installSkills(manifest, harness, workspaceDir, packageDir, log);
-    placeSystemPrompt(manifest, packageDir, workspaceDir, harness, log);
-    distributeCopies(manifest, packageDir, workspaceDir, log);
-
-    const ctx: CallbackContext = { packageDir, manifest, harness, workspaceDir, log };
-
-    // Custom onInstall from manifest (dynamic import)
-    await runCustomOnInstall(manifest, packageDir, ctx, log);
-
-    // Legacy callbacks from runSetup({ onInstall, onUnpack })
-    if (callbacks.onInstall) {
-      log.info('Running callback install...');
-      await callbacks.onInstall(harness, workspaceDir, ctx);
-    }
-
-    if (callbacks.onUnpack) {
-      log.info('Running callback unpack...');
-      await callbacks.onUnpack(harness, workspaceDir, ctx);
-    }
-
-    log.success(`Workspace ready: ${workspaceDir}`);
+    await runManagedSetup(
+      { packageDir, harness, workingDirPath: workspaceDir, log },
+      callbacks,
+    );
   }
 
   console.log('\nDone.\n');

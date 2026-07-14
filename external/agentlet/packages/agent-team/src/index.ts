@@ -18,3 +18,10 @@ export type {
   AgentTeamScanDiagnostic,
   AgentTeamScanResult,
 } from './scan.js';
+
+// Validation — inspect a managed deployment without repairing it
+export { validateManagedAgentTeam } from './validate.js';
+export type {
+  ManagedAgentTeamValidationIssue,
+  ManagedAgentTeamValidationResult,
+} from './validate.js';

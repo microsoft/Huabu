@@ -282,6 +282,80 @@ export interface AgentTeamScanResult {
   diagnostics: AgentTeamScanDiagnostic[]
 }
 
+/** agent-team/setup — start one isolated deployment setup operation. */
+export interface AgentTeamSetupParams {
+  operationId: string
+  manifestPath: string
+  harness: string
+  workingDirPath: string
+}
+
+export interface AgentTeamSetupStartResult {
+  operationId: string
+  accepted: true
+}
+
+/** agent-team/setup-progress — asynchronous phase and terminal setup events. */
+export type AgentTeamSetupProgressParams =
+  | {
+      operationId: string
+      type: 'phase'
+      phase:
+        | 'validating_manifest'
+        | 'preparing_workspace'
+        | 'installing_tools'
+        | 'installing_skills'
+        | 'placing_prompt'
+        | 'copying_files'
+        | 'running_custom_setup'
+      status: 'started' | 'completed'
+      message: string
+    }
+  | {
+      operationId: string
+      type: 'completed'
+      workingDirPath: string
+    }
+  | {
+      operationId: string
+      type: 'failed'
+      error: {
+        code: 'setup_failed' | 'worker_exited'
+        message: string
+      }
+    }
+  | {
+      operationId: string
+      type: 'cancelled'
+    }
+
+/** agent-team/setup-cancel — terminate one active setup worker. */
+export interface AgentTeamSetupCancelParams {
+  operationId: string
+}
+
+export interface AgentTeamSetupCancelResult {
+  operationId: string
+  cancelled: boolean
+}
+
+/** agent-team/validate — inspect one deployment without mutating it. */
+export interface AgentTeamValidateParams {
+  manifestPath: string
+  harness: string
+  workingDirPath: string
+}
+
+export interface AgentTeamValidationIssue {
+  code: 'manifest_invalid' | 'harness_unsupported' | 'workspace_missing'
+  message: string
+}
+
+export interface AgentTeamValidateResult {
+  valid: boolean
+  issues: AgentTeamValidationIssue[]
+}
+
 // ─── Lifecycle Events (surfaced to host app) ──────────────────────────────────
 
 /** Union of all lifecycle events the server surfaces to the host app */
