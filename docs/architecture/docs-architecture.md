@@ -58,7 +58,7 @@ Each article carries `data-pagefind-body`, excluding repeated navigation and tab
 
 The artifact validator compares generated pages with the source route registry, verifies article markup, H1 and metadata output, rejects Suspense fallback and forbidden environment values, and requires Pagefind runtime/index files. Source tests cover route uniqueness, metadata completeness, the missing-node-content regression, and base normalization.
 
-The dedicated GitHub Actions workflow builds on pull requests and deploys only [`apps/docs/dist`](../../apps/docs) on `main` or manual dispatch. It derives the repository Pages base from `GITHUB_REPOSITORY` unless the repository variable `DOCS_BASE_PATH` overrides it. The workflow uses GitHub Pages artifact and deployment actions with only `contents: read`, `pages: write`, and `id-token: write`.
+The dedicated GitHub Actions workflow builds pull requests when handbook sources or their root build configuration change, and deploys only [`apps/docs/dist`](../../apps/docs) after matching changes land on `main` or on manual dispatch. It derives the repository Pages base from `GITHUB_REPOSITORY` unless the repository variable `DOCS_BASE_PATH` overrides it. The workflow uses GitHub Pages artifact and deployment actions with only `contents: read`, `pages: write`, and `id-token: write`.
 
 Both `pnpm dev` and `pnpm dev:desktop` dynamically select a free docs port, start the handbook alongside server and web, and inject its actual URL into the web build through `VITE_HANDBOOK_URL`. `DOCS_PORT` changes the preferred starting port; either orchestrator may advance to another free port when it is occupied.
 

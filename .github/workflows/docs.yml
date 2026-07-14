@@ -3,8 +3,22 @@ name: Documentation
 on:
   pull_request:
     branches: [dev, main]
+    paths:
+      - apps/docs/**
+      - .github/workflows/docs.yml
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - tsconfig.base.json
   push:
     branches: [main]
+    paths:
+      - apps/docs/**
+      - .github/workflows/docs.yml
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - tsconfig.base.json
   workflow_dispatch:
 
 permissions:
