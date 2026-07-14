@@ -83,7 +83,7 @@ export const webSearchTool: ToolDefinition = {
 //
 // Three-tool surface for "understand the canvas without mutating it":
 //
-//   - `get_canvas_outline`  — one-shot map of the whole canvas
+//   - `get_space_outline`  — one-shot map of the whole canvas
 //     (geometry + topology-only edges + spatial clusters). Call once
 //     per canvas to orient yourself.
 //   - `inspect_nodes`        — predicate-driven node lookup (attribute
@@ -97,7 +97,7 @@ export const webSearchTool: ToolDefinition = {
 // Boundary with `read`: anything in the node markdown frontmatter
 // (label, type, src, content, summary, keywords) lives in
 // `nodes/*.md` and is owned by `read`. The three canvas tools
-// own everything in `canvas.json` (position/size/parent/style on
+// own structural state (position/size/parent/style on
 // nodes, EdgeStyle on edges) plus derived spatial/topological
 // metadata.
 //
@@ -120,9 +120,9 @@ export const getCanvasOutlineParamsSchema = Type.Object({
 });
 
 export const getCanvasOutlineTool: ToolDefinition = {
-  name: 'get_canvas_outline',
-  label: 'Get Canvas Outline',
-  description: `One-shot map of the whole canvas. Returns JSON: { canvasId, version, bbox, nodes: [{ id, type, label, filename, parentFrame?: { id, label? }, position, size: { width, height }, style?, preview? }], edges: [{ id?, source, target }], spatial: { clusters: [{ frameId?, frameLabel?, nodeIds (reading-order), arrangement }] } }. Edges are topology-only here — for an edge's direction / line style / stroke / strokeWidth call \`inspect_edges\` instead. Call this once when you enter a canvas to orient yourself; later, drill in with inspect_nodes / inspect_edges / read. Frame nodes are entries in \`nodes\` with type='frame' — group by \`parentFrame.id\` to recover the frame tree. Isolated nodes = all node ids minus the union of cluster nodeIds. \`preview\` and \`style\` are opt-in via the matching flags. For full content of any node, call read on the \`filename\` field ("nodes/*.md").`,
+  name: 'get_space_outline',
+  label: 'Get Space Outline',
+  description: `One-shot map of the whole Space. Returns JSON: { version, bbox, nodes: [{ id, type, label, filename, parentFrame?: { id, label? }, position, size: { width, height }, style?, preview? }], edges: [{ id?, source, target }], spatial: { clusters: [{ frameId?, frameLabel?, nodeIds (reading-order), arrangement }] } }. Edges are topology-only here — for an edge's direction / line style / stroke / strokeWidth call \`inspect_edges\` instead. Call this once when you enter a Space to orient yourself; later, drill in with inspect_nodes / inspect_edges / read. Frame nodes are entries in \`nodes\` with type='frame' — group by \`parentFrame.id\` to recover the frame tree. Isolated nodes = all node ids minus the union of cluster nodeIds. \`preview\` and \`style\` are opt-in via the matching flags. For full content of any node, call read on the \`filename\` field ("nodes/*.md").`,
   parameters: getCanvasOutlineParamsSchema,
 };
 
@@ -163,7 +163,7 @@ export const inspectNodesParamsSchema = Type.Object({
       },
       {
         description:
-          'Match nodes whose center lies inside this rectangle (absolute canvas coordinates).',
+          'Match nodes whose center lies inside this rectangle (absolute coordinates).',
       },
     ),
   ),
@@ -191,7 +191,7 @@ export const inspectNodesParamsSchema = Type.Object({
       },
       {
         description:
-          'Find nodes near a canvas point. Each match carries derived `distance`, `centerDistance`, `direction`.',
+          'Find nodes near a point. Each match carries derived `distance`, `centerDistance`, `direction`.',
       },
     ),
   ),
@@ -242,7 +242,7 @@ export const inspectNodesParamsSchema = Type.Object({
 export const inspectNodesTool: ToolDefinition = {
   name: 'inspect_nodes',
   label: 'Inspect Nodes',
-  description: `Find canvas nodes by predicate (attribute / spatial / topological) and return each match with full geometry + visual style + derived fields. Predicates AND together. **Always supply at least one predicate** — calling with no predicates returns every node, which is wasteful; for whole-canvas reads use get_canvas_outline instead. Returns JSON: { count, total, truncated, arrangement?, nodes: [{ id, type, label, filename, parentFrame?: { id, label? }, position, size: { width, height }, style?, distance?, centerDistance?, direction?, edgeIds?, hops?, clusterId? }] }. \`count\` is items in this response (≤ limit); \`total\` is the full match count before \`limit\` was applied — when \`truncated:true\`, raise \`limit\` to ≥\`total\` or refine your query. \`arrangement\` is a human-readable summary of the matched node set's layout (e.g. "4 nodes in a horizontal row", "6 nodes in a 2×3 grid", "3 nodes in a vertical column", "5 nodes scattered"); only emitted when \`count >= 2\`. Note on connectedTo: the target node itself is excluded from results. Use this for "where is X?" (ids), "what's near X?" (nearNode), "what connects to X?" (connectedTo), "what's in this region?" (inRect), or any combination. For full node content (label/text/summary/keywords) call read on the \`filename\` field ("nodes/*.md") — only canvas.json fields are surfaced here.`,
+  description: `Find nodes by predicate (attribute / spatial / topological) and return each match with full geometry + visual style + derived fields. Predicates AND together. **Always supply at least one predicate** — calling with no predicates returns every node, which is wasteful; for whole-Space reads use get_space_outline instead. Returns JSON: { count, total, truncated, arrangement?, nodes: [{ id, type, label, filename, parentFrame?: { id, label? }, position, size: { width, height }, style?, distance?, centerDistance?, direction?, edgeIds?, hops?, clusterId? }] }. \`count\` is items in this response (≤ limit); \`total\` is the full match count before \`limit\` was applied — when \`truncated:true\`, raise \`limit\` to ≥\`total\` or refine your query. \`arrangement\` is a human-readable summary of the matched node set's layout (e.g. "4 nodes in a horizontal row", "6 nodes in a 2×3 grid", "3 nodes in a vertical column", "5 nodes scattered"); only emitted when \`count >= 2\`. Note on connectedTo: the target node itself is excluded from results. Use this for "where is X?" (ids), "what's near X?" (nearNode), "what connects to X?" (connectedTo), "what's in this region?" (inRect), or any combination. For full node content (label/text/summary/keywords) call read on the \`filename\` field ("nodes/*.md") — only topology fields are surfaced here.`,
   parameters: inspectNodesParamsSchema,
 };
 
@@ -308,7 +308,7 @@ export const inspectEdgesParamsSchema = Type.Object({
 export const inspectEdgesTool: ToolDefinition = {
   name: 'inspect_edges',
   label: 'Inspect Edges',
-  description: `Find canvas edges by predicate (id / endpoints / EdgeStyle attributes) and return each match with its full EdgeStyle. Predicates AND together. Like \`inspect_nodes\`, prefer at least one predicate; unlike it, a no-predicate call is fine here — it returns every edge (subject to \`limit\`) because edges are typically few and \`get_canvas_outline\` carries only topology, not EdgeStyle. Reach for a no-predicate call when you specifically need every edge's full style. Returns JSON: { count, total, truncated, edges: [{ id?, source, target, lineType?, lineStyle?, stroke?, strokeWidth?, direction?, label?, labelSource? }] }. \`count\` is items in this response (≤ limit); \`total\` is the full match count before \`limit\` was applied — when \`truncated:true\`, raise \`limit\` to ≥\`total\` or refine your query. EdgeStyle fields are omitted when unset on disk (defaults: \`direction='none'\`, \`lineStyle='solid'\`, \`lineType='bezier'\`, no label); the \`by*\` predicates apply these same defaults so a query like \`byLineStyle:'solid'\` matches edges with no explicit \`lineStyle\` too. \`label\` is short free-text rendered at the edge midpoint; \`labelSource\` records who last set it ('user' / 'agent' / 'auto'). Use this when you need styling info — outline only carries topology. Common flows: pass \`edgeIds\` from \`inspect_nodes({ connectedTo })\` via \`ids\`; or query \`byDirection:'forward'\` to find directed edges; or \`byLabel:'blocks'\` to find labelled edges.`,
+  description: `Find edges by predicate (id / endpoints / EdgeStyle attributes) and return each match with its full EdgeStyle. Predicates AND together. Like \`inspect_nodes\`, prefer at least one predicate; unlike it, a no-predicate call is fine here — it returns every edge (subject to \`limit\`) because edges are typically few and \`get_space_outline\` carries only topology, not EdgeStyle. Reach for a no-predicate call when you specifically need every edge's full style. Returns JSON: { count, total, truncated, edges: [{ id?, source, target, lineType?, lineStyle?, stroke?, strokeWidth?, direction?, label?, labelSource? }] }. \`count\` is items in this response (≤ limit); \`total\` is the full match count before \`limit\` was applied — when \`truncated:true\`, raise \`limit\` to ≥\`total\` or refine your query. EdgeStyle fields are omitted when unset on disk (defaults: \`direction='none'\`, \`lineStyle='solid'\`, \`lineType='bezier'\`, no label); the \`by*\` predicates apply these same defaults so a query like \`byLineStyle:'solid'\` matches edges with no explicit \`lineStyle\` too. \`label\` is short free-text rendered at the edge midpoint; \`labelSource\` records who last set it ('user' / 'agent' / 'auto'). Use this when you need styling info — outline only carries topology. Common flows: pass \`edgeIds\` from \`inspect_nodes({ connectedTo })\` via \`ids\`; or query \`byDirection:'forward'\` to find directed edges; or \`byLabel:'blocks'\` to find labelled edges.`,
   parameters: inspectEdgesParamsSchema,
 };
 
@@ -316,22 +316,22 @@ export const inspectEdgesTool: ToolDefinition = {
 
 export const canvasCommandsParamsSchema = Type.Object({
   commands: Type.Array(AgentCanvasCommandSchema, {
-    description: 'Array of canvas commands to execute as a batch',
+    description: 'Array of Space commands to execute as a batch',
   }),
 });
 
 export const canvasCommandsTool: ToolDefinition = {
-  name: 'canvas_commands',
-  label: 'Canvas Commands',
-  description: `Execute canvas commands. Commands run in the order given; each command succeeds or fails independently, and every command's outcome — including a failure \`reason\` — is reported back in \`results[]\`. Always check it: a command is not guaranteed to succeed (e.g. CONNECT_NODES / SET_NODE_PARENT fail with \`invalid-target\` when an endpoint doesn't exist).
+  name: 'space_commands',
+  label: 'Space Commands',
+  description: `Execute Space commands. Commands run in the order given; each command succeeds or fails independently, and every command's outcome — including a failure \`reason\` — is reported back in \`results[]\`. Always check it: a command is not guaranteed to succeed (e.g. CONNECT_NODES / SET_NODE_PARENT fail with \`invalid-target\` when an endpoint doesn't exist).
 
 Batch **independent** commands together (fewer re-renders). **Dependency rule:** the server assigns every node/edge id, so a command can't reference a node created earlier in the **same call or turn** — its id isn't known yet. Create first, read the assigned ids from \`results[].nodes\`, then CONNECT / SET_NODE_PARENT them in a **follow-up call** (next turn). \`ALIGN_NODES\` / \`DISTRIBUTE_NODES\` touch only existing nodes, so they can ride along once you hold the ids.
 
 Supported command types: ${AGENT_CANVAS_COMMAND_TYPES.join(', ')}. Field-level requirements (which fields each command takes) are described by this tool's parameter schema.
 
-For worked multi-command recipes (group into frame, brainstorm-and-connect, merge/synthesize, restyle a cluster, tidy a row), \`read("skills/canvas/references/command-cookbook.md")\`; for diagram geometry and layout, \`read("skills/canvas/references/layout-recipes.md")\`.`,
+For worked multi-command recipes (group into frame, brainstorm-and-connect, merge/synthesize, restyle a cluster, tidy a row), \`read("skills/space/references/command-cookbook.md")\`; for diagram geometry and layout, \`read("skills/space/references/layout-recipes.md")\`.`,
   parameters: canvasCommandsParamsSchema,
-  // Force serial execution: two canvas_commands in the same batch can
+  // Force serial execution: two space_commands in the same batch can
   // race in two ways. Server-side, the handler reads canvas state once
   // at entry to build a nodeTypeMap — a parallel B that depends on a
   // node freshly created by parallel A wouldn't see it (lost provenance
@@ -339,8 +339,8 @@ For worked multi-command recipes (group into frame, brainstorm-and-connect, merg
   // order, and useAgentStream applies commands the moment each result
   // lands (apps/web/src/hooks/useAgentStream.ts), so a MERGE arriving
   // before its CREATE would dispatch against a missing node. Serializing
-  // canvas_commands sidesteps both. pi-agent-core's batch behavior means
-  // any mixed [read, canvas_commands] batch also runs serial; in
+  // space_commands sidesteps both. pi-agent-core's batch behavior means
+  // any mixed [read, space_commands] batch also runs serial; in
   // practice the agent reads first and writes in a later turn, so the
   // read+write mix is rare and the cost is small.
   executionMode: 'sequential',
@@ -361,7 +361,7 @@ For worked multi-command recipes (group into frame, brainstorm-and-connect, merg
 
 export const readParamsSchema = Type.Object({
   path: Type.String({
-    description: 'File path relative to the current canvas folder.',
+    description: 'File path relative to the current Space folder.',
   }),
   offset: Type.Optional(
     Type.Number({
@@ -379,13 +379,13 @@ export const readParamsSchema = Type.Object({
 export const readTool: ToolDefinition = {
   name: 'read',
   label: 'Read',
-  description: `Read the contents of a **single** file under the current canvas folder — no globs (use find to enumerate, then read each match). Text files return JSON: { path, startLine, endLine, totalLines, truncated, nextOffset?, content, frontmatter? }, truncated to 2000 lines or 50 KB, whichever is hit first; when truncated:true, nextOffset is the 1-indexed line number of the next unread line — pass it as the next offset to keep paging.
+  description: `Read the contents of a **single** file under the current Space folder — no globs (use find to enumerate, then read each match). Text files return JSON: { path, startLine, endLine, totalLines, truncated, nextOffset?, content, frontmatter? }, truncated to 2000 lines or 50 KB, whichever is hit first; when truncated:true, nextOffset is the 1-indexed line number of the next unread line — pass it as the next offset to keep paging.
 
-Raster image artifacts (png / jpg / gif / webp, stored under \`.artifacts/\`) are returned **inline as vision content you can actually see** — so to view an inline \`![](<key>)\` image referenced in a note body, call \`read(".artifacts/<key>")\` (the file also shows up as \`.artifacts/<key>\` in find / grep / ls output). Other binary files (pdf / video / archives) are rejected with an error; use the node's \`src\` URL or the canvas UI for those.
+Raster image artifacts (png / jpg / gif / webp, stored under \`.artifacts/\`) are returned **inline as vision content you can actually see** — so to view an inline \`![](<key>)\` image referenced in a note body, call \`read(".artifacts/<key>")\` (the file also shows up as \`.artifacts/<key>\` in find / grep / ls output). Other binary files (pdf / video / archives) are rejected with an error; use the node's \`src\` URL or the Space UI for those.
 
 When the file begins with a YAML frontmatter block ("---" fences), the parsed frontmatter is also returned as a structured object so you don't have to parse YAML yourself.
 
-See 'skills/canvas/SKILL.md' for the canvas folder layout, frontmatter fields per file type, the node filename ↔ label derivation rule, and the read vs inspect_nodes boundary.`,
+See 'skills/space/SKILL.md' for the Space folder layout, frontmatter fields per file type, the node filename ↔ label derivation rule, and the read vs inspect_nodes boundary.`,
   parameters: readParamsSchema,
 };
 
@@ -397,7 +397,7 @@ export const grepParamsSchema = Type.Object({
   path: Type.Optional(
     Type.String({
       description:
-        'Directory or file to search, relative to the current canvas folder. Default: the canvas root. Pass "nodes" to scope to node markdown only.',
+        'Directory or file to search, relative to the current Space folder. Default: the Space root. Pass "nodes" to scope to node markdown only.',
     }),
   ),
   glob: Type.Optional(
@@ -431,7 +431,7 @@ export const grepParamsSchema = Type.Object({
 export const grepTool: ToolDefinition = {
   name: 'grep',
   label: 'Grep',
-  description: `Search file contents for a pattern within the current canvas folder. Paths are canvas-relative; when omitted, search defaults to the canvas root. Returns JSON: { matches: [...], count, truncated }. \`count\` is matches in this response (≤ limit); \`truncated:true\` means scanning was stopped early (\`limit\` reached or wall-clock budget exhausted) so more matches may exist — raise \`limit\` or refine the pattern. Skips .history/, .git/, and node_modules/. When a match is in nodes/*.md, the result also includes nodeId, label, and nodeType — chain straight into read (for the rest of the file) or inspect_nodes / canvas_commands without a second lookup. Output is capped at 100 matches by default.`,
+  description: `Search file contents for a pattern within the current Space folder. Paths are Space-relative; when omitted, search defaults to the Space root. Returns JSON: { matches: [...], count, truncated }. \`count\` is matches in this response (≤ limit); \`truncated:true\` means scanning was stopped early (\`limit\` reached or wall-clock budget exhausted) so more matches may exist — raise \`limit\` or refine the pattern. Skips .history/, .git/, and node_modules/. When a match is in nodes/*.md, the result also includes nodeId, label, and nodeType — chain straight into read (for the rest of the file) or inspect_nodes / space_commands without a second lookup. Output is capped at 100 matches by default.`,
   parameters: grepParamsSchema,
 };
 
@@ -443,7 +443,7 @@ export const findParamsSchema = Type.Object({
   path: Type.Optional(
     Type.String({
       description:
-        'Directory to search, relative to the current canvas folder. Default: the canvas root.',
+        'Directory to search, relative to the current Space folder. Default: the Space root.',
     }),
   ),
   limit: Type.Optional(
@@ -456,7 +456,7 @@ export const findParamsSchema = Type.Object({
 export const findTool: ToolDefinition = {
   name: 'find',
   label: 'Find',
-  description: `Find files by glob pattern within the current canvas folder. Paths are canvas-relative; when omitted, search defaults to the canvas root. Returns JSON: { paths: [...], count, truncated }. \`count\` is paths in this response (≤ limit); \`truncated:true\` means the walk stopped early at \`limit\` so more files may match — raise \`limit\` or narrow the pattern. When a result is nodes/*.md, the entry also includes nodeId, label, and nodeType. Skips .history/, .git/, and node_modules/.`,
+  description: `Find files by glob pattern within the current Space folder. Paths are Space-relative; when omitted, search defaults to the Space root. Returns JSON: { paths: [...], count, truncated }. \`count\` is paths in this response (≤ limit); \`truncated:true\` means the walk stopped early at \`limit\` so more files may match — raise \`limit\` or narrow the pattern. When a result is nodes/*.md, the entry also includes nodeId, label, and nodeType. Skips .history/, .git/, and node_modules/.`,
   parameters: findParamsSchema,
 };
 
@@ -464,7 +464,7 @@ export const lsParamsSchema = Type.Object({
   path: Type.Optional(
     Type.String({
       description:
-        'Directory to list, relative to the current canvas folder. Default: the canvas root.',
+        'Directory to list, relative to the current Space folder. Default: the Space root.',
     }),
   ),
   limit: Type.Optional(
@@ -477,7 +477,7 @@ export const lsParamsSchema = Type.Object({
 export const lsTool: ToolDefinition = {
   name: 'ls',
   label: 'Ls',
-  description: `List directory contents within the current canvas folder. When path is omitted, lists the canvas root. Returns JSON: { path, entries: [...], count, total, truncated }. Entries are sorted alphabetically with a trailing "/" on directories; \`count\` is entries in this response (≤ limit), \`total\` is the full eligible entry count, \`truncated:true\` means \`total > count\` — raise \`limit\` to ≥\`total\`. A canvas folder typically contains canvas.json plus subdirectories such as nodes/, .artifacts/, .history/, and memory/.`,
+  description: `List directory contents within the current Space folder. When path is omitted, lists the Space root. Returns JSON: { path, entries: [...], count, total, truncated }. Entries are sorted alphabetically with a trailing "/" on directories; \`count\` is entries in this response (≤ limit), \`total\` is the full eligible entry count, \`truncated:true\` means \`total > count\` — raise \`limit\` to ≥\`total\`. A Space folder typically contains space.json plus subdirectories such as nodes/, .artifacts/, .history/, and memory/.`,
   parameters: lsParamsSchema,
 };
 
@@ -500,7 +500,7 @@ export const lsTool: ToolDefinition = {
 export const fsWriteParamsSchema = Type.Object({
   path: Type.String({
     description:
-      'Virtual file path. Supported targets: "memory/workspace.md" (cross-canvas profile), "memory/canvas.md" (this-canvas briefing), "skills/<id>/SKILL.md" (user skill). Mirrors the paths accepted by the `read` tool.',
+      'Virtual file path. Supported targets: "memory/user.md" (cross-Space profile), "memory/space.md" (this-Space briefing), "skills/<id>/SKILL.md" (user skill). Mirrors the paths accepted by the `read` tool.',
   }),
   mode: Type.Union(
     [Type.Literal('overwrite'), Type.Literal('replace_string')],
@@ -512,7 +512,7 @@ export const fsWriteParamsSchema = Type.Object({
   body: Type.Optional(
     Type.String({
       description:
-        'Required when mode="overwrite". Wholesale file contents; a trailing newline is added if absent. For "memory/workspace.md" and "memory/canvas.md" the body is capped at 4 KB / 80 lines; skills are uncapped.',
+        'Required when mode="overwrite". Wholesale file contents; a trailing newline is added if absent. For "memory/user.md" and "memory/space.md" the body is capped at 4 KB / 80 lines; skills are uncapped.',
     }),
   ),
   oldString: Type.Optional(
@@ -539,7 +539,7 @@ export const fsWriteTool: ToolDefinition = {
   name: 'fs_write',
   label: 'Write file',
   description:
-    'Write to a memory or skill file by virtual path. Two modes: "overwrite" (wholesale contents, creates the file if missing) and "replace_string" (Claude-Code style unique-substring edit). Supported paths: "memory/workspace.md", "memory/canvas.md", "skills/<id>/SKILL.md" — same set the `read` tool accepts. Skill creates require a `rationale`. Discipline + per-target guidance: `read("skills/memory/write/workspace-memory-writing.md" | "skills/memory/write/canvas-memory-writing.md" | "skills/memory/write/skills-writing.md")`.',
+    'Write to a memory or skill file by virtual path. Two modes: "overwrite" (wholesale contents, creates the file if missing) and "replace_string" (Claude-Code style unique-substring edit). Supported paths: "memory/user.md", "memory/space.md", "skills/<id>/SKILL.md" — same set the `read` tool accepts. Skill creates require a `rationale`. Discipline + per-target guidance: `read("skills/memory/write/user-memory-writing.md" | "skills/memory/write/space-memory-writing.md" | "skills/memory/write/skills-writing.md")`.',
   parameters: fsWriteParamsSchema,
   executionMode: 'sequential',
 };
@@ -549,7 +549,7 @@ export const fsWriteTool: ToolDefinition = {
 export const snapshotNodesParamsSchema = Type.Object({
   nodeIds: Type.Array(Type.String(), {
     description:
-      'Ids of the nodes to snapshot, as they appear in `get_canvas_outline` / `inspect_nodes`. All nodes must live on the current canvas. Pass a single id for a one-shot snapshot; pass multiple ids to let the tool spatially cluster nearby image and sketch nodes into one composite PNG per cluster.',
+      'Ids of the nodes to snapshot, as they appear in `get_space_outline` / `inspect_nodes`. All nodes must live on the current Space. Pass a single id for a one-shot snapshot; pass multiple ids to let the tool spatially cluster nearby image and sketch nodes into one composite PNG per cluster.',
   }),
   maxPixels: Type.Optional(
     Type.Integer({
@@ -565,7 +565,7 @@ export const snapshotNodesTool: ToolDefinition = {
   name: 'snapshot_nodes',
   label: 'Snapshot nodes',
   description:
-    "Snapshot canvas nodes into PNG attachments — use the returned `src` as a vision attachment (so you can SEE the node) or as `generate_image.referenceArtifactSrcs`. Call this for any `image` / `sketch` node you've located via `get_canvas_outline` / `inspect_nodes`; `frame` is also accepted and recursively expands to its image/sketch children. For `note` / `text` / `pdf` / `video` use `read(\"nodes/<file>.md\")` instead — they have no still image.\n\nMultiple ids are spatially clustered per parent frame (edge-to-edge ≤ 200 px): nearby image+sketch nodes composite into ONE PNG (images as backdrop, strokes on top); distant ids stay separate. A single image id short-circuits to that node's original artifact (or a downscaled copy when its longest edge exceeds `maxPixels`), so pass one id at a time when you want full-resolution pixels — e.g. drilling into a member of an earlier cluster.\n\nReturns `Array<{src, width, height, originNodeIds}>`; `originNodeIds` lists every contributing node. The chat route already auto-snapshots the user's selection on your first turn (keys appear in user-message metadata), so don't re-snapshot the same selection unless you need full-res single-image pixels or a smaller `maxPixels` retry.",
+    "Snapshot Space nodes into PNG attachments — use the returned `src` as a vision attachment (so you can SEE the node) or as `generate_image.referenceArtifactSrcs`. Call this for any `image` / `sketch` node you've located via `get_space_outline` / `inspect_nodes`; `frame` is also accepted and recursively expands to its image/sketch children. For `note` / `text` / `pdf` / `video` use `read(\"nodes/<file>.md\")` instead — they have no still image.\n\nMultiple ids are spatially clustered per parent frame (edge-to-edge ≤ 200 px): nearby image+sketch nodes composite into ONE PNG (images as backdrop, strokes on top); distant ids stay separate. A single image id short-circuits to that node's original artifact (or a downscaled copy when its longest edge exceeds `maxPixels`), so pass one id at a time when you want full-resolution pixels — e.g. drilling into a member of an earlier cluster.\n\nReturns `Array<{src, width, height, originNodeIds}>`; `originNodeIds` lists every contributing node. The chat route already auto-snapshots the user's selection on your first turn (keys appear in user-message metadata), so don't re-snapshot the same selection unless you need full-res single-image pixels or a smaller `maxPixels` retry.",
   parameters: snapshotNodesParamsSchema,
 };
 
@@ -606,7 +606,7 @@ export const generateImageTool: ToolDefinition = {
   name: 'generate_image',
   label: 'Generate image',
   description:
-    "Generate a new image and persist it into the current canvas's artifact store. Returns JSON `{src, width, height, revisedPrompt?}` — `src` is an artifact key like `art_xyz.png`. **If you need to place the image on the canvas**, follow up with a `canvas_commands` call: `{type:'CREATE_NODES', nodes:[{nodeType:'image', data:{src:'<the src>', label:'<short caption>'}, position:{x,y}, size:{width,height}}]}` — pick a free spot near the user's current focus. To use existing canvas content as visual reference, call `snapshot_nodes` with the source node ids and pass the returned `src` strings via `referenceArtifactSrcs`. **In your final chat reply, embed the generated image inline using markdown image syntax `![<short caption>](<the src>)` so the user sees it immediately** — do NOT use link syntax `[…](…)` (renders as a broken link, not an image), do NOT describe what's in the image (the user can see it), do NOT list pixel dimensions, and keep any surrounding text to a brief one-line confirmation. Requires Azure OpenAI with an Image Deployment configured in Settings → LLM Provider.",
+    "Generate a new image and persist it into the current Space's artifact store. Returns JSON `{src, width, height, revisedPrompt?}` — `src` is an artifact key like `art_xyz.png`. **If you need to place the image on the Space**, follow up with a `space_commands` call: `{type:'CREATE_NODES', nodes:[{nodeType:'image', data:{src:'<the src>', label:'<short caption>'}, position:{x,y}, size:{width,height}}]}` — pick a free spot near the user's current focus. To use existing Space content as visual reference, call `snapshot_nodes` with the source node ids and pass the returned `src` strings via `referenceArtifactSrcs`. **In your final chat reply, embed the generated image inline using markdown image syntax `![<short caption>](<the src>)` so the user sees it immediately** — do NOT use link syntax `[…](…)` (renders as a broken link, not an image), do NOT describe what's in the image (the user can see it), do NOT list pixel dimensions, and keep any surrounding text to a brief one-line confirmation. Requires Azure OpenAI with an Image Deployment configured in Settings → LLM Provider.",
   parameters: generateImageParamsSchema,
   // Image generation is slow (5-30s); marking sequential prevents the
   // agent from racing two parallel generations against the same

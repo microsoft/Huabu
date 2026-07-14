@@ -6,10 +6,10 @@ import { MilkdownMessageCard } from './MilkdownMessageCard';
 import { PermissionCard } from './PermissionCard';
 import { PlanCard } from './PlanCard';
 import { ThinkingCard } from './ThinkingCard';
-import { CanvasCommandCard } from './Tool/CanvasCommandCard';
 import { ImageGenerationCard } from './Tool/ImageGenerationCard';
 import { MergedAgentToolRow } from './Tool/MergedAgentToolRow';
 import { SnapshotNodesCard } from './Tool/SnapshotNodesCard';
+import { SpaceCommandCard } from './Tool/SpaceCommandCard';
 import { ToolCallCard } from './Tool/ToolCallCard';
 import { WebSearchToolDisplay } from './Tool/WebSearchToolDisplay';
 import { NODE_ICON } from '../../../config/nodeIcons';
@@ -44,13 +44,13 @@ function renderToolGroup(
   key: string,
 ): React.ReactNode {
   switch (group.variant) {
-    case 'canvas_commands':
-      // canvas_commands keeps its rich change-list UI per call
+    case 'space_commands':
+      // space_commands keeps its rich change-list UI per call
       // (grouping intentionally never merges these).
       return (
         <div key={key} className="flex flex-col gap-1">
           {group.parts.map((p) => (
-            <CanvasCommandCard
+            <SpaceCommandCard
               key={p.toolCallId}
               messageId={messageId}
               part={p}

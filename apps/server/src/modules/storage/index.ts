@@ -18,7 +18,7 @@ import {
 import { CanvasStore } from './canvas-store.js';
 import { atomicWriteJson, mkdirp, sanitizeId } from './io.js';
 import { toSafeFilename } from './naming.js';
-import { canvasJsonPath } from './paths.js';
+import { canvasJsonPath, SPACE_JSON_FILENAME } from './paths.js';
 import { getWorkspacePath } from '../workspace.js';
 
 import type { CanvasFile } from './canvas-store.js';
@@ -84,7 +84,7 @@ export function resetStorageCache(): void {
  * List every canvas in the workspace.
  *
  * Iterates the in-memory canvas-dir index (built lazily on first
- * access). Each entry is paired with its persisted `canvas.json`; rows
+ * access). Each entry is paired with its persisted topology; rows
  * whose JSON has gone missing are skipped.
  */
 export function listCanvases(): CanvasFile[] {
@@ -108,14 +108,14 @@ export function listCanvases(): CanvasFile[] {
  * Unlike {@link listCanvases}, this builds each row straight from the
  * in-memory canvas-dir index — whose entries already carry the summary
  * fields (`nodeCount` / `createdAt` / `updatedAt`) captured when
- * `scanWorkspace()` parsed each `canvas.json`. That avoids re-reading
+ * `scanWorkspace()` parsed each topology file. That avoids re-reading
  * and re-parsing every canvas file a second time just to render the
  * list.
  *
  * The displayed `title` mirrors {@link CanvasStore.read}'s Finder-rename
  * self-heal (adopt the on-disk directory name when it diverges from the
  * sanitised title) but WITHOUT the write-back — a read path must not
- * mutate disk. The persisted `canvas.json` is reconciled lazily the next
+ * mutate disk. Persisted topology is reconciled lazily the next
  * time the canvas is opened via `read()`.
  */
 export function listCanvasSummaries(): CanvasSummary[] {
@@ -141,7 +141,7 @@ export function listCanvasSummaries(): CanvasSummary[] {
 }
 
 /**
- * Create an empty canvas folder + `canvas.json`. The directory is
+ * Create an empty Space with structural state. The directory is
  * named after a sanitised version of `title` (auto-deduped on
  * collision); the stable canvas id only appears inside the JSON.
  *
@@ -177,7 +177,7 @@ export function createCanvas(
     createdAt: now,
     updatedAt: now,
   };
-  atomicWriteJson(path.join(dirPath, 'canvas.json'), canvas);
+  atomicWriteJson(path.join(dirPath, SPACE_JSON_FILENAME), canvas);
   registerCanvasDir(safeId, dirName, resolvedTitle);
   return canvas;
 }

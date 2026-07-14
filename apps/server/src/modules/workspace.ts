@@ -26,7 +26,7 @@
  *
  *   <workspace>/
  *     <canvasId>/
- *       canvas.json
+ *       space.json
  *       nodes/<nodeId>.md
  *       artifacts/<file>
  *       memory/preferences.md
@@ -39,6 +39,7 @@ import path from 'node:path';
 import { resetExternalNoteWatcher } from './canvas/external-watcher.js';
 import { refreshCanvasDirIndex } from './storage/canvas-dirs.js';
 import { migrateLegacyAcpSessions } from './storage/migrate-acp-sessions.js';
+import { migrateCanvasToSpace } from './storage/migrate-canvas-to-space.js';
 import { migrateLegacyChatThreads } from './storage/migrate-chat-threads.js';
 import { migrateLegacyChatTurns } from './storage/migrate-chat-turns.js';
 import { invalidateUserSkill } from '../prompt/index.js';
@@ -87,6 +88,10 @@ export function initWorkspaceFromEnv(): void {
   // Drop the cached canvas-dir index so subsequent lookups (used by
   // migrations and route handlers) reflect the new workspace.
   refreshCanvasDirIndex();
+  // Demo-stage rename: canvas.json -> space.json, .memory/canvas.md ->
+  // .memory/space.md, setting/.huabu.md -> setting/user.md. Runs first so
+  // later readers / migrations see the new names. Idempotent. DELETE-ME later.
+  migrateCanvasToSpace(_workspacePath);
   // Convert legacy pi-ai `Context` chat threads to structured turns
   // (`.turns.jsonl`); renames old `.json` to `.json.bak`. Idempotent.
   migrateLegacyChatThreads(_workspacePath);
@@ -161,6 +166,10 @@ export function setWorkspacePath(newPath: string): void {
   // — here `invalidateUserSkill` is only ever called from within
   // function bodies, after both modules have finished evaluating.
   invalidateUserSkill();
+  // Demo-stage rename: canvas.json -> space.json, .memory/canvas.md ->
+  // .memory/space.md, setting/.huabu.md -> setting/user.md. Runs first so
+  // later readers / migrations see the new names. Idempotent. DELETE-ME later.
+  migrateCanvasToSpace(_workspacePath);
   // Convert legacy pi-ai `Context` chat threads to structured turns
   // (`.turns.jsonl`); renames old `.json` to `.json.bak`. Idempotent.
   migrateLegacyChatThreads(_workspacePath);

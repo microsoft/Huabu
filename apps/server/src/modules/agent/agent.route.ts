@@ -134,17 +134,20 @@ const agentRoutes: FastifyPluginAsync = async (
       return reply.code(400).send({ message: 'threadId is required' });
     }
 
-    const { turns } = agenetes.history(
-      canvasAcpNamespace(canvasId ?? ''),
-      threadId,
-    );
+    const namespace = canvasAcpNamespace(canvasId ?? '');
+    const { turns } = agenetes.history(namespace, threadId);
     if (turns.length === 0) {
       // No folded turns → empty/new thread.
       return reply.send({ threadId, messages: [] });
     }
 
     const messages: ChatHistoryItem[] = [];
-    buildHistoryFromTurns(turns, messages);
+    const record = agenetes.record(namespace, threadId);
+    const isInternalThread =
+      (record?.spec as { kind?: unknown } | undefined)?.kind === 'internal';
+    buildHistoryFromTurns(turns, messages, {
+      recoverInternalToolNames: isInternalThread,
+    });
 
     return reply.send({ threadId, messages });
   });

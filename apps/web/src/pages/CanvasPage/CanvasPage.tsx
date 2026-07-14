@@ -1,7 +1,7 @@
 import { ArrowLeft } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 
 import { CenterArea } from '@/pages/CanvasPage/CenterArea.tsx';
 import { MainLayout } from '@/pages/CanvasPage/MainLayout.tsx';
@@ -14,6 +14,34 @@ import { useGlobalSearchHotkey } from '../../hooks/useGlobalSearchHotkey';
 import useStore, { dismissVersionConflictToast } from '../../store/canvasStore';
 import { useCanvasSyncStore } from '../../store/canvasSyncStore';
 import { useShortcutsUiStore } from '../../store/shortcutsUiStore';
+import { useToolStore } from '../../store/toolStore';
+
+type NewCanvasPlacementIntent = {
+  canvasId: string;
+  nodeType: 'note';
+};
+
+function readNewCanvasPlacementIntent(
+  state: unknown,
+  routeCanvasId: string | undefined,
+): NewCanvasPlacementIntent | null {
+  if (!routeCanvasId || typeof state !== 'object' || state === null) {
+    return null;
+  }
+
+  const placement = (state as Record<string, unknown>)['newCanvasPlacement'];
+  if (typeof placement !== 'object' || placement === null) return null;
+
+  const candidate = placement as Record<string, unknown>;
+  if (
+    candidate['canvasId'] !== routeCanvasId ||
+    candidate['nodeType'] !== 'note'
+  ) {
+    return null;
+  }
+
+  return { canvasId: routeCanvasId, nodeType: 'note' };
+}
 
 /**
  * Page component for a single canvas.
@@ -23,10 +51,12 @@ export default function CanvasPage() {
   const { t } = useTranslation();
   const { canvasId } = useParams<{ canvasId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const switchCanvas = useStore((s) => s.switchCanvas);
   const loadCanvas = useStore((s) => s.loadCanvas);
   const isLoading = useStore((s) => s.isLoading);
   const canvasNotFound = useStore((s) => s.canvasNotFound);
+  const nodeCount = useStore((s) => s.nodes.length);
   // Subscribed so the very first render can detect a mismatch between the
   // URL canvas and whatever (stale or empty) canvas is currently in the
   // store — without this we'd flash the previous canvas's `MainLayout`
@@ -34,6 +64,8 @@ export default function CanvasPage() {
   // `loadCanvas` and flips `isLoading` on.
   const storeCanvasId = useStore((s) => s.canvasId);
   const initialised = useRef(false);
+  const newCanvasPlacementRef = useRef<NewCanvasPlacementIntent | null>(null);
+  const setPendingNodeType = useToolStore((s) => s.setPendingNodeType);
   const isShortcutsOpen = useShortcutsUiStore((s) => s.isOpen);
   const openShortcuts = useShortcutsUiStore((s) => s.open);
   // Cmd+F / Ctrl+F → focus the canvas-wide search input in the
@@ -53,6 +85,25 @@ export default function CanvasPage() {
     return () => disconnectSync();
   }, [storeCanvasId, connectSync, disconnectSync]);
 
+  // A create action carries a one-shot placement intent through router state.
+  // Capture it before loading, then immediately remove it from browser history
+  // so refresh/back navigation cannot arm Note placement again.
+  useEffect(() => {
+    const placement = readNewCanvasPlacementIntent(location.state, canvasId);
+    if (!placement) {
+      if (newCanvasPlacementRef.current?.canvasId !== canvasId) {
+        newCanvasPlacementRef.current = null;
+      }
+      return;
+    }
+
+    newCanvasPlacementRef.current = placement;
+    navigate(`${location.pathname}${location.search}${location.hash}`, {
+      replace: true,
+      state: null,
+    });
+  }, [canvasId, location, navigate]);
+
   useEffect(() => {
     if (!canvasId) {
       navigate('/', { replace: true });
@@ -71,6 +122,36 @@ export default function CanvasPage() {
       void switchCanvas(canvasId);
     }
   }, [canvasId, storeCanvasId, loadCanvas, switchCanvas, navigate]);
+
+  // Only a newly created canvas may opt into the Note-first empty state.
+  // Waiting for the matching canvas to finish loading avoids treating the
+  // store's transient empty array as real content, while consuming the ref
+  // prevents deletion-to-empty or later rerenders from re-arming the tool.
+  useEffect(() => {
+    const placement = newCanvasPlacementRef.current;
+    if (
+      !placement ||
+      placement.canvasId !== canvasId ||
+      storeCanvasId !== canvasId ||
+      isLoading
+    ) {
+      return;
+    }
+
+    // Consume on the first completed matching load even if the server ever
+    // starts seeding new canvases. Otherwise deleting seeded content later
+    // could incorrectly re-arm this one-shot default.
+    newCanvasPlacementRef.current = null;
+    if (canvasNotFound || nodeCount !== 0) return;
+    setPendingNodeType(placement.nodeType);
+  }, [
+    canvasId,
+    storeCanvasId,
+    isLoading,
+    canvasNotFound,
+    nodeCount,
+    setPendingNodeType,
+  ]);
 
   // When the user leaves the canvas page (e.g. clicks the back arrow
   // to the canvas list, navigates into settings, or opens the docs),

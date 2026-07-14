@@ -273,10 +273,10 @@ interface NodeConnectionHandlesProps {
 export const NodeConnectionHandles = memo(
   ({ hovered, selected, isNotMouse }: NodeConnectionHandlesProps) => {
     const baseHandleSize = isNotMouse ? 14 : 8;
-    const dotSize = useStore((s) => {
-      const factor = Math.max(1 / s.transform[2], 1);
-      return baseHandleSize * factor;
-    });
+    const zoom = useStore((s) => s.transform[2]);
+    const inverseZoom = zoom > 0 ? 1 / zoom : 1;
+    const dotSize = baseHandleSize * inverseZoom;
+    const dotBorderWidth = 2.5 * inverseZoom;
     // While a connection drag is in progress, promote every exposed dot
     // from its idle hollow state to a filled + glowing state so the user
     // gets a strong "drop it here" affordance on valid endpoints.
@@ -347,20 +347,9 @@ export const NodeConnectionHandles = memo(
           // Dot is centred on the (collapsed) bbox; `pointer-events:
           // auto` makes the dot the actual click target.
           //
-          // State progression:
-          //   - idle (node hovered, NOT selected): hollow – surface fill
-          //     + info ring, visually light so four dots don't clutter
-          //     the card.
-          //   - selected: filled info. The selection outline (a z-998
-          //     HUD line drawn by `<SelectionOutlines />`) sits above the
-          //     node DOM and would otherwise slice a hollow dot's white
-          //     centre in two ("cut apart" look). Filling the dot with
-          //     the same `--color-info` makes that line blend into the
-          //     dot instead of bisecting it.
-          //   - connecting (drag in progress): filled info + glow, a
-          //     strong endpoint affordance mirroring the selected-edge
-          //     glow used elsewhere.
-          const solid = connecting || selected;
+          // Handles stay solid in every visible state so the selection
+          // outline cannot visually bisect them. Connection drag adds a
+          // glow to strengthen the endpoint affordance.
           const dotStyle: React.CSSProperties = {
             width: dotSize,
             height: dotSize,
@@ -368,10 +357,10 @@ export const NodeConnectionHandles = memo(
             left: '50%',
             transform: 'translate(-50%, -50%)',
             boxSizing: 'border-box',
-            borderWidth: 2.5,
+            borderWidth: dotBorderWidth,
             borderStyle: 'solid',
             borderColor: 'var(--color-info)',
-            backgroundColor: solid ? 'var(--color-info)' : 'var(--bg-surface)',
+            backgroundColor: 'var(--color-info)',
             boxShadow: connecting
               ? '0 0 3px var(--color-info-light)'
               : undefined,
@@ -384,6 +373,8 @@ export const NodeConnectionHandles = memo(
               position={h.position}
               style={{
                 ...edgeAlign,
+                minWidth: 0,
+                minHeight: 0,
                 background: 'transparent',
                 border: 'none',
               }}

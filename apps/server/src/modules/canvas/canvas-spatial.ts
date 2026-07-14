@@ -20,7 +20,7 @@
  *
  * Heavy lifting (clustering, proximity, arrangement detection) lives
  * in the zero-dep shared library `@sediment/shared/utils/spatial`.
- * This module is just an adapter: it loads `canvas.json`, normalizes
+ * This module is just an adapter: it loads persisted topology, normalizes
  * node sizes via the canvas-engine helper
  * (`@sediment/shared/canvas-engine/utils/nodeSizes.ts → getNodeSize`),
  * resolves absolute positions for nested nodes, then forwards to the
@@ -29,7 +29,7 @@
  * Boundary with `read`:
  *   - `read("nodes/<nodeId>.md")` owns content/label/summary/
  *     keywords (the markdown frontmatter).
- *   - This module owns whatever lives in `canvas.json`: position, size,
+ *   - This module owns structural fields: position, size,
  *     parent, visual style on `data.style`, edge endpoints +
  *     `data.edgeStyle`, plus all derived spatial/topological metadata.
  *   - When `includePreviews` is set, outline pulls the preview text
@@ -66,11 +66,11 @@ import type {
   SpatialNode,
 } from '@sediment/shared';
 
-// ─── Raw shapes parsed loosely from canvas.json ─────────────────────────────
+// ─── Loosely parsed topology shapes ─────────────────────────────────────────
 //
 // Nodes are typed as the canonical {@link CanvasNode} (= ReactFlow
 // `Node`); we narrow `data` field-by-field at the read site because
-// `canvas.json` stores them as generic JSON objects. Edges still need
+// Persisted edges are generic JSON objects and still need
 // a narrow shim below because xyflow's `Edge['data']` does not know
 // about our {@link EdgeStyle} sub-object — the canonical edge style
 // lives in `@sediment/shared`.
@@ -98,7 +98,7 @@ interface RawEdge {
 
 /**
  * Walk the parent chain to express the node's position in absolute
- * canvas coordinates. `canvas.json` stores positions relative to the
+ * Space coordinates. Persisted positions are relative to the
  * parent frame; agents reasoning about proximity want absolutes.
  */
 function resolveAbsolutePosition(
@@ -208,7 +208,6 @@ export interface CanvasOutlineCluster {
 }
 
 export interface CanvasOutline {
-  canvasId: string;
   version: number;
   bbox: { x: number; y: number; width: number; height: number } | null;
   nodes: CanvasOutlineNode[];
@@ -252,7 +251,7 @@ export function buildCanvasOutline(
     bbox = { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
   }
 
-  // Resolve display labels from the sidecar (canvas.json never carries
+  // Resolve display labels from the sidecar (topology never carries
   // them), memoized so a frame referenced as many nodes' parent is read once.
   const labelMemo = new Map<string, string | undefined>();
   const memoLabel = (id: string): string | undefined => {
@@ -320,7 +319,6 @@ export function buildCanvasOutline(
   });
 
   return {
-    canvasId,
     version: canvas.version,
     bbox,
     nodes,
@@ -421,7 +419,7 @@ export function inspectNodes(
 
   const bundle = buildSpatialBundle(canvas);
 
-  // Display labels come from the sidecar (canvas.json never carries them);
+  // Display labels come from the sidecar (topology never carries them);
   // memoize so the `labelPattern` filter and the result map read each once.
   const labelMemo = new Map<string, string | undefined>();
   const memoLabel = (id: string): string | undefined => {

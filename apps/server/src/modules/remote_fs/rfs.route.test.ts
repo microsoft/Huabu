@@ -31,9 +31,9 @@ async function buildApp() {
 }
 
 /**
- * Seed a note node (canvas.json entry + `nodes/<safeLabel>.md` body) and
+ * Seed a note node (topology entry + `nodes/<safeLabel>.md` body) and
  * return its download path. Re-calling with the same id/label overwrites the
- * body (canvas.json strips content, so the body only lives in the sidecar).
+ * body (topology strips content, so the body only lives in the sidecar).
  */
 function seedNote(
   canvasId: string,
@@ -73,7 +73,7 @@ describe('GET /api/rfs/:canvasId/skill', () => {
       const res = await app.inject({ method: 'GET', url: '/rfs/c1/skill' });
       expect(res.statusCode).toBe(200);
       expect(res.headers['content-type']).toMatch(/text\/markdown/);
-      expect(res.body).toMatch(/Accessing this Huabu canvas/i);
+      expect(res.body).toMatch(/Accessing this Huabu Space/i);
     } finally {
       await app.close();
     }

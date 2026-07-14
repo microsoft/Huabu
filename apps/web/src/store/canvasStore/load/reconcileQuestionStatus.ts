@@ -8,10 +8,10 @@
  * ## Why this exists
  *
  * A question node's `status` (`idle | pending | running | done | error`)
- * is persisted in `canvas.json` via the structure PUT, which uses
+ * is persisted as structural state via the structure PUT, which uses
  * optimistic concurrency control keyed on `canvas.version`. When the
  * agent edits the canvas *during* a question's conversation (emitting
- * `canvas_commands`), the server `version` advances; if the client's
+ * `space_commands`), the server `version` advances; if the client's
  * local version then drifts, the follow-up `status: 'done'` autosave PUT
  * 409s and is silently dropped (see the guard in `saveCanvas` /
  * `useQuestionRunner`). The node is left persisted in a stale

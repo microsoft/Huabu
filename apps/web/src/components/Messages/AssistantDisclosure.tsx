@@ -15,7 +15,7 @@
  *
  * Consumers stay declarative: pass `icon`, `title`, optional `trailing`
  * (extra controls rendered after the chevron — used by
- * `CanvasCommandCard`'s revert/keep buttons), and `children` for the
+ * `SpaceCommandCard`'s revert/keep buttons), and `children` for the
  * expanded body. Body styling is configurable via `bodyClassName` so
  * the few cards that want a left rule / different indent can opt in
  * without forking the shell.

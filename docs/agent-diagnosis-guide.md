@@ -3,7 +3,7 @@
 Status: Living document
 
 > How to figure out **why an agent is slow or not behaving as expected** on a
-> Huabu canvas, and how to turn that into fix-ready material. Covers both:
+> Huabu Space, and how to turn that into fix-ready material. Covers both:
 >
 > - **Built-in Huabu agents** — `operate` / `ask` / `sketch` / memory, run
 >   in-process by Sediment.
@@ -12,7 +12,7 @@ Status: Living document
 >
 > Scope is how agents are prompted and how their tool calls behave (system
 > prompts, the canvas skill / tool descriptions, and downstream effects like
-> `canvas_commands` → preprocessing). Out of scope: pure UI and non-agent server
+> `space_commands` → preprocessing). Out of scope: pure UI and non-agent server
 > issues.
 >
 > **Tracking lives in GitHub issues, not here.** This doc is only the playbook

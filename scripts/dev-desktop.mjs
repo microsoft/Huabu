@@ -4,6 +4,7 @@
  *
  * What you get when running `pnpm dev:desktop`:
  *   - `apps/web/src/**`                       → Vite HMR (instant)
+ *   - `apps/docs/src/**`                      → handbook Vite HMR
  *   - `apps/server/src/**`                    → `tsx watch` auto-restart
  *   - `packages/shared/src/**`                → propagates to BOTH
  *     (web reads source through Vite; server picks it up via `tsx watch`
@@ -19,9 +20,11 @@
  *   2. Spawn `pnpm dev:server` (`tsx watch src/server.ts`). This is a
  *      long-running Node process bound on SERVER_PORT (default 3001),
  *      and it auto-restarts on changes to any imported file.
- *   3. Spawn `pnpm dev:web` (Vite) for the web HMR side.
- *   4. Wait for both ports to accept TCP connections.
- *   5. Launch Electron with two env vars wired in:
+ *   3. Spawn `pnpm dev:docs` (Vite) for the standalone handbook.
+ *   4. Spawn `pnpm dev:web` (Vite) for the web HMR side, injecting the
+ *      handbook server's actual URL through VITE_HANDBOOK_URL.
+ *   5. Wait for all three ports to accept TCP connections.
+ *   6. Launch Electron with two env vars wired in:
  *        WEB_DEV_SERVER_URL  → tells main.ts to loadURL the Vite server
  *        EXTERNAL_SERVER_URL → tells main.ts to SKIP forking the bundled
  *                              server and use the external one instead
@@ -39,7 +42,8 @@
  *   - If you change `apps/desktop/src/**`, re-run this script. There is
  *     no clean way to hot-swap Electron's main process.
  *
- * Port resolution mirrors `apps/web/vite.config.ts` and `scripts/dev.mjs`:
+ * Server/web port resolution mirrors `apps/web/vite.config.ts` and
+ * `scripts/dev.mjs`; docs additionally reads DOCS_PORT:
  *   process.env  >  apps/web/.env  >  <repo-root>/.env  >  defaults
  */
 import { spawn, spawnSync } from 'node:child_process';
@@ -75,6 +79,7 @@ const env = loadEnv(
 const HOST = '127.0.0.1';
 const SERVER_PORT = Number.parseInt(env.SERVER_PORT || env.PORT || '3001', 10);
 const VITE_PORT = Number.parseInt(env.VITE_PORT || env.WEB_PORT || '5173', 10);
+const DOCS_PORT = Number.parseInt(env.DOCS_PORT || '5174', 10);
 const PORT_SCAN_RANGE = 50;
 // Cold starts (first tsx/esbuild compile, Windows Defender scanning a fresh
 // node_modules, or a loaded machine) can blow past a tight window, so the
@@ -141,8 +146,9 @@ async function isPortFree(port) {
  * holding 3001 (or 5173) doesn't crash the whole orchestrator \u2014 we
  * just slide to 3002 / 5174 and propagate that everywhere.
  */
-async function findAvailablePort(startPort) {
+async function findAvailablePort(startPort, excludedPorts = new Set()) {
   for (let p = startPort; p < startPort + PORT_SCAN_RANGE; p += 1) {
+    if (excludedPorts.has(p)) continue;
     if (await isPortFree(p)) return p;
   }
   throw new Error(
@@ -348,6 +354,8 @@ function spawnLongRunning(filter, label, extraEnv = {}) {
 /* ─── main ────────────────────────────────────────────────────────── */
 
 async function main() {
+  const serverDataDir = path.join(repoRoot, 'apps/server/data');
+
   // 1. Prime Electron's main/preload output. tsc is fast on incremental
   //    builds; the only reason to run it every time is that changes to
   //    these files require re-running the orchestrator anyway, so a
@@ -376,6 +384,15 @@ async function main() {
       `[dev-desktop] Vite port ${VITE_PORT} is in use; using ${vitePort} instead.`,
     );
   }
+  const docsPort = await findAvailablePort(
+    DOCS_PORT,
+    new Set([serverPort, vitePort]),
+  );
+  if (docsPort !== DOCS_PORT) {
+    console.warn(
+      `[dev-desktop] Docs port ${DOCS_PORT} is in use or reserved; using ${docsPort} instead.`,
+    );
+  }
 
   // 2. Start the watch-mode server (tsx watch). This auto-restarts on
   //    changes to apps/server/src/** AND packages/shared/src/** because
@@ -387,9 +404,17 @@ async function main() {
   spawnLongRunning('@sediment/server', 'server', {
     SERVER_PORT: String(serverPort),
     HUABU_BIND_HOST: HOST,
+    HUABU_DATA_DIR: serverDataDir,
   });
 
-  // 3. Start Vite in parallel. SPA fetches to `/api/*` will be proxied
+  // 3. Start the standalone handbook on its resolved port. The docs Vite
+  //    config uses strictPort, so this value remains authoritative.
+  console.log(`[dev-desktop] Starting @sediment/docs (Vite) on :${docsPort} …`);
+  spawnLongRunning('@sediment/docs', 'docs', {
+    DOCS_PORT: String(docsPort),
+  });
+
+  // 4. Start Vite in parallel. SPA fetches to `/api/*` will be proxied
   //    by Vite to SERVER_PORT, so both watchers must live on the same
   //    port pair the rest of the dev tooling expects. We pass the
   //    resolved ports through env so vite.config.ts's proxy target
@@ -401,14 +426,16 @@ async function main() {
     SERVER_PORT: String(serverPort),
     WEB_PORT: String(vitePort),
     VITE_PORT: String(vitePort),
+    VITE_HANDBOOK_URL: `http://${HOST}:${docsPort}/docs/`,
   });
 
-  // 4. Wait for both to actually accept TCP connections before launching
+  // 5. Wait for all services to accept TCP connections before launching
   //    Electron, so the first page load never sees a 502/ECONNREFUSED.
   try {
     await Promise.all([
       waitForPort(HOST, serverPort, READY_TIMEOUT_MS),
       waitForPort(HOST, vitePort, READY_TIMEOUT_MS),
+      waitForPort(HOST, docsPort, READY_TIMEOUT_MS),
     ]);
   } catch (err) {
     console.error(`[dev-desktop] ${err.message}`);
@@ -416,16 +443,17 @@ async function main() {
     return;
   }
   console.log(
-    `[dev-desktop] server up at http://${HOST}:${serverPort}, vite up at http://${HOST}:${vitePort}`,
+    `[dev-desktop] server up at http://${HOST}:${serverPort}, vite up at http://${HOST}:${vitePort}, docs up at http://${HOST}:${docsPort}/docs/`,
   );
 
-  // 5. Launch Electron, telling main.ts to (a) load the Vite URL into
+  // 6. Launch Electron, telling main.ts to (a) load the Vite URL into
   //    the BrowserWindow and (b) NOT fork its own server — point at the
   //    orchestrated one via EXTERNAL_SERVER_URL.
   const electronEnv = {
     ...process.env,
     WEB_DEV_SERVER_URL: `http://${HOST}:${vitePort}`,
     EXTERNAL_SERVER_URL: `http://${HOST}:${serverPort}`,
+    HUABU_DATA_DIR: serverDataDir,
   };
   // VS Code's task terminal sometimes leaks this and it would make
   // `electron .` run as a plain Node process instead of an Electron app.

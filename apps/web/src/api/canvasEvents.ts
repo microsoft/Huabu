@@ -39,7 +39,7 @@ export async function postCanvasEvents(
     json: body,
     keepalive: opts?.keepalive ?? false,
     signal: opts?.signal,
-    fallbackMessage: 'Failed to upload canvas events',
+    fallbackMessage: 'Failed to upload Space events',
   });
 }
 
@@ -59,7 +59,7 @@ export async function getCanvasEvents(
     ? `${routes.canvasEvents(canvasId)}?${qs}`
     : routes.canvasEvents(canvasId);
   const response = await apiFetch<GetCanvasEventsResponse>(url, {
-    fallbackMessage: 'Failed to read canvas events',
+    fallbackMessage: 'Failed to read Space events',
   });
   return response.events;
 }

@@ -1,3 +1,4 @@
+import { useInternalNode, useStore, useViewport } from '@xyflow/react';
 import clsx from 'clsx';
 import { Columns3, Move, Rows3, Ungroup } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -20,6 +21,26 @@ import type { CanvasFrameNodeData } from '@/components/Nodes/types.ts';
 import type { Node, NodeProps } from '@xyflow/react';
 
 export type FrameNodeType = Node<CanvasFrameNodeData, 'frame'>;
+
+const LABEL_MIN_VERTICAL_GAP = 22;
+const LABEL_COLLISION_HYSTERESIS = 4;
+const LABEL_MIN_SCREEN_WIDTH = 48;
+
+function shouldShowNestedLabel(
+  ancestorGap: number | null,
+  wasVisible: boolean | null,
+): boolean {
+  if (ancestorGap === null) return true;
+
+  const threshold =
+    wasVisible === null
+      ? LABEL_MIN_VERTICAL_GAP
+      : wasVisible
+        ? LABEL_MIN_VERTICAL_GAP - LABEL_COLLISION_HYSTERESIS
+        : LABEL_MIN_VERTICAL_GAP + LABEL_COLLISION_HYSTERESIS;
+
+  return Math.abs(ancestorGap) >= threshold;
+}
 
 // ── Toolbar metadata ───────────────────────────────────────────────────
 
@@ -99,6 +120,76 @@ export const FrameNode = memo(
       FRAME_GRID_MAX_COUNT,
       Math.max(FRAME_GRID_MIN_COUNT, childCount || FRAME_GRID_MIN_COUNT),
     );
+
+    const internalNode = useInternalNode(id);
+    const { zoom } = useViewport();
+    const nearestFrameAncestorY = useStore((state) => {
+      let current = state.nodeLookup.get(id);
+      const visited = new Set<string>([id]);
+      while (current?.parentId && !visited.has(current.parentId)) {
+        visited.add(current.parentId);
+        const parent = state.nodeLookup.get(current.parentId);
+        if (!parent) return null;
+        if (parent.type === 'frame') {
+          return parent.internals.positionAbsolute?.y ?? null;
+        }
+        current = parent;
+      }
+      return null;
+    });
+    // Only a container frame (with at least one direct child) can hold a
+    // colliding selected descendant frame. A frame with zero children has an
+    // empty subtree, so it can skip the whole-graph scan entirely — this
+    // keeps the O(nodes) sweep off the vast majority of (leaf) frames and
+    // leaves it running only for the few frames that actually nest.
+    const isContainerFrame = childCount > 0;
+    const selectedDescendantFrameY = useStore((state) => {
+      if (!isContainerFrame) return null;
+      for (const candidate of state.nodeLookup.values()) {
+        if (
+          candidate.id === id ||
+          candidate.type !== 'frame' ||
+          !candidate.selected
+        ) {
+          continue;
+        }
+
+        let current = candidate;
+        const visited = new Set<string>([candidate.id]);
+        while (current.parentId && !visited.has(current.parentId)) {
+          visited.add(current.parentId);
+          if (current.parentId === id) {
+            return candidate.internals.positionAbsolute?.y ?? null;
+          }
+          const parent = state.nodeLookup.get(current.parentId);
+          if (!parent) break;
+          current = parent;
+        }
+      }
+      return null;
+    });
+
+    const absY = internalNode?.internals.positionAbsolute?.y ?? 0;
+    const styleWidth = internalNode?.style?.width;
+    const nodeWidth =
+      (typeof styleWidth === 'number' ? styleWidth : undefined) ??
+      internalNode?.measured?.width ??
+      LABEL_MIN_SCREEN_WIDTH;
+    const ancestorGap =
+      nearestFrameAncestorY === null
+        ? null
+        : (absY - nearestFrameAncestorY) * zoom;
+    const previousLabelVisibilityRef = useRef<boolean | null>(null);
+    const collisionVisible = shouldShowNestedLabel(
+      ancestorGap,
+      previousLabelVisibilityRef.current,
+    );
+    previousLabelVisibilityRef.current = collisionVisible;
+    const selectedDescendantCollides =
+      selectedDescendantFrameY !== null &&
+      !shouldShowNestedLabel((selectedDescendantFrameY - absY) * zoom, null);
+    const labelSemanticallyVisible =
+      collisionVisible && !selectedDescendantCollides;
 
     const commitCount = () => {
       const trimmed = countDraft.trim();
@@ -288,8 +379,8 @@ export const FrameNode = memo(
 
     // Rendered in the zoom-invariant overlay so the label keeps a fixed screen size
     const labelOverlay = (
-      <div className="relative inline-grid items-center">
-        <span className="invisible col-start-1 row-start-1 px-1.5 text-xs font-medium whitespace-pre">
+      <div className="relative inline-grid max-w-full min-w-0 items-center">
+        <span className="invisible col-start-1 row-start-1 min-w-0 truncate px-1.5 text-xs font-medium whitespace-pre">
           {draftLabel || ' '}
         </span>
 
@@ -345,6 +436,9 @@ export const FrameNode = memo(
         actions={FrameActions}
         overlayContent={labelOverlay}
         overlayOffsetY={-24}
+        overlayVisible={labelSemanticallyVisible}
+        overlayInteractionPriority={isEditingLabel ? 3 : selected ? 2 : 0}
+        overlayMaxWidth={Math.max(LABEL_MIN_SCREEN_WIDTH, nodeWidth * zoom)}
         keepAspectRatio={false}
         // Resize is enabled for every layout mode and shares one
         // content-driven path: dragging the frame scales every direct

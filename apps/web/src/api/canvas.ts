@@ -95,7 +95,7 @@ function isNodeDuplicateResponse(value: unknown): value is {
  */
 export async function listCanvases(): Promise<ListCanvasesResponse> {
   return apiFetch<ListCanvasesResponse>(routes.canvasList, {
-    fallbackMessage: 'Failed to list canvases',
+    fallbackMessage: 'Failed to list Spaces',
   });
 }
 
@@ -108,7 +108,7 @@ export async function createCanvas(
   return apiFetch<CreateCanvasResponse>(routes.canvasList, {
     method: 'POST',
     json: request,
-    fallbackMessage: 'Failed to create canvas',
+    fallbackMessage: 'Failed to create Space',
   });
 }
 
@@ -117,7 +117,7 @@ export async function getCanvas(
 ): Promise<GetCanvasResponse | null> {
   try {
     return await apiFetch<GetCanvasResponse>(routes.canvas(canvasId), {
-      fallbackMessage: 'Failed to get canvas',
+      fallbackMessage: 'Failed to get Space',
     });
   } catch (error) {
     if (error instanceof ApiError && error.status === 404) return null;
@@ -153,7 +153,7 @@ export async function putCanvas(
     }
     const errBody =
       body && typeof body === 'object' ? (body as Partial<ApiErrorBody>) : {};
-    throw new ApiError(response.status, errBody, 'Failed to save canvas');
+    throw new ApiError(response.status, errBody, 'Failed to save Space');
   }
 
   return (await response.json()) as PutCanvasResponse;
@@ -174,7 +174,7 @@ export async function deleteNode(
 /**
  * Persist a single node's markdown sidecar
  * (`nodes/<safe(label)>.md`). Unlike `putCanvas`, this endpoint never
- * touches `canvas.json` and therefore does not participate in the
+ * touches structural state and therefore does not participate in the
  * canvas-level optimistic-concurrency `version` counter — concurrent
  * editor edits and viewport drags never collide on it.
  *
@@ -277,7 +277,7 @@ export async function importCanvas(file: File): Promise<ImportCanvasResponse> {
   return apiFetch<ImportCanvasResponse>(routes.canvasImport, {
     method: 'POST',
     formData,
-    fallbackMessage: 'Failed to import canvas',
+    fallbackMessage: 'Failed to import Space',
   });
 }
 
@@ -289,7 +289,7 @@ export async function deleteCanvasById(
 ): Promise<DeleteCanvasResponse> {
   return apiFetch<DeleteCanvasResponse>(routes.canvas(canvasId), {
     method: 'DELETE',
-    fallbackMessage: 'Failed to delete canvas',
+    fallbackMessage: 'Failed to delete Space',
   });
 }
 

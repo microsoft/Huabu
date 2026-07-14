@@ -47,9 +47,9 @@ describe('renderTemplate {{include}}', () => {
     // canvas SKILL is the motivating use case — keep this assertion
     // anchored to its real content so an accidental SKILL rewrite is
     // caught by this test, not by silent runtime breakage.
-    const out = renderBody('# Header\n\n{{include:skills/canvas/SKILL.md}}');
+    const out = renderBody('# Header\n\n{{include:skills/space/SKILL.md}}');
     expect(out).toContain('# Header');
-    expect(out).toContain('# Canvas');
+    expect(out).toContain('# Space');
     expect(out).toContain('## Tool decision matrix');
   });
 
@@ -88,7 +88,7 @@ describe('renderTemplate {{include}} (nested includes forbidden)', () => {
     mkdirSync(scratchDir, { recursive: true });
     writeFileSync(
       path.join(PROMPT_ROOT, scratchRel),
-      '# Inner\n\n{{include:skills/canvas/SKILL.md}}\n',
+      '# Inner\n\n{{include:skills/space/SKILL.md}}\n',
       'utf8',
     );
   });

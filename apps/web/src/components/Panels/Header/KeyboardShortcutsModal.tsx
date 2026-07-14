@@ -2,7 +2,10 @@ import { X } from 'lucide-react';
 import { Fragment, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { getKeyboardShortcutSections } from '../../../config/shortcuts';
+import {
+  formatShortcutById,
+  getKeyboardShortcutSections,
+} from '../../../config/shortcuts';
 import { isMac, shortcutTokens } from '../../../utils/platform';
 import { Button } from '../../Common/Button';
 import { Modal } from '../../Common/Modal';
@@ -38,7 +41,7 @@ export function KeyboardShortcutsModal({
           variant="ghost"
           iconOnly
           onClick={onClose}
-          title={t('shortcuts.closeTitle')}
+          title={`${t('actions.close')} (${formatShortcutById('help.close')})`}
           aria-label={t('shortcuts.closeAria')}
         >
           <X />

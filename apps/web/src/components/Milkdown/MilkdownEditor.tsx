@@ -159,7 +159,7 @@ export function MilkdownEditor(props: MilkdownEditorProps): JSX.Element {
         },
         uploadImage: async (file) => {
           const id = canvasIdRef.current;
-          if (!id) throw new Error('No canvas bound for image upload');
+          if (!id) throw new Error('No Space bound for image upload');
           return uploadImageApi(file, id);
         },
       });

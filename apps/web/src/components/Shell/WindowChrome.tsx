@@ -6,6 +6,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { SettingsPopover } from '@/components/Settings/SettingsPopover';
 
 import { APP_NAME } from '../../config/app';
+import { openUserHandbook } from '../../config/handbook';
 import { getElectronBridge } from '../../hooks/useElectron';
 import useCanvasStore from '../../store/canvasStore';
 import {
@@ -109,6 +110,8 @@ export function WindowChrome() {
   //   - Anywhere else (setup, playgrounds, docs): fall back to APP_NAME
   //     so the bar never looks empty.
   const onCanvasListRoute = location.pathname === '/';
+  const onWorkspaceSetupRoute = location.pathname === '/setup';
+  const showAppMenu = onCanvasListRoute || onWorkspaceSetupRoute;
   const onCanvasRoute = location.pathname.startsWith('/canvas/');
   const showWorkspaceSwitcher = onCanvasListRoute && !!workspaceLabel;
   const centerLabel = showWorkspaceSwitcher
@@ -149,14 +152,13 @@ export function WindowChrome() {
         } as React.CSSProperties
       }
     >
-      {/* Left: home / back-to-canvas-list. Wrapped in our own Tooltip
-          (placement="bottom") instead of relying on the browser-native
-          `title` attribute so it matches the rest of the title bar and
-          renders below the trigger — there is no room above. Box and
-          icon sizes mirror the md `<Button iconOnly>` used on the right
-          (28px hit area, 16px icon) so all three controls sit on the
-          same baseline. While the macOS fullscreen animation is
-          running the wrapper is hidden instantly (no transition out)
+      {/* Left: AppMenu on workspace-level pages; Home elsewhere. The Home
+          link uses our own Tooltip (placement="bottom") instead of the
+          browser-native `title` attribute so it matches the rest of the
+          title bar and renders below the trigger. Control sizes align with
+          the md `<Button iconOnly>` used on the right. While the macOS
+          fullscreen animation is running the wrapper is hidden instantly
+          (no transition out)
           and fades back in only once the window dimensions settle —
           see the `transitioning` effect above. */}
       <div
@@ -174,9 +176,8 @@ export function WindowChrome() {
           } as React.CSSProperties
         }
       >
-        {onCanvasListRoute ? (
-          // On the canvas list page the "home" button is a no-op (you're
-          // already home), so the left slot hosts the app menu instead.
+        {showAppMenu ? (
+          // On workspace-level pages, the left slot hosts the app menu.
           // Inside a canvas the House button below keeps its back-to-list
           // navigation and the app menu lives in the canvas header.
           //
@@ -281,7 +282,7 @@ export function WindowChrome() {
           title={t('navigation.userHandbook')}
           tooltipPlacement="bottom"
           aria-label={t('navigation.openUserHandbook')}
-          onClick={() => window.open('/docs', '_blank', 'noopener')}
+          onClick={openUserHandbook}
         >
           <BookOpen />
         </Button>

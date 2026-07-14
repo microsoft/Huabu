@@ -164,7 +164,7 @@ export function fingerprintNodeFields(
  * revision and forces a needless re-read.
  *
  * IMPORTANT: `data.content` must be **hydrated** (the canonical on-disk
- * `nodes/<label>.md` body). `canvas.json` deliberately strips `content` from
+ * `nodes/<label>.md` body). Persisted topology deliberately strips `content` from
  * node data (`stripNodesForCanvas`), so hashing a node straight off
  * `getCanvasStore().read()` state would see an empty body and yield a constant
  * rev. Callers hydrate via `store.readNode(id).content` first (the RFS lookup,

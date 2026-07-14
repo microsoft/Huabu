@@ -5,7 +5,7 @@
  * Drives the DeepV backend end-to-end from a single natural-language intent and
  * harvests the results (outline, per-page PNG slides, final .pptx) into an
  * output directory. Designed to be called by the deepv-slides-maker agent team,
- * which then writes the harvested materials back onto the Huabu canvas.
+ * which then writes the harvested materials back onto the Huabu Space.
  *
  * Usage:
  *   node deepv.mjs "<intent>" [outputDir] [options]

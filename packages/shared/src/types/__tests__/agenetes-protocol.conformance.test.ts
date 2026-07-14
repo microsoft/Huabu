@@ -301,7 +301,7 @@ describe('WorkloadSpec + request conformance', () => {
         storage: { root: '/data/history/canvas_1' },
       },
       threadId: 'thr_1',
-      spec: { agentId: 'ask', tools: ['read', 'canvas_commands'] },
+      spec: { agentId: 'ask', tools: ['read', 'space_commands'] },
       request: { type: 'text', content: 'summarise this canvas' },
     };
     expect(workloadSpecSchema.safeParse(spec).success).toBe(true);

@@ -1,10 +1,10 @@
 # HackMD Publisher
 
-An agent that syncs Huabu canvas nodes to [HackMD](https://hackmd.io).
+An agent that syncs Huabu Space nodes to [HackMD](https://hackmd.io).
 
 ## What It Does
 
-Select nodes on your canvas, tell the agent "publish these to HackMD", and it will:
+Select nodes in your Space, tell the agent "publish these to HackMD", and it will:
 
 1. Read each node's content via Huabu Reachback
 2. Understand the spatial structure (frames → sections, order from edges)

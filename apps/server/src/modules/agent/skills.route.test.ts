@@ -92,10 +92,10 @@ describe('GET /api/skills — listing', () => {
       const body = res.json<InjectListResponse>();
       const ids = body.skills.map((s) => s.id);
       // Catalogue-only system skills (the default for shipped
-      // skills like `canvas` / `sketch-gestures`) must NOT appear
+      // skills like `space` / `sketch-gestures`) must NOT appear
       // in the user-invokable menu — they live in the agent's
       // `{{skillCatalogue}}` only.
-      expect(ids).not.toContain('canvas');
+      expect(ids).not.toContain('space');
       expect(ids).not.toContain('sketch-gestures');
       // User skills must show up.
       expect(ids).toContain('user-only-a');
@@ -148,16 +148,16 @@ describe('GET /api/skills — listing', () => {
 
   it('promotes a user-extension of a system skill to `merged` and lists it', async () => {
     // The skill loader merges system + user skills that share the same
-    // id (see `mergeSkill` in loader.ts). `canvas` is shipped as a
+    // id (see `mergeSkill` in loader.ts). `space` is shipped as a
     // system skill, so authoring a user-side override produces a
     // `merged` entry that the route MUST surface.
-    writeUserSkill('canvas', ['ask', 'operate'], 'My custom canvas notes');
+    writeUserSkill('space', ['ask', 'operate'], 'My custom Space notes');
 
     const app = await buildApp();
     try {
       const res = await app.inject({ method: 'GET', url: '/skills/' });
       const body = res.json<InjectListResponse>();
-      const entry = body.skills.find((s) => s.id === 'canvas');
+      const entry = body.skills.find((s) => s.id === 'space');
       expect(entry).toBeDefined();
       expect(entry?.source).toBe('merged');
     } finally {

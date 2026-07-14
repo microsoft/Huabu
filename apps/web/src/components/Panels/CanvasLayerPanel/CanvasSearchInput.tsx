@@ -34,6 +34,7 @@ import { Loader2, Search, X } from 'lucide-react';
 import { useCallback, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { formatShortcutById } from '../../../config/shortcuts';
 import useCanvasStore from '../../../store/canvasStore';
 import { usePanelStore } from '../../../store/panelStore';
 import { useSearchStore } from '../../../store/searchStore';
@@ -196,7 +197,7 @@ export const CanvasSearchInput = ({
           variant="ghost"
           iconOnly
           size="sm"
-          title={t('search.clearEsc')}
+          title={`${t('search.clear')} (${formatShortcutById('search.close')})`}
           onClick={handleClear}
           className="p-0.5!"
         >

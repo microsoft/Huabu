@@ -4,7 +4,7 @@
  * ONE rule: a node is carried into the prompt with whatever authored info
  * the caller already has; anything missing (label / body / summary / src)
  * is filled from the node's on-disk `.md` sidecar — the CANONICAL source.
- * `canvas.json` never persists `data.label` and strips note bodies, so a
+ * Topology never persists `data.label` or note bodies, so a
  * caller that only has the raw canvas node hands in almost nothing and the
  * sidecar supplies the rest. This is the single place assembly lives, so
  * every server-side path (selection / neighbourhood / outline / inspect)

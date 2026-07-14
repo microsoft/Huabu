@@ -79,7 +79,7 @@ export interface ArtifactRecord {
   mimeType: string | null;
 }
 
-/** On-disk shape of `<canvasDir>/canvas.json`. */
+/** On-disk shape of `<canvasDir>/space.json`. */
 export interface CanvasFile {
   canvasId: string;
   title: string | null;
@@ -351,10 +351,10 @@ export class CanvasStore {
   // ── Canvas structure ─────────────────────────────────────────────────────
 
   /**
-   * Read this canvas's `canvas.json`. When the on-disk directory name
+   * Read this Space's `space.json`. When the on-disk directory name
    * cannot be derived from the persisted title via {@link toSafeFilename}
    * we treat that as a Finder-side rename and adopt `dirName` as the new
-   * title (persisted back into `canvas.json`). The common case where
+   * title (persisted back into `space.json`). The common case where
    * `dirName === safe(title)` (e.g. title contains `?` / `:` / `/` that
    * was sanitised at create time) is left alone — overwriting there
    * would silently strip the user's typed characters from the title.
@@ -920,7 +920,7 @@ export class CanvasStore {
    * out with a few immediate retries before we give up. The in-memory
    * NameIndex is left untouched on failure so a retry sees the same
    * state. Callers must let the error bubble — silently swallowing it
-   * would leave the canvas.json without a reference to the node while its
+   * would leave structural state without a reference to the node while its
    * `.md` stays on disk as a permanent orphan.
    */
   deleteNode(nodeId: string): 'deleted' | 'absent' {
@@ -1218,10 +1218,8 @@ export class CanvasStore {
 
   // ── Preferences (removed) ────────────────────────────────────────────────
   //
-  // Long-term user memory now lives at the workspace level
-  // (`<workspace>/setting/.huabu.md`) and canvas-scoped canvas memory
-  // lives at `<canvasDir>/.memory/canvas.md`. Both are owned by the
-  // memory sub-agent, not the per-canvas store. See
+  // User and Space memory are owned by the memory sub-agent, not the
+  // per-canvas store. See
   // `modules/agent/memory/`.
 
   // ── Lifecycle ────────────────────────────────────────────────────────────

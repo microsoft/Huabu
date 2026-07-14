@@ -72,7 +72,7 @@ const VIRTUAL_PREFIX: ReadonlyArray<readonly [string, string]> = [
 /**
  * Rewrite a request path's virtual prefix (`artifacts/`, `upload/`) to its
  * hidden on-disk counterpart. Idempotent: an already-physical `.upload/…`
- * path, `nodes/…`, `canvas.json`, etc. pass through unchanged.
+ * path, `nodes/…`, `space.json`, etc. pass through unchanged.
  */
 export function toPhysicalRel(requestRel: string): string {
   const norm = requestRel.replace(/^\/+/, '');
@@ -268,10 +268,10 @@ export interface NodeMeta {
 }
 
 /**
- * Lazy single-canvas node lookup. Reads `canvas.json` at most once,
+ * Lazy single-Space node lookup. Reads `space.json` at most once,
  * returning a closure that maps a canvas-relative path to its
  * `NodeMeta` if it matches `nodes/<filename>.md` and can be resolved via
- * frontmatter `id:` plus canvas.json metadata.
+ * frontmatter `id:` plus `space.json` metadata.
  * Returns `null` otherwise.
  */
 export function makeNodeLookup(

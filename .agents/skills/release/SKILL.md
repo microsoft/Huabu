@@ -24,12 +24,12 @@ This skill pushes a tag that publishes a public GitHub Release. **Do not run `ta
 
 ## Commands
 
-| Command | What it does |
-| --- | --- |
-| `status` | Current version, latest tag, branch, tree state. Read-only. |
-| `bump <version>` | Write `<version>` into `apps/desktop/package.json`. Local only, no commit. |
-| `tag-push <version> --yes` | Commit `Release vX.Y.Z`, annotated tag `vX.Y.Z`, push branch + tag. |
-| `run <version> --yes` | The one release command: `bump` → `tag-push`. |
+| Command                    | What it does                                                               |
+| -------------------------- | -------------------------------------------------------------------------- |
+| `status`                   | Current version, latest tag, branch, tree state. Read-only.                |
+| `bump <version>`           | Write `<version>` into `apps/desktop/package.json`. Local only, no commit. |
+| `tag-push <version> --yes` | Commit `Release vX.Y.Z`, annotated tag `vX.Y.Z`, push branch + tag.        |
+| `run <version> --yes`      | The one release command: `bump` → `tag-push`.                              |
 
 Options: `--dry-run` (print without running), `--yes` (confirm the push), `-m/--message <text>` (annotated-tag message; default `Release vX.Y.Z`).
 

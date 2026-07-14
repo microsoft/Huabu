@@ -4,7 +4,7 @@
  * `parts`/`segments` array) on the left and the right pane renders it
  * through the real {@link MessageList} dispatch — the same renderer the
  * live chat panel uses — so every part variant (text, thinking, plan,
- * tool: generic / agent_tool / canvas_commands / web_search /
+ * tool: generic / agent_tool / space_commands / web_search /
  * image_generation / snapshot_nodes) is exercised exactly as it would
  * appear in production.
  *

@@ -8,14 +8,13 @@ import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 import { useLLMStore } from '@/store/llmStore';
 
 import { AcpSettings } from './sections/AcpSettings';
-import { CanvasSettings } from './sections/CanvasSettings';
 import { GeneralSettings } from './sections/GeneralSettings';
 import { ImageProviderSettings } from './sections/ImageProviderSettings';
 import { IntegrationsSettings } from './sections/IntegrationsSettings';
 import { LLMSettings } from './sections/LLMSettings';
 
 /** Identifiers for the settings tabs (left-nav order). */
-type SettingsTab = 'general' | 'huabuAgent' | 'agents' | 'canvas';
+type SettingsTab = 'general' | 'huabuAgent' | 'agents';
 
 interface TabDef {
   id: SettingsTab;
@@ -23,15 +22,13 @@ interface TabDef {
   labelKey:
     | 'settings.general'
     | 'settings.huabuAgent'
-    | 'settings.externalAgents'
-    | 'settings.canvas';
+    | 'settings.externalAgents';
 }
 
 const TABS: TabDef[] = [
   { id: 'huabuAgent', labelKey: 'settings.huabuAgent' },
   { id: 'agents', labelKey: 'settings.externalAgents' },
   { id: 'general', labelKey: 'settings.general' },
-  { id: 'canvas', labelKey: 'settings.canvas' },
 ];
 
 interface SettingsModalProps {
@@ -45,11 +42,10 @@ interface SettingsModalProps {
  * pane, so the panel height stays fixed as more settings are added.
  *
  * Each tab renders the existing self-contained `*Settings` components:
- *  - **General** — language selection
+ *  - **General** — language and canvas display preferences
  *  - **Huabu Agent** — chat LLM (required) + optional capabilities
  *    (image generation, web search, YouTube transcripts)
  *  - **External Agents** — ACP profile management
- *  - **Canvas** — minimap etc.
  *
  * The app version sits at the bottom of the left tab rail (a product-wide
  * fact, decoupled from any single tab).
@@ -175,7 +171,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </>
             )}
             {activeTab === 'agents' && <AcpSettings />}
-            {activeTab === 'canvas' && <CanvasSettings />}
           </div>
         </div>
       </div>
