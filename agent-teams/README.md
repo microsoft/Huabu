@@ -29,7 +29,6 @@ agent-teams/<team-name>/
   agentlet.yaml        # identity, harness commands, Config schema, and setup requirements
   system_prompt.md     # canonical prompt referenced by require.prompts
   .env.example         # optional standalone-runtime example; Huabu uses managed Configs
-  README.md            # package-specific usage and examples
   workspaces/          # optional CLI-generated workspaces; ignored by git
 ```
 
