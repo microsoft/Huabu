@@ -19,7 +19,7 @@ Huabu asks Agenetes to scan the collection root, persists the discovered members
 | Agent | Responsibility | Configs | Harnesses |
 | --- | --- | --- | --- |
 | [`deepv-slides-maker/`](./deepv-slides-maker/) | Creates editable slide decks through a DeepV server. | `DEEPV_SERVER_ENDPOINT`, `DEEPV_SERVER_API_KEY` | `claude`, `copilot` |
-| [`hackmd-publisher/`](./hackmd-publisher/) | Publishes selected canvas content to HackMD and writes back the URL. | `HACKMD_TOKEN` | `claude`, `copilot` |
+| [`hackmd-publisher/`](./hackmd-publisher/) | Publishes selected canvas content to HackMD and writes back the URL. | `HMD_API_ACCESS_TOKEN` | `claude`, `copilot` |
 | [`html-slides-maker/`](./html-slides-maker/) | Creates static HTML presentations and technical diagrams after confirming the presentation brief. | None | `claude`, `copilot` |
 | [`paper-reviewer/`](./paper-reviewer/) | Reviews academic papers and drafts review responses. | None | `claude`, `copilot` |
 
@@ -48,7 +48,7 @@ command:
 
 require:
   env:
-    - name: HACKMD_TOKEN
+    - name: HMD_API_ACCESS_TOKEN
       description: HackMD API token used to publish documents
       required: true
       secret: true
@@ -57,7 +57,7 @@ require:
       installer: npm
       scope: shared
       executables:
-        - hackmd
+        - hackmd-cli
   skills:
     - https://github.com/hackmdio/hackmd-cli/tree/develop/hackmd-cli
   prompts:
@@ -77,7 +77,7 @@ Every `require.cli-tools` entry is structured:
 
 Shared npm tools are isolated by package requirement beneath `~/.agentlet/tools/npm` by default. Set `AGENTLET_SHARED_NPM_TOOLS_DIR` to use another absolute root. Setup checks an exact receipt plus all declared executables before deciding that installation can be skipped, and serializes concurrent installation of the same package requirement.
 
-The runtime prepends both workspace-local and shared npm `.bin` directories to `PATH`. For example, `@hackmd/hackmd-cli` is the npm package while `hackmd` is the executable agents invoke.
+The runtime prepends both workspace-local and shared npm `.bin` directories to `PATH`. For example, `@hackmd/hackmd-cli` is the npm package while `hackmd-cli` is the executable agents invoke.
 
 ### Configs
 
