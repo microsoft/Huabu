@@ -38,9 +38,33 @@ export interface AgentTeamMember {
   status: 'active' | 'member_missing';
 }
 
+export interface AgentTeamSetupError {
+  code: string;
+  message: string;
+}
+
+export type AgentTeamDeploymentSetup =
+  | { status: 'disabled' }
+  | { status: 'setting_up'; operationId: string; startedAt: number }
+  | { status: 'ready'; completedAt: number }
+  | { status: 'error'; failedAt: number; error: AgentTeamSetupError };
+
+export interface AgentTeamDeployment {
+  id: string;
+  alias: string;
+  revision: number;
+  enabled: boolean;
+  machine: string;
+  manifestPath: string;
+  harness: string;
+  workingDirPath: string;
+  setup: AgentTeamDeploymentSetup;
+}
+
 export interface AgentTeamRegistryState {
   roots: AgentTeamRoot[];
   members: AgentTeamMember[];
+  deployments: AgentTeamDeployment[];
 }
 
 export interface AgentTeamRegistryStore {
@@ -66,3 +90,17 @@ export type AgentTeamRescanResult =
       root: AgentTeamRoot;
       error: string;
     };
+
+export interface CreateAgentTeamDeploymentInput {
+  alias: string;
+  machine: string;
+  manifestPath: string;
+  harness: string;
+  workingDirPath: string;
+}
+
+export interface UpdateAgentTeamDeploymentInput {
+  alias?: string;
+  harness?: string;
+  workingDirPath?: string;
+}

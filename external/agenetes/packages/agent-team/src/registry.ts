@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import {
   agentTeamMemberKey,
   agentTeamRootKey,
@@ -5,6 +7,7 @@ import {
 } from './identity.js';
 
 import type {
+  AgentTeamDeployment,
   AgentTeamMember,
   AgentTeamRegistryState,
   AgentTeamRegistryStore,
@@ -12,6 +15,8 @@ import type {
   AgentTeamRoot,
   AgentTeamRootRef,
   AgentTeamScanPort,
+  CreateAgentTeamDeploymentInput,
+  UpdateAgentTeamDeploymentInput,
 } from './types.js';
 
 function cloneState(state: AgentTeamRegistryState): AgentTeamRegistryState {
@@ -30,6 +35,7 @@ export class AgentTeamRegistry {
     private readonly store: AgentTeamRegistryStore,
     private readonly scanPort: AgentTeamScanPort,
     private readonly now: () => number = Date.now,
+    private readonly generateId: () => string = randomUUID,
   ) {
     this.state = store.load();
     for (const root of this.state.roots) {
@@ -54,6 +60,125 @@ export class AgentTeamRegistry {
       (candidate) => agentTeamMemberKey(candidate) === key,
     );
     return member ? structuredClone(member) : undefined;
+  }
+
+  listDeployments(member?: {
+    machine: string;
+    manifestPath: string;
+  }): AgentTeamDeployment[] {
+    const deployments = member
+      ? this.state.deployments.filter(
+          (deployment) =>
+            deployment.machine === member.machine &&
+            deployment.manifestPath === member.manifestPath,
+        )
+      : this.state.deployments;
+    return structuredClone(deployments);
+  }
+
+  getDeployment(id: string): AgentTeamDeployment | undefined {
+    const deployment = this.state.deployments.find(
+      (candidate) => candidate.id === id,
+    );
+    return deployment ? structuredClone(deployment) : undefined;
+  }
+
+  getDeploymentByAlias(alias: string): AgentTeamDeployment | undefined {
+    const deployment = this.state.deployments.find(
+      (candidate) => candidate.alias === alias,
+    );
+    return deployment ? structuredClone(deployment) : undefined;
+  }
+
+  createDeployment(input: CreateAgentTeamDeploymentInput): AgentTeamDeployment {
+    this.assertAliasAvailable(input.alias);
+    const member = this.requireActiveMember(input.machine, input.manifestPath);
+    this.assertHarnessSupported(member, input.harness);
+    this.assertWorkingDirPath(input.workingDirPath);
+
+    const id = this.generateId();
+    if (!id.trim() || id.trim() !== id) {
+      throw new Error(
+        'Generated Agent Team deployment ID must be non-empty without surrounding whitespace',
+      );
+    }
+    if (this.state.deployments.some((deployment) => deployment.id === id)) {
+      throw new Error(`Agent Team deployment ID already exists: ${id}`);
+    }
+    const deployment: AgentTeamDeployment = {
+      id,
+      alias: input.alias,
+      revision: 1,
+      enabled: false,
+      machine: input.machine,
+      manifestPath: input.manifestPath,
+      harness: input.harness,
+      workingDirPath: input.workingDirPath,
+      setup: { status: 'disabled' },
+    };
+    this.commit({
+      ...cloneState(this.state),
+      deployments: [...this.state.deployments, deployment],
+    });
+    return structuredClone(deployment);
+  }
+
+  updateDeployment(
+    id: string,
+    input: UpdateAgentTeamDeploymentInput,
+  ): AgentTeamDeployment {
+    const current = this.state.deployments.find(
+      (deployment) => deployment.id === id,
+    );
+    if (!current) {
+      throw new Error(`Agent Team deployment not found: ${id}`);
+    }
+    if (input.alias !== undefined && input.alias !== current.alias) {
+      this.assertAliasAvailable(input.alias, id);
+    }
+
+    const harness = input.harness ?? current.harness;
+    const workingDirPath = input.workingDirPath ?? current.workingDirPath;
+    const placementChanged =
+      harness !== current.harness || workingDirPath !== current.workingDirPath;
+    if (placementChanged && current.enabled) {
+      throw new Error(
+        `Disable Agent Team deployment before changing placement: ${id}`,
+      );
+    }
+    if (placementChanged) {
+      const member = this.requireActiveMember(
+        current.machine,
+        current.manifestPath,
+      );
+      this.assertHarnessSupported(member, harness);
+      this.assertWorkingDirPath(workingDirPath);
+    }
+
+    const next: AgentTeamDeployment = {
+      ...current,
+      alias: input.alias ?? current.alias,
+      harness,
+      workingDirPath,
+      revision: placementChanged ? current.revision + 1 : current.revision,
+      setup: placementChanged ? { status: 'disabled' } : current.setup,
+    };
+    this.commit({
+      ...cloneState(this.state),
+      deployments: this.state.deployments.map((deployment) =>
+        deployment.id === id ? next : deployment,
+      ),
+    });
+    return structuredClone(next);
+  }
+
+  deleteDeployment(id: string): boolean {
+    const deployments = this.state.deployments.filter(
+      (deployment) => deployment.id !== id,
+    );
+    if (deployments.length === this.state.deployments.length) return false;
+    this.commit({ ...cloneState(this.state), deployments });
+    return true;
   }
 
   async addRoot(root: AgentTeamRootRef): Promise<AgentTeamRescanResult> {
@@ -183,6 +308,7 @@ export class AgentTeamRegistry {
         sameAgentTeamRoot(candidate, root) ? successfulRoot : candidate,
       ),
       members: [...members.values()],
+      deployments: structuredClone(this.state.deployments),
     };
     this.commit(nextState);
     return {
@@ -213,6 +339,7 @@ export class AgentTeamRegistry {
         (candidate) => !sameAgentTeamRoot(candidate, root),
       ),
       members,
+      deployments: structuredClone(this.state.deployments),
     });
     return true;
   }
@@ -221,6 +348,61 @@ export class AgentTeamRegistry {
     return this.state.roots.find((candidate) =>
       sameAgentTeamRoot(candidate, root),
     );
+  }
+
+  private requireActiveMember(
+    machine: string,
+    manifestPath: string,
+  ): AgentTeamMember {
+    const member = this.state.members.find(
+      (candidate) =>
+        candidate.machine === machine &&
+        candidate.manifestPath === manifestPath,
+    );
+    if (!member) {
+      throw new Error(
+        `Agent Team member not found: ${agentTeamMemberKey({ machine, manifestPath })}`,
+      );
+    }
+    if (member.status !== 'active') {
+      throw new Error(
+        `Agent Team member is missing: ${agentTeamMemberKey(member)}`,
+      );
+    }
+    return member;
+  }
+
+  private assertAliasAvailable(alias: string, currentId?: string): void {
+    if (!alias.trim() || alias.trim() !== alias) {
+      throw new Error(
+        'Agent Team deployment alias must be non-empty without surrounding whitespace',
+      );
+    }
+    if (
+      this.state.deployments.some(
+        (deployment) =>
+          deployment.alias === alias && deployment.id !== currentId,
+      )
+    ) {
+      throw new Error(`Agent Team deployment alias already exists: ${alias}`);
+    }
+  }
+
+  private assertHarnessSupported(
+    member: AgentTeamMember,
+    harness: string,
+  ): void {
+    if (!member.harnesses.includes(harness)) {
+      throw new Error(
+        `Harness "${harness}" is not declared by Agent Team member ${agentTeamMemberKey(member)}`,
+      );
+    }
+  }
+
+  private assertWorkingDirPath(workingDirPath: string): void {
+    if (!workingDirPath.trim()) {
+      throw new Error('Agent Team workingDirPath must be non-empty');
+    }
   }
 
   private isCurrentRoot(root: AgentTeamRootRef, epoch: number): boolean {

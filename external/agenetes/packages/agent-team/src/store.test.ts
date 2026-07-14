@@ -42,6 +42,19 @@ const state: AgentTeamRegistryState = {
       status: 'active',
     },
   ],
+  deployments: [
+    {
+      id: 'deployment-1',
+      alias: 'Reviewer',
+      revision: 1,
+      enabled: false,
+      machine: 'machine-a',
+      manifestPath: '/teams/reviewer/agentlet.yaml',
+      harness: 'copilot',
+      workingDirPath: '/teams/reviewer/workspaces/copilot',
+      setup: { status: 'disabled' },
+    },
+  ],
 };
 
 afterEach(() => {
@@ -92,5 +105,24 @@ describe('FileAgentTeamRegistryStore', () => {
     expect(() => new FileAgentTeamRegistryStore(storageDir).load()).toThrow(
       'member status does not match discovery provenance',
     );
+  });
+
+  it('loads discovery-only schema v1 files with no deployments', () => {
+    const storageDir = createStorageDir();
+    writeFileSync(
+      join(storageDir, 'registry.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        state: {
+          roots: state.roots,
+          members: state.members,
+        },
+      }),
+    );
+
+    expect(new FileAgentTeamRegistryStore(storageDir).load()).toEqual({
+      ...state,
+      deployments: [],
+    });
   });
 });

@@ -216,4 +216,116 @@ describe('AgentTeamRegistry', () => {
       discoveredBy: [root],
     });
   });
+
+  it('persists deployments with case-sensitive aliases and placement revisions', async () => {
+    const root = { machine, path: '/collections/one' };
+    const port = new FakeScanPort();
+    setResult(port, root, {
+      members: [
+        {
+          ...member,
+          harnesses: ['copilot', 'claude'],
+        },
+      ],
+      diagnostics: [],
+    });
+    const store = new InMemoryAgentTeamRegistryStore();
+    const ids = ['deployment-1', 'deployment-2'];
+    const registry = new AgentTeamRegistry(
+      store,
+      port,
+      () => 100,
+      () => ids.shift() ?? 'unexpected',
+    );
+    await registry.addRoot(root);
+
+    const first = registry.createDeployment({
+      alias: 'Reviewer',
+      machine,
+      manifestPath: member.manifestPath,
+      harness: 'copilot',
+      workingDirPath: '/workspaces/reviewer',
+    });
+    const second = registry.createDeployment({
+      alias: 'reviewer',
+      machine,
+      manifestPath: member.manifestPath,
+      harness: 'copilot',
+      workingDirPath: '/workspaces/reviewer-lowercase',
+    });
+
+    expect(first).toMatchObject({
+      id: 'deployment-1',
+      revision: 1,
+      enabled: false,
+      setup: { status: 'disabled' },
+    });
+    expect(second.id).toBe('deployment-2');
+    expect(registry.getDeploymentByAlias('Reviewer')?.id).toBe('deployment-1');
+    expect(registry.getDeploymentByAlias('reviewer')?.id).toBe('deployment-2');
+    expect(() =>
+      registry.createDeployment({
+        alias: 'Reviewer',
+        machine,
+        manifestPath: member.manifestPath,
+        harness: 'copilot',
+        workingDirPath: '/workspaces/duplicate',
+      }),
+    ).toThrow('alias already exists');
+
+    expect(
+      registry.updateDeployment(first.id, { alias: 'Primary Reviewer' }),
+    ).toMatchObject({ alias: 'Primary Reviewer', revision: 1 });
+    expect(
+      registry.updateDeployment(first.id, {
+        harness: 'claude',
+        workingDirPath: '/workspaces/reviewer-claude',
+      }),
+    ).toMatchObject({
+      harness: 'claude',
+      workingDirPath: '/workspaces/reviewer-claude',
+      revision: 2,
+      setup: { status: 'disabled' },
+    });
+
+    const restored = new AgentTeamRegistry(store, port);
+    expect(restored.getDeployment(first.id)).toMatchObject({
+      alias: 'Primary Reviewer',
+      revision: 2,
+    });
+    expect(restored.deleteDeployment(second.id)).toBe(true);
+    expect(restored.deleteDeployment(second.id)).toBe(false);
+  });
+
+  it('rejects deployments for missing members and undeclared harnesses', async () => {
+    const root = { machine, path: '/collections/one' };
+    const port = new FakeScanPort();
+    setResult(port, root, { members: [member], diagnostics: [] });
+    const registry = new AgentTeamRegistry(
+      new InMemoryAgentTeamRegistryStore(),
+      port,
+    );
+    await registry.addRoot(root);
+
+    expect(() =>
+      registry.createDeployment({
+        alias: 'Reviewer',
+        machine,
+        manifestPath: member.manifestPath,
+        harness: 'claude',
+        workingDirPath: '/workspaces/reviewer',
+      }),
+    ).toThrow('is not declared');
+
+    registry.removeRoot(root);
+    expect(() =>
+      registry.createDeployment({
+        alias: 'Reviewer',
+        machine,
+        manifestPath: member.manifestPath,
+        harness: 'copilot',
+        workingDirPath: '/workspaces/reviewer',
+      }),
+    ).toThrow('member is missing');
+  });
 });

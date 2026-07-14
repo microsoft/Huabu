@@ -12,6 +12,8 @@ import { agentTeamMemberKey, agentTeamRootKey } from './identity.js';
 
 import type { AgentTeamScanDiagnostic } from '@agentlet/protocol';
 import type {
+  AgentTeamDeployment,
+  AgentTeamDeploymentSetup,
   AgentTeamMember,
   AgentTeamRegistryState,
   AgentTeamRegistryStore,
@@ -29,7 +31,7 @@ interface RegistryFile {
 }
 
 function emptyState(): AgentTeamRegistryState {
-  return { roots: [], members: [] };
+  return { roots: [], members: [], deployments: [] };
 }
 
 function cloneState(state: AgentTeamRegistryState): AgentTeamRegistryState {
@@ -216,6 +218,98 @@ function parseMember(value: unknown, index: number): AgentTeamMember {
   };
 }
 
+function parseTimestamp(value: unknown, label: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new Error(`Invalid Agent Team registry: ${label} must be a number`);
+  }
+  return value;
+}
+
+function parseDeploymentSetup(
+  value: unknown,
+  label: string,
+): AgentTeamDeploymentSetup {
+  if (!isObject(value)) {
+    throw new Error(`Invalid Agent Team registry: ${label} must be an object`);
+  }
+  if (value.status === 'disabled') return { status: 'disabled' };
+  if (value.status === 'setting_up') {
+    assertString(value.operationId, `${label}.operationId`);
+    return {
+      status: 'setting_up',
+      operationId: value.operationId,
+      startedAt: parseTimestamp(value.startedAt, `${label}.startedAt`),
+    };
+  }
+  if (value.status === 'ready') {
+    return {
+      status: 'ready',
+      completedAt: parseTimestamp(value.completedAt, `${label}.completedAt`),
+    };
+  }
+  if (value.status === 'error') {
+    if (!isObject(value.error)) {
+      throw new Error(
+        `Invalid Agent Team registry: ${label}.error must be an object`,
+      );
+    }
+    assertString(value.error.code, `${label}.error.code`);
+    assertString(value.error.message, `${label}.error.message`);
+    return {
+      status: 'error',
+      failedAt: parseTimestamp(value.failedAt, `${label}.failedAt`),
+      error: {
+        code: value.error.code,
+        message: value.error.message,
+      },
+    };
+  }
+  throw new Error(`Invalid Agent Team registry: ${label}.status`);
+}
+
+function parseDeployment(value: unknown, index: number): AgentTeamDeployment {
+  const label = `deployments[${index}]`;
+  if (!isObject(value)) {
+    throw new Error(`Invalid Agent Team registry: ${label} must be an object`);
+  }
+  assertString(value.id, `${label}.id`);
+  assertString(value.alias, `${label}.alias`);
+  if (value.alias.trim() !== value.alias) {
+    throw new Error(
+      `Invalid Agent Team registry: ${label}.alias cannot have surrounding whitespace`,
+    );
+  }
+  if (
+    typeof value.revision !== 'number' ||
+    !Number.isSafeInteger(value.revision) ||
+    value.revision < 1
+  ) {
+    throw new Error(
+      `Invalid Agent Team registry: ${label}.revision must be a positive integer`,
+    );
+  }
+  if (typeof value.enabled !== 'boolean') {
+    throw new Error(
+      `Invalid Agent Team registry: ${label}.enabled must be a boolean`,
+    );
+  }
+  assertString(value.machine, `${label}.machine`);
+  assertString(value.manifestPath, `${label}.manifestPath`);
+  assertString(value.harness, `${label}.harness`);
+  assertString(value.workingDirPath, `${label}.workingDirPath`);
+  return {
+    id: value.id,
+    alias: value.alias,
+    revision: value.revision,
+    enabled: value.enabled,
+    machine: value.machine,
+    manifestPath: value.manifestPath,
+    harness: value.harness,
+    workingDirPath: value.workingDirPath,
+    setup: parseDeploymentSetup(value.setup, `${label}.setup`),
+  };
+}
+
 function parseRegistryFile(value: unknown): AgentTeamRegistryState {
   if (
     !isObject(value) ||
@@ -226,13 +320,16 @@ function parseRegistryFile(value: unknown): AgentTeamRegistryState {
   }
   if (
     !Array.isArray(value.state.roots) ||
-    !Array.isArray(value.state.members)
+    !Array.isArray(value.state.members) ||
+    (value.state.deployments !== undefined &&
+      !Array.isArray(value.state.deployments))
   ) {
     throw new Error('Invalid Agent Team registry state');
   }
   const state = {
     roots: value.state.roots.map(parseRoot),
     members: value.state.members.map(parseMember),
+    deployments: (value.state.deployments ?? []).map(parseDeployment),
   };
   const rootKeys = new Set(state.roots.map(agentTeamRootKey));
   if (rootKeys.size !== state.roots.length) {
@@ -241,6 +338,32 @@ function parseRegistryFile(value: unknown): AgentTeamRegistryState {
   const memberKeys = new Set(state.members.map(agentTeamMemberKey));
   if (memberKeys.size !== state.members.length) {
     throw new Error('Invalid Agent Team registry: duplicate member identity');
+  }
+  const deploymentIds = new Set(
+    state.deployments.map((deployment) => deployment.id),
+  );
+  if (deploymentIds.size !== state.deployments.length) {
+    throw new Error('Invalid Agent Team registry: duplicate deployment id');
+  }
+  const deploymentAliases = new Set(
+    state.deployments.map((deployment) => deployment.alias),
+  );
+  if (deploymentAliases.size !== state.deployments.length) {
+    throw new Error('Invalid Agent Team registry: duplicate deployment alias');
+  }
+  for (const deployment of state.deployments) {
+    if (
+      !memberKeys.has(
+        agentTeamMemberKey({
+          machine: deployment.machine,
+          manifestPath: deployment.manifestPath,
+        }),
+      )
+    ) {
+      throw new Error(
+        'Invalid Agent Team registry: deployment references an unknown member',
+      );
+    }
   }
   for (const member of state.members) {
     const discoveryKeys = new Set(member.discoveredBy.map(agentTeamRootKey));
@@ -308,9 +431,13 @@ export class FileAgentTeamRegistryStore implements AgentTeamRegistryStore {
   }
 
   save(state: AgentTeamRegistryState): void {
-    const file: RegistryFile = {
+    const candidate: RegistryFile = {
       schemaVersion: SCHEMA_VERSION,
       state: cloneState(state),
+    };
+    const file: RegistryFile = {
+      schemaVersion: SCHEMA_VERSION,
+      state: parseRegistryFile(candidate),
     };
     mkdirSync(dirname(this.filePath), { recursive: true });
     const temporaryPath = `${this.filePath}.tmp`;

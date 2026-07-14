@@ -86,7 +86,7 @@ Configuration is stored separately from deployment profiles and shared by every 
 Configs[(machine, manifestPath)] = { key: value, ... };
 ```
 
-An alias selects one deployment profile for user-facing and API lookup, while the stable deployment ID is used by durable workload bindings. Renaming an alias does not change deployment identity. The same `(machine, manifestPath)` may appear in multiple deployments with different working directories or harnesses, but all of those deployments read the same member-level environment-variable configuration. Secret and non-secret values have different persistence and read-back behavior as defined in R3.
+An alias selects one deployment profile for user-facing and API lookup, while the stable deployment ID is used by durable workload bindings. Alias uniqueness uses exact, case-sensitive comparison, so `Reviewer` and `reviewer` may coexist. Renaming an alias does not change deployment identity or revision; changing `harness` or `workingDirPath` changes placement and increments the revision. The same `(machine, manifestPath)` may appear in multiple deployments with different working directories or harnesses, but all of those deployments read the same member-level environment-variable configuration. Secret and non-secret values have different persistence and read-back behavior as defined in R3.
 
 ### R3 — Dedicated Settings experience
 

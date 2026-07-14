@@ -12,6 +12,11 @@ export {
 } from './store.js';
 export type {
   AgentTeamMember,
+  AgentTeamDeployment,
+  AgentTeamDeploymentSetup,
+  AgentTeamSetupError,
+  CreateAgentTeamDeploymentInput,
+  UpdateAgentTeamDeploymentInput,
   AgentTeamRegistryState,
   AgentTeamRegistryStore,
   AgentTeamRescanResult,
