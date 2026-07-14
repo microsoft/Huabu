@@ -76,6 +76,8 @@
     "provider": "Provider",
     "model": "Model",
     "endpoint": "Endpoint",
+    "baseUrl": "Base URL",
+    "baseUrlDescription": "Optional. Leave empty to use the provider default.",
     "deployment": "Deployment",
     "apiVersion": "API Version",
     "apiKey": "API Key",

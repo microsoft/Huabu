@@ -16,6 +16,49 @@ import { TEXT_INPUT_CLASS, useDebouncedSave } from '../utils';
 
 import type { LLMConfigUpdate, LLMUtilityConfigUpdate } from '@sediment/shared';
 
+interface BaseUrlRowProps {
+  description?: string;
+  disabled: boolean;
+  placeholder: string;
+  title: string;
+  value: string;
+  onChange: (value: string) => void;
+  onSave: (value: string) => void;
+}
+
+const BaseUrlRow: React.FC<BaseUrlRowProps> = ({
+  description,
+  disabled,
+  placeholder,
+  title,
+  value,
+  onChange,
+  onSave,
+}) => {
+  const debouncedSave = useDebouncedSave(onSave);
+
+  return (
+    <SettingRow title={title} description={description}>
+      <input
+        type="url"
+        inputMode="url"
+        autoCapitalize="none"
+        autoCorrect="off"
+        spellCheck={false}
+        placeholder={placeholder}
+        value={value}
+        onChange={(event) => {
+          const nextValue = event.target.value;
+          onChange(nextValue);
+          debouncedSave(nextValue.trim());
+        }}
+        disabled={disabled}
+        className={`${TEXT_INPUT_CLASS} w-56`}
+      />
+    </SettingRow>
+  );
+};
+
 /**
  * LLM provider/model configuration section.
  *
@@ -55,16 +98,16 @@ export const LLMSettings: React.FC = () => {
   const llmLogoutOAuth = useLLMStore((s) => s.logoutOAuth);
 
   // ── Chat-provider form state ──
-  // Azure needs four discrete fields (endpoint / deployment / api
-  // version / key) that none of the other providers expose, so it
-  // gets its own dedicated input cluster.
-  const [azureEndpoint, setAzureEndpoint] = useState('');
+  // Azure needs deployment / API version fields that none of the other
+  // providers expose, so those remain in a dedicated input cluster.
+  const [chatBaseUrl, setChatBaseUrl] = useState('');
   const [azureDeployment, setAzureDeployment] = useState('');
   const [azureApiVersion, setAzureApiVersion] = useState('');
   const [manualModel, setManualModel] = useState('');
 
   // ── Utility-tier form state ──
   const [utilityManualModel, setUtilityManualModel] = useState('');
+  const [utilityBaseUrl, setUtilityBaseUrl] = useState('');
   const utilityFollowsChat = !utilityConfig?.provider;
 
   const isAzure = llmConfig?.provider === 'azure-openai';
@@ -72,6 +115,7 @@ export const LLMSettings: React.FC = () => {
     (p) => p.id === llmConfig?.provider,
   );
   const isOAuth = selectedProvider?.authType === 'oauth';
+  const canOverrideBaseUrl = selectedProvider?.baseUrl.overridable ?? false;
 
   // The utility tier can target any provider independently of chat, so it
   // needs its own OAuth check: OAuth providers (e.g. Copilot) authenticate
@@ -81,16 +125,21 @@ export const LLMSettings: React.FC = () => {
     (p) => p.id === utilityConfig?.provider,
   );
   const isUtilityOAuth = utilitySelectedProvider?.authType === 'oauth';
+  const canOverrideUtilityBaseUrl =
+    utilitySelectedProvider?.baseUrl.overridable ?? false;
 
-  // Sync chat Azure fields with the persisted config whenever it
+  useEffect(() => {
+    setChatBaseUrl(llmConfig?.baseUrl ?? '');
+  }, [llmConfig?.provider, llmConfig?.baseUrl]);
+
+  // Sync the remaining chat Azure fields with the persisted config whenever it
   // changes (initial load, after auto-save, or when switching to
   // Azure). API key is never pre-filled — the server never returns it.
   useEffect(() => {
     if (!isAzure) return;
-    setAzureEndpoint(llmConfig?.baseUrl ?? '');
     setAzureDeployment(llmConfig?.model ?? '');
     setAzureApiVersion(llmConfig?.apiVersion ?? '');
-  }, [isAzure, llmConfig?.baseUrl, llmConfig?.model, llmConfig?.apiVersion]);
+  }, [isAzure, llmConfig?.model, llmConfig?.apiVersion]);
 
   // Surface store errors as transient toasts.
   useEffect(() => {
@@ -101,38 +150,31 @@ export const LLMSettings: React.FC = () => {
 
   // ─── Debounced auto-savers ────────────────────────────────────────
   const saveChat = useCallback(
-    (patch: Partial<LLMConfigUpdate>) => {
+    (patch: Omit<LLMConfigUpdate, 'provider'>) => {
       const provider = llmConfig?.provider ?? '';
       if (!provider) return;
-      void llmUpdateConfig({
-        provider,
-        model: llmConfig?.model ?? '',
-        ...patch,
-      });
+      void llmUpdateConfig({ provider, ...patch });
     },
-    [llmConfig?.provider, llmConfig?.model, llmUpdateConfig],
+    [llmConfig?.provider, llmUpdateConfig],
   );
   const debouncedSaveChat = useDebouncedSave(saveChat);
 
   // Utility-tier debounced saver (patches keep the current utility provider).
   const saveUtility = useCallback(
-    (patch: Partial<LLMUtilityConfigUpdate>) => {
+    (patch: Omit<LLMUtilityConfigUpdate, 'provider'>) => {
       const provider = utilityConfig?.provider ?? '';
       if (!provider) return;
-      void updateUtilityConfig({
-        provider,
-        model: utilityConfig?.model ?? '',
-        ...patch,
-      });
+      void updateUtilityConfig({ provider, ...patch });
     },
-    [utilityConfig?.provider, utilityConfig?.model, updateUtilityConfig],
+    [utilityConfig?.provider, updateUtilityConfig],
   );
   const debouncedSaveUtility = useDebouncedSave(saveUtility);
 
   // Keep the utility manual-model input in sync with persisted config.
   useEffect(() => {
     setUtilityManualModel(utilityConfig?.model ?? '');
-  }, [utilityConfig?.provider, utilityConfig?.model]);
+    setUtilityBaseUrl(utilityConfig?.baseUrl ?? '');
+  }, [utilityConfig?.provider, utilityConfig?.model, utilityConfig?.baseUrl]);
 
   // ── Utility handlers ──
   const handleUtilityFollowChange = async (follow: boolean) => {
@@ -225,23 +267,25 @@ export const LLMSettings: React.FC = () => {
           </SettingRow>
         )}
 
+        {canOverrideBaseUrl && (
+          <BaseUrlRow
+            key={llmConfig?.provider}
+            title={isAzure ? t('settings.endpoint') : t('settings.baseUrl')}
+            description={isAzure ? undefined : t('settings.baseUrlDescription')}
+            placeholder={
+              selectedProvider?.baseUrl.default ??
+              'https://…cognitiveservices.azure.com/openai/v1'
+            }
+            value={chatBaseUrl}
+            disabled={llmSaving}
+            onChange={setChatBaseUrl}
+            onSave={(baseUrl) => saveChat({ baseUrl })}
+          />
+        )}
+
         {/* Azure OpenAI — dedicated multi-field cluster */}
         {isAzure && (
           <>
-            <SettingRow title={t('settings.endpoint')}>
-              <input
-                type="text"
-                placeholder="https://…cognitiveservices.azure.com/openai/v1"
-                value={azureEndpoint}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setAzureEndpoint(v);
-                  debouncedSaveChat({ baseUrl: v });
-                }}
-                className={`${TEXT_INPUT_CLASS} w-56`}
-              />
-            </SettingRow>
-
             <SettingRow title={t('settings.deployment')}>
               <input
                 type="text"
@@ -429,6 +473,30 @@ export const LLMSettings: React.FC = () => {
                   className={`${TEXT_INPUT_CLASS} w-44`}
                 />
               </SettingRow>
+            )}
+
+            {canOverrideUtilityBaseUrl && (
+              <BaseUrlRow
+                key={utilityConfig?.provider}
+                title={
+                  utilityConfig?.provider === 'azure-openai'
+                    ? t('settings.endpoint')
+                    : t('settings.baseUrl')
+                }
+                description={
+                  utilityConfig?.provider === 'azure-openai'
+                    ? undefined
+                    : t('settings.baseUrlDescription')
+                }
+                placeholder={
+                  utilitySelectedProvider?.baseUrl.default ??
+                  'https://…cognitiveservices.azure.com/openai/v1'
+                }
+                value={utilityBaseUrl}
+                disabled={utilitySaving}
+                onChange={setUtilityBaseUrl}
+                onSave={(baseUrl) => saveUtility({ baseUrl })}
+              />
             )}
 
             {/* OAuth providers (e.g. Copilot) authenticate via login, which
