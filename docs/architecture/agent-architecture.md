@@ -134,14 +134,11 @@ Chat context uses an **envelope-first submission boundary** (see [agent-context.
 
 - [service.ts](../../apps/server/src/modules/agent/acp/service.ts) `runAcpAgent()` is the external counterpart of `runAgent`: it performs host rendering, constructs the submission and `WorkloadSpec`, and drives one Agenetes turn.
 - [preprocessor.ts](../../apps/server/src/modules/agent/acp/preprocessor.ts) renders the shared `ChatEnvelope` into canonical `AgentInput[]`. Slash commands become one exclusive `AgentCommandInput`; selection and attachments ride its `context`.
-- [`@agenetes/acp-driver`](../../external/agenetes/packages/acp-driver) owns ACP session creation/resume, canonical-input flattening, ACP update translation, and durable state up-reporting. Because ACP has no native system instruction channel, the driver prefixes joined `initialPreamble` fragments to the first ordinary prompt. Command-only turns do not consume the preamble, and `initialPreambleDelivered` is persisted independently from `sessionId`.
-- [profile-store.ts](../../apps/server/src/modules/agent/acp/profile-store.ts), [spawn-orchestrator.ts](../../apps/server/src/modules/agent/acp/spawn-orchestrator.ts), and daemon routes own host configuration and daemon lifecycle.
+- [`@agenetes/agentlet-host`](../../external/agenetes/packages/agentlet-host) mounts the durably stateless [`@agenetes/agentlet-gateway`](../../external/agenetes/packages/agentlet-gateway), supervises the local agentlet daemon, and injects host-owned authentication. The Gateway owns only live control/session connections, pending RPCs, reconnect buffers, and bounded pre-attach buffering; durable workload and conversation state remains in Agenetes.
+- [`@agenetes/acp-driver`](../../external/agenetes/packages/acp-driver) owns ACP session creation/resume, canonical-input flattening, ACP update translation, and durable state up-reporting. Each new ACP WorkloadSpec persists an explicit `agentletId`; legacy records without placement resolve in memory to the supervised local daemon without write-back. Live spawn and session caches are isolated by `(agentletId, threadId)`, and unavailable targets fail with `placement_unavailable`. Because ACP has no native system instruction channel, the driver prefixes joined `initialPreamble` fragments to the first ordinary prompt. Command-only turns do not consume the preamble, and `initialPreambleDelivered` is persisted independently from `sessionId`.
+- [profile-store.ts](../../apps/server/src/modules/agent/acp/profile-store.ts) owns host profile configuration, [spawn-orchestrator.ts](../../external/agenetes/packages/acp-driver/src/spawn-orchestrator.ts) targets the selected daemon, and [daemon.route.ts](../../apps/server/src/modules/agent/acp/daemon.route.ts) exposes loopback-only supervised-daemon status and restart controls.
 
-External agents can read/write the canvas through the **reachback** channel (see
-[agent-reachback.md](./agent-reachback.md)). The connection / protocol internals
-are mid-refactor; see
-[acp-eventstore-refactor-plan.md](../proposals/acp-eventstore-refactor-plan.md)
-and [agentlet-upgrade-plan.md](../proposals/agentlet-upgrade-plan.md).
+External agents can read/write the canvas through the **reachback** channel (see [agent-reachback.md](./agent-reachback.md)). The remaining standalone agentlet-server removal is tracked in [agenetes-agentlet-gateway-consolidation.md](../proposals/agenetes-agentlet-gateway-consolidation.md).
 
 ---
 
