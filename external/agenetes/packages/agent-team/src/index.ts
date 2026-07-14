@@ -1,5 +1,6 @@
 export { createAgentTeamRegistry } from './create.js';
 export type { CreateAgentTeamRegistryOptions } from './create.js';
+export { agentTeamMemberSecretId } from './secret-id.js';
 export {
   agentTeamMemberKey,
   agentTeamRootKey,
@@ -15,8 +16,13 @@ export type {
   AgentTeamDeployment,
   AgentTeamDeploymentSetup,
   AgentTeamSetupError,
+  AgentTeamMemberConfig,
+  AgentTeamConfigFieldView,
+  AgentTeamMemberConfigView,
+  AgentTeamSecretStore,
   CreateAgentTeamDeploymentInput,
   UpdateAgentTeamDeploymentInput,
+  UpdateAgentTeamMemberConfigsInput,
   AgentTeamRegistryState,
   AgentTeamRegistryStore,
   AgentTeamRescanResult,

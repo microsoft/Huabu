@@ -55,6 +55,13 @@ const state: AgentTeamRegistryState = {
       setup: { status: 'disabled' },
     },
   ],
+  configs: [
+    {
+      machine: 'machine-a',
+      manifestPath: '/teams/reviewer/agentlet.yaml',
+      values: { ENDPOINT: 'https://example.test' },
+    },
+  ],
 };
 
 afterEach(() => {
@@ -123,6 +130,33 @@ describe('FileAgentTeamRegistryStore', () => {
     expect(new FileAgentTeamRegistryStore(storageDir).load()).toEqual({
       ...state,
       deployments: [],
+      configs: [],
     });
+  });
+
+  it('rejects orphan configs even when there are no deployments', () => {
+    const storageDir = createStorageDir();
+    writeFileSync(
+      join(storageDir, 'registry.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        state: {
+          roots: state.roots,
+          members: state.members,
+          deployments: [],
+          configs: [
+            {
+              machine: 'machine-a',
+              manifestPath: '/teams/unknown/agentlet.yaml',
+              values: { ENDPOINT: 'https://example.test' },
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(() => new FileAgentTeamRegistryStore(storageDir).load()).toThrow(
+      'config references an unknown member',
+    );
   });
 });

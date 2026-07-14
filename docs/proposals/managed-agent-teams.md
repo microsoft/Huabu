@@ -167,7 +167,7 @@ Agenetes has a standard Agent Team driver built on the ACP driver. Agent Team di
 
 Agenetes defines the Agent Team registries and state transitions and owns the first-version file-backed persistence for ordinary Agent Team state. Huabu supplies a local absolute storage directory and an implementation of the secure credential port when mounting Agenetes. The Agenetes module does not import Huabu storage or security code.
 
-The implementation places this host-agnostic control plane in `@agenetes/agent-team`. Its discovery registry persists roots, scan diagnostics, members, and root-to-member provenance under the host-provided storage directory; a failed root scan preserves the last successful provenance instead of marking every previously discovered member missing.
+The implementation places this host-agnostic control plane in `@agenetes/agent-team`. Its registry persists roots, scan diagnostics, members, root-to-member provenance, deployments, and member-level non-secret Config overrides under the host-provided storage directory; a failed root scan preserves the last successful provenance instead of marking every previously discovered member missing. Secret Configs use stable opaque IDs through an injected managed-secret port, read models expose only configured state, and runtime-only resolution is the sole surface that returns secret plaintext inside Agenetes.
 
 ### Agentlet control-plane consolidation
 

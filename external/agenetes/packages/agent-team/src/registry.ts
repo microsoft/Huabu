@@ -5,9 +5,11 @@ import {
   agentTeamRootKey,
   sameAgentTeamRoot,
 } from './identity.js';
+import { agentTeamMemberSecretId } from './secret-id.js';
 
 import type {
   AgentTeamDeployment,
+  AgentTeamMemberConfigView,
   AgentTeamMember,
   AgentTeamRegistryState,
   AgentTeamRegistryStore,
@@ -15,12 +17,27 @@ import type {
   AgentTeamRoot,
   AgentTeamRootRef,
   AgentTeamScanPort,
+  AgentTeamSecretStore,
   CreateAgentTeamDeploymentInput,
+  UpdateAgentTeamMemberConfigsInput,
   UpdateAgentTeamDeploymentInput,
 } from './types.js';
 
 function cloneState(state: AgentTeamRegistryState): AgentTeamRegistryState {
   return structuredClone(state);
+}
+
+function setRecordValue(
+  record: Record<string, string>,
+  key: string,
+  value: string,
+): void {
+  Object.defineProperty(record, key, {
+    value,
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  });
 }
 
 export class AgentTeamRegistry {
@@ -36,6 +53,7 @@ export class AgentTeamRegistry {
     private readonly scanPort: AgentTeamScanPort,
     private readonly now: () => number = Date.now,
     private readonly generateId: () => string = randomUUID,
+    private readonly secretStore?: AgentTeamSecretStore,
   ) {
     this.state = store.load();
     for (const root of this.state.roots) {
@@ -60,6 +78,157 @@ export class AgentTeamRegistry {
       (candidate) => agentTeamMemberKey(candidate) === key,
     );
     return member ? structuredClone(member) : undefined;
+  }
+
+  getMemberConfig(
+    machine: string,
+    manifestPath: string,
+  ): AgentTeamMemberConfigView {
+    const member = this.requireMember(machine, manifestPath);
+    const persisted = this.state.configs.find(
+      (config) =>
+        config.machine === machine && config.manifestPath === manifestPath,
+    );
+    const fields = member.env.map((field) => {
+      if (field.secret) {
+        return {
+          name: field.name,
+          description: field.description,
+          required: field.required,
+          secret: true,
+          configured:
+            this.secretStore?.get(
+              agentTeamMemberSecretId(machine, manifestPath, field.name),
+            ) !== null && this.secretStore !== undefined,
+        };
+      }
+      const hasOverride = Object.hasOwn(persisted?.values ?? {}, field.name);
+      const value = hasOverride ? persisted?.values[field.name] : field.default;
+      return {
+        name: field.name,
+        description: field.description,
+        required: field.required,
+        secret: false,
+        configured: value !== undefined,
+        ...(value === undefined ? {} : { value }),
+      };
+    });
+    const missingRequired = fields
+      .filter((field) => field.required && !field.configured)
+      .map((field) => field.name);
+    return {
+      machine,
+      manifestPath,
+      fields,
+      missingRequired,
+      ready: missingRequired.length === 0,
+    };
+  }
+
+  resolveMemberEnvironment(
+    machine: string,
+    manifestPath: string,
+  ): Record<string, string> {
+    const member = this.requireMember(machine, manifestPath);
+    const persisted = this.state.configs.find(
+      (config) =>
+        config.machine === machine && config.manifestPath === manifestPath,
+    );
+    const environment: Record<string, string> = {};
+    for (const field of member.env) {
+      const value = field.secret
+        ? this.secretStore?.get(
+            agentTeamMemberSecretId(machine, manifestPath, field.name),
+          )
+        : Object.hasOwn(persisted?.values ?? {}, field.name)
+          ? persisted?.values[field.name]
+          : field.default;
+      if (value !== undefined && value !== null) {
+        setRecordValue(environment, field.name, value);
+      }
+    }
+    return environment;
+  }
+
+  async updateMemberConfigs(
+    machine: string,
+    manifestPath: string,
+    updates: UpdateAgentTeamMemberConfigsInput,
+  ): Promise<AgentTeamMemberConfigView> {
+    const member = this.requireMember(machine, manifestPath);
+    const fields = new Map(member.env.map((field) => [field.name, field]));
+    const previous = this.state.configs.find(
+      (config) =>
+        config.machine === machine && config.manifestPath === manifestPath,
+    );
+    const values = { ...(previous?.values ?? {}) };
+    const secretUpdates: Record<string, string | null> = {};
+    const previousSecrets: Record<string, string | null> = {};
+    let ordinaryChanged = false;
+
+    for (const [name, value] of Object.entries(updates)) {
+      const field = fields.get(name);
+      if (!field) {
+        throw new Error(
+          `Agent Team member does not declare environment field: ${name}`,
+        );
+      }
+      if (typeof value !== 'string' && value !== null) {
+        throw new Error(
+          `Agent Team config value must be a string or null: ${name}`,
+        );
+      }
+      if (field.secret) {
+        if (!this.secretStore) {
+          throw new Error('Agent Team SecretStore is not configured');
+        }
+        const secretId = agentTeamMemberSecretId(machine, manifestPath, name);
+        secretUpdates[secretId] = value;
+        previousSecrets[secretId] = this.secretStore.get(secretId);
+        if (Object.hasOwn(values, name)) {
+          delete values[name];
+          ordinaryChanged = true;
+        }
+      } else if (value === null) {
+        if (Object.hasOwn(values, name)) {
+          delete values[name];
+          ordinaryChanged = true;
+        }
+      } else if (values[name] !== value) {
+        setRecordValue(values, name, value);
+        ordinaryChanged = true;
+      }
+    }
+
+    const configs = this.state.configs.filter(
+      (config) =>
+        config.machine !== machine || config.manifestPath !== manifestPath,
+    );
+    if (Object.keys(values).length > 0) {
+      configs.push({ machine, manifestPath, values });
+    }
+
+    if (Object.keys(secretUpdates).length > 0) {
+      await this.secretStore?.setMany(secretUpdates);
+    }
+    try {
+      if (ordinaryChanged) {
+        this.commit({ ...cloneState(this.state), configs });
+      }
+    } catch (error) {
+      if (Object.keys(secretUpdates).length > 0 && this.secretStore) {
+        try {
+          await this.secretStore.setMany(previousSecrets);
+        } catch (rollbackError) {
+          throw new AggregateError(
+            [error, rollbackError],
+            'Agent Team config persistence and secret rollback both failed',
+          );
+        }
+      }
+      throw error;
+    }
+    return this.getMemberConfig(machine, manifestPath);
   }
 
   listDeployments(member?: {
@@ -309,6 +478,7 @@ export class AgentTeamRegistry {
       ),
       members: [...members.values()],
       deployments: structuredClone(this.state.deployments),
+      configs: structuredClone(this.state.configs),
     };
     this.commit(nextState);
     return {
@@ -340,6 +510,7 @@ export class AgentTeamRegistry {
       ),
       members,
       deployments: structuredClone(this.state.deployments),
+      configs: structuredClone(this.state.configs),
     });
     return true;
   }
@@ -354,6 +525,19 @@ export class AgentTeamRegistry {
     machine: string,
     manifestPath: string,
   ): AgentTeamMember {
+    const member = this.requireMember(machine, manifestPath);
+    if (member.status !== 'active') {
+      throw new Error(
+        `Agent Team member is missing: ${agentTeamMemberKey(member)}`,
+      );
+    }
+    return member;
+  }
+
+  private requireMember(
+    machine: string,
+    manifestPath: string,
+  ): AgentTeamMember {
     const member = this.state.members.find(
       (candidate) =>
         candidate.machine === machine &&
@@ -362,11 +546,6 @@ export class AgentTeamRegistry {
     if (!member) {
       throw new Error(
         `Agent Team member not found: ${agentTeamMemberKey({ machine, manifestPath })}`,
-      );
-    }
-    if (member.status !== 'active') {
-      throw new Error(
-        `Agent Team member is missing: ${agentTeamMemberKey(member)}`,
       );
     }
     return member;

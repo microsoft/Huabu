@@ -61,10 +61,43 @@ export interface AgentTeamDeployment {
   setup: AgentTeamDeploymentSetup;
 }
 
+export interface AgentTeamMemberConfig {
+  machine: string;
+  manifestPath: string;
+  /** Persisted non-secret overrides only. */
+  values: Record<string, string>;
+}
+
+export interface AgentTeamConfigFieldView {
+  name: string;
+  description: string;
+  required: boolean;
+  secret: boolean;
+  configured: boolean;
+  /** Present only for non-secret fields with an override or default. */
+  value?: string;
+}
+
+export interface AgentTeamMemberConfigView {
+  machine: string;
+  manifestPath: string;
+  fields: AgentTeamConfigFieldView[];
+  missingRequired: string[];
+  ready: boolean;
+}
+
+export interface AgentTeamSecretStore {
+  /** Read only a host-persisted managed value, excluding environment fallbacks. */
+  get(id: string): string | null;
+  /** Atomically persist or clear managed values when the host supports it. */
+  setMany(updates: Record<string, string | null>): Promise<void>;
+}
+
 export interface AgentTeamRegistryState {
   roots: AgentTeamRoot[];
   members: AgentTeamMember[];
   deployments: AgentTeamDeployment[];
+  configs: AgentTeamMemberConfig[];
 }
 
 export interface AgentTeamRegistryStore {
@@ -104,3 +137,5 @@ export interface UpdateAgentTeamDeploymentInput {
   harness?: string;
   workingDirPath?: string;
 }
+
+export type UpdateAgentTeamMemberConfigsInput = Record<string, string | null>;

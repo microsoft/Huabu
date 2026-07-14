@@ -14,6 +14,7 @@ import type { AgentTeamScanDiagnostic } from '@agentlet/protocol';
 import type {
   AgentTeamDeployment,
   AgentTeamDeploymentSetup,
+  AgentTeamMemberConfig,
   AgentTeamMember,
   AgentTeamRegistryState,
   AgentTeamRegistryStore,
@@ -31,11 +32,24 @@ interface RegistryFile {
 }
 
 function emptyState(): AgentTeamRegistryState {
-  return { roots: [], members: [], deployments: [] };
+  return { roots: [], members: [], deployments: [], configs: [] };
 }
 
 function cloneState(state: AgentTeamRegistryState): AgentTeamRegistryState {
   return structuredClone(state);
+}
+
+function setRecordValue(
+  record: Record<string, string>,
+  key: string,
+  value: string,
+): void {
+  Object.defineProperty(record, key, {
+    value,
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  });
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -310,6 +324,38 @@ function parseDeployment(value: unknown, index: number): AgentTeamDeployment {
   };
 }
 
+function parseMemberConfig(
+  value: unknown,
+  index: number,
+): AgentTeamMemberConfig {
+  const label = `configs[${index}]`;
+  if (!isObject(value)) {
+    throw new Error(`Invalid Agent Team registry: ${label} must be an object`);
+  }
+  assertString(value.machine, `${label}.machine`);
+  assertString(value.manifestPath, `${label}.manifestPath`);
+  if (!isObject(value.values)) {
+    throw new Error(
+      `Invalid Agent Team registry: ${label}.values must be an object`,
+    );
+  }
+  const values: Record<string, string> = {};
+  for (const [name, fieldValue] of Object.entries(value.values)) {
+    assertString(name, `${label}.values key`);
+    if (typeof fieldValue !== 'string') {
+      throw new Error(
+        `Invalid Agent Team registry: ${label}.values.${name} must be a string`,
+      );
+    }
+    setRecordValue(values, name, fieldValue);
+  }
+  return {
+    machine: value.machine,
+    manifestPath: value.manifestPath,
+    values,
+  };
+}
+
 function parseRegistryFile(value: unknown): AgentTeamRegistryState {
   if (
     !isObject(value) ||
@@ -322,7 +368,8 @@ function parseRegistryFile(value: unknown): AgentTeamRegistryState {
     !Array.isArray(value.state.roots) ||
     !Array.isArray(value.state.members) ||
     (value.state.deployments !== undefined &&
-      !Array.isArray(value.state.deployments))
+      !Array.isArray(value.state.deployments)) ||
+    (value.state.configs !== undefined && !Array.isArray(value.state.configs))
   ) {
     throw new Error('Invalid Agent Team registry state');
   }
@@ -330,6 +377,7 @@ function parseRegistryFile(value: unknown): AgentTeamRegistryState {
     roots: value.state.roots.map(parseRoot),
     members: value.state.members.map(parseMember),
     deployments: (value.state.deployments ?? []).map(parseDeployment),
+    configs: (value.state.configs ?? []).map(parseMemberConfig),
   };
   const rootKeys = new Set(state.roots.map(agentTeamRootKey));
   if (rootKeys.size !== state.roots.length) {
@@ -362,6 +410,21 @@ function parseRegistryFile(value: unknown): AgentTeamRegistryState {
     ) {
       throw new Error(
         'Invalid Agent Team registry: deployment references an unknown member',
+      );
+    }
+  }
+  const configKeys = new Set(
+    state.configs.map((config) => agentTeamMemberKey(config)),
+  );
+  if (configKeys.size !== state.configs.length) {
+    throw new Error(
+      'Invalid Agent Team registry: duplicate member config identity',
+    );
+  }
+  for (const config of state.configs) {
+    if (!memberKeys.has(agentTeamMemberKey(config))) {
+      throw new Error(
+        'Invalid Agent Team registry: config references an unknown member',
       );
     }
   }
