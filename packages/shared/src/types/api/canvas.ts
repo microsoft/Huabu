@@ -294,7 +294,7 @@ export interface CreateCanvasResponse {
 // ─── Headless Executor: POST /api/canvas/:canvasId/execute ────────────────
 //
 // The headless executor (M2) accepts a batch of canvas commands and
-// runs them server-side against authoritative `canvas.json` state.
+// runs them server-side against authoritative `space.json` state.
 // It returns the resulting structural deltas plus per-command outcomes
 // so clients can apply the diff locally without re-executing the
 // engine themselves.

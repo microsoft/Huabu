@@ -4,7 +4,7 @@
  * File-level primitive (pi/Claude-Code style). Path is resolved against
  * the **current canvas folder** via the shared sandbox, so it can
  * address any file the agent has access to within that canvas:
- *   - "canvas.json"
+ *   - "space.json"
  *   - "nodes/<filename>.md"
  *   - artifacts, memory, etc.
  *
@@ -24,7 +24,7 @@
  *
  * Note vs `inspect_nodes`: read owns everything that lives in the
  * node markdown frontmatter (label, type, src, summary, keywords, ...).
- * Position / size / parent / style live in `canvas.json` and are owned
+ * Position / size / parent / style live in `space.json` and are owned
  * by `inspect_nodes` — see that handler for the boundary.
  */
 

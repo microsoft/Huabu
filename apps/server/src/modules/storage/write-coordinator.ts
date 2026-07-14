@@ -2,7 +2,7 @@
  * Canvas write coordinator.
  *
  * Owns the **per-canvas async write lock** that serializes all durable
- * writes to a single canvas's on-disk state (`canvas.json` and its
+ * writes to a single Space's on-disk state (`space.json` and its
  * `nodes/*.md` sidecars). A single promise per `canvasId` records the tail
  * of the in-flight task chain; new callers attach onto that tail. The chain
  * catches errors so one failed task does not poison subsequent ones, and the
@@ -16,7 +16,7 @@
  * serialization, not field-ownership policy. Callers pass in what to write.
  *
  * Per-canvas (not per-node) granularity is intentional: an agent batch must
- * write `canvas.json` and several `.md` files atomically under one lock, and
+ * write `space.json` and several `.md` files atomically under one lock, and
  * the critical section holds only microsecond-scale synchronous writes (any
  * expensive pipeline stays outside the lock).
  */
@@ -111,7 +111,7 @@ export async function updateNode(
  *
  * ⚠️ The caller MUST already hold `withCanvasMutex(store.canvasId)`. This exists
  * for writers that run *inside* an existing canvas-lock critical section — the
- * agent executor, which locks its whole multi-node + `canvas.json` batch and
+ * agent executor, which locks its whole multi-node + `space.json` batch and
  * would **deadlock** on a re-entrant `updateNode` (the promise-chain mutex is
  * not re-entrant). Every writer that does NOT already hold the lock must use
  * {@link updateNode} instead.

@@ -6,7 +6,7 @@ packages that Huabu treats as extensions/plugins.
 In the AI era, the agent _is_ the integration layer. Instead of writing a
 bespoke plugin for every service (publish to HackMD, file an issue, call an
 API…), you connect an agent that already knows how to drive that service's CLI
-or skill, point it at the canvas via **Huabu Reachback**, and let it do the
+or skill, point it at the Space via **Huabu Reachback**, and let it do the
 work. Each subfolder here is one such packaged agent.
 
 ---
@@ -39,9 +39,9 @@ selector, and talk to it.
 
 ## Example agents
 
-| Agent                                      | What it does                                                                                                                                                      | Requires                                        | Harnesses           |
-| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- | ------------------- |
-| [`hackmd-publisher/`](./hackmd-publisher/) | Assembles selected canvas nodes into a markdown document (respecting frames/edges) and publishes it to [HackMD](https://hackmd.io), then writes back a link node. | HackMD API token (`.env`), `@hackmd/hackmd-cli` | `claude`, `copilot` |
+| Agent                                      | What it does                                                                                                                                                     | Requires                                        | Harnesses           |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- | ------------------- |
+| [`hackmd-publisher/`](./hackmd-publisher/) | Assembles selected Space nodes into a markdown document (respecting frames/edges) and publishes it to [HackMD](https://hackmd.io), then writes back a link node. | HackMD API token (`.env`), `@hackmd/hackmd-cli` | `claude`, `copilot` |
 
 More teams will be added as concrete extension patterns emerge.
 
@@ -147,9 +147,9 @@ agentlet agent-team doctor
 1. In a chat or on a **question node**, open the agent selector to the left of
    the input and pick the Agent Team profile you just added. This binds the
    current thread to that agent (the binding locks on the first message).
-2. Select the canvas nodes you want the agent to act on, then send a natural
+2. Select the Space nodes you want the agent to act on, then send a natural
    language request — e.g. _"Publish these notes to HackMD as a blog post."_
-3. The agent reads/writes canvas state via Huabu Reachback and writes back a
+3. The agent reads/writes Space state via Huabu Reachback and writes back a
    result node when done.
 
 See each team's own `README.md` for concrete example prompts.
@@ -163,7 +163,7 @@ See each team's own `README.md` for concrete example prompts.
 3. The daemon reads `agentlet.yaml`, resolves the command + workspace `cwd` +
    env (including `.env` and the workspace `node_modules/.bin` on `PATH`), and
    spawns the agent.
-4. The agent uses Huabu Reachback (e.g. `write-node`) to read/write canvas state.
+4. The agent uses Huabu Reachback (e.g. `write-node`) to read/write Space state.
 
 This lets Huabu treat external agents as first-class integrations without
 inventing a bespoke plugin API for every service.

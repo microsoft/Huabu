@@ -26,7 +26,7 @@
  *
  *   <workspace>/
  *     <canvasId>/
- *       canvas.json
+ *       space.json
  *       nodes/<nodeId>.md
  *       artifacts/<file>
  *       memory/preferences.md

@@ -415,7 +415,7 @@ export const useIntentStore = create<IntentState>()((set, get) => ({
 // Stage 2: Collect IDs of nearby/enclosed nodes + edges (no labels/positions)
 // Stage 3: Send screenshot + IDs to the server-side LLM agent which fetches
 //          additional node content on demand via `read` (markdown body),
-//          node layout via `inspect_nodes` (canvas.json fields), and
+//          node layout via `inspect_nodes` (space.json fields), and
 //          edge style via `inspect_edges`.
 //
 // Each call to `triggerSketchRecognition` owns its own AbortController

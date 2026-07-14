@@ -189,7 +189,7 @@ export const agentApi = {
       /**
        * Anchor a node-neighbourhood preamble to this node id. When
        * set, the server resolves the surrounding-canvas context from
-       * `canvas.json` and pushes a `[SYSTEM Context]` preamble
+       * `space.json` and pushes a `[SYSTEM Context]` preamble
        * (rendered from the Ask agent's `nodeNeighbourhoodPreamble`
        * template) before the actual user message. Sent today by
        * `useQuestionRunner`; anchor-type agnostic.

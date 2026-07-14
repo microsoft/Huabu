@@ -2,7 +2,7 @@
  * Native application menu (macOS).
  *
  * Platform convention split: macOS expects workspace-level actions
- * (New Canvas, Import, Switch Workspace, Settings, …) to live in the
+ * to live in the
  * global menu bar at the top of the screen, NOT in a logo dropdown
  * crammed next to the traffic-lights. Windows / Linux have no global
  * menu bar, so there the in-app `AppMenu` dropdown in the custom title
@@ -116,9 +116,9 @@ const DEFAULT_MENU_CONFIG: MenuConfig = {
     front: 'Bring All to Front',
     close: 'Close Window',
     toggleFullScreen: 'Toggle Full Screen',
-    newCanvas: 'New Canvas',
+    newCanvas: 'New Space',
     import: 'Import',
-    switchWorkspace: 'Switch Workspace',
+    switchWorkspace: 'Switch Home',
     settings: 'Settings',
     userHandbook: 'User Handbook',
     keyboardShortcuts: 'Keyboard Shortcuts',

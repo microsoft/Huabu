@@ -273,7 +273,7 @@ function stripNodeContentForStructurePut(nodes: readonly Node[]): Node[] {
 //
 // The frontend no longer normalises spatial data for the LLM.
 // `/api/agent` resolves the anchor node's neighbourhood server-side
-// from `canvas.json` (see `apps/server/src/modules/agent/
+// from `space.json` (see `apps/server/src/modules/agent/
 // node-neighbourhood.ts`); the web bundle only sends `anchorNodeId`.
 //
 // Existing UI-side proximity queries (sketch clustering, frame
@@ -669,7 +669,7 @@ type RFState = {
    * @internal Apply a server-authored delta batch (M2 headless executor).
    *
    * Bypasses the local engine — the server has already executed the
-   * commands, persisted canvas.json + .md sidecars, and given us the
+   * commands, persisted space.json + .md sidecars, and given us the
    * structural diff to apply. We still snapshot for undo, drive the
    * web-only post-effects (preprocessing trigger, AI-edit flag, etc.),
    * and reconcile our local `version` to `toVersion` so the next
@@ -1530,7 +1530,7 @@ const useCanvasStore = create<RFState>()(
           // Legacy field: older canvases still carry a server-side
           // viewport. Used only as a one-shot fallback when this tab
           // has no sessionStorage entry yet; the next structure PUT
-          // strips it from `canvas.json` for good.
+          // strips it from `space.json` for good.
           viewport?: CanvasViewport;
         };
         canvasHistoryManager.clear();

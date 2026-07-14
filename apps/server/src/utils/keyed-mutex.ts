@@ -6,7 +6,7 @@
  * before running. Calls with different keys do not block each other.
  *
  * Used by the memory module to serialize:
- *   - workspace memory writes (single shared `.huabu.md` written by
+ *   - user memory writes (single shared `user.md` written by
  *     curators from every canvas + chat agents) — key = constant.
  *   - per-canvas op counter mutations (`state.json` read-modify-write)
  *     — key = canvasId.

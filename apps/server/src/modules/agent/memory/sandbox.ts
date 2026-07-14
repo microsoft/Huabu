@@ -4,7 +4,7 @@
  * Two roots, both legitimate targets for the three memory writers:
  *
  *   - **Workspace root** (`<workspace>/setting/`) — workspace memory
- *     (`.huabu.md`) and user-skill SKILL.md files.
+ *     (`user.md`) and user-skill SKILL.md files.
  *   - **Canvas root** (`<canvasDir>/.memory/`) — canvas memory body
  *     (`canvas.md`) and the worker's `state.json`.
  *
@@ -98,7 +98,7 @@ export function resolveUserSkillPath(id: string): string {
 /**
  * Resolve the absolute canvas-memory file path for a canvas.
  *
- * `<canvasDir>/.memory/canvas.md`. Throws if the resolved path
+ * `<canvasDir>/.memory/space.md`. Throws if the resolved path
  * escapes the canvas's `.memory/` root (a defensive check — the path
  * computation in `storage/paths.ts` already constrains the result,
  * but going through `ensureUnderRoot` keeps the invariant explicit).

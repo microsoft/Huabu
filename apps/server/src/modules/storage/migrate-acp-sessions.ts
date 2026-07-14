@@ -110,7 +110,7 @@ export function migrateAcpSessionsFile(
  * records into `threads.json`. The per-canvas namespace uses the on-disk
  * `<canvasDir>/.history` as `storage.root` (so the migrated `threads.json`
  * lands where the live reader looks) and the real `canvasId` (read from
- * `canvas.json`) as `name`, so the persisted `spec.namespace` matches the
+ * `space.json`) as `name`, so the persisted `spec.namespace` matches the
  * live `canvasAcpNamespace(canvasId)`.
  */
 export function migrateLegacyAcpSessions(workspace: string): void {

@@ -97,7 +97,7 @@ export const webSearchTool: ToolDefinition = {
 // Boundary with `read`: anything in the node markdown frontmatter
 // (label, type, src, content, summary, keywords) lives in
 // `nodes/*.md` and is owned by `read`. The three canvas tools
-// own everything in `canvas.json` (position/size/parent/style on
+// own everything in `space.json` (position/size/parent/style on
 // nodes, EdgeStyle on edges) plus derived spatial/topological
 // metadata.
 //

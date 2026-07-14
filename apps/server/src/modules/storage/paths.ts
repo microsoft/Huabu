@@ -3,15 +3,15 @@
  *
  * Layout under `<workspace>/`:
  *
- *   setting/                        user-owned, cross-canvas
- *     .huabu.md                     workspace memory (user preferences)
+ *   setting/                        user-owned, cross-Space
+ *     user.md                       user memory (preferences)
  *     skills/<id>/SKILL.md          user / memory-agent authored skills
- *   <canvasDir>/                    name = sanitised canvas title
- *     canvas.json                   carries the stable canvasId
+ *   <canvasDir>/                    name = sanitised Space title
+ *     space.json                    carries the stable canvasId
  *     nodes/<safe(label)>.md        per-node markdown (id in frontmatter)
  *     .artifacts/<artifactId><ext>  raw uploads (hidden dir)
- *     .memory/                      canvas-scoped canvas memory (AI-private)
- *       canvas.md                   canvas memory body
+ *     .memory/                      Space-scoped memory (AI-private)
+ *       space.md                    Space memory body
  *       state.json                  memory worker bookkeeping
  *     .history/
  *       chat/<threadId>.turns.jsonl finalized turns (append-only)
@@ -79,10 +79,10 @@ export function artifactPath(canvasId: string, filename: string): string {
 // ─── Memory module paths ───────────────────────────────────────────────────
 //
 // Two scopes:
-//   - Workspace memory (`<workspace>/setting/.huabu.md`):
-//     cross-canvas user preferences / profile. User-editable.
-//   - Canvas-level canvas memory (`<canvasDir>/.memory/`): hidden,
-//     AI-private working notes for *this* canvas. The leading `.` puts
+//   - User memory (`<workspace>/setting/user.md`):
+//     cross-Space user preferences / profile. User-editable.
+//   - Space memory (`<canvasDir>/.memory/`): hidden,
+//     AI-private working notes for *this* Space. The leading `.` puts
 //     it in the same hidden tier as `.history/` and `.artifacts/`.
 
 /** Workspace memory — cross-canvas user preferences: `<workspace>/setting/user.md`. */
@@ -115,14 +115,13 @@ export function memoryStatePath(canvasId: string): string {
 // ─── Workspace-level setting / user skills ─────────────────────────────────
 
 /**
- * Workspace-level user setting directory: `<workspace>/setting/`.
- * Holds cross-canvas, user-visible artifacts:
- *   - `.huabu.md`            workspace user memory (PR-B)
+ * Home-level user setting directory: `<workspace>/setting/`.
+ * Holds cross-Space, user-visible artifacts:
+ *   - `user.md`              user memory
  *   - `skills/<id>/SKILL.md` user-authored / memory-agent-authored skills
  *
- * Distinct from the per-canvas `memory/` directory (which is
- * canvas-scoped canvas memory, AI-private). This one is the
- * cross-canvas, user-editable surface.
+ * Distinct from the per-Space `.memory/` directory (which is AI-private).
+ * This one is the cross-Space, user-editable surface.
  */
 export function settingDir(): string {
   return path.join(getWorkspacePath(), 'setting');
@@ -188,7 +187,7 @@ export function eventsPath(canvasId: string): string {
  * actually mutated state. Lines carry the canvas version, run id,
  * originator, applied commands, and the resulting structural deltas
  * (see `shared/canvas-engine/delta.ts`). Used by M3 broadcast / replay
- * and as the persistence anchor for `canvas.json`'s monotonic version
+ * and as the persistence anchor for `space.json`'s monotonic version
  * counter.
  *
  * Lives next to `events.jsonl` so the entire `.history/` tier travels

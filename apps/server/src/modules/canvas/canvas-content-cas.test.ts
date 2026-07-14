@@ -36,7 +36,7 @@ async function buildApp() {
   return app;
 }
 
-/** Seed a canvas.json with a single note node (no `.md` body yet). */
+/** Seed space.json with a single note node (no `.md` body yet). */
 function seedCanvas(canvasId: string, nodeId: string, label: string): void {
   getCanvasStore(canvasId).write({
     canvasId,

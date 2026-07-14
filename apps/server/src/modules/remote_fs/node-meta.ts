@@ -4,7 +4,7 @@
  * Two concerns live here:
  *
  * 1. **Virtual → physical path mapping.** The RFS presents a clean read
- *    layout (`nodes/`, `artifacts/`, `upload/`, `canvas.json`) while on disk
+ *    layout (`nodes/`, `artifacts/`, `upload/`, `space.json`) while on disk
  *    the artifact and upload regions are hidden `.`-dirs (`.artifacts/`,
  *    `.upload/`) alongside the private bookkeeping dirs. {@link toPhysicalRel}
  *    rewrites the two aliased prefixes and {@link resolveReadable} maps a
@@ -17,7 +17,7 @@
  *    locked) plus its incident edges (grouped into parents/children). The
  *    file → node mapping and `label` / `rev` come from the on-disk sidecar
  *    (the canonical source); type / src / locked / edges come from
- *    `canvas.json` state. All of it is serialised into the `X-Huabu-*`
+ *    `space.json` state. All of it is serialised into the `X-Huabu-*`
  *    response headers (label percent-encoded, edges as JSON).
  */
 
@@ -87,7 +87,7 @@ const NODE_FILE_RE = /^nodes\/[^/]+\.md$/;
  *
  * The file → node mapping goes through the store's frontmatter-`id` index
  * ({@link CanvasStore.nodeIdForFilename}), NOT a re-derived
- * `toSafeFilename(label)` — `canvas.json` never carries `data.label`, so the
+ * `toSafeFilename(label)` — `space.json` never carries `data.label`, so the
  * derived path would collapse to `nodes/<id>.md` and never match a real
  * label-named file. `label` / `rev` are then sourced from the sidecar.
  */
@@ -118,7 +118,7 @@ export function lookupNodeByPath(
     id: match.id,
     type: (match.type ?? 'note') as CanvasNodeType,
   };
-  // Label lives in the sidecar frontmatter (canvas.json never carries it).
+  // Label lives in the sidecar frontmatter (space.json never carries it).
   if (sidecar?.label) meta.label = sidecar.label;
   const src =
     typeof sidecar?.src === 'string'
@@ -129,7 +129,7 @@ export function lookupNodeByPath(
   if (src) meta.src = src;
   if (typeof data.locked === 'boolean') meta.locked = data.locked;
   // Revision hashes the node's *canonical* authored content — the on-disk
-  // body (`canvas.json` strips `data.content`). Media nodes carry only a
+  // body (`space.json` strips `data.content`). Media nodes carry only a
   // `src`, so a missing body is fine.
   const content =
     typeof sidecar?.content === 'string' ? sidecar.content : undefined;

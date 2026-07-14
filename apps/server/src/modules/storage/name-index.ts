@@ -7,7 +7,7 @@
  * keeps the two in sync without touching the filesystem itself.
  *
  * Three consumers share the implementation:
- *   - workspace-level canvas index (`<workspace>/<dir>/canvas.json`)
+ *   - Home-level Space index (`<workspace>/<dir>/space.json`)
  *   - per-canvas node index         (`<canvas>/nodes/<file>.md`)
  *   - per-canvas artifact index     (`<canvas>/artifacts/<file>`)
  */

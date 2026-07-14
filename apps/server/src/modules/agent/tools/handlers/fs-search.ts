@@ -16,7 +16,7 @@
  *
  * Enrichment: when a result file is `nodes/<filename>.md`, the response
  * includes `nodeId`, `label`, and `nodeType` from the canvas's
- * `canvas.json` so the LLM can chain straight into `read` (for the
+ * `space.json` so the LLM can chain straight into `read` (for the
  * rest of the file), `inspect_nodes` (for layout / style / spatial
  * relations), or `canvas_commands` (for writes) without a second
  * lookup. This is the one place we deviate from pi: pi returns raw

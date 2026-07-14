@@ -8,7 +8,6 @@ import {
   ChevronDown,
   Undo2,
   Redo2,
-  Sprout,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -23,7 +22,6 @@ import {
 import { matchesShortcut } from '@/config/shortcuts';
 import { isEditableTarget } from '@/hooks/shortcuts';
 import { useIsNotMouse } from '@/hooks/useInputMode';
-import { useIntentStore } from '@/store/intentStore';
 import { useToolStore } from '@/store/toolStore';
 
 import { NODE_ICON } from '../../../config/nodeIcons.ts';
@@ -63,8 +61,6 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
   const intentButtonRef = useRef<HTMLDivElement>(null);
-
-  const intentOpen = useIntentStore((s) => s.isOpen);
 
   // State
   const [activeModal, setActiveModal] = useState<'upload' | 'link' | null>(
@@ -160,11 +156,12 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
         setPendingNodeType(pendingNodeType === 'sketch' ? null : 'sketch');
         return;
       }
-      if (matchesShortcut(e, 'mode.audio')) {
-        e.preventDefault();
-        setPendingNodeType(pendingNodeType === 'audio' ? null : 'audio');
-        return;
-      }
+      // Temporarily disabled because the audio node feature is not ready yet.
+      // if (matchesShortcut(e, 'mode.audio')) {
+      //   e.preventDefault();
+      //   setPendingNodeType(pendingNodeType === 'audio' ? null : 'audio');
+      //   return;
+      // }
       if (matchesShortcut(e, 'mode.question')) {
         e.preventDefault();
         setPendingNodeType(pendingNodeType === 'question' ? null : 'question');
@@ -473,6 +470,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
               <NODE_ICON.sketch />
             </Button>
           </div>
+          {/* Temporarily disabled because the audio node feature is not ready yet.
           <Button
             variant="ghost"
             iconOnly
@@ -487,7 +485,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             }
           >
             <NODE_ICON.audio />
-          </Button>
+          </Button> */}
         </div>
 
         <div ref={resourceMenuRef} className="flex items-center gap-1.5">
@@ -551,8 +549,8 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           <Button
             variant="ghost"
             iconOnly
-            title={`${t('toolbar.nodes.questionSticker')} (Q)`}
-            shortcutBadge="Q"
+            title={`${t('toolbar.nodes.agentNode')} (A)`}
+            shortcutBadge="A"
             shortcutBadgeActive={pendingNodeType === 'question'}
             className={clsx(
               pendingNodeType === 'question' && 'text-info bg-bg-default',
@@ -566,6 +564,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             <NODE_ICON.question />
           </Button>
 
+          {/* Temporarily disabled because the intent feature is not yet robust enough for production use.
           <Button
             variant="ghost"
             iconOnly
@@ -581,7 +580,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             }}
           >
             <Sprout />
-          </Button>
+          </Button> */}
         </div>
 
         {/* Non-mouse only: Undo / Redo (Delete lives on the per-context floating toolbars) */}

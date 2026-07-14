@@ -66,7 +66,7 @@ function canShowNativePicker(): boolean {
 async function pickFolderNative(): Promise<string | null> {
   if (process.platform === 'darwin') {
     const script =
-      'POSIX path of (choose folder with prompt "Select Sediment workspace folder")';
+      'POSIX path of (choose folder with prompt "Select Huabu Home folder")';
     return runAndTrim('osascript', ['-e', script]);
   }
   if (process.platform === 'win32') {
@@ -84,7 +84,7 @@ async function pickFolderNative(): Promise<string | null> {
       '$owner.Show();',
       '$owner.Activate();',
       '$f = New-Object System.Windows.Forms.FolderBrowserDialog;',
-      '$f.Description = "Select Sediment workspace folder";',
+      '$f.Description = "Select Huabu Home folder";',
       '$result = $f.ShowDialog($owner);',
       '$owner.Dispose();',
       'if ($result -eq "OK") { Write-Output $f.SelectedPath }',
@@ -95,14 +95,14 @@ async function pickFolderNative(): Promise<string | null> {
   const zenity = await runAndTrim('zenity', [
     '--file-selection',
     '--directory',
-    '--title=Select Sediment workspace folder',
+    '--title=Select Huabu Home folder',
   ]);
   if (zenity) return zenity;
   const kdialog = await runAndTrim('kdialog', [
     '--getexistingdirectory',
     process.env.HOME ?? tmpdir(),
     '--title',
-    'Select Sediment workspace folder',
+    'Select Huabu Home folder',
   ]);
   return kdialog;
 }
