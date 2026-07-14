@@ -43,7 +43,7 @@ export const keyboardShortcutSections: ShortcutSection[] = [
       { keys: '3', description: 'Text placement mode' },
       { keys: '4', description: 'Sketch mode' },
       { keys: '5', description: 'Audio placement mode' },
-      { keys: 'Q', description: 'Question Sticker placement mode' },
+      { keys: 'A', description: 'Create Agent Node' },
     ],
   },
   {
@@ -69,7 +69,7 @@ export const keyboardShortcutSections: ShortcutSection[] = [
       { keys: 'Ctrl/Cmd+I', description: 'Open intent recognition' },
       {
         keys: 'Shift+Enter',
-        description: 'Submit a Question node and run immediately',
+        description: 'Submit an Agent Node and run immediately',
       },
     ],
   },

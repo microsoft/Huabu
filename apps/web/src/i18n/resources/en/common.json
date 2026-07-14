@@ -443,7 +443,7 @@
     "currentAgentThread": "Current agent for this conversation",
     "newConversation": "New conversation",
     "newChatWith": "New chat with {{name}}",
-    "saveAsQuestion": "Save chat as question node",
+    "saveAsQuestion": "Save chat as Agent Node",
     "startChatWith": "Start chat with…",
     "startNewChatWith": "Start new chat with",
     "currentStartsSameSetup": "Current — starts another thread with the same setup",
@@ -624,7 +624,7 @@
       "text": "Text",
       "sketch": "Sketch",
       "audio": "Audio",
-      "questionSticker": "Question Sticker"
+      "agentNode": "Agent Node"
     },
     "resources": {
       "uploadOrLink": "Upload or Link",
@@ -737,13 +737,13 @@
       "textMode": "Text placement mode",
       "sketchMode": "Sketch mode",
       "audioMode": "Audio placement mode",
-      "questionMode": "Question Sticker placement mode",
+      "questionMode": "Create Agent Node",
       "sendBack": "Send selected nodes to back",
       "bringFront": "Bring selected nodes to front",
       "groupFrame": "Group selected nodes into a frame",
       "copyNoteBlock": "Copy a Note block to the Space instead of moving it (the default is move — the source loses the block)",
       "openIntent": "Open intent recognition",
-      "submitQuestion": "Submit a Question node and run immediately (while editing)",
+      "submitQuestion": "Submit an Agent Node and run immediately (while editing)",
       "searchCanvas": "Search the Space (or find inside the active preview when focus is in an expanded node)",
       "jumpResult": "Jump to active result / next match",
       "previousMatch": "Previous match (in preview)",

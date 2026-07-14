@@ -443,7 +443,7 @@
     "currentAgentThread": "当前对话使用的 Agent",
     "newConversation": "新对话",
     "newChatWith": "使用 {{name}} 新建聊天",
-    "saveAsQuestion": "将聊天保存为问题节点",
+    "saveAsQuestion": "将聊天保存为 Agent 节点",
     "startChatWith": "选择聊天对象…",
     "startNewChatWith": "新聊天使用",
     "currentStartsSameSetup": "当前项；使用相同设置再开启一个对话",
@@ -624,7 +624,7 @@
       "text": "文本",
       "sketch": "手绘",
       "audio": "音频",
-      "questionSticker": "问题贴纸"
+      "agentNode": "Agent 节点"
     },
     "resources": {
       "uploadOrLink": "上传或添加链接",
@@ -737,13 +737,13 @@
       "textMode": "文本放置模式",
       "sketchMode": "手绘模式",
       "audioMode": "音频放置模式",
-      "questionMode": "问题贴纸放置模式",
+      "questionMode": "创建 Agent 节点",
       "sendBack": "将选中节点置于底层",
       "bringFront": "将选中节点置于顶层",
       "groupFrame": "将选中节点组合到框架中",
       "copyNoteBlock": "将笔记块复制到 Space，而不是移动它（默认是移动，源位置会失去该块）",
       "openIntent": "打开意图识别",
-      "submitQuestion": "提交问题节点并立即运行（编辑时）",
+      "submitQuestion": "提交 Agent 节点并立即运行（编辑时）",
       "searchCanvas": "搜索 Space（焦点在展开节点预览中时，则在当前预览内查找）",
       "jumpResult": "跳转到当前结果 / 下一个匹配项",
       "previousMatch": "上一个匹配项（预览内）",

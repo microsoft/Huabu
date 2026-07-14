@@ -222,7 +222,7 @@ export const SHORTCUTS: ShortcutDef[] = [
   },
   {
     id: 'mode.question',
-    combo: { key: 'q' },
+    combo: { key: 'a' },
     descriptionKey: 'shortcuts.items.questionMode',
     section: SECTION.toolbar,
   },
