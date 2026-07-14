@@ -28,25 +28,6 @@ export const ServerMethods = {
   SEND_RESOURCE: 'server/sendResource',
 } as const
 
-/** Host → Server method names (host channel) */
-export const HostMethods = {
-  SEND: 'host/send',
-  SUBSCRIBE: 'host/subscribe',
-  UNSUBSCRIBE: 'host/unsubscribe',
-} as const
-
-/** Server → Host method names (host channel) */
-export const ServerHostMethods = {
-  EVENT: 'server/event',
-  REPLAYED: 'server/replayed',
-  ERROR: 'server/error',
-  CONNECTED: 'agent/connected',
-  DISCONNECTED: 'agent/disconnected',
-  EXITED: 'agent/exited',
-  RESTARTED: 'agent/restarted',
-  SUSPENDED: 'agent/suspended',
-} as const
-
 /** Error codes used in agent/hello rejection */
 export const ErrorCodes = {
   INVALID_TOKEN: -32001,

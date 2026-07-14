@@ -1,15 +1,13 @@
 // @agentlet/protocol — Shared type definitions for the Agentlet protocol
 //
 // This package is the single source of truth for all protocol types.
-// Both `agentlet` (agent-side CLI) and `@agentlet/server` (relay server) depend on it.
+// Both the `agentlet` daemon and its host-side Gateway depend on it.
 
 export {
   PROTOCOL_VERSION,
   AgentletMethods,
   AgentMethods,
   ServerMethods,
-  HostMethods,
-  ServerHostMethods,
   ErrorCodes,
 } from './constants.js'
 
@@ -54,7 +52,6 @@ export type {
 } from './messages.js'
 
 export type {
-  AgentletServerOptions,
   AuthResult,
   AgentConnection,
 } from './gateway-types.js'

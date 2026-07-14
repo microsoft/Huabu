@@ -40,7 +40,7 @@ flowchart LR
     end
 
     subgraph relay["Relay"]
-        Server["@agentlet/server"]
+        Server["Agentlet Gateway"]
     end
 
     subgraph agent_side["Agent Side"]
@@ -84,11 +84,7 @@ separate HTTP endpoint, no public download, no extra auth.
 
 ### When
 
-The host app (via `@agentlet/server`) pushes its Reachback tool(s) **when the
-agentlet daemon connects**, and **re-pushes on reconnection** (the daemon's
-cache directory may have been cleared while it was suspended). Because delivery
-is idempotent — a plain overwrite at a fixed path — re-pushing is always safe
-and also keeps the script version in lock-step with the running server.
+The host app pushes its Reachback tool(s) through the Gateway **when the agentlet daemon connects**, and **re-pushes on reconnection** (the daemon's cache directory may have been cleared while it was suspended). Because delivery is idempotent — a plain overwrite at a fixed path — re-pushing is always safe and also keeps the script version in lock-step with the running host.
 
 ### How
 
@@ -164,9 +160,7 @@ To expose Reachback, a host application must:
 1. **Provide a tool script** that authenticates with `AGENTLET_TOKEN`, resolves
    its server base URL from `AGENTLET_SERVER` (or a host-specific override), and
    exposes whatever commands its agents need.
-2. **Push the script on connect/reconnect** via `server/sendResource` to
-   `${AGENTLET_REACHBACK_DIR}/<tool-script>` (see [§9 of the host integration
-   guide](host.md) for where to hook connection callbacks).
+2. **Push the script on connect/reconnect** via `server/sendResource` to `${AGENTLET_REACHBACK_DIR}/<tool-script>` from the embedding Gateway's connection callbacks.
 3. **Serve the endpoints** the script calls, accepting `Authorization: Bearer
    ${AGENTLET_TOKEN}`.
 4. **(Recommended) Inject usage into the agent's system prompt** at spawn time
@@ -185,5 +179,5 @@ itself.
 | `server/sendResource` params | [`SendResourceParams`](../packages/protocol/src/messages.ts) |
 | Wire contract & timing | [`protocol.md` §9 — Resource Distribution](protocol.md#resource-distribution) |
 | Env registry & spawn env | [`packages/local/src/agentlet.ts`](../packages/local/src/agentlet.ts) (`envRegistry`, `resolveDestination`, `handleSendResource`) |
-| Host integration (connection callbacks) | [`host.md`](host.md) |
+| Host integration (connection callbacks) | Embedding Gateway implementation |
 | Concrete host implementation | [Huabu — `docs/architecture/agent-reachback.md`](../../../docs/architecture/agent-reachback.md) |

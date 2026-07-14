@@ -1,84 +1,41 @@
 # Agentlet Protocol
 
-> Note: For formal machine-readable specs, see [`openapi.yaml`](openapi.yaml) for the REST API and [`asyncapi.yaml`](asyncapi.yaml) for the WebSocket protocols.
+The definitive machine-readable contract is the TypeScript API in [`packages/protocol/src`](../packages/protocol/src). Wire method names retain the `server/*` prefix for compatibility even when the host implementation is called a Gateway.
 
-<a id="connection-establishment"></a>
+## 1. Connection model
 
-## 1. Connection Establishment
+Agentlet uses two independent outbound WebSocket connection roles:
 
-Every agent session follows the same server-driven lifecycle. The `agentlet` CLI first registers the machine with the server via `agentlet/hello`, then processes `server/spawn { appId, sessionSpec }` requests over that control channel.
+| Role | Identity | First message | Purpose |
+| --- | --- | --- | --- |
+| `agentlet` | `agentletId` | `agentlet/hello` | Machine-level control channel for spawn, stop, list, resource delivery, and shutdown. |
+| `session` | ACP `sessionId` | `agent/hello` | Per-agent ACP relay channel with bootstrap metadata. |
 
-```mermaid
-sequenceDiagram
-    participant Host as Host App / UI
-    participant Server as @agentlet/server
-    participant CLI as agentlet
-    participant Agent as Agent Process
+The WebSocket URL includes `role`, `id`, and `token` query parameters. The Gateway authenticates the token and verifies that the query identity matches the hello payload before registering the connection.
 
-    Note over CLI,Server: Phase 1 — Agentlet Registration
-    CLI->>Server: WebSocket open (/api/bridge?role=agentlet&id=<agentletId>)
-    Note over CLI: Authorization: Bearer <token> (header)
-    Note over Server: Validate token, id format, check conflicts
-    Server-->>CLI: WS upgrade accepted (or reject with 401/409)
-    CLI->>Server: agentlet/hello { agentletId, agentletProfile }
-    Server-->>CLI: { agentletId, status: "registered" }
-    Note over Server: Close if no agentlet/hello within 5s
-    opt Resource (tool) distribution — host onConnection
-        Note over Server: Host pushes Reachback tool(s) on connect
-        Server->>CLI: server/sendResource { destination, content }
-        Note over CLI: Save to ${AGENTLET_REACHBACK_DIR} (see §9)
-    end
-
-    rect rgb(245, 245, 255)
-    Note over CLI: Phase 2 — Server-driven Spawn Request
-    Host->>Server: POST /api/agentlets/{id}/spawn
-    Server->>CLI: server/spawn { appId, sessionId?, sessionSpec }
-    end
-
-    Note over CLI,Agent: Phase 3 — Session Bootstrap (local)
-    CLI->>Agent: spawn(sessionSpec.command, stdio)
-    Agent-->>CLI: (process started, pid)
-    CLI->>Agent: initialize { clientInfo }
-    Agent-->>CLI: { agentInfo, agentCapabilities }
-    alt sessionId provided (resume)
-        CLI->>Agent: session/resume { sessionId, cwd }
-    else new session
-        CLI->>Agent: session/new { cwd }
-    end
-    Agent-->>CLI: { sessionId }
-    Note over CLI: Builds sessionProfile with agent field
-
-    Note over CLI,Server: Phase 4 — Agent-Session Registration
-    CLI->>Server: WebSocket open (/api/bridge?role=session&id=<sessionId>)
-    Note over CLI: Authorization: Bearer <token> (header)
-    Note over Server: Validate token, id format, check conflicts
-    Server-->>CLI: WS upgrade accepted (or reject with 401/409)
-    CLI->>Server: agent/hello { sessionId, sessionProfile }
-    Server-->>CLI: { sessionId, status: "connected" }
-
-    Note over CLI,Server: Phase 5 — Transparent ACP Relay
-    Host->>Server: host/send { sessionId, message }
-    Server->>CLI: ACP message (WS frame)
-    CLI->>Agent: ACP message + \n (stdin)
-    Agent-->>CLI: ACP response (stdout)
-    CLI-->>Server: ACP response (WS frame)
-    Server->>Host: server/event { sessionId, seq, event }
+```text
+/api/bridge?role=agentlet&id=<agentletId>&token=<token>
+/api/bridge?role=session&id=<sessionId>&token=<token>
 ```
 
-**Key insight:** Machine registration and per-agent session registration are separate. Phase 1 establishes the daemon control channel; each `server/spawn` request then creates an independently routed session through Phases 2–5.
+Control and session channels report the same `agentletId`. Disconnecting one role does not implicitly disconnect the other role.
 
-The two handshakes serve distinct purposes: `agentlet/hello` registers the **adapter** (machine, capabilities); `agent/hello` registers an **agent session** (process info, ACP capabilities). Each opens its own WebSocket — the agentlet control channel and per-session relay channels are independent connections.
+## 2. Lifecycle
 
-### Agentlet Registration & Control Messages
+```text
+daemon -> Gateway: connect role=agentlet
+daemon -> Gateway: agentlet/hello
+Gateway -> daemon: server/spawn
+daemon -> ACP process: initialize
+daemon -> ACP process: session/new | session/resume | session/load
+daemon -> Gateway: connect role=session
+daemon -> Gateway: agent/hello
+Gateway <-> daemon <-> ACP process: transparent ACP JSON-RPC relay
+```
 
-The agentlet registers itself using a two-step handshake: minimal identity in the WebSocket query parameters for early validation, followed by a rich `agentlet/hello` message with the full profile.
+`agentlet/hello` carries the execution-node profile:
 
-**Step 1 — WebSocket open:** The query string includes `role` (`agentlet` or `session`) and `id` (the agentlet's self-chosen identifier or the session ID). Authentication is via `Authorization: Bearer <token>` header (not query param — avoids token leaking in server logs). The server validates the token, checks the ID for format and conflicts, and upgrades the connection. If `id` is already in use by another active connection, the server rejects the upgrade with HTTP 409.
-
-**Step 2 — `agentlet/hello`:** The first message on the new connection must be `agentlet/hello` with the full `agentletProfile`. The server must receive this within 5 seconds or close the connection with code `HANDSHAKE_TIMEOUT`.
-
-```jsonc
-// Agentlet → Server (first message after WS open)
+```json
 {
   "jsonrpc": "2.0",
   "method": "agentlet/hello",
@@ -88,315 +45,120 @@ The agentlet registers itself using a two-step handshake: minimal identity in th
     "agentletProfile": {
       "bridge": { "name": "agentlet", "version": "1.0.0" },
       "machine": { "hostname": "worker-01", "platform": "linux" },
-      "capabilities": { "autoRestart": true, "bufferLimit": 1000, "maxAgents": 10 }
+      "capabilities": {
+        "autoRestart": true,
+        "bufferLimit": 1000,
+        "maxAgents": 10
+      }
     }
   }
 }
-
-// Server → Agentlet (response)
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "result": {
-    "agentletId": "worker-01",
-    "status": "registered"
-  }
-}
 ```
 
-The `agentletId` in the response confirms the machine identity supplied in the query and `agentlet/hello`.
+`agent/hello` carries the ACP session identity and the complete live `sessionProfile`, including process details, ACP bootstrap capability flags, initialization results, and the optional `session/new` response.
 
-The server registers the connection in a **connection registry**. Registered agentlets are addressable via REST API (`GET /api/agentlets`, `POST /api/agentlets/:agentletId/spawn`, etc.).
+Both hello methods are requests and require a matching JSON-RPC response before ordinary traffic begins.
 
-For the full control message schemas (`server/spawn`, `server/stop`, `server/list`, `agent/suspended`), see the [Bridge channel in asyncapi.yaml](asyncapi.yaml).
+## 3. Control methods
 
-**Spawn lifecycle:** On `server/spawn`, the agentlet validates `sessionSpec.command` / `sessionSpec.cwd` (or resolves them from `sessionSpec.agentTeam` — see below), spawns the process, performs session bootstrap (`session/new` or `session/resume` / `session/load` if `sessionId` is provided), opens a second WebSocket (standard `agent/hello` with attached `sessionProfile.agent`), and returns the result. If bootstrap fails, the agentlet terminates the agent and returns a JSON-RPC error. When native resume/load is unavailable because the method is unsupported, the session identifier is invalid, or the ACP resource no longer exists, the error carries `data: { code: "session_resume_unavailable" }`; other bootstrap failures do not carry this code.
+### Daemon to Gateway
 
-**Agent Team resolution:** If `sessionSpec.agentTeam` is present (containing `agentDir` and optionally `harness`), the agentlet resolves the concrete spawn parameters from the Agent Team package before proceeding with the normal spawn flow:
+| Method | Shape | Meaning |
+| --- | --- | --- |
+| `agentlet/hello` | Request | Register or reconnect the machine control channel. |
+| `agent/hello` | Request | Register or reconnect one ACP session channel. |
+| `agent/exited` | Notification | Agent process exited. |
+| `agent/restarted` | Notification | Agent process restarted after a crash. |
+| `agent/goodbye` | Notification | Daemon or session is shutting down. |
+| `agent/overflow` | Notification | A bounded reconnect buffer dropped messages. |
+| `agent/suspended` | Notification | Idle timeout suspended a resumable session. |
+| `agent/pong` | Notification | Application-level heartbeat response. |
 
-1. Read `agentlet.yaml` from `agentDir`
-2. Determine harness — explicit `harness` field, or the first key in `command`
-3. Validate that `workspaces/<harness>/` exists (reject with error if not)
-4. Resolve `command` from the manifest
-5. Set `cwd` to `agentDir/workspaces/<harness>/`
-6. Load `.env` from `agentDir` and merge: daemon defaults < `.env` < `sessionSpec.env`
+### Gateway to daemon
 
-See [`spec/agent-team.md`](agent-team.md) for the full Agent Team packaging model.
+| Method | Shape | Meaning |
+| --- | --- | --- |
+| `server/spawn` | Request | Launch and bootstrap an ACP agent. |
+| `server/stop` | Request | Stop one managed agent session. |
+| `server/list` | Request | List the daemon's active agents. |
+| `server/sendResource` | Notification | Write a host-provided resource through the daemon environment registry. |
+| `server/replay` | Notification | Replay Gateway-to-daemon messages buffered during disconnection. |
+| `server/ping` | Notification | Application-level heartbeat request. |
+| `server/shutdown` | Notification | Ask the daemon to stop gracefully. |
 
-**Session resume:** If the spawn request includes a `sessionId`, the agentlet will attempt to resume the session (preferring `session/resume`, falling back to `session/load` if the agent supports it). The spawn arguments (`cwd`, `mcpServers`, etc.) are re-passed to the resume request. The session store records the latest spawn params so callers can omit unchanged fields.
+All JSON-RPC envelopes and method payloads are defined in [`messages.ts`](../packages/protocol/src/messages.ts) and [`json-rpc.ts`](../packages/protocol/src/json-rpc.ts).
 
-**Idle timeout:** If `idleTimeoutSecs` is specified, the agentlet tracks inactivity on the host→agent direction. When the timeout elapses, the agentlet:
-1. Notifies the server via `agent/suspended`
-2. Gracefully stops the agent without sending `session/close` (preserving resume eligibility)
-3. Suppresses `autoRestart` to avoid restarting the suspended agent
+## 4. Spawn and bootstrap
 
-### Identity Model
+`server/spawn` includes a host correlation `appId`, an optional native ACP `sessionId`, and a `sessionSpec`.
 
-| Entity | Identity Source | Format | Example | Lifecycle |
-|---|---|---|---|---|
-| Agentlet | `--agentlet-id`, defaulting to the OS hostname | `<machine-name>` | `worker-01` | Stable until the machine name changes |
-| Agent session | ACP session bootstrap (`session/new`) | `<sessionId>` | `sess_abc123` | Primary routing key for the session — stable across resumes |
+The daemon resolves the command and working directory either directly from `sessionSpec` or from `sessionSpec.agentTeam`, then launches the process with `shell: true`. The host must therefore send only trusted commands.
 
-The agentlet's identity (`agentletId`) is the daemon's machine name. The supervising host may pass it explicitly with `--agentlet-id`; otherwise the daemon uses the OS hostname. The same value appears in the control query and hello, and in every child session's `sessionProfile.agentletId`. Changing the machine name therefore creates a new execution-node identity. The agent session's identity (`sessionId`) is established during Phase 3 bootstrap and is the primary routing key for ACP message relay. Display-oriented metadata such as `displayName` is derived separately from the session command and is not part of the bridge handshake. The `authenticate()` callback validates the query token and returns optional metadata; it does not assign identity.
+For a fresh session the daemon performs:
 
-**Duplicate session:** If an agentlet connects with a `sessionId` that is already in use by another incompatible active connection, the server rejects the connection with error code `-32004` (`DUPLICATE_SESSION`). If the existing connection is disconnected (stale), the new connection is treated as a reconnection.
+1. `initialize`
+2. `session/new`
+3. session WebSocket connection
+4. `agent/hello`
 
-### Security (Agentlet Control)
+When `sessionId` is supplied, the daemon prefers `session/resume` and falls back to `session/load` when supported. If native recovery is unavailable because the method is unsupported, the session does not exist, or the ACP resource is missing, the spawn error carries `data: { "code": "session_resume_unavailable" }`.
 
-- **Authentication:** `Authorization: Bearer <token>` header on WebSocket upgrade. For browser clients (which cannot set WS headers), use a short-lived single-use ticket obtained from a REST endpoint, passed as `?ticket=<ticket>` query param.
-- Only the token owner can spawn / stop / list sessions on their agentlet
-- The agentlet only accepts `server/spawn`, `server/stop`, and `server/list` from the server over its authenticated WebSocket
-- All agent commands run under the agentlet's OS user — no privilege escalation
-- The `sessionSpec.command` field in `server/spawn` is passed to `spawn` with `shell: true` — only trusted commands should be sent
+The host must include the required spawn parameters in every request. Agentlet has no durable session store.
 
-<a id="agent-handshake"></a>
+Agent Team resolution is documented in [`agent-team.md`](agent-team.md).
 
-## 2. Handshake Protocol
+## 5. ACP relay
 
-Two distinct handshakes serve different purposes:
+After `agent/hello` succeeds, every WebSocket text frame on the session channel contains exactly one ACP JSON-RPC message.
 
-| Handshake | Method | Phase | Purpose |
-|---|---|---|---|
-| Agentlet registration | `agentlet/hello` | Phase 1 | Register the adapter with its profile and capabilities |
-| Agent-session registration | `agent/hello` | Phase 4 | Register an agent session for ACP relay, with full session profile |
-
-Both must be the **first message** sent after the WebSocket connection opens. The server rejects any other traffic until the handshake completes. On success, the WebSocket enters its steady-state role: agent-sessions relay raw ACP JSON-RPC transparently, while agentlet connections receive server control requests (`server/spawn`, `server/stop`, etc.).
-
-For the full `AgentletHelloParams` and `AgentHelloParams` schemas, response formats, and examples, see the [Bridge channel in asyncapi.yaml](asyncapi.yaml).
-
-## 3. Message Relay (Steady State)
-
-```
-Server → Agentlet → Agent stdin:   ACP requests  (initialize, session/new, session/prompt, ...)
-Agent stdout → Agentlet → Server:  ACP responses (results, notifications, streaming chunks)
+```text
+Gateway -> session WebSocket -> agent stdin
+agent stdout -> session WebSocket -> Gateway
 ```
 
-**Framing:** Each WebSocket text frame contains exactly one JSON-RPC message (same as ACP stdio framing — newline-delimited JSON on stdio, one message per WS frame on WebSocket).
+The daemon appends newline framing when writing to agent stdin and reads agent stdout line by line. Invalid JSON and binary WebSocket frames are rejected rather than forwarded.
 
-**Agentlet behavior:**
-- Read stdout line-by-line; parse as JSON; forward each valid JSON-RPC message as a WebSocket text frame.
-- Read each WebSocket text frame; write as a line to agent stdin (append `\n`).
-- Invalid JSON from stdout: log warning, skip (do not forward garbage to server).
-- Binary WebSocket frames: reject and log (protocol violation).
+Agentlet performs ACP session bootstrap locally before opening the session connection. The Gateway does not send `initialize` or `session/new` through the relay.
 
-## 4. Control Messages
+## 6. Reconnection and buffering
 
-Control methods follow an **entity/verb** naming convention where the entity is the sender or subject: `agentlet/*` for agentlet adapter messages, `agent/*` for agent-session messages, `server/*` for server-originated messages, and `host/*` on the host channel. Lifecycle notifications use `agent/exited`, `agent/restarted`, `agent/goodbye`, `agent/overflow`, and `agent/suspended`. Server control uses `server/replay`, `server/ping`, `server/shutdown`, `server/spawn`, `server/stop`, `server/list`, and `server/sendResource` (file/tool distribution — see [§9](#resource-distribution)).
+When the machine control WebSocket disconnects unexpectedly, the daemon reconnects with exponential backoff capped by `--reconnect-max`, then repeats `agentlet/hello` with the same `agentletId`.
 
-- `agentlet/hello`, `agent/hello`, `server/spawn`, `server/stop`, and `server/list` are **requests** (have `id`, expect a response). All others are **notifications** (no `id`, no response expected).
-- Heartbeat: The agent-side adapter sends WebSocket-level pings at `--heartbeat` interval. `server/ping` / `agent/pong` are application-level keepalives initiated by the server for connection liveness detection.
+Session WebSockets do not currently reconnect automatically. Closing a session connection stops its relay without implicitly stopping the ACP process; the host must realize or stop that workload explicitly.
 
-For the complete message catalog with schemas and examples, see the [Bridge channel in asyncapi.yaml](asyncapi.yaml).
+The daemon uses bounded FIFO buffers for ACP notifications emitted during bootstrap and through the short window before the new session relay attaches. The embedding Gateway may independently buffer host-to-session traffic while its connection object is detached. Neither side provides durable replay, sequence acknowledgement, or deduplication.
 
-<a id="reconnection-protocol"></a>
+## 7. Identity and placement
 
-## 5. Reconnection Protocol
+The daemon's `agentletId` defaults to the operating-system hostname and can be supplied explicitly with `--agentlet-id`. The same identity appears in the control query, `agentlet/hello`, session query context, and `sessionProfile.agentletId`.
 
-When the WebSocket drops unexpectedly:
+The native ACP `sessionId` is established by session bootstrap and is the routing identity for one session connection. The embedding control plane selects the target `agentletId`; the daemon does not choose workload placement.
 
-1. **Buffer**: Continue reading agent stdout into an in-memory queue (up to `--buffer-limit` messages).
-2. **Backoff**: Reconnect attempts with exponential backoff: 1s, 2s, 4s, 8s, ... capped at `--reconnect-max`.
-3. **Re-handshake**: On reconnection, send the appropriate hello — `agent/hello` (same `sessionId`) for agent-session connections, or `agentlet/hello` (same `agentletId`) for agentlet control connections. Auth token travels in the `Authorization` header.
-4. **Server replay first**: If the server has buffered outbound messages (from host app `send()` calls during disconnect), it sends `server/replay` immediately after the hello response.
-5. **Client replay second**: After receiving the hello response (and any `server/replay`), Agentlet flushes its own buffered messages to the server in order.
-6. **Resume**: Normal relay resumes.
+## 8. Security boundary
 
-```mermaid
-sequenceDiagram
-    participant Local as agentlet (agent-side)
-    participant GW as @agentlet/server
+- Production connections require `wss://`; `--allow-insecure` permits `ws://` only when explicitly requested.
+- The Gateway authenticates both control and session connections before accepting hello.
+- Agent commands run with the daemon process's operating-system permissions.
+- `sessionSpec.command` uses a shell and is trusted control-plane input.
+- Resource destinations are resolved through the daemon environment registry.
 
-    Note over Local,GW: WebSocket drops unexpectedly
-    Local--xGW: (connection lost)
+## 9. Resource distribution
 
-    Note over Local: Buffering agent stdout...<br/>(agent subprocess unaffected)
-    Note over GW: Buffering host app send() calls...
+`server/sendResource` runs on the machine-level control channel and carries `{ destination, content }`.
 
-    Local->>GW: WebSocket open (reconnect, Authorization: Bearer <token>)
-    Local->>GW: agent/hello {same sessionId, same sessionProfile}
-    GW-->>Local: hello response {sessionId, status: "connected"}
-    GW->>Local: server/replay {messages: [...]} 
-    Note over Local: Writes replayed messages to agent stdin
-    Local->>GW: (flush buffered stdout messages)
-    Note over Local,GW: Normal relay resumes
-```
+The destination may reference daemon environment variables such as `${AGENTLET_REACHBACK_DIR}`. The daemon resolves the destination, creates parent directories, writes the text content, and logs success or failure.
 
-**Agent subprocess is never restarted due to network issues.** The agent continues running, writing to stdout, which Agentlet buffers. From the agent's perspective, nothing happened.
+Hosts should send resources when a daemon connects and repeat them after reconnect. Writes are overwrite-based and idempotent.
 
-<a id="protocol-type-reference"></a>
+The host-agnostic Reachback contract is documented in [`agent-reachback.md`](agent-reachback.md).
 
-## 6. Protocol Type Reference
+## 10. Source references
 
-The definitive type contract for the protocol lives in `@agentlet/protocol` (source of truth). See the source files directly:
-
-| Types | Source |
-|---|---|
-| **Base Types** — `JsonRpcRequest`, `JsonRpcNotification`, `JsonRpcResponse`, `JsonRpcError`, `JsonRpcMessage`, `AcpMessage` | [`packages/protocol/src/json-rpc.ts`](../packages/protocol/src/json-rpc.ts) |
-| **Agentlet Handshake** — `AgentletProfile`, `AgentletHelloParams`, `AgentletHelloResult` | [`packages/protocol/src/messages.ts`](../packages/protocol/src/messages.ts) |
-| **Agent Handshake** — `AgentHelloParams`, `AgentHelloResult`, `AgentHelloError` | [`packages/protocol/src/messages.ts`](../packages/protocol/src/messages.ts) |
-| **Agent Notifications** — `AgentExitedParams`, `AgentRestartedParams`, `AgentGoodbyeParams`, `AgentOverflowParams`, `AgentSuspendedParams`, `AgentPongParams` | [`packages/protocol/src/messages.ts`](../packages/protocol/src/messages.ts) |
-| **Server Control** — `ServerReplayParams`, `ServerPingParams`, `ServerShutdownParams`, `SpawnParams`, `SpawnResult`, `SessionResumeUnavailableErrorData`, `StopParams`, `StopResult`, `ListParams`, `ListResult`, `SendResourceParams` | [`packages/protocol/src/messages.ts`](../packages/protocol/src/messages.ts) |
-| **Lifecycle Events** — `LifecycleEvent` | [`packages/protocol/src/messages.ts`](../packages/protocol/src/messages.ts) |
-| **Server Configuration** — `AgentletServerOptions`, `AuthResult` | [`packages/protocol/src/gateway-types.ts`](../packages/protocol/src/gateway-types.ts) |
-| **AgentConnection** — the interface host apps interact with | [`packages/protocol/src/gateway-types.ts`](../packages/protocol/src/gateway-types.ts) |
-| **Error Codes & Constants** — `ErrorCodes`, `AgentletMethods`, `AgentMethods`, `ServerMethods`, `HostMethods`, `PROTOCOL_VERSION` | [`packages/protocol/src/constants.ts`](../packages/protocol/src/constants.ts) |
-
-### Error Codes
-
-See the `ErrorCodes` schema in [asyncapi.yaml](asyncapi.yaml) for the complete error code reference.
-
-<a id="acp-message-examples"></a>
-
-## 7. ACP Message Examples
-
-For reference — these are the ACP messages involved in the session lifecycle. Session bootstrap (`initialize` + `session/new` or `session/resume`) is performed **locally by agentlet** before connecting to the server. All subsequent messages flow through the relay transparently.
-
-```jsonc
-// ─── Session Bootstrap: New Session (agentlet → agent, LOCAL, before server connection) ───
-
-// Agentlet → Agent: Initialize the ACP session
-{ "jsonrpc": "2.0", "method": "initialize", "id": 1, "params": { "protocolVersion": 1, "clientInfo": { "name": "agentlet", "version": "1.0" }, "clientCapabilities": {} } }
-
-// Agent → Agentlet: Initialization response (capabilities)
-{ "jsonrpc": "2.0", "id": 1, "result": { "agentInfo": { "name": "claude-code", "version": "2.1" }, "agentCapabilities": { "streaming": true, "loadSession": true, "sessionCapabilities": { "resume": true } } } }
-
-// Agentlet → Agent: Start a new session (with correct local cwd)
-{ "jsonrpc": "2.0", "method": "session/new", "id": 2, "params": { "cwd": "/home/user/project", "mcpServers": [] } }
-
-// Agent → Agentlet: Session created
-{ "jsonrpc": "2.0", "id": 2, "result": { "sessionId": "sess_1" } }
-
-// ─── Session Bootstrap: Resuming a Previous Session (alternative to session/new) ───
-
-// After initialize, if a sessionId was provided in spawn params and agent supports resume:
-// Agentlet → Agent: Resume an existing session (preferred — no history replay)
-{ "jsonrpc": "2.0", "method": "session/resume", "id": 2, "params": { "sessionId": "sess_1", "cwd": "/home/user/project", "mcpServers": [] } }
-
-// Agent → Agentlet: Session resumed
-{ "jsonrpc": "2.0", "id": 2, "result": { "sessionId": "sess_1" } }
-
-// Fallback: If agent supports loadSession but not resume, use session/load instead:
-// Agentlet → Agent: Load session (agent replays history via session/update notifications)
-{ "jsonrpc": "2.0", "method": "session/load", "id": 2, "params": { "sessionId": "sess_1", "cwd": "/home/user/project", "mcpServers": [] } }
-
-// Agent → Agentlet: (session/update notifications with history, then response)
-{ "jsonrpc": "2.0", "id": 2, "result": { "sessionId": "sess_1" } }
-
-// ─── After bootstrap, agentlet connects to server with session profile in agent/hello ───
-// ─── All subsequent messages below flow THROUGH the relay transparently ───
-
-// Host → Agent: Send a prompt (UI only needs sessionId)
-{ "jsonrpc": "2.0", "method": "session/prompt", "id": 3, "params": { "sessionId": "sess_1", "prompt": [{ "type": "text", "text": "Refactor the auth module to use JWT" }] } }
-
-// Agent → Host: Streaming response chunks (notifications, no id)
-{ "jsonrpc": "2.0", "method": "session/update", "params": { "sessionId": "sess_1", "update": { "sessionUpdate": "agent_message_chunk", "content": { "type": "text", "text": "I'll start by..." } } } }
-
-// Agent → Host: Permission request
-{ "jsonrpc": "2.0", "method": "session/permission", "id": 4, "params": { "sessionId": "sess_1", "permission": { "type": "tool_call", "tool": "bash", "args": { "command": "rm -rf node_modules" } } } }
-
-// Host → Agent: Permission granted
-{ "jsonrpc": "2.0", "id": 4, "result": { "granted": true } }
-
-// Host → Agent: Cancel a running session
-{ "jsonrpc": "2.0", "method": "session/cancel", "id": 5, "params": { "sessionId": "sess_1" } }
-```
-
-<a id="server-side-contract"></a>
-
-## 8. Server-Side Contract
-
-Agentlet is intentionally server-agnostic. Any system can accept Agentlet connections by implementing:
-
-1. **WebSocket endpoint** — accepts incoming WSS connections at `/api/bridge` with `role` and `id` query parameters. Authenticates via `Authorization: Bearer <token>` header (CLI clients) or short-lived ticket / cookie (browser clients).
-2. **Handshakes** — `agentlet/hello` for agentlet registration (validates query params, stores agentlet profile, returns `agentletId`), and `agent/hello` for agent-session registration (validates token, stores session profile, returns `sessionId`).
-3. **ACP message relay** — forwards ACP JSON-RPC messages between host apps and agents transparently (no interpretation or rewriting).
-4. **Control messages** — handles `agent/exited`, `agent/goodbye`, etc. as lifecycle signals, plus `server/spawn`, `server/stop`, and `server/list` for agentlet daemons.
-5. **Reconnection** — recognizes a reconnecting agentlet (same token + `sessionId`) and optionally replays lost messages.
-
-Note: The server does **not** need to implement ACP client behavior (`initialize`, `session/new`). Session bootstrap is owned by agentlet — the server only stores and exposes the resulting session profile.
-
-This enables:
-
-- **Independent development** — Agentlet can be versioned, released, and tested without any specific server deployment.
-- **Ecosystem reuse** — Any application (IDE backend, AI canvas, CI orchestrator, research platform) can integrate by implementing the server side of this contract.
-- **User trust** — Agentlet is open-source and auditable. Users can verify it doesn't exfiltrate code (it's ~500 lines of relay logic with no network calls beyond the configured server).
-- **Minimal install** — Users install one small tool. No SDK, no heavy dependencies.
-
-<a id="resource-distribution"></a>
-
-## 9. Resource Distribution
-
-The server can push files to a connected agentlet daemon over the control
-channel using the `server/sendResource` notification. The primary use is **tool
-distribution for [Agent Reachback](agent-reachback.md)** — delivering the
-host-provided tool script(s) that spawned agents invoke to reach back into the
-host app — but the mechanism is general-purpose and can place any file.
-
-### When it happens
-
-Resource pushes ride the **agentlet control channel** (the `role=agentlet`
-connection), not a per-session channel. The host app (via `@agentlet/server`)
-should push on the daemon's `onConnection` and re-push on `onReconnection`:
-
-- **On connect** — the daemon's cache directory may be empty (fresh start), so
-  the tool must be delivered before any agent is spawned.
-- **On reconnect** — the cache may have been cleared while the daemon was
-  suspended (idle auto-suspend → resume), so the resource is re-pushed.
-
-Delivery is **idempotent** — a plain overwrite at a fixed path — so re-pushing
-is always safe and keeps the delivered script version in lock-step with the
-running server.
-
-```mermaid
-sequenceDiagram
-    participant Host as Host App
-    participant Server as @agentlet/server
-    participant Daemon as agentlet (control conn)
-
-    Daemon->>Server: agentlet/hello { agentletId, agentletProfile }
-    Server-->>Daemon: { status: "registered" }
-    Note over Server: onConnection fires
-    Host->>Server: sendResource(agentletId, { destination, content })
-    Server->>Daemon: server/sendResource { destination, content }
-    Note over Daemon: resolve ${ENV_VAR} → mkdir -p → write file
-    Daemon-->>Daemon: log resource_saved
-    Note over Daemon,Server: (on later reconnect, server re-pushes)
-```
-
-### Message
-
-`server/sendResource` is a **notification** (no `id`, no response expected) sent
-from server to agentlet on the control connection:
-
-```jsonc
-// Server → Agentlet (control channel)
-{
-  "jsonrpc": "2.0",
-  "method": "server/sendResource",
-  "params": {
-    // Destination path; supports ${ENV_VAR} interpolation
-    "destination": "${AGENTLET_REACHBACK_DIR}/my-reachback-tool.mjs",
-    // File content (text)
-    "content": "#!/usr/bin/env node\n…"
-  }
-}
-```
-
-### Daemon behavior
-
-1. **Interpolate** `${ENV_VAR}` references in `destination` against the daemon's
-   `envRegistry` (the same well-known variables injected into spawned agents,
-   e.g. `AGENTLET_REACHBACK_DIR`). An unknown variable is an error and the write
-   is skipped.
-2. **Create** parent directories (`mkdir -p`) for the resolved path.
-3. **Write** `content` to the resolved absolute path (UTF-8), overwriting any
-   existing file.
-4. **Log** `resource_saved` on success, or `resource_save_failed` (non-fatal) on
-   error.
-
-Because destinations are resolved against the env registry and that same
-registry seeds every spawned agent's environment, a pushed tool is automatically
-discoverable to agents via the corresponding `${ENV_VAR}` path — no absolute
-paths cross the wire. See the [Agent Reachback Interface](agent-reachback.md)
-for how this composes into the full tool-distribution + environment contract,
-and [`SendResourceParams`](../packages/protocol/src/messages.ts) for the type.
+| Contract | Source |
+| --- | --- |
+| Method constants and error codes | [`packages/protocol/src/constants.ts`](../packages/protocol/src/constants.ts) |
+| JSON-RPC envelopes and ACP message alias | [`packages/protocol/src/json-rpc.ts`](../packages/protocol/src/json-rpc.ts) |
+| Hello, lifecycle, spawn, replay, and resource payloads | [`packages/protocol/src/messages.ts`](../packages/protocol/src/messages.ts) |
+| Shared Gateway-facing connection types | [`packages/protocol/src/gateway-types.ts`](../packages/protocol/src/gateway-types.ts) |
+| Daemon implementation | [`packages/local/src/agentlet.ts`](../packages/local/src/agentlet.ts) |
+| WebSocket client and reconnect behavior | [`packages/local/src/ws-client.ts`](../packages/local/src/ws-client.ts) |

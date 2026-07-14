@@ -259,7 +259,7 @@ covers most use cases.
 
 - Node-focused and reusable
 - No hardwiring to CLI-only output or daemon lifecycle internals
-- Should not import from `@agentlet/server` or `@agentlet/local`
+- Should not import the daemon CLI or a host-specific Gateway implementation
 
 ## 6. Harness-Specific Mappings
 
