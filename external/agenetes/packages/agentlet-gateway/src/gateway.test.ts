@@ -470,6 +470,8 @@ describe('AgentletGateway', () => {
 
   it('routes control RPCs to the explicitly selected daemon', async () => {
     const { gateway, url } = await startHarness();
+    const setupProgress = vi.fn();
+    gateway.onAgentTeamSetupProgress(setupProgress);
     const machineA = await connect(url, {
       role: 'agentlet',
       queryId: 'machine-a',
@@ -494,6 +496,56 @@ describe('AgentletGateway', () => {
             jsonrpc: '2.0',
             id: message.id,
             result: { sessionId: 'native-a', pid: 456 },
+          }),
+        );
+      }
+      if (
+        'method' in message &&
+        message.method === ServerMethods.AGENT_TEAM_SETUP &&
+        'id' in message
+      ) {
+        machineA.socket.send(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: message.id,
+            result: { operationId: 'setup-a', accepted: true },
+          }),
+        );
+        machineA.socket.send(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            method: AgentletMethods.AGENT_TEAM_SETUP_PROGRESS,
+            params: {
+              operationId: 'setup-a',
+              type: 'completed',
+              workingDirPath: '/deployments/reviewer',
+            },
+          }),
+        );
+      }
+      if (
+        'method' in message &&
+        message.method === ServerMethods.AGENT_TEAM_SETUP_CANCEL &&
+        'id' in message
+      ) {
+        machineA.socket.send(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: message.id,
+            result: { operationId: 'setup-a', cancelled: true },
+          }),
+        );
+      }
+      if (
+        'method' in message &&
+        message.method === ServerMethods.AGENT_TEAM_VALIDATE &&
+        'id' in message
+      ) {
+        machineA.socket.send(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: message.id,
+            result: { valid: true, issues: [] },
           }),
         );
       }
@@ -530,6 +582,35 @@ describe('AgentletGateway', () => {
       members: [],
       diagnostics: [],
     });
+
+    await expect(
+      gateway.setupAgentTeam('machine-a', {
+        operationId: 'setup-a',
+        manifestPath: '/teams/reviewer/agentlet.yaml',
+        harness: 'copilot',
+        workingDirPath: '/deployments/reviewer',
+      }),
+    ).resolves.toEqual({ operationId: 'setup-a', accepted: true });
+    await waitUntil(() => setupProgress.mock.calls.length === 1);
+    expect(setupProgress).toHaveBeenCalledWith('machine-a', {
+      operationId: 'setup-a',
+      type: 'completed',
+      workingDirPath: '/deployments/reviewer',
+    });
+
+    await expect(
+      gateway.cancelAgentTeamSetup('machine-a', {
+        operationId: 'setup-a',
+      }),
+    ).resolves.toEqual({ operationId: 'setup-a', cancelled: true });
+
+    await expect(
+      gateway.validateAgentTeam('machine-a', {
+        manifestPath: '/teams/reviewer/agentlet.yaml',
+        harness: 'copilot',
+        workingDirPath: '/deployments/reviewer',
+      }),
+    ).resolves.toEqual({ valid: true, issues: [] });
   });
 
   it('rejects non-positive buffer limits', () => {

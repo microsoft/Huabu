@@ -9,6 +9,13 @@ import {
   type AgentletHelloResult,
   type AgentTeamScanParams,
   type AgentTeamScanResult,
+  type AgentTeamSetupCancelParams,
+  type AgentTeamSetupCancelResult,
+  type AgentTeamSetupParams,
+  type AgentTeamSetupProgressParams,
+  type AgentTeamSetupStartResult,
+  type AgentTeamValidateParams,
+  type AgentTeamValidateResult,
   type JsonRpcError,
   type JsonRpcMessage,
   type SendResourceParams,
@@ -63,6 +70,9 @@ export class AgentletGateway {
     Map<string, LiveAgentletConnection>
   >();
   private readonly pendingRequests = new Map<string, PendingRequest>();
+  private readonly setupProgressHandlers = new Set<
+    (agentletId: string, progress: AgentTeamSetupProgressParams) => void
+  >();
   private readonly handshakeTimeout: number;
   private readonly controlRequestTimeout: number;
   private readonly outboundBufferLimit: number;
@@ -178,6 +188,49 @@ export class AgentletGateway {
     );
   }
 
+  setupAgentTeam(
+    agentletId: string,
+    params: AgentTeamSetupParams,
+  ): Promise<AgentTeamSetupStartResult> {
+    return this.sendControlRequest(
+      agentletId,
+      ServerMethods.AGENT_TEAM_SETUP,
+      params,
+    );
+  }
+
+  cancelAgentTeamSetup(
+    agentletId: string,
+    params: AgentTeamSetupCancelParams,
+  ): Promise<AgentTeamSetupCancelResult> {
+    return this.sendControlRequest(
+      agentletId,
+      ServerMethods.AGENT_TEAM_SETUP_CANCEL,
+      params,
+    );
+  }
+
+  validateAgentTeam(
+    agentletId: string,
+    params: AgentTeamValidateParams,
+  ): Promise<AgentTeamValidateResult> {
+    return this.sendControlRequest(
+      agentletId,
+      ServerMethods.AGENT_TEAM_VALIDATE,
+      params,
+    );
+  }
+
+  onAgentTeamSetupProgress(
+    handler: (
+      agentletId: string,
+      progress: AgentTeamSetupProgressParams,
+    ) => void,
+  ): () => void {
+    this.setupProgressHandlers.add(handler);
+    return () => this.setupProgressHandlers.delete(handler);
+  }
+
   sendResource(agentletId: string, params: SendResourceParams): void {
     const connection = this.agentlets.get(agentletId);
     if (!connection || connection.status !== 'connected') return;
@@ -288,6 +341,27 @@ export class AgentletGateway {
         this.hasPendingRequest(connection.agentletId, message.id)
       ) {
         this.handlePendingResponse(connection.agentletId, message);
+      } else if (
+        connection.role === 'agentlet' &&
+        'method' in message &&
+        message.method === AgentletMethods.AGENT_TEAM_SETUP_PROGRESS
+      ) {
+        for (const handler of this.setupProgressHandlers) {
+          try {
+            handler(
+              connection.agentletId,
+              message.params as unknown as AgentTeamSetupProgressParams,
+            );
+          } catch (error) {
+            this.logger.warn(
+              {
+                agentletId: connection.agentletId,
+                error: error instanceof Error ? error.message : String(error),
+              },
+              'Agent Team setup progress handler failed',
+            );
+          }
+        }
       } else {
         connection.handleIncomingMessage(message);
       }
