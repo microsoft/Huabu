@@ -234,6 +234,8 @@ The first version does not implement a package trust workflow, setup-plan previe
 
 This proposal defines the minimum environment-variable declaration and setup-progress requirements but does not yet define upgrades or uninstall behavior.
 
+The first version does not recover an in-flight setup operation or replay a lost terminal setup notification across an agentlet control-channel disconnection. Reliable setup-status reconciliation, for example through a queryable operation status or terminal-event replay, is deferred as a future optimization rather than required by the current Agenetes domain implementation.
+
 The shipped [Agentlet Gateway consolidation](../archive/agenetes-agentlet-gateway-consolidation.md) is a prerequisite foundation for the multi-daemon Agent Team design, not an optional follow-up.
 
 ## 4. Related documents
