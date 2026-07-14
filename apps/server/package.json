@@ -19,15 +19,14 @@
     "eval:diff": "tsx evals/cli.ts diff"
   },
   "dependencies": {
+    "@agenetes/acp-driver": "workspace:*",
+    "@agenetes/agenetes": "workspace:*",
     "@agenetes/agentlet-host": "workspace:*",
+    "@agenetes/pi-driver": "workspace:*",
     "@agenetes/protocol": "workspace:*",
     "@agenetes/runtime": "workspace:*",
-    "@agenetes/acp-driver": "workspace:*",
-    "@agenetes/pi-driver": "workspace:*",
-    "@agenetes/agenetes": "workspace:*",
     "@agentclientprotocol/sdk": "^0.22.1",
     "@agentlet/protocol": "workspace:*",
-    "@agentlet/server": "workspace:*",
     "@earendil-works/pi-agent-core": "^0.75.5",
     "@earendil-works/pi-ai": "^0.75.5",
     "@fastify/compress": "^8.3.1",

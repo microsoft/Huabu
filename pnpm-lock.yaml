@@ -111,9 +111,6 @@ importers:
       '@agentlet/protocol':
         specifier: workspace:*
         version: link:../../external/agentlet/packages/protocol
-      '@agentlet/server':
-        specifier: workspace:*
-        version: link:../../external/agentlet/packages/server
       '@earendil-works/pi-agent-core':
         specifier: ^0.75.5
         version: 0.75.5(ws@8.21.0)(zod@4.4.3)

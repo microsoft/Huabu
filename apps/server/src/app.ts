@@ -229,12 +229,11 @@ app.register(rfsRoutes, { prefix: '/api/rfs' });
 
 // ── External agent (ACP) transport host ───────────────────────────────
 // Mount the Agenetes agentlet transport host (`@agenetes/agentlet-host`).
-// It embeds @agentlet/server, forks & supervises the agentlet daemon,
-// and authenticates connections against the host-injected connection
-// token. The daemon owns the agent worker pool; the server tells it
-// which agent CLI to spawn (per user profile). The connection token
-// never crosses the HTTP boundary — it lives only in-process and on the
-// loopback WS.
+// It mounts the stateless Gateway, forks & supervises the agentlet daemon,
+// and authenticates connections against the host-injected connection token.
+// The daemon owns the agent worker pool; the server tells it which agent CLI
+// to spawn (per user profile). The connection token never crosses the HTTP
+// boundary — it lives only in-process and on the loopback WS.
 //
 // L1 owns all deployment-layout knowledge and injects it downward:
 // the global connection token, the data directory, and the resolved
@@ -279,7 +278,7 @@ app.register(acpAgentletRoutes, { prefix: '/api/acp' });
 app.register(acpAgentCliRoutes, { prefix: '/api/acp' });
 app.register(acpThreadsRoutes, { prefix: '/api/acp' });
 app.log.info(
-  '[acp] agentlet server mounted — embedded agentlet will start on server ready',
+  '[acp] agentlet Gateway mounted — embedded agentlet will start on server ready',
 );
 
 // Memory op-counter: bump the per-canvas counter on every successful
