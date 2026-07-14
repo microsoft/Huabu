@@ -547,13 +547,15 @@ The sharpest case is `env`: everything host-specific a workload needs at spawn �
 external/agenetes/packages/
   @agenetes/protocol       [BASE · contracts]        deps: zod, acp-sdk
   @agenetes/runtime        [BASE · empty framework]  deps: protocol
-  @agenetes/agentlet-host  [TRANSPORT · ACP-private] deps: protocol, @agentlet/server, fastify
+  @agenetes/agentlet-gateway [TRANSPORT · stateless] deps: @agentlet/protocol, ws
+  @agenetes/agentlet-host  [TRANSPORT · ACP-private] deps: protocol, agentlet-gateway, fastify
   @agenetes/acp-driver     [DRIVER · standard]       deps: protocol, runtime, agentlet-host
   @agenetes/agenetes       [INSTANCE · assembly]     deps: protocol, runtime, acp-driver, agentlet-host
 ```
 
 - **`@agenetes/protocol`** — the host application↔Agenetes data/control contracts: `WorkloadSpec` building blocks (`defineBinding` / `composeWorkloadSpec`), `AgentSubmission` and canonical `AgentInput`, `AgentStreamEvent`, `AgentTurn` (`{ request, transcript }`, where the historical field name `request` now carries the complete submission), `ControlMsg` / `ControlAck`, `AgentCapabilities`, `AgentMetadata`, `AgentStateSnapshot` (`{ sessionId?, metadata?, initialPreambleDelivered? }`), `Namespace`, and the branded `threadId` / `sessionId` ids. Host-agnostic (zod + ACP SDK only).
 - **`@agenetes/runtime`** — the driver registry + live-handle lifecycle owner (the `AgentRuntime`): `register` / `resolve` a driver by kind, and `get` / `create` / `close` a long-lived handle by `threadId`. Depends only on `@agenetes/protocol`.
-- **`@agenetes/agentlet-host`** — the ACP transport host: mounts the agentlet WebSocket server and supervises the agentlet daemon. ACP-private (not shared base).
+- **`@agenetes/agentlet-gateway`** — the durably stateless host-side relay: authenticates daemon/session WebSockets, routes control RPCs and ACP traffic, and owns bounded live reconnect/pre-attach buffers without durable session or event stores.
+- **`@agenetes/agentlet-host`** — the ACP transport host: mounts the Agentlet Gateway and supervises the local agentlet daemon. ACP-private (not shared base).
 - **`@agenetes/acp-driver`** — the standard ACP driver and all its ACP-specific session state/logic: the handle, the client, the `session/update → AgentStreamEvent` translator, the in-memory session registry, the `ensureAcpSession` orchestration, and the ACP session-meta handling. It keeps no on-disk store: the handle rehydrates from the down-fed `priorState` and up-reports via `onState` (I9.7), so durable persistence lives entirely behind the instance's `ThreadStore`.
 - **`@agenetes/agenetes`** — the top **assembly** package: elevates `mountAgenetes`, constructs the runtime, pre-mounts the standard ACP driver, accepts the injected custom driver factory + instance-level `logger` + transport wiring, and returns the `Agenetes` instance (`create` / `get` / `close`). The only package the host application imports at the composition root. _(Surface defined in I9.3–I9.6.)_
