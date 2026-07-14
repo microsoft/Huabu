@@ -363,6 +363,33 @@ describe('agentlet daemon integration', () => {
           message.params?.type === 'cancelled',
       ),
     )
+    controlSocket?.send(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: ServerMethods.AGENT_TEAM_VALIDATE,
+        id: 25,
+        params: {
+          manifestPath: join(cancellableDir, 'agentlet.yaml'),
+          harness: 'copilot',
+          workingDirPath: cancellableWorkspace,
+        },
+      }),
+    )
+    await waitUntil(() =>
+      controlMessages.some(
+        (message) => 'id' in message && message.id === 25 && 'result' in message,
+      ),
+    )
+    expect(
+      controlMessages.find((message) => 'id' in message && message.id === 25),
+    ).toMatchObject({
+      result: {
+        valid: false,
+        issues: expect.arrayContaining([
+          expect.objectContaining({ code: 'workspace_not_ready' }),
+        ]),
+      },
+    })
 
     controlSocket?.send(
       JSON.stringify({

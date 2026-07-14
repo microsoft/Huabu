@@ -92,6 +92,8 @@ Both hello methods are requests and require a matching JSON-RPC response before 
 
 `agent-team/setup` returns after the worker is accepted. The daemon subsequently emits `agent-team/setup-progress` notifications containing structured phase events and exactly one terminal `completed`, `failed`, or `cancelled` event while the control connection remains available. The complete setup pipeline, including custom `onInstall`, runs in an isolated child process so cancellation never requires terminating the daemon. A daemon rejects concurrent setup operations targeting the same normalized workspace path.
 
+`agent-team/validate` requires the workspace's completed-setup marker in addition to a valid manifest, supported harness, and existing workspace directory. Setup clears the marker before changing the workspace and writes it atomically only after successful completion.
+
 All JSON-RPC envelopes and method payloads are defined in [`messages.ts`](../packages/protocol/src/messages.ts) and [`json-rpc.ts`](../packages/protocol/src/json-rpc.ts).
 
 ## 4. Spawn and bootstrap

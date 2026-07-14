@@ -15,6 +15,10 @@ import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseSetupArgs } from './cli.js';
 import {
+  clearManagedSetupMarker,
+  markManagedSetupReady,
+} from '../managed-workspace.js';
+import {
   detectInstalledHarnesses,
   getHarnessInfo,
   getPromptTarget,
@@ -332,7 +336,10 @@ export async function runManagedSetup(
     options,
     'preparing_workspace',
     'Preparing deployment workspace',
-    () => createWorkspace(workingDirPath),
+    () => {
+      createWorkspace(workingDirPath);
+      clearManagedSetupMarker(workingDirPath);
+    },
   );
 
   if (!harnessInfo) {
@@ -396,6 +403,7 @@ export async function runManagedSetup(
     },
   );
 
+  markManagedSetupReady(workingDirPath, harness);
   log.success(`Workspace ready: ${workingDirPath}`);
 }
 

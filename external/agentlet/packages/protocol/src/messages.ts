@@ -347,7 +347,11 @@ export interface AgentTeamValidateParams {
 }
 
 export interface AgentTeamValidationIssue {
-  code: 'manifest_invalid' | 'harness_unsupported' | 'workspace_missing'
+  code:
+    | 'manifest_invalid'
+    | 'harness_unsupported'
+    | 'workspace_missing'
+    | 'workspace_not_ready'
   message: string
 }
 

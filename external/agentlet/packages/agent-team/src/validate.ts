@@ -1,9 +1,14 @@
 import { statSync } from 'node:fs';
 
 import { readManifest } from './setup/manifest.js';
+import { isManagedSetupReady } from './managed-workspace.js';
 
 export interface ManagedAgentTeamValidationIssue {
-  code: 'manifest_invalid' | 'harness_unsupported' | 'workspace_missing';
+  code:
+    | 'manifest_invalid'
+    | 'harness_unsupported'
+    | 'workspace_missing'
+    | 'workspace_not_ready';
   message: string;
 }
 
@@ -44,6 +49,15 @@ export function validateManagedAgentTeam(options: {
     issues.push({
       code: 'workspace_missing',
       message: `Workspace is missing or not a directory: ${options.workingDirPath}`,
+    });
+  }
+  if (
+    !issues.some((issue) => issue.code === 'workspace_missing') &&
+    !isManagedSetupReady(options.workingDirPath, options.harness)
+  ) {
+    issues.push({
+      code: 'workspace_not_ready',
+      message: `Workspace has no valid completed-setup marker: ${options.workingDirPath}`,
     });
   }
 

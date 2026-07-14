@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { runManagedSetup } from '../src/setup/run-setup.js';
 import type { SetupLogger } from '../src/setup/types.js';
+import { validateManagedAgentTeam } from '../src/validate.js';
 
 const tempDirs: string[] = [];
 const logger: SetupLogger = {
@@ -67,6 +68,13 @@ describe('runManagedSetup', () => {
       ),
     ).toBe('Review carefully.');
     expect(existsSync(join(workingDirPath, 'scripts', 'helper.mjs'))).toBe(true);
+    expect(
+      validateManagedAgentTeam({
+        packageDir,
+        harness: 'copilot',
+        workingDirPath,
+      }),
+    ).toEqual({ valid: true, issues: [] });
     expect(progress).toHaveBeenCalledWith({
       phase: 'validating_manifest',
       status: 'started',
