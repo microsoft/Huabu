@@ -19,6 +19,7 @@ import { toast } from '@/components/Common/Toast';
 
 import type {
   AgentProfileView,
+  AgentTeamManifestProfileDetailView,
   AgentTeamManifestProfileView,
   AgentTeamMemberView,
 } from '@sediment/shared';
@@ -26,8 +27,8 @@ import type {
 interface AgentTeamProfilesProps {
   member: AgentTeamMemberView;
   configReady: boolean;
-  profiles: AgentTeamManifestProfileView[];
-  onProfilesChange: (profiles: AgentTeamManifestProfileView[]) => void;
+  profiles: AgentTeamManifestProfileDetailView[];
+  onProfilesChange: (profiles: AgentTeamManifestProfileDetailView[]) => void;
 }
 
 function workspaceDefault(manifestPath: string, harness: string): string {
@@ -81,27 +82,35 @@ export function AgentTeamProfiles({
   const [aliasDrafts, setAliasDrafts] = useState<Record<string, string>>({});
   const [pending, setPending] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] =
-    useState<AgentTeamManifestProfileView | null>(null);
+    useState<AgentTeamManifestProfileDetailView | null>(null);
 
   const harnessOptions = useMemo(
     () => member.harnesses.map((value) => ({ value, label: value })),
     [member.harnesses],
   );
 
-  const upsert = (profile: AgentTeamManifestProfileView) => {
+  const upsert = (
+    profile: AgentTeamManifestProfileView,
+    resetSetupLog: boolean,
+  ) => {
+    const current = profiles.find((candidate) => candidate.id === profile.id);
     onProfilesChange([
       ...profiles.filter((candidate) => candidate.id !== profile.id),
-      profile,
+      {
+        ...profile,
+        setupLog: resetSetupLog ? [] : (current?.setupLog ?? []),
+      },
     ]);
   };
 
   const run = async (
     action: string,
     operation: () => Promise<AgentTeamManifestProfileView>,
+    resetSetupLog = false,
   ) => {
     setPending(action);
     try {
-      upsert(await operation());
+      upsert(await operation(), resetSetupLog);
     } catch (error) {
       toast(error instanceof Error ? error.message : t('operationFailed'), {
         tone: 'danger',
@@ -221,10 +230,13 @@ export function AgentTeamProfiles({
                   title={status === 'error' ? t('retrySetup') : t('setup')}
                   disabled={busy || !configReady}
                   onClick={() =>
-                    void run(`setup:${profile.id}`, async () =>
-                      requireManifestProfile(
-                        await setupAgentTeamProfile(profile.id),
-                      ),
+                    void run(
+                      `setup:${profile.id}`,
+                      async () =>
+                        requireManifestProfile(
+                          await setupAgentTeamProfile(profile.id),
+                        ),
+                      true,
                     )
                   }
                 >

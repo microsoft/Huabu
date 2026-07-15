@@ -48,7 +48,7 @@ The generic `agentlet.yaml` package contract and daemon execution operations are
 
 - Settings discovers packages from user-selected collection roots on connected agentlet daemons.
 - Member Configs are shared by manifest-backed Profiles of the same package; secrets remain in the host SecretStore and are redacted from read APIs.
-- Every non-internal agent uses one Agenetes Agent Profile. Manifest Profiles carry immutable placement, manifest, harness, and working-directory fields plus durable preparation state and a bounded setup log; command Profiles carry immutable placement, command, and working directory.
+- Every non-internal agent uses one Agenetes Agent Profile. Manifest Profiles carry immutable placement, manifest, harness, and working-directory fields plus authoritative durable preparation state; command Profiles carry immutable placement, command, and working directory. Setup diagnostics are stored separately from the Profile CRD.
 - Manifest Profiles use explicit Setup, Retry, and Cancel actions. A Profile is selectable only when its member is active, required Configs are complete, and preparation is ready; command Profiles are selectable immediately.
 - The Space and Huabu Reachback remain the shared workspace and read/write bridge available to running agents.
 
@@ -71,7 +71,7 @@ Huabu Settings UI
 Huabu Fastify adapter ── host storage + SecretStore
        │
        ▼
-Agenetes Agent Team registry ── durable roots, members, Configs, Profiles, setup
+Agenetes Agent Team registry ── durable roots, members, Configs, Profiles, preparation
        │ AgentTeamControlPort
        ▼
 Agenetes Agentlet Gateway ── one connected profile per daemon machine
@@ -94,6 +94,7 @@ The current implementation follows these ownership boundaries:
 6. **Settings reads are redacted** — secret plaintext never crosses the Settings API; the UI can only replace or clear a secret and observe whether it is configured.
 7. **Runtime snapshots are immutable** — a new external thread snapshots the selected Profile's placement and launch fields. Profile deletion blocks new bindings without changing existing threads; manifest session spawn loads current Configs and validates the prepared workspace before delegating to the ACP driver.
 8. **The catalog is shared** — Agenetes computes selectable Profile IDs without loading member detail; Chat and Question Nodes consume that catalog and render ready manifest Profiles under Agent Teams and command Profiles under External Agents.
+9. **Setup diagnostics are lazy** — `<HUABU_DATA_DIR>/agent-team/registry.json` contains authoritative Profile preparation state but no setup event history. Each manifest Profile has a sibling `<encoded-profileId>.setup.jsonl` bounded to 200 phase entries. Setup and Retry truncate that file, progress appends to it without rewriting the registry, member detail loads it on demand, and Profile deletion removes it. Registry schema v3 migrates embedded schema v1/v2 logs into the sibling file.
 
 ---
 

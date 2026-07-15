@@ -54,7 +54,6 @@ const state: AgentTeamRegistryState = {
         harness: 'copilot',
       },
       preparation: { status: 'not_prepared' },
-      setupLog: [],
     },
   ],
   configs: [
@@ -82,7 +81,7 @@ describe('FileAgentTeamRegistryStore', () => {
     expect(new FileAgentTeamRegistryStore(storageDir).load()).toEqual(state);
     expect(
       JSON.parse(readFileSync(join(storageDir, 'registry.json'), 'utf8')),
-    ).toMatchObject({ schemaVersion: 2, state });
+    ).toMatchObject({ schemaVersion: 3, state });
     expect(existsSync(join(storageDir, 'registry.json.tmp'))).toBe(false);
   });
 
@@ -176,12 +175,100 @@ describe('FileAgentTeamRegistryStore', () => {
           harness: 'copilot',
         },
         preparation: { status: 'ready', completedAt: 100 },
-        setupLog: [],
       },
     ]);
     expect(
       JSON.parse(readFileSync(join(storageDir, 'registry.json'), 'utf8')),
-    ).toMatchObject({ schemaVersion: 2 });
+    ).toMatchObject({ schemaVersion: 3 });
+    expect(
+      readFileSync(join(storageDir, 'legacy-deployment.setup.jsonl'), 'utf8'),
+    ).toBe('');
+  });
+
+  it('migrates schema v2 embedded setup logs to sibling JSONL', () => {
+    const storageDir = createStorageDir();
+    writeFileSync(
+      join(storageDir, 'registry.json'),
+      JSON.stringify({
+        schemaVersion: 2,
+        state: {
+          ...state,
+          profiles: [
+            {
+              ...state.profiles[0],
+              setupLog: [
+                {
+                  receivedAt: 101,
+                  phase: 'installing_tools',
+                  status: 'started',
+                  message: 'Installing CLI tools',
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+
+    const store = new FileAgentTeamRegistryStore(storageDir);
+    expect(store.load()).toEqual(state);
+    expect(store.loadSetupLog('profile-1')).toEqual([
+      {
+        receivedAt: 101,
+        phase: 'installing_tools',
+        status: 'started',
+        message: 'Installing CLI tools',
+      },
+    ]);
+    expect(
+      JSON.parse(readFileSync(join(storageDir, 'registry.json'), 'utf8')),
+    ).toEqual({ schemaVersion: 3, state });
+  });
+
+  it('appends, resets, and deletes sibling setup logs', () => {
+    const storageDir = createStorageDir();
+    const store = new FileAgentTeamRegistryStore(storageDir);
+    const entry = {
+      receivedAt: 101,
+      phase: 'installing_tools',
+      status: 'started' as const,
+      message: 'Installing CLI tools',
+    };
+
+    store.appendSetupLog('profile-1', entry);
+    expect(store.loadSetupLog('profile-1')).toEqual([entry]);
+    expect(
+      readFileSync(join(storageDir, 'profile-1.setup.jsonl'), 'utf8'),
+    ).toBe(`${JSON.stringify(entry)}\n`);
+
+    for (let receivedAt = 102; receivedAt <= 301; receivedAt += 1) {
+      store.appendSetupLog('profile-1', { ...entry, receivedAt });
+    }
+    const bounded = store.loadSetupLog('profile-1');
+    expect(bounded).toHaveLength(200);
+    expect(bounded[0]?.receivedAt).toBe(102);
+
+    store.resetSetupLog('profile-1');
+    expect(store.loadSetupLog('profile-1')).toEqual([]);
+    store.deleteSetupLog('profile-1');
+    expect(existsSync(join(storageDir, 'profile-1.setup.jsonl'))).toBe(false);
+  });
+
+  it('fails explicitly without appending to a malformed setup log', () => {
+    const storageDir = createStorageDir();
+    const path = join(storageDir, 'profile-1.setup.jsonl');
+    writeFileSync(path, '{malformed}\n');
+    const store = new FileAgentTeamRegistryStore(storageDir);
+
+    expect(() =>
+      store.appendSetupLog('profile-1', {
+        receivedAt: 101,
+        phase: 'installing_tools',
+        status: 'started',
+        message: 'Installing CLI tools',
+      }),
+    ).toThrow('Failed to read Agent Team setup log for profile-1');
+    expect(readFileSync(path, 'utf8')).toBe('{malformed}\n');
   });
 
   it('rejects orphan configs even when there are no Profiles', () => {

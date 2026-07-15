@@ -31,6 +31,7 @@ export type {
   AgentTeamMember,
   AgentTeamMachine,
   AgentTeamManifestProfile,
+  AgentTeamManifestProfileDetail,
   AgentTeamManifestRuntime,
   AgentTeamPreparation,
   AgentTeamSetupLogEntry,

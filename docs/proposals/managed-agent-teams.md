@@ -74,7 +74,6 @@ type AgentProfile =
         harness: string;
       };
       preparation: AgentTeamPreparation;
-      setupLog: AgentTeamSetupLogEntry[];
     })
   | (AgentProfileBase & {
       launch: {
@@ -86,6 +85,8 @@ type AgentProfile =
       };
     });
 ```
+
+Member detail enriches a manifest Profile with `setupLog: AgentTeamSetupLogEntry[]`; the core Profile CRD and catalog do not carry diagnostic history.
 
 `agentletId` is placement, `workingDirPath` is the process working directory, and `launch` describes how the ACP command is resolved. `agent-team-manifest` resolves command, requirements, package environment, and harness behavior from `agentlet.yaml`; `acp-command` launches the stored command directly.
 
@@ -136,7 +137,7 @@ not-prepared ── Setup ──▶ setting-up ── success ──▶ ready
                               └─ Cancel ───▶ not-prepared
 ```
 
-Setup cannot start while required member Configs are missing. Setup progress is persisted as a bounded structured log; while an expanded member is setting up, Settings polls that member's detail until it reaches a terminal state. An interrupted setup becomes `error` with a structured `setup_interrupted` reason and requires explicit Retry.
+Setup cannot start while required member Configs are missing. `preparation` in the Profile registry is the authoritative durable state. Setup phase diagnostics are persisted separately in a bounded `<encoded-profileId>.setup.jsonl` sibling of `registry.json`; Setup and Retry truncate the previous attempt before new progress is appended. While an expanded member is setting up, Settings polls that member's detail until it reaches a terminal state. An interrupted setup becomes `error` with a structured `setup_interrupted` reason and requires explicit Retry.
 
 Profile deletion is rejected while setup or cancellation is active. Setup is never hidden inside first use or `AgentDriver.create(...)`.
 
@@ -206,7 +207,7 @@ The Agenetes Profile service exposes resource-oriented create, read/list, and de
 
 Huabu exposes thin validated HTTP adapters over the Agenetes Profile registry and runtime service. Settings adapters may remain split by product surface, but they operate on the same Profile store. Runtime and A2A calls identify Profiles by `profileId`, never alias.
 
-The Agent Team Settings adapter separates overview and detail reads. Its initial overview does not iterate through every member to resolve Config fields or serialize setup logs. Member detail is fetched on expansion and cached by the web client. Profile mutations return the affected resource instead of rebuilding and returning the complete Agent Team Settings snapshot.
+The Agent Team Settings adapter separates overview and detail reads. Its initial overview does not iterate through every member to resolve Config fields or read setup-log files. Member detail fetches and serializes each relevant Profile's log on expansion and is cached by the web client. Profile mutations return the affected core resource instead of rebuilding and returning the complete Agent Team Settings snapshot; the client preserves loaded detail logs across metadata mutations and clears them when Setup or Retry starts.
 
 Runs accept the standard Agenetes `AgentSubmission` and stream standard `AgentStreamEvent`s. Huabu renders `ChatEnvelope` into canonical inputs before invoking the service; Agenetes does not import Huabu envelope types.
 
@@ -217,7 +218,7 @@ Agent-to-agent access continues using authenticated HTTP/SSE through Huabu Reach
 The unified registry performs a one-time migration from both current stores:
 
 1. Ordinary ACP profiles become `acp-command` Profiles while preserving `profileId`, alias, command, working directory, and optional `cliId`; records created before `cwd` became mandatory preserve their previous inherited-directory behavior by snapshotting the Huabu server working directory. The old per-Profile `autoRestart` value is discarded.
-2. Managed Agent Team deployments become `agent-team-manifest` Profiles while preserving their IDs, alias, placement, launch fields, preparation state, and setup log. The old enabled intent and revision are discarded.
+2. Managed Agent Team deployments become `agent-team-manifest` Profiles while preserving their IDs, alias, placement, launch fields, and preparation state. Embedded setup logs migrate idempotently into sibling `<encoded-profileId>.setup.jsonl` files and are removed from the Profile registry. The old enabled intent and revision are discarded.
 3. Legacy ACP profiles whose `cliId` is `agent-team` are not auto-migrated because they bypass managed roots, members, Configs, and setup and may duplicate an existing managed Profile. Huabu retains those records long enough to show a clear migration notice instructing the user to create a managed Profile in Agent Team Settings and then delete the legacy record.
 
 Migration is idempotent and must not rewrite an existing unified Profile. Existing ACP thread workload snapshots remain readable until their normal storage migration path replaces the legacy recipe shape.
@@ -266,6 +267,7 @@ Profile deletion does not revoke existing threads. Global restart policy, crash-
 - Add idempotent migration and legacy Agent Team profile notice.
 - Remove enabled intent, revision, per-Profile auto-restart, runtime-field editing, alias uniqueness, and the legacy Agent Team option from External Agent Settings.
 - Replace the full Agent Team Settings snapshot with lightweight member overview reads, cached on-demand member detail, and affected-resource mutation responses.
+- Separate bounded setup diagnostics from the Profile CRD into per-Profile JSONL files loaded only by member detail.
 
 ### ✅ Runtime and Chat integration
 

@@ -48,7 +48,6 @@ const manifestProfile = {
     harness: 'claude',
   },
   preparation: { status: 'ready' as const, completedAt: 1 },
-  setupLog: [],
 };
 
 let app: FastifyInstance | undefined;

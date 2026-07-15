@@ -21,7 +21,6 @@ function profile() {
       harness: 'copilot',
     },
     preparation: { status: 'not_prepared' as const },
-    setupLog: [],
   };
 }
 
@@ -186,5 +185,4 @@ describe('Agent Team Settings routes', () => {
       code: 'profile_conflict',
     });
   });
-
 });

@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AgentTeamProfiles } from './AgentTeamProfiles';
 
 import type {
-  AgentTeamManifestProfileView,
+  AgentTeamManifestProfileDetailView,
   AgentTeamMemberView,
 } from '@sediment/shared';
 
@@ -116,7 +116,7 @@ const member: AgentTeamMemberView = {
   status: 'active',
 };
 
-const profile: AgentTeamManifestProfileView = {
+const profile: AgentTeamManifestProfileDetailView = {
   id: 'profile-id',
   alias: 'reviewer',
   agentletId: member.machine,
@@ -133,7 +133,11 @@ const profile: AgentTeamManifestProfileView = {
 let root: Root | null = null;
 let container: HTMLElement | null = null;
 
-function render(profiles: AgentTeamManifestProfileView[], configReady = true) {
+function render(
+  profiles: AgentTeamManifestProfileDetailView[],
+  configReady = true,
+  onProfilesChange = vi.fn(),
+) {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -143,7 +147,7 @@ function render(profiles: AgentTeamManifestProfileView[], configReady = true) {
         member={member}
         configReady={configReady}
         profiles={profiles}
-        onProfilesChange={vi.fn()}
+        onProfilesChange={onProfilesChange}
       />,
     );
   });
@@ -189,11 +193,29 @@ describe('AgentTeamProfiles', () => {
   });
 
   it('starts setup for a prepared Profile action', async () => {
+    const { setupLog: _setupLog, ...coreProfile } = profile;
     apiMocks.setup.mockResolvedValue({
-      ...profile,
+      ...coreProfile,
       preparation: { status: 'setting_up', startedAt: 1 },
     });
-    const view = render([profile]);
+    const onProfilesChange = vi.fn();
+    const view = render(
+      [
+        {
+          ...profile,
+          setupLog: [
+            {
+              receivedAt: 1,
+              phase: 'installing_tools',
+              status: 'started',
+              message: 'Old attempt',
+            },
+          ],
+        },
+      ],
+      true,
+      onProfilesChange,
+    );
     const setup = Array.from(view.querySelectorAll('button')).find((button) =>
       button.textContent?.includes('setup'),
     );
@@ -201,5 +223,8 @@ describe('AgentTeamProfiles', () => {
     await act(async () => setup?.click());
 
     expect(apiMocks.setup).toHaveBeenCalledWith(profile.id);
+    expect(onProfilesChange).toHaveBeenCalledWith([
+      expect.objectContaining({ id: profile.id, setupLog: [] }),
+    ]);
   });
 });

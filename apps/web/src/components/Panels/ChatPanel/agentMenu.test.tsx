@@ -41,7 +41,6 @@ const profiles: AgentProfileView[] = [
       harness: 'claude',
     },
     preparation: { status: 'ready', completedAt: 1 },
-    setupLog: [],
   },
   {
     id: 'team-pending',
@@ -54,7 +53,6 @@ const profiles: AgentProfileView[] = [
       harness: 'claude',
     },
     preparation: { status: 'not_prepared' },
-    setupLog: [],
   },
   {
     id: 'command',

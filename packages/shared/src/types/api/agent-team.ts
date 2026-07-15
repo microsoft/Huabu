@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { agentTeamManifestProfileSchema } from './agent-profile.js';
+import { agentTeamManifestProfileDetailSchema } from './agent-profile.js';
 
 const trimmedString = (max: number) =>
   z
@@ -142,7 +142,7 @@ export const agentTeamMemberDetailSchema = z
   .object({
     member: agentTeamMemberSchema,
     config: agentTeamMemberConfigSchema,
-    profiles: z.array(agentTeamManifestProfileSchema),
+    profiles: z.array(agentTeamManifestProfileDetailSchema),
   })
   .strict();
 export type AgentTeamMemberDetailView = z.infer<

@@ -1,14 +1,13 @@
 import { randomUUID } from 'node:crypto';
 
+import { AgentTeamError } from './errors.js';
 import {
   agentTeamMemberKey,
   agentTeamRootKey,
   sameAgentTeamRoot,
 } from './identity.js';
-import { AgentTeamError } from './errors.js';
 import { agentTeamMemberSecretId } from './secret-id.js';
 
-import type { AgentTeamSetupProgressParams } from '@agentlet/protocol';
 import type {
   AcpCommandProfile,
   AgentProfile,
@@ -37,8 +36,7 @@ import type {
   PatchAgentProfileInput,
   UpdateAgentTeamMemberConfigsInput,
 } from './types.js';
-
-const SETUP_LOG_LIMIT = 200;
+import type { AgentTeamSetupProgressParams } from '@agentlet/protocol';
 
 function cloneState(state: AgentTeamRegistryState): AgentTeamRegistryState {
   return structuredClone(state);
@@ -323,10 +321,8 @@ export class AgentTeamRegistry {
         );
         return (
           member?.status === 'active' &&
-          this.getMemberConfig(
-            profile.agentletId,
-            profile.launch.manifestPath,
-          ).ready
+          this.getMemberConfig(profile.agentletId, profile.launch.manifestPath)
+            .ready
         );
       })
       .map(({ id }) => id);
@@ -373,8 +369,11 @@ export class AgentTeamRegistry {
     return {
       member: structuredClone(this.requireMember(machine, manifestPath)),
       config: this.getMemberConfig(machine, manifestPath),
-      profiles: structuredClone(
-        this.manifestProfilesFor(machine, manifestPath),
+      profiles: this.manifestProfilesFor(machine, manifestPath).map(
+        (profile) => ({
+          ...structuredClone(profile),
+          setupLog: this.store.loadSetupLog(profile.id),
+        }),
       ),
     };
   }
@@ -494,6 +493,9 @@ export class AgentTeamRegistry {
     const profiles = this.state.profiles.filter((profile) => profile.id !== id);
     if (profiles.length === this.state.profiles.length) return false;
     this.commit({ ...cloneState(this.state), profiles });
+    if (current && isManifestProfile(current)) {
+      this.store.deleteSetupLog(id);
+    }
     return true;
   }
 
@@ -788,8 +790,8 @@ export class AgentTeamRegistry {
         operationId,
         startedAt: this.now(),
       },
-      setupLog: [],
     };
+    this.store.resetSetupLog(profile.id);
     this.persistProfile(settingUp);
 
     try {
@@ -841,28 +843,19 @@ export class AgentTeamRegistry {
       return;
     }
 
-    const setupLog =
-      progress.type === 'phase'
-        ? [
-            ...profile.setupLog,
-            {
-              receivedAt: this.now(),
-              phase: progress.phase,
-              status: progress.status,
-              message: progress.message,
-            },
-          ].slice(-SETUP_LOG_LIMIT)
-        : profile.setupLog;
-
     if (progress.type === 'phase') {
-      this.persistProfile({ ...profile, setupLog });
+      this.store.appendSetupLog(profile.id, {
+        receivedAt: this.now(),
+        phase: progress.phase,
+        status: progress.status,
+        message: progress.message,
+      });
       return;
     }
     if (progress.type === 'completed') {
       this.persistProfile({
         ...profile,
         preparation: { status: 'ready', completedAt: this.now() },
-        setupLog,
       });
       return;
     }
@@ -874,14 +867,12 @@ export class AgentTeamRegistry {
           failedAt: this.now(),
           error: progress.error,
         },
-        setupLog,
       });
       return;
     }
     this.persistProfile({
       ...profile,
       preparation: { status: 'not_prepared' },
-      setupLog,
     });
   }
 
@@ -957,7 +948,6 @@ export class AgentTeamRegistry {
         harness: input.harness,
       },
       preparation: { status: 'not_prepared' },
-      setupLog: [],
     };
     this.commit({
       ...cloneState(this.state),

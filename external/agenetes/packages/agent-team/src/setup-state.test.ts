@@ -122,7 +122,7 @@ async function createDeployment(options?: {
 describe('Agent Team setup state machine', () => {
   it('persists progress and ready completion', async () => {
     let time = 100;
-    const { registry, control, deploymentId } = await createDeployment({
+    const { registry, store, control, deploymentId } = await createDeployment({
       now: () => ++time,
     });
     expect(registry.listSelectableProfileIds()).toEqual([]);
@@ -139,6 +139,7 @@ describe('Agent Team setup state machine', () => {
       harness: 'copilot',
       workingDirPath: '/teams/reviewer/workspaces/copilot',
     });
+    const save = vi.spyOn(store, 'save');
 
     control.emit({
       operationId: 'operation-1',
@@ -147,22 +148,27 @@ describe('Agent Team setup state machine', () => {
       status: 'started',
       message: 'Installing CLI tools',
     });
+    expect(save).not.toHaveBeenCalled();
     control.emit({
       operationId: 'operation-1',
       type: 'completed',
       workingDirPath: '/teams/reviewer/workspaces/copilot',
     });
+    expect(save).toHaveBeenCalledOnce();
 
     expect(registry.getProfile(deploymentId)).toMatchObject({
       preparation: { status: 'ready' },
-      setupLog: [
-        {
-          phase: 'installing_tools',
-          status: 'started',
-          message: 'Installing CLI tools',
-        },
-      ],
     });
+    expect(
+      registry.getMemberDetail('machine-a', '/teams/reviewer/agentlet.yaml')
+        .profiles[0]?.setupLog,
+    ).toMatchObject([
+      {
+        phase: 'installing_tools',
+        status: 'started',
+        message: 'Installing CLI tools',
+      },
+    ]);
     expect(registry.listSelectableProfileIds()).toEqual([deploymentId]);
   });
 
@@ -262,6 +268,35 @@ describe('Agent Team setup state machine', () => {
     expect(() => registry.deleteProfile(deploymentId)).toThrow('Cancel');
   });
 
+  it('truncates logs for retry and deletes them with the Profile', async () => {
+    const { registry, store, control, deploymentId } = await createDeployment({
+      ids: ['profile-1', 'operation-1', 'operation-2'],
+    });
+    await registry.setupProfile(deploymentId);
+    control.emit({
+      operationId: 'operation-1',
+      type: 'phase',
+      phase: 'installing_tools',
+      status: 'started',
+      message: 'Old attempt',
+    });
+    control.emit({
+      operationId: 'operation-1',
+      type: 'failed',
+      error: { code: 'setup_failed', message: 'Failed' },
+    });
+
+    await registry.setupProfile(deploymentId);
+    expect(store.loadSetupLog(deploymentId)).toEqual([]);
+    control.emit({
+      operationId: 'operation-2',
+      type: 'completed',
+      workingDirPath: '/teams/reviewer/workspaces/copilot',
+    });
+    expect(registry.deleteProfile(deploymentId)).toBe(true);
+    expect(store.loadSetupLog(deploymentId)).toEqual([]);
+  });
+
   it('rejects enable before required member Configs are complete', async () => {
     const control = new FakeControlPort();
     control.memberEnv = [
@@ -326,7 +361,6 @@ describe('Agent Team setup state machine', () => {
             operationId: 'operation-1',
             startedAt: 50,
           },
-          setupLog: [],
         },
       ],
     };

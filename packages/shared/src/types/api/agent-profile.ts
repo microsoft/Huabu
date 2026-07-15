@@ -97,11 +97,20 @@ export const agentTeamManifestProfileSchema = profileBaseSchema
   .extend({
     launch: manifestLaunchSchema,
     preparation: agentTeamPreparationSchema,
-    setupLog: z.array(agentTeamSetupLogEntrySchema),
   })
   .strict();
 export type AgentTeamManifestProfileView = z.infer<
   typeof agentTeamManifestProfileSchema
+>;
+
+export const agentTeamManifestProfileDetailSchema =
+  agentTeamManifestProfileSchema
+    .extend({
+      setupLog: z.array(agentTeamSetupLogEntrySchema),
+    })
+    .strict();
+export type AgentTeamManifestProfileDetailView = z.infer<
+  typeof agentTeamManifestProfileDetailSchema
 >;
 
 export const acpCommandProfileSchema = profileBaseSchema

@@ -76,7 +76,6 @@ export interface AgentTeamManifestProfile extends AgentProfileBase {
     harness: string;
   };
   preparation: AgentTeamPreparation;
-  setupLog: AgentTeamSetupLogEntry[];
 }
 
 export interface AcpCommandProfile extends AgentProfileBase {
@@ -107,6 +106,10 @@ export interface AgentTeamSetupLogEntry {
   phase: Extract<AgentTeamSetupProgressParams, { type: 'phase' }>['phase'];
   status: 'started' | 'completed';
   message: string;
+}
+
+export interface AgentTeamManifestProfileDetail extends AgentTeamManifestProfile {
+  setupLog: AgentTeamSetupLogEntry[];
 }
 
 export interface AgentTeamMemberConfig {
@@ -151,6 +154,10 @@ export interface AgentTeamRegistryState {
 export interface AgentTeamRegistryStore {
   load(): AgentTeamRegistryState;
   save(state: AgentTeamRegistryState): void;
+  loadSetupLog(profileId: string): AgentTeamSetupLogEntry[];
+  resetSetupLog(profileId: string): void;
+  appendSetupLog(profileId: string, entry: AgentTeamSetupLogEntry): void;
+  deleteSetupLog(profileId: string): void;
 }
 
 export type AgentTeamRegistryChangeHandler = () => void;
@@ -243,7 +250,7 @@ export interface AgentTeamMemberSummary {
 export interface AgentTeamMemberDetail {
   member: AgentTeamMember;
   config: AgentTeamMemberConfigView;
-  profiles: AgentTeamManifestProfile[];
+  profiles: AgentTeamManifestProfileDetail[];
 }
 
 export type UpdateAgentTeamMemberConfigsInput = Record<string, string | null>;

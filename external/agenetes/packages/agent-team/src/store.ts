@@ -1,16 +1,17 @@
 import {
+  appendFileSync,
   chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
   renameSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
 
 import { agentTeamMemberKey, agentTeamRootKey } from './identity.js';
 
-import type { AgentTeamScanDiagnostic } from '@agentlet/protocol';
 import type {
   AcpCommandProfile,
   AgentProfile,
@@ -25,10 +26,13 @@ import type {
   AgentTeamRootRef,
   AgentTeamRootScan,
 } from './types.js';
+import type { AgentTeamScanDiagnostic } from '@agentlet/protocol';
 
-const SCHEMA_VERSION = 2;
-const LEGACY_SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 3;
+const PROFILE_SCHEMA_VERSION = 2;
+const DISCOVERY_SCHEMA_VERSION = 1;
 const REGISTRY_FILENAME = 'registry.json';
+const SETUP_LOG_LIMIT = 200;
 
 interface RegistryFile {
   schemaVersion: typeof SCHEMA_VERSION;
@@ -371,7 +375,6 @@ function parseProfile(value: unknown, index: number): AgentProfile {
         harness: value.launch.harness,
       },
       preparation: parsePreparation(value.preparation, `${label}.preparation`),
-      setupLog: parseSetupLog(value.setupLog, `${label}.setupLog`),
     } satisfies AgentTeamManifestProfile;
   }
   if (value.launch.kind !== 'acp-command') {
@@ -426,7 +429,6 @@ function migrateDeployment(
       harness: value.harness,
     },
     preparation: parsePreparation(value.setup, `${label}.setup`),
-    setupLog: parseSetupLog(value.setupLog, `${label}.setupLog`),
   };
 }
 
@@ -466,14 +468,18 @@ function parseRegistryFile(value: unknown): AgentTeamRegistryState {
   if (!isObject(value) || !isObject(value.state)) {
     throw new Error(`Unsupported or invalid Agent Team registry schema`);
   }
-  const isLegacy = value.schemaVersion === LEGACY_SCHEMA_VERSION;
-  if (!isLegacy && value.schemaVersion !== SCHEMA_VERSION) {
+  const isDiscoverySchema = value.schemaVersion === DISCOVERY_SCHEMA_VERSION;
+  if (
+    !isDiscoverySchema &&
+    value.schemaVersion !== PROFILE_SCHEMA_VERSION &&
+    value.schemaVersion !== SCHEMA_VERSION
+  ) {
     throw new Error(`Unsupported or invalid Agent Team registry schema`);
   }
   if (
     !Array.isArray(value.state.roots) ||
     !Array.isArray(value.state.members) ||
-    (isLegacy
+    (isDiscoverySchema
       ? value.state.deployments !== undefined &&
         !Array.isArray(value.state.deployments)
       : value.state.profiles !== undefined &&
@@ -485,13 +491,13 @@ function parseRegistryFile(value: unknown): AgentTeamRegistryState {
   const roots = value.state.roots as unknown[];
   const members = value.state.members as unknown[];
   const configs = (value.state.configs ?? []) as unknown[];
-  const profileValues = isLegacy
+  const profileValues = isDiscoverySchema
     ? ((value.state.deployments ?? []) as unknown[])
     : ((value.state.profiles ?? []) as unknown[]);
   const state: AgentTeamRegistryState = {
     roots: roots.map(parseRoot),
     members: members.map(parseMember),
-    profiles: isLegacy
+    profiles: isDiscoverySchema
       ? profileValues.map(migrateDeployment)
       : profileValues.map(parseProfile),
     configs: configs.map(parseMemberConfig),
@@ -564,11 +570,42 @@ function parseRegistryFile(value: unknown): AgentTeamRegistryState {
   return state;
 }
 
+function extractLegacySetupLogs(
+  value: unknown,
+): Map<string, AgentTeamSetupLogEntry[]> {
+  const result = new Map<string, AgentTeamSetupLogEntry[]>();
+  if (!isObject(value) || !isObject(value.state)) return result;
+  const values =
+    value.schemaVersion === DISCOVERY_SCHEMA_VERSION
+      ? value.state.deployments
+      : value.state.profiles;
+  if (!Array.isArray(values)) return result;
+  for (const [index, profile] of values.entries()) {
+    if (!isObject(profile) || typeof profile.id !== 'string') continue;
+    if (profile.setupLog === undefined) continue;
+    result.set(
+      profile.id,
+      parseSetupLog(profile.setupLog, `profiles[${index}].setupLog`),
+    );
+  }
+  return result;
+}
+
 export class InMemoryAgentTeamRegistryStore implements AgentTeamRegistryStore {
   private state: AgentTeamRegistryState;
+  private readonly setupLogs = new Map<string, AgentTeamSetupLogEntry[]>();
 
-  constructor(initialState: AgentTeamRegistryState = emptyState()) {
+  constructor(
+    initialState: AgentTeamRegistryState = emptyState(),
+    setupLogs: Record<string, AgentTeamSetupLogEntry[]> = {},
+  ) {
     this.state = cloneState(initialState);
+    for (const [profileId, entries] of Object.entries(setupLogs)) {
+      this.setupLogs.set(
+        profileId,
+        structuredClone(entries).slice(-SETUP_LOG_LIMIT),
+      );
+    }
   }
 
   load(): AgentTeamRegistryState {
@@ -578,15 +615,38 @@ export class InMemoryAgentTeamRegistryStore implements AgentTeamRegistryStore {
   save(state: AgentTeamRegistryState): void {
     this.state = cloneState(state);
   }
+
+  loadSetupLog(profileId: string): AgentTeamSetupLogEntry[] {
+    return structuredClone(this.setupLogs.get(profileId) ?? []);
+  }
+
+  resetSetupLog(profileId: string): void {
+    this.setupLogs.set(profileId, []);
+  }
+
+  appendSetupLog(profileId: string, entry: AgentTeamSetupLogEntry): void {
+    this.setupLogs.set(
+      profileId,
+      [...(this.setupLogs.get(profileId) ?? []), structuredClone(entry)].slice(
+        -SETUP_LOG_LIMIT,
+      ),
+    );
+  }
+
+  deleteSetupLog(profileId: string): void {
+    this.setupLogs.delete(profileId);
+  }
 }
 
 export class FileAgentTeamRegistryStore implements AgentTeamRegistryStore {
   private readonly filePath: string;
+  private readonly storageDir: string;
 
   constructor(storageDir: string) {
     if (!isAbsolute(storageDir)) {
       throw new Error('Agent Team storage directory must be absolute');
     }
+    this.storageDir = storageDir;
     this.filePath = join(storageDir, REGISTRY_FILENAME);
   }
 
@@ -601,7 +661,10 @@ export class FileAgentTeamRegistryStore implements AgentTeamRegistryStore {
       );
     }
     const state = parseRegistryFile(parsed);
-    if (isObject(parsed) && parsed.schemaVersion === LEGACY_SCHEMA_VERSION) {
+    if (isObject(parsed) && parsed.schemaVersion !== SCHEMA_VERSION) {
+      for (const [profileId, entries] of extractLegacySetupLogs(parsed)) {
+        this.writeSetupLog(profileId, entries);
+      }
       this.save(state);
     }
     return state;
@@ -622,6 +685,87 @@ export class FileAgentTeamRegistryStore implements AgentTeamRegistryStore {
     renameSync(temporaryPath, this.filePath);
     try {
       chmodSync(this.filePath, 0o600);
+    } catch {
+      // POSIX permissions are best-effort on platforms that support them.
+    }
+  }
+
+  loadSetupLog(profileId: string): AgentTeamSetupLogEntry[] {
+    const path = this.setupLogPath(profileId);
+    if (!existsSync(path)) return [];
+    try {
+      const lines = readFileSync(path, 'utf8')
+        .split('\n')
+        .filter((line) => line.length > 0);
+      return parseSetupLog(
+        lines.map((line) => JSON.parse(line) as unknown),
+        `${profileId}.setup.jsonl`,
+      ).slice(-SETUP_LOG_LIMIT);
+    } catch (error) {
+      throw new Error(
+        `Failed to read Agent Team setup log for ${profileId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  resetSetupLog(profileId: string): void {
+    this.writeSetupLog(profileId, []);
+  }
+
+  appendSetupLog(profileId: string, entry: AgentTeamSetupLogEntry): void {
+    const [validated] = parseSetupLog([entry], `${profileId}.setup.jsonl`);
+    if (!validated) {
+      throw new Error(`Invalid Agent Team setup log entry for ${profileId}`);
+    }
+    const entries = this.loadSetupLog(profileId);
+    if (entries.length >= SETUP_LOG_LIMIT) {
+      this.writeSetupLog(
+        profileId,
+        [...entries, validated].slice(-SETUP_LOG_LIMIT),
+      );
+      return;
+    }
+    mkdirSync(this.storageDir, { recursive: true });
+    const path = this.setupLogPath(profileId);
+    appendFileSync(path, `${JSON.stringify(validated)}\n`, 'utf8');
+    this.protectFile(path);
+  }
+
+  deleteSetupLog(profileId: string): void {
+    const path = this.setupLogPath(profileId);
+    try {
+      unlinkSync(path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
+
+  private setupLogPath(profileId: string): string {
+    return join(
+      this.storageDir,
+      `${encodeURIComponent(profileId)}.setup.jsonl`,
+    );
+  }
+
+  private writeSetupLog(
+    profileId: string,
+    entries: AgentTeamSetupLogEntry[],
+  ): void {
+    const validated = parseSetupLog(entries, `${profileId}.setup.jsonl`).slice(
+      -SETUP_LOG_LIMIT,
+    );
+    mkdirSync(this.storageDir, { recursive: true });
+    const path = this.setupLogPath(profileId);
+    const temporaryPath = `${path}.tmp`;
+    const content = validated.map((entry) => JSON.stringify(entry)).join('\n');
+    writeFileSync(temporaryPath, content ? `${content}\n` : '', 'utf8');
+    renameSync(temporaryPath, path);
+    this.protectFile(path);
+  }
+
+  private protectFile(path: string): void {
+    try {
+      chmodSync(path, 0o600);
     } catch {
       // POSIX permissions are best-effort on platforms that support them.
     }
