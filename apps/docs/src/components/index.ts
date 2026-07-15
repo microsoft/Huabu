@@ -13,6 +13,7 @@ export { H1, H2, H3, P, slugify } from './Heading';
 export { DocImage } from './Image';
 export { DocLink } from './Link';
 export { PageLayout } from './PageLayout';
+export { Shortcut } from './Shortcut';
 export { Table } from './Table';
 export { Toc, type TocEntry } from './Toc';
 export { cn } from './cn';

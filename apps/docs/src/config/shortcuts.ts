@@ -3,7 +3,18 @@ export type ShortcutSection = {
   items: Array<{ keys: string; description: string }>;
 };
 
+/** Public English subset of the app's user-facing shortcut catalog. */
 export const keyboardShortcutSections: ShortcutSection[] = [
+  {
+    title: 'General',
+    items: [
+      { keys: 'Ctrl/Cmd+N', description: 'New Space (desktop app only)' },
+      {
+        keys: 'Ctrl/Cmd+,',
+        description: 'Open settings (desktop app only)',
+      },
+    ],
+  },
   {
     title: 'Editing',
     items: [
@@ -33,14 +44,15 @@ export const keyboardShortcutSections: ShortcutSection[] = [
       { keys: 'Space (hold)', description: 'Temporarily switch to pan tool' },
       {
         keys: 'Space (hold while dragging)',
-        description: 'Move a node without entering or leaving any frame',
+        description:
+          'Move a node without entering or leaving any frame (opt out of auto-reparent)',
       },
       { keys: 'S', description: 'Select tool' },
       { keys: 'P', description: 'Pan tool' },
       { keys: 'L', description: 'Lasso tool' },
-      { keys: '1', description: 'Frame placement mode' },
-      { keys: '2', description: 'Note placement mode' },
-      { keys: '3', description: 'Text placement mode' },
+      { keys: '3', description: 'Frame placement mode' },
+      { keys: '1', description: 'Note placement mode' },
+      { keys: '2', description: 'Text placement mode' },
       { keys: '4', description: 'Sketch mode' },
       { keys: '5', description: 'Audio placement mode' },
       { keys: 'A', description: 'Create Agent Node' },
@@ -58,28 +70,26 @@ export const keyboardShortcutSections: ShortcutSection[] = [
     title: 'Drag and drop',
     items: [
       {
-        keys: 'Option / Ctrl (hold while dragging)',
-        description: 'Copy a Note block to the Space instead of moving it',
-      },
-    ],
-  },
-  {
-    title: 'AI',
-    items: [
-      { keys: 'Ctrl/Cmd+I', description: 'Open intent recognition' },
-      {
-        keys: 'Shift+Enter',
-        description: 'Submit an Agent Node and run immediately',
+        keys: 'Option (hold while dragging) / Ctrl (hold while dragging)',
+        description:
+          'Copy a Note block to the Space instead of moving it (the default is move — the source loses the block)',
       },
     ],
   },
   {
     title: 'Search',
     items: [
-      { keys: 'Ctrl/Cmd+F', description: 'Search the Space' },
-      { keys: 'Enter', description: 'Jump to active result or next match' },
-      { keys: 'Shift+Enter', description: 'Previous match in preview' },
-      { keys: '↑ / ↓', description: 'Move between Space search results' },
+      {
+        keys: 'Ctrl/Cmd+F',
+        description:
+          'Search the Space (or find inside the active preview when focus is in an expanded node)',
+      },
+      { keys: 'Enter', description: 'Jump to active result / next match' },
+      { keys: 'Shift+Enter', description: 'Previous match (in preview)' },
+      {
+        keys: '↑ / ↓',
+        description: 'Move between results (in Space overlay)',
+      },
       { keys: 'Esc', description: 'Close the search bar' },
     ],
   },

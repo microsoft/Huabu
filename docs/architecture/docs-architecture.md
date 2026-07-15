@@ -28,7 +28,7 @@ apps/docs/
 
 ## URL and routing model
 
-Every public article path remains under `/docs`, while Vite's normalized `DOCS_BASE_PATH` supplies the deployment prefix. A project Pages build therefore serves `/Sediment/docs/quickstart/`, while a custom-domain build can serve `/docs/quickstart/`.
+Every public article path remains under `/docs`, while Vite's normalized `DOCS_BASE_PATH` supplies the deployment prefix. A project Pages build therefore serves the Quick Start at `/Sediment/docs/`, while a custom-domain build can serve it at `/docs/`.
 
 The browser uses `BrowserRouter`; prerendering uses `StaticRouter` with the same basename. [`navigation.ts`](../../apps/docs/src/navigation.ts) is the sole route registry and includes path, lazy section loader, title, and description. It also fails module initialization on duplicate paths. Unknown paths render a handbook-specific not-found page.
 
@@ -52,11 +52,17 @@ artifact validation
 
 The server entry waits for `onAllReady`, so lazy sections resolve before HTML is written. The prerender script writes directory-style route files and route-specific title and description metadata, then removes the temporary SSR bundle. There is no production server and no SPA fallback.
 
+The first handbook section is the task-focused `Getting Started`, and `/docs` opens its `Quick Start` article directly. The Quick Start takes a new user through installation, Home selection, secure Chat Model configuration, Space creation, adding one piece of material, and completing one contextual AI conversation. The `Spaces` section contains the essential Space interactions in `Work in a Space` and an overview of Home and per-Space plain-file storage in `Data & Files`. The `AI` section contains the canonical `Work with AI` article for Chat, Agent, Agent Nodes, and change review; `Models & Capabilities` explains Chat and Utility model responsibilities plus optional web, image, and video integrations; External Agents and a combined `Memory & Skills` article cover progressively advanced topics. Superseded feature pages and routes are removed rather than retained as parallel explanations. Unreleased product capabilities are not registered as public handbook routes or referenced by public articles. Product-positioning and conceptual `Core` articles stay outside this initial task-focused handbook path.
+
+User support content lives in the `Help` navigation group. Its `Report an Issue` article sends users to the public `microsoft/Huabu` GitHub Issues tracker and asks for reproduction steps, system information, and carefully reviewed diagnostics without creating a second feedback channel inside the handbook.
+
+The `Keyboard Shortcuts` reference presents the public subset of the user-facing catalog in `apps/web/src/config/shortcuts.ts` and its English i18n strings, while retaining documentation-local data to preserve the handbook's independent application boundary. Desktop-only app shortcuts are labeled explicitly, and internal or unreleased bindings are omitted.
+
 Each article carries `data-pagefind-body`, excluding repeated navigation and table-of-contents text from indexing. Opening the sidebar search control or pressing `Ctrl/Cmd+K` displays Pagefind in an accessible modal with backdrop and Escape dismissal, focus containment, and trigger-focus restoration. Search results show compact page-title links followed by matching section-title links that jump directly to their anchors; generated body excerpts are hidden to avoid ambiguous stitched text. Results use a two-column card grid on wider screens and one column on narrow screens, loading ten page results per batch. `@pagefind/default-ui` initializes lazily on the first open in a built site and remains mounted across later opens. The Vite development server displays the modal shell but explicitly reports search as unavailable because it has no current static index.
 
 ## Validation and deployment
 
-The artifact validator compares generated pages with the source route registry, verifies article markup, H1 and metadata output, rejects Suspense fallback and forbidden environment values, and requires Pagefind runtime/index files. Source tests cover route uniqueness, metadata completeness, the missing-node-content regression, and base normalization.
+The artifact validator compares generated pages with the source route registry, verifies article markup, H1 and metadata output, rejects Suspense fallback and forbidden environment values, and requires Pagefind runtime/index files. Source tests cover route uniqueness, metadata completeness, the public navigation structure, and base normalization.
 
 The dedicated GitHub Actions workflow builds pull requests when handbook sources or their root build configuration change, and deploys only [`apps/docs/dist`](../../apps/docs) after matching changes land on `main` or on manual dispatch. It derives the repository Pages base from `GITHUB_REPOSITORY` unless the repository variable `DOCS_BASE_PATH` overrides it. The workflow uses GitHub Pages artifact and deployment actions with only `contents: read`, `pages: write`, and `id-token: write`.
 

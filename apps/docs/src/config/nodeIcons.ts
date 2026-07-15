@@ -2,7 +2,6 @@ import {
   BookOpen,
   Clipboard,
   Film,
-  FileType2,
   Frame,
   Globe,
   Image as ImageIcon,
@@ -19,7 +18,6 @@ type HandbookNodeType =
   | 'text'
   | 'image'
   | 'pdf'
-  | 'office'
   | 'video'
   | 'audio'
   | 'web'
@@ -32,7 +30,6 @@ export const NODE_ICON: Record<HandbookNodeType, LucideIcon> = {
   text: Type,
   image: ImageIcon,
   pdf: BookOpen,
-  office: FileType2,
   video: Film,
   audio: Mic,
   web: Globe,

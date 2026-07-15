@@ -765,7 +765,6 @@
       "groupFrame": "将选中节点组合到框架中",
       "copyNoteBlock": "将笔记块复制到 Space，而不是移动它（默认是移动，源位置会失去该块）",
       "openIntent": "打开意图识别",
-      "submitQuestion": "提交 Agent 节点并立即运行（编辑时）",
       "searchCanvas": "搜索 Space（焦点在展开节点预览中时，则在当前预览内查找）",
       "jumpResult": "跳转到当前结果 / 下一个匹配项",
       "previousMatch": "上一个匹配项（预览内）",

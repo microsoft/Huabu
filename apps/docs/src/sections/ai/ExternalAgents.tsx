@@ -28,10 +28,10 @@ export default function ExternalAgents() {
       toc={toc}
     >
       <Callout tone="info">
-        New here? Start with{' '}
-        <DocLink href="/docs/core/pluggable-agents">Pluggable Agents</DocLink>{' '}
-        for the rationale and the security model. This page focuses on the
-        day-to-day workflow: setting up profiles and using them in chat.
+        New to Huabu&apos;s AI surfaces? Start with{' '}
+        <DocLink href="/docs/work-with-ai">Work with AI</DocLink>. This page
+        focuses on the advanced workflow of setting up external agent profiles
+        and using them in chat.
       </Callout>
 
       <H2>Add your first agent</H2>
@@ -102,7 +102,7 @@ export default function ExternalAgents() {
         </li>
         <li>
           The <strong>@mention menu</strong> inside a{' '}
-          <DocLink href="/docs/nodes/question">Question node</DocLink> — type{' '}
+          <DocLink href="/docs/work-with-ai">Agent Node</DocLink> — type{' '}
           <Code>@</Code> followed by the profile&apos;s display name to route
           that single question to the external agent.
         </li>

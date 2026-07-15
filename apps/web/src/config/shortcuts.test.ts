@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   APP_SHORTCUTS,
   getCombo,
+  getKeyboardShortcutSections,
   matches,
   SHORTCUTS,
   type KeyCombo,
@@ -78,5 +79,20 @@ describe('getCombo', () => {
     // `search.moveBetweenResults` is a display-only gesture (↑ / ↓).
     expect(getCombo('search.moveBetweenResults')).toBeUndefined();
     expect(getCombo('does.not.exist')).toBeUndefined();
+  });
+});
+
+describe('getKeyboardShortcutSections', () => {
+  it('omits internal bindings and removed shortcuts', () => {
+    const t = ((key: string) => key) as never;
+    const sections = getKeyboardShortcutSections(t);
+    const descriptions = sections.flatMap((section) =>
+      section.items.map((item) => item.description),
+    );
+
+    expect(getCombo('ai.openIntent')).toEqual({ mod: true, key: 'i' });
+    expect(descriptions).not.toContain('shortcuts.items.openIntent');
+    expect(getCombo('ai.submitQuestion')).toBeUndefined();
+    expect(descriptions).not.toContain('shortcuts.items.submitQuestion');
   });
 });

@@ -3,6 +3,8 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { withBasePath } from '../basePath';
+import { Kbd } from './Code';
+import { Shortcut } from './Shortcut';
 
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 
@@ -123,9 +125,7 @@ export function Search() {
       >
         <SearchIcon className="h-4 w-4" />
         <span className="flex-1">Search</span>
-        <kbd className="rounded border border-gray-200 bg-gray-50 px-1.5 py-0.5 font-sans text-[10px] text-gray-500">
-          Ctrl K
-        </kbd>
+        <Shortcut combo="mod+k" />
       </button>
       {hasOpened &&
         createPortal(
@@ -169,9 +169,7 @@ export function Search() {
                   onClick={closeSearch}
                   className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 leading-none transition-colors hover:bg-gray-200 hover:text-gray-900"
                 >
-                  <kbd className="inline-flex h-5 items-center rounded border border-gray-300 bg-white px-1.5 font-sans text-[10px] leading-none">
-                    Esc
-                  </kbd>
+                  <Kbd>Esc</Kbd>
                   Close
                 </button>
               </div>
