@@ -29,4 +29,10 @@ describe('handbook route registry', () => {
       false,
     );
   });
+  it('provides a dedicated Help entry for reporting issues', () => {
+    const help = groups.find((group) => group.label === 'Help');
+    expect(help?.items.map(({ to, label }) => ({ to, label }))).toEqual([
+      { to: '/docs/reference/issues', label: 'Report an Issue' },
+    ]);
+  });
 });

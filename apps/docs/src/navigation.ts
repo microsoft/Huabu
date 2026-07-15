@@ -228,9 +228,16 @@ const groupsRaw: RawGroup[] = [
         label: 'Data Storage',
         load: () => import('./sections/reference/Storage'),
       },
+    ],
+  },
+  {
+    label: 'Help',
+    items: [
       {
         to: '/docs/reference/issues',
-        label: 'Reporting Issues',
+        label: 'Report an Issue',
+        description:
+          'Describe a problem, collect useful diagnostic information, and report it through GitHub Issues.',
         load: () => import('./sections/reference/IssueReporting'),
       },
     ],

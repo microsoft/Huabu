@@ -4,7 +4,6 @@ import {
   CodeBlock,
   DocLink,
   H2,
-  H3,
   P,
   PageLayout,
   Table,
@@ -12,153 +11,147 @@ import {
 } from '../../components';
 
 const toc: TocEntry[] = [
-  { id: 'before-filing', label: 'Before you file' },
-  { id: 'what-to-include', label: 'What to include in a bug report' },
-  { id: 'logs', label: 'Where to find logs' },
-  { id: 'feature-requests', label: 'Feature requests' },
-  { id: 'security', label: 'Security issues' },
+  { id: 'before-reporting', label: 'Before reporting' },
+  { id: 'describe-the-problem', label: 'Describe the problem' },
+  { id: 'system-information', label: 'System information' },
+  { id: 'screenshots-and-logs', label: 'Screenshots and logs' },
+  { id: 'ai-problems', label: 'AI-related problems' },
+  { id: 'submit-the-issue', label: 'Submit the issue' },
 ];
 
 export default function IssueReporting() {
   return (
     <PageLayout
-      title="Reporting Issues"
-      description="When something feels wrong — a crash, a wrong AI edit, a sync glitch — a short, specific issue is the fastest path to a fix. Here's how to file one that's easy to act on."
+      title="Report an Issue"
+      description="Report bugs and unexpected behavior through GitHub Issues. A short report with clear reproduction steps gives the team the best chance of identifying and fixing the problem."
       toc={toc}
     >
-      <H2>Before you file</H2>
+      <Callout tone="info">
+        Huabu uses{' '}
+        <DocLink href="https://github.com/microsoft/Huabu/issues">
+          GitHub Issues
+        </DocLink>{' '}
+        as its public feedback channel. Never include API keys, access tokens,
+        private documents, or other sensitive data in an issue.
+      </Callout>
+
+      <H2>Before reporting</H2>
       <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
         <li>
-          <strong>Search existing issues</strong> on{' '}
-          <DocLink href="https://github.com/hai-team/Sediment/issues">
-            GitHub
-          </DocLink>{' '}
-          — your symptom may already be tracked.
+          <strong>Update Huabu</strong> to the latest available version and
+          check whether the problem still occurs.
         </li>
         <li>
-          <strong>Try a fresh Space.</strong> If the bug doesn&apos;t reproduce
-          on an empty Space, it&apos;s likely tied to a specific node or
-          operation — that&apos;s a useful data point.
+          <strong>Search existing issues</strong> in the{' '}
+          <DocLink href="https://github.com/microsoft/Huabu/issues">
+            Huabu issue tracker
+          </DocLink>{' '}
+          using the error message or a few words that describe the symptom.
         </li>
       </ul>
-
-      <H2>What to include in a bug report</H2>
       <P>
-        Fill in as many of these as you can. Don&apos;t worry about being
-        exhaustive — the first three are the most important:
+        If an existing issue describes the same problem, add any new
+        reproduction details, your Huabu version, and your operating system to
+        that issue instead of opening a duplicate.
+      </P>
+
+      <H2>Describe the problem</H2>
+      <P>
+        Use a specific title that describes the visible symptom, such as “PDF
+        node becomes blank after reopening a Space.” In the report, include the
+        following information:
       </P>
       <Table
-        headers={['Field', 'What to put']}
+        headers={['Field', 'What to include']}
         rows={[
           [
             <strong>What happened</strong>,
-            'One sentence describing the observed behaviour.',
+            'A short description of the behavior you observed, including any error message.',
           ],
           [
             <strong>What you expected</strong>,
-            'What you were trying to do, and what the correct outcome would have looked like.',
+            'What you were trying to do and what you expected Huabu to do instead.',
           ],
           [
             <strong>Steps to reproduce</strong>,
-            'A numbered list, starting from "open Huabu" or "open Space X". If you can\'t reproduce reliably, say so — intermittent bugs still matter.',
+            'A numbered list of the shortest sequence that triggers the problem.',
           ],
           [
-            <strong>Environment</strong>,
-            <>
-              OS + version, Huabu version (from <em>Settings → About</em>),
-              browser if you&apos;re on the web build.
-            </>,
-          ],
-          [
-            <strong>Screenshot / screen recording</strong>,
-            'Worth a thousand words for Space glitches and layout bugs.',
-          ],
-          [
-            <strong>Logs</strong>,
-            'See the next section. Trim to the relevant time window if they are long.',
+            <strong>Frequency</strong>,
+            'Whether it happens every time, sometimes, or only once, and whether it also happens in a new Space.',
           ],
         ]}
       />
+      <P>For example:</P>
+      <CodeBlock language="text">{`What happened
+The PDF node is blank after I close and reopen its Space.
 
-      <Callout tone="tip">
-        If a specific Space reproduces the bug and you&apos;re willing to share
-        it, export it to a <Code>.zip</Code> bundle from the Space list and
-        attach that. The team can drop it straight into a Home and click around.
+Expected behavior
+The first page preview should appear after the Space reloads.
+
+Steps to reproduce
+1. Open Huabu and create a new Space.
+2. Drag a PDF into the Space.
+3. Return to Home, then reopen the Space.
+4. The PDF node is blank.
+
+Frequency
+Every time with this PDF; it also happens in a new Space.`}</CodeBlock>
+
+      <H2>System information</H2>
+      <P>
+        Include the Huabu version, operating system version, CPU architecture,
+        and whether you use the desktop or web app. In the desktop app, choose{' '}
+        <strong>Help → Troubleshooting → Copy System Information</strong>, then
+        paste the result into the issue.
+      </P>
+
+      <H2>Screenshots and logs</H2>
+      <P>
+        Add a screenshot or short screen recording when the problem is visual or
+        difficult to describe. For crashes, failed requests, or unexpected
+        errors, choose <strong>Help → Troubleshooting → Open Server Log</strong>{' '}
+        and attach only the relevant part of <Code>server.log</Code>.
+      </P>
+      <Callout tone="warning">
+        Review every attachment before uploading it. Remove API keys, access
+        tokens, private conversations, personal information, confidential
+        documents, and file paths that reveal information you do not want to
+        publish.
       </Callout>
 
-      <H2>Where to find logs</H2>
-      <H3>Desktop app troubleshooting</H3>
+      <H2>AI-related problems</H2>
       <P>
-        In the installed Huabu app, open <em>Help → Troubleshooting</em> on
-        macOS, or open the application menu and find <em>Troubleshooting</em> on
-        Windows and Linux. The three support actions there cover the information
-        most bug reports need:
+        If the problem involves an AI response or edit, also include the details
+        below. Share only the minimum context needed to understand the problem.
       </P>
       <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
         <li>
-          <strong>Open Server Log</strong> reveals <Code>server.log</Code> in
-          Finder or Explorer. Attach the relevant log to the issue after
-          checking it for information you do not want to share.
+          Whether you used Chat, Agent mode, or an Agent node, and whether it
+          was powered by Huabu Agent or an external agent.
         </li>
+        <li>The provider and model name, but never the API key.</li>
+        <li>Which nodes or materials were selected as context.</li>
         <li>
-          <strong>Open Developer Tools</strong> exposes the Console and Network
-          tabs for frontend errors and failed requests. Copy only the entries
-          around the problem because request details may contain Space data.
-        </li>
-        <li>
-          <strong>Copy System Information</strong> copies the Huabu, operating
-          system, CPU architecture, and Electron versions. Paste it into the
-          Environment field of the issue.
+          The relevant prompt, response, or proposed edit, if safe to share, and
+          whether you applied any proposed changes.
         </li>
       </ul>
 
-      <H3>Development server logs</H3>
+      <H2>Submit the issue</H2>
       <P>
-        When running Huabu from source with <Code>pnpm dev</Code>, Server logs
-        also appear in that terminal pane. For long sessions, redirect them to a
-        file:
-      </P>
-      <CodeBlock language="bash">{`pnpm dev 2>&1 | tee huabu-server.log`}</CodeBlock>
-
-      <H3>Browser console</H3>
-      <P>
-        In the web build, open DevTools (<Code>F12</Code> on most browsers) and
-        inspect the Console and Network tabs. The first red error after the
-        misbehaviour usually points at the offending request.
-      </P>
-
-      <H3>Space history</H3>
-      <P>
-        Each Space keeps a <Code>.history/</Code> directory with chat
-        transcripts and intent suggestions. Attach the relevant file if the bug
-        is about AI behaviour — but skim it first for anything sensitive
-        you&apos;d rather not share.
-      </P>
-
-      <H2>Feature requests</H2>
-      <P>
-        Open them in the same{' '}
-        <DocLink href="https://github.com/hai-team/Sediment/issues">
-          issue tracker
+        Once the report contains the problem, expected behavior, reproduction
+        steps, and system information, create a{' '}
+        <DocLink href="https://github.com/microsoft/Huabu/issues/new/choose">
+          new GitHub issue
         </DocLink>
-        , labelled <Code>enhancement</Code>. The most actionable shape is:
+        . You can add screenshots or logs by dragging them into the issue
+        editor.
       </P>
-      <ol className="list-decimal space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
-        <li>The workflow you&apos;re trying to support.</li>
-        <li>How you do it today, and what about that hurts.</li>
-        <li>One or two concrete shapes the feature could take.</li>
-      </ol>
-      <P>
-        Skip step 3 if you&apos;re not sure — describing the problem clearly is
-        more valuable than proposing the solution.
-      </P>
-
-      <H2>Security issues</H2>
-      <Callout tone="warning">
-        Please <strong>do not</strong> file security issues as public GitHub
-        issues. Instead, follow the disclosure instructions in the
-        repository&apos;s <Code>SECURITY.md</Code> (or the project README&apos;s
-        contact section).
+      <Callout tone="tip">
+        A minimal reproduction is more useful than a large attachment. Share a
+        sample file or exported Space only when it is necessary, safe to
+        publish, and stripped of private content.
       </Callout>
     </PageLayout>
   );
