@@ -192,19 +192,19 @@ export const SHORTCUTS: ShortcutDef[] = [
   },
   {
     id: 'mode.frame',
-    combo: { key: '1' },
+    combo: { key: '3' },
     descriptionKey: 'shortcuts.items.frameMode',
     section: SECTION.toolbar,
   },
   {
     id: 'mode.note',
-    combo: { key: '2' },
+    combo: { key: '1' },
     descriptionKey: 'shortcuts.items.noteMode',
     section: SECTION.toolbar,
   },
   {
     id: 'mode.text',
-    combo: { key: '3' },
+    combo: { key: '2' },
     descriptionKey: 'shortcuts.items.textMode',
     section: SECTION.toolbar,
   },

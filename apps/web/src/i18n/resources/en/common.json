@@ -642,7 +642,7 @@
       "text": "Text",
       "sketch": "Sketch",
       "audio": "Audio",
-      "agentNode": "Agent Node"
+      "agent": "Agent"
     },
     "resources": {
       "uploadOrLink": "Upload or Link",
