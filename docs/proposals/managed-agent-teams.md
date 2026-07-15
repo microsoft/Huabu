@@ -216,7 +216,7 @@ Agent-to-agent access continues using authenticated HTTP/SSE through Huabu Reach
 
 The unified registry performs a one-time migration from both current stores:
 
-1. Ordinary ACP profiles become `acp-command` Profiles while preserving `profileId`, alias, command, working directory, and optional `cliId`. The old per-Profile `autoRestart` value is discarded.
+1. Ordinary ACP profiles become `acp-command` Profiles while preserving `profileId`, alias, command, working directory, and optional `cliId`; records created before `cwd` became mandatory preserve their previous inherited-directory behavior by snapshotting the Huabu server working directory. The old per-Profile `autoRestart` value is discarded.
 2. Managed Agent Team deployments become `agent-team-manifest` Profiles while preserving their IDs, alias, placement, launch fields, preparation state, and setup log. The old enabled intent and revision are discarded.
 3. Legacy ACP profiles whose `cliId` is `agent-team` are not auto-migrated because they bypass managed roots, members, Configs, and setup and may duplicate an existing managed Profile. Huabu retains those records long enough to show a clear migration notice instructing the user to create a managed Profile in Agent Team Settings and then delete the legacy record.
 

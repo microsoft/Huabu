@@ -21,6 +21,7 @@ import {
   mountAgenetes,
   resolveDaemonEntry,
 } from './modules/agent/acp/index.js';
+import { buildLegacyCommandProfiles } from './modules/agent/acp/legacy-profile-migration.js';
 import {
   listProfiles as listLegacyAcpProfiles,
   removeProfiles as removeLegacyAcpProfiles,
@@ -274,19 +275,10 @@ mountAgenetes(app, {
       get: getPersistedSecret,
       setMany: setSecrets,
     },
-    legacyCommandProfiles: listLegacyAcpProfiles().flatMap((profile) =>
-      profile.cliId === 'agent-team' || !profile.command || !profile.cwd
-        ? []
-        : [
-            {
-              id: profile.id,
-              alias: profile.displayName,
-              agentletId: getSupervisedAgentletId(),
-              command: profile.command,
-              workingDirPath: profile.cwd,
-              metadata: { cliId: profile.cliId },
-            },
-          ],
+    legacyCommandProfiles: buildLegacyCommandProfiles(
+      listLegacyAcpProfiles(),
+      getSupervisedAgentletId(),
+      process.cwd(),
     ),
     onLegacyProfilesMigrated: removeLegacyAcpProfiles,
   },

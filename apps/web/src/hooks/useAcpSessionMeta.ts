@@ -18,12 +18,11 @@
  *   Any of (1)–(3) hitting means the toolbar populates immediately
  *   and the badge stays `connected` — **no spawn, no polling**.
  *
- * - **Cache miss → one-shot auto-ensure** — only when ALL three cache
- *   tiers miss (truly first use of this profile on this server) does
- *   the hook chain into `refresh()` to fire a real `ensureAcpSession`.
- *   Badge flips through `connecting` → `connected`; the resulting
- *   meta push is mirrored to the profile cache so EVERY subsequent
- *   thread for this profile starts at cache hit.
+ * - **Cache miss → optional one-shot auto-ensure** — command Profiles
+ *   chain into `refresh()` to fire a real `ensureAcpSession`. Manifest
+ *   Profiles wait for their first real turn because their session must
+ *   be opened through the unified Profile driver, not the legacy
+ *   command-session endpoint.
  *
  * - **Post-ensure schema-empty polling** — `session/new` resolves
  *   BEFORE the agent has pushed its mode / model / config-option
@@ -194,6 +193,12 @@ export interface UseAcpSessionMetaOptions {
    * for backwards-compat with the original API.
    */
   enabled?: boolean;
+  /**
+   * Whether a total cache miss should open a session through the legacy
+   * command-session endpoint. Manifest Profiles use the unified Profile
+   * driver and therefore leave this disabled until the first real turn.
+   */
+  autoEnsureOnCacheMiss?: boolean;
 }
 
 /**
@@ -205,6 +210,7 @@ export function useAcpSessionMeta({
   binding,
   canvasId,
   enabled = true,
+  autoEnsureOnCacheMiss = true,
 }: UseAcpSessionMetaOptions): UseAcpSessionMetaResult {
   const [meta, setMeta] = useState<AcpSessionMetaSnapshot>(EMPTY_META);
   const [loading, setLoading] = useState(false);
@@ -457,12 +463,10 @@ export function useAcpSessionMeta({
   // If ANY tier hits we commit the snapshot and stop: 0 spawn, badge
   // stays optimistic-green, and the toolbar populates instantly.
   //
-  // **Total miss → one-shot auto-ensure**: only when all three tiers
-  // miss (truly first use of this profile on this server) do we chain
-  // into `refresh()`. The resulting meta push is mirrored to the
-  // profile cache on the server side, so every subsequent thread for
-  // the same profile starts at cache hit. The badge flips through
-  // `connecting` → `connected` exactly once per profile lifetime.
+  // **Total miss → optional one-shot auto-ensure**: command Profiles
+  // chain into `refresh()`. Manifest Profiles wait for their first real
+  // turn because only the unified Profile driver can resolve and launch
+  // their prepared deployment.
   //
   // Cache fetch never touches `loading` (which remains semantically
   // "real ensure in flight"), and never touches `error` (cache misses
@@ -500,16 +504,23 @@ export function useAcpSessionMeta({
         // and the badge transitions through `connecting`. This now
         // only triggers on the very first thread of a profile (and
         // after a data-dir wipe).
-        void refreshRef.current();
+        if (autoEnsureOnCacheMiss) void refreshRef.current();
       })
       .catch(() => {
         // Cache fetch itself failed (network / 5xx). Treat as cache
         // miss and try to ensure — that's the only path that can
         // actually surface a real failure to the user via the badge.
         if (!isCurrent()) return;
-        void refreshRef.current();
+        if (autoEnsureOnCacheMiss) void refreshRef.current();
       });
-  }, [threadId, bindingKind, profileId, canvasId, enabled]);
+  }, [
+    threadId,
+    bindingKind,
+    profileId,
+    canvasId,
+    enabled,
+    autoEnsureOnCacheMiss,
+  ]);
 
   // Register `applyEvent` as the module-level SSE sink so
   // `handleStreamEvent` can forward session-meta updates here without
