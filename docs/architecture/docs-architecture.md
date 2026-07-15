@@ -28,7 +28,7 @@ apps/docs/
 
 ## URL and routing model
 
-Every public article path remains under `/docs`, while Vite's normalized `DOCS_BASE_PATH` supplies the deployment prefix. A project Pages build therefore serves `/Sediment/docs/quickstart/`, while a custom-domain build can serve `/docs/quickstart/`.
+Every public article path remains under `/docs`, while Vite's normalized `DOCS_BASE_PATH` supplies the deployment prefix. A project Pages build therefore serves the Quick Start at `/Sediment/docs/`, while a custom-domain build can serve it at `/docs/`.
 
 The browser uses `BrowserRouter`; prerendering uses `StaticRouter` with the same basename. [`navigation.ts`](../../apps/docs/src/navigation.ts) is the sole route registry and includes path, lazy section loader, title, and description. It also fails module initialization on duplicate paths. Unknown paths render a handbook-specific not-found page.
 
@@ -51,6 +51,8 @@ artifact validation
 ```
 
 The server entry waits for `onAllReady`, so lazy sections resolve before HTML is written. The prerender script writes directory-style route files and route-specific title and description metadata, then removes the temporary SSR bundle. There is no production server and no SPA fallback.
+
+The first handbook section is the task-focused `Getting Started`, and `/docs` opens its `Quick Start` article directly. The Quick Start takes a new user through installation, Home selection, Chat Model configuration, Space creation, adding one piece of material, and completing one contextual AI conversation. Product positioning and showcase content stay outside this initial handbook path.
 
 Each article carries `data-pagefind-body`, excluding repeated navigation and table-of-contents text from indexing. Opening the sidebar search control or pressing `Ctrl/Cmd+K` displays Pagefind in an accessible modal with backdrop and Escape dismissal, focus containment, and trigger-focus restoration. Search results show compact page-title links followed by matching section-title links that jump directly to their anchors; generated body excerpts are hidden to avoid ambiguous stitched text. Results use a two-column card grid on wider screens and one column on narrow screens, loading ten page results per batch. `@pagefind/default-ui` initializes lazily on the first open in a built site and remains mounted across later opens. The Vite development server displays the modal shell but explicitly reports search as unavailable because it has no current static index.
 

@@ -2,8 +2,8 @@
  * Single source of truth for the User Handbook.
  *
  * Authoring rules
- * - `pinned` entries sit in the static top portion of the sidebar
- *   (logo + Overview + Quick Start + Showcase) and never scroll.
+ * - `pinned` entries, when present, sit below the logo and search
+ *   control in the static top portion of the sidebar and never scroll.
  * - `groups` are rendered as bold-titled flat lists below the pinned
  *   block, all expanded all the time (no collapse).
  * - Each item declares its full absolute `to` (under `/docs`). This
@@ -11,9 +11,7 @@
  *   can regroup the menu without breaking existing URLs.
  * - The same component module may be referenced from more than one
  *   sidebar URL (e.g. the Question node appears under both "Work with AI"
- *   as "Question Mode" and under "Work in Canvas" as "Question Node");
- *   `allRoutes` is deduplicated by URL so each path registers exactly
- *   one `<Route>`.
+ *   as "Question Mode" and under "Work in Canvas" as "Question Node").
  * - Section modules are loaded with `React.lazy` so the handbook
  *   never ships in the main bundle.
  */
@@ -37,25 +35,21 @@ type RawGroup = {
   items: RawItem[];
 };
 
-const pinnedRaw: RawItem[] = [
-  {
-    to: '/docs',
-    label: 'Overview',
-    load: () => import('./sections/Overview'),
-  },
-  {
-    to: '/docs/quickstart',
-    label: 'Quick Start',
-    load: () => import('./sections/QuickStart'),
-  },
-  {
-    to: '/docs/showcase',
-    label: 'Showcase',
-    load: () => import('./sections/Showcase'),
-  },
-];
+const pinnedRaw: RawItem[] = [];
 
 const groupsRaw: RawGroup[] = [
+  {
+    label: 'Getting Started',
+    items: [
+      {
+        to: '/docs',
+        label: 'Quick Start',
+        description:
+          'Install Huabu, create your first Space, add material, and complete your first AI conversation.',
+        load: () => import('./sections/QuickStart'),
+      },
+    ],
+  },
   {
     label: 'Core',
     items: [
@@ -274,12 +268,9 @@ export const groups: DocsGroup[] = groupsRaw.map((group) => ({
 }));
 
 /**
- * Flat list consumed by `<Routes>` in `DocsPage`. Deduplicated by
- * URL so a page reused across multiple sidebar groups only registers
- * a single route. Also keeps a route registered for `/docs/nodes/overview`
- * (linked from the Overview hub but not present in the sidebar) and
- * `/docs/ai/question-mode`, which reuses the existing Question node
- * component under a different URL.
+ * Flat list consumed by `<Routes>` in `DocsPage`. It also keeps routes
+ * registered for node pages that are linked from articles but do not
+ * appear in the sidebar.
  */
 const allItems: DocsItem[] = [
   ...pinnedItems,

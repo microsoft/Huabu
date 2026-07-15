@@ -28,7 +28,7 @@ import type { CSSProperties, ReactNode } from 'react';
 export function DocsLayout({ children }: { children: ReactNode }) {
   return (
     <div
-      className="relative h-full w-full overflow-y-auto bg-white bg-[radial-gradient(circle,_rgba(0,0,0,0.12)_1px,_transparent_1px)] bg-[length:22px_22px]"
+      className="relative h-full w-full overflow-y-auto bg-white"
       style={
         {
           // Single source of truth for the side gutters. Tweak here
@@ -67,8 +67,8 @@ function DocsSidebar() {
   return (
     <aside className="fixed top-4 bottom-4 left-4 z-20 flex w-60 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
       {/* Pinned header: logo + brand + the two universal entry points
-          (Overview / Quick Start). Stays put when the lower list
-          scrolls. */}
+              (Overview / Quick Start). Stays put when the lower list
+              scrolls. */}
       <div className="shrink-0 border-b border-gray-100 px-4 pt-4 pb-3">
         <Link
           to="/docs"

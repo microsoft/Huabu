@@ -1,18 +1,21 @@
+import { Bot, Settings as SettingsIcon } from 'lucide-react';
+
 import {
   Callout,
   DocImage,
   DocLink,
   H2,
-  Kbd,
   P,
   PageLayout,
+  Shortcut,
 } from '../components';
+import { NODE_ICON } from '../config/nodeIcons';
 
 export default function QuickStart() {
   return (
     <PageLayout
       title="Quick Start"
-      description="From download to a productive thinking space in six steps, with links to deeper guides when you want more detail."
+      description="Install Huabu, create your first Space, add one piece of material, and have your first conversation with AI."
     >
       <H2>1. Download and install Huabu</H2>
       <P>
@@ -24,62 +27,37 @@ export default function QuickStart() {
         package on Windows, then install and launch Huabu.
       </P>
 
-      <H2>2. Choose a Home</H2>
+      <H2>2. Choose a Home Folder</H2>
       <P>
-        On first launch, choose a local folder for Huabu to use as your{' '}
-        <strong>Home</strong>. A Home holds all of your Spaces, settings,
-        skills, and shared memory.
-      </P>
-      <P>
-        See{' '}
-        <DocLink href="/docs/concepts/workspaces">data storage details</DocLink>{' '}
-        to learn how Huabu organizes data in this folder.
+        On first launch, select a local folder and open it as your{' '}
+        <strong>Home</strong>. Huabu stores your Spaces and their materials in
+        this folder so you can choose where your work lives.
       </P>
 
-      <H2>3. Configure Huabu Agent</H2>
+      <H2>3. Configure models and keys</H2>
       <P>
-        Open <strong>Settings</strong> from the app header, then select{' '}
-        <strong>Huabu Agent</strong>. Configure the capabilities you want to
-        use:
+        Open <strong>Settings</strong> (
+        <SettingsIcon
+          aria-label="Settings"
+          className="inline-block size-[1em] align-[-0.15em]"
+        />
+        ) from the app header (or press <Shortcut combo="mod+," />
+        ), then select <strong>Huabu Agent</strong>. The{' '}
+        <strong>Chat Model</strong> is the only model you must set up to get
+        started.
       </P>
-      <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
-        <li>
-          <strong>Chat Model (required)</strong> — choose the provider and model
-          that power Chat, Agent, and other AI interactions, then complete the
-          provider&apos;s API key or OAuth authentication.
-        </li>
-        <li>
-          <strong>Utility Model (optional)</strong> — follow the Chat Model or
-          choose a faster, lower-cost model for lightweight background tasks
-          such as labels and summaries.
-        </li>
-        <li>
-          <strong>Image Generation (optional)</strong> — configure an image
-          model if you want Huabu Agent to generate images in your Space.
-        </li>
-        <li>
-          <strong>Other Capabilities (optional)</strong> — add a Tavily API key
-          for web search and a RapidAPI key for importing YouTube transcripts.
-        </li>
-      </ul>
-      <Callout tone="tip">
-        Provider details, authentication steps, and troubleshooting live in{' '}
-        <DocLink href="/docs/reference/settings">Settings &amp; LLM</DocLink>.
-      </Callout>
+      <P>
+        The same page also holds optional settings — a{' '}
+        <strong>Utility Model</strong> for lightweight background tasks,{' '}
+        <strong>Image Generation</strong>, and capabilities such as{' '}
+        <strong>Web Search</strong> — that you can configure later.
+      </P>
       <DocImage
-        src="/docs/quick-start/configure-llm-web.png"
-        alt="Huabu Agent settings showing the conversation model configuration"
-        caption="Web preview — this screenshot will be replaced with the desktop version."
+        src="/docs/quick-start/configure-llm.png"
+        alt="Huabu Agent settings with the Chat Model provider, endpoint, and API key fields"
+        caption="Configure models and keys in Huabu Agent settings — only the Chat Model is required."
         className="mx-auto max-w-2xl"
       />
-      <Callout tone="info" title="Using an external agent?">
-        Install and authenticate an ACP-compatible agent such as Copilot or
-        Gemini, or an ACP adapter for Claude or Codex. Then open{' '}
-        <strong>Settings → External Agents</strong> and select{' '}
-        <strong>Add agent</strong>. See{' '}
-        <DocLink href="/docs/ai/external-agents">External Agents</DocLink> for
-        profile setup and usage.
-      </Callout>
 
       <H2>4. Create a Space</H2>
       <P>
@@ -88,83 +66,100 @@ export default function QuickStart() {
         <strong>New Space</strong> to create a Space and open it immediately.
       </P>
       <DocImage
-        src="/docs/quick-start/create-canvas-web.png"
+        src="/docs/quick-start/create-canvas.png"
         alt="Huabu Space list with the New Space button"
-        caption="Web preview — this screenshot will be replaced with the desktop version."
+        caption="Create a Space for the topic or project you want to work on."
         className="mx-auto max-w-2xl"
       />
 
-      <H2>5. Bring materials into your Space</H2>
-      <P>
-        Add the materials you want to think with, then arrange them in whatever
-        structure makes sense:
-      </P>
-      <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
+      <H2>5. Add content to your Space</H2>
+      <P>There are several ways to bring content into a Space:</P>
+      <ul className="text-fg-muted list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed">
         <li>
-          <strong>Add source material</strong> — drag in PDFs, images, videos,
-          or other supported files, or paste URLs for web pages and YouTube
-          videos. Huabu creates the appropriate node for each item.
+          <strong>Paste</strong> — copy text or an image anywhere and paste it
+          straight into your Space.
         </li>
         <li>
-          <strong>Add your own thinking</strong> — create Notes, Text, and
-          Sketch nodes from the toolbar, or paste text directly onto the Space.
+          <strong>Drag and drop</strong> — drop files from your computer into
+          your Space.
         </li>
         <li>
-          <strong>Shape your Space</strong> — place related nodes near each
-          other, connect explicit relationships with edges, or wrap a group in a
-          Frame. Select multiple nodes and press <Kbd>Ctrl</Kbd>/<Kbd>Cmd</Kbd>+
-          <Kbd>G</Kbd> to frame them together.
+          <strong>Upload or Link</strong> — from the toolbar, choose{' '}
+          <strong>Upload Files</strong> to add a PDF or image, or{' '}
+          <strong>Add Links</strong> to bring in a web page.
+        </li>
+        <li>
+          <strong>Create a node</strong> — start from scratch with a{' '}
+          <NODE_ICON.note
+            aria-hidden
+            className="inline-block size-[1em] align-[-0.15em]"
+          />{' '}
+          <strong>Note</strong>,{' '}
+          <NODE_ICON.text
+            aria-hidden
+            className="inline-block size-[1em] align-[-0.15em]"
+          />{' '}
+          <strong>Text</strong>,{' '}
+          <NODE_ICON.frame
+            aria-hidden
+            className="inline-block size-[1em] align-[-0.15em]"
+          />{' '}
+          <strong>Frame</strong>, or{' '}
+          <NODE_ICON.sketch
+            aria-hidden
+            className="inline-block size-[1em] align-[-0.15em]"
+          />{' '}
+          <strong>Sketch</strong> from the toolbar.
         </li>
       </ul>
       <DocImage
-        src="/docs/quick-start/add-content-web.png"
-        alt="Huabu Space with a new Note node and the node toolbar"
-        caption="Web preview — this screenshot will be replaced with the desktop version."
+        src="/docs/quick-start/add-content.png"
+        alt="Huabu toolbar with the Upload or Link menu open showing Upload Files and Add Links, alongside the Note, Text, Frame, and Sketch tools"
+        caption="Add content by pasting, dragging, uploading — or create a Note, Text, Frame, or Sketch from the toolbar."
         className="mx-auto max-w-2xl"
       />
 
       <H2>6. Think and work with AI</H2>
       <P>
-        Once your materials are in the Space, choose how you want AI to
-        participate:
+        Every conversation lives in the{' '}
+        <DocLink href="/docs/concepts/chat-panel">Chat Panel</DocLink>. Open it
+        with the top-right button (
+        <Bot
+          aria-label="Open chat panel"
+          className="inline-block size-[1em] align-[-0.15em]"
+        />
+        ), start a new conversation, and choose who you are talking to:
       </P>
-      <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
+      <ul className="text-fg-muted list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed">
         <li>
-          <strong>
-            <DocLink href="/docs/concepts/chat-panel">Chat Panel</DocLink>
-          </strong>{' '}
-          — talk with Huabu Agent or any paired external agent. Select the nodes
-          you want to use as context, then drag useful parts of a reply back
-          into the Space to continue organizing your thinking.
+          <strong>Huabu Chat</strong> — a plain conversation. Select the nodes
+          you want as context, ask questions, and drag useful parts of a reply
+          back into your Space to keep organizing your thinking.
         </li>
         <li>
-          <strong>Agent Mode</strong> — describe what you want to accomplish and
-          let Huabu Agent work with the materials and structure in your Space.
-          It presents any proposed changes for you to review before applying
-          them.
-        </li>
-        <li>
-          <strong>
-            <DocLink href="/docs/nodes/question">Question Node</DocLink>
-          </strong>{' '}
-          — ask beside relevant material so the question stays in context with
-          the ideas and sources around it.
-        </li>
-        {/*
-          <li>
-            <strong>Intent</strong> — press <Kbd>Cmd</Kbd>+<Kbd>I</Kbd> to ask the
-            AI to suggest the next move based on the Space&apos;s current state.
-          </li>
-        */}
-        <li>
-          <strong>
-            <DocLink href="/docs/ai/external-agents">External Agents</DocLink>
-          </strong>{' '}
-          — bring a paired ACP agent into your Space when you need specialized
-          context or capabilities, such as understanding a repository, producing
-          a presentation, or taking action with its own tools.
+          <strong>Huabu Agent</strong> — the same conversation, but the agent
+          can also act on your Space. It works with your materials and structure
+          and presents proposed changes for you to review before applying them.
         </li>
       </ul>
+      <P>
+        You can add more agents too. Pair an{' '}
+        <DocLink href="/docs/ai/external-agents">External Agent</DocLink> in{' '}
+        <strong>Settings → External Agents</strong>; afterwards it appears in
+        the Chat Panel next to Huabu Agent and switches in the same way —
+        bringing its own specialized context or tools, such as understanding a
+        repository or producing a presentation.
+      </P>
+      <P>
+        Prefer to ask right beside your material? Add an{' '}
+        <NODE_ICON.question
+          aria-hidden
+          className="inline-block size-[1em] align-[-0.15em]"
+        />{' '}
+        <DocLink href="/docs/nodes/question">Agent Node</DocLink> in your Space
+        to start a conversation in place, so it stays in context with the ideas
+        and sources around it.
+      </P>
       <Callout tone="tip" title="Where to next">
         Continue with{' '}
         <DocLink href="/docs/concepts/canvas-basics">Space Basics</DocLink> to

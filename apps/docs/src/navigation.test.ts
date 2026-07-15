@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { allRoutes, routeManifest } from './navigation';
+import { allRoutes, groups, pinnedItems, routeManifest } from './navigation';
 
 describe('handbook route registry', () => {
   it('contains unique /docs routes including node content', () => {
@@ -17,5 +17,16 @@ describe('handbook route registry', () => {
     expect(
       routeManifest.every((route) => route.title && route.description),
     ).toBe(true);
+  });
+
+  it('starts with the task-focused Quick Start', () => {
+    expect(pinnedItems).toEqual([]);
+    expect(groups[0]?.label).toBe('Getting Started');
+    expect(groups[0]?.items.map(({ to, label }) => ({ to, label }))).toEqual([
+      { to: '/docs', label: 'Quick Start' },
+    ]);
+    expect(allRoutes.some((route) => route.to === '/docs/showcase')).toBe(
+      false,
+    );
   });
 });
