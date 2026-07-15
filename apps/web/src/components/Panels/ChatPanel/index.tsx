@@ -1,3 +1,4 @@
+import clsx from 'clsx';
 import { ArrowLeft, ListIndentIncrease, PanelRightOpen } from 'lucide-react';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -9,6 +10,7 @@ import {
 } from '@/api/acp';
 import { logIntentEpisode } from '@/api/intent';
 import { Button } from '@/components/Common/Button';
+import { Input } from '@/components/Common/Input';
 import { toast } from '@/components/Common/Toast';
 import { useAcpProfiles } from '@/hooks/useAcpProfiles';
 import { useAcpSessionMeta } from '@/hooks/useAcpSessionMeta';
@@ -103,6 +105,33 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     const label = typeof d?.label === 'string' ? d.label.trim() : '';
     return label || undefined;
   });
+  const isViewingUserNamedQuestion = useCanvasStore((s) => {
+    if (!viewingQuestionNodeId) return false;
+    const node = s.nodes.find((n) => n.id === viewingQuestionNodeId);
+    return node?.data?.labelSource === 'user';
+  });
+  const tryRename = useCanvasStore((s) => s.tryRename);
+  const canRenameQuestion = !!viewingQuestionNodeId;
+  const [isEditingQuestionTitle, setIsEditingQuestionTitle] = useState(false);
+  const [draftQuestionTitle, setDraftQuestionTitle] = useState(
+    viewingQuestionLabel ?? '',
+  );
+  const questionTitleInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isEditingQuestionTitle) return;
+    setDraftQuestionTitle(viewingQuestionLabel ?? '');
+  }, [isEditingQuestionTitle, viewingQuestionLabel]);
+
+  useEffect(() => {
+    setIsEditingQuestionTitle(false);
+  }, [viewingQuestionNodeId]);
+
+  useEffect(() => {
+    if (!isEditingQuestionTitle) return;
+    questionTitleInputRef.current?.focus();
+    questionTitleInputRef.current?.select();
+  }, [isEditingQuestionTitle]);
 
   const mode: AgentMode =
     viewingQuestionThread && !isComposingQuestion
@@ -459,8 +488,11 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     if (viewingSketchCluster) return t('chat.sketchRecognition');
     if (viewingQuestionThread) {
       // Composing a fresh node: it has no real label yet, so show a
-      // neutral title instead of the auto-generated "Question N".
-      if (isComposingQuestion) return t('chat.newQuestion');
+      // neutral title instead of the auto-generated "Question N". A
+      // manual sidebar rename is real authored identity and stays visible.
+      if (isComposingQuestion && !isViewingUserNamedQuestion) {
+        return t('chat.newQuestion');
+      }
       return viewingQuestionLabel ?? t('chat.question');
     }
     // When the thread is delegated to an external ACP agent, the
@@ -478,8 +510,32 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     t,
     viewingQuestionThread,
     isComposingQuestion,
+    isViewingUserNamedQuestion,
     viewingQuestionLabel,
     viewingSketchCluster,
+  ]);
+
+  const commitQuestionTitle = useCallback(() => {
+    if (!viewingQuestionNodeId) {
+      setIsEditingQuestionTitle(false);
+      setDraftQuestionTitle(viewingQuestionLabel ?? '');
+      return;
+    }
+    const next = draftQuestionTitle.trim();
+    if (!next || next === (viewingQuestionLabel ?? '').trim()) {
+      setIsEditingQuestionTitle(false);
+      setDraftQuestionTitle(viewingQuestionLabel ?? '');
+      return;
+    }
+    setIsEditingQuestionTitle(false);
+    void tryRename('node', viewingQuestionNodeId, next).then((accepted) => {
+      if (!accepted) setDraftQuestionTitle(viewingQuestionLabel ?? '');
+    });
+  }, [
+    draftQuestionTitle,
+    tryRename,
+    viewingQuestionLabel,
+    viewingQuestionNodeId,
   ]);
 
   // Register intent callback — when user selects an intent in the popover,
@@ -689,9 +745,52 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
               <ArrowLeft size={16} />
             </Button>
           )}
-          <span className="min-w-0 truncate" title={panelTitle}>
-            {panelTitle}
-          </span>
+          {canRenameQuestion && isEditingQuestionTitle ? (
+            <Input
+              ref={questionTitleInputRef}
+              value={draftQuestionTitle}
+              aria-label={t('node.rename')}
+              placeholder={t('node.untitled')}
+              className="text-fg-default bg-bg-default border-edge-default w-64 max-w-full min-w-0 truncate rounded border px-1 py-0.5 text-sm font-semibold outline-none"
+              onChange={(event) => setDraftQuestionTitle(event.target.value)}
+              onBlur={commitQuestionTitle}
+              onKeyDown={(event) => {
+                event.stopPropagation();
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  commitQuestionTitle();
+                }
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  setDraftQuestionTitle(viewingQuestionLabel ?? '');
+                  setIsEditingQuestionTitle(false);
+                }
+              }}
+            />
+          ) : (
+            <span
+              className={clsx(
+                'min-w-0 truncate rounded border border-transparent px-1 py-0.5',
+                canRenameQuestion &&
+                  'hover:text-fg-default focus-visible:outline-info cursor-text focus-visible:outline-1',
+              )}
+              title={canRenameQuestion ? t('node.rename') : panelTitle}
+              role={canRenameQuestion ? 'button' : undefined}
+              tabIndex={canRenameQuestion ? 0 : undefined}
+              onClick={() => {
+                if (canRenameQuestion) setIsEditingQuestionTitle(true);
+              }}
+              onKeyDown={(event) => {
+                if (!canRenameQuestion) return;
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  setIsEditingQuestionTitle(true);
+                }
+              }}
+            >
+              {panelTitle}
+            </span>
+          )}
           {acpConnectionStatus && agentBinding.kind === 'external' && (
             <AcpConnectionBadge
               status={acpConnectionStatus}
