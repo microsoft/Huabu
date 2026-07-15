@@ -29,10 +29,14 @@ describe('handbook route registry', () => {
       false,
     );
   });
-  it('provides a dedicated Help entry for reporting issues', () => {
-    const help = groups.find((group) => group.label === 'Help');
-    expect(help?.items.map(({ to, label }) => ({ to, label }))).toEqual([
+  it('includes issue reporting in Reference', () => {
+    const reference = groups.find((group) => group.label === 'Reference');
+    expect(reference?.items.map(({ to, label }) => ({ to, label }))).toEqual([
+      { to: '/docs/reference/shortcuts', label: 'Keyboard Shortcuts' },
+      { to: '/docs/reference/settings', label: 'Settings & LLM' },
+      { to: '/docs/reference/storage', label: 'Data Storage' },
       { to: '/docs/reference/issues', label: 'Report an Issue' },
     ]);
+    expect(groups.some((group) => group.label === 'Help')).toBe(false);
   });
 });

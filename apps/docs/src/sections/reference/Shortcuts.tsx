@@ -103,7 +103,8 @@ export default function Shortcuts() {
         <>
           <Kbd>Ctrl</Kbd> on Windows / Linux, <Kbd>Cmd</Kbd> (⌘) on macOS — the
           tables below write it as <Kbd>Ctrl</Kbd>/<Kbd>Cmd</Kbd>. Press{' '}
-          <Kbd>?</Kbd> on any Space to view the same list in-app.
+          <Kbd>?</Kbd> in any Space to view the same list in-app. Shortcuts in
+          the General section are available only in the desktop app.
         </>
       }
       toc={toc}

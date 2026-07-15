@@ -228,11 +228,6 @@ const groupsRaw: RawGroup[] = [
         label: 'Data Storage',
         load: () => import('./sections/reference/Storage'),
       },
-    ],
-  },
-  {
-    label: 'Help',
-    items: [
       {
         to: '/docs/reference/issues',
         label: 'Report an Issue',
