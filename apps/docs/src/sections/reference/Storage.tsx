@@ -37,17 +37,11 @@ export default function Storage() {
 │   ├── canvas.json                    # this Space's topology
 │   ├── nodes/<node-title>.md
 │   ├── .artifacts/<artifactId>.<ext>
-│   ├── .memory/canvas.md              # Space memory (hidden)
+│   ├── .memory/space.md               # Space memory (hidden)
 │   └── .history/                      # conversation and event history
 └── setting/
-    ├── .huabu.md                      # User memory
+    ├── user.md                        # User memory
     └── skills/<id>/SKILL.md           # user-authored skills`}</CodeBlock>
-      <Callout tone="info">
-        The on-disk names <Code>canvas.json</Code>,{' '}
-        <Code>.memory/canvas.md</Code> and <Code>.huabu.md</Code> are kept from
-        earlier versions for compatibility. Conceptually they are this
-        Space&apos;s topology, its Space memory, and your User memory.
-      </Callout>
 
       <H2>Per-Space files</H2>
       <Table
@@ -69,7 +63,7 @@ export default function Storage() {
             'PDF / image / video originals; filename = artifactId, served at /api/canvas/<canvasId>/artifact/<artifactId>.<ext>.',
           ],
           [
-            <Code>.memory/canvas.md</Code>,
+            <Code>.memory/space.md</Code>,
             'Markdown',
             'Space-level memory the AI writes (hidden dir). Capped at ~4 KB on the next AI write.',
           ],
@@ -82,7 +76,7 @@ export default function Storage() {
       />
       <Callout tone="info">
         Which nodes don&apos;t get a <Code>.md</Code>?{' '}
-        <strong>Sketch and Question</strong> — they live entirely in{' '}
+        <strong>Sketch and Agent Nodes</strong> — they live entirely in{' '}
         <Code>canvas.json</Code>. Frame gets a frontmatter-only <Code>.md</Code>{' '}
         with no body.
       </Callout>
@@ -92,7 +86,7 @@ export default function Storage() {
         headers={['File', 'Contents']}
         rows={[
           [
-            <Code>setting/.huabu.md</Code>,
+            <Code>setting/user.md</Code>,
             'User memory — preferences and context that apply across every Space. Capped at ~4 KB.',
           ],
           [
@@ -200,7 +194,7 @@ export default function Storage() {
             'Not recommended — but deletions only lose conversation context, not Space content.',
           ],
           [
-            <Code>setting/.huabu.md</Code>,
+            <Code>setting/user.md</Code>,
             '✅ Edit freely; the AI will respect the 4 KB cap on its next write.',
           ],
           [

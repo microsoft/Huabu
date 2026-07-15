@@ -79,10 +79,10 @@ export default function OpenVault() {
 │   ├── canvas.json          topology (nodes, edges, version)
 │   ├── nodes/               one Markdown file per node
 │   ├── .artifacts/          hidden: raw binaries (PDFs, images, videos)
-│   ├── .memory/canvas.md    AI-written Space memory
+│   ├── .memory/space.md     AI-written Space memory
 │   └── .history/            hidden: conversation and activity history
 └── setting/
-    ├── .huabu.md            User memory
+    ├── user.md              User memory
     └── skills/              reusable AI recipes (one folder each)`}</CodeBlock>
       <P>Three things worth calling out in this layout:</P>
       <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">

@@ -31,7 +31,7 @@ export default function Content() {
 ├── canvas.json              # topology (positions, edges, frames)
 ├── nodes/<node-title>.md    # ingested content + metadata per node
 ├── .artifacts/              # hidden: raw binaries (PDFs, images, videos)
-├── .memory/canvas.md        # AI-written Space memory
+├── .memory/space.md         # AI-written Space memory
 └── .history/                # hidden: conversation and event history`}</CodeBlock>
       <P>
         Node <strong>content</strong> and node{' '}
