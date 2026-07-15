@@ -1,5 +1,5 @@
 /**
- * Canvas write tool handler — `canvas_commands`.
+ * Canvas write tool handler — `space_commands`.
  *
  * As of M2 (headless executor) this handler runs the batch
  * **server-side** through {@link executeOnServer} and returns the
@@ -17,7 +17,7 @@
  * Returns the envelope `{ source, canvasId, commands, fromVersion,
  * toVersion, deltas, results, pendingEffects, runId }` on success;
  * the SSE bridge / web client wraps it into the standard
- * `ToolResponse<'canvas_commands', ...>` envelope. Errors throw —
+ * `ToolResponse<'space_commands', ...>` envelope. Errors throw —
  * pi-agent-core catches and surfaces them as `isError: true`.
  */
 

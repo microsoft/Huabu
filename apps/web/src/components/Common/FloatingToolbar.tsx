@@ -13,7 +13,8 @@ import {
   AlignHorizontalDistributeCenter,
   AlignStartHorizontal,
   AlignStartVertical,
-  MoveVertical,
+  Shrink,
+  UnfoldVertical,
   Ungroup,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
@@ -27,6 +28,7 @@ import {
   Select as BaseSelect,
   type SelectOption as BaseSelectOption,
 } from './Select';
+import { Tooltip } from './Tooltip';
 
 import type { ReactNode } from 'react';
 
@@ -308,7 +310,7 @@ function ToolbarColorPicker({
       className="flex items-center"
     >
       <Button
-        variant="outline"
+        variant="ghost"
         iconOnly
         size="sm"
         title={title}
@@ -316,7 +318,10 @@ function ToolbarColorPicker({
           e.stopPropagation();
           setIsOpen(!isOpen);
         }}
-        className="h-6 rounded-sm"
+        className={cn(
+          'bg-bg-default enabled:hover:bg-hover h-6 w-7 rounded-md',
+          isOpen && 'ring-info ring-1',
+        )}
       >
         {children ?? defaultTrigger}
       </Button>
@@ -398,7 +403,6 @@ interface ToolbarSizePickerProps {
   heightAuto?: {
     active: boolean;
     onToggle: () => void;
-    title?: string;
   };
   /**
    * Generalised auto-size toggle. Like `heightAuto` but also covers
@@ -427,12 +431,18 @@ interface ToolbarSizePickerProps {
     dimensions?: 'height' | 'both';
     active: boolean;
     onToggle: () => void;
-    title?: string;
   };
 }
 
 const SIZE_INPUT_CLASS =
-  'border-edge-default focus:border-info nodrag w-12 rounded border bg-transparent px-1.5 py-0.5 text-xs outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none';
+  'nodrag w-10 bg-transparent text-xs outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none';
+
+// Rounded filled "capsule" wrapping the label + input so `W 937`
+// reads as one solid chip (more cohesive than a hairline-bordered
+// field). Frame hug wraps its W/H pair in a single shared capsule
+// instead, so those inner inputs opt out via `unstyled`.
+const SIZE_CAPSULE_CLASS =
+  'bg-bg-default hover:bg-hover focus-within:ring-info rounded-md px-1.5 py-1 transition-colors focus-within:ring-1';
 
 interface ToolbarNumberInputProps {
   label: string;
@@ -445,6 +455,24 @@ interface ToolbarNumberInputProps {
   inputClassName?: string;
   disabled?: boolean;
   title?: string;
+  /**
+   * Optional control rendered *inside* the input on its trailing edge
+   * (e.g. an auto/fixed height toggle). When present the input widens
+   * and reserves right padding so the value never overlaps the icon.
+   */
+  endAdornment?: ReactNode;
+  /**
+   * When set, the input displays this text read-only (e.g. "Auto")
+   * instead of an editable number — used when the dimension is
+   * content-driven and has no pinned value to edit.
+   */
+  autoText?: string;
+  /**
+   * Render without the rounded capsule background (transparent), for
+   * cases where an outer container already provides the chip surface
+   * (e.g. a frame's shared W/H capsule).
+   */
+  unstyled?: boolean;
 }
 
 function ToolbarNumberInput({
@@ -458,7 +486,11 @@ function ToolbarNumberInput({
   inputClassName,
   disabled = false,
   title,
+  endAdornment,
+  autoText,
+  unstyled = false,
 }: ToolbarNumberInputProps) {
+  const isAuto = typeof autoText === 'string';
   const [text, setText] = useState('');
 
   useEffect(() => {
@@ -496,39 +528,56 @@ function ToolbarNumberInput({
   };
 
   return (
-    <label className="flex items-center gap-1" title={title}>
+    <label
+      className={cn(
+        'nodrag flex items-center gap-1',
+        !unstyled && SIZE_CAPSULE_CLASS,
+      )}
+      title={title}
+    >
       <span className="text-fg-subtle text-xs" aria-hidden="true">
         {label}
       </span>
-      <input
-        type="number"
-        inputMode="numeric"
-        aria-label={ariaLabel}
-        min={min}
-        max={max}
-        step={step}
-        disabled={disabled}
-        value={text}
-        placeholder={typeof value === 'number' ? '' : '—'}
-        onChange={(e) => setText(e.target.value)}
-        onBlur={commit}
-        onMouseDown={(e) => e.stopPropagation()}
-        onKeyDown={(e) => {
-          e.stopPropagation();
-          if (e.key === 'Enter') {
-            commit();
-            (e.target as HTMLInputElement).blur();
-          } else if (e.key === 'Escape') {
-            restore();
-            (e.target as HTMLInputElement).blur();
-          }
-        }}
-        className={cn(
-          SIZE_INPUT_CLASS,
-          disabled && 'cursor-not-allowed opacity-50',
-          inputClassName,
+      <div className="relative flex items-center">
+        <input
+          type={isAuto ? 'text' : 'number'}
+          inputMode={isAuto ? undefined : 'numeric'}
+          aria-label={ariaLabel}
+          min={isAuto ? undefined : min}
+          max={isAuto ? undefined : max}
+          step={isAuto ? undefined : step}
+          disabled={disabled}
+          readOnly={isAuto}
+          value={isAuto ? autoText : text}
+          placeholder={isAuto || typeof value === 'number' ? '' : '—'}
+          onChange={isAuto ? undefined : (e) => setText(e.target.value)}
+          onBlur={isAuto ? undefined : commit}
+          onMouseDown={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (isAuto) return;
+            if (e.key === 'Enter') {
+              commit();
+              (e.target as HTMLInputElement).blur();
+            } else if (e.key === 'Escape') {
+              restore();
+              (e.target as HTMLInputElement).blur();
+            }
+          }}
+          className={cn(
+            SIZE_INPUT_CLASS,
+            endAdornment && 'w-14 pr-5',
+            isAuto && 'cursor-default',
+            disabled && 'cursor-not-allowed opacity-50',
+            inputClassName,
+          )}
+        />
+        {endAdornment && (
+          <div className="absolute right-1 flex items-center">
+            {endAdornment}
+          </div>
         )}
-      />
+      </div>
     </label>
   );
 }
@@ -570,62 +619,113 @@ function ToolbarSizePicker({
     (heightAuto ? { dimensions: 'height' as const, ...heightAuto } : undefined);
   const autoActive = auto?.active === true;
   const heightIsAuto = autoActive;
-  const widthIsAuto = autoActive && auto?.dimensions === 'both';
+  const isBothAxes = auto?.dimensions === 'both';
+  const widthIsAuto = autoActive && isBothAxes;
+
+  // Auto/fixed toggle rendered as a single icon whose position matches
+  // its scope: for single-axis note height it embeds in the H input;
+  // for a frame's both-axes hug it sits *before* the W/H pair as a
+  // size-wide mode control (it governs W and H together, so it can't
+  // belong to one dimension's input). The same glyph carries both
+  // states — highlighted (info tone) when auto is active, muted when
+  // pinned.
+  const autoLabel = t('toolbar.size.auto');
+  const modeToggle = (icon: ReactNode) =>
+    auto ? (
+      <Tooltip
+        content={
+          autoActive
+            ? isBothAxes
+              ? t('toolbar.size.switchManual')
+              : t('toolbar.size.switchFixedHeight')
+            : isBothAxes
+              ? t('toolbar.size.fitSize')
+              : t('toolbar.size.fitHeight')
+        }
+      >
+        <button
+          type="button"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            auto.onToggle();
+          }}
+          className={cn(
+            'nodrag flex h-4 w-4 items-center justify-center rounded transition-colors',
+            autoActive ? 'text-info' : 'text-fg-subtle hover:text-fg-default',
+          )}
+        >
+          {icon}
+        </button>
+      </Tooltip>
+    ) : null;
+
+  const widthInput = (
+    <ToolbarNumberInput
+      label="W"
+      ariaLabel="Width"
+      value={width}
+      min={minSize}
+      unstyled={isBothAxes}
+      autoText={widthIsAuto ? autoLabel : undefined}
+      inputClassName={widthIsAuto ? 'text-fg-subtle italic' : undefined}
+      onApply={(next) => {
+        if (
+          widthIsAuto ||
+          typeof width !== 'number' ||
+          next !== Math.round(width)
+        ) {
+          onApply({ width: next });
+        }
+      }}
+    />
+  );
+
+  const heightInput = showHeight ? (
+    <ToolbarNumberInput
+      label="H"
+      ariaLabel="Height"
+      value={height}
+      min={minSize}
+      unstyled={isBothAxes}
+      autoText={heightIsAuto ? autoLabel : undefined}
+      inputClassName={heightIsAuto ? 'text-fg-subtle italic' : undefined}
+      endAdornment={
+        isBothAxes ? undefined : modeToggle(<UnfoldVertical size={12} />)
+      }
+      onApply={(next) => {
+        if (
+          heightIsAuto ||
+          typeof height !== 'number' ||
+          next !== Math.round(height)
+        ) {
+          onApply({ height: next });
+        }
+      }}
+    />
+  ) : null;
+
+  // Frame hug governs W *and* H together. Wrap W + H + toggle in a
+  // single shared capsule (inner inputs transparent) so the trio reads
+  // as one unit and the trailing icon clearly switches the whole
+  // group's mode. A hairline divider keeps W and H legible inside the
+  // shared chip. Single-axis note needs no group — each input is its
+  // own capsule and the toggle is embedded in the H input.
+  if (isBothAxes) {
+    return (
+      <div className={cn('nodrag flex items-center gap-1', SIZE_CAPSULE_CLASS)}>
+        {widthInput}
+        <div className="bg-edge-default h-3.5 w-px" aria-hidden />
+        {heightInput}
+        {modeToggle(<Shrink size={12} />)}
+      </div>
+    );
+  }
 
   return (
     <div className="flex items-center gap-1">
-      <ToolbarNumberInput
-        label="W"
-        ariaLabel="Width"
-        value={width}
-        min={minSize}
-        inputClassName={widthIsAuto ? 'text-fg-subtle italic' : undefined}
-        onApply={(next) => {
-          if (
-            widthIsAuto ||
-            typeof width !== 'number' ||
-            next !== Math.round(width)
-          ) {
-            onApply({ width: next });
-          }
-        }}
-      />
-      {showHeight && (
-        <ToolbarNumberInput
-          label="H"
-          ariaLabel="Height"
-          value={height}
-          min={minSize}
-          inputClassName={heightIsAuto ? 'text-fg-subtle italic' : undefined}
-          onApply={(next) => {
-            if (
-              heightIsAuto ||
-              typeof height !== 'number' ||
-              next !== Math.round(height)
-            ) {
-              onApply({ height: next });
-            }
-          }}
-        />
-      )}
-      {auto && showHeight && (
-        <ToggleButton
-          active={autoActive}
-          title={
-            auto.title ??
-            (auto.dimensions === 'both'
-              ? autoActive
-                ? t('toolbar.size.switchManual')
-                : t('toolbar.size.fitSize')
-              : autoActive
-                ? t('toolbar.size.switchFixedHeight')
-                : t('toolbar.size.fitHeight'))
-          }
-          onClick={auto.onToggle}
-        >
-          <MoveVertical />
-        </ToggleButton>
-      )}
+      {widthInput}
+      {heightInput}
     </div>
   );
 }

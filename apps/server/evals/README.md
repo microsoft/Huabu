@@ -1,7 +1,7 @@
 # Agent eval harness
 
 Offline regression suite for the Sediment agent. Each case ships a
-minimal vault (`fixture`) plus a user prompt and a list of assertions
+minimal Home fixture plus a user prompt and a list of assertions
 on the resulting agent trace. Cases run **without** booting Fastify or
 the web UI — the runner imports `runAgent` directly and replays its
 events into a structured JSON `Trace`.
@@ -46,7 +46,7 @@ evals/
 ├── fixtures/                 # Per-case minimal vaults (git-tracked)
 │   └── read-node-content/
 │       └── default-canvas/
-│           ├── canvas.json
+│           ├── space.json
 │           └── nodes/Dolphin Migration.md
 ├── runs/                     # Per-run output (git-ignored)
 │   └── 20260511-143022/
@@ -69,9 +69,9 @@ evals/
 ## Adding a case
 
 1. **Build the fixture.** Create `fixtures/<id>/<canvasDir>/`. Inside:
-   - `canvas.json` — at minimum `{ canvasId, title, version, state: { nodes, edges }, createdAt, updatedAt }`. The `canvasId` here MUST match the case YAML's `canvasId` (default: `default-canvas`).
-   - `nodes/<safe(label)>.md` — one file per node, frontmatter must include `id` (matching the node's id in `canvas.json`), `type`, and `label`. Body is the markdown the agent will read.
-     The directory name under `fixtures/<id>/` is arbitrary — `canvas.json`'s `canvasId` is what the storage layer uses to address the canvas.
+   - `space.json` — at minimum `{ canvasId, title, version, state: { nodes, edges }, createdAt, updatedAt }`. The `canvasId` here MUST match the case YAML's `canvasId` (default: `default-canvas`).
+   - `nodes/<safe(label)>.md` — one file per node, frontmatter must include `id` (matching the node's id in `space.json`), `type`, and `label`. Body is the markdown the agent will read.
+     The directory name under `fixtures/<id>/` is arbitrary — `space.json`'s `canvasId` is what the storage layer uses to address the canvas.
 2. **Write `cases/<id>.yml`** following the `read-node-content.yml` example. Validation is enforced by `case-loader.ts`'s zod schema, so typos surface as "Invalid case file" with a per-field message.
 3. **Run it.** `pnpm --filter @sediment/server eval -- --case <id>`.
 
@@ -129,7 +129,7 @@ pnpm --filter @sediment/server eval:baseline main
 
 # 2. Switch to your branch, change some skill / tool / prompt
 git checkout my-skill-tweak
-# … edit prompt/skills/canvas/SKILL.md …
+# … edit prompt/skills/space/SKILL.md …
 
 # 3. Diff
 pnpm --filter @sediment/server eval:diff main

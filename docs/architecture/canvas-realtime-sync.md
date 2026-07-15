@@ -31,7 +31,7 @@ mid-editing.
 writer (agent / ACP / headless /execute)
   │
   ▼
-executeOnServer  ── per-canvas mutex ──► persist .md + canvas.json
+executeOnServer  ── per-canvas mutex ──► persist .md + space.json
   │                                      append delta-log, bump version
   │                                      (optional) computeChanges → sidecar
   ▼

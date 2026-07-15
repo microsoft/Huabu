@@ -234,16 +234,16 @@ function mergeToolPart(
         ...(data ? { data } : {}),
       };
     }
-    case 'canvas_commands': {
+    case 'space_commands': {
       const data = (patch.data ??
-        (existing?.variant === 'canvas_commands'
+        (existing?.variant === 'space_commands'
           ? existing.data
           : undefined)) as
-        | ToolResponse<'canvas_commands', Record<string, unknown>>
+        | ToolResponse<'space_commands', Record<string, unknown>>
         | undefined;
       return {
         ...base,
-        variant: 'canvas_commands',
+        variant: 'space_commands',
         ...(data ? { data } : {}),
       };
     }
@@ -307,8 +307,10 @@ function applyInternalToolStart(
 ): void {
   const { upsertAssistantToolPart } = useChatStore.getState();
   const variant = variantForInternalTool(toolName);
+  const canonicalToolName =
+    variant === 'space_commands' ? 'space_commands' : toolName;
   const provisional: ToolResponse<string, unknown> = {
-    tool: toolName,
+    tool: canonicalToolName,
     status: 'success',
     data: args,
   };
@@ -332,7 +334,7 @@ function applyInternalToolStart(
  * Fold an internal pi-ai tool *result* into the owning assistant
  * message: parse the `ToolResponse` envelope, merge it over the
  * provisional args recorded by {@link applyInternalToolStart}, and
- * mark the part completed. Canvas state (for `canvas_commands`) is
+ * mark the part completed. Space state (for `space_commands`) is
  * applied separately via the sync broadcast, not here.
  *
  * Driven by the ACP-shaped `tool_call_update` event for an internal
@@ -370,6 +372,7 @@ function applyInternalToolResult(
   }
   const mergedResponse: ToolResponse<string, unknown> = {
     ...toolResponse,
+    tool: variant === 'space_commands' ? 'space_commands' : toolResponse.tool,
     data: {
       ...existingArgs,
       ...(toolResponse.status === 'success'
@@ -497,14 +500,15 @@ export function handleStreamEvent(
     const internalToolName =
       priorPart?.variant === 'agent_tool'
         ? priorPart.toolName
-        : priorPart?.variant === 'canvas_commands' ||
-            priorPart?.variant === 'web_search'
-          ? priorPart.variant
-          : priorPart?.variant === 'image_generation'
-            ? 'generate_image'
-            : priorPart?.variant === 'snapshot_nodes'
-              ? 'snapshot_nodes'
-              : undefined;
+        : priorPart?.variant === 'space_commands'
+          ? 'space_commands'
+          : priorPart?.variant === 'web_search'
+            ? priorPart.variant
+            : priorPart?.variant === 'image_generation'
+              ? 'generate_image'
+              : priorPart?.variant === 'snapshot_nodes'
+                ? 'snapshot_nodes'
+                : undefined;
 
     if (internalToolName && data.rawOutput !== undefined) {
       const rawText =

@@ -8,6 +8,7 @@ import { Button } from '../../components/Common/Button';
 import { cn } from '../../components/Common/cn';
 import { Canvas } from '../../components/Panels/Canvas/Canvas';
 import { ExpandedNodePanel } from '../../components/Panels/ExpandedNodePanel/ExpandedNodePanel';
+import { openUserHandbook } from '../../config/handbook';
 import { isElectron } from '../../hooks/useElectron';
 import useCanvasStore from '../../store/canvasStore';
 import { usePreviewStore } from '../../store/previewStore';
@@ -149,15 +150,14 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
         <div className="pointer-events-auto absolute top-3 right-2 z-30 flex items-center gap-1">
           {!isElectronApp && (
             <>
-              {/* Handbook — opens the in-app user manual in a new browser
-                  tab so the canvas session stays intact while users
-                  reference the docs side-by-side. */}
+              {/* Handbook — opens the external site in a new browser tab so
+                  the canvas session stays intact while users reference it. */}
               <Button
                 variant="ghost"
                 shape="pill"
                 size="lg"
                 iconOnly
-                onClick={() => window.open('/docs', '_blank', 'noopener')}
+                onClick={openUserHandbook}
                 title={t('navigation.userHandbook')}
                 aria-label={t('navigation.openUserHandbook')}
               >

@@ -50,14 +50,14 @@ jobs:
           # under the `linux:` section in apps/desktop/electron-builder.yml.
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Version is inferred from `packageManager` in package.json
       # (pnpm@10.28.2+sha512…) — passing it again here would conflict
       # with the sha-pinned value and fail with ERR_PNPM_BAD_PM_VERSION.
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -104,7 +104,7 @@ jobs:
           echo "── staged assets ──"
           ls -lh ./release-assets/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: huabu-${{ matrix.os }}
           path: release-assets/
@@ -116,7 +116,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: assets
           # Flatten all three matrix uploads into one dir for the
@@ -126,7 +126,7 @@ jobs:
       - name: List collected assets
         run: ls -lh assets/
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           name: ${{ github.event.inputs.tag || github.ref_name }}

@@ -30,8 +30,13 @@ export interface LLMProviderInfo {
   name: string;
   /** Default API protocol for models on this provider. */
   api: LLMApiType;
-  /** Default base URL (can be overridden at runtime). */
-  defaultBaseUrl?: string;
+  /** Base URL capability and optional provider default. */
+  baseUrl: {
+    /** Endpoint used when the user has not configured an override. */
+    default?: string;
+    /** Whether Settings should allow a user-provided endpoint. */
+    overridable: boolean;
+  };
   /** Whether this provider uses built-in pi-ai models. */
   builtIn: boolean;
   /** Authentication type: 'api-key' (default) or 'oauth'. */
@@ -119,7 +124,8 @@ export interface LLMImageConfig {
  */
 export const llmConfigUpdateSchema = z.object({
   provider: z.string().min(1, 'Provider is required'),
-  model: z.string(),
+  /** Optional patch field; omitted updates preserve the saved model. */
+  model: z.string().optional(),
   /** API key — only sent when setting a new key; never returned by GET. */
   apiKey: z.string().optional(),
   /** Optional base URL override. */

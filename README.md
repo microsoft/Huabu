@@ -1,12 +1,8 @@
 # Huabu
 
-> A canvas-based framework for human–AI collaboration.
+> A Space-based framework for human–AI collaboration.
 
-Huabu provides a shared two-dimensional workspace where ideas, notes, documents,
-questions, and AI outputs live side by side as **persistent nodes**. Instead of
-treating AI as a chat window detached from your work, Huabu places the human and
-the AI inside the same canvas so they can build on each other's contributions
-over time.
+Huabu provides a shared two-dimensional Space where ideas, notes, documents, questions, and AI outputs live side by side as **persistent nodes**. Instead of treating AI as a chat window detached from your work, Huabu places the human and the AI inside the same Space so they can build on each other's contributions over time.
 
 ---
 
@@ -14,16 +10,11 @@ over time.
 
 ### 1. Externalize Thinking
 
-Huabu makes the intermediate structure of thought visible on the canvas.
-Ideas can be organized, revised, and revisited outside of working memory.
-The canvas captures not only **content**, but also **structure** — spatial
-arrangement reflects relationships, priorities, uncertainty, and the emerging
-clusters of thought that usually stay implicit in a linear document or chat.
+Huabu makes the intermediate structure of thought visible in the Space. Ideas can be organized, revised, and revisited outside of working memory. The Space captures not only **content**, but also **structure** — spatial arrangement reflects relationships, priorities, uncertainty, and the emerging clusters of thought that usually stay implicit in a linear document or chat.
 
 ### 2. Share Cognitive Space
 
-Because the AI operates in the same workspace as the human, it can access the broader context of the work rather than only the latest instruction. This lets
-it:
+Because the AI operates in the same Space as the human, it can access the broader context of the work rather than only the latest instruction. This lets it:
 
 - help organize materials,
 - synthesize across nodes,
@@ -31,34 +22,29 @@ it:
 - and support the development of ideas into more structured and actionable
   outputs.
 
-The canvas is the shared memory; both sides read from it and write to it.
+The Space is the shared memory; both sides read from it and write to it.
 
 ---
 
-## What's in a Canvas
+## What's in a Space
 
-A Huabu canvas is an infinite 2D surface composed of typed, persistent nodes
-that the user and the AI can both create, modify, link, and group.
+A Huabu Space is an infinite 2D surface composed of typed, persistent nodes that the user and the AI can both create, modify, link, and group.
 
-| Node type   | Purpose                                                       |
-| ----------- | ------------------------------------------------------------- |
-| Note        | Rich-text / Markdown notes for ideas and drafts               |
-| Text        | Lightweight text blocks for labels and annotations            |
-| Web         | Embedded web pages as living references                       |
-| PDF         | PDF reader with highlighting that flows back into the canvas  |
-| Image/Video | Visual material kept next to the thinking it informs          |
-| Frame       | Grouping container that gives a region of the canvas identity |
-| Edge        | Explicit relationships between nodes                          |
+| Node type   | Purpose                                                      |
+| ----------- | ------------------------------------------------------------ |
+| Note        | Rich-text / Markdown notes for ideas and drafts              |
+| Text        | Lightweight text blocks for labels and annotations           |
+| Web         | Embedded web pages as living references                      |
+| PDF         | PDF reader with highlighting that flows back into the Space  |
+| Image/Video | Visual material kept next to the thinking it informs         |
+| Frame       | Grouping container that gives a region of the Space identity |
+| Edge        | Explicit relationships between nodes                         |
 
 Around these primitives Huabu adds:
 
-- **Intent system** — press `Ctrl/Cmd+I` and the AI proposes the next useful
-  moves based on what is currently on the canvas.
-- **Per-canvas node content storage** — each canvas owns its node content
-  locally, so the AI can read and write directly against the same material
-  the user is working on without a separate indexing step.
-- **AI chat side panel** — a conversational surface whose actions land back
-  on the canvas as nodes and edges, not just as text replies.
+- **Intent system** — press `Ctrl/Cmd+I` and the AI proposes the next useful moves based on what is currently in the Space.
+- **Per-Space node content storage** — each Space owns its node content locally, so the AI can read and write directly against the same material the user is working on without a separate indexing step.
+- **AI chat side panel** — a conversational surface whose actions land back in the Space as nodes and edges, not just as text replies.
 
 See the user guide in [docs/user-guide](./docs/user-guide/README.md) for
 details.
@@ -113,8 +99,7 @@ format, and typecheck on every pull request regardless of local setup.
 
 ## Configuring an LLM
 
-Huabu needs an LLM to drive chat, intent suggestions, and other
-in-canvas AI features. Open the Settings button → **LLM Provider**.
+Huabu needs an LLM to drive chat, intent suggestions, and other in-Space AI features. Open the Settings button → **LLM Provider**.
 
 1. Pick a **Provider** (OpenAI, Anthropic, Google Gemini, OpenRouter,
    GitHub Copilot, and more).

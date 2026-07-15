@@ -58,7 +58,7 @@ type CanvasNodeCreateInputByType<T extends CanvasNodeType> = {
    * the engine no longer ships a fallback layout. UI callers (drag-drop,
    * paste, toolbar placement, group-into-frame, etc.) chose the slot
    * themselves; agents must always emit an explicit position via the
-   * `canvas_commands` schema.
+   * `space_commands` schema.
    */
   position: Point;
   size?: NodeSize;

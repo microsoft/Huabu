@@ -7,6 +7,7 @@ import { resolveAccent } from '@sediment/shared';
 import { getWebPreview } from '@/api/web';
 
 import { getNodeIcon } from '../../../config/nodeIcons.ts';
+import { useNodeLOD } from '../../../hooks/useNodeLOD.ts';
 import { useNodeScale } from '../../../hooks/useNodeScale.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import { FloatingToolbar } from '../../Common/FloatingToolbar.tsx';
@@ -37,6 +38,7 @@ export const WebNode = memo(
   ({ id, data, selected }: NodeProps<WebNodeType>) => {
     const { t } = useTranslation();
     const scale = useNodeScale(id, 'web');
+    const isMinimalLOD = useNodeLOD(id, 'web') === 'minimal';
     const openExpanded = useCanvasStore((s) => s.openExpanded);
     const canvasId = useCanvasStore((s) => s.canvasId);
     const ingestion = useCanvasStore((state) => state.ingestionByNodeId[id]);
@@ -51,9 +53,10 @@ export const WebNode = memo(
     // hydration scheduler. Without this, every WebNode on a freshly-
     // opened canvas would fire its `/api/web/preview` request in the
     // same tick and trigger a setState storm as each result lands
-    // ~simultaneously. The hook flips to `true` one node per frame so
-    // requests + paints stream in. See `../shared/nodeHydrationScheduler`.
-    const webHydrated = useDeferredHydration();
+    // ~simultaneously. Minimal LOD skips the queue entirely; once the node
+    // returns to full LOD, the hook grants one node per frame so requests +
+    // paints stream in. See `../shared/nodeHydrationScheduler`.
+    const webHydrated = useDeferredHydration(isMinimalLOD);
 
     const src = typeof data?.src === 'string' ? data.src : '';
     const isRemoteUrl = REMOTE_URL_RE.test(src);
@@ -90,7 +93,10 @@ export const WebNode = memo(
       // node is granted a slot; subsequent re-runs (ingestion status
       // changes, src updates) re-enter this effect with `webHydrated`
       // already true, so the staggering cost is paid exactly once per
-      // node lifetime.
+      // node lifetime. Minimal LOD also suppresses the request; entering it
+      // while a request is in flight runs this effect's cleanup and ignores
+      // the eventual result.
+      if (isMinimalLOD) return;
       if (!webHydrated) return;
 
       let cancelled = false;
@@ -120,7 +126,7 @@ export const WebNode = memo(
       return () => {
         cancelled = true;
       };
-    }, [src, canvasId, ingestion?.status, id, webHydrated]);
+    }, [src, canvasId, ingestion?.status, id, isMinimalLOD, webHydrated]);
 
     // Track image-load failures so we degrade cleanly. Without these the
     // browser would show its built-in "broken image" placeholder (the

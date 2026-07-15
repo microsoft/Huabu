@@ -42,6 +42,7 @@ import { agentMetadataSchema } from '@agenetes/protocol';
 
 import { readJson } from './io.js';
 import { parseMigratableV3Records } from './legacy/acp-sessions-v3.js';
+import { SPACE_JSON_FILENAME } from './paths.js';
 
 import type { AcpWorkloadSpec } from '../agent/agenetes/drivers.js';
 import type { AgentStateSnapshot, Namespace } from '@agenetes/protocol';
@@ -111,8 +112,8 @@ export function migrateAcpSessionsFile(
  * Walk every canvas's `.history/acp-sessions.json` and migrate its v3
  * records into `threads.json`. The per-canvas namespace uses the on-disk
  * `<canvasDir>/.history` as `storage.root` (so the migrated `threads.json`
- * lands where the live reader looks) and the real `canvasId` (read from
- * `canvas.json`) as `name`, so the persisted `spec.namespace` matches the
+ * lands where the live reader looks) and the canonical `canvasId` as `name`,
+ * so the persisted `spec.namespace` matches the
  * live `canvasAcpNamespace(canvasId)`.
  */
 export function migrateLegacyAcpSessions(workspace: string): void {
@@ -134,7 +135,7 @@ export function migrateLegacyAcpSessions(workspace: string): void {
     if (!existsSync(sessionsPath)) continue;
 
     const canvasId =
-      readJson<{ canvasId?: string }>(path.join(canvasDir, 'canvas.json'))
+      readJson<{ canvasId?: string }>(path.join(canvasDir, SPACE_JSON_FILENAME))
         ?.canvasId ?? dirName;
     const namespace: Namespace = {
       name: canvasId,

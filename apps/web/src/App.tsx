@@ -14,7 +14,6 @@ import { ToastContainer } from './components/Common/Toast';
 import { GlobalModals } from './components/Shell/GlobalModals';
 import { NativeMenuBridge } from './components/Shell/NativeMenuBridge';
 import { WindowChrome } from './components/Shell/WindowChrome';
-import DocsPage from './docs/DocsPage';
 import { useDisableBrowserZoom } from './hooks/useDisableBrowserZoom';
 import { useInputModeListener } from './hooks/useInputMode';
 import CanvasListPage from './pages/CanvasListPage';
@@ -209,11 +208,6 @@ export default function App() {
             // reach it to switch workspaces in free mode. The page itself
             // redirects to "/" in managed mode.
             { path: '/setup', element: <SetupRoute /> },
-            // User handbook — also outside the workspace guard so the
-            // docs are reachable from a fresh install (e.g. before a
-            // workspace folder has been chosen) and from a new browser
-            // tab launched via the in-canvas handbook button.
-            { path: '/docs/*', element: <DocsPage /> },
             {
               element: <WorkspaceGuardLayout />,
               children: [

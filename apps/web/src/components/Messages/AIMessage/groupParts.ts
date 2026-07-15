@@ -8,7 +8,7 @@
  *    `toolName`. `MergedAgentToolRow` then renders them as one
  *    collapsible row (e.g. three `inspect_nodes` calls collapse
  *    into "Inspected N nodes").
- *  - `canvas_commands`, `web_search`, and `generic` parts are each
+ *  - `space_commands`, `web_search`, and `generic` parts are each
  *    their OWN group — they carry per-call UI (change list, source
  *    list, status card) and merging would lose information.
  *
@@ -24,7 +24,7 @@ import type { AssistantSegment } from '../../../store/chatTypes';
 import type {
   AgentToolPart,
   AssistantToolPart,
-  CanvasCommandsToolPart,
+  SpaceCommandsToolPart,
   GenericToolPart,
   ImageGenerationToolPart,
   SnapshotNodesToolPart,
@@ -43,8 +43,8 @@ export type SegmentGroup =
     }
   | {
       kind: 'tool-group';
-      variant: 'canvas_commands';
-      parts: CanvasCommandsToolPart[];
+      variant: 'space_commands';
+      parts: SpaceCommandsToolPart[];
     }
   | {
       kind: 'tool-group';
@@ -71,7 +71,7 @@ function mergeKey(part: AssistantToolPart): string | null {
   switch (part.variant) {
     case 'agent_tool':
       return `agent_tool:${part.toolName}`;
-    case 'canvas_commands':
+    case 'space_commands':
     case 'web_search':
     case 'image_generation':
     case 'snapshot_nodes':
@@ -121,11 +121,11 @@ export function groupAdjacentToolParts(
           parts: parts as AgentToolPart[],
         });
         break;
-      case 'canvas_commands':
+      case 'space_commands':
         groups.push({
           kind: 'tool-group',
-          variant: 'canvas_commands',
-          parts: parts as CanvasCommandsToolPart[],
+          variant: 'space_commands',
+          parts: parts as SpaceCommandsToolPart[],
         });
         break;
       case 'web_search':

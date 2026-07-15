@@ -78,6 +78,13 @@ export const SelectionOutlines = () => {
           outline: `1px solid var(--color-info)`,
           outlineOffset: 0,
           borderRadius: NODE_RADIUS_PX * zoom,
+          // Soft `info-light` glow so the node selection reads the same
+          // as the selected-edge treatment (info core + info-light halo,
+          // see `.react-flow__edge.selected` in index.css). A larger blur
+          // than the edge's 2px drop-shadow is needed because the halo
+          // wraps a big rectangle rather than a hairline stroke, so a
+          // tight radius would be visually diluted to nothing.
+          boxShadow: `0 0 6px 0 var(--color-info-light)`,
           opacity: isSketch ? 0.5 : 1,
         }}
       />

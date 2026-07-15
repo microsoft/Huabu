@@ -9,7 +9,7 @@ A sketch has two **independent** relationships with AI, described separately:
 
 - **Path A — as a content node** (§4): like an image, it carries visual
   information; agents render it to a PNG via `snapshot_node` to "see" it and fold
-  it into their understanding of the canvas. No explicit trigger needed.
+  it into their understanding of the Space. No explicit trigger needed.
 - **Path B — as an executable gesture** (§5): the user explicitly fires
   `✨ Apply Sketch` from a toolbar; the strokes are parsed into `CanvasCommand[]`
   and applied with a preview.
@@ -32,13 +32,13 @@ A sketch has two **independent** relationships with AI, described separately:
 
 ## 2. Data model & persistence
 
-| Node type                                | inline in canvas.json                                                       | `nodes/<safeLabel>.md` | Notes                                                                                                               |
+| Node type                                | inline in space.json                                                        | `nodes/<safeLabel>.md` | Notes                                                                                                               |
 | ---------------------------------------- | --------------------------------------------------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | `sketch`                                 | **stroke geometry** (`points` / `initialSize` / `strokeColor` / `executed`) | ✅ frontmatter-only    | geometry inline in `state.nodes[i].data`; sidecar only persists `label` / `labelSource` (structure PUT strips them) |
 | `question` / `image` / `video` / `frame` | metadata                                                                    | ✅ frontmatter-only    | same as sketch, sidecar only                                                                                        |
 | `note` / `text` / `web` / `pdf`          | metadata                                                                    | ✅                     | text types also carry a markdown body                                                                               |
 
-`MD_BACKED_NODE_TYPES` whitelist: [canvas.route.ts](../../apps/server/src/modules/canvas/canvas.route.ts). Footprint: ~0.5–3 KB per stroke, negligible for `canvas.json`.
+`MD_BACKED_NODE_TYPES` whitelist: [canvas.route.ts](../../apps/server/src/modules/canvas/canvas.route.ts). Footprint: ~0.5–3 KB per stroke, negligible for `space.json`.
 
 Types:
 

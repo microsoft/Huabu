@@ -8,14 +8,14 @@
  *
  * The ACP spec requires `path` on the wire to be absolute. Sediment's
  * sandbox is purely server-side, so we expose a synthetic absolute
- * namespace rooted at `/canvas/` — the agent has no view of Huabu's
+ * namespace rooted at `/space/` — the agent has no view of Huabu's
  * real disk layout, and the canvasId is never sent on the wire.
  *
- *   wire:        "/canvas/nodes/foo.md"
+ *   wire:        "/space/nodes/foo.md"
  *   internal:    safeResolve(canvasId, "nodes/foo.md")
  *                  → <workspace>/<canvasDir>/nodes/foo.md
  *
- * The preprocessor advertises this same `/canvas/<rel>` form in its
+ * The preprocessor advertises this same `/space/<rel>` form in its
  * `fileRefs` list (see `acp/preprocessor.ts:serializePrompt`) so the
  * agent's `Read` tool emits matching absolute paths.
  *
@@ -26,7 +26,7 @@
  *   - `nodes/**`        — per-node markdown
  *   - `.artifacts/**`   — uploaded sources
  *
- * Everything else — `canvas.json`, `skills/**`, `memory/**`,
+ * Everything else — `space.json`, `skills/**`, `memory/**`,
  * `.history/**` — is rejected as outside the allowlist.
  */
 
@@ -35,10 +35,11 @@ import { lstatSync, readFileSync } from 'node:fs';
 import { normalizeRel, safeResolve } from '../../tools/handlers/fs-sandbox.js';
 
 /**
- * Virtual root the agent sees on the wire. Anything outside this
- * prefix is rejected before the sandbox is ever consulted.
+ * Virtual root the agent sees on the wire (`/space/`). Anything outside
+ * this prefix is rejected before the sandbox is ever consulted. The const
+ * name keeps the legacy `CANVAS` token (internal); the wire value is Space.
  */
-export const ACP_CANVAS_VFS_PREFIX = '/canvas/';
+export const ACP_CANVAS_VFS_PREFIX = '/space/';
 
 /**
  * Hard cap on a single `fs/read_text_file` response. Mirrors

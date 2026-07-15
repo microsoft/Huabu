@@ -45,15 +45,18 @@ describe('FloatingToolbar.ColorPicker', () => {
 
     const trigger = container.querySelector('button');
     expect(trigger).not.toBeNull();
+    expect(trigger?.classList.contains('bg-bg-default')).toBe(true);
+    expect(trigger?.classList.contains('rounded-md')).toBe(true);
 
     act(() => {
       trigger?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
     const redSwatch = document.body.querySelector(
-      'button[title="Red"]',
+      'button[aria-label="Red"]',
     ) as HTMLButtonElement | null;
     expect(redSwatch).not.toBeNull();
+    expect(redSwatch?.classList.contains('border-solid')).toBe(true);
 
     act(() => {
       redSwatch?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));

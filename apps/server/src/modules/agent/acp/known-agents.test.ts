@@ -71,4 +71,56 @@ describe('KNOWN_CLIS', () => {
       KNOWN_CLIS.length,
     );
   });
+
+  it('defines official argument-based auto-approval recipes', () => {
+    expect(
+      Object.fromEntries(
+        KNOWN_CLIS.map(({ id, autoApprove }) => [id, autoApprove]),
+      ),
+    ).toEqual({
+      copilot: {
+        args: ['--allow-all'],
+        position: 'after-acp',
+      },
+      claude: null,
+      gemini: {
+        args: ['--approval-mode=yolo'],
+        position: 'after-acp',
+      },
+      codex: null,
+      qwen: {
+        args: ['--approval-mode=yolo'],
+        position: 'after-acp',
+      },
+      kimi: {
+        args: ['--yolo'],
+        position: 'before-acp',
+      },
+      opencode: null,
+      cursor: {
+        args: ['--yolo'],
+        position: 'before-acp',
+      },
+    });
+
+    expect(
+      Object.fromEntries(
+        KNOWN_CLIS.filter((cli) => cli.autoApprove).map((cli) => {
+          const approval = cli.autoApprove;
+          if (!approval) throw new Error(`Missing recipe for ${cli.id}`);
+          const args =
+            approval.position === 'before-acp'
+              ? [...approval.args, ...cli.acpArgs]
+              : [...cli.acpArgs, ...approval.args];
+          return [cli.id, [cli.binary, ...args].join(' ')];
+        }),
+      ),
+    ).toEqual({
+      copilot: 'copilot --acp --allow-all',
+      gemini: 'gemini --acp --approval-mode=yolo',
+      qwen: 'qwen --acp --approval-mode=yolo',
+      kimi: 'kimi --yolo acp',
+      cursor: 'agent --yolo acp',
+    });
+  });
 });

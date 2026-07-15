@@ -33,7 +33,14 @@ export function useCanvasActions(): UseCanvasActionsResult {
     try {
       setIsCreating(true);
       const response = await createCanvas();
-      navigate(`/canvas/${response.canvasId}`);
+      navigate(`/canvas/${response.canvasId}`, {
+        state: {
+          newCanvasPlacement: {
+            canvasId: response.canvasId,
+            nodeType: 'note',
+          },
+        },
+      });
     } catch (error) {
       console.error('Failed to create canvas:', error);
     } finally {

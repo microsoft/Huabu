@@ -2,14 +2,15 @@
 /**
  * Dev orchestrator.
  *
- * Starts `shared` (tsc -w) and `server` in parallel, polls the backend TCP
- * port until it accepts connections, then starts `web`. This avoids the
- * cold-start window where Vite is already proxying `/api/*` while the server
- * is still booting (which surfaces as harmless but noisy ECONNREFUSED logs).
+ * Starts `shared` (tsc -w), `server`, and the standalone `docs` app in
+ * parallel, polls their TCP ports until they accept connections, then starts
+ * `web` with the actual handbook URL injected. This avoids the cold-start
+ * window where Vite is already proxying `/api/*` while the server is still
+ * booting (which surfaces as harmless but noisy ECONNREFUSED logs).
  *
  * Port resolution mirrors apps/web/vite.config.ts:
  *   process.env  >  apps/web/.env  >  <repo-root>/.env
- * but we only need SERVER_PORT / PORT here.
+ * Docs additionally reads DOCS_PORT and avoids the configured web port.
  */
 import { spawn, spawnSync } from 'node:child_process';
 import net from 'node:net';
@@ -51,6 +52,9 @@ const env = loadEnv(
 
 const SERVER_PORT = Number.parseInt(env.SERVER_PORT || env.PORT || '3001', 10);
 const SERVER_HOST = '127.0.0.1';
+const WEB_PORT = Number.parseInt(env.WEB_PORT || env.VITE_PORT || '5173', 10);
+const DOCS_PORT = Number.parseInt(env.DOCS_PORT || '5174', 10);
+const PORT_SCAN_RANGE = 50;
 // How long to wait for the server to accept connections before giving up.
 // Cold starts (first tsx/esbuild compile, Windows Defender scanning a fresh
 // node_modules, or a loaded machine) can blow past a tight window, so the
@@ -63,6 +67,34 @@ const POLL_INTERVAL_MS = 250;
 // Emit a "still waiting" heartbeat at this cadence so a slow boot is visible
 // instead of looking hung until the timeout fires.
 const WAIT_LOG_INTERVAL_MS = 10_000;
+
+function probeBind(host, port) {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.unref();
+    server.once('error', () => resolve(false));
+    server.once('listening', () => {
+      server.close(() => resolve(true));
+    });
+    server.listen(port, host);
+  });
+}
+
+async function isPortFree(port) {
+  if (!(await probeBind('127.0.0.1', port))) return false;
+  if (!(await probeBind('0.0.0.0', port))) return false;
+  return true;
+}
+
+async function findAvailablePort(startPort, excludedPorts = new Set()) {
+  for (let port = startPort; port < startPort + PORT_SCAN_RANGE; port += 1) {
+    if (excludedPorts.has(port)) continue;
+    if (await isPortFree(port)) return port;
+  }
+  throw new Error(
+    `No free port found in ${startPort}..${startPort + PORT_SCAN_RANGE - 1}`,
+  );
+}
 
 /** Resolve once the TCP port accepts a connection. Rejects on timeout. */
 function waitForPort(host, port, timeoutMs) {
@@ -223,7 +255,7 @@ if (process.stdin.isTTY && typeof process.stdin.setRawMode === 'function') {
 }
 
 /** Spawn a `pnpm --filter <pkg> dev` child wired to our stdio. */
-function spawnPnpmDev(filter, label) {
+function spawnPnpmDev(filter, label, extraEnv = {}) {
   const child = spawn('pnpm', ['--filter', filter, 'dev'], {
     cwd: repoRoot,
     // Inherit stdout/stderr only — deny stdin so the child can't put the
@@ -233,6 +265,7 @@ function spawnPnpmDev(filter, label) {
     shell: process.platform === 'win32',
     // POSIX: own process group so we can signal the whole subtree.
     detached: process.platform !== 'win32',
+    env: { ...process.env, ...extraEnv },
   });
   children.push(child);
   child.on('exit', (code, signal) => {
@@ -280,19 +313,37 @@ function spawnAgentletWatch(filter, label) {
   return child;
 }
 
-console.log('[dev] starting agentlet watcher + shared + server …');
+const docsPort = await findAvailablePort(
+  DOCS_PORT,
+  new Set([SERVER_PORT, WEB_PORT]),
+);
+if (docsPort !== DOCS_PORT) {
+  console.warn(
+    `[dev] Docs port ${DOCS_PORT} is in use or reserved; using ${docsPort} instead.`,
+  );
+}
+
+console.log('[dev] starting agentlet watcher + shared + server + docs …');
 // `predev` already populated protocol dist; this watcher keeps it current for
 // the daemon bundle and Agenetes Gateway consumers during development.
 spawnAgentletWatch('@agentlet/protocol', 'agentlet/protocol');
 spawnPnpmDev('@sediment/shared', 'shared');
 spawnPnpmDev('@sediment/server', 'server');
+spawnPnpmDev('@sediment/docs', 'docs', {
+  DOCS_PORT: String(docsPort),
+});
 
 try {
-  await waitForPort(SERVER_HOST, SERVER_PORT, READY_TIMEOUT_MS);
+  await Promise.all([
+    waitForPort(SERVER_HOST, SERVER_PORT, READY_TIMEOUT_MS),
+    waitForPort(SERVER_HOST, docsPort, READY_TIMEOUT_MS),
+  ]);
   console.log(
-    `[dev] server is up at ${SERVER_HOST}:${SERVER_PORT}; starting web …`,
+    `[dev] server is up at http://${SERVER_HOST}:${SERVER_PORT}, docs up at http://${SERVER_HOST}:${docsPort}/docs/; starting web …`,
   );
-  spawnPnpmDev('@sediment/web', 'web');
+  spawnPnpmDev('@sediment/web', 'web', {
+    VITE_HANDBOOK_URL: `http://${SERVER_HOST}:${docsPort}/docs/`,
+  });
 } catch (err) {
   console.error('[dev]', err);
   shutdown(1);

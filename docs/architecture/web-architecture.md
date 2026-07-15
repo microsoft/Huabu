@@ -3,7 +3,7 @@
 > Structure, dependency rules, and conventions for the frontend. The point of
 > this doc is the **layering rules** below — not an exhaustive file listing
 > (those rot fast; `ls` the dir for the current files).
-> Last updated: 2026-07-01
+> Last updated: 2026-07-14
 
 ---
 
@@ -21,7 +21,7 @@ apps/web/src/
 ├── store/         # Zustand global state
 ├── api/           # Backend API clients (one file per endpoint group)
 ├── i18n/          # i18next setup, locale resources, and translation helpers
-├── config/        # Static config & constants
+├── config/        # Static config, constants, and validated external handbook URL
 └── utils/         # Generic utilities (non-React)
 ```
 
@@ -140,6 +140,34 @@ selection toggles don't break xyflow's per-element `React.memo`.
 
 ## 7. Related docs
 
+Canvas pan and zoom are local UI state rather than canvas topology. [`canvasStore`](../../apps/web/src/store/canvasStore.ts) records the last viewport under a canvas-specific `localStorage` key, allowing both browser and Electron users to reopen a canvas at the previous view without creating server writes or sharing a viewport across devices.
+
 - [canvas-command-architecture.md](./canvas-command-architecture.md) — the command/engine model (shared, server + web).
 - [agent-context.md](./agent-context.md) — how the web assembles agent context.
 - [api-design.md](./api-design.md) — HTTP/SSE contract rules the `api/` clients follow.
+
+---
+
+## 8. External user handbook
+
+The web application does not contain handbook pages, assets, or a `/docs/*` route. Product actions call the leaf-level [`openUserHandbook()` helper](../../apps/web/src/config/handbook.ts), which validates an absolute URL and opens it in a separate browser context.
+
+Production requires `VITE_HANDBOOK_URL`; the checked-in [`apps/web/.env.production`](../../apps/web/.env.production) supplies the Microsoft Huabu Pages URL, and deployment environments may override it. Both `pnpm dev` and `pnpm dev:desktop` start the independent docs server on a dynamically selected free port and inject its actual URL through the same variable. Other development entry points resolve `/docs/` against the current page origin when the variable is unset. Production accepts HTTPS only, while development also accepts HTTP on loopback hosts. Electron continues to deny renderer child windows and sends HTTP(S) targets to the operating system through its existing `setWindowOpenHandler` in [`apps/desktop/src/main.ts`](../../apps/desktop/src/main.ts).
+
+The independent handbook architecture is documented in [docs-architecture.md](./docs-architecture.md).
+
+## 9. Desktop troubleshooting actions
+
+The packaged desktop app exposes three support actions without granting the renderer general filesystem or Electron access: reveal the canonical Server log, open Chromium Developer Tools, and copy non-sensitive system information (Huabu version, OS release, CPU architecture, and Electron version). The sandboxed preload bridge exposes only these fixed operations under `electronBridge.diagnostics`; filesystem paths and shell calls remain in the main process. Packaged builds resolve the log below Electron's `userData/data`; `dev:desktop` passes the source Server's `apps/server/data` location to both processes through `HUABU_DATA_DIR`, so the same action always reveals the log written by the active Server.
+
+The native macOS Help menu and the Windows/Linux in-app application menu reuse the fixed operations exported by [`useElectron.ts`](../../apps/web/src/hooks/useElectron.ts) and add localized feedback at the UI boundary. On Windows and Linux, Troubleshooting is a side-opening submenu composed from the shared `DropdownMenu` primitives rather than a flat group of support actions. The browser build omits the actions because the diagnostics bridge is absent.
+
+## Code entry points
+
+| File/dir                                                                       | Responsibility                                                                                |
+| ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| [`apps/web/src/App.tsx`](../../apps/web/src/App.tsx)                           | Product router; deliberately has no handbook route.                                           |
+| [`apps/web/src/config/handbook.ts`](../../apps/web/src/config/handbook.ts)     | Validate and open the canonical external handbook URL.                                        |
+| [`apps/web/src/hooks/useElectron.ts`](../../apps/web/src/hooks/useElectron.ts) | Typed Electron bridge access, fixed support operations, and copied system-information format. |
+| [`apps/desktop/src/preload.ts`](../../apps/desktop/src/preload.ts)             | Narrow sandbox bridge for native menu and diagnostics operations.                             |
+| [`apps/desktop/src/main.ts`](../../apps/desktop/src/main.ts)                   | Electron window security, external URLs, and fixed diagnostics IPC handlers.                  |

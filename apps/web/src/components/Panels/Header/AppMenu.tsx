@@ -1,15 +1,27 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 
+import { openUserHandbook } from '../../../config/handbook';
 import { getShortcutKeys } from '../../../config/shortcuts';
 import { useCanvasActions } from '../../../hooks/useCanvasActions';
-import { isElectron } from '../../../hooks/useElectron';
+import {
+  copySystemInfo,
+  desktopDiagnosticsAvailable,
+  isElectron,
+  openDeveloperTools,
+  openServerLog,
+} from '../../../hooks/useElectron';
+import { useRunDiagnostic } from '../../../hooks/useRunDiagnostic';
 import { useSettingsUiStore } from '../../../store/settingsUiStore';
 import { useShortcutsUiStore } from '../../../store/shortcutsUiStore';
 import { useWorkspaceStore } from '../../../store/workspaceStore';
 import { formatShortcut } from '../../../utils/platform';
-import { DropdownMenu, DropdownMenuItem } from '../../Common/DropdownMenu';
+import {
+  DropdownMenu,
+  DropdownMenuItem,
+  DropdownMenuSubmenu,
+} from '../../Common/DropdownMenu';
 
 interface AppMenuProps {
   /**
@@ -39,8 +51,10 @@ export const AppMenu: React.FC<AppMenuProps> = ({
   logoClassName,
 }) => {
   const { t } = useTranslation();
+  const location = useLocation();
   const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
+  const showCanvasListLink = location.pathname !== '/';
 
   const canChangeWorkspace = useWorkspaceStore(
     (s) => s.capabilities?.canChangeWorkspace ?? true,
@@ -49,6 +63,8 @@ export const AppMenu: React.FC<AppMenuProps> = ({
     useCanvasActions();
   const openSettings = useSettingsUiStore((s) => s.open);
   const openShortcuts = useShortcutsUiStore((s) => s.open);
+  const diagnosticsAvailable = desktopDiagnosticsAvailable();
+  const runDiagnostic = useRunDiagnostic();
 
   const runAndClose = (fn: () => void) => () => {
     setIsOpen(false);
@@ -102,6 +118,15 @@ export const AppMenu: React.FC<AppMenuProps> = ({
           </button>
         }
       >
+        {showCanvasListLink && (
+          <>
+            <DropdownMenuItem onClick={runAndClose(() => navigate('/'))}>
+              {t('canvasPage.backToList')}
+            </DropdownMenuItem>
+            <div className="border-edge-default my-1 border-t" />
+          </>
+        )}
+
         <DropdownMenuItem
           shortcut={newCanvasHint}
           onClick={runAndClose(() => void create())}
@@ -113,12 +138,9 @@ export const AppMenu: React.FC<AppMenuProps> = ({
         </DropdownMenuItem>
 
         {canChangeWorkspace && (
-          <>
-            <div className="border-edge-default my-1 border-t" />
-            <DropdownMenuItem onClick={runAndClose(() => navigate('/setup'))}>
-              {t('navigation.switchWorkspace')}
-            </DropdownMenuItem>
-          </>
+          <DropdownMenuItem onClick={runAndClose(() => navigate('/setup'))}>
+            {t('navigation.switchWorkspace')}
+          </DropdownMenuItem>
         )}
 
         <div className="border-edge-default my-1 border-t" />
@@ -129,18 +151,39 @@ export const AppMenu: React.FC<AppMenuProps> = ({
           {t('settings.title')}
         </DropdownMenuItem>
         <DropdownMenuItem
-          onClick={runAndClose(() =>
-            window.open('/docs', '_blank', 'noopener'),
-          )}
-        >
-          {t('navigation.userHandbook')}
-        </DropdownMenuItem>
-        <DropdownMenuItem
           shortcut={shortcutsHint}
           onClick={runAndClose(openShortcuts)}
         >
           {t('shortcuts.title')}
         </DropdownMenuItem>
+        <DropdownMenuItem onClick={runAndClose(openUserHandbook)}>
+          {t('navigation.userHandbook')}
+        </DropdownMenuItem>
+
+        {diagnosticsAvailable && (
+          <DropdownMenuSubmenu label={t('troubleshooting.title')}>
+            <DropdownMenuItem
+              onClick={runAndClose(() => runDiagnostic(openServerLog))}
+            >
+              {t('troubleshooting.openServerLog')}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={runAndClose(() => runDiagnostic(openDeveloperTools))}
+            >
+              {t('troubleshooting.openDeveloperTools')}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={runAndClose(() =>
+                runDiagnostic(
+                  copySystemInfo,
+                  t('troubleshooting.systemInfoCopied'),
+                ),
+              )}
+            >
+              {t('troubleshooting.copySystemInfo')}
+            </DropdownMenuItem>
+          </DropdownMenuSubmenu>
+        )}
       </DropdownMenu>
     </>
   );

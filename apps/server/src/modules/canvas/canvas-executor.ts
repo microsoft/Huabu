@@ -2,7 +2,7 @@
  * Headless canvas executor — server-side runner for `CanvasCommand` batches.
  *
  * Drives the shared engine (`@sediment/shared/canvas-engine`) against
- * authoritative `<canvasDir>/canvas.json` state, persists both the
+ * authoritative structural state, persists both the
  * canvas structure and the per-node markdown sidecars, computes the
  * structural deltas the engine produced, and appends one row per
  * mutating batch to `<canvasDir>/.history/delta-log.jsonl`.
@@ -621,7 +621,7 @@ export async function executeOnServer(
   // (`upload/foo.png`) or an online URL, neither of which the web can render.
   // `importForeignNodeSources` copies / downloads the bytes into `.artifacts/`
   // and rewrites `src` to the bare key. It only reads scratch bytes and writes
-  // fresh artifact files (unique ids, no canvas.json contention), so keeping it
+  // fresh artifact files (unique ids, no topology contention), so keeping it
   // outside the mutex means a slow online download never stalls concurrent
   // writes to the same canvas. Idempotent for values that are already artifact
   // keys / `/api/` URLs / `data:` URIs.
@@ -646,7 +646,7 @@ export async function executeOnServer(
 
     // Hydrate per-node content from .md sidecars before the engine sees
     // the prestate — handlers like MERGE_NODE_DATA need the current
-    // `data.content` to merge against, but canvas.json never carries it.
+    // `data.content` to merge against, but topology never carries it.
     const prestateNodes = hydrateNodes(
       store,
       canvas.state.nodes as CanvasNode[],
@@ -791,12 +791,12 @@ export async function executeOnServer(
     // `REORDER_NODES`, which rebuilds the array with the same refs in a
     // new order) therefore emit zero structural deltas. Without this
     // guard the no-op fast path below would skip persistence entirely,
-    // leaving the agent with `applied: true` while canvas.json on disk
+    // leaving the agent with `applied: true` while persisted topology
     // is unchanged.
     //
     // We do NOT synthesise a delta — Phase A has no order-aware delta
     // type, and cross-tab broadcast (M3) is not shipped yet. We just
-    // fall through to the persistence branch so canvas.json and the
+    // fall through to the persistence branch so topology and the
     // delta-log version both reflect that something happened. Catch-up
     // clients on M3 will see the version bump and need to refetch the
     // full canvas; that's an acceptable Phase-A trade-off.
@@ -827,14 +827,14 @@ export async function executeOnServer(
 
     const toVersion = fromVersion + 1;
 
-    // Persist .md sidecars FIRST so the canvas.json never references a
+    // Persist .md sidecars first so topology never references a
     // markdown file that does not exist on disk. A crash between this
-    // loop and the canvas.json write leaves orphan .md files (harmless),
+    // loop and the topology write leaves orphan .md files (harmless),
     // not orphan node references (would render as `contentMissing`).
     //
     // `writeNode` throws `CanvasStoreIOError` on environmental failures
     // (ENOSPC, EACCES, …); we deliberately do NOT catch it so the
-    // batch aborts before canvas.json is mutated. The exception bubbles
+    // batch aborts before topology is mutated. The exception bubbles
     // through `handleCanvasCommands` and surfaces as an `isError: true`
     // tool result to the LLM (and as a 500 / error event upstream).
     // Structural `conflict` / `not-found` results are programmer errors
@@ -962,7 +962,7 @@ export async function executeOnServer(
  * authoritative state — used to revert a change card's `revertDeltas`.
  *
  * Mirrors {@link executeOnServer}'s persistence (hydrate → apply →
- * persist `.md` + canvas.json → append delta-log → bump version) but
+ * persist content + topology → append delta-log → bump version) but
  * starts from deltas rather than commands, so revert needs no fragile
  * delta→command round-trip. Returns the structural deltas + pending
  * effects so the caller can broadcast them. No-op (empty diff) leaves

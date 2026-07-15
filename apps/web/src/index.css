@@ -402,6 +402,36 @@ body,
   color: var(--color-fg-subtle);
 }
 
+/* Semantic zoom cross-fade.
+   Both layers stay mounted so entering and leaving minimal LOD animate
+   symmetrically. Visibility changes only after the outgoing opacity reaches
+   zero, keeping hidden editors out of focus navigation without cutting the
+   fade short. Only opacity is animated; node geometry remains immediate. */
+.semantic-lod-placeholder,
+.semantic-lod-content {
+  opacity: 1;
+  visibility: visible;
+  transition-property: opacity, visibility;
+  transition-duration: 120ms, 0s;
+  transition-timing-function: ease-out, linear;
+  transition-delay: 0s, 0s;
+}
+
+.semantic-lod-node[data-lod='full'] > .semantic-lod-placeholder,
+.semantic-lod-node[data-lod='minimal'] > .semantic-lod-content {
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition-delay: 0s, 120ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .semantic-lod-placeholder,
+  .semantic-lod-content {
+    transition: none;
+  }
+}
+
 /* Live lasso preview uses a visual-only highlight without mutating selection state. */
 .react-flow__node.canvas-lasso-preview > div {
   box-shadow:

@@ -10,6 +10,7 @@ import path from 'node:path';
 import { readJson } from './io.js';
 import { NameIndex, type NameIndexResult } from './name-index.js';
 import { normalizeForCompare, toSafeFilename } from './naming.js';
+import { SPACE_JSON_FILENAME } from './paths.js';
 import { getWorkspacePath } from '../workspace.js';
 
 export interface CanvasDirEntry {
@@ -17,7 +18,7 @@ export interface CanvasDirEntry {
   filename: string;
   title: string | null;
   /**
-   * Summary fields captured from `canvas.json` during {@link
+   * Summary fields captured during {@link
    * scanWorkspace} so the list endpoint can build its response without a
    * second read of every canvas file. Undefined for entries registered
    * via {@link registerCanvasDir} before the next workspace re-scan.
@@ -51,13 +52,13 @@ function scanWorkspace(): void {
       state?: { nodes?: unknown[] };
       createdAt?: number;
       updatedAt?: number;
-    }>(path.join(full, 'canvas.json'));
+    }>(path.join(full, SPACE_JSON_FILENAME));
     if (!json?.canvasId) continue;
     index.add({
       id: json.canvasId,
       filename: entry,
       title: json.title ?? null,
-      // Capture summary fields from the canvas.json we just parsed so
+      // Capture summary fields from the topology we just parsed so
       // `listCanvasSummaries()` never has to re-read these files.
       nodeCount: Array.isArray(json.state?.nodes) ? json.state.nodes.length : 0,
       createdAt: typeof json.createdAt === 'number' ? json.createdAt : 0,

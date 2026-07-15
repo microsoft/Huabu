@@ -4,7 +4,7 @@
  * File-level primitive (pi/Claude-Code style). Path is resolved against
  * the **current canvas folder** via the shared sandbox, so it can
  * address any file the agent has access to within that canvas:
- *   - "canvas.json"
+ *   - "space.json"
  *   - "nodes/<filename>.md"
  *   - artifacts, memory, etc.
  *
@@ -24,7 +24,7 @@
  *
  * Note vs `inspect_nodes`: read owns everything that lives in the
  * node markdown frontmatter (label, type, src, summary, keywords, ...).
- * Position / size / parent / style live in `canvas.json` and are owned
+ * Position / size / parent / style live in `space.json` and are owned
  * by `inspect_nodes` — see that handler for the boundary.
  */
 
@@ -153,8 +153,8 @@ export async function handleRead(
     // Memory virtual paths.
     //
     // Exactly two are accepted and routed to the corresponding
-    // memory module readers (which resolve to setting/.huabu.md and
-    // the canvas's .memory/canvas.md respectively). The bodies live
+    // memory module readers (which resolve to setting/user.md and
+    // the canvas's .memory/space.md respectively). The bodies live
     // outside the canvas sandbox — the canvas one is hidden behind
     // ALWAYS_SKIP for grep/find/ls, and the workspace one isn't under
     // the canvas root at all — so reading them via the normal
@@ -165,18 +165,18 @@ export async function handleRead(
     // doesn't accidentally fall through to a 'path not found' that
     // looks like a missing memory file.
     let content: string | null = null;
-    if (rel === 'memory/workspace.md') {
+    if (rel === 'memory/user.md') {
       content = readWorkspaceMemory();
-    } else if (rel === 'memory/canvas.md') {
+    } else if (rel === 'memory/space.md') {
       if (!args.canvasId) {
         throw new Error(
-          'memory/canvas.md is canvas-scoped but no canvasId is bound to this request',
+          'memory/space.md is Space-scoped but no canvasId is bound to this request',
         );
       }
       content = readCanvasMemory(args.canvasId);
     } else {
       throw new Error(
-        `Unknown memory path "${rel}". Valid: memory/workspace.md, memory/canvas.md`,
+        `Unknown memory path "${rel}". Valid: memory/user.md, memory/space.md`,
       );
     }
     if (content === null) {

@@ -63,11 +63,7 @@ interface ProfileFormState {
    * field is rendered.
    */
   cliId: string;
-  /**
-   * Structured mode: append the CLI's `allowAllFlag` (e.g. `--allow-all`)
-   * to the assembled command. Ignored when the selected CLI has no
-   * such flag or when `cliId === 'custom'`.
-   */
+  /** Whether to add the selected CLI's official auto-approval arguments. */
   allowAll: boolean;
   /**
    * Custom mode (`cliId === 'custom'` or the picked CLI is no longer
@@ -101,8 +97,8 @@ function binaryBasename(token: string): string {
  * Assemble the final command line from a structured form + the
  * selected detected CLI. Returns the trimmed string the worker will
  * spawn. Returns `customCommand` (trimmed) in custom mode or when the
- * referenced CLI isn't currently detected. Use Custom mode for
- * anything more advanced than `binary + acpArgs (+ allow-all flag)`.
+ * referenced CLI isn't currently detected. Use Manual setup for
+ * anything outside the preset command recipes.
  */
 function buildCommand(
   state: ProfileFormState,
@@ -111,8 +107,11 @@ function buildCommand(
   if (state.cliId === 'custom') return state.customCommand.trim();
   const cli = detectedClis.find((c) => c.id === state.cliId);
   if (!cli) return state.customCommand.trim();
-  const parts: string[] = [cli.binary, ...cli.acpArgs];
-  if (state.allowAll && cli.allowAllFlag) parts.push(cli.allowAllFlag);
+  const approval = state.allowAll ? cli.autoApprove : null;
+  const parts: string[] = [cli.binary];
+  if (approval?.position === 'before-acp') parts.push(...approval.args);
+  parts.push(...cli.acpArgs);
+  if (approval?.position === 'after-acp') parts.push(...approval.args);
   return parts.join(' ');
 }
 
@@ -156,7 +155,7 @@ function buildDefaultDisplayName(
  * chose. When the command no longer matches the detected CLI's
  * exact shape (binary + acpArgs (+ allow-all flag)) — e.g. extra
  * flags were appended, the user hand-edited it, or the CLI was
- * uninstalled — falls back to Custom mode so the raw command is
+ * uninstalled — falls back to Manual setup so the raw command is
  * fully visible and editable rather than partially hidden behind
  * structured controls.
  */
@@ -181,21 +180,24 @@ function parseCommandIntoForm(
   if (tokens.length === 0 || binaryBasename(tokens[0]) !== cli.binary) {
     return fallback;
   }
-  let i = 1;
-  for (const arg of cli.acpArgs) {
-    if (tokens[i] !== arg) return fallback;
-    i++;
-  }
-  const rest = tokens.slice(i);
-  // The only structured "extra" we recognise is the allow-all flag.
-  // Anything else means the command was customised — drop into
-  // Custom mode so nothing is hidden from the user.
-  if (rest.length === 0) {
+  const actualArgs = tokens.slice(1);
+  const sameArgs = (expected: string[]) =>
+    actualArgs.length === expected.length &&
+    actualArgs.every((arg, index) => arg === expected[index]);
+  if (sameArgs(cli.acpArgs)) {
     return { cliId: cli.id, allowAll: false, customCommand: '' };
   }
-  if (cli.allowAllFlag && rest.length === 1 && rest[0] === cli.allowAllFlag) {
-    return { cliId: cli.id, allowAll: true, customCommand: '' };
+  if (cli.autoApprove) {
+    const approvedArgs =
+      cli.autoApprove.position === 'before-acp'
+        ? [...cli.autoApprove.args, ...cli.acpArgs]
+        : [...cli.acpArgs, ...cli.autoApprove.args];
+    if (sameArgs(approvedArgs)) {
+      return { cliId: cli.id, allowAll: true, customCommand: '' };
+    }
   }
+  // Anything outside the known recipes means the command was customised —
+  // drop into Manual setup so no arguments are hidden from the user.
   return fallback;
 }
 
@@ -240,11 +242,10 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
   onSaved,
 }) => {
   const { t } = useTranslation();
-  // Start a *new* profile on the Built-in tab (empty `cliId` → the
-  // `agentMode` derivation below reads it as 'detected'). This keeps the
-  // Built-in tab active while detection is still in flight so the tab
-  // never flashes Custom → Built-in. The effect below commits the real
-  // default (first CLI, or Custom when none) once detection settles.
+  // Start a *new* profile on the ACP Agent tab. An empty `cliId` keeps
+  // the picker in its detecting state until host detection settles; the
+  // effect below then commits the first CLI, or Manual setup when none
+  // were found.
   const [form, setForm] = useState<ProfileFormState>(() =>
     editing ? EMPTY_FORM : { ...EMPTY_FORM, cliId: '' },
   );
@@ -271,9 +272,9 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
       });
     } else {
       // For new profiles, wait for host-CLI detection to settle before
-      // committing a default. Until then keep `cliId` empty so the
-      // Built-in tab stays active with a "detecting…" placeholder
-      // (see the render below) rather than momentarily showing Custom.
+      // committing a default. Until then keep `cliId` empty so the ACP
+      // picker shows a stable "detecting…" placeholder rather than
+      // momentarily selecting Manual setup.
       if (!detectionLoaded) return;
       // Detection done: default to the first detected CLI so the
       // structured controls appear immediately. Falls back to
@@ -296,13 +297,23 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
    * default via `buildDefaultDisplayName`, and the submit path
    * substitutes the derived default when the field is empty.
    */
-  const handleCliChange = useCallback((cliId: string) => {
-    setForm((prev) => ({
-      ...prev,
-      cliId,
-      allowAll: false,
-    }));
-  }, []);
+  const handleCliChange = useCallback(
+    (cliId: string) => {
+      setForm((prev) => {
+        const customCommand =
+          cliId === 'custom' && prev.cliId !== 'custom'
+            ? prev.customCommand.trim() || buildCommand(prev, detectedClis)
+            : prev.customCommand;
+        return {
+          ...prev,
+          cliId,
+          allowAll: false,
+          customCommand,
+        };
+      });
+    },
+    [detectedClis],
+  );
 
   const selectedCli = useMemo(
     () =>
@@ -389,14 +400,12 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
     }
   }, [form, defaultDisplayName, detectedClis, editing, onSaved, onClose, t]);
 
-  const cliOptions = useMemo(
-    () =>
-      detectedClis.map((c) => ({
-        value: c.id,
-        label: c.displayName,
-      })),
-    [detectedClis],
-  );
+  const cliOptions = useMemo(() => {
+    return detectedClis.map((c) => ({
+      value: c.id,
+      label: c.displayName,
+    }));
+  }, [detectedClis]);
 
   /**
    * The agent picker is a two-tab switch:
@@ -474,8 +483,8 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
               value={agentMode}
               onChange={handleAgentModeChange}
               options={[
-                { value: 'detected', label: t('settings.builtIn') },
-                { value: 'custom', label: t('settings.custom') },
+                { value: 'detected', label: t('settings.acpAgent') },
+                { value: 'custom', label: t('settings.customCommand') },
               ]}
               size="sm"
               className="self-start"
@@ -526,7 +535,7 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
           </div>
         )}
 
-        {!editing && isStructured && selectedCli?.allowAllFlag && (
+        {!editing && isStructured && selectedCli?.autoApprove && (
           <label className="text-fg-default flex cursor-pointer items-start gap-2 text-xs select-none">
             <input
               type="checkbox"
@@ -538,7 +547,10 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
             />
             <FieldLabel hint={t('settings.autoApproveAllToolCallsHint')}>
               {t('settings.autoApproveAllToolCalls')} (
-              <code className="font-mono">{selectedCli.allowAllFlag}</code>)
+              <code className="font-mono">
+                {selectedCli.autoApprove.args.join(' ')}
+              </code>
+              )
             </FieldLabel>
           </label>
         )}
@@ -649,7 +661,7 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
  * Settings and the inline "Add agent" entry in `NewChatMenu`.
  *
  * Detection failures degrade silently — callers receive `[]` and the
- * editor's Auto-detected dropdown just falls back to "Custom command".
+ * editor's Agent dropdown just falls back to "Manual setup".
  *
  * `loaded` starts `false` and flips `true` after the first detection
  * attempt settles (success or failure). Callers use it to avoid
@@ -699,7 +711,7 @@ export function useDetectedClis(enabled = true): {
           if (!cancelled) setDetectedClis(agents);
         })
         .catch(() => {
-          // Detection failure is non-fatal — the Custom option still
+          // Detection failure is non-fatal — Manual setup still
           // works. Don't pop a toast; the dropdown just shows "Custom"
           // as the only entry.
         })

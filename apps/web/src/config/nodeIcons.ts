@@ -7,7 +7,6 @@
  */
 
 import {
-  // BadgeQuestionMark,
   BookOpen,
   Film,
   FileType2,
@@ -56,7 +55,6 @@ export const NODE_ICON: Record<CanvasNodeType, LucideIcon> = {
   frame: Frame,
   sketch: Pencil,
   question: MessageCircleQuestionMark,
-  // question: BadgeQuestionMark,<Sticker />
 };
 
 /**
@@ -89,7 +87,7 @@ export const NODE_TYPE_LABEL: Record<CanvasNodeType, string> = {
   web: 'Website',
   frame: 'Frame',
   sketch: 'Sketch',
-  question: 'Question',
+  question: 'Agent Node',
 };
 
 /**

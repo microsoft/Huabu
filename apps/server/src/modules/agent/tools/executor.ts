@@ -113,9 +113,9 @@ export async function executeTool(
     case 'web_search':
       return handleWebSearch(args as WebSearchArgs);
 
-    case 'get_canvas_outline':
+    case 'get_space_outline':
       return handleGetCanvasOutline(
-        withCanvasId<GetCanvasOutlineArgs>(args, 'get_canvas_outline'),
+        withCanvasId<GetCanvasOutlineArgs>(args, 'get_space_outline'),
       );
 
     case 'inspect_nodes':
@@ -140,9 +140,9 @@ export async function executeTool(
     case 'read':
       return handleRead(withCanvasId<ReadArgs>(args, 'read'), context?.readSet);
 
-    case 'canvas_commands':
+    case 'space_commands':
       return handleCanvasCommands(
-        withCanvasId<CanvasCommandsArgs>(args, 'canvas_commands'),
+        withCanvasId<CanvasCommandsArgs>(args, 'space_commands'),
         context?.origin,
         { threadId: context?.threadId, readSet: context?.readSet },
       );

@@ -1,0 +1,165 @@
+name: Nightly
+
+# Build from the default branch every night at 02:00 China Standard Time
+# (18:00 UTC), and allow an on-demand build from the Actions tab.
+on:
+  schedule:
+    - cron: '0 18 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write # create and expire nightly releases and tags
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Prepare nightly version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Generate version
+        id: version
+        shell: bash
+        run: |
+          BASE_VERSION="$(node -p "require('./apps/desktop/package.json').version.split(/[+-]/)[0]")"
+          if [[ ! "$BASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Desktop version must use X.Y.Z format: $BASE_VERSION" >&2
+            exit 1
+          fi
+
+          DATE="$(TZ=Asia/Shanghai date +%Y%m%d)"
+          SHORT_SHA="${GITHUB_SHA::7}"
+          VERSION="${BASE_VERSION}-nightly.${DATE}.g${SHORT_SHA}"
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Nightly version: v$VERSION"
+
+  cleanup:
+    name: Remove expired nightlies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete nightly releases and tags older than 7 days
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          CUTOFF="$(date -u -d '7 days ago' +%s)"
+
+          gh api --paginate \
+            -H 'Accept: application/vnd.github+json' \
+            "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq '.[] | select(.tag_name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+-nightly\\.")) | [.id, .tag_name, .created_at] | @tsv' |
+          while IFS=$'\t' read -r RELEASE_ID TAG CREATED_AT; do
+            [[ -z "$RELEASE_ID" ]] && continue
+            CREATED_EPOCH="$(date -u -d "$CREATED_AT" +%s)"
+            if (( CREATED_EPOCH <= CUTOFF )); then
+              echo "Deleting expired nightly $TAG (created $CREATED_AT)"
+              gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}"
+              gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/${TAG}" || true
+            fi
+          done
+
+  build:
+    name: Build (${{ matrix.os }})
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            script: build:desktop:mac
+          - os: windows-latest
+            script: build:desktop:win
+    runs-on: ${{ matrix.os }}
+    env:
+      NIGHTLY_VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Set nightly app version
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const path = 'apps/desktop/package.json';
+          const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
+          pkg.version = process.env.NIGHTLY_VERSION;
+          fs.writeFileSync(path, `${JSON.stringify(pkg, null, 2)}\n`);
+          NODE
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build agentlet workspace packages
+        run: pnpm run build:agentlet
+
+      - name: Build desktop installer
+        run: pnpm run ${{ matrix.script }}
+
+      - name: Stage nightly assets
+        shell: bash
+        run: |
+          mkdir -p ./release-assets
+          shopt -s nullglob
+          for ext in dmg exe AppImage blockmap; do
+            for f in ../huabu-electron-out/*."$ext"; do
+              cp "$f" ./release-assets/
+            done
+          done
+          for f in ../huabu-electron-out/latest*.yml; do
+            cp "$f" ./release-assets/
+          done
+          ls -lh ./release-assets/
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: huabu-nightly-${{ matrix.os }}
+          path: release-assets/
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish nightly release
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: assets
+          merge-multiple: true
+
+      - name: List collected assets
+        run: ls -lh assets/
+
+      - name: Publish prerelease
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: ${{ needs.prepare.outputs.tag }}
+          body: |
+            Automated nightly build from `${{ github.sha }}`.
+
+            This prerelease and its tag are automatically removed after 7 days.
+          prerelease: true
+          make_latest: false
+          files: |
+            assets/*.dmg
+            assets/*.exe
+            assets/*.blockmap
+          fail_on_unmatched_files: true

@@ -15,7 +15,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { workspaceMemoryPath, canvasMemoryPath } from '../../storage/paths.js';
 
 /**
- * Read the workspace memory body (`<workspace>/setting/.huabu.md`).
+ * Read the user memory body.
  *
  * Returns the raw markdown content (frontmatter is not used here —
  * workspace memory is bullet-list prose, no frontmatter). Returns

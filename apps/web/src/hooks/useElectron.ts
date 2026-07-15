@@ -15,6 +15,9 @@
  * outside the render phase.
  */
 
+import { APP_NAME } from '@/config/app';
+import { copyToClipboard } from '@/utils/io/clipboard';
+
 interface WorkspaceStoreSnapshot {
   path: string | null;
   recent: string[];
@@ -29,6 +32,22 @@ interface ElectronWorkspaceApi {
 interface ElectronWindowApi {
   isFullScreen: () => Promise<boolean>;
   onFullScreenChange: (cb: (fullScreen: boolean) => void) => () => void;
+}
+
+export interface ElectronSystemInfo {
+  appVersion: string;
+  platform: NodeJS.Platform;
+  osRelease: string;
+  architecture: string;
+  electronVersion: string;
+}
+
+type DiagnosticsActionResult = { ok: true } | { ok: false; error: string };
+
+interface ElectronDiagnosticsApi {
+  openServerLog: () => Promise<DiagnosticsActionResult>;
+  openDeveloperTools: () => Promise<DiagnosticsActionResult>;
+  getSystemInfo: () => Promise<ElectronSystemInfo>;
 }
 
 /**
@@ -68,6 +87,10 @@ interface ElectronMenuLabels {
   settings: string;
   userHandbook: string;
   keyboardShortcuts: string;
+  troubleshooting: string;
+  openServerLog: string;
+  openDeveloperTools: string;
+  copySystemInfo: string;
 }
 
 /**
@@ -140,6 +163,7 @@ interface ElectronBridge {
    */
   workspace?: ElectronWorkspaceApi;
   window?: ElectronWindowApi;
+  diagnostics?: ElectronDiagnosticsApi;
   dialog?: ElectronDialogApi;
   menu?: ElectronMenuApi;
 }
@@ -166,4 +190,47 @@ export function getElectronBridge(): ElectronBridge | null {
  */
 export function isElectron(): boolean {
   return getElectronBridge() !== null;
+}
+
+const PLATFORM_LABELS: Partial<Record<NodeJS.Platform, string>> = {
+  darwin: 'macOS',
+  linux: 'Linux',
+  win32: 'Windows',
+};
+
+export function formatSystemInfo(info: ElectronSystemInfo): string {
+  const platform = PLATFORM_LABELS[info.platform] ?? info.platform;
+  return [
+    `${APP_NAME}: ${info.appVersion}`,
+    `OS: ${platform} ${info.osRelease}`,
+    `Architecture: ${info.architecture}`,
+    `Electron: ${info.electronVersion}`,
+  ].join('\n');
+}
+
+function requireDiagnostics(): ElectronDiagnosticsApi {
+  const diagnostics = getElectronBridge()?.diagnostics;
+  if (!diagnostics) throw new Error('Desktop diagnostics are unavailable.');
+  return diagnostics;
+}
+
+function assertActionSucceeded(result: DiagnosticsActionResult): void {
+  if (!result.ok) throw new Error(result.error);
+}
+
+export function desktopDiagnosticsAvailable(): boolean {
+  return !!getElectronBridge()?.diagnostics;
+}
+
+export async function openServerLog(): Promise<void> {
+  assertActionSucceeded(await requireDiagnostics().openServerLog());
+}
+
+export async function openDeveloperTools(): Promise<void> {
+  assertActionSucceeded(await requireDiagnostics().openDeveloperTools());
+}
+
+export async function copySystemInfo(): Promise<void> {
+  const info = await requireDiagnostics().getSystemInfo();
+  await copyToClipboard(formatSystemInfo(info));
 }

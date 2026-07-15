@@ -30,6 +30,7 @@ import { ChevronDown, ChevronUp, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { formatShortcutById } from '../../../config/shortcuts';
 import { findNthRange, scrollRangeIntoView } from '../../../hooks/searchDom';
 import { useTextHighlight } from '../../../hooks/useTextHighlight';
 import { useSearchStore } from '../../../store/searchStore';
@@ -142,7 +143,7 @@ export const InPreviewSearchBar = ({
         variant="ghost"
         iconOnly
         size="sm"
-        title={t('search.previousMatchShortcut')}
+        title={`${t('search.previousMatch')} (${formatShortcutById('search.previousMatch')})`}
         disabled={matchCount === 0}
         onClick={() => jumpToMatch(activeMatchIdx - 1)}
       >
@@ -152,7 +153,7 @@ export const InPreviewSearchBar = ({
         variant="ghost"
         iconOnly
         size="sm"
-        title={t('search.nextMatchShortcut')}
+        title={`${t('search.nextMatch')} (${formatShortcutById('search.jumpResult')})`}
         disabled={matchCount === 0}
         onClick={() => jumpToMatch(activeMatchIdx + 1)}
       >
@@ -165,7 +166,7 @@ export const InPreviewSearchBar = ({
         iconOnly
         size="sm"
         className="p-0.5"
-        title={t('actions.closeEsc')}
+        title={`${t('actions.close')} (${formatShortcutById('search.close')})`}
         onClick={close}
       >
         <X />

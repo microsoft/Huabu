@@ -43,12 +43,15 @@
 export const ACCENT_PALETTE = [
   { token: 'white', name: 'White', value: '#ffffff' },
   { token: 'grey', name: 'Grey', value: '#A8A29E' },
-  { token: 'red', name: 'Red', value: '#D07C74' },
-  { token: 'orange', name: 'Orange', value: '#D89A5B' },
-  { token: 'amber', name: 'Amber', value: '#F2D479' },
-  { token: 'green', name: 'Green', value: '#7FB38A' },
-  { token: 'blue', name: 'Blue', value: '#5F8F9B' },
-  { token: 'purple', name: 'Purple', value: '#A08FC0' },
+  { token: 'teal', name: 'Teal', value: '#388388' },
+  { token: 'blue', name: 'Blue', value: '#4ABFBD' },
+  { token: 'green', name: 'Green', value: '#8AB77D' },
+  // Keep the stable `amber` token for persisted canvases; the current
+  // palette presents this hue to users as Yellow.
+  { token: 'amber', name: 'Yellow', value: '#E9C46A' },
+  { token: 'orange', name: 'Orange', value: '#F4A261' },
+  { token: 'red', name: 'Red', value: '#E76F51' },
+  { token: 'purple', name: 'Purple', value: '#9B8AC4' },
 ] as const;
 
 export type AccentEntry = (typeof ACCENT_PALETTE)[number];
@@ -75,9 +78,9 @@ export interface ColorPickerOption {
 }
 
 /**
- * Accent picker swatches **with** a leading `Transparent` sentinel.
+ * Accent picker swatches **with** a leading `No accent` sentinel.
  *
- * `Transparent` (`token: 'none'`, `value: 'transparent'`) represents the
+ * `No accent` (`token: 'none'`, `value: 'transparent'`) represents the
  * true "no accent" state — canvas data encodes this as
  * `style.accent: null` and the node renders with `bg-transparent`
  * (showing the canvas through). Without the sentinel, picking any
@@ -91,7 +94,7 @@ export interface ColorPickerOption {
  */
 export const ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT: readonly ColorPickerOption[] =
   [
-    { token: ACCENT_NONE_TOKEN, name: 'Transparent', value: 'transparent' },
+    { token: ACCENT_NONE_TOKEN, name: 'No accent', value: 'transparent' },
     ...ACCENT_PALETTE,
   ];
 

@@ -7,7 +7,7 @@
  *  - Non-tool parts pass through as singleton `segment` groups.
  *  - Adjacent `agent_tool` parts with the SAME `toolName` merge into
  *    one `tool-group`.
- *  - `generic` / `canvas_commands` / `web_search` parts never merge
+ *  - `generic` / `space_commands` / `web_search` parts never merge
  *    with each other or with `agent_tool` parts.
  *  - A different `agent_tool.toolName` starts a fresh group.
  *
@@ -41,12 +41,12 @@ function agentTool(
   };
 }
 
-function canvasCommandsTool(toolCallId: string): AssistantSegment {
+function spaceCommandsTool(toolCallId: string): AssistantSegment {
   return {
     kind: 'tool',
     toolCallId,
-    title: 'canvas_commands',
-    variant: 'canvas_commands',
+    title: 'space_commands',
+    variant: 'space_commands',
   };
 }
 
@@ -122,14 +122,14 @@ describe('groupAdjacentToolParts', () => {
     }
   });
 
-  it('never merges canvas_commands tool parts', () => {
+  it('never merges space_commands tool parts', () => {
     const groups = groupAdjacentToolParts([
-      canvasCommandsTool('tc-1'),
-      canvasCommandsTool('tc-2'),
+      spaceCommandsTool('tc-1'),
+      spaceCommandsTool('tc-2'),
     ]);
     expect(groups).toHaveLength(2);
     if (groups[0]?.kind === 'tool-group') {
-      expect(groups[0].variant).toBe('canvas_commands');
+      expect(groups[0].variant).toBe('space_commands');
       expect(groups[0].parts).toHaveLength(1);
     }
   });
@@ -220,11 +220,11 @@ describe('groupByThinkingPhase', () => {
   it('emits tool runs that appear before any thinking as loose groups', () => {
     const phases = groupByThinkingPhase([
       agentTool('tc-1', 'read'),
-      canvasCommandsTool('tc-2'),
+      spaceCommandsTool('tc-2'),
       thinking('Now planning'),
       agentTool('tc-3', 'grep'),
     ]);
-    // 1 loose agent_tool group + 1 loose canvas_commands + 1 phase
+    // 1 loose agent_tool group + 1 loose space_commands + 1 phase
     expect(phases).toHaveLength(3);
     expect(phases[0]?.kind).toBe('loose');
     expect(phases[1]?.kind).toBe('loose');

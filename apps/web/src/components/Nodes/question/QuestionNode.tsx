@@ -73,7 +73,8 @@ export const QuestionNode = memo(
       isEditing: false,
       content: displayText,
       baseFontSize: 16,
-      padding: NODE_PADDING,
+      paddingX: NODE_PADDING,
+      paddingY: NODE_PADDING,
       fontOpts,
       placeholder: QUESTION_NODE_PLACEHOLDER,
     });

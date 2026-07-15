@@ -70,4 +70,4 @@ Use `fs_write` exactly once:
 ## After writing
 
 - Briefly confirm to the user: skill id, one-line summary of what it does, and a reminder that they can now invoke it via `/<id>`.
-- Do **not** make canvas changes in the same turn; this slash skill is write-the-skill-and-stop.
+- Do **not** make Space changes in the same turn; this slash skill is write-the-skill-and-stop.

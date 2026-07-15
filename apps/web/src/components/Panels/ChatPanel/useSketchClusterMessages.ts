@@ -7,8 +7,8 @@
  *
  *  1. A user message describing the gesture (stroke count + ID context).
  *  2. An assistant message carrying the LLM's reasoning + a synthetic
- *     `canvas_commands` tool part (rendered by the existing
- *     `CanvasCommandCard` so Accept / Revert / Blend "just work").
+ *     `space_commands` tool part (rendered by the existing
+ *     `SpaceCommandCard` so Accept / Revert / Blend "just work").
  *  3. A status message if the LLM call failed.
  *
  * The chat panel reads these synthesized messages directly from the

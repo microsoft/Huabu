@@ -1,4 +1,58 @@
-import { describe, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
+
+import {
+  llmConfigUpdateSchema,
+  llmUtilityConfigUpdateSchema,
+} from '@sediment/shared';
+
+import { getAvailableProviders } from './llm.js';
+
+describe('LLM provider catalog', () => {
+  it('describes each provider base URL default and override capability', () => {
+    const providers = new Map(
+      getAvailableProviders().map((provider) => [provider.id, provider]),
+    );
+
+    expect(providers.get('openai')?.baseUrl).toEqual({
+      default: 'https://api.openai.com/v1',
+      overridable: true,
+    });
+    expect(providers.get('anthropic')?.baseUrl).toEqual({
+      default: 'https://api.anthropic.com',
+      overridable: true,
+    });
+    expect(providers.get('azure-openai')?.baseUrl).toEqual({
+      overridable: true,
+    });
+    expect(providers.get('github-copilot')?.baseUrl).toMatchObject({
+      default: expect.any(String),
+      overridable: false,
+    });
+  });
+});
+
+describe('LLM config patch schemas', () => {
+  it('accepts chat and utility updates without a model', () => {
+    expect(
+      llmConfigUpdateSchema.parse({
+        provider: 'openai',
+        baseUrl: 'https://proxy.example/v1',
+      }),
+    ).toEqual({
+      provider: 'openai',
+      baseUrl: 'https://proxy.example/v1',
+    });
+    expect(
+      llmUtilityConfigUpdateSchema.parse({
+        provider: 'anthropic',
+        baseUrl: 'https://proxy.example/anthropic',
+      }),
+    ).toEqual({
+      provider: 'anthropic',
+      baseUrl: 'https://proxy.example/anthropic',
+    });
+  });
+});
 
 /**
  * Executable backlog for `setLLMConfig`'s cross-subsystem write compensation.

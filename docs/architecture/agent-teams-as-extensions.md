@@ -29,8 +29,8 @@ Huabu already has this foundation via the **Huabu Reachback Tool (HRT)**:
 - **Read**: `read-node <id>` — fetch any node's content to a local file
 - **Write**: `write-node --type note <file>` (create) / `write-node --id <id> <file>` (update), with `--link-to` / `--link-from` for edge creation
 - **Vision**: `snapshot <id>` — rasterize sketch/image nodes to PNG for vision-capable agents
-- **Semantic**: `ask-agent "<prompt>"` — delegate complex spatial/semantic queries to built-in agents with full canvas context
-- **Internal tools**: `get_canvas_outline`, `inspect_nodes`, `canvas_commands` (13 commands) for the built-in agent
+- **Semantic**: `ask-agent "<prompt>"` — delegate complex spatial/semantic queries to built-in agents with full Space context
+- **Internal tools**: `get_space_outline`, `inspect_nodes`, `space_commands` (13 commands) for the built-in agent
 
 The "plugin API" is simply: _the reachback tool_ + _whatever external tools the agent has access to_. No SDK, no hooks — just CLI commands.
 
@@ -50,7 +50,7 @@ The generic `agentlet.yaml` package contract and daemon execution operations are
 - Member Configs are shared by manifest-backed Profiles of the same package; secrets remain in the host SecretStore and are redacted from read APIs.
 - Every non-internal agent uses one Agenetes Agent Profile. Manifest Profiles carry immutable placement, manifest, harness, and working-directory fields plus durable preparation state and a bounded setup log; command Profiles carry immutable placement, command, and working directory.
 - Manifest Profiles use explicit Setup, Retry, and Cancel actions. A Profile is selectable only when its member is active, required Configs are complete, and preparation is ready; command Profiles are selectable immediately.
-- The canvas and Huabu Reachback remain the shared workspace and read/write bridge available to running agents.
+- The Space and Huabu Reachback remain the shared workspace and read/write bridge available to running agents.
 
 ### Prerequisites
 
@@ -97,39 +97,39 @@ The current implementation follows these ownership boundaries:
 
 ---
 
-## 5. The Bigger Picture: Canvas as OS
+## 5. The Bigger Picture: Space as OS
 
-The ultimate vision is that the canvas becomes an **operating system for thought**:
+The ultimate vision is that the Space becomes an **operating system for thought**:
 
-| OS Concept                  | Canvas Equivalent                       |
-| --------------------------- | --------------------------------------- |
-| Files                       | Nodes                                   |
-| Folders                     | Frames                                  |
-| Symlinks                    | Edges                                   |
-| Processes                   | Agents                                  |
-| Pipes                       | Agent-to-agent communication via canvas |
-| Shell                       | Question nodes / chat                   |
-| Package manager             | Agent marketplace                       |
-| Permissions                 | Reachback capability scoping            |
-| Filesystem events (inotify) | Canvas change events → reactive agents  |
+| OS Concept                  | Space Equivalent                       |
+| --------------------------- | -------------------------------------- |
+| Files                       | Nodes                                  |
+| Folders                     | Frames                                 |
+| Symlinks                    | Edges                                  |
+| Processes                   | Agents                                 |
+| Pipes                       | Agent-to-agent communication via Space |
+| Shell                       | Question nodes / chat                  |
+| Package manager             | Agent marketplace                      |
+| Permissions                 | Reachback capability scoping           |
+| Filesystem events (inotify) | Space change events → reactive agents  |
 
 In a traditional OS, you don't need a "plugin" to connect `grep` to `sort` — you just pipe them. Similarly, in the agent-as-plugin model, you don't need a plugin API to connect HackMD publishing to Jira tracking — you just describe the workflow, and agents compose naturally.
 
-**The canvas is the universal data bus. Agents are the universal connectors. Natural language is the universal API.**
+**The Space is the universal data bus. Agents are the universal connectors. Natural language is the universal API.**
 
 ---
 
 ## 6. What Makes This Uniquely Powerful for Huabu
 
-Huabu's **spatial canvas** adds a dimension that pure chat-based agent systems lack:
+Huabu's **Space** adds a dimension that pure chat-based agent systems lack:
 
 1. **Spatial context is semantic**: Nodes near each other are related. An agent can understand intent from position alone.
 2. **Visual output**: Agents don't just return text — they create spatial arrangements that humans can scan, reorganize, and build upon.
 3. **Persistent workspace**: Unlike chat (which scrolls away), canvas nodes persist. Agent outputs become part of the user's evolving knowledge base.
-4. **Multi-agent visibility**: When multiple agents work on the same canvas, their outputs are spatially visible and can be compared side-by-side.
+4. **Multi-agent visibility**: When multiple agents work on the same Space, their outputs are spatially visible and can be compared side-by-side.
 5. **Human-in-the-loop naturally**: The user can rearrange agent outputs, add annotations, draw connections — the agent's next run incorporates human feedback through the spatial structure itself.
 
-This is why "agent as the universal interface" is not just a nice idea for Huabu — it's the **natural architecture** for a spatial thinking tool. The canvas was always meant to be a shared cognitive space. Agents are simply new inhabitants of that space.
+This is why "agent as the universal interface" is not just a nice idea for Huabu — it's the **natural architecture** for a spatial thinking tool. The Space was always meant to be a shared cognitive space. Agents are simply new inhabitants of that space.
 
 ---
 

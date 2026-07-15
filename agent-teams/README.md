@@ -19,7 +19,7 @@ Huabu asks Agenetes to scan the collection root, persists the discovered members
 | Agent                                          | Responsibility                                                                                    | Configs                                         | Harnesses           |
 | ---------------------------------------------- | ------------------------------------------------------------------------------------------------- | ----------------------------------------------- | ------------------- |
 | [`deepv-slides-maker/`](./deepv-slides-maker/) | Creates editable slide decks through a DeepV server.                                              | `DEEPV_SERVER_ENDPOINT`, `DEEPV_SERVER_API_KEY` | `claude`, `copilot` |
-| [`hackmd-publisher/`](./hackmd-publisher/)     | Publishes selected canvas content to HackMD and writes back the URL.                              | `HMD_API_ACCESS_TOKEN`                          | `claude`, `copilot` |
+| [`hackmd-publisher/`](./hackmd-publisher/)     | Publishes selected Space content to HackMD and writes back the URL.                               | `HMD_API_ACCESS_TOKEN`                          | `claude`, `copilot` |
 | [`html-slides-maker/`](./html-slides-maker/)   | Creates static HTML presentations and technical diagrams after confirming the presentation brief. | None                                            | `claude`, `copilot` |
 | [`paper-reviewer/`](./paper-reviewer/)         | Reviews academic papers and drafts review responses.                                              | None                                            | `claude`, `copilot` |
 
@@ -40,7 +40,7 @@ The source package remains in place. Managed setup materializes only the Profile
 ```yaml
 schema: agentlet-agent-schema-v1
 name: hackmd-publisher
-description: Publishes selected canvas content to HackMD
+description: Publishes selected Space content to HackMD
 
 command:
   claude: claude-agent-acp

@@ -11,10 +11,10 @@ Every canvas is fully self-contained on disk. All file I/O flows through a singl
 ```
 <workspace>/
   setting/                        # user-owned, cross-canvas
-    .huabu.md                     # workspace memory (user preferences)
+    user.md                     # workspace memory (user preferences)
     skills/<id>/SKILL.md          # user / memory-agent authored skills
   <canvasDir>/                    # dir name = safe(title)
-    canvas.json                   # { canvasId, title, version, state:{nodes,edges,...}, createdAt, updatedAt }
+    space.json                   # { canvasId, title, version, state:{nodes,edges,...}, createdAt, updatedAt }
     nodes/
       <safe(label)>.md            # frontmatter: id/type/label/src/... + content(markdown body)
     .artifacts/                   # hidden dir
@@ -33,8 +33,8 @@ Every canvas is fully self-contained on disk. All file I/O flows through a singl
 
 Key points:
 
-- The **directory name** is derived from the canvas title via `toSafeFilename(title)`, not from `canvasId`. The stable `canvasId` only lives inside `canvas.json`.
-- `listCanvases()` rescans the workspace on every call, skipping entries that start with `.` or lack `canvas.json`.
+- The **directory name** is derived from the canvas title via `toSafeFilename(title)`, not from `canvasId`. The stable `canvasId` only lives inside `space.json`.
+- `listCanvases()` rescans the workspace on every call, skipping entries that start with `.` or lack `space.json`.
 - Node filenames are `safe(label).md`; the node's stable id lives in the `id:` frontmatter field.
 - Artifacts live in `.artifacts/` (hidden) named `<artifactId><ext>`. No manifest file — the filename is the URL key.
 - Events are append-only JSONL (`events.jsonl`); each line is `{ ts: number, payload: RecentAction }`.

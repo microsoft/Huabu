@@ -5,6 +5,7 @@
 import {
   Handle,
   Position,
+  useConnection,
   useInternalNode,
   useStore,
   useViewport,
@@ -272,10 +273,14 @@ interface NodeConnectionHandlesProps {
 export const NodeConnectionHandles = memo(
   ({ hovered, selected, isNotMouse }: NodeConnectionHandlesProps) => {
     const baseHandleSize = isNotMouse ? 14 : 8;
-    const dotSize = useStore((s) => {
-      const factor = Math.max(1 / s.transform[2], 1);
-      return baseHandleSize * factor;
-    });
+    const zoom = useStore((s) => s.transform[2]);
+    const inverseZoom = zoom > 0 ? 1 / zoom : 1;
+    const dotSize = baseHandleSize * inverseZoom;
+    const dotBorderWidth = 2.5 * inverseZoom;
+    // While a connection drag is in progress, promote every exposed dot
+    // from its idle hollow state to a filled + glowing state so the user
+    // gets a strong "drop it here" affordance on valid endpoints.
+    const connecting = useConnection((c) => c.inProgress);
 
     return (
       <>
@@ -341,12 +346,24 @@ export const NodeConnectionHandles = memo(
                     };
           // Dot is centred on the (collapsed) bbox; `pointer-events:
           // auto` makes the dot the actual click target.
+          //
+          // Handles stay solid in every visible state so the selection
+          // outline cannot visually bisect them. Connection drag adds a
+          // glow to strengthen the endpoint affordance.
           const dotStyle: React.CSSProperties = {
             width: dotSize,
             height: dotSize,
             top: '50%',
             left: '50%',
             transform: 'translate(-50%, -50%)',
+            boxSizing: 'border-box',
+            borderWidth: dotBorderWidth,
+            borderStyle: 'solid',
+            borderColor: 'var(--color-info)',
+            backgroundColor: 'var(--color-info)',
+            boxShadow: connecting
+              ? '0 0 3px var(--color-info-light)'
+              : undefined,
           };
           return (
             <Handle
@@ -356,6 +373,8 @@ export const NodeConnectionHandles = memo(
               position={h.position}
               style={{
                 ...edgeAlign,
+                minWidth: 0,
+                minHeight: 0,
                 background: 'transparent',
                 border: 'none',
               }}
@@ -372,7 +391,7 @@ export const NodeConnectionHandles = memo(
             >
               <span
                 aria-hidden
-                className="bg-info pointer-events-auto absolute rounded-full"
+                className="pointer-events-auto absolute rounded-full transition-colors"
                 style={dotStyle}
               />
             </Handle>

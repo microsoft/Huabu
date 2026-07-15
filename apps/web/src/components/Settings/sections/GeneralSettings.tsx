@@ -3,7 +3,9 @@ import { useTranslation } from 'react-i18next';
 
 import { Select } from '@/components/Common/Select';
 import { SettingRow } from '@/components/Common/SettingRow';
+import { Toggle } from '@/components/Common/Toggle';
 import { supportedLngs, type SupportedLanguage } from '@/i18n';
+import useCanvasStore from '@/store/canvasStore';
 
 /** Native language names, shown regardless of the active UI language. */
 const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
@@ -17,16 +19,18 @@ const LANGUAGE_OPTIONS = supportedLngs.map((lng) => ({
 }));
 
 /**
- * General application settings. Currently exposes UI language selection.
- * Changing the language persists to `localStorage` (`sediment.language`)
- * via i18next's language detector cache, so it survives reloads.
+ * General application settings. Language changes persist to `localStorage`
+ * (`sediment.language`) via i18next's language detector cache, while the
+ * canvas store persists the minimap preference independently.
  *
- * Renders a single bare {@link SettingRow}; the parent supplies the card
- * wrapper so the General tab shows one flat list (language + about) rather
- * than redundant one-row subsections.
+ * Renders bare {@link SettingRow} entries; the parent supplies the card
+ * wrapper so the General tab shows one flat list rather than redundant
+ * one-row subsections.
  */
 export const GeneralSettings: React.FC = () => {
   const { t, i18n } = useTranslation();
+  const minimapEnabled = useCanvasStore((s) => s.minimapEnabled);
+  const toggleMinimap = useCanvasStore((s) => s.toggleMinimap);
 
   const current = (i18n.resolvedLanguage ?? i18n.language) as SupportedLanguage;
 
@@ -38,16 +42,32 @@ export const GeneralSettings: React.FC = () => {
   );
 
   return (
-    <SettingRow
-      title={t('settings.language')}
-      description={t('settings.languageDescription')}
-    >
-      <Select
-        options={LANGUAGE_OPTIONS}
-        value={current}
-        onChange={handleChange}
+    <>
+      <SettingRow
         title={t('settings.language')}
-      />
-    </SettingRow>
+        description={t('settings.languageDescription')}
+      >
+        <Select
+          options={LANGUAGE_OPTIONS}
+          value={current}
+          onChange={handleChange}
+          title={t('settings.language')}
+        />
+      </SettingRow>
+      <SettingRow
+        title={t('settings.showMiniMap')}
+        description={t('settings.miniMapDescription')}
+      >
+        <Toggle
+          checked={minimapEnabled}
+          onChange={toggleMinimap}
+          label={
+            minimapEnabled
+              ? t('settings.hideMiniMap')
+              : t('settings.showMiniMap')
+          }
+        />
+      </SettingRow>
+    </>
   );
 };

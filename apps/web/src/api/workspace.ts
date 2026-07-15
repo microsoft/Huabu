@@ -32,7 +32,7 @@ export type {
 /** Fetch current workspace mode/state and server capabilities. */
 export async function getWorkspaceInfo(): Promise<WorkspaceInfo> {
   return apiFetch<WorkspaceInfo>(routes.workspace, {
-    fallbackMessage: 'Failed to get workspace info',
+    fallbackMessage: 'Failed to get Home info',
   });
 }
 
@@ -44,7 +44,7 @@ export async function putWorkspacePath(
   return apiFetch<WorkspaceInfo>(routes.workspace, {
     method: 'PUT',
     json: body,
-    fallbackMessage: 'Failed to update workspace path',
+    fallbackMessage: 'Failed to update Home path',
   });
 }
 

@@ -1,6 +1,6 @@
 # Agent Context
 
-> The full path that carries "thinking on the canvas" to the AI agent: which
+> The full path that carries "thinking on the Space" to the AI agent: which
 > signals are exposed, how they reach the model, and what's still missing.
 > Maps to the README principles **Externalize Thinking** / **Share Cognitive Space**.
 
@@ -51,7 +51,7 @@ These two are **cross-turn-stable** system-prompt injections (they don't change 
 
 ### 3.1 Workspace memory
 
-Every turn appends `.huabu.md` as a `<workspace_memory>` tag block at the end of the system prompt (cache-friendly); built-in agent only — external/ACP has its own preamble. See [agent-memory.md](./agent-memory.md).
+Every turn appends `user.md` as a `<workspace_memory>` tag block at the end of the system prompt (cache-friendly); built-in agent only — external/ACP has its own preamble. See [agent-memory.md](./agent-memory.md).
 
 ### 3.2 Skills — two injection paths
 
@@ -90,7 +90,7 @@ Code: [node-prompt.ts](../../apps/server/src/modules/canvas/node-prompt.ts) (ass
 
 ### 5.1 `describeNode(store, input, level)` — node → data object
 
-ONE rule: **the node carries whatever authored info the caller already has; anything missing (label / body / summary / src) is filled from the node's on-disk `.md` sidecar** — the canonical source. `canvas.json` never persists `data.label` and strips note bodies, so a caller holding only the raw canvas node hands in almost nothing and the sidecar supplies the rest (the caller's own value wins when present — e.g. the client wire `label` on a selection).
+ONE rule: **the node carries whatever authored info the caller already has; anything missing (label / body / summary / src) is filled from the node's on-disk `.md` sidecar** — the canonical source. `space.json` never persists `data.label` and strips note bodies, so a caller holding only the raw canvas node hands in almost nothing and the sidecar supplies the rest (the caller's own value wins when present — e.g. the client wire `label` on a selection).
 
 `level` is what the caller claims it needs:
 
@@ -101,13 +101,13 @@ ONE rule: **the node carries whatever authored info the caller already has; anyt
 
 Both agent-facing levels **always carry `rev`** (the freshness / CAS token — see [agent-node-freshness-cas-plan](../proposals/agent-node-freshness-cas-plan.md)). The rev-less L0 `ref` is **deliberately not** an agent-facing shape: a node without `rev` can't participate in re-read / write-guard, so it stays internal to the pure ref builder. Parent-frame labels (a bare string, not a node) use `nodeLabel(store, id)`.
 
-`file` is `nodes/<safeLabel>.md`, derived from the (sidecar) label — the same path the RFS serves and whose `ETag` equals `rev`. Sourcing the label from the sidecar is what keeps that path real; reading it from `canvas.json` (always empty) would collapse it to a dead `nodes/<id>.md`.
+`file` is `nodes/<safeLabel>.md`, derived from the (sidecar) label — the same path the RFS serves and whose `ETag` equals `rev`. Sourcing the label from the sidecar is what keeps that path real; reading it from `space.json` (always empty) would collapse it to a dead `nodes/<id>.md`.
 
 ### 5.2 `renderNodes(nodes)` — data object → `<node/>` XML
 
 The single translator from data objects to the `<node id=… type=… label=… file=… rev=… preview=… />` elements the prompt shows. `file=` is always emitted — both backends address a node by its path (built-in `read()`s it; external/ACP downloads it over the RFS). Used by `<selected_nodes>` and `<canvas_neighbourhood>`.
 
-**JSON tool results skip rendering:** `get_canvas_outline` / `inspect_nodes` return the `describeNode(…, 'outline')` objects directly as JSON; only the two XML prompt blocks go through `renderNodes`.
+**JSON tool results skip rendering:** `get_space_outline` / `inspect_nodes` return the `describeNode(…, 'outline')` objects directly as JSON; only the two XML prompt blocks go through `renderNodes`.
 
 ### 5.3 Where each caller plugs in
 
@@ -115,7 +115,7 @@ The single translator from data objects to the `<node id=… type=… label=… 
 | -------------------------------------- | ------------------------------------------------------ | ------------- | ------ |
 | selection `<selected_nodes>`           | `describeNode(store, wireNode, 'preview')`             | `renderNodes` | XML    |
 | neighbourhood `<canvas_neighbourhood>` | `describeNode(store, spatialNode, 'preview')` per node | `renderNodes` | XML    |
-| `get_canvas_outline` / `inspect_nodes` | `describeNode(store, spatialNode, 'outline')`          | — (direct)    | JSON   |
+| `get_space_outline` / `inspect_nodes`  | `describeNode(store, spatialNode, 'outline')`          | — (direct)    | JSON   |
 
 The envelope stores the **data objects** (not pre-rendered strings): the same node is rendered per-backend, so rendering is deferred to `renderNodes` at serialization time.
 
@@ -127,12 +127,12 @@ The envelope stores the **data objects** (not pre-rendered strings): the same no
 
 | Tool                            | scope                | Purpose                                                                |
 | ------------------------------- | -------------------- | ---------------------------------------------------------------------- |
-| `get_canvas_outline`            | ask/operate          | whole-canvas geometry + topology + clusters, optional 120-char preview |
+| `get_space_outline`             | ask/operate          | whole-canvas geometry + topology + clusters, optional 120-char preview |
 | `inspect_nodes`                 | ask/operate          | predicate query of node geometry/style                                 |
 | `inspect_edges`                 | ask/operate          | edge direction/style                                                   |
 | `read` / `grep` / `find` / `ls` | ask/operate(/sketch) | read/search canvas files                                               |
 | `snapshot_nodes`                | ask/operate/sketch   | node → PNG vision                                                      |
-| `canvas_commands`               | operate              | mutate the canvas (server-side execution)                              |
+| `space_commands`                | operate              | mutate the canvas (server-side execution)                              |
 | `fs_write`                      | operate              | memory/skill writes                                                    |
 | `generate_image`                | operate              | AI image generation                                                    |
 | `web_search`                    | ask/operate          | Tavily                                                                 |

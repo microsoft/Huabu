@@ -59,7 +59,7 @@ import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 function rfsError(reason: string): { message: string } {
   return {
     message:
-      `${reason} To see how to use this canvas, run: ` +
+      `${reason} To see how to use this Space, run: ` +
       `curl -sH "Authorization: Bearer $AGENTLET_TOKEN" "$HUABU_RFS_URL/skill"`,
   };
 }
@@ -219,7 +219,7 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
       // Node files carry a revision ETag (hash of authored content) so an
       // agent can conditional-GET: an unchanged node returns `304` and the
       // agent reuses its cached copy instead of re-reading. Non-node files
-      // (artifacts, canvas.json, uploads) have no node revision and are served
+      // Non-node files have no node revision and are served
       // unconditionally.
       if (lookup?.meta.rev) {
         const etag = `"${lookup.meta.rev}"`;

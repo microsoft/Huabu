@@ -1,5 +1,5 @@
 import { isElectron } from '@/hooks/useElectron';
-import { isMac } from '@/utils/platform';
+import { formatShortcut, isMac } from '@/utils/platform';
 
 import type { ParseKeys, TFunction } from 'i18next';
 
@@ -192,19 +192,19 @@ export const SHORTCUTS: ShortcutDef[] = [
   },
   {
     id: 'mode.frame',
-    combo: { key: '1' },
+    combo: { key: '3' },
     descriptionKey: 'shortcuts.items.frameMode',
     section: SECTION.toolbar,
   },
   {
     id: 'mode.note',
-    combo: { key: '2' },
+    combo: { key: '1' },
     descriptionKey: 'shortcuts.items.noteMode',
     section: SECTION.toolbar,
   },
   {
     id: 'mode.text',
-    combo: { key: '3' },
+    combo: { key: '2' },
     descriptionKey: 'shortcuts.items.textMode',
     section: SECTION.toolbar,
   },
@@ -222,7 +222,7 @@ export const SHORTCUTS: ShortcutDef[] = [
   },
   {
     id: 'mode.question',
-    combo: { key: 'q' },
+    combo: { key: 'a' },
     descriptionKey: 'shortcuts.items.questionMode',
     section: SECTION.toolbar,
   },
@@ -360,6 +360,18 @@ const SHORTCUTS_BY_ID = new Map(
 export function getShortcutKeys(id: string): string | undefined {
   const def = SHORTCUTS_BY_ID.get(id);
   return def ? shortcutTemplate(def) : undefined;
+}
+
+/**
+ * A ready-to-display shortcut string for `id`, rendered with OS-appropriate
+ * notation (`⌘F` on macOS, `Ctrl+F` elsewhere). Returns `''` for unknown ids
+ * so callers can interpolate it unconditionally. Prefer this over baking key
+ * hints into i18n strings, so a tooltip like `Close (Esc)` derives its
+ * shortcut from the same catalog the help modal renders instead of drifting.
+ */
+export function formatShortcutById(id: string): string {
+  const keys = getShortcutKeys(id);
+  return keys ? formatShortcut(keys) : '';
 }
 
 /**

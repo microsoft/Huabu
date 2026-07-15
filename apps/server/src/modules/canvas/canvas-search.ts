@@ -599,7 +599,7 @@ export async function searchCanvas(
 
   if (signal?.aborted) return;
 
-  // Edge labels live in `canvas.json` (no sidecar read needed), so
+  // Edge labels live in topology (no sidecar read needed), so
   // scan them synchronously once the streaming meta tier has flushed.
   // Same gating as the in-memory driver: skip when the request is
   // scoped to a single node (a per-node search isn't asking about

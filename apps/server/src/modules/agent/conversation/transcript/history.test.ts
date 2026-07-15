@@ -54,6 +54,12 @@ function build(turns: AgentTurn[]): ChatHistoryItem[] {
   return messages;
 }
 
+function buildInternal(turns: AgentTurn[]): ChatHistoryItem[] {
+  const messages: ChatHistoryItem[] = [];
+  buildHistoryFromTurns(turns, messages, { recoverInternalToolNames: true });
+  return messages;
+}
+
 describe('buildHistoryFromTurns', () => {
   it('rebuilds the user bubble from the envelope and assistant text from the transcript', () => {
     const out = build([
@@ -105,6 +111,195 @@ describe('buildHistoryFromTurns', () => {
       variant: 'generic',
     });
   });
+
+  it('preserves raw output for an unknown internal tool', () => {
+    const out = build([
+      makeTurn('do it', [
+        {
+          type: 'tool_call',
+          data: {
+            toolCallId: 'tc-unknown',
+            title: 'future_internal_tool',
+            internalToolName: 'future_internal_tool',
+            status: 'completed',
+            rawOutput: '{"result":"kept"}',
+          },
+        } as FoldedMessage,
+      ]),
+    ]);
+
+    const assistant = out.find((message) => message.role === 'assistant');
+    if (assistant?.role !== 'assistant') throw new Error('unreachable');
+    const toolPart = assistant.parts.find((part) => part.kind === 'tool');
+    expect(toolPart).toMatchObject({
+      variant: 'generic',
+      title: 'future_internal_tool',
+      rawOutput: '{"result":"kept"}',
+    });
+  });
+
+  it.each(['space_commands', 'canvas_commands'])(
+    'normalizes the %s history tool to the canonical Space renderer',
+    (internalToolName) => {
+      const out = build([
+        makeTurn('change it', [
+          {
+            type: 'tool_call',
+            data: {
+              toolCallId: 'tc-space',
+              title: internalToolName,
+              internalToolName,
+              status: 'completed',
+              rawOutput: JSON.stringify({
+                tool: internalToolName,
+                status: 'success',
+                data: { commands: [] },
+              }),
+            },
+          } as FoldedMessage,
+        ]),
+      ]);
+
+      const assistant = out.find((m) => m.role === 'assistant');
+      if (assistant?.role !== 'assistant') throw new Error('unreachable');
+      const toolPart = assistant.parts.find((p) => p.kind === 'tool');
+      expect(toolPart).toMatchObject({
+        variant: 'space_commands',
+        data: { tool: 'space_commands', status: 'success' },
+      });
+    },
+  );
+
+  it.each([
+    {
+      toolName: 'space_commands',
+      rawInput: { commands: [{ type: 'SET_FRAME_LAYOUT' }] },
+      rawOutput: { tool: 'space_commands', status: 'success', data: {} },
+      expected: {
+        variant: 'space_commands',
+        data: {
+          tool: 'space_commands',
+          status: 'success',
+          data: { commands: [{ type: 'SET_FRAME_LAYOUT' }] },
+        },
+      },
+    },
+    {
+      toolName: 'inspect_nodes',
+      rawInput: { nodeIds: ['node-1'] },
+      rawOutput: {
+        tool: 'inspect_nodes',
+        status: 'success',
+        data: { count: 1, nodes: [{ id: 'node-1', label: 'Note 1' }] },
+      },
+      expected: {
+        variant: 'agent_tool',
+        toolName: 'inspect_nodes',
+        data: {
+          status: 'success',
+          data: {
+            nodeIds: ['node-1'],
+            count: 1,
+            nodes: [{ id: 'node-1', label: 'Note 1' }],
+          },
+        },
+      },
+    },
+  ])(
+    'recovers legacy internal $toolName calls that predate persisted machine names',
+    ({ toolName, rawInput, rawOutput, expected }) => {
+      const out = buildInternal([
+        makeTurn('use a tool', [
+          {
+            type: 'tool_call',
+            data: {
+              toolCallId: `tc-${toolName}`,
+              title: toolName,
+              status: 'completed',
+              rawInput,
+              rawOutput: JSON.stringify(rawOutput),
+            },
+          } as FoldedMessage,
+        ]),
+      ]);
+
+      const assistant = out.find((message) => message.role === 'assistant');
+      if (assistant?.role !== 'assistant') throw new Error('unreachable');
+      expect(
+        assistant.parts.find((part) => part.kind === 'tool'),
+      ).toMatchObject(expected);
+    },
+  );
+
+  it.each([
+    {
+      toolName: 'web_search',
+      rawInput: { query: 'Sediment' },
+      rawOutput: {
+        tool: 'web_search',
+        status: 'success',
+        data: { results: [{ title: 'Huabu', url: 'https://huabu.dev' }] },
+      },
+      expectedData: {
+        query: 'Sediment',
+        results: [{ title: 'Huabu', url: 'https://huabu.dev' }],
+      },
+    },
+    {
+      toolName: 'generate_image',
+      rawInput: { prompt: 'A paper diagram', size: '1024x1024' },
+      rawOutput: {
+        tool: 'generate_image',
+        status: 'success',
+        data: { src: 'art-image.png', width: 1024, height: 1024 },
+      },
+      expectedData: {
+        prompt: 'A paper diagram',
+        size: '1024x1024',
+        src: 'art-image.png',
+      },
+    },
+    {
+      toolName: 'snapshot_nodes',
+      rawInput: { nodeIds: ['node-1'] },
+      rawOutput: [
+        {
+          src: 'art-snapshot.png',
+          width: 800,
+          height: 600,
+          originNodeIds: ['node-1'],
+        },
+      ],
+      expectedData: {
+        nodeIds: ['node-1'],
+        snapshots: [{ src: 'art-snapshot.png', originNodeIds: ['node-1'] }],
+      },
+    },
+  ])(
+    'merges $toolName call arguments into reloaded rich tool data',
+    ({ toolName, rawInput, rawOutput, expectedData }) => {
+      const out = buildInternal([
+        makeTurn('use a rich tool', [
+          {
+            type: 'tool_call',
+            data: {
+              toolCallId: `tc-${toolName}`,
+              title: toolName,
+              status: 'completed',
+              rawInput,
+              rawOutput: JSON.stringify(rawOutput),
+            },
+          } as FoldedMessage,
+        ]),
+      ]);
+
+      const assistant = out.find((message) => message.role === 'assistant');
+      if (assistant?.role !== 'assistant') throw new Error('unreachable');
+      expect(
+        assistant.parts.find((part) => part.kind === 'tool'),
+      ).toMatchObject({ data: { status: 'success', data: expectedData } });
+    },
+  );
 
   it('surfaces an interrupted status row for an aborted turn', () => {
     const out = build([

@@ -100,6 +100,33 @@ contextBridge.exposeInMainWorld('electronBridge', {
     },
   },
 
+  diagnostics: {
+    openServerLog: (): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke('diagnostics:open-server-log') as Promise<
+        { ok: true } | { ok: false; error: string }
+      >,
+    openDeveloperTools: (): Promise<
+      { ok: true } | { ok: false; error: string }
+    > =>
+      ipcRenderer.invoke('diagnostics:open-developer-tools') as Promise<
+        { ok: true } | { ok: false; error: string }
+      >,
+    getSystemInfo: (): Promise<{
+      appVersion: string;
+      platform: NodeJS.Platform;
+      osRelease: string;
+      architecture: string;
+      electronVersion: string;
+    }> =>
+      ipcRenderer.invoke('diagnostics:get-system-info') as Promise<{
+        appVersion: string;
+        platform: NodeJS.Platform;
+        osRelease: string;
+        architecture: string;
+        electronVersion: string;
+      }>,
+  },
+
   /**
    * Native macOS menu bar bridge. `configure` pushes localized labels +
    * capability flags to the main process so it can (re)build the menu in
