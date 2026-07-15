@@ -22,7 +22,7 @@ export default function Content() {
   return (
     <PageLayout
       title="Node Content"
-      description="Huabu persists every node's ingested content (PDF body text, web article, Note prose, Text block) as a Markdown file with frontmatter. The AI reads these files as context during chat and intent."
+      description="Huabu persists every node's ingested content (PDF body text, web article, Note prose, Text block) as a Markdown file with frontmatter. The AI reads these files as context during conversations."
       toc={toc}
     >
       <H2>Storage model</H2>
@@ -32,7 +32,7 @@ export default function Content() {
 ├── nodes/<node-title>.md    # ingested content + metadata per node
 ├── .artifacts/              # hidden: raw binaries (PDFs, images, videos)
 ├── .memory/canvas.md        # AI-written Space memory
-└── .history/                # hidden: chat / intent / event history`}</CodeBlock>
+└── .history/                # hidden: conversation and event history`}</CodeBlock>
       <P>
         Node <strong>content</strong> and node{' '}
         <strong>position on the Space</strong> are kept as two separate pieces
@@ -44,7 +44,7 @@ export default function Content() {
         Which nodes get a <Code>.md</Code>?{' '}
         <strong>Note · Text · Web · PDF · Image · Video · Frame</strong>. Image
         / Video / Frame files only carry frontmatter (they point at the
-        artifact, or just label the frame). Sketch and Question nodes don&apos;t
+        artifact, or just label the frame). Sketch and Agent Nodes don&apos;t
         get one — their state lives entirely inside <Code>canvas.json</Code>.
       </Callout>
 

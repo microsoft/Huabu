@@ -10,6 +10,7 @@ describe('handbook route registry', () => {
       paths.every((path) => path === '/docs' || path.startsWith('/docs/')),
     ).toBe(true);
     expect(paths).toContain('/docs/nodes/content');
+    expect(paths).not.toContain('/docs/nodes/office');
   });
 
   it('provides metadata for every route', () => {
@@ -29,6 +30,48 @@ describe('handbook route registry', () => {
       false,
     );
   });
+
+  it('presents Space fundamentals as one task-focused page', () => {
+    const usingHuabu = groups.find((group) => group.label === 'Using Huabu');
+    expect(usingHuabu?.items.map(({ to, label }) => ({ to, label }))).toEqual([
+      { to: '/docs/work-in-a-space', label: 'Work in a Space' },
+    ]);
+    expect(
+      allRoutes.some(
+        (route) =>
+          route.to.startsWith('/docs/concepts/') ||
+          (route.to.startsWith('/docs/nodes/') &&
+            route.to !== '/docs/nodes/content'),
+      ),
+    ).toBe(false);
+  });
+
+  it('does not expose unreleased AI features', () => {
+    expect(allRoutes.some((route) => route.to === '/docs/ai/intent')).toBe(
+      false,
+    );
+  });
+
+  it('presents everyday AI work in one task-focused page', () => {
+    const workWithAI = groups.find((group) => group.label === 'Work with AI');
+    expect(workWithAI?.items.map(({ to, label }) => ({ to, label }))).toEqual([
+      { to: '/docs/work-with-ai', label: 'Work with AI' },
+      { to: '/docs/ai/memory', label: 'Memory' },
+      { to: '/docs/ai/external-agents', label: 'External Agents' },
+    ]);
+    expect(
+      allRoutes.some((route) =>
+        [
+          '/docs/ai/chat-mode',
+          '/docs/ai/agent-mode',
+          '/docs/ai/question-mode',
+          '/docs/ai/digest',
+          '/docs/ai/skills',
+        ].includes(route.to),
+      ),
+    ).toBe(false);
+  });
+
   it('includes issue reporting in Reference', () => {
     const reference = groups.find((group) => group.label === 'Reference');
     expect(reference?.items.map(({ to, label }) => ({ to, label }))).toEqual([

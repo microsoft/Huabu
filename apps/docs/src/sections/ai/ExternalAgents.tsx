@@ -100,7 +100,7 @@ export default function ExternalAgents() {
         </li>
         <li>
           The <strong>@mention menu</strong> inside a{' '}
-          <DocLink href="/docs/nodes/question">Question node</DocLink> — type{' '}
+          <DocLink href="/docs/work-with-ai">Agent Node</DocLink> — type{' '}
           <Code>@</Code> followed by the profile&apos;s display name to route
           that single question to the external agent.
         </li>

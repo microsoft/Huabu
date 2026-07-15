@@ -122,8 +122,8 @@ export default function QuickStart() {
       <H2>6. Think and work with AI</H2>
       <P>
         Every conversation lives in the{' '}
-        <DocLink href="/docs/concepts/chat-panel">Chat Panel</DocLink>. Open it
-        with the top-right button (
+        <DocLink href="/docs/work-with-ai">Chat Panel</DocLink>. Open it with
+        the top-right button (
         <Bot
           aria-label="Open chat panel"
           className="inline-block size-[1em] align-[-0.15em]"
@@ -139,7 +139,7 @@ export default function QuickStart() {
         <li>
           <strong>Huabu Agent</strong> — the same conversation, but the agent
           can also act on your Space. It works with your materials and structure
-          and presents proposed changes for you to review before applying them.
+          and records its changes so you can keep or revert them.
         </li>
       </ul>
       <P>
@@ -156,17 +156,16 @@ export default function QuickStart() {
           aria-hidden
           className="inline-block size-[1em] align-[-0.15em]"
         />{' '}
-        <DocLink href="/docs/nodes/question">Agent Node</DocLink> in your Space
-        to start a conversation in place, so it stays in context with the ideas
-        and sources around it.
+        <DocLink href="/docs/work-with-ai">Agent Node</DocLink> in your Space to
+        start a conversation in place, so it stays in context with the ideas and
+        sources around it.
       </P>
       <Callout tone="tip" title="Where to next">
         Continue with{' '}
-        <DocLink href="/docs/concepts/canvas-basics">Space Basics</DocLink> to
-        learn how to select, arrange, connect, and frame materials in a Space.
-        For deeper AI workflows, explore{' '}
-        <DocLink href="/docs/ai/chat-mode">Chat Mode</DocLink>,{' '}
-        <DocLink href="/docs/ai/agent-mode">Agent Mode</DocLink>, or{' '}
+        <DocLink href="/docs/work-in-a-space">Work in a Space</DocLink> to learn
+        how to select, arrange, connect, and frame materials in a Space. For
+        deeper AI workflows, continue with{' '}
+        <DocLink href="/docs/work-with-ai">Work with AI</DocLink> or configure{' '}
         <DocLink href="/docs/ai/external-agents">External Agents</DocLink>.
       </Callout>
     </PageLayout>

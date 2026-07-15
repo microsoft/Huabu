@@ -26,7 +26,7 @@ const toc: TocEntry[] = [
   { id: 'why-canvas', label: 'Why a Space, not a chat sidebar' },
   { id: 'three-layers', label: 'Three layers, one surface' },
   { id: 'the-surface', label: 'Layer 1 — The surface' },
-  { id: 'the-units', label: 'Layer 2 — The units (ten node types)' },
+  { id: 'the-units', label: 'Layer 2 — The units' },
   { id: 'the-structure', label: 'Layer 3 — Structure & navigation' },
   { id: 'how-they-compose', label: 'How the layers compose' },
   { id: 'design-principles', label: 'Design principles' },
@@ -105,7 +105,7 @@ export default function ExternalizedSensemaking() {
           [
             <strong>Units</strong>,
             'What you put on the surface — typed pieces of content.',
-            'Ten node types: Note, Text, Image, PDF, Office, Video, Web, Frame, Sketch, Question.',
+            'Available node types include Note, Text, Image, PDF, Video, Web, Frame, Sketch, and Agent.',
           ],
           [
             <strong>Structure & navigation</strong>,
@@ -115,8 +115,8 @@ export default function ExternalizedSensemaking() {
         ]}
       />
       <Callout tone="info">
-        Each section below covers one layer with the same card pattern — click
-        any card to jump to the per-feature page.
+        Each section below covers one layer with the same card pattern. The
+        cards for Space interactions lead to the unified practical guide.
       </Callout>
 
       <H2>Layer 1 — The surface</H2>
@@ -127,21 +127,21 @@ export default function ExternalizedSensemaking() {
       </P>
       <CardGrid>
         <NavCard
-          to="/docs/concepts/workspaces"
+          to="/docs/work-in-a-space"
           icon={FolderTree}
           eyebrow="Container"
           title="Home"
           description="A local folder you pick once. Holds every Space, attachment, memory and history file. Pick any folder; an empty one is easiest."
         />
         <NavCard
-          to="/docs/concepts/canvas-basics"
+          to="/docs/work-in-a-space"
           icon={Layout}
           eyebrow="Surface"
           title="Space"
           description="An infinite 2D plane with pan, zoom, marquee select, lasso select and direct manipulation."
         />
         <NavCard
-          to="/docs/concepts/canvas-basics"
+          to="/docs/work-in-a-space"
           icon={MousePointer2}
           eyebrow="Interaction"
           title="Tools & Gestures"
@@ -149,7 +149,7 @@ export default function ExternalizedSensemaking() {
         />
       </CardGrid>
 
-      <H2>Layer 2 — The units (ten node types)</H2>
+      <H2>Layer 2 — The units</H2>
       <P>
         Nodes are the things you place on the Space. Each type has its own
         editor, its own toolbar, and its own on-disk storage shape, but they
@@ -161,14 +161,14 @@ export default function ExternalizedSensemaking() {
       <H3>Content</H3>
       <CardGrid>
         <NavCard
-          to="/docs/nodes/note"
+          to="/docs/work-in-a-space"
           icon={NODE_ICON.note}
           eyebrow="Content"
           title="Note Node"
           description="Rich Markdown for thoughts, outlines, AI-written prose. Lightbox editor with block-level commands."
         />
         <NavCard
-          to="/docs/nodes/text"
+          to="/docs/work-in-a-space"
           icon={NODE_ICON.text}
           eyebrow="Content"
           title="Text Node"
@@ -179,35 +179,28 @@ export default function ExternalizedSensemaking() {
       <H3>Media</H3>
       <CardGrid>
         <NavCard
-          to="/docs/nodes/image"
+          to="/docs/work-in-a-space"
           icon={NODE_ICON.image}
           eyebrow="Media"
           title="Image Node"
           description="PNG / JPG / GIF / WebP / SVG, auto-fit to source aspect. Drop or paste to create."
         />
         <NavCard
-          to="/docs/nodes/pdf"
+          to="/docs/work-in-a-space"
           icon={NODE_ICON.pdf}
           eyebrow="Media"
           title="PDF Node"
           description="Full document with thumbnails, screenshots, text selection. The AI reads extracted text by tool call."
         />
         <NavCard
-          to="/docs/nodes/office"
-          icon={NODE_ICON.office}
-          eyebrow="Media"
-          title="Office Node"
-          description="View-only Word / Excel / PowerPoint. Text is extracted in the background so the AI can read it."
-        />
-        <NavCard
-          to="/docs/nodes/video"
+          to="/docs/work-in-a-space"
           icon={NODE_ICON.video}
           eyebrow="Media"
           title="Video Node"
           description="MP4 / WebM / MOV / OGG plus YouTube embeds. Plays inline; expand for the full player."
         />
         <NavCard
-          to="/docs/nodes/web"
+          to="/docs/work-in-a-space"
           icon={NODE_ICON.web}
           eyebrow="Media"
           title="Web Node"
@@ -218,7 +211,7 @@ export default function ExternalizedSensemaking() {
       <H3>Structure</H3>
       <CardGrid>
         <NavCard
-          to="/docs/nodes/frames"
+          to="/docs/work-in-a-space"
           icon={NODE_ICON.frame}
           eyebrow="Structure"
           title="Frame Node"
@@ -229,18 +222,18 @@ export default function ExternalizedSensemaking() {
       <H3>Interactive</H3>
       <CardGrid>
         <NavCard
-          to="/docs/nodes/sketch"
+          to="/docs/work-in-a-space"
           icon={NODE_ICON.sketch}
           eyebrow="Interactive"
           title="Sketch Node"
           description="Freehand strokes you can ask the AI to interpret into real nodes."
         />
         <NavCard
-          to="/docs/nodes/question"
+          to="/docs/work-with-ai"
           icon={NODE_ICON.question}
           eyebrow="Interactive"
-          title="Question Node"
-          description="A sticky-note question the AI answers in a connected reply, right where the source is."
+          title="Agent Node"
+          description="A dedicated AI conversation anchored beside the material it concerns."
         />
       </CardGrid>
 
@@ -253,28 +246,28 @@ export default function ExternalizedSensemaking() {
       </P>
       <CardGrid>
         <NavCard
-          to="/docs/nodes/edges"
+          to="/docs/work-in-a-space"
           icon={Network}
           eyebrow="Relations"
           title="Edges"
           description="Typed connections with direction, colour, dash and weight. Lightweight metadata — they never own content."
         />
         <NavCard
-          to="/docs/nodes/frames"
+          to="/docs/work-in-a-space"
           icon={NODE_ICON.frame}
           eyebrow="Containers"
           title="Frames as structure"
           description="A Frame is both a node and a grouping primitive. Naming a Frame names a region; the AI reads frame titles too."
         />
         <NavCard
-          to="/docs/concepts/layers-panel"
+          to="/docs/work-in-a-space"
           icon={Layers}
           eyebrow="Navigation"
           title="Layers Panel"
           description="A flat, searchable list of every node on the Space — rename, lock, jump-to. The Space's table of contents."
         />
         <NavCard
-          to="/docs/concepts/chat-panel"
+          to="/docs/work-with-ai"
           icon={MessageSquare}
           eyebrow="Conversation"
           title="Chat Panel"
@@ -308,19 +301,19 @@ export default function ExternalizedSensemaking() {
         <li>
           <strong>Spec brief.</strong> Notes for the problem and each decision
           (Layer 2), a Frame in column layout (Layer 3) to enforce reading
-          order, plus Question nodes (Layer 2 ×{' '}
-          <DocLink href="/docs/ai/question-mode">AI surface</DocLink>) for the
+          order, plus Agent Nodes (Layer 2 ×{' '}
+          <DocLink href="/docs/work-with-ai">AI surface</DocLink>) for the
           things still open.
         </li>
         <li>
           <strong>Idea cluster.</strong> Dozens of Text nodes (Layer 2) captured
-          fast, then grouped into themed Frames (Layer 3) by an Intent
-          suggestion from the AI.
+          fast, then grouped into themed Frames (Layer 3) with help from Agent
+          Mode.
         </li>
         <li>
           <strong>Reading session.</strong> Web and PDF nodes (Layer 2),
           highlights as Notes, a Sketch node where you scribbled the structure,
-          and a Question node asking the AI to interpret it.
+          and an Agent Node asking the AI to interpret it.
         </li>
       </ul>
 
@@ -373,11 +366,8 @@ export default function ExternalizedSensemaking() {
       </ul>
       <Callout tone="tip">
         Read this page once for orientation. Day-to-day, the things you reach
-        for most are{' '}
-        <DocLink href="/docs/concepts/canvas-basics">Space</DocLink> and the
-        per-node pages — start with{' '}
-        <DocLink href="/docs/nodes/note">Note</DocLink> and{' '}
-        <DocLink href="/docs/nodes/frames">Frame</DocLink>.
+        for most are covered in{' '}
+        <DocLink href="/docs/work-in-a-space">Work in a Space</DocLink>.
       </Callout>
     </PageLayout>
   );

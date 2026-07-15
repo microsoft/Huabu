@@ -9,9 +9,6 @@
  * - Each item declares its full absolute `to` (under `/docs`). This
  *   lets a single sidebar group pull pages from any folder, so we
  *   can regroup the menu without breaking existing URLs.
- * - The same component module may be referenced from more than one
- *   sidebar URL (e.g. the Question node appears under both "Work with AI"
- *   as "Question Mode" and under "Work in Canvas" as "Question Node").
  * - Section modules are loaded with `React.lazy` so the handbook
  *   never ships in the main bundle.
  */
@@ -79,39 +76,16 @@ const groupsRaw: RawGroup[] = [
     label: 'Work with AI',
     items: [
       {
-        to: '/docs/ai/chat-mode',
-        label: 'Chat Mode',
-        load: () => import('./sections/ai/ChatMode'),
-      },
-      {
-        to: '/docs/ai/agent-mode',
-        label: 'Agent Mode',
-        load: () => import('./sections/ai/AgentMode'),
-      },
-      {
-        to: '/docs/ai/question-mode',
-        label: 'Question Mode',
-        load: () => import('./sections/nodes/Question'),
-      },
-      {
-        to: '/docs/ai/intent',
-        label: 'Intent',
-        load: () => import('./sections/ai/Intent'),
-      },
-      {
-        to: '/docs/ai/digest',
-        label: 'Digest',
-        load: () => import('./sections/ai/Digest'),
+        to: '/docs/work-with-ai',
+        label: 'Work with AI',
+        description:
+          'Choose Chat, Agent, or an Agent Node; provide context; and review AI changes.',
+        load: () => import('./sections/WorkWithAI'),
       },
       {
         to: '/docs/ai/memory',
         label: 'Memory',
         load: () => import('./sections/ai/Memory'),
-      },
-      {
-        to: '/docs/ai/skills',
-        label: 'Skills',
-        load: () => import('./sections/ai/Skills'),
       },
       {
         to: '/docs/ai/external-agents',
@@ -121,92 +95,14 @@ const groupsRaw: RawGroup[] = [
     ],
   },
   {
-    label: 'Work in Space',
+    label: 'Using Huabu',
     items: [
       {
-        to: '/docs/concepts/workspaces',
-        label: 'Home',
-        load: () => import('./sections/concepts/Workspaces'),
-      },
-      {
-        to: '/docs/concepts/canvas-basics',
-        label: 'Space',
-        load: () => import('./sections/concepts/CanvasBasics'),
-      },
-      {
-        to: '/docs/nodes/note',
-        label: 'Note Node',
-        load: () => import('./sections/nodes/Note'),
-      },
-      {
-        to: '/docs/nodes/text',
-        label: 'Text Node',
-        load: () => import('./sections/nodes/Text'),
-      },
-      {
-        to: '/docs/nodes/image',
-        label: 'Image Node',
-        load: () => import('./sections/nodes/Image'),
-      },
-      {
-        to: '/docs/nodes/pdf',
-        label: 'PDF Node',
-        load: () => import('./sections/nodes/Pdf'),
-      },
-      {
-        to: '/docs/nodes/office',
-        label: 'Office Node',
-        load: () => import('./sections/nodes/Office'),
-      },
-      {
-        to: '/docs/nodes/video',
-        label: 'Video Node',
-        load: () => import('./sections/nodes/Video'),
-      },
-      {
-        to: '/docs/nodes/web',
-        label: 'Web Node',
-        load: () => import('./sections/nodes/Web'),
-      },
-      {
-        to: '/docs/nodes/frames',
-        label: 'Frame Node',
-        load: () => import('./sections/nodes/Frames'),
-      },
-      {
-        to: '/docs/nodes/sketch',
-        label: 'Sketch Node',
-        load: () => import('./sections/nodes/Sketch'),
-      },
-      {
-        to: '/docs/nodes/question',
-        label: 'Question Node',
-        load: () => import('./sections/nodes/Question'),
-      },
-      {
-        to: '/docs/nodes/edges',
-        label: 'Edges',
-        load: () => import('./sections/nodes/Edges'),
-      },
-      {
-        to: '/docs/concepts/alignment',
-        label: 'Layout & Alignment',
-        load: () => import('./sections/concepts/Alignment'),
-      },
-      {
-        to: '/docs/concepts/semantic-zoom',
-        label: 'Semantic Zoom',
-        load: () => import('./sections/concepts/SemanticZoom'),
-      },
-      {
-        to: '/docs/concepts/layers-panel',
-        label: 'Layers Panel',
-        load: () => import('./sections/concepts/LayersPanel'),
-      },
-      {
-        to: '/docs/concepts/chat-panel',
-        label: 'Chat Panel',
-        load: () => import('./sections/concepts/ChatPanel'),
+        to: '/docs/work-in-a-space',
+        label: 'Work in a Space',
+        description:
+          'Create, arrange, connect, and inspect the materials and ideas in a Huabu Space.',
+        load: () => import('./sections/WorkInASpace'),
       },
     ],
   },
@@ -270,18 +166,11 @@ export const groups: DocsGroup[] = groupsRaw.map((group) => ({
 }));
 
 /**
- * Flat list consumed by `<Routes>` in `DocsPage`. It also keeps routes
- * registered for node pages that are linked from articles but do not
- * appear in the sidebar.
+ * Flat list consumed by `<Routes>` in `DocsPage`.
  */
 const allItems: DocsItem[] = [
   ...pinnedItems,
   ...groups.flatMap((g) => g.items),
-  buildItem({
-    to: '/docs/nodes/overview',
-    label: 'Nodes',
-    load: () => import('./sections/nodes/Overview'),
-  }),
   buildItem({
     to: '/docs/nodes/content',
     label: 'Node Content',

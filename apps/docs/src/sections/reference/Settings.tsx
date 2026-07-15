@@ -134,7 +134,7 @@ export default function Settings() {
           ],
           [
             'Reply quality dropped noticeably',
-            'Check the selected model — Operate runs and complex Intents benefit from a stronger model.',
+            'Check the selected model — complex Agent runs benefit from a stronger model.',
           ],
           [
             'Amber "Worker offline" banner above the External Agents list',

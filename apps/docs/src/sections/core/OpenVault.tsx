@@ -80,7 +80,7 @@ export default function OpenVault() {
 │   ├── nodes/               one Markdown file per node
 │   ├── .artifacts/          hidden: raw binaries (PDFs, images, videos)
 │   ├── .memory/canvas.md    AI-written Space memory
-│   └── .history/            hidden: chat + intent history
+│   └── .history/            hidden: conversation and activity history
 └── setting/
     ├── .huabu.md            User memory
     └── skills/              reusable AI recipes (one folder each)`}</CodeBlock>
@@ -104,7 +104,7 @@ export default function OpenVault() {
       <H2>Sub-features built on the file model</H2>
       <CardGrid>
         <NavCard
-          to="/docs/concepts/workspaces"
+          to="/docs/work-in-a-space"
           icon={FolderTree}
           eyebrow="Container"
           title="Home"

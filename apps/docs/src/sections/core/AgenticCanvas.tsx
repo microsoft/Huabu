@@ -4,7 +4,6 @@ import {
   Lightbulb,
   MessageSquare,
   Plug,
-  Sparkles,
   Wrench,
 } from 'lucide-react';
 
@@ -23,7 +22,7 @@ import {
 const toc: TocEntry[] = [
   { id: 'what-it-means', label: 'What "agentic Space" means' },
   { id: 'shared-memory', label: 'The Space as shared memory' },
-  { id: 'surfaces', label: 'Six AI surfaces on one Space' },
+  { id: 'surfaces', label: 'AI surfaces on one Space' },
   { id: 'what-ai-sees', label: 'What the AI actually sees' },
   { id: 'edits-as-objects', label: 'Edits are first-class objects' },
   { id: 'safety', label: 'Safety rails' },
@@ -33,7 +32,7 @@ export default function AgenticCanvas() {
   return (
     <PageLayout
       title="Agentic Space"
-      description="Huabu's AI isn't a sidebar — it's a participant on the same surface you work on. It reads the whole Space, writes back into it, and exposes its capabilities through six distinct surfaces tuned to different moments in your workflow."
+      description="Huabu's AI isn't a sidebar — it's a participant on the same surface you work on. It reads the whole Space, writes back into it, and exposes capabilities tuned to different moments in your workflow."
       toc={toc}
     >
       <H2>What &quot;agentic Space&quot; means</H2>
@@ -69,39 +68,32 @@ export default function AgenticCanvas() {
         </li>
       </ul>
 
-      <H2>Six AI surfaces on one Space</H2>
+      <H2>AI surfaces on one Space</H2>
       <P>
         Pick the surface that matches what you&apos;re trying to do. They all
         share the Space, so you can hop between them without losing context.
       </P>
       <CardGrid>
         <NavCard
-          to="/docs/ai/chat-mode"
+          to="/docs/work-with-ai"
           icon={MessageSquare}
           eyebrow="Chat"
           title="Chat Mode"
           description="Open conversation in the chat panel — explanations, syntheses, light note-writing."
         />
         <NavCard
-          to="/docs/ai/agent-mode"
+          to="/docs/work-with-ai"
           icon={Bot}
           eyebrow="Chat"
           title="Agent Mode"
-          description="Structured Space edits with a reviewable change list before anything commits."
+          description="Structured Space edits with a review card that lets you keep or revert each change."
         />
         <NavCard
-          to="/docs/ai/question-mode"
+          to="/docs/work-with-ai"
           icon={Lightbulb}
           eyebrow="On the Space"
-          title="Question Mode"
-          description="Ask a question right where the source material is; the AI answers in line."
-        />
-        <NavCard
-          to="/docs/ai/intent"
-          icon={Sparkles}
-          eyebrow="On the Space"
-          title="Intent"
-          description="Context-aware “what next” suggestions you can run with one click."
+          title="Agent Node"
+          description="Keep a dedicated AI conversation beside the material it concerns."
         />
         <NavCard
           to="/docs/ai/memory"
@@ -111,7 +103,7 @@ export default function AgenticCanvas() {
           description="Cross-Space preferences and per-Space notes the AI maintains for you."
         />
         <NavCard
-          to="/docs/ai/skills"
+          to="/docs/work-with-ai"
           icon={Wrench}
           eyebrow="Long-term"
           title="Skills"
@@ -127,21 +119,20 @@ export default function AgenticCanvas() {
       </CardGrid>
 
       <H2>What the AI actually sees</H2>
-      <P>Two things travel with every message you send:</P>
+      <P>Every message gives the AI a focused starting point:</P>
       <ol className="list-decimal space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
         <li>
-          A compact <strong>Space overview</strong> — node list, frame
-          hierarchy, recent operations.
+          References to any <strong>selected nodes</strong>, including a short
+          preview and the file path the AI can read for full content.
         </li>
         <li>
-          The full content of any <strong>selected</strong> nodes, never
-          truncated.
+          For an Agent Node, a fresh view of its nearby, connected, and
+          parent-Frame context.
         </li>
       </ol>
       <P>
-        Two more layers come in on demand: <strong>memory</strong> for
-        long-lived preferences, and <strong>tool calls</strong> for reading more
-        node bodies, fetching URLs, running the AI&apos;s built-in search.
+        The built-in AI then uses tools on demand to inspect the wider Space,
+        read full node bodies, fetch URLs, search, or consult memory.
       </P>
 
       <H2>Edits are first-class objects</H2>
@@ -150,19 +141,15 @@ export default function AgenticCanvas() {
         rows={[
           [
             <strong>Chat Mode</strong>,
-            'One node at a time, undoable with Ctrl/Cmd+Z like your own edits.',
+            'Read-only conversation: it can inspect and explain the Space without changing it.',
           ],
           [
             <strong>Agent Mode</strong>,
-            'Batched as a structured change list — accept whole, accept per-item, or discard.',
+            'Changes appear as the Agent works, then remain reviewable with Keep and Revert controls.',
           ],
           [
-            <strong>Question node</strong>,
-            'Reply is appended to the node as soon as the AI finishes.',
-          ],
-          [
-            <strong>Intent</strong>,
-            'Suggested edits are committed as a batch you can roll back.',
+            <strong>Agent Node</strong>,
+            'A dedicated conversation remains anchored to a visible node on the Space.',
           ],
         ]}
       />

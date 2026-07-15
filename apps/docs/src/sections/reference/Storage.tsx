@@ -38,7 +38,7 @@ export default function Storage() {
 │   ├── nodes/<node-title>.md
 │   ├── .artifacts/<artifactId>.<ext>
 │   ├── .memory/canvas.md              # Space memory (hidden)
-│   └── .history/{chat/<threadId>.turns.jsonl, intent.json, events.jsonl}
+│   └── .history/                      # conversation and event history
 └── setting/
     ├── .huabu.md                      # User memory
     └── skills/<id>/SKILL.md           # user-authored skills`}</CodeBlock>
@@ -76,7 +76,7 @@ export default function Storage() {
           [
             <Code>.history/</Code>,
             'JSON / JSONL',
-            'Chat threads, intent log, event timeline. Cleared on Space delete.',
+            'Conversation threads and event timeline. Cleared on Space delete.',
           ],
         ]}
       />

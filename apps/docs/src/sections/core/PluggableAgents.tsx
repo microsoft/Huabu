@@ -41,7 +41,7 @@ export default function PluggableAgents() {
         <li>
           <strong>Bring more agents into the thinking itself.</strong> Different
           agents have different strengths and different blind spots. Routing a
-          Question node (or a whole chat thread) to a specific agent lets you
+          Agent Node (or a whole chat thread) to a specific agent lets you
           stress-test an idea from several angles before you commit to one.
         </li>
       </ul>
