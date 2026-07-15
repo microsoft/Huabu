@@ -31,6 +31,13 @@ describe('handbook route registry', () => {
     );
   });
 
+  it('does not expose product-positioning Core pages', () => {
+    expect(groups.some((group) => group.label === 'Core')).toBe(false);
+    expect(allRoutes.some((route) => route.to.startsWith('/docs/core/'))).toBe(
+      false,
+    );
+  });
+
   it('presents Space fundamentals as one task-focused page', () => {
     const usingHuabu = groups.find((group) => group.label === 'Using Huabu');
     expect(usingHuabu?.items.map(({ to, label }) => ({ to, label }))).toEqual([

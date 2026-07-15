@@ -48,31 +48,6 @@ const groupsRaw: RawGroup[] = [
     ],
   },
   {
-    label: 'Core',
-    items: [
-      {
-        to: '/docs/core/externalized-sensemaking',
-        label: 'Externalized Sensemaking',
-        load: () => import('./sections/core/ExternalizedSensemaking'),
-      },
-      {
-        to: '/docs/core/agentic-canvas',
-        label: 'Agentic Space',
-        load: () => import('./sections/core/AgenticCanvas'),
-      },
-      {
-        to: '/docs/core/pluggable-agents',
-        label: 'Pluggable Agents',
-        load: () => import('./sections/core/PluggableAgents'),
-      },
-      {
-        to: '/docs/core/open-vault',
-        label: 'Open Home',
-        load: () => import('./sections/core/OpenVault'),
-      },
-    ],
-  },
-  {
     label: 'Work with AI',
     items: [
       {
