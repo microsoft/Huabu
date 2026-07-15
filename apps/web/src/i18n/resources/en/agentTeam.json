@@ -28,6 +28,7 @@
   "memberStatusMissing": "Missing",
   "configs": "Configs",
   "deployments": "Deployments",
+  "profiles": "Profiles",
   "required": "Required",
   "configValue": "Value",
   "secretConfigured": "Configured — enter a replacement",
@@ -52,5 +53,18 @@
   "setupStatusError": "Error",
   "newDeployment": "New deployment",
   "addDeployment": "Add deployment",
-  "addDeploymentDescription": "Create another runnable alias, harness, and managed workspace for this member."
+  "addDeploymentDescription": "Create another runnable alias, harness, and managed workspace for this member.",
+  "profileCreated": "Profile created",
+  "profileDeleted": "Profile deleted",
+  "deleteProfile": "Delete Profile",
+  "deleteProfileTitle": "Delete Profile?",
+  "deleteProfileDescription": "Delete “{{alias}}”? Existing threads are retained, but this Profile can no longer be selected for new threads.",
+  "newProfile": "New Profile",
+  "addProfile": "Add Profile",
+  "addProfileDescription": "Create a runnable Profile with a harness and managed workspace.",
+  "setup": "Setup",
+  "cancelSetup": "Cancel setup",
+  "setupStatusNotPrepared": "Not prepared",
+  "loadingMemberDetail": "Loading member details…",
+  "loadMemberDetailFailed": "Failed to load member details"
 }

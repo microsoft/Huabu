@@ -122,8 +122,9 @@ export function updateProfile(
 ): AcpAgentProfile {
   const all = loadAll();
   const idx = all.findIndex((p) => p.id === id);
-  if (idx === -1) throw new Error(`Profile with id ${id} not found`);
-  const next: AcpAgentProfile = { ...all[idx]!, ...patch, id: all[idx]!.id };
+  const current = all[idx];
+  if (!current) throw new Error(`Profile with id ${id} not found`);
+  const next: AcpAgentProfile = { ...current, ...patch, id: current.id };
   all[idx] = next;
   saveAll(all);
   return next;
@@ -136,6 +137,13 @@ export function deleteProfile(id: string): boolean {
   if (next.length === all.length) return false;
   saveAll(next);
   return true;
+}
+
+/** Remove migrated records while retaining legacy Agent Team profiles. */
+export function removeProfiles(ids: readonly string[]): void {
+  if (ids.length === 0) return;
+  const migrated = new Set(ids);
+  saveAll(loadAll().filter((profile) => !migrated.has(profile.id)));
 }
 
 /** Test-only: wipe the on-disk store. */

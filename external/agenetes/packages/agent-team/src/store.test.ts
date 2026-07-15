@@ -42,17 +42,18 @@ const state: AgentTeamRegistryState = {
       status: 'active',
     },
   ],
-  deployments: [
+  profiles: [
     {
-      id: 'deployment-1',
+      id: 'profile-1',
       alias: 'Reviewer',
-      revision: 1,
-      enabled: false,
-      machine: 'machine-a',
-      manifestPath: '/teams/reviewer/agentlet.yaml',
-      harness: 'copilot',
+      agentletId: 'machine-a',
       workingDirPath: '/teams/reviewer/workspaces/copilot',
-      setup: { status: 'disabled' },
+      launch: {
+        kind: 'agent-team-manifest',
+        manifestPath: '/teams/reviewer/agentlet.yaml',
+        harness: 'copilot',
+      },
+      preparation: { status: 'not_prepared' },
       setupLog: [],
     },
   ],
@@ -81,7 +82,7 @@ describe('FileAgentTeamRegistryStore', () => {
     expect(new FileAgentTeamRegistryStore(storageDir).load()).toEqual(state);
     expect(
       JSON.parse(readFileSync(join(storageDir, 'registry.json'), 'utf8')),
-    ).toMatchObject({ schemaVersion: 1, state });
+    ).toMatchObject({ schemaVersion: 2, state });
     expect(existsSync(join(storageDir, 'registry.json.tmp'))).toBe(false);
   });
 
@@ -130,12 +131,60 @@ describe('FileAgentTeamRegistryStore', () => {
 
     expect(new FileAgentTeamRegistryStore(storageDir).load()).toEqual({
       ...state,
-      deployments: [],
+      profiles: [],
       configs: [],
     });
   });
 
-  it('rejects orphan configs even when there are no deployments', () => {
+  it('migrates schema v1 deployments to immutable manifest Profiles', () => {
+    const storageDir = createStorageDir();
+    writeFileSync(
+      join(storageDir, 'registry.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        state: {
+          roots: state.roots,
+          members: state.members,
+          deployments: [
+            {
+              id: 'legacy-deployment',
+              alias: 'Reviewer',
+              revision: 3,
+              enabled: true,
+              machine: 'machine-a',
+              manifestPath: '/teams/reviewer/agentlet.yaml',
+              harness: 'copilot',
+              workingDirPath: '/teams/reviewer/workspaces/copilot',
+              setup: { status: 'ready', completedAt: 100 },
+              setupLog: [],
+            },
+          ],
+          configs: [],
+        },
+      }),
+    );
+
+    expect(new FileAgentTeamRegistryStore(storageDir).load().profiles).toEqual([
+      {
+        id: 'legacy-deployment',
+        alias: 'Reviewer',
+        agentletId: 'machine-a',
+        workingDirPath: '/teams/reviewer/workspaces/copilot',
+        launch: {
+          kind: 'agent-team-manifest',
+          manifestPath: '/teams/reviewer/agentlet.yaml',
+          harness: 'copilot',
+        },
+        preparation: { status: 'ready', completedAt: 100 },
+        setupLog: [],
+      },
+    ]);
+    expect(
+      JSON.parse(readFileSync(join(storageDir, 'registry.json'), 'utf8')),
+    ).toMatchObject({ schemaVersion: 2 });
+  });
+
+  it('rejects orphan configs even when there are no Profiles', () => {
     const storageDir = createStorageDir();
     writeFileSync(
       join(storageDir, 'registry.json'),

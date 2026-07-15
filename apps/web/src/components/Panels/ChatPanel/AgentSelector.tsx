@@ -29,9 +29,9 @@ import { cn } from '../../Common/cn';
 import { Popover } from '../../Common/Popover';
 
 import type {
-  AcpAgentProfile,
   AgentBinding,
   AgentMode,
+  AgentProfileView,
 } from '@sediment/shared';
 
 export type { AgentChoice };
@@ -42,7 +42,7 @@ interface AgentSelectorProps {
   /** Built-in mode of the current thread (only meaningful for internal). */
   currentMode: AgentMode;
   /** Configured external-agent profiles available for binding. */
-  profiles: AcpAgentProfile[];
+  profiles: AgentProfileView[];
   /**
    * When true the selector is interactive (thread still empty). When
    * false it is a read-only chip (binding locked for the thread).

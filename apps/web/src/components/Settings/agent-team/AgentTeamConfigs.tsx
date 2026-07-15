@@ -10,33 +10,22 @@ import { toast } from '@/components/Common/Toast';
 
 import type {
   AgentTeamMemberConfigView,
-  AgentTeamSettingsState,
+  AgentTeamMemberDetailView,
 } from '@sediment/shared';
 
 interface AgentTeamConfigsProps {
   config: AgentTeamMemberConfigView;
-  pendingAction: string | null;
-  mutate: (
-    action: string,
-    operation: () => Promise<AgentTeamSettingsState>,
-  ) => Promise<void>;
+  onDetailChange: (detail: AgentTeamMemberDetailView) => void;
 }
 
 interface ConfigFieldProps extends AgentTeamConfigsProps {
   field: AgentTeamMemberConfigView['fields'][number];
 }
 
-function ConfigField({
-  config,
-  field,
-  pendingAction,
-  mutate,
-}: ConfigFieldProps) {
+function ConfigField({ config, field, onDetailChange }: ConfigFieldProps) {
   const { t } = useTranslation('agentTeam');
   const [value, setValue] = useState(field.secret ? '' : (field.value ?? ''));
-  const action = `config:${config.machine}:${config.manifestPath}:${field.name}`;
-  const saving = pendingAction === action;
-  const disabled = pendingAction !== null;
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     setValue(field.secret ? '' : (field.value ?? ''));
@@ -44,19 +33,21 @@ function ConfigField({
 
   const update = async (next: string | null) => {
     try {
-      await mutate(action, () =>
-        updateAgentTeamConfigs({
-          machine: config.machine,
-          manifestPath: config.manifestPath,
-          values: { [field.name]: next },
-        }),
-      );
+      setSaving(true);
+      const detail = await updateAgentTeamConfigs({
+        machine: config.machine,
+        manifestPath: config.manifestPath,
+        values: { [field.name]: next },
+      });
+      onDetailChange(detail);
       setValue(field.secret ? '' : (next ?? ''));
       toast(t('configSaved'), { tone: 'success' });
     } catch (error) {
       toast(error instanceof Error ? error.message : t('operationFailed'), {
         tone: 'danger',
       });
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -91,7 +82,7 @@ function ConfigField({
               ? t('secretConfigured')
               : t('configValue')
           }
-          disabled={disabled}
+          disabled={saving}
           autoComplete="off"
           className={`${TEXT_INPUT_CLASS} min-w-0 flex-1 font-mono`}
           onKeyDown={(event) => {
@@ -107,7 +98,7 @@ function ConfigField({
           size="sm"
           iconOnly
           title={t('save')}
-          disabled={disabled || (field.secret && value.length === 0)}
+          disabled={saving || (field.secret && value.length === 0)}
           onClick={() => void update(value)}
         >
           <Save className={saving ? 'animate-pulse' : undefined} />
@@ -119,7 +110,7 @@ function ConfigField({
             size="sm"
             iconOnly
             title={t('clearConfig')}
-            disabled={disabled}
+            disabled={saving}
             onClick={() => void update(null)}
           >
             <RotateCcw />

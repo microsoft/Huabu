@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@agenetes/acp-driver": "workspace:*",
+    "@agenetes/agent-team": "workspace:*",
     "@agenetes/pi-driver": "workspace:*",
     "@agenetes/protocol": "workspace:*",
     "@agenetes/runtime": "workspace:*"

@@ -28,6 +28,7 @@
   "memberStatusMissing": "缺失",
   "configs": "配置",
   "deployments": "部署",
+  "profiles": "Profiles",
   "required": "必填",
   "configValue": "值",
   "secretConfigured": "已配置；输入新值以替换",
@@ -52,5 +53,18 @@
   "setupStatusError": "错误",
   "newDeployment": "新部署",
   "addDeployment": "添加部署",
-  "addDeploymentDescription": "为此成员创建另一个可运行的别名、harness 和托管工作区。"
+  "addDeploymentDescription": "为此成员创建另一个可运行的别名、harness 和托管工作区。",
+  "profileCreated": "已创建 Profile",
+  "profileDeleted": "已删除 Profile",
+  "deleteProfile": "删除 Profile",
+  "deleteProfileTitle": "删除 Profile？",
+  "deleteProfileDescription": "确定删除“{{alias}}”吗？已有线程会保留，但新线程将无法再选择此 Profile。",
+  "newProfile": "新 Profile",
+  "addProfile": "添加 Profile",
+  "addProfileDescription": "使用 harness 和托管工作区创建可运行的 Profile。",
+  "setup": "Setup",
+  "cancelSetup": "取消 setup",
+  "setupStatusNotPrepared": "尚未准备",
+  "loadingMemberDetail": "正在加载成员详情…",
+  "loadMemberDetailFailed": "无法加载成员详情"
 }

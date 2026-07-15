@@ -38,11 +38,16 @@ import { create } from 'zustand';
 
 import { listAcpProfiles } from '@/api/acp';
 
-import type { AcpAgentProfile, AcpAgentletStatus } from '@/api/acp';
+import type {
+  AcpAgentProfile,
+  AcpAgentletStatus,
+  AgentProfileView,
+} from '@/api/acp';
 
 interface AcpProfilesState {
   /** Every profile the user has created. Empty until the first fetch. */
-  profiles: AcpAgentProfile[];
+  profiles: AgentProfileView[];
+  legacyProfiles: AcpAgentProfile[];
   /** Latest agentlet snapshot. `null` until the first fetch resolves. */
   agentlet: AcpAgentletStatus | null;
   /**
@@ -67,6 +72,7 @@ interface AcpProfilesState {
 
 export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
   profiles: [],
+  legacyProfiles: [],
   agentlet: null,
   loaded: false,
   error: null,
@@ -104,8 +110,12 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
     set({ loading: true });
     try {
       const res = await listAcpProfiles();
+      const selectableIds = new Set(res.selectableProfileIds);
       set({
-        profiles: res.profiles,
+        profiles: res.profiles.filter((profile) =>
+          selectableIds.has(profile.id),
+        ),
+        legacyProfiles: res.legacyProfiles,
         agentlet: res.agentlet,
         loaded: true,
         error: null,

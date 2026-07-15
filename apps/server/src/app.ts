@@ -16,16 +16,21 @@ import {
   acpAgentletRoutes,
   acpProfilesRoutes,
   acpThreadsRoutes,
+  getSupervisedAgentletId,
   installAcpProfileCachePort,
   mountAgenetes,
   resolveDaemonEntry,
 } from './modules/agent/acp/index.js';
+import {
+  listProfiles as listLegacyAcpProfiles,
+  removeProfiles as removeLegacyAcpProfiles,
+} from './modules/agent/acp/profile-store.js';
 import agentRoutes from './modules/agent/agent.route.js';
-import agentTeamRoutes from './modules/agent-team/agent-team.route.js';
 import intentRoutes from './modules/agent/intent.route.js';
 import llmRoutes from './modules/agent/llm.route.js';
 import { registerOpCounterHook } from './modules/agent/memory/op-counter-hook.js';
 import skillsRoutes from './modules/agent/skills.route.js';
+import agentTeamRoutes from './modules/agent-team/agent-team.route.js';
 import artifactRoute from './modules/artifact/artifact.route.js';
 import canvasRoutes from './modules/canvas/canvas.route.js';
 import externalNoteRoutes from './modules/canvas/external.route.js';
@@ -269,6 +274,21 @@ mountAgenetes(app, {
       get: getPersistedSecret,
       setMany: setSecrets,
     },
+    legacyCommandProfiles: listLegacyAcpProfiles().flatMap((profile) =>
+      profile.cliId === 'agent-team' || !profile.command || !profile.cwd
+        ? []
+        : [
+            {
+              id: profile.id,
+              alias: profile.displayName,
+              agentletId: getSupervisedAgentletId(),
+              command: profile.command,
+              workingDirPath: profile.cwd,
+              metadata: { cliId: profile.cliId },
+            },
+          ],
+    ),
+    onLegacyProfilesMigrated: removeLegacyAcpProfiles,
   },
 });
 // Capture the bound TCP port for L1-owned reachback (RFS): the

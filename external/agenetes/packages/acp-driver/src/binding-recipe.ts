@@ -15,8 +15,14 @@ export interface AcpBindingRecipe {
   cwd?: string;
   autoRestart: boolean;
   alias: string;
-  agentTeam?: {
-    agentDir: string;
-    harness?: string;
-  };
+  agentTeam?:
+    | {
+        manifestPath: string;
+        workingDirPath: string;
+        harness: string;
+      }
+    | {
+        agentDir: string;
+        harness?: string;
+      };
 }

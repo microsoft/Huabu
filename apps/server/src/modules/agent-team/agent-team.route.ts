@@ -4,27 +4,30 @@ import {
   getSupervisedAgentletId,
   type AgentTeamRegistry,
 } from '@agenetes/agentlet-host';
+
 import {
   AGENT_TEAM_SETTINGS_SSE_EVENTS,
-  agentTeamDeploymentParamsSchema,
-  agentTeamMemberRefSchema,
+  agentTeamMemberDetailQuerySchema,
+  agentTeamProfileActionParamsSchema,
   agentTeamRootRefSchema,
-  createAgentTeamDeploymentBodySchema,
-  updateAgentTeamDeploymentBodySchema,
+  createAgentProfileBodySchema,
+  patchAgentProfileBodySchema,
   updateAgentTeamMemberConfigsBodySchema,
 } from '@sediment/shared';
 
 import { isLoopbackRequest } from '../security/peer.js';
 
 import type {
-  AgentTeamDeploymentParams,
-  AgentTeamMemberRefBody,
+  AgentProfileParams,
+  AgentProfileView,
+  AgentTeamMemberDetailQuery,
+  AgentTeamMemberDetailView,
   AgentTeamRootRefBody,
   AgentTeamSettingsSseEvent,
   AgentTeamSettingsState,
   ApiResult,
-  CreateAgentTeamDeploymentBody,
-  UpdateAgentTeamDeploymentBody,
+  CreateAgentProfileBody,
+  PatchAgentProfileBody,
   UpdateAgentTeamMemberConfigsBody,
 } from '@sediment/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
@@ -32,20 +35,18 @@ import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 export type AgentTeamSettingsRegistry = Pick<
   AgentTeamRegistry,
   | 'addRoot'
-  | 'createDeployment'
-  | 'deleteDeployment'
-  | 'disableDeployment'
-  | 'enableDeployment'
-  | 'getMemberConfig'
-  | 'listDeployments'
+  | 'cancelProfileSetup'
+  | 'createProfile'
+  | 'deleteProfile'
+  | 'getMemberDetail'
   | 'listMachines'
-  | 'listMembers'
+  | 'listMemberSummaries'
   | 'listRoots'
   | 'onChange'
+  | 'patchProfile'
   | 'removeRoot'
   | 'rescanRoot'
-  | 'retryDeploymentSetup'
-  | 'updateDeployment'
+  | 'setupProfile'
   | 'updateMemberConfigs'
 >;
 
@@ -75,30 +76,29 @@ function settingsState(
   registry: AgentTeamSettingsRegistry,
   localMachine: string,
 ): AgentTeamSettingsState {
-  const members = registry.listMembers();
   return {
     machines: registry.listMachines(),
     localMachine,
     roots: registry.listRoots(),
-    members,
-    deployments: registry.listDeployments(),
-    configs: members.map((member) =>
-      registry.getMemberConfig(member.machine, member.manifestPath),
-    ),
+    members: registry.listMemberSummaries(),
   };
 }
 
 const badRequestCodes = new Set([
   'config_field_not_found',
+  'invalid_agentlet',
   'invalid_alias',
+  'invalid_command',
   'invalid_config_value',
+  'invalid_profile_kind',
+  'invalid_profile_patch',
   'invalid_root',
   'invalid_working_directory',
   'unsupported_harness',
 ]);
 const notFoundCodes = new Set([
-  'deployment_not_found',
   'member_not_found',
+  'profile_not_found',
   'root_not_found',
 ]);
 
@@ -146,6 +146,30 @@ export function createAgentTeamRoutes(
       },
     );
 
+    app.get<{
+      Querystring: AgentTeamMemberDetailQuery;
+      Reply: ApiResult<AgentTeamMemberDetailView>;
+    }>('/settings/member-detail', async (request, reply) => {
+      if (denyRemote(request, reply)) return;
+      const parsed = agentTeamMemberDetailQuerySchema.safeParse(request.query);
+      if (!parsed.success) {
+        return reply.status(400).send({
+          message: firstIssueMessage(parsed, 'Invalid Agent Team member'),
+          code: 'validation_failed',
+        });
+      }
+      const registry = requireRegistry(reply, getRegistry);
+      if (!registry) return;
+      try {
+        return registry.getMemberDetail(
+          parsed.data.machine,
+          parsed.data.manifestPath,
+        );
+      } catch (error) {
+        return sendAgentTeamError(error, reply);
+      }
+    });
+
     app.get('/settings/events', async (request, reply) => {
       if (denyRemote(request, reply)) return;
       const registry = requireRegistry(reply, getRegistry);
@@ -162,10 +186,15 @@ export function createAgentTeamRoutes(
       reply.raw.write(': ok\n\n');
 
       let unsubscribe = () => {};
-      let heartbeat: NodeJS.Timeout | undefined;
+      const heartbeat = setInterval(() => {
+        if (!reply.raw.destroyed && !reply.raw.writableEnded) {
+          reply.raw.write(': keep-alive\n\n');
+        }
+      }, 15_000);
+      heartbeat.unref();
       const close = () => {
         unsubscribe();
-        if (heartbeat) clearInterval(heartbeat);
+        clearInterval(heartbeat);
         if (!reply.raw.destroyed && !reply.raw.writableEnded) reply.raw.end();
       };
       const publishSnapshot = () => {
@@ -197,12 +226,6 @@ export function createAgentTeamRoutes(
       unsubscribe = registry.onChange(publishSnapshot, (error) => {
         app.log.error({ err: error }, 'Agent Team SSE subscriber failed');
       });
-      heartbeat = setInterval(() => {
-        if (!reply.raw.destroyed && !reply.raw.writableEnded) {
-          reply.raw.write(': keep-alive\n\n');
-        }
-      }, 15_000);
-      heartbeat.unref();
     });
 
     app.post<{
@@ -274,7 +297,7 @@ export function createAgentTeamRoutes(
 
     app.put<{
       Body: UpdateAgentTeamMemberConfigsBody;
-      Reply: ApiResult<AgentTeamSettingsState>;
+      Reply: ApiResult<AgentTeamMemberDetailView>;
     }>('/settings/configs', async (request, reply) => {
       if (denyRemote(request, reply)) return;
       const parsed = updateAgentTeamMemberConfigsBodySchema.safeParse(
@@ -294,131 +317,142 @@ export function createAgentTeamRoutes(
           parsed.data.manifestPath,
           parsed.data.values,
         );
-        return readState(registry);
+        return registry.getMemberDetail(
+          parsed.data.machine,
+          parsed.data.manifestPath,
+        );
       } catch (error) {
         return sendAgentTeamError(error, reply);
       }
     });
 
     app.post<{
-      Body: CreateAgentTeamDeploymentBody;
-      Reply: ApiResult<AgentTeamSettingsState>;
-    }>('/settings/deployments', async (request, reply) => {
+      Body: CreateAgentProfileBody;
+      Reply: ApiResult<AgentProfileView>;
+    }>('/settings/profiles', async (request, reply) => {
       if (denyRemote(request, reply)) return;
-      const parsed = createAgentTeamDeploymentBodySchema.safeParse(
-        request.body,
-      );
+      const parsed = createAgentProfileBodySchema.safeParse(request.body);
       if (!parsed.success) {
         return reply.status(400).send({
-          message: firstIssueMessage(parsed, 'Invalid Agent Team deployment'),
+          message: firstIssueMessage(parsed, 'Invalid Agent Profile'),
           code: 'validation_failed',
+        });
+      }
+      if (parsed.data.launch.kind !== 'agent-team-manifest') {
+        return reply.status(400).send({
+          message: 'Agent Team Settings accepts only manifest Profiles',
+          code: 'invalid_profile_kind',
         });
       }
       const registry = requireRegistry(reply, getRegistry);
       if (!registry) return;
       try {
-        registry.createDeployment(parsed.data);
-        return readState(registry);
+        return registry.createProfile({
+          launchKind: 'agent-team-manifest',
+          alias: parsed.data.alias,
+          agentletId: parsed.data.agentletId,
+          workingDirPath: parsed.data.workingDirPath,
+          manifestPath: parsed.data.launch.manifestPath,
+          harness: parsed.data.launch.harness,
+        });
       } catch (error) {
         return sendAgentTeamError(error, reply);
       }
     });
 
     app.patch<{
-      Params: AgentTeamDeploymentParams;
-      Body: UpdateAgentTeamDeploymentBody;
-      Reply: ApiResult<AgentTeamSettingsState>;
-    }>('/settings/deployments/:id', async (request, reply) => {
+      Params: AgentProfileParams;
+      Body: PatchAgentProfileBody;
+      Reply: ApiResult<AgentProfileView>;
+    }>('/settings/profiles/:id', async (request, reply) => {
       if (denyRemote(request, reply)) return;
-      const params = agentTeamDeploymentParamsSchema.safeParse(request.params);
-      const body = updateAgentTeamDeploymentBodySchema.safeParse(request.body);
+      const params = agentTeamProfileActionParamsSchema.safeParse(
+        request.params,
+      );
+      const body = patchAgentProfileBodySchema.safeParse(request.body);
       if (!params.success) {
         return reply.status(400).send({
-          message: firstIssueMessage(params, 'Invalid deployment ID'),
+          message: firstIssueMessage(params, 'Invalid Profile ID'),
           code: 'validation_failed',
         });
       }
       if (!body.success) {
         return reply.status(400).send({
-          message: firstIssueMessage(
-            body,
-            'Invalid Agent Team deployment update',
-          ),
+          message: firstIssueMessage(body, 'Invalid Agent Profile patch'),
           code: 'validation_failed',
         });
       }
       const registry = requireRegistry(reply, getRegistry);
       if (!registry) return;
       try {
-        registry.updateDeployment(params.data.id, body.data);
-        return readState(registry);
+        return registry.patchProfile(params.data.id, body.data);
       } catch (error) {
         return sendAgentTeamError(error, reply);
       }
     });
 
     app.delete<{
-      Params: AgentTeamDeploymentParams;
-      Reply: ApiResult<AgentTeamSettingsState>;
-    }>('/settings/deployments/:id', async (request, reply) => {
+      Params: AgentProfileParams;
+      Reply: ApiResult<{ deleted: true }>;
+    }>('/settings/profiles/:id', async (request, reply) => {
       if (denyRemote(request, reply)) return;
-      const parsed = agentTeamDeploymentParamsSchema.safeParse(request.params);
+      const parsed = agentTeamProfileActionParamsSchema.safeParse(
+        request.params,
+      );
       if (!parsed.success) {
         return reply.status(400).send({
-          message: firstIssueMessage(parsed, 'Invalid deployment ID'),
+          message: firstIssueMessage(parsed, 'Invalid Profile ID'),
           code: 'validation_failed',
         });
       }
       const registry = requireRegistry(reply, getRegistry);
       if (!registry) return;
       try {
-        if (!registry.deleteDeployment(parsed.data.id)) {
+        if (!registry.deleteProfile(parsed.data.id)) {
           return reply.status(404).send({
-            message: 'Agent Team deployment not found',
-            code: 'deployment_not_found',
+            message: 'Agent Profile not found',
+            code: 'profile_not_found',
           });
         }
-        return readState(registry);
+        return { deleted: true as const };
       } catch (error) {
         return sendAgentTeamError(error, reply);
       }
     });
 
     const setupAction = (
-      action: 'enable' | 'disable' | 'retry',
+      action: 'setup' | 'cancel',
       run: (
         registry: AgentTeamSettingsRegistry,
         id: string,
-      ) => Promise<unknown>,
+      ) => Promise<AgentProfileView>,
     ) => {
       app.post<{
-        Params: AgentTeamDeploymentParams;
-        Reply: ApiResult<AgentTeamSettingsState>;
-      }>(`/settings/deployments/:id/${action}`, async (request, reply) => {
+        Params: AgentProfileParams;
+        Reply: ApiResult<AgentProfileView>;
+      }>(`/settings/profiles/:id/${action}`, async (request, reply) => {
         if (denyRemote(request, reply)) return;
-        const parsed = agentTeamDeploymentParamsSchema.safeParse(
+        const parsed = agentTeamProfileActionParamsSchema.safeParse(
           request.params,
         );
         if (!parsed.success) {
           return reply.status(400).send({
-            message: firstIssueMessage(parsed, 'Invalid deployment ID'),
+            message: firstIssueMessage(parsed, 'Invalid Profile ID'),
             code: 'validation_failed',
           });
         }
         const registry = requireRegistry(reply, getRegistry);
         if (!registry) return;
         try {
-          await run(registry, parsed.data.id);
-          return readState(registry);
+          return await run(registry, parsed.data.id);
         } catch (error) {
           return sendAgentTeamError(error, reply);
         }
       });
     };
 
-    setupAction('enable', (registry, id) => registry.enableDeployment(id));
-    setupAction('disable', (registry, id) => registry.disableDeployment(id));
-    setupAction('retry', (registry, id) => registry.retryDeploymentSetup(id));
+    setupAction('setup', (registry, id) => registry.setupProfile(id));
+    setupAction('cancel', (registry, id) => registry.cancelProfileSetup(id));
   };
 }
 

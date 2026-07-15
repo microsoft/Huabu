@@ -2,10 +2,12 @@ import { apiFetch, apiUrl } from './_client';
 import { routes } from './_routes';
 
 import type {
+  AgentProfileView,
+  AgentTeamMemberDetailView,
   AgentTeamRootRefBody,
   AgentTeamSettingsState,
-  CreateAgentTeamDeploymentBody,
-  UpdateAgentTeamDeploymentBody,
+  CreateAgentProfileBody,
+  PatchAgentProfileBody,
   UpdateAgentTeamMemberConfigsBody,
 } from '@sediment/shared';
 
@@ -45,9 +47,21 @@ export async function removeAgentTeamRoot(
   });
 }
 
+export async function getAgentTeamMemberDetail(
+  member: Pick<AgentTeamMemberDetailView['member'], 'machine' | 'manifestPath'>,
+): Promise<AgentTeamMemberDetailView> {
+  const query = new URLSearchParams({
+    machine: member.machine,
+    manifestPath: member.manifestPath,
+  });
+  return apiFetch(`${routes.agentTeamMemberDetail}?${query}`, {
+    fallbackMessage: 'Failed to load Agent Team member',
+  });
+}
+
 export async function updateAgentTeamConfigs(
   update: UpdateAgentTeamMemberConfigsBody,
-): Promise<AgentTeamSettingsState> {
+): Promise<AgentTeamMemberDetailView> {
   return apiFetch(routes.agentTeamConfigs, {
     method: 'PUT',
     json: update,
@@ -55,62 +69,54 @@ export async function updateAgentTeamConfigs(
   });
 }
 
-export async function createAgentTeamDeployment(
-  deployment: CreateAgentTeamDeploymentBody,
-): Promise<AgentTeamSettingsState> {
-  return apiFetch(routes.agentTeamDeployments, {
+export async function createAgentTeamProfile(
+  profile: CreateAgentProfileBody,
+): Promise<AgentProfileView> {
+  return apiFetch(routes.agentTeamProfiles, {
     method: 'POST',
-    json: deployment,
-    fallbackMessage: 'Failed to create Agent Team deployment',
+    json: profile,
+    fallbackMessage: 'Failed to create Agent Team Profile',
   });
 }
 
-export async function updateAgentTeamDeployment(
+export async function patchAgentTeamProfile(
   id: string,
-  update: UpdateAgentTeamDeploymentBody,
-): Promise<AgentTeamSettingsState> {
-  return apiFetch(routes.agentTeamDeployment(id), {
+  update: PatchAgentProfileBody,
+): Promise<AgentProfileView> {
+  return apiFetch(routes.agentTeamProfile(id), {
     method: 'PATCH',
     json: update,
-    fallbackMessage: 'Failed to update Agent Team deployment',
+    fallbackMessage: 'Failed to update Agent Team Profile',
   });
 }
 
-export async function deleteAgentTeamDeployment(
+export async function deleteAgentTeamProfile(
   id: string,
-): Promise<AgentTeamSettingsState> {
-  return apiFetch(routes.agentTeamDeployment(id), {
+): Promise<{ deleted: true }> {
+  return apiFetch(routes.agentTeamProfile(id), {
     method: 'DELETE',
-    fallbackMessage: 'Failed to delete Agent Team deployment',
+    fallbackMessage: 'Failed to delete Agent Team Profile',
   });
 }
 
-async function runDeploymentAction(
+async function runProfileAction(
   id: string,
-  action: 'enable' | 'disable' | 'retry',
-): Promise<AgentTeamSettingsState> {
-  return apiFetch(routes.agentTeamDeploymentAction(id, action), {
+  action: 'setup' | 'cancel',
+): Promise<AgentProfileView> {
+  return apiFetch(routes.agentTeamProfileAction(id, action), {
     method: 'POST',
-    fallbackMessage: `Failed to ${action} Agent Team deployment`,
+    fallbackMessage: `Failed to ${action} Agent Team Profile`,
   });
 }
 
-export function enableAgentTeamDeployment(
-  id: string,
-): Promise<AgentTeamSettingsState> {
-  return runDeploymentAction(id, 'enable');
+export function setupAgentTeamProfile(id: string): Promise<AgentProfileView> {
+  return runProfileAction(id, 'setup');
 }
 
-export function disableAgentTeamDeployment(
+export function cancelAgentTeamProfileSetup(
   id: string,
-): Promise<AgentTeamSettingsState> {
-  return runDeploymentAction(id, 'disable');
-}
-
-export function retryAgentTeamDeploymentSetup(
-  id: string,
-): Promise<AgentTeamSettingsState> {
-  return runDeploymentAction(id, 'retry');
+): Promise<AgentProfileView> {
+  return runProfileAction(id, 'cancel');
 }
 
 export interface AgentTeamSettingsStreamError {

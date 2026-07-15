@@ -22,11 +22,16 @@ import { useEffect } from 'react';
 
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 
-import type { AcpAgentProfile, AcpAgentletStatus } from '@/api/acp';
+import type {
+  AcpAgentProfile,
+  AcpAgentletStatus,
+  AgentProfileView,
+} from '@/api/acp';
 
 export interface UseAcpProfilesResult {
   /** Every profile the user has created. Empty until the first fetch resolves. */
-  profiles: AcpAgentProfile[];
+  profiles: AgentProfileView[];
+  legacyProfiles: AcpAgentProfile[];
   /** Latest agentlet snapshot, or `null` while the first fetch is in flight. */
   agentlet: AcpAgentletStatus | null;
   /**
@@ -49,6 +54,7 @@ export interface UseAcpProfilesResult {
 
 export function useAcpProfiles(): UseAcpProfilesResult {
   const profiles = useAcpProfilesStore((s) => s.profiles);
+  const legacyProfiles = useAcpProfilesStore((s) => s.legacyProfiles);
   const agentlet = useAcpProfilesStore((s) => s.agentlet);
   const loaded = useAcpProfilesStore((s) => s.loaded);
   const error = useAcpProfilesStore((s) => s.error);
@@ -62,5 +68,13 @@ export function useAcpProfiles(): UseAcpProfilesResult {
     void init();
   }, [init]);
 
-  return { profiles, agentlet, loaded, error, loading, refresh };
+  return {
+    profiles,
+    legacyProfiles,
+    agentlet,
+    loaded,
+    error,
+    loading,
+    refresh,
+  };
 }

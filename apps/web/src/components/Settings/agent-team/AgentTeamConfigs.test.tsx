@@ -64,10 +64,7 @@ describe('AgentTeamConfigs', () => {
             missingRequired: ['TOKEN'],
             ready: false,
           }}
-          pendingAction={null}
-          mutate={async (_action, operation) => {
-            await operation();
-          }}
+          onDetailChange={vi.fn()}
         />,
       );
     });

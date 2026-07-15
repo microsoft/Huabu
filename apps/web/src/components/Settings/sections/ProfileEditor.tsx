@@ -25,16 +25,15 @@ import { Tooltip } from '@/components/Common/Tooltip';
 
 import type {
   AcpAgentCliInfo,
-  AcpAgentProfile,
-  AcpProfileCreateRequest,
-  AcpProfileUpdateRequest,
+  AcpCommandProfileView,
+  CreateAcpCommandProfileBody,
 } from '@sediment/shared';
 
 // ── Profile editor ────────────────────────────────────────────────────
 
 interface ProfileEditorFormProps {
   /** When non-null we're editing; when null we're creating. */
-  editing: AcpAgentProfile | null;
+  editing: AcpCommandProfileView | null;
   /** Host-detected CLIs used to pre-fill `command` for new profiles. */
   detectedClis: AcpAgentCliInfo[];
   /**
@@ -59,9 +58,9 @@ interface ProfileFormState {
   displayName: string;
   /**
    * Either the id of a detected CLI (`copilot` / `claude` / …) or
-   * the literal `'custom'` or `'agent-team'`. Drives whether structured
-   * controls (auto-approve toggle, command preview), the raw
-   * `customCommand` field, or the Agent Team fields are rendered.
+   * the literal `'custom'`. Drives whether structured controls
+   * (auto-approve toggle, command preview) or the raw `customCommand`
+   * field is rendered.
    */
   cliId: string;
   /**
@@ -76,11 +75,6 @@ interface ProfileFormState {
    */
   customCommand: string;
   cwd: string;
-  autoRestart: boolean;
-  /** Agent Team mode: absolute path to the agent-team directory. */
-  agentDir: string;
-  /** Agent Team mode: optional harness override (daemon validates). */
-  harness: string;
 }
 
 const EMPTY_FORM: ProfileFormState = {
@@ -89,9 +83,6 @@ const EMPTY_FORM: ProfileFormState = {
   allowAll: false,
   customCommand: '',
   cwd: '',
-  autoRestart: true,
-  agentDir: '',
-  harness: '',
 };
 
 /**
@@ -265,39 +256,19 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
   // as the inline detail pane — so a mount is equivalent to an "open".
   useEffect(() => {
     if (editing) {
-      if (editing.cliId === 'agent-team' && editing.agentTeam) {
-        // Agent Team profile — populate agent-team fields
-        setForm({
-          ...EMPTY_FORM,
-          displayName: editing.displayName,
-          cliId: 'agent-team',
-          autoRestart: editing.autoRestart,
-          agentDir: editing.agentTeam.agentDir,
-          harness: editing.agentTeam.harness ?? '',
-        });
-      } else {
-        // Try to recover the structured fields (allow-all toggle +
-        // extra args) by re-parsing the persisted `command` against the
-        // detected CLI. If the command no longer fits the structured
-        // shape (custom binary path, hand-edited, CLI uninstalled),
-        // `parseCommandIntoForm` falls back to custom mode with the raw
-        // command preserved verbatim — no silent reformat.
-        const parsed = parseCommandIntoForm(
-          editing.command ?? '',
-          editing.cliId,
-          detectedClis,
-        );
-        setForm({
-          displayName: editing.displayName,
-          cliId: parsed.cliId,
-          allowAll: parsed.allowAll,
-          customCommand: parsed.customCommand,
-          cwd: editing.cwd ?? '',
-          autoRestart: editing.autoRestart,
-          agentDir: '',
-          harness: '',
-        });
-      }
+      const cliId = editing.metadata?.cliId ?? 'custom';
+      const parsed = parseCommandIntoForm(
+        editing.launch.command,
+        cliId,
+        detectedClis,
+      );
+      setForm({
+        displayName: editing.alias,
+        cliId: parsed.cliId,
+        allowAll: parsed.allowAll,
+        customCommand: parsed.customCommand,
+        cwd: editing.workingDirPath,
+      });
     } else {
       // For new profiles, wait for host-CLI detection to settle before
       // committing a default. Until then keep `cliId` empty so the
@@ -359,44 +330,12 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
   );
 
   const handleSubmit = useCallback(async () => {
-    const isAgentTeam = form.cliId === 'agent-team';
-
-    if (isAgentTeam) {
-      const agentDir = form.agentDir.trim();
-      if (!agentDir) {
-        toast(t('settings.agentDirectoryRequired'), { tone: 'danger' });
-        return;
-      }
-      const displayName =
-        form.displayName.trim() ||
-        agentDir.split('/').pop() ||
-        t('settings.agentTeam');
+    if (editing) {
+      const displayName = form.displayName.trim() || editing.alias;
       setSaving(true);
       try {
-        if (editing) {
-          const patch: AcpProfileUpdateRequest = {
-            displayName,
-            autoRestart: form.autoRestart,
-            agentTeam: {
-              agentDir,
-              ...(form.harness.trim() && { harness: form.harness.trim() }),
-            },
-          };
-          await updateAcpProfile(editing.id, patch);
-          toast(t('settings.profileUpdated'), { tone: 'success' });
-        } else {
-          const payload: AcpProfileCreateRequest = {
-            displayName,
-            cliId: 'agent-team',
-            autoRestart: form.autoRestart,
-            agentTeam: {
-              agentDir,
-              ...(form.harness.trim() && { harness: form.harness.trim() }),
-            },
-          };
-          await createAcpProfile(payload);
-          toast(t('settings.profileCreated'), { tone: 'success' });
-        }
+        await updateAcpProfile(editing.id, { alias: displayName });
+        toast(t('settings.profileUpdated'), { tone: 'success' });
         await onSaved();
         onClose();
       } catch (err) {
@@ -428,26 +367,14 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
     const displayName = form.displayName.trim() || defaultDisplayName;
     setSaving(true);
     try {
-      if (editing) {
-        const patch: AcpProfileUpdateRequest = {
-          displayName,
-          command,
-          cwd,
-          autoRestart: form.autoRestart,
-        };
-        await updateAcpProfile(editing.id, patch);
-        toast(t('settings.profileUpdated'), { tone: 'success' });
-      } else {
-        const payload: AcpProfileCreateRequest = {
-          displayName,
-          cliId: form.cliId,
-          command,
-          cwd,
-          autoRestart: form.autoRestart,
-        };
-        await createAcpProfile(payload);
-        toast(t('settings.profileCreated'), { tone: 'success' });
-      }
+      const payload: CreateAcpCommandProfileBody = {
+        alias: displayName,
+        workingDirPath: cwd,
+        launch: { kind: 'acp-command', command },
+        metadata: { cliId: form.cliId },
+      };
+      await createAcpProfile(payload);
+      toast(t('settings.profileCreated'), { tone: 'success' });
       await onSaved();
       onClose();
     } catch (err) {
@@ -479,22 +406,12 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
    * state is derived from it so loading an existing profile lands on
    * the correct tab automatically.
    */
-  const agentMode: 'detected' | 'custom' | 'agent-team' =
-    form.cliId === 'agent-team'
-      ? 'agent-team'
-      : form.cliId === 'custom'
-        ? 'custom'
-        : 'detected';
+  const agentMode: 'detected' | 'custom' =
+    form.cliId === 'custom' ? 'custom' : 'detected';
 
   const handleAgentModeChange = useCallback(
-    (mode: 'detected' | 'custom' | 'agent-team') => {
-      if (mode === 'agent-team') {
-        setForm((prev) => ({
-          ...prev,
-          cliId: 'agent-team',
-          allowAll: false,
-        }));
-      } else if (mode === 'custom') {
+    (mode: 'detected' | 'custom') => {
+      if (mode === 'custom') {
         // Seed the Custom textarea with whatever Detected would have
         // launched so the user can tweak instead of typing from
         // scratch. Skip when the user already has a custom command
@@ -522,10 +439,6 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
     (cwd: string) => setForm((p) => ({ ...p, cwd })),
     [],
   );
-  const setAgentDir = useCallback(
-    (agentDir: string) => setForm((p) => ({ ...p, agentDir })),
-    [],
-  );
 
   return (
     <div className="flex flex-col gap-5">
@@ -538,46 +451,7 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
          * still sees what's wired up.
          */}
         {editing ? (
-          editing.cliId === 'agent-team' ? (
-            <div className="flex flex-col gap-3">
-              <label className="flex flex-col gap-1 text-xs">
-                <FieldLabel>{t('settings.agent')}</FieldLabel>
-                <div className="border-edge-default bg-surface text-fg-default rounded border px-2 py-1 text-xs">
-                  {t('settings.agentTeam')}
-                </div>
-              </label>
-              <label className="flex flex-col gap-1 text-xs">
-                <FieldLabel hint={t('settings.agentDirectoryHint')}>
-                  {t('settings.agentDirectory')}
-                </FieldLabel>
-                <PathInput
-                  value={form.agentDir}
-                  onChange={setAgentDir}
-                  placeholder="/path/to/agent-teams/my-agent"
-                  size="sm"
-                  mono
-                  pickTitle={t('settings.pickFolder')}
-                  inputClassName="rounded"
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-xs">
-                <FieldLabel hint={t('settings.harnessHint')}>
-                  {t('settings.harness')}{' '}
-                  <span className="text-fg-subtle">
-                    ({t('settings.optional')})
-                  </span>
-                </FieldLabel>
-                <Input
-                  value={form.harness}
-                  onChange={(e) =>
-                    setForm((p) => ({ ...p, harness: e.target.value }))
-                  }
-                  placeholder="claude"
-                  className="border-edge-default bg-surface rounded border px-2 py-1 font-mono text-xs"
-                />
-              </label>
-            </div>
-          ) : (
+          <div className="flex flex-col gap-3">
             <label className="flex flex-col gap-1 text-xs">
               <FieldLabel>{t('settings.agent')}</FieldLabel>
               <div className="border-edge-default bg-surface text-fg-default rounded border px-2 py-1 text-xs">
@@ -587,7 +461,13 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
                     : form.cliId)}
               </div>
             </label>
-          )
+            <label className="flex flex-col gap-1 text-xs">
+              <FieldLabel>{t('settings.launchCommand')}</FieldLabel>
+              <div className="border-edge-default bg-bg-default text-fg-muted rounded border px-2 py-1 font-mono text-xs">
+                {editing.launch.command}
+              </div>
+            </label>
+          </div>
         ) : (
           <div className="flex flex-col gap-2">
             <TabGroup
@@ -596,45 +476,11 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
               options={[
                 { value: 'detected', label: t('settings.builtIn') },
                 { value: 'custom', label: t('settings.custom') },
-                { value: 'agent-team', label: t('settings.agentTeam') },
               ]}
               size="sm"
               className="self-start"
             />
-            {agentMode === 'agent-team' ? (
-              <div className="flex flex-col gap-3">
-                <label className="flex flex-col gap-1 text-xs">
-                  <FieldLabel hint={t('settings.agentDirectoryDetailedHint')}>
-                    {t('settings.agentDirectory')}
-                  </FieldLabel>
-                  <PathInput
-                    value={form.agentDir}
-                    onChange={setAgentDir}
-                    placeholder="/path/to/agent-teams/my-agent"
-                    size="sm"
-                    mono
-                    pickTitle={t('settings.pickFolder')}
-                    inputClassName="rounded"
-                  />
-                </label>
-                <label className="flex flex-col gap-1 text-xs">
-                  <FieldLabel hint={t('settings.harnessDetailedHint')}>
-                    {t('settings.harness')}{' '}
-                    <span className="text-fg-subtle">
-                      ({t('settings.optional')})
-                    </span>
-                  </FieldLabel>
-                  <Input
-                    value={form.harness}
-                    onChange={(e) =>
-                      setForm((p) => ({ ...p, harness: e.target.value }))
-                    }
-                    placeholder="claude"
-                    className="border-edge-default bg-surface rounded border px-2 py-1 font-mono text-xs"
-                  />
-                </label>
-              </div>
-            ) : agentMode === 'detected' ? (
+            {agentMode === 'detected' ? (
               <label className="flex flex-col gap-1 text-xs">
                 <FieldLabel>{t('settings.agent')}</FieldLabel>
                 {!detectionLoaded ? (
@@ -680,7 +526,7 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
           </div>
         )}
 
-        {isStructured && selectedCli?.allowAllFlag && (
+        {!editing && isStructured && selectedCli?.allowAllFlag && (
           <label className="text-fg-default flex cursor-pointer items-start gap-2 text-xs select-none">
             <input
               type="checkbox"
@@ -698,25 +544,23 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
         )}
       </div>
 
-      {/* ─── Workspace (hidden for Agent Team — daemon resolves cwd) */}
-      {agentMode !== 'agent-team' && (
-        <div className="flex flex-col gap-3">
-          <label className="flex flex-col gap-1 text-xs">
-            <FieldLabel hint={t('settings.workingDirectoryHint')}>
-              {t('settings.workingDirectory')}
-            </FieldLabel>
-            <PathInput
-              value={form.cwd}
-              onChange={setCwd}
-              placeholder="/Users/me/project-x"
-              size="sm"
-              mono
-              pickTitle={t('settings.pickFolder')}
-              inputClassName="rounded"
-            />
-          </label>
-        </div>
-      )}
+      <div className="flex flex-col gap-3">
+        <label className="flex flex-col gap-1 text-xs">
+          <FieldLabel hint={t('settings.workingDirectoryHint')}>
+            {t('settings.workingDirectory')}
+          </FieldLabel>
+          <PathInput
+            value={form.cwd}
+            onChange={setCwd}
+            placeholder="/Users/me/project-x"
+            size="sm"
+            mono
+            pickTitle={t('settings.pickFolder')}
+            inputClassName="rounded"
+            disabled={editing !== null}
+          />
+        </label>
+      </div>
 
       {/* ─── Display name (placed last per UX request) ─────────── */}
       <label className="flex flex-col gap-1 text-xs">

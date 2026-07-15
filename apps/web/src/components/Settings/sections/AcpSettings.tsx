@@ -42,7 +42,24 @@ import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 
 import { ProfileEditorForm, useDetectedClis } from './ProfileEditor';
 
-import type { AcpAgentProfile, AcpAgentletStatus } from '@sediment/shared';
+import type {
+  AcpAgentProfile,
+  AcpAgentletStatus,
+  AcpCommandProfileView,
+  AgentProfileView,
+} from '@sediment/shared';
+
+type DeletableProfile = AcpCommandProfileView | AcpAgentProfile;
+
+function profileAlias(profile: DeletableProfile): string {
+  return 'alias' in profile ? profile.alias : profile.displayName;
+}
+
+function isCommandProfile(
+  profile: AgentProfileView,
+): profile is AcpCommandProfileView {
+  return !('preparation' in profile);
+}
 
 // ── Agentlet health banner ────────────────────────────────────────────
 
@@ -119,7 +136,9 @@ const AgentletHealthBanner: React.FC<AgentletHealthBannerProps> = ({
  */
 export const AcpSettings: React.FC = () => {
   const { t } = useTranslation();
-  const profiles = useAcpProfilesStore((s) => s.profiles);
+  const allProfiles = useAcpProfilesStore((s) => s.profiles);
+  const legacyProfiles = useAcpProfilesStore((s) => s.legacyProfiles);
+  const profiles = allProfiles.filter(isCommandProfile);
   const agentlet = useAcpProfilesStore((s) => s.agentlet);
   const loaded = useAcpProfilesStore((s) => s.loaded);
   const error = useAcpProfilesStore((s) => s.error);
@@ -131,14 +150,14 @@ export const AcpSettings: React.FC = () => {
   const { detectedClis, loaded: detectionLoaded } = useDetectedClis();
 
   const [editorOpen, setEditorOpen] = useState(false);
-  const [editing, setEditing] = useState<AcpAgentProfile | null>(null);
+  const [editing, setEditing] = useState<AcpCommandProfileView | null>(null);
   const [restarting, setRestarting] = useState(false);
   // Destructive confirmation uses a `Modal` rather than `window.confirm` so
   // the dialog matches the rest of the app's UX (see `CanvasListPage` for
   // the same pattern). `pendingDelete` holds the profile awaiting
   // confirmation; `isDeleting` blocks the modal during the network call so
   // accidental backdrop / Escape dismissals don't strand the request.
-  const [pendingDelete, setPendingDelete] = useState<AcpAgentProfile | null>(
+  const [pendingDelete, setPendingDelete] = useState<DeletableProfile | null>(
     null,
   );
   const [isDeleting, setIsDeleting] = useState(false);
@@ -165,12 +184,12 @@ export const AcpSettings: React.FC = () => {
     setEditorOpen(true);
   }, []);
 
-  const handleEdit = useCallback((profile: AcpAgentProfile) => {
+  const handleEdit = useCallback((profile: AcpCommandProfileView) => {
     setEditing(profile);
     setEditorOpen(true);
   }, []);
 
-  const handleDelete = useCallback((profile: AcpAgentProfile) => {
+  const handleDelete = useCallback((profile: DeletableProfile) => {
     // Open the confirmation modal — the actual delete runs from
     // `confirmDelete` once the user clicks through. Profiles often have
     // non-trivial cwd config and re-typing them is annoying, so we want a
@@ -251,6 +270,28 @@ export const AcpSettings: React.FC = () => {
       />
 
       <SettingSection>
+        {legacyProfiles.length > 0 && (
+          <>
+            {legacyProfiles.map((profile) => (
+              <SettingRow
+                key={profile.id}
+                title={profile.displayName}
+                description={t('settings.legacyAgentTeamProfilesDescription')}
+              >
+                <Button
+                  variant="ghost"
+                  tone="danger"
+                  size="sm"
+                  iconOnly
+                  title={t('settings.deleteProfile')}
+                  onClick={() => handleDelete(profile)}
+                >
+                  <Trash2 size={12} />
+                </Button>
+              </SettingRow>
+            ))}
+          </>
+        )}
         {profiles.length === 0 ? (
           <SettingRow
             title={t('settings.noAgents')}
@@ -270,7 +311,7 @@ export const AcpSettings: React.FC = () => {
         ) : (
           <>
             {profiles.map((profile) => (
-              <SettingRow key={profile.id} title={profile.displayName}>
+              <SettingRow key={profile.id} title={profile.alias}>
                 <div className="flex shrink-0 items-center gap-1">
                   <Button
                     variant="ghost"
@@ -352,7 +393,7 @@ export const AcpSettings: React.FC = () => {
           pendingDelete ? (
             <Trans
               i18nKey="settings.deleteExternalAgentDescription"
-              values={{ name: pendingDelete.displayName }}
+              values={{ name: profileAlias(pendingDelete) }}
               components={{
                 name: <span className="text-fg-default font-medium" />,
               }}

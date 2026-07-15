@@ -13,6 +13,14 @@ export function buildForkTargetSpec(
 ): AgenetesWorkloadSpec {
   const namespace = canvasAcpNamespace(canvasId);
   if ('binding' in source) {
+    if ('profile' in source) {
+      return {
+        ...source,
+        threadId,
+        namespace,
+        env: buildReachbackEnv(threadId, canvasId),
+      };
+    }
     return {
       ...source,
       threadId,

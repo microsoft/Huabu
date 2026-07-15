@@ -10,11 +10,17 @@ import { agentTeamMemberSecretId } from './secret-id.js';
 
 import type { AgentTeamSetupProgressParams } from '@agentlet/protocol';
 import type {
+  AcpCommandProfile,
+  AgentProfile,
+  AgentProfileSnapshot,
   AgentTeamControlPort,
-  AgentTeamDeployment,
+  AgentTeamManifestProfile,
+  AgentTeamManifestRuntime,
+  AgentTeamMemberDetail,
   AgentTeamMemberConfigView,
   AgentTeamMember,
   AgentTeamMachine,
+  AgentTeamMemberSummary,
   AgentTeamRegistryChangeErrorHandler,
   AgentTeamRegistryChangeHandler,
   AgentTeamRegistryState,
@@ -25,9 +31,11 @@ import type {
   AgentTeamScanPort,
   AgentTeamSecretStore,
   AgentTeamSetupError,
-  CreateAgentTeamDeploymentInput,
+  CreateAcpCommandProfileInput,
+  CreateAgentProfileInput,
+  CreateAgentTeamManifestProfileInput,
+  PatchAgentProfileInput,
   UpdateAgentTeamMemberConfigsInput,
-  UpdateAgentTeamDeploymentInput,
 } from './types.js';
 
 const SETUP_LOG_LIMIT = 200;
@@ -63,6 +71,12 @@ function setupError(error: unknown, fallbackCode: string): AgentTeamSetupError {
     return { code: error.data.code, message };
   }
   return { code: fallbackCode, message };
+}
+
+function isManifestProfile(
+  profile: AgentProfile,
+): profile is AgentTeamManifestProfile {
+  return profile.launch.kind === 'agent-team-manifest';
 }
 
 export class AgentTeamRegistry {
@@ -293,236 +307,246 @@ export class AgentTeamRegistry {
     return this.getMemberConfig(machine, manifestPath);
   }
 
-  listDeployments(member?: {
-    machine: string;
-    manifestPath: string;
-  }): AgentTeamDeployment[] {
-    const deployments = member
-      ? this.state.deployments.filter(
-          (deployment) =>
-            deployment.machine === member.machine &&
-            deployment.manifestPath === member.manifestPath,
-        )
-      : this.state.deployments;
-    return structuredClone(deployments);
+  listProfiles(): AgentProfile[] {
+    return structuredClone(this.state.profiles);
   }
 
-  getDeployment(id: string): AgentTeamDeployment | undefined {
-    const deployment = this.state.deployments.find(
+  getProfile(id: string): AgentProfile | undefined {
+    const profile = this.state.profiles.find(
       (candidate) => candidate.id === id,
     );
-    return deployment ? structuredClone(deployment) : undefined;
+    return profile ? structuredClone(profile) : undefined;
   }
 
-  getDeploymentByAlias(alias: string): AgentTeamDeployment | undefined {
-    const deployment = this.state.deployments.find(
-      (candidate) => candidate.alias === alias,
-    );
-    return deployment ? structuredClone(deployment) : undefined;
-  }
-
-  createDeployment(input: CreateAgentTeamDeploymentInput): AgentTeamDeployment {
-    this.assertAliasAvailable(input.alias);
-    const member = this.requireActiveMember(input.machine, input.manifestPath);
-    this.assertHarnessSupported(member, input.harness);
-    this.assertWorkingDirPath(input.workingDirPath);
-
-    const id = this.generateId();
-    if (!id.trim() || id.trim() !== id) {
-      throw new Error(
-        'Generated Agent Team deployment ID must be non-empty without surrounding whitespace',
+  listMemberSummaries(): AgentTeamMemberSummary[] {
+    return this.state.members.map((member) => {
+      const profiles = this.manifestProfilesFor(
+        member.machine,
+        member.manifestPath,
       );
-    }
-    if (this.state.deployments.some((deployment) => deployment.id === id)) {
-      throw new Error(`Agent Team deployment ID already exists: ${id}`);
-    }
-    const deployment: AgentTeamDeployment = {
-      id,
-      alias: input.alias,
-      revision: 1,
-      enabled: false,
-      machine: input.machine,
-      manifestPath: input.manifestPath,
-      harness: input.harness,
-      workingDirPath: input.workingDirPath,
-      setup: { status: 'disabled' },
-      setupLog: [],
-    };
-    this.commit({
-      ...cloneState(this.state),
-      deployments: [...this.state.deployments, deployment],
+      const preparationCounts: AgentTeamMemberSummary['preparationCounts'] = {
+        not_prepared: 0,
+        setting_up: 0,
+        ready: 0,
+        error: 0,
+      };
+      for (const profile of profiles) {
+        preparationCounts[profile.preparation.status] += 1;
+      }
+      return {
+        machine: member.machine,
+        manifestPath: member.manifestPath,
+        name: member.name,
+        description: member.description,
+        status: member.status,
+        profileCount: profiles.length,
+        preparationCounts,
+      };
     });
-    return structuredClone(deployment);
   }
 
-  updateDeployment(
-    id: string,
-    input: UpdateAgentTeamDeploymentInput,
-  ): AgentTeamDeployment {
-    const current = this.state.deployments.find(
-      (deployment) => deployment.id === id,
-    );
-    if (!current) {
-      throw new AgentTeamError(
-        'deployment_not_found',
-        `Agent Team deployment not found: ${id}`,
-      );
-    }
-    if (input.alias !== undefined && input.alias !== current.alias) {
-      this.assertAliasAvailable(input.alias, id);
-    }
-
-    const harness = input.harness ?? current.harness;
-    const workingDirPath = input.workingDirPath ?? current.workingDirPath;
-    const placementChanged =
-      harness !== current.harness || workingDirPath !== current.workingDirPath;
-    if (
-      placementChanged &&
-      (current.enabled || current.setup.status === 'setting_up')
-    ) {
-      throw new AgentTeamError(
-        'deployment_busy',
-        `Disable Agent Team deployment before changing placement: ${id}`,
-      );
-    }
-    if (placementChanged) {
-      const member = this.requireActiveMember(
-        current.machine,
-        current.manifestPath,
-      );
-      this.assertHarnessSupported(member, harness);
-      this.assertWorkingDirPath(workingDirPath);
-    }
-
-    const next: AgentTeamDeployment = {
-      ...current,
-      alias: input.alias ?? current.alias,
-      harness,
-      workingDirPath,
-      revision: placementChanged ? current.revision + 1 : current.revision,
-      setup: placementChanged ? { status: 'disabled' } : current.setup,
-      setupLog: placementChanged ? [] : current.setupLog,
-    };
-    this.commit({
-      ...cloneState(this.state),
-      deployments: this.state.deployments.map((deployment) =>
-        deployment.id === id ? next : deployment,
+  getMemberDetail(
+    machine: string,
+    manifestPath: string,
+  ): AgentTeamMemberDetail {
+    return {
+      member: structuredClone(this.requireMember(machine, manifestPath)),
+      config: this.getMemberConfig(machine, manifestPath),
+      profiles: structuredClone(
+        this.manifestProfilesFor(machine, manifestPath),
       ),
-    });
+    };
+  }
+
+  async resolveManifestRuntime(
+    snapshot: AgentProfileSnapshot,
+  ): Promise<AgentTeamManifestRuntime> {
+    if (snapshot.launch.kind !== 'agent-team-manifest') {
+      throw new AgentTeamError(
+        'invalid_profile_kind',
+        'Manifest runtime resolution requires an Agent Team Profile snapshot',
+      );
+    }
+    const config = this.getMemberConfig(
+      snapshot.agentletId,
+      snapshot.launch.manifestPath,
+    );
+    if (!config.ready) {
+      throw new AgentTeamError(
+        'config_incomplete',
+        `Agent Team Profile is missing required Configs: ${config.missingRequired.join(', ')}`,
+      );
+    }
+    const result = await this.requireControlPort().validateAgentTeam(
+      snapshot.agentletId,
+      {
+        manifestPath: snapshot.launch.manifestPath,
+        harness: snapshot.launch.harness,
+        workingDirPath: snapshot.workingDirPath,
+      },
+    );
+    if (!result.valid) {
+      const current = this.state.profiles.find(
+        (profile) => profile.id === snapshot.profileId,
+      );
+      if (current && isManifestProfile(current)) {
+        this.persistProfile({
+          ...current,
+          preparation: {
+            status: 'error',
+            failedAt: this.now(),
+            error: {
+              code: 'workspace_invalid',
+              message: result.issues.map(({ message }) => message).join('; '),
+            },
+          },
+        });
+      }
+      throw new AgentTeamError(
+        'workspace_invalid',
+        result.issues.map(({ message }) => message).join('; '),
+      );
+    }
+    return {
+      environment: this.resolveMemberEnvironment(
+        snapshot.agentletId,
+        snapshot.launch.manifestPath,
+      ),
+    };
+  }
+
+  createProfile(input: CreateAgentProfileInput): AgentProfile {
+    return input.launchKind === 'agent-team-manifest'
+      ? this.createManifestProfile(input)
+      : this.createCommandProfile(input);
+  }
+
+  importCommandProfiles(inputs: CreateAcpCommandProfileInput[]): string[] {
+    const imported: string[] = [];
+    for (const input of inputs) {
+      if (input.id && this.state.profiles.some(({ id }) => id === input.id)) {
+        imported.push(input.id);
+        continue;
+      }
+      imported.push(this.createCommandProfile(input).id);
+    }
+    return imported;
+  }
+
+  patchProfile(id: string, input: PatchAgentProfileInput): AgentProfile {
+    const current = this.requireProfile(id);
+    this.assertAlias(input.alias ?? current.alias);
+    if (input.metadata !== undefined && current.launch.kind !== 'acp-command') {
+      throw new AgentTeamError(
+        'invalid_profile_patch',
+        'Only ACP command Profiles accept metadata patches',
+      );
+    }
+    const next: AgentProfile =
+      current.launch.kind === 'acp-command'
+        ? {
+            ...current,
+            alias: input.alias ?? current.alias,
+            ...(input.metadata === undefined
+              ? {}
+              : input.metadata === null
+                ? { metadata: undefined }
+                : { metadata: input.metadata }),
+          }
+        : { ...current, alias: input.alias ?? current.alias };
+    this.persistProfile(next);
     return structuredClone(next);
   }
 
-  deleteDeployment(id: string): boolean {
-    const current = this.state.deployments.find(
-      (deployment) => deployment.id === id,
-    );
-    if (current?.enabled || current?.setup.status === 'setting_up') {
+  deleteProfile(id: string): boolean {
+    const current = this.state.profiles.find((profile) => profile.id === id);
+    if (
+      current !== undefined &&
+      isManifestProfile(current) &&
+      current.preparation.status === 'setting_up'
+    ) {
       throw new AgentTeamError(
-        'deployment_busy',
-        `Disable Agent Team deployment before deleting it: ${id}`,
+        'profile_busy',
+        `Cancel Agent Team Profile setup before deleting it: ${id}`,
       );
     }
-    const deployments = this.state.deployments.filter(
-      (deployment) => deployment.id !== id,
-    );
-    if (deployments.length === this.state.deployments.length) return false;
-    this.commit({ ...cloneState(this.state), deployments });
+    const profiles = this.state.profiles.filter((profile) => profile.id !== id);
+    if (profiles.length === this.state.profiles.length) return false;
+    this.commit({ ...cloneState(this.state), profiles });
     return true;
   }
 
-  async enableDeployment(id: string): Promise<AgentTeamDeployment> {
-    const deployment = this.requireDeployment(id);
-    if (deployment.enabled) return structuredClone(deployment);
-    if (deployment.setup.status === 'setting_up') {
+  async setupProfile(id: string): Promise<AgentTeamManifestProfile> {
+    const profile = this.requireManifestProfile(id);
+    if (profile.preparation.status === 'setting_up') {
       throw new AgentTeamError(
-        'deployment_busy',
-        `Agent Team deployment setup transition is already in progress: ${id}`,
+        'profile_busy',
+        `Agent Team Profile setup is already in progress: ${id}`,
       );
     }
-    return this.startSetup(deployment, true);
+    return this.startSetup(profile);
   }
 
-  async retryDeploymentSetup(id: string): Promise<AgentTeamDeployment> {
-    const deployment = this.requireDeployment(id);
-    if (!deployment.enabled || deployment.setup.status !== 'error') {
+  async cancelProfileSetup(id: string): Promise<AgentTeamManifestProfile> {
+    const profile = this.requireManifestProfile(id);
+    if (profile.preparation.status !== 'setting_up') {
       throw new AgentTeamError(
         'invalid_setup_transition',
-        `Agent Team deployment is not eligible for setup retry: ${id}`,
+        `Agent Team Profile setup is not active: ${id}`,
       );
-    }
-    return this.startSetup(deployment, false);
-  }
-
-  async disableDeployment(id: string): Promise<AgentTeamDeployment> {
-    const deployment = this.requireDeployment(id);
-    if (!deployment.enabled) return structuredClone(deployment);
-
-    const disabling: AgentTeamDeployment = {
-      ...deployment,
-      enabled: false,
-    };
-    this.persistDeployment(disabling);
-
-    if (deployment.setup.status !== 'setting_up') {
-      const disabled: AgentTeamDeployment = {
-        ...disabling,
-        setup: { status: 'disabled' },
-      };
-      this.persistDeployment(disabled);
-      return structuredClone(disabled);
     }
 
     const controlPort = this.requireControlPort();
     try {
       const result = await controlPort.cancelAgentTeamSetup(
-        deployment.machine,
-        { operationId: deployment.setup.operationId },
+        profile.agentletId,
+        { operationId: profile.preparation.operationId },
       );
       if (!result.cancelled) {
-        const current = this.requireDeployment(id);
+        const current = this.requireManifestProfile(id);
         if (
-          current.setup.status !== 'setting_up' ||
-          current.setup.operationId !== deployment.setup.operationId
+          current.preparation.status !== 'setting_up' ||
+          current.preparation.operationId !== profile.preparation.operationId
         ) {
           return structuredClone(current);
         }
         const error = {
           code: 'setup_cancel_rejected',
-          message: `Setup operation is no longer cancellable: ${deployment.setup.operationId}`,
+          message: `Setup operation is no longer cancellable: ${profile.preparation.operationId}`,
         };
         this.failSetupIfCurrent(
-          deployment.id,
-          deployment.setup.operationId,
+          profile.id,
+          profile.preparation.operationId,
           error,
         );
         throw new AgentTeamError('setup_cancel_rejected', error.message);
       }
     } catch (error) {
-      const current = this.requireDeployment(id);
+      const current = this.requireManifestProfile(id);
       if (
-        current.setup.status === 'setting_up' &&
-        current.setup.operationId === deployment.setup.operationId
+        current.preparation.status === 'setting_up' &&
+        current.preparation.operationId === profile.preparation.operationId
       ) {
         this.failSetupIfCurrent(
           id,
-          deployment.setup.operationId,
+          profile.preparation.operationId,
           setupError(error, 'setup_cancel_failed'),
         );
       }
       throw error;
     }
 
-    const current = this.requireDeployment(id);
+    const current = this.requireManifestProfile(id);
     if (
-      current.setup.status === 'setting_up' &&
-      current.setup.operationId === deployment.setup.operationId
+      current.preparation.status === 'setting_up' &&
+      current.preparation.operationId === profile.preparation.operationId
     ) {
-      const disabled: AgentTeamDeployment = {
+      const cancelled: AgentTeamManifestProfile = {
         ...current,
-        setup: { status: 'disabled' },
+        preparation: { status: 'not_prepared' },
       };
-      this.persistDeployment(disabled);
-      return structuredClone(disabled);
+      this.persistProfile(cancelled);
+      return structuredClone(cancelled);
     }
     return structuredClone(current);
   }
@@ -662,7 +686,7 @@ export class AgentTeamRegistry {
         sameAgentTeamRoot(candidate, root) ? successfulRoot : candidate,
       ),
       members: [...members.values()],
-      deployments: structuredClone(this.state.deployments),
+      profiles: structuredClone(this.state.profiles),
       configs: structuredClone(this.state.configs),
     };
     this.commit(nextState);
@@ -694,7 +718,7 @@ export class AgentTeamRegistry {
         (candidate) => !sameAgentTeamRoot(candidate, root),
       ),
       members,
-      deployments: structuredClone(this.state.deployments),
+      profiles: structuredClone(this.state.profiles),
       configs: structuredClone(this.state.configs),
     });
     return true;
@@ -707,28 +731,28 @@ export class AgentTeamRegistry {
   }
 
   private async startSetup(
-    deployment: AgentTeamDeployment,
-    setEnabled: boolean,
-  ): Promise<AgentTeamDeployment> {
-    this.requireActiveMember(deployment.machine, deployment.manifestPath);
+    profile: AgentTeamManifestProfile,
+  ): Promise<AgentTeamManifestProfile> {
+    this.requireActiveMember(profile.agentletId, profile.launch.manifestPath);
     const config = this.getMemberConfig(
-      deployment.machine,
-      deployment.manifestPath,
+      profile.agentletId,
+      profile.launch.manifestPath,
     );
     if (!config.ready) {
       throw new AgentTeamError(
         'config_incomplete',
-        `Agent Team deployment is missing required Configs: ${config.missingRequired.join(', ')}`,
+        `Agent Team Profile is missing required Configs: ${config.missingRequired.join(', ')}`,
       );
     }
     const controlPort = this.requireControlPort();
     const operationId = this.generateId();
     if (
       !operationId.trim() ||
-      this.state.deployments.some(
+      this.state.profiles.some(
         (candidate) =>
-          candidate.setup.status === 'setting_up' &&
-          candidate.setup.operationId === operationId,
+          isManifestProfile(candidate) &&
+          candidate.preparation.status === 'setting_up' &&
+          candidate.preparation.operationId === operationId,
       )
     ) {
       throw new Error(
@@ -736,24 +760,23 @@ export class AgentTeamRegistry {
       );
     }
 
-    const settingUp: AgentTeamDeployment = {
-      ...deployment,
-      enabled: setEnabled ? true : deployment.enabled,
-      setup: {
+    const settingUp: AgentTeamManifestProfile = {
+      ...profile,
+      preparation: {
         status: 'setting_up',
         operationId,
         startedAt: this.now(),
       },
       setupLog: [],
     };
-    this.persistDeployment(settingUp);
+    this.persistProfile(settingUp);
 
     try {
-      const result = await controlPort.setupAgentTeam(deployment.machine, {
+      const result = await controlPort.setupAgentTeam(profile.agentletId, {
         operationId,
-        manifestPath: deployment.manifestPath,
-        harness: deployment.harness,
-        workingDirPath: deployment.workingDirPath,
+        manifestPath: profile.launch.manifestPath,
+        harness: profile.launch.harness,
+        workingDirPath: profile.workingDirPath,
       });
       if (result.operationId !== operationId || result.accepted !== true) {
         throw new Error(
@@ -761,13 +784,13 @@ export class AgentTeamRegistry {
         );
       }
     } catch (error) {
-      const current = this.requireDeployment(deployment.id);
+      const current = this.requireManifestProfile(profile.id);
       if (
-        current.setup.status === 'setting_up' &&
-        current.setup.operationId === operationId
+        current.preparation.status === 'setting_up' &&
+        current.preparation.operationId === operationId
       ) {
         this.failSetupIfCurrent(
-          deployment.id,
+          profile.id,
           operationId,
           setupError(error, 'setup_start_failed'),
         );
@@ -775,25 +798,32 @@ export class AgentTeamRegistry {
       }
       return structuredClone(current);
     }
-    return structuredClone(this.requireDeployment(deployment.id));
+    return structuredClone(this.requireManifestProfile(profile.id));
   }
 
   private handleSetupProgress(
     machine: string,
     progress: AgentTeamSetupProgressParams,
   ): void {
-    const deployment = this.state.deployments.find(
+    const profile = this.state.profiles.find(
       (candidate) =>
-        candidate.machine === machine &&
-        candidate.setup.status === 'setting_up' &&
-        candidate.setup.operationId === progress.operationId,
+        isManifestProfile(candidate) &&
+        candidate.agentletId === machine &&
+        candidate.preparation.status === 'setting_up' &&
+        candidate.preparation.operationId === progress.operationId,
     );
-    if (!deployment || deployment.setup.status !== 'setting_up') return;
+    if (
+      !profile ||
+      !isManifestProfile(profile) ||
+      profile.preparation.status !== 'setting_up'
+    ) {
+      return;
+    }
 
     const setupLog =
       progress.type === 'phase'
         ? [
-            ...deployment.setupLog,
+            ...profile.setupLog,
             {
               receivedAt: this.now(),
               phase: progress.phase,
@@ -801,26 +831,24 @@ export class AgentTeamRegistry {
               message: progress.message,
             },
           ].slice(-SETUP_LOG_LIMIT)
-        : deployment.setupLog;
+        : profile.setupLog;
 
     if (progress.type === 'phase') {
-      this.persistDeployment({ ...deployment, setupLog });
+      this.persistProfile({ ...profile, setupLog });
       return;
     }
     if (progress.type === 'completed') {
-      this.persistDeployment({
-        ...deployment,
-        setup: deployment.enabled
-          ? { status: 'ready', completedAt: this.now() }
-          : { status: 'disabled' },
+      this.persistProfile({
+        ...profile,
+        preparation: { status: 'ready', completedAt: this.now() },
         setupLog,
       });
       return;
     }
     if (progress.type === 'failed') {
-      this.persistDeployment({
-        ...deployment,
-        setup: {
+      this.persistProfile({
+        ...profile,
+        preparation: {
           status: 'error',
           failedAt: this.now(),
           error: progress.error,
@@ -829,40 +857,44 @@ export class AgentTeamRegistry {
       });
       return;
     }
-    this.persistDeployment({
-      ...deployment,
-      enabled: false,
-      setup: { status: 'disabled' },
+    this.persistProfile({
+      ...profile,
+      preparation: { status: 'not_prepared' },
       setupLog,
     });
   }
 
   private failSetupIfCurrent(
-    deploymentId: string,
+    profileId: string,
     operationId: string,
     error: AgentTeamSetupError,
   ): void {
-    const deployment = this.requireDeployment(deploymentId);
+    const profile = this.requireManifestProfile(profileId);
     if (
-      deployment.setup.status !== 'setting_up' ||
-      deployment.setup.operationId !== operationId
+      profile.preparation.status !== 'setting_up' ||
+      profile.preparation.operationId !== operationId
     ) {
       return;
     }
-    this.persistDeployment({
-      ...deployment,
-      setup: { status: 'error', failedAt: this.now(), error },
+    this.persistProfile({
+      ...profile,
+      preparation: { status: 'error', failedAt: this.now(), error },
     });
   }
 
   private recoverInterruptedSetups(): void {
     let changed = false;
-    const deployments = this.state.deployments.map((deployment) => {
-      if (deployment.setup.status !== 'setting_up') return deployment;
+    const profiles = this.state.profiles.map((profile) => {
+      if (
+        !isManifestProfile(profile) ||
+        profile.preparation.status !== 'setting_up'
+      ) {
+        return profile;
+      }
       changed = true;
       return {
-        ...deployment,
-        setup: {
+        ...profile,
+        preparation: {
           status: 'error' as const,
           failedAt: this.now(),
           error: {
@@ -873,21 +905,8 @@ export class AgentTeamRegistry {
       };
     });
     if (changed) {
-      this.commit({ ...cloneState(this.state), deployments });
+      this.commit({ ...cloneState(this.state), profiles });
     }
-  }
-
-  private requireDeployment(id: string): AgentTeamDeployment {
-    const deployment = this.state.deployments.find(
-      (candidate) => candidate.id === id,
-    );
-    if (!deployment) {
-      throw new AgentTeamError(
-        'deployment_not_found',
-        `Agent Team deployment not found: ${id}`,
-      );
-    }
-    return deployment;
   }
 
   private requireControlPort(): AgentTeamControlPort {
@@ -897,11 +916,123 @@ export class AgentTeamRegistry {
     return this.controlPort;
   }
 
-  private persistDeployment(deployment: AgentTeamDeployment): void {
+  private createManifestProfile(
+    input: CreateAgentTeamManifestProfileInput,
+  ): AgentTeamManifestProfile {
+    const member = this.requireActiveMember(
+      input.agentletId,
+      input.manifestPath,
+    );
+    this.assertHarnessSupported(member, input.harness);
+    this.assertWorkingDirPath(input.workingDirPath);
+    const profile: AgentTeamManifestProfile = {
+      id: this.allocateProfileId(input.id),
+      alias: this.assertAlias(input.alias),
+      agentletId: input.agentletId,
+      workingDirPath: input.workingDirPath,
+      launch: {
+        kind: 'agent-team-manifest',
+        manifestPath: input.manifestPath,
+        harness: input.harness,
+      },
+      preparation: { status: 'not_prepared' },
+      setupLog: [],
+    };
     this.commit({
       ...cloneState(this.state),
-      deployments: this.state.deployments.map((candidate) =>
-        candidate.id === deployment.id ? deployment : candidate,
+      profiles: [...this.state.profiles, profile],
+    });
+    return structuredClone(profile);
+  }
+
+  private createCommandProfile(
+    input: CreateAcpCommandProfileInput,
+  ): AcpCommandProfile {
+    this.assertWorkingDirPath(input.workingDirPath);
+    if (!input.agentletId.trim()) {
+      throw new AgentTeamError(
+        'invalid_agentlet',
+        'ACP command Profile agentletId must be non-empty',
+      );
+    }
+    if (!input.command.trim()) {
+      throw new AgentTeamError(
+        'invalid_command',
+        'ACP command Profile command must be non-empty',
+      );
+    }
+    const profile: AcpCommandProfile = {
+      id: this.allocateProfileId(input.id),
+      alias: this.assertAlias(input.alias),
+      agentletId: input.agentletId,
+      workingDirPath: input.workingDirPath,
+      launch: { kind: 'acp-command', command: input.command },
+      ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
+    };
+    this.commit({
+      ...cloneState(this.state),
+      profiles: [...this.state.profiles, profile],
+    });
+    return structuredClone(profile);
+  }
+
+  private allocateProfileId(requestedId?: string): string {
+    const id = requestedId ?? this.generateId();
+    if (!id.trim() || id.trim() !== id) {
+      throw new Error(
+        'Generated Agent Profile ID must be non-empty without surrounding whitespace',
+      );
+    }
+    if (this.state.profiles.some((profile) => profile.id === id)) {
+      throw new AgentTeamError(
+        'profile_conflict',
+        `Agent Profile already exists: ${id}`,
+      );
+    }
+    return id;
+  }
+
+  private requireProfile(id: string): AgentProfile {
+    const profile = this.state.profiles.find(
+      (candidate) => candidate.id === id,
+    );
+    if (!profile) {
+      throw new AgentTeamError(
+        'profile_not_found',
+        `Agent Profile not found: ${id}`,
+      );
+    }
+    return profile;
+  }
+
+  private requireManifestProfile(id: string): AgentTeamManifestProfile {
+    const profile = this.requireProfile(id);
+    if (!isManifestProfile(profile)) {
+      throw new AgentTeamError(
+        'invalid_profile_kind',
+        `Agent Profile is not manifest-backed: ${id}`,
+      );
+    }
+    return profile;
+  }
+
+  private manifestProfilesFor(
+    machine: string,
+    manifestPath: string,
+  ): AgentTeamManifestProfile[] {
+    return this.state.profiles.filter(
+      (profile): profile is AgentTeamManifestProfile =>
+        isManifestProfile(profile) &&
+        profile.agentletId === machine &&
+        profile.launch.manifestPath === manifestPath,
+    );
+  }
+
+  private persistProfile(profile: AgentProfile): void {
+    this.commit({
+      ...cloneState(this.state),
+      profiles: this.state.profiles.map((candidate) =>
+        candidate.id === profile.id ? profile : candidate,
       ),
     });
   }
@@ -938,24 +1069,14 @@ export class AgentTeamRegistry {
     return member;
   }
 
-  private assertAliasAvailable(alias: string, currentId?: string): void {
+  private assertAlias(alias: string): string {
     if (!alias.trim() || alias.trim() !== alias) {
       throw new AgentTeamError(
         'invalid_alias',
-        'Agent Team deployment alias must be non-empty without surrounding whitespace',
+        'Agent Profile alias must be non-empty without surrounding whitespace',
       );
     }
-    if (
-      this.state.deployments.some(
-        (deployment) =>
-          deployment.alias === alias && deployment.id !== currentId,
-      )
-    ) {
-      throw new AgentTeamError(
-        'alias_conflict',
-        `Agent Team deployment alias already exists: ${alias}`,
-      );
-    }
+    return alias;
   }
 
   private assertHarnessSupported(

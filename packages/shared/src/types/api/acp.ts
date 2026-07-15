@@ -33,6 +33,8 @@ import type {
 } from '../agent/acp-tool.js';
 import type { AgentletStatus } from '@agenetes/protocol';
 
+import { agentProfileSchema } from './agent-profile.js';
+
 // ─── Agent profiles (user-configured spawn recipes) ────────────────────
 //
 // A profile is a stable, user-edited record describing how to spawn one
@@ -99,42 +101,15 @@ export type AcpDaemonStatus = AcpAgentletStatus;
 
 /** Response body for `GET /api/acp/profiles`. */
 export interface AcpProfilesListResponse {
-  profiles: AcpAgentProfile[];
+  profiles: import('./agent-profile.js').AgentProfileView[];
+  selectableProfileIds: string[];
+  legacyProfiles: AcpAgentProfile[];
   agentlet: AcpAgentletStatus;
 }
 
-/** Request body for `POST /api/acp/profiles`. */
-export interface AcpProfileCreateRequest {
-  /** Optional — server fills in a sensible default when omitted. */
-  displayName?: string;
-  cliId: string;
-  /** Required for direct profiles; absent for agent-team profiles. */
-  command?: string;
-  /** Required for direct profiles; absent for agent-team profiles. */
-  cwd?: string;
-  /** Default true. */
-  autoRestart?: boolean;
-  /** Agent Team reference. Required when cliId is 'agent-team'. */
-  agentTeam?: {
-    agentDir: string;
-    harness?: string;
-  };
-}
-
-/** Request body for `PATCH /api/acp/profiles/:id`. All fields optional. */
-export interface AcpProfileUpdateRequest {
-  displayName?: string;
-  command?: string;
-  cwd?: string;
-  autoRestart?: boolean;
-  agentTeam?: {
-    agentDir: string;
-    harness?: string;
-  };
-}
-
 /** Response body for `POST` / `PATCH` /api/acp/profiles[/:id]. */
-export type AcpProfileMutationResponse = AcpAgentProfile;
+export type AcpProfileMutationResponse =
+  import('./agent-profile.js').AgentProfileView;
 
 /** Response body for `GET /api/acp/agentlet`. */
 export type AcpAgentletStatusResponse = AcpAgentletStatus;
@@ -707,30 +682,13 @@ export const acpDaemonStatusSchema = acpAgentletStatusSchema;
 
 /** Schema mirror of {@link AcpProfilesListResponse}. */
 export const acpProfilesListResponseSchema = z.object({
-  profiles: z.array(acpAgentProfileSchema),
+  profiles: z.array(agentProfileSchema),
+  selectableProfileIds: z.array(z.string().min(1)),
+  legacyProfiles: z.array(acpAgentProfileSchema),
   agentlet: acpAgentletStatusSchema,
 }) satisfies z.ZodType<AcpProfilesListResponse>;
 
-/** Schema mirror of {@link AcpProfileCreateRequest}. */
-export const acpProfileCreateRequestSchema = z.object({
-  displayName: z.string().min(1).optional(),
-  cliId: z.string().min(1),
-  command: z.string().min(1).optional(),
-  cwd: z.string().min(1).optional(),
-  autoRestart: z.boolean().optional(),
-  agentTeam: agentTeamFieldSchema.optional(),
-}) satisfies z.ZodType<AcpProfileCreateRequest>;
-
-/** Schema mirror of {@link AcpProfileUpdateRequest}. */
-export const acpProfileUpdateRequestSchema = z.object({
-  displayName: z.string().min(1).optional(),
-  command: z.string().min(1).optional(),
-  cwd: z.string().min(1).optional(),
-  autoRestart: z.boolean().optional(),
-  agentTeam: agentTeamFieldSchema.optional(),
-}) satisfies z.ZodType<AcpProfileUpdateRequest>;
-
 // {@link AcpProfileMutationResponse}, {@link AcpAgentletStatusResponse} and
 // {@link AcpAgentletRestartResponse} are type aliases; reuse
-// `acpAgentProfileSchema` / `acpAgentletStatusSchema` directly
+// `agentProfileSchema` / `acpAgentletStatusSchema` directly
 // at the route boundary.

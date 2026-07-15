@@ -16,6 +16,7 @@ interface SettingSectionProps {
    * to `false` (i.e. expanded on first render).
    */
   defaultCollapsed?: boolean;
+  onCollapsedChange?: (collapsed: boolean) => void;
 }
 
 /**
@@ -31,6 +32,7 @@ export const SettingSection: React.FC<SettingSectionProps> = ({
   children,
   collapsible = false,
   defaultCollapsed = false,
+  onCollapsedChange,
 }) => {
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
   const isCollapsed = collapsible && collapsed;
@@ -41,7 +43,13 @@ export const SettingSection: React.FC<SettingSectionProps> = ({
         (collapsible ? (
           <button
             type="button"
-            onClick={() => setCollapsed((prev) => !prev)}
+            onClick={() =>
+              setCollapsed((prev) => {
+                const next = !prev;
+                onCollapsedChange?.(next);
+                return next;
+              })
+            }
             aria-expanded={!collapsed}
             className="text-fg-muted hover:text-fg-default mb-1.5 flex items-center gap-1 px-1 text-xs font-medium"
           >

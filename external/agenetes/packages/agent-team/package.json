@@ -21,6 +21,8 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@agenetes/protocol": "workspace:*",
+    "@agenetes/runtime": "workspace:*",
     "@agentlet/protocol": "workspace:*"
   },
   "devDependencies": {

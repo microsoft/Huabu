@@ -35,14 +35,12 @@ export const routes = {
   agentTeamSettingsEvents: '/agent-team/settings/events',
   agentTeamRoots: '/agent-team/settings/roots',
   agentTeamRootsRescan: '/agent-team/settings/roots/rescan',
+  agentTeamMemberDetail: '/agent-team/settings/member-detail',
   agentTeamConfigs: '/agent-team/settings/configs',
-  agentTeamDeployments: '/agent-team/settings/deployments',
-  agentTeamDeployment: (id: string) =>
-    `/agent-team/settings/deployments/${enc(id)}`,
-  agentTeamDeploymentAction: (
-    id: string,
-    action: 'enable' | 'disable' | 'retry',
-  ) => `/agent-team/settings/deployments/${enc(id)}/${action}`,
+  agentTeamProfiles: '/agent-team/settings/profiles',
+  agentTeamProfile: (id: string) => `/agent-team/settings/profiles/${enc(id)}`,
+  agentTeamProfileAction: (id: string, action: 'setup' | 'cancel') =>
+    `/agent-team/settings/profiles/${enc(id)}/${action}`,
 
   // ── Canvas ────────────────────────────────────────────────────────
   canvasList: '/canvas',

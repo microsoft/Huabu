@@ -56,23 +56,50 @@ export interface AgentTeamSetupError {
   message: string;
 }
 
-export type AgentTeamDeploymentSetup =
-  | { status: 'disabled' }
+export type AgentTeamPreparation =
+  | { status: 'not_prepared' }
   | { status: 'setting_up'; operationId: string; startedAt: number }
   | { status: 'ready'; completedAt: number }
   | { status: 'error'; failedAt: number; error: AgentTeamSetupError };
 
-export interface AgentTeamDeployment {
+export interface AgentProfileBase {
   id: string;
   alias: string;
-  revision: number;
-  enabled: boolean;
-  machine: string;
-  manifestPath: string;
-  harness: string;
+  agentletId: string;
   workingDirPath: string;
-  setup: AgentTeamDeploymentSetup;
+}
+
+export interface AgentTeamManifestProfile extends AgentProfileBase {
+  launch: {
+    kind: 'agent-team-manifest';
+    manifestPath: string;
+    harness: string;
+  };
+  preparation: AgentTeamPreparation;
   setupLog: AgentTeamSetupLogEntry[];
+}
+
+export interface AcpCommandProfile extends AgentProfileBase {
+  launch: {
+    kind: 'acp-command';
+    command: string;
+  };
+  metadata?: {
+    cliId?: string;
+  };
+}
+
+export type AgentProfile = AgentTeamManifestProfile | AcpCommandProfile;
+
+export interface AgentProfileSnapshot {
+  profileId: string;
+  agentletId: string;
+  workingDirPath: string;
+  launch: AgentProfile['launch'];
+}
+
+export interface AgentTeamManifestRuntime {
+  environment: Record<string, string>;
 }
 
 export interface AgentTeamSetupLogEntry {
@@ -117,7 +144,7 @@ export interface AgentTeamSecretStore {
 export interface AgentTeamRegistryState {
   roots: AgentTeamRoot[];
   members: AgentTeamMember[];
-  deployments: AgentTeamDeployment[];
+  profiles: AgentProfile[];
   configs: AgentTeamMemberConfig[];
 }
 
@@ -168,18 +195,55 @@ export type AgentTeamRescanResult =
       error: string;
     };
 
-export interface CreateAgentTeamDeploymentInput {
+export interface CreateAgentTeamManifestProfileInput {
+  id?: string;
   alias: string;
-  machine: string;
+  agentletId: string;
   manifestPath: string;
   harness: string;
   workingDirPath: string;
 }
 
-export interface UpdateAgentTeamDeploymentInput {
+export interface CreateAcpCommandProfileInput {
+  id?: string;
+  alias: string;
+  agentletId: string;
+  command: string;
+  workingDirPath: string;
+  metadata?: {
+    cliId?: string;
+  };
+}
+
+export type CreateAgentProfileInput =
+  | ({
+      launchKind: 'agent-team-manifest';
+    } & CreateAgentTeamManifestProfileInput)
+  | ({
+      launchKind: 'acp-command';
+    } & CreateAcpCommandProfileInput);
+
+export interface PatchAgentProfileInput {
   alias?: string;
-  harness?: string;
-  workingDirPath?: string;
+  metadata?: {
+    cliId?: string;
+  } | null;
+}
+
+export interface AgentTeamMemberSummary {
+  machine: string;
+  manifestPath: string;
+  name: string;
+  description: string;
+  status: AgentTeamMember['status'];
+  profileCount: number;
+  preparationCounts: Record<AgentTeamPreparation['status'], number>;
+}
+
+export interface AgentTeamMemberDetail {
+  member: AgentTeamMember;
+  config: AgentTeamMemberConfigView;
+  profiles: AgentTeamManifestProfile[];
 }
 
 export type UpdateAgentTeamMemberConfigsInput = Record<string, string | null>;

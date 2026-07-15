@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { agentTeamManifestProfileSchema } from './agent-profile.js';
+
 const trimmedString = (max: number) =>
   z
     .string()
@@ -96,68 +98,6 @@ export const agentTeamMemberSchema = agentTeamMemberRefSchema.extend({
 });
 export type AgentTeamMemberView = z.infer<typeof agentTeamMemberSchema>;
 
-const agentTeamSetupErrorSchema = z
-  .object({
-    code: trimmedString(255),
-    message: z.string(),
-  })
-  .strict();
-
-const agentTeamDeploymentSetupSchema = z.discriminatedUnion('status', [
-  z.object({ status: z.literal('disabled') }).strict(),
-  z
-    .object({
-      status: z.literal('setting_up'),
-      operationId: idSchema,
-      startedAt: timestampSchema,
-    })
-    .strict(),
-  z
-    .object({
-      status: z.literal('ready'),
-      completedAt: timestampSchema,
-    })
-    .strict(),
-  z
-    .object({
-      status: z.literal('error'),
-      failedAt: timestampSchema,
-      error: agentTeamSetupErrorSchema,
-    })
-    .strict(),
-]);
-
-const agentTeamSetupPhaseSchema = z.enum([
-  'validating_manifest',
-  'preparing_workspace',
-  'installing_tools',
-  'installing_skills',
-  'placing_prompt',
-  'copying_files',
-  'running_custom_setup',
-]);
-
-const agentTeamSetupLogEntrySchema = z
-  .object({
-    receivedAt: timestampSchema,
-    phase: agentTeamSetupPhaseSchema,
-    status: z.enum(['started', 'completed']),
-    message: z.string(),
-  })
-  .strict();
-
-export const agentTeamDeploymentSchema = agentTeamMemberRefSchema.extend({
-  id: idSchema,
-  alias: trimmedString(255),
-  revision: z.number().int().positive(),
-  enabled: z.boolean(),
-  harness: trimmedString(255),
-  workingDirPath: pathSchema,
-  setup: agentTeamDeploymentSetupSchema,
-  setupLog: z.array(agentTeamSetupLogEntrySchema),
-});
-export type AgentTeamDeploymentView = z.infer<typeof agentTeamDeploymentSchema>;
-
 const agentTeamConfigFieldSchema = z
   .object({
     name: trimmedString(255),
@@ -178,50 +118,52 @@ export type AgentTeamMemberConfigView = z.infer<
   typeof agentTeamMemberConfigSchema
 >;
 
+const preparationCountsSchema = z
+  .object({
+    not_prepared: z.number().int().nonnegative(),
+    setting_up: z.number().int().nonnegative(),
+    ready: z.number().int().nonnegative(),
+    error: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export const agentTeamMemberSummarySchema = agentTeamMemberRefSchema.extend({
+  name: trimmedString(255),
+  description: z.string(),
+  status: z.enum(['active', 'member_missing']),
+  profileCount: z.number().int().nonnegative(),
+  preparationCounts: preparationCountsSchema,
+});
+export type AgentTeamMemberSummaryView = z.infer<
+  typeof agentTeamMemberSummarySchema
+>;
+
+export const agentTeamMemberDetailSchema = z
+  .object({
+    member: agentTeamMemberSchema,
+    config: agentTeamMemberConfigSchema,
+    profiles: z.array(agentTeamManifestProfileSchema),
+  })
+  .strict();
+export type AgentTeamMemberDetailView = z.infer<
+  typeof agentTeamMemberDetailSchema
+>;
+
 export const agentTeamSettingsStateSchema = z
   .object({
     machines: z.array(agentTeamMachineSchema),
     localMachine: machineSchema,
     roots: z.array(agentTeamRootSchema),
-    members: z.array(agentTeamMemberSchema),
-    deployments: z.array(agentTeamDeploymentSchema),
-    configs: z.array(agentTeamMemberConfigSchema),
+    members: z.array(agentTeamMemberSummarySchema),
   })
   .strict();
 export type AgentTeamSettingsState = z.infer<
   typeof agentTeamSettingsStateSchema
 >;
 
-export const createAgentTeamDeploymentBodySchema = agentTeamMemberRefSchema
-  .extend({
-    alias: trimmedString(255),
-    harness: trimmedString(255),
-    workingDirPath: pathSchema,
-  })
-  .strict();
-export type CreateAgentTeamDeploymentBody = z.infer<
-  typeof createAgentTeamDeploymentBodySchema
->;
-
-export const updateAgentTeamDeploymentBodySchema = z
-  .object({
-    alias: trimmedString(255).optional(),
-    harness: trimmedString(255).optional(),
-    workingDirPath: pathSchema.optional(),
-  })
-  .strict()
-  .refine((value) => Object.keys(value).length > 0, {
-    message: 'At least one deployment field is required',
-  });
-export type UpdateAgentTeamDeploymentBody = z.infer<
-  typeof updateAgentTeamDeploymentBodySchema
->;
-
-export const agentTeamDeploymentParamsSchema = z
-  .object({ id: idSchema })
-  .strict();
-export type AgentTeamDeploymentParams = z.infer<
-  typeof agentTeamDeploymentParamsSchema
+export const agentTeamMemberDetailQuerySchema = agentTeamMemberRefSchema;
+export type AgentTeamMemberDetailQuery = z.infer<
+  typeof agentTeamMemberDetailQuerySchema
 >;
 
 export const updateAgentTeamMemberConfigsBodySchema = agentTeamMemberRefSchema
@@ -231,6 +173,13 @@ export const updateAgentTeamMemberConfigsBodySchema = agentTeamMemberRefSchema
   .strict();
 export type UpdateAgentTeamMemberConfigsBody = z.infer<
   typeof updateAgentTeamMemberConfigsBodySchema
+>;
+
+export const agentTeamProfileActionParamsSchema = z
+  .object({ id: idSchema })
+  .strict();
+export type AgentTeamProfileActionParams = z.infer<
+  typeof agentTeamProfileActionParamsSchema
 >;
 
 export const AGENT_TEAM_SETTINGS_SSE_EVENTS = {

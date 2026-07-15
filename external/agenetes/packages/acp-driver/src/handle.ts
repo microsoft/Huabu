@@ -171,6 +171,14 @@ export interface AcpCreateSpec {
   readonly cwd?: string;
   /** Pre-resolved spawn recipe for a first-time thread (host-resolved). */
   readonly recipe?: AcpBindingRecipe | null;
+  /**
+   * Live recipe resolver used by higher-level standard drivers. It is
+   * attached only to the temporary lowered spec and is never persisted.
+   */
+  readonly resolveRecipe?: () => Promise<{
+    recipe: AcpBindingRecipe;
+    env?: Record<string, string>;
+  }>;
   /** L1-assembled agent reachback env, passed through to the spawn call. */
   readonly env?: Record<string, string>;
 }
@@ -314,18 +322,21 @@ export class AcpAgentHandle<
     }
   }
 
-  private openSession(
+  private async openSession(
     priorState: AgentStateSnapshot | undefined,
     logger: AcpSessionLogger,
   ): Promise<AcpSessionEntry> {
+    const runtime = await this.spec.resolveRecipe?.();
+    const recipe = runtime?.recipe ?? this.spec.recipe;
+    const env = runtime?.env ?? this.spec.env;
     return ensureAcpSession({
       agentletId: this.agentletId,
       threadId: this.spec.threadId,
       binding: this.spec.binding,
       namespace: this.spec.namespace,
       ...(this.spec.cwd !== undefined && { cwd: this.spec.cwd }),
-      ...(this.spec.recipe !== undefined && { recipe: this.spec.recipe }),
-      ...(this.spec.env !== undefined && { env: this.spec.env }),
+      ...(recipe !== undefined && { recipe }),
+      ...(env !== undefined && { env }),
       ...(priorState !== undefined && { priorState }),
       logger,
     });
@@ -599,10 +610,7 @@ export class AcpAgentHandle<
     // Resolve the live session out-of-turn. A control op with no live
     // session to act on is a precondition failure — we do NOT lazily spawn
     // one just to, e.g., set a mode (§3.6.2 / M2.6).
-    const entry = acpSessionRegistry.get(
-      this.agentletId,
-      this.spec.threadId,
-    );
+    const entry = acpSessionRegistry.get(this.agentletId, this.spec.threadId);
     if (!entry) {
       return {
         ok: false,

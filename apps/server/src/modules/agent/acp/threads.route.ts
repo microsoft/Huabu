@@ -70,8 +70,9 @@ interface ThreadParams {
 function resolveThreadAgentletId(threadId: string, canvasId?: string): string {
   if (canvasId) {
     const record = agenetes.record(canvasAcpNamespace(canvasId), threadId);
-    if (record && 'binding' in record.spec && record.spec.agentletId) {
-      return record.spec.agentletId;
+    if (record && 'binding' in record.spec) {
+      if ('profile' in record.spec) return record.spec.profile.agentletId;
+      if (record.spec.agentletId) return record.spec.agentletId;
     }
   }
   return getSupervisedAgentletId();
@@ -347,10 +348,7 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
         code: 'validation_failed',
       });
     }
-    const agentletId = resolveThreadAgentletId(
-      threadId,
-      parsed.data.canvasId,
-    );
+    const agentletId = resolveThreadAgentletId(threadId, parsed.data.canvasId);
     const entry = acpSessionRegistry.get(agentletId, threadId);
     if (!entry) {
       return reply.status(404).send({

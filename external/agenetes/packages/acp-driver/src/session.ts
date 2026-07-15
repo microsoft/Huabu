@@ -149,14 +149,12 @@ export function registerAcpStateListener(
  * once it resolves the entry.
  */
 export function reportEntryState(entry: AcpSessionEntry): void {
-  if (
-    acpSessionRegistry.get(entry.agentletId, entry.threadId) !== entry
-  ) {
+  if (acpSessionRegistry.get(entry.agentletId, entry.threadId) !== entry) {
     return;
   }
-  stateListeners
-    .get(placementThreadKey(entry.agentletId, entry.threadId))
-    ?.(snapshotEntryState(entry));
+  stateListeners.get(placementThreadKey(entry.agentletId, entry.threadId))?.(
+    snapshotEntryState(entry),
+  );
 }
 
 // ─── Session lifecycle helper ─────────────────────────────────────────────
@@ -457,7 +455,12 @@ async function ensureAcpSessionInner(
       `External agent '${binding.alias}' is no longer configured. Re-create the profile in Settings → External Agents, or start a new chat with another agent.`,
     );
   }
-  const cwd = opts.cwd ?? recipe.cwd ?? recipe.agentTeam?.agentDir ?? '';
+  const agentTeamCwd = recipe.agentTeam
+    ? 'workingDirPath' in recipe.agentTeam
+      ? recipe.agentTeam.workingDirPath
+      : recipe.agentTeam.agentDir
+    : undefined;
+  const cwd = opts.cwd ?? recipe.cwd ?? agentTeamCwd ?? '';
 
   const gateway = getAgentletGateway();
   if (!gateway) {

@@ -11,17 +11,18 @@ import {
 
 import type { FastifyInstance } from 'fastify';
 
-function deployment() {
+function profile() {
   return {
-    id: 'deployment-1',
+    id: 'profile-1',
     alias: 'Reviewer',
-    revision: 1,
-    enabled: false,
-    machine: 'machine-a',
-    manifestPath: '/teams/reviewer/agentlet.yaml',
-    harness: 'copilot',
+    agentletId: 'machine-a',
     workingDirPath: '/teams/reviewer/workspaces/copilot',
-    setup: { status: 'disabled' as const },
+    launch: {
+      kind: 'agent-team-manifest' as const,
+      manifestPath: '/teams/reviewer/agentlet.yaml',
+      harness: 'copilot',
+    },
+    preparation: { status: 'not_prepared' as const },
     setupLog: [],
   };
 }
@@ -33,9 +34,8 @@ function createRegistry(): AgentTeamSettingsRegistry {
       { machine: 'machine-a', hostname: 'machine-a', platform: 'linux' },
     ]),
     listRoots: vi.fn(() => []),
-    listMembers: vi.fn(() => []),
-    listDeployments: vi.fn(() => []),
-    getMemberConfig: vi.fn(() => {
+    listMemberSummaries: vi.fn(() => []),
+    getMemberDetail: vi.fn(() => {
       throw new Error('No members');
     }),
     onChange: vi.fn((handler, _onError) => {
@@ -66,12 +66,11 @@ function createRegistry(): AgentTeamSettingsRegistry {
       missingRequired: [],
       ready: true,
     })),
-    createDeployment: vi.fn(() => deployment()),
-    updateDeployment: vi.fn(() => deployment()),
-    deleteDeployment: vi.fn(() => true),
-    enableDeployment: vi.fn(async () => deployment()),
-    disableDeployment: vi.fn(async () => deployment()),
-    retryDeploymentSetup: vi.fn(async () => deployment()),
+    createProfile: vi.fn(() => profile()),
+    patchProfile: vi.fn(() => profile()),
+    deleteProfile: vi.fn(() => true),
+    setupProfile: vi.fn(async () => profile()),
+    cancelProfileSetup: vi.fn(async () => profile()),
   };
 }
 
@@ -109,8 +108,6 @@ describe('Agent Team Settings routes', () => {
       localMachine: 'machine-a',
       roots: [],
       members: [],
-      deployments: [],
-      configs: [],
     });
   });
 
@@ -161,8 +158,8 @@ describe('Agent Team Settings routes', () => {
 
   it('maps expected domain conflicts without hiding infrastructure errors', async () => {
     const registry = createRegistry();
-    vi.mocked(registry.createDeployment).mockImplementationOnce(() => {
-      throw new AgentTeamError('alias_conflict', 'Alias already exists');
+    vi.mocked(registry.createProfile).mockImplementationOnce(() => {
+      throw new AgentTeamError('profile_conflict', 'Profile already exists');
     });
     app = Fastify({ logger: false });
     await app.register(
@@ -177,20 +174,23 @@ describe('Agent Team Settings routes', () => {
 
     const response = await app.inject({
       method: 'POST',
-      url: '/api/agent-team/settings/deployments',
+      url: '/api/agent-team/settings/profiles',
       payload: {
         alias: 'Reviewer',
-        machine: 'machine-a',
-        manifestPath: '/teams/reviewer/agentlet.yaml',
-        harness: 'copilot',
+        agentletId: 'machine-a',
         workingDirPath: '/teams/reviewer/workspaces/copilot',
+        launch: {
+          kind: 'agent-team-manifest',
+          manifestPath: '/teams/reviewer/agentlet.yaml',
+          harness: 'copilot',
+        },
       },
     });
 
     expect(response.statusCode).toBe(409);
     expect(response.json()).toEqual({
-      message: 'Alias already exists',
-      code: 'alias_conflict',
+      message: 'Profile already exists',
+      code: 'profile_conflict',
     });
   });
 

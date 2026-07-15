@@ -93,7 +93,7 @@ async function createDeployment(options?: {
 }> {
   const store = options?.store ?? new InMemoryAgentTeamRegistryStore();
   const control = options?.control ?? new FakeControlPort();
-  const ids = options?.ids ?? ['deployment-1', 'operation-1'];
+  const ids = options?.ids ?? ['profile-1', 'operation-1'];
   const registry = new AgentTeamRegistry(
     store,
     control,
@@ -103,9 +103,10 @@ async function createDeployment(options?: {
     control,
   );
   await registry.addRoot({ machine: 'machine-a', path: '/teams' });
-  const deployment = registry.createDeployment({
+  const profile = registry.createProfile({
+    launchKind: 'agent-team-manifest',
     alias: 'Reviewer',
-    machine: 'machine-a',
+    agentletId: 'machine-a',
     manifestPath: '/teams/reviewer/agentlet.yaml',
     harness: 'copilot',
     workingDirPath: '/teams/reviewer/workspaces/copilot',
@@ -114,22 +115,19 @@ async function createDeployment(options?: {
     registry,
     store,
     control,
-    deploymentId: deployment.id,
+    deploymentId: profile.id,
   };
 }
 
 describe('Agent Team setup state machine', () => {
-  it('persists enabled intent, progress, and ready completion', async () => {
+  it('persists progress and ready completion', async () => {
     let time = 100;
     const { registry, control, deploymentId } = await createDeployment({
       now: () => ++time,
     });
 
-    await expect(
-      registry.enableDeployment(deploymentId),
-    ).resolves.toMatchObject({
-      enabled: true,
-      setup: {
+    await expect(registry.setupProfile(deploymentId)).resolves.toMatchObject({
+      preparation: {
         status: 'setting_up',
         operationId: 'operation-1',
       },
@@ -154,9 +152,8 @@ describe('Agent Team setup state machine', () => {
       workingDirPath: '/teams/reviewer/workspaces/copilot',
     });
 
-    expect(registry.getDeployment(deploymentId)).toMatchObject({
-      enabled: true,
-      setup: { status: 'ready' },
+    expect(registry.getProfile(deploymentId)).toMatchObject({
+      preparation: { status: 'ready' },
       setupLog: [
         {
           phase: 'installing_tools',
@@ -178,11 +175,8 @@ describe('Agent Team setup state machine', () => {
       return { operationId: params.operationId, accepted: true };
     });
 
-    await expect(
-      registry.enableDeployment(deploymentId),
-    ).resolves.toMatchObject({
-      enabled: true,
-      setup: { status: 'ready' },
+    await expect(registry.setupProfile(deploymentId)).resolves.toMatchObject({
+      preparation: { status: 'ready' },
     });
   });
 
@@ -194,15 +188,14 @@ describe('Agent Team setup state machine', () => {
     control.setupAgentTeam.mockRejectedValueOnce(startError);
     const { registry, deploymentId } = await createDeployment({
       control,
-      ids: ['deployment-1', 'operation-1', 'operation-2'],
+      ids: ['profile-1', 'operation-1', 'operation-2'],
     });
 
-    await expect(registry.enableDeployment(deploymentId)).rejects.toThrow(
+    await expect(registry.setupProfile(deploymentId)).rejects.toThrow(
       'daemon unavailable',
     );
-    expect(registry.getDeployment(deploymentId)).toMatchObject({
-      enabled: true,
-      setup: {
+    expect(registry.getProfile(deploymentId)).toMatchObject({
+      preparation: {
         status: 'error',
         error: {
           code: 'placement_unavailable',
@@ -211,29 +204,29 @@ describe('Agent Team setup state machine', () => {
       },
     });
 
-    await expect(
-      registry.retryDeploymentSetup(deploymentId),
-    ).resolves.toMatchObject({
-      enabled: true,
-      setup: { status: 'setting_up', operationId: 'operation-2' },
+    await expect(registry.setupProfile(deploymentId)).resolves.toMatchObject({
+      preparation: { status: 'setting_up', operationId: 'operation-2' },
     });
     control.emit({
       operationId: 'operation-2',
       type: 'completed',
       workingDirPath: '/teams/reviewer/workspaces/copilot',
     });
-    expect(registry.getDeployment(deploymentId)?.setup.status).toBe('ready');
+    expect(
+      registry.getProfile(deploymentId)?.launch.kind ===
+        'agent-team-manifest' &&
+        registry.getProfile(deploymentId)?.preparation.status,
+    ).toBe('ready');
   });
 
-  it('cancels active setup when disabled', async () => {
+  it('cancels active setup explicitly', async () => {
     const { registry, control, deploymentId } = await createDeployment();
-    await registry.enableDeployment(deploymentId);
+    await registry.setupProfile(deploymentId);
 
     await expect(
-      registry.disableDeployment(deploymentId),
+      registry.cancelProfileSetup(deploymentId),
     ).resolves.toMatchObject({
-      enabled: false,
-      setup: { status: 'disabled' },
+      preparation: { status: 'not_prepared' },
     });
     expect(control.cancelAgentTeamSetup).toHaveBeenCalledWith('machine-a', {
       operationId: 'operation-1',
@@ -242,7 +235,7 @@ describe('Agent Team setup state machine', () => {
 
   it('accepts a terminal event that wins the cancellation race', async () => {
     const { registry, control, deploymentId } = await createDeployment();
-    await registry.enableDeployment(deploymentId);
+    await registry.setupProfile(deploymentId);
     control.cancelAgentTeamSetup.mockImplementationOnce(
       async (_machine, params) => {
         control.emit({
@@ -255,23 +248,16 @@ describe('Agent Team setup state machine', () => {
     );
 
     await expect(
-      registry.disableDeployment(deploymentId),
+      registry.cancelProfileSetup(deploymentId),
     ).resolves.toMatchObject({
-      enabled: false,
-      setup: { status: 'disabled' },
+      preparation: { status: 'ready' },
     });
   });
 
-  it('blocks placement changes and deletion while setup is active', async () => {
+  it('blocks deletion while setup is active', async () => {
     const { registry, deploymentId } = await createDeployment();
-    await registry.enableDeployment(deploymentId);
-
-    expect(() =>
-      registry.updateDeployment(deploymentId, {
-        workingDirPath: '/teams/reviewer/workspaces/other',
-      }),
-    ).toThrow('Disable');
-    expect(() => registry.deleteDeployment(deploymentId)).toThrow('Disable');
+    await registry.setupProfile(deploymentId);
+    expect(() => registry.deleteProfile(deploymentId)).toThrow('Cancel');
   });
 
   it('rejects enable before required member Configs are complete', async () => {
@@ -286,30 +272,28 @@ describe('Agent Team setup state machine', () => {
     ];
     const { registry, deploymentId } = await createDeployment({ control });
 
-    await expect(registry.enableDeployment(deploymentId)).rejects.toThrow(
+    await expect(registry.setupProfile(deploymentId)).rejects.toThrow(
       'missing required Configs: TOKEN',
     );
     expect(control.setupAgentTeam).not.toHaveBeenCalled();
-    expect(registry.getDeployment(deploymentId)).toMatchObject({
-      enabled: false,
-      setup: { status: 'disabled' },
+    expect(registry.getProfile(deploymentId)).toMatchObject({
+      preparation: { status: 'not_prepared' },
     });
   });
 
-  it('keeps cancellation failures visible with disabled intent', async () => {
+  it('keeps cancellation failures visible', async () => {
     const control = new FakeControlPort();
     control.cancelAgentTeamSetup.mockRejectedValueOnce(
       new Error('cancel transport failed'),
     );
     const { registry, deploymentId } = await createDeployment({ control });
-    await registry.enableDeployment(deploymentId);
+    await registry.setupProfile(deploymentId);
 
-    await expect(registry.disableDeployment(deploymentId)).rejects.toThrow(
+    await expect(registry.cancelProfileSetup(deploymentId)).rejects.toThrow(
       'cancel transport failed',
     );
-    expect(registry.getDeployment(deploymentId)).toMatchObject({
-      enabled: false,
-      setup: {
+    expect(registry.getProfile(deploymentId)).toMatchObject({
+      preparation: {
         status: 'error',
         error: {
           code: 'setup_cancel_failed',
@@ -324,17 +308,18 @@ describe('Agent Team setup state machine', () => {
       roots: [],
       members: [],
       configs: [],
-      deployments: [
+      profiles: [
         {
-          id: 'deployment-1',
+          id: 'profile-1',
           alias: 'Reviewer',
-          revision: 1,
-          enabled: true,
-          machine: 'machine-a',
-          manifestPath: '/teams/reviewer/agentlet.yaml',
-          harness: 'copilot',
+          agentletId: 'machine-a',
           workingDirPath: '/teams/reviewer/workspaces/copilot',
-          setup: {
+          launch: {
+            kind: 'agent-team-manifest',
+            manifestPath: '/teams/reviewer/agentlet.yaml',
+            harness: 'copilot',
+          },
+          preparation: {
             status: 'setting_up',
             operationId: 'operation-1',
             startedAt: 50,
@@ -351,9 +336,8 @@ describe('Agent Team setup state machine', () => {
       () => 100,
     );
 
-    expect(registry.getDeployment('deployment-1')).toMatchObject({
-      enabled: true,
-      setup: {
+    expect(registry.getProfile('profile-1')).toMatchObject({
+      preparation: {
         status: 'error',
         failedAt: 100,
         error: { code: 'setup_interrupted' },
@@ -361,14 +345,50 @@ describe('Agent Team setup state machine', () => {
     });
     expect(store.load()).toEqual({
       ...state,
-      deployments: [
+      profiles: [
         expect.objectContaining({
-          setup: expect.objectContaining({
+          preparation: expect.objectContaining({
             status: 'error',
             error: expect.objectContaining({ code: 'setup_interrupted' }),
           }),
         }),
       ],
+    });
+  });
+
+  it('marks a retained Profile unavailable after runtime validation fails', async () => {
+    const control = new FakeControlPort();
+    control.validateAgentTeam.mockResolvedValue({
+      valid: false,
+      issues: [
+        {
+          code: 'workspace_not_ready',
+          message: 'Workspace marker is missing',
+        },
+      ],
+    });
+    const { registry, deploymentId } = await createDeployment({ control });
+    const profile = registry.getProfile(deploymentId);
+    if (!profile) throw new Error('Expected Profile');
+
+    await expect(
+      registry.resolveManifestRuntime({
+        profileId: profile.id,
+        agentletId: profile.agentletId,
+        workingDirPath: profile.workingDirPath,
+        launch: profile.launch,
+      }),
+    ).rejects.toMatchObject({ code: 'workspace_invalid' });
+
+    expect(registry.getProfile(deploymentId)).toMatchObject({
+      preparation: {
+        status: 'error',
+        failedAt: 100,
+        error: {
+          code: 'workspace_invalid',
+          message: 'Workspace marker is missing',
+        },
+      },
     });
   });
 

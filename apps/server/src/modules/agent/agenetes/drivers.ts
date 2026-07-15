@@ -17,6 +17,11 @@ import {
   FileEventLogStore,
   FileTurnStore,
 } from '@agenetes/agenetes';
+import {
+  type AgentProfileWorkloadSpec,
+  type LegacyAgentProfileWorkloadSpec,
+} from '@agenetes/agent-team';
+import { getAgentTeamRegistry } from '@agenetes/agentlet-host';
 import { type PiTurnCtx, type PiWorkloadSpec } from '@agenetes/pi-driver';
 
 import { type AgentHandle } from './handle.js';
@@ -56,6 +61,16 @@ export type AcpWorkloadSpec = AcpCreateSpec & {
   readonly workloadType: WorkloadType;
 };
 
+export type ProfileWorkloadSpec = AgentProfileWorkloadSpec & {
+  readonly kind: string;
+  readonly workloadType: WorkloadType;
+};
+
+export type LegacyProfileWorkloadSpec = LegacyAgentProfileWorkloadSpec & {
+  readonly kind: string;
+  readonly workloadType: WorkloadType;
+};
+
 /** The concrete long-lived ACP (Deployment) handle type. */
 export type AcpHandle = AgentHandle<void, AcpTurnCtx>;
 
@@ -63,7 +78,10 @@ export type AcpHandle = AgentHandle<void, AcpTurnCtx>;
 export type BuiltinHandle = AgentHandle<Message[], PiTurnCtx>;
 
 /** The union `WorkloadSpec` the mounted instance dispatches on `kind`. */
-export type AgenetesWorkloadSpec = AcpWorkloadSpec | BuiltinWorkloadSpec;
+export type AgenetesWorkloadSpec =
+  | ProfileWorkloadSpec
+  | LegacyProfileWorkloadSpec
+  | BuiltinWorkloadSpec;
 
 /** The union handle the mounted instance's `create` / `get` return. */
 export type AgenetesHandle = AcpHandle | BuiltinHandle;
@@ -87,6 +105,14 @@ export const agenetes: Agenetes<AgenetesWorkloadSpec, AgenetesHandle> =
     eventLogStore: new FileEventLogStore(),
     turnStore: new FileTurnStore(),
   })
-    .register(EXTERNAL_DRIVER_KIND, 'acp')
+    .register(EXTERNAL_DRIVER_KIND, 'profile', {
+      resolveManifestRuntime: async (snapshot) => {
+        const registry = getAgentTeamRegistry();
+        if (!registry) {
+          throw new Error('Agent Profile registry is not mounted');
+        }
+        return registry.resolveManifestRuntime(snapshot);
+      },
+    })
     .register(INTERNAL_DRIVER_KIND, 'pi', { ports: huabuPiDriverPorts })
     .build<AgenetesWorkloadSpec, AgenetesHandle>();

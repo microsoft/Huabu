@@ -4,12 +4,15 @@ import type {
   AgentTeamControlPort,
   AgentTeamRegistry,
   AgentTeamSecretStore,
+  CreateAcpCommandProfileInput,
 } from '@agenetes/agent-team';
 import type { FastifyInstance } from 'fastify';
 
 export interface MountAgentTeamOptions {
   storageDir: string;
   secretStore: AgentTeamSecretStore;
+  legacyCommandProfiles?: CreateAcpCommandProfileInput[];
+  onLegacyProfilesMigrated?: (ids: string[]) => void;
 }
 
 let instance: AgentTeamRegistry | null = null;
@@ -30,6 +33,10 @@ export function mountAgentTeamRegistry(
       secretStore: options.secretStore,
       controlPort,
     });
+    const migrated = instance.importCommandProfiles(
+      options.legacyCommandProfiles ?? [],
+    );
+    options.onLegacyProfilesMigrated?.(migrated);
   });
   app.addHook('preClose', async () => {
     instance?.dispose();

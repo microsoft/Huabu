@@ -232,12 +232,12 @@ The Agentlet Gateway owns live daemon connections and routes every operation to 
 
 The agentlet protocol retains dedicated package operations:
 
-| Operation | Responsibility |
-| --- | --- |
-| `agent-team/scan` | Scan a collection root and return discovered manifests and UI metadata. |
-| `agent-team/setup` | Prepare one manifest-backed Profile workspace and emit structured progress. |
-| `agent-team/setup-cancel` | Cancel active preparation for one Profile workspace. |
-| `agent-team/validate` | Validate a prepared workspace without mutating or repairing it. |
+| Operation                 | Responsibility                                                              |
+| ------------------------- | --------------------------------------------------------------------------- |
+| `agent-team/scan`         | Scan a collection root and return discovered manifests and UI metadata.     |
+| `agent-team/setup`        | Prepare one manifest-backed Profile workspace and emit structured progress. |
+| `agent-team/setup-cancel` | Cancel active preparation for one Profile workspace.                        |
+| `agent-team/validate`     | Validate a prepared workspace without mutating or repairing it.             |
 
 Direct `acp-command` Profiles use the existing session spawn protocol and do not call Agent Team setup operations.
 
@@ -259,7 +259,7 @@ Profile deletion does not revoke existing threads. Global restart policy, crash-
 - Agent Team root discovery, member reconciliation, Configs, SecretStore integration, setup orchestration, progress SSE, and Settings UI.
 - Structured CLI requirements, shared npm tool installation, bundled manifests, and package documentation.
 
-### ▶️ Unified Profile registry
+### ✅ Unified Profile registry
 
 - Replace Agent Team deployment records and the host ACP profile store with the `AgentProfile` union.
 - Expose Agenetes create, read/list, delete, and alias/metadata patch operations and change subscriptions for the unified Profile resource.
@@ -267,14 +267,18 @@ Profile deletion does not revoke existing threads. Global restart policy, crash-
 - Remove enabled intent, revision, per-Profile auto-restart, runtime-field editing, alias uniqueness, and the legacy Agent Team option from External Agent Settings.
 - Replace the full Agent Team Settings snapshot with lightweight member overview reads, cached on-demand member detail, and affected-resource mutation responses.
 
-### ⏳ Runtime and Chat integration
+### ✅ Runtime and Chat integration
 
 - Register the standard Agent Profile driver/service with core Agenetes and remove Huabu-owned `AcpWorkloadSpec` construction.
 - Add durable external workload snapshots for both launch kinds.
 - Lower manifest-backed snapshots through injected Config resolution and validation ports into the ACP driver.
 - Project the unified Profile catalog into the two Chat selector groups.
 - Route Chat and Question Node external bindings by `profileId`.
-- Add focused migration, registry, runtime, API, selector, and Question Node coverage.
+- Add focused migration, registry, runtime, API, and selector coverage; Question Nodes reuse the same `/api/agent` binding path.
+
+### ⏳ Follow-up optimization
+
+- Replace the lightweight Agent Team overview replacement SSE event with affected-resource summary/detail events so expanded member caches can invalidate without comparing summary state.
 
 ## 6. Related documents
 

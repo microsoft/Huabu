@@ -12,8 +12,10 @@ import { agentTeamMemberKey, agentTeamRootKey } from './identity.js';
 
 import type { AgentTeamScanDiagnostic } from '@agentlet/protocol';
 import type {
-  AgentTeamDeployment,
-  AgentTeamDeploymentSetup,
+  AcpCommandProfile,
+  AgentProfile,
+  AgentTeamManifestProfile,
+  AgentTeamPreparation,
   AgentTeamSetupLogEntry,
   AgentTeamMemberConfig,
   AgentTeamMember,
@@ -24,7 +26,8 @@ import type {
   AgentTeamRootScan,
 } from './types.js';
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
+const LEGACY_SCHEMA_VERSION = 1;
 const REGISTRY_FILENAME = 'registry.json';
 
 interface RegistryFile {
@@ -33,7 +36,7 @@ interface RegistryFile {
 }
 
 function emptyState(): AgentTeamRegistryState {
-  return { roots: [], members: [], deployments: [], configs: [] };
+  return { roots: [], members: [], profiles: [], configs: [] };
 }
 
 function cloneState(state: AgentTeamRegistryState): AgentTeamRegistryState {
@@ -240,14 +243,13 @@ function parseTimestamp(value: unknown, label: string): number {
   return value;
 }
 
-function parseDeploymentSetup(
-  value: unknown,
-  label: string,
-): AgentTeamDeploymentSetup {
+function parsePreparation(value: unknown, label: string): AgentTeamPreparation {
   if (!isObject(value)) {
     throw new Error(`Invalid Agent Team registry: ${label} must be an object`);
   }
-  if (value.status === 'disabled') return { status: 'disabled' };
+  if (value.status === 'not_prepared' || value.status === 'disabled') {
+    return { status: 'not_prepared' };
+  }
   if (value.status === 'setting_up') {
     assertString(value.operationId, `${label}.operationId`);
     return {
@@ -333,8 +335,8 @@ function parseSetupLog(
   });
 }
 
-function parseDeployment(value: unknown, index: number): AgentTeamDeployment {
-  const label = `deployments[${index}]`;
+function parseProfile(value: unknown, index: number): AgentProfile {
+  const label = `profiles[${index}]`;
   if (!isObject(value)) {
     throw new Error(`Invalid Agent Team registry: ${label} must be an object`);
   }
@@ -345,20 +347,70 @@ function parseDeployment(value: unknown, index: number): AgentTeamDeployment {
       `Invalid Agent Team registry: ${label}.alias cannot have surrounding whitespace`,
     );
   }
-  if (
-    typeof value.revision !== 'number' ||
-    !Number.isSafeInteger(value.revision) ||
-    value.revision < 1
-  ) {
+  assertString(value.agentletId, `${label}.agentletId`);
+  assertString(value.workingDirPath, `${label}.workingDirPath`);
+  if (!isObject(value.launch)) {
     throw new Error(
-      `Invalid Agent Team registry: ${label}.revision must be a positive integer`,
+      `Invalid Agent Team registry: ${label}.launch must be an object`,
     );
   }
-  if (typeof value.enabled !== 'boolean') {
-    throw new Error(
-      `Invalid Agent Team registry: ${label}.enabled must be a boolean`,
-    );
+  const base = {
+    id: value.id,
+    alias: value.alias,
+    agentletId: value.agentletId,
+    workingDirPath: value.workingDirPath,
+  };
+  if (value.launch.kind === 'agent-team-manifest') {
+    assertString(value.launch.manifestPath, `${label}.launch.manifestPath`);
+    assertString(value.launch.harness, `${label}.launch.harness`);
+    return {
+      ...base,
+      launch: {
+        kind: 'agent-team-manifest',
+        manifestPath: value.launch.manifestPath,
+        harness: value.launch.harness,
+      },
+      preparation: parsePreparation(value.preparation, `${label}.preparation`),
+      setupLog: parseSetupLog(value.setupLog, `${label}.setupLog`),
+    } satisfies AgentTeamManifestProfile;
   }
+  if (value.launch.kind !== 'acp-command') {
+    throw new Error(`Invalid Agent Team registry: ${label}.launch.kind`);
+  }
+  assertString(value.launch.command, `${label}.launch.command`);
+  let metadata: AcpCommandProfile['metadata'];
+  if (value.metadata !== undefined) {
+    if (!isObject(value.metadata)) {
+      throw new Error(
+        `Invalid Agent Team registry: ${label}.metadata must be an object`,
+      );
+    }
+    if (
+      value.metadata.cliId !== undefined &&
+      typeof value.metadata.cliId !== 'string'
+    ) {
+      throw new Error(`Invalid Agent Team registry: ${label}.metadata.cliId`);
+    }
+    metadata =
+      value.metadata.cliId === undefined ? {} : { cliId: value.metadata.cliId };
+  }
+  return {
+    ...base,
+    launch: { kind: 'acp-command', command: value.launch.command },
+    ...(metadata === undefined ? {} : { metadata }),
+  } satisfies AcpCommandProfile;
+}
+
+function migrateDeployment(
+  value: unknown,
+  index: number,
+): AgentTeamManifestProfile {
+  const label = `deployments[${index}]`;
+  if (!isObject(value)) {
+    throw new Error(`Invalid Agent Team registry: ${label} must be an object`);
+  }
+  assertString(value.id, `${label}.id`);
+  assertString(value.alias, `${label}.alias`);
   assertString(value.machine, `${label}.machine`);
   assertString(value.manifestPath, `${label}.manifestPath`);
   assertString(value.harness, `${label}.harness`);
@@ -366,13 +418,14 @@ function parseDeployment(value: unknown, index: number): AgentTeamDeployment {
   return {
     id: value.id,
     alias: value.alias,
-    revision: value.revision,
-    enabled: value.enabled,
-    machine: value.machine,
-    manifestPath: value.manifestPath,
-    harness: value.harness,
+    agentletId: value.machine,
     workingDirPath: value.workingDirPath,
-    setup: parseDeploymentSetup(value.setup, `${label}.setup`),
+    launch: {
+      kind: 'agent-team-manifest',
+      manifestPath: value.manifestPath,
+      harness: value.harness,
+    },
+    preparation: parsePreparation(value.setup, `${label}.setup`),
     setupLog: parseSetupLog(value.setupLog, `${label}.setupLog`),
   };
 }
@@ -410,27 +463,38 @@ function parseMemberConfig(
 }
 
 function parseRegistryFile(value: unknown): AgentTeamRegistryState {
-  if (
-    !isObject(value) ||
-    value.schemaVersion !== SCHEMA_VERSION ||
-    !isObject(value.state)
-  ) {
+  if (!isObject(value) || !isObject(value.state)) {
+    throw new Error(`Unsupported or invalid Agent Team registry schema`);
+  }
+  const isLegacy = value.schemaVersion === LEGACY_SCHEMA_VERSION;
+  if (!isLegacy && value.schemaVersion !== SCHEMA_VERSION) {
     throw new Error(`Unsupported or invalid Agent Team registry schema`);
   }
   if (
     !Array.isArray(value.state.roots) ||
     !Array.isArray(value.state.members) ||
-    (value.state.deployments !== undefined &&
-      !Array.isArray(value.state.deployments)) ||
+    (isLegacy
+      ? value.state.deployments !== undefined &&
+        !Array.isArray(value.state.deployments)
+      : value.state.profiles !== undefined &&
+        !Array.isArray(value.state.profiles)) ||
     (value.state.configs !== undefined && !Array.isArray(value.state.configs))
   ) {
     throw new Error('Invalid Agent Team registry state');
   }
-  const state = {
-    roots: value.state.roots.map(parseRoot),
-    members: value.state.members.map(parseMember),
-    deployments: (value.state.deployments ?? []).map(parseDeployment),
-    configs: (value.state.configs ?? []).map(parseMemberConfig),
+  const roots = value.state.roots as unknown[];
+  const members = value.state.members as unknown[];
+  const configs = (value.state.configs ?? []) as unknown[];
+  const profileValues = isLegacy
+    ? ((value.state.deployments ?? []) as unknown[])
+    : ((value.state.profiles ?? []) as unknown[]);
+  const state: AgentTeamRegistryState = {
+    roots: roots.map(parseRoot),
+    members: members.map(parseMember),
+    profiles: isLegacy
+      ? profileValues.map(migrateDeployment)
+      : profileValues.map(parseProfile),
+    configs: configs.map(parseMemberConfig),
   };
   const rootKeys = new Set(state.roots.map(agentTeamRootKey));
   if (rootKeys.size !== state.roots.length) {
@@ -440,29 +504,22 @@ function parseRegistryFile(value: unknown): AgentTeamRegistryState {
   if (memberKeys.size !== state.members.length) {
     throw new Error('Invalid Agent Team registry: duplicate member identity');
   }
-  const deploymentIds = new Set(
-    state.deployments.map((deployment) => deployment.id),
-  );
-  if (deploymentIds.size !== state.deployments.length) {
-    throw new Error('Invalid Agent Team registry: duplicate deployment id');
+  const profileIds = new Set(state.profiles.map((profile) => profile.id));
+  if (profileIds.size !== state.profiles.length) {
+    throw new Error('Invalid Agent Team registry: duplicate profile id');
   }
-  const deploymentAliases = new Set(
-    state.deployments.map((deployment) => deployment.alias),
-  );
-  if (deploymentAliases.size !== state.deployments.length) {
-    throw new Error('Invalid Agent Team registry: duplicate deployment alias');
-  }
-  for (const deployment of state.deployments) {
+  for (const profile of state.profiles) {
+    if (profile.launch.kind !== 'agent-team-manifest') continue;
     if (
       !memberKeys.has(
         agentTeamMemberKey({
-          machine: deployment.machine,
-          manifestPath: deployment.manifestPath,
+          machine: profile.agentletId,
+          manifestPath: profile.launch.manifestPath,
         }),
       )
     ) {
       throw new Error(
-        'Invalid Agent Team registry: deployment references an unknown member',
+        'Invalid Agent Team registry: profile references an unknown member',
       );
     }
   }
@@ -543,7 +600,11 @@ export class FileAgentTeamRegistryStore implements AgentTeamRegistryStore {
         `Failed to read Agent Team registry: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
-    return parseRegistryFile(parsed);
+    const state = parseRegistryFile(parsed);
+    if (isObject(parsed) && parsed.schemaVersion === LEGACY_SCHEMA_VERSION) {
+      this.save(state);
+    }
+    return state;
   }
 
   save(state: AgentTeamRegistryState): void {

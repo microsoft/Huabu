@@ -18,25 +18,31 @@
  */
 
 import {
+  getAgentTeamRegistry,
+  getSupervisedAgentletId,
+} from '@agenetes/agentlet-host';
+
+import {
   renderExternalAgentInputs,
   renderSystemPreamble,
 } from './preprocessor.js';
 import { ensureProfileCacheSubscription } from './profile-cache-port.js';
-import { getProfile } from './profile-store.js';
+import { getProfile as getLegacyProfile } from './profile-store.js';
 import { buildReachbackEnv } from './reachback-env.js';
 import { canvasAcpNamespace } from '../../storage/paths.js';
 import {
   agenetes,
   EXTERNAL_DRIVER_KIND,
   type AcpHandle,
-  type AcpWorkloadSpec,
+  type LegacyProfileWorkloadSpec,
+  type ProfileWorkloadSpec,
 } from '../agenetes/drivers.js';
 import { createChatSubmission } from '../agenetes/handle.js';
 import { dumpAssembledPrompt } from '../conversation/prompt/debug-prompt.js';
-import { getSupervisedAgentletId } from '@agenetes/agentlet-host';
 
 import type { ChatEnvelope } from '../conversation/envelope.js';
 import type { AcpBindingRecipe, AcpTurnOverlay } from '@agenetes/acp-driver';
+import type { AgentProfileSnapshot } from '@agenetes/agent-team';
 import type { AgentStreamEvent } from '@sediment/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
@@ -126,7 +132,17 @@ export interface RunAcpAgentOptions {
 export function resolveBindingRecipe(
   profileId: string,
 ): AcpBindingRecipe | null {
-  const profile = getProfile(profileId);
+  const managed = getAgentTeamRegistry()?.getProfile(profileId);
+  if (managed?.launch.kind === 'acp-command') {
+    return {
+      command: managed.launch.command,
+      cwd: managed.workingDirPath,
+      autoRestart: true,
+      alias: managed.alias,
+    };
+  }
+
+  const profile = getLegacyProfile(profileId);
   if (!profile) return null;
   return {
     command: profile.command,
@@ -134,6 +150,19 @@ export function resolveBindingRecipe(
     autoRestart: profile.autoRestart,
     alias: profile.displayName,
     ...(profile.agentTeam && { agentTeam: profile.agentTeam }),
+  };
+}
+
+export function resolveProfileSnapshot(
+  profileId: string,
+): AgentProfileSnapshot | null {
+  const profile = getAgentTeamRegistry()?.getProfile(profileId);
+  if (!profile) return null;
+  return {
+    profileId: profile.id,
+    agentletId: profile.agentletId,
+    workingDirPath: profile.workingDirPath,
+    launch: profile.launch,
   };
 }
 
@@ -155,18 +184,27 @@ export async function* runAcpAgent(
   // longer opens the session out-of-band. We deliberately do NOT set `cwd`
   // when the caller omitted it, so the handle derives it from the bound
   // profile's recipe.
-  const spec: AcpWorkloadSpec = {
+  const profile = resolveProfileSnapshot(binding.profileId);
+  const baseSpec = {
     threadId,
-    agentletId: getSupervisedAgentletId(),
     kind: EXTERNAL_DRIVER_KIND,
-    workloadType: 'Deployment',
+    workloadType: 'Deployment' as const,
     namespace: canvasAcpNamespace(canvasId),
     initialPreamble: [renderSystemPreamble()],
     binding,
     env: buildReachbackEnv(threadId, canvasId),
-    ...(opts.cwd !== undefined && { cwd: opts.cwd }),
-    recipe: resolveBindingRecipe(binding.profileId),
   };
+  const spec: ProfileWorkloadSpec | LegacyProfileWorkloadSpec = profile
+    ? {
+        ...baseSpec,
+        profile,
+      }
+    : {
+        ...baseSpec,
+        agentletId: getSupervisedAgentletId(),
+        ...(opts.cwd !== undefined && { cwd: opts.cwd }),
+        recipe: resolveBindingRecipe(binding.profileId),
+      };
 
   // Optional developer aid: dump the exact text payload handed to ACP
   // `session/prompt` (the serialized prompt, NOT pi-ai messages — the

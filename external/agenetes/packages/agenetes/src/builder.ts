@@ -2,7 +2,7 @@
 // fixes drivers as static wiring at mount time. `mountAgenetes()` returns
 // an accumulating, type-safe builder:
 //
-//   - standard ACP and pi factories are present from the start;
+//   - standard ACP, Profile, and pi factories are present from the start;
 //   - `.addFactory(factoryName, factory)` grows the factory dictionary,
 //     threading a
 //     `factoryName → cfg` type map through the builder generics so a later
@@ -22,9 +22,14 @@
 // its own transport or receives a shared reference is an impl choice.
 
 import {
+  ACP_CAPABILITIES,
   acpDriverFactory,
   type AcpDriverFactoryConfig,
 } from '@agenetes/acp-driver';
+import {
+  agentProfileDriverFactory,
+  type AgentProfileRuntimePorts,
+} from '@agenetes/agent-team';
 import {
   piDriverFactory,
   type PiDriverFactoryConfig,
@@ -59,6 +64,7 @@ export type DriverFactory<TCfg = void> = (cfg: TCfg) => AgentDriver;
 /** Standard factories available on every newly mounted builder. */
 export interface StandardDriverFactoryMap {
   readonly acp: DriverFactory<AcpDriverFactoryConfig>;
+  readonly profile: DriverFactory<AgentProfileRuntimePorts>;
   readonly pi: DriverFactory<PiDriverFactoryConfig>;
 }
 
@@ -141,14 +147,23 @@ export interface MountAgenetesOptions {
 }
 
 /**
- * Open an {@link AgenetesBuilder} (README I9.5) with the standard ACP and
- * pi factories already available for registration.
+ * Open an {@link AgenetesBuilder} (README I9.5) with the standard ACP,
+ * Profile, and pi factories already available for registration.
  */
 export function mountAgenetes(
   options: MountAgenetesOptions = {},
 ): AgenetesBuilder<StandardDriverFactoryMap> {
   const factories = new Map<string, DriverFactory<never>>([
     ['acp', acpDriverFactory as DriverFactory<never>],
+    [
+      'profile',
+      ((ports: AgentProfileRuntimePorts) =>
+        agentProfileDriverFactory({
+          delegate: acpDriverFactory(),
+          delegateCapabilities: ACP_CAPABILITIES,
+          ports,
+        })) as DriverFactory<never>,
+    ],
     ['pi', piDriverFactory as DriverFactory<never>],
   ]);
   const registrations: Registration[] = [];

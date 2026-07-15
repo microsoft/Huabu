@@ -30,8 +30,6 @@ const emptyState = (localMachine: string): AgentTeamSettingsState => ({
   localMachine,
   roots: [],
   members: [],
-  deployments: [],
-  configs: [],
 });
 
 let latestMutate:

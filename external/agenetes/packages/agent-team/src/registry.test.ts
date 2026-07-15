@@ -217,7 +217,7 @@ describe('AgentTeamRegistry', () => {
     });
   });
 
-  it('persists deployments with case-sensitive aliases and placement revisions', async () => {
+  it('persists immutable Profiles and allows duplicate aliases', async () => {
     const root = { machine, path: '/collections/one' };
     const port = new FakeScanPort();
     setResult(port, root, {
@@ -230,7 +230,7 @@ describe('AgentTeamRegistry', () => {
       diagnostics: [],
     });
     const store = new InMemoryAgentTeamRegistryStore();
-    const ids = ['deployment-1', 'deployment-2'];
+    const ids = ['profile-1', 'profile-2', 'profile-3'];
     const registry = new AgentTeamRegistry(
       store,
       port,
@@ -239,65 +239,77 @@ describe('AgentTeamRegistry', () => {
     );
     await registry.addRoot(root);
 
-    const first = registry.createDeployment({
+    const first = registry.createProfile({
+      launchKind: 'agent-team-manifest',
       alias: 'Reviewer',
-      machine,
+      agentletId: machine,
       manifestPath: member.manifestPath,
       harness: 'copilot',
       workingDirPath: '/workspaces/reviewer',
     });
-    const second = registry.createDeployment({
-      alias: 'reviewer',
-      machine,
+    const second = registry.createProfile({
+      launchKind: 'agent-team-manifest',
+      alias: 'Reviewer',
+      agentletId: machine,
       manifestPath: member.manifestPath,
       harness: 'copilot',
       workingDirPath: '/workspaces/reviewer-lowercase',
     });
+    const command = registry.createProfile({
+      launchKind: 'acp-command',
+      alias: 'Reviewer',
+      agentletId: machine,
+      command: 'copilot --acp',
+      workingDirPath: '/workspaces/direct',
+      metadata: { cliId: 'copilot' },
+    });
 
     expect(first).toMatchObject({
-      id: 'deployment-1',
-      revision: 1,
-      enabled: false,
-      setup: { status: 'disabled' },
+      id: 'profile-1',
+      launch: { kind: 'agent-team-manifest' },
+      preparation: { status: 'not_prepared' },
     });
-    expect(second.id).toBe('deployment-2');
-    expect(registry.getDeploymentByAlias('Reviewer')?.id).toBe('deployment-1');
-    expect(registry.getDeploymentByAlias('reviewer')?.id).toBe('deployment-2');
-    expect(() =>
-      registry.createDeployment({
-        alias: 'Reviewer',
+    expect(second.id).toBe('profile-2');
+    expect(command).toMatchObject({
+      id: 'profile-3',
+      launch: { kind: 'acp-command', command: 'copilot --acp' },
+      metadata: { cliId: 'copilot' },
+    });
+    expect(registry.listProfiles()).toHaveLength(3);
+    expect(registry.listMemberSummaries()).toEqual([
+      expect.objectContaining({
         machine,
         manifestPath: member.manifestPath,
-        harness: 'copilot',
-        workingDirPath: '/workspaces/duplicate',
+        profileCount: 2,
+        preparationCounts: {
+          not_prepared: 2,
+          setting_up: 0,
+          ready: 0,
+          error: 0,
+        },
       }),
-    ).toThrow('alias already exists');
-
+    ]);
     expect(
-      registry.updateDeployment(first.id, { alias: 'Primary Reviewer' }),
-    ).toMatchObject({ alias: 'Primary Reviewer', revision: 1 });
+      registry.getMemberDetail(machine, member.manifestPath).profiles,
+    ).toHaveLength(2);
     expect(
-      registry.updateDeployment(first.id, {
-        harness: 'claude',
-        workingDirPath: '/workspaces/reviewer-claude',
-      }),
+      registry.patchProfile(first.id, { alias: 'Primary Reviewer' }),
     ).toMatchObject({
-      harness: 'claude',
-      workingDirPath: '/workspaces/reviewer-claude',
-      revision: 2,
-      setup: { status: 'disabled' },
+      alias: 'Primary Reviewer',
+      launch: { harness: 'copilot' },
+      workingDirPath: '/workspaces/reviewer',
     });
 
     const restored = new AgentTeamRegistry(store, port);
-    expect(restored.getDeployment(first.id)).toMatchObject({
+    expect(restored.getProfile(first.id)).toMatchObject({
       alias: 'Primary Reviewer',
-      revision: 2,
+      preparation: { status: 'not_prepared' },
     });
-    expect(restored.deleteDeployment(second.id)).toBe(true);
-    expect(restored.deleteDeployment(second.id)).toBe(false);
+    expect(restored.deleteProfile(second.id)).toBe(true);
+    expect(restored.deleteProfile(second.id)).toBe(false);
   });
 
-  it('rejects deployments for missing members and undeclared harnesses', async () => {
+  it('rejects manifest Profiles for missing members and undeclared harnesses', async () => {
     const root = { machine, path: '/collections/one' };
     const port = new FakeScanPort();
     setResult(port, root, { members: [member], diagnostics: [] });
@@ -308,9 +320,10 @@ describe('AgentTeamRegistry', () => {
     await registry.addRoot(root);
 
     expect(() =>
-      registry.createDeployment({
+      registry.createProfile({
+        launchKind: 'agent-team-manifest',
         alias: 'Reviewer',
-        machine,
+        agentletId: machine,
         manifestPath: member.manifestPath,
         harness: 'claude',
         workingDirPath: '/workspaces/reviewer',
@@ -319,9 +332,10 @@ describe('AgentTeamRegistry', () => {
 
     registry.removeRoot(root);
     expect(() =>
-      registry.createDeployment({
+      registry.createProfile({
+        launchKind: 'agent-team-manifest',
         alias: 'Reviewer',
-        machine,
+        agentletId: machine,
         manifestPath: member.manifestPath,
         harness: 'copilot',
         workingDirPath: '/workspaces/reviewer',

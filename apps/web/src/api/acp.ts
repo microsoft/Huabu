@@ -28,10 +28,10 @@ import type {
   AcpAgentletStatusResponse,
   AcpPermissionDecisionRequest,
   AcpPermissionDecisionResponse,
-  AcpProfileCreateRequest,
   AcpProfileMutationResponse,
-  AcpProfileUpdateRequest,
   AcpProfilesListResponse,
+  CreateAcpCommandProfileBody,
+  PatchAgentProfileBody,
   AcpThreadCachedMetaResponse,
   AcpThreadCommandsResponse,
   EnsureAcpSessionRequest,
@@ -51,10 +51,11 @@ export type {
   AcpAgentletStatus,
   AcpAgentletStatusResponse,
   AcpModelInfo,
-  AcpProfileCreateRequest,
   AcpProfileMutationResponse,
-  AcpProfileUpdateRequest,
   AcpProfilesListResponse,
+  CreateAcpCommandProfileBody,
+  PatchAgentProfileBody,
+  AgentProfileView,
   AcpSessionConfigOption,
   AcpSessionMetaSnapshot,
   AcpSessionMode,
@@ -99,7 +100,7 @@ export async function listAcpProfiles(): Promise<AcpProfilesListResponse> {
  * fully-formed profile + initial runtime (`spawned: false`).
  */
 export async function createAcpProfile(
-  payload: AcpProfileCreateRequest,
+  payload: CreateAcpCommandProfileBody,
 ): Promise<AcpProfileMutationResponse> {
   return apiFetch<AcpProfileMutationResponse>(routes.acpProfiles, {
     method: 'POST',
@@ -115,7 +116,7 @@ export async function createAcpProfile(
  */
 export async function updateAcpProfile(
   id: string,
-  payload: AcpProfileUpdateRequest,
+  payload: PatchAgentProfileBody,
 ): Promise<AcpProfileMutationResponse> {
   return apiFetch<AcpProfileMutationResponse>(routes.acpProfileItem(id), {
     method: 'PATCH',
