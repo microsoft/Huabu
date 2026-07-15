@@ -124,6 +124,8 @@ React Flow selection, does not show editing toolbars, does not cover the
 question status badge, and does not affect which selected nodes are sent as
 additional chat context.
 
+The chat panel header is the question node's rename surface in both compose and replay modes. Clicking the title (or focusing it and pressing Enter/Space) opens the same inline editor used by expanded content nodes; blur/Enter commits through `canvasStore.tryRename('node', ...)`, Escape cancels, and the shared rename path owns collision detection, persistence, and rollback. A fresh compose view continues to show the neutral “New question” title until the user assigns a name.
+
 ### 5.2 Dispatch
 
 All questions run through `/api/agent` ([agent.ts](../../apps/web/src/api/agent.ts) → [intent](../../apps/server/src/modules/canvas/node-neighbourhood.ts)). On first send `useAgentStream` ([useAgentStream.ts](../../apps/web/src/hooks/useAgentStream.ts)) locks `agentBinding` + `agentMode` onto the node:
@@ -148,7 +150,7 @@ The LLM gets natural-language topology; for exact coordinates it calls
 
 ### 5.4 State machine
 
-```
+```text
 idle ──double-click──▶ compose (no status change)
                             │ user sends
                             ▼
