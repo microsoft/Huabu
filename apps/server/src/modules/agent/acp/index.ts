@@ -13,6 +13,7 @@ export { default as acpThreadsRoutes } from './threads.route.js';
 export { default as acpAgentCliRoutes } from './agent-cli.route.js';
 export { default as acpProfilesRoutes } from './profiles.route.js';
 export { default as acpAgentletRoutes } from './daemon.route.js';
+export { default as externalAgentRuntimeConfigRoutes } from './runtime-config.route.js';
 /** @deprecated Use {@link acpAgentletRoutes} instead. */
 export { default as acpDaemonRoutes } from './daemon.route.js';
 

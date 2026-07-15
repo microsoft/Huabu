@@ -378,6 +378,16 @@ export class AcpAgentClient {
       (_agent: SdkAgent) => this.createClientHandler(),
       stream,
     );
+    connection.onLifecycle((event) => {
+      if (
+        event.type === 'agent/suspended' ||
+        event.type === 'agent/exited' ||
+        event.type === 'agent/goodbye' ||
+        event.type === 'agent/disconnected'
+      ) {
+        this.shutdown(event.type);
+      }
+    });
   }
 
   // ── Public API ──────────────────────────────────────────────────────────

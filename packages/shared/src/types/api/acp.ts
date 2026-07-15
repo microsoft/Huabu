@@ -35,6 +35,21 @@ import type {
 } from '../agent/acp-tool.js';
 import type { AgentletStatus } from '@agenetes/protocol';
 
+// ─── Global external-agent runtime config ─────────────────────────────
+
+export const externalAgentIdleTimeoutSecsSchema = z.union([
+  z.literal(0),
+  z.number().int().min(60).max(86_400).multipleOf(60),
+]);
+
+export const externalAgentRuntimeConfigSchema = z.object({
+  idleTimeoutSecs: externalAgentIdleTimeoutSecsSchema,
+});
+
+export type ExternalAgentRuntimeConfig = z.infer<
+  typeof externalAgentRuntimeConfigSchema
+>;
+
 // ─── Agent profiles (user-configured spawn recipes) ────────────────────
 //
 // A profile is a stable, user-edited record describing how to spawn one

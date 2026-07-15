@@ -66,7 +66,7 @@ export {
   lowerAcpInputs,
   resolveAcpAgentletId,
 } from './handle.js';
-export type { InStreamEvent, AcpTurnCtx } from './handle.js';
+export type { AcpRuntimePolicy, InStreamEvent, AcpTurnCtx } from './handle.js';
 
 export { acpDriverFactory } from './driver.js';
 export type {

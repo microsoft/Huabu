@@ -154,9 +154,12 @@ export class LiveAgentletConnection implements AgentletConnection {
     }
   }
 
-  handleWsClose(): void {
+  handleWsClose(reason = 'websocket_closed'): void {
     this.currentStatus = 'disconnected';
     this.ws = null;
+    for (const handler of this.lifecycleHandlers) {
+      handler({ type: 'agent/disconnected', reason });
+    }
   }
 
   handleReconnect(

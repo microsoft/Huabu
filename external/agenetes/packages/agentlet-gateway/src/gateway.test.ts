@@ -155,6 +155,28 @@ afterEach(async () => {
 });
 
 describe('AgentletGateway', () => {
+  it('surfaces session WebSocket closure as a connection lifecycle event', async () => {
+    const { gateway, url } = await startHarness();
+    const client = await connect(url, {
+      role: 'session',
+      queryId: 'session-close',
+      token: 'token-a',
+      hello: sessionHello('machine-a', 'session-close'),
+    });
+    const connection = gateway.getSession('machine-a', 'session-close');
+    expect(connection).toBeDefined();
+    const onLifecycle = vi.fn();
+    connection?.onLifecycle(onLifecycle);
+
+    client.socket.close();
+
+    await waitUntil(() => onLifecycle.mock.calls.length > 0);
+    expect(onLifecycle).toHaveBeenCalledWith({
+      type: 'agent/disconnected',
+      reason: 'websocket_closed',
+    });
+  });
+
   it('rejects malformed JSON-RPC without registering a connection', async () => {
     const { gateway, url } = await startHarness();
     const socket = new WebSocket(

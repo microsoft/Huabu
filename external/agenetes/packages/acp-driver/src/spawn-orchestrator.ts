@@ -57,12 +57,6 @@ export function isSessionResumeUnavailableError(error: unknown): boolean {
 }
 
 /**
- * Default idle timeout (seconds) before the agentlet daemon suspends
- * an inactive session. Resumed transparently on next message.
- */
-const DEFAULT_IDLE_TIMEOUT_SECS = 600;
-
-/**
  * Cold-start grace window for the embedded agentlet's WS handshake.
  * Generous on purpose: in packaged Electron builds the very first
  * launch has to pay for ASAR unpack, on-access AV scans of the
@@ -192,6 +186,7 @@ export async function ensureAgentForThread(
   recipe: AcpBindingRecipe,
   existingSessionId?: string,
   env?: Record<string, string>,
+  idleTimeoutSecs = 600,
 ): Promise<{ agentletId: string; sessionId: string; pid: number }> {
   const agentlet = await waitForTargetAgentlet(
     agentletId,
@@ -251,7 +246,7 @@ export async function ensureAgentForThread(
           ? { agentTeam: recipe.agentTeam }
           : { command: recipe.command, cwd: recipe.cwd }),
         autoRestart: recipe.autoRestart,
-        idleTimeoutSecs: DEFAULT_IDLE_TIMEOUT_SECS,
+        idleTimeoutSecs,
         env: spawnEnv,
       },
     });

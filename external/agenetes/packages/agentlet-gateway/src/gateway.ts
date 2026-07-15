@@ -396,7 +396,7 @@ export class AgentletGateway {
       clearTimeout(handshakeTimer);
       const connection = this.findConnectionByWs(ws);
       if (!connection) return;
-      connection.handleWsClose();
+      connection.handleWsClose('websocket_closed');
       this.notifyDisconnection(connection, 'websocket_closed');
     });
 

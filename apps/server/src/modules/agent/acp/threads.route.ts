@@ -39,6 +39,7 @@ import {
 import { ensureProfileCacheSubscription } from './profile-cache-port.js';
 import { getProfileSchemaCache } from './profile-schema-cache.js';
 import { buildReachbackEnv } from './reachback-env.js';
+import { getExternalAgentRuntimeConfig } from './runtime-config.js';
 import { resolveBindingRecipe } from './service.js';
 import { canvasAcpNamespace } from '../../storage/paths.js';
 import {
@@ -157,6 +158,7 @@ async function resolveSetRpcEntry(
       env: spec.env,
       ...(spec.cwd !== undefined && { cwd: spec.cwd }),
       recipe: spec.recipe,
+      idleTimeoutSecs: getExternalAgentRuntimeConfig().idleTimeoutSecs,
       logger,
     });
     return { ok: true, entry, spec };
@@ -298,6 +300,7 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
         env: buildReachbackEnv(threadId, parsed.data.canvasId ?? ''),
         cwd: parsed.data.cwd,
         recipe: resolveBindingRecipe(parsed.data.profileId),
+        idleTimeoutSecs: getExternalAgentRuntimeConfig().idleTimeoutSecs,
         logger: request.log,
       });
       return {

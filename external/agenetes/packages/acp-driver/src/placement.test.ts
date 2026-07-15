@@ -93,6 +93,34 @@ describe('explicit ACP placement', () => {
     expect(spawnOnAgentlet).toHaveBeenCalledTimes(2);
   });
 
+  it('passes the host idle-timeout policy to agentlet spawn', async () => {
+    const spawnOnAgentlet = vi.fn(async () => ({
+      sessionId: 'session-never-suspend',
+      pid: 303,
+    }));
+    host.gateway = {
+      getAgentlet: () => ({ agentletId: 'machine-a', status: 'connected' }),
+      getSession: () => ({ status: 'connected' }),
+      spawnOnAgentlet,
+    };
+
+    await ensureAgentForThread(
+      'machine-a',
+      'thread-never-suspend',
+      recipe,
+      undefined,
+      undefined,
+      0,
+    );
+
+    expect(spawnOnAgentlet).toHaveBeenCalledWith(
+      'machine-a',
+      expect.objectContaining({
+        sessionSpec: expect.objectContaining({ idleTimeoutSecs: 0 }),
+      }),
+    );
+  });
+
   it('returns a structured placement error when the target is absent', async () => {
     vi.useFakeTimers();
     host.gateway = {
