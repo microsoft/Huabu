@@ -7,12 +7,13 @@ import { Button } from '@/components/Common/Button';
 import { Select } from '@/components/Common/Select';
 import { SettingRow } from '@/components/Common/SettingRow';
 import { SettingSection } from '@/components/Common/SettingSection';
+import { TextInput } from '@/components/Common/TextInput';
 import { toast } from '@/components/Common/Toast';
 import { Toggle } from '@/components/Common/Toggle';
 import { useLLMStore } from '@/store/llmStore';
 import { copyToClipboard } from '@/utils/io/clipboard';
 
-import { TEXT_INPUT_CLASS, useDebouncedSave } from '../utils';
+import { useDebouncedSave } from '../utils';
 
 import type { LLMConfigUpdate, LLMUtilityConfigUpdate } from '@sediment/shared';
 
@@ -39,7 +40,7 @@ const BaseUrlRow: React.FC<BaseUrlRowProps> = ({
 
   return (
     <SettingRow title={title} description={description}>
-      <input
+      <TextInput
         type="url"
         inputMode="url"
         autoCapitalize="none"
@@ -53,7 +54,7 @@ const BaseUrlRow: React.FC<BaseUrlRowProps> = ({
           debouncedSave(nextValue.trim());
         }}
         disabled={disabled}
-        className={`${TEXT_INPUT_CLASS} w-56`}
+        className="w-56"
       />
     </SettingRow>
   );
@@ -253,7 +254,7 @@ export const LLMSettings: React.FC = () => {
 
         {llmConfig?.provider && llmModels.length === 0 && !isAzure && (
           <SettingRow title={t('settings.model')}>
-            <input
+            <TextInput
               type="text"
               placeholder="e.g. gpt-4o"
               value={manualModel}
@@ -262,7 +263,7 @@ export const LLMSettings: React.FC = () => {
                 setManualModel(v);
                 debouncedSaveChat({ model: v.trim() });
               }}
-              className={`${TEXT_INPUT_CLASS} w-44`}
+              className="w-44"
             />
           </SettingRow>
         )}
@@ -287,7 +288,7 @@ export const LLMSettings: React.FC = () => {
         {isAzure && (
           <>
             <SettingRow title={t('settings.deployment')}>
-              <input
+              <TextInput
                 type="text"
                 placeholder="e.g. gpt-5-chat"
                 value={azureDeployment}
@@ -296,12 +297,12 @@ export const LLMSettings: React.FC = () => {
                   setAzureDeployment(v);
                   debouncedSaveChat({ model: v });
                 }}
-                className={`${TEXT_INPUT_CLASS} w-56`}
+                className="w-56"
               />
             </SettingRow>
 
             <SettingRow title={t('settings.apiVersion')}>
-              <input
+              <TextInput
                 type="text"
                 placeholder="e.g. 2025-04-01-preview"
                 value={azureApiVersion}
@@ -310,7 +311,7 @@ export const LLMSettings: React.FC = () => {
                   setAzureApiVersion(v);
                   debouncedSaveChat({ apiVersion: v });
                 }}
-                className={`${TEXT_INPUT_CLASS} w-56`}
+                className="w-56"
               />
             </SettingRow>
 
@@ -461,7 +462,7 @@ export const LLMSettings: React.FC = () => {
               </SettingRow>
             ) : (
               <SettingRow title={t('settings.model')}>
-                <input
+                <TextInput
                   type="text"
                   placeholder="e.g. gpt-4o-mini"
                   value={utilityManualModel}
@@ -470,7 +471,7 @@ export const LLMSettings: React.FC = () => {
                     setUtilityManualModel(v);
                     debouncedSaveUtility({ model: v.trim() });
                   }}
-                  className={`${TEXT_INPUT_CLASS} w-44`}
+                  className="w-44"
                 />
               </SettingRow>
             )}

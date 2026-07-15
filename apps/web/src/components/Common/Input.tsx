@@ -5,10 +5,6 @@ import { Tooltip } from './Tooltip';
 
 import type { InputHTMLAttributes } from 'react';
 
-/** Shared styling for compact text inputs used in settings forms. */
-export const TEXT_INPUT_CLASS =
-  'border-edge-default bg-surface text-fg-muted focus:ring-info-light rounded border px-2 py-1.5 text-xs focus:ring-1 focus:outline-none';
-
 export type InputProps = {
   className?: string;
   wrapperClassName?: string;

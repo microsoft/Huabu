@@ -15,11 +15,11 @@ import {
   updateAcpProfile,
 } from '@/api/acp';
 import { Button } from '@/components/Common/Button';
-import { Input } from '@/components/Common/Input';
 import { Modal } from '@/components/Common/Modal';
 import { PathInput } from '@/components/Common/PathInput';
 import { Select } from '@/components/Common/Select';
 import { TabGroup } from '@/components/Common/TabGroup';
+import { TextInput } from '@/components/Common/TextInput';
 import { toast } from '@/components/Common/Toast';
 import { Tooltip } from '@/components/Common/Tooltip';
 
@@ -519,7 +519,7 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
                 <FieldLabel hint={t('settings.launchCommandHint')}>
                   {t('settings.launchCommand')}
                 </FieldLabel>
-                <Input
+                <TextInput
                   value={form.customCommand}
                   onChange={(e) =>
                     setForm((p) => ({
@@ -528,7 +528,7 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
                     }))
                   }
                   placeholder="/usr/local/bin/copilot --acp --allow-all"
-                  className="border-edge-default bg-surface rounded border px-2 py-1 font-mono text-xs"
+                  mono
                 />
               </label>
             )}
@@ -580,13 +580,12 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
           {t('settings.displayName')}{' '}
           <span className="text-fg-subtle">({t('settings.optional')})</span>
         </FieldLabel>
-        <Input
+        <TextInput
           value={form.displayName}
           onChange={(e) =>
             setForm((p) => ({ ...p, displayName: e.target.value }))
           }
           placeholder={defaultDisplayName}
-          className="border-edge-default bg-surface rounded border px-2 py-1 text-xs"
         />
       </label>
 

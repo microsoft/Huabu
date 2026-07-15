@@ -4,8 +4,8 @@ import { useTranslation } from 'react-i18next';
 
 import { updateAgentTeamConfigs } from '@/api/agent-team';
 import { Button } from '@/components/Common/Button';
-import { Input, TEXT_INPUT_CLASS } from '@/components/Common/Input';
 import { SettingRow } from '@/components/Common/SettingRow';
+import { TextInput } from '@/components/Common/TextInput';
 import { toast } from '@/components/Common/Toast';
 
 import type {
@@ -73,7 +73,7 @@ function ConfigField({ config, field, onDetailChange }: ConfigFieldProps) {
             <Key className="text-warning" size={14} />
           )
         ) : null}
-        <Input
+        <TextInput
           type={field.secret ? 'password' : 'text'}
           value={value}
           onChange={(event) => setValue(event.target.value)}
@@ -84,7 +84,8 @@ function ConfigField({ config, field, onDetailChange }: ConfigFieldProps) {
           }
           disabled={saving}
           autoComplete="off"
-          className={`${TEXT_INPUT_CLASS} min-w-0 flex-1 font-mono`}
+          mono
+          className="min-w-0 flex-1"
           onKeyDown={(event) => {
             if (event.key === 'Enter' && (!field.secret || value.length > 0)) {
               event.preventDefault();

@@ -20,11 +20,15 @@ vi.mock('@/components/Common/Button', () => ({
   ),
 }));
 
-vi.mock('@/components/Common/Input', () => ({
-  Input: (props: React.InputHTMLAttributes<HTMLInputElement>) => (
-    <input {...props} />
-  ),
-  TEXT_INPUT_CLASS: '',
+vi.mock('@/components/Common/TextInput', () => ({
+  TextInput: ({
+    mono: _mono,
+    size: _size,
+    ...props
+  }: React.InputHTMLAttributes<HTMLInputElement> & {
+    mono?: boolean;
+    size?: 'sm' | 'md';
+  }) => <input {...props} />,
 }));
 
 vi.mock('@/components/Common/Toast', () => ({

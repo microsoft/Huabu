@@ -10,11 +10,11 @@ import {
   setupAgentTeamProfile,
 } from '@/api/agent-team';
 import { Button } from '@/components/Common/Button';
-import { Input, TEXT_INPUT_CLASS } from '@/components/Common/Input';
 import { Modal } from '@/components/Common/Modal';
 import { PathInput } from '@/components/Common/PathInput';
 import { Select } from '@/components/Common/Select';
 import { SettingRow } from '@/components/Common/SettingRow';
+import { TextInput } from '@/components/Common/TextInput';
 import { toast } from '@/components/Common/Toast';
 
 import type {
@@ -156,7 +156,7 @@ export function AgentTeamProfiles({
           <SettingRow
             key={profile.id}
             title={
-              <Input
+              <TextInput
                 value={aliasDraft}
                 onChange={(event) =>
                   setAliasDrafts((current) => ({
@@ -166,7 +166,6 @@ export function AgentTeamProfiles({
                 }
                 aria-label={t('alias')}
                 disabled={busy}
-                className={TEXT_INPUT_CLASS}
               />
             }
             description={[
@@ -266,12 +265,11 @@ export function AgentTeamProfiles({
           description={t('addProfileDescription')}
         >
           <div className="flex min-w-80 flex-col gap-2 py-1">
-            <Input
+            <TextInput
               value={alias}
               onChange={(event) => setAlias(event.target.value)}
               placeholder={t('alias')}
               disabled={pending !== null}
-              className={TEXT_INPUT_CLASS}
             />
             <Select
               value={harness}

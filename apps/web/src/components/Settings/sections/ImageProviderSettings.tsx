@@ -12,9 +12,10 @@ import { ApiKeyRow } from '@/components/Common/ApiKeyRow';
 import { Select } from '@/components/Common/Select';
 import { SettingRow } from '@/components/Common/SettingRow';
 import { SettingSection } from '@/components/Common/SettingSection';
+import { TextInput } from '@/components/Common/TextInput';
 import { useLLMStore } from '@/store/llmStore';
 
-import { TEXT_INPUT_CLASS, useDebouncedSave } from '../utils';
+import { useDebouncedSave } from '../utils';
 
 import type { ImageModelFamily, LLMImageConfigUpdate } from '@sediment/shared';
 
@@ -112,7 +113,7 @@ export const ImageProviderSettings: React.FC = () => {
       </SettingRow>
 
       <SettingRow title={t('settings.endpoint')}>
-        <input
+        <TextInput
           type="text"
           placeholder="https://…cognitiveservices.azure.com"
           value={imgEndpoint}
@@ -121,7 +122,7 @@ export const ImageProviderSettings: React.FC = () => {
             setImgEndpoint(v);
             debouncedSaveImage({ baseUrl: v });
           }}
-          className={`${TEXT_INPUT_CLASS} w-56`}
+          className="w-56"
         />
       </SettingRow>
 
@@ -143,7 +144,7 @@ export const ImageProviderSettings: React.FC = () => {
         title={t('settings.deployment')}
         description={t('settings.deploymentOptional')}
       >
-        <input
+        <TextInput
           type="text"
           placeholder={imgModelFamily}
           value={imgDeployment}
@@ -152,7 +153,7 @@ export const ImageProviderSettings: React.FC = () => {
             setImgDeployment(v);
             debouncedSaveImage({ model: v });
           }}
-          className={`${TEXT_INPUT_CLASS} w-56`}
+          className="w-56"
         />
       </SettingRow>
 
@@ -160,7 +161,7 @@ export const ImageProviderSettings: React.FC = () => {
         title={t('settings.apiVersion')}
         description={t('settings.optional')}
       >
-        <input
+        <TextInput
           type="text"
           placeholder={t('settings.imageApiVersionPlaceholder')}
           value={imgApiVersion}
@@ -169,7 +170,7 @@ export const ImageProviderSettings: React.FC = () => {
             setImgApiVersion(v);
             debouncedSaveImage({ apiVersion: v });
           }}
-          className={`${TEXT_INPUT_CLASS} w-56`}
+          className="w-56"
         />
       </SettingRow>
 

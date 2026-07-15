@@ -3,8 +3,8 @@ import React, { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Button } from './Button';
-import { Input, TEXT_INPUT_CLASS } from './Input';
 import { SettingRow } from './SettingRow';
+import { TextInput } from './TextInput';
 
 interface ApiKeyRowProps {
   /** Label for the credential. */
@@ -88,7 +88,7 @@ export const ApiKeyRow: React.FC<ApiKeyRowProps> = ({
 
       {editing && (
         <div className="px-3 py-2.5">
-          <Input
+          <TextInput
             type="password"
             aria-label={title}
             placeholder={placeholder}
@@ -107,7 +107,7 @@ export const ApiKeyRow: React.FC<ApiKeyRowProps> = ({
                 closeEditor();
               }
             }}
-            className={`${TEXT_INPUT_CLASS} w-full`}
+            className="w-full"
             autoComplete="off"
             autoFocus
           />

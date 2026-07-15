@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
 
-export { TEXT_INPUT_CLASS } from '@/components/Common/Input';
-
 /**
  * Debounce a save callback so the caller can invoke it on every keystroke
  * but the network round-trip only fires after the user pauses typing for
