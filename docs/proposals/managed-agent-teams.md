@@ -185,7 +185,9 @@ The snapshot prevents Profile deletion or later display metadata changes from si
 
 For `agent-team-manifest`, the workload snapshot retains the member identity and loads current member Configs whenever it spawns a new session. This keeps secrets out of durable workload state while allowing Config updates to take effect on later session spawns.
 
-Both launch kinds lower to the standard ACP driver and preserve explicit `agentletId` placement. Runtime lowering currently sets `SessionSpec.autoRestart = true` for every external workload. Per-Profile restart settings are removed; a future global runtime policy may add configuration, exponential backoff, and circuit breaking.
+`@agenetes/agent-team` provides a standard Agent Profile driver/service registered with the core Agenetes instance. It accepts the durable Profile snapshot, resolves either launch kind, loads current manifest Configs and validates prepared workspaces through injected ports when required, and delegates ACP execution to the standard ACP driver. Huabu does not construct `AcpWorkloadSpec` or duplicate Profile lowering.
+
+Both launch kinds preserve explicit `agentletId` placement. Runtime lowering currently sets `SessionSpec.autoRestart = true` for every external workload. Per-Profile restart settings are removed; a future global runtime policy may add configuration, exponential backoff, and circuit breaking.
 
 An `acp-command` Profile has no setup or preflight lifecycle. Its stored fields are validated structurally at creation, and agentlet availability, missing working directories, missing executables, or ACP handshake failures are reported as structured errors from the attempted session spawn.
 
@@ -222,7 +224,7 @@ Migration is idempotent and must not rewrite an existing unified Profile. Existi
 
 ## 3. Agenetes and agentlet ownership
 
-`@agenetes/agent-team` owns the host-agnostic unified Profile registry, Agent Team roots and members, Config metadata, preparation state, runtime Profile resolution, and the first-version file-backed persistence and migration.
+`@agenetes/agent-team` owns the host-agnostic unified Profile registry, Agent Team roots and members, Config metadata, preparation state, runtime Profile resolution, the standard Agent Profile driver/service, and the first-version file-backed persistence and migration.
 
 `@agenetes/agentlet-host.mountAgenetes(...)` composes the registry with the single Agentlet Gateway and supplies it as the Agent Team control port. Huabu supplies the storage directory, SecretStore adapter, reachback environment, HTTP/SSE projection, and Settings and Chat UI.
 
@@ -267,8 +269,9 @@ Profile deletion does not revoke existing threads. Global restart policy, crash-
 
 ### ⏳ Runtime and Chat integration
 
-- Add Agenetes Profile resolution and durable external workload snapshots for both launch kinds.
-- Lower manifest-backed snapshots through Config resolution, validation, and the ACP driver.
+- Register the standard Agent Profile driver/service with core Agenetes and remove Huabu-owned `AcpWorkloadSpec` construction.
+- Add durable external workload snapshots for both launch kinds.
+- Lower manifest-backed snapshots through injected Config resolution and validation ports into the ACP driver.
 - Project the unified Profile catalog into the two Chat selector groups.
 - Route Chat and Question Node external bindings by `profileId`.
 - Add focused migration, registry, runtime, API, selector, and Question Node coverage.
