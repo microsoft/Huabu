@@ -57,6 +57,8 @@ export type ShortcutDef = {
   id: string;
   descriptionKey: I18nKey;
   section: I18nKey;
+  /** Keep an internal binding out of user-facing shortcut lists. */
+  hidden?: boolean;
 } & ({ combo: KeyCombo; gesture?: never } | { gesture: string; combo?: never });
 
 /**
@@ -266,12 +268,7 @@ export const SHORTCUTS: ShortcutDef[] = [
     combo: { mod: true, key: 'i' },
     descriptionKey: 'shortcuts.items.openIntent',
     section: SECTION.ai,
-  },
-  {
-    id: 'ai.submitQuestion',
-    combo: { shift: true, key: 'Enter' },
-    descriptionKey: 'shortcuts.items.submitQuestion',
-    section: SECTION.ai,
+    hidden: true,
   },
 
   // Search
@@ -433,7 +430,9 @@ export function getKeyboardShortcutSections(t: TFunction): ShortcutSection[] {
   // App-level shortcuts lead the list, but only where they actually work
   // (Electron). In a plain browser Cmd/Ctrl+N is reserved by the OS for a
   // new window, so listing it would mislead.
-  const defs = isElectron() ? [...APP_SHORTCUTS, ...SHORTCUTS] : SHORTCUTS;
+  const defs = (
+    isElectron() ? [...APP_SHORTCUTS, ...SHORTCUTS] : SHORTCUTS
+  ).filter((def) => !def.hidden);
 
   for (const def of defs) {
     let items = bySection.get(def.section);

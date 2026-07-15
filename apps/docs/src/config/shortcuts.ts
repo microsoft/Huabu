@@ -3,10 +3,7 @@ export type ShortcutSection = {
   items: Array<{ keys: string; description: string }>;
 };
 
-/**
- * English handbook mirror of the user-facing catalog in
- * `apps/web/src/config/shortcuts.ts` and its English i18n strings.
- */
+/** Public English subset of the app's user-facing shortcut catalog. */
 export const keyboardShortcutSections: ShortcutSection[] = [
   {
     title: 'General',
@@ -76,16 +73,6 @@ export const keyboardShortcutSections: ShortcutSection[] = [
         keys: 'Option (hold while dragging) / Ctrl (hold while dragging)',
         description:
           'Copy a Note block to the Space instead of moving it (the default is move — the source loses the block)',
-      },
-    ],
-  },
-  {
-    title: 'AI',
-    items: [
-      { keys: 'Ctrl/Cmd+I', description: 'Open intent recognition' },
-      {
-        keys: 'Shift+Enter',
-        description: 'Submit an Agent Node and run immediately (while editing)',
       },
     ],
   },

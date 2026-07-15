@@ -760,7 +760,6 @@
       "groupFrame": "Group selected nodes into a frame",
       "copyNoteBlock": "Copy a Note block to the Space instead of moving it (the default is move — the source loses the block)",
       "openIntent": "Open intent recognition",
-      "submitQuestion": "Submit an Agent Node and run immediately (while editing)",
       "searchCanvas": "Search the Space (or find inside the active preview when focus is in an expanded node)",
       "jumpResult": "Jump to active result / next match",
       "previousMatch": "Previous match (in preview)",

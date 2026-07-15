@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { keyboardShortcutSections } from './shortcuts';
 
 describe('handbook keyboard shortcut catalog', () => {
-  it('documents every app shortcut in canonical section order', () => {
+  it('documents the public shortcuts in canonical section order', () => {
     expect(keyboardShortcutSections.map((section) => section.title)).toEqual([
       'General',
       'Editing',
@@ -11,13 +11,12 @@ describe('handbook keyboard shortcut catalog', () => {
       'Toolbar',
       'Layering & Grouping',
       'Drag and drop',
-      'AI',
       'Search',
       'Help',
     ]);
     expect(
       keyboardShortcutSections.flatMap((section) => section.items),
-    ).toHaveLength(33);
+    ).toHaveLength(31);
   });
 
   it('uses the toolbar bindings registered by the app', () => {

@@ -72,6 +72,8 @@ What stays in `apps/web/src/handler/canvasCommand/`:
 6. **Barrel exports** (`index.ts`) provide clean import paths in `handler/`, `utils/io/`, `utils/node/`.
 7. **Design tokens only** — never raw hex / Tailwind palette / ShadCN aliases. See [.github/design-system.md](../../.github/design-system.md).
 
+The keyboard shortcut catalog may retain internal runtime bindings with `hidden: true`; `getKeyboardShortcutSections()` excludes them from the user-facing modal. Removed bindings must be deleted from the catalog rather than left as display-only entries.
+
 ---
 
 ## 5. Internationalisation
