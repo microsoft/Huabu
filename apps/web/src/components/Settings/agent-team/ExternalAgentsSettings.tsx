@@ -16,8 +16,8 @@
  * kinds run on the same daemon.
  */
 
-import { Pencil, Play, Plus, Square, Trash2 } from 'lucide-react';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, Pencil, Play, Plus, Square, Trash2 } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { deleteAcpProfile, restartAcpAgentlet } from '@/api/acp';
@@ -29,13 +29,14 @@ import {
 import { Button } from '@/components/Common/Button';
 import { Loading } from '@/components/Common/Loading';
 import { Modal } from '@/components/Common/Modal';
-import { SettingRow } from '@/components/Common/SettingRow';
-import { SettingSection } from '@/components/Common/SettingSection';
 import { toast } from '@/components/Common/Toast';
+import { SettingRow } from '@/components/Settings/Common/SettingRow';
+import { SettingSection } from '@/components/Settings/Common/SettingSection';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 
 import { AgentletHealthBanner } from './AgentletHealthBanner';
 import { AgentProfileEditor } from './AgentProfileEditor';
+import { ProfileFormFooterTarget } from './ProfileFormFooter';
 import { useDetectedClis } from './useDetectedClis';
 import { useUnifiedAgents, type ManifestProfileRow } from './useUnifiedAgents';
 
@@ -95,7 +96,104 @@ export function ExternalAgentsSettings() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [restarting, setRestarting] = useState(false);
   const [pendingSetup, setPendingSetup] = useState<string | null>(null);
+  const [footerTarget, setFooterTarget] = useState<HTMLDivElement | null>(null);
   const confirmDeleteRef = useRef<HTMLButtonElement>(null);
+  const returnTargetRef = useRef<string | null>(null);
+  const activeViewRef = useRef<HTMLDivElement>(null);
+  const editorHeadingRef = useRef<HTMLHeadingElement>(null);
+  const enterDirectionRef = useRef<'forward' | 'back' | null>(null);
+  const transitionTimerRef = useRef<number | null>(null);
+  const exitAnimationRef = useRef<Animation | null>(null);
+
+  const switchView = useCallback(
+    (direction: 'forward' | 'back', complete: () => void) => {
+      const view = activeViewRef.current;
+      const reducedMotion = window.matchMedia(
+        '(prefers-reduced-motion: reduce)',
+      ).matches;
+      if (!view || reducedMotion) {
+        complete();
+        return;
+      }
+      if (transitionTimerRef.current !== null) {
+        window.clearTimeout(transitionTimerRef.current);
+        transitionTimerRef.current = null;
+      }
+      view.getAnimations().forEach((animation) => animation.cancel());
+      view.style.pointerEvents = 'none';
+      const offset = direction === 'forward' ? '-16px' : '16px';
+      exitAnimationRef.current = view.animate(
+        [
+          { transform: 'translateX(0)' },
+          { transform: `translateX(${offset})` },
+        ],
+        { duration: 110, easing: 'ease-in', fill: 'forwards' },
+      );
+      transitionTimerRef.current = window.setTimeout(() => {
+        transitionTimerRef.current = null;
+        exitAnimationRef.current?.cancel();
+        exitAnimationRef.current = null;
+        view.style.pointerEvents = '';
+        enterDirectionRef.current = direction;
+        complete();
+      }, 110);
+    },
+    [],
+  );
+
+  const openEditor = useCallback(
+    (next: EditorState, triggerKey: string) => {
+      returnTargetRef.current = triggerKey;
+      switchView('forward', () => setEditor(next));
+    },
+    [switchView],
+  );
+
+  const closeEditor = useCallback(() => {
+    switchView('back', () => setEditor(null));
+  }, [switchView]);
+
+  useEffect(
+    () => () => {
+      if (transitionTimerRef.current !== null) {
+        window.clearTimeout(transitionTimerRef.current);
+      }
+      exitAnimationRef.current?.cancel();
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const direction = enterDirectionRef.current;
+    const view = activeViewRef.current;
+    enterDirectionRef.current = null;
+    if (!direction) return;
+    // Entering the editor unmounts the trigger button, which would drop
+    // focus to <body>. Pull focus to the editor heading so keyboard and
+    // screen-reader users land in the new view. (Closing is handled by
+    // restoreTriggerFocus, which returns focus to the originating trigger.)
+    if (direction === 'forward') editorHeadingRef.current?.focus();
+    if (
+      !view ||
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    ) {
+      return;
+    }
+    const offset = direction === 'forward' ? '16px' : '-16px';
+    view.animate(
+      [{ transform: `translateX(${offset})` }, { transform: 'translateX(0)' }],
+      { duration: 170, easing: 'ease-out' },
+    );
+  }, [editor]);
+
+  const restoreTriggerFocus = useCallback(
+    (triggerKey: string) => (element: HTMLButtonElement | null) => {
+      if (!element || returnTargetRef.current !== triggerKey) return;
+      element.focus();
+      returnTargetRef.current = null;
+    },
+    [],
+  );
 
   // CLI detection feeds the two host-CLI forms *and* the list, which
   // resolves a Profile's agent id (command `cliId` or manifest `harness`)
@@ -226,233 +324,283 @@ export function ExternalAgentsSettings() {
         restarting={restarting}
       />
 
-      <SettingSection>
-        {loading ? (
-          <SettingRow title={t('settings.loadingAgents')}>
-            <Loading layout="inline" size="sm" />
-          </SettingRow>
-        ) : (
-          <>
-            {sortedManifest.map((row) => {
-              const status = row.profile.preparation.status;
-              const busy = pendingSetup === row.profile.id;
-              const errorMessage =
-                status === 'error'
-                  ? row.profile.preparation.error.message
-                  : undefined;
-              // Subtitle is just the agent it runs on, resolved to the same
-              // display name command rows use (e.g. "GitHub Copilot") so both
-              // kinds read consistently. Working directory, a "Preset" tag,
-              // and the error text are intentionally omitted — the error
-              // travels with the Error badge instead of a grey detail line.
-              const harnessLabel =
-                detectedClis.find((c) => c.id === row.profile.launch.harness)
-                  ?.displayName ?? row.profile.launch.harness;
-              return (
-                <SettingRow
-                  key={row.profile.id}
-                  title={row.profile.alias}
-                  description={harnessLabel}
-                >
-                  <div className="flex shrink-0 items-center gap-1.5">
-                    {/*
-                     * Only badge states that need attention (setting up, not
-                     * prepared, error). A ready preset shows no badge so it
-                     * reads the same as an always-ready command agent. The
-                     * Error badge carries the failure message as its tooltip
-                     * so the detail stays with the status it belongs to.
-                     */}
-                    {status !== 'ready' ? (
-                      <span
-                        className={`${STATUS_CLASS[status]} inline-flex rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap`}
-                        title={errorMessage}
-                      >
-                        {tAgent(STATUS_KEY[status])}
-                      </span>
-                    ) : null}
-                    {status === 'setting_up' ? (
-                      <Button
-                        variant="outline"
-                        tone="neutral"
-                        size="sm"
-                        title={tAgent('cancelSetup')}
-                        disabled={busy}
-                        onClick={() => void cancelSetup(row)}
-                      >
-                        <Square size={12} />
-                        <span>{tAgent('cancelSetup')}</span>
-                      </Button>
-                    ) : status !== 'ready' ? (
-                      <Button
-                        variant="outline"
-                        tone="info"
-                        size="sm"
-                        title={
-                          status === 'error'
-                            ? tAgent('retrySetup')
-                            : tAgent('setup')
-                        }
-                        disabled={busy || !row.config.ready}
-                        onClick={() => void runSetup(row)}
-                      >
-                        <Play size={12} />
-                        <span>
-                          {status === 'error'
-                            ? tAgent('retrySetup')
-                            : tAgent('setup')}
-                        </span>
-                      </Button>
-                    ) : null}
-                    <Button
-                      variant="ghost"
-                      tone="neutral"
-                      size="sm"
-                      iconOnly
-                      title={t('settings.editProfile')}
-                      onClick={() => setEditor({ kind: 'edit-manifest', row })}
-                    >
-                      <Pencil size={12} />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      tone="danger"
-                      size="sm"
-                      iconOnly
-                      title={t('settings.deleteProfile')}
-                      onClick={() =>
-                        setPendingDelete({
-                          kind: 'manifest',
-                          id: row.profile.id,
-                          alias: row.profile.alias,
-                          member: memberRefOf(row),
-                        })
-                      }
-                    >
-                      <Trash2 size={12} />
-                    </Button>
-                  </div>
-                </SettingRow>
-              );
-            })}
-
-            {commandProfiles.map((profile) => (
-              <SettingRow
-                key={profile.id}
-                title={profile.alias}
-                description={describeCommandProfile(profile)}
+      <div className="-mx-px overflow-x-clip px-px">
+        {editor ? (
+          <div key="editor" ref={activeViewRef}>
+            <header className="mb-3">
+              <Button
+                variant="ghost"
+                tone="neutral"
+                size="sm"
+                className="px-1.5"
+                onClick={closeEditor}
               >
-                <div className="flex shrink-0 items-center gap-1">
-                  <Button
-                    variant="ghost"
-                    tone="neutral"
-                    size="sm"
-                    iconOnly
-                    title={t('settings.editProfile')}
-                    onClick={() => setEditor({ kind: 'edit-command', profile })}
-                  >
-                    <Pencil size={12} />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    tone="danger"
-                    size="sm"
-                    iconOnly
-                    title={t('settings.deleteProfile')}
-                    onClick={() =>
-                      setPendingDelete({
-                        kind: 'command',
-                        id: profile.id,
-                        alias: profile.alias,
-                      })
+                <ArrowLeft size={12} />
+                <span>{t('settings.backToAgents')}</span>
+              </Button>
+              <h4
+                ref={editorHeadingRef}
+                tabIndex={-1}
+                className="text-fg-default mt-2 truncate text-sm font-semibold outline-none"
+              >
+                {editor.kind === 'create'
+                  ? t('settings.newAgentProfile')
+                  : t('settings.editAgentProfile', {
+                      name:
+                        editor.kind === 'edit-command'
+                          ? editor.profile.alias
+                          : editor.row.profile.alias,
+                    })}
+              </h4>
+            </header>
+            <ProfileFormFooterTarget target={footerTarget}>
+              <SettingSection>
+                {editor.kind === 'create' ? (
+                  <AgentProfileEditor
+                    mode="create"
+                    members={members}
+                    manifestError={manifestError}
+                    detectedClis={detectedClis}
+                    detectionLoaded={detectionLoaded}
+                    onClose={closeEditor}
+                    onCommandCreated={async () => {
+                      await refreshCommand();
+                      closeEditor();
+                    }}
+                    onManifestCreated={async (ref) => {
+                      await refreshMember(ref);
+                    }}
+                    applyMemberDetail={applyMemberDetail}
+                  />
+                ) : editor.kind === 'edit-command' ? (
+                  <AgentProfileEditor
+                    mode="edit-command"
+                    profile={editor.profile}
+                    detectedClis={detectedClis}
+                    detectionLoaded={detectionLoaded}
+                    onClose={closeEditor}
+                    onSaved={refreshCommand}
+                  />
+                ) : (
+                  <AgentProfileEditor
+                    mode="edit-manifest"
+                    row={editor.row}
+                    detectedClis={detectedClis}
+                    onClose={closeEditor}
+                    applyMemberDetail={applyMemberDetail}
+                    onAliasSaved={async () => {
+                      await refreshMember(memberRefOf(editor.row));
+                    }}
+                  />
+                )}
+              </SettingSection>
+            </ProfileFormFooterTarget>
+            <div ref={setFooterTarget} className="mt-3" />
+          </div>
+        ) : (
+          <div key="list" ref={activeViewRef}>
+            <SettingSection>
+              {loading ? (
+                <SettingRow title={t('settings.loadingAgents')}>
+                  <Loading layout="inline" size="sm" />
+                </SettingRow>
+              ) : (
+                <>
+                  {sortedManifest.map((row) => {
+                    const status = row.profile.preparation.status;
+                    const busy = pendingSetup === row.profile.id;
+                    const errorMessage =
+                      status === 'error'
+                        ? row.profile.preparation.error.message
+                        : undefined;
+                    // Subtitle is just the agent it runs on, resolved to the same
+                    // display name command rows use (e.g. "GitHub Copilot") so both
+                    // kinds read consistently. Working directory, a "Preset" tag,
+                    // and the error text are intentionally omitted — the error
+                    // travels with the Error badge instead of a grey detail line.
+                    const harnessLabel =
+                      detectedClis.find(
+                        (c) => c.id === row.profile.launch.harness,
+                      )?.displayName ?? row.profile.launch.harness;
+                    return (
+                      <SettingRow
+                        key={row.profile.id}
+                        title={row.profile.alias}
+                        description={harnessLabel}
+                      >
+                        <div className="flex shrink-0 items-center gap-1.5">
+                          {/*
+                           * Only badge states that need attention (setting up, not
+                           * prepared, error). A ready preset shows no badge so it
+                           * reads the same as an always-ready command agent. The
+                           * Error badge carries the failure message as its tooltip
+                           * so the detail stays with the status it belongs to.
+                           */}
+                          {status !== 'ready' ? (
+                            <span
+                              className={`${STATUS_CLASS[status]} inline-flex rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap`}
+                              title={errorMessage}
+                            >
+                              {tAgent(STATUS_KEY[status])}
+                            </span>
+                          ) : null}
+                          {status === 'setting_up' ? (
+                            <Button
+                              variant="outline"
+                              tone="neutral"
+                              size="sm"
+                              title={tAgent('cancelSetup')}
+                              disabled={busy}
+                              onClick={() => void cancelSetup(row)}
+                            >
+                              <Square size={12} />
+                              <span>{tAgent('cancelSetup')}</span>
+                            </Button>
+                          ) : status !== 'ready' ? (
+                            <Button
+                              variant="outline"
+                              tone="info"
+                              size="sm"
+                              title={
+                                status === 'error'
+                                  ? tAgent('retrySetup')
+                                  : tAgent('setup')
+                              }
+                              disabled={busy || !row.config.ready}
+                              onClick={() => void runSetup(row)}
+                            >
+                              <Play size={12} />
+                              <span>
+                                {status === 'error'
+                                  ? tAgent('retrySetup')
+                                  : tAgent('setup')}
+                              </span>
+                            </Button>
+                          ) : null}
+                          <Button
+                            variant="ghost"
+                            tone="neutral"
+                            size="sm"
+                            iconOnly
+                            title={t('settings.editProfile')}
+                            ref={restoreTriggerFocus(
+                              `manifest:${row.profile.id}`,
+                            )}
+                            data-editor-trigger={`manifest:${row.profile.id}`}
+                            onClick={() =>
+                              openEditor(
+                                { kind: 'edit-manifest', row },
+                                `manifest:${row.profile.id}`,
+                              )
+                            }
+                          >
+                            <Pencil size={12} />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            tone="danger"
+                            size="sm"
+                            iconOnly
+                            title={t('settings.deleteProfile')}
+                            onClick={() =>
+                              setPendingDelete({
+                                kind: 'manifest',
+                                id: row.profile.id,
+                                alias: row.profile.alias,
+                                member: memberRefOf(row),
+                              })
+                            }
+                          >
+                            <Trash2 size={12} />
+                          </Button>
+                        </div>
+                      </SettingRow>
+                    );
+                  })}
+
+                  {commandProfiles.map((profile) => (
+                    <SettingRow
+                      key={profile.id}
+                      title={profile.alias}
+                      description={describeCommandProfile(profile)}
+                    >
+                      <div className="flex shrink-0 items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          tone="neutral"
+                          size="sm"
+                          iconOnly
+                          title={t('settings.editProfile')}
+                          ref={restoreTriggerFocus(`command:${profile.id}`)}
+                          data-editor-trigger={`command:${profile.id}`}
+                          onClick={() =>
+                            openEditor(
+                              { kind: 'edit-command', profile },
+                              `command:${profile.id}`,
+                            )
+                          }
+                        >
+                          <Pencil size={12} />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          tone="danger"
+                          size="sm"
+                          iconOnly
+                          title={t('settings.deleteProfile')}
+                          onClick={() =>
+                            setPendingDelete({
+                              kind: 'command',
+                              id: profile.id,
+                              alias: profile.alias,
+                            })
+                          }
+                        >
+                          <Trash2 size={12} />
+                        </Button>
+                      </div>
+                    </SettingRow>
+                  ))}
+
+                  <SettingRow
+                    title={
+                      isEmpty
+                        ? t('settings.noAgents')
+                        : t('settings.addAnotherAgent')
+                    }
+                    description={
+                      isEmpty
+                        ? t('settings.noAgentsDescription')
+                        : t('settings.addAnotherAgentDescription')
                     }
                   >
-                    <Trash2 size={12} />
-                  </Button>
-                </div>
-              </SettingRow>
-            ))}
+                    <Button
+                      variant="outline"
+                      tone="info"
+                      size="sm"
+                      ref={restoreTriggerFocus('create')}
+                      data-editor-trigger="create"
+                      onClick={() => openEditor({ kind: 'create' }, 'create')}
+                    >
+                      <Plus size={12} />
+                      <span>{t('settings.addAgent')}</span>
+                    </Button>
+                  </SettingRow>
 
-            <SettingRow
-              title={
-                isEmpty ? t('settings.noAgents') : t('settings.addAnotherAgent')
-              }
-              description={
-                isEmpty
-                  ? t('settings.noAgentsDescription')
-                  : t('settings.addAnotherAgentDescription')
-              }
-            >
-              <Button
-                variant="outline"
-                tone="info"
-                size="sm"
-                onClick={() => setEditor({ kind: 'create' })}
-              >
-                <Plus size={12} />
-                <span>{t('settings.addAgent')}</span>
-              </Button>
-            </SettingRow>
-
-            {manifestError && (
-              <SettingRow
-                title={tAgent('loadFailed')}
-                description={manifestError}
-              >
-                <span />
-              </SettingRow>
-            )}
-          </>
+                  {manifestError && (
+                    <SettingRow
+                      title={tAgent('loadFailed')}
+                      description={manifestError}
+                    >
+                      <span />
+                    </SettingRow>
+                  )}
+                </>
+              )}
+            </SettingSection>
+          </div>
         )}
-      </SettingSection>
-
-      {editor && (
-        <SettingSection
-          title={
-            editor.kind === 'create'
-              ? t('settings.addAgent')
-              : t('settings.editExternalAgent')
-          }
-        >
-          {editor.kind === 'create' ? (
-            <AgentProfileEditor
-              mode="create"
-              members={members}
-              manifestError={manifestError}
-              detectedClis={detectedClis}
-              detectionLoaded={detectionLoaded}
-              onClose={() => setEditor(null)}
-              onCommandCreated={async () => {
-                await refreshCommand();
-                setEditor(null);
-              }}
-              onManifestCreated={async (ref) => {
-                await refreshMember(ref);
-              }}
-              applyMemberDetail={applyMemberDetail}
-            />
-          ) : editor.kind === 'edit-command' ? (
-            <AgentProfileEditor
-              mode="edit-command"
-              profile={editor.profile}
-              detectedClis={detectedClis}
-              detectionLoaded={detectionLoaded}
-              onClose={() => setEditor(null)}
-              onSaved={refreshCommand}
-            />
-          ) : (
-            <AgentProfileEditor
-              mode="edit-manifest"
-              row={editor.row}
-              detectedClis={detectedClis}
-              onClose={() => setEditor(null)}
-              applyMemberDetail={applyMemberDetail}
-              onAliasSaved={async () => {
-                await refreshMember(memberRefOf(editor.row));
-              }}
-            />
-          )}
-        </SettingSection>
-      )}
+      </div>
 
       <Modal
         isOpen={pendingDelete !== null}
