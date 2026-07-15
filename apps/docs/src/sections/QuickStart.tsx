@@ -63,6 +63,11 @@ export default function QuickStart() {
         <strong>Image Generation</strong>, and capabilities such as{' '}
         <strong>Web Search</strong> — that you can configure later.
       </P>
+      <Callout tone="info">
+        API keys and sign-in credentials saved in the Huabu desktop app are
+        encrypted at rest using your operating system&apos;s protected storage.
+        Huabu never stores them as plain text.
+      </Callout>
       <DocImage
         src="/docs/quick-start/configure-llm.png"
         alt="Huabu Agent settings with the Chat Model provider, endpoint, and API key fields"

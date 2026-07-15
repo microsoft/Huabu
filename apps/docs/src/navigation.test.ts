@@ -3,14 +3,12 @@ import { describe, expect, it } from 'vitest';
 import { allRoutes, groups, pinnedItems, routeManifest } from './navigation';
 
 describe('handbook route registry', () => {
-  it('contains unique /docs routes including node content', () => {
+  it('contains unique /docs routes', () => {
     const paths = allRoutes.map((route) => route.to);
     expect(new Set(paths).size).toBe(paths.length);
     expect(
       paths.every((path) => path === '/docs' || path.startsWith('/docs/')),
     ).toBe(true);
-    expect(paths).toContain('/docs/nodes/content');
-    expect(paths).not.toContain('/docs/nodes/office');
   });
 
   it('provides metadata for every route', () => {
@@ -42,14 +40,13 @@ describe('handbook route registry', () => {
     const spaces = groups.find((group) => group.label === 'Spaces');
     expect(spaces?.items.map(({ to, label }) => ({ to, label }))).toEqual([
       { to: '/docs/work-in-a-space', label: 'Work in a Space' },
-      { to: '/docs/space/data-and-backup', label: 'Data & Backup' },
+      { to: '/docs/space/data-and-backup', label: 'Data & Files' },
     ]);
     expect(
       allRoutes.some(
         (route) =>
           route.to.startsWith('/docs/concepts/') ||
-          (route.to.startsWith('/docs/nodes/') &&
-            route.to !== '/docs/nodes/content'),
+          route.to.startsWith('/docs/nodes/'),
       ),
     ).toBe(false);
   });
@@ -67,10 +64,6 @@ describe('handbook route registry', () => {
       { to: '/docs/ai/external-agents', label: 'External Agents' },
       { to: '/docs/ai/memory', label: 'Memory' },
       { to: '/docs/ai/skills', label: 'Skills' },
-      {
-        to: '/docs/ai/models-and-credentials',
-        label: 'Models & Credentials',
-      },
     ]);
     expect(
       allRoutes.some((route) =>
@@ -79,6 +72,7 @@ describe('handbook route registry', () => {
           '/docs/ai/agent-mode',
           '/docs/ai/question-mode',
           '/docs/ai/digest',
+          '/docs/ai/models-and-credentials',
         ].includes(route.to),
       ),
     ).toBe(false);

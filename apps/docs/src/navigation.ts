@@ -59,7 +59,9 @@ const groupsRaw: RawGroup[] = [
       },
       {
         to: '/docs/space/data-and-backup',
-        label: 'Data & Backup',
+        label: 'Data & Files',
+        description:
+          'Understand how Huabu stores each Space as plain files inside your Home folder.',
         load: () => import('./sections/space/DataAndBackup'),
       },
     ],
@@ -88,11 +90,6 @@ const groupsRaw: RawGroup[] = [
         to: '/docs/ai/skills',
         label: 'Skills',
         load: () => import('./sections/ai/Skills'),
-      },
-      {
-        to: '/docs/ai/models-and-credentials',
-        label: 'Models & Credentials',
-        load: () => import('./sections/ai/ModelsAndCredentials'),
       },
     ],
   },
@@ -151,11 +148,6 @@ export const groups: DocsGroup[] = groupsRaw.map((group) => ({
 const allItems: DocsItem[] = [
   ...pinnedItems,
   ...groups.flatMap((g) => g.items),
-  buildItem({
-    to: '/docs/nodes/content',
-    label: 'Node Content',
-    load: () => import('./sections/nodes/Content'),
-  }),
 ];
 
 const seen = new Set<string>();
