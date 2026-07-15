@@ -132,7 +132,6 @@
     "workingDirectory": "Working directory",
     "workingDirectoryHint": "The agent is spawned with this as its working directory and treats it as the project root for file edits and tool calls.",
     "displayName": "Display name",
-    "noCliFound": "No ACP-capable agents found on your PATH. Switch to <strong>Manual setup</strong> to enter a launch command.",
     "detectingClis": "Detecting agents…",
     "moreInfo": "More info",
     "pickFolder": "Pick a folder",

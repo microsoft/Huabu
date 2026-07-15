@@ -7,7 +7,7 @@
 
 import { Info } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Trans, useTranslation } from 'react-i18next';
+import { useTranslation } from 'react-i18next';
 
 import {
   createAcpProfile,
@@ -18,7 +18,6 @@ import { Button } from '@/components/Common/Button';
 import { Modal } from '@/components/Common/Modal';
 import { PathInput } from '@/components/Common/PathInput';
 import { Select } from '@/components/Common/Select';
-import { TabGroup } from '@/components/Common/TabGroup';
 import { TextInput } from '@/components/Common/TextInput';
 import { toast } from '@/components/Common/Toast';
 import { Tooltip } from '@/components/Common/Tooltip';
@@ -38,10 +37,10 @@ interface ProfileEditorFormProps {
   detectedClis: AcpAgentCliInfo[];
   /**
    * Whether host-CLI detection has settled at least once. Until it has,
-   * a new profile keeps the Built-in tab active with a "detecting…"
-   * placeholder instead of prematurely falling back to Custom — which
-   * would flash the Custom tab open on mount and then snap to Built-in
-   * once the CLIs arrive.
+   * a new profile keeps the picker in a "detecting…" placeholder instead
+   * of prematurely selecting "Custom command" — which would flash the raw
+   * command field open on mount and then snap to a detected CLI once the
+   * CLIs arrive.
    */
   detectionLoaded: boolean;
   /** Dismiss the editor (cancel or after a successful save). */
@@ -400,49 +399,20 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
     }
   }, [form, defaultDisplayName, detectedClis, editing, onSaved, onClose, t]);
 
+  /**
+   * One unified picker: every detected CLI followed by a trailing
+   * "Custom command" option. Selecting "custom" is the single source of
+   * truth for showing the raw launch-command field, so loading an
+   * existing profile lands on the right control automatically.
+   */
   const cliOptions = useMemo(() => {
-    return detectedClis.map((c) => ({
+    const options = detectedClis.map((c) => ({
       value: c.id,
       label: c.displayName,
     }));
-  }, [detectedClis]);
-
-  /**
-   * The agent picker is a two-tab switch:
-   *   - "detected" → choose from the auto-detected CLIs on PATH.
-   *   - "custom"   → type a full launch command yourself.
-   * `form.cliId === 'custom'` is the single source of truth; the tab
-   * state is derived from it so loading an existing profile lands on
-   * the correct tab automatically.
-   */
-  const agentMode: 'detected' | 'custom' =
-    form.cliId === 'custom' ? 'custom' : 'detected';
-
-  const handleAgentModeChange = useCallback(
-    (mode: 'detected' | 'custom') => {
-      if (mode === 'custom') {
-        // Seed the Custom textarea with whatever Detected would have
-        // launched so the user can tweak instead of typing from
-        // scratch. Skip when the user already has a custom command
-        // (e.g. they toggled away and back) so we don't blow away
-        // their edits.
-        setForm((prev) => {
-          if (prev.cliId === 'custom') return prev;
-          const seeded =
-            prev.customCommand.trim() || buildCommand(prev, detectedClis);
-          return {
-            ...prev,
-            cliId: 'custom',
-            allowAll: false,
-            customCommand: seeded,
-          };
-        });
-      } else {
-        handleCliChange(detectedClis[0]?.id ?? 'custom');
-      }
-    },
-    [detectedClis, handleCliChange],
-  );
+    options.push({ value: 'custom', label: t('settings.customCommand') });
+    return options;
+  }, [detectedClis, t]);
 
   const setCwd = useCallback(
     (cwd: string) => setForm((p) => ({ ...p, cwd })),
@@ -479,42 +449,27 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
           </div>
         ) : (
           <div className="flex flex-col gap-2">
-            <TabGroup
-              value={agentMode}
-              onChange={handleAgentModeChange}
-              options={[
-                { value: 'detected', label: t('settings.acpAgent') },
-                { value: 'custom', label: t('settings.customCommand') },
-              ]}
-              size="sm"
-              className="self-start"
-            />
-            {agentMode === 'detected' ? (
-              <label className="flex flex-col gap-1 text-xs">
-                <FieldLabel>{t('settings.agent')}</FieldLabel>
-                {!detectionLoaded ? (
-                  // Detection still in flight — a neutral placeholder
-                  // avoids flashing the "no CLI found" copy before the
-                  // CLIs have actually been probed.
-                  <div className="border-edge-default bg-surface text-fg-subtle rounded border px-2 py-1 text-xs leading-snug">
-                    {t('settings.detectingClis')}
-                  </div>
-                ) : cliOptions.length > 0 ? (
-                  <Select
-                    value={form.cliId}
-                    onChange={handleCliChange}
-                    options={cliOptions}
-                  />
-                ) : (
-                  <div className="border-edge-default bg-surface text-fg-muted rounded border px-2 py-1 text-xs leading-snug">
-                    <Trans
-                      i18nKey="settings.noCliFound"
-                      components={{ strong: <strong /> }}
-                    />
-                  </div>
-                )}
-              </label>
-            ) : (
+            <label className="flex flex-col gap-1 text-xs">
+              <FieldLabel>{t('settings.agent')}</FieldLabel>
+              {!detectionLoaded ? (
+                // Detection still in flight — a neutral placeholder avoids
+                // flashing a premature selection before the CLIs have
+                // actually been probed.
+                <div className="border-edge-default bg-surface text-fg-subtle rounded border px-2 py-1 text-xs leading-snug">
+                  {t('settings.detectingClis')}
+                </div>
+              ) : (
+                // Detected CLIs first, then "Custom command" as the last
+                // option. Selecting it reveals the raw launch-command
+                // field below.
+                <Select
+                  value={form.cliId}
+                  onChange={handleCliChange}
+                  options={cliOptions}
+                />
+              )}
+            </label>
+            {form.cliId === 'custom' ? (
               <label className="flex flex-col gap-1 text-xs">
                 <FieldLabel hint={t('settings.launchCommandHint')}>
                   {t('settings.launchCommand')}
@@ -531,7 +486,7 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
                   mono
                 />
               </label>
-            )}
+            ) : null}
           </div>
         )}
 

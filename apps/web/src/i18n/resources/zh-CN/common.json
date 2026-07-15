@@ -132,7 +132,6 @@
     "workingDirectory": "工作目录",
     "workingDirectoryHint": "Agent 会以此作为工作目录启动，并将它视为项目根目录来编辑文件和调用工具。",
     "displayName": "显示名称",
-    "noCliFound": "在 PATH 中未找到支持 ACP 的 Agent。切换到 <strong>手动设置</strong> 以输入启动命令。",
     "detectingClis": "正在检测 Agent…",
     "moreInfo": "更多信息",
     "pickFolder": "选择文件夹",
