@@ -377,3 +377,4 @@ export type LifecycleEvent =
   | { type: 'agent/overflow'; dropped: number }
   | { type: 'agent/goodbye'; reason: string }
   | { type: 'agent/suspended'; sessionId: string; reason: string }
+  | { type: 'agent/disconnected'; reason: string }
