@@ -71,4 +71,30 @@ describe('resolveAgentTeam', () => {
       ].join(delimiter),
     );
   });
+
+  it('uses the manifest and workspace paths snapshotted by a Profile', () => {
+    const packageDir = mkdtempSync(join(tmpdir(), 'agent-team-profile-'));
+    tempDirs.push(packageDir);
+    const workspaceDir = join(packageDir, 'custom-workspace');
+    mkdirSync(workspaceDir, { recursive: true });
+    writeFileSync(
+      join(packageDir, 'agentlet.yaml'),
+      [
+        'schema: agentlet-agent-schema-v1',
+        'name: reviewer',
+        'description: Reviews documents',
+        'command:',
+        '  claude: claude-agent-acp',
+      ].join('\n'),
+    );
+
+    const resolved = resolveAgentTeam({
+      manifestPath: join(packageDir, 'agentlet.yaml'),
+      workingDirPath: workspaceDir,
+      harness: 'claude',
+    });
+
+    expect(resolved.command).toBe('claude-agent-acp');
+    expect(resolved.cwd).toBe(workspaceDir);
+  });
 });

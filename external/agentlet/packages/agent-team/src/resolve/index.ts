@@ -4,7 +4,7 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs';
-import { delimiter, join, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { readManifest } from '../setup/manifest.js';
 import {
   npmToolsBinDir,
@@ -13,10 +13,16 @@ import {
 import type { AgentTeamManifest } from '../setup/types.js';
 
 /** Input: the agentTeam field from SessionSpec. */
-export interface AgentTeamRef {
-  agentDir: string;
-  harness?: string;
-}
+export type AgentTeamRef =
+  | {
+      manifestPath: string;
+      workingDirPath: string;
+      harness: string;
+    }
+  | {
+      agentDir: string;
+      harness?: string;
+    };
 
 /** Output: resolved spawn parameters. */
 export interface ResolvedSpawn {
@@ -38,7 +44,10 @@ export function resolveAgentTeam(
   ref: AgentTeamRef,
   envOverrides: Record<string, string> = {},
 ): ResolvedSpawn {
-  const agentDir = resolve(ref.agentDir);
+  const agentDir =
+    'manifestPath' in ref
+      ? dirname(resolve(ref.manifestPath))
+      : resolve(ref.agentDir);
 
   // 1. Read manifest
   const manifest = readManifest(agentDir);
@@ -47,7 +56,10 @@ export function resolveAgentTeam(
   const harness = resolveHarness(ref.harness, manifest);
 
   // 3. Validate workspace
-  const cwd = join(agentDir, 'workspaces', harness);
+  const cwd =
+    'workingDirPath' in ref
+      ? resolve(ref.workingDirPath)
+      : join(agentDir, 'workspaces', harness);
   if (!existsSync(cwd)) {
     throw new Error(
       `Agent Team workspace not prepared for harness "${harness}": ${cwd}\n` +

@@ -91,12 +91,20 @@ export interface SessionSpec {
   /** Seconds of inactivity before suspending. 0 or omitted = no timeout. */
   idleTimeoutSecs?: number
   /** Agent Team resolution — if set, command/cwd are resolved from the manifest. */
-  agentTeam?: {
-    /** Absolute path to the agent-team package folder (containing agentlet.yaml). */
-    agentDir: string
-    /** Target harness. If omitted, uses the first from manifest supported_harnesses, or 'default'. */
-    harness?: string
-  }
+  agentTeam?:
+    | {
+        /** Absolute path to agentlet.yaml. */
+        manifestPath: string
+        /** Prepared workspace selected by the Profile. */
+        workingDirPath: string
+        /** Target harness declared by the manifest. */
+        harness: string
+      }
+    | {
+        /** Legacy package directory used by existing durable workloads. */
+        agentDir: string
+        harness?: string
+      }
 }
 
 // ─── agentlet/hello (Request/Response) ────────────────────────────────────────

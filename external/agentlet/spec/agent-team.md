@@ -339,25 +339,28 @@ In addition to the existing `SessionSpec { command, cwd, env, ... }`, there is
 an Agent Team variant:
 
 ```text
-{ agent_dir, harness }
+{ manifestPath, workingDirPath, harness }
 ```
 
 This is represented as a nested field on `SessionSpec`:
 
 ```ts
-agentTeam?: { agentDir: string; harness?: string }
+agentTeam?: {
+  manifestPath: string
+  workingDirPath: string
+  harness: string
+}
 ```
 
 ### 8.2 Daemon behavior on Agent Team spawn
 
-When the daemon receives `{ agent_dir, harness }`:
+When the daemon receives `{ manifestPath, workingDirPath, harness }`:
 
-1. **Read** `agentlet.yaml` from `agent_dir`
-2. **Validate** that `workspaces/<harness|default>/` exists (i.e., setup has
-   been done)
-3. **Resolve** `command` from the manifest for the chosen harness
-4. **Derive** `cwd = agent_dir/workspaces/<harness|default>/`
-5. **Load** `.env` from `agent_dir` if present
+1. **Read** the selected `manifestPath`.
+2. **Validate** that `workingDirPath` exists and remains prepared.
+3. **Resolve** `command` from the manifest for the chosen harness.
+4. **Use** `workingDirPath` as `cwd`.
+5. **Load** `.env` from the manifest directory if present.
 6. **Prepend** the deployment workspace and agentlet-shared npm `.bin` directories to `PATH`
 7. **Spawn** the resolved command — from here on, identical to any other ACP session
 
@@ -387,4 +390,4 @@ internally. The host only needs to know:
 - **package name**: `@agentlet/agent-team`
 - **setup entry point**: `@agentlet/agent-team` CLI is the primary entry point; per-package `agent-setup.mjs` is optional
 - **declarative setup**: structured npm requirements in `require.cli-tools`, plus `require.skills`, `require.prompts`, and `require.copies`; `onInstall` remains available for custom logic
-- **SessionSpec variant**: nested `agentTeam?: { agentDir, harness? }` field on existing `SessionSpec`
+- **SessionSpec variant**: nested `agentTeam?: { manifestPath, workingDirPath, harness }` field on existing `SessionSpec`; the legacy `{ agentDir, harness? }` variant remains readable for existing durable workloads

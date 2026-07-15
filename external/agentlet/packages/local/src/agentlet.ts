@@ -553,7 +553,12 @@ export class Agentlet {
         // resolveAgentTeam merges .env < host env, then prepends managed tool paths.
         sessionSpec.env = resolved.env
         this.logger.info('agent_team_resolved', {
-          agentDir: sessionSpec.agentTeam.agentDir,
+          ...('manifestPath' in sessionSpec.agentTeam
+            ? {
+                manifestPath: sessionSpec.agentTeam.manifestPath,
+                workingDirPath: sessionSpec.agentTeam.workingDirPath,
+              }
+            : { agentDir: sessionSpec.agentTeam.agentDir }),
           harness: sessionSpec.agentTeam.harness,
           command: resolved.command,
           cwd: resolved.cwd,
