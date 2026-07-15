@@ -1,8 +1,7 @@
 /**
  * External-agent profile editor — the add/edit form plus its supporting
  * command-assembly helpers and the `useDetectedClis` host-CLI detection
- * hook. Rendered inline inside {@link AcpSettings} and as a standalone
- * {@link ProfileEditorModal} by the chat panel's "Add agent" menu.
+ * hook. Rendered inline inside External Agent Settings.
  */
 
 import { Info } from 'lucide-react';
@@ -15,7 +14,6 @@ import {
   updateAcpProfile,
 } from '@/api/acp';
 import { Button } from '@/components/Common/Button';
-import { Modal } from '@/components/Common/Modal';
 import { PathInput } from '@/components/Common/PathInput';
 import { Select } from '@/components/Common/Select';
 import { TextInput } from '@/components/Common/TextInput';
@@ -47,10 +45,6 @@ interface ProfileEditorFormProps {
   onClose: () => void;
   /** Parent re-fetches profiles after the mutation succeeds. */
   onSaved: () => Promise<void>;
-}
-
-interface ProfileEditorModalProps extends ProfileEditorFormProps {
-  isOpen: boolean;
 }
 
 interface ProfileFormState {
@@ -202,9 +196,8 @@ function parseCommandIntoForm(
 
 /**
  * Field label with an optional trailing info icon that surfaces the
- * long-form description in a hover tooltip. Used inside
- * `ProfileEditorModal` to keep each row visually compact while
- * preserving the explanatory copy.
+ * long-form description in a hover tooltip while keeping each row
+ * visually compact.
  */
 const FieldLabel: React.FC<{
   children: React.ReactNode;
@@ -588,45 +581,7 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
 };
 
 /**
- * Modal wrapper around {@link ProfileEditorForm}. Used by surfaces that
- * have no host container of their own (e.g. the chat panel's "Add agent"
- * menu), where a standalone dialog is the right pattern. Inside Settings
- * the form is rendered inline as a master-detail pane instead, so the
- * editor never stacks a second modal on top of the Settings modal.
- */
-export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
-  isOpen,
-  editing,
-  detectedClis,
-  detectionLoaded,
-  onClose,
-  onSaved,
-}) => {
-  const { t } = useTranslation();
-  return (
-    <Modal
-      isOpen={isOpen}
-      onClose={onClose}
-      title={
-        editing
-          ? t('settings.editExternalAgent')
-          : t('settings.newExternalAgent')
-      }
-      className="w-104"
-    >
-      <ProfileEditorForm
-        editing={editing}
-        detectedClis={detectedClis}
-        detectionLoaded={detectionLoaded}
-        onClose={onClose}
-        onSaved={onSaved}
-      />
-    </Modal>
-  );
-};
-/**
- * Fetch and cache host-detected CLIs when an editor opens. Shared between
- * Settings and the inline "Add agent" entry in `NewChatMenu`.
+ * Fetch and cache host-detected CLIs while the inline Settings editor is open.
  *
  * Detection failures degrade silently — callers receive `[]` and the
  * editor's Agent dropdown just falls back to "Manual setup".

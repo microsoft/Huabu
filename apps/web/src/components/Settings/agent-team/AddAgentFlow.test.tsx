@@ -29,10 +29,6 @@ vi.mock('@/api/agent-team', () => ({
   updateAgentTeamConfigs: vi.fn(),
 }));
 
-vi.mock('@/components/Common/Modal', () => ({
-  Modal: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-}));
-
 vi.mock('@/components/Common/PathInput', () => ({
   PathInput: ({
     value,

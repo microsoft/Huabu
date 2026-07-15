@@ -10,7 +10,7 @@
  *    with the member-level Config/Token (shared across the template's
  *    Profiles) and the alias.
  *  - **Custom** (`acp-command`) — a raw launch-command Profile edited
- *    through the shared {@link ProfileEditorModal}.
+ *    through the inline {@link ProfileEditorForm}.
  *
  * The agentlet daemon banner sits above the list because both Profile
  * kinds run on the same daemon.
@@ -33,7 +33,7 @@ import { SettingRow } from '@/components/Common/SettingRow';
 import { SettingSection } from '@/components/Common/SettingSection';
 import { toast } from '@/components/Common/Toast';
 import {
-  ProfileEditorModal,
+  ProfileEditorForm,
   useDetectedClis,
 } from '@/components/Settings/sections/ProfileEditor';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
@@ -318,7 +318,10 @@ export function ExternalAgentsSettings() {
                     size="sm"
                     iconOnly
                     title={t('settings.editProfile')}
-                    onClick={() => setEditingCommand(profile)}
+                    onClick={() => {
+                      setAddOpen(false);
+                      setEditingCommand(profile);
+                    }}
                   >
                     <Pencil size={12} />
                   </Button>
@@ -356,7 +359,10 @@ export function ExternalAgentsSettings() {
                 variant="outline"
                 tone="info"
                 size="sm"
-                onClick={() => setAddOpen(true)}
+                onClick={() => {
+                  setEditingCommand(null);
+                  setAddOpen(true);
+                }}
               >
                 <Plus size={12} />
                 <span>{t('settings.addAgent')}</span>
@@ -376,33 +382,46 @@ export function ExternalAgentsSettings() {
       </SettingSection>
 
       {addOpen && (
-        <AddAgentFlow
-          members={members}
-          manifestError={manifestError}
-          detectedClis={detectedClis}
-          detectionLoaded={detectionLoaded}
-          onClose={() => setAddOpen(false)}
-          onCommandCreated={async () => {
-            await refreshCommand();
-            setAddOpen(false);
-          }}
-          onManifestCreated={async (ref) => {
-            await refreshMember(ref);
-          }}
-          applyMemberDetail={applyMemberDetail}
-        />
+        <div className="mt-3 flex flex-col gap-2">
+          <h4 className="text-fg-muted px-1 text-xs font-medium">
+            {t('settings.addAgent')}
+          </h4>
+          <div className="border-edge-default bg-surface ring-edge-default/50 rounded-md p-4 shadow-sm ring-1">
+            <AddAgentFlow
+              members={members}
+              manifestError={manifestError}
+              detectedClis={detectedClis}
+              detectionLoaded={detectionLoaded}
+              onClose={() => setAddOpen(false)}
+              onCommandCreated={async () => {
+                await refreshCommand();
+                setAddOpen(false);
+              }}
+              onManifestCreated={async (ref) => {
+                await refreshMember(ref);
+              }}
+              applyMemberDetail={applyMemberDetail}
+            />
+          </div>
+        </div>
       )}
 
-      <ProfileEditorModal
-        isOpen={editingCommand !== null}
-        editing={editingCommand}
-        detectedClis={detectedClis}
-        detectionLoaded={detectionLoaded}
-        onClose={() => setEditingCommand(null)}
-        onSaved={async () => {
-          await refreshCommand();
-        }}
-      />
+      {editingCommand && (
+        <div className="mt-3 flex flex-col gap-2">
+          <h4 className="text-fg-muted px-1 text-xs font-medium">
+            {t('settings.editExternalAgent')}
+          </h4>
+          <div className="border-edge-default bg-surface ring-edge-default/50 rounded-md p-4 shadow-sm ring-1">
+            <ProfileEditorForm
+              editing={editingCommand}
+              detectedClis={detectedClis}
+              detectionLoaded={detectionLoaded}
+              onClose={() => setEditingCommand(null)}
+              onSaved={refreshCommand}
+            />
+          </div>
+        </div>
+      )}
 
       {editingManifest && (
         <ManifestProfileEditor

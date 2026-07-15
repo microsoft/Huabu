@@ -13,7 +13,6 @@ import { useTranslation } from 'react-i18next';
 import { listAcpAgentClis } from '@/api/acp';
 import { createAgentTeamProfile } from '@/api/agent-team';
 import { Button } from '@/components/Common/Button';
-import { Modal } from '@/components/Common/Modal';
 import { PathInput } from '@/components/Common/PathInput';
 import { Select } from '@/components/Common/Select';
 import { SettingRow } from '@/components/Common/SettingRow';
@@ -80,47 +79,40 @@ export function AddAgentFlow({
   );
 
   return (
-    <Modal
-      isOpen
-      onClose={onClose}
-      title={t('settings.addAgent')}
-      className="w-108"
-    >
-      <div className="flex flex-col gap-5">
-        <label className="flex flex-col gap-1 text-xs">
-          <span className="text-fg-muted">{t('settings.template')}</span>
-          <Select
-            value={selectedKey}
-            options={templateOptions}
-            onChange={setSelectedKey}
-          />
-        </label>
-        {manifestError ? (
-          <p className="text-warning text-xs" role="status">
-            {t('settings.templatesUnavailable', { error: manifestError })}
-          </p>
-        ) : null}
-        {selected ? (
-          <TemplateProfileForm
-            key={selectedKey}
-            group={selected}
-            detectedClis={detectedClis}
-            detectionLoaded={detectionLoaded}
-            onClose={onClose}
-            onCreated={onManifestCreated}
-            applyMemberDetail={applyMemberDetail}
-          />
-        ) : (
-          <ProfileEditorForm
-            editing={null}
-            detectedClis={detectedClis}
-            detectionLoaded={detectionLoaded}
-            onClose={onClose}
-            onSaved={onCommandCreated}
-          />
-        )}
-      </div>
-    </Modal>
+    <div className="flex flex-col gap-5">
+      <label className="flex flex-col gap-1 text-xs">
+        <span className="text-fg-muted">{t('settings.template')}</span>
+        <Select
+          value={selectedKey}
+          options={templateOptions}
+          onChange={setSelectedKey}
+        />
+      </label>
+      {manifestError ? (
+        <p className="text-warning text-xs" role="status">
+          {t('settings.templatesUnavailable', { error: manifestError })}
+        </p>
+      ) : null}
+      {selected ? (
+        <TemplateProfileForm
+          key={selectedKey}
+          group={selected}
+          detectedClis={detectedClis}
+          detectionLoaded={detectionLoaded}
+          onClose={onClose}
+          onCreated={onManifestCreated}
+          applyMemberDetail={applyMemberDetail}
+        />
+      ) : (
+        <ProfileEditorForm
+          editing={null}
+          detectedClis={detectedClis}
+          detectionLoaded={detectionLoaded}
+          onClose={onClose}
+          onSaved={onCommandCreated}
+        />
+      )}
+    </div>
   );
 }
 
