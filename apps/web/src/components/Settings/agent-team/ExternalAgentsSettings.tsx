@@ -10,7 +10,7 @@
  *    with the member-level Config/Token (shared across the template's
  *    Profiles) and the alias.
  *  - **Custom** (`acp-command`) — a raw launch-command Profile edited
- *    through the inline {@link ProfileEditorForm}.
+ *    through the inline {@link AgentProfileEditor}.
  *
  * The agentlet daemon banner sits above the list because both Profile
  * kinds run on the same daemon.
@@ -32,21 +32,23 @@ import { Modal } from '@/components/Common/Modal';
 import { SettingRow } from '@/components/Common/SettingRow';
 import { SettingSection } from '@/components/Common/SettingSection';
 import { toast } from '@/components/Common/Toast';
-import {
-  ProfileEditorForm,
-  useDetectedClis,
-} from '@/components/Settings/sections/ProfileEditor';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 
-import { AddAgentFlow } from './AddAgentFlow';
 import { AgentletHealthBanner } from './AgentletHealthBanner';
-import { ManifestProfileEditor } from './ManifestProfileEditor';
+import { AgentProfileEditor } from './AgentProfileEditor';
+import { useDetectedClis } from './useDetectedClis';
 import { useUnifiedAgents, type ManifestProfileRow } from './useUnifiedAgents';
 
 import type {
   AcpCommandProfileView,
   AgentTeamManifestProfileView,
 } from '@sediment/shared';
+
+/** The single open editor: create, or editing one of the two Profile kinds. */
+type EditorState =
+  | { kind: 'create' }
+  | { kind: 'edit-command'; profile: AcpCommandProfileView }
+  | { kind: 'edit-manifest'; row: ManifestProfileRow };
 
 type PreparationStatus = AgentTeamManifestProfileView['preparation']['status'];
 
@@ -86,11 +88,7 @@ export function ExternalAgentsSettings() {
   } = useUnifiedAgents();
   const agentlet = useAcpProfilesStore((s) => s.agentlet);
 
-  const [addOpen, setAddOpen] = useState(false);
-  const [editingCommand, setEditingCommand] =
-    useState<AcpCommandProfileView | null>(null);
-  const [editingManifest, setEditingManifest] =
-    useState<ManifestProfileRow | null>(null);
+  const [editor, setEditor] = useState<EditorState | null>(null);
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(
     null,
   );
@@ -99,14 +97,42 @@ export function ExternalAgentsSettings() {
   const [pendingSetup, setPendingSetup] = useState<string | null>(null);
   const confirmDeleteRef = useRef<HTMLButtonElement>(null);
 
-  const editorEnabled = addOpen || editingCommand !== null;
+  // CLI detection feeds the two host-CLI forms *and* the list, which
+  // resolves a Profile's agent id (command `cliId` or manifest `harness`)
+  // to its display name so both kinds read the same (e.g. "GitHub Copilot").
+  const needsCliNames =
+    manifestProfiles.length > 0 ||
+    commandProfiles.some(
+      (p) => p.metadata?.cliId && p.metadata.cliId !== 'custom',
+    );
+  const detectionEnabled =
+    needsCliNames || (editor !== null && editor.kind !== 'edit-manifest');
   const { detectedClis, loaded: detectionLoaded } =
-    useDetectedClis(editorEnabled);
+    useDetectedClis(detectionEnabled);
 
   const memberRefOf = (row: ManifestProfileRow) => ({
     machine: row.member.machine,
     manifestPath: row.member.manifestPath,
   });
+
+  /**
+   * Row description for a command Profile. A structured (detected-CLI)
+   * Profile is named after its agent and never exposes the raw launch
+   * command — only genuinely custom-command Profiles show it, because for
+   * them the command *is* the identifying configuration.
+   */
+  const describeCommandProfile = useCallback(
+    (profile: AcpCommandProfileView): string => {
+      const cliId = profile.metadata?.cliId;
+      if (!cliId || cliId === 'custom') {
+        return [t('settings.agentCustomBadge'), profile.launch.command]
+          .filter(Boolean)
+          .join(' · ');
+      }
+      return detectedClis.find((c) => c.id === cliId)?.displayName ?? cliId;
+    },
+    [detectedClis, t],
+  );
 
   const handleRestart = useCallback(async () => {
     setRestarting(true);
@@ -210,31 +236,40 @@ export function ExternalAgentsSettings() {
             {sortedManifest.map((row) => {
               const status = row.profile.preparation.status;
               const busy = pendingSetup === row.profile.id;
-              const lastLog =
-                row.profile.setupLog[row.profile.setupLog.length - 1];
-              const statusDetail =
+              const errorMessage =
                 status === 'error'
                   ? row.profile.preparation.error.message
-                  : lastLog?.message;
+                  : undefined;
+              // Subtitle is just the agent it runs on, resolved to the same
+              // display name command rows use (e.g. "GitHub Copilot") so both
+              // kinds read consistently. Working directory, a "Preset" tag,
+              // and the error text are intentionally omitted — the error
+              // travels with the Error badge instead of a grey detail line.
+              const harnessLabel =
+                detectedClis.find((c) => c.id === row.profile.launch.harness)
+                  ?.displayName ?? row.profile.launch.harness;
               return (
                 <SettingRow
                   key={row.profile.id}
                   title={row.profile.alias}
-                  description={[
-                    t('settings.agentTemplateBadge'),
-                    row.profile.launch.harness,
-                    row.profile.workingDirPath,
-                    statusDetail,
-                  ]
-                    .filter(Boolean)
-                    .join(' · ')}
+                  description={harnessLabel}
                 >
                   <div className="flex shrink-0 items-center gap-1.5">
-                    <span
-                      className={`${STATUS_CLASS[status]} inline-flex rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap`}
-                    >
-                      {tAgent(STATUS_KEY[status])}
-                    </span>
+                    {/*
+                     * Only badge states that need attention (setting up, not
+                     * prepared, error). A ready preset shows no badge so it
+                     * reads the same as an always-ready command agent. The
+                     * Error badge carries the failure message as its tooltip
+                     * so the detail stays with the status it belongs to.
+                     */}
+                    {status !== 'ready' ? (
+                      <span
+                        className={`${STATUS_CLASS[status]} inline-flex rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap`}
+                        title={errorMessage}
+                      >
+                        {tAgent(STATUS_KEY[status])}
+                      </span>
+                    ) : null}
                     {status === 'setting_up' ? (
                       <Button
                         variant="outline"
@@ -274,11 +309,7 @@ export function ExternalAgentsSettings() {
                       size="sm"
                       iconOnly
                       title={t('settings.editProfile')}
-                      onClick={() => {
-                        setAddOpen(false);
-                        setEditingCommand(null);
-                        setEditingManifest(row);
-                      }}
+                      onClick={() => setEditor({ kind: 'edit-manifest', row })}
                     >
                       <Pencil size={12} />
                     </Button>
@@ -308,12 +339,7 @@ export function ExternalAgentsSettings() {
               <SettingRow
                 key={profile.id}
                 title={profile.alias}
-                description={[
-                  t('settings.agentCustomBadge'),
-                  profile.launch.command,
-                ]
-                  .filter(Boolean)
-                  .join(' · ')}
+                description={describeCommandProfile(profile)}
               >
                 <div className="flex shrink-0 items-center gap-1">
                   <Button
@@ -322,11 +348,7 @@ export function ExternalAgentsSettings() {
                     size="sm"
                     iconOnly
                     title={t('settings.editProfile')}
-                    onClick={() => {
-                      setAddOpen(false);
-                      setEditingManifest(null);
-                      setEditingCommand(profile);
-                    }}
+                    onClick={() => setEditor({ kind: 'edit-command', profile })}
                   >
                     <Pencil size={12} />
                   </Button>
@@ -364,11 +386,7 @@ export function ExternalAgentsSettings() {
                 variant="outline"
                 tone="info"
                 size="sm"
-                onClick={() => {
-                  setEditingCommand(null);
-                  setEditingManifest(null);
-                  setAddOpen(true);
-                }}
+                onClick={() => setEditor({ kind: 'create' })}
               >
                 <Plus size={12} />
                 <span>{t('settings.addAgent')}</span>
@@ -387,48 +405,52 @@ export function ExternalAgentsSettings() {
         )}
       </SettingSection>
 
-      {addOpen && (
-        <SettingSection title={t('settings.addAgent')}>
-          <AddAgentFlow
-            members={members}
-            manifestError={manifestError}
-            detectedClis={detectedClis}
-            detectionLoaded={detectionLoaded}
-            onClose={() => setAddOpen(false)}
-            onCommandCreated={async () => {
-              await refreshCommand();
-              setAddOpen(false);
-            }}
-            onManifestCreated={async (ref) => {
-              await refreshMember(ref);
-            }}
-            applyMemberDetail={applyMemberDetail}
-          />
-        </SettingSection>
-      )}
-
-      {editingCommand && (
-        <SettingSection title={t('settings.editExternalAgent')}>
-          <ProfileEditorForm
-            editing={editingCommand}
-            detectedClis={detectedClis}
-            detectionLoaded={detectionLoaded}
-            onClose={() => setEditingCommand(null)}
-            onSaved={refreshCommand}
-          />
-        </SettingSection>
-      )}
-
-      {editingManifest && (
-        <SettingSection title={t('settings.editExternalAgent')}>
-          <ManifestProfileEditor
-            row={editingManifest}
-            onClose={() => setEditingManifest(null)}
-            applyMemberDetail={applyMemberDetail}
-            onAliasSaved={async () => {
-              await refreshMember(memberRefOf(editingManifest));
-            }}
-          />
+      {editor && (
+        <SettingSection
+          title={
+            editor.kind === 'create'
+              ? t('settings.addAgent')
+              : t('settings.editExternalAgent')
+          }
+        >
+          {editor.kind === 'create' ? (
+            <AgentProfileEditor
+              mode="create"
+              members={members}
+              manifestError={manifestError}
+              detectedClis={detectedClis}
+              detectionLoaded={detectionLoaded}
+              onClose={() => setEditor(null)}
+              onCommandCreated={async () => {
+                await refreshCommand();
+                setEditor(null);
+              }}
+              onManifestCreated={async (ref) => {
+                await refreshMember(ref);
+              }}
+              applyMemberDetail={applyMemberDetail}
+            />
+          ) : editor.kind === 'edit-command' ? (
+            <AgentProfileEditor
+              mode="edit-command"
+              profile={editor.profile}
+              detectedClis={detectedClis}
+              detectionLoaded={detectionLoaded}
+              onClose={() => setEditor(null)}
+              onSaved={refreshCommand}
+            />
+          ) : (
+            <AgentProfileEditor
+              mode="edit-manifest"
+              row={editor.row}
+              detectedClis={detectedClis}
+              onClose={() => setEditor(null)}
+              applyMemberDetail={applyMemberDetail}
+              onAliasSaved={async () => {
+                await refreshMember(memberRefOf(editor.row));
+              }}
+            />
+          )}
         </SettingSection>
       )}
 

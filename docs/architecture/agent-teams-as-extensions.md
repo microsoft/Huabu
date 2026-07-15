@@ -66,7 +66,7 @@ The External Agents Settings tab presents command-backed and manifest-backed Pro
 
 `GET /api/acp/agent-cli` returns the complete trusted Agent catalogue in canonical order with an `installed` flag. Ordinary creation offers installed Agents followed by Custom command; a selected Template filters that same catalogue to its manifest harness allowlist, disables missing Agents with installation guidance, and blocks unknown harness IDs.
 
-Creating a manifest-backed Profile never starts Setup. The unified list retains explicit Setup, Retry, and Cancel actions and shows preparation state alongside command-backed Profiles, which are selectable immediately.
+The `POST` create endpoint never starts Setup on its own. The Settings create action ("Create and set up") is enabled only once every required field — including the preset's required Configs — is complete, and then orchestrates Setup as a follow-up `setup` call on the newly created Profile. The unified list still owns the long-running lifecycle: it retains explicit Setup, Retry, and Cancel actions, shows preparation state alongside command-backed Profiles (which are selectable immediately), and monitors setup progress after the editor closes. If the follow-up Setup call fails, the created Profile remains and can be set up again from the list.
 
 Chat keeps the built-in Agent separate, groups every selectable non-internal Profile under External Agents, and sends Add agent to the External Agents Settings tab rather than owning a second editor.
 

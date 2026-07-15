@@ -67,6 +67,6 @@
   "setupStatusNotPrepared": "尚未准备",
   "loadingMemberDetail": "正在加载成员详情…",
   "loadMemberDetailFailed": "无法加载成员详情",
-  "tokenSharedHint": "这些值由同一模板创建的所有 Agent 共享，修改一处会影响全部。",
+  "tokenSharedHint": "此预设所需的登录凭据；由基于同一预设创建的所有 Agent 共用，修改一处会影响全部。",
   "profileUpdated": "Profile 已更新"
 }

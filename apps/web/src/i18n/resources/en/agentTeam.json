@@ -67,6 +67,6 @@
   "setupStatusNotPrepared": "Not prepared",
   "loadingMemberDetail": "Loading member details…",
   "loadMemberDetailFailed": "Failed to load member details",
-  "tokenSharedHint": "These values are shared by every agent created from this template — changing one affects all of them.",
+  "tokenSharedHint": "Credentials required by this preset. Shared by every agent created from it — changing one affects all.",
   "profileUpdated": "Profile updated"
 }

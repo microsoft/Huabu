@@ -2,7 +2,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { AddAgentFlow } from './AddAgentFlow';
+import { AgentProfileEditor } from './AgentProfileEditor';
 
 import type { ManifestMemberGroup } from './useUnifiedAgents';
 
@@ -15,6 +15,7 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const apiMocks = vi.hoisted(() => ({
   createCommand: vi.fn(),
   createManifest: vi.fn(),
+  setupManifest: vi.fn(),
   listClis: vi.fn(),
 }));
 
@@ -26,6 +27,8 @@ vi.mock('@/api/acp', () => ({
 
 vi.mock('@/api/agent-team', () => ({
   createAgentTeamProfile: apiMocks.createManifest,
+  setupAgentTeamProfile: apiMocks.setupManifest,
+  patchAgentTeamProfile: vi.fn(),
   updateAgentTeamConfigs: vi.fn(),
 }));
 
@@ -124,7 +127,8 @@ function renderFlow() {
   root = createRoot(container);
   act(() =>
     root?.render(
-      <AddAgentFlow
+      <AgentProfileEditor
+        mode="create"
         members={members}
         manifestError={null}
         detectedClis={agents}
@@ -146,7 +150,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe('AddAgentFlow', () => {
+describe('AgentProfileEditor (create)', () => {
   it('defaults to no Template and keeps Custom command last', () => {
     renderFlow();
 
@@ -179,9 +183,10 @@ describe('AddAgentFlow', () => {
     expect(container?.textContent).not.toContain('Manual setup');
   });
 
-  it('creates a manifest Profile without invoking Setup', async () => {
+  it('creates a manifest Profile and kicks off setup', async () => {
     apiMocks.listClis.mockResolvedValue({ agents });
     apiMocks.createManifest.mockResolvedValue({ id: 'profile-1' });
+    apiMocks.setupManifest.mockResolvedValue({ id: 'profile-1' });
     renderFlow();
     const templateSelect = container?.querySelector('select');
     await act(async () => {
@@ -212,7 +217,7 @@ describe('AddAgentFlow', () => {
     });
 
     expect(apiMocks.createManifest).toHaveBeenCalledWith({
-      alias: 'GitHub Copilot (project)',
+      alias: 'Reviewer (project)',
       agentletId: 'machine-a',
       workingDirPath: 'C:\\work\\project',
       launch: {
@@ -221,5 +226,6 @@ describe('AddAgentFlow', () => {
         harness: 'copilot',
       },
     });
+    expect(apiMocks.setupManifest).toHaveBeenCalledWith('profile-1');
   });
 });
