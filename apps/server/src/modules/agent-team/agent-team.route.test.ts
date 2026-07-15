@@ -1,5 +1,3 @@
-import { get } from 'node:http';
-
 import { AgentTeamError } from '@agenetes/agentlet-host';
 import Fastify from 'fastify';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -28,7 +26,6 @@ function profile() {
 }
 
 function createRegistry(): AgentTeamSettingsRegistry {
-  const listeners = new Set<() => void>();
   return {
     listMachines: vi.fn(() => [
       { machine: 'machine-a', hostname: 'machine-a', platform: 'linux' },
@@ -37,10 +34,6 @@ function createRegistry(): AgentTeamSettingsRegistry {
     listMemberSummaries: vi.fn(() => []),
     getMemberDetail: vi.fn(() => {
       throw new Error('No members');
-    }),
-    onChange: vi.fn((handler, _onError) => {
-      listeners.add(handler);
-      return () => listeners.delete(handler);
     }),
     addRoot: vi.fn(async (root) => ({
       ok: true as const,
@@ -194,43 +187,4 @@ describe('Agent Team Settings routes', () => {
     });
   });
 
-  it('opens SSE with an initial Settings snapshot', async () => {
-    const registry = createRegistry();
-    app = Fastify({ logger: false });
-    await app.register(
-      createAgentTeamRoutes(
-        () => registry,
-        () => 'machine-a',
-      ),
-      {
-        prefix: '/api/agent-team',
-      },
-    );
-    await app.listen({ host: '127.0.0.1', port: 0 });
-    const address = app.server.address();
-    if (!address || typeof address === 'string') {
-      throw new Error('Expected server address');
-    }
-
-    const payload = await new Promise<string>((resolve, reject) => {
-      const request = get(
-        `http://127.0.0.1:${address.port}/api/agent-team/settings/events`,
-        (response) => {
-          let data = '';
-          response.setEncoding('utf8');
-          response.on('data', (chunk: string) => {
-            data += chunk;
-            if (data.includes('event: snapshot')) {
-              response.destroy();
-              resolve(data);
-            }
-          });
-        },
-      );
-      request.on('error', reject);
-    });
-
-    expect(payload).toContain('event: snapshot');
-    expect(payload).toContain('"roots":[]');
-  });
 });

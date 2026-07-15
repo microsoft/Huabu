@@ -181,31 +181,3 @@ export const agentTeamProfileActionParamsSchema = z
 export type AgentTeamProfileActionParams = z.infer<
   typeof agentTeamProfileActionParamsSchema
 >;
-
-export const AGENT_TEAM_SETTINGS_SSE_EVENTS = {
-  SNAPSHOT: 'snapshot',
-  ERROR: 'state-error',
-} as const;
-
-export const agentTeamSettingsSseEventSchema = z.discriminatedUnion('type', [
-  z
-    .object({
-      type: z.literal(AGENT_TEAM_SETTINGS_SSE_EVENTS.SNAPSHOT),
-      data: agentTeamSettingsStateSchema,
-    })
-    .strict(),
-  z
-    .object({
-      type: z.literal(AGENT_TEAM_SETTINGS_SSE_EVENTS.ERROR),
-      data: z
-        .object({
-          message: z.string(),
-          code: z.string().optional(),
-        })
-        .strict(),
-    })
-    .strict(),
-]);
-export type AgentTeamSettingsSseEvent = z.infer<
-  typeof agentTeamSettingsSseEventSchema
->;

@@ -645,10 +645,8 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
   );
 };
 /**
- * Fetch the host-detected CLIs on mount. Shared between the Settings
- * section and the inline "Add agent" entry in `NewChatMenu` so both
- * surfaces can present the same Profile editor without duplicating the
- * one-shot detection effect.
+ * Fetch and cache host-detected CLIs when an editor opens. Shared between
+ * Settings and the inline "Add agent" entry in `NewChatMenu`.
  *
  * Detection failures degrade silently — callers receive `[]` and the
  * editor's Auto-detected dropdown just falls back to "Custom command".
@@ -659,13 +657,34 @@ export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
  * actually run, which would otherwise flash the Custom tab open on
  * mount and then snap to Built-in once the CLIs arrive.
  */
-export function useDetectedClis(): {
+let detectedClisCache: AcpAgentCliInfo[] | null = null;
+let detectedClisRequest: Promise<AcpAgentCliInfo[]> | null = null;
+
+function loadDetectedClis(force = false): Promise<AcpAgentCliInfo[]> {
+  if (!force && detectedClisCache) return Promise.resolve(detectedClisCache);
+  if (detectedClisRequest) return detectedClisRequest;
+  const request: Promise<AcpAgentCliInfo[]> = listAcpAgentClis()
+    .then((response) => {
+      detectedClisCache = response.agents;
+      return response.agents;
+    })
+    .finally(() => {
+      if (detectedClisRequest === request) detectedClisRequest = null;
+    });
+  detectedClisRequest = request;
+  return request;
+}
+
+export function useDetectedClis(enabled = true): {
   detectedClis: AcpAgentCliInfo[];
   loaded: boolean;
 } {
-  const [detectedClis, setDetectedClis] = useState<AcpAgentCliInfo[]>([]);
-  const [loaded, setLoaded] = useState(false);
+  const [detectedClis, setDetectedClis] = useState<AcpAgentCliInfo[]>(
+    () => detectedClisCache ?? [],
+  );
+  const [loaded, setLoaded] = useState(detectedClisCache !== null);
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     /**
      * Fire-and-forget. We refetch on every workspace-ready transition
@@ -674,10 +693,10 @@ export function useDetectedClis(): {
      * initial fetch 503s and we'd otherwise be stuck with an empty
      * Built-in list until the user reloads.
      */
-    const load = () => {
-      listAcpAgentClis()
-        .then((res) => {
-          if (!cancelled) setDetectedClis(res.agents);
+    const load = (force = false) => {
+      loadDetectedClis(force)
+        .then((agents) => {
+          if (!cancelled) setDetectedClis(agents);
         })
         .catch(() => {
           // Detection failure is non-fatal — the Custom option still
@@ -689,12 +708,15 @@ export function useDetectedClis(): {
         });
     };
     load();
-    const handler = () => load();
+    const handler = () => {
+      detectedClisCache = null;
+      load(true);
+    };
     window.addEventListener('workspace-changed', handler);
     return () => {
       cancelled = true;
       window.removeEventListener('workspace-changed', handler);
     };
-  }, []);
+  }, [enabled]);
   return { detectedClis, loaded };
 }

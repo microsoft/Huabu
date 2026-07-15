@@ -6,8 +6,7 @@ import acpProfilesRoutes from './profiles.route.js';
 const mocks = vi.hoisted(() => ({
   registry: {
     listProfiles: vi.fn(),
-    listMemberSummaries: vi.fn(),
-    getMemberDetail: vi.fn(),
+    listSelectableProfileIds: vi.fn(),
     createProfile: vi.fn(),
   },
 }));
@@ -94,27 +93,10 @@ describe('ACP Profile catalog routes', () => {
       commandProfile,
       manifestProfile,
     ]);
-    mocks.registry.listMemberSummaries.mockReturnValue([
-      {
-        machine: 'machine-b',
-        manifestPath: manifestProfile.launch.manifestPath,
-        name: 'reviewer',
-        description: '',
-        status: 'active',
-        profileCount: 1,
-        preparationCounts: {
-          not_prepared: 0,
-          setting_up: 0,
-          ready: 1,
-          error: 0,
-        },
-      },
+    mocks.registry.listSelectableProfileIds.mockReturnValue([
+      commandProfile.id,
+      manifestProfile.id,
     ]);
-    mocks.registry.getMemberDetail.mockReturnValue({
-      member: { status: 'active' },
-      config: { ready: true },
-      profiles: [manifestProfile],
-    });
     app = Fastify({ logger: false });
     await app.register(acpProfilesRoutes, { prefix: '/api/acp' });
 
@@ -133,16 +115,7 @@ describe('ACP Profile catalog routes', () => {
 
   it('keeps a manifest Profile out of selectors when Configs are incomplete', async () => {
     mocks.registry.listProfiles.mockReturnValue([manifestProfile]);
-    mocks.registry.listMemberSummaries.mockReturnValue([
-      {
-        machine: 'machine-b',
-        manifestPath: manifestProfile.launch.manifestPath,
-        status: 'active',
-      },
-    ]);
-    mocks.registry.getMemberDetail.mockReturnValue({
-      config: { ready: false },
-    });
+    mocks.registry.listSelectableProfileIds.mockReturnValue([]);
     app = Fastify({ logger: false });
     await app.register(acpProfilesRoutes, { prefix: '/api/acp' });
 

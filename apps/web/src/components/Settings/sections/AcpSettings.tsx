@@ -144,13 +144,10 @@ export const AcpSettings: React.FC = () => {
   const error = useAcpProfilesStore((s) => s.error);
   const refresh = useAcpProfilesStore((s) => s.refresh);
 
-  // Host-CLI detection — see the shared `useDetectedClis` hook above
-  // for rationale (single fetch, silent on failure). Re-using the hook
-  // keeps Settings and `NewChatMenu`'s inline editor in lockstep.
-  const { detectedClis, loaded: detectionLoaded } = useDetectedClis();
-
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<AcpCommandProfileView | null>(null);
+  const { detectedClis, loaded: detectionLoaded } =
+    useDetectedClis(editorOpen);
   const [restarting, setRestarting] = useState(false);
   // Destructive confirmation uses a `Modal` rather than `window.confirm` so
   // the dialog matches the rest of the app's UX (see `CanvasListPage` for

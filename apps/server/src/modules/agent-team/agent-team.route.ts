@@ -6,7 +6,6 @@ import {
 } from '@agenetes/agentlet-host';
 
 import {
-  AGENT_TEAM_SETTINGS_SSE_EVENTS,
   agentTeamMemberDetailQuerySchema,
   agentTeamProfileActionParamsSchema,
   agentTeamRootRefSchema,
@@ -23,7 +22,6 @@ import type {
   AgentTeamMemberDetailQuery,
   AgentTeamMemberDetailView,
   AgentTeamRootRefBody,
-  AgentTeamSettingsSseEvent,
   AgentTeamSettingsState,
   ApiResult,
   CreateAgentProfileBody,
@@ -42,7 +40,6 @@ export type AgentTeamSettingsRegistry = Pick<
   | 'listMachines'
   | 'listMemberSummaries'
   | 'listRoots'
-  | 'onChange'
   | 'patchProfile'
   | 'removeRoot'
   | 'rescanRoot'
@@ -122,13 +119,6 @@ function firstIssueMessage(
   return result.error.issues[0]?.message ?? fallback;
 }
 
-function writeSse(
-  raw: NodeJS.WritableStream,
-  event: AgentTeamSettingsSseEvent,
-): void {
-  raw.write(`event: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`);
-}
-
 export function createAgentTeamRoutes(
   getRegistry: () => AgentTeamSettingsRegistry | null,
   getLocalMachine: () => string,
@@ -168,64 +158,6 @@ export function createAgentTeamRoutes(
       } catch (error) {
         return sendAgentTeamError(error, reply);
       }
-    });
-
-    app.get('/settings/events', async (request, reply) => {
-      if (denyRemote(request, reply)) return;
-      const registry = requireRegistry(reply, getRegistry);
-      if (!registry) return;
-
-      reply.hijack();
-      reply.raw.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        Connection: 'keep-alive',
-        'X-Accel-Buffering': 'no',
-      });
-      reply.raw.flushHeaders?.();
-      reply.raw.write(': ok\n\n');
-
-      let unsubscribe = () => {};
-      const heartbeat = setInterval(() => {
-        if (!reply.raw.destroyed && !reply.raw.writableEnded) {
-          reply.raw.write(': keep-alive\n\n');
-        }
-      }, 15_000);
-      heartbeat.unref();
-      const close = () => {
-        unsubscribe();
-        clearInterval(heartbeat);
-        if (!reply.raw.destroyed && !reply.raw.writableEnded) reply.raw.end();
-      };
-      const publishSnapshot = () => {
-        if (reply.raw.destroyed || reply.raw.writableEnded) return;
-        try {
-          writeSse(reply.raw, {
-            type: AGENT_TEAM_SETTINGS_SSE_EVENTS.SNAPSHOT,
-            data: readState(registry),
-          });
-        } catch (error) {
-          writeSse(reply.raw, {
-            type: AGENT_TEAM_SETTINGS_SSE_EVENTS.ERROR,
-            data: {
-              message:
-                error instanceof Error
-                  ? error.message
-                  : 'Failed to read Agent Team state',
-              code: 'agent_team_state_failed',
-            },
-          });
-          close();
-        }
-      };
-
-      request.raw.once('close', close);
-      reply.raw.once('error', close);
-      publishSnapshot();
-      if (reply.raw.destroyed || reply.raw.writableEnded) return;
-      unsubscribe = registry.onChange(publishSnapshot, (error) => {
-        app.log.error({ err: error }, 'Agent Team SSE subscriber failed');
-      });
     });
 
     app.post<{

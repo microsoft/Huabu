@@ -1,4 +1,4 @@
-import { apiFetch, apiUrl } from './_client';
+import { apiFetch } from './_client';
 import { routes } from './_routes';
 
 import type {
@@ -117,52 +117,4 @@ export function cancelAgentTeamProfileSetup(
   id: string,
 ): Promise<AgentProfileView> {
   return runProfileAction(id, 'cancel');
-}
-
-export interface AgentTeamSettingsStreamError {
-  message: string;
-  code?: string;
-}
-
-export function subscribeAgentTeamSettings(
-  onSnapshot: (state: AgentTeamSettingsState) => void,
-  onStateError?: (error: AgentTeamSettingsStreamError) => void,
-): () => void {
-  const source = new EventSource(apiUrl(routes.agentTeamSettingsEvents));
-  source.addEventListener('snapshot', (event) => {
-    let state: AgentTeamSettingsState;
-    try {
-      state = JSON.parse(event.data) as AgentTeamSettingsState;
-    } catch {
-      onStateError?.({
-        message: 'Agent Team Settings stream returned invalid data',
-        code: 'invalid_stream_data',
-      });
-      source.close();
-      return;
-    }
-    onSnapshot(state);
-  });
-  source.addEventListener('state-error', (event) => {
-    let streamError: AgentTeamSettingsStreamError;
-    try {
-      streamError = JSON.parse(event.data) as AgentTeamSettingsStreamError;
-    } catch {
-      onStateError?.({
-        message: 'Agent Team Settings stream returned an invalid error',
-        code: 'invalid_stream_error',
-      });
-      source.close();
-      return;
-    }
-    onStateError?.(streamError);
-    source.close();
-  });
-  source.onerror = () => {
-    onStateError?.({
-      message: 'Agent Team Settings stream disconnected',
-      code: 'stream_disconnected',
-    });
-  };
-  return () => source.close();
 }

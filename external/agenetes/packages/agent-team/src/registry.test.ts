@@ -276,6 +276,7 @@ describe('AgentTeamRegistry', () => {
       metadata: { cliId: 'copilot' },
     });
     expect(registry.listProfiles()).toHaveLength(3);
+    expect(registry.listSelectableProfileIds()).toEqual(['profile-3']);
     expect(registry.listMemberSummaries()).toEqual([
       expect.objectContaining({
         machine,

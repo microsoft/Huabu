@@ -66,7 +66,7 @@ The Agent Teams Settings tab lists connected daemon machines. It identifies the 
 
 ```text
 Huabu Settings UI
-       │ loopback REST + SSE
+       │ loopback REST
        ▼
 Huabu Fastify adapter ── host storage + SecretStore
        │
@@ -88,12 +88,12 @@ The current implementation follows these ownership boundaries:
 
 1. **Generic packaging and execution live in agentlet** — `agentlet.yaml` and daemon-side scan/setup/validate behavior are not Huabu-specific conventions.
 2. **Agenetes owns the control and runtime Profile plane** — `@agenetes/agent-team` owns durable discovery, Config metadata, the unified Profile registry, setup orchestration, availability, and Profile-to-ACP lowering; `@agenetes/agentlet-host.mountAgenetes(...)` internally composes the registry with the single Gateway instance.
-3. **Huabu supplies host capabilities** — Huabu provides an absolute storage directory, the SecretStore adapter, loopback-only HTTP/SSE projection, and Settings UI. Huabu does not inject, select, or coordinate the Gateway.
-4. **Machine presence is live state** — the Gateway projects connected daemon profiles through `AgentTeamControlPort`; registry changes publish replacement Settings snapshots over SSE.
+3. **Huabu supplies host capabilities** — Huabu provides an absolute storage directory, the SecretStore adapter, loopback-only REST projection, and Settings UI. Huabu does not inject, select, or coordinate the Gateway.
+4. **Machine presence is sampled live** — the Gateway projects connected daemon profiles through `AgentTeamControlPort`; each Agent Team Settings overview read returns the currently connected machines.
 5. **Setup is explicit and durable** — Setup/Retry drives preparation, required Configs gate setup and selection, cancellation and errors remain visible, and interrupted in-flight setup reconciles to an explicit error on restart.
 6. **Settings reads are redacted** — secret plaintext never crosses the Settings API; the UI can only replace or clear a secret and observe whether it is configured.
 7. **Runtime snapshots are immutable** — a new external thread snapshots the selected Profile's placement and launch fields. Profile deletion blocks new bindings without changing existing threads; manifest session spawn loads current Configs and validates the prepared workspace before delegating to the ACP driver.
-8. **The catalog is shared** — Chat and Question Nodes consume one Profile catalog and render ready manifest Profiles under Agent Teams and command Profiles under External Agents.
+8. **The catalog is shared** — Agenetes computes selectable Profile IDs without loading member detail; Chat and Question Nodes consume that catalog and render ready manifest Profiles under Agent Teams and command Profiles under External Agents.
 
 ---
 
@@ -140,7 +140,7 @@ This is why "agent as the universal interface" is not just a nice idea for Huabu
 | [`external/agenetes/packages/agent-team/`](../../external/agenetes/packages/agent-team/)             | Durable Agent Team control-plane aggregate, unified Profile registry and driver, Config resolution, and setup state machine. |
 | [`external/agenetes/packages/agentlet-gateway/`](../../external/agenetes/packages/agentlet-gateway/) | Connected daemon catalog and routed Agent Team control operations.                                                           |
 | [`external/agenetes/packages/agentlet-host/`](../../external/agenetes/packages/agentlet-host/)       | Agenetes composition boundary that mounts the Gateway and Agent Team registry.                                               |
-| [`apps/server/src/modules/agent-team/`](../../apps/server/src/modules/agent-team/)                   | Loopback-only REST/SSE adapter and host capability projection.                                                               |
+| [`apps/server/src/modules/agent-team/`](../../apps/server/src/modules/agent-team/)                   | Loopback-only REST adapter and host capability projection.                                                                   |
 | [`packages/shared/src/types/api/agent-team.ts`](../../packages/shared/src/types/api/agent-team.ts)   | Shared Zod wire contracts for Settings reads and mutations.                                                                  |
 | [`apps/web/src/components/Settings/agent-team/`](../../apps/web/src/components/Settings/agent-team/) | Roots, lazy member detail, Configs, manifest Profiles, preparation status, and live synchronization UI.                      |
 | [`external/agentlet/spec/agent-team.md`](../../external/agentlet/spec/agent-team.md)                 | Generic package and daemon execution contract.                                                                               |

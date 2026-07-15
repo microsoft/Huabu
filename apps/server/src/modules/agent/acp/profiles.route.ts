@@ -62,12 +62,6 @@ function isCommandProfile(profile: AgentProfile): profile is AcpCommandProfile {
   return profile.launch.kind === 'acp-command';
 }
 
-function isManifestProfile(
-  profile: AgentProfile,
-): profile is Exclude<AgentProfile, AcpCommandProfile> {
-  return 'preparation' in profile;
-}
-
 const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
   // ── List ─────────────────────────────────────────────────────────────
   app.get<{ Reply: ApiResult<AcpProfilesListResponse> }>(
@@ -76,32 +70,9 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
       if (denyRemote(request, reply)) return;
       const registry = getAgentTeamRegistry();
       const profiles = registry?.listProfiles() ?? [];
-      const memberSummaries = registry?.listMemberSummaries() ?? [];
-      const selectableProfileIds = profiles
-        .filter((profile) => {
-          if (isCommandProfile(profile)) return true;
-          if (
-            !isManifestProfile(profile) ||
-            profile.preparation.status !== 'ready' ||
-            !registry
-          ) {
-            return false;
-          }
-          const member = memberSummaries.find(
-            (candidate) =>
-              candidate.machine === profile.agentletId &&
-              candidate.manifestPath === profile.launch.manifestPath,
-          );
-          if (!member || member.status !== 'active') return false;
-          return registry.getMemberDetail(
-            profile.agentletId,
-            profile.launch.manifestPath,
-          ).config.ready;
-        })
-        .map(({ id }) => id);
       return {
         profiles,
-        selectableProfileIds,
+        selectableProfileIds: registry?.listSelectableProfileIds() ?? [],
         legacyProfiles: listLegacyProfiles().filter(
           (profile) => profile.cliId === 'agent-team',
         ),

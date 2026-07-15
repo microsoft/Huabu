@@ -8,21 +8,10 @@ import type { AgentTeamSettingsState } from '@sediment/shared';
 
 const apiMocks = vi.hoisted(() => ({
   getSettings: vi.fn(),
-  subscribe: vi.fn(),
-}));
-const translationMocks = vi.hoisted(() => ({
-  t: (key: string) => key,
-}));
-
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: translationMocks.t,
-  }),
 }));
 
 vi.mock('@/api/agent-team', () => ({
   getAgentTeamSettings: apiMocks.getSettings,
-  subscribeAgentTeamSettings: apiMocks.subscribe,
 }));
 
 const emptyState = (localMachine: string): AgentTeamSettingsState => ({
@@ -40,12 +29,12 @@ let latestMutate:
   | null = null;
 
 function Harness() {
-  const { state, streamError, mutate } = useAgentTeamSettings();
+  const { state, loadError, mutate } = useAgentTeamSettings();
   latestMutate = mutate;
   return (
     <div>
       <span data-state>{state?.localMachine ?? 'loading'}</span>
-      <span data-error>{streamError ?? ''}</span>
+      <span data-error>{loadError ?? ''}</span>
     </div>
   );
 }
@@ -69,57 +58,38 @@ afterEach(() => {
   root = null;
   container = null;
   apiMocks.getSettings.mockReset();
-  apiMocks.subscribe.mockReset();
   latestMutate = null;
 });
 
 describe('useAgentTeamSettings', () => {
-  it('bootstraps with GET before subscribing and accepts SSE updates', async () => {
-    let onSnapshot: ((state: AgentTeamSettingsState) => void) | undefined;
-    apiMocks.getSettings.mockResolvedValueOnce(emptyState('get-machine'));
-    apiMocks.subscribe.mockImplementation(
-      (handler: (state: AgentTeamSettingsState) => void) => {
-        onSnapshot = handler;
-        return vi.fn();
-      },
+  it('loads the initial REST snapshot', async () => {
+    apiMocks.getSettings.mockResolvedValueOnce(emptyState('rest-machine'));
+
+    const view = renderHarness();
+    expect(view.querySelector('[data-state]')?.textContent).toBe('loading');
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(apiMocks.getSettings).toHaveBeenCalledOnce();
+    expect(view.querySelector('[data-state]')?.textContent).toBe(
+      'rest-machine',
     );
-
-    const view = renderHarness();
-    expect(apiMocks.subscribe).not.toHaveBeenCalled();
-
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(view.querySelector('[data-state]')?.textContent).toBe('get-machine');
-    expect(apiMocks.subscribe).toHaveBeenCalledOnce();
-
-    act(() => onSnapshot?.(emptyState('sse-machine')));
-    expect(view.querySelector('[data-state]')?.textContent).toBe('sse-machine');
   });
 
-  it('surfaces an initial load error while still opening the stream', async () => {
-    apiMocks.getSettings.mockRejectedValueOnce('unavailable');
-    apiMocks.subscribe.mockReturnValue(vi.fn());
+  it('surfaces an initial REST load error', async () => {
+    apiMocks.getSettings.mockRejectedValueOnce(new Error('unavailable'));
 
     const view = renderHarness();
     await act(async () => {
       await Promise.resolve();
     });
 
-    expect(view.querySelector('[data-error]')?.textContent).toBe('loadFailed');
-    expect(apiMocks.subscribe).toHaveBeenCalledOnce();
+    expect(view.querySelector('[data-error]')?.textContent).toBe('unavailable');
   });
 
-  it('does not let a mutation response overwrite a newer SSE snapshot', async () => {
-    let onSnapshot: ((state: AgentTeamSettingsState) => void) | undefined;
+  it('applies the REST snapshot returned by a mutation', async () => {
     let resolveMutation: ((state: AgentTeamSettingsState) => void) | undefined;
     apiMocks.getSettings.mockResolvedValueOnce(emptyState('initial'));
-    apiMocks.subscribe.mockImplementation(
-      (handler: (state: AgentTeamSettingsState) => void) => {
-        onSnapshot = handler;
-        return vi.fn();
-      },
-    );
 
     const view = renderHarness();
     await act(async () => {
@@ -133,12 +103,11 @@ describe('useAgentTeamSettings', () => {
     act(() => {
       mutationDone = latestMutate?.('update', () => mutation);
     });
-    act(() => onSnapshot?.(emptyState('newer-sse')));
     await act(async () => {
-      resolveMutation?.(emptyState('older-rest'));
+      resolveMutation?.(emptyState('updated'));
       await mutationDone;
     });
 
-    expect(view.querySelector('[data-state]')?.textContent).toBe('newer-sse');
+    expect(view.querySelector('[data-state]')?.textContent).toBe('updated');
   });
 });

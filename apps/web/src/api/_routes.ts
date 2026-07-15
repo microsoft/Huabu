@@ -32,7 +32,6 @@ export const routes = {
 
   // ── Agent Team Settings (loopback-only) ─────────────────────────
   agentTeamSettings: '/agent-team/settings',
-  agentTeamSettingsEvents: '/agent-team/settings/events',
   agentTeamRoots: '/agent-team/settings/roots',
   agentTeamRootsRescan: '/agent-team/settings/roots/rescan',
   agentTeamMemberDetail: '/agent-team/settings/member-detail',

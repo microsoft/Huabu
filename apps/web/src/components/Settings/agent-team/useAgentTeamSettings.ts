@@ -1,52 +1,34 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useTranslation } from 'react-i18next';
+import { useCallback, useEffect, useState } from 'react';
 
-import {
-  getAgentTeamSettings,
-  subscribeAgentTeamSettings,
-} from '@/api/agent-team';
+import { getAgentTeamSettings } from '@/api/agent-team';
 
 import type { AgentTeamSettingsState } from '@sediment/shared';
 
 export function useAgentTeamSettings() {
-  const { t } = useTranslation('agentTeam');
   const [state, setState] = useState<AgentTeamSettingsState | null>(null);
-  const [streamError, setStreamError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
-  const streamSnapshotVersion = useRef(0);
 
   useEffect(() => {
     let active = true;
-    let unsubscribe = () => {};
-
-    const initialize = async () => {
-      try {
-        const snapshot = await getAgentTeamSettings();
-        if (active) setState(snapshot);
-      } catch (error) {
-        if (active) {
-          setStreamError(
-            error instanceof Error ? error.message : t('loadFailed'),
-          );
-        }
-      }
-      if (!active) return;
-      unsubscribe = subscribeAgentTeamSettings(
-        (snapshot) => {
-          streamSnapshotVersion.current += 1;
-          setState(snapshot);
-          setStreamError(null);
-        },
-        (error) => setStreamError(error.message),
-      );
-    };
-
-    void initialize();
+    void getAgentTeamSettings()
+      .then((snapshot) => {
+        if (!active) return;
+        setState(snapshot);
+        setLoadError(null);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setLoadError(
+          error instanceof Error
+            ? error.message
+            : 'Failed to load Agent Team Settings',
+        );
+      });
     return () => {
       active = false;
-      unsubscribe();
     };
-  }, [t]);
+  }, []);
 
   const mutate = useCallback(
     async (
@@ -54,13 +36,10 @@ export function useAgentTeamSettings() {
       operation: () => Promise<AgentTeamSettingsState>,
     ): Promise<void> => {
       setPendingAction(action);
-      const startingStreamVersion = streamSnapshotVersion.current;
       try {
         const snapshot = await operation();
-        if (streamSnapshotVersion.current === startingStreamVersion) {
-          setState(snapshot);
-        }
-        setStreamError(null);
+        setState(snapshot);
+        setLoadError(null);
       } finally {
         setPendingAction(null);
       }
@@ -70,7 +49,7 @@ export function useAgentTeamSettings() {
 
   return {
     state,
-    streamError,
+    loadError,
     pendingAction,
     mutate,
   };

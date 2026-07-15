@@ -125,6 +125,7 @@ describe('Agent Team setup state machine', () => {
     const { registry, control, deploymentId } = await createDeployment({
       now: () => ++time,
     });
+    expect(registry.listSelectableProfileIds()).toEqual([]);
 
     await expect(registry.setupProfile(deploymentId)).resolves.toMatchObject({
       preparation: {
@@ -162,6 +163,7 @@ describe('Agent Team setup state machine', () => {
         },
       ],
     });
+    expect(registry.listSelectableProfileIds()).toEqual([deploymentId]);
   });
 
   it('accepts terminal progress before the setup request returns', async () => {

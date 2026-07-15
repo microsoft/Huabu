@@ -23,6 +23,7 @@ function MemberSection({ summary }: { summary: AgentTeamMemberSummaryView }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const loadingRef = useRef(false);
   const summaryVersion = JSON.stringify([
     summary.status,
     summary.profileCount,
@@ -32,7 +33,8 @@ function MemberSection({ summary }: { summary: AgentTeamMemberSummaryView }) {
 
   const load = useCallback(
     async (force = false) => {
-      if ((!force && detail) || loading) return;
+      if ((!force && detail) || loadingRef.current) return;
+      loadingRef.current = true;
       setLoading(true);
       setError(null);
       try {
@@ -45,10 +47,11 @@ function MemberSection({ summary }: { summary: AgentTeamMemberSummaryView }) {
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : t('operationFailed'));
       } finally {
+        loadingRef.current = false;
         setLoading(false);
       }
     },
-    [detail, loading, summary.machine, summary.manifestPath, t],
+    [detail, summary.machine, summary.manifestPath, t],
   );
 
   useEffect(() => {
@@ -57,6 +60,15 @@ function MemberSection({ summary }: { summary: AgentTeamMemberSummaryView }) {
     setDetail(null);
     if (expanded) void load(true);
   }, [expanded, load, summaryVersion]);
+
+  const setupActive = detail?.profiles.some(
+    (profile) => profile.preparation.status === 'setting_up',
+  );
+  useEffect(() => {
+    if (!expanded || !setupActive) return;
+    const timer = window.setInterval(() => void load(true), 1_000);
+    return () => window.clearInterval(timer);
+  }, [expanded, load, setupActive]);
 
   return (
     <SettingSection
@@ -99,9 +111,9 @@ function MemberSection({ summary }: { summary: AgentTeamMemberSummaryView }) {
 
 export function AgentTeamSettings() {
   const { t } = useTranslation('agentTeam');
-  const { state, streamError, pendingAction, mutate } = useAgentTeamSettings();
+  const { state, loadError, pendingAction, mutate } = useAgentTeamSettings();
 
-  if (!state && !streamError) {
+  if (!state && !loadError) {
     return (
       <div className="text-fg-muted flex items-center gap-2 py-8 text-sm">
         <Loader2 className="animate-spin" size={16} />
@@ -110,11 +122,11 @@ export function AgentTeamSettings() {
     );
   }
 
-  if (streamError && !state) {
+  if (loadError && !state) {
     return (
       <div className="border-danger/20 bg-danger-bg text-danger flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
         <AlertCircle size={16} />
-        {t('loadFailed')}: {streamError}
+        {t('loadFailed')}: {loadError}
       </div>
     );
   }

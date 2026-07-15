@@ -269,9 +269,7 @@ export function useAddAgentEditor(
   onRefreshProfiles?: () => void | Promise<void>,
 ): { openEditor: () => void; editor: ReactNode } {
   const [editorOpen, setEditorOpen] = useState(false);
-  // CLI detection is cheap (single cached fetch). Done eagerly so the
-  // editor modal opens instantly even on a cold mount.
-  const { detectedClis, loaded } = useDetectedClis();
+  const { detectedClis, loaded } = useDetectedClis(editorOpen);
 
   const editor = onRefreshProfiles ? (
     <ProfileEditorModal

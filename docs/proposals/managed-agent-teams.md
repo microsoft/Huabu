@@ -136,7 +136,7 @@ not-prepared ── Setup ──▶ setting-up ── success ──▶ ready
                               └─ Cancel ───▶ not-prepared
 ```
 
-Setup cannot start while required member Configs are missing. Setup progress is persisted as a bounded structured log and projected to Settings over SSE. An interrupted setup becomes `error` with a structured `setup_interrupted` reason and requires explicit Retry.
+Setup cannot start while required member Configs are missing. Setup progress is persisted as a bounded structured log; while an expanded member is setting up, Settings polls that member's detail until it reaches a terminal state. An interrupted setup becomes `error` with a structured `setup_interrupted` reason and requires explicit Retry.
 
 Profile deletion is rejected while setup or cancellation is active. Setup is never hidden inside first use or `AgentDriver.create(...)`.
 
@@ -226,7 +226,7 @@ Migration is idempotent and must not rewrite an existing unified Profile. Existi
 
 `@agenetes/agent-team` owns the host-agnostic unified Profile registry, Agent Team roots and members, Config metadata, preparation state, runtime Profile resolution, the standard Agent Profile driver/service, and the first-version file-backed persistence and migration.
 
-`@agenetes/agentlet-host.mountAgenetes(...)` composes the registry with the single Agentlet Gateway and supplies it as the Agent Team control port. Huabu supplies the storage directory, SecretStore adapter, reachback environment, HTTP/SSE projection, and Settings and Chat UI.
+`@agenetes/agentlet-host.mountAgenetes(...)` composes the registry with the single Agentlet Gateway and supplies it as the Agent Team control port. Huabu supplies the storage directory, SecretStore adapter, reachback environment, REST projection, and Settings and Chat UI.
 
 The Agentlet Gateway owns live daemon connections and routes every operation to the Profile's explicit `agentletId`. The standard ACP driver owns session creation, resumption, canonical-input flattening, event translation, and durable ACP state.
 
@@ -256,7 +256,7 @@ Profile deletion does not revoke existing threads. Global restart policy, crash-
 ### ✅ Foundation shipped
 
 - Multi-daemon Agentlet Gateway placement and the locally supervised daemon.
-- Agent Team root discovery, member reconciliation, Configs, SecretStore integration, setup orchestration, progress SSE, and Settings UI.
+- Agent Team root discovery, member reconciliation, Configs, SecretStore integration, setup orchestration, persisted progress, and Settings UI.
 - Structured CLI requirements, shared npm tool installation, bundled manifests, and package documentation.
 
 ### ✅ Unified Profile registry
@@ -275,10 +275,6 @@ Profile deletion does not revoke existing threads. Global restart policy, crash-
 - Project the unified Profile catalog into the two Chat selector groups.
 - Route Chat and Question Node external bindings by `profileId`.
 - Add focused migration, registry, runtime, API, and selector coverage; Question Nodes reuse the same `/api/agent` binding path.
-
-### ⏳ Follow-up optimization
-
-- Replace the lightweight Agent Team overview replacement SSE event with affected-resource summary/detail events so expanded member caches can invalidate without comparing summary state.
 
 ## 6. Related documents
 

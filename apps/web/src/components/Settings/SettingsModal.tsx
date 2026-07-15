@@ -71,13 +71,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const acpInit = useAcpProfilesStore((s) => s.init);
   const [activeTab, setActiveTab] = useState<SettingsTab>(TABS[0].id);
 
-  // Load LLM + ACP config lazily when the dialog opens (Models / External
-  // Agents tabs). The integrations store self-initialises in its component.
+  // Load each registry only when its owning tab is visible.
   useEffect(() => {
     if (!isOpen) return;
-    void llmInit();
-    void acpInit();
-  }, [isOpen, llmInit, acpInit]);
+    if (activeTab === 'huabuAgent') void llmInit();
+    if (activeTab === 'agents') void acpInit();
+  }, [isOpen, activeTab, llmInit, acpInit]);
 
   // Close on Escape.
   useEffect(() => {

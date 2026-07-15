@@ -311,6 +311,27 @@ export class AgentTeamRegistry {
     return structuredClone(this.state.profiles);
   }
 
+  listSelectableProfileIds(): string[] {
+    return this.state.profiles
+      .filter((profile) => {
+        if (!isManifestProfile(profile)) return true;
+        if (profile.preparation.status !== 'ready') return false;
+        const member = this.state.members.find(
+          (candidate) =>
+            candidate.machine === profile.agentletId &&
+            candidate.manifestPath === profile.launch.manifestPath,
+        );
+        return (
+          member?.status === 'active' &&
+          this.getMemberConfig(
+            profile.agentletId,
+            profile.launch.manifestPath,
+          ).ready
+        );
+      })
+      .map(({ id }) => id);
+  }
+
   getProfile(id: string): AgentProfile | undefined {
     const profile = this.state.profiles.find(
       (candidate) => candidate.id === id,
