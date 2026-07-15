@@ -106,7 +106,11 @@ The backend registry is unified, but Huabu retains two task-oriented Settings ta
 - **Agent Team** manages roots, members, member Configs, manifest-backed Profiles, and preparation.
 - **External Agent** manages command-backed Profiles and removes the legacy Agent Team option.
 
-The Agent Team tab groups manifest-backed Profiles beneath their discovered member. Member Configs are shared by every Profile that references the same `(agentletId, manifestPath)`.
+The Agent Team tab initially loads only roots and lightweight member summaries. Every member is collapsed by default. A summary contains the member identity and display metadata, discovery status, manifest-backed Profile count, and aggregate preparation status; it does not contain Config fields, Profile records, or setup logs.
+
+Expanding a member loads its detail by `(agentletId, manifestPath)`. The detail contains required environment fields and redacted configuration state, manifest-backed Profiles, preparation state, and setup logs. The web client caches loaded details so collapsing and reopening a member does not repeat the request; registry changes update or invalidate only the affected summary and detail rather than replacing the complete Settings state.
+
+Member Configs are shared by every Profile that references the same `(agentletId, manifestPath)`.
 
 Required environment variables are declared structurally in `agentlet.yaml`:
 
@@ -196,7 +200,11 @@ Chat consumes one Profile catalog from the unified registry. The selector presen
 
 Opening or refreshing the selector must reflect newly prepared, created, or deleted Profiles without requiring an application reload.
 
-Huabu exposes thin validated adapters over the Agenetes registry and runtime service. Settings adapters may remain split by product surface, but they operate on the same Profile store. Runtime and A2A calls identify Profiles by `profileId`, never alias.
+The Agenetes Profile service exposes resource-oriented create, read/list, and delete operations plus a restricted patch operation for alias and non-runtime metadata. It does not expose an update operation for `agentletId`, `workingDirPath`, or `launch`; changing runtime identity requires delete followed by create.
+
+Huabu exposes thin validated HTTP adapters over the Agenetes Profile registry and runtime service. Settings adapters may remain split by product surface, but they operate on the same Profile store. Runtime and A2A calls identify Profiles by `profileId`, never alias.
+
+The Agent Team Settings adapter separates overview and detail reads. Its initial overview does not iterate through every member to resolve Config fields or serialize setup logs. Member detail is fetched on expansion and cached by the web client. Profile mutations return the affected resource instead of rebuilding and returning the complete Agent Team Settings snapshot.
 
 Runs accept the standard Agenetes `AgentSubmission` and stream standard `AgentStreamEvent`s. Huabu renders `ChatEnvelope` into canonical inputs before invoking the service; Agenetes does not import Huabu envelope types.
 
@@ -252,8 +260,10 @@ Profile deletion does not revoke existing threads. Global restart policy, crash-
 ### ▶️ Unified Profile registry
 
 - Replace Agent Team deployment records and the host ACP profile store with the `AgentProfile` union.
+- Expose Agenetes create, read/list, delete, and alias/metadata patch operations and change subscriptions for the unified Profile resource.
 - Add idempotent migration and legacy Agent Team profile notice.
 - Remove enabled intent, revision, per-Profile auto-restart, runtime-field editing, alias uniqueness, and the legacy Agent Team option from External Agent Settings.
+- Replace the full Agent Team Settings snapshot with lightweight member overview reads, cached on-demand member detail, and affected-resource mutation responses.
 
 ### ⏳ Runtime and Chat integration
 
