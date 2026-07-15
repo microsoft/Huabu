@@ -1,4 +1,8 @@
 import type {
+  AgentProfileSnapshot,
+  AgentTeamManifestRuntime,
+} from './types.js';
+import type {
   AgentCapabilities,
   AgentStateSnapshot,
   AgentStreamEvent,
@@ -13,10 +17,6 @@ import type {
   AgentHandle,
 } from '@agenetes/runtime';
 
-import type {
-  AgentProfileSnapshot,
-  AgentTeamManifestRuntime,
-} from './types.js';
 
 export interface AgentProfileWorkloadSpec {
   readonly threadId: string;

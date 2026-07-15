@@ -1,21 +1,21 @@
-import Fastify from 'fastify';
-import WebSocket from 'ws';
-import { afterEach, describe, expect, it } from 'vitest';
-
-import {
-  ACP_UPGRADE_PATH,
-  mountAgentletGateway,
-} from './gateway-mount.js';
-import {
-  _resetDaemonAuthForTests,
-  getDaemonAuth,
-} from './daemon-auth.js';
-
 import {
   AgentletMethods,
   PROTOCOL_VERSION,
   type JsonRpcMessage,
 } from '@agentlet/protocol';
+import Fastify from 'fastify';
+import { afterEach, describe, expect, it } from 'vitest';
+import WebSocket from 'ws';
+
+import {
+  _resetDaemonAuthForTests,
+  getDaemonAuth,
+} from './daemon-auth.js';
+import {
+  ACP_UPGRADE_PATH,
+  mountAgentletGateway,
+} from './gateway-mount.js';
+
 import type { FastifyInstance } from 'fastify';
 
 let app: FastifyInstance | undefined;

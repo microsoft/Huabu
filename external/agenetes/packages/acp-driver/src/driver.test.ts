@@ -5,6 +5,7 @@
 // keyed by `spec.threadId` (I9.3). A full WorkloadSpec satisfies the create
 // input structurally — only `threadId` is read today.
 
+import { getSupervisedAgentletId } from '@agenetes/agentlet-host';
 import { describe, expect, it } from 'vitest';
 
 import { acpDriverFactory } from './driver.js';
@@ -13,7 +14,6 @@ import {
   ACP_CAPABILITIES,
   resolveAcpAgentletId,
 } from './handle.js';
-import { getSupervisedAgentletId } from '@agenetes/agentlet-host';
 
 const freshContext = {
   recovery: {

@@ -17,14 +17,12 @@
 
 import { hostname } from 'node:os';
 
-import {
-  getAgentTeamRegistry,
-  mountAgentTeamRegistry,
-} from './agent-team-mount.js';
+import { mountAgentTeamRegistry } from './agent-team-mount.js';
 import { getDaemonAuth } from './daemon-auth.js';
 import { getDaemonSupervisor } from './daemon-supervisor.js';
 import { mountAgentletGateway } from './gateway-mount.js';
 
+import type { MountAgentTeamOptions } from './agent-team-mount.js';
 import type {
   AgentletConnection,
   AgentletGateway,
@@ -108,7 +106,7 @@ export interface MountAgenetesOptions {
    * Host capabilities for the durable Agent Team control plane. The mounted
    * Gateway is connected internally and is never supplied by the host.
    */
-  agentTeam?: import('./agent-team-mount.js').MountAgentTeamOptions;
+  agentTeam?: MountAgentTeamOptions;
 }
 
 /**

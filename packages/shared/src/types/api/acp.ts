@@ -24,7 +24,9 @@ import {
   ZAcpSessionConfigOption,
   ZAcpSessionMode,
 } from './acp-tool.js';
+import { agentProfileSchema } from './agent-profile.js';
 
+import type { AgentProfileView } from './agent-profile.js';
 import type {
   AcpCost,
   AcpModelInfo,
@@ -33,7 +35,6 @@ import type {
 } from '../agent/acp-tool.js';
 import type { AgentletStatus } from '@agenetes/protocol';
 
-import { agentProfileSchema } from './agent-profile.js';
 
 // ─── Agent profiles (user-configured spawn recipes) ────────────────────
 //
@@ -101,15 +102,14 @@ export type AcpDaemonStatus = AcpAgentletStatus;
 
 /** Response body for `GET /api/acp/profiles`. */
 export interface AcpProfilesListResponse {
-  profiles: import('./agent-profile.js').AgentProfileView[];
+  profiles: AgentProfileView[];
   selectableProfileIds: string[];
   legacyProfiles: AcpAgentProfile[];
   agentlet: AcpAgentletStatus;
 }
 
 /** Response body for `POST` / `PATCH` /api/acp/profiles[/:id]. */
-export type AcpProfileMutationResponse =
-  import('./agent-profile.js').AgentProfileView;
+export type AcpProfileMutationResponse = AgentProfileView;
 
 /** Response body for `GET /api/acp/agentlet`. */
 export type AcpAgentletStatusResponse = AcpAgentletStatus;

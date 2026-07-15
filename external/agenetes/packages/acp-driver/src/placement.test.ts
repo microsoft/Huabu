@@ -5,8 +5,7 @@ const host = vi.hoisted(() => ({
 }));
 
 vi.mock('@agenetes/agentlet-host', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('@agenetes/agentlet-host')>();
+  const actual = await importOriginal<typeof AgentletHostModule>();
   return {
     ...actual,
     getAgentletGateway: () => host.gateway,
@@ -18,15 +17,16 @@ vi.mock('@agenetes/agentlet-host', async (importOriginal) => {
   };
 });
 
+import { acpSessionRegistry } from './session-registry.js';
 import {
   _resetSpawnOrchestratorForTests,
   ensureAgentForThread,
 } from './spawn-orchestrator.js';
-import { acpSessionRegistry } from './session-registry.js';
 
 import type { AcpBindingRecipe } from './binding-recipe.js';
 import type { AcpAgentClient } from './client.js';
 import type { AcpSessionEntry } from './session-registry.js';
+import type * as AgentletHostModule from '@agenetes/agentlet-host';
 
 const recipe: AcpBindingRecipe = {
   alias: 'test-agent',

@@ -32,7 +32,7 @@ function testDelegate(
       return {
         capabilities,
         async *run() {
-          return undefined;
+          yield* [];
         },
         async control() {
           return { ok: true };

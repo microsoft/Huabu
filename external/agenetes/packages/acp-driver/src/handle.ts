@@ -34,8 +34,8 @@
  * See docs/proposals/layered-architecture.md §3.6 / §7 (M2 / M2.6 / M5).
  */
 
-import { resolveAgentInputs } from '@agenetes/protocol';
 import { getSupervisedAgentletId } from '@agenetes/agentlet-host';
+import { resolveAgentInputs } from '@agenetes/protocol';
 import {
   classifyAgentRealization,
   HistoryLoadDeniedError,
