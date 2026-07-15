@@ -19,10 +19,10 @@ const toc: TocEntry[] = [
   { id: 'troubleshooting', label: 'Troubleshooting' },
 ];
 
-export default function Settings() {
+export default function ModelsAndCredentials() {
   return (
     <PageLayout
-      title="Settings & LLM"
+      title="Models & Credentials"
       description="Pick which model the AI uses, how it authenticates with your provider, and how to connect external coding-agent CLIs. Settings are application-wide — one configuration is shared across every Home and Space."
       toc={toc}
     >

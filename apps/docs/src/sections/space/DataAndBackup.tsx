@@ -19,10 +19,10 @@ const toc: TocEntry[] = [
   { id: 'hand-editing', label: 'Hand-editing files' },
 ];
 
-export default function Storage() {
+export default function DataAndBackup() {
   return (
     <PageLayout
-      title="Data Storage"
+      title="Data & Backup"
       description="Huabu stores data in two places: the Home folder you choose (per-Space data, backup-friendly) and an app-wide data folder (model credentials, machine-local). Everything is plain files — no opaque database."
       toc={toc}
     >

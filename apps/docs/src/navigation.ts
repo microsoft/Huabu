@@ -48,7 +48,24 @@ const groupsRaw: RawGroup[] = [
     ],
   },
   {
-    label: 'Work with AI',
+    label: 'Spaces',
+    items: [
+      {
+        to: '/docs/work-in-a-space',
+        label: 'Work in a Space',
+        description:
+          'Create, arrange, connect, and inspect the materials and ideas in a Huabu Space.',
+        load: () => import('./sections/space/WorkInASpace'),
+      },
+      {
+        to: '/docs/space/data-and-backup',
+        label: 'Data & Backup',
+        load: () => import('./sections/space/DataAndBackup'),
+      },
+    ],
+  },
+  {
+    label: 'AI',
     items: [
       {
         to: '/docs/work-with-ai',
@@ -72,37 +89,20 @@ const groupsRaw: RawGroup[] = [
         label: 'Skills',
         load: () => import('./sections/ai/Skills'),
       },
-    ],
-  },
-  {
-    label: 'Using Huabu',
-    items: [
       {
-        to: '/docs/work-in-a-space',
-        label: 'Work in a Space',
-        description:
-          'Create, arrange, connect, and inspect the materials and ideas in a Huabu Space.',
-        load: () => import('./sections/WorkInASpace'),
+        to: '/docs/ai/models-and-credentials',
+        label: 'Models & Credentials',
+        load: () => import('./sections/ai/ModelsAndCredentials'),
       },
     ],
   },
   {
-    label: 'Reference',
+    label: 'Help',
     items: [
       {
         to: '/docs/reference/shortcuts',
         label: 'Keyboard Shortcuts',
         load: () => import('./sections/reference/Shortcuts'),
-      },
-      {
-        to: '/docs/reference/settings',
-        label: 'Settings & LLM',
-        load: () => import('./sections/reference/Settings'),
-      },
-      {
-        to: '/docs/reference/storage',
-        label: 'Data Storage',
-        load: () => import('./sections/reference/Storage'),
       },
       {
         to: '/docs/reference/issues',

@@ -39,9 +39,10 @@ describe('handbook route registry', () => {
   });
 
   it('presents Space fundamentals as one task-focused page', () => {
-    const usingHuabu = groups.find((group) => group.label === 'Using Huabu');
-    expect(usingHuabu?.items.map(({ to, label }) => ({ to, label }))).toEqual([
+    const spaces = groups.find((group) => group.label === 'Spaces');
+    expect(spaces?.items.map(({ to, label }) => ({ to, label }))).toEqual([
       { to: '/docs/work-in-a-space', label: 'Work in a Space' },
+      { to: '/docs/space/data-and-backup', label: 'Data & Backup' },
     ]);
     expect(
       allRoutes.some(
@@ -60,12 +61,16 @@ describe('handbook route registry', () => {
   });
 
   it('presents everyday AI work in one task-focused page', () => {
-    const workWithAI = groups.find((group) => group.label === 'Work with AI');
-    expect(workWithAI?.items.map(({ to, label }) => ({ to, label }))).toEqual([
+    const ai = groups.find((group) => group.label === 'AI');
+    expect(ai?.items.map(({ to, label }) => ({ to, label }))).toEqual([
       { to: '/docs/work-with-ai', label: 'Work with AI' },
       { to: '/docs/ai/external-agents', label: 'External Agents' },
       { to: '/docs/ai/memory', label: 'Memory' },
       { to: '/docs/ai/skills', label: 'Skills' },
+      {
+        to: '/docs/ai/models-and-credentials',
+        label: 'Models & Credentials',
+      },
     ]);
     expect(
       allRoutes.some((route) =>
@@ -79,14 +84,24 @@ describe('handbook route registry', () => {
     ).toBe(false);
   });
 
-  it('includes issue reporting in Reference', () => {
-    const reference = groups.find((group) => group.label === 'Reference');
-    expect(reference?.items.map(({ to, label }) => ({ to, label }))).toEqual([
+  it('keeps shortcuts and issue reporting in Help', () => {
+    const help = groups.find((group) => group.label === 'Help');
+    expect(help?.items.map(({ to, label }) => ({ to, label }))).toEqual([
       { to: '/docs/reference/shortcuts', label: 'Keyboard Shortcuts' },
-      { to: '/docs/reference/settings', label: 'Settings & LLM' },
-      { to: '/docs/reference/storage', label: 'Data Storage' },
       { to: '/docs/reference/issues', label: 'Report an Issue' },
     ]);
-    expect(groups.some((group) => group.label === 'Help')).toBe(false);
+    expect(groups.map((group) => group.label)).toEqual([
+      'Getting Started',
+      'Spaces',
+      'AI',
+      'Help',
+    ]);
+    expect(
+      allRoutes.some((route) =>
+        ['/docs/reference/settings', '/docs/reference/storage'].includes(
+          route.to,
+        ),
+      ),
+    ).toBe(false);
   });
 });
