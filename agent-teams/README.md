@@ -6,13 +6,12 @@ Each package remains a normal Agent Team defined by the generic [`external/agent
 
 ## Quick start
 
-1. Ensure the machine containing these packages runs an agentlet daemon connected to Huabu.
+1. Install or run Huabu; the desktop distribution includes this collection and registers it through the locally supervised agentlet automatically.
 2. Open **Settings → Agent Teams**.
-3. Add the absolute path to this `agent-teams/` directory as a collection root on that machine.
-4. Configure fields marked with a red `(*)`.
-5. Expand the member, select a harness, confirm the managed workspace path, create a Profile, and select **Setup**.
+3. Configure fields marked with a red `(*)`.
+4. Expand the member, select a harness, choose the working directory the agent should use, create a Profile, and select **Setup**.
 
-Huabu asks Agenetes to scan the collection root, persists the discovered members and Profiles, stores secret Configs in the host SecretStore, and runs package setup through the selected daemon. A Profile appears under Agent Teams in Chat and Question Nodes after its member is active, required Configs are complete, and preparation is ready. Users do not need to run setup or register an External Agent Profile manually.
+Huabu asks Agenetes to scan the bundled collection, persists the discovered members and Profiles, stores secret Configs in the host SecretStore, and runs package setup through the local daemon. The user-selected Profile working directory is prepared by Setup and later becomes the agent process `cwd`, exactly as `workingDirPath` does for command-backed ACP Profiles. A Profile appears under Agent Teams in Chat and Question Nodes after its member is active, required Configs are complete, and preparation is ready.
 
 ## Bundled teams
 

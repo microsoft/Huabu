@@ -9,8 +9,8 @@
  * thread-scoped session / commands routes.
  *
  * Endpoint surface:
- *  - `GET /api/acp/agent-cli` — detect locally installed agents from the
- *     trusted built-in catalogue to populate the profile editor's picker.
+ *  - `GET /api/acp/agent-cli` — probe the trusted built-in agent catalogue
+ *     and populate the profile editor's picker with installation state.
  *  - `GET/POST/PATCH/DELETE /api/acp/profiles` — CRUD for spawn
  *     recipes. Always returns the runtime status (spawned/pid/etc.)
  *     alongside each profile.
@@ -75,9 +75,7 @@ export type {
 // ── Agent CLI detection ──────────────────────────────────────────────
 
 /**
- * Detect ACP-capable agent CLIs installed on the host. The server filters
- * out missing ones; the UI shows the installed list when the user creates
- * a new profile.
+ * Probe the complete trusted ACP-capable agent catalogue on the host.
  */
 export async function listAcpAgentClis(): Promise<AcpAgentCliListResponse> {
   return apiFetch<AcpAgentCliListResponse>(routes.acpAgentCli, {

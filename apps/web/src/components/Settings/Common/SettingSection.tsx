@@ -1,9 +1,13 @@
 import { ChevronDown } from 'lucide-react';
 import React, { useState } from 'react';
 
+import { SettingLabel } from './SettingLabel';
+
 interface SettingSectionProps {
   /** Section heading shown above the card. Omit to render a bare card with no heading. */
   title?: string;
+  /** Whether the entire capability or group may be left unconfigured. */
+  optional?: boolean;
   children: React.ReactNode;
   /**
    * When true, renders a ghost chevron next to the title and lets the
@@ -29,6 +33,7 @@ interface SettingSectionProps {
  */
 export const SettingSection: React.FC<SettingSectionProps> = ({
   title,
+  optional = false,
   children,
   collapsible = false,
   defaultCollapsed = false,
@@ -53,7 +58,7 @@ export const SettingSection: React.FC<SettingSectionProps> = ({
             aria-expanded={!collapsed}
             className="text-fg-muted hover:text-fg-default mb-1.5 flex items-center gap-1 px-1 text-xs font-medium"
           >
-            <span>{title}</span>
+            <SettingLabel optional={optional}>{title}</SettingLabel>
             <ChevronDown
               size={12}
               className={`shrink-0 transition-transform ${collapsed ? '-rotate-90' : ''}`}
@@ -61,7 +66,7 @@ export const SettingSection: React.FC<SettingSectionProps> = ({
           </button>
         ) : (
           <h4 className="text-fg-muted mb-1.5 px-1 text-xs font-medium">
-            {title}
+            <SettingLabel optional={optional}>{title}</SettingLabel>
           </h4>
         ))}
       {!isCollapsed && (

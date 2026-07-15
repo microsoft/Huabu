@@ -23,7 +23,7 @@
   "rootStatusNeverScanned": "Not scanned",
   "rootStatusSuccess": "Ready",
   "rootStatusError": "Scan failed",
-  "noMembers": "Add a collection root to discover Agent Team members.",
+  "noMembers": "No bundled Agent Team templates are available.",
   "memberStatusActive": "Available",
   "memberStatusMissing": "Missing",
   "configs": "Configs",
@@ -61,10 +61,12 @@
   "deleteProfileDescription": "Delete “{{alias}}”? Existing threads are retained, but this Profile can no longer be selected for new threads.",
   "newProfile": "New Profile",
   "addProfile": "Add Profile",
-  "addProfileDescription": "Create a runnable Profile with a harness and managed workspace.",
+  "addProfileDescription": "Create a runnable Profile with a harness and a working directory you choose.",
   "setup": "Setup",
   "cancelSetup": "Cancel setup",
   "setupStatusNotPrepared": "Not prepared",
   "loadingMemberDetail": "Loading member details…",
-  "loadMemberDetailFailed": "Failed to load member details"
+  "loadMemberDetailFailed": "Failed to load member details",
+  "tokenSharedHint": "Credentials required by this preset. Shared by every agent created from it — changing one affects all.",
+  "profileUpdated": "Profile updated"
 }

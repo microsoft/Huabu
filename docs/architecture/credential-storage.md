@@ -21,6 +21,8 @@ For standalone deployments, the encrypted primary backend wins over the environm
 
 The renderer never receives plaintext credentials. Existing HTTP read models continue to return only authentication/status booleans.
 
+Settings API updates for optional capability credentials use an explicit three-state patch contract: omitting a key preserves the persisted value, a non-empty string sets or replaces it, and `null` removes the value stored by Huabu. Removing a persisted key preserves non-secret provider configuration and does not alter deployment-owned environment variables; an environment fallback may therefore keep the capability available at runtime.
+
 ## Electron encrypted store
 
 The encrypted file is versioned JSON whose values are Base64 representations of buffers returned by `safeStorage.encryptString()`; Base64 is transport encoding, while the security comes from the platform backend used by Electron.

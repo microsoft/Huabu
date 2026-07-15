@@ -97,6 +97,7 @@ Shipped or superseded proposals end up under [archive/](./archive/) so
 | [agenetes-agentlet-gateway-consolidation.md](./archive/agenetes-agentlet-gateway-consolidation.md) | Shipped    | Replaced standalone agentlet-server with the stateless Agenetes Gateway and explicit ACP placement.  |
 | [acp-eventstore-refactor-plan.md](./archive/acp-eventstore-refactor-plan.md)                       | Superseded | Earlier EventStore adaptation plan replaced by Gateway-owned live buffering and Agenetes durability. |
 | [agentlet-upgrade-plan.md](./archive/agentlet-upgrade-plan.md)                                     | Superseded | Earlier split-hello migration plan absorbed by the Gateway consolidation.                            |
+| [unified-external-agent-settings.md](./archive/unified-external-agent-settings.md)                 | Shipped    | Unified command-backed and manifest-backed Profiles across Settings creation, listing, and Chat.     |
 
 The shipped standalone handbook plan is retained as [docs-github-pages-plan.md](./archive/docs-github-pages-plan.md).
 

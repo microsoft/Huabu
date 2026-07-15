@@ -10,19 +10,21 @@
 
 The original Agent Team design treated an Agent Team as a special case of an External Agent. A user had to run `agentlet agent-team setup`, verify the package outside Huabu, and then manually register it through the External Agent profile editor.
 
-User studies found that workflow too complex, especially for non-expert users. Huabu now manages Agent Team discovery, Configs, preparation, and profile creation after the user downloads an Agent Team collection.
+User studies found that workflow too complex, especially for non-expert users. Huabu now bundles the supported templates and manages Agent Team discovery, Configs, preparation, and profile creation.
 
 The first managed implementation added a separate Agent Team deployment registry while preserving the existing ACP profile store. That split prevents ready Agent Team profiles from appearing in Chat and duplicates identity, persistence, selection, and runtime concepts. This proposal replaces both stores with one Agenetes-owned Agent Profile registry.
 
 ## 2. Requirements
 
-### R1 — Minimal work outside Huabu
+### R1 — Bundled packages
 
-The only required action outside Huabu is downloading an Agent Team collection onto an agentlet daemon host. Huabu may bundle selected collections in the future, but bundled discovery, downloads, updates, and version management are outside the current scope.
+Huabu ships the repository's `agent-teams/` collection with the desktop application. The Server automatically registers and scans this read-only collection through the locally supervised agentlet after it connects. Users do not download packages or configure collection roots; custom and remote Agent Team collections are outside the current scope.
 
-### R2 — Root paths and member discovery
+On upgrade, automatic registration removes roots persisted by earlier custom-collection builds. Existing member metadata, Configs, Profiles, and durable thread snapshots remain stored, but members that are no longer discovered become unavailable and are omitted from Settings.
 
-The user adds Agent Team collection roots through the Agent Team Settings tab. Each root contains a stable `agentletId` and an absolute path on that daemon host. The locally supervised daemon is selected by default and supports a native folder picker; remote daemon roots use direct absolute-path input validated by daemon-side scan.
+### R2 — Bundled member discovery
+
+The desktop build copies the fixed collection next to the Server bundle. Source development resolves the checked-in repository collection from the same Server-owned resolver. The collection is always placed on the locally supervised agentlet and remains an internal registry root rather than a user-managed Settings resource.
 
 ```typescript
 interface AgentTeamRoot {
@@ -50,9 +52,9 @@ interface AgentTeamMember {
 }
 ```
 
-Results that resolve to the same identity are merged even when multiple roots discover them. Removing a root retains member metadata and Configs so durable thread snapshots can continue resolving their member-level environment, but a missing member cannot create or prepare a new manifest-backed Profile and does not appear as available for new Chat bindings.
+Members are discovered from that one collection and retain the existing `(agentletId, manifestPath)` identity so durable Profiles and threads continue using the generic Agent Team runtime contract.
 
-The source package remains at its original daemon-host path. Huabu and Agenetes do not copy the package into managed storage; setup materializes only the selected Profile's `workingDirPath`.
+The package remains in the read-only application resources. Huabu and Agenetes do not copy it into the selected workspace; setup materializes only the user-selected Profile `workingDirPath`, which follows the same explicit work-directory interaction as a command-backed ACP Profile.
 
 ### R3 — One Agenetes Agent Profile model
 
@@ -104,10 +106,10 @@ Deleting a Profile prevents new bindings but does not stop or invalidate existin
 
 The backend registry is unified, but Huabu retains two task-oriented Settings tabs:
 
-- **Agent Team** manages roots, members, member Configs, manifest-backed Profiles, and preparation.
+- **Agent Team** manages bundled members, member Configs, manifest-backed Profiles, user-selected working directories, and preparation.
 - **External Agent** manages command-backed Profiles and removes the legacy Agent Team option.
 
-The Agent Team tab initially loads only roots and lightweight member summaries. Every member is collapsed by default. A summary contains the member identity and display metadata, discovery status, manifest-backed Profile count, and aggregate preparation status; it does not contain Config fields, Profile records, or setup logs.
+The Agent Team tab initially loads only lightweight bundled-member summaries. The internal bundled root is not editable or rendered. Every member is collapsed by default. A summary contains the member identity and display metadata, discovery status, manifest-backed Profile count, and aggregate preparation status; it does not contain Config fields, Profile records, or setup logs.
 
 Expanding a member loads its detail by `(agentletId, manifestPath)`. The detail contains required environment fields and redacted configuration state, manifest-backed Profiles, preparation state, and setup logs. The web client caches loaded details so collapsing and reopening a member does not repeat the request; registry changes update or invalidate only the affected summary and detail rather than replacing the complete Settings state.
 
@@ -143,11 +145,7 @@ Profile deletion is rejected while setup or cancellation is active. Setup is nev
 
 Before a new manifest-backed ACP session starts, the daemon validates that the prepared workspace remains usable. Validation never performs implicit repair. A failed validation returns a structured runtime error and makes the source Profile unavailable for new bindings until the user explicitly retries Setup. A durable thread whose Profile was deleted still reports its own validation or spawn failure without recreating Profile state.
 
-`workingDirPath` defaults to:
-
-```text
-<manifest-directory>/workspaces/<harness>/
-```
+Profile creation requires the user to choose an absolute `workingDirPath`, using the same folder-picker and path-input interaction as a command-backed ACP Profile. Huabu does not default this path into the read-only bundled package.
 
 At runtime, environment sources merge in this precedence order:
 
@@ -244,7 +242,7 @@ Direct `acp-command` Profiles use the existing session spawn protocol and do not
 
 ## 4. Current scope
 
-The first version consumes Agent Team collections that already exist on connected daemon hosts. Git installation, a marketplace, bundled discovery, upgrades, and uninstall behavior are deferred.
+The current version consumes only Agent Team packages bundled with Huabu and runs them on the locally supervised agentlet. Custom roots, remote package collections, Git installation, a marketplace, independent package upgrades, and package uninstall behavior are deferred.
 
 Adding a root and explicitly running Setup trusts package-defined setup code. Package trust preview, trust persistence, and revocation are not part of the current version.
 
@@ -259,6 +257,7 @@ Profile deletion does not revoke existing threads. Global restart policy, crash-
 - Multi-daemon Agentlet Gateway placement and the locally supervised daemon.
 - Agent Team root discovery, member reconciliation, Configs, SecretStore integration, setup orchestration, persisted progress, and Settings UI.
 - Structured CLI requirements, shared npm tool installation, bundled manifests, and package documentation.
+- Desktop packaging and automatic local registration of the fixed bundled collection; Settings no longer exposes collection-root mutations.
 
 ### ✅ Unified Profile registry
 

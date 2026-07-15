@@ -67,6 +67,10 @@ export default defineConfig([
       const dst = path.resolve('dist-bundle/prompt');
       cpSync(src, dst, { recursive: true });
       console.log(`[tsup] copied prompt templates -> ${dst}`);
+      const agentTeamsSrc = path.resolve('../../agent-teams');
+      const agentTeamsDst = path.resolve('dist-bundle/agent-teams');
+      cpSync(agentTeamsSrc, agentTeamsDst, { recursive: true });
+      console.log(`[tsup] copied bundled Agent Teams -> ${agentTeamsDst}`);
       // @resvg/resvg-wasm — copied next to server.js so the
       // snapshot_nodes tool's bundle-layout fallback finds it via
       // `path.join(__dirname, 'resvg-bg.wasm')`.

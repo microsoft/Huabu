@@ -16,6 +16,7 @@ import {
   acpAgentletRoutes,
   acpProfilesRoutes,
   acpThreadsRoutes,
+  getAgentTeamRegistry,
   getSupervisedAgentletId,
   installAcpProfileCachePort,
   mountAgenetes,
@@ -32,6 +33,10 @@ import llmRoutes from './modules/agent/llm.route.js';
 import { registerOpCounterHook } from './modules/agent/memory/op-counter-hook.js';
 import skillsRoutes from './modules/agent/skills.route.js';
 import agentTeamRoutes from './modules/agent-team/agent-team.route.js';
+import {
+  registerBundledAgentTeams,
+  resolveBundledAgentTeamsPath,
+} from './modules/agent-team/bundled-agent-teams.js';
 import artifactRoute from './modules/artifact/artifact.route.js';
 import canvasRoutes from './modules/canvas/canvas.route.js';
 import externalNoteRoutes from './modules/canvas/external.route.js';
@@ -265,7 +270,7 @@ try {
     app.log.warn({ err }, '[acp] could not remove legacy acp-config.json');
   }
 }
-mountAgenetes(app, {
+const agentletGateway = mountAgenetes(app, {
   connectionToken: getConnectionToken(),
   dataDir: getDataDir(),
   daemonEntryPath: resolveDaemonEntry() ?? '',
@@ -283,6 +288,28 @@ mountAgenetes(app, {
     onLegacyProfilesMigrated: removeLegacyAcpProfiles,
   },
 });
+// Legacy `agent-team` ACP records predate managed Agent Teams. They can't
+// be auto-migrated (they bypass managed roots, Configs, and setup) and are
+// no longer surfaced in Settings, so drop them at startup instead of
+// letting them linger as orphaned entries.
+removeLegacyAcpProfiles(
+  listLegacyAcpProfiles()
+    .filter((profile) => profile.cliId === 'agent-team')
+    .map((profile) => profile.id),
+);
+const bundledAgentTeamsPath = resolveBundledAgentTeamsPath();
+if (bundledAgentTeamsPath) {
+  const unregisterBundledAgentTeams = registerBundledAgentTeams({
+    bundledRootPath: bundledAgentTeamsPath,
+    localMachine: getSupervisedAgentletId(),
+    machineSource: agentletGateway,
+    getRegistry: getAgentTeamRegistry,
+    log: app.log,
+  });
+  app.addHook('onClose', async () => unregisterBundledAgentTeams());
+} else {
+  app.log.warn('[agent-team] bundled collection not found');
+}
 // Capture the bound TCP port for L1-owned reachback (RFS): the
 // canvas-scoped `HUABU_RFS_URL` base is built from this. RFS is
 // canvas-coupled and therefore a pure L1 concern, so the port lives in

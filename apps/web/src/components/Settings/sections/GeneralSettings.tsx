@@ -2,8 +2,8 @@ import React, { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Select } from '@/components/Common/Select';
-import { SettingRow } from '@/components/Common/SettingRow';
 import { Toggle } from '@/components/Common/Toggle';
+import { SettingRow } from '@/components/Settings/Common/SettingRow';
 import { supportedLngs, type SupportedLanguage } from '@/i18n';
 import useCanvasStore from '@/store/canvasStore';
 
@@ -52,6 +52,7 @@ export const GeneralSettings: React.FC = () => {
           value={current}
           onChange={handleChange}
           title={t('settings.language')}
+          ariaLabel={t('settings.language')}
         />
       </SettingRow>
       <SettingRow

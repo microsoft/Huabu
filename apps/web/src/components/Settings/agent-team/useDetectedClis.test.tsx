@@ -2,7 +2,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { useDetectedClis } from './ProfileEditor';
+import { useDetectedClis } from './useDetectedClis';
 
 const apiMocks = vi.hoisted(() => ({
   listAgentClis: vi.fn(),
@@ -12,10 +12,6 @@ vi.mock('@/api/acp', () => ({
   createAcpProfile: vi.fn(),
   listAcpAgentClis: apiMocks.listAgentClis,
   updateAcpProfile: vi.fn(),
-}));
-
-vi.mock('@/components/Common/PathInput', () => ({
-  PathInput: () => null,
 }));
 
 function Harness({ enabled }: { enabled: boolean }) {

@@ -38,6 +38,14 @@ describe('setIntegrationsConfig', () => {
     expect(setSecrets).not.toHaveBeenCalled();
   });
 
+  it('removes keys explicitly set to null', async () => {
+    await setIntegrationsConfig({ tavilyApiKey: null });
+
+    expect(setSecrets).toHaveBeenCalledWith({
+      [SECRET_IDS.tavilyApiKey]: null,
+    });
+  });
+
   it('propagates a batch write failure to the caller', async () => {
     setSecrets.mockRejectedValueOnce(new Error('disk full'));
 

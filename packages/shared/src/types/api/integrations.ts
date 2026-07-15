@@ -34,16 +34,14 @@ export interface IntegrationsConfig {
 /**
  * Body for `PUT /api/integrations/config`.
  *
- * Every field is optional and only applied when a non-empty string is
- * provided — mirroring the LLM config's "leave empty to keep the saved
- * key" behaviour, so the client never has to echo back an existing
- * secret it can't read.
+ * Every field is optional. Omission preserves the saved key, a non-empty
+ * string sets it, and `null` removes the key stored by Huabu.
  */
 export const integrationsConfigUpdateSchema = z.object({
-  /** Tavily API key. Omit or leave empty to keep the current value. */
-  tavilyApiKey: z.string().optional(),
-  /** RapidAPI key. Omit or leave empty to keep the current value. */
-  rapidApiKey: z.string().optional(),
+  /** Tavily API key. Omit to preserve; send null to remove. */
+  tavilyApiKey: z.string().min(1).nullable().optional(),
+  /** RapidAPI key. Omit to preserve; send null to remove. */
+  rapidApiKey: z.string().min(1).nullable().optional(),
 });
 
 export type IntegrationsConfigUpdate = z.infer<

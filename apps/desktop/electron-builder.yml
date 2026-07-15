@@ -69,6 +69,13 @@ extraResources:
       # files bloat the installer for no benefit.
       - '**/*.js'
       - '**/*.js.map'
+  # Fixed Huabu Agent Team templates. The Server scans this read-only
+  # collection through the locally supervised agentlet; users still choose
+  # each Profile's writable working directory before Setup.
+  - from: ../server/dist-bundle/agent-teams
+    to: server/agent-teams
+    filter:
+      - '**/*'
   - from: ../web/dist
     to: web
     filter:

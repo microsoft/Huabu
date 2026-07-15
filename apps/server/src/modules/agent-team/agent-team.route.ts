@@ -8,7 +8,6 @@ import {
 import {
   agentTeamMemberDetailQuerySchema,
   agentTeamProfileActionParamsSchema,
-  agentTeamRootRefSchema,
   createAgentProfileBodySchema,
   patchAgentProfileBodySchema,
   updateAgentTeamMemberConfigsBodySchema,
@@ -21,7 +20,6 @@ import type {
   AgentProfileView,
   AgentTeamMemberDetailQuery,
   AgentTeamMemberDetailView,
-  AgentTeamRootRefBody,
   AgentTeamSettingsState,
   ApiResult,
   CreateAgentProfileBody,
@@ -32,17 +30,13 @@ import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 
 export type AgentTeamSettingsRegistry = Pick<
   AgentTeamRegistry,
-  | 'addRoot'
   | 'cancelProfileSetup'
   | 'createProfile'
   | 'deleteProfile'
   | 'getMemberDetail'
   | 'listMachines'
   | 'listMemberSummaries'
-  | 'listRoots'
   | 'patchProfile'
-  | 'removeRoot'
-  | 'rescanRoot'
   | 'setupProfile'
   | 'updateMemberConfigs'
 >;
@@ -76,8 +70,10 @@ function settingsState(
   return {
     machines: registry.listMachines(),
     localMachine,
-    roots: registry.listRoots(),
-    members: registry.listMemberSummaries(),
+    roots: [],
+    members: registry
+      .listMemberSummaries()
+      .filter((member) => member.status === 'active'),
   };
 }
 
@@ -158,73 +154,6 @@ export function createAgentTeamRoutes(
       } catch (error) {
         return sendAgentTeamError(error, reply);
       }
-    });
-
-    app.post<{
-      Body: AgentTeamRootRefBody;
-      Reply: ApiResult<AgentTeamSettingsState>;
-    }>('/settings/roots', async (request, reply) => {
-      if (denyRemote(request, reply)) return;
-      const parsed = agentTeamRootRefSchema.safeParse(request.body);
-      if (!parsed.success) {
-        return reply.status(400).send({
-          message: firstIssueMessage(parsed, 'Invalid Agent Team root'),
-          code: 'validation_failed',
-        });
-      }
-      const registry = requireRegistry(reply, getRegistry);
-      if (!registry) return;
-      try {
-        await registry.addRoot(parsed.data);
-        return readState(registry);
-      } catch (error) {
-        return sendAgentTeamError(error, reply);
-      }
-    });
-
-    app.post<{
-      Body: AgentTeamRootRefBody;
-      Reply: ApiResult<AgentTeamSettingsState>;
-    }>('/settings/roots/rescan', async (request, reply) => {
-      if (denyRemote(request, reply)) return;
-      const parsed = agentTeamRootRefSchema.safeParse(request.body);
-      if (!parsed.success) {
-        return reply.status(400).send({
-          message: firstIssueMessage(parsed, 'Invalid Agent Team root'),
-          code: 'validation_failed',
-        });
-      }
-      const registry = requireRegistry(reply, getRegistry);
-      if (!registry) return;
-      try {
-        await registry.rescanRoot(parsed.data);
-        return readState(registry);
-      } catch (error) {
-        return sendAgentTeamError(error, reply);
-      }
-    });
-
-    app.delete<{
-      Body: AgentTeamRootRefBody;
-      Reply: ApiResult<AgentTeamSettingsState>;
-    }>('/settings/roots', async (request, reply) => {
-      if (denyRemote(request, reply)) return;
-      const parsed = agentTeamRootRefSchema.safeParse(request.body);
-      if (!parsed.success) {
-        return reply.status(400).send({
-          message: firstIssueMessage(parsed, 'Invalid Agent Team root'),
-          code: 'validation_failed',
-        });
-      }
-      const registry = requireRegistry(reply, getRegistry);
-      if (!registry) return;
-      if (!registry.removeRoot(parsed.data)) {
-        return reply.status(404).send({
-          message: 'Agent Team root not found',
-          code: 'root_not_found',
-        });
-      }
-      return readState(registry);
     });
 
     app.put<{
