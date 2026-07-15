@@ -2,7 +2,7 @@
 
 > Present command-backed ACP Profiles and manifest-backed Agent Team Profiles through one external-agent management and creation experience.
 >
-> Status: **Planning** · Last updated: 2026-07-15
+> Status: **Shipped** · Last updated: 2026-07-15
 
 ---
 

@@ -378,6 +378,7 @@ export function ExternalAgentsSettings() {
       {addOpen && (
         <AddAgentFlow
           members={members}
+          manifestError={manifestError}
           detectedClis={detectedClis}
           detectionLoaded={detectionLoaded}
           onClose={() => setAddOpen(false)}

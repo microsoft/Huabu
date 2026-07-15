@@ -62,7 +62,13 @@ The locally supervised agentlet daemon scans and runs the bundled Agent Team pac
 pnpm install
 ```
 
-The Agent Teams Settings tab lists bundled templates, Configs, Profiles, and preparation state. Collection-root and remote-package management are not exposed. Profile creation uses the native folder picker when available and otherwise accepts an absolute working-directory path.
+The External Agents Settings tab presents command-backed and manifest-backed Profiles in one list. Its single Add agent editor starts with an optional Template, uses one trusted Agent catalogue for both ACP recipes and manifest harness IDs, conditionally exposes member Configs, and uses the same working-directory and display-name controls for both launch kinds. Collection-root and remote-package management are not exposed.
+
+`GET /api/acp/agent-cli` returns the complete trusted Agent catalogue in canonical order with an `installed` flag. Ordinary creation offers installed Agents followed by Custom command; a selected Template filters that same catalogue to its manifest harness allowlist, disables missing Agents with installation guidance, and blocks unknown harness IDs.
+
+Creating a manifest-backed Profile never starts Setup. The unified list retains explicit Setup, Retry, and Cancel actions and shows preparation state alongside command-backed Profiles, which are selectable immediately.
+
+Chat keeps the built-in Agent separate, groups every selectable non-internal Profile under External Agents, and sends Add agent to the External Agents Settings tab rather than owning a second editor.
 
 ## 3. Architecture: Agent Connection Topology
 
@@ -95,7 +101,7 @@ The current implementation follows these ownership boundaries:
 5. **Setup is explicit and durable** — Setup/Retry drives preparation, required Configs gate setup and selection, cancellation and errors remain visible, and interrupted in-flight setup reconciles to an explicit error on restart.
 6. **Settings reads are redacted** — secret plaintext never crosses the Settings API; the UI can only replace or clear a secret and observe whether it is configured.
 7. **Runtime snapshots are immutable** — a new external thread snapshots the selected Profile's placement and launch fields. Profile deletion blocks new bindings without changing existing threads; manifest session spawn loads current Configs and validates the prepared workspace before delegating to the ACP driver.
-8. **The catalog is shared** — Agenetes computes selectable Profile IDs without loading member detail; Chat and Question Nodes consume that catalog and render ready manifest Profiles under Agent Teams and command Profiles under External Agents.
+8. **The catalog is shared** — Agenetes computes selectable Profile IDs without loading member detail; Chat and Question Nodes consume that catalog and render every available non-internal Profile in one External Agents group.
 9. **Setup diagnostics are lazy** — `<HUABU_DATA_DIR>/agent-team/registry.json` contains authoritative Profile preparation state but no setup event history. Each manifest Profile has a sibling `<encoded-profileId>.setup.jsonl` bounded to 200 phase entries. Setup and Retry truncate that file, progress appends to it without rewriting the registry, member detail loads it on demand, and Profile deletion removes it. Registry schema v3 migrates embedded schema v1/v2 logs into the sibling file.
 
 ---
@@ -138,12 +144,13 @@ This is why "agent as the universal interface" is not just a nice idea for Huabu
 
 ## 7. Code entry points
 
-| File/dir                                                                                             | Responsibility                                                                                                               |
-| ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| [`external/agenetes/packages/agent-team/`](../../external/agenetes/packages/agent-team/)             | Durable Agent Team control-plane aggregate, unified Profile registry and driver, Config resolution, and setup state machine. |
-| [`external/agenetes/packages/agentlet-gateway/`](../../external/agenetes/packages/agentlet-gateway/) | Connected daemon catalog and routed Agent Team control operations.                                                           |
-| [`external/agenetes/packages/agentlet-host/`](../../external/agenetes/packages/agentlet-host/)       | Agenetes composition boundary that mounts the Gateway and Agent Team registry.                                               |
-| [`apps/server/src/modules/agent-team/`](../../apps/server/src/modules/agent-team/)                   | Bundled collection registration, loopback-only REST adapter, and host capability projection.                                 |
-| [`packages/shared/src/types/api/agent-team.ts`](../../packages/shared/src/types/api/agent-team.ts)   | Shared Zod wire contracts for Settings reads and mutations.                                                                  |
-| [`apps/web/src/components/Settings/agent-team/`](../../apps/web/src/components/Settings/agent-team/) | Lazy bundled-member detail, Configs, manifest Profiles, user-selected working directories, and preparation UI.               |
-| [`external/agentlet/spec/agent-team.md`](../../external/agentlet/spec/agent-team.md)                 | Generic package and daemon execution contract.                                                                               |
+| File/dir                                                                                                             | Responsibility                                                                                                               |
+| -------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| [`external/agenetes/packages/agent-team/`](../../external/agenetes/packages/agent-team/)                             | Durable Agent Team control-plane aggregate, unified Profile registry and driver, Config resolution, and setup state machine. |
+| [`external/agenetes/packages/agentlet-gateway/`](../../external/agenetes/packages/agentlet-gateway/)                 | Connected daemon catalog and routed Agent Team control operations.                                                           |
+| [`external/agenetes/packages/agentlet-host/`](../../external/agenetes/packages/agentlet-host/)                       | Agenetes composition boundary that mounts the Gateway and Agent Team registry.                                               |
+| [`apps/server/src/modules/agent-team/`](../../apps/server/src/modules/agent-team/)                                   | Bundled collection registration, loopback-only REST adapter, and host capability projection.                                 |
+| [`apps/server/src/modules/agent/acp/agent-cli.route.ts`](../../apps/server/src/modules/agent/acp/agent-cli.route.ts) | Loopback-only trusted Agent catalogue and host installation-state projection.                                                |
+| [`packages/shared/src/types/api/agent-team.ts`](../../packages/shared/src/types/api/agent-team.ts)                   | Shared Zod wire contracts for Settings reads and mutations.                                                                  |
+| [`apps/web/src/components/Settings/agent-team/`](../../apps/web/src/components/Settings/agent-team/)                 | Unified Profile list and editor, bundled-member Configs, user-selected working directories, and preparation UI.              |
+| [`external/agentlet/spec/agent-team.md`](../../external/agentlet/spec/agent-team.md)                                 | Generic package and daemon execution contract.                                                                               |

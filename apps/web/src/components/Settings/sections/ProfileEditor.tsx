@@ -281,7 +281,7 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
       // so the input's placeholder shows the derived default — the
       // submit handler falls back to `defaultDisplayName` when the
       // field is left blank.
-      const firstDetected = detectedClis[0];
+      const firstDetected = detectedClis.find((agent) => agent.installed);
       setForm({
         ...EMPTY_FORM,
         cliId: firstDetected ? firstDetected.id : 'custom',
@@ -318,7 +318,8 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
     () =>
       form.cliId === 'custom'
         ? null
-        : (detectedClis.find((c) => c.id === form.cliId) ?? null),
+        : (detectedClis.find((c) => c.id === form.cliId && c.installed) ??
+          null),
     [form.cliId, detectedClis],
   );
   const isStructured = selectedCli !== null;
@@ -377,6 +378,17 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
     const displayName = form.displayName.trim() || defaultDisplayName;
     setSaving(true);
     try {
+      if (form.cliId !== 'custom') {
+        const latest = await listAcpAgentClis();
+        if (
+          !latest.agents.some(
+            (agent) => agent.id === form.cliId && agent.installed,
+          )
+        ) {
+          toast(t('settings.selectedAgentUnavailable'), { tone: 'danger' });
+          return;
+        }
+      }
       const payload: CreateAcpCommandProfileBody = {
         alias: displayName,
         workingDirPath: cwd,
@@ -406,10 +418,12 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
    * existing profile lands on the right control automatically.
    */
   const cliOptions = useMemo(() => {
-    const options = detectedClis.map((c) => ({
-      value: c.id,
-      label: c.displayName,
-    }));
+    const options = detectedClis
+      .filter((c) => c.installed)
+      .map((c) => ({
+        value: c.id,
+        label: c.displayName,
+      }));
     options.push({ value: 'custom', label: t('settings.customCommand') });
     return options;
   }, [detectedClis, t]);

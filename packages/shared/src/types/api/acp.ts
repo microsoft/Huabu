@@ -132,9 +132,9 @@ export type AcpDaemonRestartResponse = AcpAgentletRestartResponse;
 // The server probes the host for known ACP-capable agent binaries
 // (`copilot`, `gemini` natively; `claude-agent-acp` and `codex-acp` for
 // Claude / Codex, which have no native ACP mode and are driven through
-// their ACP adapters) and reports the ones it found. Powers the agent
-// dropdown in the Profile Editor — picking a detected agent pre-fills
-// `command` for the new profile.
+// their ACP adapters) and reports their installation state. Powers the
+// agent dropdown in the Profile Editor — picking an installed agent
+// pre-fills `command` for the new profile.
 //
 // This endpoint is loopback-only — it shells out to discover host
 // binaries and must never be reachable from a remote browser.
@@ -177,8 +177,8 @@ export interface AcpAgentCliInfo {
 /** Response body for `GET /api/acp/agent-cli`. */
 export interface AcpAgentCliListResponse {
   /**
-   * Detected agent CLIs. Server filters out `installed === false`
-   * entries by default; UI shows nothing for missing agents.
+   * Complete trusted agent catalogue in canonical display order, including
+   * entries with `installed === false`.
    */
   agents: AcpAgentCliInfo[];
 }
