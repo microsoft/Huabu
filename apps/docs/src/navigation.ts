@@ -55,7 +55,7 @@ const groupsRaw: RawGroup[] = [
         label: 'Work with AI',
         description:
           'Choose Chat, Agent, or an Agent Node; provide context; and review AI changes.',
-        load: () => import('./sections/WorkWithAI'),
+        load: () => import('./sections/ai/WorkWithAI'),
       },
       {
         to: '/docs/ai/external-agents',

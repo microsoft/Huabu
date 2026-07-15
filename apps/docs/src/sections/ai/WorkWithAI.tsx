@@ -6,8 +6,8 @@ import {
   Shortcut,
   Table,
   type TocEntry,
-} from '../components';
-import { NODE_ICON } from '../config/nodeIcons';
+} from '../../components';
+import { NODE_ICON } from '../../config/nodeIcons';
 
 const toc: TocEntry[] = [
   { id: 'choose-how-to-work', label: 'Choose how to work' },
