@@ -83,21 +83,9 @@ describe('explicit ACP placement', () => {
       spawnOnAgentlet,
     };
 
-    const firstA = await ensureAgentForThread(
-      'machine-a',
-      'thread-1',
-      recipe,
-    );
-    const firstB = await ensureAgentForThread(
-      'machine-b',
-      'thread-1',
-      recipe,
-    );
-    const secondA = await ensureAgentForThread(
-      'machine-a',
-      'thread-1',
-      recipe,
-    );
+    const firstA = await ensureAgentForThread('machine-a', 'thread-1', recipe);
+    const firstB = await ensureAgentForThread('machine-b', 'thread-1', recipe);
+    const secondA = await ensureAgentForThread('machine-a', 'thread-1', recipe);
 
     expect(firstA.sessionId).toBe('machine-a-thread-1');
     expect(firstB.sessionId).toBe('machine-b-thread-1');
@@ -111,11 +99,7 @@ describe('explicit ACP placement', () => {
       getAgentlet: () => undefined,
     };
 
-    const pending = ensureAgentForThread(
-      'machine-missing',
-      'thread-1',
-      recipe,
-    );
+    const pending = ensureAgentForThread('machine-missing', 'thread-1', recipe);
     const rejection = expect(pending).rejects.toMatchObject({
       code: 'placement_unavailable',
     });

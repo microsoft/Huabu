@@ -146,8 +146,7 @@ export const AcpSettings: React.FC = () => {
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<AcpCommandProfileView | null>(null);
-  const { detectedClis, loaded: detectionLoaded } =
-    useDetectedClis(editorOpen);
+  const { detectedClis, loaded: detectionLoaded } = useDetectedClis(editorOpen);
   const [restarting, setRestarting] = useState(false);
   // Destructive confirmation uses a `Modal` rather than `window.confirm` so
   // the dialog matches the rest of the app's UX (see `CanvasListPage` for

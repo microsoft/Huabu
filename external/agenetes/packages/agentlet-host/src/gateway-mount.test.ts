@@ -7,14 +7,8 @@ import Fastify from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 
-import {
-  _resetDaemonAuthForTests,
-  getDaemonAuth,
-} from './daemon-auth.js';
-import {
-  ACP_UPGRADE_PATH,
-  mountAgentletGateway,
-} from './gateway-mount.js';
+import { _resetDaemonAuthForTests, getDaemonAuth } from './daemon-auth.js';
+import { ACP_UPGRADE_PATH, mountAgentletGateway } from './gateway-mount.js';
 
 import type { FastifyInstance } from 'fastify';
 
@@ -31,9 +25,9 @@ describe('Agentlet Gateway mount', () => {
     const auth = getDaemonAuth();
     auth.configure('machine-a', 'test-token');
 
-    expect(() =>
-      auth.validateAgentlet('machine-b', 'test-token'),
-    ).toThrow('Invalid supervised agentlet identity');
+    expect(() => auth.validateAgentlet('machine-b', 'test-token')).toThrow(
+      'Invalid supervised agentlet identity',
+    );
   });
 
   it('authenticates the supervised identity and closes upgraded sockets', async () => {

@@ -17,7 +17,6 @@ import type {
   AgentHandle,
 } from '@agenetes/runtime';
 
-
 export interface AgentProfileWorkloadSpec {
   readonly threadId: string;
   readonly namespace: Namespace;

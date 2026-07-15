@@ -35,7 +35,6 @@ import type {
 } from '../agent/acp-tool.js';
 import type { AgentletStatus } from '@agenetes/protocol';
 
-
 // ─── Agent profiles (user-configured spawn recipes) ────────────────────
 //
 // A profile is a stable, user-edited record describing how to spawn one
