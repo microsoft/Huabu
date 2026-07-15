@@ -63,8 +63,9 @@ describe('handbook route registry', () => {
     const workWithAI = groups.find((group) => group.label === 'Work with AI');
     expect(workWithAI?.items.map(({ to, label }) => ({ to, label }))).toEqual([
       { to: '/docs/work-with-ai', label: 'Work with AI' },
-      { to: '/docs/ai/memory', label: 'Memory' },
       { to: '/docs/ai/external-agents', label: 'External Agents' },
+      { to: '/docs/ai/memory', label: 'Memory' },
+      { to: '/docs/ai/skills', label: 'Skills' },
     ]);
     expect(
       allRoutes.some((route) =>
@@ -73,7 +74,6 @@ describe('handbook route registry', () => {
           '/docs/ai/agent-mode',
           '/docs/ai/question-mode',
           '/docs/ai/digest',
-          '/docs/ai/skills',
         ].includes(route.to),
       ),
     ).toBe(false);

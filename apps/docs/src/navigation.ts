@@ -58,14 +58,19 @@ const groupsRaw: RawGroup[] = [
         load: () => import('./sections/WorkWithAI'),
       },
       {
+        to: '/docs/ai/external-agents',
+        label: 'External Agents',
+        load: () => import('./sections/ai/ExternalAgents'),
+      },
+      {
         to: '/docs/ai/memory',
         label: 'Memory',
         load: () => import('./sections/ai/Memory'),
       },
       {
-        to: '/docs/ai/external-agents',
-        label: 'External Agents',
-        load: () => import('./sections/ai/ExternalAgents'),
+        to: '/docs/ai/skills',
+        label: 'Skills',
+        load: () => import('./sections/ai/Skills'),
       },
     ],
   },

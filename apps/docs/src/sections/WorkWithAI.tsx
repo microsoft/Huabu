@@ -1,7 +1,5 @@
 import {
   Callout,
-  Code,
-  DocLink,
   H2,
   P,
   PageLayout,
@@ -18,7 +16,6 @@ const toc: TocEntry[] = [
   { id: 'let-agent-work', label: 'Let Agent work on the Space' },
   { id: 'review-ai-changes', label: 'Review AI changes' },
   { id: 'ask-beside-material', label: 'Ask beside your material' },
-  { id: 'reuse-workflows', label: 'Reuse workflows with Skills' },
 ];
 
 const listClassName =
@@ -191,20 +188,6 @@ export default function WorkWithAI() {
         connect it to the most relevant nodes. The conversation stays bound to
         that node and to the agent selected for it.
       </P>
-
-      <H2>Reuse workflows with Skills</H2>
-      <P>
-        A Skill is a reusable set of instructions for a task you perform more
-        than once. In a built-in Agent conversation, type <Code>/</Code> to open
-        the Skills menu, choose a Skill, and send the turn. Any nodes selected
-        at that moment remain the task&apos;s focus.
-      </P>
-      <Callout tone="tip">
-        Use a Skill for a repeatable procedure, such as turning selected
-        research notes into the same comparison structure. Use{' '}
-        <DocLink href="/docs/ai/memory">Memory</DocLink> for preferences or
-        facts you want carried between conversations.
-      </Callout>
     </PageLayout>
   );
 }
