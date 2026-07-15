@@ -1,4 +1,4 @@
-import { cn } from './cn';
+import { cn } from '@/components/Common/cn';
 
 interface SettingControlProps {
   children: React.ReactNode;

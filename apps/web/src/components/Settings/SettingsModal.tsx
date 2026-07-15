@@ -2,7 +2,7 @@ import { X } from 'lucide-react';
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { SettingSection } from '@/components/Common/SettingSection';
+import { SettingSection } from '@/components/Settings/Common/SettingSection';
 import { getElectronBridge } from '@/hooks/useElectron';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 import { useLLMStore } from '@/store/llmStore';

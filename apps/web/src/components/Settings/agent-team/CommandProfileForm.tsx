@@ -15,13 +15,14 @@ import {
 import { Button } from '@/components/Common/Button';
 import { PathInput } from '@/components/Common/PathInput';
 import { Select } from '@/components/Common/Select';
-import { SettingControl } from '@/components/Common/SettingControl';
-import { SettingLabel } from '@/components/Common/SettingLabel';
-import { SettingRow } from '@/components/Common/SettingRow';
-import { SettingSubGroup } from '@/components/Common/SettingSubGroup';
 import { TextInput } from '@/components/Common/TextInput';
 import { toast } from '@/components/Common/Toast';
+import { SettingControl } from '@/components/Settings/Common/SettingControl';
+import { SettingLabel } from '@/components/Settings/Common/SettingLabel';
+import { SettingRow } from '@/components/Settings/Common/SettingRow';
+import { SettingSubGroup } from '@/components/Settings/Common/SettingSubGroup';
 
+import { ProfileFormFooter } from './ProfileFormFooter';
 import { ReadOnlyField } from './ReadOnlyField';
 
 import type {
@@ -585,7 +586,7 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
       </SettingRow>
 
       {/* ─── Actions ───────────────────────────────────────────── */}
-      <div className="flex justify-end gap-2 px-3 py-2.5">
+      <ProfileFormFooter>
         <Button
           variant="outline"
           tone="neutral"
@@ -608,7 +609,7 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
               ? t('settings.saveChanges')
               : t('settings.createProfile')}
         </Button>
-      </div>
+      </ProfileFormFooter>
     </div>
   );
 };

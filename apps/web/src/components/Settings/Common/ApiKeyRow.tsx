@@ -2,10 +2,11 @@ import { Check, Key } from 'lucide-react';
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { Button } from './Button';
+import { Button } from '@/components/Common/Button';
+import { TextInput } from '@/components/Common/TextInput';
+
 import { SettingControl } from './SettingControl';
 import { SettingRow } from './SettingRow';
-import { TextInput } from './TextInput';
 
 interface ApiKeyRowProps {
   /** Label for the credential. */

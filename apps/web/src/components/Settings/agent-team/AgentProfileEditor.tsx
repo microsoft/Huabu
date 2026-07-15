@@ -22,8 +22,8 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Select } from '@/components/Common/Select';
-import { SettingControl } from '@/components/Common/SettingControl';
-import { SettingRow } from '@/components/Common/SettingRow';
+import { SettingControl } from '@/components/Settings/Common/SettingControl';
+import { SettingRow } from '@/components/Settings/Common/SettingRow';
 
 import { CommandProfileForm } from './CommandProfileForm';
 import { ManifestProfileForm } from './ManifestProfileForm';

@@ -2,12 +2,12 @@ import { useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { updateAgentTeamConfigs } from '@/api/agent-team';
-import { ApiKeyRow } from '@/components/Common/ApiKeyRow';
-import { SettingControl } from '@/components/Common/SettingControl';
-import { SettingLabel } from '@/components/Common/SettingLabel';
-import { SettingRow } from '@/components/Common/SettingRow';
 import { TextInput } from '@/components/Common/TextInput';
 import { toast } from '@/components/Common/Toast';
+import { ApiKeyRow } from '@/components/Settings/Common/ApiKeyRow';
+import { SettingControl } from '@/components/Settings/Common/SettingControl';
+import { SettingLabel } from '@/components/Settings/Common/SettingLabel';
+import { SettingRow } from '@/components/Settings/Common/SettingRow';
 
 import type {
   AgentTeamMemberConfigView,

@@ -1,9 +1,9 @@
 import React, { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { ApiKeyRow } from '@/components/Common/ApiKeyRow';
-import { SettingSection } from '@/components/Common/SettingSection';
 import { toast } from '@/components/Common/Toast';
+import { ApiKeyRow } from '@/components/Settings/Common/ApiKeyRow';
+import { SettingSection } from '@/components/Settings/Common/SettingSection';
 import { useIntegrationsStore } from '@/store/integrationsStore';
 
 /**

@@ -8,13 +8,13 @@ import {
   getImageCapabilities,
 } from '@sediment/shared';
 
-import { ApiKeyRow } from '@/components/Common/ApiKeyRow';
 import { Select } from '@/components/Common/Select';
-import { SettingControl } from '@/components/Common/SettingControl';
-import { SettingLabel } from '@/components/Common/SettingLabel';
-import { SettingRow } from '@/components/Common/SettingRow';
-import { SettingSection } from '@/components/Common/SettingSection';
 import { TextInput } from '@/components/Common/TextInput';
+import { ApiKeyRow } from '@/components/Settings/Common/ApiKeyRow';
+import { SettingControl } from '@/components/Settings/Common/SettingControl';
+import { SettingLabel } from '@/components/Settings/Common/SettingLabel';
+import { SettingRow } from '@/components/Settings/Common/SettingRow';
+import { SettingSection } from '@/components/Settings/Common/SettingSection';
 import { useLLMStore } from '@/store/llmStore';
 
 import { useDebouncedSave } from '../utils';
