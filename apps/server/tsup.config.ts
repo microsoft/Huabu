@@ -6,14 +6,8 @@ import { defineConfig } from 'tsup';
 
 // ESM bundles don't have `require`, `__dirname`, or `__filename` in
 // global scope, but plenty of bundled CJS packages assume they exist:
-//   • dynamic `require('fs')` calls (createRequire fills this)
-//   • `sql.js` resolves its `sql-wasm.wasm` via
-//     `path.join(__dirname, 'sql-wasm.wasm')` — without the polyfill it
-//     throws `ReferenceError: __dirname is not defined` at first call
-//     to `initSqlJs()` and the whole server boot dies (see
-//     external/agentlet/packages/server/src/data-store.ts).
-// Both polyfills resolve to the directory of the bundled output file,
-// which is where we copy `sql-wasm.wasm` to in `onSuccess` below.
+// dynamic `require('fs')` calls need createRequire, while bundled runtime
+// asset lookups need file-relative `__dirname` / `__filename`.
 const BANNER = {
   js:
     `import { createRequire as __createRequire } from 'module';\n` +
@@ -24,19 +18,10 @@ const BANNER = {
     `const __dirname = __pathDirname(__filename);`,
 };
 
-// Resolve `sql.js/dist/sql-wasm.wasm` from agentlet's server package
-// (the only direct importer of sql.js in this monorepo). Going through
-// createRequire keeps us pnpm-layout-agnostic — no hard-coded
-// `node_modules/.pnpm/sql.js@…` path that breaks on every version bump.
-const sqlWasmSrc = createRequire(
-  path.resolve('../../external/agentlet/packages/server/package.json'),
-).resolve('sql.js/dist/sql-wasm.wasm');
-
 // @resvg/resvg-wasm ships its WebAssembly as `index_bg.wasm`. The agent
 // tool `snapshot_nodes` calls `initWasm(readFile('resvg-bg.wasm'))` at
 // first use; the fallback path it uses in bundle layout is sibling-of-
-// server.js, so copy the file there. Same pnpm-agnostic resolution
-// pattern as sqlWasmSrc above.
+// server.js, so copy the file there using pnpm-layout-agnostic resolution.
 const resvgWasmSrc = createRequire(path.resolve('package.json')).resolve(
   '@resvg/resvg-wasm/index_bg.wasm',
 );
@@ -82,13 +67,6 @@ export default defineConfig([
       const dst = path.resolve('dist-bundle/prompt');
       cpSync(src, dst, { recursive: true });
       console.log(`[tsup] copied prompt templates -> ${dst}`);
-      // sql.js (used by @agentlet/server via DataStore.init) loads its
-      // wasm via `path.join(__dirname, 'sql-wasm.wasm')`. After the
-      // banner polyfill, __dirname resolves to dist-bundle/ — copy
-      // the wasm here so the lookup succeeds in the packaged app.
-      const wasmDst = path.resolve('dist-bundle/sql-wasm.wasm');
-      cpSync(sqlWasmSrc, wasmDst);
-      console.log(`[tsup] copied sql-wasm.wasm -> ${wasmDst}`);
       // @resvg/resvg-wasm — copied next to server.js so the
       // snapshot_nodes tool's bundle-layout fallback finds it via
       // `path.join(__dirname, 'resvg-bg.wasm')`.
@@ -128,15 +106,6 @@ export default defineConfig([
     banner: BANNER,
     esbuildOptions(options) {
       options.platform = 'node';
-    },
-    // Agentlet's own DataStore also boots sql.js — copy the wasm next
-    // to the forked daemon entry so __dirname resolves correctly there
-    // too (this bundle lives under dist-bundle/agentlet/, separate
-    // from the server bundle's wasm copy).
-    async onSuccess() {
-      const wasmDst = path.resolve('dist-bundle/agentlet/sql-wasm.wasm');
-      cpSync(sqlWasmSrc, wasmDst);
-      console.log(`[tsup] copied sql-wasm.wasm -> ${wasmDst}`);
     },
   },
 ]);

@@ -27,7 +27,7 @@
  * docs/proposals/layered-architecture.md §7 (M5).
  */
 
-import { getAgentletServer } from '@agenetes/agentlet-host';
+import { getAgentletGateway } from '@agenetes/agentlet-host';
 
 import { AcpAgentClient } from './client.js';
 import { AcpServiceError } from './errors.js';
@@ -104,7 +104,7 @@ export function setAcpProfileCachePort(port: AcpProfileCachePort | null): void {
 
 // ─── Up-report channel (I9.7) ─────────────────────────────────────────────
 //
-// The instance's per-thread up-report listeners, keyed by threadId. The
+// The instance's per-thread up-report listeners, keyed by placement + threadId. The
 // owning `AcpAgentHandle` registers one via `registerAcpStateListener` when
 // the Agenetes instance wires it (`handle.onState`), independent of whether
 // a `run` is active — so an out-of-turn set-RPC (which resolves an entry
@@ -117,19 +117,25 @@ const stateListeners = new Map<
   (snapshot: AgentStateSnapshot) => void
 >();
 
+function placementThreadKey(agentletId: string, threadId: string): string {
+  return JSON.stringify([agentletId, threadId]);
+}
+
 /**
  * Register (replace) the up-report listener for `threadId`. Returns an
  * unsubscribe that removes it only if it is still the current listener.
  * Called by {@link AcpAgentHandle.onState}.
  */
 export function registerAcpStateListener(
+  agentletId: string,
   threadId: string,
   listener: (snapshot: AgentStateSnapshot) => void,
 ): () => void {
-  stateListeners.set(threadId, listener);
+  const key = placementThreadKey(agentletId, threadId);
+  stateListeners.set(key, listener);
   return () => {
-    if (stateListeners.get(threadId) === listener) {
-      stateListeners.delete(threadId);
+    if (stateListeners.get(key) === listener) {
+      stateListeners.delete(key);
     }
   };
 }
@@ -143,14 +149,19 @@ export function registerAcpStateListener(
  * once it resolves the entry.
  */
 export function reportEntryState(entry: AcpSessionEntry): void {
-  const threadId = findThreadIdForEntry(entry);
-  if (!threadId) return;
-  stateListeners.get(threadId)?.(snapshotEntryState(entry));
+  if (acpSessionRegistry.get(entry.agentletId, entry.threadId) !== entry) {
+    return;
+  }
+  stateListeners.get(placementThreadKey(entry.agentletId, entry.threadId))?.(
+    snapshotEntryState(entry),
+  );
 }
 
 // ─── Session lifecycle helper ─────────────────────────────────────────────
 
 export interface EnsureAcpSessionOptions {
+  /** Explicit execution-node placement for this session. */
+  agentletId: string;
   threadId: string;
   /** External binding for the thread (see {@link RunAcpAgentOptions.binding}). */
   binding: { alias: string; profileId: string };
@@ -200,7 +211,7 @@ export interface EnsureAcpSessionOptions {
 /**
  * Per-key map of in-flight `ensureAcpSession` work, used to coalesce
  * concurrent callers so we never run `initialize() + session/new`
- * twice for the same `{threadId, profileId, scopeName}` triple.
+ * twice for the same `{agentletId, threadId, profileId, scopeName}` tuple.
  *
  * Why this matters: the ChatPanel mount fires
  * `POST /api/acp/threads/:id/session` to warm the slash-command cache,
@@ -211,18 +222,19 @@ export interface EnsureAcpSessionOptions {
  * `shutdown()`s the first client — which silently invalidates the
  * first request's listener registration and wastes one round-trip.
  *
- * Keying by all three staleness inputs means: different profile / scope
- * / thread → independent slots, so a binding switch is never blocked
+ * Keying by all four staleness inputs means: different placement / profile /
+ * scope / thread → independent slots, so a binding switch is never blocked
  * waiting on a stale promise.
  */
 const inflightEnsureSessions = new Map<string, Promise<AcpSessionEntry>>();
 
 function ensureSessionKey(
+  agentletId: string,
   threadId: string,
   profileId: string,
   scopeName: string,
 ): string {
-  return `${threadId}|${profileId}|${scopeName}`;
+  return JSON.stringify([agentletId, threadId, profileId, scopeName]);
 }
 
 /**
@@ -265,20 +277,6 @@ export function snapshotEntryState(entry: AcpSessionEntry): AgentStateSnapshot {
     metadata: snapshotEntryMeta(entry),
     initialPreambleDelivered: entry.initialPreambleDelivered,
   };
-}
-
-/**
- * Reverse-lookup the threadId for a registry entry. The registry maps
- * threadId → entry but the entry itself doesn't carry the threadId. Used by
- * {@link reportEntryState} to key the up-report listener map. Linear scan
- * over O(threads-on-this-server) — a single server holds a handful of live
- * ACP sessions, and this only runs on the meta-update path.
- */
-function findThreadIdForEntry(entry: AcpSessionEntry): string | null {
-  for (const [threadId, candidate] of acpSessionRegistry.entries()) {
-    if (candidate === entry) return threadId;
-  }
-  return null;
 }
 
 /**
@@ -325,8 +323,8 @@ function hydrateEntryFromPersistedMeta(
  * selectors until the user sends the first prompt.
  *
  * The blob is opaque (persisted verbatim by agentlet), so every field is
- * validated defensively. Called BEFORE {@link replayEventStoreMeta} so a
- * genuinely-newer replayed notification still overrides this seed.
+ * validated defensively. Called before the live listener is installed so
+ * buffered bootstrap notifications drain afterward and override this seed.
  */
 function seedEntryFromNewSessionResult(
   entry: AcpSessionEntry,
@@ -409,6 +407,7 @@ export async function ensureAcpSession(
   opts: EnsureAcpSessionOptions,
 ): Promise<AcpSessionEntry> {
   const key = ensureSessionKey(
+    opts.agentletId,
     opts.threadId,
     opts.binding.profileId,
     opts.namespace.name,
@@ -434,7 +433,7 @@ export async function ensureAcpSession(
 async function ensureAcpSessionInner(
   opts: EnsureAcpSessionOptions,
 ): Promise<AcpSessionEntry> {
-  const { threadId, binding, logger } = opts;
+  const { agentletId, threadId, binding, logger } = opts;
   const namespace = opts.namespace;
   const scopeName = namespace.name;
   // Down-feed (I9.7): the durable snapshot the instance read off the
@@ -456,10 +455,15 @@ async function ensureAcpSessionInner(
       `External agent '${binding.alias}' is no longer configured. Re-create the profile in Settings → External Agents, or start a new chat with another agent.`,
     );
   }
-  const cwd = opts.cwd ?? recipe.cwd ?? recipe.agentTeam?.agentDir ?? '';
+  const agentTeamCwd = recipe.agentTeam
+    ? 'workingDirPath' in recipe.agentTeam
+      ? recipe.agentTeam.workingDirPath
+      : recipe.agentTeam.agentDir
+    : undefined;
+  const cwd = opts.cwd ?? recipe.cwd ?? agentTeamCwd ?? '';
 
-  const server = getAgentletServer();
-  if (!server) {
+  const gateway = getAgentletGateway();
+  if (!gateway) {
     throw new AcpServiceError(
       'bridge_not_mounted',
       'ACP bridge is not mounted \u2014 the embedded agentlet daemon is not running yet',
@@ -474,12 +478,13 @@ async function ensureAcpSessionInner(
   // Failures here surface as a 503 from the caller with a user-actionable
   // hint pointing at Settings → External Agents.
   const { sessionId: agentSessionId } = await ensureAgentForThread(
+    agentletId,
     threadId,
     recipe,
     priorSessionId,
     opts.env,
   );
-  const conn = server.getConnection(agentSessionId);
+  const conn = gateway.getSession(agentletId, agentSessionId);
   if (!conn || conn.status !== 'connected') {
     // Agentlet acknowledged the spawn but the agent's own WS session
     // never reached `connected` (or has since dropped). Surfaces the
@@ -492,7 +497,7 @@ async function ensureAcpSessionInner(
     );
   }
 
-  let entry = acpSessionRegistry.get(threadId);
+  let entry = acpSessionRegistry.get(agentletId, threadId);
   if (entry && entry.namespace.name !== scopeName) {
     logger.info(
       {
@@ -506,7 +511,7 @@ async function ensureAcpSessionInner(
     // scope switch already writes under the new namespace and the old
     // record simply lingers unread — the instance (sole store writer) owns
     // any cleanup, not the driver. We only drop the live in-memory entry.
-    acpSessionRegistry.remove(threadId);
+    acpSessionRegistry.remove(agentletId, threadId);
     entry = undefined;
   }
   if (entry && entry.client.isClosed) {
@@ -514,7 +519,7 @@ async function ensureAcpSessionInner(
       { threadId },
       '[acp] stored session client was closed \u2014 reopening',
     );
-    acpSessionRegistry.remove(threadId);
+    acpSessionRegistry.remove(agentletId, threadId);
     entry = undefined;
   }
   if (entry) {
@@ -529,41 +534,41 @@ async function ensureAcpSessionInner(
   //
   // The agentlet daemon has already bootstrapped the session
   // (initialize + session/new) during spawn. We seed the client from
-  // the DataStore's SessionRecord instead of calling those RPCs again.
+  // the live session profile instead of calling those RPCs again.
   // This fixes the split-brain sessionId divergence where Huabu's
   // second session/new created a different sessionId from the one the
-  // WS relay + EventStore are keyed on.
+  // WS relay is keyed on.
 
   const client = new AcpAgentClient(conn, { scopeName, logger });
 
-  // Seed initializeResult from the DataStore (persisted by the server
-  // on agent/hello). The record contains the agent's capabilities from
-  // the daemon's bootstrap — no need to re-initialize.
-  const dataStore = server.getDataStore();
-  const sessionRecord = dataStore.getSession(agentSessionId);
-  if (sessionRecord?.initializeResult) {
+  // The live profile carries the daemon's bootstrap results, so the
+  // stateless Gateway does not need a DataStore.
+  const bootstrapProfile = conn.sessionProfile?.session;
+  if (bootstrapProfile?.initializeResult) {
     client.seedFromRecord(
-      sessionRecord.initializeResult as AcpInitializeResult,
+      bootstrapProfile.initializeResult as AcpInitializeResult,
     );
     logger.info(
       {
         threadId,
         sessionId: agentSessionId,
-        agentInfo: (sessionRecord.initializeResult as AcpInitializeResult)
+        agentInfo: (bootstrapProfile.initializeResult as AcpInitializeResult)
           .agentInfo,
       },
-      '[acp] seeded client from DataStore (skipped redundant initialize + session/new)',
+      '[acp] seeded client from live session profile (skipped redundant initialize + session/new)',
     );
   } else {
     logger.warn(
       { threadId, sessionId: agentSessionId },
-      '[acp] DataStore has no initializeResult for session — agent capabilities unknown',
+      '[acp] live session profile has no initializeResult — agent capabilities unknown',
     );
   }
 
   const sessionId = agentSessionId;
 
   const created: AcpSessionEntry = {
+    agentletId,
+    threadId,
     client,
     sessionId,
     profileId: binding.profileId,
@@ -594,15 +599,10 @@ async function ensureAcpSessionInner(
     metaUpdatedAt: 0,
   };
 
-  // Install the long-lived listener so live session/update notifications
-  // (available_commands_update, mode updates, etc.) flow to the entry.
-  client.registerSessionListener(sessionId, (update) => {
-    handleSessionMetaUpdate(created, update, logger);
-  });
-
   // Seed modes/models/configOptions inline from the agent's `session/new`
   // response (Copilot CLI delivers them here rather than via notifications).
-  // Done BEFORE replay so a genuinely-newer notification still wins.
+  // Done before attaching the listener so a buffered, genuinely-newer
+  // notification drains afterward and wins.
   //
   // Gated on the ABSENCE of a down-fed meta snapshot: the `session/new`
   // blob is frozen at session-creation time, so its `current*` fields
@@ -611,20 +611,20 @@ async function ensureAcpSessionInner(
   // right (no user choice exists yet). On RESUME (`priorState.metadata`
   // present) those frozen defaults are the STALEST source of `current*` —
   // staler than the user's last selection in `priorState.metadata` and
-  // staler than any replayed/live notification — so we skip the seed
-  // entirely and let `replay` + `hydrateEntryFromPersistedMeta` restore
+  // staler than any buffered/live notification — so we skip the seed
+  // entirely and let notifications + `hydrateEntryFromPersistedMeta` restore
   // the up-to-date state instead of clobbering it.
   seedEntryFromNewSessionResult(
     created,
-    priorState?.metadata ? undefined : sessionRecord?.newSessionResult,
+    priorState?.metadata ? undefined : bootstrapProfile?.newSessionResult,
     logger,
   );
 
-  // Replay any session/update notifications from EventStore that the
-  // agent sent during the daemon's session bootstrap (before Huabu
-  // constructed the client). These include modes/models/configOptions/
-  // available_commands that would otherwise be lost.
-  replayEventStoreMeta(server, sessionId, created, logger);
+  // Installing the listener synchronously drains Gateway pre-attach messages
+  // that AcpAgentClient retained as orphan updates during construction.
+  client.registerSessionListener(sessionId, (update) => {
+    handleSessionMetaUpdate(created, update, logger);
+  });
 
   // If the down-fed snapshot has a meta payload (e.g. from a previous
   // server lifetime), use it as a fallback seed — it may carry
@@ -666,7 +666,7 @@ async function ensureAcpSessionInner(
     }
   }
 
-  acpSessionRegistry.set(threadId, created);
+  acpSessionRegistry.set(agentletId, threadId, created);
 
   // The durable record is refreshed via the up-report channel (I9.7): the
   // owning handle installs `reportState` on this entry the moment it
@@ -675,50 +675,6 @@ async function ensureAcpSessionInner(
   // (the sole ThreadStore writer). No direct on-disk write here anymore.
 
   return created;
-}
-
-/**
- * Replay `session/update` notifications from the EventStore that arrived
- * during the daemon's session bootstrap (before Huabu constructed the
- * AcpAgentClient). This catches modes, models, configOptions, and
- * available_commands that the agent pushed in response to `session/new`.
- */
-function replayEventStoreMeta(
-  server: NonNullable<ReturnType<typeof getAgentletServer>>,
-  sessionId: string,
-  entry: AcpSessionEntry,
-  logger: AcpSessionLogger,
-): void {
-  const eventStore = server.getEventStore();
-  let replayed = 0;
-  try {
-    const events = eventStore.getEventsSince(sessionId, 0);
-    for (const ev of events) {
-      if (ev.dir !== 'agent') continue;
-      const msg = ev.event as unknown as Record<string, unknown>;
-      if (msg.method !== 'session/update') continue;
-      const params = msg.params as
-        | { update?: AcpSessionUpdate }
-        | null
-        | undefined;
-      const update = params?.update;
-      if (update && typeof update === 'object' && 'sessionUpdate' in update) {
-        handleSessionMetaUpdate(entry, update as AcpSessionUpdate, logger);
-        replayed++;
-      }
-    }
-  } catch (err) {
-    logger.warn(
-      { sessionId, err: err instanceof Error ? err.message : String(err) },
-      '[acp] failed to replay EventStore meta — UI selectors may start empty',
-    );
-  }
-  if (replayed > 0) {
-    logger.info(
-      { sessionId, replayed },
-      '[acp] replayed session/update events from EventStore for meta seeding',
-    );
-  }
 }
 
 /**

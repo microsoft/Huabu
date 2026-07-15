@@ -30,6 +30,17 @@ export const routes = {
   // ── Integrations (third-party API keys) ──────────────────────────
   integrationsConfig: '/integrations/config',
 
+  // ── Agent Team Settings (loopback-only) ─────────────────────────
+  agentTeamSettings: '/agent-team/settings',
+  agentTeamRoots: '/agent-team/settings/roots',
+  agentTeamRootsRescan: '/agent-team/settings/roots/rescan',
+  agentTeamMemberDetail: '/agent-team/settings/member-detail',
+  agentTeamConfigs: '/agent-team/settings/configs',
+  agentTeamProfiles: '/agent-team/settings/profiles',
+  agentTeamProfile: (id: string) => `/agent-team/settings/profiles/${enc(id)}`,
+  agentTeamProfileAction: (id: string, action: 'setup' | 'cancel') =>
+    `/agent-team/settings/profiles/${enc(id)}/${action}`,
+
   // ── Canvas ────────────────────────────────────────────────────────
   canvasList: '/canvas',
   canvasImport: '/canvas/import',
@@ -111,8 +122,10 @@ export const routes = {
   acpAgentletRestart: '/acp/agentlet/restart',
   acpThreadSession: (threadId: string) =>
     `/acp/threads/${enc(threadId)}/session`,
-  acpThreadCommands: (threadId: string) =>
-    `/acp/threads/${enc(threadId)}/commands`,
+  acpThreadCommands: (threadId: string, canvasId?: string) => {
+    const params = canvasId ? `?canvasId=${enc(canvasId)}` : '';
+    return `/acp/threads/${enc(threadId)}/commands${params}`;
+  },
   acpThreadCachedMeta: (
     threadId: string,
     canvasId?: string,

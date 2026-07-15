@@ -142,6 +142,10 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     refresh: refreshAcpProfiles,
     loaded: acpProfilesLoaded,
   } = useAcpProfiles();
+  const activeExternalProfile =
+    agentBinding.kind === 'external'
+      ? acpProfiles.find((profile) => profile.id === agentBinding.profileId)
+      : undefined;
 
   // Auto-reset a stale external binding on an *empty* thread: the
   // persisted binding refers to a profile that no longer exists
@@ -270,6 +274,8 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     binding: agentBinding,
     canvasId,
     enabled: acpExternalReachable,
+    autoEnsureOnCacheMiss:
+      activeExternalProfile?.launch.kind !== 'agent-team-manifest',
   });
 
   // Keep a ref to the latest snapshot so the optimistic handlers can

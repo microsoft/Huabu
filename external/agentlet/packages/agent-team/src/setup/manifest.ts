@@ -80,7 +80,6 @@ function validateManifest(
     } else {
       const requireDoc = doc.require as Record<string, unknown>;
       const requireArrays = [
-        ['cli-tools', requireDoc['cli-tools']],
         ['prompts', requireDoc.prompts],
         ['skills', requireDoc.skills],
       ] as const;
@@ -92,6 +91,72 @@ function validateManifest(
             !value.every((entry: unknown) => typeof entry === 'string'))
         ) {
           errors.push(`\`require.${field}\` must be an array of strings`);
+        }
+      }
+
+      const cliTools = requireDoc['cli-tools'];
+      if (cliTools !== undefined) {
+        if (!Array.isArray(cliTools)) {
+          errors.push('`require.cli-tools` must be an array');
+        } else {
+          cliTools.forEach((entry: unknown, i) => {
+            if (
+              typeof entry !== 'object' ||
+              entry === null ||
+              Array.isArray(entry)
+            ) {
+              errors.push(`\`require.cli-tools[${i}]\` must be an object`);
+              return;
+            }
+            const tool = entry as Record<string, unknown>;
+            const unknownKeys = Object.keys(tool).filter(
+              (key) =>
+                !['package', 'installer', 'scope', 'executables'].includes(key),
+            );
+            if (unknownKeys.length > 0) {
+              errors.push(
+                `\`require.cli-tools[${i}]\` has unknown field(s): ${unknownKeys.join(', ')}`,
+              );
+            }
+            if (
+              typeof tool.package !== 'string' ||
+              tool.package.trim() === '' ||
+              tool.package.trim() !== tool.package ||
+              tool.package.startsWith('-')
+            ) {
+              errors.push(
+                `\`require.cli-tools[${i}].package\` must be a non-empty package identifier without surrounding whitespace or a leading dash`,
+              );
+            }
+            if (tool.installer !== 'npm') {
+              errors.push(
+                `\`require.cli-tools[${i}].installer\` must be "npm"`,
+              );
+            }
+            if (tool.scope !== 'workspace' && tool.scope !== 'shared') {
+              errors.push(
+                `\`require.cli-tools[${i}].scope\` must be "workspace" or "shared"`,
+              );
+            }
+            if (
+              !Array.isArray(tool.executables) ||
+              tool.executables.length === 0 ||
+              !tool.executables.every(
+                (executable) =>
+                  typeof executable === 'string' &&
+                  executable.trim() !== '' &&
+                  executable.trim() === executable &&
+                  executable !== '.' &&
+                  executable !== '..' &&
+                  !executable.includes('/') &&
+                  !executable.includes('\\'),
+              )
+            ) {
+              errors.push(
+                `\`require.cli-tools[${i}].executables\` must be a non-empty array of command basenames`,
+              );
+            }
+          });
         }
       }
 
@@ -110,6 +175,56 @@ function validateManifest(
             ) {
               errors.push(
                 `\`require.copies[${i}]\` must be an object with string \`from\` and \`to\` fields`,
+              );
+            }
+          });
+        }
+      }
+
+      const env = requireDoc.env;
+      if (env !== undefined) {
+        if (!Array.isArray(env)) {
+          errors.push('`require.env` must be an array');
+        } else {
+          env.forEach((entry: unknown, i) => {
+            if (
+              typeof entry !== 'object' ||
+              entry === null ||
+              Array.isArray(entry)
+            ) {
+              errors.push(`\`require.env[${i}]\` must be an object`);
+              return;
+            }
+
+            const field = entry as Record<string, unknown>;
+            if (typeof field.name !== 'string' || field.name.trim() === '') {
+              errors.push(
+                `\`require.env[${i}].name\` must be a non-empty string`,
+              );
+            }
+            if (
+              typeof field.description !== 'string' ||
+              field.description.trim() === ''
+            ) {
+              errors.push(
+                `\`require.env[${i}].description\` must be a non-empty string`,
+              );
+            }
+            if (typeof field.required !== 'boolean') {
+              errors.push(`\`require.env[${i}].required\` must be a boolean`);
+            }
+            if (typeof field.secret !== 'boolean') {
+              errors.push(`\`require.env[${i}].secret\` must be a boolean`);
+            }
+            if (
+              field.default !== undefined &&
+              typeof field.default !== 'string'
+            ) {
+              errors.push(`\`require.env[${i}].default\` must be a string`);
+            }
+            if (field.secret === true && field.default !== undefined) {
+              errors.push(
+                `\`require.env[${i}].default\` is not allowed for secret fields`,
               );
             }
           });

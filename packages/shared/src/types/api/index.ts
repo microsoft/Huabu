@@ -22,3 +22,5 @@ export * from './acp.js';
 export * from './acp-tool.js';
 export * from './skills.js';
 export * from './rfs.js';
+export * from './agent-team.js';
+export * from './agent-profile.js';

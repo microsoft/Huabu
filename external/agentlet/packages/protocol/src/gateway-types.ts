@@ -1,59 +1,18 @@
 import type { AcpMessage } from './json-rpc.js'
-import type { AgentHelloParams, AgentletHelloParams, LifecycleEvent, AgentSuspendedParams } from './messages.js'
+import type { LifecycleEvent } from './messages.js'
 
-// ─── Server Configuration ────────────────────────────────────────────────────
-
-/** Options for constructing an AgentletServer instance */
-export interface AgentletServerOptions {
-  /**
-   * Validate the token from the WebSocket upgrade.
-   * Called for both agentlet/hello and agent/hello.
-   * Throw an Error to reject the connection.
-   *
-   * @param token - The authentication token (from WS query param)
-   * @param params - The hello params (AgentHelloParams or AgentletHelloParams)
-   * @returns Optional metadata to attach to the connection
-   */
-  authenticate: (token: string, params: AgentHelloParams | AgentletHelloParams) => Promise<AuthResult>
-
-  /** Called when a new agent session connects (not called for agentlet control connections) */
-  onConnection?: (agent: AgentConnection) => void
-
-  /** Called when a previously disconnected agent session reconnects (same sessionId) */
-  onReconnection?: (agent: AgentConnection) => void
-
-  /** Called when an agent session disconnects (network drop or graceful goodbye) */
-  onDisconnection?: (agent: AgentConnection, reason: string) => void
-
-  /** Called when an agentlet reports a session was suspended (idle timeout) */
-  onSessionSuspended?: (params: AgentSuspendedParams, agentletSessionId: string) => void
-
-  /** Max time (ms) to wait for hello after WebSocket opens. Default: 10000 */
-  handshakeTimeout?: number
-
-  /** Max messages buffered per connection for replay on reconnection. Default: 100 */
-  outboundBufferLimit?: number
-
-  /**
-   * Persistence directory (required). The server creates:
-   * - <storeDir>/sessions.db — session metadata (SQLite)
-   * - <storeDir>/events/    — per-session event logs (JSONL)
-   */
-  storeDir: string
-}
-
-/** Result returned by the authenticate callback */
+/** Host-owned metadata associated with an authenticated connection. */
 export interface AuthResult {
   /**
    * Application-specific metadata (user info, project, permissions, etc.)
-   * Stored on AgentConnection.metadata and available to host app.
+   * Stored on AgentConnection.metadata and available to the host app.
    */
   metadata?: Record<string, unknown>
 }
 
 // ─── AgentConnection ──────────────────────────────────────────────────────────
 
-/** Represents a connected (or recently-disconnected) agent in the server registry */
+/** Represents a connected (or recently-disconnected) agent in a Gateway registry. */
 export interface AgentConnection {
   /** Connection identifier — sessionId for agent-sessions, agentletId for agentlets */
   readonly sessionId: string

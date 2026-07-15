@@ -45,6 +45,8 @@ export type AcpEnsureErrorCode =
    *  permission error). Remediation: "Restart worker" in Settings →
    *  External Agents. */
   | 'worker_not_ready'
+  /** The WorkloadSpec targets an agentlet that is not connected. */
+  | 'placement_unavailable'
   /** Native session resume/load is unavailable for the persisted session.
    *  Driver-owned recovery may fall back to folded history. */
   | 'session_resume_unavailable'

@@ -22,7 +22,7 @@
  *      (1s → 2s → 5s → 10s → 10s …). After 5 failures inside any
  *      60s window we stop trying and surface `lastError` to the UI;
  *      the user can hit "Restart worker" from Settings to reset.
- *   4. `app.onClose` kills the child cleanly.
+ *   4. Fastify `preClose` kills the child before upgraded sockets are drained.
  *
  * The daemon connects to the bridge over loopback HTTP with the
  * `--allow-insecure` flag (we use `ws://`, not `wss://`, because the
@@ -32,7 +32,7 @@
  * ### Status reporting
  *
  * `getDaemonStatus()` combines the supervisor's view (last error,
- * backoff schedule) with the agentlet server's view (is a daemon
+ * backoff schedule) with the Gateway's view (is a daemon
  * actually registered right now?). The UI uses the merged snapshot
  * to decide whether to show the amber troubleshooting block.
  *
@@ -48,10 +48,11 @@
 
 import { fork } from 'node:child_process';
 import { existsSync, unlinkSync } from 'node:fs';
+import { hostname } from 'node:os';
 import { join } from 'node:path';
 
 import { getDaemonAuth } from './daemon-auth.js';
-import { getAgentletServer } from './server-mount.js';
+import { getAgentletGateway } from './gateway-mount.js';
 
 import type { AgentletStatus } from '@agenetes/protocol';
 import type { FastifyInstance } from 'fastify';
@@ -229,6 +230,8 @@ export interface AttachOptions {
   daemonEntryPath: string;
   /** Absolute directory for host-owned persistent state. */
   dataDir: string;
+  /** Machine identity shared by the daemon and Gateway authenticator. */
+  agentletId?: string;
 }
 
 class DaemonSupervisor {
@@ -256,6 +259,7 @@ class DaemonSupervisor {
    * {@link attach} time. Used only for legacy-ticket cleanup here.
    */
   private dataDir = '';
+  private agentletId = '';
 
   /**
    * Install the supervisor on a Fastify app. Idempotent per-app —
@@ -266,6 +270,7 @@ class DaemonSupervisor {
     this.app = app;
     this.daemonEntryPath = opts.daemonEntryPath;
     this.dataDir = opts.dataDir;
+    this.agentletId = opts.agentletId ?? hostname();
 
     cleanupLegacyTicketsFile(app, this.dataDir);
 
@@ -291,7 +296,7 @@ class DaemonSupervisor {
       this.start();
     });
 
-    app.addHook('onClose', async () => {
+    app.addHook('preClose', async () => {
       this.close();
     });
   }
@@ -358,20 +363,20 @@ class DaemonSupervisor {
   }
 
   /**
-   * Merge the supervisor's view with the agentlet server's daemon
+   * Merge the supervisor's view with the Gateway's daemon
    * registry to produce the wire snapshot consumed by the UI.
    */
   getStatus(): AgentletStatus {
-    const server = getAgentletServer();
-    const live = server?.getAgentlets() ?? [];
+    const gateway = getAgentletGateway();
+    const live = gateway?.getAgentlets({ status: 'connected' }) ?? [];
     const agentlet = live[0];
 
     if (agentlet) {
       return {
         online: true,
-        agentletId: agentlet.sessionId,
-        hostname: (agentlet.metadata as any)?.machine?.hostname,
-        platform: (agentlet.metadata as any)?.machine?.platform,
+        agentletId: agentlet.agentletId,
+        hostname: agentlet.agentletProfile?.machine?.hostname,
+        platform: agentlet.agentletProfile?.machine?.platform,
         connectedAt: agentlet.connectedAt.toISOString(),
       };
     }
@@ -408,15 +413,14 @@ class DaemonSupervisor {
       return;
     }
     const serverUrl = `ws://127.0.0.1:${this.serverPort}/api/acp/agent`;
-    // Idle agentlet mode: no --agent flag means it waits for
-    // server/spawn requests. The `daemon` subcommand selects the
-    // daemon role of the agentlet CLI.
     const args = [
       'daemon',
       '--server',
       serverUrl,
       '--token',
       token,
+      '--agentlet-id',
+      this.agentletId,
       '--allow-insecure',
     ];
 

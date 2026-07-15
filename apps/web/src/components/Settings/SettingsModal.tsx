@@ -8,13 +8,14 @@ import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 import { useLLMStore } from '@/store/llmStore';
 
 import { AcpSettings } from './sections/AcpSettings';
+import { AgentTeamSettings } from './sections/AgentTeamSettings';
 import { GeneralSettings } from './sections/GeneralSettings';
 import { ImageProviderSettings } from './sections/ImageProviderSettings';
 import { IntegrationsSettings } from './sections/IntegrationsSettings';
 import { LLMSettings } from './sections/LLMSettings';
 
 /** Identifiers for the settings tabs (left-nav order). */
-type SettingsTab = 'general' | 'huabuAgent' | 'agents';
+type SettingsTab = 'general' | 'huabuAgent' | 'agents' | 'agentTeams';
 
 interface TabDef {
   id: SettingsTab;
@@ -22,12 +23,14 @@ interface TabDef {
   labelKey:
     | 'settings.general'
     | 'settings.huabuAgent'
-    | 'settings.externalAgents';
+    | 'settings.externalAgents'
+    | 'settings.agentTeams';
 }
 
 const TABS: TabDef[] = [
   { id: 'huabuAgent', labelKey: 'settings.huabuAgent' },
   { id: 'agents', labelKey: 'settings.externalAgents' },
+  { id: 'agentTeams', labelKey: 'settings.agentTeams' },
   { id: 'general', labelKey: 'settings.general' },
 ];
 
@@ -59,13 +62,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const acpInit = useAcpProfilesStore((s) => s.init);
   const [activeTab, setActiveTab] = useState<SettingsTab>(TABS[0].id);
 
-  // Load LLM + ACP config lazily when the dialog opens (Models / External
-  // Agents tabs). The integrations store self-initialises in its component.
+  // Load each registry only when its owning tab is visible.
   useEffect(() => {
     if (!isOpen) return;
-    void llmInit();
-    void acpInit();
-  }, [isOpen, llmInit, acpInit]);
+    if (activeTab === 'huabuAgent') void llmInit();
+    if (activeTab === 'agents') void acpInit();
+  }, [isOpen, activeTab, llmInit, acpInit]);
 
   // Close on Escape.
   useEffect(() => {
@@ -171,6 +173,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </>
             )}
             {activeTab === 'agents' && <AcpSettings />}
+            {activeTab === 'agentTeams' && <AgentTeamSettings />}
           </div>
         </div>
       </div>

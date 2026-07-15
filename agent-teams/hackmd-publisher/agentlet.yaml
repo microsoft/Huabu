@@ -6,12 +6,21 @@ description: >
   edges), and publishes to HackMD. Writes back a result node with the published URL.
 
 command:
-  claude: claude --acp --allow-all
-  copilot: copilot --acp
+  claude: claude-agent-acp
+  copilot: copilot --acp --allow-all
 
 require:
+  env:
+    - name: HMD_API_ACCESS_TOKEN
+      description: HackMD API token used to publish documents
+      required: true
+      secret: true
   cli-tools:
-    - '@hackmd/hackmd-cli'
+    - package: '@hackmd/hackmd-cli'
+      installer: npm
+      scope: shared
+      executables:
+        - hackmd-cli
   skills:
     - https://github.com/hackmdio/hackmd-cli/tree/develop/hackmd-cli
   prompts:

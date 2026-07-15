@@ -65,14 +65,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # apps/server's tsup bundle imports from @agentlet/protocol and
-      # @agentlet/server — both are workspace packages under
-      # external/agentlet/ whose dist/ outputs don't exist on a fresh
-      # checkout. Root package.json has predev / predev:desktop that
-      # auto-run this, but there's no prebuild:desktop, so the build
-      # scripts assume agentlet is already compiled. Build it
-      # explicitly here so the matrix script doesn't trip on
-      # `Could not resolve "@agentlet/protocol"`.
+      # The server and Gateway import @agentlet/protocol, whose dist/ output
+      # does not exist on a fresh checkout. Build the retained Agentlet
+      # workspace packages before the desktop matrix consumes them.
       - name: Build agentlet workspace packages
         run: pnpm run build:agentlet
 

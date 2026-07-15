@@ -91,12 +91,20 @@ export interface SessionSpec {
   /** Seconds of inactivity before suspending. 0 or omitted = no timeout. */
   idleTimeoutSecs?: number
   /** Agent Team resolution — if set, command/cwd are resolved from the manifest. */
-  agentTeam?: {
-    /** Absolute path to the agent-team package folder (containing agentlet.yaml). */
-    agentDir: string
-    /** Target harness. If omitted, uses the first from manifest supported_harnesses, or 'default'. */
-    harness?: string
-  }
+  agentTeam?:
+    | {
+        /** Absolute path to agentlet.yaml. */
+        manifestPath: string
+        /** Prepared workspace selected by the Profile. */
+        workingDirPath: string
+        /** Target harness declared by the manifest. */
+        harness: string
+      }
+    | {
+        /** Legacy package directory used by existing durable workloads. */
+        agentDir: string
+        harness?: string
+      }
 }
 
 // ─── agentlet/hello (Request/Response) ────────────────────────────────────────
@@ -244,6 +252,120 @@ export interface SendResourceParams {
   destination: string
   /** File content (text) */
   content: string
+}
+
+// ─── Agent Team Control ──────────────────────────────────────────────────────
+
+/** Host-configurable environment field exposed by an Agent Team manifest. */
+export interface AgentTeamEnvField {
+  name: string
+  description: string
+  required: boolean
+  secret: boolean
+  default?: string
+}
+
+/** agent-team/scan — discover Agent Team manifests below one collection root. */
+export interface AgentTeamScanParams {
+  rootPath: string
+}
+
+export interface AgentTeamScanMember {
+  name: string
+  manifestPath: string
+  description: string
+  harnesses: string[]
+  env: AgentTeamEnvField[]
+}
+
+export interface AgentTeamScanDiagnostic {
+  manifestPath: string
+  code: 'invalid_manifest' | 'manifest_unreadable'
+  message: string
+}
+
+export interface AgentTeamScanResult {
+  rootPath: string
+  members: AgentTeamScanMember[]
+  diagnostics: AgentTeamScanDiagnostic[]
+}
+
+/** agent-team/setup — start one isolated deployment setup operation. */
+export interface AgentTeamSetupParams {
+  operationId: string
+  manifestPath: string
+  harness: string
+  workingDirPath: string
+}
+
+export interface AgentTeamSetupStartResult {
+  operationId: string
+  accepted: true
+}
+
+/** agent-team/setup-progress — asynchronous phase and terminal setup events. */
+export type AgentTeamSetupProgressParams =
+  | {
+      operationId: string
+      type: 'phase'
+      phase:
+        | 'validating_manifest'
+        | 'preparing_workspace'
+        | 'installing_tools'
+        | 'installing_skills'
+        | 'placing_prompt'
+        | 'copying_files'
+        | 'running_custom_setup'
+      status: 'started' | 'completed'
+      message: string
+    }
+  | {
+      operationId: string
+      type: 'completed'
+      workingDirPath: string
+    }
+  | {
+      operationId: string
+      type: 'failed'
+      error: {
+        code: 'setup_failed' | 'worker_exited'
+        message: string
+      }
+    }
+  | {
+      operationId: string
+      type: 'cancelled'
+    }
+
+/** agent-team/setup-cancel — terminate one active setup worker. */
+export interface AgentTeamSetupCancelParams {
+  operationId: string
+}
+
+export interface AgentTeamSetupCancelResult {
+  operationId: string
+  cancelled: boolean
+}
+
+/** agent-team/validate — inspect one deployment without mutating it. */
+export interface AgentTeamValidateParams {
+  manifestPath: string
+  harness: string
+  workingDirPath: string
+}
+
+export interface AgentTeamValidationIssue {
+  code:
+    | 'manifest_invalid'
+    | 'harness_unsupported'
+    | 'workspace_missing'
+    | 'workspace_not_ready'
+  message: string
+}
+
+export interface AgentTeamValidateResult {
+  valid: boolean
+  issues: AgentTeamValidationIssue[]
 }
 
 // ─── Lifecycle Events (surfaced to host app) ──────────────────────────────────

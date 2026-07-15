@@ -19,9 +19,9 @@ import { cn } from '../../Common/cn';
 import { Popover } from '../../Common/Popover';
 
 import type {
-  AcpAgentProfile,
   AgentBinding,
   AgentMode,
+  AgentProfileView,
 } from '@sediment/shared';
 
 export type NewChatChoice = AgentChoice;
@@ -32,7 +32,7 @@ interface NewChatMenuProps {
   /** Binding of the *current* thread. Used to mark the matching menu row. */
   currentBinding: AgentBinding;
   /** Configured external-agent profiles available for binding. */
-  profiles: AcpAgentProfile[];
+  profiles: AgentProfileView[];
   /**
    * Re-fetch the profile list. Invoked after the inline "Add agent"
    * modal saves so the newly-created profile shows up in the menu
@@ -81,8 +81,12 @@ export const NewChatMenu = ({
   const handleToggle = useCallback(() => {
     if (disabled) return;
     if (justDismissedRef.current) return;
-    setIsOpen((prev) => !prev);
-  }, [disabled]);
+    setIsOpen((prev) => {
+      const next = !prev;
+      if (next) void onRefreshProfiles?.();
+      return next;
+    });
+  }, [disabled, onRefreshProfiles]);
 
   const computePosition = useCallback(() => {
     if (!triggerRef.current) return { x: 0, y: 0 };

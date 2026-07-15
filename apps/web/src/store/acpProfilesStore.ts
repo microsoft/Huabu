@@ -38,11 +38,18 @@ import { create } from 'zustand';
 
 import { listAcpProfiles } from '@/api/acp';
 
-import type { AcpAgentProfile, AcpAgentletStatus } from '@/api/acp';
+import type {
+  AcpAgentProfile,
+  AcpAgentletStatus,
+  AgentProfileView,
+} from '@/api/acp';
+
+let inFlightRefresh: Promise<void> | null = null;
 
 interface AcpProfilesState {
   /** Every profile the user has created. Empty until the first fetch. */
-  profiles: AcpAgentProfile[];
+  profiles: AgentProfileView[];
+  legacyProfiles: AcpAgentProfile[];
   /** Latest agentlet snapshot. `null` until the first fetch resolves. */
   agentlet: AcpAgentletStatus | null;
   /**
@@ -67,6 +74,7 @@ interface AcpProfilesState {
 
 export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
   profiles: [],
+  legacyProfiles: [],
   agentlet: null,
   loaded: false,
   error: null,
@@ -100,24 +108,36 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
     }
     await get().refresh();
   },
-  refresh: async () => {
-    set({ loading: true });
-    try {
-      const res = await listAcpProfiles();
-      set({
-        profiles: res.profiles,
-        agentlet: res.agentlet,
-        loaded: true,
-        error: null,
-        loading: false,
-      });
-    } catch (err) {
-      // Leave the previous snapshot in place so transient errors
-      // don't make the picker flicker between "available" and empty.
-      set({
-        error: err instanceof Error ? err : new Error(String(err)),
-        loading: false,
-      });
-    }
+  refresh: () => {
+    if (inFlightRefresh) return inFlightRefresh;
+    const request = (async () => {
+      set({ loading: true });
+      try {
+        const res = await listAcpProfiles();
+        const selectableIds = new Set(res.selectableProfileIds);
+        set({
+          profiles: res.profiles.filter((profile) =>
+            selectableIds.has(profile.id),
+          ),
+          legacyProfiles: res.legacyProfiles,
+          agentlet: res.agentlet,
+          loaded: true,
+          error: null,
+          loading: false,
+        });
+      } catch (err) {
+        // Leave the previous snapshot in place so transient errors
+        // don't make the picker flicker between "available" and empty.
+        set({
+          error: err instanceof Error ? err : new Error(String(err)),
+          loading: false,
+        });
+      }
+    })();
+    inFlightRefresh = request;
+    void request.finally(() => {
+      if (inFlightRefresh === request) inFlightRefresh = null;
+    });
+    return request;
   },
 }));

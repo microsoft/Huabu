@@ -76,6 +76,9 @@ export function migrateAcpSessionsFile(
 
     const spec: AcpWorkloadSpec = {
       threadId,
+      // This reconstructed record intentionally remains legacy-shaped.
+      // The ACP driver resolves missing placement to the supervised local
+      // daemon at read time without writing the fallback back to storage.
       kind: EXTERNAL_DRIVER_KIND,
       workloadType: ACP_WORKLOAD_TYPE,
       namespace,

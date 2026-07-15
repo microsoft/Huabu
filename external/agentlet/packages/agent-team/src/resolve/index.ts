@@ -4,15 +4,25 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs';
-import { delimiter, join, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { readManifest } from '../setup/manifest.js';
+import {
+  npmToolsBinDir,
+  resolveNpmToolsRoot,
+} from '../setup/npm-tools.js';
 import type { AgentTeamManifest } from '../setup/types.js';
 
 /** Input: the agentTeam field from SessionSpec. */
-export interface AgentTeamRef {
-  agentDir: string;
-  harness?: string;
-}
+export type AgentTeamRef =
+  | {
+      manifestPath: string;
+      workingDirPath: string;
+      harness: string;
+    }
+  | {
+      agentDir: string;
+      harness?: string;
+    };
 
 /** Output: resolved spawn parameters. */
 export interface ResolvedSpawn {
@@ -30,8 +40,14 @@ export interface ResolvedSpawn {
  * 4. Resolve command from manifest
  * 5. Load .env if present
  */
-export function resolveAgentTeam(ref: AgentTeamRef): ResolvedSpawn {
-  const agentDir = resolve(ref.agentDir);
+export function resolveAgentTeam(
+  ref: AgentTeamRef,
+  envOverrides: Record<string, string> = {},
+): ResolvedSpawn {
+  const agentDir =
+    'manifestPath' in ref
+      ? dirname(resolve(ref.manifestPath))
+      : resolve(ref.agentDir);
 
   // 1. Read manifest
   const manifest = readManifest(agentDir);
@@ -40,7 +56,10 @@ export function resolveAgentTeam(ref: AgentTeamRef): ResolvedSpawn {
   const harness = resolveHarness(ref.harness, manifest);
 
   // 3. Validate workspace
-  const cwd = join(agentDir, 'workspaces', harness);
+  const cwd =
+    'workingDirPath' in ref
+      ? resolve(ref.workingDirPath)
+      : join(agentDir, 'workspaces', harness);
   if (!existsSync(cwd)) {
     throw new Error(
       `Agent Team workspace not prepared for harness "${harness}": ${cwd}\n` +
@@ -52,16 +71,17 @@ export function resolveAgentTeam(ref: AgentTeamRef): ResolvedSpawn {
   const command = resolveCommand(manifest, harness);
 
   // 5. Load .env
-  const env = loadDotEnv(agentDir);
+  const env = { ...loadDotEnv(agentDir), ...envOverrides };
 
-  // 6. Make workspace-local CLI tools reachable on the agent's PATH.
-  //    `agentlet agent-team setup` installs cli-tools via a local `npm install`
-  //    into <cwd>/node_modules, so their executables land in
-  //    <cwd>/node_modules/.bin. Shells do not add this to PATH automatically,
-  //    so prepend it here (preserving the inherited PATH).
-  const binDir = join(cwd, 'node_modules', '.bin');
+  // 6. Make workspace and agentlet-shared CLI tools reachable on the final PATH.
+  const workspaceBinDir = join(cwd, 'node_modules', '.bin');
+  const sharedBinDirs = (manifest.require?.['cli-tools'] ?? [])
+    .filter((tool) => tool.scope === 'shared')
+    .map((tool) => npmToolsBinDir(resolveNpmToolsRoot(tool, cwd)));
   const basePath = env.PATH ?? process.env.PATH ?? '';
-  env.PATH = basePath ? `${binDir}${delimiter}${basePath}` : binDir;
+  env.PATH = [workspaceBinDir, ...sharedBinDirs, basePath]
+    .filter(Boolean)
+    .join(delimiter);
 
   return { command, cwd, env };
 }

@@ -20,8 +20,8 @@ export interface WsClientOptions {
   sessionId: string
   /** Connection role — agentlet control channel or per-session relay */
   role: 'agentlet' | 'session'
-  /** Agentlet identifier (required for role=agentlet, used in agentletProfile for role=session) */
-  agentletId?: string
+  /** Machine identity shared by the control and session channels */
+  agentletId: string
   /** Agent process info (required for role=session) */
   agent?: {
     command: string
@@ -78,7 +78,7 @@ export class WsClient extends EventEmitter<WsClientEvents> {
     url.searchParams.set('token', this.options.token)
     url.searchParams.set('role', this.options.role === 'agentlet' ? 'agentlet' : 'session')
     url.searchParams.set('id', this.options.role === 'agentlet'
-      ? (this.options.agentletId ?? this.options.sessionId)
+      ? this.options.agentletId
       : this.options.sessionId)
     this.ws = new WebSocket(url.toString())
 
@@ -145,7 +145,7 @@ export class WsClient extends EventEmitter<WsClientEvents> {
     }
 
     const params: AgentletHelloParams = {
-      agentletId: this.options.agentletId ?? this.options.sessionId,
+      agentletId: this.options.agentletId,
       agentletProfile,
     }
 
@@ -159,7 +159,7 @@ export class WsClient extends EventEmitter<WsClientEvents> {
 
   private sendAgentHello(): void {
     const sessionProfile: SessionProfile = {
-      agentletId: this.options.agentletId ?? '',
+      agentletId: this.options.agentletId,
       bridge: { name: 'agentlet', version: PROTOCOL_VERSION },
       agent: this.options.agent!,
       capabilities: this.options.capabilities,

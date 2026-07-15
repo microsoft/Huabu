@@ -198,8 +198,7 @@ async function ensureResvgReady(): Promise<void> {
   wasmInitPromise = (async () => {
     // Try dev path first (resolves through node_modules), fall back to
     // bundle path (sibling of the bundled server.js). The bundle copy
-    // is performed by tsup.config.ts's onSuccess hook, mirroring the
-    // sql-wasm.wasm pattern.
+    // is performed by tsup.config.ts's onSuccess hook.
     let wasmBytes: Buffer | null = null;
     try {
       const require = createRequire(import.meta.url);

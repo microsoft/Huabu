@@ -5,8 +5,8 @@ description: >
   engages in discussion with the user about the paper, and helps draft review-style
   responses.
 command:
-  claude: claude --acp --allow-all
-  copilot: copilot --acp
+  claude: claude-agent-acp
+  copilot: copilot --acp --allow-all
 
 require:
   prompts:

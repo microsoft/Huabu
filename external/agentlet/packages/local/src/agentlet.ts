@@ -1,5 +1,7 @@
+import { fork, type ChildProcess } from 'node:child_process'
+import { createRequire } from 'node:module'
 import { hostname, platform } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import WebSocket from 'ws'
 import {
@@ -14,10 +16,20 @@ import {
   type SpawnParams,
   type StopParams,
   type SendResourceParams,
+  type AgentTeamScanParams,
+  type AgentTeamSetupCancelParams,
+  type AgentTeamSetupParams,
+  type AgentTeamSetupProgressParams,
+  type AgentTeamValidateParams,
   type JsonRpcMessage,
   type JsonRpcError,
 } from '@agentlet/protocol'
-import { resolveAgentTeam } from '@agentlet/agent-team'
+import {
+  resolveAgentTeam,
+  scanAgentTeamRoot,
+  validateManagedAgentTeam,
+  type ManagedSetupWorkerMessage,
+} from '@agentlet/agent-team'
 import { AgentProcess } from './agent-process.js'
 import { WsClient } from './ws-client.js'
 import { Relay } from './relay.js'
@@ -28,8 +40,6 @@ import {
   type SessionProfile,
 } from './session-bootstrap.js'
 import type { AgentletOptions } from './cli.js'
-
-type AgentletState = 'starting' | 'connecting' | 'handshaking' | 'relaying' | 'reconnecting' | 'shutting_down' | 'stopped'
 
 interface ManagedAgent {
   sessionId: string
@@ -46,8 +56,11 @@ interface ManagedAgent {
   idleSuspending: boolean
 }
 
-function defaultDaemonId(): string {
-  return hostname()
+interface ManagedSetupOperation {
+  child: ChildProcess
+  workingDirPath: string
+  cancellationRequested: boolean
+  terminalEventSent: boolean
 }
 
 /**
@@ -56,39 +69,30 @@ function defaultDaemonId(): string {
  * this prevents unbounded memory growth from streamed agent output.
  */
 const EARLY_MESSAGE_BUFFER_CAP = 1000
+const require = createRequire(import.meta.url)
+
+export function resolveAgentletId(
+  configuredId: string | undefined,
+  machineHostname = hostname(),
+): string {
+  return configuredId?.trim() || machineHostname
+}
 
 /**
- * Agentlet is the unified lifecycle state machine for the agentlet CLI.
- *
- * Two modes, selected by the presence of `options.agent`:
- *
- * - **Bridge mode** (`--agent <cmd>`): Spawns a single local ACP agent,
- *   bootstraps an ACP session, and relays messages over a WebSocket to the
- *   server.
- *
- * - **Daemon mode** (no `--agent`): Connects a control channel to the server
- *   and waits for `server/spawn` commands, managing multiple agents on demand.
+ * Agentlet connects a machine-level control channel and manages agent
+ * processes requested by the host.
  */
 export class Agentlet {
   private readonly options: AgentletOptions
   private readonly logger: Logger
-  private readonly mode: 'bridge' | 'daemon'
-  private state: AgentletState = 'starting'
   private reconnectAttempt = 0
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private shutdownInProgress = false
 
-  // Bridge mode state
-  private agent!: AgentProcess
-  private sessionProfile!: SessionProfile
-  private sessionWs!: WsClient
-  private relay!: Relay
-  private buffer: JsonRpcMessage[] = []
-
-  // Daemon mode state
   private readonly daemonId: string
   private controlWs: WebSocket | null = null
   private readonly agents = new Map<string, ManagedAgent>()
+  private readonly setupOperations = new Map<string, ManagedSetupOperation>()
   private handshakeComplete = false
 
   /**
@@ -102,8 +106,7 @@ export class Agentlet {
   constructor(options: AgentletOptions, logger: Logger) {
     this.options = options
     this.logger = logger
-    this.mode = options.agent ? 'bridge' : 'daemon'
-    this.daemonId = options.agentletId ?? hostname()
+    this.daemonId = resolveAgentletId(options.agentletId)
 
     // Well-known env vars with defaults — process.env overrides if set.
     // Values are resolved to absolute paths against the daemon cwd so that
@@ -118,173 +121,7 @@ export class Agentlet {
 
   async start(): Promise<void> {
     this.setupSignalHandlers()
-    if (this.mode === 'bridge') {
-      await this.startBridge()
-    } else {
-      this.startDaemon()
-    }
-  }
-
-  // ── Bridge mode ──────────────────────────────────────────────────────
-
-  /** Start bridge: spawn agent, bootstrap session, connect WebSocket, begin relay */
-  private async startBridge(): Promise<void> {
-    const cwd = resolve(this.options.cwd)
-
-    this.state = 'starting'
-    this.agent = new AgentProcess({
-      command: this.options.agent!,
-      cwd,
-      env: this.options.env,
-    })
-
-    this.agent.on('exit', (code, signal) => {
-      this.logger.info('agent_exited', { code, signal })
-      this.sendBridgeNotification(AgentMethods.EXITED, {
-        code, signal, willRestart: this.options.autoRestart && code !== 0,
-      })
-
-      if (this.shutdownInProgress) return
-
-      if (this.options.autoRestart && code !== 0) {
-        this.restartBridgeAgent(cwd)
-      } else {
-        this.shutdown('agent_exited')
-      }
-    })
-
-    this.agent.on('error', (err) => {
-      this.logger.error('agent_error', { message: err.message })
-    })
-
-    this.agent.on('stderr', (line) => {
-      this.logger.debug('agent_stderr', { line })
-    })
-
-    this.agent.start()
-    this.logger.info('agent_spawned', { pid: this.agent.pid, command: this.options.agent })
-
-    // Session bootstrap (initialize + session/new)
-    this.sessionProfile = await bootstrapSession(this.agent, { cwd }, this.logger)
-
-    // Wire up the message handler for relay/buffering (after bootstrap is done)
-    this.agent.on('message', (data) => {
-      if (this.state === 'reconnecting') {
-        if (this.buffer.length < this.options.bufferLimit) {
-          this.buffer.push(data as JsonRpcMessage)
-        } else {
-          this.logger.warn('buffer_overflow', { dropped: 1 })
-        }
-      }
-    })
-
-    this.connectBridgeWebSocket(cwd)
-  }
-
-  private connectBridgeWebSocket(cwd: string): void {
-    this.state = 'connecting'
-
-    this.sessionWs = new WsClient({
-      serverUrl: this.options.server,
-      token: this.options.token,
-      sessionId: this.sessionProfile.sessionId,
-      role: 'session',
-      agentletId: hostname(),
-      agent: {
-        command: this.options.agent!,
-        pid: this.agent.pid!,
-        cwd,
-      },
-      session: this.sessionProfile,
-      capabilities: {
-        autoRestart: this.options.autoRestart,
-        bufferLimit: this.options.bufferLimit,
-      },
-      heartbeatInterval: this.options.heartbeat,
-      allowInsecure: this.options.allowInsecure,
-      machine: { hostname: hostname(), platform: platform() },
-    })
-
-    this.sessionWs.on('open', () => {
-      this.state = 'handshaking'
-      this.logger.info('ws_connected', { server: this.options.server })
-    })
-
-    this.sessionWs.on('handshake_ok', (result) => {
-      this.state = 'relaying'
-      this.reconnectAttempt = 0
-      this.logger.info('handshake_ok', { sessionId: result.sessionId })
-
-      // Flush any buffered messages from reconnection
-      if (this.buffer.length > 0) {
-        this.logger.info('buffer_flushing', { count: this.buffer.length })
-        for (const msg of this.buffer) {
-          this.sessionWs.send(msg)
-        }
-        this.buffer = []
-      }
-
-      // Start relay
-      this.relay = new Relay(this.agent, this.sessionWs, this.logger)
-      this.relay.start()
-    })
-
-    this.sessionWs.on('handshake_error', (err) => {
-      this.logger.error('handshake_failed', { code: err.code, message: err.message })
-      this.shutdown('handshake_failed')
-    })
-
-    this.sessionWs.on('close', (code, reason) => {
-      if (this.shutdownInProgress) return
-      this.logger.warn('ws_disconnected', { code, reason })
-      this.relay?.stop()
-      this.startBridgeReconnection(cwd)
-    })
-
-    this.sessionWs.on('error', (err) => {
-      this.logger.error('ws_error', { message: err.message })
-    })
-
-    this.sessionWs.connect()
-  }
-
-  private startBridgeReconnection(cwd: string): void {
-    this.state = 'reconnecting'
-    this.reconnectAttempt++
-
-    const backoff = Math.min(
-      Math.pow(2, this.reconnectAttempt - 1) * 1000,
-      this.options.reconnectMax * 1000
-    )
-
-    this.logger.info('reconnecting', { attempt: this.reconnectAttempt, backoff_ms: backoff })
-
-    this.reconnectTimer = setTimeout(() => {
-      this.connectBridgeWebSocket(cwd)
-    }, backoff)
-  }
-
-  private restartBridgeAgent(cwd: string): void {
-    const attempt = this.reconnectAttempt + 1
-    if (attempt > this.options.restartMax) {
-      this.logger.error('max_restarts_exceeded', { max: this.options.restartMax })
-      this.sendBridgeNotification(AgentMethods.GOODBYE, { reason: 'max_restarts_exceeded' })
-      this.shutdown('max_restarts_exceeded')
-      return
-    }
-
-    setTimeout(() => {
-      this.agent.start()
-      this.logger.info('agent_restarted', { pid: this.agent.pid, attempt })
-      this.sendBridgeNotification(AgentMethods.RESTARTED, {
-        pid: this.agent.pid!, attempt,
-      })
-    }, this.options.restartDelay)
-  }
-
-  private sendBridgeNotification(method: string, params: Record<string, unknown>): void {
-    const msg: JsonRpcMessage = { jsonrpc: '2.0', method, params }
-    this.sessionWs?.send(msg)
+    this.startDaemon()
   }
 
   // ── Resource handling ───────────────────────────────────────────────
@@ -321,8 +158,6 @@ export class Agentlet {
       })
     }
   }
-
-  // ── Daemon mode ──────────────────────────────────────────────────────
 
   private startDaemon(): void {
     this.logger.info('daemon_starting', { daemonId: this.daemonId })
@@ -381,7 +216,7 @@ export class Agentlet {
   private sendDaemonHello(): void {
     const agentletProfile: AgentletProfile = {
       bridge: { name: 'agentlet', version: PROTOCOL_VERSION },
-      machine: { hostname: hostname(), platform: platform() },
+      machine: { hostname: this.daemonId, platform: platform() },
       capabilities: {
         autoRestart: true,
         bufferLimit: this.options.bufferLimit,
@@ -446,9 +281,264 @@ export class Agentlet {
       case ServerMethods.LIST:
         this.handleList(msg.id)
         break
+      case ServerMethods.AGENT_TEAM_SCAN:
+        this.handleAgentTeamScan(msg.id, msg.params as unknown as AgentTeamScanParams)
+        break
+      case ServerMethods.AGENT_TEAM_SETUP:
+        this.handleAgentTeamSetup(msg.id, msg.params as unknown as AgentTeamSetupParams)
+        break
+      case ServerMethods.AGENT_TEAM_SETUP_CANCEL:
+        this.handleAgentTeamSetupCancel(msg.id, msg.params as unknown as AgentTeamSetupCancelParams)
+        break
+      case ServerMethods.AGENT_TEAM_VALIDATE:
+        this.handleAgentTeamValidate(msg.id, msg.params as unknown as AgentTeamValidateParams)
+        break
       default:
         this.sendDaemonResponse(msg.id, undefined, { code: -32601, message: `Unknown method: ${msg.method}` })
     }
+  }
+
+  private handleAgentTeamScan(requestId: string | number, params: AgentTeamScanParams): void {
+    if (!params || typeof params.rootPath !== 'string' || params.rootPath.trim() === '') {
+      this.sendDaemonResponse(requestId, undefined, {
+        code: -32602,
+        message: 'Missing required param: rootPath',
+      })
+      return
+    }
+
+    try {
+      this.sendDaemonResponse(requestId, scanAgentTeamRoot(params.rootPath))
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.sendDaemonResponse(requestId, undefined, {
+        code: -32602,
+        message,
+        data: { code: 'agent_team_scan_failed' },
+      })
+    }
+  }
+
+  private handleAgentTeamSetup(requestId: string | number, params: AgentTeamSetupParams): void {
+    const validationError = this.validateManagedOperationParams(params, true)
+    if (validationError) {
+      this.sendDaemonResponse(requestId, undefined, { code: -32602, message: validationError })
+      return
+    }
+    if (this.setupOperations.has(params.operationId)) {
+      this.sendDaemonResponse(requestId, undefined, {
+        code: -32602,
+        message: `Setup operation already exists: ${params.operationId}`,
+        data: { code: 'setup_in_progress' },
+      })
+      return
+    }
+    const workingDirPath = resolve(params.workingDirPath)
+    if (
+      [...this.setupOperations.values()].some(
+        (operation) => operation.workingDirPath === workingDirPath,
+      )
+    ) {
+      this.sendDaemonResponse(requestId, undefined, {
+        code: -32602,
+        message: `A setup operation is already using workspace: ${workingDirPath}`,
+        data: { code: 'workspace_setup_in_progress' },
+      })
+      return
+    }
+
+    try {
+      const workerPath = require.resolve('@agentlet/agent-team/setup-worker')
+      const child = fork(
+        workerPath,
+        [
+          JSON.stringify({
+            packageDir: dirname(params.manifestPath),
+            harness: params.harness,
+            workingDirPath,
+          }),
+        ],
+        { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] },
+      )
+      const operation: ManagedSetupOperation = {
+        child,
+        workingDirPath,
+        cancellationRequested: false,
+        terminalEventSent: false,
+      }
+      this.setupOperations.set(params.operationId, operation)
+      child.stdout?.on('data', (data) => {
+        this.logger.debug('agent_team_setup_stdout', {
+          operationId: params.operationId,
+          output: data.toString().trim(),
+        })
+      })
+      child.stderr?.on('data', (data) => {
+        this.logger.warn('agent_team_setup_stderr', {
+          operationId: params.operationId,
+          output: data.toString().trim(),
+        })
+      })
+      child.on('message', (message: ManagedSetupWorkerMessage) => {
+        this.handleManagedSetupWorkerMessage(params.operationId, operation, message)
+      })
+      child.once('error', (error) => {
+        if (this.setupOperations.get(params.operationId) !== operation || operation.terminalEventSent) return
+        this.setupOperations.delete(params.operationId)
+        operation.terminalEventSent = true
+        this.sendAgentTeamSetupProgress(
+          operation.cancellationRequested
+            ? { operationId: params.operationId, type: 'cancelled' }
+            : {
+                operationId: params.operationId,
+                type: 'failed',
+                error: { code: 'worker_exited', message: error.message },
+              },
+        )
+      })
+      child.once('exit', (code, signal) => {
+        if (this.setupOperations.get(params.operationId) !== operation) return
+        this.setupOperations.delete(params.operationId)
+        if (operation.terminalEventSent) return
+        operation.terminalEventSent = true
+        if (operation.cancellationRequested) {
+          this.sendAgentTeamSetupProgress({
+            operationId: params.operationId,
+            type: 'cancelled',
+          })
+        } else {
+          this.sendAgentTeamSetupProgress({
+            operationId: params.operationId,
+            type: 'failed',
+            error: {
+              code: 'worker_exited',
+              message: `Setup worker exited unexpectedly (${code === null ? `signal ${signal}` : `code ${code}`})`,
+            },
+          })
+        }
+      })
+      this.sendDaemonResponse(requestId, {
+        operationId: params.operationId,
+        accepted: true,
+      })
+    } catch (error) {
+      this.sendDaemonResponse(requestId, undefined, {
+        code: -32000,
+        message: error instanceof Error ? error.message : String(error),
+        data: { code: 'setup_start_failed' },
+      })
+    }
+  }
+
+  private handleAgentTeamSetupCancel(requestId: string | number, params: AgentTeamSetupCancelParams): void {
+    if (!params || typeof params.operationId !== 'string' || params.operationId.trim() === '') {
+      this.sendDaemonResponse(requestId, undefined, {
+        code: -32602,
+        message: 'Missing required param: operationId',
+      })
+      return
+    }
+    const operation = this.setupOperations.get(params.operationId)
+    const cancelled = operation !== undefined && !operation.terminalEventSent
+    if (cancelled) {
+      operation.cancellationRequested = true
+      operation.child.send({ type: 'cancel' })
+      setTimeout(() => {
+        if (this.setupOperations.get(params.operationId) === operation) {
+          operation.child.kill('SIGTERM')
+        }
+      }, 500).unref()
+    }
+    this.sendDaemonResponse(requestId, {
+      operationId: params.operationId,
+      cancelled,
+    })
+  }
+
+  private handleAgentTeamValidate(requestId: string | number, params: AgentTeamValidateParams): void {
+    const validationError = this.validateManagedOperationParams(params, false)
+    if (validationError) {
+      this.sendDaemonResponse(requestId, undefined, { code: -32602, message: validationError })
+      return
+    }
+    this.sendDaemonResponse(
+      requestId,
+      validateManagedAgentTeam({
+        packageDir: dirname(params.manifestPath),
+        harness: params.harness,
+        workingDirPath: params.workingDirPath,
+      }),
+    )
+  }
+
+  private validateManagedOperationParams(
+    params: AgentTeamSetupParams | AgentTeamValidateParams,
+    requireOperationId: boolean,
+  ): string | undefined {
+    if (!params || typeof params !== 'object') return 'Missing Agent Team operation params'
+    if (
+      requireOperationId &&
+      (!('operationId' in params) ||
+        typeof params.operationId !== 'string' ||
+        params.operationId.trim() === '')
+    ) {
+      return 'Missing required param: operationId'
+    }
+    if (typeof params.manifestPath !== 'string' || !isAbsolute(params.manifestPath)) {
+      return 'manifestPath must be an absolute path'
+    }
+    if (typeof params.harness !== 'string' || params.harness.trim() === '') {
+      return 'Missing required param: harness'
+    }
+    if (
+      typeof params.workingDirPath !== 'string' ||
+      !isAbsolute(params.workingDirPath)
+    ) {
+      return 'workingDirPath must be an absolute path'
+    }
+    return undefined
+  }
+
+  private handleManagedSetupWorkerMessage(
+    operationId: string,
+    operation: ManagedSetupOperation,
+    message: ManagedSetupWorkerMessage,
+  ): void {
+    if (this.setupOperations.get(operationId) !== operation || operation.terminalEventSent) return
+    if (operation.cancellationRequested) return
+    if (message.type === 'progress') {
+      this.sendAgentTeamSetupProgress({
+        operationId,
+        type: 'phase',
+        ...message.progress,
+      })
+      return
+    }
+
+    operation.terminalEventSent = true
+    this.setupOperations.delete(operationId)
+    if (message.type === 'completed') {
+      this.sendAgentTeamSetupProgress({
+        operationId,
+        type: 'completed',
+        workingDirPath: message.workingDirPath,
+      })
+    } else {
+      this.sendAgentTeamSetupProgress({
+        operationId,
+        type: 'failed',
+        error: message.error,
+      })
+    }
+  }
+
+  private sendAgentTeamSetupProgress(params: AgentTeamSetupProgressParams): void {
+    if (this.controlWs?.readyState !== WebSocket.OPEN) return
+    this.controlWs.send(JSON.stringify({
+      jsonrpc: '2.0',
+      method: AgentletMethods.AGENT_TEAM_SETUP_PROGRESS,
+      params,
+    }))
   }
 
   private async handleSpawn(requestId: string | number, params: SpawnParams): Promise<void> {
@@ -457,13 +547,18 @@ export class Agentlet {
     // Agent Team resolution: translate { agentDir, harness } → { command, cwd, env }
     if (sessionSpec?.agentTeam) {
       try {
-        const resolved = resolveAgentTeam(sessionSpec.agentTeam)
+        const resolved = resolveAgentTeam(sessionSpec.agentTeam, sessionSpec.env)
         sessionSpec.command = resolved.command
         sessionSpec.cwd = resolved.cwd
-        // Env merge: daemon defaults < .env from agentDir < sessionSpec.env from host
-        sessionSpec.env = { ...resolved.env, ...sessionSpec.env }
+        // resolveAgentTeam merges .env < host env, then prepends managed tool paths.
+        sessionSpec.env = resolved.env
         this.logger.info('agent_team_resolved', {
-          agentDir: sessionSpec.agentTeam.agentDir,
+          ...('manifestPath' in sessionSpec.agentTeam
+            ? {
+                manifestPath: sessionSpec.agentTeam.manifestPath,
+                workingDirPath: sessionSpec.agentTeam.workingDirPath,
+              }
+            : { agentDir: sessionSpec.agentTeam.agentDir }),
           harness: sessionSpec.agentTeam.harness,
           command: resolved.command,
           cwd: resolved.cwd,
@@ -661,7 +756,7 @@ export class Agentlet {
         capabilities: { autoRestart, bufferLimit: this.options.bufferLimit },
         heartbeatInterval: this.options.heartbeat,
         allowInsecure: this.options.allowInsecure,
-        machine: { hostname: hostname(), platform: platform() },
+        machine: { hostname: this.daemonId, platform: platform() },
       })
 
       managed.ws = agentWs
@@ -850,12 +945,9 @@ export class Agentlet {
     this.reconnectTimer = setTimeout(() => this.connectDaemonControl(), backoff)
   }
 
-  // ── Shared ───────────────────────────────────────────────────────────
-
   private async shutdown(reason: string): Promise<void> {
     if (this.shutdownInProgress) return
     this.shutdownInProgress = true
-    this.state = 'shutting_down'
 
     this.logger.info('shutting_down', { reason })
 
@@ -865,43 +957,18 @@ export class Agentlet {
       this.reconnectTimer = null
     }
 
-    if (this.mode === 'bridge') {
-      await this.shutdownBridge(reason)
-    } else {
-      await this.shutdownDaemon(reason)
-    }
-
-    this.state = 'stopped'
+    await this.shutdownDaemon(reason)
     this.logger.info('stopped', { reason })
   }
 
-  private async shutdownBridge(reason: string): Promise<void> {
-    // Send goodbye
-    this.sendBridgeNotification(AgentMethods.GOODBYE, { reason })
-
-    // Stop relay
-    this.relay?.stop()
-
-    // Shutdown agent: close stdin, wait, then force kill
-    if (this.agent?.running) {
-      this.agent.closeStdin()
-      await this.waitForAgentExit(this.agent, 5000)
-
-      if (this.agent.running) {
-        this.agent.terminate()
-        await this.waitForAgentExit(this.agent, 2000)
-      }
-
-      if (this.agent.running) {
-        this.agent.kill()
-      }
-    }
-
-    // Close WebSocket
-    this.sessionWs?.close()
-  }
-
   private async shutdownDaemon(reason: string): Promise<void> {
+    for (const operation of this.setupOperations.values()) {
+      operation.cancellationRequested = true
+      operation.child.send({ type: 'cancel' })
+      operation.child.kill('SIGTERM')
+    }
+    this.setupOperations.clear()
+
     // Stop all managed agents
     for (const [sessionId, managed] of this.agents) {
       this.logger.info('stopping_agent', { sessionId })

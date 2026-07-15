@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./setup-worker": {
+      "import": "./dist/setup/managed-setup-worker.js",
+      "default": "./dist/setup/managed-setup-worker.js"
     }
   },
   "files": [

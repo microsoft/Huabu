@@ -9,18 +9,47 @@
  *      Kept for backward compat and complex custom setups.
  */
 
-import { execSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseSetupArgs } from './cli.js';
+import {
+  clearManagedSetupMarker,
+  markManagedSetupReady,
+} from '../managed-workspace.js';
 import {
   detectInstalledHarnesses,
   getHarnessInfo,
   getPromptTarget,
 } from './harness.js';
 import { readManifest } from './manifest.js';
-import type { AgentTeamManifest, CallbackContext, CopyEntry, SetupCallbacks, SetupLogger } from './types.js';
+import {
+  cliToolExecutablesExist,
+  cliToolIsReady,
+  recordCliTool,
+  resolveNpmToolsRoot,
+} from './npm-tools.js';
+import type {
+  AgentTeamManifest,
+  CallbackContext,
+  CliToolRequirement,
+  CopyEntry,
+  ManagedSetupOptions,
+  ManagedSetupPhase,
+  SetupCallbacks,
+  SetupLogger,
+} from './types.js';
 import {
   createWorkspace,
   copyEntryToWorkspace,
@@ -88,7 +117,9 @@ function resolveHarnesses(
 
 // ── Declarative pipeline steps ─────────────────────────────────────────
 
-function getRequiredCliTools(manifest: AgentTeamManifest): string[] {
+function getRequiredCliTools(
+  manifest: AgentTeamManifest,
+): CliToolRequirement[] {
   return manifest.require?.['cli-tools'] ?? [];
 }
 
@@ -104,35 +135,184 @@ function getRequiredCopies(manifest: AgentTeamManifest): CopyEntry[] {
   return manifest.require?.copies ?? [];
 }
 
-/** Install CLI tools declared in manifest.require['cli-tools'] via npm. */
-function installTools(
+async function runCommand(
+  command: string,
+  args: string[],
+  cwd: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  signal?.throwIfAborted();
+  await new Promise<void>((resolveCommand, rejectCommand) => {
+    const child = spawn(command, args, {
+      cwd,
+      stdio: 'inherit',
+      signal,
+    });
+    child.once('error', rejectCommand);
+    child.once('exit', (code, childSignal) => {
+      if (code === 0) {
+        resolveCommand();
+        return;
+      }
+      if (signal?.aborted) {
+        rejectCommand(signal.reason);
+        return;
+      }
+      rejectCommand(
+        new Error(
+          `${command} exited with ${code === null ? `signal ${childSignal}` : `code ${code}`}`,
+        ),
+      );
+    });
+  });
+}
+
+async function waitForLock(signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
+  await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+}
+
+async function withInstallLock(
+  root: string,
+  signal: AbortSignal | undefined,
+  action: () => Promise<void>,
+): Promise<void> {
+  mkdirSync(root, { recursive: true });
+  const lockPath = join(root, '.agentlet-install-lock');
+  const ownerPath = join(lockPath, 'owner');
+  const owner = randomUUID();
+  const deadline = Date.now() + 120_000;
+  while (true) {
+    signal?.throwIfAborted();
+    try {
+      mkdirSync(lockPath);
+      writeFileSync(ownerPath, owner, 'utf8');
+      break;
+    } catch (error) {
+      if (
+        !(
+          error instanceof Error &&
+          'code' in error &&
+          error.code === 'EEXIST'
+        )
+      ) {
+        throw error;
+      }
+      let lockAge: number;
+      try {
+        lockAge = Date.now() - statSync(lockPath).mtimeMs;
+      } catch {
+        continue;
+      }
+      if (lockAge > 30 * 60_000) {
+        const stalePath = `${lockPath}.stale-${owner}`;
+        try {
+          renameSync(lockPath, stalePath);
+          rmSync(stalePath, { recursive: true, force: true });
+        } catch {
+          // Another waiter or the active owner changed the lock first.
+        }
+        continue;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(`Timed out waiting for npm tools lock: ${lockPath}`);
+      }
+      await waitForLock(signal);
+    }
+  }
+  const ownsLock = () => {
+    try {
+      return readFileSync(ownerPath, 'utf8') === owner;
+    } catch {
+      return false;
+    }
+  };
+  const heartbeat = setInterval(() => {
+    if (!ownsLock()) return;
+    try {
+      const now = new Date();
+      utimesSync(lockPath, now, now);
+    } catch {
+      // Losing the lock is detected before release.
+    }
+  }, 30_000);
+  heartbeat.unref();
+  try {
+    await action();
+  } finally {
+    clearInterval(heartbeat);
+    if (ownsLock()) {
+      rmSync(lockPath, { recursive: true, force: true });
+    }
+  }
+}
+
+function ensureNpmRoot(root: string): void {
+  mkdirSync(root, { recursive: true });
+  const packageJsonPath = join(root, 'package.json');
+  if (!existsSync(packageJsonPath)) {
+    writeFileSync(
+      packageJsonPath,
+      `${JSON.stringify({ private: true }, null, 2)}\n`,
+      'utf8',
+    );
+  }
+}
+
+async function installTool(
+  tool: CliToolRequirement,
+  workspaceDir: string,
+  log: SetupLogger,
+  signal?: AbortSignal,
+): Promise<void> {
+  const root = resolveNpmToolsRoot(tool, workspaceDir);
+  await withInstallLock(root, signal, async () => {
+    if (cliToolIsReady(root, tool)) {
+      log.info(`Tool already ready: ${tool.package} (${tool.scope})`);
+      return;
+    }
+    ensureNpmRoot(root);
+    await runCommand(
+      'npm',
+      ['install', '--prefix', root, '--save-exact', tool.package],
+      root,
+      signal,
+    );
+    if (!cliToolExecutablesExist(root, tool)) {
+      throw new Error(
+        `Installed package "${tool.package}" did not provide required executable(s): ${tool.executables.join(', ')}`,
+      );
+    }
+    recordCliTool(root, tool);
+    log.success(`Tool installed: ${tool.package} (${tool.scope})`);
+  });
+}
+
+async function installTools(
   manifest: AgentTeamManifest,
   workspaceDir: string,
   log: SetupLogger,
-): void {
+  signal?: AbortSignal,
+): Promise<void> {
   const cliTools = getRequiredCliTools(manifest);
   if (cliTools.length === 0) return;
-  log.info(`Installing tools: ${cliTools.join(', ')}`);
-
-  // Ensure package.json exists so npm install works
-  const pkgJson = join(workspaceDir, 'package.json');
-  if (!existsSync(pkgJson)) {
-    execSync('npm init -y --silent', { cwd: workspaceDir, stdio: 'pipe' });
+  log.info(
+    `Preparing tools: ${cliTools.map((tool) => tool.package).join(', ')}`,
+  );
+  for (const tool of cliTools) {
+    await installTool(tool, workspaceDir, log, signal);
   }
-
-  const pkgs = cliTools.join(' ');
-  execSync(`npm install ${pkgs}`, { cwd: workspaceDir, stdio: 'inherit' });
-  log.success('Tools installed');
 }
 
 /** Install skills declared in manifest.require.skills via `npx skills add`. */
-function installSkills(
+async function installSkills(
   manifest: AgentTeamManifest,
   harness: string,
   workspaceDir: string,
   packageDir: string,
   log: SetupLogger,
-): void {
+  signal?: AbortSignal,
+): Promise<void> {
   const skills = getRequiredSkills(manifest);
   if (skills.length === 0) return;
 
@@ -151,15 +331,36 @@ function installSkills(
     // `npx --yes` auto-confirms the one-time install of the `skills`
     // package; the trailing `--yes` skips the skills tool's own prompts
     // (e.g. installation scope) so setup stays fully non-interactive.
-    execSync(
-      `npx --yes skills add ${skillPath} --agent ${harnessInfo.skillsAgent} --yes`,
-      {
-        cwd: workspaceDir,
-        stdio: 'inherit',
-      },
+    await runCommand(
+      'npx',
+      [
+        '--yes',
+        'skills',
+        'add',
+        skillPath,
+        '--agent',
+        harnessInfo.skillsAgent,
+        '--yes',
+      ],
+      workspaceDir,
+      signal,
     );
   }
+
   log.success('Skills installed');
+}
+
+async function runPhase(
+  options: ManagedSetupOptions,
+  phase: ManagedSetupPhase,
+  message: string,
+  action: () => void | Promise<void>,
+): Promise<void> {
+  options.signal?.throwIfAborted();
+  options.onProgress?.({ phase, status: 'started', message });
+  await action();
+  options.signal?.throwIfAborted();
+  options.onProgress?.({ phase, status: 'completed', message });
 }
 
 /** Place the system prompt at the harness-specific location. */
@@ -242,6 +443,105 @@ async function runCustomOnInstall(
 
 // ── Command runners ────────────────────────────────────────────────────
 
+/** Materialize one explicit Agent Team deployment workspace. */
+export async function runManagedSetup(
+  options: ManagedSetupOptions,
+  callbacks: SetupCallbacks = {},
+): Promise<void> {
+  let manifest: AgentTeamManifest | undefined;
+  await runPhase(
+    options,
+    'validating_manifest',
+    'Validating Agent Team manifest',
+    () => {
+      manifest = readManifest(options.packageDir);
+      resolveHarnesses(manifest, options.harness, options.log);
+    },
+  );
+
+  const validatedManifest = manifest;
+  if (!validatedManifest) {
+    throw new Error('Agent Team manifest validation did not complete');
+  }
+
+  const { packageDir, harness, workingDirPath, log, signal } = options;
+  const harnessInfo = getHarnessInfo(harness);
+
+  await runPhase(
+    options,
+    'preparing_workspace',
+    'Preparing deployment workspace',
+    () => {
+      createWorkspace(workingDirPath);
+      clearManagedSetupMarker(workingDirPath);
+    },
+  );
+
+  if (!harnessInfo) {
+    log.warn(
+      `Unknown harness '${harness}', skipping prompt placement and skills installation`,
+    );
+  }
+
+  await runPhase(options, 'installing_tools', 'Installing CLI tools', () =>
+    installTools(validatedManifest, workingDirPath, log, signal),
+  );
+  await runPhase(options, 'installing_skills', 'Installing skills', () =>
+    installSkills(
+      validatedManifest,
+      harness,
+      workingDirPath,
+      packageDir,
+      log,
+      signal,
+    ),
+  );
+  await runPhase(options, 'placing_prompt', 'Placing system prompt', () =>
+    placeSystemPrompt(
+      validatedManifest,
+      packageDir,
+      workingDirPath,
+      harness,
+      log,
+    ),
+  );
+  await runPhase(options, 'copying_files', 'Copying declared files', () =>
+    distributeCopies(validatedManifest, packageDir, workingDirPath, log),
+  );
+
+  const ctx: CallbackContext = {
+    packageDir,
+    manifest: validatedManifest,
+    harness,
+    workspaceDir: workingDirPath,
+    log,
+  };
+  await runPhase(
+    options,
+    'running_custom_setup',
+    'Running custom setup',
+    async () => {
+      await runCustomOnInstall(
+        validatedManifest,
+        packageDir,
+        ctx,
+        log,
+      );
+      if (callbacks.onInstall) {
+        log.info('Running callback install...');
+        await callbacks.onInstall(harness, workingDirPath, ctx);
+      }
+      if (callbacks.onUnpack) {
+        log.info('Running callback unpack...');
+        await callbacks.onUnpack(harness, workingDirPath, ctx);
+      }
+    },
+  );
+
+  markManagedSetupReady(workingDirPath, harness);
+  log.success(`Workspace ready: ${workingDirPath}`);
+}
+
 /** Run the `unpack` (or `setup`) command. */
 async function runUnpack(
   packageDir: string,
@@ -257,39 +557,10 @@ async function runUnpack(
   for (const harness of harnesses) {
     log.info(`Preparing workspace for "${harness}"...`);
     const workspaceDir = resolveWorkspaceDir(packageDir, harness);
-    const harnessInfo = getHarnessInfo(harness);
-
-    createWorkspace(workspaceDir);
-
-    if (!harnessInfo) {
-      log.warn(
-        `Unknown harness '${harness}', skipping prompt placement and skills installation`,
-      );
-    }
-
-    // Declarative pipeline: tools → skills → prompt → copies
-    installTools(manifest, workspaceDir, log);
-    installSkills(manifest, harness, workspaceDir, packageDir, log);
-    placeSystemPrompt(manifest, packageDir, workspaceDir, harness, log);
-    distributeCopies(manifest, packageDir, workspaceDir, log);
-
-    const ctx: CallbackContext = { packageDir, manifest, harness, workspaceDir, log };
-
-    // Custom onInstall from manifest (dynamic import)
-    await runCustomOnInstall(manifest, packageDir, ctx, log);
-
-    // Legacy callbacks from runSetup({ onInstall, onUnpack })
-    if (callbacks.onInstall) {
-      log.info('Running callback install...');
-      await callbacks.onInstall(harness, workspaceDir, ctx);
-    }
-
-    if (callbacks.onUnpack) {
-      log.info('Running callback unpack...');
-      await callbacks.onUnpack(harness, workspaceDir, ctx);
-    }
-
-    log.success(`Workspace ready: ${workspaceDir}`);
+    await runManagedSetup(
+      { packageDir, harness, workingDirPath: workspaceDir, log },
+      callbacks,
+    );
   }
 
   console.log('\nDone.\n');
@@ -356,7 +627,11 @@ async function runDoctor(
   log.info(`Schema:       ${manifest.schema}`);
   log.info(`Harnesses:    ${harnesses.join(', ')}`);
   if (getRequiredCliTools(manifest).length) {
-    log.info(`CLI tools:    ${getRequiredCliTools(manifest).join(', ')}`);
+    log.info(
+      `CLI tools:    ${getRequiredCliTools(manifest)
+        .map((tool) => `${tool.package} (${tool.installer}/${tool.scope})`)
+        .join(', ')}`,
+    );
   }
   if (getRequiredSkills(manifest).length) {
     log.info(`Skills:       ${getRequiredSkills(manifest).join(', ')}`);

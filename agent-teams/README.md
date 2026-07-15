@@ -1,180 +1,121 @@
 # Agent Teams for Huabu
 
-This folder contains **Huabu-managed Agent Teams**: reusable external-agent
-packages that Huabu treats as extensions/plugins.
+This folder contains Huabu-managed Agent Teams: reusable external-agent packages that Huabu discovers, configures, prepares, and runs through Agenetes and connected agentlet daemons.
 
-In the AI era, the agent _is_ the integration layer. Instead of writing a
-bespoke plugin for every service (publish to HackMD, file an issue, call an
-API…), you connect an agent that already knows how to drive that service's CLI
-or skill, point it at the Space via **Huabu Reachback**, and let it do the
-work. Each subfolder here is one such packaged agent.
-
----
+Each package remains a normal Agent Team defined by the generic [`external/agentlet/spec/agent-team.md`](../external/agentlet/spec/agent-team.md) contract. Huabu adds the managed discovery, Config, Profile, setup, and runtime experience.
 
 ## Quick start
 
-```bash
-# 1. Enter the agent-team folder (setup is always run from inside it)
-cd agent-teams/hackmd-publisher
+1. Ensure the machine containing these packages runs an agentlet daemon connected to Huabu.
+2. Open **Settings → Agent Teams**.
+3. Add the absolute path to this `agent-teams/` directory as a collection root on that machine.
+4. Configure fields marked with a red `(*)`.
+5. Expand the member, select a harness, confirm the managed workspace path, create a Profile, and select **Setup**.
 
-# 2. Add any secrets the agent needs (if the folder ships a .env.example)
-cp .env.example .env && $EDITOR .env
+Huabu asks Agenetes to scan the collection root, persists the discovered members and Profiles, stores secret Configs in the host SecretStore, and runs package setup through the selected daemon. A Profile appears under Agent Teams in Chat and Question Nodes after its member is active, required Configs are complete, and preparation is ready. Users do not need to run setup or register an External Agent Profile manually.
 
-# 3. Prepare per-harness workspaces (installs cli-tools, skills, prompts)
-agentlet agent-team setup            # or: agentlet agent-team unpack
+## Bundled teams
 
-# 4. (optional) Check readiness
-agentlet agent-team doctor
-```
+| Agent                                          | Responsibility                                                                                    | Configs                                         | Harnesses           |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------- | ----------------------------------------------- | ------------------- |
+| [`deepv-slides-maker/`](./deepv-slides-maker/) | Creates editable slide decks through a DeepV server.                                              | `DEEPV_SERVER_ENDPOINT`, `DEEPV_SERVER_API_KEY` | `claude`, `copilot` |
+| [`hackmd-publisher/`](./hackmd-publisher/)     | Publishes selected Space content to HackMD and writes back the URL.                               | `HMD_API_ACCESS_TOKEN`                          | `claude`, `copilot` |
+| [`html-slides-maker/`](./html-slides-maker/)   | Creates static HTML presentations and technical diagrams after confirming the presentation brief. | None                                            | `claude`, `copilot` |
+| [`paper-reviewer/`](./paper-reviewer/)         | Reviews academic papers and drafts review responses.                                              | None                                            | `claude`, `copilot` |
 
-Then in the Huabu UI: **Settings → External Agents → Add agent → Agent Team**,
-enter the **absolute path** to this folder, pick the agent from the chat agent
-selector, and talk to it.
-
-> Requires **agentlet** on your `PATH`. In the Sediment monorepo it is installed
-> automatically (`pnpm install` runs the PATH setup; build it with
-> `pnpm run build:agentlet`).
-
----
-
-## Example agents
-
-| Agent                                      | What it does                                                                                                                                                     | Requires                                        | Harnesses           |
-| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- | ------------------- |
-| [`hackmd-publisher/`](./hackmd-publisher/) | Assembles selected Space nodes into a markdown document (respecting frames/edges) and publishes it to [HackMD](https://hackmd.io), then writes back a link node. | HackMD API token (`.env`), `@hackmd/hackmd-cli` | `claude`, `copilot` |
-
-More teams will be added as concrete extension patterns emerge.
-
----
-
-## What lives here
-
-Each subdirectory under `agent-teams/` is one bundled Agent Team package:
+## Package layout
 
 ```text
 agent-teams/<team-name>/
-  agentlet.yaml        # manifest: name, description, command (per harness), require
-  system_prompt.md     # prompt(s) referenced by require.prompts
-  .env.example         # optional: secrets template (copy to .env)
-  README.md            # human docs + example prompts
-  workspaces/          # generated by `setup`; per-harness, git-ignored
+  agentlet.yaml        # identity, harness commands, Config schema, and setup requirements
+  system_prompt.md     # canonical prompt referenced by require.prompts
+  .env.example         # optional standalone-runtime example; Huabu uses managed Configs
+  workspaces/          # optional CLI-generated workspaces; ignored by git
 ```
 
-The manifest declares, per harness, the launch `command` and what the agent
-`require`s — `cli-tools` (npm packages), `skills`, and `prompts`:
+The source package remains in place. Managed setup materializes only the Profile's configured `workingDirPath`.
+
+## Manifest example
 
 ```yaml
 schema: agentlet-agent-schema-v1
 name: hackmd-publisher
-description: ...
+description: Publishes selected Space content to HackMD
+
 command:
-  claude: claude --acp --allow-all
-  copilot: copilot --acp
+  claude: claude-agent-acp
+  copilot: copilot --acp --allow-all
+
 require:
+  env:
+    - name: HMD_API_ACCESS_TOKEN
+      description: HackMD API token used to publish documents
+      required: true
+      secret: true
   cli-tools:
-    - '@hackmd/hackmd-cli'
+    - package: '@hackmd/hackmd-cli'
+      installer: npm
+      scope: shared
+      executables:
+        - hackmd-cli
   skills:
     - https://github.com/hackmdio/hackmd-cli/tree/develop/hackmd-cli
   prompts:
     - system_prompt.md
 ```
 
-The full schema, workspace layout, and runtime contract are defined in the
-agentlet spec, not repeated here:
-[`external/agentlet/spec/agent-team.md`](../external/agentlet/spec/agent-team.md).
+### CLI tools
 
----
+Every `require.cli-tools` entry is structured:
 
-## How-to guide
+| Field         | Current values         | Meaning                                                                                  |
+| ------------- | ---------------------- | ---------------------------------------------------------------------------------------- |
+| `package`     | npm package identifier | Package passed to npm.                                                                   |
+| `installer`   | `npm`                  | Installer backend. Future backends require an explicit protocol extension.               |
+| `scope`       | `workspace`, `shared`  | Install into one Profile workspace or an agentlet-managed store reusable across folders. |
+| `executables` | non-empty command list | Commands that must exist before setup and validation can succeed.                        |
 
-### 1. Get a package
+Shared npm tools are isolated by package requirement beneath `~/.agentlet/tools/npm` by default. Set `AGENTLET_SHARED_NPM_TOOLS_DIR` to use another absolute root. Setup checks an exact receipt plus all declared executables before deciding that installation can be skipped, and serializes concurrent installation of the same package requirement.
 
-- **In the Sediment monorepo** — the bundled teams are already here under
-  `agent-teams/`. Nothing to download.
-- **Standalone** — clone or copy a single team folder anywhere on the machine
-  that runs agentlet. Everything the daemon needs lives inside that folder.
+The runtime prepends both workspace-local and shared npm `.bin` directories to `PATH`. For example, `@hackmd/hackmd-cli` is the npm package while `hackmd-cli` is the executable agents invoke.
 
-### 2. Provide secrets (if any)
+### Configs
 
-If the folder ships a `.env.example`, copy it to `.env` and fill in the values
-(API tokens, etc.). `.env` is git-ignored and loaded into the agent's
-environment at spawn time.
+`require.env` is the source of truth for Huabu's member-level Config UI. Required values gate Profile setup and selection. Secret values are stored by Huabu's SecretStore and read APIs expose only whether each secret is configured.
 
-```bash
-cp .env.example .env
-$EDITOR .env
-```
+The optional `.env.example` remains useful when running a package outside Huabu, but managed Profiles receive current Config values whenever a new session spawns and do not require users to create `.env`.
 
-### 3. Set up the workspace
+## Optional standalone setup
 
-Run the setup commands **from inside the agent-team folder** — they operate on
-the `agentlet.yaml` in the current directory (there is no path argument).
+The generic agentlet CLI remains available for package development and standalone use:
 
 ```bash
 cd agent-teams/<team-name>
-
-# Validate the manifest is well-formed and ready
-agentlet agent-team validate
-
-# Prepare per-harness workspaces under ./workspaces/<harness>/
-#  - installs require.cli-tools (npm), require.skills, and places prompts
-#  - defaults to every installed harness in the manifest
-#  - 'unpack' is an alias for 'setup'
-agentlet agent-team setup
-agentlet agent-team setup --harness copilot   # target one harness
-
-# Diagnose readiness (missing tools, harnesses, env, etc.)
+agentlet agent-team setup --harness copilot
+agentlet agent-team validate --harness copilot
 agentlet agent-team doctor
 ```
 
-> Setup only prepares harnesses whose CLI is installed on the machine; others
-> are skipped with a warning. Installed `cli-tools` land in
-> `workspaces/<harness>/node_modules/.bin` and are put on the agent's `PATH`
-> automatically at spawn time.
+CLI setup defaults the workspace to `workspaces/<harness>/`. Huabu-managed setup instead uses the complete Profile `workingDirPath` selected in Settings.
 
-### 4. Connect the agent in the Huabu UI
+## Runtime flow
 
-1. Open **Settings → External Agents** (header settings popover).
-2. Click **Add agent**, then choose the **Agent Team** profile mode.
-3. Set **Agent directory** to the **absolute path** of the team folder (the one
-   containing `agentlet.yaml`), e.g. `/path/to/agent-teams/hackmd-publisher`.
-4. Optionally set a **Harness** override (e.g. `claude` / `copilot`). Leave blank
-   to use the first harness declared in the manifest.
-5. Save.
+```text
+Settings root + machine
+        ↓
+Agenetes discovery registry
+        ↓
+member Configs + Profile placement
+        ↓ Setup/Retry
+agentlet scan/setup/validate control operations
+        ↓
+prepared workspace + shared/workspace tool PATH
+        ↓
+ACP agent session with Huabu Reachback
+```
 
-### 5. Talk to the agent
+## Related documentation
 
-1. In a chat or on a **question node**, open the agent selector to the left of
-   the input and pick the Agent Team profile you just added. This binds the
-   current thread to that agent (the binding locks on the first message).
-2. Select the Space nodes you want the agent to act on, then send a natural
-   language request — e.g. _"Publish these notes to HackMD as a blog post."_
-3. The agent reads/writes Space state via Huabu Reachback and writes back a
-   result node when done.
-
-See each team's own `README.md` for concrete example prompts.
-
----
-
-## How Huabu uses Agent Teams at runtime
-
-1. User runs `agentlet agent-team setup` to prepare the workspace.
-2. Huabu sends `{ agentDir, harness }` to the agentlet daemon.
-3. The daemon reads `agentlet.yaml`, resolves the command + workspace `cwd` +
-   env (including `.env` and the workspace `node_modules/.bin` on `PATH`), and
-   spawns the agent.
-4. The agent uses Huabu Reachback (e.g. `write-node`) to read/write Space state.
-
-This lets Huabu treat external agents as first-class integrations without
-inventing a bespoke plugin API for every service.
-
----
-
-## Related docs
-
-- [`external/agentlet/spec/agent-team.md`](../external/agentlet/spec/agent-team.md)
-  — source of truth for the generic Agent Team packaging/runtime model.
-- [`external/agentlet/README.md`](../external/agentlet/README.md) — the agentlet
-  CLI (`agentlet daemon …` / `agentlet agent-team …`).
-- [`docs/architecture/agent-teams-as-extensions.md`](../docs/architecture/agent-teams-as-extensions.md) —
-  Huabu product/vision for managed Agent Teams as extensions/plugins.
+- [`external/agentlet/spec/agent-team.md`](../external/agentlet/spec/agent-team.md) — generic manifest, setup, workspace, and runtime contract.
+- [`docs/architecture/agent-teams-as-extensions.md`](../docs/architecture/agent-teams-as-extensions.md) — current Huabu/Agenetes ownership and topology.
+- [`docs/proposals/managed-agent-teams.md`](../docs/proposals/managed-agent-teams.md) — unified Profile design and remaining fine-grained Settings event optimization.

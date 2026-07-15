@@ -1,5 +1,5 @@
 import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -66,8 +66,27 @@ describe('buildForkTargetSpec', () => {
     const target = buildForkTargetSpec(source, 'target', 'target_canvas');
     expect(target).toMatchObject({
       threadId: 'target',
+      agentletId: hostname(),
       namespace: { name: 'target_canvas' },
       env: { HUABU_THREAD_ID: 'target' },
+    });
+  });
+
+  it('preserves explicit ACP placement when retargeting', () => {
+    const source: AcpWorkloadSpec = {
+      threadId: 'source',
+      agentletId: 'machine-b',
+      kind: 'external',
+      workloadType: 'Deployment',
+      namespace: { name: 'source_canvas' },
+      binding: { alias: 'copilot', profileId: 'profile_1' },
+    };
+
+    expect(
+      buildForkTargetSpec(source, 'target', 'target_canvas'),
+    ).toMatchObject({
+      threadId: 'target',
+      agentletId: 'machine-b',
     });
   });
 });

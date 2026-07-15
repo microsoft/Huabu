@@ -5,7 +5,7 @@
 // @agenetes/agentlet-host package) because the L1 UI consumes it as a
 // browser-safe wire type: the web bundle reaches it transitively through
 // @sediment/shared, which must never depend on a package that drags in
-// fastify / @agentlet/server. Keeping it here (zod-only) is what lets
+// Fastify or WebSocket runtime dependencies. Keeping it here (zod-only) lets
 // both the supervisor's `getStatus()` return type and the browser share
 // one definition without a layering leak.
 

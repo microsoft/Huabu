@@ -42,8 +42,8 @@ export default function ExternalAgents() {
           className="inline-block size-[1em] align-[-0.15em]"
         />
         ) → <strong>External Agents</strong> and click{' '}
-        <strong>Add agent</strong>. The editor separates regular ACP agents from
-        Agent Teams:
+        <strong>Add agent</strong>. Choose a detected ACP preset or switch to
+        manual setup:
       </P>
       <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
         <li>
@@ -66,10 +66,6 @@ export default function ExternalAgents() {
           </DocLink>{' '}
           for the full list of supported agents and flags.
         </li>
-        <li>
-          <strong>Agent Team</strong> — launch a prepared Agent Team from its
-          directory and optionally override its harness.
-        </li>
       </ul>
       <P>
         Fill in <strong>Working directory</strong> (the project root the agent
@@ -79,13 +75,19 @@ export default function ExternalAgents() {
         every chat surface — no restart, no terminal step.
       </P>
       <Callout tone="info">
+        Agent Teams are managed separately under Settings → Agent Teams, where
+        Huabu discovers packages, collects required configuration, prepares
+        their workspaces, and publishes ready Profiles to the same chat
+        selector.
+      </Callout>
+      <Callout tone="info">
         If no supported preset appears in the <strong>Agent</strong> menu,
         install one first — for example{' '}
         <Code>npm install -g @github/copilot</Code>,{' '}
         <Code>npm install -g @agentclientprotocol/claude-agent-acp</Code>,{' '}
         <Code>npm install -g @google/gemini-cli</Code>, or{' '}
-        <Code>npm install -g @agentclientprotocol/codex-acp</Code> — then
-        re-open the editor. Detection re-runs every time Settings is opened.
+        <Code>npm install -g @agentclientprotocol/codex-acp</Code> — then reload
+        Huabu and re-open the editor.
       </Callout>
 
       <H2>Using a profile in chat</H2>

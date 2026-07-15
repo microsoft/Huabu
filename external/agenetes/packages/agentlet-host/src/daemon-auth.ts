@@ -1,5 +1,5 @@
 /**
- * Agentlet authentication for the embedded agentlet server.
+ * Agentlet authentication for the embedded Gateway.
  *
  * One Agenetes host manages exactly one agentlet (forked as a child of
  * the server process — see {@link ./daemon-supervisor.ts}). The auth
@@ -47,12 +47,19 @@ import type {
  */
 class AcpDaemonAuth {
   private token: string | null = null;
+  private agentletId: string | null = null;
 
   /**
    * Set the active token. Called once by `mountAgenetes` with the
    * host-injected `connectionToken`.
    */
   setDaemonToken(token: string): void {
+    this.token = token;
+  }
+
+  /** Configure the identity and token accepted for the supervised daemon. */
+  configure(agentletId: string, token: string): void {
+    this.agentletId = agentletId;
     this.token = token;
   }
 
@@ -100,9 +107,18 @@ class AcpDaemonAuth {
     return { metadata: { source: 'daemon' } };
   }
 
+  /** Validate the Gateway identity/token authentication port. */
+  validateAgentlet(agentletId: string, token: string): AuthResult {
+    if (this.agentletId && agentletId !== this.agentletId) {
+      throw new Error('Invalid supervised agentlet identity');
+    }
+    return this.validate(token, {} as AgentletHelloParams);
+  }
+
   /** Test/teardown helper — drops the in-memory token. */
   close(): void {
     this.token = null;
+    this.agentletId = null;
   }
 }
 

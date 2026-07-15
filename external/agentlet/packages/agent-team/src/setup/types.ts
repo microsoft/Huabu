@@ -10,6 +10,28 @@ export interface CopyEntry {
   to: string;
 }
 
+/** One host-configurable environment field declared by an Agent Team. */
+export interface AgentTeamEnvField {
+  name: string;
+  description: string;
+  required: boolean;
+  secret: boolean;
+  /** Optional non-secret default. Secret fields must never declare defaults. */
+  default?: string;
+}
+
+/** One CLI package installed during setup. */
+export interface CliToolRequirement {
+  /** Package identifier understood by the selected installer. */
+  package: string;
+  /** Installation backend. Only npm is currently supported. */
+  installer: 'npm';
+  /** Install into this deployment workspace or the agentlet-managed shared store. */
+  scope: 'workspace' | 'shared';
+  /** Commands that must exist after installation. */
+  executables: string[];
+}
+
 /** Parsed agentlet.yaml manifest. */
 export interface AgentTeamManifest {
   schema: string;
@@ -18,12 +40,14 @@ export interface AgentTeamManifest {
   command: Record<string, string>;
   /** Declarative requirements to materialize in each workspace. */
   require?: {
-    /** Harness-agnostic CLI tools to install via npm. */
-    'cli-tools'?: string[];
+    /** Harness-agnostic CLI tools to install and validate. */
+    'cli-tools'?: CliToolRequirement[];
     /** Canonical prompt files relative to the package root. */
     prompts?: string[];
     /** Skill paths to install via `npx skills add`. */
     skills?: string[];
+    /** Ordered host-configurable environment schema. */
+    env?: AgentTeamEnvField[];
     /**
      * Plain file/directory copies from the package root into each
      * workspace, e.g. helper scripts the agent invokes at runtime.
@@ -67,8 +91,31 @@ export interface SetupLogger {
   success(msg: string): void;
 }
 
-/**
- * Callbacks that per-package agent-setup.mjs can provide.
+export type ManagedSetupPhase =
+  | 'validating_manifest'
+  | 'preparing_workspace'
+  | 'installing_tools'
+  | 'installing_skills'
+  | 'placing_prompt'
+  | 'copying_files'
+  | 'running_custom_setup';
+
+export interface ManagedSetupProgress {
+  phase: ManagedSetupPhase;
+  status: 'started' | 'completed';
+  message: string;
+}
+
+export interface ManagedSetupOptions {
+  packageDir: string;
+  harness: string;
+  workingDirPath: string;
+  log: SetupLogger;
+  signal?: AbortSignal;
+  onProgress?(progress: ManagedSetupProgress): void;
+}
+
+/** Callbacks that per-package agent-setup.mjs can provide.
  * Each callback is invoked once per harness being processed.
  *
  * Signature: `(harness, workspaceDir, ctx)`

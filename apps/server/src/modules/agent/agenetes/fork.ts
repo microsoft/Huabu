@@ -1,3 +1,5 @@
+import { getSupervisedAgentletId } from '@agenetes/agentlet-host';
+
 import { canvasAcpNamespace } from '../../storage/paths.js';
 import { buildReachbackEnv } from '../acp/reachback-env.js';
 
@@ -11,9 +13,18 @@ export function buildForkTargetSpec(
 ): AgenetesWorkloadSpec {
   const namespace = canvasAcpNamespace(canvasId);
   if ('binding' in source) {
+    if ('profile' in source) {
+      return {
+        ...source,
+        threadId,
+        namespace,
+        env: buildReachbackEnv(threadId, canvasId),
+      };
+    }
     return {
       ...source,
       threadId,
+      agentletId: source.agentletId ?? getSupervisedAgentletId(),
       namespace,
       env: buildReachbackEnv(threadId, canvasId),
     };

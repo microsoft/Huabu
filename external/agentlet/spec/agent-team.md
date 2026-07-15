@@ -23,6 +23,8 @@ The key design principle is to separate:
 Setup is never hidden inside the first spawn. The user explicitly runs setup,
 and the daemon only launches from already-prepared workspaces.
 
+Managed hosts may invoke the same pipeline through the daemon's `agent-team/setup` control operation. Managed setup requires an explicit absolute deployment workspace, runs in an isolated child process, emits structured progress, and can be cancelled without terminating the daemon. The runner clears its readiness marker before materialization and atomically writes a new marker only after every setup phase succeeds, so validation cannot mistake a partial or cancelled workspace for a ready deployment.
+
 ## 2. Lifecycle
 
 ```text
@@ -102,11 +104,25 @@ command:
 
 require:
   cli-tools:
-    - hackmd-cli
+    - package: "@hackmd/hackmd-cli"
+      installer: npm
+      scope: shared
+      executables:
+        - hackmd
   prompts:
     - system_prompt.md
   skills:
     - ./skills/huabu-read
+  env:
+    - name: HACKMD_API_TOKEN
+      description: API token used to publish documents
+      required: true
+      secret: true
+    - name: HACKMD_API_URL
+      description: HackMD API base URL
+      required: false
+      secret: false
+      default: https://api.hackmd.io/v1
   copies:
     - from: deepv.mjs
       to: deepv.mjs
@@ -120,8 +136,21 @@ require:
 | `name` | `string` | yes | Stable package name. |
 | `description` | `string` | yes | Human-readable summary. |
 | `command` | `Record<string, string>` | yes | Command used to launch the agent process over ACP stdio. The keys implicitly define the supported harnesses. |
-| `require` | `{ cli-tools?: string[]; prompts?: string[]; skills?: string[]; copies?: { from: string; to: string }[] }` | no | Declarative setup requirements: npm CLI tools, prompt files, skills, and plain file/directory copies to materialize in each workspace. |
+| `require` | `{ cli-tools?: CliTool[]; prompts?: string[]; skills?: string[]; env?: EnvField[]; copies?: { from: string; to: string }[] }` | no | Declarative setup and runtime requirements: CLI packages, prompt files, skills, ordered environment fields, and plain file/directory copies. |
 | `onInstall` | `string` | no | Path to a custom setup script (relative to package root). Dynamically imported after the declarative pipeline. Must export a default async function. |
+
+Each `require.env` entry contains `name`, `description`, `required`, and `secret`. A non-secret entry may also declare a string `default`; secret entries cannot declare defaults.
+
+Each `require.cli-tools` entry contains:
+
+| Field | Type | Required | Meaning |
+| --- | --- | ---: | --- |
+| `package` | `string` | yes | Package identifier passed to the installer. |
+| `installer` | `"npm"` | yes | Installation backend. The current schema supports only npm; other installers require an explicit future protocol extension. |
+| `scope` | `"workspace" \| "shared"` | yes | `workspace` installs into one deployment workspace; `shared` installs once into agentlet-managed storage and is reusable across packages and deployments on that host. |
+| `executables` | `string[]` | yes | Non-empty list of commands that setup and validation require the installed package to expose. |
+
+`executables` uses installer-independent command names rather than npm's `bin` terminology. For example, the npm package `@hackmd/hackmd-cli` exposes the `hackmd` executable.
 
 ### 4.3 `command`
 
@@ -138,7 +167,7 @@ The daemon reads this field at spawn time to determine what process to launch.
 
 The `@agentlet/agent-team` CLI processes these manifest fields in order:
 
-1. **`require.cli-tools`** — installs npm packages in the workspace (`npm install <pkg>`)
+1. **`require.cli-tools`** — checks each package receipt and required executable, then installs missing npm tools into either the deployment workspace or the shared agentlet tools store
 2. **`require.skills`** — installs skills via `npx skills add <path> --agent <agent>`,
    using the harness registry's `skillsAgent` mapping (e.g., `claude` →
    `claude-code`, `copilot` → `github-copilot`)
@@ -162,10 +191,11 @@ best-effort during setup: the CLI still installs `require.cli-tools`, copies
 `require.copies`, and runs `onInstall`, but skips skills installation and
 prompt placement because those need harness-specific registry entries.
 
-Most agent teams need only `require.cli-tools`, `require.skills`,
-`require.prompts`, and `require.copies`. The `onInstall` script is for truly
-custom logic beyond what the declarative fields cover (generating config files,
-fetching external data, etc.).
+For `scope: workspace`, npm packages and receipts live in the deployment workspace. For `scope: shared`, they live under `~/.agentlet/tools/npm` by default; operators may set `AGENTLET_SHARED_NPM_TOOLS_DIR` to an absolute alternative. Shared installation is protected by an inter-process lock so concurrent deployment setup does not mutate the same npm prefix simultaneously.
+
+Setup skips installation only when the stored receipt exactly matches the declared package and executable list and every executable exists. A successful npm process that does not expose all declared executables fails setup. Both workspace and shared `.bin` directories are prepended to the spawned agent's `PATH`.
+
+Most agent teams need only `require.cli-tools`, `require.skills`, `require.prompts`, and `require.copies`. The `onInstall` script is for truly custom logic beyond what the declarative fields cover (generating config files, fetching external data, etc.).
 
 ### 4.5 `onInstall` Script Contract
 
@@ -259,7 +289,7 @@ covers most use cases.
 
 - Node-focused and reusable
 - No hardwiring to CLI-only output or daemon lifecycle internals
-- Should not import from `@agentlet/server` or `@agentlet/local`
+- Should not import the daemon CLI or a host-specific Gateway implementation
 
 ## 6. Harness-Specific Mappings
 
@@ -309,27 +339,30 @@ In addition to the existing `SessionSpec { command, cwd, env, ... }`, there is
 an Agent Team variant:
 
 ```text
-{ agent_dir, harness }
+{ manifestPath, workingDirPath, harness }
 ```
 
 This is represented as a nested field on `SessionSpec`:
 
 ```ts
-agentTeam?: { agentDir: string; harness?: string }
+agentTeam?: {
+  manifestPath: string
+  workingDirPath: string
+  harness: string
+}
 ```
 
 ### 8.2 Daemon behavior on Agent Team spawn
 
-When the daemon receives `{ agent_dir, harness }`:
+When the daemon receives `{ manifestPath, workingDirPath, harness }`:
 
-1. **Read** `agentlet.yaml` from `agent_dir`
-2. **Validate** that `workspaces/<harness|default>/` exists (i.e., setup has
-   been done)
-3. **Resolve** `command` from the manifest for the chosen harness
-4. **Derive** `cwd = agent_dir/workspaces/<harness|default>/`
-5. **Load** `.env` from `agent_dir` if present
-6. **Spawn** the resolved command — from here on, identical to any other ACP
-   session
+1. **Read** the selected `manifestPath`.
+2. **Validate** that `workingDirPath` exists and remains prepared.
+3. **Resolve** `command` from the manifest for the chosen harness.
+4. **Use** `workingDirPath` as `cwd`.
+5. **Load** `.env` from the manifest directory if present.
+6. **Prepend** the deployment workspace and agentlet-shared npm `.bin` directories to `PATH`
+7. **Spawn** the resolved command — from here on, identical to any other ACP session
 
 The daemon does **not**:
 
@@ -356,5 +389,5 @@ internally. The host only needs to know:
 - **callback API**: `(harness, workspaceDir, ctx)` where `ctx = { packageDir, manifest, harness, workspaceDir, log }`
 - **package name**: `@agentlet/agent-team`
 - **setup entry point**: `@agentlet/agent-team` CLI is the primary entry point; per-package `agent-setup.mjs` is optional
-- **declarative setup**: `require.cli-tools`, `require.skills`, `require.prompts`, `require.copies` in manifest; `onInstall` for custom logic
-- **SessionSpec variant**: nested `agentTeam?: { agentDir, harness? }` field on existing `SessionSpec`
+- **declarative setup**: structured npm requirements in `require.cli-tools`, plus `require.skills`, `require.prompts`, and `require.copies`; `onInstall` remains available for custom logic
+- **SessionSpec variant**: nested `agentTeam?: { manifestPath, workingDirPath, harness }` field on existing `SessionSpec`; the legacy `{ agentDir, harness? }` variant remains readable for existing durable workloads

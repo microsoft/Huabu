@@ -24,7 +24,9 @@ import {
   ZAcpSessionConfigOption,
   ZAcpSessionMode,
 } from './acp-tool.js';
+import { agentProfileSchema } from './agent-profile.js';
 
+import type { AgentProfileView } from './agent-profile.js';
 import type {
   AcpCost,
   AcpModelInfo,
@@ -99,42 +101,14 @@ export type AcpDaemonStatus = AcpAgentletStatus;
 
 /** Response body for `GET /api/acp/profiles`. */
 export interface AcpProfilesListResponse {
-  profiles: AcpAgentProfile[];
+  profiles: AgentProfileView[];
+  selectableProfileIds: string[];
+  legacyProfiles: AcpAgentProfile[];
   agentlet: AcpAgentletStatus;
 }
 
-/** Request body for `POST /api/acp/profiles`. */
-export interface AcpProfileCreateRequest {
-  /** Optional — server fills in a sensible default when omitted. */
-  displayName?: string;
-  cliId: string;
-  /** Required for direct profiles; absent for agent-team profiles. */
-  command?: string;
-  /** Required for direct profiles; absent for agent-team profiles. */
-  cwd?: string;
-  /** Default true. */
-  autoRestart?: boolean;
-  /** Agent Team reference. Required when cliId is 'agent-team'. */
-  agentTeam?: {
-    agentDir: string;
-    harness?: string;
-  };
-}
-
-/** Request body for `PATCH /api/acp/profiles/:id`. All fields optional. */
-export interface AcpProfileUpdateRequest {
-  displayName?: string;
-  command?: string;
-  cwd?: string;
-  autoRestart?: boolean;
-  agentTeam?: {
-    agentDir: string;
-    harness?: string;
-  };
-}
-
 /** Response body for `POST` / `PATCH` /api/acp/profiles[/:id]. */
-export type AcpProfileMutationResponse = AcpAgentProfile;
+export type AcpProfileMutationResponse = AgentProfileView;
 
 /** Response body for `GET /api/acp/agentlet`. */
 export type AcpAgentletStatusResponse = AcpAgentletStatus;
@@ -320,6 +294,12 @@ export interface EnsureAcpSessionResponse {
   sessionMeta: AcpSessionMetaSnapshot;
 }
 
+/** Query for `GET /api/acp/threads/:threadId/commands`. */
+export interface AcpThreadCommandsQuery {
+  /** Canvas containing the persisted workload placement. */
+  canvasId?: string;
+}
+
 /** Response body for `GET /api/acp/threads/:threadId/commands`. */
 export interface AcpThreadCommandsResponse {
   sessionId: string;
@@ -367,6 +347,7 @@ export interface AcpThreadCachedMetaResponse {
  *   • `profile_missing` — bound profile no longer exists.
  *   • `bridge_not_mounted` — embedded agentlet bridge still booting.
  *   • `worker_not_ready` — agentlet daemon worker never came online.
+ *   • `placement_unavailable` — the explicitly targeted agentlet is offline.
  *   • `session_resume_unavailable` — persisted native session is gone.
  *   • `spawn_failed` — daemon rejected the spawn RPC (bad recipe).
  *   • `connect_timeout` — agent process started but never opened WS
@@ -378,6 +359,7 @@ export type AcpEnsureErrorCode =
   | 'profile_missing'
   | 'bridge_not_mounted'
   | 'worker_not_ready'
+  | 'placement_unavailable'
   | 'session_resume_unavailable'
   | 'spawn_failed'
   | 'connect_timeout'
@@ -598,6 +580,11 @@ export const ensureAcpSessionResponseSchema = z.object({
   sessionMeta: acpSessionMetaSnapshotSchema,
 }) satisfies z.ZodType<EnsureAcpSessionResponse>;
 
+/** Schema mirror of {@link AcpThreadCommandsQuery}. */
+export const acpThreadCommandsQuerySchema = z.object({
+  canvasId: z.string().min(1).optional(),
+}) satisfies z.ZodType<AcpThreadCommandsQuery>;
+
 /** Schema mirror of {@link AcpThreadCommandsResponse}. */
 export const acpThreadCommandsResponseSchema = z.object({
   sessionId: z.string().min(1),
@@ -698,30 +685,13 @@ export const acpDaemonStatusSchema = acpAgentletStatusSchema;
 
 /** Schema mirror of {@link AcpProfilesListResponse}. */
 export const acpProfilesListResponseSchema = z.object({
-  profiles: z.array(acpAgentProfileSchema),
+  profiles: z.array(agentProfileSchema),
+  selectableProfileIds: z.array(z.string().min(1)),
+  legacyProfiles: z.array(acpAgentProfileSchema),
   agentlet: acpAgentletStatusSchema,
 }) satisfies z.ZodType<AcpProfilesListResponse>;
 
-/** Schema mirror of {@link AcpProfileCreateRequest}. */
-export const acpProfileCreateRequestSchema = z.object({
-  displayName: z.string().min(1).optional(),
-  cliId: z.string().min(1),
-  command: z.string().min(1).optional(),
-  cwd: z.string().min(1).optional(),
-  autoRestart: z.boolean().optional(),
-  agentTeam: agentTeamFieldSchema.optional(),
-}) satisfies z.ZodType<AcpProfileCreateRequest>;
-
-/** Schema mirror of {@link AcpProfileUpdateRequest}. */
-export const acpProfileUpdateRequestSchema = z.object({
-  displayName: z.string().min(1).optional(),
-  command: z.string().min(1).optional(),
-  cwd: z.string().min(1).optional(),
-  autoRestart: z.boolean().optional(),
-  agentTeam: agentTeamFieldSchema.optional(),
-}) satisfies z.ZodType<AcpProfileUpdateRequest>;
-
 // {@link AcpProfileMutationResponse}, {@link AcpAgentletStatusResponse} and
 // {@link AcpAgentletRestartResponse} are type aliases; reuse
-// `acpAgentProfileSchema` / `acpAgentletStatusSchema` directly
+// `agentProfileSchema` / `acpAgentletStatusSchema` directly
 // at the route boundary.

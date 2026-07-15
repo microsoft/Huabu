@@ -24,9 +24,10 @@ import { Button } from '../../Common/Button';
 import { cn } from '../../Common/cn';
 
 import type {
-  AcpAgentProfile,
   AgentBinding,
   AgentMode,
+  AgentProfileView,
+  AgentTeamManifestProfileView,
 } from '@sediment/shared';
 
 /** A picked (mode, binding) pair emitted by either agent menu. */
@@ -44,6 +45,12 @@ export function bindingsEqual(a: AgentBinding, b: AgentBinding): boolean {
     return a.profileId === b.profileId;
   }
   return false;
+}
+
+function isManifestProfile(
+  profile: AgentProfileView,
+): profile is AgentTeamManifestProfileView {
+  return 'preparation' in profile;
 }
 
 interface AgentMenuRowProps {
@@ -97,7 +104,7 @@ interface AgentMenuOptionsProps {
   heading: string;
   currentBinding: AgentBinding;
   currentMode: AgentMode;
-  profiles: AcpAgentProfile[];
+  profiles: AgentProfileView[];
   /** Grey out every row (e.g. mid-stream) without closing the menu. */
   busy?: boolean;
   /** Tooltip applied to whichever row matches the current binding. */
@@ -158,7 +165,44 @@ export function AgentMenuOptions({
           />
         );
       })}
-      {profiles.length > 0 && (
+      {profiles.some(
+        (profile) => profile.launch.kind === 'agent-team-manifest',
+      ) && (
+        <div
+          role="presentation"
+          className="text-fg-muted mt-1 flex items-center gap-2 px-3 pt-1 pb-0.5 text-[10px] tracking-wider uppercase select-none"
+        >
+          <span className="bg-edge-default h-px flex-1" />
+          <span>{t('chat.agentTeams')}</span>
+          <span className="bg-edge-default h-px flex-1" />
+        </div>
+      )}
+      {profiles
+        .filter(
+          (profile) =>
+            isManifestProfile(profile) &&
+            profile.preparation.status === 'ready',
+        )
+        .map((profile) => {
+          const binding: AgentBinding = {
+            kind: 'external',
+            alias: profile.alias,
+            profileId: profile.id,
+          };
+          const isCurrent = bindingsEqual(currentBinding, binding);
+          return (
+            <AgentMenuRow
+              key={`profile:${profile.id}`}
+              icon={<Route size={14} />}
+              label={profile.alias}
+              current={isCurrent}
+              disabled={busy}
+              title={isCurrent ? currentRowTitle : undefined}
+              onClick={() => onSelect({ mode: currentMode, binding })}
+            />
+          );
+        })}
+      {profiles.some((profile) => profile.launch.kind === 'acp-command') && (
         <div
           role="presentation"
           className="text-fg-muted mt-1 flex items-center gap-2 px-3 pt-1 pb-0.5 text-[10px] tracking-wider uppercase select-none"
@@ -168,25 +212,27 @@ export function AgentMenuOptions({
           <span className="bg-edge-default h-px flex-1" />
         </div>
       )}
-      {profiles.map((profile) => {
-        const binding: AgentBinding = {
-          kind: 'external',
-          alias: profile.displayName,
-          profileId: profile.id,
-        };
-        const isCurrent = bindingsEqual(currentBinding, binding);
-        return (
-          <AgentMenuRow
-            key={`profile:${profile.id}`}
-            icon={<Route size={14} />}
-            label={profile.displayName}
-            current={isCurrent}
-            disabled={busy}
-            title={isCurrent ? currentRowTitle : undefined}
-            onClick={() => onSelect({ mode: currentMode, binding })}
-          />
-        );
-      })}
+      {profiles
+        .filter((profile) => profile.launch.kind === 'acp-command')
+        .map((profile) => {
+          const binding: AgentBinding = {
+            kind: 'external',
+            alias: profile.alias,
+            profileId: profile.id,
+          };
+          const isCurrent = bindingsEqual(currentBinding, binding);
+          return (
+            <AgentMenuRow
+              key={`profile:${profile.id}`}
+              icon={<Route size={14} />}
+              label={profile.alias}
+              current={isCurrent}
+              disabled={busy}
+              title={isCurrent ? currentRowTitle : undefined}
+              onClick={() => onSelect({ mode: currentMode, binding })}
+            />
+          );
+        })}
       {onAddAgent && (
         <>
           <div
@@ -223,9 +269,7 @@ export function useAddAgentEditor(
   onRefreshProfiles?: () => void | Promise<void>,
 ): { openEditor: () => void; editor: ReactNode } {
   const [editorOpen, setEditorOpen] = useState(false);
-  // CLI detection is cheap (single cached fetch). Done eagerly so the
-  // editor modal opens instantly even on a cold mount.
-  const { detectedClis, loaded } = useDetectedClis();
+  const { detectedClis, loaded } = useDetectedClis(editorOpen);
 
   const editor = onRefreshProfiles ? (
     <ProfileEditorModal

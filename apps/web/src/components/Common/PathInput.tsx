@@ -29,6 +29,7 @@ export interface PathInputProps {
    * instead (used by full-page flows where no toast host is mounted).
    */
   onError?: (message: string) => void;
+  ariaLabel?: string;
   placeholder?: string;
   disabled?: boolean;
   /** Controls button size, icon size and default input padding. */
@@ -37,6 +38,8 @@ export interface PathInputProps {
   mono?: boolean;
   /** Tooltip on the folder-picker button. */
   pickTitle?: string;
+  /** Whether this field may use the local native picker. Defaults to true. */
+  pickerEnabled?: boolean;
   /** Extra classes merged onto the input. Later classes win (tailwind-merge). */
   inputClassName?: string;
   /** Extra classes merged onto the flex row wrapper. */
@@ -58,11 +61,13 @@ export function PathInput({
   onChange,
   onPicked,
   onError,
+  ariaLabel,
   placeholder,
   disabled,
   size = 'md',
   mono = false,
   pickTitle = 'Browse for a folder',
+  pickerEnabled = true,
   inputClassName,
   className,
   onKeyDown,
@@ -103,6 +108,7 @@ export function PathInput({
     <div className={cn('flex items-stretch gap-1.5', className)}>
       <Input
         type="text"
+        aria-label={ariaLabel}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={onKeyDown}
@@ -116,7 +122,7 @@ export function PathInput({
           inputClassName,
         )}
       />
-      {folderPickerSupported && (
+      {pickerEnabled && folderPickerSupported && (
         <Button
           variant="outline"
           tone="neutral"

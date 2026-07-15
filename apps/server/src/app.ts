@@ -16,15 +16,22 @@ import {
   acpAgentletRoutes,
   acpProfilesRoutes,
   acpThreadsRoutes,
+  getSupervisedAgentletId,
   installAcpProfileCachePort,
   mountAgenetes,
   resolveDaemonEntry,
 } from './modules/agent/acp/index.js';
+import { buildLegacyCommandProfiles } from './modules/agent/acp/legacy-profile-migration.js';
+import {
+  listProfiles as listLegacyAcpProfiles,
+  removeProfiles as removeLegacyAcpProfiles,
+} from './modules/agent/acp/profile-store.js';
 import agentRoutes from './modules/agent/agent.route.js';
 import intentRoutes from './modules/agent/intent.route.js';
 import llmRoutes from './modules/agent/llm.route.js';
 import { registerOpCounterHook } from './modules/agent/memory/op-counter-hook.js';
 import skillsRoutes from './modules/agent/skills.route.js';
+import agentTeamRoutes from './modules/agent-team/agent-team.route.js';
 import artifactRoute from './modules/artifact/artifact.route.js';
 import canvasRoutes from './modules/canvas/canvas.route.js';
 import externalNoteRoutes from './modules/canvas/external.route.js';
@@ -43,6 +50,7 @@ import {
 } from './modules/workspace.js';
 import workspaceRoutes from './modules/workspace.route.js';
 import { preloadSkills } from './prompt/index.js';
+import { getPersistedSecret, setSecrets } from './security/secret-store.js';
 import { MAX_UPLOAD_BYTES } from './upload-limits.js';
 import { logger } from './utils/logger.js';
 
@@ -226,15 +234,15 @@ app.register(integrationsRoutes, { prefix: '/api/integrations' });
 app.register(skillsRoutes, { prefix: '/api/skills' });
 app.register(workspaceRoutes, { prefix: '/api/workspace' });
 app.register(rfsRoutes, { prefix: '/api/rfs' });
+app.register(agentTeamRoutes, { prefix: '/api/agent-team' });
 
 // ── External agent (ACP) transport host ───────────────────────────────
 // Mount the Agenetes agentlet transport host (`@agenetes/agentlet-host`).
-// It embeds @agentlet/server, forks & supervises the agentlet daemon,
-// and authenticates connections against the host-injected connection
-// token. The daemon owns the agent worker pool; the server tells it
-// which agent CLI to spawn (per user profile). The connection token
-// never crosses the HTTP boundary — it lives only in-process and on the
-// loopback WS.
+// It mounts the stateless Gateway, forks & supervises the agentlet daemon,
+// and authenticates connections against the host-injected connection token.
+// The daemon owns the agent worker pool; the server tells it which agent CLI
+// to spawn (per user profile). The connection token never crosses the HTTP
+// boundary — it lives only in-process and on the loopback WS.
 //
 // L1 owns all deployment-layout knowledge and injects it downward:
 // the global connection token, the data directory, and the resolved
@@ -261,6 +269,19 @@ mountAgenetes(app, {
   connectionToken: getConnectionToken(),
   dataDir: getDataDir(),
   daemonEntryPath: resolveDaemonEntry() ?? '',
+  agentTeam: {
+    storageDir: join(getDataDir(), 'agent-team'),
+    secretStore: {
+      get: getPersistedSecret,
+      setMany: setSecrets,
+    },
+    legacyCommandProfiles: buildLegacyCommandProfiles(
+      listLegacyAcpProfiles(),
+      getSupervisedAgentletId(),
+      process.cwd(),
+    ),
+    onLegacyProfilesMigrated: removeLegacyAcpProfiles,
+  },
 });
 // Capture the bound TCP port for L1-owned reachback (RFS): the
 // canvas-scoped `HUABU_RFS_URL` base is built from this. RFS is
@@ -279,7 +300,7 @@ app.register(acpAgentletRoutes, { prefix: '/api/acp' });
 app.register(acpAgentCliRoutes, { prefix: '/api/acp' });
 app.register(acpThreadsRoutes, { prefix: '/api/acp' });
 app.log.info(
-  '[acp] agentlet server mounted — embedded agentlet will start on server ready',
+  '[acp] agentlet Gateway mounted — embedded agentlet will start on server ready',
 );
 
 // Memory op-counter: bump the per-canvas counter on every successful
