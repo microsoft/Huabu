@@ -85,6 +85,20 @@ export interface ChatEnvelope {
   };
 }
 
+/**
+ * Whether this turn carries any image content the model must be able to
+ * accept — off-canvas uploads, selection image attachments, or composite
+ * snapshots. Used by the vision guard when routing a workload onto the
+ * Utility tier (see `skill-model-routing.ts` / `resolveForRole`).
+ */
+export function envelopeHasImage(envelope: ChatEnvelope): boolean {
+  return (
+    envelope.user.attachments.some((a) => a.type === 'image') ||
+    envelope.focus.selection.imageAttachments.length > 0 ||
+    envelope.focus.selection.snapshotAttachments.length > 0
+  );
+}
+
 /** Inputs needed to assemble one chat turn's envelope. */
 export interface ChatEnvelopeParams {
   /** Raw user prompt text. */

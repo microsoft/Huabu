@@ -39,6 +39,16 @@ export interface ModelRoleInfo {
  */
 export const MODEL_ROLES = {
   chat: { defaultTier: 'chat', vision: true, label: 'Chat agent' },
+  memory: {
+    defaultTier: 'utility',
+    vision: false,
+    label: 'Memory curation',
+  },
+  skill: {
+    defaultTier: 'utility',
+    vision: true,
+    label: 'Skill authoring',
+  },
   intent: { defaultTier: 'utility', vision: true, label: 'Intent suggestions' },
   imageLabel: {
     defaultTier: 'utility',

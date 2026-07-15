@@ -33,12 +33,12 @@ export default function ModelsAndCapabilities() {
         rows={[
           [
             <strong>Chat Model</strong>,
-            'Conversations, Agent work, Memory curation, and Skills.',
+            'Conversations, Agent work, and running Skills.',
             'Yes',
           ],
           [
             <strong>Utility Model</strong>,
-            'Lightweight labels, summaries, keywords, and intent suggestions.',
+            'Memory, Skill creation and updates, labels, summaries, keywords, and intent suggestions.',
             'No',
           ],
           [
@@ -53,8 +53,9 @@ export default function ModelsAndCapabilities() {
       <P>
         The Chat Model powers built-in Chat and Agent conversations. It reasons
         over your request, reads Space material, chooses tools, and plans Space
-        changes. Memory curation and Skill creation, updates, and runs also use
-        this model.
+        changes. Running a Skill to complete a task also uses this model. Chat
+        acts as the fallback when the Utility Model is not configured or cannot
+        process required image input.
       </P>
       <Callout tone="tip">
         Choose the most capable model you want to use for interactive work. It
@@ -65,14 +66,14 @@ export default function ModelsAndCapabilities() {
       <H2>Utility Model</H2>
       <P>
         The optional Utility Model handles frequent, lightweight background
-        work: intent suggestions, image and Frame labels, and content labels,
-        summaries, and keywords. A faster or less expensive model can reduce
-        latency and cost for these tasks.
+        work: Memory curation, Skill creation and updates, intent suggestions,
+        image and Frame labels, and content labels, summaries, and keywords. A
+        faster or less expensive model can reduce latency and cost for these
+        tasks.
       </P>
       <Callout tone="info">
         Leave Utility Model set to <strong>Follow chat model</strong> to use the
-        Chat Model for these tasks too. Memory and Skills do not currently use
-        the Utility Model.
+        Chat Model for these tasks too.
       </Callout>
 
       <H2>Image understanding</H2>

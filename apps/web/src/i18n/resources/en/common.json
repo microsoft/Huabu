@@ -77,7 +77,7 @@
     "huabuAgent": "Huabu Agent",
     "chatModel": "Chat Model",
     "utilityModel": "Utility Model",
-    "utilityModelDesc": "Model for lightweight background tasks (labeling, summaries, keywords). Pick a faster, cheaper model to save cost and latency.",
+    "utilityModelDesc": "Model for Memory, Skill creation and updates, and lightweight background tasks such as labeling, summaries, and keywords. Pick a faster, cheaper model to save cost and latency.",
     "followChatModel": "Follow chat model",
     "imageGeneration": "Image Generation",
     "provider": "Provider",

@@ -10,7 +10,9 @@
  * happen without leaking host singletons into the subtree package.
  */
 
-import { ensureApiKey, getLLMModel } from '../llm.js';
+import { MODEL_ROLES } from '@sediment/shared';
+
+import { ensureApiKeyForRole, getModelForRole } from '../llm.js';
 import { getSessionReadSet } from '../session-read-set.js';
 import { buildAgentToolsByNames } from '../tools/index.js';
 
@@ -25,11 +27,13 @@ import type {
 import type { Namespace, WorkloadType } from '@agenetes/protocol';
 import type { ToolExecutionMode } from '@earendil-works/pi-agent-core';
 import type { Message } from '@earendil-works/pi-ai';
-import type { NodeOrigin } from '@sediment/shared';
+import type { ModelRole, NodeOrigin } from '@sediment/shared';
 
 interface HuabuPiHostContext {
   readonly canvasId?: string;
   readonly origin?: NodeOrigin;
+  readonly modelRole?: ModelRole;
+  readonly hasImage?: boolean;
 }
 
 interface BuildHuabuPiWorkloadSpecOptions {
@@ -44,6 +48,8 @@ interface BuildHuabuPiWorkloadSpecOptions {
   readonly toolExecution?: ToolExecutionMode;
   readonly canvasId?: string;
   readonly origin?: NodeOrigin;
+  readonly modelRole?: ModelRole;
+  readonly hasImage?: boolean;
 }
 
 function getHuabuHostContext(
@@ -61,6 +67,11 @@ function getHuabuHostContext(
       obj.origin && typeof obj.origin === 'object'
         ? (obj.origin as NodeOrigin)
         : undefined,
+    modelRole:
+      typeof obj.modelRole === 'string' && obj.modelRole in MODEL_ROLES
+        ? (obj.modelRole as ModelRole)
+        : undefined,
+    hasImage: typeof obj.hasImage === 'boolean' ? obj.hasImage : undefined,
   };
 }
 
@@ -73,13 +84,19 @@ function assertHostActiveModel(ref: PiModelRef): void {
 }
 
 export const huabuPiDriverPorts = {
-  async resolveModel(ref) {
+  async resolveModel(ref, ctx) {
     assertHostActiveModel(ref);
-    return getLLMModel();
+    const host = getHuabuHostContext(ctx);
+    return getModelForRole(host.modelRole ?? 'chat', {
+      hasImage: host.hasImage,
+    });
   },
-  async getApiKey(ref) {
+  async getApiKey(ref, ctx) {
     assertHostActiveModel(ref);
-    return ensureApiKey();
+    const host = getHuabuHostContext(ctx);
+    return ensureApiKeyForRole(host.modelRole ?? 'chat', {
+      hasImage: host.hasImage,
+    });
   },
   async resolveTools(refs, ctx) {
     const unsupported = refs.filter(
@@ -131,6 +148,10 @@ export function buildHuabuPiWorkloadSpec(
       hostContext: {
         ...(options.canvasId ? { canvasId: options.canvasId } : {}),
         ...(options.origin ? { origin: options.origin } : {}),
+        ...(options.modelRole ? { modelRole: options.modelRole } : {}),
+        ...(options.hasImage !== undefined
+          ? { hasImage: options.hasImage }
+          : {}),
       },
     },
   };

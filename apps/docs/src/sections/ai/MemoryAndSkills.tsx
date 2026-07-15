@@ -52,9 +52,9 @@ export default function MemoryAndSkills() {
         you want Agent to preserve a successful repeatable workflow.
       </Callout>
       <Callout tone="info">
-        Memory curation and Skill creation, updates, and runs currently use the
-        Chat Model. The Utility Model is reserved for lightweight background
-        tasks such as labels, summaries, keywords, and intent suggestions.
+        Memory curation and Skill creation or updates use the Utility Model.
+        Running a Skill to complete a task uses the Chat Model. If Utility is
+        not configured, Huabu uses Chat for authoring too.
       </Callout>
 
       <H2>Two Memory tiers</H2>
