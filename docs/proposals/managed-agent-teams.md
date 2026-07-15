@@ -1,45 +1,37 @@
 # Managed Agent Teams
 
-> Redesign Agent Teams as a Huabu-managed experience so non-expert users do not need to operate agentlet or manually register an External Agent profile.
+> Redesign Agent Teams as a Huabu-managed experience and unify every non-internal agent behind one Agenetes Agent Profile model.
 >
-> Status: **In-Progress** · Last updated: 2026-07-14 · Tracks: [#253](https://github.com/hai-team/Sediment/issues/253)
+> Status: **In-Progress** · Last updated: 2026-07-15 · Tracks: [#253](https://github.com/hai-team/Sediment/issues/253)
 
 ---
 
 ## 1. Context
 
-The current Agent Team design treats an Agent Team as a special case of an External Agent. Before Huabu can use it, the user must run `agentlet agent-team setup`, ensure the package works outside Huabu, and then register it through an External Agent profile-like form.
+The original Agent Team design treated an Agent Team as a special case of an External Agent. A user had to run `agentlet agent-team setup`, verify the package outside Huabu, and then manually register it through the External Agent profile editor.
 
-User case studies found that this workflow has too many steps and exposes too many technical concepts, especially for non-expert users. This proposal redesigns the boundary so Huabu manages Agent Team discovery, configuration, preparation, and runtime access after the user downloads the package.
+User studies found that workflow too complex, especially for non-expert users. Huabu now manages Agent Team discovery, Configs, preparation, and profile creation after the user downloads an Agent Team collection.
+
+The first managed implementation added a separate Agent Team deployment registry while preserving the existing ACP profile store. That split prevents ready Agent Team profiles from appearing in Chat and duplicates identity, persistence, selection, and runtime concepts. This proposal replaces both stores with one Agenetes-owned Agent Profile registry.
 
 ## 2. Requirements
 
 ### R1 — Minimal work outside Huabu
 
-The user downloads an Agent Team collection root whose member directories follow the structure defined in R2. This is the only required action outside Huabu before adding the collection root.
-
-The first version only consumes collection roots that already exist on a selected agentlet daemon host's filesystem. Downloading, updating, and version-managing those collections remain user-owned operations outside Huabu.
-
-Huabu may bundle selected Agent Teams in the future so those teams can enter the user-visible pool without a separate download, but bundled discovery is not part of the current design scope.
+The only required action outside Huabu is downloading an Agent Team collection onto an agentlet daemon host. Huabu may bundle selected collections in the future, but bundled discovery, downloads, updates, and version management are outside the current scope.
 
 ### R2 — Root paths and member discovery
 
-The user adds Agent Team collection roots through the Huabu UI. Each root selects a currently connected agentlet daemon, shown to the user as a machine, and an absolute path in that daemon host's filesystem. The local agentlet daemon is selected by default. A native folder picker is available only for the local daemon; remote daemon roots use direct absolute-path input and are validated by `agent-team/scan`.
-
-The implemented machine catalog comes from connected daemon profiles exposed by the Agenetes Gateway. Connect, reconnect, and disconnect changes notify the Agent Team registry and publish a replacement Settings snapshot over SSE; the locally supervised daemon identity is supplied independently by the Huabu host rather than inferred by the Gateway.
-
-Huabu stores the roots as:
+The user adds Agent Team collection roots through the Agent Team Settings tab. Each root contains a stable `agentletId` and an absolute path on that daemon host. The locally supervised daemon is selected by default and supports a native folder picker; remote daemon roots use direct absolute-path input validated by daemon-side scan.
 
 ```typescript
-interface AgentTeamPath {
-  machine: string; // Stable agentletId
-  path: string; // Absolute path on the daemon host
+interface AgentTeamRoot {
+  agentletId: string;
+  path: string;
 }
-
-type AgentTeamPaths = AgentTeamPath[];
 ```
 
-For each root, Agent Team members are discovered at:
+Members are discovered at:
 
 ```text
 <root.path>/
@@ -47,64 +39,76 @@ For each root, Agent Team members are discovered at:
     agentlet.yaml
 ```
 
-The UI initiates discovery through Agenetes. Agenetes routes the request to the selected agentlet daemon, the daemon scans the corresponding absolute path, and the result returns to Huabu.
-
-An agentlet daemon's `agentletId` is its persistent, configurable machine name. The default machine name is the daemon host's OS hostname, but it must be unique among daemon connections to the same Agenetes host. Registration rejects a conflicting name and requires the operator to configure a different one.
-
-Traversing all configured roots produces `agent-team-members`. A member is identified by `(machine, manifestPath)`:
+A member is identified by `(agentletId, manifestPath)`. Its manifest `name` is descriptive and is not an identity.
 
 ```typescript
 interface AgentTeamMember {
-  machine: string;
-  manifestPath: string; // Absolute path to agentlet.yaml on the daemon host
-  name: string; // Descriptive name read from agentlet.yaml; not an identity
-}
-```
-
-Results that resolve to the same `(machine, manifestPath)` are merged into one member even when multiple roots discover them. Different members may use the same manifest `name`.
-
-Removing a collection root does not immediately delete member state. If the same `(machine, manifestPath)` remains discoverable through another root, the member is unchanged. If no configured root discovers it, the member, its Configs, and its deployments are retained with `member_missing` status; associated live handles are closed and calls are rejected until the member is discovered again or its deployments are explicitly deleted.
-
-The source package remains in place on the selected daemon host and is always addressed by its original `manifestPath`. Huabu and Agenetes do not copy the source package into managed storage; setup materializes only the deployment's resolved `workingDirPath`.
-
-Each member may have multiple runnable deployment profiles:
-
-```typescript
-interface AgentTeamDeployment {
-  id: string; // Stable internal identity
-  alias: string; // Globally unique, user-editable name
-  revision: number; // Changes when placement fields change
-  enabled: boolean;
-  machine: string;
+  agentletId: string;
   manifestPath: string;
-  workingDirPath: string;
-  harness: string;
-  setup: AgentTeamDeploymentSetup;
-  setupLog: AgentTeamSetupLogEntry[];
+  name: string;
+  status: 'active' | 'member-missing';
 }
 ```
 
-Configuration is stored separately from deployment profiles and shared by every deployment of the same member:
+Results that resolve to the same identity are merged even when multiple roots discover them. Removing a root retains member metadata and Configs so durable thread snapshots can continue resolving their member-level environment, but a missing member cannot create or prepare a new manifest-backed Profile and does not appear as available for new Chat bindings.
+
+The source package remains at its original daemon-host path. Huabu and Agenetes do not copy the package into managed storage; setup materializes only the selected Profile's `workingDirPath`.
+
+### R3 — One Agenetes Agent Profile model
+
+Every non-internal agent is represented by one Agenetes-owned Agent Profile. A Profile is a bind-time template, not a running process and not an authorization record for threads that already exist.
 
 ```typescript
-Configs[(machine, manifestPath)] = { key: value, ... };
+interface AgentProfileBase {
+  id: string;
+  alias: string;
+  agentletId: string;
+  workingDirPath: string;
+}
+
+type AgentProfile =
+  | (AgentProfileBase & {
+      launch: {
+        kind: 'agent-team-manifest';
+        manifestPath: string;
+        harness: string;
+      };
+      preparation: AgentTeamPreparation;
+      setupLog: AgentTeamSetupLogEntry[];
+    })
+  | (AgentProfileBase & {
+      launch: {
+        kind: 'acp-command';
+        command: string;
+      };
+      metadata?: {
+        cliId?: string;
+      };
+    });
 ```
 
-An alias selects one deployment profile for user-facing and API lookup, while the stable deployment ID is used by durable workload bindings. Alias uniqueness uses exact, case-sensitive comparison, so `Reviewer` and `reviewer` may coexist. Renaming an alias does not change deployment identity or revision; changing `harness` or `workingDirPath` changes placement and increments the revision. The same `(machine, manifestPath)` may appear in multiple deployments with different working directories or harnesses, but all of those deployments read the same member-level environment-variable configuration. Secret and non-secret values have different persistence and read-back behavior as defined in R3.
+`agentletId` is placement, `workingDirPath` is the process working directory, and `launch` describes how the ACP command is resolved. `agent-team-manifest` resolves command, requirements, package environment, and harness behavior from `agentlet.yaml`; `acp-command` launches the stored command directly.
 
-### R3 — Dedicated Settings experience
+Detected CLIs and custom commands are both `acp-command` Profiles. `metadata.cliId` supports editor presentation, icons, and host CLI redetection but does not participate in runtime resolution.
 
-Settings has a dedicated **Agent Team** tab rather than exposing Agent Teams as a special mode inside the External Agent profile editor.
+Profile IDs are globally unique and are the only identity used by Chat bindings, HTTP/A2A calls, and durable workloads. Aliases are display-only and may repeat; no runtime API resolves a Profile by alias.
 
-The tab groups settings by discovered member. Each member has an expandable block or equivalent grouped surface with package information and member-level Configs, followed by the member's deployment aliases.
+Profile runtime fields are immutable after creation. Changing `agentletId`, `workingDirPath`, or `launch` requires deleting the Profile and creating a new one. Alias and non-runtime metadata remain editable. The immutable runtime identity removes the need for a Profile revision.
 
-The implemented Settings surface supports root add/rescan/remove, local-only folder picking, red `(*)` markers on required Configs, secret replacement and clearing, deployment create/edit/delete with delete confirmation, labeled harness selection, enable/disable/retry actions, setup status and logs, and GET bootstrap followed by SSE replacement snapshots. The first deployment form is shown immediately so its harness selection is discoverable. Enable controls are disabled while required member Configs are incomplete, matching the backend state-machine gate.
+Profiles have no Enabled field. An `acp-command` Profile is available for new bindings immediately after creation. An `agent-team-manifest` Profile is available only when its member is active, required Configs are complete, and preparation is `ready`.
 
-The member-level Configs table is shared by every deployment whose profile references the same `(machine, manifestPath)`.
+Deleting a Profile prevents new bindings but does not stop or invalidate existing threads. Emergency revocation or termination of existing threads is a separate future thread/session operation.
 
-Required environment variables are declared structurally in the optional `require.env` field of `agentlet.yaml`. This is a backward-compatible addition to `agentlet-agent-schema-v1`; omitting the field means the member declares no user-configurable environment requirements.
+### R4 — Settings and preparation
 
-The first version uses an ordered list whose entries contain:
+The backend registry is unified, but Huabu retains two task-oriented Settings tabs:
+
+- **Agent Team** manages roots, members, member Configs, manifest-backed Profiles, and preparation.
+- **External Agent** manages command-backed Profiles and removes the legacy Agent Team option.
+
+The Agent Team tab groups manifest-backed Profiles beneath their discovered member. Member Configs are shared by every Profile that references the same `(agentletId, manifestPath)`.
+
+Required environment variables are declared structurally in `agentlet.yaml`:
 
 ```typescript
 interface AgentTeamEnvField {
@@ -112,56 +116,33 @@ interface AgentTeamEnvField {
   description: string;
   required: boolean;
   secret: boolean;
-  default?: string; // Allowed only when secret is false
+  default?: string;
 }
 ```
 
-Non-secret values are stored in ordinary Agent Team settings and are visible when the UI is reopened. Secret values are stored in Huabu's `SecretStore`; read APIs return only whether each secret is configured, and the UI allows the user to replace or clear it without receiving the existing plaintext.
+Non-secret overrides are stored in ordinary Agent Team state. Secret values remain in Huabu's `SecretStore`; read APIs expose only whether each secret is configured.
 
-Each deployment alias provides:
-
-1. An independent enable/disable toggle.
-2. A harness dropdown populated from the harnesses declared by the member manifest.
-3. A required `workingDirPath` whose initial UI value defaults to `<manifest-directory>/workspaces/<harness>/`.
-
-A deployment cannot be enabled while any member-level required environment variable is missing. The member Configs table identifies all missing required values.
-
-Enabling a deployment records the user's enabled intent and starts setup against the selected agentlet daemon after `workingDirPath` has been resolved. Setup emits structured progress events such as `{ phase, message, level }`, allowing the UI to show the current operation and an inspectable setup log.
-
-Deployment readiness is represented separately from enabled intent:
+Manifest-backed preparation uses explicit actions rather than an Enabled toggle:
 
 ```text
-disabled
-   │ enable
-   ▼
-setting_up ── success ──▶ ready
-   │
-   └──────── failure ───▶ error ── Retry setup ──▶ setting_up
+not-prepared ── Setup ──▶ setting-up ── success ──▶ ready
+                              │
+                              ├─ failure ──▶ error ── Retry ──▶ setting-up
+                              │
+                              └─ Cancel ───▶ not-prepared
 ```
 
-A setup failure leaves the deployment enabled with `setupStatus: "error"`. The UI exposes the failure information and a Retry action rather than silently disabling the deployment or retrying indefinitely.
+Setup cannot start while required member Configs are missing. Setup progress is persisted as a bounded structured log and projected to Settings over SSE. An interrupted setup becomes `error` with a structured `setup_interrupted` reason and requires explicit Retry.
 
-The first version does not resume setup operations across Huabu, Agenetes, daemon, or control-channel restarts. An interrupted operation becomes `error` with a structured `setup_interrupted` reason and requires explicit Retry.
+Profile deletion is rejected while setup or cancellation is active. Setup is never hidden inside first use or `AgentDriver.create(...)`.
 
-Turning off the enable toggle during `setting_up` immediately records disabled intent and asks the daemon to cancel the active setup operation. A successful cancellation returns the deployment to `disabled`; cancellation failures remain visible rather than allowing an unreported background operation.
+Before a new manifest-backed ACP session starts, the daemon validates that the prepared workspace remains usable. Validation never performs implicit repair. A failed validation returns a structured runtime error and makes the source Profile unavailable for new bindings until the user explicitly retries Setup. A durable thread whose Profile was deleted still reports its own validation or spawn failure without recreating Profile state.
 
-The implemented Agenetes state machine persists enabled intent, operation identity, setup status, structured errors, and a bounded phase log before and during daemon operations. Progress is matched by both machine and operation ID, so stale notifications are ignored and terminal progress that arrives before the setup or cancellation response is retained. Placement changes and deletion are rejected while setup or cancellation is active.
-
-The first-version `/api/agent-team/settings/*` read, mutation, and SSE routes are loopback-only because their redacted read model still exposes daemon filesystem paths and their mutations can write secrets or execute package-defined setup code. The Huabu adapter validates every request through shared Zod contracts and projects full redacted Settings snapshots; asynchronous registry changes publish replacement snapshots over SSE.
-
-Disabling a ready deployment immediately rejects new create and run calls and closes all live handles bound to that deployment. Durable threads are retained and may recover after the deployment is enabled and ready again, provided its placement revision has not changed.
-
-Deleting a deployment closes its live handles and removes its stable deployment ID and alias. Durable threads are retained but can no longer realize; access returns a structured `deployment_missing` error.
-
-The harness dropdown allows the user to select any harness declared by the manifest even when that harness is not currently installed on the selected daemon host. Missing harness executables are reported as explicit errors during deployment creation or runtime rather than blocking selection in Settings.
-
-`workingDirPath` is both the target directory prepared by setup and the process working directory. The UI derives its initial value from the selected member's `manifestPath` and harness:
+`workingDirPath` defaults to:
 
 ```text
 <manifest-directory>/workspaces/<harness>/
 ```
-
-The UI submits the complete `(machine, manifestPath, harness, workingDirPath)` tuple. Agenetes persists that complete value, and `agent-team/setup` and `agent-team/validate` require it; backend layers never represent an omitted working directory.
 
 At runtime, environment sources merge in this precedence order:
 
@@ -169,97 +150,123 @@ At runtime, environment sources merge in this precedence order:
 daemon process env < package .env < Huabu member Configs < Huabu runtime/reachback env
 ```
 
-Member Config values are delivered only at session spawn. The Agenetes Agent Team module reads current ordinary and secret values through its injected ports, merges them with host runtime/reachback values in memory, and sends the result as ephemeral `SessionSpec.env`. Setup cannot access these values, and they are never copied into the durable `WorkloadSpec`, package `.env`, or prepared workspace.
+Member Config values are delivered only at session spawn. Secrets are never copied into the durable workload snapshot, package `.env`, or prepared workspace.
 
-### R4 — Agenetes Agent Team driver
+### R5 — Runtime binding and realization
 
-Agenetes has a standard Agent Team driver built on the ACP driver. Agent Team discovery, deployment management, setup orchestration, readiness, and runtime realization belong to the Agenetes Agent Team control-plane module; Huabu provides the Settings UI and host-specific adapters such as secure credential storage and reachback environment construction.
-
-Agenetes defines the Agent Team registries and state transitions and owns the first-version file-backed persistence for ordinary Agent Team state. Huabu supplies a local absolute storage directory and an implementation of the secure credential port when mounting Agenetes. The Agenetes module does not import Huabu storage or security code.
-
-The implementation places this host-agnostic control plane in `@agenetes/agent-team`. Its registry persists roots, scan diagnostics, members, root-to-member provenance, deployments, and member-level non-secret Config overrides under the host-provided storage directory; a failed root scan preserves the last successful provenance instead of marking every previously discovered member missing. Secret Configs use stable opaque IDs through an injected managed-secret port, read models expose only configured state, and runtime-only resolution is the sole surface that returns secret plaintext inside Agenetes.
-
-`@agenetes/agentlet-host.mountAgenetes(...)` owns the composition boundary: after mounting one Agentlet Gateway, it internally supplies that Gateway as the registry's `AgentTeamControlPort`. Huabu supplies only the Agent Team storage directory and secret-store port and may obtain the mounted registry for HTTP projection; it never passes, selects, or coordinates a Gateway for Agent Team operations.
-
-### Agentlet control-plane consolidation
-
-Agent Team depends on the shipped [Agenetes Agentlet Gateway Consolidation](../archive/agenetes-agentlet-gateway-consolidation.md).
-
-That prerequisite retires standalone `agentlet-server`, moves the host-side relay into `@agenetes/agentlet-gateway`, makes Agenetes the sole owner of durable workload/session/event state, and leaves agentlet as the remotely deployable execution-plane daemon. This proposal consumes that boundary but does not own its migration.
-
-Setup is not performed inside `AgentDriver.create(...)` or hidden on the first user message. It is an explicit asynchronous consequence of enabling or retrying a deployment, as defined in R3.
-
-Before creating an ACP session, the Agent Team runtime asks the selected agentlet daemon to validate that the prepared workspace is still usable. Validation never performs an implicit setup. If the package or workspace has become invalid, session creation fails, the deployment leaves `ready`, and the user must explicitly run Retry setup.
-
-Agent Team workloads retain their own spec kind and are not lowered to an ACP spec by Huabu. The durable binding uses a stable deployment ID plus the placement revision expected when the thread was bound:
+Chat preserves its existing top-level distinction between internal and external bindings. Every non-internal selection uses the same Profile binding regardless of launch kind:
 
 ```typescript
-interface AgentTeamBinding {
-  deploymentId: string;
-  expectedDeploymentRevision: number;
+type AgentBinding =
+  | { kind: 'internal' }
+  | {
+      kind: 'external';
+      profileId: string;
+      alias: string;
+    };
+```
+
+When a thread first binds to an external Profile, Agenetes validates that the Profile is currently available and snapshots its runtime fields into the durable WorkloadSpec:
+
+```typescript
+interface ExternalProfileSnapshot {
+  profileId: string;
+  agentletId: string;
+  workingDirPath: string;
+  launch: AgentProfile['launch'];
 }
 ```
 
-On realization, the Agent Team module resolves the current deployment by ID. If its placement revision differs from the expected revision, realization fails with a structured `deployment_changed` result. Agent Team does not rebind an existing thread to the changed placement; the caller must create a new ThreadIdentity for the current deployment.
+The snapshot prevents Profile deletion or later display metadata changes from silently altering an existing thread. Because runtime fields are immutable, no `expectedRevision` guard is needed.
 
-Member Configs are intentionally dynamic and are not copied into the durable `WorkloadSpec`. After the revision check, the Agent Team module loads the current Configs through its injected config and secret ports, validates the prepared workspace, and lowers the resolved runtime inputs to the ACP driver. Alias lookup happens at the user/API boundary and resolves to the stable deployment ID before a workload is bound.
+For `agent-team-manifest`, the workload snapshot retains the member identity and loads current member Configs whenever it spawns a new session. This keeps secrets out of durable workload state while allowing Config updates to take effect on later session spawns.
 
-The agentlet protocol provides dedicated Agent Team control operations:
+Both launch kinds lower to the standard ACP driver and preserve explicit `agentletId` placement. Runtime lowering currently sets `SessionSpec.autoRestart = true` for every external workload. Per-Profile restart settings are removed; a future global runtime policy may add configuration, exponential backoff, and circuit breaking.
 
-| Operation                 | Responsibility                                                                                             |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `agent-team/scan`         | Scan a collection root on the daemon host and return discovered member manifests and UI-relevant metadata. |
-| `agent-team/setup`        | Materialize one deployment workspace and emit structured setup progress events.                            |
-| `agent-team/setup-cancel` | Cancel the active setup operation for one deployment workspace.                                            |
-| `agent-team/validate`     | Validate that a prepared deployment remains usable without mutating or repairing it.                       |
+An `acp-command` Profile has no setup or preflight lifecycle. Its stored fields are validated structurally at creation, and agentlet availability, missing working directories, missing executables, or ACP handshake failures are reported as structured errors from the attempted session spawn.
 
-These are formal protocol operations rather than shell-command execution. Agenetes routes each operation to the deployment's explicit `agentletId`.
+Huabu Chat and Question Nodes continue using the existing `/api/agent` envelope and thread flow. The route resolves a Profile only when creating the thread's external workload; subsequent runs use the durable snapshot. Agent Team execution must not bypass `ChatEnvelope`, spatial neighbourhood context, reachback environment construction, or standard Agenetes persistence.
 
-Setup progress travels as structured JSON-RPC notifications over the daemon control channel. The Agenetes Agent Team service exposes those events as an `AsyncIterable`, and the Huabu adapter projects the same stream to the Settings UI over SSE.
+### R6 — Catalog and API
 
-The standard ACP driver is generalized to accept an explicit `agentletId` placement instead of selecting the first connected daemon. Agent Team lowering preserves `deployment.machine` as that ACP placement so workspace validation and session spawn always execute on the same machine.
+Chat consumes one Profile catalog from the unified registry. The selector presents two groups matching Settings:
 
-### R5 — Unified Agent Team API
+- **Agent Teams** contains available `agent-team-manifest` Profiles.
+- **External Agents** contains all `acp-command` Profiles.
 
-The system provides an Agent Team service through which a user or an agent can talk to any enabled and ready deployment.
+Opening or refreshing the selector must reflect newly prepared, created, or deleted Profiles without requiring an application reload.
 
-Agenetes owns the host-agnostic service API. Huabu provides a thin `/api/agent-team/*` HTTP/SSE adapter over that service rather than implementing a second Agent Team orchestration layer.
+Huabu exposes thin validated adapters over the Agenetes registry and runtime service. Settings adapters may remain split by product surface, but they operate on the same Profile store. Runtime and A2A calls identify Profiles by `profileId`, never alias.
 
-Agenetes owns the first-version file-backed persistence implementation for Agent Team roots, discovery provenance, members, deployments, non-secret Configs, and setup state. These control-plane records, including bounded setup logs and interrupted-operation recovery, are implemented in `@agenetes/agent-team`. The host supplies only a local absolute storage directory when mounting Agenetes; Agenetes owns the file names, schema versioning, validation, reconciliation, and atomic reads and writes below that directory. In-memory persistence is test-only. Secret values remain behind a separately injected host `SecretStore` port because encryption and operating-system credential backends are host capabilities.
+Runs accept the standard Agenetes `AgentSubmission` and stream standard `AgentStreamEvent`s. Huabu renders `ChatEnvelope` into canonical inputs before invoking the service; Agenetes does not import Huabu envelope types.
 
-The caller selects a deployment by its current alias and supplies a complete Agenetes `ThreadIdentity` containing `namespace` and `threadId`. The service resolves the alias to the stable deployment ID, constructs the Agent Team `WorkloadSpec`, and then uses standard `Agenetes.create(...)` semantics. Agent Team does not define a separate thread lifecycle, get-or-create rule, or persistence model.
+Agent-to-agent access continues using authenticated HTTP/SSE through Huabu Reachback. It does not introduce a second Agent Team-specific conversation model.
 
-Runs accept the standard Agenetes `AgentSubmission`, including canonical inputs, and stream standard `AgentStreamEvent`s through the resulting `AgentHandle.run(...)`. The Huabu adapter is responsible for rendering a user-side `ChatEnvelope` into canonical inputs before invoking the service; Agenetes never imports the Huabu envelope type.
+### R7 — Persistence migration
 
-The first version uses instance-level authentication and permits authenticated Huabu users and agents to call any deployment whose enabled intent is true and whose setup status is `ready`. Deployment-level ACLs are deferred.
+The unified registry performs a one-time migration from both current stores:
 
-Agent-to-agent access uses a generic authenticated HTTP client distributed through Huabu Reachback. The client can send JSON requests and consume SSE streams; it does not add Agent Team-specific `start`, `send`, or `ask` commands. An Agent Team skill teaches agents how to call the standard routes and construct ThreadIdentity and AgentSubmission payloads. The first version does not introduce a separate A2A or MCP protocol for this feature.
+1. Ordinary ACP profiles become `acp-command` Profiles while preserving `profileId`, alias, command, working directory, and optional `cliId`. The old per-Profile `autoRestart` value is discarded.
+2. Managed Agent Team deployments become `agent-team-manifest` Profiles while preserving their IDs, alias, placement, launch fields, preparation state, and setup log. The old enabled intent and revision are discarded.
+3. Legacy ACP profiles whose `cliId` is `agent-team` are not auto-migrated because they bypass managed roots, members, Configs, and setup and may duplicate an existing managed Profile. Huabu retains those records long enough to show a clear migration notice instructing the user to create a managed Profile in Agent Team Settings and then delete the legacy record.
 
-The core Huabu invocation routes are:
+Migration is idempotent and must not rewrite an existing unified Profile. Existing ACP thread workload snapshots remain readable until their normal storage migration path replaces the legacy recipe shape.
 
-| Route                                         | Responsibility                                                                                                               |
-| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `PUT /api/agent-team/threads/:threadId`       | Accept `{ namespace, alias }`, resolve the alias, construct the Agent Team spec, and invoke standard `Agenetes.create(...)`. |
-| `POST /api/agent-team/threads/:threadId/runs` | Accept `{ namespace, submission }`, invoke `AgentHandle.run(...)` for the bound thread, and stream standard events over SSE. |
+## 3. Agenetes and agentlet ownership
 
-The run route does not accept or re-resolve an alias. Huabu validates the caller-provided namespace against host-owned workspace storage rather than trusting a client-provided storage path.
+`@agenetes/agent-team` owns the host-agnostic unified Profile registry, Agent Team roots and members, Config metadata, preparation state, runtime Profile resolution, and the first-version file-backed persistence and migration.
 
-## 3. Current scope
+`@agenetes/agentlet-host.mountAgenetes(...)` composes the registry with the single Agentlet Gateway and supplies it as the Agent Team control port. Huabu supplies the storage directory, SecretStore adapter, reachback environment, HTTP/SSE projection, and Settings and Chat UI.
 
-The first version discovers Agent Teams from roots on connected agentlet daemon hosts. Git URL installation, a marketplace, and bundled Agent Team discovery are deferred.
+The Agentlet Gateway owns live daemon connections and routes every operation to the Profile's explicit `agentletId`. The standard ACP driver owns session creation, resumption, canonical-input flattening, event translation, and durable ACP state.
 
-The first version does not implement a package trust workflow, setup-plan preview, trust persistence, or trust revocation. Adding a collection root and enabling a deployment treats that local package path as trusted and may install dependencies or execute package-defined setup code. This is an explicit first-version security limitation.
+The agentlet protocol retains dedicated package operations:
 
-This proposal defines the minimum environment-variable declaration and setup-progress requirements but does not yet define upgrades or uninstall behavior.
+| Operation | Responsibility |
+| --- | --- |
+| `agent-team/scan` | Scan a collection root and return discovered manifests and UI metadata. |
+| `agent-team/setup` | Prepare one manifest-backed Profile workspace and emit structured progress. |
+| `agent-team/setup-cancel` | Cancel active preparation for one Profile workspace. |
+| `agent-team/validate` | Validate a prepared workspace without mutating or repairing it. |
 
-The first version does not recover an in-flight setup operation or replay a lost terminal setup notification across an agentlet control-channel disconnection. Reliable setup-status reconciliation, for example through a queryable operation status or terminal-event replay, is deferred as a future optimization rather than required by the current Agenetes domain implementation.
+Direct `acp-command` Profiles use the existing session spawn protocol and do not call Agent Team setup operations.
 
-The shipped [Agentlet Gateway consolidation](../archive/agenetes-agentlet-gateway-consolidation.md) is a prerequisite foundation for the multi-daemon Agent Team design, not an optional follow-up.
+## 4. Current scope
 
-## 4. Related documents
+The first version consumes Agent Team collections that already exist on connected daemon hosts. Git installation, a marketplace, bundled discovery, upgrades, and uninstall behavior are deferred.
 
-- [`../../agent-teams/README.md`](../../agent-teams/README.md) — current Huabu Agent Team usage.
-- [`../architecture/agent-teams-as-extensions.md`](../architecture/agent-teams-as-extensions.md) — current product vision.
-- [`../../external/agentlet/spec/agent-team.md`](../../external/agentlet/spec/agent-team.md) — current generic Agent Team package and setup contract.
-- [`../architecture/agent-architecture.md`](../architecture/agent-architecture.md) — current External Agent and Agenetes integration.
-- [`agenetes-agentlet-gateway-consolidation.md`](../archive/agenetes-agentlet-gateway-consolidation.md) — shipped removal of standalone agentlet-server and consolidation of durable state into Agenetes.
+Adding a root and explicitly running Setup trusts package-defined setup code. Package trust preview, trust persistence, and revocation are not part of the current version.
+
+Reliable setup reconciliation across a lost control-channel connection remains deferred. An interrupted operation becomes an explicit error instead of being silently retried.
+
+Profile deletion does not revoke existing threads. Global restart policy, crash-loop backoff, circuit breaking, and explicit thread/session revocation are future runtime capabilities.
+
+## 5. Implementation progress
+
+### ✅ Foundation shipped
+
+- Multi-daemon Agentlet Gateway placement and the locally supervised daemon.
+- Agent Team root discovery, member reconciliation, Configs, SecretStore integration, setup orchestration, progress SSE, and Settings UI.
+- Structured CLI requirements, shared npm tool installation, bundled manifests, and package documentation.
+
+### ▶️ Unified Profile registry
+
+- Replace Agent Team deployment records and the host ACP profile store with the `AgentProfile` union.
+- Add idempotent migration and legacy Agent Team profile notice.
+- Remove enabled intent, revision, per-Profile auto-restart, runtime-field editing, alias uniqueness, and the legacy Agent Team option from External Agent Settings.
+
+### ⏳ Runtime and Chat integration
+
+- Add Agenetes Profile resolution and durable external workload snapshots for both launch kinds.
+- Lower manifest-backed snapshots through Config resolution, validation, and the ACP driver.
+- Project the unified Profile catalog into the two Chat selector groups.
+- Route Chat and Question Node external bindings by `profileId`.
+- Add focused migration, registry, runtime, API, selector, and Question Node coverage.
+
+## 6. Related documents
+
+- [`../../agent-teams/README.md`](../../agent-teams/README.md) — current Huabu Agent Team usage and package authoring.
+- [`../architecture/agent-teams-as-extensions.md`](../architecture/agent-teams-as-extensions.md) — current product vision and shipped control-plane boundaries.
+- [`../../external/agentlet/spec/agent-team.md`](../../external/agentlet/spec/agent-team.md) — generic Agent Team package and setup contract.
+- [`../architecture/agent-architecture.md`](../architecture/agent-architecture.md) — current built-in and ACP agent runtime.
+- [`agenetes-agentlet-gateway-consolidation.md`](../archive/agenetes-agentlet-gateway-consolidation.md) — shipped Gateway ownership and placement foundation.
