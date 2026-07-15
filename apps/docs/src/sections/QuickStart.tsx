@@ -153,18 +153,18 @@ export default function QuickStart() {
           back into your Space to keep organizing your thinking.
         </li>
         <li>
-          <strong>Huabu Agent</strong> — the same conversation, but the agent
-          can also act on your Space. It works with your materials and structure
-          and records its changes so you can keep or revert them.
+          <strong>Huabu Agent</strong> — a conversation in which the agent can
+          also act on your Space. It works with your materials and structure and
+          records its changes so you can keep or revert them.
         </li>
       </ul>
       <P>
         You can add more agents too. Pair an{' '}
         <DocLink href="/docs/ai/external-agents">External Agent</DocLink> in{' '}
         <strong>Settings → External Agents</strong>; afterwards it appears in
-        the Chat Panel next to Huabu Agent and switches in the same way —
-        bringing its own specialized context or tools, such as understanding a
-        repository or producing a presentation.
+        the Chat Panel as an option when you start a new conversation, bringing
+        its own specialized context or tools, such as understanding a repository
+        or producing a presentation.
       </P>
       <P>
         Prefer to ask right beside your material? Add an{' '}

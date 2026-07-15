@@ -40,9 +40,11 @@ Two independent write paths:
 - Failures only `warn`, never throw; the next trigger naturally retries.
 - The curator uses [agents/memory/AGENT.md](../../apps/server/src/prompt/agents/memory/AGENT.md), max 5 iterations, sequential tool calls.
 
-### 2.2 Explicit in-chat writes (user-driven)
+### 2.2 Explicit requests in chat
 
-The ask / operate chat agents both get the memory write tool. **It may only be called when the user explicitly says "remember this" / "save as a skill"**; the policy lives in their AGENT.md. Inferred preferences go through §2.1.
+Normal ask / operate turns do not write memory directly. Ask is read-only, and operate reserves `fs_write` for an explicitly invoked `/create-skill` or `/update-skill`; a plain-language "remember this" request instead enters the chat digest and becomes a high-confidence candidate when the background curator next runs. This path is delayed until the canvas reaches the automatic-curation threshold, and the curator may still choose not to write.
+
+User Skill creation and updates are explicit slash-command flows on the built-in operate surface. `/create-skill` checks the catalogue for near matches but does not silently switch to an update; `/update-skill` resolves and reads an existing user or merged Skill before writing it.
 
 ---
 
@@ -87,6 +89,7 @@ Implementation: routing + validation in [tools/handlers/fs-write.ts](../../apps/
 ### 4.1 Shared constraints
 
 - Workspace + canvas memory are both capped at **4 KB / 80 lines** (both overwrite and replace_string validate the merged size). Skill files are uncapped.
+- The cap is enforced on writes through `fs_write`; an oversized hand-edited file is not automatically trimmed. A later write whose resulting body remains oversized is rejected.
 - Sandbox dual root: workspace root is `<workspace>/setting/`, canvas root is `<canvas>/.memory/`. `..` escapes are rejected.
 - `replace_string`'s "exactly once" rule is a safety contract: ambiguity is resolved by the agent supplying more context, never guessed by the writer.
 
@@ -111,7 +114,7 @@ The tool description carries only mechanics (params / cap / validation); **polic
 - [write/space-memory-writing.md](../../apps/server/src/prompt/skills/memory/write/space-memory-writing.md)
 - [write/skills-writing.md](../../apps/server/src/prompt/skills/memory/write/skills-writing.md)
 
-Both the curator AGENT.md and the chat AGENT.md point at the same sub-docs to avoid the rules drifting in two places.
+The curator AGENT.md points at all three sub-docs. The operate Agent receives Skill-writing policy only when `/create-skill` or `/update-skill` injects the corresponding user-invokable Skill; normal ask / operate turns do not write memory.
 
 ---
 

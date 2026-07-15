@@ -3,7 +3,6 @@ import {
   H2,
   P,
   PageLayout,
-  Shortcut,
   Table,
   type TocEntry,
 } from '../../components';
@@ -12,10 +11,13 @@ import { NODE_ICON } from '../../config/nodeIcons';
 const toc: TocEntry[] = [
   { id: 'choose-how-to-work', label: 'Choose how to work' },
   { id: 'give-ai-context', label: 'Give AI the right context' },
-  { id: 'ask-and-discuss', label: 'Ask and discuss in Chat' },
   { id: 'let-agent-work', label: 'Let Agent work on the Space' },
   { id: 'review-ai-changes', label: 'Review AI changes' },
-  { id: 'ask-beside-material', label: 'Ask beside your material' },
+  {
+    id: 'work-beside-material',
+    label: 'Work beside your material with an Agent Node',
+  },
+  { id: 'ask-and-discuss', label: 'Ask and discuss in Chat' },
 ];
 
 const listClassName =
@@ -27,7 +29,7 @@ export default function WorkWithAI() {
   return (
     <PageLayout
       title="Work with AI"
-      description="Choose the right AI surface, provide focused context, let an Agent work on your Space, and review every resulting change."
+      description="Let an Agent shape your Space, or keep an Agent Node beside the material you are developing."
       toc={toc}
     >
       <H2>Choose how to work</H2>
@@ -39,10 +41,6 @@ export default function WorkWithAI() {
       <Table
         headers={['What you want to do', 'Use']}
         rows={[
-          [
-            'Ask questions, discuss ideas, or understand selected material',
-            <strong>Chat</strong>,
-          ],
           [
             'Create, edit, arrange, or connect things in the Space',
             <strong>Agent</strong>,
@@ -57,6 +55,10 @@ export default function WorkWithAI() {
               <strong>Agent Node</strong>
             </>,
           ],
+          [
+            'Ask questions, discuss ideas, or understand selected material',
+            <strong>Chat</strong>,
+          ],
         ]}
       />
 
@@ -69,10 +71,10 @@ export default function WorkWithAI() {
       <ul className={listClassName}>
         <li>
           <strong>Select relevant nodes before sending.</strong> The source
-          count beside the composer confirms which nodes are in focus.
+          count beside the chat input confirms which nodes are in focus.
         </li>
         <li>
-          <strong>Paste or drop a file or image into the composer.</strong> It
+          <strong>Paste or drop a file or image into the chat input.</strong> It
           is attached to that message without first becoming a Space node.
         </li>
         <li>
@@ -86,43 +88,18 @@ export default function WorkWithAI() {
         for the AI to interpret and easier for you to review.
       </Callout>
 
-      <H2>Ask and discuss in Chat</H2>
-      <ol className={orderedListClassName}>
-        <li>Open the Chat Panel from the top-right of the Space.</li>
-        <li>
-          Start a conversation with <strong>Chat</strong>.
-        </li>
-        <li>Select any nodes that should be the focus.</li>
-        <li>
-          Type your question and press <Shortcut combo="Enter" />.
-        </li>
-        <li>Continue the conversation until the result is useful.</li>
-      </ol>
-      <P>
-        Chat is read-only: it can inspect the Space, read selected sources,
-        search files or the web, and explain what it finds, but it does not
-        modify the Space. Use it for summaries, comparisons, explanations, and
-        brainstorming.
-      </P>
-      <Callout tone="info">
-        When the next step requires Space changes, start or switch to an Agent
-        conversation and describe the outcome you want.
-      </Callout>
-
       <H2>Let Agent work on the Space</H2>
       <ol className={orderedListClassName}>
-        <li>Select the nodes the Agent should focus on.</li>
         <li>
-          Start a conversation with <strong>Agent</strong>.
+          Open the Chat Panel and start a new conversation with{' '}
+          <strong>Agent</strong>.
         </li>
         <li>
           Describe both the result and its shape—for example, “group these notes
           into named Frames and connect each source to its summary.”
         </li>
-        <li>
-          Send the request and let the Agent inspect and update the Space.
-        </li>
-        <li>Review the resulting changes above the composer.</li>
+        <li>Send the request and let Agent update the Space.</li>
+        <li>Review the resulting changes above the chat input.</li>
       </ol>
       <P>
         Agent can create, edit, move, group, connect, and remove items as part
@@ -133,7 +110,7 @@ export default function WorkWithAI() {
       <H2>Review AI changes</H2>
       <P>
         Agent changes are collected by conversation in a review card above the
-        composer. Expand it to inspect individual changes or act on the whole
+        chat input. Expand it to inspect individual changes or act on the whole
         set.
       </P>
       <Table
@@ -158,7 +135,7 @@ export default function WorkWithAI() {
         overwriting newer work.
       </Callout>
 
-      <H2>Ask beside your material</H2>
+      <H2>Work beside your material with an Agent Node</H2>
       <P>
         An Agent Node keeps a dedicated conversation on the Space, making it
         useful for open questions that should remain visible beside their source
@@ -174,7 +151,9 @@ export default function WorkWithAI() {
           <strong>Agent Node</strong> from the toolbar or a node&apos;s
           quick-create arrow.
         </li>
-        <li>The Chat Panel opens the new node&apos;s conversation.</li>
+        <li>
+          The Chat Panel opens a conversation bound to the new Agent Node.
+        </li>
         <li>
           Choose the built-in Chat, Agent, or an available external agent.
         </li>
@@ -188,6 +167,26 @@ export default function WorkWithAI() {
         connect it to the most relevant nodes. The conversation stays bound to
         that node and to the agent selected for it.
       </P>
+
+      <H2>Ask and discuss in Chat</H2>
+      <ol className={orderedListClassName}>
+        <li>Open the Chat Panel from the top-right of the Space.</li>
+        <li>
+          Start a new conversation with <strong>Chat</strong>.
+        </li>
+        <li>Write your question and send it.</li>
+      </ol>
+      <P>
+        Chat is read-only: it can inspect the Space, read selected sources,
+        search files or the web, and explain what it finds, but it does not
+        modify the Space. Use it for summaries, comparisons, explanations, and
+        brainstorming.
+      </P>
+      <Callout tone="info">
+        When the next step requires Space changes, start a new conversation with{' '}
+        <strong>Agent</strong> and describe the outcome you want. An existing
+        Chat conversation cannot be switched to Agent.
+      </Callout>
     </PageLayout>
   );
 }

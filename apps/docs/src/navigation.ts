@@ -77,19 +77,21 @@ const groupsRaw: RawGroup[] = [
         load: () => import('./sections/ai/WorkWithAI'),
       },
       {
+        to: '/docs/ai/models-and-capabilities',
+        label: 'Models & Capabilities',
+        description:
+          'Configure the Chat and Utility Models and optional web, image, and video capabilities.',
+        load: () => import('./sections/ai/ModelsAndCapabilities'),
+      },
+      {
         to: '/docs/ai/external-agents',
         label: 'External Agents',
         load: () => import('./sections/ai/ExternalAgents'),
       },
       {
-        to: '/docs/ai/memory',
-        label: 'Memory',
-        load: () => import('./sections/ai/Memory'),
-      },
-      {
-        to: '/docs/ai/skills',
-        label: 'Skills',
-        load: () => import('./sections/ai/Skills'),
+        to: '/docs/ai/memory-and-skills',
+        label: 'Memory & Skills',
+        load: () => import('./sections/ai/MemoryAndSkills'),
       },
     ],
   },
