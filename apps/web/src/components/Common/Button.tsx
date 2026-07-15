@@ -134,6 +134,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       tooltipPlacement,
       type = 'button',
       title,
+      'aria-label': ariaLabel,
       shortcutBadge,
       shortcutBadgeActive,
       ...props
@@ -144,6 +145,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       <button
         ref={ref}
         type={type}
+        aria-label={ariaLabel ?? (iconOnly ? title : undefined)}
         className={cn(
           'flex items-center justify-center transition-colors',
           '[&_svg]:shrink-0',

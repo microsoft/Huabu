@@ -1,5 +1,5 @@
 import { X } from 'lucide-react';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { SettingSection } from '@/components/Common/SettingSection';
@@ -61,6 +61,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const requestedTab = useSettingsUiStore((s) => s.requestedTab);
   const clearRequestedTab = useSettingsUiStore((s) => s.clearRequestedTab);
   const [activeTab, setActiveTab] = useState<SettingsTab>(TABS[0].id);
+  const titleId = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const previouslyFocusedRef = useRef<HTMLElement | null>(null);
 
   // Deep-link support: a caller (e.g. the chat "Add agent" row) can ask
   // to open Settings on a specific tab via `settingsUiStore.open(tab)`.
@@ -83,11 +86,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   // Close on Escape.
   useEffect(() => {
     if (!isOpen) return;
+    previouslyFocusedRef.current = document.activeElement as HTMLElement | null;
+    const focusTimer = window.setTimeout(() => dialogRef.current?.focus(), 0);
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key !== 'Escape') return;
+      const openDialogs = document.querySelectorAll(
+        '[role="dialog"][aria-modal="true"]',
+      );
+      if (openDialogs.length === 1) onClose();
     };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    return () => {
+      window.clearTimeout(focusTimer);
+      window.removeEventListener('keydown', onKey);
+      previouslyFocusedRef.current?.focus();
+      previouslyFocusedRef.current = null;
+    };
   }, [isOpen, onClose]);
 
   if (!isOpen) return null;
@@ -117,10 +131,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       />
 
       {/* Dialog */}
-      <div className="animate-in fade-in zoom-in-95 border-edge-default bg-surface shadow-bottom relative flex h-[80vh] max-h-[640px] w-full max-w-3xl overflow-hidden rounded-xl border duration-200">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className="animate-in fade-in zoom-in-95 border-edge-default bg-surface shadow-bottom relative flex h-[80vh] max-h-160 w-full max-w-3xl overflow-hidden rounded-xl border duration-200 focus:outline-none"
+      >
         {/* Left tab rail */}
         <nav className="border-edge-default bg-bg-default flex w-48 shrink-0 flex-col gap-0.5 border-r py-3 pr-3">
-          <h2 className="text-fg-default mb-2 pr-2 pl-3 text-sm font-semibold">
+          <h2
+            id={titleId}
+            className="text-fg-default mb-2 pr-2 pl-3 text-sm font-semibold"
+          >
             {t('settings.title')}
           </h2>
           {TABS.map(({ id, labelKey }) => {

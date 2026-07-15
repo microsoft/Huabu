@@ -52,6 +52,7 @@ export const GeneralSettings: React.FC = () => {
           value={current}
           onChange={handleChange}
           title={t('settings.language')}
+          ariaLabel={t('settings.language')}
         />
       </SettingRow>
       <SettingRow

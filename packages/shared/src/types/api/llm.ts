@@ -176,8 +176,8 @@ export const llmImageConfigUpdateSchema = z.object({
     )
     .optional(),
   apiVersion: z.string().optional(),
-  /** API key — only sent when setting a new key; never returned by GET. */
-  apiKey: z.string().optional(),
+  /** API key — set with a string, remove with null; never returned by GET. */
+  apiKey: z.string().min(1).nullable().optional(),
   quality: z.enum(['low', 'medium', 'high', 'auto']).optional(),
 });
 export type LLMImageConfigUpdate = z.infer<typeof llmImageConfigUpdateSchema>;

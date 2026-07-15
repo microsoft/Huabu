@@ -13,6 +13,7 @@ import { toast } from './Toast';
 import type { KeyboardEventHandler } from 'react';
 
 export interface PathInputProps {
+  id?: string;
   /** Current path value. */
   value: string;
   /** Called with the new value on typing *and* after a folder is picked. */
@@ -57,6 +58,7 @@ export interface PathInputProps {
  * handled internally so call sites stay declarative.
  */
 export function PathInput({
+  id,
   value,
   onChange,
   onPicked,
@@ -107,6 +109,7 @@ export function PathInput({
   return (
     <div className={cn('flex items-stretch gap-1.5', className)}>
       <TextInput
+        id={id}
         type="text"
         size={size}
         mono={mono}

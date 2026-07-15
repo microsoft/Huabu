@@ -7,7 +7,7 @@
  * and creates an `agent-team-manifest` Profile without starting Setup.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { listAcpAgentClis } from '@/api/acp';
@@ -15,6 +15,8 @@ import { createAgentTeamProfile } from '@/api/agent-team';
 import { Button } from '@/components/Common/Button';
 import { PathInput } from '@/components/Common/PathInput';
 import { Select } from '@/components/Common/Select';
+import { SettingControl } from '@/components/Common/SettingControl';
+import { SettingLabel } from '@/components/Common/SettingLabel';
 import { SettingRow } from '@/components/Common/SettingRow';
 import { TextInput } from '@/components/Common/TextInput';
 import { toast } from '@/components/Common/Toast';
@@ -57,6 +59,7 @@ export function AddAgentFlow({
   applyMemberDetail,
 }: AddAgentFlowProps) {
   const { t } = useTranslation();
+  const templateLabel = t('settings.template');
   const templateOptions = useMemo(
     () => [
       {
@@ -79,17 +82,20 @@ export function AddAgentFlow({
   );
 
   return (
-    <div className="flex flex-col gap-5">
-      <label className="flex flex-col gap-1 text-xs">
-        <span className="text-fg-muted">{t('settings.template')}</span>
-        <Select
-          value={selectedKey}
-          options={templateOptions}
-          onChange={setSelectedKey}
-        />
-      </label>
+    <div className="divide-edge-default flex flex-col divide-y">
+      <SettingRow title={t('settings.template')}>
+        <SettingControl>
+          <Select
+            value={selectedKey}
+            options={templateOptions}
+            onChange={setSelectedKey}
+            ariaLabel={templateLabel}
+            className="w-full"
+          />
+        </SettingControl>
+      </SettingRow>
       {manifestError ? (
-        <p className="text-warning text-xs" role="status">
+        <p className="text-warning px-3 py-2.5 text-xs" role="status">
           {t('settings.templatesUnavailable', { error: manifestError })}
         </p>
       ) : null}
@@ -133,6 +139,8 @@ function TemplateProfileForm({
 }) {
   const { t } = useTranslation();
   const { t: tAgent } = useTranslation('agentTeam');
+  const cwdId = useId();
+  const displayNameId = useId();
   const supportedAgents = useMemo(() => {
     const harnesses = new Set(group.member.harnesses);
     return detectedClis.filter((agent) => harnesses.has(agent.id));
@@ -240,30 +248,33 @@ function TemplateProfileForm({
     (unknownHarnesses.length > 0 || supportedAgents.length === 0);
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="divide-edge-default flex flex-col divide-y">
       {group.member.description ? (
-        <p className="text-fg-muted text-xs leading-snug">
+        <p className="text-fg-muted px-3 py-2.5 text-xs leading-snug">
           {group.member.description}
         </p>
       ) : null}
-      <label className="flex flex-col gap-1 text-xs">
-        <span className="text-fg-muted">{t('settings.agent')}</span>
-        {!detectionLoaded ? (
-          <div className="border-edge-default bg-surface text-fg-subtle rounded border px-2 py-1">
-            {t('settings.detectingClis')}
-          </div>
-        ) : (
-          <Select
-            value={agentId}
-            options={agentOptions}
-            onChange={setAgentId}
-            placeholder={t('settings.noSupportedAgent')}
-            disabled={agentOptions.length === 0}
-          />
-        )}
-      </label>
+      <SettingRow title={t('settings.agent')}>
+        <SettingControl>
+          {!detectionLoaded ? (
+            <div className="border-edge-default bg-surface text-fg-subtle rounded border px-2 py-1 text-xs">
+              {t('settings.detectingClis')}
+            </div>
+          ) : (
+            <Select
+              value={agentId}
+              options={agentOptions}
+              onChange={setAgentId}
+              placeholder={t('settings.noSupportedAgent')}
+              disabled={agentOptions.length === 0}
+              ariaLabel={t('settings.agent')}
+              className="w-full"
+            />
+          )}
+        </SettingControl>
+      </SettingRow>
       {unsupported ? (
-        <p className="text-danger text-xs" role="alert">
+        <p className="text-danger px-3 py-2.5 text-xs" role="alert">
           {t('settings.unsupportedTemplateAgents', {
             agents:
               unknownHarnesses.join(', ') || group.member.harnesses.join(', '),
@@ -273,13 +284,13 @@ function TemplateProfileForm({
       {detectionLoaded &&
       supportedAgents.length > 0 &&
       selectableAgents.length === 0 ? (
-        <p className="text-warning text-xs" role="status">
+        <p className="text-warning px-3 py-2.5 text-xs" role="status">
           {t('settings.installSupportedAgent')}
         </p>
       ) : null}
 
-      <div className="border-edge-default border-t pt-3">
-        <p className="text-fg-subtle mb-2 text-[11px] leading-snug">
+      <div>
+        <p className="text-fg-subtle px-3 py-2 text-[11px] leading-snug">
           {tAgent('tokenSharedHint')}
         </p>
         <AgentTeamConfigs
@@ -289,29 +300,40 @@ function TemplateProfileForm({
       </div>
 
       <SettingRow
+        labelFor={cwdId}
         title={tAgent('workingDirectory')}
         description={t('settings.templateWorkingDirHint')}
       >
-        <PathInput
-          value={workingDirPath}
-          onChange={setWorkingDirPath}
-          placeholder="/Users/me/project-x"
-          pickTitle={tAgent('pickFolder')}
-          size="sm"
-          mono
-          className="min-w-64"
-        />
+        <SettingControl>
+          <PathInput
+            id={cwdId}
+            value={workingDirPath}
+            onChange={setWorkingDirPath}
+            placeholder="/Users/me/project-x"
+            pickTitle={tAgent('pickFolder')}
+            size="sm"
+            mono
+          />
+        </SettingControl>
       </SettingRow>
-      <SettingRow title={t('settings.displayName')}>
-        <TextInput
-          value={alias}
-          onChange={(event) => setAlias(event.target.value)}
-          placeholder={defaultAlias}
-          className="min-w-64"
-        />
+      <SettingRow
+        labelFor={displayNameId}
+        title={
+          <SettingLabel optional>{t('settings.displayName')}</SettingLabel>
+        }
+      >
+        <SettingControl>
+          <TextInput
+            id={displayNameId}
+            value={alias}
+            onChange={(event) => setAlias(event.target.value)}
+            placeholder={defaultAlias}
+            className="w-full"
+          />
+        </SettingControl>
       </SettingRow>
 
-      <div className="flex justify-end gap-2">
+      <div className="flex justify-end gap-2 px-3 py-2.5">
         <Button
           variant="outline"
           tone="neutral"

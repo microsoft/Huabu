@@ -4,8 +4,7 @@
  * hook. Rendered inline inside External Agent Settings.
  */
 
-import { Info } from 'lucide-react';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -16,9 +15,11 @@ import {
 import { Button } from '@/components/Common/Button';
 import { PathInput } from '@/components/Common/PathInput';
 import { Select } from '@/components/Common/Select';
+import { SettingControl } from '@/components/Common/SettingControl';
+import { SettingLabel } from '@/components/Common/SettingLabel';
+import { SettingRow } from '@/components/Common/SettingRow';
 import { TextInput } from '@/components/Common/TextInput';
 import { toast } from '@/components/Common/Toast';
-import { Tooltip } from '@/components/Common/Tooltip';
 
 import type {
   AcpAgentCliInfo,
@@ -194,38 +195,6 @@ function parseCommandIntoForm(
   return fallback;
 }
 
-/**
- * Field label with an optional trailing info icon that surfaces the
- * long-form description in a hover tooltip while keeping each row
- * visually compact.
- */
-const FieldLabel: React.FC<{
-  children: React.ReactNode;
-  hint?: React.ReactNode;
-}> = ({ children, hint }) => {
-  const { t } = useTranslation();
-  return (
-    <span className="text-fg-muted flex items-center gap-1">
-      <span>{children}</span>
-      {hint ? (
-        <Tooltip
-          content={hint}
-          contentClassName="max-w-80 leading-snug whitespace-normal"
-        >
-          <span
-            role="img"
-            aria-label={t('settings.moreInfo')}
-            tabIndex={0}
-            className="text-fg-subtle hover:text-fg-default focus-visible:text-fg-default inline-flex cursor-help outline-none"
-          >
-            <Info size={12} />
-          </span>
-        </Tooltip>
-      ) : null}
-    </span>
-  );
-};
-
 export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
   editing,
   detectedClis,
@@ -234,6 +203,10 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
   onSaved,
 }) => {
   const { t } = useTranslation();
+  const autoApproveId = useId();
+  const commandId = useId();
+  const cwdId = useId();
+  const displayNameId = useId();
   // Start a *new* profile on the ACP Agent tab. An empty `cliId` keeps
   // the picker in its detecting state until host detection settles; the
   // effect below then commits the first CLI, or Manual setup when none
@@ -425,11 +398,14 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
     (cwd: string) => setForm((p) => ({ ...p, cwd })),
     [],
   );
+  const createDisabled =
+    !editing &&
+    (!detectionLoaded || !buildCommand(form, detectedClis) || !form.cwd.trim());
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="divide-edge-default flex flex-col divide-y">
       {/* ─── Agent ─────────────────────────────────────────────── */}
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col">
         {/*
          * Hide the picker on edit because `cliId` is immutable in the
          * update schema (changing it would silently break the persisted
@@ -437,93 +413,113 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
          * still sees what's wired up.
          */}
         {editing ? (
-          <div className="flex flex-col gap-3">
-            <label className="flex flex-col gap-1 text-xs">
-              <FieldLabel>{t('settings.agent')}</FieldLabel>
-              <div className="border-edge-default bg-surface text-fg-default rounded border px-2 py-1 text-xs">
-                {detectedClis.find((c) => c.id === form.cliId)?.displayName ??
-                  (form.cliId === 'custom'
-                    ? t('settings.customCommand')
-                    : form.cliId)}
-              </div>
-            </label>
-            <label className="flex flex-col gap-1 text-xs">
-              <FieldLabel>{t('settings.launchCommand')}</FieldLabel>
-              <div className="border-edge-default bg-bg-default text-fg-muted rounded border px-2 py-1 font-mono text-xs">
-                {editing.launch.command}
-              </div>
-            </label>
+          <div className="flex flex-col">
+            <SettingRow title={t('settings.agent')}>
+              <SettingControl>
+                <div className="border-edge-default bg-surface text-fg-default rounded border px-2 py-1 text-xs">
+                  {detectedClis.find((c) => c.id === form.cliId)?.displayName ??
+                    (form.cliId === 'custom'
+                      ? t('settings.customCommand')
+                      : form.cliId)}
+                </div>
+              </SettingControl>
+            </SettingRow>
+            <SettingRow title={t('settings.launchCommand')}>
+              <SettingControl>
+                <div className="border-edge-default bg-bg-default text-fg-muted rounded border px-2 py-1 font-mono text-xs break-all">
+                  {editing.launch.command}
+                </div>
+              </SettingControl>
+            </SettingRow>
           </div>
         ) : (
-          <div className="flex flex-col gap-2">
-            <label className="flex flex-col gap-1 text-xs">
-              <FieldLabel>{t('settings.agent')}</FieldLabel>
-              {!detectionLoaded ? (
-                // Detection still in flight — a neutral placeholder avoids
-                // flashing a premature selection before the CLIs have
-                // actually been probed.
-                <div className="border-edge-default bg-surface text-fg-subtle rounded border px-2 py-1 text-xs leading-snug">
-                  {t('settings.detectingClis')}
-                </div>
-              ) : (
-                // Detected CLIs first, then "Custom command" as the last
-                // option. Selecting it reveals the raw launch-command
-                // field below.
-                <Select
-                  value={form.cliId}
-                  onChange={handleCliChange}
-                  options={cliOptions}
-                />
-              )}
-            </label>
+          <div className="flex flex-col">
+            <SettingRow title={t('settings.agent')}>
+              <SettingControl>
+                {!detectionLoaded ? (
+                  // Detection still in flight — a neutral placeholder avoids
+                  // flashing a premature selection before the CLIs have
+                  // actually been probed.
+                  <div className="border-edge-default bg-surface text-fg-subtle rounded border px-2 py-1 text-xs leading-snug">
+                    {t('settings.detectingClis')}
+                  </div>
+                ) : (
+                  // Detected CLIs first, then "Custom command" as the last
+                  // option. Selecting it reveals the raw launch-command
+                  // field below.
+                  <Select
+                    value={form.cliId}
+                    onChange={handleCliChange}
+                    options={cliOptions}
+                    ariaLabel={t('settings.agent')}
+                    className="w-full"
+                  />
+                )}
+              </SettingControl>
+            </SettingRow>
             {form.cliId === 'custom' ? (
-              <label className="flex flex-col gap-1 text-xs">
-                <FieldLabel hint={t('settings.launchCommandHint')}>
-                  {t('settings.launchCommand')}
-                </FieldLabel>
-                <TextInput
-                  value={form.customCommand}
-                  onChange={(e) =>
-                    setForm((p) => ({
-                      ...p,
-                      customCommand: e.target.value,
-                    }))
-                  }
-                  placeholder="/usr/local/bin/copilot --acp --allow-all"
-                  mono
-                />
-              </label>
+              <SettingRow
+                labelFor={commandId}
+                title={t('settings.launchCommand')}
+                description={t('settings.launchCommandHint')}
+              >
+                <SettingControl>
+                  <TextInput
+                    id={commandId}
+                    value={form.customCommand}
+                    onChange={(e) =>
+                      setForm((p) => ({
+                        ...p,
+                        customCommand: e.target.value,
+                      }))
+                    }
+                    placeholder="/usr/local/bin/copilot --acp --allow-all"
+                    mono
+                    className="w-full"
+                  />
+                </SettingControl>
+              </SettingRow>
             ) : null}
           </div>
         )}
 
         {!editing && isStructured && selectedCli?.autoApprove && (
-          <label className="text-fg-default flex cursor-pointer items-start gap-2 text-xs select-none">
+          <SettingRow
+            description={t('settings.autoApproveAllToolCallsHint')}
+            title={
+              <label htmlFor={autoApproveId} className="cursor-pointer">
+                <span>
+                  {t('settings.autoApproveAllToolCalls')} (
+                  <code className="font-mono">
+                    {selectedCli.autoApprove.args.join(' ')}
+                  </code>
+                  )
+                </span>
+              </label>
+            }
+          >
             <input
+              id={autoApproveId}
               type="checkbox"
-              className="accent-info mt-0.5 h-3.5 w-3.5"
+              aria-label={t('settings.autoApproveAllToolCalls')}
+              className="accent-info h-3.5 w-3.5 cursor-pointer"
               checked={form.allowAll}
               onChange={(e) =>
                 setForm((p) => ({ ...p, allowAll: e.target.checked }))
               }
             />
-            <FieldLabel hint={t('settings.autoApproveAllToolCallsHint')}>
-              {t('settings.autoApproveAllToolCalls')} (
-              <code className="font-mono">
-                {selectedCli.autoApprove.args.join(' ')}
-              </code>
-              )
-            </FieldLabel>
-          </label>
+          </SettingRow>
         )}
       </div>
 
-      <div className="flex flex-col gap-3">
-        <label className="flex flex-col gap-1 text-xs">
-          <FieldLabel hint={t('settings.workingDirectoryHint')}>
-            {t('settings.workingDirectory')}
-          </FieldLabel>
+      <SettingRow
+        labelFor={cwdId}
+        title={t('settings.workingDirectory')}
+        description={t('settings.workingDirectoryHint')}
+      >
+        <SettingControl>
           <PathInput
+            id={cwdId}
             value={form.cwd}
             onChange={setCwd}
             placeholder="/Users/me/project-x"
@@ -533,26 +529,31 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
             inputClassName="rounded"
             disabled={editing !== null}
           />
-        </label>
-      </div>
+        </SettingControl>
+      </SettingRow>
 
       {/* ─── Display name (placed last per UX request) ─────────── */}
-      <label className="flex flex-col gap-1 text-xs">
-        <FieldLabel>
-          {t('settings.displayName')}{' '}
-          <span className="text-fg-subtle">({t('settings.optional')})</span>
-        </FieldLabel>
-        <TextInput
-          value={form.displayName}
-          onChange={(e) =>
-            setForm((p) => ({ ...p, displayName: e.target.value }))
-          }
-          placeholder={defaultDisplayName}
-        />
-      </label>
+      <SettingRow
+        labelFor={displayNameId}
+        title={
+          <SettingLabel optional>{t('settings.displayName')}</SettingLabel>
+        }
+      >
+        <SettingControl>
+          <TextInput
+            id={displayNameId}
+            value={form.displayName}
+            onChange={(e) =>
+              setForm((p) => ({ ...p, displayName: e.target.value }))
+            }
+            placeholder={defaultDisplayName}
+            className="w-full"
+          />
+        </SettingControl>
+      </SettingRow>
 
       {/* ─── Actions ───────────────────────────────────────────── */}
-      <div className="flex justify-end gap-2">
+      <div className="flex justify-end gap-2 px-3 py-2.5">
         <Button
           variant="outline"
           tone="neutral"
@@ -567,7 +568,7 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
           tone="info"
           size="sm"
           onClick={() => void handleSubmit()}
-          disabled={saving}
+          disabled={saving || createDisabled}
         >
           {saving
             ? t('settings.saving')

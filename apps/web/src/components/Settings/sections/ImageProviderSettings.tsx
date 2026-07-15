@@ -10,6 +10,8 @@ import {
 
 import { ApiKeyRow } from '@/components/Common/ApiKeyRow';
 import { Select } from '@/components/Common/Select';
+import { SettingControl } from '@/components/Common/SettingControl';
+import { SettingLabel } from '@/components/Common/SettingLabel';
 import { SettingRow } from '@/components/Common/SettingRow';
 import { SettingSection } from '@/components/Common/SettingSection';
 import { TextInput } from '@/components/Common/TextInput';
@@ -100,101 +102,109 @@ export const ImageProviderSettings: React.FC = () => {
   );
 
   return (
-    <SettingSection title={t('settings.imageGeneration')} collapsible>
+    <SettingSection title={t('settings.imageGeneration')} optional collapsible>
       <SettingRow title={t('settings.provider')}>
-        <div className="w-44">
+        <SettingControl>
           <Select
             options={imageProviderOptions}
             value={llmImageConfig?.provider || 'azure-openai'}
             onChange={(v) => saveImage({ provider: v })}
             placeholder={t('settings.selectProvider')}
+            ariaLabel={t('settings.provider')}
+            className="w-full"
           />
-        </div>
+        </SettingControl>
       </SettingRow>
 
       <SettingRow title={t('settings.endpoint')}>
-        <TextInput
-          type="text"
-          placeholder="https://…cognitiveservices.azure.com"
-          value={imgEndpoint}
-          onChange={(e) => {
-            const v = e.target.value;
-            setImgEndpoint(v);
-            debouncedSaveImage({ baseUrl: v });
-          }}
-          className="w-56"
-        />
+        <SettingControl>
+          <TextInput
+            type="text"
+            aria-label={t('settings.endpoint')}
+            placeholder="https://…cognitiveservices.azure.com"
+            value={imgEndpoint}
+            onChange={(e) => {
+              const v = e.target.value;
+              setImgEndpoint(v);
+              debouncedSaveImage({ baseUrl: v });
+            }}
+            className="w-full"
+          />
+        </SettingControl>
       </SettingRow>
 
       <SettingRow title={t('settings.model')}>
-        <div className="w-56">
+        <SettingControl>
           <Select
             options={IMAGE_MODEL_FAMILY_OPTIONS}
             value={imgModelFamily}
+            ariaLabel={t('settings.model')}
+            className="w-full"
             onChange={(v) => {
               const next = v as ImageModelFamily;
               setImgModelFamily(next);
               saveImage({ modelFamily: next });
             }}
           />
-        </div>
+        </SettingControl>
       </SettingRow>
 
       <SettingRow
-        title={t('settings.deployment')}
+        title={<SettingLabel optional>{t('settings.deployment')}</SettingLabel>}
         description={t('settings.deploymentOptional')}
       >
-        <TextInput
-          type="text"
-          placeholder={imgModelFamily}
-          value={imgDeployment}
-          onChange={(e) => {
-            const v = e.target.value;
-            setImgDeployment(v);
-            debouncedSaveImage({ model: v });
-          }}
-          className="w-56"
-        />
+        <SettingControl>
+          <TextInput
+            type="text"
+            aria-label={t('settings.deployment')}
+            placeholder={imgModelFamily}
+            value={imgDeployment}
+            onChange={(e) => {
+              const v = e.target.value;
+              setImgDeployment(v);
+              debouncedSaveImage({ model: v });
+            }}
+            className="w-full"
+          />
+        </SettingControl>
       </SettingRow>
 
-      <SettingRow
-        title={t('settings.apiVersion')}
-        description={t('settings.optional')}
-      >
-        <TextInput
-          type="text"
-          placeholder={t('settings.imageApiVersionPlaceholder')}
-          value={imgApiVersion}
-          onChange={(e) => {
-            const v = e.target.value;
-            setImgApiVersion(v);
-            debouncedSaveImage({ apiVersion: v });
-          }}
-          className="w-56"
-        />
+      <SettingRow title={t('settings.apiVersion')}>
+        <SettingControl>
+          <TextInput
+            type="text"
+            aria-label={t('settings.apiVersion')}
+            placeholder={t('settings.imageApiVersionPlaceholder')}
+            value={imgApiVersion}
+            onChange={(e) => {
+              const v = e.target.value;
+              setImgApiVersion(v);
+              debouncedSaveImage({ apiVersion: v });
+            }}
+            className="w-full"
+          />
+        </SettingControl>
       </SettingRow>
 
       <SettingRow title={t('settings.imageQuality')}>
-        <div className="w-56">
+        <SettingControl>
           <Select
-            options={getImageCapabilities(imgModelFamily).qualities.map((q) => {
-              const isDefault =
-                q === getImageCapabilities(imgModelFamily).defaultQuality;
-              return {
+            options={getImageCapabilities(imgModelFamily).qualities.map(
+              (q) => ({
                 value: q,
-                label: isDefault
-                  ? t('settings.defaultSuffix', { value: q })
-                  : q,
-              };
-            })}
+                label: q,
+              }),
+            )}
             value={imgQuality}
+            ariaLabel={t('settings.imageQuality')}
+            className="w-full"
             onChange={(v) => {
               const next = v as 'low' | 'medium' | 'high' | 'auto';
               setImgQuality(next);
               saveImage({ quality: next });
             }}
           />
-        </div>
+        </SettingControl>
       </SettingRow>
 
       <ApiKeyRow
@@ -208,6 +218,7 @@ export const ImageProviderSettings: React.FC = () => {
         placeholder="Azure key"
         saving={llmImageSaving}
         onSave={(key) => saveImage({ apiKey: key })}
+        onRemove={() => saveImage({ apiKey: null })}
       />
     </SettingSection>
   );

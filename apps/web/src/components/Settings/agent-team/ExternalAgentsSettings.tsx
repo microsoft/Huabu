@@ -274,7 +274,11 @@ export function ExternalAgentsSettings() {
                       size="sm"
                       iconOnly
                       title={t('settings.editProfile')}
-                      onClick={() => setEditingManifest(row)}
+                      onClick={() => {
+                        setAddOpen(false);
+                        setEditingCommand(null);
+                        setEditingManifest(row);
+                      }}
                     >
                       <Pencil size={12} />
                     </Button>
@@ -320,6 +324,7 @@ export function ExternalAgentsSettings() {
                     title={t('settings.editProfile')}
                     onClick={() => {
                       setAddOpen(false);
+                      setEditingManifest(null);
                       setEditingCommand(profile);
                     }}
                   >
@@ -361,6 +366,7 @@ export function ExternalAgentsSettings() {
                 size="sm"
                 onClick={() => {
                   setEditingCommand(null);
+                  setEditingManifest(null);
                   setAddOpen(true);
                 }}
               >
@@ -382,56 +388,48 @@ export function ExternalAgentsSettings() {
       </SettingSection>
 
       {addOpen && (
-        <div className="mt-3 flex flex-col gap-2">
-          <h4 className="text-fg-muted px-1 text-xs font-medium">
-            {t('settings.addAgent')}
-          </h4>
-          <div className="border-edge-default bg-surface ring-edge-default/50 rounded-md p-4 shadow-sm ring-1">
-            <AddAgentFlow
-              members={members}
-              manifestError={manifestError}
-              detectedClis={detectedClis}
-              detectionLoaded={detectionLoaded}
-              onClose={() => setAddOpen(false)}
-              onCommandCreated={async () => {
-                await refreshCommand();
-                setAddOpen(false);
-              }}
-              onManifestCreated={async (ref) => {
-                await refreshMember(ref);
-              }}
-              applyMemberDetail={applyMemberDetail}
-            />
-          </div>
-        </div>
+        <SettingSection title={t('settings.addAgent')}>
+          <AddAgentFlow
+            members={members}
+            manifestError={manifestError}
+            detectedClis={detectedClis}
+            detectionLoaded={detectionLoaded}
+            onClose={() => setAddOpen(false)}
+            onCommandCreated={async () => {
+              await refreshCommand();
+              setAddOpen(false);
+            }}
+            onManifestCreated={async (ref) => {
+              await refreshMember(ref);
+            }}
+            applyMemberDetail={applyMemberDetail}
+          />
+        </SettingSection>
       )}
 
       {editingCommand && (
-        <div className="mt-3 flex flex-col gap-2">
-          <h4 className="text-fg-muted px-1 text-xs font-medium">
-            {t('settings.editExternalAgent')}
-          </h4>
-          <div className="border-edge-default bg-surface ring-edge-default/50 rounded-md p-4 shadow-sm ring-1">
-            <ProfileEditorForm
-              editing={editingCommand}
-              detectedClis={detectedClis}
-              detectionLoaded={detectionLoaded}
-              onClose={() => setEditingCommand(null)}
-              onSaved={refreshCommand}
-            />
-          </div>
-        </div>
+        <SettingSection title={t('settings.editExternalAgent')}>
+          <ProfileEditorForm
+            editing={editingCommand}
+            detectedClis={detectedClis}
+            detectionLoaded={detectionLoaded}
+            onClose={() => setEditingCommand(null)}
+            onSaved={refreshCommand}
+          />
+        </SettingSection>
       )}
 
       {editingManifest && (
-        <ManifestProfileEditor
-          row={editingManifest}
-          onClose={() => setEditingManifest(null)}
-          applyMemberDetail={applyMemberDetail}
-          onAliasSaved={async () => {
-            await refreshMember(memberRefOf(editingManifest));
-          }}
-        />
+        <SettingSection title={t('settings.editExternalAgent')}>
+          <ManifestProfileEditor
+            row={editingManifest}
+            onClose={() => setEditingManifest(null)}
+            applyMemberDetail={applyMemberDetail}
+            onAliasSaved={async () => {
+              await refreshMember(memberRefOf(editingManifest));
+            }}
+          />
+        </SettingSection>
       )}
 
       <Modal

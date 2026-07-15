@@ -1,14 +1,17 @@
 import { Check, Key } from 'lucide-react';
-import React, { useRef, useState } from 'react';
+import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Button } from './Button';
+import { SettingControl } from './SettingControl';
 import { SettingRow } from './SettingRow';
 import { TextInput } from './TextInput';
 
 interface ApiKeyRowProps {
   /** Label for the credential. */
-  title: string;
+  title: React.ReactNode;
+  /** Accessible input label when the visual title is not plain text. */
+  ariaLabel?: string;
   /** Optional description shown beneath the label. */
   description?: string;
   /** Whether a credential is already available to the server. */
@@ -17,29 +20,32 @@ interface ApiKeyRowProps {
   placeholder: string;
   /** Whether a save request is in flight. */
   saving?: boolean;
-  /** Persist a new key when the editor is submitted or loses focus. */
+  /** Persist a new key when the editor is submitted. */
   onSave: (key: string) => void;
+  /** Remove the key stored by Huabu. Omit for credentials that cannot be removed. */
+  onRemove?: () => void;
 }
 
 /**
  * Consistent secret-entry row used by settings panels.
  *
- * The default state exposes only credential status and an intentional
- * Set/Update action. Editing reveals a password input and saves a non-empty
- * value on Enter or blur; saved secrets are never read back into it.
+ * The default state exposes credential status and one Set/Update action.
+ * Editing replaces it with an explicit input and Save/Cancel actions; saved
+ * secrets are never read back into the input.
  */
 export const ApiKeyRow: React.FC<ApiKeyRowProps> = ({
   title,
+  ariaLabel,
   description,
   saved,
   placeholder,
   saving = false,
   onSave,
+  onRemove,
 }) => {
   const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState('');
-  const actionButtonRef = useRef<HTMLButtonElement>(null);
 
   const closeEditor = () => {
     setValue('');
@@ -48,71 +54,87 @@ export const ApiKeyRow: React.FC<ApiKeyRowProps> = ({
 
   const commitValue = () => {
     const key = value.trim();
-    if (key) onSave(key);
+    if (key) {
+      onSave(key);
+    } else if (saved && onRemove) {
+      onRemove();
+    }
     closeEditor();
   };
 
   return (
     <>
       <SettingRow title={title} description={description}>
-        <div className="flex items-center gap-1.5">
-          {saved ? (
-            <Check size={14} className="text-success" />
-          ) : (
-            <Key size={14} className="text-warning" />
-          )}
-          <Button
-            ref={actionButtonRef}
-            variant="outline"
-            tone="neutral"
-            size="sm"
-            onClick={() => {
-              if (editing) {
-                closeEditor();
-              } else {
-                setEditing(true);
+        {editing ? (
+          <SettingControl>
+            <TextInput
+              type="password"
+              aria-label={
+                ariaLabel ?? (typeof title === 'string' ? title : undefined)
               }
-            }}
-            disabled={saving}
-          >
-            {saving
-              ? t('settings.saving')
-              : editing
-                ? t('actions.cancel')
-                : saved
-                  ? t('settings.updateKey')
-                  : t('settings.setApiKey')}
-          </Button>
-        </div>
+              placeholder={placeholder}
+              value={value}
+              onChange={(event) => setValue(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  commitValue();
+                } else if (event.key === 'Escape') {
+                  event.preventDefault();
+                  closeEditor();
+                }
+              }}
+              className="w-full"
+              autoComplete="off"
+              autoFocus
+            />
+            <div className="mt-2 flex items-center justify-end gap-1.5">
+              <Button
+                variant="outline"
+                tone="neutral"
+                size="sm"
+                onClick={closeEditor}
+                disabled={saving}
+              >
+                {t('actions.cancel')}
+              </Button>
+              <Button
+                tone="neutral"
+                size="sm"
+                onClick={commitValue}
+                disabled={saving || (!value.trim() && !(saved && onRemove))}
+              >
+                {saving ? t('settings.saving') : t('actions.save')}
+              </Button>
+            </div>
+          </SettingControl>
+        ) : (
+          <div className="flex items-center gap-2">
+            {saved ? (
+              <Check
+                size={14}
+                className="text-success"
+                aria-label={t('settings.keyConfigured')}
+              />
+            ) : (
+              <Key
+                size={14}
+                className="text-warning"
+                aria-label={t('settings.keyNotConfigured')}
+              />
+            )}
+            <Button
+              variant="outline"
+              tone="neutral"
+              size="sm"
+              onClick={() => setEditing(true)}
+              disabled={saving}
+            >
+              {saved ? t('settings.updateKey') : t('settings.setApiKey')}
+            </Button>
+          </div>
+        )}
       </SettingRow>
-
-      {editing && (
-        <div className="px-3 py-2.5">
-          <TextInput
-            type="password"
-            aria-label={title}
-            placeholder={placeholder}
-            value={value}
-            onChange={(event) => setValue(event.target.value)}
-            onBlur={(event) => {
-              if (event.relatedTarget === actionButtonRef.current) return;
-              commitValue();
-            }}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault();
-                commitValue();
-              } else if (event.key === 'Escape') {
-                event.preventDefault();
-                closeEditor();
-              }
-            }}
-            className="w-full"
-            autoComplete="off"
-            autoFocus
-          />
-        </div>
-      )}
     </>
   );
 };

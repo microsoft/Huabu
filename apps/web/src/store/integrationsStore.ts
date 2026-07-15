@@ -22,7 +22,7 @@ interface IntegrationsState {
 
   /** Load the current masked config from the server. */
   init: () => Promise<void>;
-  /** Save API keys (empty fields keep the existing values). */
+  /** Set API keys or remove them explicitly with null. */
   updateConfig: (update: IntegrationsConfigUpdate) => Promise<void>;
 }
 

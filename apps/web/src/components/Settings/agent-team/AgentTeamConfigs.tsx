@@ -1,9 +1,10 @@
-import { Check, Key, RotateCcw, Save } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { updateAgentTeamConfigs } from '@/api/agent-team';
-import { Button } from '@/components/Common/Button';
+import { ApiKeyRow } from '@/components/Common/ApiKeyRow';
+import { SettingControl } from '@/components/Common/SettingControl';
+import { SettingLabel } from '@/components/Common/SettingLabel';
 import { SettingRow } from '@/components/Common/SettingRow';
 import { TextInput } from '@/components/Common/TextInput';
 import { toast } from '@/components/Common/Toast';
@@ -24,6 +25,7 @@ interface ConfigFieldProps extends AgentTeamConfigsProps {
 
 function ConfigField({ config, field, onDetailChange }: ConfigFieldProps) {
   const { t } = useTranslation('agentTeam');
+  const inputId = useId();
   const [value, setValue] = useState(field.secret ? '' : (field.value ?? ''));
   const [saving, setSaving] = useState(false);
 
@@ -41,7 +43,6 @@ function ConfigField({ config, field, onDetailChange }: ConfigFieldProps) {
       });
       onDetailChange(detail);
       setValue(field.secret ? '' : (next ?? ''));
-      toast(t('configSaved'), { tone: 'success' });
     } catch (error) {
       toast(error instanceof Error ? error.message : t('operationFailed'), {
         tone: 'danger',
@@ -52,72 +53,54 @@ function ConfigField({ config, field, onDetailChange }: ConfigFieldProps) {
   };
 
   const label = (
-    <>
-      {field.name}
-      {field.required && (
-        <span className="text-danger" title={t('required')}>
-          {' '}
-          (*)
-        </span>
-      )}
-    </>
+    <SettingLabel optional={!field.required}>{field.name}</SettingLabel>
   );
 
+  if (field.secret) {
+    return (
+      <ApiKeyRow
+        title={label}
+        ariaLabel={field.name}
+        description={field.description}
+        saved={field.configured}
+        placeholder={t('configValue')}
+        saving={saving}
+        onSave={(next) => void update(next)}
+        onRemove={() => void update(null)}
+      />
+    );
+  }
+
   return (
-    <SettingRow title={label} description={field.description}>
-      <div className="flex min-w-72 items-center justify-end gap-1.5">
-        {field.secret ? (
-          field.configured ? (
-            <Check className="text-success" size={14} />
-          ) : (
-            <Key className="text-warning" size={14} />
-          )
-        ) : null}
+    <SettingRow
+      title={label}
+      description={field.description}
+      labelFor={inputId}
+    >
+      <SettingControl>
         <TextInput
-          type={field.secret ? 'password' : 'text'}
+          id={inputId}
+          type="text"
           value={value}
           onChange={(event) => setValue(event.target.value)}
-          placeholder={
-            field.secret && field.configured
-              ? t('secretConfigured')
-              : t('configValue')
-          }
+          placeholder={t('configValue')}
           disabled={saving}
           autoComplete="off"
           mono
-          className="min-w-0 flex-1"
+          className="w-full"
+          onBlur={() => {
+            if (value !== (field.value ?? '')) {
+              void update(value.trim() ? value : null);
+            }
+          }}
           onKeyDown={(event) => {
-            if (event.key === 'Enter' && (!field.secret || value.length > 0)) {
+            if (event.key === 'Enter') {
               event.preventDefault();
-              void update(value);
+              event.currentTarget.blur();
             }
           }}
         />
-        <Button
-          variant="outline"
-          tone="neutral"
-          size="sm"
-          iconOnly
-          title={t('save')}
-          disabled={saving || (field.secret && value.length === 0)}
-          onClick={() => void update(value)}
-        >
-          <Save className={saving ? 'animate-pulse' : undefined} />
-        </Button>
-        {(field.configured || (!field.secret && field.value !== undefined)) && (
-          <Button
-            variant="ghost"
-            tone="neutral"
-            size="sm"
-            iconOnly
-            title={t('clearConfig')}
-            disabled={saving}
-            onClick={() => void update(null)}
-          >
-            <RotateCcw />
-          </Button>
-        )}
-      </div>
+      </SettingControl>
     </SettingRow>
   );
 }

@@ -243,6 +243,8 @@ export const Popover: FC<PopoverProps> = ({
   useEffect(() => {
     if (!onDismiss) return;
 
+    const dialogsAtOpen = new Set(document.querySelectorAll('[role="dialog"]'));
+
     const handlePointerDown = (e: PointerEvent) => {
       const container = containerRef.current;
       if (!container) return;
@@ -250,9 +252,9 @@ export const Popover: FC<PopoverProps> = ({
       if (!(target instanceof Node)) return;
       if (container.contains(target)) return;
       if (target instanceof Element) {
-        if (target.closest('[role="dialog"], [data-popover-dismiss-ignore]')) {
-          return;
-        }
+        if (target.closest('[data-popover-dismiss-ignore]')) return;
+        const dialog = target.closest('[role="dialog"]');
+        if (dialog && !dialogsAtOpen.has(dialog)) return;
       }
       onDismiss();
     };
@@ -274,12 +276,14 @@ export const Popover: FC<PopoverProps> = ({
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
         onDismiss();
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [onDismiss, dismissOnEscape]);
 
   const isMeasuring = clamped === null;

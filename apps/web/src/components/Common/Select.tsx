@@ -39,6 +39,8 @@ type SelectProps<T extends string = string> = {
   className?: string;
   /** Tooltip text wrapped around the trigger button via `Button`'s `title`. */
   title?: string;
+  /** Accessible name when the visual row label is not a native label. */
+  ariaLabel?: string;
   /** Trigger button props forwarded to `<Button>`. Defaults to outline/neutral/sm. */
   variant?: ButtonProps['variant'];
   tone?: ButtonProps['tone'];
@@ -105,6 +107,7 @@ export function Select<T extends string = string>({
   placeholder = 'Select…',
   className,
   title,
+  ariaLabel,
   variant = 'outline',
   tone = 'neutral',
   size = 'sm',
@@ -187,6 +190,7 @@ export function Select<T extends string = string>({
           disabled={disabled}
           onClick={handleToggle}
           aria-expanded={isOpen}
+          aria-label={ariaLabel}
           title={title}
           tooltipWrapperClassName="flex min-w-0 shrink"
           className={cn(
