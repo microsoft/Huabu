@@ -22,6 +22,8 @@ import { SettingLabel } from '@/components/Settings/Common/SettingLabel';
 import { SettingRow } from '@/components/Settings/Common/SettingRow';
 import { SettingSubGroup } from '@/components/Settings/Common/SettingSubGroup';
 
+import { ProfileEditActions } from './ProfileEditActions';
+import { ProfileEditFields } from './ProfileEditFields';
 import { ProfileFormFooter } from './ProfileFormFooter';
 import { ReadOnlyField } from './ReadOnlyField';
 
@@ -406,97 +408,130 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
     !editing &&
     (!detectionLoaded || !buildCommand(form, detectedClis) || !form.cwd.trim());
 
+  if (editing) {
+    const agentName =
+      detectedClis.find((cli) => cli.id === form.cliId)?.displayName ??
+      (form.cliId === 'custom' ? t('settings.customCommand') : form.cliId);
+    const agentDetails = (
+      <>
+        {detectionLoaded && !isStructured ? (
+          <SettingRow title={t('settings.launchCommand')}>
+            <SettingControl>
+              <ReadOnlyField value={editing.launch.command} mono />
+            </SettingControl>
+          </SettingRow>
+        ) : null}
+        {isStructured && selectedCli?.autoApprove ? (
+          <SettingSubGroup>
+            <SettingRow
+              description={t('settings.autoApproveAllToolCallsHint')}
+              title={
+                <span>
+                  {t('settings.autoApproveAllToolCalls')} (
+                  <code className="font-mono">
+                    {selectedCli.autoApprove.args.join(' ')}
+                  </code>
+                  )
+                </span>
+              }
+            >
+              <input
+                id={autoApproveId}
+                type="checkbox"
+                aria-label={t('settings.autoApproveAllToolCalls')}
+                className="accent-info h-3.5 w-3.5"
+                checked={form.allowAll}
+                disabled
+                readOnly
+              />
+            </SettingRow>
+          </SettingSubGroup>
+        ) : null}
+      </>
+    );
+
+    return (
+      <div className="divide-edge-default flex flex-col divide-y">
+        <ProfileEditFields
+          agentName={agentName}
+          agentDetails={agentDetails}
+          workingDirPath={form.cwd}
+          displayNameId={displayNameId}
+          displayNameControl={
+            <TextInput
+              id={displayNameId}
+              value={form.displayName}
+              onChange={(event) =>
+                setForm((previous) => ({
+                  ...previous,
+                  displayName: event.target.value,
+                }))
+              }
+              className="w-full"
+            />
+          }
+        />
+        <ProfileEditActions
+          saving={saving}
+          onCancel={onClose}
+          onSave={() => void handleSubmit()}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="divide-edge-default flex flex-col divide-y">
       {/* ─── Agent ─────────────────────────────────────────────── */}
       <div className="flex flex-col">
-        {/*
-         * Hide the picker on edit because `cliId` is immutable in the
-         * update schema (changing it would silently break the persisted
-         * binding). Show the chosen agent as a static label so the user
-         * still sees what's wired up.
-         */}
-        {editing ? (
-          <div className="flex flex-col">
-            <SettingRow title={t('settings.agent')}>
+        <div className="flex flex-col">
+          <SettingRow title={t('settings.agent')}>
+            <SettingControl>
+              {!detectionLoaded ? (
+                // Detection still in flight — a neutral placeholder avoids
+                // flashing a premature selection before the CLIs have
+                // actually been probed.
+                <div className="border-edge-default bg-surface text-fg-subtle rounded border px-2 py-1 text-xs leading-snug">
+                  {t('settings.detectingClis')}
+                </div>
+              ) : (
+                // Detected CLIs first, then "Custom command" as the last
+                // option. Selecting it reveals the raw launch-command
+                // field below.
+                <Select
+                  value={form.cliId}
+                  onChange={handleCliChange}
+                  options={cliOptions}
+                  ariaLabel={t('settings.agent')}
+                  className="w-full"
+                />
+              )}
+            </SettingControl>
+          </SettingRow>
+          {form.cliId === 'custom' ? (
+            <SettingRow
+              labelFor={commandId}
+              title={t('settings.launchCommand')}
+              description={t('settings.launchCommandHint')}
+            >
               <SettingControl>
-                <ReadOnlyField
-                  value={
-                    detectedClis.find((c) => c.id === form.cliId)
-                      ?.displayName ??
-                    (form.cliId === 'custom'
-                      ? t('settings.customCommand')
-                      : form.cliId)
+                <TextInput
+                  id={commandId}
+                  value={form.customCommand}
+                  onChange={(e) =>
+                    setForm((p) => ({
+                      ...p,
+                      customCommand: e.target.value,
+                    }))
                   }
+                  placeholder="/usr/local/bin/copilot --acp --allow-all"
+                  mono
+                  className="w-full"
                 />
               </SettingControl>
             </SettingRow>
-            {/*
-             * Only custom-command Profiles expose the raw command — for a
-             * structured (detected-CLI) Profile the command is derived from
-             * the Agent + auto-approve toggle below, so showing it too would
-             * leak an implementation detail. Wait for detection to settle
-             * before deciding, so a structured Profile doesn't flash its
-             * command and then hide it once the CLI is recognised.
-             */}
-            {detectionLoaded && !isStructured ? (
-              <SettingRow title={t('settings.launchCommand')}>
-                <SettingControl>
-                  <ReadOnlyField value={editing.launch.command} mono />
-                </SettingControl>
-              </SettingRow>
-            ) : null}
-          </div>
-        ) : (
-          <div className="flex flex-col">
-            <SettingRow title={t('settings.agent')}>
-              <SettingControl>
-                {!detectionLoaded ? (
-                  // Detection still in flight — a neutral placeholder avoids
-                  // flashing a premature selection before the CLIs have
-                  // actually been probed.
-                  <div className="border-edge-default bg-surface text-fg-subtle rounded border px-2 py-1 text-xs leading-snug">
-                    {t('settings.detectingClis')}
-                  </div>
-                ) : (
-                  // Detected CLIs first, then "Custom command" as the last
-                  // option. Selecting it reveals the raw launch-command
-                  // field below.
-                  <Select
-                    value={form.cliId}
-                    onChange={handleCliChange}
-                    options={cliOptions}
-                    ariaLabel={t('settings.agent')}
-                    className="w-full"
-                  />
-                )}
-              </SettingControl>
-            </SettingRow>
-            {form.cliId === 'custom' ? (
-              <SettingRow
-                labelFor={commandId}
-                title={t('settings.launchCommand')}
-                description={t('settings.launchCommandHint')}
-              >
-                <SettingControl>
-                  <TextInput
-                    id={commandId}
-                    value={form.customCommand}
-                    onChange={(e) =>
-                      setForm((p) => ({
-                        ...p,
-                        customCommand: e.target.value,
-                      }))
-                    }
-                    placeholder="/usr/local/bin/copilot --acp --allow-all"
-                    mono
-                    className="w-full"
-                  />
-                </SettingControl>
-              </SettingRow>
-            ) : null}
-          </div>
-        )}
+          ) : null}
+        </div>
 
         {isStructured && selectedCli?.autoApprove && (
           <SettingSubGroup>
@@ -526,13 +561,8 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
                 id={autoApproveId}
                 type="checkbox"
                 aria-label={t('settings.autoApproveAllToolCalls')}
-                className={
-                  editing
-                    ? 'accent-info h-3.5 w-3.5'
-                    : 'accent-info h-3.5 w-3.5 cursor-pointer'
-                }
+                className="accent-info h-3.5 w-3.5 cursor-pointer"
                 checked={form.allowAll}
-                disabled={editing !== null}
                 onChange={(e) =>
                   setForm((p) => ({ ...p, allowAll: e.target.checked }))
                 }
@@ -543,25 +573,21 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
       </div>
 
       <SettingRow
-        {...(editing ? {} : { labelFor: cwdId })}
+        labelFor={cwdId}
         title={t('settings.workingDirectory')}
         description={t('settings.workingDirectoryHint')}
       >
         <SettingControl>
-          {editing ? (
-            <ReadOnlyField value={form.cwd} mono />
-          ) : (
-            <PathInput
-              id={cwdId}
-              value={form.cwd}
-              onChange={setCwd}
-              placeholder="/Users/me/project-x"
-              size="sm"
-              mono
-              pickTitle={t('settings.pickFolder')}
-              inputClassName="rounded"
-            />
-          )}
+          <PathInput
+            id={cwdId}
+            value={form.cwd}
+            onChange={setCwd}
+            placeholder="/Users/me/project-x"
+            size="sm"
+            mono
+            pickTitle={t('settings.pickFolder')}
+            inputClassName="rounded"
+          />
         </SettingControl>
       </SettingRow>
 
@@ -603,11 +629,7 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
           onClick={() => void handleSubmit()}
           disabled={saving || createDisabled}
         >
-          {saving
-            ? t('settings.saving')
-            : editing
-              ? t('settings.saveChanges')
-              : t('settings.createProfile')}
+          {saving ? t('settings.saving') : t('settings.createProfile')}
         </Button>
       </ProfileFormFooter>
     </div>

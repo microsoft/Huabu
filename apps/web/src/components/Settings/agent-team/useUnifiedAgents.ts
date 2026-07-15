@@ -5,8 +5,7 @@
  * It fuses the two backend surfaces that used to power separate tabs:
  *
  *  - `acpProfilesStore` (`GET /api/acp/profiles`) — command-backed ACP
- *    Profiles, the agentlet daemon health snapshot, and legacy Agent
- *    Team profiles awaiting migration.
+ *    Profiles and the agentlet daemon health snapshot.
  *  - Agent Team Settings (`GET /api/agent-team/*`) — the bundled manifest
  *    members, their member-level Configs, and every manifest Profile
  *    (including ones that are not yet prepared, which the ACP list omits
@@ -70,7 +69,7 @@ export interface UnifiedAgents {
   members: ManifestMemberGroup[];
   /** Every manifest Profile flattened with its owning member for the list. */
   manifestProfiles: ManifestProfileRow[];
-  /** Refresh the ACP surface (command Profiles + daemon + legacy). */
+  /** Refresh the ACP surface (command Profiles + daemon snapshot). */
   refreshCommand: () => Promise<void>;
   /** Refresh every bundled member detail. */
   refreshManifest: () => Promise<void>;

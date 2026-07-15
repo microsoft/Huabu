@@ -16,7 +16,7 @@
  * kinds run on the same daemon.
  */
 
-import { ArrowLeft, Pencil, Play, Plus, Square, Trash2 } from 'lucide-react';
+import { Pencil, Play, Plus, Square, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -74,7 +74,18 @@ interface PendingDelete {
   member?: { machine: string; manifestPath: string };
 }
 
-export function ExternalAgentsSettings() {
+export interface ExternalAgentsNavigation {
+  title: string;
+  onBack: () => void;
+}
+
+interface ExternalAgentsSettingsProps {
+  onNavigationChange: (navigation: ExternalAgentsNavigation | null) => void;
+}
+
+export function ExternalAgentsSettings({
+  onNavigationChange,
+}: ExternalAgentsSettingsProps) {
   const { t } = useTranslation();
   const { t: tAgent } = useTranslation('agentTeam');
   const {
@@ -100,7 +111,6 @@ export function ExternalAgentsSettings() {
   const confirmDeleteRef = useRef<HTMLButtonElement>(null);
   const returnTargetRef = useRef<string | null>(null);
   const activeViewRef = useRef<HTMLDivElement>(null);
-  const editorHeadingRef = useRef<HTMLHeadingElement>(null);
   const enterDirectionRef = useRef<'forward' | 'back' | null>(null);
   const transitionTimerRef = useRef<number | null>(null);
   const exitAnimationRef = useRef<Animation | null>(null);
@@ -153,6 +163,24 @@ export function ExternalAgentsSettings() {
     switchView('back', () => setEditor(null));
   }, [switchView]);
 
+  const editorTitle = editor
+    ? editor.kind === 'create'
+      ? t('settings.newAgentProfile')
+      : t('settings.editAgentProfile', {
+          name:
+            editor.kind === 'edit-command'
+              ? editor.profile.alias
+              : editor.row.profile.alias,
+        })
+    : null;
+
+  useEffect(() => {
+    onNavigationChange(
+      editorTitle ? { title: editorTitle, onBack: closeEditor } : null,
+    );
+    return () => onNavigationChange(null);
+  }, [closeEditor, editorTitle, onNavigationChange]);
+
   useEffect(
     () => () => {
       if (transitionTimerRef.current !== null) {
@@ -168,11 +196,6 @@ export function ExternalAgentsSettings() {
     const view = activeViewRef.current;
     enterDirectionRef.current = null;
     if (!direction) return;
-    // Entering the editor unmounts the trigger button, which would drop
-    // focus to <body>. Pull focus to the editor heading so keyboard and
-    // screen-reader users land in the new view. (Closing is handled by
-    // restoreTriggerFocus, which returns focus to the originating trigger.)
-    if (direction === 'forward') editorHeadingRef.current?.focus();
     if (
       !view ||
       window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -327,32 +350,6 @@ export function ExternalAgentsSettings() {
       <div className="-mx-px overflow-x-clip px-px">
         {editor ? (
           <div key="editor" ref={activeViewRef}>
-            <header className="mb-3">
-              <Button
-                variant="ghost"
-                tone="neutral"
-                size="sm"
-                className="px-1.5"
-                onClick={closeEditor}
-              >
-                <ArrowLeft size={12} />
-                <span>{t('settings.backToAgents')}</span>
-              </Button>
-              <h4
-                ref={editorHeadingRef}
-                tabIndex={-1}
-                className="text-fg-default mt-2 truncate text-sm font-semibold outline-none"
-              >
-                {editor.kind === 'create'
-                  ? t('settings.newAgentProfile')
-                  : t('settings.editAgentProfile', {
-                      name:
-                        editor.kind === 'edit-command'
-                          ? editor.profile.alias
-                          : editor.row.profile.alias,
-                    })}
-              </h4>
-            </header>
             <ProfileFormFooterTarget target={footerTarget}>
               <SettingSection>
                 {editor.kind === 'create' ? (

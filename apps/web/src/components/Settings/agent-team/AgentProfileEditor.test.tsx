@@ -16,6 +16,7 @@ const apiMocks = vi.hoisted(() => ({
   createCommand: vi.fn(),
   createManifest: vi.fn(),
   setupManifest: vi.fn(),
+  patchManifest: vi.fn(),
   listClis: vi.fn(),
 }));
 
@@ -28,7 +29,7 @@ vi.mock('@/api/acp', () => ({
 vi.mock('@/api/agent-team', () => ({
   createAgentTeamProfile: apiMocks.createManifest,
   setupAgentTeamProfile: apiMocks.setupManifest,
-  patchAgentTeamProfile: vi.fn(),
+  patchAgentTeamProfile: apiMocks.patchManifest,
   updateAgentTeamConfigs: vi.fn(),
 }));
 
@@ -142,6 +143,40 @@ function renderFlow() {
   );
 }
 
+function renderManifestEditor(onClose = vi.fn()) {
+  container = document.createElement('div');
+  document.body.appendChild(container);
+  root = createRoot(container);
+  act(() =>
+    root?.render(
+      <AgentProfileEditor
+        mode="edit-manifest"
+        row={{
+          member: members[0].member,
+          config: members[0].config,
+          profile: {
+            id: 'profile-1',
+            alias: 'Reviewer',
+            agentletId: 'machine-a',
+            workingDirPath: 'C:\\work\\project',
+            launch: {
+              kind: 'agent-team-manifest',
+              manifestPath: 'C:\\templates\\reviewer\\agentlet.yaml',
+              harness: 'copilot',
+            },
+            preparation: { status: 'ready', completedAt: 1 },
+            setupLog: [],
+          },
+        }}
+        detectedClis={agents}
+        onClose={onClose}
+        applyMemberDetail={vi.fn()}
+        onAliasSaved={vi.fn()}
+      />,
+    ),
+  );
+}
+
 afterEach(() => {
   act(() => root?.unmount());
   container?.remove();
@@ -227,5 +262,42 @@ describe('AgentProfileEditor (create)', () => {
       },
     });
     expect(apiMocks.setupManifest).toHaveBeenCalledWith('profile-1');
+  });
+});
+
+describe('AgentProfileEditor (edit manifest)', () => {
+  it('uses the shared editor fields and saves explicitly', async () => {
+    apiMocks.patchManifest.mockResolvedValue(undefined);
+    const onClose = vi.fn();
+    renderManifestEditor(onClose);
+
+    expect(container?.textContent).toContain('Reviewer');
+    expect(container?.textContent).toContain('GitHub Copilot');
+    expect(container?.textContent).toContain('C:\\work\\project');
+
+    const name = container?.querySelector<HTMLInputElement>('input');
+    await act(async () => {
+      if (!name) return;
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        'value',
+      )?.set;
+      valueSetter?.call(name, 'Project Reviewer');
+      name.dispatchEvent(new Event('input', { bubbles: true }));
+      name.dispatchEvent(new Event('blur', { bubbles: true }));
+    });
+    expect(apiMocks.patchManifest).not.toHaveBeenCalled();
+
+    const save = [...(container?.querySelectorAll('button') ?? [])].at(-1);
+    await act(async () => {
+      save?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(apiMocks.patchManifest).toHaveBeenCalledWith('profile-1', {
+      alias: 'Project Reviewer',
+    });
+    expect(onClose).toHaveBeenCalledOnce();
   });
 });

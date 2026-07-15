@@ -36,8 +36,9 @@ import { SettingRow } from '@/components/Settings/Common/SettingRow';
 import { SettingSubGroup } from '@/components/Settings/Common/SettingSubGroup';
 
 import { AgentTeamConfigs } from './AgentTeamConfigs';
+import { ProfileEditActions } from './ProfileEditActions';
+import { ProfileEditFields } from './ProfileEditFields';
 import { ProfileFormFooter } from './ProfileFormFooter';
-import { ReadOnlyField } from './ReadOnlyField';
 
 import type {
   ManifestMemberGroup,
@@ -347,7 +348,7 @@ function EditManifestProfileForm({
   const { t } = useTranslation();
   const { t: tAgent } = useTranslation('agentTeam');
   const aliasId = useId();
-  const { profile, config } = row;
+  const { profile, config, member } = row;
   const [alias, setAlias] = useState(profile.alias);
   const [saving, setSaving] = useState(false);
   // Resolve the harness id to the same display name the list uses (e.g.
@@ -359,11 +360,17 @@ function EditManifestProfileForm({
 
   const saveAlias = async () => {
     const next = alias.trim();
-    if (!next || next === profile.alias) return;
+    if (!next) return;
+    if (next === profile.alias) {
+      onClose();
+      return;
+    }
     setSaving(true);
     try {
       await patchAgentTeamProfile(profile.id, { alias: next });
       await onAliasSaved();
+      toast(t('settings.profileUpdated'), { tone: 'success' });
+      onClose();
     } catch (error) {
       toast(
         error instanceof Error ? error.message : tAgent('operationFailed'),
@@ -376,52 +383,42 @@ function EditManifestProfileForm({
 
   return (
     <div className="divide-edge-default flex flex-col divide-y">
-      <SettingRow title={tAgent('alias')} labelFor={aliasId}>
-        <SettingControl>
+      <ProfileEditFields
+        preset={{
+          name: member.name,
+          description: member.description || undefined,
+          configuration:
+            config.fields.length > 0 ? (
+              <SettingSubGroup>
+                <p className="text-fg-subtle px-3 py-2 text-[11px] leading-snug">
+                  {tAgent('tokenSharedHint')}
+                </p>
+                <AgentTeamConfigs
+                  config={config}
+                  onDetailChange={applyMemberDetail}
+                />
+              </SettingSubGroup>
+            ) : undefined,
+        }}
+        agentName={harnessLabel}
+        workingDirPath={profile.workingDirPath}
+        displayNameId={aliasId}
+        displayNameControl={
           <TextInput
             id={aliasId}
             value={alias}
             onChange={(event) => setAlias(event.target.value)}
-            onBlur={() => void saveAlias()}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault();
-                event.currentTarget.blur();
-              }
-            }}
             disabled={saving}
             className="w-full"
           />
-        </SettingControl>
-      </SettingRow>
-
-      <SettingRow title={tAgent('harness')}>
-        <SettingControl>
-          <ReadOnlyField value={harnessLabel} />
-        </SettingControl>
-      </SettingRow>
-      <SettingRow title={tAgent('workingDirectory')}>
-        <SettingControl>
-          <ReadOnlyField value={profile.workingDirPath} mono />
-        </SettingControl>
-      </SettingRow>
-
-      {config.fields.length > 0 ? (
-        <div>
-          <p className="text-fg-subtle px-3 py-2 text-[11px] leading-snug">
-            {tAgent('tokenSharedHint')}
-          </p>
-          <AgentTeamConfigs
-            config={config}
-            onDetailChange={applyMemberDetail}
-          />
-        </div>
-      ) : null}
-      <ProfileFormFooter>
-        <Button variant="outline" tone="neutral" size="sm" onClick={onClose}>
-          {t('actions.close')}
-        </Button>
-      </ProfileFormFooter>
+        }
+      />
+      <ProfileEditActions
+        saving={saving}
+        saveDisabled={!alias.trim()}
+        onCancel={onClose}
+        onSave={() => void saveAlias()}
+      />
     </div>
   );
 }

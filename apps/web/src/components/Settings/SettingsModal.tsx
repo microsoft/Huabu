@@ -1,14 +1,18 @@
-import { X } from 'lucide-react';
-import React, { useEffect, useId, useRef, useState } from 'react';
+import { ArrowLeft, X } from 'lucide-react';
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { Button } from '@/components/Common/Button';
 import { SettingSection } from '@/components/Settings/Common/SettingSection';
 import { getElectronBridge } from '@/hooks/useElectron';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 import { useLLMStore } from '@/store/llmStore';
 import { useSettingsUiStore } from '@/store/settingsUiStore';
 
-import { ExternalAgentsSettings } from './agent-team/ExternalAgentsSettings';
+import {
+  ExternalAgentsSettings,
+  type ExternalAgentsNavigation,
+} from './agent-team/ExternalAgentsSettings';
 import { GeneralSettings } from './sections/GeneralSettings';
 import { ImageProviderSettings } from './sections/ImageProviderSettings';
 import { IntegrationsSettings } from './sections/IntegrationsSettings';
@@ -61,9 +65,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const requestedTab = useSettingsUiStore((s) => s.requestedTab);
   const clearRequestedTab = useSettingsUiStore((s) => s.clearRequestedTab);
   const [activeTab, setActiveTab] = useState<SettingsTab>(TABS[0].id);
+  const [externalAgentsNavigation, setExternalAgentsNavigation] =
+    useState<ExternalAgentsNavigation | null>(null);
   const titleId = useId();
+  const contentHeadingRef = useRef<HTMLHeadingElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+
+  const handleExternalAgentsNavigationChange = useCallback(
+    (navigation: ExternalAgentsNavigation | null) => {
+      setExternalAgentsNavigation(navigation);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (externalAgentsNavigation) contentHeadingRef.current?.focus();
+  }, [externalAgentsNavigation]);
 
   // Deep-link support: a caller (e.g. the chat "Add agent" row) can ask
   // to open Settings on a specific tab via `settingsUiStore.open(tab)`.
@@ -108,6 +126,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const activeLabelKey =
     TABS.find((tab) => tab.id === activeTab)?.labelKey ?? 'settings.general';
+  const contentTitle =
+    activeTab === 'agents' && externalAgentsNavigation
+      ? externalAgentsNavigation.title
+      : t(activeLabelKey);
 
   // In the Electron shell keep the custom title bar (`WindowChrome`)
   // fully visible above the modal: offset the overlay below the
@@ -181,9 +203,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         {/* Right content pane */}
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="border-edge-default flex shrink-0 items-center justify-between border-b px-5 py-3">
-            <h3 className="text-fg-default text-sm font-semibold">
-              {t(activeLabelKey)}
-            </h3>
+            <div className="flex min-w-0 items-center gap-1.5">
+              {activeTab === 'agents' && externalAgentsNavigation && (
+                <Button
+                  variant="ghost"
+                  tone="neutral"
+                  size="sm"
+                  iconOnly
+                  title={t('settings.backToAgents')}
+                  onClick={externalAgentsNavigation.onBack}
+                >
+                  <ArrowLeft />
+                </Button>
+              )}
+              <h3
+                ref={contentHeadingRef}
+                tabIndex={-1}
+                className="text-fg-default truncate text-sm font-semibold outline-none"
+              >
+                {contentTitle}
+              </h3>
+            </div>
             <button
               type="button"
               onClick={onClose}
@@ -207,7 +247,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <IntegrationsSettings />
               </>
             )}
-            {activeTab === 'agents' && <ExternalAgentsSettings />}
+            {activeTab === 'agents' && (
+              <ExternalAgentsSettings
+                onNavigationChange={handleExternalAgentsNavigationChange}
+              />
+            )}
           </div>
         </div>
       </div>
