@@ -29,28 +29,10 @@ function createRegistry(): AgentTeamSettingsRegistry {
     listMachines: vi.fn(() => [
       { machine: 'machine-a', hostname: 'machine-a', platform: 'linux' },
     ]),
-    listRoots: vi.fn(() => []),
     listMemberSummaries: vi.fn(() => []),
     getMemberDetail: vi.fn(() => {
       throw new Error('No members');
     }),
-    addRoot: vi.fn(async (root) => ({
-      ok: true as const,
-      root: {
-        ...root,
-        scan: { status: 'success' as const, scannedAt: 1, diagnostics: [] },
-      },
-      members: [],
-    })),
-    rescanRoot: vi.fn(async (root) => ({
-      ok: true as const,
-      root: {
-        ...root,
-        scan: { status: 'success' as const, scannedAt: 1, diagnostics: [] },
-      },
-      members: [],
-    })),
-    removeRoot: vi.fn(() => true),
     updateMemberConfigs: vi.fn(async (machine, manifestPath) => ({
       machine,
       manifestPath,
@@ -139,13 +121,41 @@ describe('Agent Team Settings routes', () => {
 
     const response = await app.inject({
       method: 'POST',
-      url: '/api/agent-team/settings/roots',
-      payload: { machine: ' machine-a ', path: '' },
+      url: '/api/agent-team/settings/profiles',
+      payload: {
+        alias: '',
+        agentletId: 'machine-a',
+        workingDirPath: 'relative/path',
+        launch: {
+          kind: 'agent-team-manifest',
+          manifestPath: '/teams/reviewer/agentlet.yaml',
+          harness: 'copilot',
+        },
+      },
     });
 
     expect(response.statusCode).toBe(400);
     expect(response.json()).toMatchObject({ code: 'validation_failed' });
-    expect(registry.addRoot).not.toHaveBeenCalled();
+    expect(registry.createProfile).not.toHaveBeenCalled();
+  });
+
+  it('does not expose collection-root mutations', async () => {
+    app = Fastify({ logger: false });
+    await app.register(
+      createAgentTeamRoutes(
+        () => createRegistry(),
+        () => 'machine-a',
+      ),
+      { prefix: '/api/agent-team' },
+    );
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/agent-team/settings/roots',
+      payload: { machine: 'machine-a', path: '/teams' },
+    });
+
+    expect(response.statusCode).toBe(404);
   });
 
   it('maps expected domain conflicts without hiding infrastructure errors', async () => {

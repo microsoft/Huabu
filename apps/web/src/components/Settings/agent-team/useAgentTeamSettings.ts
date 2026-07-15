@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { getAgentTeamSettings } from '@/api/agent-team';
 
@@ -7,7 +7,6 @@ import type { AgentTeamSettingsState } from '@sediment/shared';
 export function useAgentTeamSettings() {
   const [state, setState] = useState<AgentTeamSettingsState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [pendingAction, setPendingAction] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -30,27 +29,8 @@ export function useAgentTeamSettings() {
     };
   }, []);
 
-  const mutate = useCallback(
-    async (
-      action: string,
-      operation: () => Promise<AgentTeamSettingsState>,
-    ): Promise<void> => {
-      setPendingAction(action);
-      try {
-        const snapshot = await operation();
-        setState(snapshot);
-        setLoadError(null);
-      } finally {
-        setPendingAction(null);
-      }
-    },
-    [],
-  );
-
   return {
     state,
     loadError,
-    pendingAction,
-    mutate,
   };
 }

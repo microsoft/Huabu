@@ -44,34 +44,36 @@ Huabu uses **Agent Teams** as its managed external-agent extension mechanism.
 - **Huabu-managed Agent Team** — an Agent Team packaged for Huabu workflows,
   usually bundled under `agent-teams/`
 
-The generic `agentlet.yaml` package contract and daemon execution operations are defined in the agentlet spec. The user downloads an Agent Team collection onto a daemon host and then manages it from Huabu; the user does not run `agentlet agent-team setup` or register an External Agent profile.
+The generic `agentlet.yaml` package contract and daemon execution operations are defined in the agentlet spec. Huabu currently ships one fixed Agent Team collection with the desktop application; users do not download a collection, configure a collection root, run `agentlet agent-team setup`, or register an External Agent profile.
 
-- Settings discovers packages from user-selected collection roots on connected agentlet daemons.
+- The Server automatically registers the bundled read-only collection after the locally supervised agentlet connects.
+- Registration removes roots persisted by earlier custom-collection builds; their member metadata and Profiles remain durable but become unavailable, and Settings projects only active bundled members.
 - Member Configs are shared by manifest-backed Profiles of the same package; secrets remain in the host SecretStore and are redacted from read APIs.
+- Each Profile keeps the same user-selected `workingDirPath` model as a command-backed ACP Profile. Setup prepares that writable directory, and runtime uses it as the agent process `cwd`; the bundled package directory is never used as the writable workspace.
 - Every non-internal agent uses one Agenetes Agent Profile. Manifest Profiles carry immutable placement, manifest, harness, and working-directory fields plus authoritative durable preparation state; command Profiles carry immutable placement, command, and working directory. Setup diagnostics are stored separately from the Profile CRD.
 - Manifest Profiles use explicit Setup, Retry, and Cancel actions. A Profile is selectable only when its member is active, required Configs are complete, and preparation is ready; command Profiles are selectable immediately.
 - The Space and Huabu Reachback remain the shared workspace and read/write bridge available to running agents.
 
 ### Prerequisites
 
-Each machine that hosts Agent Team packages runs an agentlet daemon connected to the Huabu server's Agenetes Gateway. In the Sediment monorepo, `pnpm install` provides the agentlet binaries used by development environments.
+The locally supervised agentlet daemon scans and runs the bundled Agent Team packages through the Huabu server's Agenetes Gateway. In the Sediment monorepo, `pnpm install` provides the agentlet binaries used by development environments.
 
 ```bash
 pnpm install
 ```
 
-The Agent Teams Settings tab lists connected daemon machines. It identifies the locally supervised daemon explicitly, defaults root creation to that machine, and exposes the native folder picker only for that local machine. Remote roots remain editable as absolute daemon-host paths and are validated by daemon-side scan.
+The Agent Teams Settings tab lists bundled templates, Configs, Profiles, and preparation state. Collection-root and remote-package management are not exposed. Profile creation uses the native folder picker when available and otherwise accepts an absolute working-directory path.
 
 ## 3. Architecture: Agent Connection Topology
 
 ```text
-Huabu Settings UI
-       │ loopback REST
-       ▼
-Huabu Fastify adapter ── host storage + SecretStore
+Bundled collection ── automatic local registration
        │
        ▼
-Agenetes Agent Team registry ── durable roots, members, Configs, Profiles, preparation
+Huabu Fastify adapter ── host storage + SecretStore + loopback REST
+       │
+       ▼
+Agenetes Agent Team registry ── fixed root, members, Configs, Profiles, preparation
        │ AgentTeamControlPort
        ▼
 Agenetes Agentlet Gateway ── one connected profile per daemon machine
@@ -89,7 +91,7 @@ The current implementation follows these ownership boundaries:
 1. **Generic packaging and execution live in agentlet** — `agentlet.yaml` and daemon-side scan/setup/validate behavior are not Huabu-specific conventions.
 2. **Agenetes owns the control and runtime Profile plane** — `@agenetes/agent-team` owns durable discovery, Config metadata, the unified Profile registry, setup orchestration, availability, and Profile-to-ACP lowering; `@agenetes/agentlet-host.mountAgenetes(...)` internally composes the registry with the single Gateway instance.
 3. **Huabu supplies host capabilities** — Huabu provides an absolute storage directory, the SecretStore adapter, loopback-only REST projection, and Settings UI. Huabu does not inject, select, or coordinate the Gateway.
-4. **Machine presence is sampled live** — the Gateway projects connected daemon profiles through `AgentTeamControlPort`; each Agent Team Settings overview read returns the currently connected machines.
+4. **Bundled discovery follows local machine presence** — Huabu waits for the locally supervised daemon to connect, then registers and scans the fixed collection copied next to the Server bundle.
 5. **Setup is explicit and durable** — Setup/Retry drives preparation, required Configs gate setup and selection, cancellation and errors remain visible, and interrupted in-flight setup reconciles to an explicit error on restart.
 6. **Settings reads are redacted** — secret plaintext never crosses the Settings API; the UI can only replace or clear a secret and observe whether it is configured.
 7. **Runtime snapshots are immutable** — a new external thread snapshots the selected Profile's placement and launch fields. Profile deletion blocks new bindings without changing existing threads; manifest session spawn loads current Configs and validates the prepared workspace before delegating to the ACP driver.
@@ -141,7 +143,7 @@ This is why "agent as the universal interface" is not just a nice idea for Huabu
 | [`external/agenetes/packages/agent-team/`](../../external/agenetes/packages/agent-team/)             | Durable Agent Team control-plane aggregate, unified Profile registry and driver, Config resolution, and setup state machine. |
 | [`external/agenetes/packages/agentlet-gateway/`](../../external/agenetes/packages/agentlet-gateway/) | Connected daemon catalog and routed Agent Team control operations.                                                           |
 | [`external/agenetes/packages/agentlet-host/`](../../external/agenetes/packages/agentlet-host/)       | Agenetes composition boundary that mounts the Gateway and Agent Team registry.                                               |
-| [`apps/server/src/modules/agent-team/`](../../apps/server/src/modules/agent-team/)                   | Loopback-only REST adapter and host capability projection.                                                                   |
+| [`apps/server/src/modules/agent-team/`](../../apps/server/src/modules/agent-team/)                   | Bundled collection registration, loopback-only REST adapter, and host capability projection.                                 |
 | [`packages/shared/src/types/api/agent-team.ts`](../../packages/shared/src/types/api/agent-team.ts)   | Shared Zod wire contracts for Settings reads and mutations.                                                                  |
-| [`apps/web/src/components/Settings/agent-team/`](../../apps/web/src/components/Settings/agent-team/) | Roots, lazy member detail, Configs, manifest Profiles, preparation status, and live synchronization UI.                      |
+| [`apps/web/src/components/Settings/agent-team/`](../../apps/web/src/components/Settings/agent-team/) | Lazy bundled-member detail, Configs, manifest Profiles, user-selected working directories, and preparation UI.               |
 | [`external/agentlet/spec/agent-team.md`](../../external/agentlet/spec/agent-team.md)                 | Generic package and daemon execution contract.                                                                               |

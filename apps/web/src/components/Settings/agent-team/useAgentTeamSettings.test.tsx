@@ -21,16 +21,8 @@ const emptyState = (localMachine: string): AgentTeamSettingsState => ({
   members: [],
 });
 
-let latestMutate:
-  | ((
-      action: string,
-      operation: () => Promise<AgentTeamSettingsState>,
-    ) => Promise<void>)
-  | null = null;
-
 function Harness() {
-  const { state, loadError, mutate } = useAgentTeamSettings();
-  latestMutate = mutate;
+  const { state, loadError } = useAgentTeamSettings();
   return (
     <div>
       <span data-state>{state?.localMachine ?? 'loading'}</span>
@@ -58,7 +50,6 @@ afterEach(() => {
   root = null;
   container = null;
   apiMocks.getSettings.mockReset();
-  latestMutate = null;
 });
 
 describe('useAgentTeamSettings', () => {
@@ -85,29 +76,5 @@ describe('useAgentTeamSettings', () => {
     });
 
     expect(view.querySelector('[data-error]')?.textContent).toBe('unavailable');
-  });
-
-  it('applies the REST snapshot returned by a mutation', async () => {
-    let resolveMutation: ((state: AgentTeamSettingsState) => void) | undefined;
-    apiMocks.getSettings.mockResolvedValueOnce(emptyState('initial'));
-
-    const view = renderHarness();
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    const mutation = new Promise<AgentTeamSettingsState>((resolve) => {
-      resolveMutation = resolve;
-    });
-    let mutationDone: Promise<void> | undefined;
-    act(() => {
-      mutationDone = latestMutate?.('update', () => mutation);
-    });
-    await act(async () => {
-      resolveMutation?.(emptyState('updated'));
-      await mutationDone;
-    });
-
-    expect(view.querySelector('[data-state]')?.textContent).toBe('updated');
   });
 });

@@ -171,6 +171,7 @@ describe('AgentTeamProfiles', () => {
   it('shows harness selection only while creating a Profile', () => {
     const createView = render([]);
     expect(createView.querySelector('select')).not.toBeNull();
+    expect(createView.querySelector('input')?.value).toBe('');
 
     act(() => root?.unmount());
     root = createRoot(createView);
@@ -186,6 +187,31 @@ describe('AgentTeamProfiles', () => {
     });
     expect(createView.querySelector('select')).toBeNull();
     expect(createView.textContent).toContain(profile.workingDirPath);
+  });
+
+  it('keeps the user-selected working directory when the harness changes', () => {
+    const view = render([]);
+    const inputs = view.querySelectorAll('input');
+    const workingDirectory = inputs[1];
+    const harness = view.querySelector('select');
+
+    act(() => {
+      if (workingDirectory) {
+        Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          'value',
+        )?.set?.call(workingDirectory, '/projects/presentation');
+        workingDirectory.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    });
+    act(() => {
+      if (harness) {
+        harness.value = 'copilot';
+        harness.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+
+    expect(workingDirectory?.value).toBe('/projects/presentation');
   });
 
   it('blocks setup until required Configs are ready', () => {

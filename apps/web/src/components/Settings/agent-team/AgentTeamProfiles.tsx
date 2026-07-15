@@ -31,15 +31,6 @@ interface AgentTeamProfilesProps {
   onProfilesChange: (profiles: AgentTeamManifestProfileDetailView[]) => void;
 }
 
-function workspaceDefault(manifestPath: string, harness: string): string {
-  const slash = manifestPath.lastIndexOf('/');
-  const backslash = manifestPath.lastIndexOf('\\');
-  const index = Math.max(slash, backslash);
-  const separator = backslash > slash ? '\\' : '/';
-  const directory = index >= 0 ? manifestPath.slice(0, index) : manifestPath;
-  return `${directory}${separator}workspaces${separator}${harness}`;
-}
-
 function statusTone(
   status: AgentTeamManifestProfileView['preparation']['status'],
 ): string {
@@ -76,9 +67,7 @@ export function AgentTeamProfiles({
   const [showCreate, setShowCreate] = useState(profiles.length === 0);
   const [alias, setAlias] = useState('');
   const [harness, setHarness] = useState(firstHarness);
-  const [workingDirPath, setWorkingDirPath] = useState(() =>
-    workspaceDefault(member.manifestPath, firstHarness),
-  );
+  const [workingDirPath, setWorkingDirPath] = useState('');
   const [aliasDrafts, setAliasDrafts] = useState<Record<string, string>>({});
   const [pending, setPending] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] =
@@ -151,7 +140,7 @@ export function AgentTeamProfiles({
         const statusDetail =
           status === 'error'
             ? profile.preparation.error.message
-            : profile.setupLog.at(-1)?.message;
+            : profile.setupLog[profile.setupLog.length - 1]?.message;
         return (
           <SettingRow
             key={profile.id}
@@ -276,15 +265,13 @@ export function AgentTeamProfiles({
               options={harnessOptions}
               disabled={pending !== null}
               title={t('harness')}
-              onChange={(value) => {
-                setHarness(value);
-                setWorkingDirPath(workspaceDefault(member.manifestPath, value));
-              }}
+              onChange={setHarness}
             />
             <PathInput
               value={workingDirPath}
               onChange={setWorkingDirPath}
               placeholder={t('workingDirectory')}
+              pickTitle={t('pickFolder')}
               disabled={pending !== null}
             />
             <div className="flex justify-end gap-1.5">

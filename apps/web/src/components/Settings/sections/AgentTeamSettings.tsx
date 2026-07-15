@@ -8,13 +8,11 @@ import { SettingSection } from '@/components/Common/SettingSection';
 
 import { AgentTeamConfigs } from '../agent-team/AgentTeamConfigs';
 import { AgentTeamProfiles } from '../agent-team/AgentTeamProfiles';
-import { AgentTeamRoots } from '../agent-team/AgentTeamRoots';
 import { useAgentTeamSettings } from '../agent-team/useAgentTeamSettings';
 
 import type {
   AgentTeamMemberDetailView,
   AgentTeamMemberSummaryView,
-  AgentTeamSettingsState,
 } from '@sediment/shared';
 
 function MemberSection({ summary }: { summary: AgentTeamMemberSummaryView }) {
@@ -111,7 +109,7 @@ function MemberSection({ summary }: { summary: AgentTeamMemberSummaryView }) {
 
 export function AgentTeamSettings() {
   const { t } = useTranslation('agentTeam');
-  const { state, loadError, pendingAction, mutate } = useAgentTeamSettings();
+  const { state, loadError } = useAgentTeamSettings();
 
   if (!state && !loadError) {
     return (
@@ -133,23 +131,8 @@ export function AgentTeamSettings() {
 
   if (!state) return null;
 
-  const runMutation = async (
-    action: string,
-    operation: () => Promise<AgentTeamSettingsState>,
-  ) => {
-    await mutate(action, operation);
-  };
-
   return (
     <div className="space-y-4">
-      <AgentTeamRoots
-        machines={state.machines}
-        localMachine={state.localMachine}
-        roots={state.roots}
-        pendingAction={pendingAction}
-        mutate={runMutation}
-      />
-
       {state.members.length === 0 ? (
         <SettingSection title={t('profiles')}>
           <SettingRow
