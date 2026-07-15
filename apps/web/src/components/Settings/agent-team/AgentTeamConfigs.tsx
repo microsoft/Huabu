@@ -17,13 +17,19 @@ import type {
 interface AgentTeamConfigsProps {
   config: AgentTeamMemberConfigView;
   onDetailChange: (detail: AgentTeamMemberDetailView) => void;
+  density?: 'default' | 'compact';
 }
 
 interface ConfigFieldProps extends AgentTeamConfigsProps {
   field: AgentTeamMemberConfigView['fields'][number];
 }
 
-function ConfigField({ config, field, onDetailChange }: ConfigFieldProps) {
+function ConfigField({
+  config,
+  field,
+  onDetailChange,
+  density,
+}: ConfigFieldProps) {
   const { t } = useTranslation('agentTeam');
   const inputId = useId();
   const [value, setValue] = useState(field.secret ? '' : (field.value ?? ''));
@@ -67,6 +73,7 @@ function ConfigField({ config, field, onDetailChange }: ConfigFieldProps) {
         saving={saving}
         onSave={(next) => void update(next)}
         onRemove={() => void update(null)}
+        density={density}
       />
     );
   }
@@ -76,6 +83,7 @@ function ConfigField({ config, field, onDetailChange }: ConfigFieldProps) {
       title={label}
       description={field.description}
       labelFor={inputId}
+      density={density}
     >
       <SettingControl>
         <TextInput

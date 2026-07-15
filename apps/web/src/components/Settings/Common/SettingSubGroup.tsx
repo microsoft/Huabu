@@ -9,8 +9,9 @@ import React from 'react';
 export const SettingSubGroup: React.FC<{
   children: React.ReactNode;
   className?: string;
-}> = ({ children, className = '' }) => (
-  <div className="px-3 pt-0.5 pb-2">
+  density?: 'default' | 'compact';
+}> = ({ children, className = '', density = 'default' }) => (
+  <div className={density === 'compact' ? 'px-3 pb-1.5' : 'px-3 pt-0.5 pb-2'}>
     <div
       className={`border-edge-default/70 overflow-hidden border-l-2 pl-1 ${className}`.trim()}
       role="group"

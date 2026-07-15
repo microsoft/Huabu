@@ -226,13 +226,14 @@ function CreateManifestProfileForm({
        * just noise.
        */}
       {group.config.fields.length > 0 ? (
-        <SettingSubGroup>
-          <p className="text-fg-subtle px-3 py-2 text-[11px] leading-snug">
+        <SettingSubGroup density="compact">
+          <p className="text-fg-subtle px-3 pt-1 pb-0.5 text-[11px] leading-snug">
             {tAgent('tokenSharedHint')}
           </p>
           <AgentTeamConfigs
             config={group.config}
             onDetailChange={applyMemberDetail}
+            density="compact"
           />
         </SettingSubGroup>
       ) : null}
@@ -389,13 +390,14 @@ function EditManifestProfileForm({
           description: member.description || undefined,
           configuration:
             config.fields.length > 0 ? (
-              <SettingSubGroup>
-                <p className="text-fg-subtle px-3 py-2 text-[11px] leading-snug">
+              <SettingSubGroup density="compact">
+                <p className="text-fg-subtle px-3 pt-1 pb-0.5 text-[11px] leading-snug">
                   {tAgent('tokenSharedHint')}
                 </p>
                 <AgentTeamConfigs
                   config={config}
                   onDetailChange={applyMemberDetail}
+                  density="compact"
                 />
               </SettingSubGroup>
             ) : undefined,

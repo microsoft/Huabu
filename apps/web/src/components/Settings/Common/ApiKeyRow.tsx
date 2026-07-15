@@ -25,6 +25,8 @@ interface ApiKeyRowProps {
   onSave: (key: string) => void;
   /** Remove the key stored by Huabu. Omit for credentials that cannot be removed. */
   onRemove?: () => void;
+  /** Reduces vertical padding when rendered as a subordinate setting. */
+  density?: 'default' | 'compact';
 }
 
 /**
@@ -43,6 +45,7 @@ export const ApiKeyRow: React.FC<ApiKeyRowProps> = ({
   saving = false,
   onSave,
   onRemove,
+  density = 'default',
 }) => {
   const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
@@ -65,7 +68,7 @@ export const ApiKeyRow: React.FC<ApiKeyRowProps> = ({
 
   return (
     <>
-      <SettingRow title={title} description={description}>
+      <SettingRow title={title} description={description} density={density}>
         {editing ? (
           <SettingControl>
             <TextInput

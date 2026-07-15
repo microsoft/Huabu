@@ -11,6 +11,8 @@ interface SettingRowProps {
   children: React.ReactNode;
   /** Additional class names for the row element. */
   className?: string;
+  /** Reduces vertical padding for subordinate settings. */
+  density?: 'default' | 'compact';
 }
 
 /**
@@ -24,10 +26,11 @@ export const SettingRow: React.FC<SettingRowProps> = ({
   labelFor,
   children,
   className = '',
+  density = 'default',
 }) => {
   return (
     <div
-      className={`flex items-center justify-between gap-3 px-3 py-2.5 ${className}`.trim()}
+      className={`flex items-center justify-between gap-3 px-3 ${density === 'compact' ? 'py-1.5' : 'py-2.5'} ${className}`.trim()}
     >
       <div className="min-w-0 flex-1">
         {title &&

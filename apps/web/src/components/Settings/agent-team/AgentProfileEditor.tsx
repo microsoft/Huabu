@@ -138,12 +138,7 @@ function CreateAgentProfileFlow({
 
   return (
     <div className="flex flex-col">
-      <SettingRow
-        title={t('settings.template')}
-        description={
-          selected?.member.description || t('settings.templateOptionalHint')
-        }
-      >
+      <SettingRow title={t('settings.template')}>
         <SettingControl>
           <Select
             value={selectedKey}
@@ -154,6 +149,9 @@ function CreateAgentProfileFlow({
           />
         </SettingControl>
       </SettingRow>
+      <p className="text-fg-subtle px-3 pb-2.5 text-[11px] leading-snug">
+        {selected?.member.description || t('settings.templateOptionalHint')}
+      </p>
       {manifestError ? (
         <p className="text-warning px-3 py-2.5 text-xs" role="status">
           {t('settings.templatesUnavailable', { error: manifestError })}

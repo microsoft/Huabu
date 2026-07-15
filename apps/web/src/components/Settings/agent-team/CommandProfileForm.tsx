@@ -422,7 +422,7 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
           </SettingRow>
         ) : null}
         {isStructured && selectedCli?.autoApprove ? (
-          <SettingSubGroup>
+          <SettingSubGroup density="compact">
             <SettingRow
               description={t('settings.autoApproveAllToolCallsHint')}
               title={
@@ -434,6 +434,7 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
                   )
                 </span>
               }
+              density="compact"
             >
               <input
                 id={autoApproveId}
@@ -534,7 +535,7 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
         </div>
 
         {isStructured && selectedCli?.autoApprove && (
-          <SettingSubGroup>
+          <SettingSubGroup density="compact">
             <SettingRow
               description={t('settings.autoApproveAllToolCallsHint')}
               title={
@@ -551,6 +552,7 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
                   </span>
                 </label>
               }
+              density="compact"
             >
               {/*
                * Read-only in edit: the command (and therefore this flag) is
