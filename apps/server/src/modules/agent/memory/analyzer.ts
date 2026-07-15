@@ -107,6 +107,7 @@ export async function runAnalysisPass(
   // parse the updates that belong to our writer (`fs_write`).
   const stream = runAgent({
     scope: 'memory',
+    modelRole: 'memory',
     canvasId,
     context,
     logger: { info: (m) => logger?.info(m) },

@@ -32,7 +32,7 @@ import { type ToolScope } from './tools/index.js';
 import type { ChatEnvelope } from './conversation/envelope.js';
 import type { WorkloadType } from '@agenetes/protocol';
 import type { Context, Message } from '@earendil-works/pi-ai';
-import type { AgentStreamEvent, NodeOrigin } from '@sediment/shared';
+import type { AgentStreamEvent, ModelRole, NodeOrigin } from '@sediment/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
 /**
@@ -118,6 +118,10 @@ export interface AgentRunOptions {
    * not mis-tagged as AI-initiated.
    */
   origin?: NodeOrigin;
+  /** Model role used to resolve the Chat or Utility tier for this workload. */
+  modelRole?: ModelRole;
+  /** Whether this workload may send image content to the selected model. */
+  hasImage?: boolean;
   /**
    * Soft cap on agent turns (LLM call + tool batch). When reached, the
    * agent loop is aborted internally and a cap-out error is emitted.
@@ -177,6 +181,8 @@ export async function* runAgent(
     envelope,
     context,
     origin,
+    modelRole,
+    hasImage,
     maxIterations,
     signal,
     workloadType = 'Job',
@@ -244,6 +250,8 @@ export async function* runAgent(
     toolExecution: agentCfg.runtime.toolExecution,
     canvasId,
     origin,
+    modelRole,
+    hasImage,
   });
 
   // `spec.kind` is `internal`, so the instance's union handle narrows to
