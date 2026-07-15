@@ -8,14 +8,25 @@ import {
   P,
   PageLayout,
   Shortcut,
+  type TocEntry,
 } from '../components';
 import { NODE_ICON } from '../config/nodeIcons';
+
+const toc: TocEntry[] = [
+  { id: '1-download-and-install-huabu', label: 'Download and install Huabu' },
+  { id: '2-choose-a-home-folder', label: 'Choose a Home Folder' },
+  { id: '3-configure-models-and-keys', label: 'Configure models and keys' },
+  { id: '4-create-a-space', label: 'Create a Space' },
+  { id: '5-add-content-to-your-space', label: 'Add content to your Space' },
+  { id: '6-think-and-work-with-ai', label: 'Think and work with AI' },
+];
 
 export default function QuickStart() {
   return (
     <PageLayout
       title="Quick Start"
       description="Install Huabu, create your first Space, add one piece of material, and have your first conversation with AI."
+      toc={toc}
     >
       <H2>1. Download and install Huabu</H2>
       <P>
