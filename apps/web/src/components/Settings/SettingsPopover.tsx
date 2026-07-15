@@ -49,7 +49,7 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
       iconOnly
       title={t('settings.title')}
       tooltipPlacement={tooltipPlacement}
-      onClick={openSettings}
+      onClick={() => openSettings()}
       aria-label={t('settings.open')}
     >
       <Settings />

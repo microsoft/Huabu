@@ -12,13 +12,9 @@
  */
 
 import { MessageSquare, Plus, Route, Sprout } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import {
-  ProfileEditorModal,
-  useDetectedClis,
-} from '@/components/Settings/sections/ProfileEditor';
+import { useSettingsUiStore } from '@/store/settingsUiStore';
 
 import { Button } from '../../Common/Button';
 import { cn } from '../../Common/cn';
@@ -29,6 +25,7 @@ import type {
   AgentProfileView,
   AgentTeamManifestProfileView,
 } from '@sediment/shared';
+import type { ReactNode } from 'react';
 
 /** A picked (mode, binding) pair emitted by either agent menu. */
 export interface AgentChoice {
@@ -165,74 +162,49 @@ export function AgentMenuOptions({
           />
         );
       })}
-      {profiles.some(
-        (profile) => profile.launch.kind === 'agent-team-manifest',
-      ) && (
-        <div
-          role="presentation"
-          className="text-fg-muted mt-1 flex items-center gap-2 px-3 pt-1 pb-0.5 text-[10px] tracking-wider uppercase select-none"
-        >
-          <span className="bg-edge-default h-px flex-1" />
-          <span>{t('chat.agentTeams')}</span>
-          <span className="bg-edge-default h-px flex-1" />
-        </div>
-      )}
-      {profiles
-        .filter(
+      {(() => {
+        // Both Profile kinds share one "External Agents" group now. Only
+        // ready manifest Profiles are selectable; command Profiles are
+        // always selectable. Preserve order: manifest first, then command.
+        const external = profiles.filter(
           (profile) =>
-            isManifestProfile(profile) &&
-            profile.preparation.status === 'ready',
-        )
-        .map((profile) => {
-          const binding: AgentBinding = {
-            kind: 'external',
-            alias: profile.alias,
-            profileId: profile.id,
-          };
-          const isCurrent = bindingsEqual(currentBinding, binding);
-          return (
-            <AgentMenuRow
-              key={`profile:${profile.id}`}
-              icon={<Route size={14} />}
-              label={profile.alias}
-              current={isCurrent}
-              disabled={busy}
-              title={isCurrent ? currentRowTitle : undefined}
-              onClick={() => onSelect({ mode: currentMode, binding })}
-            />
-          );
-        })}
-      {profiles.some((profile) => profile.launch.kind === 'acp-command') && (
-        <div
-          role="presentation"
-          className="text-fg-muted mt-1 flex items-center gap-2 px-3 pt-1 pb-0.5 text-[10px] tracking-wider uppercase select-none"
-        >
-          <span className="bg-edge-default h-px flex-1" />
-          <span>{t('chat.externalAgents')}</span>
-          <span className="bg-edge-default h-px flex-1" />
-        </div>
-      )}
-      {profiles
-        .filter((profile) => profile.launch.kind === 'acp-command')
-        .map((profile) => {
-          const binding: AgentBinding = {
-            kind: 'external',
-            alias: profile.alias,
-            profileId: profile.id,
-          };
-          const isCurrent = bindingsEqual(currentBinding, binding);
-          return (
-            <AgentMenuRow
-              key={`profile:${profile.id}`}
-              icon={<Route size={14} />}
-              label={profile.alias}
-              current={isCurrent}
-              disabled={busy}
-              title={isCurrent ? currentRowTitle : undefined}
-              onClick={() => onSelect({ mode: currentMode, binding })}
-            />
-          );
-        })}
+            (isManifestProfile(profile) &&
+              profile.preparation.status === 'ready') ||
+            profile.launch.kind === 'acp-command',
+        );
+        if (external.length === 0) return null;
+        return (
+          <>
+            <div
+              role="presentation"
+              className="text-fg-muted mt-1 flex items-center gap-2 px-3 pt-1 pb-0.5 text-[10px] tracking-wider uppercase select-none"
+            >
+              <span className="bg-edge-default h-px flex-1" />
+              <span>{t('chat.externalAgents')}</span>
+              <span className="bg-edge-default h-px flex-1" />
+            </div>
+            {external.map((profile) => {
+              const binding: AgentBinding = {
+                kind: 'external',
+                alias: profile.alias,
+                profileId: profile.id,
+              };
+              const isCurrent = bindingsEqual(currentBinding, binding);
+              return (
+                <AgentMenuRow
+                  key={`profile:${profile.id}`}
+                  icon={<Route size={14} />}
+                  label={profile.alias}
+                  current={isCurrent}
+                  disabled={busy}
+                  title={isCurrent ? currentRowTitle : undefined}
+                  onClick={() => onSelect({ mode: currentMode, binding })}
+                />
+              );
+            })}
+          </>
+        );
+      })()}
       {onAddAgent && (
         <>
           <div
@@ -258,33 +230,15 @@ export function AgentMenuOptions({
 }
 
 /**
- * Encapsulates the inline "Add agent" editor modal so both menus avoid
- * duplicating the `editorOpen` state + `ProfileEditorModal` + CLI
- * detection wiring. Returns `openEditor` (call it from the "Add agent"
- * row) and `editor` (render it at the menu's root, outside the popover
- * so it survives the popover closing). `editor` is `null` when the
- * caller did not supply `onRefreshProfiles`.
+ * "Add agent" now deep-links into the unified External Agents Settings
+ * tab instead of opening an inline editor, so template and custom
+ * Profiles are created in one place. The `editor` slot is kept in the
+ * return shape (always `null`) so existing call sites can render it
+ * without any changes.
  */
 export function useAddAgentEditor(
-  onRefreshProfiles?: () => void | Promise<void>,
+  _onRefreshProfiles?: () => void | Promise<void>,
 ): { openEditor: () => void; editor: ReactNode } {
-  const [editorOpen, setEditorOpen] = useState(false);
-  const { detectedClis, loaded } = useDetectedClis(editorOpen);
-
-  const editor = onRefreshProfiles ? (
-    <ProfileEditorModal
-      isOpen={editorOpen}
-      editing={null}
-      detectedClis={detectedClis}
-      detectionLoaded={loaded}
-      onClose={() => setEditorOpen(false)}
-      onSaved={async () => {
-        // Refresh the profile list so the newly-created agent appears
-        // without forcing the user to open Settings or reload.
-        await onRefreshProfiles();
-      }}
-    />
-  ) : null;
-
-  return { openEditor: () => setEditorOpen(true), editor };
+  const openSettings = useSettingsUiStore((s) => s.open);
+  return { openEditor: () => openSettings('agents'), editor: null };
 }

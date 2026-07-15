@@ -103,7 +103,6 @@ export type AcpDaemonStatus = AcpAgentletStatus;
 export interface AcpProfilesListResponse {
   profiles: AgentProfileView[];
   selectableProfileIds: string[];
-  legacyProfiles: AcpAgentProfile[];
   agentlet: AcpAgentletStatus;
 }
 
@@ -687,7 +686,6 @@ export const acpDaemonStatusSchema = acpAgentletStatusSchema;
 export const acpProfilesListResponseSchema = z.object({
   profiles: z.array(agentProfileSchema),
   selectableProfileIds: z.array(z.string().min(1)),
-  legacyProfiles: z.array(acpAgentProfileSchema),
   agentlet: acpAgentletStatusSchema,
 }) satisfies z.ZodType<AcpProfilesListResponse>;
 

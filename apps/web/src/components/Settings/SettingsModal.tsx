@@ -6,16 +6,16 @@ import { SettingSection } from '@/components/Common/SettingSection';
 import { getElectronBridge } from '@/hooks/useElectron';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 import { useLLMStore } from '@/store/llmStore';
+import { useSettingsUiStore } from '@/store/settingsUiStore';
 
-import { AcpSettings } from './sections/AcpSettings';
-import { AgentTeamSettings } from './sections/AgentTeamSettings';
+import { ExternalAgentsSettings } from './agent-team/ExternalAgentsSettings';
 import { GeneralSettings } from './sections/GeneralSettings';
 import { ImageProviderSettings } from './sections/ImageProviderSettings';
 import { IntegrationsSettings } from './sections/IntegrationsSettings';
 import { LLMSettings } from './sections/LLMSettings';
 
 /** Identifiers for the settings tabs (left-nav order). */
-type SettingsTab = 'general' | 'huabuAgent' | 'agents' | 'agentTeams';
+type SettingsTab = 'general' | 'huabuAgent' | 'agents';
 
 interface TabDef {
   id: SettingsTab;
@@ -23,14 +23,12 @@ interface TabDef {
   labelKey:
     | 'settings.general'
     | 'settings.huabuAgent'
-    | 'settings.externalAgents'
-    | 'settings.agentTeams';
+    | 'settings.externalAgents';
 }
 
 const TABS: TabDef[] = [
   { id: 'huabuAgent', labelKey: 'settings.huabuAgent' },
   { id: 'agents', labelKey: 'settings.externalAgents' },
-  { id: 'agentTeams', labelKey: 'settings.agentTeams' },
   { id: 'general', labelKey: 'settings.general' },
 ];
 
@@ -60,7 +58,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const { t } = useTranslation();
   const llmInit = useLLMStore((s) => s.init);
   const acpInit = useAcpProfilesStore((s) => s.init);
+  const requestedTab = useSettingsUiStore((s) => s.requestedTab);
+  const clearRequestedTab = useSettingsUiStore((s) => s.clearRequestedTab);
   const [activeTab, setActiveTab] = useState<SettingsTab>(TABS[0].id);
+
+  // Deep-link support: a caller (e.g. the chat "Add agent" row) can ask
+  // to open Settings on a specific tab via `settingsUiStore.open(tab)`.
+  // Apply it once per open, then clear it so a later plain open() keeps
+  // the tab the user last viewed.
+  useEffect(() => {
+    if (isOpen && requestedTab) {
+      setActiveTab(requestedTab);
+      clearRequestedTab();
+    }
+  }, [isOpen, requestedTab, clearRequestedTab]);
 
   // Load each registry only when its owning tab is visible.
   useEffect(() => {
@@ -172,8 +183,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <IntegrationsSettings />
               </>
             )}
-            {activeTab === 'agents' && <AcpSettings />}
-            {activeTab === 'agentTeams' && <AgentTeamSettings />}
+            {activeTab === 'agents' && <ExternalAgentsSettings />}
           </div>
         </div>
       </div>

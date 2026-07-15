@@ -288,6 +288,15 @@ const agentletGateway = mountAgenetes(app, {
     onLegacyProfilesMigrated: removeLegacyAcpProfiles,
   },
 });
+// Legacy `agent-team` ACP records predate managed Agent Teams. They can't
+// be auto-migrated (they bypass managed roots, Configs, and setup) and are
+// no longer surfaced in Settings, so drop them at startup instead of
+// letting them linger as orphaned entries.
+removeLegacyAcpProfiles(
+  listLegacyAcpProfiles()
+    .filter((profile) => profile.cliId === 'agent-team')
+    .map((profile) => profile.id),
+);
 const bundledAgentTeamsPath = resolveBundledAgentTeamsPath();
 if (bundledAgentTeamsPath) {
   const unregisterBundledAgentTeams = registerBundledAgentTeams({

@@ -66,5 +66,7 @@
   "cancelSetup": "Cancel setup",
   "setupStatusNotPrepared": "Not prepared",
   "loadingMemberDetail": "Loading member details…",
-  "loadMemberDetailFailed": "Failed to load member details"
+  "loadMemberDetailFailed": "Failed to load member details",
+  "tokenSharedHint": "These values are shared by every agent created from this template — changing one affects all of them.",
+  "profileUpdated": "Profile updated"
 }
