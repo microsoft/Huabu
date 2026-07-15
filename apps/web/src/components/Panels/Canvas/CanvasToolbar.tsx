@@ -405,23 +405,8 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           <Button
             variant="ghost"
             iconOnly
-            title={`${t('toolbar.nodes.frame')} (1)`}
+            title={`${t('toolbar.nodes.note')} (1)`}
             shortcutBadge="1"
-            shortcutBadgeActive={pendingNodeType === 'frame'}
-            className={clsx(
-              pendingNodeType === 'frame' && 'text-info bg-bg-default',
-            )}
-            onClick={() =>
-              setPendingNodeType(pendingNodeType === 'frame' ? null : 'frame')
-            }
-          >
-            <NODE_ICON.frame />
-          </Button>
-          <Button
-            variant="ghost"
-            iconOnly
-            title={`${t('toolbar.nodes.note')} (2)`}
-            shortcutBadge="2"
             shortcutBadgeActive={pendingNodeType === 'note'}
             className={clsx(
               pendingNodeType === 'note' && 'text-info bg-bg-default',
@@ -435,8 +420,8 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           <Button
             variant="ghost"
             iconOnly
-            title={`${t('toolbar.nodes.text')} (3)`}
-            shortcutBadge="3"
+            title={`${t('toolbar.nodes.text')} (2)`}
+            shortcutBadge="2"
             shortcutBadgeActive={pendingNodeType === 'text'}
             className={clsx(
               pendingNodeType === 'text' && 'text-info bg-bg-default',
@@ -446,6 +431,21 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             }
           >
             <NODE_ICON.text />
+          </Button>
+          <Button
+            variant="ghost"
+            iconOnly
+            title={`${t('toolbar.nodes.frame')} (3)`}
+            shortcutBadge="3"
+            shortcutBadgeActive={pendingNodeType === 'frame'}
+            className={clsx(
+              pendingNodeType === 'frame' && 'text-info bg-bg-default',
+            )}
+            onClick={() =>
+              setPendingNodeType(pendingNodeType === 'frame' ? null : 'frame')
+            }
+          >
+            <NODE_ICON.frame />
           </Button>
           <div className="relative flex items-center">
             {pendingNodeType === 'sketch' && <SketchSettingsPanel />}
@@ -549,7 +549,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           <Button
             variant="ghost"
             iconOnly
-            title={`${t('toolbar.nodes.agentNode')} (A)`}
+            title={`${t('toolbar.nodes.agent')} (A)`}
             shortcutBadge="A"
             shortcutBadgeActive={pendingNodeType === 'question'}
             className={clsx(

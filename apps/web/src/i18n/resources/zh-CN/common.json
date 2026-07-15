@@ -642,7 +642,7 @@
       "text": "文本",
       "sketch": "手绘",
       "audio": "音频",
-      "agentNode": "Agent 节点"
+      "agent": "Agent"
     },
     "resources": {
       "uploadOrLink": "上传或添加链接",
