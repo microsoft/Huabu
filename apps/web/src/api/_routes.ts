@@ -118,6 +118,7 @@ export const routes = {
   // Embedded agentlet daemon — health + manual restart.
   acpAgentlet: '/acp/agentlet',
   acpAgentletRestart: '/acp/agentlet/restart',
+  acpRuntimeConfig: '/acp/runtime-config',
   acpThreadSession: (threadId: string) =>
     `/acp/threads/${enc(threadId)}/session`,
   acpThreadCommands: (threadId: string, canvasId?: string) => {

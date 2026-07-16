@@ -63,28 +63,30 @@ curl -fsS -X DELETE -H "$AUTH" "$HUABU_RFS_URL/upload/summary.md"
 
 For anything the Space needs to _understand_ — creating nodes, moving/linking them, laying out frames, rendering sketches, or finding relevant nodes — send a natural-language prompt to the internal agent. It owns all Space mutations.
 
-The response is **always** an event stream (`text/event-stream`): comment heartbeats (`: ping`) keep the connection alive during long turns, and the final answer arrives as plain text inside `data:` frames. Use a streaming client (`curl -N`) and strip the framing:
+The response is **always** an event stream (`text/event-stream`): comment heartbeats (`: ping`) keep the connection alive during long turns, `: threadId <id>` identifies the live conversation, and the final answer arrives as plain text inside `data:` frames.
 
 ```bash
 curl -N -H "$AUTH" -H "Content-Type: text/plain" \
   --data-binary @./prompt.txt "$HUABU_RFS_URL/agent" \
-  | sed -n 's/^data: //p'
-# (PowerShell: ... | Select-String '^data: ')
+  | tee /tmp/huabu-agent.sse
+
+THREAD_ID="$(sed -n 's/^: threadId //p' /tmp/huabu-agent.sse | head -1)"
+sed -n 's/^data: //p' /tmp/huabu-agent.sse
 ```
 
-Or send JSON with options:
+Continue the same live conversation by returning that ID:
 
 ```bash
-curl -N -H "$AUTH" -H "Content-Type: application/json" \
-  -d '{"prompt":"Create a note from upload/summary.md near node-123 and link them", "doneTextOnly":true, "heartbeatSec":10}' \
-  "$HUABU_RFS_URL/agent" | sed -n 's/^data: //p'
+curl -N -H "$AUTH" -H "Content-Type: text/plain" \
+  -H "X-Huabu-Thread-Id: $THREAD_ID" \
+  --data-binary @./follow-up.txt "$HUABU_RFS_URL/agent"
 ```
 
-Body options:
+Request headers:
 
-- `prompt` (required) — what you want done or answered.
-- `doneTextOnly` (default `true`) — emit only the final answer text as `data:` frames (best for the `sed` one-liner). Set `false` to also receive structured intermediate events (`event: tool_call`, etc.).
-- `heartbeatSec` (default `15`, clamped to `[5, 30]`) — heartbeat cadence.
+- `X-Huabu-Thread-Id` — continue the live conversation returned by a prior call; omit it to create a new conversation.
+- `X-Huabu-Event-Mode` — `final` (default) returns only the final answer plus protocol comments; `all` also returns structured intermediate events.
+- `X-Huabu-Heartbeat-Sec` — heartbeat cadence from `5` to `30` seconds (default `15`).
 
 Typical asks:
 
@@ -98,4 +100,5 @@ Typical asks:
 
 - **Auth every request.** Missing/invalid bearer → `401`.
 - **Errors** use `{ "message": ... }`; on failure the message includes a ready-to-run command to re-fetch this guide.
+- **Continuation is live-only.** If Huabu restarts or the handle is closed, start a new conversation by omitting `X-Huabu-Thread-Id`.
 - **Snapshots / vision:** sketch and image nodes are not readable as text — ask the agent to render them, then download the PNG.

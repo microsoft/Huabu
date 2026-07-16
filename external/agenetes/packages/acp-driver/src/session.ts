@@ -196,6 +196,11 @@ export interface EnsureAcpSessionOptions {
    */
   env?: Record<string, string>;
   /**
+   * Idle timeout applied when spawning this session. `0` disables automatic
+   * suspension. The host owns the global policy and injects its current value.
+   */
+  idleTimeoutSecs?: number;
+  /**
    * The instance's **down-feed** (I9.7): the durable `AgentStateSnapshot`
    * last persisted for this thread, threaded down from `driver.create`. The
    * session lifecycle resumes its low-level session from
@@ -483,6 +488,7 @@ async function ensureAcpSessionInner(
     recipe,
     priorSessionId,
     opts.env,
+    opts.idleTimeoutSecs,
   );
   const conn = gateway.getSession(agentletId, agentSessionId);
   if (!conn || conn.status !== 'connected') {

@@ -26,6 +26,7 @@ export class Relay extends EventEmitter {
   private readonly logger: Logger
   private readonly idleTimeoutMs: number
   private idleTimer: ReturnType<typeof setTimeout> | null = null
+  private readonly pendingHostRequests = new Set<string | number>()
   private active = false
 
   constructor(agent: AgentProcess, ws: WsClient, logger: Logger, options?: RelayOptions) {
@@ -73,6 +74,7 @@ export class Relay extends EventEmitter {
         return
       }
 
+      this.completeHostRequest(msg)
       this.logger.debug('relay_agent_to_ws', { method: (msg as unknown as Record<string, unknown>).method, id: (msg as unknown as Record<string, unknown>).id })
       const sent = this.ws.send(msg)
       if (!sent) {
@@ -84,6 +86,7 @@ export class Relay extends EventEmitter {
     this.ws.on('message', (msg) => {
       if (!this.active) return
 
+      this.trackHostRequest(msg)
       this.resetIdleTimer()
       this.logger.debug('relay_ws_to_agent', { method: (msg as unknown as Record<string, unknown>).method, id: (msg as unknown as Record<string, unknown>).id })
       const written = this.agent.write(msg)
@@ -100,13 +103,21 @@ export class Relay extends EventEmitter {
   stop(): void {
     this.active = false
     this.clearIdleTimer()
+    this.pendingHostRequests.clear()
   }
 
   private resetIdleTimer(): void {
     if (!this.idleTimeoutMs || !this.active) return
     this.clearIdleTimer()
     this.idleTimer = setTimeout(() => {
+      this.idleTimer = null
       if (!this.active) return
+      if (this.pendingHostRequests.size > 0) {
+        this.logger.debug('relay_idle_deferred', {
+          pendingHostRequests: this.pendingHostRequests.size,
+        })
+        return
+      }
       this.logger.info('relay_idle_timeout', { timeoutSecs: this.idleTimeoutMs / 1000 })
       this.emit('idle')
     }, this.idleTimeoutMs)
@@ -116,6 +127,19 @@ export class Relay extends EventEmitter {
     if (this.idleTimer) {
       clearTimeout(this.idleTimer)
       this.idleTimer = null
+    }
+  }
+
+  private trackHostRequest(msg: JsonRpcMessage): void {
+    if ('method' in msg && 'id' in msg) {
+      this.pendingHostRequests.add(msg.id)
+    }
+  }
+
+  private completeHostRequest(msg: JsonRpcMessage): void {
+    if ('method' in msg || !('id' in msg)) return
+    if (this.pendingHostRequests.delete(msg.id)) {
+      this.resetIdleTimer()
     }
   }
 

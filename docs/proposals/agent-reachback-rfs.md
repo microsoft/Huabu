@@ -7,7 +7,7 @@
 > (RFS)** view for moving bytes, and **`ask-agent`** for everything
 > canvas-semantic. A single internal agent is the only writer to the canvas graph.
 >
-> Status: **Draft**, awaiting review · Last updated 2026-07-01
+> Status: **Draft**, awaiting review · Last updated: 2026-07-16
 >
 > Supersedes the shortcut sections of
 > [`../architecture/agent-reachback.md`](../architecture/agent-reachback.md)
@@ -513,11 +513,11 @@ Resolved for phase 1 (kept here as decisions + their guardrails):
   the event log for audit. A hard `reachback` scope is revisited only when opening
   to untrusted agents.
 
-Deferred (default chosen, revisit only if needed):
+Shipped follow-up:
 
-- **`ask-agent` statefulness / `--resume`.** `POST /agent` is **stateless per call**
-  for phase 1; the `done` event's `threadId` is surfaced but resume is not wired.
-  Revisit if multi-turn reachback dialogs prove necessary. (Carried from v1.)
+- **`ask-agent` uses a live internal Deployment.** A first `POST /agent` creates an `operate` Deployment and returns its `threadId` at the start of the SSE stream; a later request supplies `X-Huabu-Thread-Id` and submits a new turn directly to the same live handle. The system prompt is loaded only when the Deployment is created. Continuation is live-only in this phase; durable identity recovery is tracked separately in [#316](https://github.com/hai-team/Sediment/issues/316).
+
+Deferred (default chosen, revisit only if needed):
 
 - **RFS auth = per-request Bearer; token→canvas scoping deferred.** The `/api/rfs/*`
   endpoints authenticate via `Authorization: Bearer $AGENTLET_TOKEN` on every

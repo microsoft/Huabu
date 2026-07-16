@@ -42,6 +42,7 @@ import type {
   SetAcpSessionModelResponse,
   SetAcpSessionModeRequest,
   SetAcpSessionModeResponse,
+  ExternalAgentRuntimeConfig,
 } from '@sediment/shared';
 
 export type {
@@ -70,6 +71,7 @@ export type {
   SetAcpSessionModelResponse,
   SetAcpSessionModeRequest,
   SetAcpSessionModeResponse,
+  ExternalAgentRuntimeConfig,
 } from '@sediment/shared';
 
 // ── Agent CLI detection ──────────────────────────────────────────────
@@ -160,6 +162,22 @@ export async function restartAcpAgentlet(): Promise<AcpAgentletStatus> {
   return apiFetch<AcpAgentletStatusResponse>(routes.acpAgentletRestart, {
     method: 'POST',
     fallbackMessage: 'Failed to restart agentlet',
+  });
+}
+
+export async function getExternalAgentRuntimeConfig(): Promise<ExternalAgentRuntimeConfig> {
+  return apiFetch<ExternalAgentRuntimeConfig>(routes.acpRuntimeConfig, {
+    fallbackMessage: 'Failed to read external-agent runtime settings',
+  });
+}
+
+export async function updateExternalAgentRuntimeConfig(
+  config: ExternalAgentRuntimeConfig,
+): Promise<ExternalAgentRuntimeConfig> {
+  return apiFetch<ExternalAgentRuntimeConfig>(routes.acpRuntimeConfig, {
+    method: 'PUT',
+    json: config,
+    fallbackMessage: 'Failed to update external-agent runtime settings',
   });
 }
 

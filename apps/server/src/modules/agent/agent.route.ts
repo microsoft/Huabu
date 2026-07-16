@@ -32,6 +32,7 @@ import { buildHistoryFromTurns } from '../agent/conversation/transcript/history.
 import { getLLMModel } from '../agent/llm.js';
 import { readWorkspaceMemory } from '../agent/memory/index.js';
 import { planSkillDispatch } from '../agent/skill-model-routing.js';
+import { acquireAgentTurn } from '../agent/turn-lease.js';
 import { canvasAcpNamespace } from '../storage/paths.js';
 
 import type {
@@ -495,6 +496,14 @@ const agentRoutes: FastifyPluginAsync = async (
     const skillDispatch = planSkillDispatch(envelope.skills.resolved);
     const runsSkillAuthoring = skillDispatch.closeLiveHandle;
 
+    const releaseTurn = acquireAgentTurn(resolvedThreadId);
+    if (!releaseTurn) {
+      return reply.code(409).send({
+        message: 'Another turn is already running for this thread.',
+        code: 'thread_busy',
+      });
+    }
+
     // Debug-prompt metadata forwarded to the dispatch layer (it assembles
     // the final prompt). No-op unless HUABU_DEBUG_PROMPT is set.
     const debugPrompt = {
@@ -654,6 +663,7 @@ const agentRoutes: FastifyPluginAsync = async (
     } finally {
       run.completed = true;
       scheduleRunCleanup(resolvedThreadId);
+      releaseTurn();
       reply.raw.removeListener('close', onDisconnect);
       socket?.removeListener('close', onDisconnect);
       if (clientConnected) {

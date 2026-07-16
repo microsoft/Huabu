@@ -183,6 +183,11 @@ export interface AcpCreateSpec {
   readonly env?: Record<string, string>;
 }
 
+export interface AcpRuntimePolicy {
+  /** Return the current host policy for newly spawned or resumed sessions. */
+  getIdleTimeoutSecs(): number;
+}
+
 /** Resolve explicit placement or the read-only legacy local fallback. */
 export function resolveAcpAgentletId(spec: AcpCreateSpec): string {
   return spec.agentletId ?? getSupervisedAgentletId();
@@ -263,6 +268,9 @@ export class AcpAgentHandle<
   constructor(
     private readonly spec: AcpCreateSpec,
     private readonly createContext: AgentCreateContext<AcpCreateSpec>,
+    private readonly runtimePolicy: AcpRuntimePolicy = {
+      getIdleTimeoutSecs: () => 600,
+    },
   ) {
     this.agentletId = resolveAcpAgentletId(spec);
   }
@@ -338,6 +346,7 @@ export class AcpAgentHandle<
       ...(recipe !== undefined && { recipe }),
       ...(env !== undefined && { env }),
       ...(priorState !== undefined && { priorState }),
+      idleTimeoutSecs: this.runtimePolicy.getIdleTimeoutSecs(),
       logger,
     });
   }

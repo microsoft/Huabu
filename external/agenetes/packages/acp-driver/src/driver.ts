@@ -13,6 +13,7 @@
 import {
   AcpAgentHandle,
   type AcpCreateSpec,
+  type AcpRuntimePolicy,
   type AcpTurnCtx,
   type InStreamEvent,
 } from './handle.js';
@@ -35,12 +36,15 @@ export type AcpAgentDriver<
 
 /**
  * Bootstrap config for {@link acpDriverFactory} (the I9.5 `factoryArgs`).
- * Empty — the ACP session transport is reached through the
- * `@agenetes/agentlet-host` module getter (wired at mount), and every
- * per-thread input (binding / cwd / recipe / namespace / env) rides the
- * baked {@link AcpCreateSpec}, so the factory needs no config.
+ * The transport is reached through the `@agenetes/agentlet-host` module
+ * getter. The host injects only process-wide runtime policy that must remain
+ * live across persisted workload specs.
  */
-export type AcpDriverFactoryConfig = void;
+export type AcpDriverFactoryConfig = AcpRuntimePolicy | undefined;
+
+const DEFAULT_RUNTIME_POLICY: AcpRuntimePolicy = {
+  getIdleTimeoutSecs: () => 600,
+};
 
 /**
  * The I9.5 driver factory for the standard ACP driver. Produces a driver
@@ -49,8 +53,11 @@ export type AcpDriverFactoryConfig = void;
  */
 export function acpDriverFactory<
   TSubmission extends AgentSubmission = AgentSubmission,
->(_config?: AcpDriverFactoryConfig): AcpAgentDriver<TSubmission> {
+>(
+  config: AcpDriverFactoryConfig = DEFAULT_RUNTIME_POLICY,
+): AcpAgentDriver<TSubmission> {
   return {
-    create: (spec, context) => new AcpAgentHandle<TSubmission>(spec, context),
+    create: (spec, context) =>
+      new AcpAgentHandle<TSubmission>(spec, context, config),
   };
 }

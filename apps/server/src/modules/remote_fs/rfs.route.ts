@@ -25,11 +25,14 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import {
+  AGENT_SSE_EVENTS,
   RFS_HEARTBEAT_DEFAULT_SEC,
   RFS_HEARTBEAT_MAX_SEC,
   RFS_HEARTBEAT_MIN_SEC,
   createId,
+  rfsAgentHeadersSchema,
   rfsAgentRequestSchema,
+  type RfsAgentEventMode,
   type RfsUploadResponse,
 } from '@sediment/shared';
 
@@ -41,11 +44,20 @@ import {
 } from './node-meta.js';
 import { resolveCanvasSkill } from './skill.js';
 import { loadAgent } from '../../prompt/index.js';
+import {
+  agenetes,
+  INTERNAL_DRIVER_KIND,
+  type BuiltinHandle,
+} from '../agent/agenetes/drivers.js';
+import { createChatSubmission } from '../agent/agenetes/handle.js';
 import { runAgent, type StreamEvent } from '../agent/agent.service.js';
 import { isPromptDebugEnabled } from '../agent/conversation/prompt/debug-prompt.js';
 import { safeResolve } from '../agent/tools/handlers/fs-sandbox.js';
+import { acquireAgentTurn } from '../agent/turn-lease.js';
+import { canvasAcpNamespace } from '../storage/paths.js';
 
-import type { Context, UserMessage } from '@earendil-works/pi-ai';
+import type { ChatEnvelope } from '../agent/conversation/envelope.js';
+import type { Context } from '@earendil-works/pi-ai';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 
 // ── Error helper: fold a runnable /skill recovery command into { message } ──
@@ -56,11 +68,15 @@ import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
  * skipped the bootstrap or mis-formed a request is handed the fix on its first
  * fumble. `$HUABU_RFS_URL` / `$AGENTLET_TOKEN` are the agent's own env vars.
  */
-function rfsError(reason: string): { message: string } {
+function rfsError(
+  reason: string,
+  code?: string,
+): { message: string; code?: string } {
   return {
     message:
       `${reason} To see how to use this Space, run: ` +
       `curl -sH "Authorization: Bearer $AGENTLET_TOKEN" "$HUABU_RFS_URL/skill"`,
+    ...(code ? { code } : {}),
   };
 }
 
@@ -108,6 +124,36 @@ function writeDataText(raw: NodeJS.WritableStream, text: string): void {
 function clampHeartbeatSec(sec: number | undefined): number {
   if (sec === undefined) return RFS_HEARTBEAT_DEFAULT_SEC;
   return Math.min(RFS_HEARTBEAT_MAX_SEC, Math.max(RFS_HEARTBEAT_MIN_SEC, sec));
+}
+
+function createRfsEnvelope(prompt: string): ChatEnvelope {
+  return {
+    user: { text: prompt, attachments: [] },
+    skills: { invokedIds: [], resolved: [] },
+    focus: {
+      selection: {
+        refs: [],
+        selectedIds: [],
+        imageAttachments: [],
+        snapshotAttachments: [],
+      },
+    },
+  };
+}
+
+function normalizeInternalEvent(event: StreamEvent): StreamEvent {
+  if (event.type !== 'tool_call') return event;
+  return {
+    ...event,
+    data: {
+      ...event.data,
+      internalToolName:
+        event.data.internalToolName ??
+        (event.data.title && event.data.title.length > 0
+          ? event.data.title
+          : undefined),
+    },
+  };
 }
 
 // ── Reachback ask-agent debug logging (gated by HUABU_DEBUG_PROMPT) ──
@@ -330,6 +376,18 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
     '/:canvasId/agent',
     async (request, reply) => {
       const { canvasId } = request.params;
+      const parsedHeaders = rfsAgentHeadersSchema.safeParse(request.headers);
+      if (!parsedHeaders.success) {
+        return reply
+          .code(400)
+          .send(
+            rfsError(
+              parsedHeaders.error.issues[0]?.message ??
+                'Invalid RFS agent headers.',
+              'validation_failed',
+            ),
+          );
+      }
 
       // Body: JSON `{prompt, doneTextOnly?, heartbeatSec?}` or a raw text prompt.
       const body = request.body;
@@ -337,8 +395,8 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
       const contentType = request.headers['content-type'] ?? '';
 
       let prompt: string;
-      let doneTextOnly = true;
-      let heartbeatSec: number | undefined;
+      let legacyEventMode: RfsAgentEventMode = 'final';
+      let legacyHeartbeatSec: number | undefined;
 
       if (contentType.includes('application/json')) {
         let json: unknown;
@@ -355,9 +413,9 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
         }
         prompt = parsed.data.prompt;
         if (parsed.data.doneTextOnly !== undefined) {
-          doneTextOnly = parsed.data.doneTextOnly;
+          legacyEventMode = parsed.data.doneTextOnly ? 'final' : 'all';
         }
-        heartbeatSec = parsed.data.heartbeatSec;
+        legacyHeartbeatSec = parsed.data.heartbeatSec;
       } else {
         prompt = buf.toString('utf8').trim();
       }
@@ -368,11 +426,75 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
           .send(rfsError('A non-empty prompt is required.'));
       }
 
+      const requestedThreadId = parsedHeaders.data['x-huabu-thread-id'];
+      const threadId = requestedThreadId ?? createId('reachback');
+      const eventMode =
+        parsedHeaders.data['x-huabu-event-mode'] ?? legacyEventMode;
+      const heartbeatSec = clampHeartbeatSec(
+        parsedHeaders.data['x-huabu-heartbeat-sec'] ?? legacyHeartbeatSec,
+      );
+
+      let liveHandle: BuiltinHandle | undefined;
+      if (requestedThreadId) {
+        const record = agenetes.record(
+          canvasAcpNamespace(canvasId),
+          requestedThreadId,
+        );
+        if (!record || record.spec.workloadType !== 'Deployment') {
+          return reply
+            .code(404)
+            .send(
+              rfsError(
+                'No Deployment exists for this thread in the requested Space.',
+                'thread_not_found',
+              ),
+            );
+        }
+        if (record.spec.kind !== INTERNAL_DRIVER_KIND) {
+          return reply
+            .code(409)
+            .send(
+              rfsError(
+                'This thread uses an unsupported agent driver.',
+                'unsupported_thread_kind',
+              ),
+            );
+        }
+        liveHandle = agenetes.get(requestedThreadId) as
+          | BuiltinHandle
+          | undefined;
+        if (!liveHandle) {
+          return reply
+            .code(409)
+            .send(
+              rfsError(
+                'The Deployment exists but its agent handle is not live.',
+                'thread_not_live',
+              ),
+            );
+        }
+      }
+
+      const releaseTurn = acquireAgentTurn(threadId);
+      if (!releaseTurn) {
+        return reply
+          .code(409)
+          .send(
+            rfsError(
+              'Another turn is already running for this thread.',
+              'thread_busy',
+            ),
+          );
+      }
+
       await streamAgent(reply, request, {
         canvasId,
         prompt,
-        doneTextOnly,
-        heartbeatSec: clampHeartbeatSec(heartbeatSec),
+        threadId,
+        eventMode,
+        heartbeatSec,
+        liveHandle,
+        releaseTurn,
       });
     },
   );
@@ -383,8 +505,11 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
 interface StreamAgentInput {
   canvasId: string;
   prompt: string;
-  doneTextOnly: boolean;
+  threadId: string;
+  eventMode: RfsAgentEventMode;
   heartbeatSec: number;
+  liveHandle?: BuiltinHandle;
+  releaseTurn: () => void;
 }
 
 async function streamAgent(
@@ -392,8 +517,15 @@ async function streamAgent(
   request: FastifyRequest,
   input: StreamAgentInput,
 ): Promise<void> {
-  const { canvasId, prompt, doneTextOnly, heartbeatSec } = input;
-  const threadId = createId('reachback');
+  const {
+    canvasId,
+    prompt,
+    threadId,
+    eventMode,
+    heartbeatSec,
+    liveHandle,
+    releaseTurn,
+  } = input;
   const debug = isPromptDebugEnabled();
   const startedAt = Date.now();
   let toolCalls = 0;
@@ -408,22 +540,22 @@ async function streamAgent(
     );
   }
 
-  const userMessage: UserMessage = {
-    role: 'user',
-    content: [{ type: 'text', text: prompt }],
-    timestamp: Date.now(),
-  };
-  const context: Context = {
-    systemPrompt: loadAgent('operate', { canvasId }).systemPrompt,
-    messages: [userMessage],
-    tools: [],
-  };
+  const envelope = createRfsEnvelope(prompt);
 
   reply.hijack();
   const raw = reply.raw;
   raw.writeHead(200, SSE_HEADERS);
   raw.flushHeaders?.();
   raw.write(': ok\n\n');
+  raw.write(`: threadId ${threadId}\n\n`);
+  if (eventMode === 'all') {
+    raw.write(
+      `event: ${AGENT_SSE_EVENTS.Meta}\ndata: ${JSON.stringify({
+        threadId,
+        mode: 'operate',
+      })}\n\n`,
+    );
+  }
 
   // Timer-driven heartbeats keep proxies / client timeouts at bay during a
   // long agent turn, independent of how often the agent actually emits.
@@ -436,40 +568,71 @@ async function streamAgent(
   request.raw.socket?.once('close', onClose);
 
   try {
-    const stream = runAgent({
-      scope: 'operate',
-      canvasId,
-      origin: { type: 'ai-operate' },
-      context,
-      logger: { info: (m: string) => request.log.info(m) },
-      signal: abortController.signal,
-      maxIterations: 20,
-    });
+    const logger = { info: (message: string) => request.log.info(message) };
+    const stream = liveHandle
+      ? liveHandle.run(
+          createChatSubmission(envelope, [{ type: 'text', text: prompt }]),
+          {
+            signal: abortController.signal,
+            logger,
+            maxIterations: 20,
+          },
+        )
+      : runAgent({
+          scope: 'operate',
+          workloadType: 'Deployment',
+          threadId,
+          canvasId,
+          origin: { type: 'ai-operate' },
+          envelope,
+          context: {
+            systemPrompt: loadAgent('operate', { canvasId }).systemPrompt,
+            messages: [],
+            tools: [],
+          } satisfies Context,
+          logger,
+          signal: abortController.signal,
+          maxIterations: 20,
+        });
 
-    for await (const event of stream) {
+    for await (const rawEvent of stream) {
+      const event = normalizeInternalEvent(rawEvent);
       if (event.type === 'tool_call') toolCalls += 1;
       else if (event.type === 'done') outcome = 'ok';
       else if (event.type === 'error') outcome = 'error';
       if (debug) logReachbackEvent(request, threadId, event);
-      if (doneTextOnly) {
+      if (eventMode === 'final') {
         // Clean mode: only the final answer text reaches the wire, as
         // `data:` frames a `sed` one-liner can extract.
         if (event.type === 'done') writeDataText(raw, event.data.message);
+        else if (event.type === 'error') {
+          raw.write(
+            `event: ${AGENT_SSE_EVENTS.Error}\ndata: ${JSON.stringify(
+              event.data,
+            )}\n\n`,
+          );
+        }
       } else {
         raw.write(
           `event: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`,
         );
       }
     }
-    // threadId as a comment so it never pollutes the plain-text answer.
-    raw.write(`: threadId ${threadId}\n\n`);
+    if (eventMode === 'all' && outcome !== 'error') {
+      raw.write(`event: ${AGENT_SSE_EVENTS.End}\ndata: {}\n\n`);
+    }
   } catch (err: unknown) {
     outcome = 'error';
     const message = err instanceof Error ? err.message : 'Internal agent error';
-    raw.write(`event: error\ndata: ${JSON.stringify({ message })}\n\n`);
+    raw.write(
+      `event: ${AGENT_SSE_EVENTS.Error}\ndata: ${JSON.stringify({
+        error: message,
+      })}\n\n`,
+    );
   } finally {
     clearInterval(heartbeat);
     request.raw.socket?.removeListener('close', onClose);
+    releaseTurn();
     raw.end();
     if (debug) {
       if (outcome === 'incomplete' && abortController.signal.aborted) {

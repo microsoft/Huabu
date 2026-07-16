@@ -67,7 +67,7 @@ export type AgentConnection = Omit<
   AgentletConnection,
   'sessionProfile' | 'agentletProfile'
 >;
-export type { AcpMessage } from '@agentlet/protocol';
+export type { AcpMessage, LifecycleEvent } from '@agentlet/protocol';
 export { AgentletRequestError } from '@agenetes/agentlet-gateway';
 export { AgentTeamError } from '@agenetes/agent-team';
 export type {

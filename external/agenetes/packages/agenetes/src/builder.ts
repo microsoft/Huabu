@@ -61,10 +61,14 @@ import type { AgentDriver, AgentHandle } from '@agenetes/runtime';
  */
 export type DriverFactory<TCfg = void> = (cfg: TCfg) => AgentDriver;
 
+export interface AgentProfileDriverFactoryConfig extends AgentProfileRuntimePorts {
+  acp?: Exclude<AcpDriverFactoryConfig, undefined>;
+}
+
 /** Standard factories available on every newly mounted builder. */
 export interface StandardDriverFactoryMap {
   readonly acp: DriverFactory<AcpDriverFactoryConfig>;
-  readonly profile: DriverFactory<AgentProfileRuntimePorts>;
+  readonly profile: DriverFactory<AgentProfileDriverFactoryConfig>;
   readonly pi: DriverFactory<PiDriverFactoryConfig>;
 }
 
@@ -78,7 +82,9 @@ type CfgOf<FMap, FN extends keyof FMap> =
  * just `(driverName, factoryName)`.
  */
 type RegisterArgs<FMap, FN extends keyof FMap> =
-  CfgOf<FMap, FN> extends void ? [] : [factoryArgs: CfgOf<FMap, FN>];
+  undefined extends CfgOf<FMap, FN>
+    ? [factoryArgs?: Exclude<CfgOf<FMap, FN>, undefined>]
+    : [factoryArgs: CfgOf<FMap, FN>];
 
 /**
  * The accumulating I9.5 builder. `FMap` is the `factoryName → factory`
@@ -157,12 +163,14 @@ export function mountAgenetes(
     ['acp', acpDriverFactory as DriverFactory<never>],
     [
       'profile',
-      ((ports: AgentProfileRuntimePorts) =>
-        agentProfileDriverFactory({
-          delegate: acpDriverFactory(),
+      ((config: AgentProfileDriverFactoryConfig) => {
+        const { acp, ...ports } = config;
+        return agentProfileDriverFactory({
+          delegate: acpDriverFactory(acp),
           delegateCapabilities: ACP_CAPABILITIES,
           ports,
-        })) as DriverFactory<never>,
+        });
+      }) as DriverFactory<never>,
     ],
     ['pi', piDriverFactory as DriverFactory<never>],
   ]);

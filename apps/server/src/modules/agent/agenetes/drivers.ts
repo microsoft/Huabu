@@ -26,6 +26,7 @@ import { type PiTurnCtx, type PiWorkloadSpec } from '@agenetes/pi-driver';
 
 import { type AgentHandle } from './handle.js';
 import { huabuPiDriverPorts } from './pi-driver.js';
+import { getExternalAgentRuntimeConfig } from '../acp/runtime-config.js';
 
 import type { Agenetes } from '@agenetes/agenetes';
 import type { WorkloadType } from '@agenetes/protocol';
@@ -106,6 +107,10 @@ export const agenetes: Agenetes<AgenetesWorkloadSpec, AgenetesHandle> =
     turnStore: new FileTurnStore(),
   })
     .register(EXTERNAL_DRIVER_KIND, 'profile', {
+      acp: {
+        getIdleTimeoutSecs: () =>
+          getExternalAgentRuntimeConfig().idleTimeoutSecs,
+      },
       resolveManifestRuntime: async (snapshot) => {
         const registry = getAgentTeamRegistry();
         if (!registry) {

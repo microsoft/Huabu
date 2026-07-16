@@ -14,9 +14,29 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import fastify from 'fastify';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const agentMocks = vi.hoisted(() => ({
+  runAgent: vi.fn(),
+  record: vi.fn(),
+  get: vi.fn(),
+  handleRun: vi.fn(),
+}));
+
+vi.mock('../agent/agent.service.js', () => ({
+  runAgent: agentMocks.runAgent,
+}));
+
+vi.mock('../agent/agenetes/drivers.js', () => ({
+  INTERNAL_DRIVER_KIND: 'internal',
+  agenetes: {
+    record: agentMocks.record,
+    get: agentMocks.get,
+  },
+}));
 
 import rfsRoutes from './rfs.route.js';
+import { acquireAgentTurn } from '../agent/turn-lease.js';
 import { getCanvasStore } from '../storage/index.js';
 import { toSafeFilename } from '../storage/naming.js';
 import { setWorkspacePath } from '../workspace.js';
@@ -60,6 +80,14 @@ function seedNote(
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), 'sediment-rfs-'));
   setWorkspacePath(tmp);
+  agentMocks.runAgent.mockReset();
+  agentMocks.record.mockReset();
+  agentMocks.get.mockReset();
+  agentMocks.handleRun.mockReset();
+  agentMocks.runAgent.mockImplementation(async function* () {
+    yield { type: 'done', data: { message: 'first answer' } };
+    return [];
+  });
 });
 
 afterEach(() => {
@@ -226,6 +254,223 @@ describe('node download revision (ETag / conditional GET)', () => {
       // Body changed → the stale If-None-Match no longer matches → 200.
       expect(second.statusCode).toBe(200);
       expect(second.headers['etag']).not.toBe(etag1);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('POST /api/rfs/:canvasId/agent', () => {
+  it('creates a Deployment and returns its thread id before the final text', async () => {
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/agent',
+        headers: { 'content-type': 'text/plain' },
+        payload: 'hello',
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['content-type']).toMatch(/text\/event-stream/);
+      expect(res.body).toMatch(
+        /^: ok\n\n: threadId reachback-[^\n]+\n\ndata: first answer\n\n$/,
+      );
+      expect(agentMocks.runAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scope: 'operate',
+          workloadType: 'Deployment',
+          threadId: expect.stringMatching(/^reachback-/),
+          canvasId: 'c1',
+          envelope: expect.objectContaining({
+            user: expect.objectContaining({ text: 'hello' }),
+          }),
+          context: expect.objectContaining({ messages: [] }),
+        }),
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('continues an existing live internal Deployment directly through its handle', async () => {
+    agentMocks.record.mockReturnValue({
+      spec: { kind: 'internal', workloadType: 'Deployment' },
+      state: {},
+    });
+    agentMocks.handleRun.mockImplementation(async function* () {
+      yield { type: 'done', data: { message: 'continued answer' } };
+      return [];
+    });
+    agentMocks.get.mockReturnValue({ run: agentMocks.handleRun });
+
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/agent',
+        headers: {
+          'content-type': 'text/plain',
+          'x-huabu-thread-id': 'reachback-existing',
+        },
+        payload: 'continue',
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body).toContain(': threadId reachback-existing');
+      expect(res.body).toContain('data: continued answer');
+      expect(agentMocks.runAgent).not.toHaveBeenCalled();
+      expect(agentMocks.record).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'c1' }),
+        'reachback-existing',
+      );
+      expect(agentMocks.handleRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'huabu.chat',
+          content: expect.objectContaining({
+            user: expect.objectContaining({ text: 'continue' }),
+          }),
+          rendered: [{ type: 'text', text: 'continue' }],
+        }),
+        expect.objectContaining({ maxIterations: 20 }),
+      );
+
+      const next = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/agent',
+        headers: {
+          'content-type': 'text/plain',
+          'x-huabu-thread-id': 'reachback-existing',
+        },
+        payload: 'continue again',
+      });
+      expect(next.statusCode).toBe(200);
+      expect(agentMocks.handleRun).toHaveBeenCalledTimes(2);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('returns thread_not_live before opening SSE', async () => {
+    agentMocks.record.mockReturnValue({
+      spec: { kind: 'internal', workloadType: 'Deployment' },
+      state: {},
+    });
+    agentMocks.get.mockReturnValue(undefined);
+
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/agent',
+        headers: {
+          'content-type': 'text/plain',
+          'x-huabu-thread-id': 'reachback-cold',
+        },
+        payload: 'continue',
+      });
+
+      expect(res.statusCode).toBe(409);
+      expect(res.json<{ code: string }>().code).toBe('thread_not_live');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('rejects a non-internal Deployment', async () => {
+    agentMocks.record.mockReturnValue({
+      spec: { kind: 'external', workloadType: 'Deployment' },
+      state: {},
+    });
+
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/agent',
+        headers: {
+          'content-type': 'text/plain',
+          'x-huabu-thread-id': 'external-thread',
+        },
+        payload: 'continue',
+      });
+
+      expect(res.statusCode).toBe(409);
+      expect(res.json<{ code: string }>().code).toBe('unsupported_thread_kind');
+      expect(agentMocks.get).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('returns thread_busy before opening SSE', async () => {
+    agentMocks.record.mockReturnValue({
+      spec: { kind: 'internal', workloadType: 'Deployment' },
+      state: {},
+    });
+    agentMocks.get.mockReturnValue({ run: agentMocks.handleRun });
+    const release = acquireAgentTurn('reachback-busy');
+
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/agent',
+        headers: {
+          'content-type': 'text/plain',
+          'x-huabu-thread-id': 'reachback-busy',
+        },
+        payload: 'continue',
+      });
+
+      expect(res.statusCode).toBe(409);
+      expect(res.json<{ code: string }>().code).toBe('thread_busy');
+    } finally {
+      release?.();
+      await app.close();
+    }
+  });
+
+  it('keeps terminal errors visible in final mode', async () => {
+    agentMocks.runAgent.mockImplementation(async function* () {
+      yield { type: 'error', data: { error: 'model failed' } };
+      return [];
+    });
+
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/agent',
+        headers: { 'content-type': 'text/plain' },
+        payload: 'hello',
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body).toContain('event: error');
+      expect(res.body).toContain('"error":"model failed"');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('lets event-mode headers override legacy JSON options', async () => {
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/agent',
+        headers: {
+          'content-type': 'application/json',
+          'x-huabu-event-mode': 'all',
+        },
+        payload: JSON.stringify({ prompt: 'hello', doneTextOnly: true }),
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body).toContain('event: meta');
+      expect(res.body).toContain('event: done');
+      expect(res.body).toContain('event: end');
     } finally {
       await app.close();
     }

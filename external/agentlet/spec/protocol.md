@@ -128,11 +128,15 @@ The daemon appends newline framing when writing to agent stdin and reads agent s
 
 Agentlet performs ACP session bootstrap locally before opening the session connection. The Gateway does not send `initialize` or `session/new` through the relay.
 
+Idle suspension measures host-to-agent inactivity only when no host request is awaiting an agent response. A pending request such as `session/prompt` keeps the session active for its entire duration; the idle countdown restarts after the matching success or error response arrives.
+
 ## 6. Reconnection and buffering
 
 When the machine control WebSocket disconnects unexpectedly, the daemon reconnects with exponential backoff capped by `--reconnect-max`, then repeats `agentlet/hello` with the same `agentletId`.
 
 Session WebSockets do not currently reconnect automatically. Closing a session connection stops its relay without implicitly stopping the ACP process; the host must realize or stop that workload explicitly.
+
+The Gateway surfaces a local `agent/disconnected` lifecycle event when a session WebSocket closes so host clients can reject pending requests and discard connection-scoped state. This event is not an on-wire agent notification.
 
 The daemon uses bounded FIFO buffers for ACP notifications emitted during bootstrap and through the short window before the new session relay attaches. The embedding Gateway may independently buffer host-to-session traffic while its connection object is detached. Neither side provides durable replay, sequence acknowledgement, or deduplication.
 
