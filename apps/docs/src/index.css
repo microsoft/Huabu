@@ -1,0 +1,177 @@
+/*
+ * Copyright (c) Microsoft Corporation.
+ * Licensed under the MIT license.
+ */
+
+@import 'tailwindcss';
+@import '@pagefind/default-ui/css/ui.css';
+
+:root {
+  color: #191919;
+  background: #ffffff;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  --fg-default: #191919;
+  --fg-muted: #6b6b6b;
+  --fg-subtle: #ababab;
+}
+
+@theme inline {
+  --color-fg-default: var(--fg-default);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  min-width: 320px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+:focus-visible {
+  outline: 2px solid #191919;
+  outline-offset: 2px;
+}
+
+.docs-search-modal {
+  --pagefind-ui-scale: 1;
+  --pagefind-ui-primary: #191919;
+  --pagefind-ui-text: #353535;
+  --pagefind-ui-background: #ffffff;
+  --pagefind-ui-border: #e5e7eb;
+  --pagefind-ui-tag: #f3f4f6;
+  --pagefind-ui-border-width: 1px;
+  --pagefind-ui-border-radius: 12px;
+  --pagefind-ui-font: inherit;
+}
+
+.docs-search-modal .pagefind-ui__search-input {
+  height: 56px;
+  padding-right: 20px;
+  border-color: #d1d5db;
+  font-size: 18px;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 4%);
+}
+
+.docs-search-modal .pagefind-ui__form::before {
+  top: 28px;
+  transform: translateY(-50%);
+}
+
+.docs-search-modal .pagefind-ui__search-clear {
+  display: none;
+}
+
+.docs-search-modal .pagefind-ui__search-input:focus {
+  border-color: #9ca3af;
+  outline: none;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 4%);
+}
+
+.docs-search-modal .pagefind-ui__drawer {
+  padding-top: 4px;
+}
+
+.docs-search-modal .pagefind-ui__message {
+  display: none;
+}
+
+.docs-search-modal .pagefind-ui__results-area {
+  margin-top: 4px;
+}
+
+.docs-search-modal .pagefind-ui__result.pagefind-ui__result {
+  gap: 0;
+  padding: 10px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+}
+
+.docs-search-modal .pagefind-ui__result.pagefind-ui__result:last-of-type {
+  border-bottom: 1px solid #e5e7eb;
+}
+
+@media (min-width: 640px) {
+  .docs-search-modal .pagefind-ui__results {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+}
+
+.docs-search-modal .pagefind-ui__result-thumb.pagefind-ui__result-thumb {
+  display: none;
+}
+
+.docs-search-modal .pagefind-ui__result-inner.pagefind-ui__result-inner {
+  min-width: 0;
+  margin-top: 0;
+}
+
+.docs-search-modal .pagefind-ui__result-link {
+  font-size: 17px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.docs-search-modal .pagefind-ui__result-excerpt.pagefind-ui__result-excerpt {
+  display: none;
+}
+
+.docs-search-modal .pagefind-ui__result-nested.pagefind-ui__result-nested {
+  padding-left: 14px;
+}
+
+.docs-search-modal
+  .pagefind-ui__result-nested.pagefind-ui__result-nested:first-of-type {
+  padding-top: 4px;
+}
+
+.docs-search-modal
+  .pagefind-ui__result-nested
+  .pagefind-ui__result-link.pagefind-ui__result-link {
+  color: #6b7280;
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.docs-search-modal .pagefind-ui__button {
+  display: block;
+  width: fit-content;
+  height: 32px;
+  margin: 12px auto 2px;
+  padding: 0 14px;
+  border-color: #e5e7eb;
+  border-radius: 9999px;
+  background: #f9fafb;
+  color: #6b7280;
+  font-size: 13px;
+  font-weight: 500;
+  transition:
+    color 150ms ease,
+    background-color 150ms ease,
+    border-color 150ms ease;
+}
+
+.docs-search-modal .pagefind-ui__button:hover {
+  border-color: #d1d5db;
+  background: #f3f4f6;
+  color: #191919;
+}

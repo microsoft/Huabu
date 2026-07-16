@@ -315,6 +315,11 @@ FakesAssemblies/
 .ntvs_analysis.dat
 node_modules/
 
+# Huabu handbook build output
+apps/docs/.ssr/
+apps/docs/dist/
+apps/docs/tsconfig.node.tsbuildinfo
+
 # Visual Studio 6 build log
 *.plg
 
