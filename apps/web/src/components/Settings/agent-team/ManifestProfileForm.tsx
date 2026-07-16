@@ -132,18 +132,24 @@ function CreateManifestProfileForm({
     const folder = flatPath.slice(flatPath.lastIndexOf('/') + 1);
     return folder ? `${presetName} (${folder})` : presetName;
   }, [group.member.name, workingDirPath]);
-  const agentOptions = useMemo(
-    () =>
-      supportedAgents.map((agent) => ({
+  const agentOptions = useMemo(() => {
+    const installed = supportedAgents
+      .filter((agent) => agent.installed)
+      .map((agent) => ({
         value: agent.id,
         label: agent.displayName,
-        description: agent.installed
-          ? undefined
-          : t('settings.agentNotInstalled', { hint: agent.installHint }),
-        disabled: !agent.installed,
-      })),
-    [supportedAgents, t],
-  );
+      }));
+    const missing = supportedAgents
+      .filter((agent) => !agent.installed)
+      .map((agent, index) => ({
+        value: agent.id,
+        label: agent.displayName,
+        disabled: true,
+        sectionLabel:
+          index === 0 ? t('settings.notInstalledAgents') : undefined,
+      }));
+    return [...installed, ...missing];
+  }, [supportedAgents, t]);
 
   const create = useCallback(async () => {
     const cwd = workingDirPath.trim();

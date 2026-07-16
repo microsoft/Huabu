@@ -165,7 +165,7 @@
     "noTemplateDescription": "Use the agent as-is, with no customization.",
     "templateOptionalHint": "Apply pre-configured capabilities, or use the agent as-is.",
     "templatesUnavailable": "Presets are unavailable. You can still create an agent with no preset. {{error}}",
-    "agentNotInstalled": "Not installed. {{hint}}",
+    "notInstalledAgents": "Not installed",
     "selectedAgentUnavailable": "The selected agent is no longer installed. Install it and try again.",
     "noSupportedAgent": "No supported agent",
     "unsupportedTemplateAgents": "This preset requires unsupported agent IDs: {{agents}}.",

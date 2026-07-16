@@ -384,19 +384,36 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
   }, [form, defaultDisplayName, detectedClis, editing, onSaved, onClose, t]);
 
   /**
-   * One unified picker: every detected CLI followed by a trailing
-   * "Custom command" option. Selecting "custom" is the single source of
-   * truth for showing the raw launch-command field, so loading an
-   * existing profile lands on the right control automatically.
+   * One unified picker: installed Agents first, missing Agents disabled
+   * after them, and a trailing "Custom command" option. Selecting
+   * "custom" is the single source of truth for showing the raw
+   * launch-command field, so loading an existing profile lands on the
+   * right control automatically.
    */
   const cliOptions = useMemo(() => {
-    const options = detectedClis
-      .filter((c) => c.installed)
-      .map((c) => ({
-        value: c.id,
-        label: c.displayName,
+    const installed = detectedClis
+      .filter((cli) => cli.installed)
+      .map((cli) => ({
+        value: cli.id,
+        label: cli.displayName,
       }));
-    options.push({ value: 'custom', label: t('settings.customCommand') });
+    const missing = detectedClis
+      .filter((cli) => !cli.installed)
+      .map((cli, index) => ({
+        value: cli.id,
+        label: cli.displayName,
+        disabled: true,
+        sectionLabel:
+          index === 0 ? t('settings.notInstalledAgents') : undefined,
+      }));
+    const options = [
+      ...installed,
+      ...missing,
+      {
+        value: 'custom',
+        label: t('settings.customCommand'),
+      },
+    ];
     return options;
   }, [detectedClis, t]);
 
