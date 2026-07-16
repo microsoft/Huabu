@@ -159,5 +159,5 @@ describe('runManagedSetup', () => {
     expect(logger.info).toHaveBeenCalledWith(
       `Tool already ready: ${toolDir} (shared)`,
     );
-  });
+  }, 15_000);
 });

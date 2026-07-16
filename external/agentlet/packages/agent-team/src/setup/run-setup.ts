@@ -9,7 +9,7 @@
  *      Kept for backward compat and complex custom setups.
  */
 
-import { spawn } from 'node:child_process';
+import type { spawn as nodeSpawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
   existsSync,
@@ -21,7 +21,8 @@ import {
   utimesSync,
   writeFileSync,
 } from 'node:fs';
-import { resolve, join } from 'node:path';
+import { createRequire } from 'node:module';
+import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseSetupArgs } from './cli.js';
 import {
@@ -57,6 +58,8 @@ import {
   isWorkspaceReady,
   resolveWorkspaceDir,
 } from './workspace.js';
+
+const spawn = createRequire(import.meta.url)('cross-spawn') as typeof nodeSpawn;
 
 /** Create the default console logger. */
 function createLogger(): SetupLogger {

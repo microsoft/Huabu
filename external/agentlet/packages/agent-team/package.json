@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "commander": "^13.0.0",
+    "cross-spawn": "^7.0.6",
     "yaml": "^2.7.0"
   },
   "devDependencies": {
