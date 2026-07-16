@@ -35,7 +35,7 @@ export default function DataAndBackup() {
 │   ├── space.json                     # this Space's topology
 │   ├── nodes/<node-title>.md
 │   ├── .artifacts/<artifactId>.<ext>
-│   ├── .memory/canvas.md              # Space memory
+│   ├── .memory/space.md              # Space memory
 │   └── .history/                      # conversation and event history
 └── setting/
     ├── user.md                        # User memory
@@ -61,7 +61,7 @@ export default function DataAndBackup() {
             'PDF / image / video originals; each filename is based on its artifact ID.',
           ],
           [
-            <Code>.memory/canvas.md</Code>,
+            <Code>.memory/space.md</Code>,
             'Markdown',
             'Space-level memory the AI writes.',
           ],

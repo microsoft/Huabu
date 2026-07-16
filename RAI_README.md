@@ -44,7 +44,7 @@ Huabu was evaluated on its ability to support exploratory knowledge work scenari
 
 ### EVALUATION METHODS
 
-We used used qualitative observation, task walk-throughs, and structured user feedback from internal dogfooding sessions to measure Huabu’s performance.
+We used qualitative observation, task walk-throughs, and structured user feedback from internal dogfooding sessions to measure Huabu’s performance.
 
 We compared the performance of Huabu against the linear chat baseline that is the dominant paradigm today using participant-reported feedback across research, planning, and ideation scenarios.
 
