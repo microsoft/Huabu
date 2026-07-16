@@ -33,6 +33,7 @@ import { toast } from '@/components/Common/Toast';
 import { SettingRow } from '@/components/Settings/Common/SettingRow';
 import { SettingSection } from '@/components/Settings/Common/SettingSection';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
+import { copyToClipboard } from '@/utils/io/clipboard';
 
 import { AgentletHealthBanner } from './AgentletHealthBanner';
 import { AgentProfileEditor } from './AgentProfileEditor';
@@ -306,6 +307,15 @@ export function ExternalAgentsSettings({
     [refreshMember, tAgent],
   );
 
+  const copyPreparationError = useCallback(
+    (message: string) => {
+      void copyToClipboard(message).then(() => {
+        toast(t('settings.errorMessageCopied'), { tone: 'success' });
+      });
+    },
+    [t],
+  );
+
   const confirmDelete = useCallback(async () => {
     if (!pendingDelete) return;
     setIsDeleting(true);
@@ -433,10 +443,22 @@ export function ExternalAgentsSettings({
                            * Error badge carries the failure message as its tooltip
                            * so the detail stays with the status it belongs to.
                            */}
-                          {status !== 'ready' ? (
+                          {status === 'error' && errorMessage ? (
+                            <Button
+                              variant="ghost"
+                              shape="pill"
+                              tone="danger"
+                              size="sm"
+                              title={errorMessage}
+                              aria-label={t('settings.copyErrorMessage')}
+                              onClick={() => copyPreparationError(errorMessage)}
+                              className={`${STATUS_CLASS[status]} px-2 py-0.5 text-xs font-medium whitespace-nowrap`}
+                            >
+                              {tAgent(STATUS_KEY[status])}
+                            </Button>
+                          ) : status !== 'ready' ? (
                             <span
                               className={`${STATUS_CLASS[status]} inline-flex rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap`}
-                              title={errorMessage}
                             >
                               {tAgent(STATUS_KEY[status])}
                             </span>

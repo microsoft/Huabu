@@ -5,11 +5,14 @@
  * true`, no error) renders nothing so the section stays compact.
  */
 
-import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Copy, RefreshCw } from 'lucide-react';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/Common/Button';
+import { toast } from '@/components/Common/Toast';
+import { Tooltip } from '@/components/Common/Tooltip';
+import { copyToClipboard } from '@/utils/io/clipboard';
 
 import type { AcpAgentletStatus } from '@sediment/shared';
 
@@ -32,6 +35,13 @@ export const AgentletHealthBanner: React.FC<AgentletHealthBannerProps> = ({
     ? Math.max(0, Math.ceil((agentlet.nextRestartAt - Date.now()) / 1000))
     : null;
 
+  const copyErrorMessage = () => {
+    if (!agentlet.lastError) return;
+    void copyToClipboard(agentlet.lastError).then(() => {
+      toast(t('settings.errorMessageCopied'), { tone: 'success' });
+    });
+  };
+
   return (
     <div className="border-warning-light/60 bg-warning-light/15 mb-3 flex items-start gap-2 rounded-md border px-3 py-2">
       <AlertTriangle className="text-warning mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -40,9 +50,22 @@ export const AgentletHealthBanner: React.FC<AgentletHealthBannerProps> = ({
           {t('settings.workerOffline')}
         </p>
         {agentlet.lastError && (
-          <p className="text-fg-muted mt-0.5 text-[11px] leading-snug wrap-break-word">
-            {agentlet.lastError}
-          </p>
+          <Tooltip
+            content={agentlet.lastError}
+            wrapperClassName="mt-0.5 flex min-w-0 max-w-full"
+            contentClassName="max-w-lg whitespace-pre-wrap wrap-break-word"
+          >
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={copyErrorMessage}
+              aria-label={t('settings.copyErrorMessage')}
+              className="text-fg-muted max-w-full min-w-0 justify-start gap-1 px-0 py-0 text-left text-[11px] leading-snug"
+            >
+              <span className="truncate">{agentlet.lastError}</span>
+              <Copy className="shrink-0" aria-hidden />
+            </Button>
+          </Tooltip>
         )}
         {nextRestartInSec !== null && nextRestartInSec > 0 && (
           <p className="text-fg-subtle mt-0.5 text-[11px] leading-snug">
