@@ -1,12 +1,13 @@
-import { Check, Key, RotateCcw, Save } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { updateAgentTeamConfigs } from '@/api/agent-team';
-import { Button } from '@/components/Common/Button';
-import { Input, TEXT_INPUT_CLASS } from '@/components/Common/Input';
-import { SettingRow } from '@/components/Common/SettingRow';
+import { TextInput } from '@/components/Common/TextInput';
 import { toast } from '@/components/Common/Toast';
+import { ApiKeyRow } from '@/components/Settings/Common/ApiKeyRow';
+import { SettingControl } from '@/components/Settings/Common/SettingControl';
+import { SettingLabel } from '@/components/Settings/Common/SettingLabel';
+import { SettingRow } from '@/components/Settings/Common/SettingRow';
 
 import type {
   AgentTeamMemberConfigView,
@@ -16,14 +17,21 @@ import type {
 interface AgentTeamConfigsProps {
   config: AgentTeamMemberConfigView;
   onDetailChange: (detail: AgentTeamMemberDetailView) => void;
+  density?: 'default' | 'compact';
 }
 
 interface ConfigFieldProps extends AgentTeamConfigsProps {
   field: AgentTeamMemberConfigView['fields'][number];
 }
 
-function ConfigField({ config, field, onDetailChange }: ConfigFieldProps) {
+function ConfigField({
+  config,
+  field,
+  onDetailChange,
+  density,
+}: ConfigFieldProps) {
   const { t } = useTranslation('agentTeam');
+  const inputId = useId();
   const [value, setValue] = useState(field.secret ? '' : (field.value ?? ''));
   const [saving, setSaving] = useState(false);
 
@@ -41,7 +49,6 @@ function ConfigField({ config, field, onDetailChange }: ConfigFieldProps) {
       });
       onDetailChange(detail);
       setValue(field.secret ? '' : (next ?? ''));
-      toast(t('configSaved'), { tone: 'success' });
     } catch (error) {
       toast(error instanceof Error ? error.message : t('operationFailed'), {
         tone: 'danger',
@@ -52,71 +59,56 @@ function ConfigField({ config, field, onDetailChange }: ConfigFieldProps) {
   };
 
   const label = (
-    <>
-      {field.name}
-      {field.required && (
-        <span className="text-danger" title={t('required')}>
-          {' '}
-          (*)
-        </span>
-      )}
-    </>
+    <SettingLabel optional={!field.required}>{field.name}</SettingLabel>
   );
 
+  if (field.secret) {
+    return (
+      <ApiKeyRow
+        title={label}
+        ariaLabel={field.name}
+        description={field.description}
+        saved={field.configured}
+        placeholder={t('configValue')}
+        saving={saving}
+        onSave={(next) => void update(next)}
+        onRemove={() => void update(null)}
+        density={density}
+      />
+    );
+  }
+
   return (
-    <SettingRow title={label} description={field.description}>
-      <div className="flex min-w-72 items-center justify-end gap-1.5">
-        {field.secret ? (
-          field.configured ? (
-            <Check className="text-success" size={14} />
-          ) : (
-            <Key className="text-warning" size={14} />
-          )
-        ) : null}
-        <Input
-          type={field.secret ? 'password' : 'text'}
+    <SettingRow
+      title={label}
+      description={field.description}
+      labelFor={inputId}
+      density={density}
+    >
+      <SettingControl>
+        <TextInput
+          id={inputId}
+          type="text"
           value={value}
           onChange={(event) => setValue(event.target.value)}
-          placeholder={
-            field.secret && field.configured
-              ? t('secretConfigured')
-              : t('configValue')
-          }
+          placeholder={t('configValue')}
           disabled={saving}
           autoComplete="off"
-          className={`${TEXT_INPUT_CLASS} min-w-0 flex-1 font-mono`}
+          mono
+          className="w-full"
+          onBlur={() => {
+            if (value !== (field.value ?? '')) {
+              void update(value.trim() ? value : null);
+            }
+          }}
           onKeyDown={(event) => {
-            if (event.key === 'Enter' && (!field.secret || value.length > 0)) {
+            if (event.key === 'Enter') {
               event.preventDefault();
-              void update(value);
+              event.currentTarget.blur();
             }
           }}
         />
-        <Button
-          variant="outline"
-          tone="neutral"
-          size="sm"
-          iconOnly
-          title={t('save')}
-          disabled={saving || (field.secret && value.length === 0)}
-          onClick={() => void update(value)}
-        >
-          <Save className={saving ? 'animate-pulse' : undefined} />
-        </Button>
-        {(field.configured || (!field.secret && field.value !== undefined)) && (
-          <Button
-            variant="ghost"
-            tone="neutral"
-            size="sm"
-            iconOnly
-            title={t('clearConfig')}
-            disabled={saving}
-            onClick={() => void update(null)}
-          >
-            <RotateCcw />
-          </Button>
-        )}
-      </div>
+      </SettingControl>
     </SettingRow>
   );
 }

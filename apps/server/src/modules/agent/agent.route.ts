@@ -24,11 +24,15 @@ import { runAcpAgent } from '../agent/acp/service.js';
 import { agenetes } from '../agent/agenetes/drivers.js';
 import { buildForkTargetSpec } from '../agent/agenetes/fork.js';
 import { runAgent } from '../agent/agent.service.js';
-import { buildChatEnvelope } from '../agent/conversation/envelope.js';
+import {
+  buildChatEnvelope,
+  envelopeHasImage,
+} from '../agent/conversation/envelope.js';
 import { buildHistoryFromTurns } from '../agent/conversation/transcript/history.js';
 import { getLLMModel } from '../agent/llm.js';
 import { readWorkspaceMemory } from '../agent/memory/index.js';
 import { acquireAgentTurn } from '../agent/turn-lease.js';
+import { planSkillDispatch } from '../agent/skill-model-routing.js';
 import { canvasAcpNamespace } from '../storage/paths.js';
 
 import type {
@@ -489,6 +493,8 @@ const agentRoutes: FastifyPluginAsync = async (
       canvasId: canvasId ?? null,
       logger: request.log,
     });
+    const skillDispatch = planSkillDispatch(envelope.skills.resolved);
+    const runsSkillAuthoring = skillDispatch.closeLiveHandle;
 
     const releaseTurn = acquireAgentTurn(resolvedThreadId);
     if (!releaseTurn) {
@@ -589,6 +595,13 @@ const agentRoutes: FastifyPluginAsync = async (
           debugPrompt,
         });
       } else {
+        // A live Deployment bakes its host context when created. Skill
+        // authoring commands therefore run as fresh Jobs on the Utility role.
+        // Ordinary task Skills stay on the Chat-backed Deployment. Closing any
+        // live chat handle before authoring ensures the next normal turn
+        // rehydrates the authoring turn instead of continuing from stale state.
+        // (See `planSkillDispatch` for the coupled role/lifecycle/close rule.)
+        if (skillDispatch.closeLiveHandle) agenetes.close(resolvedThreadId);
         // The pi-driver owns restart recovery from Agenetes durable input.
         // L1 supplies only current host policy and the current request.
         const context = {
@@ -598,7 +611,14 @@ const agentRoutes: FastifyPluginAsync = async (
         };
         stream = runAgent({
           scope: mode,
-          workloadType: 'Deployment',
+          workloadType: skillDispatch.workloadType,
+          modelRole: skillDispatch.modelRole,
+          // `hasImage` only informs the vision guard on a fresh Job (the
+          // Utility-tier authoring path). A live Deployment bakes its host
+          // context at creation, so passing it there would be dead data that
+          // never re-reads per turn — omit it and let the chat model (always
+          // vision-capable) handle images.
+          hasImage: runsSkillAuthoring ? envelopeHasImage(envelope) : undefined,
           // The built-in chat agent's canvas writes are delivered to the
           // frontend ONLY via the sync broadcast (like ACP), not applied
           // from the chat tool result. Attributing them to the chat

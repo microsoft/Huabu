@@ -4,7 +4,6 @@ import { routes } from './_routes';
 import type {
   AgentProfileView,
   AgentTeamMemberDetailView,
-  AgentTeamRootRefBody,
   AgentTeamSettingsState,
   CreateAgentProfileBody,
   PatchAgentProfileBody,
@@ -14,36 +13,6 @@ import type {
 export async function getAgentTeamSettings(): Promise<AgentTeamSettingsState> {
   return apiFetch(routes.agentTeamSettings, {
     fallbackMessage: 'Failed to load Agent Team Settings',
-  });
-}
-
-export async function addAgentTeamRoot(
-  root: AgentTeamRootRefBody,
-): Promise<AgentTeamSettingsState> {
-  return apiFetch(routes.agentTeamRoots, {
-    method: 'POST',
-    json: root,
-    fallbackMessage: 'Failed to add Agent Team root',
-  });
-}
-
-export async function rescanAgentTeamRoot(
-  root: AgentTeamRootRefBody,
-): Promise<AgentTeamSettingsState> {
-  return apiFetch(routes.agentTeamRootsRescan, {
-    method: 'POST',
-    json: root,
-    fallbackMessage: 'Failed to rescan Agent Team root',
-  });
-}
-
-export async function removeAgentTeamRoot(
-  root: AgentTeamRootRefBody,
-): Promise<AgentTeamSettingsState> {
-  return apiFetch(routes.agentTeamRoots, {
-    method: 'DELETE',
-    json: root,
-    fallbackMessage: 'Failed to remove Agent Team root',
   });
 }
 

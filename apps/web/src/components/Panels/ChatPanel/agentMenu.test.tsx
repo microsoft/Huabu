@@ -10,11 +10,6 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 
-vi.mock('@/components/Settings/sections/ProfileEditor', () => ({
-  ProfileEditorModal: () => null,
-  useDetectedClis: () => ({ detectedClis: [], loaded: true }),
-}));
-
 vi.mock('../../Common/Button', () => ({
   Button: ({
     children,
@@ -74,7 +69,7 @@ afterEach(() => {
 });
 
 describe('AgentMenuOptions', () => {
-  it('groups ready Agent Teams separately from command Profiles', () => {
+  it('groups ready template and command Profiles under External Agents', () => {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -90,7 +85,7 @@ describe('AgentMenuOptions', () => {
       );
     });
 
-    expect(container.textContent).toContain('chat.agentTeams');
+    expect(container.textContent).not.toContain('chat.agentTeams');
     expect(container.textContent).toContain('Ready Team');
     expect(container.textContent).not.toContain('Pending Team');
     expect(container.textContent).toContain('chat.externalAgents');

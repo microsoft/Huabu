@@ -71,6 +71,8 @@ Each LLM call site is registered as a role with metadata: its default tier, whet
 ```ts
 export const MODEL_ROLES = {
   chat: { defaultTier: 'chat', vision: true, label: 'Chat agent' },
+  memory: { defaultTier: 'utility', vision: false, label: 'Memory curation' },
+  skill: { defaultTier: 'utility', vision: true, label: 'Skill authoring' },
   intent: { defaultTier: 'utility', vision: true, label: 'Intent suggestions' },
   imageLabel: { defaultTier: 'utility', vision: true, label: 'Image labeling' },
   frameLabel: {
@@ -176,9 +178,11 @@ Each phase is independently shippable. The whole thing is **additive and backwar
 
 ### Phase 4 — Switch call sites to roles
 
-**This round: preprocessing only.**
+**Shipped call sites:** preprocessing, Memory curation, and explicit Skill authoring commands.
 
 - `provider-manager.ts`: the three `llmComplete` calls → `{ role: 'imageLabel' | 'frameLabel' | 'contentMeta' }`, passing `hasImage` for the image path.
+- The Memory curator uses the `memory` role through the built-in pi-driver host adapter.
+- `/create-skill` and `/update-skill` use the `skill` role through a fresh Job, with image-aware fallback to Chat when needed. Ordinary task Skills continue on the Chat Model.
 - **Deferred:** `intent.service.ts` keeps using the chat model for now. The `intent` role still ships in the catalog (data), and the resolver already handles it, so moving intent onto the utility tier later is a one-line call-site change (`{ role: 'intent', hasImage: <screenshot present> }`) with no further plumbing.
 
 ### Phase 5 — Web UI ([`LLMSettings.tsx`](../../apps/web/src/components/Settings/sections/LLMSettings.tsx) + `api/llm.ts` + `store/llmStore.ts`)
@@ -205,4 +209,4 @@ Each phase is independently shippable. The whole thing is **additive and backwar
 
 1. **Role granularity — keep as-is.** The five-role catalog (chat / intent / imageLabel / frameLabel / contentMeta) is sufficient; `contentMeta` stays a single role (no label/summary/keywords split). Finer roles can be added later as pure data.
 2. **Utility auth — reuse the per-provider credential store, with an inline key input for un-authenticated providers (v1.5).** Credentials live in the shared `providers` map keyed by provider id. The utility tier picks a `provider` + `model` and reuses whatever key/OAuth that provider already has stored. The utility provider dropdown lists **all** providers; selecting one that has no stored key reveals an **inline API-key input** that writes straight back into the same `providers` map (no separate/independent auth system). So the user can point utility at either an already-configured provider or a brand-new one without leaving the utility panel. A fully independent auth stack (chat and utility using unrelated credential silos) remains out of scope.
-3. **Scope — preprocessing only this round.** Intent recognition stays on the chat model for now; its role ships in the catalog so the later switch is a one-line change (see Phase 4).
+3. **Scope — preprocessing, Memory, and Skill authoring.** Ordinary task Skills stay on Chat. Intent recognition also stays on the chat model for now; its role ships in the catalog so the later switch is a one-line change (see Phase 4).

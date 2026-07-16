@@ -70,7 +70,7 @@ What stays in `apps/web/src/handler/canvasCommand/`:
 4. **New canvas commands** are added to the shared engine `packages/shared/src/canvas-engine/commands/` + registered in its `index.ts` (`HANDLERS` / `COMMAND_META`), not in the web app.
 5. **Shared hooks** belong in `hooks/`; single-component hooks stay co-located.
 6. **Barrel exports** (`index.ts`) provide clean import paths in `handler/`, `utils/io/`, `utils/node/`.
-7. **Design tokens only** — never raw hex / Tailwind palette / ShadCN aliases. See [.github/design-system.md](../../.github/design-system.md).
+7. **Design tokens only** — never raw hex / Tailwind palette / ShadCN aliases. The token declarations in [`apps/web/src/index.css`](../../apps/web/src/index.css) are authoritative; reusable UI contracts live in [`apps/web/src/components/Common/`](../../apps/web/src/components/Common/).
 
 The keyboard shortcut catalog may retain internal runtime bindings with `hidden: true`; `getKeyboardShortcutSections()` excludes them from the user-facing modal. Removed bindings must be deleted from the catalog rather than left as display-only entries.
 

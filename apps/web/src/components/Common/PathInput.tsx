@@ -6,13 +6,14 @@ import { useFolderPickerSupported } from '@/store/workspaceStore';
 
 import { Button } from './Button';
 import { cn } from './cn';
-import { Input } from './Input';
 import { Loading } from './Loading';
+import { TextInput } from './TextInput';
 import { toast } from './Toast';
 
 import type { KeyboardEventHandler } from 'react';
 
 export interface PathInputProps {
+  id?: string;
   /** Current path value. */
   value: string;
   /** Called with the new value on typing *and* after a folder is picked. */
@@ -57,6 +58,7 @@ export interface PathInputProps {
  * handled internally so call sites stay declarative.
  */
 export function PathInput({
+  id,
   value,
   onChange,
   onPicked,
@@ -106,8 +108,11 @@ export function PathInput({
 
   return (
     <div className={cn('flex items-stretch gap-1.5', className)}>
-      <Input
+      <TextInput
+        id={id}
         type="text"
+        size={size}
+        mono={mono}
         aria-label={ariaLabel}
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -116,9 +121,8 @@ export function PathInput({
         disabled={disabled}
         wrapperClassName="min-w-0 flex-1"
         className={cn(
-          'border-edge-default bg-surface text-fg-default placeholder:text-fg-subtle focus:border-edge-strong w-full rounded-md border focus:outline-none',
-          size === 'sm' ? 'px-2 py-1 text-xs' : 'px-2.5 py-1.5 text-sm',
-          mono && 'font-mono',
+          'text-fg-default focus:border-edge-strong w-full focus:ring-0',
+          size === 'sm' && 'py-1',
           inputClassName,
         )}
       />

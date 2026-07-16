@@ -37,7 +37,6 @@ import { invalidateProfileSchemaCache } from './profile-schema-cache.js';
 import {
   deleteProfile as deleteLegacyProfile,
   getProfile as getLegacyProfile,
-  listProfiles as listLegacyProfiles,
 } from './profile-store.js';
 import { isLoopbackRequest } from '../../security/peer.js';
 
@@ -73,9 +72,6 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
       return {
         profiles,
         selectableProfileIds: registry?.listSelectableProfileIds() ?? [],
-        legacyProfiles: listLegacyProfiles().filter(
-          (profile) => profile.cliId === 'agent-team',
-        ),
         agentlet: getDaemonSupervisor().getStatus(),
       };
     },

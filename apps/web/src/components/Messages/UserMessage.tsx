@@ -39,7 +39,7 @@ export const UserMessage = ({
               invokedSkills.map((id) => (
                 <span
                   key={id}
-                  className="text-ai mr-1 font-mono"
+                  className="mr-1 font-mono"
                   title={t('messages.invokedSkill', { id })}
                 >
                   /{id}

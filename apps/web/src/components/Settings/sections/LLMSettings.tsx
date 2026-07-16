@@ -2,17 +2,20 @@ import { Check, Copy, LogIn, LogOut } from 'lucide-react';
 import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { ApiKeyRow } from '@/components/Common/ApiKeyRow';
 import { Button } from '@/components/Common/Button';
 import { Select } from '@/components/Common/Select';
-import { SettingRow } from '@/components/Common/SettingRow';
-import { SettingSection } from '@/components/Common/SettingSection';
+import { TextInput } from '@/components/Common/TextInput';
 import { toast } from '@/components/Common/Toast';
 import { Toggle } from '@/components/Common/Toggle';
+import { ApiKeyRow } from '@/components/Settings/Common/ApiKeyRow';
+import { SettingControl } from '@/components/Settings/Common/SettingControl';
+import { SettingLabel } from '@/components/Settings/Common/SettingLabel';
+import { SettingRow } from '@/components/Settings/Common/SettingRow';
+import { SettingSection } from '@/components/Settings/Common/SettingSection';
 import { useLLMStore } from '@/store/llmStore';
 import { copyToClipboard } from '@/utils/io/clipboard';
 
-import { TEXT_INPUT_CLASS, useDebouncedSave } from '../utils';
+import { useDebouncedSave } from '../utils';
 
 import type { LLMConfigUpdate, LLMUtilityConfigUpdate } from '@sediment/shared';
 
@@ -20,7 +23,7 @@ interface BaseUrlRowProps {
   description?: string;
   disabled: boolean;
   placeholder: string;
-  title: string;
+  title: React.ReactNode;
   value: string;
   onChange: (value: string) => void;
   onSave: (value: string) => void;
@@ -39,22 +42,25 @@ const BaseUrlRow: React.FC<BaseUrlRowProps> = ({
 
   return (
     <SettingRow title={title} description={description}>
-      <input
-        type="url"
-        inputMode="url"
-        autoCapitalize="none"
-        autoCorrect="off"
-        spellCheck={false}
-        placeholder={placeholder}
-        value={value}
-        onChange={(event) => {
-          const nextValue = event.target.value;
-          onChange(nextValue);
-          debouncedSave(nextValue.trim());
-        }}
-        disabled={disabled}
-        className={`${TEXT_INPUT_CLASS} w-56`}
-      />
+      <SettingControl>
+        <TextInput
+          type="url"
+          inputMode="url"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          aria-label={typeof title === 'string' ? title : undefined}
+          placeholder={placeholder}
+          value={value}
+          onChange={(event) => {
+            const nextValue = event.target.value;
+            onChange(nextValue);
+            debouncedSave(nextValue.trim());
+          }}
+          disabled={disabled}
+          className="w-full"
+        />
+      </SettingControl>
     </SettingRow>
   );
 };
@@ -221,7 +227,7 @@ export const LLMSettings: React.FC = () => {
     <>
       <SettingSection title={t('settings.chatModel')} collapsible>
         <SettingRow title={t('settings.provider')}>
-          <div className="w-44">
+          <SettingControl>
             <Select
               options={llmProviders.map((p) => ({
                 value: p.id,
@@ -231,13 +237,15 @@ export const LLMSettings: React.FC = () => {
               onChange={(v) => void handleProviderChange(v)}
               disabled={llmSaving}
               placeholder={t('settings.selectProvider')}
+              ariaLabel={t('settings.provider')}
+              className="w-full"
             />
-          </div>
+          </SettingControl>
         </SettingRow>
 
         {llmConfig?.provider && llmModels.length > 0 && !isAzure && (
           <SettingRow title={t('settings.model')}>
-            <div className="w-44">
+            <SettingControl>
               <Select
                 options={llmModels.map((m) => ({
                   value: m.id,
@@ -246,31 +254,42 @@ export const LLMSettings: React.FC = () => {
                 value={llmConfig?.model ?? ''}
                 onChange={(v) => void handleModelChange(v)}
                 disabled={llmSaving}
+                ariaLabel={t('settings.model')}
+                className="w-full"
               />
-            </div>
+            </SettingControl>
           </SettingRow>
         )}
 
         {llmConfig?.provider && llmModels.length === 0 && !isAzure && (
           <SettingRow title={t('settings.model')}>
-            <input
-              type="text"
-              placeholder="e.g. gpt-4o"
-              value={manualModel}
-              onChange={(e) => {
-                const v = e.target.value;
-                setManualModel(v);
-                debouncedSaveChat({ model: v.trim() });
-              }}
-              className={`${TEXT_INPUT_CLASS} w-44`}
-            />
+            <SettingControl>
+              <TextInput
+                type="text"
+                aria-label={t('settings.model')}
+                placeholder="e.g. gpt-4o"
+                value={manualModel}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setManualModel(v);
+                  debouncedSaveChat({ model: v.trim() });
+                }}
+                className="w-full"
+              />
+            </SettingControl>
           </SettingRow>
         )}
 
         {canOverrideBaseUrl && (
           <BaseUrlRow
             key={llmConfig?.provider}
-            title={isAzure ? t('settings.endpoint') : t('settings.baseUrl')}
+            title={
+              isAzure ? (
+                t('settings.endpoint')
+              ) : (
+                <SettingLabel optional>{t('settings.baseUrl')}</SettingLabel>
+              )
+            }
             description={isAzure ? undefined : t('settings.baseUrlDescription')}
             placeholder={
               selectedProvider?.baseUrl.default ??
@@ -287,31 +306,37 @@ export const LLMSettings: React.FC = () => {
         {isAzure && (
           <>
             <SettingRow title={t('settings.deployment')}>
-              <input
-                type="text"
-                placeholder="e.g. gpt-5-chat"
-                value={azureDeployment}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setAzureDeployment(v);
-                  debouncedSaveChat({ model: v });
-                }}
-                className={`${TEXT_INPUT_CLASS} w-56`}
-              />
+              <SettingControl>
+                <TextInput
+                  type="text"
+                  aria-label={t('settings.deployment')}
+                  placeholder="e.g. gpt-5-chat"
+                  value={azureDeployment}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setAzureDeployment(v);
+                    debouncedSaveChat({ model: v });
+                  }}
+                  className="w-full"
+                />
+              </SettingControl>
             </SettingRow>
 
             <SettingRow title={t('settings.apiVersion')}>
-              <input
-                type="text"
-                placeholder="e.g. 2025-04-01-preview"
-                value={azureApiVersion}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setAzureApiVersion(v);
-                  debouncedSaveChat({ apiVersion: v });
-                }}
-                className={`${TEXT_INPUT_CLASS} w-56`}
-              />
+              <SettingControl>
+                <TextInput
+                  type="text"
+                  aria-label={t('settings.apiVersion')}
+                  placeholder="e.g. 2025-04-01-preview"
+                  value={azureApiVersion}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setAzureApiVersion(v);
+                    debouncedSaveChat({ apiVersion: v });
+                  }}
+                  className="w-full"
+                />
+              </SettingControl>
             </SettingRow>
 
             <ApiKeyRow
@@ -431,7 +456,7 @@ export const LLMSettings: React.FC = () => {
         {!utilityFollowsChat && (
           <>
             <SettingRow title={t('settings.provider')}>
-              <div className="w-44">
+              <SettingControl>
                 <Select
                   options={llmProviders.map((p) => ({
                     value: p.id,
@@ -441,13 +466,15 @@ export const LLMSettings: React.FC = () => {
                   onChange={(v) => void handleUtilityProviderChange(v)}
                   disabled={utilitySaving}
                   placeholder={t('settings.selectProvider')}
+                  ariaLabel={t('settings.provider')}
+                  className="w-full"
                 />
-              </div>
+              </SettingControl>
             </SettingRow>
 
             {utilityModels.length > 0 ? (
               <SettingRow title={t('settings.model')}>
-                <div className="w-44">
+                <SettingControl>
                   <Select
                     options={utilityModels.map((m) => ({
                       value: m.id,
@@ -456,22 +483,27 @@ export const LLMSettings: React.FC = () => {
                     value={utilityConfig?.model ?? ''}
                     onChange={(v) => void handleUtilityModelChange(v)}
                     disabled={utilitySaving}
+                    ariaLabel={t('settings.model')}
+                    className="w-full"
                   />
-                </div>
+                </SettingControl>
               </SettingRow>
             ) : (
               <SettingRow title={t('settings.model')}>
-                <input
-                  type="text"
-                  placeholder="e.g. gpt-4o-mini"
-                  value={utilityManualModel}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setUtilityManualModel(v);
-                    debouncedSaveUtility({ model: v.trim() });
-                  }}
-                  className={`${TEXT_INPUT_CLASS} w-44`}
-                />
+                <SettingControl>
+                  <TextInput
+                    type="text"
+                    aria-label={t('settings.model')}
+                    placeholder="e.g. gpt-4o-mini"
+                    value={utilityManualModel}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setUtilityManualModel(v);
+                      debouncedSaveUtility({ model: v.trim() });
+                    }}
+                    className="w-full"
+                  />
+                </SettingControl>
               </SettingRow>
             )}
 
@@ -479,9 +511,13 @@ export const LLMSettings: React.FC = () => {
               <BaseUrlRow
                 key={utilityConfig?.provider}
                 title={
-                  utilityConfig?.provider === 'azure-openai'
-                    ? t('settings.endpoint')
-                    : t('settings.baseUrl')
+                  utilityConfig?.provider === 'azure-openai' ? (
+                    t('settings.endpoint')
+                  ) : (
+                    <SettingLabel optional>
+                      {t('settings.baseUrl')}
+                    </SettingLabel>
+                  )
                 }
                 description={
                   utilityConfig?.provider === 'azure-openai'

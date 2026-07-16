@@ -36,9 +36,9 @@ export function getIntegrationsConfig(): IntegrationsConfig {
 }
 
 /**
- * Apply an update. Only non-empty strings are written — an omitted or
- * empty field leaves the existing key untouched (so the client never has
- * to echo back a secret it cannot read). Returns the fresh masked model.
+ * Apply an update. Omitted fields preserve their current value, strings set
+ * a key, and `null` removes the key stored by Huabu. Returns the fresh masked
+ * model.
  */
 export async function setIntegrationsConfig(
   update: IntegrationsConfigUpdate,
@@ -50,10 +50,10 @@ export async function setIntegrationsConfig(
   // committed (see ElectronSecretStore.setMany). Batching keeps the call site
   // ready for full atomicity once the bridge gains a batch message.
   const updates: Record<string, string | null> = {};
-  if (typeof update.tavilyApiKey === 'string' && update.tavilyApiKey !== '') {
+  if (update.tavilyApiKey !== undefined) {
     updates[SECRET_IDS.tavilyApiKey] = update.tavilyApiKey;
   }
-  if (typeof update.rapidApiKey === 'string' && update.rapidApiKey !== '') {
+  if (update.rapidApiKey !== undefined) {
     updates[SECRET_IDS.rapidApiKey] = update.rapidApiKey;
   }
   if (Object.keys(updates).length > 0) await setSecrets(updates);

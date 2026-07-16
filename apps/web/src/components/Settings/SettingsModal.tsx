@@ -1,21 +1,25 @@
-import { X } from 'lucide-react';
-import React, { useEffect, useState } from 'react';
+import { ArrowLeft, X } from 'lucide-react';
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { SettingSection } from '@/components/Common/SettingSection';
+import { Button } from '@/components/Common/Button';
+import { SettingSection } from '@/components/Settings/Common/SettingSection';
 import { getElectronBridge } from '@/hooks/useElectron';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 import { useLLMStore } from '@/store/llmStore';
+import { useSettingsUiStore } from '@/store/settingsUiStore';
 
-import { AcpSettings } from './sections/AcpSettings';
-import { AgentTeamSettings } from './sections/AgentTeamSettings';
+import {
+  ExternalAgentsSettings,
+  type ExternalAgentsNavigation,
+} from './agent-team/ExternalAgentsSettings';
 import { GeneralSettings } from './sections/GeneralSettings';
 import { ImageProviderSettings } from './sections/ImageProviderSettings';
 import { IntegrationsSettings } from './sections/IntegrationsSettings';
 import { LLMSettings } from './sections/LLMSettings';
 
 /** Identifiers for the settings tabs (left-nav order). */
-type SettingsTab = 'general' | 'huabuAgent' | 'agents' | 'agentTeams';
+type SettingsTab = 'general' | 'huabuAgent' | 'agents';
 
 interface TabDef {
   id: SettingsTab;
@@ -23,14 +27,12 @@ interface TabDef {
   labelKey:
     | 'settings.general'
     | 'settings.huabuAgent'
-    | 'settings.externalAgents'
-    | 'settings.agentTeams';
+    | 'settings.externalAgents';
 }
 
 const TABS: TabDef[] = [
   { id: 'huabuAgent', labelKey: 'settings.huabuAgent' },
   { id: 'agents', labelKey: 'settings.externalAgents' },
-  { id: 'agentTeams', labelKey: 'settings.agentTeams' },
   { id: 'general', labelKey: 'settings.general' },
 ];
 
@@ -60,7 +62,37 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const { t } = useTranslation();
   const llmInit = useLLMStore((s) => s.init);
   const acpInit = useAcpProfilesStore((s) => s.init);
+  const requestedTab = useSettingsUiStore((s) => s.requestedTab);
+  const clearRequestedTab = useSettingsUiStore((s) => s.clearRequestedTab);
   const [activeTab, setActiveTab] = useState<SettingsTab>(TABS[0].id);
+  const [externalAgentsNavigation, setExternalAgentsNavigation] =
+    useState<ExternalAgentsNavigation | null>(null);
+  const titleId = useId();
+  const contentHeadingRef = useRef<HTMLHeadingElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+
+  const handleExternalAgentsNavigationChange = useCallback(
+    (navigation: ExternalAgentsNavigation | null) => {
+      setExternalAgentsNavigation(navigation);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (externalAgentsNavigation) contentHeadingRef.current?.focus();
+  }, [externalAgentsNavigation]);
+
+  // Deep-link support: a caller (e.g. the chat "Add agent" row) can ask
+  // to open Settings on a specific tab via `settingsUiStore.open(tab)`.
+  // Apply it once per open, then clear it so a later plain open() keeps
+  // the tab the user last viewed.
+  useEffect(() => {
+    if (isOpen && requestedTab) {
+      setActiveTab(requestedTab);
+      clearRequestedTab();
+    }
+  }, [isOpen, requestedTab, clearRequestedTab]);
 
   // Load each registry only when its owning tab is visible.
   useEffect(() => {
@@ -72,17 +104,32 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   // Close on Escape.
   useEffect(() => {
     if (!isOpen) return;
+    previouslyFocusedRef.current = document.activeElement as HTMLElement | null;
+    const focusTimer = window.setTimeout(() => dialogRef.current?.focus(), 0);
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key !== 'Escape') return;
+      const openDialogs = document.querySelectorAll(
+        '[role="dialog"][aria-modal="true"]',
+      );
+      if (openDialogs.length === 1) onClose();
     };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    return () => {
+      window.clearTimeout(focusTimer);
+      window.removeEventListener('keydown', onKey);
+      previouslyFocusedRef.current?.focus();
+      previouslyFocusedRef.current = null;
+    };
   }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
   const activeLabelKey =
     TABS.find((tab) => tab.id === activeTab)?.labelKey ?? 'settings.general';
+  const contentTitle =
+    activeTab === 'agents' && externalAgentsNavigation
+      ? externalAgentsNavigation.title
+      : t(activeLabelKey);
 
   // In the Electron shell keep the custom title bar (`WindowChrome`)
   // fully visible above the modal: offset the overlay below the
@@ -106,10 +153,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       />
 
       {/* Dialog */}
-      <div className="animate-in fade-in zoom-in-95 border-edge-default bg-surface shadow-bottom relative flex h-[80vh] max-h-[640px] w-full max-w-3xl overflow-hidden rounded-xl border duration-200">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className="animate-in fade-in zoom-in-95 border-edge-default bg-surface shadow-bottom relative flex h-[80vh] max-h-160 w-full max-w-3xl overflow-hidden rounded-xl border duration-200 focus:outline-none"
+      >
         {/* Left tab rail */}
         <nav className="border-edge-default bg-bg-default flex w-48 shrink-0 flex-col gap-0.5 border-r py-3 pr-3">
-          <h2 className="text-fg-default mb-2 pr-2 pl-3 text-sm font-semibold">
+          <h2
+            id={titleId}
+            className="text-fg-default mb-2 pr-2 pl-3 text-sm font-semibold"
+          >
             {t('settings.title')}
           </h2>
           {TABS.map(({ id, labelKey }) => {
@@ -146,9 +203,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         {/* Right content pane */}
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="border-edge-default flex shrink-0 items-center justify-between border-b px-5 py-3">
-            <h3 className="text-fg-default text-sm font-semibold">
-              {t(activeLabelKey)}
-            </h3>
+            <div className="flex min-w-0 items-center gap-1.5">
+              {activeTab === 'agents' && externalAgentsNavigation && (
+                <Button
+                  variant="ghost"
+                  tone="neutral"
+                  size="sm"
+                  iconOnly
+                  title={t('settings.backToAgents')}
+                  onClick={externalAgentsNavigation.onBack}
+                >
+                  <ArrowLeft />
+                </Button>
+              )}
+              <h3
+                ref={contentHeadingRef}
+                tabIndex={-1}
+                className="text-fg-default truncate text-sm font-semibold outline-none"
+              >
+                {contentTitle}
+              </h3>
+            </div>
             <button
               type="button"
               onClick={onClose}
@@ -172,8 +247,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <IntegrationsSettings />
               </>
             )}
-            {activeTab === 'agents' && <AcpSettings />}
-            {activeTab === 'agentTeams' && <AgentTeamSettings />}
+            {activeTab === 'agents' && (
+              <ExternalAgentsSettings
+                onNavigationChange={handleExternalAgentsNavigationChange}
+              />
+            )}
           </div>
         </div>
       </div>

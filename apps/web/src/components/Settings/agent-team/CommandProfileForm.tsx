@@ -1,13 +1,11 @@
 /**
- * External-agent profile editor — the add/edit form plus its supporting
- * command-assembly helpers and the `useDetectedClis` host-CLI detection
- * hook. Rendered inline inside {@link AcpSettings} and as a standalone
- * {@link ProfileEditorModal} by the chat panel's "Add agent" menu.
+ * Command-backed (`acp-command`) Profile form — the add/edit form plus its
+ * supporting command-assembly helpers. Rendered inside {@link AgentProfileEditor}
+ * for both creating a new custom agent and editing an existing one.
  */
 
-import { Info } from 'lucide-react';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Trans, useTranslation } from 'react-i18next';
+import React, { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import {
   createAcpProfile,
@@ -15,13 +13,19 @@ import {
   updateAcpProfile,
 } from '@/api/acp';
 import { Button } from '@/components/Common/Button';
-import { Input } from '@/components/Common/Input';
-import { Modal } from '@/components/Common/Modal';
 import { PathInput } from '@/components/Common/PathInput';
 import { Select } from '@/components/Common/Select';
-import { TabGroup } from '@/components/Common/TabGroup';
+import { TextInput } from '@/components/Common/TextInput';
 import { toast } from '@/components/Common/Toast';
-import { Tooltip } from '@/components/Common/Tooltip';
+import { SettingControl } from '@/components/Settings/Common/SettingControl';
+import { SettingLabel } from '@/components/Settings/Common/SettingLabel';
+import { SettingRow } from '@/components/Settings/Common/SettingRow';
+import { SettingSubGroup } from '@/components/Settings/Common/SettingSubGroup';
+
+import { ProfileEditActions } from './ProfileEditActions';
+import { ProfileEditFields } from './ProfileEditFields';
+import { ProfileFormFooter } from './ProfileFormFooter';
+import { ReadOnlyField } from './ReadOnlyField';
 
 import type {
   AcpAgentCliInfo,
@@ -29,19 +33,19 @@ import type {
   CreateAcpCommandProfileBody,
 } from '@sediment/shared';
 
-// ── Profile editor ────────────────────────────────────────────────────
+// ── Command Profile form ──────────────────────────────────────────────
 
-interface ProfileEditorFormProps {
+interface CommandProfileFormProps {
   /** When non-null we're editing; when null we're creating. */
   editing: AcpCommandProfileView | null;
   /** Host-detected CLIs used to pre-fill `command` for new profiles. */
   detectedClis: AcpAgentCliInfo[];
   /**
    * Whether host-CLI detection has settled at least once. Until it has,
-   * a new profile keeps the Built-in tab active with a "detecting…"
-   * placeholder instead of prematurely falling back to Custom — which
-   * would flash the Custom tab open on mount and then snap to Built-in
-   * once the CLIs arrive.
+   * a new profile keeps the picker in a "detecting…" placeholder instead
+   * of prematurely selecting "Custom command" — which would flash the raw
+   * command field open on mount and then snap to a detected CLI once the
+   * CLIs arrive.
    */
   detectionLoaded: boolean;
   /** Dismiss the editor (cancel or after a successful save). */
@@ -50,11 +54,7 @@ interface ProfileEditorFormProps {
   onSaved: () => Promise<void>;
 }
 
-interface ProfileEditorModalProps extends ProfileEditorFormProps {
-  isOpen: boolean;
-}
-
-interface ProfileFormState {
+interface CommandProfileFormState {
   displayName: string;
   /**
    * Either the id of a detected CLI (`copilot` / `claude` / …) or
@@ -73,7 +73,7 @@ interface ProfileFormState {
   cwd: string;
 }
 
-const EMPTY_FORM: ProfileFormState = {
+const EMPTY_FORM: CommandProfileFormState = {
   displayName: '',
   cliId: 'custom',
   allowAll: false,
@@ -101,7 +101,7 @@ function binaryBasename(token: string): string {
  * anything outside the preset command recipes.
  */
 function buildCommand(
-  state: ProfileFormState,
+  state: CommandProfileFormState,
   detectedClis: AcpAgentCliInfo[],
 ): string {
   if (state.cliId === 'custom') return state.customCommand.trim();
@@ -201,40 +201,7 @@ function parseCommandIntoForm(
   return fallback;
 }
 
-/**
- * Field label with an optional trailing info icon that surfaces the
- * long-form description in a hover tooltip. Used inside
- * `ProfileEditorModal` to keep each row visually compact while
- * preserving the explanatory copy.
- */
-const FieldLabel: React.FC<{
-  children: React.ReactNode;
-  hint?: React.ReactNode;
-}> = ({ children, hint }) => {
-  const { t } = useTranslation();
-  return (
-    <span className="text-fg-muted flex items-center gap-1">
-      <span>{children}</span>
-      {hint ? (
-        <Tooltip
-          content={hint}
-          contentClassName="max-w-80 leading-snug whitespace-normal"
-        >
-          <span
-            role="img"
-            aria-label={t('settings.moreInfo')}
-            tabIndex={0}
-            className="text-fg-subtle hover:text-fg-default focus-visible:text-fg-default inline-flex cursor-help outline-none"
-          >
-            <Info size={12} />
-          </span>
-        </Tooltip>
-      ) : null}
-    </span>
-  );
-};
-
-export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
+export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
   editing,
   detectedClis,
   detectionLoaded,
@@ -242,11 +209,15 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
   onSaved,
 }) => {
   const { t } = useTranslation();
+  const autoApproveId = useId();
+  const commandId = useId();
+  const cwdId = useId();
+  const displayNameId = useId();
   // Start a *new* profile on the ACP Agent tab. An empty `cliId` keeps
   // the picker in its detecting state until host detection settles; the
   // effect below then commits the first CLI, or Manual setup when none
   // were found.
-  const [form, setForm] = useState<ProfileFormState>(() =>
+  const [form, setForm] = useState<CommandProfileFormState>(() =>
     editing ? EMPTY_FORM : { ...EMPTY_FORM, cliId: '' },
   );
   const [saving, setSaving] = useState(false);
@@ -282,7 +253,7 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
       // so the input's placeholder shows the derived default — the
       // submit handler falls back to `defaultDisplayName` when the
       // field is left blank.
-      const firstDetected = detectedClis[0];
+      const firstDetected = detectedClis.find((agent) => agent.installed);
       setForm({
         ...EMPTY_FORM,
         cliId: firstDetected ? firstDetected.id : 'custom',
@@ -319,7 +290,8 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
     () =>
       form.cliId === 'custom'
         ? null
-        : (detectedClis.find((c) => c.id === form.cliId) ?? null),
+        : (detectedClis.find((c) => c.id === form.cliId && c.installed) ??
+          null),
     [form.cliId, detectedClis],
   );
   const isStructured = selectedCli !== null;
@@ -378,6 +350,17 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
     const displayName = form.displayName.trim() || defaultDisplayName;
     setSaving(true);
     try {
+      if (form.cliId !== 'custom') {
+        const latest = await listAcpAgentClis();
+        if (
+          !latest.agents.some(
+            (agent) => agent.id === form.cliId && agent.installed,
+          )
+        ) {
+          toast(t('settings.selectedAgentUnavailable'), { tone: 'danger' });
+          return;
+        }
+      }
       const payload: CreateAcpCommandProfileBody = {
         alias: displayName,
         workingDirPath: cwd,
@@ -400,126 +383,141 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
     }
   }, [form, defaultDisplayName, detectedClis, editing, onSaved, onClose, t]);
 
-  const cliOptions = useMemo(() => {
-    return detectedClis.map((c) => ({
-      value: c.id,
-      label: c.displayName,
-    }));
-  }, [detectedClis]);
-
   /**
-   * The agent picker is a two-tab switch:
-   *   - "detected" → choose from the auto-detected CLIs on PATH.
-   *   - "custom"   → type a full launch command yourself.
-   * `form.cliId === 'custom'` is the single source of truth; the tab
-   * state is derived from it so loading an existing profile lands on
-   * the correct tab automatically.
+   * One unified picker: every detected CLI followed by a trailing
+   * "Custom command" option. Selecting "custom" is the single source of
+   * truth for showing the raw launch-command field, so loading an
+   * existing profile lands on the right control automatically.
    */
-  const agentMode: 'detected' | 'custom' =
-    form.cliId === 'custom' ? 'custom' : 'detected';
-
-  const handleAgentModeChange = useCallback(
-    (mode: 'detected' | 'custom') => {
-      if (mode === 'custom') {
-        // Seed the Custom textarea with whatever Detected would have
-        // launched so the user can tweak instead of typing from
-        // scratch. Skip when the user already has a custom command
-        // (e.g. they toggled away and back) so we don't blow away
-        // their edits.
-        setForm((prev) => {
-          if (prev.cliId === 'custom') return prev;
-          const seeded =
-            prev.customCommand.trim() || buildCommand(prev, detectedClis);
-          return {
-            ...prev,
-            cliId: 'custom',
-            allowAll: false,
-            customCommand: seeded,
-          };
-        });
-      } else {
-        handleCliChange(detectedClis[0]?.id ?? 'custom');
-      }
-    },
-    [detectedClis, handleCliChange],
-  );
+  const cliOptions = useMemo(() => {
+    const options = detectedClis
+      .filter((c) => c.installed)
+      .map((c) => ({
+        value: c.id,
+        label: c.displayName,
+      }));
+    options.push({ value: 'custom', label: t('settings.customCommand') });
+    return options;
+  }, [detectedClis, t]);
 
   const setCwd = useCallback(
     (cwd: string) => setForm((p) => ({ ...p, cwd })),
     [],
   );
+  const createDisabled =
+    !editing &&
+    (!detectionLoaded || !buildCommand(form, detectedClis) || !form.cwd.trim());
+
+  if (editing) {
+    const agentName =
+      detectedClis.find((cli) => cli.id === form.cliId)?.displayName ??
+      (form.cliId === 'custom' ? t('settings.customCommand') : form.cliId);
+    const agentDetails = (
+      <>
+        {detectionLoaded && !isStructured ? (
+          <SettingRow title={t('settings.launchCommand')}>
+            <SettingControl>
+              <ReadOnlyField value={editing.launch.command} mono />
+            </SettingControl>
+          </SettingRow>
+        ) : null}
+        {isStructured && selectedCli?.autoApprove ? (
+          <SettingSubGroup density="compact">
+            <SettingRow
+              description={t('settings.autoApproveAllToolCallsHint')}
+              title={
+                <span>
+                  {t('settings.autoApproveAllToolCalls')} (
+                  <code className="font-mono">
+                    {selectedCli.autoApprove.args.join(' ')}
+                  </code>
+                  )
+                </span>
+              }
+              density="compact"
+            >
+              <input
+                id={autoApproveId}
+                type="checkbox"
+                aria-label={t('settings.autoApproveAllToolCalls')}
+                className="accent-info h-3.5 w-3.5"
+                checked={form.allowAll}
+                disabled
+                readOnly
+              />
+            </SettingRow>
+          </SettingSubGroup>
+        ) : null}
+      </>
+    );
+
+    return (
+      <div className="divide-edge-default flex flex-col divide-y">
+        <ProfileEditFields
+          agentName={agentName}
+          agentDetails={agentDetails}
+          workingDirPath={form.cwd}
+          displayNameId={displayNameId}
+          displayNameControl={
+            <TextInput
+              id={displayNameId}
+              value={form.displayName}
+              onChange={(event) =>
+                setForm((previous) => ({
+                  ...previous,
+                  displayName: event.target.value,
+                }))
+              }
+              className="w-full"
+            />
+          }
+        />
+        <ProfileEditActions
+          saving={saving}
+          onCancel={onClose}
+          onSave={() => void handleSubmit()}
+        />
+      </div>
+    );
+  }
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="divide-edge-default flex flex-col divide-y">
       {/* ─── Agent ─────────────────────────────────────────────── */}
-      <div className="flex flex-col gap-3">
-        {/*
-         * Hide the picker on edit because `cliId` is immutable in the
-         * update schema (changing it would silently break the persisted
-         * binding). Show the chosen agent as a static label so the user
-         * still sees what's wired up.
-         */}
-        {editing ? (
-          <div className="flex flex-col gap-3">
-            <label className="flex flex-col gap-1 text-xs">
-              <FieldLabel>{t('settings.agent')}</FieldLabel>
-              <div className="border-edge-default bg-surface text-fg-default rounded border px-2 py-1 text-xs">
-                {detectedClis.find((c) => c.id === form.cliId)?.displayName ??
-                  (form.cliId === 'custom'
-                    ? t('settings.customCommand')
-                    : form.cliId)}
-              </div>
-            </label>
-            <label className="flex flex-col gap-1 text-xs">
-              <FieldLabel>{t('settings.launchCommand')}</FieldLabel>
-              <div className="border-edge-default bg-bg-default text-fg-muted rounded border px-2 py-1 font-mono text-xs">
-                {editing.launch.command}
-              </div>
-            </label>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-2">
-            <TabGroup
-              value={agentMode}
-              onChange={handleAgentModeChange}
-              options={[
-                { value: 'detected', label: t('settings.acpAgent') },
-                { value: 'custom', label: t('settings.customCommand') },
-              ]}
-              size="sm"
-              className="self-start"
-            />
-            {agentMode === 'detected' ? (
-              <label className="flex flex-col gap-1 text-xs">
-                <FieldLabel>{t('settings.agent')}</FieldLabel>
-                {!detectionLoaded ? (
-                  // Detection still in flight — a neutral placeholder
-                  // avoids flashing the "no CLI found" copy before the
-                  // CLIs have actually been probed.
-                  <div className="border-edge-default bg-surface text-fg-subtle rounded border px-2 py-1 text-xs leading-snug">
-                    {t('settings.detectingClis')}
-                  </div>
-                ) : cliOptions.length > 0 ? (
-                  <Select
-                    value={form.cliId}
-                    onChange={handleCliChange}
-                    options={cliOptions}
-                  />
-                ) : (
-                  <div className="border-edge-default bg-surface text-fg-muted rounded border px-2 py-1 text-xs leading-snug">
-                    <Trans
-                      i18nKey="settings.noCliFound"
-                      components={{ strong: <strong /> }}
-                    />
-                  </div>
-                )}
-              </label>
-            ) : (
-              <label className="flex flex-col gap-1 text-xs">
-                <FieldLabel hint={t('settings.launchCommandHint')}>
-                  {t('settings.launchCommand')}
-                </FieldLabel>
-                <Input
+      <div className="flex flex-col">
+        <div className="flex flex-col">
+          <SettingRow title={t('settings.agent')}>
+            <SettingControl>
+              {!detectionLoaded ? (
+                // Detection still in flight — a neutral placeholder avoids
+                // flashing a premature selection before the CLIs have
+                // actually been probed.
+                <div className="border-edge-default bg-surface text-fg-subtle rounded border px-2 py-1 text-xs leading-snug">
+                  {t('settings.detectingClis')}
+                </div>
+              ) : (
+                // Detected CLIs first, then "Custom command" as the last
+                // option. Selecting it reveals the raw launch-command
+                // field below.
+                <Select
+                  value={form.cliId}
+                  onChange={handleCliChange}
+                  options={cliOptions}
+                  ariaLabel={t('settings.agent')}
+                  className="w-full"
+                />
+              )}
+            </SettingControl>
+          </SettingRow>
+          {form.cliId === 'custom' ? (
+            <SettingRow
+              labelFor={commandId}
+              title={t('settings.launchCommand')}
+              description={t('settings.launchCommandHint')}
+            >
+              <SettingControl>
+                <TextInput
+                  id={commandId}
                   value={form.customCommand}
                   onChange={(e) =>
                     setForm((p) => ({
@@ -528,40 +526,62 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
                     }))
                   }
                   placeholder="/usr/local/bin/copilot --acp --allow-all"
-                  className="border-edge-default bg-surface rounded border px-2 py-1 font-mono text-xs"
+                  mono
+                  className="w-full"
                 />
-              </label>
-            )}
-          </div>
-        )}
+              </SettingControl>
+            </SettingRow>
+          ) : null}
+        </div>
 
-        {!editing && isStructured && selectedCli?.autoApprove && (
-          <label className="text-fg-default flex cursor-pointer items-start gap-2 text-xs select-none">
-            <input
-              type="checkbox"
-              className="accent-info mt-0.5 h-3.5 w-3.5"
-              checked={form.allowAll}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, allowAll: e.target.checked }))
+        {isStructured && selectedCli?.autoApprove && (
+          <SettingSubGroup density="compact">
+            <SettingRow
+              description={t('settings.autoApproveAllToolCallsHint')}
+              title={
+                <label
+                  htmlFor={autoApproveId}
+                  className={editing ? undefined : 'cursor-pointer'}
+                >
+                  <span>
+                    {t('settings.autoApproveAllToolCalls')} (
+                    <code className="font-mono">
+                      {selectedCli.autoApprove.args.join(' ')}
+                    </code>
+                    )
+                  </span>
+                </label>
               }
-            />
-            <FieldLabel hint={t('settings.autoApproveAllToolCallsHint')}>
-              {t('settings.autoApproveAllToolCalls')} (
-              <code className="font-mono">
-                {selectedCli.autoApprove.args.join(' ')}
-              </code>
-              )
-            </FieldLabel>
-          </label>
+              density="compact"
+            >
+              {/*
+               * Read-only in edit: the command (and therefore this flag) is
+               * immutable after creation, so the checkbox reflects the saved
+               * choice but can't be toggled.
+               */}
+              <input
+                id={autoApproveId}
+                type="checkbox"
+                aria-label={t('settings.autoApproveAllToolCalls')}
+                className="accent-info h-3.5 w-3.5 cursor-pointer"
+                checked={form.allowAll}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, allowAll: e.target.checked }))
+                }
+              />
+            </SettingRow>
+          </SettingSubGroup>
         )}
       </div>
 
-      <div className="flex flex-col gap-3">
-        <label className="flex flex-col gap-1 text-xs">
-          <FieldLabel hint={t('settings.workingDirectoryHint')}>
-            {t('settings.workingDirectory')}
-          </FieldLabel>
+      <SettingRow
+        labelFor={cwdId}
+        title={t('settings.workingDirectory')}
+        description={t('settings.workingDirectoryHint')}
+      >
+        <SettingControl>
           <PathInput
+            id={cwdId}
             value={form.cwd}
             onChange={setCwd}
             placeholder="/Users/me/project-x"
@@ -569,29 +589,32 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
             mono
             pickTitle={t('settings.pickFolder')}
             inputClassName="rounded"
-            disabled={editing !== null}
           />
-        </label>
-      </div>
+        </SettingControl>
+      </SettingRow>
 
       {/* ─── Display name (placed last per UX request) ─────────── */}
-      <label className="flex flex-col gap-1 text-xs">
-        <FieldLabel>
-          {t('settings.displayName')}{' '}
-          <span className="text-fg-subtle">({t('settings.optional')})</span>
-        </FieldLabel>
-        <Input
-          value={form.displayName}
-          onChange={(e) =>
-            setForm((p) => ({ ...p, displayName: e.target.value }))
-          }
-          placeholder={defaultDisplayName}
-          className="border-edge-default bg-surface rounded border px-2 py-1 text-xs"
-        />
-      </label>
+      <SettingRow
+        labelFor={displayNameId}
+        title={
+          <SettingLabel optional>{t('settings.displayName')}</SettingLabel>
+        }
+      >
+        <SettingControl>
+          <TextInput
+            id={displayNameId}
+            value={form.displayName}
+            onChange={(e) =>
+              setForm((p) => ({ ...p, displayName: e.target.value }))
+            }
+            placeholder={defaultDisplayName}
+            className="w-full"
+          />
+        </SettingControl>
+      </SettingRow>
 
       {/* ─── Actions ───────────────────────────────────────────── */}
-      <div className="flex justify-end gap-2">
+      <ProfileFormFooter>
         <Button
           variant="outline"
           tone="neutral"
@@ -606,129 +629,11 @@ export const ProfileEditorForm: React.FC<ProfileEditorFormProps> = ({
           tone="info"
           size="sm"
           onClick={() => void handleSubmit()}
-          disabled={saving}
+          disabled={saving || createDisabled}
         >
-          {saving
-            ? t('settings.saving')
-            : editing
-              ? t('settings.saveChanges')
-              : t('settings.createProfile')}
+          {saving ? t('settings.saving') : t('settings.createProfile')}
         </Button>
-      </div>
+      </ProfileFormFooter>
     </div>
   );
 };
-
-/**
- * Modal wrapper around {@link ProfileEditorForm}. Used by surfaces that
- * have no host container of their own (e.g. the chat panel's "Add agent"
- * menu), where a standalone dialog is the right pattern. Inside Settings
- * the form is rendered inline as a master-detail pane instead, so the
- * editor never stacks a second modal on top of the Settings modal.
- */
-export const ProfileEditorModal: React.FC<ProfileEditorModalProps> = ({
-  isOpen,
-  editing,
-  detectedClis,
-  detectionLoaded,
-  onClose,
-  onSaved,
-}) => {
-  const { t } = useTranslation();
-  return (
-    <Modal
-      isOpen={isOpen}
-      onClose={onClose}
-      title={
-        editing
-          ? t('settings.editExternalAgent')
-          : t('settings.newExternalAgent')
-      }
-      className="w-104"
-    >
-      <ProfileEditorForm
-        editing={editing}
-        detectedClis={detectedClis}
-        detectionLoaded={detectionLoaded}
-        onClose={onClose}
-        onSaved={onSaved}
-      />
-    </Modal>
-  );
-};
-/**
- * Fetch and cache host-detected CLIs when an editor opens. Shared between
- * Settings and the inline "Add agent" entry in `NewChatMenu`.
- *
- * Detection failures degrade silently — callers receive `[]` and the
- * editor's Agent dropdown just falls back to "Manual setup".
- *
- * `loaded` starts `false` and flips `true` after the first detection
- * attempt settles (success or failure). Callers use it to avoid
- * committing a "no CLI found → custom" default before detection has
- * actually run, which would otherwise flash the Custom tab open on
- * mount and then snap to Built-in once the CLIs arrive.
- */
-let detectedClisCache: AcpAgentCliInfo[] | null = null;
-let detectedClisRequest: Promise<AcpAgentCliInfo[]> | null = null;
-
-function loadDetectedClis(force = false): Promise<AcpAgentCliInfo[]> {
-  if (!force && detectedClisCache) return Promise.resolve(detectedClisCache);
-  if (detectedClisRequest) return detectedClisRequest;
-  const request: Promise<AcpAgentCliInfo[]> = listAcpAgentClis()
-    .then((response) => {
-      detectedClisCache = response.agents;
-      return response.agents;
-    })
-    .finally(() => {
-      if (detectedClisRequest === request) detectedClisRequest = null;
-    });
-  detectedClisRequest = request;
-  return request;
-}
-
-export function useDetectedClis(enabled = true): {
-  detectedClis: AcpAgentCliInfo[];
-  loaded: boolean;
-} {
-  const [detectedClis, setDetectedClis] = useState<AcpAgentCliInfo[]>(
-    () => detectedClisCache ?? [],
-  );
-  const [loaded, setLoaded] = useState(detectedClisCache !== null);
-  useEffect(() => {
-    if (!enabled) return;
-    let cancelled = false;
-    /**
-     * Fire-and-forget. We refetch on every workspace-ready transition
-     * because `/api/acp/agent-cli` sits behind the server's workspace
-     * guard — if Settings was opened on the WorkspaceSetupPage the
-     * initial fetch 503s and we'd otherwise be stuck with an empty
-     * Built-in list until the user reloads.
-     */
-    const load = (force = false) => {
-      loadDetectedClis(force)
-        .then((agents) => {
-          if (!cancelled) setDetectedClis(agents);
-        })
-        .catch(() => {
-          // Detection failure is non-fatal — Manual setup still
-          // works. Don't pop a toast; the dropdown just shows "Custom"
-          // as the only entry.
-        })
-        .finally(() => {
-          if (!cancelled) setLoaded(true);
-        });
-    };
-    load();
-    const handler = () => {
-      detectedClisCache = null;
-      load(true);
-    };
-    window.addEventListener('workspace-changed', handler);
-    return () => {
-      cancelled = true;
-      window.removeEventListener('workspace-changed', handler);
-    };
-  }, [enabled]);
-  return { detectedClis, loaded };
-}

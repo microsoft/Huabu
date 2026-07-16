@@ -1112,6 +1112,23 @@ function getUtilityModel(): Model<Api> {
 }
 
 /**
+ * Vision guard predicate: a vision-capable role that is carrying an image
+ * this turn must not run on a model that cannot accept image input. When
+ * this returns `true` the caller steps the resolved model back up to the
+ * (always vision-capable) chat model. Pure over its inputs so the fallback
+ * logic can be unit-tested without the persisted-store / secret machinery.
+ */
+export function shouldStepUpForVision(
+  role: ModelRole,
+  modelInput: readonly string[],
+  hasImage: boolean | undefined,
+): boolean {
+  return Boolean(
+    MODEL_ROLES[role].vision && hasImage && !modelInput.includes('image'),
+  );
+}
+
+/**
  * Resolve `(config, model)` for a role via the two-layer binding:
  * the role's default tier picks chat or utility; utility falls through to
  * chat when unconfigured. A **vision guard** steps a resolved model up to
@@ -1135,15 +1152,28 @@ function resolveForRole(
   }
 
   // Vision guard: only relevant when an image is actually being sent.
-  if (
-    info.vision &&
-    opts?.hasImage &&
-    !resolved.model.input.includes('image')
-  ) {
+  if (shouldStepUpForVision(role, resolved.model.input, opts?.hasImage)) {
     resolved = chat();
   }
 
   return resolved;
+}
+
+/** Resolve the configured model for a built-in agent workload role. */
+export function getModelForRole(
+  role: ModelRole,
+  opts?: { hasImage?: boolean },
+): Model<Api> {
+  return resolveForRole(role, opts).model;
+}
+
+/** Resolve and authenticate the provider configured for a workload role. */
+export async function ensureApiKeyForRole(
+  role: ModelRole,
+  opts?: { hasImage?: boolean },
+): Promise<string> {
+  const { cfg } = resolveForRole(role, opts);
+  return ensureApiKeyFor(cfg);
 }
 
 /**

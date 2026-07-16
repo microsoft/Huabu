@@ -108,7 +108,6 @@ describe('ACP Profile catalog routes', () => {
     expect(response.json()).toMatchObject({
       profiles: [commandProfile, manifestProfile],
       selectableProfileIds: ['command-1', 'team-1'],
-      legacyProfiles: [],
     });
   });
 
