@@ -25,13 +25,22 @@ type PiMessage = Context['messages'][number];
 /**
  * Truthy check for the debug flag.
  *
- * Defaults to **on** when `HUABU_DEBUG_PROMPT` is unset, to make prompt
- * debugging convenient during development. Set it explicitly to a falsey
- * value (`0` / `false` / `no` / `off`, or an empty string) to disable.
+ * When `HUABU_DEBUG_PROMPT` is set explicitly its value wins: `1` /
+ * `true` / `yes` / `on` enable it; anything else (including an empty
+ * string) disables it.
+ *
+ * When unset, the default follows the environment — **on** in
+ * development (convenient prompt debugging) and **off** in production.
+ * This keeps packaged desktop builds from silently writing unbounded,
+ * un-rotated per-thread `.prompt.log` dumps of the full prompt to disk:
+ * the Electron main process injects `NODE_ENV=production` for packaged
+ * builds (see apps/desktop/src/main.ts → buildServerEnv), so an end user
+ * who never sets the flag gets no prompt dump. Set it explicitly to a
+ * truthy value to re-enable it in a production build.
  */
 export function isPromptDebugEnabled(): boolean {
   const v = process.env.HUABU_DEBUG_PROMPT;
-  if (v === undefined) return true;
+  if (v === undefined) return process.env.NODE_ENV !== 'production';
   const s = v.trim().toLowerCase();
   return s === '1' || s === 'true' || s === 'yes' || s === 'on';
 }

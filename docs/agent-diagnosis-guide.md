@@ -35,7 +35,7 @@ canvas folder inside the active workspace.
 **2. The assembled prompt — built-in agents only.**
 `<canvas>/.history/chat/<threadId>.prompt.log` is a human-readable dump of the
 **fully-assembled** prompt sent to a built-in agent, one block per turn (gated by
-`HUABU_DEBUG_PROMPT`, now default-on; see
+`HUABU_DEBUG_PROMPT`, default-on in development and off in production; see
 [`debug-prompt.ts`](../apps/server/src/modules/agent/conversation/prompt/debug-prompt.ts)).
 External ACP agents assemble their own prompt inside the external harness, so
 there is **no** `.prompt.log` for them — read their `.turns.jsonl` plus the
