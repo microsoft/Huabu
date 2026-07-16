@@ -1,0 +1,90 @@
+name: Bug report
+description: Report a reproducible problem or unexpected behavior in Huabu
+title: '[Bug]: '
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Huabu. Please search existing issues before submitting a new report.
+
+        Do not include API keys, access tokens, private documents, personal information, or other sensitive data.
+
+  - type: checkboxes
+    id: existing-issues
+    attributes:
+      label: Existing issues
+      options:
+        - label: I searched the existing issues and did not find a report of the same problem.
+          required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the behavior you observed, including any error message.
+      placeholder: Tell us what went wrong.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: What did you expect?
+      description: Describe what you were trying to do and what you expected Huabu to do instead.
+      placeholder: Tell us what should have happened.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: List the shortest sequence of steps that triggers the problem.
+      placeholder: |
+        1. Open Huabu and ...
+        2. Select ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: How often does it happen?
+      options:
+        - Every time
+        - Sometimes
+        - Only once
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: system-information
+    attributes:
+      label: System information
+      description: In the desktop app, choose Help → Troubleshooting → Copy System Information, then paste the result here.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: ai-details
+    attributes:
+      label: AI-related details
+      description: Complete this only if the problem involves an AI response or edit.
+      placeholder: Include the interaction mode, agent, provider and model, selected context, relevant output, and whether proposed changes were applied. Never include an API key.
+
+  - type: textarea
+    id: screenshots-and-logs
+    attributes:
+      label: Screenshots and logs
+      description: Drag screenshots, recordings, or the relevant part of server.log here after removing sensitive information.
+
+  - type: checkboxes
+    id: sensitive-information
+    attributes:
+      label: Sensitive information
+      options:
+        - label: I reviewed this report and its attachments and removed sensitive information.
+          required: true
