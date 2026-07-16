@@ -25,32 +25,59 @@ export default function ExternalAgents() {
   return (
     <PageLayout
       title="External Agents"
-      description="Connect an AI coding agent installed on your computer, configure it as a Profile in Huabu, and use it in Chat or an Agent Node."
+      description="Connect different AI agents, configure them as Profiles in Huabu."
       toc={toc}
     >
       <H2>What is an external agent?</H2>
       <P>
-        An external agent is an AI agent that runs on your computer through its
-        own command-line application. Huabu starts the agent, gives it the
-        working directory you choose, and connects it to a chat thread. The
-        agent&apos;s model access, sign-in, tools, permissions, and usage
-        charges still belong to that external application.
+        External agents are AI agents outside Huabu&apos;s built-in agent
+        system. Huabu currently starts local{' '}
+        <DocLink href="https://agentclientprotocol.com/get-started/agents">
+          ACP-compatible agents
+        </DocLink>
+        , connects to them over ACP, and associates each with a working
+        directory and chat thread. Model access, authentication, tools,
+        permissions, and usage charges remain with the agent or its provider.
       </P>
-      <Callout tone="info">
-        External Agents are independent of the models under{' '}
-        <strong>Settings &gt; Huabu Agent</strong>. Configuring a Chat Model for
-        Huabu does not install or sign in to Copilot, Claude, Gemini, Codex, or
-        another external agent.
-      </Callout>
 
       <H2>Before you start</H2>
       <P>Prepare the agent on the same computer that runs Huabu:</P>
       <ol className="list-decimal space-y-2 pl-5 text-[15px] leading-relaxed text-gray-700">
         <li>
-          <strong>Install an ACP-compatible agent.</strong> Huabu recognizes
-          GitHub Copilot CLI, Claude Code through <Code>claude-agent-acp</Code>,
-          Gemini CLI, and Codex through <Code>codex-acp</Code>. You can also use
-          a different ACP command through <strong>Custom command</strong>.
+          <strong>Install an ACP-compatible agent.</strong> Huabu automatically
+          detects these eight ACP-capable agent commands or adapters after
+          installation:{' '}
+          <DocLink href="https://www.npmjs.com/package/@github/copilot">
+            GitHub Copilot
+          </DocLink>
+          ,{' '}
+          <DocLink href="https://www.npmjs.com/package/@agentclientprotocol/claude-agent-acp">
+            Claude Agent
+          </DocLink>
+          ,{' '}
+          <DocLink href="https://geminicli.com/docs/get-started/installation">
+            Gemini
+          </DocLink>
+          ,{' '}
+          <DocLink href="https://www.npmjs.com/package/@agentclientprotocol/codex-acp">
+            Codex
+          </DocLink>
+          ,{' '}
+          <DocLink href="https://github.com/QwenLM/qwen-code">
+            Qwen Code
+          </DocLink>
+          ,{' '}
+          <DocLink href="https://github.com/MoonshotAI/kimi-cli">
+            Kimi Code
+          </DocLink>
+          , <DocLink href="https://opencode.ai/docs/">OpenCode</DocLink>, and{' '}
+          <DocLink href="https://cursor.com/docs/cli/installation">
+            Cursor
+          </DocLink>
+          . For any other ACP-compatible agent, select{' '}
+          <strong>Custom command</strong> and enter its complete ACP launch
+          command, such as <Code>/path/to/my-agent --acp</Code>. Use the command
+          documented by that agent.
         </li>
         <li>
           <strong>Sign in and accept any first-run prompts.</strong> Open a
@@ -59,28 +86,13 @@ export default function ExternalAgents() {
           background agent process.
         </li>
         <li>
-          <strong>Make the command available to Huabu.</strong> The executable
-          must be on the <Code>PATH</Code> inherited by Huabu. If it is not,
-          choose <strong>Custom command</strong> later and enter an absolute
-          executable path.
-        </li>
-        <li>
-          <strong>Choose a working directory.</strong> Use an existing local
-          folder that contains the project or files the agent should work with.
-          Your user account and the agent must be able to read it; agents that
-          create or edit files also need write access.
+          <strong>Ensure Huabu can find the agent.</strong> The agent command
+          must be on the operating system&apos;s <Code>PATH</Code> environment
+          variable when Huabu starts. Restart Huabu after installing the agent
+          or changing <Code>PATH</Code>. If the command is still unavailable,
+          use <strong>Custom command</strong> with its absolute executable path.
         </li>
       </ol>
-      <Callout tone="tip">
-        Verify the agent in a terminal before adding it to Huabu. If the command
-        can start, authenticate, and answer there, most setup problems are
-        already out of the way. Installation commands and supported launch
-        options are listed in the{' '}
-        <DocLink href="https://github.com/hai-team/agentlet#readme">
-          agentlet README
-        </DocLink>
-        .
-      </Callout>
 
       <H2>Create a Profile</H2>
       <P>
@@ -98,11 +110,16 @@ export default function ExternalAgents() {
         rows={[
           [
             <strong>Preset</strong>,
-            'Leave it set to None for a general-purpose agent, or select a packaged workflow. Presets may add configuration and setup steps.',
+            <>
+              Choose a Preset to give the agent a ready-made role and workflow,
+              including any required tools, configuration, and setup. Leave it
+              set to <strong>None</strong> to use the agent as installed. See{' '}
+              <DocLink href="#understand-presets">Understand Presets</DocLink>.
+            </>,
           ],
           [
             <strong>Agent</strong>,
-            'Choose an installed agent. Agents supported by a selected Preset but missing from your computer are shown as unavailable with an installation hint.',
+            'Installed agents appear first. Agents that are not installed appear in a disabled Not installed section, followed by Custom command. Selecting a Preset filters the list to agents supported by that Preset.',
           ],
           [
             <strong>Auto-approve all tool calls</strong>,
@@ -128,20 +145,52 @@ export default function ExternalAgents() {
 
       <H2>Understand Presets</H2>
       <P>
-        A <strong>Preset</strong> is a packaged Agent Team workflow. It is not a
-        model and it does not include an agent executable. Instead, it defines a
-        specialized role, the agents that can run it, any required
-        configuration, and the setup needed to prepare your working directory.
+        A <strong>Preset</strong> is a ready-made workflow for a specific task.
+        It gives an external agent a specialized role, instructions, and tools,
+        and may configure the working directory for that workflow. A Preset is
+        not a model and does not install the external agent itself.
       </P>
       <P>
-        For example, <strong>paper-reviewer</strong> gives the selected agent a
-        paper-review role and workflow. <strong>hackmd-publisher</strong> adds a
-        HackMD token, publishing tools, and instructions for turning selected
-        Space material into a document and writing the published URL back to
-        Huabu. <strong>deepv-slides-maker</strong> adds a DeepV service endpoint
-        and API key for producing editable slide decks. Available Presets may
-        change as Huabu adds or updates packaged workflows.
+        The first release includes the following Presets. Their additional
+        requirements apply alongside the installed and authenticated external
+        agent described above.
       </P>
+      <Table
+        headers={['Preset', 'What it does', 'Additional requirements']}
+        rows={[
+          [
+            <strong>paper-reviewer</strong>,
+            'Provides a paper-review role and workflow for discussing academic papers and drafting review responses.',
+            'None. It does not install npm tools or skills.',
+          ],
+          [
+            <strong>html-slides-maker</strong>,
+            'Creates static HTML presentations and optional technical diagrams.',
+            <>
+              Node.js with <Code>npx</Code> available on the <Code>PATH</Code>,
+              plus network access to GitHub during setup so Huabu can install
+              the required skills.
+            </>,
+          ],
+          [
+            <strong>hackmd-publisher</strong>,
+            'Turns selected Space material into a HackMD document and writes the published URL back to Huabu.',
+            <>
+              A HackMD API token, Node.js with <Code>npm</Code> and{' '}
+              <Code>npx</Code> available on the <Code>PATH</Code>, access to a
+              working npm registry, and network access to GitHub during setup.
+            </>,
+          ],
+        ]}
+      />
+      <Callout tone="tip">
+        On macOS, Windows, and Linux, <Code>npm</Code> and <Code>npx</Code> are
+        normally installed with Node.js. Verify that <Code>node --version</Code>
+        , <Code>npm --version</Code>, and <Code>npx --version</Code> work in a
+        normal terminal, then restart Huabu after installing Node.js or changing
+        the <Code>PATH</Code>. A company npm mirror is supported as long as it
+        can provide the packages required by the Preset.
+      </Callout>
       <Table
         headers={['Without a Preset', 'With a Preset']}
         rows={[
@@ -167,9 +216,10 @@ export default function ExternalAgents() {
         After selecting a Preset, complete any fields shown directly below it,
         choose an available Agent and a working directory, then select{' '}
         <strong>Create and set up</strong>. Setup continues from the External
-        Agents list. The Profile becomes selectable when setup reaches{' '}
-        <strong>Ready</strong>. If setup fails, the Profile remains in the list
-        so you can fix its configuration and retry.
+        Agents list. When setup finishes successfully, the setup status and
+        action disappear and the Profile becomes available in Chat. If setup
+        fails, the Profile remains in the list so you can fix its configuration
+        and retry.
       </P>
       <Callout tone="info">
         Preset configuration belongs to the Preset and is shared by Profiles
@@ -178,29 +228,34 @@ export default function ExternalAgents() {
       </Callout>
 
       <H2>Use an external agent</H2>
-      <P>A ready Profile appears in Huabu&apos;s agent selectors:</P>
+      <P>
+        Once a Profile is available, you can choose it from the agent menus in
+        Chat. A Profile that uses a Preset appears after setup finishes
+        successfully.
+      </P>
       <ul className="list-disc space-y-1.5 pl-5 text-[15px] leading-relaxed text-gray-700">
         <li>
-          In the <strong>new-chat menu</strong>, select a Profile under{' '}
-          <strong>External Agents</strong> to start a thread with it. The{' '}
-          <strong>Add agent</strong> entry opens Settings directly on the
-          External Agents page.
+          To start a new conversation, open the dropdown beside the{' '}
+          <strong>New chat</strong> button and select a Profile under{' '}
+          <strong>External Agents</strong>.
         </li>
         <li>
-          In an <DocLink href="/docs/work-with-ai">Agent Node</DocLink>, type{' '}
-          <Code>@</Code> and the Profile name to direct a new question to that
-          external agent.
+          Before sending the first message in an empty conversation, you can
+          also use the Agent menu in the message box to choose a Profile. After
+          you send the message, you cannot change the Agent for that
+          conversation.
         </li>
       </ul>
       <P>
-        Send the first message to start the external process. Huabu reuses it
-        for the thread and starts it again when necessary. Press <Kbd>/</Kbd>{' '}
-        inside the thread to see slash commands exposed by that particular
-        agent.
+        The <strong>Add agent</strong> entry in either menu opens Settings
+        directly on the External Agents page. Send a message to begin the
+        conversation. Huabu opens the selected Agent when needed and continues
+        using it for that conversation. Type <Kbd>/</Kbd> in the message box to
+        see any commands offered by that Agent.
       </P>
       <Callout tone="info">
-        A chat thread stays bound to the Profile it started with. To use a
-        different agent or pick up changed Profile settings, start a new thread.
+        A conversation keeps using the Profile it started with. Start a new
+        conversation to use a different Agent or updated Profile settings.
       </Callout>
 
       <H2>Manage &amp; troubleshoot</H2>
@@ -233,7 +288,7 @@ export default function ExternalAgents() {
           ],
           [
             'A Preset Profile is not available in Chat',
-            'Return to External Agents and check its status. Complete required Preset configuration, then use Set up or Retry until the Profile is Ready.',
+            'Return to External Agents and check its status. Complete the required Preset configuration, then use Set up or Retry. When setup succeeds, the status badge disappears and the Profile becomes available in Chat.',
           ],
           [
             'Worker offline appears',
