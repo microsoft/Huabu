@@ -35,14 +35,7 @@ async function exists(file) {
 }
 
 async function validateLocalReference(reference, sourceFile) {
-  if (
-    reference.startsWith('#') ||
-    reference.startsWith('mailto:') ||
-    reference.startsWith('data:') ||
-    reference.startsWith('javascript:')
-  ) {
-    return;
-  }
+  if (reference.startsWith('#')) return;
 
   const url = new URL(reference, 'https://handbook.invalid');
   if (url.origin !== 'https://handbook.invalid') return;
