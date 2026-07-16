@@ -165,7 +165,7 @@
     "noTemplateDescription": "直接使用该 Agent，不做定制。",
     "templateOptionalHint": "应用预配置能力，或直接使用该 Agent。",
     "templatesUnavailable": "预设暂不可用，但仍可创建不使用预设的 Agent。{{error}}",
-    "agentNotInstalled": "尚未安装。{{hint}}",
+    "notInstalledAgents": "尚未安装",
     "selectedAgentUnavailable": "所选 Agent 已不再安装。请安装后重试。",
     "noSupportedAgent": "没有支持的 Agent",
     "unsupportedTemplateAgents": "此预设需要当前版本不支持的 Agent ID：{{agents}}。",

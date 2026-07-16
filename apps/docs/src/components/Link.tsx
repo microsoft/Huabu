@@ -3,6 +3,7 @@
  *
  * - Internal links (starting with `/`) use react-router's `Link` so
  *   they don't trigger a full page reload.
+ * - Same-page anchors (starting with `#`) use a regular anchor.
  * - External links open in a new tab with `rel="noopener"`.
  */
 
@@ -20,6 +21,7 @@ type DocLinkProps = {
 
 export function DocLink({ href, children, className, ...rest }: DocLinkProps) {
   const isInternal = href.startsWith('/') && !href.startsWith('//');
+  const isSamePageAnchor = href.startsWith('#');
   const classes = cn(
     'font-medium text-gray-900 underline decoration-gray-400 underline-offset-2 transition-colors hover:decoration-gray-900',
     className,
@@ -30,6 +32,14 @@ export function DocLink({ href, children, className, ...rest }: DocLinkProps) {
       <RouterLink to={href} className={classes}>
         {children}
       </RouterLink>
+    );
+  }
+
+  if (isSamePageAnchor) {
+    return (
+      <a href={href} className={classes} {...rest}>
+        {children}
+      </a>
     );
   }
 

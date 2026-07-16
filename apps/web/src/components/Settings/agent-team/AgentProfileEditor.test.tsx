@@ -186,7 +186,7 @@ afterEach(() => {
 });
 
 describe('AgentProfileEditor (create)', () => {
-  it('defaults to no Template and keeps Custom command last', () => {
+  it('defaults to no Template and lists missing Agents before Custom command', () => {
     renderFlow();
 
     const selects = container?.querySelectorAll('select');
@@ -194,8 +194,10 @@ describe('AgentProfileEditor (create)', () => {
     const agentOptions = [...(selects?.[1]?.options ?? [])];
     expect(agentOptions.map((option) => option.value)).toEqual([
       'copilot',
+      'claude',
       'custom',
     ]);
+    expect(agentOptions[1]?.disabled).toBe(true);
   });
 
   it('filters a Template to supported Agents and disables missing ones', async () => {
