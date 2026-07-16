@@ -31,8 +31,8 @@ import {
 import { buildHistoryFromTurns } from '../agent/conversation/transcript/history.js';
 import { getLLMModel } from '../agent/llm.js';
 import { readWorkspaceMemory } from '../agent/memory/index.js';
-import { acquireAgentTurn } from '../agent/turn-lease.js';
 import { planSkillDispatch } from '../agent/skill-model-routing.js';
+import { acquireAgentTurn } from '../agent/turn-lease.js';
 import { canvasAcpNamespace } from '../storage/paths.js';
 
 import type {
