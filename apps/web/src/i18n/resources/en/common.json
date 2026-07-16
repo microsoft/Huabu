@@ -178,6 +178,8 @@
     "restarting": "Restarting…",
     "forceRestartWorker": "Force the worker to restart now",
     "nextAutoRetry": "Next auto-retry in {{seconds}}s.",
+    "copyErrorMessage": "Copy error message",
+    "errorMessageCopied": "Error message copied",
     "agentTeams": "Agent Teams",
     "showMiniMap": "Show MiniMap",
     "hideMiniMap": "Hide MiniMap",

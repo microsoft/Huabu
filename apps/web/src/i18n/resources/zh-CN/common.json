@@ -178,6 +178,8 @@
     "restarting": "正在重启…",
     "forceRestartWorker": "立即强制重启 worker",
     "nextAutoRetry": "{{seconds}} 秒后自动重试。",
+    "copyErrorMessage": "复制错误信息",
+    "errorMessageCopied": "错误信息已复制",
     "agentTeams": "Agent Teams",
     "showMiniMap": "显示小地图",
     "hideMiniMap": "隐藏小地图",
