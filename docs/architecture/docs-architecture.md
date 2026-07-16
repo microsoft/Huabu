@@ -60,11 +60,11 @@ The `Keyboard Shortcuts` reference presents the public subset of the user-facing
 
 Each article carries `data-pagefind-body`, excluding repeated navigation and table-of-contents text from indexing. Opening the sidebar search control or pressing `Ctrl/Cmd+K` displays Pagefind in an accessible modal with backdrop and Escape dismissal, focus containment, and trigger-focus restoration. Search results show compact page-title links followed by matching section-title links that jump directly to their anchors; generated body excerpts are hidden to avoid ambiguous stitched text. Results use a two-column card grid on wider screens and one column on narrow screens, loading ten page results per batch. `@pagefind/default-ui` initializes lazily on the first open in a built site and remains mounted across later opens. The Vite development server displays the modal shell but explicitly reports search as unavailable because it has no current static index.
 
-## Validation and deployment
+## Validation
 
 The artifact validator compares generated pages with the source route registry, verifies article markup, H1 and metadata output, rejects Suspense fallback and forbidden environment values, and requires Pagefind runtime/index files. Source tests cover route uniqueness, metadata completeness, the public navigation structure, and base normalization.
 
-The dedicated GitHub Actions workflow builds pull requests when handbook sources or their root build configuration change, and deploys only [`apps/docs/dist`](../../apps/docs) after matching changes land on `main` or on manual dispatch. It derives the repository Pages base from `GITHUB_REPOSITORY` unless the repository variable `DOCS_BASE_PATH` overrides it. The workflow uses GitHub Pages artifact and deployment actions with only `contents: read`, `pages: write`, and `id-token: write`.
+The repository does not run a dedicated documentation deployment workflow because GitHub Pages is unavailable for its current private-repository plan. `pnpm build:docs` still produces a complete static artifact in [`apps/docs/dist`](../../apps/docs), with `DOCS_BASE_PATH` and `DOCS_CANONICAL_ORIGIN` available for an external hosting target.
 
 Both `pnpm dev` and `pnpm dev:desktop` dynamically select a free docs port, start the handbook alongside server and web, and inject its actual URL into the web build through `VITE_HANDBOOK_URL`. `DOCS_PORT` changes the preferred starting port; either orchestrator may advance to another free port when it is occupied.
 
@@ -86,4 +86,3 @@ Both `pnpm dev` and `pnpm dev:desktop` dynamically select a free docs port, star
 | [`apps/docs/src/entry-server.tsx`](../../apps/docs/src/entry-server.tsx)             | Stream complete route markup at build time.           |
 | [`apps/docs/scripts/prerender.mjs`](../../apps/docs/scripts/prerender.mjs)           | Write route HTML and the artifact-root redirect.      |
 | [`apps/docs/scripts/validate-build.mjs`](../../apps/docs/scripts/validate-build.mjs) | Enforce the static artifact contract.                 |
-| [`.github/workflows/docs.yml`](../../.github/workflows/docs.yml)                     | Build, upload, and deploy the Pages artifact.         |
