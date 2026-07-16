@@ -51,6 +51,7 @@ The generic `agentlet.yaml` package contract and daemon execution operations are
 - Member Configs are shared by manifest-backed Profiles of the same package; secrets remain in the host SecretStore and are redacted from read APIs.
 - Each Profile keeps the same user-selected `workingDirPath` model as a command-backed ACP Profile. Setup prepares that writable directory, and runtime uses it as the agent process `cwd`; the bundled package directory is never used as the writable workspace.
 - Every non-internal agent uses one Agenetes Agent Profile. Manifest Profiles carry immutable placement, manifest, harness, and working-directory fields plus authoritative durable preparation state; command Profiles carry immutable placement, command, and working directory. Setup diagnostics are stored separately from the Profile CRD.
+- Declarative setup launches package-manager commands through cross-platform executable resolution, so Windows `.cmd` shims such as `npm` and `npx` work without opting into shell command construction.
 - Manifest Profiles use explicit Setup, Retry, and Cancel actions. A Profile is selectable only when its member is active, required Configs are complete, and preparation is ready; command Profiles are selectable immediately.
 - The Space and Huabu Reachback remain the shared workspace and read/write bridge available to running agents.
 

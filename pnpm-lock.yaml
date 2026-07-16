@@ -626,6 +626,9 @@ importers:
       commander:
         specifier: ^13.0.0
         version: 13.1.0
+      cross-spawn:
+        specifier: ^7.0.6
+        version: 7.0.6
       yaml:
         specifier: ^2.7.0
         version: 2.9.0
