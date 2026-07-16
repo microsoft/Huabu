@@ -15,6 +15,7 @@ const toc: TocEntry[] = [
   { id: 'understand-the-space', label: 'Understand the Space' },
   { id: 'navigate-and-select', label: 'Navigate and select' },
   { id: 'use-the-toolbar', label: 'Use the toolbar' },
+  { id: 'move-content-by-dragging', label: 'Move content by dragging' },
   { id: 'choose-the-right-node', label: 'Choose the right node' },
   { id: 'build-structure', label: 'Build structure' },
   { id: 'open-view-and-edit', label: 'Open, view, and edit' },
@@ -118,6 +119,54 @@ export default function WorkInASpace() {
         URLs, images, or text, and copy existing nodes. Huabu creates the
         matching node type and places it near the pointer.
       </P>
+
+      <H2>Move content by dragging</H2>
+      <P>
+        Content can flow directly from your computer and other sources into the
+        Space and your writing. Drop a local file or a useful block or excerpt
+        onto empty space to make it a node. You can also drop extracted content
+        into a Note to continue working with it there. Huabu preserves the
+        appropriate format, so you do not need to import, copy, create a
+        destination, and paste in separate steps.
+      </P>
+      <Table
+        headers={['Drag from', 'Drop on empty space', 'Drop into a Note']}
+        rows={[
+          [
+            'A local file',
+            'Creates the matching Image, PDF, Video, or Web node and uploads the file.',
+            'Not supported.',
+          ],
+          [
+            'A Chat reply',
+            'Creates a Note from a text block or an Image from an image block.',
+            'Appends the block, or inserts it at the indicator when the Note is expanded.',
+          ],
+          [
+            'A PDF selection',
+            'Creates a Note from selected text or an Image from a captured area.',
+            'Appends the text or image to the Note.',
+          ],
+          [
+            'A Note block',
+            'Moves the block into a new Note.',
+            'Moves the block to the end of the other Note.',
+          ],
+        ]}
+      />
+      <P>
+        Only one content node can be expanded at a time. A selection dragged
+        from an expanded PDF or Note therefore lands on the target Note in the
+        Space and is appended to its end. When the target Note itself is
+        expanded, content available from Chat can follow the insertion indicator
+        between existing blocks, and its own blocks can be reordered.
+      </P>
+      <Callout tone="tip">
+        Dragging from Chat or a PDF always copies the source. When dragging a
+        Note block, the default is move; hold <strong>Option</strong> on macOS
+        or <strong>Ctrl</strong> on Windows / Linux while dragging to copy it
+        instead.
+      </Callout>
 
       <H2>Choose the right node</H2>
       <Table
@@ -268,16 +317,19 @@ export default function WorkInASpace() {
       <P>
         A Note supports headings, lists, tasks, quotes, code, tables, links, and
         other rich content. Expand it for the full editor; switch between rich
-        text and raw Markdown when needed. You can also drag a block out of an
-        expanded Note to turn that passage into a separate Note in the Space.
+        text and raw Markdown when needed. Drag blocks out to organize them as
+        separate Notes, or move them to the end of another Note in the Space.
+        When this Note is expanded, you can also place content dragged from Chat
+        at the insertion indicator.
       </P>
 
       <H3>Work with a PDF</H3>
       <P>
         Expand a PDF to read the full document with page thumbnails. Highlight
-        text to use an excerpt, or select an area to capture it as an Image.
-        Selected text and captures can be placed back in the Space or sent to
-        chat, keeping the extracted idea close to its source.
+        text to drag it out as a Note, or select an area to drag it out as an
+        Image. Drop either one on empty space to create a node or into a Note to
+        add it to your writing. You can also send a capture to Chat, keeping the
+        extracted idea close to its source.
       </P>
 
       <H2>Everyday operations</H2>
