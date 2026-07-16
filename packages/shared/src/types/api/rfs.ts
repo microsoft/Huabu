@@ -130,6 +130,43 @@ export const RFS_HEARTBEAT_MAX_SEC = 30;
 /** Default heartbeat cadence when the caller omits `heartbeatSec`. */
 export const RFS_HEARTBEAT_DEFAULT_SEC = 15;
 
+/** Canonical request headers for `POST /api/rfs/:canvasId/agent`. */
+export const RFS_AGENT_HEADERS = {
+  threadId: 'X-Huabu-Thread-Id',
+  eventMode: 'X-Huabu-Event-Mode',
+  heartbeatSec: 'X-Huabu-Heartbeat-Sec',
+} as const;
+
+export const rfsAgentEventModeSchema = z.enum(['final', 'all']);
+export type RfsAgentEventMode = z.infer<typeof rfsAgentEventModeSchema>;
+
+/**
+ * Validated control headers for `POST /api/rfs/:canvasId/agent`.
+ *
+ * Fastify normalizes incoming header names to lowercase. Unknown standard
+ * headers are retained by `.passthrough()` and ignored by the route.
+ */
+export const rfsAgentHeadersSchema = z
+  .object({
+    'x-huabu-thread-id': z
+      .string()
+      .trim()
+      .min(1)
+      .max(256)
+      .regex(/^[^\r\n]+$/)
+      .optional(),
+    'x-huabu-event-mode': rfsAgentEventModeSchema.optional(),
+    'x-huabu-heartbeat-sec': z.coerce
+      .number()
+      .int()
+      .min(RFS_HEARTBEAT_MIN_SEC)
+      .max(RFS_HEARTBEAT_MAX_SEC)
+      .optional(),
+  })
+  .passthrough();
+
+export type RfsAgentHeaders = z.infer<typeof rfsAgentHeadersSchema>;
+
 /**
  * Request body for `POST /api/rfs/:canvasId/agent`.
  *
