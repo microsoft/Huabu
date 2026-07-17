@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { Github } from 'lucide-react';
 import { Link, NavLink } from 'react-router-dom';
 
 import { withBasePath } from './basePath';
@@ -73,13 +74,19 @@ function DocsSidebar() {
               (Overview / Quick Start). Stays put when the lower list
               scrolls. */}
       <div className="shrink-0 border-b border-gray-100 px-4 pt-4 pb-3">
-        <Link
-          to="/docs"
-          className="mb-3 flex items-center gap-2 text-[15px] font-semibold text-gray-900"
-        >
-          <img src={withBasePath('favicon.svg')} alt="" className="h-5 w-5" />
-          <span>Huabu Handbook</span>
-        </Link>
+        <div className="mb-3 flex items-center gap-2 text-[15px] font-semibold text-gray-900">
+          <a
+            href={withBasePath('/')}
+            aria-label="Huabu home"
+            title="Huabu home"
+            className="rounded transition-opacity hover:opacity-70 focus-visible:outline-2 focus-visible:outline-offset-2"
+          >
+            <img src={withBasePath('favicon.svg')} alt="" className="h-5 w-5" />
+          </a>
+          <Link to="/docs" className="transition-colors hover:text-gray-600">
+            Handbook
+          </Link>
+        </div>
         <Search />
         <ul className="space-y-0.5">
           {pinnedItems.map((item) => (
@@ -114,6 +121,20 @@ function DocsSidebar() {
           ))}
         </ul>
       </nav>
+      <div className="shrink-0 border-t border-gray-100 px-4 py-3">
+        <a
+          href="https://github.com/microsoft/Huabu"
+          target="_blank"
+          rel="noreferrer"
+          className="flex items-center gap-2 rounded-md px-3 py-1.5 text-[13px] text-gray-500 transition-colors hover:bg-gray-50 hover:text-gray-900"
+        >
+          <Github aria-hidden="true" className="h-4 w-4" />
+          <span>GitHub</span>
+          <span className="ml-auto" aria-hidden="true">
+            ↗
+          </span>
+        </a>
+      </div>
     </aside>
   );
 }

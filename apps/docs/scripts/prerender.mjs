@@ -47,7 +47,4 @@ for (const route of routeManifest) {
   await writeFile(path.join(routeDir, 'index.html'), html);
 }
 
-const redirectTarget = `${docsBasePath}docs/`;
-const redirectHtml = `<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n    <meta http-equiv="refresh" content="0; url=${escapeAttribute(redirectTarget)}" />\n    <link rel="canonical" href="${escapeAttribute(redirectTarget)}" />\n    <title>Huabu Handbook</title>\n  </head>\n  <body>\n    <p><a href="${escapeAttribute(redirectTarget)}">Open the Huabu Handbook</a></p>\n  </body>\n</html>\n`;
-await writeFile(path.join(distDir, 'index.html'), redirectHtml);
 await rm(ssrDir, { recursive: true, force: true });

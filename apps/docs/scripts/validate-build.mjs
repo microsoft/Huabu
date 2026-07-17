@@ -24,6 +24,7 @@ const baseSegments = (process.env.DOCS_BASE_PATH ?? '/')
   .filter(Boolean);
 const basePath =
   baseSegments.length === 0 ? '/' : `/${baseSegments.join('/')}/`;
+const canonicalOrigin = process.env.DOCS_CANONICAL_ORIGIN?.replace(/\/$/, '');
 
 async function exists(file) {
   try {
@@ -93,8 +94,45 @@ for (const route of uniqueRoutes) {
 }
 
 const root = await readFile(path.join(distDir, 'index.html'), 'utf8');
-if (!root.includes('http-equiv="refresh"') || !root.includes('docs/'))
-  failures.push('Missing root handbook redirect');
+if (
+  !root.includes(
+    '<title>Huabu, where you and your agents think together</title>',
+  )
+)
+  failures.push('Missing landing page at artifact root');
+if (!root.includes('href="./docs/"'))
+  failures.push('Missing landing page link to the handbook');
+const expectedCanonicalUrl = canonicalOrigin
+  ? `${canonicalOrigin}${basePath}`
+  : basePath;
+const expectedSocialPreviewUrl = canonicalOrigin
+  ? `${canonicalOrigin}${basePath}huabu-social-preview-v10.png`
+  : `${basePath}huabu-social-preview-v10.png`;
+if (!root.includes(`<link rel="canonical" href="${expectedCanonicalUrl}" />`))
+  failures.push('Invalid landing page canonical URL');
+if (
+  !root.includes(`<meta property="og:url" content="${expectedCanonicalUrl}" />`)
+)
+  failures.push('Invalid landing page Open Graph URL');
+for (const attribute of [
+  `property="og:image" content="${expectedSocialPreviewUrl}"`,
+  `name="twitter:image" content="${expectedSocialPreviewUrl}"`,
+]) {
+  if (!root.includes(attribute))
+    failures.push(`Invalid landing page social preview URL: ${attribute}`);
+}
+if (/__HUABU_[A-Z_]+__/.test(root))
+  failures.push('Unresolved landing page build placeholder');
+if (!root.includes(`url('${basePath}huabu-logo.svg')`))
+  failures.push('Missing or invalid logo image URL in landing page');
+for (const asset of [
+  'huabu-logo.svg',
+  'huabu-social-preview-v10.png',
+  'image-for-shell-act.png',
+]) {
+  if (!(await exists(path.join(distDir, asset))))
+    failures.push(`Missing landing page asset: ${asset}`);
+}
 const pagefindDir = path.join(distDir, 'pagefind');
 if (!(await exists(path.join(pagefindDir, 'pagefind-ui.js'))))
   failures.push('Missing Pagefind UI runtime');
@@ -122,5 +160,5 @@ if (failures.length > 0) {
   process.exit(1);
 }
 console.log(
-  `Validated ${uniqueRoutes.length} prerendered handbook routes and Pagefind output.`,
+  `Validated the landing page, ${uniqueRoutes.length} prerendered handbook routes, and Pagefind output.`,
 );

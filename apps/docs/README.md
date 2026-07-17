@@ -1,6 +1,8 @@
 # Huabu User Handbook
 
-This package contains the source for the public Huabu User Handbook at [https://microsoft.github.io/Huabu/docs/](https://microsoft.github.io/Huabu/docs/). It is an independent Vite application maintained directly in the Huabu repository.
+This package contains the public Huabu website at [https://microsoft.github.io/Huabu/](https://microsoft.github.io/Huabu/). The static landing page is served at the site root, while the Vite-powered User Handbook is served from [`/docs/`](https://microsoft.github.io/Huabu/docs/).
+
+The landing page source lives in `landingpage/`. Its handbook links and local assets are deployment-relative. The production build copies it into the artifact root after prerendering the handbook, replaces explicit metadata placeholders with canonical and social-preview URLs derived from `DOCS_BASE_PATH` and `DOCS_CANONICAL_ORIGIN`, and validates both parts as one deployable site. The social-preview image is stored alongside the landing page source and copied into the artifact rather than loaded from an external host.
 
 ## Requirements
 
@@ -23,7 +25,7 @@ Start the Vite development server:
 pnpm dev
 ```
 
-The development server defaults to `http://localhost:43127`. Set `DOCS_PORT` to use another port. Search is unavailable in development because Pagefind indexes are generated during the production build.
+The development server defaults to `http://localhost:43127`. Set `DOCS_PORT` to use another port. The Vite server serves the handbook directly; open `landingpage/index.html` separately to work on the static landing page. Search is unavailable in development because Pagefind indexes are generated during the production build.
 
 To preview the complete generated site, including search:
 
@@ -32,7 +34,7 @@ pnpm build
 pnpm preview
 ```
 
-The preview server defaults to `http://localhost:43128`.
+The preview server defaults to `http://localhost:43128`. The landing page is available at the server root, and the handbook is available at `http://localhost:43128/docs/`. The preview server runs in multi-page mode so each prerendered handbook route serves its own generated HTML instead of falling back to the landing page.
 
 ## Quality checks
 

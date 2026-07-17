@@ -1,4 +1,4 @@
-name: Deploy user handbook
+name: Deploy website
 
 on:
   workflow_dispatch:
@@ -7,6 +7,9 @@ on:
       - main
     paths:
       - 'apps/docs/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
       - '.github/workflows/deploy-docs.yml'
 
 permissions:
@@ -20,6 +23,7 @@ concurrency:
 
 jobs:
   build:
+    name: Build website
     runs-on: ubuntu-latest
     steps:
       - name: Check out Huabu
@@ -40,21 +44,23 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
 
-      - name: Build handbook
-        run: pnpm --filter @huabu/docs build
-        env:
-          DOCS_BASE_PATH: /Huabu/
-          DOCS_CANONICAL_ORIGIN: https://microsoft.github.io
-
       - name: Configure GitHub Pages
+        id: pages
         uses: actions/configure-pages@v5
 
-      - name: Upload handbook artifact
+      - name: Build website and handbook
+        run: pnpm --filter @huabu/docs build
+        env:
+          DOCS_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+          DOCS_CANONICAL_ORIGIN: ${{ steps.pages.outputs.origin }}
+
+      - name: Upload website artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: apps/docs/dist
 
   deploy:
+    name: Deploy website
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
