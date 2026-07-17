@@ -219,7 +219,7 @@
         display: inline-flex;
         align-items: center;
         gap: 8px;
-        margin-bottom: clamp(20px, 2.5vh, 28px);
+        margin-bottom: clamp(30px, 3.5vh, 40px);
         padding: 6px 10px;
         border: 1px solid #cdd9b6;
         border-radius: 999px;
@@ -241,8 +241,8 @@
       .hero h1 {
         max-width: min(14.4em, 100%);
         margin: 0 auto;
-        font-size: clamp(42px, 6vw, 78px);
-        line-height: 0.98;
+        font-size: clamp(44px, 6.5vw, 88px);
+        line-height: 1.12;
         letter-spacing: -0.057em;
         font-weight: 690;
       }
@@ -251,7 +251,7 @@
       }
       .hero-lede {
         max-width: 650px;
-        margin: clamp(24px, 3vh, 32px) auto 0;
+        margin: clamp(34px, 4vh, 44px) auto 0;
         color: var(--fg-muted);
         font-size: clamp(16px, 1.7vw, 20px);
         line-height: 1.55;
@@ -1246,7 +1246,7 @@
       .finale-content {
         position: relative;
         z-index: 2;
-        max-width: 860px;
+        width: min(1600px, calc(100vw - 96px));
         text-align: center;
       }
       .finale-logo {
@@ -1267,12 +1267,19 @@
       }
       .finale h2 {
         margin: 0;
-        font-size: clamp(44px, 6.5vw, 86px);
-        line-height: 0.98;
-        letter-spacing: -0.058em;
-        font-weight: 650;
+        font-size: clamp(44px, 6.5vw, 88px);
+        line-height: 1.12;
+        letter-spacing: 0.015em;
+        font-weight: 700;
+      }
+      @media (min-width: 900px) {
+        .finale h2,
+        .finale h2 span {
+          white-space: nowrap;
+        }
       }
       .finale h2 span {
+        display: block;
         color: #74babc;
       }
       .finale p {
@@ -1512,7 +1519,8 @@
         font-weight: 800;
       }
       .hero h1 {
-        letter-spacing: -0.015em;
+        letter-spacing: 0.015em;
+        word-spacing: -0.08em;
         font-weight: 700;
       }
       .caption h2 {
@@ -1967,7 +1975,8 @@
         color: #9cbf72;
       }
       .finale h2 {
-        letter-spacing: -0.02em;
+        letter-spacing: 0.015em;
+        word-spacing: -0.08em;
       }
       .hero-actions .button,
       .finale-actions .button {
@@ -2513,7 +2522,7 @@
     <header class="hero" id="top">
       <div class="hero-copy">
         <div class="hero-kicker">
-          A shared workspace for human–agent thinking
+          An infinite work surface
         </div>
         <h1>Huabu, where you and your agents <span>think together</span></h1>
         <p class="hero-lede">
@@ -2621,7 +2630,7 @@
 
           <section class="caption left" data-range="0.158 0.345">
             <div class="caption-panel">
-              <h2>Bring in <span>anything</span></h2>
+              <h2>Bring in <span>anything.</span></h2>
               <p>
                 Pull a thought from a conversation, or drop in a PDF, website,
                 image, video, or file. Each becomes a visible node you can
@@ -2647,7 +2656,7 @@
               <p>
                 Agents begin with the context already in your Space. Give them a
                 brief, run tasks in parallel, and bring every result back to the
-                canvas.
+                Space.
               </p>
             </div>
           </section>
@@ -2679,13 +2688,13 @@
     <footer class="finale" id="github">
       <div class="finale-content">
         <span class="finale-logo" aria-hidden="true"></span>
-        <div class="finale-kicker">Open source · Available now</div>
+        <div class="finale-kicker">Available now</div>
         <h2>
-          Stop prompting into the void. <span>Start thinking on a canvas.</span>
+          Stop prompting into the void. <span>Start thinking on Huabu.</span>
         </h2>
         <p>
-          Explore the source, download the latest release, and help shape a
-          workspace built for thinking with agents.
+          Download Huabu and start shaping a shared workspace built for
+          thinking with agents.
         </p>
         <div class="finale-actions">
           <a
@@ -2695,7 +2704,6 @@
             rel="noreferrer"
             >View Huabu on GitHub <span>↗</span></a
           >
-          <a class="button" href="./docs/">Huabu Handbook <span>→</span></a>
           <a
             class="button"
             href="https://github.com/microsoft/Huabu/releases"
@@ -2703,9 +2711,7 @@
             rel="noreferrer"
             >Download latest release</a
           >
-        </div>
-        <div class="finale-meta">
-          Huabu · One shared workspace for human and agent thinking
+          <a class="button" href="./docs/">Huabu Handbook <span>→</span></a>
         </div>
       </div>
     </footer>
@@ -3724,7 +3730,7 @@
         ];
 
         const FRAMES = [
-          { x: 250, y: 470, w: 1450, h: 720, label: 'From chat to canvas' },
+          { x: 250, y: 470, w: 1450, h: 720, label: 'From chat to Space' },
           {
             x: 1750,
             y: 440,
