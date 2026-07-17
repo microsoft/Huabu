@@ -31,8 +31,15 @@ export function PageLayout({
   children,
 }: PageLayoutProps) {
   useEffect(() => {
-    const id = decodeURIComponent(window.location.hash.slice(1));
-    if (!id) return;
+    const rawHash = window.location.hash.slice(1);
+    if (!rawHash) return;
+
+    let id = rawHash;
+    try {
+      id = decodeURIComponent(rawHash);
+    } catch {
+      // Keep the raw hash if it isn't valid percent-encoding.
+    }
 
     document.getElementById(id)?.scrollIntoView({ block: 'start' });
   }, []);
