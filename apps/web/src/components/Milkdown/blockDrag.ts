@@ -243,7 +243,7 @@ export function attachBlockDragListeners(
     if (!handle && !image) return;
 
     const snapshot = handle
-      ? priorSelection ?? instance.getMultiBlockSelectionRange()
+      ? (priorSelection ?? instance.getMultiBlockSelectionRange())
       : instance.getDragRangeAtDOM(image as HTMLElement);
     // Clear immediately so a subsequent single-block drag isn't
     // accidentally treated as multi-block.
