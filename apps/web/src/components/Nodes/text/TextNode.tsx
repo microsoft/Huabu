@@ -102,15 +102,23 @@ export const TextNode = memo(
     // ------------------------------------------------------------------
     // Editing handlers
     // ------------------------------------------------------------------
+    // Single focus path: whenever inline editing begins — no matter the
+    // trigger (double-click or a post-create request) — focus the
+    // textarea. Running in a committed effect guarantees the textarea is
+    // mounted, so this is deterministic where a fixed `setTimeout` focus
+    // delay was merely a race that usually won.
+    useEffect(() => {
+      if (isEditing) textareaRef.current?.focus();
+    }, [isEditing]);
+
+    // Post-create: a freshly created text node requests direct inline
+    // editing. Enter editing (the focus effect above does the focus) and
+    // consume the one-shot request.
     useEffect(() => {
       if (!inlineEditRequested) return;
-      if (!isEditing) {
-        setIsEditing(true);
-        return;
-      }
-      textareaRef.current?.focus();
+      setIsEditing(true);
       consumeInlineEditRequest(id);
-    }, [consumeInlineEditRequest, id, inlineEditRequested, isEditing]);
+    }, [consumeInlineEditRequest, id, inlineEditRequested]);
 
     const toggleDecoration = (value: string) => {
       let current = textDecoration.split(' ').filter(Boolean);
@@ -125,7 +133,6 @@ export const TextNode = memo(
     const handleDoubleClick = useCallback((e: React.MouseEvent) => {
       e.stopPropagation();
       setIsEditing(true);
-      setTimeout(() => textareaRef.current?.focus(), 50);
     }, []);
 
     const handleBlur = useCallback(() => {

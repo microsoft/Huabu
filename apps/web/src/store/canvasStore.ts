@@ -1456,6 +1456,16 @@ const useCanvasStore = create<RFState>()(
       if (editNodeId !== undefined && !editTargetAlreadyExists) {
         const node = get().nodes.find(({ id }) => id === editNodeId);
         if (node?.type === 'note') {
+          // Inline the settle-previous + expand + focus-tick sequence
+          // instead of calling `openExpanded(node.id)` on purpose:
+          // `openExpanded` re-enters `dispatchUiIntent` with an
+          // `EXPAND_NODE` intent, which would (a) recurse through the
+          // resolver in the middle of this `ADD_NODES` dispatch, and
+          // (b) record an `EXPAND_NODE` gesture in the recent-action
+          // window / event buffer that the user never performed —
+          // polluting the context handed to the agent. Opening the
+          // editor here is a silent side effect of creation, so it must
+          // not emit its own intent event.
           const previousId = get().expandedNodeId;
           if (previousId && previousId !== node.id) {
             const previousNode = get().nodes.find(
