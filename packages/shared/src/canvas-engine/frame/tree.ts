@@ -148,8 +148,13 @@ export function normalizeTreeOrder(nodes: NestableNode[]): NestableNode[] {
     if (node.parentId) visit(node.parentId);
     visiting.delete(id);
 
+    // A cycle broken during the recursion above already pushed this node
+    // (as a parent-stripped copy) and marked it visited. Re-check here so
+    // we never emit it twice, and re-read `normalizedById` so we push the
+    // canonical (possibly rewritten) node rather than the stale capture.
+    if (visited.has(id)) return;
     visited.add(id);
-    result.push(node);
+    result.push(normalizedById.get(id) ?? node);
   };
 
   // Stable-ish order: iterate by original index.
