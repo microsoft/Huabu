@@ -23,10 +23,8 @@ interface RangeSliderProps {
   onChange: (value: number) => void;
 }
 
-// Track + thumb styles are identical across size variants — the size
-// preset only changes the outer input box and readout font. Pulled out
-// into a single constant string of literal class names so Tailwind's
-// JIT still picks them up (no runtime interpolation of class fragments).
+// Shared track + thumb colors. Thumb dimensions live in SIZE_STYLES so the
+// desktop control can stay visually light while touch keeps a larger handle.
 const SLIDER_TRACK_AND_THUMB = [
   // WebKit / Blink — grey track, borderless thumb
   '[&::-webkit-slider-runnable-track]:bg-edge-default',
@@ -34,19 +32,14 @@ const SLIDER_TRACK_AND_THUMB = [
   '[&::-webkit-slider-runnable-track]:rounded-full',
   '[&::-webkit-slider-runnable-track]:border-0',
   '[&::-webkit-slider-thumb]:appearance-none',
-  '[&::-webkit-slider-thumb]:h-4',
-  '[&::-webkit-slider-thumb]:w-4',
   '[&::-webkit-slider-thumb]:rounded-full',
   '[&::-webkit-slider-thumb]:bg-info',
   '[&::-webkit-slider-thumb]:border-0',
-  '[&::-webkit-slider-thumb]:-mt-1',
   // Firefox — same look
   '[&::-moz-range-track]:bg-edge-default',
   '[&::-moz-range-track]:h-1.5',
   '[&::-moz-range-track]:rounded-full',
   '[&::-moz-range-track]:border-0',
-  '[&::-moz-range-thumb]:h-4',
-  '[&::-moz-range-thumb]:w-4',
   '[&::-moz-range-thumb]:rounded-full',
   '[&::-moz-range-thumb]:bg-info',
   '[&::-moz-range-thumb]:border-0',
@@ -55,8 +48,16 @@ const SLIDER_TRACK_AND_THUMB = [
 // Size-specific outer dimensions / readout font — must be literal so
 // Tailwind's JIT can pick them up (no dynamic concatenation).
 const SIZE_STYLES = {
-  sm: { input: 'h-5 w-28', readout: 'text-xs min-w-5' },
-  md: { input: 'h-6 w-36', readout: 'text-sm min-w-6' },
+  sm: {
+    input:
+      'h-5 w-28 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:-mt-[3px] [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:w-3',
+    readout: 'text-xs min-w-5',
+  },
+  md: {
+    input:
+      'h-6 w-36 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:-mt-1 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4',
+    readout: 'text-sm min-w-6',
+  },
 } as const satisfies Record<
   RangeSliderSize,
   { input: string; readout: string }

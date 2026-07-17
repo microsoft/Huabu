@@ -66,7 +66,7 @@ export const SKETCH_STROKE_MERGE_MAX_DISTANCE_SCREEN_PX = 80;
  * The actual radius is user-adjustable via the eraser slider in
  * `SketchSettingsPanel` and lives on `toolStore.sketchDraft.eraserSize`.
  */
-export const SKETCH_ERASER_RADIUS_SCREEN_PX = 16;
+export const SKETCH_ERASER_RADIUS_SCREEN_PX = 12;
 
 /** Minimum eraser brush radius (screen-space px) exposed to the user. */
 export const SKETCH_ERASER_RADIUS_MIN_PX = 4;

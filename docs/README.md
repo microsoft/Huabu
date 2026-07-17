@@ -84,6 +84,7 @@ docs/
 | [managed-agent-teams.md](./proposals/managed-agent-teams.md)                                       | In-Progress    | Huabu-managed discovery, configuration, preparation, and runtime.         |
 | [milkdown-custom-toolbar-plan.md](./proposals/milkdown-custom-toolbar-plan.md)                     | In-Progress    | Sediment-owned Milkdown toolbar and semantic editor commands.             |
 | [model-role-routing.md](./proposals/model-role-routing.md)                                         | Proposed       | Model selection by runtime role.                                          |
+| [touch-and-pen-canvas-interactions.md](./proposals/touch-and-pen-canvas-interactions.md)           | Draft          | Touch navigation, node movement, pen routing, and touch-first tools.       |
 
 ### Shipped
 

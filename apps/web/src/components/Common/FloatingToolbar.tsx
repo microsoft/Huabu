@@ -53,6 +53,10 @@ export type ToolbarAlignDirection =
 export const FLOATING_TOOLBAR_CLASS =
   'text-fg-muted shadow-bottom bg-surface flex items-center gap-1 rounded-lg p-1.5';
 
+/** Shared surface chrome for compact popovers opened from a toolbar. */
+export const FLOATING_TOOLBAR_POPOVER_CLASS =
+  'border-edge-default shadow-bottom bg-surface z-50 rounded-lg border px-2 py-1.5';
+
 // ─── Root ─────────────────────────────────────────────────────────────────────
 
 interface RootProps {
@@ -119,6 +123,7 @@ function ToggleButton({
       iconOnly
       size={size}
       title={title}
+      aria-pressed={active}
       onClick={onClick}
       disabled={disabled}
       className={cn(
@@ -240,6 +245,8 @@ interface ToolbarColorPickerProps {
   onSelect: (token: string) => void;
   /** Tooltip label for the trigger button. */
   title?: string;
+  /** Extra classes for the trigger button. */
+  triggerClassName?: string;
   /** Optional controlled open state. When omitted, the picker manages itself. */
   open?: boolean;
   /** Called when the popover should open or close. */
@@ -260,6 +267,7 @@ function ToolbarColorPicker({
   value,
   onSelect,
   title = 'Change color',
+  triggerClassName,
   open,
   onOpenChange,
   children,
@@ -321,6 +329,7 @@ function ToolbarColorPicker({
         className={cn(
           'bg-bg-default enabled:hover:bg-hover h-6 w-7 rounded-md',
           isOpen && 'ring-info ring-1',
+          triggerClassName,
         )}
       >
         {children ?? defaultTrigger}
@@ -338,7 +347,7 @@ function ToolbarColorPicker({
               />
               <div
                 ref={refs.setFloating}
-                className="border-edge-default shadow-bottom bg-surface z-50 rounded-full border px-2 py-1.5"
+                className={FLOATING_TOOLBAR_POPOVER_CLASS}
                 style={{
                   ...floatingStyles,
                   visibility: isPositioned ? 'visible' : 'hidden',
