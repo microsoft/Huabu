@@ -31,7 +31,7 @@ jobs:
 
           GH_TOKEN="$SOURCE_TOKEN" gh release view \
             --repo "$SOURCE_REPO" \
-            --json tagName,body,isPrerelease \
+            --json tagName,isPrerelease \
             > source-release.json
 
           SOURCE_TAG="$(jq -r '.tagName' source-release.json)"
@@ -49,7 +49,28 @@ jobs:
             fi
           done
 
-          jq -r '.body // ""' source-release.json > release-notes.md
+          DISPLAY_VERSION="${DEST_TAG#v}"
+          printf '## Huabu %s\n\n' "$DISPLAY_VERSION" > release-notes.md
+          cat >> release-notes.md <<'EOF'
+          Huabu is a spatial workspace where you and your agents can think together. This experimental release is available for:
+
+          - macOS on Apple silicon (`.dmg`)
+          - Windows on x64 (`.exe`)
+
+          ### Installation note
+
+          These builds are not yet signed with public code-signing certificates, so macOS or Windows may display a security warning.
+
+          On macOS, Control-click Huabu and choose **Open**. If macOS still blocks the app downloaded from this official Release page, run:
+
+          ```bash
+          xattr -dr com.apple.quarantine /Applications/Huabu.app
+          ```
+
+          - [User Handbook](https://microsoft.github.io/Huabu/docs/)
+          - [Responsible AI information](https://github.com/microsoft/Huabu/blob/main/RAI_README.md)
+          - [Report an issue or share feedback](https://github.com/microsoft/Huabu/issues)
+          EOF
 
           {
             echo "source_tag=$SOURCE_TAG"
