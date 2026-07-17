@@ -31,7 +31,11 @@
 
 import { applyStructuredFrameRelayout } from './autoLayout/gridLayout.js';
 import { HANDLERS, COMMAND_META } from './commands/index.js';
-import { fitFrames, type NestableNode } from './frame/index.js';
+import {
+  fitFrames,
+  normalizeTreeOrder,
+  type NestableNode,
+} from './frame/index.js';
 import { getFrameSizing } from './frame/sizing.js';
 import {
   coerceProvenance,
@@ -240,6 +244,21 @@ export function executeCanvasCommands(
     if (fitTargets.size > 0) {
       currentNodes = fitFrames(currentNodes as NestableNode[], fitTargets);
     }
+  }
+
+  // ------------------------------------------------------------------
+  // Authoritative tree-order invariant (single end-of-batch pass).
+  //
+  // Parents must precede their children in the array and frame children
+  // must carry the frame zIndex; otherwise React Flow throws "Parent node
+  // not found" on the client. This is the single funnel every command
+  // batch passes through, so normalizing HERE lets individual commands stop
+  // maintaining the invariant themselves. `normalizeTreeOrder` is idempotent
+  // and returns unchanged node refs when order/zIndex already hold, so the
+  // common (already-ordered) batch pays only an O(n log n) verification.
+  // ------------------------------------------------------------------
+  if (anyApplied) {
+    currentNodes = normalizeTreeOrder(currentNodes as NestableNode[]);
   }
 
   // ------------------------------------------------------------------
