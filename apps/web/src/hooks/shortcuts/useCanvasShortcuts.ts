@@ -16,64 +16,11 @@ import {
 import { isSnapSessionActive } from '../../handler/snap/snapSession';
 import useCanvasStore from '../../store/canvasStore';
 import { useIntentStore } from '../../store/intentStore';
+import { parseSedimentClipboard } from '../../utils/io/clipboard';
 import { looksLikeUrl } from '../../utils/io/media';
 
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
 import type { Edge, Node, ReactFlowInstance } from '@xyflow/react';
-
-// Marker keys used to identify serialized canvas nodes / edges in the
-// system clipboard. Older payloads only have `__sediment_nodes__`; the
-// edges key is optional and absent for paste-from-other-app cases.
-// `__sediment_canvas_id__` was added when artifact references moved
-// from full URLs to bare keys: the source canvas id is needed by the
-// cross-canvas clone path because the bare key alone no longer
-// identifies which canvas the underlying file lives in.
-const SEDIMENT_NODES_KEY = '__sediment_nodes__';
-const SEDIMENT_EDGES_KEY = '__sediment_edges__';
-const SEDIMENT_CANVAS_ID_KEY = '__sediment_canvas_id__';
-
-interface SedimentClipboard {
-  nodes: unknown[];
-  edges: unknown[];
-  /** The canvas the nodes were copied from. May be undefined for legacy payloads. */
-  srcCanvasId?: string;
-}
-
-/**
- * Try to parse system clipboard text as serialized Sediment canvas
- * nodes (and optionally edges). Returns the payload when valid,
- * otherwise null.
- */
-function parseSedimentClipboard(
-  text: string | null | undefined,
-): SedimentClipboard | null {
-  if (!text) return null;
-  try {
-    const parsed = JSON.parse(text);
-    if (
-      parsed &&
-      typeof parsed === 'object' &&
-      Array.isArray(parsed[SEDIMENT_NODES_KEY]) &&
-      parsed[SEDIMENT_NODES_KEY].length > 0
-    ) {
-      const edges = Array.isArray(parsed[SEDIMENT_EDGES_KEY])
-        ? parsed[SEDIMENT_EDGES_KEY]
-        : [];
-      const srcCanvasId =
-        typeof parsed[SEDIMENT_CANVAS_ID_KEY] === 'string'
-          ? (parsed[SEDIMENT_CANVAS_ID_KEY] as string)
-          : undefined;
-      return {
-        nodes: parsed[SEDIMENT_NODES_KEY],
-        edges,
-        ...(srcCanvasId ? { srcCanvasId } : {}),
-      };
-    }
-  } catch {
-    // Not JSON — not sediment data
-  }
-  return null;
-}
 
 /**
  * Refs shared between Canvas rendering and this shortcut hook.

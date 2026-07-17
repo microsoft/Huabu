@@ -1,4 +1,10 @@
-export { copyToClipboard } from './clipboard';
+export {
+  copyToClipboard,
+  parseSedimentClipboard,
+  parseSedimentImageClipboard,
+  type SedimentClipboard,
+  type SedimentClipboardImage,
+} from './clipboard';
 
 export {
   SEDIMENT_DND_MIME,
