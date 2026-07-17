@@ -123,7 +123,10 @@ for (const attribute of [
 }
 if (/__HUABU_[A-Z_]+__/.test(root))
   failures.push('Unresolved landing page build placeholder');
+if (!root.includes(`url('${basePath}huabu-logo.svg')`))
+  failures.push('Missing or invalid logo image URL in landing page');
 for (const asset of [
+  'huabu-logo.svg',
   'huabu-social-preview-v10.png',
   'image-for-shell-act.png',
 ]) {
