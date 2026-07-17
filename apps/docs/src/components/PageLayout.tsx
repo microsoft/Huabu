@@ -11,10 +11,10 @@
  *   scrolling.
  */
 
+import { useEffect, type ReactNode } from 'react';
+
 import { H1, P } from './Heading';
 import { Toc, type TocEntry } from './Toc';
-
-import { useEffect, type ReactNode } from 'react';
 
 type PageLayoutProps = {
   title: string;
