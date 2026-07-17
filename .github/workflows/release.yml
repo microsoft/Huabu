@@ -8,9 +8,9 @@ name: Release
 #   git tag v0.1.0 && git push origin v0.1.0
 #
 # Or run manually from the Actions tab via `workflow_dispatch`,
-# supplying a tag like `v0.1.0-rc1`. Manual runs publish as a
-# *draft* release so you can sanity-check the assets before
-# making them public.
+# supplying a tag like `v0.1.0-rc.1`. The build derives the app version
+# from that tag, and manual runs publish as a *draft* release so you can
+# sanity-check the correctly-versioned assets before making them public.
 #
 # Code-signing is intentionally disabled here. Both the macOS and
 # Windows installers ship unsigned — users get the usual
@@ -26,7 +26,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag name (e.g. v0.1.0-rc1) — published as a draft release'
+        description: 'Tag name (e.g. v0.1.0-rc.1) — used as the app version and published as a draft release'
         required: true
 
 permissions:
@@ -61,6 +61,31 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+
+      # Keep the packaged app, installer filenames, update metadata, and
+      # GitHub Release on one version. For tag pushes this is normally a
+      # no-op relative to the release commit; workflow_dispatch builds need
+      # the temporary rewrite because they do not create a version commit.
+      - name: Set app version from release tag
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const path = 'apps/desktop/package.json';
+          const tag = process.env.RELEASE_TAG ?? '';
+          const version = tag.startsWith('v') ? tag.slice(1) : '';
+          const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+          if (!semver.test(version)) {
+            console.error(`Release tag must be valid semver prefixed with v: ${tag}`);
+            process.exit(1);
+          }
+          const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
+          pkg.version = version;
+          fs.writeFileSync(path, `${JSON.stringify(pkg, null, 2)}\n`);
+          console.log(`Desktop version: ${version}`);
+          NODE
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

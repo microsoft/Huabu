@@ -58,7 +58,7 @@ Then watch GitHub Actions → workflow **"Release"** for the `v0.3.0` build; whe
 
 ## Pre-release (draft) builds
 
-To vet installers before going public, don't use this skill — run the **"Release"** workflow manually (`workflow_dispatch`) from the Actions tab with a tag like `v0.3.0-rc1`. Manual runs publish a **draft** release you can inspect before making it public.
+To vet installers before going public, don't use this skill — run the **"Release"** workflow manually (`workflow_dispatch`) from the Actions tab with a tag like `v0.3.0-rc.1`. The workflow derives the temporary desktop app version from this tag, so installer filenames, update metadata, and the app itself use `0.3.0-rc.1` without requiring a version commit. Manual runs publish a **draft** release you can inspect before making it public.
 
 ## Notes
 

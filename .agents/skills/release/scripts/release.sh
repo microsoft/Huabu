@@ -132,8 +132,8 @@ macOS + Windows installers and publishes a GitHub Release. This script does not
 await that build — follow it in the Actions tab (workflow "Release").
 
 For a pre-release you want to vet before going public, skip this script and run
-the "Release" workflow manually (workflow_dispatch) with a tag like v0.3.0-rc1 —
-it publishes a *draft* release instead.
+the "Release" workflow manually (workflow_dispatch) with a tag like v0.3.0-rc.1.
+It derives the app version from the tag and publishes a *draft* release instead.
 
 Examples:
   release.sh status
