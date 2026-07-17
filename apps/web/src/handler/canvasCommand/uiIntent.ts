@@ -254,6 +254,11 @@ export interface UiIntentResolution {
   /** Trace entries to record for this intent. */
   trace: RecentAction[];
   /**
+   * UI-only request to begin editing a node after its commands execute.
+   * The store maps this to the node type's editing surface.
+   */
+  editNodeId?: string;
+  /**
    * UI-only state mutation that bypasses the command pipeline.
    *
    * Used for view-state toggles (currently only the expand-overlay) that

@@ -203,6 +203,11 @@ export default function resolveAddNodes(
         nodes: created.map((item) => item.node),
       },
     ],
+    ...(created.length === 1 &&
+    (created[0].traceNode.type === 'note' ||
+      created[0].traceNode.type === 'text')
+      ? { editNodeId: created[0].traceNode.id }
+      : {}),
     trace: [
       {
         action: 'node_created',

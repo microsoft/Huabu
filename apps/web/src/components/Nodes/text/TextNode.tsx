@@ -1,5 +1,5 @@
 import { Bold, Italic, Underline, Strikethrough } from 'lucide-react';
-import { memo, useCallback, useState, useRef, useMemo } from 'react';
+import { memo, useCallback, useEffect, useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { resolveAccent } from '@sediment/shared';
@@ -38,6 +38,12 @@ export const TextNode = memo(
   ({ id, data, selected, width }: NodeProps<TextNodeType>) => {
     const { t } = useTranslation();
     const updateNodeData = useCanvasStore((state) => state.updateNodeData);
+    const inlineEditRequested = useCanvasStore(
+      (state) => state.pendingInlineEditNodeId === id,
+    );
+    const consumeInlineEditRequest = useCanvasStore(
+      (state) => state.consumeInlineEditRequest,
+    );
     const [isEditing, setIsEditing] = useState(false);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -73,10 +79,7 @@ export const TextNode = memo(
     const accentTokens = accent ? getAccentTokens(accent) : null;
     const textColor = accentTokens?.fg ?? undefined;
 
-    const fontOpts = useMemo(
-      () => getTextNodeFontOpts(style),
-      [style.fontFamily, style.fontWeight, style.fontStyle],
-    );
+    const fontOpts = getTextNodeFontOpts(style);
 
     const borderInset = style.accent ? ACCENT_BORDER : 0;
 
@@ -99,6 +102,24 @@ export const TextNode = memo(
     // ------------------------------------------------------------------
     // Editing handlers
     // ------------------------------------------------------------------
+    // Single focus path: whenever inline editing begins — no matter the
+    // trigger (double-click or a post-create request) — focus the
+    // textarea. Running in a committed effect guarantees the textarea is
+    // mounted, so this is deterministic where a fixed `setTimeout` focus
+    // delay was merely a race that usually won.
+    useEffect(() => {
+      if (isEditing) textareaRef.current?.focus();
+    }, [isEditing]);
+
+    // Post-create: a freshly created text node requests direct inline
+    // editing. Enter editing (the focus effect above does the focus) and
+    // consume the one-shot request.
+    useEffect(() => {
+      if (!inlineEditRequested) return;
+      setIsEditing(true);
+      consumeInlineEditRequest(id);
+    }, [consumeInlineEditRequest, id, inlineEditRequested]);
+
     const toggleDecoration = (value: string) => {
       let current = textDecoration.split(' ').filter(Boolean);
       if (current.includes(value)) {
@@ -112,7 +133,6 @@ export const TextNode = memo(
     const handleDoubleClick = useCallback((e: React.MouseEvent) => {
       e.stopPropagation();
       setIsEditing(true);
-      setTimeout(() => textareaRef.current?.focus(), 50);
     }, []);
 
     const handleBlur = useCallback(() => {
