@@ -6,12 +6,16 @@
 <p align="center"><strong>Where you and your agents think together.</strong></p>
 
 <p align="center">
+	<img src="assets/huabu-collaboration.svg" alt="A blue human and three colorful agents organizing connected materials together in a shared Space" width="800" />
+</p>
+
+<p align="center">
 	<a href="https://microsoft.github.io/Huabu/docs/">User Handbook</a> ·
 	<a href="https://github.com/microsoft/Huabu/releases/latest">Download</a> ·
 	<a href="https://github.com/microsoft/Huabu/issues">Feedback</a>
 </p>
 
-Huabu is a spatial workspace for thinking with AI. It keeps ideas and AI work persistent, visible, and connected, so collaboration can continue across sessions instead of disappearing into isolated chat threads.
+Huabu gives you an infinite work surface where you and your agents think together. Bring ideas, files, open questions, and agents into one living surface, where they stay visible and connected across sessions—and turn clearer thinking into work that ships.
 
 ## Core Features
 

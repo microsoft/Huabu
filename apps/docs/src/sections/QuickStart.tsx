@@ -103,6 +103,14 @@ export default function QuickStart() {
           your Space.
         </li>
         <li>
+          <strong>Keep useful AI results</strong> — drag a useful block from a
+          Chat reply into your Space, where it becomes its own node. See{' '}
+          <DocLink href="/docs/work-in-a-space#drag-content-into-the-space">
+            Drag content into the Space
+          </DocLink>
+          .
+        </li>
+        <li>
           <strong>Upload or Link</strong> — from the toolbar, choose{' '}
           <strong>Upload Files</strong> to add a PDF or image, or{' '}
           <strong>Add Links</strong> to bring in a web page.

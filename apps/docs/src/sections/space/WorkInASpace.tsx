@@ -17,8 +17,8 @@ import { NODE_ICON } from '../../config/nodeIcons';
 const toc: TocEntry[] = [
   { id: 'understand-the-space', label: 'Understand the Space' },
   { id: 'navigate-and-select', label: 'Navigate and select' },
+  { id: 'drag-content-into-the-space', label: 'Drag content into the Space' },
   { id: 'use-the-toolbar', label: 'Use the toolbar' },
-  { id: 'move-content-by-dragging', label: 'Move content by dragging' },
   { id: 'choose-the-right-node', label: 'Choose the right node' },
   { id: 'build-structure', label: 'Build structure' },
   { id: 'open-view-and-edit', label: 'Open, view, and edit' },
@@ -85,45 +85,7 @@ export default function WorkInASpace() {
         move it without adding it to or removing it from that Frame.
       </Callout>
 
-      <H2>Use the toolbar</H2>
-      <P>
-        The toolbar is the main place to choose how you interact with the Space
-        and what you want to add. Select a creation tool, then click or drag in
-        the Space to place the new node. Press <Shortcut combo="Esc" /> to
-        cancel a placement tool.
-      </P>
-      <Table
-        headers={['Group', 'Tools', 'What they do']}
-        rows={[
-          [
-            'Navigate',
-            'Select (S), Pan (P), Lasso (L)',
-            'Select and move nodes, move the viewport, or draw a freehand selection.',
-          ],
-          [
-            'Create',
-            'Note (1), Text (2), Frame (3), Sketch (4)',
-            'Create your own writing, labels, groups, and drawings.',
-          ],
-          [
-            'Import',
-            'Upload Files, Add Links',
-            'Bring images, PDFs, videos, HTML files, and web links into the Space.',
-          ],
-          [
-            'AI',
-            'Agent (A)',
-            'Place an Agent node and start an AI conversation beside the relevant material.',
-          ],
-        ]}
-      />
-      <P>
-        You can also drag files from your computer onto the Space, paste files,
-        URLs, images, or text, and copy existing nodes. Huabu creates the
-        matching node type and places it near the pointer.
-      </P>
-
-      <H2>Move content by dragging</H2>
+      <H2>Drag content into the Space</H2>
       <P>
         Content can flow directly from your computer and other sources into the
         Space and your writing. Drop a local file or a useful block or excerpt
@@ -132,6 +94,12 @@ export default function WorkInASpace() {
         appropriate format, so you do not need to import, copy, create a
         destination, and paste in separate steps.
       </P>
+      <DocImage
+        src="/docs/work-in-a-space/chat-to-space.svg"
+        alt="A highlighted excerpt from one reply in a Chat session being dragged into a dotted Space, where the same excerpt becomes a new independent material node"
+        caption="Select a useful excerpt from a reply and drag that block into the Space. The excerpt becomes its own node, ready to arrange and connect with the rest of your work."
+        className="mx-auto max-w-4xl"
+      />
       <Table
         headers={['Drag from', 'Drop on empty space', 'Drop into a Note']}
         rows={[
@@ -170,6 +138,44 @@ export default function WorkInASpace() {
         or <strong>Ctrl</strong> on Windows / Linux while dragging to copy it
         instead.
       </Callout>
+
+      <H2>Use the toolbar</H2>
+      <P>
+        The toolbar is the main place to choose how you interact with the Space
+        and what you want to add. Select a creation tool, then click or drag in
+        the Space to place the new node. Press <Shortcut combo="Esc" /> to
+        cancel a placement tool.
+      </P>
+      <Table
+        headers={['Group', 'Tools', 'What they do']}
+        rows={[
+          [
+            'Navigate',
+            'Select (S), Pan (P), Lasso (L)',
+            'Select and move nodes, move the viewport, or draw a freehand selection.',
+          ],
+          [
+            'Create',
+            'Note (1), Text (2), Frame (3), Sketch (4)',
+            'Create your own writing, labels, groups, and drawings.',
+          ],
+          [
+            'Import',
+            'Upload Files, Add Links',
+            'Bring images, PDFs, videos, HTML files, and web links into the Space.',
+          ],
+          [
+            'AI',
+            'Agent (A)',
+            'Place an Agent node and start an AI conversation beside the relevant material.',
+          ],
+        ]}
+      />
+      <P>
+        You can also drag files from your computer onto the Space, paste files,
+        URLs, images, or text, and copy existing nodes. Huabu creates the
+        matching node type and places it near the pointer.
+      </P>
 
       <H2>Choose the right node</H2>
       <Table

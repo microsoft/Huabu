@@ -100,6 +100,6 @@ This project may contain trademarks or logos for projects, products, or services
 
 ## CONTACT
 
-This research was conducted by members of [Microsoft Research](https://www.microsoft.com/en-us/research/). We welcome feedback and collaboration from our audience. If you have suggestions, questions, or observe unexpected/offensive behavior in our technology, please contact us at nanchen@microsoft.com.
+This research was conducted by members of [Microsoft Research](https://www.microsoft.com/en-us/research/). We welcome feedback and collaboration from our audience. If you have suggestions, questions, or observe unexpected/offensive behavior in our technology, please contact us at huabu@microsoft.com.
 
 If the team receives reports of undesired behavior or identifies issues independently, we will update this repository with appropriate mitigations.

@@ -11,10 +11,10 @@
  *   scrolling.
  */
 
+import { useEffect, type ReactNode } from 'react';
+
 import { H1, P } from './Heading';
 import { Toc, type TocEntry } from './Toc';
-
-import type { ReactNode } from 'react';
 
 type PageLayoutProps = {
   title: string;
@@ -30,6 +30,20 @@ export function PageLayout({
   toc,
   children,
 }: PageLayoutProps) {
+  useEffect(() => {
+    const rawHash = window.location.hash.slice(1);
+    if (!rawHash) return;
+
+    let id = rawHash;
+    try {
+      id = decodeURIComponent(rawHash);
+    } catch {
+      // Keep the raw hash if it isn't valid percent-encoding.
+    }
+
+    document.getElementById(id)?.scrollIntoView({ block: 'start' });
+  }, []);
+
   return (
     // Horizontal padding comes from `DocsLayout`'s gutter variables
     // so every page lines up identically against the sidebar and
