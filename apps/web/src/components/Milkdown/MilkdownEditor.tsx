@@ -25,6 +25,7 @@
 import { useEffect, useRef } from 'react';
 
 import {
+  cloneArtifactToCanvas,
   resolveArtifactUrl,
   uploadImage as uploadImageApi,
 } from '@/api/artifact';
@@ -161,6 +162,14 @@ export function MilkdownEditor(props: MilkdownEditorProps): JSX.Element {
           const id = canvasIdRef.current;
           if (!id) throw new Error('No Space bound for image upload');
           return uploadImageApi(file, id);
+        },
+        importImage: async ({ src, srcCanvasId }) => {
+          const id = canvasIdRef.current;
+          if (!id) throw new Error('No Space bound for image import');
+          if (!srcCanvasId) return src;
+          const imported = await cloneArtifactToCanvas(srcCanvasId, src, id);
+          if (!imported) throw new Error('Image artifact is missing');
+          return imported;
         },
       });
 

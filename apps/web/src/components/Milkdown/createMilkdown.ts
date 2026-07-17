@@ -45,6 +45,7 @@ import { fingerprintMarkdownKeys } from '@sediment/shared/canvas-engine';
 import { toast } from '@/components/Common/Toast';
 import { getAccentTokens } from '@/components/Nodes/accentTokens';
 import { fingerprintBlocks, type BlockSnapshot } from '@/utils/blockProvenance';
+import { parseSedimentImageClipboard } from '@/utils/io/clipboard';
 
 import { normalizeMathDelimiters } from './markdownUtils';
 
@@ -179,6 +180,15 @@ export interface MilkdownFactoryOptions {
    * runs. Errors are surfaced by the factory via a toast.
    */
   uploadImage?: (file: File) => Promise<string>;
+  /**
+   * Import an image referenced by a copied canvas node and resolve to the
+   * artifact key that belongs in this editor's canvas. The host owns
+   * cross-canvas cloning because the factory has no canvas API dependency.
+   */
+  importImage?: (image: {
+    src: string;
+    srcCanvasId?: string;
+  }) => Promise<string>;
   /**
    * Drag-only preview mode (chat AI messages, etc.). Default `false`.
    *
@@ -322,6 +332,8 @@ export interface MilkdownInstance {
    * `NodeSelection` on mousedown.
    */
   getMultiBlockSelectionRange(): MilkdownDragRange | null;
+  /** Resolve the enclosing drag-block range for a DOM node inside the editor. */
+  getDragRangeAtDOM(target: globalThis.Node): MilkdownDragRange | null;
   /**
    * Resolve the drag payload (markdown + block DOMs).
    *
@@ -1480,6 +1492,7 @@ export async function createMilkdown(
     toolbarMode = 'sediment',
     previewMode = false,
     uploadImage,
+    importImage,
   } = options;
   const resolveImageSrc = options.resolveImageSrc ?? ((src: string) => src);
   const useReactToolbar = !previewMode && toolbarMode === 'sediment';
@@ -1771,6 +1784,114 @@ export async function createMilkdown(
         }),
     ),
   );
+
+  // Canvas-node clipboard paste. Canvas copy writes node metadata as
+  // `text/plain`; without this handler ProseMirror inserts that JSON as text.
+  // Only image-only selections are claimed (see the strict parser), while
+  // ordinary text and mixed node selections retain the default paste path.
+  if (importImage) {
+    const importKey = new PluginKey<DecorationSet>(
+      'sediment-canvas-image-import',
+    );
+
+    crepe.editor.use(
+      $prose(
+        () =>
+          new Plugin<DecorationSet>({
+            key: importKey,
+            state: {
+              init: () => DecorationSet.empty,
+              apply: (tr, set) => {
+                let next = set.map(tr.mapping, tr.doc);
+                const meta = tr.getMeta(importKey) as
+                  | { add?: Decoration; remove?: object }
+                  | undefined;
+                if (meta?.add) next = next.add(tr.doc, [meta.add]);
+                if (meta?.remove) {
+                  const id = meta.remove;
+                  next = next.remove(
+                    next.find(
+                      undefined,
+                      undefined,
+                      (spec) => (spec as { id?: object }).id === id,
+                    ),
+                  );
+                }
+                return next;
+              },
+            },
+            props: {
+              decorations: (state) => importKey.getState(state),
+              handleDOMEvents: {
+                paste: (view, event) => {
+                  const clipboardEvent = event as ClipboardEvent;
+                  const clipboard = parseSedimentImageClipboard(
+                    clipboardEvent.clipboardData?.getData('text/plain'),
+                  );
+                  if (!clipboard) return false;
+
+                  clipboardEvent.preventDefault();
+                  void (async () => {
+                    let anchor = view.state.selection.from;
+                    for (const image of clipboard.images) {
+                      const id = {};
+                      const widget = document.createElement('span');
+                      widget.className = 'milkdown-image-uploading';
+                      widget.textContent = 'Importing image…';
+                      const decoration = Decoration.widget(anchor, widget, {
+                        id,
+                      });
+                      view.dispatch(
+                        view.state.tr.setMeta(importKey, { add: decoration }),
+                      );
+
+                      try {
+                        const src = await importImage({
+                          src: image.src,
+                          ...(clipboard.srcCanvasId
+                            ? { srcCanvasId: clipboard.srcCanvasId }
+                            : {}),
+                        });
+                        const set = importKey.getState(view.state);
+                        const placeholder = set?.find(
+                          undefined,
+                          undefined,
+                          (spec) => (spec as { id?: object }).id === id,
+                        )[0];
+                        const pos = placeholder?.from ?? anchor;
+                        const imageType = view.state.schema.nodes.image;
+                        const tr = view.state.tr.setMeta(importKey, {
+                          remove: id,
+                        });
+                        if (imageType) {
+                          const node = imageType.create({
+                            src,
+                            alt: image.label ?? '',
+                          });
+                          tr.insert(pos, node);
+                          anchor = pos + node.nodeSize;
+                        }
+                        view.dispatch(tr.scrollIntoView());
+                      } catch (err) {
+                        view.dispatch(
+                          view.state.tr.setMeta(importKey, { remove: id }),
+                        );
+                        toast('Failed to paste image', { tone: 'danger' });
+                        console.error(
+                          '[milkdown] canvas image import failed',
+                          err,
+                        );
+                      }
+                    }
+                  })();
+                  return true;
+                },
+              },
+            },
+          }),
+      ),
+    );
+  }
 
   // Paste / drop image upload. Only wired when an `uploadImage` uploader
   // is supplied (editable note surfaces). Pasted or dropped image files
@@ -2389,6 +2510,32 @@ export async function createMilkdown(
         // `$from` is always before `$to` in a PM selection, so the
         // earliest start and latest end form the union range.
         result = { from: fromBlockStart, to: toBlockEnd };
+      });
+      return result;
+    },
+    getDragRangeAtDOM: (target) => {
+      let result: MilkdownDragRange | null = null;
+      crepe.editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        if (!view.dom.contains(target)) return;
+
+        let pos: number;
+        try {
+          pos = view.posAtDOM(target, 0);
+        } catch {
+          return;
+        }
+
+        const resolved = view.state.doc.resolve(
+          Math.max(0, Math.min(pos, view.state.doc.content.size)),
+        );
+        const depth = findDragBlockDepth(resolved);
+        if (depth === null) return;
+
+        result = {
+          from: resolved.before(depth),
+          to: resolved.after(depth),
+        };
       });
       return result;
     },

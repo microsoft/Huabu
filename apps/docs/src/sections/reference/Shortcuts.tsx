@@ -146,6 +146,14 @@ export default function Shortcuts() {
       />
 
       <Callout tone="info">
+        When the cursor is inside an editable <strong>Note</strong>, pasting
+        copied Image nodes inserts them as image blocks at the cursor instead of
+        duplicating them on the Space. Image-only multi-selections are
+        supported; copy Image nodes separately from other node types for this
+        workflow.
+      </Callout>
+
+      <Callout tone="info">
         Shortcuts adapt to your platform automatically — the modifier shows up
         as <Kbd>Cmd</Kbd> on macOS and <Kbd>Ctrl</Kbd> on Windows / Linux.
       </Callout>

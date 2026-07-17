@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   createMilkdown,
@@ -15,6 +15,10 @@ let roots: HTMLElement[] = [];
 async function mount(
   markdown: string,
   resolveImageSrc?: (src: string) => string,
+  importImage?: (image: {
+    src: string;
+    srcCanvasId?: string;
+  }) => Promise<string>,
 ): Promise<{ instance: MilkdownInstance; root: HTMLElement }> {
   const root = document.createElement('div');
   document.body.appendChild(root);
@@ -24,6 +28,7 @@ async function mount(
     initialMarkdown: markdown,
     toolbarMode: 'none',
     resolveImageSrc,
+    importImage,
   });
   instances.push(instance);
   return { instance, root };
@@ -122,5 +127,68 @@ describe('image src resolution (nodeView)', () => {
     // resolution happens only at the DOM boundary.
     expect(instance.getMarkdown()).toContain('art_abc.png');
     expect(instance.getMarkdown()).not.toContain('https://cdn.test');
+  });
+
+  it('resolves a direct image drag as a removable note block', async () => {
+    const { instance, root } = await mount(
+      'before\n\n![alt text](art_abc.png)\n\nafter',
+    );
+
+    const img = root.querySelector('img');
+    expect(img).not.toBeNull();
+
+    const range = instance.getDragRangeAtDOM(img as HTMLImageElement);
+    const payload = instance.getDragPayload(range);
+
+    expect(payload?.markdown).toContain('![alt text](art_abc.png)');
+    const sourceContentAfterMove = instance.getDocAfterRangeRemoved(
+      payload?.range ?? null,
+    );
+    expect(sourceContentAfterMove).toContain('before');
+    expect(sourceContentAfterMove).toContain('after');
+    expect(sourceContentAfterMove).not.toContain('art_abc.png');
+  });
+
+  it('pastes a copied canvas image as an image block instead of JSON', async () => {
+    const importImage = vi.fn(async () => 'artifact-cloned.png');
+    const { instance, root } = await mount('', undefined, importImage);
+    const clipboardData = new DataTransfer();
+    clipboardData.setData(
+      'text/plain',
+      JSON.stringify({
+        __sediment_nodes__: [
+          {
+            id: 'node-image',
+            type: 'image',
+            data: {
+              type: 'image',
+              src: 'artifact-source.png',
+              label: 'Huabu collaboration banner',
+            },
+          },
+        ],
+        __sediment_edges__: [],
+        __sediment_canvas_id__: 'canvas-source',
+      }),
+    );
+
+    root.querySelector('.ProseMirror')?.dispatchEvent(
+      new ClipboardEvent('paste', {
+        bubbles: true,
+        cancelable: true,
+        clipboardData,
+      }),
+    );
+
+    await vi.waitFor(() => {
+      expect(instance.getMarkdown()).toContain(
+        '![Huabu collaboration banner](artifact-cloned.png)',
+      );
+    });
+    expect(instance.getMarkdown()).not.toContain('__sediment_nodes__');
+    expect(importImage).toHaveBeenCalledWith({
+      src: 'artifact-source.png',
+      srcCanvasId: 'canvas-source',
+    });
   });
 });

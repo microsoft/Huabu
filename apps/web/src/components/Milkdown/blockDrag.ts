@@ -159,6 +159,8 @@ export interface AttachBlockDragOptions {
  * Install the capture-phase mousedown + bubble-phase dragstart + dragend
  * handlers required to support dragging Crepe blocks out of the editor
  * onto an arbitrary HTML5 drop target (in our case: the canvas surface).
+ * Both block-handle drags and native drags started directly on an image
+ * are normalized to the same block payload.
  *
  * The capture-phase mousedown fires BEFORE Crepe's BlockService
  * bubble-phase handler. When the user already has a multi-block text
@@ -237,12 +239,16 @@ export function attachBlockDragListeners(
 
     const target = event.target as HTMLElement | null;
     const handle = target?.closest('.milkdown-block-handle');
-    if (!handle) return;
+    const image = target?.closest('.ProseMirror img');
+    if (!handle && !image) return;
 
-    const snapshot = priorSelection ?? instance.getMultiBlockSelectionRange();
+    const snapshot = handle
+      ? (priorSelection ?? instance.getMultiBlockSelectionRange())
+      : instance.getDragRangeAtDOM(image as HTMLElement);
     // Clear immediately so a subsequent single-block drag isn't
     // accidentally treated as multi-block.
     priorSelection = null;
+    if (!handle && !snapshot) return;
 
     const payload = instance.getDragPayload(snapshot);
     if (!payload) return;
