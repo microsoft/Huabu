@@ -322,6 +322,8 @@ export interface MilkdownInstance {
    * `NodeSelection` on mousedown.
    */
   getMultiBlockSelectionRange(): MilkdownDragRange | null;
+  /** Resolve the enclosing drag-block range for a DOM node inside the editor. */
+  getDragRangeAtDOM(target: globalThis.Node): MilkdownDragRange | null;
   /**
    * Resolve the drag payload (markdown + block DOMs).
    *
@@ -2389,6 +2391,32 @@ export async function createMilkdown(
         // `$from` is always before `$to` in a PM selection, so the
         // earliest start and latest end form the union range.
         result = { from: fromBlockStart, to: toBlockEnd };
+      });
+      return result;
+    },
+    getDragRangeAtDOM: (target) => {
+      let result: MilkdownDragRange | null = null;
+      crepe.editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        if (!view.dom.contains(target)) return;
+
+        let pos: number;
+        try {
+          pos = view.posAtDOM(target, 0);
+        } catch {
+          return;
+        }
+
+        const resolved = view.state.doc.resolve(
+          Math.max(0, Math.min(pos, view.state.doc.content.size)),
+        );
+        const depth = findDragBlockDepth(resolved);
+        if (depth === null) return;
+
+        result = {
+          from: resolved.before(depth),
+          to: resolved.after(depth),
+        };
       });
       return result;
     },

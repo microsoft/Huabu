@@ -123,4 +123,24 @@ describe('image src resolution (nodeView)', () => {
     expect(instance.getMarkdown()).toContain('art_abc.png');
     expect(instance.getMarkdown()).not.toContain('https://cdn.test');
   });
+
+  it('resolves a direct image drag as a removable note block', async () => {
+    const { instance, root } = await mount(
+      'before\n\n![alt text](art_abc.png)\n\nafter',
+    );
+
+    const img = root.querySelector('img');
+    expect(img).not.toBeNull();
+
+    const range = instance.getDragRangeAtDOM(img as HTMLImageElement);
+    const payload = instance.getDragPayload(range);
+
+    expect(payload?.markdown).toContain('![alt text](art_abc.png)');
+    const sourceContentAfterMove = instance.getDocAfterRangeRemoved(
+      payload?.range ?? null,
+    );
+    expect(sourceContentAfterMove).toContain('before');
+    expect(sourceContentAfterMove).toContain('after');
+    expect(sourceContentAfterMove).not.toContain('art_abc.png');
+  });
 });
