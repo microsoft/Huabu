@@ -29,6 +29,18 @@ vi.mock('../../utils/logger.js', () => ({
   getLogger: () => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn() }),
 }));
 
+// Spy on the canvas-dir index so the delete-cleanup prune step on re-arm is
+// observable (it refreshes the index and enumerates live canvas ids).
+const canvasDirs = vi.hoisted(() => ({
+  refresh: vi.fn(),
+  list: vi.fn<() => Array<{ id: string }>>(() => []),
+}));
+
+vi.mock('../storage/canvas-dirs.js', () => ({
+  refreshCanvasDirIndex: canvasDirs.refresh,
+  listCanvasDirEntries: () => canvasDirs.list(),
+}));
+
 /** Build a fresh fake FSWatcher whose `.on(...)` chain is a no-op. */
 function makeFakeWatcher() {
   const w = {
@@ -128,5 +140,21 @@ describe('runWithExternalNoteWatcherSuspended', () => {
     // Outer bracket exited → exactly one close and one re-arm for the pair.
     expect(first.close).toHaveBeenCalledTimes(1);
     expect(watchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('refreshes the dir index and enumerates live canvases before re-arming', async () => {
+    // Guards the delete-cleanup prune: a canvas whose subtree is removed
+    // while suspended emits no `unlink`, so on re-arm the bracket must
+    // refresh the index and query the surviving ids to drop stale pending
+    // state. (pendingByCanvas is module-private, so we assert the prune
+    // step runs rather than its effect on a seeded entry.)
+    await resetExternalNoteWatcher(); // arms watcher #1
+    canvasDirs.refresh.mockClear();
+    canvasDirs.list.mockClear();
+
+    await runWithExternalNoteWatcherSuspended(async () => undefined);
+
+    expect(canvasDirs.refresh).toHaveBeenCalledTimes(1);
+    expect(canvasDirs.list).toHaveBeenCalledTimes(1);
   });
 });

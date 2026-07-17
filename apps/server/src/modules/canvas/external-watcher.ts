@@ -211,6 +211,18 @@ export async function runWithExternalNoteWatcherSuspended<T>(
     suspendDepth--;
     if (suspendDepth === 0 && armAfterResume) {
       armAfterResume = false;
+      // Prune pending entries for canvases that no longer exist. While the
+      // watcher was suspended we observed no `unlink` events, so a canvas
+      // deleted during the bracket (its whole subtree `rmSync`'d) would
+      // otherwise leave its `pendingByCanvas` map permanently stale — a
+      // small leak, and `snapshotExternalNotes` never revisits a deleted
+      // canvasId to clear it lazily. Keyed by `canvasId`, so a rename
+      // (which changes only the directory name, not the id) is unaffected.
+      refreshCanvasDirIndex();
+      const liveCanvasIds = new Set(listCanvasDirEntries().map((e) => e.id));
+      for (const id of pendingByCanvas.keys()) {
+        if (!liveCanvasIds.has(id)) pendingByCanvas.delete(id);
+      }
       armWatcher();
     }
   }
