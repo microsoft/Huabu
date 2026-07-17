@@ -4,11 +4,27 @@
 import { fileURLToPath, URL } from 'node:url';
 
 import react from '@vitejs/plugin-react';
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 
 import { normalizeBasePath } from './src/normalizeBasePath';
 
-export default defineConfig(({ isSsrBuild }) => {
+const previewDirectoryIndexes = {
+  name: 'preview-directory-indexes',
+  configurePreviewServer(server) {
+    server.middlewares.use((request, _response, next) => {
+      if (request.url) {
+        const url = new URL(request.url, 'http://preview.local');
+        if (url.pathname.endsWith('/')) {
+          url.pathname += 'index.html';
+          request.url = `${url.pathname}${url.search}`;
+        }
+      }
+      next();
+    });
+  },
+} satisfies Plugin;
+
+export default defineConfig(({ isPreview, isSsrBuild }) => {
   const parsedDocsPort = Number.parseInt(process.env.DOCS_PORT || '', 10);
   const docsPort =
     Number.isFinite(parsedDocsPort) && parsedDocsPort > 0
@@ -16,8 +32,9 @@ export default defineConfig(({ isSsrBuild }) => {
       : 43127;
 
   return {
+    appType: isPreview ? 'mpa' : 'spa',
     base: normalizeBasePath(process.env.DOCS_BASE_PATH),
-    plugins: [react()],
+    plugins: [previewDirectoryIndexes, react()],
     resolve: {
       alias: {
         '@': fileURLToPath(new URL('./src', import.meta.url)),
