@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Huabu Handbook
+    url: https://microsoft.github.io/Huabu/docs/
+    about: Read the user handbook before reporting a usage question.

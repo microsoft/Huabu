@@ -1,25 +1,23 @@
-# TODO: The maintainer of this repo has not yet edited this file
-
-**REPO OWNER**: Do you want Customer Service & Support (CSS) support for this product/project?
-
-- **No CSS support:** Fill out this template with information about how to file issues and get help.
-- **Yes CSS support:** Fill out an intake form at [aka.ms/onboardsupport](https://aka.ms/onboardsupport). CSS will work with/help you to determine next steps.
-- **Not sure?** Fill out an intake as though the answer were "Yes". CSS will help you decide.
-
-*Then remove this first heading from this SUPPORT.MD file before publishing your repo.*
-
 # Support
 
-## How to file issues and get help  
+## How to get help
 
-This project uses GitHub Issues to track bugs and feature requests. Please search the existing 
-issues before filing new issues to avoid duplicates.  For new issues, file your bug or 
-feature request as a new Issue.
+Community support is available through the [Huabu GitHub issue tracker](https://github.com/microsoft/Huabu/issues) on a best-effort basis.
 
-For help and questions about using this project, please **REPO MAINTAINER: INSERT INSTRUCTIONS HERE 
-FOR HOW TO ENGAGE REPO OWNERS OR COMMUNITY FOR HELP. COULD BE A STACK OVERFLOW TAG OR OTHER
-CHANNEL. WHERE WILL YOU HELP PEOPLE?**.
+Before opening an issue:
 
-## Microsoft Support Policy  
+1. Update Huabu to the latest available version and confirm that the problem still occurs.
+2. Search [existing issues](https://github.com/microsoft/Huabu/issues) to avoid duplicates.
+3. Follow the [Report an Issue guide](https://microsoft.github.io/Huabu/docs/reference/issues) to collect reproduction steps, system information, and relevant screenshots or logs.
 
-Support for this **PROJECT or PRODUCT** is limited to the resources listed above.
+If an existing issue describes the same problem, add any new details there instead of opening a duplicate. Otherwise, [create a new issue](https://github.com/microsoft/Huabu/issues/new/choose).
+
+Never include API keys, access tokens, private documents, personal information, or other sensitive data in a public issue. Review and redact screenshots and logs before uploading them.
+
+## Security issues
+
+Do not report security vulnerabilities through public GitHub issues. Follow the instructions in [SECURITY.md](SECURITY.md) instead.
+
+## Microsoft Support Policy
+
+Support for Huabu is limited to the community resources listed above.
