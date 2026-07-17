@@ -254,8 +254,9 @@ export function executeCanvasCommands(
   // not found" on the client. This is the single funnel every command
   // batch passes through, so normalizing HERE lets individual commands stop
   // maintaining the invariant themselves. `normalizeTreeOrder` is idempotent
-  // and returns unchanged node refs when order/zIndex already hold, so the
-  // common (already-ordered) batch pays only an O(n log n) verification.
+  // and returns the same array reference when order/zIndex already hold, so
+  // the common (already-ordered) batch pays only an O(n) fast-path check
+  // (no sort, no remap, no allocation).
   // ------------------------------------------------------------------
   if (anyApplied) {
     currentNodes = normalizeTreeOrder(currentNodes as NestableNode[]);
