@@ -6,6 +6,10 @@
 <p align="center"><strong>Where you and your agents think together.</strong></p>
 
 <p align="center">
+	<img src="assets/huabu-collaboration.svg" alt="A blue human and three colorful agents organizing connected materials together in a shared Space" width="800" />
+</p>
+
+<p align="center">
 	<a href="https://microsoft.github.io/Huabu/docs/">User Handbook</a> ·
 	<a href="https://github.com/microsoft/Huabu/releases/latest">Download</a> ·
 	<a href="https://github.com/microsoft/Huabu/issues">Feedback</a>

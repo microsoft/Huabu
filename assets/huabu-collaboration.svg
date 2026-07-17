@@ -1,0 +1,283 @@
+<!--
+  Copyright (c) Microsoft Corporation.
+  Licensed under the MIT license.
+-->
+<svg
+  width="960"
+  height="300"
+  viewBox="0 0 960 300"
+  fill="none"
+  xmlns="http://www.w3.org/2000/svg"
+>
+  <title>A human and three agents collaborating in a Huabu Space</title>
+  <desc>
+    A blue human and three colorful agents arrange connected materials together
+    on a shared spatial canvas.
+  </desc>
+  <defs>
+    <pattern
+      id="canvas-dots"
+      width="18"
+      height="18"
+      patternUnits="userSpaceOnUse"
+    >
+      <circle cx="1" cy="1" r="1" fill="#BDB6A9" opacity="0.42" />
+    </pattern>
+  </defs>
+  <rect
+    x="1"
+    y="1"
+    width="958"
+    height="298"
+    rx="24"
+    fill="#F6F3EC"
+    stroke="#D8D3C8"
+    stroke-width="2"
+  />
+
+  <g aria-label="Shared Space canvas">
+    <rect
+      x="228"
+      y="27"
+      width="504"
+      height="246"
+      rx="16"
+      fill="#EEE9DD"
+      stroke="#CFC9BD"
+      stroke-width="2"
+    />
+    <rect
+      x="228"
+      y="27"
+      width="504"
+      height="246"
+      rx="16"
+      fill="url(#canvas-dots)"
+    />
+
+    <path
+      d="M337 102C383 84 424 91 456 123"
+      stroke="#F25022"
+      stroke-width="2.5"
+      stroke-linecap="round"
+      stroke-dasharray="3 7"
+      opacity="0.58"
+    />
+    <path
+      d="M502 140C545 126 572 119 611 128"
+      stroke="#FFB900"
+      stroke-width="2.5"
+      stroke-linecap="round"
+      stroke-dasharray="3 7"
+      opacity="0.68"
+    />
+    <path
+      d="M482 158C477 184 492 200 528 214"
+      stroke="#7FBA00"
+      stroke-width="2.5"
+      stroke-linecap="round"
+      stroke-dasharray="3 7"
+      opacity="0.58"
+    />
+    <path
+      d="M337 123C356 158 372 184 404 204"
+      stroke="#00A4EF"
+      stroke-width="2.5"
+      stroke-linecap="round"
+      stroke-dasharray="3 7"
+      opacity="0.58"
+    />
+
+    <g transform="rotate(-4 292 110)">
+      <rect
+        x="254"
+        y="79"
+        width="83"
+        height="61"
+        rx="6"
+        fill="#FFFDF8"
+        stroke="#CFC9BD"
+        stroke-width="2"
+      />
+      <circle cx="273" cy="98" r="8" fill="#00A4EF" opacity="0.78" />
+      <path
+        d="M289 96H320M269 116H319M269 127H304"
+        stroke="#706B62"
+        stroke-width="3"
+        stroke-linecap="round"
+        opacity="0.62"
+      />
+    </g>
+    <g transform="rotate(3 469 139)">
+      <rect
+        x="428"
+        y="111"
+        width="82"
+        height="57"
+        rx="6"
+        fill="#FFFDF8"
+        stroke="#CFC9BD"
+        stroke-width="2"
+      />
+      <path
+        d="M443 127H480M443 139H478M443 151H487"
+        stroke="#706B62"
+        stroke-width="3"
+        stroke-linecap="round"
+        opacity="0.62"
+      />
+      <path d="M494 120L502 128L494 136L486 128L494 120Z" fill="#F25022" />
+    </g>
+    <g transform="rotate(-3 623 131)">
+      <rect
+        x="578"
+        y="99"
+        width="90"
+        height="64"
+        rx="6"
+        fill="#FFFDF8"
+        stroke="#CFC9BD"
+        stroke-width="2"
+      />
+      <rect
+        x="592"
+        y="112"
+        width="26"
+        height="21"
+        rx="3"
+        fill="#FFB900"
+        opacity="0.78"
+      />
+      <path
+        d="M627 116H653M627 127H647M592 146H653"
+        stroke="#706B62"
+        stroke-width="3"
+        stroke-linecap="round"
+        opacity="0.62"
+      />
+    </g>
+    <g transform="rotate(4 426 209)">
+      <rect
+        x="383"
+        y="184"
+        width="86"
+        height="50"
+        rx="6"
+        fill="#FFFDF8"
+        stroke="#CFC9BD"
+        stroke-width="2"
+      />
+      <path
+        d="M397 199H454M397 211H439M397 222H448"
+        stroke="#706B62"
+        stroke-width="3"
+        stroke-linecap="round"
+        opacity="0.62"
+      />
+    </g>
+    <g transform="rotate(-2 559 214)">
+      <rect
+        x="516"
+        y="188"
+        width="86"
+        height="52"
+        rx="6"
+        fill="#FFFDF8"
+        stroke="#CFC9BD"
+        stroke-width="2"
+      />
+      <path
+        d="M531 202H586M531 214H576M531 226H581"
+        stroke="#706B62"
+        stroke-width="3"
+        stroke-linecap="round"
+        opacity="0.68"
+      />
+    </g>
+  </g>
+
+  <path
+    d="M188 150C207 150 214 150 228 150"
+    stroke="#00A4EF"
+    stroke-width="3"
+    stroke-linecap="round"
+    stroke-dasharray="3 8"
+    opacity="0.7"
+  />
+  <path
+    d="M732 83C750 76 765 67 789 58"
+    stroke="#F25022"
+    stroke-width="3"
+    stroke-linecap="round"
+    stroke-dasharray="3 8"
+    opacity="0.7"
+  />
+  <path
+    d="M732 150H789"
+    stroke="#FFB900"
+    stroke-width="3"
+    stroke-linecap="round"
+    stroke-dasharray="3 8"
+    opacity="0.78"
+  />
+  <path
+    d="M732 217C750 225 765 234 789 242"
+    stroke="#7FBA00"
+    stroke-width="3"
+    stroke-linecap="round"
+    stroke-dasharray="3 8"
+    opacity="0.7"
+  />
+
+  <g aria-label="Human" transform="translate(137 150)">
+    <circle r="51" fill="#00A4EF" />
+    <path
+      d="M-17-13C-18-8-18-4-17 0M17-14C16-9 16-4 17 0M0 5C-7 15-8 22 1 27"
+      stroke="#24221E"
+      stroke-width="6"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+  </g>
+
+  <g aria-label="Agents">
+    <g transform="translate(824 58) scale(0.82)">
+      <path d="M0-43L43 0L0 43L-43 0L0-43Z" fill="#F25022" />
+      <path
+        d="M-14-10L-16 2M15-11L14 1M7 14C0 15-2 24 6 26C14 27 17 20 12 15"
+        stroke="#24221E"
+        stroke-width="5.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </g>
+    <g transform="translate(824 150) scale(0.82)">
+      <path
+        d="M0-43L14-15L43 0L14 15L0 43L-14 15L-43 0L-14-15L0-43Z"
+        fill="#FFB900"
+      />
+      <path
+        d="M-14-9L-15 2M15-10L14 1M-7 14C-1 20 7 20 13 14"
+        stroke="#24221E"
+        stroke-width="5.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </g>
+    <g transform="translate(824 242) scale(0.82)">
+      <circle cx="0" cy="-22" r="19.5" fill="#7FBA00" />
+      <circle cx="20.9" cy="-6.8" r="19.5" fill="#7FBA00" />
+      <circle cx="12.9" cy="17.8" r="19.5" fill="#7FBA00" />
+      <circle cx="-12.9" cy="17.8" r="19.5" fill="#7FBA00" />
+      <circle cx="-20.9" cy="-6.8" r="19.5" fill="#7FBA00" />
+      <circle r="20" fill="#7FBA00" />
+      <path
+        d="M-13-9L-15 2M15-8L13 3M-8 13C-2 19 6 20 12 14"
+        stroke="#24221E"
+        stroke-width="5.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </g>
+  </g>
+</svg>

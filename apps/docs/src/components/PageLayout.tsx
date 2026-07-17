@@ -14,7 +14,7 @@
 import { H1, P } from './Heading';
 import { Toc, type TocEntry } from './Toc';
 
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 
 type PageLayoutProps = {
   title: string;
@@ -30,6 +30,13 @@ export function PageLayout({
   toc,
   children,
 }: PageLayoutProps) {
+  useEffect(() => {
+    const id = decodeURIComponent(window.location.hash.slice(1));
+    if (!id) return;
+
+    document.getElementById(id)?.scrollIntoView({ block: 'start' });
+  }, []);
+
   return (
     // Horizontal padding comes from `DocsLayout`'s gutter variables
     // so every page lines up identically against the sidebar and
