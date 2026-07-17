@@ -1,6 +1,5 @@
 import { noop, type CommandDefinition } from './types.js';
 import { createId, type CanvasCommand } from '../../index.js';
-import { normalizeTreeOrder, type NestableNode } from '../frame/index.js';
 import { deduplicateLabel, generateNextLabel } from '../utils/labels.js';
 import {
   getNodeCreationStyle,
@@ -135,16 +134,17 @@ const createNodes: CommandDefinition<Cmd> = {
     }
 
     // ---------------------------------------------------------------
-    // 4. Normalize tree order.
+    // 4. Concatenate the new nodes.
     //
     // User-created ordinary nodes become the active selection. Agent/system
     // creates, and question nodes, preserve the previous selection because
     // they should not steal focus from the user's current canvas context.
+    //
+    // Tree order (parents before children, frame-child zIndex) is repaired
+    // by the executor's single end-of-batch `normalizeTreeOrder` pass, so
+    // this handler no longer normalizes itself.
     // ---------------------------------------------------------------
-    const orderedNodes = normalizeTreeOrder([
-      ...state.nodes,
-      ...newNodes,
-    ] as NestableNode[]);
+    const orderedNodes = [...state.nodes, ...newNodes];
     const selectableCreatedNodeIds =
       state.source === 'ui'
         ? newNodes.filter((n) => n.type !== 'question').map((n) => n.id)

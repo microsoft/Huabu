@@ -28,6 +28,7 @@ import {
 } from './canvas-executor.js';
 import { searchCanvas } from './canvas-search.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
+import { runWithExternalNoteWatcherSuspended } from './external-watcher.js';
 import { MAX_UPLOAD_BYTES } from '../../upload-limits.js';
 import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
 import { getPreprocessDispatcher, getProfile } from '../preprocessing/index.js';
@@ -554,7 +555,12 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     Reply: ApiResult<DeleteCanvasResponse>;
   }>('/:canvasId', async function (request, reply) {
     const { canvasId } = request.params;
-    const deleted = deleteCanvas(canvasId);
+    // Suspend the external-note watcher across the directory delete: on
+    // Windows a live `fs.watch` handle inside the canvas subtree makes
+    // `rmSync` fail with EPERM (same root cause as the rename path).
+    const deleted = await runWithExternalNoteWatcherSuspended(() =>
+      deleteCanvas(canvasId),
+    );
 
     if (!deleted) {
       return reply.code(404).send({ message: 'Canvas not found' });
@@ -1089,7 +1095,12 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     const previousTitle = existing?.title ?? null;
     const nextTitle = title ?? previousTitle;
     if (typeof title === 'string' && title !== previousTitle) {
-      const renameResult = store.renameSelf(title);
+      // Suspend the external-note watcher across the directory rename: on
+      // Windows a live `fs.watch` handle inside the canvas subtree makes
+      // `renameSync` fail with EPERM (see `runWithExternalNoteWatcherSuspended`).
+      const renameResult = await runWithExternalNoteWatcherSuspended(() =>
+        store.renameSelf(title),
+      );
       if (!renameResult.ok && renameResult.reason === 'conflict') {
         return reply.code(409).send({
           code: 'CANVAS_TITLE_CONFLICT',

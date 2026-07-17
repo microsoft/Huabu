@@ -62,6 +62,40 @@ export function normalizeTreeOrder(nodes: NestableNode[]): NestableNode[] {
   const byId = indexById(nodes);
   const originalIndex = new Map(nodes.map((n, i) => [n.id, i] as const));
 
+  // Fast path: if the array already satisfies every invariant this function
+  // enforces, return it untouched. The executor runs `normalizeTreeOrder`
+  // once per applied batch regardless of whether structure actually changed
+  // (the `anyApplied` gate can't cheaply know), so the overwhelmingly common
+  // "already valid" case must be O(n) with zero allocation — no `normalized`
+  // remap, no second index, no sort, no result array. Invariants checked:
+  //   1. every `parentId` resolves to a present node (no dangling link);
+  //   2. each parent appears strictly before its child in the array;
+  //   3. frame children carry `zIndex === -1`, and top-level non-frame nodes
+  //      do NOT carry the frame `zIndex`.
+  // Any violation (or a cycle, which makes rule 2 unsatisfiable) falls
+  // through to the full repair pass below.
+  let alreadyValid = true;
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
+    if (!n.parentId) {
+      if (n.type !== 'frame' && n.zIndex === -1) {
+        alreadyValid = false;
+        break;
+      }
+      continue;
+    }
+    const parentIndex = originalIndex.get(n.parentId);
+    if (parentIndex === undefined || parentIndex >= i) {
+      alreadyValid = false;
+      break;
+    }
+    if (byId.get(n.parentId)?.type === 'frame' && n.zIndex !== -1) {
+      alreadyValid = false;
+      break;
+    }
+  }
+  if (alreadyValid) return nodes;
+
   // Drop dangling parent links to avoid runtime errors and ensure frame
   // children share the same zIndex as their parent frame.
   const normalized = nodes.map((n) => {
@@ -114,8 +148,13 @@ export function normalizeTreeOrder(nodes: NestableNode[]): NestableNode[] {
     if (node.parentId) visit(node.parentId);
     visiting.delete(id);
 
+    // A cycle broken during the recursion above already pushed this node
+    // (as a parent-stripped copy) and marked it visited. Re-check here so
+    // we never emit it twice, and re-read `normalizedById` so we push the
+    // canonical (possibly rewritten) node rather than the stale capture.
+    if (visited.has(id)) return;
     visited.add(id);
-    result.push(node);
+    result.push(normalizedById.get(id) ?? node);
   };
 
   // Stable-ish order: iterate by original index.

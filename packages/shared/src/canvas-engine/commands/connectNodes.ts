@@ -38,6 +38,12 @@ const connectNodes: CommandDefinition<Cmd> = {
       const target = edgeInput.target as string;
       const id = (edgeInput.id as string | undefined) ?? createId('edge');
 
+      // Skip self-loops (an edge whose source and target are the same
+      // node). Self-connections carry no meaning here and are awkward to
+      // select/delete, so we drop them silently as a no-op rather than
+      // failing the whole command.
+      if (source === target) continue;
+
       // Skip duplicate edges (same behavior as RF addEdge). A duplicate
       // is a legitimate no-op, not a failure — the command still applies.
       const exists = nextEdges.some(

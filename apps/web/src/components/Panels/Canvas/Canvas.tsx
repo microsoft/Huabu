@@ -6,6 +6,8 @@ import {
   ConnectionMode,
   SelectionMode,
   type ReactFlowInstance,
+  type Connection,
+  type Edge,
   Panel,
 } from '@xyflow/react';
 import clsx from 'clsx';
@@ -312,6 +314,15 @@ export const Canvas: React.FC<CanvasProps> = ({
     if (tool !== 'select') return;
     selectNodes(nodes.filter((n) => n.selected).map((n) => n.id));
   }, [nodes, selectNodes, tool]);
+
+  // Reject self-connections (an edge whose source and target are the same
+  // node). React Flow uses this both to show the in-progress connection
+  // line as invalid and to suppress the `onConnect` callback, so a
+  // self-loop can never be created by dragging onto the node's own handle.
+  const isValidConnection = useCallback(
+    (connection: Connection | Edge) => connection.source !== connection.target,
+    [],
+  );
 
   // When a connection drag ends without landing on a handle, check if the
   // pointer is over a node element and create the connection anyway.
@@ -907,6 +918,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onConnectEnd={onConnectEnd}
+        isValidConnection={isValidConnection}
         connectionMode={ConnectionMode.Loose}
         onNodeDragStart={onNodeDragStart}
         onNodeDrag={onNodeDrag}

@@ -69,7 +69,16 @@ export default defineConfig([
       console.log(`[tsup] copied prompt templates -> ${dst}`);
       const agentTeamsSrc = path.resolve('../../agent-teams');
       const agentTeamsDst = path.resolve('dist-bundle/agent-teams');
-      cpSync(agentTeamsSrc, agentTeamsDst, { recursive: true });
+      // `deepv-slides-maker` is dev-only and must not ship in production
+      // installers. Skip its subtree (and anything under it) while copying
+      // the rest of the bundled Agent Team templates.
+      const excludedTeamDir = path.join(agentTeamsSrc, 'deepv-slides-maker');
+      cpSync(agentTeamsSrc, agentTeamsDst, {
+        recursive: true,
+        filter: (source) =>
+          source !== excludedTeamDir &&
+          !source.startsWith(excludedTeamDir + path.sep),
+      });
       console.log(`[tsup] copied bundled Agent Teams -> ${agentTeamsDst}`);
       // @resvg/resvg-wasm — copied next to server.js so the
       // snapshot_nodes tool's bundle-layout fallback finds it via

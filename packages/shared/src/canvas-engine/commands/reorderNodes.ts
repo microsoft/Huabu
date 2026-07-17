@@ -1,5 +1,4 @@
 import { noop, type CommandDefinition } from './types.js';
-import { normalizeTreeOrder, type NestableNode } from '../frame/index.js';
 
 import type { CanvasCommand } from '../../index.js';
 import type { Node } from '@xyflow/react';
@@ -56,8 +55,10 @@ const reorderNodes: CommandDefinition<Cmd> = {
       }
     }
 
-    reordered = normalizeTreeOrder(reordered as NestableNode[]);
-
+    // Array order IS the reorder result; the executor runs a single
+    // end-of-batch `normalizeTreeOrder` pass that repairs parent-before-
+    // child order (and frame-child zIndex) using this array's order as the
+    // stable sort key, so no per-command normalization is needed here.
     return {
       applied: true,
       nodes: reordered,

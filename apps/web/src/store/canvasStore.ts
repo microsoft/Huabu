@@ -28,6 +28,7 @@ import {
   readFrameGridConfig,
   describeStructuredDropZone,
   getNodeSize,
+  normalizeTreeOrder,
   type AlignDirection,
   type Delta,
   type NestableNode,
@@ -1371,8 +1372,17 @@ const useCanvasStore = create<RFState>()(
       // `applySharedPostEffectsFromWriteResult` before computing the
       // diff, so any reroute is folded into the delta payload.
 
+      // Re-establish the parent-before-child + frame-child zIndex invariant.
+      // `applyDeltas` replays coarse deltas through an insertion-ordered
+      // `Map`, so a reparent (REPLACE_NODE keeps the child's old slot) or a
+      // frame created in the same batch (INSERT_NODE appended last) can leave
+      // a child ahead of its parent — React Flow then throws "Parent node not
+      // found". This delta-replay path bypasses the server executor entirely,
+      // so we normalize here at the client state-producer boundary.
+      const orderedNodes = normalizeTreeOrder(applied.nodes as NestableNode[]);
+
       get()._setStateNoAutosave({
-        nodes: applied.nodes as Node[],
+        nodes: orderedNodes as Node[],
         edges: applied.edges as Edge[],
         version: toVersion,
       });
@@ -1593,7 +1603,16 @@ const useCanvasStore = create<RFState>()(
         // mid-conversation. Nodes that own a `threadId` always have a
         // persisted conversation, so a stale status is demoted to
         // `done` here, restoring the badge + reopen affordance.
-        const loadedNodes = reconcileQuestionStatus(state.nodes ?? []);
+        // Normalize tree order on load: persisted topology is not
+        // guaranteed to list every parent frame ahead of its children
+        // (older writes, or a delta-authored save), and a child ahead of
+        // its parent makes React Flow throw "Parent node not found" on the
+        // first mount. This is a defensive boundary guard on untrusted
+        // on-disk state — see the same invariant enforced in
+        // `applyDeltasFromAgent`.
+        const loadedNodes = normalizeTreeOrder(
+          reconcileQuestionStatus(state.nodes ?? []) as NestableNode[],
+        ) as Node[];
         const loadedEdges = state.edges ?? [];
         // Prefer this client's persistent UI state; fall back to whatever the
         // server still has from before viewport was moved client-side.

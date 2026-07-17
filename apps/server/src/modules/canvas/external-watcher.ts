@@ -113,17 +113,13 @@ function handleUnlink(absPath: string): void {
 }
 
 /**
- * Stop the current watcher (if any), drop pending state, and re-arm it
- * against the currently active workspace. Safe to call multiple times.
- * Listeners are preserved so reconnected clients keep their streams.
+ * Build and wire a chokidar watcher against the active workspace, storing
+ * it in the module-level `watcher`. Pending state is left untouched so the
+ * caller decides whether a fresh scan should clear it (workspace switch) or
+ * preserve it (resume after a self-write suspension). No-op when no
+ * workspace is configured.
  */
-export async function resetExternalNoteWatcher(): Promise<void> {
-  if (watcher) {
-    await watcher.close().catch(() => undefined);
-    watcher = null;
-  }
-  pendingByCanvas.clear();
-
+function armWatcher(): void {
   if (!isWorkspaceConfigured()) return;
   const ws = getWorkspacePath();
   // chokidar v5 removed glob support, so watch the workspace root and
@@ -150,6 +146,86 @@ export async function resetExternalNoteWatcher(): Promise<void> {
         'external note watcher error (ignored)',
       );
     });
+}
+
+/**
+ * Stop the current watcher (if any), drop pending state, and re-arm it
+ * against the currently active workspace. Safe to call multiple times.
+ * Listeners are preserved so reconnected clients keep their streams.
+ */
+export async function resetExternalNoteWatcher(): Promise<void> {
+  if (watcher) {
+    await watcher.close().catch(() => undefined);
+    watcher = null;
+  }
+  pendingByCanvas.clear();
+  armWatcher();
+}
+
+// ── Self-write suspension ────────────────────────────────────────────────
+//
+// On Windows a live `fs.watch` handle anywhere inside a canvas subtree
+// (the canvas dir itself OR its `nodes/` child) makes `renameSync` /
+// `rmSync` of that directory fail with EPERM — the handle is persistent,
+// so retries never win and `unwatch(subpath)` does not release it. The
+// only fix is to fully `close()` the single workspace watcher for the
+// duration of a server-owned directory rename/delete, then re-arm it.
+//
+// The server is the sole legitimate writer of these directories, so
+// suspending our own observer around our own write is safe. A depth
+// counter lets concurrent/nested suspensions (e.g. a rename racing a
+// delete) share one close/re-arm cycle instead of thrashing.
+let suspendDepth = 0;
+let armAfterResume = false;
+
+/**
+ * Run `fn` with the external-note watcher suspended, then re-arm it.
+ *
+ * Use this to bracket any server-initiated rename or delete of a canvas
+ * directory so the live watch handle cannot block the filesystem
+ * operation on Windows. Re-arming preserves `pendingByCanvas`: external
+ * notes are keyed by `canvasId` + `relativePath` (`nodes/<file>.md`),
+ * neither of which a directory rename changes, and the `handleAdd`
+ * dedupe guard suppresses duplicate `added` emits during the re-scan —
+ * so the client's external-note list does not flicker.
+ *
+ * A no-op passthrough when the watcher is not currently running (e.g.
+ * no workspace configured, or a test harness), so it never spins up a
+ * watcher that was intentionally absent.
+ */
+export async function runWithExternalNoteWatcherSuspended<T>(
+  fn: () => T | Promise<T>,
+): Promise<T> {
+  if (suspendDepth === 0) {
+    // Only re-arm on exit if a watcher was actually running on entry.
+    armAfterResume = watcher !== null;
+    if (watcher) {
+      await watcher.close().catch(() => undefined);
+      watcher = null;
+    }
+  }
+  suspendDepth++;
+  try {
+    return await fn();
+  } finally {
+    suspendDepth--;
+    if (suspendDepth === 0 && armAfterResume) {
+      armAfterResume = false;
+      // Prune pending entries for canvases that no longer exist. While the
+      // watcher was suspended we observed no `unlink` events, so a canvas
+      // deleted during the bracket (its whole subtree `rmSync`'d) would
+      // otherwise leave its `pendingByCanvas` map permanently stale — a
+      // small leak, and `snapshotExternalNotes` never revisits a deleted
+      // canvasId to clear it lazily. Keyed by `canvasId`, so a rename
+      // (which changes only the directory name, not the id) is unaffected.
+      refreshCanvasDirIndex();
+      const liveCanvasIds = new Set(listCanvasDirEntries().map((e) => e.id));
+      for (const id of pendingByCanvas.keys()) {
+        if (!liveCanvasIds.has(id)) pendingByCanvas.delete(id);
+      }
+      armWatcher();
+    }
+  }
 }
 
 export function snapshotExternalNotes(canvasId: string): ExternalNoteItem[] {
