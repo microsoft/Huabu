@@ -2,3 +2,4 @@
 **/node_modules/
 **/.ssr/
 **/*.tsbuildinfo
+pnpm-lock.yaml
