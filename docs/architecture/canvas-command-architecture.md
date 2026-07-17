@@ -26,13 +26,13 @@ selection.
 
 `CanvasUiIntent` must not be shared with the agent because it depends on ephemeral frontend state.
 
-### Design Rules
+### UI intent design rules
 
 Resolvers:
 
 1. Read UI-only state (selection, clipboard, drag context, viewport, hit-testing).
 2. Resolve ambiguous gestures into explicit operands.
-3. Return `UiIntentResolution { commands, trace }`.
+3. Return `UiIntentResolution { commands, trace, ...uiEffects }`.
 4. Never mutate canvas state directly.
 
 Resolvers must not:
@@ -42,11 +42,17 @@ Resolvers must not:
 3. Trigger ingestion or label resolution
 4. Apply state mutations
 
-### Implementation
+### UI intent implementation
 
 Types and resolvers: `apps/web/src/handler/canvasCommand/uiIntent.ts` + `apps/web/src/handler/canvasCommand/resolvers/`.
 
 22 intent types: 8 composite gestures (need selection/clipboard/drag/viewport resolution) + 14 direct-mapping intents (thin wrappers to `CanvasCommand`). See `uiIntent.ts` for the full union.
+
+### Post-create editing
+
+`UiIntentResolution.editNodeId` is a transient web-only request applied after the resolved commands commit successfully. `ADD_NODES` sets it when one `note` or `text` node is created: a note opens in the expanded view and focuses its editor, while a text node enters inline editing and focuses its textarea. Batch creation leaves it unset because there is no unambiguous editor target.
+
+The request never enters `CanvasCommand`, persisted node data, or deltas. Agent execution, SSE application, delta replay, and rejected create commands therefore cannot open a view or steal focus.
 
 Composite intent examples:
 
@@ -62,7 +68,7 @@ Composite intent examples:
 
 `CanvasCommand` is the shared executable command schema. It is the only command type the executor accepts. Both web and agent converge to this schema.
 
-### Design Rules
+### Command design rules
 
 `CanvasCommand` is the smallest shared executable domain instruction (not the smallest state diff). A command may own deterministic domain behavior inside execution:
 
@@ -132,7 +138,7 @@ Node ids use `node-<uuid>`, edge ids use `edge-<uuid>`.
 4. If any command changes state, take one undo snapshot and commit once.
 5. Run post-commit effects.
 
-### Implementation
+### Execution implementation
 
 The engine is shared, in `packages/shared/src/canvas-engine/`:
 
@@ -194,3 +200,14 @@ The web client receives the server's deltas (via tool-result + SSE broadcast) an
 ### IntentAction Convergence
 
 The parallel `IntentAction` union has been removed from `packages/shared/src/types/intent.ts`. That module now only contains intent _recognition_ types (`IntentCandidate`, `IntentEpisode`, `IntentRequest`, `IntentResponse`).
+
+## Code entry points
+
+| File                                                                                                                                       | Responsibility                                                                        |
+| ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
+| [`apps/web/src/handler/canvasCommand/uiIntent.ts`](../../apps/web/src/handler/canvasCommand/uiIntent.ts)                                   | Web-only intent and resolution contracts, including transient UI effects.             |
+| [`apps/web/src/handler/canvasCommand/resolvers/resolveAddNodes.ts`](../../apps/web/src/handler/canvasCommand/resolvers/resolveAddNodes.ts) | Materialize user-created nodes and choose an unambiguous post-create edit target.     |
+| [`apps/web/src/store/canvasStore.ts`](../../apps/web/src/store/canvasStore.ts)                                                             | Execute resolved commands and map post-create editing to expanded or inline UI state. |
+| [`apps/web/src/components/Nodes/note/NotePreview.tsx`](../../apps/web/src/components/Nodes/note/NotePreview.tsx)                           | Focus the editable note surface when expanded-view focus is requested.                |
+| [`apps/web/src/components/Nodes/text/TextNode.tsx`](../../apps/web/src/components/Nodes/text/TextNode.tsx)                                 | Consume inline-edit requests and focus the text textarea.                             |
+| [`packages/shared/src/canvas-engine/executor.ts`](../../packages/shared/src/canvas-engine/executor.ts)                                     | Execute host-agnostic canvas commands without web UI state.                           |

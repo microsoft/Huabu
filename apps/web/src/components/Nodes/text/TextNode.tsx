@@ -1,5 +1,5 @@
 import { Bold, Italic, Underline, Strikethrough } from 'lucide-react';
-import { memo, useCallback, useState, useRef, useMemo } from 'react';
+import { memo, useCallback, useEffect, useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { resolveAccent } from '@sediment/shared';
@@ -38,6 +38,12 @@ export const TextNode = memo(
   ({ id, data, selected, width }: NodeProps<TextNodeType>) => {
     const { t } = useTranslation();
     const updateNodeData = useCanvasStore((state) => state.updateNodeData);
+    const inlineEditRequested = useCanvasStore(
+      (state) => state.pendingInlineEditNodeId === id,
+    );
+    const consumeInlineEditRequest = useCanvasStore(
+      (state) => state.consumeInlineEditRequest,
+    );
     const [isEditing, setIsEditing] = useState(false);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -73,10 +79,7 @@ export const TextNode = memo(
     const accentTokens = accent ? getAccentTokens(accent) : null;
     const textColor = accentTokens?.fg ?? undefined;
 
-    const fontOpts = useMemo(
-      () => getTextNodeFontOpts(style),
-      [style.fontFamily, style.fontWeight, style.fontStyle],
-    );
+    const fontOpts = getTextNodeFontOpts(style);
 
     const borderInset = style.accent ? ACCENT_BORDER : 0;
 
@@ -99,6 +102,16 @@ export const TextNode = memo(
     // ------------------------------------------------------------------
     // Editing handlers
     // ------------------------------------------------------------------
+    useEffect(() => {
+      if (!inlineEditRequested) return;
+      if (!isEditing) {
+        setIsEditing(true);
+        return;
+      }
+      textareaRef.current?.focus();
+      consumeInlineEditRequest(id);
+    }, [consumeInlineEditRequest, id, inlineEditRequested, isEditing]);
+
     const toggleDecoration = (value: string) => {
       let current = textDecoration.split(' ').filter(Boolean);
       if (current.includes(value)) {

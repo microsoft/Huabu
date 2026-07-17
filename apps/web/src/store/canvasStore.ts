@@ -348,6 +348,9 @@ type RFState = {
   closeExpanded: () => void;
   setExpandMode: (mode: 'replace' | 'split') => void;
 
+  pendingInlineEditNodeId: string | null;
+  consumeInlineEditRequest: (nodeId: string) => void;
+
   collapsedFrameIds: Set<string>;
   toggleFrameCollapse: (frameId: string) => void;
   isFrameCollapsed: (frameId: string) => boolean;
@@ -1157,6 +1160,12 @@ const useCanvasStore = create<RFState>()(
     },
     setExpandMode: (mode) => set({ expandMode: mode }),
 
+    pendingInlineEditNodeId: null,
+    consumeInlineEditRequest: (nodeId) => {
+      if (get().pendingInlineEditNodeId !== nodeId) return;
+      set({ pendingInlineEditNodeId: null });
+    },
+
     collapsedFrameIds: new Set<string>(),
     toggleFrameCollapse: (frameId) => {
       const { collapsedFrameIds } = get();
@@ -1437,8 +1446,35 @@ const useCanvasStore = create<RFState>()(
         ...(viewportCenter ? { viewportCenter } : {}),
       };
       const execution = resolveUiIntent(intent, uiState);
+      const editNodeId = execution.editNodeId;
+      const editTargetAlreadyExists =
+        editNodeId !== undefined &&
+        uiState.nodes.some(({ id }) => id === editNodeId);
       if (execution.commands.length > 0) {
         get().executeCommands(execution.commands);
+      }
+      if (editNodeId !== undefined && !editTargetAlreadyExists) {
+        const node = get().nodes.find(({ id }) => id === editNodeId);
+        if (node?.type === 'note') {
+          const previousId = get().expandedNodeId;
+          if (previousId && previousId !== node.id) {
+            const previousNode = get().nodes.find(
+              ({ id }) => id === previousId,
+            );
+            if (
+              previousNode?.type === 'note' ||
+              previousNode?.type === 'text'
+            ) {
+              settleNodePreprocess(previousId);
+            }
+          }
+          set((state) => ({
+            expandedNodeId: node.id,
+            expandedNodeFocusTick: state.expandedNodeFocusTick + 1,
+          }));
+        } else if (node?.type === 'text') {
+          set({ pendingInlineEditNodeId: node.id });
+        }
       }
       // Apply UI-only state mutations (e.g. expand-overlay toggle) that
       // bypass the command pipeline.
@@ -1653,6 +1689,7 @@ const useCanvasStore = create<RFState>()(
       // or, for older canvases without one, runs a one-shot fitView.
       set({
         expandedNodeId: null,
+        pendingInlineEditNodeId: null,
         collapsedFrameIds: new Set(),
         canvasNotFound: false,
         viewport: null,
