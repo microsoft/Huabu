@@ -303,6 +303,15 @@ body,
   touch-action: none;
 }
 
+[data-canvas-root] {
+  -webkit-touch-callout: none;
+}
+
+[data-canvas-root]
+  :is(input, textarea, select, [contenteditable='true'], a[href]) {
+  -webkit-touch-callout: default;
+}
+
 /* React Flow controls panel — remove the default subtle shadow and round the
    corners so it blends with the app's soft surface aesthetic.
    Tailwind's preflight resets <button> backgrounds to transparent, so we also

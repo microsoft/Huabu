@@ -27,6 +27,15 @@ export type FrameFitPreviewRole = 'target' | 'source';
 export type FrameFitPreview = FrameFitResult & { role: FrameFitPreviewRole };
 
 type GesturePreviewState = {
+  /** Stroke ids hidden while an eraser gesture is still uncommitted. */
+  sketchErasePreview: Record<string, string[]>;
+
+  /** Replace the transient Sketch eraser preview. */
+  setSketchErasePreview: (preview: Record<string, string[]>) => void;
+
+  /** Restore all strokes when erasing commits or is cancelled. */
+  clearSketchErasePreview: () => void;
+
   /**
    * Previews of how frames would resize based on the current drag/resize.
    * One entry per affected frame — allows showing both the source frame
@@ -120,6 +129,9 @@ export type StructuredDropPreview = {
  * and avoids a circular import.
  */
 export const useGesturePreviewStore = create<GesturePreviewState>()((set) => ({
+  sketchErasePreview: {},
+  setSketchErasePreview: (sketchErasePreview) => set({ sketchErasePreview }),
+  clearSketchErasePreview: () => set({ sketchErasePreview: {} }),
   frameFitPreviews: [],
   setFrameFitPreviews: (previews) => set({ frameFitPreviews: previews }),
   clearFrameFitPreview: () => set({ frameFitPreviews: [] }),

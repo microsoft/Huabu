@@ -4,7 +4,19 @@ import { createId, resolveAccent } from '@sediment/shared';
 
 import { SKETCH_STROKE_MERGE_MAX_DISTANCE_SCREEN_PX } from '@/config/canvas';
 import { resolveFrameAtPoint } from '@/handler/canvasCommand/utils';
+import {
+  beginCanvasGesture,
+  canTouchTakeOverCanvasGesture,
+  endCanvasGesture,
+  updateCanvasGesture,
+  type CanvasPointerType,
+} from '@/handler/canvasGestureSession';
+import {
+  useEffectiveDeviceMode,
+  useEffectiveTouchInteractionMode,
+} from '@/hooks/useInputMode';
 import useCanvasStore from '@/store/canvasStore';
+import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 import { useToolStore } from '@/store/toolStore';
 
 import { findSketchStrokeHits } from './sketchHitTest';
@@ -31,6 +43,7 @@ import type { ReactFlowInstance } from '@xyflow/react';
  * preview vanishes one paint before the committed SketchNode renders.
  */
 const PREVIEW_CLEAR_DELAY_FRAMES = 2;
+export const CANCEL_SKETCH_GESTURE_EVENT = 'sediment:cancel-sketch-gesture';
 
 /**
  * Run `cb` after `frames` animation frames have elapsed. Used to defer
@@ -116,6 +129,8 @@ export function SketchOverlay({
   const addNode = useCanvasStore((s) => s.addNode);
   const selectNodes = useCanvasStore((s) => s.selectNodes);
   const sketchDraft = useToolStore((s) => s.sketchDraft);
+  const deviceMode = useEffectiveDeviceMode();
+  const touchInteractionMode = useEffectiveTouchInteractionMode();
 
   // Drop any prior canvas selection the moment the sketch tool
   // activates: the overlay swallows all pointer events so the user
@@ -158,6 +173,7 @@ export function SketchOverlay({
   // the first finger's coordinates being dragged around by the gesture and
   // leaving stray strokes behind.
   const activePointerIdRef = useRef<number | null>(null);
+  const eraseHitsRef = useRef<Map<string, Set<string>>>(new Map());
   // Middle-mouse pan state. The overlay sits on top of ReactFlow and
   // swallows all pointer events, so ReactFlow's built-in `panOnDrag={[1]}`
   // never sees a middle-mouse press. We re-implement that gesture here
@@ -176,6 +192,39 @@ export function SketchOverlay({
   const [eraserPos, setEraserPos] = useState<{ x: number; y: number } | null>(
     null,
   );
+
+  const acceptsPointer = useCallback(
+    (pointerType: string) => {
+      if (deviceMode === 'desktop' || pointerType === 'mouse') return true;
+      return touchInteractionMode === 'pen'
+        ? pointerType === 'pen'
+        : pointerType === 'touch';
+    },
+    [deviceMode, touchInteractionMode],
+  );
+
+  const cancelActiveGesture = useCallback(() => {
+    const pointerId = activePointerIdRef.current;
+    if (pointerId !== null) endCanvasGesture(pointerId);
+    activePointerIdRef.current = null;
+    screenPtsRef.current = [];
+    eraseHitsRef.current.clear();
+    useGesturePreviewStore.getState().clearSketchErasePreview();
+    clearTokenRef.current++;
+    setPoints([]);
+    setErasing(false);
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener(CANCEL_SKETCH_GESTURE_EVENT, cancelActiveGesture);
+    return () => {
+      window.removeEventListener(
+        CANCEL_SKETCH_GESTURE_EVENT,
+        cancelActiveGesture,
+      );
+      cancelActiveGesture();
+    };
+  }, [cancelActiveGesture]);
 
   /** Convert clientX/clientY to overlay-relative coordinates */
   const toLocal = useCallback((clientX: number, clientY: number) => {
@@ -261,12 +310,14 @@ export function SketchOverlay({
       // Only the primary button (left mouse / pen tip / first touch) draws.
       // Other buttons (right click etc.) fall through with no action.
       if (e.button !== 0 || !e.isPrimary) return;
+      if (!acceptsPointer(e.pointerType)) return;
       // Single-touch only: if another pointer is already drawing, treat
       // this as the second finger of a pinch-zoom / pan gesture. Abort the
       // in-progress stroke (release capture, drop preview) so the gesture
       // is handled cleanly by ReactFlow underneath instead of producing a
       // jittery line as the first finger gets dragged around.
       if (activePointerIdRef.current !== null) {
+        if (!canTouchTakeOverCanvasGesture()) return;
         try {
           e.currentTarget.releasePointerCapture(activePointerIdRef.current);
         } catch {
@@ -278,6 +329,16 @@ export function SketchOverlay({
         clearTokenRef.current++;
         return;
       }
+      if (
+        !beginCanvasGesture(
+          'sketch-draw',
+          e.pointerId,
+          e.pointerType as CanvasPointerType,
+          { x: e.clientX, y: e.clientY },
+        )
+      ) {
+        return;
+      }
       activePointerIdRef.current = e.pointerId;
       e.currentTarget.setPointerCapture(e.pointerId);
       // Invalidate any pending "clear preview" callback from the previous
@@ -287,14 +348,15 @@ export function SketchOverlay({
       screenPtsRef.current = [[e.clientX, e.clientY, e.pressure]];
       setPoints([[lx, ly, e.pressure]]);
     },
-    [toLocal, tryStartPan],
+    [acceptsPointer, toLocal, tryStartPan],
   );
 
   const handlePointerMove = useCallback(
     (e: React.PointerEvent) => {
       if (tryUpdatePan(e)) return;
       if (e.pointerId !== activePointerIdRef.current) return;
-      if (e.buttons !== 1) return;
+      if (e.pointerType === 'mouse' && e.buttons !== 1) return;
+      updateCanvasGesture(e.pointerId, { x: e.clientX, y: e.clientY });
       const { lx, ly } = toLocal(e.clientX, e.clientY);
       screenPtsRef.current = [
         ...screenPtsRef.current,
@@ -309,12 +371,21 @@ export function SketchOverlay({
     (e: React.PointerEvent) => {
       if (tryEndPan(e)) return;
       if (e.pointerId !== activePointerIdRef.current) return;
+      const phase = updateCanvasGesture(e.pointerId, {
+        x: e.clientX,
+        y: e.clientY,
+      });
       activePointerIdRef.current = null;
+      endCanvasGesture(e.pointerId);
       e.currentTarget.releasePointerCapture(e.pointerId);
-      const pts = screenPtsRef.current;
+      const lastPoint = screenPtsRef.current.at(-1);
+      const pts =
+        lastPoint && lastPoint[0] === e.clientX && lastPoint[1] === e.clientY
+          ? screenPtsRef.current
+          : [...screenPtsRef.current, [e.clientX, e.clientY, e.pressure]];
 
-      // Need at least a few points to form a meaningful stroke
-      if (pts.length < 3) {
+      // A tap or natural pointer jitter remains pending and creates no stroke.
+      if (phase !== 'locked' || pts.length < 3) {
         screenPtsRef.current = [];
         setPoints([]);
         return;
@@ -322,7 +393,8 @@ export function SketchOverlay({
 
       const result = processPoints(
         pts,
-        (pos) => rfInstance?.screenToFlowPosition(pos) ?? pos,
+        (pos) =>
+          rfInstance?.screenToFlowPosition(pos, { snapToGrid: false }) ?? pos,
         strokeSize,
       );
 
@@ -457,12 +529,15 @@ export function SketchOverlay({
     [rfInstance, addNode, strokeColor, strokeSize, zoom, tryEndPan],
   );
 
-  const eraseAtClient = useCallback(
+  const collectEraseHits = useCallback(
     (clientX: number, clientY: number) => {
-      const flow = rfInstance?.screenToFlowPosition({
-        x: clientX,
-        y: clientY,
-      });
+      const flow = rfInstance?.screenToFlowPosition(
+        {
+          x: clientX,
+          y: clientY,
+        },
+        { snapToGrid: false },
+      );
       if (!flow) return;
       // Per-stroke eraser: a swipe over a single stroke removes ONLY
       // that stroke, leaving the rest of the (possibly multi-stroke)
@@ -471,35 +546,50 @@ export function SketchOverlay({
       const hits = findSketchStrokeHits(flow.x, flow.y, eraserFlowRadius);
       if (hits.length === 0) return;
 
-      // Group hits by node so each node produces a single coherent
-      // pair of (MERGE_NODE_DATA, SET_NODE_GEOMETRY) commands rather
-      // than one per stroke.
-      const byNode = new Map<string, Set<string>>();
+      let changed = false;
       for (const h of hits) {
-        let set = byNode.get(h.nodeId);
+        let set = eraseHitsRef.current.get(h.nodeId);
         if (!set) {
           set = new Set();
-          byNode.set(h.nodeId, set);
+          eraseHitsRef.current.set(h.nodeId, set);
         }
+        const previousSize = set.size;
         set.add(h.strokeId);
+        changed ||= set.size !== previousSize;
       }
-
-      const commands: CanvasCommand[] = [];
-      for (const [nodeId, strokeIds] of byNode) {
-        commands.push(...buildEraseCommands(nodeId as CanvasNodeId, strokeIds));
+      if (changed) {
+        useGesturePreviewStore
+          .getState()
+          .setSketchErasePreview(
+            Object.fromEntries(
+              Array.from(eraseHitsRef.current, ([nodeId, strokeIds]) => [
+                nodeId,
+                Array.from(strokeIds),
+              ]),
+            ),
+          );
       }
-      if (commands.length === 0) return;
-
-      // SET_NODE_GEOMETRY uses snapshot:'caller'. If the brush only
-      // produced full deletes we don't need beginGesture, but it's
-      // cheap and harmless to call when there's any geometry change.
-      const hasGeometry = commands.some((c) => c.type === 'SET_NODE_GEOMETRY');
-      const store = useCanvasStore.getState();
-      if (hasGeometry) store.beginGesture('SET_NODE_GEOMETRY');
-      store.executeCommands(commands, 'ui');
     },
     [rfInstance, eraserFlowRadius],
   );
+
+  const commitEraseHits = useCallback(() => {
+    const hitsByNode = eraseHitsRef.current;
+    eraseHitsRef.current = new Map();
+    useGesturePreviewStore.getState().clearSketchErasePreview();
+    if (hitsByNode.size === 0) return;
+
+    const commands: CanvasCommand[] = [];
+    for (const [nodeId, strokeIds] of hitsByNode) {
+      commands.push(...buildEraseCommands(nodeId as CanvasNodeId, strokeIds));
+    }
+    if (commands.length === 0) return;
+
+    const hasGeometry = commands.some((c) => c.type === 'SET_NODE_GEOMETRY');
+    const store = useCanvasStore.getState();
+    if (hasGeometry) store.beginGesture('SET_NODE_GEOMETRY');
+    store.executeCommands(commands, 'ui');
+  }, []);
 
   const handleEraserPointerDown = useCallback(
     (e: React.PointerEvent) => {
@@ -507,26 +597,42 @@ export function SketchOverlay({
       if (tryStartPan(e)) return;
       // Only the primary button (left mouse / pen tip / first touch) erases.
       if (e.button !== 0 || !e.isPrimary) return;
+      if (!acceptsPointer(e.pointerType)) return;
       // Single-touch only: a second finger lands -> abort the eraser drag
       // and let the underlying canvas handle the pinch / pan gesture.
       if (activePointerIdRef.current !== null) {
+        if (!canTouchTakeOverCanvasGesture()) return;
         try {
           e.currentTarget.releasePointerCapture(activePointerIdRef.current);
         } catch {
           // Capture may already be lost; ignore.
         }
         activePointerIdRef.current = null;
+        eraseHitsRef.current.clear();
+        useGesturePreviewStore.getState().clearSketchErasePreview();
         setErasing(false);
         return;
       }
+      if (
+        !beginCanvasGesture(
+          'sketch-erase',
+          e.pointerId,
+          e.pointerType as CanvasPointerType,
+          { x: e.clientX, y: e.clientY },
+        )
+      ) {
+        return;
+      }
       activePointerIdRef.current = e.pointerId;
+      eraseHitsRef.current.clear();
+      useGesturePreviewStore.getState().clearSketchErasePreview();
       e.currentTarget.setPointerCapture(e.pointerId);
       setErasing(true);
       const { lx, ly } = toLocal(e.clientX, e.clientY);
       setEraserPos({ x: lx, y: ly });
-      eraseAtClient(e.clientX, e.clientY);
+      collectEraseHits(e.clientX, e.clientY);
     },
-    [toLocal, eraseAtClient, tryStartPan],
+    [acceptsPointer, collectEraseHits, toLocal, tryStartPan],
   );
 
   const handleEraserPointerMove = useCallback(
@@ -540,26 +646,50 @@ export function SketchOverlay({
       setEraserPos({ x: lx, y: ly });
       if (tryUpdatePan(e)) return;
       if (e.pointerId !== activePointerIdRef.current) return;
-      if (e.buttons !== 1) return;
-      eraseAtClient(e.clientX, e.clientY);
+      if (e.pointerType === 'mouse' && e.buttons !== 1) return;
+      updateCanvasGesture(e.pointerId, { x: e.clientX, y: e.clientY });
+      collectEraseHits(e.clientX, e.clientY);
     },
-    [toLocal, eraseAtClient, tryUpdatePan],
+    [collectEraseHits, toLocal, tryUpdatePan],
   );
 
   const handleEraserPointerUp = useCallback(
     (e: React.PointerEvent) => {
       if (tryEndPan(e)) return;
       if (e.pointerId !== activePointerIdRef.current) return;
+      const phase = updateCanvasGesture(e.pointerId, {
+        x: e.clientX,
+        y: e.clientY,
+      });
       activePointerIdRef.current = null;
+      endCanvasGesture(e.pointerId);
       e.currentTarget.releasePointerCapture(e.pointerId);
       setErasing(false);
+      if (phase === 'locked') {
+        collectEraseHits(e.clientX, e.clientY);
+        commitEraseHits();
+      } else {
+        eraseHitsRef.current.clear();
+        useGesturePreviewStore.getState().clearSketchErasePreview();
+      }
     },
-    [tryEndPan],
+    [collectEraseHits, commitEraseHits, tryEndPan],
   );
 
   const handleEraserPointerLeave = useCallback(() => {
     setEraserPos(null);
   }, []);
+
+  const handlePointerCancel = useCallback(
+    (e: React.PointerEvent) => {
+      if (e.pointerId !== activePointerIdRef.current) return;
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+      cancelActiveGesture();
+    },
+    [cancelActiveGesture],
+  );
 
   // Draw-mode cursor: a filled dot in the active stroke color sized to
   // match the on-screen stroke thickness (`strokeSize * zoom`, mirroring
@@ -607,7 +737,7 @@ export function SketchOverlay({
         onPointerDown={handleEraserPointerDown}
         onPointerMove={handleEraserPointerMove}
         onPointerUp={handleEraserPointerUp}
-        onPointerCancel={handleEraserPointerUp}
+        onPointerCancel={handlePointerCancel}
         onPointerLeave={handleEraserPointerLeave}
       >
         {eraserPos && (
@@ -635,7 +765,7 @@ export function SketchOverlay({
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
-      onPointerCancel={handlePointerUp}
+      onPointerCancel={handlePointerCancel}
     >
       <svg className="h-full w-full">
         {points.length > 0 && (

@@ -1,6 +1,53 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { useToolStore } from './toolStore';
+import {
+  resolveDeviceMode,
+  resolveTouchInteractionMode,
+  useToolStore,
+} from './toolStore';
+
+describe('toolStore input preferences', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    useToolStore.setState({
+      deviceModePreference: 'auto',
+      touchInteractionPreference: 'auto',
+      penObserved: false,
+    });
+  });
+
+  it('resolves automatic and explicit device preferences independently', () => {
+    expect(resolveDeviceMode('auto', false)).toBe('desktop');
+    expect(resolveDeviceMode('auto', true)).toBe('touch');
+    expect(resolveDeviceMode('desktop', true)).toBe('desktop');
+    expect(resolveDeviceMode('touch', false)).toBe('touch');
+  });
+
+  it('uses observed pen input only for automatic touch interaction', () => {
+    expect(resolveTouchInteractionMode('auto', false)).toBe('finger');
+    expect(resolveTouchInteractionMode('auto', true)).toBe('pen');
+    expect(resolveTouchInteractionMode('finger', true)).toBe('finger');
+    expect(resolveTouchInteractionMode('pen', false)).toBe('pen');
+  });
+
+  it('persists observed pen input without rewriting either preference', () => {
+    useToolStore.getState().setDeviceModePreference('touch');
+    useToolStore.getState().setTouchInteractionPreference('finger');
+    useToolStore.getState().observePen();
+
+    const state = useToolStore.getState();
+    expect(state.penObserved).toBe(true);
+    expect(state.deviceModePreference).toBe('touch');
+    expect(state.touchInteractionPreference).toBe('finger');
+
+    const stored = JSON.parse(
+      localStorage.getItem('sediment-sketch-tools') ?? '{}',
+    ) as { state?: Record<string, unknown> };
+    expect(stored.state?.penObserved).toBe(true);
+    expect(stored.state?.deviceModePreference).toBe('touch');
+    expect(stored.state?.touchInteractionPreference).toBe('finger');
+  });
+});
 
 describe('toolStore sketch size presets', () => {
   beforeEach(() => {

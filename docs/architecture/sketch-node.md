@@ -76,6 +76,8 @@ Desktop and touch input share `toolStore.sketchDraft` and the same mode/paramete
 
 `SketchModeSwitcher` owns the shared `draw` / `erase` store updates. Draw exposes three fixed-position color slots through `SketchColorPresetPicker`, and draw/erase each expose three fixed-position size slots through `SketchPresetPicker`. Each trio is transparent by default; color and size use the same subtle grey slot-level selected surface without an accent ring. Selecting a different slot applies it immediately; selecting the active slot opens the full palette or size slider to edit that slot. Size slots render only a short rounded stroke preview whose height represents the stored value. The preset values, active indices, and current `sketchDraft` preferences persist under the `sediment-sketch-tools` localStorage key through Zustand `persist`; transient `pendingNodeType` does not persist.
 
+During an eraser drag, each hit stroke is hidden immediately through `gesturePreviewStore` so the interaction has live visual feedback. The underlying node data is unchanged until pointer up, when all hits commit as one command batch and one undo gesture; cancelling or switching tools clears the preview and restores every uncommitted stroke.
+
 A selected Sketch node deliberately does not use or mutate these drawing presets. Its toolbar keeps one color menu and one `SketchSizePicker` secondary menu that edit only that node's stored strokes, so post-draw edits cannot silently change future drawing preferences. `SketchControls` owns their shared open state: opening either menu closes the other, and both use the common floating-toolbar popover surface.
 
 From here the two paths are independent: read by AI (§4) or explicitly parsed (§5).

@@ -23,6 +23,15 @@ export const SNAP_GRID: [number, number] = [GRID_SIZE, GRID_SIZE];
 export const MIN_ZOOM = 0.1;
 export const MAX_ZOOM = 5;
 
+/** Screen-space movement required before a touch gesture becomes a drag. */
+export const TOUCH_DRAG_ACTIVATION_PX = 8;
+
+/** Screen-space movement required before a pen gesture becomes a drag. */
+export const PEN_DRAG_ACTIVATION_PX = 4;
+
+/** Mouse keeps React Flow's existing crisp desktop drag behavior. */
+export const MOUSE_DRAG_ACTIVATION_PX = 1;
+
 /**
  * Sketch tool — pointer-up stroke merging (Microsoft Whiteboard /
  * Procreate behaviour). When the user finishes a stroke, instead of

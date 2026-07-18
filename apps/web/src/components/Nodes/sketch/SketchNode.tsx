@@ -6,6 +6,7 @@ import { resolveAccent } from '@sediment/shared';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import useCanvasStore from '@/store/canvasStore';
+import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 import { useIntentStore } from '@/store/intentStore';
 
 import { NodeWrapper } from '../NodeWrapper';
@@ -63,6 +64,13 @@ export const SketchNode = memo(
       (s) => s.requestSketchRecognition,
     );
     const updateNodeData = useCanvasStore((s) => s.updateNodeData);
+    const erasedStrokeIds = useGesturePreviewStore(
+      (s) => s.sketchErasePreview[id],
+    );
+    const erasedStrokeIdSet = useMemo(
+      () => new Set(erasedStrokeIds),
+      [erasedStrokeIds],
+    );
 
     const strokes = data.strokes ?? [];
     // Toolbar swatches show the most recently drawn stroke's color/size
@@ -128,7 +136,12 @@ export const SketchNode = memo(
             painted stroke shape itself. No Tailwind override needed.
           */}
           {strokes.map((s) => (
-            <StrokePath key={s.id} stroke={s} scaleX={scaleX} scaleY={scaleY} />
+            <g
+              key={s.id}
+              visibility={erasedStrokeIdSet.has(s.id) ? 'hidden' : undefined}
+            >
+              <StrokePath stroke={s} scaleX={scaleX} scaleY={scaleY} />
+            </g>
           ))}
         </svg>
       </NodeWrapper>

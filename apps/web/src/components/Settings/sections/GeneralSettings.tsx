@@ -13,8 +13,17 @@ import { Toggle } from '@/components/Common/Toggle';
 import { SettingRow } from '@/components/Settings/Common/SettingRow';
 import { canCheckForUpdates, useAppUpdate } from '@/hooks/useAppUpdate';
 import { getElectronBridge } from '@/hooks/useElectron';
+import {
+  useEffectiveDeviceMode,
+  useEffectiveTouchInteractionMode,
+} from '@/hooks/useInputMode';
 import { supportedLngs, type SupportedLanguage } from '@/i18n';
 import useCanvasStore from '@/store/canvasStore';
+import {
+  useToolStore,
+  type DeviceModePreference,
+  type TouchInteractionPreference,
+} from '@/store/toolStore';
 
 /** Native language names, shown regardless of the active UI language. */
 const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
@@ -42,6 +51,20 @@ export const GeneralSettings: React.FC = () => {
   const { t, i18n } = useTranslation();
   const minimapEnabled = useCanvasStore((s) => s.minimapEnabled);
   const toggleMinimap = useCanvasStore((s) => s.toggleMinimap);
+  const deviceModePreference = useToolStore(
+    (state) => state.deviceModePreference,
+  );
+  const touchInteractionPreference = useToolStore(
+    (state) => state.touchInteractionPreference,
+  );
+  const setDeviceModePreference = useToolStore(
+    (state) => state.setDeviceModePreference,
+  );
+  const setTouchInteractionPreference = useToolStore(
+    (state) => state.setTouchInteractionPreference,
+  );
+  const effectiveDeviceMode = useEffectiveDeviceMode();
+  const effectiveTouchInteractionMode = useEffectiveTouchInteractionMode();
   const [idleTimeoutSecs, setIdleTimeoutSecs] = useState(600);
   const [idleTimeoutSelection, setIdleTimeoutSelection] = useState('600');
   const [customMinutes, setCustomMinutes] = useState('10');
@@ -187,6 +210,57 @@ export const GeneralSettings: React.FC = () => {
           </Button>
         </SettingRow>
       )}
+      <SettingRow
+        title={t('settings.deviceMode')}
+        description={t('settings.deviceModeDescription')}
+      >
+        <Select<DeviceModePreference>
+          options={[
+            {
+              value: 'auto',
+              label: t('settings.automaticResolved', {
+                mode: t(`settings.deviceMode_${effectiveDeviceMode}`),
+              }),
+            },
+            { value: 'desktop', label: t('settings.deviceMode_desktop') },
+            { value: 'touch', label: t('settings.deviceMode_touch') },
+          ]}
+          value={deviceModePreference}
+          onChange={setDeviceModePreference}
+          title={t('settings.deviceMode')}
+          ariaLabel={t('settings.deviceMode')}
+        />
+      </SettingRow>
+      <SettingRow
+        title={t('settings.touchInteractionMode')}
+        description={t('settings.touchInteractionModeDescription')}
+      >
+        <Select<TouchInteractionPreference>
+          options={[
+            {
+              value: 'auto',
+              label: t('settings.automaticResolved', {
+                mode: t(
+                  `settings.touchInteractionMode_${effectiveTouchInteractionMode}`,
+                ),
+              }),
+            },
+            {
+              value: 'pen',
+              label: t('settings.touchInteractionMode_pen'),
+            },
+            {
+              value: 'finger',
+              label: t('settings.touchInteractionMode_finger'),
+            },
+          ]}
+          value={touchInteractionPreference}
+          onChange={setTouchInteractionPreference}
+          disabled={effectiveDeviceMode === 'desktop'}
+          title={t('settings.touchInteractionMode')}
+          ariaLabel={t('settings.touchInteractionMode')}
+        />
+      </SettingRow>
       <SettingRow
         title={t('settings.externalAgentIdleTimeout')}
         description={t('settings.externalAgentIdleTimeoutDescription')}

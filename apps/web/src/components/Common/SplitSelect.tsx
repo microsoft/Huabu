@@ -30,6 +30,7 @@ type SplitSelectProps<T extends string = string> = {
   menuClassName?: string;
   primaryButtonClassName?: string;
   menuButtonClassName?: string;
+  hideMenuButton?: boolean;
   variant?: ButtonProps['variant'];
   tone?: ButtonProps['tone'];
   size?: ButtonProps['size'];
@@ -83,6 +84,7 @@ export function SplitSelect<T extends string = string>({
   menuClassName,
   primaryButtonClassName,
   menuButtonClassName,
+  hideMenuButton = false,
   variant = 'outline',
   tone = 'neutral',
   size = 'sm',
@@ -177,30 +179,32 @@ export function SplitSelect<T extends string = string>({
             <span>{current?.buttonLabel ?? current?.label ?? placeholder}</span>
           )}
         </Button>
-        <Button
-          variant={variant}
-          tone={tone}
-          size={menuButtonSize}
-          shape={shape}
-          iconOnly
-          disabled={disabled}
-          onClick={handleToggle}
-          title={menuTitle}
-          aria-expanded={isOpen}
-          aria-haspopup="listbox"
-          className={cn(
-            isSeparated ? splitShapeClasses[shape] : rightShapeClasses[shape],
-            isOpen && 'bg-bg-default',
-            'px-0.5',
-            menuButtonClassName,
-          )}
-        >
-          <ChevronDown
-            className={clsx('transition-transform', isOpen && 'rotate-180')}
-          />
-        </Button>
+        {!hideMenuButton && (
+          <Button
+            variant={variant}
+            tone={tone}
+            size={menuButtonSize}
+            shape={shape}
+            iconOnly
+            disabled={disabled}
+            onClick={handleToggle}
+            title={menuTitle}
+            aria-expanded={isOpen}
+            aria-haspopup="listbox"
+            className={cn(
+              isSeparated ? splitShapeClasses[shape] : rightShapeClasses[shape],
+              isOpen && 'bg-bg-default',
+              'px-0.5',
+              menuButtonClassName,
+            )}
+          >
+            <ChevronDown
+              className={clsx('transition-transform', isOpen && 'rotate-180')}
+            />
+          </Button>
+        )}
       </div>
-      {isOpen && (
+      {isOpen && !hideMenuButton && (
         <Popover
           position={computePosition()}
           onDismiss={handleDismiss}
@@ -229,11 +233,13 @@ export function SplitSelect<T extends string = string>({
                 </span>
                 {option.icon && <span className="shrink-0">{option.icon}</span>}
                 <span className="flex-1">{option.label}</span>
-                {option.shortcut != null && option.shortcut !== '' && (
-                  <span className="text-fg-subtle ml-3 shrink-0 text-xs font-medium">
-                    {option.shortcut}
-                  </span>
-                )}
+                {option.shortcut !== null &&
+                  option.shortcut !== undefined &&
+                  option.shortcut !== '' && (
+                    <span className="text-fg-subtle ml-3 shrink-0 text-xs font-medium">
+                      {option.shortcut}
+                    </span>
+                  )}
               </Button>
             );
           })}

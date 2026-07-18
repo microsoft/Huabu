@@ -2,13 +2,24 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type MutableRefObject,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 
+import {
+  beginCanvasGesture,
+  endCanvasGesture,
+  updateCanvasGesture,
+  type CanvasPointerType,
+} from '@/handler/canvasGestureSession';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
+import type {
+  EffectiveDeviceMode,
+  EffectiveTouchInteractionMode,
+} from '@/store/toolStore';
 import type { Edge, ReactFlowInstance } from '@xyflow/react';
 
 type Point = {
@@ -33,6 +44,8 @@ interface UseCanvasLassoOptions {
   rfInstanceRef: MutableRefObject<ReactFlowInstance | null>;
   edges: Edge[];
   onSelect: (nodeIds: string[]) => void;
+  deviceMode: EffectiveDeviceMode;
+  touchInteractionMode: EffectiveTouchInteractionMode;
 }
 
 interface UseCanvasLassoResult {
@@ -53,6 +66,7 @@ interface UseCanvasLassoResult {
    * as the viewport scrolls under it.
    */
   shiftScreenPoints: (dx: number, dy: number) => void;
+  cancel: () => void;
 }
 
 function distance(a: Point, b: Point) {
@@ -223,17 +237,33 @@ export function useCanvasLasso({
   rfInstanceRef,
   edges,
   onSelect,
+  deviceMode,
+  touchInteractionMode,
 }: UseCanvasLassoOptions): UseCanvasLassoResult {
   const [screenPoints, setScreenPoints] = useState<Point[] | null>(null);
+  const pendingRef = useRef<{
+    pointerId: number;
+    start: Point;
+    captureTarget: HTMLDivElement;
+  } | null>(null);
 
   const cancel = useCallback(() => {
+    const pending = pendingRef.current;
+    if (pending) {
+      endCanvasGesture(pending.pointerId);
+      if (pending.captureTarget.hasPointerCapture(pending.pointerId)) {
+        pending.captureTarget.releasePointerCapture(pending.pointerId);
+      }
+      pendingRef.current = null;
+    }
     setScreenPoints(null);
   }, []);
 
   useEffect(() => {
-    if (active) return;
-    setScreenPoints(null);
-  }, [active]);
+    if (!active) cancel();
+  }, [active, cancel]);
+
+  useEffect(() => cancel, [cancel]);
 
   useEffect(() => {
     if (!active) return;
@@ -252,6 +282,13 @@ export function useCanvasLasso({
     (event: ReactPointerEvent<HTMLDivElement>) => {
       if (!active) return;
       if (event.button !== 0 || !event.isPrimary) return;
+      if (
+        deviceMode === 'touch' &&
+        ((touchInteractionMode === 'pen' && event.pointerType !== 'pen') ||
+          (touchInteractionMode === 'finger' && event.pointerType === 'pen'))
+      ) {
+        return;
+      }
       const target = event.target as HTMLElement;
 
       // Touch devices: React Flow's synthetic click selection on nodes is
@@ -286,27 +323,57 @@ export function useCanvasLasso({
       event.stopPropagation();
       event.currentTarget.setPointerCapture(event.pointerId);
 
-      onSelect([]);
-      setScreenPoints([{ x: event.clientX, y: event.clientY }]);
+      const start = { x: event.clientX, y: event.clientY };
+      if (
+        !beginCanvasGesture(
+          'lasso',
+          event.pointerId,
+          event.pointerType as CanvasPointerType,
+          start,
+        )
+      ) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+        return;
+      }
+      pendingRef.current = {
+        pointerId: event.pointerId,
+        start,
+        captureTarget: event.currentTarget,
+      };
     },
-    [active, onSelect],
+    [active, deviceMode, onSelect, touchInteractionMode],
   );
 
   const onPointerMove = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
+      const pending = pendingRef.current;
+      if (!pending || pending.pointerId !== event.pointerId) return;
+      const nextPoint = { x: event.clientX, y: event.clientY };
+      const phase = updateCanvasGesture(event.pointerId, nextPoint);
+      if (phase === 'pending') return;
+
       setScreenPoints((previous) => {
-        if (!previous) return previous;
-        return appendPoint(previous, { x: event.clientX, y: event.clientY });
+        if (!previous) {
+          onSelect([]);
+          return [pending.start, nextPoint];
+        }
+        return appendPoint(previous, nextPoint);
       });
     },
-    [],
+    [onSelect],
   );
 
   const commit = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (!screenPoints) return;
+      const pending = pendingRef.current;
+      if (!pending || pending.pointerId !== event.pointerId) return;
 
-      event.currentTarget.releasePointerCapture(event.pointerId);
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      pendingRef.current = null;
+      endCanvasGesture(event.pointerId);
+      if (!screenPoints) return;
 
       const finalScreenPoints = appendPoint(screenPoints, {
         x: event.clientX,
@@ -331,11 +398,10 @@ export function useCanvasLasso({
 
   const onPointerCancel = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (!screenPoints) return;
-      event.currentTarget.releasePointerCapture(event.pointerId);
+      if (pendingRef.current?.pointerId !== event.pointerId) return;
       cancel();
     },
-    [cancel, screenPoints],
+    [cancel],
   );
 
   const shiftScreenPoints = useCallback((dx: number, dy: number) => {
@@ -388,5 +454,6 @@ export function useCanvasLasso({
     previewEdgeIds,
     isActive: screenPoints !== null,
     shiftScreenPoints,
+    cancel,
   };
 }

@@ -43,16 +43,27 @@ import {
   urlToNodeInput,
   textToNoteNodeInput,
 } from '@/handler/canvasCommand/nodeInputBuilders';
+import { getDragActivationDistance } from '@/handler/canvasGestureSession';
 import { useCanvasShortcuts } from '@/hooks/shortcuts';
 import { useAutoPanDuringSelection } from '@/hooks/useAutoPanDuringSelection';
 import { useCanvasGestures } from '@/hooks/useCanvasGestures';
 import { useCanvasLasso } from '@/hooks/useCanvasLasso';
 import { useFrameDragToCreate } from '@/hooks/useFrameDragToCreate';
-import { useIsNotMouse } from '@/hooks/useInputMode';
+import {
+  useEffectiveDeviceMode,
+  useEffectiveTouchInteractionMode,
+  useIsNotMouse,
+} from '@/hooks/useInputMode';
 import { useSketchHoverRouting } from '@/hooks/useSketchHoverRouting';
 import { isMac } from '@/utils/platform';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
+import {
+  canPlaceNodeWithPointer,
+  isEmptyCanvasPlacementTarget,
+  isNodePlacementTap,
+  resolveNodeDraggable,
+} from './canvasInputPolicy.ts';
 import { NodeToolbar } from './CanvasToolbar.tsx';
 import {
   EDIT_EDGE_LABEL_EVENT,
@@ -82,7 +93,10 @@ import { FrameNode } from '../../Nodes/frame/FrameNode.tsx';
 import { createQuestionNodeAndCompose } from '../../Nodes/question/questionCompose.ts';
 import { QuestionNode } from '../../Nodes/question/QuestionNode.tsx';
 import { SketchNode } from '../../Nodes/sketch/SketchNode.tsx';
-import { SketchOverlay } from '../../Nodes/sketch/SketchOverlay.tsx';
+import {
+  CANCEL_SKETCH_GESTURE_EVENT,
+  SketchOverlay,
+} from '../../Nodes/sketch/SketchOverlay.tsx';
 import { SketchProcessingOverlay } from '../../Nodes/sketch/SketchProcessingOverlay.tsx';
 import { VideoNode } from '../../Nodes/video/VideoNode.tsx';
 import { WebNode } from '../../Nodes/web/WebNode.tsx';
@@ -204,8 +218,30 @@ function getInfoColor(): string {
 const CanvasGestures: React.FC<{
   wrapperRef: React.MutableRefObject<HTMLDivElement | null>;
   rfInstanceRef: React.MutableRefObject<ReactFlowInstance | null>;
-}> = ({ wrapperRef, rfInstanceRef }) => {
-  useCanvasGestures(wrapperRef, rfInstanceRef);
+  deviceMode: 'desktop' | 'touch';
+  deviceModePreference: 'auto' | 'desktop' | 'touch';
+  touchInteractionMode: 'pen' | 'finger';
+  explicitToolActive: boolean;
+  onTouchTakeover: () => void;
+  onEmptyCanvasTap: () => void;
+}> = ({
+  wrapperRef,
+  rfInstanceRef,
+  deviceMode,
+  deviceModePreference,
+  touchInteractionMode,
+  explicitToolActive,
+  onTouchTakeover,
+  onEmptyCanvasTap,
+}) => {
+  useCanvasGestures(wrapperRef, rfInstanceRef, {
+    deviceMode,
+    deviceModePreference,
+    touchInteractionMode,
+    explicitToolActive,
+    onTouchTakeover,
+    onEmptyCanvasTap,
+  });
   return null;
 };
 
@@ -345,6 +381,13 @@ export const Canvas: React.FC<CanvasProps> = ({
   );
 
   const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const placementPointerRef = useRef<{
+    pointerId: number;
+    pointerType: string;
+    startX: number;
+    startY: number;
+  } | null>(null);
+  const suppressNextPaneClickRef = useRef(false);
   const rfInstanceRef = useRef<ReactFlowInstance | null>(null);
   const lastDropRef = useRef<{ key: string; at: number } | null>(null);
   const mousePositionRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -373,6 +416,21 @@ export const Canvas: React.FC<CanvasProps> = ({
   );
 
   const isNotMouse = useIsNotMouse();
+  const deviceMode = useEffectiveDeviceMode();
+  const deviceModePreference = useToolStore(
+    (state) => state.deviceModePreference,
+  );
+  const touchInteractionMode = useEffectiveTouchInteractionMode();
+  const isTouchDevice = deviceMode === 'touch';
+  const directManipulationPointer =
+    isTouchDevice && touchInteractionMode === 'pen' ? 'pen' : 'touch';
+  const dragActivationDistance = isTouchDevice
+    ? getDragActivationDistance(directManipulationPointer)
+    : getDragActivationDistance('mouse');
+
+  useEffect(() => {
+    if (isTouchDevice && tool === 'pan') setTool('select');
+  }, [isTouchDevice, setTool, tool]);
 
   const handleSelectionStart = useCallback(() => {
     if (tool !== 'select') return;
@@ -459,12 +517,15 @@ export const Canvas: React.FC<CanvasProps> = ({
     previewEdgeIds,
     isActive: isLassoActive,
     shiftScreenPoints: shiftLassoScreenPoints,
+    cancel: cancelLasso,
   } = useCanvasLasso({
     active: !pendingNodeType && tool === 'lasso',
     wrapperRef,
     rfInstanceRef,
     edges,
     onSelect: (nodeIds) => selectNodes(nodeIds),
+    deviceMode,
+    touchInteractionMode,
   });
 
   // Sketch hover routing: hit-test the cursor against painted strokes so
@@ -484,6 +545,11 @@ export const Canvas: React.FC<CanvasProps> = ({
     () => new Set(previewEdgeIds),
     [previewEdgeIds],
   );
+  const handleTouchTakeover = useCallback(() => {
+    placementPointerRef.current = null;
+    cancelLasso();
+    window.dispatchEvent(new Event(CANCEL_SKETCH_GESTURE_EVENT));
+  }, [cancelLasso]);
   // Manual z-order: array/forest order is the sole stacking authority
   // (see `assignNodeZIndices`). React Flow runs in `zIndexMode="manual"`
   // so these derived values are used verbatim; without this a framed
@@ -520,9 +586,22 @@ export const Canvas: React.FC<CanvasProps> = ({
         return cached;
       }
 
-      const needsWrap = nextClassName !== baseClassName || node.zIndex !== z;
+      const touchDraggable = resolveNodeDraggable(
+        node.draggable,
+        node.selected,
+        deviceMode,
+      );
+      const needsWrap =
+        nextClassName !== baseClassName ||
+        node.zIndex !== z ||
+        node.draggable !== touchDraggable;
       const wrapped = needsWrap
-        ? { ...node, className: nextClassName, zIndex: z }
+        ? {
+            ...node,
+            className: nextClassName,
+            zIndex: z,
+            draggable: touchDraggable,
+          }
         : node;
       nextCache.set(node, wrapped);
       return wrapped;
@@ -530,7 +609,7 @@ export const Canvas: React.FC<CanvasProps> = ({
 
     zWrapCacheRef.current = nextCache;
     return result;
-  }, [lassoPreviewNodeIdSet, nodes, zByNode]);
+  }, [deviceMode, lassoPreviewNodeIdSet, nodes, zByNode]);
 
   // Override marker colors on selected edges so arrows match the selection
   // highlight color (--color-info). CSS cannot style SVG <marker> referenced
@@ -635,53 +714,56 @@ export const Canvas: React.FC<CanvasProps> = ({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [pendingNodeType, exitPendingNodeType]);
 
+  const placePendingNode = useCallback(
+    (clientX: number, clientY: number) => {
+      if (
+        !pendingNodeType ||
+        pendingNodeType === 'frame' ||
+        pendingNodeType === 'sketch'
+      ) {
+        return false;
+      }
+      const instance = rfInstanceRef.current;
+      if (!instance) return false;
+
+      const position = instance.screenToFlowPosition({
+        x: clientX,
+        y: clientY,
+      });
+
+      if (pendingNodeType === 'question') {
+        createQuestionNodeAndCompose({
+          addNode,
+          placementPoint: position,
+          canvasId,
+        });
+      } else {
+        addNode({
+          nodeType: pendingNodeType,
+          placementPoint: position,
+          data: {
+            content: '',
+            origin: { type: 'user-created' },
+          },
+        });
+      }
+      setPendingNodeType(null);
+      return true;
+    },
+    [addNode, canvasId, pendingNodeType, setPendingNodeType],
+  );
+
   // Handle click-to-place for note, text, and question; otherwise dismiss
   // any currently expanded view (preview or node) so clicking the canvas
   // background acts as a quick close gesture in split mode.
   const handlePaneClick = useCallback(
     (event: React.MouseEvent) => {
-      // 1. Click-to-place for pending node creation tools.
-      if (
-        pendingNodeType &&
-        pendingNodeType !== 'frame' &&
-        pendingNodeType !== 'sketch'
-      ) {
-        const instance = rfInstanceRef.current;
-        if (!instance) return;
-
-        const position = instance.screenToFlowPosition({
-          x: event.clientX,
-          y: event.clientY,
-        });
-
-        // Question nodes are born bound to a chat thread: mint the node
-        // id + thread id up front so we can drop the node AND jump
-        // straight into compose (open the panel, focus the input, pick
-        // the agent inline). Presetting `id` is supported by the
-        // ADD_NODES resolver and already used by paste.
-        if (pendingNodeType === 'question') {
-          createQuestionNodeAndCompose({
-            addNode,
-            placementPoint: position,
-            canvasId,
-          });
-          setPendingNodeType(null);
-          return;
-        }
-
-        const data: Record<string, unknown> = {
-          content: '',
-          origin: { type: 'user-created' },
-        };
-
-        addNode({
-          nodeType: pendingNodeType,
-          placementPoint: position,
-          data,
-        });
-        setPendingNodeType(null);
+      if (suppressNextPaneClickRef.current) {
+        suppressNextPaneClickRef.current = false;
         return;
       }
+      // 1. Click-to-place for pending node creation tools.
+      if (placePendingNode(event.clientX, event.clientY)) return;
 
       // 2. With a different creation tool still active (frame / sketch), the
       //    background click belongs to that tool — leave the expanded view
@@ -700,14 +782,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         closeExpanded();
       }
     },
-    [
-      pendingNodeType,
-      addNode,
-      setPendingNodeType,
-      expandedNodeId,
-      closeExpanded,
-      canvasId,
-    ],
+    [pendingNodeType, expandedNodeId, closeExpanded, placePendingNode],
   );
 
   // When a node is expanded in split mode, pan the canvas so the node stays visible.
@@ -766,6 +841,29 @@ export const Canvas: React.FC<CanvasProps> = ({
         tool === 'lasso' && 'cursor-crosshair',
       )}
       onPointerDown={(event) => {
+        if (
+          pendingNodeType &&
+          pendingNodeType !== 'frame' &&
+          pendingNodeType !== 'sketch' &&
+          event.button === 0 &&
+          event.isPrimary &&
+          canPlaceNodeWithPointer(
+            event.pointerType,
+            deviceMode,
+            touchInteractionMode,
+          ) &&
+          isEmptyCanvasPlacementTarget(event.target as Element)
+        ) {
+          placementPointerRef.current = {
+            pointerId: event.pointerId,
+            pointerType: event.pointerType,
+            startX: event.clientX,
+            startY: event.clientY,
+          };
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
         framePointerHandlers.onPointerDown(event);
         lassoPointerHandlers.onPointerDown(event);
       }}
@@ -774,12 +872,57 @@ export const Canvas: React.FC<CanvasProps> = ({
         lassoPointerHandlers.onPointerMove(event);
       }}
       onPointerUp={(event) => {
+        const placementPointer = placementPointerRef.current;
+        if (placementPointer?.pointerId === event.pointerId) {
+          placementPointerRef.current = null;
+          if (
+            isNodePlacementTap(
+              placementPointer.startX,
+              placementPointer.startY,
+              event.clientX,
+              event.clientY,
+              getDragActivationDistance(
+                placementPointer.pointerType as 'touch' | 'pen',
+              ),
+            )
+          ) {
+            suppressNextPaneClickRef.current = placePendingNode(
+              event.clientX,
+              event.clientY,
+            );
+            if (suppressNextPaneClickRef.current) {
+              window.setTimeout(() => {
+                suppressNextPaneClickRef.current = false;
+              }, 0);
+            }
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
         framePointerHandlers.onPointerUp(event);
         lassoPointerHandlers.onPointerUp(event);
       }}
       onPointerCancel={(event) => {
+        if (placementPointerRef.current?.pointerId === event.pointerId) {
+          placementPointerRef.current = null;
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
         framePointerHandlers.onPointerCancel(event);
         lassoPointerHandlers.onPointerCancel(event);
+      }}
+      onContextMenu={(event) => {
+        const target = event.target as Element;
+        if (
+          target.closest(
+            'input, textarea, select, [contenteditable="true"], a[href]',
+          )
+        ) {
+          return;
+        }
+        event.preventDefault();
       }}
       onDragOver={(e) => {
         // Accept both internal Sediment payloads and native file/URL drops
@@ -1006,19 +1149,25 @@ export const Canvas: React.FC<CanvasProps> = ({
         panOnDrag={
           pendingNodeType
             ? [1] /* creation tool active → middle mouse button still pans */
-            : tool === 'pan'
-              ? true
-              : isNotMouse
-                ? false /* non-mouse + select tool → drag creates selection rect */
-                : [1] /* mouse + selection tools → middle mouse button pans */
+            : isTouchDevice
+              ? false
+              : tool === 'pan'
+                ? true
+                : isNotMouse
+                  ? false /* non-mouse + select tool → drag creates selection rect */
+                  : [1] /* mouse + selection tools → middle mouse button pans */
         }
-        selectionOnDrag={pendingNodeType ? false : tool === 'select'}
+        selectionOnDrag={
+          pendingNodeType ? false : !isTouchDevice && tool === 'select'
+        }
         selectionMode={SelectionMode.Partial}
         onSelectionStart={handleSelectionStart}
         onSelectionEnd={handleSelectionEnd}
         nodesDraggable={
           !interactivityLocked && !pendingNodeType && tool !== 'lasso'
         }
+        nodeDragThreshold={dragActivationDistance}
+        nodeClickDistance={dragActivationDistance}
         nodesConnectable={!interactivityLocked}
         elementsSelectable={!interactivityLocked && !pendingNodeType}
         panOnScroll={!isNotMouse}
@@ -1042,14 +1191,27 @@ export const Canvas: React.FC<CanvasProps> = ({
         zIndexMode="manual"
         elevateNodesOnSelect={false}
       >
-        <CanvasGestures wrapperRef={wrapperRef} rfInstanceRef={rfInstanceRef} />
+        <CanvasGestures
+          wrapperRef={wrapperRef}
+          rfInstanceRef={rfInstanceRef}
+          deviceMode={deviceMode}
+          deviceModePreference={deviceModePreference}
+          touchInteractionMode={touchInteractionMode}
+          explicitToolActive={tool === 'lasso' || Boolean(pendingNodeType)}
+          onTouchTakeover={handleTouchTakeover}
+          onEmptyCanvasTap={() => selectNodes([])}
+        />
         <SelectionAutoPan
           active={isBoxSelecting || isLassoActive}
           wrapperRef={wrapperRef}
           onPan={shiftLassoScreenPoints}
         />
         <Panel position="bottom-center" className="mb-6">
-          <NodeToolbar activeTool={tool} onToolChange={setTool} />
+          <NodeToolbar
+            activeTool={tool}
+            onToolChange={setTool}
+            deviceMode={deviceMode}
+          />
         </Panel>
         {!isBoxSelecting && <MultiSelectResizer />}
         {!isBoxSelecting && <SelectionOutlines />}

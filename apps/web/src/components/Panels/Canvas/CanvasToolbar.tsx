@@ -24,6 +24,10 @@ import { isEditableTarget } from '@/hooks/shortcuts';
 import { useIsNotMouse } from '@/hooks/useInputMode';
 import { useToolStore } from '@/store/toolStore';
 
+import {
+  getAvailableCanvasTools,
+  resolveCanvasToolShortcut,
+} from './canvasInputPolicy.ts';
 import { NODE_ICON } from '../../../config/nodeIcons.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import { detectNodeType, detectOfficeFormat } from '../../../utils/io/media.ts';
@@ -42,9 +46,14 @@ import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
 interface NodeToolbarProps {
   activeTool: 'select' | 'pan' | 'lasso';
   onToolChange: (tool: 'select' | 'pan' | 'lasso') => void;
+  deviceMode: 'desktop' | 'touch';
 }
 
-export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
+export const NodeToolbar = ({
+  activeTool,
+  onToolChange,
+  deviceMode,
+}: NodeToolbarProps) => {
   const { t } = useTranslation();
   const addNodes = useCanvasStore((s) => s.addNodes);
   const pendingNodeType = useToolStore((s) => s.pendingNodeType);
@@ -78,28 +87,32 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
   // mirrors the currently active tool and the popover lists every option
   // (with its letter shortcut hint).
   const toolOptions = useMemo<SplitSelectOption<'select' | 'pan' | 'lasso'>[]>(
-    () => [
-      {
-        value: 'select',
-        label: t('toolbar.tools.select'),
-        icon: <MousePointer2 />,
-        shortcut: isNotMouse ? undefined : 'S',
-      },
-      {
-        value: 'pan',
-        label: t('toolbar.tools.pan'),
-        icon: <Hand />,
-        shortcut: isNotMouse ? undefined : 'P',
-      },
-      {
-        value: 'lasso',
-        label: t('toolbar.tools.lasso'),
-        icon: <Lasso />,
-        shortcut: isNotMouse ? undefined : 'L',
-      },
-    ],
-    [isNotMouse, t],
+    () =>
+      getAvailableCanvasTools(deviceMode).map((value) => ({
+        value,
+        label: t(`toolbar.tools.${value}`),
+        icon:
+          value === 'select' ? (
+            <MousePointer2 />
+          ) : value === 'pan' ? (
+            <Hand />
+          ) : (
+            <Lasso />
+          ),
+        shortcut: isNotMouse
+          ? undefined
+          : value === 'select'
+            ? 'S'
+            : value === 'pan'
+              ? 'P'
+              : 'L',
+      })),
+    [deviceMode, isNotMouse, t],
   );
+
+  const displayedTool = deviceMode === 'touch' ? 'lasso' : activeTool;
+  const displayedToolActive =
+    deviceMode === 'touch' ? activeTool === 'lasso' : true;
 
   // Single-character keyboard shortcuts for the toolbar items, mirroring
   // the badge hints shown on each button. Select / Pan / Lasso get
@@ -127,7 +140,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
       if (matchesShortcut(e, 'tool.pan')) {
         e.preventDefault();
         if (pendingNodeType) setPendingNodeType(null);
-        onToolChange('pan');
+        onToolChange(resolveCanvasToolShortcut('pan', deviceMode));
         return;
       }
       if (matchesShortcut(e, 'tool.lasso')) {
@@ -175,6 +188,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
     activeModal,
+    deviceMode,
     onToolChange,
     pendingNodeType,
     setPendingNodeType,
@@ -367,7 +381,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
         <div className="flex items-center gap-1.5">
           <SplitSelect<'select' | 'pan' | 'lasso'>
             options={toolOptions}
-            value={activeTool}
+            value={displayedTool}
             onPrimaryAction={(tool) => {
               if (pendingNodeType) setPendingNodeType(null);
               onToolChange(tool);
@@ -381,10 +395,11 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             size="md"
             iconOnly
             align="top-left"
+            hideMenuButton={toolOptions.length === 1}
             primaryTitle={
-              activeTool === 'lasso'
+              displayedTool === 'lasso'
                 ? toolTitle(t('toolbar.tools.lasso'), 'L')
-                : activeTool === 'pan'
+                : displayedTool === 'pan'
                   ? toolTitle(t('toolbar.tools.pan'), 'P')
                   : toolTitle(t('toolbar.tools.select'), 'S')
             }
@@ -401,6 +416,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             primaryShortcutBadgeActive={!pendingNodeType}
             primaryButtonClassName={clsx(
               !pendingNodeType &&
+                displayedToolActive &&
                 'text-info bg-bg-default enabled:hover:bg-bg-default',
             )}
             menuButtonClassName="enabled:hover:bg-bg-default"

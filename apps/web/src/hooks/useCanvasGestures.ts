@@ -1,7 +1,31 @@
 import { useStoreApi, type ReactFlowInstance } from '@xyflow/react';
-import { useEffect, type MutableRefObject } from 'react';
+import { useEffect, useRef, type MutableRefObject } from 'react';
+
+import {
+  beginCanvasGesture,
+  canTouchTakeOverCanvasGesture,
+  cancelPendingCanvasGesture,
+  endCanvasGesture,
+  updateCanvasGesture,
+} from '@/handler/canvasGestureSession';
+import { isSnapSessionActive } from '@/handler/snap/snapSession';
 
 import { MAX_ZOOM, MIN_ZOOM } from '../config/canvas';
+
+import type {
+  DeviceModePreference,
+  EffectiveDeviceMode,
+  EffectiveTouchInteractionMode,
+} from '@/store/toolStore';
+
+interface CanvasGestureOptions {
+  deviceMode: EffectiveDeviceMode;
+  deviceModePreference: DeviceModePreference;
+  touchInteractionMode: EffectiveTouchInteractionMode;
+  explicitToolActive: boolean;
+  onTouchTakeover: () => void;
+  onEmptyCanvasTap: () => void;
+}
 
 /**
  * Custom touch / trackpad gesture handling for the canvas.
@@ -28,9 +52,10 @@ import { MAX_ZOOM, MIN_ZOOM } from '../config/canvas';
 export function useCanvasGestures(
   wrapperRef: MutableRefObject<HTMLDivElement | null>,
   rfInstanceRef: MutableRefObject<ReactFlowInstance | null>,
+  options: CanvasGestureOptions,
 ): void {
   useTrackpadPinch(wrapperRef, rfInstanceRef);
-  useTouchPinch(wrapperRef, rfInstanceRef);
+  useTouchNavigation(wrapperRef, rfInstanceRef, options);
   useMultiTouchSelectionCancel();
 }
 
@@ -50,7 +75,7 @@ interface Point {
 }
 
 /** Clamp `zoom` to the configured viewport range. */
-function clampZoom(zoom: number): number {
+export function clampZoom(zoom: number): number {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
 }
 
@@ -63,7 +88,7 @@ function clampZoom(zoom: number): number {
  * To keep that point under the same screen position after zooming we offset
  * the new translate so the relation still holds at `newZoom`.
  */
-function zoomAroundPoint(
+export function zoomAroundPoint(
   from: Viewport,
   anchor: Point,
   newZoom: number,
@@ -78,13 +103,48 @@ function zoomAroundPoint(
   };
 }
 
-const distance = (a: Touch, b: Touch): number =>
-  Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+const distance = (a: Point, b: Point): number =>
+  Math.hypot(a.x - b.x, a.y - b.y);
 
-const midpoint = (a: Touch, b: Touch): Point => ({
-  x: (a.clientX + b.clientX) / 2,
-  y: (a.clientY + b.clientY) / 2,
+const midpoint = (a: Point, b: Point): Point => ({
+  x: (a.x + b.x) / 2,
+  y: (a.y + b.y) / 2,
 });
+
+export function shouldOwnSingleTouchNavigation(
+  target: Element | null,
+  options: Pick<
+    CanvasGestureOptions,
+    | 'deviceMode'
+    | 'deviceModePreference'
+    | 'touchInteractionMode'
+    | 'explicitToolActive'
+  >,
+): boolean {
+  const {
+    deviceMode,
+    deviceModePreference,
+    touchInteractionMode,
+    explicitToolActive,
+  } = options;
+  if (deviceModePreference === 'desktop') return false;
+  if (deviceMode !== 'touch' && deviceModePreference !== 'auto') return false;
+  if (target?.closest('.react-flow__panel')) return false;
+  if (touchInteractionMode === 'pen') return true;
+  if (explicitToolActive) return false;
+  return !target?.closest('.react-flow__node');
+}
+
+export function shouldSuppressTouchEnd(
+  pointerId: number,
+  panTouchId: number | null,
+  isPinching: boolean,
+  suppressedTouchIds: ReadonlySet<number>,
+): boolean {
+  return (
+    panTouchId === pointerId || isPinching || suppressedTouchIds.has(pointerId)
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Trackpad pinch (ctrlKey + wheel)
@@ -157,10 +217,14 @@ function useTrackpadPinch(
  * for the duration of the gesture, so the user feels the canvas pivot around
  * a fixed point rather than chasing a drifting midpoint.
  */
-function useTouchPinch(
+function useTouchNavigation(
   wrapperRef: MutableRefObject<HTMLDivElement | null>,
   rfInstanceRef: MutableRefObject<ReactFlowInstance | null>,
+  options: CanvasGestureOptions,
 ): void {
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
+
   useEffect(() => {
     const el = wrapperRef.current;
     if (!el) return;
@@ -169,72 +233,181 @@ function useTouchPinch(
     let startDist = 0;
     let startMidpoint: Point = { x: 0, y: 0 };
     let startViewport: Viewport = { x: 0, y: 0, zoom: 1 };
+    let panTouchId: number | null = null;
+    let panStart: Point = { x: 0, y: 0 };
+    let panStartViewport: Viewport = { x: 0, y: 0, zoom: 1 };
+    const suppressedTouchIds = new Set<number>();
+    const activeTouches = new Map<number, Point>();
 
-    const onTouchStart = (e: TouchEvent) => {
-      if (e.touches.length !== 2) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.pointerType !== 'touch') return;
       const instance = rfInstanceRef.current;
       if (!instance) return;
-      isPinching = true;
-      startDist = distance(e.touches[0], e.touches[1]);
-      startMidpoint = midpoint(e.touches[0], e.touches[1]);
-      startViewport = instance.getViewport();
+      const currentOptions = optionsRef.current;
+      const point = { x: event.clientX, y: event.clientY };
+      activeTouches.set(event.pointerId, point);
+
+      if (
+        activeTouches.size === 1 &&
+        shouldOwnSingleTouchNavigation(
+          event.target as Element | null,
+          currentOptions,
+        )
+      ) {
+        if (!canTouchTakeOverCanvasGesture()) {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+        currentOptions.onTouchTakeover();
+        cancelPendingCanvasGesture();
+        if (!beginCanvasGesture('touch-pan', event.pointerId, 'touch', point)) {
+          return;
+        }
+        panTouchId = event.pointerId;
+        panStart = point;
+        panStartViewport = instance.getViewport();
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
+      if (activeTouches.size === 2) {
+        if (isSnapSessionActive() || !canTouchTakeOverCanvasGesture()) {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+        currentOptions.onTouchTakeover();
+        if (panTouchId !== null) {
+          endCanvasGesture(panTouchId);
+        } else {
+          cancelPendingCanvasGesture();
+        }
+        panTouchId = null;
+        isPinching = true;
+        const [first, second] = Array.from(activeTouches.entries());
+        startDist = distance(first[1], second[1]);
+        startMidpoint = midpoint(first[1], second[1]);
+        startViewport = instance.getViewport();
+        suppressedTouchIds.add(first[0]);
+        suppressedTouchIds.add(second[0]);
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
+      if (
+        currentOptions.deviceMode === 'touch' &&
+        currentOptions.touchInteractionMode === 'pen' &&
+        !(event.target as HTMLElement | null)?.closest('.react-flow__panel')
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
     };
 
-    const onTouchMove = (e: TouchEvent) => {
-      if (!isPinching || e.touches.length !== 2) return;
+    const onPointerMove = (event: PointerEvent) => {
+      if (
+        event.pointerType !== 'touch' ||
+        !activeTouches.has(event.pointerId)
+      ) {
+        return;
+      }
       const instance = rfInstanceRef.current;
       if (!instance) return;
+      const point = { x: event.clientX, y: event.clientY };
+      activeTouches.set(event.pointerId, point);
 
-      e.preventDefault();
-      e.stopPropagation();
+      if (isPinching && activeTouches.size === 2) {
+        event.preventDefault();
+        event.stopPropagation();
+        const [first, second] = Array.from(activeTouches.values());
+        const newDist = distance(first, second);
+        const newMidpoint = midpoint(first, second);
+        const newZoom = clampZoom(
+          startViewport.zoom * (newDist / Math.max(startDist, 1)),
+        );
+        const rect = el.getBoundingClientRect();
+        instance.setViewport(
+          zoomAroundPoint(
+            startViewport,
+            {
+              x: startMidpoint.x - rect.left,
+              y: startMidpoint.y - rect.top,
+            },
+            newZoom,
+            {
+              x: newMidpoint.x - startMidpoint.x,
+              y: newMidpoint.y - startMidpoint.y,
+            },
+          ),
+          { duration: 0 },
+        );
+        return;
+      }
 
-      const newDist = distance(e.touches[0], e.touches[1]);
-      const newMidpoint = midpoint(e.touches[0], e.touches[1]);
-
-      const scale = newDist / Math.max(startDist, 1);
-      const newZoom = clampZoom(startViewport.zoom * scale);
-
-      const rect = el.getBoundingClientRect();
-      const anchor = {
-        x: startMidpoint.x - rect.left,
-        y: startMidpoint.y - rect.top,
-      };
-      const pan = {
-        x: newMidpoint.x - startMidpoint.x,
-        y: newMidpoint.y - startMidpoint.y,
-      };
-
-      instance.setViewport(
-        zoomAroundPoint(startViewport, anchor, newZoom, pan),
-        { duration: 0 },
-      );
+      if (panTouchId === event.pointerId && activeTouches.size === 1) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (updateCanvasGesture(event.pointerId, point) !== 'locked') return;
+        instance.setViewport(
+          {
+            x: panStartViewport.x + point.x - panStart.x,
+            y: panStartViewport.y + point.y - panStart.y,
+            zoom: panStartViewport.zoom,
+          },
+          { duration: 0 },
+        );
+      } else if (isPinching && suppressedTouchIds.has(event.pointerId)) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
     };
 
-    const endPinch = (e: TouchEvent) => {
-      if (e.touches.length < 2) isPinching = false;
+    const onPointerEnd = (event: PointerEvent) => {
+      if (event.pointerType !== 'touch') return;
+      if (
+        shouldSuppressTouchEnd(
+          event.pointerId,
+          panTouchId,
+          isPinching,
+          suppressedTouchIds,
+        )
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      activeTouches.delete(event.pointerId);
+      if (panTouchId === event.pointerId) {
+        const phase = updateCanvasGesture(event.pointerId, {
+          x: event.clientX,
+          y: event.clientY,
+        });
+        endCanvasGesture(event.pointerId);
+        panTouchId = null;
+        if (phase === 'pending') {
+          optionsRef.current.onEmptyCanvasTap();
+        }
+      }
+      if (isPinching && activeTouches.size === 0) {
+        isPinching = false;
+        suppressedTouchIds.clear();
+      }
     };
 
-    el.addEventListener('touchstart', onTouchStart, {
-      capture: true,
-      passive: true,
-    });
-    el.addEventListener('touchmove', onTouchMove, {
-      capture: true,
-      passive: false,
-    });
-    el.addEventListener('touchend', endPinch, { capture: true, passive: true });
-    el.addEventListener('touchcancel', endPinch, {
-      capture: true,
-      passive: true,
-    });
+    el.addEventListener('pointerdown', onPointerDown, { capture: true });
+    el.addEventListener('pointermove', onPointerMove, { capture: true });
+    el.addEventListener('pointerup', onPointerEnd, { capture: true });
+    el.addEventListener('pointercancel', onPointerEnd, { capture: true });
 
     return () => {
-      el.removeEventListener('touchstart', onTouchStart, { capture: true });
-      el.removeEventListener('touchmove', onTouchMove, { capture: true });
-      el.removeEventListener('touchend', endPinch, { capture: true });
-      el.removeEventListener('touchcancel', endPinch, { capture: true });
+      el.removeEventListener('pointerdown', onPointerDown, { capture: true });
+      el.removeEventListener('pointermove', onPointerMove, { capture: true });
+      el.removeEventListener('pointerup', onPointerEnd, { capture: true });
+      el.removeEventListener('pointercancel', onPointerEnd, { capture: true });
     };
-  }, [wrapperRef, rfInstanceRef]);
+  }, [rfInstanceRef, wrapperRef]);
 }
 
 // ---------------------------------------------------------------------------
