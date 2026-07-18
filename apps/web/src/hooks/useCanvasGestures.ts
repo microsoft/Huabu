@@ -3,12 +3,14 @@ import { useEffect, useRef, type MutableRefObject } from 'react';
 
 import {
   beginCanvasGesture,
-  canTouchTakeOverCanvasGesture,
   cancelPendingCanvasGesture,
   endCanvasGesture,
   updateCanvasGesture,
 } from '@/handler/canvasGestureSession';
-import { isSnapSessionActive } from '@/handler/snap/snapSession';
+import {
+  canTouchClaimViewport,
+  canTouchTakeOverForPinch,
+} from '@/handler/canvasInteractionOwner';
 
 import {
   isNodeTarget,
@@ -258,7 +260,7 @@ function useTouchNavigation(
           currentOptions,
         )
       ) {
-        if (!canTouchTakeOverCanvasGesture()) {
+        if (!canTouchClaimViewport()) {
           event.preventDefault();
           event.stopPropagation();
           return;
@@ -277,7 +279,7 @@ function useTouchNavigation(
       }
 
       if (activeTouches.size === 2) {
-        if (isSnapSessionActive() || !canTouchTakeOverCanvasGesture()) {
+        if (!canTouchTakeOverForPinch()) {
           event.preventDefault();
           event.stopPropagation();
           return;
