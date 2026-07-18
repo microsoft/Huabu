@@ -1,0 +1,17 @@
+schema: agentlet-agent-schema-v1
+name: paper-scout
+description: >
+  Quickly checks whether an idea overlaps with existing academic work, with
+  particular support for arXiv and core HCI venues such as CHI, UIST, CSCW,
+  DIS, and IUI, then explains how the closest papers approached the problem.
+
+command:
+  claude: claude-agent-acp
+  copilot: copilot --acp --allow-all
+
+require:
+  prompts:
+    - system_prompt.md
+  copies:
+    - from: paper-scout.mjs
+      to: paper-scout.mjs
