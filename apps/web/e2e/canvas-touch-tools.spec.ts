@@ -43,6 +43,22 @@ test.describe('canvas touch tools', () => {
     await expect(page.locator('.react-flow__node')).toHaveCount(1);
   });
 
+  test('dragging past the threshold with the Text tool places nothing', async ({
+    page,
+  }) => {
+    await openNewCanvas(page);
+    const client = await page.context().newCDPSession(page);
+    const center = await paneCenter(page);
+
+    await expect(page.locator('.react-flow__node')).toHaveCount(0);
+    await pickCreateTool(page, /^Text/, 'canvas-pending-text');
+    // A drag well beyond the tap activation distance is not a placement tap.
+    await oneFingerDrag(client, center, 160, 120);
+    await page.waitForTimeout(150);
+
+    await expect(page.locator('.react-flow__node')).toHaveCount(0);
+  });
+
   test('dragging with the Frame tool creates a frame node', async ({
     page,
   }) => {
@@ -71,13 +87,12 @@ test.describe('canvas touch tools', () => {
     await pickCreateTool(page, /^Text/, 'canvas-pending-text');
     await touchTap(client, center);
     await expect(page.locator('.react-flow__node')).toHaveCount(1);
-
-    // Exit the node editor and clear the selection, then arm the lasso tool
-    // via its keyboard shortcut (works regardless of the resolved device
-    // toolbar layout). Escape first so the 'l' key cannot type into a still
-    // focused editor.
+    // Type content so the node is not discarded as an empty text node when it
+    // loses focus, then exit the editor and clear the selection.
+    await page.keyboard.type('x');
     await page.keyboard.press('Escape');
     await page.mouse.click(center.x + 300, center.y + 200);
+    await expect(page.locator('.react-flow__node')).toHaveCount(1);
     await expect(page.locator('.react-flow__node.selected')).toHaveCount(0);
     await page.keyboard.press('l');
     await expect(page.locator('.cursor-crosshair')).toBeVisible();
