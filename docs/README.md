@@ -76,6 +76,7 @@ docs/
 | -------------------------------------------------------------------------------------------------- | -------------- | ------------------------------------------------------------------------- |
 | [agent-node-freshness-cas-plan.md](./proposals/agent-node-freshness-cas-plan.md)                   | In-Progress    | Read/write revision freshness across agent and web paths.                 |
 | [canvas-checkpoint-plan.md](./proposals/canvas-checkpoint-plan.md)                                 | Proposed       | Canvas checkpoint and restoration design.                                 |
+| [canvas-pointer-router.md](./proposals/canvas-pointer-router.md)                                   | Proposed       | Unified pointer routing with recognizer takeover priority.                |
 | [canvas-realtime-sync-plan.md](./proposals/canvas-realtime-sync-plan.md)                           | In-Progress    | Roadmap from multi-agent sync to multi-user co-editing.                   |
 | [content-before-ai-design.md](./proposals/content-before-ai-design.md)                             | Needs review   | Block-level and inline authorship provenance.                             |
 | [credential-storage-hardening-followups.md](./proposals/credential-storage-hardening-followups.md) | Draft          | Follow-up credential storage hardening.                                   |
