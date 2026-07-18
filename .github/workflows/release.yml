@@ -12,12 +12,14 @@ name: Release
 # from that tag, and manual runs publish as a *draft* release so you can
 # sanity-check the correctly-versioned assets before making them public.
 #
-# Code-signing is intentionally disabled here. Both the macOS and
-# Windows installers ship unsigned — users get the usual
-# "unidentified developer" / SmartScreen prompt on first launch.
-# When signing certificates are ready, set CSC_LINK / CSC_KEY_PASSWORD
-# (mac) and WIN_CSC_LINK / WIN_CSC_KEY_PASSWORD (win) as repo secrets
-# and remove the `CSC_IDENTITY_AUTO_DISCOVERY=false` override below.
+# Code-signing:
+#   • macOS: signed with the Developer ID certificate in the CSC_LINK /
+#     CSC_KEY_PASSWORD repo secrets and notarized via APPLE_ID /
+#     APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID (electron-builder
+#     `notarize: true`). Notarization adds ~5–15 min to the mac job.
+#   • Windows: still unsigned (SmartScreen prompts). When a Windows
+#     certificate is ready, add WIN_CSC_LINK / WIN_CSC_KEY_PASSWORD
+#     secrets and pass them to the Windows build step.
 
 on:
   push:
@@ -96,18 +98,25 @@ jobs:
       - name: Build agentlet workspace packages
         run: pnpm run build:agentlet
 
-      - name: Build desktop installer
+      # The signing env vars are scoped to the macOS step only: CSC_LINK
+      # is also honored by electron-builder's *Windows* signing path, so
+      # exposing the Apple .p12 to the Windows job would make it try (and
+      # fail) to sign the .exe with it.
+      - name: Build desktop installer (macOS, signed + notarized)
+        if: runner.os == 'macOS'
         run: pnpm run ${{ matrix.script }}
-        # No CSC_LINK / certificate configured, so:
-        #   • macOS: electron-builder finds no Developer ID identity in
-        #     the runner keychain and falls back to ad-hoc signing
-        #     (identity `-`). Required on Apple Silicon — without it
-        #     the .app won't even launch. Users still see the gentle
-        #     "unidentified developer" prompt and can right-click →
-        #     Open. Set CSC_LINK + CSC_KEY_PASSWORD secrets to ship
-        #     properly-signed builds.
-        #   • Windows: no CSC_LINK → electron-builder silently skips
-        #     signing; the .exe ships unsigned (SmartScreen prompts).
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Build desktop installer
+        if: runner.os != 'macOS'
+        run: pnpm run ${{ matrix.script }}
+        # Windows: no WIN_CSC_LINK configured → electron-builder skips
+        # signing; the .exe ships unsigned (SmartScreen prompts).
 
       # electron-builder writes outside the repo (../huabu-electron-out/
       # per apps/desktop/electron-builder.yml, to dodge a Windows file-lock
