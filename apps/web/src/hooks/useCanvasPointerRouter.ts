@@ -26,6 +26,11 @@ interface CanvasPointerRouterOptions {
  * drives a {@link PointerRouterCore}. Recognizers registered here own,
  * observe, and preempt canvas gestures through one arbitration protocol.
  *
+ * The built-in `viewport-navigation` recognizer runs first (as a global
+ * observer); `extraRecognizers` are offered the claim after it, in order.
+ * `extraRecognizers` must be a stable array — a changing identity would
+ * re-install the listeners and drop any in-flight gesture.
+ *
  * Must be called from inside `<ReactFlow>` so the recognizers can reach
  * the viewport through the shared React Flow instance ref.
  */
@@ -33,6 +38,10 @@ export function useCanvasPointerRouter(
   wrapperRef: MutableRefObject<HTMLDivElement | null>,
   rfInstanceRef: MutableRefObject<ReactFlowInstance | null>,
   options: CanvasPointerRouterOptions,
+  extraRecognizers: PointerRecognizer<
+    PointerEvent,
+    CanvasPointerRouterContext
+  >[] = [],
 ): void {
   const optionsRef = useRef(options);
   optionsRef.current = options;
@@ -44,7 +53,7 @@ export function useCanvasPointerRouter(
     const recognizers: PointerRecognizer<
       PointerEvent,
       CanvasPointerRouterContext
-    >[] = [createViewportNavigationRecognizer()];
+    >[] = [createViewportNavigationRecognizer(), ...extraRecognizers];
 
     const core = new PointerRouterCore<
       PointerEvent,
@@ -82,5 +91,5 @@ export function useCanvasPointerRouter(
       el.removeEventListener('pointerup', onUp, { capture: true });
       el.removeEventListener('pointercancel', onCancel, { capture: true });
     };
-  }, [wrapperRef, rfInstanceRef]);
+  }, [wrapperRef, rfInstanceRef, extraRecognizers]);
 }

@@ -44,6 +44,7 @@ import {
   textToNoteNodeInput,
 } from '@/handler/canvasCommand/nodeInputBuilders';
 import { getDragActivationDistance } from '@/handler/canvasGestureSession';
+import { createPlacementRecognizer } from '@/handler/canvasPointerRecognizers/placement';
 import { useCanvasShortcuts } from '@/hooks/shortcuts';
 import { useAutoPanDuringSelection } from '@/hooks/useAutoPanDuringSelection';
 import { useCanvasGestures } from '@/hooks/useCanvasGestures';
@@ -60,10 +61,7 @@ import { isMac } from '@/utils/platform';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
 import {
-  canPlaceNodeWithPointer,
   closestNodeElement,
-  isEmptyCanvasPlacementTarget,
-  isNodePlacementTap,
   resolveNodeDraggable,
 } from './canvasInputPolicy.ts';
 import { NodeToolbar } from './CanvasToolbar.tsx';
@@ -104,6 +102,9 @@ import { VideoNode } from '../../Nodes/video/VideoNode.tsx';
 import { WebNode } from '../../Nodes/web/WebNode.tsx';
 
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
+import type { CanvasPointerRouterContext } from '@/handler/canvasPointerRouterContext';
+import type { PointerRecognizer } from '@/handler/pointerRouter';
+import type { CanvasViewport } from '@sediment/shared';
 import type {
   FrameFitResult,
   NestableNode,
@@ -226,6 +227,10 @@ const CanvasGestures: React.FC<{
   explicitToolActive: boolean;
   onTouchTakeover: () => void;
   onEmptyCanvasTap: () => void;
+  extraRecognizers: PointerRecognizer<
+    PointerEvent,
+    CanvasPointerRouterContext
+  >[];
 }> = ({
   wrapperRef,
   rfInstanceRef,
@@ -235,16 +240,22 @@ const CanvasGestures: React.FC<{
   explicitToolActive,
   onTouchTakeover,
   onEmptyCanvasTap,
+  extraRecognizers,
 }) => {
   useCanvasGestures(wrapperRef, rfInstanceRef);
-  useCanvasPointerRouter(wrapperRef, rfInstanceRef, {
-    deviceMode,
-    deviceModePreference,
-    touchInteractionMode,
-    explicitToolActive,
-    onTouchTakeover,
-    onEmptyCanvasTap,
-  });
+  useCanvasPointerRouter(
+    wrapperRef,
+    rfInstanceRef,
+    {
+      deviceMode,
+      deviceModePreference,
+      touchInteractionMode,
+      explicitToolActive,
+      onTouchTakeover,
+      onEmptyCanvasTap,
+    },
+    extraRecognizers,
+  );
   return null;
 };
 
@@ -384,12 +395,6 @@ export const Canvas: React.FC<CanvasProps> = ({
   );
 
   const wrapperRef = useRef<HTMLDivElement | null>(null);
-  const placementPointerRef = useRef<{
-    pointerId: number;
-    pointerType: string;
-    startX: number;
-    startY: number;
-  } | null>(null);
   const suppressNextPaneClickRef = useRef(false);
   const rfInstanceRef = useRef<ReactFlowInstance | null>(null);
   const lastDropRef = useRef<{ key: string; at: number } | null>(null);
@@ -549,7 +554,6 @@ export const Canvas: React.FC<CanvasProps> = ({
     [previewEdgeIds],
   );
   const handleTouchTakeover = useCallback(() => {
-    placementPointerRef.current = null;
     cancelLasso();
     window.dispatchEvent(new Event(CANCEL_SKETCH_GESTURE_EVENT));
   }, [cancelLasso]);
@@ -756,6 +760,29 @@ export const Canvas: React.FC<CanvasProps> = ({
     [addNode, canvasId, pendingNodeType, setPendingNodeType],
   );
 
+  // Click-to-place pointer recognizer for the pointer router. Backed by
+  // refs so the recognizer is created once and never loses its in-flight
+  // tap state to a re-render.
+  const placePendingNodeRef = useRef(placePendingNode);
+  placePendingNodeRef.current = placePendingNode;
+  const suppressNextPaneClick = useCallback(() => {
+    suppressNextPaneClickRef.current = true;
+    window.setTimeout(() => {
+      suppressNextPaneClickRef.current = false;
+    }, 0);
+  }, []);
+  const pointerRecognizers = useMemo<
+    PointerRecognizer<PointerEvent, CanvasPointerRouterContext>[]
+  >(
+    () => [
+      createPlacementRecognizer({
+        placePendingNode: (x, y) => placePendingNodeRef.current(x, y),
+        suppressNextPaneClick,
+      }),
+    ],
+    [suppressNextPaneClick],
+  );
+
   // Handle click-to-place for note, text, and question; otherwise dismiss
   // any currently expanded view (preview or node) so clicking the canvas
   // background acts as a quick close gesture in split mode.
@@ -844,29 +871,6 @@ export const Canvas: React.FC<CanvasProps> = ({
         tool === 'lasso' && 'cursor-crosshair',
       )}
       onPointerDown={(event) => {
-        if (
-          pendingNodeType &&
-          pendingNodeType !== 'frame' &&
-          pendingNodeType !== 'sketch' &&
-          event.button === 0 &&
-          event.isPrimary &&
-          canPlaceNodeWithPointer(
-            event.pointerType,
-            deviceMode,
-            touchInteractionMode,
-          ) &&
-          isEmptyCanvasPlacementTarget(event.target as Element)
-        ) {
-          placementPointerRef.current = {
-            pointerId: event.pointerId,
-            pointerType: event.pointerType,
-            startX: event.clientX,
-            startY: event.clientY,
-          };
-          event.preventDefault();
-          event.stopPropagation();
-          return;
-        }
         framePointerHandlers.onPointerDown(event);
         lassoPointerHandlers.onPointerDown(event);
       }}
@@ -875,44 +879,10 @@ export const Canvas: React.FC<CanvasProps> = ({
         lassoPointerHandlers.onPointerMove(event);
       }}
       onPointerUp={(event) => {
-        const placementPointer = placementPointerRef.current;
-        if (placementPointer?.pointerId === event.pointerId) {
-          placementPointerRef.current = null;
-          if (
-            isNodePlacementTap(
-              placementPointer.startX,
-              placementPointer.startY,
-              event.clientX,
-              event.clientY,
-              getDragActivationDistance(
-                placementPointer.pointerType as 'touch' | 'pen',
-              ),
-            )
-          ) {
-            suppressNextPaneClickRef.current = placePendingNode(
-              event.clientX,
-              event.clientY,
-            );
-            if (suppressNextPaneClickRef.current) {
-              window.setTimeout(() => {
-                suppressNextPaneClickRef.current = false;
-              }, 0);
-            }
-          }
-          event.preventDefault();
-          event.stopPropagation();
-          return;
-        }
         framePointerHandlers.onPointerUp(event);
         lassoPointerHandlers.onPointerUp(event);
       }}
       onPointerCancel={(event) => {
-        if (placementPointerRef.current?.pointerId === event.pointerId) {
-          placementPointerRef.current = null;
-          event.preventDefault();
-          event.stopPropagation();
-          return;
-        }
         framePointerHandlers.onPointerCancel(event);
         lassoPointerHandlers.onPointerCancel(event);
       }}
@@ -1203,6 +1173,7 @@ export const Canvas: React.FC<CanvasProps> = ({
           explicitToolActive={tool === 'lasso' || Boolean(pendingNodeType)}
           onTouchTakeover={handleTouchTakeover}
           onEmptyCanvasTap={() => selectNodes([])}
+          extraRecognizers={pointerRecognizers}
         />
         <SelectionAutoPan
           active={isBoxSelecting || isLassoActive}
