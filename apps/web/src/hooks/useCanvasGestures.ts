@@ -10,6 +10,10 @@ import {
 } from '@/handler/canvasGestureSession';
 import { isSnapSessionActive } from '@/handler/snap/snapSession';
 
+import {
+  isNodeTarget,
+  isPanelTarget,
+} from '../components/Panels/Canvas/canvasInputPolicy';
 import { MAX_ZOOM, MIN_ZOOM } from '../config/canvas';
 
 import type {
@@ -129,10 +133,10 @@ export function shouldOwnSingleTouchNavigation(
   } = options;
   if (deviceModePreference === 'desktop') return false;
   if (deviceMode !== 'touch' && deviceModePreference !== 'auto') return false;
-  if (target?.closest('.react-flow__panel')) return false;
+  if (isPanelTarget(target)) return false;
   if (touchInteractionMode === 'pen') return true;
   if (explicitToolActive) return false;
-  return !target?.closest('.react-flow__node');
+  return !isNodeTarget(target);
 }
 
 export function shouldSuppressTouchEnd(
@@ -300,7 +304,7 @@ function useTouchNavigation(
       if (
         currentOptions.deviceMode === 'touch' &&
         currentOptions.touchInteractionMode === 'pen' &&
-        !(event.target as HTMLElement | null)?.closest('.react-flow__panel')
+        !isPanelTarget(event.target as Element | null)
       ) {
         event.preventDefault();
         event.stopPropagation();

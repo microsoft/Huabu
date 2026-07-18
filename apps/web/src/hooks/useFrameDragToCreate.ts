@@ -7,6 +7,8 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 
+import { isPanelTarget } from '../components/Panels/Canvas/canvasInputPolicy';
+
 import type { ReactFlowInstance } from '@xyflow/react';
 
 /**
@@ -99,7 +101,7 @@ export function useFrameDragToCreate({
       // Primary mouse button / primary touch / primary pen.
       if (e.button !== 0 || !e.isPrimary) return;
       // Ignore presses that originate inside floating toolbars / panels.
-      if ((e.target as HTMLElement).closest('.react-flow__panel')) return;
+      if (isPanelTarget(e.target as Element)) return;
 
       e.preventDefault();
       e.stopPropagation();

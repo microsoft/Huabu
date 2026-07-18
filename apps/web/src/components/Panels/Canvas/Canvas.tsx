@@ -60,6 +60,7 @@ import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
 import {
   canPlaceNodeWithPointer,
+  closestNodeElement,
   isEmptyCanvasPlacementTarget,
   isNodePlacementTap,
   resolveNodeDraggable,
@@ -480,7 +481,7 @@ export const Canvas: React.FC<CanvasProps> = ({
             )
           : (event.target as Element);
 
-      const nodeEl = target?.closest('.react-flow__node');
+      const nodeEl = closestNodeElement(target);
       if (!nodeEl) return;
 
       const targetNodeId = nodeEl.getAttribute('data-id');

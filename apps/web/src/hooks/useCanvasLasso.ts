@@ -16,6 +16,11 @@ import {
 } from '@/handler/canvasGestureSession';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
+import {
+  closestNodeElement,
+  isEmptyPaneTarget,
+} from '../components/Panels/Canvas/canvasInputPolicy';
+
 import type {
   EffectiveDeviceMode,
   EffectiveTouchInteractionMode,
@@ -297,7 +302,7 @@ export function useCanvasLasso({
       // before a click is synthesised). Mouse already works via React Flow's
       // own onClick handler, so only intercept touch / pen taps here.
       if (event.pointerType !== 'mouse') {
-        const nodeEl = target.closest<HTMLElement>('.react-flow__node');
+        const nodeEl = closestNodeElement(target);
         if (nodeEl) {
           const nodeId = nodeEl.getAttribute('data-id');
           if (nodeId) {
@@ -309,15 +314,7 @@ export function useCanvasLasso({
         }
       }
 
-      if (!target.closest('.react-flow__pane')) return;
-      if (target.closest('.react-flow__panel')) return;
-      if (
-        target.closest(
-          '.react-flow__node, .react-flow__edge, .react-flow__handle',
-        )
-      ) {
-        return;
-      }
+      if (!isEmptyPaneTarget(target)) return;
 
       event.preventDefault();
       event.stopPropagation();
