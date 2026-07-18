@@ -48,6 +48,7 @@ import { useCanvasShortcuts } from '@/hooks/shortcuts';
 import { useAutoPanDuringSelection } from '@/hooks/useAutoPanDuringSelection';
 import { useCanvasGestures } from '@/hooks/useCanvasGestures';
 import { useCanvasLasso } from '@/hooks/useCanvasLasso';
+import { useCanvasPointerRouter } from '@/hooks/useCanvasPointerRouter';
 import { useFrameDragToCreate } from '@/hooks/useFrameDragToCreate';
 import {
   useEffectiveDeviceMode,
@@ -235,7 +236,8 @@ const CanvasGestures: React.FC<{
   onTouchTakeover,
   onEmptyCanvasTap,
 }) => {
-  useCanvasGestures(wrapperRef, rfInstanceRef, {
+  useCanvasGestures(wrapperRef, rfInstanceRef);
+  useCanvasPointerRouter(wrapperRef, rfInstanceRef, {
     deviceMode,
     deviceModePreference,
     touchInteractionMode,
