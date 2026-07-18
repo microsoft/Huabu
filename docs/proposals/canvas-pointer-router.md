@@ -1,9 +1,15 @@
 # Canvas Pointer Router
 
-Status: Proposed (design only; not implemented)
+Status: In-Progress (steps 1–3 shipped; sketch stays an overlay; physical-device validation pending)
 Last updated: 2026-07-18
 
 This proposal designs a single pointer-routing layer for the canvas so that mouse, touch, and pen gestures are dispatched from one place with an explicit ownership and priority model. It builds on the shipped input contract in [`../architecture/canvas-input-interactions.md`](../architecture/canvas-input-interactions.md) and the two refactors that preceded it: the centralized React Flow target predicates in `canvasInputPolicy` and the `canvasInteractionOwner` takeover façade. Landing this router still requires physical-device validation before it can be considered done.
+
+## Shipped status
+
+- **Steps 1–3 are implemented.** `PointerRouterCore` (ordered claim, observer broadcast, preempt) drives one capture-phase pointer stream via `useCanvasPointerRouter`. Viewport navigation, click-to-place, and lasso/frame all run through the router; the former JSX pointer fan-out in `Canvas.tsx` is gone. Verified behavior-preserving by a Playwright touch e2e suite (pinch in/out, one-finger pan, placement, frame, lasso) plus the full web unit suite.
+- **Sketch stays an overlay (step 4 declined).** `SketchOverlay` is a self-contained full-screen overlay whose pointer handling is tightly coupled to its own SVG preview rendering. It already shares the two things that matter — the `canvasGestureSession` arbiter and `gesturePreviewStore` — so folding its dispatch into the router would split handling from rendering and add coupling for no arbitration gain. Its middle-mouse pan is a deliberate compensating duplicate of React Flow's `panOnDrag={[1]}` (the overlay swallows the events React Flow would otherwise pan on) and cannot be cheaply unified.
+- **Remaining:** physical-device validation of the capture-phase migration (trusted pointer ordering, `setPointerCapture`, pen / palm, multi-touch takeover) before this proposal is archived.
 
 ## Problem
 

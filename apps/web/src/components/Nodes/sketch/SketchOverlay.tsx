@@ -238,6 +238,16 @@ export function SketchOverlay({
    * a pan-start so the caller can short-circuit its draw/erase path.
    * Browsers default middle-button-down to the auto-scroll cursor, which
    * we suppress with `preventDefault()`.
+   *
+   * NOTE: this is a *compensating* implementation, not a sketch-specific
+   * feature. Middle-mouse pan is provided canvas-wide by React Flow's
+   * `panOnDrag={[1]}` (see `Canvas.tsx`). This full-screen overlay sits on
+   * top of React Flow and swallows the pointer stream while the sketch
+   * tool is active, so React Flow never sees the middle-button drag —
+   * we re-implement the same behavior here purely to stay consistent with
+   * the rest of the canvas. It is intentionally duplicated: the two paths
+   * use different mechanisms (React Flow config vs. this overlay handler)
+   * and cannot be cleanly shared without replacing React Flow's own pan.
    */
   const tryStartPan = useCallback(
     (e: React.PointerEvent): boolean => {
