@@ -187,6 +187,30 @@ describe('PointerRouterCore', () => {
     expect(router.ownerOf(1)?.id).toBe('watcher');
   });
 
+  it('lets an observer cancel another pointer owner during takeover', () => {
+    const owner = spyRecognizer('owner', { claims: true });
+    const watcher: PointerRecognizer<Evt, Ctx> = {
+      id: 'watcher',
+      canClaim: () => false,
+      onDown: () => 'pass',
+      observe: {
+        onDown: (event, observerCtx) => {
+          if (event.pointerId === 2) observerCtx.cancelPointer(1);
+        },
+      },
+    };
+    const router = new PointerRouterCore([watcher, owner], () => ctx);
+
+    router.handleDown(ev(1));
+    expect(router.ownerOf(1)?.id).toBe('owner');
+
+    router.handleDown(ev(2));
+
+    expect(owner.calls).toEqual(['down:1', 'cancel:1', 'down:2']);
+    expect(router.ownerOf(1)).toBeNull();
+    expect(router.ownerOf(2)?.id).toBe('owner');
+  });
+
   it('does nothing when the context is null', () => {
     const a = spyRecognizer('a', { claims: true });
     const router = new PointerRouterCore<Evt, Ctx>([a], () => null);

@@ -2,11 +2,9 @@ import { useEffect, useState } from 'react';
 import { create } from 'zustand';
 
 import {
-  resolveDeviceMode,
-  resolveTouchInteractionMode,
+  resolveInputMode,
   useToolStore,
-  type EffectiveDeviceMode,
-  type EffectiveTouchInteractionMode,
+  type EffectiveInputMode,
 } from '@/store/toolStore';
 
 export type InputMode = 'mouse' | 'touch' | 'pen';
@@ -32,13 +30,21 @@ export function useInputMode(): InputMode {
   return useInputModeStore((s) => s.mode);
 }
 
-/** Returns `true` when the last interaction was touch. */
-export function useIsTouch(): boolean {
-  return useInputModeStore((s) => s.mode === 'touch');
-}
-
+/**
+ * Reactive "am I currently using touch or pen?" signal that drives UI density
+ * and pointer-appropriate affordances (handle sizes, shortcut hints, on-canvas
+ * delete buttons, available tools, pan vs box-select, node draggability).
+ *
+ * It follows the *most recent* pointer so hybrid devices (e.g. Surface) switch
+ * between desktop and touch experiences the moment the user changes pointer.
+ * Mouse mode pins this to `false` because it ignores touchscreen and pen input
+ * entirely.
+ */
 export function useIsNotMouse(): boolean {
-  return useInputModeStore((s) => s.mode !== 'mouse');
+  const effective = useEffectiveInputMode();
+  const lastPointer = useInputMode();
+  if (effective === 'mouse') return false;
+  return lastPointer !== 'mouse';
 }
 
 function detectTouchCapability(): boolean {
@@ -51,8 +57,9 @@ function detectTouchCapability(): boolean {
   );
 }
 
-export function useEffectiveDeviceMode(): EffectiveDeviceMode {
-  const preference = useToolStore((state) => state.deviceModePreference);
+export function useEffectiveInputMode(): EffectiveInputMode {
+  const preference = useToolStore((state) => state.inputModePreference);
+  const penObserved = useToolStore((state) => state.penObserved);
   const inputMode = useInputMode();
   const [touchCapable, setTouchCapable] = useState(detectTouchCapability);
 
@@ -63,16 +70,11 @@ export function useEffectiveDeviceMode(): EffectiveDeviceMode {
     return () => query.removeEventListener('change', update);
   }, []);
 
-  return resolveDeviceMode(
+  return resolveInputMode(
     preference,
     touchCapable || inputMode === 'touch' || inputMode === 'pen',
+    penObserved,
   );
-}
-
-export function useEffectiveTouchInteractionMode(): EffectiveTouchInteractionMode {
-  const preference = useToolStore((state) => state.touchInteractionPreference);
-  const penObserved = useToolStore((state) => state.penObserved);
-  return resolveTouchInteractionMode(preference, penObserved);
 }
 /**
  * Call once near the app root to install the global `pointerdown` listener.

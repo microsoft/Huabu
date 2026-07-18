@@ -46,14 +46,9 @@ import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
 interface NodeToolbarProps {
   activeTool: 'select' | 'pan' | 'lasso';
   onToolChange: (tool: 'select' | 'pan' | 'lasso') => void;
-  deviceMode: 'desktop' | 'touch';
 }
 
-export const NodeToolbar = ({
-  activeTool,
-  onToolChange,
-  deviceMode,
-}: NodeToolbarProps) => {
+export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
   const { t } = useTranslation();
   const addNodes = useCanvasStore((s) => s.addNodes);
   const pendingNodeType = useToolStore((s) => s.pendingNodeType);
@@ -88,7 +83,7 @@ export const NodeToolbar = ({
   // (with its letter shortcut hint).
   const toolOptions = useMemo<SplitSelectOption<'select' | 'pan' | 'lasso'>[]>(
     () =>
-      getAvailableCanvasTools(deviceMode).map((value) => ({
+      getAvailableCanvasTools(isNotMouse).map((value) => ({
         value,
         label: t(`toolbar.tools.${value}`),
         icon:
@@ -107,12 +102,11 @@ export const NodeToolbar = ({
               ? 'P'
               : 'L',
       })),
-    [deviceMode, isNotMouse, t],
+    [isNotMouse, t],
   );
 
-  const displayedTool = deviceMode === 'touch' ? 'lasso' : activeTool;
-  const displayedToolActive =
-    deviceMode === 'touch' ? activeTool === 'lasso' : true;
+  const displayedTool = isNotMouse ? 'lasso' : activeTool;
+  const displayedToolActive = isNotMouse ? activeTool === 'lasso' : true;
 
   // Single-character keyboard shortcuts for the toolbar items, mirroring
   // the badge hints shown on each button. Select / Pan / Lasso get
@@ -140,7 +134,7 @@ export const NodeToolbar = ({
       if (matchesShortcut(e, 'tool.pan')) {
         e.preventDefault();
         if (pendingNodeType) setPendingNodeType(null);
-        onToolChange(resolveCanvasToolShortcut('pan', deviceMode));
+        onToolChange(resolveCanvasToolShortcut('pan', isNotMouse));
         return;
       }
       if (matchesShortcut(e, 'tool.lasso')) {
@@ -188,7 +182,7 @@ export const NodeToolbar = ({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
     activeModal,
-    deviceMode,
+    isNotMouse,
     onToolChange,
     pendingNodeType,
     setPendingNodeType,

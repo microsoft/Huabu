@@ -51,11 +51,7 @@ export function createPlacementRecognizer(
         pendingNodeType !== 'sketch' &&
         event.button === 0 &&
         event.isPrimary &&
-        canPlaceNodeWithPointer(
-          event.pointerType,
-          ctx.deviceMode,
-          ctx.touchInteractionMode,
-        ) &&
+        canPlaceNodeWithPointer(event.pointerType, ctx.inputMode) &&
         isEmptyCanvasPlacementTarget(event.target as Element)
       );
     },

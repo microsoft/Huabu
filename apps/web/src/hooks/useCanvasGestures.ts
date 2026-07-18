@@ -7,16 +7,10 @@ import {
 } from '../components/Panels/Canvas/canvasInputPolicy';
 import { MAX_ZOOM, MIN_ZOOM } from '../config/canvas';
 
-import type {
-  DeviceModePreference,
-  EffectiveDeviceMode,
-  EffectiveTouchInteractionMode,
-} from '@/store/toolStore';
+import type { EffectiveInputMode } from '@/store/toolStore';
 
 interface CanvasGestureOptions {
-  deviceMode: EffectiveDeviceMode;
-  deviceModePreference: DeviceModePreference;
-  touchInteractionMode: EffectiveTouchInteractionMode;
+  inputMode: EffectiveInputMode;
   explicitToolActive: boolean;
   onTouchTakeover: () => void;
   onEmptyCanvasTap: () => void;
@@ -100,24 +94,12 @@ export const midpoint = (a: Point, b: Point): Point => ({
 
 export function shouldOwnSingleTouchNavigation(
   target: Element | null,
-  options: Pick<
-    CanvasGestureOptions,
-    | 'deviceMode'
-    | 'deviceModePreference'
-    | 'touchInteractionMode'
-    | 'explicitToolActive'
-  >,
+  options: Pick<CanvasGestureOptions, 'inputMode' | 'explicitToolActive'>,
 ): boolean {
-  const {
-    deviceMode,
-    deviceModePreference,
-    touchInteractionMode,
-    explicitToolActive,
-  } = options;
-  if (deviceModePreference === 'desktop') return false;
-  if (deviceMode !== 'touch' && deviceModePreference !== 'auto') return false;
+  const { inputMode, explicitToolActive } = options;
+  if (inputMode === 'mouse') return false;
   if (isPanelTarget(target)) return false;
-  if (touchInteractionMode === 'pen') return true;
+  if (inputMode === 'pen') return true;
   if (explicitToolActive) return false;
   return !isNodeTarget(target);
 }

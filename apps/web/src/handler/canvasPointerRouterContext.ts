@@ -1,8 +1,4 @@
-import type {
-  DeviceModePreference,
-  EffectiveDeviceMode,
-  EffectiveTouchInteractionMode,
-} from '@/store/toolStore';
+import type { EffectiveInputMode } from '@/store/toolStore';
 import type { ReactFlowInstance } from '@xyflow/react';
 
 /**
@@ -15,9 +11,7 @@ import type { ReactFlowInstance } from '@xyflow/react';
 export interface CanvasPointerRouterContext {
   wrapper: HTMLDivElement;
   instance: ReactFlowInstance;
-  deviceMode: EffectiveDeviceMode;
-  deviceModePreference: DeviceModePreference;
-  touchInteractionMode: EffectiveTouchInteractionMode;
+  inputMode: EffectiveInputMode;
   explicitToolActive: boolean;
   onTouchTakeover: () => void;
   onEmptyCanvasTap: () => void;

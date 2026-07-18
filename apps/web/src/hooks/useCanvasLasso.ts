@@ -21,10 +21,7 @@ import {
   isEmptyPaneTarget,
 } from '../components/Panels/Canvas/canvasInputPolicy';
 
-import type {
-  EffectiveDeviceMode,
-  EffectiveTouchInteractionMode,
-} from '@/store/toolStore';
+import type { EffectiveInputMode } from '@/store/toolStore';
 import type { Edge, ReactFlowInstance } from '@xyflow/react';
 
 type Point = {
@@ -49,8 +46,7 @@ interface UseCanvasLassoOptions {
   rfInstanceRef: MutableRefObject<ReactFlowInstance | null>;
   edges: Edge[];
   onSelect: (nodeIds: string[]) => void;
-  deviceMode: EffectiveDeviceMode;
-  touchInteractionMode: EffectiveTouchInteractionMode;
+  inputMode: EffectiveInputMode;
 }
 
 interface UseCanvasLassoResult {
@@ -242,8 +238,7 @@ export function useCanvasLasso({
   rfInstanceRef,
   edges,
   onSelect,
-  deviceMode,
-  touchInteractionMode,
+  inputMode,
 }: UseCanvasLassoOptions): UseCanvasLassoResult {
   const [screenPoints, setScreenPoints] = useState<Point[] | null>(null);
   const pendingRef = useRef<{
@@ -287,10 +282,13 @@ export function useCanvasLasso({
     (event: ReactPointerEvent<HTMLDivElement>) => {
       if (!active) return;
       if (event.button !== 0 || !event.isPrimary) return;
+      // The mouse always draws a lasso. Non-mouse pointers are accepted only
+      // when the input mode routes them to direct manipulation.
       if (
-        deviceMode === 'touch' &&
-        ((touchInteractionMode === 'pen' && event.pointerType !== 'pen') ||
-          (touchInteractionMode === 'finger' && event.pointerType === 'pen'))
+        event.pointerType !== 'mouse' &&
+        (inputMode === 'mouse' ||
+          (inputMode === 'pen' && event.pointerType !== 'pen') ||
+          (inputMode === 'finger' && event.pointerType !== 'touch'))
       ) {
         return;
       }
@@ -338,7 +336,7 @@ export function useCanvasLasso({
         captureTarget: event.currentTarget,
       };
     },
-    [active, deviceMode, onSelect, touchInteractionMode],
+    [active, inputMode, onSelect],
   );
 
   const onPointerMove = useCallback(

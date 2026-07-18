@@ -52,8 +52,7 @@ type PointerPhase = 'down' | 'move' | 'up' | 'cancel';
 interface PointerRouterContext {
   wrapper: HTMLDivElement;
   rfInstance: ReactFlowInstance;
-  deviceMode: EffectiveDeviceMode;
-  touchInteractionMode: EffectiveTouchInteractionMode;
+  inputMode: EffectiveInputMode;
 }
 
 interface PointerRecognizer {
@@ -63,7 +62,7 @@ interface PointerRecognizer {
   /**
    * Fast, side-effect-free gate. Returns true only when this recognizer
    * could own a gesture that starts from this pointerdown, given the
-   * current tool, device mode, and event target. Pure — delegates to
+   * current tool, input mode, and event target. Pure — delegates to
    * `canvasInputPolicy` predicates. The router only calls `onDown` for
    * recognizers whose `canClaim` returns true.
    */

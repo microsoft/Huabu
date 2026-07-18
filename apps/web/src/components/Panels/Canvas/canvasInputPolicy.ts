@@ -1,7 +1,4 @@
-import type {
-  EffectiveDeviceMode,
-  EffectiveTouchInteractionMode,
-} from '@/store/toolStore';
+import type { EffectiveInputMode } from '@/store/toolStore';
 
 export type CanvasTool = 'select' | 'pan' | 'lasso';
 
@@ -40,37 +37,62 @@ export function isEmptyPaneTarget(target: Element | null): boolean {
   );
 }
 
-export function getAvailableCanvasTools(
-  deviceMode: EffectiveDeviceMode,
-): CanvasTool[] {
-  return deviceMode === 'touch' ? ['lasso'] : ['select', 'pan', 'lasso'];
+// Toolbar layout, tool availability, and node-drag affordances follow the
+// pointer the user is *currently* using (`isNotMouse`), not the persisted
+// input-mode preference. This keeps hybrid devices (e.g. Surface) desktop-like
+// while a mouse is in hand and touch-friendly the moment a finger or pen takes
+// over. The `inputMode` preference below only gates which non-mouse pointers
+// may reach the canvas and disambiguates pen vs finger.
+export function getAvailableCanvasTools(isNotMouse: boolean): CanvasTool[] {
+  return isNotMouse ? ['lasso'] : ['select', 'pan', 'lasso'];
 }
 
 export function resolveCanvasToolShortcut(
   tool: CanvasTool,
-  deviceMode: EffectiveDeviceMode,
+  isNotMouse: boolean,
 ): CanvasTool {
-  return deviceMode === 'touch' && tool !== 'lasso' ? 'select' : tool;
+  return isNotMouse && tool !== 'lasso' ? 'select' : tool;
 }
 
 export function resolveNodeDraggable(
   draggable: boolean | undefined,
   selected: boolean | undefined,
-  deviceMode: EffectiveDeviceMode,
+  isNotMouse: boolean,
 ): boolean | undefined {
-  return deviceMode === 'touch' && selected !== true ? false : draggable;
+  return isNotMouse && selected !== true ? false : draggable;
 }
 
 export function canPlaceNodeWithPointer(
   pointerType: string,
-  deviceMode: EffectiveDeviceMode,
-  touchInteractionMode: EffectiveTouchInteractionMode,
+  inputMode: EffectiveInputMode,
 ): boolean {
-  if (pointerType === 'mouse') return false;
-  if (deviceMode === 'desktop') return true;
-  return touchInteractionMode === 'pen'
-    ? pointerType === 'pen'
-    : pointerType === 'touch';
+  // Mouse placement flows through the pane click handler, not the pointer tap.
+  if (inputMode === 'mouse') return false;
+  return inputMode === 'pen' ? pointerType === 'pen' : pointerType === 'touch';
+}
+
+export function canManipulateCanvasWithPointer(
+  pointerType: string,
+  inputMode: EffectiveInputMode,
+): boolean {
+  // The mouse is a precise, unambiguous pointer and always operates the canvas,
+  // regardless of the input-mode preference (except never being *blocked*).
+  if (pointerType === 'mouse') return true;
+  // Mouse mode deliberately ignores touchscreen and pen input.
+  if (inputMode === 'mouse') return false;
+  if (inputMode === 'pen') {
+    return pointerType === 'pen' || pointerType === 'touch';
+  }
+  return pointerType === 'touch';
+}
+
+export function canDirectlyManipulateWithPointer(
+  pointerType: string,
+  inputMode: EffectiveInputMode,
+): boolean {
+  if (pointerType === 'mouse') return true;
+  if (inputMode === 'mouse') return false;
+  return inputMode === 'pen' ? pointerType === 'pen' : pointerType === 'touch';
 }
 
 export function isEmptyCanvasPlacementTarget(target: Element): boolean {

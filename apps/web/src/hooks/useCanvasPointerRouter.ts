@@ -1,21 +1,19 @@
 import { useEffect, useRef, type MutableRefObject } from 'react';
 
+import {
+  canManipulateCanvasWithPointer,
+  isPanelTarget,
+} from '@/components/Panels/Canvas/canvasInputPolicy';
 import { createViewportNavigationRecognizer } from '@/handler/canvasPointerRecognizers/viewportNavigation';
 import { PointerRouterCore } from '@/handler/pointerRouter';
 
 import type { CanvasPointerRouterContext } from '@/handler/canvasPointerRouterContext';
 import type { PointerRecognizer } from '@/handler/pointerRouter';
-import type {
-  DeviceModePreference,
-  EffectiveDeviceMode,
-  EffectiveTouchInteractionMode,
-} from '@/store/toolStore';
+import type { EffectiveInputMode } from '@/store/toolStore';
 import type { ReactFlowInstance } from '@xyflow/react';
 
 interface CanvasPointerRouterOptions {
-  deviceMode: EffectiveDeviceMode;
-  deviceModePreference: DeviceModePreference;
-  touchInteractionMode: EffectiveTouchInteractionMode;
+  inputMode: EffectiveInputMode;
   explicitToolActive: boolean;
   onTouchTakeover: () => void;
   onEmptyCanvasTap: () => void;
@@ -66,19 +64,40 @@ export function useCanvasPointerRouter(
       return {
         wrapper,
         instance,
-        deviceMode: o.deviceMode,
-        deviceModePreference: o.deviceModePreference,
-        touchInteractionMode: o.touchInteractionMode,
+        inputMode: o.inputMode,
         explicitToolActive: o.explicitToolActive,
         onTouchTakeover: o.onTouchTakeover,
         onEmptyCanvasTap: o.onEmptyCanvasTap,
       };
     });
 
-    const onDown = (event: PointerEvent) => core.handleDown(event);
-    const onMove = (event: PointerEvent) => core.handleMove(event);
-    const onUp = (event: PointerEvent) => core.handleUp(event);
-    const onCancel = (event: PointerEvent) => core.handleCancel(event);
+    const shouldBlock = (event: PointerEvent) =>
+      !isPanelTarget(event.target as Element | null) &&
+      !canManipulateCanvasWithPointer(
+        event.pointerType,
+        optionsRef.current.inputMode,
+      );
+    const block = (event: PointerEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+    };
+    const onDown = (event: PointerEvent) => {
+      if (shouldBlock(event)) return block(event);
+      core.handleDown(event);
+    };
+    const onMove = (event: PointerEvent) => {
+      if (shouldBlock(event)) return block(event);
+      core.handleMove(event);
+    };
+    const onUp = (event: PointerEvent) => {
+      if (shouldBlock(event)) return block(event);
+      core.handleUp(event);
+    };
+    const onCancel = (event: PointerEvent) => {
+      if (shouldBlock(event)) return block(event);
+      core.handleCancel(event);
+    };
 
     el.addEventListener('pointerdown', onDown, { capture: true });
     el.addEventListener('pointermove', onMove, { capture: true });

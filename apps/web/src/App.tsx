@@ -105,7 +105,12 @@ function RootLayout() {
   }, [blocker]);
 
   return (
-    <div className="flex h-screen flex-col">
+    // `h-full` (not `h-screen`/`100vh`) so the app tracks the *visible*
+    // viewport. On mobile Safari `100vh` resolves to the large viewport,
+    // overflowing the `overflow: hidden` `#root` (which is `100%` of the
+    // visible viewport) and clipping the bottom toolbar. Desktop is
+    // unaffected since both values match there.
+    <div className="flex h-full flex-col">
       <WindowChrome />
       {/* Bridges the native macOS menu bar to the in-app action
           handlers. Renders nothing off macOS. */}

@@ -13,17 +13,10 @@ import { Toggle } from '@/components/Common/Toggle';
 import { SettingRow } from '@/components/Settings/Common/SettingRow';
 import { canCheckForUpdates, useAppUpdate } from '@/hooks/useAppUpdate';
 import { getElectronBridge } from '@/hooks/useElectron';
-import {
-  useEffectiveDeviceMode,
-  useEffectiveTouchInteractionMode,
-} from '@/hooks/useInputMode';
+import { useEffectiveInputMode } from '@/hooks/useInputMode';
 import { supportedLngs, type SupportedLanguage } from '@/i18n';
 import useCanvasStore from '@/store/canvasStore';
-import {
-  useToolStore,
-  type DeviceModePreference,
-  type TouchInteractionPreference,
-} from '@/store/toolStore';
+import { useToolStore, type InputModePreference } from '@/store/toolStore';
 
 /** Native language names, shown regardless of the active UI language. */
 const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
@@ -51,20 +44,13 @@ export const GeneralSettings: React.FC = () => {
   const { t, i18n } = useTranslation();
   const minimapEnabled = useCanvasStore((s) => s.minimapEnabled);
   const toggleMinimap = useCanvasStore((s) => s.toggleMinimap);
-  const deviceModePreference = useToolStore(
-    (state) => state.deviceModePreference,
+  const inputModePreference = useToolStore(
+    (state) => state.inputModePreference,
   );
-  const touchInteractionPreference = useToolStore(
-    (state) => state.touchInteractionPreference,
+  const setInputModePreference = useToolStore(
+    (state) => state.setInputModePreference,
   );
-  const setDeviceModePreference = useToolStore(
-    (state) => state.setDeviceModePreference,
-  );
-  const setTouchInteractionPreference = useToolStore(
-    (state) => state.setTouchInteractionPreference,
-  );
-  const effectiveDeviceMode = useEffectiveDeviceMode();
-  const effectiveTouchInteractionMode = useEffectiveTouchInteractionMode();
+  const effectiveInputMode = useEffectiveInputMode();
   const [idleTimeoutSecs, setIdleTimeoutSecs] = useState(600);
   const [idleTimeoutSelection, setIdleTimeoutSelection] = useState('600');
   const [customMinutes, setCustomMinutes] = useState('10');
@@ -211,54 +197,25 @@ export const GeneralSettings: React.FC = () => {
         </SettingRow>
       )}
       <SettingRow
-        title={t('settings.deviceMode')}
-        description={t('settings.deviceModeDescription')}
+        title={t('settings.inputMode')}
+        description={t('settings.inputModeDescription')}
       >
-        <Select<DeviceModePreference>
+        <Select<InputModePreference>
           options={[
             {
               value: 'auto',
               label: t('settings.automaticResolved', {
-                mode: t(`settings.deviceMode_${effectiveDeviceMode}`),
+                mode: t(`settings.inputMode_${effectiveInputMode}`),
               }),
             },
-            { value: 'desktop', label: t('settings.deviceMode_desktop') },
-            { value: 'touch', label: t('settings.deviceMode_touch') },
+            { value: 'mouse', label: t('settings.inputMode_mouse') },
+            { value: 'pen', label: t('settings.inputMode_pen') },
+            { value: 'finger', label: t('settings.inputMode_finger') },
           ]}
-          value={deviceModePreference}
-          onChange={setDeviceModePreference}
-          title={t('settings.deviceMode')}
-          ariaLabel={t('settings.deviceMode')}
-        />
-      </SettingRow>
-      <SettingRow
-        title={t('settings.touchInteractionMode')}
-        description={t('settings.touchInteractionModeDescription')}
-      >
-        <Select<TouchInteractionPreference>
-          options={[
-            {
-              value: 'auto',
-              label: t('settings.automaticResolved', {
-                mode: t(
-                  `settings.touchInteractionMode_${effectiveTouchInteractionMode}`,
-                ),
-              }),
-            },
-            {
-              value: 'pen',
-              label: t('settings.touchInteractionMode_pen'),
-            },
-            {
-              value: 'finger',
-              label: t('settings.touchInteractionMode_finger'),
-            },
-          ]}
-          value={touchInteractionPreference}
-          onChange={setTouchInteractionPreference}
-          disabled={effectiveDeviceMode === 'desktop'}
-          title={t('settings.touchInteractionMode')}
-          ariaLabel={t('settings.touchInteractionMode')}
+          value={inputModePreference}
+          onChange={setInputModePreference}
+          title={t('settings.inputMode')}
+          ariaLabel={t('settings.inputMode')}
         />
       </SettingRow>
       <SettingRow

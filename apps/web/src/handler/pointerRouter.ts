@@ -33,6 +33,9 @@ export interface PreemptContext {
    * observer already owns the pointer.
    */
   preempt(): void;
+
+  /** Cancel and release the current owner of another tracked pointer. */
+  cancelPointer(pointerId: number): void;
 }
 
 export interface PointerRecognizer<E extends RoutablePointerEvent, C> {
@@ -73,6 +76,7 @@ type ObserveHook = 'onDown' | 'onMove' | 'onUp' | 'onCancel';
 
 export class PointerRouterCore<E extends RoutablePointerEvent, C> {
   private readonly owners = new Map<number, PointerRecognizer<E, C>>();
+  private readonly events = new Map<number, E>();
 
   constructor(
     private readonly recognizers: readonly PointerRecognizer<E, C>[],
@@ -87,6 +91,7 @@ export class PointerRouterCore<E extends RoutablePointerEvent, C> {
   handleDown(event: E): void {
     const ctx = this.getContext();
     if (ctx === null) return;
+    this.events.set(event.pointerId, event);
 
     this.broadcast('onDown', event, ctx);
     // An observer may have already seized the pointer via preempt().
@@ -104,6 +109,7 @@ export class PointerRouterCore<E extends RoutablePointerEvent, C> {
   handleMove(event: E): void {
     const ctx = this.getContext();
     if (ctx === null) return;
+    this.events.set(event.pointerId, event);
     this.broadcast('onMove', event, ctx);
     this.owners.get(event.pointerId)?.onMove?.(event, ctx);
   }
@@ -117,6 +123,7 @@ export class PointerRouterCore<E extends RoutablePointerEvent, C> {
       this.owners.delete(event.pointerId);
       owner.onUp?.(event, ctx);
     }
+    this.events.delete(event.pointerId);
   }
 
   handleCancel(event: E): void {
@@ -128,6 +135,7 @@ export class PointerRouterCore<E extends RoutablePointerEvent, C> {
       this.owners.delete(event.pointerId);
       owner.onCancel?.(event, ctx);
     }
+    this.events.delete(event.pointerId);
   }
 
   private broadcast(hook: ObserveHook, event: E, ctx: C): void {
@@ -137,6 +145,7 @@ export class PointerRouterCore<E extends RoutablePointerEvent, C> {
       const observerCtx: C & PreemptContext = {
         ...ctx,
         preempt: () => this.preempt(recognizer, event, ctx),
+        cancelPointer: (pointerId) => this.cancelPointer(pointerId, ctx),
       };
       fn(event, observerCtx);
     }
@@ -147,5 +156,13 @@ export class PointerRouterCore<E extends RoutablePointerEvent, C> {
     if (current === recognizer) return;
     if (current) current.onCancel?.(event, ctx);
     this.owners.set(event.pointerId, recognizer);
+  }
+
+  private cancelPointer(pointerId: number, ctx: C): void {
+    const owner = this.owners.get(pointerId);
+    const event = this.events.get(pointerId);
+    if (!owner || !event) return;
+    this.owners.delete(pointerId);
+    owner.onCancel?.(event, ctx);
   }
 }

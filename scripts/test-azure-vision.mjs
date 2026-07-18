@@ -8,6 +8,7 @@ import dotenv from 'dotenv';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..');
+const REQUEST_TIMEOUT_MS = 20_000;
 
 dotenv.config({ path: path.join(repoRoot, '.env'), quiet: true });
 
@@ -38,6 +39,7 @@ async function run(imagePath) {
 
   const response = await fetch(url, {
     method: 'POST',
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     headers: {
       'Content-Type': 'application/octet-stream',
       'Ocp-Apim-Subscription-Key': key,

@@ -19,7 +19,10 @@ import {
 } from '@/hooks/useCanvasGestures';
 
 import type { CanvasPointerRouterContext } from '@/handler/canvasPointerRouterContext';
-import type { PointerRecognizer } from '@/handler/pointerRouter';
+import type {
+  PointerRecognizer,
+  PreemptContext,
+} from '@/handler/pointerRouter';
 
 interface Point {
   x: number;
@@ -58,9 +61,11 @@ export function createViewportNavigationRecognizer(): PointerRecognizer<
 
   const observeDown = (
     event: PointerEvent,
-    ctx: CanvasPointerRouterContext,
+    ctx: CanvasPointerRouterContext & PreemptContext,
   ): void => {
     if (event.pointerType !== 'touch') return;
+    if (ctx.inputMode === 'mouse') return;
+    if (isPanelTarget(event.target as Element | null)) return;
     const { instance } = ctx;
     const point = { x: event.clientX, y: event.clientY };
     activeTouches.set(event.pointerId, point);
@@ -102,6 +107,8 @@ export function createViewportNavigationRecognizer(): PointerRecognizer<
       panTouchId = null;
       isPinching = true;
       const [first, second] = Array.from(activeTouches.entries());
+      ctx.cancelPointer(first[0]);
+      ctx.cancelPointer(second[0]);
       startDist = distance(first[1], second[1]);
       startMidpoint = midpoint(first[1], second[1]);
       startViewport = instance.getViewport();
@@ -113,8 +120,7 @@ export function createViewportNavigationRecognizer(): PointerRecognizer<
     }
 
     if (
-      ctx.deviceMode === 'touch' &&
-      ctx.touchInteractionMode === 'pen' &&
+      ctx.inputMode === 'pen' &&
       !isPanelTarget(event.target as Element | null)
     ) {
       event.preventDefault();
@@ -182,6 +188,7 @@ export function createViewportNavigationRecognizer(): PointerRecognizer<
   const observeEnd = (
     event: PointerEvent,
     ctx: CanvasPointerRouterContext,
+    cancelled: boolean,
   ): void => {
     if (event.pointerType !== 'touch') return;
     if (
@@ -203,7 +210,7 @@ export function createViewportNavigationRecognizer(): PointerRecognizer<
       });
       endCanvasGesture(event.pointerId);
       panTouchId = null;
-      if (phase === 'pending') {
+      if (!cancelled && phase === 'pending') {
         ctx.onEmptyCanvasTap();
       }
     }
@@ -220,8 +227,8 @@ export function createViewportNavigationRecognizer(): PointerRecognizer<
     observe: {
       onDown: observeDown,
       onMove: observeMove,
-      onUp: observeEnd,
-      onCancel: observeEnd,
+      onUp: (event, ctx) => observeEnd(event, ctx, false),
+      onCancel: (event, ctx) => observeEnd(event, ctx, true),
     },
   };
 }

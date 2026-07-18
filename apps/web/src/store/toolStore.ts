@@ -45,25 +45,17 @@ export type SketchSizePresetKind = 'stroke' | 'eraser';
 export type SketchSizePresets = [number, number, number];
 export type SketchColorPresets = [string, string, string];
 
-export type DeviceModePreference = 'auto' | 'desktop' | 'touch';
-export type EffectiveDeviceMode = 'desktop' | 'touch';
-export type TouchInteractionPreference = 'auto' | 'pen' | 'finger';
-export type EffectiveTouchInteractionMode = 'pen' | 'finger';
+export type InputModePreference = 'auto' | 'mouse' | 'pen' | 'finger';
+export type EffectiveInputMode = Exclude<InputModePreference, 'auto'>;
 
-export function resolveDeviceMode(
-  preference: DeviceModePreference,
+export function resolveInputMode(
+  preference: InputModePreference,
   touchCapable: boolean,
-): EffectiveDeviceMode {
-  if (preference !== 'auto') return preference;
-  return touchCapable ? 'touch' : 'desktop';
-}
-
-export function resolveTouchInteractionMode(
-  preference: TouchInteractionPreference,
   penObserved: boolean,
-): EffectiveTouchInteractionMode {
+): EffectiveInputMode {
   if (preference !== 'auto') return preference;
-  return penObserved ? 'pen' : 'finger';
+  if (penObserved) return 'pen';
+  return touchCapable ? 'finger' : 'mouse';
 }
 
 type ToolState = {
@@ -75,15 +67,11 @@ type ToolState = {
   activeColorPreset: number;
   activeStrokeSizePreset: number;
   activeEraserSizePreset: number;
-  deviceModePreference: DeviceModePreference;
-  touchInteractionPreference: TouchInteractionPreference;
+  inputModePreference: InputModePreference;
   penObserved: boolean;
   setPendingNodeType: (type: PendingNodeType) => void;
   setSketchDraft: (patch: Partial<SketchDraft>) => void;
-  setDeviceModePreference: (preference: DeviceModePreference) => void;
-  setTouchInteractionPreference: (
-    preference: TouchInteractionPreference,
-  ) => void;
+  setInputModePreference: (preference: InputModePreference) => void;
   observePen: () => void;
   selectSketchColorPreset: (index: number) => void;
   updateSketchColorPreset: (index: number, color: string) => void;
@@ -143,16 +131,13 @@ export const useToolStore = create<ToolState>()(
       activeColorPreset: 0,
       activeStrokeSizePreset: 1,
       activeEraserSizePreset: 0,
-      deviceModePreference: 'auto',
-      touchInteractionPreference: 'auto',
+      inputModePreference: 'auto',
       penObserved: false,
       setPendingNodeType: (type) => set({ pendingNodeType: type }),
       setSketchDraft: (patch) =>
         set((state) => ({ sketchDraft: { ...state.sketchDraft, ...patch } })),
-      setDeviceModePreference: (deviceModePreference) =>
-        set({ deviceModePreference }),
-      setTouchInteractionPreference: (touchInteractionPreference) =>
-        set({ touchInteractionPreference }),
+      setInputModePreference: (inputModePreference) =>
+        set({ inputModePreference }),
       observePen: () =>
         set((state) => (state.penObserved ? state : { penObserved: true })),
       selectSketchColorPreset: (index) =>
@@ -248,8 +233,7 @@ export const useToolStore = create<ToolState>()(
         activeColorPreset: state.activeColorPreset,
         activeStrokeSizePreset: state.activeStrokeSizePreset,
         activeEraserSizePreset: state.activeEraserSizePreset,
-        deviceModePreference: state.deviceModePreference,
-        touchInteractionPreference: state.touchInteractionPreference,
+        inputModePreference: state.inputModePreference,
         penObserved: state.penObserved,
       }),
     },

@@ -33,9 +33,7 @@ function targetInside(className: string): Element {
 }
 
 const fingerOptions = {
-  deviceMode: 'touch' as const,
-  deviceModePreference: 'touch' as const,
-  touchInteractionMode: 'finger' as const,
+  inputMode: 'finger' as const,
   explicitToolActive: false,
 };
 
@@ -68,27 +66,16 @@ describe('shouldOwnSingleTouchNavigation', () => {
     expect(
       shouldOwnSingleTouchNavigation(targetInside('react-flow__node'), {
         ...fingerOptions,
-        touchInteractionMode: 'pen',
+        inputMode: 'pen',
       }),
     ).toBe(true);
   });
 
-  it('accepts the first auto-mode touch before effective mode rerenders', () => {
+  it('rejects touchscreen navigation in mouse mode', () => {
     expect(
       shouldOwnSingleTouchNavigation(targetInside('react-flow__background'), {
         ...fingerOptions,
-        deviceMode: 'desktop',
-        deviceModePreference: 'auto',
-      }),
-    ).toBe(true);
-  });
-
-  it('honors an explicit desktop preference', () => {
-    expect(
-      shouldOwnSingleTouchNavigation(targetInside('react-flow__background'), {
-        ...fingerOptions,
-        deviceMode: 'desktop',
-        deviceModePreference: 'desktop',
+        inputMode: 'mouse',
       }),
     ).toBe(false);
   });

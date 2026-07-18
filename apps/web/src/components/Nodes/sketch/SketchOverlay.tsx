@@ -11,10 +11,7 @@ import {
   updateCanvasGesture,
   type CanvasPointerType,
 } from '@/handler/canvasGestureSession';
-import {
-  useEffectiveDeviceMode,
-  useEffectiveTouchInteractionMode,
-} from '@/hooks/useInputMode';
+import { useEffectiveInputMode } from '@/hooks/useInputMode';
 import useCanvasStore from '@/store/canvasStore';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 import { useToolStore } from '@/store/toolStore';
@@ -129,8 +126,7 @@ export function SketchOverlay({
   const addNode = useCanvasStore((s) => s.addNode);
   const selectNodes = useCanvasStore((s) => s.selectNodes);
   const sketchDraft = useToolStore((s) => s.sketchDraft);
-  const deviceMode = useEffectiveDeviceMode();
-  const touchInteractionMode = useEffectiveTouchInteractionMode();
+  const inputMode = useEffectiveInputMode();
 
   // Drop any prior canvas selection the moment the sketch tool
   // activates: the overlay swallows all pointer events so the user
@@ -195,12 +191,14 @@ export function SketchOverlay({
 
   const acceptsPointer = useCallback(
     (pointerType: string) => {
-      if (deviceMode === 'desktop' || pointerType === 'mouse') return true;
-      return touchInteractionMode === 'pen'
+      // The mouse always draws; other pointers follow the input-mode routing.
+      if (pointerType === 'mouse') return true;
+      if (inputMode === 'mouse') return false;
+      return inputMode === 'pen'
         ? pointerType === 'pen'
         : pointerType === 'touch';
     },
-    [deviceMode, touchInteractionMode],
+    [inputMode],
   );
 
   const cancelActiveGesture = useCallback(() => {

@@ -28,16 +28,28 @@ export interface ForwardedPointerHandlers {
 export function createForwardingRecognizer(
   id: string,
   getHandlers: () => ForwardedPointerHandlers,
+  shouldForward: (
+    event: PointerEvent,
+    ctx: CanvasPointerRouterContext,
+  ) => boolean = () => true,
 ): PointerRecognizer<PointerEvent, CanvasPointerRouterContext> {
   return {
     id,
     canClaim: () => false,
     onDown: () => 'pass',
     observe: {
-      onDown: (event) => getHandlers().onPointerDown(event),
-      onMove: (event) => getHandlers().onPointerMove(event),
-      onUp: (event) => getHandlers().onPointerUp(event),
-      onCancel: (event) => getHandlers().onPointerCancel(event),
+      onDown: (event, ctx) => {
+        if (shouldForward(event, ctx)) getHandlers().onPointerDown(event);
+      },
+      onMove: (event, ctx) => {
+        if (shouldForward(event, ctx)) getHandlers().onPointerMove(event);
+      },
+      onUp: (event, ctx) => {
+        if (shouldForward(event, ctx)) getHandlers().onPointerUp(event);
+      },
+      onCancel: (event, ctx) => {
+        if (shouldForward(event, ctx)) getHandlers().onPointerCancel(event);
+      },
     },
   };
 }

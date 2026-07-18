@@ -9,7 +9,7 @@ import {
   type NestableNode,
 } from '@sediment/shared/canvas-engine';
 
-import { useIsTouch } from '@/hooks/useInputMode.ts';
+import { useIsNotMouse } from '@/hooks/useInputMode.ts';
 import useCanvasStore from '@/store/canvasStore';
 
 import type { CanvasNode } from '@/components/Nodes/types';
@@ -69,7 +69,7 @@ export const MultiSelectResizer = () => {
   const setNodeGeometry = useCanvasStore((s) => s.setNodeGeometry);
   const onNodeResizeStart = useCanvasStore((s) => s.onNodeResizeStart);
 
-  const isTouch = useIsTouch();
+  const isDirectManipulation = useIsNotMouse();
   const { zoom, x: vpX, y: vpY } = useViewport();
   const domNode = useStore((s) => s.domNode);
   const storeApi = useStoreApi();
@@ -108,7 +108,7 @@ export const MultiSelectResizer = () => {
   const widthPx = Math.max(0, maxPx.x - minPx.x);
   const heightPx = Math.max(0, maxPx.y - minPx.y);
 
-  const handleSize = isTouch ? 12 : 8;
+  const handleSize = isDirectManipulation ? 12 : 8;
 
   const startGesture = (corner: Corner, e: React.PointerEvent) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;

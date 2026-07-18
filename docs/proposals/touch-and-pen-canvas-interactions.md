@@ -19,7 +19,7 @@ Touch and pen input also need distinct interaction modes. In Pen mode, the pen o
 4. Keep Lasso and Sketch as explicit persistent modes whose single-pointer behavior is unambiguous.
 5. Provide explicit Pen and Finger interaction modes instead of granting fingers the same manipulation capabilities whenever a pen is present.
 6. Detect Pen mode from real `pointerType === 'pen'` input and provide a manual Auto / Pen / Finger preference because pen capability cannot always be detected before first contact.
-7. Model the user's current device experience as Desktop or Touch so toolbars, hit targets, hover affordances, and future input adaptations share one extensible source of truth.
+7. Drive toolbars, hit targets, hover affordances, and future input adaptations from the pointer currently in use so hybrid devices adapt reactively, keeping that reactive signal separate from the persisted interaction preference.
 8. Preserve the existing desktop mouse tool model and keyboard shortcuts.
 
 ## Non-Goals
@@ -74,7 +74,7 @@ In Pen mode, touch operates application chrome but does not activate on-canvas n
 
 ### Interaction Mode Selection
 
-The preference is `auto`, `pen`, or `finger` and applies to canvas interaction, not toolbar density. `pen` and `finger` are explicit user overrides.
+The preference is `auto`, `mouse`, `pen`, or `finger` and governs canvas pointer routing, not toolbar density. `mouse`, `pen`, and `finger` are explicit user overrides.
 
 In `auto`, the app resolves to Finger mode until this browser profile has observed a trusted `pointerdown` with `pointerType === 'pen'`. After observation it resolves to Pen mode and persists `penObserved` for subsequent sessions on the same browser profile and origin. Automatic detection must never infer Pen mode from `any-pointer: fine`, because that also matches a mouse. Users whose browser or driver misreports the pen can select Pen or Finger explicitly in Settings; an explicit preference always overrides `penObserved`.
 
@@ -82,35 +82,26 @@ Switching modes must not reinterpret a gesture already in progress. The new mode
 
 ## Settings Model
 
-The two preferences represent different layers and must remain independent:
+One persisted preference governs which non-mouse pointers reach the canvas; the reactive current pointer governs UI density and tool visibility:
 
-| Setting                | Options                    | Responsibility                                                                                                                                                                                              |
-| ---------------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Device mode            | `auto`, `desktop`, `touch` | Select the application's overall input-device experience. It may drive toolbars, control and hit-target sizes, hover-dependent affordances, floating actions, shortcut hints, and future touch adaptations. |
-| Touch interaction mode | `auto`, `pen`, `finger`    | Decide whether pen or finger owns direct canvas manipulation when the effective device mode is Touch.                                                                                                       |
+| Setting    | Options                          | Responsibility                                                                                                                                                        |
+| ---------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Input mode | `auto`, `mouse`, `pen`, `finger` | Gate which non-mouse pointers reach the canvas and disambiguate pen vs finger. The mouse is never blocked; Mouse mode additionally ignores touchscreen and pen input. |
 
-`DeviceMode` is intentionally broader than a canvas-toolbar layout preference. In `auto`, touch capability signals such as `navigator.maxTouchPoints`, `(any-pointer: coarse)`, and observed touch or pen input determine the effective Desktop or Touch mode. `desktop` and `touch` are explicit user overrides for misreported hardware, hybrid devices, remote sessions, and personal preference. Automatic detection must not overwrite an explicit preference.
+Toolbar density, tool visibility, activation thresholds, and node-drag affordances follow the pointer currently in use (`useIsNotMouse`) rather than this persisted preference, so a mouse and a finger used on the same hybrid device each get their native experience.
 
-`TouchInteractionMode` applies when the effective device mode is Touch. Its `auto` behavior follows the Interaction Mode Selection rules above; explicit `pen` and `finger` values override pen-capability inference. The saved preference and the effective resolved mode are separate values so automatic detection does not rewrite user intent.
-
-When the effective device mode is Desktop, Touch interaction mode remains saved but inactive. Returning to Touch restores the prior Touch interaction preference.
-
-Suggested model:
+In `auto`, trusted pen observation resolves to Pen, otherwise touch capability resolves to Finger, and environments without either resolve to Mouse. Explicit Mouse, Pen, and Finger choices override capability inference and are never rewritten automatically. Mouse mode rejects touchscreen touch and pen canvas operations while retaining trackpad wheel gestures.
 
 ```ts
-type DeviceModePreference = 'auto' | 'desktop' | 'touch';
-type EffectiveDeviceMode = 'desktop' | 'touch';
-type TouchInteractionPreference = 'auto' | 'pen' | 'finger';
-type EffectiveTouchInteractionMode = 'pen' | 'finger';
+type InputModePreference = 'auto' | 'mouse' | 'pen' | 'finger';
+type EffectiveInputMode = Exclude<InputModePreference, 'auto'>;
 ```
 
 ## Device-Driven UI Behavior
 
-Desktop device mode keeps the existing Select, Pan, and Lasso tool group and its keyboard shortcuts. Touch device mode hides Select and Pan in both Pen and Finger interaction modes because direct gestures provide their capabilities; Lasso becomes the visible primary selection tool.
+Toolbar contents and affordances follow the pointer currently in use, not the persisted preference. While the mouse is the current pointer the toolbar keeps the Select, Pan, and Lasso tool group and its keyboard shortcuts. While touch or pen is the current pointer, Select and Pan are hidden because direct gestures provide their capabilities and Lasso becomes the visible primary selection tool. Because this follows the current pointer, a hybrid device switches between the two experiences the instant the pointer changes; Mouse mode pins the signal to mouse because it ignores touch and pen.
 
-Device mode and Touch interaction mode are separate settings. Device mode controls the broader UI adaptation, while Pen / Finger mode determines canvas gesture ownership. Alternating between pen and touch must not switch device mode or cause toolbars to jump.
-
-Touch device mode represents Select and Pan as one internal `default` tool. Switching from Desktop to Touch maps either Select or Pan to `default`; switching from Touch to Desktop maps `default` to Select rather than restoring a hidden prior tool. Lasso, Sketch, and other explicit modes remain active across a device-mode change. Select and Pan shortcuts must not create hidden tool state while Touch mode is effective; they map to `default` or have no effect. Preference changes during an active gesture apply at the next gesture boundary.
+While touch or pen is the current pointer, Select and Pan collapse to one internal `default` tool. Switching from mouse to touch or pen maps either Select or Pan to `default`; switching back to the mouse maps `default` to Select rather than restoring a hidden prior tool. Lasso, Sketch, and other explicit modes remain active across pointer and input-mode changes. Select and Pan shortcuts must not create hidden tool state while touch or pen is the current pointer; they map to `default` or have no effect. Preference changes during an active gesture apply at the next gesture boundary.
 
 ## Acceptance Criteria
 
@@ -121,12 +112,12 @@ Touch device mode represents Select and Pan as one internal `default` tool. Swit
 5. A second finger takes over a pending node gesture, lasso, or uncommitted Sketch stroke without a viewport jump or residual mutation; it does not take over a node or Sketch mutation after that gesture locks.
 6. Lasso remains explicitly active across completed selections, while mode-appropriate viewport navigation remains available.
 7. Auto resolves to Finger until a real pen event is observed, persists `penObserved` per browser profile and origin, resolves subsequent Auto sessions to Pen, and honors explicit Pen and Finger overrides.
-8. Device mode remains independent of Pen / Finger interaction mode and provides a reusable Desktop / Touch signal beyond the canvas toolbar.
-9. Auto, Desktop, and Touch device preferences resolve predictably without overwriting explicit user choices.
+8. Auto, Mouse, Pen, and Finger input preferences resolve predictably without overwriting explicit user choices.
+9. Mouse mode rejects touchscreen touch and pen canvas operations while retaining mouse and trackpad behavior.
 10. Mouse Select, Pan, Lasso, and keyboard behavior remains unchanged.
 11. A cancelled gesture cannot resume when the pointer count falls, and no click, selection, drag-stop, lasso, Sketch, link, or control action leaks from its remaining pointer.
 12. Sketch erasing commits once on pointer up, produces one undo step, and leaves no mutation when cancelled before commit.
-13. Desktop Select or Pan maps to Touch `default`, Touch `default` maps back to Desktop Select, and shortcuts cannot create a hidden Select or Pan state in Touch mode.
+13. While the mouse is the current pointer Select or Pan is available; when touch or pen takes over they collapse to the internal `default`, returning to the mouse maps `default` back to Select, and shortcuts cannot create a hidden Select or Pan state while touch or pen is the current pointer.
 
 ## Likely Code Entry Points
 
@@ -139,5 +130,5 @@ Touch device mode represents Select and Pan as one internal `default` tool. Swit
 | [`../../apps/web/src/hooks/useInputMode.ts`](../../apps/web/src/hooks/useInputMode.ts)                                                       | Track observed pointer input; future device-mode resolution must remain separate from gesture ownership. |
 | [`../../apps/web/src/components/Nodes/sketch/SketchOverlay.tsx`](../../apps/web/src/components/Nodes/sketch/SketchOverlay.tsx)               | Keep draw and erase changes gesture-local until commit and discard them on eligible touch takeover.      |
 | [`../../apps/web/src/store/canvasStore.ts`](../../apps/web/src/store/canvasStore.ts)                                                         | Own node-drag gesture snapshots, lock state, cancellation, commit, and undo boundaries.                  |
-| [`../../apps/web/src/store/toolStore.ts`](../../apps/web/src/store/toolStore.ts)                                                             | Persist device and Touch interaction preferences separately from transient gesture ownership.            |
-| [`../../apps/web/src/components/Settings/sections/GeneralSettings.tsx`](../../apps/web/src/components/Settings/sections/GeneralSettings.tsx) | Present Device mode and Touch interaction mode preferences.                                              |
+| [`../../apps/web/src/store/toolStore.ts`](../../apps/web/src/store/toolStore.ts)                                                             | Persist the input preference and pen observation separately from transient gesture ownership.            |
+| [`../../apps/web/src/components/Settings/sections/GeneralSettings.tsx`](../../apps/web/src/components/Settings/sections/GeneralSettings.tsx) | Present the input preference and resolved Auto value.                                                    |

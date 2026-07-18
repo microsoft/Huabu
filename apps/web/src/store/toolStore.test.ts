@@ -1,51 +1,41 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import {
-  resolveDeviceMode,
-  resolveTouchInteractionMode,
-  useToolStore,
-} from './toolStore';
+import { resolveInputMode, useToolStore } from './toolStore';
 
-describe('toolStore input preferences', () => {
+describe('toolStore input preference', () => {
   beforeEach(() => {
     localStorage.clear();
     useToolStore.setState({
-      deviceModePreference: 'auto',
-      touchInteractionPreference: 'auto',
+      inputModePreference: 'auto',
       penObserved: false,
     });
   });
 
-  it('resolves automatic and explicit device preferences independently', () => {
-    expect(resolveDeviceMode('auto', false)).toBe('desktop');
-    expect(resolveDeviceMode('auto', true)).toBe('touch');
-    expect(resolveDeviceMode('desktop', true)).toBe('desktop');
-    expect(resolveDeviceMode('touch', false)).toBe('touch');
+  it('resolves explicit modes without hardware inference', () => {
+    expect(resolveInputMode('mouse', true, true)).toBe('mouse');
+    expect(resolveInputMode('pen', false, false)).toBe('pen');
+    expect(resolveInputMode('finger', false, true)).toBe('finger');
   });
 
-  it('uses observed pen input only for automatic touch interaction', () => {
-    expect(resolveTouchInteractionMode('auto', false)).toBe('finger');
-    expect(resolveTouchInteractionMode('auto', true)).toBe('pen');
-    expect(resolveTouchInteractionMode('finger', true)).toBe('finger');
-    expect(resolveTouchInteractionMode('pen', false)).toBe('pen');
+  it('resolves auto from observed pen and touch capability', () => {
+    expect(resolveInputMode('auto', false, false)).toBe('mouse');
+    expect(resolveInputMode('auto', true, false)).toBe('finger');
+    expect(resolveInputMode('auto', true, true)).toBe('pen');
   });
 
-  it('persists observed pen input without rewriting either preference', () => {
-    useToolStore.getState().setDeviceModePreference('touch');
-    useToolStore.getState().setTouchInteractionPreference('finger');
+  it('persists observed pen input without rewriting the preference', () => {
+    useToolStore.getState().setInputModePreference('finger');
     useToolStore.getState().observePen();
 
     const state = useToolStore.getState();
     expect(state.penObserved).toBe(true);
-    expect(state.deviceModePreference).toBe('touch');
-    expect(state.touchInteractionPreference).toBe('finger');
+    expect(state.inputModePreference).toBe('finger');
 
     const stored = JSON.parse(
       localStorage.getItem('sediment-sketch-tools') ?? '{}',
     ) as { state?: Record<string, unknown> };
     expect(stored.state?.penObserved).toBe(true);
-    expect(stored.state?.deviceModePreference).toBe('touch');
-    expect(stored.state?.touchInteractionPreference).toBe('finger');
+    expect(stored.state?.inputModePreference).toBe('finger');
   });
 });
 
@@ -66,6 +56,8 @@ describe('toolStore sketch size presets', () => {
       activeColorPreset: 0,
       activeStrokeSizePreset: 1,
       activeEraserSizePreset: 1,
+      inputModePreference: 'auto',
+      penObserved: false,
     });
   });
 
@@ -77,32 +69,6 @@ describe('toolStore sketch size presets', () => {
     expect(initialState.sketchDraft.eraserSize).toBe(
       initialState.eraserSizePresets[initialState.activeEraserSizePreset],
     );
-  });
-
-  it('aligns a persisted version 1 eraser preset with the draft value', async () => {
-    localStorage.setItem(
-      'sediment-sketch-tools',
-      JSON.stringify({
-        version: 1,
-        state: {
-          sketchDraft: {
-            strokeColor: 'black',
-            strokeSize: 8,
-            eraserSize: 16,
-            mode: 'draw',
-          },
-          eraserSizePresets: [12, 24, 40],
-          activeEraserSizePreset: 1,
-        },
-      }),
-    );
-
-    await useToolStore.persist.rehydrate();
-
-    const state = useToolStore.getState();
-    expect(state.sketchDraft.eraserSize).toBe(16);
-    expect(state.eraserSizePresets).toEqual([12, 16, 40]);
-    expect(state.activeEraserSizePreset).toBe(1);
   });
 
   it('selects a preset and applies it to the active sketch draft', () => {

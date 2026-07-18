@@ -53,8 +53,8 @@ import { useCanvasLasso } from '@/hooks/useCanvasLasso';
 import { useCanvasPointerRouter } from '@/hooks/useCanvasPointerRouter';
 import { useFrameDragToCreate } from '@/hooks/useFrameDragToCreate';
 import {
-  useEffectiveDeviceMode,
-  useEffectiveTouchInteractionMode,
+  useEffectiveInputMode,
+  useInputMode,
   useIsNotMouse,
 } from '@/hooks/useInputMode';
 import { useSketchHoverRouting } from '@/hooks/useSketchHoverRouting';
@@ -62,6 +62,7 @@ import { isMac } from '@/utils/platform';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
 import {
+  canDirectlyManipulateWithPointer,
   closestNodeElement,
   resolveNodeDraggable,
 } from './canvasInputPolicy.ts';
@@ -222,9 +223,7 @@ function getInfoColor(): string {
 const CanvasGestures: React.FC<{
   wrapperRef: React.MutableRefObject<HTMLDivElement | null>;
   rfInstanceRef: React.MutableRefObject<ReactFlowInstance | null>;
-  deviceMode: 'desktop' | 'touch';
-  deviceModePreference: 'auto' | 'desktop' | 'touch';
-  touchInteractionMode: 'pen' | 'finger';
+  inputMode: 'mouse' | 'pen' | 'finger';
   explicitToolActive: boolean;
   onTouchTakeover: () => void;
   onEmptyCanvasTap: () => void;
@@ -235,9 +234,7 @@ const CanvasGestures: React.FC<{
 }> = ({
   wrapperRef,
   rfInstanceRef,
-  deviceMode,
-  deviceModePreference,
-  touchInteractionMode,
+  inputMode,
   explicitToolActive,
   onTouchTakeover,
   onEmptyCanvasTap,
@@ -248,9 +245,7 @@ const CanvasGestures: React.FC<{
     wrapperRef,
     rfInstanceRef,
     {
-      deviceMode,
-      deviceModePreference,
-      touchInteractionMode,
+      inputMode,
       explicitToolActive,
       onTouchTakeover,
       onEmptyCanvasTap,
@@ -425,21 +420,16 @@ export const Canvas: React.FC<CanvasProps> = ({
   );
 
   const isNotMouse = useIsNotMouse();
-  const deviceMode = useEffectiveDeviceMode();
-  const deviceModePreference = useToolStore(
-    (state) => state.deviceModePreference,
-  );
-  const touchInteractionMode = useEffectiveTouchInteractionMode();
-  const isTouchDevice = deviceMode === 'touch';
-  const directManipulationPointer =
-    isTouchDevice && touchInteractionMode === 'pen' ? 'pen' : 'touch';
-  const dragActivationDistance = isTouchDevice
-    ? getDragActivationDistance(directManipulationPointer)
+  const inputMode = useEffectiveInputMode();
+  const lastPointer = useInputMode();
+  // Tap-vs-drag activation follows the pointer actually in use.
+  const dragActivationDistance = isNotMouse
+    ? getDragActivationDistance(lastPointer === 'pen' ? 'pen' : 'touch')
     : getDragActivationDistance('mouse');
 
   useEffect(() => {
-    if (isTouchDevice && tool === 'pan') setTool('select');
-  }, [isTouchDevice, setTool, tool]);
+    if (isNotMouse && tool === 'pan') setTool('select');
+  }, [isNotMouse, setTool, tool]);
 
   const handleSelectionStart = useCallback(() => {
     if (tool !== 'select') return;
@@ -533,8 +523,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     rfInstanceRef,
     edges,
     onSelect: (nodeIds) => selectNodes(nodeIds),
-    deviceMode,
-    touchInteractionMode,
+    inputMode,
   });
 
   // Sketch hover routing: hit-test the cursor against painted strokes so
@@ -597,7 +586,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       const touchDraggable = resolveNodeDraggable(
         node.draggable,
         node.selected,
-        deviceMode,
+        isNotMouse,
       );
       const needsWrap =
         nextClassName !== baseClassName ||
@@ -617,7 +606,7 @@ export const Canvas: React.FC<CanvasProps> = ({
 
     zWrapCacheRef.current = nextCache;
     return result;
-  }, [deviceMode, lassoPreviewNodeIdSet, nodes, zByNode]);
+  }, [isNotMouse, lassoPreviewNodeIdSet, nodes, zByNode]);
 
   // Override marker colors on selected edges so arrows match the selection
   // highlight color (--color-info). CSS cannot style SVG <marker> referenced
@@ -789,15 +778,20 @@ export const Canvas: React.FC<CanvasProps> = ({
         placePendingNode: (x, y) => placePendingNodeRef.current(x, y),
         suppressNextPaneClick,
       }),
-      createForwardingRecognizer('frame-drag', () => ({
-        onPointerDown: (e) =>
-          frameHandlersRef.current.onPointerDown(toReact(e)),
-        onPointerMove: (e) =>
-          frameHandlersRef.current.onPointerMove(toReact(e)),
-        onPointerUp: (e) => frameHandlersRef.current.onPointerUp(toReact(e)),
-        onPointerCancel: (e) =>
-          frameHandlersRef.current.onPointerCancel(toReact(e)),
-      })),
+      createForwardingRecognizer(
+        'frame-drag',
+        () => ({
+          onPointerDown: (e) =>
+            frameHandlersRef.current.onPointerDown(toReact(e)),
+          onPointerMove: (e) =>
+            frameHandlersRef.current.onPointerMove(toReact(e)),
+          onPointerUp: (e) => frameHandlersRef.current.onPointerUp(toReact(e)),
+          onPointerCancel: (e) =>
+            frameHandlersRef.current.onPointerCancel(toReact(e)),
+        }),
+        (event, ctx) =>
+          canDirectlyManipulateWithPointer(event.pointerType, ctx.inputMode),
+      ),
       createForwardingRecognizer('lasso', () => ({
         onPointerDown: (e) =>
           lassoHandlersRef.current.onPointerDown(toReact(e)),
@@ -1133,16 +1127,16 @@ export const Canvas: React.FC<CanvasProps> = ({
         panOnDrag={
           pendingNodeType
             ? [1] /* creation tool active → middle mouse button still pans */
-            : isTouchDevice
-              ? false
+            : isNotMouse
+              ? false /* touch/pen → custom gesture recognizers drive pan */
               : tool === 'pan'
                 ? true
-                : isNotMouse
-                  ? false /* non-mouse + select tool → drag creates selection rect */
-                  : [1] /* mouse + selection tools → middle mouse button pans */
+                : [
+                    1,
+                  ] /* mouse + selection tools → middle mouse button pans; drag box-selects */
         }
         selectionOnDrag={
-          pendingNodeType ? false : !isTouchDevice && tool === 'select'
+          pendingNodeType ? false : !isNotMouse && tool === 'select'
         }
         selectionMode={SelectionMode.Partial}
         onSelectionStart={handleSelectionStart}
@@ -1178,9 +1172,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         <CanvasGestures
           wrapperRef={wrapperRef}
           rfInstanceRef={rfInstanceRef}
-          deviceMode={deviceMode}
-          deviceModePreference={deviceModePreference}
-          touchInteractionMode={touchInteractionMode}
+          inputMode={inputMode}
           explicitToolActive={tool === 'lasso' || Boolean(pendingNodeType)}
           onTouchTakeover={handleTouchTakeover}
           onEmptyCanvasTap={() => selectNodes([])}
@@ -1192,11 +1184,7 @@ export const Canvas: React.FC<CanvasProps> = ({
           onPan={shiftLassoScreenPoints}
         />
         <Panel position="bottom-center" className="mb-6">
-          <NodeToolbar
-            activeTool={tool}
-            onToolChange={setTool}
-            deviceMode={deviceMode}
-          />
+          <NodeToolbar activeTool={tool} onToolChange={setTool} />
         </Panel>
         {!isBoxSelecting && <MultiSelectResizer />}
         {!isBoxSelecting && <SelectionOutlines />}
