@@ -108,6 +108,40 @@ export async function oneFingerDrag(
   });
 }
 
+/** Single-finger tap (touch down then up at the same point, no drag). */
+export async function touchTap(client: CDPSession, at: Point): Promise<void> {
+  await client.send('Input.dispatchTouchEvent', {
+    type: 'touchStart',
+    touchPoints: [{ x: at.x, y: at.y }],
+  });
+  await client.send('Input.dispatchTouchEvent', {
+    type: 'touchEnd',
+    touchPoints: [],
+  });
+}
+
+/** Drive a single-finger drag through an ordered list of screen points. */
+export async function oneFingerPath(
+  client: CDPSession,
+  points: Point[],
+): Promise<void> {
+  if (points.length === 0) return;
+  await client.send('Input.dispatchTouchEvent', {
+    type: 'touchStart',
+    touchPoints: [{ x: points[0].x, y: points[0].y }],
+  });
+  for (let i = 1; i < points.length; i++) {
+    await client.send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: [{ x: points[i].x, y: points[i].y }],
+    });
+  }
+  await client.send('Input.dispatchTouchEvent', {
+    type: 'touchEnd',
+    touchPoints: [],
+  });
+}
+
 /** Parse the `scale(n)` factor out of a viewport transform string. */
 export function scaleOf(transform: string): number {
   const match = /scale\(([-0-9.]+)\)/.exec(transform);
