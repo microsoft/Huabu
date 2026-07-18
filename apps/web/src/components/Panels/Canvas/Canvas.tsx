@@ -44,6 +44,7 @@ import {
   textToNoteNodeInput,
 } from '@/handler/canvasCommand/nodeInputBuilders';
 import { getDragActivationDistance } from '@/handler/canvasGestureSession';
+import { createForwardingRecognizer } from '@/handler/canvasPointerRecognizers/forwarding';
 import { createPlacementRecognizer } from '@/handler/canvasPointerRecognizers/placement';
 import { useCanvasShortcuts } from '@/hooks/shortcuts';
 import { useAutoPanDuringSelection } from '@/hooks/useAutoPanDuringSelection';
@@ -771,17 +772,43 @@ export const Canvas: React.FC<CanvasProps> = ({
       suppressNextPaneClickRef.current = false;
     }, 0);
   }, []);
+  // Frame and lasso keep their existing self-gating handlers; the router
+  // forwards native pointer events to them (read via refs so the recognizer
+  // stays stable while the memoized handlers change identity).
+  const frameHandlersRef = useRef(framePointerHandlers);
+  frameHandlersRef.current = framePointerHandlers;
+  const lassoHandlersRef = useRef(lassoPointerHandlers);
+  lassoHandlersRef.current = lassoPointerHandlers;
   const pointerRecognizers = useMemo<
     PointerRecognizer<PointerEvent, CanvasPointerRouterContext>[]
-  >(
-    () => [
+  >(() => {
+    const toReact = (event: PointerEvent) =>
+      event as unknown as React.PointerEvent<HTMLDivElement>;
+    return [
       createPlacementRecognizer({
         placePendingNode: (x, y) => placePendingNodeRef.current(x, y),
         suppressNextPaneClick,
       }),
-    ],
-    [suppressNextPaneClick],
-  );
+      createForwardingRecognizer('frame-drag', () => ({
+        onPointerDown: (e) =>
+          frameHandlersRef.current.onPointerDown(toReact(e)),
+        onPointerMove: (e) =>
+          frameHandlersRef.current.onPointerMove(toReact(e)),
+        onPointerUp: (e) => frameHandlersRef.current.onPointerUp(toReact(e)),
+        onPointerCancel: (e) =>
+          frameHandlersRef.current.onPointerCancel(toReact(e)),
+      })),
+      createForwardingRecognizer('lasso', () => ({
+        onPointerDown: (e) =>
+          lassoHandlersRef.current.onPointerDown(toReact(e)),
+        onPointerMove: (e) =>
+          lassoHandlersRef.current.onPointerMove(toReact(e)),
+        onPointerUp: (e) => lassoHandlersRef.current.onPointerUp(toReact(e)),
+        onPointerCancel: (e) =>
+          lassoHandlersRef.current.onPointerCancel(toReact(e)),
+      })),
+    ];
+  }, [suppressNextPaneClick]);
 
   // Handle click-to-place for note, text, and question; otherwise dismiss
   // any currently expanded view (preview or node) so clicking the canvas
@@ -870,22 +897,6 @@ export const Canvas: React.FC<CanvasProps> = ({
         pendingNodeType === 'question' && 'canvas-pending-question',
         tool === 'lasso' && 'cursor-crosshair',
       )}
-      onPointerDown={(event) => {
-        framePointerHandlers.onPointerDown(event);
-        lassoPointerHandlers.onPointerDown(event);
-      }}
-      onPointerMove={(event) => {
-        framePointerHandlers.onPointerMove(event);
-        lassoPointerHandlers.onPointerMove(event);
-      }}
-      onPointerUp={(event) => {
-        framePointerHandlers.onPointerUp(event);
-        lassoPointerHandlers.onPointerUp(event);
-      }}
-      onPointerCancel={(event) => {
-        framePointerHandlers.onPointerCancel(event);
-        lassoPointerHandlers.onPointerCancel(event);
-      }}
       onContextMenu={(event) => {
         const target = event.target as Element;
         if (
