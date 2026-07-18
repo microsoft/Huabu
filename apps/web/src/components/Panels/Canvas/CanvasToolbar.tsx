@@ -145,16 +145,19 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
       }
       if (matchesShortcut(e, 'mode.frame')) {
         e.preventDefault();
+        onToolChange('select');
         setPendingNodeType(pendingNodeType === 'frame' ? null : 'frame');
         return;
       }
       if (matchesShortcut(e, 'mode.note')) {
         e.preventDefault();
+        onToolChange('select');
         setPendingNodeType(pendingNodeType === 'note' ? null : 'note');
         return;
       }
       if (matchesShortcut(e, 'mode.text')) {
         e.preventDefault();
+        onToolChange('select');
         setPendingNodeType(pendingNodeType === 'text' ? null : 'text');
         return;
       }
@@ -163,6 +166,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
         // Match the click handler: always reset the sketch tool to draw
         // mode so the eraser doesn't silently persist between sessions.
         setSketchDraft({ mode: 'draw' });
+        onToolChange('select');
         setPendingNodeType(pendingNodeType === 'sketch' ? null : 'sketch');
         return;
       }
@@ -174,6 +178,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
       // }
       if (matchesShortcut(e, 'mode.question')) {
         e.preventDefault();
+        onToolChange('select');
         setPendingNodeType(pendingNodeType === 'question' ? null : 'question');
         return;
       }
@@ -378,7 +383,11 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             value={displayedTool}
             onPrimaryAction={(tool) => {
               if (pendingNodeType) setPendingNodeType(null);
-              onToolChange(tool);
+              onToolChange(
+                isNotMouse && tool === 'lasso' && activeTool === 'lasso'
+                  ? 'select'
+                  : tool,
+              );
             }}
             onChange={(tool) => {
               if (pendingNodeType) setPendingNodeType(null);
@@ -430,9 +439,10 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             className={clsx(
               pendingNodeType === 'note' && 'text-info bg-bg-default',
             )}
-            onClick={() =>
-              setPendingNodeType(pendingNodeType === 'note' ? null : 'note')
-            }
+            onClick={() => {
+              onToolChange('select');
+              setPendingNodeType(pendingNodeType === 'note' ? null : 'note');
+            }}
           >
             <NODE_ICON.note />
           </Button>
@@ -445,9 +455,10 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             className={clsx(
               pendingNodeType === 'text' && 'text-info bg-bg-default',
             )}
-            onClick={() =>
-              setPendingNodeType(pendingNodeType === 'text' ? null : 'text')
-            }
+            onClick={() => {
+              onToolChange('select');
+              setPendingNodeType(pendingNodeType === 'text' ? null : 'text');
+            }}
           >
             <NODE_ICON.text />
           </Button>
@@ -460,9 +471,10 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             className={clsx(
               pendingNodeType === 'frame' && 'text-info bg-bg-default',
             )}
-            onClick={() =>
-              setPendingNodeType(pendingNodeType === 'frame' ? null : 'frame')
-            }
+            onClick={() => {
+              onToolChange('select');
+              setPendingNodeType(pendingNodeType === 'frame' ? null : 'frame');
+            }}
           >
             <NODE_ICON.frame />
           </Button>
@@ -477,7 +489,10 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
               <SketchModeSwitcher
                 size="md"
                 active={pendingNodeType === 'sketch'}
-                onActivate={() => setPendingNodeType('sketch')}
+                onActivate={() => {
+                  onToolChange('select');
+                  setPendingNodeType('sketch');
+                }}
               />
             ) : (
               <Button
@@ -493,6 +508,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
                   // Clicking the Sketch button always resets the tool to draw
                   // mode so the eraser doesn't silently persist between sessions.
                   setSketchDraft({ mode: 'draw' });
+                  onToolChange('select');
                   setPendingNodeType(
                     pendingNodeType === 'sketch' ? null : 'sketch',
                   );

@@ -16,10 +16,7 @@ import {
 } from '@/handler/canvasGestureSession';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
-import {
-  closestNodeElement,
-  isEmptyPaneTarget,
-} from '../components/Panels/Canvas/canvasInputPolicy';
+import { isEmptyPaneTarget } from '../components/Panels/Canvas/canvasInputPolicy';
 
 import type { EffectiveInputMode } from '@/store/toolStore';
 import type { Edge, ReactFlowInstance } from '@xyflow/react';
@@ -294,24 +291,6 @@ export function useCanvasLasso({
       }
       const target = event.target as HTMLElement;
 
-      // Touch devices: React Flow's synthetic click selection on nodes is
-      // unreliable while the lasso tool is active (`nodesDraggable={false}`
-      // detaches d3-drag, and the pane/wrapper pointer flow swallows the tap
-      // before a click is synthesised). Mouse already works via React Flow's
-      // own onClick handler, so only intercept touch / pen taps here.
-      if (event.pointerType !== 'mouse') {
-        const nodeEl = closestNodeElement(target);
-        if (nodeEl) {
-          const nodeId = nodeEl.getAttribute('data-id');
-          if (nodeId) {
-            event.preventDefault();
-            event.stopPropagation();
-            onSelect([nodeId]);
-          }
-          return;
-        }
-      }
-
       if (!isEmptyPaneTarget(target)) return;
 
       event.preventDefault();
@@ -336,7 +315,7 @@ export function useCanvasLasso({
         captureTarget: event.currentTarget,
       };
     },
-    [active, inputMode, onSelect],
+    [active, inputMode],
   );
 
   const onPointerMove = useCallback(

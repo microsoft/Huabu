@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
+import { useEffectiveInputMode } from './useInputMode';
 import { createCanvas, importCanvas } from '../api/canvas';
 
 /**
@@ -25,6 +26,7 @@ export interface UseCanvasActionsResult {
 
 export function useCanvasActions(): UseCanvasActionsResult {
   const navigate = useNavigate();
+  const inputMode = useEffectiveInputMode();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
@@ -37,7 +39,7 @@ export function useCanvasActions(): UseCanvasActionsResult {
         state: {
           newCanvasPlacement: {
             canvasId: response.canvasId,
-            nodeType: 'note',
+            nodeType: inputMode === 'mouse' ? 'note' : 'sketch',
           },
         },
       });
@@ -46,7 +48,7 @@ export function useCanvasActions(): UseCanvasActionsResult {
     } finally {
       setIsCreating(false);
     }
-  }, [navigate]);
+  }, [inputMode, navigate]);
 
   const openImportDialog = useCallback(() => {
     fileInputRef.current?.click();

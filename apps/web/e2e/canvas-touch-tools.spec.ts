@@ -32,6 +32,16 @@ async function pickCreateTool(
 }
 
 test.describe('canvas touch tools', () => {
+  test('new touch canvas starts with Sketch active', async ({ page }) => {
+    await openNewCanvas(page);
+
+    await expect(page.getByRole('button', { name: /^Pen$/ })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await expect(page.locator('.cursor-crosshair')).toBeVisible();
+  });
+
   test('tapping with the Text tool places a node', async ({ page }) => {
     await openNewCanvas(page);
     const client = await page.context().newCDPSession(page);
@@ -110,5 +120,46 @@ test.describe('canvas touch tools', () => {
     ]);
 
     await expect(page.locator('.react-flow__node.selected')).toHaveCount(1);
+  });
+
+  test('lasso keeps selected nodes draggable', async ({ page }) => {
+    await openNewCanvas(page);
+    const client = await page.context().newCDPSession(page);
+    const center = await paneCenter(page);
+
+    await page.getByRole('button', { name: /^Text/ }).click();
+    await touchTap(client, center);
+    await page.keyboard.type('x');
+    await page.keyboard.press('Escape');
+    await page.mouse.click(center.x + 300, center.y + 200);
+    await page.keyboard.press('l');
+    const node = page.locator('.react-flow__node').first();
+    const before = await node.boundingBox();
+    if (!before) throw new Error('placed node has no bounding box');
+
+    const pad = 50;
+    await oneFingerPath(client, [
+      { x: before.x - pad, y: before.y - pad },
+      { x: before.x + before.width + pad, y: before.y - pad },
+      { x: before.x + before.width + pad, y: before.y + before.height + pad },
+      { x: before.x - pad, y: before.y + before.height + pad },
+      { x: before.x - pad, y: before.y - pad },
+    ]);
+    await expect(page.locator('.react-flow__node.selected')).toHaveCount(1);
+
+    await oneFingerDrag(
+      client,
+      { x: before.x + before.width / 2, y: before.y + before.height / 2 },
+      120,
+      80,
+    );
+
+    const after = await node.boundingBox();
+    if (!after) throw new Error('moved node has no bounding box');
+    expect(
+      Math.abs(after.x - before.x) + Math.abs(after.y - before.y),
+    ).toBeGreaterThan(50);
+    await expect(page.locator('.react-flow__node.selected')).toHaveCount(1);
+    await expect(page.locator('.cursor-crosshair')).toBeVisible();
   });
 });

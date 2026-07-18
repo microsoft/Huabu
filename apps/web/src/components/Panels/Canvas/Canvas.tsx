@@ -431,6 +431,12 @@ export const Canvas: React.FC<CanvasProps> = ({
     if (isNotMouse && tool === 'pan') setTool('select');
   }, [isNotMouse, setTool, tool]);
 
+  useEffect(() => {
+    if (isNotMouse && !pendingNodeType && tool !== 'lasso') {
+      setPendingNodeType('sketch');
+    }
+  }, [isNotMouse, pendingNodeType, setPendingNodeType, tool]);
+
   const handleSelectionStart = useCallback(() => {
     if (tool !== 'select') return;
     setIsBoxSelecting(true);
@@ -1141,9 +1147,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         selectionMode={SelectionMode.Partial}
         onSelectionStart={handleSelectionStart}
         onSelectionEnd={handleSelectionEnd}
-        nodesDraggable={
-          !interactivityLocked && !pendingNodeType && tool !== 'lasso'
-        }
+        nodesDraggable={!interactivityLocked && !pendingNodeType}
         nodeDragThreshold={dragActivationDistance}
         nodeClickDistance={dragActivationDistance}
         nodesConnectable={!interactivityLocked}

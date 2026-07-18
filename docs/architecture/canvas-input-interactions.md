@@ -22,9 +22,11 @@ The reactive current-pointer signal (`useIsNotMouse`) follows the most recent `p
 
 While the mouse is the current pointer, the toolbar keeps the Select, Pan, and Lasso tools and their existing mouse and keyboard behavior, including shortcut hints and badges.
 
-While touch or pen is the current pointer, Select and Pan collapse to the internal default state. The toolbar exposes a single Lasso entry without a redundant dropdown arrow and hides Select and Pan; the Lasso entry remains visually inactive until the user explicitly activates it, so displaying the entry does not change the default internal Select state. Select and Pan shortcuts both resolve to the default Select state instead of creating hidden Pan state; switching back to the mouse maps that default state to Select. Because this mapping follows the current pointer rather than the persisted mode, a mouse and a finger used on the same hybrid device each get their native toolbar.
+While touch or pen is active, Sketch is the visible default tool: a pen draws while touch navigates in Pen mode, and touch draws while two-finger input navigates in Finger mode. Select and Pan collapse to the internal direct-manipulation state and are hidden from the touch-first toolbar; Lasso remains available as an explicit alternative. Select and Pan shortcuts both resolve to the internal Select state instead of creating hidden Pan state, and the visible toolbar returns to Sketch whenever no other explicit tool is active. Because the toolbar layout follows the current pointer rather than the persisted mode, a mouse and a finger used on the same hybrid device each get their native toolbar.
 
-Lasso and Sketch remain explicit persistent modes across pointer and input-mode changes.
+New empty canvases carry a one-shot input-appropriate creation intent: Mouse starts with Note armed, while Pen and Finger start with Sketch armed. Existing canvases do not arm Note; Pen and Finger still fall back to the visible Sketch default after any one-shot placement tool finishes.
+
+Lasso and Sketch remain explicit persistent modes across pointer and input-mode changes. Lasso owns only empty-pane gestures, so activating it does not disable dragging nodes that were already selected before pointer down.
 
 ## 3. Direct manipulation
 

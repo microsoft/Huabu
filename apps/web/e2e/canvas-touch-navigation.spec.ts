@@ -50,12 +50,29 @@ test.describe('canvas touch navigation', () => {
     expect(scaleOf(zoomedOut)).toBeLessThan(scaleOf(zoomedIn));
   });
 
-  test('one-finger drag on empty canvas pans the viewport', async ({
+  test('in Pen mode, one-finger drag pans while Sketch is active', async ({
     page,
   }) => {
     await openNewCanvas(page);
     const client = await page.context().newCDPSession(page);
     const center = await paneCenter(page);
+
+    await page.evaluate(() => {
+      const key = 'sediment-sketch-tools';
+      const persisted = JSON.parse(localStorage.getItem(key) ?? '{}') as {
+        state?: Record<string, unknown>;
+        version?: number;
+      };
+      localStorage.setItem(
+        key,
+        JSON.stringify({
+          ...persisted,
+          state: { ...persisted.state, inputModePreference: 'pen' },
+        }),
+      );
+    });
+    await page.reload();
+    await page.waitForSelector('.react-flow__pane');
 
     const before = await readViewportTransform(page);
     await oneFingerDrag(client, center, 200, 120);
