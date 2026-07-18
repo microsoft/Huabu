@@ -97,6 +97,14 @@ mac:
         - arm64
   category: public.app-category.productivity
   darkModeSupport: true
+  # Sign + notarize in CI. The Developer ID certificate arrives via the
+  # CSC_LINK / CSC_KEY_PASSWORD env vars; notarization credentials via
+  # APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID (see
+  # .github/workflows/release.yml). Local `dist:mac` runs without those
+  # env vars still work: electron-builder falls back to ad-hoc signing
+  # and skips notarization with a warning.
+  hardenedRuntime: true
+  notarize: true
 
 win:
   target:
