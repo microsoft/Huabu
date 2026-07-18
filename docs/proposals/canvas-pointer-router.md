@@ -75,8 +75,27 @@ interface PointerRecognizer {
   onMove?(event: PointerEvent, ctx: PointerRouterContext): void;
   onUp?(event: PointerEvent, ctx: PointerRouterContext): void;
   onCancel?(event: PointerEvent, ctx: PointerRouterContext): void;
+
+  /**
+   * Optional global observer. When present, the router forwards *every*
+   * pointer event to these hooks regardless of ownership, before the
+   * per-owner routing. A hook may call `ctx.preempt()` to seize
+   * ownership of the pointer from the current owner (cancelling that
+   * owner via `onCancel`). This models two-finger navigation taking over
+   * an in-progress single-pointer gesture: viewport-navigation must track
+   * every touch even while another recognizer owns the first finger, so
+   * that the second finger can preempt into a pinch.
+   */
+  observe?: {
+    onDown?(event: PointerEvent, ctx: PointerRouterObserverContext): void;
+    onMove?(event: PointerEvent, ctx: PointerRouterObserverContext): void;
+    onUp?(event: PointerEvent, ctx: PointerRouterObserverContext): void;
+    onCancel?(event: PointerEvent, ctx: PointerRouterObserverContext): void;
+  };
 }
 ```
+
+`PointerRouterObserverContext` extends `PointerRouterContext` with `preempt(): void`, which reassigns the current pointer's ownership to the observing recognizer and calls the displaced owner's `onCancel`. Ownership is still one recognizer per pointer id; the observer channel only lets a recognizer _watch_ pointers it does not own and _escalate_ to owning them.
 
 Recognizers never call `addEventListener` themselves. They receive already-dispatched events from the router and use `event.preventDefault()` / `event.stopPropagation()` only when they own the pointer, exactly as the current code does.
 
@@ -98,13 +117,14 @@ The router offers each `pointerdown` to recognizers in a fixed priority order an
 | 4        | `lasso`               | Lasso tool active and the target is an empty pane (or a node tap on touch / pen).                                                                                                                |
 | 5        | `click-to-place`      | A creation tool is pending and `canPlaceNodeWithPointer` accepts the pointer on an empty pane target.                                                                                            |
 
-Cross-recognizer takeover — for example a second finger converting an in-progress lasso into a pinch — remains governed by `canvasGestureSession` (pending versus locked) and `snapSession` (active node drag), both consulted only through `canvasInteractionOwner`. The router itself holds no gesture-specific state beyond the current owner per active pointer id.
+Cross-recognizer takeover — for example a second finger converting an in-progress lasso into a pinch — is expressed through the observer / `preempt()` channel above and remains governed by `canvasGestureSession` (pending versus locked) and `snapSession` (active node drag), both consulted only through `canvasInteractionOwner`. `viewport-navigation` registers an `observe` block so it tracks every touch pointer even when another recognizer owns the first finger; when the second touch lands and `canTouchTakeOverForPinch()` allows it, the observer calls `preempt()` to seize the gesture and cancel the displaced lasso or sketch preview. The router itself holds no gesture-specific state beyond the current owner per active pointer id and the set of observers.
 
 An active node drag is not a router recognizer: it is driven by React Flow and tracked by `snapSession`. The router treats it as an external owner by asking `canvasInteractionOwner` before letting a touch take over, preserving the rule that a live drag rejects a second finger.
 
 ## Router responsibilities
 
 - Maintain a `Map<pointerId, PointerRecognizer>` of active owners so move / up / cancel route only to the owner.
+- Before per-owner routing, forward every pointer event to each recognizer's optional `observe` hooks so a recognizer can track pointers it does not own and call `preempt()` to seize them.
 - Offer `pointerdown` to recognizers in priority order, calling `onDown` only for those whose `canClaim` passed, and record the first claimant.
 - Route `pointermove`, `pointerup`, and `pointercancel` for an owned pointer to its owner, then clear the entry on up / cancel.
 - Never mutate gesture state directly; recognizers own their own preview stores and session calls.
@@ -114,7 +134,7 @@ An active node drag is not a router recognizer: it is driven by React Flow and t
 
 Each step is behavior-preserving, independently committed, and verified by the existing unit suite plus manual device smoke where the phase changes.
 
-1. Add the `PointerRecognizer` type and `useCanvasPointerRouter` with an empty registry that installs the capture listeners but delegates nothing yet. No behavior change.
+1. Add the `PointerRecognizer` type and a DOM-independent `PointerRouterCore` (owner map, priority offer, observer broadcast, and `preempt`) with unit tests using synthetic recognizers. Not yet wired into `Canvas.tsx`; zero runtime behavior change.
 2. Move two-finger pinch, single-finger pan, and multi-touch cancel out of `useCanvasGestures` into a `viewport-navigation` recognizer. Keep the trackpad-wheel handler where it is or move it alongside as a non-pointer concern. Verify pinch geometry and single-touch ownership tests still pass.
 3. Convert `useCanvasLasso`, `useFrameDragToCreate`, and the inline placement branch into recognizers and delete the fan-out in `Canvas.tsx`.
 4. Convert `SketchOverlay` pointer handling to a recognizer, or keep the overlay but route its pointers through the same registry, so sketch takeover uses the shared protocol.
