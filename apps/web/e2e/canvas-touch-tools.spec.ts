@@ -9,12 +9,9 @@ import {
 } from './helpers';
 
 /**
- * Baseline behavior guardrail for the canvas touch tools that the pointer
- * router refactor (docs/proposals/canvas-pointer-router.md) will migrate
- * into recognizers: click-to-place, frame drag-to-create, and lasso.
- *
- * Pinning current behavior here lets the bubble-phase → capture-phase
- * migration in router steps 3–4 be verified as behavior-preserving.
+ * Behavior guardrail for the routed canvas touch tools documented in
+ * docs/architecture/canvas-input-interactions.md: click-to-place, frame
+ * drag-to-create, and lasso.
  */
 
 /**

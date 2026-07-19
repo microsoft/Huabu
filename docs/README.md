@@ -76,7 +76,6 @@ docs/
 | -------------------------------------------------------------------------------------------------- | -------------- | ------------------------------------------------------------------------- |
 | [agent-node-freshness-cas-plan.md](./proposals/agent-node-freshness-cas-plan.md)                   | In-Progress    | Read/write revision freshness across agent and web paths.                 |
 | [canvas-checkpoint-plan.md](./proposals/canvas-checkpoint-plan.md)                                 | Proposed       | Canvas checkpoint and restoration design.                                 |
-| [canvas-pointer-router.md](./proposals/canvas-pointer-router.md)                                   | In-Progress    | Unified pointer routing; recognizer steps 1–3 shipped.                     |
 | [canvas-realtime-sync-plan.md](./proposals/canvas-realtime-sync-plan.md)                           | In-Progress    | Roadmap from multi-agent sync to multi-user co-editing.                   |
 | [content-before-ai-design.md](./proposals/content-before-ai-design.md)                             | Needs review   | Block-level and inline authorship provenance.                             |
 | [credential-storage-hardening-followups.md](./proposals/credential-storage-hardening-followups.md) | Draft          | Follow-up credential storage hardening.                                   |
@@ -86,7 +85,6 @@ docs/
 | [managed-agent-teams.md](./proposals/managed-agent-teams.md)                                       | In-Progress    | Huabu-managed discovery, configuration, preparation, and runtime.         |
 | [milkdown-custom-toolbar-plan.md](./proposals/milkdown-custom-toolbar-plan.md)                     | In-Progress    | Sediment-owned Milkdown toolbar and semantic editor commands.             |
 | [model-role-routing.md](./proposals/model-role-routing.md)                                         | Proposed       | Model selection by runtime role.                                          |
-| [touch-and-pen-canvas-interactions.md](./proposals/touch-and-pen-canvas-interactions.md)           | Draft          | Touch navigation, node movement, pen routing, and touch-first tools.       |
 
 ### Shipped
 
@@ -96,6 +94,7 @@ docs/
 | [agenetes-agentlet-gateway-consolidation.md](./proposals/agenetes-agentlet-gateway-consolidation.md) | Agenetes-owned stateless Agentlet Gateway and ACP placement.                |
 | [agenetes-thread-rehydration-and-forking.md](./proposals/agenetes-thread-rehydration-and-forking.md) | Durable-thread recovery and driver-owned rehydration.                       |
 | [agent-request-render-resolution.md](./proposals/agent-request-render-resolution.md)                 | Generic agent submission and input boundary.                                |
+| [canvas-pointer-router.md](./proposals/canvas-pointer-router.md)                                     | Unified pointer routing and recognizer takeover priority.                   |
 | [layered-architecture.md](./proposals/layered-architecture.md)                                       | Interaction-, protocol-, and task-driven architecture layers.               |
 | [node-write-unification-plan.md](./proposals/node-write-unification-plan.md)                         | Unified authored-content persistence and revision handling.                 |
 | [pi-harness-driver-refactor-plan.md](./proposals/pi-harness-driver-refactor-plan.md)                 | Agenetes harness driver boundary.                                           |

@@ -13,9 +13,8 @@ import {
 /**
  * Baseline behavior guardrail for canvas touch navigation.
  *
- * These tests pin the current touch gesture behavior so the planned
- * pointer-router refactor (docs/proposals/canvas-pointer-router.md) can
- * be verified as behavior-preserving. They run in a `hasTouch` context
+ * These tests pin the touch gesture contract documented in
+ * docs/architecture/canvas-input-interactions.md. They run in a `hasTouch` context
  * so the app resolves to touch mode with the default (finger) interaction
  * mode and no explicit tool active.
  */

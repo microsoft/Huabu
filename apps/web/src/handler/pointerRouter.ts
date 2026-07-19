@@ -15,7 +15,7 @@
  * The React hook that installs capture-phase listeners and supplies the
  * live context lives separately.
  *
- * See `docs/proposals/canvas-pointer-router.md`.
+ * See `docs/architecture/canvas-input-interactions.md` §6.
  */
 
 export type ClaimResult = 'claim' | 'pass';
