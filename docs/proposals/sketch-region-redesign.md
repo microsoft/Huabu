@@ -74,9 +74,9 @@ Last updated: 2026-07-19
 
 - **选择规则（R3，按类型）**：sketch 节点永远走**笔画选择**（圈到哪几条选哪几条；全部圈到只是「≈选中整块」但仍是笔画，永不整节点选择）；其它类型节点走**整节点选择**；两者可共存。「笔画在多边形内」判据 ≥ 1 点在内；stroke 命中在消费端算，[useCanvasLasso.ts](../../apps/web/src/hooks/useCanvasLasso.ts) 不耦合 sketch。
 - 选中状态存 [gesturePreviewStore](../../apps/web/src/store/gesturePreviewStore.ts) 瞬态 slice（不持久、不进 undo）。
-- **移动模型**：在**套索工具内拖动选区**移动（不切工具）；只做**原节点内平移**，跨节点/抽出 = Stage 4。
+- **移动模型**：在**套索工具内拖动选区**移动（不切工具）；笔画只做**原节点内平移**（跨节点/抽出 = Stage 4）。若套索同时圈住整节点（混选），那些节点与笔画**一起移动**。
 - **纯笔画工具栏**：对齐 sketch 节点的 [SketchControls](../../apps/web/src/components/Nodes/sketch/SketchControls.tsx)（调色 + 粗细，作用于选中笔画、**不改画笔预设**）。**删除键仅触摸端显示**，桌面端用键盘 Delete。
-- **混选（笔画 + 节点）**：走 B（只留共同能力，**无移动**）；删除仅触摸端，**桌面端无工具栏**；节点工具栏在「存在笔画选择」时隐藏。
+- **混选（笔画 + 节点）**：拖动时两者**一起移动**（节点走 store 正常拖拽生命周期，snap / 重定父 / 自动保存不变，笔画烘入同一条 undo）；工具栏则只留共同能力：删除仅触摸端、**桌面端无工具栏**；节点工具栏在「存在笔画选择」时隐藏。
 
 **已实现（第一批）**
 
@@ -85,12 +85,12 @@ Last updated: 2026-07-19
 
 **已实现（本阶段扩展）**
 
-3. **移动（GoodNotes 式：保留套索区）**：套索完成后**保留其多边形**作为选区（存 `gesturePreviewStore.sketchSelectionPolygon`、flow 空间、随选择一起清除，并由 [StrokeSelectionRegion.tsx](../../apps/web/src/components/Panels/Canvas/StrokeSelectionRegion.tsx) 在 `ViewportPortal` 里画出虚线选区）。独立 hook [useSketchStrokeMove](../../apps/web/src/hooks/useSketchStrokeMove.ts) 由 Canvas 指针链中一个**排在套索前**的 `sketch-stroke-move` recognizer 驱动——pointerdown **落在保留选区多边形内**（且为纯笔画选择、无节点选中）→ 移动（预览走 `sketchStrokeMovePreview` 平移选中笔画 + 选区本身，松手按各自节点用 [buildMoveStrokesCommands](../../apps/web/src/components/Nodes/sketch/sketchMerge.ts) 重算 bbox、单条 undo）；落在选区外 → 让位给套索（开始新套索，先清旧选）。只做**原节点内平移**；跨节点/抽出 = Stage 4。
+3. **移动（GoodNotes 式：保留套索区）**：套索完成后**保留其多边形**作为选区（存 `gesturePreviewStore.sketchSelectionPolygon`、flow 空间、随选择一起清除，并由 [StrokeSelectionRegion.tsx](../../apps/web/src/components/Panels/Canvas/StrokeSelectionRegion.tsx) 在 `ViewportPortal` 里画出虚线选区、内部显示 move 光标）。独立 hook [useSketchStrokeMove](../../apps/web/src/hooks/useSketchStrokeMove.ts) 由 Canvas 指针链中一个**排在套索前**的 `sketch-stroke-move` recognizer 驱动——pointerdown **落在保留选区多边形内** → 移动（预览走 `sketchStrokeMovePreview` 平移选中笔画 + 选区本身，松手按各自节点用 [buildMoveStrokesCommands](../../apps/web/src/components/Nodes/sketch/sketchMerge.ts) 重算 bbox）；落在选区外 → 让位给套索（开始新套索，先清旧选）。笔画只做**原节点内平移**（跨节点/抽出 = Stage 4）；**混选时被选中的整节点与笔画一起移动**（节点走 store 的 `onNodeDragStart` → `onNodesChange` → `onNodeDragStop` 生命周期，snap / 重定父 / 自动保存与普通拖拽一致，笔画烘入同一条 undo）。
 4. **样式**：笔画工具栏加调色 + 粗细（复用 [SketchControls](../../apps/web/src/components/Nodes/sketch/SketchControls.tsx)，只 map 选中笔画，不改画笔预设）；混选时隐藏（仅共同能力）。
 5. **键盘删除**：Delete / Backspace 删选中笔画（复用 `buildEraseCommands`，护栏跳过 input/textarea/contentEditable），与 React Flow 的节点删除并存（混选一次删两者）。
 6. **工具栏仲裁**：纯笔画 → 样式条（触摸端多一个删除）；混选 → 桌面无、触摸只删除；纯节点 → 现有节点条。节点工具栏（MultiSelect / 单选）在存在笔画选择时隐藏（[NodeWrapper.tsx](../../apps/web/src/components/Nodes/NodeWrapper.tsx) + [Canvas.tsx](../../apps/web/src/components/Panels/Canvas/Canvas.tsx)）。
 
-MVP 限制：移动仅限原节点内（抽出/拆分 = Stage 4）；混选无移动（已 gated）；移动手势不接入 `canvasGestureSession`（桌面 MVP 无多指接管仲裁）。
+MVP 限制：笔画移动仅限原节点内（抽出/拆分 = Stage 4）；混选时被选中的整节点与笔画一起移动（走 store 拖拽生命周期，与普通拖拽一致）；纯笔画移动手势不接入 `canvasGestureSession`（桌面 MVP 无多指接管仲裁）。
 
 明确不做：渲染 PNG、发大模型、抽出/拆分（Stage 4）、OCR、混选的移动。
 

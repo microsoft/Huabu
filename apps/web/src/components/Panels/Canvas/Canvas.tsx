@@ -363,6 +363,12 @@ export const Canvas: React.FC<CanvasProps> = ({
   const hasStrokeSelection = useGesturePreviewStore(
     (s) => Object.keys(s.sketchStrokeSelection).length > 0,
   );
+  // True while a stroke-move drag is in progress — drives the wrapper's
+  // move cursor (the pointer is captured by the router during the drag, so
+  // the region element's own cursor no longer applies).
+  const isStrokeMoving = useGesturePreviewStore(
+    (s) => s.sketchStrokeMovePreview !== null,
+  );
   const frameFitPreviews = useGesturePreviewStore(
     (state) => state.frameFitPreviews,
   );
@@ -584,10 +590,16 @@ export const Canvas: React.FC<CanvasProps> = ({
       useGesturePreviewStore.getState().clearSketchStrokeSelection();
     }
   }, [tool]);
-  const lassoPreviewNodeIdSet = useMemo(
-    () => new Set(previewNodeIds),
-    [previewNodeIds],
-  );
+  // A sketch node is never whole-node selected by the lasso (it always
+  // yields stroke-level hits, R3), so it must not flash the whole-node
+  // preview box while the lasso passes over it — only its captured strokes
+  // highlight, and only on commit.
+  const lassoPreviewNodeIdSet = useMemo(() => {
+    const sketchIds = new Set(
+      nodes.filter((n) => n.type === 'sketch').map((n) => n.id),
+    );
+    return new Set(previewNodeIds.filter((id) => !sketchIds.has(id)));
+  }, [previewNodeIds, nodes]);
   const lassoPreviewEdgeIdSet = useMemo(
     () => new Set(previewEdgeIds),
     [previewEdgeIds],
@@ -869,10 +881,9 @@ export const Canvas: React.FC<CanvasProps> = ({
             !canDirectlyManipulateWithPointer(event.pointerType, ctx.inputMode)
           )
             return false;
-          // Move applies to a PURE stroke selection only; in a mixed
-          // selection (strokes + nodes) there is no move (agreed design).
-          if (useCanvasStore.getState().nodes.some((n) => n.selected))
-            return false;
+          // Grabbing the retained region drags the whole selection — the
+          // strokes plus any whole nodes the lasso also caught (they move
+          // together, see useSketchStrokeMove).
           const poly = useGesturePreviewStore.getState().sketchSelectionPolygon;
           if (!poly || poly.length < 3) return false;
           const inst = rfInstanceRef.current;
@@ -992,7 +1003,8 @@ export const Canvas: React.FC<CanvasProps> = ({
         pendingNodeType === 'sketch' && 'cursor-crosshair',
         pendingNodeType === 'audio' && 'canvas-pending-audio',
         pendingNodeType === 'question' && 'canvas-pending-question',
-        tool === 'lasso' && 'cursor-crosshair',
+        tool === 'lasso' && !isStrokeMoving && 'cursor-crosshair',
+        isStrokeMoving && 'cursor-move',
       )}
       onContextMenu={(event) => {
         const target = event.target as Element;
@@ -1301,7 +1313,9 @@ export const Canvas: React.FC<CanvasProps> = ({
         {!isBoxSelecting && <MultiSelectResizer />}
         {!isBoxSelecting && <SelectionOutlines />}
         {!isBoxSelecting && !hasStrokeSelection && <MultiSelectToolbar />}
-        {!isBoxSelecting && <StrokeSelectionRegion />}
+        {!isBoxSelecting && (
+          <StrokeSelectionRegion interactive={hasStrokeSelection} />
+        )}
         {!isBoxSelecting && <StrokeSelectionToolbar />}
         {!isBoxSelecting && <EdgeStyleToolbar />}
         <IntentPopover />
