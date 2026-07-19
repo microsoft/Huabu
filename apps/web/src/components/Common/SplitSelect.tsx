@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import { Check, ChevronDown } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
 import { useCallback, useRef, useState } from 'react';
 
 import { Button, type ButtonProps } from './Button';
@@ -228,9 +228,6 @@ export function SplitSelect<T extends string = string>({
                   isSelected ? 'text-info' : 'text-fg-muted',
                 )}
               >
-                <span className="flex size-4 shrink-0 items-center justify-center">
-                  {isSelected && <Check className="size-4" />}
-                </span>
                 {option.icon && <span className="shrink-0">{option.icon}</span>}
                 <span className="flex-1">{option.label}</span>
                 {option.shortcut !== null &&
