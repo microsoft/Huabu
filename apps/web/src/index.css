@@ -500,6 +500,15 @@ body:not(.canvas-resize-active) .react-flow__node-frame:not(.dragging) {
 .react-flow__node-sketch[data-sketch-hover='true'] * {
   pointer-events: auto !important;
 }
+/* A *selected* sketch behaves like an ordinary node: its whole bounding
+   box is grabbable, so it (or a multi-selection that includes it) can be
+   dragged from anywhere — not only from a hair-thin stroke, which made
+   sketches feel stuck on touch and awkward to move in a group. Unselected
+   sketches keep the stroke-only drill-through above. */
+.react-flow__node-sketch.selected,
+.react-flow__node-sketch.selected * {
+  pointer-events: auto !important;
+}
 .react-flow__node-sketch .react-flow__handle,
 .react-flow__node-sketch .react-flow__resize-control {
   pointer-events: auto !important;
