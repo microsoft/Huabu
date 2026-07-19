@@ -4,6 +4,7 @@ import {
   canManipulateCanvasWithPointer,
   isPanelTarget,
 } from '@/components/Panels/Canvas/canvasInputPolicy';
+import { createNodeDragRecognizer } from '@/handler/canvasPointerRecognizers/nodeDrag';
 import { createViewportNavigationRecognizer } from '@/handler/canvasPointerRecognizers/viewportNavigation';
 import { PointerRouterCore } from '@/handler/pointerRouter';
 
@@ -52,7 +53,14 @@ export function useCanvasPointerRouter(
     const recognizers: PointerRecognizer<
       PointerEvent,
       CanvasPointerRouterContext
-    >[] = [createViewportNavigationRecognizer(), ...extraRecognizers];
+    >[] = [
+      // Offered before viewport-navigation so a Pen-mode finger pressing
+      // an already-selected node drags it instead of panning; everything
+      // else falls through to viewport navigation / tap-select.
+      createNodeDragRecognizer(),
+      createViewportNavigationRecognizer(),
+      ...extraRecognizers,
+    ];
 
     const core = new PointerRouterCore<
       PointerEvent,

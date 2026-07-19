@@ -20,12 +20,15 @@ import { isSnapSessionActive } from './snap/snapSession';
 /**
  * Whether a new single-finger touch may claim a viewport gesture.
  *
- * Only the pan / lasso / sketch arbiter gates this: an active node-drag
- * snap session cannot coexist with a *first* touch, because the finger
- * already driving the drag makes the live pointer count ≥ 2.
+ * Gated by both arbiters: the pan / lasso / sketch arbiter, and the
+ * node-drag / resize snap session. An active snap session means a node
+ * is being dragged (in Pen mode, by a finger driven through the
+ * `node-drag` recognizer), so a second finger must not spin up a
+ * competing single-finger pan — it is either ignored or, when a pinch is
+ * eligible, absorbed by the pinch observer.
  */
 export function canTouchClaimViewport(): boolean {
-  return canTouchTakeOverCanvasGesture();
+  return !isSnapSessionActive() && canTouchTakeOverCanvasGesture();
 }
 
 /**
