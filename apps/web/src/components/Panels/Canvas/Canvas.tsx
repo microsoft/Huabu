@@ -44,7 +44,7 @@ import {
   textToNoteNodeInput,
 } from '@/handler/canvasCommand/nodeInputBuilders';
 import { getDragActivationDistance } from '@/handler/canvasGestureSession';
-import { createForwardingRecognizer } from '@/handler/canvasPointerRecognizers/forwarding';
+import { createHandlerOwnerRecognizer } from '@/handler/canvasPointerRecognizers/handlerOwner';
 import { createPlacementRecognizer } from '@/handler/canvasPointerRecognizers/placement';
 import { useCanvasShortcuts } from '@/hooks/shortcuts';
 import { useAutoPanDuringSelection } from '@/hooks/useAutoPanDuringSelection';
@@ -64,6 +64,8 @@ import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 import {
   canDirectlyManipulateWithPointer,
   closestNodeElement,
+  isEmptyPaneTarget,
+  isPanelTarget,
   resolveNodeDraggable,
 } from './canvasInputPolicy.ts';
 import { NodeToolbar } from './CanvasToolbar.tsx';
@@ -774,6 +776,8 @@ export const Canvas: React.FC<CanvasProps> = ({
   frameHandlersRef.current = framePointerHandlers;
   const lassoHandlersRef = useRef(lassoPointerHandlers);
   lassoHandlersRef.current = lassoPointerHandlers;
+  const toolRef = useRef(tool);
+  toolRef.current = tool;
   const pointerRecognizers = useMemo<
     PointerRecognizer<PointerEvent, CanvasPointerRouterContext>[]
   >(() => {
@@ -784,7 +788,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         placePendingNode: (x, y) => placePendingNodeRef.current(x, y),
         suppressNextPaneClick,
       }),
-      createForwardingRecognizer(
+      createHandlerOwnerRecognizer(
         'frame-drag',
         () => ({
           onPointerDown: (e) =>
@@ -796,17 +800,31 @@ export const Canvas: React.FC<CanvasProps> = ({
             frameHandlersRef.current.onPointerCancel(toReact(e)),
         }),
         (event, ctx) =>
+          useToolStore.getState().pendingNodeType === 'frame' &&
+          event.button === 0 &&
+          event.isPrimary &&
+          !isPanelTarget(event.target as Element | null) &&
           canDirectlyManipulateWithPointer(event.pointerType, ctx.inputMode),
       ),
-      createForwardingRecognizer('lasso', () => ({
-        onPointerDown: (e) =>
-          lassoHandlersRef.current.onPointerDown(toReact(e)),
-        onPointerMove: (e) =>
-          lassoHandlersRef.current.onPointerMove(toReact(e)),
-        onPointerUp: (e) => lassoHandlersRef.current.onPointerUp(toReact(e)),
-        onPointerCancel: (e) =>
-          lassoHandlersRef.current.onPointerCancel(toReact(e)),
-      })),
+      createHandlerOwnerRecognizer(
+        'lasso',
+        () => ({
+          onPointerDown: (e) =>
+            lassoHandlersRef.current.onPointerDown(toReact(e)),
+          onPointerMove: (e) =>
+            lassoHandlersRef.current.onPointerMove(toReact(e)),
+          onPointerUp: (e) => lassoHandlersRef.current.onPointerUp(toReact(e)),
+          onPointerCancel: (e) =>
+            lassoHandlersRef.current.onPointerCancel(toReact(e)),
+        }),
+        (event, ctx) =>
+          useToolStore.getState().pendingNodeType === null &&
+          toolRef.current === 'lasso' &&
+          event.button === 0 &&
+          event.isPrimary &&
+          isEmptyPaneTarget(event.target as Element | null) &&
+          canDirectlyManipulateWithPointer(event.pointerType, ctx.inputMode),
+      ),
     ];
   }, [suppressNextPaneClick]);
 

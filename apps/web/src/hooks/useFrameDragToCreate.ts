@@ -57,7 +57,7 @@ interface UseFrameDragToCreateOptions {
 interface UseFrameDragToCreateResult {
   /** Spread onto the canvas wrapper to wire up the gesture. */
   pointerHandlers: {
-    onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void;
+    onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => boolean;
     onPointerMove: (e: ReactPointerEvent<HTMLDivElement>) => void;
     onPointerUp: (e: ReactPointerEvent<HTMLDivElement>) => void;
     onPointerCancel: (e: ReactPointerEvent<HTMLDivElement>) => void;
@@ -97,11 +97,11 @@ export function useFrameDragToCreate({
 
   const onPointerDown = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
-      if (!active) return;
+      if (!active) return false;
       // Primary mouse button / primary touch / primary pen.
-      if (e.button !== 0 || !e.isPrimary) return;
+      if (e.button !== 0 || !e.isPrimary) return false;
       // Ignore presses that originate inside floating toolbars / panels.
-      if (isPanelTarget(e.target as Element)) return;
+      if (isPanelTarget(e.target as Element)) return false;
 
       e.preventDefault();
       e.stopPropagation();
@@ -112,6 +112,7 @@ export function useFrameDragToCreate({
 
       const point = { x: e.clientX, y: e.clientY };
       setDrag({ start: point, end: point });
+      return true;
     },
     [active],
   );

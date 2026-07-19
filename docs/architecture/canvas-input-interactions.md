@@ -56,7 +56,7 @@ A live node drag is considered locked while the snap session is active, so a sec
 
 ## 5. Lasso and Sketch routing
 
-In Pen mode, Lasso and Sketch accept pen pointers and reject touch drawing. In Finger mode, they accept touch pointers and reject pen drawing. Mouse mode accepts only mouse pointers. Lasso begins only from the React Flow pane and excludes panels, nodes, edges, and handles. Sketch draw and erase movement is keyed by the active pointer id; only mouse movement additionally requires the primary button bit.
+In Pen mode, Lasso and Sketch accept pen pointers and reject touch drawing. In Finger mode, they accept touch pointers and reject pen drawing. Mouse mode accepts only mouse pointers. Lasso begins only from the React Flow pane and excludes panels, nodes, edges, and handles. Lasso and Frame are exclusive pointer-router owners: after a successful down, only that owner receives the pointer's move/up/cancel lifecycle, and pinch takeover cancels the owner through its normal cancellation path. The global observer channel is reserved for multi-pointer viewport takeover rather than ordinary tool dispatch. Sketch draw and erase movement is keyed by the active pointer id; only mouse movement additionally requires the primary button bit.
 
 Lasso does not clear selection or expose a path while pending. Crossing the activation distance locks the gesture, clears selection, and starts the preview path; releasing or cancelling before lock has no selection side effect.
 
@@ -77,7 +77,7 @@ Automated tests cover preference precedence and persistence, Mouse/Pen/Finger to
 | [`apps/web/src/components/Panels/Canvas/canvasInputPolicy.ts`](../../apps/web/src/components/Panels/Canvas/canvasInputPolicy.ts)       | Define testable input-mode tool mapping and pointer eligibility rules.                |
 | [`apps/web/src/handler/pointerRouter.ts`](../../apps/web/src/handler/pointerRouter.ts)                                                 | Arbitrate pointer ownership: ordered claim offering, observer broadcast, and preempt. |
 | [`apps/web/src/hooks/useCanvasPointerRouter.ts`](../../apps/web/src/hooks/useCanvasPointerRouter.ts)                                   | Install the single capture-phase pointer stream and drive the recognizers.            |
-| [`apps/web/src/handler/canvasPointerRecognizers/`](../../apps/web/src/handler/canvasPointerRecognizers)                                | Viewport-navigation, click-to-place, and lasso/frame forwarding recognizers.          |
+| [`apps/web/src/handler/canvasPointerRecognizers/`](../../apps/web/src/handler/canvasPointerRecognizers)                                | Viewport-navigation and exclusive click-to-place, Lasso, and Frame recognizers.       |
 | [`apps/web/src/hooks/useCanvasGestures.ts`](../../apps/web/src/hooks/useCanvasGestures.ts)                                             | Own trackpad pinch and multi-touch selection cancel.                                  |
 | [`apps/web/src/hooks/useCanvasLasso.ts`](../../apps/web/src/hooks/useCanvasLasso.ts)                                                   | Route and cancel Lasso input by effective interaction mode.                           |
 | [`apps/web/src/components/Nodes/sketch/SketchOverlay.tsx`](../../apps/web/src/components/Nodes/sketch/SketchOverlay.tsx)               | Route Sketch pointers and commit gesture-local draw or erase mutations.               |

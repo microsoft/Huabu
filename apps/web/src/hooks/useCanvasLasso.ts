@@ -48,7 +48,7 @@ interface UseCanvasLassoOptions {
 
 interface UseCanvasLassoResult {
   pointerHandlers: {
-    onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void;
+    onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => boolean;
     onPointerMove: (e: ReactPointerEvent<HTMLDivElement>) => void;
     onPointerUp: (e: ReactPointerEvent<HTMLDivElement>) => void;
     onPointerCancel: (e: ReactPointerEvent<HTMLDivElement>) => void;
@@ -277,8 +277,8 @@ export function useCanvasLasso({
 
   const onPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (!active) return;
-      if (event.button !== 0 || !event.isPrimary) return;
+      if (!active) return false;
+      if (event.button !== 0 || !event.isPrimary) return false;
       // The mouse always draws a lasso. Non-mouse pointers are accepted only
       // when the input mode routes them to direct manipulation.
       if (
@@ -287,11 +287,11 @@ export function useCanvasLasso({
           (inputMode === 'pen' && event.pointerType !== 'pen') ||
           (inputMode === 'finger' && event.pointerType !== 'touch'))
       ) {
-        return;
+        return false;
       }
       const target = event.target as HTMLElement;
 
-      if (!isEmptyPaneTarget(target)) return;
+      if (!isEmptyPaneTarget(target)) return false;
 
       event.preventDefault();
       event.stopPropagation();
@@ -307,13 +307,14 @@ export function useCanvasLasso({
         )
       ) {
         event.currentTarget.releasePointerCapture(event.pointerId);
-        return;
+        return false;
       }
       pendingRef.current = {
         pointerId: event.pointerId,
         start,
         captureTarget: event.currentTarget,
       };
+      return true;
     },
     [active, inputMode],
   );
