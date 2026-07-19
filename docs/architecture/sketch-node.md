@@ -65,7 +65,15 @@ intentStore.onSketchCreated(id)        ← only updates pendingSketchIds, no tim
 - **No dim / fade**: `executed: true` is kept but used only by the §5 state machine; rendering is unaffected.
 - Move / delete / recolor / nest-in-frame / relabel all go through the normal node flow.
 
-### 3.1 Draw and erase controls
+### 3.1 Draw does not auto-select
+
+A freshly drawn sketch is created **unselected**: `SketchOverlay` passes `selectOnCreate: false` on `addNode`, which threads through `ADD_NODES` → `CREATE_NODES` so the engine's [createNodes.ts](../../packages/shared/src/canvas-engine/commands/createNodes.ts) skips it in the auto-selection set. Two independent guards suppress create-time selection — the type-invariant `question` exclusion and the per-creation `selectOnCreate === false` hint — do not collapse them. Rationale: a selection box mid-draw interrupts continuous freehand writing, and an unselected sketch keeps stroke-only hit-testing so it never shadows nodes beneath its transparent bbox.
+
+### 3.2 Stroke merging is purely spatial ("regions")
+
+On pointer-up a new stroke either starts a fresh sketch node or is appended onto the **nearest existing sketch region** within a screen-space proximity threshold ([findMergeTarget](../../apps/web/src/components/Nodes/sketch/sketchMerge.ts), threshold `SKETCH_STROKE_MERGE_MAX_DISTANCE_SCREEN_PX / zoom`; same parent frame only). Merging is **purely spatial — time plays no role in the boundary**: coming back to write next to an old region still merges into it, so a mid-writing think-pause can never split a line across nodes. It only ever targets one existing region per stroke; merging two existing regions ("bridging") is a later concern. Per-stroke `createdAt` is preserved as intra-region metadata but no longer influences the region boundary; a unified node-level "modified-after-a-gap" provenance is a separate cross-cutting concern (see [sketch-region-redesign proposal](../proposals/sketch-region-redesign.md)).
+
+### 3.3 Draw and erase controls
 
 Desktop and touch input share `toolStore.sketchDraft` and the same mode/parameter components, but expose the frequent mode switch at different levels:
 

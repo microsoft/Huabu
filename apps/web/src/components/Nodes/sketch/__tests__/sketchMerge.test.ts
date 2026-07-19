@@ -10,10 +10,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-import {
-  SKETCH_STROKE_MERGE_MAX_DISTANCE_SCREEN_PX,
-  SKETCH_STROKE_MERGE_MAX_GAP_MS,
-} from '@/config/canvas';
+import { SKETCH_STROKE_MERGE_MAX_DISTANCE_SCREEN_PX } from '@/config/canvas';
 
 import {
   buildEraseCommands,
@@ -100,13 +97,12 @@ describe('findMergeTarget', () => {
     const got = findMergeTarget(
       { x: 0, y: 0, width: 50, height: 50 },
       null,
-      NOW,
       FLOW_THRESHOLD,
     );
     expect(got).toBeNull();
   });
 
-  it('returns null when the only candidate is older than the time window', () => {
+  it('merges into a spatially-near region no matter how long ago it was drawn', () => {
     setNodes([
       makeSketch({
         id: 'a',
@@ -116,7 +112,9 @@ describe('findMergeTarget', () => {
           {
             id: 's1',
             points: [[0, 0]],
-            createdAt: NOW - SKETCH_STROKE_MERGE_MAX_GAP_MS - 1,
+            // Drawn ten minutes ago — the old time window would have
+            // rejected this; purely spatial merging still folds in.
+            createdAt: NOW - 10 * 60 * 1000,
           },
         ],
       }),
@@ -124,10 +122,9 @@ describe('findMergeTarget', () => {
     const got = findMergeTarget(
       { x: 50, y: 50, width: 10, height: 10 }, // overlapping bbox
       null,
-      NOW,
       FLOW_THRESHOLD,
     );
-    expect(got).toBeNull();
+    expect(got).toBe('a');
   });
 
   it('returns null when the only candidate is farther than maxDistance', () => {
@@ -143,7 +140,6 @@ describe('findMergeTarget', () => {
       // bbox starts well past `0 + 50 + FLOW_THRESHOLD` on the X axis
       { x: 50 + FLOW_THRESHOLD + 5, y: 0, width: 10, height: 10 },
       null,
-      NOW,
       FLOW_THRESHOLD,
     );
     expect(got).toBeNull();
@@ -161,7 +157,6 @@ describe('findMergeTarget', () => {
     const got = findMergeTarget(
       { x: 50, y: 50, width: 10, height: 10 },
       null,
-      NOW,
       FLOW_THRESHOLD,
     );
     expect(got).toBe('a');
@@ -191,7 +186,6 @@ describe('findMergeTarget', () => {
       findMergeTarget(
         { x: 10, y: 10, width: 5, height: 5 },
         null,
-        NOW,
         FLOW_THRESHOLD,
       ),
     ).toBe('top-level');
@@ -200,38 +194,36 @@ describe('findMergeTarget', () => {
       findMergeTarget(
         { x: 10, y: 10, width: 5, height: 5 },
         'frame-1' as never,
-        NOW,
         FLOW_THRESHOLD,
       ),
     ).toBe('in-frame');
   });
 
-  it('tiebreaks by most-recent touch when both are within range', () => {
+  it('picks the spatially nearest region, not the most recent', () => {
     setNodes([
       makeSketch({
-        id: 'older',
-        position: { x: 0, y: 0 },
+        id: 'recent-far',
+        position: { x: 200, y: 0 },
         size: { width: 50, height: 50 },
-        strokes: [{ id: 's1', points: [[0, 0]], createdAt: NOW - 500 }],
+        strokes: [{ id: 's1', points: [[0, 0]], createdAt: NOW }], // most recent
       }),
       makeSketch({
-        id: 'newer',
-        position: { x: 200, y: 0 }, // farther but more recent
+        id: 'old-near',
+        position: { x: 0, y: 0 },
         size: { width: 50, height: 50 },
-        strokes: [{ id: 's2', points: [[0, 0]], createdAt: NOW - 50 }],
+        strokes: [{ id: 's2', points: [[0, 0]], createdAt: NOW - 5000 }], // older
       }),
     ]);
-    // Threshold large enough for both to qualify.
     const got = findMergeTarget(
-      { x: 60, y: 0, width: 130, height: 50 }, // overlaps `newer`, near `older`
+      // dist to old-near = 5, to recent-far = 135 → nearest wins despite age
+      { x: 55, y: 0, width: 10, height: 10 },
       null,
-      NOW,
       300,
     );
-    expect(got).toBe('newer');
+    expect(got).toBe('old-near');
   });
 
-  it('on equal touch timestamps, picks the closer candidate', () => {
+  it('picks the closer of two candidates', () => {
     setNodes([
       makeSketch({
         id: 'far',
@@ -249,7 +241,6 @@ describe('findMergeTarget', () => {
     const got = findMergeTarget(
       { x: 0, y: 0, width: 60, height: 50 }, // distance: near=40, far=140
       null,
-      NOW,
       300,
     );
     expect(got).toBe('near');
@@ -272,7 +263,6 @@ describe('findMergeTarget', () => {
     const got = findMergeTarget(
       { x: 120, y: 0, width: 10, height: 10 },
       null,
-      NOW,
       FLOW_THRESHOLD,
     );
     expect(got).toBe('a');

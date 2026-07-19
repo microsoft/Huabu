@@ -35,19 +35,13 @@ export const MOUSE_DRAG_ACTIVATION_PX = 1;
 /**
  * Sketch tool — pointer-up stroke merging (Microsoft Whiteboard /
  * Procreate behaviour). When the user finishes a stroke, instead of
- * always creating a brand-new sketch node, we look for a recent
- * nearby sketch node and append the stroke onto it. The two thresholds
- * below decide what "recent" and "nearby" mean. See
+ * always creating a brand-new sketch node, we look for the nearest
+ * nearby sketch region and append the stroke onto it. Merging is purely
+ * spatial (time plays no role); the threshold below decides what
+ * "nearby" means. See
  * `apps/web/src/components/Nodes/sketch/sketchMerge.ts` for the
  * matching algorithm.
  */
-
-/**
- * Maximum gap (ms) between a candidate sketch node's most-recent stroke
- * and the new stroke's pointer-up. Beyond this the new stroke starts a
- * fresh sketch node instead of merging.
- */
-export const SKETCH_STROKE_MERGE_MAX_GAP_MS = 5000;
 
 /**
  * Maximum gap (in **screen-space px**) between the new stroke's bbox

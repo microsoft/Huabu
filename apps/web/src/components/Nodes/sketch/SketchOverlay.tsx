@@ -407,12 +407,15 @@ export function SketchOverlay({
       );
 
       const now = Date.now();
-      // Microsoft Whiteboard-style stroke merging: if the user just
-      // doodled on a nearby sketch within
-      // SKETCH_STROKE_MERGE_MAX_GAP_MS, append this stroke onto that
-      // node instead of creating a fresh one. Cross-frame merging is
-      // forbidden so a sketch trapped inside a frame can't unexpectedly
-      // absorb a freshly-drawn one outside it. See sketchMerge.ts.
+      // Whiteboard-style stroke merging: append this stroke onto the
+      // nearest existing sketch region instead of creating a fresh node,
+      // keeping a continuous piece of handwriting in one region. Merging
+      // is purely spatial — no time window — so a mid-writing think-pause
+      // never splits a line across nodes. Cross-frame merging is forbidden
+      // so a sketch trapped inside a frame can't unexpectedly absorb a
+      // freshly-drawn one outside it. See sketchMerge.ts. (`now` is still
+      // used below as each stroke's `createdAt` — intra-region metadata
+      // that no longer influences the region boundary.)
       //
       // Resolve the parent frame (if any) from the new stroke's bbox
       // top-left so we match the exact same auto-nesting that
@@ -444,7 +447,6 @@ export function SketchOverlay({
       const targetId = findMergeTarget(
         newBboxFlow,
         newParentId,
-        now,
         mergeMaxDistance,
       );
 

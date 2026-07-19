@@ -2,14 +2,18 @@
  * Stroke-merge helpers for the sketch tool.
  *
  * When the user finishes a stroke, we don't always create a brand-new
- * sketch node. If there's a *recent* sketch node nearby that the user
- * was just doodling on, we instead append the new stroke onto that node
- * (Microsoft Whiteboard / Procreate behaviour). This avoids littering
- * the canvas with one node per pen lift.
+ * sketch node. If there's a sketch node (a "region") nearby, we instead
+ * append the new stroke onto that node (Microsoft Whiteboard / Procreate
+ * behaviour). This avoids littering the canvas with one node per pen lift
+ * and keeps a continuous piece of handwriting in a single region.
  *
- * Decision rules (tuned per plan v2.1):
- *  - Time window: the candidate's most-recent stroke must have been
- *    drawn in the last `SKETCH_STROKE_MERGE_MAX_GAP_MS` ms.
+ * Decision rules:
+ *  - Purely spatial: the target is the *nearest* existing sketch region
+ *    within `maxDistance` of the new stroke's bbox. Time is NOT a factor
+ *    — coming back to write next to an old region still merges into it,
+ *    so a mid-writing think-pause can never split a line across nodes.
+ *    Per-stroke `createdAt` is preserved as intra-region metadata, but it
+ *    no longer influences the region boundary.
  *  - Proximity: the new stroke's bbox must be within `maxDistance`
  *    units of the candidate's current bbox (axis-aligned, zero on
  *    overlap). The caller chooses the unit — typically by converting
@@ -23,14 +27,15 @@
  *  - Cross-color is allowed: merging a black scribble onto a red one
  *    just produces a node with mixed-color strokes, since each stroke
  *    keeps its own `color` / `size`.
- *  - Tiebreak: most recently touched candidate wins; on ties, the
- *    closest bbox wins.
+ *  - Tiebreak: nearest bbox edge distance wins; on ties, the nearest
+ *    bbox centre wins (still purely spatial, deterministic).
  *
- * If no candidate qualifies, the caller falls back to creating a new
- * sketch node.
+ * Only ever targets a single existing region for the new stroke; it
+ * never merges two existing regions (that "bridging" merge is a separate,
+ * later concern). If no candidate qualifies, the caller falls back to
+ * creating a new sketch node.
  */
 
-import { SKETCH_STROKE_MERGE_MAX_GAP_MS } from '@/config/canvas';
 import useCanvasStore from '@/store/canvasStore';
 
 import type { CanvasSketchNodeData } from '../types';
@@ -66,21 +71,10 @@ function bboxDistance(a: FlowBBox, b: FlowBBox): number {
 }
 
 /**
- * Return the most-recently-touched stroke timestamp on a sketch node.
- * Returns `0` if the node has no strokes (defensive \u2014 schema requires
- * at least one).
- */
-function latestStrokeAt(strokes: readonly SketchStroke[]): number {
-  let max = 0;
-  for (const s of strokes) {
-    if (s.createdAt > max) max = s.createdAt;
-  }
-  return max;
-}
 
-/**
  * Find an eligible sketch node to merge a brand-new stroke into, or
- * `null` if no candidate qualifies.
+ * `null` if no candidate qualifies. Purely spatial — the nearest existing
+ * sketch region within `maxDistance` wins; time plays no role.
  *
  * @param newBboxFlow  Bbox of the just-finished stroke, in the same
  *                     coordinate space as the candidates' `node.position`
@@ -88,8 +82,6 @@ function latestStrokeAt(strokes: readonly SketchStroke[]): number {
  *                     parent-local for strokes inside a frame).
  * @param newParentId  Parent frame ID of the new stroke (or `null` for
  *                     top-level). Cross-frame matches are rejected.
- * @param now          Wall-clock timestamp of the pointer-up event,
- *                     in ms (typically `Date.now()`).
  * @param maxDistance  Maximum allowed bbox-to-bbox distance, in the
  *                     same units as `newBboxFlow`. Callers converting
  *                     a screen-space threshold should pass
@@ -98,12 +90,15 @@ function latestStrokeAt(strokes: readonly SketchStroke[]): number {
 export function findMergeTarget(
   newBboxFlow: FlowBBox,
   newParentId: CanvasNodeId | null,
-  now: number,
   maxDistance: number,
 ): CanvasNodeId | null {
   const nodes = useCanvasStore.getState().nodes;
 
-  let best: { id: CanvasNodeId; touchedAt: number; dist: number } | null = null;
+  const newCx = newBboxFlow.x + newBboxFlow.width / 2;
+  const newCy = newBboxFlow.y + newBboxFlow.height / 2;
+
+  let best: { id: CanvasNodeId; dist: number; centerDist: number } | null =
+    null;
 
   for (const node of nodes) {
     if (node.type !== 'sketch') continue;
@@ -112,9 +107,6 @@ export function findMergeTarget(
     const data = node.data as CanvasSketchNodeData;
     const strokes = data.strokes ?? [];
     if (strokes.length === 0) continue;
-
-    const touchedAt = latestStrokeAt(strokes);
-    if (now - touchedAt > SKETCH_STROKE_MERGE_MAX_GAP_MS) continue;
 
     const w =
       node.measured?.width ?? node.width ?? data.initialSize?.width ?? 0;
@@ -130,12 +122,19 @@ export function findMergeTarget(
     const dist = bboxDistance(newBboxFlow, candBbox);
     if (dist > maxDistance) continue;
 
+    // Deterministic, purely spatial tiebreak: on equal edge distance
+    // (e.g. two overlapping regions, both dist 0) prefer the one whose
+    // centre is nearest.
+    const candCx = candBbox.x + candBbox.width / 2;
+    const candCy = candBbox.y + candBbox.height / 2;
+    const centerDist = Math.hypot(newCx - candCx, newCy - candCy);
+
     if (
       !best ||
-      touchedAt > best.touchedAt ||
-      (touchedAt === best.touchedAt && dist < best.dist)
+      dist < best.dist ||
+      (dist === best.dist && centerDist < best.centerDist)
     ) {
-      best = { id: node.id as CanvasNodeId, touchedAt, dist };
+      best = { id: node.id as CanvasNodeId, dist, centerDist };
     }
   }
 
