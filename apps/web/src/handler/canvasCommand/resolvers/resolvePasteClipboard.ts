@@ -151,6 +151,10 @@ export default function resolvePasteClipboard(
       position,
       ...(size && { size }),
       ...(parentId && { parentId }),
+      // Paste / duplicate selects everything it created so the user can
+      // immediately move it. `selectOnCreate: true` also opts question
+      // nodes in, overriding their default no-auto-select policy.
+      selectOnCreate: true,
     });
     traceNodes.push({ id: nodeId, type: nodeType, label });
   }

@@ -254,6 +254,25 @@ describe('CREATE_NODES selection', () => {
     expect(nodes.find((n) => n.id === 'existing')?.selected).toBe(false);
   });
 
+  it('force-selects a question created with selectOnCreate:true (paste/duplicate)', () => {
+    const nodes = createNodes({
+      type: 'CREATE_NODES',
+      nodes: [
+        {
+          id: 'pasted-question' as never,
+          nodeType: 'question',
+          position: { x: 10, y: 10 },
+          selectOnCreate: true,
+        },
+      ],
+    });
+
+    // Overrides the default question exclusion so the pasted copy is
+    // selected (and the prior selection is cleared).
+    expect(nodes.find((n) => n.id === 'pasted-question')?.selected).toBe(true);
+    expect(nodes.find((n) => n.id === 'existing')?.selected).toBe(false);
+  });
+
   it('preserves selection for agent-created nodes', () => {
     const command: CanvasCommand = {
       type: 'CREATE_NODES',

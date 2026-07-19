@@ -44,6 +44,10 @@ const createNodes: CommandDefinition<Cmd> = {
     // (`selectOnCreate: false`, e.g. sketch draw). Collected during the
     // build loop and excluded from the auto-selection set below.
     const noSelectOnCreateIds = new Set<string>();
+    // Nodes whose input opted IN to create-time selection
+    // (`selectOnCreate: true`, e.g. paste / duplicate), overriding the
+    // default `question` exclusion below.
+    const forceSelectOnCreateIds = new Set<string>();
     // Parent frames whose group label may need re-resolution because a
     // new child was added. The server decides whether to actually run.
     const affectedParentFrames: Node[] = [];
@@ -135,20 +139,26 @@ const createNodes: CommandDefinition<Cmd> = {
       }
 
       if (input.selectOnCreate === false) noSelectOnCreateIds.add(nodeId);
+      else if (input.selectOnCreate === true)
+        forceSelectOnCreateIds.add(nodeId);
       newNodes.push(node);
     }
 
     // ---------------------------------------------------------------
     // 4. Concatenate the new nodes.
     //
-    // User-created ordinary nodes become the active selection. Two
-    // independent guards suppress that, expressing two DIFFERENT intents
-    // (do not collapse them):
-    //   - `type === 'question'` — a type-invariant policy: question nodes
-    //     never steal focus (they are usually born from the preprocess /
-    //     compose flow, which focuses the chat input instead).
-    //   - `selectOnCreate === false` — a per-creation hint: this specific
-    //     gesture opted out (e.g. sketch freehand draw), regardless of type.
+    // Create-time selection is decided per node by `selectOnCreate`
+    // layered over a default (these express DIFFERENT intents — do not
+    // collapse them):
+    //   - `selectOnCreate === false` — hard opt-out (e.g. sketch freehand
+    //     draw): never selected, regardless of type.
+    //   - `selectOnCreate === true` — hard opt-in (e.g. paste / duplicate):
+    //     always selected, overriding the `question` default below.
+    //   - otherwise (default) — non-`question` nodes select; `question`
+    //     nodes do NOT. Questions are usually born from the compose /
+    //     preprocess flow, which focuses the chat input instead of the
+    //     canvas, so by default they must not steal focus; an explicit
+    //     `selectOnCreate: true` (paste / duplicate) is the escape hatch.
     // Agent/system creates (`source !== 'ui'`) never auto-select at all.
     //
     // Tree order (parents before children, frame-child zIndex) is repaired
@@ -159,9 +169,11 @@ const createNodes: CommandDefinition<Cmd> = {
     const selectableCreatedNodeIds =
       state.source === 'ui'
         ? newNodes
-            .filter(
-              (n) => n.type !== 'question' && !noSelectOnCreateIds.has(n.id),
-            )
+            .filter((n) => {
+              if (noSelectOnCreateIds.has(n.id)) return false;
+              if (forceSelectOnCreateIds.has(n.id)) return true;
+              return n.type !== 'question';
+            })
             .map((n) => n.id)
         : [];
     const finalNodes =

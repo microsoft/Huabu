@@ -66,6 +66,9 @@ Created like any node via `CREATE_NODES` ([resolveAddNodes.ts](../../apps/web/sr
 - After sending: **running → done / error**.
 - Move / delete / resize / re-frame all go through the normal node flow; a stale
   pasted copy strips transient state so it starts fresh.
+- **Create-time selection**: a question node does **not** auto-select when born
+  from the compose / preprocess flow (those focus the chat input, so the canvas
+  must not steal focus) — this is the default in [createNodes.ts](../../packages/shared/src/canvas-engine/commands/createNodes.ts). Paste / duplicate is the exception: [resolvePasteClipboard.ts](../../apps/web/src/handler/canvasCommand/resolvers/resolvePasteClipboard.ts) sets `selectOnCreate: true`, which overrides that default so the pasted copy is selected like any other pasted node.
 - Question height is content-driven like text nodes. Drag-resize may use the
   transient box height to derive a locked `data.style.fontSize`, but the node's
   top-level `style.height` is not persisted. The floating toolbar therefore
