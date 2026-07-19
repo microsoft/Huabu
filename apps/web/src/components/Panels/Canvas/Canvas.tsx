@@ -1146,10 +1146,13 @@ export const Canvas: React.FC<CanvasProps> = ({
           );
         }}
         panOnDrag={
-          pendingNodeType
-            ? [1] /* creation tool active → middle mouse button still pans */
-            : isNotMouse
-              ? false /* touch/pen → custom gesture recognizers drive pan */
+          isNotMouse
+            ? false /* touch/pen → custom pointer router is the sole pan driver;
+                       React Flow's d3-zoom touch pan (a separate Touch Events
+                       stream) would otherwise still fire under a truthy
+                       `[1]` and pan the canvas mid-frame/lasso/placement */
+            : pendingNodeType
+              ? [1] /* mouse + creation tool → middle mouse button still pans */
               : tool === 'pan'
                 ? true
                 : [
