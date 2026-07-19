@@ -15,6 +15,7 @@ import { SKETCH_STROKE_MERGE_MAX_DISTANCE_SCREEN_PX } from '@/config/canvas';
 import {
   buildEraseCommands,
   buildMergeCommands,
+  buildMoveStrokesCommands,
   findMergeTarget,
 } from '../sketchMerge';
 
@@ -583,5 +584,115 @@ describe('buildEraseCommands', () => {
     ]);
     const cmds = buildEraseCommands('a' as never, new Set(['s1']));
     expect(cmds).toEqual([{ type: 'DELETE_NODES', nodeIds: ['a'] }]);
+  });
+});
+
+// =====================================================================
+// buildMoveStrokesCommands
+// =====================================================================
+
+describe('buildMoveStrokesCommands', () => {
+  const NOW = 4_000_000;
+
+  it('returns [] when no strokes are moved', () => {
+    expect(buildMoveStrokesCommands('a' as never, new Set(), 5, 5)).toEqual([]);
+  });
+
+  it('returns [] when the delta is zero', () => {
+    expect(
+      buildMoveStrokesCommands('a' as never, new Set(['s1']), 0, 0),
+    ).toEqual([]);
+  });
+
+  it('returns [] when the target node does not exist', () => {
+    setNodes([]);
+    expect(
+      buildMoveStrokesCommands('missing' as never, new Set(['s1']), 5, 5),
+    ).toEqual([]);
+  });
+
+  it('translates the moved stroke and reframes the union bbox', () => {
+    // Node at flow origin (10, 20), size 100×100 (scale = 1).
+    //   's1' (moved) size 0 at local (0, 0)   → flow (10, 20).
+    //   's2' (kept)  size 0 at local (40, 40) → flow (50, 60).
+    // Move s1 by (+30, +10): s1 flow → (40, 30). s2 stays (50, 60).
+    // Union bbox: (40, 30)–(50, 60) → 10×30, origin (40, 30).
+    setNodes([
+      makeSketch({
+        id: 'a',
+        position: { x: 10, y: 20 },
+        size: { width: 100, height: 100 },
+        strokes: [
+          { id: 's1', points: [[0, 0]], size: 0, createdAt: NOW },
+          { id: 's2', points: [[40, 40]], size: 0, createdAt: NOW },
+        ],
+      }),
+    ]);
+    const cmds = buildMoveStrokesCommands(
+      'a' as never,
+      new Set(['s1']),
+      30,
+      10,
+    );
+    expect(cmds).toHaveLength(2);
+
+    const geom = cmds[1] as Extract<
+      (typeof cmds)[number],
+      { type: 'SET_NODE_GEOMETRY' }
+    >;
+    expect(geom.items).toEqual([
+      {
+        nodeId: 'a',
+        position: { x: 40, y: 30 },
+        size: { width: 10, height: 30 },
+      },
+    ]);
+
+    const patch = (
+      cmds[0] as Extract<(typeof cmds)[number], { type: 'MERGE_NODE_DATA' }>
+    ).patches[0].patch as {
+      strokes: Array<{ id: string; points: number[][] }>;
+      initialSize: { width: number; height: number };
+    };
+    expect(patch.initialSize).toEqual({ width: 10, height: 30 });
+    // Re-rooted at new origin (40, 30):
+    //   s1 flow (40, 30) → local (0, 0).
+    //   s2 flow (50, 60) → local (10, 30).
+    const s1 = patch.strokes.find((s) => s.id === 's1');
+    const s2 = patch.strokes.find((s) => s.id === 's2');
+    expect(s1?.points).toEqual([[0, 0]]);
+    expect(s2?.points).toEqual([[10, 30]]);
+  });
+
+  it('bakes the current scale into moved and kept strokes (resized node)', () => {
+    // Initial 100×100, currently 200×100 → scaleX = 2, scaleY = 1.
+    //   's1' (moved) local (10, 10) → flow (10 + 20, 20 + 10) = (30, 30).
+    //   's2' (kept)  local (50, 50) → flow (10 + 100, 20 + 50) = (110, 70).
+    // Move s1 by (+10, +10): s1 flow → (40, 40). s2 stays (110, 70).
+    // Union bbox: (40, 40)–(110, 70) → 70×30, origin (40, 40).
+    setNodes([
+      makeSketch({
+        id: 'a',
+        position: { x: 10, y: 20 },
+        size: { width: 200, height: 100 },
+        initialSize: { width: 100, height: 100 },
+        strokes: [
+          { id: 's1', points: [[10, 10]], size: 0, createdAt: NOW },
+          { id: 's2', points: [[50, 50]], size: 0, createdAt: NOW },
+        ],
+      }),
+    ]);
+    const cmds = buildMoveStrokesCommands(
+      'a' as never,
+      new Set(['s1']),
+      10,
+      10,
+    );
+    const geom = cmds[1] as Extract<
+      (typeof cmds)[number],
+      { type: 'SET_NODE_GEOMETRY' }
+    >;
+    expect(geom.items[0].position).toEqual({ x: 40, y: 40 });
+    expect(geom.items[0].size).toEqual({ width: 70, height: 30 });
   });
 });

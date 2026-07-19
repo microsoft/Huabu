@@ -417,3 +417,110 @@ export function buildEraseCommands(
     },
   ];
 }
+
+/**
+ * Build the commands to translate a SUBSET of a sketch node's strokes by
+ * `(dxFlow, dyFlow)` flow-space units (Stage 2 in-node move), reframing the
+ * node tightly around the result. Mirrors {@link buildEraseCommands} but
+ * moves strokes instead of removing them: every stroke is baked into flow
+ * space (scale applied), the moved ones get the offset, then all points are
+ * reframed into a fresh local space (scale reset to 1).
+ *
+ * Returns `[]` when nothing would change. Uses `snapshot:'caller'`; caller
+ * must `beginGesture('SET_NODE_GEOMETRY')` before `executeCommands`.
+ */
+export function buildMoveStrokesCommands(
+  targetNodeId: CanvasNodeId,
+  movedStrokeIds: Set<string>,
+  dxFlow: number,
+  dyFlow: number,
+): CanvasCommand[] {
+  if (movedStrokeIds.size === 0) return [];
+  if (dxFlow === 0 && dyFlow === 0) return [];
+
+  const node = useCanvasStore
+    .getState()
+    .nodes.find((n) => n.id === targetNodeId);
+  if (!node || node.type !== 'sketch') return [];
+
+  const data = node.data as CanvasSketchNodeData;
+  if (data.strokes.length === 0) return [];
+
+  const baseW = data.initialSize?.width || 1;
+  const baseH = data.initialSize?.height || 1;
+  const curW = node.measured?.width ?? node.width ?? baseW;
+  const curH = node.measured?.height ?? node.height ?? baseH;
+  const scaleX = curW / baseW;
+  const scaleY = curH / baseH;
+  const O = { x: node.position.x, y: node.position.y };
+
+  // Bake every stroke into flow space; moved strokes get the offset.
+  const flowStrokes = data.strokes.map((s) => {
+    const moved = movedStrokeIds.has(s.id);
+    const ox = moved ? dxFlow : 0;
+    const oy = moved ? dyFlow : 0;
+    return {
+      s,
+      pts: s.points.map((p) => {
+        const fx = O.x + p[0] * scaleX + ox;
+        const fy = O.y + p[1] * scaleY + oy;
+        return p.length > 2 ? [fx, fy, ...p.slice(2)] : [fx, fy];
+      }),
+    };
+  });
+
+  // Tight union bbox (flow), padded per stroke by its own size/2.
+  let x1 = Infinity;
+  let y1 = Infinity;
+  let x2 = -Infinity;
+  let y2 = -Infinity;
+  for (const { s, pts } of flowStrokes) {
+    const pad = (s.size ?? 0) / 2;
+    for (const p of pts) {
+      if (p[0] - pad < x1) x1 = p[0] - pad;
+      if (p[1] - pad < y1) y1 = p[1] - pad;
+      if (p[0] + pad > x2) x2 = p[0] + pad;
+      if (p[1] + pad > y2) y2 = p[1] + pad;
+    }
+  }
+  if (!Number.isFinite(x1)) return [];
+
+  const unionW = x2 - x1;
+  const unionH = y2 - y1;
+
+  // Reframe every point into the new local space (top-left = x1,y1);
+  // resetting initialSize to the union makes the local scale 1 again.
+  const bakedMoved: SketchStroke[] = flowStrokes.map(({ s, pts }) => ({
+    ...s,
+    points: pts.map((p) =>
+      p.length > 2
+        ? [p[0] - x1, p[1] - y1, ...p.slice(2)]
+        : [p[0] - x1, p[1] - y1],
+    ),
+  }));
+
+  return [
+    {
+      type: 'MERGE_NODE_DATA',
+      patches: [
+        {
+          nodeId: targetNodeId,
+          patch: {
+            strokes: bakedMoved,
+            initialSize: { width: unionW, height: unionH },
+          },
+        },
+      ],
+    },
+    {
+      type: 'SET_NODE_GEOMETRY',
+      items: [
+        {
+          nodeId: targetNodeId,
+          position: { x: x1, y: y1 },
+          size: { width: unionW, height: unionH },
+        },
+      ],
+    },
+  ];
+}

@@ -58,6 +58,7 @@ import {
   useIsNotMouse,
 } from '@/hooks/useInputMode';
 import { useSketchHoverRouting } from '@/hooks/useSketchHoverRouting';
+import { useSketchStrokeMove } from '@/hooks/useSketchStrokeMove';
 import { isMac } from '@/utils/platform';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
@@ -81,6 +82,7 @@ import { IntentPopover } from './IntentPopover.tsx';
 import { MultiSelectResizer } from './MultiSelectResizer.tsx';
 import { SelectionOutlines } from './SelectionOutlines.tsx';
 import { SnapGuidesOverlay } from './SnapGuidesOverlay.tsx';
+import { StrokeSelectionRegion } from './StrokeSelectionRegion.tsx';
 import { StructuredDropOverlay } from './StructuredDropOverlay.tsx';
 import { useInitialCanvasViewport } from './useInitialCanvasViewport.ts';
 import { GRID_SIZE, MAX_ZOOM, MIN_ZOOM } from '../../../config/canvas.ts';
@@ -97,7 +99,10 @@ import { looksLikeUrl } from '../../../utils/io/media.ts';
 import { FrameNode } from '../../Nodes/frame/FrameNode.tsx';
 import { createQuestionNodeAndCompose } from '../../Nodes/question/questionCompose.ts';
 import { QuestionNode } from '../../Nodes/question/QuestionNode.tsx';
-import { findSketchStrokesInPolygon } from '../../Nodes/sketch/sketchHitTest.ts';
+import {
+  findSketchStrokesInPolygon,
+  isPointInFlowPolygon,
+} from '../../Nodes/sketch/sketchHitTest.ts';
 import { SketchNode } from '../../Nodes/sketch/SketchNode.tsx';
 import {
   CANCEL_SKETCH_GESTURE_EVENT,
@@ -353,6 +358,11 @@ export const Canvas: React.FC<CanvasProps> = ({
   const canvasId = useCanvasStore((state) => state.canvasId);
   const minimapEnabled = useCanvasStore((state) => state.minimapEnabled);
   const pendingNodeType = useToolStore((state) => state.pendingNodeType);
+  // Whether a stroke-level sketch selection is active — suppresses node
+  // toolbars so a mixed lasso never shows them (boolean selector).
+  const hasStrokeSelection = useGesturePreviewStore(
+    (s) => Object.keys(s.sketchStrokeSelection).length > 0,
+  );
   const frameFitPreviews = useGesturePreviewStore(
     (state) => state.frameFitPreviews,
   );
@@ -545,9 +555,13 @@ export const Canvas: React.FC<CanvasProps> = ({
         nodes.filter((n) => n.type === 'sketch').map((n) => n.id),
       );
       const nonSketchNodeIds = nodeIds.filter((id) => !sketchIdSet.has(id));
-      useGesturePreviewStore
-        .getState()
-        .setSketchStrokeSelection(strokeSelection);
+      const preview = useGesturePreviewStore.getState();
+      preview.setSketchStrokeSelection(strokeSelection);
+      // Retain the lasso polygon so the user can drag inside it to move the
+      // strokes (GoodNotes-style); drop it when nothing was captured.
+      preview.setSketchSelectionPolygon(
+        Object.keys(strokeSelection).length > 0 ? flowPolygon : null,
+      );
       selectNodes(nonSketchNodeIds);
     },
     inputMode,
@@ -803,6 +817,11 @@ export const Canvas: React.FC<CanvasProps> = ({
   frameHandlersRef.current = framePointerHandlers;
   const lassoHandlersRef = useRef(lassoPointerHandlers);
   lassoHandlersRef.current = lassoPointerHandlers;
+  // Stroke-move gesture (drag inside the retained lasso region). Claims a
+  // pointerdown before the lasso when it lands inside the selection polygon.
+  const strokeMoveHandlers = useSketchStrokeMove({ rfInstanceRef });
+  const strokeMoveHandlersRef = useRef(strokeMoveHandlers);
+  strokeMoveHandlersRef.current = strokeMoveHandlers;
   const toolRef = useRef(tool);
   toolRef.current = tool;
   const pointerRecognizers = useMemo<
@@ -832,6 +851,38 @@ export const Canvas: React.FC<CanvasProps> = ({
           event.isPrimary &&
           !isPanelTarget(event.target as Element | null) &&
           canDirectlyManipulateWithPointer(event.pointerType, ctx.inputMode),
+      ),
+      createHandlerOwnerRecognizer(
+        'sketch-stroke-move',
+        () => ({
+          onPointerDown: (e) => strokeMoveHandlersRef.current.onPointerDown(e),
+          onPointerMove: (e) => strokeMoveHandlersRef.current.onPointerMove(e),
+          onPointerUp: (e) => strokeMoveHandlersRef.current.onPointerUp(e),
+          onPointerCancel: (e) =>
+            strokeMoveHandlersRef.current.onPointerCancel(e),
+        }),
+        (event, ctx) => {
+          if (useToolStore.getState().pendingNodeType !== null) return false;
+          if (toolRef.current !== 'lasso') return false;
+          if (event.button !== 0 || !event.isPrimary) return false;
+          if (
+            !canDirectlyManipulateWithPointer(event.pointerType, ctx.inputMode)
+          )
+            return false;
+          // Move applies to a PURE stroke selection only; in a mixed
+          // selection (strokes + nodes) there is no move (agreed design).
+          if (useCanvasStore.getState().nodes.some((n) => n.selected))
+            return false;
+          const poly = useGesturePreviewStore.getState().sketchSelectionPolygon;
+          if (!poly || poly.length < 3) return false;
+          const inst = rfInstanceRef.current;
+          if (!inst) return false;
+          const flow = inst.screenToFlowPosition({
+            x: event.clientX,
+            y: event.clientY,
+          });
+          return isPointInFlowPolygon(flow.x, flow.y, poly);
+        },
       ),
       createHandlerOwnerRecognizer(
         'lasso',
@@ -1249,7 +1300,8 @@ export const Canvas: React.FC<CanvasProps> = ({
         </Panel>
         {!isBoxSelecting && <MultiSelectResizer />}
         {!isBoxSelecting && <SelectionOutlines />}
-        {!isBoxSelecting && <MultiSelectToolbar />}
+        {!isBoxSelecting && !hasStrokeSelection && <MultiSelectToolbar />}
+        {!isBoxSelecting && <StrokeSelectionRegion />}
         {!isBoxSelecting && <StrokeSelectionToolbar />}
         {!isBoxSelecting && <EdgeStyleToolbar />}
         <IntentPopover />

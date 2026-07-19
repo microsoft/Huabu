@@ -209,7 +209,7 @@ interface FlowPoint {
  * Ray-cast point-in-polygon test (even-odd rule). `poly` is a closed
  * polygon given as an ordered vertex list; the closing edge is implied.
  */
-function pointInPolygon(
+export function isPointInFlowPolygon(
   px: number,
   py: number,
   poly: readonly FlowPoint[],
@@ -268,7 +268,7 @@ export function findSketchStrokesInPolygon(
       for (const pt of stroke.points) {
         const px = abs.x + pt[0] * scaleX;
         const py = abs.y + pt[1] * scaleY;
-        if (pointInPolygon(px, py, flowPolygon)) {
+        if (isPointInFlowPolygon(px, py, flowPolygon)) {
           matched.push(stroke.id);
           break;
         }

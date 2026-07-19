@@ -1,5 +1,5 @@
 import { Trash2 } from 'lucide-react';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { CanvasFloatingPopover } from '@/components/Common/CanvasFloatingPopover';
@@ -7,45 +7,93 @@ import {
   FloatingToolbar,
   FLOATING_TOOLBAR_CLASS,
 } from '@/components/Common/FloatingToolbar';
+import { SketchControls } from '@/components/Nodes/sketch/SketchControls';
 import { getSketchStrokeSelectionBounds } from '@/components/Nodes/sketch/sketchHitTest';
 import { buildEraseCommands } from '@/components/Nodes/sketch/sketchMerge';
+import {
+  DEFAULT_STROKE_COLOR,
+  DEFAULT_STROKE_SIZE,
+} from '@/components/Nodes/sketch/sketchPath';
+import { useIsNotMouse } from '@/hooks/useInputMode';
 import useCanvasStore from '@/store/canvasStore';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 
-import type { CanvasCommand, CanvasNodeId } from '@sediment/shared';
+import type { CanvasSketchNodeData } from '@/components/Nodes/types';
+import type {
+  CanvasCommand,
+  CanvasNodeId,
+  SketchStroke,
+} from '@sediment/shared';
 
 /**
- * Floating toolbar for a Stage 2 stroke-level lasso selection. Anchored
- * above the union bbox of the selected strokes; currently exposes a
- * single Delete action (rendering to PNG / send-to-AI is deferred to
- * Stage 3). Selection lives in `gesturePreviewStore.sketchStrokeSelection`
- * (`nodeId -> strokeIds`) and is produced by the Canvas lasso consumer.
+ * Floating toolbar for a Stage 2 stroke-level lasso selection. Aligns with
+ * the sketch node's own controls: color + thickness edit the selected
+ * strokes. Delete is **touch-only** (desktop uses the keyboard). Toolbar
+ * arbitration guarantees at most one floating toolbar:
+ *   - pure stroke selection → color + size (+ delete on touch);
+ *   - mixed (strokes + nodes) → touch: delete only; desktop: nothing
+ *     (node toolbars are suppressed while a stroke selection exists);
+ *   - pure node selection → the node toolbars own the surface.
  */
 export const StrokeSelectionToolbar = () => {
   const { t } = useTranslation();
-  // Subscribe to `nodes` too so the anchor tracks a selected sketch that
-  // gets moved / resized while its strokes stay selected.
+  // Subscribe to `nodes` so the anchor + representative style track edits.
   const nodes = useCanvasStore((s) => s.nodes);
+  const updateNodeData = useCanvasStore((s) => s.updateNodeData);
   const executeCommands = useCanvasStore((s) => s.executeCommands);
   const beginGesture = useCanvasStore((s) => s.beginGesture);
   const selection = useGesturePreviewStore((s) => s.sketchStrokeSelection);
   const clearSelection = useGesturePreviewStore(
     (s) => s.clearSketchStrokeSelection,
   );
+  const isNotMouse = useIsNotMouse();
 
   const hasSelection = Object.keys(selection).length > 0;
-
-  // Guarantee at most one floating toolbar: when any node is selected the
-  // node toolbars own the surface, so the stroke delete bar steps aside
-  // (the strokes stay highlighted; this only affects the rare mixed lasso).
   const hasNodeSelection = nodes.some((n) => n.selected);
+  const isMixed = hasSelection && hasNodeSelection;
 
   const anchor = useMemo(() => {
     if (!hasSelection) return null;
-    // `nodes` is an explicit dep so the bbox recomputes as sketches move.
-    void nodes;
+    void nodes; // recompute as sketches move / resize
     return getSketchStrokeSelectionBounds(selection);
   }, [selection, hasSelection, nodes]);
+
+  // Representative color / size for the swatches: the first selected stroke.
+  const { color, size } = useMemo(() => {
+    for (const [nodeId, strokeIds] of Object.entries(selection)) {
+      const node = nodes.find((n) => n.id === nodeId);
+      const strokes = (node?.data as CanvasSketchNodeData | undefined)?.strokes;
+      if (!strokes) continue;
+      const idSet = new Set(strokeIds);
+      const first = strokes.find((s) => idSet.has(s.id));
+      if (first) {
+        return {
+          color: first.color ?? DEFAULT_STROKE_COLOR,
+          size: first.size ?? DEFAULT_STROKE_SIZE,
+        };
+      }
+    }
+    return { color: DEFAULT_STROKE_COLOR, size: DEFAULT_STROKE_SIZE };
+  }, [selection, nodes]);
+
+  // Apply a per-stroke patch (color / size) to only the selected strokes.
+  const patchSelected = useCallback(
+    (patch: Partial<SketchStroke>) => {
+      for (const [nodeId, strokeIds] of Object.entries(selection)) {
+        const node = nodes.find((n) => n.id === nodeId);
+        const strokes = (node?.data as CanvasSketchNodeData | undefined)
+          ?.strokes;
+        if (!strokes) continue;
+        const idSet = new Set(strokeIds);
+        updateNodeData(nodeId, {
+          strokes: strokes.map((s) =>
+            idSet.has(s.id) ? { ...s, ...patch } : s,
+          ),
+        });
+      }
+    },
+    [selection, nodes, updateNodeData],
+  );
 
   const handleDelete = useCallback(() => {
     const commands: CanvasCommand[] = [];
@@ -57,33 +105,67 @@ export const StrokeSelectionToolbar = () => {
     }
     clearSelection();
     if (commands.length === 0) return;
-
-    // `SET_NODE_GEOMETRY` uses snapshot:'caller' — take the undo snapshot
-    // now so stroke removal + geometry reflow fold into one undo entry
-    // (mirrors the eraser's commit in SketchOverlay).
     if (commands.some((c) => c.type === 'SET_NODE_GEOMETRY')) {
       beginGesture('SET_NODE_GEOMETRY');
     }
     executeCommands(commands, 'ui');
   }, [selection, clearSelection, beginGesture, executeCommands]);
 
+  // Keyboard delete: the delete button is touch-only, so desktop deletes
+  // the stroke selection via Delete / Backspace. Coexists with React Flow's
+  // node delete (a mixed selection removes both on one press).
+  useEffect(() => {
+    if (!hasSelection) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+      const el = document.activeElement as HTMLElement | null;
+      if (
+        el &&
+        (el.tagName === 'INPUT' ||
+          el.tagName === 'TEXTAREA' ||
+          el.isContentEditable)
+      ) {
+        return;
+      }
+      handleDelete();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [hasSelection, handleDelete]);
+
+  const showStyle = !isMixed; // style controls only for a pure stroke selection
+  const showDelete = isNotMouse; // delete button is touch-only
+  const open = hasSelection && anchor !== null && (showStyle || showDelete);
+
   return (
     <CanvasFloatingPopover
       anchor={anchor}
-      open={hasSelection && anchor !== null && !hasNodeSelection}
+      open={open}
       offset={12}
       side="top"
       className={FLOATING_TOOLBAR_CLASS}
     >
-      <FloatingToolbar.ActionButton
-        title={t('toolbar.deleteSelected')}
-        onClick={(e) => {
-          e.stopPropagation();
-          handleDelete();
-        }}
-      >
-        <Trash2 />
-      </FloatingToolbar.ActionButton>
+      {showStyle && (
+        <SketchControls
+          color={color}
+          size={size}
+          touch={isNotMouse}
+          onColorChange={(c) => patchSelected({ color: c })}
+          onSizeChange={(s) => patchSelected({ size: s })}
+        />
+      )}
+      {showStyle && showDelete && <FloatingToolbar.Divider />}
+      {showDelete && (
+        <FloatingToolbar.ActionButton
+          title={t('toolbar.deleteSelected')}
+          onClick={(e) => {
+            e.stopPropagation();
+            handleDelete();
+          }}
+        >
+          <Trash2 />
+        </FloatingToolbar.ActionButton>
+      )}
     </CanvasFloatingPopover>
   );
 };

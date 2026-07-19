@@ -49,8 +49,34 @@ type GesturePreviewState = {
   /** Replace the current stroke-level selection. */
   setSketchStrokeSelection: (selection: Record<string, string[]>) => void;
 
-  /** Clear the stroke-level selection. */
+  /** Clear the stroke-level selection (also drops region + move preview). */
   clearSketchStrokeSelection: () => void;
+
+  /**
+   * The retained lasso polygon (flow-space) for the current stroke
+   * selection — GoodNotes-style: the loop stays after selection so the
+   * user can drag inside it to move the strokes. `null` when there is no
+   * stroke selection. Point-in-polygon against this decides move vs.
+   * new-lasso.
+   */
+  sketchSelectionPolygon: Array<{ x: number; y: number }> | null;
+
+  /** Set the retained selection polygon (flow-space). */
+  setSketchSelectionPolygon: (
+    polygon: Array<{ x: number; y: number }> | null,
+  ) => void;
+
+  /**
+   * Live translation (flow-space) applied to the selected strokes while a
+   * move drag is in progress; `null` when not moving. Baked into node data
+   * on pointer-up. Purely visual until commit.
+   */
+  sketchStrokeMovePreview: { dx: number; dy: number } | null;
+
+  /** Set / clear the live move-preview offset. */
+  setSketchStrokeMovePreview: (
+    offset: { dx: number; dy: number } | null,
+  ) => void;
 
   /**
    * Previews of how frames would resize based on the current drag/resize.
@@ -151,7 +177,18 @@ export const useGesturePreviewStore = create<GesturePreviewState>()((set) => ({
   sketchStrokeSelection: {},
   setSketchStrokeSelection: (sketchStrokeSelection) =>
     set({ sketchStrokeSelection }),
-  clearSketchStrokeSelection: () => set({ sketchStrokeSelection: {} }),
+  clearSketchStrokeSelection: () =>
+    set({
+      sketchStrokeSelection: {},
+      sketchSelectionPolygon: null,
+      sketchStrokeMovePreview: null,
+    }),
+  sketchSelectionPolygon: null,
+  setSketchSelectionPolygon: (sketchSelectionPolygon) =>
+    set({ sketchSelectionPolygon }),
+  sketchStrokeMovePreview: null,
+  setSketchStrokeMovePreview: (sketchStrokeMovePreview) =>
+    set({ sketchStrokeMovePreview }),
   frameFitPreviews: [],
   setFrameFitPreviews: (previews) => set({ frameFitPreviews: previews }),
   clearFrameFitPreview: () => set({ frameFitPreviews: [] }),
