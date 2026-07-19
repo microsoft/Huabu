@@ -1,6 +1,6 @@
 # Sketch 区域化重构 · 分阶段方案
 
-Status: In progress — **Stage 1 implemented** (draw no longer auto-selects; stroke merging is purely spatial). Stage 2–4 remain design drafts; each needs its open questions confirmed before implementation.
+Status: In progress — **Stage 1 + Stage 2 implemented** (Stage 1: draw no longer auto-selects; stroke merging is purely spatial. Stage 2: stroke-level lasso selection + delete). Stage 3–4 remain design drafts; each needs its open questions confirmed before implementation.
 
 Owner: canvas / sketch
 
@@ -66,23 +66,34 @@ Last updated: 2026-07-19
 
 已定：**边界判定纯空间，时间完全退出边界**；时间以每条笔画既有的 `createdAt` 形式保留为区域内信息，**不加新字段**（「怎么用这份时间信息」留到真正需要时再做）。
 
-### Stage 2 — stroke 级套索 MVP
+### Stage 2 — stroke 级套索选择 + 就地编辑（纯客户端，无 AI/渲染）
 
-目标：把「选择」从节点级下沉到笔画级，只做不触发拆分的操作。
+目标：把「选择」下沉到笔画级，并让笔画选择成为**一等可编辑对象**（选 / 移 / 调样式 / 删），与 sketch 节点同等操作空间。渲染 PNG / 发大模型 / 部分选择的 AI 上下文移到 Stage 3；抽出/拆分移到 Stage 4。
 
-1. **套索 stroke 级选择**：套索命中 sketch 区域时返回落在多边形内的**笔画 id**（复用 [useCanvasLasso.ts](../../apps/web/src/hooks/useCanvasLasso.ts) 的点在多边形 + 现有 stroke 命中几何），而非整节点。
-2. **选中笔画 → 删除**：复用橡皮的批量删除命令与单条 undo。
-3. **stroke → PNG 工具**：把选中笔画 / 区域栅格化成图片（泛化现有 snapshot / screenshot），**并记录 flow→pixel 变换 T**——这是 Stage 3 OCR 复用的同一个工具与同一个变换。
-4. **选中笔画 → 发图给大模型**：接到现有 vision / snapshot 通路。
+**已定决策**
 
-明确不做：抽出成新区域（=拆分，Stage 4）、OCR。
+- **选择规则（R3，按类型）**：sketch 节点永远走**笔画选择**（圈到哪几条选哪几条；全部圈到只是「≈选中整块」但仍是笔画，永不整节点选择）；其它类型节点走**整节点选择**；两者可共存。「笔画在多边形内」判据 ≥ 1 点在内；stroke 命中在消费端算，[useCanvasLasso.ts](../../apps/web/src/hooks/useCanvasLasso.ts) 不耦合 sketch。
+- 选中状态存 [gesturePreviewStore](../../apps/web/src/store/gesturePreviewStore.ts) 瞬态 slice（不持久、不进 undo）。
+- **移动模型**：在**套索工具内拖动选区**移动（不切工具）；只做**原节点内平移**，跨节点/抽出 = Stage 4。
+- **纯笔画工具栏**：对齐 sketch 节点的 [SketchControls](../../apps/web/src/components/Nodes/sketch/SketchControls.tsx)（调色 + 粗细，作用于选中笔画、**不改画笔预设**）。**删除键仅触摸端显示**，桌面端用键盘 Delete。
+- **混选（笔画 + 节点）**：走 B（只留共同能力，**无移动**）；删除仅触摸端，**桌面端无工具栏**；节点工具栏在「存在笔画选择」时隐藏。
+
+**已实现（第一批）**
+
+1. 套索 stroke 级选择（R3）+ 逐笔高亮（`gesturePreviewStore.sketchStrokeSelection` + [SketchNode.tsx](../../apps/web/src/components/Nodes/sketch/SketchNode.tsx)）。
+2. 删除浮条 [StrokeSelectionToolbar](../../apps/web/src/components/Panels/Canvas/FloatingToolbars/StrokeSelectionToolbar.tsx)（复用 [buildEraseCommands](../../apps/web/src/components/Nodes/sketch/sketchMerge.ts)：子集移除 + 重算 bbox + 清空则删节点 + 单条 undo）；有节点选择时让位（单浮条护栏）。
+
+**待实现（本阶段扩展）** 3. **移动（GoodNotes 式：保留套索区）**：套索完成后**保留其多边形**作为选区（存 `gesturePreviewStore`、flow 空间、随选择一起清除，并持久画出虚线选区，复用 lasso preview path 的画法）。独立 hook `useSketchStrokeDrag` 在 Canvas 指针链**排在套索前**——pointerdown **落在保留选区多边形内** → 移动（平移所有选中笔画 + 选区本身，松手按各自节点重算 bbox、单条 undo）；落在选区外 → 让位给套索（开始新套索，先清旧选）。这把消歧从「模糊的描边命中」简化成「点在保留多边形内」，也更好抓（选区内空白也能拖），是 A 变简单的关键。只做**原节点内平移**；跨节点/抽出 = Stage 4。4. **样式**：笔画工具栏加调色 + 粗细（复用 `SketchControls`，只 map 选中笔画）。5. **键盘删除**：Delete / Backspace 删选中笔画（复用 `buildEraseCommands`），与 React Flow 的节点删除并存（混选一次删两者）。6. **工具栏仲裁**：纯笔画 → 样式条（触摸多一个删除）；混选 → 桌面无、触摸只删除；纯节点 → 现有节点条。节点工具栏（MultiSelect / 单选）在存在笔画选择时隐藏。
+
+明确不做：渲染 PNG、发大模型、抽出/拆分（Stage 4）、OCR、混选的移动。
 
 ### Stage 3 — OCR：手写转文本
 
 目标：填充区域的 OCR，让手写变成可搜索、可被 AI 当文本读的内容。引擎用已验证的 Azure AI Vision Read（[scripts/test-azure-vision.mjs](../../scripts/test-azure-vision.mjs)，`features=read`，返回 `blocks[].lines[]`：行文本 + `words[]` + bounding polygon + confidence）。
 
-1. **OCR 端点**：新增服务端 `ocr` 路由，复用 [sketch.service.ts](../../apps/server/src/modules/agent/sketch.service.ts) 的 vision 基座；输入 = Stage 2 的区域 PNG，调 Azure Read，归一成 `{ text, lines[] }`。
-2. **坐标对齐**：用 Stage 2 记录的 T⁻¹ 把 Azure 像素多边形换回**区域本地 flow 坐标**。T 必须在栅格化当刻记下，是最易埋 bug 的点。
+0. **stroke→PNG 渲染器（从 Stage 2 移入）**：复用/扩展服务端 [clusterToSvg](../../apps/server/src/modules/agent/tools/handlers/snapshot-node.ts)——它已用 perfect-freehand→SVG→resvg 渲整节点/集群；加一个**可选 per-node stroke-id 过滤**以渲染子集；渲染时**捕获 flow→pixel 变换 T**（OCR 坐标对齐要用）。客户端旧 `sketchToImage.ts` 已删除、渲染已迁到服务端（见 snapshot-node.ts:413），**不要重建客户端渲染器**。
+1. **OCR 端点**：新增服务端 `ocr` 路由，复用 [sketch.service.ts](../../apps/server/src/modules/agent/sketch.service.ts) 的 vision 基座；输入 = 上面渲染器产出的区域 PNG，调 Azure Read，归一成 `{ text, lines[] }`。
+2. **坐标对齐**：用渲染时记录的 T⁻¹ 把 Azure 像素多边形换回**区域本地 flow 坐标**。T 必须在栅格化当刻记下，是最易埋 bug 的点。
 3. **stroke ↔ line 映射**：每条笔画分配给质心 / 重叠所在的行 → `line.strokeIds`（供锚定 / 高亮，不参与拆分文本运算）。
 4. **阅读顺序**：行按 (top, then left) 排；多列延后。
 5. **落库**：`text` → 节点 body（可搜索、可 `read`、喂后续问题检测）；`lines[]`（bbox + strokeIds + confidence）→ frontmatter；写入 `strokesHash` + `status: 'ready'`。此时才定稿并首次写入 `ocr` schema。
@@ -92,6 +103,12 @@ Last updated: 2026-07-19
 明确不做：word 级映射、多列、拆分、问题检测。
 
 开放问题：映射粒度（line 级 v1 够用 / word 级留待逐词高亮）、成本与隐私（是否惰性 OCR）、字/画置信度阈值取值、text 落 body 还是 frontmatter 的最终定稿。
+
+**部分选择 → AI 上下文（从 Stage 2 移入的难点，待定）**：现在选**整节点**时 node id 进 selected-node 上下文，agent 可 `snapshot_node(id)` 看整节点。但选**节点内部分 stroke**时，「node X 的某几条笔画」无法用 node id 寻址。两条路：
+
+- **Option A · 预渲染成图片直接附到这轮对话**：把选中 stroke 渲成 PNG（用上面 stroke 过滤渲染器）作为**图片上下文**贴到 chat turn。agent 直接看到，无需新寻址方案；但无法事后重寻址/重渲。简单。
+- **Option B · 子节点引用**：引入「node X, strokes[ids]」引用，贯穿 selected-node 上下文 + `snapshot_node` 接受 stroke 过滤 + wire 类型。强大（可重渲、可持久引用）但要改一整条链路，重。
+  推荐先做 **Option A**（和 OCR / 图片附件基座一起），Option B 视需求再评估。
 
 ### Stage 4 — 语义与重组层（两条独立子轨，均依赖 Stage 3）
 
@@ -103,6 +120,10 @@ Last updated: 2026-07-19
 4. 沿用 Accept / Revert 式**预览**，先**半自动**（不静默全自动），观察准确率后再考虑全自动。
 
 **子轨 B · 区域拆分 + 桥接合并**（低频高价值）
+
+> **交互模型线索（frame 类比）**：把 sketch 区域类比成 **frame**、里面的笔画类比成 **frame 内的节点**——「把笔画从区域 A 拖到区域 B」≈ 节点在 frame 间重定父，「拖到空白」≈ 拖出成顶层（新区域）。frame 系统已解决的**成员归属 + drag-to-reparent 判定 + fit-to-content** 逻辑可作为拆分/合并的 UX 外形与可复用判定逻辑来借鉴（见 [useFrameDragToCreate](../../apps/web/src/hooks/useFrameDragToCreate.ts) 及 canvas-engine 的 frame reparent）。
+>
+> **但不要照字面把每条 stroke 变成 ReactFlow 节点**：一页手写数百条 stroke → 数百节点，会冲击性能、持久化（stroke 现为节点 data 内联数组）、渲染（一节点一 SVG）、以及 AI 快照/OCR（都依赖「区域=节点、stroke 内联」）。正确综合是**借 frame 的判定逻辑当模式、stroke 仍保持内联**——「拖 stroke 换区域」= 操作内联 strokes 数组 + 区域 bbox + 重跑 OCR，与下面第 1–6 步一致。
 
 1. 套索抽出笔画 S → 新区域 B = S，A' = A − S（几何复用 [sketchMerge.ts](../../apps/web/src/components/Nodes/sketch/sketchMerge.ts) 的 union-bbox / scale 反向）。
 2. **身份**：A' 保留原 id / MD（剩余体即原体）；B 拿新 id / 新 MD。
@@ -129,7 +150,8 @@ graph LR
 ```
 
 - Stage 1 两项正交、可各自提交回滚，能马上开工。
-- Stage 2 的「stroke→PNG + 变换 T」是 Stage 3 的前置件。
+- Stage 2 是纯客户端编辑（stroke 套索选择 + 删除），不依赖 AI/渲染，可独立发。
+- Stage 3 自带 stroke→PNG 渲染器（复用服务端 `clusterToSvg` + stroke 过滤 + 捕获 T），OCR、部分选择→AI 上下文都收在这里。
 - Stage 4 两条子轨都只依赖 Stage 3，彼此独立、可并行或分先后。
 
 ---

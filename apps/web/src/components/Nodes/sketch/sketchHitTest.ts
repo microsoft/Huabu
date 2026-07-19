@@ -198,3 +198,138 @@ export function findSketchStrokeHits(
   });
   return out;
 }
+
+/** Flow-space point, matching the lasso polygon's vertex shape. */
+interface FlowPoint {
+  x: number;
+  y: number;
+}
+
+/**
+ * Ray-cast point-in-polygon test (even-odd rule). `poly` is a closed
+ * polygon given as an ordered vertex list; the closing edge is implied.
+ */
+function pointInPolygon(
+  px: number,
+  py: number,
+  poly: readonly FlowPoint[],
+): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x;
+    const yi = poly[i].y;
+    const xj = poly[j].x;
+    const yj = poly[j].y;
+    const intersects =
+      yi > py !== yj > py &&
+      px < ((xj - xi) * (py - yi)) / (yj - yi || Number.EPSILON) + xi;
+    if (intersects) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * Find sketch strokes whose geometry falls inside a flow-space lasso
+ * polygon (Stage 2 stroke-level selection). A stroke is captured when
+ * at least one of its points lands inside the polygon — lenient, which
+ * matches lasso intuition.
+ *
+ * Returns a map of `nodeId -> strokeIds`; sketch nodes with no captured
+ * stroke are omitted, so an empty result means "the lasso hit no ink".
+ * Coordinates mirror {@link walkSketchHits} (absolute position + the
+ * node's current resize scale) so sketches nested inside frames line up.
+ */
+export function findSketchStrokesInPolygon(
+  flowPolygon: readonly FlowPoint[],
+): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  if (flowPolygon.length < 3) return out;
+
+  const nodes = useCanvasStore.getState().nodes;
+  const byId = indexById(nodes as NestableNode[]);
+  const getAbs = createAbsolutePositionGetter(byId);
+
+  for (const node of nodes) {
+    if (node.type !== 'sketch') continue;
+    const data = node.data as CanvasSketchNodeData;
+    const strokes = data.strokes ?? [];
+    if (strokes.length === 0) continue;
+
+    const baseW = data.initialSize?.width || 1;
+    const baseH = data.initialSize?.height || 1;
+    const w = node.measured?.width ?? node.width ?? baseW;
+    const h = node.measured?.height ?? node.height ?? baseH;
+    const scaleX = w / baseW;
+    const scaleY = h / baseH;
+    const abs = getAbs(node.id) ?? node.position;
+
+    const matched: string[] = [];
+    for (const stroke of strokes) {
+      for (const pt of stroke.points) {
+        const px = abs.x + pt[0] * scaleX;
+        const py = abs.y + pt[1] * scaleY;
+        if (pointInPolygon(px, py, flowPolygon)) {
+          matched.push(stroke.id);
+          break;
+        }
+      }
+    }
+    if (matched.length > 0) out[node.id] = matched;
+  }
+
+  return out;
+}
+
+/**
+ * Union bounding box (flow-space, absolute) of a stroke-level selection
+ * (`nodeId -> strokeIds`), inflated by each stroke's half-width so the
+ * box encloses the painted bulge. Returns `null` for an empty selection.
+ * Used to anchor the stroke-selection floating toolbar.
+ */
+export function getSketchStrokeSelectionBounds(
+  selection: Record<string, readonly string[]>,
+): { x: number; y: number; width: number; height: number } | null {
+  if (Object.keys(selection).length === 0) return null;
+
+  const nodes = useCanvasStore.getState().nodes;
+  const byId = indexById(nodes as NestableNode[]);
+  const getAbs = createAbsolutePositionGetter(byId);
+
+  let x1 = Infinity;
+  let y1 = Infinity;
+  let x2 = -Infinity;
+  let y2 = -Infinity;
+
+  for (const node of nodes) {
+    if (node.type !== 'sketch') continue;
+    const wanted = selection[node.id];
+    if (!wanted || wanted.length === 0) continue;
+    const wantedSet = new Set(wanted);
+
+    const data = node.data as CanvasSketchNodeData;
+    const strokes = data.strokes ?? [];
+    const baseW = data.initialSize?.width || 1;
+    const baseH = data.initialSize?.height || 1;
+    const w = node.measured?.width ?? node.width ?? baseW;
+    const h = node.measured?.height ?? node.height ?? baseH;
+    const scaleX = w / baseW;
+    const scaleY = h / baseH;
+    const abs = getAbs(node.id) ?? node.position;
+
+    for (const stroke of strokes) {
+      if (!wantedSet.has(stroke.id)) continue;
+      const half = (stroke.size ?? 0) / 2;
+      for (const pt of stroke.points) {
+        const px = abs.x + pt[0] * scaleX;
+        const py = abs.y + pt[1] * scaleY;
+        x1 = Math.min(x1, px - half);
+        y1 = Math.min(y1, py - half);
+        x2 = Math.max(x2, px + half);
+        y2 = Math.max(y2, py + half);
+      }
+    }
+  }
+
+  if (x1 === Infinity) return null;
+  return { x: x1, y: y1, width: x2 - x1, height: y2 - y1 };
+}

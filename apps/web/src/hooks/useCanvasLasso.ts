@@ -42,7 +42,14 @@ interface UseCanvasLassoOptions {
   wrapperRef: MutableRefObject<HTMLDivElement | null>;
   rfInstanceRef: MutableRefObject<ReactFlowInstance | null>;
   edges: Edge[];
-  onSelect: (nodeIds: string[]) => void;
+  /**
+   * Called on lasso commit (and with empty args when a fresh drag
+   * clears the previous selection). `flowPolygon` is the committed lasso
+   * polygon in flow-space, so the consumer can compute stroke-level hits
+   * and choose stroke- vs node-selection without the hook knowing about
+   * sketches.
+   */
+  onSelect: (nodeIds: string[], flowPolygon: Point[]) => void;
   inputMode: EffectiveInputMode;
 }
 
@@ -210,16 +217,10 @@ function getNodeRect(instance: ReactFlowInstance, nodeId: string): Rect | null {
   };
 }
 
-function getSelectedNodeIdsFromPolygon(
-  polygon: Point[],
-  instance: ReactFlowInstance | null,
+function getSelectedNodeIdsFromFlowPolygon(
+  flowPolygon: Point[],
+  instance: ReactFlowInstance,
 ) {
-  if (!instance) return [];
-
-  const flowPolygon = polygon.map((point) =>
-    instance.screenToFlowPosition(point),
-  );
-
   return instance
     .getNodes()
     .filter((node) => {
@@ -243,6 +244,11 @@ export function useCanvasLasso({
     start: Point;
     captureTarget: HTMLDivElement;
   } | null>(null);
+  // Whether this drag has already cleared the previous selection. Used to
+  // fire `onSelect([], [])` exactly once, from the event handler body —
+  // never inside a `setScreenPoints` updater (that runs during render and
+  // trips React's "setState while rendering another component" warning).
+  const clearedRef = useRef(false);
 
   const cancel = useCallback(() => {
     const pending = pendingRef.current;
@@ -253,6 +259,7 @@ export function useCanvasLasso({
       }
       pendingRef.current = null;
     }
+    clearedRef.current = false;
     setScreenPoints(null);
   }, []);
 
@@ -314,6 +321,7 @@ export function useCanvasLasso({
         start,
         captureTarget: event.currentTarget,
       };
+      clearedRef.current = false;
       return true;
     },
     [active, inputMode],
@@ -327,13 +335,18 @@ export function useCanvasLasso({
       const phase = updateCanvasGesture(event.pointerId, nextPoint);
       if (phase === 'pending') return;
 
-      setScreenPoints((previous) => {
-        if (!previous) {
-          onSelect([]);
-          return [pending.start, nextPoint];
-        }
-        return appendPoint(previous, nextPoint);
-      });
+      // Clear the previous selection once, as the lasso actually starts
+      // drawing — done here (event handler) rather than inside the
+      // setScreenPoints updater to avoid a setState-during-render warning.
+      if (!clearedRef.current) {
+        clearedRef.current = true;
+        onSelect([], []);
+      }
+      setScreenPoints((previous) =>
+        previous
+          ? appendPoint(previous, nextPoint)
+          : [pending.start, nextPoint],
+      );
     },
     [onSelect],
   );
@@ -358,12 +371,16 @@ export function useCanvasLasso({
         finalScreenPoints.length >= MIN_LASSO_POINTS &&
         hasEnoughArea(finalScreenPoints)
       ) {
-        onSelect(
-          getSelectedNodeIdsFromPolygon(
-            finalScreenPoints,
-            rfInstanceRef.current,
-          ),
-        );
+        const instance = rfInstanceRef.current;
+        const flowPolygon = instance
+          ? finalScreenPoints.map((point) =>
+              instance.screenToFlowPosition(point),
+            )
+          : [];
+        const nodeIds = instance
+          ? getSelectedNodeIdsFromFlowPolygon(flowPolygon, instance)
+          : [];
+        onSelect(nodeIds, flowPolygon);
       }
 
       cancel();
@@ -409,7 +426,12 @@ export function useCanvasLasso({
     if (!screenPoints || screenPoints.length < MIN_LASSO_POINTS) return [];
     if (!hasEnoughArea(screenPoints)) return [];
 
-    return getSelectedNodeIdsFromPolygon(screenPoints, rfInstanceRef.current);
+    const instance = rfInstanceRef.current;
+    if (!instance) return [];
+    const flowPolygon = screenPoints.map((point) =>
+      instance.screenToFlowPosition(point),
+    );
+    return getSelectedNodeIdsFromFlowPolygon(flowPolygon, instance);
   }, [rfInstanceRef, screenPoints]);
 
   const previewEdgeIds = useMemo(

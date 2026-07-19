@@ -76,6 +76,7 @@ import {
 } from './edges/LabelledEdge.tsx';
 import { EdgeStyleToolbar } from './FloatingToolbars/EdgeStyleToolbar.tsx';
 import { MultiSelectToolbar } from './FloatingToolbars/MultiSelectToolbar.tsx';
+import { StrokeSelectionToolbar } from './FloatingToolbars/StrokeSelectionToolbar.tsx';
 import { IntentPopover } from './IntentPopover.tsx';
 import { MultiSelectResizer } from './MultiSelectResizer.tsx';
 import { SelectionOutlines } from './SelectionOutlines.tsx';
@@ -96,6 +97,7 @@ import { looksLikeUrl } from '../../../utils/io/media.ts';
 import { FrameNode } from '../../Nodes/frame/FrameNode.tsx';
 import { createQuestionNodeAndCompose } from '../../Nodes/question/questionCompose.ts';
 import { QuestionNode } from '../../Nodes/question/QuestionNode.tsx';
+import { findSketchStrokesInPolygon } from '../../Nodes/sketch/sketchHitTest.ts';
 import { SketchNode } from '../../Nodes/sketch/SketchNode.tsx';
 import {
   CANCEL_SKETCH_GESTURE_EVENT,
@@ -527,7 +529,27 @@ export const Canvas: React.FC<CanvasProps> = ({
     wrapperRef,
     rfInstanceRef,
     edges,
-    onSelect: (nodeIds) => selectNodes(nodeIds),
+    // Stage 2 selection routing (D1=A), by node type:
+    //   - a sketch node is ALWAYS stroke-level — the lasso selects exactly
+    //     the strokes it captured. Capturing every stroke of a sketch just
+    //     means the whole thing is selected, but it stays a STROKE selection
+    //     (never a node selection); move a whole sketch as an object with
+    //     the Select tool instead.
+    //   - every other node type is selected whole (React Flow).
+    // The two can coexist in one lasso. A fresh drag calls this with empty
+    // args, clearing both.
+    onSelect: (nodeIds, flowPolygon) => {
+      const strokeSelection =
+        flowPolygon.length >= 3 ? findSketchStrokesInPolygon(flowPolygon) : {};
+      const sketchIdSet = new Set(
+        nodes.filter((n) => n.type === 'sketch').map((n) => n.id),
+      );
+      const nonSketchNodeIds = nodeIds.filter((id) => !sketchIdSet.has(id));
+      useGesturePreviewStore
+        .getState()
+        .setSketchStrokeSelection(strokeSelection);
+      selectNodes(nonSketchNodeIds);
+    },
     inputMode,
   });
 
@@ -540,6 +562,14 @@ export const Canvas: React.FC<CanvasProps> = ({
     enabled:
       pendingNodeType !== 'sketch' && tool !== 'lasso' && !isBoxSelecting,
   });
+  // Stage 2: a stroke-level selection only makes sense under the Lasso
+  // tool (where it is produced and its delete toolbar shows). Drop it the
+  // moment the tool changes so the highlight + toolbar don't linger.
+  useEffect(() => {
+    if (tool !== 'lasso') {
+      useGesturePreviewStore.getState().clearSketchStrokeSelection();
+    }
+  }, [tool]);
   const lassoPreviewNodeIdSet = useMemo(
     () => new Set(previewNodeIds),
     [previewNodeIds],
@@ -1220,6 +1250,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         {!isBoxSelecting && <MultiSelectResizer />}
         {!isBoxSelecting && <SelectionOutlines />}
         {!isBoxSelecting && <MultiSelectToolbar />}
+        {!isBoxSelecting && <StrokeSelectionToolbar />}
         {!isBoxSelecting && <EdgeStyleToolbar />}
         <IntentPopover />
         <Background color="var(--canvas-grid)" gap={GRID_SIZE} />

@@ -72,6 +72,14 @@ export const SketchNode = memo(
       [erasedStrokeIds],
     );
 
+    const selectedStrokeIds = useGesturePreviewStore(
+      (s) => s.sketchStrokeSelection[id],
+    );
+    const selectedStrokeIdSet = useMemo(
+      () => new Set(selectedStrokeIds),
+      [selectedStrokeIds],
+    );
+
     const strokes = data.strokes ?? [];
     // Toolbar swatches show the most recently drawn stroke's color/size
     // (last entry in the array), since that is the user's most recent
@@ -139,6 +147,11 @@ export const SketchNode = memo(
             <g
               key={s.id}
               visibility={erasedStrokeIdSet.has(s.id) ? 'hidden' : undefined}
+              style={
+                selectedStrokeIdSet.has(s.id)
+                  ? { filter: 'drop-shadow(0 0 3px var(--color-info))' }
+                  : undefined
+              }
             >
               <StrokePath stroke={s} scaleX={scaleX} scaleY={scaleY} />
             </g>

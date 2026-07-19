@@ -37,6 +37,22 @@ type GesturePreviewState = {
   clearSketchErasePreview: () => void;
 
   /**
+   * Sketch strokes currently selected by a stroke-level lasso (Stage 2),
+   * keyed by sketch node id -> selected stroke ids. Unlike the other
+   * entries in this store this is an ACTED-UPON selection (a floating
+   * toolbar deletes / operates on it), not a per-tick drag preview — but
+   * it shares the same transient, never-persisted, never-undone lifecycle,
+   * so it lives here to reuse the churn-free store.
+   */
+  sketchStrokeSelection: Record<string, string[]>;
+
+  /** Replace the current stroke-level selection. */
+  setSketchStrokeSelection: (selection: Record<string, string[]>) => void;
+
+  /** Clear the stroke-level selection. */
+  clearSketchStrokeSelection: () => void;
+
+  /**
    * Previews of how frames would resize based on the current drag/resize.
    * One entry per affected frame — allows showing both the source frame
    * shrinking and the target frame expanding simultaneously.
@@ -132,6 +148,10 @@ export const useGesturePreviewStore = create<GesturePreviewState>()((set) => ({
   sketchErasePreview: {},
   setSketchErasePreview: (sketchErasePreview) => set({ sketchErasePreview }),
   clearSketchErasePreview: () => set({ sketchErasePreview: {} }),
+  sketchStrokeSelection: {},
+  setSketchStrokeSelection: (sketchStrokeSelection) =>
+    set({ sketchStrokeSelection }),
+  clearSketchStrokeSelection: () => set({ sketchStrokeSelection: {} }),
   frameFitPreviews: [],
   setFrameFitPreviews: (previews) => set({ frameFitPreviews: previews }),
   clearFrameFitPreview: () => set({ frameFitPreviews: [] }),
