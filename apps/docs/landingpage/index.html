@@ -308,7 +308,8 @@
         position: relative;
         z-index: 1;
         width: min(980px, calc(100vw - 48px));
-        aspect-ratio: 16 / 9;
+        display: grid;
+        grid-template-rows: 38px auto;
         margin-top: clamp(28px, 4vh, 44px);
         overflow: hidden;
         border: 1px solid #d7d9d5;
@@ -318,11 +319,19 @@
           0 28px 80px rgba(34, 42, 39, 0.13),
           0 3px 12px rgba(34, 42, 39, 0.07);
       }
+      .hero-video {
+        position: relative;
+        width: 100%;
+        height: auto;
+        aspect-ratio: 16 / 9;
+        display: block;
+        object-fit: cover;
+        background: #000;
+      }
       .video-chrome {
-        position: absolute;
-        inset: 0 0 auto;
+        position: relative;
         height: 38px;
-        z-index: 3;
+        z-index: 1;
         display: flex;
         align-items: center;
         justify-content: space-between;
@@ -1953,9 +1962,18 @@
         background: var(--ink);
       }
       .video-shell {
-        border: 2.4px solid var(--ink);
+        border: none;
         border-radius: 18px 15px 19px 14px;
         box-shadow: 7px 9px 0 -1px rgba(120, 150, 90, 0.22);
+      }
+      .video-shell::after {
+        content: '';
+        position: absolute;
+        inset: 1px;
+        z-index: 5;
+        pointer-events: none;
+        border: 2.4px solid var(--ink);
+        border-radius: 18px 15px 19px 14px;
         filter: url(#rough);
       }
       .video-placeholder::before {
@@ -2561,30 +2579,23 @@
         </div>
       </div>
 
-      <div class="video-shell" aria-label="Product film placeholder">
+      <div class="video-shell" aria-label="Huabu product film">
         <div class="video-chrome">
           <span class="window-dots" aria-hidden="true"
             ><i></i><i></i><i></i
           ></span>
-          <span>Huabu product film · video placeholder</span>
-          <span>02:20</span>
+          <span>Huabu product film</span>
+          <span>2:05</span>
         </div>
-        <!-- Replace .video-placeholder with your product <video> or embed when ready. -->
-        <div class="video-placeholder">
-          <div class="video-map" aria-hidden="true">
-            <div class="mock-node a"></div>
-            <div class="mock-node b"></div>
-            <div class="mock-node c"></div>
-            <div class="mock-node d"></div>
-          </div>
-          <button
-            class="play-button"
-            type="button"
-            aria-label="Product video placeholder"
-            tabindex="-1"
-          ></button>
-          <span class="video-label">Product video coming here</span>
-        </div>
+        <video
+          class="hero-video"
+          src="https://github.com/microsoft/Huabu/releases/download/v0.9.0/Huabu-Video.mp4"
+          poster="./Huabu-Video-Poster.jpg"
+          controls
+          preload="metadata"
+          playsinline
+          aria-label="Huabu product demo video"
+        ></video>
       </div>
     </header>
 
