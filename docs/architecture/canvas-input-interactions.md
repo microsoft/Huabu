@@ -46,7 +46,9 @@ Click-to-place creation tools such as Note, Text, and Question always accept a m
 
 ## 4. Multi-touch navigation
 
-The pointer router's `viewport-navigation` recognizer owns touch navigation through one capture-phase Pointer Events stream from pointer down through move and release. The same stream intercepts React Flow and drives the viewport, avoiding browser-dependent compatibility ordering between Pointer Events and legacy Touch Events. It captures the viewport and initial pointer geometry when the second finger lands; pinch scale is anchored to the takeover midpoint and midpoint translation contributes pan, preventing a viewport jump.
+The pointer router's `viewport-navigation` recognizer owns touch navigation through one capture-phase Pointer Events stream from pointer down through move and release. The same stream intercepts React Flow and drives the viewport, avoiding browser-dependent compatibility ordering between Pointer Events and legacy Touch Events. Pinch scale is anchored to the takeover midpoint and midpoint translation contributes pan, preventing a viewport jump.
+
+The pinch is always driven by the first two active touches, and its baseline (start distance, start midpoint, and start viewport) is keyed by that pointer-id pair. Whenever the pair changes — a third finger lands, or one of the two lifts — the baseline is re-captured from the live finger positions and viewport on the next move. This keeps the zoom continuous with three or more fingers down (no freeze) and prevents a jump when the gesture drops back to a different two-finger pair. While a pinch is live, additional touches only extend the pinch's touch set; they never claim a competing single-finger pan.
 
 Touches that begin inside React Flow panels remain application-chrome input and are not added to the viewport recognizer's active-touch set. A panel touch therefore cannot become one half of a canvas pinch.
 

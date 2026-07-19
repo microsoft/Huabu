@@ -57,6 +57,12 @@ export function createViewportNavigationRecognizer(): PointerRecognizer<
   let panStartViewport: Viewport = { x: 0, y: 0, zoom: 1 };
   const suppressedTouchIds = new Set<number>();
   const activeTouches = new Map<number, Point>();
+  // The pointer-id pair currently driving the pinch. Whenever a finger is
+  // added or lifted this pair changes; setting it to `null` forces the next
+  // move to re-capture the baseline from the live finger positions and
+  // viewport, which is what removes the freeze (3+ fingers) and the jump
+  // (dropping back to a different two-finger pair).
+  let pinchAnchorIds: [number, number] | null = null;
 
   const observeDown = (
     event: PointerEvent,
@@ -65,29 +71,31 @@ export function createViewportNavigationRecognizer(): PointerRecognizer<
     if (event.pointerType !== 'touch') return;
     if (ctx.inputMode === 'mouse') return;
     if (isPanelTarget(event.target as Element | null)) return;
-    const { instance } = ctx;
     const point = { x: event.clientX, y: event.clientY };
     activeTouches.set(event.pointerId, point);
 
-    if (activeTouches.size === 2) {
+    if (activeTouches.size >= 2) {
       if (!canTouchTakeOverForPinch()) {
         event.preventDefault();
         event.stopPropagation();
         return;
       }
-      ctx.onTouchTakeover();
-      if (panTouchId === null) {
-        cancelPendingCanvasGesture();
+      if (!isPinching) {
+        // First transition into a pinch: take over any in-progress gesture
+        // (pending Lasso / single-finger pan) so it can't fight the pinch.
+        ctx.onTouchTakeover();
+        if (panTouchId === null) {
+          cancelPendingCanvasGesture();
+        }
+        isPinching = true;
+        for (const id of activeTouches.keys()) ctx.cancelPointer(id);
       }
-      isPinching = true;
-      const [first, second] = Array.from(activeTouches.entries());
-      ctx.cancelPointer(first[0]);
-      ctx.cancelPointer(second[0]);
-      startDist = distance(first[1], second[1]);
-      startMidpoint = midpoint(first[1], second[1]);
-      startViewport = instance.getViewport();
-      suppressedTouchIds.add(first[0]);
-      suppressedTouchIds.add(second[0]);
+      // Every finger participating in the pinch has its `pointerup`
+      // suppressed so React Flow never sees a stray tap when the gesture
+      // ends. Invalidate the anchor so the next move re-captures a baseline
+      // that matches the new finger set — no freeze, no jump.
+      for (const id of activeTouches.keys()) suppressedTouchIds.add(id);
+      pinchAnchorIds = null;
       event.preventDefault();
       event.stopPropagation();
       return;
@@ -112,13 +120,28 @@ export function createViewportNavigationRecognizer(): PointerRecognizer<
     const point = { x: event.clientX, y: event.clientY };
     activeTouches.set(event.pointerId, point);
 
-    if (isPinching && activeTouches.size === 2) {
+    if (isPinching && activeTouches.size >= 2) {
       const { instance } = ctx;
       event.preventDefault();
       event.stopPropagation();
-      const [first, second] = Array.from(activeTouches.values());
-      const newDist = distance(first, second);
-      const newMidpoint = midpoint(first, second);
+      // Always drive the pinch from the first two active touches. When that
+      // pair changes (a third finger lands, or one of the two lifts), capture
+      // a fresh baseline from the current positions and viewport, then wait
+      // for the next move so the zoom continues smoothly from where it was.
+      const [first, second] = Array.from(activeTouches.entries());
+      if (
+        pinchAnchorIds === null ||
+        pinchAnchorIds[0] !== first[0] ||
+        pinchAnchorIds[1] !== second[0]
+      ) {
+        startDist = distance(first[1], second[1]);
+        startMidpoint = midpoint(first[1], second[1]);
+        startViewport = instance.getViewport();
+        pinchAnchorIds = [first[0], second[0]];
+        return;
+      }
+      const newDist = distance(first[1], second[1]);
+      const newMidpoint = midpoint(first[1], second[1]);
       const newZoom = clampZoom(
         startViewport.zoom * (newDist / Math.max(startDist, 1)),
       );
@@ -161,9 +184,14 @@ export function createViewportNavigationRecognizer(): PointerRecognizer<
       event.stopPropagation();
     }
     activeTouches.delete(event.pointerId);
-    if (isPinching && activeTouches.size === 0) {
-      isPinching = false;
-      suppressedTouchIds.clear();
+    if (isPinching) {
+      if (activeTouches.size === 0) {
+        isPinching = false;
+        suppressedTouchIds.clear();
+      }
+      // A finger lifted mid-pinch: invalidate the anchor so the surviving
+      // pair re-captures its baseline on the next move instead of jumping.
+      pinchAnchorIds = null;
     }
   };
 
@@ -172,6 +200,9 @@ export function createViewportNavigationRecognizer(): PointerRecognizer<
     canClaim: (event, ctx) =>
       event.pointerType === 'touch' &&
       ctx.inputMode !== 'mouse' &&
+      // While a pinch is live, extra fingers must not spin up a competing
+      // single-finger pan owner; they only extend the pinch touch set.
+      !isPinching &&
       !isPanelTarget(event.target as Element | null) &&
       shouldOwnSingleTouchNavigation(event.target as Element | null, ctx) &&
       canTouchClaimViewport(),
