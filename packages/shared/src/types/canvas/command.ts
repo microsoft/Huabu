@@ -67,6 +67,15 @@ type CanvasNodeCreateInputByType<T extends CanvasNodeType> = {
   position: Point;
   size?: NodeSize;
   parentId?: CanvasNodeId | null;
+  /**
+   * UI-only creation hint. When `false`, this node is NOT auto-selected
+   * on create even for a `source === 'ui'` gesture. The sketch draw
+   * overlay sets it so freehand strokes never pop a selection box
+   * mid-draw. Defaults to `true` (select) when omitted. Never persisted
+   * — a one-shot command input, not node data — and a no-op for
+   * agent/system creates (which never auto-select regardless of source).
+   */
+  selectOnCreate?: boolean;
 };
 
 export type CanvasNodeCreateInput = {

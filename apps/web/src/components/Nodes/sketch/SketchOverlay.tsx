@@ -491,6 +491,11 @@ export function SketchOverlay({
         addNode({
           id: nodeId,
           nodeType: 'sketch',
+          // A freshly drawn sketch must NOT auto-select: the selection box
+          // would interrupt continuous freehand drawing (and, unselected,
+          // the node keeps stroke-only hit-testing so it never shadows
+          // nodes beneath its transparent bbox).
+          selectOnCreate: false,
           // placementPoint is the top-left of the new node, which here
           // is the top-left of the stroke's bounding box. Passed in
           // flow-space coords; resolveAddNodes re-runs the same

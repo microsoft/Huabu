@@ -40,6 +40,10 @@ const createNodes: CommandDefinition<Cmd> = {
       (n) => n.data?.label as string | undefined,
     );
     const newNodes: Node[] = [];
+    // Nodes whose input opted out of create-time selection
+    // (`selectOnCreate: false`, e.g. sketch draw). Collected during the
+    // build loop and excluded from the auto-selection set below.
+    const noSelectOnCreateIds = new Set<string>();
     // Parent frames whose group label may need re-resolution because a
     // new child was added. The server decides whether to actually run.
     const affectedParentFrames: Node[] = [];
@@ -130,15 +134,22 @@ const createNodes: CommandDefinition<Cmd> = {
         }
       }
 
+      if (input.selectOnCreate === false) noSelectOnCreateIds.add(nodeId);
       newNodes.push(node);
     }
 
     // ---------------------------------------------------------------
     // 4. Concatenate the new nodes.
     //
-    // User-created ordinary nodes become the active selection. Agent/system
-    // creates, and question nodes, preserve the previous selection because
-    // they should not steal focus from the user's current canvas context.
+    // User-created ordinary nodes become the active selection. Two
+    // independent guards suppress that, expressing two DIFFERENT intents
+    // (do not collapse them):
+    //   - `type === 'question'` — a type-invariant policy: question nodes
+    //     never steal focus (they are usually born from the preprocess /
+    //     compose flow, which focuses the chat input instead).
+    //   - `selectOnCreate === false` — a per-creation hint: this specific
+    //     gesture opted out (e.g. sketch freehand draw), regardless of type.
+    // Agent/system creates (`source !== 'ui'`) never auto-select at all.
     //
     // Tree order (parents before children, frame-child zIndex) is repaired
     // by the executor's single end-of-batch `normalizeTreeOrder` pass, so
@@ -147,7 +158,11 @@ const createNodes: CommandDefinition<Cmd> = {
     const orderedNodes = [...state.nodes, ...newNodes];
     const selectableCreatedNodeIds =
       state.source === 'ui'
-        ? newNodes.filter((n) => n.type !== 'question').map((n) => n.id)
+        ? newNodes
+            .filter(
+              (n) => n.type !== 'question' && !noSelectOnCreateIds.has(n.id),
+            )
+            .map((n) => n.id)
         : [];
     const finalNodes =
       selectableCreatedNodeIds.length > 0

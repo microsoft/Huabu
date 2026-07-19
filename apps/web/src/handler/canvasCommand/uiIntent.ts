@@ -75,6 +75,13 @@ export interface AddNodeInput {
    * command — the shared engine no longer ships a layout fallback.
    */
   placementPoint?: Point;
+  /**
+   * When `false`, the created node is not auto-selected even though this
+   * is a UI gesture. Passed straight through to the `CREATE_NODES` input.
+   * Used by the sketch draw overlay so a freshly drawn stroke does not
+   * steal selection and interrupt continuous drawing. Defaults to `true`.
+   */
+  selectOnCreate?: boolean;
 }
 
 // ---------------------------------------------------------------------------
