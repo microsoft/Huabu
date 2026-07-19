@@ -22,11 +22,11 @@ The reactive current-pointer signal (`useIsNotMouse`) follows the most recent `p
 
 While the mouse is the current pointer, the toolbar keeps the Select, Pan, and Lasso tools and their existing mouse and keyboard behavior, including shortcut hints and badges.
 
-While touch or pen is active, Sketch is the visible default tool: a pen draws while touch navigates in Pen mode, and touch draws while two-finger input navigates in Finger mode. Select and Pan collapse to the internal direct-manipulation state and are hidden from the touch-first toolbar; Lasso remains available as an explicit alternative. Select and Pan shortcuts both resolve to the internal Select state instead of creating hidden Pan state, and the visible toolbar returns to Sketch whenever no other explicit tool is active. Because the toolbar layout follows the current pointer rather than the persisted mode, a mouse and a finger used on the same hybrid device each get their native toolbar.
+While touch or pen is active, Select is the visible default tool and the safe home base: a tap selects a node and a drag on an already-selected node moves it, all through React Flow with no accidental ink. Pan collapses to the internal direct-manipulation state and is hidden from the touch-first toolbar; Select and Lasso are the visible tools, and Sketch is an explicit sticky tool listed among the creation nodes. Pan shortcuts resolve to the internal Select state instead of creating hidden Pan state. Because the toolbar layout follows the current pointer rather than the persisted mode, a mouse and a finger used on the same hybrid device each get their native toolbar.
 
-New empty canvases carry a one-shot input-appropriate creation intent: Mouse starts with Note armed, while Pen and Finger start with Sketch armed. Existing canvases do not arm Note; Pen and Finger still fall back to the visible Sketch default after any one-shot placement tool finishes.
+New empty canvases carry a one-shot input-appropriate creation intent: Mouse starts with Note armed, while Pen and Finger start with Sketch armed. This intent is consumed once, on the first completed load of a freshly created empty canvas. After it is consumed — and after any one-shot placement tool finishes on any canvas — the tool falls back to Select rather than re-arming Sketch, so a resting finger or pen can never accidentally draw or erase.
 
-Lasso and Sketch remain explicit persistent modes across pointer and input-mode changes. Lasso owns only empty-pane gestures, so activating it does not disable dragging nodes that were already selected before pointer down.
+Lasso and Sketch remain explicit persistent modes across pointer and input-mode changes: once chosen they stay active until the user switches away. Lasso owns only empty-pane gestures, so activating it does not disable dragging nodes that were already selected before pointer down.
 
 ## 3. Direct manipulation
 
@@ -48,6 +48,8 @@ Click-to-place creation tools such as Note, Text, and Question always accept a m
 
 The pointer router's `viewport-navigation` recognizer owns touch navigation through one capture-phase Pointer Events stream from pointer down through move and release. The same stream intercepts React Flow and drives the viewport, avoiding browser-dependent compatibility ordering between Pointer Events and legacy Touch Events. Pinch scale is anchored to the takeover midpoint and midpoint translation contributes pan, preventing a viewport jump.
 
+React Flow's own `zoomOnPinch` runs on d3-zoom's separate Touch Events stream, which the capture-phase Pointer Events suppression cannot stop; leaving it enabled lets it and the recognizer both write `setViewport` and the gesture stalls. It is therefore disabled whenever a finger or pen is the current pointer — mirroring the touch `panOnDrag` disable — so the router is the sole viewport driver; only the mouse/trackpad keeps React Flow's native pinch.
+
 The pinch is always driven by the first two active touches, and its baseline (start distance, start midpoint, and start viewport) is keyed by that pointer-id pair. Whenever the pair changes — a third finger lands, or one of the two lifts — the baseline is re-captured from the live finger positions and viewport on the next move. This keeps the zoom continuous with three or more fingers down (no freeze) and prevents a jump when the gesture drops back to a different two-finger pair. While a pinch is live, additional touches only extend the pinch's touch set; they never claim a competing single-finger pan.
 
 Touches that begin inside React Flow panels remain application-chrome input and are not added to the viewport recognizer's active-touch set. A panel touch therefore cannot become one half of a canvas pinch.
@@ -63,6 +65,8 @@ In Pen mode, Lasso and Sketch accept pen pointers and reject touch drawing. In F
 Lasso does not clear selection or expose a path while pending. Crossing the activation distance locks the gesture, clears selection, and starts the preview path; releasing or cancelling before lock has no selection side effect.
 
 Sketch drawing remains gesture-local until pointer up and commits only after the gesture locks. Sketch erasing collects hit stroke ids in a gesture-local map and immediately hides those strokes through the transient gesture preview store, then builds one command batch on pointer up after lock. Cancelling the gesture clears the draw or erase preview and restores hidden strokes, producing no canvas mutation or undo entry.
+
+Because the Sketch overlay swallows the pointer stream (React Flow never sees taps beneath it), a tap that never locks into a stroke or erase doubles as a selection gesture: the overlay hit-tests node bounding boxes under the down point — not `elementsFromPoint`, which skips the `pointer-events: none` nodes React Flow renders while Sketch is armed — and selects the topmost node, or clears the selection when the tap lands on empty canvas.
 
 ## 6. Validation boundary
 
@@ -83,5 +87,5 @@ Automated tests cover preference precedence and persistence, Mouse/Pen/Finger to
 | [`apps/web/src/hooks/useCanvasGestures.ts`](../../apps/web/src/hooks/useCanvasGestures.ts)                                             | Own trackpad pinch and multi-touch selection cancel.                                  |
 | [`apps/web/src/hooks/useCanvasLasso.ts`](../../apps/web/src/hooks/useCanvasLasso.ts)                                                   | Route and cancel Lasso input by effective interaction mode.                           |
 | [`apps/web/src/components/Nodes/sketch/SketchOverlay.tsx`](../../apps/web/src/components/Nodes/sketch/SketchOverlay.tsx)               | Route Sketch pointers and commit gesture-local draw or erase mutations.               |
-| [`apps/web/src/components/Panels/Canvas/CanvasToolbar.tsx`](../../apps/web/src/components/Panels/Canvas/CanvasToolbar.tsx)             | Present desktop tools or the touch-first Lasso tool.                                  |
+| [`apps/web/src/components/Panels/Canvas/CanvasToolbar.tsx`](../../apps/web/src/components/Panels/Canvas/CanvasToolbar.tsx)             | Present desktop tools or the touch-first Select and Lasso tools.                      |
 | [`apps/web/src/components/Settings/sections/GeneralSettings.tsx`](../../apps/web/src/components/Settings/sections/GeneralSettings.tsx) | Present the input preference and resolved Auto value.                                 |

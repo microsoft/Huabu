@@ -433,12 +433,6 @@ export const Canvas: React.FC<CanvasProps> = ({
     if (isNotMouse && tool === 'pan') setTool('select');
   }, [isNotMouse, setTool, tool]);
 
-  useEffect(() => {
-    if (isNotMouse && !pendingNodeType && tool !== 'lasso') {
-      setPendingNodeType('sketch');
-    }
-  }, [isNotMouse, pendingNodeType, setPendingNodeType, tool]);
-
   const handleSelectionStart = useCallback(() => {
     if (tool !== 'select') return;
     setIsBoxSelecting(true);
@@ -1172,7 +1166,14 @@ export const Canvas: React.FC<CanvasProps> = ({
         elementsSelectable={!interactivityLocked && !pendingNodeType}
         panOnScroll={!isNotMouse}
         zoomOnScroll={true}
-        zoomOnPinch={true}
+        // Touch/pen pinch is driven by the custom pointer router (via
+        // Pointer Events). React Flow's built-in pinch uses d3-zoom on a
+        // *separate* Touch Events stream that our capture-phase pointer
+        // suppression can't stop, so leaving it on lets both fight over
+        // `setViewport` and the gesture stalls. Mirror `panOnDrag` above:
+        // hand pan AND zoom to the router whenever a finger/pen is active,
+        // keeping React Flow's pinch only for the mouse (trackpad) case.
+        zoomOnPinch={!isNotMouse}
         minZoom={MIN_ZOOM}
         maxZoom={MAX_ZOOM}
         onlyRenderVisibleElements

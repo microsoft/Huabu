@@ -56,6 +56,46 @@ function runAfterFrames(frames: number, cb: () => void): void {
 }
 
 /**
+ * The overlay swallows the pointer stream, so React Flow never sees a
+ * tap that lands on a node. Recover the id of the node beneath the point
+ * so a tap can still select it.
+ *
+ * We can't use `document.elementsFromPoint` here: while the sketch tool
+ * is active the canvas runs with `nodesDraggable={false}` /
+ * `elementsSelectable={false}`, which makes React Flow give every node
+ * `pointer-events: none`, and `elementsFromPoint` skips such elements.
+ * Instead we hit-test the node bounding boxes directly and return the
+ * topmost (highest z-index) match.
+ */
+function nodeIdUnderPoint(clientX: number, clientY: number): string | null {
+  const nodeEls = document.querySelectorAll<HTMLElement>('.react-flow__node');
+  let bestId: string | null = null;
+  let bestZ = -Infinity;
+  for (const el of nodeEls) {
+    const rect = el.getBoundingClientRect();
+    if (
+      clientX < rect.left ||
+      clientX > rect.right ||
+      clientY < rect.top ||
+      clientY > rect.bottom
+    ) {
+      continue;
+    }
+    const id = el.getAttribute('data-id');
+    if (!id) continue;
+    // React Flow stacks nodes via an inline z-index; the highest one is
+    // painted on top, so it wins when boxes overlap (e.g. a node nested
+    // inside a frame).
+    const z = Number.parseInt(el.style.zIndex || '0', 10) || 0;
+    if (z >= bestZ) {
+      bestZ = z;
+      bestId = id;
+    }
+  }
+  return bestId;
+}
+
+/**
  * Process raw screen-space points into flow-space node data.
  * Returns bounding box position/size and normalised point array.
  */
@@ -129,10 +169,10 @@ export function SketchOverlay({
   const inputMode = useEffectiveInputMode();
 
   // Drop any prior canvas selection the moment the sketch tool
-  // activates: the overlay swallows all pointer events so the user
-  // can't (de)select anything by clicking either, and a stale
-  // selection would otherwise still be sent as context on the next
-  // chat turn and surfaced in selection-aware toolbars.
+  // activates so a stale selection isn't sent as context on the next
+  // chat turn or surfaced in selection-aware toolbars. Runs once on
+  // activation; the overlay then lets a tap (re)select a node via the
+  // pointer-up handlers below.
   useEffect(() => {
     selectNodes([], false);
   }, [selectNodes]);
@@ -170,6 +210,12 @@ export function SketchOverlay({
   // leaving stray strokes behind.
   const activePointerIdRef = useRef<number | null>(null);
   const eraseHitsRef = useRef<Map<string, Set<string>>>(new Map());
+  // Node under the pointer when a stroke/erase gesture starts. When the
+  // gesture ends as a tap (never locked into a drag), we select this node
+  // instead of drawing/erasing — so touch users can pick a node even
+  // though the overlay owns the pointer stream. `null` means empty canvas,
+  // whose tap clears the selection.
+  const tapNodeIdRef = useRef<string | null>(null);
   // Middle-mouse pan state. The overlay sits on top of ReactFlow and
   // swallows all pointer events, so ReactFlow's built-in `panOnDrag={[1]}`
   // never sees a middle-mouse press. We re-implement that gesture here
@@ -337,6 +383,9 @@ export function SketchOverlay({
         clearTokenRef.current++;
         return;
       }
+      // Remember the node under the down point so a tap (no locked drag)
+      // can select it on pointer-up instead of leaving a stray dot.
+      tapNodeIdRef.current = nodeIdUnderPoint(e.clientX, e.clientY);
       if (
         !beginCanvasGesture(
           'sketch-draw',
@@ -396,8 +445,17 @@ export function SketchOverlay({
       if (phase !== 'locked' || pts.length < 3) {
         screenPtsRef.current = [];
         setPoints([]);
+        // A genuine tap (never locked into a drag) doubles as a selection
+        // gesture: select the node under the down point, or clear the
+        // selection when the tap landed on empty canvas.
+        if (phase !== 'locked') {
+          const nodeId = tapNodeIdRef.current;
+          selectNodes(nodeId ? [nodeId] : []);
+        }
+        tapNodeIdRef.current = null;
         return;
       }
+      tapNodeIdRef.current = null;
 
       const result = processPoints(
         pts,
@@ -534,7 +592,15 @@ export function SketchOverlay({
         setPoints([]);
       });
     },
-    [rfInstance, addNode, strokeColor, strokeSize, zoom, tryEndPan],
+    [
+      rfInstance,
+      addNode,
+      strokeColor,
+      strokeSize,
+      zoom,
+      tryEndPan,
+      selectNodes,
+    ],
   );
 
   const collectEraseHits = useCallback(
@@ -621,6 +687,9 @@ export function SketchOverlay({
         setErasing(false);
         return;
       }
+      // Remember the node under the down point so a tap (no locked drag)
+      // can select it on pointer-up instead of erasing.
+      tapNodeIdRef.current = nodeIdUnderPoint(e.clientX, e.clientY);
       if (
         !beginCanvasGesture(
           'sketch-erase',
@@ -679,9 +748,13 @@ export function SketchOverlay({
       } else {
         eraseHitsRef.current.clear();
         useGesturePreviewStore.getState().clearSketchErasePreview();
+        // A genuine tap doubles as a selection gesture (see draw handler).
+        const nodeId = tapNodeIdRef.current;
+        selectNodes(nodeId ? [nodeId] : []);
       }
+      tapNodeIdRef.current = null;
     },
-    [collectEraseHits, commitEraseHits, tryEndPan],
+    [collectEraseHits, commitEraseHits, tryEndPan, selectNodes],
   );
 
   const handleEraserPointerLeave = useCallback(() => {

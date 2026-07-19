@@ -16,9 +16,9 @@ import {
 } from './canvasInputPolicy';
 
 describe('canvas input policy', () => {
-  it('exposes Select, Pan, and Lasso for the mouse but only Lasso for touch/pen', () => {
+  it('exposes Select, Pan, and Lasso for the mouse but Select and Lasso for touch/pen', () => {
     expect(getAvailableCanvasTools(false)).toEqual(['select', 'pan', 'lasso']);
-    expect(getAvailableCanvasTools(true)).toEqual(['lasso']);
+    expect(getAvailableCanvasTools(true)).toEqual(['select', 'lasso']);
   });
 
   it('maps hidden touch Select and Pan shortcuts to the internal Select state', () => {

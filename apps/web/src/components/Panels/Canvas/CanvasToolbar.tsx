@@ -105,8 +105,8 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
     [isNotMouse, t],
   );
 
-  const displayedTool = isNotMouse ? 'lasso' : activeTool;
-  const displayedToolActive = isNotMouse ? activeTool === 'lasso' : true;
+  const displayedTool = activeTool;
+  const displayedToolActive = true;
 
   // Single-character keyboard shortcuts for the toolbar items, mirroring
   // the badge hints shown on each button. Select / Pan / Lasso get
