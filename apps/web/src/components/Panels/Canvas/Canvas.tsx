@@ -902,6 +902,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       data-canvas-root=""
       data-search-scope="canvas"
       aria-busy={isInitialViewportPending}
+      data-not-mouse={isNotMouse ? '' : undefined}
       className={clsx(
         'bg-bg-default relative flex h-full w-full flex-col',
         pendingNodeType === 'note' && 'canvas-pending-note',

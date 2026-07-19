@@ -307,9 +307,20 @@ body,
   -webkit-touch-callout: none;
 }
 
+/* Touch/pen only: stop canvas gestures (draw, pan, lasso, node drag) from
+   selecting node/panel text and popping the iOS copy callout. Left as the
+   default for the mouse so desktop users can still select node text to
+   copy. Editable content and links re-enable selection below. */
+[data-canvas-root][data-not-mouse] {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 [data-canvas-root]
   :is(input, textarea, select, [contenteditable='true'], a[href]) {
   -webkit-touch-callout: default;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 /* React Flow controls panel — remove the default subtle shadow and round the
