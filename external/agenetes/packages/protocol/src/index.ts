@@ -25,7 +25,7 @@
  * Contract version for the Agenetes L1<->L2 protocol. Bump on any
  * breaking change to the wire schemas exported from this package.
  */
-export const AGENETES_PROTOCOL_VERSION = '0.2.0';
+export const AGENETES_PROTOCOL_VERSION = '0.3.0';
 
 // Two-level identity contract (§8).
 export { threadIdSchema, sessionIdSchema } from './identity.js';
@@ -36,20 +36,13 @@ export type { ThreadId, SessionId } from './identity.js';
 export { namespaceSchema } from './namespace.js';
 export type { Namespace } from './namespace.js';
 
-// WorkloadSpec building blocks (§3.6.1): the protocol ships the blocks,
-// the host composes the closed union.
+// WorkloadSpec: one opaque envelope; selected drivers validate nested specs.
 export {
   workloadTypeSchema,
-  defineBinding,
-  composeWorkloadSpec,
+  agentSpecSchema,
+  workloadSpecSchema,
 } from './workload.js';
-export type {
-  WorkloadType,
-  BindingDefinition,
-  AnyBindingDefinition,
-  BindingMemberSchema,
-  WorkloadSpecSchema,
-} from './workload.js';
+export type { WorkloadType, AgentSpec, WorkloadSpec } from './workload.js';
 
 // AgentSubmission: durable host source data plus optional canonical inputs.
 // Host rendering is complete before run(); drivers lower AgentInput[] into
@@ -155,9 +148,8 @@ export type {
 export { agentMetadataSchema } from './agent-metadata.js';
 export type { AgentMetadata } from './agent-metadata.js';
 
-// AgentStateSnapshot (§5 / M5.5 / README I9.7): the driver-agnostic
-// durable-state snapshot for one thread — the full `{ sessionId?, metadata?,
-// initialPreambleDelivered? }` value the handle up-reports and the instance
+// AgentStateSnapshot (§5 / M5.5 / README I9.7): the full driver-owned durable
+// state plus common metadata that the handle up-reports and the instance
 // persists as `ThreadRecord.state`. Never a per-field delta.
 export { agentStateSnapshotSchema } from './agent-state.js';
 export type { AgentStateSnapshot } from './agent-state.js';

@@ -1,14 +1,8 @@
+import { z } from 'zod';
+
 /**
  * The self-contained spawn recipe an ACP thread is bound to — the subset
- * of a host `AcpAgentProfile` that determines how the external agent
- * process is (re)launched.
- *
- * It rides the create-time `WorkloadSpec` (L1-baked) and is forwarded
- * verbatim to the agentlet spawn call on every turn. Under
- * recipe-first-via-L1 (README I9.6 / decision R1) L1 owns keeping a
- * returning thread's recipe stable; the driver no longer persists or
- * reads it from an on-disk session store (that store was removed once the
- * durable thread state moved onto the Agenetes `ThreadStore`, I9.7).
+ * of a host profile that determines how the external process is relaunched.
  */
 export interface AcpBindingRecipe {
   command?: string;
@@ -26,3 +20,23 @@ export interface AcpBindingRecipe {
         harness?: string;
       };
 }
+
+export const acpBindingRecipeSchema: z.ZodType<AcpBindingRecipe> = z.object({
+  command: z.string().optional(),
+  cwd: z.string().optional(),
+  autoRestart: z.boolean(),
+  alias: z.string(),
+  agentTeam: z
+    .union([
+      z.object({
+        manifestPath: z.string(),
+        workingDirPath: z.string(),
+        harness: z.string(),
+      }),
+      z.object({
+        agentDir: z.string(),
+        harness: z.string().optional(),
+      }),
+    ])
+    .optional(),
+});

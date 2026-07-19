@@ -254,9 +254,9 @@ export async function* runAgent(
     hasImage,
   });
 
-  // `spec.kind` is `internal`, so the instance's union handle narrows to
-  // the built-in pi-backed handle. For `Deployment`, `create(spec)` is
-  // get-or-create by `threadId`; for `Job`, it mints a fresh handle.
+  // Static DriverMap construction guarantees that `internal` is the
+  // pi-backed handle. Deployments get-or-create by `threadId`; Jobs mint a
+  // fresh handle.
   const handle = agenetes.create(spec) as BuiltinHandle;
   if (workloadType === 'Deployment' && context.systemPrompt !== undefined) {
     await syncDeploymentSystemPrompt(

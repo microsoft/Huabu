@@ -71,9 +71,13 @@ interface ThreadParams {
 function resolveThreadAgentletId(threadId: string, canvasId?: string): string {
   if (canvasId) {
     const record = agenetes.record(canvasAcpNamespace(canvasId), threadId);
-    if (record && 'binding' in record.spec) {
-      if ('profile' in record.spec) return record.spec.profile.agentletId;
-      if (record.spec.agentletId) return record.spec.agentletId;
+    const driverSpec = record?.spec.spec;
+    if (
+      driverSpec &&
+      typeof driverSpec === 'object' &&
+      typeof (driverSpec as { agentletId?: unknown }).agentletId === 'string'
+    ) {
+      return (driverSpec as { agentletId: string }).agentletId;
     }
   }
   return getSupervisedAgentletId();
@@ -117,13 +121,18 @@ async function resolveSetRpcEntry(
         // control op. `binding.alias` falls back to the profileId.
         spec: {
           threadId,
-          agentletId: existing.agentletId,
           kind: EXTERNAL_DRIVER_KIND,
           workloadType: 'Deployment',
           namespace: existing.namespace,
-          binding: { alias: existing.profileId, profileId: existing.profileId },
-          cwd: existing.cwd,
-          recipe: existing.bindingRecipe,
+          spec: {
+            agentletId: existing.agentletId,
+            binding: {
+              alias: existing.profileId,
+              profileId: existing.profileId,
+            },
+            cwd: existing.cwd,
+            recipe: existing.bindingRecipe,
+          },
         },
       };
     }
@@ -138,14 +147,16 @@ async function resolveSetRpcEntry(
   }
   const spec: AcpWorkloadSpec = {
     threadId,
-    agentletId,
     kind: EXTERNAL_DRIVER_KIND,
     workloadType: 'Deployment',
     namespace: canvasAcpNamespace(ctx.canvasId ?? ''),
-    binding: { alias: ctx.profileId, profileId: ctx.profileId },
-    env: buildReachbackEnv(threadId, ctx.canvasId ?? ''),
-    ...(ctx.cwd !== undefined && { cwd: ctx.cwd }),
-    recipe: resolveBindingRecipe(ctx.profileId),
+    spec: {
+      agentletId,
+      binding: { alias: ctx.profileId, profileId: ctx.profileId },
+      env: buildReachbackEnv(threadId, ctx.canvasId ?? ''),
+      ...(ctx.cwd !== undefined && { cwd: ctx.cwd }),
+      recipe: resolveBindingRecipe(ctx.profileId),
+    },
   };
   ensureProfileCacheSubscription(threadId, ctx.profileId);
   if (existing) return { ok: true, entry: existing, spec };
@@ -153,11 +164,11 @@ async function resolveSetRpcEntry(
     const entry = await ensureAcpSession({
       agentletId,
       threadId: spec.threadId,
-      binding: spec.binding,
+      binding: spec.spec.binding,
       namespace: spec.namespace,
-      env: spec.env,
-      ...(spec.cwd !== undefined && { cwd: spec.cwd }),
-      recipe: spec.recipe,
+      env: spec.spec.env,
+      ...(spec.spec.cwd !== undefined && { cwd: spec.spec.cwd }),
+      recipe: spec.spec.recipe,
       idleTimeoutSecs: getExternalAgentRuntimeConfig().idleTimeoutSecs,
       logger,
     });

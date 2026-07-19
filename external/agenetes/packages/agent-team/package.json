@@ -23,7 +23,8 @@
   "dependencies": {
     "@agenetes/protocol": "workspace:*",
     "@agenetes/runtime": "workspace:*",
-    "@agentlet/protocol": "workspace:*"
+    "@agentlet/protocol": "workspace:*",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

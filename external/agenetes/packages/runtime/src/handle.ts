@@ -72,6 +72,7 @@ export interface AgentHandle<
   TResult = unknown,
   TEvent extends AgentStreamEvent = AgentStreamEvent,
   TTurnCtx = unknown,
+  TDriverState = unknown,
 > {
   /**
    * Run one turn by resolving the submission's canonical inputs, lowering
@@ -138,7 +139,9 @@ export interface AgentHandle<
    * / out-of-turn channel, so the two never double-fold (the fold happens
    * once, here).
    */
-  onState?(listener: (snapshot: AgentStateSnapshot) => void): () => void;
+  onState?(
+    listener: (snapshot: AgentStateSnapshot<TDriverState>) => void,
+  ): () => void;
 
   /** The capability descriptor this handle advertises. */
   readonly capabilities: AgentCapabilities;

@@ -4,7 +4,7 @@ import { AcpServiceError } from './errors.js';
 import { AcpAgentHandle, lowerAcpInputs } from './handle.js';
 import { emptyAcpOverlay } from './overlay.js';
 
-import type { AcpCreateSpec } from './handle.js';
+import type { AcpCreateSpec, AcpDurableState } from './handle.js';
 import type { AcpSessionEntry } from './session-registry.js';
 import type { AgentCreateContext } from '@agenetes/runtime';
 
@@ -17,13 +17,17 @@ const sessionMocks = vi.hoisted(() => ({
 vi.mock('./session.js', () => sessionMocks);
 
 const spec: AcpCreateSpec = {
+  kind: 'acp',
+  workloadType: 'Deployment',
   threadId: 'thread_1',
   namespace: { name: 'canvas_1' },
-  binding: { alias: 'copilot', profileId: 'profile_1' },
-  recipe: {
-    alias: 'copilot',
-    command: 'copilot --acp',
-    cwd: '/repo',
+  spec: {
+    binding: { alias: 'copilot', profileId: 'profile_1' },
+    recipe: {
+      alias: 'copilot',
+      command: 'copilot --acp',
+      cwd: '/repo',
+    },
   },
 };
 
@@ -40,18 +44,16 @@ const logger = {
 };
 
 function durableContext(
-  authorizeHistoryLoad: AgentCreateContext<AcpCreateSpec>['recovery']['authorizeHistoryLoad'],
-): AgentCreateContext<AcpCreateSpec> {
+  authorizeHistoryLoad: AgentCreateContext<AcpDurableState>['recovery']['authorizeHistoryLoad'],
+): AgentCreateContext<AcpDurableState> {
   return {
-    durableInput: {
-      source: { namespace: spec.namespace, threadId: spec.threadId },
-      record: {
-        spec,
-        state: {
+    recoveryInput: {
+      state: {
+        driverState: {
           sessionId: 'stale_session',
-          metadata: { currentModeId: 'ask' },
           initialPreambleDelivered: false,
         },
+        metadata: { currentModeId: 'ask' },
       },
       turns: [foldedTurn],
     },
@@ -139,15 +141,20 @@ describe('ACP durable history recovery', () => {
     expect(sessionMocks.ensureAcpSession).toHaveBeenCalledTimes(2);
     expect(sessionMocks.ensureAcpSession.mock.calls[0]?.[0]).toMatchObject({
       priorState: {
-        sessionId: 'stale_session',
-        initialPreambleDelivered: false,
+        driverState: {
+          sessionId: 'stale_session',
+          initialPreambleDelivered: false,
+        },
       },
     });
     expect(sessionMocks.ensureAcpSession.mock.calls[1]?.[0]).toMatchObject({
-      priorState: { metadata: { currentModeId: 'ask' } },
+      priorState: {
+        driverState: { initialPreambleDelivered: false },
+        metadata: { currentModeId: 'ask' },
+      },
     });
     expect(
-      sessionMocks.ensureAcpSession.mock.calls[1]?.[0]?.priorState,
+      sessionMocks.ensureAcpSession.mock.calls[1]?.[0]?.priorState?.driverState,
     ).not.toHaveProperty('sessionId');
     expect(authorizeHistoryLoad).toHaveBeenCalledWith({
       mode: 'recover',
@@ -190,7 +197,10 @@ describe('ACP durable history recovery', () => {
     const { entry, prompt } = sessionEntry();
     sessionMocks.ensureAcpSession.mockResolvedValue(entry);
     const handle = new AcpAgentHandle(
-      { ...spec, initialPreamble: ['SYSTEM'] },
+      {
+        ...spec,
+        spec: { ...spec.spec, initialPreamble: ['SYSTEM'] },
+      },
       {
         recovery: {
           authorizeHistoryLoad: vi.fn(async () => ({

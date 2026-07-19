@@ -2,11 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   agentProfileDriverFactory,
-  type AgentProfileDelegateWorkloadSpec,
   type AgentProfileWorkloadSpec,
 } from './profile-driver.js';
 
-import type { AgentDriver } from '@agenetes/runtime';
+import type { WorkloadSpec } from '@agenetes/protocol';
+import type { MountedAgentDriver } from '@agenetes/runtime';
 
 const capabilities = {
   supportedControlMessages: ['cancel' as const],
@@ -24,11 +24,16 @@ const freshContext = {
 };
 
 function testDelegate(
-  onCreate: (spec: AgentProfileDelegateWorkloadSpec) => void,
-): AgentDriver<AgentProfileDelegateWorkloadSpec> {
+  onCreate: (spec: WorkloadSpec) => void,
+): MountedAgentDriver {
   return {
-    create: (spec) => {
-      onCreate(spec);
+    schemaVersion: 1,
+    workloadTypes: ['Deployment'],
+    validateSpec: (raw) => raw,
+    validateState: (raw) => raw,
+    initialState: () => ({}),
+    create: (workload) => {
+      onCreate(workload);
       return {
         capabilities,
         async *run() {
@@ -43,18 +48,16 @@ function testDelegate(
   };
 }
 
-function baseSpec(): Omit<AgentProfileWorkloadSpec, 'profile'> {
+function baseSpec(): Omit<AgentProfileWorkloadSpec['spec'], 'profile'> {
   return {
-    threadId: 'thread-1',
-    namespace: { name: 'canvas-1', storage: { root: '/data/canvas-1' } },
     binding: { profileId: 'profile-1', alias: 'reviewer' },
     env: { HUABU_THREAD_ID: 'thread-1', TOKEN: 'reachback' },
   };
 }
 
 async function realize(
-  profile: AgentProfileWorkloadSpec['profile'],
-  onCreate: (spec: AgentProfileDelegateWorkloadSpec) => void,
+  profile: AgentProfileWorkloadSpec['spec']['profile'],
+  onCreate: (spec: WorkloadSpec) => void,
   resolveManifestRuntime = vi.fn(async () => ({ environment: {} })),
 ) {
   const driver = agentProfileDriverFactory({
@@ -62,7 +65,16 @@ async function realize(
     delegateCapabilities: capabilities,
     ports: { resolveManifestRuntime },
   });
-  const handle = driver.create({ ...baseSpec(), profile }, freshContext);
+  const handle = driver.create(
+    {
+      kind: 'agent-profile',
+      workloadType: 'Deployment',
+      threadId: 'thread-1',
+      namespace: { name: 'canvas-1', storage: { root: '/data/canvas-1' } },
+      spec: { ...baseSpec(), profile },
+    },
+    freshContext,
+  );
   for await (const _event of handle.run(null, undefined)) {
     throw new Error('Test delegate must not yield events');
   }
@@ -70,8 +82,35 @@ async function realize(
 }
 
 describe('agentProfileDriverFactory', () => {
+  it('mounts runtime spec validation and delegates state validation', () => {
+    const driver: MountedAgentDriver = agentProfileDriverFactory({
+      delegate: testDelegate(() => {}),
+      delegateCapabilities: capabilities,
+      ports: { resolveManifestRuntime: vi.fn() },
+    });
+
+    expect(
+      driver.validateSpec({
+        ...baseSpec(),
+        profile: {
+          profileId: 'profile-1',
+          agentletId: 'machine-a',
+          workingDirPath: '/work/reviewer',
+          launch: { kind: 'acp-command', command: 'reviewer --acp' },
+        },
+      }),
+    ).toMatchObject({ binding: { alias: 'reviewer' } });
+    expect(driver.initialState()).toEqual({});
+    expect(() =>
+      driver.validateSpec({
+        ...baseSpec(),
+        profile: { profileId: 'profile-1' },
+      }),
+    ).toThrowError(expect.objectContaining({ code: 'invalid_driver_spec' }));
+  });
+
   it('lowers command snapshots directly without manifest preflight', async () => {
-    let lowered: AgentProfileDelegateWorkloadSpec | undefined;
+    let lowered: WorkloadSpec | undefined;
     const resolveManifestRuntime = await realize(
       {
         profileId: 'profile-1',
@@ -86,20 +125,22 @@ describe('agentProfileDriverFactory', () => {
 
     expect(resolveManifestRuntime).not.toHaveBeenCalled();
     expect(lowered).toMatchObject({
-      agentletId: 'machine-a',
-      cwd: '/work/reviewer',
-      recipe: {
-        command: 'reviewer --acp',
+      spec: {
+        agentletId: 'machine-a',
         cwd: '/work/reviewer',
-        autoRestart: true,
-        alias: 'reviewer',
+        recipe: {
+          command: 'reviewer --acp',
+          cwd: '/work/reviewer',
+          autoRestart: true,
+          alias: 'reviewer',
+        },
       },
     });
   });
 
   it('validates manifest snapshots and merges Configs below host env', async () => {
-    let lowered: AgentProfileDelegateWorkloadSpec | undefined;
-    const snapshot: AgentProfileWorkloadSpec['profile'] = {
+    let lowered: WorkloadSpec | undefined;
+    const snapshot: AgentProfileWorkloadSpec['spec']['profile'] = {
       profileId: 'profile-1',
       agentletId: 'machine-b',
       workingDirPath: '/work/reviewer',
@@ -122,13 +163,18 @@ describe('agentProfileDriverFactory', () => {
     );
 
     expect(lowered).toMatchObject({
-      agentletId: 'machine-b',
-      cwd: '/work/reviewer',
+      spec: {
+        agentletId: 'machine-b',
+        cwd: '/work/reviewer',
+      },
     });
-    if (!lowered || !('resolveRecipe' in lowered) || !lowered.resolveRecipe) {
+    const loweredSpec = lowered?.spec as
+      | { resolveRecipe?: () => Promise<unknown> }
+      | undefined;
+    if (!loweredSpec?.resolveRecipe) {
       throw new Error('Manifest Profile did not provide a recipe resolver');
     }
-    const runtime = await lowered.resolveRecipe();
+    const runtime = await loweredSpec.resolveRecipe();
     expect(resolveManifestRuntime).toHaveBeenCalledWith(snapshot);
     expect(runtime).toMatchObject({
       env: {

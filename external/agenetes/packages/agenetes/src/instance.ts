@@ -13,7 +13,12 @@
 // never on the instance (I9.2), so the host composes them off the handle
 // `create` / `get` return.
 
-import { AGENT_STREAM_EVENTS, agentSubmissionSchema } from '@agenetes/protocol';
+import {
+  AGENT_STREAM_EVENTS,
+  agentSubmissionSchema,
+  workloadSpecSchema,
+} from '@agenetes/protocol';
+import { AgenetesError } from '@agenetes/runtime';
 
 import {
   EventLog,
@@ -41,40 +46,18 @@ import type {
   AgentTurnMeta,
   Namespace,
   ObservedAgentTurn,
-  WorkloadType,
+  WorkloadSpec,
 } from '@agenetes/protocol';
 import type {
   AgentCreateContext,
   AgentHandle,
   AgentRuntime,
+  MountedAgentDriver,
   ThreadIdentity,
 } from '@agenetes/runtime';
 
-/**
- * The minimal shape the instance reads off a `WorkloadSpec` (I9.6). The
- * host composes the concrete closed union from the `@agenetes/protocol`
- * building blocks; the instance stays generic over it and only needs the
- * identity/dispatch fields — `threadId` (I4.2), the driver route `kind`
- * (I5), the lifecycle axis `workloadType` (I3.2, orthogonal to `kind`),
- * and the `namespace` (I4.1) it persists the durable record under.
- */
-export interface WorkloadSpecShape {
-  readonly threadId: string;
-  readonly kind: string;
-  readonly workloadType: WorkloadType;
-  readonly namespace: Namespace;
-}
-
-/**
- * The runtime + query surface the host drives (I9.3 / I9.4). Generic over
- * the host's concrete `WorkloadSpec` (`TSpec`) and the handle I/O types the
- * host's drivers produce; both default to the widest shape so a caller can
- * bind only what it needs.
- */
-export interface Agenetes<
-  TSpec extends WorkloadSpecShape = WorkloadSpecShape,
-  THandle extends AgentHandle = AgentHandle,
-> {
+/** The runtime + query surface the host drives (I9.3 / I9.4). */
+export interface Agenetes {
   /**
    * Realise the workload for `spec`, dispatching the driver on `spec.kind`
    * and the lifecycle on `spec.workloadType` (I3.2 / I9.3):
@@ -91,32 +74,29 @@ export interface Agenetes<
    * Either way the durable thread record is upserted so the query surface
    * can read it independent of handle liveness (I9.4).
    */
-  create(spec: TSpec): THandle;
+  create(spec: WorkloadSpec): AgentHandle;
   /**
    * Realise a fresh target thread from a durable source thread. The host
    * supplies the complete target spec; Agenetes performs no field-level
    * merge. The target receives the source record and folded turns but
    * starts with an empty target state.
    */
-  fork(source: ThreadIdentity, targetSpec: TSpec): THandle;
+  fork(source: ThreadIdentity, targetSpec: WorkloadSpec): AgentHandle;
   /**
    * Pure lookup of the live handle for `threadId` — **never spawns**
    * (I9.3). A missing handle is a precondition failure (e.g. a control
    * write on a dead thread), not a lazy spawn.
    */
-  get(threadId: string): THandle | undefined;
+  get(threadId: string): AgentHandle | undefined;
   /** Tear the live handle down and evict it from the live table (I9.3). */
   close(threadId: string): void;
   /**
    * Read one durable thread record by `(namespace, threadId)` (I9.4),
    * independent of whether a handle is live.
    */
-  record(
-    namespace: Namespace,
-    threadId: string,
-  ): ThreadRecord<TSpec> | undefined;
+  record(namespace: Namespace, threadId: string): ThreadRecord | undefined;
   /** Enumerate a namespace's persisted thread records (I9.4). */
-  records(namespace: Namespace): ThreadRecord<TSpec>[];
+  records(namespace: Namespace): ThreadRecord[];
   /**
    * The notification surface (I9.7): subscribe to a thread's driver-agnostic
    * `AgentMetadata` as it changes. The instance persists each up-reported
@@ -294,22 +274,18 @@ function createTail(
  * (the driver registry + live-handle table), a {@link ThreadStore} (the
  * durable thread table), and the two-tier conversation log backings (the
  * {@link EventLog} Tier 1 + {@link TurnStore} Tier 2, I9.8). Callers
- * normally reach this through the `mountAgenetes` builder (I9.5), which
- * assembles the runtime from the driver-factory dictionary and defaults the
- * log backings; it is exported for hosts that already own a runtime. The
- * log backings default to their in-memory variants so a direct caller can
- * omit them.
+ * normally reach this through `mountAgenetes(...)` (I9.5), which constructs
+ * the runtime from a complete static DriverMap and defaults the log backings;
+ * it is exported for hosts that already own a runtime. The log backings
+ * default to their in-memory variants so a direct caller can omit them.
  */
-export function createAgenetesInstance<
-  TSpec extends WorkloadSpecShape = WorkloadSpecShape,
-  THandle extends AgentHandle = AgentHandle,
->(
+export function createAgenetesInstance(
   runtime: AgentRuntime,
   threadStore: ThreadStore,
   eventLog: EventLog = new EventLog(new InMemoryEventLogStore()),
   turnStore: TurnStore = new InMemoryTurnStore(),
   autoRecoverPolicy: AutoRecoverPolicy = DEFAULT_AUTO_RECOVER_POLICY,
-): Agenetes<TSpec, THandle> {
+): Agenetes {
   // The instance is the SOLE ThreadStore writer and the owner of the
   // per-thread notification fan-out (I9.7). It registers ONE up-report
   // listener per live Deployment handle (keyed by threadId) and tears it
@@ -318,6 +294,66 @@ export function createAgenetesInstance<
   const bus = new ThreadNotificationBus();
   const unsubscribers = new Map<string, () => void>();
   const recovery = createAgentRecoveryContext(autoRecoverPolicy);
+
+  const resolveDriver = (spec: WorkloadSpec): MountedAgentDriver => {
+    const driver = runtime.resolve(spec.kind);
+    if (!driver) {
+      throw new AgenetesError(
+        'unknown_driver_kind',
+        `no agent driver mounted for kind '${spec.kind}'`,
+        { kind: spec.kind },
+      );
+    }
+    if (!driver.workloadTypes.includes(spec.workloadType)) {
+      throw new AgenetesError(
+        'unsupported_workload_type',
+        `driver '${spec.kind}' does not support ${spec.workloadType}`,
+        { kind: spec.kind, workloadType: spec.workloadType },
+      );
+    }
+    return driver;
+  };
+
+  const validateSpec = (
+    raw: WorkloadSpec,
+  ): { spec: WorkloadSpec; driver: MountedAgentDriver } => {
+    const parsed = workloadSpecSchema.safeParse(raw);
+    if (!parsed.success) {
+      throw new AgenetesError(
+        'invalid_workload',
+        'invalid workload envelope',
+        parsed.error,
+      );
+    }
+    const driver = resolveDriver(parsed.data);
+    return {
+      spec: { ...parsed.data, spec: driver.validateSpec(parsed.data.spec) },
+      driver,
+    };
+  };
+
+  const validateRecord = (record: ThreadRecord): ThreadRecord => {
+    const { spec, driver } = validateSpec(record.spec);
+    if (record.driverSchemaVersion !== driver.schemaVersion) {
+      throw new AgenetesError(
+        'invalid_persisted_record',
+        `driver schema version mismatch for '${spec.kind}'`,
+        {
+          kind: spec.kind,
+          expected: driver.schemaVersion,
+          actual: record.driverSchemaVersion,
+        },
+      );
+    }
+    return {
+      driverSchemaVersion: record.driverSchemaVersion,
+      spec,
+      state: {
+        ...record.state,
+        driverState: driver.validateState(record.state.driverState),
+      },
+    };
+  };
 
   const readHistory = (
     namespace: Namespace,
@@ -337,9 +373,14 @@ export function createAgenetesInstance<
   // FIRST (sole writer), then re-emit its metadata (persist-then-notify).
   // A handle without `onState` (a driver that reports no out-of-turn meta)
   // wires nothing and its notification stream stays empty.
-  const wireUpReport = (spec: TSpec, handle: AgentHandle): void => {
+  const wireUpReport = (
+    spec: WorkloadSpec,
+    driver: MountedAgentDriver,
+    handle: AgentHandle,
+  ): void => {
     const unsub = handle.onState?.((snapshot: AgentStateSnapshot) => {
       threadStore.upsert(spec.namespace, spec.threadId, {
+        driverSchemaVersion: driver.schemaVersion,
         spec,
         state: snapshot,
       });
@@ -435,30 +476,12 @@ export function createAgenetesInstance<
     });
   };
 
-  const createContext = (
-    source: ThreadIdentity,
-    record: ThreadRecord<TSpec>,
-  ): AgentCreateContext<TSpec> => ({
-    durableInput: {
-      source,
-      record,
-      turns: readHistory(source.namespace, source.threadId, true),
-    },
-    recovery,
-  });
-
   const realize = (
-    targetSpec: TSpec,
-    context: AgentCreateContext<TSpec>,
+    targetSpec: WorkloadSpec,
+    driver: MountedAgentDriver,
+    context: AgentCreateContext,
     initialState: AgentStateSnapshot,
-  ): THandle => {
-    const driver = runtime.resolve<TSpec>(targetSpec.kind);
-    if (!driver) {
-      throw new Error(
-        `no agent driver registered for kind '${targetSpec.kind}'`,
-      );
-    }
-
+  ): AgentHandle => {
     let handle: AgentHandle;
     if (targetSpec.workloadType === 'Job') {
       const raw = driver.create(targetSpec, context);
@@ -475,49 +498,80 @@ export function createAgenetesInstance<
           targetSpec.threadId,
         ),
       );
-      if (!wasLive) wireUpReport(targetSpec, handle);
+      if (!wasLive) wireUpReport(targetSpec, driver, handle);
     }
 
     const isTransientJob =
       targetSpec.workloadType === 'Job' && !targetSpec.threadId;
     if (!isTransientJob) {
       threadStore.upsert(targetSpec.namespace, targetSpec.threadId, {
+        driverSchemaVersion: driver.schemaVersion,
         spec: targetSpec,
         state: initialState,
       });
     }
-    return handle as THandle;
+    return handle;
   };
 
   return {
-    create(spec: TSpec): THandle {
+    create(rawSpec: WorkloadSpec): AgentHandle {
+      const incoming = validateSpec(rawSpec);
       // A persisted same-thread spec is authoritative across restart,
       // preserving reuse-ignores-spec semantics when no live handle exists.
-      const prior = spec.threadId
-        ? threadStore.get<TSpec>(spec.namespace, spec.threadId)
+      const rawPrior = incoming.spec.threadId
+        ? threadStore.get(incoming.spec.namespace, incoming.spec.threadId)
         : undefined;
-      const targetSpec =
-        prior?.spec.workloadType === 'Deployment' ? prior.spec : spec;
-      const context = prior
-        ? createContext(
-            { namespace: spec.namespace, threadId: spec.threadId },
-            prior,
-          )
+      const prior = rawPrior ? validateRecord(rawPrior) : undefined;
+      if (prior && prior.spec.kind !== incoming.spec.kind) {
+        throw new AgenetesError(
+          'invalid_workload',
+          `thread '${incoming.spec.threadId}' cannot change driver kind`,
+          { priorKind: prior.spec.kind, targetKind: incoming.spec.kind },
+        );
+      }
+      const target =
+        prior?.spec.workloadType === 'Deployment'
+          ? {
+              spec: prior.spec,
+              driver: resolveDriver(prior.spec),
+            }
+          : incoming;
+      const context: AgentCreateContext = prior
+        ? {
+            recovery,
+            recoveryInput: {
+              state: prior.state,
+              turns: readHistory(
+                incoming.spec.namespace,
+                incoming.spec.threadId,
+                true,
+              ),
+            },
+          }
         : { recovery };
-      return realize(targetSpec, context, prior?.state ?? {});
+      const initialState =
+        prior?.state ??
+        ({
+          driverState: target.driver.initialState(),
+        } satisfies AgentStateSnapshot);
+      return realize(target.spec, target.driver, context, initialState);
     },
-    fork(source: ThreadIdentity, targetSpec: TSpec): THandle {
-      const sourceRecord = threadStore.get<TSpec>(
-        source.namespace,
-        source.threadId,
-      );
+    fork(source: ThreadIdentity, rawTargetSpec: WorkloadSpec): AgentHandle {
+      const sourceRecord = threadStore.get(source.namespace, source.threadId);
       if (!sourceRecord) {
-        throw new Error(
+        throw new AgenetesError(
+          'invalid_workload',
           `cannot fork missing source thread '${source.namespace.name}/${source.threadId}'`,
         );
       }
+      validateRecord(sourceRecord);
+      const target = validateSpec(rawTargetSpec);
+      const targetSpec = target.spec;
       if (source.threadId === targetSpec.threadId) {
-        throw new Error('fork target threadId must differ from source');
+        throw new AgenetesError(
+          'invalid_workload',
+          'fork target threadId must differ from source',
+        );
       }
       if (
         runtime.get(targetSpec.threadId) !== undefined ||
@@ -525,18 +579,32 @@ export function createAgenetesInstance<
           undefined ||
         turnStore.list(targetSpec.namespace, targetSpec.threadId).length > 0
       ) {
-        throw new Error(
+        throw new AgenetesError(
+          'invalid_workload',
           `fork target thread already exists '${targetSpec.namespace.name}/${targetSpec.threadId}'`,
         );
       }
       if (!targetSpec.threadId) {
-        throw new Error('fork target threadId must not be empty');
+        throw new AgenetesError(
+          'invalid_workload',
+          'fork target threadId must not be empty',
+        );
       }
-      const context = createContext(source, sourceRecord);
-      return realize(targetSpec, context, {});
+      return realize(
+        targetSpec,
+        target.driver,
+        {
+          recovery,
+          forkInput: {
+            source,
+            turns: readHistory(source.namespace, source.threadId, true),
+          },
+        },
+        { driverState: target.driver.initialState() },
+      );
     },
-    get(threadId: string): THandle | undefined {
-      return runtime.get(threadId) as THandle | undefined;
+    get(threadId: string): AgentHandle | undefined {
+      return runtime.get(threadId);
     },
     close(threadId: string): void {
       // Tear down the up-report listener + end any open notification streams
@@ -549,14 +617,12 @@ export function createAgenetesInstance<
       bus.closeThread(threadId);
       runtime.close(threadId);
     },
-    record(
-      namespace: Namespace,
-      threadId: string,
-    ): ThreadRecord<TSpec> | undefined {
-      return threadStore.get<TSpec>(namespace, threadId);
+    record(namespace: Namespace, threadId: string): ThreadRecord | undefined {
+      const record = threadStore.get(namespace, threadId);
+      return record ? validateRecord(record) : undefined;
     },
-    records(namespace: Namespace): ThreadRecord<TSpec>[] {
-      return threadStore.list<TSpec>(namespace);
+    records(namespace: Namespace): ThreadRecord[] {
+      return threadStore.list(namespace).map(validateRecord);
     },
     notifications(threadId: string): AsyncIterable<AgentMetadata> {
       return bus.subscribe(threadId);

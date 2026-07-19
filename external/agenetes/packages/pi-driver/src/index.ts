@@ -12,6 +12,7 @@ export type {
   JsonObject,
   PiDriverFactoryConfig,
   PiDriverPorts,
+  PiDurableState,
   PiModelContext,
   PiModelRef,
   PiRunResult,
@@ -21,3 +22,4 @@ export type {
   PiRecipe,
   PiWorkloadSpec,
 } from './types.js';
+export { piDurableStateSchema, piSpecSchema } from './types.js';

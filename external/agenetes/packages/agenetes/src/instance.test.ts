@@ -1,10 +1,9 @@
 // M5 INST acceptance — the mounted Agenetes instance skeleton.
 //
 // Exercises the three invariant surfaces end-to-end with a stub driver
-// factory (no ACP / no host): the I9.5 builder assembles a driver-factory
-// dictionary; the I9.3 runtime surface get-or-creates / looks up / closes
-// live handles; and the I9.4 query surface reads durable thread records
-// orthogonally to handle liveness, isolated per namespace.
+// (no ACP / no host): I9.5 mounts a complete static DriverMap; the I9.3
+// runtime surface get-or-creates / looks up / closes live handles; and the
+// I9.4 query surface reads durable records independently from handle liveness.
 
 import { describe, expect, it, vi } from 'vitest';
 
@@ -12,17 +11,26 @@ import { InMemoryEventLogStore } from './event-log.js';
 import { InMemoryThreadStore } from './thread-store.js';
 import { InMemoryTurnStore } from './turn-store.js';
 
-import { mountAgenetes, type WorkloadSpecShape } from './index.js';
+import { mountAgenetes } from './index.js';
 
-import type { AgentStateSnapshot, AgentTurn } from '@agenetes/protocol';
+import type {
+  AgentSpec,
+  AgentStateSnapshot,
+  AgentTurn,
+} from '@agenetes/protocol';
+import { defineDriver } from '@agenetes/runtime';
 import type {
   AgentCreateContext,
-  AgentDriver,
   AgentHandle,
+  TypedWorkloadSpec,
 } from '@agenetes/runtime';
 
-interface StubSpec extends WorkloadSpecShape {
+interface StubDriverSpec extends AgentSpec {
   readonly note?: string;
+}
+type StubSpec = TypedWorkloadSpec<StubDriverSpec>;
+interface StubDriverState {
+  readonly sessionId?: string;
 }
 
 /** A stub handle recording its close() so teardown is observable. */
@@ -30,7 +38,7 @@ class StubHandle {
   closed = false;
   constructor(
     readonly spec: StubSpec,
-    readonly createContext: AgentCreateContext<StubSpec>,
+    readonly createContext: AgentCreateContext<StubDriverState>,
   ) {}
   close(): void {
     this.closed = true;
@@ -38,11 +46,32 @@ class StubHandle {
 }
 
 /** A driver whose end-state `create(spec)` (I9.3) mints a stub handle. */
-function stubDriver(): AgentDriver<StubSpec> {
-  return {
+const stubSpecSchema = {
+  safeParse(input: unknown) {
+    return input !== null && typeof input === 'object'
+      ? { success: true as const, data: input as StubDriverSpec }
+      : { success: false as const, error: new Error('expected object') };
+  },
+};
+
+const stubStateSchema = {
+  safeParse(input: unknown) {
+    return input !== null && typeof input === 'object'
+      ? { success: true as const, data: input as StubDriverState }
+      : { success: false as const, error: new Error('expected object') };
+  },
+};
+
+function stubDriver() {
+  return defineDriver({
+    schemaVersion: 1,
+    workloadTypes: ['Job', 'Deployment'],
+    specSchema: stubSpecSchema,
+    stateSchema: stubStateSchema,
+    initialState: () => ({}),
     create: (spec, context) =>
       new StubHandle(spec, context) as unknown as AgentHandle,
-  };
+  });
 }
 
 const ns = (name: string, root?: string) => ({
@@ -51,13 +80,7 @@ const ns = (name: string, root?: string) => ({
 });
 
 function mount() {
-  return (
-    mountAgenetes()
-      .addFactory('stub', stubDriver)
-      // driverName === contract kind (I5.1 alias); factoryName === impl id
-      .register('external', 'stub')
-      .build<StubSpec>()
-  );
+  return mountAgenetes({ drivers: { external: stubDriver() } });
 }
 
 describe('mounted Agenetes instance (M5 INST skeleton)', () => {
@@ -68,16 +91,16 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
       kind: 'external',
       workloadType: 'Deployment',
       namespace: ns('canvas_1', '/data/c1'),
-      note: 'first',
+      spec: { note: 'first' },
     };
     const h1 = inst.create(spec) as unknown as StubHandle;
     const h2 = inst.create({
       ...spec,
-      note: 'second',
+      spec: { note: 'second' },
     }) as unknown as StubHandle;
     expect(h2).toBe(h1);
     // reuse-ignores-spec: the live handle keeps its original spec
-    expect(h1.spec.note).toBe('first');
+    expect(h1.spec.spec.note).toBe('first');
   });
 
   it('restart recovery keeps the persisted spec authoritative', () => {
@@ -87,18 +110,45 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
       kind: 'external',
       workloadType: 'Deployment',
       namespace: ns('canvas_1', '/data/c1'),
-      note: 'persisted',
+      spec: { note: 'persisted' },
     };
     inst.create(spec);
     inst.close(spec.threadId);
 
     const recovered = inst.create({
       ...spec,
-      note: 'drifted',
+      spec: { note: 'drifted' },
     }) as unknown as StubHandle;
-    expect(recovered.spec.note).toBe('persisted');
-    expect(inst.record(spec.namespace, spec.threadId)?.spec.note).toBe(
-      'persisted',
+    expect(recovered.spec.spec.note).toBe('persisted');
+    expect(inst.record(spec.namespace, spec.threadId)?.spec.spec).toEqual(
+      expect.objectContaining({
+        note: 'persisted',
+      }),
+    );
+  });
+
+  it('rejects changing the driver kind of a persisted thread', () => {
+    const store = new InMemoryThreadStore();
+    const first = mountAgenetes({
+      drivers: { external: stubDriver(), internal: stubDriver() },
+      threadStore: store,
+    });
+    const spec: StubSpec = {
+      threadId: 'thr_1',
+      kind: 'external',
+      workloadType: 'Deployment',
+      namespace: ns('canvas_1'),
+      spec: {},
+    };
+    first.create(spec);
+    first.close(spec.threadId);
+
+    const restarted = mountAgenetes({
+      drivers: { external: stubDriver(), internal: stubDriver() },
+      threadStore: store,
+    });
+    expect(() => restarted.create({ ...spec, kind: 'internal' })).toThrow(
+      /cannot change driver kind/,
     );
   });
 
@@ -113,16 +163,17 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
       kind: 'external',
       workloadType: 'Deployment',
       namespace: sourceNamespace,
-      note: 'source',
+      spec: { note: 'source' },
     };
-    const sourceState: AgentStateSnapshot = {
-      sessionId: 'source_session',
+    const sourceState: AgentStateSnapshot<StubDriverState> = {
+      driverState: { sessionId: 'source_session' },
     };
     const sourceTurn: AgentTurn = {
       request: { type: 'user_text', content: 'before fork' },
       transcript: [{ type: 'text', data: { content: 'source answer' } }],
     };
     store.upsert(sourceNamespace, sourceSpec.threadId, {
+      driverSchemaVersion: 1,
       spec: sourceSpec,
       state: sourceState,
     });
@@ -148,19 +199,17 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
       data: { content: 'partial answer' },
     });
     const inst = mountAgenetes({
+      drivers: { external: stubDriver() },
       threadStore: store,
       eventLogStore,
       turnStore,
-    })
-      .addFactory('stub', stubDriver)
-      .register('external', 'stub')
-      .build<StubSpec>();
+    });
     const targetSpec: StubSpec = {
       threadId: 'target_thread',
       kind: 'external',
       workloadType: 'Deployment',
       namespace: targetNamespace,
-      note: 'complete target',
+      spec: { note: 'complete target' },
     };
 
     const handle = inst.fork(
@@ -169,12 +218,12 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
     ) as unknown as StubHandle;
 
     expect(handle.spec).toEqual(targetSpec);
-    expect(handle.createContext.durableInput).toEqual({
+    expect(handle.createContext.recoveryInput).toBeUndefined();
+    expect(handle.createContext.forkInput).toEqual({
       source: {
         namespace: sourceNamespace,
         threadId: sourceSpec.threadId,
       },
-      record: { spec: sourceSpec, state: sourceState },
       turns: [
         sourceTurn,
         {
@@ -185,8 +234,9 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
       ],
     });
     expect(inst.record(targetNamespace, targetSpec.threadId)).toEqual({
+      driverSchemaVersion: 1,
       spec: targetSpec,
-      state: {},
+      state: { driverState: {} },
     });
     expect(inst.history(targetNamespace, targetSpec.threadId).turns).toEqual(
       [],
@@ -204,6 +254,7 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
       kind: 'external',
       workloadType: 'Deployment',
       namespace,
+      spec: {},
     };
     expect(() =>
       inst.fork({ namespace, threadId: 'missing' }, targetSpec),
@@ -233,6 +284,7 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
       kind: 'external',
       workloadType: 'Deployment',
       namespace: ns('canvas_1'),
+      spec: {},
     };
     const created = inst.create(spec);
     expect(inst.get('thr_1')).toBe(created);
@@ -245,6 +297,7 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
       kind: 'external',
       workloadType: 'Deployment',
       namespace: ns('canvas_1'),
+      spec: {},
     }) as unknown as StubHandle;
     inst.close('thr_1');
     expect(handle.closed).toBe(true);
@@ -258,21 +311,23 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
       kind: 'external',
       workloadType: 'Job',
       namespace: ns('canvas_1', '/data/c1'),
-      note: 'first',
+      spec: { note: 'first' },
     };
     const h1 = inst.create(spec) as unknown as StubHandle;
     const h2 = inst.create({
       ...spec,
-      note: 'second',
+      spec: { note: 'second' },
     }) as unknown as StubHandle;
     // distinct handles — a Job is not cached / reused
     expect(h2).not.toBe(h1);
-    expect(h1.spec.note).toBe('first');
-    expect(h2.spec.note).toBe('second');
+    expect(h1.spec.spec.note).toBe('first');
+    expect(h2.spec.spec.note).toBe('second');
     // and it never registers in the live-handle table
     expect(inst.get('thr_job')).toBeUndefined();
     // but the durable record is still upserted (query surface, I9.4)
-    expect(inst.record(spec.namespace, 'thr_job')?.spec.note).toBe('second');
+    expect(inst.record(spec.namespace, 'thr_job')?.spec.spec).toEqual(
+      expect.objectContaining({ note: 'second' }),
+    );
   });
 
   it('a transient Job (empty threadId) upserts no durable record (I9.4)', () => {
@@ -283,11 +338,11 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
       kind: 'external',
       workloadType: 'Job',
       namespace,
-      note: 'stateless',
+      spec: { note: 'stateless' },
     };
     // it still runs and returns a fresh handle …
     const handle = inst.create(spec) as unknown as StubHandle;
-    expect(handle.spec.note).toBe('stateless');
+    expect(handle.spec.spec.note).toBe('stateless');
     // … but leaves no durable footprint: an empty key would collide across
     // every transient Job in the namespace and accumulate junk records.
     expect(inst.record(namespace, '')).toBeUndefined();
@@ -302,8 +357,9 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
         kind: 'nope',
         workloadType: 'Deployment',
         namespace: ns('canvas_1'),
+        spec: {},
       }),
-    ).toThrow(/no agent driver registered for kind 'nope'/);
+    ).toThrow(/no agent driver mounted for kind 'nope'/);
   });
 
   it('query surface reads durable records, orthogonal to liveness (I9.4)', () => {
@@ -314,14 +370,14 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
       kind: 'external',
       workloadType: 'Deployment',
       namespace,
+      spec: {},
     };
     inst.create(spec);
 
     const rec = inst.record(namespace, 'thr_1');
     expect(rec?.spec).toEqual(spec);
-    // A freshly-created record starts with an empty AgentStateSnapshot;
-    // sessionId / metadata are filled in later via up-reports (I9.7).
-    expect(rec?.state).toEqual({});
+    expect(rec?.driverSchemaVersion).toBe(1);
+    expect(rec?.state).toEqual({ driverState: {} });
 
     // closing the live handle does NOT drop the durable record
     inst.close('thr_1');
@@ -338,12 +394,14 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
       kind: 'external',
       workloadType: 'Deployment',
       namespace: nsA,
+      spec: {},
     });
     inst.create({
       threadId: 'thr_b',
       kind: 'external',
       workloadType: 'Deployment',
       namespace: nsB,
+      spec: {},
     });
 
     expect(inst.records(nsA).map((r) => r.spec.threadId)).toEqual(['thr_a']);
@@ -355,17 +413,19 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
     const store = new InMemoryThreadStore();
     const turnStore = new InMemoryTurnStore();
     const namespace = ns('canvas_1', '/data/c1');
-    const prior: AgentStateSnapshot = {
-      sessionId: 'sess_abc' as AgentStateSnapshot['sessionId'],
+    const prior: AgentStateSnapshot<StubDriverState> = {
+      driverState: { sessionId: 'sess_abc' },
       metadata: { currentModeId: 'ask' },
     };
     // Pre-seed a durable record as if a prior process had up-reported.
     store.upsert(namespace, 'thr_1', {
+      driverSchemaVersion: 1,
       spec: {
         threadId: 'thr_1',
         kind: 'external',
         workloadType: 'Deployment',
         namespace,
+        spec: {},
       } as StubSpec,
       state: prior,
     });
@@ -378,25 +438,24 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
       seqStart: 1,
       seqEnd: 2,
     });
-    const inst = mountAgenetes({ threadStore: store, turnStore })
-      .addFactory('stub', stubDriver)
-      .register('external', 'stub')
-      .build<StubSpec>();
+    const inst = mountAgenetes({
+      drivers: { external: stubDriver() },
+      threadStore: store,
+      turnStore,
+    });
 
     const spec: StubSpec = {
       threadId: 'thr_1',
       kind: 'external',
       workloadType: 'Deployment',
       namespace,
+      spec: {},
     };
     // Down-feed: the driver receives the durable record at create time.
     const handle = inst.create(spec) as unknown as StubHandle;
-    expect(handle.createContext.durableInput?.record.state).toEqual(prior);
-    expect(handle.createContext.durableInput?.source).toEqual({
-      namespace,
-      threadId: 'thr_1',
-    });
-    expect(handle.createContext.durableInput?.turns).toEqual([foldedTurn]);
+    expect(handle.createContext.forkInput).toBeUndefined();
+    expect(handle.createContext.recoveryInput?.state).toEqual(prior);
+    expect(handle.createContext.recoveryInput?.turns).toEqual([foldedTurn]);
 
     // The state-preserving upsert must NOT clobber the persisted snapshot
     // back to `{}` — a returning thread keeps its resume token + metadata.
@@ -407,29 +466,30 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
     expect(inst.record(namespace, 'thr_1')?.state).toEqual(prior);
   });
 
-  it('build() throws when a registration names an unknown factory', () => {
+  it('create() throws when no driver is mounted for the requested kind', () => {
     expect(() =>
-      mountAgenetes()
-        // no factory named 'ghost' was added
-        .register('external', 'ghost' as never)
-        .build(),
-    ).toThrow(/no driver factory named 'ghost'/);
+      mountAgenetes({ drivers: {} }).create({
+        threadId: 'thr_1',
+        kind: 'external',
+        workloadType: 'Deployment',
+        namespace: ns('canvas_1'),
+        spec: {},
+      }),
+    ).toThrow(/no agent driver mounted for kind 'external'/);
   });
 
   it('injected ThreadStore backs the query surface (I9.4 port)', () => {
     const upsert = vi.fn();
     const list = vi.fn().mockReturnValue([]);
     const inst = mountAgenetes({
+      drivers: { external: stubDriver() },
       threadStore: {
         upsert,
         get: vi.fn(),
         list,
         delete: vi.fn(),
       },
-    })
-      .addFactory('stub', stubDriver)
-      .register('external', 'stub')
-      .build<StubSpec>();
+    });
 
     const namespace = ns('canvas_1');
     inst.create({
@@ -437,6 +497,7 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
       kind: 'external',
       workloadType: 'Deployment',
       namespace,
+      spec: {},
     });
     expect(upsert).toHaveBeenCalledTimes(1);
     inst.records(namespace);

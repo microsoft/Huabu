@@ -1,194 +1,206 @@
-// The workload-realization and live-handle lifecycle seams (README I2).
-// Agenetes dispatches a serializable workload spec to a registered
-// `AgentDriver`; the driver realizes it as an `AgentHandle`. Host-owned
-// dependencies enter standard drivers through their mount-time factory
-// ports, never as per-create backing objects.
+import { AgenetesError } from './errors.js';
 
+import type {
+  AgentSpec,
+  AgentStateSnapshot,
+  AgentStreamEvent,
+  AgentSubmission,
+  WorkloadSpec,
+  WorkloadType,
+} from '@agenetes/protocol';
 import type { AgentHandle } from './handle.js';
 import type { AgentCreateContext } from './realization.js';
-import type { AgentStreamEvent, AgentSubmission } from '@agenetes/protocol';
 
-/**
- * A registered driver realizes a target create input into an
- * {@link AgentHandle}. The create context carries any source thread's
- * durable record and folded turns plus instance-level recovery policy.
- * Kept fully generic so this package never names a host spec type.
- */
+/** Runtime-schema subset implemented by Zod schemas without coupling runtime to Zod. */
+export interface RuntimeSchema<T> {
+  safeParse(
+    input: unknown,
+  ):
+    | { readonly success: true; readonly data: T }
+    | { readonly success: false; readonly error: unknown };
+}
+
+export type TypedWorkloadSpec<TSpec> = Omit<WorkloadSpec, 'spec'> & {
+  readonly spec: TSpec;
+};
+
+/** A strongly typed driver implementation before heterogeneous-map erasure. */
 export interface AgentDriver<
-  TInput = unknown,
+  TSpec extends AgentSpec = AgentSpec,
+  TDriverState = unknown,
   TSubmission extends AgentSubmission = AgentSubmission,
   TResult = unknown,
   TEvent extends AgentStreamEvent = AgentStreamEvent,
   TTurnCtx = unknown,
 > {
-  /**
-   * Produce a handle for one target workload. The context is always
-   * provided; `durableInput` is absent for a fresh create.
-   */
   create(
-    input: TInput,
-    context: AgentCreateContext<TInput>,
-  ): AgentHandle<TSubmission, TResult, TEvent, TTurnCtx>;
+    workload: TypedWorkloadSpec<TSpec>,
+    context: AgentCreateContext<TDriverState>,
+  ): AgentHandle<TSubmission, TResult, TEvent, TTurnCtx, TDriverState>;
+}
+
+export interface DriverDefinition<
+  TSpec extends AgentSpec,
+  TDriverState,
+  TSubmission extends AgentSubmission = AgentSubmission,
+  TResult = unknown,
+  TEvent extends AgentStreamEvent = AgentStreamEvent,
+  TTurnCtx = unknown,
+> {
+  readonly schemaVersion: number;
+  readonly workloadTypes: readonly WorkloadType[];
+  readonly specSchema: RuntimeSchema<TSpec>;
+  readonly stateSchema: RuntimeSchema<TDriverState>;
+  readonly initialState: () => TDriverState;
+  readonly create: AgentDriver<
+    TSpec,
+    TDriverState,
+    TSubmission,
+    TResult,
+    TEvent,
+    TTurnCtx
+  >['create'];
+}
+
+/** Type-erased driver stored in the static heterogeneous DriverMap. */
+export interface MountedAgentDriver {
+  readonly schemaVersion: number;
+  readonly workloadTypes: readonly WorkloadType[];
+  validateSpec(raw: unknown): unknown;
+  validateState(raw: unknown): unknown;
+  initialState(): unknown;
+  create(
+    workload: WorkloadSpec,
+    context: AgentCreateContext,
+  ): AgentHandle;
+}
+
+export type DriverMap = Readonly<Record<string, MountedAgentDriver>>;
+
+function parseOrThrow<T>(
+  schema: RuntimeSchema<T>,
+  raw: unknown,
+  code: 'invalid_driver_spec' | 'invalid_driver_state',
+): T {
+  const parsed = schema.safeParse(raw);
+  if (parsed.success) return parsed.data;
+  throw new AgenetesError(code, code.replaceAll('_', ' '), parsed.error);
 }
 
 /**
- * The driver registry + the live-handle lifecycle owner — L2's dispatch
- * table (the generalisation of the hard-coded
- * `binding.kind === 'external' ? runAcpAgent : runAgent` fork) grown into
- * a lifecycle owner that holds long-lived Deployment handles keyed by
- * `threadId` (§3.6.1 / M2.6).
- *
- * Two orthogonal concerns:
- *   - *Driver dispatch* (`register` / `resolve` / `has` / `kinds`): map a
- *     driver *kind* to the object that knows how to `create` its handles.
- *   - *Handle lifecycle* (`get` / `getOrCreate` / `close`): hold the live
- *     Deployment handle for a `threadId`, generalising today's
- *     `ensureAcpSession` (get-or-create-by-threadId). This is imperative
- *     lifecycle ownership of one named workload per `threadId` — no queue,
- *     no placement, no replicas, and (by choosing `create` over a
- *     declarative `apply`) no desired-state reconcile loop. It is *not* a
- *     scheduler and *not* a reconciler.
- *
- * A one-shot Job never enters the lifecycle registry: its handle lives
- * only for its single `run`, so callers `resolve` its driver and `create`
- * + `run` a fresh handle directly, and `get(threadId)` is always
- * `undefined` for it.
+ * Bind one driver's schemas to its typed implementation, then erase its
+ * generics for storage in the mounted heterogeneous DriverMap.
+ */
+export function defineDriver<
+  TSpec extends AgentSpec,
+  TDriverState,
+  TSubmission extends AgentSubmission = AgentSubmission,
+  TResult = unknown,
+  TEvent extends AgentStreamEvent = AgentStreamEvent,
+  TTurnCtx = unknown,
+>(
+  definition: DriverDefinition<
+    TSpec,
+    TDriverState,
+    TSubmission,
+    TResult,
+    TEvent,
+    TTurnCtx
+  >,
+): MountedAgentDriver {
+  if (
+    !Number.isSafeInteger(definition.schemaVersion) ||
+    definition.schemaVersion < 1 ||
+    definition.workloadTypes.length === 0
+  ) {
+    throw new AgenetesError(
+      'invalid_driver_definition',
+      'driver definition requires a positive schemaVersion and workload type',
+    );
+  }
+
+  const validateSpec = (raw: unknown): TSpec =>
+    parseOrThrow(definition.specSchema, raw, 'invalid_driver_spec');
+  const validateState = (raw: unknown): TDriverState =>
+    parseOrThrow(definition.stateSchema, raw, 'invalid_driver_state');
+
+  return {
+    schemaVersion: definition.schemaVersion,
+    workloadTypes: [...definition.workloadTypes],
+    validateSpec,
+    validateState,
+    initialState: () => validateState(definition.initialState()),
+    create(workload, context) {
+      const spec = validateSpec(workload.spec);
+      const recoveryInput = context.recoveryInput
+        ? {
+            ...context.recoveryInput,
+            state: {
+              ...context.recoveryInput.state,
+              driverState: validateState(
+                context.recoveryInput.state.driverState,
+              ),
+            },
+          }
+        : undefined;
+      const handle = definition.create(
+        { ...workload, spec },
+        {
+          recovery: context.recovery,
+          ...(recoveryInput ? { recoveryInput } : {}),
+          ...(context.forkInput ? { forkInput: context.forkInput } : {}),
+        },
+      );
+
+      if (!handle.onState) return handle;
+      return new Proxy(handle, {
+        get(target, property) {
+          if (property === 'onState') {
+            return (
+              listener: (snapshot: AgentStateSnapshot) => void,
+            ): (() => void) =>
+              target.onState!((snapshot) => {
+                listener({
+                  ...snapshot,
+                  driverState: validateState(snapshot.driverState),
+                });
+              });
+          }
+          const value = Reflect.get(target, property, target);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+    },
+  };
+}
+
+/**
+ * Runtime registry for the static driver map plus live Deployment handles.
+ * Driver entries cannot be mutated after construction.
  */
 export interface AgentRuntime {
-  /**
-   * Register (inject) a driver under the dispatch `kind`. The `kind` is
-   * supplied by the caller (never read off the driver — a driver carries
-   * no `kind`); re-registering a `kind` replaces it.
-   */
-  register(kind: string, driver: AgentDriver): void;
-
-  /**
-   * Look up a driver by kind. The caller knows the concrete driver shape
-   * for its kind and binds the type parameters accordingly.
-   */
-  resolve<
-    TInput = unknown,
-    TSubmission extends AgentSubmission = AgentSubmission,
-    TResult = unknown,
-    TEvent extends AgentStreamEvent = AgentStreamEvent,
-    TTurnCtx = unknown,
-  >(
-    kind: string,
-  ): AgentDriver<TInput, TSubmission, TResult, TEvent, TTurnCtx> | undefined;
-
-  /** Whether a driver is registered for `kind`. */
-  has(kind: string): boolean;
-
-  /** The registered driver kinds, in registration order. */
+  resolve(kind: string): MountedAgentDriver | undefined;
   readonly kinds: readonly string[];
-
-  /**
-   * Pure lookup of the live handle bound to `threadId` — **no spec**,
-   * never creates. Returns `undefined` when no handle is live (e.g. a
-   * one-shot Job, or a Deployment not yet created / already closed).
-   *
-   * This retires the wart where control routes drag `{profileId,
-   * canvasId, cwd}` around merely to *find* a session: they become
-   * `get(threadId)?.control(...)`, and a missing session is a
-   * precondition failure (do not lazily spawn a session just to, e.g.,
-   * set a mode). The caller supplies the concrete generics for the kind
-   * it knows lives under `threadId`.
-   */
-  get<
-    TSubmission extends AgentSubmission = AgentSubmission,
-    TResult = unknown,
-    TEvent extends AgentStreamEvent = AgentStreamEvent,
-    TTurnCtx = unknown,
-  >(
-    threadId: string,
-  ): AgentHandle<TSubmission, TResult, TEvent, TTurnCtx> | undefined;
-
-  /**
-   * Get or create the live handle for `threadId`. If one is already live
-   * it is returned as-is; otherwise `createHandle` constructs and registers
-   * it. `createHandle` closes over the workload spec, which is used only at
-   * construction;
-   * this deliberately **does not reconcile spec drift** (changing the spec
-   * is an explicit `close()` + `create()` the caller decides, not a hidden
-   * reconcile). This matches `ensureAcpSession`'s reuse-ignores-spec
-   * behaviour.
-   */
-  getOrCreate<
-    TSubmission extends AgentSubmission = AgentSubmission,
-    TResult = unknown,
-    TEvent extends AgentStreamEvent = AgentStreamEvent,
-    TTurnCtx = unknown,
-  >(
-    threadId: string,
-    createHandle: () => AgentHandle<TSubmission, TResult, TEvent, TTurnCtx>,
-  ): AgentHandle<TSubmission, TResult, TEvent, TTurnCtx>;
-
-  /**
-   * Close and evict the live handle for `threadId` (calls `handle.close()`
-   * then forgets it). No-op when nothing is live. Idempotent.
-   */
+  get(threadId: string): AgentHandle | undefined;
+  getOrCreate(threadId: string, createHandle: () => AgentHandle): AgentHandle;
   close(threadId: string): void;
 }
 
-/** Create an empty {@link AgentRuntime} (a `Map`-backed dispatch table). */
-export function createAgentRuntime(): AgentRuntime {
-  const drivers = new Map<string, AgentDriver>();
-  // The live-handle lifecycle registry: one long-lived Deployment handle
-  // per `threadId`. Jobs never enter here.
+export function createAgentRuntime(drivers: DriverMap): AgentRuntime {
   const handles = new Map<string, AgentHandle>();
+  const kinds = Object.keys(drivers);
   return {
-    register(kind: string, driver: AgentDriver): void {
-      drivers.set(kind, driver);
-    },
-    resolve<
-      TInput,
-      TSubmission extends AgentSubmission,
-      TResult,
-      TEvent extends AgentStreamEvent,
-      TTurnCtx,
-    >(kind: string) {
-      // The registry is heterogeneous (each kind has its own input/result
-      // shapes); the caller supplies the concrete generics for its kind.
-      return drivers.get(kind) as
-        | AgentDriver<TInput, TSubmission, TResult, TEvent, TTurnCtx>
-        | undefined;
-    },
-    has(kind: string): boolean {
-      return drivers.has(kind);
-    },
-    get kinds(): readonly string[] {
-      return [...drivers.keys()];
-    },
-    get<
-      TSubmission extends AgentSubmission,
-      TResult,
-      TEvent extends AgentStreamEvent,
-      TTurnCtx,
-    >(threadId: string) {
-      // Heterogeneous like `resolve`: the caller binds the generics for
-      // the kind it knows lives under `threadId`.
-      return handles.get(threadId) as
-        | AgentHandle<TSubmission, TResult, TEvent, TTurnCtx>
-        | undefined;
-    },
-    getOrCreate<
-      TSubmission extends AgentSubmission,
-      TResult,
-      TEvent extends AgentStreamEvent,
-      TTurnCtx,
-    >(
-      threadId: string,
-      createHandle: () => AgentHandle<TSubmission, TResult, TEvent, TTurnCtx>,
-    ) {
+    resolve: (kind) => drivers[kind],
+    kinds,
+    get: (threadId) => handles.get(threadId),
+    getOrCreate(threadId, createHandle) {
       const existing = handles.get(threadId);
-      if (existing) {
-        return existing as AgentHandle<TSubmission, TResult, TEvent, TTurnCtx>;
-      }
+      if (existing) return existing;
       const created = createHandle();
-      handles.set(threadId, created as AgentHandle);
+      handles.set(threadId, created);
       return created;
     },
-    close(threadId: string): void {
+    close(threadId) {
       const handle = handles.get(threadId);
       if (!handle) return;
       handle.close();

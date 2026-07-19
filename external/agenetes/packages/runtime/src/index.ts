@@ -2,19 +2,25 @@
 // See ./handle.ts for the design rules and layering rationale.
 
 export type { AgentHandle } from './handle.js';
-export type { AgentDriver, AgentRuntime } from './driver.js';
-export { createAgentRuntime } from './driver.js';
+export type {
+  AgentDriver,
+  AgentRuntime,
+  DriverDefinition,
+  DriverMap,
+  MountedAgentDriver,
+  RuntimeSchema,
+  TypedWorkloadSpec,
+} from './driver.js';
+export { createAgentRuntime, defineDriver } from './driver.js';
 export type {
   AgentCreateContext,
-  AgentDurableInput,
-  AgentDurableRecord,
-  AgentRealizationMode,
+  AgentForkInput,
+  AgentRecoveryInput,
   AgentRecoveryContext,
   HistoryLoadAuthorization,
   HistoryLoadAuthorizationInput,
   ThreadIdentity,
 } from './realization.js';
-export {
-  classifyAgentRealization,
-  HistoryLoadDeniedError,
-} from './realization.js';
+export { HistoryLoadDeniedError } from './realization.js';
+export { AgenetesError } from './errors.js';
+export type { AgenetesErrorCode } from './errors.js';

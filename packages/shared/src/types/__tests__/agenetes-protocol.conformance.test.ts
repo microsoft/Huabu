@@ -22,12 +22,11 @@ import {
   agentStateSnapshotSchema,
   agentSubmissionSchema,
   agentStreamEventSchema,
-  composeWorkloadSpec,
   controlAckSchema,
   controlMsgSchema,
-  defineBinding,
   namespaceSchema,
   resolveAgentInputs,
+  workloadSpecSchema,
   type AgentStreamEvent as ProtocolStreamEvent,
   type ControlMsg,
   type Namespace,
@@ -265,34 +264,13 @@ describe('ControlMsg conformance', () => {
   });
 });
 
-// ── WorkloadSpec + request — both current drivers are expressible ──────
+// ── Opaque WorkloadSpec — both current drivers are expressible ─────────
 //
-// WorkloadSpec is a target redesign (not a mirror of today's minimal
-// `AgentBinding`), so conformance here is expressibility: build the closed
-// union the host would compose for the two current driver routes and prove
-// representative specs for each round-trip, including the Job⇒request
-// invariant.
+// Driver payloads stay opaque at the protocol boundary. Each mounted driver
+// owns its complete nested schema and validates after direct kind dispatch.
 
-const internalSpecSchema = z.object({
-  agentId: z.string(),
-  tools: z.array(z.string()),
-});
-const externalSpecSchema = z.object({
-  profileId: z.string(),
-  alias: z.string(),
-  cwd: z.string().optional(),
-});
-
-const workloadSpecSchema = composeWorkloadSpec({
-  bindings: [
-    defineBinding({ kind: 'internal', spec: internalSpecSchema }),
-    defineBinding({ kind: 'external', spec: externalSpecSchema }),
-  ],
-  request: agentSubmissionSchema,
-});
-
-describe('WorkloadSpec + request conformance', () => {
-  it('expresses an internal-driver Job (request required)', () => {
+describe('opaque WorkloadSpec conformance', () => {
+  it('expresses an internal-driver Job without per-turn input', () => {
     const spec = {
       kind: 'internal',
       workloadType: 'Job',
@@ -302,23 +280,22 @@ describe('WorkloadSpec + request conformance', () => {
       },
       threadId: 'thr_1',
       spec: { agentId: 'ask', tools: ['read', 'space_commands'] },
-      request: { type: 'text', content: 'summarise this canvas' },
     };
     expect(workloadSpecSchema.safeParse(spec).success).toBe(true);
   });
 
-  it('rejects a Job without an initial request', () => {
+  it('allows a transient Job to use the current empty thread sentinel', () => {
     const spec = {
       kind: 'internal',
       workloadType: 'Job',
       namespace: { name: 'canvas_1' },
-      threadId: 'thr_1',
+      threadId: '',
       spec: { agentId: 'ask', tools: [] },
     };
-    expect(workloadSpecSchema.safeParse(spec).success).toBe(false);
+    expect(workloadSpecSchema.safeParse(spec).success).toBe(true);
   });
 
-  it('expresses an external-driver Deployment (request optional)', () => {
+  it('expresses an external-driver Deployment with nested instructions', () => {
     const spec = {
       kind: 'external',
       workloadType: 'Deployment',
@@ -327,8 +304,12 @@ describe('WorkloadSpec + request conformance', () => {
         storage: { root: '/data/history/canvas_2' },
       },
       threadId: 'thr_2',
-      initialPreamble: ['agent identity', 'tool policy'],
-      spec: { profileId: 'copilot', alias: 'Copilot', cwd: '/repo' },
+      spec: {
+        initialPreamble: ['agent identity', 'tool policy'],
+        profileId: 'copilot',
+        alias: 'Copilot',
+        cwd: '/repo',
+      },
     };
     expect(workloadSpecSchema.safeParse(spec).success).toBe(true);
   });
@@ -399,12 +380,16 @@ describe('WorkloadSpec + request conformance', () => {
   it('round-trips durable preamble delivery state independently of sessionId', () => {
     expect(
       agentStateSnapshotSchema.parse({
-        sessionId: 'session_1',
-        initialPreambleDelivered: false,
+        driverState: {
+          sessionId: 'session_1',
+          initialPreambleDelivered: false,
+        },
       }),
     ).toEqual({
-      sessionId: 'session_1',
-      initialPreambleDelivered: false,
+      driverState: {
+        sessionId: 'session_1',
+        initialPreambleDelivered: false,
+      },
     });
   });
 

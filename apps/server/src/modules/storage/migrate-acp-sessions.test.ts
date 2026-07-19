@@ -90,22 +90,29 @@ describe('migrateLegacyAcpSessions', () => {
     migrateLegacyAcpSessions(tmp);
 
     const store = new FileThreadStore();
-    const v3 = store.get<AcpWorkloadSpec>(namespace, 'thread-v3');
+    const v3 = store.get(namespace, 'thread-v3');
+    const v3Spec = v3?.spec.spec as AcpWorkloadSpec['spec'] | undefined;
     expect(v3).toBeDefined();
     expect(v3?.spec.kind).toBe('external');
     expect(v3?.spec.workloadType).toBe('Deployment');
     // namespace.name persisted as the canonical canvasId.
     expect(v3?.spec.namespace.name).toBe('canvas-42');
-    expect(v3?.spec.binding).toEqual({
+    expect(v3Spec?.binding).toEqual({
       alias: 'Claude',
       profileId: 'claude-code',
     });
-    expect(v3?.spec.recipe?.command).toBe('claude-code-acp');
-    expect(v3?.spec.agentletId).toBeUndefined();
-    expect(v3?.state.sessionId).toBe('sess-abc');
+    expect(v3Spec?.recipe?.command).toBe('claude-code-acp');
+    expect(v3Spec?.agentletId).toBeUndefined();
+    expect(
+      (
+        v3?.state.driverState as
+          | { sessionId?: string }
+          | undefined
+      )?.sessionId,
+    ).toBe('sess-abc');
     expect(v3?.state.metadata).toMatchObject({ currentModelId: 'sonnet' });
     // reachback env is never a durable spec field.
-    expect((v3?.spec as { env?: unknown }).env).toBeUndefined();
+    expect(v3Spec?.env).toBeUndefined();
 
     // v2 record skipped.
     expect(store.get(namespace, 'thread-v2')).toBeUndefined();
@@ -125,19 +132,31 @@ describe('migrateLegacyAcpSessions', () => {
     // store drops it on read back, defeating the clobber guard.
     const store = new FileThreadStore();
     store.upsert(namespace, 'thread-v3', {
+      driverSchemaVersion: 1,
       spec: {
         threadId: 'thread-v3',
         kind: 'external',
         workloadType: 'Deployment',
         namespace,
+        spec: {
+          binding: { alias: 'Claude', profileId: 'claude-code' },
+        },
       } as never,
-      state: { sessionId: 'live-session' as never },
+      state: {
+        driverState: {
+          sessionId: 'live-session',
+          initialPreambleDelivered: false,
+        },
+      },
     });
 
     migrateLegacyAcpSessions(tmp);
 
     const kept = store.get(namespace, 'thread-v3');
-    expect(kept?.state.sessionId).toBe('live-session');
+    expect(
+      (kept?.state.driverState as { sessionId?: string } | undefined)
+        ?.sessionId,
+    ).toBe('live-session');
   });
 
   it('preserves explicit agentlet placement in a persisted WorkloadSpec', () => {
@@ -147,22 +166,26 @@ describe('migrateLegacyAcpSessions', () => {
     };
     const store = new FileThreadStore();
     store.upsert(namespace, 'thread-placed', {
+      driverSchemaVersion: 1,
       spec: {
         threadId: 'thread-placed',
-        agentletId: 'machine-b',
         kind: 'external',
         workloadType: 'Deployment',
         namespace,
-        binding: { alias: 'Claude', profileId: 'claude-code' },
+        spec: {
+          agentletId: 'machine-b',
+          binding: { alias: 'Claude', profileId: 'claude-code' },
+        },
       } as AcpWorkloadSpec,
-      state: {},
+      state: {
+        driverState: { initialPreambleDelivered: false },
+      },
     });
 
-    const reloaded = new FileThreadStore().get<AcpWorkloadSpec>(
-      namespace,
-      'thread-placed',
-    );
-    expect(reloaded?.spec.agentletId).toBe('machine-b');
+    const reloaded = new FileThreadStore().get(namespace, 'thread-placed');
+    expect(
+      (reloaded?.spec.spec as AcpWorkloadSpec['spec'] | undefined)?.agentletId,
+    ).toBe('machine-b');
   });
 
   it('is idempotent — a second sweep is a no-op', () => {
