@@ -17,6 +17,7 @@ interface CanvasPointerRouterOptions {
   explicitToolActive: boolean;
   onTouchTakeover: () => void;
   onEmptyCanvasTap: () => void;
+  onNodeTap: (nodeId: string) => void;
 }
 
 /**
@@ -68,6 +69,7 @@ export function useCanvasPointerRouter(
         explicitToolActive: o.explicitToolActive,
         onTouchTakeover: o.onTouchTakeover,
         onEmptyCanvasTap: o.onEmptyCanvasTap,
+        onNodeTap: o.onNodeTap,
       };
     });
 

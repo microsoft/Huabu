@@ -229,6 +229,7 @@ const CanvasGestures: React.FC<{
   explicitToolActive: boolean;
   onTouchTakeover: () => void;
   onEmptyCanvasTap: () => void;
+  onNodeTap: (nodeId: string) => void;
   extraRecognizers: PointerRecognizer<
     PointerEvent,
     CanvasPointerRouterContext
@@ -240,6 +241,7 @@ const CanvasGestures: React.FC<{
   explicitToolActive,
   onTouchTakeover,
   onEmptyCanvasTap,
+  onNodeTap,
   extraRecognizers,
 }) => {
   useCanvasGestures(wrapperRef, rfInstanceRef);
@@ -251,6 +253,7 @@ const CanvasGestures: React.FC<{
       explicitToolActive,
       onTouchTakeover,
       onEmptyCanvasTap,
+      onNodeTap,
     },
     extraRecognizers,
   );
@@ -1199,6 +1202,7 @@ export const Canvas: React.FC<CanvasProps> = ({
           explicitToolActive={tool === 'lasso' || Boolean(pendingNodeType)}
           onTouchTakeover={handleTouchTakeover}
           onEmptyCanvasTap={() => selectNodes([])}
+          onNodeTap={(nodeId) => selectNodes([nodeId])}
           extraRecognizers={pointerRecognizers}
         />
         <SelectionAutoPan

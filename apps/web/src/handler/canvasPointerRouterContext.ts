@@ -15,4 +15,10 @@ export interface CanvasPointerRouterContext {
   explicitToolActive: boolean;
   onTouchTakeover: () => void;
   onEmptyCanvasTap: () => void;
+  /**
+   * Select the node a non-mouse tap landed on. Used in Pen mode, where a
+   * finger tap on a node is claimed by viewport navigation (the pen owns
+   * ink/manipulation) but should still pick the node rather than clear.
+   */
+  onNodeTap: (nodeId: string) => void;
 }

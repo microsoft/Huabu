@@ -9,6 +9,7 @@ import {
   canTouchClaimViewport,
   canTouchTakeOverForPinch,
 } from '@/handler/canvasInteractionOwner';
+import { nodeIdAtScreenPoint } from '@/handler/canvasNodeAtPoint';
 import {
   clampZoom,
   distance,
@@ -243,7 +244,17 @@ export function createViewportNavigationRecognizer(): PointerRecognizer<
       });
       endCanvasGesture(event.pointerId);
       panTouchId = null;
-      if (phase === 'pending') ctx.onEmptyCanvasTap();
+      // A tap (never locked into a pan) selects the node it landed on, or
+      // clears the selection on empty canvas. The node is resolved from the
+      // shared screen-point hit-test rather than the event target so it
+      // works even when a full-screen tool overlay (Sketch) covers the
+      // node and steals the DOM target — the pen keeps drawing while the
+      // finger picks nodes.
+      if (phase === 'pending') {
+        const nodeId = nodeIdAtScreenPoint(panStart.x, panStart.y);
+        if (nodeId) ctx.onNodeTap(nodeId);
+        else ctx.onEmptyCanvasTap();
+      }
     },
     onCancel: (event) => {
       if (panTouchId !== event.pointerId) return;
