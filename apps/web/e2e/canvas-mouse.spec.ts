@@ -48,7 +48,10 @@ async function placeTextNode(
   at: { x: number; y: number },
   content = 'hello',
 ): Promise<void> {
-  await page.getByRole('button', { name: /^Text/ }).click();
+  // Scope the tool button to the bottom-center toolbar panel so it stays
+  // unambiguous once placed Text nodes also match an accessible "Text" name.
+  const toolbar = page.locator('.react-flow__panel.bottom.center');
+  await toolbar.getByRole('button', { name: /^Text/ }).click();
   await expect(page.locator('.canvas-pending-text').first()).toBeVisible();
   await page.mouse.click(at.x, at.y);
   await page.keyboard.type(content);
@@ -186,5 +189,76 @@ test.describe('canvas mouse mode', () => {
       'data-not-mouse',
       /.*/,
     );
+  });
+
+  test('box-select two nodes then dragging one moves the whole group', async ({
+    page,
+  }) => {
+    const c = await paneCenter(page);
+    await placeTextNode(page, { x: c.x - 130, y: c.y }, 'a');
+    await placeTextNode(page, { x: c.x + 140, y: c.y }, 'b');
+    await expect(page.locator('.react-flow__node')).toHaveCount(2);
+
+    await page.keyboard.press('s');
+    await page.mouse.click(c.x + 340, c.y + 240); // clear selection
+    await expect(page.locator('.react-flow__node.selected')).toHaveCount(0);
+
+    // Marquee enclosing both nodes.
+    const nodes = page.locator('.react-flow__node');
+    const a0 = await nodes.nth(0).boundingBox();
+    const b0 = await nodes.nth(1).boundingBox();
+    if (!a0 || !b0) throw new Error('nodes have no bounding box');
+    const left = Math.min(a0.x, b0.x) - 50;
+    const top = Math.min(a0.y, b0.y) - 50;
+    const right = Math.max(a0.x + a0.width, b0.x + b0.width) + 50;
+    const bottom = Math.max(a0.y + a0.height, b0.y + b0.height) + 50;
+    await page.mouse.move(left, top);
+    await page.mouse.down();
+    await page.mouse.move(right, bottom, { steps: 14 });
+    await page.mouse.up();
+    await expect(page.locator('.react-flow__node.selected')).toHaveCount(2);
+
+    // Drag one selected member: the whole selection moves.
+    await page.mouse.move(a0.x + a0.width / 2, a0.y + a0.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(a0.x + a0.width / 2, a0.y + a0.height / 2 + 130, {
+      steps: 12,
+    });
+    await page.mouse.up();
+
+    const a1 = await nodes.nth(0).boundingBox();
+    const b1 = await nodes.nth(1).boundingBox();
+    if (!a1 || !b1) throw new Error('moved nodes have no bounding box');
+    expect(a1.y - a0.y).toBeGreaterThan(60);
+    expect(b1.y - b0.y).toBeGreaterThan(60);
+  });
+
+  test('lasso selects an enclosed node with the mouse', async ({ page }) => {
+    const c = await paneCenter(page);
+    await placeTextNode(page, c);
+    await page.mouse.click(c.x + 340, c.y + 240); // blur + clear selection
+    await expect(page.locator('.react-flow__node.selected')).toHaveCount(0);
+
+    await page.keyboard.press('l');
+    await expect(page.locator('.cursor-crosshair')).toBeVisible();
+
+    const box = await page.locator('.react-flow__node').first().boundingBox();
+    if (!box) throw new Error('node has no bounding box');
+    const pad = 55;
+    const path = [
+      { x: box.x - pad, y: box.y - pad },
+      { x: box.x + box.width + pad, y: box.y - pad },
+      { x: box.x + box.width + pad, y: box.y + box.height + pad },
+      { x: box.x - pad, y: box.y + box.height + pad },
+      { x: box.x - pad, y: box.y - pad },
+    ];
+    await page.mouse.move(path[0].x, path[0].y);
+    await page.mouse.down();
+    for (let i = 1; i < path.length; i++) {
+      await page.mouse.move(path[i].x, path[i].y, { steps: 6 });
+    }
+    await page.mouse.up();
+
+    await expect(page.locator('.react-flow__node.selected')).toHaveCount(1);
   });
 });
