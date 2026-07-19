@@ -36,14 +36,13 @@ interface Viewport {
 }
 
 /**
- * Two-finger pinch + pan and single-finger empty-canvas pan on touch
- * devices, ported verbatim from the former `useTouchNavigation`.
+ * Two-finger pinch + pan and single-finger empty-canvas pan on touch devices.
  *
- * Implemented through the router's global `observe` channel because it
- * must track every touch pointer — even one owned by another recognizer
- * (e.g. a pending lasso) — so that a second finger can take over into a
- * pinch. State is captured when the second finger lands and held constant
- * for the gesture so the canvas pivots around a fixed point.
+ * Single-finger pan uses the router's exclusive owner lifecycle. The global
+ * observer only tracks touch pointers so a second finger can cancel ordinary
+ * owners (for example a pending lasso) and take over into a pinch. Pinch state
+ * is captured when the second finger lands and held constant for the gesture
+ * so the canvas pivots around a fixed point.
  */
 export function createViewportNavigationRecognizer(): PointerRecognizer<
   PointerEvent,
@@ -70,28 +69,6 @@ export function createViewportNavigationRecognizer(): PointerRecognizer<
     const point = { x: event.clientX, y: event.clientY };
     activeTouches.set(event.pointerId, point);
 
-    if (
-      activeTouches.size === 1 &&
-      shouldOwnSingleTouchNavigation(event.target as Element | null, ctx)
-    ) {
-      if (!canTouchClaimViewport()) {
-        event.preventDefault();
-        event.stopPropagation();
-        return;
-      }
-      ctx.onTouchTakeover();
-      cancelPendingCanvasGesture();
-      if (!beginCanvasGesture('touch-pan', event.pointerId, 'touch', point)) {
-        return;
-      }
-      panTouchId = event.pointerId;
-      panStart = point;
-      panStartViewport = instance.getViewport();
-      event.preventDefault();
-      event.stopPropagation();
-      return;
-    }
-
     if (activeTouches.size === 2) {
       if (!canTouchTakeOverForPinch()) {
         event.preventDefault();
@@ -99,12 +76,9 @@ export function createViewportNavigationRecognizer(): PointerRecognizer<
         return;
       }
       ctx.onTouchTakeover();
-      if (panTouchId !== null) {
-        endCanvasGesture(panTouchId);
-      } else {
+      if (panTouchId === null) {
         cancelPendingCanvasGesture();
       }
-      panTouchId = null;
       isPinching = true;
       const [first, second] = Array.from(activeTouches.entries());
       ctx.cancelPointer(first[0]);
@@ -135,11 +109,11 @@ export function createViewportNavigationRecognizer(): PointerRecognizer<
     if (event.pointerType !== 'touch' || !activeTouches.has(event.pointerId)) {
       return;
     }
-    const { instance } = ctx;
     const point = { x: event.clientX, y: event.clientY };
     activeTouches.set(event.pointerId, point);
 
     if (isPinching && activeTouches.size === 2) {
+      const { instance } = ctx;
       event.preventDefault();
       event.stopPropagation();
       const [first, second] = Array.from(activeTouches.values());
@@ -167,29 +141,13 @@ export function createViewportNavigationRecognizer(): PointerRecognizer<
       return;
     }
 
-    if (panTouchId === event.pointerId && activeTouches.size === 1) {
-      event.preventDefault();
-      event.stopPropagation();
-      if (updateCanvasGesture(event.pointerId, point) !== 'locked') return;
-      instance.setViewport(
-        {
-          x: panStartViewport.x + point.x - panStart.x,
-          y: panStartViewport.y + point.y - panStart.y,
-          zoom: panStartViewport.zoom,
-        },
-        { duration: 0 },
-      );
-    } else if (isPinching && suppressedTouchIds.has(event.pointerId)) {
+    if (isPinching && suppressedTouchIds.has(event.pointerId)) {
       event.preventDefault();
       event.stopPropagation();
     }
   };
 
-  const observeEnd = (
-    event: PointerEvent,
-    ctx: CanvasPointerRouterContext,
-    cancelled: boolean,
-  ): void => {
+  const observeEnd = (event: PointerEvent): void => {
     if (event.pointerType !== 'touch') return;
     if (
       shouldSuppressTouchEnd(
@@ -203,17 +161,6 @@ export function createViewportNavigationRecognizer(): PointerRecognizer<
       event.stopPropagation();
     }
     activeTouches.delete(event.pointerId);
-    if (panTouchId === event.pointerId) {
-      const phase = updateCanvasGesture(event.pointerId, {
-        x: event.clientX,
-        y: event.clientY,
-      });
-      endCanvasGesture(event.pointerId);
-      panTouchId = null;
-      if (!cancelled && phase === 'pending') {
-        ctx.onEmptyCanvasTap();
-      }
-    }
     if (isPinching && activeTouches.size === 0) {
       isPinching = false;
       suppressedTouchIds.clear();
@@ -222,13 +169,61 @@ export function createViewportNavigationRecognizer(): PointerRecognizer<
 
   return {
     id: 'viewport-navigation',
-    canClaim: () => false,
-    onDown: () => 'pass',
+    canClaim: (event, ctx) =>
+      event.pointerType === 'touch' &&
+      ctx.inputMode !== 'mouse' &&
+      !isPanelTarget(event.target as Element | null) &&
+      shouldOwnSingleTouchNavigation(event.target as Element | null, ctx) &&
+      canTouchClaimViewport(),
+    onDown: (event, ctx) => {
+      const point = { x: event.clientX, y: event.clientY };
+      ctx.onTouchTakeover();
+      cancelPendingCanvasGesture();
+      if (!beginCanvasGesture('touch-pan', event.pointerId, 'touch', point)) {
+        return 'pass';
+      }
+      panTouchId = event.pointerId;
+      panStart = point;
+      panStartViewport = ctx.instance.getViewport();
+      event.preventDefault();
+      event.stopPropagation();
+      return 'claim';
+    },
+    onMove: (event, ctx) => {
+      if (panTouchId !== event.pointerId || activeTouches.size !== 1) return;
+      const point = { x: event.clientX, y: event.clientY };
+      event.preventDefault();
+      event.stopPropagation();
+      if (updateCanvasGesture(event.pointerId, point) !== 'locked') return;
+      ctx.instance.setViewport(
+        {
+          x: panStartViewport.x + point.x - panStart.x,
+          y: panStartViewport.y + point.y - panStart.y,
+          zoom: panStartViewport.zoom,
+        },
+        { duration: 0 },
+      );
+    },
+    onUp: (event, ctx) => {
+      if (panTouchId !== event.pointerId) return;
+      const phase = updateCanvasGesture(event.pointerId, {
+        x: event.clientX,
+        y: event.clientY,
+      });
+      endCanvasGesture(event.pointerId);
+      panTouchId = null;
+      if (phase === 'pending') ctx.onEmptyCanvasTap();
+    },
+    onCancel: (event) => {
+      if (panTouchId !== event.pointerId) return;
+      endCanvasGesture(event.pointerId);
+      panTouchId = null;
+    },
     observe: {
       onDown: observeDown,
       onMove: observeMove,
-      onUp: (event, ctx) => observeEnd(event, ctx, false),
-      onCancel: (event, ctx) => observeEnd(event, ctx, true),
+      onUp: observeEnd,
+      onCancel: observeEnd,
     },
   };
 }
