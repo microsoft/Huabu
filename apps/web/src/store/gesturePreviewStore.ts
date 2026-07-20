@@ -53,6 +53,23 @@ type GesturePreviewState = {
   clearSketchStrokeSelection: () => void;
 
   /**
+   * Sketch strokes to transiently HIGHLIGHT — distinct from the
+   * acted-upon `sketchStrokeSelection`. Driven by hovering a chat
+   * message's partial-stroke chip so the user can see which strokes that
+   * turn referenced, WITHOUT disturbing the live selection. Keyed by
+   * sketch node id -> stroke ids. Rendering intersects these against the
+   * node's live strokes, so ids for erased strokes / deleted nodes simply
+   * do not paint (deletion-safe, no cleanup needed).
+   */
+  sketchStrokeHighlight: Record<string, string[]>;
+
+  /** Replace the transient stroke highlight. */
+  setSketchStrokeHighlight: (highlight: Record<string, string[]>) => void;
+
+  /** Clear the transient stroke highlight. */
+  clearSketchStrokeHighlight: () => void;
+
+  /**
    * The retained lasso polygon (flow-space) for the current stroke
    * selection — GoodNotes-style: the loop stays after selection so the
    * user can drag inside it to move the strokes. `null` when there is no
@@ -183,6 +200,10 @@ export const useGesturePreviewStore = create<GesturePreviewState>()((set) => ({
       sketchSelectionPolygon: null,
       sketchStrokeMovePreview: null,
     }),
+  sketchStrokeHighlight: {},
+  setSketchStrokeHighlight: (sketchStrokeHighlight) =>
+    set({ sketchStrokeHighlight }),
+  clearSketchStrokeHighlight: () => set({ sketchStrokeHighlight: {} }),
   sketchSelectionPolygon: null,
   setSketchSelectionPolygon: (sketchSelectionPolygon) =>
     set({ sketchSelectionPolygon }),

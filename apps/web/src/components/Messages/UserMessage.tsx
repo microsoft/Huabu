@@ -1,5 +1,7 @@
 import { useTranslation } from 'react-i18next';
 
+import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
+
 import { NodeRef } from '../Common/NodeRef';
 
 import type { ChatAttachment, SelectedStrokeSubset } from '@sediment/shared';
@@ -32,8 +34,14 @@ export const UserMessage = ({
   invokedSkills,
 }: UserMessageProps) => {
   const { t } = useTranslation();
-  const strokeCountByNode = new Map(
-    (selectedStrokeIds ?? []).map((s) => [s.nodeId, s.strokeIds.length]),
+  const setStrokeHighlight = useGesturePreviewStore(
+    (s) => s.setSketchStrokeHighlight,
+  );
+  const clearStrokeHighlight = useGesturePreviewStore(
+    (s) => s.clearSketchStrokeHighlight,
+  );
+  const strokeIdsByNode = new Map(
+    (selectedStrokeIds ?? []).map((s) => [s.nodeId, s.strokeIds]),
   );
   const hasRefs =
     (attachments && attachments.length > 0) ||
@@ -67,13 +75,22 @@ export const UserMessage = ({
             {attachments?.map((att, i) => (
               <NodeRef key={att.url ?? `att-${i}`} attachment={att} />
             ))}
-            {selectedNodeIds?.map((id) => (
-              <NodeRef
-                key={id}
-                nodeId={id}
-                strokeCount={strokeCountByNode.get(id)}
-              />
-            ))}
+            {selectedNodeIds?.map((id) => {
+              const strokeIds = strokeIdsByNode.get(id);
+              if (!strokeIds) return <NodeRef key={id} nodeId={id} />;
+              // Hovering a partial-stroke chip highlights just those
+              // strokes on the canvas (best-effort: SketchNode only paints
+              // ids still present, so erased strokes / deleted nodes no-op).
+              return (
+                <span
+                  key={id}
+                  onMouseEnter={() => setStrokeHighlight({ [id]: strokeIds })}
+                  onMouseLeave={() => clearStrokeHighlight()}
+                >
+                  <NodeRef nodeId={id} strokeCount={strokeIds.length} />
+                </span>
+              );
+            })}
           </div>
         </div>
       )}

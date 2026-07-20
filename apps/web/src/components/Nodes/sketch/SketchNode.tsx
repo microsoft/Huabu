@@ -81,6 +81,16 @@ export const SketchNode = memo(
       () => new Set(selectedStrokeIds),
       [selectedStrokeIds],
     );
+    // Transient hover highlight (e.g. hovering a chat message's stroke
+    // chip). Only strokes still present on this node paint — erased
+    // strokes / deleted nodes simply never match, so no cleanup needed.
+    const highlightStrokeIds = useGesturePreviewStore(
+      (s) => s.sketchStrokeHighlight[id],
+    );
+    const highlightStrokeIdSet = useMemo(
+      () => new Set(highlightStrokeIds),
+      [highlightStrokeIds],
+    );
     // Live translate applied to selected strokes while a move drag is in
     // progress (flow-space; 1 SVG unit = 1 flow unit within the node).
     const movePreview = useGesturePreviewStore(
@@ -155,6 +165,7 @@ export const SketchNode = memo(
           */}
           {strokes.map((s) => {
             const isSelected = selectedStrokeIdSet.has(s.id);
+            const isHighlighted = !isSelected && highlightStrokeIdSet.has(s.id);
             return (
               <g
                 key={s.id}
@@ -165,7 +176,7 @@ export const SketchNode = memo(
                     : undefined
                 }
                 style={
-                  isSelected
+                  isSelected || isHighlighted
                     ? { filter: 'drop-shadow(0 0 3px var(--color-info))' }
                     : undefined
                 }
