@@ -1,6 +1,6 @@
 # Sketch 区域化重构 · 分阶段方案
 
-Status: In progress — **Stage 1 + Stage 2 implemented** (Stage 1: draw no longer auto-selects; stroke merging is purely spatial. Stage 2: stroke-level lasso selection + delete + GoodNotes-style retained-region move + style + keyboard delete + toolbar arbitration). Stage 3–4 remain design drafts; each needs its open questions confirmed before implementation. **Stage 3 redesigned 2026-07-20** after an empirical Azure Read run: OCR is now a low-fidelity search/trigger index (not authoritative content), agent comprehension goes through pull-render (`snapshot_nodes`, extended with an optional `strokeIds` filter), and OCR is lazy-by-default.
+Status: In progress — **Stage 1 + Stage 2 + Stage 4B (拆分 + 拖入合并) implemented** (Stage 1: draw no longer auto-selects; stroke merging is purely spatial. Stage 2: stroke-level lasso selection + delete + GoodNotes-style retained-region move + style + keyboard delete + toolbar arbitration. Stage 4B: dragging a pure stroke selection onto blank canvas splits it into a new region, onto another region merges into it — via a new `MOVE_SKETCH_STROKES_TO_REGION` UI intent, an absolute-flow (frame-safe) transfer builder, and drop-point frame reparenting; **auto-contact merge (方案 B) and edge-rewire-on-empty are deferred**). Stage 3 and Stage 4A remain design drafts; each needs its open questions confirmed before implementation. **Stage 3 redesigned 2026-07-20** after an empirical Azure Read run: OCR is now a low-fidelity search/trigger index (not authoritative content), agent comprehension goes through pull-render (`snapshot_nodes`, extended with an optional `strokeIds` filter), and OCR is lazy-by-default.
 
 Owner: canvas / sketch
 
@@ -141,6 +141,18 @@ MVP 限制：笔画移动仅限原节点内（抽出/拆分 = Stage 4）；混�
 4. 沿用 Accept / Revert 式**预览**，先**半自动**（不静默全自动），观察准确率后再考虑全自动。
 
 **子轨 B · 区域拆分 + 桥接合并**（低频高价值）
+
+**已实现（2026-07-20，拖放式拆分 + 拖入合并，intent 路径）**：把 Stage 2 的「原节点内平移」手势扩展成跨区域——纯笔画选择拖到**空白**即拆成新区域、拖到**另一区域**即并入。落地形态经与直连-builder 权衡后选了 **intent 路径**（拆分/合并是复合操作，与 note 拖块 `MOVE_NOTE_*` 对齐、resolver 纯函数可测）：
+
+- **intent + resolver**：新增 `MOVE_SKETCH_STROKES_TO_REGION`（[uiIntent.ts](../../apps/web/src/handler/canvasCommand/uiIntent.ts)）+ [resolveMoveSketchStrokesToRegion.ts](../../apps/web/src/handler/canvasCommand/resolvers/resolveMoveSketchStrokesToRegion.ts)，payload 带 `sources`（多源）/ `dropDelta` / `targetNodeId | null` / `dropPoint`。
+- **纯几何 builder**：[sketchMerge.ts](../../apps/web/src/components/Nodes/sketch/sketchMerge.ts) 的 `buildSketchStrokeTransferCommands` 在**绝对 flow 坐标**里算（`getAbsolutePosition`），跨 frame 也正确；同父时退化为现有数学。源侧复用抽出的纯核 `computeEraseCommands`（剩余重算 / 全清空则删节点）。
+- **frame 重定父（Tier 2）**：拆分到空白时用 `resolveFrameAtPoint`（[utils/local.ts](../../apps/web/src/handler/canvasCommand/utils/local.ts) 的 `findFrameAtPoint` 包装，节点创建同款）按落点决定新区域父 frame。
+- **拖放命中**：[useSketchStrokeMove.ts](../../apps/web/src/hooks/useSketchStrokeMove.ts) commit 里按绝对-flow bbox 命中拖放目标（排除源、topmost 优先）判定 merge / split / in-node。
+- **frame accept 预览**：拖笔画会**拆分落入某 frame** 时，复用 `computeFrameFit` + `setFrameFitPreviews` 显示与整节点拖拽同款的 grow-to-fit 虚线框（`hug` frame 生长、`manual` frame 高亮当前边界）；合并 / 原地 / 落顶层空白不显示，commit/cancel 清除。仅 sketch **合并目标区域**不做高亮（按需保留）。
+- **单条 undo**：store action `moveSketchStrokesToRegion` 用 `beginNodeDataGesture` / `endNodeDataGesture` 括号折叠（含空操作 `rollbackGestureSnapshot` 护栏）。
+- **测试**：[resolveMoveSketchStrokesToRegion.test.ts](../../apps/web/src/handler/canvasCommand/resolvers/__tests__/resolveMoveSketchStrokesToRegion.test.ts) 覆盖拆分 / 合并 / 单源清空删 / 跨 frame 绝对坐标 / 退化。
+
+**MVP 边界 / 延后**：仅纯笔画选择走跨区域（混选整节点维持 Stage 2 一起移动）；**自动接触合并（方案 B）延后**；**边改接延后**——源被全清空删除时其边随 `DELETE_NODES` 丢弃（Stage 4A 给区域连边时再补顶点收缩）；「OCR 重跑」现为 no-op（Stage 3 未落地，缺 `ocr` 字段即未识别）。
 
 > **交互模型线索（frame 类比）**：把 sketch 区域类比成 **frame**、里面的笔画类比成 **frame 内的节点**——「把笔画从区域 A 拖到区域 B」≈ 节点在 frame 间重定父，「拖到空白」≈ 拖出成顶层（新区域）。frame 系统已解决的**成员归属 + drag-to-reparent 判定 + fit-to-content** 逻辑可作为拆分/合并的 UX 外形与可复用判定逻辑来借鉴（见 [useFrameDragToCreate](../../apps/web/src/hooks/useFrameDragToCreate.ts) 及 canvas-engine 的 frame reparent）。
 >
