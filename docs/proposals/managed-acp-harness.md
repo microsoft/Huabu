@@ -1,54 +1,92 @@
 # Managed ACP Harness
 
-> Define the standard ACP launch baseline, promote durable `initialPreamble` to the shared agent-spec semantic, and separate managed harness configuration from the project working directory.
+> Record the deferred managed-harness direction and define the nearer-term Profile lifecycle that compiles a scanned Agent Team manifest into a durable external-agent `WorkloadSpec`.
 >
-> Status: **In-Progress** · Last updated: 2026-07-18 · Tracks: [#321](https://github.com/hai-team/Sediment/issues/321) · Follows: [#253](https://github.com/hai-team/Sediment/issues/253), [#334](https://github.com/hai-team/Sediment/issues/334)
+> Status: **Backlog** · Last updated: 2026-07-20 · Tracks: [#321](https://github.com/hai-team/Sediment/issues/321) · Follows: [#253](https://github.com/hai-team/Sediment/issues/253), [#334](https://github.com/hai-team/Sediment/issues/334)
 
 ---
 
 ## 1. Context
 
-Agent Team setup currently prepares prompts and skills inside a Profile's `workingDirPath` because supported harnesses discover configuration from conventional files beneath their process working directory. This couples the project an agent should inspect and modify with the instructions and capabilities that define the agent.
+Agent Team setup currently prepares prompts and skills inside a Profile's `workingDirPath` because supported harnesses discover configuration from conventional files beneath their process working directory. This coupling remains accepted for the current implementation; removing it requires harness-specific integration and is deferred.
 
-Issue #321 separates this problem from resource acquisition. Resource management, downloading, caching, receipts, and garbage collection will be designed separately. This proposal focuses on ACP launch semantics and on making managed harness configuration available without writing it into the selected project directory.
+Resource management, downloading, caching, receipts, and reuse are now the highest-priority part of #321 because installation and setup latency depend on them. Resource acquisition remains a distinct architectural boundary, but Profile setup should consume reusable Resource Manager outputs instead of repeatedly downloading or installing equivalent resources.
 
-Issue #334 established the lower control-plane boundary used here: `WorkloadSpec` is an opaque envelope whose `kind` directly selects a driver from a static DriverMap; each driver defines and validates its own spec and durable-state schemas. The shared `AgentSpec` carries `initialPreamble`, while the ACP driver's state persists `initialPreambleDelivered` independently from its session id.
+Issue #334 established the lower control-plane boundary used here: `WorkloadSpec` is an opaque envelope whose `kind` directly selects a driver from a static DriverMap; each driver defines and validates its own spec and durable-state schemas. That refactor stands independently and should land before the remaining #321 optimizations.
 
-## 2. Agreed direction
+## 2. Current scope decision
 
-The following decisions are the current design baseline:
+The current implementation keeps Agent Team Profiles on the generic `external` ACP driver and keeps setup materialization inside `workingDirPath`. File-free setup, isolated harness configuration roots, `CompiledAcpLaunch`, and direct harness-specific driver kinds such as `external-copilot` are backlog work rather than requirements for the next #321 increment.
 
-1. Durable `initialPreamble` is a shared `AgentSpec` semantic inside each agent driver's opaque `WorkloadSpec.spec` payload rather than per-turn rendered input.
-2. A generic ACP workload can always fall back to the minimal `{ command, cwd, agentletId }` launch configuration, optionally with `initialPreamble`.
-3. Generic command-backed ACP Profiles have no setup or preparation lifecycle.
-4. `CompiledAcpLaunch` is the boundary between logical Profile configuration and a concrete ACP process/session launch, although its exact fields remain provisional.
-5. Copilot CLI, `claude-agent-acp`, and `codex-acp` are the initial planned managed harnesses.
-6. Each managed harness receives an independent driver route such as `external-copilot`, `external-claude-agent-acp`, or `external-codex-acp`; `WorkloadSpec.kind` is the only routing key.
-7. Managed harness drivers share ACP-generic session lifecycle, recovery, event translation, controls, and transport implementation instead of duplicating that lower-level core.
-8. There is no central Harness Adapter registry or host router. Harness-specific compilation belongs to the selected driver and its package-level collaborators.
+The nearer-term optimization is to make the existing Agent Team flow deterministic: parse a manifest during scan, bind a specific scanned revision into a Profile, run explicit setup, persist the resulting generic external-driver spec template, and compile the final durable `WorkloadSpec` from that template when the caller supplies thread identity.
 
-## 3. Goals
+Launch must not rediscover or reinterpret the source manifest. A changed manifest becomes visible only through an explicit rescan and invalidates affected prepared Profiles rather than silently changing an existing launch.
+
+## 3. Profile lifecycle and workload compilation
+
+The intended lifecycle is:
+
+```text
+scanned normalized manifest revision
+              │
+              ▼
+user Config indexed by (agentletId, manifestPath)
+              │
+              ▼
+user-created Profile indexed by profileId
+  + agentletId + manifest revision + harness + workingDirPath
+              │
+              ▼
+explicit setup indexed by profileId
+  + reusable Resource Manager outputs
+  + on-demand manifest-derived setup behavior
+              │
+              ▼
+prepared generic external-driver spec template
+              │
+              ▼
+profileId + threadId + namespace + initialPreamble + runtime context
+              │
+              ▼
+durable WorkloadSpec
+              │
+              ▼
+Agenetes.create(...) → DriverMap["external"]
+```
+
+Scanning persists a validated normalized manifest snapshot and digest, not only the current UI summary. "Read once" means once per explicit scan or rescan revision: setup consumes the persisted snapshot, and spawn never rereads `agentlet.yaml`.
+
+Config remains indexed by `(agentletId, manifestPath)` because it belongs to the discovered Agent Team definition. Setup-time Config changes invalidate prepared Profiles based on that definition. Runtime Config, especially secrets, is resolved through runtime ports and does not enter durable driver specs.
+
+Profile creation fixes the selected agentlet, manifest revision, harness, and working directory under a `profileId`. Setup remains explicit and may continue writing the legacy harness files into `workingDirPath`, but it consumes reusable resources and produces a versioned, non-secret external-driver spec template containing the resolved command, working directory, launch inputs, and resource receipts required for later recovery.
+
+The Profile management control plane owns `compileWorkloadSpec(...)`. The host supplies `profileId`, `threadId`, `namespace`, `workloadType`, `initialPreamble`, and runtime context; the compiler validates that the Profile is ready and not stale, combines those caller-owned values with the prepared template, and returns a complete `WorkloadSpec`.
+
+This compiler belongs beside Profile management rather than inside the generic Agenetes runtime kernel. `Agenetes.create(...)` must continue to receive the complete durable boundary so static driver routing, schema validation, recovery, fork, and operation after Profile deletion do not depend on mutable Profile state.
+
+## 4. Goals
 
 1. Define one portable ACP launch baseline that works for an arbitrary ACP command without harness knowledge.
-2. Give `initialPreamble` durable, driver-owned first-message semantics so host rendering no longer branches on `isFirstMessage`.
-3. Allow managed harnesses to use native instructions, skills, plugins, MCP servers, and tools without materializing Agent Team configuration inside the project working directory.
-4. Preserve one shared ACP implementation for runtime lifecycle and protocol behavior beneath independently routed harness drivers.
-5. Make the difference between fully managed, partially managed, and generic fallback harnesses explicit rather than silently degrading configuration.
-6. Keep compiled configuration isolated between Agent Teams and sessions that target the same project.
+2. Preserve the #334 `WorkloadSpec` and static DriverMap boundary independently from the deferred managed-harness design.
+3. Make manifest scanning the only source-manifest read and persist the normalized revision consumed by setup.
+4. Make Profile setup produce a versioned generic external-driver spec template instead of deferring manifest resolution until spawn.
+5. Centralize Profile-to-`WorkloadSpec` compilation in the Profile management control plane rather than constructing driver specs ad hoc in `runAcpAgent(...)`.
+6. Reuse Resource Manager outputs across Profile setup operations while retaining explicit setup and current working-directory materialization.
+7. Keep secrets out of manifests, setup receipts, driver spec templates, and durable `WorkloadSpec`.
 
-## 4. Non-goals
+## 5. Non-goals
 
-This proposal does not define the Resource Manager, downloader, cache receipt, upgrade, trust, or garbage-collection design from issue #321.
+This proposal does not define the Resource Manager's resource identity, downloader, cache, trust, upgrade, receipt, or garbage-collection contracts. Those contracts are a prerequisite workstream with higher implementation priority.
 
 This proposal does not require every ACP harness to support native system prompts, external skill roots, plugins, or MCP configuration.
 
 This proposal does not make `initialPreamble` equivalent to an ACP or model-native system-role message.
 
-This proposal does not yet finalize each managed driver's compiled launch schema or how its compilation is divided between the control plane and execution node.
+The current increment does not introduce harness-specific drivers, direct managed-harness kinds, `CompiledAcpLaunch`, or native harness configuration compilation.
 
-This proposal does not preserve the current prepared-workspace layout as a compatibility requirement. Migration of existing Profiles and prepared workspaces will be designed after the target contract is stable.
+The current increment does not make setup file-free or move prepared harness configuration outside `workingDirPath`.
 
-## 5. Terminology
+## 6. Terminology
 
 | Term                          | Meaning                                                                                                                                                              |
 | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -60,7 +98,7 @@ This proposal does not preserve the current prepared-workspace layout as a compa
 | Managed harness driver        | A driver selected directly by a harness-specific `WorkloadSpec.kind`; it validates its own spec/state and compiles logical configuration into a concrete ACP launch. |
 | Generic ACP fallback          | Launching an arbitrary ACP command with the standard minimum contract and no managed harness preparation.                                                            |
 
-## 6. Standard ACP launch baseline
+## 7. Standard ACP launch baseline
 
 The standard ACP driver must support a launch that is independent of any known harness:
 
@@ -94,9 +132,9 @@ interface WorkloadSpec {
 
 The concrete `spec` selected by `kind` extends `AgentSpec` and contains the ACP launch inputs. The preamble remains independent from host request rendering while its realization and delivery state stay driver-owned.
 
-## 7. Durable `initialPreamble` semantics
+## 8. Durable `initialPreamble` semantics
 
-### 7.1 Contract
+### 8.1 Contract
 
 `initialPreamble` is an ordered list of host-authored instructions attached to a workload when its durable `WorkloadSpec` is created. It is immutable for that durable workload realization.
 
@@ -110,7 +148,7 @@ Delivery becomes durable only after the prompt carrying the preamble succeeds. A
 
 Recovery and fork must use the durable delivery state supplied by Agenetes rather than infer delivery from message count, `sessionId`, or host rendering state.
 
-### 7.2 Semantic limits
+### 8.2 Semantic limits
 
 The portable realization is instruction-like content in the first ACP prompt. It is not guaranteed to have system-message priority, to be hidden from the harness transcript, or to be protected from later user instructions.
 
@@ -118,13 +156,13 @@ A managed harness driver may realize the same logical preamble through a native 
 
 The exact acknowledgement contract for native realization remains open. Candidate approaches include returning an explicit preamble realization mode from compilation or reporting successful realization from session bootstrap.
 
-### 7.3 Host rendering consequence
+### 8.3 Host rendering consequence
 
 Host request rendering should render only the current submission. It should not inspect `isFirstMessage`, prepend system instructions, or decide whether recovery needs another preamble.
 
 This keeps first-message behavior in the durable driver lifecycle and allows the same renderer to be used for fresh runs, resumed sessions, recovered sessions, and forks.
 
-## 8. Provisional compiled launch boundary
+## 9. Backlog: provisional compiled launch boundary
 
 The following shape records the current design direction but is not yet a final API:
 
@@ -148,7 +186,7 @@ The current standard ACP client supplies empty `mcpServers` during session creat
 
 The final contract may need additional fields for native preamble realization, executable/tool paths, isolated config roots, plugin directories, permission policy, and launch diagnostics. These fields should be added only after the managed harness mechanisms are verified.
 
-## 9. Managed harness model
+## 10. Backlog: managed harness model
 
 Managed support means more than recognizing a command name. A managed harness has its own directly routed driver with versioned spec/state schemas; that driver must compile the declared Agent Team capabilities without modifying the project working directory and validate that the resulting launch is usable.
 
@@ -164,7 +202,7 @@ A harness is fully managed only when every capability declared by the Agent Team
 
 An unknown harness or an unsupported version may still be launched through a generic command-backed ACP Profile, but that fallback provides only the standard ACP baseline and portable `initialPreamble`.
 
-## 10. Proposed layering
+## 11. Backlog: managed harness layering
 
 The current architectural direction is:
 
@@ -190,7 +228,7 @@ Each managed harness driver owns its harness-specific spec/state schemas and con
 
 The execution node must participate because command availability, installed harness version, local paths, platform behavior, and compiled resource locations are node-local facts. It remains undecided which compilation steps happen in the managed driver before spawn and which require a paired execution-node component.
 
-## 11. Configuration semantics
+## 12. Backlog: file-free configuration semantics
 
 `workingDirPath` continues to mean only the project directory used as process and ACP session `cwd`.
 
@@ -202,7 +240,7 @@ Launching a managed harness must not download, install, repair, add, modify, or 
 
 Project-owned configuration already present in `workingDirPath` is a separate policy question. Each managed driver must define whether it is inherited, disabled, or composed with Agent Team configuration, including deterministic precedence and collision behavior.
 
-## 12. Required invariants
+## 13. Future file-free invariants
 
 1. `workingDirPath` always identifies the user project, never a prepared Agent Team workspace.
 2. Two Agent Teams targeting the same `workingDirPath` cannot overwrite or observe each other's compiled configuration unless they intentionally reference the same immutable prepared resource.
@@ -215,7 +253,7 @@ Project-owned configuration already present in `workingDirPath` is a separate po
 9. Unsupported harness capabilities fail explicitly before or during launch without leaving project-directory residue.
 10. Secrets are delivered at spawn/session initialization and are not copied into durable `WorkloadSpec`, compiled configuration files, or project files.
 
-## 13. Remaining managed-driver design questions
+## 14. Backlog managed-driver design questions
 
 The following questions remain deliberately open for the next design step:
 
@@ -230,17 +268,18 @@ The following questions remain deliberately open for the next design step:
 9. How should project-owned harness configuration compose with managed Agent Team configuration?
 10. Does `CompiledAcpLaunch.command` remain a shell command string, or should managed drivers produce an executable plus argument vector while the generic fallback preserves command strings?
 
-## 14. Proposed design sequence
+## 15. Revised implementation sequence
 
-1. Specify and test the complete durable `initialPreamble` contract across fresh create, command-first sessions, failure, resume, recovery fallback, and fork.
-2. Remove first-message instruction branching from host request rendering after the durable contract covers the existing behavior.
-3. Define the normalized logical capability input and managed-driver capability model.
-4. Verify the exact configuration and isolation mechanisms of the supported Copilot CLI, `claude-agent-acp`, and `codex-acp` versions.
-5. Finalize `CompiledAcpLaunch` and carry its session-init fields through Agent Profile lowering, agentlet spawn, ACP bootstrap, resume, and recovery.
-6. Implement one managed harness end to end, extract only the ACP-generic runtime core it proves, and reuse that core in the remaining independently routed drivers.
-7. Replace prepared workspaces under `workingDirPath` with implementation-owned compiled configuration and add migration behavior.
+1. Land #334 independently so the opaque `WorkloadSpec`, static DriverMap, driver-owned schemas, and durable `initialPreamble` semantics become the stable lower boundary.
+2. Define and implement the Resource Manager contracts needed to avoid repeated downloads and installations during Profile setup.
+3. Extend Agent Team scan results and registry persistence with a normalized manifest snapshot and digest.
+4. Bind Profiles to a scanned manifest revision and mark preparation stale when that revision or setup-time Config changes.
+5. Make setup consume the persisted manifest revision and Resource Manager outputs, then return a versioned generic external-driver spec template and resource receipts.
+6. Add Profile management `compileWorkloadSpec(...)` and reduce `runAcpAgent(...)` to supplying caller-owned context.
+7. Send direct command/cwd/env launch inputs to agentlet for newly prepared Profiles; retain spawn-time manifest resolution only as an explicitly bounded compatibility path for old persisted workloads.
+8. Defer harness-specific drivers, `CompiledAcpLaunch`, and file-free setup until resource reuse and the deterministic generic Profile flow are established.
 
-## 15. Related documents and code
+## 16. Related documents and code
 
 | File                                                                                                                                   | Relevance                                                                       |
 | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
