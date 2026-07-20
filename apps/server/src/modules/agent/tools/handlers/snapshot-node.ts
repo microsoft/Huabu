@@ -279,6 +279,33 @@ function sketchEffectiveSize(n: CanvasNode): {
 }
 
 /**
+ * Return a shallow-cloned sketch node whose `data.strokes` is narrowed
+ * to `keep` (the caller-requested stroke id subset), preserving the
+ * node's original stroke order and every other field (position, size,
+ * initialSize) so the whole downstream pipeline — clustering, bbox,
+ * fingerprint, render — treats it exactly like a full node with fewer
+ * strokes. The content-address fingerprint hashes stroke points, so the
+ * subset render is automatically distinct from the whole-node render.
+ *
+ * Falls back to the original node (no filtering) when `keep` is empty,
+ * matches nothing (stale ids), or already covers every stroke: a blank
+ * PNG is more confusing than the full node, and a full match is a no-op.
+ */
+export function filterSketchStrokes(
+  node: CanvasNode,
+  keep: Set<string>,
+): CanvasNode {
+  const strokes = getSketchData(node)?.strokes ?? [];
+  if (strokes.length === 0) return node;
+  const filtered = strokes.filter((s) => keep.has(s.id));
+  if (filtered.length === 0 || filtered.length === strokes.length) return node;
+  return {
+    ...node,
+    data: { ...(node.data as Record<string, unknown>), strokes: filtered },
+  } as CanvasNode;
+}
+
+/**
  * SHA-256 fingerprint over the cluster's geometry + strokes plus any
  * backdrop image nodes composited under the strokes. Stable under
  * re-ordering of nodes (sort by id) but sensitive to any change in
@@ -821,6 +848,16 @@ export async function snapshotNodesToArtifacts(
   const allNodes = (canvas.state.nodes ?? []) as CanvasNode[];
   const byId = new Map(allNodes.map((n) => [n.id, n] as const));
 
+  // Per-node stroke subset requested by the caller (partial-selection
+  // snapshot). Keyed by node id; empty entries are dropped so a node
+  // with no ids renders in full.
+  const strokeSubsetMap = new Map<string, Set<string>>();
+  for (const f of args.strokeSubsets ?? []) {
+    if (f.strokeIds.length > 0) {
+      strokeSubsetMap.set(f.nodeId, new Set(f.strokeIds));
+    }
+  }
+
   // Dedup ids while preserving first-seen order so the result reads
   // like the request did.
   const seenIds = new Set<string>();
@@ -874,7 +911,9 @@ export async function snapshotNodesToArtifacts(
     const type = getNodeType(node);
 
     if (type === 'image' || type === 'sketch') {
-      snapshottable.push({ node, type, fromFrame });
+      const keep = type === 'sketch' ? strokeSubsetMap.get(id) : undefined;
+      const effective = keep ? filterSketchStrokes(node, keep) : node;
+      snapshottable.push({ node: effective, type, fromFrame });
       continue;
     }
     // Non-snapshottable types coming via frame expansion are skipped

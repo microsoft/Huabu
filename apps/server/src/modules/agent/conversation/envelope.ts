@@ -157,6 +157,29 @@ function collectSketchNodeIds(nodes: WireSelectionNode[]): string[] {
 }
 
 /**
+ * Walk the wire selection for sketch nodes that carry a PARTIAL stroke
+ * selection (`strokeIds` present — the user lassoed a subset rather than
+ * the whole node) and shape them into `snapshot_nodes` `strokeSubsets`
+ * entries (a KEEP list — render only these strokes). Sketch nodes without
+ * `strokeIds` render in full and never appear here.
+ */
+function collectSketchStrokeSubsets(
+  nodes: WireSelectionNode[],
+): { nodeId: string; strokeIds: string[] }[] {
+  const out: { nodeId: string; strokeIds: string[] }[] = [];
+  const walk = (list: WireSelectionNode[]) => {
+    for (const n of list) {
+      if (n.type === 'sketch' && n.strokeIds && n.strokeIds.length > 0) {
+        out.push({ nodeId: n.id, strokeIds: n.strokeIds });
+      }
+      if (n.children) walk(n.children);
+    }
+  };
+  walk(nodes);
+  return out;
+}
+
+/**
  * Flatten the wire selection (frame children included) into the L1
  * `AgentNodePreview` payload of `{ id, type, label?, filename, preview? }`.
  * The `preview` is picked server-side via the shared
@@ -276,6 +299,8 @@ async function deriveSnapshotAttachments(
   const consumedImageIds = new Set<string>();
 
   const sketchIds = collectSketchNodeIds(selectedNodes);
+  const strokeSubsets = collectSketchStrokeSubsets(selectedNodes);
+  const partialNodeIds = new Set(strokeSubsets.map((f) => f.nodeId));
   const selectedImageIds = selectionImageAttachments
     .map((a) => a.originNodeId)
     .filter((id): id is string => typeof id === 'string');
@@ -288,6 +313,7 @@ async function deriveSnapshotAttachments(
     const rasterResults = await snapshotNodesToArtifacts({
       nodeIds: snapshotIds,
       canvasId,
+      ...(strokeSubsets.length > 0 ? { strokeSubsets } : {}),
     });
     const selectedImageIdSet = new Set(selectedImageIds);
     for (const r of rasterResults) {
@@ -305,16 +331,21 @@ async function deriveSnapshotAttachments(
       for (const iid of imageIds) consumedImageIds.add(iid);
       const nStrokes = strokeIds.length;
       const nImages = imageIds.length;
+      // Flag when any contributing stroke node was rendered from a
+      // PARTIAL stroke selection, so the label tells the agent it is
+      // seeing a subset (the lassoed strokes), not the whole node.
+      const isPartial = strokeIds.some((id) => partialNodeIds.has(id));
+      const partialTag = isPartial ? ' — partial stroke selection' : '';
       const label =
         nStrokes === 0
           ? `Image cluster (${nImages} images)`
           : nImages > 0
             ? `Sketch cluster (${nStrokes} stroke node${
                 nStrokes === 1 ? '' : 's'
-              } + ${nImages} backdrop image${nImages === 1 ? '' : 's'})`
+              } + ${nImages} backdrop image${nImages === 1 ? '' : 's'})${partialTag}`
             : nStrokes === 1
-              ? 'Sketch (1 stroke node)'
-              : `Sketch cluster (${nStrokes} stroke nodes)`;
+              ? `Sketch (1 stroke node)${partialTag}`
+              : `Sketch cluster (${nStrokes} stroke nodes)${partialTag}`;
       snapshotAttachments.push({
         type: 'image',
         source: 'selection',

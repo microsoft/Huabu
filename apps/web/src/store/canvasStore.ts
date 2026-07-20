@@ -1552,9 +1552,39 @@ const useCanvasStore = create<RFState>()(
     getAgentChatContext: (): AgentChatContext => {
       const { nodes } = get();
       const buildSelectedDetail = makeBuildSelectedDetail(nodes);
-      return {
-        selectedNodes: nodes.filter((n) => n.selected).map(buildSelectedDetail),
-      };
+      const selectedNodes = nodes
+        .filter((n) => n.selected)
+        .map(buildSelectedDetail);
+
+      // Fold in any Stage-2 partial stroke selection as sketch wire
+      // nodes carrying `strokeIds`. Stroke selection lives outside
+      // ReactFlow node selection (gesturePreviewStore), so these nodes
+      // are normally NOT in the `n.selected` set — append them with
+      // their stroke subset so the server can auto-snapshot + address
+      // just those strokes and tell the agent it is a partial selection.
+      const strokeSel = useGesturePreviewStore.getState().sketchStrokeSelection;
+      const selectedIds = new Set(selectedNodes.map((n) => n.id));
+      for (const [nodeId, strokeIds] of Object.entries(strokeSel)) {
+        if (!strokeIds || strokeIds.length === 0) continue;
+        const node = nodes.find((n) => n.id === nodeId);
+        if (!node || node.type !== 'sketch') continue;
+        if (selectedIds.has(nodeId)) {
+          // Rare mixed case: the sketch is also whole-node selected —
+          // attach the subset to its existing wire entry.
+          const existing = selectedNodes.find((n) => n.id === nodeId);
+          if (existing) existing.strokeIds = strokeIds;
+          continue;
+        }
+        const data = node.data as Record<string, unknown> | undefined;
+        selectedNodes.push({
+          id: nodeId,
+          type: 'sketch',
+          label: data?.label as string | undefined,
+          strokeIds,
+        });
+      }
+
+      return { selectedNodes };
     },
 
     getIntentContext: (): IntentContext => {

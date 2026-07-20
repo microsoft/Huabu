@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { clusterToSvg, type ContextImage } from './snapshot-node.js';
+import {
+  clusterToSvg,
+  filterSketchStrokes,
+  type ContextImage,
+} from './snapshot-node.js';
 
 import type { CanvasNode } from '@sediment/shared/canvas-engine';
 
@@ -32,6 +36,7 @@ function makeImageNode(opts: {
 }
 
 type SketchStroke = {
+  id?: string;
   points: number[][];
   color?: string;
   size?: number;
@@ -211,5 +216,48 @@ describe('clusterToSvg', () => {
     expect(built).not.toBeNull();
     expect(built!.width).toBe(512);
     expect(built!.svg).toContain('width="512"');
+  });
+});
+
+describe('filterSketchStrokes', () => {
+  const threeStrokeSketch = (): CanvasNode =>
+    makeSketch({
+      id: 'sk',
+      x: 0,
+      y: 0,
+      w: 100,
+      h: 100,
+      strokes: [
+        { id: 'a', points: [[0, 0, 0.5]], color: 'red', size: 4 },
+        { id: 'b', points: [[1, 1, 0.5]], color: 'blue', size: 4 },
+        { id: 'c', points: [[2, 2, 0.5]], color: 'green', size: 4 },
+      ],
+    });
+
+  const strokeIds = (n: CanvasNode): string[] =>
+    ((n.data as { strokes?: { id: string }[] }).strokes ?? []).map((s) => s.id);
+
+  it('keeps only the requested subset, preserving order', () => {
+    const out = filterSketchStrokes(threeStrokeSketch(), new Set(['a', 'c']));
+    expect(strokeIds(out)).toEqual(['a', 'c']);
+  });
+
+  it('returns the node unchanged when the filter matches nothing (stale ids)', () => {
+    const node = threeStrokeSketch();
+    const out = filterSketchStrokes(node, new Set(['zzz']));
+    // Same reference — no clone, renders the whole node.
+    expect(out).toBe(node);
+  });
+
+  it('returns the node unchanged when the filter covers every stroke', () => {
+    const node = threeStrokeSketch();
+    const out = filterSketchStrokes(node, new Set(['a', 'b', 'c']));
+    expect(out).toBe(node);
+  });
+
+  it('does not mutate the original node', () => {
+    const node = threeStrokeSketch();
+    filterSketchStrokes(node, new Set(['b']));
+    expect(strokeIds(node)).toEqual(['a', 'b', 'c']);
   });
 });
