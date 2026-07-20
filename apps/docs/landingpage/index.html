@@ -328,6 +328,23 @@
         object-fit: cover;
         background: #000;
       }
+      .hero-video:fullscreen,
+      .hero-video:-webkit-full-screen {
+        object-fit: contain;
+      }
+      .hero-video::cue {
+        font:
+          500 clamp(14px, 1.7vw, 20px)/1.05 'Inter',
+          sans-serif;
+        color: #fff;
+        background-color: rgba(0, 0, 0, 0.55);
+      }
+      .hero-video:fullscreen::cue,
+      .hero-video:-webkit-full-screen::cue {
+        font:
+          500 clamp(20px, 3.4vh, 34px)/1.05 'Inter',
+          sans-serif;
+      }
       .video-chrome {
         position: relative;
         height: 38px;
@@ -2589,13 +2606,24 @@
         </div>
         <video
           class="hero-video"
-          src="https://github.com/microsoft/Huabu/releases/download/v0.9.0/Huabu-Video.mp4"
           poster="./Huabu-Video-Poster.jpg"
           controls
           preload="metadata"
           playsinline
           aria-label="Huabu product demo video"
-        ></video>
+        >
+          <source
+            src="https://github.com/microsoft/Huabu/releases/download/v0.9.0/Huabu-Video.mp4"
+            type="video/mp4"
+          />
+          <track
+            kind="captions"
+            src="./Huabu-Video.vtt"
+            srclang="en"
+            label="English"
+            default
+          />
+        </video>
       </div>
     </header>
 
