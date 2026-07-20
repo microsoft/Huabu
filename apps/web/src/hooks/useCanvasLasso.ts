@@ -16,7 +16,7 @@ import {
 } from '@/handler/canvasGestureSession';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
-import { isEmptyPaneTarget } from '../components/Panels/Canvas/canvasInputPolicy';
+import { isLassoStartTarget } from '../components/Panels/Canvas/canvasInputPolicy';
 
 import type { EffectiveInputMode } from '@/store/toolStore';
 import type { Edge, ReactFlowInstance } from '@xyflow/react';
@@ -298,7 +298,7 @@ export function useCanvasLasso({
       }
       const target = event.target as HTMLElement;
 
-      if (!isEmptyPaneTarget(target)) return false;
+      if (!isLassoStartTarget(target)) return false;
 
       event.preventDefault();
       event.stopPropagation();

@@ -379,6 +379,17 @@ body,
   cursor: crosshair !important;
 }
 
+/*
+ * Lasso tool: show the crosshair over nodes too (not just the pane), so a
+ * lasso started on a frame's background / a note reads as "selecting", not
+ * "grab / click". Mirrors the pending-frame override; nodes are not
+ * draggable in lasso mode (see `nodesDraggable`), so no grab affordance is
+ * lost.
+ */
+.canvas-lasso .react-flow__node {
+  cursor: crosshair !important;
+}
+
 .canvas-pending-audio .react-flow__pane,
 .canvas-pending-audio .react-flow__node {
   cursor: crosshair !important;

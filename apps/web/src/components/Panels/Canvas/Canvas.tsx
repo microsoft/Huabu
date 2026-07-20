@@ -65,7 +65,7 @@ import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 import {
   canDirectlyManipulateWithPointer,
   closestNodeElement,
-  isEmptyPaneTarget,
+  isLassoStartTarget,
   isPanelTarget,
   resolveNodeDraggable,
 } from './canvasInputPolicy.ts';
@@ -913,7 +913,7 @@ export const Canvas: React.FC<CanvasProps> = ({
           toolRef.current === 'lasso' &&
           event.button === 0 &&
           event.isPrimary &&
-          isEmptyPaneTarget(event.target as Element | null) &&
+          isLassoStartTarget(event.target as Element | null) &&
           canDirectlyManipulateWithPointer(event.pointerType, ctx.inputMode),
       ),
     ];
@@ -1005,7 +1005,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         pendingNodeType === 'sketch' && 'cursor-crosshair',
         pendingNodeType === 'audio' && 'canvas-pending-audio',
         pendingNodeType === 'question' && 'canvas-pending-question',
-        tool === 'lasso' && !isStrokeMoving && 'cursor-crosshair',
+        tool === 'lasso' && !isStrokeMoving && 'canvas-lasso cursor-crosshair',
         isStrokeMoving && 'cursor-grabbing',
       )}
       onContextMenu={(event) => {
@@ -1261,7 +1261,9 @@ export const Canvas: React.FC<CanvasProps> = ({
         selectionMode={SelectionMode.Partial}
         onSelectionStart={handleSelectionStart}
         onSelectionEnd={handleSelectionEnd}
-        nodesDraggable={!interactivityLocked && !pendingNodeType}
+        nodesDraggable={
+          !interactivityLocked && !pendingNodeType && tool !== 'lasso'
+        }
         nodeDragThreshold={dragActivationDistance}
         nodeClickDistance={dragActivationDistance}
         nodesConnectable={!interactivityLocked}

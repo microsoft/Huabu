@@ -8,6 +8,7 @@ export type CanvasTool = 'select' | 'pan' | 'lasso';
 const REACT_FLOW_PANE = '.react-flow__pane';
 const REACT_FLOW_PANEL = '.react-flow__panel';
 const REACT_FLOW_NODE = '.react-flow__node';
+const REACT_FLOW_NODE_FRAME = '.react-flow__node-frame';
 const REACT_FLOW_INTERACTIVE =
   '.react-flow__panel, .react-flow__node, .react-flow__edge, .react-flow__handle';
 
@@ -35,6 +36,32 @@ export function isEmptyPaneTarget(target: Element | null): boolean {
   return Boolean(
     target?.closest(REACT_FLOW_PANE) && !target.closest(REACT_FLOW_INTERACTIVE),
   );
+}
+
+/**
+ * True when the pointer target is a frame's own background — i.e. the
+ * topmost node under the pointer is a frame (not one of its children).
+ *
+ * A frame is a solid container node, so a pointerdown inside it (or one that
+ * drills through a framed sketch's transparent `pointer-events: none` bbox
+ * and lands on the frame beneath) targets the frame element rather than the
+ * empty pane. Treating the frame background as a valid surface lets the
+ * lasso begin inside a frame; on its own this is not enough — React Flow
+ * node dragging must also be off in lasso mode (see `nodesDraggable`), or the
+ * frame is grabbed and moved before the lasso can claim the gesture.
+ */
+export function isFrameBackgroundTarget(target: Element | null): boolean {
+  const node = target?.closest(REACT_FLOW_NODE);
+  return Boolean(node && node.matches(REACT_FLOW_NODE_FRAME));
+}
+
+/**
+ * Valid surface for STARTING a lasso: empty canvas, or a frame's own
+ * background (so a lasso can select the frame's contents). Node interiors
+ * (except frames) and panels are excluded.
+ */
+export function isLassoStartTarget(target: Element | null): boolean {
+  return isEmptyPaneTarget(target) || isFrameBackgroundTarget(target);
 }
 
 // Toolbar layout, tool availability, and node-drag affordances follow the
