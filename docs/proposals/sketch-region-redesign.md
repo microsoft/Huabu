@@ -121,6 +121,16 @@ MVP 限制：笔画移动仅限原节点内（抽出/拆分 = Stage 4）；混�
 
 明确不做：**eager 预渲染+附图的旁路**（冗余，现有 selection-visual + `snapshot_nodes` 已覆盖）；把 stroke 变节点的持久化引用（超出所需）。
 
+**已实现（2026-07-20）**：`snapshot_nodes` 加可选 `strokeSubsets`（per-node 的 KEEP-list：`[{ nodeId, strokeIds }]`，只渲列出的笔画，内容寻址独立、不撞整节点快照）；wire `WireSelectionNode` 加可选 `strokeIds`；`getAgentChatContext` 把 Stage-2 笔画选择（`gesturePreviewStore.sketchStrokeSelection`）注入选择；服务端 auto-snapshot 只渲那几笔并给附件打「partial stroke selection」标注。UI 侧：来源计数（`SourceCount`）与发送后 user-message 的 `selectedNodeIds` 都已把「有笔画选择的 sketch 节点」计入（否则纯笔画选择在发送前/后都看不出是 source）。
+
+**后续增强 · 部分笔画的持久化 + 历史悬浮高亮（计划）**：让用户在聊天记录里悬浮某条 user message 的 source chip 时，画布重新高亮当时发送的那几笔。
+
+- **数据已在**：strokeIds 已随 `request.selectedNodes[].strokeIds` 持久化（turn 记录存整份请求），无需新存储。只需 surface：给消息加 `selectedStrokeIds?: { nodeId, strokeIds }[]`（运行时 [chatTypes.ts](../../apps/web/src/store/chatTypes.ts) + wire [chat.ts](../../packages/shared/src/types/agent/chat.ts) + 历史 schema），在 envelope 的 `focus.selection` 加 `strokeSubsets` 供 [history.ts](../../apps/server/src/modules/agent/conversation/transcript/history.ts) 回读时 emit，[useChatHistory.ts](../../apps/web/src/hooks/useChatHistory.ts) 透传，[useAgentStream.ts](../../apps/web/src/hooks/useAgentStream.ts) 实时写入。
+- **高亮通道**：新增瞬态 `gesturePreviewStore.sketchStrokeHighlight`（与活动选择 `sketchStrokeSelection` **分开**，避免打架）；[SketchNode.tsx](../../apps/web/src/components/Nodes/sketch/SketchNode.tsx) 把逐笔高亮渲染改成 `selection ∪ highlight` 并集（描亮逻辑已存在）。chip 的 `onMouseEnter/Leave` 写/清高亮（[UserMessage.tsx](../../apps/web/src/components/Messages/UserMessage.tsx)）。
+- **删除兜底**（核心原则：**持久化的是历史事实，高亮是对当前画布的尽力而为**）：SketchNode **只高亮自己 `data.strokes` 里仍存在的 id** → 笔画被擦/节点被删天然被过滤，无需额外清理；节点被删时 chip 与「整节点指向已删节点」同样降级、悬浮 no-op；计数标签取**发送当时**的记录数（持久 strokeIds 长度），不按当前重算。
+- **标签**：先显示「N 笔」（发送时的选中笔数，最稳）；若要「N/M」需额外持久化发送时总笔数 M。
+- **提交拆分**：① 持久化 + 回显 `selectedStrokeIds` +「N 笔」标签（无高亮）；② 高亮通道 + chip 悬浮 + 删除兜底交集。各自可独立回滚。
+
 ### Stage 4 — 语义与重组层（两条独立子轨，均依赖 Stage 3）
 
 **子轨 A · 问题检测 + 半自动作答**（原始产品目标）
