@@ -143,15 +143,53 @@ function migrateInternalSpec(
   threadId: string,
   workload: Record<string, unknown>,
 ): WorkloadSpec {
-  if (!workload.spec || typeof workload.spec !== 'object') {
+  const nested =
+    workload.spec && typeof workload.spec === 'object'
+      ? (workload.spec as Record<string, unknown>)
+      : undefined;
+  if (!nested && workload.workloadType !== 'Job') {
     return invalid(filePath, `thread '${threadId}' has invalid pi spec`);
   }
-  const parsedDriverSpec = piSpecSchema.safeParse({
-    ...(workload.spec as Record<string, unknown>),
-    ...(workload.initialPreamble !== undefined
-      ? { initialPreamble: workload.initialPreamble }
-      : {}),
-  });
+  // Early v1 pi Jobs predate PiSpec and persisted their turn inputs directly
+  // on the workload envelope. They are never authoritative Deployments.
+  const driverSpec = nested
+    ? {
+        ...nested,
+        ...(workload.initialPreamble !== undefined
+          ? { initialPreamble: workload.initialPreamble }
+          : {}),
+      }
+    : {
+        ...(typeof workload.systemPrompt === 'string' &&
+        workload.systemPrompt.length > 0
+          ? { initialPreamble: [workload.systemPrompt] }
+          : {}),
+        recipe: {
+          model: { type: 'host', id: 'active' },
+          runtime: {
+            ...(workload.maxIterations !== undefined
+              ? { maxIterations: workload.maxIterations }
+              : {}),
+            toolExecution: 'parallel',
+          },
+        },
+        initialMessages: workload.messages,
+        hostContext: {
+          ...(typeof workload.canvasId === 'string' &&
+          workload.canvasId.length > 0
+            ? { canvasId: workload.canvasId }
+            : {}),
+          ...(workload.origin &&
+          typeof workload.origin === 'object' &&
+          !Array.isArray(workload.origin)
+            ? { origin: workload.origin }
+            : {}),
+          ...(typeof workload.scope === 'string'
+            ? { legacyScope: workload.scope }
+            : {}),
+        },
+      };
+  const parsedDriverSpec = piSpecSchema.safeParse(driverSpec);
   if (!parsedDriverSpec.success) {
     return invalid(filePath, `thread '${threadId}' has invalid pi spec`);
   }

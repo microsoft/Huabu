@@ -152,4 +152,48 @@ describe('migrateLegacyAgenetesThreads', () => {
     expect(readFileSync(invalidPath, 'utf-8')).toBe(before);
     expect(existsSync(`${invalidPath}.agenetes-v1.bak`)).toBe(false);
   });
+
+  it('migrates the legacy flattened pi Job shape', () => {
+    const filePath = writeLegacy({
+      'legacy-pi': {
+        spec: {
+          kind: 'internal',
+          workloadType: 'Job',
+          namespace: {
+            name: 'canvas-1',
+            storage: { root: join(tmp, 'Canvas', '.history') },
+          },
+          threadId: 'legacy-pi',
+          systemPrompt: 'Operate safely.',
+          scope: 'operate',
+          canvasId: 'canvas-1',
+          messages: [{ role: 'user', content: 'Inspect the selected node.' }],
+          maxIterations: 20,
+        },
+        state: {},
+      },
+    });
+
+    expect(migrateAgenetesThreadFile(filePath)).toBe(1);
+
+    const store = new FileThreadStore();
+    const migrated = store.get(
+      {
+        name: 'canvas-1',
+        storage: { root: join(tmp, 'Canvas', '.history') },
+      },
+      'legacy-pi',
+    );
+    expect(migrated?.spec.spec).toEqual({
+      initialPreamble: ['Operate safely.'],
+      recipe: {
+        model: { type: 'host', id: 'active' },
+        runtime: { maxIterations: 20, toolExecution: 'parallel' },
+      },
+      initialMessages: [
+        { role: 'user', content: 'Inspect the selected node.' },
+      ],
+      hostContext: { canvasId: 'canvas-1', legacyScope: 'operate' },
+    });
+  });
 });
