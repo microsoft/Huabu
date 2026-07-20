@@ -64,6 +64,8 @@ export const SketchNode = memo(
       (s) => s.requestSketchRecognition,
     );
     const updateNodeData = useCanvasStore((s) => s.updateNodeData);
+    const beginNodeDataGesture = useCanvasStore((s) => s.beginNodeDataGesture);
+    const endNodeDataGesture = useCanvasStore((s) => s.endNodeDataGesture);
     const erasedStrokeIds = useGesturePreviewStore(
       (s) => s.sketchErasePreview[id],
     );
@@ -108,6 +110,8 @@ export const SketchNode = memo(
             strokes: strokes.map((s) => ({ ...s, size })),
           })
         }
+        onSizeDragStart={beginNodeDataGesture}
+        onSizeDragEnd={endNodeDataGesture}
       />
     );
 

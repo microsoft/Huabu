@@ -108,6 +108,20 @@ const AUTOSAVE_DEBOUNCE_MS = 1000;
 const PREPROCESS_DEBOUNCE_MS = 1000;
 const NODE_CONTENT_DEBOUNCE_MS = 500;
 
+/**
+ * Arm a single undo snapshot for a gesture: snapshot the current state and
+ * mark it as the gesture's snapshot so subsequent same-gesture writes fold
+ * into it rather than each pushing their own entry. Shared by `beginGesture`
+ * (caller-snapshot geometry gestures) and `beginNodeDataGesture`
+ * (self-snapshotting data-edit bursts like the stroke-size slider): the two
+ * differ only in WHEN they arm and how they release, not in the arming
+ * itself — so that stays a single source of truth here.
+ */
+function armGestureSnapshot(nodes: Node[], edges: Edge[]): void {
+  const pushed = canvasHistoryManager.takeSnapshot(nodes, edges);
+  canvasHistoryManager.markGestureSnapshot(pushed);
+}
+
 // ─── Viewport localStorage ────────────────────────────────────────────────
 //
 // Pan + zoom is local UI state, not canvas data: persisting it server-side
@@ -594,6 +608,20 @@ type RFState = {
    * Use `onNodeDragStart` / `onNodeResizeStart` instead of calling directly.
    */
   beginGesture: (commandType: CanvasCommandType) => void;
+
+  /**
+   * Bracket a burst of live `updateNodeData` edits (e.g. dragging the
+   * stroke-size slider, whose `onChange` fires every tick) into a SINGLE
+   * undo entry. `beginNodeDataGesture` snapshots the pre-edit state once
+   * and arms the gesture flag; the per-tick `MERGE_NODE_DATA` writes then
+   * fold into it instead of each self-snapshotting. `endNodeDataGesture`
+   * releases the flag on pointer-up / cancel. Unlike `beginGesture` this
+   * works for `snapshot: 'yes'` commands (which self-snapshot), so it is
+   * the right bracket for data edits rather than geometry gestures.
+   */
+  beginNodeDataGesture: () => void;
+  /** Release the {@link beginNodeDataGesture} bracket. */
+  endNodeDataGesture: () => void;
 
   /** Align selected nodes along an axis. */
   alignSelectedNodes: (direction: AlignDirection) => void;
@@ -2886,11 +2914,25 @@ const useCanvasStore = create<RFState>()(
     },
 
     beginGesture: (commandType) => {
+      // Caller-snapshot gestures (drag / resize) arm here; the closing
+      // caller-snapshot command consumes the flag inside `executeCommands`.
       if (COMMAND_META[commandType].snapshot === 'caller') {
         const { nodes, edges } = get();
-        const pushed = canvasHistoryManager.takeSnapshot(nodes, edges);
-        canvasHistoryManager.markGestureSnapshot(pushed);
+        armGestureSnapshot(nodes, edges);
       }
+    },
+
+    beginNodeDataGesture: () => {
+      // Bracket a burst of live `updateNodeData` ticks into ONE undo entry.
+      // `MERGE_NODE_DATA` self-snapshots ('yes') and so never consumes the
+      // flag, hence the explicit `endNodeDataGesture` counterpart below.
+      const { nodes, edges } = get();
+      armGestureSnapshot(nodes, edges);
+    },
+
+    endNodeDataGesture: () => {
+      // Release the flag so the next unrelated edit snapshots normally.
+      canvasHistoryManager.consumeGestureSnapshot();
     },
 
     alignSelectedNodes: (direction) => {

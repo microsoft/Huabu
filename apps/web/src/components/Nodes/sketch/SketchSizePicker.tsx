@@ -19,6 +19,10 @@ interface SketchSizePickerProps {
   max: number;
   label: string;
   onChange: (value: number) => void;
+  /** Fired once when the slider drag / key interaction begins. */
+  onDragStart?: () => void;
+  /** Fired once when it ends (pointer up / cancel / blur / unmount). */
+  onDragEnd?: () => void;
   touch?: boolean;
   selected?: boolean;
   onSelect?: () => void;
@@ -33,6 +37,8 @@ export function SketchSizePicker({
   max,
   label,
   onChange,
+  onDragStart,
+  onDragEnd,
   touch = false,
   selected,
   onSelect,
@@ -111,6 +117,8 @@ export function SketchSizePicker({
                   label={label}
                   size={touch ? 'md' : 'sm'}
                   onChange={onChange}
+                  onDragStart={onDragStart}
+                  onDragEnd={onDragEnd}
                 />
               </div>
             </>,

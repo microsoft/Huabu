@@ -36,6 +36,7 @@
  * creating a new sketch node.
  */
 
+import { canvasHistoryManager } from '@/store/canvasHistoryManager';
 import useCanvasStore from '@/store/canvasStore';
 
 import type { CanvasSketchNodeData } from '../types';
@@ -523,4 +524,36 @@ export function buildMoveStrokesCommands(
       ],
     },
   ];
+}
+
+/**
+ * Execute a batch of stroke-mutation commands (move / erase) as **one undo
+ * entry**, applying the shared snapshot-folding policy in a single place so
+ * every caller (stroke move, stroke delete, mixed gestures) stays
+ * consistent.
+ *
+ * - `foldIntoOpenGesture: true` — the caller has ALREADY opened an undo
+ *   gesture (e.g. a node-drag / node-delete that took its own snapshot) and
+ *   wants this batch to fold into that SAME entry. We re-arm the gesture
+ *   snapshot flag so `executeCommands` neither pushes a second snapshot nor
+ *   warns about a `snapshot:'caller'` command lacking a `beginGesture`.
+ * - `foldIntoOpenGesture: false` (default) — this batch owns its own
+ *   single-entry gesture; we open one via `beginGesture('SET_NODE_GEOMETRY')`
+ *   when the batch contains a caller-snapshot geometry command (a pure
+ *   `DELETE_NODES`-only batch needs none — the command self-snapshots).
+ *
+ * No-op for an empty batch.
+ */
+export function commitStrokeCommands(
+  commands: CanvasCommand[],
+  { foldIntoOpenGesture = false }: { foldIntoOpenGesture?: boolean } = {},
+): void {
+  if (commands.length === 0) return;
+  const store = useCanvasStore.getState();
+  if (foldIntoOpenGesture) {
+    canvasHistoryManager.markGestureSnapshot();
+  } else if (commands.some((c) => c.type === 'SET_NODE_GEOMETRY')) {
+    store.beginGesture('SET_NODE_GEOMETRY');
+  }
+  store.executeCommands(commands, 'ui');
 }

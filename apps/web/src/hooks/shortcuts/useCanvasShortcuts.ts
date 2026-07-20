@@ -15,6 +15,7 @@ import {
 } from '../../handler/canvasCommand/nodeInputBuilders';
 import { isSnapSessionActive } from '../../handler/snap/snapSession';
 import useCanvasStore from '../../store/canvasStore';
+import { useGesturePreviewStore } from '../../store/gesturePreviewStore';
 import { useIntentStore } from '../../store/intentStore';
 import { parseSedimentClipboard } from '../../utils/io/clipboard';
 import { looksLikeUrl } from '../../utils/io/media';
@@ -227,7 +228,16 @@ export function useCanvasShortcuts(
       if ((key === 'Delete' || key === 'Backspace') && !editable) {
         e.preventDefault();
         const { nodes: cur, edges: curEdges } = useCanvasStore.getState();
-        const selectedNodeIds = cur.filter((n) => n.selected).map((n) => n.id);
+        // When a stroke-level sketch selection is active, StrokeSelectionToolbar
+        // owns node + stroke deletion and folds both into one undo entry;
+        // skip node deletion here so the same keypress doesn't push a second
+        // snapshot. Edges (never part of a stroke lasso) are still handled.
+        const hasStrokeSelection =
+          Object.keys(useGesturePreviewStore.getState().sketchStrokeSelection)
+            .length > 0;
+        const selectedNodeIds = hasStrokeSelection
+          ? []
+          : cur.filter((n) => n.selected).map((n) => n.id);
         const selectedEdgeIds = curEdges
           .filter((edge) => edge.selected)
           .map((edge) => edge.id);

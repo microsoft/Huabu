@@ -45,20 +45,70 @@ export interface SketchStrokeHit {
  * so we need the resolved absolute position for the bbox to line up
  * with the pointer's flow-space hit point.
  */
+type SketchStoreNode = ReturnType<
+  typeof useCanvasStore.getState
+>['nodes'][number];
+
+/**
+ * Resolve a sketch node's flow-space mapping — the resize scale
+ * (`current size / initialSize`) plus its absolute origin (`x0`, `y0`) and
+ * current size (`w`, `h`). Shared by every sketch hit-test / bounds helper
+ * so the coordinate math lives in exactly one place.
+ */
+function sketchFlowTransform(
+  node: SketchStoreNode,
+  data: CanvasSketchNodeData,
+  absPos: { x: number; y: number },
+): {
+  scaleX: number;
+  scaleY: number;
+  x0: number;
+  y0: number;
+  w: number;
+  h: number;
+} {
+  const baseW = data.initialSize?.width || 1;
+  const baseH = data.initialSize?.height || 1;
+  const w = node.measured?.width ?? node.width ?? baseW;
+  const h = node.measured?.height ?? node.height ?? baseH;
+  return {
+    scaleX: w / baseW,
+    scaleY: h / baseH,
+    x0: absPos.x,
+    y0: absPos.y,
+    w,
+    h,
+  };
+}
+
+/**
+ * Snapshot the canvas `nodes` plus an absolute-position resolver so a walk
+ * can map sketches nested inside frames (whose `node.position` is
+ * parent-relative) into absolute flow coordinates. Shared boilerplate for
+ * the three sketch walkers below.
+ */
+function getSketchAbsResolver(): {
+  nodes: SketchStoreNode[];
+  getAbs: ReturnType<typeof createAbsolutePositionGetter>;
+} {
+  const nodes = useCanvasStore.getState().nodes;
+  const byId = indexById(nodes as NestableNode[]);
+  return { nodes, getAbs: createAbsolutePositionGetter(byId) };
+}
+
 function nodeReject(
-  node: ReturnType<typeof useCanvasStore.getState>['nodes'][number],
+  node: SketchStoreNode,
   data: CanvasSketchNodeData,
   absPos: { x: number; y: number },
   flowX: number,
   flowY: number,
   r: number,
 ): { scaleX: number; scaleY: number; x0: number; y0: number } | null {
-  const baseW = data.initialSize?.width || 1;
-  const baseH = data.initialSize?.height || 1;
-  const w = node.measured?.width ?? node.width ?? baseW;
-  const h = node.measured?.height ?? node.height ?? baseH;
-  const x0 = absPos.x;
-  const y0 = absPos.y;
+  const { scaleX, scaleY, x0, y0, w, h } = sketchFlowTransform(
+    node,
+    data,
+    absPos,
+  );
   if (
     flowX < x0 - r ||
     flowX > x0 + w + r ||
@@ -67,7 +117,7 @@ function nodeReject(
   ) {
     return null;
   }
-  return { scaleX: w / baseW, scaleY: h / baseH, x0, y0 };
+  return { scaleX, scaleY, x0, y0 };
 }
 
 /**
@@ -102,12 +152,10 @@ function walkSketchHits(
   hitRadius: number,
   onHit: (nodeId: string, strokeId: string) => HitWalkAction,
 ): void {
-  const nodes = useCanvasStore.getState().nodes;
   // Resolve absolute positions once per walk so sketches nested inside
   // frames (whose `node.position` is parent-relative) still hit-test
   // against the pointer's absolute flow coordinates.
-  const byId = indexById(nodes as NestableNode[]);
-  const getAbs = createAbsolutePositionGetter(byId);
+  const { nodes, getAbs } = getSketchAbsResolver();
 
   for (const node of nodes) {
     if (node.type !== 'sketch') continue;
@@ -245,9 +293,7 @@ export function findSketchStrokesInPolygon(
   const out: Record<string, string[]> = {};
   if (flowPolygon.length < 3) return out;
 
-  const nodes = useCanvasStore.getState().nodes;
-  const byId = indexById(nodes as NestableNode[]);
-  const getAbs = createAbsolutePositionGetter(byId);
+  const { nodes, getAbs } = getSketchAbsResolver();
 
   for (const node of nodes) {
     if (node.type !== 'sketch') continue;
@@ -255,19 +301,14 @@ export function findSketchStrokesInPolygon(
     const strokes = data.strokes ?? [];
     if (strokes.length === 0) continue;
 
-    const baseW = data.initialSize?.width || 1;
-    const baseH = data.initialSize?.height || 1;
-    const w = node.measured?.width ?? node.width ?? baseW;
-    const h = node.measured?.height ?? node.height ?? baseH;
-    const scaleX = w / baseW;
-    const scaleY = h / baseH;
     const abs = getAbs(node.id) ?? node.position;
+    const { scaleX, scaleY, x0, y0 } = sketchFlowTransform(node, data, abs);
 
     const matched: string[] = [];
     for (const stroke of strokes) {
       for (const pt of stroke.points) {
-        const px = abs.x + pt[0] * scaleX;
-        const py = abs.y + pt[1] * scaleY;
+        const px = x0 + pt[0] * scaleX;
+        const py = y0 + pt[1] * scaleY;
         if (isPointInFlowPolygon(px, py, flowPolygon)) {
           matched.push(stroke.id);
           break;
@@ -291,9 +332,7 @@ export function getSketchStrokeSelectionBounds(
 ): { x: number; y: number; width: number; height: number } | null {
   if (Object.keys(selection).length === 0) return null;
 
-  const nodes = useCanvasStore.getState().nodes;
-  const byId = indexById(nodes as NestableNode[]);
-  const getAbs = createAbsolutePositionGetter(byId);
+  const { nodes, getAbs } = getSketchAbsResolver();
 
   let x1 = Infinity;
   let y1 = Infinity;
@@ -308,20 +347,15 @@ export function getSketchStrokeSelectionBounds(
 
     const data = node.data as CanvasSketchNodeData;
     const strokes = data.strokes ?? [];
-    const baseW = data.initialSize?.width || 1;
-    const baseH = data.initialSize?.height || 1;
-    const w = node.measured?.width ?? node.width ?? baseW;
-    const h = node.measured?.height ?? node.height ?? baseH;
-    const scaleX = w / baseW;
-    const scaleY = h / baseH;
     const abs = getAbs(node.id) ?? node.position;
+    const { scaleX, scaleY, x0, y0 } = sketchFlowTransform(node, data, abs);
 
     for (const stroke of strokes) {
       if (!wantedSet.has(stroke.id)) continue;
       const half = (stroke.size ?? 0) / 2;
       for (const pt of stroke.points) {
-        const px = abs.x + pt[0] * scaleX;
-        const py = abs.y + pt[1] * scaleY;
+        const px = x0 + pt[0] * scaleX;
+        const py = y0 + pt[1] * scaleY;
         x1 = Math.min(x1, px - half);
         y1 = Math.min(y1, py - half);
         x2 = Math.max(x2, px + half);

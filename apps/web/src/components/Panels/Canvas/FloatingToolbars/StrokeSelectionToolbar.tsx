@@ -9,7 +9,10 @@ import {
 } from '@/components/Common/FloatingToolbar';
 import { SketchControls } from '@/components/Nodes/sketch/SketchControls';
 import { getSketchStrokeSelectionBounds } from '@/components/Nodes/sketch/sketchHitTest';
-import { buildEraseCommands } from '@/components/Nodes/sketch/sketchMerge';
+import {
+  buildEraseCommands,
+  commitStrokeCommands,
+} from '@/components/Nodes/sketch/sketchMerge';
 import {
   DEFAULT_STROKE_COLOR,
   DEFAULT_STROKE_SIZE,
@@ -40,8 +43,9 @@ export const StrokeSelectionToolbar = () => {
   // Subscribe to `nodes` so the anchor + representative style track edits.
   const nodes = useCanvasStore((s) => s.nodes);
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
-  const executeCommands = useCanvasStore((s) => s.executeCommands);
-  const beginGesture = useCanvasStore((s) => s.beginGesture);
+  const deleteNodes = useCanvasStore((s) => s.deleteNodes);
+  const beginNodeDataGesture = useCanvasStore((s) => s.beginNodeDataGesture);
+  const endNodeDataGesture = useCanvasStore((s) => s.endNodeDataGesture);
   const selection = useGesturePreviewStore((s) => s.sketchStrokeSelection);
   const clearSelection = useGesturePreviewStore(
     (s) => s.clearSketchStrokeSelection,
@@ -96,20 +100,31 @@ export const StrokeSelectionToolbar = () => {
   );
 
   const handleDelete = useCallback(() => {
-    const commands: CanvasCommand[] = [];
+    const strokeCommands: CanvasCommand[] = [];
     for (const [nodeId, strokeIds] of Object.entries(selection)) {
       if (strokeIds.length === 0) continue;
-      commands.push(
+      strokeCommands.push(
         ...buildEraseCommands(nodeId as CanvasNodeId, new Set(strokeIds)),
       );
     }
+    // Whole nodes the same lasso also selected are removed TOGETHER with the
+    // strokes, as a single undo entry (mirrors the mixed stroke-move
+    // gesture). Sketch nodes are never whole-node selected, so these are the
+    // non-sketch members of a mixed selection.
+    const selectedNodeIds = useCanvasStore
+      .getState()
+      .nodes.filter((n) => n.selected)
+      .map((n) => n.id);
     clearSelection();
-    if (commands.length === 0) return;
-    if (commands.some((c) => c.type === 'SET_NODE_GEOMETRY')) {
-      beginGesture('SET_NODE_GEOMETRY');
+    if (selectedNodeIds.length > 0) {
+      // Node delete takes its own snapshot + records the intent trace; fold
+      // the stroke erase into that SAME undo entry.
+      deleteNodes(selectedNodeIds);
+      commitStrokeCommands(strokeCommands, { foldIntoOpenGesture: true });
+    } else {
+      commitStrokeCommands(strokeCommands);
     }
-    executeCommands(commands, 'ui');
-  }, [selection, clearSelection, beginGesture, executeCommands]);
+  }, [selection, clearSelection, deleteNodes]);
 
   // Keyboard delete: the delete button is touch-only, so desktop deletes
   // the stroke selection via Delete / Backspace. Coexists with React Flow's
@@ -152,6 +167,8 @@ export const StrokeSelectionToolbar = () => {
           touch={isNotMouse}
           onColorChange={(c) => patchSelected({ color: c })}
           onSizeChange={(s) => patchSelected({ size: s })}
+          onSizeDragStart={beginNodeDataGesture}
+          onSizeDragEnd={endNodeDataGesture}
         />
       )}
       {showStyle && showDelete && <FloatingToolbar.Divider />}

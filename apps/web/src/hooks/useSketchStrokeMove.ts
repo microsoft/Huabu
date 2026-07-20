@@ -1,13 +1,35 @@
 import { useCallback, useRef } from 'react';
 
-import { buildMoveStrokesCommands } from '@/components/Nodes/sketch/sketchMerge';
-import { canvasHistoryManager } from '@/store/canvasHistoryManager';
+import {
+  buildMoveStrokesCommands,
+  commitStrokeCommands,
+} from '@/components/Nodes/sketch/sketchMerge';
 import useCanvasStore from '@/store/canvasStore';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 
 import type { CanvasCommand, CanvasNodeId } from '@sediment/shared';
 import type { Node, NodeChange, ReactFlowInstance } from '@xyflow/react';
 import type { MutableRefObject } from 'react';
+
+/**
+ * The canvas store's drag lifecycle callbacks (`onNodeDragStart`,
+ * `onNodeDrag`, `onNodeDragStop`) are typed as DOM `MouseEvent` handlers but
+ * only read a handful of fields: the modifier keys (`altKey` gates
+ * duplicate-on-drag; the others feed snap / structured-drop) plus
+ * `clientX`/`clientY`. Forward the REAL values from the driving pointer
+ * event rather than hardcoding them, so this stays correct if the store
+ * starts reading another modifier.
+ */
+function asDragMouseEvent(event: PointerEvent): MouseEvent {
+  return {
+    altKey: event.altKey,
+    shiftKey: event.shiftKey,
+    metaKey: event.metaKey,
+    ctrlKey: event.ctrlKey,
+    clientX: event.clientX,
+    clientY: event.clientY,
+  } as unknown as MouseEvent;
+}
 
 /**
  * Stage 2 "move" gesture for a stroke-level selection (GoodNotes-style).
@@ -48,13 +70,6 @@ export function useSketchStrokeMove({
     /** Whether the store drag lifecycle has been opened for the nodes. */
     nodeDragStarted: boolean;
   } | null>(null);
-
-  // The store's drag callbacks are typed as DOM mouse handlers; synthesize
-  // the only fields they read (`altKey`, `clientX`/`clientY`).
-  const dragEvent = (extra?: {
-    clientX: number;
-    clientY: number;
-  }): MouseEvent => ({ altKey: false, ...extra }) as unknown as MouseEvent;
 
   const positionChanges = (
     startPositions: Map<string, { x: number; y: number }>,
@@ -130,7 +145,7 @@ export function useSketchStrokeMove({
           // Snapshots pre-drag positions + starts the snap session (one
           // undo entry for the whole move).
           store.onNodeDragStart(
-            dragEvent(),
+            asDragMouseEvent(event),
             drag.primaryNode as Node,
             drag.draggedNodes,
           );
@@ -141,7 +156,7 @@ export function useSketchStrokeMove({
         // native React Flow drag). Without this the child appears to float
         // out of its frame mid-drag even though it lands correctly.
         store.onNodeDrag(
-          dragEvent({ clientX: event.clientX, clientY: event.clientY }),
+          asDragMouseEvent(event),
           drag.primaryNode as Node,
           drag.draggedNodes,
         );
@@ -183,28 +198,21 @@ export function useSketchStrokeMove({
       // Mixed move: settle the live node positions, then close the node
       // drag lifecycle FIRST — its NODE_DRAG_STOP intent consumes the undo
       // snapshot taken by onNodeDragStart (reparent + geometry as one undo
-      // entry). Only then fold the stroke bake into that SAME entry by
-      // re-arming the gesture-snapshot flag, so executeCommands neither
-      // warns ("caller command without beginGesture") nor pushes a second
-      // snapshot.
+      // entry). Only then fold the stroke bake into that SAME entry, so
+      // executeCommands neither warns ("caller command without
+      // beginGesture") nor pushes a second snapshot.
       const dx = offset?.dx ?? 0;
       const dy = offset?.dy ?? 0;
       store.onNodesChange(positionChanges(drag.startPositions, dx, dy, false));
       store.onNodeDragStop(
-        dragEvent({ clientX: event.clientX, clientY: event.clientY }),
+        asDragMouseEvent(event),
         drag.primaryNode as Node,
         drag.draggedNodes,
       );
-      if (strokeCommands.length > 0) {
-        canvasHistoryManager.markGestureSnapshot();
-        store.executeCommands(strokeCommands, 'ui');
-      }
-    } else if (strokeCommands.length > 0) {
+      commitStrokeCommands(strokeCommands, { foldIntoOpenGesture: true });
+    } else {
       // Pure stroke move: own single-entry undo gesture.
-      if (strokeCommands.some((c) => c.type === 'SET_NODE_GEOMETRY')) {
-        store.beginGesture('SET_NODE_GEOMETRY');
-      }
-      store.executeCommands(strokeCommands, 'ui');
+      commitStrokeCommands(strokeCommands);
     }
 
     // Keep the retained polygon around the moved strokes.
@@ -228,7 +236,7 @@ export function useSketchStrokeMove({
       const store = useCanvasStore.getState();
       store.onNodesChange(positionChanges(drag.startPositions, 0, 0, false));
       store.onNodeDragStop(
-        dragEvent(),
+        asDragMouseEvent(event),
         drag.primaryNode as Node,
         drag.draggedNodes,
       );

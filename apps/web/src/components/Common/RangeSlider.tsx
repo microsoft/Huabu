@@ -1,3 +1,5 @@
+import { useEffect, useRef } from 'react';
+
 type RangeSliderSize = 'sm' | 'md';
 
 interface RangeSliderProps {
@@ -21,6 +23,17 @@ interface RangeSliderProps {
    */
   showValue?: boolean;
   onChange: (value: number) => void;
+  /**
+   * Fired once when a drag / keyboard interaction begins (before the first
+   * `onChange`). Lets a consumer open a single undo gesture that the
+   * per-tick `onChange` writes fold into. Paired with {@link onDragEnd}.
+   */
+  onDragStart?: () => void;
+  /**
+   * Fired once when the interaction ends (pointer up / cancel / blur, or on
+   * unmount as a safety net) so the consumer can close the undo gesture.
+   */
+  onDragEnd?: () => void;
 }
 
 // Shared track + thumb colors. Thumb dimensions live in SIZE_STYLES so the
@@ -79,8 +92,27 @@ export function RangeSlider({
   size = 'sm',
   showValue = true,
   onChange,
+  onDragStart,
+  onDragEnd,
 }: RangeSliderProps) {
   const styles = SIZE_STYLES[size];
+  // Bracket a drag / key interaction so start + end fire exactly once even
+  // though the browser emits several terminal events (pointerup +
+  // lostpointercapture + blur). A ref (not state) keeps this render-free.
+  const activeRef = useRef(false);
+  const begin = () => {
+    if (activeRef.current) return;
+    activeRef.current = true;
+    onDragStart?.();
+  };
+  const end = () => {
+    if (!activeRef.current) return;
+    activeRef.current = false;
+    onDragEnd?.();
+  };
+  // Safety net: if the slider unmounts mid-drag (e.g. its toolbar closes),
+  // still close the gesture so the armed undo bracket never leaks.
+  useEffect(() => end, []); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <>
       <input
@@ -91,7 +123,16 @@ export function RangeSlider({
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
         onClick={(e) => e.stopPropagation()}
-        onPointerDown={(e) => e.stopPropagation()}
+        onPointerDown={(e) => {
+          e.stopPropagation();
+          begin();
+        }}
+        onPointerUp={end}
+        onPointerCancel={end}
+        onLostPointerCapture={end}
+        onKeyDown={begin}
+        onKeyUp={end}
+        onBlur={end}
         title={`${label}: ${value}`}
         className={`${styles.input} cursor-pointer appearance-none bg-transparent ${SLIDER_TRACK_AND_THUMB}`}
         aria-label={label}

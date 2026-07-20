@@ -19,6 +19,14 @@ interface SketchControlsProps {
   onColorChange: (color: string) => void;
   /** Called with the new thickness (clamped to [min, max] by the slider). */
   onSizeChange: (size: number) => void;
+  /**
+   * Optional: fired once when the thickness slider drag begins / ends. Post-
+   * draw toolbars use this to bracket the per-tick `onSizeChange` writes into
+   * a single undo entry; the pre-draw settings panel (draft state, no undo)
+   * omits them.
+   */
+  onSizeDragStart?: () => void;
+  onSizeDragEnd?: () => void;
   touch?: boolean;
 }
 
@@ -39,6 +47,8 @@ export function SketchControls({
   size,
   onColorChange,
   onSizeChange,
+  onSizeDragStart,
+  onSizeDragEnd,
   touch = false,
 }: SketchControlsProps) {
   const { t } = useTranslation();
@@ -60,6 +70,8 @@ export function SketchControls({
         label={t('node.strokeThickness')}
         touch={touch}
         onChange={onSizeChange}
+        onDragStart={onSizeDragStart}
+        onDragEnd={onSizeDragEnd}
         open={openControl === 'size'}
         onOpenChange={(open) => setOpenControl(open ? 'size' : null)}
       />
