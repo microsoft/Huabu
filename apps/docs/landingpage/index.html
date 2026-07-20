@@ -328,6 +328,19 @@
         object-fit: cover;
         background: #000;
       }
+      .hero-video:fullscreen,
+      .hero-video:-webkit-full-screen {
+        object-fit: contain;
+      }
+      .hero-video::cue {
+        font: 500 1.7vw/1.05 'Inter', sans-serif;
+        color: #fff;
+        background: rgba(0, 0, 0, 0.55);
+      }
+      .hero-video:fullscreen::cue,
+      .hero-video:-webkit-full-screen::cue {
+        font: 500 3.4vh/1.05 'Inter', sans-serif;
+      }
       .video-chrome {
         position: relative;
         height: 38px;
@@ -2595,7 +2608,15 @@
           preload="metadata"
           playsinline
           aria-label="Huabu product demo video"
-        ></video>
+        >
+          <track
+            kind="subtitles"
+            src="./Huabu-Video.vtt"
+            srclang="en"
+            label="English"
+            default
+          />
+        </video>
       </div>
     </header>
 
