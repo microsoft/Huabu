@@ -364,8 +364,10 @@ export const Canvas: React.FC<CanvasProps> = ({
     (s) => Object.keys(s.sketchStrokeSelection).length > 0,
   );
   // True while a stroke-move drag is in progress — drives the wrapper's
-  // move cursor (the pointer is captured by the router during the drag, so
-  // the region element's own cursor no longer applies).
+  // grabbing cursor (the pointer is captured by the router during the drag,
+  // so the region element's own cursor no longer applies). Uses `grabbing`
+  // to match node drag and canvas pan, since all three are "move a grabbed
+  // object" gestures.
   const isStrokeMoving = useGesturePreviewStore(
     (s) => s.sketchStrokeMovePreview !== null,
   );
@@ -1004,7 +1006,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         pendingNodeType === 'audio' && 'canvas-pending-audio',
         pendingNodeType === 'question' && 'canvas-pending-question',
         tool === 'lasso' && !isStrokeMoving && 'cursor-crosshair',
-        isStrokeMoving && 'cursor-move',
+        isStrokeMoving && 'cursor-grabbing',
       )}
       onContextMenu={(event) => {
         const target = event.target as Element;
