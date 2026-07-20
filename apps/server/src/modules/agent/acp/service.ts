@@ -187,7 +187,7 @@ export async function* runAcpAgent(
   let agentletId: string;
   let cwd: string | undefined;
   let recipe: AcpBindingRecipe | null;
-  let env = buildReachbackEnv(threadId, canvasId);
+  const env = buildReachbackEnv(threadId, canvasId);
   if (profile) {
     agentletId = profile.agentletId;
     cwd = profile.workingDirPath;

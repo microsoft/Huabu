@@ -26,11 +26,7 @@ interface ThreadStoreFile {
 }
 
 export interface ThreadStore {
-  upsert(
-    namespace: Namespace,
-    threadId: string,
-    record: ThreadRecord,
-  ): void;
+  upsert(namespace: Namespace, threadId: string, record: ThreadRecord): void;
   get(namespace: Namespace, threadId: string): ThreadRecord | undefined;
   list(namespace: Namespace): ThreadRecord[];
   delete(namespace: Namespace, threadId: string): void;
@@ -48,11 +44,7 @@ export class InMemoryThreadStore implements ThreadStore {
     return scope;
   }
 
-  upsert(
-    namespace: Namespace,
-    threadId: string,
-    record: ThreadRecord,
-  ): void {
+  upsert(namespace: Namespace, threadId: string, record: ThreadRecord): void {
     this.#scope(namespace).set(threadId, record);
   }
 
@@ -156,11 +148,7 @@ export class FileThreadStore implements ThreadStore {
     return { schemaVersion: THREAD_STORE_SCHEMA_VERSION, records };
   }
 
-  upsert(
-    namespace: Namespace,
-    threadId: string,
-    record: ThreadRecord,
-  ): void {
+  upsert(namespace: Namespace, threadId: string, record: ThreadRecord): void {
     sanitizeId(threadId, 'threadId');
     const file = this.#readFile(namespace);
     file.records[threadId] = record;

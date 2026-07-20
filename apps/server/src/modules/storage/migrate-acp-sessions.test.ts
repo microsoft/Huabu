@@ -104,11 +104,7 @@ describe('migrateLegacyAcpSessions', () => {
     expect(v3Spec?.recipe?.command).toBe('claude-code-acp');
     expect(v3Spec?.agentletId).toBeUndefined();
     expect(
-      (
-        v3?.state.driverState as
-          | { sessionId?: string }
-          | undefined
-      )?.sessionId,
+      (v3?.state.driverState as { sessionId?: string } | undefined)?.sessionId,
     ).toBe('sess-abc');
     expect(v3?.state.metadata).toMatchObject({ currentModelId: 'sonnet' });
     // reachback env is never a durable spec field.

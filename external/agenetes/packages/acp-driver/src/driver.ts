@@ -61,9 +61,7 @@ export const acpDurableStateSchema = z.object({
 
 export function acpDriverFactory<
   TSubmission extends AgentSubmission = AgentSubmission,
->(
-  config: AcpDriverFactoryConfig = DEFAULT_RUNTIME_POLICY,
-): MountedAgentDriver {
+>(config: AcpDriverFactoryConfig = DEFAULT_RUNTIME_POLICY): MountedAgentDriver {
   return defineDriver({
     schemaVersion: 1,
     workloadTypes: ['Deployment'],

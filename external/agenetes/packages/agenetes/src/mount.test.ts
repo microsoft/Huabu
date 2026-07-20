@@ -1,8 +1,7 @@
+import { defineDriver } from '@agenetes/runtime';
 import { describe, expect, it } from 'vitest';
 
 import { mountAgenetes } from './mount.js';
-
-import { defineDriver } from '@agenetes/runtime';
 
 const emptySchema = {
   safeParse(input: unknown) {
@@ -21,7 +20,7 @@ const driver = defineDriver({
   create: () =>
     ({
       capabilities: {},
-      async *run() {
+      async run() {
         return undefined;
       },
       async control() {

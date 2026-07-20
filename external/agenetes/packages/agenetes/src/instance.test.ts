@@ -5,6 +5,7 @@
 // runtime surface get-or-creates / looks up / closes live handles; and the
 // I9.4 query surface reads durable records independently from handle liveness.
 
+import { defineDriver } from '@agenetes/runtime';
 import { describe, expect, it, vi } from 'vitest';
 
 import { InMemoryEventLogStore } from './event-log.js';
@@ -18,7 +19,6 @@ import type {
   AgentStateSnapshot,
   AgentTurn,
 } from '@agenetes/protocol';
-import { defineDriver } from '@agenetes/runtime';
 import type {
   AgentCreateContext,
   AgentHandle,

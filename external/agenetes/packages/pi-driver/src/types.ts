@@ -1,6 +1,5 @@
-import { z } from 'zod';
-
 import { agentSpecSchema } from '@agenetes/protocol';
+import { z } from 'zod';
 
 import type { Namespace, WorkloadType } from '@agenetes/protocol';
 import type { TypedWorkloadSpec } from '@agenetes/runtime';

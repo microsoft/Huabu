@@ -1,19 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { piDriverFactory } from './driver.js';
 import {
   lowerPiInputs,
   resolvePiInitialMessages,
   resolvePiSystemPrompt,
 } from './handle.js';
-import { piDriverFactory } from './driver.js';
 
 import type { PiDurableState, PiWorkloadSpec } from './types.js';
 import type { AgentTurn } from '@agenetes/protocol';
 import type { HistoryLoadDeniedError } from '@agenetes/runtime';
-import type {
-  AgentCreateContext,
-  MountedAgentDriver,
-} from '@agenetes/runtime';
+import type { AgentCreateContext, MountedAgentDriver } from '@agenetes/runtime';
 
 const spec: PiWorkloadSpec = {
   kind: 'internal',

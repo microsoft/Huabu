@@ -27,8 +27,7 @@ export interface AgentProfileSpec extends AgentSpec {
   readonly env?: Record<string, string>;
 }
 
-export type AgentProfileWorkloadSpec =
-  TypedWorkloadSpec<AgentProfileSpec>;
+export type AgentProfileWorkloadSpec = TypedWorkloadSpec<AgentProfileSpec>;
 
 interface AcpDelegateSpec extends AgentSpec {
   readonly binding: { readonly alias: string; readonly profileId: string };

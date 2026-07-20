@@ -5,6 +5,7 @@
 // `history({ withTail })` projects the uncovered suffix as an incomplete
 // turn, while `tail()` keeps serving the raw live events.
 
+import { defineDriver } from '@agenetes/runtime';
 import { describe, expect, it } from 'vitest';
 
 import { mountAgenetes } from './index.js';
@@ -17,7 +18,6 @@ import type {
   Namespace,
   WorkloadSpec,
 } from '@agenetes/protocol';
-import { defineDriver } from '@agenetes/runtime';
 import type { AgentHandle } from '@agenetes/runtime';
 
 interface Script {

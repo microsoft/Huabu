@@ -12,13 +12,13 @@ import path from 'node:path';
 
 import { acpSpecSchema } from '@agenetes/acp-driver';
 import { THREAD_STORE_SCHEMA_VERSION } from '@agenetes/agenetes';
+import { piSpecSchema } from '@agenetes/pi-driver';
 import {
   agentMetadataSchema,
   workloadSpecSchema,
   type AgentMetadata,
   type WorkloadSpec,
 } from '@agenetes/protocol';
-import { piSpecSchema } from '@agenetes/pi-driver';
 
 import { atomicWriteJson } from './io.js';
 

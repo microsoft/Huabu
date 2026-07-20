@@ -1,5 +1,7 @@
 import { AgenetesError } from './errors.js';
 
+import type { AgentHandle } from './handle.js';
+import type { AgentCreateContext } from './realization.js';
 import type {
   AgentSpec,
   AgentStateSnapshot,
@@ -8,8 +10,6 @@ import type {
   WorkloadSpec,
   WorkloadType,
 } from '@agenetes/protocol';
-import type { AgentHandle } from './handle.js';
-import type { AgentCreateContext } from './realization.js';
 
 /** Runtime-schema subset implemented by Zod schemas without coupling runtime to Zod. */
 export interface RuntimeSchema<T> {
@@ -69,10 +69,7 @@ export interface MountedAgentDriver {
   validateSpec(raw: unknown): unknown;
   validateState(raw: unknown): unknown;
   initialState(): unknown;
-  create(
-    workload: WorkloadSpec,
-    context: AgentCreateContext,
-  ): AgentHandle;
+  create(workload: WorkloadSpec, context: AgentCreateContext): AgentHandle;
 }
 
 export type DriverMap = Readonly<Record<string, MountedAgentDriver>>;

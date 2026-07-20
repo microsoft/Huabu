@@ -6,6 +6,7 @@
 // without `onState` wires nothing and its stream stays empty; `close` ends
 // every open stream.
 
+import { defineDriver } from '@agenetes/runtime';
 import { describe, expect, it } from 'vitest';
 
 import { mountAgenetes } from './index.js';
@@ -15,11 +16,7 @@ import type {
   AgentMetadata,
   AgentStateSnapshot,
 } from '@agenetes/protocol';
-import { defineDriver } from '@agenetes/runtime';
-import type {
-  AgentHandle,
-  TypedWorkloadSpec,
-} from '@agenetes/runtime';
+import type { AgentHandle, TypedWorkloadSpec } from '@agenetes/runtime';
 
 type StubSpec = TypedWorkloadSpec<AgentSpec>;
 interface StubDriverState {

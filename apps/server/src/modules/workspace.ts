@@ -38,8 +38,8 @@ import path from 'node:path';
 
 import { resetExternalNoteWatcher } from './canvas/external-watcher.js';
 import { refreshCanvasDirIndex } from './storage/canvas-dirs.js';
-import { migrateLegacyAgenetesThreads } from './storage/migrate-agenetes-threads.js';
 import { migrateLegacyAcpSessions } from './storage/migrate-acp-sessions.js';
+import { migrateLegacyAgenetesThreads } from './storage/migrate-agenetes-threads.js';
 import { migrateCanvasToSpace } from './storage/migrate-canvas-to-space.js';
 import { migrateLegacyChatThreads } from './storage/migrate-chat-threads.js';
 import { migrateLegacyChatTurns } from './storage/migrate-chat-turns.js';
