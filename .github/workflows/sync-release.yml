@@ -57,16 +57,6 @@ jobs:
           - macOS on Apple silicon (`.dmg`)
           - Windows on x64 (`.exe`)
 
-          ### Installation note
-
-          These builds are not yet signed with public code-signing certificates, so macOS or Windows may display a security warning.
-
-          On macOS, Control-click Huabu and choose **Open**. If macOS still blocks the app downloaded from this official Release page, run:
-
-          ```bash
-          xattr -dr com.apple.quarantine /Applications/Huabu.app
-          ```
-
           - [User Handbook](https://microsoft.github.io/Huabu/docs/)
           - [Responsible AI information](https://github.com/microsoft/Huabu/blob/main/RAI_README.md)
           - [Report an issue or share feedback](https://github.com/microsoft/Huabu/issues)
