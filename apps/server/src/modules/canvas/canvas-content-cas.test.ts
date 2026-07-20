@@ -241,3 +241,85 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
     }
   });
 });
+
+describe('PUT /nodes/:nodeId/content — tombstone drops late writes after delete', () => {
+  /** Overwrite topology for `canvasId` with exactly `nodes`. */
+  function writeStructure(canvasId: string, nodes: unknown[]): void {
+    getCanvasStore(canvasId).write({
+      canvasId,
+      title: null,
+      version: 1,
+      state: { nodes: nodes as never, edges: [] },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+  }
+
+  it('drops a late content PUT for a node deleted and gone from structure', async () => {
+    // Reproduces the "ghost sidecar" bug: a content PUT (or preprocessing
+    // write) still in flight when the node is deleted must not recreate the
+    // `nodes/<label>.md` the file watcher would resurface as an external note.
+    const app = await buildApp();
+    try {
+      const store = getCanvasStore('tomb-drop');
+      seedCanvas('tomb-drop', 'n1', 'Note'); // n1 present in structure
+      store.deleteNode('n1'); // tombstone n1 (no sidecar yet)
+      writeStructure('tomb-drop', []); // autosave removed n1 from topology
+
+      const res = await putContent(app, 'tomb-drop', 'n1', {
+        nodeType: 'note',
+        content: 'ghost body',
+      });
+      // Benign response so the client (which already removed the node) sees
+      // no error toast…
+      expect(res.statusCode).toBe(200);
+      // …and no sidecar was resurrected on disk.
+      expect(store.readNode('n1')).toBeNull();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('allows the write again once the node is restored to structure (undo)', async () => {
+    const app = await buildApp();
+    try {
+      const store = getCanvasStore('tomb-undo');
+      seedCanvas('tomb-undo', 'n1', 'Note');
+      store.deleteNode('n1');
+      writeStructure('tomb-undo', []); // gone
+      // Undo restores the node into topology → clears the tombstone.
+      seedCanvas('tomb-undo', 'n1', 'Note');
+
+      const res = await putContent(app, 'tomb-undo', 'n1', {
+        nodeType: 'note',
+        content: 'restored body',
+      });
+      expect(res.statusCode).toBe(200);
+      expect(store.readNode('n1')?.content).toBe('restored body');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('does not suppress while the node is still listed in structure', async () => {
+    // The presence escape hatch: a tombstone alone must not block a write
+    // while topology still lists the node (the delete-before-autosave window
+    // and the undo path), otherwise a restored node could be stranded with no
+    // sidecar.
+    const app = await buildApp();
+    try {
+      const store = getCanvasStore('tomb-present');
+      seedCanvas('tomb-present', 'n1', 'Note');
+      store.deleteNode('n1'); // tombstone set, but n1 still in structure
+
+      const res = await putContent(app, 'tomb-present', 'n1', {
+        nodeType: 'note',
+        content: 'still-alive body',
+      });
+      expect(res.statusCode).toBe(200);
+      expect(store.readNode('n1')?.content).toBe('still-alive body');
+    } finally {
+      await app.close();
+    }
+  });
+});

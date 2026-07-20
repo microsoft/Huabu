@@ -332,6 +332,17 @@ function addSidecarToIndex(
   idx.add({ id, filename });
 }
 
+/**
+ * How long a deleted node's tombstone keeps suppressing late sidecar
+ * writes for that id (see {@link CanvasStore.isNodeWriteSuppressed}). Only
+ * needs to outlast the slowest in-flight writer that could land after a
+ * DELETE — a preprocessing run (PDF/office extraction + LLM) or an
+ * already-sent content PUT. Five minutes is comfortably beyond both; the
+ * value is a memory-bounding GC horizon only, not a correctness knob (the
+ * structural-presence escape hatch handles undo/redo regardless of TTL).
+ */
+const NODE_TOMBSTONE_TTL_MS = 5 * 60_000;
+
 export class CanvasStore {
   readonly canvasId: string;
   private nodes: NameIndex<NodeFileEntry> | null = null;
@@ -343,6 +354,18 @@ export class CanvasStore {
    * instead of silently picking one file.
    */
   private nodeDuplicateIds = new Set<string>();
+
+  /**
+   * Recently-deleted node ids → tombstone expiry (ms epoch). Set by
+   * {@link deleteNode}; consulted by {@link isNodeWriteSuppressed} so a
+   * late in-flight sidecar write (an already-sent content PUT or a slow
+   * preprocessing run that finishes after the DELETE) cannot resurrect a
+   * `nodes/<label>.md` for a node that is gone — which the external note
+   * watcher would otherwise surface as a "ghost" note on the canvas.
+   * Cleared eagerly when the same id reappears in a structural
+   * {@link write} (undo/redo) and swept lazily once expired.
+   */
+  private nodeTombstones = new Map<string, number>();
 
   constructor(canvasId: string) {
     this.canvasId = sanitizeId(canvasId, 'canvasId');
@@ -394,6 +417,16 @@ export class CanvasStore {
       );
     }
     atomicWriteJson(canvasJsonPath(this.canvasId), canvas);
+    // A structural write that (re)lists a node id proves the node is alive,
+    // so any tombstone for it must be lifted: this is the undo/redo path
+    // where the node comes back and its content PUT / preprocessing writes
+    // must be allowed through again. Cheap no-op when nothing is tombstoned.
+    if (this.nodeTombstones.size > 0) {
+      for (const n of canvas.state.nodes) {
+        const id = (n as { id?: unknown } | null)?.id;
+        if (typeof id === 'string') this.nodeTombstones.delete(id);
+      }
+    }
   }
 
   readVersion(): number | null {
@@ -924,6 +957,13 @@ export class CanvasStore {
    * `.md` stays on disk as a permanent orphan.
    */
   deleteNode(nodeId: string): 'deleted' | 'absent' {
+    // Tombstone the id up front (before any early return or throw) so a late
+    // in-flight write cannot resurrect the sidecar regardless of which delete
+    // branch we take. Sweep expired entries here so the map stays bounded on
+    // a long create/delete session even for ids never written again.
+    this.sweepExpiredTombstones();
+    this.nodeTombstones.set(nodeId, Date.now() + NODE_TOMBSTONE_TTL_MS);
+
     const idx = this.nodeIndex();
     const filename = idx.get(nodeId)?.filename ?? this.nodeFilenameOf(nodeId);
     const filePath = nodeFilePath(this.canvasId, filename);
@@ -942,6 +982,54 @@ export class CanvasStore {
     }
     idx.remove(nodeId);
     return 'deleted';
+  }
+
+  /**
+   * Whether a `.md` sidecar write for `nodeId` should be dropped because the
+   * node was just deleted and has not come back — the tombstone guard that
+   * stops a late in-flight writer (an already-sent content PUT, or a slow
+   * preprocessing run that finishes after the DELETE) from recreating a
+   * ghost sidecar the external note watcher would surface on the canvas.
+   *
+   * Suppress only when the id is tombstoned, unexpired, AND absent from the
+   * live structural state. The structural-presence escape hatch keeps
+   * undo/redo safe: once the node is restored into `space.json`, its own
+   * writes are allowed through again (and the stale tombstone is cleared
+   * eagerly here). Brand-new nodes are never tombstoned, so a first write
+   * racing its structural PUT is never suppressed.
+   *
+   * Called from the single write funnel {@link applyNodeUpdate}. The
+   * `read()` cost is paid only for the rare write that targets a
+   * recently-deleted id (the common case short-circuits on an empty map).
+   */
+  isNodeWriteSuppressed(nodeId: string): boolean {
+    const expiresAt = this.nodeTombstones.get(nodeId);
+    if (expiresAt === undefined) return false;
+    if (Date.now() >= expiresAt) {
+      this.nodeTombstones.delete(nodeId);
+      return false;
+    }
+    if (this.isNodeInCurrentState(nodeId)) {
+      this.nodeTombstones.delete(nodeId);
+      return false;
+    }
+    return true;
+  }
+
+  private isNodeInCurrentState(nodeId: string): boolean {
+    const canvas = this.read();
+    if (!canvas) return false;
+    return canvas.state.nodes.some(
+      (n) => (n as { id?: unknown } | null)?.id === nodeId,
+    );
+  }
+
+  private sweepExpiredTombstones(): void {
+    if (this.nodeTombstones.size === 0) return;
+    const now = Date.now();
+    for (const [id, expiresAt] of this.nodeTombstones) {
+      if (now >= expiresAt) this.nodeTombstones.delete(id);
+    }
   }
 
   listNodes(): NodeContentSummary[] {

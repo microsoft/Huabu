@@ -22,6 +22,7 @@ import type {
 /** A minimal in-memory stand-in for the fields `updateNode` touches. */
 function fakeStore(canvasId = 'c1') {
   let record: NodeContent | null = null;
+  let suppressed = false;
   let writeImpl: (content: NodeContent) => RenameResult = (content) => ({
     ok: true,
     filename: `${content.label ?? 'Untitled'}.md`,
@@ -31,6 +32,7 @@ function fakeStore(canvasId = 'c1') {
   const store = {
     canvasId,
     readNode: () => record,
+    isNodeWriteSuppressed: () => suppressed,
     writeNode: (_id: string, content: NodeContent) => {
       const result = writeImpl(content);
       if (result.ok) record = content;
@@ -43,6 +45,9 @@ function fakeStore(canvasId = 'c1') {
     get: () => record,
     seed: (r: NodeContent | null) => {
       record = r;
+    },
+    setSuppressed: (v: boolean) => {
+      suppressed = v;
     },
     onWrite: (fn: (content: NodeContent) => RenameResult) => {
       writeImpl = fn;
@@ -120,6 +125,27 @@ describe('updateNode — serialized rev-CAS node write', () => {
     expect(out.status).toBe('rejected');
     if (out.status !== 'rejected') throw new Error('unreachable');
     expect(out.result.reason).toBe('conflict');
+  });
+
+  it('drops a write for a tombstoned node without invoking apply', async () => {
+    const s = fakeStore();
+    s.seed(note('on-disk'));
+    s.setSuppressed(true);
+    let applyCalled = false;
+
+    const out = await updateNode(s.store, 'n1', {
+      apply: () => {
+        applyCalled = true;
+        return note('late-resurrection');
+      },
+    });
+
+    expect(out.status).toBe('skipped-deleted');
+    // `apply` must not run — callers derive their result from its side
+    // effects, so a suppressed write has to be a true no-op.
+    expect(applyCalled).toBe(false);
+    // Nothing was written; the on-disk record is untouched.
+    expect(s.get()?.content).toBe('on-disk');
   });
 
   it('serializes concurrent updates — the second sees the first write', async () => {

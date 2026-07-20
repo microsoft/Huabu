@@ -51,6 +51,10 @@ export async function withCanvasMutex<T>(
  *  - `rev-conflict`  → `expectRev` disagreed with the current on-disk rev;
  *    nothing was written (no clobber). `currentRev` is the on-disk baseline.
  *  - `noop`          → `apply` returned `null` (nothing to write).
+ *  - `skipped-deleted` → the node is tombstoned (deleted moments ago) and
+ *    absent from live structural state, so this write was a late in-flight
+ *    resurrection and was dropped. `apply` is NOT invoked. See
+ *    {@link CanvasStore.isNodeWriteSuppressed}.
  *  - `rejected`      → `writeNode` refused (label collision / duplicate
  *    sidecars / missing file); the raw store result is passed through so the
  *    caller maps it to its own error surface.
@@ -59,6 +63,7 @@ export type UpdateNodeOutcome =
   | { status: 'ok'; rev: string; label: string | null; filename: string }
   | { status: 'rev-conflict'; currentRev: string }
   | { status: 'noop' }
+  | { status: 'skipped-deleted' }
   | { status: 'rejected'; result: Extract<RenameResult, { ok: false }> };
 
 export interface UpdateNodeOptions {
@@ -121,6 +126,16 @@ export function applyNodeUpdate(
   nodeId: string,
   opts: UpdateNodeOptions,
 ): UpdateNodeOutcome {
+  // Tombstone guard: a node deleted moments ago must not be resurrected on
+  // disk by a late in-flight write (an already-sent content PUT or a slow
+  // preprocessing run that finished after the DELETE). Checked before the
+  // read/CAS/apply so no stale work is done. `apply` is intentionally NOT
+  // invoked, so callers that derive their result from `apply`'s side effects
+  // (e.g. the preprocessing persist stage) naturally treat this as a no-op.
+  if (store.isNodeWriteSuppressed(nodeId)) {
+    return { status: 'skipped-deleted' };
+  }
+
   const current = store.readNode(nodeId);
 
   if (opts.expectRev !== undefined) {

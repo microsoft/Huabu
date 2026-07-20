@@ -804,7 +804,16 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.code(500).send({ message: 'Failed to write node content' });
     }
     if (outcome.status !== 'ok') {
-      // Unreachable: `apply` always returns a record, so 'noop' can't occur.
+      // `skipped-deleted`: the node was deleted while this write was in
+      // flight (an editor content PUT or a slow preprocessing run that
+      // finished after the DELETE). Dropping the write prevents a
+      // resurrected "ghost" sidecar the file watcher would surface as an
+      // external note. Respond benignly — the client has already removed
+      // the node — so no error toast fires. ('noop' is otherwise
+      // unreachable: `apply` always returns a record.)
+      if (outcome.status === 'skipped-deleted') {
+        return reply.send({ nodeId, label: null, rev: '' });
+      }
       return reply.code(500).send({ message: 'Failed to write node content' });
     }
 
