@@ -596,7 +596,9 @@
     "sourceLabel_one": "个来源",
     "sourceLabel_other": "个来源",
     "selectedSourcesLabel_one": "已选择 {{count}} 个来源：{{sources}}",
-    "selectedSourcesLabel_other": "已选择 {{count}} 个来源：{{sources}}"
+    "selectedSourcesLabel_other": "已选择 {{count}} 个来源：{{sources}}",
+    "partialStrokeCount_one": "{{count}} 笔",
+    "partialStrokeCount_other": "{{count}} 笔"
   },
   "messages": {
     "generationInterrupted": "生成已中断",

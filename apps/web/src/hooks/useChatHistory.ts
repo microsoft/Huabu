@@ -126,6 +126,10 @@ export function useChatHistory(
               m.selectedNodeIds && m.selectedNodeIds.length > 0
                 ? { selectedNodeIds: m.selectedNodeIds }
                 : {};
+            const selectedStrokesField =
+              m.selectedStrokeIds && m.selectedStrokeIds.length > 0
+                ? { selectedStrokeIds: m.selectedStrokeIds }
+                : {};
             const invokedSkillsField =
               m.invokedSkills && m.invokedSkills.length > 0
                 ? { invokedSkills: m.invokedSkills }
@@ -136,6 +140,7 @@ export function useChatHistory(
               content: m.content || '',
               ...attachmentsField,
               ...selectedNodesField,
+              ...selectedStrokesField,
               ...invokedSkillsField,
             };
           },

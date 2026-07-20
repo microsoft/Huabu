@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next';
+
 import { Tooltip } from './Tooltip';
 import { NODE_ICON } from '../../config/nodeIcons';
 import useCanvasStore from '../../store/canvasStore';
@@ -17,6 +19,14 @@ interface NodeRefProps {
   snapshotLabel?: string;
   /** When true, the badge shows a blinking highlight (used during preview). */
   previewing?: boolean;
+  /**
+   * When set, this ref covers only a PARTIAL stroke selection of the
+   * sketch node (the count recorded at send time). Rendered as a small
+   * suffix (“N strokes”) so the chip reads as a subset, not the whole
+   * node. This is a historical count — not recomputed against the live
+   * node — so it stays meaningful even after strokes are edited.
+   */
+  strokeCount?: number;
 }
 
 const ATTACHMENT_TYPE_TO_NODE: Record<string, CanvasNodeType> = {
@@ -38,7 +48,9 @@ export function NodeRef({
   fallbackLabel,
   snapshotLabel,
   previewing,
+  strokeCount,
 }: NodeRefProps) {
+  const { t } = useTranslation();
   const nodes = useCanvasStore((s) => s.nodes);
   const selectNodes = useCanvasStore((s) => s.selectNodes);
   const rfInstance = useCanvasStore((s) => s.rfInstance);
@@ -120,6 +132,11 @@ export function NodeRef({
     >
       <Icon size={9} className="flex-shrink-0" />
       <span className="max-w-[100px] truncate">{label}</span>
+      {strokeCount != null && strokeCount > 0 && (
+        <span className="opacity-70">
+          · {t('chat.partialStrokeCount', { count: strokeCount })}
+        </span>
+      )}
     </div>
   );
 

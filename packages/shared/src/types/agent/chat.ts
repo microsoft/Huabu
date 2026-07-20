@@ -24,6 +24,17 @@ export interface ChatAttachment {
 // --- Chat History ---
 
 /**
+ * A per-sketch-node partial stroke selection recorded on a chat message
+ * — the strokes the user lassoed (a KEEP list of stable `SketchStroke.id`s)
+ * when they sent the turn. Lets the UI show “N strokes” and re-highlight
+ * just those strokes on hover. Absent = the whole node was in scope.
+ */
+export interface SelectedStrokeSubset {
+  nodeId: string;
+  strokeIds: string[];
+}
+
+/**
  * A single message item returned by the history endpoint.
  *
  * Assistant turns are an ordered `parts` array (`text` / `thinking` /
@@ -44,6 +55,13 @@ export type ChatHistoryItem =
       attachments?: ChatAttachment[];
       /** IDs of canvas nodes that were selected when this message was sent. */
       selectedNodeIds?: string[];
+      /**
+       * Partial stroke selections (per sketch node) that were sent as
+       * context — the lassoed stroke subset. Coexists with
+       * `selectedNodeIds` (the node also appears there). Absent when no
+       * partial stroke selection was active.
+       */
+      selectedStrokeIds?: SelectedStrokeSubset[];
       /**
        * Skill ids the user explicitly invoked via leading `/<id>`
        * tokens. Preserved across reload so the chat bubble can render

@@ -26,7 +26,11 @@ import { snapshotNodesToArtifacts } from '../tools/handlers/snapshot-node.js';
 
 import type { NodeNeighbourhoodContext } from '../../canvas/node-neighbourhood.js';
 import type { AgentNodePreview } from '../node-ref.js';
-import type { ChatAttachment, WireSelectionNode } from '@sediment/shared';
+import type {
+  ChatAttachment,
+  SelectedStrokeSubset,
+  WireSelectionNode,
+} from '@sediment/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
 /** A user-invoked skill resolved to its body for this turn. */
@@ -70,6 +74,14 @@ export interface ChatEnvelope {
       imageAttachments: ChatAttachment[];
       /** Composite PNG snapshots derived from selected sketch/image nodes. */
       snapshotAttachments: ChatAttachment[];
+      /**
+       * Per-sketch-node partial stroke selections (the lassoed subset).
+       * Persisted with the envelope so history reload can re-surface
+       * “N strokes” + hover-highlight. Absent / empty = no partial
+       * selection (older persisted turns naturally lack it — zero
+       * migration).
+       */
+      strokeSubsets?: SelectedStrokeSubset[];
     };
     /**
      * The node the request was anchored at (e.g. a question node), plus
@@ -451,6 +463,9 @@ export async function buildChatEnvelope(
         selectedIds: selectedNodes ? collectSelectedNodeIds(selectedNodes) : [],
         imageAttachments: dedupedImageAttachments,
         snapshotAttachments,
+        strokeSubsets: selectedNodes
+          ? collectSketchStrokeSubsets(selectedNodes)
+          : [],
       },
       ...(anchor ? { anchor } : {}),
     },

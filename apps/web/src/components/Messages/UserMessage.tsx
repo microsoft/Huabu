@@ -2,12 +2,18 @@ import { useTranslation } from 'react-i18next';
 
 import { NodeRef } from '../Common/NodeRef';
 
-import type { ChatAttachment } from '@sediment/shared';
+import type { ChatAttachment, SelectedStrokeSubset } from '@sediment/shared';
 
 interface UserMessageProps {
   content: string;
   attachments?: ChatAttachment[];
   selectedNodeIds?: string[];
+  /**
+   * Per-sketch-node partial stroke selections sent with this message.
+   * Used to annotate the matching node chip with its stroke count so it
+   * reads as a subset rather than the whole node.
+   */
+  selectedStrokeIds?: SelectedStrokeSubset[];
   /**
    * Skill ids the user explicitly invoked via leading `/<id>` tokens.
    * The tokens are stripped from `content` at submit time (see
@@ -22,9 +28,13 @@ export const UserMessage = ({
   content,
   attachments,
   selectedNodeIds,
+  selectedStrokeIds,
   invokedSkills,
 }: UserMessageProps) => {
   const { t } = useTranslation();
+  const strokeCountByNode = new Map(
+    (selectedStrokeIds ?? []).map((s) => [s.nodeId, s.strokeIds.length]),
+  );
   const hasRefs =
     (attachments && attachments.length > 0) ||
     (selectedNodeIds && selectedNodeIds.length > 0);
@@ -58,7 +68,11 @@ export const UserMessage = ({
               <NodeRef key={att.url ?? `att-${i}`} attachment={att} />
             ))}
             {selectedNodeIds?.map((id) => (
-              <NodeRef key={id} nodeId={id} />
+              <NodeRef
+                key={id}
+                nodeId={id}
+                strokeCount={strokeCountByNode.get(id)}
+              />
             ))}
           </div>
         </div>

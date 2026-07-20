@@ -712,16 +712,19 @@ export function useAgentStream(): UseAgentStreamReturn {
         .getState()
         .nodes.filter((n) => n.selected && n.id !== anchorQuestionNodeId)
         .map((n) => n.id);
-      const strokeSelectedIds = Object.entries(
+      const selectedStrokeIds = Object.entries(
         useGesturePreviewStore.getState().sketchStrokeSelection,
       )
         .filter(
           ([nodeId, strokeIds]) =>
             strokeIds.length > 0 && nodeId !== anchorQuestionNodeId,
         )
-        .map(([nodeId]) => nodeId);
+        .map(([nodeId, strokeIds]) => ({ nodeId, strokeIds }));
       const selectedNodeIds = Array.from(
-        new Set([...nodeSelectedIds, ...strokeSelectedIds]),
+        new Set([
+          ...nodeSelectedIds,
+          ...selectedStrokeIds.map((s) => s.nodeId),
+        ]),
       );
 
       const mergedAttachments = [...allPending];
@@ -747,6 +750,7 @@ export function useAgentStream(): UseAgentStreamReturn {
           content: prompt,
           attachments,
           ...(selectedNodeIds.length > 0 ? { selectedNodeIds } : {}),
+          ...(selectedStrokeIds.length > 0 ? { selectedStrokeIds } : {}),
           ...(invokedSkills && invokedSkills.length > 0
             ? { invokedSkills }
             : {}),

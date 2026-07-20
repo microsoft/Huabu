@@ -267,6 +267,7 @@ export function buildHistoryFromTurns(
         envelope.focus.selection.selectedIds,
       );
       const selectedNodeIds = envelope.focus.selection.selectedIds;
+      const selectedStrokeIds = envelope.focus.selection.strokeSubsets ?? [];
       const invokedSkills = envelope.skills.invokedIds;
       if (
         envelope.user.text.trim() ||
@@ -280,6 +281,7 @@ export function buildHistoryFromTurns(
             attachments: attachments as ChatAttachment[],
           }),
           ...(selectedNodeIds.length > 0 && { selectedNodeIds }),
+          ...(selectedStrokeIds.length > 0 && { selectedStrokeIds }),
           ...(invokedSkills.length > 0 && { invokedSkills }),
         });
       }

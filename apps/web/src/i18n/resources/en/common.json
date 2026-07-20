@@ -596,7 +596,9 @@
     "sourceLabel_one": "source",
     "sourceLabel_other": "sources",
     "selectedSourcesLabel_one": "{{count}} selected source: {{sources}}",
-    "selectedSourcesLabel_other": "{{count}} selected sources: {{sources}}"
+    "selectedSourcesLabel_other": "{{count}} selected sources: {{sources}}",
+    "partialStrokeCount_one": "{{count}} stroke",
+    "partialStrokeCount_other": "{{count}} strokes"
   },
   "messages": {
     "generationInterrupted": "Generation interrupted",
