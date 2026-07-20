@@ -1,23 +1,32 @@
 name: Release
 
-# Build the desktop app for macOS, Windows, and Linux on every
-# `v*.*.*` tag push, then publish the three installers as a GitHub
-# Release attached to that tag.
+# Build, sign, and notarize the macOS desktop app on every `v*.*.*`
+# tag push, and upload the dmg straight to a GitHub Release attached
+# to that tag.
 #
 # Trigger:
 #   git tag v0.1.0 && git push origin v0.1.0
 #
 # Or run manually from the Actions tab via `workflow_dispatch`,
 # supplying a tag like `v0.1.0-rc.1`. The build derives the app version
-# from that tag, and manual runs publish as a *draft* release so you can
+# from that tag, and manual runs stay a *draft* release so you can
 # sanity-check the correctly-versioned assets before making them public.
 #
-# Code-signing is intentionally disabled here. Both the macOS and
-# Windows installers ship unsigned — users get the usual
-# "unidentified developer" / SmartScreen prompt on first launch.
-# When signing certificates are ready, set CSC_LINK / CSC_KEY_PASSWORD
-# (mac) and WIN_CSC_LINK / WIN_CSC_KEY_PASSWORD (win) as repo secrets
-# and remove the `CSC_IDENTITY_AUTO_DISCOVERY=false` override below.
+# The dmg is uploaded straight to the release with `gh release upload`,
+# deliberately NOT via actions/upload-artifact: workflow artifacts count
+# against the org's shared Actions storage quota, which is exhausted and
+# blocked three release attempts with "Artifact storage quota has been
+# hit". Release assets live on the release itself and are exempt.
+#
+# Windows is intentionally not built here: the exe ships unsigned
+# (no WIN_CSC_LINK certificate yet), so releases only carry the signed
+# mac dmg for now. To reinstate it, add a windows-latest matrix job that
+# runs build:desktop:win and `gh release upload`s the exe the same way.
+#
+# macOS code-signing: Developer ID certificate from the CSC_LINK /
+# CSC_KEY_PASSWORD repo secrets; notarization via APPLE_ID /
+# APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID (electron-builder
+# `notarize: true`). Notarization adds ~5–15 min (Apple's queue).
 
 on:
   push:
@@ -33,24 +42,29 @@ permissions:
   contents: write # to create the release + upload assets
 
 jobs:
-  build:
-    name: Build (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-latest
-            script: build:desktop:mac
-          - os: windows-latest
-            script: build:desktop:win
-          # Linux is intentionally disabled — electron-builder's
-          # AppImage target rejects the scoped package name
-          # `@sediment/desktop` as executableName (slash is unsafe in
-          # file paths). Re-enable by adding `executableName: huabu`
-          # under the `linux:` section in apps/desktop/electron-builder.yml.
-    runs-on: ${{ matrix.os }}
+  release:
+    name: Build and release (macOS)
+    runs-on: macos-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v7
+
+      # Idempotent so re-runs of a partially failed workflow reuse the
+      # same release instead of erroring. For workflow_dispatch the tag
+      # does not exist yet; --target pins the eventual tag to the commit
+      # being built, and the tag is only created when the draft is
+      # published.
+      - name: Create draft release
+        run: |
+          if gh release view "$RELEASE_TAG" --json isDraft >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists — reusing it."
+          else
+            gh release create "$RELEASE_TAG" --draft --title "$RELEASE_TAG" \
+              --generate-notes --target "$GITHUB_SHA"
+          fi
 
       # Version is inferred from `packageManager` in package.json
       # (pnpm@10.28.2+sha512…) — passing it again here would conflict
@@ -68,8 +82,6 @@ jobs:
       # the temporary rewrite because they do not create a version commit.
       - name: Set app version from release tag
         shell: bash
-        env:
-          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
           node - <<'NODE'
           const fs = require('node:fs');
@@ -92,76 +104,38 @@ jobs:
 
       # The server and Gateway import @agentlet/protocol, whose dist/ output
       # does not exist on a fresh checkout. Build the retained Agentlet
-      # workspace packages before the desktop matrix consumes them.
+      # workspace packages before the desktop build consumes them.
       - name: Build agentlet workspace packages
         run: pnpm run build:agentlet
 
-      - name: Build desktop installer
-        run: pnpm run ${{ matrix.script }}
-        # No CSC_LINK / certificate configured, so:
-        #   • macOS: electron-builder finds no Developer ID identity in
-        #     the runner keychain and falls back to ad-hoc signing
-        #     (identity `-`). Required on Apple Silicon — without it
-        #     the .app won't even launch. Users still see the gentle
-        #     "unidentified developer" prompt and can right-click →
-        #     Open. Set CSC_LINK + CSC_KEY_PASSWORD secrets to ship
-        #     properly-signed builds.
-        #   • Windows: no CSC_LINK → electron-builder silently skips
-        #     signing; the .exe ships unsigned (SmartScreen prompts).
+      - name: Build desktop installer (signed + notarized)
+        run: pnpm run build:desktop:mac
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
       # electron-builder writes outside the repo (../huabu-electron-out/
       # per apps/desktop/electron-builder.yml, to dodge a Windows file-lock
-      # issue with VS Code). Copy the artefacts back into the workspace so
-      # actions/upload-artifact can pick them up reliably on all three OSes.
-      - name: Stage release assets
+      # issue with VS Code). --clobber keeps re-runs idempotent.
+      - name: Upload dmg to the release
         shell: bash
         run: |
-          mkdir -p ./release-assets
           shopt -s nullglob
-          for ext in dmg exe AppImage blockmap; do
-            for f in ../huabu-electron-out/*."$ext"; do
-              cp "$f" ./release-assets/
-            done
-          done
-          for f in ../huabu-electron-out/latest*.yml; do
-            cp "$f" ./release-assets/
-          done
-          echo "── staged assets ──"
-          ls -lh ./release-assets/
+          files=(../huabu-electron-out/*.dmg ../huabu-electron-out/*.blockmap)
+          if (( ${#files[@]} == 0 )); then
+            echo "No dmg found in ../huabu-electron-out" >&2
+            exit 1
+          fi
+          ls -lh "${files[@]}"
+          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber
 
-      - uses: actions/upload-artifact@v7
-        with:
-          name: huabu-${{ matrix.os }}
-          path: release-assets/
-          if-no-files-found: error
-          retention-days: 7
-
-  release:
-    name: Publish GitHub Release
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v8
-        with:
-          path: assets
-          # Flatten all three matrix uploads into one dir for the
-          # release-asset glob below.
-          merge-multiple: true
-
-      - name: List collected assets
-        run: ls -lh assets/
-
-      - uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          name: ${{ github.event.inputs.tag || github.ref_name }}
-          # Manual (workflow_dispatch) runs publish as drafts so you can
-          # vet the installers before flipping them public; tag-pushes
-          # publish immediately.
-          draft: ${{ github.event_name == 'workflow_dispatch' }}
-          generate_release_notes: true
-          files: |
-            assets/*.dmg
-            assets/*.exe
-            assets/*.blockmap
-          fail_on_unmatched_files: true
+      # Manual (workflow_dispatch) runs stay drafts so you can vet the
+      # installer before flipping it public; tag-pushes publish
+      # immediately. Publishing the draft is also what creates the git
+      # tag for workflow_dispatch releases (at the --target commit).
+      - name: Publish release (tag pushes only)
+        if: github.event_name == 'push'
+        run: gh release edit "$RELEASE_TAG" --draft=false
