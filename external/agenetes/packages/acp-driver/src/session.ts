@@ -36,6 +36,7 @@ import { ensureAgentForThread } from './spawn-orchestrator.js';
 
 import type { AcpBindingRecipe } from './binding-recipe.js';
 import type { AcpInitializeResult } from './client.js';
+import type { AcpDurableState } from './handle.js';
 import type { AcpSessionEntry } from './session-registry.js';
 import type {
   AgentMetadata,
@@ -114,7 +115,7 @@ export function setAcpProfileCachePort(port: AcpProfileCachePort | null): void {
 // (the instance persists it as the sole ThreadStore writer, then re-emits).
 const stateListeners = new Map<
   string,
-  (snapshot: AgentStateSnapshot) => void
+  (snapshot: AgentStateSnapshot<AcpDurableState>) => void
 >();
 
 function placementThreadKey(agentletId: string, threadId: string): string {
@@ -129,7 +130,7 @@ function placementThreadKey(agentletId: string, threadId: string): string {
 export function registerAcpStateListener(
   agentletId: string,
   threadId: string,
-  listener: (snapshot: AgentStateSnapshot) => void,
+  listener: (snapshot: AgentStateSnapshot<AcpDurableState>) => void,
 ): () => void {
   const key = placementThreadKey(agentletId, threadId);
   stateListeners.set(key, listener);
@@ -204,12 +205,12 @@ export interface EnsureAcpSessionOptions {
    * The instance's **down-feed** (I9.7): the durable `AgentStateSnapshot`
    * last persisted for this thread, threaded down from `driver.create`. The
    * session lifecycle resumes its low-level session from
-   * `priorState.sessionId` (via `session/load`) and rehydrates the entry's
+   * `priorState.driverState.sessionId` (via `session/load`) and rehydrates
    * observable metadata from `priorState.metadata` — replacing the old
    * on-disk `readAcpSessionRecord` read entirely. `undefined` for a fresh
    * thread (no durable record yet).
    */
-  priorState?: AgentStateSnapshot;
+  priorState?: AgentStateSnapshot<AcpDurableState>;
   logger: AcpSessionLogger;
 }
 
@@ -274,13 +275,17 @@ function snapshotEntryMeta(entry: AcpSessionEntry): AgentMetadata {
  * omitting it lets the next lifetime start fresh while still keeping any
  * seeded `metadata` warm.
  */
-export function snapshotEntryState(entry: AcpSessionEntry): AgentStateSnapshot {
+export function snapshotEntryState(
+  entry: AcpSessionEntry,
+): AgentStateSnapshot<AcpDurableState> {
   return {
-    ...(entry.persistedToDisk
-      ? { sessionId: entry.sessionId as SessionId }
-      : {}),
+    driverState: {
+      ...(entry.persistedToDisk
+        ? { sessionId: entry.sessionId as SessionId }
+        : {}),
+      initialPreambleDelivered: entry.initialPreambleDelivered,
+    },
     metadata: snapshotEntryMeta(entry),
-    initialPreambleDelivered: entry.initialPreambleDelivered,
   };
 }
 
@@ -446,7 +451,7 @@ async function ensureAcpSessionInner(
   // (`session/load`) and its `metadata` seeds the entry — no on-disk
   // `readAcpSessionRecord` read anymore.
   const priorState = opts.priorState;
-  const priorSessionId = priorState?.sessionId;
+  const priorSessionId = priorState?.driverState.sessionId;
 
   // Recipe resolution (recipe-first-via-L1, I9.6 / R1): use the L1-baked
   // recipe that rode the create-time spec verbatim. L1 owns keeping a
@@ -592,7 +597,8 @@ async function ensureAcpSessionInner(
     persistedToDisk: !!priorSessionId,
     // Delivery is independent from session creation: a command may create
     // and persist a session without consuming the pending preamble.
-    initialPreambleDelivered: priorState?.initialPreambleDelivered ?? false,
+    initialPreambleDelivered:
+      priorState?.driverState.initialPreambleDelivered ?? false,
     availableCommands: [],
     commandsUpdatedAt: 0,
     availableModes: [],

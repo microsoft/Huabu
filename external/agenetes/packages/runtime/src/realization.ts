@@ -10,16 +10,15 @@ export interface ThreadIdentity {
   readonly threadId: string;
 }
 
-/** Durable thread-table entry supplied to a driver at create time. */
-export interface AgentDurableRecord<TSpec = unknown> {
-  readonly spec: TSpec;
-  readonly state: AgentStateSnapshot;
+/** Same-thread durable input used only for recovery. */
+export interface AgentRecoveryInput<TDriverState = unknown> {
+  readonly state: AgentStateSnapshot<TDriverState>;
+  readonly turns: readonly ObservedAgentTurn[];
 }
 
-/** Driver-agnostic durable source material for recovery or forking. */
-export interface AgentDurableInput<TSpec = unknown> {
+/** Cross-thread durable input used only for fork realization. */
+export interface AgentForkInput {
   readonly source: ThreadIdentity;
-  readonly record: AgentDurableRecord<TSpec>;
   readonly turns: readonly ObservedAgentTurn[];
 }
 
@@ -53,24 +52,14 @@ export interface AgentRecoveryContext {
   ): Promise<HistoryLoadAuthorization>;
 }
 
-/** Create-time context separating durable source data from target spec. */
-export interface AgentCreateContext<TSpec = unknown> {
-  readonly durableInput?: AgentDurableInput<TSpec>;
+/**
+ * Create-time context. Recovery receives same-driver prior state; fork
+ * receives source identity and history only, never source spec or state.
+ */
+export interface AgentCreateContext<TDriverState = unknown> {
+  readonly recoveryInput?: AgentRecoveryInput<TDriverState>;
+  readonly forkInput?: AgentForkInput;
   readonly recovery: AgentRecoveryContext;
-}
-
-export type AgentRealizationMode = 'fresh' | 'recover' | 'fork';
-
-/** Classify realization by comparing source and target durable identity. */
-export function classifyAgentRealization(
-  target: ThreadIdentity,
-  durableInput?: AgentDurableInput,
-): AgentRealizationMode {
-  if (!durableInput) return 'fresh';
-  return durableInput.source.threadId === target.threadId &&
-    durableInput.source.namespace.name === target.namespace.name
-    ? 'recover'
-    : 'fork';
 }
 
 type HistoryLoadDenial = Extract<

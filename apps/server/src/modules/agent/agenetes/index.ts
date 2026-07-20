@@ -39,7 +39,4 @@ export {
   type AgenetesHandle,
   type AcpWorkloadSpec,
   type BuiltinWorkloadSpec,
-  type AgenetesWorkloadSpec,
-  type AcpCreateSpec,
 } from './drivers.js';
-export { buildForkTargetSpec } from './fork.js';

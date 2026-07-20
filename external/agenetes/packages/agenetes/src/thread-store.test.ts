@@ -1,56 +1,52 @@
-// M5.5/A2 acceptance — the durable FileThreadStore.
-//
-// FileThreadStore is the restart-surviving twin of InMemoryThreadStore: it
-// persists (namespace, threadId) -> ThreadRecord as
-// `<namespace.storage.root>/threads.json`, one file per namespace, in the
-// current `{ spec, state }` shape only (no legacy reader). These tests
-// exercise round-trip fidelity, tolerant reads (a corrupt file / bad
-// metadata never bricks the store), and per-namespace isolation.
-
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   FileThreadStore,
+  THREAD_STORE_SCHEMA_VERSION,
   type ThreadRecord,
-  type WorkloadSpecShape,
 } from './index.js';
 
 import type {
   AgentMetadata,
   AgentStateSnapshot,
   Namespace,
-  SessionId,
+  WorkloadSpec,
 } from '@agenetes/protocol';
 
-interface Spec extends WorkloadSpecShape {
-  readonly note?: string;
+interface DriverState {
+  readonly sessionId?: string;
 }
 
-let tmp: string;
+let scratch: string;
 
 beforeEach(() => {
-  tmp = mkdtempSync(path.join(tmpdir(), 'agenetes-threadstore-'));
+  scratch = mkdtempSync(path.join(process.cwd(), '.agenetes-threadstore-'));
 });
 
 afterEach(() => {
-  rmSync(tmp, { recursive: true, force: true });
+  rmSync(scratch, { recursive: true, force: true });
 });
 
 const ns = (name: string): Namespace => ({
   name,
-  storage: { root: path.join(tmp, name) },
+  storage: { root: path.join(scratch, name) },
 });
 
-const spec = (threadId: string, note?: string): Spec => ({
+const spec = (threadId: string, note?: string): WorkloadSpec => ({
   threadId,
   kind: 'internal',
   workloadType: 'Job',
   namespace: ns('canvas-1'),
-  ...(note ? { note } : {}),
+  spec: note ? { note } : {},
 });
 
 const meta: AgentMetadata = {
@@ -58,47 +54,76 @@ const meta: AgentMetadata = {
   metaUpdatedAt: 1704067200000,
 };
 
-/** Brand a raw string as a low-level driver session id for test data. */
-const sid = (s: string): SessionId => s as SessionId;
-
 const state = (
   sessionId?: string,
   metadata?: AgentMetadata,
-): AgentStateSnapshot => ({
-  ...(sessionId ? { sessionId: sid(sessionId) } : {}),
+): AgentStateSnapshot<DriverState> => ({
+  driverState: sessionId ? { sessionId } : {},
   ...(metadata ? { metadata } : {}),
 });
 
-describe('FileThreadStore (M5.5/A2 durable backing)', () => {
-  it('round-trips spec + state (sessionId, metadata)', () => {
+const record = (
+  threadId: string,
+  sessionId?: string,
+  metadata?: AgentMetadata,
+): ThreadRecord => ({
+  driverSchemaVersion: 1,
+  spec: spec(threadId),
+  state: state(sessionId, metadata),
+});
+
+const writeStore = (namespace: Namespace, value: unknown): void => {
+  mkdirSync(namespace.storage!.root, { recursive: true });
+  writeFileSync(
+    path.join(namespace.storage!.root, 'threads.json'),
+    JSON.stringify(value),
+  );
+};
+
+describe('FileThreadStore agenetes-v2 durable backing', () => {
+  it('round-trips the strict versioned record envelope', () => {
     const store = new FileThreadStore();
     const namespace = ns('canvas-1');
-    const record: ThreadRecord<Spec> = {
+    store.upsert(namespace, 't1', {
+      driverSchemaVersion: 3,
       spec: spec('t1', 'hello'),
       state: state('sess-abc', meta),
-    };
-    store.upsert(namespace, 't1', record);
+    });
 
-    // A fresh instance reads the same bytes from disk (restart-survival).
-    const reread = new FileThreadStore().get<Spec>(namespace, 't1');
-    expect(reread).toBeDefined();
-    expect(reread!.spec.note).toBe('hello');
-    expect(reread!.state.sessionId).toBe('sess-abc');
-    expect(reread!.state.metadata).toEqual(meta);
+    const reread = new FileThreadStore().get(namespace, 't1');
+    expect(reread).toEqual({
+      driverSchemaVersion: 3,
+      spec: expect.objectContaining({
+        threadId: 't1',
+        spec: { note: 'hello' },
+      }),
+      state: {
+        driverState: { sessionId: 'sess-abc' },
+        metadata: meta,
+      },
+    });
+    expect(
+      JSON.parse(
+        readFileSync(
+          path.join(namespace.storage!.root, 'threads.json'),
+          'utf8',
+        ),
+      ),
+    ).toMatchObject({ schemaVersion: THREAD_STORE_SCHEMA_VERSION });
   });
 
   it('upsert replaces the whole record; delete removes it', () => {
     const store = new FileThreadStore();
     const namespace = ns('canvas-1');
+    store.upsert(namespace, 't1', record('t1', 'first'));
     store.upsert(namespace, 't1', {
-      spec: spec('t1'),
-      state: state('first'),
+      ...record('t1', 'second'),
+      driverSchemaVersion: 2,
     });
-    store.upsert(namespace, 't1', {
-      spec: spec('t1'),
-      state: state('second'),
+    expect(store.get(namespace, 't1')).toMatchObject({
+      driverSchemaVersion: 2,
+      state: { driverState: { sessionId: 'second' } },
     });
-    expect(store.get(namespace, 't1')!.state.sessionId).toBe('second');
 
     store.delete(namespace, 't1');
     expect(store.get(namespace, 't1')).toBeUndefined();
@@ -108,69 +133,87 @@ describe('FileThreadStore (M5.5/A2 durable backing)', () => {
     const store = new FileThreadStore();
     const a = ns('canvas-a');
     const b = ns('canvas-b');
-    store.upsert(a, 't1', { spec: spec('t1'), state: state() });
-    store.upsert(b, 't2', { spec: spec('t2'), state: state() });
-    expect(store.list(a).map((r) => (r.spec as Spec).threadId)).toEqual(['t1']);
-    expect(store.list(b).map((r) => (r.spec as Spec).threadId)).toEqual(['t2']);
+    store.upsert(a, 't1', record('t1'));
+    store.upsert(b, 't2', record('t2'));
+    expect(store.list(a).map((item) => item.spec.threadId)).toEqual(['t1']);
+    expect(store.list(b).map((item) => item.spec.threadId)).toEqual(['t2']);
     expect(store.get(a, 't2')).toBeUndefined();
   });
 
-  it('returns empty for a missing / never-written namespace', () => {
+  it('returns empty for a missing namespace', () => {
     const store = new FileThreadStore();
     expect(store.list(ns('never'))).toEqual([]);
     expect(store.get(ns('never'), 'x')).toBeUndefined();
   });
 
-  it('tolerates a corrupt file (returns empty, never throws)', () => {
+  it('fails fast on corrupt JSON', () => {
     const namespace = ns('canvas-1');
     mkdirSync(namespace.storage!.root, { recursive: true });
     writeFileSync(
       path.join(namespace.storage!.root, 'threads.json'),
       '{ this is not json',
     );
-    const store = new FileThreadStore();
-    expect(store.list(namespace)).toEqual([]);
+    expect(() => new FileThreadStore().list(namespace)).toThrow(
+      /cannot read .*threads\.json/,
+    );
   });
 
-  it('drops a record with a malformed metadata snapshot but keeps spec', () => {
+  it('fails fast on non-v2 store schemas', () => {
     const namespace = ns('canvas-1');
-    mkdirSync(namespace.storage!.root, { recursive: true });
-    writeFileSync(
-      path.join(namespace.storage!.root, 'threads.json'),
-      JSON.stringify({
-        schemaVersion: 1,
-        records: {
-          t1: {
-            spec: spec('t1'),
-            // metaUpdatedAt must be a number — a string is rejected.
-            state: { sessionId: 's', metadata: { metaUpdatedAt: 'nope' } },
-          },
-        },
-      }),
+    writeStore(namespace, { schemaVersion: 1, records: {} });
+    expect(() => new FileThreadStore().list(namespace)).toThrow(
+      /unsupported thread store schema '1'/,
     );
-    const store = new FileThreadStore();
-    const rec = store.get<Spec>(namespace, 't1');
-    expect(rec).toBeDefined();
-    expect(rec!.state.sessionId).toBe('s');
-    expect(rec!.state.metadata).toBeUndefined();
   });
 
-  it('skips a record whose spec is not a persistable WorkloadSpec', () => {
-    const namespace = ns('canvas-1');
-    mkdirSync(namespace.storage!.root, { recursive: true });
-    writeFileSync(
-      path.join(namespace.storage!.root, 'threads.json'),
-      JSON.stringify({
-        schemaVersion: 1,
-        records: {
-          bad: { spec: { threadId: 't' }, state: {} },
-          good: { spec: spec('good'), state: {} },
-        },
+  it.each([
+    [
+      'missing driver schema version',
+      () => ({ spec: spec('t1'), state: state() }),
+      /invalid driver schema version/,
+    ],
+    [
+      'invalid workload envelope',
+      () => ({
+        driverSchemaVersion: 1,
+        spec: { threadId: 't1' },
+        state: state(),
       }),
-    );
-    const store = new FileThreadStore();
-    expect(store.list(namespace).map((r) => (r.spec as Spec).threadId)).toEqual(
-      ['good'],
+      /invalid workload spec/,
+    ],
+    [
+      'invalid state envelope',
+      () => ({
+        driverSchemaVersion: 1,
+        spec: spec('t1'),
+        state: { metadata: { metaUpdatedAt: 'nope' } },
+      }),
+      /invalid state envelope/,
+    ],
+  ])('fails fast on %s', (_name, createPersistedRecord, expected) => {
+    const namespace = ns('canvas-1');
+    writeStore(namespace, {
+      schemaVersion: THREAD_STORE_SCHEMA_VERSION,
+      records: { t1: createPersistedRecord() },
+    });
+    expect(() => new FileThreadStore().get(namespace, 't1')).toThrow(expected);
+  });
+
+  it('fails the whole read when any record is invalid', () => {
+    const namespace = ns('canvas-1');
+    writeStore(namespace, {
+      schemaVersion: THREAD_STORE_SCHEMA_VERSION,
+      records: {
+        good: record('good'),
+        bad: {
+          driverSchemaVersion: 1,
+          spec: spec('different-id'),
+          state: state(),
+        },
+      },
+    });
+    expect(() => new FileThreadStore().list(namespace)).toThrow(
+      /record key 'bad' does not match spec threadId 'different-id'/,
     );
   });
 });

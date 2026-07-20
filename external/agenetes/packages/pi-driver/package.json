@@ -24,7 +24,8 @@
     "@agenetes/protocol": "workspace:*",
     "@agenetes/runtime": "workspace:*",
     "@earendil-works/pi-agent-core": "^0.75.5",
-    "@earendil-works/pi-ai": "^0.75.5"
+    "@earendil-works/pi-ai": "^0.75.5",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "typescript": "^5.9.0",

@@ -1,15 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { piDriverFactory } from './driver.js';
 import {
   lowerPiInputs,
   resolvePiInitialMessages,
   resolvePiSystemPrompt,
 } from './handle.js';
 
-import type { PiWorkloadSpec } from './types.js';
+import type { PiDurableState, PiWorkloadSpec } from './types.js';
 import type { AgentTurn } from '@agenetes/protocol';
 import type { HistoryLoadDeniedError } from '@agenetes/runtime';
-import type { AgentCreateContext } from '@agenetes/runtime';
+import type { AgentCreateContext, MountedAgentDriver } from '@agenetes/runtime';
 
 const spec: PiWorkloadSpec = {
   kind: 'internal',
@@ -28,23 +29,56 @@ const foldedTurn: AgentTurn = {
 };
 
 function context(
-  authorizeHistoryLoad: AgentCreateContext<PiWorkloadSpec>['recovery']['authorizeHistoryLoad'],
+  authorizeHistoryLoad: AgentCreateContext<PiDurableState>['recovery']['authorizeHistoryLoad'],
   sourceThreadId = spec.threadId,
-): AgentCreateContext<PiWorkloadSpec> {
+): AgentCreateContext<PiDurableState> {
+  const durableInput =
+    sourceThreadId === spec.threadId
+      ? {
+          recoveryInput: {
+            state: { driverState: {} },
+            turns: [foldedTurn],
+          },
+        }
+      : {
+          forkInput: {
+            source: {
+              namespace: spec.namespace,
+              threadId: sourceThreadId,
+            },
+            turns: [foldedTurn],
+          },
+        };
   return {
-    durableInput: {
-      source: {
-        namespace: spec.namespace,
-        threadId: sourceThreadId,
-      },
-      record: { spec, state: {} },
-      turns: [foldedTurn],
-    },
+    ...durableInput,
     recovery: { authorizeHistoryLoad },
   };
 }
 
 describe('pi durable history seed', () => {
+  it('mounts runtime spec and state validation', () => {
+    const driver: MountedAgentDriver = piDriverFactory({
+      ports: {
+        resolveModel: vi.fn(),
+        getApiKey: vi.fn(),
+        resolveTools: vi.fn(),
+      },
+    });
+
+    expect(driver.validateSpec(spec.spec)).toMatchObject({
+      recipe: { model: { type: 'host', id: 'active' } },
+    });
+    expect(driver.initialState()).toEqual({});
+    expect(() =>
+      driver.validateSpec({
+        recipe: { model: { type: 'host', id: '' } },
+      }),
+    ).toThrowError(expect.objectContaining({ code: 'invalid_driver_spec' }));
+    expect(() => driver.validateState({ unexpected: true })).toThrowError(
+      expect.objectContaining({ code: 'invalid_driver_state' }),
+    );
+  });
+
   it('keeps configured initial messages for a fresh create', async () => {
     const authorizeHistoryLoad = vi.fn();
     await expect(
@@ -107,12 +141,18 @@ describe('pi durable history seed', () => {
         expect(
           resolvePiSystemPrompt({
             ...spec,
-            initialPreamble: ['identity', 'tool policy'],
+            spec: {
+              ...spec.spec,
+              initialPreamble: ['identity', 'tool policy'],
+            },
           }),
         ).toBe('identity\n\ntool policy');
-        expect(resolvePiSystemPrompt({ ...spec, initialPreamble: [] })).toBe(
-          undefined,
-        );
+        expect(
+          resolvePiSystemPrompt({
+            ...spec,
+            spec: { ...spec.spec, initialPreamble: [] },
+          }),
+        ).toBe(undefined);
       });
     });
   });

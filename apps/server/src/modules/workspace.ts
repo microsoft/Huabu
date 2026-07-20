@@ -39,6 +39,7 @@ import path from 'node:path';
 import { resetExternalNoteWatcher } from './canvas/external-watcher.js';
 import { refreshCanvasDirIndex } from './storage/canvas-dirs.js';
 import { migrateLegacyAcpSessions } from './storage/migrate-acp-sessions.js';
+import { migrateLegacyAgenetesThreads } from './storage/migrate-agenetes-threads.js';
 import { migrateCanvasToSpace } from './storage/migrate-canvas-to-space.js';
 import { migrateLegacyChatThreads } from './storage/migrate-chat-threads.js';
 import { migrateLegacyChatTurns } from './storage/migrate-chat-turns.js';
@@ -99,6 +100,9 @@ export function initWorkspaceFromEnv(): void {
   // turns into the Agenetes two-tier log (`chat_v2/`). Runs AFTER the
   // pi-ai `.json` -> `.turns.jsonl` hop above. Idempotent (.bak on source).
   migrateLegacyChatTurns(_workspacePath);
+  // Convert the strict workload/state boundary before any writer opens the
+  // namespace. Keeps the original v1 file as `.agenetes-v1.bak`.
+  migrateLegacyAgenetesThreads(_workspacePath);
   // M6.9 row 1: fold the removed `acp-sessions.json` (v3) recovery records
   // into `threads.json` `ThreadRecord`s. Idempotent (.bak on source).
   migrateLegacyAcpSessions(_workspacePath);
@@ -177,6 +181,9 @@ export function setWorkspacePath(newPath: string): void {
   // turns into the Agenetes two-tier log (`chat_v2/`). Runs AFTER the
   // pi-ai `.json` -> `.turns.jsonl` hop above. Idempotent (.bak on source).
   migrateLegacyChatTurns(_workspacePath);
+  // Convert the strict workload/state boundary before any writer opens the
+  // namespace. Keeps the original v1 file as `.agenetes-v1.bak`.
+  migrateLegacyAgenetesThreads(_workspacePath);
   // M6.9 row 1: fold the removed `acp-sessions.json` (v3) recovery records
   // into `threads.json` `ThreadRecord`s. Idempotent (.bak on source).
   migrateLegacyAcpSessions(_workspacePath);

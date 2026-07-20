@@ -76,31 +76,35 @@ export function migrateAcpSessionsFile(
 
     const spec: AcpWorkloadSpec = {
       threadId,
-      // This reconstructed record intentionally remains legacy-shaped.
-      // The ACP driver resolves missing placement to the supervised local
-      // daemon at read time without writing the fallback back to storage.
       kind: EXTERNAL_DRIVER_KIND,
       workloadType: ACP_WORKLOAD_TYPE,
       namespace,
-      binding: {
-        alias: record.bindingRecipe.alias,
-        profileId: record.profileId,
+      spec: {
+        binding: {
+          alias: record.bindingRecipe.alias,
+          profileId: record.profileId,
+        },
+        ...(record.cwd ? { cwd: record.cwd } : {}),
+        recipe: record.bindingRecipe,
       },
-      ...(record.cwd ? { cwd: record.cwd } : {}),
-      recipe: record.bindingRecipe,
     };
 
     const state: AgentStateSnapshot = {
-      // `sessionId` is a branded string on the wire schema; the persisted
-      // value is a valid ACP session id, so brand it by assertion.
-      sessionId: record.sessionId as AgentStateSnapshot['sessionId'],
+      driverState: {
+        sessionId: record.sessionId,
+        initialPreambleDelivered: false,
+      },
     };
     if (record.meta !== undefined) {
       const parsed = agentMetadataSchema.safeParse(record.meta);
       if (parsed.success) state.metadata = parsed.data;
     }
 
-    threadStore.upsert(namespace, threadId, { spec, state });
+    threadStore.upsert(namespace, threadId, {
+      driverSchemaVersion: 1,
+      spec,
+      state,
+    });
     migrated += 1;
   }
 

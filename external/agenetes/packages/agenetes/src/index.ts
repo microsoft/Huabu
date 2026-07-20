@@ -1,26 +1,24 @@
 // @agenetes/agenetes — the mounted Agenetes instance (L2 control-plane
 // core). See ./instance.ts (I9.3 runtime + I9.4 query surfaces),
-// ./builder.ts (I9.5 driver-factory-dictionary bootstrap), and
+// ./mount.ts (I9.5 static DriverMap composition), and
 // ./thread-store.ts (the durable thread-table port).
 
-export { mountAgenetes } from './builder.js';
-export type {
-  AgenetesBuilder,
-  DriverFactory,
-  MountAgenetesOptions,
-  StandardDriverFactoryMap,
-} from './builder.js';
+export { mountAgenetes } from './mount.js';
+export type { MountAgenetesOptions } from './mount.js';
 
 export { createAgenetesInstance } from './instance.js';
 export type {
   Agenetes,
-  WorkloadSpecShape,
   HistoryOptions,
   ThreadHistory,
   ThreadLogMetadata,
 } from './instance.js';
 
-export { InMemoryThreadStore, FileThreadStore } from './thread-store.js';
+export {
+  InMemoryThreadStore,
+  FileThreadStore,
+  THREAD_STORE_SCHEMA_VERSION,
+} from './thread-store.js';
 export type { ThreadRecord, ThreadStore } from './thread-store.js';
 
 export {

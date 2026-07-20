@@ -36,10 +36,7 @@
 
 import { getSupervisedAgentletId } from '@agenetes/agentlet-host';
 import { resolveAgentInputs } from '@agenetes/protocol';
-import {
-  classifyAgentRealization,
-  HistoryLoadDeniedError,
-} from '@agenetes/runtime';
+import { HistoryLoadDeniedError } from '@agenetes/runtime';
 
 import { AcpServiceError } from './errors.js';
 import { applyToolExt } from './overlay.js';
@@ -60,7 +57,7 @@ import type {
   AgentInput,
   AgentSubmission,
   AgentTurn,
-  Namespace,
+  SessionId,
 } from '@agenetes/protocol';
 import type {
   AgentCapabilities,
@@ -71,6 +68,7 @@ import type {
 import type {
   AgentCreateContext,
   AgentHandle as RuntimeAgentHandle,
+  TypedWorkloadSpec,
 } from '@agenetes/runtime';
 import type {
   ContentBlock as AcpContentBlock,
@@ -147,19 +145,9 @@ function serializeDurableTurn(turn: AgentTurn): string {
  * hands the entry in. A full host `WorkloadSpec` satisfies this
  * structurally, so the mounted instance passes its spec straight through.
  */
-export interface AcpCreateSpec {
-  /** The L1-minted addressable id this Deployment is keyed by (I4.2). */
-  readonly threadId: string;
+export interface AcpSpec {
   /** Portable host-authored instructions realized by this driver. */
   readonly initialPreamble?: readonly string[];
-  /**
-   * The dispatch `kind` (I5). Optional here — the handle never reads it
-   * (the instance dispatches on it before `create`) — but present on the
-   * full host spec, which is why it is accepted.
-   */
-  readonly kind?: string;
-  /** Storage / metadata scope for this session (I4.1 / §7 M5.0). */
-  readonly namespace: Namespace;
   /** External binding (alias + profileId) for the thread. */
   readonly binding: { readonly alias: string; readonly profileId: string };
   /**
@@ -179,18 +167,57 @@ export interface AcpCreateSpec {
     recipe: AcpBindingRecipe;
     env?: Record<string, string>;
   }>;
-  /** L1-assembled agent reachback env, passed through to the spawn call. */
+  /**
+   * Durable non-sensitive host environment such as reachback coordinates.
+   * Secret-backed values must use `resolveRuntimeEnvironment`.
+   */
   readonly env?: Record<string, string>;
+}
+
+export type AcpCreateSpec = TypedWorkloadSpec<AcpSpec>;
+
+export interface AcpDurableState {
+  readonly sessionId?: SessionId;
+  readonly initialPreambleDelivered: boolean;
 }
 
 export interface AcpRuntimePolicy {
   /** Return the current host policy for newly spawned or resumed sessions. */
   getIdleTimeoutSecs(): number;
+  /**
+   * Resolve non-durable environment values immediately before session spawn.
+   * Hosts use this port for secret-backed configuration that must never enter
+   * the persisted workload spec.
+   */
+  resolveRuntimeEnvironment?(
+    spec: AcpSpec,
+  ): Promise<Record<string, string> | undefined>;
+}
+
+export async function resolveAcpRuntimeLaunch(
+  spec: AcpSpec,
+  runtimePolicy: AcpRuntimePolicy,
+): Promise<{
+  recipe: AcpBindingRecipe | null | undefined;
+  env: Record<string, string> | undefined;
+}> {
+  const [runtime, resolvedEnvironment] = await Promise.all([
+    spec.resolveRecipe?.(),
+    runtimePolicy.resolveRuntimeEnvironment?.(spec),
+  ]);
+  const runtimeEnvironment = runtime?.env ?? resolvedEnvironment;
+  return {
+    recipe: runtime?.recipe ?? spec.recipe,
+    env:
+      runtimeEnvironment || spec.env
+        ? { ...runtimeEnvironment, ...spec.env }
+        : undefined,
+  };
 }
 
 /** Resolve explicit placement or the read-only legacy local fallback. */
 export function resolveAcpAgentletId(spec: AcpCreateSpec): string {
-  return spec.agentletId ?? getSupervisedAgentletId();
+  return spec.spec.agentletId ?? getSupervisedAgentletId();
 }
 
 /** The per-turn context an {@link AcpAgentHandle.run} accepts. */
@@ -267,7 +294,7 @@ export class AcpAgentHandle<
    */
   constructor(
     private readonly spec: AcpCreateSpec,
-    private readonly createContext: AgentCreateContext<AcpCreateSpec>,
+    private readonly createContext: AgentCreateContext<AcpDurableState>,
     private readonly runtimePolicy: AcpRuntimePolicy = {
       getIdleTimeoutSecs: () => 600,
     },
@@ -292,23 +319,17 @@ export class AcpAgentHandle<
   private async ensureSession(
     logger: AcpSessionLogger,
   ): Promise<AcpSessionEntry> {
-    const durableInput = this.createContext.durableInput;
-    const realization = classifyAgentRealization(
-      { namespace: this.spec.namespace, threadId: this.spec.threadId },
-      durableInput,
-    );
-    const turns = durableInput?.turns ?? [];
-    const sourceState =
-      realization === 'recover' ? durableInput?.record.state : undefined;
+    const recoveryInput = this.createContext.recoveryInput;
+    const forkInput = this.createContext.forkInput;
+    const turns = recoveryInput?.turns ?? forkInput?.turns ?? [];
+    const sourceState = recoveryInput?.state;
 
     if (
       turns.length > 0 &&
-      (realization === 'fork' || sourceState?.sessionId === undefined)
+      (forkInput !== undefined ||
+        sourceState?.driverState.sessionId === undefined)
     ) {
-      await this.authorizeHistoryLoad(
-        realization === 'fork' ? 'fork' : 'recover',
-        turns,
-      );
+      await this.authorizeHistoryLoad(forkInput ? 'fork' : 'recover', turns);
     }
 
     try {
@@ -324,25 +345,29 @@ export class AcpAgentHandle<
 
       await this.authorizeHistoryLoad('recover', turns);
       const fallbackState = sourceState?.metadata
-        ? { metadata: sourceState.metadata }
+        ? {
+            driverState: { initialPreambleDelivered: false },
+            metadata: sourceState.metadata,
+          }
         : undefined;
       return this.openSession(fallbackState, logger);
     }
   }
 
   private async openSession(
-    priorState: AgentStateSnapshot | undefined,
+    priorState: AgentStateSnapshot<AcpDurableState> | undefined,
     logger: AcpSessionLogger,
   ): Promise<AcpSessionEntry> {
-    const runtime = await this.spec.resolveRecipe?.();
-    const recipe = runtime?.recipe ?? this.spec.recipe;
-    const env = runtime?.env ?? this.spec.env;
+    const { recipe, env } = await resolveAcpRuntimeLaunch(
+      this.spec.spec,
+      this.runtimePolicy,
+    );
     return ensureAcpSession({
       agentletId: this.agentletId,
       threadId: this.spec.threadId,
-      binding: this.spec.binding,
+      binding: this.spec.spec.binding,
       namespace: this.spec.namespace,
-      ...(this.spec.cwd !== undefined && { cwd: this.spec.cwd }),
+      ...(this.spec.spec.cwd !== undefined && { cwd: this.spec.spec.cwd }),
       ...(recipe !== undefined && { recipe }),
       ...(env !== undefined && { env }),
       ...(priorState !== undefined && { priorState }),
@@ -359,7 +384,9 @@ export class AcpAgentHandle<
    * unsubscribe that clears it. The instance wires this once per live
    * Deployment handle.
    */
-  onState(listener: (snapshot: AgentStateSnapshot) => void): () => void {
+  onState(
+    listener: (snapshot: AgentStateSnapshot<AcpDurableState>) => void,
+  ): () => void {
     return registerAcpStateListener(
       this.agentletId,
       this.spec.threadId,
@@ -404,7 +431,7 @@ export class AcpAgentHandle<
     reportEntryState(entry);
 
     const lowered = lowerAcpInputs(resolveAgentInputs(submission));
-    const preamble = this.spec.initialPreamble?.join('\n\n') ?? '';
+    const preamble = this.spec.spec.initialPreamble?.join('\n\n') ?? '';
     const includedPreamble =
       preamble.length > 0 &&
       !entry.initialPreambleDelivered &&

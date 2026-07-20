@@ -1,13 +1,11 @@
 export { createAgentTeamRegistry } from './create.js';
 export {
   agentProfileDriverFactory,
+  agentProfileSpecSchema,
   type AgentProfileDriverConfig,
-  type AgentProfileDriverInput,
-  type AgentProfileDelegateWorkloadSpec,
   type AgentProfileRuntimePorts,
+  type AgentProfileSpec,
   type AgentProfileWorkloadSpec,
-  type LegacyAgentProfileWorkloadSpec,
-  type LoweredAgentProfileWorkloadSpec,
 } from './profile-driver.js';
 export { AgentTeamError } from './errors.js';
 export type { AgentTeamErrorCode } from './errors.js';

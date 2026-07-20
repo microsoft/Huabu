@@ -1,7 +1,7 @@
 {
   "name": "@agenetes/agenetes",
   "version": "0.1.0",
-  "description": "The mounted Agenetes instance (L2 control-plane core): the I9.5 driver-factory-dictionary builder, the I9.3 runtime surface (create/get/close over live AgentHandles) and the I9.4 query surface (durable thread records via a pluggable ThreadStore port). Host-agnostic — depends only on @agenetes/protocol + @agenetes/runtime.",
+  "description": "The mounted Agenetes instance: static driver dispatch, live AgentHandle lifecycle, and durable thread records.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -21,9 +21,6 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@agenetes/acp-driver": "workspace:*",
-    "@agenetes/agent-team": "workspace:*",
-    "@agenetes/pi-driver": "workspace:*",
     "@agenetes/protocol": "workspace:*",
     "@agenetes/runtime": "workspace:*"
   },

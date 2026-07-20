@@ -26,8 +26,10 @@ function entry(overrides: Partial<AcpSessionEntry> = {}): AcpSessionEntry {
 describe('ACP durable state snapshot', () => {
   it('persists preamble delivery independently from sessionId', () => {
     expect(snapshotEntryState(entry())).toMatchObject({
-      sessionId: 'session_1',
-      initialPreambleDelivered: false,
+      driverState: {
+        sessionId: 'session_1',
+        initialPreambleDelivered: false,
+      },
     });
 
     expect(
@@ -38,7 +40,7 @@ describe('ACP durable state snapshot', () => {
         }),
       ),
     ).toMatchObject({
-      initialPreambleDelivered: true,
+      driverState: { initialPreambleDelivered: true },
     });
     expect(
       snapshotEntryState(
@@ -47,6 +49,6 @@ describe('ACP durable state snapshot', () => {
           initialPreambleDelivered: true,
         }),
       ),
-    ).not.toHaveProperty('sessionId');
+    ).not.toHaveProperty('driverState.sessionId');
   });
 });

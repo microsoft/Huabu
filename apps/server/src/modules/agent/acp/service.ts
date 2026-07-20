@@ -34,8 +34,7 @@ import {
   agenetes,
   EXTERNAL_DRIVER_KIND,
   type AcpHandle,
-  type LegacyProfileWorkloadSpec,
-  type ProfileWorkloadSpec,
+  type AcpWorkloadSpec,
 } from '../agenetes/drivers.js';
 import { createChatSubmission } from '../agenetes/handle.js';
 import { dumpAssembledPrompt } from '../conversation/prompt/debug-prompt.js';
@@ -185,26 +184,51 @@ export async function* runAcpAgent(
   // when the caller omitted it, so the handle derives it from the bound
   // profile's recipe.
   const profile = resolveProfileSnapshot(binding.profileId);
-  const baseSpec = {
+  let agentletId: string;
+  let cwd: string | undefined;
+  let recipe: AcpBindingRecipe | null;
+  const env = buildReachbackEnv(threadId, canvasId);
+  if (profile) {
+    agentletId = profile.agentletId;
+    cwd = profile.workingDirPath;
+    if (profile.launch.kind === 'acp-command') {
+      recipe = {
+        command: profile.launch.command,
+        cwd: profile.workingDirPath,
+        autoRestart: true,
+        alias: binding.alias,
+      };
+    } else {
+      recipe = {
+        autoRestart: true,
+        alias: binding.alias,
+        agentTeam: {
+          manifestPath: profile.launch.manifestPath,
+          workingDirPath: profile.workingDirPath,
+          harness: profile.launch.harness,
+        },
+      };
+    }
+  } else {
+    agentletId = getSupervisedAgentletId();
+    cwd = opts.cwd;
+    recipe = resolveBindingRecipe(binding.profileId);
+  }
+
+  const spec: AcpWorkloadSpec = {
     threadId,
     kind: EXTERNAL_DRIVER_KIND,
     workloadType: 'Deployment' as const,
     namespace: canvasAcpNamespace(canvasId),
-    initialPreamble: [renderSystemPreamble()],
-    binding,
-    env: buildReachbackEnv(threadId, canvasId),
+    spec: {
+      initialPreamble: [renderSystemPreamble()],
+      binding,
+      agentletId,
+      ...(cwd !== undefined && { cwd }),
+      recipe,
+      env,
+    },
   };
-  const spec: ProfileWorkloadSpec | LegacyProfileWorkloadSpec = profile
-    ? {
-        ...baseSpec,
-        profile,
-      }
-    : {
-        ...baseSpec,
-        agentletId: getSupervisedAgentletId(),
-        ...(opts.cwd !== undefined && { cwd: opts.cwd }),
-        recipe: resolveBindingRecipe(binding.profileId),
-      };
 
   // Optional developer aid: dump the exact text payload handed to ACP
   // `session/prompt` (the serialized prompt, NOT pi-ai messages — the
@@ -231,9 +255,8 @@ export async function* runAcpAgent(
 
   // Get-or-create the long-lived ACP handle for this thread (I9.3) and
   // drive one turn. The handle self-resolves its session inside `run`, so
-  // any session-open failure (unbound profile / bridge down) throws on the
-  // generator's first `next()` — exactly as before. `spec.kind` is
-  // `external`, so the instance's union handle narrows to an `AcpHandle`.
+  // session-open failures surface on the generator's first `next()`.
+  // Static DriverMap construction guarantees that `external` is ACP.
   const handle = agenetes.create(spec) as AcpHandle;
   // Fold this thread's up-reported metadata into the L1 profile cache
   // (I9.7). Idempotent per thread — subscribing before `run()` so the

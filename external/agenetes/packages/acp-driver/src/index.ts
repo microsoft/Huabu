@@ -68,11 +68,17 @@ export {
 } from './handle.js';
 export type { AcpRuntimePolicy, InStreamEvent, AcpTurnCtx } from './handle.js';
 
-export { acpDriverFactory } from './driver.js';
+export {
+  acpDriverFactory,
+  acpDurableStateSchema,
+  acpSpecSchema,
+} from './driver.js';
 export type {
   AcpAgentDriver,
   AcpCreateSpec,
   AcpDriverFactoryConfig,
+  AcpDurableState,
+  AcpSpec,
 } from './driver.js';
 
 export { AcpServiceError } from './errors.js';

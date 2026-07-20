@@ -1,12 +1,10 @@
 import { resolveAgentInputs } from '@agenetes/protocol';
-import {
-  classifyAgentRealization,
-  HistoryLoadDeniedError,
-} from '@agenetes/runtime';
+import { HistoryLoadDeniedError } from '@agenetes/runtime';
 import { Agent, convertToLlm } from '@earendil-works/pi-agent-core';
 
 import type {
   PiDriverPorts,
+  PiDurableState,
   PiModelContext,
   PiRunResult,
   PiToolContext,
@@ -90,11 +88,11 @@ function toolContext(spec: PiWorkloadSpec): PiToolContext {
 export function resolvePiSystemPrompt(
   spec: PiWorkloadSpec,
 ): string | undefined {
-  if (spec.initialPreamble === undefined) {
+  if (spec.spec.initialPreamble === undefined) {
     return spec.spec.recipe.systemPrompt;
   }
-  return spec.initialPreamble.length > 0
-    ? spec.initialPreamble.join('\n\n')
+  return spec.spec.initialPreamble.length > 0
+    ? spec.spec.initialPreamble.join('\n\n')
     : undefined;
 }
 
@@ -148,19 +146,15 @@ function serializeDurableTurn(turn: AgentTurn): string {
 
 export async function resolvePiInitialMessages(
   spec: PiWorkloadSpec,
-  context: AgentCreateContext<PiWorkloadSpec>,
+  context: AgentCreateContext<PiDurableState>,
 ): Promise<Message[]> {
-  const durableInput = context.durableInput;
+  const durableInput = context.recoveryInput ?? context.forkInput;
   if (!durableInput || durableInput.turns.length === 0) {
     return [...(spec.spec.initialMessages ?? [])];
   }
 
-  const realization = classifyAgentRealization(
-    { namespace: spec.namespace, threadId: spec.threadId },
-    durableInput,
-  );
   const authorization = await context.recovery.authorizeHistoryLoad({
-    mode: realization === 'fork' ? 'fork' : 'recover',
+    mode: context.forkInput ? 'fork' : 'recover',
     turns: durableInput.turns,
   });
   if (!authorization.allowed) {
@@ -200,7 +194,7 @@ export class PiAgentHandle<
   constructor(
     private readonly spec: PiWorkloadSpec,
     private readonly ports: PiDriverPorts,
-    private readonly createContext: AgentCreateContext<PiWorkloadSpec>,
+    private readonly createContext: AgentCreateContext<PiDurableState>,
   ) {
     this.capabilities = piCapabilitiesForWorkloadType(spec.workloadType);
     this.pendingSystemPrompt = resolvePiSystemPrompt(spec);

@@ -1,4 +1,8 @@
+import { agentSpecSchema } from '@agenetes/protocol';
+import { z } from 'zod';
+
 import type { Namespace, WorkloadType } from '@agenetes/protocol';
+import type { TypedWorkloadSpec } from '@agenetes/runtime';
 import type {
   AgentTool,
   ToolExecutionMode,
@@ -33,6 +37,7 @@ export interface PiRecipe {
 }
 
 export interface PiSpec {
+  readonly initialPreamble?: readonly string[];
   readonly recipe: PiRecipe;
   /**
    * Optional fresh-create transcript seed. Durable recovery history is
@@ -51,14 +56,46 @@ export interface PiSpec {
  * host WorkloadSpec satisfies this structurally, so the mounted instance
  * can pass the spec straight through.
  */
-export interface PiWorkloadSpec {
-  readonly kind: string;
-  readonly workloadType: WorkloadType;
-  readonly namespace: Namespace;
-  readonly threadId: string;
-  readonly initialPreamble?: readonly string[];
-  readonly spec: PiSpec;
-}
+export type PiWorkloadSpec = TypedWorkloadSpec<PiSpec>;
+
+const messageSchema = z.custom<Message>(
+  (value) =>
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { role?: unknown }).role === 'string',
+  'Invalid pi message',
+);
+
+export const piSpecSchema = agentSpecSchema.extend({
+  recipe: z.object({
+    systemPrompt: z.string().optional(),
+    model: z.object({
+      type: z.literal('host'),
+      id: z.string().min(1),
+      options: z.record(z.string(), z.unknown()).optional(),
+    }),
+    tools: z
+      .array(
+        z.object({
+          name: z.string().min(1),
+          options: z.record(z.string(), z.unknown()).optional(),
+        }),
+      )
+      .readonly()
+      .optional(),
+    runtime: z
+      .object({
+        maxIterations: z.number().int().positive().optional(),
+        toolExecution: z.enum(['parallel', 'sequential']).optional(),
+      })
+      .optional(),
+  }),
+  initialMessages: z.array(messageSchema).readonly().optional(),
+  hostContext: z.record(z.string(), z.unknown()).optional(),
+});
+
+export const piDurableStateSchema = z.object({}).strict();
+export type PiDurableState = z.infer<typeof piDurableStateSchema>;
 
 export interface PiModelContext {
   readonly workloadType: WorkloadType;

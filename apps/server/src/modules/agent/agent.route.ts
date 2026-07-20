@@ -22,7 +22,6 @@ import {
 import { loadAgent } from '../../prompt/index.js';
 import { runAcpAgent } from '../agent/acp/service.js';
 import { agenetes } from '../agent/agenetes/drivers.js';
-import { buildForkTargetSpec } from '../agent/agenetes/fork.js';
 import { runAgent } from '../agent/agent.service.js';
 import {
   buildChatEnvelope,
@@ -160,9 +159,8 @@ const agentRoutes: FastifyPluginAsync = async (
   /**
    * POST /agent/history/:threadId/fork
    *
-   * Realises a fresh target thread from the source's materialized history.
-   * L1 compiles the complete target spec; Agenetes validates freshness and
-   * lets the target driver load completed plus optional incomplete turns.
+   * Temporarily unavailable while #321 defines the explicit target-agent
+   * contract required to compile a complete target WorkloadSpec.
    */
   fastify.post<{
     Params: { threadId: string };
@@ -200,29 +198,10 @@ const agentRoutes: FastifyPluginAsync = async (
         .send({ message: 'target thread must differ from source' });
     }
 
-    const sourceNamespace = canvasAcpNamespace(canvasId);
-    const sourceRecord = agenetes.record(sourceNamespace, threadId);
-    if (!sourceRecord) {
-      return reply.send({ threadId: targetThreadId, forked: false });
-    }
-
-    const targetSpec = buildForkTargetSpec(
-      sourceRecord.spec,
-      targetThreadId,
-      dstCanvasId,
-    );
-    try {
-      agenetes.fork({ namespace: sourceNamespace, threadId }, targetSpec);
-    } catch (error) {
-      request.log.warn(
-        { err: error, threadId, targetThreadId },
-        'Failed to fork agent thread',
-      );
-      return reply.code(409).send({
-        message: error instanceof Error ? error.message : 'Fork failed',
-      });
-    }
-    return reply.send({ threadId: targetThreadId, forked: true });
+    return reply.code(501).send({
+      message:
+        'Thread fork is temporarily unavailable until the target agent contract is explicit.',
+    });
   });
 
   /**

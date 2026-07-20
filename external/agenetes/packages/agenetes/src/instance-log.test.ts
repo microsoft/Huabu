@@ -5,17 +5,20 @@
 // `history({ withTail })` projects the uncovered suffix as an incomplete
 // turn, while `tail()` keeps serving the raw live events.
 
+import { defineDriver } from '@agenetes/runtime';
 import { describe, expect, it } from 'vitest';
 
-import { mountAgenetes, type WorkloadSpecShape } from './index.js';
+import { mountAgenetes } from './index.js';
 
 import type {
   AgentCapabilities,
+  AgentSpec,
   AgentStreamEvent,
   FoldedMessage,
   Namespace,
+  WorkloadSpec,
 } from '@agenetes/protocol';
-import type { AgentDriver, AgentHandle } from '@agenetes/runtime';
+import type { AgentHandle } from '@agenetes/runtime';
 
 interface Script {
   readonly events: AgentStreamEvent[];
@@ -42,26 +45,48 @@ class ScriptedHandle {
 
 let raw: ScriptedHandle | undefined;
 
-function scriptedDriver(): AgentDriver<WorkloadSpecShape> {
-  return {
+const specSchema = {
+  safeParse(input: unknown) {
+    return input !== null && typeof input === 'object'
+      ? { success: true as const, data: input as AgentSpec }
+      : { success: false as const, error: new Error('expected object') };
+  },
+};
+
+const stateSchema = {
+  safeParse(input: unknown) {
+    return input !== null && typeof input === 'object'
+      ? {
+          success: true as const,
+          data: input as Record<string, never>,
+        }
+      : { success: false as const, error: new Error('expected object') };
+  },
+};
+
+function scriptedDriver() {
+  return defineDriver({
+    schemaVersion: 1,
+    workloadTypes: ['Job', 'Deployment'],
+    specSchema,
+    stateSchema,
+    initialState: () => ({}),
     create: () => (raw = new ScriptedHandle()) as unknown as AgentHandle,
-  };
+  });
 }
 
 function mount() {
-  return mountAgenetes()
-    .addFactory('scripted', scriptedDriver)
-    .register('external', 'scripted')
-    .build<WorkloadSpecShape>();
+  return mountAgenetes({ drivers: { external: scriptedDriver() } });
 }
 
 const ns: Namespace = { name: 'canvas-1', storage: undefined };
 const threadId = 'thr_1';
-const deployment: WorkloadSpecShape = {
+const deployment: WorkloadSpec = {
   threadId,
   kind: 'external',
   workloadType: 'Deployment',
   namespace: ns,
+  spec: {},
 };
 
 const text = (content: string): AgentStreamEvent => ({
@@ -231,11 +256,12 @@ describe('Agenetes two-tier conversation log (M5.6/C3)', () => {
 
   it('a threaded Job IS logged — history folds its turn (I9.8: any durable thread)', async () => {
     const inst = mount();
-    const jobSpec: WorkloadSpecShape = {
+    const jobSpec: WorkloadSpec = {
       threadId: 'thr_job',
       kind: 'external',
       workloadType: 'Job',
       namespace: ns,
+      spec: {},
     };
     const handle = inst.create(jobSpec);
     raw!.scripts.push({
@@ -254,11 +280,12 @@ describe('Agenetes two-tier conversation log (M5.6/C3)', () => {
 
   it('a transient Job (no threadId) is NOT logged — nothing to fold against', async () => {
     const inst = mount();
-    const jobSpec: WorkloadSpecShape = {
+    const jobSpec: WorkloadSpec = {
       threadId: '',
       kind: 'external',
       workloadType: 'Job',
       namespace: ns,
+      spec: {},
     };
     const handle = inst.create(jobSpec);
     raw!.scripts.push({

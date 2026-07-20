@@ -1,49 +1,36 @@
+import { agentSpecSchema } from '@agenetes/protocol';
+import { defineDriver } from '@agenetes/runtime';
+import { z } from 'zod';
+
 import type {
   AgentProfileSnapshot,
   AgentTeamManifestRuntime,
 } from './types.js';
 import type {
   AgentCapabilities,
+  AgentSpec,
   AgentStateSnapshot,
   AgentStreamEvent,
   AgentSubmission,
-  ControlAck,
-  ControlMsg,
-  Namespace,
 } from '@agenetes/protocol';
 import type {
   AgentCreateContext,
-  AgentDriver,
   AgentHandle,
+  MountedAgentDriver,
+  RuntimeSchema,
+  TypedWorkloadSpec,
 } from '@agenetes/runtime';
 
-export interface AgentProfileWorkloadSpec {
-  readonly threadId: string;
-  readonly namespace: Namespace;
+export interface AgentProfileSpec extends AgentSpec {
   readonly binding: { readonly alias: string; readonly profileId: string };
   readonly profile: AgentProfileSnapshot;
-  readonly initialPreamble?: readonly string[];
   readonly env?: Record<string, string>;
-  readonly kind?: string;
 }
 
-export interface LegacyAgentProfileWorkloadSpec {
-  readonly threadId: string;
-  readonly namespace: Namespace;
+export type AgentProfileWorkloadSpec = TypedWorkloadSpec<AgentProfileSpec>;
+
+interface AcpDelegateSpec extends AgentSpec {
   readonly binding: { readonly alias: string; readonly profileId: string };
-  readonly initialPreamble?: readonly string[];
-  readonly env?: Record<string, string>;
-  readonly kind?: string;
-  readonly agentletId?: string;
-  readonly cwd?: string;
-  readonly recipe?: unknown;
-}
-
-export type AgentProfileDriverInput =
-  | AgentProfileWorkloadSpec
-  | LegacyAgentProfileWorkloadSpec;
-
-export interface LoweredAgentProfileWorkloadSpec extends AgentProfileWorkloadSpec {
   readonly agentletId: string;
   readonly cwd: string;
   readonly recipe?: {
@@ -58,14 +45,13 @@ export interface LoweredAgentProfileWorkloadSpec extends AgentProfileWorkloadSpe
     };
   };
   readonly resolveRecipe?: () => Promise<{
-    recipe: NonNullable<LoweredAgentProfileWorkloadSpec['recipe']>;
+    recipe: NonNullable<AcpDelegateSpec['recipe']>;
     env?: Record<string, string>;
   }>;
+  readonly env?: Record<string, string>;
 }
 
-export type AgentProfileDelegateWorkloadSpec =
-  | LoweredAgentProfileWorkloadSpec
-  | LegacyAgentProfileWorkloadSpec;
+type AcpDelegateWorkloadSpec = TypedWorkloadSpec<AcpDelegateSpec>;
 
 export interface AgentProfileRuntimePorts {
   resolveManifestRuntime(
@@ -73,62 +59,87 @@ export interface AgentProfileRuntimePorts {
   ): Promise<AgentTeamManifestRuntime>;
 }
 
-export interface AgentProfileDriverConfig<
-  TSubmission extends AgentSubmission,
-  TResult,
-  TEvent extends AgentStreamEvent,
-  TTurnCtx,
-> {
-  delegate: AgentDriver<
-    AgentProfileDelegateWorkloadSpec,
-    TSubmission,
-    TResult,
-    TEvent,
-    TTurnCtx
-  >;
-  delegateCapabilities: AgentCapabilities;
-  ports: AgentProfileRuntimePorts;
+export interface AgentProfileDriverConfig {
+  readonly delegate: MountedAgentDriver;
+  readonly delegateCapabilities: AgentCapabilities;
+  readonly ports: AgentProfileRuntimePorts;
 }
 
-function lowerCommandProfile(
-  spec: AgentProfileWorkloadSpec,
-): LoweredAgentProfileWorkloadSpec {
-  if (spec.profile.launch.kind !== 'acp-command') {
-    throw new Error(
-      'Command Profile lowering requires an ACP command snapshot',
-    );
+const profileSnapshotSchema = z.object({
+  profileId: z.string(),
+  agentletId: z.string(),
+  workingDirPath: z.string(),
+  launch: z.discriminatedUnion('kind', [
+    z.object({
+      kind: z.literal('acp-command'),
+      command: z.string(),
+    }),
+    z.object({
+      kind: z.literal('agent-team-manifest'),
+      manifestPath: z.string(),
+      harness: z.string(),
+    }),
+  ]),
+});
+
+export const agentProfileSpecSchema = agentSpecSchema.extend({
+  binding: z.object({
+    alias: z.string(),
+    profileId: z.string(),
+  }),
+  profile: profileSnapshotSchema,
+  env: z.record(z.string(), z.string()).optional(),
+});
+
+function lowerProfile(
+  workload: AgentProfileWorkloadSpec,
+  ports: AgentProfileRuntimePorts,
+): AcpDelegateWorkloadSpec {
+  const { profile, binding, env, initialPreamble } = workload.spec;
+  if (profile.launch.kind === 'acp-command') {
+    return {
+      ...workload,
+      spec: {
+        initialPreamble,
+        binding,
+        agentletId: profile.agentletId,
+        cwd: profile.workingDirPath,
+        env,
+        recipe: {
+          command: profile.launch.command,
+          cwd: profile.workingDirPath,
+          autoRestart: true,
+          alias: binding.alias,
+        },
+      },
+    };
   }
-  return {
-    ...spec,
-    agentletId: spec.profile.agentletId,
-    cwd: spec.profile.workingDirPath,
-    recipe: {
-      command: spec.profile.launch.command,
-      cwd: spec.profile.workingDirPath,
-      autoRestart: true,
-      alias: spec.binding.alias,
-    },
-  };
-}
+  const launch = profile.launch;
 
-function delegateContext(
-  context: AgentCreateContext<AgentProfileDriverInput>,
-  spec: AgentProfileDelegateWorkloadSpec,
-): AgentCreateContext<AgentProfileDelegateWorkloadSpec> {
-  const durableInput = context.durableInput;
   return {
-    recovery: context.recovery,
-    ...(durableInput
-      ? {
-          durableInput: {
-            ...durableInput,
-            record: {
-              ...durableInput.record,
-              spec,
+    ...workload,
+    spec: {
+      initialPreamble,
+      binding,
+      agentletId: profile.agentletId,
+      cwd: profile.workingDirPath,
+      env,
+      resolveRecipe: async () => {
+        const runtime = await ports.resolveManifestRuntime(profile);
+        return {
+          env: { ...runtime.environment, ...env },
+          recipe: {
+            autoRestart: true,
+            alias: binding.alias,
+            agentTeam: {
+              manifestPath: launch.manifestPath,
+              workingDirPath: profile.workingDirPath,
+              harness: launch.harness,
             },
           },
-        }
-      : {}),
+        };
+      },
+    },
   };
 }
 
@@ -150,14 +161,9 @@ class AgentProfileHandle<
   private closed = false;
 
   constructor(
-    private readonly spec: AgentProfileDriverInput,
-    private readonly context: AgentCreateContext<AgentProfileDriverInput>,
-    private readonly config: AgentProfileDriverConfig<
-      TSubmission,
-      TResult,
-      TEvent,
-      TTurnCtx
-    >,
+    private readonly workload: AgentProfileWorkloadSpec,
+    private readonly context: AgentCreateContext,
+    private readonly config: AgentProfileDriverConfig,
   ) {
     this.capabilities = config.delegateCapabilities;
   }
@@ -178,16 +184,11 @@ class AgentProfileHandle<
   private async createDelegate(): Promise<
     AgentHandle<TSubmission, TResult, TEvent, TTurnCtx>
   > {
-    const lowered =
-      'profile' in this.spec
-        ? this.spec.profile.launch.kind === 'acp-command'
-          ? lowerCommandProfile(this.spec)
-          : this.lowerManifestProfile()
-        : this.spec;
+    const lowered = lowerProfile(this.workload, this.config.ports);
     const delegate = this.config.delegate.create(
       lowered,
-      delegateContext(this.context, lowered),
-    );
+      this.context,
+    ) as AgentHandle<TSubmission, TResult, TEvent, TTurnCtx>;
     if (this.closed) {
       delegate.close();
       throw new Error('Agent Profile handle is closed');
@@ -201,39 +202,6 @@ class AgentProfileHandle<
     return delegate;
   }
 
-  private lowerManifestProfile(): LoweredAgentProfileWorkloadSpec {
-    if (!('profile' in this.spec)) {
-      throw new Error('Manifest lowering requires a Profile workload');
-    }
-    const launch = this.spec.profile.launch;
-    if (launch.kind !== 'agent-team-manifest') {
-      throw new Error('Manifest Profile lowering requires a manifest snapshot');
-    }
-    const profile = this.spec.profile;
-    const hostEnvironment = this.spec.env;
-    const alias = this.spec.binding.alias;
-    return {
-      ...this.spec,
-      agentletId: profile.agentletId,
-      cwd: profile.workingDirPath,
-      resolveRecipe: async () => {
-        const runtime = await this.config.ports.resolveManifestRuntime(profile);
-        return {
-          env: { ...runtime.environment, ...hostEnvironment },
-          recipe: {
-            autoRestart: true,
-            alias,
-            agentTeam: {
-              manifestPath: launch.manifestPath,
-              workingDirPath: profile.workingDirPath,
-              harness: launch.harness,
-            },
-          },
-        };
-      },
-    };
-  }
-
   async *run(
     submission: TSubmission | null,
     ctx: TTurnCtx,
@@ -242,7 +210,9 @@ class AgentProfileHandle<
     return yield* delegate.run(submission, ctx);
   }
 
-  async control(msg: ControlMsg): Promise<ControlAck> {
+  async control(
+    msg: Parameters<AgentHandle['control']>[0],
+  ): Promise<Awaited<ReturnType<AgentHandle['control']>>> {
     const delegate = await this.realize();
     return delegate.control(msg);
   }
@@ -261,21 +231,37 @@ class AgentProfileHandle<
   }
 }
 
+function delegateStateSchema(
+  delegate: MountedAgentDriver,
+): RuntimeSchema<unknown> {
+  return {
+    safeParse(input) {
+      try {
+        return { success: true, data: delegate.validateState(input) };
+      } catch (error) {
+        return { success: false, error };
+      }
+    },
+  };
+}
+
 export function agentProfileDriverFactory<
   TSubmission extends AgentSubmission = AgentSubmission,
   TResult = unknown,
   TEvent extends AgentStreamEvent = AgentStreamEvent,
   TTurnCtx = unknown,
->(
-  config: AgentProfileDriverConfig<TSubmission, TResult, TEvent, TTurnCtx>,
-): AgentDriver<
-  AgentProfileDriverInput,
-  TSubmission,
-  TResult,
-  TEvent,
-  TTurnCtx
-> {
-  return {
-    create: (spec, context) => new AgentProfileHandle(spec, context, config),
-  };
+>(config: AgentProfileDriverConfig): MountedAgentDriver {
+  return defineDriver({
+    schemaVersion: 1,
+    workloadTypes: ['Deployment'],
+    specSchema: agentProfileSpecSchema,
+    stateSchema: delegateStateSchema(config.delegate),
+    initialState: () => config.delegate.initialState(),
+    create: (workload, context) =>
+      new AgentProfileHandle<TSubmission, TResult, TEvent, TTurnCtx>(
+        workload,
+        context,
+        config,
+      ),
+  });
 }
