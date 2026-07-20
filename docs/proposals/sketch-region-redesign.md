@@ -1,10 +1,10 @@
 # Sketch 区域化重构 · 分阶段方案
 
-Status: In progress — **Stage 1 + Stage 2 implemented** (Stage 1: draw no longer auto-selects; stroke merging is purely spatial. Stage 2: stroke-level lasso selection + delete + GoodNotes-style retained-region move + style + keyboard delete + toolbar arbitration). Stage 3–4 remain design drafts; each needs its open questions confirmed before implementation.
+Status: In progress — **Stage 1 + Stage 2 implemented** (Stage 1: draw no longer auto-selects; stroke merging is purely spatial. Stage 2: stroke-level lasso selection + delete + GoodNotes-style retained-region move + style + keyboard delete + toolbar arbitration). Stage 3–4 remain design drafts; each needs its open questions confirmed before implementation. **Stage 3 redesigned 2026-07-20** after an empirical Azure Read run: OCR is now a low-fidelity search/trigger index (not authoritative content), agent comprehension goes through pull-render (`snapshot_nodes`, extended with an optional `strokeIds` filter), and OCR is lazy-by-default.
 
 Owner: canvas / sketch
 
-Last updated: 2026-07-19
+Last updated: 2026-07-20
 
 > 本文是把一次较长的设计讨论收敛后的定稿路线。它重新定位 sketch：从「每笔猜边界、每涂鸦一个节点」演进为「**墨迹 + 可识别文本的区域节点**」，并把操作单元下沉到**笔画（stroke）**。目标是同时改善手写体验、减少无意义的文件碎片，并为「AI 自动捕获手写问题」这一产品目标铺路。落地时遵循 docs-first：每阶段发货后，把已实现部分并回 `docs/architecture/sketch-node.md`。
 
@@ -32,6 +32,7 @@ Last updated: 2026-07-19
 - **时间退出「边界判定」，但保留为「区域内信息」**：决定「要不要另起一个节点」只看空间，时间不再参与——这才是治好问题 2（「2.」被劈开）的根因。隔很久回来在旧区域旁书写，只要空间就近仍并入该区域。而「这段是很久以后才补的」这一事实，天然记录在每条笔画既有的 `SketchStroke.createdAt` 上（[SketchOverlay.tsx](../../apps/web/src/components/Nodes/sketch/SketchOverlay.tsx) 写入）。将来可用于来源/历史、视觉区分、OCR 重分段提示——但现在不做，也不加新字段。
 - **sketch 只杀 sketch-vs-sketch 叠放**：手写叠在 note / image 等其他节点上的穿透问题，仍需描边级命中（原「支柱 3」）来解决；但该场景少见，已延后。
 - **文本层与节点边界解耦**：OCR 产出「文本 + 逐行 bbox + stroke 映射」，问题检测跑在文本的句子/span 上，而非节点粒度。不要用节点边界承载语义单元。
+- **OCR = 低保真索引/触发器，不是 agent 推理的权威内容**：OCR 文本只服务两件事——「全文搜索」与「被动问句捕获（Stage 4A）」。agent **真正理解**一块 sketch 走**按需拉取渲染**：复用现有 `snapshot_nodes`（[snapshot-node.ts](../../apps/server/src/modules/agent/tools/handlers/snapshot-node.ts) 已把 sketch path 渲成 PNG，内容寻址、可复用），让多模态模型直接看图，而**不读 OCR 文本**。依据（一次真实手写 sketch 的 Azure Read 实测）：箭头被读成 `-`（confidence 99）、`∫f(x)`→`Estif(x)`、中文行草整行错乱——这类高置信度误识别只能留在容错的索引层，绝不进推理链。定位/寻址由「区域=节点」天然承载：**node id 即区域地址**（agent 可 `snapshot_nodes(id)` 重渲、可从节点状态直接取坐标做锚定/连边，无需额外的 bbox 信封字段）；细到「行/句」用 OCR `line.bbox`，细到「部分 stroke」用 `snapshot_nodes` 的可选 stroke 过滤（见 Stage 3）。
 - **拆分/合并靠「重跑 OCR」而非「拼接文本」**：区域拆分或合并后，只需重新划分笔画 + 标记受影响区域 OCR 过期 + 各区域独立重跑 OCR。重跑永远正确并复用同一管线，省掉最脏的「文本重分段」代码。
 - **快照走区域/选区**：把「stroke 集合 / 区域矩形」栅格化成 PNG 的工具，OCR 与「发图给大模型」共用。`snapshot_node` 仍按 node id 寻址（[snapshot-node.ts](../../apps/server/src/modules/agent/tools/handlers/snapshot-node.ts)），不受影响。
 
@@ -94,28 +95,31 @@ MVP 限制：笔画移动仅限原节点内（抽出/拆分 = Stage 4）；混�
 
 明确不做：渲染 PNG、发大模型、抽出/拆分（Stage 4）、OCR、混选的移动。
 
-### Stage 3 — OCR：手写转文本
+### Stage 3 — OCR：手写转「低保真索引」（理解走拉取渲染）
 
-目标：填充区域的 OCR，让手写变成可搜索、可被 AI 当文本读的内容。引擎用已验证的 Azure AI Vision Read（[scripts/test-azure-vision.mjs](../../scripts/test-azure-vision.mjs)，`features=read`，返回 `blocks[].lines[]`：行文本 + `words[]` + bounding polygon + confidence）。
+目标：给区域填一层**低保真、容错的 OCR 索引**，让手写变得**可搜索**、并能**被动触发**问句捕获（Stage 4A）。**理解不靠这层文本**——agent 要看懂一块 sketch 时，走「按需拉取渲染」（`snapshot_nodes`）直接看图。引擎用已验证的 Azure AI Vision Read（[scripts/test-azure-vision.mjs](../../scripts/test-azure-vision.mjs)，`features=read`，返回 `blocks[].lines[]`：行文本 + `words[]` + bounding polygon + confidence）。
+
+> **实测定调（2026-07-20）**：拿一张真实的多语言潦草手写 sketch 跑 Azure Read——英文清晰词与短问句（`why now?` / `why canvas?` / `more idea?`）可识别（60–95）；中文行草大面积部分正确但整行出错常见；**箭头/圈/框基本丢失或被误读成高置信度标点**（箭头→`-`@99、`∫f(x)`→`Estif(x)`、圈住的 `4`→`(4)`@14）。结论：OCR 文本作「搜索/触发」索引够用，作「转写/理解」不可信——故本阶段把它定位成**只读低保真索引**，理解一律交给拉取的区域图片。
 
 0. **stroke→PNG 渲染器（从 Stage 2 移入）**：复用/扩展服务端 [clusterToSvg](../../apps/server/src/modules/agent/tools/handlers/snapshot-node.ts)——它已用 perfect-freehand→SVG→resvg 渲整节点/集群；加一个**可选 per-node stroke-id 过滤**以渲染子集；渲染时**捕获 flow→pixel 变换 T**（OCR 坐标对齐要用）。客户端旧 `sketchToImage.ts` 已删除、渲染已迁到服务端（见 snapshot-node.ts:413），**不要重建客户端渲染器**。
 1. **OCR 端点**：新增服务端 `ocr` 路由，复用 [sketch.service.ts](../../apps/server/src/modules/agent/sketch.service.ts) 的 vision 基座；输入 = 上面渲染器产出的区域 PNG，调 Azure Read，归一成 `{ text, lines[] }`。
 2. **坐标对齐**：用渲染时记录的 T⁻¹ 把 Azure 像素多边形换回**区域本地 flow 坐标**。T 必须在栅格化当刻记下，是最易埋 bug 的点。
 3. **stroke ↔ line 映射**：每条笔画分配给质心 / 重叠所在的行 → `line.strokeIds`（供锚定 / 高亮，不参与拆分文本运算）。
 4. **阅读顺序**：行按 (top, then left) 排；多列延后。
-5. **落库**：`text` → 节点 body（可搜索、可 `read`、喂后续问题检测）；`lines[]`（bbox + strokeIds + confidence）→ frontmatter；写入 `strokesHash` + `status: 'ready'`。此时才定稿并首次写入 `ocr` schema。
-6. **触发与过期**：区域稳定后 debounce 触发（~1.5–3s 或工具切走）；`strokesHash` 守卫跳过未变区域；区域一变标 `stale` 重跑。
-7. **字/画门槛**：整体低 `confidence` → 标「非文本区域」，`text` 留空，后续跳过，避免把示意图当文字识别。
+5. **落库（作为索引，不作权威内容）**：`text` → 节点 body（**可搜索、喂问句检测的低保真索引**，**不是 agent 的权威读取源**——理解走拉取的区域图片）；`lines[]`（bbox + strokeIds + confidence）→ frontmatter；写入 `strokesHash` + `status: 'ready'`。此时才定稿并首次写入 `ocr` schema。
+6. **触发：默认惰性，仅被动特性需要时才转主动**：自动 OCR 的**唯一存在理由**是服务「搜索」与「Stage 4A 被动问句捕获」。因此——这两个特性未上线前，OCR 做成**惰性/按需**（agent 撞到看不懂的 sketch 才拉图理解，顺带可缓存一次 OCR），Stage 3 第一版可以**只做拉取渲染、完全不跑 eager OCR**；只有 Stage 4A 落地时才把 OCR 升级成 debounce **主动**跑（~1.5–3s 或工具切走）。无论主动/惰性，都用 `strokesHash` 守卫跳过未变区域、区域一变标 `stale`。
+7. **字/画门槛（实测加强）**：两道闸——(a) 整体低 `confidence` → 标「非文本区域」、`text` 留空、后续跳过；(b) **纯标点/单符号 token（如 `-`、`(4)`、`-->`）无论 confidence 多高一律剔除**。加 (b) 是因为实测中箭头被读成 `-`@99——只靠低置信度门槛挡不住这种「符号被误识别成高置信度标点」，会污染索引与问句检测。
 
 明确不做：word 级映射、多列、拆分、问题检测。
 
-开放问题：映射粒度（line 级 v1 够用 / word 级留待逐词高亮）、成本与隐私（是否惰性 OCR）、字/画置信度阈值取值、text 落 body 还是 frontmatter 的最终定稿。
+开放问题：映射粒度（line 级 v1 够用 / word 级留待逐词高亮）、字/画置信度阈值与「纯符号 token」判定的具体取值、text 落 body 还是 frontmatter 的最终定稿。已定：**OCR 是低保真索引、理解走拉图**；**默认惰性 OCR**（成本/隐私顺带解决——只在真正需要时才把手写送出）。
 
-**部分选择 → AI 上下文（从 Stage 2 移入的难点，待定）**：现在选**整节点**时 node id 进 selected-node 上下文，agent 可 `snapshot_node(id)` 看整节点。但选**节点内部分 stroke**时，「node X 的某几条笔画」无法用 node id 寻址。两条路：
+**理解 → AI 上下文：统一走「拉取渲染」，不做 eager 附图**。现有链路已经是这套（[build-prompt.ts](../../apps/server/src/modules/agent/conversation/prompt/build-prompt.ts) + [sketch-hint.ts](../../apps/server/src/modules/agent/conversation/prompt/sketch-hint.ts)）：选中节点在发送时被自动预渲染进 `<selected_nodes_visuals>`（带 origin id），agent 也能主动 `snapshot_nodes(nodeIds)` 拉更多。分两种粒度：
 
-- **Option A · 预渲染成图片直接附到这轮对话**：把选中 stroke 渲成 PNG（用上面 stroke 过滤渲染器）作为**图片上下文**贴到 chat turn。agent 直接看到，无需新寻址方案；但无法事后重寻址/重渲。简单。
-- **Option B · 子节点引用**：引入「node X, strokes[ids]」引用，贯穿 selected-node 上下文 + `snapshot_node` 接受 stroke 过滤 + wire 类型。强大（可重渲、可持久引用）但要改一整条链路，重。
-  推荐先做 **Option A**（和 OCR / 图片附件基座一起），Option B 视需求再评估。
+- **整节点（≈整区域）**：**零新增**。node id 进 selected-nodes 上下文，agent 用现有 `snapshot_nodes(id)` 拉图理解、或直接复用自动推送的 selection-visual；定位坐标从节点状态直接取，**不需要发明 `flowBbox` 信封字段**。
+- **部分 stroke**：现有 `snapshot_nodes` 渲的是整节点/整簇，无法寻址「node X 的某几笔」。唯一新增 = **给 `snapshot_nodes` 加可选 per-node `strokeIds` 过滤**（Stage 3 手顺 0 已列该渲染器能力），agent 传 `{ nodeId, strokeIds }` 拉子集渲染。这是「统一拉取」模型的自然延伸，不引入新的附图旁路。
+
+明确不做：**eager 预渲染+附图的旁路**（冗余，现有 selection-visual + `snapshot_nodes` 已覆盖）；把 stroke 变节点的持久化引用（超出所需）。
 
 ### Stage 4 — 语义与重组层（两条独立子轨，均依赖 Stage 3）
 
@@ -150,7 +154,7 @@ MVP 限制：笔画移动仅限原节点内（抽出/拆分 = Stage 4）；混�
 ```mermaid
 graph LR
   S1[Stage 1<br/>不自动选中 + 空间聚合] --> S2[Stage 2<br/>stroke 套索 MVP<br/>选择/删除/发图 + 变换 T]
-  S2 --> S3[Stage 3<br/>OCR 填充]
+  S2 --> S3[Stage 3<br/>拉取渲染理解<br/>+ 低保真 OCR 索引]
   S3 --> S4A[Stage 4A<br/>问题检测 / 半自动作答]
   S3 --> S4B[Stage 4B<br/>区域拆分 / 桥接合并]
   S1 -.纯交互修复，可先发.-> done((可独立提交))
@@ -158,7 +162,7 @@ graph LR
 
 - Stage 1 两项正交、可各自提交回滚，能马上开工。
 - Stage 2 是纯客户端编辑（stroke 套索选择 + 删除），不依赖 AI/渲染，可独立发。
-- Stage 3 自带 stroke→PNG 渲染器（复用服务端 `clusterToSvg` + stroke 过滤 + 捕获 T），OCR、部分选择→AI 上下文都收在这里。
+- Stage 3 **拉取优先**：理解走现有 `snapshot_nodes`（+ 新增可选 `strokeIds` 过滤）拉图；OCR 只做**低保真索引/触发**，默认惰性，Stage 3 第一版可只做拉图、不跑 eager OCR。渲染器复用服务端 `clusterToSvg`（+ stroke 过滤 + 捕获变换 T 供 `line.bbox` 对齐）。
 - Stage 4 两条子轨都只依赖 Stage 3，彼此独立、可并行或分先后。
 
 ---
@@ -171,6 +175,6 @@ graph LR
 
 ## 6. 决策记录（为何如此）
 
-- **为何 sketch 近期不去 md 化 / 不动持久化**：sketch 的 `.md` 仅为持久化 label（结构 PUT 会剥掉 `label` / `labelSource`），并非 AI 特性；agent 看到的 `label` 与 `file=` 由 [node-ref.ts](../../apps/server/src/modules/agent/node-ref.ts) / [node-element.ts](../../apps/server/src/modules/agent/conversation/prompt/node-element.ts) 从结构态纯函数现算，不依赖文件存在。未来 OCR 会让区域 MD 有真实文本内容，届时 sketch 更应保持 text-bearing（body 存转写）而非无文件——因此「归零 .md」被反转，改为「区域存转写」。
+- **为何 sketch 近期不去 md 化 / 不动持久化**：sketch 的 `.md` 仅为持久化 label（结构 PUT 会剥掉 `label` / `labelSource`），并非 AI 特性；agent 看到的 `label` 与 `file=` 由 [node-ref.ts](../../apps/server/src/modules/agent/node-ref.ts) / [node-element.ts](../../apps/server/src/modules/agent/conversation/prompt/node-element.ts) 从结构态纯函数现算，不依赖文件存在。未来 OCR 会让区域 MD 带上**低保真索引文本**（可搜索、供问句检测），届时 sketch 更应保持 text-bearing（body 存该索引）而非无文件——因此「归零 .md」被反转，改为「区域存 OCR 索引」。注意：该 body 文本是**索引、非权威内容**，agent 的理解仍走拉取的区域图片（见 Stage 3）。
 - **为何不把 sketch 收编进 PointerRouterCore / 不动 `acceptsPointer`**：这是已论证过的取舍（overlay 形态对 sketch 密集开发更内聚）。触发重构的信号是语义（出现手掌拒识 / 压感 / 笔尾橡皮等专属输入规则）而非结构。本方案不引入这些规则，故维持现状；仅建议 Stage 1 把会话 / 聚合逻辑隔离成独立 helper，为将来可能的收编留干净接缝。
 - **为何拆分靠重跑而非拼接**：见 §2；把最脏的「文本重分段」化简为「各区域独立重跑 OCR」，永远正确且复用同一管线。
