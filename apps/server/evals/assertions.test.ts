@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { evaluateAssertions } from '../../evals/assertions.js';
+import { evaluateAssertions } from './assertions.js';
 
-import type { Trace } from '../../evals/trace.js';
+import type { Trace } from './trace.js';
 
 function traceWithTool(name: string, ok: boolean): Trace {
   return {
