@@ -47,9 +47,7 @@ function seed(canvasId: string, nodes: SeedNode[]): void {
   });
 }
 
-function byId(
-  result: ReturnType<typeof inspectNodes>,
-): Map<
+function byId(result: ReturnType<typeof inspectNodes>): Map<
   string,
   {
     position: { x: number; y: number };

@@ -7,7 +7,7 @@ Opinionated layouts for structured diagrams (architecture diagrams, flowcharts, 
 - The Space uses x (right = positive) and y (down = positive) coordinates.
 - A standard node is about **400px wide** and **300px tall**. Use a gap of **~50px** between nodes.
 - Headers / labels can be narrower (≈250px wide).
-- **`position` is required** on every `CREATE_NODES` entry. It is **parent-local**: relative to the node's `parentId` frame, or absolute canvas coords when there is no parent (root). It is the same coordinate space as the `position` you read from `inspect_nodes` (not `absolutePosition`). There is no fallback layout — if you don't pick a slot, the call is rejected.
+- **`position` is required** on every `CREATE_NODES` entry. It is **parent-local**: relative to the node's `parentId` frame, or absolute canvas coords when there is no parent (root). It is the same coordinate space as the `position` you read from `inspect_nodes` (not `absolutePosition`). There is no auto-layout — if you omit `position`, the engine falls back to `(0, 0)` (often off-screen), so always pick an explicit slot.
 
 ## Positioning patterns
 
