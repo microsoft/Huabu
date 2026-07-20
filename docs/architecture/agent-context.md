@@ -78,13 +78,13 @@ The envelope splits "where the user pointed this turn" into orthogonal parts ([e
 
 Key differences: **selection / anchor point at existing canvas nodes** (enriched with a `preview` via node-ref; content via tools); **attachment is a one-off off-canvas asset** (content inlined directly). Anchor is "a single focus point + neighbourhood"; selection is "a set of node metadata".
 
-For both selection and anchor, the server enriches each node into an agent-facing object via the shared `describeNode` assembler (see §5) — `file` (`nodes/<safeLabel>.md`) + `preview` (ladder `summary > content[:120] > src`) + `rev`, plus the parent label for frames. **No content / geometry sent** — content via `read("nodes/<id>.md")`, layout/style via `inspect_nodes`.
+For both selection and anchor, the server enriches each node into an agent-facing object via the shared `describeNode` assembler (see §5) — `filename` (`nodes/<safeLabel>.md`) + `preview` (ladder `summary > content[:120] > src`) + `rev`, plus the parent label for frames. **No content / geometry sent** — content via `read("nodes/<id>.md")`, layout/style via `inspect_nodes`.
 
 ---
 
 ## 5. How a node becomes context (`describeNode` / `renderNodes`)
 
-Every node that reaches the model — a selected node, a neighbour, an outline/inspect row — is assembled by **one** function and (for prompt text) rendered by **one** translator. This is the single place the node's `label / file / preview / rev` shape is decided, so the call sites cannot drift.
+Every node that reaches the model — a selected node, a neighbour, an outline/inspect row — is assembled by **one** function and (for prompt text) rendered by **one** translator. This is the single place the node's `label / filename / preview / rev` shape is decided, so the call sites cannot drift.
 
 Code: [node-prompt.ts](../../apps/server/src/modules/canvas/node-prompt.ts) (assemble) + [node-element.ts](../../apps/server/src/modules/agent/conversation/prompt/node-element.ts) (`renderNodes`).
 
@@ -94,14 +94,16 @@ ONE rule: **the node carries whatever authored info the caller already has; anyt
 
 `level` is what the caller claims it needs:
 
-| level       | shape              | fields                                       |
-| ----------- | ------------------ | -------------------------------------------- |
-| `'preview'` | `AgentNodePreview` | id, type, label, **file**, preview, **rev**  |
-| `'outline'` | `AgentNodeOutline` | preview + position, size, parentFrame, style |
+| level       | shape              | fields                                                         |
+| ----------- | ------------------ | -------------------------------------------------------------- |
+| `'preview'` | `AgentNodePreview` | id, type, label, **filename**, preview, **rev**                |
+| `'outline'` | `AgentNodeOutline` | preview + position, absolutePosition, size, parentFrame, style |
 
 Both agent-facing levels **always carry `rev`** (the freshness / CAS token — see [agent-node-freshness-cas-plan](../proposals/agent-node-freshness-cas-plan.md)). The rev-less L0 `ref` is **deliberately not** an agent-facing shape: a node without `rev` can't participate in re-read / write-guard, so it stays internal to the pure ref builder. Parent-frame labels (a bare string, not a node) use `nodeLabel(store, id)`.
 
-`file` is `nodes/<safeLabel>.md`, derived from the (sidecar) label — the same path the RFS serves and whose `ETag` equals `rev`. Sourcing the label from the sidecar is what keeps that path real; reading it from `space.json` (always empty) would collapse it to a dead `nodes/<id>.md`.
+`AgentNodeOutline` carries geometry as a **local-vs-world pair**: `position` is parent-local (relative to the direct parent frame, or absolute for a root node) and is the sole writable coordinate; `absolutePosition` is the parent-chain-resolved world coordinate, read-only.
+
+`filename` is `nodes/<safeLabel>.md`, derived from the (sidecar) label — the same path the RFS serves and whose `ETag` equals `rev`. Sourcing the label from the sidecar is what keeps that path real; reading it from `space.json` (always empty) would collapse it to a dead `nodes/<id>.md`.
 
 ### 5.2 `renderNodes(nodes)` — data object → `<node/>` XML
 

@@ -111,7 +111,7 @@ export const NodeCreateInputSchema = Type.Object({
   position: Type.Optional(
     Type.Object(PointSchema.properties, {
       description:
-        "Required. The new node's top-left (x, y) in absolute canvas coordinates. Marked optional only for schema compatibility — always pass explicit coordinates: there is no auto-layout, so an omitted position drops the node at a default spot away from the user's current view, where they won't find it.",
+        "Required. The new node's top-left (x, y) in **parent-local** coordinates: relative to `parentId`'s frame, or absolute canvas coordinates when there is no `parentId` (root). Mirror the `position` field you read from `inspect_nodes` — NOT `absolutePosition`. Marked optional only for schema compatibility — always pass explicit coordinates: there is no auto-layout, so an omitted position drops the node at a default spot away from the user's current view, where they won't find it. Placing into a `column`/`row` frame? The position is only a sort hint — the frame decides the final slot.",
     }),
   ),
   size: Type.Optional(NodeSizeSchema),

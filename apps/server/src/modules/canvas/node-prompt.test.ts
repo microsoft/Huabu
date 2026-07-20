@@ -136,6 +136,26 @@ describe('describeNode — outline level', () => {
     expect(node.summary).toBe('Sum');
     expect(node.preview).toBe('Body');
     expect(typeof node.rev).toBe('string');
+    // absolutePosition defaults to position when the caller omits it.
+    expect(node.absolutePosition).toEqual({ x: 10, y: 20 });
+  });
+
+  it('carries an explicit absolutePosition distinct from parent-local position', () => {
+    const store = stubStore({ n1: { label: 'Node' } });
+    const node = describeNode(
+      store,
+      {
+        id: 'n1',
+        type: 'note',
+        position: { x: 50, y: 60 },
+        absolutePosition: { x: 1050, y: 560 },
+        size: { width: 30, height: 40 },
+        parentFrame: { id: 'f1', label: 'Frame' },
+      },
+      'outline',
+    );
+    expect(node.position).toEqual({ x: 50, y: 60 });
+    expect(node.absolutePosition).toEqual({ x: 1050, y: 560 });
   });
 });
 

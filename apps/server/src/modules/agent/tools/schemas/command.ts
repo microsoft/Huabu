@@ -93,7 +93,10 @@ export const AgentCanvasCommandSchema = Type.Union([
         }),
       ),
     },
-    { description: 'Set position and/or size on existing nodes.' },
+    {
+      description:
+        "Set position and/or size on existing nodes. `position` is **parent-local** (relative to the node's current parent frame, or absolute for a root node) — mirror the `position` you read from `inspect_nodes`, not `absolutePosition`.",
+    },
   ),
   Type.Object(
     {

@@ -85,6 +85,12 @@ Every `CanvasCommand`:
 4. Must use explicit operands (node ids, frame ids, edge ids, scope).
 5. Returns `applied: false` with no side effects if it cannot be applied.
 
+### Coordinate space (parent-local)
+
+Node geometry on `CanvasCommand` (`CREATE_NODES.position`, `SET_NODE_GEOMETRY.position`) is **parent-local**: relative to the node's direct parent frame, or absolute canvas coordinates when the node has no parent (root-local == world). This is the single coordinate contract for every caller — web resolvers already convert gestures to parent-local before emitting commands (`resolveAddNodes` subtracts the target frame's absolute origin), and the agent tool schema mirrors it. There is no absolute→relative adapter between the tool boundary and the executor.
+
+The executor interprets the submitted `position` in that local space; a subsequent frame-fit or structured-layout pass may then normalize the persisted local value (e.g. a hug frame moves its origin and rewrites children's locals to preserve their world placement; a `column`/`row` frame re-slots children and treats `position` only as an intra-track sort key). So the contract is "interpret the input as parent-local", not "persist the numeric input verbatim". The agent-facing read side exposes the same `position` plus a read-only resolved `absolutePosition`.
+
 ### Command Catalog
 
 See `packages/shared/src/types/canvas/command.ts` for the full discriminated union. Summary:

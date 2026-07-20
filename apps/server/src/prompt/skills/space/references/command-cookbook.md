@@ -16,7 +16,7 @@ Composed `space_commands` sequences for common user intents. When a step needs t
 | Convert a frame back to siblings       | `DISSOLVE_FRAME`                                                                                                                                |
 | Move a node into a frame               | `SET_NODE_PARENT { nodeId, parentId }`                                                                                                          |
 | Detach a node from its frame           | `SET_NODE_PARENT { nodeId, parentId: null } `                                                                                                   |
-| Add standalone nodes to existing Space | `inspect_nodes`(anchor) → `CREATE_NODES` with position = anchor.position + (anchor.size.width + 100, 0).                                        |
+| Add standalone nodes to existing Space | `inspect_nodes`(anchor) → `CREATE_NODES` (root, no `parentId`) with position = anchor.absolutePosition + (anchor.size.width + 100, 0).          |
 
 ## Recipe: brainstorm from a source
 

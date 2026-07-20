@@ -7,7 +7,7 @@ Opinionated layouts for structured diagrams (architecture diagrams, flowcharts, 
 - The Space uses x (right = positive) and y (down = positive) coordinates.
 - A standard node is about **400px wide** and **300px tall**. Use a gap of **~50px** between nodes.
 - Headers / labels can be narrower (≈250px wide).
-- **`position` is required** on every `CREATE_NODES` entry and is honoured verbatim by the engine. There is no fallback layout to fall back on — if you don't pick a slot, the call will be rejected.
+- **`position` is required** on every `CREATE_NODES` entry. It is **parent-local**: relative to the node's `parentId` frame, or absolute canvas coords when there is no parent (root). It is the same coordinate space as the `position` you read from `inspect_nodes` (not `absolutePosition`). There is no auto-layout — if you omit `position`, the engine falls back to `(0, 0)` (often off-screen), so always pick an explicit slot.
 
 ## Positioning patterns
 
@@ -31,7 +31,7 @@ Place the centre at `(cx, cy)`; place N children on a ring of radius `r`. For ev
 
 - Create a frame for each logical group / layer, sized to enclose its children with **~40px padding** on every side.
 - Use `SET_NODE_PARENT` to parent child nodes into the frame.
-- **Position the frame first**, then position children. Child positions are absolute (Space-relative), not frame-relative — but it is easier to think of children as offsets from the frame's top-left.
+- **Position the frame first**, then position children. Child `position` is **frame-relative** (parent-local): a child at `(0, 0)` sits at the frame's top-left. So the coordinates in the patterns above are the child's offsets **inside** the frame, starting from `(0, 0)` + your padding.
 - Give the frame a clear `data.label` so the group is identifiable when zoomed out.
 
 ### Structured frame layout (`column` / `row`)
@@ -81,7 +81,7 @@ Determine: number of tracks (rows), nodes per track, sub-nodes per main node, re
 - Sub-nodes: `+250px below their main row`.
 - Horizontal: header at `x = 0` (text node, w=250, bold), main nodes at `x = 300, 750, 1200, 1650` (450px spacing). Sub-nodes centred horizontally below their parent.
 - Sizes: header w=250, main w=400, sub w=350.
-- Always set an explicit `position` on every node — it is honoured verbatim.
+- Always set an explicit `position` on every node — in parent-local coordinates (frame-relative for framed children, absolute for root nodes).
 
 ### Colour per track
 

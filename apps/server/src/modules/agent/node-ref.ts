@@ -90,19 +90,31 @@ export interface AgentNodePreview extends AgentNodeRef {
  * an object that carries the parent's display label too — saves the
  * model a second `read` just to learn what frame a node lives in.
  *
- * `position` is in absolute canvas coordinates (already resolved
- * through any parent-frame chain).
+ * Coordinates use a local-vs-world split:
+ *   - `position` is **parent-local** — relative to the direct parent
+ *     frame, or absolute for a root node (no parent). This is the value
+ *     the agent echoes back when creating / moving a node.
+ *   - `absolutePosition` is the **world** coordinate (parent-chain
+ *     resolved), read-only, for proximity / global-layout reasoning.
  *
  * Used by:
  *  - canvas outline (`get_canvas_outline`)
  *  - inspect_nodes results
- *  - intent-recognition canvas snapshot
  */
 export interface AgentNodeOutline extends AgentNodePreview {
   /** Parent frame, when the node lives inside one. */
   parentFrame?: { id: string; label?: string };
-  /** Absolute position on canvas (top-left corner). */
+  /**
+   * Parent-local top-left: relative to the direct parent frame, or
+   * absolute when the node has no parent. This is the sole writable
+   * coordinate — echo it back on `CREATE_NODES` / `SET_NODE_GEOMETRY`.
+   */
   position: { x: number; y: number };
+  /**
+   * World top-left (parent-chain resolved). Read-only; for proximity /
+   * global-layout reasoning. Equals `position` for a root node.
+   */
+  absolutePosition: { x: number; y: number };
   /** Effective dimensions (measured > styled > 0 fallback). */
   size: { width: number; height: number };
   /**
@@ -146,6 +158,12 @@ export interface NodePreviewInput extends NodeRefInput {
 export interface NodeOutlineInput extends NodePreviewInput {
   parentFrame?: { id: string; label?: string };
   position: { x: number; y: number };
+  /**
+   * World coordinate (parent-chain resolved). Optional on input;
+   * callers that know only a single coordinate space (e.g. a root node)
+   * may omit it and it defaults to `position`.
+   */
+  absolutePosition?: { x: number; y: number };
   size: { width: number; height: number };
   style?: Record<string, unknown>;
 }
@@ -248,6 +266,7 @@ export function buildAgentNodeOutline(
   const out: AgentNodeOutline = {
     ...base,
     position: input.position,
+    absolutePosition: input.absolutePosition ?? input.position,
     size: input.size,
   };
   if (input.parentFrame) out.parentFrame = input.parentFrame;

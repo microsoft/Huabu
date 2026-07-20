@@ -49,7 +49,7 @@ import {
   type CanvasNode,
 } from '@sediment/shared/canvas-engine';
 
-import { describeNode, nodeLabel } from './node-prompt.js';
+import { describeNode, nodeLabel, type NodeInput } from './node-prompt.js';
 import { getCanvasStore } from '../storage/index.js';
 
 import type { AgentNodeOutline } from '../agent/node-ref.js';
@@ -174,6 +174,46 @@ function readVisualStyle(
     : undefined;
 }
 
+/**
+ * Build the shared `describeNode` input for a spatial node: type + inline
+ * `content` / `src` + the dual coordinate contract + size + `parentFrame`.
+ *
+ * Coordinates: `position` is parent-local (the raw stored value);
+ * `absolutePosition` is the parent-chain-resolved world coordinate. They
+ * coincide for root nodes.
+ *
+ * `style` is layered on by the caller — opt-in for outline, always for
+ * inspect — so it is deliberately left off here.
+ */
+function spatialNodeInput(
+  s: SpatialNode,
+  raw: CanvasNode | undefined,
+  parentLabel: string | undefined,
+): NodeInput {
+  const rawData = raw?.data as Record<string, unknown> | undefined;
+  return {
+    id: s.id,
+    type: (s.type ?? raw?.type ?? 'note') as CanvasNodeType,
+    ...(typeof rawData?.['content'] === 'string'
+      ? { content: rawData['content'] as string }
+      : {}),
+    ...(typeof rawData?.['src'] === 'string'
+      ? { src: rawData['src'] as string }
+      : {}),
+    position: raw?.position,
+    absolutePosition: { x: s.rect.x, y: s.rect.y },
+    size: { width: s.rect.width, height: s.rect.height },
+    ...(s.parentId
+      ? {
+          parentFrame: {
+            id: s.parentId,
+            ...(parentLabel ? { label: parentLabel } : {}),
+          },
+        }
+      : {}),
+  };
+}
+
 // ─── Public: get_canvas_outline ─────────────────────────────────────────────
 
 /**
@@ -263,30 +303,12 @@ export function buildCanvasOutline(
 
   const nodes: CanvasOutlineNode[] = bundle.spatialNodes.map((s) => {
     const raw = bundle.rawById.get(s.id);
-    const rawData = raw?.data as Record<string, unknown> | undefined;
     const parentLabel = s.parentId ? memoLabel(s.parentId) : undefined;
     const style = opts.includeStyle ? readVisualStyle(raw) : undefined;
     const out: CanvasOutlineNode = describeNode(
       store,
       {
-        id: s.id,
-        type: (s.type ?? raw?.type ?? 'note') as CanvasNodeType,
-        ...(typeof rawData?.['content'] === 'string'
-          ? { content: rawData['content'] as string }
-          : {}),
-        ...(typeof rawData?.['src'] === 'string'
-          ? { src: rawData['src'] as string }
-          : {}),
-        position: { x: s.rect.x, y: s.rect.y },
-        size: { width: s.rect.width, height: s.rect.height },
-        ...(s.parentId
-          ? {
-              parentFrame: {
-                id: s.parentId,
-                ...(parentLabel ? { label: parentLabel } : {}),
-              },
-            }
-          : {}),
+        ...spatialNodeInput(s, raw, parentLabel),
         ...(style ? { style } : {}),
       },
       'outline',
@@ -671,30 +693,10 @@ export function inspectNodes(
 
   const nodes: InspectNodeResult[] = resultNodes.map((s) => {
     const raw = bundle.rawById.get(s.id);
-    const rawData = raw?.data as Record<string, unknown> | undefined;
     const parentLabel = s.parentId ? memoLabel(s.parentId) : undefined;
     const base = describeNode(
       store,
-      {
-        id: s.id,
-        type: (s.type ?? raw?.type ?? 'note') as CanvasNodeType,
-        ...(typeof rawData?.['content'] === 'string'
-          ? { content: rawData['content'] as string }
-          : {}),
-        ...(typeof rawData?.['src'] === 'string'
-          ? { src: rawData['src'] as string }
-          : {}),
-        position: { x: s.rect.x, y: s.rect.y },
-        size: { width: s.rect.width, height: s.rect.height },
-        ...(s.parentId
-          ? {
-              parentFrame: {
-                id: s.parentId,
-                ...(parentLabel ? { label: parentLabel } : {}),
-              },
-            }
-          : {}),
-      },
+      spatialNodeInput(s, raw, parentLabel),
       'outline',
     );
     // Inspect deliberately omits text hints (`summary` / `preview`); agents
