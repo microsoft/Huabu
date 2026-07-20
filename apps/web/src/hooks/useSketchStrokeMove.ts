@@ -1,13 +1,22 @@
 import { useCallback, useRef } from 'react';
 
 import {
+  computeFrameFit,
+  getAbsolutePosition,
+  getFrameSizing,
+} from '@sediment/shared/canvas-engine';
+
+import {
   buildMoveStrokesCommands,
   commitStrokeCommands,
 } from '@/components/Nodes/sketch/sketchMerge';
+import { resolveFrameAtPoint } from '@/handler/canvasCommand/utils';
 import useCanvasStore from '@/store/canvasStore';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 
+import type { FrameFitPreview } from '@/store/gesturePreviewStore';
 import type { CanvasCommand, CanvasNodeId } from '@sediment/shared';
+import type { NestableNode } from '@sediment/shared/canvas-engine';
 import type { Node, NodeChange, ReactFlowInstance } from '@xyflow/react';
 import type { MutableRefObject } from 'react';
 
@@ -29,6 +38,167 @@ function asDragMouseEvent(event: PointerEvent): MouseEvent {
     clientX: event.clientX,
     clientY: event.clientY,
   } as unknown as MouseEvent;
+}
+
+/**
+ * Stage 4B drop decision for a PURE stroke selection, based on the drop
+ * point:
+ *  - over a DIFFERENT sketch region        → `merge` into it,
+ *  - over empty canvas (outside every source region) → `split` into a
+ *    brand-new region,
+ *  - still inside a source region           → `in-node` (plain Stage-2
+ *    translate, no re-homing).
+ *
+ * Region bboxes are computed in ABSOLUTE flow (`getAbsolutePosition`) so
+ * framed regions hit-test correctly. On overlap the visually-frontmost
+ * (last in array) region wins.
+ */
+type StrokeDropDecision =
+  | { kind: 'merge'; targetNodeId: CanvasNodeId }
+  | { kind: 'split'; targetNodeId: null }
+  | { kind: 'in-node' };
+
+function resolveStrokeDropTarget(
+  nodes: Node[],
+  point: { x: number; y: number },
+  sourceIds: string[],
+): StrokeDropDecision {
+  const nn = nodes as unknown as NestableNode[];
+  const sourceSet = new Set(sourceIds);
+  const contains = (node: Node): boolean => {
+    if (node.type !== 'sketch') return false;
+    const abs = getAbsolutePosition(nn, node.id) ?? node.position;
+    const data = node.data as
+      | { initialSize?: { width: number; height: number } }
+      | undefined;
+    const w =
+      node.measured?.width ?? node.width ?? data?.initialSize?.width ?? 0;
+    const h =
+      node.measured?.height ?? node.height ?? data?.initialSize?.height ?? 0;
+    return (
+      point.x >= abs.x &&
+      point.x <= abs.x + w &&
+      point.y >= abs.y &&
+      point.y <= abs.y + h
+    );
+  };
+
+  // Prefer merging into a non-source region under the drop point.
+  for (let i = nodes.length - 1; i >= 0; i--) {
+    const node = nodes[i];
+    if (sourceSet.has(node.id)) continue;
+    if (contains(node)) {
+      return { kind: 'merge', targetNodeId: node.id as CanvasNodeId };
+    }
+  }
+
+  // No foreign region hit: still inside a source → in-node; else split.
+  for (const id of sourceIds) {
+    const node = nodes.find((n) => n.id === id);
+    if (node && contains(node)) return { kind: 'in-node' };
+  }
+  return { kind: 'split', targetNodeId: null };
+}
+
+/** Axis-aligned flow bbox of a polygon, translated by a drag offset. */
+function polygonBoundsWithOffset(
+  poly: Array<{ x: number; y: number }>,
+  offset: { dx: number; dy: number },
+): { x: number; y: number; width: number; height: number } | null {
+  let x1 = Infinity;
+  let y1 = Infinity;
+  let x2 = -Infinity;
+  let y2 = -Infinity;
+  for (const p of poly) {
+    if (p.x < x1) x1 = p.x;
+    if (p.y < y1) y1 = p.y;
+    if (p.x > x2) x2 = p.x;
+    if (p.y > y2) y2 = p.y;
+  }
+  if (!Number.isFinite(x1)) return null;
+  return {
+    x: x1 + offset.dx,
+    y: y1 + offset.dy,
+    width: x2 - x1,
+    height: y2 - y1,
+  };
+}
+
+/**
+ * While a PURE stroke selection is being dragged, mirror the frame
+ * accept-preview a whole-node drag gets for free (via the store's
+ * `onNodeDrag` → `computeFrameFit`). Shown only for the SPLIT case — drop
+ * point over a frame and NOT merging into another region — since only then
+ * does a new region get reparented into that frame; cleared otherwise
+ * (merge / in-node / blank top-level). Reuses the same `computeFrameFit`
+ * + `setFrameFitPreviews` path so the overlay renders identically to a
+ * node drag; the incoming rect is the retained lasso polygon's bounds
+ * translated by the live drag offset.
+ */
+function updateFrameDropPreviewForStrokeDrag(
+  dropFlow: { x: number; y: number },
+  offset: { dx: number; dy: number },
+): void {
+  const gp = useGesturePreviewStore.getState();
+  const nodes = useCanvasStore.getState().nodes;
+  const sel = gp.sketchStrokeSelection;
+  const sourceIds = Object.keys(sel).filter((id) => (sel[id]?.length ?? 0) > 0);
+  if (sourceIds.length === 0) {
+    gp.clearFrameFitPreview();
+    return;
+  }
+
+  const nn = nodes as unknown as NestableNode[];
+  // Only a SPLIT reparents into a frame; merge / in-node do not.
+  const decision = resolveStrokeDropTarget(nodes, dropFlow, sourceIds);
+  const hit =
+    decision.kind === 'split' ? resolveFrameAtPoint(nn, dropFlow) : null;
+  const frameNode = hit ? nodes.find((n) => n.id === hit.parentId) : undefined;
+  if (!hit || !frameNode) {
+    gp.clearFrameFitPreview();
+    return;
+  }
+  const frameId = hit.parentId;
+
+  // Grow-to-fit preview for `hug` frames (matches node drag); a manual
+  // (pinned) frame just highlights its current bounds as the drop target.
+  const poly = gp.sketchSelectionPolygon;
+  const movedRect = poly ? polygonBoundsWithOffset(poly, offset) : null;
+  const fit =
+    movedRect && getFrameSizing(frameNode) === 'hug'
+      ? computeFrameFit(nn, frameId, { includeAbsoluteRects: [movedRect] })
+      : null;
+
+  let preview: FrameFitPreview;
+  if (fit) {
+    let absX = fit.position.x;
+    let absY = fit.position.y;
+    if (frameNode.parentId) {
+      const pa = getAbsolutePosition(nn, frameNode.parentId);
+      if (pa) {
+        absX += pa.x;
+        absY += pa.y;
+      }
+    }
+    preview = {
+      frameId,
+      position: { x: absX, y: absY },
+      width: fit.width,
+      height: fit.height,
+      role: 'target',
+    };
+  } else {
+    const fa = getAbsolutePosition(nn, frameId) ?? frameNode.position;
+    preview = {
+      frameId,
+      position: { x: fa.x, y: fa.y },
+      width: frameNode.measured?.width ?? frameNode.width ?? 0,
+      height: frameNode.measured?.height ?? frameNode.height ?? 0,
+      role: 'target',
+    };
+  }
+
+  gp.setFrameFitPreviews([preview]);
 }
 
 /**
@@ -160,6 +330,11 @@ export function useSketchStrokeMove({
           drag.primaryNode as Node,
           drag.draggedNodes,
         );
+      } else {
+        // Pure stroke drag: no node-drag lifecycle runs, so mirror the
+        // frame accept-preview here (shown only when the strokes would
+        // split into a frame).
+        updateFrameDropPreviewForStrokeDrag(cur, { dx, dy });
       }
     },
     [rfInstanceRef],
@@ -173,8 +348,49 @@ export function useSketchStrokeMove({
     const preview = useGesturePreviewStore.getState();
     const offset = preview.sketchStrokeMovePreview;
     preview.setSketchStrokeMovePreview(null);
+    preview.clearFrameFitPreview();
     const moved = !!offset && (offset.dx !== 0 || offset.dy !== 0);
     const store = useCanvasStore.getState();
+
+    // Stage 4B: a PURE stroke selection (no whole-node drag) dropped onto a
+    // DIFFERENT region or empty canvas is a cross-region transfer — split
+    // into a new region or merge into another — rather than a Stage-2
+    // in-node translate. Mixed selections keep the in-node behaviour below.
+    if (moved && offset && !drag.nodeDragStarted) {
+      const inst = rfInstanceRef.current;
+      const sel = preview.sketchStrokeSelection;
+      const sourceIds = Object.keys(sel).filter(
+        (id) => (sel[id]?.length ?? 0) > 0,
+      );
+      if (inst && sourceIds.length > 0) {
+        const dropFlow = inst.screenToFlowPosition({
+          x: event.clientX,
+          y: event.clientY,
+        });
+        const decision = resolveStrokeDropTarget(
+          store.nodes,
+          dropFlow,
+          sourceIds,
+        );
+        if (decision.kind !== 'in-node') {
+          const sources = sourceIds.map((id) => ({
+            nodeId: id,
+            strokeIds: sel[id],
+          }));
+          // The strokes are about to move to a new / other node, so the
+          // per-node selection map and retained lasso loop no longer
+          // describe them — clear the transient selection first.
+          preview.clearSketchStrokeSelection();
+          store.moveSketchStrokesToRegion({
+            sources,
+            dropDelta: { dx: offset.dx, dy: offset.dy },
+            targetNodeId: decision.targetNodeId,
+            dropPoint: dropFlow,
+          });
+          return;
+        }
+      }
+    }
 
     // Bake the stroke subset move into each affected sketch node.
     const strokeCommands: CanvasCommand[] = [];
@@ -231,6 +447,7 @@ export function useSketchStrokeMove({
     if (drag?.pointerId !== event.pointerId) return;
     dragRef.current = null;
     useGesturePreviewStore.getState().setSketchStrokeMovePreview(null);
+    useGesturePreviewStore.getState().clearFrameFitPreview();
     // Abort the node drag lifecycle if it was opened.
     if (drag.nodeDragStarted) {
       const store = useCanvasStore.getState();

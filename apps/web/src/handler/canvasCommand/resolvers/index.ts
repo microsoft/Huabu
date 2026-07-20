@@ -4,6 +4,7 @@ export { default as resolveGroupRectIntoFrame } from './resolveGroupRectIntoFram
 export { default as resolveGroupSelectionIntoFrame } from './resolveGroupSelectionIntoFrame';
 export { default as resolveMoveNoteBlockIntoNote } from './resolveMoveNoteBlockIntoNote';
 export { default as resolveMoveNoteExcerpt } from './resolveMoveNoteExcerpt';
+export { default as resolveMoveSketchStrokesToRegion } from './resolveMoveSketchStrokesToRegion';
 export { default as resolveNodeDragStop } from './resolveNodeDragStop';
 export { default as resolvePasteClipboard } from './resolvePasteClipboard';
 export { default as resolveSelectNodes } from './resolveSelectNodes';

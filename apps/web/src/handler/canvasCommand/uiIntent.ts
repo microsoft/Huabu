@@ -16,6 +16,7 @@ import {
   resolveGroupSelectionIntoFrame,
   resolveMoveNoteBlockIntoNote,
   resolveMoveNoteExcerpt,
+  resolveMoveSketchStrokesToRegion,
   resolveNodeDragStop,
   resolvePasteClipboard,
   resolveSelectNodes,
@@ -252,6 +253,28 @@ export type CanvasUiIntent =
       reorderTarget?: { nodeId: string; position: 'before' | 'after' };
     }
   | { type: 'EXPAND_NODE'; nodeId: string }
+  | {
+      /**
+       * Stroke-level split / cross-region move (Stage 4B). Pulls the
+       * given strokes out of their source region(s) and re-homes them
+       * either into an existing region (`targetNodeId`) or a brand-new
+       * region (`targetNodeId === null`, a split). Source regions that
+       * lose every stroke are deleted; the whole thing is one undo entry.
+       */
+      type: 'MOVE_SKETCH_STROKES_TO_REGION';
+      /** Per-source stroke ids being moved (a lasso may span regions). */
+      sources: Array<{ nodeId: string; strokeIds: string[] }>;
+      /** Flow-space translation the user dragged the selection by. */
+      dropDelta: { dx: number; dy: number };
+      /** Existing region to merge into, or `null` to split into a new region. */
+      targetNodeId: string | null;
+      /**
+       * Flow-space drop point — used only for the split case to auto-pick
+       * the new region's parent frame (`resolveFrameAtPoint`). Ignored on
+       * merge, where the strokes adopt the target's own parent.
+       */
+      dropPoint: Point;
+    }
   | { type: 'CONVERT_NODE_TYPE'; nodeId: string; to: 'text' | 'note' };
 
 // ---------------------------------------------------------------------------
@@ -353,6 +376,8 @@ export function resolveUiIntent(
       return resolveMoveNoteExcerpt(intent, ui);
     case 'MOVE_NOTE_BLOCK_INTO_NOTE':
       return resolveMoveNoteBlockIntoNote(intent, ui);
+    case 'MOVE_SKETCH_STROKES_TO_REGION':
+      return resolveMoveSketchStrokesToRegion(intent, ui);
     case 'DELETE_NODES':
       return resolveDeleteNodes(intent, ui);
     case 'UPDATE_NODE_DATA':

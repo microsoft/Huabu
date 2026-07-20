@@ -36,6 +36,8 @@
  * creating a new sketch node.
  */
 
+import { getAbsolutePosition } from '@sediment/shared/canvas-engine';
+
 import { canvasHistoryManager } from '@/store/canvasHistoryManager';
 import useCanvasStore from '@/store/canvasStore';
 
@@ -45,6 +47,8 @@ import type {
   CanvasNodeId,
   SketchStroke,
 } from '@sediment/shared';
+import type { NestableNode } from '@sediment/shared/canvas-engine';
+import type { Node } from '@xyflow/react';
 
 /** Axis-aligned bounding box in flow-space coordinates. */
 export interface FlowBBox {
@@ -327,12 +331,30 @@ export function buildEraseCommands(
   targetNodeId: CanvasNodeId,
   removedStrokeIds: Set<string>,
 ): CanvasCommand[] {
-  if (removedStrokeIds.size === 0) return [];
-
   const node = useCanvasStore
     .getState()
     .nodes.find((n) => n.id === targetNodeId);
-  if (!node || node.type !== 'sketch') return [];
+  if (!node) return [];
+  return computeEraseCommands(node as Node, removedStrokeIds);
+}
+
+/**
+ * Pure core of {@link buildEraseCommands}: identical logic, but operating
+ * on a caller-supplied sketch node snapshot instead of reading the store —
+ * so it can run inside a pure UI-intent resolver. Shared with the
+ * stroke-transfer builder, whose "source side" (removing the moved strokes
+ * from each origin region) is exactly an erase.
+ *
+ * @param node              Sketch node snapshot to erase from.
+ * @param removedStrokeIds  Set of stroke ids to remove.
+ */
+export function computeEraseCommands(
+  node: Node,
+  removedStrokeIds: Set<string>,
+): CanvasCommand[] {
+  if (removedStrokeIds.size === 0) return [];
+  if (node.type !== 'sketch') return [];
+  const targetNodeId = node.id as CanvasNodeId;
 
   const data = node.data as CanvasSketchNodeData;
   const remaining = data.strokes.filter((s) => !removedStrokeIds.has(s.id));
@@ -522,6 +544,280 @@ export function buildMoveStrokesCommands(
           size: { width: unionW, height: unionH },
         },
       ],
+    },
+  ];
+}
+
+// ---------------------------------------------------------------------------
+// Stroke transfer: split into a new region / merge into another region
+// ---------------------------------------------------------------------------
+//
+// Unlike the erase / in-node-move builders above (which stay entirely inside
+// a single node and can treat `node.position` as a flat origin), a transfer
+// re-homes strokes into a DIFFERENT node — possibly under a different parent
+// frame. So the geometry here goes through ABSOLUTE flow coordinates
+// (`getAbsolutePosition`): bake each source's moved strokes into absolute
+// flow, then reframe them into the destination's local space. When source
+// and destination share a parent the offsets cancel and this reduces to the
+// same math the in-node builders use.
+
+/** Current render scale of a sketch node (measured size ÷ baked initialSize). */
+function sketchNodeScale(node: Node): { scaleX: number; scaleY: number } {
+  const data = node.data as CanvasSketchNodeData;
+  const baseW = data.initialSize?.width || 1;
+  const baseH = data.initialSize?.height || 1;
+  const curW = node.measured?.width ?? node.width ?? baseW;
+  const curH = node.measured?.height ?? node.height ?? baseH;
+  return { scaleX: curW / baseW, scaleY: curH / baseH };
+}
+
+/**
+ * Bake the given strokes into ABSOLUTE flow coordinates: apply the node's
+ * current resize scale and translate by the node's absolute top-left
+ * (`absOrigin` from `getAbsolutePosition`, so this is correct even when the
+ * node lives inside a frame), plus an optional extra translation (the drop
+ * delta). Extra point components (pressure at index 2, …) are preserved.
+ */
+function bakeStrokesToAbsFlow(
+  strokes: SketchStroke[],
+  absOrigin: { x: number; y: number },
+  scaleX: number,
+  scaleY: number,
+  extraDx = 0,
+  extraDy = 0,
+): SketchStroke[] {
+  return strokes.map((s) => ({
+    ...s,
+    points: s.points.map((p) => {
+      const fx = absOrigin.x + p[0] * scaleX + extraDx;
+      const fy = absOrigin.y + p[1] * scaleY + extraDy;
+      return p.length > 2 ? [fx, fy, ...p.slice(2)] : [fx, fy];
+    }),
+  }));
+}
+
+/**
+ * Tight bounding box (flow coords) of already-baked flow strokes, padded per
+ * stroke by its own `size / 2` so the perfect-freehand halo stays enclosed.
+ * Returns `null` when there are no finite points.
+ */
+function flowStrokesBounds(
+  strokes: SketchStroke[],
+): { x1: number; y1: number; x2: number; y2: number } | null {
+  let x1 = Infinity;
+  let y1 = Infinity;
+  let x2 = -Infinity;
+  let y2 = -Infinity;
+  for (const s of strokes) {
+    const pad = (s.size ?? 0) / 2;
+    for (const p of s.points) {
+      if (p[0] - pad < x1) x1 = p[0] - pad;
+      if (p[1] - pad < y1) y1 = p[1] - pad;
+      if (p[0] + pad > x2) x2 = p[0] + pad;
+      if (p[1] + pad > y2) y2 = p[1] + pad;
+    }
+  }
+  return Number.isFinite(x1) ? { x1, y1, x2, y2 } : null;
+}
+
+/** Reframe flow-coord strokes into a local space whose origin is (ox, oy). */
+function reframeFlowStrokes(
+  strokes: SketchStroke[],
+  ox: number,
+  oy: number,
+): SketchStroke[] {
+  return strokes.map((s) => ({
+    ...s,
+    points: s.points.map((p) =>
+      p.length > 2
+        ? [p[0] - ox, p[1] - oy, ...p.slice(2)]
+        : [p[0] - ox, p[1] - oy],
+    ),
+  }));
+}
+
+/** Parameters for {@link buildSketchStrokeTransferCommands}. */
+export interface SketchStrokeTransferParams {
+  /** Full node list — for absolute-position + target lookups. */
+  nodes: Node[];
+  /** Per-source stroke ids to pull out of each origin region. */
+  sources: Array<{ nodeId: CanvasNodeId; strokeIds: string[] }>;
+  /** Flow-space translation applied to the extracted strokes (drop delta). */
+  dropDelta: { dx: number; dy: number };
+  /**
+   * Existing sketch region to merge the strokes into, or `null` to split
+   * them out into a brand-new region.
+   */
+  targetNodeId: CanvasNodeId | null;
+  /** Pre-allocated id for the new region (used only when `targetNodeId` is `null`). */
+  newNodeId: CanvasNodeId;
+  /**
+   * Parent frame for the NEW region (a `findFrameAtPoint` / `resolveFrameAtPoint`
+   * result at the drop point). Ignored when merging into an existing target —
+   * the moved strokes simply adopt the target's own parent.
+   */
+  destParentId: CanvasNodeId | null;
+}
+
+/**
+ * Build the command batch for a stroke-level split / cross-region move:
+ * remove a subset of strokes from one or more source regions and re-home
+ * them either into an existing region (`targetNodeId`) or a fresh region
+ * (`targetNodeId === null`).
+ *
+ * Outcome per side:
+ *  - **Source(s)**: reuse {@link computeEraseCommands} — survivors are
+ *    reframed, or the whole node is deleted if every stroke moved out.
+ *  - **Destination**: the moved strokes are baked into absolute flow (with
+ *    the drop delta), unioned with the target's existing strokes (merge) or
+ *    on their own (split), then reframed into the destination's local space.
+ *
+ * Returns `[]` (a no-op) when nothing meaningful would move, so callers
+ * never delete strokes without re-homing them. The batch mixes
+ * `snapshot:'caller'` (`SET_NODE_GEOMETRY`) and self-snapshot commands
+ * (`CREATE_NODES` / `DELETE_NODES`); commit it inside a single
+ * `beginNodeDataGesture` / `endNodeDataGesture` bracket so it folds into one
+ * undo entry regardless of which branch fired.
+ *
+ * Pure over its `nodes` snapshot (no store reads), so it runs inside a
+ * UI-intent resolver.
+ */
+export function buildSketchStrokeTransferCommands(
+  params: SketchStrokeTransferParams,
+): CanvasCommand[] {
+  const { nodes, dropDelta, targetNodeId, newNodeId, destParentId } = params;
+  const nn = nodes as unknown as NestableNode[];
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+
+  // ── 1. Extract the moved strokes from every source into absolute flow ──
+  const extractedFlow: SketchStroke[] = [];
+  const sourceCommands: CanvasCommand[] = [];
+  for (const { nodeId, strokeIds } of params.sources) {
+    if (strokeIds.length === 0) continue;
+    // A source that is also the drop target is an in-node move, not a
+    // transfer — handled by the caller's move path, skip here.
+    if (nodeId === targetNodeId) continue;
+    const node = byId.get(nodeId);
+    if (!node || node.type !== 'sketch') continue;
+    const data = node.data as CanvasSketchNodeData;
+    const keep = new Set(strokeIds);
+    const moved = (data.strokes ?? []).filter((s) => keep.has(s.id));
+    if (moved.length === 0) continue;
+
+    const absOrigin = getAbsolutePosition(nn, nodeId) ?? node.position;
+    const { scaleX, scaleY } = sketchNodeScale(node);
+    extractedFlow.push(
+      ...bakeStrokesToAbsFlow(
+        moved,
+        absOrigin,
+        scaleX,
+        scaleY,
+        dropDelta.dx,
+        dropDelta.dy,
+      ),
+    );
+
+    // Source side = erase the moved strokes (rebake survivors / delete node
+    // when the region is emptied).
+    sourceCommands.push(...computeEraseCommands(node, keep));
+  }
+
+  const movedBounds = flowStrokesBounds(extractedFlow);
+  // Nothing meaningful to move (no source matched, or degenerate geometry) —
+  // abort entirely so we never delete strokes without re-homing them.
+  if (!movedBounds || extractedFlow.length === 0) return [];
+
+  if (targetNodeId !== null) {
+    // ── 2a. Merge the moved strokes into an existing region ──
+    const target = byId.get(targetNodeId);
+    if (!target || target.type !== 'sketch') return [];
+    const targetData = target.data as CanvasSketchNodeData;
+    const targetAbs = getAbsolutePosition(nn, targetNodeId) ?? target.position;
+    const { scaleX, scaleY } = sketchNodeScale(target);
+    const targetFlow = bakeStrokesToAbsFlow(
+      targetData.strokes ?? [],
+      targetAbs,
+      scaleX,
+      scaleY,
+    );
+
+    const all = [...targetFlow, ...extractedFlow];
+    const bounds = flowStrokesBounds(all);
+    if (!bounds) return [];
+    const unionW = bounds.x2 - bounds.x1;
+    const unionH = bounds.y2 - bounds.y1;
+    const reframed = reframeFlowStrokes(all, bounds.x1, bounds.y1);
+
+    const targetParentAbs = target.parentId
+      ? (getAbsolutePosition(nn, target.parentId) ?? { x: 0, y: 0 })
+      : { x: 0, y: 0 };
+
+    return [
+      ...sourceCommands,
+      {
+        type: 'MERGE_NODE_DATA',
+        patches: [
+          {
+            nodeId: targetNodeId,
+            patch: {
+              strokes: reframed,
+              initialSize: { width: unionW, height: unionH },
+            },
+          },
+        ],
+      },
+      {
+        type: 'SET_NODE_GEOMETRY',
+        items: [
+          {
+            nodeId: targetNodeId,
+            position: {
+              x: bounds.x1 - targetParentAbs.x,
+              y: bounds.y1 - targetParentAbs.y,
+            },
+            size: { width: unionW, height: unionH },
+          },
+        ],
+      },
+    ];
+  }
+
+  // ── 2b. Split the moved strokes out into a brand-new region ──
+  const unionW = movedBounds.x2 - movedBounds.x1;
+  const unionH = movedBounds.y2 - movedBounds.y1;
+  const reframed = reframeFlowStrokes(
+    extractedFlow,
+    movedBounds.x1,
+    movedBounds.y1,
+  );
+  const destParentAbs = destParentId
+    ? (getAbsolutePosition(nn, destParentId) ?? { x: 0, y: 0 })
+    : { x: 0, y: 0 };
+
+  return [
+    ...sourceCommands,
+    {
+      type: 'CREATE_NODES',
+      nodes: [
+        {
+          id: newNodeId,
+          nodeType: 'sketch',
+          position: {
+            x: movedBounds.x1 - destParentAbs.x,
+            y: movedBounds.y1 - destParentAbs.y,
+          },
+          size: { width: unionW, height: unionH },
+          ...(destParentId ? { parentId: destParentId } : {}),
+          // A split-off region must not steal selection (it would interrupt
+          // the pen and shadow nodes under its transparent bbox).
+          selectOnCreate: false,
+          data: {
+            strokes: reframed,
+            initialSize: { width: unionW, height: unionH },
+            origin: { type: 'user-created' },
+          },
+        },
+      ] as Extract<CanvasCommand, { type: 'CREATE_NODES' }>['nodes'],
     },
   ];
 }

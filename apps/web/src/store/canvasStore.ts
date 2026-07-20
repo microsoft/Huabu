@@ -438,6 +438,21 @@ type RFState = {
     targetNodeId: string;
     targetContentAfterInsert: string;
   }) => void;
+  /**
+   * Stroke-level split / cross-region move (Stage 4B). Pulls the given
+   * strokes out of their source region(s) and re-homes them either into an
+   * existing region (`targetNodeId`) or a brand-new region
+   * (`targetNodeId === null`). Wrapped in one `beginNodeDataGesture` /
+   * `endNodeDataGesture` bracket so the whole reorganisation — survivor
+   * reflow, source deletion, and the new/merged region — collapses into a
+   * single undo entry regardless of which command mix the resolver emits.
+   */
+  moveSketchStrokesToRegion: (input: {
+    sources: Array<{ nodeId: string; strokeIds: string[] }>;
+    dropDelta: { dx: number; dy: number };
+    targetNodeId: string | null;
+    dropPoint: { x: number; y: number };
+  }) => void;
   deleteNodes: (nodeIds: string[]) => void;
   disconnectEdges: (edgeIds: string[]) => void;
   setNodeGeometry: (
@@ -2786,6 +2801,35 @@ const useCanvasStore = create<RFState>()(
         targetNodeId,
         targetContentAfterInsert,
       });
+    },
+
+    moveSketchStrokesToRegion: ({
+      sources,
+      dropDelta,
+      targetNodeId,
+      dropPoint,
+    }) => {
+      // The transfer batch mixes caller-snapshot (`SET_NODE_GEOMETRY`) and
+      // self-snapshot (`CREATE_NODES` / `DELETE_NODES`) commands, so bracket
+      // it in the general data-gesture (arms + releases regardless of the
+      // command mix) to fold everything into one undo entry.
+      const before = get().nodes;
+      get().beginNodeDataGesture();
+      get().dispatchUiIntent({
+        type: 'MOVE_SKETCH_STROKES_TO_REGION',
+        sources,
+        dropDelta,
+        targetNodeId,
+        dropPoint,
+      });
+      if (get().nodes === before) {
+        // The resolver produced no applicable command (e.g. every source
+        // vanished between selection and drop). Drop the optimistic
+        // snapshot so no phantom empty undo entry is left behind.
+        canvasHistoryManager.rollbackGestureSnapshot();
+      } else {
+        get().endNodeDataGesture();
+      }
     },
 
     deleteNodes: (nodeIds) => {
