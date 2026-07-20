@@ -334,15 +334,15 @@
       }
       .hero-video::cue {
         font:
-          500 1.7vw/1.05 'Inter',
+          500 clamp(14px, 1.7vw, 20px)/1.05 'Inter',
           sans-serif;
         color: #fff;
-        background: rgba(0, 0, 0, 0.55);
+        background-color: rgba(0, 0, 0, 0.55);
       }
       .hero-video:fullscreen::cue,
       .hero-video:-webkit-full-screen::cue {
         font:
-          500 3.4vh/1.05 'Inter',
+          500 clamp(20px, 3.4vh, 34px)/1.05 'Inter',
           sans-serif;
       }
       .video-chrome {
@@ -2606,13 +2606,16 @@
         </div>
         <video
           class="hero-video"
-          src="https://github.com/microsoft/Huabu/releases/download/v0.9.0/Huabu-Video.mp4"
           poster="./Huabu-Video-Poster.jpg"
           controls
           preload="metadata"
           playsinline
           aria-label="Huabu product demo video"
         >
+          <source
+            src="https://github.com/microsoft/Huabu/releases/download/v0.9.0/Huabu-Video.mp4"
+            type="video/mp4"
+          />
           <track
             kind="subtitles"
             src="./Huabu-Video.vtt"
