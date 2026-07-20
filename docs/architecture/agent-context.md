@@ -94,12 +94,14 @@ ONE rule: **the node carries whatever authored info the caller already has; anyt
 
 `level` is what the caller claims it needs:
 
-| level       | shape              | fields                                       |
-| ----------- | ------------------ | -------------------------------------------- |
-| `'preview'` | `AgentNodePreview` | id, type, label, **file**, preview, **rev**  |
-| `'outline'` | `AgentNodeOutline` | preview + position, size, parentFrame, style |
+| level       | shape              | fields                                                         |
+| ----------- | ------------------ | -------------------------------------------------------------- |
+| `'preview'` | `AgentNodePreview` | id, type, label, **file**, preview, **rev**                    |
+| `'outline'` | `AgentNodeOutline` | preview + position, absolutePosition, size, parentFrame, style |
 
 Both agent-facing levels **always carry `rev`** (the freshness / CAS token — see [agent-node-freshness-cas-plan](../proposals/agent-node-freshness-cas-plan.md)). The rev-less L0 `ref` is **deliberately not** an agent-facing shape: a node without `rev` can't participate in re-read / write-guard, so it stays internal to the pure ref builder. Parent-frame labels (a bare string, not a node) use `nodeLabel(store, id)`.
+
+`AgentNodeOutline` carries geometry as a **local-vs-world pair**: `position` is parent-local (relative to the direct parent frame, or absolute for a root node) and is the sole writable coordinate; `absolutePosition` is the parent-chain-resolved world coordinate, read-only.
 
 `file` is `nodes/<safeLabel>.md`, derived from the (sidecar) label — the same path the RFS serves and whose `ETag` equals `rev`. Sourcing the label from the sidecar is what keeps that path real; reading it from `space.json` (always empty) would collapse it to a dead `nodes/<id>.md`.
 

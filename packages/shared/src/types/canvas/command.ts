@@ -54,11 +54,13 @@ type CanvasNodeCreateInputByType<T extends CanvasNodeType> = {
   nodeType: T;
   data?: Partial<Omit<Extract<NodeData, { type: T }>, 'type'>>;
   /**
-   * Top-left position of the new node. Required for every caller —
-   * the engine no longer ships a fallback layout. UI callers (drag-drop,
-   * paste, toolbar placement, group-into-frame, etc.) chose the slot
-   * themselves; agents must always emit an explicit position via the
-   * `space_commands` schema.
+   * Top-left position of the new node, in **parent-local** coordinates:
+   * relative to `parentId`'s frame, or absolute canvas coordinates when
+   * there is no `parentId` (root-local == world). Required for every
+   * caller — the engine no longer ships a fallback layout. UI callers
+   * (drag-drop, paste, toolbar placement, group-into-frame, etc.) chose
+   * the slot themselves and already convert to parent-local; agents must
+   * always emit an explicit position via the `space_commands` schema.
    */
   position: Point;
   size?: NodeSize;
@@ -91,6 +93,11 @@ export interface CanvasNodeParentUpdate {
 
 export interface CanvasNodeGeometryUpdate {
   nodeId: CanvasNodeId;
+  /**
+   * New top-left in **parent-local** coordinates (relative to the node's
+   * current parent frame, or absolute for a root node). Matches the
+   * coordinate space of `CanvasNodeCreateInput.position`.
+   */
   position?: Point;
   size?: NodeSize;
 }

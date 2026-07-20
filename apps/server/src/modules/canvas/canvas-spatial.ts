@@ -277,7 +277,11 @@ export function buildCanvasOutline(
         ...(typeof rawData?.['src'] === 'string'
           ? { src: rawData['src'] as string }
           : {}),
-        position: { x: s.rect.x, y: s.rect.y },
+        // `position` is parent-local (raw stored value); `absolutePosition`
+        // is the parent-chain-resolved world coordinate. They coincide for
+        // root nodes.
+        position: raw?.position ?? { x: s.rect.x, y: s.rect.y },
+        absolutePosition: { x: s.rect.x, y: s.rect.y },
         size: { width: s.rect.width, height: s.rect.height },
         ...(s.parentId
           ? {
@@ -684,7 +688,9 @@ export function inspectNodes(
         ...(typeof rawData?.['src'] === 'string'
           ? { src: rawData['src'] as string }
           : {}),
-        position: { x: s.rect.x, y: s.rect.y },
+        // Parent-local `position` (raw) + resolved `absolutePosition`.
+        position: raw?.position ?? { x: s.rect.x, y: s.rect.y },
+        absolutePosition: { x: s.rect.x, y: s.rect.y },
         size: { width: s.rect.width, height: s.rect.height },
         ...(s.parentId
           ? {

@@ -47,6 +47,8 @@ export interface NodeInput {
   content?: string;
   src?: string;
   position?: { x: number; y: number };
+  /** World coordinate; when omitted the outline builder defaults it to `position`. */
+  absolutePosition?: { x: number; y: number };
   size?: { width: number; height: number };
   parentFrame?: { id: string; label?: string };
   style?: Record<string, unknown>;
@@ -126,6 +128,9 @@ export function describeNode(
     return buildAgentNodeOutline({
       ...common,
       position: input.position ?? { x: 0, y: 0 },
+      ...(input.absolutePosition
+        ? { absolutePosition: input.absolutePosition }
+        : {}),
       size: input.size ?? { width: 0, height: 0 },
       ...(input.parentFrame ? { parentFrame: input.parentFrame } : {}),
       ...(input.style ? { style: input.style } : {}),
