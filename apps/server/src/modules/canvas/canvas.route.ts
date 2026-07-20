@@ -812,7 +812,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       // the node — so no error toast fires. ('noop' is otherwise
       // unreachable: `apply` always returns a record.)
       if (outcome.status === 'skipped-deleted') {
-        return reply.send({ nodeId, label: null, rev: '' });
+        // Empty-content revision (not `''`) so the response still honours the
+        // invariant that `rev` is always a valid node revision hash.
+        return reply.send({ nodeId, label: null, rev: nodeRevisionOf({}) });
       }
       return reply.code(500).send({ message: 'Failed to write node content' });
     }

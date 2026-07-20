@@ -992,11 +992,16 @@ export class CanvasStore {
    * ghost sidecar the external note watcher would surface on the canvas.
    *
    * Suppress only when the id is tombstoned, unexpired, AND absent from the
-   * live structural state. The structural-presence escape hatch keeps
-   * undo/redo safe: once the node is restored into `space.json`, its own
-   * writes are allowed through again (and the stale tombstone is cleared
-   * eagerly here). Brand-new nodes are never tombstoned, so a first write
-   * racing its structural PUT is never suppressed.
+   * live structural state. Presence in `space.json` is an escape hatch that
+   * lets the write through, but it does NOT clear the tombstone: during the
+   * delete-before-autosave window the sidecar DELETE has landed while the
+   * structural PUT that drops the node is still pending, so the id is
+   * transiently still listed. Clearing here would let a later slow in-flight
+   * writer resurrect the ghost once that PUT lands. The tombstone is cleared
+   * only by a structural {@link write} that re-lists the id (the genuine
+   * undo/redo resurrection) or by TTL expiry. Brand-new nodes are never
+   * tombstoned, so a first write racing its structural PUT is never
+   * suppressed.
    *
    * Called from the single write funnel {@link applyNodeUpdate}. The
    * `read()` cost is paid only for the rare write that targets a
@@ -1009,8 +1014,11 @@ export class CanvasStore {
       this.nodeTombstones.delete(nodeId);
       return false;
     }
+    // Escape hatch: allow the write while the node is still listed in
+    // structure, but keep the tombstone so it keeps guarding once the node
+    // leaves structure again (see the note above on the delete-before-
+    // autosave window). A real resurrection clears it via `write()`.
     if (this.isNodeInCurrentState(nodeId)) {
-      this.nodeTombstones.delete(nodeId);
       return false;
     }
     return true;

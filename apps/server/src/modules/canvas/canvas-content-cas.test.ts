@@ -322,4 +322,42 @@ describe('PUT /nodes/:nodeId/content — tombstone drops late writes after delet
       await app.close();
     }
   });
+
+  it('keeps the tombstone through the escape hatch so a later write is still suppressed', async () => {
+    // Guards the delete-before-autosave window: the escape hatch lets a write
+    // through while the node is transiently still listed, but must NOT clear
+    // the tombstone — otherwise a slower in-flight writer that lands after the
+    // structural PUT drops the node would resurrect a ghost with no guard
+    // left.
+    const app = await buildApp();
+    try {
+      const store = getCanvasStore('tomb-window');
+      seedCanvas('tomb-window', 'n1', 'Note');
+      store.deleteNode('n1'); // tombstone set; n1 still listed
+
+      // A writer lands while n1 is still in structure → allowed (escape
+      // hatch), tombstone kept.
+      const during = await putContent(app, 'tomb-window', 'n1', {
+        nodeType: 'note',
+        content: 'during-window',
+      });
+      expect(during.statusCode).toBe(200);
+
+      // Structural autosave now removes n1 from topology (tombstone survives:
+      // n1 is not in the new node list, so write() does not clear it).
+      writeStructure('tomb-window', []);
+
+      // A later in-flight writer must be suppressed — proving the tombstone
+      // outlived the escape hatch. The on-disk body stays at the earlier
+      // value; the later write was dropped rather than applied.
+      const after = await putContent(app, 'tomb-window', 'n1', {
+        nodeType: 'note',
+        content: 'ghost-after-window',
+      });
+      expect(after.statusCode).toBe(200);
+      expect(store.readNode('n1')?.content).toBe('during-window');
+    } finally {
+      await app.close();
+    }
+  });
 });
