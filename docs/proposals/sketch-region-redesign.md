@@ -1,26 +1,22 @@
 # Sketch 区域化重构 · 分阶段方案
 
-Status: In progress — **Stage 1 + Stage 2 + Stage 4B (拆分 + 拖入合并) implemented** (Stage 1: draw no longer auto-selects; stroke merging is purely spatial. Stage 2: stroke-level lasso selection + delete + GoodNotes-style retained-region move + style + keyboard delete + toolbar arbitration. Stage 4B: dragging a pure stroke selection onto blank canvas splits it into a new region, onto another region merges into it — via a new `MOVE_SKETCH_STROKES_TO_REGION` UI intent, an absolute-flow (frame-safe) transfer builder, and drop-point frame reparenting; **auto-contact merge (方案 B) and edge-rewire-on-empty are deferred**). Stage 3 and Stage 4A remain design drafts; each needs its open questions confirmed before implementation. **Stage 3 redesigned 2026-07-20** after an empirical Azure Read run: OCR is now a low-fidelity search/trigger index (not authoritative content), agent comprehension goes through pull-render (`snapshot_nodes`, extended with an optional `strokeIds` filter), and OCR is lazy-by-default.
+Status: In progress — **Stage 1 + Stage 2 + Stage 4B(拆分 + 拖入合并)已发货并折回 [sketch-node.md](../architecture/sketch-node.md)**（不自动选中、纯空间区域聚合、stroke 级套索选择/删除/样式/保留选区移动、混选一起移动 + 框内 sketch carried 对账、跨区域拆分/合并、部分笔画作为 AI 上下文 + 聊天悬浮高亮）。**本 proposal 现只保留未完成的部分**：Stage 3（OCR 低保真索引 + 拉取渲染理解，其中 `snapshot_nodes` 的 `strokeSubsets` 拉取与部分笔画持久化已发货，**eager OCR 本身未做**）、Stage 4A（问句检测 + 半自动作答），以及 Stage 4B 的延后项（自动接触合并/方案 B、边改接、拆分后 OCR 重跑）。**Stage 3 redesigned 2026-07-20** after an empirical Azure Read run: OCR is now a low-fidelity search/trigger index (not authoritative content), agent comprehension goes through pull-render (`snapshot_nodes`, extended with an optional `strokeIds` filter), and OCR is lazy-by-default.
 
 Owner: canvas / sketch
 
-Last updated: 2026-07-20
+Last updated: 2026-07-21
 
-> 本文是把一次较长的设计讨论收敛后的定稿路线。它重新定位 sketch：从「每笔猜边界、每涂鸦一个节点」演进为「**墨迹 + 可识别文本的区域节点**」，并把操作单元下沉到**笔画（stroke）**。目标是同时改善手写体验、减少无意义的文件碎片，并为「AI 自动捕获手写问题」这一产品目标铺路。落地时遵循 docs-first：每阶段发货后，把已实现部分并回 `docs/architecture/sketch-node.md`。
+> 本文是把一次较长的设计讨论收敛后的定稿路线。它重新定位 sketch：从「每笔猜边界、每涂鸦一个节点」演进为「**墨迹 + 可识别文本的区域节点**」，并把操作单元下沉到**笔画（stroke）**。目标是同时改善手写体验、减少无意义的文件碎片，并为「AI 自动捕获手写问题」这一产品目标铺路。落地时遵循 docs-first：每阶段发货后，把已实现部分并回 [sketch-node.md](../architecture/sketch-node.md)——**Stage 1 / 2 / 4B 已并入，实现细节以架构文档为准，本文不再复述。**
 
 ---
 
 ## 1. 背景与动机
 
-现状（见 [sketch-node.md](../architecture/sketch-node.md)）下暴露的问题，按用户反馈排序：
+原始动机里的多数交互问题已随 Stage 1/2 解决并折回 [sketch-node.md](../architecture/sketch-node.md)：绘画被选择框打断（问题 1）、时间聚合把手写劈开（问题 2）、不能部分选择（问题 5）均已修复。**仍在驱动本文剩余工作的动机**：
 
-1. **绘画被选择框打断**：新建节点默认自动选中（[createNodes.ts](../../packages/shared/src/canvas-engine/commands/createNodes.ts) 的 `selectableCreatedNodeIds`），用笔连续书写时节点不断被选中，外框打断绘制。
-2. **时间聚合把一段手写劈开**：当前聚合用「5 秒时间窗 + 80px 距离」全局扫描（[sketchMerge.ts](../../apps/web/src/components/Nodes/sketch/sketchMerge.ts)、[config/canvas.ts](../../apps/web/src/config/canvas.ts) 的 `SKETCH_STROKE_MERGE_MAX_GAP_MS` / `SKETCH_STROKE_MERGE_MAX_DISTANCE_SCREEN_PX`）。写「1. …」后写「2.」再思考 >5s 才写内容时，「2.」被粘到上一行、其后的内容又另起新节点，数字与内容被拆散。
-3. **选中的 sketch 透明区遮挡后方节点**：`.react-flow__node-sketch.selected` 让整个包围盒 `pointer-events: auto`（[index.css](../../apps/web/src/index.css)），选中态下透明区会拦截本应落到后方节点的点击。
-4. **文件碎片**：sketch 是 md-backed（`MD_BACKED_NODE_TYPES`，见 [nodeContentFields.ts](../../apps/web/src/store/canvasStore/save/nodeContentFields.ts)），每个 sketch 节点写一个仅含 label 的近乎空的 `nodes/<safeLabel>.md`，涂鸦一多文件即碎片化且无内容。
-5. **不能部分选择**：套索是节点级（[useCanvasLasso.ts](../../apps/web/src/hooks/useCanvasLasso.ts) 的 `onSelect(nodeIds)`），聚合成大节点后无法圈选其中部分笔画，不符合笔记工具的手感。
-
-未来产品目标：用户在画布上手写「这里是为什么」「有什么更好的方案吗」之类句子，AI 自动捕获这些问题并调用 Agent 去查询/作答。
+- **文件碎片 → 让区域承载可识别文本**（问题 4）：sketch 是 md-backed（`MD_BACKED_NODE_TYPES`，见 [nodeContentFields.ts](../../apps/web/src/store/canvasStore/save/nodeContentFields.ts)），当前每个 sketch 节点只写一个仅含 label 的近乎空 `.md`，涂鸦一多即碎片化且无内容。OCR（Stage 3）会让区域 MD 带上低保真索引文本（可搜索、供问句检测），这是 sketch 保持 text-bearing 的方向。
+- **AI 自动捕获手写问题**（产品目标，Stage 4A）：用户在画布上手写「这里是为什么」「有什么更好的方案吗」之类句子，AI 自动捕获并调用 Agent 去查询/作答。
+- **已延后**：选中态透明区遮挡后方节点（问题 3 / 原「支柱 3」）——sketch 完全覆盖其他节点类型的场景少见，延后（见 §2）。
 
 ---
 
@@ -52,48 +48,15 @@ Last updated: 2026-07-20
 
 ## 3. 分阶段步骤
 
-### Stage 1 — 基座：交互修复 + 区域模型骨架
+### Stage 1 — 基座：交互修复 + 区域模型骨架 ✅ 已发货
 
-目标：解决问题 1、2，立住「区域=节点、就近合并」的行为。**纯行为改动，不碰任何持久化字段、不碰选中态命中。**
+解决问题 1、2，立住「区域=节点、就近合并」的行为：绘制不自动选中 + 空间聚合取代时间窗（边界纯空间、时间退出）。**实现细节见 [sketch-node.md](../architecture/sketch-node.md) §3.1–3.2**；本文不再复述。已定契约：区域将来会有 `ocr` 字段、**缺失即未识别**、schema 待 Stage 3 定稿（见下「Stage 1 不预留 OCR schema」）。
 
-1. **绘制不自动选中**：`AddNodeInput`（[uiIntent.ts](../../apps/web/src/handler/canvasCommand/uiIntent.ts)）加 `selectOnCreate?: boolean`（默认 `true`）；[resolveAddNodes.ts](../../apps/web/src/handler/canvasCommand/resolvers/resolveAddNodes.ts) 透传到 `CREATE_NODES` node 输入；[createNodes.ts](../../packages/shared/src/canvas-engine/commands/createNodes.ts) 的 `selectableCreatedNodeIds` 额外排除 `selectOnCreate === false`；[SketchOverlay.tsx](../../apps/web/src/components/Nodes/sketch/SketchOverlay.tsx) 的 `addNode` 传 `selectOnCreate: false`。用 per-input 标志而非按 `type` 排除，避免误伤 paste。
-2. **空间聚合取代时间窗**：[SketchOverlay.tsx](../../apps/web/src/components/Nodes/sketch/SketchOverlay.tsx) pointer-up 的聚合从「5s 时间窗全局扫描」改为「并入**最近的已有区域**（同 parent、空间就近）」；**边界判定纯空间、时间完全退出**。保留 [sketchMerge.ts](../../apps/web/src/components/Nodes/sketch/sketchMerge.ts) 的 `buildMergeCommands` 几何与容错回退，以及每条笔画既有的 `createdAt`（作为区域内时间信息，不参与边界）。
-3. **区域=sketch 节点**：确立「新笔画并入最近区域」的单目标合并；bridging（两已有区域相并）与拆分延后到 Stage 4。
-4. **文档**：更新 [sketch-node.md](../architecture/sketch-node.md) §3 为「不自动选中 + 空间区域聚合」，并写明契约：区域将来会有 `ocr` 字段、**缺失即未识别**、schema 待 Stage 3 定稿——只写文字约定，不落数据。
+### Stage 2 — stroke 级套索选择 + 就地编辑 ✅ 已发货
 
-明确不做：支柱 3、OCR 内容、套索改造、拆分。
+把「选择」下沉到笔画级并成为一等可编辑对象（选 / 移 / 调样式 / 删），纯客户端、无 AI/渲染：stroke 级套索选择（R3：sketch 永远笔画级、其它类型整节点、可共存）+ 逐笔高亮 + 删除浮条 + GoodNotes 式保留选区移动 + 样式条 + 键盘删除 + 单浮条工具栏仲裁；混选时被选中的整节点与笔画一起移动（走 store 拖拽生命周期）。**实现细节与「node 层 vs 套索笔画层」两层模型见 [sketch-node.md](../architecture/sketch-node.md) §3.4–3.5**；本文不再复述。
 
-提交拆分：`feat(canvas): sketch 绘制不自动选中` / `feat(canvas): 空间区域聚合取代时间窗` / 文档更新。两项功能正交、可各自回滚。
-
-已定：**边界判定纯空间，时间完全退出边界**；时间以每条笔画既有的 `createdAt` 形式保留为区域内信息，**不加新字段**（「怎么用这份时间信息」留到真正需要时再做）。
-
-### Stage 2 — stroke 级套索选择 + 就地编辑（纯客户端，无 AI/渲染）
-
-目标：把「选择」下沉到笔画级，并让笔画选择成为**一等可编辑对象**（选 / 移 / 调样式 / 删），与 sketch 节点同等操作空间。渲染 PNG / 发大模型 / 部分选择的 AI 上下文移到 Stage 3；抽出/拆分移到 Stage 4。
-
-**已定决策**
-
-- **选择规则（R3，按类型）**：sketch 节点永远走**笔画选择**（圈到哪几条选哪几条；全部圈到只是「≈选中整块」但仍是笔画，永不整节点选择）；其它类型节点走**整节点选择**；两者可共存。「笔画在多边形内」判据 ≥ 1 点在内；stroke 命中在消费端算，[useCanvasLasso.ts](../../apps/web/src/hooks/useCanvasLasso.ts) 不耦合 sketch。
-- 选中状态存 [gesturePreviewStore](../../apps/web/src/store/gesturePreviewStore.ts) 瞬态 slice（不持久、不进 undo）。
-- **移动模型**：在**套索工具内拖动选区**移动（不切工具）；笔画只做**原节点内平移**（跨节点/抽出 = Stage 4）。若套索同时圈住整节点（混选），那些节点与笔画**一起移动**。
-- **纯笔画工具栏**：对齐 sketch 节点的 [SketchControls](../../apps/web/src/components/Nodes/sketch/SketchControls.tsx)（调色 + 粗细，作用于选中笔画、**不改画笔预设**）。**删除键仅触摸端显示**，桌面端用键盘 Delete。
-- **混选（笔画 + 节点）**：拖动时两者**一起移动**（节点走 store 正常拖拽生命周期，snap / 重定父 / 自动保存不变，笔画烘入同一条 undo）；工具栏则只留共同能力：删除仅触摸端、**桌面端无工具栏**；节点工具栏在「存在笔画选择」时隐藏。
-
-**已实现（第一批）**
-
-1. 套索 stroke 级选择（R3）+ 逐笔高亮（`gesturePreviewStore.sketchStrokeSelection` + [SketchNode.tsx](../../apps/web/src/components/Nodes/sketch/SketchNode.tsx)）。
-2. 删除浮条 [StrokeSelectionToolbar](../../apps/web/src/components/Panels/Canvas/FloatingToolbars/StrokeSelectionToolbar.tsx)（复用 [buildEraseCommands](../../apps/web/src/components/Nodes/sketch/sketchMerge.ts)：子集移除 + 重算 bbox + 清空则删节点 + 单条 undo）；有节点选择时让位（单浮条护栏）。
-
-**已实现（本阶段扩展）**
-
-3. **移动（GoodNotes 式：保留套索区）**：套索完成后**保留其多边形**作为选区（存 `gesturePreviewStore.sketchSelectionPolygon`、flow 空间、随选择一起清除，并由 [StrokeSelectionRegion.tsx](../../apps/web/src/components/Panels/Canvas/StrokeSelectionRegion.tsx) 在 `ViewportPortal` 里画出虚线选区、内部显示 move 光标）。独立 hook [useSketchStrokeMove](../../apps/web/src/hooks/useSketchStrokeMove.ts) 由 Canvas 指针链中一个**排在套索前**的 `sketch-stroke-move` recognizer 驱动——pointerdown **落在保留选区多边形内** → 移动（预览走 `sketchStrokeMovePreview` 平移选中笔画 + 选区本身，松手按各自节点用 [buildMoveStrokesCommands](../../apps/web/src/components/Nodes/sketch/sketchMerge.ts) 重算 bbox）；落在选区外 → 让位给套索（开始新套索，先清旧选）。笔画只做**原节点内平移**（跨节点/抽出 = Stage 4）；**混选时被选中的整节点与笔画一起移动**（节点走 store 的 `onNodeDragStart` → `onNodesChange` → `onNodeDragStop` 生命周期，snap / 重定父 / 自动保存与普通拖拽一致，笔画烘入同一条 undo）。
-4. **样式**：笔画工具栏加调色 + 粗细（复用 [SketchControls](../../apps/web/src/components/Nodes/sketch/SketchControls.tsx)，只 map 选中笔画，不改画笔预设）；混选时隐藏（仅共同能力）。
-5. **键盘删除**：Delete / Backspace 删选中笔画（复用 `buildEraseCommands`，护栏跳过 input/textarea/contentEditable），与 React Flow 的节点删除并存（混选一次删两者）。
-6. **工具栏仲裁**：纯笔画 → 样式条（触摸端多一个删除）；混选 → 桌面无、触摸只删除；纯节点 → 现有节点条。节点工具栏（MultiSelect / 单选）在存在笔画选择时隐藏（[NodeWrapper.tsx](../../apps/web/src/components/Nodes/NodeWrapper.tsx) + [Canvas.tsx](../../apps/web/src/components/Panels/Canvas/Canvas.tsx)）。
-
-MVP 限制：笔画移动仅限原节点内（抽出/拆分 = Stage 4）；混选时被选中的整节点与笔画一起移动（走 store 拖拽生命周期，与普通拖拽一致）；纯笔画移动手势不接入 `canvasGestureSession`（桌面 MVP 无多指接管仲裁）。
-
-明确不做：渲染 PNG、发大模型、抽出/拆分（Stage 4）、OCR、混选的移动。
+> **两层模型（要点）**：sketch 在数据/引擎层就是**普通 node**（id/position/parentId/命令/undo 全同其它节点，整节点移动用 Select 工具）；「笔画选择」只是**套索工具下的瞬态选择粒度**（`gesturePreviewStore.sketchStrokeSelection`，不持久、不进 undo），存在的唯一理由是表达「只操作一部分笔画」。由此 sketch 有**两条独立移动通道**（整节点走 node-drag、笔画走 preview/bake），单次手势同时驱动两者时需对账（carried-node）。
 
 ### Stage 3 — OCR：手写转「低保真索引」（理解走拉取渲染）
 
@@ -142,28 +105,24 @@ MVP 限制：笔画移动仅限原节点内（抽出/拆分 = Stage 4）；混�
 
 **子轨 B · 区域拆分 + 桥接合并**（低频高价值）
 
-**已实现（2026-07-20，拖放式拆分 + 拖入合并，intent 路径）**：把 Stage 2 的「原节点内平移」手势扩展成跨区域——纯笔画选择拖到**空白**即拆成新区域、拖到**另一区域**即并入。落地形态经与直连-builder 权衡后选了 **intent 路径**（拆分/合并是复合操作，与 note 拖块 `MOVE_NOTE_*` 对齐、resolver 纯函数可测）：
+**✅ 已发货：拖放式拆分 + 拖入合并（intent 路径）** — 纯笔画选择拖到空白即拆成新区域、拖到另一区域即并入，经 `MOVE_SKETCH_STROKES_TO_REGION` intent + 绝对-flow（跨 frame 安全）transfer builder + 落点 frame 重定父 + 单条 undo 实现。**实现细节见 [sketch-node.md](../architecture/sketch-node.md) §3.5「Cross-region split / merge」**；本文不再复述。
 
-- **intent + resolver**：新增 `MOVE_SKETCH_STROKES_TO_REGION`（[uiIntent.ts](../../apps/web/src/handler/canvasCommand/uiIntent.ts)）+ [resolveMoveSketchStrokesToRegion.ts](../../apps/web/src/handler/canvasCommand/resolvers/resolveMoveSketchStrokesToRegion.ts)，payload 带 `sources`（多源）/ `dropDelta` / `targetNodeId | null` / `dropPoint`。
-- **纯几何 builder**：[sketchMerge.ts](../../apps/web/src/components/Nodes/sketch/sketchMerge.ts) 的 `buildSketchStrokeTransferCommands` 在**绝对 flow 坐标**里算（`getAbsolutePosition`），跨 frame 也正确；同父时退化为现有数学。源侧复用抽出的纯核 `computeEraseCommands`（剩余重算 / 全清空则删节点）。
-- **frame 重定父（Tier 2）**：拆分到空白时用 `resolveFrameAtPoint`（[utils/local.ts](../../apps/web/src/handler/canvasCommand/utils/local.ts) 的 `findFrameAtPoint` 包装，节点创建同款）按落点决定新区域父 frame。
-- **拖放命中**：[useSketchStrokeMove.ts](../../apps/web/src/hooks/useSketchStrokeMove.ts) commit 里按绝对-flow bbox 命中拖放目标（排除源、topmost 优先）判定 merge / split / in-node。
-- **frame accept 预览**：拖笔画会**拆分落入某 frame** 时，复用 `computeFrameFit` + `setFrameFitPreviews` 显示与整节点拖拽同款的 grow-to-fit 虚线框（`hug` frame 生长、`manual` frame 高亮当前边界）；合并 / 原地 / 落顶层空白不显示，commit/cancel 清除。仅 sketch **合并目标区域**不做高亮（按需保留）。
-- **单条 undo**：store action `moveSketchStrokesToRegion` 用 `beginNodeDataGesture` / `endNodeDataGesture` 括号折叠（含空操作 `rollbackGestureSnapshot` 护栏）。
-- **测试**：[resolveMoveSketchStrokesToRegion.test.ts](../../apps/web/src/handler/canvasCommand/resolvers/__tests__/resolveMoveSketchStrokesToRegion.test.ts) 覆盖拆分 / 合并 / 单源清空删 / 跨 frame 绝对坐标 / 退化。
+**仍未完成（本子轨剩余）**：
 
-**MVP 边界 / 延后**：仅纯笔画选择走跨区域（混选整节点维持 Stage 2 一起移动）；**自动接触合并（方案 B）延后**；**边改接延后**——源被全清空删除时其边随 `DELETE_NODES` 丢弃（Stage 4A 给区域连边时再补顶点收缩）；「OCR 重跑」现为 no-op（Stage 3 未落地，缺 `ocr` 字段即未识别）。
+- **自动接触合并（方案 B）**：桥接两区域的笔画使两区自动并成一个（不靠拖放，靠空间接触判定）。
+- **边改接**：源区域被全清空删除时，其边现随 `DELETE_NODES` 丢弃；应在 Stage 4A 给区域连边后补「顶点收缩 / 改接存活方」。
+- **拆分/合并后 OCR 重跑**：现为 no-op（Stage 3 未落地，缺 `ocr` 字段即未识别）；Stage 3 后各受影响区域标 `stale` 并独立重跑。
 
 > **交互模型线索（frame 类比）**：把 sketch 区域类比成 **frame**、里面的笔画类比成 **frame 内的节点**——「把笔画从区域 A 拖到区域 B」≈ 节点在 frame 间重定父，「拖到空白」≈ 拖出成顶层（新区域）。frame 系统已解决的**成员归属 + drag-to-reparent 判定 + fit-to-content** 逻辑可作为拆分/合并的 UX 外形与可复用判定逻辑来借鉴（见 [useFrameDragToCreate](../../apps/web/src/hooks/useFrameDragToCreate.ts) 及 canvas-engine 的 frame reparent）。
 >
-> **但不要照字面把每条 stroke 变成 ReactFlow 节点**：一页手写数百条 stroke → 数百节点，会冲击性能、持久化（stroke 现为节点 data 内联数组）、渲染（一节点一 SVG）、以及 AI 快照/OCR（都依赖「区域=节点、stroke 内联」）。正确综合是**借 frame 的判定逻辑当模式、stroke 仍保持内联**——「拖 stroke 换区域」= 操作内联 strokes 数组 + 区域 bbox + 重跑 OCR，与下面第 1–6 步一致。
+> **但不要照字面把每条 stroke 变成 ReactFlow 节点**：一页手写数百条 stroke → 数百节点，会冲击性能、持久化（stroke 现为节点 data 内联数组）、渲染（一节点一 SVG）、以及 AI 快照/OCR（都依赖「区域=节点、stroke 内联」）。正确综合是**借 frame 的判定逻辑当模式、stroke 仍保持内联**——「拖 stroke 换区域」= 操作内联 strokes 数组 + 区域 bbox + 重跑 OCR。
 
-1. 套索抽出笔画 S → 新区域 B = S，A' = A − S（几何复用 [sketchMerge.ts](../../apps/web/src/components/Nodes/sketch/sketchMerge.ts) 的 union-bbox / scale 反向）。
-2. **身份**：A' 保留原 id / MD（剩余体即原体）；B 拿新 id / 新 MD。
-3. **文本正确性靠重跑**：A' 与 B 都标 `stale` → 各自重跑 OCR，不手术式拼接文本（关键简化）。
-4. 边 / frame：A' 继承原边与父 frame；B 若空间上仍在原 frame 内则继承。
-5. **桥接合并**（Stage 1 延后的另一半）：两区域并一 → 保留吸收方 id、删另一 MD、union 重算、重跑 OCR、被吸收方的边改接存活方。
-6. 全程单条 undo。
+**桥接合并的设计（未实现部分）**：
+
+1. **文本正确性靠重跑**：合并/拆分后受影响区域都标 `stale` → 各自重跑 OCR，不手术式拼接文本（关键简化）。
+2. **身份**：拆分时 remainder 保留原 id / MD（剩余体即原体），新区域拿新 id / 新 MD；桥接合并保留吸收方 id、删另一 MD、union 重算。
+3. **边 / frame**：拆分时 A' 继承原边与父 frame；被吸收方的边改接存活方（见上「边改接」延后项）。
+4. 全程单条 undo。
 
 明确不做（Stage 4 之外）：全自动作答、word 级抽出、多列阅读顺序。
 
@@ -189,13 +148,7 @@ graph LR
 
 ---
 
-## 5. 误合并的退路（Stage 1 起就有）
-
-「接触即合并」较激进 + 拆分延后，需保证误合并不致卡死。MVP 天然有两条退路：撤销（合并本就是单条 undo，`buildMergeCommands` 折成一个 gesture）；stroke 套索删除（Stage 2 起可事后擦掉并错的几笔）。因此延后完整拆分不会陷入死胡同。
-
----
-
-## 6. 决策记录（为何如此）
+## 5. 决策记录（为何如此）
 
 - **为何 sketch 近期不去 md 化 / 不动持久化**：sketch 的 `.md` 仅为持久化 label（结构 PUT 会剥掉 `label` / `labelSource`），并非 AI 特性；agent 看到的 `label` 与 `file=` 由 [node-ref.ts](../../apps/server/src/modules/agent/node-ref.ts) / [node-element.ts](../../apps/server/src/modules/agent/conversation/prompt/node-element.ts) 从结构态纯函数现算，不依赖文件存在。未来 OCR 会让区域 MD 带上**低保真索引文本**（可搜索、供问句检测），届时 sketch 更应保持 text-bearing（body 存该索引）而非无文件——因此「归零 .md」被反转，改为「区域存 OCR 索引」。注意：该 body 文本是**索引、非权威内容**，agent 的理解仍走拉取的区域图片（见 Stage 3）。
 - **为何不把 sketch 收编进 PointerRouterCore / 不动 `acceptsPointer`**：这是已论证过的取舍（overlay 形态对 sketch 密集开发更内聚）。触发重构的信号是语义（出现手掌拒识 / 压感 / 笔尾橡皮等专属输入规则）而非结构。本方案不引入这些规则，故维持现状；仅建议 Stage 1 把会话 / 聚合逻辑隔离成独立 helper，为将来可能的收编留干净接缝。
