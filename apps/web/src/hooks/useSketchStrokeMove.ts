@@ -306,7 +306,6 @@ export function useSketchStrokeMove({
       });
       const dx = cur.x - drag.startFlow.x;
       const dy = cur.y - drag.startFlow.y;
-      useGesturePreviewStore.getState().setSketchStrokeMovePreview({ dx, dy });
 
       if (drag.draggedNodes.length > 0) {
         const store = useCanvasStore.getState();
@@ -330,10 +329,37 @@ export function useSketchStrokeMove({
           drag.primaryNode as Node,
           drag.draggedNodes,
         );
+        // Sync the stroke translate to the nodes' SNAPPED delta. onNodesChange
+        // applies smart-snap to the dragged nodes, so translating the strokes
+        // by the RAW pointer delta would drift them off the snapped nodes —
+        // a sketch stroke lassoed together with a frame would slide out of it.
+        // The group moves rigidly by a single snapped delta, so read the
+        // primary node's actual post-snap position delta and move the strokes
+        // by the same amount. `primaryNode` is always top-level (or has a
+        // stationary, unselected parent), so its local position delta equals
+        // the flow-space group delta.
+        const primary = drag.primaryNode;
+        const startPos = primary
+          ? drag.startPositions.get(primary.id)
+          : undefined;
+        const livePrimary = primary
+          ? useCanvasStore.getState().nodes.find((n) => n.id === primary.id)
+          : undefined;
+        const synced =
+          startPos && livePrimary
+            ? {
+                dx: livePrimary.position.x - startPos.x,
+                dy: livePrimary.position.y - startPos.y,
+              }
+            : { dx, dy };
+        useGesturePreviewStore.getState().setSketchStrokeMovePreview(synced);
       } else {
-        // Pure stroke drag: no node-drag lifecycle runs, so mirror the
-        // frame accept-preview here (shown only when the strokes would
-        // split into a frame).
+        // Pure stroke drag: no node-drag lifecycle runs, so move by the raw
+        // pointer delta and mirror the frame accept-preview (shown only when
+        // the strokes would split into a frame).
+        useGesturePreviewStore
+          .getState()
+          .setSketchStrokeMovePreview({ dx, dy });
         updateFrameDropPreviewForStrokeDrag(cur, { dx, dy });
       }
     },
