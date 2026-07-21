@@ -11,13 +11,14 @@
  * duplicates them.
  */
 
-import { MessageSquare, Plus, Sprout } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { AgentIcon } from '@/components/Common/AgentIcon';
 import { useSettingsUiStore } from '@/store/settingsUiStore';
 import { readAgentIcon } from '@/utils/agentIcon';
 
+import { AgentModeIcon, ChatModeIcon } from './ModeIcon';
 import { Button } from '../../Common/Button';
 import { cn } from '../../Common/cn';
 
@@ -133,9 +134,13 @@ export function AgentMenuOptions({
     {
       mode: 'ask',
       label: t('chat.modeChat'),
-      icon: <MessageSquare size={14} />,
+      icon: <ChatModeIcon size={14} />,
     },
-    { mode: 'operate', label: t('chat.modeAgent'), icon: <Sprout size={14} /> },
+    {
+      mode: 'operate',
+      label: t('chat.modeAgent'),
+      icon: <AgentModeIcon size={14} />,
+    },
   ];
 
   return (

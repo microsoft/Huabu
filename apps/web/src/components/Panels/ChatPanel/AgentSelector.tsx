@@ -16,7 +16,7 @@
  * keeps its slot (just hidden) in read-only mode.
  */
 
-import { ChevronDown, MessageSquare, Route, Sprout } from 'lucide-react';
+import { ChevronDown, Route } from 'lucide-react';
 import { useCallback, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -25,6 +25,7 @@ import {
   useAddAgentEditor,
   type AgentChoice,
 } from './agentMenu';
+import { AgentModeIcon, ChatModeIcon } from './ModeIcon';
 import { cn } from '../../Common/cn';
 import { Popover } from '../../Common/Popover';
 
@@ -66,8 +67,8 @@ function describeBinding(
     return { icon: <Route size={13} />, label: binding.alias };
   }
   return mode === 'operate'
-    ? { icon: <Sprout size={13} />, label: labels.agent }
-    : { icon: <MessageSquare size={13} />, label: labels.chat };
+    ? { icon: <AgentModeIcon size={13} />, label: labels.agent }
+    : { icon: <ChatModeIcon size={13} />, label: labels.chat };
 }
 
 export const AgentSelector = ({
