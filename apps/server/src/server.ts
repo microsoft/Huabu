@@ -113,4 +113,3 @@ parentPort?.on('message', (event) => {
     shutdown('system:shutdown');
   }
 });
-

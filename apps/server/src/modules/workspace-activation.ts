@@ -19,7 +19,6 @@ import {
 } from './workspace.js';
 import { getLogger } from '../utils/logger.js';
 
-
 const DEFAULT_ACTIVATION_TIMEOUT_MS = 70_000;
 
 /**

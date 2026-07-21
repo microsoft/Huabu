@@ -262,9 +262,15 @@ const workspaceRoutes: FastifyPluginAsync = async (app) => {
       return buildWorkspaceState();
     } catch (e) {
       if (e instanceof WorkspaceActivationTimeoutError) {
-        return sendError(reply, 504, e.message, 'WORKSPACE_ACTIVATION_TIMEOUT', {
-          seconds: e.timeoutSeconds,
-        });
+        return sendError(
+          reply,
+          504,
+          e.message,
+          'WORKSPACE_ACTIVATION_TIMEOUT',
+          {
+            seconds: e.timeoutSeconds,
+          },
+        );
       }
       if (e instanceof WorkspaceActivationInProgressError) {
         return sendError(
