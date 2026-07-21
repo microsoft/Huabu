@@ -93,7 +93,7 @@ export const NodeDataSchema = Type.Object(
     src: Type.Optional(
       Type.String({
         description:
-          "Source pointer for media nodes. `web` takes a URL. `image` / `video` / `pdf` / `office` take a staged upload path (`upload/<name>`), a bare artifact key a tool handed you (`artifact-…` / `gen-…`), or an `https://…` URL — the server relocates / downloads the bytes into the artifact store and persists a bare key (you don't convert an upload into a key yourself). For image nodes, updating `src` also re-derives the node's height from the new image's aspect ratio.",
+          "Source pointer for media nodes (`web` / `image` / `video` / `pdf` / `office`). Accepts a staged upload path (`upload/<name>`), a bare artifact key a tool handed you (`artifact-…` / `gen-…`), or an `https://…` URL. For `web`, a live `https://…` (or `data:` HTML) URL stays unchanged and renders live, while a canvas-local source must be `.html` and is imported into the artifact store. For the other media types, the server relocates / downloads foreign sources into the artifact store and persists a bare key, so you never convert an upload into a key yourself. Setting an `image` node's `src` also re-derives its height from the aspect ratio.",
       }),
     ),
     style: Type.Optional(NodeStyleSchema),
