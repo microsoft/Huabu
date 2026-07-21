@@ -19,6 +19,8 @@ interface ProfileEditFieldsProps {
   workingDirPath: string;
   displayNameId: string;
   displayNameControl: ReactNode;
+  /** Optional avatar picker rendered as its own row under the display name. */
+  iconControl?: ReactNode;
 }
 
 /** Canonical field order and labels shared by every Profile edit form. */
@@ -29,6 +31,7 @@ export function ProfileEditFields({
   workingDirPath,
   displayNameId,
   displayNameControl,
+  iconControl,
 }: ProfileEditFieldsProps) {
   const { t } = useTranslation();
 
@@ -74,6 +77,15 @@ export function ProfileEditFields({
       >
         <SettingControl>{displayNameControl}</SettingControl>
       </SettingRow>
+
+      {iconControl ? (
+        <SettingRow
+          title={t('settings.agentIcon.label')}
+          description={t('settings.agentIcon.hint')}
+        >
+          <SettingControl>{iconControl}</SettingControl>
+        </SettingRow>
+      ) : null}
     </>
   );
 }

@@ -11,10 +11,12 @@
  * duplicates them.
  */
 
-import { MessageSquare, Plus, Route, Sprout } from 'lucide-react';
+import { MessageSquare, Plus, Sprout } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
+import { AgentIcon } from '@/components/Common/AgentIcon';
 import { useSettingsUiStore } from '@/store/settingsUiStore';
+import { readAgentIcon } from '@/utils/agentIcon';
 
 import { Button } from '../../Common/Button';
 import { cn } from '../../Common/cn';
@@ -190,10 +192,17 @@ export function AgentMenuOptions({
                 profileId: profile.id,
               };
               const isCurrent = bindingsEqual(currentBinding, binding);
+              const icon = readAgentIcon(profile);
               return (
                 <AgentMenuRow
                   key={`profile:${profile.id}`}
-                  icon={<Route size={14} />}
+                  icon={
+                    <AgentIcon
+                      shape={icon.shape}
+                      color={icon.color}
+                      size={14}
+                    />
+                  }
                   label={profile.alias}
                   current={isCurrent}
                   disabled={busy}

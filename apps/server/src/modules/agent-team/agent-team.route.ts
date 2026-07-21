@@ -215,6 +215,9 @@ export function createAgentTeamRoutes(
           workingDirPath: parsed.data.workingDirPath,
           manifestPath: parsed.data.launch.manifestPath,
           harness: parsed.data.launch.harness,
+          ...(parsed.data.customData === undefined
+            ? {}
+            : { customData: parsed.data.customData }),
         });
       } catch (error) {
         return sendAgentTeamError(error, reply);

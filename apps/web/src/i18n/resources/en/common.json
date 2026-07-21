@@ -173,6 +173,25 @@
     "addAnotherAgent": "Add another agent",
     "addAnotherAgentDescription": "Configure a new external agent to bind chats to.",
     "editProfile": "Edit profile",
+    "agentIcon": {
+      "label": "Icon",
+      "hint": "Pick a shape and color to tell this agent apart.",
+      "change": "Change icon for {{alias}}",
+      "shape": "Shape",
+      "color": "Color",
+      "shapes": {
+        "circle": "Circle",
+        "diamond": "Diamond",
+        "spark": "Spark",
+        "flower": "Flower"
+      },
+      "colors": {
+        "blue": "Blue",
+        "red": "Red",
+        "yellow": "Yellow",
+        "green": "Green"
+      }
+    },
     "deleteProfile": "Delete profile",
     "deleteProfileConfirm": "Delete “{{alias}}”? This action cannot be undone.",
     "deleteExternalAgentTitle": "Delete external agent?",

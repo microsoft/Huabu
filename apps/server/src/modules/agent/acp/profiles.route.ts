@@ -103,6 +103,9 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
         command: parsed.data.launch.command,
         workingDirPath: parsed.data.workingDirPath,
         ...(parsed.data.metadata && { metadata: parsed.data.metadata }),
+        ...(parsed.data.customData === undefined
+          ? {}
+          : { customData: parsed.data.customData }),
       });
       if (!isCommandProfile(created)) {
         throw new Error('Agent Profile registry returned an invalid kind');
@@ -151,6 +154,9 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
     }
     const updated = registry.patchProfile(request.params.id, {
       ...(parsed.data.alias === undefined ? {} : { alias: parsed.data.alias }),
+      ...(parsed.data.customData === undefined
+        ? {}
+        : { customData: parsed.data.customData }),
       ...(parsed.data.metadata === undefined
         ? {}
         : { metadata: parsed.data.metadata }),
