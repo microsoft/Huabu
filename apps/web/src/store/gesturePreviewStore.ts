@@ -26,15 +26,19 @@ export type FrameFitPreviewRole = 'target' | 'source';
  */
 export type FrameFitPreview = FrameFitResult & { role: FrameFitPreviewRole };
 
-type GesturePreviewState = {
+/**
+ * The canvas-scoped transient DATA fields (no actions). Every field here is
+ * purely-visual, never-persisted, never-undone state tied to the current
+ * canvas geometry.
+ *
+ * Declared as its own type so {@link INITIAL_PREVIEW_DATA} — and therefore
+ * every reset that spreads it (`resetCanvasScopedTransients`) — is
+ * EXHAUSTIVE: add a transient field here and the compiler forces a matching
+ * default, so a new field can never be silently omitted from the reset.
+ */
+type GesturePreviewData = {
   /** Stroke ids hidden while an eraser gesture is still uncommitted. */
   sketchErasePreview: Record<string, string[]>;
-
-  /** Replace the transient Sketch eraser preview. */
-  setSketchErasePreview: (preview: Record<string, string[]>) => void;
-
-  /** Restore all strokes when erasing commits or is cancelled. */
-  clearSketchErasePreview: () => void;
 
   /**
    * Sketch strokes currently selected by a stroke-level lasso (Stage 2),
@@ -45,12 +49,6 @@ type GesturePreviewState = {
    * so it lives here to reuse the churn-free store.
    */
   sketchStrokeSelection: Record<string, string[]>;
-
-  /** Replace the current stroke-level selection. */
-  setSketchStrokeSelection: (selection: Record<string, string[]>) => void;
-
-  /** Clear the stroke-level selection (also drops region + move preview). */
-  clearSketchStrokeSelection: () => void;
 
   /**
    * Sketch strokes to transiently HIGHLIGHT — distinct from the
@@ -63,12 +61,6 @@ type GesturePreviewState = {
    */
   sketchStrokeHighlight: Record<string, string[]>;
 
-  /** Replace the transient stroke highlight. */
-  setSketchStrokeHighlight: (highlight: Record<string, string[]>) => void;
-
-  /** Clear the transient stroke highlight. */
-  clearSketchStrokeHighlight: () => void;
-
   /**
    * The retained lasso polygon (flow-space) for the current stroke
    * selection — GoodNotes-style: the loop stays after selection so the
@@ -78,22 +70,12 @@ type GesturePreviewState = {
    */
   sketchSelectionPolygon: Array<{ x: number; y: number }> | null;
 
-  /** Set the retained selection polygon (flow-space). */
-  setSketchSelectionPolygon: (
-    polygon: Array<{ x: number; y: number }> | null,
-  ) => void;
-
   /**
    * Live translation (flow-space) applied to the selected strokes while a
    * move drag is in progress; `null` when not moving. Baked into node data
    * on pointer-up. Purely visual until commit.
    */
   sketchStrokeMovePreview: { dx: number; dy: number } | null;
-
-  /** Set / clear the live move-preview offset. */
-  setSketchStrokeMovePreview: (
-    offset: { dx: number; dy: number } | null,
-  ) => void;
 
   /**
    * Sketch node ids whose selected strokes must NOT apply
@@ -105,9 +87,6 @@ type GesturePreviewState = {
    * bake skips the same nodes for the same reason.
    */
   sketchStrokeMoveCarriedNodeIds: string[];
-
-  /** Set / clear the carried-node ids for the current mixed move. */
-  setSketchStrokeMoveCarriedNodeIds: (ids: string[]) => void;
 
   /**
    * Previews of how frames would resize based on the current drag/resize.
@@ -121,26 +100,11 @@ type GesturePreviewState = {
   frameFitPreviews: FrameFitPreview[];
 
   /**
-   * Replace the preview list. Called by `canvasStore` after it has
-   * computed the fit for each affected frame.
-   */
-  setFrameFitPreviews: (previews: FrameFitPreview[]) => void;
-
-  /** Clear the frame fit previews (e.g. when drag or resize ends). */
-  clearFrameFitPreview: () => void;
-
-  /**
    * Smart-snap guide lines to render this frame. Written by the snap
    * session during drag (via `canvasStore.onNodesChange`) and during
    * resize (via `NodeWrapper.handleResize`); cleared on gesture end.
    */
   snapGuides: Guide[];
-
-  /** Replace the guide list (called every drag/resize tick). */
-  setSnapGuides: (guides: Guide[]) => void;
-
-  /** Clear the guide list when the gesture ends. */
-  clearSnapGuides: () => void;
 
   /**
    * Live drop indicator for a node hovering over a structured
@@ -152,6 +116,54 @@ type GesturePreviewState = {
    * never set it).
    */
   structuredDropPreview: StructuredDropPreview | null;
+};
+
+type GesturePreviewState = GesturePreviewData & {
+  /** Replace the transient Sketch eraser preview. */
+  setSketchErasePreview: (preview: Record<string, string[]>) => void;
+
+  /** Restore all strokes when erasing commits or is cancelled. */
+  clearSketchErasePreview: () => void;
+
+  /** Replace the current stroke-level selection. */
+  setSketchStrokeSelection: (selection: Record<string, string[]>) => void;
+
+  /** Clear the stroke-level selection (also drops region + move preview). */
+  clearSketchStrokeSelection: () => void;
+
+  /** Replace the transient stroke highlight. */
+  setSketchStrokeHighlight: (highlight: Record<string, string[]>) => void;
+
+  /** Clear the transient stroke highlight. */
+  clearSketchStrokeHighlight: () => void;
+
+  /** Set the retained selection polygon (flow-space). */
+  setSketchSelectionPolygon: (
+    polygon: Array<{ x: number; y: number }> | null,
+  ) => void;
+
+  /** Set / clear the live move-preview offset. */
+  setSketchStrokeMovePreview: (
+    offset: { dx: number; dy: number } | null,
+  ) => void;
+
+  /** Set / clear the carried-node ids for the current mixed move. */
+  setSketchStrokeMoveCarriedNodeIds: (ids: string[]) => void;
+
+  /**
+   * Replace the preview list. Called by `canvasStore` after it has
+   * computed the fit for each affected frame.
+   */
+  setFrameFitPreviews: (previews: FrameFitPreview[]) => void;
+
+  /** Clear the frame fit previews (e.g. when drag or resize ends). */
+  clearFrameFitPreview: () => void;
+
+  /** Replace the guide list (called every drag/resize tick). */
+  setSnapGuides: (guides: Guide[]) => void;
+
+  /** Clear the guide list when the gesture ends. */
+  clearSnapGuides: () => void;
 
   /** Replace the structured drop indicator (called every drag tick). */
   setStructuredDropPreview: (preview: StructuredDropPreview | null) => void;
@@ -159,8 +171,13 @@ type GesturePreviewState = {
   /** Clear the structured drop indicator when the gesture ends. */
   clearStructuredDropPreview: () => void;
 
-  /** Clear every canvas-scoped transient when authoritative nodes reload. */
-  resetForCanvasLoad: () => void;
+  /**
+   * Clear every canvas-scoped transient. Called on any authoritative
+   * geometry swap that may strand a retained stroke selection / polygon:
+   * canvas switch, authoritative reload, same-canvas SSE snapshot heal,
+   * and undo / redo.
+   */
+  resetCanvasScopedTransients: () => void;
 };
 
 /**
@@ -174,6 +191,23 @@ export type StructuredDropPreview = {
   y: number;
   width: number;
   height: number;
+};
+
+/**
+ * Empty value for every canvas-scoped transient. Single source of truth for
+ * both the store's initial state and `resetCanvasScopedTransients`, so the
+ * two can never drift and a newly-added field is reset automatically.
+ */
+const INITIAL_PREVIEW_DATA: GesturePreviewData = {
+  sketchErasePreview: {},
+  sketchStrokeSelection: {},
+  sketchStrokeHighlight: {},
+  sketchSelectionPolygon: null,
+  sketchStrokeMovePreview: null,
+  sketchStrokeMoveCarriedNodeIds: [],
+  frameFitPreviews: [],
+  snapGuides: [],
+  structuredDropPreview: null,
 };
 
 /**
@@ -205,10 +239,9 @@ export type StructuredDropPreview = {
  * and avoids a circular import.
  */
 export const useGesturePreviewStore = create<GesturePreviewState>()((set) => ({
-  sketchErasePreview: {},
+  ...INITIAL_PREVIEW_DATA,
   setSketchErasePreview: (sketchErasePreview) => set({ sketchErasePreview }),
   clearSketchErasePreview: () => set({ sketchErasePreview: {} }),
-  sketchStrokeSelection: {},
   setSketchStrokeSelection: (sketchStrokeSelection) =>
     set({ sketchStrokeSelection }),
   clearSketchStrokeSelection: () =>
@@ -218,39 +251,21 @@ export const useGesturePreviewStore = create<GesturePreviewState>()((set) => ({
       sketchStrokeMovePreview: null,
       sketchStrokeMoveCarriedNodeIds: [],
     }),
-  sketchStrokeHighlight: {},
   setSketchStrokeHighlight: (sketchStrokeHighlight) =>
     set({ sketchStrokeHighlight }),
   clearSketchStrokeHighlight: () => set({ sketchStrokeHighlight: {} }),
-  sketchSelectionPolygon: null,
   setSketchSelectionPolygon: (sketchSelectionPolygon) =>
     set({ sketchSelectionPolygon }),
-  sketchStrokeMovePreview: null,
   setSketchStrokeMovePreview: (sketchStrokeMovePreview) =>
     set({ sketchStrokeMovePreview }),
-  sketchStrokeMoveCarriedNodeIds: [],
   setSketchStrokeMoveCarriedNodeIds: (sketchStrokeMoveCarriedNodeIds) =>
     set({ sketchStrokeMoveCarriedNodeIds }),
-  frameFitPreviews: [],
   setFrameFitPreviews: (previews) => set({ frameFitPreviews: previews }),
   clearFrameFitPreview: () => set({ frameFitPreviews: [] }),
-  snapGuides: [],
   setSnapGuides: (guides) => set({ snapGuides: guides }),
   clearSnapGuides: () => set({ snapGuides: [] }),
-  structuredDropPreview: null,
   setStructuredDropPreview: (preview) =>
     set({ structuredDropPreview: preview }),
   clearStructuredDropPreview: () => set({ structuredDropPreview: null }),
-  resetForCanvasLoad: () =>
-    set({
-      sketchErasePreview: {},
-      sketchStrokeSelection: {},
-      sketchStrokeHighlight: {},
-      sketchSelectionPolygon: null,
-      sketchStrokeMovePreview: null,
-      sketchStrokeMoveCarriedNodeIds: [],
-      frameFitPreviews: [],
-      snapGuides: [],
-      structuredDropPreview: null,
-    }),
+  resetCanvasScopedTransients: () => set({ ...INITIAL_PREVIEW_DATA }),
 }));

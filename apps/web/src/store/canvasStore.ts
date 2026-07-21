@@ -1711,7 +1711,7 @@ const useCanvasStore = create<RFState>()(
         // different-canvas switch and to a same-canvas SSE gap/snapshot heal:
         // even when the canvas id is unchanged, selected stroke ids and
         // retained polygons may have been deleted or moved remotely.
-        useGesturePreviewStore.getState().resetForCanvasLoad();
+        useGesturePreviewStore.getState().resetCanvasScopedTransients();
         // Apply the authoritative server state via the no-autosave setter.
         // A load must NEVER schedule a structure PUT: the nodes/edges we
         // just fetched already ARE the server's state, so bumping the
@@ -1812,7 +1812,7 @@ const useCanvasStore = create<RFState>()(
       // inherit the previous canvas's recent-action trail.
       intentActionWindow.clear();
       useToolStore.getState().resetForCanvasSwitch();
-      useGesturePreviewStore.getState().resetForCanvasLoad();
+      useGesturePreviewStore.getState().resetCanvasScopedTransients();
       canvasHistoryManager.clear();
 
       // Load the new canvas
@@ -3345,6 +3345,15 @@ const useCanvasStore = create<RFState>()(
       const snapshot = canvasHistoryManager.undo(nodes, edges);
       if (!snapshot) return;
 
+      // Undo swaps in authoritative geometry, so any retained stroke
+      // selection / polygon may no longer describe it (e.g. the classic
+      // "move strokes then undo" strands the dashed region at the moved
+      // position while the strokes revert). Drop the whole floating
+      // selection — the delta is unknowable from a generic undo, so
+      // re-homing the polygon is not possible; clearing is the safe,
+      // reload-consistent choice.
+      useGesturePreviewStore.getState().resetCanvasScopedTransients();
+
       const action: RecentAction = { action: 'canvas_undone' };
       set({
         nodes: snapshot.nodes,
@@ -3365,6 +3374,10 @@ const useCanvasStore = create<RFState>()(
       const { nodes, edges, canvasId } = get();
       const snapshot = canvasHistoryManager.redo(nodes, edges);
       if (!snapshot) return;
+
+      // See `undo`: a redo is the same authoritative geometry swap, so
+      // discard the floating stroke selection for the same reason.
+      useGesturePreviewStore.getState().resetCanvasScopedTransients();
 
       const action: RecentAction = { action: 'canvas_redone' };
       set({
