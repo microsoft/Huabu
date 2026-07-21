@@ -135,7 +135,7 @@ export function AgentIcon({
     <svg
       width={size}
       height={size}
-      viewBox="0 0 120 120"
+      viewBox="18 18 84 84"
       className={className}
       role={title ? 'img' : undefined}
       aria-hidden={title ? undefined : true}

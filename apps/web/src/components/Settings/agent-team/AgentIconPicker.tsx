@@ -51,14 +51,14 @@ export function AgentIconPicker({
           disabled={disabled}
           // Override the Button's default lucide-sized icon (~13px) and tighten
           // the icon-only padding so the avatar fills the trigger.
-          className="rounded-full p-0.5 [&_svg]:h-7 [&_svg]:w-7"
+          className="rounded-full p-0.5 [&_svg]:h-5 [&_svg]:w-5"
           aria-label={t('settings.agentIcon.change', { alias })}
           title={t('settings.agentIcon.change', { alias })}
         >
           <AgentIcon
             shape={value.shape}
             color={value.color}
-            size={28}
+            size={20}
             withFace
           />
         </Button>
@@ -72,7 +72,7 @@ export function AgentIconPicker({
           optionLabel={(shape) => t(`settings.agentIcon.shapes.${shape}`)}
           onSelect={(shape) => onChange({ ...value, shape })}
           renderIcon={(shape: AgentIconShape) => (
-            <AgentIcon shape={shape} color={value.color} size={24} withFace />
+            <AgentIcon shape={shape} color={value.color} size={20} withFace />
           )}
         />
         <IconOptionRow
@@ -82,7 +82,7 @@ export function AgentIconPicker({
           optionLabel={(color) => t(`settings.agentIcon.colors.${color}`)}
           onSelect={(color) => onChange({ ...value, color })}
           renderIcon={(color: AgentIconColor) => (
-            <AgentIcon shape={value.shape} color={color} size={24} withFace />
+            <AgentIcon shape={value.shape} color={color} size={20} withFace />
           )}
         />
       </div>
