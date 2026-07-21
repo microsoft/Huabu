@@ -33,7 +33,7 @@ Every node passes the same stages; the dispatcher skips those whose capabilities
 
 Web / pdf skip Stages 2–5 when `src` is unchanged and content is cached on disk ([cache-check.ts](../../apps/server/src/modules/preprocessing/stages/cache-check.ts)); `force=true` overrides. `allowLLM=false` / interactive mode → Enrich skipped, result still valid.
 
-Before preprocessing, an agent-authored `web.src` is normalized at the server executor boundary: a canvas-local staged `.html` file is moved from `.upload/` into `.artifacts/` and persisted as a bare artifact key, while live `http(s)://` and self-contained `data:` URLs remain unchanged; other local extensions are not imported or reclaimed. Input Resolve then maps the artifact key to an absolute local path for extraction, while remote and `data:` sources continue through the URL path.
+Before preprocessing, an agent-authored `web.src` is normalized at the server executor boundary: any canvas-local `.html` file is imported into `.artifacts/` and persisted as a bare artifact key (uploads staged under `.upload/` are reclaimed), while live `http(s)://` and self-contained `data:` URLs remain unchanged; other local extensions are not imported or reclaimed. Input Resolve then maps the artifact key to an absolute local path for extraction, while remote and `data:` sources continue through the URL path.
 
 Enrich runs on the **utility model tier**, not the chat model: `ProviderManager` calls `llmComplete(ctx, { role })` with the `imageLabel` / `frameLabel` / `contentMeta` roles, so labeling / summaries / keywords resolve through the user's utility model (a faster/cheaper model, or the chat model when utility follows chat). See [model-role-routing](../proposals/model-role-routing.md).
 
