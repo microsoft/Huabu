@@ -34,7 +34,11 @@ import { SettingControl } from '@/components/Settings/Common/SettingControl';
 import { SettingLabel } from '@/components/Settings/Common/SettingLabel';
 import { SettingRow } from '@/components/Settings/Common/SettingRow';
 import { SettingSubGroup } from '@/components/Settings/Common/SettingSubGroup';
-import { readAgentIcon, withAgentIcon } from '@/utils/agentIcon';
+import {
+  readAgentIcon,
+  randomAgentIcon,
+  withAgentIcon,
+} from '@/utils/agentIcon';
 
 import { AgentIconPicker } from './AgentIconPicker';
 import { AgentTeamConfigs } from './AgentTeamConfigs';
@@ -111,6 +115,7 @@ function CreateManifestProfileForm({
   const [agentId, setAgentId] = useState('');
   const [workingDirPath, setWorkingDirPath] = useState('');
   const [alias, setAlias] = useState('');
+  const [icon, setIcon] = useState<AgentIconValue>(() => randomAgentIcon());
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
@@ -175,6 +180,7 @@ function CreateManifestProfileForm({
           manifestPath: group.member.manifestPath,
           harness: agentId,
         },
+        customData: withAgentIcon(undefined, icon),
       });
       // Create is only enabled once every required field (including the
       // preset's required credentials) is complete, so setup can always run
@@ -212,6 +218,7 @@ function CreateManifestProfileForm({
     alias,
     defaultAlias,
     group.member,
+    icon,
     onClose,
     onCreated,
     t,
@@ -312,6 +319,20 @@ function CreateManifestProfileForm({
             onChange={(event) => setAlias(event.target.value)}
             placeholder={defaultAlias}
             className="w-full"
+          />
+        </SettingControl>
+      </SettingRow>
+
+      <SettingRow
+        title={t('settings.agentIcon.label')}
+        description={t('settings.agentIcon.hint')}
+      >
+        <SettingControl>
+          <AgentIconPicker
+            value={icon}
+            onChange={setIcon}
+            alias={alias || defaultAlias}
+            disabled={creating}
           />
         </SettingControl>
       </SettingRow>

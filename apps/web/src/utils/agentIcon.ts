@@ -51,6 +51,17 @@ export function getDefaultAgentIcon(profileId: string): AgentIconValue {
   };
 }
 
+/**
+ * A random icon, used to seed the create form so each new agent starts with a
+ * distinct-looking avatar the user can then adjust (there is no Profile id to
+ * derive a stable default from yet).
+ */
+export function randomAgentIcon(): AgentIconValue {
+  const pick = <T>(list: readonly T[]): T =>
+    list[Math.floor(Math.random() * list.length)];
+  return { shape: pick(AGENT_ICON_SHAPES), color: pick(AGENT_ICON_COLORS) };
+}
+
 /** Resolve the effective icon for a Profile (saved value, else default). */
 export function readAgentIcon(profile: {
   id: string;

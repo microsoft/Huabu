@@ -21,7 +21,11 @@ import { SettingControl } from '@/components/Settings/Common/SettingControl';
 import { SettingLabel } from '@/components/Settings/Common/SettingLabel';
 import { SettingRow } from '@/components/Settings/Common/SettingRow';
 import { SettingSubGroup } from '@/components/Settings/Common/SettingSubGroup';
-import { readAgentIcon, withAgentIcon } from '@/utils/agentIcon';
+import {
+  readAgentIcon,
+  randomAgentIcon,
+  withAgentIcon,
+} from '@/utils/agentIcon';
 
 import { AgentIconPicker } from './AgentIconPicker';
 import { ProfileEditActions } from './ProfileEditActions';
@@ -223,8 +227,8 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
   const [form, setForm] = useState<CommandProfileFormState>(() =>
     editing ? EMPTY_FORM : { ...EMPTY_FORM, cliId: '' },
   );
-  const [icon, setIcon] = useState<AgentIconValue | null>(() =>
-    editing ? readAgentIcon(editing) : null,
+  const [icon, setIcon] = useState<AgentIconValue>(() =>
+    editing ? readAgentIcon(editing) : randomAgentIcon(),
   );
   const [saving, setSaving] = useState(false);
 
@@ -378,6 +382,7 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
         workingDirPath: cwd,
         launch: { kind: 'acp-command', command },
         metadata: { cliId: form.cliId },
+        customData: withAgentIcon(undefined, icon),
       };
       await createAcpProfile(payload);
       toast(t('settings.profileCreated'), { tone: 'success' });
@@ -510,14 +515,12 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
             />
           }
           iconControl={
-            icon ? (
-              <AgentIconPicker
-                value={icon}
-                onChange={setIcon}
-                alias={form.displayName || editing.alias}
-                disabled={saving}
-              />
-            ) : undefined
+            <AgentIconPicker
+              value={icon}
+              onChange={setIcon}
+              alias={form.displayName || editing.alias}
+              disabled={saving}
+            />
           }
         />
         <ProfileEditActions
@@ -657,6 +660,21 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
             }
             placeholder={defaultDisplayName}
             className="w-full"
+          />
+        </SettingControl>
+      </SettingRow>
+
+      {/* ─── Icon ──────────────────────────────────────────────── */}
+      <SettingRow
+        title={t('settings.agentIcon.label')}
+        description={t('settings.agentIcon.hint')}
+      >
+        <SettingControl>
+          <AgentIconPicker
+            value={icon}
+            onChange={setIcon}
+            alias={form.displayName || defaultDisplayName}
+            disabled={saving}
           />
         </SettingControl>
       </SettingRow>
