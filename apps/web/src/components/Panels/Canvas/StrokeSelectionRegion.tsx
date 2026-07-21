@@ -44,7 +44,12 @@ export const StrokeSelectionRegion = memo(() => {
     <ViewportPortal>
       <svg
         className="pointer-events-none absolute overflow-visible"
-        style={{ left: x1 + dx, top: y1 + dy, width: w, height: h }}
+        // Sit above the nodes so the loop is visible over an opaque frame
+        // background and its `move` cursor / grab wins. The viewport portal
+        // is stacking-transparent (no transform/z-index of its own), so this
+        // z-index competes directly with node z-indices (which top out in the
+        // low tens) inside `.react-flow__viewport`.
+        style={{ left: x1 + dx, top: y1 + dy, width: w, height: h, zIndex: 50 }}
         viewBox={`0 0 ${w} ${h}`}
       >
         <polygon
