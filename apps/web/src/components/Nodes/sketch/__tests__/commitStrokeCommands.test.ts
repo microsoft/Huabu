@@ -16,13 +16,17 @@ import { commitStrokeCommands } from '../sketchMerge';
 import type { CanvasCommand } from '@sediment/shared';
 
 // Hoisted so the spies exist before the (hoisted) `vi.mock` factories run.
-const { beginGesture, executeCommands, markGestureSnapshot } = vi.hoisted(
-  () => ({
-    beginGesture: vi.fn(),
-    executeCommands: vi.fn(),
-    markGestureSnapshot: vi.fn(),
-  }),
-);
+const {
+  beginGesture,
+  consumeGestureSnapshot,
+  executeCommands,
+  markGestureSnapshot,
+} = vi.hoisted(() => ({
+  beginGesture: vi.fn(),
+  consumeGestureSnapshot: vi.fn(),
+  executeCommands: vi.fn(),
+  markGestureSnapshot: vi.fn(),
+}));
 
 vi.mock('@/store/canvasStore', () => ({
   default: {
@@ -31,7 +35,7 @@ vi.mock('@/store/canvasStore', () => ({
 }));
 
 vi.mock('@/store/canvasHistoryManager', () => ({
-  canvasHistoryManager: { markGestureSnapshot },
+  canvasHistoryManager: { consumeGestureSnapshot, markGestureSnapshot },
 }));
 
 // A caller-snapshot geometry command (produced by stroke move / partial
@@ -51,6 +55,7 @@ const del: CanvasCommand = { type: 'DELETE_NODES', nodeIds: ['a' as never] };
 
 beforeEach(() => {
   beginGesture.mockClear();
+  consumeGestureSnapshot.mockClear();
   executeCommands.mockClear();
   markGestureSnapshot.mockClear();
 });
@@ -61,6 +66,7 @@ describe('commitStrokeCommands', () => {
     expect(executeCommands).not.toHaveBeenCalled();
     expect(beginGesture).not.toHaveBeenCalled();
     expect(markGestureSnapshot).not.toHaveBeenCalled();
+    expect(consumeGestureSnapshot).not.toHaveBeenCalled();
   });
 
   it('opens its own single-entry gesture for a geometry batch', () => {
@@ -83,6 +89,7 @@ describe('commitStrokeCommands', () => {
   it('folds into an already-open gesture instead of taking a new snapshot', () => {
     commitStrokeCommands([geom], { foldIntoOpenGesture: true });
     expect(markGestureSnapshot).toHaveBeenCalledTimes(1);
+    expect(consumeGestureSnapshot).toHaveBeenCalledTimes(1);
     expect(beginGesture).not.toHaveBeenCalled();
     expect(executeCommands).toHaveBeenCalledTimes(1);
     expect(executeCommands).toHaveBeenCalledWith([geom], 'ui');
@@ -91,7 +98,19 @@ describe('commitStrokeCommands', () => {
   it('folds even a delete-only batch when asked (mixed gesture)', () => {
     commitStrokeCommands([del], { foldIntoOpenGesture: true });
     expect(markGestureSnapshot).toHaveBeenCalledTimes(1);
+    expect(consumeGestureSnapshot).toHaveBeenCalledTimes(1);
     expect(beginGesture).not.toHaveBeenCalled();
     expect(executeCommands).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes a folded gesture even when command execution throws', () => {
+    executeCommands.mockImplementationOnce(() => {
+      throw new Error('boom');
+    });
+
+    expect(() =>
+      commitStrokeCommands([del], { foldIntoOpenGesture: true }),
+    ).toThrow('boom');
+    expect(consumeGestureSnapshot).toHaveBeenCalledTimes(1);
   });
 });

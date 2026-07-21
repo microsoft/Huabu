@@ -865,5 +865,16 @@ export function commitStrokeCommands(
   } else if (commands.some((c) => c.type === 'SET_NODE_GEOMETRY')) {
     store.beginGesture('SET_NODE_GEOMETRY');
   }
-  store.executeCommands(commands, 'ui');
+  try {
+    store.executeCommands(commands, 'ui');
+  } finally {
+    // A folded batch containing a caller-snapshot command is consumed by
+    // executeCommands itself. DELETE_NODES-only and all-no-op batches are
+    // not, so close the re-armed flag here as an idempotent safety net. If it
+    // leaked, an unrelated later edit could incorrectly skip its own undo
+    // snapshot.
+    if (foldIntoOpenGesture) {
+      canvasHistoryManager.consumeGestureSnapshot();
+    }
+  }
 }

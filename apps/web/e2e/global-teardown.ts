@@ -3,8 +3,9 @@ import { rmSync } from 'node:fs';
 /**
  * Remove the throwaway workspace + data dirs the e2e backend was locked to.
  *
- * `playwright.config.ts` creates them per run and exposes their paths via
- * `E2E_WORKSPACE_DIR` / `E2E_DATA_DIR`. Deleting them here keeps repeated
+ * `playwright.config.ts` assigns unique paths per run and exposes them via
+ * `E2E_WORKSPACE_DIR` / `E2E_DATA_DIR`; the backend creates them at boot.
+ * Deleting them here keeps repeated
  * `test:e2e` runs from piling up temp Spaces and sqlite state under the OS
  * temp dir. Runs in the same runner process that evaluated the config, so
  * the env vars set there are visible. `force` makes teardown idempotent and

@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -7,8 +7,9 @@ import { defineConfig, devices } from '@playwright/test';
 /**
  * Playwright end-to-end configuration for the web app.
  *
- * Uses the system Google Chrome (`channel: 'chrome'`) so no browser
- * download is required. The single project enables touch emulation
+ * Uses Playwright-managed Chromium by default. Set `E2E_BROWSER_CHANNEL`
+ * (for example `chrome` or `msedge`) to validate a system browser channel.
+ * The single project enables touch emulation
  * (`hasTouch` + `isMobile`) because these tests exist to exercise the
  * canvas multi-touch / pen gesture pipeline, which unit tests cannot
  * drive faithfully.
@@ -30,12 +31,15 @@ import { defineConfig, devices } from '@playwright/test';
 const E2E_SERVER_PORT = process.env.E2E_SERVER_PORT ?? '3101';
 const E2E_WEB_PORT = process.env.E2E_WEB_PORT ?? '5273';
 const baseURL = process.env.E2E_BASE_URL ?? `http://localhost:${E2E_WEB_PORT}`;
+const browserChannel = process.env.E2E_BROWSER_CHANNEL;
 
-// Throwaway workspace + data dir for the e2e backend. Managed mode locks the
-// server to `HUABU_WORKSPACE` at boot, so every Space the suite creates is
-// written here instead of the developer's real workspace.
-const e2eWorkspace = mkdtempSync(join(tmpdir(), 'sediment-e2e-workspace-'));
-const e2eDataDir = mkdtempSync(join(tmpdir(), 'sediment-e2e-data-'));
+// Unique paths for the throwaway workspace + data dir. Do not create them
+// while evaluating this config: editor test discovery and `--list` also load
+// the module but do not reliably run global teardown. The backend creates the
+// directories when the actual test run starts.
+const runId = `${process.pid}-${randomUUID()}`;
+const e2eWorkspace = join(tmpdir(), `sediment-e2e-workspace-${runId}`);
+const e2eDataDir = join(tmpdir(), `sediment-e2e-data-${runId}`);
 
 // Expose the temp dirs to `global-teardown.ts` (same runner process) so it can
 // delete them after the run and keep repeated e2e runs from piling up.
@@ -53,7 +57,7 @@ export default defineConfig({
   globalTeardown: './e2e/global-teardown.ts',
   use: {
     baseURL,
-    channel: 'chrome',
+    ...(browserChannel ? { channel: browserChannel } : {}),
     locale: 'en-US',
     trace: 'retain-on-failure',
   },
@@ -62,7 +66,7 @@ export default defineConfig({
       name: 'touch',
       use: {
         ...devices['Desktop Chrome'],
-        channel: 'chrome',
+        ...(browserChannel ? { channel: browserChannel } : {}),
         locale: 'en-US',
         hasTouch: true,
         isMobile: false,

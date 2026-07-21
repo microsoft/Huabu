@@ -176,11 +176,10 @@ export function createNodeDragRecognizer(): PointerRecognizer<
     onCancel: (event) => {
       if (event.pointerId !== pointerId) return;
       if (locked && primaryNode) {
-        // Finalize at the current position so the snap session and undo
-        // snapshot never leak (mirrors the mouse drag-stop safety net).
-        useCanvasStore
-          .getState()
-          .onNodeDragStop(dragEvent(), primaryNode, draggedNodes);
+        // Cancellation is not a drop: restore the pre-drag positions, clear
+        // `dragging`, and tear down snap/history state without running frame
+        // re-parenting or scheduling a save.
+        useCanvasStore.getState().cancelActiveNodeDrag();
       }
       reset();
     },

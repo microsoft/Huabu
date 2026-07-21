@@ -117,7 +117,6 @@ import { WebNode } from '../../Nodes/web/WebNode.tsx';
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
 import type { CanvasPointerRouterContext } from '@/handler/canvasPointerRouterContext';
 import type { PointerRecognizer } from '@/handler/pointerRouter';
-import type { CanvasViewport } from '@sediment/shared';
 import type {
   FrameFitResult,
   NestableNode,
