@@ -56,6 +56,7 @@ import { initWasm, Resvg } from '@resvg/resvg-wasm';
 import { getStroke } from 'perfect-freehand';
 
 import { findClusters, resolveAccent } from '@sediment/shared';
+import { getSketchRenderedSize } from '@sediment/shared/canvas-engine';
 
 import { getCanvasStore } from '../../../storage/index.js';
 
@@ -253,29 +254,20 @@ function escapeXml(s: string): string {
 
 // ─── Sketch helpers ────────────────────────────────────────────────────────
 /**
- * Effective on-canvas size for a sketch node. Prefers React Flow's
- * `measured` (reflects any user resize), then engine-persisted
- * `style.{width,height}`, then `data.initialSize`, then 0. The
- * `initialSize` fallback matters on first paint before xyflow has had
- * a chance to write `measured`.
+ * Effective on-canvas size for a sketch node. Thin server-side alias for
+ * the shared {@link getSketchRenderedSize}: the persisted `CanvasNode` is
+ * structurally a ReactFlow node, so the shared reader's superset chain
+ * (`measured → node.width → style → initialSize → 0`) already selects the
+ * right source here — the engine only ever populates `measured` / `style`,
+ * so the `node.width` tier is a no-op on the server. Kept as a named
+ * wrapper so call sites read intent and the sketch-only `initialSize`
+ * fallback stays documented at the point of use.
  */
 function sketchEffectiveSize(n: CanvasNode): {
   width: number;
   height: number;
 } {
-  const style = readStyle(n);
-  const data = getSketchData(n);
-  const w =
-    num(n.measured?.width) ??
-    num(style?.width) ??
-    data?.initialSize?.width ??
-    0;
-  const h =
-    num(n.measured?.height) ??
-    num(style?.height) ??
-    data?.initialSize?.height ??
-    0;
-  return { width: w, height: h };
+  return getSketchRenderedSize(n);
 }
 
 /**

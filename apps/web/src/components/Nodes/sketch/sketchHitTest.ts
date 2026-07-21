@@ -1,5 +1,6 @@
 import {
   createAbsolutePositionGetter,
+  getSketchRenderedSize,
   indexById,
   type NestableNode,
 } from '@sediment/shared/canvas-engine';
@@ -69,8 +70,13 @@ function sketchFlowTransform(
 } {
   const baseW = data.initialSize?.width || 1;
   const baseH = data.initialSize?.height || 1;
-  const w = node.measured?.width ?? node.width ?? baseW;
-  const h = node.measured?.height ?? node.height ?? baseH;
+  // Single source of truth for the rendered size (measured -> node.width ->
+  // style -> initialSize). Keeps every hit-test / bounds helper aligned with
+  // the geometry builders in sketchMerge; falls back to the baked base size
+  // only for a degenerate node with no size info at all.
+  const rendered = getSketchRenderedSize(node);
+  const w = rendered.width || baseW;
+  const h = rendered.height || baseH;
   return {
     scaleX: w / baseW,
     scaleY: h / baseH,

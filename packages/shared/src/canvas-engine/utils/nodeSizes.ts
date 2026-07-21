@@ -95,6 +95,21 @@ export function getNodeCreationStyle(
 // ---------------------------------------------------------------------------
 
 /**
+ * Coerce a raw dimension value into a finite number, or `undefined`.
+ * Accepts a plain number or a CSS-length string (`"420px"` → `420`);
+ * anything non-finite / unparseable becomes `undefined` so `??` chains
+ * can fall through to the next source.
+ */
+function parseDimension(v: unknown): number | undefined {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : undefined;
+  if (typeof v === 'string') {
+    const parsed = Number.parseFloat(v);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
+/**
  * Return the rendered width/height of a canvas node.
  * Returns `{ width: 0, height: 0 }` when no size information is available
  * (e.g. node not yet mounted). Callers that need a non-zero fallback for
@@ -108,27 +123,13 @@ export function getNodeSize(node: Node): { width: number; height: number } {
     | { width?: number | string; height?: number | string }
     | undefined;
 
-  const width =
-    (typeof measured?.width === 'number' ? measured.width : undefined) ??
-    (typeof style?.width === 'number'
-      ? style.width
-      : typeof style?.width === 'string'
-        ? Number.parseFloat(style.width)
-        : undefined) ??
-    0;
-
+  const width = parseDimension(measured?.width) ?? parseDimension(style?.width);
   const height =
-    (typeof measured?.height === 'number' ? measured.height : undefined) ??
-    (typeof style?.height === 'number'
-      ? style.height
-      : typeof style?.height === 'string'
-        ? Number.parseFloat(style.height)
-        : undefined) ??
-    0;
+    parseDimension(measured?.height) ?? parseDimension(style?.height);
 
   return {
-    width: Number.isFinite(width) ? width : 0,
-    height: Number.isFinite(height) ? height : 0,
+    width: width ?? 0,
+    height: height ?? 0,
   };
 }
 
@@ -144,4 +145,52 @@ export function getLayoutNodeSize(node: Node): { w: number; h: number } {
     w: width || 200,
     h: height || 100,
   };
+}
+
+/**
+ * Effective rendered size of a **sketch** node.
+ *
+ * Specialises {@link getNodeSize} for sketches with one extra, sketch-only
+ * fallback tier: the baked `data.initialSize` (the bbox the strokes were
+ * captured against), which makes sketch geometry line up on the very first
+ * paint before any measurement / persisted size exists.
+ *
+ * Single reader for BOTH runtimes — web (live xyflow `Node`) and server
+ * (persisted `CanvasNode`, which is structurally the same ReactFlow node).
+ * The priority chain is a superset that each side self-selects from, so no
+ * per-side conversion is needed:
+ *   `measured` → `node.width` → `style.{width,height}` → `initialSize` → 0.
+ * The web renderer writes size into `measured` / `node.width`; the canvas
+ * engine persists it into `style` (which may be a `"420px"`-style string,
+ * parsed here). Whichever fields a given runtime does not populate are
+ * simply `undefined` and skipped.
+ */
+export function getSketchRenderedSize(node: Node): {
+  width: number;
+  height: number;
+} {
+  const measured = node.measured as
+    | { width?: number; height?: number }
+    | undefined;
+  const style = node.style as
+    | { width?: number | string; height?: number | string }
+    | undefined;
+  const data = node.data as
+    | { initialSize?: { width?: number; height?: number } }
+    | undefined;
+
+  const width =
+    parseDimension(measured?.width) ??
+    parseDimension(node.width) ??
+    parseDimension(style?.width) ??
+    data?.initialSize?.width ??
+    0;
+  const height =
+    parseDimension(measured?.height) ??
+    parseDimension(node.height) ??
+    parseDimension(style?.height) ??
+    data?.initialSize?.height ??
+    0;
+
+  return { width, height };
 }

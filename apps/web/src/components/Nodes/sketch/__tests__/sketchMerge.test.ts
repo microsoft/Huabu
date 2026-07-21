@@ -418,6 +418,68 @@ describe('buildMergeCommands', () => {
     expect(patch.strokes[1].points[0]).toEqual([210, 0]);
   });
 
+  it('uses persisted style size when the node is unmounted (no measured / node.width)', () => {
+    // Regression: a scaled sketch loaded from disk but not yet mounted has
+    // only `style` geometry (persisted by the canvas engine, possibly as a
+    // CSS string) — no `measured`, no top-level `node.width`. The hit-test
+    // already resolves the rendered size via getSketchRenderedSize
+    // (measured → node.width → style → initialSize); the merge builder must
+    // read the SAME size, otherwise it would fall back to initialSize
+    // (scale = 1) and bake / persist the strokes at the wrong scale.
+    //
+    // initialSize 100×100, style 200×100 → scaleX = 2, scaleY = 1. If the
+    // builder ignored style it would emit scale = 1 and place the existing
+    // point at (50, 50) with a 100-wide bbox.
+    setNodes([
+      {
+        id: 'a',
+        type: 'sketch',
+        position: { x: 0, y: 0 },
+        // No `measured`, no `width` / `height` — only persisted `style`,
+        // written as a CSS-length string to also exercise parseDimension.
+        style: { width: '200px', height: '100px' },
+        data: {
+          type: 'sketch',
+          strokes: [
+            {
+              id: 's1',
+              points: [[50, 50]],
+              color: '#000',
+              size: 4,
+              createdAt: NOW,
+            },
+          ],
+          initialSize: { width: 100, height: 100 },
+        },
+      } as unknown as Node,
+    ]);
+    const cmds = buildMergeCommands(
+      'a' as never,
+      null,
+      [[0, 0]],
+      { x: 210, y: 0, width: 30, height: 30 },
+      '#000',
+      4,
+      NOW,
+      'n',
+    );
+    const merge = cmds[0] as Extract<
+      (typeof cmds)[number],
+      { type: 'MERGE_NODE_DATA' }
+    >;
+    const patch = merge.patches[0].patch as {
+      strokes: Array<{ id: string; points: number[][] }>;
+      initialSize: { width: number; height: number };
+    };
+    // Union bbox: x ∈ [0, 240], y ∈ [0, 100] — proves style width (200)
+    // drove the resized bbox, not initialSize (100).
+    expect(patch.initialSize).toEqual({ width: 240, height: 100 });
+    // Existing stroke baked with style-derived scale: (50 * 2, 50 * 1).
+    expect(patch.strokes[0].points[0]).toEqual([100, 50]);
+    // New stroke shifted by (210, 0).
+    expect(patch.strokes[1].points[0]).toEqual([210, 0]);
+  });
+
   it('preserves the third (pressure) tuple component on baked points', () => {
     setNodes([
       makeSketch({

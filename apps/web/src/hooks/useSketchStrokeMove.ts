@@ -4,6 +4,7 @@ import {
   computeFrameFit,
   getAbsolutePosition,
   getFrameSizing,
+  getSketchRenderedSize,
 } from '@sediment/shared/canvas-engine';
 
 import {
@@ -68,13 +69,7 @@ function resolveStrokeDropTarget(
   const contains = (node: Node): boolean => {
     if (node.type !== 'sketch') return false;
     const abs = getAbsolutePosition(nn, node.id) ?? node.position;
-    const data = node.data as
-      | { initialSize?: { width: number; height: number } }
-      | undefined;
-    const w =
-      node.measured?.width ?? node.width ?? data?.initialSize?.width ?? 0;
-    const h =
-      node.measured?.height ?? node.height ?? data?.initialSize?.height ?? 0;
+    const { width: w, height: h } = getSketchRenderedSize(node);
     return (
       point.x >= abs.x &&
       point.x <= abs.x + w &&

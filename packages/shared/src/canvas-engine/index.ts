@@ -98,6 +98,7 @@ export {
   isAlwaysAutoHeightNodeType,
   getNodeSize,
   getLayoutNodeSize,
+  getSketchRenderedSize,
 } from './utils/nodeSizes.js';
 export {
   NODE_TYPE_TO_PREFIX,

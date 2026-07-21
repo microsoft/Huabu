@@ -36,7 +36,10 @@
  * creating a new sketch node.
  */
 
-import { getAbsolutePosition } from '@sediment/shared/canvas-engine';
+import {
+  getAbsolutePosition,
+  getSketchRenderedSize,
+} from '@sediment/shared/canvas-engine';
 
 import { canvasHistoryManager } from '@/store/canvasHistoryManager';
 import useCanvasStore from '@/store/canvasStore';
@@ -113,10 +116,7 @@ export function findMergeTarget(
     const strokes = data.strokes ?? [];
     if (strokes.length === 0) continue;
 
-    const w =
-      node.measured?.width ?? node.width ?? data.initialSize?.width ?? 0;
-    const h =
-      node.measured?.height ?? node.height ?? data.initialSize?.height ?? 0;
+    const { width: w, height: h } = getSketchRenderedSize(node);
     const candBbox: FlowBBox = {
       x: node.position.x,
       y: node.position.y,
@@ -215,8 +215,13 @@ export function buildMergeCommands(
   const data = node.data as CanvasSketchNodeData;
   const baseW = data.initialSize?.width || 1;
   const baseH = data.initialSize?.height || 1;
-  const curW = node.measured?.width ?? node.width ?? baseW;
-  const curH = node.measured?.height ?? node.height ?? baseH;
+  // Single source of truth for the rendered size (measured -> node.width ->
+  // style -> initialSize), so this stays in sync with the hit-test that
+  // selected this node as the merge target. Falls back to the baked base
+  // size only for a degenerate node with no size info at all.
+  const rendered = getSketchRenderedSize(node);
+  const curW = rendered.width || baseW;
+  const curH = rendered.height || baseH;
   const scaleX = curW / baseW;
   const scaleY = curH / baseH;
 
@@ -370,8 +375,11 @@ export function computeEraseCommands(
 
   const baseW = data.initialSize?.width || 1;
   const baseH = data.initialSize?.height || 1;
-  const curW = node.measured?.width ?? node.width ?? baseW;
-  const curH = node.measured?.height ?? node.height ?? baseH;
+  // Same rendered-size source as the hit-test (measured -> node.width ->
+  // style -> initialSize) so erase geometry matches what was tested.
+  const rendered = getSketchRenderedSize(node);
+  const curW = rendered.width || baseW;
+  const curH = rendered.height || baseH;
   const scaleX = curW / baseW;
   const scaleY = curH / baseH;
   const O = { x: node.position.x, y: node.position.y };
@@ -471,8 +479,11 @@ export function buildMoveStrokesCommands(
 
   const baseW = data.initialSize?.width || 1;
   const baseH = data.initialSize?.height || 1;
-  const curW = node.measured?.width ?? node.width ?? baseW;
-  const curH = node.measured?.height ?? node.height ?? baseH;
+  // Same rendered-size source as the hit-test (measured -> node.width ->
+  // style -> initialSize) so move geometry matches what was tested.
+  const rendered = getSketchRenderedSize(node);
+  const curW = rendered.width || baseW;
+  const curH = rendered.height || baseH;
   const scaleX = curW / baseW;
   const scaleY = curH / baseH;
   const O = { x: node.position.x, y: node.position.y };
@@ -566,8 +577,11 @@ function sketchNodeScale(node: Node): { scaleX: number; scaleY: number } {
   const data = node.data as CanvasSketchNodeData;
   const baseW = data.initialSize?.width || 1;
   const baseH = data.initialSize?.height || 1;
-  const curW = node.measured?.width ?? node.width ?? baseW;
-  const curH = node.measured?.height ?? node.height ?? baseH;
+  // Same rendered-size source as the hit-test (measured -> node.width ->
+  // style -> initialSize) so cross-region transfer geometry matches.
+  const rendered = getSketchRenderedSize(node);
+  const curW = rendered.width || baseW;
+  const curH = rendered.height || baseH;
   return { scaleX: curW / baseW, scaleY: curH / baseH };
 }
 
