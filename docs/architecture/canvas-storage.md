@@ -1,10 +1,12 @@
 # Canvas Storage Architecture
 
-> Last updated: 2026-07-09
+> Last updated: 2026-07-21
 
 ## 1. Overview
 
 Every canvas is fully self-contained on disk. All file I/O flows through a single `CanvasStore` facade in `apps/server/src/modules/storage/`.
+
+Runtime Home-folder activation prepares and migrates the selected directory in a disposable child process before committing it as the active workspace. This isolation is required because synchronous filesystem calls against cloud, network, or virtual drives can block indefinitely; a stuck preparation is terminated after 70 seconds with `WORKSPACE_ACTIVATION_TIMEOUT`, while the Server event loop and previously active workspace remain available. Concurrent activation attempts return `WORKSPACE_ACTIVATION_IN_PROGRESS`. Managed-mode startup still prepares synchronously before the Server accepts requests.
 
 ## 2. Disk Layout
 
@@ -55,6 +57,8 @@ Key points:
 | `write-coordinator.ts`    | Single durable-write chokepoint — `withCanvasMutex` / `updateNode` / `applyNodeUpdate` (see §4) |
 | `index.ts`                | `getCanvasStore` / `listCanvases` / `createCanvas` / `deleteCanvas` / `resetStorageCache`       |
 | `migrate-chat-threads.ts` | One-shot pi-ai `Context` → structured `.turns.jsonl` chat-thread migration                      |
+
+Workspace activation is coordinated by `apps/server/src/modules/workspace-activation.ts`; the isolated child entry is `workspace-prepare.worker.ts`, and the ordered migration sequence is centralized in `workspace-prepare.ts`.
 
 ## 4. Write coordinator — one chokepoint for durable node writes
 

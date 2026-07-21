@@ -20,26 +20,10 @@ import CanvasListPage from './pages/CanvasListPage';
 import CanvasPage from './pages/CanvasPage/CanvasPage.tsx';
 import ComponentShowcasePage from './pages/ComponentShowcasePage';
 import ToolCallPlaygroundPage from './pages/ToolCallPlaygroundPage';
+import { WorkspaceLoadingScreen } from './pages/WorkspaceLoadingScreen';
 import WorkspaceSetupPage from './pages/WorkspaceSetupPage';
 import { drainPendingSaves } from './store/canvasStore.ts';
 import { useWorkspaceStore } from './store/workspaceStore';
-
-/**
- * Loading spinner shown during workspace initialisation.
- */
-function LoadingScreen() {
-  const { t } = useTranslation();
-  return (
-    <div className="bg-bg-default h-full">
-      <Loading
-        variant="brand"
-        layout="block"
-        size="md"
-        message={t('app.loadingWorkspace')}
-      />
-    </div>
-  );
-}
 
 /**
  * Carries the "still bootstrapping the workspace store" flag from the
@@ -164,7 +148,7 @@ function WorkspaceGuardLayout() {
   const initialising = useContext(InitialisingContext);
   const isReady = useWorkspaceStore((s) => s.isReady);
 
-  if (initialising) return <LoadingScreen />;
+  if (initialising) return <WorkspaceLoadingScreen />;
   if (!isReady) return <WorkspaceSetupPage />;
   return <Outlet />;
 }
@@ -177,7 +161,7 @@ function WorkspaceGuardLayout() {
  */
 function SetupRoute() {
   const initialising = useContext(InitialisingContext);
-  return initialising ? <LoadingScreen /> : <WorkspaceSetupPage />;
+  return initialising ? <WorkspaceLoadingScreen /> : <WorkspaceSetupPage />;
 }
 
 export default function App() {

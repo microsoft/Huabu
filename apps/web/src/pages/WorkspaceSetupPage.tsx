@@ -7,6 +7,7 @@ import { Button } from '../components/Common/Button';
 import { PathInput } from '../components/Common/PathInput';
 import { APP_NAME } from '../config/app';
 import { useWorkspaceStore } from '../store/workspaceStore';
+import { WorkspaceLoadingScreen } from './WorkspaceLoadingScreen';
 
 /**
  * First-launch / "switch workspace" page.
@@ -37,6 +38,10 @@ export default function WorkspaceSetupPage() {
     return <Navigate to="/" replace />;
   }
 
+  if (isSyncing) {
+    return <WorkspaceLoadingScreen />;
+  }
+
   return (
     <div className="bg-bg-default flex min-h-full items-center justify-center">
       <div className="w-full max-w-md px-6">
@@ -55,15 +60,12 @@ export default function WorkspaceSetupPage() {
 
         <FreeSetup
           isSyncing={isSyncing}
+          storeError={storeError}
           recentWorkspaces={recentWorkspaces}
           removeRecentWorkspace={removeRecentWorkspace}
           selectWorkspace={selectWorkspace}
           onActivated={() => navigate('/', { replace: true })}
         />
-
-        {storeError && (
-          <p className="text-danger mt-3 text-center text-xs">{storeError}</p>
-        )}
       </div>
     </div>
   );
@@ -75,6 +77,7 @@ export default function WorkspaceSetupPage() {
 
 interface FreeSetupProps {
   isSyncing: boolean;
+  storeError: string | null;
   recentWorkspaces: string[];
   removeRecentWorkspace: (path: string) => void;
   selectWorkspace: (path: string) => Promise<void>;
@@ -83,6 +86,7 @@ interface FreeSetupProps {
 
 function FreeSetup({
   isSyncing,
+  storeError,
   recentWorkspaces,
   removeRecentWorkspace,
   selectWorkspace,
@@ -102,10 +106,8 @@ function FreeSetup({
     try {
       await selectWorkspace(p);
       onActivated();
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : t('workspace.openPathFailed'),
-      );
+    } catch {
+      // The workspace store localizes and exposes activation failures.
     }
   };
 
@@ -172,7 +174,15 @@ function FreeSetup({
         </div>
       )}
 
-      {error && <p className="text-danger mt-3 text-center text-xs">{error}</p>}
+      {(error ?? storeError) && (
+        <p
+          className="text-danger mt-3 text-center text-xs"
+          role="alert"
+          aria-live="assertive"
+        >
+          {error ?? storeError}
+        </p>
+      )}
     </>
   );
 }

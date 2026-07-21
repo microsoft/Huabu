@@ -28,7 +28,10 @@ const resvgWasmSrc = createRequire(path.resolve('package.json')).resolve(
 
 export default defineConfig([
   {
-    entry: ['src/server.ts'],
+    entry: {
+      server: 'src/server.ts',
+      'workspace-prepare.worker': 'src/modules/workspace-prepare.worker.ts',
+    },
     format: ['esm'],
     outDir: 'dist-bundle',
     bundle: true,

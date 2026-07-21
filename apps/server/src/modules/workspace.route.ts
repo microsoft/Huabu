@@ -8,11 +8,15 @@ import { validatePathSchema, workspacePathSchema } from '@sediment/shared';
 import { resetPreprocessDispatcher } from './preprocessing/index.js';
 import { resetStorageCache } from './storage/index.js';
 import {
+  activateWorkspacePath,
+  WorkspaceActivationInProgressError,
+  WorkspaceActivationTimeoutError,
+} from './workspace-activation.js';
+import {
   getWorkspaceName,
   getWorkspacePath,
   isManagedMode,
   isWorkspaceConfigured,
-  setWorkspacePath,
 } from './workspace.js';
 
 import type {
@@ -134,8 +138,14 @@ function sendError(
   reply: FastifyReply,
   status: number,
   message: string,
+  code?: string,
+  details?: unknown,
 ): FastifyReply {
-  const body: ApiErrorBody = { message };
+  const body: ApiErrorBody = {
+    message,
+    ...(code ? { code } : {}),
+    ...(details !== undefined ? { details } : {}),
+  };
   return reply.status(status).send(body);
 }
 
@@ -245,12 +255,25 @@ const workspaceRoutes: FastifyPluginAsync = async (app) => {
       );
     }
     try {
-      setWorkspacePath(parsed.data.path);
+      await activateWorkspacePath(parsed.data.path);
       // Reset singletons that cache filesystem handles for the old workspace.
       resetStorageCache();
       resetPreprocessDispatcher();
       return buildWorkspaceState();
     } catch (e) {
+      if (e instanceof WorkspaceActivationTimeoutError) {
+        return sendError(reply, 504, e.message, 'WORKSPACE_ACTIVATION_TIMEOUT', {
+          seconds: e.timeoutSeconds,
+        });
+      }
+      if (e instanceof WorkspaceActivationInProgressError) {
+        return sendError(
+          reply,
+          409,
+          e.message,
+          'WORKSPACE_ACTIVATION_IN_PROGRESS',
+        );
+      }
       return sendError(reply, 400, (e as Error).message);
     }
   });

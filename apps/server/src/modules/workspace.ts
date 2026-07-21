@@ -33,16 +33,11 @@
  *       .history/{chat/<threadId>.json,intent.json,events.jsonl}
  */
 
-import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 
 import { resetExternalNoteWatcher } from './canvas/external-watcher.js';
 import { refreshCanvasDirIndex } from './storage/canvas-dirs.js';
-import { migrateLegacyAcpSessions } from './storage/migrate-acp-sessions.js';
-import { migrateLegacyAgenetesThreads } from './storage/migrate-agenetes-threads.js';
-import { migrateCanvasToSpace } from './storage/migrate-canvas-to-space.js';
-import { migrateLegacyChatThreads } from './storage/migrate-chat-threads.js';
-import { migrateLegacyChatTurns } from './storage/migrate-chat-turns.js';
+import { prepareWorkspaceOnDisk } from './workspace-prepare.js';
 import { invalidateUserSkill } from '../prompt/index.js';
 
 const ENV_KEY = 'HUABU_WORKSPACE';
@@ -83,30 +78,10 @@ export function initWorkspaceFromEnv(): void {
       `${ENV_KEY} must be an absolute path, got: ${JSON.stringify(fromEnv)}`,
     );
   }
-  _workspacePath = path.resolve(fromEnv);
+  const resolvedPath = path.resolve(fromEnv);
   _managed = true;
-  mkdirSync(_workspacePath, { recursive: true });
-  // Drop the cached canvas-dir index so subsequent lookups (used by
-  // migrations and route handlers) reflect the new workspace.
-  refreshCanvasDirIndex();
-  // Demo-stage rename: canvas.json -> space.json, .memory/canvas.md ->
-  // .memory/space.md, setting/.huabu.md -> setting/user.md. Runs first so
-  // later readers / migrations see the new names. Idempotent. DELETE-ME later.
-  migrateCanvasToSpace(_workspacePath);
-  // Convert legacy pi-ai `Context` chat threads to structured turns
-  // (`.turns.jsonl`); renames old `.json` to `.json.bak`. Idempotent.
-  migrateLegacyChatThreads(_workspacePath);
-  // Second hop (M6.9 row 2): fold legacy `.history/chat/*.turns.jsonl`
-  // turns into the Agenetes two-tier log (`chat_v2/`). Runs AFTER the
-  // pi-ai `.json` -> `.turns.jsonl` hop above. Idempotent (.bak on source).
-  migrateLegacyChatTurns(_workspacePath);
-  // Convert the strict workload/state boundary before any writer opens the
-  // namespace. Keeps the original v1 file as `.agenetes-v1.bak`.
-  migrateLegacyAgenetesThreads(_workspacePath);
-  // M6.9 row 1: fold the removed `acp-sessions.json` (v3) recovery records
-  // into `threads.json` `ThreadRecord`s. Idempotent (.bak on source).
-  migrateLegacyAcpSessions(_workspacePath);
-  void resetExternalNoteWatcher();
+  prepareWorkspaceOnDisk(resolvedPath);
+  commitWorkspacePath(resolvedPath);
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -155,9 +130,25 @@ export function setWorkspacePath(newPath: string): void {
       'Server is in managed mode; the workspace is fixed at startup',
     );
   }
+  const resolvedPath = resolveWorkspacePath(newPath);
+  prepareWorkspaceOnDisk(resolvedPath);
+  commitWorkspacePath(resolvedPath);
+}
+
+/** Validate and normalize a user-provided workspace path. */
+export function resolveWorkspacePath(newPath: string): string {
   validateAbsolutePath(newPath);
-  _workspacePath = path.resolve(newPath);
-  mkdirSync(_workspacePath, { recursive: true });
+  return path.resolve(newPath);
+}
+
+/**
+ * Commit an already-prepared workspace to process-local state.
+ *
+ * This function intentionally performs no disk I/O. Runtime activation calls
+ * it only after the isolated preparation process has completed successfully.
+ */
+export function commitWorkspacePath(resolvedPath: string): void {
+  _workspacePath = resolvedPath;
   // Drop the cached canvas-dir index so subsequent lookups (used by
   // migrations and route handlers) reflect the new workspace.
   refreshCanvasDirIndex();
@@ -170,23 +161,6 @@ export function setWorkspacePath(newPath: string): void {
   // — here `invalidateUserSkill` is only ever called from within
   // function bodies, after both modules have finished evaluating.
   invalidateUserSkill();
-  // Demo-stage rename: canvas.json -> space.json, .memory/canvas.md ->
-  // .memory/space.md, setting/.huabu.md -> setting/user.md. Runs first so
-  // later readers / migrations see the new names. Idempotent. DELETE-ME later.
-  migrateCanvasToSpace(_workspacePath);
-  // Convert legacy pi-ai `Context` chat threads to structured turns
-  // (`.turns.jsonl`); renames old `.json` to `.json.bak`. Idempotent.
-  migrateLegacyChatThreads(_workspacePath);
-  // Second hop (M6.9 row 2): fold legacy `.history/chat/*.turns.jsonl`
-  // turns into the Agenetes two-tier log (`chat_v2/`). Runs AFTER the
-  // pi-ai `.json` -> `.turns.jsonl` hop above. Idempotent (.bak on source).
-  migrateLegacyChatTurns(_workspacePath);
-  // Convert the strict workload/state boundary before any writer opens the
-  // namespace. Keeps the original v1 file as `.agenetes-v1.bak`.
-  migrateLegacyAgenetesThreads(_workspacePath);
-  // M6.9 row 1: fold the removed `acp-sessions.json` (v3) recovery records
-  // into `threads.json` `ThreadRecord`s. Idempotent (.bak on source).
-  migrateLegacyAcpSessions(_workspacePath);
   void resetExternalNoteWatcher();
 }
 

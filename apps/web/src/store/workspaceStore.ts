@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { create } from 'zustand';
 
+import { ApiError } from '../api/_client';
 import {
   getWorkspaceInfo,
   putWorkspacePath,
@@ -9,6 +10,7 @@ import {
   type WorkspaceMode,
 } from '../api/workspace';
 import { getElectronBridge } from '../hooks/useElectron';
+import { i18n } from '../i18n';
 
 const FREE_PATH_KEY = 'sediment:workspace-path';
 const RECENT_PATHS_KEY = 'sediment:recent-workspaces';
@@ -201,6 +203,25 @@ function emitWorkspaceChanged(): void {
   window.dispatchEvent(new Event('workspace-changed'));
 }
 
+function workspaceActivationError(error: unknown, path: string): string {
+  if (error instanceof ApiError) {
+    if (error.code === 'WORKSPACE_ACTIVATION_TIMEOUT') {
+      const seconds =
+        typeof (error.details as { seconds?: unknown } | undefined)?.seconds ===
+        'number'
+          ? (error.details as { seconds: number }).seconds
+          : 70;
+      return i18n.t('workspace.activationTimeout', { path, seconds });
+    }
+    if (error.code === 'WORKSPACE_ACTIVATION_IN_PROGRESS') {
+      return i18n.t('workspace.activationInProgress');
+    }
+  }
+  return error instanceof Error
+    ? error.message
+    : i18n.t('workspace.openPathFailed');
+}
+
 export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   mode: null,
   capabilities: null,
@@ -296,10 +317,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         }
         set({
           workspacePath: null,
-          error:
-            err instanceof Error
-              ? `Saved Home folder is no longer valid: ${err.message}`
-              : 'Saved Home folder is no longer valid',
+          error: workspaceActivationError(err, savedPath),
         });
       }
     }
@@ -319,8 +337,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       set({ ...fromInfo(info), recentWorkspaces: recent, isSyncing: false });
       emitWorkspaceChanged();
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : 'Failed to update Home folder';
+      const message = workspaceActivationError(err, path);
       set({ error: message, isSyncing: false });
       throw err;
     }
