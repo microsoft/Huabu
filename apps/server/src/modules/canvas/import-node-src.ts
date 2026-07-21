@@ -74,9 +74,9 @@ const KNOWN_MEDIA_EXT: ReadonlySet<string> = new Set(
 
 /**
  * Node types whose `data.src` is a **local media artifact** served from
- * `.artifacts/`. Only these are normalized — deliberately excluding `web`,
- * whose `src` is a *live* URL the preprocessing pipeline fetches (Readability)
- * and the node iframes; downloading + rewriting it would break the node.
+ * `.artifacts/`. Remote (`http(s)://`) srcs are downloaded and rewritten too,
+ * because these node types never carry a *live* URL — the web client only ever
+ * renders their bytes from the artifact store.
  */
 const ARTIFACT_SRC_NODE_TYPES: ReadonlySet<string> = new Set([
   'image',
@@ -87,13 +87,48 @@ const ARTIFACT_SRC_NODE_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Node types whose `data.src` may be **either** a live remote URL **or** a
+ * canvas-local file. `web` is the sole member: an agent can author a `web`
+ * node from a locally-generated HTML file staged under `.upload/`, which must
+ * be copied into `.artifacts/` to render, while a `web` node pointing at a
+ * live site must keep that URL verbatim so the preprocessing pipeline
+ * (Readability) and the live iframe can fetch it. So only the *local file*
+ * case is normalized here; remote URLs are left untouched (never downloaded).
+ */
+const LOCAL_ONLY_ARTIFACT_SRC_NODE_TYPES: ReadonlySet<string> = new Set([
+  'web',
+]);
+
+/** Local file extensions accepted as agent-authored `web` node sources. */
+const WEB_LOCAL_EXTENSIONS: ReadonlySet<string> = new Set(['.html']);
+
+interface SrcNormalizeMode {
+  allowRemoteDownload: boolean;
+  allowedLocalExtensions?: ReadonlySet<string>;
+}
+
+/**
+ * Resolve how a given node type's `src` should be normalized, or `null` when
+ * the type is not artifact-backed and should be left untouched.
+ */
+function srcNormalizeMode(type: string): SrcNormalizeMode | null {
+  if (ARTIFACT_SRC_NODE_TYPES.has(type)) return { allowRemoteDownload: true };
+  if (LOCAL_ONLY_ARTIFACT_SRC_NODE_TYPES.has(type)) {
+    return {
+      allowRemoteDownload: false,
+      allowedLocalExtensions: WEB_LOCAL_EXTENSIONS,
+    };
+  }
+  return null;
+}
+
+/**
  * Rewrite every foreign `data.src` in `commands` into a bare artifact key.
  *
- * Only artifact-backed media node types are touched (see
- * {@link ARTIFACT_SRC_NODE_TYPES}). Returns a new command array; unaffected
- * commands are passed through by reference. Import failures are logged and
- * swallowed — the original `src` is preserved so a single unreachable URL
- * never fails the whole batch.
+ * Only artifact-backed node types are touched (see {@link srcNormalizeMode}).
+ * Returns a new command array; unaffected commands are passed through by
+ * reference. Import failures are logged and swallowed — the original `src` is
+ * preserved so a single unreachable URL never fails the whole batch.
  */
 export async function importForeignNodeSources(
   store: CanvasStore,
@@ -123,9 +158,16 @@ export async function importForeignNodeSources(
     if (cmd.type === 'CREATE_NODES') {
       const nodes = await Promise.all(
         cmd.nodes.map(async (node) => {
-          if (!ARTIFACT_SRC_NODE_TYPES.has(node.nodeType)) return node;
+          const mode = srcNormalizeMode(node.nodeType);
+          if (!mode) return node;
           const data = node.data as Record<string, unknown> | undefined;
-          const key = await resolveImportedSrc(store, canvasId, data?.['src']);
+          const key = await resolveImportedSrc(
+            store,
+            canvasId,
+            data?.['src'],
+            mode.allowRemoteDownload,
+            mode.allowedLocalExtensions,
+          );
           if (key === null) return node;
           // Cast back to the discriminated create-input union — the engine
           // treats `data` structurally, but the static type is per-nodeType.
@@ -141,13 +183,14 @@ export async function importForeignNodeSources(
     if (cmd.type === 'MERGE_NODE_DATA') {
       const patches = await Promise.all(
         cmd.patches.map(async (entry) => {
-          if (!ARTIFACT_SRC_NODE_TYPES.has(nodeType(entry.nodeId))) {
-            return entry;
-          }
+          const mode = srcNormalizeMode(nodeType(entry.nodeId));
+          if (!mode) return entry;
           const key = await resolveImportedSrc(
             store,
             canvasId,
             entry.patch?.['src'],
+            mode.allowRemoteDownload,
+            mode.allowedLocalExtensions,
           );
           if (key === null) return entry;
           return { ...entry, patch: { ...entry.patch, src: key } };
@@ -166,19 +209,28 @@ export async function importForeignNodeSources(
  * bytes into `.artifacts/` and return the new bare key. Returns `null` when
  * the value is already renderable (or cannot be safely imported), signalling
  * the caller to leave it unchanged.
+ *
+ * `allowRemoteDownload` gates the `http(s)://` branch: media node types
+ * download and fix up remote srcs, but `web` nodes must keep a live URL
+ * verbatim (see {@link LOCAL_ONLY_ARTIFACT_SRC_NODE_TYPES}). When
+ * `allowedLocalExtensions` is present, local files outside that allowlist are
+ * preserved in place and left unchanged.
  */
 async function resolveImportedSrc(
   store: CanvasStore,
   canvasId: string,
   raw: unknown,
+  allowRemoteDownload: boolean,
+  allowedLocalExtensions?: ReadonlySet<string>,
 ): Promise<string | null> {
   if (typeof raw !== 'string' || raw.length === 0) return null;
   const src = raw;
   if (src.startsWith('data:')) return null;
 
   // Online address — download unless it is already an app artifact URL the
-  // web client re-bases itself.
+  // web client re-bases itself, or this node type keeps live URLs verbatim.
   if (/^https?:\/\//i.test(src)) {
+    if (!allowRemoteDownload) return null;
     let pathname: string;
     try {
       pathname = new URL(src).pathname;
@@ -222,6 +274,15 @@ async function resolveImportedSrc(
   // A bare key like `art_abc.png` resolves under the canvas root but has no
   // file on disk there — leave it so the web resolver builds the artifact URL.
   if (!existsSync(absPath) || !statSync(absPath).isFile()) return null;
+
+  const localExt = path.extname(absPath).toLowerCase();
+  if (allowedLocalExtensions && !allowedLocalExtensions.has(localExt)) {
+    log.warn(
+      { src, localExt, allowedLocalExtensions: [...allowedLocalExtensions] },
+      'Local node src has an unsupported extension; skipped',
+    );
+    return null;
+  }
 
   return await copyToArtifact(store, absPath, physicalRel);
 }
