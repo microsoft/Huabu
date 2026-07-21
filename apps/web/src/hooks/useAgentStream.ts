@@ -12,9 +12,11 @@ import {
 } from '@sediment/shared';
 
 import { agentApi } from '@/api/agent';
+import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
+import { getDefaultAgentIcon, readAgentIcon } from '@/utils/agentIcon';
 
 import type { AssistantSegment } from '../store/chatTypes';
 import type {
@@ -819,9 +821,27 @@ export function useAgentStream(): UseAgentStreamReturn {
             .getState()
             .updateNodeData(questionNodeId, { content: prompt });
         }
+        const selectedBinding = useChatStore.getState().agentBinding;
+        const selectedProfile =
+          selectedBinding.kind === 'external'
+            ? useAcpProfilesStore
+                .getState()
+                .profiles.find(
+                  (profile) => profile.id === selectedBinding.profileId,
+                )
+            : undefined;
+        const snapshotBinding =
+          selectedBinding.kind === 'external' && selectedProfile
+            ? { ...selectedBinding, alias: selectedProfile.alias }
+            : selectedBinding;
         const composeBinding = isCompose
           ? {
-              agentBinding: useChatStore.getState().agentBinding,
+              agentBinding: snapshotBinding,
+              agentIcon: selectedProfile
+                ? readAgentIcon(selectedProfile)
+                : selectedBinding.kind === 'external'
+                  ? getDefaultAgentIcon(selectedBinding.profileId)
+                  : undefined,
               agentMode,
             }
           : {};
@@ -883,9 +903,13 @@ export function useAgentStream(): UseAgentStreamReturn {
               // useful final `done` event ever arrived. A cap-out error
               // emitted after a successful answer is treated as success.
               if (questionNodeId) {
+                const stillViewing =
+                  useChatStore.getState().viewingQuestionThread?.nodeId ===
+                  questionNodeId;
                 useCanvasStore.getState().patchNodeSilent(questionNodeId, {
                   status: sawDone ? 'done' : 'error',
                   errorMessage: sawDone ? undefined : err.message,
+                  ...(stillViewing ? { viewed: true } : {}),
                 });
               }
               setThreadLoading(threadId, false);
@@ -968,9 +992,13 @@ export function useAgentStream(): UseAgentStreamReturn {
         console.error(`${agentMode} failed:`, err);
         if (questionNodeId) {
           const message = err instanceof Error ? err.message : 'Unknown error';
+          const stillViewing =
+            useChatStore.getState().viewingQuestionThread?.nodeId ===
+            questionNodeId;
           useCanvasStore.getState().patchNodeSilent(questionNodeId, {
             status: sawDone ? 'done' : 'error',
             errorMessage: sawDone ? undefined : message,
+            ...(stillViewing ? { viewed: true } : {}),
           });
         }
         setThreadLoading(threadId, false);

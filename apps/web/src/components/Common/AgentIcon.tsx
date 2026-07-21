@@ -1,7 +1,7 @@
 /**
  * `AgentIcon` — a small, static avatar used to visually distinguish external
  * agents. It renders one of the hand-drawn "basic shapes" (circle, diamond,
- * spark, five-petal flower, cloud) filled with one of four fixed brand colors,
+ * spark, five-petal flower, soft bean) filled with one of four fixed brand colors,
  * plus an optional subtle face.
  *
  * The shapes and colors are fixed brand-avatar art (the same palette the Huabu
@@ -10,9 +10,11 @@
  * applies to normal component styling.
  *
  * The icon is static by default because it appears in dense lists and menus.
- * Callers that represent live execution may opt into the working motion; only
- * the shape body rotates, keeping the face upright.
+ * Callers that represent live execution may opt into the working motion. The
+ * shape body animates while the face stays upright.
  */
+
+import './AgentIcon.css';
 
 export const AGENT_ICON_SHAPES = [
   'circle',
@@ -97,11 +99,7 @@ const FACE_PATHS: Record<
   },
   cloud: {
     rotate: 0,
-    strokes: [
-      'M52 54 C51.5 57 51.5 60 52 63',
-      'M68 54 C67.5 57 67.5 60 68 63',
-      'M56 68 C59 72 64 72 67 68',
-    ],
+    strokes: ['M50 50 L49 58', 'M70 50 L69 58', 'M54 69 C58 73 64 74 68 70'],
   },
 };
 
@@ -129,12 +127,11 @@ function ShapeBody({ shape, fill }: { shape: AgentIconShape; fill: string }) {
       );
     case 'cloud':
       return (
-        <g fill={fill}>
-          <circle cx="42" cy="68" r="18" />
-          <circle cx="60" cy="54" r="24" />
-          <circle cx="80" cy="68" r="17" />
-          <rect x="38" y="62" width="46" height="28" rx="14" />
-        </g>
+        <path
+          d="M66 19C84 19 99 30 101 45C103 58 94 65 86 70C78 75 82 87 73 95C63 104 45 102 32 92C18 82 15 65 21 50C27 34 42 25 54 21C58 20 62 19 66 19Z"
+          fill={fill}
+          transform="translate(7.008 7.008) scale(0.8832)"
+        />
       );
   }
 }
@@ -167,6 +164,21 @@ export function AgentIcon({
 }: AgentIconProps) {
   const showFace = withFace ?? size >= 20;
   const face = FACE_PATHS[shape];
+  const faceElement = showFace ? (
+    <g
+      transform={`rotate(${face.rotate} 60 60)`}
+      fill="none"
+      stroke={FACE_INK}
+      strokeWidth={4.2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {face.strokes.map((d, i) => (
+        <path key={i} d={d} />
+      ))}
+    </g>
+  ) : null;
+  const isWorking = motion === 'working';
 
   return (
     <svg
@@ -178,24 +190,20 @@ export function AgentIcon({
       aria-hidden={title ? undefined : true}
       aria-label={title}
     >
-      <g
-        className={motion === 'working' ? 'agent-icon-working-body' : undefined}
-      >
-        <ShapeBody shape={shape} fill={COLOR_HEX[color]} />
-      </g>
-      {showFace && (
-        <g
-          transform={`rotate(${face.rotate} 60 60)`}
-          fill="none"
-          stroke={FACE_INK}
-          strokeWidth={4.2}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          {face.strokes.map((d, i) => (
-            <path key={i} d={d} />
-          ))}
+      {isWorking ? (
+        <g className="agent-icon-working-avatar">
+          <g className="agent-icon-working-body">
+            <ShapeBody shape={shape} fill={COLOR_HEX[color]} />
+          </g>
+          {faceElement}
         </g>
+      ) : (
+        <>
+          <g>
+            <ShapeBody shape={shape} fill={COLOR_HEX[color]} />
+          </g>
+          {faceElement}
+        </>
       )}
     </svg>
   );

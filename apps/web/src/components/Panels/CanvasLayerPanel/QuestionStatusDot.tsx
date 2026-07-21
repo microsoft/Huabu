@@ -19,8 +19,8 @@
  * row's click target is the surrounding row, not the icon).
  */
 
-import { getStatusLabel } from '@/components/Common/StatusBadge';
 import { Tooltip } from '@/components/Common/Tooltip';
+import { getStatusLabel } from '@/components/Nodes/sketch/StatusBadge';
 
 import type { QuestionNodeStatus } from '@sediment/shared';
 

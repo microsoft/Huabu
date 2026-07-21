@@ -1,14 +1,14 @@
-import { clsx } from 'clsx';
-import { AlertTriangle, MapPin, MessageSquare } from 'lucide-react';
+import { MapPin, MessageSquare } from 'lucide-react';
 import { memo, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { createId, getQuestionNodeStatus } from '@sediment/shared';
 
+import './QuestionNode.css';
+
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
-import { StatusBadge } from '@/components/Common/StatusBadge.tsx';
-import { Tooltip } from '@/components/Common/Tooltip.tsx';
 import { useTextNodeSurface } from '@/hooks/useTextNodeSurface';
+import { useAcpProfilesStore } from '@/store/acpProfilesStore.ts';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore.ts';
 import useCanvasStore from '@/store/canvasStore.ts';
 import { useChatStore } from '@/store/chatStore.ts';
@@ -20,8 +20,13 @@ import {
   QUESTION_NODE_PLACEHOLDER,
 } from '@/utils/node/nodeFontConfig';
 import { getQuestionDisplayText } from '@/utils/node/questionDisplayText';
+import { resolveQuestionAgentPresentation } from '@/utils/questionAgentPresentation.ts';
 
 import { NodeWrapper } from '../NodeWrapper';
+import {
+  QuestionAgentBadge,
+  type QuestionAgentBadgeStatus,
+} from './QuestionAgentBadge.tsx';
 import { enterQuestionCompose } from './questionCompose.ts';
 import { TextNodeBody } from '../shared/TextNodeBody';
 
@@ -123,6 +128,13 @@ export const QuestionNode = memo(
     const showChatAnchor = useChatStore(
       (s) => s.viewingQuestionThread?.nodeId === id,
     );
+    const isOpenForQuestion = useChatStore(
+      (s) =>
+        s.viewingQuestionThread?.nodeId === id &&
+        s.viewingQuestionThread.compose === true,
+    );
+    const composeAgentBinding = useChatStore((s) => s.agentBinding);
+    const agentProfiles = useAcpProfilesStore((s) => s.profiles);
     const isRightPanelCollapsed = usePanelStore((s) => s.isRightCollapsed);
     const requestOpenRightPanel = usePanelStore((s) => s.requestOpenRightPanel);
     const canvasId = useCanvasStore((s) => s.canvasId);
@@ -218,6 +230,28 @@ export const QuestionNode = memo(
     );
 
     const isDoneUnviewed = status === 'done' && !viewed;
+    const isErrorUnviewed = status === 'error' && !viewed;
+    const effectiveBinding = isOpenForQuestion
+      ? composeAgentBinding
+      : (data.agentBinding ?? { kind: 'internal' as const });
+    const agentPresentation = resolveQuestionAgentPresentation({
+      binding: effectiveBinding,
+      fallbackIcon: data.agentIcon,
+      profiles: agentProfiles,
+    });
+    // `open` is the highest-priority badge state: whenever this node's
+    // conversation is open in the chat panel (it is the anchor), the user
+    // can already watch the live result there, so the badge only needs to
+    // hint "this conversation is open" — it deliberately overrides
+    // running / done / error. `showChatAnchor` covers both the initial
+    // compose and re-opening an already-run node.
+    const badgeStatus: QuestionAgentBadgeStatus | null = showChatAnchor
+      ? 'open'
+      : isForkPending
+        ? 'running'
+        : status === 'idle'
+          ? null
+          : status;
 
     return (
       <NodeWrapper
@@ -229,10 +263,7 @@ export const QuestionNode = memo(
         keepAspectRatio={false}
         allowOverflow
         fillColor={STICKY_BG}
-        className={clsx(
-          'question-sticky rounded-lg transition-all duration-200',
-          isDoneUnviewed && 'question-node-done-unviewed',
-        )}
+        className="question-sticky rounded-lg transition-all duration-200"
         {...surface.nodeWrapperProps}
       >
         <TextNodeBody
@@ -248,30 +279,28 @@ export const QuestionNode = memo(
           color="var(--question-fg)"
           textareaClassName="placeholder:text-fg-default/40"
         >
-          {status !== 'idle' && (
-            <StatusBadge
-              status={isForkPending ? 'running' : status}
+          {badgeStatus && (
+            <QuestionAgentBadge
+              status={badgeStatus}
+              agent={agentPresentation}
+              unread={isDoneUnviewed || isErrorUnviewed}
+              conflictCount={status === 'done' ? conflictCount : 0}
+              conflictTooltip={
+                conflictCount > 0
+                  ? t('node.agentChangesSkipped', { count: conflictCount })
+                  : undefined
+              }
               offset={{ top: -22, left: -2 }}
-              shake={!isForkPending && status === 'error'}
-              className={isDoneUnviewed ? 'question-done-pill' : undefined}
               tooltip={
                 status === 'error' && data.errorMessage
                   ? data.errorMessage
-                  : undefined
+                  : canOpenInChat
+                    ? status === 'running'
+                      ? t('node.watchLiveConversation')
+                      : t('node.openConversation')
+                    : undefined
               }
               onClick={canOpenInChat ? openInChat : undefined}
-              title={
-                canOpenInChat
-                  ? status === 'running'
-                    ? t('node.watchLiveConversation')
-                    : t('node.openConversation')
-                  : undefined
-              }
-              trailing={
-                status === 'done' && conflictCount > 0 ? (
-                  <ConflictBadge count={conflictCount} />
-                ) : undefined
-              }
             />
           )}
         </TextNodeBody>
@@ -280,25 +309,6 @@ export const QuestionNode = memo(
     );
   },
 );
-
-/**
- * Small warning chip rendered next to a question node's "Done" badge when
- * one or more of the run's canvas writes were skipped because the user
- * was mid-editing the target node. Signals a
- * partially-applied run without a global toast; clicking the badge itself
- * opens the conversation where the skipped rows are listed.
- */
-function ConflictBadge({ count }: { count: number }) {
-  const { t } = useTranslation();
-  return (
-    <Tooltip content={t('node.agentChangesSkipped', { count })}>
-      <span className="bg-warning-bg text-warning pointer-events-auto inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs font-semibold shadow-sm">
-        <AlertTriangle size={12} />
-        {count}
-      </span>
-    </Tooltip>
-  );
-}
 
 function ChatAnchorOverlay() {
   // A light "anchored" mask laid over the question node's content layer.

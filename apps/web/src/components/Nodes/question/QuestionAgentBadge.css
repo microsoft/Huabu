@@ -1,0 +1,90 @@
+@keyframes question-agent-attention-nudge {
+  0%,
+  12%,
+  100% {
+    transform: translateX(0) rotate(0deg);
+  }
+  3% {
+    transform: translateX(-1px) rotate(-1.5deg);
+  }
+  6% {
+    transform: translateX(1px) rotate(1.5deg);
+  }
+  9% {
+    transform: translateX(-0.5px) rotate(-0.75deg);
+  }
+}
+
+.question-agent-badge {
+  --question-agent-quiet-ring: color-mix(
+    in srgb,
+    var(--fg-subtle) 55%,
+    var(--bg-surface)
+  );
+}
+
+.question-agent-badge-icon {
+  width: 2rem !important;
+  height: 2rem !important;
+  flex: none;
+}
+
+/* The `open` speech bubble is an SVG child of the Button, whose descendant
+   `svg` sizing rule would otherwise shrink it. Force the intended 44×48
+   box so the bubble wraps the avatar instead of collapsing to an icon. */
+.question-agent-badge-bubble {
+  width: 2.75rem !important;
+  height: 3rem !important;
+}
+
+.question-agent-ring-running::before,
+.question-agent-ring-error::before {
+  position: absolute;
+  inset: -2px;
+  z-index: 0;
+  padding: 3px;
+  border-radius: inherit;
+  content: '';
+  pointer-events: none;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+}
+
+.question-agent-ring-running::before {
+  background: conic-gradient(
+    from 0deg,
+    color-mix(in srgb, var(--info) 16%, transparent) 0deg,
+    color-mix(in srgb, var(--info) 16%, transparent) 70deg,
+    var(--info) 150deg,
+    var(--info) 210deg,
+    color-mix(in srgb, var(--info) 16%, transparent) 290deg,
+    color-mix(in srgb, var(--info) 16%, transparent) 360deg
+  );
+  animation: question-agent-ring-rotate 3.2s linear infinite;
+}
+
+.question-agent-ring-error::before {
+  background: repeating-conic-gradient(
+    var(--danger) 0deg 24deg,
+    transparent 24deg 42deg
+  );
+}
+
+.question-agent-attention {
+  animation: question-agent-attention-nudge 4s ease-in-out infinite;
+}
+
+@keyframes question-agent-ring-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .question-agent-ring-running::before,
+  .question-agent-attention {
+    animation: none;
+  }
+}
