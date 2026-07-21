@@ -48,17 +48,29 @@ void start();
 // foreground group. Without an explicit handler Node takes the default
 // action and terminates immediately — which SKIPS Fastify's `onClose`
 // hooks. Those hooks are the ONLY thing that reaps the forked agentlet
-// daemon (see daemon-supervisor.ts → `close()`), so a hard exit here
-// orphans the daemon and it keeps running after the app is gone.
+// daemon (see daemon-supervisor.ts → `close()`) and closes the external
+// -note chokidar watcher (see app.ts `onClose`), so a hard exit here
+// orphans the daemon and leaves the watch handle wedged after the app
+// is gone.
 //
-// Calling `app.close()` runs the hooks (daemon killed, log stream
-// flushed). A hard-timeout fallback guarantees we still exit even if a
-// hook hangs (e.g. a wedged filesystem), so shutdown can never stall.
+// On Windows there is no real POSIX signal delivery: Electron's
+// `utilityProcess.kill()` (packaged) and the dev orchestrator's
+// `taskkill /F` both call `TerminateProcess`, which bypasses these
+// handlers entirely. So the Electron main process also asks us to shut
+// down *cooperatively* via a `system:shutdown` message on the utility
+// parent port (see apps/desktop/src/main.ts `before-quit`); that path is
+// what actually runs `app.close()` on Windows before the hard-kill
+// fallback fires.
+//
+// Calling `app.close()` runs the hooks (daemon killed, watcher closed,
+// log stream flushed). A hard-timeout fallback guarantees we still exit
+// even if a hook hangs (e.g. a wedged filesystem), so shutdown can never
+// stall.
 let shuttingDown = false;
-function shutdown(signal: NodeJS.Signals): void {
+function shutdown(reason: string): void {
   if (shuttingDown) return;
   shuttingDown = true;
-  log.info(`Received ${signal}, shutting down…`);
+  log.info(`Received ${reason}, shutting down…`);
   const forceExit = setTimeout(() => {
     log.warn('Graceful shutdown timed out after 3s; forcing exit');
     process.exit(1);
@@ -79,3 +91,26 @@ function shutdown(signal: NodeJS.Signals): void {
 
 process.once('SIGTERM', () => shutdown('SIGTERM'));
 process.once('SIGINT', () => shutdown('SIGINT'));
+
+// Cooperative shutdown request from the Electron main process. Required on
+// Windows, where `utilityProcess.kill()` is a hard `TerminateProcess` that
+// never triggers the signal handlers above. `parentPort` only exists when
+// we were spawned as an Electron utility process; in dev (`tsx watch`) it
+// is absent and this is a no-op.
+interface ParentPortLike {
+  on(event: 'message', listener: (event: { data: unknown }) => void): void;
+}
+const parentPort = (
+  process as NodeJS.Process & { parentPort?: ParentPortLike | null }
+).parentPort;
+parentPort?.on('message', (event) => {
+  const data = event?.data;
+  if (
+    data &&
+    typeof data === 'object' &&
+    (data as { type?: unknown }).type === 'system:shutdown'
+  ) {
+    shutdown('system:shutdown');
+  }
+});
+

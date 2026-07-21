@@ -1176,13 +1176,20 @@ app.on('window-all-closed', () => {
 
 // Gracefully shut down the server before the process exits. We
 // preventDefault and drive the quit ourselves so we can:
-//   1. wait for the server to actually exit (its `'exit'` handler also
+//   1. ask the server to shut down cooperatively so it runs Fastify's
+//      `onClose` hooks (reap the agentlet daemon, close the external-note
+//      chokidar watch handle, flush logs). On Windows `serverProcess.kill()`
+//      is a hard `TerminateProcess` that bypasses the server's signal
+//      handlers, so a `system:shutdown` message over the utility parent
+//      port is the ONLY way those hooks run before exit — otherwise the
+//      Google Drive watch handle is force-abandoned and can stay wedged;
+//   2. wait for the server to actually exit (its `'exit'` handler also
 //      closes the rotating log stream — racing past it loses the last
 //      few KB of buffered logs); and
-//   2. enforce a hard cap so a hung server can never block quit. 3s is
-//      generous: Fastify's default `closeGraceful` is ~10s, but we
-//      pass `kill()` (SIGTERM on POSIX, terminate on Win), which
-//      Fastify handles by draining in-flight requests synchronously.
+//   3. enforce a hard cap so a hung server can never block quit. 3s is
+//      generous: the cooperative path completes in well under a second on
+//      a healthy machine, and a wedged filesystem still exits via the
+//      hard `kill()` fallback below.
 let quitInFlight = false;
 app.on('before-quit', (event) => {
   if (quitInFlight) return;
@@ -1196,11 +1203,35 @@ app.on('before-quit', (event) => {
     exited = true;
     app.exit(0);
   });
-  proc.kill();
+  // Prefer a cooperative shutdown so the server's `onClose` hooks run.
+  try {
+    proc.postMessage({ type: 'system:shutdown' });
+  } catch {
+    // No parent-port channel (shouldn't happen for a utilityProcess) —
+    // fall straight through to the hard kill below.
+  }
+  // Fallback if the cooperative shutdown doesn't land in time (e.g. the
+  // message handler never registered, or the event loop is wedged). On
+  // Windows `proc.kill()` is a hard `TerminateProcess`; on POSIX it is a
+  // SIGTERM, which the server handles as *another* graceful shutdown, so
+  // the only truly forceful stop there is the `app.exit(0)` cap below.
+  // 2.5s (under the 3s app.exit cap) gives `app.close()` — which closes
+  // the chokidar watch handle this fix protects — headroom to finish
+  // before Windows force-terminates it mid-cleanup.
+  const hardKill = setTimeout(() => {
+    if (!exited) {
+      try {
+        proc.kill();
+      } catch {
+        /* already dead */
+      }
+    }
+  }, 2500);
+  hardKill.unref?.();
   setTimeout(() => {
     if (!exited) {
       console.warn(
-        '[desktop] server did not exit within 3s after kill; forcing app.exit',
+        '[desktop] server did not exit within 3s of shutdown request; forcing app.exit',
       );
       app.exit(0);
     }
