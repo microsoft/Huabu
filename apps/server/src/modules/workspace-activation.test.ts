@@ -77,8 +77,6 @@ describe('workspace activation isolation', () => {
         timeoutMs: 50,
       }),
     ).rejects.toBeInstanceOf(WorkspaceActivationInProgressError);
-    await expect(first).rejects.toBeInstanceOf(
-      WorkspaceActivationTimeoutError,
-    );
+    await expect(first).rejects.toBeInstanceOf(WorkspaceActivationTimeoutError);
   });
 });

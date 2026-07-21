@@ -2,9 +2,7 @@
 
 import { prepareWorkspaceOnDisk } from './workspace-prepare.js';
 
-type PreparationResult =
-  | { ok: true }
-  | { ok: false; message: string };
+type PreparationResult = { ok: true } | { ok: false; message: string };
 
 function finish(result: PreparationResult, exitCode: number): void {
   if (!process.send) {

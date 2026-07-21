@@ -35,9 +35,7 @@ const MAX_STDERR_CHARS = 8_192;
 
 const log = getLogger('workspace-activation');
 
-type PreparationResult =
-  | { ok: true }
-  | { ok: false; message: string };
+type PreparationResult = { ok: true } | { ok: false; message: string };
 
 export class WorkspaceActivationTimeoutError extends Error {
   /** Configured timeout in whole seconds, surfaced to the UI copy. */
@@ -74,7 +72,9 @@ function defaultWorkerPath(): string {
     'workspace-prepare.worker.js',
   );
   if (existsSync(bundledWorker)) return bundledWorker;
-  return fileURLToPath(new URL('./workspace-prepare.worker.ts', import.meta.url));
+  return fileURLToPath(
+    new URL('./workspace-prepare.worker.ts', import.meta.url),
+  );
 }
 
 /** Run all potentially blocking filesystem preparation outside the Server. */
@@ -119,7 +119,10 @@ export function runWorkspacePreparation(
       // filesystem syscall ignores SIGTERM, so force-kill after a grace
       // period to guarantee the orphaned process is reaped.
       child.kill();
-      forceKillTimer = setTimeout(() => child.kill('SIGKILL'), FORCE_KILL_GRACE_MS);
+      forceKillTimer = setTimeout(
+        () => child.kill('SIGKILL'),
+        FORCE_KILL_GRACE_MS,
+      );
       forceKillTimer.unref();
       settle(new WorkspaceActivationTimeoutError(timeoutMs));
     }, timeoutMs);
@@ -146,7 +149,10 @@ export function runWorkspacePreparation(
       if (settled) return;
       const detail = stderr.trim();
       if (detail) {
-        log.error({ workspacePath, code, signal, detail }, 'Workspace preparation crashed');
+        log.error(
+          { workspacePath, code, signal, detail },
+          'Workspace preparation crashed',
+        );
       }
       settle(
         new Error(

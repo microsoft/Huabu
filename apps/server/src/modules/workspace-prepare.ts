@@ -14,12 +14,30 @@ import { migrateCanvasToSpace } from './storage/migrate-canvas-to-space.js';
 import { migrateLegacyChatThreads } from './storage/migrate-chat-threads.js';
 import { migrateLegacyChatTurns } from './storage/migrate-chat-turns.js';
 
-/** Prepare and migrate a resolved absolute workspace path on disk. */
+/**
+ * Prepare and migrate a resolved absolute workspace path on disk.
+ *
+ * Migration order is load-bearing — each step assumes the prior ones have run.
+ * All migrations are idempotent (they leave a `.bak` on the source), so this is
+ * safe to re-run on every activation.
+ */
 export function prepareWorkspaceOnDisk(workspacePath: string): void {
   mkdirSync(workspacePath, { recursive: true });
+  // Demo-stage rename: canvas.json -> space.json, .memory/canvas.md ->
+  // .memory/space.md, setting/.huabu.md -> setting/user.md. Runs first so
+  // later readers / migrations see the new names. DELETE-ME later.
   migrateCanvasToSpace(workspacePath);
+  // Convert legacy pi-ai `Context` chat threads to structured turns
+  // (`.turns.jsonl`); renames old `.json` to `.json.bak`.
   migrateLegacyChatThreads(workspacePath);
+  // Second hop (M6.9 row 2): fold legacy `.history/chat/*.turns.jsonl` turns
+  // into the Agenetes two-tier log (`chat_v2/`). MUST run AFTER the pi-ai
+  // `.json` -> `.turns.jsonl` hop above.
   migrateLegacyChatTurns(workspacePath);
+  // Convert the strict workload/state boundary before any writer opens the
+  // namespace. Keeps the original v1 file as `.agenetes-v1.bak`.
   migrateLegacyAgenetesThreads(workspacePath);
+  // M6.9 row 1: fold the removed `acp-sessions.json` (v3) recovery records
+  // into `threads.json` `ThreadRecord`s.
   migrateLegacyAcpSessions(workspacePath);
 }
