@@ -42,7 +42,9 @@ export class WorkspaceActivationTimeoutError extends Error {
   readonly timeoutSeconds: number;
 
   constructor(timeoutMs: number) {
-    const timeoutSeconds = Math.round(timeoutMs / 1000);
+    // Round up and clamp to >= 1 so sub-second timeouts never render as an
+    // awkward "0 seconds" and the copy never understates the real budget.
+    const timeoutSeconds = Math.max(1, Math.ceil(timeoutMs / 1000));
     super(
       `Workspace activation timed out after ${timeoutSeconds} seconds. The folder may be on an unavailable or slow cloud/network drive.`,
     );
@@ -130,6 +132,15 @@ export function runWorkspacePreparation(
 
     child.once('message', (raw: unknown) => {
       const result = raw as PreparationResult;
+      // Proactively close the IPC channel so a worker that reports its result
+      // but forgets to `process.disconnect()` / `process.exit()` (e.g. a
+      // minimal test helper) still loses the handle keeping it alive and can
+      // exit, instead of lingering as an orphan.
+      try {
+        child.disconnect();
+      } catch {
+        // Already disconnected by a well-behaved worker; nothing to do.
+      }
       if (result?.ok === true) {
         settle();
       } else {
