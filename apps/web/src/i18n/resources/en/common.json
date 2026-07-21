@@ -262,7 +262,9 @@
     "workspace": "Home folder: {{workspace}}",
     "workspacePrefix": "Home folder: ",
     "clickToSwitch": "Click to switch",
-    "openPathFailed": "Failed to open path"
+    "openPathFailed": "Failed to open path",
+    "activationTimeout": "Opening Home folder “{{path}}” took longer than {{seconds}} seconds. Check that the cloud or network drive is available, then try again.",
+    "activationInProgress": "Another Home folder is still opening. Please wait for it to finish."
   },
   "canvasList": {
     "title": "Spaces",

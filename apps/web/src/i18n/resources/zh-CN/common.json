@@ -262,7 +262,9 @@
     "workspace": "Home 文件夹：{{workspace}}",
     "workspacePrefix": "Home 文件夹：",
     "clickToSwitch": "点击切换",
-    "openPathFailed": "打开路径失败"
+    "openPathFailed": "打开路径失败",
+    "activationTimeout": "打开“{{path}}”已超过 {{seconds}} 秒。请检查云盘或网络磁盘是否可用，然后重试。",
+    "activationInProgress": "另一个主目录仍在打开，请等待其完成。"
   },
   "canvasList": {
     "title": "Space",

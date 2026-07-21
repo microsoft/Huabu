@@ -48,6 +48,14 @@ files:
 extraResources:
   - from: ../server/dist-bundle/server.js
     to: server/server.js
+  # Isolated workspace-preparation worker (self-contained tsup bundle).
+  # Runtime Home-folder switches `fork()` this file; `defaultWorkerPath()`
+  # in apps/server/src/modules/workspace-activation.ts resolves it as a
+  # sibling of server.js. Without this entry the lookup falls back to the
+  # `.ts` source (absent in packaged builds), so switching workspaces at
+  # runtime fails in the installed app.
+  - from: ../server/dist-bundle/workspace-prepare.worker.js
+    to: server/workspace-prepare.worker.js
   # @resvg/resvg-wasm — loaded on demand by the `rasterize_node` agent
   # tool via `path.join(__dirname, 'resvg-bg.wasm')` (bundle layout
   # fallback). Missing this file is non-fatal at boot but the tool

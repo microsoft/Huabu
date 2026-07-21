@@ -148,18 +148,56 @@ function armWatcher(): void {
     });
 }
 
+// Serialize watcher lifecycle transitions (reset / shutdown). `commitWorkspacePath`
+// fires `void resetExternalNoteWatcher()` without awaiting, so two rapid workspace
+// activations could otherwise run their close→arm cycles concurrently: the second
+// `armWatcher()` overwrites the module-level `watcher` reference before the first
+// cycle closes its handle, leaking a live FSWatcher that can never be closed.
+// Chaining every transition through one promise guarantees strict ordering.
+let lifecycleChain: Promise<void> = Promise.resolve();
+
+function enqueueLifecycle(task: () => Promise<void>): Promise<void> {
+  // Run `task` after the previous transition settles, regardless of whether it
+  // resolved or rejected, so one failed close can never wedge the chain.
+  const run = lifecycleChain.then(task, task);
+  lifecycleChain = run.catch(() => undefined);
+  return run;
+}
+
 /**
  * Stop the current watcher (if any), drop pending state, and re-arm it
- * against the currently active workspace. Safe to call multiple times.
+ * against the currently active workspace. Safe to call multiple times and
+ * from concurrent callers — transitions are serialized so the module-level
+ * `watcher` reference is never overwritten before its handle is closed.
  * Listeners are preserved so reconnected clients keep their streams.
  */
 export async function resetExternalNoteWatcher(): Promise<void> {
-  if (watcher) {
-    await watcher.close().catch(() => undefined);
-    watcher = null;
-  }
-  pendingByCanvas.clear();
-  armWatcher();
+  return enqueueLifecycle(async () => {
+    if (watcher) {
+      await watcher.close().catch(() => undefined);
+      watcher = null;
+    }
+    pendingByCanvas.clear();
+    armWatcher();
+  });
+}
+
+/**
+ * Close the current watcher (if any) and drop pending state *without*
+ * re-arming. Call this from the server's shutdown path so the live
+ * `fs.watch` handle is released cleanly instead of being force-killed —
+ * on virtual/network filesystems (Google Drive) a force-terminated
+ * process can leave in-flight watch requests wedged. Serialized against
+ * `resetExternalNoteWatcher` through the shared lifecycle chain.
+ */
+export async function closeExternalNoteWatcher(): Promise<void> {
+  return enqueueLifecycle(async () => {
+    if (watcher) {
+      await watcher.close().catch(() => undefined);
+      watcher = null;
+    }
+    pendingByCanvas.clear();
+  });
 }
 
 // ── Self-write suspension ────────────────────────────────────────────────
