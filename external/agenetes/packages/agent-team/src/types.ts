@@ -12,6 +12,18 @@ import type {
   AgentTeamValidateResult,
 } from '@agentlet/protocol';
 
+/**
+ * An arbitrary JSON value. Used by {@link AgentProfileBase.customData}, which
+ * agenetes stores and returns verbatim without ever interpreting its contents.
+ */
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+
 export interface AgentTeamRootRef {
   machine: string;
   path: string;
@@ -67,6 +79,13 @@ export interface AgentProfileBase {
   alias: string;
   agentletId: string;
   workingDirPath: string;
+  /**
+   * Caller-owned, opaque bag of JSON data. agenetes persists it verbatim and
+   * never reads or interprets its contents; embedding hosts use it to attach
+   * their own per-Profile data (e.g. display preferences) without changing this
+   * package.
+   */
+  customData?: Record<string, JsonValue>;
 }
 
 export interface AgentTeamManifestProfile extends AgentProfileBase {
@@ -209,6 +228,7 @@ export interface CreateAgentTeamManifestProfileInput {
   manifestPath: string;
   harness: string;
   workingDirPath: string;
+  customData?: Record<string, JsonValue>;
 }
 
 export interface CreateAcpCommandProfileInput {
@@ -220,6 +240,7 @@ export interface CreateAcpCommandProfileInput {
   metadata?: {
     cliId?: string;
   };
+  customData?: Record<string, JsonValue>;
 }
 
 export type CreateAgentProfileInput =
@@ -235,6 +256,11 @@ export interface PatchAgentProfileInput {
   metadata?: {
     cliId?: string;
   } | null;
+  /**
+   * Opaque host data. `undefined` leaves it untouched, `null` clears it, and an
+   * object replaces the whole bag.
+   */
+  customData?: Record<string, JsonValue> | null;
 }
 
 export interface AgentTeamMemberSummary {
