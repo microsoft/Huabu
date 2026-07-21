@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
@@ -40,8 +41,10 @@ export const UserMessage = ({
   const clearStrokeHighlight = useGesturePreviewStore(
     (s) => s.clearSketchStrokeHighlight,
   );
-  const strokeIdsByNode = new Map(
-    (selectedStrokeIds ?? []).map((s) => [s.nodeId, s.strokeIds]),
+  const strokeIdsByNode = useMemo(
+    () =>
+      new Map((selectedStrokeIds ?? []).map((s) => [s.nodeId, s.strokeIds])),
+    [selectedStrokeIds],
   );
   const hasRefs =
     (attachments && attachments.length > 0) ||

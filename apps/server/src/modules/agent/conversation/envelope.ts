@@ -329,7 +329,9 @@ async function deriveSnapshotAttachments(
     });
     const selectedImageIdSet = new Set(selectedImageIds);
     for (const r of rasterResults) {
-      const strokeIds = r.originNodeIds.filter(
+      // `originNodeIds` are NODE ids; split them into the sketch nodes vs
+      // the backdrop image nodes contributing to this composite.
+      const sketchNodeIds = r.originNodeIds.filter(
         (id) => !selectedImageIdSet.has(id),
       );
       const imageIds = r.originNodeIds.filter((id) =>
@@ -338,15 +340,15 @@ async function deriveSnapshotAttachments(
       // Singleton image pass-through (no strokes, exactly one image —
       // handler short-circuited to that node's original artifact):
       // leave it to its standalone `selectionImageAttachments` entry.
-      if (strokeIds.length === 0 && imageIds.length === 1) continue;
+      if (sketchNodeIds.length === 0 && imageIds.length === 1) continue;
       // Anything else is a composite owned by this snapshot.
       for (const iid of imageIds) consumedImageIds.add(iid);
-      const nStrokes = strokeIds.length;
+      const nStrokes = sketchNodeIds.length;
       const nImages = imageIds.length;
       // Flag when any contributing stroke node was rendered from a
       // PARTIAL stroke selection, so the label tells the agent it is
       // seeing a subset (the lassoed strokes), not the whole node.
-      const isPartial = strokeIds.some((id) => partialNodeIds.has(id));
+      const isPartial = sketchNodeIds.some((id) => partialNodeIds.has(id));
       const partialTag = isPartial ? ' — partial stroke selection' : '';
       const label =
         nStrokes === 0
