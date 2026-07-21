@@ -9,8 +9,9 @@
  * than UI chrome — they are exempt from the semantic design-token rule that
  * applies to normal component styling.
  *
- * The icon is deliberately static (no animation): it appears in dense lists and
- * menus where motion would be distracting and costly to render.
+ * The icon is static by default because it appears in dense lists and menus.
+ * Callers that represent live execution may opt into the working motion; only
+ * the shape body rotates, keeping the face upright.
  */
 
 export const AGENT_ICON_SHAPES = [
@@ -42,6 +43,8 @@ export type AgentIconValue = {
   shape: AgentIconShape;
   color: AgentIconColor;
 };
+
+export type AgentIconMotion = 'none' | 'working';
 
 /** Fixed brand-avatar palette (matches the Huabu logo dots). */
 const COLOR_HEX: Record<AgentIconColor, string> = {
@@ -148,6 +151,8 @@ export type AgentIconProps = {
   withFace?: boolean;
   /** Accessible label. When omitted the icon is treated as decorative. */
   title?: string;
+  /** Optional semantic motion. Dense lists should keep the default `none`. */
+  motion?: AgentIconMotion;
   className?: string;
 };
 
@@ -157,6 +162,7 @@ export function AgentIcon({
   size = 16,
   withFace,
   title,
+  motion = 'none',
   className,
 }: AgentIconProps) {
   const showFace = withFace ?? size >= 20;
@@ -172,7 +178,11 @@ export function AgentIcon({
       aria-hidden={title ? undefined : true}
       aria-label={title}
     >
-      <ShapeBody shape={shape} fill={COLOR_HEX[color]} />
+      <g
+        className={motion === 'working' ? 'agent-icon-working-body' : undefined}
+      >
+        <ShapeBody shape={shape} fill={COLOR_HEX[color]} />
+      </g>
       {showFace && (
         <g
           transform={`rotate(${face.rotate} 60 60)`}

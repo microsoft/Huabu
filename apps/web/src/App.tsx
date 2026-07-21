@@ -16,6 +16,7 @@ import { NativeMenuBridge } from './components/Shell/NativeMenuBridge';
 import { WindowChrome } from './components/Shell/WindowChrome';
 import { useDisableBrowserZoom } from './hooks/useDisableBrowserZoom';
 import { useInputModeListener } from './hooks/useInputMode';
+import AgentNodePlaygroundPage from './pages/AgentNodePlaygroundPage';
 import CanvasListPage from './pages/CanvasListPage';
 import CanvasPage from './pages/CanvasPage/CanvasPage.tsx';
 import ComponentShowcasePage from './pages/ComponentShowcasePage';
@@ -208,6 +209,10 @@ export default function App() {
                 {
                   path: '/playground/tool-calls',
                   element: <ToolCallPlaygroundPage />,
+                },
+                {
+                  path: '/playground/agent-nodes',
+                  element: <AgentNodePlaygroundPage />,
                 },
                 { path: '/canvas/:canvasId', element: <CanvasPage /> },
                 { path: '*', element: <Navigate to="/" replace /> },

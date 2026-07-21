@@ -651,6 +651,45 @@ body:not(.canvas-resize-active) .react-flow__node-frame:not(.dragging) {
   }
 }
 
+/* Agent avatar working motion. Only the shape body rotates; the face remains
+   upright. This is opt-in so dense menus and settings lists stay quiet. */
+.agent-icon-working-body {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: agent-icon-working-windmill 3.6s cubic-bezier(0.45, 0, 0.2, 1)
+    infinite;
+}
+
+@keyframes agent-icon-working-windmill {
+  0% {
+    transform: rotate(0deg) scale(1);
+  }
+  18% {
+    transform: rotate(58deg) scale(1.05);
+  }
+  34% {
+    transform: rotate(116deg) scale(1.01);
+  }
+  50% {
+    transform: rotate(180deg) scale(1.06);
+  }
+  66% {
+    transform: rotate(238deg) scale(1.01);
+  }
+  82% {
+    transform: rotate(302deg) scale(1.05);
+  }
+  100% {
+    transform: rotate(360deg) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-icon-working-body {
+    animation: none;
+  }
+}
+
 /* Error: shake */
 @keyframes question-badge-shake {
   0%,
