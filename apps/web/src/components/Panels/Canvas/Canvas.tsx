@@ -27,6 +27,8 @@ import '@xyflow/react/dist/style.css';
 import {
   assignNodeZIndices,
   edgeZIndex,
+  getAbsolutePosition,
+  getNodeSize,
   indexById,
 } from '@sediment/shared/canvas-engine';
 
@@ -559,17 +561,61 @@ export const Canvas: React.FC<CanvasProps> = ({
     onSelect: (nodeIds, flowPolygon) => {
       const strokeSelection =
         flowPolygon.length >= 3 ? findSketchStrokesInPolygon(flowPolygon) : {};
+
+      // Lasso bbox in flow-space — used to drop "container" frames below.
+      let lassoBbox: {
+        x1: number;
+        y1: number;
+        x2: number;
+        y2: number;
+      } | null = null;
+      for (const p of flowPolygon) {
+        if (!lassoBbox) lassoBbox = { x1: p.x, y1: p.y, x2: p.x, y2: p.y };
+        else {
+          if (p.x < lassoBbox.x1) lassoBbox.x1 = p.x;
+          if (p.y < lassoBbox.y1) lassoBbox.y1 = p.y;
+          if (p.x > lassoBbox.x2) lassoBbox.x2 = p.x;
+          if (p.y > lassoBbox.y2) lassoBbox.y2 = p.y;
+        }
+      }
+
       const sketchIdSet = new Set(
         nodes.filter((n) => n.type === 'sketch').map((n) => n.id),
       );
-      const nonSketchNodeIds = nodeIds.filter((id) => !sketchIdSet.has(id));
+      const nn = nodes as NestableNode[];
+      const nonSketchNodeIds = nodeIds.filter((id) => {
+        if (sketchIdSet.has(id)) return false;
+        // Lassoing INSIDE a frame selects its CONTENTS, not the frame
+        // itself: drop any frame whose bounds fully enclose the lasso (it
+        // is a container the loop was drawn within, not a target). A
+        // nested frame the loop actually encircles does NOT enclose the
+        // loop, so it stays selected.
+        const node = nodes.find((n) => n.id === id);
+        if (node?.type === 'frame' && lassoBbox) {
+          const abs = getAbsolutePosition(nn, id);
+          const size = getNodeSize(node);
+          if (
+            abs &&
+            abs.x <= lassoBbox.x1 &&
+            abs.y <= lassoBbox.y1 &&
+            abs.x + size.width >= lassoBbox.x2 &&
+            abs.y + size.height >= lassoBbox.y2
+          ) {
+            return false;
+          }
+        }
+        return true;
+      });
+
       const preview = useGesturePreviewStore.getState();
       preview.setSketchStrokeSelection(strokeSelection);
-      // Retain the lasso polygon so the user can drag inside it to move the
-      // strokes (GoodNotes-style); drop it when nothing was captured.
-      preview.setSketchSelectionPolygon(
-        Object.keys(strokeSelection).length > 0 ? flowPolygon : null,
-      );
+      // Retain the lasso loop for ANY non-empty selection (strokes and/or
+      // whole nodes) so the user can drag inside it to move the whole
+      // selection GoodNotes-style; drop it only when the lasso caught
+      // nothing.
+      const hasSelection =
+        Object.keys(strokeSelection).length > 0 || nonSketchNodeIds.length > 0;
+      preview.setSketchSelectionPolygon(hasSelection ? flowPolygon : null);
       selectNodes(nonSketchNodeIds);
     },
     inputMode,
@@ -1317,9 +1363,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         {!isBoxSelecting && <MultiSelectResizer />}
         {!isBoxSelecting && <SelectionOutlines />}
         {!isBoxSelecting && !hasStrokeSelection && <MultiSelectToolbar />}
-        {!isBoxSelecting && (
-          <StrokeSelectionRegion interactive={hasStrokeSelection} />
-        )}
+        {!isBoxSelecting && <StrokeSelectionRegion />}
         {!isBoxSelecting && <StrokeSelectionToolbar />}
         {!isBoxSelecting && <EdgeStyleToolbar />}
         <IntentPopover />

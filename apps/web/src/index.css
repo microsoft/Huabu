@@ -380,13 +380,15 @@ body,
 }
 
 /*
- * Lasso tool: show the crosshair over nodes too (not just the pane), so a
- * lasso started on a frame's background / a note reads as "selecting", not
- * "grab / click". Mirrors the pending-frame override; nodes are not
- * draggable in lasso mode (see `nodesDraggable`), so no grab affordance is
- * lost.
+ * Lasso tool: show the crosshair only where a lasso can actually START —
+ * the empty pane and a frame's own background (both `isLassoStartTarget`).
+ * Other nodes keep their normal cursor (a note reads as click-to-select,
+ * not lasso). The retained selection loop advertises its own `move`
+ * cursor for dragging the selection. Nodes are not draggable in lasso
+ * mode (see `nodesDraggable`), so no grab affordance is lost.
  */
-.canvas-lasso .react-flow__node {
+.canvas-lasso .react-flow__pane,
+.canvas-lasso .react-flow__node-frame {
   cursor: crosshair !important;
 }
 
