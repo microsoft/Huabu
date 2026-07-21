@@ -127,10 +127,10 @@ function ShapeBody({ shape, fill }: { shape: AgentIconShape; fill: string }) {
     case 'cloud':
       return (
         <g fill={fill}>
-          <circle cx="44" cy="64" r="15" />
-          <circle cx="60" cy="54" r="20" />
-          <circle cx="78" cy="64" r="14" />
-          <rect x="40" y="60" width="40" height="22" rx="11" />
+          <circle cx="42" cy="68" r="18" />
+          <circle cx="60" cy="54" r="24" />
+          <circle cx="80" cy="68" r="17" />
+          <rect x="38" y="62" width="46" height="28" rx="14" />
         </g>
       );
   }
