@@ -27,7 +27,7 @@ import {
   withAgentIcon,
 } from '@/utils/agentIcon';
 
-import { AgentIconPicker } from './AgentIconPicker';
+import { AgentIconField } from './AgentIconField';
 import { ProfileEditActions } from './ProfileEditActions';
 import { ProfileEditFields } from './ProfileEditFields';
 import { ProfileFormFooter } from './ProfileFormFooter';
@@ -514,14 +514,12 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
               className="w-full"
             />
           }
-          iconControl={
-            <AgentIconPicker
-              value={icon}
-              onChange={setIcon}
-              alias={form.displayName || editing.alias}
-              disabled={saving}
-            />
-          }
+        />
+        <AgentIconField
+          value={icon}
+          onChange={setIcon}
+          alias={form.displayName || editing.alias}
+          disabled={saving}
         />
         <ProfileEditActions
           saving={saving}
@@ -665,19 +663,12 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
       </SettingRow>
 
       {/* ─── Icon ──────────────────────────────────────────────── */}
-      <SettingRow
-        title={t('settings.agentIcon.label')}
-        description={t('settings.agentIcon.hint')}
-      >
-        <SettingControl>
-          <AgentIconPicker
-            value={icon}
-            onChange={setIcon}
-            alias={form.displayName || defaultDisplayName}
-            disabled={saving}
-          />
-        </SettingControl>
-      </SettingRow>
+      <AgentIconField
+        value={icon}
+        onChange={setIcon}
+        alias={form.displayName || defaultDisplayName}
+        disabled={saving}
+      />
 
       {/* ─── Actions ───────────────────────────────────────────── */}
       <ProfileFormFooter>

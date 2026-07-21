@@ -40,7 +40,7 @@ import {
   withAgentIcon,
 } from '@/utils/agentIcon';
 
-import { AgentIconPicker } from './AgentIconPicker';
+import { AgentIconField } from './AgentIconField';
 import { AgentTeamConfigs } from './AgentTeamConfigs';
 import { ProfileEditActions } from './ProfileEditActions';
 import { ProfileEditFields } from './ProfileEditFields';
@@ -323,19 +323,12 @@ function CreateManifestProfileForm({
         </SettingControl>
       </SettingRow>
 
-      <SettingRow
-        title={t('settings.agentIcon.label')}
-        description={t('settings.agentIcon.hint')}
-      >
-        <SettingControl>
-          <AgentIconPicker
-            value={icon}
-            onChange={setIcon}
-            alias={alias || defaultAlias}
-            disabled={creating}
-          />
-        </SettingControl>
-      </SettingRow>
+      <AgentIconField
+        value={icon}
+        onChange={setIcon}
+        alias={alias || defaultAlias}
+        disabled={creating}
+      />
 
       <ProfileFormFooter>
         <Button
@@ -456,14 +449,12 @@ function EditManifestProfileForm({
             className="w-full"
           />
         }
-        iconControl={
-          <AgentIconPicker
-            value={icon}
-            onChange={setIcon}
-            alias={alias || profile.alias}
-            disabled={saving}
-          />
-        }
+      />
+      <AgentIconField
+        value={icon}
+        onChange={setIcon}
+        alias={alias || profile.alias}
+        disabled={saving}
       />
       <ProfileEditActions
         saving={saving}
