@@ -3,11 +3,11 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Navigate, useNavigate } from 'react-router-dom';
 
+import { WorkspaceLoadingScreen } from './WorkspaceLoadingScreen';
 import { Button } from '../components/Common/Button';
 import { PathInput } from '../components/Common/PathInput';
 import { APP_NAME } from '../config/app';
 import { useWorkspaceStore } from '../store/workspaceStore';
-import { WorkspaceLoadingScreen } from './WorkspaceLoadingScreen';
 
 /**
  * First-launch / "switch workspace" page.

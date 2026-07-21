@@ -9,16 +9,16 @@
 
 import { fork, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-
-import { getLogger } from '../utils/logger.js';
+import { fileURLToPath } from 'node:url';
 
 import {
   commitWorkspacePath,
   isManagedMode,
   resolveWorkspacePath,
 } from './workspace.js';
+import { getLogger } from '../utils/logger.js';
+
 
 const DEFAULT_ACTIVATION_TIMEOUT_MS = 70_000;
 
