@@ -49,11 +49,18 @@ export function AgentIconPicker({
           size="sm"
           iconOnly
           disabled={disabled}
-          className="rounded-full"
+          // Override the Button's default lucide-sized icon (~13px) and tighten
+          // the icon-only padding so the avatar fills the trigger.
+          className="rounded-full p-0.5 [&_svg]:h-7 [&_svg]:w-7"
           aria-label={t('settings.agentIcon.change', { alias })}
           title={t('settings.agentIcon.change', { alias })}
         >
-          <AgentIcon shape={value.shape} color={value.color} size={20} />
+          <AgentIcon
+            shape={value.shape}
+            color={value.color}
+            size={28}
+            withFace
+          />
         </Button>
       }
     >
