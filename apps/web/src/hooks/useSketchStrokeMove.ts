@@ -239,6 +239,12 @@ export function useSketchStrokeMove({
     startPositions: Map<string, { x: number; y: number }>;
     /** Whether the store drag lifecycle has been opened for the nodes. */
     nodeDragStarted: boolean;
+    /**
+     * Sketch nodes carried by a dragged ancestor (framed sketch lassoed
+     * with its frame). Their strokes must NOT be baked by the move offset
+     * on commit — the ancestor drag already moves the whole node.
+     */
+    carriedSketchNodeIds: Set<string>;
   } | null>(null);
 
   const positionChanges = (
@@ -271,6 +277,31 @@ export function useSketchStrokeMove({
       const selectedNodes = allSelected.filter(
         (n) => !n.parentId || !selectedIds.has(n.parentId),
       );
+      // Sketch nodes whose strokes are selected but that sit inside a
+      // dragged node (e.g. a framed sketch lassoed together with its
+      // frame) are carried by that ancestor's drag: their whole SVG moves
+      // by the group delta already, so the stroke move-preview / bake must
+      // NOT be applied on top (that would move the strokes twice, flinging
+      // them out of the frame). Walk each candidate's parent chain against
+      // the dragged-node set to find them.
+      const allNodes = useCanvasStore.getState().nodes;
+      const nodeById = new Map(allNodes.map((n) => [n.id, n]));
+      const draggedIds = new Set(selectedNodes.map((n) => n.id));
+      const isCarriedByDrag = (nodeId: string): boolean => {
+        let parentId = nodeById.get(nodeId)?.parentId;
+        const seen = new Set<string>();
+        while (parentId && !seen.has(parentId)) {
+          if (draggedIds.has(parentId)) return true;
+          seen.add(parentId);
+          parentId = nodeById.get(parentId)?.parentId;
+        }
+        return false;
+      };
+      const carriedSketchNodeIds = new Set(
+        Object.keys(
+          useGesturePreviewStore.getState().sketchStrokeSelection,
+        ).filter((id) => isCarriedByDrag(id)),
+      );
       dragRef.current = {
         pointerId: event.pointerId,
         startFlow: inst.screenToFlowPosition({
@@ -286,9 +317,13 @@ export function useSketchStrokeMove({
           ]),
         ),
         nodeDragStarted: false,
+        carriedSketchNodeIds,
       };
       // Reset any stale preview from a previous drag.
       useGesturePreviewStore.getState().setSketchStrokeMovePreview(null);
+      useGesturePreviewStore
+        .getState()
+        .setSketchStrokeMoveCarriedNodeIds(Array.from(carriedSketchNodeIds));
       return true;
     },
     [rfInstanceRef],
@@ -374,6 +409,7 @@ export function useSketchStrokeMove({
     const preview = useGesturePreviewStore.getState();
     const offset = preview.sketchStrokeMovePreview;
     preview.setSketchStrokeMovePreview(null);
+    preview.setSketchStrokeMoveCarriedNodeIds([]);
     preview.clearFrameFitPreview();
     const moved = !!offset && (offset.dx !== 0 || offset.dy !== 0);
     const store = useCanvasStore.getState();
@@ -425,6 +461,9 @@ export function useSketchStrokeMove({
         preview.sketchStrokeSelection,
       )) {
         if (strokeIds.length === 0) continue;
+        // A sketch carried by a dragged ancestor already moves with it;
+        // baking the offset here would double-move its strokes.
+        if (drag.carriedSketchNodeIds.has(nodeId)) continue;
         strokeCommands.push(
           ...buildMoveStrokesCommands(
             nodeId as CanvasNodeId,
@@ -473,6 +512,7 @@ export function useSketchStrokeMove({
     if (drag?.pointerId !== event.pointerId) return;
     dragRef.current = null;
     useGesturePreviewStore.getState().setSketchStrokeMovePreview(null);
+    useGesturePreviewStore.getState().setSketchStrokeMoveCarriedNodeIds([]);
     useGesturePreviewStore.getState().clearFrameFitPreview();
     // Abort the node drag lifecycle if it was opened.
     if (drag.nodeDragStarted) {

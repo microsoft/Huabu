@@ -96,6 +96,15 @@ export const SketchNode = memo(
     const movePreview = useGesturePreviewStore(
       (s) => s.sketchStrokeMovePreview,
     );
+    // When this node is carried by a dragged ancestor (e.g. a framed sketch
+    // lassoed together with its frame), the ancestor's drag already moves
+    // the whole node by the group delta. Applying the stroke preview on top
+    // would translate the selected strokes a second time, sliding them out
+    // of the frame — so suppress the preview for this node in that case.
+    const carriedNodeIds = useGesturePreviewStore(
+      (s) => s.sketchStrokeMoveCarriedNodeIds,
+    );
+    const isCarried = carriedNodeIds.includes(id);
 
     const strokes = data.strokes ?? [];
     // Toolbar swatches show the most recently drawn stroke's color/size
@@ -171,7 +180,7 @@ export const SketchNode = memo(
                 key={s.id}
                 visibility={erasedStrokeIdSet.has(s.id) ? 'hidden' : undefined}
                 transform={
-                  movePreview && isSelected
+                  movePreview && isSelected && !isCarried
                     ? `translate(${movePreview.dx} ${movePreview.dy})`
                     : undefined
                 }

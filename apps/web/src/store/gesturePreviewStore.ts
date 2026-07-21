@@ -96,6 +96,20 @@ type GesturePreviewState = {
   ) => void;
 
   /**
+   * Sketch node ids whose selected strokes must NOT apply
+   * `sketchStrokeMovePreview` during a mixed move, because the node is
+   * carried by a dragged ancestor (e.g. a framed sketch lassoed together
+   * with its frame). The ancestor's drag already translates the node's
+   * whole SVG by the group delta; adding the stroke preview on top would
+   * move those strokes twice (they'd slide out of the frame). The commit
+   * bake skips the same nodes for the same reason.
+   */
+  sketchStrokeMoveCarriedNodeIds: string[];
+
+  /** Set / clear the carried-node ids for the current mixed move. */
+  setSketchStrokeMoveCarriedNodeIds: (ids: string[]) => void;
+
+  /**
    * Previews of how frames would resize based on the current drag/resize.
    * One entry per affected frame — allows showing both the source frame
    * shrinking and the target frame expanding simultaneously.
@@ -199,6 +213,7 @@ export const useGesturePreviewStore = create<GesturePreviewState>()((set) => ({
       sketchStrokeSelection: {},
       sketchSelectionPolygon: null,
       sketchStrokeMovePreview: null,
+      sketchStrokeMoveCarriedNodeIds: [],
     }),
   sketchStrokeHighlight: {},
   setSketchStrokeHighlight: (sketchStrokeHighlight) =>
@@ -210,6 +225,9 @@ export const useGesturePreviewStore = create<GesturePreviewState>()((set) => ({
   sketchStrokeMovePreview: null,
   setSketchStrokeMovePreview: (sketchStrokeMovePreview) =>
     set({ sketchStrokeMovePreview }),
+  sketchStrokeMoveCarriedNodeIds: [],
+  setSketchStrokeMoveCarriedNodeIds: (sketchStrokeMoveCarriedNodeIds) =>
+    set({ sketchStrokeMoveCarriedNodeIds }),
   frameFitPreviews: [],
   setFrameFitPreviews: (previews) => set({ frameFitPreviews: previews }),
   clearFrameFitPreview: () => set({ frameFitPreviews: [] }),
