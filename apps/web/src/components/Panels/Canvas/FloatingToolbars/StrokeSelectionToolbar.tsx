@@ -42,7 +42,7 @@ export const StrokeSelectionToolbar = () => {
   const { t } = useTranslation();
   // Subscribe to `nodes` so the anchor + representative style track edits.
   const nodes = useCanvasStore((s) => s.nodes);
-  const updateNodeData = useCanvasStore((s) => s.updateNodeData);
+  const executeCommands = useCanvasStore((s) => s.executeCommands);
   const deleteNodes = useCanvasStore((s) => s.deleteNodes);
   const beginNodeDataGesture = useCanvasStore((s) => s.beginNodeDataGesture);
   const endNodeDataGesture = useCanvasStore((s) => s.endNodeDataGesture);
@@ -83,20 +83,30 @@ export const StrokeSelectionToolbar = () => {
   // Apply a per-stroke patch (color / size) to only the selected strokes.
   const patchSelected = useCallback(
     (patch: Partial<SketchStroke>) => {
+      const patches: Extract<
+        CanvasCommand,
+        { type: 'MERGE_NODE_DATA' }
+      >['patches'] = [];
       for (const [nodeId, strokeIds] of Object.entries(selection)) {
         const node = nodes.find((n) => n.id === nodeId);
         const strokes = (node?.data as CanvasSketchNodeData | undefined)
           ?.strokes;
         if (!strokes) continue;
         const idSet = new Set(strokeIds);
-        updateNodeData(nodeId, {
-          strokes: strokes.map((s) =>
-            idSet.has(s.id) ? { ...s, ...patch } : s,
-          ),
+        patches.push({
+          nodeId: nodeId as CanvasNodeId,
+          patch: {
+            strokes: strokes.map((s) =>
+              idSet.has(s.id) ? { ...s, ...patch } : s,
+            ),
+          },
         });
       }
+      if (patches.length > 0) {
+        executeCommands([{ type: 'MERGE_NODE_DATA', patches }]);
+      }
     },
-    [selection, nodes, updateNodeData],
+    [selection, nodes, executeCommands],
   );
 
   const handleDelete = useCallback(() => {

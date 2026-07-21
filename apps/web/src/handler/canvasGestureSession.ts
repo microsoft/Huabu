@@ -7,6 +7,7 @@ import {
 export type CanvasGestureKind =
   | 'touch-pan'
   | 'lasso'
+  | 'sketch-stroke-move'
   | 'sketch-draw'
   | 'sketch-erase';
 export type CanvasGesturePhase = 'pending' | 'locked';

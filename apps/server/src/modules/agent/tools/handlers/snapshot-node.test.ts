@@ -242,11 +242,10 @@ describe('filterSketchStrokes', () => {
     expect(strokeIds(out)).toEqual(['a', 'c']);
   });
 
-  it('returns the node unchanged when the filter matches nothing (stale ids)', () => {
-    const node = threeStrokeSketch();
-    const out = filterSketchStrokes(node, new Set(['zzz']));
-    // Same reference — no clone, renders the whole node.
-    expect(out).toBe(node);
+  it('rejects a filter that matches nothing instead of rendering the whole sketch', () => {
+    expect(() =>
+      filterSketchStrokes(threeStrokeSketch(), new Set(['zzz'])),
+    ).toThrow('The stroke selection may be stale');
   });
 
   it('returns the node unchanged when the filter covers every stroke', () => {

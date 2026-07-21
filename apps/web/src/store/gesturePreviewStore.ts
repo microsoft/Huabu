@@ -158,6 +158,9 @@ type GesturePreviewState = {
 
   /** Clear the structured drop indicator when the gesture ends. */
   clearStructuredDropPreview: () => void;
+
+  /** Clear every canvas-scoped transient when authoritative nodes reload. */
+  resetForCanvasLoad: () => void;
 };
 
 /**
@@ -238,4 +241,16 @@ export const useGesturePreviewStore = create<GesturePreviewState>()((set) => ({
   setStructuredDropPreview: (preview) =>
     set({ structuredDropPreview: preview }),
   clearStructuredDropPreview: () => set({ structuredDropPreview: null }),
+  resetForCanvasLoad: () =>
+    set({
+      sketchErasePreview: {},
+      sketchStrokeSelection: {},
+      sketchStrokeHighlight: {},
+      sketchSelectionPolygon: null,
+      sketchStrokeMovePreview: null,
+      sketchStrokeMoveCarriedNodeIds: [],
+      frameFitPreviews: [],
+      snapGuides: [],
+      structuredDropPreview: null,
+    }),
 }));

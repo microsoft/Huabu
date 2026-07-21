@@ -384,6 +384,11 @@ type RFState = {
   onNodeDrag: OnNodeDrag;
   onNodeDragStop: OnNodeDrag;
   /**
+   * Cancel the active node drag without running drop/reparent resolution.
+   * Restores the pre-drag positions and discards the gesture snapshot.
+   */
+  cancelActiveNodeDrag: () => void;
+  /**
    * Tear down any drag-time snap state and detach the window-level
    * Alt listeners attached during `onNodeDragStart`. Idempotent.
    * Called from Canvas unmount to cover the path where the component
@@ -1701,6 +1706,12 @@ const useCanvasStore = create<RFState>()(
             ? state.viewport
             : null;
         const loadedViewport = storedViewport ?? legacyServerViewport;
+        // An authoritative node replacement invalidates every transient that
+        // points at the previous in-memory geometry. This applies both to a
+        // different-canvas switch and to a same-canvas SSE gap/snapshot heal:
+        // even when the canvas id is unchanged, selected stroke ids and
+        // retained polygons may have been deleted or moved remotely.
+        useGesturePreviewStore.getState().resetForCanvasLoad();
         // Apply the authoritative server state via the no-autosave setter.
         // A load must NEVER schedule a structure PUT: the nodes/edges we
         // just fetched already ARE the server's state, so bumping the
@@ -1801,7 +1812,7 @@ const useCanvasStore = create<RFState>()(
       // inherit the previous canvas's recent-action trail.
       intentActionWindow.clear();
       useToolStore.getState().resetForCanvasSwitch();
-      useGesturePreviewStore.getState().clearFrameFitPreview();
+      useGesturePreviewStore.getState().resetForCanvasLoad();
       canvasHistoryManager.clear();
 
       // Load the new canvas
@@ -2531,6 +2542,40 @@ const useCanvasStore = create<RFState>()(
           canvasHistoryManager.rollbackGestureSnapshot();
         }
       }
+    },
+
+    cancelActiveNodeDrag: () => {
+      if (_dragPreviewRafId !== null) {
+        cancelAnimationFrame(_dragPreviewRafId);
+        _dragPreviewRafId = null;
+      }
+      const preview = useGesturePreviewStore.getState();
+      preview.clearFrameFitPreview();
+      preview.clearStructuredDropPreview();
+
+      const startPositions = _dragStartPositions;
+      _dragStartPositions = null;
+      if (startPositions) {
+        get()._setStateNoAutosave({
+          nodes: get().nodes.map((node) => {
+            const start = startPositions.get(node.id);
+            return start
+              ? {
+                  ...node,
+                  position: { x: start.x, y: start.y },
+                  dragging: false,
+                }
+              : node;
+          }),
+        });
+      }
+
+      endSnapSession();
+      canvasHistoryManager.rollbackGestureSnapshot();
+      set({
+        canUndo: canvasHistoryManager.canUndo,
+        canRedo: canvasHistoryManager.canRedo,
+      });
     },
 
     endActiveDragSession: () => {

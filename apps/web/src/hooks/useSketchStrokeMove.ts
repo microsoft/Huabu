@@ -12,6 +12,12 @@ import {
   commitStrokeCommands,
 } from '@/components/Nodes/sketch/sketchMerge';
 import { resolveFrameAtPoint } from '@/handler/canvasCommand/utils';
+import {
+  beginCanvasGesture,
+  endCanvasGesture,
+  updateCanvasGesture,
+  type CanvasPointerType,
+} from '@/handler/canvasGestureSession';
 import useCanvasStore from '@/store/canvasStore';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 
@@ -269,8 +275,20 @@ export function useSketchStrokeMove({
         .getState()
         .nodes.filter((n) => n.selected && n.type !== 'sketch') as Node[];
       const selectedIds = new Set(allSelected.map((n) => n.id));
+      const allNodes = useCanvasStore.getState().nodes;
+      const nodeById = new Map(allNodes.map((n) => [n.id, n]));
+      const hasSelectedAncestor = (nodeId: string): boolean => {
+        let parentId = nodeById.get(nodeId)?.parentId;
+        const seen = new Set<string>();
+        while (parentId && !seen.has(parentId)) {
+          if (selectedIds.has(parentId)) return true;
+          seen.add(parentId);
+          parentId = nodeById.get(parentId)?.parentId;
+        }
+        return false;
+      };
       const selectedNodes = allSelected.filter(
-        (n) => !n.parentId || !selectedIds.has(n.parentId),
+        (node) => !hasSelectedAncestor(node.id),
       );
       // Sketch nodes whose strokes are selected but that sit inside a
       // dragged node (e.g. a framed sketch lassoed together with its
@@ -279,8 +297,6 @@ export function useSketchStrokeMove({
       // NOT be applied on top (that would move the strokes twice, flinging
       // them out of the frame). Walk each candidate's parent chain against
       // the dragged-node set to find them.
-      const allNodes = useCanvasStore.getState().nodes;
-      const nodeById = new Map(allNodes.map((n) => [n.id, n]));
       const draggedIds = new Set(selectedNodes.map((n) => n.id));
       const isCarriedByDrag = (nodeId: string): boolean => {
         let parentId = nodeById.get(nodeId)?.parentId;
@@ -297,6 +313,17 @@ export function useSketchStrokeMove({
           useGesturePreviewStore.getState().sketchStrokeSelection,
         ).filter((id) => isCarriedByDrag(id)),
       );
+      const startScreen = { x: event.clientX, y: event.clientY };
+      if (
+        !beginCanvasGesture(
+          'sketch-stroke-move',
+          event.pointerId,
+          event.pointerType as CanvasPointerType,
+          startScreen,
+        )
+      ) {
+        return false;
+      }
       dragRef.current = {
         pointerId: event.pointerId,
         startFlow: inst.screenToFlowPosition({
@@ -334,6 +361,11 @@ export function useSketchStrokeMove({
         x: event.clientX,
         y: event.clientY,
       });
+      const phase = updateCanvasGesture(event.pointerId, {
+        x: event.clientX,
+        y: event.clientY,
+      });
+      if (phase !== 'locked') return;
       const dx = cur.x - drag.startFlow.x;
       const dy = cur.y - drag.startFlow.y;
 
@@ -400,6 +432,7 @@ export function useSketchStrokeMove({
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     dragRef.current = null;
+    endCanvasGesture(event.pointerId);
 
     const preview = useGesturePreviewStore.getState();
     const offset = preview.sketchStrokeMovePreview;
@@ -506,18 +539,13 @@ export function useSketchStrokeMove({
     const drag = dragRef.current;
     if (drag?.pointerId !== event.pointerId) return;
     dragRef.current = null;
+    endCanvasGesture(event.pointerId);
     useGesturePreviewStore.getState().setSketchStrokeMovePreview(null);
     useGesturePreviewStore.getState().setSketchStrokeMoveCarriedNodeIds([]);
     useGesturePreviewStore.getState().clearFrameFitPreview();
     // Abort the node drag lifecycle if it was opened.
     if (drag.nodeDragStarted) {
-      const store = useCanvasStore.getState();
-      store.onNodesChange(positionChanges(drag.startPositions, 0, 0, false));
-      store.onNodeDragStop(
-        asDragMouseEvent(event),
-        drag.primaryNode as Node,
-        drag.draggedNodes,
-      );
+      useCanvasStore.getState().cancelActiveNodeDrag();
     }
   }, []);
 

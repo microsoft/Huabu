@@ -279,9 +279,9 @@ function sketchEffectiveSize(n: CanvasNode): {
  * strokes. The content-address fingerprint hashes stroke points, so the
  * subset render is automatically distinct from the whole-node render.
  *
- * Falls back to the original node (no filtering) when `keep` is empty,
- * matches nothing (stale ids), or already covers every stroke: a blank
- * PNG is more confusing than the full node, and a full match is a no-op.
+ * Returns the original node when `keep` already covers every stroke. A
+ * non-empty KEEP-list that matches nothing is rejected instead of silently
+ * widening the requested context to the full sketch.
  */
 export function filterSketchStrokes(
   node: CanvasNode,
@@ -290,7 +290,12 @@ export function filterSketchStrokes(
   const strokes = getSketchData(node)?.strokes ?? [];
   if (strokes.length === 0) return node;
   const filtered = strokes.filter((s) => keep.has(s.id));
-  if (filtered.length === 0 || filtered.length === strokes.length) return node;
+  if (filtered.length === 0) {
+    throw new Error(
+      `None of the requested stroke ids exist on sketch node ${node.id}. The stroke selection may be stale; ask the user to select the strokes again.`,
+    );
+  }
+  if (filtered.length === strokes.length) return node;
   return {
     ...node,
     data: { ...(node.data as Record<string, unknown>), strokes: filtered },

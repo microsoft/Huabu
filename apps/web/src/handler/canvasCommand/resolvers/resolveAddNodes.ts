@@ -164,7 +164,9 @@ function materializeAddNode(
       position,
       ...(size && { size }),
       ...(parentId && { parentId }),
-      ...(input.selectOnCreate === false && { selectOnCreate: false }),
+      ...(input.selectOnCreate !== undefined && {
+        selectOnCreate: input.selectOnCreate,
+      }),
     },
     traceNode: {
       id: nodeId,
