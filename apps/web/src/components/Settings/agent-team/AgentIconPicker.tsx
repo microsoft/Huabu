@@ -9,7 +9,7 @@ import { useTranslation } from 'react-i18next';
 
 import {
   AGENT_ICON_COLORS,
-  AGENT_ICON_SHAPES,
+  AGENT_ICON_SELECTABLE_SHAPES,
   AgentIcon,
   type AgentIconColor,
   type AgentIconShape,
@@ -67,7 +67,7 @@ export function AgentIconPicker({
       <div className="flex flex-col gap-2">
         <IconOptionRow
           label={t('settings.agentIcon.shape')}
-          options={AGENT_ICON_SHAPES}
+          options={AGENT_ICON_SELECTABLE_SHAPES}
           isSelected={(shape) => shape === value.shape}
           optionLabel={(shape) => t(`settings.agentIcon.shapes.${shape}`)}
           onSelect={(shape) => onChange({ ...value, shape })}

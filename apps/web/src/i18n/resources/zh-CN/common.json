@@ -183,7 +183,8 @@
         "circle": "圆形",
         "diamond": "菱形",
         "spark": "闪光星",
-        "flower": "五瓣花"
+        "flower": "五瓣花",
+        "cloud": "云朵"
       },
       "colors": {
         "blue": "蓝色",

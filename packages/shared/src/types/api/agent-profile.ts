@@ -48,10 +48,10 @@ const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
 export const customDataSchema = z.record(z.string(), jsonValueSchema);
 export type CustomData = z.infer<typeof customDataSchema>;
 
-/** The four basic-shape agent avatars. */
+/** The basic-shape agent avatars. */
 export const agentIconSchema = z
   .object({
-    shape: z.enum(['circle', 'diamond', 'spark', 'flower']),
+    shape: z.enum(['circle', 'diamond', 'spark', 'flower', 'cloud']),
     color: z.enum(['blue', 'red', 'yellow', 'green']),
   })
   .strict();

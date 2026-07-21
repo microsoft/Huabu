@@ -183,7 +183,8 @@
         "circle": "Circle",
         "diamond": "Diamond",
         "spark": "Spark",
-        "flower": "Flower"
+        "flower": "Flower",
+        "cloud": "Cloud"
       },
       "colors": {
         "blue": "Blue",

@@ -10,6 +10,7 @@
 
 import {
   AGENT_ICON_COLORS,
+  AGENT_ICON_SELECTABLE_SHAPES,
   AGENT_ICON_SHAPES,
   type AgentIconColor,
   type AgentIconShape,
@@ -46,7 +47,8 @@ function hash(value: string): number {
 export function getDefaultAgentIcon(profileId: string): AgentIconValue {
   const h = hash(profileId);
   return {
-    shape: AGENT_ICON_SHAPES[h % AGENT_ICON_SHAPES.length],
+    shape:
+      AGENT_ICON_SELECTABLE_SHAPES[h % AGENT_ICON_SELECTABLE_SHAPES.length],
     color: AGENT_ICON_COLORS[(h >>> 8) % AGENT_ICON_COLORS.length],
   };
 }
@@ -59,7 +61,10 @@ export function getDefaultAgentIcon(profileId: string): AgentIconValue {
 export function randomAgentIcon(): AgentIconValue {
   const pick = <T>(list: readonly T[]): T =>
     list[Math.floor(Math.random() * list.length)];
-  return { shape: pick(AGENT_ICON_SHAPES), color: pick(AGENT_ICON_COLORS) };
+  return {
+    shape: pick(AGENT_ICON_SELECTABLE_SHAPES),
+    color: pick(AGENT_ICON_COLORS),
+  };
 }
 
 /** Resolve the effective icon for a Profile (saved value, else default). */
