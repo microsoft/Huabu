@@ -59,6 +59,21 @@ describe('agentCanvasCommandSchema', () => {
       }).success,
     ).toBe(false);
   });
+
+  it('rejects caller-owned authorship metadata', () => {
+    expect(
+      agentCanvasCommandSchema.safeParse({
+        type: 'CONNECT_NODES',
+        edges: [
+          {
+            source: 'node-1',
+            target: 'node-2',
+            style: { label: 'supports', labelSource: 'user' },
+          },
+        ],
+      }).success,
+    ).toBe(false);
+  });
 });
 
 describe('Space operation limits', () => {

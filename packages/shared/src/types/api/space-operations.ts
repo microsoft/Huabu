@@ -159,7 +159,6 @@ const edgeStyleSchema = z
       .describe(
         'Short text rendered at the edge midpoint. Pass an empty string to clear an existing label.',
       ),
-    labelSource: z.enum(['auto', 'user', 'agent']).optional(),
   })
   .strict()
   .partial();
@@ -873,3 +872,84 @@ export const rfsExecuteRequestSchema = z
   .strict();
 
 export type RfsExecuteRequest = z.infer<typeof rfsExecuteRequestSchema>;
+
+const executeResultNodeSchema = z
+  .object({
+    nodeId: z.string(),
+    label: z.string().optional(),
+    width: z.number(),
+    height: z.number(),
+    src: z.string().optional(),
+  })
+  .strict();
+
+const executeResultEdgeSchema = z
+  .object({
+    edgeId: z.string(),
+    source: z.string(),
+    target: z.string(),
+  })
+  .strict();
+
+export const rfsExecuteResponseSchema = z
+  .object({
+    canvasId: z.string(),
+    runId: z.string(),
+    fromVersion: z.number().int().nonnegative(),
+    toVersion: z.number().int().nonnegative(),
+    commands: z.array(agentCanvasCommandSchema),
+    results: z.array(
+      z
+        .object({
+          index: z.number().int().nonnegative(),
+          type: z.enum(AGENT_CANVAS_COMMAND_TYPES),
+          applied: z.boolean(),
+          reason: z
+            .enum([
+              'no-op',
+              'not-found',
+              'invalid-parent',
+              'invalid-target',
+              'invalid-scope',
+              'cycle',
+              'duplicate-id',
+              'conflict',
+            ])
+            .optional(),
+          nodes: z.array(executeResultNodeSchema).optional(),
+          edges: z.array(executeResultEdgeSchema).optional(),
+        })
+        .strict(),
+    ),
+    revisions: z.array(
+      z
+        .object({
+          nodeId: z.string(),
+          rev: z.string(),
+        })
+        .strict(),
+    ),
+    affected: z
+      .object({
+        nodeIds: z.array(z.string()),
+        edgeIds: z.array(z.string()),
+        deletedNodeIds: z.array(z.string()),
+        deletedEdgeIds: z.array(z.string()),
+      })
+      .strict(),
+    conflicts: z
+      .array(
+        z
+          .object({
+            nodeId: z.string(),
+            reason: z.enum(['not-read', 'stale']),
+            expectedRev: z.string().optional(),
+            currentRev: z.string(),
+          })
+          .strict(),
+      )
+      .optional(),
+  })
+  .strict();
+
+export type RfsExecuteResponse = z.infer<typeof rfsExecuteResponseSchema>;

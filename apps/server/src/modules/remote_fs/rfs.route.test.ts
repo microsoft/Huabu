@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import fastify from 'fastify';
 import {
   rfsCapabilitiesResponseSchema,
+  rfsExecuteResponseSchema,
   rfsOperationCapabilityResponseSchema,
   spaceQueryResponseSchema,
 } from '@sediment/shared';
@@ -252,6 +253,177 @@ describe('POST /api/rfs/:canvasId/query', () => {
       expect(invalidLimit.json<{ code: string }>().code).toBe(
         'validation_failed',
       );
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('POST /api/rfs/:canvasId/execute', () => {
+  it('creates and connects nodes while returning generated IDs and revisions', async () => {
+    seedNote('c1', 'node-1', 'Alpha', 'existing body');
+    const app = await buildApp();
+    try {
+      const createResponse = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/execute',
+        headers: { 'content-type': 'application/json' },
+        payload: {
+          runId: 'external-run-1',
+          commands: [
+            {
+              type: 'CREATE_NODES',
+              nodes: [
+                {
+                  nodeType: 'note',
+                  data: { label: 'Created', content: '# Created' },
+                  position: { x: 200, y: 100 },
+                },
+              ],
+            },
+          ],
+        },
+      });
+      expect(createResponse.statusCode).toBe(200);
+      const created = rfsExecuteResponseSchema.parse(createResponse.json());
+      const createdNodeId = created.results[0]?.nodes?.[0]?.nodeId;
+      expect(created).toMatchObject({
+        runId: 'external-run-1',
+        fromVersion: 1,
+        toVersion: 2,
+        results: [{ index: 0, type: 'CREATE_NODES', applied: true }],
+      });
+      expect(createdNodeId).toMatch(/^node-/);
+      expect(created.revisions).toContainEqual({
+        nodeId: createdNodeId,
+        rev: expect.any(String),
+      });
+      expect(JSON.stringify(created.commands)).not.toMatch(
+        /origin|labelSource/,
+      );
+
+      const connectResponse = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/execute',
+        headers: { 'content-type': 'application/json' },
+        payload: {
+          commands: [
+            {
+              type: 'CONNECT_NODES',
+              edges: [{ source: 'node-1', target: createdNodeId }],
+            },
+          ],
+        },
+      });
+      const connected = rfsExecuteResponseSchema.parse(connectResponse.json());
+      expect(connected.results[0]?.edges?.[0]).toMatchObject({
+        edgeId: expect.stringMatching(/^edge-/),
+        source: 'node-1',
+        target: createdNodeId,
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('returns stale content conflicts as HTTP 200 without echoing content', async () => {
+    seedNote('c1', 'node-1', 'Alpha', 'current secret body');
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/execute',
+        headers: { 'content-type': 'application/json' },
+        payload: {
+          commands: [
+            {
+              type: 'MERGE_NODE_DATA',
+              patches: [
+                {
+                  nodeId: 'node-1',
+                  expectRev: 'stale-revision',
+                  patch: { content: 'replacement' },
+                },
+              ],
+            },
+          ],
+        },
+      });
+      expect(response.statusCode).toBe(200);
+      const result = rfsExecuteResponseSchema.parse(response.json());
+      expect(result).toMatchObject({
+        fromVersion: 1,
+        toVersion: 1,
+        results: [{ applied: false, reason: 'conflict' }],
+        conflicts: [{ nodeId: 'node-1', reason: 'stale' }],
+      });
+      expect(response.body).not.toContain('current secret body');
+      expect(getCanvasStore('c1').readNode('node-1')?.content).toBe(
+        'current secret body',
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('applies content updates guarded by the downloaded revision', async () => {
+    const file = seedNote('c1', 'node-1', 'Alpha', 'before');
+    const app = await buildApp();
+    try {
+      const download = await app.inject({
+        method: 'GET',
+        url: `/rfs/c1/download/${file}`,
+      });
+      const revision = String(download.headers['etag']).replace(/"/g, '');
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/execute',
+        headers: { 'content-type': 'application/json' },
+        payload: {
+          commands: [
+            {
+              type: 'MERGE_NODE_DATA',
+              patches: [
+                {
+                  nodeId: 'node-1',
+                  expectRev: revision,
+                  patch: { content: 'after' },
+                },
+              ],
+            },
+          ],
+        },
+      });
+      const result = rfsExecuteResponseSchema.parse(response.json());
+      expect(result).toMatchObject({
+        fromVersion: 1,
+        toVersion: 2,
+        results: [{ applied: true }],
+        revisions: [{ nodeId: 'node-1', rev: expect.any(String) }],
+      });
+      expect(result.revisions[0]?.rev).not.toBe(revision);
+      expect(getCanvasStore('c1').readNode('node-1')?.content).toBe('after');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('rejects caller-owned origin and UI-only commands', async () => {
+    seedNote('c1', 'node-1', 'Alpha', 'body');
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/execute',
+        headers: { 'content-type': 'application/json' },
+        payload: {
+          originator: { source: 'ui' },
+          commands: [{ type: 'SET_NODE_SELECTION', nodeIds: ['node-1'] }],
+        },
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.json<{ code: string }>().code).toBe('validation_failed');
     } finally {
       await app.close();
     }

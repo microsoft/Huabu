@@ -28,9 +28,10 @@ import {
   CanvasNotFoundError,
   executeOnServer,
 } from '../../../canvas/canvas-executor.js';
+import { prepareAgentCanvasCommands } from '../../../canvas/agent-command-preparation.js';
 
 import type {
-  CanvasCommand,
+  AgentOperationCommand,
   ExecuteConflict,
   NodeOrigin,
 } from '@sediment/shared';
@@ -60,17 +61,12 @@ function buildConflictHint(conflicts: readonly ExecuteConflict[]): string {
 }
 
 /**
- * Args type for `handleCanvasCommands`. Intentionally kept loose
- * (`commands: Array<Record<string, unknown>>`) instead of being derived
- * from `canvasCommandsParamsSchema` because the body walks each command
- * with runtime `cmd.type === '...'` narrowing and augments shapes the
- * schema does not describe (injected `origin`, `labelSource`). The
- * schema still validates LLM input upstream via `validateToolCall` —
- * the looseness here is only on the executor side.
+ * Args type for `handleCanvasCommands`, derived from the canonical shared
+ * agent operation contract validated by pi-ai before dispatch.
  */
 export type CanvasCommandsArgs = {
   canvasId: string;
-  commands: Array<Record<string, unknown>>;
+  commands: AgentOperationCommand[];
 };
 
 /** Default origin assigned to every node created by the operate agent. */
@@ -102,116 +98,9 @@ export async function handleCanvasCommands(
     'canvas_commands handler invoked',
   );
 
-  const annotated = args.commands.map((cmd) => {
-    if (cmd.type === 'CREATE_NODES') {
-      const nodes = cmd.nodes as Array<Record<string, unknown>>;
-      return {
-        ...cmd,
-        nodes: nodes.map((node) => {
-          const data = (node.data as Record<string, unknown> | undefined) ?? {};
-          const hasLabel = typeof data.label === 'string';
-          return {
-            ...node,
-            data: {
-              ...data,
-              origin,
-              ...(hasLabel ? { labelSource: 'agent' as const } : {}),
-            },
-          };
-        }),
-      };
-    }
-    if (cmd.type === 'MERGE_NODE_DATA') {
-      const patches = cmd.patches as Array<Record<string, unknown>>;
-      return {
-        ...cmd,
-        patches: patches.map((entry) => {
-          const patch =
-            (entry.patch as Record<string, unknown> | undefined) ?? {};
-          const hasLabel = typeof patch.label === 'string';
-          // Auto-inject the compare-and-swap token for body rewrites: the
-          // rev the agent last saw for this node (from the run's read-set —
-          // seeded from context, updated by `read`). Only for `content`
-          // writes (the executor's CAS scope) and only when the agent didn't
-          // already supply one. Absent when the node was never read this run
-          // → the executor rejects it as a blind write. `src` is NOT guarded
-          // (a short pointer, never reached via a sidecar read), so it is
-          // never injected here.
-          const nodeId =
-            typeof entry.nodeId === 'string' ? entry.nodeId : undefined;
-          const rewritesContent = 'content' in patch;
-          const injectedRev =
-            rewritesContent &&
-            entry.expectRev === undefined &&
-            nodeId !== undefined
-              ? opts?.readSet?.get(nodeId)
-              : undefined;
-          const nextPatch = hasLabel
-            ? { ...patch, labelSource: 'agent' as const }
-            : patch;
-          if (nextPatch === patch && injectedRev === undefined) return entry;
-          return {
-            ...entry,
-            patch: nextPatch,
-            ...(injectedRev !== undefined ? { expectRev: injectedRev } : {}),
-          };
-        }),
-      };
-    }
-    if (cmd.type === 'CONNECT_NODES' || cmd.type === 'SET_EDGE_STYLE') {
-      // Edges expose a `label` field (same provenance model as the
-      // node-level `label`). When the LLM provides a non-empty label
-      // without an explicit `labelSource`, stamp `'agent'` so the UI
-      // can distinguish AI-authored labels from user-authored ones.
-      // An explicit empty string clears the label — we leave it alone
-      // so the user-side merger can drop the field correctly.
-      const stampStyle = (
-        style: Record<string, unknown> | undefined,
-      ): Record<string, unknown> | undefined => {
-        if (!style || typeof style !== 'object') return style;
-        const hasLabelKey = Object.prototype.hasOwnProperty.call(
-          style,
-          'label',
-        );
-        if (!hasLabelKey) return style;
-        if (typeof style.label !== 'string' || style.label.length === 0) {
-          return style;
-        }
-        if (
-          'labelSource' in style &&
-          typeof style.labelSource === 'string' &&
-          style.labelSource.length > 0
-        ) {
-          return style;
-        }
-        return { ...style, labelSource: 'agent' as const };
-      };
-
-      if (cmd.type === 'CONNECT_NODES') {
-        const edges = cmd.edges as Array<Record<string, unknown>>;
-        return {
-          ...cmd,
-          edges: edges.map((edge) => {
-            const stamped = stampStyle(
-              edge.style as Record<string, unknown> | undefined,
-            );
-            return stamped === edge.style ? edge : { ...edge, style: stamped };
-          }),
-        };
-      }
-      // SET_EDGE_STYLE: each entry is `{ edge, style }`.
-      const patches = cmd.edges as Array<Record<string, unknown>>;
-      return {
-        ...cmd,
-        edges: patches.map((entry) => {
-          const stamped = stampStyle(
-            entry.style as Record<string, unknown> | undefined,
-          );
-          return stamped === entry.style ? entry : { ...entry, style: stamped };
-        }),
-      };
-    }
-    return cmd;
+  const annotated = prepareAgentCanvasCommands(args.commands, {
+    origin,
+    readSet: opts?.readSet,
   });
 
   const runId = createId('run');
@@ -234,7 +123,7 @@ export async function handleCanvasCommands(
   try {
     const result = await executeOnServer({
       canvasId: args.canvasId,
-      commands: annotated as unknown as CanvasCommand[],
+      commands: annotated,
       originator: {
         source: 'agent',
         ...(opts?.threadId ? { threadId: opts.threadId } : {}),

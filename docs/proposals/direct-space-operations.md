@@ -65,7 +65,7 @@ Transactional batches, durable multi-file atomicity, request idempotency, exactl
 
 ## Authorization constraint
 
-The current RFS bearer token grants the complete RFS surface. The direct facade must report effective read and write permissions separately and enforce them consistently. The concrete credential representation must be resolved before write access is considered complete; it must remain canvas-scoped and must not introduce authorization logic into command adapters.
+The first version reuses the current RFS bearer token, which grants the complete RFS surface. The direct facade reports effective read and write permissions separately as enabled; the canvas ID routes operations to one Space but is not represented as an independent security boundary. A narrower capability credential is outside issue #348 and authorization logic does not enter query or command adapters.
 
 ## Procedural skill
 
@@ -94,11 +94,12 @@ The skill contains workflow and bounded examples, not duplicated runtime schemas
 
 ## Code entry points
 
-| File/dir | Responsibility |
-|---|---|
-| [`packages/shared/src/types/canvas/command.ts`](../../packages/shared/src/types/canvas/command.ts) | Current shared TypeScript `CanvasCommand` and agent-allowed command union. |
-| [`apps/server/src/modules/agent/tools/definitions.ts`](../../apps/server/src/modules/agent/tools/definitions.ts) | Current internal-agent query and command runtime schemas to consolidate. |
-| [`apps/server/src/modules/canvas/canvas-spatial.ts`](../../apps/server/src/modules/canvas/canvas-spatial.ts) | Existing outline and inspect implementations. |
-| [`apps/server/src/modules/canvas/canvas-search.ts`](../../apps/server/src/modules/canvas/canvas-search.ts) | Existing bounded, cancellable search implementation. |
-| [`apps/server/src/modules/canvas/canvas-executor.ts`](../../apps/server/src/modules/canvas/canvas-executor.ts) | Canonical server-side mutation execution and persistence path. |
-| [`apps/server/src/modules/remote_fs/rfs.route.ts`](../../apps/server/src/modules/remote_fs/rfs.route.ts) | Existing RFS facade to extend with direct operations. |
+| File/dir                                                                                                         | Responsibility                                                                 |
+| ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| [`packages/shared/src/types/canvas/command.ts`](../../packages/shared/src/types/canvas/command.ts)               | Current shared TypeScript `CanvasCommand` and agent-allowed command union.     |
+| [`packages/shared/src/types/api/space-operations.ts`](../../packages/shared/src/types/api/space-operations.ts)   | Canonical direct-operation request, response, capability, and limit contracts. |
+| [`apps/server/src/modules/agent/tools/definitions.ts`](../../apps/server/src/modules/agent/tools/definitions.ts) | Internal-agent tools adapted from the canonical shared contracts.              |
+| [`apps/server/src/modules/canvas/canvas-spatial.ts`](../../apps/server/src/modules/canvas/canvas-spatial.ts)     | Existing outline and inspect implementations.                                  |
+| [`apps/server/src/modules/canvas/canvas-search.ts`](../../apps/server/src/modules/canvas/canvas-search.ts)       | Existing bounded, cancellable search implementation.                           |
+| [`apps/server/src/modules/canvas/canvas-executor.ts`](../../apps/server/src/modules/canvas/canvas-executor.ts)   | Canonical server-side mutation execution and persistence path.                 |
+| [`apps/server/src/modules/remote_fs/rfs.route.ts`](../../apps/server/src/modules/remote_fs/rfs.route.ts)         | Existing RFS facade to extend with direct operations.                          |

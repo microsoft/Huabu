@@ -10,6 +10,7 @@ The surface separates byte transfer from semantic canvas work:
 External agent
   ├─ download / upload ──> canvas file projection
   ├─ query ──────────────> canonical SpaceQuery dispatcher
+  ├─ execute ────────────> agent command preparation ──> CanvasCommand engine
   └─ agent ──────────────> internal Huabu agent ──> CanvasCommand engine
 ```
 
@@ -30,6 +31,7 @@ All endpoints are mounted under `/api/rfs/:canvasId`; `HUABU_RFS_URL` already co
 | `GET /capabilities/queries/:type`  | Return one query's generated JSON Schema, constraints, result description, and examples.    |
 | `GET /capabilities/commands/:type` | Return one command's generated JSON Schema, constraints, result description, and examples.  |
 | `POST /query`                      | Validate and execute one bounded `SpaceQuery`, returning a query-discriminated JSON result. |
+| `POST /execute`                    | Validate and execute an ordered batch of agent-allowed `CanvasCommand` variants.            |
 
 There is no directory-listing endpoint. External agents receive exact node paths in selected-node context or ask the internal agent to discover relevant files.
 
@@ -39,11 +41,17 @@ There is no directory-listing endpoint. External agents receive exact node paths
 
 Capability detail schemas are generated from the same Zod registry used for request validation and built-in agent tools. Query results remain metadata-oriented and bounded; large node bodies and artifacts are still read through `download`.
 
+## Direct execution plane
+
+`POST /execute` accepts `{ runId?, commands }`, rejects caller-supplied originator context and UI-only command variants, stamps server-owned agent authorship metadata, and invokes `executeOnServer()` with `{ source: 'agent' }`. The same preparation helper is used by the built-in `space_commands` tool; RFS does not call the Canvas HTTP route or duplicate executor behavior.
+
+Commands run in order with current partial-commit semantics. The JSON response reports the effective run ID, version transition, projected commands, every command outcome, generated node and edge IDs, affected entity IDs, new node revisions, and content conflicts. It deliberately omits Web-facing deltas, pending effects, change-review records, and conflict body content. A stale or unread content write is a completed business result returned with HTTP 200; the caller re-downloads the node before reconciling.
+
 ## Authentication and scoping
 
 Every RFS request requires `Authorization: Bearer <AGENTLET_TOKEN>`. The global server auth hook compares the bearer value with the active Agentlet connection token, and the canvas ID embedded in `HUABU_RFS_URL` scopes route resolution to one Space.
 
-The shipped token grants access to the complete RFS surface. Separate effective read and write capabilities are part of the direct-operation proposal and are not current behavior.
+The shipped token grants access to the complete RFS surface, including direct reads and writes, and `/capabilities` reports both permissions as enabled. The canvas ID scopes route resolution but is not an independent credential or security boundary.
 
 ## File projection
 
@@ -67,15 +75,17 @@ RFS errors use the normal API error body and include a runnable `/skill` recover
 
 ## Code entry points
 
-| File/dir                                                                                                                   | Responsibility                                                                 |
-| -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| [`apps/server/src/modules/remote_fs/rfs.route.ts`](../../apps/server/src/modules/remote_fs/rfs.route.ts)                   | Canvas-scoped file, capability, direct-query, and ask-agent routes.            |
-| [`apps/server/src/modules/remote_fs/space-capabilities.ts`](../../apps/server/src/modules/remote_fs/space-capabilities.ts) | Compact capability handshake and schema-derived per-operation descriptions.    |
-| [`apps/server/src/modules/canvas/space-query.ts`](../../apps/server/src/modules/canvas/space-query.ts)                     | Canonical query dispatcher over spatial and search services.                   |
-| [`apps/server/src/modules/remote_fs/node-meta.ts`](../../apps/server/src/modules/remote_fs/node-meta.ts)                   | Safe path projection and node metadata headers.                                |
-| [`apps/server/src/modules/remote_fs/skill.ts`](../../apps/server/src/modules/remote_fs/skill.ts)                           | Resolve the bundled or canvas-specific access guide.                           |
-| [`apps/server/src/prompt/external-agent/access-huabu.md`](../../apps/server/src/prompt/external-agent/access-huabu.md)     | Agent-facing RFS procedure served by `GET /skill`.                             |
-| [`apps/server/src/modules/agent/acp/reachback-env.ts`](../../apps/server/src/modules/agent/acp/reachback-env.ts)           | Inject the canvas-scoped RFS environment into external sessions.               |
-| [`packages/shared/src/types/api/rfs.ts`](../../packages/shared/src/types/api/rfs.ts)                                       | Shared file-plane RFS wire schemas, headers, and constants.                    |
-| [`packages/shared/src/types/api/space-operations.ts`](../../packages/shared/src/types/api/space-operations.ts)             | Canonical direct-operation request, response, capability, and limit contracts. |
-| [`external/agentlet/spec/agent-reachback.md`](../../external/agentlet/spec/agent-reachback.md)                             | Host-agnostic Agentlet reachback transport contract.                           |
+| File/dir                                                                                                                           | Responsibility                                                                 |
+| ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| [`apps/server/src/modules/remote_fs/rfs.route.ts`](../../apps/server/src/modules/remote_fs/rfs.route.ts)                           | Canvas-scoped file, capability, direct-query, and ask-agent routes.            |
+| [`apps/server/src/modules/remote_fs/space-capabilities.ts`](../../apps/server/src/modules/remote_fs/space-capabilities.ts)         | Compact capability handshake and schema-derived per-operation descriptions.    |
+| [`apps/server/src/modules/remote_fs/space-execute.ts`](../../apps/server/src/modules/remote_fs/space-execute.ts)                   | Agent-friendly projection over canonical command preparation and execution.    |
+| [`apps/server/src/modules/canvas/space-query.ts`](../../apps/server/src/modules/canvas/space-query.ts)                             | Canonical query dispatcher over spatial and search services.                   |
+| [`apps/server/src/modules/canvas/agent-command-preparation.ts`](../../apps/server/src/modules/canvas/agent-command-preparation.ts) | Shared server-owned authorship and built-in read-set annotation.               |
+| [`apps/server/src/modules/remote_fs/node-meta.ts`](../../apps/server/src/modules/remote_fs/node-meta.ts)                           | Safe path projection and node metadata headers.                                |
+| [`apps/server/src/modules/remote_fs/skill.ts`](../../apps/server/src/modules/remote_fs/skill.ts)                                   | Resolve the bundled or canvas-specific access guide.                           |
+| [`apps/server/src/prompt/external-agent/access-huabu.md`](../../apps/server/src/prompt/external-agent/access-huabu.md)             | Agent-facing RFS procedure served by `GET /skill`.                             |
+| [`apps/server/src/modules/agent/acp/reachback-env.ts`](../../apps/server/src/modules/agent/acp/reachback-env.ts)                   | Inject the canvas-scoped RFS environment into external sessions.               |
+| [`packages/shared/src/types/api/rfs.ts`](../../packages/shared/src/types/api/rfs.ts)                                               | Shared file-plane RFS wire schemas, headers, and constants.                    |
+| [`packages/shared/src/types/api/space-operations.ts`](../../packages/shared/src/types/api/space-operations.ts)                     | Canonical direct-operation request, response, capability, and limit contracts. |
+| [`external/agentlet/spec/agent-reachback.md`](../../external/agentlet/spec/agent-reachback.md)                                     | Host-agnostic Agentlet reachback transport contract.                           |

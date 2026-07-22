@@ -561,6 +561,12 @@ export interface ExecuteOnServerOutput {
       height: number;
       src?: string;
     }>;
+    /** Server-assigned IDs for edges created by CONNECT_NODES. */
+    edges?: Array<{
+      edgeId: string;
+      source: string;
+      target: string;
+    }>;
   }>;
   /** Commands as the executor saw them — ids assigned, source-stamped. */
   commands: CanvasCommand[];
@@ -760,6 +766,19 @@ export async function executeOnServer(
           .filter((n): n is NonNullable<typeof n> => n !== null);
 
         if (nodes.length > 0) result.nodes = nodes;
+      } else if (r.applied && r.command.type === 'CONNECT_NODES') {
+        const edges = r.command.edges.flatMap((edge) =>
+          edge.id
+            ? [
+                {
+                  edgeId: edge.id,
+                  source: edge.source,
+                  target: edge.target,
+                },
+              ]
+            : [],
+        );
+        if (edges.length > 0) result.edges = edges;
       } else if (r.applied && r.command.type === 'MERGE_NODE_DATA') {
         // Echo final image dimensions when a MERGE rewrote an image src.
         const nodes = r.command.patches

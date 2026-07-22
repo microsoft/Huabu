@@ -17,6 +17,7 @@
  *   override → bundled default).
  * - `GET    capabilities*`   — discover direct query/command contracts.
  * - `POST   query`           — run one bounded canonical SpaceQuery.
+ * - `POST   execute`         — execute validated agent Space commands.
  *
  * Errors keep the repo-standard `{ message }` shape and, on `4xx`/`5xx`, fold
  * a runnable `/skill` recovery command into the message (self-healing pull).
@@ -34,6 +35,7 @@ import {
   createId,
   rfsAgentHeadersSchema,
   rfsAgentRequestSchema,
+  rfsExecuteRequestSchema,
   spaceQuerySchema,
   type RfsAgentEventMode,
   type RfsUploadResponse,
@@ -51,6 +53,7 @@ import {
   getQueryCapability,
   getRfsCapabilities,
 } from './space-capabilities.js';
+import { executeRfsCommands } from './space-execute.js';
 import { loadAgent } from '../../prompt/index.js';
 import {
   agenetes,
@@ -62,6 +65,7 @@ import { runAgent, type StreamEvent } from '../agent/agent.service.js';
 import { isPromptDebugEnabled } from '../agent/conversation/prompt/debug-prompt.js';
 import { safeResolve } from '../agent/tools/handlers/fs-sandbox.js';
 import { acquireAgentTurn } from '../agent/turn-lease.js';
+import { CanvasNotFoundError } from '../canvas/canvas-executor.js';
 import { executeSpaceQuery, SpaceQueryError } from '../canvas/space-query.js';
 import { canvasAcpNamespace } from '../storage/paths.js';
 
@@ -325,6 +329,54 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
         return reply
           .code(500)
           .send(rfsError('Failed to execute the Space query.'));
+      }
+    },
+  );
+
+  // ── POST /:canvasId/execute ──
+  app.post<{ Params: { canvasId: string } }>(
+    '/:canvasId/execute',
+    async (request, reply) => {
+      const body = request.body;
+      const buffer = Buffer.isBuffer(body) ? body : Buffer.alloc(0);
+      let json: unknown;
+      try {
+        json = JSON.parse(buffer.toString('utf8') || '{}');
+      } catch {
+        return reply
+          .code(400)
+          .send(rfsError('Request body is not valid JSON.', 'invalid_json'));
+      }
+      const parsed = rfsExecuteRequestSchema.safeParse(json);
+      if (!parsed.success) {
+        return reply
+          .code(400)
+          .send(
+            rfsError(
+              parsed.error.issues[0]?.message ??
+                'Invalid Space execution request.',
+              'validation_failed',
+            ),
+          );
+      }
+
+      try {
+        return reply.send(
+          await executeRfsCommands(request.params.canvasId, parsed.data),
+        );
+      } catch (error) {
+        if (error instanceof CanvasNotFoundError) {
+          return reply
+            .code(404)
+            .send(rfsError('Canvas not found.', 'canvas_not_found'));
+        }
+        request.log.error(
+          { err: error, canvasId: request.params.canvasId },
+          'rfs Space execution failed',
+        );
+        return reply
+          .code(500)
+          .send(rfsError('Failed to execute the Space commands.'));
       }
     },
   );
