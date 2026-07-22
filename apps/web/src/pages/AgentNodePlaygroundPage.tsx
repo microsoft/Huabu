@@ -1173,19 +1173,22 @@ function LodAgentChip({
         ? LOD_AGENT_COLOR_HEX.green
         : LOD_AGENT_COLOR_HEX.blue;
 
+  // Warm off-white "sticker" fill (paler), shared by the chip body and the
+  // open chat bubble.
+  const stickerFill = 'color-mix(in srgb, var(--question-bg) 32%, white)';
   const chipStyle: CSSProperties = {
     width: size,
     height: size,
+    background: isOpen ? 'transparent' : stickerFill,
     borderColor: ringBorderColor,
     boxShadow: ringBoxShadow,
     ['--question-agent-running-ring' as string]: runningRingColor,
   };
 
-  return (
+  const chip = (
     <div
       className={cn(
         'question-agent-badge relative inline-flex items-center justify-center rounded-full border-2',
-        isOpen ? 'bg-transparent' : 'bg-surface shadow-sm',
         isRunning &&
           'question-agent-ring-running border-transparent shadow-none',
         isError && 'question-agent-ring-error border-transparent',
@@ -1202,7 +1205,7 @@ function LodAgentChip({
         >
           <path
             d="M22 2C11 2 2 11 2 22c0 8 4.5 14.5 11 18l-4 6 9-4.5c1.3.3 2.6.5 4 .5 11 0 20-9 20-20S33 2 22 2Z"
-            fill="var(--bg-surface)"
+            fill={stickerFill}
             stroke="var(--question-border)"
             strokeWidth="2"
             strokeLinejoin="round"
@@ -1243,6 +1246,8 @@ function LodAgentChip({
       ) : null}
     </div>
   );
+
+  return chip;
 }
 
 /** One canvas viewport rendering the node + badge at a simulated zoom. */
@@ -1471,6 +1476,162 @@ function QuestionNodeLodLab({ icon }: { icon: AgentIconValue }) {
   );
 }
 
+type HarmonyDirection = 'sticker' | 'stamp' | 'clean';
+
+const HARMONY_DIRECTIONS: Array<{
+  id: HarmonyDirection;
+  label: string;
+  note: string;
+  recommended?: boolean;
+}> = [
+  {
+    id: 'sticker',
+    label: 'Sticker badge',
+    note: 'Keep the warm note; the badge becomes a paper sticker — warm off-white, a soft warm shadow, and a slight tilt — instead of a crisp app chip.',
+  },
+  {
+    id: 'stamp',
+    label: 'Ink-stamp badge',
+    note: 'Keep the warm note; drop the white chip entirely — the star sits in a hand-drawn ink ring, like a stamp pressed onto the paper.',
+    recommended: true,
+  },
+  {
+    id: 'clean',
+    label: 'Clean sticky',
+    note: 'Flatten the note instead: no depth board, a soft even shadow, and a crisp sans font — so it matches the clean vector badge.',
+  },
+];
+
+/** The status badge rendered in each harmony direction's own chrome. */
+function HarmonyBadge({ direction }: { direction: HarmonyDirection }) {
+  if (direction === 'sticker') {
+    return (
+      <div
+        className="flex items-center justify-center"
+        style={{
+          width: 40,
+          height: 40,
+          borderRadius: 11,
+          background: 'color-mix(in srgb, var(--question-bg) 55%, white)',
+          border:
+            '1px solid color-mix(in srgb, var(--question-border) 45%, transparent)',
+          boxShadow:
+            '0 3px 7px color-mix(in srgb, var(--question-fg) 22%, transparent)',
+          transform: 'rotate(-7deg)',
+        }}
+      >
+        <BuiltInStarBody mode="ask" size={30} />
+      </div>
+    );
+  }
+  if (direction === 'stamp') {
+    return (
+      <div
+        className="relative flex items-center justify-center"
+        style={{ width: 42, height: 42 }}
+      >
+        <BuiltInStarBody mode="ask" size={38} />
+        <svg
+          width={44}
+          height={44}
+          viewBox="0 0 44 44"
+          className="pointer-events-none absolute"
+          style={{ inset: -1 }}
+          aria-hidden
+        >
+          <path
+            d="M22 3.5 C32 3 40.5 11 40.5 21.5 C41 32 33 40.5 22 40.5 C11.5 41 3.5 32.5 3.5 22 C3 12 11 4 22 3.5 Z"
+            fill="none"
+            stroke="var(--question-fg)"
+            strokeWidth="2.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </div>
+    );
+  }
+  // clean — keep the crisp white chip (it now matches the cleaned note)
+  return (
+    <div
+      className="flex items-center justify-center rounded-full"
+      style={{
+        width: 40,
+        height: 40,
+        background: 'var(--bg-surface)',
+        boxShadow:
+          '0 2px 6px color-mix(in srgb, var(--fg-default) 16%, transparent)',
+      }}
+    >
+      <BuiltInStarBody mode="ask" size={32} />
+    </div>
+  );
+}
+
+/** A question sticky reproduced in one harmony direction's body style. */
+function HarmonyStickyCard({ direction }: { direction: HarmonyDirection }) {
+  const clean = direction === 'clean';
+  return (
+    <div className="relative" style={{ width: 240 }}>
+      <div className="absolute -top-3 left-3 z-10">
+        <HarmonyBadge direction={direction} />
+      </div>
+      {clean ? (
+        <div
+          className="relative flex min-h-32 flex-col justify-between rounded-xl p-5"
+          style={{
+            color: 'var(--question-fg)',
+            backgroundColor: 'var(--question-bg)',
+            border:
+              '1px solid color-mix(in srgb, var(--question-border) 70%, transparent)',
+            boxShadow:
+              '0 4px 14px color-mix(in srgb, var(--question-fg) 14%, transparent)',
+          }}
+        >
+          <p
+            className="text-lg font-semibold"
+            style={{
+              fontFamily: 'Inter, system-ui, sans-serif',
+              letterSpacing: '-0.01em',
+            }}
+          >
+            How does semantic zoom work?
+          </p>
+        </div>
+      ) : (
+        <div className="relative">
+          <div
+            aria-hidden
+            className="absolute inset-0 rounded-lg"
+            style={{
+              transform: 'translate(8px, 8px)',
+              background: 'var(--question-border)',
+            }}
+          />
+          <div
+            className="relative flex min-h-32 flex-col justify-between rounded-lg border p-5 shadow-md"
+            style={{
+              color: 'var(--question-fg)',
+              backgroundColor: 'var(--question-bg)',
+              borderColor: 'var(--question-border)',
+            }}
+          >
+            <p
+              className="text-lg font-semibold"
+              style={{
+                fontFamily:
+                  '"Comic Sans MS", STXingkai, KaiTi, "Kaiti SC", cursive',
+              }}
+            >
+              How does semantic zoom work?
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AgentNodePlaygroundPage() {
   const [shape, setShape] = useState<AgentIconShape>('flower');
   const [color, setColor] = useState<AgentIconColor>('blue');
@@ -1519,6 +1680,59 @@ export default function AgentNodePlaygroundPage() {
       <main className="mx-auto max-w-7xl px-6 py-8">
         <section className="mb-14">
           <QuestionNodeLodLab icon={icon} />
+        </section>
+
+        <section className="mb-14">
+          <div className="mb-5">
+            <h2 className="text-fg-default font-semibold">
+              Body × badge harmony directions
+            </h2>
+            <p className="text-fg-muted mt-1 max-w-3xl text-sm">
+              Three ways to reconcile the hand-drawn sticky with the badge. 1
+              &amp; 2 keep the warm note and restyle the badge; 3 keeps the
+              crisp badge and cleans up the note instead.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            {HARMONY_DIRECTIONS.map((d) => (
+              <article
+                key={d.id}
+                className={cn(
+                  'overflow-hidden rounded-xl border',
+                  d.recommended
+                    ? 'border-info ring-info/20 ring-2'
+                    : 'border-edge-default',
+                )}
+              >
+                <div
+                  className="flex min-h-56 items-center justify-center p-6"
+                  style={{
+                    background: 'var(--bg-default)',
+                    backgroundImage:
+                      'radial-gradient(color-mix(in srgb, var(--fg-subtle) 30%, transparent) 1px, transparent 1px)',
+                    backgroundSize: '16px 16px',
+                  }}
+                >
+                  <HarmonyStickyCard direction={d.id} />
+                </div>
+                <div className="bg-surface p-4">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-fg-default text-sm font-semibold">
+                      {d.label}
+                    </h3>
+                    {d.recommended ? (
+                      <span className="bg-info-bg text-info rounded-full px-1.5 py-0.5 text-[10px] font-semibold">
+                        Recommended
+                      </span>
+                    ) : null}
+                  </div>
+                  <p className="text-fg-muted mt-1 text-xs leading-relaxed">
+                    {d.note}
+                  </p>
+                </div>
+              </article>
+            ))}
+          </div>
         </section>
 
         <section className="mb-14">

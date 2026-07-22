@@ -80,7 +80,11 @@ export function QuestionAgentBadge({
     ringBorderColor = isError ? 'transparent' : attentionColor;
   }
 
+  // Warm off-white "sticker" fill, shared by the chip body and the open chat
+  // bubble so the badge reads like a little sticker resting on the note.
+  const stickerFill = 'color-mix(in srgb, var(--question-bg) 32%, white)';
   const badgeStyle: CSSProperties = {
+    background: isOpen ? 'transparent' : stickerFill,
     borderColor: ringBorderColor,
     boxShadow: ringBoxShadow,
     ['--question-agent-running-ring' as string]: runningRingColor,
@@ -95,9 +99,12 @@ export function QuestionAgentBadge({
       onClick={onClick}
       disabled={!onClick}
       className={clsx(
-        'question-agent-badge relative h-8 w-8 p-0 disabled:cursor-default disabled:opacity-100',
-        'bg-surface enabled:hover:bg-surface border-2 shadow-sm',
-        isOpen && 'border-transparent bg-transparent shadow-none',
+        'question-agent-badge relative p-0 disabled:cursor-default disabled:opacity-100',
+        // The ghost Button variant sets `border-none` (border-style: none),
+        // which would suppress the quiet/attention ring even with border-2, so
+        // force `border-solid` back on.
+        'border-2 border-solid shadow-sm',
+        isOpen && 'border-transparent shadow-none',
         isRunning &&
           'question-agent-ring-running border-transparent shadow-none',
         isError &&
@@ -115,7 +122,7 @@ export function QuestionAgentBadge({
         >
           <path
             d="M22 2C11 2 2 11 2 22c0 8 4.5 14.5 11 18l-4 6 9-4.5c1.3.3 2.6.5 4 .5 11 0 20-9 20-20S33 2 22 2Z"
-            fill="var(--bg-surface)"
+            fill={stickerFill}
             stroke="var(--question-border)"
             strokeWidth="2"
             strokeLinejoin="round"
@@ -125,18 +132,24 @@ export function QuestionAgentBadge({
       {agent.kind === 'internal' ? (
         <BuiltInAgentAvatar
           mode={agent.mode}
-          size={26}
+          size={29}
           motion={isRunning ? 'working' : 'none'}
-          className="question-agent-badge-icon relative z-10"
+          className={clsx(
+            'question-agent-badge-icon relative z-10',
+            isOpen && 'translate-x-0.5 translate-y-0.5',
+          )}
         />
       ) : (
         <AgentIcon
           shape={agent.icon.shape}
           color={agent.icon.color}
-          size={26}
+          size={29}
           withFace
           motion={isRunning ? 'working' : 'none'}
-          className="question-agent-badge-icon relative z-10"
+          className={clsx(
+            'question-agent-badge-icon relative z-10',
+            isOpen && 'translate-x-0.5 translate-y-0.5',
+          )}
         />
       )}
       {hasConflict ? (

@@ -16,11 +16,17 @@
 }
 
 .question-agent-badge {
+  /* Single knob for the whole badge. The open bubble is 1.1×/1.2× and the
+     avatar is 0.8× of this. Keeps the playground's 40px proportions, scaled
+     down to 36px so it feels less bulky on the note. */
+  --question-agent-badge-size: 2.25rem;
   --question-agent-quiet-ring: color-mix(
     in srgb,
     var(--fg-subtle) 55%,
     var(--bg-surface)
   );
+  width: var(--question-agent-badge-size) !important;
+  height: var(--question-agent-badge-size) !important;
   /* Cross-fade the state visuals (background, ring border, attention halo)
      so switching status — e.g. open → running — eases instead of snapping. */
   transition:
@@ -30,8 +36,8 @@
 }
 
 .question-agent-badge-icon {
-  width: 1.625rem !important;
-  height: 1.625rem !important;
+  width: calc(var(--question-agent-badge-size) * 0.8) !important;
+  height: calc(var(--question-agent-badge-size) * 0.8) !important;
   flex: none;
 }
 
@@ -39,8 +45,8 @@
    `svg` sizing rule would otherwise shrink it. Force the intended 44×48
    box so the bubble wraps the avatar instead of collapsing to an icon. */
 .question-agent-badge-bubble {
-  width: 2.2rem !important;
-  height: 2.4rem !important;
+  width: calc(var(--question-agent-badge-size) * 1.1) !important;
+  height: calc(var(--question-agent-badge-size) * 1.2) !important;
   animation: question-agent-fade-in 220ms ease;
 }
 

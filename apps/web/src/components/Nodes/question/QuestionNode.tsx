@@ -302,7 +302,7 @@ export const QuestionNode = memo(
                   ? t('node.agentChangesSkipped', { count: conflictCount })
                   : undefined
               }
-              offset={{ top: -22, left: -2 }}
+              offset={{ top: -20, left: 0 }}
               tooltip={
                 status === 'error' && data.errorMessage
                   ? data.errorMessage
