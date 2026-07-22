@@ -1,7 +1,6 @@
 # Desktop Auto-Update Architecture
 
-How the packaged Huabu desktop app detects, downloads, and installs new
-releases via [`electron-updater`](https://www.electron.build/auto-update).
+How the packaged Huabu desktop app detects, downloads, and installs new releases via [`electron-updater`](https://www.electron.build/auto-update).
 
 ## Policy
 
@@ -48,10 +47,7 @@ The `dist:*` scripts pass `--publish never`: electron-builder generates the upda
 | macOS    | `*.dmg`, `*.zip`, `*.blockmap`, `latest-mac.yml` |
 | Windows  | `*.exe`, `*.exe.blockmap`, `latest.yml`          |
 
-The `.dmg` / `.exe` are the human-facing first installs; the `.zip`
-(Squirrel.Mac) and `latest*.yml` feeds are what the running app consumes.
-When a build is relocated from the build-source repo to the public
-distribution repo, these metadata files must move with it.
+The `.dmg` / `.exe` are the human-facing first installs; the `.zip` (Squirrel.Mac) and `latest*.yml` feeds are what the running app consumes. When a build is relocated from the build-source repo to the public distribution repo, these metadata files must move with it.
 
 ## Code entry points
 

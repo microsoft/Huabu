@@ -43,9 +43,14 @@ export function useAppUpdate(): UseAppUpdate {
     if (!updater) return;
 
     let cancelled = false;
-    void updater.getState().then((snapshot) => {
-      if (!cancelled) setStatus(snapshot);
-    });
+    void updater
+      .getState()
+      .then((snapshot) => {
+        if (!cancelled) setStatus(snapshot);
+      })
+      .catch(() => {
+        // Keep the default state until the status stream emits.
+      });
     const unsubscribe = updater.onStatus((next) => {
       setStatus(next);
     });

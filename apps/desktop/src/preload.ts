@@ -168,12 +168,14 @@ contextBridge.exposeInMainWorld('electronBridge', {
   },
 
   /**
-   * Auto-update bridge (electron-updater, packaged app only). The main
-   * process drives the check → download → install lifecycle and pushes
-   * every transition over `update:status`; `getState` returns the latest
-   * snapshot so a freshly-mounted renderer can sync immediately. The
-   * `check` / `download` / `install` actions map onto explicit user
-   * intent — nothing downloads or restarts without a click.
+   * Auto-update bridge (electron-updater). Real update operations only
+   * work in the packaged app; unpackaged dev runs return an unavailable
+   * result instead of throwing. The main process drives the check →
+   * download → install lifecycle and pushes every transition over
+   * `update:status`; `getState` returns the latest snapshot so a
+   * freshly-mounted renderer can sync immediately. The `check` /
+   * `download` / `install` actions map onto explicit user intent —
+   * nothing downloads or restarts without a click.
    */
   updater: {
     check: (): Promise<

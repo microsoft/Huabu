@@ -111,9 +111,9 @@ afterPack: scripts/after-pack.mjs
 # workflow). This lets the public update feed point at the distribution
 # repository (where releases are published) independently of the build
 # source repository, without embedding either name in the codebase.
-# Local `pnpm dist` runs without these vars produce an installer whose
-# updater is simply inert — fine, because local builds are never
-# distributed.
+# Local `pnpm dist` runs must provide both variables too. electron-builder
+# treats a missing `${env.*}` macro as an invalid configuration and stops
+# the build before producing an installer.
 publish:
   provider: github
   owner: ${env.HUABU_UPDATE_OWNER}
