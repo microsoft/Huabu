@@ -10,6 +10,7 @@
     "dev:shared": "pnpm --filter @sediment/shared dev",
     "predev:desktop": "pnpm run build:agentlet && pnpm run build:agenetes",
     "dev:desktop": "node scripts/dev-desktop.mjs",
+    "start:web": "pnpm run build:agentlet && pnpm run build:agenetes && pnpm --filter @sediment/shared build && pnpm --filter @sediment/server bundle && pnpm --filter @sediment/web build && node scripts/start-web.mjs",
     "start:desktop": "pnpm run build:agentlet && pnpm run build:agenetes && pnpm --filter @sediment/shared build && pnpm --filter @sediment/server bundle && pnpm --filter @sediment/web build && pnpm --filter @sediment/desktop dev",
     "build:agentlet": "pnpm --filter @agentlet/protocol --filter @agentlet/agent-team --filter agentlet run build",
     "build:agenetes": "pnpm --filter @agenetes/protocol --filter @agenetes/runtime --filter @agenetes/agent-team --filter @agenetes/agentlet-gateway --filter @agenetes/agentlet-host --filter @agenetes/acp-driver --filter @agenetes/pi-driver --filter @agenetes/agenetes run build",
