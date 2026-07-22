@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 
 import { spawnSupervisedDevChild } from './dev-child-supervisor.mjs';
+import { findAvailablePort } from './dev-ports.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..');
@@ -56,7 +57,6 @@ const SERVER_PORT = Number.parseInt(env.SERVER_PORT || env.PORT || '3001', 10);
 const SERVER_HOST = '127.0.0.1';
 const WEB_PORT = Number.parseInt(env.WEB_PORT || env.VITE_PORT || '5173', 10);
 const DOCS_PORT = Number.parseInt(env.DOCS_PORT || '5174', 10);
-const PORT_SCAN_RANGE = 50;
 // How long to wait for the server to accept connections before giving up.
 // Cold starts (first tsx/esbuild compile, Windows Defender scanning a fresh
 // node_modules, or a loaded machine) can blow past a tight window, so the
@@ -69,34 +69,6 @@ const POLL_INTERVAL_MS = 250;
 // Emit a "still waiting" heartbeat at this cadence so a slow boot is visible
 // instead of looking hung until the timeout fires.
 const WAIT_LOG_INTERVAL_MS = 10_000;
-
-function probeBind(host, port) {
-  return new Promise((resolve) => {
-    const server = net.createServer();
-    server.unref();
-    server.once('error', () => resolve(false));
-    server.once('listening', () => {
-      server.close(() => resolve(true));
-    });
-    server.listen(port, host);
-  });
-}
-
-async function isPortFree(port) {
-  if (!(await probeBind('127.0.0.1', port))) return false;
-  if (!(await probeBind('0.0.0.0', port))) return false;
-  return true;
-}
-
-async function findAvailablePort(startPort, excludedPorts = new Set()) {
-  for (let port = startPort; port < startPort + PORT_SCAN_RANGE; port += 1) {
-    if (excludedPorts.has(port)) continue;
-    if (await isPortFree(port)) return port;
-  }
-  throw new Error(
-    `No free port found in ${startPort}..${startPort + PORT_SCAN_RANGE - 1}`,
-  );
-}
 
 /** Resolve once the TCP port accepts a connection. Rejects on timeout. */
 function waitForPort(host, port, timeoutMs) {
