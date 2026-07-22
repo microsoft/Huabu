@@ -16,6 +16,15 @@ import { join } from 'node:path';
 import fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import {
+  AGENT_CANVAS_COMMAND_TYPES,
+  rfsCapabilitiesResponseSchema,
+  rfsExecuteResponseSchema,
+  rfsOperationCapabilityResponseSchema,
+  spaceQueryResponseSchema,
+} from '@sediment/shared';
+import { getNodeDefaultSize } from '@sediment/shared/canvas-engine';
+
 const agentMocks = vi.hoisted(() => ({
   runAgent: vi.fn(),
   record: vi.fn(),
@@ -102,6 +111,383 @@ describe('GET /api/rfs/:canvasId/skill', () => {
       expect(res.statusCode).toBe(200);
       expect(res.headers['content-type']).toMatch(/text\/markdown/);
       expect(res.body).toMatch(/Accessing this Huabu Space/i);
+      expect(res.body).toMatch(/POST execute/);
+      expect(res.body).toMatch(/work without an internal model provider/i);
+      for (const command of AGENT_CANVAS_COMMAND_TYPES) {
+        expect(res.body).toMatch(
+          new RegExp(String.raw`\|\s+\`${command}\`\s+\|`),
+        );
+      }
+      expect(res.body).toContain('/capabilities/commands/$COMMAND');
+      expect(res.body).toContain('**parent-local**');
+      expect(res.body).toContain('read-only `absolutePosition`');
+      expect(res.body).toContain(
+        `${getNodeDefaultSize('web').width} × ${getNodeDefaultSize('web').height}px`,
+      );
+      expect(res.body).toContain(
+        `${getNodeDefaultSize('note').height}px nominal layout height`,
+      );
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('direct Space query discovery', () => {
+  it('publishes bounded operation capabilities and generated schemas', async () => {
+    const app = await buildApp();
+    try {
+      const capabilities = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/capabilities',
+      });
+      expect(capabilities.statusCode).toBe(200);
+      const parsedCapabilities = rfsCapabilitiesResponseSchema.parse(
+        capabilities.json(),
+      );
+      expect(parsedCapabilities).toMatchObject({
+        permissions: { read: true, write: true },
+        execution: { atomic: false, idempotent: false },
+        limits: { queryMax: 200, executeMaxCommands: 50 },
+      });
+
+      const detail = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/capabilities/queries/INSPECT_NODES',
+      });
+      expect(detail.statusCode).toBe(200);
+      const parsedDetail = rfsOperationCapabilityResponseSchema.parse(
+        detail.json(),
+      );
+      expect(parsedDetail).toMatchObject({
+        kind: 'query',
+        type: 'INSPECT_NODES',
+      });
+      expect(parsedDetail.schema).toHaveProperty('properties.type');
+
+      const commandDetail = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/capabilities/commands/CREATE_NODES',
+      });
+      const parsedCommand = rfsOperationCapabilityResponseSchema.parse(
+        commandDetail.json(),
+      );
+      expect(parsedCommand.examples).toHaveLength(1);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('returns a structured unsupported-operation error', async () => {
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/capabilities/queries/UNKNOWN',
+      });
+      expect(response.statusCode).toBe(404);
+      expect(response.json<{ code: string }>()).toMatchObject({
+        code: 'unsupported_query',
+      });
+
+      const inheritedName = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/capabilities/queries/toString',
+      });
+      expect(inheritedName.statusCode).toBe(404);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('POST /api/rfs/:canvasId/query', () => {
+  it('dispatches spatial queries through the canonical JSON response', async () => {
+    seedNote('c1', 'node-1', 'Alpha', 'hello body');
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/query',
+        headers: { 'content-type': 'application/json' },
+        payload: { type: 'INSPECT_NODES', ids: ['node-1'] },
+      });
+      expect(response.statusCode).toBe(200);
+      const parsed = spaceQueryResponseSchema.parse(response.json());
+      expect(parsed).toMatchObject({
+        type: 'INSPECT_NODES',
+        result: {
+          count: 1,
+          nodes: [{ id: 'node-1', label: 'Alpha' }],
+        },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('collects streaming search into a bounded JSON result', async () => {
+    seedNote('c1', 'node-1', 'Alpha', 'hello searchable body');
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/query',
+        headers: { 'content-type': 'application/json' },
+        payload: { type: 'SEARCH', query: 'searchable', limit: 10 },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(spaceQueryResponseSchema.parse(response.json())).toMatchObject({
+        type: 'SEARCH',
+        result: {
+          count: 1,
+          truncated: false,
+          matches: [{ tier: 'content', match: { nodeId: 'node-1' } }],
+        },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('rejects invalid JSON and out-of-range query limits', async () => {
+    const app = await buildApp();
+    try {
+      const invalidJson = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/query',
+        headers: { 'content-type': 'application/json' },
+        payload: '{',
+      });
+      expect(invalidJson.statusCode).toBe(400);
+      expect(invalidJson.json<{ code: string }>().code).toBe('invalid_json');
+
+      const invalidLimit = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/query',
+        headers: { 'content-type': 'application/json' },
+        payload: { type: 'INSPECT_NODES', limit: 201 },
+      });
+      expect(invalidLimit.statusCode).toBe(400);
+      expect(invalidLimit.json<{ code: string }>().code).toBe(
+        'validation_failed',
+      );
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('POST /api/rfs/:canvasId/execute', () => {
+  it('executes adjacent requests independently when they reuse a runId', async () => {
+    const anchorFile = seedNote('c1', 'node-1', 'Alpha', 'existing body');
+    agentMocks.runAgent.mockImplementation(() => {
+      throw new Error('Internal model provider is not configured');
+    });
+    const app = await buildApp();
+    try {
+      const anchorQuery = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/query',
+        headers: { 'content-type': 'application/json' },
+        payload: { type: 'INSPECT_NODES', ids: ['node-1'] },
+      });
+      expect(anchorQuery.statusCode).toBe(200);
+      expect(anchorQuery.json()).toMatchObject({
+        result: { nodes: [{ id: 'node-1', filename: anchorFile }] },
+      });
+
+      const anchorDownload = await app.inject({
+        method: 'GET',
+        url: `/rfs/c1/download/${anchorFile}`,
+      });
+      expect(anchorDownload.statusCode).toBe(200);
+      expect(anchorDownload.body).toContain('existing body');
+
+      const createResponse = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/execute',
+        headers: { 'content-type': 'application/json' },
+        payload: {
+          runId: 'external-run-1',
+          commands: [
+            {
+              type: 'CREATE_NODES',
+              nodes: [
+                {
+                  nodeType: 'note',
+                  data: { label: 'Created', content: '# Created' },
+                  position: { x: 200, y: 100 },
+                },
+              ],
+            },
+          ],
+        },
+      });
+      expect(createResponse.statusCode).toBe(200);
+      const created = rfsExecuteResponseSchema.parse(createResponse.json());
+      const createdNodeId = created.results[0]?.nodes?.[0]?.nodeId;
+      expect(created).toMatchObject({
+        runId: 'external-run-1',
+        fromVersion: 1,
+        toVersion: 2,
+        results: [{ index: 0, type: 'CREATE_NODES', applied: true }],
+      });
+      expect(createdNodeId).toMatch(/^node-/);
+      expect(created.revisions).toContainEqual({
+        nodeId: createdNodeId,
+        rev: expect.any(String),
+      });
+      expect(JSON.stringify(created.commands)).not.toMatch(
+        /origin|labelSource/,
+      );
+
+      const connectResponse = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/execute',
+        headers: { 'content-type': 'application/json' },
+        payload: {
+          runId: 'external-run-1',
+          commands: [
+            {
+              type: 'CONNECT_NODES',
+              edges: [{ source: 'node-1', target: createdNodeId }],
+            },
+          ],
+        },
+      });
+      const connected = rfsExecuteResponseSchema.parse(connectResponse.json());
+      expect(connected).toMatchObject({
+        runId: 'external-run-1',
+        fromVersion: 2,
+        toVersion: 3,
+      });
+      expect(connected.results[0]?.edges?.[0]).toMatchObject({
+        edgeId: expect.stringMatching(/^edge-/),
+        source: 'node-1',
+        target: createdNodeId,
+      });
+
+      const verification = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/query',
+        headers: { 'content-type': 'application/json' },
+        payload: {
+          type: 'INSPECT_EDGES',
+          between: { a: 'node-1', b: createdNodeId },
+        },
+      });
+      expect(verification.statusCode).toBe(200);
+      expect(verification.json()).toMatchObject({
+        result: {
+          count: 1,
+          edges: [{ source: 'node-1', target: createdNodeId }],
+        },
+      });
+      expect(agentMocks.runAgent).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('returns stale content conflicts as HTTP 200 without echoing content', async () => {
+    seedNote('c1', 'node-1', 'Alpha', 'current secret body');
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/execute',
+        headers: { 'content-type': 'application/json' },
+        payload: {
+          commands: [
+            {
+              type: 'MERGE_NODE_DATA',
+              patches: [
+                {
+                  nodeId: 'node-1',
+                  expectRev: 'stale-revision',
+                  patch: { content: 'replacement' },
+                },
+              ],
+            },
+          ],
+        },
+      });
+      expect(response.statusCode).toBe(200);
+      const result = rfsExecuteResponseSchema.parse(response.json());
+      expect(result).toMatchObject({
+        fromVersion: 1,
+        toVersion: 1,
+        results: [{ applied: false, reason: 'conflict' }],
+        conflicts: [{ nodeId: 'node-1', reason: 'stale' }],
+      });
+      expect(response.body).not.toContain('current secret body');
+      expect(getCanvasStore('c1').readNode('node-1')?.content).toBe(
+        'current secret body',
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('applies content updates guarded by the downloaded revision', async () => {
+    const file = seedNote('c1', 'node-1', 'Alpha', 'before');
+    const app = await buildApp();
+    try {
+      const download = await app.inject({
+        method: 'GET',
+        url: `/rfs/c1/download/${file}`,
+      });
+      const revision = String(download.headers['etag']).replace(/"/g, '');
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/execute',
+        headers: { 'content-type': 'application/json' },
+        payload: {
+          commands: [
+            {
+              type: 'MERGE_NODE_DATA',
+              patches: [
+                {
+                  nodeId: 'node-1',
+                  expectRev: revision,
+                  patch: { content: 'after' },
+                },
+              ],
+            },
+          ],
+        },
+      });
+      const result = rfsExecuteResponseSchema.parse(response.json());
+      expect(result).toMatchObject({
+        fromVersion: 1,
+        toVersion: 2,
+        results: [{ applied: true }],
+        revisions: [{ nodeId: 'node-1', rev: expect.any(String) }],
+      });
+      expect(result.revisions[0]?.rev).not.toBe(revision);
+      expect(getCanvasStore('c1').readNode('node-1')?.content).toBe('after');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('rejects caller-owned origin and UI-only commands', async () => {
+    seedNote('c1', 'node-1', 'Alpha', 'body');
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/execute',
+        headers: { 'content-type': 'application/json' },
+        payload: {
+          originator: { source: 'ui' },
+          commands: [{ type: 'SET_NODE_SELECTION', nodeIds: ['node-1'] }],
+        },
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.json<{ code: string }>().code).toBe('validation_failed');
     } finally {
       await app.close();
     }

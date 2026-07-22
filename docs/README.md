@@ -15,24 +15,22 @@ ACP agents), see [agent-diagnosis-guide.md](./agent-diagnosis-guide.md).
 ```
 docs/
   architecture/   ← Long-lived "what exists today". The system reference.
-  proposals/      ← In-flight design / refactor plans. Each has a Status header.
-  archive/        ← Shipped or superseded proposals, kept for history.
+  proposals/      ← Formally reviewed design records, active or shipped.
+  backlog/        ← Uncommitted ideas that are not implementation instructions.
+  archive/        ← Abandoned or superseded designs kept for history.
 ```
 
 **Rules**
 
 0. Three principles: docs **describe the current system**, are **updated in the same change as the code**, and are **written for agents to read** (concise, greppable, with clickable links).
-1. `architecture/*.md` describes the **current** system. No "we plan to" prose.
-   When a proposal ships, fold the lasting design into the matching
-   `architecture/*.md` and move (or delete) the original proposal.
-2. Every `proposals/*.md` **must** carry a `Status:` line in its first 10 lines
-   (`Draft` · `Planning` · `In-Progress` · `Shipped` · `Superseded`) plus a
-   `Last updated:` date.
-3. When a proposal is fully shipped: either fold it into `architecture/` or
-   `git mv` it into `archive/`. Never leave a stale plan in `proposals/`.
-4. Cross-link between docs with relative paths. Code references use
+1. `architecture/*.md` describes the **current** system. No "we plan to" prose. When a proposal ships, fold the implemented behavior into the matching architecture document.
+2. Every `proposals/*.md` **must** carry a lifecycle `Status:` line near the top plus a `Last updated:` date. Shipped proposals remain at their stable paths with `Status: Shipped`; they preserve design history but do not override architecture.
+3. `backlog/*.md` is non-authoritative and must carry `Status: Backlog` plus a `Last reviewed:` date. Promote a backlog idea into `proposals/` before implementation.
+4. `archive/*.md` is only for abandoned or superseded designs. Link prominently to the replacement when one exists.
+5. Always use `git mv` when moving or renaming files already tracked by Git.
+6. Cross-link between docs with relative paths. Code references use
    `../../<path>` (because docs live two levels deep now).
-5. **Consistent layout formats**: directory / disk layouts use a fenced code
+7. **Consistent layout formats**: directory / disk layouts use a fenced code
    block tree with inline comments; module & code-entry lists use a markdown
    table (`| File/dir | Responsibility |`) with clickable relative links; data
    flows use a small ASCII diagram (≤10 lines). Don't mix trees and tables for
@@ -65,42 +63,63 @@ docs/
 
 ---
 
-## Proposals — in-flight design & refactor plans
+## Proposals — reviewed design records
 
 > Each file's own `Status` / `Last updated` header is the source of truth.
 > The column below summarises it at the time this index was written.
 
-| Doc                                                                                                  | Status                                          | Summary                                                                                                                        |
-| ---------------------------------------------------------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| [agenetes-thread-rehydration-and-forking.md](./proposals/agenetes-thread-rehydration-and-forking.md) | Completed                                       | Agenetes-managed recovery and thread forking as one durable-thread realization model across drivers.                           |
-| [canvas-realtime-sync-plan.md](./proposals/canvas-realtime-sync-plan.md)                             | In-Progress (P0+P1 shipped)                     | Roadmap from multi-agent sync to multi-user co-editing; shipped foundation folded into `architecture/canvas-realtime-sync.md`. |
-| [content-before-ai-design.md](./proposals/content-before-ai-design.md)                               | Unknown — needs owner review                    | Block-level provenance (AI vs user authorship) + inline word-level diff bars per block.                                        |
-| [headless-executor-plan.md](./proposals/headless-executor-plan.md)                                   | Partly shipped (M2 referenced from `canvas.ts`) | Server-side headless canvas executor + structure/content sync split.                                                           |
-| [huabu-cli-design.md](./proposals/huabu-cli-design.md)                                               | Draft                                           | `huabu` CLI + MCP server so any agent can read/write canvases without a custom adapter.                                        |
-| [layered-architecture.md](./proposals/layered-architecture.md)                                       | Draft                                           | Three-layer model — Interaction-driven (HAI) / Protocol-driven (Agent-as-a-Local-Service) / Task-driven (Task Automation).     |
-| [managed-acp-harness.md](./proposals/managed-acp-harness.md)                                         | Draft                                           | Resource-first Agent Team Profile compilation; file-free setup and harness-specific drivers remain backlog work.               |
-| [managed-agent-teams.md](./proposals/managed-agent-teams.md)                                         | In-Progress                                     | Redesign Agent Teams as a Huabu-managed discovery, configuration, preparation, and runtime experience.                         |
-| [milkdown-custom-toolbar-plan.md](./proposals/milkdown-custom-toolbar-plan.md)                       | Draft                                           | Replace Crepe's built-in Milkdown toolbar with a Sediment-owned React toolbar and semantic editor command API.                 |
+### Active
 
-When you ship one of these, edit it to add `Status: Shipped` + the merge
-commit/PR, and either fold lasting parts into the matching
-`architecture/*.md` or move the whole file with `git mv` into `archive/`.
+| Doc                                                                                                | Status         | Summary                                                                   |
+| -------------------------------------------------------------------------------------------------- | -------------- | ------------------------------------------------------------------------- |
+| [agent-node-freshness-cas-plan.md](./proposals/agent-node-freshness-cas-plan.md)                   | In-Progress    | Read/write revision freshness across agent and web paths.                 |
+| [canvas-checkpoint-plan.md](./proposals/canvas-checkpoint-plan.md)                                 | Proposed       | Canvas checkpoint and restoration design.                                 |
+| [canvas-realtime-sync-plan.md](./proposals/canvas-realtime-sync-plan.md)                           | In-Progress    | Roadmap from multi-agent sync to multi-user co-editing.                   |
+| [content-before-ai-design.md](./proposals/content-before-ai-design.md)                             | Needs review   | Block-level and inline authorship provenance.                             |
+| [credential-storage-hardening-followups.md](./proposals/credential-storage-hardening-followups.md) | Draft          | Follow-up credential storage hardening.                                   |
+| [direct-space-operations.md](./proposals/direct-space-operations.md)                               | In-Progress    | #348 deterministic RFS query and mutation operations for external agents. |
+| [headless-executor-plan.md](./proposals/headless-executor-plan.md)                                 | Partly shipped | Server-side headless canvas executor and structure/content sync.          |
+| [managed-acp-harness.md](./proposals/managed-acp-harness.md)                                       | Draft          | Resource-first Agent Team Profile compilation.                            |
+| [managed-agent-teams.md](./proposals/managed-agent-teams.md)                                       | In-Progress    | Huabu-managed discovery, configuration, preparation, and runtime.         |
+| [milkdown-custom-toolbar-plan.md](./proposals/milkdown-custom-toolbar-plan.md)                     | In-Progress    | Sediment-owned Milkdown toolbar and semantic editor commands.             |
+| [model-role-routing.md](./proposals/model-role-routing.md)                                         | Proposed       | Model selection by runtime role.                                          |
+
+### Shipped
+
+| Doc                                                                                                  | Summary                                                                     |
+| ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| [agent-reachback-rfs.md](./proposals/agent-reachback-rfs.md)                                         | Canvas-scoped RFS file plane, ask-agent control plane, and skill bootstrap. |
+| [agenetes-agentlet-gateway-consolidation.md](./proposals/agenetes-agentlet-gateway-consolidation.md) | Agenetes-owned stateless Agentlet Gateway and ACP placement.                |
+| [agenetes-thread-rehydration-and-forking.md](./proposals/agenetes-thread-rehydration-and-forking.md) | Durable-thread recovery and driver-owned rehydration.                       |
+| [agent-request-render-resolution.md](./proposals/agent-request-render-resolution.md)                 | Generic agent submission and input boundary.                                |
+| [layered-architecture.md](./proposals/layered-architecture.md)                                       | Interaction-, protocol-, and task-driven architecture layers.               |
+| [node-write-unification-plan.md](./proposals/node-write-unification-plan.md)                         | Unified authored-content persistence and revision handling.                 |
+| [pi-harness-driver-refactor-plan.md](./proposals/pi-harness-driver-refactor-plan.md)                 | Agenetes harness driver boundary.                                           |
+| [unified-external-agent-settings.md](./proposals/unified-external-agent-settings.md)                 | Unified command-backed and manifest-backed Agent Profiles.                  |
+
+When a proposal ships, set `Status: Shipped`, record the merge PR or commit, update the corresponding architecture document, and retain the proposal's stable path.
+
+---
+
+## Backlog
+
+Backlog documents are preserved discussion material, not approved implementation guidance.
+
+| Doc                                                  | Summary                                                             |
+| ---------------------------------------------------- | ------------------------------------------------------------------- |
+| [huabu-cli-design.md](./backlog/huabu-cli-design.md) | Early CLI/MCP exploration whose CLI-first assumptions predate #348. |
 
 ---
 
 ## Archive
 
-Shipped or superseded proposals end up under [archive/](./archive/) so
-`grep` against `proposals/` only returns work that's actually in flight.
+Archive contains only abandoned or superseded designs.
 
-| Doc                                                                                                | Status     | Summary                                                                                              |
-| -------------------------------------------------------------------------------------------------- | ---------- | ---------------------------------------------------------------------------------------------------- |
-| [agenetes-agentlet-gateway-consolidation.md](./archive/agenetes-agentlet-gateway-consolidation.md) | Shipped    | Replaced standalone agentlet-server with the stateless Agenetes Gateway and explicit ACP placement.  |
-| [acp-eventstore-refactor-plan.md](./archive/acp-eventstore-refactor-plan.md)                       | Superseded | Earlier EventStore adaptation plan replaced by Gateway-owned live buffering and Agenetes durability. |
-| [agentlet-upgrade-plan.md](./archive/agentlet-upgrade-plan.md)                                     | Superseded | Earlier split-hello migration plan absorbed by the Gateway consolidation.                            |
-| [unified-external-agent-settings.md](./archive/unified-external-agent-settings.md)                 | Shipped    | Unified command-backed and manifest-backed Profiles across Settings creation, listing, and Chat.     |
-
-The shipped standalone handbook plan is retained as [docs-github-pages-plan.md](./archive/docs-github-pages-plan.md).
+| Doc                                                                          | Status     | Summary                                                                                         |
+| ---------------------------------------------------------------------------- | ---------- | ----------------------------------------------------------------------------------------------- |
+| [acp-eventstore-refactor-plan.md](./archive/acp-eventstore-refactor-plan.md) | Superseded | Earlier EventStore adaptation replaced by Gateway-owned live buffering and Agenetes durability. |
+| [agent-reachback.md](./archive/agent-reachback.md)                           | Superseded | Removed HRT `.mjs` node-CRUD reachback design.                                                  |
+| [agentlet-upgrade-plan.md](./archive/agentlet-upgrade-plan.md)               | Superseded | Earlier split-hello migration absorbed by the Gateway consolidation.                            |
 
 ---
 

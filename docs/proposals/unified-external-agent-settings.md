@@ -244,7 +244,7 @@ The unified list distinguishes an empty Profile registry from unavailable Templa
 
 - Remove superseded split-flow components and translations.
 - Update current architecture and package usage documentation after behavior ships.
-- Mark this proposal Shipped and move it to `docs/archive/` after the architecture docs describe the final system.
+- Mark this proposal `Shipped`, keep its stable path under `docs/proposals/`, and update the architecture docs to describe the final system.
 
 ## 13. Verification
 

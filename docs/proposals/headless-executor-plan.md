@@ -1,5 +1,9 @@
 # Headless Executor & Sync Plan
 
+Status: Needs Review — partially shipped
+
+Last updated: 2026-07-22
+
 ## Goals
 
 1. **Headless executor**: agent commands execute on the server, with real success/failure feedback flowing back to the LLM.

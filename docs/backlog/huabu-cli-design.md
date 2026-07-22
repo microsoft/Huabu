@@ -3,7 +3,9 @@
 > 让 Huabu 成为 agent 生态里的一等公民：任何能调 bash / MCP 的 agent
 > 都能理解、读取、操作画布，无需为 Huabu 写专门适配器。
 >
-> Status: **Draft**, awaiting review · Last updated 2026-05-22
+> Status: **Backlog** · Last reviewed: 2026-07-22
+>
+> **Non-authoritative exploration.** This document predates the native RFS HTTP direction in [issue #348](https://github.com/hai-team/Sediment/issues/348). Its CLI-first API boundary, separate CLI contract, and `huabu mcp` assumptions are not approved architecture. Any future CLI should be reconsidered as an optional adapter over the canonical `SpaceQuery` / `CanvasCommand` HTTP facade.
 
 ---
 

@@ -283,4 +283,4 @@ Profile deletion does not revoke existing threads. Global restart policy, crash-
 - [`../architecture/agent-teams-as-extensions.md`](../architecture/agent-teams-as-extensions.md) — current product vision and shipped control-plane boundaries.
 - [`../../external/agentlet/spec/agent-team.md`](../../external/agentlet/spec/agent-team.md) — generic Agent Team package and setup contract.
 - [`../architecture/agent-architecture.md`](../architecture/agent-architecture.md) — current built-in and ACP agent runtime.
-- [`agenetes-agentlet-gateway-consolidation.md`](../archive/agenetes-agentlet-gateway-consolidation.md) — shipped Gateway ownership and placement foundation.
+- [`agenetes-agentlet-gateway-consolidation.md`](./agenetes-agentlet-gateway-consolidation.md) — shipped Gateway ownership and placement foundation.

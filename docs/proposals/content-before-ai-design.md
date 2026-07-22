@@ -1,5 +1,9 @@
 # Block-Level Provenance & Inline Diff Design
 
+Status: Draft — needs owner review
+
+Last updated: 2026-07-22
+
 ## Background
 
 Sediment tracks which blocks in a note were written or modified by AI using a

@@ -103,16 +103,7 @@ Design principles:
 4. **Truncation contract**: read tools return `count + truncated`, and add
    `total` only when the full set is cheap to obtain.
 
-`space_commands` covers 13 commands
-([schemas/command.ts](../../apps/server/src/modules/agent/tools/schemas/command.ts)):
-CREATE_NODES, DELETE_NODES, MERGE_NODE_DATA, SET_NODE_PARENT, DISSOLVE_FRAME,
-SET_NODE_GEOMETRY, REORDER_NODES, CONNECT_NODES, DISCONNECT_EDGES,
-SET_EDGE_STYLE, ALIGN_NODES, DISTRIBUTE_NODES,
-SET_FRAME_LAYOUT — the agent subset of
-[`CanvasCommand`](../../packages/shared/src/types/canvas/command.ts) (excluding
-the UI-only `SET_NODE_LOCKED / SET_NODE_SELECTION / CHANGE_NODE_TYPE`). Commands
-execute server-side, persist to disk, and return deltas; see
-[canvas-command-architecture.md](./canvas-command-architecture.md).
+`space_commands` covers 13 commands ([space-operations.ts](../../packages/shared/src/types/api/space-operations.ts)): CREATE_NODES, DELETE_NODES, MERGE_NODE_DATA, SET_NODE_PARENT, DISSOLVE_FRAME, SET_NODE_GEOMETRY, REORDER_NODES, CONNECT_NODES, DISCONNECT_EDGES, SET_EDGE_STYLE, ALIGN_NODES, DISTRIBUTE_NODES, SET_FRAME_LAYOUT — the agent subset of [`CanvasCommand`](../../packages/shared/src/types/canvas/command.ts) (excluding the UI-only `SET_NODE_LOCKED / SET_NODE_SELECTION / CHANGE_NODE_TYPE`). The canonical Zod contracts are converted to the JSON Schema shape expected by pi-ai in [zod-tool-schema.ts](../../apps/server/src/modules/agent/tools/zod-tool-schema.ts). Commands execute server-side, persist to disk, and return deltas; see [canvas-command-architecture.md](./canvas-command-architecture.md).
 
 ---
 
@@ -141,7 +132,7 @@ Chat context uses an **envelope-first submission boundary** (see [agent-context.
 - Before a first turn, Chat hydrates session metadata from cache. A cache miss may prewarm command Profiles through the command-session endpoint, while manifest Profiles remain optimistically available until the first real turn compiles the Profile and opens its ACP session.
 - [profile-store.ts](../../apps/server/src/modules/agent/acp/profile-store.ts) now retains only unmigrated legacy `cliId=agent-team` records long enough to show migration guidance. Ordinary legacy command Profiles preserve their IDs and use the Huabu server working directory when an old record omitted `cwd`. [profiles.route.ts](../../apps/server/src/modules/agent/acp/profiles.route.ts) is the thin loopback-only HTTP adapter over the unified registry, [spawn-orchestrator.ts](../../external/agenetes/packages/acp-driver/src/spawn-orchestrator.ts) targets the selected daemon, and [daemon.route.ts](../../apps/server/src/modules/agent/acp/daemon.route.ts) exposes supervised-daemon status and restart controls.
 
-External agents can read/write the canvas through the **reachback** channel (see [agent-reachback.md](./agent-reachback.md)). The shipped ownership migration is recorded in [agenetes-agentlet-gateway-consolidation.md](../archive/agenetes-agentlet-gateway-consolidation.md).
+External agents can read/write the canvas through the **reachback** channel (see [agent-reachback.md](./agent-reachback.md)). The shipped ownership migration is recorded in [agenetes-agentlet-gateway-consolidation.md](../proposals/agenetes-agentlet-gateway-consolidation.md).
 
 ---
 
@@ -178,7 +169,7 @@ userInvokable`.
 
 To add / change a tool:
 
-1. Add the schema in `tools/schemas/` (skip if reusing existing atoms).
+1. Add canvas command/query contracts to `packages/shared/src/types/api/space-operations.ts`; add server-only tool schemas beside `tools/definitions.ts`.
 2. Add the def in `tools/definitions.ts` (schema + description + boundary
    notes), register it in `TOOL_REGISTRY`.
 3. Put the body in `tools/handlers/<name>.ts`; `throw` on failure.

@@ -7,10 +7,12 @@
 > (RFS)** view for moving bytes, and **`ask-agent`** for everything
 > canvas-semantic. A single internal agent is the only writer to the canvas graph.
 >
-> Status: **Draft**, awaiting review · Last updated: 2026-07-16
+> Status: **Shipped** · Last updated: 2026-07-22
 >
-> Supersedes the shortcut sections of
-> [`../architecture/agent-reachback.md`](../architecture/agent-reachback.md)
+> Current behavior is documented in [`../architecture/agent-reachback.md`](../architecture/agent-reachback.md). The direct-operation extension is tracked in [`direct-space-operations.md`](./direct-space-operations.md) and [issue #348](https://github.com/hai-team/Sediment/issues/348).
+>
+> Supersedes the shortcut design recorded in
+> [`../archive/agent-reachback.md`](../archive/agent-reachback.md)
 > (`read-node`, `write-node`, `snapshot`). The agentlet transport layer
 > ([Agent Reachback Interface](../../external/agentlet/spec/agent-reachback.md))
 > is unchanged.
@@ -553,6 +555,4 @@ Deferred (default chosen, revisit only if needed):
    `GET /api/reachback/snapshot` endpoint, **and the `.mjs` reachback tool + its
    `server/sendResource` distribution** (obsoletes the v1 "script versioning"
    issue).
-4. Fold the shipped design into
-   [`agent-reachback.md`](../architecture/agent-reachback.md) and archive this
-   proposal.
+4. Fold the shipped design into [`agent-reachback.md`](../architecture/agent-reachback.md), mark this proposal `Shipped`, and retain its stable path for design history.
