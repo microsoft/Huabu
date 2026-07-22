@@ -52,6 +52,22 @@ describe('LLM provider catalog', () => {
       input: ['text', 'image'],
     });
   });
+
+  it('surfaces cost and context window for built-in models', () => {
+    const models = getModelsForProvider('openai');
+    expect(models.length).toBeGreaterThan(0);
+
+    // At least one real (non-synthesized) model carries pricing +
+    // context-window metadata from pi-ai's registry.
+    const priced = models.find((m) => m.cost && m.cost.input > 0);
+    expect(priced).toBeDefined();
+    expect(priced!.cost).toEqual({
+      input: expect.any(Number),
+      output: expect.any(Number),
+    });
+    expect(typeof priced!.contextWindow).toBe('number');
+    expect(priced!.contextWindow).toBeGreaterThan(0);
+  });
 });
 
 describe('OpenAI live model discovery', () => {

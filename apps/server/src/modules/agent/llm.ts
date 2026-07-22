@@ -620,6 +620,12 @@ export function getModelsForProvider(providerId: string): LLMModelInfo[] {
         provider: providerId,
         reasoning: m.reasoning,
         input: m.input as ('text' | 'image')[],
+        ...(m.cost
+          ? { cost: { input: m.cost.input, output: m.cost.output } }
+          : {}),
+        ...(typeof m.contextWindow === 'number'
+          ? { contextWindow: m.contextWindow }
+          : {}),
       }));
     } catch {
       return [];

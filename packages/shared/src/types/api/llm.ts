@@ -57,6 +57,19 @@ export interface LLMModelInfo {
   reasoning: boolean;
   /** Supported input types. */
   input: ('text' | 'image')[];
+  /**
+   * Per-token price in USD from pi-ai's registry, when known. Powers
+   * cost-aware selection (e.g. the utility tier's cheapest-eligible
+   * default) and price display in the model picker. Omitted for models
+   * whose price the registry does not carry (custom endpoints, freshly
+   * discovered ids).
+   */
+  cost?: { input: number; output: number };
+  /**
+   * Maximum context window in tokens from pi-ai's registry, when known.
+   * Omitted for models the registry does not describe.
+   */
+  contextWindow?: number;
 }
 
 // ==================== Active Configuration ====================
