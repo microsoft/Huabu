@@ -166,4 +166,40 @@ contextBridge.exposeInMainWorld('electronBridge', {
         { ok: true; path: string } | { ok: false; reason: 'cancelled' }
       >,
   },
+
+  /**
+   * Auto-update bridge (electron-updater, packaged app only). The main
+   * process drives the check → download → install lifecycle and pushes
+   * every transition over `update:status`; `getState` returns the latest
+   * snapshot so a freshly-mounted renderer can sync immediately. The
+   * `check` / `download` / `install` actions map onto explicit user
+   * intent — nothing downloads or restarts without a click.
+   */
+  updater: {
+    check: (): Promise<
+      { ok: true; status: unknown } | { ok: false; error: string }
+    > =>
+      ipcRenderer.invoke('update:check') as Promise<
+        { ok: true; status: unknown } | { ok: false; error: string }
+      >,
+    download: (): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke('update:download') as Promise<
+        { ok: true } | { ok: false; error: string }
+      >,
+    install: (): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke('update:install') as Promise<
+        { ok: true } | { ok: false; error: string }
+      >,
+    getState: (): Promise<unknown> =>
+      ipcRenderer.invoke('update:get-state') as Promise<unknown>,
+    onStatus: (cb: (status: unknown) => void): (() => void) => {
+      const listener = (_event: unknown, status: unknown): void => {
+        cb(status);
+      };
+      ipcRenderer.on('update:status', listener);
+      return () => {
+        ipcRenderer.removeListener('update:status', listener);
+      };
+    },
+  },
 });

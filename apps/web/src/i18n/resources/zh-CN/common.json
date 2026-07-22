@@ -31,6 +31,22 @@
     "userHandbook": "用户手册",
     "openUserHandbook": "打开用户手册"
   },
+  "update": {
+    "check": "检查更新",
+    "checking": "正在检查…",
+    "checkComplete": "更新检查已完成。",
+    "checkFailed": "无法检查更新：{{message}}",
+    "foundVersion": "发现新版本 {{version}}。",
+    "settingsDescription": "检查公开发布源中是否有新的桌面版本。",
+    "currentVersion": "当前已是最新版本 {{version}}。",
+    "available": "更新",
+    "availableVersion": "发现新版本 {{version}}，点击下载",
+    "downloading": "正在下载更新… {{percent}}%",
+    "restart": "重启更新",
+    "restartReady": "新版本 {{version}} 已就绪，重启即可安装",
+    "error": "更新失败",
+    "errorRetry": "更新失败：{{message}}。点击重试。"
+  },
   "menu": {
     "file": "文件",
     "edit": "编辑",

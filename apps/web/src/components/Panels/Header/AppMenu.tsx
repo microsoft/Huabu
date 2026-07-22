@@ -4,10 +4,12 @@ import { useLocation, useNavigate } from 'react-router-dom';
 
 import { openUserHandbook } from '../../../config/handbook';
 import { getShortcutKeys } from '../../../config/shortcuts';
+import { canCheckForUpdates, useAppUpdate } from '../../../hooks/useAppUpdate';
 import { useCanvasActions } from '../../../hooks/useCanvasActions';
 import {
   copySystemInfo,
   desktopDiagnosticsAvailable,
+  getElectronBridge,
   isElectron,
   openDeveloperTools,
   openServerLog,
@@ -65,6 +67,8 @@ export const AppMenu: React.FC<AppMenuProps> = ({
   const openShortcuts = useShortcutsUiStore((s) => s.open);
   const diagnosticsAvailable = desktopDiagnosticsAvailable();
   const runDiagnostic = useRunDiagnostic();
+  const { status: updateStatus, check: checkForUpdates } = useAppUpdate();
+  const updaterAvailable = !!getElectronBridge()?.updater;
 
   const runAndClose = (fn: () => void) => () => {
     setIsOpen(false);
@@ -159,6 +163,17 @@ export const AppMenu: React.FC<AppMenuProps> = ({
         <DropdownMenuItem onClick={runAndClose(openUserHandbook)}>
           {t('navigation.userHandbook')}
         </DropdownMenuItem>
+
+        {updaterAvailable && (
+          <DropdownMenuItem
+            disabled={!canCheckForUpdates(updateStatus)}
+            onClick={runAndClose(checkForUpdates)}
+          >
+            {updateStatus.state === 'checking'
+              ? t('update.checking')
+              : t('update.check')}
+          </DropdownMenuItem>
+        )}
 
         {diagnosticsAvailable && (
           <DropdownMenuSubmenu label={t('troubleshooting.title')}>

@@ -57,6 +57,7 @@ import {
   isDesktopSecretId,
 } from './secure-secrets.js';
 import { TITLE_BAR_HEIGHT } from './title-bar.js';
+import { registerUpdaterIpc, startAutoUpdateChecks } from './updater.js';
 
 // ── Constants ────────────────────────────────────────────────────────
 
@@ -1044,6 +1045,10 @@ app.whenReady().then(async () => {
   registerDiagnosticsIpc();
   registerDialogIpc();
   registerMenuIpc(() => mainWindow);
+  // Auto-update IPC must exist before the first render so the preload
+  // bridge's `update:get-state` / `update:check` calls always resolve.
+  // The actual GitHub-feed checks only run in a packaged app.
+  registerUpdaterIpc(() => mainWindow);
 
   // macOS Dock icon. In a packaged .app this comes from the bundle's
   // .icns automatically, but in dev (`electron .`) the Dock would show
@@ -1153,6 +1158,9 @@ app.whenReady().then(async () => {
       IS_DEV && devServerUrl ? devServerUrl : `http://127.0.0.1:${serverPort}`;
     configureWebSession(serverOrigin);
     createWindow(serverPort);
+    // Begin background update checks now that a window exists to receive
+    // status events. No-op unless the app is packaged.
+    startAutoUpdateChecks();
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await dialog.showErrorBox('Huabu failed to start', message);

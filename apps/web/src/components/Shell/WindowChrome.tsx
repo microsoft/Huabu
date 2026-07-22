@@ -5,6 +5,7 @@ import { Link, useLocation } from 'react-router-dom';
 
 import { SettingsPopover } from '@/components/Settings/SettingsPopover';
 
+import { UpdateButton } from './UpdateButton';
 import { APP_NAME } from '../../config/app';
 import { openUserHandbook } from '../../config/handbook';
 import { getElectronBridge } from '../../hooks/useElectron';
@@ -275,6 +276,7 @@ export function WindowChrome() {
         className="ml-auto flex items-center gap-1"
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       >
+        <UpdateButton />
         <Button
           variant="ghost"
           size="md"

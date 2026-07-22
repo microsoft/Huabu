@@ -31,6 +31,22 @@
     "userHandbook": "User Handbook",
     "openUserHandbook": "Open user handbook"
   },
+  "update": {
+    "check": "Check for Updates",
+    "checking": "Checking…",
+    "checkComplete": "Update check completed.",
+    "checkFailed": "Unable to check for updates: {{message}}",
+    "foundVersion": "Version {{version}} is available.",
+    "settingsDescription": "Check the public release feed for a newer desktop version.",
+    "currentVersion": "Version {{version}} is up to date.",
+    "available": "Update",
+    "availableVersion": "Version {{version}} is available — click to download",
+    "downloading": "Downloading update… {{percent}}%",
+    "restart": "Restart",
+    "restartReady": "Version {{version}} is ready — restart to install",
+    "error": "Update failed",
+    "errorRetry": "Update failed: {{message}}. Click to try again."
+  },
   "menu": {
     "file": "File",
     "edit": "Edit",
